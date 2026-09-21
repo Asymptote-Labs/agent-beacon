@@ -35,6 +35,10 @@ var memoryOpts struct {
 	jevModel    string
 	jevCost     float64
 	timeout     time.Duration
+	state       string
+	kind        string
+	reason      string
+	replacement string
 }
 
 var memoryCmd = &cobra.Command{
@@ -69,6 +73,50 @@ var memoryEvaluationsShowCmd = &cobra.Command{
 	RunE:         runMemoryEvaluationsShow,
 }
 
+var memoryCandidatesCmd = &cobra.Command{
+	Use:   "candidates",
+	Short: "Review extracted memory candidates",
+}
+
+var memoryCandidatesListCmd = &cobra.Command{
+	Use:          "list",
+	Short:        "List memory candidates",
+	SilenceUsage: true,
+	RunE:         runMemoryCandidatesList,
+}
+
+var memoryCandidatesShowCmd = &cobra.Command{
+	Use:          "show <candidate-id>",
+	Short:        "Show one memory candidate",
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE:         runMemoryCandidatesShow,
+}
+
+var memoryCandidatesApproveCmd = &cobra.Command{
+	Use:          "approve <candidate-id>",
+	Short:        "Approve a candidate into project memory",
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE:         runMemoryCandidatesApprove,
+}
+
+var memoryCandidatesRejectCmd = &cobra.Command{
+	Use:          "reject <candidate-id>",
+	Short:        "Reject a memory candidate",
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE:         runMemoryCandidatesReject,
+}
+
+var memoryCandidatesSupersedeCmd = &cobra.Command{
+	Use:          "supersede <candidate-id>",
+	Short:        "Mark a candidate as superseded by approved memory",
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE:         runMemoryCandidatesSupersede,
+}
+
 type evaluationRunResult struct {
 	DryRun           bool                                    `json:"dry_run"`
 	Project          asymptoteobserve.LearningProjectV1      `json:"project"`
@@ -78,27 +126,40 @@ type evaluationRunResult struct {
 	EstimatedCostUSD float64                                 `json:"estimated_cost_usd"`
 	Previews         []learning.EvaluationPreview            `json:"previews,omitempty"`
 	Evaluations      []asymptoteobserve.LearningEvaluationV1 `json:"evaluations,omitempty"`
+	Candidates       []asymptoteobserve.LearningCandidateV1  `json:"candidates,omitempty"`
 }
 
 func init() {
 	rootCmd.AddCommand(memoryCmd)
 	memoryCmd.AddCommand(memoryEvaluationsCmd)
+	memoryCmd.AddCommand(memoryCandidatesCmd)
 	memoryEvaluationsCmd.AddCommand(memoryEvaluationsRunCmd)
 	memoryEvaluationsCmd.AddCommand(memoryEvaluationsListCmd)
 	memoryEvaluationsCmd.AddCommand(memoryEvaluationsShowCmd)
+	memoryCandidatesCmd.AddCommand(memoryCandidatesListCmd)
+	memoryCandidatesCmd.AddCommand(memoryCandidatesShowCmd)
+	memoryCandidatesCmd.AddCommand(memoryCandidatesApproveCmd)
+	memoryCandidatesCmd.AddCommand(memoryCandidatesRejectCmd)
+	memoryCandidatesCmd.AddCommand(memoryCandidatesSupersedeCmd)
 
-	for _, c := range []*cobra.Command{memoryEvaluationsRunCmd, memoryEvaluationsListCmd, memoryEvaluationsShowCmd} {
+	for _, c := range []*cobra.Command{memoryEvaluationsRunCmd, memoryEvaluationsListCmd, memoryEvaluationsShowCmd, memoryCandidatesListCmd, memoryCandidatesShowCmd, memoryCandidatesApproveCmd, memoryCandidatesRejectCmd, memoryCandidatesSupersedeCmd} {
 		c.Flags().BoolVar(&memoryOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&memoryOpts.systemMode, "system", false, "Use system endpoint paths")
 		c.Flags().StringVar(&memoryOpts.logPath, "log-path", "", "Runtime JSONL log path")
 		c.Flags().BoolVar(&memoryOpts.jsonOutput, "json", false, "Print machine-readable JSON")
 		c.Flags().StringVar(&memoryOpts.projectPath, "project", "", "Project path for memory scoping (defaults to current directory)")
 	}
-	for _, c := range []*cobra.Command{memoryEvaluationsRunCmd, memoryEvaluationsListCmd} {
+	for _, c := range []*cobra.Command{memoryEvaluationsRunCmd, memoryEvaluationsListCmd, memoryCandidatesListCmd} {
 		c.Flags().IntVar(&memoryOpts.limit, "limit", 25, "Limit returned traces or evaluations")
 		c.Flags().IntVar(&memoryOpts.page, "page", 1, "Page number for collection output")
 		c.Flags().StringVarP(&memoryOpts.query, "query", "q", "", "Free-text query")
 	}
+	memoryCandidatesListCmd.Flags().StringVar(&memoryOpts.state, "state", "", "Filter candidates by state")
+	memoryCandidatesListCmd.Flags().StringVar(&memoryOpts.kind, "kind", "", "Filter candidates by memory kind")
+	for _, c := range []*cobra.Command{memoryCandidatesApproveCmd, memoryCandidatesRejectCmd, memoryCandidatesSupersedeCmd} {
+		c.Flags().StringVar(&memoryOpts.reason, "reason", "", "Review reason recorded with the candidate")
+	}
+	memoryCandidatesSupersedeCmd.Flags().StringVar(&memoryOpts.replacement, "replacement", "", "Approved memory ID that supersedes this candidate")
 	memoryEvaluationsRunCmd.Flags().StringVar(&memoryOpts.harness, "harness", "", "Filter traces by harness")
 	memoryEvaluationsRunCmd.Flags().StringVar(&memoryOpts.traceID, "trace", "", "Evaluate a single trace ID")
 	memoryEvaluationsRunCmd.Flags().StringVar(&memoryOpts.since, "since", "", "RFC3339 lower time bound, inclusive")
@@ -154,6 +215,12 @@ func runMemoryEvaluationsRun(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		result.Evaluations = append(result.Evaluations, eval)
+		if candidate, ok := learning.CandidateFromEvaluation(eval); ok {
+			if err := store.PutCandidate(candidate); err != nil {
+				return err
+			}
+			result.Candidates = append(result.Candidates, candidate)
+		}
 	}
 	if memoryOpts.jsonOutput {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
@@ -168,6 +235,9 @@ func runMemoryEvaluationsRun(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(cmd.OutOrStdout(), "Evaluated %d trace(s); wrote results to %s\n", len(result.Evaluations), store.Path())
 	for _, eval := range result.Evaluations {
 		fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%.2f\t%s\n", eval.ID, eval.Trace.ID, eval.Score, eval.Status)
+	}
+	if len(result.Candidates) > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "Created %d candidate(s) for review.\n", len(result.Candidates))
 	}
 	return nil
 }
@@ -205,6 +275,75 @@ func runMemoryEvaluationsShow(cmd *cobra.Command, args []string) error {
 	for _, question := range eval.Questions {
 		fmt.Fprintf(cmd.OutOrStdout(), "%s\t%.2f\t%.2f\t%s\n", question.ID, question.Probability, question.Confidence, question.Reason)
 	}
+	return nil
+}
+
+func runMemoryCandidatesList(cmd *cobra.Command, args []string) error {
+	query, err := memoryCandidateQuery()
+	if err != nil {
+		return err
+	}
+	candidates, err := memoryStore().ListCandidates(query)
+	if err != nil {
+		return err
+	}
+	if memoryOpts.jsonOutput {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(candidates)
+	}
+	for _, candidate := range candidates {
+		fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\n", candidate.ID, candidate.State, candidate.Kind, candidate.Title)
+	}
+	return nil
+}
+
+func runMemoryCandidatesShow(cmd *cobra.Command, args []string) error {
+	candidate, ok, err := memoryStore().GetCandidate(args[0])
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("candidate not found: %s", args[0])
+	}
+	if memoryOpts.jsonOutput {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(candidate)
+	}
+	printCandidate(cmd, candidate)
+	return nil
+}
+
+func runMemoryCandidatesApprove(cmd *cobra.Command, args []string) error {
+	candidate, memory, err := learning.ApproveCandidate(memoryStore(), args[0], memoryOpts.reason)
+	if err != nil {
+		return err
+	}
+	if memoryOpts.jsonOutput {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]interface{}{"candidate": candidate, "memory": memory})
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Approved %s as memory %s\n", candidate.ID, memory.ID)
+	return nil
+}
+
+func runMemoryCandidatesReject(cmd *cobra.Command, args []string) error {
+	candidate, err := learning.RejectCandidate(memoryStore(), args[0], memoryOpts.reason)
+	if err != nil {
+		return err
+	}
+	if memoryOpts.jsonOutput {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(candidate)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Rejected %s\n", candidate.ID)
+	return nil
+}
+
+func runMemoryCandidatesSupersede(cmd *cobra.Command, args []string) error {
+	candidate, err := learning.SupersedeCandidate(memoryStore(), args[0], memoryOpts.replacement, memoryOpts.reason)
+	if err != nil {
+		return err
+	}
+	if memoryOpts.jsonOutput {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(candidate)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Superseded %s with %s\n", candidate.ID, candidate.SupersededBy)
 	return nil
 }
 
@@ -264,6 +403,23 @@ func memoryQuery() (learning.Query, error) {
 		Limit:     memoryOpts.limit,
 		Page:      memoryOpts.page,
 	}, nil
+}
+
+func memoryCandidateQuery() (learning.Query, error) {
+	query, err := memoryQuery()
+	if err != nil {
+		return learning.Query{}, err
+	}
+	query.State = memoryOpts.state
+	query.Kind = memoryOpts.kind
+	return query, nil
+}
+
+func printCandidate(cmd *cobra.Command, candidate asymptoteobserve.LearningCandidateV1) {
+	fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\n", candidate.ID, candidate.State, candidate.Kind)
+	fmt.Fprintln(cmd.OutOrStdout(), candidate.Title)
+	fmt.Fprintln(cmd.OutOrStdout())
+	fmt.Fprintln(cmd.OutOrStdout(), candidate.Body)
 }
 
 func memoryStore() *learning.Store {

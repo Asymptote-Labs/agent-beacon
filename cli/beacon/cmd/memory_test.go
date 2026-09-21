@@ -15,6 +15,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/learning"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 func TestMemoryEvaluationCommandsRegistered(t *testing.T) {
@@ -22,6 +23,11 @@ func TestMemoryEvaluationCommandsRegistered(t *testing.T) {
 		{"memory", "evaluations", "run"},
 		{"memory", "evaluations", "list"},
 		{"memory", "evaluations", "show"},
+		{"memory", "candidates", "list"},
+		{"memory", "candidates", "show"},
+		{"memory", "candidates", "approve"},
+		{"memory", "candidates", "reject"},
+		{"memory", "candidates", "supersede"},
 	} {
 		cmd, _, err := rootCmd.Find(path)
 		if err != nil || cmd == nil {
@@ -93,6 +99,9 @@ func TestMemoryEvaluationsRunPersistsMockedJevResult(t *testing.T) {
 	if len(result.Evaluations) != 1 || result.Evaluations[0].Score < 0.79 || result.Evaluations[0].Score > 0.81 {
 		t.Fatalf("evaluations = %#v", result.Evaluations)
 	}
+	if len(result.Candidates) != 1 || result.Candidates[0].State != "candidate" {
+		t.Fatalf("candidates = %#v", result.Candidates)
+	}
 
 	memoryOpts.query = "session:cursor:s1"
 	list, err := memoryStore().ListEvaluations(learning.Query{ProjectID: result.Project.ID, Q: "cursor"})
@@ -101,6 +110,29 @@ func TestMemoryEvaluationsRunPersistsMockedJevResult(t *testing.T) {
 	}
 	if len(list) != 1 || !strings.HasPrefix(list[0].ID, "eval_") {
 		t.Fatalf("persisted evaluations = %#v", list)
+	}
+}
+
+func TestMemoryCandidatesApproveCommand(t *testing.T) {
+	logPath, project := writeMemoryCommandFixture(t)
+	resetMemoryOpts(t)
+	memoryOpts.userMode = true
+	memoryOpts.logPath = logPath
+	memoryOpts.projectPath = project
+	candidate := testCommandCandidate(t)
+	if err := memoryStore().PutCandidate(candidate); err != nil {
+		t.Fatal(err)
+	}
+	memoryOpts.reason = "reviewed"
+	memoryOpts.jsonOutput = true
+	var out bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&out)
+	if err := runMemoryCandidatesApprove(cmd, []string{candidate.ID}); err != nil {
+		t.Fatalf("runMemoryCandidatesApprove returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"memory"`) || !strings.Contains(out.String(), `"approved"`) {
+		t.Fatalf("unexpected approve output: %s", out.String())
 	}
 }
 
@@ -164,6 +196,36 @@ func resetMemoryOpts(t *testing.T) {
 		jevModel    string
 		jevCost     float64
 		timeout     time.Duration
+		state       string
+		kind        string
+		reason      string
+		replacement string
 	}{userMode: true, limit: 25, page: 1, jevEndpoint: learning.DefaultJevEndpoint, jevModel: learning.DefaultJevModel, jevCost: learning.DefaultCostPerTrace}
 	t.Cleanup(func() { memoryOpts = previous })
+}
+
+func testCommandCandidate(t *testing.T) asymptoteobserve.LearningCandidateV1 {
+	t.Helper()
+	candidate, ok := learning.CandidateFromEvaluation(asymptoteobserve.LearningEvaluationV1{
+		SchemaVersion: asymptoteobserve.LearningSchemaVersion,
+		ID:            "eval-command",
+		Status:        asymptoteobserve.LearningEvaluationStatusCompleted,
+		Score:         0.9,
+		Project:       asymptoteobserve.LearningProjectV1{ID: "project-1"},
+		Trace: asymptoteobserve.LearningTraceRefV1{
+			ID:       "trace-command",
+			Title:    "Fix flaky package smoke",
+			Harness:  asymptoteobserve.TraceHarnessV1{Name: "cursor"},
+			EventIDs: []string{"event-1"},
+		},
+		Questions: []asymptoteobserve.LearningEvaluationQuestionV1{
+			{ID: "task_success", Probability: 0.9},
+			{ID: "reusable_correction", Probability: 0.9},
+			{ID: "evidence_supported", Probability: 0.9},
+		},
+	})
+	if !ok {
+		t.Fatal("candidate not created")
+	}
+	return candidate
 }
