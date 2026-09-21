@@ -236,7 +236,7 @@ Confirm status, then generate one event and check the log:
 beacon endpoint hooks status --harness dsh
 beacon endpoint dsh status
 beacon endpoint dsh sync
-beacon endpoint doctor --system
+beacon endpoint doctor
 grep '"name":"deepseek_harness"' ~/.beacon/endpoint/logs/runtime.jsonl | tail -3
 ```
 
@@ -254,8 +254,8 @@ If DeepSeek Harness telemetry is missing:
 ## Related
 
 <Columns cols={2}>
-  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
-    Return to the runtime support overview.
+  <Card title="beacon endpoint dsh" icon="rotate" href="/cli/endpoint-dsh">
+    Sync committed sessions and inspect collection progress.
   </Card>
   <Card title="Agent harness integration model" icon="plug" href="/runtimes/integration-model">
     See how Beacon discovers and configures each runtime.

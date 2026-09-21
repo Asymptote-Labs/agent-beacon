@@ -7,7 +7,12 @@ description: "Connect a Beacon endpoint to Beacon managed ingest, or disconnect 
 
 `beacon endpoint connect` forwards this endpoint's telemetry to Beacon so it appears on the Beacon dashboard. For a user endpoint, the signed-in CLI account authorizes a device-specific ingest key without another browser approval. The account token is never copied into endpoint state or given to Vector. System mode retains browser approval because unattended/system installs are account-free.
 
-Forwarding is opt-in and revocable. Nothing recorded before connection is sent, and revoking the device from the dashboard stops ingestion within about a minute. `beacon endpoint disconnect` stops the forwarder and removes the local credentials.
+Forwarding is opt-in and revocable. Runtime telemetry starts at the end of the
+existing runtime log, so pre-connect runtime events are not sent. Inventory starts
+at the beginning of `inventory_state.jsonl` so the dashboard receives the endpoint's
+current inventory baseline, including inventory records written before connection.
+Revoking the device from the dashboard stops ingestion within about a minute.
+`beacon endpoint disconnect` stops the forwarder and removes the local credentials.
 
 ```bash title="Command syntax"
 beacon endpoint connect [flags]

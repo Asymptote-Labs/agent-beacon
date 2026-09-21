@@ -31,7 +31,10 @@ Use system mode for MDM deployments so endpoint events land in the shared system
 
 ### Beacon Managed
 
-Use this path when Beacon events should appear on the Beacon dashboard. A device key is issued only after a member of your organization approves the machine in the browser, and revoking it stops ingestion within a minute.
+Use this path when Beacon events should appear on the Beacon dashboard. In user
+mode, the signed-in CLI account authorizes a device key without another browser
+approval. System mode uses browser approval. Revoking the device stops ingestion
+within a minute.
 
 <Columns cols={2}>
   <Card title="Beacon Managed" icon="tower-broadcast" href="/log-forwarding/asymptote">

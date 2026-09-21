@@ -41,9 +41,13 @@ diffs, and optional inventory content locally before upload. See
 [`beacon endpoint connect`](/cli/endpoint-connect#privacy-modes) for the exact contract.
 
 Completing the wizard records managed intent and prints that next step; it does not
-connect automatically. Existing local history is not uploaded. The explicit
+connect automatically. Pre-connect runtime history is not uploaded. On the first
+connection, inventory is read from the beginning of `inventory_state.jsonl` so the
+hosted dashboard receives the endpoint's current inventory baseline. The explicit
 `beacon endpoint install --connect` flag remains the exception: it presets Managed
-and runs device enrollment after installation.
+and attempts device enrollment after installation. If that enrollment fails, the
+local install still succeeds and prints `beacon endpoint connect` as the retry
+command; verify forwarding with `beacon endpoint status --json`.
 
 The wizard never appears non-interactively. Package postinstall scripts, MDM
 deployments, `--system` installs, CI, `--dry-run`, and any piped or redirected stdin
@@ -124,6 +128,6 @@ To have your record deleted, email the install ID shown by this command to
     Configure endpoint telemetry and collector service files.
   </Card>
   <Card title="Endpoint config" icon="gear" href="/cli/endpoint-config">
-    Inspect, validate, and update endpoint configuration.
+    Inspect endpoint configuration and validate destination settings.
   </Card>
 </Columns>

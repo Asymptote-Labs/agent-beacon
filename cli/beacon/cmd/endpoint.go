@@ -423,7 +423,7 @@ func init() {
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.noStart, "no-start", false, "Write files without starting the collector service")
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.serviceKind, "service", "", "Service manager to use: auto (default), launchd, systemd, or none for a supervised collector process")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.dryRun, "dry-run", false, "Print planned actions without changing endpoint files or services")
-	endpointInstallCmd.Flags().BoolVar(&endpointOpts.connect, "connect", false, "After installing, connect this endpoint to Asymptote managed ingest (opens a browser to approve the device)")
+	endpointInstallCmd.Flags().BoolVar(&endpointOpts.connect, "connect", false, "After installing, attempt to connect this endpoint to Beacon Managed (user mode uses the signed-in account; system mode opens browser approval)")
 	endpointOnboardingCmd.Flags().BoolVar(&endpointOpts.onboardingReset, "reset", false, "Clear the onboarding record so the question is asked again")
 	endpointOnboardingCmd.Flags().BoolVar(&endpointOpts.onboardingResend, "resend", false, "Retry a signup that could not be delivered")
 	endpointOnboardingCmd.Flags().BoolVar(&endpointOpts.jsonOutput, "json", false, "Print the onboarding record as JSON")

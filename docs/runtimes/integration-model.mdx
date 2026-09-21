@@ -17,6 +17,8 @@ Beacon supports multiple [runtime surfaces](/concepts/core-concepts#runtime-surf
 | [Codex CLI](/runtimes/codex-cli) | Looks for the `codex` executable and `~/.codex/config.toml` |
 | [Gemini CLI](/runtimes/gemini-cli) | Looks for the `gemini` executable and `~/.gemini/settings.json` |
 | [GitHub Copilot CLI](/runtimes/github-copilot-cli) | Looks for the `copilot` executable or `~/.copilot/config.json`, then validates Copilot OTel environment variables |
+| [DeepSeek Harness](/runtimes/deepseek-harness) | Looks for the `dsh` executable or `$DSH_HOME` (default `~/.dsh`), then checks both Beacon's owned hook file and its mount row in `cordis.patch.yml` |
+| [Kimi Code](/runtimes/kimi-code) | Looks for the `kimi` executable or `$KIMI_CODE_HOME` (default `~/.kimi-code`), then parses `config.toml` and checks for Beacon's `--platform kimi` hook commands |
 | [VS Code](/runtimes/vscode) | Looks for the `code` executable or VS Code user settings, then validates Copilot Chat OTel settings |
 | [Grok Build](/runtimes/grok-build) | Checks for Beacon's managed Grok hook file at `~/.grok/hooks/beacon-endpoint.json` or `./.grok/hooks/beacon-endpoint.json` |
 | [OpenCode](/runtimes/opencode) | Looks for the `opencode` executable or `~/.config/opencode`, then checks the managed Beacon plugin |
@@ -50,7 +52,7 @@ During install, Beacon configures the runtime surfaces it can safely manage:
 | [Factory Droid](/runtimes/factory-droid) | Droid's OTLP endpoint remains under its launch environment, commonly managed through MDM or another customer-owned policy. Committed sessions can be backfilled with `beacon endpoint factory sync`. |
 | [OpenClaw Gateway](/runtimes/openclaw-gateway) | Configure OpenClaw with the `diagnostics-otel` plugin. Beacon prints local OTLP/HTTP setup guidance and validates observed events. Committed session files can be backfilled with `beacon endpoint integrations openclaw sessions sync`. |
 | [fx (Vercel Labs)](/runtimes/vercel-fx) | Nothing is installed or configured. fx has no hook file, plugin directory, or OTLP endpoint, so collection is an action: run or schedule [`beacon endpoint fx sync`](/cli/endpoint-fx). |
-| Hook-based runtimes | [Antigravity CLI](/runtimes/antigravity-cli), [Claude Code](/runtimes/claude-code), [Cline](/runtimes/cline), [Cursor](/runtimes/cursor), [Devin CLI](/runtimes/devin), [Devin Desktop](/runtimes/devin-desktop), [Factory](/runtimes/factory-droid), [Grok Build](/runtimes/grok-build), [goose](/runtimes/goose), [Hermes Agent](/runtimes/hermes-agent), [Kiro](/runtimes/kiro), [Muse Code](/runtimes/muse-code), [Oh My Pi](/runtimes/oh-my-pi), [OpenCode](/runtimes/opencode), [OpenHands](/runtimes/openhands), [Pi](/runtimes/pi), and [Qwen Code](/runtimes/qwen-code) hooks and managed plugins are installed separately with [`beacon endpoint hooks`](/cli/hooks), because hooks are per-user or per-project runtime configuration rather than base collector service configuration. |
+| Hook-based runtimes | [Antigravity CLI](/runtimes/antigravity-cli), [Claude Code](/runtimes/claude-code), [Cline](/runtimes/cline), [Cursor](/runtimes/cursor), [DeepSeek Harness](/runtimes/deepseek-harness), [Devin CLI](/runtimes/devin), [Devin Desktop](/runtimes/devin-desktop), [Factory](/runtimes/factory-droid), [Grok Build](/runtimes/grok-build), [goose](/runtimes/goose), [Hermes Agent](/runtimes/hermes-agent), [Kimi Code](/runtimes/kimi-code), [Kiro](/runtimes/kiro), [Muse Code](/runtimes/muse-code), [Oh My Pi](/runtimes/oh-my-pi), [OpenCode](/runtimes/opencode), [OpenHands](/runtimes/openhands), [Pi](/runtimes/pi), and [Qwen Code](/runtimes/qwen-code) hooks and managed plugins are installed separately with [`beacon endpoint hooks`](/cli/hooks), because hooks are per-user or per-project runtime configuration rather than base collector service configuration. DeepSeek Harness and Kimi Code support user scope only. |
 
 ## Integration paths
 
@@ -60,6 +62,8 @@ During install, Beacon configures the runtime surfaces it can safely manage:
 | [Codex CLI](/runtimes/codex-cli) | Local OTLP logs, selective turn traces, SessionStart hook, and poll of `~/.codex/sessions` | Beacon writes structured Codex OTLP config, filters noisy internal spans, and joins OS-user context to per-turn usage. `beacon endpoint codex sync` backfills committed sessions as poll events. |
 | [Gemini CLI](/runtimes/gemini-cli) | Opt-in local OTLP logs, traces, and metrics | Beacon writes Gemini telemetry settings and maps Gemini prompts, tool calls, MCP activity, file operations, and approval events into endpoint events. |
 | [GitHub Copilot CLI](/runtimes/github-copilot-cli) | MDM-managed OTLP HTTP export plus poll of `~/.copilot/session-state` | Beacon validates Copilot's effective launch environment and maps Copilot spans into prompt, session, tool, and approval-like endpoint events. `beacon endpoint copilot sync` backfills committed session records as poll events with assistant text, complete tool results, commands, file activity, and token usage. |
+| [DeepSeek Harness](/runtimes/deepseek-harness) | Native hook bridge plus poll of `$DSH_HOME/sessions` | Beacon installs an owned hooks file and a mount row in the runtime's home-level `cordis.patch.yml`. `beacon endpoint dsh sync` backfills assistant text/reasoning, failures, persisted tool detail, and token usage as poll events. There is no project scope. |
+| [Kimi Code](/runtimes/kimi-code) | Native hook payloads through `beacon-hooks` | Beacon appends a verified `[[hooks]]` block to the runtime's existing `config.toml` without reserializing the file. Hooks cover lifecycle, prompts, tools, commands, files, MCP, subagents, compaction, and observed permission decisions. Kimi exposes no token usage on hooks and has no project scope. |
 | [VS Code](/runtimes/vscode) | Copilot Chat OTel plus optional preview hooks | Beacon writes VS Code Copilot OTel settings and maps Copilot prompts, sessions, model metadata, and tool activity into endpoint events. Hooks are optional for extra lifecycle and cross-agent detail. |
 | [Antigravity CLI](/runtimes/antigravity-cli) | Native hook payloads through `beacon-hooks` | Beacon writes a managed Antigravity hook block and maps prompt, pre-tool, post-tool, invocation, command, file edit, and diff telemetry into endpoint events. |
 | [Grok Build](/runtimes/grok-build) | Native hook payloads through `beacon-hooks`, plus poll of `~/.grok/sessions` | Beacon writes an owned Grok hook file and maps session, prompt, tool, command, file, and failed-tool events into endpoint events. `beacon endpoint grok sync` backfills committed sessions as poll events. |
@@ -85,13 +89,18 @@ During install, Beacon configures the runtime surfaces it can safely manage:
 
 ## Hook telemetry
 
-Antigravity CLI, Claude Code, Cline, Cursor, Devin CLI, Devin Desktop, Factory, goose, Grok Build, Hermes Agent, Muse Code, Oh My Pi, OpenCode, OpenHands, Pi, Qwen Code, and optional VS Code hooks cover activity that is better represented as runtime events than generic OTLP spans.
+Antigravity CLI, Claude Code, Cline, Cursor, DeepSeek Harness, Devin CLI, Devin
+Desktop, Factory, goose, Grok Build, Hermes Agent, Kimi Code, Muse Code, Oh My
+Pi, OpenCode, OpenHands, Pi, Qwen Code, and optional VS Code hooks cover activity
+that is better represented as runtime events than generic OTLP spans.
 
 | Runtime | Hook telemetry |
 |---------|----------------|
 | [Antigravity CLI](/runtimes/antigravity-cli) | Prompt submission, pre-tool and post-tool activity, invocation stop events, command activity, file edits, and diffs where payloads are available. |
 | [Claude Code](/runtimes/claude-code) | Session lifecycle, prompt submission, pre-tool and post-tool activity, failed tool calls, subagent start and stop, permission requests, and session-end events where payloads are available. |
 | [Cursor](/runtimes/cursor) | Session lifecycle, prompt submission, tool invocation, shell command execution, MCP-like tool activity, approval decisions, and file edits where payloads are available. |
+| [DeepSeek Harness](/runtimes/deepseek-harness) | Session lifecycle, prompts, tools, commands, files, MCP and subagent activity through the Claude-shaped bridge. The live bridge does not expose assistant text/reasoning, failures, or token usage; session sync fills those gaps. |
+| [Kimi Code](/runtimes/kimi-code) | Session lifecycle, prompts, tool invocation and failures, commands with output and exit code, file reads and edits with diffs, MCP calls, subagents, context compaction, and observed permission decisions. No hook payload exposes token usage. |
 | [VS Code](/runtimes/vscode) | Preview only and may be disabled by organization policy. When enabled, hooks add lifecycle, prompt, pre-tool, post-tool, stop, and subagent detail across VS Code agent surfaces. |
 | [Devin CLI](/runtimes/devin) | Session lifecycle, prompt submission, pre-tool and post-tool activity, permission requests, stop events, session-end events, approvals, and file telemetry where payloads are available. |
 | [Devin Desktop](/runtimes/devin-desktop) | Prompt submission, command execution, MCP tool use, file reads, and file writes where Cascade/Windsurf hook payloads are available. |

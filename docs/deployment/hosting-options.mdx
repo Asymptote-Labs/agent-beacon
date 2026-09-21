@@ -86,11 +86,20 @@ See [Local](/deployment/open-source) for setup details and [Security & IT Rollou
 Use Managed when you want hosted visibility, governance, and enterprise rollout support for agent activity.
 
 1. [Create a Beacon account](https://beacon.sh/sign-up).
-2. Connect each endpoint to your account:
+2. Sign the CLI in on each user endpoint:
+
+```bash
+beacon login
+```
+
+3. Connect the endpoint to your account:
 
 ```bash
 beacon endpoint connect --dashboard-url https://beacon.sh
 ```
+
+Interactive `beacon endpoint install` performs the sign-in step when needed.
+System-mode connect remains account-free and uses browser approval instead.
 
 Beacon Managed gives you the open-source Agent Beacon experience without having to run the backend yourself.
 

@@ -38,7 +38,7 @@ beacon endpoint [command]
     Show collector, service, harness, diagnostic, and runtime log status.
   </Card>
   <Card title="beacon endpoint connect" icon="link" href="/cli/endpoint-connect">
-    Approve this device in the Beacon dashboard and start the Vector forwarder.
+    Enroll this device with the signed-in CLI account and start the Vector forwarder. System mode uses browser approval.
   </Card>
   <Card title="beacon endpoint disconnect" icon="link-slash" href="/cli/endpoint-connect">
     Stop the Beacon forwarder and remove the local device key.
@@ -53,13 +53,19 @@ beacon endpoint [command]
     Stop services and remove managed endpoint files.
   </Card>
   <Card title="beacon endpoint config" icon="gear" href="/cli/endpoint-config">
-    Inspect, validate, and update endpoint configuration.
+    Inspect endpoint configuration and validate destination settings.
   </Card>
   <Card title="beacon endpoint onboarding" icon="envelope" href="/cli/endpoint-onboarding">
     Show, reset, or resend the one-time onboarding record.
   </Card>
   <Card title="beacon endpoint fx" icon="rotate" href="/cli/endpoint-fx">
     Collect telemetry from fx session records on this machine.
+  </Card>
+  <Card title="beacon endpoint copilot" icon="rotate" href="/cli/endpoint-copilot">
+    Collect telemetry from GitHub Copilot CLI session records.
+  </Card>
+  <Card title="beacon endpoint dsh" icon="rotate" href="/cli/endpoint-dsh">
+    Collect telemetry from DeepSeek Harness session records.
   </Card>
   <Card title="beacon endpoint traces" icon="magnifying-glass" href="/cli/endpoint-traces">
     Index, list, search, and show local traces from runtime logs.

@@ -13,7 +13,17 @@ Generate the pack with [`beacon endpoint asymptote`](/cli/asymptote). `beacon en
 
 ## What leaves the machine
 
-Standard mode forwards every line written after the forwarder starts exactly as Beacon wrote it locally. Metadata-only mode applies a local Vector transform first, removing retained prompts, responses, reasoning, tool arguments/results, command output, raw fields, diffs, inventory content, and MCP definitions while preserving stable ids, hashes, counts, actions, paths, token usage, and other structured metadata. Beacon's [retention and redaction](/security/retention-redaction) controls still run before either mode. The ingest service adds tenant identity server-side.
+For runtime telemetry, Standard mode forwards every line written after the
+forwarder starts exactly as Beacon wrote it locally; pre-connect runtime history is
+not sent. Inventory is read from the beginning of `inventory_state.jsonl` so a
+newly connected endpoint sends its current inventory baseline, including inventory
+records written before connection. Metadata-only mode applies a local Vector
+transform first, removing retained prompts, responses, reasoning, tool
+arguments/results, command output, raw fields, diffs, inventory content, and MCP
+definitions while preserving stable ids, hashes, counts, actions, paths, token
+usage, and other structured metadata. Beacon's [retention and
+redaction](/security/retention-redaction) controls still run before either mode.
+The ingest service adds tenant identity server-side.
 
 Nothing else is sent. The forwarder does not read prompts, files, environment variables, or shell history beyond what the events already contain.
 

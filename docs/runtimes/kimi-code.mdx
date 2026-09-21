@@ -66,12 +66,12 @@ Beacon **refuses** rather than writing:
 # Beacon endpoint telemetry. Managed by `beacon endpoint hooks install --harness kimi`.
 [[hooks]]
 event = 'SessionStart'
-command = "'/opt/beacon/bin/beacon-hooks' --platform kimi --log '/var/log/beacon/runtime.jsonl' session-start"
+command = "'/opt/beacon/bin/beacon-hooks' --platform kimi --log '/var/log/beacon-agent/runtime.jsonl' session-start"
 timeout = 10
 
 [[hooks]]
 event = 'UserPromptSubmit'
-command = "'/opt/beacon/bin/beacon-hooks' --platform kimi --log '/var/log/beacon/runtime.jsonl' prompt-submit"
+command = "'/opt/beacon/bin/beacon-hooks' --platform kimi --log '/var/log/beacon-agent/runtime.jsonl' prompt-submit"
 timeout = 30
 ```
 
@@ -246,7 +246,7 @@ Confirm status, then generate one event and check the log:
 
 ```bash
 beacon endpoint hooks status --harness kimi
-beacon endpoint doctor --system
+beacon endpoint doctor
 grep '"name":"kimi_code"' ~/.beacon/endpoint/logs/runtime.jsonl | tail -3
 ```
 

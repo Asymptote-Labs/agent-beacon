@@ -23,7 +23,10 @@
   <a href="https://docs.beacon.sh/cli">Commands</a>
 </p>
 
-Beacon captures **agent session history** across Claude Code, Cursor, Codex, OpenCode, and 20+ other harnesses, then turns useful workflows, corrections, and debugging patterns into reusable knowledge for future agents.
+Beacon captures the **session telemetry each configured runtime exposes** across
+Claude Code, Cursor, Codex, OpenCode, and 20+ other harnesses. Its explicit,
+review-gated memory workflow can turn selected workflows, corrections, and
+debugging patterns into reusable knowledge for future agents.
 
 **A problem solved by one agent shouldn't need to be learned from scratch by another.**
 
@@ -31,14 +34,18 @@ Beacon captures **agent session history** across Claude Code, Cursor, Codex, Ope
 
 ## Beacon Overview
 
-Beacon is an open-source memory layer for AI coding agents that learns from your work across Claude Code, Cursor, Codex, OpenCode, and 20+ other harnesses. It captures full session history, identifies useful workflows, corrections, and debugging patterns, and makes that knowledge reusable by future agents. Built for developers who want agent knowledge to compound across tools instead of disappearing when a session ends.
+Beacon is an open-source memory layer for AI coding agents that collects available
+session telemetry across Claude Code, Cursor, Codex, OpenCode, and 20+ other
+harnesses. Developers can evaluate selected traces, review candidate workflows,
+corrections, and debugging patterns, and approve useful knowledge for reuse by
+future agents.
 
 **Key Capabilities:**
 
 - **Cross-harness history** - sessions from Claude Code, Cursor, Codex, OpenCode, Cline, and 20+ harnesses in one place
-- **Knowledge that compounds** - workflows, corrections, debugging patterns, and repo conventions that survive beyond a single session
+- **Knowledge that compounds** - explicitly evaluated and approved workflows, corrections, debugging patterns, and repo conventions that survive beyond a single session
 - **Shared agent memory** - reviewed knowledge future agents can retrieve through MCP or Agent Skills
-- **Exact session replay** - prompts, responses, tools, commands, edits, approvals, MCP activity, and tokens in one trace
+- **Runtime-aware trace review** - prompts, responses, tools, commands, edits, approvals, MCP activity, and tokens where the configured runtime surface exposes them
 - **Local-first portability** - durable JSONL, explicit destinations, and no harness lock-in
 
 ---
@@ -101,9 +108,11 @@ msiexec /i BeaconEndpointAgent-<version>-x64.msi /qn
 
 ### 2. Use your agents normally
 
-Open Claude Code, Cursor, Codex, or any other supported harness.
+Open a configured runtime. The default endpoint install configures Claude Code
+and Codex CLI; Cursor and other supported harnesses may require their documented
+hook, plugin, OTLP, or session-sync setup.
 
-Beacon continuously captures your session history in the background.
+Beacon captures the telemetry that runtime exposes through its configured surface.
 
 ### 3. Explore your history
 
@@ -124,7 +133,10 @@ Or inspect the raw event stream:
 ```
 
 > [!NOTE]
-> Local until connected: signing in or accepting the preselected Managed option does not enable forwarding. The separate connect step offers Standard or Metadata-only upload privacy.
+> Local until connected: signing in or accepting the preselected Managed option
+> does not enable forwarding. The onboarding wizard records Standard or
+> Metadata-only privacy; `beacon endpoint connect` uses that choice, or
+> `--privacy-mode` overrides it.
 
 Inspect the account used during interactive setup:
 
