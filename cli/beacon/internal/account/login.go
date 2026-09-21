@@ -19,14 +19,16 @@ import (
 )
 
 const (
-	DefaultBaseURL    = "https://beacon.sh"
-	BaseURLEnv        = "BEACON_AUTH_URL"
-	LoginPagePath     = "/cli/auth"
-	LoginInitPath     = "/api/cli/auth/init"
-	ExchangePath      = "/api/cli/auth/exchange"
-	RevokePath        = "/api/cli/auth/revoke"
-	defaultTimeout    = 30 * time.Second
-	loginWait         = 5 * time.Minute
+	DefaultBaseURL = "https://beacon.sh"
+	BaseURLEnv     = "BEACON_AUTH_URL"
+	LoginPagePath  = "/cli/auth"
+	LoginInitPath  = "/api/cli/auth/init"
+	ExchangePath   = "/api/cli/auth/exchange"
+	RevokePath     = "/api/cli/auth/revoke"
+	defaultTimeout = 30 * time.Second
+	// LoginWait bounds how long Login waits for the browser. Exported so a caller
+	// rendering its own waiting state can show the same deadline.
+	LoginWait         = 5 * time.Minute
 	CLIClientName     = "beacon-cli"
 	CLIGrantVersion   = "2026-09-01"
 	ScopeProfileRead  = "profile:read"
@@ -42,6 +44,31 @@ type LoginOptions struct {
 	Out         io.Writer
 	Timeout     time.Duration
 	Now         func() time.Time
+	// OnPrompt receives the sign-in URL once the callback server is listening and
+	// the session is registered, and again if opening a browser then failed.
+	//
+	// When it is set, Login writes nothing to Out: a caller rendering its own UI
+	// owns the screen, and stray writes would corrupt an alternate-screen frame.
+	OnPrompt func(LoginPrompt)
+}
+
+// LoginPrompt is everything a user needs in order to finish signing in.
+//
+// It is reported before the browser is opened rather than after, so the URL is on
+// screen even when the open fails or the terminal cannot open one at all. The
+// callback server is already listening by then, so waiting never depends on the
+// user having acknowledged anything -- the failure mode where a CLI only starts
+// listening after a keypress is what this ordering avoids.
+type LoginPrompt struct {
+	// URL is the sign-in page, carrying the loopback port this process listens on.
+	URL string
+	// WillOpen is true when Login is about to try opening a browser itself.
+	WillOpen bool
+	// BrowserErr is set on the second call when that attempt failed; the URL is then
+	// the only way through.
+	BrowserErr error
+	// Timeout is how long Login will wait before giving up.
+	Timeout time.Duration
 }
 
 type clientInfo struct {
@@ -96,7 +123,7 @@ func Login(ctx context.Context, opts LoginOptions) (*Session, error) {
 	}
 	timeout := opts.Timeout
 	if timeout == 0 {
-		timeout = loginWait
+		timeout = LoginWait
 	}
 	now := opts.Now
 	if now == nil {
@@ -150,18 +177,26 @@ func Login(ctx context.Context, opts LoginOptions) (*Session, error) {
 	}
 
 	loginURL := buildLoginURL(baseURL, pkce.State, callback.Port())
+	report := opts.OnPrompt
+	if report != nil {
+		out = io.Discard
+	} else {
+		report = func(LoginPrompt) {}
+	}
+	report(LoginPrompt{URL: loginURL, WillOpen: !opts.NoBrowser, Timeout: timeout})
 	if opts.NoBrowser {
 		fmt.Fprintf(out, "Open this URL to sign in to Beacon:\n%s\n", loginURL)
 	} else {
 		fmt.Fprintf(out, "Opening %s in your browser...\n", baseURL)
 		if err := openBrowser(loginURL); err != nil {
+			report(LoginPrompt{URL: loginURL, BrowserErr: err, Timeout: timeout})
 			fmt.Fprintln(out, "Could not open a browser automatically.")
 			fmt.Fprintf(out, "Open this URL to sign in to Beacon:\n%s\n", loginURL)
 		}
 	}
 	fmt.Fprintln(out, "Waiting for Beacon sign-in...")
 
-	result, err := callback.Wait(timeout)
+	result, err := callback.WaitContext(ctx, timeout)
 	if err != nil {
 		return nil, err
 	}

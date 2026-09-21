@@ -30,6 +30,17 @@ The first interactive `beacon endpoint install` opens a full-screen terminal wiz
 Move between choices with the arrow keys, continue with <kbd>enter</kbd>, and cancel
 with <kbd>esc</kbd>.
 
+Signing in happens inside the wizard. The full-screen view stays up while your
+browser is open, showing the sign-in URL, a spinner, and how long is left before the
+attempt times out. The URL is printed before any browser is opened, so it is usable
+even when none can be, and <kbd>esc</kbd> during the wait returns to the sign-in
+screen rather than ending the install.
+
+If sign-in cannot finish -- an offline machine, no browser, or the wait expiring --
+the wizard offers to try again, to show the URL for you to open yourself, or to
+finish setup without an account and keep telemetry on this machine. Pass
+`--no-browser` to `beacon endpoint install` to start in that mode.
+
 Signing in establishes account identity only. It does not register a managed endpoint,
 start Vector, or send telemetry. Beacon Managed is preselected; choose Local explicitly
 to opt out of managed forwarding.

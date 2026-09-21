@@ -161,6 +161,35 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 		DestinationOnly:   destinationOnly,
 		PresetDestination: preset,
 		PresetPrivacyMode: profile.Onboarding.PrivacyMode,
+		NoBrowser:         endpointOpts.noBrowser,
+		Now:               onboardingClock,
+		SignInTimeout:     account.LoginWait,
+		// Signing in happens inside the wizard so the full-screen UI is never torn
+		// down around it. The wizard itself stays free of network code: this is the
+		// only place onboarding reaches beacon.sh, and it hands back an email, never
+		// a token.
+		SignIn: func(ctx context.Context, req onboarding.SignInRequest, reporter onboarding.Reporter) (onboarding.Account, error) {
+			session, err := onboardingAccountLogin(ctx, account.LoginOptions{
+				Version:   version.GetVersion(),
+				NoBrowser: req.NoBrowser,
+				Timeout:   account.LoginWait,
+				Now:       onboardingClock,
+				OnPrompt: func(prompt account.LoginPrompt) {
+					reporter.Prompt(onboarding.SignInPrompt{
+						URL:        prompt.URL,
+						WillOpen:   prompt.WillOpen,
+						BrowserErr: prompt.BrowserErr,
+					})
+				},
+			})
+			if err != nil {
+				return onboarding.Account{}, err
+			}
+			if err := onboardingAccountSave(*session); err != nil {
+				return onboarding.Account{}, fmt.Errorf("store Beacon session: %w", err)
+			}
+			return onboarding.Account{Email: session.User.Email}, nil
+		},
 	}
 	result, err := onboardingRunWizard(onboardingStdin, cmd.OutOrStdout(), options)
 	if err != nil {
@@ -189,6 +218,9 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 	}
 	if !result.Completed {
 		return onboardingOutcome{}, onboarding.ErrWizardCancelled
+	}
+	if result.SignedInEmail != "" {
+		status = account.Status{SignedIn: true, User: account.User{Email: result.SignedInEmail}}
 	}
 
 	privacyMode := ""

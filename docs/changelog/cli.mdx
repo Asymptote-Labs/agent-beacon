@@ -13,6 +13,17 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ### Unreleased
 
+- **Sign-in no longer tears down the setup screen** · The wizard used to quit to
+  sign you in, print to plain output, block for up to five minutes, then start a
+  second wizard that wiped what it had just printed. Sign-in now runs inside the
+  same full-screen view, which shows the URL, a spinner, and the remaining time.
+  The URL is printed before any browser opens, so it works when none can, and
+  <kbd>esc</kbd> during the wait goes back instead of killing the install.
+- **A sign-in that cannot finish no longer blocks the install** · Offline, without
+  a browser, or after the wait expires, the wizard offers to retry, to show the URL
+  to open yourself, or to finish setup without an account with telemetry kept
+  locally. `beacon endpoint install --no-browser` starts in URL mode.
+
 - **Choosing Beacon Managed now connects the endpoint** · Confirming Managed in the
   install wizard installs Beacon and then enrolls the device and starts the
   forwarder, instead of printing `beacon endpoint connect` for you to run yourself.

@@ -1,8 +1,11 @@
 package onboarding
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -291,5 +294,251 @@ func TestConfirmScreenNamesWhatConfirmingStarts(t *testing.T) {
 	}
 	if strings.Contains(view, "install and connect") {
 		t.Fatalf("local confirm screen must not offer to connect: %s", view)
+	}
+}
+
+// signInWizard builds a wizard whose sign-in runs in place, the way RunWizard does.
+func signInWizard(t *testing.T, signIn SignInFunc) wizardModel {
+	t.Helper()
+	model := newWizardModel(WizardOptions{
+		OfferManaged:  true,
+		SignIn:        signIn,
+		SignInTimeout: 5 * time.Minute,
+		Now:           func() time.Time { return time.Date(2026, 9, 21, 8, 0, 0, 0, time.UTC) },
+	})
+	model.events = make(chan tea.Msg, 8)
+	model.width, model.height = 100, 30
+	return model
+}
+
+func neverReturns(ctx context.Context, _ SignInRequest, _ Reporter) (Account, error) {
+	<-ctx.Done()
+	return Account{}, ctx.Err()
+}
+
+// Sign-in used to quit the wizard so the caller could run it, print to plain
+// stdout, block for up to five minutes, and then start a second wizard -- which
+// wiped what had just been printed. It now runs without the screen going away.
+func TestSignInRunsInsideTheWizard(t *testing.T) {
+	model := signInWizard(t, neverReturns)
+	model.screen = signInScreen
+
+	model, cmd := advanceWizard(t, model, "enter")
+	if model.screen != signInWaitScreen {
+		t.Fatalf("screen = %v, want the waiting screen", model.screen)
+	}
+	if model.result.NeedLogin {
+		t.Fatal("an injected sign-in must not fall back to the caller")
+	}
+	if cmd == nil {
+		t.Fatal("expected the wait to be armed")
+	}
+	t.Cleanup(func() { model.stopSignIn() })
+}
+
+// The URL has to be on screen before any browser is claimed to have opened, and it
+// has to survive rendering intact: a soft-wrapped URL is one nobody can copy.
+func TestSignInWaitShowsAnUnwrappedURLAndAClock(t *testing.T) {
+	model := signInWizard(t, neverReturns)
+	model.screen = signInScreen
+	model, _ = advanceWizard(t, model, "enter")
+	t.Cleanup(func() { model.stopSignIn() })
+
+	url := "https://beacon.sh/cli/auth?port=54123&state=" + strings.Repeat("a", 43)
+	next, _ := model.Update(signInPromptMsg{URL: url, WillOpen: true})
+	model = next.(wizardModel)
+
+	// Seven seconds later.
+	later := model.startedAt.Add(7 * time.Second)
+	next, _ = model.Update(tickMsg(later))
+	model = next.(wizardModel)
+
+	view := model.View()
+	if !strings.Contains(view, url) {
+		t.Fatalf("the sign-in URL must render on one unbroken line:\n%s", view)
+	}
+	flat := strings.Join(strings.Fields(view), " ")
+	for _, want := range []string{"0:07 elapsed", "times out in 4:53", "does not send telemetry"} {
+		if !strings.Contains(flat, want) {
+			t.Fatalf("waiting screen missing %q:\n%s", want, view)
+		}
+	}
+}
+
+// Abandoning the browser must not end the install. It used to: the wait was
+// uncancellable, so ctrl+c during it killed the whole command.
+func TestEscDuringSignInGoesBackWithoutEndingTheInstall(t *testing.T) {
+	model := signInWizard(t, neverReturns)
+	model.screen = signInScreen
+	model, _ = advanceWizard(t, model, "enter")
+
+	model, cmd := advanceWizard(t, model, "esc")
+	if cmd != nil {
+		t.Fatal("esc while waiting must not quit the wizard")
+	}
+	if model.screen != signInScreen {
+		t.Fatalf("screen = %v, want the sign-in screen", model.screen)
+	}
+	if model.result.Completed || model.result.NeedLogin {
+		t.Fatalf("result = %#v", model.result)
+	}
+}
+
+// Signing in is the expected path, so the sign-in screen offers nothing else. A
+// visible "skip" there would read as a suggestion.
+func TestSignInScreenOffersNoAlternative(t *testing.T) {
+	model := signInWizard(t, neverReturns)
+	model.screen = signInScreen
+	flat := strings.Join(strings.Fields(model.View()), " ")
+	for _, unwanted := range []string{"without an account", "Local only", "skip"} {
+		if strings.Contains(strings.ToLower(flat), strings.ToLower(unwanted)) {
+			t.Fatalf("the sign-in screen must not advertise %q:\n%s", unwanted, flat)
+		}
+	}
+}
+
+// But a sign-in that genuinely failed has to leave a way forward, or an offline or
+// browserless machine cannot install a local-first tool at all.
+func TestSignInFailureOffersRecoveryAndALocalFinish(t *testing.T) {
+	model := signInWizard(t, neverReturns)
+	model.screen = signInScreen
+	model, _ = advanceWizard(t, model, "enter")
+	next, _ := model.Update(signInPromptMsg{URL: "https://beacon.sh/cli/auth?port=1&state=x", WillOpen: true})
+	model = next.(wizardModel)
+	next, _ = model.Update(signInDoneMsg{err: errors.New("connection refused")})
+	model = next.(wizardModel)
+
+	if model.screen != signInFailedScreen {
+		t.Fatalf("screen = %v, want the recovery screen", model.screen)
+	}
+	flat := strings.Join(strings.Fields(model.View()), " ")
+	for _, want := range []string{"connection refused", "Try signing in again", "Show the URL", "Finish setup without an account"} {
+		if !strings.Contains(flat, want) {
+			t.Fatalf("recovery screen missing %q:\n%s", want, flat)
+		}
+	}
+
+	// Retry is first, so the default action is to try again rather than give up.
+	if model.recoveryChoices()[0].id != "retry" {
+		t.Fatalf("recovery choices = %#v, want retry first", model.recoveryChoices())
+	}
+
+	// Choosing to finish without an account lands on local, never managed.
+	ids := map[string]int{}
+	for i, choice := range model.recoveryChoices() {
+		ids[choice.id] = i
+	}
+	model.selected = ids["local"]
+	model, _ = advanceWizard(t, model, "enter")
+	if !model.result.WithoutAccount || model.result.Destination != DestinationLocal {
+		t.Fatalf("result = %#v, want a local finish without an account", model.result)
+	}
+	if model.screen != confirmScreen {
+		t.Fatalf("screen = %v, want confirmation", model.screen)
+	}
+	if flat := strings.Join(strings.Fields(model.View()), " "); !strings.Contains(flat, "not signed in") {
+		t.Fatalf("the confirm screen should say no account is attached:\n%s", flat)
+	}
+}
+
+// Picking the manual option retries with the browser suppressed.
+func TestRecoveryCanRetryWithoutABrowser(t *testing.T) {
+	requests := make(chan SignInRequest, 4)
+	model := signInWizard(t, func(ctx context.Context, req SignInRequest, _ Reporter) (Account, error) {
+		requests <- req
+		<-ctx.Done()
+		return Account{}, ctx.Err()
+	})
+	model.screen = signInFailedScreen
+	model.prompt = SignInPrompt{URL: "https://beacon.sh/cli/auth", WillOpen: true}
+	for i, choice := range model.recoveryChoices() {
+		if choice.id == "manual" {
+			model.selected = i
+		}
+	}
+	model, _ = advanceWizard(t, model, "enter")
+	t.Cleanup(func() { model.stopSignIn() })
+
+	if model.screen != signInWaitScreen {
+		t.Fatalf("screen = %v, want the waiting screen", model.screen)
+	}
+	select {
+	case req := <-requests:
+		if !req.NoBrowser {
+			t.Fatalf("retry request = %#v, want the browser suppressed", req)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the retry never reached the sign-in function")
+	}
+}
+
+// A successful sign-in continues to the next question in the same screen session.
+func TestSignInSuccessContinuesToTheDestinationQuestion(t *testing.T) {
+	model := signInWizard(t, neverReturns)
+	model.screen = signInScreen
+	model, _ = advanceWizard(t, model, "enter")
+	next, _ := model.Update(signInDoneMsg{account: Account{Email: "person@example.com"}})
+	model = next.(wizardModel)
+
+	if model.screen != destinationScreen {
+		t.Fatalf("screen = %v, want the destination question", model.screen)
+	}
+	if model.result.SignedInEmail != "person@example.com" || !model.options.SignedIn {
+		t.Fatalf("result = %#v options.SignedIn = %t", model.result, model.options.SignedIn)
+	}
+}
+
+// With no sign-in injected the wizard keeps its original contract, which is what
+// the command-level tests drive.
+func TestWizardWithoutAnInjectedSignInStillReportsNeedLogin(t *testing.T) {
+	model := newWizardModel(WizardOptions{OfferManaged: true})
+	model.screen = signInScreen
+	model, cmd := advanceWizard(t, model, "enter")
+	if !model.result.NeedLogin || cmd == nil {
+		t.Fatalf("result = %#v cmd = %v", model.result, cmd)
+	}
+}
+
+// The whole first run, in one screen session: welcome, sign in, wait for the
+// browser, answer the destination question, confirm. This is the sequence that
+// used to require quitting the program and starting a second one around a blocking
+// five-minute login.
+func TestWholeFirstRunHappensInOneScreenSession(t *testing.T) {
+	model := signInWizard(t, neverReturns)
+	model.options.OfferManaged = false
+	model.screen = welcomeScreen
+
+	model, _ = advanceWizard(t, model, "enter")
+	if model.screen != signInScreen {
+		t.Fatalf("after welcome: screen = %v", model.screen)
+	}
+	model, quitCmd := advanceWizard(t, model, "enter")
+	t.Cleanup(func() { model.stopSignIn() })
+	if model.screen != signInWaitScreen {
+		t.Fatalf("after sign-in: screen = %v", model.screen)
+	}
+	if model.result.NeedLogin {
+		t.Fatal("the program must not exit to sign in")
+	}
+	_ = quitCmd
+
+	next, _ := model.Update(signInPromptMsg{URL: "https://beacon.sh/cli/auth?port=1&state=x", WillOpen: true})
+	model = next.(wizardModel)
+	next, _ = model.Update(signInDoneMsg{account: Account{Email: "newuser@example.com"}})
+	model = next.(wizardModel)
+	if model.screen != destinationScreen {
+		t.Fatalf("after sign-in completed: screen = %v", model.screen)
+	}
+
+	model, _ = advanceWizard(t, model, "enter")
+	if model.screen != confirmScreen || model.result.Destination != DestinationLocal {
+		t.Fatalf("after destination: screen = %v destination = %q", model.screen, model.result.Destination)
+	}
+	model, cmd := advanceWizard(t, model, "enter")
+	if !model.result.Completed || cmd == nil {
+		t.Fatalf("result = %#v", model.result)
+	}
+	if model.result.SignedInEmail != "newuser@example.com" {
+		t.Fatalf("the signed-in account should reach the caller: %#v", model.result)
 	}
 }

@@ -106,10 +106,27 @@ func (cs *CallbackServer) Start() {
 
 // Wait blocks for the first completed callback or the timeout.
 func (cs *CallbackServer) Wait(timeout time.Duration) (*CallbackResult, error) {
+	return cs.WaitContext(context.Background(), timeout)
+}
+
+// WaitContext is Wait that also returns when ctx is done.
+//
+// A caller rendering a cancellable waiting state needs to stop waiting without
+// killing the command: onboarding lets the user abandon a browser sign-in and
+// return to the wizard. The caller's deferred Shutdown releases the loopback
+// listener either way.
+func (cs *CallbackServer) WaitContext(ctx context.Context, timeout time.Duration) (*CallbackResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case result := <-cs.resultCh:
 		return result, nil
-	case <-time.After(timeout):
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-timer.C:
 		return nil, fmt.Errorf("timeout waiting for the browser to finish")
 	}
 }
