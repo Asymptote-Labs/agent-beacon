@@ -174,7 +174,7 @@ func streamSource(source eventSource, fn func(schema.Event) error) error {
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
 		line := bytes.TrimSpace(scanner.Bytes())
 		if len(line) == 0 {
@@ -235,7 +235,7 @@ func collectSessionStateStats(source eventSource, query EventQuery, stats map[st
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	lineNo := 0
 	for scanner.Scan() {
 		lineNo++
@@ -386,7 +386,7 @@ func readEventsFromSource(source eventSource, query EventQuery, result *EventRes
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 
 	lineNo := 0
 	for scanner.Scan() {
@@ -452,7 +452,7 @@ func FindEvent(path, id string) (EventRecord, bool, error) {
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	currentLine := 0
 	for scanner.Scan() {
 		currentLine++

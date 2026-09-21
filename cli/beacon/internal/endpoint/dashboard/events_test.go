@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +33,26 @@ func TestReadEventsSkipsMalformedLinesAndFilters(t *testing.T) {
 	}
 	if result.Events[0].Event.Event.Action != "command.executed" {
 		t.Fatalf("unexpected event action: %s", result.Events[0].Event.Event.Action)
+	}
+}
+
+func TestReadEventsHandlesMultiMegabyteLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	event := testSchemaEvent("2026-09-21T01:00:00Z", "hermes", "tool.invoked", "tool", "repo-a")
+	// A single harness tool output can exceed the old 4 MiB scanner cap; one long
+	// line must not fail the whole log.
+	event.Message = strings.Repeat("x", 5<<20)
+	writeTestLog(t, path, marshalEvents(t, event)...)
+
+	result, err := ReadEvents(path, EventQuery{Limit: 10})
+	if err != nil {
+		t.Fatalf("ReadEvents returned error: %v", err)
+	}
+	if len(result.Events) != 1 {
+		t.Fatalf("events = %d, want 1", len(result.Events))
+	}
+	if got := len(result.Events[0].Event.Message); got != 5<<20 {
+		t.Fatalf("message length = %d, want %d", got, 5<<20)
 	}
 }
 

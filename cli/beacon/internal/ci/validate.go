@@ -93,7 +93,7 @@ func readStructuredEvents(path string, since time.Time) ([]schema.Event, []strin
 	var events []schema.Event
 	var malformed []string
 	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	lineNo := 0
 	filtering := !since.IsZero()
 	for scanner.Scan() {
