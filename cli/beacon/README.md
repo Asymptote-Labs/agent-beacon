@@ -29,6 +29,11 @@ Endpoint commands use per-user paths by default so hook and OTLP telemetry share
 `~/.beacon/endpoint/logs/runtime.jsonl`. Use `--system` for root-managed
 deployment paths.
 
+With no `--harness` flag, install and repair discover local runtimes and configure
+every integration Beacon can safely install. Pass an exact comma-separated list
+to override discovery, or `--harness all` to force every installable integration.
+If no installable runtime is detected, Beacon falls back to Claude Code and Codex.
+
 Add optional Splunk HEC forwarding during install or repair:
 
 ```bash

@@ -17,6 +17,7 @@ import (
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	endpointinventory "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
@@ -68,23 +69,108 @@ func TestSplitEndpointTargetsDedupesHookAliases(t *testing.T) {
 // start, end, file activity, or subagent lifecycle, since Claude's OTLP export has none.
 func TestDefaultInstallHarnessesCarryClaudeAndCodexHooks(t *testing.T) {
 	defaultList := endpointInstallCmd.Flags().Lookup("harness").DefValue
-	otlp, hooks, err := splitEndpointTargets(splitHarnessCSV(defaultList))
+	selection, err := resolveEndpointTargets(defaultList, []harness.Harness{
+		{Name: "claude_code", DisplayName: "Claude Code", Detected: true},
+		{Name: "codex_cli", DisplayName: "Codex CLI", Detected: true},
+	})
 	if err != nil {
-		t.Fatalf("splitEndpointTargets(%q) returned error: %v", defaultList, err)
+		t.Fatalf("resolveEndpointTargets(%q) returned error: %v", defaultList, err)
 	}
-	if got, want := strings.Join(otlp, ","), "claude,codex"; got != want {
+	if got, want := strings.Join(selection.OTLP, ","), "claude,codex"; got != want {
 		t.Fatalf("default otlp targets = %q, want %q", got, want)
 	}
-	if got, want := strings.Join(hooks, ","), "claude,codex"; got != want {
+	if got, want := strings.Join(selection.Hooks, ","), "claude,codex"; got != want {
 		t.Fatalf("default hook targets = %q, want %q", got, want)
 	}
 	// Listing the explicit hook alias as well must not install Claude hooks twice.
-	_, hooks, err = splitEndpointTargets([]string{"claude", "claude-hooks", "codex"})
+	_, hooks, err := splitEndpointTargets([]string{"claude", "claude-hooks", "codex"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got, want := strings.Join(hooks, ","), "claude,codex"; got != want {
 		t.Fatalf("hook targets with explicit alias = %q, want %q", got, want)
+	}
+}
+
+func TestResolveEndpointTargetsAutoInstallsEveryDetectedInstallableRuntime(t *testing.T) {
+	selection, err := resolveEndpointTargets("auto", []harness.Harness{
+		{Name: "claude_code", DisplayName: "Claude Code", Detected: true},
+		{Name: "vscode", DisplayName: "VS Code", Detected: true},
+		{Name: "opencode", DisplayName: "opencode", Detected: true},
+		{Name: "vercel_fx", DisplayName: "fx", Detected: true},
+		{Name: "cursor", DisplayName: "Cursor", Detected: false},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(selection.OTLP, ","), "claude,vscode"; got != want {
+		t.Fatalf("auto OTLP targets = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(selection.Hooks, ","), "claude,vscode,opencode"; got != want {
+		t.Fatalf("auto hook targets = %q, want %q", got, want)
+	}
+	if len(selection.Skipped) != 1 || selection.Skipped[0].Name != "fx" {
+		t.Fatalf("auto skipped targets = %#v, want fx", selection.Skipped)
+	}
+	if selection.Fallback {
+		t.Fatal("auto selection unexpectedly used fallback")
+	}
+}
+
+func TestResolveEndpointTargetsAutoFallsBackWhenNothingInstallableDetected(t *testing.T) {
+	selection, err := resolveEndpointTargets("auto", []harness.Harness{
+		{Name: "vercel_fx", DisplayName: "fx", Detected: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(selection.OTLP, ","), "claude,codex"; got != want {
+		t.Fatalf("fallback OTLP targets = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(selection.Hooks, ","), "claude,codex"; got != want {
+		t.Fatalf("fallback hook targets = %q, want %q", got, want)
+	}
+	if !selection.Fallback {
+		t.Fatal("auto selection did not mark fallback")
+	}
+}
+
+func TestResolveEndpointTargetsExplicitListDoesNotAutoDetect(t *testing.T) {
+	selection, err := resolveEndpointTargets("gemini,cursor", []harness.Harness{
+		{Name: "opencode", DisplayName: "opencode", Detected: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(selection.OTLP, ","), "gemini"; got != want {
+		t.Fatalf("explicit OTLP targets = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(selection.Hooks, ","), "cursor"; got != want {
+		t.Fatalf("explicit hook targets = %q, want %q", got, want)
+	}
+	if selection.Automatic {
+		t.Fatal("explicit selection marked automatic")
+	}
+}
+
+func TestResolveEndpointTargetsAllIncludesOTLPAndHookVariants(t *testing.T) {
+	selection, err := resolveEndpointTargets("all", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(selection.OTLP, ","); !strings.Contains(got, "claude") || !strings.Contains(got, "vscode") {
+		t.Fatalf("all OTLP targets = %q, want Claude and VS Code", got)
+	}
+	if got := strings.Join(selection.Hooks, ","); !strings.Contains(got, "openhands") || !strings.Contains(got, "muse") || !strings.Contains(got, "vscode") {
+		t.Fatalf("all hook targets = %q, want OpenHands, Muse, and VS Code", got)
+	}
+}
+
+func TestAutoEndpointTargetsCoversDiscoveryRegistry(t *testing.T) {
+	for _, discovered := range harness.DiscoverAll() {
+		if _, ok := autoEndpointTargets[discovered.Name]; !ok {
+			t.Errorf("discovery target %q (%s) has no automatic install or skip rule", discovered.Name, discovered.DisplayName)
+		}
 	}
 }
 
@@ -107,7 +193,11 @@ func TestPlannedInstallActionsSeparatesHookHarnesses(t *testing.T) {
 	endpointOpts.logPath = filepath.Join(t.TempDir(), "runtime.jsonl")
 	endpointOpts.noStart = true
 
-	actions := plannedInstallActions(false, service.KindAuto)
+	otlp, hooks, err := splitEndpointTargets(splitHarnessCSV(endpointOpts.harnesses))
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions := plannedInstallActions(false, service.KindAuto, otlp, hooks)
 	counts := map[string]int{}
 	hookRows := map[string]int{}
 	for _, action := range actions {
@@ -853,12 +943,12 @@ func TestBasicAuthHeader(t *testing.T) {
 	}
 }
 
-func TestEndpointHarnessDefaultsDoNotClobberInstall(t *testing.T) {
+func TestEndpointHarnessDefaults(t *testing.T) {
 	installFlag := endpointInstallCmd.Flags().Lookup("harness")
 	if installFlag == nil {
 		t.Fatal("install command missing --harness flag")
 	}
-	if got, want := installFlag.DefValue, "claude,codex"; got != want {
+	if got, want := installFlag.DefValue, "auto"; got != want {
 		t.Fatalf("install --harness default = %q, want %q", got, want)
 	}
 

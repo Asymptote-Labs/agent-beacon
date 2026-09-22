@@ -13,7 +13,11 @@ The service is a launchd job on macOS and a systemd unit on Linux. Where neither
 beacon endpoint install
 ```
 
-By default, Beacon configures Claude Code and Codex CLI telemetry for local or customer-controlled runtime JSONL logs. Gemini CLI and VS Code Copilot telemetry are opt-in with the `gemini` and `vscode` harnesses. The `claude` harness writes both Claude Code's OpenTelemetry settings and its user-level hooks, because the OTLP export alone carries no session start or end, file activity, or subagent lifecycle; `beacon endpoint hooks uninstall --harness claude` removes the hooks again, and `beacon endpoint hooks install --harness claude --level project` adds project-level ones. A hook that cannot be written, for example into a settings file whose `hooks` key is not an object, is reported as a warning with the retry command; the endpoint itself is installed and `endpoint install` still exits 0. Codex uses OTLP logs plus one selective turn trace for tokens, and its required SessionStart hook adds local OS-user context. Beacon applies redaction, sanitization, truncation, and event-size limits before writing supported content fields. GitHub Copilot CLI and Factory Droid OTLP are managed through their launch environments, so Beacon validates their telemetry state but does not mutate shell profiles during install.
+By default, Beacon discovers the runtimes installed for the invoking user and configures every integration it can safely install. This includes OTLP settings and supported hooks, plugins, or extensions; VS Code receives both its OTLP and hook configuration. An explicit `--harness` list disables automatic selection. If discovery finds no automatically installable runtime, Beacon preserves the unattended-install fallback by configuring Claude Code and Codex CLI.
+
+Discovery can also find runtimes whose collection path cannot be enabled safely by a machine-wide default. Beacon reports these without treating them as install failures: GitHub Copilot CLI needs launch-environment settings, Claude Cowork needs admin configuration, poll-only fx needs `beacon endpoint fx sync`, and OpenHands CLI/GUI coverage requires project-level hooks installed from inside each repository. Factory Droid's hooks are installed automatically when Droid is detected, while its separate OTLP endpoint remains launch-environment managed.
+
+The `claude` harness writes both Claude Code's OpenTelemetry settings and its user-level hooks, because the OTLP export alone carries no session start or end, file activity, or subagent lifecycle; `beacon endpoint hooks uninstall --harness claude` removes the hooks again, and `beacon endpoint hooks install --harness claude --level project` adds project-level ones. A hook that cannot be written, for example into a settings file whose `hooks` key is not an object, is reported as a warning with the retry command; the endpoint itself is installed and `endpoint install` still exits 0. Codex uses OTLP logs plus one selective turn trace for tokens, and its required SessionStart hook adds local OS-user context. Beacon applies redaction, sanitization, truncation, and event-size limits before writing supported content fields.
 
 ## Flags
 
@@ -22,7 +26,7 @@ By default, Beacon configures Claude Code and Codex CLI telemetry for local or c
 | `--user` | Use per-user endpoint paths. Enabled by default |
 | `--system` | Use system endpoint paths and launch daemon. Requires root |
 | `--log-path <path>` | Runtime JSONL log path |
-| `--harness <list>` | Comma-separated harnesses to configure. Defaults to `claude,codex`, each of which installs its OTLP settings and its hooks; include `gemini` for Gemini CLI or `vscode` for VS Code Copilot OTLP telemetry. Hook harnesses can be listed alongside them: `cursor`, `factory`, `opencode`, `cline`, `pi`, `omp`, `openclaw`, `grok`, `qwen`, `hermes`, `antigravity`, `devin-cli`, `devin-desktop`, `dsh`, and `kimi`, for example `beacon endpoint install --harness claude,codex,cursor,kimi`. DeepSeek Harness and Kimi Code are user-level only. `beacon endpoint hooks install` adds the same hooks to an existing install later, and is the only way to add VS Code hook telemetry. GitHub Copilot CLI and Factory Droid OTLP endpoints are managed through their launch environments |
+| `--harness <selection>` | Harnesses to configure. Defaults to `auto`, which installs every detected integration Beacon can configure and reports detected manual or poll-only integrations. Use `all` to force every installable integration, or pass an exact comma-separated list such as `claude,codex,cursor,kimi`. DeepSeek Harness and Kimi Code are user-level only. An explicit list preserves exact-selection behavior |
 | `--otlp-grpc-port <port>` | Local OTLP gRPC port. Defaults to `4317` |
 | `--otlp-http-port <port>` | Local OTLP HTTP port. Defaults to `4318` |
 | `--collector <path>` | Path to a `beacon-otelcol` binary |
@@ -88,10 +92,16 @@ Configure only one harness:
 beacon endpoint install --harness claude
 ```
 
-Opt in Gemini CLI telemetry alongside the defaults:
+Override discovery with an exact harness list:
 
-```bash title="Opt in Gemini CLI telemetry alongside the defaults"
+```bash title="Configure an exact harness list"
 beacon endpoint install --harness claude,codex,gemini
+```
+
+Force every installable integration without checking whether its runtime is present:
+
+```bash title="Configure all supported integrations"
+beacon endpoint install --harness all
 ```
 
 Configure VS Code Copilot telemetry:

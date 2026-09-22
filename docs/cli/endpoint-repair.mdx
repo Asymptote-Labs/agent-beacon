@@ -11,7 +11,7 @@ description: "Repair Beacon endpoint service files, collector configuration, and
 beacon endpoint repair
 ```
 
-Repair preserves runtime logs and harness telemetry configuration while reinstalling managed endpoint files. GitHub Copilot CLI and Factory Droid launch-environment settings remain customer-managed; repair validates their telemetry state but does not write those environment settings.
+Repair preserves runtime logs while reinstalling managed endpoint files. By default it rediscovers installed runtimes and reapplies every integration Beacon can configure. Pass an explicit `--harness` list to repair only those targets. GitHub Copilot CLI and Factory Droid launch-environment settings remain customer-managed; repair does not write those environment settings.
 
 During repair, Beacon removes the existing managed service before reinstalling it so an unhealthy collector can release local OTLP ports. If reinstall cannot complete, Beacon restores the previous endpoint configuration so local state is not left partially rolled back.
 
@@ -22,7 +22,7 @@ During repair, Beacon removes the existing managed service before reinstalling i
 | `--user` | Use per-user endpoint paths. Enabled by default |
 | `--system` | Use system endpoint paths and launch daemon |
 | `--log-path <path>` | Runtime JSONL log path |
-| `--harness <list>` | Comma-separated harnesses to configure. Defaults to `claude,codex`; include `gemini` for Gemini CLI or `vscode` for VS Code Copilot OTLP telemetry. Hook harnesses can be listed alongside them: `claude-hooks` (Claude Code hooks), `cursor`, `factory`, `opencode`, `cline`, `pi`, `omp`, `openclaw`, `grok`, `qwen`, `hermes`, `antigravity`, `devin-cli`, `devin-desktop`, `dsh`, and `kimi`, for example `beacon endpoint repair --harness claude,codex,cursor,kimi`. DeepSeek Harness and Kimi Code are user-level only. `beacon endpoint hooks install` adds the same hooks to an existing install later, and is the only way to add VS Code hook telemetry. GitHub Copilot CLI and Factory Droid OTLP endpoints are managed through their launch environments |
+| `--harness <selection>` | Harnesses to configure. Defaults to `auto`, which repairs every detected integration Beacon can configure. Use `all` to force every installable integration, or pass an exact comma-separated list such as `claude,codex,cursor,kimi`. DeepSeek Harness and Kimi Code are user-level only |
 | `--otlp-grpc-port <port>` | Local OTLP gRPC port. Defaults to `4317` |
 | `--otlp-http-port <port>` | Local OTLP HTTP port. Defaults to `4318` |
 | `--collector <path>` | Path to a `beacon-otelcol` binary |

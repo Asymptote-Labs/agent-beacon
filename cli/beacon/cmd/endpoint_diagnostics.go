@@ -849,12 +849,11 @@ func runEndpointIntegrationsValidate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func plannedInstallActions(repair bool, kind service.Kind) []plannedAction {
+func plannedInstallActions(repair bool, kind service.Kind, otlpTargets, hookTargets []string) []plannedAction {
 	cfg := endpointconfig.Default(endpointUserMode(), endpointOpts.logPath)
 	if endpointOpts.logPath != "" {
 		cfg.LogPath = endpointOpts.logPath
 	}
-	otlpTargets, hookTargets, _ := splitEndpointTargets(splitHarnessCSV(endpointOpts.harnesses))
 	actions := []plannedAction{}
 	if repair {
 		actions = append(actions, plannedAction{Action: "unload_service", Message: "repair unloads existing endpoint service if present"})
