@@ -11,73 +11,84 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## September 2026
 
-### Unreleased
+### v1.3.19 · September 21, 2026
 
-- **Plainer onboarding copy** · The wizard explained itself twice and repeated the
-  same reassurance on three screens. The welcome now states what interactive setup
-  does in one line, and the screens that follow say only what that screen decides.
-  The destination choice describes what you actually get from each: Managed as
-  free, unlimited cloud-based retention of every agent session, AI-powered search
-  and analytics on the hosted dashboard, and rich findings analyzing AI usage
-  coming soon; Local as a dashboard for this machine alone
-  where nothing leaves it. Each says when to pick it.
-  The managed disclosure is plain language, with no forwarder internals.
-
-- **Printed dashboard links point somewhere that exists** · The dashboard is a
-  single page at `/dashboard` whose views are tabs, so the service root serves the
-  marketing site and deep links such as `/dashboard/telemetry` and
-  `/dashboard/endpoints` have no route behind them. Connect and disconnect printed
-  those paths, and the cloud-agents guide named them in prose; all of them now point
-  at the dashboard itself.
-- **Setup ends on what to do next** · A managed install used to close on a wall of
-  paths and a sentence pairing the dashboard with a revocation link. It now ends by
-  saying to run an agent as usual and that its sessions appear on the dashboard
-  within a minute. Nothing is forwarded before that point, since the runtime source
-  starts at the connection, so there is nothing to look at until an agent runs.
-- **The browser page after sign-in is a real page** · Signing in used to land on
-  unstyled markup with a bare heading. It now carries Beacon's mark and styling, and
-  says the one thing that matters at that moment: return to your terminal, which is
-  still waiting on you. Device approval gets the same page. Everything is inline,
-  since the page is served from a loopback port with no network guarantee behind it.
-
-- **Sign-in no longer tears down the setup screen** · The wizard used to quit to
-  sign you in, print to plain output, block for up to five minutes, then start a
-  second wizard that wiped what it had just printed. Sign-in now runs inside the
-  same full-screen view, which shows the URL, a spinner, and the remaining time.
-  The URL is printed before any browser opens, so it works when none can, and
-  <kbd>esc</kbd> during the wait goes back instead of killing the install.
-- **A sign-in that cannot finish no longer blocks the install** · Offline, without
-  a browser, or after the wait expires, the wizard offers to retry, to show the URL
-  to open yourself, or to finish setup without an account with telemetry kept
-  locally. `beacon endpoint install --no-browser` starts in URL mode.
-
-- **Choosing Beacon Managed now connects the endpoint** · Confirming Managed in the
-  install wizard installs Beacon and then enrolls the device and starts the
-  forwarder, instead of printing `beacon endpoint connect` for you to run yourself.
-  The confirm screen states that forwarding starts and names what the selected
-  privacy mode sends. An endpoint that is already enrolled is never re-enrolled,
-  since enrollment rotates its device key. A failed enrollment leaves a working local
-  install, prints the retry command, and re-offers the question on the next install.
+- **Onboarding happens in one screen that never disappears** · Signing in used to
+  quit the full-screen wizard, print to plain output, block for up to five minutes,
+  then start a second wizard that wiped what it had printed. It now runs inside the
+  same view, which shows the sign-in URL, a spinner and the time remaining. The URL
+  is printed before any browser is opened, so it works when none can be, and
+  <kbd>esc</kbd> during the wait returns to the sign-in screen instead of ending the
+  install. `beacon endpoint install --no-browser` starts in URL mode.
+- **Choosing Beacon Managed connects the endpoint** · Confirming Managed installs
+  Beacon and then enrolls the device and starts the forwarder, rather than printing
+  `beacon endpoint connect` for you to run. The confirm screen states that forwarding
+  starts and names what the selected privacy mode sends, so that screen is where
+  forwarding is authorized. An endpoint already enrolled is never re-enrolled, since
+  enrollment rotates its device key. A failed enrollment leaves a working local
+  install, prints the retry command, and re-offers the question next time.
+- **A sign-in that cannot finish no longer blocks the install** · Offline, without a
+  browser, or after the wait expires, the wizard offers to retry, to show the URL to
+  open yourself, or to finish setup without an account. Signing in stays the expected
+  path: that screen offers no alternative until an attempt has actually failed.
+- **Clearer, shorter onboarding copy** · The wizard explained itself twice and
+  repeated the same reassurance on three screens. The destination choice now
+  describes what each option gives you: Managed as free, unlimited cloud-based
+  retention of every agent session with AI-powered search and analytics on Beacon's
+  hosted dashboard, Local as a dashboard for this machine where nothing leaves it,
+  each saying when to pick it. The managed disclosure is plain language.
 - **A failed install no longer marks the machine onboarded** · The onboarding record
   was written before `lifecycle.Install` ran, so an install that then failed left a
   profile saying setup was complete: the retry skipped the wizard silently and never
-  offered the destination again. The record is now written only after the install
-  succeeds.
-
-- **Clearer first-run onboarding** · The destination screen now says what Beacon
-  Managed gives you rather than how it works: one searchable history across every
-  agent, unlimited retention, token and usage analytics, and no backend to run. The
-  managed disclosure names what actually leaves the machine, since the previous
-  wording claimed no existing history was uploaded at all, which was not true of the
-  inventory snapshot.
+  offered the destination again. It is now written only after the install succeeds.
 - **A redirected install no longer launches the wizard** · Terminal detection used a
-  character-device test, which `/dev/null` satisfies, so `beacon endpoint install <
-  /dev/null` started the full-screen wizard against an input already at end of file
-  and failed the install with "onboarding cancelled". It now uses a real terminal
-  check, and `TERM=dumb` takes the same silent skip the trace browser already used.
+  character-device test, which `/dev/null` satisfies, so an install with stdin
+  redirected from `/dev/null` started the full-screen wizard against an input already
+  at end of file and failed with "onboarding cancelled". It now uses a real terminal
+  check, and `TERM=dumb` takes the same silent skip.
+- **The browser page after sign-in is a real page** · Signing in used to land on
+  unstyled markup. It now carries Beacon's mark and styling and says the one thing
+  that matters: return to your terminal, which is still waiting. Device approval gets
+  the same page. Everything is inline, since it is served from a loopback port with
+  no network guarantee behind it.
+- **Setup ends on what to do next** · A managed install closed on a wall of paths and
+  a sentence pairing the dashboard with a revocation link. It now says to run an
+  agent as usual and that its sessions appear on the dashboard within a minute.
+- **Printed dashboard links point somewhere that exists** · The dashboard is a single
+  page at `/dashboard` whose views are tabs, so deep links such as
+  `/dashboard/telemetry` and `/dashboard/endpoints` have no route behind them.
+  Connect, disconnect, `asymptote validate` and the cloud-agents guide named those
+  paths; all now point at the dashboard itself.
 - **`q` no longer quits the onboarding wizard** · It was bound to quit on every
   screen, so one stray keystroke on a choice list ended the install. Cancel with
-  `esc`.
+  <kbd>esc</kbd>.
+- **Dashboard and MCP HTTP servers reject non-loopback Host headers** · Both bind to
+  loopback, which keeps other machines out but not a web page that DNS-rebinds its
+  own hostname to `127.0.0.1`; the browser then treats the local server as
+  same-origin and the page can read captured prompts and tool activity. Both now
+  answer 403 unless the Host header names localhost or a loopback IP.
+- **Long traces keep their tail in the learning projection** · Only the first 80
+  events were kept, so a long session was evaluated without its outcome, which is
+  usually where the fix, the passing test or the final decision lands. The opening
+  context and the tail are both kept, with an explicit marker for the omitted middle.
+- **DeepSeek Harness sessions with a format version are discovered** · DSH names a
+  record `session.v3.jsonl.zstd`, and discovery compared the filename for equality
+  against the unversioned names, so a store of versioned records yielded nothing and
+  reported that as success. Names are now matched by shape, with the version optional.
+- **Claude Code and Codex hooks install by default** · `beacon endpoint install` and
+  `beacon endpoint repair` now write each runtime's user-level hooks together with its
+  OpenTelemetry settings whenever the `claude` or `codex` harness is selected, which the
+  default harness list does. Their OTLP export has no session start or end, file reads or
+  diffs, or subagent lifecycle, so a default install previously recorded thinner sessions
+  for them than for every other supported runtime. Package installs already refreshed
+  these hooks for the console user; this brings Homebrew and tarball installs in line.
+  `beacon endpoint hooks uninstall --harness claude` removes them, and `--harness codex`
+  the Codex ones.
+- **Hook install failures no longer fail the install** · When `endpoint install` or
+  `endpoint repair` cannot write a runtime's hooks, it prints a warning and the
+  `beacon endpoint hooks install --harness …` command to retry, and still attempts every
+  other hook target. The collector, config, service, and OTLP settings are already in place
+  at that point, so the endpoint is installed rather than reported broken.
 
 ### v1.3.18 · September 21, 2026
 
@@ -123,18 +134,6 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   and persisted token usage. Poll events remain offline, deterministic, and
   cannot approve, deny, or delay tools.
 
-- **Claude Code hooks install by default** · `beacon endpoint install` and `beacon endpoint repair`
-  now write Claude Code's user-level hooks together with its OpenTelemetry settings whenever
-  the `claude` harness is selected, which the default harness list does. Claude's OTLP export
-  has no session start or end, file reads or diffs, or subagent lifecycle, so a default install
-  previously recorded thinner Claude sessions than every other supported runtime. Package
-  installs already refreshed these hooks for the console user; this brings Homebrew and
-  tarball installs in line. `beacon endpoint hooks uninstall --harness claude` removes them.
-- **Hook install failures no longer fail the install** · When `endpoint install` or
-  `endpoint repair` cannot write a runtime's hooks, it prints a warning and the
-  `beacon endpoint hooks install --harness …` command to retry, and still attempts every
-  other hook target. The collector, config, service, and OTLP settings are already in place
-  at that point, so the endpoint is installed rather than reported broken.
 
 ### v1.3.17 · September 21, 2026
 

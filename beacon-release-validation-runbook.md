@@ -118,8 +118,9 @@ pulls in the `beacon-vector` keg on macOS; otherwise the signed `.pkg` or vector
       command ends with "Connected to Asymptote as device …" and a running forwarder.
 - [ ] `beacon endpoint status` shows `Asymptote managed ingest: connected … credential valid`
       and `~/.beacon/endpoint/asymptote/vector.toml` contains no `bcn_device` string.
-- [ ] Run a short agent session; within two minutes it appears on `/dashboard/telemetry`
-      and the machine on `/dashboard/endpoints`.
+- [ ] Run a short agent session; within two minutes it appears on `/dashboard`, and the
+      machine is listed among the endpoints there. The dashboard is a single page whose
+      views are tabs, so there is no `/dashboard/telemetry` or `/dashboard/endpoints`.
 - [ ] Revoke the device on the dashboard; within a minute `status` says `credential revoked`.
 - [ ] `beacon endpoint disconnect` removes the forwarder and the `asymptote/` directory.
 
