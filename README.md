@@ -124,10 +124,11 @@ Or inspect the raw event stream:
 ```
 
 > [!NOTE]
-> Local until connected: signing in or accepting the preselected Managed option
-> does not enable forwarding. The onboarding wizard records Standard or
-> Metadata-only privacy; `beacon endpoint connect` uses that choice, or
-> `--privacy-mode` overrides it.
+> Signing in does not enable forwarding. Confirming the preselected Beacon Managed
+> option does: the wizard says so on the confirm screen, names what your chosen
+> privacy mode sends, and connects the endpoint after the install succeeds. Choose
+> Local to keep everything on this machine, and disconnect any time with
+> `beacon endpoint disconnect`.
 
 Inspect the account used during interactive setup:
 
