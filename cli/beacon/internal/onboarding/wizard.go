@@ -602,7 +602,8 @@ func destinationCopy(destination string) (string, string) {
 		return "Beacon Managed (recommended)",
 			"Free, unlimited cloud-based retention of all your agent sessions, with " +
 				"AI-powered search and analytics on Beacon's hosted dashboard, plus " +
-				"findings and detections. Pick this for Beacon's full feature set."
+				"rich findings analyzing your AI usage (coming soon). Pick this for " +
+				"Beacon's full feature set."
 	default:
 		return "Local only",
 			"A local dashboard for this machine's agent telemetry, kept for as long as " +
