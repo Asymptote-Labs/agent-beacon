@@ -34,7 +34,7 @@ flowchart LR
 
 | Risk | Design response |
 |------|-----------------|
-| Unintended hosted telemetry | Managed is preselected in interactive onboarding, but selection and account sign-in do not forward anything. Forwarding starts only after the separate connect command. Runtime forwarding starts at the end of the existing log; inventory starts at the beginning so the service receives the endpoint's current inventory baseline. The active privacy mode is recorded, and forwarding stops within a minute of revocation |
+| Unintended hosted telemetry | Account sign-in forwards nothing. Managed is preselected, and confirming it starts forwarding within the same command, which the confirm screen states before the choice is accepted, naming what the selected privacy mode sends. Choosing Local forwards nothing, and `beacon endpoint disconnect` stops a connected endpoint. Runtime forwarding starts at the end of the existing log; inventory starts at the beginning so the service receives the endpoint's current inventory baseline. The active privacy mode is recorded, and forwarding stops within a minute of revocation |
 | Network exposure of collectors | Default OTLP receivers bind to `127.0.0.1` rather than an externally reachable interface |
 | Over-collection of prompt or diff content | Standard applies local sanitization and size controls. Metadata-only additionally strips retained prompts, responses, reasoning, tool arguments/results, command output, raw fields, diffs, inventory content, and MCP definitions in Vector before buffering or upload |
 | Secret leakage in retained content | Beacon applies redaction, sanitization, truncation, and event-size limits before writing supported content fields |

@@ -77,8 +77,9 @@ The explicit `beacon endpoint install --connect` flag is unchanged: it presets M
 and skips the destination question.
 
 The wizard never appears non-interactively. Package postinstall scripts, MDM
-deployments, `--system` installs, CI, `--dry-run`, and any piped or redirected stdin
-skip it silently. These paths remain account-free.
+deployments, `--system` installs, CI, `--dry-run`, `TERM=dumb`, and any piped or
+redirected stdin skip it silently, including a redirect to `/dev/null`. These paths
+remain account-free.
 
 ## Flags
 
@@ -122,7 +123,10 @@ beacon endpoint onboarding
 ```
 
 The answer is stored as `onboarding.destination` in `~/.beacon/profile.json`;
-managed selections also store `onboarding.privacy_mode`. `--json` exposes both:
+managed selections also store `onboarding.privacy_mode`. Setup completed through an
+account records `onboarding.outcome` as `authenticated` with the signed-in email;
+setup finished without one after a failed sign-in records `skipped` and no email,
+since no account authorized that run. `--json` exposes all of them:
 
 | Value | Printed as |
 |-------|------------|

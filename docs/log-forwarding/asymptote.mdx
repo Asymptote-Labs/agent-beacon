@@ -7,7 +7,7 @@ description: "Forward Beacon endpoint events to Beacon's managed ingest service 
 
 Beacon Managed is the forwarding path that lands Beacon endpoint events on the Beacon dashboard without any customer-run infrastructure. Beacon stays the local JSONL producer. A Vector forwarder on the endpoint tails the [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log) and the inventory log and POSTs gzip-compressed NDJSON batches over HTTPS to Beacon's ingest service, authenticated with a key issued to that one device.
 
-This is the only Beacon destination that sends telemetry to a Beacon-run endpoint. It is preselected during interactive onboarding, but nothing is forwarded until the separate connect command mints a device key and starts the forwarder. Choosing Local explicitly opts out. Revoking the device from the dashboard's Beacon Endpoints page stops ingestion within about a minute.
+This is the only Beacon destination that sends telemetry to a Beacon-run endpoint. It is preselected during interactive onboarding, and confirming it mints a device key and starts the forwarder in the same command, once the local install has succeeded. Signing in alone forwards nothing. Choosing Local explicitly opts out. Revoking the device from the dashboard's Beacon Endpoints page stops ingestion within about a minute.
 
 Generate the pack with [`beacon endpoint asymptote`](/cli/asymptote). `beacon endpoint connect` performs enrollment and runs the forwarder as a service; the pack is for running or inspecting the same forwarder by hand.
 

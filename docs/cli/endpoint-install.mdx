@@ -27,6 +27,7 @@ By default, Beacon configures Claude Code and Codex CLI telemetry for local or c
 | `--otlp-http-port <port>` | Local OTLP HTTP port. Defaults to `4318` |
 | `--collector <path>` | Path to a `beacon-otelcol` binary |
 | `--no-start` | Write files without starting the collector service |
+| `--no-browser` | During interactive setup, print the sign-in URL instead of opening a browser. Useful where no browser can be opened, though the URL still has to be opened on this machine |
 | `--service <kind>` | Service manager to use: `auto` (default), `launchd`, `systemd`, or `none` for a supervised collector process |
 | `--dry-run` | Print planned actions without changing endpoint files or services |
 | `--include-runtime-metrics` | Include generic process, runtime, and harness operational OTLP metrics in Beacon JSONL. By default, low-signal metrics such as process CPU, memory, Node.js event loop, V8 heap, GitHub Copilot CLI, and OpenClaw operational metrics are filtered out |
