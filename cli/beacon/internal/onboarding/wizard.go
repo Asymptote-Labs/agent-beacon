@@ -466,6 +466,11 @@ func (m wizardModel) recover() (tea.Model, tea.Cmd) {
 		m.result.WithoutAccount = true
 		m.result.Destination = DestinationLocal
 		m.result.PrivacyMode = ""
+		// Drop any leftover identity. Email is populated from whatever session was
+		// on disk, including an expired one that cannot be used, so leaving it set
+		// would show an account on the confirm screen next to "not signed in".
+		m.options.Email = ""
+		m.options.SignedIn = false
 		m.screen = confirmScreen
 		return m, nil
 	default:

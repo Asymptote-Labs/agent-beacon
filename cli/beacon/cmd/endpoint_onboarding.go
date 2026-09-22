@@ -219,8 +219,15 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 	if !result.Completed {
 		return onboardingOutcome{}, onboarding.ErrWizardCancelled
 	}
-	if result.SignedInEmail != "" {
+	switch {
+	case result.SignedInEmail != "":
 		status = account.Status{SignedIn: true, User: account.User{Email: result.SignedInEmail}}
+	case result.WithoutAccount:
+		// The user finished without signing in. Any identity still in status came
+		// from a session on disk that was not usable -- an expired one keeps its
+		// user -- and recording it would name someone who did not authorize this
+		// run, under an outcome that says they did.
+		status = account.Status{}
 	}
 
 	privacyMode := ""
@@ -245,13 +252,18 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 		recordedDestination = ""
 	}
 
-	outcome := onboardingOutcome{Connect: connectAfterInstall}
+	decided := onboardingOutcome{Connect: connectAfterInstall}
 	email := status.User.Email
-	outcome.Persist = func() error {
+	// A run that never signed in is recorded as skipped, not authenticated.
+	outcome := onboarding.OutcomeAuthenticated
+	if result.WithoutAccount {
+		outcome = onboarding.OutcomeSkipped
+	}
+	decided.Persist = func() error {
 		if profile.Onboarding.CompletedAt == "" {
 			profile.Onboarding = onboarding.Onboarding{
 				CompletedAt:   onboardingClock().UTC().Format(time.RFC3339),
-				Outcome:       onboarding.OutcomeAuthenticated,
+				Outcome:       outcome,
 				Email:         email,
 				BeaconVersion: version.GetVersion(),
 				Destination:   recordedDestination,
@@ -280,7 +292,7 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 	case result.Destination == onboarding.DestinationLocal:
 		fmt.Fprintln(cmd.OutOrStdout(), "Local-only telemetry selected. Open it with `beacon traces`.")
 	}
-	return outcome, nil
+	return decided, nil
 }
 
 // recordDestinationAsymptote stores the managed answer after explicit

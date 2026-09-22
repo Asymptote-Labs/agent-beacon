@@ -574,3 +574,38 @@ func TestStaleSignInDoesNotPoisonRetry(t *testing.T) {
 		t.Fatalf("the current attempt's failure was dropped: screen = %v", model.screen)
 	}
 }
+
+// An expired session still carries a user, so Email is populated while SignedIn is
+// false. Finishing without an account must not then show that stale identity.
+func TestFinishingWithoutAnAccountDropsALeftoverIdentity(t *testing.T) {
+	model := signInWizard(t, neverReturns)
+	model.options.Email = "stale@example.com" // from an expired session
+	model.options.OfferManaged = true
+	model.screen = signInScreen
+
+	model, _ = advanceWizard(t, model, "enter")
+	t.Cleanup(func() { model.stopSignIn() })
+	next, _ := model.Update(signInDoneMsg{attempt: 1, err: errors.New("connection refused")})
+	model = next.(wizardModel)
+
+	for i, choice := range model.recoveryChoices() {
+		if choice.id == "local" {
+			model.selected = i
+		}
+	}
+	model, _ = advanceWizard(t, model, "enter")
+
+	if model.options.Email != "" {
+		t.Fatalf("a leftover identity survived the skip: %q", model.options.Email)
+	}
+	view := strings.Join(strings.Fields(model.View()), " ")
+	if strings.Contains(view, "stale@example.com") {
+		t.Fatalf("confirm screen shows an account the user did not sign in as:\n%s", view)
+	}
+	if strings.Contains(view, "Account:") {
+		t.Fatalf("confirm screen shows an account line with no account:\n%s", view)
+	}
+	if !strings.Contains(view, "not signed in") {
+		t.Fatalf("confirm screen should say there is no account:\n%s", view)
+	}
+}
