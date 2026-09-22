@@ -134,7 +134,7 @@ func (s *Server) HasExpectedTools() error {
 
 func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
 	scanner := bufio.NewScanner(in)
-	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	encoder := json.NewEncoder(out)
 	for scanner.Scan() {
 		select {
@@ -170,7 +170,7 @@ func (s *Server) HTTPHandler() http.Handler {
 			writeHTTPError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 16*1024*1024))
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4*1024*1024))
 		if err != nil {
 			writeHTTPError(w, http.StatusBadRequest, err.Error())
 			return
