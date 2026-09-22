@@ -600,10 +600,12 @@ func destinationCopy(destination string) (string, string) {
 	switch destination {
 	case DestinationAsymptote:
 		return "Beacon Managed (recommended)",
-			"Free, unlimited cloud-based retention of all your agent sessions, with " +
-				"AI-powered search and analytics on Beacon's hosted dashboard, plus " +
-				"rich findings analyzing your AI usage (coming soon). Pick this for " +
-				"Beacon's full feature set."
+			"Free, unlimited cloud-based retention of all your agent sessions. " +
+				// Non-breaking hyphen: the wrapper treats a plain "-" as a break
+				// point and split this across lines as "AI-" / "powered".
+				"AI\u2011powered search and analytics on Beacon's hosted dashboard. " +
+				"Rich findings analyzing your AI usage, coming soon. " +
+				"Pick this for Beacon's full feature set."
 	default:
 		return "Local only",
 			"A local dashboard for this machine's agent telemetry, kept for as long as " +
