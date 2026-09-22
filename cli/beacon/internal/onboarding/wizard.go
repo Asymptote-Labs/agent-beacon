@@ -494,7 +494,14 @@ func (m wizardModel) View() string {
 		}
 	case signInScreen:
 		title = "Sign in to continue"
-		body = "Beacon will open beacon.sh in your browser using a secure PKCE flow.\n\nSigning in does not send telemetry, register a managed endpoint, or enable forwarding."
+		// --no-browser means no browser will be opened, so promising one here sends
+		// an SSH or headless user looking for a window that never appears.
+		if m.options.NoBrowser {
+			body = "Beacon will show a beacon.sh URL to open yourself, using a secure PKCE flow."
+		} else {
+			body = "Beacon will open beacon.sh in your browser using a secure PKCE flow."
+		}
+		body += "\n\nSigning in does not send telemetry, register a managed endpoint, or enable forwarding."
 	case signInWaitScreen:
 		title = "Waiting for you to finish signing in"
 		switch {
@@ -670,16 +677,19 @@ func (m wizardModel) hint() string {
 	if m.screen == confirmScreen && m.result.Destination == DestinationAsymptote {
 		return "enter install and connect · esc cancel"
 	}
-	return wizardHint(m.screen)
+	return m.wizardHint(m.screen)
 }
 
-func wizardHint(screen wizardScreen) string {
+func (m wizardModel) wizardHint(screen wizardScreen) string {
 	switch screen {
 	case destinationScreen:
 		return "↑/↓ choose · enter continue · esc cancel"
 	case privacyScreen:
 		return "↑/↓ choose · enter continue · esc cancel"
 	case signInScreen:
+		if m.options.NoBrowser {
+			return "enter show the sign-in URL · esc cancel"
+		}
 		return "enter open beacon.sh · esc cancel"
 	case signInWaitScreen:
 		return "esc go back · ctrl+c cancel setup"

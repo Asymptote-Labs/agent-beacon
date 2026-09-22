@@ -609,3 +609,35 @@ func TestFinishingWithoutAnAccountDropsALeftoverIdentity(t *testing.T) {
 		t.Fatalf("confirm screen should say there is no account:\n%s", view)
 	}
 }
+
+// --no-browser means no browser is opened, so the first screen must not promise
+// one. An SSH or headless user would otherwise go looking for a window that never
+// appears, and only learn the truth on the next screen.
+func TestSignInScreenHonorsNoBrowser(t *testing.T) {
+	withBrowser := newWizardModel(WizardOptions{OfferManaged: true})
+	withBrowser.screen = signInScreen
+	withBrowser.width, withBrowser.height = 100, 30
+	view := strings.Join(strings.Fields(withBrowser.View()), " ")
+	if !strings.Contains(view, "will open beacon.sh in your browser") || !strings.Contains(view, "enter open beacon.sh") {
+		t.Fatalf("default sign-in screen = %s", view)
+	}
+
+	headless := newWizardModel(WizardOptions{OfferManaged: true, NoBrowser: true})
+	headless.screen = signInScreen
+	headless.width, headless.height = 100, 30
+	view = strings.Join(strings.Fields(headless.View()), " ")
+	if strings.Contains(view, "will open beacon.sh in your browser") {
+		t.Fatalf("--no-browser screen still promises to open a browser:\n%s", view)
+	}
+	for _, want := range []string{"URL to open yourself", "enter show the sign-in URL"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("--no-browser screen missing %q:\n%s", want, view)
+		}
+	}
+	// Either way the screen offers no way around signing in.
+	for _, unwanted := range []string{"without an account", "Local only"} {
+		if strings.Contains(view, unwanted) {
+			t.Fatalf("sign-in screen must not advertise %q:\n%s", unwanted, view)
+		}
+	}
+}
