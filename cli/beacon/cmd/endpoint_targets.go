@@ -3,6 +3,8 @@ package cmd
 import (
 	"fmt"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 )
 
 type endpointTargetKind string
@@ -15,6 +17,60 @@ const (
 type endpointTarget struct {
 	Name string
 	Kind endpointTargetKind
+}
+
+const endpointHarnessAuto = "auto"
+
+type autoEndpointTarget struct {
+	OTLP  []string
+	Hooks []string
+	Skip  string
+}
+
+type skippedEndpointTarget struct {
+	Name   string
+	Reason string
+}
+
+type endpointTargetSelection struct {
+	OTLP      []string
+	Hooks     []string
+	Skipped   []skippedEndpointTarget
+	Automatic bool
+}
+
+// autoEndpointTargets maps discovery's canonical event names onto endpoint install's target
+// names. Some discovered runtimes deliberately have no install target: Beacon can observe their
+// presence, but enabling collection requires an external admin setting, launch environment, or a
+// poll command rather than a config file endpoint install may safely mutate.
+var autoEndpointTargets = map[string]autoEndpointTarget{
+	"claude_code":      {OTLP: []string{"claude"}, Hooks: []string{"claude"}},
+	"codex_cli":        {OTLP: []string{"codex"}, Hooks: []string{"codex"}},
+	"gemini_cli":       {OTLP: []string{"gemini"}},
+	"antigravity_cli":  {Hooks: []string{"antigravity"}},
+	"copilot_cli":      {Skip: "its OTLP endpoint is managed through the Copilot CLI launch environment"},
+	"opencode":         {Hooks: []string{"opencode"}},
+	"cline":            {Hooks: []string{"cline"}},
+	"pi_cli":           {Hooks: []string{"pi"}},
+	"omp":              {Hooks: []string{"omp"}},
+	"openclaw":         {Hooks: []string{"openclaw"}},
+	"grok":             {Hooks: []string{"grok"}},
+	"prime_agent":      {Hooks: []string{"prime"}},
+	"omo_senpi":        {Hooks: []string{"omo"}},
+	"vercel_fx":        {Skip: "collection is enabled by running `beacon endpoint fx sync`"},
+	"deepseek_harness": {Hooks: []string{"dsh"}},
+	"qwen_code":        {Hooks: []string{"qwen"}},
+	"kimi_code":        {Hooks: []string{"kimi"}},
+	"kiro":             {Hooks: []string{"kiro"}},
+	"muse_code":        {Hooks: []string{"muse"}},
+	"openhands":        {Skip: "the CLI and GUI require project-level hooks installed from inside each repository"},
+	"hermes":           {Hooks: []string{"hermes"}},
+	"factory":          {Hooks: []string{"factory"}},
+	"vscode":           {OTLP: []string{"vscode"}, Hooks: []string{"vscode"}},
+	"cursor":           {Hooks: []string{"cursor"}},
+	"devin-cli":        {Hooks: []string{"devin-cli"}},
+	"devin-desktop":    {Hooks: []string{"devin-desktop"}},
+	"claude_cowork":    {Skip: "its OTLP endpoint requires Claude admin configuration"},
 }
 
 // harnessTarget is one row of the supported-harness registry. It is the single
@@ -248,6 +304,77 @@ func splitEndpointTargets(values []string) (otlp []string, hooks []string, err e
 		}
 	}
 	return otlp, hooks, nil
+}
+
+func resolveEndpointTargets(value string, discovered []harness.Harness) (endpointTargetSelection, error) {
+	values := splitHarnessCSV(value)
+	if len(values) != 1 || (normalizeHarnessKey(values[0]) != endpointHarnessAuto && normalizeHarnessKey(values[0]) != "all") {
+		otlp, hooks, err := splitEndpointTargets(values)
+		return endpointTargetSelection{OTLP: otlp, Hooks: hooks}, err
+	}
+
+	switch normalizeHarnessKey(values[0]) {
+	case "all":
+		return allInstallableEndpointTargets(), nil
+	case endpointHarnessAuto:
+		selection := endpointTargetSelection{Automatic: true}
+		seenOTLP := map[string]bool{}
+		seenHooks := map[string]bool{}
+		for _, found := range discovered {
+			if !found.Detected {
+				continue
+			}
+			target, ok := autoEndpointTargets[found.Name]
+			if !ok {
+				selection.Skipped = append(selection.Skipped, skippedEndpointTarget{
+					Name:   found.DisplayName,
+					Reason: "no automatic installer is registered",
+				})
+				continue
+			}
+			if target.Skip != "" {
+				selection.Skipped = append(selection.Skipped, skippedEndpointTarget{
+					Name:   found.DisplayName,
+					Reason: target.Skip,
+				})
+				continue
+			}
+			for _, name := range target.OTLP {
+				if !seenOTLP[name] {
+					selection.OTLP = append(selection.OTLP, name)
+					seenOTLP[name] = true
+				}
+			}
+			for _, name := range target.Hooks {
+				if !seenHooks[name] {
+					selection.Hooks = append(selection.Hooks, name)
+					seenHooks[name] = true
+				}
+			}
+		}
+		return selection, nil
+	default:
+		panic("unreachable endpoint harness selection")
+	}
+}
+
+func allInstallableEndpointTargets() endpointTargetSelection {
+	selection := endpointTargetSelection{}
+	seenOTLP := map[string]bool{}
+	seenHooks := map[string]bool{}
+	for _, target := range harnessTargets {
+		if target.endpointKind == endpointTargetOTLP && !seenOTLP[target.name] {
+			selection.OTLP = append(selection.OTLP, target.name)
+			seenOTLP[target.name] = true
+		}
+		// hookAliases is also populated on OTLP rows whose runtime has a separately
+		// installable hook integration, notably Claude, Codex, and VS Code.
+		if len(target.hookAliases) > 0 && !seenHooks[target.name] {
+			selection.Hooks = append(selection.Hooks, target.name)
+			seenHooks[target.name] = true
+		}
+	}
+	return selection
 }
 
 func canonicalHookTargets(values []string) ([]string, error) {

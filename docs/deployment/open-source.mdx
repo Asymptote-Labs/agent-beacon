@@ -80,9 +80,9 @@ beacon endpoint install
 beacon endpoint status
 ```
 
-By default, Beacon configures Claude Code and Codex CLI to export telemetry to a local OpenTelemetry Collector on `127.0.0.1`. Add Gemini when you want Beacon to manage Gemini OTLP settings too:
+By default, Beacon detects runtimes installed for the invoking user and configures every integration it can safely install. Pass an exact list when you want deterministic target selection:
 
-```bash title="Include Gemini telemetry"
+```bash title="Configure an exact runtime set"
 beacon endpoint install --harness claude,codex,gemini
 ```
 

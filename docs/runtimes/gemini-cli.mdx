@@ -5,7 +5,7 @@ description: "Beacon support details for Gemini CLI endpoint telemetry"
 
 ## Runtime overview
 
-Beacon supports Gemini CLI through opt-in local OTLP logs, traces, and metrics.
+Beacon supports Gemini CLI through local OTLP logs, traces, and metrics. The default endpoint install enables it when Gemini is detected.
 
 ## Prerequisites
 
@@ -13,7 +13,7 @@ Before enabling Gemini CLI telemetry, make sure:
 
 - Gemini CLI is installed and available as the `gemini` executable for the user or managed endpoint.
 - `beacon endpoint install` has run so the local collector, endpoint config, and runtime log path exist.
-- The install explicitly includes Gemini, for example `beacon endpoint install --harness claude,codex,gemini`.
+- Gemini is detectable through its executable or user configuration. If automatic discovery is unavailable in an unattended environment, explicitly include it with `beacon endpoint install --harness claude,codex,gemini`.
 - No project settings or `GEMINI_TELEMETRY_*` environment variables override the user-level Beacon settings you expect to use.
 - Your team has reviewed content handling and destination access for prompt telemetry.
 
@@ -27,7 +27,7 @@ Beacon detects Gemini CLI through the `gemini` executable and `~/.gemini/setting
 
 ## Install or configuration support
 
-Gemini CLI telemetry is opt-in. Run `beacon endpoint install --harness claude,codex,gemini` when you want Beacon to manage Gemini telemetry settings.
+The default `beacon endpoint install` configures Gemini automatically when it is detected. Run `beacon endpoint install --harness claude,codex,gemini` to select it explicitly instead.
 
 Beacon writes local OTLP settings to `~/.gemini/settings.json`, sets `target` to `local`, uses OTLP gRPC, enables collector mode, and removes `outfile` so telemetry flows to Beacon.
 

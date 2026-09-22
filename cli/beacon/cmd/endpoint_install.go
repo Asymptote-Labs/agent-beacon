@@ -92,16 +92,17 @@ func runEndpointDashboard(cmd *cobra.Command, args []string) error {
 }
 
 func runEndpointInstall(cmd *cobra.Command, args []string) error {
-	otlpHarnesses, hookHarnesses, err := splitEndpointTargets(splitHarnessCSV(endpointOpts.harnesses))
+	selection, err := resolveEndpointTargets(endpointOpts.harnesses, harness.DiscoverAll())
 	if err != nil {
 		return err
 	}
+	reportEndpointTargetSelection(cmd, selection)
 	serviceKind, err := service.ParseKind(endpointOpts.serviceKind)
 	if err != nil {
 		return err
 	}
 	if endpointOpts.dryRun {
-		return printPlannedActions(plannedInstallActions(false, serviceKind))
+		return printPlannedActions(plannedInstallActions(false, serviceKind, selection.OTLP, selection.Hooks))
 	}
 	// Asked once, on an interactive install, before anything is written to disk. Every
 	// non-interactive path (package postinstall, MDM, CI) is gated out inside.
@@ -115,7 +116,7 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	result, err := lifecycle.Install(lifecycle.InstallOptions{
 		UserMode:              endpointUserMode(),
 		LogPath:               endpointOpts.logPath,
-		Harnesses:             otlpHarnesses,
+		Harnesses:             selection.OTLP,
 		GRPCPort:              endpointOpts.grpcPort,
 		HTTPPort:              endpointOpts.httpPort,
 		CollectorPath:         endpointOpts.collectorPath,
@@ -149,7 +150,7 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Scheduled inventory job not installed: %s\n", result.InventoryJobDetail)
 	}
 	printLingerGap(cmd.ErrOrStderr(), result)
-	installHookTargetsFromEndpointInstall(cmd.ErrOrStderr(), hookHarnesses)
+	installHookTargetsFromEndpointInstall(cmd.ErrOrStderr(), selection.Hooks)
 	if connectAfterInstall {
 		// The install is complete and stands on its own; a failed connect is reported
 		// with the retry command rather than turning a working install into an error.
@@ -268,16 +269,17 @@ func runEndpointUninstall(cmd *cobra.Command, args []string) error {
 }
 
 func runEndpointRepair(cmd *cobra.Command, args []string) error {
-	otlpHarnesses, hookHarnesses, err := splitEndpointTargets(splitHarnessCSV(endpointOpts.harnesses))
+	selection, err := resolveEndpointTargets(endpointOpts.harnesses, harness.DiscoverAll())
 	if err != nil {
 		return err
 	}
+	reportEndpointTargetSelection(cmd, selection)
 	serviceKind, err := service.ParseKind(endpointOpts.serviceKind)
 	if err != nil {
 		return err
 	}
 	if endpointOpts.dryRun {
-		return printPlannedActions(plannedInstallActions(true, serviceKind))
+		return printPlannedActions(plannedInstallActions(true, serviceKind, selection.OTLP, selection.Hooks))
 	}
 	// Resend only. Repair is a maintenance command and never asks a question, but a
 	// signup that failed on a flaky network deserves the retry the docs promise.
@@ -285,7 +287,7 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 	result, err := lifecycle.Repair(lifecycle.InstallOptions{
 		UserMode:              endpointUserMode(),
 		LogPath:               endpointOpts.logPath,
-		Harnesses:             otlpHarnesses,
+		Harnesses:             selection.OTLP,
 		GRPCPort:              endpointOpts.grpcPort,
 		HTTPPort:              endpointOpts.httpPort,
 		CollectorPath:         endpointOpts.collectorPath,
@@ -301,8 +303,31 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Endpoint repaired. Manifest: %s\n", result.ManifestPath)
 	printLingerGap(cmd.ErrOrStderr(), result)
-	installHookTargetsFromEndpointInstall(cmd.ErrOrStderr(), hookHarnesses)
+	installHookTargetsFromEndpointInstall(cmd.ErrOrStderr(), selection.Hooks)
 	return nil
+}
+
+func reportEndpointTargetSelection(cmd *cobra.Command, selection endpointTargetSelection) {
+	if !selection.Automatic {
+		return
+	}
+	out := cmd.OutOrStdout()
+	var targets []string
+	seen := map[string]bool{}
+	for _, target := range append(append([]string(nil), selection.OTLP...), selection.Hooks...) {
+		if !seen[target] {
+			targets = append(targets, target)
+			seen[target] = true
+		}
+	}
+	if len(targets) == 0 {
+		fmt.Fprintln(out, "No automatically installable runtimes were detected; no runtime integrations will be configured.")
+	} else {
+		fmt.Fprintf(out, "Automatically configuring detected runtimes: %s\n", strings.Join(targets, ", "))
+	}
+	for _, skipped := range selection.Skipped {
+		fmt.Fprintf(out, "Detected %s but skipped automatic configuration: %s.\n", skipped.Name, skipped.Reason)
+	}
 }
 
 // printLingerGap says so when the collector is running but will not outlive this login session.
