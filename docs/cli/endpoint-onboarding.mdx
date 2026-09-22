@@ -46,10 +46,13 @@ Signing in establishes account identity only. It does not register a managed end
 start Vector, or send telemetry. Beacon Managed is preselected; choose Local explicitly
 to opt out of managed forwarding.
 
-Choosing Beacon Managed shows a separate disclosure naming exactly what leaves the
-machine: runtime events recorded before you connect stay local, while the inventory
-snapshot of which agent runtimes, skills, and MCP servers are installed uploads once
-so the dashboard has a baseline for the endpoint.
+Choosing Beacon Managed shows a separate disclosure: your agents' activity on this
+machine will be sent to your Beacon account as it happens, and `beacon endpoint
+disconnect` stops it. The screen makes no claim about data already on disk, because
+the honest version of that claim needs a caveat: runtime events recorded before you
+connect stay local, but the inventory snapshot of which agent runtimes, skills, and
+MCP servers are installed does upload once as the endpoint's baseline. That detail is
+documented here rather than shown on the screen where someone is choosing.
 
 Standard forwards the complete locally sanitized event. Metadata only strips retained
 prompts, responses, reasoning, tool arguments/results, command output, raw fields,

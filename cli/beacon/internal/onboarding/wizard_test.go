@@ -85,12 +85,10 @@ func TestManagedWizardRequiresDisclosureConfirmation(t *testing.T) {
 	}
 	view := strings.Join(strings.Fields(model.View()), " ")
 	for _, want := range []string{
-		// Plain language: what is sent, what is not, and how to stop. No mention of
+		// Plain language: what starts happening, and how to stop it. No mention of
 		// the forwarder's implementation, which nobody choosing a destination needs.
 		"What gets sent to beacon.sh",
 		"sent to your Beacon account as it happens",
-		"What is already on this machine stays here",
-		"which agents and tools you have installed",
 		"beacon endpoint disconnect",
 		// The disclosure has to describe what actually ships. The runtime source is
 		// read_from = "end", so pre-connect runtime events stay local -- but the
@@ -101,8 +99,17 @@ func TestManagedWizardRequiresDisclosureConfirmation(t *testing.T) {
 			t.Fatalf("managed disclosure missing %q:\n%s", want, view)
 		}
 	}
-	if strings.Contains(view, "Existing local history is not uploaded") {
-		t.Fatalf("the disclosure must not claim existing history is never uploaded; inventory is:\n%s", view)
+	// The screen makes no claim about data already on disk. Any unqualified
+	// version of "nothing recorded before now is sent" is false, because the
+	// inventory source reads from the beginning of its log.
+	for _, false_ := range []string{
+		"Existing local history is not uploaded",
+		"What is already on this machine stays here",
+		"Nothing already recorded",
+	} {
+		if strings.Contains(view, false_) {
+			t.Fatalf("the disclosure must not claim existing data stays local; inventory does not:\n%s", view)
+		}
 	}
 	for _, jargon := range []string{"Vector", "HTTPS", "forwarder", "snapshot"} {
 		if strings.Contains(view, jargon) {

@@ -546,11 +546,14 @@ func (m wizardModel) View() string {
 		body = strings.Join(rows, "\n")
 	case managedDisclosureScreen:
 		title = "What gets sent to beacon.sh"
-		body = "From now on, what your agents do on this machine is sent to your Beacon " +
-			"account as it happens. You choose how much of it on the next screen." +
-			"\n\nWhat is already on this machine stays here. The one exception is a list of " +
-			"which agents and tools you have installed, sent once so the dashboard knows " +
-			"what this machine is." +
+		// Deliberately makes no claim about what is already on disk. The obvious
+		// reassurance -- that nothing recorded before now is sent -- is not true
+		// without naming the inventory exception, and that caveat costs more
+		// attention than it is worth on the screen where someone is deciding. An
+		// unqualified version of it is the false statement this screen used to
+		// carry; saying nothing is better than saying that.
+		body = "Your agents' activity on this machine will be sent to your Beacon " +
+			"account as it happens." +
 			"\n\nStop any time with `beacon endpoint disconnect`."
 	case privacyScreen:
 		title = "Choose what Beacon Managed receives"
