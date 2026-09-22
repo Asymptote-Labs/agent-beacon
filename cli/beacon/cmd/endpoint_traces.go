@@ -44,7 +44,7 @@ var runTraceView = traceview.Run
 
 func runTopLevelTraces(cmd *cobra.Command, args []string) error {
 	logPath := endpointTraceLogPath()
-	if !isCharDevice(os.Stdin) || !isCharDevice(os.Stdout) || strings.EqualFold(os.Getenv("TERM"), "dumb") {
+	if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) || strings.EqualFold(os.Getenv("TERM"), "dumb") {
 		result, err := dashboard.ReadTraceList(logPath, dashboard.TraceQuery{Limit: 100})
 		if err != nil {
 			return err

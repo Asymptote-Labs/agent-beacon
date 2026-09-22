@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -35,6 +37,46 @@ func TestPrintRootSplash(t *testing.T) {
 	for _, line := range beaconBanner {
 		if len([]rune(line)) > 64 {
 			t.Fatalf("banner line %q is too wide: got %d columns", line, len(line))
+		}
+	}
+}
+
+// isTerminal gates the full-screen onboarding wizard and the trace browser, so
+// anything that is not a real terminal has to read as false.
+//
+// This previously tested os.ModeCharDevice, which /dev/null also sets. The result
+// was that `beacon endpoint install < /dev/null` -- an ordinary shape for a wrapper
+// script or an unattended run -- looked interactive, started the wizard against an
+// input already at EOF, and failed the install with "onboarding cancelled".
+func TestIsTerminalRejectsDevNullPipesAndRegularFiles(t *testing.T) {
+	devNull, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer devNull.Close()
+
+	readEnd, writeEnd, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer readEnd.Close()
+	defer writeEnd.Close()
+
+	regular, err := os.Create(filepath.Join(t.TempDir(), "redirected.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer regular.Close()
+
+	for name, file := range map[string]*os.File{
+		"/dev/null":    devNull,
+		"pipe read":    readEnd,
+		"pipe write":   writeEnd,
+		"regular file": regular,
+		"nil":          nil,
+	} {
+		if isTerminal(file) {
+			t.Fatalf("isTerminal(%s) = true, want false", name)
 		}
 	}
 }

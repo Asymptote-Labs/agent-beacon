@@ -81,10 +81,23 @@ func TestManagedWizardRequiresDisclosureConfirmation(t *testing.T) {
 		t.Fatalf("managed selection = screen %v result %#v", model.screen, model.result)
 	}
 	view := strings.Join(strings.Fields(model.View()), " ")
-	for _, want := range []string{"sends new telemetry to beacon.sh", "Nothing is forwarded", "beacon endpoint connect", "Existing local history is not uploaded"} {
+	for _, want := range []string{
+		"sends new telemetry to beacon.sh",
+		"Nothing is forwarded",
+		"beacon endpoint connect",
+		// The disclosure has to describe what actually ships. The runtime source is
+		// read_from = "end", so pre-connect runtime events stay local -- but the
+		// inventory source is read_from = "beginning", so the existing snapshot does
+		// upload. The screen used to flatly claim nothing existing is uploaded.
+		"Runtime events recorded before you connect stay on this machine",
+		"inventory snapshot",
+	} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("managed disclosure missing %q:\n%s", want, view)
 		}
+	}
+	if strings.Contains(view, "Existing local history is not uploaded") {
+		t.Fatalf("the disclosure must not claim existing history is never uploaded; inventory is:\n%s", view)
 	}
 	model, _ = advanceWizard(t, model, "enter")
 	if model.screen != privacyScreen {
@@ -144,5 +157,86 @@ func TestWizardPresetManagedSkipsDestinationChoice(t *testing.T) {
 	model, _ = advanceWizard(t, model, "enter")
 	if model.screen != managedDisclosureScreen || model.result.Destination != DestinationAsymptote {
 		t.Fatalf("preset managed = screen %v result %#v", model.screen, model.result)
+	}
+}
+
+// The destination captions are the only place a first-time user learns why Managed
+// exists. They used to describe the mechanism ("forward new events after you
+// connect") and named no benefit at all.
+func TestDestinationCaptionsNameTheValueNotTheMechanism(t *testing.T) {
+	managedLabel, managedDetail := destinationCopy(DestinationAsymptote)
+	if !strings.Contains(managedLabel, "Beacon Managed") {
+		t.Fatalf("managed label = %q", managedLabel)
+	}
+	for _, want := range []string{"searchable", "Unlimited retention", "analytics"} {
+		if !strings.Contains(managedDetail, want) {
+			t.Fatalf("managed detail missing %q: %q", want, managedDetail)
+		}
+	}
+	localLabel, localDetail := destinationCopy(DestinationLocal)
+	if !strings.Contains(localLabel, "Local only") {
+		t.Fatalf("local label = %q", localLabel)
+	}
+	// Local is a supported end state, not a penalty: it says where data lives and
+	// what the user takes on, and does not editorialize.
+	if !strings.Contains(localDetail, "stays in ~/.beacon") {
+		t.Fatalf("local detail should say where data lives: %q", localDetail)
+	}
+	for _, unwanted := range []string{"Opt out", "Nothing is sent"} {
+		if strings.Contains(localDetail, unwanted) {
+			t.Fatalf("local detail should read as a peer choice, found %q: %q", unwanted, localDetail)
+		}
+	}
+}
+
+// A caption that wraps must stay in its column. The detail was previously emitted
+// as one pre-indented string and wrapped with the rest of the body, which indented
+// the first line and left continuations flush against the margin.
+func TestChoiceDetailIndentsEveryWrappedLine(t *testing.T) {
+	model := newWizardModel(WizardOptions{SignedIn: true, OfferManaged: true, DestinationOnly: true})
+	model.width, model.height = 72, 30
+
+	_, detail := destinationCopy(DestinationAsymptote)
+	rendered := choiceDetail(detail, 64)
+	lines := strings.Split(rendered, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected the managed caption to wrap at this width, got one line: %q", rendered)
+	}
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "      ") {
+			t.Fatalf("wrapped caption line is not indented: %q", line)
+		}
+	}
+
+	// And the whole screen still renders every word of both captions.
+	view := strings.Join(strings.Fields(model.View()), " ")
+	for _, want := range []string{"No backend to run.", "limited to this device."} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("destination screen truncated %q:\n%s", want, view)
+		}
+	}
+}
+
+// "q" used to quit from every screen, so a stray keystroke on a choice list killed
+// the install, and no screen could ever accept free text.
+func TestWizardHasNoGlobalQuitKey(t *testing.T) {
+	for _, screen := range []wizardScreen{welcomeScreen, signInScreen, destinationScreen, managedDisclosureScreen, privacyScreen, confirmScreen} {
+		model := newWizardModel(WizardOptions{SignedIn: true, OfferManaged: true})
+		model.screen = screen
+		next, command := advanceWizard(t, model, "q")
+		if command != nil {
+			t.Fatalf("q returned a command on screen %v; it must not quit", screen)
+		}
+		if next.screen != screen || next.result.Completed || next.result.NeedLogin {
+			t.Fatalf("q changed state on screen %v: %#v", screen, next.result)
+		}
+	}
+	// esc still cancels.
+	model := newWizardModel(WizardOptions{SignedIn: true, OfferManaged: true})
+	if _, command := advanceWizard(t, model, "esc"); command == nil {
+		t.Fatal("esc must still cancel the wizard")
 	}
 }

@@ -20,16 +20,25 @@ Beacon does not repeat completed setup.
 The first interactive `beacon endpoint install` opens a full-screen terminal wizard:
 
 1. Sign in through beacon.sh using the same browser PKCE flow as [`beacon login`](/cli/account-auth).
-2. Choose **Local only** or **Beacon Managed**.
+2. Choose **Local only** or **Beacon Managed**. Managed is described by what it adds:
+   one searchable history across every agent, unlimited retention, token and usage
+   analytics, and no backend to run. Local keeps everything in `~/.beacon` on the
+   machine, where you manage retention and history covers only that device.
 3. For Managed, choose **Standard** or **Metadata only** forwarding.
 4. Review the destination and privacy mode, then confirm installation.
+
+Move between choices with the arrow keys, continue with <kbd>enter</kbd>, and cancel
+with <kbd>esc</kbd>.
 
 Signing in establishes account identity only. It does not register a managed endpoint,
 start Vector, or send telemetry. Beacon Managed is preselected; choose Local explicitly
 to opt out of managed forwarding.
 
-Choosing Beacon Managed shows a separate disclosure that new runtime and inventory
-events will be sent to beacon.sh only after you run:
+Choosing Beacon Managed shows a separate disclosure naming exactly what leaves the
+machine: runtime events recorded before you connect stay local, while the inventory
+snapshot of which agent runtimes, skills, and MCP servers are installed uploads once
+so the dashboard has a baseline for the endpoint. Forwarding starts only after you
+run:
 
 ```bash
 beacon endpoint connect

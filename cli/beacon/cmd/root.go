@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/cobra/doc"
+	"golang.org/x/term"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 )
@@ -72,25 +73,27 @@ func shouldUseColor(out io.Writer) bool {
 	if !ok {
 		return false
 	}
-	return isCharDevice(file)
+	return isTerminal(file)
 }
 
-// isCharDevice reports whether a file is attached to a terminal rather than a pipe,
+// isTerminal reports whether a file is an interactive terminal rather than a pipe,
 // a redirect, or a file.
 //
-// Onboarding depends on this to stay out of the way of every non-interactive install
-// path: package postinstall scripts, MDM helpers, CI, and the packaging smoke tests
-// all reach `endpoint install` without a terminal, and a prompt there would hang a
-// fleet deployment.
-func isCharDevice(file *os.File) bool {
+// Onboarding and the trace browser depend on this to stay out of the way of every
+// non-interactive path: package postinstall scripts, MDM helpers, CI, and the
+// packaging smoke tests all reach `endpoint install` without a terminal, and a
+// full-screen prompt there would hang a fleet deployment.
+//
+// This used to test os.ModeCharDevice, which is also set on /dev/null and /dev/zero.
+// `beacon endpoint install < /dev/null` therefore looked interactive, launched the
+// wizard against an input that was already at EOF, and failed the install with
+// "onboarding cancelled" -- the exact deployment shape the check exists to protect.
+// A real isatty has no such hole.
+func isTerminal(file *os.File) bool {
 	if file == nil {
 		return false
 	}
-	stat, err := file.Stat()
-	if err != nil {
-		return false
-	}
-	return stat.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(file.Fd()))
 }
 
 var completionCmd = &cobra.Command{

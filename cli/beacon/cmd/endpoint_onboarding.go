@@ -71,8 +71,17 @@ const runtimeProbeBudget = 2 * time.Second
 // install behind it.
 const submitBudget = 6 * time.Second
 
+// defaultOnboardingIsTTY reports whether this install can show a full-screen wizard.
+//
+// TERM=dumb is excluded alongside the isatty checks because a dumb terminal cannot
+// render the alternate screen the wizard draws into; the trace browser already made
+// that distinction and onboarding needs the same one. Both land in the existing
+// not_a_terminal skip, which is silent by contract.
 func defaultOnboardingIsTTY() bool {
-	return isCharDevice(os.Stdin) && isCharDevice(os.Stdout)
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("TERM")), "dumb") {
+		return false
+	}
+	return isTerminal(os.Stdin) && isTerminal(os.Stdout)
 }
 
 // maybeRunOnboarding runs the one-time account and destination wizard when this
