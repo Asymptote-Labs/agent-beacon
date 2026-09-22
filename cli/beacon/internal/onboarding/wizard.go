@@ -600,9 +600,9 @@ func destinationCopy(destination string) (string, string) {
 	switch destination {
 	case DestinationAsymptote:
 		return "Beacon Managed (recommended)",
-			"The full Beacon dashboard: search across every session, analytics, findings " +
-				"and detections, every machine in one place, kept indefinitely and safe if " +
-				"this one is lost. Pick this to actually use Beacon."
+			"The full Beacon dashboard: AI-powered search and analytics over every " +
+				"session, plus findings and detections, every machine in one place, kept " +
+				"indefinitely and safe if this one is lost. Pick this to actually use Beacon."
 	default:
 		return "Local only",
 			"A basic dashboard on this machine: recent sessions and traces, this machine " +

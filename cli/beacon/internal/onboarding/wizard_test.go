@@ -178,7 +178,7 @@ func TestDestinationCaptionsNameTheValueNotTheMechanism(t *testing.T) {
 	if !strings.Contains(managedLabel, "Beacon Managed") {
 		t.Fatalf("managed label = %q", managedLabel)
 	}
-	for _, want := range []string{"full Beacon dashboard", "search", "analytics", "indefinitely", "Pick this"} {
+	for _, want := range []string{"full Beacon dashboard", "AI-powered search and analytics", "findings and detections", "indefinitely", "Pick this"} {
 		if !strings.Contains(managedDetail, want) {
 			t.Fatalf("managed detail missing %q: %q", want, managedDetail)
 		}
