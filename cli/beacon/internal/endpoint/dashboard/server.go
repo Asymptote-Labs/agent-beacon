@@ -343,7 +343,7 @@ func ListenAndServe(opts Options) error {
 	}
 	server := &http.Server{
 		Addr:              opts.Addr,
-		Handler:           handler,
+		Handler:           RequireLoopbackHost(handler),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return server.ListenAndServe()
@@ -359,6 +359,28 @@ func ValidateLoopbackAddr(addr string) error {
 		return fmt.Errorf("dashboard address must bind to a loopback IP")
 	}
 	return nil
+}
+
+// RequireLoopbackHost rejects requests whose Host header is not a loopback name.
+//
+// Binding to loopback keeps other machines out, but not a web page that DNS-rebinds its own
+// hostname to 127.0.0.1: the browser then treats this server as same-origin with that page and
+// lets it read every response. The Host header still carries the page's hostname, so it is the
+// one place the request can be told apart from a local client.
+func RequireLoopbackHost(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		host = strings.Trim(host, "[]")
+		ip := net.ParseIP(host)
+		if !strings.EqualFold(host, "localhost") && (ip == nil || !ip.IsLoopback()) {
+			writeError(w, http.StatusForbidden, fmt.Errorf("request host must be a loopback address"))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func URL(addr string) string {
