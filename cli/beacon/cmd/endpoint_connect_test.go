@@ -132,7 +132,8 @@ func TestConnectUsesSignedInAccountAndSelectedPrivacy(t *testing.T) {
 	text := out.String()
 	for _, want := range []string{
 		"Next: run any supported agent",
-		"sessions appear at https://beacon.sh",
+		// The recorded service URL is the marketing root; the app is at /dashboard.
+		"sessions appear at https://beacon.sh/dashboard",
 		"within a minute",
 	} {
 		if !strings.Contains(text, want) {
@@ -144,6 +145,24 @@ func TestConnectUsesSignedInAccountAndSelectedPrivacy(t *testing.T) {
 	}
 	if last := strings.TrimSpace(text); !strings.HasSuffix(last, "within a minute of the activity.") {
 		t.Fatalf("the dashboard should be the last thing said:\n%s", text)
+	}
+}
+
+// Every URL Beacon prints has to be one a browser can actually open. The dashboard
+// is a single page at /dashboard whose views are tabs, so the service root is the
+// marketing site and deep links like /dashboard/telemetry have no route at all.
+func TestDashboardHomeURL(t *testing.T) {
+	for base, want := range map[string]string{
+		"https://beacon.sh":           "https://beacon.sh/dashboard",
+		"https://beacon.sh/":          "https://beacon.sh/dashboard",
+		"  https://beacon.sh  ":       "https://beacon.sh/dashboard",
+		"https://beacon.sh/dashboard": "https://beacon.sh/dashboard",
+		"http://127.0.0.1:8971":       "http://127.0.0.1:8971/dashboard",
+		"":                            "https://beacon.sh/dashboard",
+	} {
+		if got := dashboardHomeURL(base); got != want {
+			t.Fatalf("dashboardHomeURL(%q) = %q, want %q", base, got, want)
+		}
 	}
 }
 

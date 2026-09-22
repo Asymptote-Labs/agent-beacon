@@ -164,7 +164,7 @@ func connectEndpoint(cmd *cobra.Command, userMode bool, logPath string) error {
 	// connection point, so the dashboard stays empty until an agent actually runs.
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Next: run any supported agent as you normally would.")
-	fmt.Fprintf(out, "Its sessions appear at %s within a minute of the activity.\n", result.Enrollment.DashboardURL)
+	fmt.Fprintf(out, "Its sessions appear at %s within a minute of the activity.\n", dashboardHomeURL(result.Enrollment.DashboardURL))
 	return nil
 }
 
@@ -222,7 +222,7 @@ func runEndpointDisconnect(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(out, "Local enrollment record and device key removed from %s.\n", asymptote.Dir(userMode))
 	}
 	if loadErr == nil && enrollment != nil {
-		fmt.Fprintf(out, "The device %s is still registered server-side; revoke it from %s/dashboard/endpoints.\n", enrollment.DeviceID, enrollment.DashboardURL)
+		fmt.Fprintf(out, "The device %s is still registered server-side; revoke it from %s.\n", enrollment.DeviceID, dashboardHomeURL(enrollment.DashboardURL))
 	} else {
 		fmt.Fprintln(out, "Revoke the device from the dashboard's Beacon Endpoints page if it is still registered.")
 	}
@@ -265,6 +265,24 @@ func connectBrowserOpener(userMode bool) func(string) error {
 }
 
 // managedIngestStatusLine renders the human status line for `beacon endpoint status`.
+// dashboardHomeURL turns the recorded service URL into the page a person can
+// actually open.
+//
+// The recorded value is the service root, which serves the marketing site, and the
+// dashboard is a single page at /dashboard with its views as tabs. Deep links like
+// /dashboard/telemetry have no route behind them, so anything printed here has to
+// stop at the dashboard itself.
+func dashboardHomeURL(base string) string {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	if base == "" {
+		return auth.DefaultDashboardURL + "/dashboard"
+	}
+	if strings.HasSuffix(base, "/dashboard") {
+		return base
+	}
+	return base + "/dashboard"
+}
+
 func managedIngestStatusLine(status asymptote.ManagedIngestStatus) string {
 	if !status.Enabled {
 		if status.Message != "" {

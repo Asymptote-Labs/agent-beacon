@@ -13,6 +13,12 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ### Unreleased
 
+- **Printed dashboard links point somewhere that exists** · The dashboard is a
+  single page at `/dashboard` whose views are tabs, so the service root serves the
+  marketing site and deep links such as `/dashboard/telemetry` and
+  `/dashboard/endpoints` have no route behind them. Connect and disconnect printed
+  those paths, and the cloud-agents guide named them in prose; all of them now point
+  at the dashboard itself.
 - **Setup ends on what to do next** · A managed install used to close on a wall of
   paths and a sentence pairing the dashboard with a revocation link. It now ends by
   saying to run an agent as usual and that its sessions appear on the dashboard
