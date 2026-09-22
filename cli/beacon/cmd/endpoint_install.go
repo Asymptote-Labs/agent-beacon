@@ -312,17 +312,17 @@ func reportEndpointTargetSelection(cmd *cobra.Command, selection endpointTargetS
 		return
 	}
 	out := cmd.OutOrStdout()
-	if selection.Fallback {
-		fmt.Fprintln(out, "No automatically installable runtimes were detected; using the Claude Code and Codex CLI fallback.")
-	} else {
-		var targets []string
-		seen := map[string]bool{}
-		for _, target := range append(append([]string(nil), selection.OTLP...), selection.Hooks...) {
-			if !seen[target] {
-				targets = append(targets, target)
-				seen[target] = true
-			}
+	var targets []string
+	seen := map[string]bool{}
+	for _, target := range append(append([]string(nil), selection.OTLP...), selection.Hooks...) {
+		if !seen[target] {
+			targets = append(targets, target)
+			seen[target] = true
 		}
+	}
+	if len(targets) == 0 {
+		fmt.Fprintln(out, "No automatically installable runtimes were detected; no runtime integrations will be configured.")
+	} else {
 		fmt.Fprintf(out, "Automatically configuring detected runtimes: %s\n", strings.Join(targets, ", "))
 	}
 	for _, skipped := range selection.Skipped {

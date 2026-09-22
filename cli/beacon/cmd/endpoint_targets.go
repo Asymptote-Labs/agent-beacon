@@ -37,7 +37,6 @@ type endpointTargetSelection struct {
 	Hooks     []string
 	Skipped   []skippedEndpointTarget
 	Automatic bool
-	Fallback  bool
 }
 
 // autoEndpointTargets maps discovery's canonical event names onto endpoint install's target
@@ -352,13 +351,6 @@ func resolveEndpointTargets(value string, discovered []harness.Harness) (endpoin
 					seenHooks[name] = true
 				}
 			}
-		}
-		if len(selection.OTLP) == 0 && len(selection.Hooks) == 0 {
-			// Preserve the historical unattended-install behavior when discovery has no useful
-			// user environment (for example a package postinstall running as root).
-			selection.OTLP = []string{"claude", "codex"}
-			selection.Hooks = []string{"claude", "codex"}
-			selection.Fallback = true
 		}
 		return selection, nil
 	default:

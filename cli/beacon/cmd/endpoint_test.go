@@ -112,26 +112,23 @@ func TestResolveEndpointTargetsAutoInstallsEveryDetectedInstallableRuntime(t *te
 	if len(selection.Skipped) != 1 || selection.Skipped[0].Name != "fx" {
 		t.Fatalf("auto skipped targets = %#v, want fx", selection.Skipped)
 	}
-	if selection.Fallback {
-		t.Fatal("auto selection unexpectedly used fallback")
-	}
 }
 
-func TestResolveEndpointTargetsAutoFallsBackWhenNothingInstallableDetected(t *testing.T) {
+func TestResolveEndpointTargetsAutoSelectsNothingWhenNoInstallableRuntimeDetected(t *testing.T) {
 	selection, err := resolveEndpointTargets("auto", []harness.Harness{
 		{Name: "vercel_fx", DisplayName: "fx", Detected: true},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := strings.Join(selection.OTLP, ","), "claude,codex"; got != want {
-		t.Fatalf("fallback OTLP targets = %q, want %q", got, want)
+	if len(selection.OTLP) != 0 {
+		t.Fatalf("auto OTLP targets = %#v, want none", selection.OTLP)
 	}
-	if got, want := strings.Join(selection.Hooks, ","), "claude,codex"; got != want {
-		t.Fatalf("fallback hook targets = %q, want %q", got, want)
+	if len(selection.Hooks) != 0 {
+		t.Fatalf("auto hook targets = %#v, want none", selection.Hooks)
 	}
-	if !selection.Fallback {
-		t.Fatal("auto selection did not mark fallback")
+	if len(selection.Skipped) != 1 || selection.Skipped[0].Name != "fx" {
+		t.Fatalf("auto skipped targets = %#v, want fx", selection.Skipped)
 	}
 }
 
