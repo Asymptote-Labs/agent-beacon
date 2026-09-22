@@ -189,7 +189,19 @@ func BuildProjection(show asymptoteobserve.TraceShowResultV1) Projection {
 	}
 	events := show.Events
 	if len(events) > maxProjectionEvents {
-		events = events[:maxProjectionEvents]
+		// Long sessions resolve at the end: keep the opening context and the tail
+		// instead of only the first maxProjectionEvents events, otherwise the
+		// evaluator never sees the fix or outcome a reusable lesson depends on.
+		head := maxProjectionEvents / 2
+		tail := maxProjectionEvents - head
+		combined := make([]asymptoteobserve.TraceEventV1, 0, maxProjectionEvents+1)
+		combined = append(combined, events[:head]...)
+		combined = append(combined, asymptoteobserve.TraceEventV1{
+			Type:    "omitted",
+			Summary: fmt.Sprintf("%d events omitted from the middle of this trace", len(events)-maxProjectionEvents),
+		})
+		combined = append(combined, events[len(events)-tail:]...)
+		events = combined
 	}
 	for _, event := range events {
 		projected := ProjectedEvent{
