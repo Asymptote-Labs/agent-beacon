@@ -13,6 +13,12 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ### Unreleased
 
+- **The browser page after sign-in is a real page** · Signing in used to land on
+  unstyled markup with a bare heading. It now carries Beacon's mark and styling, and
+  says the one thing that matters at that moment: return to your terminal, which is
+  still waiting on you. Device approval gets the same page. Everything is inline,
+  since the page is served from a loopback port with no network guarantee behind it.
+
 - **Sign-in no longer tears down the setup screen** · The wizard used to quit to
   sign you in, print to plain output, block for up to five minutes, then start a
   second wizard that wiped what it had just printed. Sign-in now runs inside the

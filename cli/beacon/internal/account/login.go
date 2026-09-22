@@ -155,7 +155,7 @@ func Login(ctx context.Context, opts LoginOptions) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	callback.SetSuccessPage("Beacon: signed in", "You are signed in to Beacon. You can close this tab and return to the terminal.")
+	callback.SetSuccessPage("Signed in to Beacon", "Return to your terminal to finish setting up this machine.")
 	defer callback.Shutdown()
 	callback.Start()
 
