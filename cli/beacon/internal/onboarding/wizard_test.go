@@ -34,8 +34,8 @@ func TestWizardRequestsLoginBeforeDestination(t *testing.T) {
 	if model.screen != signInScreen {
 		t.Fatalf("screen = %v, want sign in", model.screen)
 	}
-	if view := model.View(); !strings.Contains(view, "does not send telemetry") {
-		t.Fatalf("sign-in disclosure missing:\n%s", view)
+	if view := model.View(); !strings.Contains(view, "beacon.sh") {
+		t.Fatalf("sign-in screen should name where it sends you:\n%s", view)
 	}
 	model, command := advanceWizard(t, model, "enter")
 	if command == nil || !model.result.NeedLogin || model.result.Completed {
@@ -85,18 +85,17 @@ func TestManagedWizardRequiresDisclosureConfirmation(t *testing.T) {
 	}
 	view := strings.Join(strings.Fields(model.View()), " ")
 	for _, want := range []string{
-		"sends new telemetry to beacon.sh",
-		"Nothing is forwarded by signing in",
-		// Confirming now connects, so the disclosure describes that rather than
-		// naming a command the user is expected to run afterwards.
-		"Beacon installs, then connects this machine",
+		// Plain language: what is sent, what is not, and how to stop. No mention of
+		// the forwarder's implementation, which nobody choosing a destination needs.
+		"What gets sent to beacon.sh",
+		"sent to your Beacon account as it happens",
+		"What is already on this machine stays here",
+		"which agents and tools you have installed",
 		"beacon endpoint disconnect",
 		// The disclosure has to describe what actually ships. The runtime source is
 		// read_from = "end", so pre-connect runtime events stay local -- but the
 		// inventory source is read_from = "beginning", so the existing snapshot does
 		// upload. The screen used to flatly claim nothing existing is uploaded.
-		"Runtime events recorded before you connect stay on this machine",
-		"inventory snapshot",
 	} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("managed disclosure missing %q:\n%s", want, view)
@@ -104,6 +103,11 @@ func TestManagedWizardRequiresDisclosureConfirmation(t *testing.T) {
 	}
 	if strings.Contains(view, "Existing local history is not uploaded") {
 		t.Fatalf("the disclosure must not claim existing history is never uploaded; inventory is:\n%s", view)
+	}
+	for _, jargon := range []string{"Vector", "HTTPS", "forwarder", "snapshot"} {
+		if strings.Contains(view, jargon) {
+			t.Fatalf("the disclosure should not need %q to be understood:\n%s", jargon, view)
+		}
 	}
 	model, _ = advanceWizard(t, model, "enter")
 	if model.screen != privacyScreen {
@@ -174,23 +178,32 @@ func TestDestinationCaptionsNameTheValueNotTheMechanism(t *testing.T) {
 	if !strings.Contains(managedLabel, "Beacon Managed") {
 		t.Fatalf("managed label = %q", managedLabel)
 	}
-	for _, want := range []string{"searchable", "Unlimited retention", "analytics"} {
+	for _, want := range []string{"full Beacon dashboard", "search", "analytics", "indefinitely", "Pick this"} {
 		if !strings.Contains(managedDetail, want) {
 			t.Fatalf("managed detail missing %q: %q", want, managedDetail)
 		}
 	}
+
 	localLabel, localDetail := destinationCopy(DestinationLocal)
 	if !strings.Contains(localLabel, "Local only") {
 		t.Fatalf("local label = %q", localLabel)
 	}
-	// Local is a supported end state, not a penalty: it says where data lives and
-	// what the user takes on, and does not editorialize.
-	if !strings.Contains(localDetail, "stays in ~/.beacon") {
-		t.Fatalf("local detail should say where data lives: %q", localDetail)
+	// Local is a supported end state, not a penalty, and it is not feature-poor:
+	// the local dashboard ships the same Findings, Detections, Analytics and Token
+	// Usage views. Claiming Managed adds those would be false, so the copy has to
+	// differentiate on scope, retention and durability instead.
+	for _, want := range []string{"this machine", "Nothing leaves", "explore Beacon", "Pick this"} {
+		if !strings.Contains(localDetail, want) {
+			t.Fatalf("local detail missing %q: %q", want, localDetail)
+		}
 	}
-	for _, unwanted := range []string{"Opt out", "Nothing is sent"} {
-		if strings.Contains(localDetail, unwanted) {
-			t.Fatalf("local detail should read as a peer choice, found %q: %q", unwanted, localDetail)
+	if strings.Contains(localDetail, "Opt out") {
+		t.Fatalf("local should read as a peer choice, not a refusal: %q", localDetail)
+	}
+	// Both say when to choose them, which is the part a first-time user needs.
+	for name, detail := range map[string]string{"managed": managedDetail, "local": localDetail} {
+		if !strings.Contains(detail, "Pick this") {
+			t.Fatalf("%s detail gives no guidance on when to choose it: %q", name, detail)
 		}
 	}
 }
@@ -219,7 +232,7 @@ func TestChoiceDetailIndentsEveryWrappedLine(t *testing.T) {
 
 	// And the whole screen still renders every word of both captions.
 	view := strings.Join(strings.Fields(model.View()), " ")
-	for _, want := range []string{"No backend to run.", "limited to this device."} {
+	for _, want := range []string{"Pick this to actually use Beacon.", "keep data off the network."} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("destination screen truncated %q:\n%s", want, view)
 		}
@@ -253,7 +266,7 @@ func TestWizardHasNoGlobalQuitKey(t *testing.T) {
 func TestConfirmScreenNamesWhatConfirmingStarts(t *testing.T) {
 	for mode, wantSends := range map[string]string{
 		"standard":      "including prompts and tool activity",
-		"metadata_only": "stay on this machine",
+		"metadata_only": "stay here",
 	} {
 		model := newWizardModel(WizardOptions{
 			SignedIn:          true,
@@ -270,7 +283,7 @@ func TestConfirmScreenNamesWhatConfirmingStarts(t *testing.T) {
 
 		view := strings.Join(strings.Fields(model.View()), " ")
 		for _, want := range []string{
-			"Confirming installs Beacon and starts forwarding new events to beacon.sh.",
+			"This installs Beacon and starts forwarding to beacon.sh.",
 			wantSends,
 			"enter install and connect",
 		} {
@@ -358,7 +371,7 @@ func TestSignInWaitShowsAnUnwrappedURLAndAClock(t *testing.T) {
 		t.Fatalf("the sign-in URL must render on one unbroken line:\n%s", view)
 	}
 	flat := strings.Join(strings.Fields(view), " ")
-	for _, want := range []string{"0:07 elapsed", "times out in 4:53", "does not send telemetry"} {
+	for _, want := range []string{"0:07 elapsed", "times out in 4:53"} {
 		if !strings.Contains(flat, want) {
 			t.Fatalf("waiting screen missing %q:\n%s", want, view)
 		}
@@ -629,7 +642,7 @@ func TestSignInScreenHonorsNoBrowser(t *testing.T) {
 	if strings.Contains(view, "will open beacon.sh in your browser") {
 		t.Fatalf("--no-browser screen still promises to open a browser:\n%s", view)
 	}
-	for _, want := range []string{"URL to open yourself", "enter show the sign-in URL"} {
+	for _, want := range []string{"URL for you to open", "enter show the sign-in URL"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("--no-browser screen missing %q:\n%s", want, view)
 		}

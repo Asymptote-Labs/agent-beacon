@@ -488,7 +488,7 @@ func (m wizardModel) View() string {
 	switch m.screen {
 	case welcomeScreen:
 		title = "Welcome to Beacon"
-		body = "One local timeline for every AI agent.\n\nThis interactive setup signs you in, then asks whether telemetry should stay local or be forwarded to Beacon Managed."
+		body = "Interactive setup: sign in, choose where this machine's telemetry goes, and install."
 		if m.options.SignedIn {
 			body += "\n\n" + wizardDim.Render("Signed in as "+m.options.Email)
 		}
@@ -497,11 +497,10 @@ func (m wizardModel) View() string {
 		// --no-browser means no browser will be opened, so promising one here sends
 		// an SSH or headless user looking for a window that never appears.
 		if m.options.NoBrowser {
-			body = "Beacon will show a beacon.sh URL to open yourself, using a secure PKCE flow."
+			body = "Beacon will show a beacon.sh URL for you to open."
 		} else {
-			body = "Beacon will open beacon.sh in your browser using a secure PKCE flow."
+			body = "Beacon will open beacon.sh in your browser."
 		}
-		body += "\n\nSigning in does not send telemetry, register a managed endpoint, or enable forwarding."
 	case signInWaitScreen:
 		title = "Waiting for you to finish signing in"
 		switch {
@@ -516,8 +515,7 @@ func (m wizardModel) View() string {
 		}
 		raw = m.prompt.URL
 		if m.prompt.URL != "" {
-			raw += "\n\n" + wizardDim.Render(m.waitStatus()) +
-				"\n\n" + wizardDim.Render("Signing in does not send telemetry or connect this machine.")
+			raw += "\n\n" + wizardDim.Render(m.waitStatus())
 		}
 	case signInFailedScreen:
 		title = "Sign-in did not finish"
@@ -547,10 +545,12 @@ func (m wizardModel) View() string {
 		}
 		body = strings.Join(rows, "\n")
 	case managedDisclosureScreen:
-		title = "Beacon Managed sends new telemetry to beacon.sh"
-		body = wizardWarn.Render("Nothing is forwarded by signing in.") +
-			"\n\nBeacon installs, then connects this machine: a device key is minted and a local Vector forwarder starts sending new events to beacon.sh over HTTPS." +
-			"\n\nRuntime events recorded before you connect stay on this machine. The inventory snapshot -- which agent runtimes, skills, and MCP servers are installed here -- uploads once so the dashboard has this endpoint's baseline." +
+		title = "What gets sent to beacon.sh"
+		body = "From now on, what your agents do on this machine is sent to your Beacon " +
+			"account as it happens. You choose how much of it on the next screen." +
+			"\n\nWhat is already on this machine stays here. The one exception is a list of " +
+			"which agents and tools you have installed, sent once so the dashboard knows " +
+			"what this machine is." +
 			"\n\nStop any time with `beacon endpoint disconnect`."
 	case privacyScreen:
 		title = "Choose what Beacon Managed receives"
@@ -573,13 +573,14 @@ func (m wizardModel) View() string {
 		body += "Destination: " + label
 		if m.result.Destination == DestinationAsymptote {
 			body += "\nPrivacy: " + managedprivacy.Label(m.result.PrivacyMode) +
-				"\n\n" + wizardWarn.Render("Confirming installs Beacon and starts forwarding new events to beacon.sh.") +
-				"\n\n" + privacySends(m.result.PrivacyMode)
+				"\n\n" + wizardWarn.Render("This installs Beacon and starts forwarding to beacon.sh.") +
+				"\n" + wizardDim.Render(privacySends(m.result.PrivacyMode))
 		} else {
 			body += "\n\nYour telemetry stays on this machine."
 			if m.result.WithoutAccount {
 				body += " You are not signed in; connect later with `beacon endpoint connect`."
 			}
+
 		}
 	}
 
@@ -599,12 +600,14 @@ func destinationCopy(destination string) (string, string) {
 	switch destination {
 	case DestinationAsymptote:
 		return "Beacon Managed (recommended)",
-			"One searchable history across Claude Code, Cursor, Codex and more. " +
-				"Unlimited retention, token and usage analytics. No backend to run."
+			"The full Beacon dashboard: search across every session, analytics, findings " +
+				"and detections, every machine in one place, kept indefinitely and safe if " +
+				"this one is lost. Pick this to actually use Beacon."
 	default:
 		return "Local only",
-			"Everything stays in ~/.beacon on this machine. You manage retention, " +
-				"and history is limited to this device."
+			"A basic dashboard on this machine: recent sessions and traces, this machine " +
+				"only, for as long as the logs are on disk. Nothing leaves. Pick this to " +
+				"explore Beacon or to keep data off the network."
 	}
 }
 
@@ -627,9 +630,9 @@ func choiceDetail(detail string, width int) string {
 
 func privacyCopy(mode string) (string, string) {
 	if mode == managedprivacy.MetadataOnly {
-		return "Metadata only", "Omit prompts, responses, reasoning, tool arguments/results, command output, raw fields, and diffs."
+		return "Metadata only", "No prompts, responses, tool arguments or results, command output, or diffs."
 	}
-	return "Standard (recommended)", "Send locally sanitized retained content, including prompts and tool activity."
+	return "Standard (recommended)", "Locally sanitized content, including prompts and tool activity."
 }
 
 func privacyIndex(mode string) int {
@@ -646,9 +649,9 @@ func privacyIndex(mode string) int {
 // leaves this machine rather than point at a command to run later.
 func privacySends(mode string) string {
 	if mode == managedprivacy.MetadataOnly {
-		return "Metadata only: prompts, responses, reasoning, tool arguments and results, command output and diffs stay on this machine."
+		return "Prompts, responses, tool arguments and results, command output and diffs stay here."
 	}
-	return "Standard: the locally sanitized event, including prompts and tool activity."
+	return "Sends locally sanitized content, including prompts and tool activity."
 }
 
 // waitStatus renders the spinner, how long this has been going, and how long is

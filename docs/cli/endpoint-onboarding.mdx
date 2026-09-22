@@ -20,10 +20,11 @@ Beacon does not repeat completed setup.
 The first interactive `beacon endpoint install` opens a full-screen terminal wizard:
 
 1. Sign in through beacon.sh using the same browser PKCE flow as [`beacon login`](/cli/account-auth).
-2. Choose **Local only** or **Beacon Managed**. Managed is described by what it adds:
-   one searchable history across every agent, unlimited retention, token and usage
-   analytics, and no backend to run. Local keeps everything in `~/.beacon` on the
-   machine, where you manage retention and history covers only that device.
+2. Choose **Local only** or **Beacon Managed**. Managed is the full dashboard:
+   search across every session, analytics, findings and detections, every machine
+   in one place, kept indefinitely. Local is a basic dashboard on the machine
+   itself, covering only that machine for as long as the logs are on disk, and is
+   framed for exploring Beacon or keeping data off the network.
 3. For Managed, choose **Standard** or **Metadata only** forwarding.
 4. Review the destination and privacy mode, then confirm installation.
 
