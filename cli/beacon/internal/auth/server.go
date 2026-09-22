@@ -6,12 +6,16 @@ import (
 	"html"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	callbackReadTimeout       = 10 * time.Second
+	callbackReadTimeout = 10 * time.Second
+	// defaultRedirectAfter is long enough to read two short lines and still short
+	// enough that nobody waits on it.
+	defaultRedirectAfter      = 6 * time.Second
 	defaultExchangeTimeout    = 30 * time.Second
 	callbackWriteTimeoutSlack = 5 * time.Second
 )
@@ -66,7 +70,7 @@ func NewCallbackServer(expectedState, codeVerifier string, exchange ExchangeFunc
 		state:        expectedState,
 		codeVerifier: codeVerifier,
 		exchange:     exchange,
-		successTitle: "Beacon Authentication Complete",
+		successTitle: "Signed in to Beacon",
 		successBody:  "You can close this window and return to the terminal.",
 	}
 	mux := http.NewServeMux()
@@ -106,10 +110,27 @@ func (cs *CallbackServer) Start() {
 
 // Wait blocks for the first completed callback or the timeout.
 func (cs *CallbackServer) Wait(timeout time.Duration) (*CallbackResult, error) {
+	return cs.WaitContext(context.Background(), timeout)
+}
+
+// WaitContext is Wait that also returns when ctx is done.
+//
+// A caller rendering a cancellable waiting state needs to stop waiting without
+// killing the command: onboarding lets the user abandon a browser sign-in and
+// return to the wizard. The caller's deferred Shutdown releases the loopback
+// listener either way.
+func (cs *CallbackServer) WaitContext(ctx context.Context, timeout time.Duration) (*CallbackResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case result := <-cs.resultCh:
 		return result, nil
-	case <-time.After(timeout):
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-timer.C:
 		return nil, fmt.Errorf("timeout waiting for the browser to finish")
 	}
 }
@@ -174,23 +195,84 @@ func (cs *CallbackServer) sendResponse(w http.ResponseWriter, success bool, erro
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	if success {
-		_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
-<html>
-<head><title>%s</title></head>
-<body>
-  <h1>%s</h1>
-  <p>%s</p>
-</body>
-</html>`, html.EscapeString(cs.successTitle), html.EscapeString(cs.successTitle), html.EscapeString(cs.successBody))
+		_, _ = fmt.Fprint(w, cs.successHTML())
 		return
 	}
-	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
-<html>
-<head><title>Beacon Authentication Failed</title></head>
+	_, _ = fmt.Fprint(w, renderCallbackPage(callbackPage{
+		Title:   "Beacon: sign-in failed",
+		Heading: "Sign-in failed",
+		Lead:    errorMsg,
+		Note:    "Return to your terminal and run the command again.",
+		Failed:  true,
+	}))
+}
+
+func (cs *CallbackServer) successHTML() string {
+	return renderCallbackPage(callbackPage{
+		Title:   cs.successTitle,
+		Heading: cs.successTitle,
+		Lead:    cs.successBody,
+		Note:    "You can close this tab.",
+	})
+}
+
+type callbackPage struct {
+	Title   string
+	Heading string
+	Lead    string
+	Note    string
+	Failed  bool
+}
+
+// renderCallbackPage draws the one page a browser ever sees from the CLI.
+//
+// Everything is inline. This is served from a loopback port with no network
+// guarantee behind it, so a stylesheet or font fetched from anywhere else would be
+// the one thing on screen that could fail.
+func renderCallbackPage(p callbackPage) string {
+	accent := "#7c5cff"
+	if p.Failed {
+		accent = "#e5484d"
+	}
+	var footer strings.Builder
+	if p.Note != "" {
+		fmt.Fprintf(&footer, `<p class="note">%s</p>`, html.EscapeString(p.Note))
+	}
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>%s</title>
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      padding: 24px; background: #0b0b0f; color: #e8e8ed;
+      font: 15px/1.6 ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    .card { width: 100%%; max-width: 420px; text-align: center; }
+    .mark { font-size: 11px; letter-spacing: .38em; color: %s; font-weight: 700; margin-bottom: 28px; }
+    h1 { font-size: 22px; line-height: 1.3; margin: 0 0 12px; font-weight: 600; }
+    .lead { margin: 0; color: #a8a8b3; }
+    .note { margin: 28px 0 0; font-size: 13px; color: #74747f; }
+    a { color: %s; }
+    @media (prefers-color-scheme: light) {
+      body { background: #fbfbfd; color: #16161a; }
+      .lead { color: #5b5b66; }
+      .note { color: #8a8a94; }
+    }
+  </style>
+</head>
 <body>
-  <h1>Authentication Failed</h1>
-  <p>%s</p>
-  <p>Please return to the terminal and run the command again.</p>
+  <main class="card">
+    <div class="mark">B E A C O N</div>
+    <h1>%s</h1>
+    <p class="lead">%s</p>
+    %s
+  </main>
 </body>
-</html>`, html.EscapeString(errorMsg))
+</html>`, html.EscapeString(p.Title), accent, accent,
+		html.EscapeString(p.Heading), html.EscapeString(p.Lead), footer.String())
 }

@@ -13,6 +13,44 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ### Unreleased
 
+- **Plainer onboarding copy** · The wizard explained itself twice and repeated the
+  same reassurance on three screens. The welcome now states what interactive setup
+  does in one line, and the screens that follow say only what that screen decides.
+  The destination choice describes what you actually get from each: Managed as
+  free, unlimited cloud-based retention of every agent session, AI-powered search
+  and analytics on the hosted dashboard, and rich findings analyzing AI usage
+  coming soon; Local as a dashboard for this machine alone
+  where nothing leaves it. Each says when to pick it.
+  The managed disclosure is plain language, with no forwarder internals.
+
+- **Printed dashboard links point somewhere that exists** · The dashboard is a
+  single page at `/dashboard` whose views are tabs, so the service root serves the
+  marketing site and deep links such as `/dashboard/telemetry` and
+  `/dashboard/endpoints` have no route behind them. Connect and disconnect printed
+  those paths, and the cloud-agents guide named them in prose; all of them now point
+  at the dashboard itself.
+- **Setup ends on what to do next** · A managed install used to close on a wall of
+  paths and a sentence pairing the dashboard with a revocation link. It now ends by
+  saying to run an agent as usual and that its sessions appear on the dashboard
+  within a minute. Nothing is forwarded before that point, since the runtime source
+  starts at the connection, so there is nothing to look at until an agent runs.
+- **The browser page after sign-in is a real page** · Signing in used to land on
+  unstyled markup with a bare heading. It now carries Beacon's mark and styling, and
+  says the one thing that matters at that moment: return to your terminal, which is
+  still waiting on you. Device approval gets the same page. Everything is inline,
+  since the page is served from a loopback port with no network guarantee behind it.
+
+- **Sign-in no longer tears down the setup screen** · The wizard used to quit to
+  sign you in, print to plain output, block for up to five minutes, then start a
+  second wizard that wiped what it had just printed. Sign-in now runs inside the
+  same full-screen view, which shows the URL, a spinner, and the remaining time.
+  The URL is printed before any browser opens, so it works when none can, and
+  <kbd>esc</kbd> during the wait goes back instead of killing the install.
+- **A sign-in that cannot finish no longer blocks the install** · Offline, without
+  a browser, or after the wait expires, the wizard offers to retry, to show the URL
+  to open yourself, or to finish setup without an account with telemetry kept
+  locally. `beacon endpoint install --no-browser` starts in URL mode.
+
 - **Choosing Beacon Managed now connects the endpoint** · Confirming Managed in the
   install wizard installs Beacon and then enrolls the device and starts the
   forwarder, instead of printing `beacon endpoint connect` for you to run yourself.

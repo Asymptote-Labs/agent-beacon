@@ -942,3 +942,45 @@ func TestOnboardingPersistsNothingUntilTheInstallSucceeds(t *testing.T) {
 		t.Fatal("a machine whose install failed must be asked again on the next install")
 	}
 }
+
+// Finishing setup without an account must not record a leftover identity as the
+// person who onboarded, nor claim the run was authenticated.
+//
+// account.Inspect returns the stored user even when the session is expired, so
+// Email is populated while SignedIn is false.
+func TestSkippingTheAccountRecordsNoIdentity(t *testing.T) {
+	h := newOnboardingHarness(t)
+	h.askable = true
+	h.accountStatus = account.Status{
+		SignedIn: true,
+		Expired:  true,
+		User:     account.User{ID: "usr_old", Email: "stale@example.com"},
+	}
+	onboardingRunWizard = func(_ io.Reader, _ io.Writer, _ onboarding.WizardOptions) (onboarding.WizardResult, error) {
+		return onboarding.WizardResult{
+			Completed:      true,
+			WithoutAccount: true,
+			Destination:    onboarding.DestinationLocal,
+		}, nil
+	}
+
+	if _, err := runOnboarding(t, h.cmd); err != nil {
+		t.Fatalf("runOnboarding returned error: %v", err)
+	}
+	if len(h.saved) != 1 {
+		t.Fatalf("saved = %+v, want one profile", h.saved)
+	}
+	got := h.saved[0].Onboarding
+	if got.Email != "" {
+		t.Fatalf("recorded an identity the user did not sign in as: %q", got.Email)
+	}
+	if got.Outcome == onboarding.OutcomeAuthenticated {
+		t.Fatalf("a run with no account must not be recorded as authenticated: %q", got.Outcome)
+	}
+	if got.Outcome != onboarding.OutcomeSkipped {
+		t.Fatalf("outcome = %q, want skipped", got.Outcome)
+	}
+	if got.Destination != onboarding.DestinationLocal {
+		t.Fatalf("destination = %q, want local", got.Destination)
+	}
+}

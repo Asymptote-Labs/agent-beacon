@@ -46,9 +46,10 @@ Beacon is an open-source memory layer for AI coding agents that learns from your
 ## 🚀 Quick Start
 
 Beacon is open source and local-first. Interactive endpoint setup signs in through
-beacon.sh and preselects Beacon Managed, with an explicit Local opt-out. Nothing is
-forwarded until the separate connect step. System, package, MDM, and CI installation
-paths remain noninteractive and account-free.
+beacon.sh and preselects Beacon Managed, with an explicit Local opt-out. Signing in
+forwards nothing; confirming Managed installs Beacon and connects this machine in
+the same command, and the confirm screen says so before you accept. System, package,
+MDM, and CI installation paths remain noninteractive and account-free.
 
 ### 1. Install Beacon
 

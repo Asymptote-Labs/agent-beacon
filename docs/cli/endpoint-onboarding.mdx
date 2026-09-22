@@ -20,24 +20,39 @@ Beacon does not repeat completed setup.
 The first interactive `beacon endpoint install` opens a full-screen terminal wizard:
 
 1. Sign in through beacon.sh using the same browser PKCE flow as [`beacon login`](/cli/account-auth).
-2. Choose **Local only** or **Beacon Managed**. Managed is described by what it adds:
-   one searchable history across every agent, unlimited retention, token and usage
-   analytics, and no backend to run. Local keeps everything in `~/.beacon` on the
-   machine, where you manage retention and history covers only that device.
+2. Choose **Local only** or **Beacon Managed**. Managed offers free, unlimited
+   cloud-based retention of every agent session. It adds AI-powered search and
+   analytics on Beacon's hosted dashboard, with rich findings analyzing your AI
+   usage coming soon. Local is a dashboard for this machine's telemetry,
+   kept for as long as the logs are on disk, with nothing leaving the machine.
 3. For Managed, choose **Standard** or **Metadata only** forwarding.
 4. Review the destination and privacy mode, then confirm installation.
 
 Move between choices with the arrow keys, continue with <kbd>enter</kbd>, and cancel
 with <kbd>esc</kbd>.
 
+Signing in happens inside the wizard. The full-screen view stays up while your
+browser is open, showing the sign-in URL, a spinner, and how long is left before the
+attempt times out. The URL is printed before any browser is opened, so it is usable
+even when none can be, and <kbd>esc</kbd> during the wait returns to the sign-in
+screen rather than ending the install.
+
+If sign-in cannot finish -- an offline machine, no browser, or the wait expiring --
+the wizard offers to try again, to show the URL for you to open yourself, or to
+finish setup without an account and keep telemetry on this machine. Pass
+`--no-browser` to `beacon endpoint install` to start in that mode.
+
 Signing in establishes account identity only. It does not register a managed endpoint,
 start Vector, or send telemetry. Beacon Managed is preselected; choose Local explicitly
 to opt out of managed forwarding.
 
-Choosing Beacon Managed shows a separate disclosure naming exactly what leaves the
-machine: runtime events recorded before you connect stay local, while the inventory
-snapshot of which agent runtimes, skills, and MCP servers are installed uploads once
-so the dashboard has a baseline for the endpoint.
+Choosing Beacon Managed shows a separate disclosure: your agents' activity on this
+machine will be sent to your Beacon account as it happens, and `beacon endpoint
+disconnect` stops it. The screen makes no claim about data already on disk, because
+the honest version of that claim needs a caveat: runtime events recorded before you
+connect stay local, but the inventory snapshot of which agent runtimes, skills, and
+MCP servers are installed does upload once as the endpoint's baseline. That detail is
+documented here rather than shown on the screen where someone is choosing.
 
 Standard forwards the complete locally sanitized event. Metadata only strips retained
 prompts, responses, reasoning, tool arguments/results, command output, raw fields,
@@ -66,8 +81,9 @@ The explicit `beacon endpoint install --connect` flag is unchanged: it presets M
 and skips the destination question.
 
 The wizard never appears non-interactively. Package postinstall scripts, MDM
-deployments, `--system` installs, CI, `--dry-run`, and any piped or redirected stdin
-skip it silently. These paths remain account-free.
+deployments, `--system` installs, CI, `--dry-run`, `TERM=dumb`, and any piped or
+redirected stdin skip it silently, including a redirect to `/dev/null`. These paths
+remain account-free.
 
 ## Flags
 
@@ -111,7 +127,10 @@ beacon endpoint onboarding
 ```
 
 The answer is stored as `onboarding.destination` in `~/.beacon/profile.json`;
-managed selections also store `onboarding.privacy_mode`. `--json` exposes both:
+managed selections also store `onboarding.privacy_mode`. Setup completed through an
+account records `onboarding.outcome` as `authenticated` with the signed-in email;
+setup finished without one after a failed sign-in records `skipped` and no email,
+since no account authorized that run. `--json` exposes all of them:
 
 | Value | Printed as |
 |-------|------------|

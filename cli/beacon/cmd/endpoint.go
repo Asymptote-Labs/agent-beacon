@@ -38,6 +38,7 @@ var endpointOpts struct {
 	onboardingReset          bool
 	onboardingResend         bool
 	connect                  bool
+	noBrowser                bool
 	fix                      bool
 	allTargets               bool
 	coworkHeaders            string
@@ -421,6 +422,7 @@ func init() {
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.includeRuntimeMetrics, "include-runtime-metrics", false, "Include generic process/runtime OTLP metrics and harness operational metrics (OpenClaw, Copilot CLI) in the runtime JSONL log")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.includeCodexSpans, "include-codex-spans", false, "Include high-volume Codex OTLP spans for troubleshooting")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.noStart, "no-start", false, "Write files without starting the collector service")
+	endpointInstallCmd.Flags().BoolVar(&endpointOpts.noBrowser, "no-browser", false, "During interactive setup, print the sign-in URL instead of opening a browser")
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.serviceKind, "service", "", "Service manager to use: auto (default), launchd, systemd, or none for a supervised collector process")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.dryRun, "dry-run", false, "Print planned actions without changing endpoint files or services")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.connect, "connect", false, "After installing, attempt to connect this endpoint to Beacon Managed (user mode uses the signed-in account; system mode opens browser approval)")

@@ -331,7 +331,9 @@ var siemDestinations = []siemDestination{
 			print: func(cfg endpointconfig.Config) {
 				fmt.Println("Expected Asymptote fields: vendor=beacon product=endpoint-agent destination.type=asymptote destination.mode=asymptote_managed_http")
 				fmt.Println(`Check the device key: curl -sS -o /dev/null -w '%{http_code}\n' "$BEACON_ASYMPTOTE_INGEST_URL/v1/ingest/health" -H "Authorization: Bearer $(sed -n 's/.*\"device_key\": *\"\([^\"]*\)\".*/\1/p' "$BEACON_ASYMPTOTE_SECRETS_FILE")"   # 200 valid, 401 revoked`)
-				fmt.Println("Confirm delivery on the Asymptote dashboard telemetry page by searching for \"Beacon endpoint Asymptote validation event\"; forwarded events appear within a minute or two.")
+				// Points at the dashboard itself: its views are tabs, so there is no
+				// /dashboard/telemetry route to send anyone to.
+				fmt.Printf("Confirm delivery at %s by searching for \"Beacon endpoint Asymptote validation event\"; forwarded events appear within a minute or two.\n", dashboardHomeURL(""))
 			},
 		},
 	},

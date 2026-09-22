@@ -124,6 +124,46 @@ func TestConnectUsesSignedInAccountAndSelectedPrivacy(t *testing.T) {
 	if strings.Contains(out.String(), "bcn_cli_secret") || !strings.Contains(out.String(), "Managed privacy: Metadata only") {
 		t.Fatalf("output = %q", out.String())
 	}
+
+	// Setup ends on what to do next, not on more state. This is the moment the user
+	// has the most intent and the least idea what happens now, and nothing is
+	// forwarded yet: the runtime source starts at the connection point, so the
+	// dashboard stays empty until an agent actually runs.
+	text := out.String()
+	for _, want := range []string{
+		"Next: run any supported agent",
+		// The recorded service URL is the marketing root; the app is at /dashboard.
+		"sessions appear at https://beacon.sh/dashboard",
+		"within a minute",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("connect should close on next steps, missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "/dashboard/endpoints") || strings.Contains(text, "Revoke this device") {
+		t.Fatalf("the closing lines should be next steps, not device administration:\n%s", text)
+	}
+	if last := strings.TrimSpace(text); !strings.HasSuffix(last, "within a minute of the activity.") {
+		t.Fatalf("the dashboard should be the last thing said:\n%s", text)
+	}
+}
+
+// Every URL Beacon prints has to be one a browser can actually open. The dashboard
+// is a single page at /dashboard whose views are tabs, so the service root is the
+// marketing site and deep links like /dashboard/telemetry have no route at all.
+func TestDashboardHomeURL(t *testing.T) {
+	for base, want := range map[string]string{
+		"https://beacon.sh":           "https://beacon.sh/dashboard",
+		"https://beacon.sh/":          "https://beacon.sh/dashboard",
+		"  https://beacon.sh  ":       "https://beacon.sh/dashboard",
+		"https://beacon.sh/dashboard": "https://beacon.sh/dashboard",
+		"http://127.0.0.1:8971":       "http://127.0.0.1:8971/dashboard",
+		"":                            "https://beacon.sh/dashboard",
+	} {
+		if got := dashboardHomeURL(base); got != want {
+			t.Fatalf("dashboardHomeURL(%q) = %q, want %q", base, got, want)
+		}
+	}
 }
 
 func TestConnectRequiresSignedInAccountInUserMode(t *testing.T) {

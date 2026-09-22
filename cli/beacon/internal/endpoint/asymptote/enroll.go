@@ -130,7 +130,7 @@ func Enroll(ctx context.Context, opts EnrollOptions) (*EnrollResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	server.SetSuccessPage("Beacon: device connected", "This machine is now forwarding to Asymptote. You can close this tab and return to the terminal.")
+	server.SetSuccessPage("This device is connected", "Return to your terminal. This machine now forwards new events to Beacon.")
 	defer func() { _ = server.Shutdown() }()
 	server.Start()
 
