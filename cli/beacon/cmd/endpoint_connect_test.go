@@ -124,6 +124,27 @@ func TestConnectUsesSignedInAccountAndSelectedPrivacy(t *testing.T) {
 	if strings.Contains(out.String(), "bcn_cli_secret") || !strings.Contains(out.String(), "Managed privacy: Metadata only") {
 		t.Fatalf("output = %q", out.String())
 	}
+
+	// Setup ends on what to do next, not on more state. This is the moment the user
+	// has the most intent and the least idea what happens now, and nothing is
+	// forwarded yet: the runtime source starts at the connection point, so the
+	// dashboard stays empty until an agent actually runs.
+	text := out.String()
+	for _, want := range []string{
+		"Next: run any supported agent",
+		"sessions appear at https://beacon.sh",
+		"within a minute",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("connect should close on next steps, missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "/dashboard/endpoints") || strings.Contains(text, "Revoke this device") {
+		t.Fatalf("the closing lines should be next steps, not device administration:\n%s", text)
+	}
+	if last := strings.TrimSpace(text); !strings.HasSuffix(last, "within a minute of the activity.") {
+		t.Fatalf("the dashboard should be the last thing said:\n%s", text)
+	}
 }
 
 func TestConnectRequiresSignedInAccountInUserMode(t *testing.T) {

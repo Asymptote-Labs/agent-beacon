@@ -158,8 +158,13 @@ func connectEndpoint(cmd *cobra.Command, userMode bool, logPath string) error {
 	fmt.Fprintf(out, "Managed privacy: %s\n", managedprivacy.Label(result.Enrollment.PrivacyMode))
 	fmt.Fprintf(out, "Vector config: %s\n", result.VectorConfig)
 	fmt.Fprintf(out, "Device key: %s (never printed; the Vector forwarder reads it)\n", result.SecretsFile)
-	fmt.Fprintf(out, "Events recorded from now on appear on %s/dashboard/telemetry. Revoke this device from %s/dashboard/endpoints.\n",
-		result.Enrollment.DashboardURL, result.Enrollment.DashboardURL)
+	// Close on what to do next rather than on more state. Setup is finished here,
+	// and this is the moment the user has the most intent and the least idea what
+	// happens now. Nothing is forwarded yet: the runtime source starts at the
+	// connection point, so the dashboard stays empty until an agent actually runs.
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Next: run any supported agent as you normally would.")
+	fmt.Fprintf(out, "Its sessions appear at %s within a minute of the activity.\n", result.Enrollment.DashboardURL)
 	return nil
 }
 
