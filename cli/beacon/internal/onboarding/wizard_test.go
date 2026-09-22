@@ -178,7 +178,7 @@ func TestDestinationCaptionsNameTheValueNotTheMechanism(t *testing.T) {
 	if !strings.Contains(managedLabel, "Beacon Managed") {
 		t.Fatalf("managed label = %q", managedLabel)
 	}
-	for _, want := range []string{"full Beacon dashboard", "AI-powered search and analytics", "findings and detections", "indefinitely", "Pick this"} {
+	for _, want := range []string{"Free, unlimited cloud-based retention", "AI search and analytics", "findings", "detections", "full feature set"} {
 		if !strings.Contains(managedDetail, want) {
 			t.Fatalf("managed detail missing %q: %q", want, managedDetail)
 		}
@@ -192,7 +192,7 @@ func TestDestinationCaptionsNameTheValueNotTheMechanism(t *testing.T) {
 	// the local dashboard ships the same Findings, Detections, Analytics and Token
 	// Usage views. Claiming Managed adds those would be false, so the copy has to
 	// differentiate on scope, retention and durability instead.
-	for _, want := range []string{"this machine", "Nothing leaves", "explore Beacon", "Pick this"} {
+	for _, want := range []string{"this machine", "Nothing leaves your machine", "testing", "agent activity in one place"} {
 		if !strings.Contains(localDetail, want) {
 			t.Fatalf("local detail missing %q: %q", want, localDetail)
 		}
@@ -232,7 +232,7 @@ func TestChoiceDetailIndentsEveryWrappedLine(t *testing.T) {
 
 	// And the whole screen still renders every word of both captions.
 	view := strings.Join(strings.Fields(model.View()), " ")
-	for _, want := range []string{"Pick this to actually use Beacon.", "keep data off the network."} {
+	for _, want := range []string{"full feature set.", "agent activity in one place."} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("destination screen truncated %q:\n%s", want, view)
 		}
