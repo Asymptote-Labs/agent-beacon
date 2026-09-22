@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,10 @@ const (
 	Harness      = "deepseek_harness"
 	StateVersion = 1
 
+	// SessionFileZstd and SessionFileJSON are the unversioned spellings, kept for
+	// fixtures and for callers that write a record file by hand. What DSH itself
+	// writes carries the session *format* version -- session.v3.jsonl.zstd -- so
+	// discovery matches the shape (sessionFileName) rather than these strings.
 	SessionFileZstd = "session.jsonl.zstd"
 	SessionFileJSON = "session.jsonl"
 
@@ -25,6 +30,33 @@ const (
 	MaxDirectories = 4000
 	MaxLineBytes   = 8 * 1024 * 1024
 )
+
+// sessionFileName matches the name DSH gives a session record file:
+//
+//	session.jsonl
+//	session.jsonl.zstd
+//	session.v3.jsonl
+//	session.v3.jsonl.zstd
+//
+// The optional `vN` segment is the session format version, and it is part of the
+// filename the store writes. Discovery compared the name for equality against the
+// two unversioned constants above, so a store full of `session.v3.jsonl.zstd`
+// yielded no sessions at all -- and returned that as success with an empty list,
+// which is the part that made it a silent failure rather than a visible error.
+//
+// The version stays optional and unconstrained: a store written by a future DSH
+// should still be discovered, and a record is validated by the decoder rather than
+// by the name of the file holding it.
+var sessionFileName = regexp.MustCompile(`^session(?:\.v[0-9]+)?\.jsonl(?:\.zstd)?$`)
+
+// classifySessionFile reports whether a directory entry names a session record
+// file, and whether its contents are zstd-compressed.
+func classifySessionFile(name string) (compressed bool, ok bool) {
+	if !sessionFileName.MatchString(name) {
+		return false, false
+	}
+	return strings.HasSuffix(name, ".zstd"), true
+}
 
 type Record struct {
 	Line   int
