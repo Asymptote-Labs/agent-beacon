@@ -139,7 +139,7 @@ sudo apt remove beacon     # keeps config and collected logs
 sudo apt purge beacon      # removes them
 ```
 
-On RPM systems, `dnf remove` keeps `/etc/beacon/endpoint` and `/var/log/beacon-agent`. Remove them with `sudo beacon endpoint uninstall --system` if you want the data gone.
+On RPM systems, `dnf remove` keeps `/etc/beacon/endpoint` and `/var/log/beacon-agent`, and there is no purge. To remove the data too, run `sudo beacon endpoint uninstall --system` before `sudo dnf remove beacon`; afterwards the `beacon` binary is gone.
 
 ## Related
 
