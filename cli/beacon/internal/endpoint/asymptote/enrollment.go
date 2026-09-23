@@ -21,9 +21,14 @@ const (
 	// connect that fails after approval (validate, unit, load) retries with the same id and
 	// the server rotates the device's key instead of registering a second device.
 	InstallIDFileName = "install-id"
-	SecretsFileName   = "vector-secrets.json"
-	VectorConfigName  = "vector.toml"
-	DataDirName       = "vector-data"
+	// ConnectPendingFileName marks a connect that has received a key from the server and not
+	// yet finished. On a re-connect that key replaced the one the running forwarder holds, so
+	// from then until every later step has succeeded the endpoint must not be reported as
+	// connected. It holds only a timestamp and whether this was a re-connect.
+	ConnectPendingFileName = "connect-pending"
+	SecretsFileName        = "vector-secrets.json"
+	VectorConfigName       = "vector.toml"
+	DataDirName            = "vector-data"
 )
 
 // Dir is the managed-ingest state directory for the selected endpoint mode.
@@ -35,6 +40,54 @@ func SecretsPath(userMode bool) string      { return filepath.Join(Dir(userMode)
 func VectorConfigPath(userMode bool) string { return filepath.Join(Dir(userMode), VectorConfigName) }
 func DataDir(userMode bool) string          { return filepath.Join(Dir(userMode), DataDirName) }
 func InstallIDPath(userMode bool) string    { return filepath.Join(Dir(userMode), InstallIDFileName) }
+func ConnectPendingPath(userMode bool) string {
+	return filepath.Join(Dir(userMode), ConnectPendingFileName)
+}
+
+// ConnectIncomplete reports whether a connect got as far as the key exchange and then failed
+// before finishing. On a re-connect the server has already rotated the device key by then, so
+// the forwarder still running with the previous key cannot upload until connect is run again.
+func ConnectIncomplete(userMode bool) bool {
+	_, err := os.Stat(ConnectPendingPath(userMode))
+	return err == nil
+}
+
+type connectPending struct {
+	StartedAt time.Time `json:"started_at"`
+	Reconnect bool      `json:"reconnect"`
+}
+
+// markConnectPending records that a connect has received a key and not yet finished.
+func markConnectPending(userMode bool, at time.Time, reconnect bool) error {
+	if err := ensureDir(userMode); err != nil {
+		return err
+	}
+	data, err := json.Marshal(connectPending{StartedAt: at.UTC(), Reconnect: reconnect})
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(ConnectPendingPath(userMode), append(data, '\n'), 0o600)
+}
+
+func loadConnectPending(userMode bool) (connectPending, error) {
+	data, err := os.ReadFile(ConnectPendingPath(userMode))
+	if err != nil {
+		return connectPending{}, err
+	}
+	var pending connectPending
+	if err := json.Unmarshal(data, &pending); err != nil {
+		return connectPending{}, fmt.Errorf("pending connect marker %s is not valid JSON: %w", ConnectPendingPath(userMode), err)
+	}
+	return pending, nil
+}
+
+// clearConnectPending removes the marker once a connect has finished.
+func clearConnectPending(userMode bool) error {
+	if err := os.Remove(ConnectPendingPath(userMode)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
 
 // ReadInstallID returns the pinned install id, or "" when none has been written.
 func ReadInstallID(userMode bool) string {
@@ -54,16 +107,21 @@ func WriteInstallID(userMode bool, installID string) error {
 }
 
 // Connected reports whether this endpoint is enrolled and has its forwarder configured: both
-// enrollment.json and vector.toml exist. Either alone is not a connection. disconnect
-// --keep-credentials leaves the record behind without a config, and a connect that failed at
-// vector validate or at loading the service leaves the config behind without a record; a
-// machine in either state must be offered connect again and reported as not connected.
+// enrollment.json and vector.toml exist and no connect is left incomplete. Either file alone is
+// not a connection. disconnect --keep-credentials leaves the record behind without a config,
+// and a first connect that failed at vector validate or at loading the service leaves the
+// config behind without a record. A re-connect that failed after the key exchange leaves both
+// files from the previous connection, but the server has rotated the key that connection's
+// forwarder holds, so the pending marker decides. A machine in any of these states must be
+// offered connect again and reported as not connected.
 func Connected(userMode bool) bool {
 	if _, err := os.Stat(VectorConfigPath(userMode)); err != nil {
 		return false
 	}
-	_, err := os.Stat(EnrollmentPath(userMode))
-	return err == nil
+	if _, err := os.Stat(EnrollmentPath(userMode)); err != nil {
+		return false
+	}
+	return !ConnectIncomplete(userMode)
 }
 
 // Enrollment is the non-secret record of a device's enrollment. Everything `beacon endpoint
@@ -156,7 +214,8 @@ func RemoveState(userMode bool, keepCredentials bool) error {
 		}
 		return nil
 	}
-	for _, path := range []string{VectorConfigPath(userMode), DataDir(userMode)} {
+	// The forwarder is gone, so a pending connect has nothing left running on a dead key.
+	for _, path := range []string{VectorConfigPath(userMode), DataDir(userMode), ConnectPendingPath(userMode)} {
 		if err := os.RemoveAll(path); err != nil && !os.IsNotExist(err) {
 			return err
 		}

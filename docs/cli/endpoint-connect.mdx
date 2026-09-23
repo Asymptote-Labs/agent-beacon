@@ -35,9 +35,11 @@ beacon endpoint disconnect [flags]
 5. Renders `asymptote/vector.toml` with the selected privacy mode, runs `vector validate` on the file the service will run, installs a service unit, and starts it.
 6. Records the non-secret enrollment, including privacy mode, in `asymptote/enrollment.json` and `config.json`'s `managed_ingest` block.
 
-A connect that fails at `vector validate` or at loading the service saves no enrollment record, so the endpoint is not connected and `beacon endpoint disconnect` cleans up what was written. After `disconnect --keep-credentials`, status reports not connected and names the kept device id.
+A first connect that fails at `vector validate` or at loading the service saves no enrollment record, so the endpoint is not connected and `beacon endpoint disconnect` cleans up what was written. After `disconnect --keep-credentials`, status reports not connected and names the kept device id.
 
 Re-running `connect` on a connected machine reuses its install id, so the server rotates the existing device's key in place instead of creating a second device. Because that rotation invalidates the key the running forwarder holds, the new config is validated before enrollment: a re-run whose config Vector rejects leaves the forwarder, its key, and its buffer untouched. Under launchd the new forwarder is loaded only after the old one has exited (Vector drains in-flight requests first), and if the new instance has not started within the wait, `connect` fails and points at `launchctl print` for the job (v1.3.2).
+
+Some steps can only fail after the server has issued the key: storing it, validating the config that carries the server's ingest URL, writing the service unit, starting the service, and recording the enrollment. `connect` writes `asymptote/connect-pending` as soon as the key arrives and removes it only when every step has succeeded. If a step in between fails, `connect` says the connect is incomplete and names the retry, and `beacon endpoint status` reports Beacon Managed as not connected with `connect_incomplete: true` in `--json`. On a re-connect, the forwarder still running holds the key the server just rotated out, so the previous enrollment record and config are not treated as a working connection. On a first connect, Beacon stops and removes any partial forwarder before returning the error, so a later onboarding retry can safely select local-only telemetry. Run `beacon endpoint connect` again once the cause is fixed. An approval that is cancelled or expires before a key is issued rotates nothing and leaves an existing connection as it was.
 
 ## Privacy modes
 
@@ -61,6 +63,7 @@ are not uploaded under the new one.
 |------|-----------|---------------------|---------------------|
 | Enrollment record | `~/.beacon/endpoint/asymptote/enrollment.json` (0600) | `/Library/Application Support/Beacon/Endpoint/asymptote/enrollment.json` | `/etc/beacon/endpoint/asymptote/enrollment.json` |
 | Install id | `~/.beacon/endpoint/asymptote/install-id` (0600) | `…/Endpoint/asymptote/install-id` | `/etc/beacon/endpoint/asymptote/install-id` |
+| Pending-connect marker (only while a connect is unfinished) | `~/.beacon/endpoint/asymptote/connect-pending` (0600, timestamp and reconnect flag only) | `…/Endpoint/asymptote/connect-pending` | `/etc/beacon/endpoint/asymptote/connect-pending` |
 | Device key | `~/.beacon/endpoint/asymptote/vector-secrets.json` (0600) | `…/Endpoint/asymptote/vector-secrets.json` | `/etc/beacon/endpoint/asymptote/vector-secrets.json` |
 | Vector config | `~/.beacon/endpoint/asymptote/vector.toml` (0644, no secret) | `…/Endpoint/asymptote/vector.toml` | `/etc/beacon/endpoint/asymptote/vector.toml` |
 | Buffer and checkpoints | `~/.beacon/endpoint/asymptote/vector-data/` | `…/Endpoint/asymptote/vector-data/` | `/etc/beacon/endpoint/asymptote/vector-data/` |

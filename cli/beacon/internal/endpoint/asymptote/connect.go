@@ -75,8 +75,11 @@ type ConnectResult struct {
 // A re-run on an enrolled machine reuses its install id, which rotates the key in place on the
 // server rather than creating a second device. That rotation is why validation comes first:
 // once the server has rotated the key, a forwarder still running with the old one is failing
-// every upload, so nothing that can be checked locally may fail after that point.
-func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
+// every upload, so nothing that can be checked locally may fail after that point. What cannot
+// be checked ahead (storing the key, writing the config and unit, starting the service) is
+// covered by a pending marker written as soon as the key arrives and removed only when every step has
+// succeeded: until then status reports the connect as incomplete, not as the old connection.
+func Connect(ctx context.Context, opts ConnectOptions) (_ *ConnectResult, err error) {
 	out := opts.Out
 	if out == nil {
 		out = io.Discard
@@ -85,6 +88,14 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 	if now == nil {
 		now = time.Now
 	}
+	// keyIssued is set once the server has handed over a key. Any failure after that point
+	// is reported as an incomplete connect with the retry command.
+	keyIssued, reconnect := false, false
+	defer func() {
+		if err != nil && keyIssued {
+			err = incompleteConnectError(reconnect, err)
+		}
+	}()
 	privacyMode, err := managedprivacy.Normalize(opts.PrivacyMode)
 	if err != nil {
 		return nil, err
@@ -93,6 +104,19 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 	if manager == nil {
 		manager = service.ForwarderManager{UserMode: opts.UserMode}
 	}
+	firstConnectForwarderTouched := false
+	defer func() {
+		// A first connect can fail after writing or starting its forwarder but before
+		// the endpoint records a complete connection. Stop that partial forwarder so
+		// a later onboarding retry may safely choose local-only telemetry.
+		if err == nil || !keyIssued || reconnect || !firstConnectForwarderTouched {
+			return
+		}
+		if unloadErr := manager.Unload(); unloadErr != nil {
+			err = errors.Join(err, fmt.Errorf("could not stop the incomplete forwarder: %w", unloadErr))
+		}
+		manager.RemoveUnits()
+	}()
 	if !manager.Supported() {
 		return nil, errors.New(manager.UnsupportedReason())
 	}
@@ -106,6 +130,7 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 	if err != nil && !errors.Is(err, ErrNotEnrolled) {
 		return nil, err
 	}
+	reconnect = previous != nil
 	installID := opts.InstallID
 	if installID == "" && previous != nil {
 		installID = previous.InstallID
@@ -167,6 +192,18 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	keyIssued = true
+	// The server has issued the key; on a re-connect it has rotated the one the running
+	// forwarder holds. Mark the connect pending before anything else can fail, and remove the
+	// marker only once every step below has succeeded. It is written here rather than before
+	// enrollment so an approval that is cancelled, expires, or is interrupted with Ctrl-C
+	// (which ends the process without unwinding) never flags a working connection. If the
+	// marker itself cannot be written, the secrets file still holds the rotated-out key, which
+	// the status credential check reports as revoked. A marker left by an earlier attempt
+	// stays until a connect finishes, since that attempt's rotation still stands.
+	if err := markConnectPending(opts.UserMode, now(), reconnect); err != nil {
+		return nil, fmt.Errorf("could not record that connect is in progress: %w", err)
+	}
 	if opts.AccountEnroll != nil {
 		fmt.Fprintf(out, "Account authorized device enrollment for %s (device %s, key %s)\n", displayOrg(result), result.DeviceID, result.KeyPrefix)
 	} else {
@@ -220,6 +257,7 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 	if err := writeFileAtomic(configPath, []byte(rendered), 0o644); err != nil {
 		return nil, err
 	}
+	firstConnectForwarderTouched = !reconnect
 	unitPath, err := manager.WriteUnit(vector.Path, configPath)
 	if err != nil {
 		return nil, err
@@ -261,6 +299,9 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 	}); err != nil {
 		return nil, err
 	}
+	if err := clearConnectPending(opts.UserMode); err != nil {
+		return nil, fmt.Errorf("could not record that connect finished: %w", err)
+	}
 	return &ConnectResult{
 		Enrollment:     enrollment,
 		VectorConfig:   configPath,
@@ -270,6 +311,15 @@ func Connect(ctx context.Context, opts ConnectOptions) (*ConnectResult, error) {
 		ReEnrolled:     previous != nil,
 		ForwarderState: manager.Status(),
 	}, nil
+}
+
+// incompleteConnectError says that connect stopped after the key exchange and names the retry.
+// The cause stays last and wrapped so the step that failed is still visible to callers.
+func incompleteConnectError(reconnect bool, err error) error {
+	if reconnect {
+		return fmt.Errorf("re-connect incomplete: the server has already rotated this device's key, so the forwarder cannot upload until connect finishes; fix the cause and run `beacon endpoint connect` again: %w", err)
+	}
+	return fmt.Errorf("connect incomplete after the device was approved; fix the cause and run `beacon endpoint connect` again: %w", err)
 }
 
 // DisconnectOptions drives Disconnect.
