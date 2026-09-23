@@ -1,5 +1,5 @@
 // Runs the real build (esbuild.config.mjs) for each target into a temp dir. The
-// Chrome output must be what it always was; the Firefox output must be complete.
+// Chrome output must be what it always was; the Firefox and Safari outputs must be complete.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
@@ -16,7 +16,7 @@ const out = (t: string) => path.join(work, t);
 
 beforeAll(() => {
   work = mkdtempSync(path.join(tmpdir(), 'beacon-ext-build-'));
-  for (const t of ['chrome', 'firefox']) {
+  for (const t of ['chrome', 'firefox', 'safari']) {
     execFileSync(process.execPath, ['esbuild.config.mjs', '--target', t, '--outdir', out(t)], {
       cwd: root,
       stdio: 'pipe',
@@ -28,7 +28,7 @@ afterAll(() => {
   rmSync(work, { recursive: true, force: true });
 });
 
-describe.each(['chrome', 'firefox'])('%s build', (t) => {
+describe.each(['chrome', 'firefox', 'safari'])('%s build', (t) => {
   it.each(FILES)('emits a non-empty %s', (f) => {
     const p = path.join(out(t), f);
     expect(existsSync(p)).toBe(true);
@@ -45,6 +45,16 @@ describe('chrome build', () => {
 
   it('emits the same file set as before per-browser targets existed', () => {
     const got = readdirSync(out('chrome')).filter((f) => !f.endsWith('.map')).sort();
+    expect(got).toEqual([...FILES].sort());
+  });
+});
+
+describe('safari build', () => {
+  it('ships src/manifest.json byte for byte, with the same file set as Chrome', () => {
+    expect(readFileSync(path.join(out('safari'), 'manifest.json'))).toEqual(
+      readFileSync(path.join(root, 'src', 'manifest.json')),
+    );
+    const got = readdirSync(out('safari')).filter((f) => !f.endsWith('.map')).sort();
     expect(got).toEqual([...FILES].sort());
   });
 });

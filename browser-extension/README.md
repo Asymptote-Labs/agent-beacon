@@ -80,6 +80,7 @@ npx playwright install chromium   # one-time, for the e2e harness
 npm run build         # bundle src/ → dist/ (esbuild, Chrome target)
 npm run build:watch   # rebuild on change
 npm run build:firefox # bundle src/ → dist-firefox/ with the Gecko manifest
+npm run build:safari  # bundle src/ → dist-safari/ (input to packaging/macos/safari; not loadable alone)
 npm run lint:firefox  # build:firefox, then Mozilla's web-ext lint (warnings fail)
 npm run check         # tsc --noEmit
 npm run test:unit     # pure adapter + normalization tests (vitest, no browser)
@@ -227,7 +228,7 @@ staging one. Prefer a throwaway account where practical.
 | `src/options/` | OTLP endpoint and per-site toggles. |
 | `e2e/` | Playwright fixtures + helpers (`mock-collector`, `sse-replay-server`, `otlp-assertions`) + specs. |
 | `test/unit/` | vitest unit tests. |
-| `tools/targets.mjs` | Per-browser build targets (`chrome` → `dist/`, `firefox` → `dist-firefox/`) and the manifest each one ships. |
+| `tools/targets.mjs` | Per-browser build targets (`chrome` → `dist/`, `firefox` → `dist-firefox/`, `safari` → `dist-safari/`) and the manifest each one ships. |
 | `fixtures/<site>/*.sse` | Recorded, sanitized chat streams — real captures for `claude/` and `chatgpt/`. |
 
 ## Testing model (layered by fidelity/cost)
@@ -248,6 +249,26 @@ staging one. Prefer a throwaway account where practical.
   out-of-tree `/opt/beacon/bin/beacon-otelcol` approach sketched in `tools/integration-otelcol/`.
 - **(d) live smoke** (opt-in, headed) — drive the real sites in a persistent authed profile; a
   drift alarm that flags when recorded fixtures go stale. *(not yet implemented)*
+
+## Safari (experimental, not shipped)
+
+Safari support is in progress (#392). `npm run build:safari` writes
+`dist-safari/`: the same bundles and the unchanged `src/manifest.json`, compiled
+for Safari 18, the first release documented to run MAIN-world content scripts.
+Safari cannot load that folder for real use; it has to ship inside a macOS app.
+The packaging lives in
+[`packaging/macos/safari/`](../packaging/macos/safari/README.md): the Xcode app
+wrapper script, the signing plan, the MDM example, and a
+[compatibility review](../packaging/macos/safari/compatibility.md) with its gap
+list.
+
+**The self-verifying loop above does not cover Safari.** Playwright cannot load
+extensions into WebKit, and `safaridriver` cannot install them. The replay e2e
+(layer b) therefore runs on Chromium only, and it stays the correctness gate for
+the site adapters. The unit tests (layer a) are browser-agnostic. A Safari build
+is verified by hand with the
+[Safari smoke checklist](../packaging/macos/safari/smoke-checklist.md) until an
+XCTest-based check exists.
 
 ## Status
 

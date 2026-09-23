@@ -562,6 +562,14 @@ sudo /opt/beacon/bin/beacon endpoint wazuh validate
 sudo launchctl print system/com.beacon.endpoint.collector
 ```
 
+### Safari Browser Extension (Experimental)
+
+The Safari build of the browser collector is not shipped yet. Its app wrapper,
+signing plan, and Declarative Device Management example live in
+[`safari/`](safari/README.md). Safari extensions can only be force-enabled by a
+declaration on supervised Macs running macOS 15 or later, not by a
+configuration profile.
+
 ## Fleet
 
 Upload the signed/notarized `.pkg` as Fleet software and scope it to a pilot

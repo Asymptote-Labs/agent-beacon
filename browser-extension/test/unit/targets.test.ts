@@ -11,6 +11,7 @@ import {
   FIREFOX_MIN_VERSION,
   GECKO_ID,
   MIN_FIREFOX_FOR_MAIN_WORLD,
+  SAFARI_MIN_VERSION,
   TARGETS,
   firefoxManifest,
   getTarget,
@@ -36,7 +37,7 @@ describe('build targets', () => {
   });
 
   it('rejects an unknown target by name', () => {
-    expect(() => getTarget('safari')).toThrow(/unknown build target "safari".*chrome, firefox/);
+    expect(() => getTarget('opera')).toThrow(/unknown build target "opera".*chrome, firefox, safari/);
     expect(() => getTarget('toString')).toThrow(/unknown build target/);
   });
 
@@ -44,6 +45,27 @@ describe('build targets', () => {
     const ff = getTarget('firefox');
     expect(ff.outdir).toBe('dist-firefox');
     expect(ff.esbuildTarget).toEqual([`firefox${parseInt(FIREFOX_MIN_VERSION, 10)}`]);
+  });
+});
+
+describe('safari target', () => {
+  it('builds to dist-safari and ships src/manifest.json verbatim', () => {
+    const safari = getTarget('safari');
+    expect(safari.outdir).toBe('dist-safari');
+    expect(safari.manifest).toBeNull();
+  });
+
+  it('targets a Safari that runs world: "MAIN" content scripts (Safari 18)', () => {
+    expect(SAFARI_MIN_VERSION).toBeGreaterThanOrEqual(18);
+    expect(getTarget('safari').esbuildTarget).toEqual([`safari${SAFARI_MIN_VERSION}`]);
+    const usesMain = base().content_scripts.some((c: { world?: string }) => c.world === 'MAIN');
+    expect(usesMain).toBe(true);
+  });
+
+  it('keeps the Chrome background shape, which Safari documents as supported', () => {
+    // Verbatim means the service worker ships as is. If Safari needs
+    // background.scripts instead, the target must gain a derived manifest.
+    expect(base().background).toEqual({ service_worker: 'sw.js' });
   });
 });
 

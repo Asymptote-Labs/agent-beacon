@@ -8,6 +8,7 @@
     "build": "node esbuild.config.mjs",
     "build:watch": "node esbuild.config.mjs --watch",
     "build:firefox": "node esbuild.config.mjs --target firefox",
+    "build:safari": "node esbuild.config.mjs --target safari",
     "lint:firefox": "npm run build:firefox && web-ext lint --source-dir dist-firefox --warnings-as-errors",
     "check": "tsc --noEmit",
     "test:unit": "vitest run",
