@@ -244,7 +244,7 @@ func TestWaitForPortsAvailableWaitsForTransientListeners(t *testing.T) {
 		_ = httpListener.Close()
 	}()
 
-	if err := WaitForPortsAvailable(grpcPort, httpPort, 2*time.Second); err != nil {
+	if err := WaitForPortsAvailable(grpcPort, httpPort, freeTestPort(t), 2*time.Second); err != nil {
 		t.Fatalf("WaitForPortsAvailable returned error: %v", err)
 	}
 }
@@ -262,7 +262,7 @@ func TestWaitForPortsAvailableReportsPersistentConflict(t *testing.T) {
 	httpPort := httpListener.Addr().(*net.TCPAddr).Port
 	_ = httpListener.Close()
 
-	err = WaitForPortsAvailable(grpcListener.Addr().(*net.TCPAddr).Port, httpPort, 50*time.Millisecond)
+	err = WaitForPortsAvailable(grpcListener.Addr().(*net.TCPAddr).Port, httpPort, freeTestPort(t), 50*time.Millisecond)
 	if err == nil || !strings.Contains(err.Error(), "OTLP gRPC port") {
 		t.Fatalf("WaitForPortsAvailable error = %v, want gRPC port conflict", err)
 	}
@@ -368,7 +368,7 @@ func TestPortAvailabilityAndOpenChecks(t *testing.T) {
 }
 
 func TestCheckStatusDoesNotTreatOpenOTLPPortsAsHealthy(t *testing.T) {
-	if healthReady() {
+	if healthReady(endpointconfig.DefaultHealthCheckPort) {
 		t.Skip("collector health check endpoint is already active")
 	}
 	bin := filepath.Join(t.TempDir(), stubCollectorName())
@@ -403,7 +403,7 @@ func TestCheckStatusDoesNotTreatOpenOTLPPortsAsHealthy(t *testing.T) {
 }
 
 func TestHealthReadyChecksCollectorHealthEndpoint(t *testing.T) {
-	if !PortAvailable(HealthCheckPort) {
+	if !PortAvailable(endpointconfig.DefaultHealthCheckPort) {
 		t.Skip("collector health check port is already in use")
 	}
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -423,7 +423,7 @@ func TestHealthReadyChecksCollectorHealthEndpoint(t *testing.T) {
 		<-done
 	})
 
-	if !healthReady() {
+	if !healthReady(endpointconfig.DefaultHealthCheckPort) {
 		t.Fatal("healthReady() = false, want true")
 	}
 }

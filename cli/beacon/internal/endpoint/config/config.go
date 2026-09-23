@@ -23,6 +23,10 @@ const (
 	UserConfigPath  = ".beacon/endpoint/config.json"
 	DefaultGRPCPort = 4317
 	DefaultHTTPPort = 4318
+	// DefaultHealthCheckPort is where the collector's health_check extension listens on an
+	// install with the default OTLP ports, and on any configuration written before the port was
+	// recorded (see HealthCheckPort).
+	DefaultHealthCheckPort = 13133
 )
 
 // SystemBaseDir is the single source of truth for the system-mode state directory.
@@ -124,10 +128,15 @@ type AutoUpdate struct {
 }
 
 type Collector struct {
-	BinaryPath            string `json:"binary_path,omitempty"`
-	ConfigPath            string `json:"config_path,omitempty"`
-	GRPCPort              int    `json:"grpc_port"`
-	HTTPPort              int    `json:"http_port"`
+	BinaryPath string `json:"binary_path,omitempty"`
+	ConfigPath string `json:"config_path,omitempty"`
+	GRPCPort   int    `json:"grpc_port"`
+	HTTPPort   int    `json:"http_port"`
+	// HealthPort is the collector health_check extension's loopback port. Zero, which is what a
+	// config.json written before the field existed decodes to, means DefaultHealthCheckPort:
+	// that is the port such an install rendered into its collector config. Read it through
+	// HealthCheckPort rather than directly.
+	HealthPort            int    `json:"health_port,omitempty"`
 	SpoolPath             string `json:"spool_path,omitempty"`
 	IncludeRuntimeMetrics bool   `json:"include_runtime_metrics,omitempty"`
 	IncludeCodexSpans     bool   `json:"include_codex_spans,omitempty"`
@@ -190,6 +199,69 @@ func Default(userMode bool, logPath string) Config {
 			SpoolPath:  filepath.Join(base, "spool", "otlp.jsonl"),
 		},
 	}
+}
+
+// HealthCheckPort is the port the collector's health_check extension listens on for this config.
+//
+// A config with no recorded port predates the field, and every such install rendered the fixed
+// DefaultHealthCheckPort into its collector config, so that is the answer for it; deriving one
+// here instead would point status at a port the running collector never bound.
+func HealthCheckPort(collector Collector) int {
+	if collector.HealthPort > 0 {
+		return collector.HealthPort
+	}
+	return DefaultHealthCheckPort
+}
+
+// DeriveHealthCheckPort picks the health-check port for an install that did not name one.
+//
+// The port moves with the OTLP HTTP port: it is DefaultHealthCheckPort shifted by however far the
+// HTTP port was moved from DefaultHTTPPort. The default install therefore keeps 13133, and a second
+// collector installed on alternate OTLP ports -- a user-mode endpoint beside the system one, which
+// is the case that needs different ports at all -- gets a different health port without being
+// told (4328 gives 13143). The fixed port was why those two could not run together (#447).
+//
+// When that shift leaves the valid range or lands on an OTLP port, the next free-looking neighbour
+// of the HTTP port is used instead. The result is a pure function of the two ports, so install,
+// repair and status agree without consulting anything else.
+func DeriveHealthCheckPort(grpcPort, httpPort int) int {
+	if grpcPort <= 0 {
+		grpcPort = DefaultGRPCPort
+	}
+	if httpPort <= 0 {
+		httpPort = DefaultHTTPPort
+	}
+	candidates := []int{
+		DefaultHealthCheckPort + (httpPort - DefaultHTTPPort),
+		httpPort + 1,
+		httpPort - 1,
+		httpPort + 2,
+		httpPort - 2,
+	}
+	for _, port := range candidates {
+		if validPort(port) && port != grpcPort && port != httpPort {
+			return port
+		}
+	}
+	return DefaultHealthCheckPort
+}
+
+// ValidateCollectorPorts rejects a health-check port the collector could not bind: outside the TCP
+// range, or shared with an OTLP receiver, which would make the collector fail at start with a bind
+// error rather than at install with an explanation.
+func ValidateCollectorPorts(collector Collector) error {
+	health := HealthCheckPort(collector)
+	if !validPort(health) {
+		return fmt.Errorf("collector health-check port %d is out of range; choose a port between 1 and 65535 with --health-port", health)
+	}
+	if health == collector.GRPCPort || health == collector.HTTPPort {
+		return fmt.Errorf("collector health-check port %d is also an OTLP receiver port; choose a different --health-port", health)
+	}
+	return nil
+}
+
+func validPort(port int) bool {
+	return port > 0 && port <= 65535
 }
 
 func InventoryDefaults() InventorySettings {

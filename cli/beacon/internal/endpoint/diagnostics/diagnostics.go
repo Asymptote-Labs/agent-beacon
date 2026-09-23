@@ -86,13 +86,13 @@ func lingerCheck() Check {
 func checkCollectorHealth(cfg endpointconfig.Config) Check {
 	status := collector.CheckStatus(cfg)
 	if status.HealthReady {
-		return Check{Name: "collector_health", Target: fmt.Sprintf("127.0.0.1:%d", collector.HealthCheckPort), Status: StatusOK, Severity: SeverityInfo, Message: "collector health check is ready", Evidence: "health_check_ready"}
+		return Check{Name: "collector_health", Target: fmt.Sprintf("127.0.0.1:%d", status.HealthPort), Status: StatusOK, Severity: SeverityInfo, Message: "collector health check is ready", Evidence: "health_check_ready"}
 	}
 	message := status.Message
 	if message == "" {
 		message = "collector health check is not ready"
 	}
-	return Check{Name: "collector_health", Target: fmt.Sprintf("127.0.0.1:%d", collector.HealthCheckPort), Status: StatusWarn, Severity: SeverityMedium, Message: message, Evidence: "health_check_unavailable"}
+	return Check{Name: "collector_health", Target: fmt.Sprintf("127.0.0.1:%d", status.HealthPort), Status: StatusWarn, Severity: SeverityMedium, Message: message, Evidence: "health_check_unavailable"}
 }
 
 func HasFailures(checks []Check) bool {

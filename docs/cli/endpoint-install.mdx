@@ -29,6 +29,7 @@ The `claude` harness writes both Claude Code's OpenTelemetry settings and its us
 | `--harness <selection>` | Harnesses to configure. Defaults to `auto`, which installs every detected integration Beacon can configure and reports detected manual or poll-only integrations. Use `all` to force every installable integration, or pass an exact comma-separated list such as `claude,codex,cursor,kimi`. DeepSeek Harness and Kimi Code are user-level only. An explicit list preserves exact-selection behavior |
 | `--otlp-grpc-port <port>` | Local OTLP gRPC port. Defaults to `4317` |
 | `--otlp-http-port <port>` | Local OTLP HTTP port. Defaults to `4318` |
+| `--health-port <port>` | Local collector health-check port. Defaults to `13133`, moved by the same amount as `--otlp-http-port` when that is changed (HTTP port `4328` gives `13143`), so a second collector on alternate OTLP ports does not collide with the first |
 | `--collector <path>` | Path to a `beacon-otelcol` binary |
 | `--no-start` | Write files without starting the collector service |
 | `--no-browser` | During interactive setup, print the sign-in URL instead of opening a browser. Useful where no browser can be opened, though the URL still has to be opened on this machine |
@@ -202,9 +203,17 @@ beacon endpoint hooks install --harness grok --level project
   System-mode install (`--system`) is supported on macOS and on Linux distributions that use systemd. Omit `--system` for the default non-root local install. GitHub Copilot CLI and Factory Droid OTLP use launch-environment settings rather tha Beacon-managed shell-profile edits.
 </Note>
 
-## Known limitations
+## Running user and system mode together
 
-A user-mode collector cannot run beside a system-mode one on the same machine. The collector health-check port (`127.0.0.1:13133`) is fixed, so the second collector cannot bind it; the install fails with `Collector ports are not listening` and rolls back the endpoint files it wrote. Either write the user-mode files without starting the service (`beacon endpoint install --user --no-start`) or uninstall the system endpoint first (`sudo beacon endpoint uninstall --system`). Tracked as [GitHub issue #447](https://github.com/asymptote-labs/agent-beacon/issues/447).
+A user-mode collector can run beside a system-mode one on the same machine when the two use different ports. Give the user install its own OTLP ports; its health-check port moves with them:
+
+```bash title="Install a user-mode endpoint beside the system one"
+beacon endpoint install --user --otlp-grpc-port 4327 --otlp-http-port 4328
+```
+
+That collector listens on `127.0.0.1:4327`, `127.0.0.1:4328`, and health check `127.0.0.1:13143`. Pass `--health-port` to choose the health-check port yourself. The port is recorded as `collector.health_port` in `config.json`, and `beacon endpoint status` checks the recorded port. A config written before the field existed has no `health_port` and keeps using `13133`.
+
+If a port the collector needs is already taken, the install stops before it writes anything and names that port. If the collector starts but exits before it is ready, the install error quotes the collector's last error line and gives the path of its log, then rolls back.
 
 ## Related
 

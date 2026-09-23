@@ -25,6 +25,7 @@ During repair, Beacon removes the existing managed service before reinstalling i
 | `--harness <selection>` | Harnesses to configure. Defaults to `auto`, which repairs every detected integration Beacon can configure. Use `all` to force every installable integration, or pass an exact comma-separated list such as `claude,codex,cursor,kimi`. DeepSeek Harness and Kimi Code are user-level only |
 | `--otlp-grpc-port <port>` | Local OTLP gRPC port. Defaults to `4317` |
 | `--otlp-http-port <port>` | Local OTLP HTTP port. Defaults to `4318` |
+| `--health-port <port>` | Local collector health-check port. Defaults to `13133`, moved by the same amount as `--otlp-http-port` when that is changed (HTTP port `4328` gives `13143`), so a second collector on alternate OTLP ports does not collide with the first |
 | `--collector <path>` | Path to a `beacon-otelcol` binary |
 | `--no-start` | Write files without starting the collector service |
 | `--service <kind>` | Service manager to use: `auto` (default), `launchd`, `systemd`, or `none` for a supervised collector process |

@@ -23,6 +23,12 @@ import (
 
 var (
 	writeCollectorConfig = endpointcollector.WriteConfig
+	// collectorReadyTimeout is how long Install waits for a started collector to answer on all of
+	// its ports. A variable so tests of a collector that exits on start need not wait it out.
+	collectorReadyTimeout = 10 * time.Second
+	// portReleaseTimeout is how long preflight waits for a busy collector port to be released,
+	// which covers a collector that is still shutting down from a previous uninstall or repair.
+	portReleaseTimeout   = 10 * time.Second
 	saveEndpointConfig   = endpointconfig.Save
 	appendInstallEvent   = writer.AppendEvent
 	detectUpdaterInstall = selfupdate.DetectInstall
@@ -180,11 +186,14 @@ func inventoryHeartbeatStatus(requestedUserMode bool, logPath string) InventoryH
 }
 
 type InstallOptions struct {
-	UserMode              bool
-	LogPath               string
-	Harnesses             []string
-	GRPCPort              int
-	HTTPPort              int
+	UserMode  bool
+	LogPath   string
+	Harnesses []string
+	GRPCPort  int
+	HTTPPort  int
+	// HealthPort is the collector health_check port. Zero derives it from the OTLP ports
+	// (endpointconfig.DeriveHealthCheckPort), which keeps 13133 for the default ports.
+	HealthPort            int
 	CollectorPath         string
 	StartService          bool
 	IncludeRuntimeMetrics bool
@@ -501,6 +510,10 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		// the two decisions disagreeing about the state they are reasoning about.
 		wasRunning := manager.Status().Running
 		tx.ServiceWasRunning = wasRunning
+		// Note where the collector's log ends before starting it, so a failed start can quote
+		// what this start wrote rather than whatever an earlier run left in the same file.
+		collectorLog := manager.CollectorLog()
+		collectorLogOffset := endpointcollector.LogSize(collectorLog.Path)
 		if wasRunning {
 			if err := manager.Restart(); err != nil {
 				tx.Rollback(manifest)
@@ -524,9 +537,9 @@ func Install(opts InstallOptions) (InstallResult, error) {
 			manifest.LingerEnabled = lingerOutcome.Enabled
 			manifest.LingerDetail = lingerOutcome.Detail
 		}
-		if err := endpointcollector.WaitUntilReady(cfg, 10*time.Second); err != nil {
+		if err := endpointcollector.WaitUntilReady(cfg, collectorReadyTimeout); err != nil {
 			tx.Rollback(manifest)
-			return InstallResult{}, err
+			return InstallResult{}, collectorStartError(err, collectorLog, collectorLogOffset)
 		}
 	}
 	tx.Track(manifestPath(cfg.UserMode))
@@ -861,6 +874,14 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 	if opts.HTTPPort != 0 {
 		cfg.Collector.HTTPPort = opts.HTTPPort
 	}
+	// Derived afresh from the ports in effect rather than carried from the existing config, the
+	// same way the OTLP ports themselves are taken from this install's options: an install that
+	// moves the OTLP ports has to move the health port with them, or a user-mode collector moved
+	// off the system one's ports would still collide with it on 13133.
+	cfg.Collector.HealthPort = opts.HealthPort
+	if cfg.Collector.HealthPort == 0 {
+		cfg.Collector.HealthPort = endpointconfig.DeriveHealthCheckPort(cfg.Collector.GRPCPort, cfg.Collector.HTTPPort)
+	}
 	cfg.Collector.BinaryPath = opts.CollectorPath
 	cfg.Collector.IncludeRuntimeMetrics = opts.IncludeRuntimeMetrics
 	cfg.Collector.IncludeCodexSpans = opts.IncludeCodexSpans
@@ -880,6 +901,26 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 		endpointconfig.NormalizeDestinations(&cfg)
 	}
 	return cfg
+}
+
+// collectorStartError adds the collector's own explanation to a readiness failure.
+//
+// The readiness check can only see the symptom -- ports not listening, health check not ready --
+// and the symptom points at the wrong thing when the collector exited on start: a user-mode
+// collector killed by a health-check port the system collector held was reported as "Collector
+// ports are not listening", which blames the OTLP ports (#447). The collector's last error line
+// names the real cause.
+func collectorStartError(err error, log service.CollectorLog, offset int64) error {
+	if log.Path != "" {
+		if line := endpointcollector.LogErrorSince(log.Path, offset); line != "" {
+			return fmt.Errorf("%w; collector reported: %s (full log: %s)", err, line, log.Path)
+		}
+		return fmt.Errorf("%w; the collector wrote nothing new to %s", err, log.Path)
+	}
+	if log.Hint != "" {
+		return fmt.Errorf("%w; for the collector's own error see %s", err, log.Hint)
+	}
+	return err
 }
 
 func installDestination(cfg endpointconfig.Config) *schema.DestinationInfo {
@@ -982,32 +1023,63 @@ func preflight(cfg endpointconfig.Config, startService bool, kind service.Kind) 
 		return fmt.Errorf("system install needs elevated privileges; %s, or omit --system for the default user install",
 			SystemPrivilegeHint())
 	}
+	if err := endpointconfig.ValidateCollectorPorts(cfg.Collector); err != nil {
+		return err
+	}
 	if !startService {
 		return nil
 	}
+	healthPort := endpointconfig.HealthCheckPort(cfg.Collector)
 	grpcAvailable := endpointcollector.PortAvailable(cfg.Collector.GRPCPort)
 	httpAvailable := endpointcollector.PortAvailable(cfg.Collector.HTTPPort)
-	if grpcAvailable && httpAvailable {
+	healthAvailable := endpointcollector.PortAvailable(healthPort)
+	if grpcAvailable && httpAvailable && healthAvailable {
 		return nil
 	}
-	if existingCollectorReady(cfg, kind) {
+	own := service.Manager{UserMode: cfg.UserMode, Kind: kind}.Status()
+	if own.Loaded && existingCollectorReady(cfg) {
 		return nil
 	}
-	if err := endpointcollector.WaitForPortsAvailable(cfg.Collector.GRPCPort, cfg.Collector.HTTPPort, 10*time.Second); err != nil {
-		return fmt.Errorf("%w; if this persists, another process may be using Beacon's OTLP receiver ports", err)
+	// This mode's own running collector may be what holds the health port: a reinstall that moves
+	// only the gRPC port keeps the same derived health port, and the restart that follows releases
+	// it. Only a health port held while this mode's collector is not running -- by the system
+	// collector, beside a first user-mode install -- is a conflict worth failing on here.
+	if grpcAvailable && httpAvailable && own.Running {
+		return nil
+	}
+	if err := endpointcollector.WaitForPortsAvailable(cfg.Collector.GRPCPort, cfg.Collector.HTTPPort, healthPort, portReleaseTimeout); err != nil {
+		return fmt.Errorf("%w; if this persists, another process may be using the ports Beacon's collector needs", err)
 	}
 	return nil
 }
 
-// The kind is threaded through rather than re-detected: preflight already honours an explicit
-// --service=, and auto-detecting here would consult a different backend than the one the install
-// is about to use.
-func existingCollectorReady(cfg endpointconfig.Config, kind service.Kind) bool {
-	if !(service.Manager{UserMode: cfg.UserMode, Kind: kind}).Status().Loaded {
+// existingCollectorReady reports whether this mode's loaded collector is already serving the OTLP
+// ports this install asks for, in which case the busy ports are its own and the install's restart
+// releases them.
+//
+// Its health endpoint is looked for on the port this install will use and, failing that, on the one
+// recorded by the install that started it. The two differ whenever the health port moves under a
+// running collector -- a legacy config with alternate OTLP ports, which ran on 13133, being
+// reinstalled onto its derived port, or an explicit --health-port change -- and probing only the
+// new port would take the endpoint's own collector for a stranger holding its ports.
+//
+// The caller has already checked that the service is loaded: the kind is threaded through rather
+// than re-detected, since preflight honours an explicit --service= and auto-detecting would consult
+// a different backend than the one the install is about to use.
+func existingCollectorReady(cfg endpointconfig.Config) bool {
+	status := endpointcollector.CheckStatus(cfg)
+	if !status.GRPCReady || !status.HTTPReady {
 		return false
 	}
-	status := endpointcollector.CheckStatus(cfg)
-	return status.GRPCReady && status.HTTPReady && status.HealthReady
+	if status.HealthReady {
+		return true
+	}
+	existing, err := endpointconfig.Load(cfg.UserMode)
+	if err != nil || endpointconfig.HealthCheckPort(existing.Collector) == status.HealthPort {
+		return false
+	}
+	existing.Collector.GRPCPort, existing.Collector.HTTPPort = cfg.Collector.GRPCPort, cfg.Collector.HTTPPort
+	return endpointcollector.CheckStatus(existing).HealthReady
 }
 
 func configureHarnesses(cfg endpointconfig.Config) ([]string, error) {

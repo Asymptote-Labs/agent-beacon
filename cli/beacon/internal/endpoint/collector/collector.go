@@ -16,7 +16,6 @@ import (
 const (
 	BinaryName         = "beacon-otelcol"
 	PackagedBinaryPath = "/opt/beacon/bin/beacon-otelcol"
-	HealthCheckPort    = 13133
 )
 
 var (
@@ -30,6 +29,7 @@ type Status struct {
 	ConfigPath  string `json:"config_path,omitempty"`
 	GRPCPort    int    `json:"grpc_port"`
 	HTTPPort    int    `json:"http_port"`
+	HealthPort  int    `json:"health_port"`
 	GRPCReady   bool   `json:"grpc_ready"`
 	HTTPReady   bool   `json:"http_ready"`
 	HealthReady bool   `json:"health_ready"`
@@ -168,7 +168,7 @@ exporters:
 %s
 extensions:
   health_check:
-    endpoint: 127.0.0.1:13133
+    endpoint: 127.0.0.1:%d
 
 service:
   telemetry:
@@ -188,7 +188,7 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, batch]
       exporters: %s
-`, cfg.Collector.GRPCPort, cfg.Collector.HTTPPort, cfg.LogPath, runtimeMetricsYAML+codexSpansYAML+splunkExporter+falconExporter, exporters, exporters, exporters)
+`, cfg.Collector.GRPCPort, cfg.Collector.HTTPPort, cfg.LogPath, runtimeMetricsYAML+codexSpansYAML+splunkExporter+falconExporter, endpointconfig.HealthCheckPort(cfg.Collector), exporters, exporters, exporters)
 }
 
 func splunkHECYAML(cfg endpointconfig.Config) string {
@@ -256,21 +256,23 @@ func falconHECYAML(cfg endpointconfig.Config) string {
 
 func CheckStatus(cfg endpointconfig.Config) Status {
 	binary := DiscoverBinary(cfg.Collector.BinaryPath)
+	healthPort := endpointconfig.HealthCheckPort(cfg.Collector)
 	status := Status{
 		BinaryPath:  binary,
 		ConfigPath:  cfg.Collector.ConfigPath,
 		GRPCPort:    cfg.Collector.GRPCPort,
 		HTTPPort:    cfg.Collector.HTTPPort,
+		HealthPort:  healthPort,
 		GRPCReady:   portOpen(cfg.Collector.GRPCPort),
 		HTTPReady:   portOpen(cfg.Collector.HTTPPort),
-		HealthReady: healthReady(),
+		HealthReady: healthReady(healthPort),
 	}
 	if binary == "" {
 		status.Message = "OpenTelemetry Collector binary was not found on PATH"
 	} else if !status.GRPCReady && !status.HTTPReady {
 		status.Message = "Collector ports are not listening"
 	} else if !status.HealthReady {
-		status.Message = "Collector health check is not ready"
+		status.Message = fmt.Sprintf("Collector health check on 127.0.0.1:%d is not ready", healthPort)
 	}
 	return status
 }
@@ -292,23 +294,35 @@ func WaitUntilReady(cfg endpointconfig.Config, timeout time.Duration) error {
 	}
 }
 
-func WaitForPortsAvailable(grpcPort, httpPort int, timeout time.Duration) error {
+// WaitForPortsAvailable waits for every port the collector will bind -- the two OTLP receivers
+// and the health_check extension -- to be free, and names the ones that stay taken.
+//
+// The health port is checked with the others because it fails the collector just as surely: a
+// second collector whose OTLP ports were free but whose health port was held by the first used to
+// pass this wait, exit on start, and be reported as "Collector ports are not listening" (#447).
+func WaitForPortsAvailable(grpcPort, httpPort, healthPort int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
 		grpcAvailable := PortAvailable(grpcPort)
 		httpAvailable := PortAvailable(httpPort)
-		if grpcAvailable && httpAvailable {
+		healthAvailable := PortAvailable(healthPort)
+		if grpcAvailable && httpAvailable && healthAvailable {
 			return nil
 		}
 		if time.Now().After(deadline) {
+			var busy []string
 			switch {
 			case !grpcAvailable && !httpAvailable:
-				return fmt.Errorf("OTLP gRPC port %d and HTTP port %d are already in use", grpcPort, httpPort)
+				busy = append(busy, fmt.Sprintf("OTLP gRPC port %d and HTTP port %d are already in use", grpcPort, httpPort))
 			case !grpcAvailable:
-				return fmt.Errorf("OTLP gRPC port %d is already in use", grpcPort)
-			default:
-				return fmt.Errorf("OTLP HTTP port %d is already in use", httpPort)
+				busy = append(busy, fmt.Sprintf("OTLP gRPC port %d is already in use", grpcPort))
+			case !httpAvailable:
+				busy = append(busy, fmt.Sprintf("OTLP HTTP port %d is already in use", httpPort))
 			}
+			if !healthAvailable {
+				busy = append(busy, fmt.Sprintf("collector health-check port %d is already in use (another Beacon collector, such as a system-mode install, may hold it; choose another with --health-port)", healthPort))
+			}
+			return fmt.Errorf("%s", strings.Join(busy, "; "))
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
@@ -332,9 +346,9 @@ func portOpen(port int) bool {
 	return true
 }
 
-func healthReady() bool {
+func healthReady(port int) bool {
 	client := http.Client{Timeout: 500 * time.Millisecond}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/", HealthCheckPort))
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/", port))
 	if err != nil {
 		return false
 	}
