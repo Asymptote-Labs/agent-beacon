@@ -77,3 +77,7 @@ func pidAlive(pid int) bool {
 	}
 	return code == stillActive
 }
+
+// pidRunsProgram reports true: the pid-recycling check reads procfs, which Windows does not have.
+// pidAlive is the only test here, as it was before the check existed.
+func pidRunsProgram(pid int, program string) bool { return true }

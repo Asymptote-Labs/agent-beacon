@@ -249,17 +249,18 @@ sudo apt remove beacon      # or: sudo dnf remove beacon
 
 Removal stops and deletes the service and takes the binaries away, but leaves `/etc/beacon/endpoint` and `/var/log/beacon-agent` alone. Collected telemetry is not something a package removal should destroy. To remove those too:
 
-```bash title="Remove everything"
+```bash title="Remove everything (Debian, Ubuntu)"
 sudo apt purge beacon
 ```
 
-On RPM systems, or to remove a non-package install, use Beacon directly:
+RPM has no purge. Run Beacon's own uninstall first, while the binary is still there, then remove the package:
 
-```bash title="Full uninstall"
+```bash title="Remove everything (RHEL, Rocky, Fedora)"
 sudo beacon endpoint uninstall --system
+sudo dnf remove beacon
 ```
 
-`--keep-logs` and `--keep-config` are available if you want to keep either.
+`beacon endpoint uninstall --system` on its own also removes a non-package install. `--keep-logs` and `--keep-config` are available if you want to keep either.
 
 ## Related
 
