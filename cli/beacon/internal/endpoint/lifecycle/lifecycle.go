@@ -186,8 +186,12 @@ func inventoryHeartbeatStatus(requestedUserMode bool, logPath string) InventoryH
 }
 
 type InstallOptions struct {
-	UserMode  bool
-	LogPath   string
+	UserMode bool
+	LogPath  string
+	// Harnesses lists the OTLP runtimes whose settings install writes. nil means unspecified
+	// and falls back to the config default (Claude Code and Codex); a non-nil empty list means
+	// configure none. A caller that resolved an explicit selection must pass it non-nil, or a
+	// selection with no OTLP runtime silently configures the default ones (#640).
 	Harnesses []string
 	GRPCPort  int
 	HTTPPort  int

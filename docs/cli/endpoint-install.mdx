@@ -13,7 +13,7 @@ The service is a launchd job on macOS and a systemd unit on Linux. Where neither
 beacon endpoint install
 ```
 
-By default, Beacon discovers the runtimes installed for the invoking user and configures every integration it can safely install. This includes OTLP settings and supported hooks, plugins, or extensions; VS Code receives both its OTLP and hook configuration. An explicit `--harness` list disables automatic selection. If discovery finds no automatically installable runtime, Beacon installs the collector without changing any runtime configuration.
+By default, Beacon discovers the runtimes installed for the invoking user and configures every integration it can safely install. This includes OTLP settings and supported hooks, plugins, or extensions; VS Code receives both its OTLP and hook configuration. An explicit `--harness` list disables automatic selection and configures only the runtimes it names: a hook-only list such as `--harness omp` leaves Claude Code's and Codex's settings untouched, and `--harness ""` installs the collector alone. If discovery finds no automatically installable runtime, Beacon installs the collector without changing any runtime configuration.
 
 Discovery can also find runtimes whose collection path cannot be enabled safely by a machine-wide default. Beacon reports these without treating them as install failures: GitHub Copilot CLI needs launch-environment settings, Claude Cowork needs admin configuration, poll-only fx needs `beacon endpoint fx sync`, and OpenHands CLI/GUI coverage requires project-level hooks installed from inside each repository. Factory Droid's hooks are installed automatically when Droid is detected, while its separate OTLP endpoint remains launch-environment managed.
 

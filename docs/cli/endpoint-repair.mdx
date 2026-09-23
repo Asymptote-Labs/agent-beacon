@@ -11,7 +11,7 @@ description: "Repair Beacon endpoint service files, collector configuration, and
 beacon endpoint repair
 ```
 
-Repair preserves runtime logs while reinstalling managed endpoint files. By default it rediscovers installed runtimes and reapplies every integration Beacon can configure. Pass an explicit `--harness` list to repair only those targets. GitHub Copilot CLI and Factory Droid launch-environment settings remain customer-managed; repair does not write those environment settings.
+Repair preserves runtime logs while reinstalling managed endpoint files. By default it rediscovers installed runtimes and reapplies every integration Beacon can configure. Pass an explicit `--harness` list to repair only those targets; runtimes it does not name, including Claude Code and Codex, are not written. GitHub Copilot CLI and Factory Droid launch-environment settings remain customer-managed; repair does not write those environment settings.
 
 During repair, Beacon removes the existing managed service before reinstalling it so an unhealthy collector can release local OTLP ports. If reinstall cannot complete, Beacon restores the previous endpoint configuration so local state is not left partially rolled back.
 
