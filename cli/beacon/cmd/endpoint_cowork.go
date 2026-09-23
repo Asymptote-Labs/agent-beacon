@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/auth"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/cowork"
 )
@@ -59,7 +61,7 @@ func runEndpointCoworkSetup(cmdCtx context.Context) error {
 			ResourceAttributes: resourceAttributes,
 		})
 		if endpointOpts.coworkOpen {
-			if err := dashboard.OpenBrowser(cowork.AdminURL); err != nil {
+			if err := openCoworkAdmin(); err != nil {
 				_ = tunnel.Stop()
 				return err
 			}
@@ -84,9 +86,20 @@ func runEndpointCoworkSetup(cmdCtx context.Context) error {
 		ResourceAttributes: resourceAttributes,
 	})
 	if endpointOpts.coworkOpen {
-		return dashboard.OpenBrowser(cowork.AdminURL)
+		return openCoworkAdmin()
 	}
 	return nil
+}
+
+// openCoworkAdmin opens the Cowork admin page. With no display to open it on, the setup already
+// printed names the URL, so that is not a failure.
+func openCoworkAdmin() error {
+	err := dashboard.OpenBrowser(cowork.AdminURL)
+	if errors.Is(err, auth.ErrNoDisplay) {
+		fmt.Printf("Not opening a browser (%v).\n", err)
+		return nil
+	}
+	return err
 }
 
 func runEndpointCoworkValidate() error {

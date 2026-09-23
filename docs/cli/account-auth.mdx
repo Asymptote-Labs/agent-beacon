@@ -35,6 +35,22 @@ session, use a browser on the remote host or forward the callback port shown in
 the printed URL; opening it on an unrelated workstation without port forwarding
 redirects to that workstation's localhost and cannot complete the remote login.
 
+On Linux, `beacon login` does not try to open a browser when there is no display
+(`DISPLAY` and `WAYLAND_DISPLAY` unset) or in an SSH session. It says so, prints the
+URL and the port forward to run, and waits:
+
+```text
+No browser can be opened on this machine: this is an SSH session.
+Sign-in finishes when beacon.sh redirects a browser back to this machine.
+Open this URL to sign in to Beacon:
+https://beacon.sh/cli/auth?port=43121&state=...
+From another computer over SSH, forward the port first: ssh -L 43121:127.0.0.1:43121 <this machine>
+Waiting for Beacon sign-in...
+```
+
+Run the `ssh -L` command in a second terminal on your own computer, then open the URL
+there. The port changes on every attempt.
+
 The session is stored at `~/.beacon/auth/session.json` in a `0700` directory with file mode `0600`. Human and JSON command output never includes the access token. Tokens expire rather than refreshing indefinitely; run `beacon login` again after expiry.
 
 Use `--auth-url` or `BEACON_AUTH_URL` only for a self-hosted or development authentication service. Non-loopback authentication URLs must use HTTPS.

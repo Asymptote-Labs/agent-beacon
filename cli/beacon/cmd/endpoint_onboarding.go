@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/account"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/auth"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/managedprivacy"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/onboarding"
@@ -57,6 +58,7 @@ var (
 	onboardingRunWizard                = onboarding.RunWizard
 	onboardingAccountInspect           = account.Inspect
 	onboardingAccountLogin             = account.Login
+	onboardingDisplayCheck             = auth.CheckDisplay
 	onboardingAccountSave              = account.Save
 	onboardingClock                    = time.Now
 	// destinationAskable reports whether the destination question makes sense here: an
@@ -162,6 +164,7 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 		PresetDestination: preset,
 		PresetPrivacyMode: profile.Onboarding.PrivacyMode,
 		NoBrowser:         endpointOpts.noBrowser,
+		NoDisplay:         onboardingDisplayCheck(),
 		Now:               onboardingClock,
 		SignInTimeout:     account.LoginWait,
 		// Signing in happens inside the wizard so the full-screen UI is never torn
@@ -179,6 +182,7 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 						URL:        prompt.URL,
 						WillOpen:   prompt.WillOpen,
 						BrowserErr: prompt.BrowserErr,
+						SSHForward: account.SSHForwardCommand(prompt.Port),
 					})
 				},
 			})

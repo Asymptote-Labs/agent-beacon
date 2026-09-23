@@ -69,6 +69,9 @@ type LoginPrompt struct {
 	BrowserErr error
 	// Timeout is how long Login will wait before giving up.
 	Timeout time.Duration
+	// Port is the loopback port the sign-in redirects to. Signing in from another computer over
+	// SSH means forwarding it: ssh -L Port:127.0.0.1:Port.
+	Port int
 }
 
 type clientInfo struct {
@@ -176,23 +179,31 @@ func Login(ctx context.Context, opts LoginOptions) (*Session, error) {
 		return nil, fmt.Errorf("start Beacon sign-in: %w", err)
 	}
 
-	loginURL := buildLoginURL(baseURL, pkce.State, callback.Port())
+	port := callback.Port()
+	loginURL := buildLoginURL(baseURL, pkce.State, port)
 	report := opts.OnPrompt
 	if report != nil {
 		out = io.Discard
 	} else {
 		report = func(LoginPrompt) {}
 	}
-	report(LoginPrompt{URL: loginURL, WillOpen: !opts.NoBrowser, Timeout: timeout})
+	report(LoginPrompt{URL: loginURL, WillOpen: !opts.NoBrowser, Timeout: timeout, Port: port})
 	if opts.NoBrowser {
-		fmt.Fprintf(out, "Open this URL to sign in to Beacon:\n%s\n", loginURL)
+		printLoginURL(out, loginURL, port)
+	} else if err := openBrowser(loginURL); err != nil {
+		report(LoginPrompt{URL: loginURL, BrowserErr: err, Timeout: timeout, Port: port})
+		if errors.Is(err, auth.ErrNoDisplay) {
+			// Said at once, not after the wait times out: the redirect has to land on this
+			// machine, so the person needs the URL and the port to forward, not a spinner.
+			msg := err.Error()
+			fmt.Fprintf(out, "%s%s.\n", strings.ToUpper(msg[:1]), msg[1:])
+			fmt.Fprintln(out, "Sign-in finishes when beacon.sh redirects a browser back to this machine.")
+		} else {
+			fmt.Fprintln(out, "Could not open a browser automatically.")
+		}
+		printLoginURL(out, loginURL, port)
 	} else {
 		fmt.Fprintf(out, "Opening %s in your browser...\n", baseURL)
-		if err := openBrowser(loginURL); err != nil {
-			report(LoginPrompt{URL: loginURL, BrowserErr: err, Timeout: timeout})
-			fmt.Fprintln(out, "Could not open a browser automatically.")
-			fmt.Fprintf(out, "Open this URL to sign in to Beacon:\n%s\n", loginURL)
-		}
 	}
 	fmt.Fprintln(out, "Waiting for Beacon sign-in...")
 
@@ -267,6 +278,18 @@ func ResolveBaseURL(flagValue string) string {
 		value = DefaultBaseURL
 	}
 	return strings.TrimRight(value, "/")
+}
+
+// printLoginURL shows the sign-in URL and how to use it from another computer.
+func printLoginURL(out io.Writer, loginURL string, port int) {
+	fmt.Fprintf(out, "Open this URL to sign in to Beacon:\n%s\n", loginURL)
+	fmt.Fprintf(out, "From another computer over SSH, forward the port first: %s\n", SSHForwardCommand(port))
+}
+
+// SSHForwardCommand is the port forward that lets a browser on the SSH client finish a sign-in
+// that redirects to port on this machine.
+func SSHForwardCommand(port int) string {
+	return fmt.Sprintf("ssh -L %d:127.0.0.1:%d <this machine>", port, port)
 }
 
 func buildLoginURL(baseURL, state string, port int) string {

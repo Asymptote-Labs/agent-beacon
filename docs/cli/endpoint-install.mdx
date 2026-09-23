@@ -32,7 +32,7 @@ The `claude` harness writes both Claude Code's OpenTelemetry settings and its us
 | `--health-port <port>` | Local collector health-check port. Defaults to `13133`, moved by the same amount as `--otlp-http-port` when that is changed (HTTP port `4328` gives `13143`), so a second collector on alternate OTLP ports does not collide with the first |
 | `--collector <path>` | Path to a `beacon-otelcol` binary |
 | `--no-start` | Write files without starting the collector service |
-| `--no-browser` | During interactive setup, print the sign-in URL instead of opening a browser. Useful where no browser can be opened, though the URL still has to be opened on this machine |
+| `--no-browser` | During interactive setup, print the sign-in URL instead of opening a browser. Useful where no browser can be opened. Open the URL on this machine, or on another computer after forwarding the port it names over SSH |
 | `--service <kind>` | Service manager to use: `auto` (default), `launchd`, `systemd`, or `none` for a supervised collector process |
 | `--dry-run` | Print planned actions without changing endpoint files or services |
 | `--include-runtime-metrics` | Include generic process, runtime, and harness operational OTLP metrics in Beacon JSONL. By default, low-signal metrics such as process CPU, memory, Node.js event loop, V8 heap, GitHub Copilot CLI, and OpenClaw operational metrics are filtered out |

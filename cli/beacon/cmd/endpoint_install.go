@@ -2,11 +2,13 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/auth"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
@@ -81,7 +83,12 @@ func runEndpointDashboard(cmd *cobra.Command, args []string) error {
 	}
 	if endpointOpts.dashboardOpen {
 		if err := dashboard.OpenBrowser(url); err != nil {
-			return err
+			// Over SSH the dashboard is still worth serving: forward its port and open it on
+			// the client.
+			if !errors.Is(err, auth.ErrNoDisplay) {
+				return err
+			}
+			fmt.Printf("Not opening a browser (%v).\n", err)
 		}
 	}
 	return dashboardListenAndServe(dashboard.Options{
