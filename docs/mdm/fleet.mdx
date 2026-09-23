@@ -1,262 +1,146 @@
 ---
 title: "Fleet"
-description: "Deploy and inventory the Beacon endpoint agent with Fleet."
+description: "Deploy the Beacon endpoint agent to Macs with Fleet, and reference for the Fleet scripts, policies, and reports it ships."
 ---
 
-## Overview
+Fleet installs Beacon on your Macs as a custom package. Beacon then runs locally, writing agent activity to `/var/log/beacon-agent/runtime.jsonl`, and needs no Beacon account and no Fleet API access on the Mac.
 
-Fleet can deploy and inventory the local Beacon endpoint agent on managed Macs. Beacon's Fleet support uses the signed and notarized macOS `.pkg` as Fleet software, while the endpoint agent writes local JSONL telemetry without requiring a hosted account, remote policy fetch, or Fleet API credentials.
+<Card title="Beacon with Fleet and S3" icon="bucket" href="/guides/fleet-s3-mdm">
+  Start here. A step-by-step rollout from a pilot Mac to every Mac, including forwarding to your own S3 bucket.
+</Card>
 
-## What Fleet manages
+This page is the reference for what the package gives Fleet admins.
 
-| Signal | How it helps |
-| --- | --- |
-| Package installation | Deploy Beacon binaries, endpoint scripts, Fleet queries, and Fleet helper scripts. |
-| System endpoint configuration | Install launchd service files and collector configuration for system-mode telemetry. |
-| Runtime telemetry location | Write endpoint events to `/var/log/beacon-agent/runtime.jsonl`. |
-| Inventory and remediation | Use Fleet queries, policies, labels, and scripts to identify missing, stale, or unhealthy installs. |
+## Requirements
 
-## Package layout
+- **Fleet Premium and a specific team.** Custom packages can't be added to "All teams". Fleet 4.82 and later call teams *fleets*.
+- **Apple Silicon Macs.** The signed package, `BeaconEndpointAgent-<version>-arm64.pkg`, is Apple Silicon only. Set the package's **Pre-install query** to `SELECT 1 FROM system_info WHERE cpu_type LIKE 'arm64%';` so Fleet skips Intel Macs.
+- **Scripts enabled in `fleetd`.** This is the default with Fleet MDM. Otherwise deploy `fleetd` with `--enable-scripts`.
+- **A custom uninstall script.** Fleet's default `.pkg` uninstall only removes `.app` bundles. Use the one in [the guide](/guides/fleet-s3-mdm#3-set-up-fleet), which runs Beacon's full cleanup.
+- **Nothing in the post-install script.** If a Fleet post-install script fails, `fleetd` uninstalls the package. Run S3 setup and self-update setup as separate scripts after the install.
+- **Leave the package's Deploy switch off.** Fleet 4.83 and later call automatic install **Deploy**. For a `.pkg`, the policy it creates checks for an app bundle to decide whether the package is installed, and Beacon has none, so that policy never passes. Use the **Beacon: installed** policy with an **Install software** automation instead.
 
-The macOS package includes Beacon binaries, endpoint helper scripts, and Fleet assets:
+## What the package installs
 
-```text
-/opt/beacon/bin/beacon
-/opt/beacon/bin/beacon-otelcol
-/opt/beacon/bin/vector
-/opt/beacon/scripts/install-endpoint.sh
-/opt/beacon/scripts/uninstall-endpoint.sh
-/opt/beacon/fleet/queries/*.sql
-/opt/beacon/fleet/scripts/*.sh
-```
-
-The package postinstall performs the default system install. That install creates system configuration and runtime state:
+The package postinstall runs a system-mode install and configures Claude Code and Codex for the user logged in at the Mac.
 
 ```text
+/opt/beacon/bin/beacon, beacon-otelcol, vector
+/opt/beacon/fleet/policies/*.sql     Fleet policies
+/opt/beacon/fleet/queries/*.sql      Fleet reports
+/opt/beacon/fleet/scripts/*.sh       install, repair, validate, uninstall
 /Library/Application Support/Beacon/Endpoint/config.json
-/Library/Application Support/Beacon/Endpoint/otelcol.yaml
 /Library/LaunchDaemons/com.beacon.endpoint.collector.plist
+/Library/LaunchDaemons/com.beacon.endpoint.inventory.plist
 /var/log/beacon-agent/runtime.jsonl
+/var/log/beacon-agent/inventory_state.jsonl
 ```
 
-## Requirements and caveats
+## Policies and reports
 
-- **Fleet Premium.** Custom software packages are a Premium feature and must be added to a specific team. They cannot be added to All teams.
-- **Apple Silicon only.** The signed, notarized endpoint `.pkg` (`BeaconEndpointAgent-<version>-arm64.pkg`) is arm64. Intel Macs are not covered by that artifact.
-- **Scripts enabled on `fleetd`.** Software install and Fleet scripts require `fleetd --enable-scripts`. Scripts are enabled by default when you use Fleet MDM.
-- **Self-hosted package storage.** If you self-host Fleet, configure an S3 bucket for Fleet to store uploaded installers and raise load-balancer timeouts to at least five minutes for package upload.
-- **Do not put S3 or self-update enablement in the package post-install script.** If a Fleet post-install script exits non-zero, `fleetd` uninstalls the package. Enable self-updates and S3 forwarding with separate Fleet scripts after install.
-- **Self-updates are off by default** and apply only to the Apple Silicon system package install. Endpoints need network access to the GitHub release manifest unless you set `BEACON_UPDATE_MANIFEST_URL`.
-- **S3 forwarding reuses the packaged Vector helper** at `/opt/beacon/jamf/claude/s3/install-forwarder.sh`. There is no separate Fleet-only forwarder binary. Release packages include `/opt/beacon/bin/vector`.
-- **Fleet's default `.pkg` uninstall only removes `.app` bundles.** Beacon lives under `/opt/beacon`, so supply a custom uninstall script that calls the packaged cleanup helper.
+The package ships two kinds of osquery files.
 
-For S3 forwarding plus self-updates, follow [Beacon with Fleet and S3](/guides/fleet-s3-mdm).
+**Policies** (`/opt/beacon/fleet/policies`) return a row only when that part of Beacon is healthy, so a failing policy points at a problem. They all pass on Intel Macs, where the package doesn't apply.
 
-## Deploy with Fleet
+| File | Passes when |
+| --- | --- |
+| `beacon-installed.sql` | The package receipt and `/opt/beacon/bin/beacon` are present |
+| `collector-running.sql` | The collector process is running as root |
+| `s3-forwarder-running.sql` | Vector is running with Beacon's S3 config |
+| `s3-forwarding-configured.sql` | The S3 credentials file, Vector config, and LaunchDaemon are all present |
+| `inventory-heartbeat-recent.sql` | Inventory was written in the last 96 hours |
 
-Upload the signed and notarized `.pkg` as Fleet software and scope it to a pilot team or label. The package postinstall performs the default system install, so no post-install script is required for the common deployment path. See [Deploy software](https://fleetdm.com/guides/deploy-software-packages) for Fleet's package, script, and targeting model.
+**Reports** (`/opt/beacon/fleet/queries`) return one row per host with a status value, for dashboards and exports: install state and version, collector health, S3 and Falcon forwarder health, S3 configuration, inventory heartbeat age, last event age, config presence, runtime log presence, and Splunk HEC configuration.
 
-<Steps>
-  <Step title="Upload the Beacon package">
-    Upload the signed and notarized Beacon macOS package as Fleet software. The package installs Beacon binaries under `/opt/beacon` and includes Fleet helper scripts and inventory queries.
-  </Step>
-  <Step title="Scope to a pilot">
-    Scope the software to a pilot team or label before broader rollout.
-  </Step>
-  <Step title="Add policies or labels">
-    Add queries from `/opt/beacon/fleet/queries` as Fleet policies or labels to track install state, service health, log freshness, config state, and runtime log writability.
-  </Step>
-  <Step title="Optionally enable endpoint self-updates">
-    Beacon package self-updates are off by default. To opt in during rollout,
-    add a Fleet script or policy command that runs one of the following after the
-    package install completes:
+<Warning>
+  Don't turn reports into policies. A report returns a row on every host, and Fleet passes a policy whenever its query returns a row, so the policy always passes. Policies built from these files before the `policies/` folder existed have this problem, and three of them also read a `launchd` column that osquery doesn't have. Replace them with the files in `policies/`.
+</Warning>
 
-    ```bash title="Enable automatic package self-updates"
-    /opt/beacon/bin/beacon endpoint update enable
-    ```
-
-    For visibility without automatic package installation, enable check-only
-    mode instead:
-
-    ```bash title="Enable check-only update monitoring"
-    /opt/beacon/bin/beacon endpoint update enable --check-only
-    ```
-
-    Both commands require root and are intended for the system package install.
-    `auto` mode installs newer compatible signed packages from the release
-    manifest after package verification and health checks. `check-only` mode
-    writes local update status events to `/var/log/beacon-agent/system.jsonl` but
-    does not download or apply packages.
-  </Step>
-  <Step title="Optionally configure S3 forwarding">
-    After the package is installed, run a Fleet script that starts Vector
-    forwarding. Do not put that script in the package post-install. See
-    [Beacon with Fleet and S3](/guides/fleet-s3-mdm).
-  </Step>
-  <Step title="Validate the deployment">
-    Run the Fleet validation helper on a managed Mac:
-
-    ```bash
-    /opt/beacon/fleet/scripts/validate.sh
-    sudo /opt/beacon/bin/beacon endpoint update status
-    ```
-  </Step>
-</Steps>
+The [admin helper](/guides/fleet-s3-mdm#3-set-up-fleet) creates the five policies and the main reports for you.
 
 ## Fleet scripts
 
-Fleet scripts are installed under `/opt/beacon/fleet/scripts`:
+These are in `/opt/beacon/fleet/scripts` on each Mac:
 
-| Script | Purpose |
-|--------|---------|
-| `install.sh` | Reinstall or install with optional arguments |
-| `validate.sh` | Check status JSON, Wazuh validation, and LaunchDaemon health |
-| `repair.sh` | Preserve logs and config while repairing collector and harness configuration |
-| `uninstall.sh` | Remove endpoint service files |
+| Script | What it does |
+| --- | --- |
+| `install.sh` | Runs the system install again, for example with different agents |
+| `repair.sh` | Repairs the collector and agent settings. Keeps logs, config, and any S3 forwarder. |
+| `validate.sh` | Prints endpoint status and LaunchDaemon health |
+| `uninstall.sh` | Removes the endpoint service, its config, and the S3, GCS, and Falcon forwarders with their credentials. It leaves `/opt/beacon` and the package receipt. For a complete removal, uninstall the package from Fleet. |
 
-Use the install script when a workflow needs explicit parameters or a reinstall action.
+Fleet runs scripts without arguments, so pass settings as environment variables in a short wrapper script. For example, to add Gemini CLI:
 
-Fleet install script positional arguments:
-
-```text
-install.sh argument 1: harnesses, default claude,codex; include gemini to opt in Gemini CLI telemetry; do not include GitHub Copilot CLI
-install.sh argument 2: OTLP gRPC port, default 4317
-install.sh argument 3: OTLP HTTP port, default 4318
-install.sh argument 4: collector path, default /opt/beacon/bin/beacon-otelcol
-install.sh argument 5: no-start flag, accepts 1/true/yes
-install.sh argument 6: Splunk HEC endpoint URL
-install.sh argument 7: Splunk HEC token
-install.sh argument 8: optional Splunk index
-install.sh argument 9: optional Splunk source, default beacon-endpoint-agent when configured
-install.sh argument 10: optional Splunk sourcetype, default beacon:endpoint when configured
-install.sh argument 11: Splunk TLS skip-verify flag, accepts 1/true/yes; use only for testing
-install.sh argument 12: optional Splunk HEC CA certificate path
+```bash
+#!/bin/sh
+BEACON_ENDPOINT_HARNESSES=claude,codex,gemini /opt/beacon/fleet/scripts/repair.sh
 ```
 
-Fleet repair script positional arguments:
+| Variable | Used by | Default |
+| --- | --- | --- |
+| `BEACON_ENDPOINT_HARNESSES` | `install.sh`, `repair.sh` | `claude,codex` |
+| `BEACON_OTLP_GRPC_PORT`, `BEACON_OTLP_HTTP_PORT` | `install.sh`, `repair.sh` | `4317`, `4318` |
+| `BEACON_SPLUNK_HEC_ENDPOINT`, `BEACON_SPLUNK_HEC_TOKEN` | `install.sh`, `repair.sh` | none |
+| `BEACON_KEEP_LOGS=1`, `BEACON_KEEP_CONFIG=1` | `uninstall.sh` | off |
 
-```text
-repair.sh argument 1: harnesses, default claude,codex; include gemini to opt in Gemini CLI telemetry; do not include GitHub Copilot CLI
-repair.sh argument 2: OTLP gRPC port, default 4317
-repair.sh argument 3: OTLP HTTP port, default 4318
-repair.sh argument 4: Splunk HEC endpoint URL
-repair.sh argument 5: Splunk HEC token
-repair.sh argument 6: optional Splunk index
-repair.sh argument 7: optional Splunk source
-repair.sh argument 8: optional Splunk sourcetype
-repair.sh argument 9: Splunk TLS skip-verify flag
-repair.sh argument 10: optional Splunk HEC CA certificate path
+GitHub Copilot CLI isn't in the agent list. Deploy `COPILOT_OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` in Copilot's launch environment instead.
+
+## Self-updates
+
+Self-updates are off by default. Turn them on with a Fleet script after the package is installed:
+
+```bash
+#!/bin/sh
+/opt/beacon/bin/beacon endpoint update enable            # or: update enable --check-only
 ```
 
-## Inventory with queries
-
-Add queries from `/opt/beacon/fleet/queries` as Fleet policies or labels. They cover package, service, log, and config presence and freshness.
-
-Available queries:
-
-- `beacon-version.sql`
-- `collector-service-health.sql`
-- `last-event-age-seconds.sql`
-- `configured-harnesses.sql`
-- `runtime-log-writable.sql`
-- `splunk-hec-forwarding.sql`
-- `falcon-vector-forwarder-health.sql`
-- `s3-vector-forwarder-health.sql`
-- `s3-vector-forwarding-configured.sql`
-
-Recommended Fleet policies:
-
-- Beacon install state is not `not_installed`.
-- Collector service health is `running`.
-- Last runtime event age is less than `86400`.
-- Endpoint config state is `present`.
-- Runtime log state is `present`.
-- Splunk HEC config state is `configured` when HEC export is required.
-- S3 Vector forwarder health is `running` when S3 forwarding is required.
-- S3 Vector forwarding state is `configured` when S3 forwarding is required.
-
-## Repair and uninstall
-
-Use `/opt/beacon/fleet/scripts/repair.sh` for endpoints where policies report a stale or unhealthy install. Include `gemini` in the harness argument, for example `claude,codex,gemini`, when the repair workflow should manage Gemini CLI telemetry settings. Configure GitHub Copilot CLI separately by deploying `COPILOT_OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` in Copilot's launch environment.
-
-Use `/opt/beacon/fleet/scripts/uninstall.sh` to remove endpoint service files. Set `BEACON_KEEP_LOGS=1` or the first uninstall argument to preserve runtime logs during removal. Set `BEACON_KEEP_CONFIG=1` or the second uninstall argument to preserve harness telemetry configuration.
+`auto` mode installs newer signed packages after verifying them, and rolls back if the new version fails its health check. `check-only` only records that an update is available, in `/var/log/beacon-agent/system.jsonl`. Macs need to reach GitHub Releases. To use a release manifest you host, write `{"manifest_url": "https://..."}` to `/Library/Application Support/Beacon/Endpoint/managed.json`.
 
 ## Troubleshooting
 
 <AccordionGroup>
-  <Accordion title="Beacon is not installed">
-    If the Beacon version query reports `not_installed`, confirm the Fleet software install completed and that the package is scoped to the host.
-
-    On the device, verify that the expected files exist:
+  <Accordion title="Beacon: installed fails">
+    Check that the package is scoped to the host and that the install finished in the host's **Activity** tab. On the Mac:
 
     ```bash
     ls /opt/beacon/bin/beacon
-    ls /opt/beacon/fleet/scripts/validate.sh
+    pkgutil --pkg-info ai.asymptote.beacon.endpoint
     ```
   </Accordion>
-  <Accordion title="Collector service is not running">
-    Check endpoint status and launchd state:
+  <Accordion title="Beacon: collector running fails">
+    ```bash
+    sudo /opt/beacon/bin/beacon endpoint status --system
+    sudo /opt/beacon/bin/beacon endpoint doctor --system
+    ```
+
+    `doctor` prints the command that fixes anything it finds. `/opt/beacon/fleet/scripts/repair.sh` also repairs the collector without touching logs or forwarding.
+  </Accordion>
+  <Accordion title="No agent activity from a Mac">
+    The package only configures the user logged in when it installed. After that user logs in, run:
 
     ```bash
-    sudo /opt/beacon/bin/beacon endpoint status --json
-    sudo launchctl print system/com.beacon.endpoint.collector
+    sudo /opt/beacon/bin/beacon endpoint user-config repair-installed --system
     ```
 
-    If the service file or collector configuration drifted, run `/opt/beacon/fleet/scripts/repair.sh`.
+    Agent sessions that were already open keep their old settings, so start a new one.
   </Accordion>
-  <Accordion title="Runtime events are stale or missing">
-    Verify that the runtime log exists and is writable:
-
-    ```bash
-    sudo test -w /var/log/beacon-agent/runtime.jsonl
-    sudo /opt/beacon/bin/beacon endpoint wazuh validate
-    ```
-
-    If validation succeeds but events remain stale, confirm the configured harnesses match the agent harnesses installed or configured for the device and that the local collector ports are not in use by another process. For GitHub Copilot CLI, confirm Copilot's launch environment includes `COPILOT_OTEL_ENABLED=true` and points OTLP HTTP at the local Beacon collector.
+  <Accordion title="S3 forwarding">
+    See [Troubleshooting in the Fleet and S3 guide](/guides/fleet-s3-mdm#troubleshooting).
   </Accordion>
-  <Accordion title="Splunk HEC is not configured">
-    Check Fleet install script arguments 6 and 7, or the `BEACON_SPLUNK_HEC_ENDPOINT` and `BEACON_SPLUNK_HEC_TOKEN` environment variables used by the install workflow.
-
-    Use `splunk-hec-forwarding.sql` to verify whether endpoint configuration contains a Splunk destination. On the device, confirm the non-secret destination fields:
-
-    ```bash
-    sudo /opt/beacon/bin/beacon endpoint status --system --json
-    ```
+  <Accordion title="Splunk HEC isn't configured">
+    Check that the install or repair wrapper sets `BEACON_SPLUNK_HEC_ENDPOINT` and `BEACON_SPLUNK_HEC_TOKEN`. On the Mac, `sudo /opt/beacon/bin/beacon endpoint status --system --json` shows the configured destination without the token.
   </Accordion>
-  <Accordion title="Endpoint self-update is not running">
-    Check update mode, launchd state, and local system update events:
-
+  <Accordion title="Self-updates aren't running">
     ```bash
     sudo /opt/beacon/bin/beacon endpoint update status
-    sudo launchctl print system/com.beacon.endpoint.updater
     sudo tail -n 30 /var/log/beacon-agent/system.jsonl
     ```
 
-    If the updater is disabled or missing, run the Fleet script or policy command
-    that enables the desired mode:
-
-    ```bash
-    sudo /opt/beacon/bin/beacon endpoint update enable
-    ```
-
-    To trigger an urgent update check from Fleet, run the scheduled updater path
-    immediately:
+    `Update mode: off` means the enable script hasn't run on this Mac. To check for an update right away:
 
     ```bash
     sudo BEACON_UPDATE_JITTER_SECONDS=0 /opt/beacon/bin/beacon endpoint update --scheduled
     ```
-  </Accordion>
-  <Accordion title="S3 Vector forwarder is not running">
-    Confirm the release package includes Vector and that the Fleet S3 script ran after install:
-
-    ```bash
-    ls /opt/beacon/bin/vector
-    ls /opt/beacon/jamf/claude/s3/install-forwarder.sh
-    sudo launchctl print system/com.beacon.endpoint.s3-forwarder
-    sudo tail -n 50 /tmp/com.beacon.endpoint.s3-forwarder.err
-    ```
-
-    If the environment file is missing, rerun `beacon-configure-s3-forwarding.sh` from Fleet. Do not echo AWS secrets in script output. Vector batches uploads for up to five minutes.
   </Accordion>
 </AccordionGroup>
 
@@ -264,12 +148,12 @@ Use `/opt/beacon/fleet/scripts/uninstall.sh` to remove endpoint service files. S
 
 <Columns cols={2}>
   <Card title="Beacon with Fleet and S3" icon="bucket" href="/guides/fleet-s3-mdm">
-    Upload the package, enable self-updates, and forward runtime plus inventory JSONL to S3.
+    The step-by-step rollout, including S3 forwarding.
   </Card>
   <Card title="MDM deployment" icon="laptop-mobile" href="/mdm">
-    Review the shared macOS MDM deployment model and package layout.
+    The macOS package and how it behaves under any MDM.
   </Card>
   <Card title="Log forwarding" icon="tower-broadcast" href="/log-forwarding">
-    Forward Beacon events into Wazuh, Splunk HEC, Falcon LogScale, Elastic, Datadog, Sumo Logic, Rapid7 InsightIDR, or customer-managed pipelines.
+    Other destinations: Splunk HEC, Falcon LogScale, Elastic, Sentinel, and more.
   </Card>
 </Columns>
