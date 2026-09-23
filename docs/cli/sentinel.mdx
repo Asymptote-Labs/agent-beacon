@@ -1,11 +1,11 @@
 ---
 title: "beacon endpoint sentinel"
-description: "Generate Microsoft Sentinel Azure Monitor Agent forwarding content and validation events for Beacon endpoint events."
+description: "Generate Microsoft Sentinel forwarding content and validation events for Beacon endpoint events."
 ---
 
 ## Forwarding command
 
-Use `beacon endpoint sentinel` to generate Microsoft Sentinel forwarding content for Beacon endpoint events. The generated pack keeps Beacon as a local JSONL producer and helps Azure Monitor Agent tail `runtime.jsonl` into a Log Analytics custom table through a Data Collection Rule.
+Use `beacon endpoint sentinel` to generate Microsoft Sentinel forwarding content for Beacon endpoint events. The generated pack keeps Beacon as a local JSONL producer and gets `runtime.jsonl` into a Log Analytics custom table through a Data Collection Rule, either with Azure Monitor Agent or with the Vector that ships with Beacon and the Logs Ingestion API. The Vector path needs no Azure Arc.
 
 Beacon does not store Azure tenant IDs, client secrets, workspace IDs, DCR identifiers, ingestion endpoints, or Azure Monitor Agent configuration. Keep those values in Azure, endpoint-management policy, or deployment tooling.
 
@@ -80,7 +80,7 @@ beacon endpoint sentinel print-config --log-path /path/to/runtime.jsonl
 beacon endpoint sentinel install-pack --output ./beacon-sentinel-pack
 ```
 
-The pack includes setup instructions, the `BeaconRuntime_CL` table schema, a DCR template, the DCR transform, starter hunting queries, example detection logic, and sample Beacon endpoint events.
+The pack includes setup instructions, the `BeaconRuntime_CL` table schema, a DCR template for each path (`dcr-template.json` for Azure Monitor Agent, `dcr-logs-ingestion-template.json` for Vector), `vector.toml`, the DCR transform, starter hunting queries, example detection logic, and sample Beacon endpoint events.
 
 ### Examples
 
@@ -162,7 +162,7 @@ Expected validation query: BeaconRuntime_CL | where Message has "Beacon endpoint
 
 <Columns cols={2}>
   <Card title="Microsoft Sentinel forwarding" icon="chart-line" href="/log-forwarding/microsoft-sentinel">
-    Configure Azure Monitor Agent and Data Collection Rules for Beacon events.
+    Configure Azure Monitor Agent or Vector, and Data Collection Rules, for Beacon events.
   </Card>
   <Card title="Log forwarding" icon="tower-broadcast" href="/log-forwarding">
     Review forwarding patterns and validation steps.

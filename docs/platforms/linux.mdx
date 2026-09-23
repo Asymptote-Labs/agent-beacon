@@ -153,7 +153,7 @@ A new install is local-only. Nothing leaves the machine until you set up a desti
 |---|---|
 | [Splunk](/log-forwarding/splunk) | The collector, over HEC |
 | [Elastic](/log-forwarding/elastic), [Datadog](/log-forwarding/datadog), [Wazuh](/log-forwarding/wazuh) | That product's own agent, tailing the log |
-| [Microsoft Sentinel](/log-forwarding/microsoft-sentinel) | Azure Monitor Agent, tailing the log |
+| [Microsoft Sentinel](/log-forwarding/microsoft-sentinel) | Vector, through the Logs Ingestion API. Or Azure Monitor Agent, which outside Azure needs Azure Arc first |
 | [S3](/log-forwarding#aws-s3), [GCS](/log-forwarding#google-cloud-storage), [CloudWatch](/log-forwarding/cloudwatch), [Sumo Logic](/log-forwarding/sumo), [Rapid7](/log-forwarding/rapid7), [CrowdStrike Falcon](/log-forwarding/falcon) | Vector |
 | [Beacon Managed](/log-forwarding/asymptote) | Vector, set up by `beacon endpoint connect` |
 
@@ -221,6 +221,8 @@ Install in user mode if you do not want a system service, either because you are
 ```bash title="User-mode install"
 beacon endpoint install
 ```
+
+On an interactive terminal this opens the setup wizard, which asks you to sign in. Sign-in finishes in a browser on this machine, so over SSH or with no display the wizard says so straight away and offers to finish without an account, or to show the sign-in URL with the `ssh -L` command for opening it on your own computer. See [Onboarding](/cli/endpoint-onboarding). `BEACON_ONBOARDING=0` skips the wizard, and package installs never show it.
 
 This writes everything under `~/.beacon/endpoint` and registers a `systemctl --user` unit. One caveat has no macOS equivalent and is worth stating plainly: **a `--user` unit stops when you log out**, unless linger is enabled for your account. Beacon enables it during install when it can:
 

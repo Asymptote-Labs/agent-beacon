@@ -11,6 +11,46 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## September 2026
 
+### v1.3.22 · September 23, 2026
+
+- **Vector ships with Beacon on Linux** · The `.deb` and `.rpm` install
+  [Vector](https://vector.dev) 0.56.0 at `/opt/beacon/bin/vector`, the Linux
+  archives carry it as `beacon-vector` beside `beacon`, and Homebrew on Linux
+  installs that same file. It is the static musl build, so it runs on minimal and
+  custom-built hosts, and it runs only when a destination needs it: Beacon
+  Managed, S3, GCS, CloudWatch, Sumo Logic, Rapid7, Falcon, or Sentinel. Beacon
+  finds it without PATH or `BEACON_VECTOR_BIN`.
+- **Vector is pinned to 0.56.0 everywhere** · Vector 0.57 stops expanding
+  `${VAR:-default}` in config files and 0.58 stops expanding `${VAR}`, which broke
+  most generated forwarding configs. The Homebrew `beacon-vector` keg on Apple
+  Silicon moves back from 0.58.0 to 0.56.0 on the next `brew upgrade`, matching the
+  macOS package and the Linux packages. CI now loads every generated config with
+  the bundled Vector, and a macOS release fails if its package has no Vector.
+- **Microsoft Sentinel without Azure Arc** · The Sentinel pack adds `vector.toml`
+  and `dcr-logs-ingestion-template.json`. The bundled Vector sends
+  `runtime.jsonl` to the Logs Ingestion API as an Entra app registration, through
+  the same transform into the same `BeaconRuntime_CL` table as the Azure Monitor
+  Agent path. The docs now say plainly that Azure Monitor Agent on a machine
+  outside Azure needs Azure Arc first, and give a systemd unit for the Vector
+  path.
+- **Sign-in says at once when it cannot finish** · On Linux with no display, or
+  over SSH, the install wizard goes straight to recovery and explains why
+  instead of waiting five minutes for a browser nobody can see. Finishing without
+  an account is the default; the sign-in URL comes with the `ssh -L` command for
+  its port. `beacon login` prints the same, and `dashboard --open` no longer fails
+  over SSH.
+- **Homebrew upgrades no longer strand services** · Vector and the collector
+  found beside a Homebrew-installed `beacon` now resolve to the `<prefix>/bin`
+  link rather than the versioned keg, so the forwarder and collector units keep
+  working after `brew upgrade`.
+- **Hook-only installs leave Claude Code and Codex alone** ·
+  `beacon endpoint install --harness omp` (or any selection with no OpenTelemetry
+  runtime) no longer writes OTLP settings into `~/.claude/settings.json` and
+  `~/.codex/config.toml`. Selections that name those runtimes are unchanged.
+- **RPM coverage** · The package smoke test now installs, upgrades, and removes
+  the `.rpm` on Rocky 9 in CI, alongside the `.deb` on Ubuntu, and checks that
+  `apt purge` removes config and logs.
+
 ### v1.3.21 · September 23, 2026
 
 - **Browser events identify the browser that produced them** · The browser
@@ -54,6 +94,13 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   compares DeepSeek's native sessions with retained live-hook evidence and
   reports `dsh_hook_capture` when sandboxing prevented live capture, while
   directing operators to session sync for backfill.
+- **The supervised collector no longer signals an unrelated process** · In
+  containers and other hosts without a service manager, a pidfile that outlived
+  its collector could name a process the kernel had since given that pid, and
+  unload would send it SIGTERM. The pid now counts as the collector only when its
+  command line matches the program it was started as. The RPM uninstall docs now
+  say to run `beacon endpoint uninstall --system` before `dnf remove`, since RPM
+  has no purge.
 - **Trace and memory content fixes** · Trace views now use retained assistant
   response or reasoning text as `content.text`, keeping the event label as the
   summary. Jev/Noul candidates no longer store the question type as if it were

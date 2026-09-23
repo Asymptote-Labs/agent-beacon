@@ -85,7 +85,7 @@ flowchart LR
   endpointMgmt["MDM or secret tooling"] -->|"log group, stream prefix, AWS credentials"| vectorAgent
 ```
 
-Install Vector using your normal endpoint management tooling, then copy the generated config into Vector's config directory. On a macOS system-mode Beacon deployment, the generated config tails `/var/log/beacon-agent/runtime.jsonl`:
+Beacon's macOS package and Linux `.deb` and `.rpm` already install Vector at `/opt/beacon/bin/vector`. Otherwise, install Vector using your normal endpoint management tooling. Then copy the generated config into Vector's config directory. On a macOS system-mode Beacon deployment, the generated config tails `/var/log/beacon-agent/runtime.jsonl`:
 
 ```bash title="Install Vector using your normal endpoint management tooling, then copy the generated config into Vector's config directory. On a macOS system-mode Beacon deployment, the generated config tails /var/log/beacon-agent/runtime.jsonl"
 sudo mkdir -p /etc/vector
