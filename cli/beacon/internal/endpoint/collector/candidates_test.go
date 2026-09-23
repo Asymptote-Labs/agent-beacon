@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -37,6 +38,33 @@ func TestDefaultBinaryCandidatesLooksForTheNameOnDisk(t *testing.T) {
 		}
 	} else if strings.HasSuffix(first, ".exe") {
 		t.Fatalf("first candidate %q has a .exe on a POSIX platform", first)
+	}
+}
+
+// A Homebrew CLI runs from its versioned keg. The collector path found here goes into the service
+// unit, and the keg is deleted at the next `brew upgrade`, so the sibling has to be the
+// <prefix>/bin link. PATH would usually find the link first, but not under sudo on Linuxbrew.
+func TestDefaultBinaryCandidatesUseTheHomebrewLink(t *testing.T) {
+	prefix := t.TempDir()
+	kegBin := filepath.Join(prefix, "Cellar", "beacon", "1.3.20", "bin")
+	link := filepath.Join(prefix, "bin", binaryFileName())
+	for _, dir := range []string{kegBin, filepath.Dir(link)} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(kegBin, binaryFileName()), nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(link, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := currentExecutable
+	currentExecutable = func() (string, error) { return filepath.Join(kegBin, "beacon"), nil }
+	t.Cleanup(func() { currentExecutable = old })
+
+	if got := defaultBinaryCandidates()[0]; got != link {
+		t.Fatalf("first candidate = %q, want the Homebrew link %q", got, link)
 	}
 }
 

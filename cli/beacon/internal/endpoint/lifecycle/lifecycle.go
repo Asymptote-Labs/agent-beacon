@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/brewpath"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
 	endpointcollector "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/collector"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
@@ -146,18 +147,9 @@ func DefaultInventoryJobProgram(userMode bool) string {
 	return "beacon"
 }
 
-// stableProgramPath keeps the scheduled unit pointing at a path that survives upgrades. A
-// Homebrew binary reports its versioned Cellar keg, which `brew upgrade` deletes; the linked
-// `<prefix>/bin/beacon` is the path that keeps resolving, so that is what the unit records.
-func stableProgramPath(exe string) string {
-	if idx := strings.Index(exe, string(filepath.Separator)+"Cellar"+string(filepath.Separator)); idx > 0 {
-		linked := filepath.Join(exe[:idx], "bin", filepath.Base(exe))
-		if _, err := os.Stat(linked); err == nil {
-			return linked
-		}
-	}
-	return exe
-}
+// stableProgramPath keeps the scheduled unit pointing at a path that survives upgrades: a Homebrew
+// binary's linked <prefix>/bin/beacon rather than its versioned keg, which `brew upgrade` deletes.
+func stableProgramPath(exe string) string { return brewpath.Stable(exe) }
 
 // InventoryHeartbeatStatus is the status view of the scheduled inventory job.
 type InventoryHeartbeatStatus struct {

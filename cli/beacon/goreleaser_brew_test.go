@@ -70,9 +70,9 @@ func TestHomebrewFormulaNeverDependsOnAFormulaNamedVector(t *testing.T) {
 // nothing else finds it. Renaming the formula on either side alone leaves `brew install
 // beacon` installing a Vector that `beacon endpoint connect` cannot see.
 //
-// The dependency is macOS-only because Beacon bundles the tap's Vector mirror only on
-// macOS. Homebrew-on-Linux installs Beacon without a Vector dependency and uses the
-// vector.dev package path documented for Linux instead. The mirror formula itself still
+// The dependency is macOS-only because Linux needs none: the Linux archive the formula
+// installs from already carries Vector as beacon-vector (see
+// TestLinuxReleaseArtifactsCarryVectorWhereFindVectorLooks). The mirror formula itself still
 // carries Linux URLs so Homebrew's cross-platform tap validation can load it.
 func TestHomebrewFormulaDependsOnTheVectorMirrorFindVectorLooksFor(t *testing.T) {
 	want := "asymptote-labs/tap/" + asymptote.TapVectorFormula
@@ -87,9 +87,8 @@ func TestHomebrewFormulaDependsOnTheVectorMirrorFindVectorLooksFor(t *testing.T)
 			}
 			found = true
 			if dep.OS != "mac" {
-				t.Errorf("brew %q depends on %q with os %q, want %q: Beacon bundles the "+
-					"tap's Vector mirror only on macOS; Homebrew-on-Linux installs Beacon "+
-					"without a Vector dependency and uses the vector.dev package path instead",
+				t.Errorf("brew %q depends on %q with os %q, want %q: on Linux the release "+
+					"archive already carries Vector, so the dependency would install a second copy",
 					brew.Name, dep.Name, dep.OS, "mac")
 			}
 		}
@@ -101,4 +100,70 @@ func TestHomebrewFormulaDependsOnTheVectorMirrorFindVectorLooksFor(t *testing.T)
 		return
 	}
 	t.Fatal(`no brews entry named "beacon" in .goreleaser.yaml`)
+}
+
+// releaseVectorConfig is the slice of .goreleaser.yaml that puts Vector into Linux artifacts.
+type releaseVectorConfig struct {
+	Archives []struct {
+		// Either a bare glob or a {src, strip_parent, ...} entry.
+		Files []any `yaml:"files"`
+	} `yaml:"archives"`
+	NFPMs []struct {
+		Contents []struct {
+			Src string `yaml:"src"`
+			Dst string `yaml:"dst"`
+		} `yaml:"contents"`
+	} `yaml:"nfpms"`
+	Brews []struct {
+		Name    string `yaml:"name"`
+		Install string `yaml:"install"`
+	} `yaml:"brews"`
+}
+
+// TestLinuxReleaseArtifactsCarryVectorWhereFindVectorLooks keeps each Linux artifact's copy of
+// Vector at a path FindVector searches. The .deb and .rpm install it at the packaged path. The
+// archive carries it beside beacon under the archive name, and the Homebrew formula has to
+// install it from there or Homebrew-on-Linux has no Vector at all, since its tap dependency is
+// macOS-only.
+func TestLinuxReleaseArtifactsCarryVectorWhereFindVectorLooks(t *testing.T) {
+	raw, err := os.ReadFile(".goreleaser.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config releaseVectorConfig
+	if err := yaml.Unmarshal(raw, &config); err != nil {
+		t.Fatal(err)
+	}
+
+	var packaged bool
+	for _, nfpm := range config.NFPMs {
+		for _, c := range nfpm.Contents {
+			if c.Dst == asymptote.PackagedVectorPath && strings.HasSuffix(c.Src, "/"+asymptote.ArchiveVectorName) {
+				packaged = true
+			}
+		}
+	}
+	if !packaged {
+		t.Errorf("no nfpm content installs Vector at %s", asymptote.PackagedVectorPath)
+	}
+
+	var archived bool
+	for _, archive := range config.Archives {
+		for _, f := range archive.Files {
+			entry, _ := f.(map[string]any)
+			src, _ := entry["src"].(string)
+			if path.Base(strings.TrimSuffix(src, "*")) == asymptote.ArchiveVectorName {
+				archived = true
+			}
+		}
+	}
+	if !archived {
+		t.Errorf("the release archive does not carry %s", asymptote.ArchiveVectorName)
+	}
+
+	for _, brew := range config.Brews {
+		if brew.Name == "beacon" && !strings.Contains(brew.Install, `bin.install "`+asymptote.ArchiveVectorName+`" if OS.linux?`) {
+			t.Errorf("the beacon formula does not install %s on Linux:\n%s", asymptote.ArchiveVectorName, brew.Install)
+		}
+	}
 }

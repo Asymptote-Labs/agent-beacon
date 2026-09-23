@@ -46,7 +46,7 @@ curl -fsSLO "${BASE}/checksums.txt"
 grep "  ${ARCHIVE}$" checksums.txt | sha256sum --check -
 
 tar -xzf "${ARCHIVE}"
-mkdir -p ~/.local/bin && mv beacon beacon-hooks beacon-otelcol ~/.local/bin/
+mkdir -p ~/.local/bin && mv beacon beacon-hooks beacon-otelcol beacon-vector ~/.local/bin/
 
 # ~/.local/bin is already on PATH on most distributions; if `beacon version` fails, add it:
 #   echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && exec $SHELL
@@ -56,7 +56,7 @@ beacon endpoint install
 
 The version comes from the current release rather than a number you have to keep up to date, and the architecture comes from `uname -m`: `x86_64` maps to the published `amd64` archive and `aarch64` to `arm64`. An architecture Beacon does not publish stops the run before anything is downloaded.
 
-The archive contains three binaries: the `beacon` CLI, the `beacon-hooks` adapter that captures tool activity, and the `beacon-otelcol` collector. All three are needed, and all three are statically linked with no shared-library dependencies.
+The archive contains four binaries: the `beacon` CLI, the `beacon-hooks` adapter that captures tool activity, the `beacon-otelcol` collector, and `beacon-vector`, which is [Vector](https://vector.dev) for forwarding (see [Forwarding](#forwarding)). The first three are needed. `beacon-vector` only runs if you set up a destination that uses it, and it is named that so it cannot shadow a `vector` you already have on PATH. All four are statically linked with no shared-library dependencies.
 
 See [User-mode install](#user-mode-install) for what this sets up and its one caveat.
 
@@ -145,11 +145,25 @@ beacon token-usage           # token and cost rollups
 
 See the [event schema](/telemetry-schema/event-schema) for the full field reference.
 
+## Forwarding
+
+A new install is local-only. Nothing leaves the machine until you set up a destination, and each one reads the same local log.
+
+| Destination | What ships the events |
+|---|---|
+| [Splunk](/log-forwarding/splunk) | The collector, over HEC |
+| [Elastic](/log-forwarding/elastic), [Datadog](/log-forwarding/datadog), [Wazuh](/log-forwarding/wazuh) | That product's own agent, tailing the log |
+| [Microsoft Sentinel](/log-forwarding/microsoft-sentinel) | Azure Monitor Agent, tailing the log |
+| [S3](/log-forwarding#aws-s3), [GCS](/log-forwarding#google-cloud-storage), [CloudWatch](/log-forwarding/cloudwatch), [Sumo Logic](/log-forwarding/sumo), [Rapid7](/log-forwarding/rapid7), [CrowdStrike Falcon](/log-forwarding/falcon) | Vector |
+| [Beacon Managed](/log-forwarding/asymptote) | Vector, set up by `beacon endpoint connect` |
+
+Vector comes with Beacon. The `.deb` and `.rpm` install it at `/opt/beacon/bin/vector`, and the tarball carries it as `beacon-vector`. Neither is on PATH by default, and neither runs until a destination needs it. `beacon endpoint connect` finds it on its own. For the other Vector destinations, run the generated `vector.toml` with `/opt/beacon/bin/vector`, or with your own Vector 0.50 or newer.
+
 ## What the install does
 
 | Step | Result |
 |---|---|
-| Unpack | `beacon`, `beacon-hooks` and `beacon-otelcol` under `/opt/beacon/bin` |
+| Unpack | `beacon`, `beacon-hooks`, `beacon-otelcol` and `vector` under `/opt/beacon/bin` |
 | System install | Config and collector config under `/etc/beacon/endpoint` |
 | Service | `/etc/systemd/system/beacon-collector.service`, enabled and started |
 | Runtime log | `/var/log/beacon-agent/runtime.jsonl` |

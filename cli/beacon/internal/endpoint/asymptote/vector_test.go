@@ -129,10 +129,19 @@ func TestEnrollmentStoreUsesPrivatePermissionsAndAtomicWrites(t *testing.T) {
 // than a reason to keep looking.
 func TestDefaultVectorSearchPathsPrefersTheBeaconVectorKeg(t *testing.T) {
 	t.Setenv("HOMEBREW_PREFIX", filepath.Join("/fake", "brew"))
+	cliDir := t.TempDir()
+	oldExe := currentExecutable
+	currentExecutable = func() (string, error) { return filepath.Join(cliDir, "beacon"), nil }
+	t.Cleanup(func() { currentExecutable = oldExe })
 	paths := defaultVectorSearchPaths()
 
-	if len(paths) == 0 || paths[0] != PackagedVectorPath {
-		t.Fatalf("defaultVectorSearchPaths() = %q, want the packaged Vector first", paths)
+	if len(paths) < 2 || paths[0] != filepath.Join(cliDir, ArchiveVectorName) || paths[1] != PackagedVectorPath {
+		t.Fatalf("defaultVectorSearchPaths() = %q, want %s beside the CLI, then the packaged Vector",
+			paths, ArchiveVectorName)
+	}
+	if slices.Contains(paths, filepath.Join(cliDir, "vector")) {
+		t.Fatalf("defaultVectorSearchPaths() = %q: a plain vector beside a Homebrew beacon is the "+
+			"user's own, and must not outrank the pinned keg", paths)
 	}
 	keg := filepath.Join("/fake", "brew", "opt", TapVectorFormula, "libexec", "vector")
 	if !slices.Contains(paths, keg) {
@@ -175,5 +184,77 @@ func TestHomebrewPrefixesDeduplicates(t *testing.T) {
 	}
 	if len(got) != len(prefixes) {
 		t.Errorf("homebrewPrefixes() = %q, want the same %d prefixes as the unset default %q", got, len(prefixes), prefixes)
+	}
+}
+
+// An extracted Linux release archive, or Homebrew-on-Linux, puts Vector beside beacon as
+// beacon-vector. FindVector has to find it there without PATH or BEACON_VECTOR_BIN, or
+// forwarding from a tarball install asks the user to install a Vector they already have.
+func TestFindVectorFindsTheArchiveCopyBesideTheCLI(t *testing.T) {
+	isolateVectorDiscovery(t)
+	vectorSearchPaths = defaultVectorSearchPaths
+	cliDir := t.TempDir()
+	sibling := filepath.Join(cliDir, ArchiveVectorName)
+	if err := os.Rename(fakeVector(t, "0.58.0", 0), sibling); err != nil {
+		t.Fatal(err)
+	}
+	oldExe := currentExecutable
+	currentExecutable = func() (string, error) { return filepath.Join(cliDir, "beacon"), nil }
+	t.Cleanup(func() { currentExecutable = oldExe })
+
+	got, err := FindVector("")
+	if err != nil || got.Path != sibling || got.Version != "0.58.0" {
+		t.Fatalf("FindVector() = %+v, %v; want %s", got, err, sibling)
+	}
+}
+
+func TestVectorNotFoundMessageNamesWhereVectorComesFrom(t *testing.T) {
+	cases := map[string][]string{
+		"darwin":  {"brew install asymptote-labs/tap/" + TapVectorFormula, VectorBinEnv},
+		"linux":   {PackagedVectorPath, ArchiveVectorName, "https://vector.dev", VectorBinEnv},
+		"windows": {"https://vector.dev", VectorBinEnv},
+	}
+	for goos, want := range cases {
+		msg := vectorNotFoundMessage(goos)
+		for _, part := range want {
+			if !strings.Contains(msg, part) {
+				t.Errorf("%s: %q does not mention %q", goos, msg, part)
+			}
+		}
+	}
+	if strings.Contains(vectorNotFoundMessage("linux"), "brew install") {
+		t.Error("the Linux message should not send people to a macOS install command")
+	}
+}
+
+// Under Homebrew the running CLI is in a versioned keg, and connect writes the Vector path into the
+// forwarder's service unit. The keg path breaks at the next `brew upgrade`, so FindVector has to
+// return the <prefix>/bin link instead.
+func TestFindVectorReturnsTheHomebrewLinkNotTheKeg(t *testing.T) {
+	isolateVectorDiscovery(t)
+	vectorSearchPaths = defaultVectorSearchPaths
+	prefix := t.TempDir()
+	kegBin := filepath.Join(prefix, "Cellar", "beacon", "1.3.20", "bin")
+	if err := os.MkdirAll(kegBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	keg := filepath.Join(kegBin, ArchiveVectorName)
+	if err := os.Rename(fakeVector(t, "0.56.0", 0), keg); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(prefix, "bin", ArchiveVectorName)
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(keg, link); err != nil {
+		t.Fatal(err)
+	}
+	oldExe := currentExecutable
+	currentExecutable = func() (string, error) { return filepath.Join(kegBin, "beacon"), nil }
+	t.Cleanup(func() { currentExecutable = oldExe })
+
+	got, err := FindVector("")
+	if err != nil || got.Path != link {
+		t.Fatalf("FindVector() = %+v, %v; want the Homebrew link %s, not the keg", got, err, link)
 	}
 }

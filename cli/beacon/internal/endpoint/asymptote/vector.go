@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/brewpath"
 )
 
 // MinVectorVersion is the oldest Vector the forwarder template is validated against; the
@@ -19,8 +21,14 @@ const MinVectorVersion = "0.50.0"
 // VectorBinEnv names an explicit Vector binary, ahead of every search location.
 const VectorBinEnv = "BEACON_VECTOR_BIN"
 
-// PackagedVectorPath is where the signed macOS package installs Vector.
+// PackagedVectorPath is where the macOS package and the Linux .deb and .rpm install Vector.
 const PackagedVectorPath = "/opt/beacon/bin/vector"
+
+// ArchiveVectorName is what the Linux release archive calls Vector, next to the beacon binary.
+// Homebrew-on-Linux installs it under the same name. Not "vector", because people unpack the
+// archive into a directory on PATH, and a file named vector there would shadow the Vector they
+// already use.
+const ArchiveVectorName = "beacon-vector"
 
 // TapVectorFormula is the Homebrew formula the tap mirrors Vector as, and the name of the
 // keg `brew install beacon` pulls in on macOS.
@@ -40,13 +48,30 @@ type VectorInfo struct {
 }
 
 // ErrVectorNotFound is returned when no usable Vector binary exists.
+var ErrVectorNotFound = errors.New(vectorNotFoundMessage(runtime.GOOS))
+
+// vectorNotFoundMessage says where Vector should have come from on this platform.
 //
 // The Homebrew hint names the tap's own formula rather than a bare "brew install vector":
 // Vector is not in homebrew-core, so the bare name is ambiguous once both vectordotdev/brew
-// and asymptote-labs/tap are tapped, and Homebrew refuses an ambiguous name. Any Vector at
-// or above MinVectorVersion satisfies FindVector, whichever tap or package it came from.
-var ErrVectorNotFound = errors.New("vector was not found; install it from https://vector.dev " +
-	"(macOS: brew install asymptote-labs/tap/" + TapVectorFormula + ") or set " + VectorBinEnv)
+// and asymptote-labs/tap are tapped, and Homebrew refuses an ambiguous name. On Linux every
+// Beacon artifact ships Vector, so a missing one means Beacon was installed some other way or
+// the file was removed. Any Vector at or above MinVectorVersion satisfies FindVector.
+func vectorNotFoundMessage(goos string) string {
+	switch goos {
+	case "darwin":
+		return "vector was not found; install it with `brew install asymptote-labs/tap/" + TapVectorFormula +
+			"` or from https://vector.dev, or set " + VectorBinEnv
+	case "linux":
+		return "vector was not found; the Beacon .deb and .rpm install it as " + PackagedVectorPath +
+			" and the release archive carries it as " + ArchiveVectorName + " beside beacon. " +
+			"Reinstall Beacon from one of those, install Vector " + MinVectorVersion +
+			" or newer from https://vector.dev, or set " + VectorBinEnv
+	default:
+		return "vector was not found; install Vector " + MinVectorVersion +
+			" or newer from https://vector.dev or set " + VectorBinEnv
+	}
+}
 
 // runCommandOutput is swapped by tests to fake `vector --version`.
 var runCommandOutput = func(bin string, args ...string) ([]byte, error) {
@@ -61,9 +86,9 @@ var (
 
 // FindVector locates a Vector binary of at least MinVectorVersion.
 //
-// Order: the explicit argument, BEACON_VECTOR_BIN, the packaged /opt/beacon/bin/vector, the
-// beacon-vector keg in each Homebrew prefix, a linked vector in each Homebrew prefix, then
-// PATH. The first candidate that exists is checked for version; a too-old binary is an error
+// Order: the explicit argument, BEACON_VECTOR_BIN, beacon-vector beside the running CLI, the
+// packaged /opt/beacon/bin/vector, the beacon-vector keg in each Homebrew prefix, a linked
+// vector in each Homebrew prefix, then PATH. The first candidate that exists is checked for version; a too-old binary is an error
 // rather than a reason to keep searching, because silently running a different Vector than the
 // one the operator pointed at would be worse. That is also why the beacon-vector keg is tried
 // ahead of any other Homebrew Vector: it is the copy whose version the tap pins, so it cannot
@@ -100,8 +125,21 @@ func FindVector(explicit string) (VectorInfo, error) {
 // does not leak into a test that expects none.
 var vectorSearchPaths = defaultVectorSearchPaths
 
+// currentExecutable is swapped by tests.
+var currentExecutable = os.Executable
+
 func defaultVectorSearchPaths() []string {
-	paths := []string{PackagedVectorPath}
+	var paths []string
+	// Beside the CLI first, which is what an extracted Linux release archive and a
+	// Homebrew-on-Linux install look like. Only under ArchiveVectorName: a plain vector beside
+	// the CLI in a Homebrew bin directory is whatever Vector the user linked there, and it
+	// must not outrank the pinned keg below. Under Homebrew the running CLI is in a versioned
+	// keg, and connect writes this path into the forwarder's service unit, so it is mapped to
+	// the <prefix>/bin link that survives `brew upgrade`.
+	if executable, err := currentExecutable(); err == nil {
+		paths = append(paths, brewpath.Stable(filepath.Join(filepath.Dir(executable), ArchiveVectorName)))
+	}
+	paths = append(paths, PackagedVectorPath)
 	prefixes := homebrewPrefixes()
 	// Every beacon-vector keg first, then every linked vector. Interleaving the two per
 	// prefix would let an old linked Vector in the first prefix mask the pinned keg in the

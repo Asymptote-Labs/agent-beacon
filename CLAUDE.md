@@ -290,6 +290,17 @@ before running `packaging/macos/build-pkg.sh` or
 `/opt/beacon/bin/vector` so packaged Jamf/Fleet forwarder helpers work without a
 separate Vector install.
 
+The Linux `.deb`, `.rpm`, and release archives carry Vector too. Run
+`sh packaging/linux/fetch-vector.sh` before GoReleaser: it downloads the static
+(musl) build for both arches, checks it against Vector's published checksums and
+for a program interpreter, and stages it under `cli/beacon/release-vector/`. The
+GoReleaser before-hook fails without it. The packages install it as
+`/opt/beacon/bin/vector`; the archives carry it as `beacon-vector`, which the
+Homebrew formula installs on Linux. The version is pinned in that script at
+0.56.0, the same as the macOS package. Vector 0.57 and 0.58 stop expanding the
+`${VAR}` references the generated packs rely on, so bump it only together with
+`packaging/linux/validate-vector-packs.sh` passing against the new version.
+
 ### Preferred CI Release
 
 CI release automation should:
@@ -323,6 +334,14 @@ tap:
 gh release view <tag> --json url,tagName,assets --jq '.tagName + " " + .url + " assets=" + (.assets | map(.name) | join(","))'
 gh api repos/Asymptote-Labs/homebrew-tap/contents/Formula/beacon.rb --jq '.content' | base64 --decode | sed -n '1,70p'
 gh api repos/Asymptote-Labs/homebrew-tap/commits/main --jq '.sha + " " + .commit.message'
+```
+
+Check Homebrew on Linux with a real install, since formula changes only take effect
+once a release publishes them. It should print a Vector version:
+
+```bash
+docker run --rm --platform linux/amd64 homebrew/brew sh -c \
+  'brew install asymptote-labs/tap/beacon && "$(brew --prefix)/bin/beacon-vector" --version'
 ```
 
 The release should include the five GoReleaser CLI archives (four `.tar.gz` plus
@@ -380,6 +399,7 @@ cp collector-builder/dist/beacon-otelcol/darwin_amd64/beacon-otelcol .tmp/releas
 cp collector-builder/dist/beacon-otelcol/darwin_arm64/beacon-otelcol .tmp/release-<tag>/collector-builder/dist/beacon-otelcol/darwin_arm64/beacon-otelcol
 cp collector-builder/dist/beacon-otelcol/linux_amd64/beacon-otelcol .tmp/release-<tag>/collector-builder/dist/beacon-otelcol/linux_amd64/beacon-otelcol
 cp collector-builder/dist/beacon-otelcol/linux_arm64/beacon-otelcol .tmp/release-<tag>/collector-builder/dist/beacon-otelcol/linux_arm64/beacon-otelcol
+sh packaging/linux/fetch-vector.sh "$PWD/.tmp/release-<tag>/cli/beacon/release-vector"
 ```
 
 Tag and publish from the clean release checkout. Prefer explicitly exported

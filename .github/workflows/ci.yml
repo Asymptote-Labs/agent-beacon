@@ -596,6 +596,16 @@ jobs:
           # build-release-collectors.sh stages, so the before-hook finds it under either script.
           mkdir -p dist/beacon-otelcol/windows_amd64
           cp dist/beacon-otelcol/linux_amd64/beacon-otelcol dist/beacon-otelcol/windows_amd64/beacon-otelcol.exe
+      # The real Vector build, not a stand-in: the smoke test runs it and checks it is static.
+      # Cached by the script's hash, which is where the version is pinned.
+      - uses: actions/cache@v4
+        id: vector-cache
+        with:
+          path: cli/beacon/release-vector
+          key: release-vector-${{ hashFiles('packaging/linux/fetch-vector.sh') }}
+      - name: Download Vector for the Linux packages
+        if: steps.vector-cache.outputs.cache-hit != 'true'
+        run: sh packaging/linux/fetch-vector.sh
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
@@ -603,9 +613,23 @@ jobs:
       - name: Build packages
         working-directory: cli/beacon
         run: goreleaser release --snapshot --clean --skip=publish,homebrew,announce --parallelism 1
+      # Every generated Vector pack has to load in the Vector the packages ship. Vector 0.57 and 0.58
+      # changed how ${VAR} expands and broke most of them with no Beacon change at all. Uses the CLI
+      # goreleaser just built, which carries the real embedded hooks binary.
+      - name: Validate the Vector packs against the bundled Vector
+        run: |
+          sh packaging/linux/validate-vector-packs.sh \
+            cli/beacon/release-vector/linux_amd64/beacon-vector \
+            cli/beacon/dist/beacon_linux_amd64_v1/beacon
       - name: Install the .deb and verify the endpoint
         env:
           BEACON_SMOKE_ARCH: amd64
+        run: sh packaging/linux/smoke-package.sh
+      # Rocky 9, because RHEL and its rebuilds are where RPM fleets run.
+      - name: Install the .rpm and verify the endpoint
+        env:
+          BEACON_SMOKE_ARCH: amd64
+          BEACON_SMOKE_FORMAT: rpm
         run: sh packaging/linux/smoke-package.sh
 
   package-smoke:

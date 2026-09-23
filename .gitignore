@@ -57,3 +57,4 @@ collector-builder/dist/
 
 # Staged by the goreleaser before-hook; holds ~100MB of collector binaries.
 cli/beacon/release-collectors/
+cli/beacon/release-vector/

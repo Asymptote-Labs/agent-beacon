@@ -16,6 +16,9 @@ before:
     # .exe because that is the name the target needs, which build-release-collectors.sh already
     # stages -- the collector builder itself emits an extensionless PE binary.
     - cp ../../collector-builder/dist/beacon-otelcol/windows_amd64/beacon-otelcol.exe ./release-collectors/windows_amd64/beacon-otelcol.exe
+    # Vector for the Linux packages and archives, staged by packaging/linux/fetch-vector.sh. Checked
+    # here so a missing download fails the release instead of shipping packages without Vector.
+    - bash -c 'for a in amd64 arm64; do test -x release-vector/linux_$a/beacon-vector || { echo "release-vector/linux_$a/beacon-vector is missing; run packaging/linux/fetch-vector.sh" >&2; exit 1; }; done'
     # Package the external threat-rule pack (repo rules/, not embedded in the binary)
     # as a release asset users install with `beacon rules pull <asset-url>`.
     - bash -c 'mkdir -p release-rules && COPYFILE_DISABLE=1 tar --exclude="._*" --exclude=".DS_Store" -czf release-rules/threat-rules.tar.gz -C ../.. rules'
@@ -107,6 +110,11 @@ archives:
       # collector sitting beside the CLI that was run.
       - src: release-collectors/{{ .Os }}_{{ .Arch }}/beacon-otelcol*
         strip_parent: true
+      # Linux archives only: release-vector has no darwin or windows directory, so the glob matches
+      # nothing there. Named beacon-vector so that unpacking the archive into a directory on PATH
+      # does not shadow a Vector the user already has. FindVector looks for it beside the CLI.
+      - src: release-vector/{{ .Os }}_{{ .Arch }}/beacon-vector*
+        strip_parent: true
 
 nfpms:
   # Native packages are the Linux counterpart of the signed macOS .pkg: installing one should
@@ -135,6 +143,14 @@ nfpms:
     contents:
       - src: ../../collector-builder/dist/beacon-otelcol/linux_{{ .Arch }}/beacon-otelcol
         dst: /opt/beacon/bin/beacon-otelcol
+        file_info:
+          mode: 0755
+      # Vector runs every forwarder Beacon renders (Beacon Managed, S3, GCS, CloudWatch, Sumo Logic,
+      # Rapid7, Falcon). Same path as the macOS package, which is where FindVector looks. It does not
+      # run unless one of those is configured. /opt/beacon/bin is not on PATH, so it cannot shadow
+      # another Vector.
+      - src: release-vector/linux_{{ .Arch }}/beacon-vector
+        dst: /opt/beacon/bin/vector
         file_info:
           mode: 0755
       - src: ../../packaging/linux/install-endpoint.sh
@@ -237,10 +253,11 @@ brews:
     # which Homebrew never links into the prefix -- so it cannot collide on a bin/vector
     # symlink either. FindVector looks there first; see internal/endpoint/asymptote.
     #
-    # os: mac because Beacon only bundles the tap's Vector mirror for macOS.
-    # Homebrew-on-Linux installs Beacon with no dependency and uses the vector.dev
-    # package, as the docs say. The mirror formula itself still carries Linux URLs
-    # so Homebrew's cross-platform tap validation can load it.
+    # os: mac because Linux needs no dependency: the Linux release archive already
+    # carries Vector as beacon-vector, and the install block below puts it beside
+    # beacon, where FindVector looks first. That is the same Vector build the .deb
+    # and .rpm ship. The mirror formula itself still carries Linux URLs so
+    # Homebrew's cross-platform tap validation can load it.
     dependencies:
       - name: asymptote-labs/tap/beacon-vector
         os: mac
@@ -248,15 +265,15 @@ brews:
       bin.install "beacon"
       bin.install "beacon-hooks"
       bin.install "beacon-otelcol"
+      bin.install "beacon-vector" if OS.linux?
     caveats: |
       To configure local endpoint telemetry, run:
         beacon endpoint install
 
       To forward telemetry to the Asymptote dashboard (opt-in, revocable), run:
         beacon endpoint connect
-      On macOS that needs no extra step: this formula installs its own Vector as
-      beacon-vector, kept out of PATH so it never collides with a Vector you
-      already have. On Linux, install Vector 0.50 or newer from https://vector.dev.
+      That needs no extra step: this formula installs its own Vector as
+      beacon-vector, so it never collides with a Vector you already have.
     test: |
       system "#{bin}/beacon", "version"
 
