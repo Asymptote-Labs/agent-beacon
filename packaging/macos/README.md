@@ -24,6 +24,7 @@ The package builder assembles this payload:
 /opt/beacon/jamf/claude/gcs/install-forwarder.sh
 /opt/beacon/jamf/claude/gcs/run-forwarder.sh
 /opt/beacon/jamf/claude/gcs/repair-hooks-and-forwarder.sh
+/opt/beacon/fleet/policies/*.sql
 /opt/beacon/fleet/queries/*.sql
 /opt/beacon/fleet/scripts/*.sh
 ```
@@ -586,6 +587,33 @@ The customer-facing walkthrough is
 Do not put S3 or self-update enablement in the Fleet package post-install
 script: a non-zero post-install causes Fleet to uninstall the package.
 
+What the helper sets up on the team:
+
+- The package, named "Beacon Endpoint Agent", with a pre-install query that
+  skips Intel Macs. Fleet otherwise names the title "endpoint", after the last
+  part of the package identifier. On a rerun the helper finds the title by its
+  bundle identifier and updates only what changed, so a new release replaces
+  the package instead of adding a second one.
+- The AWS keys as Fleet secret variables. Only a global admin, maintainer, or
+  GitOps user can write those, so the API token needs a global admin or
+  maintainer role. With `BEACON_AWS_CREDENTIAL_MODE=none` the helper stores no
+  keys and a team admin or maintainer token is enough.
+- The host scripts for self-updates, S3 forwarding, and validation.
+- The five policies from `policies/` and five reports from `queries/`.
+- Automatic install, when `FLEET_AUTOMATIC_INSTALL=true`, as an install-software
+  automation on the "Beacon: installed" policy. Fleet's own automatic install
+  for a `.pkg` checks the `apps` table for a bundle identifier, and Beacon
+  installs no `.app`, so that policy never passes. The helper replaces one it
+  finds.
+
+The helper stops before writing anything when the token lacks a needed role,
+when AWS keys are missing under `--yes` (set `BEACON_AWS_CREDENTIAL_MODE=none`
+to deliver them another way), or when a key starting with `ASIA` has no session
+token. Temporary credentials work but stop uploads when they expire, so use a
+long-lived IAM user key for the writer. `--dry-run` makes no network calls.
+Run `sh examples/fleet/test/test-configure-beacon-macos-s3.sh` to exercise the
+helper against a local stand-in for the Fleet API.
+
 Fleet scripts are installed under `/opt/beacon/fleet/scripts`:
 
 ```text
@@ -612,6 +640,10 @@ install.sh argument 11: Splunk insecure TLS skip verify
 install.sh argument 12: Splunk CA file
 ```
 
+Fleet runs scripts without arguments. To change these values, upload a short
+wrapper script that sets the matching `BEACON_*` variables, for example
+`BEACON_ENDPOINT_HARNESSES=claude,codex,gemini /opt/beacon/fleet/scripts/install.sh`.
+
 Fleet repair script positional arguments:
 
 ```text
@@ -635,13 +667,36 @@ For GitHub Copilot CLI, deploy the same `COPILOT_OTEL_ENABLED=true` and
 Beacon package. Copilot is not part of the default Fleet harness argument and
 Beacon does not write Copilot shell profiles or `~/.copilot/config.json`.
 
-Add queries from `packaging/macos/fleet/queries` as Fleet policies or labels.
-They cover package/service/log/config presence and freshness; run
-`/opt/beacon/fleet/scripts/validate.sh` for full CLI-level validation of status,
-harness configuration, Wazuh validation, and launchd health.
+Fleet osquery files come in two kinds:
+
+- `packaging/macos/fleet/policies/*.sql` are Fleet policies. Each returns a row
+  only when that part of Beacon is healthy, so the policy fails on a host where
+  it is not. Each also passes on Intel Macs, where the Apple Silicon package
+  does not apply.
+- `packaging/macos/fleet/queries/*.sql` are reports (saved queries). Each
+  returns one row per host with a status value. Do not use them as policies:
+  they return a row on every host, and Fleet passes a policy whenever its query
+  returns a row.
+
+Policies built from the `queries/` files before this change always passed,
+and three of them read a `pid` column that osquery's `launchd` table does not
+have. Replace them with the files in `policies/`.
+
+Policies:
+
+- `beacon-installed.sql`: package receipt and `/opt/beacon/bin/beacon` present
+- `collector-running.sql`: `beacon-otelcol` running as root
+- `s3-forwarder-running.sql`: Vector running with the Beacon S3 config
+- `s3-forwarding-configured.sql`: S3 env file, Vector config, and LaunchDaemon present
+- `inventory-heartbeat-recent.sql`: inventory heartbeat written in the last 96
+  hours. The job runs every 6 hours but skips runs while the Mac sleeps, so a
+  shorter window fails laptops after a weekend.
+
+Reports:
 
 - `beacon-version.sql`
 - `collector-service-health.sql`
+- `inventory-heartbeat-age-seconds.sql`
 - `last-event-age-seconds.sql`
 - `configured-harnesses.sql`
 - `runtime-log-writable.sql`
@@ -650,14 +705,8 @@ harness configuration, Wazuh validation, and launchd health.
 - `s3-vector-forwarder-health.sql`
 - `s3-vector-forwarding-configured.sql`
 
-Recommended Fleet policies:
-
-- Beacon install state is not `not_installed`
-- Collector service health is `running`
-- Last runtime event age is less than `86400`
-- Endpoint config state is `present`
-- Runtime log state is `present`
-- S3 Vector forwarder health is `running` when S3 forwarding is required
+Run `/opt/beacon/fleet/scripts/validate.sh` for full CLI-level validation of
+status, harness configuration, Wazuh validation, and launchd health.
 
 ## Uninstall And Rollback
 

@@ -179,11 +179,12 @@ label. For default deployment, no post-install script is required because the
 package postinstall performs the system install.
 
 Fleet remediation and validation scripts are packaged under
-`/opt/beacon/fleet/scripts`, and osquery examples are packaged under
-`/opt/beacon/fleet/queries`. Use the queries as Fleet policies or labels for
-missing, unhealthy, stale, or misconfigured endpoints. Scope `repair.sh` to
-hosts that fail the collector health, log freshness, retention, or log
-writability policies.
+`/opt/beacon/fleet/scripts`. Fleet policies are packaged under
+`/opt/beacon/fleet/policies`: each returns a row only when the host is healthy,
+so it fails on a missing, stopped, stale, or unconfigured endpoint. Reports
+(saved queries) are under `/opt/beacon/fleet/queries` and return one row per
+host; do not use them as policies. Scope `repair.sh` to hosts that fail the
+installed, collector, or heartbeat policies.
 
 Splunk HEC forwarding can be configured with:
 
@@ -214,5 +215,5 @@ Release gates:
 - `sudo launchctl print system/com.beacon.endpoint.collector` reports the
   collector service as loaded/running
 - Jamf Extension Attributes report expected values after a recon
-- Fleet queries report expected values after host detail refresh
+- Fleet policies pass and Fleet reports show expected values after host detail refresh
 
