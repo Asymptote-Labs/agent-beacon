@@ -436,3 +436,32 @@ func TestNeedsRealSystemdRejectsContradictions(t *testing.T) {
 		t.Errorf("system+systemd is the intended combination: %v", err)
 	}
 }
+
+// The forwarding probe runs Vector by hand as the agent user against the user-mode log and secrets
+// file, so it only means something in that arrangement.
+func TestVerifyVectorForwardingRejectsArrangementsTheProbeCannotRun(t *testing.T) {
+	base := func(in *Install) Scenario {
+		return Scenario{ID: "i", Prompt: "do a thing", Install: in,
+			Expect: []Expect{{Action: "prompt.submitted", Why: "baseline"}}}
+	}
+	for _, in := range []*Install{
+		{VerifyVectorForwarding: true, Mode: "system", Service: "none"},
+		{VerifyVectorForwarding: true, NeedsRealSystemd: true, Mode: "system", Service: "systemd"},
+	} {
+		if err := base(in).Validate(); err == nil {
+			t.Errorf("%+v cannot run the forwarding probe and must be rejected", in)
+		}
+	}
+	win := base(&Install{VerifyVectorForwarding: true, Mode: "user", Service: "none"})
+	win.Platform = PlatformWindows
+	if err := win.Validate(); err == nil {
+		t.Error("a Windows scenario has no bundled Vector and must be rejected")
+	}
+	ok := base(&Install{VerifyVectorForwarding: true, Mode: "user", Service: "none"})
+	if err := ok.Validate(); err != nil {
+		t.Errorf("user mode with no service manager is the intended arrangement: %v", err)
+	}
+	if !ok.VerifiesVectorForwarding() {
+		t.Error("VerifiesVectorForwarding should report the request")
+	}
+}

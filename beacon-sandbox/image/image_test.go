@@ -650,3 +650,44 @@ func TestStaleProvenanceFallsBackToTheMtimeComparison(t *testing.T) {
 		t.Errorf("a local rebuild from current sources is fresh, got: %s", why)
 	}
 }
+
+// The Vector layer is what i04 exists to test, so a layer that installed the wrong build, or
+// skipped its checks, would make that scenario verify something the packages do not ship. It is
+// also appended only on request, so every other scenario keeps its cached image.
+func TestBuildInstallsTheBundledVectorOnlyWhenAsked(t *testing.T) {
+	spec, err := Build(Spec{RepoRoot: stubRepo(t)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if joined := strings.Join(spec.Layers, "\n"); strings.Contains(joined, VectorPath) {
+		t.Fatalf("Vector must not be installed unless a scenario asks for it:\n%s", joined)
+	}
+
+	spec, err = Build(Spec{RepoRoot: stubRepo(t), WithVector: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var layer string
+	for _, l := range spec.Layers {
+		if strings.Contains(l, VectorPath) {
+			layer = l
+		}
+	}
+	if layer == "" {
+		t.Fatal("WithVector added no layer that installs Vector")
+	}
+	for _, want := range []string{
+		"vector-" + VectorVersion + "-x86_64-unknown-linux-musl.tar.gz",
+		VectorSHA256 + "  vector-" + VectorVersion,
+		"sha256sum -c -",
+		"vector-" + VectorVersion + "-SHA256SUMS",
+		"dynamically linked",
+	} {
+		if !strings.Contains(layer, want) {
+			t.Errorf("the Vector layer is missing %q:\n%s", want, layer)
+		}
+	}
+	if !strings.HasSuffix(layer, VectorPath+" --version") {
+		t.Errorf("the layer must end by running Vector, so a bad binary fails the build:\n%s", layer)
+	}
+}

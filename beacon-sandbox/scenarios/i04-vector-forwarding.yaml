@@ -1,0 +1,37 @@
+id: i04-vector-forwarding
+# Does the Vector that the Linux packages bundle actually forward Beacon's events?
+#
+# The .deb, .rpm and Linux archives ship Vector at /opt/beacon/bin/vector. It runs Beacon Managed
+# forwarding and six customer-managed destinations, and nothing else in the suite starts it. So a
+# pack that Vector rejects, a secret backend that sends the wrong key, or a Vector build that will
+# not start on the target host would all go unnoticed.
+#
+# The image installs that Vector build at that path. After a user-mode install the probe renders
+# Beacon's Asymptote pack, writes a throwaway device key to the 0600 secrets file, and runs Vector
+# against a loopback stand-in for the ingest service. `beacon endpoint asymptote validate` writes
+# the first event, and the session writes the rest. The check wants both at the stand-in,
+# authenticated and byte-identical to the runtime log.
+#
+# User mode in the gVisor lane on purpose: there is no systemd here, so `beacon endpoint connect`
+# and the forwarder service are out of reach. Vector runs by hand as the agent user, which is
+# what the forwarder service does minus the service.
+install:
+  mode: user
+  service: none
+  expect_status_running: true
+  expect_service_kind: none
+  verify_vector_forwarding: true
+
+prompt: >-
+  Run exactly this shell command and report its output: echo {{canary}} | tee {{sentinel}}
+sentinel: /home/agent/work/i04.sentinel
+budget_usd: 1.0
+timeout_seconds: 420
+
+expect:
+  - action: prompt.submitted
+    contains: ["{{canary}}"]
+    fields: ["prompt.text", "session.id", "harness.name"]
+    why: >-
+      The session's events are what the forwarding check looks for at the stand-in. If they never
+      reached the runtime log, nothing downstream can be judged.
