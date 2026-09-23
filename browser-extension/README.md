@@ -187,6 +187,22 @@ staging one. Prefer a throwaway account where practical.
 - **(d) live smoke** (opt-in, headed) — drive the real sites in a persistent authed profile; a
   drift alarm that flags when recorded fixtures go stale. *(not yet implemented)*
 
+## Safari (experimental, not shipped)
+
+Safari support is in progress (#392). Its packaging lives in
+[`packaging/macos/safari/`](../packaging/macos/safari/README.md): the Xcode app
+wrapper script, the signing plan, the MDM example, and a
+[compatibility review](../packaging/macos/safari/compatibility.md) with its gap
+list.
+
+**The self-verifying loop above does not cover Safari.** Playwright cannot load
+extensions into WebKit, and `safaridriver` cannot install them. The replay e2e
+(layer b) therefore runs on Chromium only, and it stays the correctness gate for
+the site adapters. The unit tests (layer a) are browser-agnostic. A Safari build
+is verified by hand with the
+[Safari smoke checklist](../packaging/macos/safari/smoke-checklist.md) until an
+XCTest-based check exists.
+
 ## Status
 
 This is a **V0 MVP**: both **Claude.ai** and **ChatGPT** capture are proven end-to-end against the

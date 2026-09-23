@@ -1,0 +1,20 @@
+{
+  "Type": "com.apple.configuration.safari.extensions.settings",
+  "Identifier": "ai.asymptote.beacon.browser-collector.safari-extension-settings",
+  "ServerToken": "beacon-browser-collector-safari-1",
+  "Payload": {
+    "ManagedExtensions": {
+      "ai.asymptote.beacon.browser-collector.Extension (TEAMID1234)": {
+        "State": "AlwaysOn",
+        "PrivateBrowsing": "Allowed",
+        "AllowedDomains": [
+          "claude.ai",
+          "chatgpt.com",
+          "chat.openai.com",
+          "127.0.0.1",
+          "localhost"
+        ]
+      }
+    }
+  }
+}

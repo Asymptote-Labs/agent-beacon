@@ -1079,3 +1079,7 @@ if [ ! -f "$GCS_FORWARDER_MARKER" ]; then
   echo "combined GCS Vector repair should run forwarder before failing repair" >&2
   exit 1
 fi
+
+# Safari app-wrapper helper and MDM declaration (packaging/macos/safari). Runs on
+# Linux too: the packager and uname are faked.
+sh "$ROOT_DIR/packaging/macos/safari/test-safari-packaging.sh"
