@@ -5,11 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 func TestPathHonorsHome(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	want := filepath.Join(home, ProfilePath)
 	if got := Path(); got != want {
@@ -18,7 +20,7 @@ func TestPathHonorsHome(t *testing.T) {
 }
 
 func TestLoadMissingProfileReportsNotPrompted(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 
 	p := Load()
 	if p.Prompted() {
@@ -33,7 +35,7 @@ func TestLoadMissingProfileReportsNotPrompted(t *testing.T) {
 // signal; refusing to install over it would trade a real user for a lead.
 func TestLoadCorruptProfileReportsNotPrompted(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	path := filepath.Join(home, ProfilePath)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
@@ -48,7 +50,7 @@ func TestLoadCorruptProfileReportsNotPrompted(t *testing.T) {
 }
 
 func TestSaveRoundTrip(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 
 	in := Profile{
 		Onboarding: Onboarding{
@@ -88,8 +90,9 @@ func TestSaveRoundTrip(t *testing.T) {
 
 // The profile holds the operator's email address, so it must not be world-readable.
 func TestSaveUsesOwnerOnlyPermissions(t *testing.T) {
+	testenv.RequirePOSIXFileModes(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	if err := Save(Profile{}); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -107,8 +110,9 @@ func TestSaveUsesOwnerOnlyPermissions(t *testing.T) {
 // A profile written by an older build with looser permissions gets tightened rather
 // than silently kept, because os.WriteFile only applies its mode on creation.
 func TestSaveTightensExistingPermissions(t *testing.T) {
+	testenv.RequirePOSIXFileModes(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	path := filepath.Join(home, ProfilePath)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
@@ -131,7 +135,7 @@ func TestSaveTightensExistingPermissions(t *testing.T) {
 }
 
 func TestSavePreservesExistingInstallID(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 
 	if err := Save(Profile{InstallID: "deadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -148,7 +152,7 @@ func TestSavePreservesExistingInstallID(t *testing.T) {
 
 func TestSaveWritesValidJSON(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	if err := Save(Profile{Onboarding: Onboarding{Outcome: OutcomeSkipped}}); err != nil {
 		t.Fatalf("Save: %v", err)

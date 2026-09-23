@@ -394,30 +394,71 @@ jobs:
       # validateExecutable tested the POSIX executable bit, which is never set on Windows, so
       # DiscoverBinary rejected every collector binary there.
       #
-      # The 16 that still fail are listed in #318 with the reason each one fails. They are excluded
-      # rather than tolerated: a permanently red gate is one nobody reads. The scope widens as they are
-      # fixed, and must not widen by adding `./...` back while the assumptions remain.
+      # The widening for #318 found the next one: the Vector packs substitute log paths into TOML
+      # basic strings unescaped, so a Windows path turns `\t` and `\b` into control characters.
+      # internal/endpoint/asymptote, gcs and s3 assert the derived inventory path in vector.toml and
+      # fail on exactly that, so they stay excluded until the rendering is fixed rather than having
+      # the assertion bent to match.
+      #
+      # Excluded packages are listed in #318 with the reason each one fails. They are excluded rather
+      # than tolerated: a permanently red gate is one nobody reads. The scope widens as they are fixed,
+      # and must not widen by adding `./...` back while the assumptions remain.
       - name: Test the ported packages on Windows
         working-directory: cli/beacon
         run: |
           go test `
+            . `
+            ./cmd/... `
+            ./internal/account/... `
+            ./internal/auth/... `
+            ./internal/ci/... `
+            ./internal/claudesession/... `
+            ./internal/clinesession/... `
+            ./internal/codexsession/... `
+            ./internal/copilotsession/... `
+            ./internal/cursorsession/... `
             ./internal/devincloud/... `
+            ./internal/dshsession/... `
             ./internal/embedded/... `
             ./internal/endpoint/activity/... `
+            ./internal/endpoint/cloudwatch/... `
             ./internal/endpoint/collector/... `
             ./internal/endpoint/config/... `
+            ./internal/endpoint/dashboard/... `
+            ./internal/endpoint/datadog/... `
             ./internal/endpoint/detect/... `
+            ./internal/endpoint/diagnostics/... `
+            ./internal/endpoint/elastic/... `
+            ./internal/endpoint/falcon/... `
             ./internal/endpoint/harness/... `
             ./internal/endpoint/hooks/... `
             ./internal/endpoint/integrations/... `
             ./internal/endpoint/inventory/... `
+            ./internal/endpoint/lifecycle/... `
+            ./internal/endpoint/rapid7/... `
             ./internal/endpoint/schema/... `
             ./internal/endpoint/selfupdate/... `
             ./internal/endpoint/sentinel/... `
             ./internal/endpoint/service/... `
+            ./internal/endpoint/siempack/... `
+            ./internal/endpoint/sumo/... `
+            ./internal/endpoint/traceview/... `
             ./internal/endpoint/wazuh/... `
             ./internal/endpoint/writer/... `
+            ./internal/factorysession/... `
+            ./internal/fxsession/... `
+            ./internal/groksession/... `
+            ./internal/hermessession/... `
+            ./internal/learning/... `
+            ./internal/managedprivacy/... `
             ./internal/mcpserver/... `
+            ./internal/onboarding/... `
+            ./internal/openclawsession/... `
+            ./internal/opencodesession/... `
+            ./internal/osuser/... `
+            ./internal/pisession/... `
+            ./internal/primesession/... `
+            ./internal/testenv/... `
             ./internal/tokens/... `
             ./internal/updatecheck/... `
             ./internal/version/...

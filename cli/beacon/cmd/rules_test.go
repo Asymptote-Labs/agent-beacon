@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"github.com/spf13/cobra"
 )
 
@@ -192,7 +193,7 @@ func TestExtractRuleTarballKeepsSameBaseNameEntries(t *testing.T) {
 }
 
 func TestRulesPullAcceptsURLWithQuery(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	prev := rulesOpts
 	rulesOpts.userMode, rulesOpts.systemMode, rulesOpts.force = true, false, false
 	t.Cleanup(func() { rulesOpts = prev })
@@ -214,7 +215,7 @@ func TestRulesPullAcceptsURLWithQuery(t *testing.T) {
 }
 
 func TestRulesPullRejectsUnsupportedPath(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	prev := rulesOpts
 	rulesOpts.userMode, rulesOpts.systemMode = true, false
 	t.Cleanup(func() { rulesOpts = prev })

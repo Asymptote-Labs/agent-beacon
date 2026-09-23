@@ -13,6 +13,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/learning"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
@@ -444,7 +445,7 @@ func TestTokensEndpointSessionFilterIsCaseInsensitive(t *testing.T) {
 }
 
 func TestDetectionsEndpointListsBaselineRules(t *testing.T) {
-	t.Setenv("HOME", t.TempDir()) // empty store -> embedded baseline
+	testenv.SetHome(t, t.TempDir()) // empty store -> embedded baseline
 	handler, err := Handler(Options{UserMode: true, LogPath: filepath.Join(t.TempDir(), "runtime.jsonl")})
 	if err != nil {
 		t.Fatalf("Handler returned error: %v", err)
@@ -474,7 +475,7 @@ func TestDetectionsEndpointListsBaselineRules(t *testing.T) {
 }
 
 func TestFindingsEndpointReturnsHitsLinkedToRules(t *testing.T) {
-	t.Setenv("HOME", t.TempDir()) // empty store -> embedded baseline
+	testenv.SetHome(t, t.TempDir()) // empty store -> embedded baseline
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	// A destructive command the baseline "recursive-root-delete" rule matches.
 	line := `{"timestamp":"2026-06-11T10:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"command.executed","category":"command"},"severity":"info","endpoint":{"os":"darwin"},"harness":{"name":"claude_code"},"session":{"id":"local-session"},"command":{"command":"rm -rf /"},"message":"command.executed"}`
@@ -519,7 +520,7 @@ func TestFindingsEndpointReturnsHitsLinkedToRules(t *testing.T) {
 }
 
 func TestRunScanRejectsEmptyRuleSet(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	_, err := RunScan(true, filepath.Join(t.TempDir(), "runtime.jsonl"), t.TempDir(), "", "")
 	if err == nil {
 		t.Fatal("expected empty rule set to be rejected")
@@ -531,7 +532,7 @@ func TestRunScanRejectsEmptyRuleSet(t *testing.T) {
 
 func TestInventoryEndpointReturnsConfigsAndMCPServers(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	// A Claude Code user config declaring one MCP server, which the inventory
 	// scan should discover and surface.
 	claudeDir := filepath.Join(home, ".claude")

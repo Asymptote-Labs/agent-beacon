@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 func TestRenderLogPath(t *testing.T) {
@@ -66,7 +68,7 @@ func TestInstallWritesFilesWithModesAndLogPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0755 {
+	if testenv.HasPOSIXFileModes() && info.Mode().Perm() != 0755 {
 		t.Fatalf("script mode = %s, want 0755", info.Mode().Perm())
 	}
 
@@ -74,7 +76,7 @@ func TestInstallWritesFilesWithModesAndLogPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if configInfo.Mode().Perm() != 0644 {
+	if testenv.HasPOSIXFileModes() && configInfo.Mode().Perm() != 0644 {
 		t.Fatalf("config mode = %s, want 0644", configInfo.Mode().Perm())
 	}
 }

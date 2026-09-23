@@ -17,6 +17,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 func TestRestoreTargetTimestampedBackup(t *testing.T) {
@@ -37,7 +38,7 @@ func TestRestoreTargetLegacyBackup(t *testing.T) {
 
 func TestBuildConfigAppliesInstallOptions(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	logPath := filepath.Join(home, "runtime.jsonl")
 	collectorPath := filepath.Join(home, "bin", "otelcol")
 
@@ -88,7 +89,7 @@ func TestBuildConfigAppliesInstallOptions(t *testing.T) {
 
 func TestBuildConfigPreservesAutoUpdateMode(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	configPath := endpointconfig.ConfigPath(true)
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -229,7 +230,7 @@ func TestConfigureHarnessesRejectsClineAsHookManaged(t *testing.T) {
 
 func TestConfigureHarnessesAcceptsGemini(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	cfg := endpointconfig.Config{
 		UserMode:  true,
 		Harnesses: []string{"gemini"},
@@ -258,7 +259,7 @@ func TestConfigureHarnessesAcceptsGemini(t *testing.T) {
 
 func TestWriteReadManifestRoundTrip(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	manifest := Manifest{
 		CreatedAt:      "2026-05-12T00:00:00Z",
 		UserMode:       true,
@@ -309,7 +310,7 @@ func TestAutoUpdateModeFromConfigFileIgnoresDestinationValidation(t *testing.T) 
 	}
 	if info, err := os.Stat(path); err != nil {
 		t.Fatal(err)
-	} else if got := info.Mode().Perm(); got != 0o600 {
+	} else if got := info.Mode().Perm(); testenv.HasPOSIXFileModes() && got != 0o600 {
 		t.Fatalf("permissions = %v, want 0600", got)
 	}
 	data, err := os.ReadFile(path)
@@ -437,7 +438,7 @@ func TestUninstallFallbackRemovesKnownFiles(t *testing.T) {
 		t.Skip("launchd paths are macOS-only")
 	}
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	logPath := filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl")
 	cfg := endpointconfig.Default(true, logPath)
 	for _, path := range []string{endpointconfig.ConfigPath(true), cfg.Collector.ConfigPath, logPath} {
@@ -461,7 +462,7 @@ func TestUninstallFallbackRemovesKnownFiles(t *testing.T) {
 
 func TestConfigureHarnessesAcceptsVSCode(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	cfg := endpointconfig.Config{
 		UserMode:  true,
 		Harnesses: []string{"vscode"},
@@ -498,7 +499,7 @@ func TestInstallUserModeWithoutStartingService(t *testing.T) {
 		t.Skip("install preflight is macOS-only")
 	}
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	collectorPath := filepath.Join(home, "bin", "beacon-otelcol")
 	if err := os.MkdirAll(filepath.Dir(collectorPath), 0755); err != nil {
 		t.Fatalf("mkdir fake collector dir: %v", err)
@@ -550,7 +551,7 @@ func TestInstallPreservesManagedIngestBlock(t *testing.T) {
 		t.Skip("install preflight is macOS-only")
 	}
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	collectorPath := filepath.Join(home, "bin", "beacon-otelcol")
 	if err := os.MkdirAll(filepath.Dir(collectorPath), 0755); err != nil {
 		t.Fatal(err)
@@ -593,7 +594,7 @@ func TestInstallFailsBeforeWritingArtifactsWhenCollectorMissing(t *testing.T) {
 		t.Skip("install preflight is macOS-only")
 	}
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	logPath := filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl")
 	missingCollector := filepath.Join(home, "bin", "beacon-otelcol")
 
@@ -621,7 +622,7 @@ func TestInstallRollsBackArtifactsWhenFinalEventFails(t *testing.T) {
 		t.Skip("install preflight is macOS-only")
 	}
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	collectorPath := filepath.Join(home, "bin", "beacon-otelcol")
 	if err := os.MkdirAll(filepath.Dir(collectorPath), 0755); err != nil {
 		t.Fatalf("mkdir fake collector dir: %v", err)
@@ -663,7 +664,7 @@ func TestRepairPreservesExistingConfigWhenReinstallFails(t *testing.T) {
 		t.Skip("install preflight is macOS-only")
 	}
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	logPath := filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl")
 	configPath := endpointconfig.ConfigPath(true)
 	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
@@ -721,7 +722,7 @@ func freePort(t *testing.T) int {
 
 func TestConfigureHarnessesAcceptsClaude(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	cfg := endpointconfig.Config{
 		UserMode:  true,
 		Harnesses: []string{"claude"},
@@ -765,7 +766,7 @@ func TestSameCollectorPorts(t *testing.T) {
 
 func TestLoadOrDefaultFallsBackToDefaultThenLoadsSavedConfig(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	logPath := filepath.Join(home, "runtime.jsonl")
 
 	// No config saved yet: returns a default with the requested log path.
@@ -912,7 +913,7 @@ func TestDestinationStatusAndInstallDestinationReportEnabledHEC(t *testing.T) {
 // still be the user's: each mode has its own enrollment, and the system one is root-only.
 func TestStatusReportsManagedIngestForRequestedMode(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	if err := asymptote.SaveEnrollment(true, asymptote.Enrollment{InstallID: "i", IngestURL: "https://ingest.example", DeviceID: "user-device", OrganizationID: "org", OrganizationName: "Org"}); err != nil {
 		t.Fatal(err)
 	}
@@ -933,7 +934,7 @@ func TestStatusReportsManagedIngestForRequestedMode(t *testing.T) {
 
 func TestGetStatusAndResolveRuntimeLogReportRequestedConfig(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	logPath := filepath.Join(home, "runtime.jsonl")
 
 	source := ResolveRuntimeLog(true, logPath)

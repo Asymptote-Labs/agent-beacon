@@ -10,6 +10,7 @@ import (
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 // recordingInventoryJob stands in for service.InventoryManager and records what lifecycle asked of it.
@@ -75,7 +76,7 @@ func writeInventoryConfig(t *testing.T, userMode bool, body string) {
 
 // No config at all is the fresh-install case, and it must mean enabled: the job is on by default.
 func TestReconcileInventoryJobWritesAndLoadsWhenEnabled(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	calls := installFakeInventoryJob(t, true)
 	result, err := ReconcileInventoryJob(InventoryJobOptions{UserMode: true, Program: "/usr/local/bin/beacon", LogPath: "/tmp/runtime.jsonl", Load: true})
 	if err != nil {
@@ -90,7 +91,7 @@ func TestReconcileInventoryJobWritesAndLoadsWhenEnabled(t *testing.T) {
 }
 
 func TestReconcileInventoryJobUnloadsAndRemovesWhenDisabled(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	writeInventoryConfig(t, true, `{"user_mode":true,"inventory_heartbeat":{"enabled":false}}`)
 	calls := installFakeInventoryJob(t, true)
 	result, err := ReconcileInventoryJob(InventoryJobOptions{UserMode: true, Program: "/usr/local/bin/beacon", Load: true})
@@ -106,7 +107,7 @@ func TestReconcileInventoryJobUnloadsAndRemovesWhenDisabled(t *testing.T) {
 }
 
 func TestReconcileInventoryJobSkipsUnsupportedWithoutError(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	calls := installFakeInventoryJob(t, false)
 	result, err := ReconcileInventoryJob(InventoryJobOptions{UserMode: true, Program: "/usr/local/bin/beacon", Load: true})
 	if err != nil {
@@ -118,7 +119,7 @@ func TestReconcileInventoryJobSkipsUnsupportedWithoutError(t *testing.T) {
 }
 
 func TestReconcileInventoryJobWritesWithoutLoadingWhenAsked(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	calls := installFakeInventoryJob(t, true)
 	result, err := ReconcileInventoryJob(InventoryJobOptions{UserMode: true, Program: "/usr/local/bin/beacon", Load: false})
 	if err != nil {
@@ -155,7 +156,7 @@ func TestInventoryEnabledFromConfigFileDefaultsToTrue(t *testing.T) {
 // A package upgrade re-runs install, which rebuilds config.json from defaults. An operator's
 // explicit `enabled: false` has to survive that, or the job would silently come back.
 func TestBuildConfigPreservesInventoryBlock(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	writeInventoryConfig(t, true, `{"user_mode":true,"log_path":"/tmp/runtime.jsonl","inventory_heartbeat":{"enabled":false,"runtimes":["cursor"]}}`)
 	cfg := buildConfig(InstallOptions{UserMode: true})
 	if cfg.Inventory == nil || cfg.Inventory.Enabled == nil || *cfg.Inventory.Enabled || len(cfg.Inventory.Runtimes) != 1 {
@@ -168,7 +169,7 @@ func TestInstallWritesTheInventoryJobWithoutLoadingItOnNoStart(t *testing.T) {
 		t.Skip("install preflight is macOS-only")
 	}
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	collectorPath := filepath.Join(home, "bin", "beacon-otelcol")
 	if err := os.MkdirAll(filepath.Dir(collectorPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -213,7 +214,7 @@ func TestInstallReportsAHostWithoutASchedulerAndStillSucceeds(t *testing.T) {
 		t.Skip("install preflight is macOS-only")
 	}
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	collectorPath := filepath.Join(home, "bin", "beacon-otelcol")
 	if err := os.MkdirAll(filepath.Dir(collectorPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -240,7 +241,7 @@ func TestInstallReportsAHostWithoutASchedulerAndStillSucceeds(t *testing.T) {
 }
 
 func TestUninstallRemovesTheInventoryJobForTheMode(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	old := removeInventoryJob
 	var removedFor []bool
 	removeInventoryJob = func(userMode bool) { removedFor = append(removedFor, userMode) }
@@ -283,7 +284,7 @@ func TestRollbackUnloadsALoadedInventoryJob(t *testing.T) {
 }
 
 func TestReconcileSurfacesARefusedLoad(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	installFakeInventoryJobWithLoadError(t, true, errors.New("enable --now refused"))
 	result, err := ReconcileInventoryJob(InventoryJobOptions{UserMode: true, Program: "/usr/local/bin/beacon", Load: true})
 	if err == nil || result.Loaded {

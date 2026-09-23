@@ -485,7 +485,7 @@ unpacked through Chrome's developer mode.
 
 ## Implementation Notes
 
-- Prefer deterministic tests that use `t.TempDir()`, `t.Setenv("HOME", ...)`, fake binaries, and free local ports.
+- Prefer deterministic tests that use `t.TempDir()`, `testenv.SetHome(t, ...)` (`cli/beacon/internal/testenv`; a bare `t.Setenv("HOME", ...)` does not move `os.UserHomeDir` on Windows), fake binaries, and free local ports. Gate Unix permission-bit assertions with `testenv.HasPOSIXFileModes()` or `testenv.RequirePOSIXFileModes(t)`, and shell-script fixtures with `testenv.RequirePOSIXExecutableFixtures(t)`.
 - Avoid tests that require root, real `launchctl` service changes, Wazuh, a live collector, or external network access.
 - For macOS-only behavior, gate tests with `runtime.GOOS == "darwin"` or assert the non-Darwin contract explicitly.
 - Keep endpoint event schema fields stable: `vendor`, `product`, `schema_version`, required event fields, and Wazuh-compatible JSONL output are release contracts.

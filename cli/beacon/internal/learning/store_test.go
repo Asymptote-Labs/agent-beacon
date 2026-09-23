@@ -236,8 +236,12 @@ func setMemoryUpdatedAt(t *testing.T, store *Store, id, updatedAt string) {
 
 func TestProjectIDForPathMatchesTheMostSpecificKnownProject(t *testing.T) {
 	store := Open(filepath.Join(t.TempDir(), "memory.db"))
-	outer := asymptoteobserve.LearningProjectV1{ID: "project-outer", Path: "/work"}
-	inner := asymptoteobserve.LearningProjectV1{ID: "project-inner", Path: "/work/repo"}
+	// Absolute on every platform, because stored project paths are: ProjectIDForPath makes the
+	// relayed path absolute before comparing, and on Windows "/work" gains a drive letter that a
+	// stored "/work" never has. Nothing here is created on disk; resolution must not touch it.
+	root := t.TempDir()
+	outer := asymptoteobserve.LearningProjectV1{ID: "project-outer", Path: filepath.Join(root, "work")}
+	inner := asymptoteobserve.LearningProjectV1{ID: "project-inner", Path: filepath.Join(root, "work", "repo")}
 	for _, project := range []asymptoteobserve.LearningProjectV1{outer, inner} {
 		memory := asymptoteobserve.LearningMemoryV1{
 			ID:          "memory-" + project.ID,
@@ -251,7 +255,7 @@ func TestProjectIDForPathMatchesTheMostSpecificKnownProject(t *testing.T) {
 		}
 	}
 
-	got, err := store.ProjectIDForPath("/work/repo/cli/beacon")
+	got, err := store.ProjectIDForPath(filepath.Join(root, "work", "repo", "cli", "beacon"))
 	if err != nil {
 		t.Fatalf("ProjectIDForPath: %v", err)
 	}
@@ -259,20 +263,22 @@ func TestProjectIDForPathMatchesTheMostSpecificKnownProject(t *testing.T) {
 		t.Fatalf("project ID = %q, want %q", got, inner.ID)
 	}
 
-	unknown, err := store.ProjectIDForPath("/elsewhere")
+	elsewhere := filepath.Join(root, "elsewhere")
+	unknown, err := store.ProjectIDForPath(elsewhere)
 	if err != nil {
 		t.Fatalf("ProjectIDForPath: %v", err)
 	}
-	if want := ProjectID(asymptoteobserve.LearningProjectV1{Path: "/elsewhere"}); unknown != want {
+	if want := ProjectID(asymptoteobserve.LearningProjectV1{Path: elsewhere}); unknown != want {
 		t.Fatalf("unknown project ID = %q, want the path-derived ID %q", unknown, want)
 	}
 }
 
 func TestListMemoriesScopesARelayedProjectPathToOneProject(t *testing.T) {
 	store := Open(filepath.Join(t.TempDir(), "memory.db"))
+	root := t.TempDir() // absolute on every platform; see TestProjectIDForPathMatchesTheMostSpecificKnownProject
 	for _, project := range []asymptoteobserve.LearningProjectV1{
-		{ID: "project-a", Path: "/work/a"},
-		{ID: "project-b", Path: "/work/b"},
+		{ID: "project-a", Path: filepath.Join(root, "work", "a")},
+		{ID: "project-b", Path: filepath.Join(root, "work", "b")},
 	} {
 		memory := asymptoteobserve.LearningMemoryV1{
 			ID:          "memory-" + project.ID,
@@ -286,7 +292,7 @@ func TestListMemoriesScopesARelayedProjectPathToOneProject(t *testing.T) {
 		}
 	}
 
-	memories, err := store.ListMemories(Query{ProjectPath: "/work/a/sub"})
+	memories, err := store.ListMemories(Query{ProjectPath: filepath.Join(root, "work", "a", "sub")})
 	if err != nil {
 		t.Fatalf("ListMemories: %v", err)
 	}
@@ -294,7 +300,7 @@ func TestListMemoriesScopesARelayedProjectPathToOneProject(t *testing.T) {
 		t.Fatalf("memories = %#v, want only project-a", memories)
 	}
 
-	none, err := store.ListMemories(Query{ProjectPath: "/work/c"})
+	none, err := store.ListMemories(Query{ProjectPath: filepath.Join(root, "work", "c")})
 	if err != nil {
 		t.Fatalf("ListMemories: %v", err)
 	}

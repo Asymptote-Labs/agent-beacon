@@ -49,9 +49,19 @@ func SetHome(t *testing.T, dir string) {
 // writes. Skipping is honest in the meantime; asserting 0666 == 0600 would not be.
 func RequirePOSIXFileModes(t *testing.T) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
+	if !HasPOSIXFileModes() {
 		t.Skip("Unix permission bits do not exist on Windows; the equivalent is an ACL check")
 	}
+}
+
+// HasPOSIXFileModes reports whether this platform reports the Unix permission bits Beacon writes.
+//
+// It is the per-assertion form of RequirePOSIXFileModes, for a test that checks a mode alongside
+// other behavior: `if testenv.HasPOSIXFileModes() && perm != 0o600`. Skipping the whole test there
+// would throw away the assertions that do hold on Windows -- that the file was written, and what it
+// contains -- to avoid the one that cannot.
+func HasPOSIXFileModes() bool {
+	return runtime.GOOS != "windows"
 }
 
 // RequirePOSIXExecutableFixtures skips a test that stands in for a CLI with a shell script.

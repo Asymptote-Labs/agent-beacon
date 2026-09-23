@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 // The failure this exists to catch: `beacon endpoint uninstall --system` without privileges used to
@@ -28,7 +30,7 @@ func TestUninstallRefusesAnUnprivilegedSystemRemoval(t *testing.T) {
 // A user-mode uninstall needs no privileges and must not be caught by that gate.
 func TestUninstallAllowsUserModeWithoutPrivileges(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	if err := Uninstall(UninstallOptions{UserMode: true}); err != nil {
 		t.Errorf("user-mode uninstall failed with nothing installed: %v", err)
@@ -40,7 +42,7 @@ func TestUninstallAllowsUserModeWithoutPrivileges(t *testing.T) {
 // to keep logs, and invisible, because the file an operator would look for was gone.
 func TestUninstallRemovesRotatedArchivesToo(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	logDir := filepath.Join(home, ".beacon", "endpoint", "logs")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
@@ -68,7 +70,7 @@ func TestUninstallRemovesRotatedArchivesToo(t *testing.T) {
 // --keep-logs has to keep all of them, not just the current one.
 func TestUninstallKeepLogsKeepsTheArchives(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	logDir := filepath.Join(home, ".beacon", "endpoint", "logs")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {

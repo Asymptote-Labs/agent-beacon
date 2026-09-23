@@ -6,12 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 func TestProvisionUsesRunnerTempAndWritesCollectorConfig(t *testing.T) {
@@ -41,7 +43,9 @@ func TestProvisionUsesRunnerTempAndWritesCollectorConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), session.LogPath) {
+	// The collector config quotes the path, so on Windows its backslashes arrive escaped. Match
+	// the quoted form, which is also the stricter check everywhere else.
+	if !strings.Contains(string(data), strconv.Quote(session.LogPath)) {
 		t.Fatalf("collector config does not reference log path:\n%s", data)
 	}
 }
@@ -177,6 +181,7 @@ func TestStartDetachedWritesStateAndExports(t *testing.T) {
 }
 
 func TestRunChildInjectsClaudeEnvAndBeaconPaths(t *testing.T) {
+	testenv.RequirePOSIXExecutableFixtures(t)
 	dir := t.TempDir()
 	output := filepath.Join(dir, "env.txt")
 	child := fakeExecutable(t, "child", "#!/bin/sh\nenv > \"$1\"\n")
@@ -413,7 +418,7 @@ func TestProvisionForwardWritesSecureExporterConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
+	if perm := info.Mode().Perm(); testenv.HasPOSIXFileModes() && perm != 0o600 {
 		t.Fatalf("token-bearing config mode = %o, want 600", perm)
 	}
 
@@ -446,6 +451,7 @@ func TestProvisionForwardMissingTokenFails(t *testing.T) {
 }
 
 func TestRunChildStripsForwardToken(t *testing.T) {
+	testenv.RequirePOSIXExecutableFixtures(t)
 	dir := t.TempDir()
 	output := filepath.Join(dir, "env.txt")
 	t.Setenv(EnvSplunkToken, "leak-me-not")
@@ -474,6 +480,7 @@ func TestRunChildStripsForwardToken(t *testing.T) {
 }
 
 func TestRunChildStripsUploadCredentialsWhenUploadConfigured(t *testing.T) {
+	testenv.RequirePOSIXExecutableFixtures(t)
 	dir := t.TempDir()
 	output := filepath.Join(dir, "env.txt")
 	t.Setenv("AWS_ACCESS_KEY_ID", "aws-key")

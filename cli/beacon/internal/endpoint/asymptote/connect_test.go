@@ -16,6 +16,7 @@ import (
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 type fakeForwarder struct {
@@ -90,7 +91,7 @@ func connectOptions(t *testing.T, fd *fakeDashboard, fwd *fakeForwarder, vector 
 
 func TestConnectWritesSecretsConfigUnitAndEnrollmentInOrder(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	isolateVectorDiscovery(t)
 	fd := newFakeDashboard(t)
 	fwd := &fakeForwarder{supported: true}
@@ -170,7 +171,7 @@ func TestConnectWritesSecretsConfigUnitAndEnrollmentInOrder(t *testing.T) {
 
 func TestConnectReusesInstallIDOnReEnrollment(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	isolateVectorDiscovery(t)
 	fd := newFakeDashboard(t)
 	fwd := &fakeForwarder{supported: true}
@@ -198,7 +199,7 @@ func TestConnectReusesInstallIDOnReEnrollment(t *testing.T) {
 }
 
 func TestConnectUsesAccountEnrollmentWithoutOpeningBrowser(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	isolateVectorDiscovery(t)
 	var authorization string
 	accountServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -242,7 +243,7 @@ func TestConnectUsesAccountEnrollmentWithoutOpeningBrowser(t *testing.T) {
 
 func TestConnectStopsBeforeTheBrowserWhenVectorIsMissingOrOld(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	isolateVectorDiscovery(t)
 	fd := newFakeDashboard(t)
 	fwd := &fakeForwarder{supported: true}
@@ -268,7 +269,7 @@ func TestConnectStopsBeforeTheBrowserWhenVectorIsMissingOrOld(t *testing.T) {
 
 func TestConnectRefusesUnsupportedServiceManagerBeforeEnrolling(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	fd := newFakeDashboard(t)
 	opened := false
 	opts := connectOptions(t, fd, &fakeForwarder{supported: false}, fakeVector(t, "0.56.0", 0))
@@ -283,7 +284,7 @@ func TestConnectRefusesUnsupportedServiceManagerBeforeEnrolling(t *testing.T) {
 
 func TestConnectFailsWhenVectorValidateRejectsTheConfig(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	fd := newFakeDashboard(t)
 	fwd := &fakeForwarder{supported: true}
 	opened := false
@@ -320,7 +321,7 @@ func TestConnectFailsWhenVectorValidateRejectsTheConfig(t *testing.T) {
 }
 
 func TestConnectedNeedsEnrollmentAndForwarderConfig(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	if Connected(true) {
 		t.Fatal("fresh machine")
 	}
@@ -346,7 +347,7 @@ func TestConnectedNeedsEnrollmentAndForwarderConfig(t *testing.T) {
 
 func TestDisconnectRemovesForwarderAndOptionallyKeepsCredentials(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	fd := newFakeDashboard(t)
 	fwd := &fakeForwarder{supported: true}
 	if _, err := Connect(context.Background(), connectOptions(t, fd, fwd, fakeVector(t, "0.56.0", 0))); err != nil {
@@ -395,7 +396,7 @@ func TestDisconnectRemovesForwarderAndOptionallyKeepsCredentials(t *testing.T) {
 
 func TestStatusReportsCredentialState(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	if got := Status(true, StatusOptions{}); got.Enabled || got.Message != "" {
 		t.Fatalf("not enrolled status = %+v", got)
 	}
@@ -458,7 +459,7 @@ func mustJSON(t *testing.T, v any) []byte {
 
 func TestConnectPinsInstallIDBeforeEnrollmentSoRetriesReuseIt(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	isolateVectorDiscovery(t)
 	fd := newFakeDashboard(t)
 	fwd := &fakeForwarder{supported: true}
@@ -492,7 +493,7 @@ func TestConnectPinsInstallIDBeforeEnrollmentSoRetriesReuseIt(t *testing.T) {
 
 func TestConnectResultJSONUsesSnakeCaseAndNormalizedDashboardURL(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	isolateVectorDiscovery(t)
 	fd := newFakeDashboard(t)
 	opts := connectOptions(t, fd, &fakeForwarder{supported: true}, fakeVector(t, "0.56.0", 0))
@@ -518,7 +519,7 @@ func TestConnectResultJSONUsesSnakeCaseAndNormalizedDashboardURL(t *testing.T) {
 
 func TestLoopbackIngestURLIsAcceptedEndToEnd(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	isolateVectorDiscovery(t)
 	fd := newFakeDashboard(t)
 	fd.ingestURL = "http://127.0.0.1:9999"
@@ -548,7 +549,7 @@ func TestLoopbackIngestURLIsAcceptedEndToEnd(t *testing.T) {
 
 func TestConnectClearsBufferOnPrivacyModeChange(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	isolateVectorDiscovery(t)
 	fd := newFakeDashboard(t)
 	fwd := &fakeForwarder{supported: true}
@@ -578,7 +579,7 @@ func TestConnectClearsBufferOnPrivacyModeChange(t *testing.T) {
 
 func TestConnectRejectedConfigOnPrivacyChangeRotatesNoKeyAndKeepsForwarderRunning(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	isolateVectorDiscovery(t)
 	fd := newFakeDashboard(t)
 	fwd := &fakeForwarder{supported: true}
@@ -639,7 +640,7 @@ func TestConnectRejectedConfigOnPrivacyChangeRotatesNoKeyAndKeepsForwarderRunnin
 
 func TestConnectPreservesBufferWhenPrivacyModeUnchanged(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	isolateVectorDiscovery(t)
 	fd := newFakeDashboard(t)
 	fwd := &fakeForwarder{supported: true}
@@ -665,7 +666,7 @@ func TestConnectPreservesBufferWhenPrivacyModeUnchanged(t *testing.T) {
 
 func TestDisconnectIgnoresALeftoverInstallIDFromACancelledConnect(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	// A connect that was cancelled after pinning the id leaves only asymptote/install-id.
 	if err := WriteInstallID(true, "abc123"); err != nil {
 		t.Fatal(err)
@@ -702,7 +703,7 @@ func TestConnectWithRealVectorOnAFreshMachine(t *testing.T) {
 	if vector == "" {
 		t.Skip("set BEACON_TEST_VECTOR_BIN to run connect against a real Vector")
 	}
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	isolateVectorDiscovery(t)
 	fd := newFakeDashboard(t)
 	fwd := &fakeForwarder{supported: true}
