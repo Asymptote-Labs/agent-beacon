@@ -43,45 +43,15 @@ func questionByID(t *testing.T, eval asymptoteobserve.LearningEvaluationV1, id s
 func TestEvaluateDoesNotReportAnswerTypeAsReason(t *testing.T) {
 	eval := evaluateWithJevBody(t, `{"answers":{
 		"task_success":{"type":"noul","noul":0.43},
-		"reusable_correction":{"type":"noul","noul":0.78},
-		"evidence_supported":{"type":"noul","noul":0.49}}}`)
+		"reusable_correction":{"type":"noul","noul":0.78,"reason":"undocumented"},
+		"evidence_supported":{"type":"noul","noul":0.49,"explanation":"undocumented"}}}`)
 	for _, question := range eval.Questions {
 		if question.Reason != "" {
-			t.Fatalf("question %s reason = %q, want empty when Jev returns no rationale", question.ID, question.Reason)
+			t.Fatalf("question %s reason = %q, want empty for a TypeSafe Noul answer", question.ID, question.Reason)
 		}
 	}
 	if got := questionByID(t, eval, "reusable_correction").Probability; got != 0.78 {
 		t.Fatalf("reusable_correction probability = %v, want 0.78", got)
-	}
-}
-
-func TestEvaluateKeepsJevAnswerReason(t *testing.T) {
-	eval := evaluateWithJevBody(t, `{"answers":{
-		"task_success":{"type":"noul","noul":0.9,"reason":"  The final test run\n\tpassed after the retry.  "},
-		"reusable_correction":{"type":"noul","noul":0.8,"rationale":"Retrying the smoke once isolates the flaky network step."},
-		"evidence_supported":{"type":"noul","noul":0.7,"explanation":"Event 1 shows the failure and the passing rerun."}}}`)
-	cases := map[string]string{
-		"task_success":        "The final test run passed after the retry.",
-		"reusable_correction": "Retrying the smoke once isolates the flaky network step.",
-		"evidence_supported":  "Event 1 shows the failure and the passing rerun.",
-	}
-	for id, want := range cases {
-		if got := questionByID(t, eval, id).Reason; got != want {
-			t.Fatalf("question %s reason = %q, want %q", id, got, want)
-		}
-	}
-}
-
-func TestEvaluateRedactsAndBoundsJevReason(t *testing.T) {
-	long := strings.Repeat("b", maxProjectionText*2)
-	eval := evaluateWithJevBody(t, `{"answers":{
-		"task_success":{"type":"noul","noul":0.9,"reason":"token=supersecretvalue `+long+`"}}}`)
-	reason := questionByID(t, eval, "task_success").Reason
-	if strings.Contains(reason, "supersecretvalue") {
-		t.Fatalf("reason leaked secret: %s", reason)
-	}
-	if !strings.Contains(reason, "bbbbbbbb") || len(reason) > maxProjectionText+32 {
-		t.Fatalf("reason not bounded: %d bytes", len(reason))
 	}
 }
 
@@ -109,7 +79,7 @@ func TestQuestionReasonHidesPlaceholder(t *testing.T) {
 	}
 }
 
-func TestCandidateBodyIncludesEvaluatorReasons(t *testing.T) {
+func TestCandidateBodyIncludesCompatibilityReasons(t *testing.T) {
 	eval := testLearningEvaluation()
 	eval.Questions[1].Reason = "Retrying the smoke once isolates the flaky network step."
 	eval.Questions[2].Reason = "Event 1 shows the failure and the passing rerun."

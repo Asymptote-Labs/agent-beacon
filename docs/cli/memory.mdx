@@ -91,9 +91,10 @@ Inspect one candidate:
 beacon memory candidates show <candidate-id>
 ```
 
-The candidate body lists the evaluator's rationale for each rubric question when
-Jev returns one. If it returned scores only, the body says no lesson text was
-extracted; check the source trace before you approve it.
+TypeSafe Noul answers contain probabilities, not explanatory text. The candidate
+body therefore says that no lesson text was extracted; check the source trace
+before you approve it. A compatible internal evaluator using the legacy
+`questions` or `results` response shape can provide a stored `reason`.
 
 Approve a candidate into project memory:
 

@@ -169,9 +169,10 @@ func candidateTitle(eval asymptoteobserve.LearningEvaluationV1, kind string) str
 	return strings.TrimSpace(strings.ReplaceAll(kind, "_", " ")) + ": " + title
 }
 
-// candidateBody builds the candidate text from the evaluator's per-question
-// rationale. Without any rationale there is no lesson to extract, so the body says
-// so instead of presenting bare scores as guidance (#620).
+// candidateBody uses per-question rationale only when a compatible evaluator
+// supplied it through the legacy questions/results response shapes. TypeSafe Noul
+// answers contain probabilities, not rationale, so the normal Jev path explicitly
+// says that no lesson text was extracted instead of presenting scores as guidance.
 func candidateBody(eval asymptoteobserve.LearningEvaluationV1) string {
 	var rationale []string
 	for _, question := range eval.Questions {

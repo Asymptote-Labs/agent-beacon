@@ -112,11 +112,6 @@ type jevAnswer struct {
 	Score         *float64           `json:"score,omitempty"`
 	Confidence    float64            `json:"confidence,omitempty"`
 	Probabilities map[string]float64 `json:"probabilities,omitempty"`
-	// Rationale for the probability, when the evaluator returns one. The
-	// spellings cover compatible evaluators; the first non-empty one wins.
-	Reason      string `json:"reason,omitempty"`
-	Rationale   string `json:"rationale,omitempty"`
-	Explanation string `json:"explanation,omitempty"`
 }
 
 func Evaluate(ctx context.Context, opts EvaluatorOptions, input EvaluationInput) (asymptoteobserve.LearningEvaluationV1, error) {
@@ -337,8 +332,9 @@ func normalizeQuestionResults(results []asymptoteobserve.LearningEvaluationQuest
 		if result.Probability > 1 {
 			result.Probability = 1
 		}
-		// One line, so it stays a single bullet in the candidate body and a
-		// single row in `memory evaluations show`.
+		// Compatibility responses can still use the older questions/results
+		// shapes, whose schema includes reason. Keep real values while dropping
+		// the question-type placeholder written by older Beacon releases.
 		result.Reason = cleanText(strings.Join(strings.Fields(QuestionReason(result)), " "))
 		out = append(out, result)
 	}
@@ -384,15 +380,14 @@ func questionsFromJevAnswers(answers map[string]jevAnswer) []asymptoteobserve.Le
 			Prompt:      question.Prompt,
 			Probability: probability,
 			Confidence:  answer.Confidence,
-			Reason:      firstNonEmpty(answer.Reason, answer.Rationale, answer.Explanation),
 		})
 	}
 	return out
 }
 
-// QuestionReason returns the evaluator's rationale for one rubric question, or ""
-// when it gave none. Releases before the fix for #620 stored the Jev question
-// type ("noul") as the reason, so that value is treated as absent too.
+// QuestionReason returns a stored reason for one rubric question, or "" when it
+// has none. TypeSafe Noul answers do not include reasons. Releases before the fix
+// for #620 copied the answer type ("noul") into this field, so hide that value.
 func QuestionReason(question asymptoteobserve.LearningEvaluationQuestionV1) string {
 	reason := strings.TrimSpace(question.Reason)
 	if strings.EqualFold(reason, jevQuestionType) {
