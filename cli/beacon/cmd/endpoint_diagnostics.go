@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/dshsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/embedded"
 
 	endpointcollector "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/collector"
@@ -154,14 +155,23 @@ func buildDoctorResult(status lifecycle.Status, generatedAt time.Time) doctorRes
 		checks = append(checks, consoleUserConfigCheck())
 	}
 	codexDetected := false
+	dshDetected := false
 	for _, h := range status.Harnesses {
 		checks = append(checks, harnessCheck(h, status.LogPath, status.RuntimeLog.EffectiveUserMode))
 		if h.Detected && h.Name == "codex_cli" {
 			codexDetected = true
 		}
+		if h.Detected && h.Name == dshsession.Harness {
+			dshDetected = true
+		}
 	}
 	if codexDetected {
 		checks = append(checks, codexTokenAttributionCheck(status.LogPath, status.RuntimeLog.EffectiveUserMode))
+	}
+	if dshDetected {
+		if check, ok := doctorDshHookCaptureCheck(status.LogPath); ok {
+			checks = append(checks, check)
+		}
 	}
 	result := doctorResult{
 		Status:      aggregateCheckStatus(checks),
@@ -1542,6 +1552,11 @@ func planDoctorFixes(result doctorResult, status lifecycle.Status) doctorFixPlan
 			}
 			addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: message})
 		case "runtime_log_source":
+			addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: check.Action})
+		// Nothing here is Beacon's to repair: the sandbox mode is the operator's choice in dsh, and
+		// widening it on their behalf would be the wrong fix even if doctor could. Reported as a
+		// skip so --fix does not read as having found nothing.
+		case "dsh_hook_capture":
 			addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: check.Action})
 		}
 	}
