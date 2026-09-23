@@ -271,7 +271,8 @@ func TestKQLAssetsMentionSentinelTableAndValidation(t *testing.T) {
 // 10 MB by default, so a busy flush would lose a whole batch to 413s.
 func TestVectorBatchesFitTheLogsIngestionLimit(t *testing.T) {
 	vector := mustRead("pack/vector.toml.tmpl")
-	match := regexp.MustCompile(`(?m)^max_bytes = (\d+)$`).FindStringSubmatch(vector)
+	// \r? because Windows checkouts carry CRLF, and (?m)$ matches only before \n.
+	match := regexp.MustCompile(`(?m)^max_bytes = (\d+)\r?$`).FindStringSubmatch(vector)
 	if match == nil {
 		t.Fatal("vector.toml does not cap batch.max_bytes, so the sink batches up to 10 MB")
 	}
