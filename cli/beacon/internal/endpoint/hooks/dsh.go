@@ -484,7 +484,8 @@ Run this first:
 beacon endpoint dsh status --workspace "$PWD" --json
 ` + "```" + `
 
-Summarize whether the current workspace has pending DeepSeek session records.
+Summarize whether the current workspace has pending DeepSeek session records or staged
+hook events (spool_bytes, waiting for the next sync to drain them).
 
 ## Sync Current Workspace
 
@@ -496,6 +497,7 @@ beacon endpoint dsh sync --workspace "$PWD"
 ` + "```" + `
 
 Use ` + "`--print`" + ` only when the user wants to preview mapped events without writing Beacon's
-runtime log.
+runtime log. A sync also drains staged hook events from the workspace spool into the runtime
+log, which ` + "`--print`" + ` does not do.
 `
 }
