@@ -44,6 +44,8 @@ type LaunchAgentVolume struct {
 	// StagingDir is the private startup-volume directory the plist is bootstrapped from when
 	// External is true. Empty when External is false, or when no usable location was found.
 	StagingDir string `json:"staging_dir,omitempty"`
+	// StagingError explains why none of the candidate startup-volume directories was usable.
+	StagingError string `json:"staging_error,omitempty"`
 	// Reason says how External was decided, for diagnostics.
 	Reason string `json:"reason,omitempty"`
 }
@@ -70,19 +72,34 @@ func InspectLaunchAgentVolume(plistPath string) LaunchAgentVolume {
 	if !vol.External {
 		return vol
 	}
+	var stagingErrors []string
 	for _, base := range launchdStagingBases() {
 		if strings.TrimSpace(base) == "" {
 			continue
 		}
 		if bootErr == nil {
 			if id, err := launchdVolumeID(base); err != nil || id != bootID {
+				if err != nil {
+					stagingErrors = append(stagingErrors, fmt.Sprintf("%s: cannot inspect volume: %v", base, err))
+				} else {
+					stagingErrors = append(stagingErrors, fmt.Sprintf("%s: not on the startup volume", base))
+				}
 				continue
 			}
 		} else if underVolumes(base) {
+			stagingErrors = append(stagingErrors, fmt.Sprintf("%s: under /Volumes", base))
 			continue
 		}
-		vol.StagingDir = filepath.Join(base, launchdStagingDirName())
+		candidate := filepath.Join(base, launchdStagingDirName())
+		if err := probeLaunchdStagingDir(candidate); err != nil {
+			stagingErrors = append(stagingErrors, fmt.Sprintf("%s: %v", candidate, err))
+			continue
+		}
+		vol.StagingDir = candidate
 		break
+	}
+	if vol.StagingDir == "" {
+		vol.StagingError = strings.Join(stagingErrors, "; ")
 	}
 	return vol
 }
@@ -113,7 +130,11 @@ func launchdBootstrapPath(domain, plistPath string) (string, string) {
 		return plistPath, ""
 	}
 	if vol.StagingDir == "" {
-		return plistPath, externalVolumeNote(domain, vol, "", errors.New("no private directory on the startup volume was found"))
+		err := errors.New("no usable private directory on the startup volume was found")
+		if vol.StagingError != "" {
+			err = errors.New(vol.StagingError)
+		}
+		return plistPath, externalVolumeNote(domain, vol, "", err)
 	}
 	staged, err := stageLaunchdPlist(plistPath, vol.StagingDir)
 	if err != nil {
@@ -132,8 +153,33 @@ func externalVolumeNote(domain string, vol LaunchAgentVolume, staged string, sta
 	} else {
 		fmt.Fprintf(&b, " Beacon bootstrapped a copy staged at %s, and launchd refused that too.", staged)
 	}
-	fmt.Fprintf(&b, " To load it by hand: install with --no-start, copy the plist from %s into a private directory on the startup volume (mkdir -p -m 700 \"$TMPDIR/beacon-launchd\"), then run `launchctl bootstrap %s <copied plist>`.", vol.PlistDir, domain)
+	fmt.Fprintf(&b, " To load it by hand: install with --no-start, copy the plist from %s into a private directory on the startup volume (`mkdir -p \"$TMPDIR/beacon-launchd\" && chmod 700 \"$TMPDIR/beacon-launchd\"`), then run `launchctl bootstrap %s <copied plist>`.", vol.PlistDir, domain)
 	return b.String()
+}
+
+// probeLaunchdStagingDir verifies the same ownership, mode and write requirements used by staging.
+// It removes an empty directory it created so inspection does not leave state behind.
+func probeLaunchdStagingDir(dir string) error {
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		if !os.IsExist(err) {
+			return err
+		}
+	} else {
+		defer os.Remove(dir)
+	}
+	if err := checkPrivateStagingDir(dir); err != nil {
+		return err
+	}
+	probe, err := os.CreateTemp(dir, ".probe-*")
+	if err != nil {
+		return err
+	}
+	probePath := probe.Name()
+	if err := probe.Close(); err != nil {
+		_ = os.Remove(probePath)
+		return err
+	}
+	return os.Remove(probePath)
 }
 
 // stageLaunchdPlist copies plistPath into stagingDir under the same name and returns the copy's path.

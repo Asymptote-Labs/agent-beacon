@@ -122,11 +122,55 @@ func TestInspectLaunchAgentVolumeFlagsPlistOffTheStartupVolume(t *testing.T) {
 	if !vol.External {
 		t.Fatalf("plist on the external volume was not flagged: %#v", vol)
 	}
+	if !testenv.HasPOSIXFileModes() {
+		if vol.StagingDir != "" || vol.StagingError == "" {
+			t.Fatalf("host without POSIX modes should reject private staging: %#v", vol)
+		}
+		return
+	}
 	if vol.StagingDir != f.staging {
 		t.Fatalf("staging dir = %q, want %q on the startup volume", vol.StagingDir, f.staging)
 	}
 	if !strings.Contains(vol.Reason, "different volume") {
 		t.Fatalf("reason should say why: %q", vol.Reason)
+	}
+}
+
+func TestInspectLaunchAgentVolumeRejectsAnUnsafeStagingDirectory(t *testing.T) {
+	testenv.RequirePOSIXFileModes(t)
+	f := newVolumeFixture(t)
+	if err := os.Mkdir(f.staging, 0o770); err != nil {
+		t.Fatal(err)
+	}
+
+	vol := InspectLaunchAgentVolume(f.externalPlist(t, UserLabel))
+	if !vol.External || vol.StagingDir != "" {
+		t.Fatalf("unsafe staging directory reported usable: %#v", vol)
+	}
+	if !strings.Contains(vol.StagingError, "must not be accessible to other users") {
+		t.Fatalf("staging error does not explain unsafe permissions: %#v", vol)
+	}
+}
+
+func TestInspectLaunchAgentVolumeFallsBackFromAnUnsafeStagingDirectory(t *testing.T) {
+	testenv.RequirePOSIXFileModes(t)
+	f := newVolumeFixture(t)
+	if err := os.Mkdir(f.staging, 0o770); err != nil {
+		t.Fatal(err)
+	}
+	fallbackBase := filepath.Join(f.boot, "private-tmp")
+	if err := os.Mkdir(fallbackBase, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	primaryBase := filepath.Dir(f.staging)
+	oldBases := launchdStagingBases
+	launchdStagingBases = func() []string { return []string{primaryBase, fallbackBase} }
+	t.Cleanup(func() { launchdStagingBases = oldBases })
+
+	vol := InspectLaunchAgentVolume(f.externalPlist(t, UserLabel))
+	want := filepath.Join(fallbackBase, launchdStagingDirName())
+	if vol.StagingDir != want || vol.StagingError != "" {
+		t.Fatalf("fallback staging directory = %#v, want %s", vol, want)
 	}
 }
 

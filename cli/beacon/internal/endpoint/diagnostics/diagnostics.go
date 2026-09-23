@@ -82,16 +82,20 @@ func launchAgentVolumeCheck(vol service.LaunchAgentVolume) Check {
 			Message: "LaunchAgents is on the startup volume", Evidence: "launch_agents_startup_volume"}
 	}
 	if vol.StagingDir == "" {
+		detail := "no private directory on the startup volume was usable"
+		if vol.StagingError != "" {
+			detail += ": " + vol.StagingError
+		}
 		return Check{Name: "launch_agents_volume", Target: vol.PlistDir, Status: StatusFail, Severity: SeverityHigh,
-			Message: vol.Reason + ", so launchd refuses to bootstrap Beacon's LaunchAgents from it, and no private " +
-				"directory on the startup volume was found to bootstrap a copy from",
+			Message:  vol.Reason + ", so launchd refuses to bootstrap Beacon's LaunchAgents from it, and " + detail,
 			Evidence: "launch_agents_external_volume_unstaged",
 			Action: "install with --no-start, copy the plists from " + vol.PlistDir + " into a private directory on the " +
 				"startup volume, and run `launchctl bootstrap gui/$(id -u) <copied plist>` for each"}
 	}
-	return Check{Name: "launch_agents_volume", Target: vol.PlistDir, Status: StatusWarn, Severity: SeverityLow,
+	return Check{Name: "launch_agents_volume", Target: vol.PlistDir, Status: StatusWarn, Severity: SeverityMedium,
 		Message: vol.Reason + ", which launchd will not bootstrap LaunchAgents from; Beacon bootstraps copies staged in " +
-			vol.StagingDir + " instead. If the collector is not running after a restart or login, repair the install to restage them",
+			vol.StagingDir + " instead for this login session. Automatic loading after logout or restart is not guaranteed; " +
+			"if the collector is not running, repair the install to restage the jobs",
 		Evidence: "launch_agents_external_volume_staged",
 		Action:   "beacon endpoint repair --user"}
 }

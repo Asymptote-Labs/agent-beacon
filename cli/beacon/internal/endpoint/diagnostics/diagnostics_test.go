@@ -203,19 +203,23 @@ func TestLaunchAgentVolumeCheck(t *testing.T) {
 		StagingDir: "/var/folders/xx/T/beacon-launchd-502",
 		Reason:     "/Volumes/Ext/Library/LaunchAgents is on a different volume than /Users",
 	})
-	if staged.Status != StatusWarn || staged.Evidence != "launch_agents_external_volume_staged" ||
+	if staged.Status != StatusWarn || staged.Severity != SeverityMedium ||
+		staged.Evidence != "launch_agents_external_volume_staged" ||
 		staged.Action != "beacon endpoint repair --user" ||
-		!strings.Contains(staged.Message, "/var/folders/xx/T/beacon-launchd-502") {
+		!strings.Contains(staged.Message, "/var/folders/xx/T/beacon-launchd-502") ||
+		!strings.Contains(staged.Message, "not guaranteed") {
 		t.Fatalf("staged external-volume check = %#v", staged)
 	}
 
 	unstaged := launchAgentVolumeCheck(service.LaunchAgentVolume{
-		PlistDir: "/Volumes/Ext/Library/LaunchAgents",
-		External: true,
-		Reason:   "/Volumes/Ext/Library/LaunchAgents is under /Volumes",
+		PlistDir:     "/Volumes/Ext/Library/LaunchAgents",
+		External:     true,
+		StagingError: "/private/tmp/beacon-launchd-502 is mode 770",
+		Reason:       "/Volumes/Ext/Library/LaunchAgents is under /Volumes",
 	})
 	if unstaged.Status != StatusFail || unstaged.Evidence != "launch_agents_external_volume_unstaged" ||
-		!strings.Contains(unstaged.Action, "--no-start") || !strings.Contains(unstaged.Action, "launchctl bootstrap gui/") {
+		!strings.Contains(unstaged.Action, "--no-start") || !strings.Contains(unstaged.Action, "launchctl bootstrap gui/") ||
+		!strings.Contains(unstaged.Message, "mode 770") {
 		t.Fatalf("unstaged external-volume check = %#v", unstaged)
 	}
 }

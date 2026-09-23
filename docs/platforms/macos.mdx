@@ -72,13 +72,14 @@ beacon endpoint doctor --fix
 
 launchd will not bootstrap a LaunchAgent whose plist is on a volume other than the startup volume. When your home directory is on an external disk (`/Volumes/<disk>`), `launchctl bootstrap gui/<uid> ~/Library/LaunchAgents/<label>.plist` fails with `Bootstrap failed: 5: Input/output error`, even with ownership enabled on the volume.
 
-A user-mode install handles this itself. Beacon still writes the canonical plists to `~/Library/LaunchAgents`, but when that directory is on a different volume from `/Users`, it copies each plist into a private directory on the startup volume and bootstraps the copy instead. That directory is `$TMPDIR/beacon-launchd-<uid>`, with `/private/tmp/beacon-launchd-<uid>` as a fallback, and it must be owned by you with mode `0700`. This applies to the collector, the scheduled inventory job, and the managed forwarder. The program, its config, and the logs stay where they are, and a home on the startup volume is bootstrapped in place as before. `launchctl print "gui/$(id -u)/com.beacon.endpoint.collector.user"` shows the staged path.
+A user-mode install handles the current login session itself. Beacon still writes the canonical plists to `~/Library/LaunchAgents`, but when that directory is on a different volume from `/Users`, it copies each plist into a private directory on the startup volume and bootstraps the copy instead. That directory is `$TMPDIR/beacon-launchd-<uid>`, with `/private/tmp/beacon-launchd-<uid>` as a fallback, and it must be owned by you with mode `0700`. This applies to the collector, the scheduled inventory job, and the managed forwarder. The program, its config, and the logs stay where they are, and a home on the startup volume is bootstrapped in place as before. `launchctl print "gui/$(id -u)/com.beacon.endpoint.collector.user"` shows the staged path.
 
-`beacon endpoint doctor` reports this layout as `launch_agents_volume`. If the collector is not running after a restart or login, run `beacon endpoint repair --user`, which stages fresh copies and bootstraps them again. If Beacon cannot stage the copies, doctor reports a failure. In that case, bootstrap them by hand:
+The explicit bootstrap registration belongs to the current launchd login domain. Beacon cannot guarantee that launchd will reload the canonical external-volume plists automatically after logout or restart. `beacon endpoint doctor` therefore reports this layout as a medium-severity `launch_agents_volume` warning even when staging works. If the collector is not running after a restart or login, run `beacon endpoint repair --user`, which stages fresh copies and bootstraps them again. If Beacon cannot safely create and write the staging directory, doctor reports a failure with the rejected path and reason. In that case, bootstrap the plists by hand:
 
 ```bash title="Manual bootstrap from the startup volume"
 beacon endpoint install --user --no-start
-mkdir -p -m 700 "$TMPDIR/beacon-launchd"
+mkdir -p "$TMPDIR/beacon-launchd"
+chmod 700 "$TMPDIR/beacon-launchd"
 for label in com.beacon.endpoint.collector.user com.beacon.endpoint.inventory; do
   cp "$HOME/Library/LaunchAgents/$label.plist" "$TMPDIR/beacon-launchd/"
   launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
