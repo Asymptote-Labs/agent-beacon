@@ -24,7 +24,7 @@ The IDs (S1 to S10) are referenced from [`compatibility.md`](compatibility.md).
 - A fresh extension build:
 
   ```bash
-  cd browser-extension && npm ci && npm run build && cd ..
+  cd browser-extension && npm ci && npm run build:safari && cd ..
   ```
 
 - Safari > Settings > Advanced: turn on "Show features for web developers".
@@ -33,7 +33,7 @@ Choose one of two ways to load the build:
 
 - **Quick (no Xcode, unsigned):** Safari > Settings > Developer > turn on
   "Allow unsigned extensions", then "Add Temporary Extension…" and select
-  `browser-extension/dist`. Safari removes temporary extensions after 24 hours or
+  `browser-extension/dist-safari`. Safari removes temporary extensions after 24 hours or
   when you quit Safari, and "Allow unsigned extensions" also resets on quit.
 - **App wrapper (what users get):**
 
@@ -60,7 +60,7 @@ sudo tail -f /var/log/beacon-agent/runtime.jsonl   # system/package install
 | S1 | **Loads.** The extension appears in Safari > Settings > Extensions with name "Agent Beacon — Browser Collector" and the manifest's version, and can be enabled. If you used the app wrapper, note any packager warnings about unsupported manifest keys. | Enabled, no load error. Any packager warnings are copied into the results. |
 | S2 | **Service worker starts.** Develop > Web Extension Background Content (or the extension's service worker entry in the Develop menu) opens an inspector for `sw.js`. | The console shows no uncaught errors at startup. |
 | S3 | **MAIN-world interceptor runs.** Grant the extension access to claude.ai (toolbar button > Always Allow on This Website), reload claude.ai, open the page's Web Inspector, and check that `window.fetch` has been wrapped. For example, `window.fetch.toString()` does not print `[native code]`. | The interceptor is installed before the page's first chat request. |
-| S4 | **Site-access flow.** On a site you have not granted yet, the toolbar badge asks for access and capture does not happen. After you grant access, capture works. | The behaviour matches Safari's documented ask-first model. Write down the exact prompts shown; users will see the same ones. |
+| S4 | **Site-access flow.** On a site you have not granted yet, the toolbar badge asks for access and capture does not happen. Open the popup: the host-permission banner should list the missing sites, and its grant button should trigger Safari's permission request. After you grant access, capture works. | The behaviour matches Safari's documented ask-first model. Write down the exact prompts shown; users will see the same ones. |
 | S5 | **Reaches the collector.** Grant access to `127.0.0.1` too, if Safari lists it: Safari > Settings > Websites > the extension, or "Always Allow on Every Website" for a test profile only. Send a claude.ai message and watch the service worker inspector's Network and Console tabs. | The `POST http://127.0.0.1:4318/v1/logs` returns 200. There is no "access control checks" (CORS) error, no ATS error, and no Local Network prompt from macOS. If it fails, record the exact console error and see "Reaching the collector" in `compatibility.md`. |
 | S6 | **claude.ai end to end.** Send one message on claude.ai. | `runtime.jsonl` gains a `prompt.submitted` and an `agent.response.completed` event with harness `claude_web`, the right model, and the prompt and response text (with retention `full`). |
 | S7 | **chatgpt.com end to end.** Send one message on chatgpt.com. | The same pair of events, with harness `chatgpt_web`. |

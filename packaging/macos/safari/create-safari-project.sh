@@ -14,7 +14,7 @@ set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)"
 
-EXTENSION_DIR="${SAFARI_EXTENSION_DIR:-$ROOT_DIR/browser-extension/dist}"
+EXTENSION_DIR="${SAFARI_EXTENSION_DIR:-$ROOT_DIR/browser-extension/dist-safari}"
 PROJECT_DIR="${SAFARI_PROJECT_DIR:-$ROOT_DIR/dist/safari}"
 APP_NAME="${SAFARI_APP_NAME:-Beacon Browser Collector}"
 BUNDLE_IDENTIFIER="${SAFARI_BUNDLE_IDENTIFIER:-ai.asymptote.beacon.browser-collector}"
@@ -32,11 +32,11 @@ usage() {
 Usage:
   sh packaging/macos/safari/create-safari-project.sh [options]
 
-Build the extension first (cd browser-extension && npm ci && npm run build),
+Build the extension first (cd browser-extension && npm ci && npm run build:safari),
 then run this on a Mac with Xcode installed.
 
 Options:
-  --extension-dir DIR    Built extension to wrap (default: browser-extension/dist).
+  --extension-dir DIR    Built extension to wrap (default: browser-extension/dist-safari).
   --project-dir DIR      Directory the Xcode project is written under
                          (default: dist/safari). The packager creates
                          DIR/<app name>/.
@@ -139,7 +139,7 @@ if ! printf '%s\n' "$BUNDLE_IDENTIFIER" | grep -Eq '^[A-Za-z0-9-]+(\.[A-Za-z0-9-
   die "--bundle-id must be a reverse-DNS identifier of letters, digits, hyphens, and periods (got '$BUNDLE_IDENTIFIER')"
 fi
 
-[ -d "$EXTENSION_DIR" ] || die "extension directory not found: $EXTENSION_DIR (run 'npm ci && npm run build' in browser-extension first)"
+[ -d "$EXTENSION_DIR" ] || die "extension directory not found: $EXTENSION_DIR (run 'npm ci && npm run build:safari' in browser-extension first)"
 EXTENSION_DIR="$(CDPATH= cd -- "$EXTENSION_DIR" && pwd)"
 
 for f in $REQUIRED_FILES; do

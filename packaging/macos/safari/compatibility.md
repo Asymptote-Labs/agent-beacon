@@ -63,8 +63,10 @@ and a third gate, not in the issue, is the real risk.
      `AllowedDomains` (see [`mdm/`](mdm/)). This is the first thing to try in S5.
    - If the service worker still fails once access is granted, ship a Safari
      manifest variant with `background.scripts` (plus
-     `preferred_environment: ["document", "service_worker"]`). That needs the
-     per-target manifest build owned by #393.
+     `preferred_environment: ["document", "service_worker"]`). The per-target
+     build merged in #628 makes that a derived-manifest function on the `safari`
+     entry in `browser-extension/tools/targets.mjs`, which today ships the
+     manifest unchanged.
    - Last resort: add a `cors.allowed_origins` entry for
      `safari-web-extension://*` to the collector's OTLP HTTP receiver.
      Safari changes the extension's origin UUID on every launch
@@ -82,8 +84,12 @@ Blocking. Must be confirmed on a Mac before Safari counts as supported:
   observed teeing `window.fetch` on claude.ai and chatgpt.com in Safari.
 - **G3: site-access grants.** Content scripts do not run on claude.ai or
   chatgpt.com until the user grants access. Unmanaged users need an onboarding
-  step. Managed fleets can pre-grant with MDM `AllowedDomains`, but only on
-  supervised macOS 15+ (see [`README.md`](README.md#mdm)).
+  step. The host-permission banner merged in #628 (`src/shared/permissions.ts`,
+  shown in the popup and options page) may cover that, since it asks through
+  `permissions.request`. How Safari answers that call from an extension page has
+  not been tested, so S4 must check it. Managed fleets can pre-grant with MDM
+  `AllowedDomains`, but only on supervised macOS 15+ (see
+  [`README.md`](README.md#mdm)).
 
 Non-blocking differences:
 
@@ -107,8 +113,9 @@ Non-blocking differences:
 
 Not needed for Safari:
 
-- **A `browser.*` shim.** Safari supports `chrome.*` natively. The shim #393 adds
-  is harmless here but not required.
+- **A `browser.*` shim.** Safari supports `chrome.*` natively. The shim merged
+  in #628 (`src/shared/browser.ts`) prefers `browser.*` where it exists, which is
+  harmless in Safari but not required.
 - **The Local Network usage string (`NSLocalNetworkUsageDescription`).** See
   "Reaching the collector" above.
 

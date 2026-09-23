@@ -5,6 +5,7 @@ export declare const GECKO_ID: string;
 export declare const FIREFOX_MIN_VERSION: string;
 export declare const FIREFOX_ANDROID_MIN_VERSION: string;
 export declare const MIN_FIREFOX_FOR_MAIN_WORLD: number;
+export declare const SAFARI_MIN_VERSION: number;
 export declare const FIREFOX_DATA_COLLECTION: Readonly<{ required: string[] }>;
 
 export declare function firefoxManifest(base: Record<string, any>): Record<string, any>;

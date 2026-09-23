@@ -90,6 +90,10 @@ export function firefoxManifest(base) {
   return m;
 }
 
+/** Oldest Safari the Safari build supports: the first release documented to run
+ *  `content_scripts[].world: "MAIN"`, which the fetch interceptor depends on. */
+export const SAFARI_MIN_VERSION = 18;
+
 /**
  * @typedef {object} BuildTarget
  * @property {string} name       target id, as passed to `--target`
@@ -115,6 +119,19 @@ export const TARGETS = Object.freeze({
     outdir: 'dist-firefox',
     esbuildTarget: [`firefox${parseInt(FIREFOX_MIN_VERSION, 10)}`],
     manifest: firefoxManifest,
+  },
+  // Safari documents every key src/manifest.json uses, including the
+  // `background.service_worker` and the MAIN-world content script (Safari 18),
+  // so the manifest ships verbatim and only the esbuild target differs. The
+  // output is not loadable on its own: packaging/macos/safari wraps it in the
+  // macOS app Safari requires. If the service worker turns out to be unable to
+  // reach the collector (see packaging/macos/safari/compatibility.md), this is
+  // where a derived manifest with `background.scripts` would go.
+  safari: {
+    name: 'safari',
+    outdir: 'dist-safari',
+    esbuildTarget: [`safari${SAFARI_MIN_VERSION}`],
+    manifest: null,
   },
 });
 

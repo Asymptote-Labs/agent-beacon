@@ -35,7 +35,7 @@ On a Mac with full Xcode (the Command Line Tools alone do not include the
 packager):
 
 ```bash
-cd browser-extension && npm ci && npm run build && cd ..
+cd browser-extension && npm ci && npm run build:safari && cd ..
 sh packaging/macos/safari/create-safari-project.sh
 ```
 
@@ -44,7 +44,7 @@ target (`ai.asymptote.beacon.browser-collector`) and the extension target
 (`ai.asymptote.beacon.browser-collector.Extension`). The extension files are
 **copied** into the project, so it is a snapshot of that build. Regenerate it
 (`--force`) after rebuilding the extension. For a local edit-and-build loop, use
-`--reference-resources`; the project then points at `browser-extension/dist`,
+`--reference-resources`; the project then points at `browser-extension/dist-safari`,
 and Product > Build picks up each rebuild.
 
 `--dry-run` validates the inputs and prints the exact packager command on any
@@ -57,17 +57,22 @@ extension in step, and avoids a hand-edited Xcode project in the repository. If
 the wrapper later needs native code (it does not today), commit the project
 then.
 
-### Dependency on the Firefox work (#393)
+### The Safari build target
 
-This directory wraps whatever build it is pointed at. It does not add a
-`browser.*` shim or per-target manifests: #393 owns both.
+The script wraps `browser-extension/dist-safari/`, which `npm run build:safari`
+produces from the `safari` entry in `browser-extension/tools/targets.mjs`. That
+entry came with the per-target build and `browser.*` shim merged in #628 (the
+Firefox work, #393):
 
-- Safari does not need the shim. It supports `chrome.*`.
-- Safari may need a manifest variant. If S5 in the checklist shows the service
-  worker's POST failing CORS even after `127.0.0.1` access is granted, the Safari
-  target needs `background.scripts` plus `preferred_environment`. That comes from
-  #393's per-target manifest build. Point the script at that target's output
-  with `--extension-dir` (or `SAFARI_EXTENSION_DIR`).
+- The Safari target ships `src/manifest.json` unchanged and compiles for Safari
+  18, the first release documented to run MAIN-world content scripts.
+- The shim is harmless in Safari but not required, because Safari supports
+  `chrome.*` as well.
+- If S5 in the checklist shows the service worker's POST failing CORS even
+  after `127.0.0.1` access is granted, give the Safari target a derived manifest
+  with `background.scripts` plus `preferred_environment`. `firefoxManifest` in
+  the same file is the model to follow. Point the script at any other build with
+  `--extension-dir` (or `SAFARI_EXTENSION_DIR`).
 
 ## Distribution and signing plan
 
@@ -93,7 +98,7 @@ Proposed release steps, for a macOS runner in the existing `release` environment
 which already holds `DEVELOPER_ID_APP_CERT_P12`, `DEVELOPER_ID_INSTALLER_CERT_P12`,
 their passwords, and the `NOTARY_API_KEY_*` secrets:
 
-1. Build the extension and strip sourcemaps, as the Chrome zip job does.
+1. Build the extension (`npm run build:safari`) and strip sourcemaps, as the Chrome zip job does.
 2. `sh packaging/macos/safari/create-safari-project.sh --force`
 3. Archive the app with the Developer ID Application identity, the team from the
    `APPLE_TEAM_ID` variable, and the hardened runtime. macOS requires app

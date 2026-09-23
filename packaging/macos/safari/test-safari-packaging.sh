@@ -108,6 +108,13 @@ sh -n "$0"
 run_linux --help >"$TMP_DIR/out" || fail "--help should exit 0"
 grep -q '^Usage:' "$TMP_DIR/out" || fail "--help should print usage"
 
+# The default input is the `safari` build target's output directory.
+grep -q 'default: browser-extension/dist-safari' "$TMP_DIR/out" || fail "--help should name dist-safari as the default"
+grep -q 'EXTENSION_DIR="${SAFARI_EXTENSION_DIR:-$ROOT_DIR/browser-extension/dist-safari}"' "$SCRIPT" ||
+  fail "the script should default to browser-extension/dist-safari"
+grep -q "outdir: 'dist-safari'" "$ROOT_DIR/browser-extension/tools/targets.mjs" ||
+  fail "browser-extension/tools/targets.mjs should build the safari target to dist-safari"
+
 # --- argument handling ---
 
 expect_fail "unknown argument" "unknown argument: --bogus" -- run_linux --bogus
