@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -634,10 +635,130 @@ func eventContent(event schema.Event) *TraceContentV1 {
 	if event.Prompt != nil && event.Prompt.Text != "" {
 		return contentFromText(event.Prompt.Text, event.Content)
 	}
-	if event.Message != "" && (traceEventType(event) == "agent_message" || traceEventType(event) == "agent_reasoning") {
-		return contentFromText(event.Message, event.Content)
+	var partType string
+	switch traceEventType(event) {
+	case "agent_message":
+		partType = asymptoteobserve.GenAIPartTypeText
+	case "agent_reasoning":
+		partType = asymptoteobserve.GenAIPartTypeReasoning
+	}
+	if partType != "" {
+		// The retained turn text lives in gen_ai.output.messages; event.Message on
+		// these events is usually a fixed label ("Codex assistant message"). The
+		// label stays the event summary, and is the content only when no text was
+		// retained.
+		if text := retainedOutputText(event.GenAI, partType); text != "" {
+			return retainedOutputContent(text, event.Content)
+		}
+		if event.Message != "" {
+			return contentFromText(event.Message, event.Content)
+		}
 	}
 	return contentFromContentInfo(event.Content)
+}
+
+// retainedOutputContent is contentFromText for text read back out of
+// gen_ai.output.messages. The writer already redacted and bounded each stored
+// part, but an event can carry several parts, so the joined text is held to the
+// same limit prompt.text is stored at and redacted again; the marker records
+// either change so a reader can still tell the copy was altered.
+func retainedOutputContent(text string, info *schema.ContentInfo) *TraceContentV1 {
+	bounded := asymptoteobserve.TruncateString(text, asymptoteobserve.DefaultStringLimit)
+	cleaned := asymptoteobserve.RedactString(bounded)
+	content := contentFromText(cleaned, info)
+	if bounded != text {
+		content.Truncated = true
+	}
+	if cleaned != bounded {
+		content.Redacted = true
+	}
+	return content
+}
+
+// retainedOutputText joins the assistant parts of partType in
+// gen_ai.output.messages, in order. It reads both shapes Beacon writes: the
+// semconv {"role","parts":[{"type","content"}]} form and the
+// {"role","content":[{"type","text"}]} form some session mappers use. Parts of
+// another type -- reasoning on a message event, tool calls -- are skipped, so
+// an assistant message never shows its reasoning as what it said.
+func retainedOutputText(genAI *schema.GenAIInfo, partType string) string {
+	if genAI == nil || genAI.Output == nil || genAI.Output.Messages == nil {
+		return ""
+	}
+	// The collector keeps an OTLP messages attribute that is not JSON as the
+	// bare string it arrived as; that string is the output text itself.
+	if text, ok := genAI.Output.Messages.(string); ok {
+		if partType == asymptoteobserve.GenAIPartTypeText {
+			return strings.TrimSpace(text)
+		}
+		return ""
+	}
+	var texts []string
+	for _, message := range genAIItems(genAI.Output.Messages) {
+		msg, ok := message.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if role, _ := msg["role"].(string); role != "" && role != asymptoteobserve.RoleAssistant {
+			continue
+		}
+		parts, hasParts := msg["parts"]
+		if !hasParts {
+			parts = msg["content"]
+		}
+		if text, ok := parts.(string); ok {
+			// A bare string body is the message's text, never its reasoning.
+			if partType == asymptoteobserve.GenAIPartTypeText && strings.TrimSpace(text) != "" {
+				texts = append(texts, strings.TrimSpace(text))
+			}
+			continue
+		}
+		for _, raw := range genAIItems(parts) {
+			part, ok := raw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if kind, _ := part["type"].(string); kind != partType {
+				continue
+			}
+			text, _ := part["content"].(string)
+			if strings.TrimSpace(text) == "" {
+				text, _ = part["text"].(string)
+			}
+			if trimmed := strings.TrimSpace(text); trimmed != "" {
+				texts = append(texts, trimmed)
+			}
+		}
+	}
+	return strings.Join(texts, "\n\n")
+}
+
+// genAIItems normalizes a messages or parts value to a slice. Events decoded
+// from the log hold []interface{}; events built in memory by a mapper can hold
+// a typed slice, which is walked through a JSON round trip rather than one case
+// per Go type.
+func genAIItems(value interface{}) []interface{} {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case []interface{}:
+		return typed
+	case []map[string]interface{}:
+		out := make([]interface{}, len(typed))
+		for i, item := range typed {
+			out[i] = item
+		}
+		return out
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var out []interface{}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 func contentFromText(text string, info *schema.ContentInfo) *TraceContentV1 {
