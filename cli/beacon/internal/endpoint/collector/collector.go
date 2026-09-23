@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/brewpath"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 )
 
@@ -78,8 +79,13 @@ func DiscoverBinary(configured string) string {
 // collector at all.
 func defaultBinaryCandidates() []string {
 	paths := packagedBinaryPaths()
+	// A Homebrew CLI runs from its versioned keg, and the collector path found here goes into
+	// the service unit, so it is mapped to the <prefix>/bin link that survives `brew upgrade`.
+	// PATH usually finds that link first, but not under sudo, whose secure_path leaves out the
+	// Linuxbrew prefix.
 	if executable, err := currentExecutable(); err == nil {
-		paths = append([]string{filepath.Join(filepath.Dir(executable), binaryFileName())}, paths...)
+		sibling := brewpath.Stable(filepath.Join(filepath.Dir(executable), binaryFileName()))
+		paths = append([]string{sibling}, paths...)
 	}
 	return paths
 }

@@ -224,3 +224,35 @@ func TestVectorNotFoundMessageNamesWhereVectorComesFrom(t *testing.T) {
 		t.Error("the Linux message should not send people to a macOS install command")
 	}
 }
+
+// Under Homebrew the running CLI is in a versioned keg, and connect writes the Vector path into the
+// forwarder's service unit. The keg path breaks at the next `brew upgrade`, so FindVector has to
+// return the <prefix>/bin link instead.
+func TestFindVectorReturnsTheHomebrewLinkNotTheKeg(t *testing.T) {
+	isolateVectorDiscovery(t)
+	vectorSearchPaths = defaultVectorSearchPaths
+	prefix := t.TempDir()
+	kegBin := filepath.Join(prefix, "Cellar", "beacon", "1.3.20", "bin")
+	if err := os.MkdirAll(kegBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	keg := filepath.Join(kegBin, ArchiveVectorName)
+	if err := os.Rename(fakeVector(t, "0.56.0", 0), keg); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(prefix, "bin", ArchiveVectorName)
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(keg, link); err != nil {
+		t.Fatal(err)
+	}
+	oldExe := currentExecutable
+	currentExecutable = func() (string, error) { return filepath.Join(kegBin, "beacon"), nil }
+	t.Cleanup(func() { currentExecutable = oldExe })
+
+	got, err := FindVector("")
+	if err != nil || got.Path != link {
+		t.Fatalf("FindVector() = %+v, %v; want the Homebrew link %s, not the keg", got, err, link)
+	}
+}

@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/brewpath"
 )
 
 // MinVectorVersion is the oldest Vector the forwarder template is validated against; the
@@ -131,9 +133,11 @@ func defaultVectorSearchPaths() []string {
 	// Beside the CLI first, which is what an extracted Linux release archive and a
 	// Homebrew-on-Linux install look like. Only under ArchiveVectorName: a plain vector beside
 	// the CLI in a Homebrew bin directory is whatever Vector the user linked there, and it
-	// must not outrank the pinned keg below.
+	// must not outrank the pinned keg below. Under Homebrew the running CLI is in a versioned
+	// keg, and connect writes this path into the forwarder's service unit, so it is mapped to
+	// the <prefix>/bin link that survives `brew upgrade`.
 	if executable, err := currentExecutable(); err == nil {
-		paths = append(paths, filepath.Join(filepath.Dir(executable), ArchiveVectorName))
+		paths = append(paths, brewpath.Stable(filepath.Join(filepath.Dir(executable), ArchiveVectorName)))
 	}
 	paths = append(paths, PackagedVectorPath)
 	prefixes := homebrewPrefixes()
