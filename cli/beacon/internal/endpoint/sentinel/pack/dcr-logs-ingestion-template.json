@@ -29,6 +29,7 @@
       "apiVersion": "2023-03-11",
       "name": "[parameters('dataCollectionRuleName')]",
       "location": "[parameters('location')]",
+      "kind": "Direct",
       "properties": {
         "dataCollectionEndpointId": "[parameters('dataCollectionEndpointResourceId')]",
         "streamDeclarations": {

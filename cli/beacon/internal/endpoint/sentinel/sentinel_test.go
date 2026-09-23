@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -107,6 +109,7 @@ func TestRenderedDCRTemplateContainsTransformFromKQL(t *testing.T) {
 // dcrRule is the part of a DCR ARM template the two ingestion paths have to agree on.
 type dcrRule struct {
 	Resources []struct {
+		Kind       string `json:"kind"`
 		Properties struct {
 			StreamDeclarations map[string]struct {
 				Columns []struct {
@@ -159,6 +162,11 @@ func TestLogsIngestionPathMatchesTheDCRAndTheAgentPath(t *testing.T) {
 	}
 	if got := ingest.DataFlows[0].Streams; len(got) != 1 || got[0] != stream {
 		t.Errorf("the Logs Ingestion data flow reads %v, want %s", got, stream)
+	}
+	// Microsoft's Logs Ingestion templates mark the DCR Direct. Without it Azure treats the rule as
+	// an agent DCR, not one the Logs Ingestion API posts to.
+	if kind := parseDCR(t, "pack/dcr-logs-ingestion-template.json").Resources[0].Kind; kind != "Direct" {
+		t.Errorf("the Logs Ingestion DCR has kind %q, want Direct", kind)
 	}
 	if ingest.DataFlows[0].OutputStream != agent.DataFlows[0].OutputStream {
 		t.Errorf("the two paths write to different tables: %q and %q",
@@ -256,5 +264,18 @@ func TestKQLAssetsMentionSentinelTableAndValidation(t *testing.T) {
 	}
 	if !strings.Contains(mustRead("pack/queries.kql"), "Beacon endpoint Sentinel validation event") {
 		t.Fatal("queries.kql should include the Sentinel validation phrase")
+	}
+}
+
+// The Logs Ingestion API rejects requests over 1 MB, and the azure_logs_ingestion sink batches up to
+// 10 MB by default, so a busy flush would lose a whole batch to 413s.
+func TestVectorBatchesFitTheLogsIngestionLimit(t *testing.T) {
+	vector := mustRead("pack/vector.toml.tmpl")
+	match := regexp.MustCompile(`(?m)^max_bytes = (\d+)$`).FindStringSubmatch(vector)
+	if match == nil {
+		t.Fatal("vector.toml does not cap batch.max_bytes, so the sink batches up to 10 MB")
+	}
+	if n, _ := strconv.Atoi(match[1]); n <= 0 || n > 1_000_000 {
+		t.Fatalf("batch.max_bytes = %s, want at most 1 MB", match[1])
 	}
 }

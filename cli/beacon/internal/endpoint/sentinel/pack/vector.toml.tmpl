@@ -50,7 +50,10 @@ azure_tenant_id = "${AZURE_TENANT_ID}"
 azure_client_id = "${AZURE_CLIENT_ID}"
 azure_client_secret = "${AZURE_CLIENT_SECRET}"
 
+# The Logs Ingestion API rejects a request over 1 MB with 413, and the sink's own default is 10 MB.
+# 512 KB leaves room for the JSON escaping of RawData; one Beacon event is at most 64 KB.
 [sinks.beacon_sentinel.batch]
+max_bytes = 524288
 max_events = 1000
 timeout_secs = 30
 
