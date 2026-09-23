@@ -529,10 +529,6 @@ jobs:
       - name: Download Vector for the Linux packages
         if: steps.vector-cache.outputs.cache-hit != 'true'
         run: sh packaging/linux/fetch-vector.sh
-      # Every generated Vector pack has to load in the Vector the packages ship. Vector 0.57 and 0.58
-      # changed how ${VAR} expands and broke most of them with no Beacon change at all.
-      - name: Validate the Vector packs against the bundled Vector
-        run: sh packaging/linux/validate-vector-packs.sh cli/beacon/release-vector/linux_amd64/beacon-vector
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
@@ -540,6 +536,14 @@ jobs:
       - name: Build packages
         working-directory: cli/beacon
         run: goreleaser release --snapshot --clean --skip=publish,homebrew,announce --parallelism 1
+      # Every generated Vector pack has to load in the Vector the packages ship. Vector 0.57 and 0.58
+      # changed how ${VAR} expands and broke most of them with no Beacon change at all. Uses the CLI
+      # goreleaser just built, which carries the real embedded hooks binary.
+      - name: Validate the Vector packs against the bundled Vector
+        run: |
+          sh packaging/linux/validate-vector-packs.sh \
+            cli/beacon/release-vector/linux_amd64/beacon-vector \
+            cli/beacon/dist/beacon_linux_amd64_v1/beacon
       - name: Install the .deb and verify the endpoint
         env:
           BEACON_SMOKE_ARCH: amd64
