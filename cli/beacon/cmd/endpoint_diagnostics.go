@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -907,6 +908,12 @@ func plannedUninstallActions() []plannedAction {
 	actions := []plannedAction{
 		{Action: "unload_service", Message: "stop endpoint collector service if present"},
 		{Action: "unload_service", Message: "remove scheduled inventory heartbeat job if present"},
+	}
+	if !cfg.UserMode && runtime.GOOS == "darwin" {
+		actions = append(actions, plannedAction{Action: "unload_service", Message: "stop and remove the S3, GCS and Falcon forwarders if present"})
+		if !endpointOpts.keepConfig {
+			actions = append(actions, plannedAction{Action: "remove_file", Target: service.ScriptForwarderConfigDir(), Message: "forwarder config and credentials"})
+		}
 	}
 	if !endpointOpts.keepConfig {
 		actions = append(actions, plannedAction{Action: "restore_backup", Message: "restore backed up harness configs when available"})

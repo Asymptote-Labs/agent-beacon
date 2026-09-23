@@ -759,3 +759,51 @@ func TestApplyRecordsVerificationInTelemetry(t *testing.T) {
 			res.Verification)
 	}
 }
+
+// The package preinstall stops the S3, GCS and Falcon forwarders and only the postinstall starts
+// them again. An update whose install fails never reaches that postinstall, so the rollback has to
+// bring them back itself, or forwarding stays off until the Mac reboots.
+func TestApplyRollbackRestoresScriptForwarders(t *testing.T) {
+	artifact, sha := makeBeaconTarball(t, "9.9.9")
+	srv := nativeManifestServer(t, "9.9.9", sha, artifact)
+	defer srv.Close()
+
+	a := NewApplier("0.0.1")
+	a.ManifestURL = srv.URL + "/manifest.json"
+	a.StageDir = t.TempDir()
+	a.InstallPrefix = t.TempDir()
+	a.LogPath = filepath.Join(t.TempDir(), "system.jsonl")
+	oldBin := filepath.Join(a.InstallPrefix, "opt/beacon/bin/beacon")
+	if err := os.MkdirAll(filepath.Dir(oldBin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(oldBin, []byte("#!/bin/sh\necho \"beacon version 0.0.1 (old) built on test\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a.run = func(ctx context.Context, name string, args ...string) (string, error) {
+		switch filepath.Base(name) {
+		case "pkgutil":
+			return "Developer ID Installer: Example (TEAMID)", nil
+		case "installer", "dpkg", "rpm":
+			return "postinstall failed", fmt.Errorf("exit status 1")
+		default:
+			return "", nil
+		}
+	}
+	a.restart = func() error { return nil }
+	restored := 0
+	old := restoreScriptForwarders
+	restoreScriptForwarders = func() error { restored++; return nil }
+	t.Cleanup(func() { restoreScriptForwarders = old })
+
+	res, err := a.Apply(context.Background())
+	if err == nil {
+		t.Fatal("a failed install must fail the update")
+	}
+	if !res.RolledBack {
+		t.Fatalf("the failed install should have been rolled back: %+v", res)
+	}
+	if restored != 1 {
+		t.Fatalf("rollback reloaded the forwarders %d times, want 1", restored)
+	}
+}
