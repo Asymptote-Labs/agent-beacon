@@ -1556,6 +1556,13 @@ func planDoctorFixes(result doctorResult, status lifecycle.Status) doctorFixPlan
 		// Nothing here is Beacon's to repair: the sandbox mode is the operator's choice in dsh, and
 		// widening it on their behalf would be the wrong fix even if doctor could. Reported as a
 		// skip so --fix does not read as having found nothing.
+		// A LaunchAgents directory on an external volume is a layout, not damage: when Beacon can
+		// stage the plists (warn) the install already works and there is nothing to repair; when it
+		// cannot (fail) the remedy is the manual bootstrap in the check's action.
+		case "launch_agents_volume":
+			if check.Status == diagnostics.StatusFail {
+				addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: check.Action})
+			}
 		case "dsh_hook_capture":
 			addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: check.Action})
 		}

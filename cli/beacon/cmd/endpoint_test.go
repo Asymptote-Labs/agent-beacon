@@ -2022,6 +2022,27 @@ func TestPlanDoctorFixesDoesNotTreatMissingEventAsAppliedFix(t *testing.T) {
 	}
 }
 
+// An external-volume home that Beacon can stage is informational, so --fix must not repair it; one it
+// cannot stage is skipped with the manual bootstrap as the message (#639).
+func TestPlanDoctorFixesTreatsLaunchAgentsVolumeAsManual(t *testing.T) {
+	status := lifecycle.Status{RuntimeLog: lifecycle.RuntimeLogSource{EffectiveUserMode: true}}
+	staged := planDoctorFixes(doctorResult{Checks: []diagnostics.Check{
+		{Name: "launch_agents_volume", Target: "/Volumes/Ext/Library/LaunchAgents", Status: diagnostics.StatusWarn,
+			Evidence: "launch_agents_external_volume_staged", Action: "beacon endpoint repair --user"},
+	}}, status)
+	if len(staged.Fixes) != 0 || len(staged.Skipped) != 0 {
+		t.Fatalf("a staged external-volume home needs no fix: %#v", staged)
+	}
+	unstaged := planDoctorFixes(doctorResult{Checks: []diagnostics.Check{
+		{Name: "launch_agents_volume", Target: "/Volumes/Ext/Library/LaunchAgents", Status: diagnostics.StatusFail,
+			Evidence: "launch_agents_external_volume_unstaged", Action: "install with --no-start, then launchctl bootstrap"},
+	}}, status)
+	if len(unstaged.Fixes) != 0 || len(unstaged.Skipped) != 1 || unstaged.Skipped[0].Action != "manual_fix" ||
+		!strings.Contains(unstaged.Skipped[0].Message, "--no-start") {
+		t.Fatalf("an unstaged external-volume home should be a manual skip: %#v", unstaged)
+	}
+}
+
 func TestApplyDoctorFixesContinuesAfterCollectorRepairFailure(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)

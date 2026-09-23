@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
@@ -187,5 +188,38 @@ func TestLingerCheckOffersTheSharedRemediation(t *testing.T) {
 	}
 	if want := service.LingerRemediation(u.Username); check.Action != want {
 		t.Errorf("doctor action = %q, want the shared remediation %q", check.Action, want)
+	}
+}
+
+func TestLaunchAgentVolumeCheck(t *testing.T) {
+	onBoot := launchAgentVolumeCheck(service.LaunchAgentVolume{PlistDir: "/Users/test/Library/LaunchAgents"})
+	if onBoot.Status != StatusOK || onBoot.Evidence != "launch_agents_startup_volume" {
+		t.Fatalf("startup-volume check = %#v", onBoot)
+	}
+
+	staged := launchAgentVolumeCheck(service.LaunchAgentVolume{
+		PlistDir:   "/Volumes/Ext/Library/LaunchAgents",
+		External:   true,
+		StagingDir: "/var/folders/xx/T/beacon-launchd-502",
+		Reason:     "/Volumes/Ext/Library/LaunchAgents is on a different volume than /Users",
+	})
+	if staged.Status != StatusWarn || staged.Severity != SeverityMedium ||
+		staged.Evidence != "launch_agents_external_volume_staged" ||
+		staged.Action != "beacon endpoint repair --user" ||
+		!strings.Contains(staged.Message, "/var/folders/xx/T/beacon-launchd-502") ||
+		!strings.Contains(staged.Message, "not guaranteed") {
+		t.Fatalf("staged external-volume check = %#v", staged)
+	}
+
+	unstaged := launchAgentVolumeCheck(service.LaunchAgentVolume{
+		PlistDir:     "/Volumes/Ext/Library/LaunchAgents",
+		External:     true,
+		StagingError: "/private/tmp/beacon-launchd-502 is mode 770",
+		Reason:       "/Volumes/Ext/Library/LaunchAgents is under /Volumes",
+	})
+	if unstaged.Status != StatusFail || unstaged.Evidence != "launch_agents_external_volume_unstaged" ||
+		!strings.Contains(unstaged.Action, "--no-start") || !strings.Contains(unstaged.Action, "launchctl bootstrap gui/") ||
+		!strings.Contains(unstaged.Message, "mode 770") {
+		t.Fatalf("unstaged external-volume check = %#v", unstaged)
 	}
 }

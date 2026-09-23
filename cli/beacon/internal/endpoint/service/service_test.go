@@ -356,6 +356,10 @@ func TestLaunchctlGuidance(t *testing.T) {
 	if !strings.Contains(withTarget, "launchctl bootout gui/501/"+UserLabel) {
 		t.Fatalf("guidance missing domain/label target: %q", withTarget)
 	}
+	// #639: an external-volume home is a known cause of error 5, and doctor names it.
+	if !strings.Contains(withTarget, "/Volumes") || !strings.Contains(withTarget, "beacon endpoint doctor") {
+		t.Fatalf("guidance should mention the external-volume cause: %q", withTarget)
+	}
 
 	fallback := launchctlGuidance("Input/output error", "", "")
 	if !strings.Contains(fallback, "the Beacon launchd job") {

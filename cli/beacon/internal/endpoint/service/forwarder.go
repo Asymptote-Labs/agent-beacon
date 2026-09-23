@@ -185,8 +185,7 @@ func (m ForwarderManager) Unload() error {
 		if runtime.GOOS != "darwin" {
 			return nil
 		}
-		domain := serviceDomain(m.UserMode)
-		return runLaunchctlWithContext(domain, ForwarderLabel, "", "bootout", domain+"/"+ForwarderLabel)
+		return bootoutLaunchdJob(serviceDomain(m.UserMode), ForwarderLabel)
 	default:
 		return nil
 	}

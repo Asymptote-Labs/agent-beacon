@@ -227,8 +227,7 @@ func (m InventoryManager) Unload() error {
 		if runtime.GOOS != "darwin" {
 			return nil
 		}
-		domain := serviceDomain(m.UserMode)
-		return runLaunchctlWithContext(domain, InventoryLabel, "", "bootout", domain+"/"+InventoryLabel)
+		return bootoutLaunchdJob(serviceDomain(m.UserMode), InventoryLabel)
 	default:
 		return nil
 	}

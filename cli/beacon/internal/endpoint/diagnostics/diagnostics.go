@@ -51,6 +51,11 @@ func Run(cfg endpointconfig.Config) []Check {
 	case service.KindLaunchd:
 		if path, err := mgr.UnitPath(); err == nil {
 			checks = append(checks, checkFile("launchd_plist", path, true))
+			// A home directory on an external volume is the one layout where the plist being
+			// present says nothing about whether launchd will load it (#639).
+			if cfg.UserMode {
+				checks = append(checks, launchAgentVolumeCheck(service.InspectLaunchAgentVolume(path)))
+			}
 		}
 	case service.KindSystemd:
 		if path, err := mgr.UnitPath(); err == nil {
@@ -64,6 +69,35 @@ func Run(cfg endpointconfig.Config) []Check {
 		}
 	}
 	return checks
+}
+
+// launchAgentVolumeCheck reports a LaunchAgents directory off the startup volume. launchd refuses to
+// bootstrap plists from there ("Bootstrap failed: 5: Input/output error"), so Beacon bootstraps a
+// staged copy on the startup volume instead. That works for the running session, but it is a
+// layout worth naming: whether launchd's own login scan loads the canonical plist is not something
+// Beacon can see, and a collector missing after a restart is fixed by a repair, which restages it.
+func launchAgentVolumeCheck(vol service.LaunchAgentVolume) Check {
+	if !vol.External {
+		return Check{Name: "launch_agents_volume", Target: vol.PlistDir, Status: StatusOK, Severity: SeverityInfo,
+			Message: "LaunchAgents is on the startup volume", Evidence: "launch_agents_startup_volume"}
+	}
+	if vol.StagingDir == "" {
+		detail := "no private directory on the startup volume was usable"
+		if vol.StagingError != "" {
+			detail += ": " + vol.StagingError
+		}
+		return Check{Name: "launch_agents_volume", Target: vol.PlistDir, Status: StatusFail, Severity: SeverityHigh,
+			Message:  vol.Reason + ", so launchd refuses to bootstrap Beacon's LaunchAgents from it, and " + detail,
+			Evidence: "launch_agents_external_volume_unstaged",
+			Action: "install with --no-start, copy the plists from " + vol.PlistDir + " into a private directory on the " +
+				"startup volume, and run `launchctl bootstrap gui/$(id -u) <copied plist>` for each"}
+	}
+	return Check{Name: "launch_agents_volume", Target: vol.PlistDir, Status: StatusWarn, Severity: SeverityMedium,
+		Message: vol.Reason + ", which launchd will not bootstrap LaunchAgents from; Beacon bootstraps copies staged in " +
+			vol.StagingDir + " instead for this login session. Automatic loading after logout or restart is not guaranteed; " +
+			"if the collector is not running, repair the install to restage the jobs",
+		Evidence: "launch_agents_external_volume_staged",
+		Action:   "beacon endpoint repair --user"}
 }
 
 func lingerCheck() Check {
