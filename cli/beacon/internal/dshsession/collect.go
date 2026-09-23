@@ -59,6 +59,7 @@ type Summary struct {
 	Sessions        int `json:"sessions"`
 	SessionsChanged int `json:"sessions_changed"`
 	EventsEmitted   int `json:"events_emitted"`
+	SpoolEvents     int `json:"spool_events,omitempty"`
 	Errors          int `json:"errors"`
 	MalformedLines  int `json:"malformed_lines"`
 	PartialSessions int `json:"partial_sessions"`
@@ -123,7 +124,21 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	var errs []error
 	opts.guard = sessionsync.NewRetentionGuard(opts.Print, opts.Write)
 	var stopErr error
+	// The redelivery guard is loaded once per sweep, from the log as it stands before any
+	// drain appends: every id found there is already recorded.
+	seen := loadDrainedIDs(opts.LogPath)
 	for _, ref := range refs {
+		// Drain before the store mapping so the live hook copy of an event lands first.
+		// The writer keeps the line it saw and skips a matching candidate, so wherever the
+		// two capture paths describe one event identically (same key, same call id), the
+		// surviving copy is the collection_method=hook line doctor's capture check counts,
+		// not the poll backfill of the same moment.
+		if drained, drainErr := drainSessionSpool(ref, opts, seen); drainErr != nil {
+			summary.Errors++
+			errs = append(errs, fmt.Errorf("DeepSeek session %s spool: %w", ref.ID, drainErr))
+		} else if drained > 0 {
+			summary.SpoolEvents += drained
+		}
 		changed, collectErr := collectSession(store, ref, state, opts, &summary)
 		if sessionsync.Stopped(collectErr) {
 			// Not a failed session: this one and the rest are left for a later sync, with cursors
