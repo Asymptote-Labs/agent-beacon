@@ -116,9 +116,7 @@ func (b launchdBackend) load(userMode bool) error {
 }
 
 func (b launchdBackend) unload(userMode bool) error {
-	domain := serviceDomain(userMode)
-	target := domain + "/" + b.label(userMode)
-	return runLaunchctlWithContext(domain, b.label(userMode), "", "bootout", target)
+	return bootoutLaunchdJob(serviceDomain(userMode), b.label(userMode))
 }
 
 func (b launchdBackend) restart(userMode bool) error {
@@ -164,7 +162,21 @@ func launchctlNoSuchProcess(text string) bool {
 	return strings.Contains(text, "No such process") || strings.Contains(text, "Could not find service")
 }
 
+// loadLaunchdJob bootstraps plistPath into domain, reloading a job that is already registered.
+//
+// A user LaunchAgent whose plist is off the startup volume is bootstrapped from a staged copy
+// instead (see launchd_volume.go, #639); a failure then carries a note naming the volume and the
+// manual route.
 func loadLaunchdJob(domain, label, plistPath string) error {
+	bootstrapPath, note := launchdBootstrapPath(domain, plistPath)
+	err := bootstrapLaunchdJob(domain, label, bootstrapPath)
+	if err != nil && note != "" {
+		return fmt.Errorf("%w\n%s", err, note)
+	}
+	return err
+}
+
+func bootstrapLaunchdJob(domain, label, plistPath string) error {
 	out, err := runLaunchctlCommand("bootstrap", domain, plistPath)
 	if err == nil {
 		return nil
@@ -239,7 +251,7 @@ func launchctlGuidance(output, domain, label string) string {
 	if target == "" {
 		target = "the Beacon launchd job"
 	}
-	return fmt.Sprintf("Bootstrap failed: 5 usually means launchd could not read or execute the job. Verify the collector binary referenced by the plist exists and is executable, clear stale state with `launchctl bootout %s`, then inspect launchd logs with `log show --predicate 'process == \"launchd\"' --last 5m`.", target)
+	return fmt.Sprintf("Bootstrap failed: 5 usually means launchd could not read or execute the job. Verify the collector binary referenced by the plist exists and is executable, clear stale state with `launchctl bootout %s`, then inspect launchd logs with `log show --predicate 'process == \"launchd\"' --last 5m`. launchd also refuses plists on an external volume, such as a home directory under /Volumes; `beacon endpoint doctor` reports that case.", target)
 }
 
 func serviceDomain(userMode bool) string {
