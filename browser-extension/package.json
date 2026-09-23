@@ -3,10 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Chrome extension that relays LLM chat telemetry (ChatGPT, Claude) into the local Agent Beacon pipeline, with a fully automated self-verifying build/test loop.",
+  "description": "Chrome and Firefox extension that relays LLM chat telemetry (ChatGPT, Claude) into the local Agent Beacon pipeline, with a fully automated self-verifying build/test loop.",
   "scripts": {
     "build": "node esbuild.config.mjs",
     "build:watch": "node esbuild.config.mjs --watch",
+    "build:firefox": "node esbuild.config.mjs --target firefox",
+    "lint:firefox": "npm run build:firefox && web-ext lint --source-dir dist-firefox --warnings-as-errors",
     "check": "tsc --noEmit",
     "test:unit": "vitest run",
     "test:unit:watch": "vitest",
@@ -26,6 +28,7 @@
     "@types/node": "^22.0.0",
     "esbuild": "^0.28.1",
     "typescript": "^5.6.0",
-    "vitest": "^4.1.0"
+    "vitest": "^4.1.0",
+    "web-ext": "^10.7.0"
   }
 }

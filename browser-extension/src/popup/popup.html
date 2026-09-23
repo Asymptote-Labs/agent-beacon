@@ -9,10 +9,17 @@
       .muted { color: #666; font-size: 12px; }
       select, button { font: inherit; }
       .status { margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee; }
+      .perm { margin: 0 0 10px; padding: 8px; border: 1px solid #e0a800; background: #fff8e1; border-radius: 4px; }
+      .perm p { margin: 0 0 6px; }
     </style>
   </head>
   <body>
     <h1>Agent Beacon — Browser Collector</h1>
+    <div class="perm" id="perm-missing" data-testid="perm-missing" hidden>
+      <p><strong>Site access not granted.</strong> Nothing is captured until the browser allows access to:
+        <span id="perm-list" data-testid="perm-list"></span></p>
+      <button id="perm-grant" data-testid="perm-grant">Grant site access</button>
+    </div>
     <div class="row">
       <label for="enabled">Capture enabled</label>
       <input type="checkbox" id="enabled" />
