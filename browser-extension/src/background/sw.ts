@@ -3,6 +3,7 @@
 
 import '../adapters/claude.js'; // registers the Claude adapter (side effect)
 import '../adapters/chatgpt.js'; // registers the ChatGPT adapter (side effect)
+import { ext } from '../shared/browser.js';
 import type { ChatTurn, RelayMessage, Settings } from '../shared/types.js';
 import { getSettings, saveSettings, siteEnabled } from './settings.js';
 import { Assembler } from './assembler.js';
@@ -15,20 +16,20 @@ const assembler = new Assembler();
 let keepAliveTimer: ReturnType<typeof setInterval> | undefined;
 function updateKeepAlive(): void {
   if (assembler.active > 0 && keepAliveTimer == null) {
-    keepAliveTimer = setInterval(() => chrome.runtime.getPlatformInfo(() => {}), 20_000);
+    keepAliveTimer = setInterval(() => void ext.runtime.getPlatformInfo(), 20_000);
   } else if (assembler.active === 0 && keepAliveTimer != null) {
     clearInterval(keepAliveTimer);
     keepAliveTimer = undefined;
   }
 }
 
-chrome.runtime.onInstalled.addListener(() => {
+ext.runtime.onInstalled.addListener(() => {
   void saveSettings({}); // materialize defaults
 });
 
 installFlushAlarm();
 
-chrome.runtime.onMessage.addListener((msg: RelayMessage | ControlMessage, sender, sendResponse) => {
+ext.runtime.onMessage.addListener((msg: RelayMessage | ControlMessage, sender, sendResponse) => {
   if (isControl(msg)) {
     handleControl(msg).then(sendResponse);
     return true; // async response
@@ -69,7 +70,7 @@ async function handleControl(msg: ControlMessage): Promise<unknown> {
   switch (msg.type) {
     case 'GET_STATUS': {
       const settings = await getSettings();
-      const q = await chrome.storage.local.get('delivery_queue');
+      const q = await ext.storage.local.get('delivery_queue');
       return { settings, queueDepth: (q.delivery_queue ?? []).length, active: assembler.active };
     }
     case 'SET_SETTINGS':

@@ -14,6 +14,13 @@ name: Release Browser Extension
 #
 # Chrome Web Store publication is deferred. Until then the artifact is a zip you
 # load unpacked, and its .sha256 is the only integrity check it has.
+#
+# Firefox: the `firefox` job signs the Firefox build through AMO as an unlisted
+# (self-distributed) add-on and attaches `-firefox.xpi` to the same release. It
+# needs two repository secrets, AMO_JWT_ISSUER and AMO_JWT_SECRET (an AMO API
+# key pair). Without them the job logs a notice and does nothing, so a release
+# still succeeds with only the Chrome zip. It runs after `release` so the Chrome
+# asset never waits on, or fails because of, Mozilla's signing service.
 
 on:
   workflow_dispatch:
@@ -32,6 +39,8 @@ jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.value }}
     env:
       REPO: ${{ github.repository }}
       TAG: ${{ github.ref_name }}
@@ -198,4 +207,143 @@ jobs:
           gh release upload "$TAG" \
             "${{ steps.pack.outputs.name }}" \
             "${{ steps.pack.outputs.name }}.sha256" \
+            --repo "$REPO" --clobber
+
+  firefox:
+    needs: release
+    runs-on: ubuntu-latest
+    # AMO's automated review of an unlisted submission is usually minutes, but
+    # web-ext waits for it; bound the wait rather than holding a runner.
+    timeout-minutes: 30
+    env:
+      REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      VERSION: ${{ needs.release.outputs.version }}
+      # web-ext reads these two names directly.
+      WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+      WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # Every later step is conditional on this one. AMO accepts each version
+      # exactly once, so a re-run of a release whose .xpi is already attached
+      # must not try to sign again (it would fail with "version already exists").
+      - name: Decide whether to sign
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="agent-beacon-browser-extension-${VERSION}-firefox.xpi"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          if [ -z "$WEB_EXT_API_KEY" ] || [ -z "$WEB_EXT_API_SECRET" ]; then
+            echo "::notice title=Firefox signing skipped::AMO_JWT_ISSUER / AMO_JWT_SECRET are not configured. The Chrome release is unaffected; no -firefox.xpi is attached."
+            echo "sign=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Captured first: piping into `grep -q` under pipefail can fail the
+          # pipeline with SIGPIPE on a match and read as "not attached".
+          assets="$(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name')"
+          if printf '%s\n' "$assets" | grep -qxF "$name"; then
+            echo "::notice title=Firefox signing skipped::$name is already attached to $TAG; AMO signs a version only once."
+            echo "sign=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "sign=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.sign == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.sign == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: browser-extension/package-lock.json
+
+      - name: Install extension dependencies
+        if: steps.gate.outputs.sign == 'true'
+        working-directory: browser-extension
+        run: npm ci
+
+      # Same gate CI runs on every PR: build dist-firefox/ and lint it.
+      - name: Build and lint the Firefox target
+        if: steps.gate.outputs.sign == 'true'
+        working-directory: browser-extension
+        run: npm run lint:firefox
+
+      # The bundles are esbuild output from TypeScript, which AMO treats as
+      # processed code, so the reviewer gets the source tree it was built from.
+      # Sourcemaps are removed for the same reason as in the Chrome zip.
+      - name: Sign the Firefox build (AMO, unlisted)
+        if: steps.gate.outputs.sign == 'true'
+        working-directory: browser-extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest_version="$(node -p "require('./dist-firefox/manifest.json').version")"
+          if [ "$manifest_version" != "$VERSION" ]; then
+            echo "dist-firefox/manifest.json version ($manifest_version) != release version ($VERSION)"
+            exit 1
+          fi
+          find dist-firefox -name '*.map' -delete
+          git -C .. archive --format=zip -o "$RUNNER_TEMP/browser-extension-source.zip" HEAD browser-extension
+          npx web-ext sign \
+            --source-dir dist-firefox \
+            --artifacts-dir web-ext-artifacts \
+            --channel unlisted \
+            --upload-source-code "$RUNNER_TEMP/browser-extension-source.zip" \
+            --approval-timeout 1200000
+          shopt -s nullglob
+          signed=(web-ext-artifacts/*.xpi)
+          if [ "${#signed[@]}" -ne 1 ]; then
+            echo "expected exactly one signed .xpi, found ${#signed[@]}"
+            exit 1
+          fi
+          mv "${signed[0]}" "${{ steps.gate.outputs.name }}"
+          shasum -a 256 "${{ steps.gate.outputs.name }}" > "${{ steps.gate.outputs.name }}.sha256"
+          cat "${{ steps.gate.outputs.name }}.sha256"
+
+      # Verify the bytes about to be published: a Gecko MV3 manifest with the
+      # pinned ID and the release version, every bundle present, no sourcemaps,
+      # and Mozilla's signature files (an unsigned .xpi will not install on
+      # release Firefox, so attaching one would be a broken asset).
+      - name: Verify the signed archive
+        if: steps.gate.outputs.sign == 'true'
+        working-directory: browser-extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          unzip -q "${{ steps.gate.outputs.name }}" -d "$tmp"
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import { GECKO_ID } from "./tools/targets.mjs";
+            const dir = process.argv[1], want = process.argv[2];
+            const m = JSON.parse(fs.readFileSync(dir + "/manifest.json", "utf8"));
+            if (m.manifest_version !== 3) throw new Error("not MV3");
+            if (m.version !== want) throw new Error("manifest version " + m.version + " != " + want);
+            if (m.browser_specific_settings?.gecko?.id !== GECKO_ID) throw new Error("gecko id mismatch");
+            if (!Array.isArray(m.background?.scripts)) throw new Error("no background.scripts");
+            for (const f of ["sw.js", "content.js", "interceptor.js",
+                             "popup.html", "popup.js", "options.html", "options.js"]) {
+              if (!fs.existsSync(dir + "/" + f)) throw new Error("missing " + f);
+            }
+            for (const f of fs.readdirSync(dir)) {
+              if (f.endsWith(".map")) throw new Error("sourcemap leaked into the archive: " + f);
+            }
+            const meta = dir + "/META-INF";
+            const sig = fs.existsSync(meta) ? fs.readdirSync(meta) : [];
+            if (!sig.some((f) => f === "mozilla.rsa" || f === "cose.sig")) {
+              throw new Error("no Mozilla signature in META-INF: " + JSON.stringify(sig));
+            }
+            console.log("xpi ok: signed Gecko MV3 " + m.version);
+          ' "$tmp" "$VERSION"
+
+      - name: Attach the signed .xpi to the release
+        if: steps.gate.outputs.sign == 'true'
+        working-directory: browser-extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" \
+            "${{ steps.gate.outputs.name }}" \
+            "${{ steps.gate.outputs.name }}.sha256" \
             --repo "$REPO" --clobber

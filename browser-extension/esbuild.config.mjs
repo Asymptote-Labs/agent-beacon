@@ -1,12 +1,29 @@
 import * as esbuild from 'esbuild';
-import { cp, mkdir, rm } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
+import { DEFAULT_TARGET, assertSafeOutdir, getTarget } from './tools/targets.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const src = path.join(__dirname, 'src');
-const dist = path.join(__dirname, 'dist');
-const watch = process.argv.includes('--watch');
+
+// `--target chrome` (default) writes dist/, exactly as before per-browser targets
+// existed. `--target firefox` writes dist-firefox/. See tools/targets.mjs.
+// `--outdir` overrides the output directory (the unit tests build into a temp dir).
+const { values: args } = parseArgs({
+  options: {
+    watch: { type: 'boolean', default: false },
+    target: { type: 'string', default: DEFAULT_TARGET },
+    outdir: { type: 'string' },
+  },
+});
+const target = getTarget(args.target);
+const dist = path.resolve(__dirname, args.outdir ?? target.outdir);
+// The output directory is deleted before every build; refuse one that would
+// take project sources with it.
+assertSafeOutdir(__dirname, src, dist);
+const watch = args.watch;
 
 // Each extension surface is its own bundle. Content scripts and the MAIN-world
 // interceptor must be classic scripts (no ESM import in those worlds), so we
@@ -19,9 +36,21 @@ const entries = {
   'options': 'options/options.ts',
 };
 
-/** Copy static assets (manifest, html, icons) into dist/. */
+/** Write the target's manifest: verbatim for Chrome, derived for the others. */
+async function writeManifest() {
+  const source = path.join(src, 'manifest.json');
+  if (target.manifest == null) {
+    await cp(source, path.join(dist, 'manifest.json'));
+    return;
+  }
+  const base = JSON.parse(await readFile(source, 'utf8'));
+  const derived = target.manifest(base);
+  await writeFile(path.join(dist, 'manifest.json'), JSON.stringify(derived, null, 2) + '\n');
+}
+
+/** Copy static assets (manifest, html, icons) into the output directory. */
 async function copyStatic() {
-  await cp(path.join(src, 'manifest.json'), path.join(dist, 'manifest.json'));
+  await writeManifest();
   for (const surface of ['popup', 'options']) {
     await cp(path.join(src, surface, `${surface}.html`), path.join(dist, `${surface}.html`));
   }
@@ -36,7 +65,7 @@ const buildOptions = {
   outdir: dist,
   bundle: true,
   format: 'iife',
-  target: ['chrome120'],
+  target: target.esbuildTarget,
   sourcemap: true,
   logLevel: 'info',
 };
@@ -53,7 +82,7 @@ async function run() {
   } else {
     await esbuild.build(buildOptions);
     await copyStatic();
-    console.log('[esbuild] build complete → dist/');
+    console.log(`[esbuild] ${target.name} build complete → ${path.relative(__dirname, dist) || '.'}/`);
   }
 }
 

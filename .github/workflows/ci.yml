@@ -98,6 +98,16 @@ jobs:
             }
           "
 
+      # Firefox has no Playwright extension loading, so its gate is the build
+      # itself plus Mozilla's own linter (the same addons-linter AMO runs at
+      # signing time) over the generated Gecko manifest and bundles. The unit
+      # tests above already cover the manifest generator and the API shim.
+      # Warnings fail the step: a warning today is usually an AMO rejection or
+      # an ignored manifest key on some Firefox version.
+      - name: Build and lint the Firefox target
+        working-directory: browser-extension
+        run: npm run lint:firefox
+
       # e2e/helpers/cert.ts shells out to openssl for the throwaway self-signed
       # cert the replay server uses. Fail here with a clear message rather than
       # inside a Playwright fixture.
