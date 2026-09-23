@@ -172,3 +172,71 @@ func TestRetentionGuardWithNoWritesRetainsNothing(t *testing.T) {
 		t.Fatalf("Written()=%d Retained()=%d, want 0 and 0", w, r)
 	}
 }
+
+// Other writers take the log's lock between guarded appends and can rotate several times while a
+// sweep reads its next session. The guard must decide from where its first file actually is now,
+// not from how many files it has written into: here it has written one file, which another writer
+// has already pushed to the last retained slot, so the guarded rotation would delete it.
+func TestRetentionGuardRefusesWhenAnotherWriterMovedItsFirstFileToTheLastSlot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	guard := &RetentionGuard{}
+	guarded := Options{Path: path, RotateSize: 1, RotateArchives: 2, Guard: guard}
+	other := Options{Path: path, RotateSize: 1, RotateArchives: 2}
+
+	if _, err := AppendEvent(retentionEvent(0), guarded); err != nil {
+		t.Fatal(err)
+	}
+	for i := 100; i < 102; i++ {
+		if _, err := AppendEvent(retentionEvent(i), other); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if data, err := os.ReadFile(path + ".2"); err != nil || !strings.Contains(string(data), "retention event 0\"") {
+		t.Fatalf("fixture: guarded event is not at .2 (err=%v): %q", err, data)
+	}
+
+	if _, err := AppendEvent(retentionEvent(1), guarded); !errors.Is(err, ErrRetentionWindowFull) {
+		t.Fatalf("guarded AppendEvent err = %v, want ErrRetentionWindowFull", err)
+	}
+	if !strings.Contains(retainedText(t, path, 2), "retention event 0\"") {
+		t.Fatal("the guarded append rotated out the guard's own first event")
+	}
+	if got := guard.Retained(); got != 1 {
+		t.Errorf("Retained() = %d, want 1", got)
+	}
+}
+
+// Once another writer has rotated the guard's first file out entirely, there is nothing left of it
+// to protect: the guard keeps writing, reports the loss, and protects what it wrote afterwards.
+func TestRetentionGuardProtectsWhatSurvivesAfterAnotherWriterRotatedItsFirstFileOut(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	guard := &RetentionGuard{}
+	guarded := Options{Path: path, RotateSize: 1, RotateArchives: 2, Guard: guard}
+	other := Options{Path: path, RotateSize: 1, RotateArchives: 2}
+
+	if _, err := AppendEvent(retentionEvent(0), guarded); err != nil {
+		t.Fatal(err)
+	}
+	for i := 100; i < 103; i++ {
+		if _, err := AppendEvent(retentionEvent(i), other); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := AppendEvent(retentionEvent(1), guarded); err != nil {
+		t.Fatalf("guarded append after the first file was already gone: %v", err)
+	}
+	if w, r := guard.Written(), guard.Retained(); w != 2 || r != 1 {
+		t.Fatalf("Written()=%d Retained()=%d, want 2 and 1", w, r)
+	}
+	for i := 103; i < 105; i++ {
+		if _, err := AppendEvent(retentionEvent(i), other); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := AppendEvent(retentionEvent(2), guarded); !errors.Is(err, ErrRetentionWindowFull) {
+		t.Fatalf("guarded AppendEvent err = %v, want ErrRetentionWindowFull (event 1 is at .2)", err)
+	}
+	if !strings.Contains(retainedText(t, path, 2), "retention event 1\"") {
+		t.Fatal("the guarded append rotated out the guard's surviving event")
+	}
+}

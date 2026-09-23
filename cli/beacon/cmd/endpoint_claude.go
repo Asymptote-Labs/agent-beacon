@@ -33,7 +33,7 @@ var endpointClaudeSyncCmd = &cobra.Command{
 
 The runtime log keeps the live file plus five archives, 10 MiB each by default, and every
 rotation deletes the oldest. A sweep never rotates out its own output: when writing more would
-delete the file holding the sweep's first event, it stops, reports how many sessions are still
+delete a log file holding the sweep's output, it stops, reports how many sessions are still
 pending, and leaves their cursors where they were, so the next sweep picks them up. Between
 sweeps, ship or copy the log files if you need to keep every event, or backfill a large history
 in one sweep with a larger --rotate-bytes.`,

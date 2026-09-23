@@ -8,8 +8,8 @@ import (
 	"os"
 )
 
-// ErrRetentionWindowFull is returned by a guarded append whose rotation would discard the file
-// holding the guard's first event. Nothing is written or rotated when it is returned.
+// ErrRetentionWindowFull is returned by a guarded append whose rotation would delete a file holding
+// the guard's output. Nothing is written or rotated when it is returned.
 var ErrRetentionWindowFull = errors.New("the runtime log's rotation window is full of this run's own output")
 
 // RetentionGuard keeps one run of appends -- a session backfill sweep, say -- from rotating its
@@ -18,13 +18,15 @@ var ErrRetentionWindowFull = errors.New("the runtime log's rotation window is fu
 // The log keeps the live file plus a fixed number of archives, and every rotation deletes the
 // oldest archive. A run that writes more than that window used to rotate its own first events away
 // before it finished, so a backfill of 595,640 events kept 27,550 and still reported success
-// (#619). With a guard, the append whose rotation would delete the file holding the run's first
-// event fails with ErrRetentionWindowFull instead, and the caller can stop where it is and leave
+// (#619). With a guard, the append whose rotation would delete a file holding the run's output
+// fails with ErrRetentionWindowFull instead, and the caller can stop where it is and leave
 // the rest for the next run.
 //
-// The guard counts the distinct files its appends landed in. That sees rotations by other writers
-// too (the hooks and the collector share the log), but only after the fact: another process can
-// still rotate the window over during the run, which is what Retained reports.
+// The decision is made under the log's lock from where the guard's files actually are, not from how
+// many it has written: the hooks and the collector share the log and can rotate it several times
+// between two guarded appends. A guarded rotation is refused when the archive it would delete holds
+// any of the guard's output. Output another writer has already rotated out cannot be protected;
+// Retained reports it.
 //
 // The zero value is ready to use. A guard is not safe for concurrent use; give each run its own.
 type RetentionGuard struct {
@@ -83,13 +85,18 @@ func (g *RetentionGuard) Retained() int {
 			continue
 		}
 		for i, info := range kept {
-			if os.SameFile(s.file, info) && s.firstLineAt(keptPaths[i]) {
+			if s.isFile(keptPaths[i], info) {
 				n += s.events
 				break
 			}
 		}
 	}
 	return n
+}
+
+// isFile reports whether the file at path, stat'd as info, is the one this segment was written to.
+func (s retentionSegment) isFile(path string, info os.FileInfo) bool {
+	return s.file != nil && os.SameFile(s.file, info) && s.firstLineAt(path)
 }
 
 // firstLineAt reports whether path still holds the segment's first line where it was written.
@@ -107,15 +114,31 @@ func (s retentionSegment) firstLineAt(path string) bool {
 	return bytes.Equal(digest[:], s.digest[:])
 }
 
-// rotationWouldDiscardOwnOutput reports whether a rotation now would delete the file holding the
-// guard's first event. The guard's files are, oldest first, at .N ... .1 and the live path, and a
-// rotation deletes .archives, so once the guard has written into archives+1 files the oldest of
-// them is at .archives. Before the guard's first write there is nothing of its own to lose.
-func (g *RetentionGuard) rotationWouldDiscardOwnOutput(archives int) bool {
+// rotationWouldDiscardOwnOutput reports whether rotating path now would delete a file holding the
+// guard's output. Rotation deletes the archive at .archives (and anything numbered past it, which
+// no reader looks at), so that is the one file to check. Called under the log's lock, so the answer
+// holds for the rotation that follows it.
+func (g *RetentionGuard) rotationWouldDiscardOwnOutput(path string, archives int) (bool, error) {
+	if len(g.segments) == 0 {
+		return false, nil
+	}
 	if archives < 1 {
 		archives = DefaultRotateArchives
 	}
-	return len(g.segments) >= archives+1
+	victim := fmt.Sprintf("%s.%d", path, archives)
+	info, err := os.Stat(victim)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, s := range g.segments {
+		if s.isFile(victim, info) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // record notes one written line. info is the file it was appended to, stat'd after the write under

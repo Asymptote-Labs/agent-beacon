@@ -126,7 +126,7 @@ Run `beacon endpoint claude sync --watch`, or schedule one-shot sweeps, if you w
 
 ### Large backfills and log rotation
 
-The runtime log keeps the live file plus five archives, 10 MiB each, and every rotation deletes the oldest archive. A first sync over a long Claude Code history can produce far more than that window. A sweep never rotates out its own output. When writing the next event would delete the file that holds the sweep's first event, the sweep stops. It leaves the cursors of the remaining sessions (including the one it stopped inside) where they were and exits non-zero:
+The runtime log keeps the live file plus five archives, 10 MiB each, and every rotation deletes the oldest archive. A first sync over a long Claude Code history can produce far more than that window. A sweep never rotates out its own output. When writing the next event would delete a log file that holds the sweep's output, the sweep stops. It decides from where its files are at that moment, so it holds even when the hooks or the collector rotate the log during the sweep. It leaves the cursors of the remaining sessions (including the one it stopped inside) where they were and exits non-zero:
 
 ```text
 claude sync: 3496 sessions, 168 changed, 33689 events (33689 retained), 0 errors

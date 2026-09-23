@@ -212,8 +212,14 @@ func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int
 		if err != nil {
 			return err
 		}
-		if rotate && guard.rotationWouldDiscardOwnOutput(rotateArchives) {
-			return ErrRetentionWindowFull
+		if rotate {
+			discard, err := guard.rotationWouldDiscardOwnOutput(path, rotateArchives)
+			if err != nil {
+				return err
+			}
+			if discard {
+				return ErrRetentionWindowFull
+			}
 		}
 	}
 	if err := rotateIfNeeded(path, rotateBytes, rotateArchives, int64(len(line))); err != nil {
