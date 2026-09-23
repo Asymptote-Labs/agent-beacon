@@ -9,6 +9,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
 	endpointhooks "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	endpointintegrations "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
@@ -62,43 +63,62 @@ func dshHookCaptureCheckAt(logPath, hooksPath, dshHome string) diagnostics.Check
 		Severity: diagnostics.SeverityInfo,
 	}
 
+	// Evidence that cannot be read is a warning, not a pass. Doctor's text output prints only
+	// failures and warnings, so an ok here would tell the operator hook capture had been checked
+	// when it had not been.
+	unreadable := func(evidence, what string, err error) diagnostics.Check {
+		check.Status = diagnostics.StatusWarn
+		check.Severity = diagnostics.SeverityLow
+		check.Evidence = evidence
+		check.Message = "could not verify DeepSeek Harness hook capture: " + what + " could not be read: " + err.Error()
+		check.Action = "check that this user can read " + what + ", then run beacon endpoint doctor again"
+		return check
+	}
+
 	// The hooks file is rewritten wholesale by every install and repair, so its modification time
 	// is when the current hook commands took effect. Sessions before it were never going to be
 	// captured live and are not evidence of anything.
 	hooksInfo, err := os.Stat(hooksPath)
 	if err != nil {
-		check.Message = "DeepSeek Harness hooks file could not be read: " + err.Error()
-		check.Evidence = "dsh_hooks_unreadable"
-		return check
+		return unreadable("dsh_hooks_unreadable", "the hooks file "+hooksPath, err)
 	}
 	installedAt := hooksInfo.ModTime()
 
 	store, err := dshsession.NewStore(dshHome)
 	if err != nil {
-		check.Message = "DeepSeek Harness session store could not be resolved: " + err.Error()
-		check.Evidence = "dsh_sessions_unreadable"
-		return check
+		return unreadable("dsh_sessions_unreadable", "the DeepSeek Harness session store", err)
 	}
 	refs, err := store.List()
 	if err != nil {
-		check.Message = "DeepSeek Harness session store could not be read: " + err.Error()
-		check.Evidence = "dsh_sessions_unreadable"
-		return check
+		return unreadable("dsh_sessions_unreadable", "the DeepSeek Harness session store "+store.SessionsDir, err)
 	}
 
-	// The newest archive is read as well as the live log: a busy machine rotates at 10 MiB, and
-	// hook events that moved to runtime.jsonl.1 would otherwise make captured sessions read as
-	// missed.
+	// Every retained archive is read, newest first, stopping at the first that holds a hook event:
+	// archives are strictly older than the file before them, so that event is the latest one. Poll
+	// backfill writes into the same log, so on a busy machine the last hook event can sit several
+	// rotations back while capture is working fine.
+	//
 	var lastHook time.Time
 	hookSeen := false
-	for _, path := range []string{logPath, logPath + ".1"} {
+	paths := writer.RetainedLogPaths(logPath)
+	for _, path := range paths {
 		if ts, ok := endpointintegrations.LastHarnessEventByCollectionMethod(path, dshsession.Harness, asymptoteobserve.CollectionMethodHook); ok {
 			hookSeen = true
-			if ts.After(lastHook) {
-				lastHook = ts
-			}
+			lastHook = ts
+			break
 		}
 	}
+	// Once the oldest archive slot is occupied, rotation has started discarding history, and a
+	// session last written before the oldest retained event has no evidence either way: its hook
+	// events, if it had any, are gone. Such sessions are not counted. Before that slot fills,
+	// nothing has been discarded and every session since install is fair evidence.
+	var oldestRetained time.Time
+	if len(paths) > 0 {
+		if first, ok := endpointintegrations.FirstEventTime(paths[len(paths)-1]); ok {
+			oldestRetained = first
+		}
+	}
+
 	// A session is missed when it was written after the hooks took effect and after the last live
 	// hook event, by more than the commit gap. Taking the later of the two lets a machine that
 	// captured fine and later moved to a sandboxed mode be flagged too, not only a fresh install.
@@ -111,7 +131,7 @@ func dshHookCaptureCheckAt(logPath, hooksPath, dshHome string) diagnostics.Check
 	var newest time.Time
 	for _, ref := range refs {
 		modified := time.UnixMilli(ref.ModTimeUnixMS)
-		if modified.Before(installedAt) {
+		if modified.Before(installedAt) || modified.Before(oldestRetained) {
 			continue
 		}
 		sinceInstall++

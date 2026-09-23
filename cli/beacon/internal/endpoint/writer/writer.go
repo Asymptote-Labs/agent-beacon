@@ -233,6 +233,23 @@ func openRuntimeFile(path string, flag int) (*os.File, error) {
 	return f, nil
 }
 
+// RetainedLogPaths returns the runtime log at path followed by every archive the rotation contract
+// keeps for it, newest first: path, path.1, ..., path.N for N = DefaultRotateArchives. Readers that
+// need history older than the live file -- the last event of some kind, say -- walk this list
+// rather than guessing how many archives exist. The hook adapter and the beaconjson exporter rotate
+// with the same count, so the list covers whichever process wrote the log.
+func RetainedLogPaths(path string) []string {
+	if path == "" {
+		return nil
+	}
+	paths := make([]string, 0, DefaultRotateArchives+1)
+	paths = append(paths, path)
+	for i := 1; i <= DefaultRotateArchives; i++ {
+		paths = append(paths, path+fmt.Sprintf(".%d", i))
+	}
+	return paths
+}
+
 func rotateIfNeeded(path string, maxSize int64, archives int, nextWriteBytes int64) error {
 	if maxSize <= 0 {
 		return nil

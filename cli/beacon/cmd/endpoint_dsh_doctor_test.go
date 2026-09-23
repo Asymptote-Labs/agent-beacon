@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 )
 
 // DeepSeek Harness runs hook commands sandboxed to the session workspace unless the sandbox mode is
@@ -273,5 +275,78 @@ func TestDshHookCaptureReadsTheRotatedArchive(t *testing.T) {
 
 	if got := f.check(); got.Status != diagnostics.StatusOK {
 		t.Fatalf("status = %s, want ok when the hook event is in the rotated archive (%s)", got.Status, got.Message)
+	}
+}
+
+// Evidence doctor cannot read is a warning, not a pass: doctor's text output prints only failures
+// and warnings, so an ok would report hook capture as checked when it was not.
+func TestDshHookCaptureWarnsWhenEvidenceIsUnreadable(t *testing.T) {
+	f := newDshDoctorFixture(t)
+	if err := os.Remove(f.hooksPath); err != nil {
+		t.Fatal(err)
+	}
+
+	got := f.check()
+	if got.Status != diagnostics.StatusWarn || got.Evidence != "dsh_hooks_unreadable" {
+		t.Fatalf("status/evidence = %s/%s, want warn/dsh_hooks_unreadable (%s)", got.Status, got.Evidence, got.Message)
+	}
+	if !strings.Contains(got.Message, f.hooksPath) || got.Action == "" {
+		t.Fatalf("the warning does not name what could not be read, or has no action: %+v", got)
+	}
+}
+
+// writeArchive writes one rotated archive of the runtime log holding the given lines.
+func (f dshDoctorFixture) writeArchive(t *testing.T, index int, lines ...string) {
+	t.Helper()
+	body := ""
+	for _, l := range lines {
+		body += l + "\n"
+	}
+	if err := os.WriteFile(fmt.Sprintf("%s.%d", f.logPath, index), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func dshLogLine(method string, ts time.Time) string {
+	return `{"timestamp":"` + ts.UTC().Format(time.RFC3339Nano) + `","harness":{"name":"deepseek_harness","collection_method":"` + method + `"}}`
+}
+
+// Poll backfill writes into the same log, so on a busy machine the last hook event can sit several
+// rotations back. Every retained archive is read, not only the newest one.
+func TestDshHookCaptureReadsEveryRetainedArchive(t *testing.T) {
+	f := newDshDoctorFixture(t)
+	hookAt := f.installedAt.Add(time.Hour)
+	// The oldest retained slot holds the hook event; every newer file holds only poll events.
+	oldest := writer.DefaultRotateArchives
+	f.writeArchive(t, oldest, dshLogLine("hook", hookAt))
+	for i := oldest - 1; i >= 1; i-- {
+		f.writeArchive(t, i, dshLogLine("poll", hookAt.Add(time.Duration(oldest-i)*time.Second)))
+	}
+	f.event(t, "poll", hookAt.Add(time.Minute))
+	f.session(t, "sess-a", hookAt.Add(time.Minute))
+
+	if got := f.check(); got.Status != diagnostics.StatusOK || got.Evidence != "dsh_hook_events_observed" {
+		t.Fatalf("status/evidence = %s/%s, want ok when the last hook event is in archive .%d (%s)", got.Status, got.Evidence, oldest, got.Message)
+	}
+}
+
+// Once every archive slot is in use, rotation has started discarding history. A session older than
+// the oldest retained event may have had hook events that are gone, so it is not reported as missed.
+func TestDshHookCaptureIgnoresSessionsOlderThanRetainedHistory(t *testing.T) {
+	f := newDshDoctorFixture(t)
+	historyStart := f.installedAt.Add(10 * time.Hour)
+	for i := writer.DefaultRotateArchives; i >= 1; i-- {
+		f.writeArchive(t, i, dshLogLine("poll", historyStart.Add(time.Duration(writer.DefaultRotateArchives-i)*time.Minute)))
+	}
+	f.session(t, "before-history", f.installedAt.Add(time.Hour))
+
+	if got := f.check(); got.Status != diagnostics.StatusOK {
+		t.Fatalf("status = %s, want ok for a session older than the retained log history (%s)", got.Status, got.Message)
+	}
+
+	// A session inside the retained history with no hook event is still flagged.
+	f.session(t, "inside-history", historyStart.Add(time.Hour))
+	if got := f.check(); got.Status != diagnostics.StatusWarn || !strings.Contains(got.Message, "1 DeepSeek Harness session(s)") {
+		t.Fatalf("status = %s, want warn counting only the session inside the history (%s)", got.Status, got.Message)
 	}
 }

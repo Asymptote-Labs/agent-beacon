@@ -91,6 +91,34 @@ func LastHarnessEventByCollectionMethod(logPath, harnessName, method string) (ti
 	return lastHarnessEvent(logPath, harnessName, method)
 }
 
+// FirstEventTime returns the timestamp of the first event in logPath that carries a parseable one.
+// For a rotated archive that is the start of the history the file holds. Only the head of the file
+// is read.
+func FirstEventTime(logPath string) (time.Time, bool) {
+	if logPath == "" {
+		return time.Time{}, false
+	}
+	file, err := os.Open(logPath)
+	if err != nil {
+		return time.Time{}, false
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for lines := 0; lines < 100 && scanner.Scan(); lines++ {
+		var event struct {
+			Timestamp string `json:"timestamp"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			continue
+		}
+		if parsed, err := time.Parse(time.RFC3339Nano, event.Timestamp); err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
+}
+
 func lastHarnessEvent(logPath, harnessName, method string) (time.Time, bool) {
 	if logPath == "" || strings.TrimSpace(harnessName) == "" {
 		return time.Time{}, false
