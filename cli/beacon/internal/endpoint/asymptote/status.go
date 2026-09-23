@@ -37,6 +37,10 @@ type ManagedIngestStatus struct {
 	CredentialMessage string `json:"credential_message,omitempty"`
 	BufferBytes       int64  `json:"buffer_bytes"`
 	Message           string `json:"message,omitempty"`
+	// ConnectIncomplete is true when a connect received a key from the server and then
+	// failed before finishing. Enabled is false then: on a re-connect the server has rotated
+	// the key the running forwarder holds, so it cannot upload until connect is run again.
+	ConnectIncomplete bool `json:"connect_incomplete,omitempty"`
 }
 
 // StatusOptions tunes Status; zero values are the production defaults.
@@ -49,13 +53,33 @@ type StatusOptions struct {
 // Status describes the managed-ingest state of this endpoint. It never reads the device key
 // into the caller's structures: the key is used for one HEAD-equivalent GET and discarded.
 func Status(userMode bool, opts StatusOptions) ManagedIngestStatus {
+	incomplete := ConnectIncomplete(userMode)
 	enrollment, err := LoadEnrollment(userMode)
 	if err != nil {
-		status := ManagedIngestStatus{Enabled: false}
-		if !errors.Is(err, ErrNotEnrolled) {
+		status := ManagedIngestStatus{Enabled: false, ConnectIncomplete: incomplete}
+		switch {
+		case !errors.Is(err, ErrNotEnrolled):
 			status.Message = err.Error()
+		case incomplete:
+			status.Message = "connect incomplete: this device was approved but connect did not finish; run `beacon endpoint connect` again"
 		}
 		return status
+	}
+	if incomplete {
+		privacyMode, _ := managedprivacy.Normalize(enrollment.PrivacyMode)
+		// The record and config are the previous connection's, and so is the key prefix,
+		// which the server has rotated out; the key file may already hold the new one, so
+		// a credential check would say valid while the running forwarder cannot upload.
+		return ManagedIngestStatus{
+			Enabled:           false,
+			ConnectIncomplete: true,
+			DeviceID:          enrollment.DeviceID,
+			OrganizationID:    enrollment.OrganizationID,
+			OrganizationName:  enrollment.OrganizationName,
+			PrivacyMode:       privacyMode,
+			Forwarder:         ForwarderStatus(userMode),
+			Message:           fmt.Sprintf("re-connect incomplete: the server rotated device %s's key but connect did not finish, so the forwarder cannot upload; run `beacon endpoint connect` again", enrollment.DeviceID),
+		}
 	}
 	if !Connected(userMode) {
 		privacyMode, _ := managedprivacy.Normalize(enrollment.PrivacyMode)

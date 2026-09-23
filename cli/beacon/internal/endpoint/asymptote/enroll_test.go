@@ -26,6 +26,9 @@ type fakeDashboard struct {
 	server       *httptest.Server
 	initStatus   int
 	exchangeFail string
+	// deviceKey overrides the key the exchange mints, so a test can tell a rotated key
+	// from the one it replaced.
+	deviceKey string
 }
 
 func newFakeDashboard(t *testing.T) *fakeDashboard {
@@ -62,9 +65,13 @@ func newFakeDashboard(t *testing.T) *fakeDashboard {
 			if ingest == "" {
 				ingest = "https://ingest.example.test"
 			}
+			key := fd.deviceKey
+			if key == "" {
+				key = "bcn_device_abcdefgh_" + strings.Repeat("k", 43)
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"device_id":         "dev-1",
-				"device_key":        "bcn_device_abcdefgh_" + strings.Repeat("k", 43),
+				"device_key":        key,
 				"key_prefix":        "bcn_device_abcdefgh",
 				"ingest_url":        ingest,
 				"organization_id":   "org-1",

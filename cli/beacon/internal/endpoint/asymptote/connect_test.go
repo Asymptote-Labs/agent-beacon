@@ -26,6 +26,7 @@ type fakeForwarder struct {
 	unloads   int
 	removed   int
 	loadErr   error
+	writeErr  error
 }
 
 func (f *fakeForwarder) Supported() bool           { return f.supported }
@@ -34,6 +35,9 @@ func (f *fakeForwarder) Label() string             { return "fake.forwarder" }
 func (f *fakeForwarder) UnitPath() (string, error) { return f.unitPath, nil }
 func (f *fakeForwarder) WriteUnit(vectorBin, configPath string) (string, error) {
 	f.written = append(f.written, vectorBin+" --config "+configPath)
+	if f.writeErr != nil {
+		return "", f.writeErr
+	}
 	if f.unitPath != "" {
 		if err := os.WriteFile(f.unitPath, []byte("unit"), 0o644); err != nil {
 			return "", err
