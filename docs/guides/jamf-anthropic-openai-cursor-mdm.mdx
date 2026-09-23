@@ -392,9 +392,6 @@ Write an inventory heartbeat:
 sudo /opt/beacon/bin/beacon endpoint inventory heartbeat \
   --system \
   --force \
-  --trigger manual \
-  --trigger-harness claude \
-  --working-dir /Users/Shared \
   --log-path /var/log/beacon-agent/runtime.jsonl
 ```
 
@@ -550,9 +547,6 @@ Force inventory and inspect the local file:
 sudo /opt/beacon/bin/beacon endpoint inventory heartbeat \
   --system \
   --force \
-  --trigger manual \
-  --trigger-harness claude \
-  --working-dir /Users/Shared \
   --log-path /var/log/beacon-agent/runtime.jsonl
 
 tail -n 5 /var/log/beacon-agent/inventory_state.jsonl
