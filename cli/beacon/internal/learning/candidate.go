@@ -169,9 +169,28 @@ func candidateTitle(eval asymptoteobserve.LearningEvaluationV1, kind string) str
 	return strings.TrimSpace(strings.ReplaceAll(kind, "_", " ")) + ": " + title
 }
 
+// candidateBody uses per-question rationale only when a compatible evaluator
+// supplied it through the legacy questions/results response shapes. TypeSafe Noul
+// answers contain probabilities, not rationale, so the normal Jev path explicitly
+// says that no lesson text was extracted instead of presenting scores as guidance.
 func candidateBody(eval asymptoteobserve.LearningEvaluationV1) string {
+	var rationale []string
+	for _, question := range eval.Questions {
+		if reason := QuestionReason(question); reason != "" {
+			rationale = append(rationale, fmt.Sprintf("- %s: %s", question.ID, reason))
+		}
+	}
 	var lines []string
-	lines = append(lines, "Reusable lesson extracted from a reviewed Beacon trace.")
+	if len(rationale) > 0 {
+		lines = append(lines, "Reusable lesson extracted from a reviewed Beacon trace.")
+		lines = append(lines, "")
+		lines = append(lines, "Evaluator rationale:")
+		lines = append(lines, rationale...)
+	} else {
+		lines = append(lines, "Beacon trace flagged for review by evaluation scores.")
+		lines = append(lines, "")
+		lines = append(lines, "The evaluator returned scores with no rationale, so no lesson text was extracted. Review the source trace before approving.")
+	}
 	lines = append(lines, "")
 	lines = append(lines, "Trace: "+eval.Trace.ID)
 	if eval.Trace.Harness.Name != "" {
