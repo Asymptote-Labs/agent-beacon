@@ -48,6 +48,10 @@ var (
 		_ = job.Unload()
 		job.RemoveUnits()
 	}
+	// removeScriptForwarders is the seam for the S3, GCS and Falcon forwarders the package
+	// helpers install, so tests can see whether an uninstall reaches them without touching
+	// /Library.
+	removeScriptForwarders = service.RemoveScriptForwarders
 )
 
 // inventoryJobController is what lifecycle needs from service.InventoryManager.
@@ -207,6 +211,10 @@ type UninstallOptions struct {
 	KeepLogs    bool
 	KeepConfig  bool
 	KeepUpdater bool
+	// KeepForwarders leaves the package-helper forwarders (S3, GCS, Falcon) running. Repair
+	// sets it: it uninstalls and reinstalls the endpoint, and nothing in Install puts those
+	// forwarders back.
+	KeepForwarders bool
 }
 
 type InstallResult struct {
@@ -612,6 +620,11 @@ func Uninstall(opts UninstallOptions) error {
 		removeUpdaterJob()
 	}
 	removeInventoryJob(cfg.UserMode)
+	// The S3, GCS and Falcon forwarders run from /opt/beacon and read the customer's credentials
+	// from their env files, so they go with the endpoint the same way the managed forwarder does.
+	if !cfg.UserMode && !opts.KeepForwarders {
+		fail("remove package forwarders", removeScriptForwarders(opts.KeepConfig))
+	}
 	// The managed-ingest forwarder and its credentials go with the endpoint; server-side the
 	// device stays registered until it is revoked from the dashboard.
 	fail("disconnect managed ingest", asymptote.Disconnect(asymptote.DisconnectOptions{
@@ -667,6 +680,19 @@ func runtimeLogFiles(logPath string) []string {
 	return paths
 }
 
+// repairUninstallOptions is the teardown half of Repair: everything the reinstall recreates goes,
+// and everything it does not recreate stays.
+func repairUninstallOptions(opts InstallOptions) UninstallOptions {
+	return UninstallOptions{
+		UserMode:       opts.UserMode,
+		LogPath:        opts.LogPath,
+		KeepLogs:       true,
+		KeepConfig:     true,
+		KeepUpdater:    true,
+		KeepForwarders: true,
+	}
+}
+
 func Repair(opts InstallOptions) (InstallResult, error) {
 	configPath := endpointconfig.ConfigPath(opts.UserMode)
 	configSnapshot := snapshotFile(configPath)
@@ -676,7 +702,7 @@ func Repair(opts InstallOptions) (InstallResult, error) {
 			priorAutoUpdateMode = mode
 		}
 	}
-	_ = Uninstall(UninstallOptions{UserMode: opts.UserMode, LogPath: opts.LogPath, KeepLogs: true, KeepConfig: true, KeepUpdater: true})
+	_ = Uninstall(repairUninstallOptions(opts))
 	result, err := Install(opts)
 	if err != nil {
 		restoreFile(configPath, configSnapshot)

@@ -671,8 +671,12 @@ preserve harness telemetry configuration.
 /opt/beacon/fleet/scripts/uninstall.sh "$@"
 ```
 
-The endpoint uninstall removes service/configuration state. Package payload
-removal remains under the MDM/package receipt lifecycle.
+The endpoint uninstall removes service/configuration state. That includes the
+S3, GCS and Falcon forwarder LaunchDaemons and, unless config is kept, their
+env files under `/Library/Application Support/Beacon/Forwarders`, which hold
+the forwarding credentials. `beacon endpoint repair` leaves the forwarders
+running. Package payload removal remains under the MDM/package receipt
+lifecycle.
 
 ## Troubleshooting
 

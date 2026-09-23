@@ -317,3 +317,32 @@ func TestStableProgramPathPrefersTheLinkedHomebrewBinary(t *testing.T) {
 		t.Fatalf("without a linked binary the keg path stays, got %q", got)
 	}
 }
+
+// The package-helper forwarders are system LaunchDaemons. A user-mode uninstall has no business
+// with them, and must not reach for /Library.
+func TestUserUninstallLeavesScriptForwardersAlone(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	old := removeScriptForwarders
+	called := false
+	removeScriptForwarders = func(bool) error { called = true; return nil }
+	t.Cleanup(func() { removeScriptForwarders = old })
+	if err := Uninstall(UninstallOptions{UserMode: true}); err != nil {
+		t.Fatal(err)
+	}
+	if called {
+		t.Fatal("a user-mode uninstall removed the system S3/GCS/Falcon forwarders")
+	}
+}
+
+// Repair tears the endpoint down and installs it again, and Install never recreates the S3, GCS or
+// Falcon forwarders. If the teardown removed them, `beacon endpoint repair --system` and the Fleet
+// and Jamf repair scripts would silently stop a customer's forwarding.
+func TestRepairTeardownKeepsScriptForwarders(t *testing.T) {
+	opts := repairUninstallOptions(InstallOptions{UserMode: false})
+	if !opts.KeepForwarders {
+		t.Fatal("repair's uninstall step must keep the package-helper forwarders")
+	}
+	if !opts.KeepConfig || !opts.KeepLogs || !opts.KeepUpdater {
+		t.Fatalf("repair's uninstall step changed what it keeps: %+v", opts)
+	}
+}
