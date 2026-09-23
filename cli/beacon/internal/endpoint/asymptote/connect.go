@@ -104,6 +104,19 @@ func Connect(ctx context.Context, opts ConnectOptions) (_ *ConnectResult, err er
 	if manager == nil {
 		manager = service.ForwarderManager{UserMode: opts.UserMode}
 	}
+	firstConnectForwarderTouched := false
+	defer func() {
+		// A first connect can fail after writing or starting its forwarder but before
+		// the endpoint records a complete connection. Stop that partial forwarder so
+		// a later onboarding retry may safely choose local-only telemetry.
+		if err == nil || !keyIssued || reconnect || !firstConnectForwarderTouched {
+			return
+		}
+		if unloadErr := manager.Unload(); unloadErr != nil {
+			err = errors.Join(err, fmt.Errorf("could not stop the incomplete forwarder: %w", unloadErr))
+		}
+		manager.RemoveUnits()
+	}()
 	if !manager.Supported() {
 		return nil, errors.New(manager.UnsupportedReason())
 	}
@@ -188,7 +201,7 @@ func Connect(ctx context.Context, opts ConnectOptions) (_ *ConnectResult, err er
 	// marker itself cannot be written, the secrets file still holds the rotated-out key, which
 	// the status credential check reports as revoked. A marker left by an earlier attempt
 	// stays until a connect finishes, since that attempt's rotation still stands.
-	if err := markConnectPending(opts.UserMode, now()); err != nil {
+	if err := markConnectPending(opts.UserMode, now(), reconnect); err != nil {
 		return nil, fmt.Errorf("could not record that connect is in progress: %w", err)
 	}
 	if opts.AccountEnroll != nil {
@@ -244,6 +257,7 @@ func Connect(ctx context.Context, opts ConnectOptions) (_ *ConnectResult, err er
 	if err := writeFileAtomic(configPath, []byte(rendered), 0o644); err != nil {
 		return nil, err
 	}
+	firstConnectForwarderTouched = !reconnect
 	unitPath, err := manager.WriteUnit(vector.Path, configPath)
 	if err != nil {
 		return nil, err

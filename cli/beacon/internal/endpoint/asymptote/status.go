@@ -67,9 +67,16 @@ func Status(userMode bool, opts StatusOptions) ManagedIngestStatus {
 	}
 	if incomplete {
 		privacyMode, _ := managedprivacy.Normalize(enrollment.PrivacyMode)
-		// The record and config are the previous connection's, and so is the key prefix,
-		// which the server has rotated out; the key file may already hold the new one, so
-		// a credential check would say valid while the running forwarder cannot upload.
+		pending, pendingErr := loadConnectPending(userMode)
+		message := "connect incomplete: this device was approved but connect did not finish; the partial forwarder was stopped; run `beacon endpoint connect` again"
+		if pendingErr != nil {
+			message = fmt.Sprintf("connect incomplete: could not read its state: %v; run `beacon endpoint connect` again", pendingErr)
+		} else if pending.Reconnect {
+			// The record and config are the previous connection's, and so is the key
+			// prefix, which the server has rotated out; the key file may already hold
+			// the new one, so a credential check would be misleading here.
+			message = fmt.Sprintf("re-connect incomplete: the server rotated device %s's key but connect did not finish, so the forwarder cannot upload; run `beacon endpoint connect` again", enrollment.DeviceID)
+		}
 		return ManagedIngestStatus{
 			Enabled:           false,
 			ConnectIncomplete: true,
@@ -78,7 +85,7 @@ func Status(userMode bool, opts StatusOptions) ManagedIngestStatus {
 			OrganizationName:  enrollment.OrganizationName,
 			PrivacyMode:       privacyMode,
 			Forwarder:         ForwarderStatus(userMode),
-			Message:           fmt.Sprintf("re-connect incomplete: the server rotated device %s's key but connect did not finish, so the forwarder cannot upload; run `beacon endpoint connect` again", enrollment.DeviceID),
+			Message:           message,
 		}
 	}
 	if !Connected(userMode) {

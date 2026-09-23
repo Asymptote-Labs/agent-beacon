@@ -24,7 +24,7 @@ const (
 	// ConnectPendingFileName marks a connect that has received a key from the server and not
 	// yet finished. On a re-connect that key replaced the one the running forwarder holds, so
 	// from then until every later step has succeeded the endpoint must not be reported as
-	// connected. It holds only a timestamp.
+	// connected. It holds only a timestamp and whether this was a re-connect.
 	ConnectPendingFileName = "connect-pending"
 	SecretsFileName        = "vector-secrets.json"
 	VectorConfigName       = "vector.toml"
@@ -52,12 +52,33 @@ func ConnectIncomplete(userMode bool) bool {
 	return err == nil
 }
 
+type connectPending struct {
+	StartedAt time.Time `json:"started_at"`
+	Reconnect bool      `json:"reconnect"`
+}
+
 // markConnectPending records that a connect has received a key and not yet finished.
-func markConnectPending(userMode bool, at time.Time) error {
+func markConnectPending(userMode bool, at time.Time, reconnect bool) error {
 	if err := ensureDir(userMode); err != nil {
 		return err
 	}
-	return writeFileAtomic(ConnectPendingPath(userMode), []byte(at.UTC().Format(time.RFC3339)+"\n"), 0o600)
+	data, err := json.Marshal(connectPending{StartedAt: at.UTC(), Reconnect: reconnect})
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(ConnectPendingPath(userMode), append(data, '\n'), 0o600)
+}
+
+func loadConnectPending(userMode bool) (connectPending, error) {
+	data, err := os.ReadFile(ConnectPendingPath(userMode))
+	if err != nil {
+		return connectPending{}, err
+	}
+	var pending connectPending
+	if err := json.Unmarshal(data, &pending); err != nil {
+		return connectPending{}, fmt.Errorf("pending connect marker %s is not valid JSON: %w", ConnectPendingPath(userMode), err)
+	}
+	return pending, nil
 }
 
 // clearConnectPending removes the marker once a connect has finished.

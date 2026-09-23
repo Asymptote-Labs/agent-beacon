@@ -77,6 +77,13 @@ func assertConnectIncomplete(t *testing.T, connectErr error) {
 	if !ConnectIncomplete(true) {
 		t.Fatal("ConnectIncomplete must be true after a failure that followed the key exchange")
 	}
+	pending, err := loadConnectPending(true)
+	if err != nil {
+		t.Fatalf("read pending marker: %v", err)
+	}
+	if !pending.Reconnect {
+		t.Fatal("a failed re-connect must be recorded as a re-connect")
+	}
 	status := Status(true, StatusOptions{SkipCredentialCheck: true})
 	if status.Enabled || !status.ConnectIncomplete {
 		t.Fatalf("status must not report an incomplete connect as connected: %+v", status)
@@ -300,6 +307,44 @@ func TestFirstConnectFailingAfterApprovalIsReportedIncomplete(t *testing.T) {
 	}
 	if encoded["connect_incomplete"] != true {
 		t.Fatalf("status JSON must expose connect_incomplete: %v", encoded)
+	}
+}
+
+func TestFirstConnectFailureAfterStartingForwarderStopsIt(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	isolateVectorDiscovery(t)
+	fd := newFakeDashboard(t)
+	fwd := &fakeForwarder{supported: true}
+
+	// Make the final config.json update fail, after the forwarder has been written,
+	// loaded and enrollment.json has been saved.
+	cfgPath := endpointconfig.ConfigPath(true)
+	if err := os.MkdirAll(filepath.Join(cfgPath, "blocker"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Connect(context.Background(), connectOptions(t, fd, fwd, fakeVector(t, "0.56.0", 0)))
+	if err == nil {
+		t.Fatal("expected the final config update to fail")
+	}
+	if fwd.loads != 1 || fwd.unloads != 1 || fwd.removed != 1 {
+		t.Fatalf("a partial first-connect forwarder must be stopped and removed: loads=%d unloads=%d removed=%d", fwd.loads, fwd.unloads, fwd.removed)
+	}
+	pending, pendingErr := loadConnectPending(true)
+	if pendingErr != nil {
+		t.Fatalf("read pending marker: %v", pendingErr)
+	}
+	if pending.Reconnect {
+		t.Fatal("a failed first connect must not be recorded as a re-connect")
+	}
+	status := Status(true, StatusOptions{SkipCredentialCheck: true})
+	if status.Enabled || !status.ConnectIncomplete {
+		t.Fatalf("status after partial first connect = %+v", status)
+	}
+	if strings.Contains(status.Message, "re-connect") || strings.Contains(status.Message, "rotated") {
+		t.Fatalf("first-connect status must not claim an earlier key was rotated: %q", status.Message)
+	}
+	if !strings.Contains(status.Message, "partial forwarder was stopped") {
+		t.Fatalf("first-connect status must say the partial forwarder was stopped: %q", status.Message)
 	}
 }
 
