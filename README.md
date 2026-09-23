@@ -271,8 +271,8 @@ Beacon supports local agents, browser agents, cloud agents, CI workflows, and ag
 
 | Site | Collection | Prompt | Response | Tool | Tokens |
 | --- | --- | --- | --- | --- | --- |
-| Claude.ai | Extension → local OTLP | ✅ | ✅ | ✅ | ~ |
-| ChatGPT | Extension → local OTLP | ✅ | ✅ | ✅ | – |
+| Claude.ai | Chromium + Firefox extension → local OTLP | ✅ | ✅ | ✅ | ~ |
+| ChatGPT | Chromium + Firefox extension → local OTLP | ✅ | ✅ | ✅ | – |
 
 ### Cloud Agents
 
