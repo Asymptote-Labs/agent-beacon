@@ -80,3 +80,33 @@ func TestScanCodexUsageSignalsSeparatesAttributionSources(t *testing.T) {
 		t.Fatalf("signals = %#v, want one of each Codex source", got)
 	}
 }
+
+// DeepSeek Harness writes deepseek_harness events from two paths: live hooks and the offline poll
+// of its session store. A log holding only poll events must not read as live hook capture, because
+// that is exactly the log a sandboxed dsh produces: every hook fails to write and `dsh sync` fills
+// the log anyway (#605).
+func TestLastHarnessEventByCollectionMethodIgnoresOtherPaths(t *testing.T) {
+	log := writeLog(t,
+		`{"timestamp":"2026-09-21T10:00:00Z","harness":{"name":"deepseek_harness","collection_method":"hook"}}`,
+		`{"timestamp":"2026-09-21T12:00:00Z","harness":{"name":"deepseek_harness","collection_method":"poll"}}`,
+		`{"timestamp":"2026-09-21T13:00:00Z","harness":{"name":"claude","collection_method":"hook"}}`,
+	)
+	got, ok := LastHarnessEventByCollectionMethod(log, "dsh", "hook")
+	if !ok {
+		t.Fatal("no hook event found, want the 10:00 one")
+	}
+	if want := "2026-09-21T10:00:00Z"; got.UTC().Format("2006-01-02T15:04:05Z") != want {
+		t.Fatalf("last hook event = %s, want %s: a poll event or another harness's hook was counted", got, want)
+	}
+
+	pollOnly := writeLog(t, `{"timestamp":"2026-09-21T12:00:00Z","harness":{"name":"deepseek_harness","collection_method":"poll"}}`)
+	if _, ok := LastHarnessEventByCollectionMethod(pollOnly, "deepseek_harness", "hook"); ok {
+		t.Fatal("a poll-only log reported a hook event")
+	}
+	if !HasRecentHarnessEvent(pollOnly, "deepseek_harness") {
+		t.Fatal("the unfiltered lookup must still count poll events")
+	}
+	if _, ok := LastHarnessEventByCollectionMethod(log, "deepseek_harness", ""); ok {
+		t.Fatal("an empty method must not match everything; callers use LastHarnessEvent for that")
+	}
+}

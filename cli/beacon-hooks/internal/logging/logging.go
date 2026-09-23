@@ -3,12 +3,14 @@ package logging
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	osuser "os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/config"
@@ -131,10 +133,54 @@ func (l *Logger) EndpointEventWithFidelity(action, category, severity, message, 
 	attachDerivedTrace(event)
 	if err := writeEndpointJSON(path, event); err != nil {
 		fmt.Fprintf(os.Stderr, "logging: failed to write endpoint event to %s: %v\n", path, err)
+		reportEndpointWriteFailure(os.Stderr, l.platform, path, err)
 		return err
 	}
 	return nil
 }
+
+// reportedWriteFailures remembers which runtime log paths this process has already explained a
+// write failure for, so the explanation is printed once per path rather than once per event. One
+// hook invocation can emit several events -- a post-tool hook records the tool result, the file
+// edit and the command in turn -- and a runtime that shows hook stderr to the person at the
+// keyboard would otherwise repeat the same paragraph for each.
+var reportedWriteFailures sync.Map
+
+// reportEndpointWriteFailure explains, on stderr, that an endpoint event was not recorded and what
+// to do about it.
+//
+// The one-line error above it names the path and the errno, which is enough for someone reading a
+// log and not enough for someone watching a hook fail: "read-only file system" from inside an
+// agent's sandbox reads like a broken disk, not like a runtime that confines its hooks.
+//
+// The exit status is deliberately not changed. Every hook path exits 0 (see the policy seam and
+// the per-runtime deny notes in cmd/policy.go), and on the Claude-shaped hook contract DeepSeek
+// Harness and several others reproduce, exit 2 is a *block*: it would refuse the tool call, erase
+// the prompt, or -- on Stop -- keep the agent running, on every event, for as long as the log stays
+// unwritable. A telemetry write that failed must never become a control decision, so the failure is
+// made loud here, on the stream a runtime shows or logs for a hook, and detectable from outside by
+// `beacon endpoint doctor`, which is where an operator can act on it.
+func reportEndpointWriteFailure(w io.Writer, platform, path string, err error) {
+	if w == nil || err == nil {
+		return
+	}
+	if _, already := reportedWriteFailures.LoadOrStore(path, true); already {
+		return
+	}
+	fmt.Fprintf(w, "beacon-hooks: this event was NOT recorded: cannot write the Beacon runtime log %s (%v).\n", path, err)
+	if asymptoteobserve.NormalizeHarnessName(platform) == dshHarnessName {
+		// DeepSeek Harness runs hook commands sandboxed to the session's working directory in
+		// every sandbox mode except danger-full-access, and its sandbox policy has no writable-path
+		// allow-list, so a log under the user's home is unreachable from a hook by design (#605).
+		fmt.Fprintln(w, "beacon-hooks: DeepSeek Harness runs hooks inside the session sandbox, which can write only the session workspace unless the sandbox mode is danger-full-access; if this session is sandboxed, that is the cause and live hook capture is off for it.")
+		fmt.Fprintln(w, "beacon-hooks: run `beacon endpoint dsh sync` outside the harness to backfill this session from DeepSeek's own session store, and `beacon endpoint doctor` to check hook capture.")
+		return
+	}
+	fmt.Fprintln(w, "beacon-hooks: check that this user can write that path (the hook may be running in a sandbox that confines writes), then run `beacon endpoint doctor`.")
+}
+
+// dshHarnessName is DeepSeek Harness's canonical harness.name.
+const dshHarnessName = "deepseek_harness"
 
 // normalizeEventModel canonicalizes event["model"] in place, the way the harness name is
 // canonicalized in baseEndpointEvent and for the same reason: every token report groups by this

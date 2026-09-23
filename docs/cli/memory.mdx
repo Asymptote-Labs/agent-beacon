@@ -91,6 +91,11 @@ Inspect one candidate:
 beacon memory candidates show <candidate-id>
 ```
 
+TypeSafe Noul answers contain probabilities, not explanatory text. The candidate
+body therefore says that no lesson text was extracted; check the source trace
+before you approve it. A compatible internal evaluator using the legacy
+`questions` or `results` response shape can provide a stored `reason`.
+
 Approve a candidate into project memory:
 
 ```bash

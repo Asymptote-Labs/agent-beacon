@@ -5,7 +5,7 @@ description: "Install and configure the Beacon browser extension that collects C
 
 ## Overview
 
-Beacon collects browser chat telemetry through an optional Chrome MV3 extension. It reads the chat streams of the sites you enable and relays them into the same local pipeline as agent activity, so browser conversations land in the runtime log next to CLI agent events.
+Beacon collects browser chat telemetry through an optional MV3 browser extension, built for Chrome and, in beta, for Firefox. It reads the chat streams of the sites you enable and relays them into the same local pipeline as agent activity, so browser conversations land in the runtime log next to CLI agent events.
 
 One extension covers both supported sites:
 
@@ -29,7 +29,7 @@ The extension is in beta. It is not published on the Chrome Web Store and instal
 Before installing the extension, make sure:
 
 - The Beacon endpoint is [installed](/cli/install) and running. The extension posts to the local collector on `http://127.0.0.1:4318/v1/logs`, which a default endpoint install already listens on, so no collector configuration is needed.
-- You have Chrome, Edge, or another Chromium browser that can load an unpacked MV3 extension. See [Chromium browsers](/runtimes/browser-extension-chromium) for which ones are tested. Firefox and Safari are not supported.
+- You have Chrome, Edge, or another Chromium browser that can load an unpacked MV3 extension (see [Chromium browsers](/runtimes/browser-extension-chromium) for which ones are tested), or Firefox 140 or newer for the Firefox build. Safari is not supported.
 - You have Node 22 or newer, if you are building from source rather than using a release archive.
 - You have reviewed what the extension retains. It captures full prompt and response text by default.
 - The people whose browsers it runs in know it is there, since it reads their Claude.ai and ChatGPT conversations.
@@ -100,6 +100,20 @@ The `-chrome` archive is the build for every Chromium browser, including Edge, B
 
 Other Chromium browsers load it the same way from their own extensions page, such as `edge://extensions` or `brave://extensions`. See [Chromium browsers](/runtimes/browser-extension-chromium#install).
 
+### Load it in Firefox
+
+The Firefox build is in beta. It is generated from the same sources as the Chrome build and passes Mozilla's linter in CI, but it has no automated end-to-end test, so capture on Firefox is checked by hand.
+
+Build it with `npm run build:firefox`, which writes `browser-extension/dist-firefox`. Then:
+
+1. Open `about:debugging#/runtime/this-firefox`.
+2. Choose **Load Temporary Add-on**, then select `dist-firefox/manifest.json`. A temporary add-on is removed when Firefox restarts. For a permanent install, use a signed `.xpi` and the [enterprise policy](#firefox-enterprise-policy) below.
+3. Click the extension's toolbar icon. If it shows **Site access not granted**, choose **Grant site access** and accept Firefox's prompt.
+
+<Warning>
+Firefox lets the user withhold an MV3 extension's host permissions. If they are withheld, the extension captures nothing, and nothing on the chat site indicates it. The popup and options page show a **Site access not granted** banner listing the missing hosts, until access is granted. All five hosts are needed: `claude.ai`, `chatgpt.com`, and `chat.openai.com` for capture, and `127.0.0.1` and `localhost` for delivery to the collector. Access can also be changed per site in `about:addons`, under the extension's **Permissions** tab.
+</Warning>
+
 ## Configuration
 
 The extension is configured in its own UI, not by `beacon`. There is no CLI command and no config file on disk. Settings are split across two surfaces:
@@ -110,6 +124,31 @@ The extension is configured in its own UI, not by `beacon`. There is no CLI comm
 | Options page | Right-click the icon and choose **Options**, or use **Details** then **Extension options** in `chrome://extensions` | OTLP logs endpoint, and per-site checkboxes for claude.ai and chatgpt.com |
 
 Both sites are enabled by default. Turn one off in the options page to collect from the other alone.
+
+## Firefox enterprise policy
+
+Firefox installs only Mozilla-signed add-ons outside development. When the release workflow is configured with AMO credentials, each `ext-v*` release carries a signed, self-distributed `agent-beacon-browser-extension-<version>-firefox.xpi` and its `.sha256`. Until then, no signed build is published, and this policy has nothing to point at.
+
+To force-install it across a fleet, use Firefox's `ExtensionSettings` policy. The add-on ID is fixed at `browser-collector@agent-beacon.asymptotelabs.ai`. In `policies.json`, placed in the `distribution` directory of the Firefox installation:
+
+```json
+{
+  "policies": {
+    "ExtensionSettings": {
+      "browser-collector@agent-beacon.asymptotelabs.ai": {
+        "installation_mode": "force_installed",
+        "install_url": "https://github.com/Asymptote-Labs/agent-beacon/releases/download/ext-v<version>/agent-beacon-browser-extension-<version>-firefox.xpi"
+      }
+    }
+  }
+}
+```
+
+The same `ExtensionSettings` value can be delivered through Group Policy on Windows, using Mozilla's ADMX templates, or through a macOS configuration profile for the `org.mozilla.firefox` domain.
+
+- `install_url` must be a direct link to the signed `.xpi`. Use the versioned release asset, because the `latest` release on this repository can be a CLI release rather than an extension release. The build declares no `update_url`, so Firefox does not update it on its own. To roll out a new version, change `install_url` to the new release.
+- `force_installed` stops users from removing or disabling the extension. It does not replace the site-access check. After the rollout, open the extension's popup on one machine and confirm there is no **Site access not granted** banner.
+- Retention still defaults to `full` and is set in the extension's popup. See [Retained content](#retained-content).
 
 ## Retained content
 
@@ -171,7 +210,7 @@ Coverage that is the same for both sites:
 | Approval telemetry | Not available. Neither site exposes approval decisions to a page script |
 | Session lifecycle | Partial. Turns are correlated by conversation id; there is no session start or stop signal |
 | Local JSONL and dashboard | Supported after events reach the collector |
-| MDM deployment | Not covered by Beacon's MDM assets. Browser force-install policy needs a store listing or signed package, which do not exist yet. See [Force-install through browser policy](/runtimes/browser-extension-chromium#force-install-through-browser-policy) |
+| MDM deployment | Not covered by Beacon's MDM assets. Distribute through browser policy instead, such as Firefox's [`ExtensionSettings`](#firefox-enterprise-policy). Chromium force-install needs a store listing or signed package, which do not exist yet; see [Force-install through browser policy](/runtimes/browser-extension-chromium#force-install-through-browser-policy) |
 | Browser attribution | Supported. `user_agent.name` and `user_agent.version` name the browser on every event |
 
 Tool telemetry and token usage differ by site. See [Claude.ai](/runtimes/claude-web) and [ChatGPT](/runtimes/chatgpt-web).

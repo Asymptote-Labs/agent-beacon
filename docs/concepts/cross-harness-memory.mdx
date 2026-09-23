@@ -39,8 +39,14 @@ bounded, redacted trace projection. Beacon sends typed yes/no questions such as:
 - Does the trace contain a reusable correction or debugging pattern?
 - Is the reusable lesson supported by concrete trace evidence?
 
-Jev returns probabilities. Beacon stores those probabilities with the trace
+Jev returns probabilities. TypeSafe System One models do not generate
+explanations or rationale. Beacon stores those probabilities with the trace
 provenance, evaluator model, and usage metadata when the API reports it.
+
+The candidate therefore says that no lesson text was extracted instead of
+presenting the scores as a lesson. Review the source trace before approving it.
+A compatible internal evaluator using the legacy `questions` or `results`
+response shape can also provide a stored `reason`.
 
 Use `--dry-run` first to preview selected traces and estimated calls without making
 a network request.

@@ -22,6 +22,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/updatecheck"
 
 	"github.com/spf13/cobra"
@@ -481,7 +482,7 @@ func TestRepairCollectorServiceRollsBackWhenReadinessFails(t *testing.T) {
 	})
 
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	collectorConfigPath := filepath.Join(home, "otelcol.yaml")
 	plistPath := filepath.Join(home, "agent.plist")
 	cfg := endpointconfig.Config{
@@ -1016,7 +1017,7 @@ func TestRunEndpointDashboardPassesRequestedLogPathToHandler(t *testing.T) {
 		dashboardListenAndServe = oldListen
 	})
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	configuredLog := filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl")
 	if _, err := endpointconfig.Save(endpointconfig.Default(true, configuredLog)); err != nil {
 		t.Fatalf("save endpoint config: %v", err)
@@ -1195,7 +1196,7 @@ func TestWriteInventoryEventsHonorsConfiguredRuntimes(t *testing.T) {
 
 func TestScheduledInventoryHeartbeatAlwaysWritesAndSnapshotsOnChange(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	writeTestFile(t, filepath.Join(home, ".cursor", "mcp.json"), `{"mcpServers":{"one":{"command":"npx"}}}`)
 	writeTestFile(t, filepath.Join(home, ".codex", "config.toml"), `[mcp_servers.github]
@@ -1264,7 +1265,7 @@ command = "gh"
 
 func TestInventoryHeartbeatAppendFailureLeavesStateUntouched(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	logDir := t.TempDir()
 	logPath := filepath.Join(logDir, "runtime.jsonl")
 	inventoryLogPath := endpointinventory.LogPath(logPath, true)
@@ -1299,7 +1300,7 @@ func TestInventoryHeartbeatAppendFailureLeavesStateUntouched(t *testing.T) {
 func TestScheduledHeartbeatInSystemModeScansTheConsoleUsersHome(t *testing.T) {
 	consoleHome := t.TempDir()
 	writeTestFile(t, filepath.Join(consoleHome, ".cursor", "mcp.json"), `{"mcpServers":{"console-one":{"command":"npx"}}}`)
-	t.Setenv("HOME", t.TempDir()) // root's home: must not be what gets scanned
+	testenv.SetHome(t, t.TempDir()) // root's home: must not be what gets scanned
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	cfg := endpointconfig.Default(false, logPath)
 	settings := endpointconfig.InventoryConfig(cfg)
@@ -1347,7 +1348,7 @@ func TestScheduledHeartbeatInSystemModeScansTheConsoleUsersHome(t *testing.T) {
 
 // Hooks installed by older versions still run `inventory heartbeat --trigger hook` on every prompt.
 func TestHeartbeatHookTriggerIsRetired(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	oldOpts := endpointOpts
 	t.Cleanup(func() { endpointOpts = oldOpts })
@@ -1474,7 +1475,7 @@ func TestFilterInventorySectionsKeepsOnlyRequestedBuckets(t *testing.T) {
 func TestEndpointInventoryHooksJSONIncludesDefaultHookStatuses(t *testing.T) {
 	old := endpointOpts
 	t.Cleanup(func() { endpointOpts = old })
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	endpointOpts.userMode = true
 	endpointOpts.logPath = filepath.Join(t.TempDir(), "runtime.jsonl")
 	endpointOpts.jsonOutput = true
@@ -1592,7 +1593,7 @@ func TestRunEndpointInventoryWriteEventHonorsConfigContentOptIn(t *testing.T) {
 	old := endpointOpts
 	t.Cleanup(func() { endpointOpts = old })
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	writeTestFile(t, filepath.Join(home, ".cursor", "mcp.json"), `{"mcpServers":{"one":{"command":"npx","env":{"API_TOKEN":"secret"}}}}`)
 	include := true
@@ -1697,7 +1698,7 @@ func TestAutoUpdateModeIgnoresDestinationValidation(t *testing.T) {
 	}
 	if info, err := os.Stat(path); err != nil {
 		t.Fatal(err)
-	} else if got := info.Mode().Perm(); got != 0o600 {
+	} else if got := info.Mode().Perm(); testenv.HasPOSIXFileModes() && got != 0o600 {
 		t.Fatalf("config permissions = %v, want 0600", got)
 	}
 	data, err := os.ReadFile(path)
@@ -1738,7 +1739,13 @@ func TestEndpointSystemLogPathUsesSystemPathForPackageInstall(t *testing.T) {
 	endpointOpts.userMode = true
 	endpointOpts.systemMode = false
 
-	if got, want := endpointSystemLogPath(), "/var/log/beacon-agent/system.jsonl"; got != want {
+	// The POSIX location is a published contract, so it stays a literal. Windows has no /var/log
+	// and keeps the system log beside its machine-wide config under %ProgramData%.
+	want := "/var/log/beacon-agent/system.jsonl"
+	if runtime.GOOS == "windows" {
+		want = filepath.Join(endpointconfig.SystemLogDir(), "system.jsonl")
+	}
+	if got := endpointSystemLogPath(); got != want {
 		t.Fatalf("endpointSystemLogPath = %q, want %q", got, want)
 	}
 }
@@ -1906,7 +1913,7 @@ func TestAggregateCheckStatus(t *testing.T) {
 
 func TestConfigValidationCheckReportsInvalidConfig(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	path := endpointconfig.ConfigPath(true)
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
@@ -2017,7 +2024,7 @@ func TestPlanDoctorFixesDoesNotTreatMissingEventAsAppliedFix(t *testing.T) {
 
 func TestApplyDoctorFixesContinuesAfterCollectorRepairFailure(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	logPath := filepath.Join(t.TempDir(), "logs", "runtime.jsonl")
 	status := lifecycle.Status{
 		LogPath:    logPath,
@@ -2280,7 +2287,7 @@ func TestEndpointGCSValidatePrintsGoogleCloudCLIInspectionGuidance(t *testing.T)
 
 func TestEndpointAsymptoteValidatePrintsCredentialAndDashboardGuidance(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	logPath := filepath.Join(home, "runtime.jsonl")
 	oldLogPath := endpointOpts.logPath
 	oldUserMode := endpointOpts.userMode
@@ -2323,13 +2330,28 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Drain the pipe while fn runs rather than after it returns. A pipe holds only a fixed buffer,
+	// and a writer that fills it blocks until someone reads: reading afterwards deadlocks as soon as
+	// fn prints more than that. Linux buffers 64 KiB, so the inventory JSON fits and the bug hid;
+	// Windows buffers far less, and `endpoint inventory --json` hung in its Encode for the full test
+	// timeout.
+	type readResult struct {
+		data []byte
+		err  error
+	}
+	drained := make(chan readResult, 1)
+	go func() {
+		data, err := io.ReadAll(readEnd)
+		drained <- readResult{data, err}
+	}()
 	os.Stdout = writeEnd
 	runErr := fn()
+	os.Stdout = oldStdout
 	if err := writeEnd.Close(); err != nil {
 		t.Fatal(err)
 	}
-	os.Stdout = oldStdout
-	output, err := io.ReadAll(readEnd)
+	result := <-drained
+	output, err := result.data, result.err
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2339,13 +2361,40 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 	return string(output), runErr
 }
 
+// captureStdout must not depend on the output fitting in a pipe buffer. It used to read only after
+// fn returned, which deadlocked `endpoint inventory --json` on Windows for the full test timeout;
+// a megabyte is past the buffer on every platform, so this pins the fix on Linux and macOS too.
+func TestCaptureStdoutDrainsOutputLargerThanAPipeBuffer(t *testing.T) {
+	payload := strings.Repeat("x", 1<<20)
+	realStdout := os.Stdout
+	done := make(chan string, 1)
+	go func() {
+		out, _ := captureStdout(t, func() error {
+			_, err := os.Stdout.WriteString(payload)
+			return err
+		})
+		done <- out
+	}()
+	select {
+	case out := <-done:
+		if len(out) != len(payload) {
+			t.Fatalf("captured %d bytes, want %d", len(out), len(payload))
+		}
+	case <-time.After(30 * time.Second):
+		// Put stdout back first: the testing package reports through it, and a deadlocked
+		// capture has left it pointing at the full pipe, so the failure would hang too.
+		os.Stdout = realStdout
+		t.Fatal("captureStdout deadlocked: fn filled the pipe and nothing was reading it")
+	}
+}
+
 // A shared Mac alternates console users. Switching between them is not a change in anyone's
 // inventory, so the second visit to each home must write a heartbeat and no snapshot.
 func TestScheduledHeartbeatKeepsOneDigestPerConsoleUser(t *testing.T) {
 	alice, bob := t.TempDir(), t.TempDir()
 	writeTestFile(t, filepath.Join(alice, ".cursor", "mcp.json"), `{"mcpServers":{"alice-one":{"command":"npx"}}}`)
 	writeTestFile(t, filepath.Join(bob, ".cursor", "mcp.json"), `{"mcpServers":{"bob-one":{"command":"npx"},"bob-two":{"command":"uvx"}}}`)
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	cfg := endpointconfig.Default(false, logPath)
 	settings := endpointconfig.InventoryConfig(cfg)
@@ -2410,7 +2459,7 @@ func TestSystemHeartbeatScopeIgnoresServiceAccountsAtTheConsole(t *testing.T) {
 // command. Every other target is still attempted.
 func TestEndpointInstallHookFailureIsAWarningAndOtherHooksStillInstall(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	old := endpointOpts
 	t.Cleanup(func() { endpointOpts = old })
 	endpointOpts.userMode = true

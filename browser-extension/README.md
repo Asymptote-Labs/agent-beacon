@@ -2,7 +2,7 @@
 
 Part of the [agent-beacon](../README.md) monorepo. MIT, under the repository root `LICENSE`.
 
-Chrome (MV3) extension that relays LLM chat telemetry from the browser — Claude.ai and
+Chrome (MV3) extension, with a Firefox build target, that relays LLM chat telemetry from the browser — Claude.ai and
 ChatGPT — into the **same local Agent Beacon pipeline** as the endpoint agent, normalized into
 the same schema. Browser chat activity (prompts, responses, tool calls) ends up in
 `runtime.jsonl` next to agent activity, and forwards onward via the same Vector shippers.
@@ -57,7 +57,7 @@ flowchart LR
 
 **Two capture surfaces per page:** the **MAIN-world** `interceptor.js` runs in the page's own JS
 context so it can tee `window.fetch`'s streamed SSE via `response.clone()`; the **ISOLATED-world**
-`content.js` holds the privileged `chrome.runtime` channel to the service worker. Everything from
+`content.js` holds the privileged `runtime` messaging channel to the service worker. Everything from
 `ChatTurn` onward is **site-agnostic** — only the per-site adapters know each site's wire format.
 Each captured turn emits one `prompt.submitted` + one `agent.response.completed` OTLP log (plus a
 `tool.invoked` per tool call).
@@ -77,8 +77,10 @@ npx playwright install chromium   # one-time, for the e2e harness
 ## Commands
 
 ```bash
-npm run build         # bundle src/ → dist/ (esbuild)
+npm run build         # bundle src/ → dist/ (esbuild, Chrome target)
 npm run build:watch   # rebuild on change
+npm run build:firefox # bundle src/ → dist-firefox/ with the Gecko manifest
+npm run lint:firefox  # build:firefox, then Mozilla's web-ext lint (warnings fail)
 npm run check         # tsc --noEmit
 npm run test:unit     # pure adapter + normalization tests (vitest, no browser)
 npm test              # builds dist/, runs the Playwright replay e2e (THE autonomous loop)
@@ -96,7 +98,7 @@ release archive is named `-chrome.zip` after the Chromium extension family, not 
 Chrome alone. CI runs the replay e2e in Chromium and Edge; the other forks are covered by the
 manual checklist in [docs/runtimes/browser-extension-chromium.mdx](../docs/runtimes/browser-extension-chromium.mdx).
 Every emitted event names the browser that produced it (`user_agent.name`, `user_agent.version`,
-`browser.brands`; see `src/shared/browser.ts`).
+`browser.brands`; see `src/shared/browser-identity.ts`).
 
 **Beta, and not on the Chrome Web Store.** It installs unpacked, so Chrome will not
 auto-update it: to move to a new version, rebuild or re-download and reload.
@@ -122,6 +124,60 @@ Then:
 
 Read [Retained content](#retained-content) before enabling it on a browser profile you
 also use personally.
+
+## Firefox
+
+**Beta, and less tested than Chrome.** The Firefox build is produced from the same sources
+and passes Mozilla's linter in CI, but it has no automated end-to-end test (see
+[Testing model](#testing-model-layered-by-fidelitycost)). Requires Firefox 140 or newer (the
+current ESR).
+
+```bash
+npm ci
+npm run build:firefox   # produces dist-firefox/
+```
+
+For development, load it as a temporary add-on (removed when Firefox restarts):
+
+1. Make sure the Beacon endpoint agent is running.
+2. Open `about:debugging#/runtime/this-firefox`.
+3. Choose **Load Temporary Add-on…** and select `dist-firefox/manifest.json`.
+4. **Grant site access.** Firefox lets the user withhold an MV3 extension's host permissions,
+   and a withheld host means nothing is captured from it. Nothing else warns you: the page
+   works normally and no error appears. Click the extension's toolbar icon: if it shows
+   **Site access not granted**, choose **Grant site access** and accept Firefox's prompt. The
+   same banner is on the options page. Access can also be changed per site under
+   `about:addons` → Agent Beacon → **Permissions**. All five hosts are needed: the three chat
+   origins for capture, and `127.0.0.1` / `localhost` for delivery to the collector.
+5. Send a message on claude.ai or chatgpt.com and check `runtime.jsonl`, as for Chrome.
+
+A permanent install needs a Mozilla-signed `.xpi`. The release workflow signs one through AMO
+(unlisted, i.e. self-distributed) and attaches `agent-beacon-browser-extension-<version>-firefox.xpi`
+to the `ext-v*` release **when the `AMO_JWT_ISSUER` / `AMO_JWT_SECRET` secrets are configured**;
+until then only the Chrome zip is published. For fleets, force-install the signed `.xpi` with the
+`ExtensionSettings` enterprise policy. See the
+[deployment docs](../docs/runtimes/browser-extension.mdx#firefox-enterprise-policy).
+
+How the Firefox build differs, all generated from `src/manifest.json` by
+[`tools/targets.mjs`](tools/targets.mjs):
+
+- `background.scripts` (an event page) instead of `background.service_worker`, since Firefox
+  does not run extension service workers.
+- `options_ui` (opening in a tab) instead of Chrome's `options_page`.
+- `browser_specific_settings.gecko`: the pinned add-on ID
+  `browser-collector@agent-beacon.asymptotelabs.ai` (it keys `storage.local` and AMO signing, so it
+  must never change), `strict_min_version` 140, and a `data_collection_permissions` declaration of
+  `personalCommunications`, because captured chat text leaves the browser for the collector.
+- The MAIN-world interceptor keeps `content_scripts[].world: "MAIN"`, which Firefox honours from
+  128 on, so no `scripting.executeScript` fallback is needed at the supported minimum.
+- All extension calls go through `src/shared/browser.ts`, which picks the promise-based
+  `browser.*` namespace where it exists (Firefox, Safari) and `chrome.*` otherwise. A unit test
+  fails if any source file calls `chrome.*` directly.
+
+Not yet verified on a real Firefox (no Firefox runs in CI): the event page's POST to
+`http://127.0.0.1:4318/v1/logs`, and the retry cadence. Chrome clamps `chrome.alarms` to about
+30 seconds; Firefox's clamp has not been measured. The retry code is the same on both, and the
+durable queue means delivery is eventual on either engine.
 
 ## Retained content
 
@@ -171,7 +227,7 @@ staging one. Prefer a throwaway account where practical.
 
 | Path | Purpose |
 |---|---|
-| `src/shared/` | Site-agnostic core. `normalize.ts` (pure `ChatTurn → OTLP`), `otlp.ts`, `vocab.ts`, `types.ts`, `ids.ts`. |
+| `src/shared/` | Site-agnostic core. `normalize.ts` (pure `ChatTurn → OTLP`), `otlp.ts`, `vocab.ts`, `types.ts`, `ids.ts`. `browser.ts` (the `browser.*` / `chrome.*` shim) and `permissions.ts` (host-permission banner). |
 | `src/adapters/` | The only site-specific code. `claude.ts` + `chatgpt.ts` (both done). `sse.ts` shared SSE framing. |
 | `src/interceptor/` | MAIN-world `fetch`/stream tee. |
 | `src/content/` | ISOLATED-world relay + (future) DOM fallback. |
@@ -180,14 +236,20 @@ staging one. Prefer a throwaway account where practical.
 | `src/options/` | OTLP endpoint and per-site toggles. |
 | `e2e/` | Playwright fixtures + helpers (`mock-collector`, `sse-replay-server`, `otlp-assertions`) + specs. |
 | `test/unit/` | vitest unit tests. |
+| `tools/targets.mjs` | Per-browser build targets (`chrome` → `dist/`, `firefox` → `dist-firefox/`) and the manifest each one ships. |
 | `fixtures/<site>/*.sse` | Recorded, sanitized chat streams — real captures for `claude/` and `chatgpt/`. |
 
 ## Testing model (layered by fidelity/cost)
 
 - **(a) unit** — recorded `.sse` → `ChatTurn` → golden OTLP. Milliseconds, no browser.
-- **(b) e2e replay** — a local HTTPS server impersonates the chat site (via `--host-resolver-rules`
+- **(b) e2e replay** *(Chromium only)* — a local HTTPS server impersonates the chat site (via `--host-resolver-rules`
   mapping the real hostname to it + a throwaway self-signed cert), the real extension loads, and a
   **mock collector** captures what it POSTs. Fully autonomous — **this is the loop run every iteration.**
+- **Firefox smoke** — Playwright cannot load an extension into Firefox, so Firefox does **not**
+  get the replay e2e. Its automated coverage is reduced, not equal: the unit tests for the
+  manifest generator, the API shim and the permission flow, a real `build:firefox`, and
+  `web-ext lint --warnings-as-errors` over the output (`npm run lint:firefox`, run in CI).
+  Capture on a real Firefox is a manual check, following the [Firefox](#firefox) steps.
 - **(c) collector conformance** *(planned)* — now that this lives in the agent-beacon monorepo,
   the consumer of these envelopes is in-tree at `collector-builder/exporter/beaconjsonexporter`.
   The plan is a Go test that feeds committed golden envelopes straight through the real exporter
@@ -207,6 +269,8 @@ dashboard), including interleaved sessions with no cross-contamination.
 - ✅ Resilience: multi-tab correlation + aborted/partial stream (e2e)
 - ✅ Content-script context-invalidation guard (survives extension reloads)
 - ✅ ChatGPT capture (`delta_encoding: v1` parser) + autonomous replay e2e
+- ✅ Firefox build target (`npm run build:firefox`): Gecko manifest, `browser.*` shim, host-permission
+  grant flow; covered by unit tests and `web-ext lint`, **not** by the replay e2e
 - ⬜ ChatGPT stream-handoff/resume case (see limitations); DOM-fallback capture, XHR transport
 - ⬜ Real-collector integration test + live-smoke/fixture-recorder as CI layers
 

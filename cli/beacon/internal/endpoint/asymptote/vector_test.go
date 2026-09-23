@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 // isolateVectorDiscovery hides the machine's own Vector installs from FindVector.
@@ -85,7 +87,7 @@ func TestValidateVectorConfigSurfacesVectorOutput(t *testing.T) {
 
 func TestEnrollmentStoreUsesPrivatePermissionsAndAtomicWrites(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	if _, err := LoadEnrollment(true); !errors.Is(err, ErrNotEnrolled) {
 		t.Fatalf("expected ErrNotEnrolled, got %v", err)
 	}
@@ -96,7 +98,7 @@ func TestEnrollmentStoreUsesPrivatePermissionsAndAtomicWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(SecretsPath(true))
-	if err != nil || info.Mode().Perm() != 0o600 {
+	if err != nil || (testenv.HasPOSIXFileModes() && info.Mode().Perm() != 0o600) {
 		t.Fatalf("secrets mode: %v %v", info, err)
 	}
 	entries, _ := os.ReadDir(Dir(true))

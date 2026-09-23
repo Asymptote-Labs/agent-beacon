@@ -35,6 +35,7 @@ func TestRealFxSessionRecordCollectsEndToEnd(t *testing.T) {
 	if ref.Manifest == nil {
 		t.Fatal("the recorded session's manifest was not readable")
 	}
+	requireByteExactFixture(t, ref)
 
 	events, stats, err := store.Read(ref)
 	if err != nil {
@@ -158,11 +159,31 @@ func mapRealSession(t *testing.T) []MappedEvent {
 	if err != nil || len(refs) != 1 {
 		t.Fatalf("List: %v (%d sessions)", err, len(refs))
 	}
+	requireByteExactFixture(t, refs[0])
 	events, _, err := store.Read(refs[0])
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
 	return MapSession(refs[0], events, MapOptions{})
+}
+
+// requireByteExactFixture fails with the actual cause when the recorded log is no longer the bytes
+// fx wrote. The manifest's event_log_bytes is a byte watermark over those bytes, and the reader
+// stops there, so any rewrite of the file silently moves records past it. The one that happened: a
+// Windows checkout with core.autocrlf converted every LF to CRLF, 26 lines grew 26 bytes, and the
+// last record -- the only committed turn -- fell past the watermark as a "partial tail", leaving
+// session.started as the whole session. testdata/.gitattributes marks these files -text so git
+// never converts them; this names that instead of four unrelated-looking mapping failures.
+func requireByteExactFixture(t *testing.T, ref SessionRef) {
+	t.Helper()
+	if ref.Manifest == nil {
+		t.Fatal("the recorded session's manifest was not readable")
+	}
+	if ref.Manifest.EventLogBytes != ref.SizeBytes {
+		t.Fatalf("recorded events.jsonl is %d bytes but its manifest commits %d: the fixture was rewritten "+
+			"after capture (line-ending conversion on checkout?) -- see testdata/.gitattributes",
+			ref.SizeBytes, ref.Manifest.EventLogBytes)
+	}
 }
 
 func findMapped(t *testing.T, mapped []MappedEvent, action string) schema.Event {

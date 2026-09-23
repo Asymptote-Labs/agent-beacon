@@ -1,14 +1,25 @@
 package hooks
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"strings"
 )
 
+// settingsHookGroup and settingsHookRef model the shape Beacon writes into a runtime's shared
+// settings file. That file also holds the user's own hooks, including kinds Beacon has no fields
+// for: Claude Code's `http` hooks carry `url`, `headers` and `allowedEnvVars`, `prompt` and `agent`
+// hooks carry `prompt` and `model`, and command hooks can carry `async` or `statusMessage`. A
+// rewrite that decoded those into these structs and encoded them back dropped every field it did
+// not model and added an empty `command`, which left a user's http guard hook in place but inert
+// (#618). So an entry read from disk remembers its original JSON and is written back from it; see
+// preserveUnmodelledJSON.
 type settingsHookGroup struct {
 	Matcher string            `json:"matcher,omitempty"`
 	Hooks   []settingsHookRef `json:"hooks"`
+
+	raw json.RawMessage
 }
 
 type settingsHookRef struct {
@@ -24,6 +35,111 @@ type settingsHookRef struct {
 	// picks the matching one.
 	Shell      string `json:"shell,omitempty"`
 	ShowOutput *bool  `json:"show_output,omitempty"`
+
+	raw json.RawMessage
+}
+
+// The alias types have the same fields and no methods, so the custom methods below can use the
+// default encoding without recursing into themselves.
+type settingsHookGroupFields settingsHookGroup
+type settingsHookRefFields settingsHookRef
+
+func (group *settingsHookGroup) UnmarshalJSON(data []byte) error {
+	var fields settingsHookGroupFields
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*group = settingsHookGroup(fields)
+	group.raw = bytes.Clone(data)
+	return nil
+}
+
+func (group settingsHookGroup) MarshalJSON() ([]byte, error) {
+	current := settingsHookGroupFields(group)
+	if group.raw == nil {
+		return json.Marshal(current)
+	}
+	var original settingsHookGroupFields
+	if err := json.Unmarshal(group.raw, &original); err != nil {
+		return nil, err
+	}
+	return preserveUnmodelledJSON(group.raw, original, current)
+}
+
+func (hook *settingsHookRef) UnmarshalJSON(data []byte) error {
+	var fields settingsHookRefFields
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*hook = settingsHookRef(fields)
+	hook.raw = bytes.Clone(data)
+	return nil
+}
+
+func (hook settingsHookRef) MarshalJSON() ([]byte, error) {
+	current := settingsHookRefFields(hook)
+	if hook.raw == nil {
+		return json.Marshal(current)
+	}
+	var original settingsHookRefFields
+	if err := json.Unmarshal(hook.raw, &original); err != nil {
+		return nil, err
+	}
+	return preserveUnmodelledJSON(hook.raw, original, current)
+}
+
+// preserveUnmodelledJSON re-encodes an object Beacon read from disk. raw is the object as it was
+// read, original is raw decoded into Beacon's struct, and current is that struct now. Every field
+// whose encoding is unchanged keeps raw's spelling, including whether it was present at all, so an
+// object nobody edited comes back byte for byte and one that was edited keeps every field Beacon
+// does not model.
+func preserveUnmodelledJSON(raw json.RawMessage, original, current any) ([]byte, error) {
+	before, err := jsonObjectFields(original)
+	if err != nil {
+		return nil, err
+	}
+	after, err := jsonObjectFields(current)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]json.RawMessage
+	edited := false
+	for _, fields := range []map[string]json.RawMessage{before, after} {
+		for key := range fields {
+			was, hadBefore := before[key]
+			now, hasAfter := after[key]
+			if hadBefore == hasAfter && bytes.Equal(was, now) {
+				continue
+			}
+			if !edited {
+				if err := json.Unmarshal(raw, &out); err != nil {
+					return nil, err
+				}
+				edited = true
+			}
+			if hasAfter {
+				out[key] = now
+			} else {
+				delete(out, key)
+			}
+		}
+	}
+	if !edited {
+		return raw, nil
+	}
+	return json.Marshal(out)
+}
+
+func jsonObjectFields(value any) (map[string]json.RawMessage, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, err
+	}
+	return fields, nil
 }
 
 type settingsHooksFile struct {
@@ -94,17 +210,24 @@ func removeSettingsEndpointHooksFromLoaded(settings *settingsHooksFile, platform
 	}
 	changed := false
 	for eventName, groups := range settings.hooks {
+		eventChanged := false
 		filtered := groups[:0]
 		for _, group := range groups {
 			withoutEndpointHooks, groupChanged := filterSettingsEndpointHooks(group, platform)
 			if groupChanged {
-				changed = true
+				eventChanged = true
 			}
-			if len(withoutEndpointHooks.Hooks) == 0 {
+			// Drop a group only when removing Beacon's hooks emptied it. A group the user left
+			// empty is theirs, and is kept like any other entry Beacon did not write.
+			if groupChanged && len(withoutEndpointHooks.Hooks) == 0 {
 				continue
 			}
 			filtered = append(filtered, withoutEndpointHooks)
 		}
+		if !eventChanged {
+			continue
+		}
+		changed = true
 		if len(filtered) == 0 {
 			delete(settings.hooks, eventName)
 		} else {
@@ -136,26 +259,7 @@ func removeSettingsEndpointHooks(path, platform string) (bool, error) {
 		}
 		return false, err
 	}
-	changed := false
-	for eventName, groups := range settings.hooks {
-		filtered := groups[:0]
-		for _, group := range groups {
-			withoutEndpointHooks, groupChanged := filterSettingsEndpointHooks(group, platform)
-			if groupChanged {
-				changed = true
-			}
-			if len(withoutEndpointHooks.Hooks) == 0 {
-				continue
-			}
-			filtered = append(filtered, withoutEndpointHooks)
-		}
-		if len(filtered) == 0 {
-			delete(settings.hooks, eventName)
-		} else {
-			settings.hooks[eventName] = filtered
-		}
-	}
-	if !changed {
+	if !removeSettingsEndpointHooksFromLoaded(&settings, platform) {
 		return false, nil
 	}
 	out, err := settings.marshal()

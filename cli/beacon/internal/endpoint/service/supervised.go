@@ -33,6 +33,10 @@ type supervisedState struct {
 	Program    string `json:"program"`
 	ConfigPath string `json:"config_path"`
 	StartedAt  string `json:"started_at"`
+	// StartedProgram is the program PID was started as. It differs from Program after writeUnit
+	// records a new program while the old collector is still running, and running() has to check
+	// the pid against what it was started as or unload would leave the old collector alive.
+	StartedProgram string `json:"started_program,omitempty"`
 }
 
 func (supervisedBackend) kind() Kind { return KindSupervised }
@@ -69,9 +73,10 @@ func (b supervisedBackend) writeUnit(userMode bool, program, configPath string) 
 	state := supervisedState{Program: program, ConfigPath: configPath}
 	// Preserve a live pid so writeUnit followed by status does not lose track of a collector
 	// that is already running.
-	if existing.PID > 0 && processAlive(existing.PID) {
+	if existing.running() {
 		state.PID = existing.PID
 		state.StartedAt = existing.StartedAt
+		state.StartedProgram = existing.StartedProgram
 	}
 	return path, b.write(userMode, state)
 }
@@ -104,7 +109,24 @@ func (b supervisedBackend) write(userMode bool, st supervisedState) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
+	// Written to a temporary file and renamed into place. os.WriteFile truncates and then writes,
+	// so a crash in between left an empty pidfile and lost track of a running collector.
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".collector.pid.*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(append(data, '\n')); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 func (b supervisedBackend) load(userMode bool) error {
@@ -115,7 +137,7 @@ func (b supervisedBackend) load(userMode bool) error {
 	if st.Program == "" {
 		return errors.New("supervised collector has no recorded program path")
 	}
-	if st.PID > 0 && processAlive(st.PID) {
+	if st.running() {
 		return nil // already running
 	}
 
@@ -144,6 +166,7 @@ func (b supervisedBackend) load(userMode bool) error {
 
 	st.PID = cmd.Process.Pid
 	st.StartedAt = time.Now().UTC().Format(time.RFC3339)
+	st.StartedProgram = st.Program
 	return b.write(userMode, st)
 }
 
@@ -152,7 +175,7 @@ func (b supervisedBackend) unload(userMode bool) error {
 	if err != nil {
 		return nil // nothing recorded, nothing to stop
 	}
-	if st.PID <= 0 || !processAlive(st.PID) {
+	if !st.running() {
 		st.PID = 0
 		_ = b.write(userMode, st)
 		return nil
@@ -167,12 +190,12 @@ func (b supervisedBackend) unload(userMode bool) error {
 	_ = terminateGracefully(proc)
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if !processAlive(st.PID) {
+		if !st.running() {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if processAlive(st.PID) {
+	if st.running() {
 		_ = proc.Kill()
 	}
 	st.PID = 0
@@ -195,7 +218,7 @@ func (b supervisedBackend) status(userMode bool) Status {
 	}
 	// "Loaded" means installed and intended to run, matching the other backends.
 	status.Loaded = st.Program != ""
-	status.Running = st.PID > 0 && processAlive(st.PID)
+	status.Running = st.running()
 	switch {
 	case status.Running:
 		status.Message = fmt.Sprintf("supervised pid %d (%s)", st.PID, supervisedCaveats(userMode))
@@ -226,10 +249,19 @@ func supervisedCaveats(userMode bool) string {
 	return noRestart
 }
 
-// processAlive reports whether a pid is live.
-func processAlive(pid int) bool {
-	if pid <= 0 {
+// running reports whether the recorded pid is live and is still the collector this state recorded.
+//
+// A pid is only a number, and the kernel hands it out again once the process holding it exits. The
+// pidfile outlives the collector -- an OOM kill, a container restart, a reboot of a host with no
+// service manager -- so the number can name an unrelated process by the time anything reads it.
+// Liveness alone then made status report a dead collector as running, load skip starting one, and
+// unload send that stranger SIGTERM, then SIGKILL if it had not exited ten seconds later.
+//
+// A pidfile written before StartedProgram existed cannot be checked, and is trusted on liveness
+// alone as before. Program is not a substitute: writeUnit may have changed it since the pid started.
+func (st supervisedState) running() bool {
+	if st.PID <= 0 || !pidAlive(st.PID) {
 		return false
 	}
-	return pidAlive(pid)
+	return st.StartedProgram == "" || pidRunsProgram(st.PID, st.StartedProgram)
 }

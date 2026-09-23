@@ -1,4 +1,6 @@
 // Popup UI: toggle capture, choose retention, show live status.
+import { ext } from '../shared/browser.js';
+import { mountPermissionBanner } from '../shared/permissions.js';
 import type { Settings } from '../shared/types.js';
 
 interface Status {
@@ -10,7 +12,7 @@ interface Status {
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 async function refresh(): Promise<void> {
-  const status = (await chrome.runtime.sendMessage({ type: 'GET_STATUS' })) as Status;
+  const status = (await ext.runtime.sendMessage({ type: 'GET_STATUS' })) as Status;
   ($('enabled') as HTMLInputElement).checked = status.settings.enabled;
   ($('retention') as HTMLSelectElement).value = status.settings.retention;
   $('endpoint').textContent = status.settings.endpoint;
@@ -19,7 +21,7 @@ async function refresh(): Promise<void> {
 }
 
 $('enabled').addEventListener('change', async (e) => {
-  await chrome.runtime.sendMessage({
+  await ext.runtime.sendMessage({
     type: 'SET_SETTINGS',
     patch: { enabled: (e.target as HTMLInputElement).checked },
   });
@@ -27,7 +29,7 @@ $('enabled').addEventListener('change', async (e) => {
 });
 
 $('retention').addEventListener('change', async (e) => {
-  await chrome.runtime.sendMessage({
+  await ext.runtime.sendMessage({
     type: 'SET_SETTINGS',
     patch: { retention: (e.target as HTMLSelectElement).value as Settings['retention'] },
   });
@@ -35,3 +37,4 @@ $('retention').addEventListener('change', async (e) => {
 });
 
 void refresh();
+mountPermissionBanner(ext, document);

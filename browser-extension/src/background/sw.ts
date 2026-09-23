@@ -3,38 +3,39 @@
 
 import '../adapters/claude.js'; // registers the Claude adapter (side effect)
 import '../adapters/chatgpt.js'; // registers the ChatGPT adapter (side effect)
+import { ext } from '../shared/browser.js';
 import type { ChatTurn, RelayMessage, Settings } from '../shared/types.js';
 import { getSettings, saveSettings, siteEnabled } from './settings.js';
 import { Assembler } from './assembler.js';
 import { enqueueTurn, flush, installFlushAlarm } from './delivery.js';
-import { detectBrowser } from '../shared/browser.js';
+import { detectBrowser } from '../shared/browser-identity.js';
 
 const assembler = new Assembler();
 
 // Which Chromium fork (or other browser) this is. Resolved once: the brand
 // list and UA string are fixed for the life of the worker. Stamped on every
 // emitted turn as user_agent.* / browser.brands.
-const browser = detectBrowser(globalThis.navigator);
+const browserIdentity = detectBrowser(globalThis.navigator);
 
 // Keep the SW awake while any stream is active, so mid-stream suspension is
 // rare. Correctness never depends on this — durable state covers the rest.
 let keepAliveTimer: ReturnType<typeof setInterval> | undefined;
 function updateKeepAlive(): void {
   if (assembler.active > 0 && keepAliveTimer == null) {
-    keepAliveTimer = setInterval(() => chrome.runtime.getPlatformInfo(() => {}), 20_000);
+    keepAliveTimer = setInterval(() => void ext.runtime.getPlatformInfo(), 20_000);
   } else if (assembler.active === 0 && keepAliveTimer != null) {
     clearInterval(keepAliveTimer);
     keepAliveTimer = undefined;
   }
 }
 
-chrome.runtime.onInstalled.addListener(() => {
+ext.runtime.onInstalled.addListener(() => {
   void saveSettings({}); // materialize defaults
 });
 
 installFlushAlarm();
 
-chrome.runtime.onMessage.addListener((msg: RelayMessage | ControlMessage, sender, sendResponse) => {
+ext.runtime.onMessage.addListener((msg: RelayMessage | ControlMessage, sender, sendResponse) => {
   if (isControl(msg)) {
     handleControl(msg).then(sendResponse);
     return true; // async response
@@ -57,7 +58,7 @@ async function finalizeTurn(turn: ChatTurn): Promise<void> {
   const settings = await getSettings();
   // siteEnabled covers both the global toggle and the per-site toggle.
   if (!siteEnabled(settings, turn.site)) return;
-  await enqueueTurn(turn, settings, browser);
+  await enqueueTurn(turn, settings, browserIdentity);
 }
 
 // ---- Control messages from popup/options ----
@@ -75,7 +76,7 @@ async function handleControl(msg: ControlMessage): Promise<unknown> {
   switch (msg.type) {
     case 'GET_STATUS': {
       const settings = await getSettings();
-      const q = await chrome.storage.local.get('delivery_queue');
+      const q = await ext.storage.local.get('delivery_queue');
       return { settings, queueDepth: (q.delivery_queue ?? []).length, active: assembler.active };
     }
     case 'SET_SETTINGS':

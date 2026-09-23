@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectBrowser, type NavigatorLike, type UABrand } from '../../src/shared/browser.js';
+import { detectBrowser, type NavigatorLike, type UABrand } from '../../src/shared/browser-identity.js';
 
 // Brand lists as each browser reports them in navigator.userAgentData.brands.
 // Edge and Chromium were read from a live MV3 service worker (Edge 153, Chromium

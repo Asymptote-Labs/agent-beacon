@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 func TestInventoryPlistIsAOneShotIntervalJob(t *testing.T) {
@@ -144,7 +146,7 @@ func TestInventoryUnitPathsIncludeTheServiceOnSystemd(t *testing.T) {
 		t.Skip("POSIX paths only")
 	}
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	m := InventoryManager{UserMode: true, Kind: KindSystemd}
 	paths := m.UnitPaths()
 	wantTimer := filepath.Join(home, ".config", "systemd", "user", InventoryTimerUnit)
@@ -205,7 +207,7 @@ func TestInventoryWriteUnitRendersTheModeIntoThePlist(t *testing.T) {
 		t.Skip("launchd only")
 	}
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	t.Setenv(InventoryIntervalEnv, "")
 	m := InventoryManager{UserMode: true, Kind: KindLaunchd}
 	path, err := m.WriteUnit("/usr/local/bin/beacon", "/tmp/scratch/runtime.jsonl")
@@ -234,7 +236,7 @@ func TestInventoryLoadBootstrapsAndReloadsAnExistingJob(t *testing.T) {
 		t.Skip("launchd only")
 	}
 	shrinkLaunchdWaits(t)
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	var calls []string
 	alreadyLoaded := true
 	oldRun := runLaunchctlCommand

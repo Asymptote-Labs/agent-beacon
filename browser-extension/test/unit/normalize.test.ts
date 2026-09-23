@@ -6,7 +6,7 @@ import {
   type KeyValue,
   type LogRecord,
 } from '../../src/shared/otlp.js';
-import type { BrowserIdentity } from '../../src/shared/browser.js';
+import type { BrowserIdentity } from '../../src/shared/browser-identity.js';
 import type { ChatTurn, Retention } from '../../src/shared/types.js';
 
 function baseTurn(over: Partial<ChatTurn> = {}): ChatTurn {

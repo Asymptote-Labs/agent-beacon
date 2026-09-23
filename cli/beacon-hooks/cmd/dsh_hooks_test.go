@@ -1,8 +1,12 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/policycontract"
 )
@@ -835,4 +839,83 @@ func leafString(input map[string]interface{}, key string) string {
 	}
 	value, _ := input[key].(string)
 	return value
+}
+
+// ---------------------------------------------------------------------------
+// Unwritable runtime log (#605)
+// ---------------------------------------------------------------------------
+
+// DeepSeek Harness runs hook commands sandboxed to the session workspace in every sandbox mode but
+// danger-full-access, so a hook commonly cannot write ~/.beacon at all. The hook must stay what it
+// is on every other path -- non-blocking, exit 0, a no-opinion `{}` for the bridge's decoder --
+// because on this Claude-shaped contract exit 2 is a block: it would refuse the tool, erase the
+// prompt, or keep a Stop from ending the turn, on every event. What changes is that the loss is
+// said out loud on stderr instead of in a single terse line.
+func TestDshUnwritableRuntimeLogStaysNonBlockingAndSaysWhy(t *testing.T) {
+	origPlatform := platformFlag
+	t.Cleanup(func() { platformFlag = origPlatform })
+
+	cases := []struct {
+		name  string
+		run   func(cmd *cobra.Command, args []string)
+		input map[string]interface{}
+	}{
+		{"session-start", runSessionStart, dshEvent("SessionStart", "d-ro-start", map[string]interface{}{"source": "startup"})},
+		{"prompt-submit", runPromptSubmit, dshEvent("UserPromptSubmit", "d-ro-prompt", map[string]interface{}{"prompt": "hello"})},
+		{"pre-tool", runPreTool, dshEvent("PreToolUse", "d-ro-pre", map[string]interface{}{
+			"tool_name": "bash", "tool_input": map[string]interface{}{"command": "ls"}, "tool_use_id": "call-ro-1",
+		})},
+		// stop is deliberately absent: runStop ends with os.Exit(0) after writing its response,
+		// which cannot run in-process. It takes the same emitHookEvent path as the three above.
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dshTestSetup(t)
+			dir := t.TempDir()
+			blocker := filepath.Join(dir, "read-only")
+			if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+				t.Fatalf("write blocker: %v", err)
+			}
+			// The parent is a regular file, so the log cannot be created on any platform: the
+			// portable stand-in for the read-only file system the sandbox presents.
+			logPath := filepath.Join(blocker, "runtime.jsonl")
+			t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+			var out map[string]interface{}
+			stderr := captureHookStderr(t, func() {
+				out = runHookWithInput(t, tc.run, tc.input)
+			})
+			if len(out) != 0 {
+				t.Fatalf("stdout = %#v, want the empty no-opinion object; a write failure must not become a decision", out)
+			}
+			for _, want := range []string{"NOT recorded", logPath, "danger-full-access", "beacon endpoint dsh sync"} {
+				if !strings.Contains(stderr, want) {
+					t.Fatalf("stderr does not mention %q:\n%s", want, stderr)
+				}
+			}
+		})
+	}
+}
+
+// captureHookStderr runs fn with os.Stderr redirected to a file and returns what was written.
+func captureHookStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatalf("create stderr capture: %v", err)
+	}
+	orig := os.Stderr
+	os.Stderr = f
+	func() {
+		defer func() { os.Stderr = orig }()
+		fn()
+	}()
+	if err := f.Close(); err != nil {
+		t.Fatalf("close stderr capture: %v", err)
+	}
+	data, err := os.ReadFile(f.Name())
+	if err != nil {
+		t.Fatalf("read stderr capture: %v", err)
+	}
+	return string(data)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os/user"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -100,6 +101,11 @@ func TestLookupReportsWhyWhenNSSIsUnavailable(t *testing.T) {
 // The fast path must still work, and must not consult NSS for an account the local database can
 // already answer -- that would put a subprocess on the hot path of every ordinary host.
 func TestLookupUsesTheLocalDatabaseFirst(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// Info carries a numeric UID and GID. Windows identifies accounts by SID, which fromUser
+		// rightly refuses to coerce, so no Windows account resolves on the local fast path.
+		t.Skip("POSIX account database; Windows accounts have SIDs, not numeric UIDs")
+	}
 	me, err := user.Current()
 	if err != nil || me.Username == "" {
 		t.Skip("no resolvable current user on this host")

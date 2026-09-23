@@ -62,6 +62,25 @@ beacon endpoint dsh status
 
 The poll path is local and offline. It complements hooks by backfilling persisted assistant text, reasoning, structured tool failures, and token usage that the hook bridge does not expose. Poll events are marked `harness.collection_method=poll`, so they are historical observation only: they cannot approve, deny, hold, or delay a tool call.
 
+### Live hooks and the DeepSeek Harness sandbox
+
+<Warning>
+**In every sandbox mode except `danger-full-access`, live hooks cannot write Beacon's runtime log.** `dsh` runs hook commands inside the same sandbox as the session, confined to the session's working directory. Its sandbox policy is a mode plus a workspace root, with no list of extra writable paths, so a hook cannot reach `~/.beacon/endpoint/logs/runtime.jsonl` or any other path outside the workspace. The default mode is `read-only`, and `workspace-write` is the common working mode, so this is the usual case rather than an unusual one.
+</Warning>
+
+When this happens, each hook still exits `0`. That is deliberate: on this hook contract, exit code `2` is a **block**. It would refuse the tool call, erase the prompt, or stop a turn from ending, on every event, for as long as the log stays unwritable, and a telemetry write that failed must never become a control decision. Instead, the hook prints on stderr that the event was **not recorded**, names the log path and the error, and points at the remedies. The explanation is printed once per hook invocation, not once per event, so it stays readable wherever `dsh` shows or logs hook output.
+
+The poll half is unaffected. `beacon endpoint dsh sync` runs outside the harness and reads DeepSeek's own session store, so sessions the hooks missed can still be backfilled with assistant text, tool calls, commands, file activity, and token usage. What is lost is the **live** path: poll events arrive after the fact, carry `harness.collection_method=poll`, and cannot hold or deny a tool call.
+
+`beacon endpoint doctor` reports this as `dsh_hook_capture: warn` when DeepSeek sessions have run since the hooks were installed but no live hook event has been recorded. The regular `harness_observed` check cannot catch it, because synced poll events satisfy it. See [`dsh_hook_capture`](/cli/endpoint-doctor#dsh_hook_capture).
+
+Your options:
+
+- **Rely on the poll path.** Keep the sandbox and run `beacon endpoint dsh sync`, or ask `dsh` to run it through the Beacon skill. You get everything the store holds, without live capture or the policy seam.
+- **Run `dsh` in `danger-full-access` mode** for sessions that need live capture. This removes the sandbox for the whole session, not just for the hooks, so it is a security decision to make on its own merits. Beacon does not change the sandbox mode for you.
+
+Beacon does not yet have a runtime log location a sandboxed hook can write to. The only writable path is the session's own workspace, which changes from session to session and is usually a repository.
+
 <Warning>
 **There is no project scope.** The bridge's `configPath` is process-level — read once at startup — and per-session discovery of a project-local hooks file is unimplemented in the bridge itself. A repository has nowhere to mount a hook bridge from, so `--level project` is **refused with that explanation** rather than quietly becoming a machine-wide install. DeepSeek Harness is also left out of the project-level `--all` sweep for the same reason.
 </Warning>
@@ -223,6 +242,7 @@ Unlike [Kiro](/runtimes/kiro) and [OpenHands](/runtimes/openhands), Beacon **doe
 - **No transcript path on hooks.** The bridge always sends `transcript_path` as the empty string. Use `beacon endpoint dsh sync` for the native session-store path.
 - **No compaction events.** `PreCompact` and `PostCompact` are among the events the bridge does not support.
 - **Subagent detail is thin.** The bridge reports a constant `agent_type` of `general-purpose` and uses the child's session id where Claude Code reports the parent's, so a subagent event cannot be joined to the session that spawned it.
+- **Live hooks need `danger-full-access`.** In the `read-only` (default) and `workspace-write` sandbox modes, hooks cannot write the runtime log, so live capture records nothing and `beacon endpoint dsh sync` is the collection path. See [Live hooks and the DeepSeek Harness sandbox](#live-hooks-and-the-deepseek-harness-sandbox).
 - **No project scope.** See the warning under [Collection path](#collection-path).
 - **Only command hooks run.** The bridge runs shell-form `command` handlers only, which is what Beacon writes. It has no bearing on Beacon's install and is noted because it bounds what else you can put in the same file.
 
@@ -242,6 +262,7 @@ grep '"name":"deepseek_harness"' ~/.beacon/endpoint/logs/runtime.jsonl | tail -3
 
 If DeepSeek Harness telemetry is missing:
 
+- Run `beacon endpoint doctor`. If it reports `dsh_hook_capture: warn`, the hooks are loaded but cannot write the log, which is almost always the session sandbox. See [Live hooks and the DeepSeek Harness sandbox](#live-hooks-and-the-deepseek-harness-sandbox). Hook stderr, and `dsh`'s own hook output, will show `beacon-hooks: this event was NOT recorded`.
 - Confirm **both** files exist. `beacon endpoint hooks status --harness dsh` prints both paths; either one alone is inert.
 - Check `$DSH_HOME`: if it is set, both files are under that directory, not `~/.dsh`.
 - Confirm the mount's `configPath` points at the hooks file that is actually there. A reinstall repoints it.
