@@ -11,6 +11,74 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## September 2026
 
+### v1.3.21 · September 23, 2026
+
+- **Browser events identify the browser that produced them** · The browser
+  extension now records `user_agent.name` and `user_agent.version` on every
+  event, using UA Client Hints with a user-agent fallback. Chromium, Chrome,
+  Edge, Brave, Opera, Opera GX, Vivaldi, Arc, and Firefox are distinguished
+  where the browser exposes enough information; the typed fields survive
+  metadata-only retention. The replay e2e now runs in Microsoft Edge as well as
+  Chromium.
+- **A beta Firefox browser-extension build** · `npm run build:firefox` produces
+  a Gecko-targeted build with a pinned add-on ID, Firefox-compatible background
+  and options declarations, Mozilla linting in CI, and a visible site-access
+  warning and grant flow when Firefox withholds MV3 host permissions. Permanent
+  installation still requires an AMO-signed XPI; the release workflow publishes
+  one only when its AMO credentials are configured.
+- **Safari packaging groundwork, not Safari support** · The extension has an
+  experimental Safari build target plus scripts for generating an Xcode app
+  wrapper, validating an MDM declaration, and running packaging checks. It has
+  not been tested in Safari, is not wired into a release, and is not shipped.
+- **User and system collectors can run together** · A collector's default
+  health-check port now moves with an overridden OTLP HTTP port, so a user-mode
+  collector on alternate OTLP ports does not collide with a system collector
+  still using `13133`. The resolved port is stored in endpoint configuration
+  and used by status, diagnostics, repair, and CI checks.
+- **Interrupted managed reconnects are no longer reported as healthy** · As soon
+  as enrollment returns a rotated device key, connect records a non-secret
+  pending marker. If storing the key, writing configuration, or starting the
+  forwarder then fails, status reports `connect_incomplete: true` and the retry
+  command instead of presenting the previous enrollment as connected. A failed
+  first connect also removes any partial forwarder.
+- **Large Claude Code backfills preserve the sweep they just wrote** ·
+  `beacon endpoint claude sync` stops before rotation would delete output from
+  the current sweep, leaves remaining session cursors pending, and reports
+  retained and rotated event counts. `--rotate-bytes` can temporarily enlarge
+  the sync's rotation window for a one-pass backfill.
+- **Existing Claude Code hooks survive Beacon edits verbatim** · Install, repair,
+  and uninstall now preserve non-Beacon `command`, `http`, `prompt`, and `agent`
+  hooks, including fields Beacon does not interpret such as URLs and headers.
+- **DeepSeek sandbox capture gaps are visible** · A hook that cannot write the
+  runtime log now warns on stderr without blocking the agent. Endpoint doctor
+  compares DeepSeek's native sessions with retained live-hook evidence and
+  reports `dsh_hook_capture` when sandboxing prevented live capture, while
+  directing operators to session sync for backfill.
+- **Trace and memory content fixes** · Trace views now use retained assistant
+  response or reasoning text as `content.text`, keeping the event label as the
+  summary. Jev/Noul candidates no longer store the question type as if it were
+  an evaluator-provided reason.
+- **Safer supervised service cleanup** · The no-init-system backend verifies
+  that a pidfile still names the collector it started before signaling it, so a
+  recycled process ID cannot cause Beacon to stop an unrelated process. Linux
+  removal guidance now also makes clear that RPM has no purge operation and
+  that a full removal runs `beacon endpoint uninstall --system` before
+  `dnf remove`.
+
+### v1.3.20 · September 22, 2026
+
+- **Endpoint install now discovers local runtimes by default** · With no
+  `--harness` flag, `beacon endpoint install` and `repair` detect the invoking
+  user's runtimes and configure every integration Beacon can safely install,
+  including supported OTLP settings, hooks, plugins, and extensions. An explicit
+  comma-separated list keeps exact-selection behavior, while `--harness all`
+  forces every installable integration.
+- **Manual and poll-only integrations are reported, not misconfigured** ·
+  Discovery explains the next step for GitHub Copilot CLI, Claude Cowork, fx,
+  and project-scoped OpenHands instead of treating those surfaces as install
+  failures. If no automatically installable runtime is found, Beacon still
+  installs the collector without changing runtime configuration.
+
 ### v1.3.19 · September 21, 2026
 
 - **Onboarding happens in one screen that never disappears** · Signing in used to

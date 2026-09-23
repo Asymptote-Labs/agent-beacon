@@ -24,7 +24,7 @@ The endpoint architecture is local-first. Collection, normalization, storage, co
 | Surface | How activity reaches Beacon | Where events land |
 | --- | --- | --- |
 | [Local agents](#local-agents) | Native hooks, managed plugins and extensions, local [OTLP](/concepts/core-concepts#otlp), or a poll of the runtime's own session store | Persistent local [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log) |
-| [Browser](#browser) | Optional Chrome extension posting OTLP to the local collector | Persistent local runtime JSONL log |
+| [Browser](#browser) | Optional MV3 extension for Chromium browsers and beta Firefox, posting OTLP to the local collector | Persistent local runtime JSONL log |
 | [Agents in code](#agents-in-code) | [Observe SDK](/concepts/core-concepts#observe-sdk) instrumentation exporting OpenTelemetry spans | Customer-managed OTLP collector or hosted Observe |
 | [CI pipelines](#ci-pipelines) | Temporary collector wrapped around the job | Completed `runtime.jsonl` as a build artifact or upload |
 | [Cloud agents](#cloud-agents) | Sandbox hooks running `beacon-hooks` inside the provider environment | `/tmp/beacon/runtime.jsonl`, uploaded per run to customer-managed storage |
@@ -37,7 +37,7 @@ The endpoint package installs the CLI, runs the [local collector](/concepts/core
 
 ### Browser
 
-Chat activity on supported sites is collected by an optional Chrome extension that reads the page's chat stream and posts OTLP logs to the local collector on `127.0.0.1:4318`. It writes no files and contacts no remote endpoint. Coverage is deliberately narrow: only the supported chat origins, never general browsing. See [Browser Extension](/runtimes/browser-extension).
+Chat activity on supported sites is collected by an optional MV3 extension for Chromium browsers and beta Firefox. It reads the page's chat stream and posts OTLP logs to the local collector on `127.0.0.1:4318`. It writes no files and contacts no remote endpoint. Coverage is deliberately narrow: only the supported chat origins, never general browsing. See [Browser Extension](/runtimes/browser-extension).
 
 ### Agents in code
 

@@ -20,8 +20,8 @@ A browser being Chromium-based does not mean Beacon has tested it there. This pa
 | Opera, Opera GX | Expected to work, not in CI | [Manual checklist](#manual-verification-checklist). There is no Playwright channel for Opera |
 | Vivaldi | Expected to work, not in CI | [Manual checklist](#manual-verification-checklist). There is no Playwright channel for Vivaldi |
 | Arc | Expected to work, not in CI | [Manual checklist](#manual-verification-checklist). There is no Playwright channel for Arc, and Arc does not run on Linux CI runners |
-| Firefox | Beta, separate build | Not Chromium: a separate `dist-firefox` build, linted in CI and checked by hand. See [Load it in Firefox](/runtimes/browser-extension#load-it-in-firefox) |
-| Safari | Not supported | Different extension platform. Tracked separately |
+| Firefox | Beta, separate build | Not Chromium: a separate `dist-firefox` build, linted in CI; live capture still requires manual verification. See [Load it in Firefox](/runtimes/browser-extension#load-it-in-firefox) |
+| Safari | Not supported | Experimental build and packaging scaffolding exists, but it has not been tested in Safari and is not shipped |
 
 The extension needs a browser built on Chromium 111 or newer, because its interceptor is declared as a main-world content script in the manifest.
 
