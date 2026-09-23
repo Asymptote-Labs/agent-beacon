@@ -29,6 +29,9 @@ type SignInPrompt struct {
 	URL        string
 	WillOpen   bool
 	BrowserErr error
+	// SSHForward is the port forward that lets a browser on another computer finish this
+	// sign-in, shown next to a URL the user opens themselves.
+	SSHForward string
 }
 
 // Reporter is how a sign-in in progress tells the wizard what is happening. It is
@@ -63,6 +66,10 @@ type WizardOptions struct {
 	SignIn SignInFunc
 	// NoBrowser presents the URL to open rather than claiming one will open.
 	NoBrowser bool
+	// NoDisplay is why no browser can be opened on this machine, or nil when one can. When set,
+	// and NoBrowser is not, the wizard does not start a sign-in that cannot finish: it goes
+	// straight to recovery and says why.
+	NoDisplay error
 	// Now is injectable so elapsed time renders deterministically in tests.
 	Now func() time.Time
 	// SignInTimeout is rendered as a countdown. The real deadline lives in SignIn.
@@ -114,7 +121,10 @@ type wizardModel struct {
 	signInErr    error
 	// attempt counts sign-in attempts, so a report from an abandoned one can be
 	// told apart from the current one's.
-	attempt   int
+	attempt int
+	// noDisplay is set while recovery is showing because no browser can be opened here,
+	// rather than because an attempt failed.
+	noDisplay bool
 	startedAt time.Time
 	now       time.Time
 	frame     int
@@ -180,10 +190,11 @@ var (
 func newWizardModel(options WizardOptions) wizardModel {
 	screen := welcomeScreen
 	result := WizardResult{Destination: options.PresetDestination, PrivacyMode: options.PresetPrivacyMode}
+	needSignIn := false
 	if options.DestinationOnly {
 		switch {
 		case !options.SignedIn:
-			screen = signInScreen
+			needSignIn = true
 		case options.PresetDestination == DestinationAsymptote:
 			screen = managedDisclosureScreen
 		case options.PresetDestination != "":
@@ -192,7 +203,29 @@ func newWizardModel(options WizardOptions) wizardModel {
 			screen = destinationScreen
 		}
 	}
-	return wizardModel{options: options, result: result, screen: screen}
+	model := wizardModel{options: options, result: result, screen: screen}
+	if needSignIn {
+		model.needSignIn()
+	}
+	return model
+}
+
+// needSignIn moves to the sign-in screen, or, when there is no display to open a browser on,
+// straight to recovery.
+//
+// A sign-in finishes by redirecting a browser back to this machine. With no display, or over SSH,
+// the browser Beacon opens is one nobody sees, and the attempt used to sit on the wait screen for
+// five minutes before anything said so. The missing display is the failure, so it is reported as
+// one, before any attempt starts.
+func (m *wizardModel) needSignIn() {
+	if m.options.NoDisplay != nil && !m.options.NoBrowser {
+		m.signInErr = m.options.NoDisplay
+		m.noDisplay = true
+		m.selected = 0
+		m.screen = signInFailedScreen
+		return
+	}
+	m.screen = signInScreen
 }
 
 func RunWizard(in io.Reader, out io.Writer, options WizardOptions) (WizardResult, error) {
@@ -247,7 +280,7 @@ func (m wizardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			// ending the install: the browser may simply not have opened.
 			if m.screen == signInWaitScreen {
 				m.stopSignIn()
-				m.screen = signInScreen
+				m.needSignIn()
 				return m, nil
 			}
 			return m.cancelAndQuit()
@@ -289,6 +322,7 @@ func (m wizardModel) startSignIn() (tea.Model, tea.Cmd) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancelSignIn = cancel
 	m.signInErr = nil
+	m.noDisplay = false
 	m.prompt = SignInPrompt{}
 	m.startedAt = m.clock()
 	m.now = m.startedAt
@@ -357,7 +391,7 @@ func (m wizardModel) advance() (tea.Model, tea.Cmd) {
 	case welcomeScreen:
 		switch {
 		case !m.options.SignedIn:
-			m.screen = signInScreen
+			m.needSignIn()
 		case m.options.PresetDestination == DestinationAsymptote:
 			m.screen = managedDisclosureScreen
 		case m.options.PresetDestination != "":
@@ -431,6 +465,25 @@ type recoveryChoice struct {
 // finish, or a local-first tool becomes uninstallable without tribal knowledge of
 // an environment variable.
 func (m wizardModel) recoveryChoices() []recoveryChoice {
+	local := recoveryChoice{
+		id:     "local",
+		label:  "Finish setup without an account",
+		detail: "Install Beacon with telemetry kept on this machine. Connect later with `beacon endpoint connect`.",
+	}
+	cancel := recoveryChoice{id: "cancel", label: "Cancel setup", detail: "Stop without installing."}
+	if m.noDisplay {
+		// No retry: trying again cannot find a display. Finishing locally comes first because
+		// it is the choice that works from here.
+		return []recoveryChoice{
+			local,
+			{
+				id:     "manual",
+				label:  "Show the sign-in URL",
+				detail: "Open it in a browser on this machine, or on your own computer after forwarding the port it names over SSH.",
+			},
+			cancel,
+		}
+	}
 	choices := []recoveryChoice{
 		{id: "retry", label: "Try signing in again", detail: "Open beacon.sh and wait for the browser again."},
 	}
@@ -441,14 +494,7 @@ func (m wizardModel) recoveryChoices() []recoveryChoice {
 			detail: "Open the address yourself, in a browser on this machine.",
 		})
 	}
-	return append(choices,
-		recoveryChoice{
-			id:     "local",
-			label:  "Finish setup without an account",
-			detail: "Install Beacon with telemetry kept on this machine. Connect later with `beacon endpoint connect`.",
-		},
-		recoveryChoice{id: "cancel", label: "Cancel setup", detail: "Stop without installing."},
-	)
+	return append(choices, local, cancel)
 }
 
 func (m wizardModel) recover() (tea.Model, tea.Cmd) {
@@ -514,13 +560,23 @@ func (m wizardModel) View() string {
 			body = "Open this URL to sign in:"
 		}
 		raw = m.prompt.URL
+		if m.prompt.URL != "" && m.prompt.SSHForward != "" && (!m.prompt.WillOpen || m.prompt.BrowserErr != nil) {
+			raw += "\n\n" + wizardDim.Render("From another computer over SSH, forward the port first:") +
+				"\n" + m.prompt.SSHForward
+		}
 		if m.prompt.URL != "" {
 			raw += "\n\n" + wizardDim.Render(m.waitStatus())
 		}
 	case signInFailedScreen:
 		title = "Sign-in did not finish"
+		if m.noDisplay {
+			title = "No browser on this machine"
+		}
 		if m.signInErr != nil {
 			body = wizardWarn.Render(m.signInErr.Error()) + "\n\n"
+		}
+		if m.noDisplay {
+			body += "Sign-in finishes when beacon.sh redirects a browser back to this machine.\n\n"
 		}
 		var rows []string
 		for index, choice := range m.recoveryChoices() {

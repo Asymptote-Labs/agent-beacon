@@ -7,12 +7,11 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
-	"os/exec"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/auth"
 	endpointhooks "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
@@ -390,17 +389,10 @@ func URL(addr string) string {
 	return "http://" + addr
 }
 
+// OpenBrowser is auth.OpenBrowser, which checks for a display on Linux before exec'ing xdg-open.
+// This used to be a second copy of the opener without that check.
 func OpenBrowser(url string) error {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-	default:
-		cmd = exec.Command("xdg-open", url)
-	}
-	return cmd.Start()
+	return auth.OpenBrowser(url)
 }
 
 func parseQuery(r *http.Request, fallbackLimit int) EventQuery {

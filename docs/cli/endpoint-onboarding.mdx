@@ -42,6 +42,19 @@ the wizard offers to try again, to show the URL for you to open yourself, or to
 finish setup without an account and keep telemetry on this machine. Pass
 `--no-browser` to `beacon endpoint install` to start in that mode.
 
+On Linux, the wizard checks for a display before it starts. With no `DISPLAY` or
+`WAYLAND_DISPLAY`, or in an SSH session, it goes straight to that screen and says why,
+because sign-in finishes by redirecting a browser back to this machine. The choices
+are:
+
+- **Finish setup without an account** (the default): a local install.
+- **Show the sign-in URL**: open it on this machine, or on your own computer after
+  forwarding the port it names. The wizard prints the command, for example
+  `ssh -L 43121:127.0.0.1:43121 <this machine>`.
+- **Cancel setup**.
+
+An SSH session with X11 forwarding (`ssh -X`) counts as having a display.
+
 Signing in establishes account identity only. It does not register a managed endpoint,
 start Vector, or send telemetry. Beacon Managed is preselected; choose Local explicitly
 to opt out of managed forwarding.
