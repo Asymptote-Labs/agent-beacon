@@ -73,6 +73,25 @@ func HasHarnessEventSince(logPath, harnessName string, since time.Time) bool {
 }
 
 func LastHarnessEvent(logPath, harnessName string) (time.Time, bool) {
+	return lastHarnessEvent(logPath, harnessName, "")
+}
+
+// LastHarnessEventByCollectionMethod is LastHarnessEvent restricted to events whose
+// harness.collection_method is method.
+//
+// The distinction matters for a runtime with two capture paths. DeepSeek Harness has live hooks
+// and an offline poll of its session store, and both write events named deepseek_harness, so a
+// log full of backfilled poll events answers "has this harness been observed?" with yes while
+// every live hook is failing to write (#605). Asking for hook events alone is what separates the
+// two.
+func LastHarnessEventByCollectionMethod(logPath, harnessName, method string) (time.Time, bool) {
+	if strings.TrimSpace(method) == "" {
+		return time.Time{}, false
+	}
+	return lastHarnessEvent(logPath, harnessName, method)
+}
+
+func lastHarnessEvent(logPath, harnessName, method string) (time.Time, bool) {
 	if logPath == "" || strings.TrimSpace(harnessName) == "" {
 		return time.Time{}, false
 	}
@@ -104,6 +123,11 @@ func LastHarnessEvent(logPath, harnessName string) (time.Time, bool) {
 		}
 		if harness, ok := event["harness"].(map[string]interface{}); ok {
 			if name, _ := harness["name"].(string); asymptoteobserve.NormalizeHarnessName(name) == want {
+				if method != "" {
+					if got, _ := harness["collection_method"].(string); got != method {
+						continue
+					}
+				}
 				found = true
 				if ts, ok := event["timestamp"].(string); ok {
 					if parsed, err := time.Parse(time.RFC3339Nano, ts); err == nil && parsed.After(last) {

@@ -26,6 +26,7 @@ Doctor verifies:
 - Runtime log permissions
 - Service definition: launchd plist on macOS, systemd unit on Linux
 - Configured harness telemetry and recent observed events
+- Whether DeepSeek Harness hooks are actually recording live events (`dsh_hook_capture`)
 - Whether a real user's agent runtime points at the collector (system mode only)
 
 The runtime log itself can be missing before the first event is written. In that case, doctor reports a warning instead of a hard failure.
@@ -45,6 +46,21 @@ console_user_configured: fail target=alice (alice has no agent runtime pointed a
 Everything else can be green when this fails. The collector is running, the service is loaded, and the harness check passes, because `doctor --system` runs as root and sees the settings the install wrote for root. The person whose sessions matter is the one with nothing.
 
 If no logged-in user can be identified at all, this reports a warning rather than a failure: an unattended host legitimately has nobody to configure, and that is not something an operator can act on.
+
+### `dsh_hook_capture`
+
+This check runs only when DeepSeek Harness is detected and Beacon's hooks for it are installed. It catches a failure no other check sees: the hooks are loaded, but they cannot write the runtime log because `dsh` runs them inside its session sandbox. `harness_observed` stays green in this state, because `beacon endpoint dsh sync` fills the log with poll events under the same harness name.
+
+```
+dsh_hook_capture: warn target=deepseek_harness (2 DeepSeek Harness session(s) ran without a live
+  hook event (newest 2026-09-21T11:00:00Z; no hook event since the hooks were installed). The usual
+  cause is dsh's sandbox: ...)
+  action="run `beacon endpoint dsh sync` to backfill those sessions from DeepSeek's session store; ..."
+```
+
+Doctor cannot reproduce the sandbox, because running the hook command from doctor runs it outside `dsh`, where it succeeds. So the check compares evidence instead. It counts native sessions that DeepSeek wrote after the hooks were installed and more than a few minutes after the last event with `harness.collection_method=hook`. Each of those is a session the live hooks did not capture. The other cause is a `dsh` process that was already running when the hooks were installed and has not been restarted.
+
+This is a warning, not a failure. The sandbox mode is the operator's choice in `dsh`, and Beacon does not change it. `--fix` lists the check as a manual skip. See [Live hooks and the DeepSeek Harness sandbox](/runtimes/deepseek-harness#live-hooks-and-the-deepseek-harness-sandbox).
 
 ## Fix mode
 
