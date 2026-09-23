@@ -1,0 +1,5 @@
+# Recorded fx sessions are byte-exact captures: session.json's event_log_bytes is a watermark over
+# the exact bytes fx wrote to events.jsonl, and the reader stops at it. Line-ending conversion on
+# checkout (core.autocrlf on Windows) grows the log by one byte per line and pushes the final
+# committed turn past the watermark. Never convert these files.
+* -text
