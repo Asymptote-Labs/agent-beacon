@@ -124,6 +124,25 @@ Detailed tool inputs can contain sensitive command arguments, paths, URLs, searc
 
 Run `beacon endpoint claude sync --watch`, or schedule one-shot sweeps, if you want the poll path to stay current. The live OTLP and hook paths remain the real-time integrations; the poll path is for backfill and catch-up.
 
+### Large backfills and log rotation
+
+The runtime log keeps the live file plus five archives, 10 MiB each, and every rotation deletes the oldest archive. A first sync over a long Claude Code history can produce far more than that window. A sweep never rotates out its own output. When writing the next event would delete a log file that holds the sweep's output, the sweep stops. It decides from where its files are at that moment, so it holds even when the hooks or the collector rotate the log during the sweep. It leaves the cursors of the remaining sessions (including the one it stopped inside) where they were and exits non-zero:
+
+```text
+claude sync: 3496 sessions, 168 changed, 33689 events (33689 retained), 0 errors
+  stopped before log rotation would discard this sweep's own events; 3329 session(s) left pending for the next sweep.
+```
+
+With `--json`, the summary carries `events_retained` (events this sweep wrote that are still in the log or its archives when it finishes), `events_rotated_out` (events another writer's rotations discarded during the sweep, which also makes the sweep exit non-zero), `retention_limited`, and `sessions_pending`.
+
+The next sweep continues where this one stopped. The guard covers one sweep at a time, so the next sweep's rotations can discard the previous sweep's output. That includes `--watch`, which sweeps again on every interval. If you need every event, ship or copy the log files between sweeps. To backfill in one sweep, raise the file size for this sync only:
+
+```bash
+beacon endpoint claude sync --rotate-bytes 1073741824
+```
+
+`--rotate-bytes` cannot be smaller than the default 10 MiB. The archive count stays at five, because the hooks and the collector prune any archive past five on their next rotation. After the sync, those writers keep rotating at 10 MiB, so the large file becomes an ordinary archive and stays readable until five more rotations have happened. Hooks and the collector also rotate at 10 MiB while the sync runs, so live agent activity during a large backfill can stop the sweep early. The sweep then stops at the window, and none of its events are lost. Run large backfills while agents are idle.
+
 ## Deployment notes
 
 For MDM deployments, use the signed and notarized macOS `.pkg` so endpoint events land in `/var/log/beacon-agent/runtime.jsonl`. The package installs the endpoint agent under `/opt/beacon`, creates system endpoint configuration, and loads the local collector LaunchDaemon.
