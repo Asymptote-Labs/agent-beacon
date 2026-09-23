@@ -1083,3 +1083,39 @@ fi
 # Safari app-wrapper helper and MDM declaration (packaging/macos/safari). Runs on
 # Linux too: the packager and uname are faked.
 sh "$ROOT_DIR/packaging/macos/safari/test-safari-packaging.sh"
+
+# Fleet osquery files (packaging/macos/fleet) and the Fleet admin helper
+# (examples/fleet). A Fleet policy passes whenever its query returns a row, so a
+# policy must return nothing on an unhealthy host and must not aggregate.
+FLEET_HELPER="$ROOT_DIR/examples/fleet/configure-beacon-macos-s3.sh"
+bash -n "$FLEET_HELPER"
+for sql in "$ROOT_DIR"/packaging/macos/fleet/queries/*.sql "$ROOT_DIR"/packaging/macos/fleet/policies/*.sql; do
+  if grep -Eiq '(^|[^a-z_])pid([^a-z_]|$)' "$sql"; then
+    echo "$sql reads pid; osquery's launchd table has no pid column" >&2
+    exit 1
+  fi
+done
+for sql in "$ROOT_DIR"/packaging/macos/fleet/policies/*.sql; do
+  if grep -Eiq 'count[[:space:]]*\(' "$sql"; then
+    echo "$sql aggregates, so it returns a row on every host and the policy always passes" >&2
+    exit 1
+  fi
+  if ! head -n 1 "$sql" | grep -q '^SELECT 1'; then
+    echo "$sql should start with SELECT 1 and return a row only when the host is healthy" >&2
+    exit 1
+  fi
+  if ! grep -q "cpu_type LIKE 'arm64%'" "$sql"; then
+    echo "$sql should pass on Intel Macs, where the Apple Silicon package does not apply" >&2
+    exit 1
+  fi
+done
+if grep -q 'automatic_install=' "$FLEET_HELPER"; then
+  echo "the Fleet helper should not use Fleet's automatic install; its .pkg policy never passes" >&2
+  exit 1
+fi
+if grep -q 'query=${SOFTWARE_QUERY}' "$FLEET_HELPER"; then
+  echo "the Fleet helper should find the Beacon title by bundle identifier, not by name" >&2
+  exit 1
+fi
+sh "$ROOT_DIR/examples/fleet/test/test-fleet-sql.sh"
+sh "$ROOT_DIR/examples/fleet/test/test-configure-beacon-macos-s3.sh"
