@@ -91,6 +91,40 @@ func runEndpointDashboard(cmd *cobra.Command, args []string) error {
 	})
 }
 
+// Seams for tests. Production always runs the lifecycle package.
+var (
+	endpointLifecycleInstall = lifecycle.Install
+	endpointLifecycleRepair  = lifecycle.Repair
+)
+
+// endpointInstallOptions builds the lifecycle options shared by `endpoint install` and
+// `endpoint repair` from the resolved target selection and flags.
+//
+// The selection is authoritative for OTLP runtimes: every --harness value (auto, all, an
+// explicit list, or "" for collector-only) has been resolved by this point, so a selection with
+// no OTLP targets means "configure none". lifecycle.InstallOptions reads a nil Harnesses as
+// "unspecified" and substitutes the config default of Claude Code and Codex, which is how
+// `--harness omp` came to rewrite ~/.claude/settings.json and ~/.codex/config.toml on every
+// install and repair (#640). So the list is always handed over non-nil.
+func endpointInstallOptions(selection endpointTargetSelection, serviceKind service.Kind) lifecycle.InstallOptions {
+	harnesses := append([]string{}, selection.OTLP...)
+	return lifecycle.InstallOptions{
+		UserMode:              endpointUserMode(),
+		LogPath:               endpointOpts.logPath,
+		Harnesses:             harnesses,
+		GRPCPort:              endpointOpts.grpcPort,
+		HTTPPort:              endpointOpts.httpPort,
+		HealthPort:            endpointOpts.healthPort,
+		CollectorPath:         endpointOpts.collectorPath,
+		StartService:          !endpointOpts.noStart,
+		IncludeRuntimeMetrics: endpointOpts.includeRuntimeMetrics,
+		IncludeCodexSpans:     endpointOpts.includeCodexSpans,
+		SplunkHEC:             splunkHECOptions(),
+		FalconHEC:             falconHECOptions(),
+		ServiceKind:           serviceKind,
+	}
+}
+
 func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	selection, err := resolveEndpointTargets(endpointOpts.harnesses, harness.DiscoverAll())
 	if err != nil {
@@ -113,21 +147,7 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	// Confirming Beacon Managed connects this endpoint; --connect does the same for
 	// the paths the wizard did not own.
 	connectAfterInstall := onboarded.Connect || endpointOpts.connect
-	result, err := lifecycle.Install(lifecycle.InstallOptions{
-		UserMode:              endpointUserMode(),
-		LogPath:               endpointOpts.logPath,
-		Harnesses:             selection.OTLP,
-		GRPCPort:              endpointOpts.grpcPort,
-		HTTPPort:              endpointOpts.httpPort,
-		HealthPort:            endpointOpts.healthPort,
-		CollectorPath:         endpointOpts.collectorPath,
-		StartService:          !endpointOpts.noStart,
-		IncludeRuntimeMetrics: endpointOpts.includeRuntimeMetrics,
-		IncludeCodexSpans:     endpointOpts.includeCodexSpans,
-		SplunkHEC:             splunkHECOptions(),
-		FalconHEC:             falconHECOptions(),
-		ServiceKind:           serviceKind,
-	})
+	result, err := endpointLifecycleInstall(endpointInstallOptions(selection, serviceKind))
 	if err != nil {
 		return err
 	}
@@ -285,21 +305,7 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 	// Resend only. Repair is a maintenance command and never asks a question, but a
 	// signup that failed on a flaky network deserves the retry the docs promise.
 	retryPendingOnboarding()
-	result, err := lifecycle.Repair(lifecycle.InstallOptions{
-		UserMode:              endpointUserMode(),
-		LogPath:               endpointOpts.logPath,
-		Harnesses:             selection.OTLP,
-		GRPCPort:              endpointOpts.grpcPort,
-		HTTPPort:              endpointOpts.httpPort,
-		HealthPort:            endpointOpts.healthPort,
-		CollectorPath:         endpointOpts.collectorPath,
-		StartService:          !endpointOpts.noStart,
-		IncludeRuntimeMetrics: endpointOpts.includeRuntimeMetrics,
-		IncludeCodexSpans:     endpointOpts.includeCodexSpans,
-		SplunkHEC:             splunkHECOptions(),
-		FalconHEC:             falconHECOptions(),
-		ServiceKind:           serviceKind,
-	})
+	result, err := endpointLifecycleRepair(endpointInstallOptions(selection, serviceKind))
 	if err != nil {
 		return err
 	}
