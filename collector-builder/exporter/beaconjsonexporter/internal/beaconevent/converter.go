@@ -1120,6 +1120,7 @@ func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 	applyModel(event, FirstString(attrs, "gen_ai.request.model", "gen_ai.response.model", "model", "ai.model"))
 	event.Repository = FirstString(attrs, "vcs.repository.url", "repository", "repo.path", "workspace.repository")
 	event.Branch = FirstString(attrs, "vcs.branch.name", "git.branch", "branch")
+	event.UserAgent = UserAgentFromAttrs(attrs)
 	if id := FirstString(attrs, "gen_ai.conversation.id", "beacon.session.id", "copilot_chat.session_id", "copilot_chat.chat_session_id", "conversation.id", "conversation_id", "session.id"); id != "" || FirstString(attrs, "cwd", "working_directory", "workspace") != "" {
 		event.Session = &SessionInfo{
 			ID:               id,
@@ -1546,6 +1547,19 @@ func populateRunContext(event *Event, attrs map[string]interface{}) {
 		return
 	}
 	event.Run = &run
+}
+
+// UserAgentFromAttrs promotes the OTel semconv `user_agent.name` / `user_agent.version`
+// attributes into the typed user_agent field. The browser extension sets them on its
+// resource so every browser chat event names the browser (Edge, Brave, Chromium, ...)
+// it came from; promoting them matters because metadata-only forwarding drops raw
+// attributes. A version without a name identifies nothing and is left in raw.
+func UserAgentFromAttrs(attrs map[string]interface{}) *UserAgentInfo {
+	name := FirstStringAttr(attrs, "user_agent.name")
+	if name == "" {
+		return nil
+	}
+	return &UserAgentInfo{Name: name, Version: FirstStringAttr(attrs, "user_agent.version")}
 }
 
 func (c Converter) RawPayload(attrs map[string]interface{}, extra map[string]interface{}) map[string]interface{} {

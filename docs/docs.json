@@ -163,6 +163,7 @@
                 "group": "Browser Chat",
                 "pages": [
                   "runtimes/browser-extension",
+                  "runtimes/browser-extension-chromium",
                   "runtimes/claude-web",
                   "runtimes/chatgpt-web"
                 ]

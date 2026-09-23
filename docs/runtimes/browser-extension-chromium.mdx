@@ -1,0 +1,160 @@
+---
+title: "Chromium Browsers"
+description: "Which Chromium browsers the Beacon browser extension is tested in, how events name the browser, and how to verify and deploy it in Edge, Brave, Opera, Vivaldi, and Arc"
+---
+
+## Overview
+
+Microsoft Edge, Brave, Opera, Vivaldi, and Arc are all built on Chromium and all run Manifest V3 extensions. The [browser extension](/runtimes/browser-extension) ships one build, and that same build loads in each of them. There is no per-browser port and no second artifact.
+
+A browser being Chromium-based does not mean Beacon has tested it there. This page keeps the two claims apart: which browsers run in automated tests on every change, and which rely on the manual checklist below.
+
+## Support levels
+
+| Browser | Status | How it is verified |
+|---------|--------|--------------------|
+| Chromium | Tested | Automated replay e2e in CI on every pull request (`BROWSER_CHANNEL=chromium`) |
+| Microsoft Edge | Tested | Automated replay e2e in CI on every pull request (`BROWSER_CHANNEL=msedge`) |
+| Google Chrome | Expected to work, not in CI | Branded Chrome (137 and later) no longer honors `--load-extension`, which the harness uses to load `dist/`, so it cannot run in the automated e2e. Use the [manual checklist](#manual-verification-checklist) |
+| Brave | Expected to work, not in CI | [Manual checklist](#manual-verification-checklist). There is no Playwright channel for Brave |
+| Opera, Opera GX | Expected to work, not in CI | [Manual checklist](#manual-verification-checklist). There is no Playwright channel for Opera |
+| Vivaldi | Expected to work, not in CI | [Manual checklist](#manual-verification-checklist). There is no Playwright channel for Vivaldi |
+| Arc | Expected to work, not in CI | [Manual checklist](#manual-verification-checklist). There is no Playwright channel for Arc, and Arc does not run on Linux CI runners |
+| Firefox, Safari | Not supported | Different extension platforms. Tracked separately |
+
+The extension needs a browser built on Chromium 111 or newer, because its interceptor is declared as a main-world content script in the manifest.
+
+## Which browser an event came from
+
+Every event the extension sends names the browser that produced it. On a managed fleet that matters: a paste into ChatGPT from the managed Edge profile and one from a personal Brave install are different investigations.
+
+The extension's service worker reads the browser's own UA Client Hints brand list (`navigator.userAgentData.brands`), falling back to the user-agent string, and sends OpenTelemetry semantic-convention attributes on every OTLP log:
+
+| OTLP attribute | Example | Where it lands in the event |
+|----------------|---------|-----------------------------|
+| `user_agent.name` | `Microsoft Edge` | `user_agent.name` |
+| `user_agent.version` | `153` (major version) | `user_agent.version` |
+| `browser.brands` | `["Microsoft Edge 153", "Not_A Brand 8", "Chromium 153"]` | `raw.attributes` |
+| `user_agent.original` | the browser's UA string | `raw.attributes` |
+
+`user_agent.name` and `user_agent.version` are typed event fields. They are metadata rather than content, so they survive every retention mode, including `metadata` retention in the extension and Metadata-only managed forwarding, which drops `raw`. Threat rules can match on `e.user_agent.name`.
+
+To see the browser on recent events:
+
+```bash
+grep '"claude_web"\|"chatgpt_web"' ~/.beacon/endpoint/logs/runtime.jsonl | tail -5 | jq '{harness: .harness.name, browser: .user_agent.name, version: .user_agent.version}'
+```
+
+`user_agent.name` is what the browser claims to be. Some browsers do not name themselves:
+
+| Browser | Reports as | Why |
+|---------|------------|-----|
+| Microsoft Edge | `Microsoft Edge` | Edge adds its own brand |
+| Brave | `Brave` | Brave adds its own brand. Builds that do not are still recognized by Brave's `navigator.brave` object |
+| Opera, Opera GX | `Opera`, `Opera GX` | Opera adds its own brand. `user_agent.version` is Opera's version, not Chromium's |
+| Google Chrome | `Google Chrome` | |
+| Chromium, and Playwright's test build | `Chromium` | No vendor brand |
+| Vivaldi | Usually `Chromium` | Vivaldi adds no brand of its own and copies Chrome's UA string for site compatibility. Older builds that still put `Vivaldi/` in the UA string without brand hints report `Vivaldi` |
+| Arc | Usually `Google Chrome` | Arc copies Chrome's brand list and UA string. An extension's service worker has no other signal, so Arc cannot be told apart from Chrome |
+
+When a browser adds a brand Beacon does not know, that brand is reported as-is. When a browser gives neither brand hints nor a recognizable UA string, the attributes are omitted rather than guessed.
+
+## Install
+
+Every Chromium browser uses the same archive, `agent-beacon-browser-extension-<version>-chrome.zip`, or a local `dist/` build. The `-chrome` suffix names the Chromium extension family, not Google Chrome alone. See [Use a release archive](/runtimes/browser-extension#use-a-release-archive) for download and verification.
+
+Load it unpacked from the browser's extensions page, with developer mode turned on:
+
+| Browser | Extensions page | Developer mode toggle |
+|---------|-----------------|-----------------------|
+| Google Chrome, Chromium | `chrome://extensions` | Top right |
+| Microsoft Edge | `edge://extensions` | Left sidebar |
+| Brave | `brave://extensions` | Top right |
+| Opera, Opera GX | `opera://extensions` | Top right |
+| Vivaldi | `vivaldi://extensions` | Top right |
+| Arc | `chrome://extensions` | Top right |
+
+Then choose **Load unpacked** and select the `dist` folder or the unzipped release folder, as described in [Load it in Chrome](/runtimes/browser-extension#load-it-in-chrome).
+
+The extension is not published in any extension store yet. When it is, Brave, Vivaldi, and Arc install from the Chrome Web Store, Opera needs its own add-ons listing (or the user allows Chrome Web Store installs in Opera), and Edge needs its own Microsoft Edge Add-ons listing through Partner Center. No Edge Add-ons submission exists today.
+
+## Manual verification checklist
+
+Use this for every browser the automated e2e does not cover, and record the result. Two passes: the replay e2e, which needs no login and no network, and a live check against the real sites.
+
+### 1. Replay e2e against the browser binary
+
+The Playwright harness accepts any Chromium-family binary through `BROWSER_EXECUTABLE`. It launches the browser with the built extension and replays recorded chat streams through it, which proves the extension loads, the interceptor fires, and delivery works in that browser.
+
+```bash
+cd browser-extension
+npm ci
+npm run build
+BROWSER_EXECUTABLE="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" npx playwright test
+```
+
+Typical executable paths:
+
+| Browser | macOS | Linux |
+|---------|-------|-------|
+| Brave | `/Applications/Brave Browser.app/Contents/MacOS/Brave Browser` | `/usr/bin/brave-browser` |
+| Opera | `/Applications/Opera.app/Contents/MacOS/Opera` | `/usr/bin/opera` |
+| Vivaldi | `/Applications/Vivaldi.app/Contents/MacOS/Vivaldi` | `/usr/bin/vivaldi` |
+| Arc | `/Applications/Arc.app/Contents/MacOS/Arc` | Not available |
+
+On Windows, the path is the **Target** of the browser's shortcut (right-click the shortcut, then **Properties**).
+
+`BROWSER_CHANNEL` selects a Playwright channel instead (`chromium`, the default, or `msedge`; pre-release variants such as `msedge-beta` also work). `BROWSER_EXECUTABLE` wins when both are set. A browser that ignores `--load-extension`, as branded Chrome does, fails every test at the first step, which is itself a useful result: skip to the live check.
+
+### 2. Live check against the real sites
+
+With the Beacon endpoint running:
+
+- [ ] Load the extension unpacked from the browser's extensions page. It appears in the list, is enabled, and shows no errors.
+- [ ] The toolbar popup opens and shows capture on and a queue depth of 0.
+- [ ] Send one message on claude.ai. A `claude_web` event arrives in the runtime log.
+- [ ] Send one message on chatgpt.com. A `chatgpt_web` event arrives in the runtime log.
+- [ ] Both events carry `user_agent.name`. Note the value; see [Which browser an event came from](#which-browser-an-event-came-from) for what each browser should report.
+- [ ] No permission prompt about local network access appeared. The service worker console, from the extensions page, shows no delivery errors.
+- [ ] Quit and restart the browser. The extension is still enabled and the next message is still captured.
+- [ ] Browser-specific: in Brave, repeat one message with Shields up for the site; in Opera, confirm the extension is allowed on claude.ai and chatgpt.com; in Arc, check whether capture also works in a Space that uses a different profile, and record the answer.
+
+### 3. Record the result
+
+Add a row to the pull request or release notes that ran it:
+
+| Browser | Version | OS | Date | Replay e2e | Live check | `user_agent.name` seen |
+|---------|---------|----|------|------------|------------|------------------------|
+| _e.g. Brave_ | _1.x (Chromium N)_ | _macOS 15_ | _YYYY-MM-DD_ | _pass/fail_ | _pass/fail_ | _Brave_ |
+
+## Force-install through browser policy
+
+For IT-managed fleets, Chromium browsers can install an extension without user action through the `ExtensionInstallForcelist` policy, or its successor `ExtensionSettings` with `installation_mode: force_installed`. Each browser reads that policy from its own location:
+
+| Browser | Windows registry key | macOS preference domain | Linux policy directory |
+|---------|----------------------|-------------------------|------------------------|
+| Google Chrome | `HKLM\SOFTWARE\Policies\Google\Chrome` | `com.google.Chrome` | `/etc/opt/chrome/policies/managed/` |
+| Microsoft Edge | `HKLM\SOFTWARE\Policies\Microsoft\Edge` (Edge ADMX) | `com.microsoft.Edge` | `/etc/opt/edge/policies/managed/` |
+| Brave | `HKLM\SOFTWARE\Policies\BraveSoftware\Brave` (Brave ADMX) | `com.brave.Browser` | `/etc/brave/policies/managed/` |
+| Chromium | `HKLM\SOFTWARE\Policies\Chromium` | `org.chromium.Chromium` | `/etc/chromium/policies/managed/` |
+| Opera, Vivaldi, Arc | Not verified | Not verified | Not verified |
+
+Beacon has not verified an enterprise policy path for Opera, Vivaldi, or Arc. Check the vendor's current enterprise documentation, and test on one machine, before relying on policy there.
+
+Each `ExtensionInstallForcelist` entry is `<extension id>;<update URL>`. Two things block force-install today:
+
+- **There is no update URL to point at.** The extension is not in the Chrome Web Store or Microsoft Edge Add-ons, and Beacon does not publish a signed `.crx` with an update manifest. Force-install needs one of those.
+- **There is no stable extension ID.** An unpacked extension's ID is derived from the folder it was loaded from, because the manifest carries no `key`. A policy has nothing fixed to name until the extension is packaged with a key or listed in a store.
+
+Until then, distribution is load-unpacked. Managed profiles can also block developer mode, which blocks **Load unpacked**. If your fleet does, allow developer mode for the profiles that should run the extension, or wait for a store listing.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Browser extension" icon="puzzle-piece" href="/runtimes/browser-extension">
+    Install, configuration, and troubleshooting.
+  </Card>
+  <Card title="Schema fields" icon="table" href="/telemetry-schema/fields">
+    Where `user_agent` sits in the event schema.
+  </Card>
+</Columns>

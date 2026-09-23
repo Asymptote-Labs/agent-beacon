@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeTurn } from '../../src/shared/normalize.js';
-import { attrValue, type KeyValue, type LogRecord } from '../../src/shared/otlp.js';
+import { normalizeTurn, turnToEnvelope } from '../../src/shared/normalize.js';
+import {
+  attrValue,
+  type AttrPrimitive,
+  type KeyValue,
+  type LogRecord,
+} from '../../src/shared/otlp.js';
+import type { BrowserIdentity } from '../../src/shared/browser.js';
 import type { ChatTurn, Retention } from '../../src/shared/types.js';
 
 function baseTurn(over: Partial<ChatTurn> = {}): ChatTurn {
@@ -23,8 +29,8 @@ function baseTurn(over: Partial<ChatTurn> = {}): ChatTurn {
   };
 }
 
-function flat(attrs: KeyValue[]): Record<string, string | number | boolean> {
-  const out: Record<string, string | number | boolean> = {};
+function flat(attrs: KeyValue[]): Record<string, AttrPrimitive | AttrPrimitive[]> {
+  const out: Record<string, AttrPrimitive | AttrPrimitive[]> = {};
   for (const a of attrs) {
     const v = attrValue(attrs, a.key);
     if (v !== undefined) out[a.key] = v;
@@ -181,5 +187,69 @@ describe('normalizeTurn — size cap', () => {
     const p = flat(byAction(normalize(baseTurn({ promptText: huge })).logRecords, 'prompt.submitted')!.attributes);
     expect((p['beacon.prompt.text'] as string).length).toBeLessThan(huge.length);
     expect(p['beacon.field_truncated']).toBe(true);
+  });
+});
+
+describe('normalizeTurn — browser identity', () => {
+  const edge: BrowserIdentity = {
+    name: 'Microsoft Edge',
+    version: '153',
+    brands: ['Microsoft Edge 153', 'Not_A Brand 8', 'Chromium 153'],
+    original: 'Mozilla/5.0 (X11; Linux x86_64) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0',
+  };
+
+  it('emits OTel semconv user_agent.* and browser.brands as resource attributes', () => {
+    const { resourceAttributes } = normalizeTurn(baseTurn(), 'full', edge);
+    const res = flat(resourceAttributes);
+    expect(res['user_agent.name']).toBe('Microsoft Edge');
+    expect(res['user_agent.version']).toBe('153');
+    expect(res['user_agent.original']).toBe(edge.original);
+    expect(res['browser.brands']).toEqual(['Microsoft Edge 153', 'Not_A Brand 8', 'Chromium 153']);
+  });
+
+  it('encodes browser.brands as an OTLP arrayValue of strings', () => {
+    const { resourceAttributes } = normalizeTurn(baseTurn(), 'full', edge);
+    const kv = resourceAttributes.find((a) => a.key === 'browser.brands');
+    expect(kv?.value).toEqual({
+      arrayValue: {
+        values: [
+          { stringValue: 'Microsoft Edge 153' },
+          { stringValue: 'Not_A Brand 8' },
+          { stringValue: 'Chromium 153' },
+        ],
+      },
+    });
+  });
+
+  it('puts identity on the resource, so every record of the turn (incl. tools) carries it', () => {
+    const turn = baseTurn({ toolCalls: [{ id: 't1', name: 'web_search', arguments: { q: 'x' } }] });
+    const env = turnToEnvelope(turn, 'full', edge);
+    expect(env.resourceLogs).toHaveLength(1);
+    expect(flat(env.resourceLogs[0].resource.attributes)['user_agent.name']).toBe('Microsoft Edge');
+    expect(env.resourceLogs[0].scopeLogs[0].logRecords).toHaveLength(3);
+  });
+
+  it('survives metadata retention (identity is metadata, not content)', () => {
+    const res = flat(normalizeTurn(baseTurn(), 'metadata', edge).resourceAttributes);
+    expect(res['user_agent.name']).toBe('Microsoft Edge');
+    expect(res['browser.brands']).toBeDefined();
+  });
+
+  it('omits optional fields it does not have (no version, no UA string, no brands)', () => {
+    const res = flat(normalizeTurn(baseTurn(), 'full', { name: 'Chromium', brands: [] }).resourceAttributes);
+    expect(res['user_agent.name']).toBe('Chromium');
+    expect('user_agent.version' in res).toBe(false);
+    expect('user_agent.original' in res).toBe(false);
+    expect('browser.brands' in res).toBe(false);
+  });
+
+  it('emits no browser attributes at all when identity is unknown (no regression)', () => {
+    const without = normalizeTurn(baseTurn(), 'full').resourceAttributes;
+    expect(without.map((a) => a.key)).toEqual([
+      'beacon.origin',
+      'beacon.harness.name',
+      'service.name',
+      'gen_ai.provider.name',
+    ]);
   });
 });

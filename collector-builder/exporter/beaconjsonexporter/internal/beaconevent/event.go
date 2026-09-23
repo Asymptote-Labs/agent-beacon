@@ -64,6 +64,7 @@ type GenAIUsageCacheCreationInfo = asymptoteobserve.GenAIUsageCacheCreationInfo
 type GenAIUsageCacheReadInfo = asymptoteobserve.GenAIUsageCacheReadInfo
 type GenAIUsageReasoningInfo = asymptoteobserve.GenAIUsageReasoningInfo
 type GenAIWorkflowInfo = asymptoteobserve.GenAIWorkflowInfo
+type UserAgentInfo = asymptoteobserve.UserAgentInfo
 
 type Event struct {
 	ObservedAt time.Time `json:"-"`
@@ -100,6 +101,7 @@ type Event struct {
 	Content       *ContentInfo                      `json:"content,omitempty"`
 	Destination   *asymptoteobserve.DestinationInfo `json:"destination,omitempty"`
 	Health        *asymptoteobserve.HealthInfo      `json:"health,omitempty"`
+	UserAgent     *UserAgentInfo                    `json:"user_agent,omitempty"`
 	GenAI         *GenAIInfo                        `json:"gen_ai,omitempty"`
 	Model         string                            `json:"model,omitempty"`
 	Repository    string                            `json:"repository,omitempty"`

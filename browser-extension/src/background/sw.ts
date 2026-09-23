@@ -7,8 +7,14 @@ import type { ChatTurn, RelayMessage, Settings } from '../shared/types.js';
 import { getSettings, saveSettings, siteEnabled } from './settings.js';
 import { Assembler } from './assembler.js';
 import { enqueueTurn, flush, installFlushAlarm } from './delivery.js';
+import { detectBrowser } from '../shared/browser.js';
 
 const assembler = new Assembler();
+
+// Which Chromium fork (or other browser) this is. Resolved once: the brand
+// list and UA string are fixed for the life of the worker. Stamped on every
+// emitted turn as user_agent.* / browser.brands.
+const browser = detectBrowser(globalThis.navigator);
 
 // Keep the SW awake while any stream is active, so mid-stream suspension is
 // rare. Correctness never depends on this — durable state covers the rest.
@@ -51,7 +57,7 @@ async function finalizeTurn(turn: ChatTurn): Promise<void> {
   const settings = await getSettings();
   // siteEnabled covers both the global toggle and the per-site toggle.
   if (!siteEnabled(settings, turn.site)) return;
-  await enqueueTurn(turn, settings);
+  await enqueueTurn(turn, settings, browser);
 }
 
 // ---- Control messages from popup/options ----

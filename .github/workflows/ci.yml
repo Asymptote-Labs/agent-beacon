@@ -54,6 +54,16 @@ jobs:
     # server. A wedged browser is a plausible failure mode, so bound it rather
     # than holding a runner for the six-hour GitHub default.
     timeout-minutes: 20
+    # One build serves every Chromium fork; the matrix proves it loads and
+    # captures in each browser Playwright can drive on Linux. Brave, Opera,
+    # Vivaldi and Arc have no Playwright channel and are covered by the manual
+    # checklist in docs/runtimes/browser-extension-chromium.mdx instead.
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, msedge]
+    env:
+      BROWSER_CHANNEL: ${{ matrix.browser }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -109,7 +119,11 @@ jobs:
         working-directory: browser-extension
         run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
 
+      # Chromium leg only. The msedge leg installs nothing into this directory
+      # but Playwright's .links bookkeeping, and saving that under the shared
+      # key would give the chromium leg a cache hit with no browser in it.
       - name: Cache Playwright browsers
+        if: matrix.browser == 'chromium'
         id: pw-cache
         uses: actions/cache@v4
         with:
@@ -125,9 +139,19 @@ jobs:
       # The full Chromium build, not the headless shell: e2e/fixtures.ts uses
       # channel: 'chromium', which is what supports MV3 extensions in headless.
       - name: Install Chromium for Playwright
-        if: steps.pw-cache.outputs.cache-hit != 'true'
+        if: matrix.browser == 'chromium' && steps.pw-cache.outputs.cache-hit != 'true'
         working-directory: browser-extension
         run: npx playwright install chromium
+
+      # Edge stable installs from Microsoft's apt repository into
+      # /opt/microsoft/msedge, outside the Playwright cache, so it is installed
+      # on every run. Edge still honors --load-extension (checked on Edge 153),
+      # which is what lets the same harness load dist/. Branded Google Chrome
+      # stopped honoring it, which is why `chrome` is not a matrix leg.
+      - name: Install Microsoft Edge for Playwright
+        if: matrix.browser == 'msedge'
+        working-directory: browser-extension
+        run: npx playwright install msedge
 
       # `npx playwright test`, not `npm test`: the pretest hook would rebuild
       # dist/ and hide a build failure inside the e2e step. GitHub sets CI=true,
@@ -142,7 +166,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: browser-extension-playwright-report
+          name: browser-extension-playwright-report-${{ matrix.browser }}
           path: |
             browser-extension/playwright-report/
             browser-extension/test-results/

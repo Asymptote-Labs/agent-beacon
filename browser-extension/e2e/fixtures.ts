@@ -3,12 +3,17 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startMockCollector, type MockCollector } from './helpers/mock-collector.js';
 import { startReplayServer, type ReplayServer } from './helpers/sse-replay-server.js';
+import { resolveBrowserTarget } from './browser-target.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Load the built extension from dist/ (npm's pretest builds it). Overridable.
 const pathToExtension = process.env.EXTENSION_PATH ?? path.join(__dirname, '..', 'dist');
 const headless = process.env.HEADED !== '1';
+
+// Which browser the replay runs in. The specs are browser-agnostic; only the
+// launch changes. See e2e/browser-target.ts for the accepted values.
+export const browserTarget = resolveBrowserTarget(process.env);
 
 interface Fixtures {
   mockCollector: MockCollector;
@@ -44,7 +49,7 @@ export const test = base.extend<Fixtures>({
     ].join(', ');
 
     const context = await chromium.launchPersistentContext('', {
-      channel: 'chromium',
+      ...browserTarget.launch,
       headless,
       ignoreHTTPSErrors: true,
       args: [

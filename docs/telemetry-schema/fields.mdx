@@ -33,6 +33,7 @@ Beacon models each event as an action plus a set of typed entities. The [`event`
 | `gen_ai` | OpenTelemetry GenAI semantic convention context | `agent`, `conversation`, `input`, `output`, `provider`, `request`, `response`, `retrieval`, `system_instructions`, `tool`, `usage`, `workflow` |
 | `destination` | Output or validation destination state | `type`, `mode`, `status` |
 | `health` | Endpoint or component health state | `component`, `status`, `reason` |
+| `user_agent` | Browser that produced a browser chat event, as the browser names itself | `name`, `version` |
 
 Top-level `sequence`, `model`, `repository`, `branch`, `message`, `raw`, and `field_truncated` fields add shared context that can apply across multiple entities. For example, a command event can include both `tool` and `command`; a file edit can include `file`, `session`, `repository`, and `branch`; a CI event can include `origin` and `run`; and a GenAI tool call can include both `tool` and nested `gen_ai.tool` metadata.
 
@@ -76,6 +77,7 @@ Optional context fields add detail when available:
 | `gen_ai` | OpenTelemetry GenAI request, response, usage, message, tool, retrieval, evaluation, provider, and workflow metadata |
 | `destination` | Output destination state, such as Wazuh localfile validation |
 | `health` | Component health status |
+| `user_agent` | Browser name and major version for browser extension events, such as `Microsoft Edge` or `Brave`. See [Chromium browsers](/runtimes/browser-extension-chromium#which-browser-an-event-came-from) |
 | `model`, `repository`, `branch`, `message`, `raw`, `field_truncated` | Additional runtime context and truncation metadata |
 
 ## Related

@@ -14,7 +14,9 @@ import {
   int,
   msToUnixNano,
   str,
+  strArray,
 } from './otlp.js';
+import type { BrowserIdentity } from './browser.js';
 import {
   type EventAction,
   MAX_FIELD_BYTES,
@@ -73,13 +75,22 @@ function shapeText(text: string, retention: Retention): Shaped | null {
  * Normalize a chat turn into 1..N OTLP log records:
  *  - one response record (agent.response.completed, or agent.response if partial)
  *  - one tool.invoked record per captured tool call
+ *
+ * `browser` is the identity sw.ts resolved at startup (see browser.ts). It is
+ * a resource attribute, so every record of the turn carries it, and it is
+ * metadata rather than content, so it survives every retention mode.
  */
-export function normalizeTurn(turn: ChatTurn, retention: Retention): NormalizedTurn {
+export function normalizeTurn(
+  turn: ChatTurn,
+  retention: Retention,
+  browser?: BrowserIdentity,
+): NormalizedTurn {
   const resourceAttributes: KeyValue[] = [
     str('beacon.origin', ORIGIN),
     str('beacon.harness.name', turn.site),
     str('service.name', SERVICE_NAME),
     str('gen_ai.provider.name', providerFor(turn.site)),
+    ...browserAttributes(browser),
   ];
 
   const tid = turn.turnId || turnId(turn.sessionId, 0);
@@ -209,12 +220,23 @@ function toolRecord(
   };
 }
 
+/** OTel semconv browser/user-agent attributes. The collector promotes
+ *  user_agent.name/version into the event's typed `user_agent` field. */
+function browserAttributes(browser: BrowserIdentity | undefined): KeyValue[] {
+  if (!browser) return [];
+  const attrs: KeyValue[] = [str('user_agent.name', browser.name)];
+  if (browser.version) attrs.push(str('user_agent.version', browser.version));
+  if (browser.original) attrs.push(str('user_agent.original', browser.original));
+  if (browser.brands.length > 0) attrs.push(strArray('browser.brands', browser.brands));
+  return attrs;
+}
+
 function stringify(v: unknown): string {
   return typeof v === 'string' ? v : JSON.stringify(v ?? null);
 }
 
 /** Convenience: normalize straight into a single OTLP logs envelope. */
-export function turnToEnvelope(turn: ChatTurn, retention: Retention) {
-  const { resourceAttributes, logRecords } = normalizeTurn(turn, retention);
+export function turnToEnvelope(turn: ChatTurn, retention: Retention, browser?: BrowserIdentity) {
+  const { resourceAttributes, logRecords } = normalizeTurn(turn, retention, browser);
   return buildLogsEnvelope(resourceAttributes, logRecords, SERVICE_NAME);
 }
