@@ -95,8 +95,12 @@ include_array() {
       *'*'*|*'?'*|*'['*) ;;
       *)
         mkdir -p "$(dirname "$path")"
-        touch "$path"
-        chmod 0644 "$path" || true
+        # Hooks run as the console user and append to the runtime log, so a missing log is
+        # created 0666, the mode Beacon's own writer uses. An existing log keeps its mode.
+        if [ ! -e "$path" ]; then
+          touch "$path"
+          chmod 0666 "$path" || true
+        fi
         ;;
     esac
   done

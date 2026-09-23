@@ -794,6 +794,15 @@ if ! grep -q 'RunAtLoad' "$S3_LAUNCHDAEMONS_DIR/com.beacon.endpoint.s3-forwarder
   echo "S3 Vector plist missing RunAtLoad" >&2
   exit 1
 fi
+# Hooks append to the runtime log as the console user, so an installer that has to create it
+# creates it 0666, the mode Beacon's writer uses.
+case "$(ls -l "$TMP_DIR/s3-runtime.jsonl" | awk '{print $1}')" in
+  -rw-rw-rw-*) ;;
+  *)
+    echo "S3 forwarder installer should create a missing runtime log as 0666" >&2
+    exit 1
+    ;;
+esac
 
 S3_FAKE_REPAIR="$TMP_DIR/fake-s3-repair-fails.sh"
 S3_FAKE_FORWARDER="$TMP_DIR/fake-s3-forwarder-runs.sh"
@@ -828,6 +837,10 @@ GCS_CREDENTIALS="$TMP_DIR/gcs-service-account.json"
 mkdir -p "$GCS_LAUNCHDAEMONS_DIR"
 printf '%s\n' '{"type":"service_account","project_id":"beacon-test"}' >"$GCS_CREDENTIALS"
 chmod 0600 "$GCS_CREDENTIALS"
+# The collector already created this log 0666. The installer used to chmod it to 0644, which
+# locked out hooks running as the console user until the next root write restored the mode.
+: >"$TMP_DIR/gcs-runtime.jsonl"
+chmod 0666 "$TMP_DIR/gcs-runtime.jsonl"
 
 BEACON_VECTOR_BIN="$FAKE_VECTOR" \
 BEACON_GCS_FORWARDER_WRAPPER="$ROOT_DIR/packaging/macos/jamf/claude/gcs/run-forwarder.sh" \
@@ -838,6 +851,13 @@ BEACON_NO_START="1" \
 GOOGLE_APPLICATION_CREDENTIALS="$GCS_CREDENTIALS" \
 GOOGLE_CLOUD_PROJECT="beacon-test" \
 "$ROOT_DIR/packaging/macos/jamf/claude/gcs/install-forwarder.sh" _ _ _ "beacon-gcs-test-bucket" "beacon/claude/runtime/" "NEARLINE" "end" >/dev/null
+case "$(ls -l "$TMP_DIR/gcs-runtime.jsonl" | awk '{print $1}')" in
+  -rw-rw-rw-*) ;;
+  *)
+    echo "GCS forwarder installer should leave an existing runtime log's mode alone" >&2
+    exit 1
+    ;;
+esac
 
 for path in \
   "$GCS_FORWARDER_BASE/gcs-vector.toml" \
