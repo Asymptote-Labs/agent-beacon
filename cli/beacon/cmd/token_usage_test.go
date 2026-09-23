@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
 )
 
@@ -201,7 +202,7 @@ func TestTokenUsageCoverageIgnoresFiltersThatWouldHideSilentRuntimes(t *testing.
 // depends on every row meaning something.
 func TestTokenUsageCoverageDoesNotTreatAShellProfileAsAnInstall(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	t.Setenv("SHELL", "/bin/zsh")
 	// The only runtime evidence on this machine: a shell profile. No product configs at all.
 	if err := os.WriteFile(filepath.Join(home, ".zshrc"), []byte("export PATH=$PATH\n"), 0o600); err != nil {
@@ -243,7 +244,7 @@ func TestTokenUsageCoverageHarnessScopeDoesNotStrandOtherRuntimes(t *testing.T) 
 	// Hermetic: two runtimes installed, so scoping to one has something to strand. Reading the
 	// real HOME here would make the test pass or fail on what the machine happens to have.
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	for _, rel := range []string{".claude/settings.json", ".codex/config.toml"} {
 		path := filepath.Join(home, rel)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -282,7 +283,7 @@ func TestTokenUsageCoverageHarnessScopeDoesNotStrandOtherRuntimes(t *testing.T) 
 // events vanish, and a runtime that spent tokens is reported inactive.
 func TestTokenUsageCoverageHarnessScopeAcceptsAliases(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	line := `{"timestamp":"2026-06-11T10:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"token.usage","category":"metric"},"severity":"info","endpoint":{"hostname":"h"},"harness":{"name":"vscode_copilot"},"model":"gpt-4o","session":{"id":"s1"},"gen_ai":{"usage":{"input_tokens":42}},"message":"usage"}`
 	if err := os.WriteFile(logPath, []byte(line+"\n"), 0o600); err != nil {
@@ -314,7 +315,7 @@ func TestTokenUsageCoverageHarnessScopeAcceptsAliases(t *testing.T) {
 // has classified yet.
 func TestTokenUsageCoverageHarnessScopeIsCaseInsensitiveForUnknownRuntimes(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	// An unrecognized harness, so NormalizeHarnessName passes the spelling through untouched.
 	line := `{"timestamp":"2026-06-11T10:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"token.usage","category":"metric"},"severity":"info","endpoint":{"hostname":"h"},"harness":{"name":"NewAgent"},"model":"some-model","session":{"id":"s1"},"gen_ai":{"usage":{"input_tokens":7}},"message":"usage"}`

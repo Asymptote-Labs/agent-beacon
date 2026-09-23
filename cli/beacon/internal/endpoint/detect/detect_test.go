@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/threatrules"
 )
 
@@ -55,7 +56,7 @@ func TestBaselineDelegates(t *testing.T) {
 }
 
 func TestLoadActiveFallsBackToBaseline(t *testing.T) {
-	t.Setenv("HOME", t.TempDir()) // empty store -> baseline
+	testenv.SetHome(t, t.TempDir()) // empty store -> baseline
 	loaded, err := LoadActive(true, "")
 	if err != nil {
 		t.Fatalf("load active: %v", err)
@@ -66,7 +67,7 @@ func TestLoadActiveFallsBackToBaseline(t *testing.T) {
 }
 
 func TestInstallRemoveRoundTripViaUserMode(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 
 	src := filepath.Join(t.TempDir(), "my.rule.yaml")
 	if err := os.WriteFile(src, []byte(ruleWithID("custom-rule")), 0o644); err != nil {

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"testing/fstest"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 func testPack() Pack {
@@ -80,7 +82,7 @@ func TestPackInstallWritesRenderedFilesWithModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0755 {
+	if testenv.HasPOSIXFileModes() && info.Mode().Perm() != 0755 {
 		t.Fatalf("run.sh mode = %v, want 0755", info.Mode().Perm())
 	}
 

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 func TestConfigSnippetUsesConfiguredPath(t *testing.T) {
@@ -147,6 +149,8 @@ func TestConfigSnippetFromFS_ErrorOnMissingAsset(t *testing.T) {
 }
 
 func TestInstallPack_ErrorOnWriteFailure(t *testing.T) {
+	// A 0555 directory is only read-only where Unix permission bits exist; Windows ignores them.
+	testenv.RequirePOSIXFileModes(t)
 	if os.Getuid() == 0 {
 		t.Skip("running as root: filesystem permission restrictions do not apply")
 	}
