@@ -30,6 +30,9 @@ type Options struct {
 	MaxBytes       int
 	RotateSize     int64
 	RotateArchives int
+	// Guard, when set, keeps this append from rotating out anything the guard's earlier appends
+	// wrote, and records where this one landed. See RetentionGuard.
+	Guard *RetentionGuard
 }
 
 // SystemLogPath is the system-mode runtime log, resolved per platform.
@@ -98,7 +101,7 @@ func AppendEvent(event schema.Event, opts Options) (string, error) {
 			data = stamped
 		}
 	}
-	if err := appendJSONL(opts.Path, append(data, '\n'), opts.RotateSize, opts.RotateArchives); err != nil {
+	if err := appendJSONL(opts.Path, append(data, '\n'), opts.RotateSize, opts.RotateArchives, opts.Guard); err != nil {
 		return "", err
 	}
 	return opts.Path, nil
@@ -180,7 +183,7 @@ func SanitizeEvent(event schema.Event, maxBytes int) schema.Event {
 	return asymptoteobserve.SanitizeEvent(event, maxBytes)
 }
 
-func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int) error {
+func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int, guard *RetentionGuard) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
@@ -202,6 +205,23 @@ func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int
 	if asymptoteobserve.IsDuplicateEndpointEvent(path, line, asymptoteobserve.EndpointDuplicateWindow) {
 		return nil
 	}
+	if guard != nil {
+		// Decided under the lock, so no other Beacon writer can rotate between the check and the
+		// rotation it permits.
+		rotate, err := needsRotation(path, rotateBytes, int64(len(line)))
+		if err != nil {
+			return err
+		}
+		if rotate {
+			discard, err := guard.rotationWouldDiscardOwnOutput(path, rotateArchives)
+			if err != nil {
+				return err
+			}
+			if discard {
+				return ErrRetentionWindowFull
+			}
+		}
+	}
 	if err := rotateIfNeeded(path, rotateBytes, rotateArchives, int64(len(line))); err != nil {
 		return err
 	}
@@ -210,8 +230,14 @@ func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int
 		return err
 	}
 	defer f.Close()
-	_, err = f.Write(line)
-	return err
+	if _, err := f.Write(line); err != nil {
+		return err
+	}
+	if guard != nil {
+		info, statErr := f.Stat()
+		guard.record(path, rotateArchives, line, info, statErr)
+	}
+	return nil
 }
 
 func openRuntimeFile(path string, flag int) (*os.File, error) {
@@ -233,6 +259,15 @@ func openRuntimeFile(path string, flag int) (*os.File, error) {
 	return f, nil
 }
 
+// RetainedLogPaths returns the runtime log at path followed by every archive the rotation contract
+// keeps for it, newest first: path, path.1, ..., path.N for N = DefaultRotateArchives. Readers that
+// need history older than the live file -- the last event of some kind, say -- walk this list
+// rather than guessing how many archives exist. The hook adapter and the beaconjson exporter rotate
+// with the same count, so the list covers whichever process wrote the log.
+func RetainedLogPaths(path string) []string {
+	return retainedPaths(path, DefaultRotateArchives)
+}
+
 func rotateIfNeeded(path string, maxSize int64, archives int, nextWriteBytes int64) error {
 	if maxSize <= 0 {
 		return nil
@@ -240,15 +275,9 @@ func rotateIfNeeded(path string, maxSize int64, archives int, nextWriteBytes int
 	if archives < 1 {
 		archives = DefaultRotateArchives
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
+	rotate, err := needsRotation(path, maxSize, nextWriteBytes)
+	if err != nil || !rotate {
 		return err
-	}
-	if info.Size() == 0 || info.Size()+nextWriteBytes <= maxSize {
-		return nil
 	}
 	if err := removeOverflowArchives(path, archives); err != nil {
 		return err
@@ -262,6 +291,23 @@ func rotateIfNeeded(path string, maxSize int64, archives int, nextWriteBytes int
 	}
 	rotated := path + ".1"
 	return os.Rename(path, rotated)
+}
+
+// needsRotation reports whether appending nextWriteBytes to path would take it past maxSize, which
+// is when rotateIfNeeded rotates. An empty or missing file never rotates, so one oversized line
+// still lands somewhere.
+func needsRotation(path string, maxSize int64, nextWriteBytes int64) (bool, error) {
+	if maxSize <= 0 {
+		return false, nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return info.Size() > 0 && info.Size()+nextWriteBytes > maxSize, nil
 }
 
 func removeOverflowArchives(path string, archives int) error {

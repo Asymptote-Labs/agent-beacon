@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 func TestVectorConfigForwardsBothStreamsOverHTTPWithABearerSecret(t *testing.T) {
@@ -64,7 +66,8 @@ func TestIngestSmokeTestChecksCredentialBeforePosting(t *testing.T) {
 	}
 	for _, want := range []string{
 		`BEACON_LOG="${BEACON_LOG:-/tmp/beacon/runtime.jsonl}"`,
-		`BEACON_INVENTORY_LOG="${BEACON_INVENTORY_LOG:-/tmp/beacon/inventory_state.jsonl}"`,
+		// Derived with the host's separator; the assertion is that it sits beside the log.
+		`BEACON_INVENTORY_LOG="${BEACON_INVENTORY_LOG:-` + filepath.Join("/tmp/beacon", "inventory_state.jsonl") + `}"`,
 		"BEACON_ASYMPTOTE_INGEST_URL",
 		"BEACON_ASYMPTOTE_SECRETS_FILE",
 		"https://*)",
@@ -102,7 +105,7 @@ func TestInstallPackWritesExpectedFilesWithSafeModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if script.Mode().Perm()&0111 == 0 {
+	if testenv.HasPOSIXFileModes() && script.Mode().Perm()&0111 == 0 {
 		t.Fatalf("smoke test should be executable, mode=%s", script.Mode())
 	}
 	vectorPath := filepath.Join(dir, "vector.toml")
@@ -120,7 +123,7 @@ func TestInstallPackWritesExpectedFilesWithSafeModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0644 {
+	if testenv.HasPOSIXFileModes() && info.Mode().Perm() != 0644 {
 		t.Fatalf("generated vector config should be 0644, mode=%s", info.Mode().Perm())
 	}
 }

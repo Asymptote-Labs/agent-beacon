@@ -23,6 +23,8 @@ beacon endpoint traces [command]
 
 The index is local SQLite state derived from `runtime.jsonl`. Rebuilding it does not change the runtime log, and the command does not contact the network.
 
+For assistant message and reasoning events, an event's `content.text` is the text retained in `gen_ai.output.messages`: what the assistant said, or its reasoning. The event's label, such as `Codex assistant message`, stays in `summary`, and fills `content.text` only when the event retained no text. The retained text went through Beacon's redaction and size limits when it was written, and `content.redacted` and `content.truncated` report either change. `beacon memory` evaluates traces from this same view.
+
 ## Commands
 
 | Command | Description |

@@ -297,3 +297,40 @@ func testApprovedCommandMemory() (asymptoteobserve.LearningCandidateV1, asymptot
 	}
 	return candidate, memory
 }
+
+// Issue #620: evaluations stored by earlier releases carry reason "noul", the Jev
+// question type, not a rationale. The text view must not present it as one.
+func TestMemoryEvaluationsShowHidesPlaceholderReason(t *testing.T) {
+	logPath, project := writeMemoryCommandFixture(t)
+	resetMemoryOpts(t)
+	memoryOpts.userMode = true
+	memoryOpts.logPath = logPath
+	memoryOpts.projectPath = project
+	eval := asymptoteobserve.LearningEvaluationV1{
+		SchemaVersion: asymptoteobserve.LearningSchemaVersion,
+		ID:            "eval-placeholder",
+		Status:        asymptoteobserve.LearningEvaluationStatusCompleted,
+		Score:         0.7,
+		Project:       asymptoteobserve.LearningProjectV1{ID: "project-1"},
+		Trace:         asymptoteobserve.LearningTraceRefV1{ID: "trace-placeholder"},
+		Questions: []asymptoteobserve.LearningEvaluationQuestionV1{
+			{ID: "task_success", Probability: 0.43, Reason: "noul"},
+			{ID: "reusable_correction", Probability: 0.78, Reason: "Retry isolates the flaky step."},
+		},
+	}
+	if err := memoryStore().PutEvaluation(eval); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&out)
+	if err := runMemoryEvaluationsShow(cmd, []string{eval.ID}); err != nil {
+		t.Fatalf("runMemoryEvaluationsShow returned error: %v", err)
+	}
+	if strings.Contains(out.String(), "noul") {
+		t.Fatalf("show printed the placeholder reason:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "Retry isolates the flaky step.") {
+		t.Fatalf("show dropped a real reason:\n%s", out.String())
+	}
+}

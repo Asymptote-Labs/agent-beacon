@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 func TestUploadSmokeTestUsesConfiguredPath(t *testing.T) {
@@ -18,8 +20,10 @@ func TestUploadSmokeTestUsesConfiguredPath(t *testing.T) {
 	if !strings.Contains(got, "/tmp/beacon/runtime.jsonl") {
 		t.Fatalf("script did not include configured path: %s", got)
 	}
-	if !strings.Contains(got, "/tmp/beacon/inventory_state.jsonl") {
-		t.Fatalf("script did not include derived inventory path: %s", got)
+	// Derived with the host's separator, so the expectation is too: the assertion is that the
+	// inventory stream sits beside the configured log, not what a separator looks like.
+	if want := filepath.Join("/tmp/beacon", "inventory_state.jsonl"); !strings.Contains(got, want) {
+		t.Fatalf("script did not include derived inventory path %q: %s", want, got)
 	}
 	if strings.Contains(got, "{{LOG_PATH}}") {
 		t.Fatalf("script still contains template token: %s", got)
@@ -61,7 +65,7 @@ func TestInstallPackWritesExpectedFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm()&0111 == 0 {
+	if testenv.HasPOSIXFileModes() && info.Mode().Perm()&0111 == 0 {
 		t.Fatalf("generated script should be executable, mode=%s", info.Mode())
 	}
 	vectorPath := filepath.Join(dir, "vector.toml")
@@ -79,7 +83,7 @@ func TestInstallPackWritesExpectedFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0644 {
+	if testenv.HasPOSIXFileModes() && info.Mode().Perm() != 0644 {
 		t.Fatalf("generated vector config should be 0644, mode=%s", info.Mode().Perm())
 	}
 }
@@ -224,6 +228,8 @@ func TestUploadSmokeTestFromFS_ErrorOnMissingAsset(t *testing.T) {
 }
 
 func TestInstallPack_ErrorOnWriteFailure(t *testing.T) {
+	// A 0555 directory is only read-only where Unix permission bits exist; Windows ignores them.
+	testenv.RequirePOSIXFileModes(t)
 	if os.Getuid() == 0 {
 		t.Skip("running as root: filesystem permission restrictions do not apply")
 	}

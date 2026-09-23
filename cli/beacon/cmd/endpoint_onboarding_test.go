@@ -12,6 +12,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/account"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/onboarding"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"github.com/spf13/cobra"
 )
 
@@ -77,7 +78,7 @@ func newOnboardingHarness(t *testing.T) *onboardingHarness {
 	t.Setenv(onboardingEnvEnabled, "")
 	t.Setenv(onboardingEnvEmail, "")
 	t.Setenv(onboardingEnvUsage, "")
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 
 	prevLoad, prevSave, prevSend := onboardingLoad, onboardingSave, onboardingSend
 	prevTTY, prevRoot := onboardingIsTTY, onboardingIsRoot

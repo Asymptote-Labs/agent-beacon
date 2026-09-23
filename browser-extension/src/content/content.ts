@@ -4,17 +4,18 @@
 // happens in the SW so this script stays resistant to page interference.
 
 import { BEACON_MSG, type BeaconWindowMessage, type RelayMessage } from '../shared/types.js';
+import { ext } from '../shared/browser.js';
 
 /**
  * True only when the extension context this content script belongs to is still
  * alive. After the extension is reloaded/updated, previously-injected content
- * scripts in already-open tabs are orphaned: `chrome.runtime` is torn down and
+ * scripts in already-open tabs are orphaned: `runtime` is torn down and
  * touching `.sendMessage` throws. Guarding here degrades gracefully (a tab
  * refresh re-injects a fresh, connected content script).
  */
 function extensionAlive(): boolean {
   try {
-    return typeof chrome !== 'undefined' && !!chrome.runtime && !!chrome.runtime.id;
+    return ext != null && !!ext.runtime && !!ext.runtime.id;
   } catch {
     return false;
   }
@@ -44,7 +45,7 @@ window.addEventListener('message', (event: MessageEvent) => {
   // Fire-and-forget; the SW may be asleep and will wake to handle it. Wrap in
   // try/catch in case the context is invalidated between the check and the call.
   try {
-    void chrome.runtime.sendMessage(relay).catch(() => {
+    void ext.runtime.sendMessage(relay).catch(() => {
       /* SW not ready / extension reloading — safe to drop a single event */
     });
   } catch {

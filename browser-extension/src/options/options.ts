@@ -1,10 +1,12 @@
 // Options UI: endpoint override + per-site enable.
+import { ext } from '../shared/browser.js';
+import { mountPermissionBanner } from '../shared/permissions.js';
 import type { Settings } from '../shared/types.js';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 async function load(): Promise<void> {
-  const { settings } = (await chrome.runtime.sendMessage({ type: 'GET_STATUS' })) as {
+  const { settings } = (await ext.runtime.sendMessage({ type: 'GET_STATUS' })) as {
     settings: Settings;
   };
   ($('endpoint') as HTMLInputElement).value = settings.endpoint;
@@ -20,10 +22,11 @@ $('save').addEventListener('click', async () => {
       chatgpt_web: ($('site_chatgpt_web') as HTMLInputElement).checked,
     },
   };
-  await chrome.runtime.sendMessage({ type: 'SET_SETTINGS', patch });
+  await ext.runtime.sendMessage({ type: 'SET_SETTINGS', patch });
   const saved = $('saved');
   saved.hidden = false;
   setTimeout(() => (saved.hidden = true), 1500);
 });
 
 void load();
+mountPermissionBanner(ext, document);

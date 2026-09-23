@@ -3,6 +3,7 @@
 // to the local beacon collector. Failed sends retry with exponential backoff
 // driven by chrome.alarms (which survives suspension, unlike setTimeout).
 
+import { ext } from '../shared/browser.js';
 import type { ChatTurn, Settings } from '../shared/types.js';
 import { turnToEnvelope } from '../shared/normalize.js';
 import type { LogsEnvelope } from '../shared/otlp.js';
@@ -19,12 +20,12 @@ interface QueueItem {
 }
 
 async function readQueue(): Promise<QueueItem[]> {
-  const got = await chrome.storage.local.get(QUEUE_KEY);
+  const got = await ext.storage.local.get(QUEUE_KEY);
   return (got[QUEUE_KEY] as QueueItem[]) ?? [];
 }
 
 async function writeQueue(items: QueueItem[]): Promise<void> {
-  await chrome.storage.local.set({ [QUEUE_KEY]: items });
+  await ext.storage.local.set({ [QUEUE_KEY]: items });
 }
 
 // Serialize every read-modify-write on the queue. The service worker is a single
@@ -105,12 +106,12 @@ function scheduleRetry(queue: QueueItem[]): void {
   // the durable queue (chrome.storage) guarantees eventual delivery. We use
   // alarms rather than setTimeout because they survive service-worker suspension.
   const backoffMs = Math.min(250 * 2 ** minAttempts, 60_000);
-  chrome.alarms.create(ALARM, { when: Date.now() + backoffMs });
+  ext.alarms.create(ALARM, { when: Date.now() + backoffMs });
 }
 
 /** Wire the alarm listener (called once from the SW entry). */
 export function installFlushAlarm(): void {
-  chrome.alarms.onAlarm.addListener((alarm) => {
+  ext.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === ALARM) void flush();
   });
 }

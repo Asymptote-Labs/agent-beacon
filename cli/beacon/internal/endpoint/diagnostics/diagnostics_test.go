@@ -84,7 +84,7 @@ func TestCheckLogPermissions(t *testing.T) {
 
 func TestRunAndHasFailures(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	cfg := endpointconfig.Default(true, filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl"))
 	if _, err := endpointconfig.Save(cfg); err != nil {
 		t.Fatalf("save config: %v", err)
@@ -126,7 +126,7 @@ func TestRunAndHasFailures(t *testing.T) {
 
 func TestLaunchPlistPathMatchesServiceManager(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 
 	userPath := servicePlistPathForTest(true)
 	wantUserPath := filepath.Join(home, "Library", "LaunchAgents", service.UserLabel+".plist")

@@ -26,6 +26,12 @@ func TestResolveConsoleUserRejectsUnusableAccounts(t *testing.T) {
 }
 
 func TestResolveConsoleUserAcceptsTheCurrentUser(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// osuser resolves POSIX accounts: numeric UID/GID, from the local database or NSS. A
+		// Windows account is a SID named DOMAIN\user, so there is nothing for it to resolve and
+		// the console-user handoff this serves is a macOS/Linux system-install path.
+		t.Skip("console-user resolution is POSIX-only; Windows accounts have SIDs, not UIDs")
+	}
 	u, err := user.Current()
 	if err != nil || u.Username == "root" || u.HomeDir == "" {
 		t.Skip("needs a non-root current user with a home directory")

@@ -18,7 +18,7 @@ const traceStoreFile = "traces.db"
 // traceStoreSchemaVersion is written to the database's user_version. The store
 // is a rebuildable index over the runtime log, never a source of truth, so a
 // version bump drops the tables and reindexes rather than migrating them.
-const traceStoreSchemaVersion = 3
+const traceStoreSchemaVersion = 4
 
 // Search rows are an acceleration structure, not retained evidence. Keep them
 // small and fall back to the JSONL scan for free-text queries when truncation

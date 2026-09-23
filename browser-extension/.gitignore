@@ -4,6 +4,9 @@
 # extracted back into its own repository.
 node_modules/
 dist/
+# Non-default build targets (tools/targets.mjs). Not matched by the root
+# .gitignore's bare `dist/`.
+dist-*/
 
 # Playwright artifacts. NOT covered by the repo-root .gitignore -- these four
 # lines are the only thing keeping them out of the repository.
@@ -37,6 +40,9 @@ fixtures/**/diag-*.sse
 # stale copy of a published asset.
 *.zip
 *.zip.sha256
+*.xpi
+*.xpi.sha256
+web-ext-artifacts/
 
 # Note for future work: the repo-root .gitignore ignores `*.jsonl` everywhere,
 # with per-destination `!` negations. If a future integration test needs a

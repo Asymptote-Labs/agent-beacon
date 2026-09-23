@@ -402,3 +402,49 @@ func TestAppendEventCollapsesTheHookAndCollectorReportsOfOneCall(t *testing.T) {
 		t.Fatalf("one Bash call was recorded %d times: %s", len(lines), string(data))
 	}
 }
+
+// RetainedLogPaths must name exactly the files rotation keeps: a reader walking it for history
+// older than the live file (doctor's dsh_hook_capture looks for the last hook event) would
+// otherwise miss an archive, or look for one that can never exist.
+func TestRetainedLogPathsMatchesWhatRotationKeeps(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "runtime.jsonl")
+	for i := 0; i < DefaultRotateArchives*2+3; i++ {
+		event := schema.NewEvent(schema.NewEventOptions{
+			Action:  "agent.detected",
+			Harness: schema.HarnessInfo{Name: "test"},
+			Message: "event " + strconv.Itoa(i),
+		})
+		if _, err := AppendEvent(event, Options{Path: path, RotateSize: 1}); err != nil {
+			t.Fatalf("AppendEvent %d: %v", i, err)
+		}
+	}
+
+	retained := RetainedLogPaths(path)
+	if len(retained) != DefaultRotateArchives+1 || retained[0] != path {
+		t.Fatalf("RetainedLogPaths = %v, want the live log then %d archives", retained, DefaultRotateArchives)
+	}
+	want := map[string]bool{}
+	for _, p := range retained {
+		want[p] = true
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("%s is listed as retained but rotation did not keep it: %v", p, err)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		name := filepath.Join(dir, entry.Name())
+		if strings.HasSuffix(name, ".lock") {
+			continue
+		}
+		if !want[name] {
+			t.Fatalf("rotation kept %s, which RetainedLogPaths does not list", name)
+		}
+	}
+	if got := RetainedLogPaths(""); got != nil {
+		t.Fatalf("RetainedLogPaths(\"\") = %v, want nil", got)
+	}
+}

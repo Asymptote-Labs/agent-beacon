@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 func TestForwarderPlistRunsVectorResidentWithKeepAlive(t *testing.T) {
@@ -119,7 +121,7 @@ func TestForwarderLoadWaitsForTheOldJobAndVerifiesTheNewOne(t *testing.T) {
 		t.Skip("launchd only")
 	}
 	shrinkLaunchdWaits(t)
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	var calls []string
 	printsAfterBootout := 0
 	bootstrapped := false
@@ -163,7 +165,7 @@ func TestForwarderLoadFailsWhenTheNewInstanceNeverStarts(t *testing.T) {
 		t.Skip("launchd only")
 	}
 	shrinkLaunchdWaits(t)
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	bootstrapped := false
 	oldRun := runLaunchctlCommand
 	runLaunchctlCommand = func(args ...string) (string, error) {

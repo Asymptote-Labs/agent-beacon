@@ -15,6 +15,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/managedprivacy"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/onboarding"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 func TestEndpointConnectAndDisconnectCommandsRegistered(t *testing.T) {
@@ -184,7 +185,7 @@ func TestConnectRequiresSignedInAccountInUserMode(t *testing.T) {
 
 func TestSelectedManagedPrivacyModePrefersFlagThenActiveEnrollment(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	testenv.SetHome(t, home)
 	originalOpts := connectOpts
 	t.Cleanup(func() { connectOpts = originalOpts })
 	if err := onboarding.Save(onboarding.Profile{Onboarding: onboarding.Onboarding{

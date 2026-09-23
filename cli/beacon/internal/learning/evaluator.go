@@ -22,6 +22,10 @@ const (
 	DefaultCostPerTrace = 0.00035
 	maxProjectionEvents = 80
 	maxProjectionText   = 1200
+
+	// jevQuestionType is the System One question type Beacon asks for. Jev echoes
+	// it back as each answer's "type", which is not a rationale.
+	jevQuestionType = "noul"
 )
 
 var RubricQuestions = []asymptoteobserve.LearningEvaluationQuestionV1{
@@ -328,6 +332,10 @@ func normalizeQuestionResults(results []asymptoteobserve.LearningEvaluationQuest
 		if result.Probability > 1 {
 			result.Probability = 1
 		}
+		// Compatibility responses can still use the older questions/results
+		// shapes, whose schema includes reason. Keep real values while dropping
+		// the question-type placeholder written by older Beacon releases.
+		result.Reason = cleanText(strings.Join(strings.Fields(QuestionReason(result)), " "))
 		out = append(out, result)
 	}
 	return out
@@ -337,7 +345,7 @@ func jevQuestions() map[string]jevQuestion {
 	out := make(map[string]jevQuestion, len(RubricQuestions))
 	for _, question := range RubricQuestions {
 		out[question.ID] = jevQuestion{
-			Type:         "noul",
+			Type:         jevQuestionType,
 			Instructions: question.Prompt,
 			Criteria: map[string]string{
 				"true":  "The trace satisfies this criterion.",
@@ -372,10 +380,20 @@ func questionsFromJevAnswers(answers map[string]jevAnswer) []asymptoteobserve.Le
 			Prompt:      question.Prompt,
 			Probability: probability,
 			Confidence:  answer.Confidence,
-			Reason:      answer.Type,
 		})
 	}
 	return out
+}
+
+// QuestionReason returns a stored reason for one rubric question, or "" when it
+// has none. TypeSafe Noul answers do not include reasons. Releases before the fix
+// for #620 copied the answer type ("noul") into this field, so hide that value.
+func QuestionReason(question asymptoteobserve.LearningEvaluationQuestionV1) string {
+	reason := strings.TrimSpace(question.Reason)
+	if strings.EqualFold(reason, jevQuestionType) {
+		return ""
+	}
+	return reason
 }
 
 func projectionQuestionDefaults(projection Projection) []asymptoteobserve.LearningEvaluationQuestionV1 {

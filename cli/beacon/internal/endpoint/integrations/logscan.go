@@ -73,6 +73,53 @@ func HasHarnessEventSince(logPath, harnessName string, since time.Time) bool {
 }
 
 func LastHarnessEvent(logPath, harnessName string) (time.Time, bool) {
+	return lastHarnessEvent(logPath, harnessName, "")
+}
+
+// LastHarnessEventByCollectionMethod is LastHarnessEvent restricted to events whose
+// harness.collection_method is method.
+//
+// The distinction matters for a runtime with two capture paths. DeepSeek Harness has live hooks
+// and an offline poll of its session store, and both write events named deepseek_harness, so a
+// log full of backfilled poll events answers "has this harness been observed?" with yes while
+// every live hook is failing to write (#605). Asking for hook events alone is what separates the
+// two.
+func LastHarnessEventByCollectionMethod(logPath, harnessName, method string) (time.Time, bool) {
+	if strings.TrimSpace(method) == "" {
+		return time.Time{}, false
+	}
+	return lastHarnessEvent(logPath, harnessName, method)
+}
+
+// FirstEventTime returns the timestamp of the first event in logPath that carries a parseable one.
+// For a rotated archive that is the start of the history the file holds. Only the head of the file
+// is read.
+func FirstEventTime(logPath string) (time.Time, bool) {
+	if logPath == "" {
+		return time.Time{}, false
+	}
+	file, err := os.Open(logPath)
+	if err != nil {
+		return time.Time{}, false
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for lines := 0; lines < 100 && scanner.Scan(); lines++ {
+		var event struct {
+			Timestamp string `json:"timestamp"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			continue
+		}
+		if parsed, err := time.Parse(time.RFC3339Nano, event.Timestamp); err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
+}
+
+func lastHarnessEvent(logPath, harnessName, method string) (time.Time, bool) {
 	if logPath == "" || strings.TrimSpace(harnessName) == "" {
 		return time.Time{}, false
 	}
@@ -104,6 +151,11 @@ func LastHarnessEvent(logPath, harnessName string) (time.Time, bool) {
 		}
 		if harness, ok := event["harness"].(map[string]interface{}); ok {
 			if name, _ := harness["name"].(string); asymptoteobserve.NormalizeHarnessName(name) == want {
+				if method != "" {
+					if got, _ := harness["collection_method"].(string); got != method {
+						continue
+					}
+				}
 				found = true
 				if ts, ok := event["timestamp"].(string); ok {
 					if parsed, err := time.Parse(time.RFC3339Nano, ts); err == nil && parsed.After(last) {

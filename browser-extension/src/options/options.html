@@ -10,10 +10,20 @@
       .site { display: flex; align-items: center; gap: 8px; font-weight: 400; margin: 6px 0; }
       button { margin-top: 16px; padding: 8px 14px; font: inherit; }
       .saved { color: #2a7; margin-left: 10px; }
+      .perm { margin: 12px 0; padding: 10px; border: 1px solid #e0a800; background: #fff8e1; border-radius: 4px; }
+      .perm p { margin: 0 0 8px; }
+      .perm button { margin-top: 0; }
     </style>
   </head>
   <body>
     <h1>Agent Beacon — Browser Collector</h1>
+
+    <div class="perm" id="perm-missing" data-testid="perm-missing" hidden>
+      <p><strong>Site access not granted.</strong> The extension captures nothing, and cannot reach
+        the local collector, until the browser allows access to:
+        <span id="perm-list" data-testid="perm-list"></span></p>
+      <button id="perm-grant" data-testid="perm-grant">Grant site access</button>
+    </div>
 
     <label for="endpoint">OTLP logs endpoint</label>
     <input type="text" id="endpoint" data-testid="endpoint" />

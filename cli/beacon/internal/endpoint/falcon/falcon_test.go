@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 func TestConfigSnippetUsesConfiguredPath(t *testing.T) {
@@ -59,7 +61,7 @@ func TestInstallPackWritesExpectedFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0755 {
+	if testenv.HasPOSIXFileModes() && info.Mode().Perm() != 0755 {
 		t.Fatalf("generated smoke-test script should be 0755, mode=%s", info.Mode().Perm())
 	}
 }
@@ -218,6 +220,8 @@ func TestSmokeTestFromFS_ErrorOnMissingAsset(t *testing.T) {
 }
 
 func TestInstallPack_ErrorOnWriteFailure(t *testing.T) {
+	// A 0555 directory is only read-only where Unix permission bits exist; Windows ignores them.
+	testenv.RequirePOSIXFileModes(t)
 	if os.Getuid() == 0 {
 		t.Skip("running as root: filesystem permission restrictions do not apply")
 	}
