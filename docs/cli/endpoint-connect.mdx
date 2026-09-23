@@ -23,7 +23,7 @@ beacon endpoint disconnect [flags]
 
 - Beacon endpoint installed (`beacon endpoint install`) and writing local JSONL.
 - A current `beacon login` session with `device:enroll` scope for user mode.
-- Vector 0.50 or newer on the machine (Apple Silicon gets 0.58 from Homebrew or the package; Intel Macs get 0.50.0, the last x86_64 build Vector published). The signed macOS package installs it at `/opt/beacon/bin/vector`; on macOS Homebrew installs it with Beacon, as the tap's `beacon-vector` keg (named that rather than `vector` so it coexists with a Vector from `vectordotdev/brew`, and kept in `libexec` so it stays off your PATH); on Linux install the `vector` package from [vector.dev](https://vector.dev). `connect` stops before opening a browser if no usable Vector is found or if Vector rejects the forwarder config.
+- Vector 0.50 or newer on the machine (Apple Silicon gets 0.58 from Homebrew or the package; Intel Macs get 0.50.0, the last x86_64 build Vector published). The signed macOS package installs it at `/opt/beacon/bin/vector`; on macOS Homebrew installs it with Beacon, as the tap's `beacon-vector` keg (named that rather than `vector` so it coexists with a Vector from `vectordotdev/brew`, and kept in `libexec` so it stays off your PATH); on Linux the `.deb` and `.rpm` install it at `/opt/beacon/bin/vector`, the release archive carries it as `beacon-vector` next to `beacon`, and Homebrew on Linux installs that same `beacon-vector`. `connect` stops before opening a browser if no usable Vector is found or if Vector rejects the forwarder config.
 - System mode only: a browser where an organization member can approve the device.
 
 ## What connect does

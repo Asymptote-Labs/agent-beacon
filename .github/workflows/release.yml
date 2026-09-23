@@ -58,6 +58,11 @@ jobs:
             END { exit !(beaconjson && falcon_hec) }
           '
 
+      # The .deb, .rpm, and Linux archives carry Vector. The goreleaser before-hook fails the
+      # release if this did not stage both arches.
+      - name: Download Vector for the Linux packages
+        run: sh packaging/linux/fetch-vector.sh
+
       - name: Check GoReleaser config
         working-directory: cli/beacon
         env:
@@ -215,6 +220,13 @@ jobs:
               sh packaging/macos/build-signed-notarized-pkg.sh
           done
           ls -la dist/macos
+          # build-pkg.sh leaves Vector out when BEACON_VECTOR_BIN is unset, which is right for a
+          # local skeleton build and wrong for a release. awk rather than grep -q, which exits on
+          # the first match and fails the pipeline under pipefail.
+          for pkg in dist/macos/*.pkg; do
+            pkgutil --payload-files "$pkg" | awk '$0 == "./opt/beacon/bin/vector" { found = 1 } END { exit !found }' || {
+              echo "$pkg has no /opt/beacon/bin/vector" >&2; exit 1; }
+          done
 
       - name: Generate update manifest
         env:

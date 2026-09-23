@@ -42,14 +42,17 @@ cleanup() { docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; }
 trap cleanup EXIT INT TERM
 cleanup
 
+# binutils is for readelf, which checks the packaged Vector is static. Rocky rather than Fedora for
+# the rpm lane because RHEL and Rocky are what RPM fleets actually run; its image already has
+# curl-minimal, which conflicts with the curl package.
 case "$FORMAT" in
   deb) IMAGE=beacon-package-smoke-deb
-       BASE=ubuntu:24.04
-       INSTALL_PKGS="systemd systemd-sysv dbus curl ca-certificates iproute2"
+       BASE="${BEACON_SMOKE_BASE:-ubuntu:24.04}"
+       INSTALL_PKGS="systemd systemd-sysv dbus curl ca-certificates iproute2 binutils"
        PKGMGR_INSTALL="apt-get install -y -qq /var/tmp/beacon.deb" ;;
   rpm) IMAGE=beacon-package-smoke-rpm
-       BASE=fedora:40
-       INSTALL_PKGS="systemd dbus curl ca-certificates iproute"
+       BASE="${BEACON_SMOKE_BASE:-rockylinux/rockylinux:9}"
+       INSTALL_PKGS="systemd dbus ca-certificates iproute binutils"
        PKGMGR_INSTALL="dnf install -y -q /var/tmp/beacon.rpm" ;;
   *) echo "unsupported format $FORMAT" >&2; exit 1 ;;
 esac
@@ -184,6 +187,26 @@ docker exec "$CONTAINER" su - "$SMOKE_USER" -c 'beacon --version' >/dev/null 2>&
   echo "beacon resolves on PATH but does not execute" >&2; exit 1; }
 echo "ok: beacon is reachable by name, as the documentation says it is"
 
+# Vector ships in the package for the forwarders Beacon renders, at the path FindVector looks.
+# It must run, and be static like every other Linux binary Beacon ships, or a stripped host with a
+# different libc gets a Vector that cannot start. The headers must be read and include a LOAD
+# segment before the missing INTERP counts, so a file readelf cannot parse does not pass.
+docker exec "$CONTAINER" test -x /opt/beacon/bin/vector || {
+  echo "/opt/beacon/bin/vector is missing, so no forwarder can run" >&2; exit 1; }
+vector_version="$(docker exec "$CONTAINER" /opt/beacon/bin/vector --version 2>&1)" || {
+  echo "/opt/beacon/bin/vector does not run: $vector_version" >&2; exit 1; }
+headers="$(docker exec "$CONTAINER" readelf -lW /opt/beacon/bin/vector 2>&1)" || {
+  echo "could not read /opt/beacon/bin/vector's program headers: $headers" >&2; exit 1; }
+case "$headers" in *LOAD*) ;; *) echo "no program headers in /opt/beacon/bin/vector" >&2; exit 1 ;; esac
+case "$headers" in *INTERP*) echo "/opt/beacon/bin/vector is dynamically linked" >&2; exit 1 ;; esac
+# /opt/beacon/bin is not on PATH, and the package must not put a vector there: it would shadow one
+# the user already runs.
+if docker exec "$CONTAINER" sh -c 'command -v vector' >/dev/null 2>&1; then
+  echo "the package put a vector on PATH: $(docker exec "$CONTAINER" sh -c 'command -v vector')" >&2
+  exit 1
+fi
+echo "ok: packaged Vector runs, is static, and stays off PATH ($vector_version)"
+
 # The two commands the docs tell a new user to run. Both must report healthy with no manual setup.
 if ! docker exec "$CONTAINER" /opt/beacon/bin/beacon endpoint status --system --json >/tmp/beacon-status.json 2>&1; then
   echo "endpoint status failed:" >&2; cat /tmp/beacon-status.json >&2; exit 1
@@ -260,7 +283,22 @@ if ! docker exec "$CONTAINER" test -f /etc/beacon/endpoint/config.json; then
   echo "removal deleted the config; only a purge should do that" >&2
   exit 1
 fi
-echo "ok: removal kept config and logs (purge removes them)"
+if docker exec "$CONTAINER" test -e /opt/beacon/bin/vector; then
+  echo "removal left /opt/beacon/bin/vector behind" >&2; exit 1
+fi
+echo "ok: removal took the binaries and kept config and logs"
+
+# rpm has no purge, so this half is deb only. It is what makes "only a purge deletes it" true.
+if [ "$FORMAT" = deb ]; then
+  docker exec "$CONTAINER" apt-get purge -y -qq beacon >/dev/null 2>&1 || {
+    echo "apt-get purge failed" >&2; exit 1; }
+  for d in /etc/beacon/endpoint /var/log/beacon-agent; do
+    if docker exec "$CONTAINER" test -e "$d"; then
+      echo "purge left $d behind" >&2; exit 1
+    fi
+  done
+  echo "ok: purge removed config and logs"
+fi
 
 echo
 echo "package smoke test passed ($FORMAT/$ARCH)"

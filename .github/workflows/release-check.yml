@@ -11,6 +11,7 @@ on:
       - "cli/beacon/.goreleaser.yaml"
       - "collector-builder/**"
       - "packaging/macos/**"
+      - "packaging/linux/**"
       - ".github/workflows/release.yml"
       - ".github/workflows/release-check.yml"
 
@@ -59,6 +60,9 @@ jobs:
             END { exit !(beaconjson && falcon_hec) }
           '
 
+      - name: Download Vector for the Linux packages
+        run: sh packaging/linux/fetch-vector.sh
+
       - name: Check GoReleaser config
         working-directory: cli/beacon
         env:
@@ -99,6 +103,18 @@ jobs:
               }
             '
 
+            # Vector ships in the Linux archives only, as beacon-vector.
+            has_vector=0
+            if tar -tzf "$archive" | awk '/(^|\/)beacon-vector$/ { found = 1 } END { exit !found }'; then
+              has_vector=1
+            fi
+            case "$archive" in
+              *_linux_*.tar.gz)
+                [ "$has_vector" = 1 ] || { echo "$archive is missing beacon-vector"; exit 1; } ;;
+              *)
+                [ "$has_vector" = 0 ] || { echo "$archive should not carry beacon-vector"; exit 1; } ;;
+            esac
+
             case "$archive" in
               *linux_amd64.tar.gz)
                 linux_archive="$archive"
@@ -114,3 +130,4 @@ jobs:
           extract_dir="$(mktemp -d)"
           tar -xzf "$linux_archive" -C "$extract_dir"
           "$extract_dir/beacon" version
+          "$extract_dir/beacon-vector" --version
