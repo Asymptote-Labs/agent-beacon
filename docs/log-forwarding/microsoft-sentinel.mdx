@@ -1,11 +1,18 @@
 ---
 title: "Microsoft Sentinel"
-description: "Forward Beacon endpoint events into Microsoft Sentinel with Azure Monitor Agent custom log collection."
+description: "Forward Beacon endpoint events into Microsoft Sentinel with Azure Monitor Agent or with Vector and the Logs Ingestion API."
 ---
 
 ## Forwarding overview
 
-Beacon `v0.0.32` added the [Microsoft Sentinel content pack](/concepts/core-concepts#microsoft-sentinel-content-pack) for teams that want Beacon endpoint events in Log Analytics and Sentinel hunting workflows. Beacon remains the local JSONL producer and writes one source of truth, the active [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log). Azure Monitor Agent tails that file and sends new records through a Data Collection Rule (DCR) into a custom Log Analytics table.
+Beacon `v0.0.32` added the [Microsoft Sentinel content pack](/concepts/core-concepts#microsoft-sentinel-content-pack) for teams that want Beacon endpoint events in Log Analytics and Sentinel hunting workflows. Beacon remains the local JSONL producer and writes one source of truth, the active [runtime JSONL log](/concepts/core-concepts#runtime-jsonl-log). Something on the host tails that file and sends new records through a Data Collection Rule (DCR) into a custom Log Analytics table. There are two ways to do that, and both fill the same `BeaconRuntime_CL` table through the same transform:
+
+| Path | Runs on the host | Needs |
+|---|---|---|
+| Azure Monitor Agent | AMA | An Azure VM, or [Azure Arc](#azure-monitor-agent-outside-azure) on any other machine |
+| Vector | The Vector that ships with Beacon | A Microsoft Entra app registration. No Arc and no agent extension. See [Vector and the Logs Ingestion API](#vector-and-the-logs-ingestion-api) |
+
+On a desktop or server outside Azure, the Vector path is usually simpler.
 
 Use this path when you want Sentinel ingestion without storing Azure tenant IDs, client secrets, workspace IDs, DCR identifiers, or ingestion endpoints in Beacon endpoint configuration.
 
@@ -22,9 +29,9 @@ Use system mode for MDM deployments so Azure Monitor Agent can tail `/var/log/be
 
 - Beacon endpoint installed and writing local JSONL.
 - A Log Analytics workspace, with Microsoft Sentinel enabled if you want Sentinel hunting and analytics workflows.
-- Azure Monitor Agent installed or deployed to the endpoint.
 - A custom Log Analytics table named `BeaconRuntime_CL`.
-- A Data Collection Rule associated with the endpoint and workspace.
+- For the Azure Monitor Agent path: AMA on the endpoint (Azure Arc first, outside Azure) and a DCR associated with it.
+- For the Vector path: an Entra app registration, a Data Collection Endpoint, and the Logs Ingestion DCR from the pack.
 
 ## Install the Sentinel pack
 
@@ -41,6 +48,7 @@ The pack includes:
 - `README.md` with setup and validation steps
 - `table-schema.json` for the `BeaconRuntime_CL` custom table
 - `dcr-template.json` for Azure Monitor Agent custom text log collection
+- `dcr-logs-ingestion-template.json` and `vector.toml` for the Vector path
 - `dcr-transform.kql` for parsing each Beacon JSONL line
 - `queries.kql` with validation and starter hunting queries
 - `detections.kql` with example analytics rule logic
@@ -133,9 +141,71 @@ The DCR uses Custom Text Logs because Beacon writes newline-delimited JSON. The 
 
 ### 5. Choose the ingestion path
 
-Azure Monitor Agent cannot directly tail Beacon logs from macOS endpoints. For macOS fleets, use a small customer-managed forwarder or relay that reads Beacon JSONL records and posts them to the Azure Monitor Logs Ingestion API.
+Azure Monitor Agent does not run on macOS, so Macs use the [Vector path](#vector-and-the-logs-ingestion-api). The signed macOS package installs Vector at `/opt/beacon/bin/vector`, just like the Linux packages.
 
-For supported Windows or Linux testing, install Azure Monitor Agent on the machine, add a custom text log source pointing to the Beacon runtime log path, usually `/var/log/beacon-agent/runtime.jsonl`, apply the Beacon DCR transform, route output to `BeaconRuntime_CL`, and associate the DCR with the machine.
+For Azure Monitor Agent on Windows or Linux, install AMA on the machine, add a custom text log source pointing at the Beacon runtime log (usually `/var/log/beacon-agent/runtime.jsonl`), apply the Beacon DCR transform, route output to `BeaconRuntime_CL`, and associate the DCR with the machine.
+
+### Azure Monitor Agent outside Azure
+
+AMA is an Azure VM extension. On a machine that is not an Azure VM, you have to onboard it to [Azure Arc](https://learn.microsoft.com/en-us/azure/azure-arc/servers/overview) (`azcmagent connect`) before AMA can be installed. That makes every endpoint an Azure resource, running the Connected Machine agent next to AMA. The DCE's logs ingestion endpoint must be in the workspace's region.
+
+A host that cannot reach Azure at all cannot use either path.
+
+## Vector and the Logs Ingestion API
+
+Vector reads `runtime.jsonl` and posts each line to the [Logs Ingestion API](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/logs-ingestion-api-overview) with an Entra app registration. It needs no Arc, no AMA, and no Azure resource per machine. Vector ships with Beacon: the `.deb`, `.rpm`, and macOS package install it at `/opt/beacon/bin/vector`, and the Linux archive carries it as `beacon-vector`.
+
+Each record carries the original Beacon line as `RawData`. The Logs Ingestion DCR runs the same transform as the AMA path, so the rows are identical either way.
+
+### 1. Azure side, once
+
+1. Create the `BeaconRuntime_CL` table and a Data Collection Endpoint in the workspace's region, as in steps 2 and 3 above.
+2. Deploy `dcr-logs-ingestion-template.json` with the workspace and DCE resource IDs. Note the `dcrImmutableId` output.
+3. Register an app in Microsoft Entra ID and create a client secret for it.
+4. On the DCR, grant the app the **Monitoring Metrics Publisher** role.
+
+### 2. Each host
+
+The host needs outbound HTTPS to `login.microsoftonline.com` and to your DCE's `*.ingest.monitor.azure.com` hostname. Nothing else.
+
+```bash title="Install the config and credentials"
+sudo mkdir -p /etc/beacon-sentinel
+sudo cp beacon-sentinel-pack/vector.toml /etc/beacon-sentinel/vector.toml
+sudo install -m 0600 /dev/null /etc/beacon-sentinel/azure.env
+sudo tee /etc/beacon-sentinel/azure.env >/dev/null <<'ENV'
+BEACON_SENTINEL_DCE_ENDPOINT=https://<dce>.<region>.ingest.monitor.azure.com
+BEACON_SENTINEL_DCR_IMMUTABLE_ID=dcr-...
+AZURE_TENANT_ID=...
+AZURE_CLIENT_ID=...
+AZURE_CLIENT_SECRET=...
+ENV
+```
+
+```ini title="/etc/systemd/system/beacon-sentinel.service"
+[Unit]
+Description=Vector: Beacon events to Microsoft Sentinel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/opt/beacon/bin/vector --config /etc/beacon-sentinel/vector.toml
+EnvironmentFile=/etc/beacon-sentinel/azure.env
+DynamicUser=yes
+StateDirectory=vector/beacon-sentinel
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash title="Start it"
+sudo systemctl daemon-reload
+sudo systemctl enable --now beacon-sentinel
+```
+
+`DynamicUser` runs Vector as an unprivileged user. It can read the runtime log because Beacon writes it world-readable, and systemd reads `azure.env` as root before dropping privileges. `StateDirectory` creates `/var/lib/vector/beacon-sentinel`, where Vector keeps its read position.
+
+The pack ships a client secret config. Vector also supports a certificate (`azure_credential_kind = "client_certificate_credential"` with `certificate_path`); see the [`azure_logs_ingestion` sink](https://vector.dev/docs/reference/configuration/sinks/azure_logs_ingestion/).
 
 The generated table schema includes columns such as `Vendor`, `Product`, `EventAction`, `Severity`, `HostName`, `UserName`, `HarnessName`, `SessionId`, `ToolName`, `CommandLine`, `Repository`, `Branch`, `Message`, `ContentRetention`, and `RawData`.
 
@@ -163,7 +233,7 @@ BeaconRuntime_CL
 | order by TimeGenerated desc
 ```
 
-If the validation query does not return data, check the DCR association, Azure Monitor Agent health state, configured file path, and table schema. The target table must exist before the DCR can route transformed records to it.
+If the validation query does not return data, check the DCR association, Azure Monitor Agent health state, configured file path, and table schema. On the Vector path, check `journalctl -u beacon-sentinel` for authentication errors and confirm the app has Monitoring Metrics Publisher on the DCR. Role assignments can take several minutes to apply. The target table must exist before the DCR can route transformed records to it.
 
 ## Hunting content
 
@@ -175,7 +245,7 @@ Use `detections.kql` as example analytics rule logic. Review and tune thresholds
 
 Microsoft Sentinel can also collect CEF and Syslog through Azure Monitor Agent, but the generated Beacon pack uses custom logs because Beacon events are rich structured JSON with prompts, tool calls, commands, files, runtime metadata, and optional raw fields. Flattening those events into CEF loses useful context.
 
-The Azure Monitor Logs Ingestion API can be useful for a centralized customer-managed forwarder, but it should not be configured directly in Beacon endpoint agent state. Direct API forwarding requires Microsoft Entra credentials, DCR identifiers, ingestion endpoints, batching, retries, and network failure handling. Keep those concerns outside Beacon's local endpoint collector unless you are building a separate managed forwarder.
+Beacon's own endpoint config never holds Azure credentials. On the Vector path, the Entra secret, DCR ID, and ingestion endpoint live only in the Vector service's environment file. Vector does the batching and retries.
 
 ## Content handling
 

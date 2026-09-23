@@ -1,0 +1,63 @@
+# Beacon Endpoint Agent -> Microsoft Sentinel, through the Azure Monitor Logs Ingestion API
+#
+# For hosts that cannot run Azure Monitor Agent, which on a machine outside Azure means
+# onboarding it to Azure Arc first. Vector posts to a Data Collection Endpoint with a
+# Microsoft Entra app registration instead, so no Arc and no agent extension are needed.
+# Beacon's Linux packages ship Vector at /opt/beacon/bin/vector.
+#
+# Each record carries the original Beacon line as RawData. The DCR in
+# dcr-logs-ingestion-template.json runs the same transform as the Azure Monitor Agent
+# path, so both paths produce identical BeaconRuntime_CL rows.
+#
+# Set in the Vector service environment, not in Beacon config:
+#   BEACON_SENTINEL_DCE_ENDPOINT      https://<dce>.<region>.ingest.monitor.azure.com
+#   BEACON_SENTINEL_DCR_IMMUTABLE_ID  dcr-... (the DCR's immutableId)
+#   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
+# The app registration needs the Monitoring Metrics Publisher role on the DCR.
+
+data_dir = "/var/lib/vector/beacon-sentinel"
+
+[sources.beacon_runtime]
+type = "file"
+include = ["{{LOG_PATH}}"]
+read_from = "end"
+
+[transforms.beacon_raw_record]
+type = "remap"
+inputs = ["beacon_runtime"]
+source = '''
+raw = string!(.message)
+parsed, err = parse_json(raw)
+ts = now()
+if err == null && is_object(parsed) {
+  ts = parse_timestamp(parsed.timestamp, format: "%+") ?? now()
+}
+. = {"RawData": raw}
+.timestamp = ts
+'''
+
+[sinks.beacon_sentinel]
+type = "azure_logs_ingestion"
+inputs = ["beacon_raw_record"]
+endpoint = "${BEACON_SENTINEL_DCE_ENDPOINT}"
+dcr_immutable_id = "${BEACON_SENTINEL_DCR_IMMUTABLE_ID}"
+stream_name = "Custom-BeaconRuntimeRaw"
+timestamp_field = "TimeGenerated"
+
+[sinks.beacon_sentinel.auth]
+azure_credential_kind = "client_secret_credential"
+azure_tenant_id = "${AZURE_TENANT_ID}"
+azure_client_id = "${AZURE_CLIENT_ID}"
+azure_client_secret = "${AZURE_CLIENT_SECRET}"
+
+# The Logs Ingestion API rejects a request over 1 MB with 413, and the sink's own default is 10 MB.
+# 512 KB leaves room for the JSON escaping of RawData; one Beacon event is at most 64 KB.
+[sinks.beacon_sentinel.batch]
+max_bytes = 524288
+max_events = 1000
+timeout_secs = 30
+
+[sinks.beacon_sentinel.request]
+retry_attempts = 10
+retry_initial_backoff_secs = 1
+retry_max_duration_secs = 300

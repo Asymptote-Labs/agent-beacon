@@ -83,14 +83,25 @@ the default Beacon recommendation because Beacon events are rich structured JSON
 with prompts, tool calls, commands, files, runtime metadata, and optional raw
 fields. Flattening those events into CEF loses useful context.
 
-## Direct Logs Ingestion API
+## Without Azure Monitor Agent: Vector and the Logs Ingestion API
 
-The Azure Monitor Logs Ingestion API can be useful for a centralized,
-customer-managed forwarder, but it should not be configured directly in Beacon
-endpoint agent state. Direct API forwarding requires Microsoft Entra
-credentials, DCR identifiers, ingestion endpoints, batching, retries, and
-network failure handling. Keep those concerns outside Beacon's local endpoint
-collector unless you are building a separate managed forwarder.
+On a machine outside Azure, Azure Monitor Agent needs Azure Arc first, and it
+does not run on macOS at all. `vector.toml` is the alternative. The Vector that
+ships with Beacon (`/opt/beacon/bin/vector`) posts each line to the Logs
+Ingestion API with a Microsoft Entra app registration. It needs no Arc and no
+agent extension.
+
+1. Deploy `dcr-logs-ingestion-template.json` with your workspace and Data
+   Collection Endpoint resource IDs, and note the `dcrImmutableId` output. It
+   runs the same transform into the same `BeaconRuntime_CL` table.
+2. Grant your app registration the Monitoring Metrics Publisher role on that DCR.
+3. Run Vector with `vector.toml`, setting `BEACON_SENTINEL_DCE_ENDPOINT`,
+   `BEACON_SENTINEL_DCR_IMMUTABLE_ID`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and
+   `AZURE_CLIENT_SECRET` in the Vector service's environment.
+
+The host needs outbound HTTPS to `login.microsoftonline.com` and the DCE's
+`*.ingest.monitor.azure.com` hostname. The Azure credentials live only in the
+Vector service's environment, never in Beacon config.
 
 ## Content Handling
 

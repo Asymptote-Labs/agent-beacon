@@ -25,7 +25,11 @@ func Files() []siempack.File {
 		{Name: "README.md", Content: mustRead("pack/README.md")},
 		{Name: "dcr-transform.kql", Content: DCRTransform()},
 		{Name: "table-schema.json", Content: mustRead("pack/table-schema.json")},
-		{Name: "dcr-template.json", Content: renderDCRTemplate(), TemplateLogPath: true, JSONEscape: true},
+		{Name: "dcr-template.json", Content: renderDCRTemplate("pack/dcr-template.json"), TemplateLogPath: true, JSONEscape: true},
+		// The Logs Ingestion API path, for hosts without Azure Monitor Agent: Vector sends each line
+		// as RawData to a DCR that runs the same transform, so both paths fill the same table.
+		{Name: "vector.toml", Content: mustRead("pack/vector.toml.tmpl"), TemplateLogPath: true},
+		{Name: "dcr-logs-ingestion-template.json", Content: renderDCRTemplate("pack/dcr-logs-ingestion-template.json")},
 		{Name: "queries.kql", Content: mustRead("pack/queries.kql")},
 		{Name: "detections.kql", Content: mustRead("pack/detections.kql")},
 		{Name: "sample-event.jsonl", Content: mustRead("pack/sample-event.jsonl")},
@@ -46,8 +50,8 @@ func InstallPack(outputDir, logPath string) error {
 	return siempack.Install(outputDir, Files(), logPath)
 }
 
-func renderDCRTemplate() string {
-	tmpl := mustRead("pack/dcr-template.json")
+func renderDCRTemplate(path string) string {
+	tmpl := mustRead(path)
 	return strings.ReplaceAll(tmpl, "{{DCR_TRANSFORM}}", siempack.JSONEscapeForString(minifyKQL(DCRTransform())))
 }
 
