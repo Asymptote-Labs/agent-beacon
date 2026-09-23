@@ -13,10 +13,15 @@
 # Beacon ships is static so it runs on stripped and custom-built hosts without caring which libc
 # they carry. The script fails unless the binary has no program interpreter.
 #
-# Set VECTOR_VERSION to change the version. Keep it in step with the tap's beacon-vector formula.
+# Set VECTOR_VERSION to change the version, and run packaging/linux/validate-vector-packs.sh
+# against the result before shipping it. 0.56.0 matches the signed macOS package. Newer releases
+# break the generated packs, which take destinations and credentials from ${VAR}: 0.57 stops
+# expanding the ${VAR:-default} form, and 0.58 stops expanding ${VAR} at all unless Vector runs
+# with --dangerously-allow-env-var-interpolation. (Beacon Managed's connect is unaffected because
+# it writes literal values.)
 set -eu
 
-VECTOR_VERSION="${VECTOR_VERSION:-0.58.0}"
+VECTOR_VERSION="${VECTOR_VERSION:-0.56.0}"
 ROOT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)"
 OUT_DIR="${1:-$ROOT_DIR/cli/beacon/release-vector}"
 [ "$#" -gt 0 ] && shift

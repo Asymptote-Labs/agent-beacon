@@ -296,8 +296,10 @@ The Linux `.deb`, `.rpm`, and release archives carry Vector too. Run
 for a program interpreter, and stages it under `cli/beacon/release-vector/`. The
 GoReleaser before-hook fails without it. The packages install it as
 `/opt/beacon/bin/vector`; the archives carry it as `beacon-vector`, which the
-Homebrew formula installs on Linux. The version is pinned in that script; keep
-it in step with the tap's `beacon-vector` formula.
+Homebrew formula installs on Linux. The version is pinned in that script at
+0.56.0, the same as the macOS package. Vector 0.57 and 0.58 stop expanding the
+`${VAR}` references the generated packs rely on, so bump it only together with
+`packaging/linux/validate-vector-packs.sh` passing against the new version.
 
 ### Preferred CI Release
 
