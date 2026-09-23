@@ -40,7 +40,14 @@ bounded, redacted trace projection. Beacon sends typed yes/no questions such as:
 - Is the reusable lesson supported by concrete trace evidence?
 
 Jev returns probabilities. Beacon stores those probabilities with the trace
-provenance, evaluator model, and usage metadata when the API reports it.
+provenance, evaluator model, and usage metadata when the API reports it. When the
+evaluator also returns a rationale for a question, Beacon stores it, redacted and
+size-limited, as that question's `reason`.
+
+A candidate's body is built from those rationales. When the evaluator returns
+scores with no rationale, the candidate says that no lesson text was extracted
+instead of presenting the scores as a lesson, so review the source trace before
+approving it.
 
 Use `--dry-run` first to preview selected traces and estimated calls without making
 a network request.

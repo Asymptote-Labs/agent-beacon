@@ -299,7 +299,7 @@ func runMemoryEvaluationsShow(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%.2f\n", eval.ID, eval.Trace.ID, eval.Status, eval.Score)
 	for _, question := range eval.Questions {
-		fmt.Fprintf(cmd.OutOrStdout(), "%s\t%.2f\t%.2f\t%s\n", question.ID, question.Probability, question.Confidence, question.Reason)
+		fmt.Fprintf(cmd.OutOrStdout(), "%s\t%.2f\t%.2f\t%s\n", question.ID, question.Probability, question.Confidence, learning.QuestionReason(question))
 	}
 	return nil
 }
