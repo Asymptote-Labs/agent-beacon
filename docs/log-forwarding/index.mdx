@@ -211,15 +211,15 @@ See [Rapid7 forwarding](/log-forwarding/rapid7) for Custom Logs setup, webhook h
 
 ### Microsoft Sentinel
 
-For Microsoft Sentinel, generate Beacon's Sentinel content pack and configure Azure Monitor Agent custom log collection to tail Beacon JSONL into the `BeaconRuntime_CL` table.
+For Microsoft Sentinel, generate Beacon's Sentinel content pack. Either Azure Monitor Agent tails Beacon JSONL into the `BeaconRuntime_CL` table, or the Vector that ships with Beacon sends it through the Logs Ingestion API, which needs no Azure Arc on machines outside Azure.
 
 ```bash title="Generate the integration pack"
 beacon endpoint sentinel install-pack --system --output ./beacon-sentinel-pack
 ```
 
-The generated pack includes setup guidance, `table-schema.json`, `dcr-template.json`, `dcr-transform.kql`, starter hunting queries, example detection logic, and sample events. Azure tenant IDs, client secrets, workspace IDs, DCR identifiers, and ingestion endpoints stay in Azure Monitor, endpoint-management tooling, or customer-managed forwarders rather tha Beacon endpoint configuration.
+The generated pack includes setup guidance, `table-schema.json`, `dcr-template.json`, `dcr-logs-ingestion-template.json`, `vector.toml`, `dcr-transform.kql`, starter hunting queries, example detection logic, and sample events. Azure tenant IDs, client secrets, workspace IDs, DCR identifiers, and ingestion endpoints stay in Azure Monitor, endpoint-management tooling, or the Vector service's environment rather than Beacon endpoint configuration.
 
-See [Microsoft Sentinel forwarding](/log-forwarding/microsoft-sentinel) for Azure Monitor Agent setup, DCR configuration, validation queries, and content handling guidance.
+See [Microsoft Sentinel forwarding](/log-forwarding/microsoft-sentinel) for both paths, DCR configuration, validation queries, and content handling guidance.
 
 ### AWS CloudWatch Logs
 

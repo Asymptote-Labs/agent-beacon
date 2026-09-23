@@ -9,15 +9,24 @@ Installing the package is the whole setup. It unpacks the binaries, performs the
 
 ## Install
 
-Download the package for your architecture from the [latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest) and install it:
+Run the block for your distribution. It downloads the latest package for your architecture, checks it against the release checksums, and installs it.
 
 <CodeGroup>
 ```bash title="Debian, Ubuntu"
-sudo apt install ./beacon_<version>_linux_amd64.deb
+VERSION="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/asymptote-labs/agent-beacon/releases/latest)"; VERSION="${VERSION##*/v}"
+PKG="beacon_${VERSION}_linux_$(dpkg --print-architecture).deb"
+BASE="https://github.com/asymptote-labs/agent-beacon/releases/download/v${VERSION}"
+curl -fsSLO "${BASE}/${PKG}" && curl -fsSLO "${BASE}/checksums.txt"
+grep "  ${PKG}$" checksums.txt | sha256sum --check - && sudo apt install "./${PKG}"
 ```
 
 ```bash title="Fedora, RHEL, Rocky, Alma"
-sudo dnf install ./beacon_<version>_linux_amd64.rpm
+VERSION="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/asymptote-labs/agent-beacon/releases/latest)"; VERSION="${VERSION##*/v}"
+case "$(uname -m)" in x86_64) ARCH=amd64 ;; aarch64) ARCH=arm64 ;; esac
+PKG="beacon_${VERSION}_linux_${ARCH}.rpm"
+BASE="https://github.com/asymptote-labs/agent-beacon/releases/download/v${VERSION}"
+curl -fsSLO "${BASE}/${PKG}" && curl -fsSLO "${BASE}/checksums.txt"
+grep "  ${PKG}$" checksums.txt | sha256sum --check - && sudo dnf install "./${PKG}"
 ```
 </CodeGroup>
 
@@ -68,32 +77,27 @@ See [User-mode install](#user-mode-install) for what this sets up and its one ca
 
 ## Confirm it worked
 
-```bash title="Verify the install"
+```bash title="Check the endpoint"
 beacon endpoint status --system
 ```
 
 ```
-Beacon Endpoint Agent 1.0.6
+Beacon Endpoint Agent <version>
 Config: /etc/beacon/endpoint/config.json
 Runtime log: /var/log/beacon-agent/runtime.jsonl
 Collector: grpc=true http=true
 Service: loaded=true running=true
 Harness: Claude Code  telemetry=enabled
 Last event: present
+Beacon Managed: not connected (run `beacon endpoint connect`)
+Inventory heartbeat: scheduled every 6h0m0s; job loaded=true running=true; last emitted never
 ```
 
-`beacon endpoint doctor --system` goes further. It checks the whole chain (unit, collector, config, log permissions, and each harness's settings) and prints the command to fix anything it finds.
+`running=true` and `telemetry=enabled` are the lines that matter. Then run your agent as usual (see [Using it](#using-it)) and its events land in the runtime log. `Beacon Managed: not connected` is expected, because a package install keeps everything on this machine.
 
-On a fresh install it reports one warning, which is not a problem:
+### If something looks wrong
 
-```
-Beacon endpoint doctor: warn
-harness_observed: warn target=claude_code (telemetry is configured but no matching event has
-  been observed yet) action="run Claude Code or beacon endpoint test-event"
-Summary: 0 failure(s), 1 warning(s)
-```
-
-That means "configured correctly, but not used yet". It clears the first time you run your agent. What matters is `0 failure(s)`.
+`beacon endpoint doctor --system` checks the whole chain (unit, collector, config, log permissions, and each harness's settings) and prints the command that fixes anything it finds. What matters is `0 failure(s)`. Before you have run an agent it warns `harness_observed`, which clears the first time you do.
 
 <Warning>
   One failure is worth knowing by name, because a system endpoint can be perfectly healthy and
@@ -108,15 +112,7 @@ That means "configured correctly, but not used yet". It clears the first time yo
   A system-mode endpoint runs as root, so it has to work out whose agent settings to configure. If it could not identify you at install time, the collector still starts and reports healthy, but nothing is sending to it. Run the action above as the user whose sessions should be captured and it clears.
 </Warning>
 
-If you would rather confirm the pipeline before running a real session, write a synthetic event:
-
-```bash title="Prove the collector is receiving and writing events"
-sudo beacon endpoint test-event --system
-```
-
-<Note>
-  Pass `--system` here. Without it the command targets the user-mode log under `~/.beacon`, which is not the log a system install writes to, so it would report success against the wrong file.
-</Note>
+To test the pipeline without running an agent, write a synthetic event with `sudo beacon endpoint test-event --system`. Keep the `--system`: without it the command writes to the user-mode log under `~/.beacon` and reports success against the wrong file.
 
 ## Using it
 
@@ -153,7 +149,7 @@ A new install is local-only. Nothing leaves the machine until you set up a desti
 |---|---|
 | [Splunk](/log-forwarding/splunk) | The collector, over HEC |
 | [Elastic](/log-forwarding/elastic), [Datadog](/log-forwarding/datadog), [Wazuh](/log-forwarding/wazuh) | That product's own agent, tailing the log |
-| [Microsoft Sentinel](/log-forwarding/microsoft-sentinel) | Azure Monitor Agent, tailing the log |
+| [Microsoft Sentinel](/log-forwarding/microsoft-sentinel) | Vector, through the Logs Ingestion API. Or Azure Monitor Agent, which outside Azure needs Azure Arc first |
 | [S3](/log-forwarding#aws-s3), [GCS](/log-forwarding#google-cloud-storage), [CloudWatch](/log-forwarding/cloudwatch), [Sumo Logic](/log-forwarding/sumo), [Rapid7](/log-forwarding/rapid7), [CrowdStrike Falcon](/log-forwarding/falcon) | Vector |
 | [Beacon Managed](/log-forwarding/asymptote) | Vector, set up by `beacon endpoint connect` |
 
@@ -221,6 +217,8 @@ Install in user mode if you do not want a system service, either because you are
 ```bash title="User-mode install"
 beacon endpoint install
 ```
+
+On an interactive terminal this opens the setup wizard, which asks you to sign in. Sign-in finishes in a browser on this machine, so over SSH or with no display the wizard says so straight away and offers to finish without an account, or to show the sign-in URL with the `ssh -L` command for opening it on your own computer. See [Onboarding](/cli/endpoint-onboarding). `BEACON_ONBOARDING=0` skips the wizard, and package installs never show it.
 
 This writes everything under `~/.beacon/endpoint` and registers a `systemctl --user` unit. One caveat has no macOS equivalent and is worth stating plainly: **a `--user` unit stops when you log out**, unless linger is enabled for your account. Beacon enables it during install when it can:
 

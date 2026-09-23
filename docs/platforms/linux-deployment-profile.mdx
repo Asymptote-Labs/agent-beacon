@@ -37,13 +37,14 @@ sudo strace -f -c -o /tmp/install.trace beacon endpoint install --system --dry-r
 
 ## Binaries
 
-Three static executables, no shared libraries, no minimum glibc version. They run the same on a minimal or older userland as on a full one.
+Four static executables, no shared libraries, no minimum glibc version. They run the same on a minimal or older userland as on a full one.
 
 | Binary | Role | Resident? |
 |---|---|---|
 | `beacon-otelcol` | Collector | Yes, the only long-running process |
 | `beacon-hooks` | Records one agent event | No, it forks and exits |
 | `beacon` | CLI | No |
+| `vector` | Forwarder ([Vector](https://vector.dev) 0.56) | Only if you set up a destination that uses it |
 
 ```bash
 file /opt/beacon/bin/beacon-otelcol     # ... statically linked
@@ -62,7 +63,8 @@ Measured on Ubuntu 24.04 / amd64 after a live Claude Code session.
 | Resident memory | 28-58 MiB | Hard ceiling 128 MiB (`memory_limiter`) |
 | CPU, idle | 0.03-0.3% of one core | Two timers: 1s memory check, 5s batch flush |
 | Threads | 15 | Go runtime, scales with available cores |
-| Disk | ≤60 MB | 10 MiB × 5 rotations, oldest discarded |
+| Disk, log | ≤60 MB | 10 MiB × 5 rotations, oldest discarded |
+| Disk, package | ~220 MB installed, ~86 MB download (amd64) | About 150 MB of it is Vector |
 | Per agent event | one `fork`/`exec`, one `flock`, one append | Process exits immediately |
 
 ### Caveats
@@ -97,6 +99,8 @@ The only outbound connections Beacon ever makes, for an egress allowlist:
 | `beacon.sh` | Interactive install only: browser sign-in, and the device enrollment that follows when Beacon Managed is confirmed | `BEACON_MANAGED_INGEST=0` hides the managed answer; `BEACON_ONBOARDING=0` skips the wizard entirely |
 | Your ingest host | Continuously, only on an endpoint connected to Beacon Managed | `beacon endpoint disconnect`, or never connecting |
 | `api.github.com`, `github.com` | Version check and self-update | Off by default; leave it off and deploy through your config management |
+
+A forwarding destination you set up yourself, such as Splunk HEC, or Microsoft Sentinel through Vector, connects to that destination's hosts. Nothing does until you configure one.
 
 ```bash
 ss -ltnp | grep beacon-otelcol

@@ -6,7 +6,7 @@ description: "Install the Beacon CLI from platform archives or build it from sou
 ## Archive collection
 
 Beacon releases publish platform archives for macOS and Linux on `amd64` and `arm64`, plus a
-`.zip` for Windows. Each archive contains three binaries: the `beacon` CLI, the `beacon-hooks` adapter that captures tool activity, and the matching `beacon-otelcol` collector. SHA-256 checksums are published alongside the release in `checksums.txt`.
+`.zip` for Windows. Each archive contains three binaries: the `beacon` CLI, the `beacon-hooks` adapter that captures tool activity, and the matching `beacon-otelcol` collector. The Linux archives also carry `beacon-vector`, which is [Vector](https://vector.dev) for forwarding, named so it cannot shadow a `vector` already on your PATH. SHA-256 checksums are published alongside the release in `checksums.txt`.
 
 All three matter. `beacon-hooks` is what supported runtimes invoke to record prompts, tool calls,
 and approvals, so an install that keeps only the CLI and the collector captures OpenTelemetry data
@@ -42,6 +42,7 @@ fi
 
 tar -xzf "${ARCHIVE}"
 mkdir -p ~/.local/bin && mv beacon beacon-hooks beacon-otelcol ~/.local/bin/
+[ -f beacon-vector ] && mv beacon-vector ~/.local/bin/   # Linux archives only
 beacon version
 ```
 
@@ -49,8 +50,7 @@ The version comes from the current release rather than a number to keep up to da
 platform and architecture come from `uname`: `x86_64` maps to the published `amd64` archive and
 `aarch64` to `arm64`. A platform or architecture Beacon does not publish stops the run before
 anything is downloaded. The checksum step names the one archive about to be extracted, so it
-verifies that file rather than whatever else the directory happens to hold. The archive layout is
-identical across platforms.
+verifies that file rather than whatever else the directory happens to hold.
 
 For managed endpoint rollouts on Apple Silicon Macs, GitHub Releases also attach
 a signed, notarized, and stapled `BeaconEndpointAgent-<version>-arm64.pkg`. The
