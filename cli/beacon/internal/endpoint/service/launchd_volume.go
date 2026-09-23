@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -86,11 +87,13 @@ func InspectLaunchAgentVolume(plistPath string) LaunchAgentVolume {
 	return vol
 }
 
-func underVolumes(path string) bool {
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		path = resolved
+// underVolumes reports whether p is under the macOS /Volumes mount point. launchd paths are POSIX
+// paths, so the comparison is done with forward slashes whatever the host's separator is.
+func underVolumes(p string) bool {
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		p = resolved
 	}
-	return strings.HasPrefix(filepath.Clean(path)+"/", "/Volumes/")
+	return strings.HasPrefix(path.Clean(filepath.ToSlash(p))+"/", "/Volumes/")
 }
 
 // launchdStagingDirName carries the uid so the /private/tmp fallback cannot collide between users.

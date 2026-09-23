@@ -229,14 +229,22 @@ func TestLoadLaunchdJobExplainsAnExternalHomeWhenBootstrapStillFails(t *testing.
 	if err == nil {
 		t.Fatal("loadLaunchdJob succeeded, want the bootstrap failure")
 	}
-	for _, want := range []string{
+	wants := []string{
 		"Bootstrap failed: 5",
 		f.external,
 		"not on the startup volume",
-		filepath.Join(f.staging, UserLabel+".plist"),
 		"--no-start",
 		"launchctl bootstrap gui/502",
-	} {
+	}
+	if testenv.HasPOSIXFileModes() {
+		// Staging succeeded, so the note names the copy launchd refused too.
+		wants = append(wants, filepath.Join(f.staging, UserLabel+".plist"))
+	} else {
+		// No mode bits means the 0700 check cannot pass, so staging is refused and the note says
+		// so; launchd never runs on such a host, but the explanation must still be coherent.
+		wants = append(wants, "could not be staged")
+	}
+	for _, want := range wants {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error missing %q:\n%v", want, err)
 		}
