@@ -1478,6 +1478,108 @@ func TestHarnessNameHonorsBrowserExtensionAttr(t *testing.T) {
 	}
 }
 
+// browserExtensionLogs builds one OTLP log the way browser-extension/src/shared/normalize.ts
+// does: identity on the resource, the event on the record.
+func browserExtensionLogs(withIdentity bool) plog.Logs {
+	logs := plog.NewLogs()
+	resourceLogs := logs.ResourceLogs().AppendEmpty()
+	res := resourceLogs.Resource().Attributes()
+	res.PutStr("beacon.origin", "browser-extension")
+	res.PutStr("beacon.harness.name", "chatgpt_web")
+	res.PutStr("service.name", "agent-beacon-browser-collector")
+	res.PutStr("gen_ai.provider.name", "openai")
+	if withIdentity {
+		res.PutStr("user_agent.name", "Microsoft Edge")
+		res.PutStr("user_agent.version", "153")
+		res.PutStr("user_agent.original", "Mozilla/5.0 (X11; Linux x86_64) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0")
+		brands := res.PutEmptySlice("browser.brands")
+		for _, b := range []string{"Microsoft Edge 153", "Not_A Brand 8", "Chromium 153"} {
+			brands.AppendEmpty().SetStr(b)
+		}
+	}
+	record := resourceLogs.ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+	record.Body().SetStr("chatgpt_web agent.response.completed")
+	record.SetTimestamp(pcommon.NewTimestampFromTime(time.Unix(1700000000, 0).UTC()))
+	record.Attributes().PutStr("beacon.event.action", "agent.response.completed")
+	record.Attributes().PutStr("beacon.event.category", "agent")
+	record.Attributes().PutStr("gen_ai.conversation.id", "conv-1")
+	return logs
+}
+
+// A browser chat event must say which browser produced it, in a typed field rather than only
+// in raw.attributes: metadata-only managed forwarding deletes raw, and a rule or an analyst
+// filtering on the managed Edge profile vs a personal Brave install needs it either way.
+func TestEventFromLogPromotesBrowserUserAgent(t *testing.T) {
+	events := NewConverter(Options{}).EventsFromLogs(browserExtensionLogs(true))
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	event := events[0]
+	if event.UserAgent == nil || event.UserAgent.Name != "Microsoft Edge" || event.UserAgent.Version != "153" {
+		t.Fatalf("user_agent = %#v, want Microsoft Edge 153", event.UserAgent)
+	}
+	if event.Harness.Name != "chatgpt_web" {
+		t.Fatalf("harness.name = %q, want chatgpt_web (identity must not disturb harness naming)", event.Harness.Name)
+	}
+	encoded, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"user_agent":{"name":"Microsoft Edge","version":"153"}`) {
+		t.Fatalf("encoded event lacks the typed user_agent object: %s", encoded)
+	}
+	// The full brand list and UA string stay available in raw for local investigation.
+	rawAttrs, _ := event.Raw["attributes"].(map[string]interface{})
+	brands, _ := rawAttrs["browser.brands"].([]interface{})
+	if len(brands) != 3 || brands[0] != "Microsoft Edge 153" {
+		t.Fatalf("raw browser.brands = %#v, want the three reported brands", rawAttrs["browser.brands"])
+	}
+	if rawAttrs["user_agent.original"] == nil {
+		t.Fatal("raw user_agent.original missing")
+	}
+}
+
+func TestEventFromLogOmitsUserAgentWithoutIdentity(t *testing.T) {
+	events := NewConverter(Options{}).EventsFromLogs(browserExtensionLogs(false))
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].UserAgent != nil {
+		t.Fatalf("user_agent = %#v, want nil when no user_agent.name is sent", events[0].UserAgent)
+	}
+	encoded, err := json.Marshal(events[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), `"user_agent"`) {
+		t.Fatalf("encoded event carries user_agent without identity: %s", encoded)
+	}
+}
+
+func TestUserAgentFromAttrs(t *testing.T) {
+	cases := []struct {
+		name  string
+		attrs map[string]interface{}
+		want  *UserAgentInfo
+	}{
+		{"name and version", map[string]interface{}{"user_agent.name": "Brave", "user_agent.version": "124"}, &UserAgentInfo{Name: "Brave", Version: "124"}},
+		{"name only", map[string]interface{}{"user_agent.name": "Chromium"}, &UserAgentInfo{Name: "Chromium"}},
+		{"trimmed", map[string]interface{}{"user_agent.name": "  Opera  ", "user_agent.version": " 110 "}, &UserAgentInfo{Name: "Opera", Version: "110"}},
+		{"version without a name identifies nothing", map[string]interface{}{"user_agent.version": "124"}, nil},
+		{"blank name", map[string]interface{}{"user_agent.name": "   "}, nil},
+		{"non-string name is not coerced", map[string]interface{}{"user_agent.name": []interface{}{"Edge"}}, nil},
+		{"original alone is not promoted", map[string]interface{}{"user_agent.original": "curl/8.4.0"}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := UserAgentFromAttrs(tc.attrs)
+			if (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {
+				t.Fatalf("UserAgentFromAttrs(%v) = %#v, want %#v", tc.attrs, got, tc.want)
+			}
+		})
+	}
+}
+
 // Claude Code ships a native PowerShell tool that replaces Bash as the default shell on Windows,
 // and it reports the command in the same tool_input.command field. Handling only "bash" left the
 // event classified as command.executed with an empty e.command.command -- the leaf every

@@ -147,4 +147,6 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.trace.span_id` | string |
 | `e.user.name` | string |
 | `e.user.uid` | string |
+| `e.user_agent.name` | string |
+| `e.user_agent.version` | string |
 | `e.vendor` | string |

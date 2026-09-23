@@ -7,6 +7,7 @@ import { ext } from '../shared/browser.js';
 import type { ChatTurn, Settings } from '../shared/types.js';
 import { turnToEnvelope } from '../shared/normalize.js';
 import type { LogsEnvelope } from '../shared/otlp.js';
+import type { BrowserIdentity } from '../shared/browser-identity.js';
 
 const QUEUE_KEY = 'delivery_queue';
 const ALARM = 'beacon_flush';
@@ -43,8 +44,12 @@ function withQueueLock<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /** Normalize a turn and enqueue it for delivery, then kick a flush. */
-export async function enqueueTurn(turn: ChatTurn, settings: Settings): Promise<void> {
-  const envelope = turnToEnvelope(turn, settings.retention);
+export async function enqueueTurn(
+  turn: ChatTurn,
+  settings: Settings,
+  identity?: BrowserIdentity,
+): Promise<void> {
+  const envelope = turnToEnvelope(turn, settings.retention, identity);
   const item: QueueItem = {
     id: turn.turnId,
     endpoint: settings.endpoint,

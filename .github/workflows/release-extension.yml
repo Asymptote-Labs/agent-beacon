@@ -2,6 +2,13 @@ name: Release Browser Extension
 
 # Publishes the unpacked Chrome MV3 build as a zip on a pushed `ext-v*` tag.
 #
+# One zip serves every Chromium browser (Chrome, Edge, Brave, Opera, Vivaldi,
+# Arc). It keeps the `-chrome.zip` name on purpose: `chrome` is the name the
+# WebExtension tooling uses for the whole Chromium target family, it pairs with
+# the `-firefox.xpi` target below, and renaming it would break every download
+# script and doc that already names the asset. The release notes state the
+# family claim instead (#394).
+#
 # Independent of the CLI's `v*` release on purpose: the extension versions on its
 # own cadence and shares no assets with the binary. GitHub tag patterns anchor at
 # the start, so the `v*` filter in release.yml does not match `ext-v0.1.0` and the
@@ -182,9 +189,9 @@ jobs:
           version="$VERSION"
 
           printf '%s\n' \
-            "Unpacked Chrome MV3 build of the Agent Beacon browser collector (\`browser-extension/\`)." \
+            "Unpacked Chromium MV3 build of the Agent Beacon browser collector (\`browser-extension/\`). The same archive loads in Chrome, Edge, Brave, Opera, Vivaldi and Arc; CI tests it in Chromium and Edge." \
             "" \
-            "**Install:** download and unzip, then Chrome -> Extensions -> Developer mode -> Load unpacked -> select the unzipped folder." \
+            "**Install:** download and unzip, then open the browser's extensions page (\`chrome://extensions\`, \`edge://extensions\`, \`brave://extensions\`, ...) -> Developer mode -> Load unpacked -> select the unzipped folder." \
             "" \
             "Requires a running Beacon endpoint: the extension POSTs OTLP GenAI logs to \`http://127.0.0.1:4318/v1/logs\`." \
             "" \

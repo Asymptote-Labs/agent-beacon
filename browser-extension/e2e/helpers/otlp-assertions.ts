@@ -1,10 +1,10 @@
 // Helpers to read OTLP log envelopes captured by the mock collector.
 
-import type { KeyValue, LogRecord, LogsEnvelope } from '../../src/shared/otlp.js';
+import type { AttrPrimitive, KeyValue, LogRecord, LogsEnvelope } from '../../src/shared/otlp.js';
 import { attrValue } from '../../src/shared/otlp.js';
 
-export function flatAttrs(attrs: KeyValue[]): Record<string, string | number | boolean> {
-  const out: Record<string, string | number | boolean> = {};
+export function flatAttrs(attrs: KeyValue[]): Record<string, AttrPrimitive | AttrPrimitive[]> {
+  const out: Record<string, AttrPrimitive | AttrPrimitive[]> = {};
   for (const a of attrs) {
     const v = attrValue(attrs, a.key);
     if (v !== undefined) out[a.key] = v;
@@ -12,7 +12,7 @@ export function flatAttrs(attrs: KeyValue[]): Record<string, string | number | b
   return out;
 }
 
-export function resourceAttrs(env: LogsEnvelope): Record<string, string | number | boolean> {
+export function resourceAttrs(env: LogsEnvelope): Record<string, AttrPrimitive | AttrPrimitive[]> {
   return flatAttrs(env.resourceLogs[0]?.resource.attributes ?? []);
 }
 

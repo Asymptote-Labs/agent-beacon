@@ -420,6 +420,16 @@ type DestinationInfo struct {
 	Status string `json:"status,omitempty"`
 }
 
+// UserAgentInfo identifies the user agent (for browser-sourced events, the browser)
+// that produced an event, in the OpenTelemetry and ECS `user_agent.*` shape. Name is
+// what the agent claims to be, e.g. "Microsoft Edge", "Brave", or "Chromium", and
+// Version is its version as reported (the browser extension sends the major version).
+// It is metadata rather than content, so it survives metadata-only retention.
+type UserAgentInfo struct {
+	Name    string `json:"name,omitempty"`
+	Version string `json:"version,omitempty"`
+}
+
 type HealthInfo struct {
 	Component string `json:"component,omitempty"`
 	Status    string `json:"status,omitempty"`
@@ -472,6 +482,7 @@ type Event struct {
 	Content       *ContentInfo           `json:"content,omitempty"`
 	Destination   *DestinationInfo       `json:"destination,omitempty"`
 	Health        *HealthInfo            `json:"health,omitempty"`
+	UserAgent     *UserAgentInfo         `json:"user_agent,omitempty"`
 	GenAI         *GenAIInfo             `json:"gen_ai,omitempty"`
 	Model         string                 `json:"model,omitempty"`
 	Repository    string                 `json:"repository,omitempty"`

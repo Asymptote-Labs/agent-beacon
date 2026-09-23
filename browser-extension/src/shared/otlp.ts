@@ -7,7 +7,8 @@ export type AnyValue =
   | { stringValue: string }
   | { intValue: string }
   | { doubleValue: number }
-  | { boolValue: boolean };
+  | { boolValue: boolean }
+  | { arrayValue: { values: AnyValue[] } };
 
 export interface KeyValue {
   key: string;
@@ -45,16 +46,34 @@ export function bool(key: string, value: boolean): KeyValue {
   return { key, value: { boolValue: value } };
 }
 
+/** string[] attribute (OTLP ArrayValue of stringValues), e.g. browser.brands. */
+export function strArray(key: string, values: readonly string[]): KeyValue {
+  return { key, value: { arrayValue: { values: values.map((v) => ({ stringValue: v })) } } };
+}
+
 /** epoch milliseconds → OTLP nanosecond timestamp string. */
 export function msToUnixNano(ms: number): string {
   return String(Math.trunc(ms)) + '000000';
 }
 
-/** Look up a single attribute's primitive value (used by tests/delivery). */
-export function attrValue(attrs: KeyValue[], key: string): string | number | boolean | undefined {
+export type AttrPrimitive = string | number | boolean;
+
+/** Look up a single attribute's value (used by tests/delivery). Arrays come
+ *  back as arrays of their primitive elements. */
+export function attrValue(
+  attrs: KeyValue[],
+  key: string,
+): AttrPrimitive | AttrPrimitive[] | undefined {
   const kv = attrs.find((a) => a.key === key);
   if (!kv) return undefined;
   const v = kv.value;
+  if ('arrayValue' in v) {
+    return v.arrayValue.values.map(primitive).filter((x): x is AttrPrimitive => x !== undefined);
+  }
+  return primitive(v);
+}
+
+function primitive(v: AnyValue): AttrPrimitive | undefined {
   if ('stringValue' in v) return v.stringValue;
   if ('intValue' in v) return Number(v.intValue);
   if ('doubleValue' in v) return v.doubleValue;

@@ -105,3 +105,33 @@ func TestEvalMatchPresent(t *testing.T) {
 		t.Fatalf("expected match")
 	}
 }
+
+// Browser chat events name their browser in e.user_agent, so a rule can scope to (or away
+// from) the managed browser. Events from every other source have no user_agent at all, and a
+// rule on it must quietly not match them rather than error.
+func TestEvalMatchUserAgent(t *testing.T) {
+	prog, err := CompileMatch(`e.harness.name == "chatgpt_web" && e.user_agent.name != "Microsoft Edge"`)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	cases := []struct {
+		name  string
+		event asymptoteobserve.Event
+		want  bool
+	}{
+		{"personal Brave", asymptoteobserve.Event{Harness: asymptoteobserve.HarnessInfo{Name: "chatgpt_web"}, UserAgent: &asymptoteobserve.UserAgentInfo{Name: "Brave", Version: "124"}}, true},
+		{"managed Edge", asymptoteobserve.Event{Harness: asymptoteobserve.HarnessInfo{Name: "chatgpt_web"}, UserAgent: &asymptoteobserve.UserAgentInfo{Name: "Microsoft Edge", Version: "153"}}, false},
+		{"CLI agent without user_agent", asymptoteobserve.Event{Harness: asymptoteobserve.HarnessInfo{Name: "claude_code"}}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := EvalMatch(prog, tc.event)
+			if err != nil {
+				t.Fatalf("eval: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("match = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

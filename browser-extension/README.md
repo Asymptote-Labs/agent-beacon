@@ -85,12 +85,21 @@ npm run lint:firefox  # build:firefox, then Mozilla's web-ext lint (warnings fai
 npm run check         # tsc --noEmit
 npm run test:unit     # pure adapter + normalization tests (vitest, no browser)
 npm test              # builds dist/, runs the Playwright replay e2e (THE autonomous loop)
+BROWSER_CHANNEL=msedge npm test                # same e2e in Microsoft Edge (chromium is the default)
+BROWSER_EXECUTABLE=/path/to/brave npm test     # same e2e in any other Chromium-family binary
 npm run test:headed   # watch it drive a browser
 npm run record:fixtures -- --site claude|chatgpt --name <n>   # capture a fixture (headed, authed)
 npm run report        # open the last HTML report
 ```
 
 ## Loading the extension in your own browser
+
+One build serves every Chromium browser: Chrome, Edge, Brave, Opera, Vivaldi and Arc. The
+release archive is named `-chrome.zip` after the Chromium extension family, not after Google
+Chrome alone. CI runs the replay e2e in Chromium and Edge; the other forks are covered by the
+manual checklist in [docs/runtimes/browser-extension-chromium.mdx](../docs/runtimes/browser-extension-chromium.mdx).
+Every emitted event names the browser that produced it (`user_agent.name`, `user_agent.version`,
+`browser.brands`; see `src/shared/browser-identity.ts`).
 
 **Beta, and not on the Chrome Web Store.** It installs unpacked, so Chrome will not
 auto-update it: to move to a new version, rebuild or re-download and reload.
