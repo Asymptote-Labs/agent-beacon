@@ -35,6 +35,11 @@ type CollectOptions struct {
 	UserMode    bool
 	Print       bool
 	Out         io.Writer
+	// RotateBytes is the size at which this sweep rotates the runtime log; zero means the size
+	// every Beacon writer uses. The archive count is not configurable here: the hooks and the
+	// collector prune archives past the shared count on their next rotation, and readers only
+	// look that far, so a sweep that kept more would lose them anyway.
+	RotateBytes int64
 }
 
 type Summary struct {
@@ -44,6 +49,18 @@ type Summary struct {
 	Errors          int `json:"errors"`
 	MalformedLines  int `json:"malformed_lines"`
 	PartialSessions int `json:"partial_sessions"`
+	// EventsRetained is how many of the events this sweep wrote are still in the runtime log or
+	// its archives when it finishes. Events the writer suppressed as duplicates are in neither.
+	EventsRetained int `json:"events_retained"`
+	// EventsRotatedOut is how many events this sweep wrote that another writer's rotations
+	// discarded before it finished. The sweep never rotates out its own output.
+	EventsRotatedOut int `json:"events_rotated_out"`
+	// RetentionLimited is set when the sweep stopped because writing more would have rotated its
+	// own output out of the log. SessionsPending is how many sessions still have records to read:
+	// the one the sweep stopped inside (also counted in SessionsChanged when it wrote part of it)
+	// and every later one with new records. Their cursors were left where they were.
+	RetentionLimited bool `json:"retention_limited"`
+	SessionsPending  int  `json:"sessions_pending"`
 }
 
 func DefaultStatePath() string {
@@ -131,9 +148,25 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 		}
 	}()
 
+	var guard *writer.RetentionGuard
+	if opts.Write && !opts.Print {
+		guard = &writer.RetentionGuard{}
+	}
 	var errs []error
-	for _, ref := range refs {
-		changed, collectErr := collectSession(store, ref, state, opts, &summary)
+	for i, ref := range refs {
+		changed, collectErr := collectSession(store, ref, state, opts, guard, &summary)
+		if errors.Is(collectErr, writer.ErrRetentionWindowFull) {
+			// Not a failed session: this one and the rest are simply left for the next sweep,
+			// with cursors that have not moved past anything that was not written.
+			if changed {
+				summary.SessionsChanged++
+			}
+			summary.RetentionLimited = true
+			summary.SessionsPending = 1 + countChanged(refs[i+1:], state)
+			errs = append(errs, fmt.Errorf("stopped after %d events with %d Claude session(s) pending: %w",
+				summary.EventsEmitted, summary.SessionsPending, collectErr))
+			break
+		}
 		if collectErr != nil {
 			summary.Errors++
 			errs = append(errs, fmt.Errorf("Claude session %s: %w", ref.ID, collectErr))
@@ -143,13 +176,34 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 			summary.SessionsChanged++
 		}
 	}
+	if guard != nil {
+		summary.EventsRetained = guard.Retained()
+		summary.EventsRotatedOut = guard.Written() - summary.EventsRetained
+		if summary.EventsRotatedOut > 0 {
+			errs = append(errs, fmt.Errorf("%d of the %d events this sweep wrote were rotated out of the runtime log by another writer before it finished",
+				summary.EventsRotatedOut, guard.Written()))
+		}
+	}
 	if len(errs) > 0 {
 		return summary, errors.Join(errs...)
 	}
 	return summary, nil
 }
 
-func collectSession(store *Store, ref SessionRef, state *State, opts CollectOptions, summary *Summary) (bool, error) {
+// countChanged is how many of refs have records the cursor has not reached, which is what a
+// sweep that stopped before them leaves for the next one.
+func countChanged(refs []SessionRef, state *State) int {
+	n := 0
+	for _, ref := range refs {
+		c := state.Files[ref.Path]
+		if c == nil || ref.SizeBytes != c.SizeBytes || ref.ModTimeUnixMS != c.ModTimeUnixMS {
+			n++
+		}
+	}
+	return n
+}
+
+func collectSession(store *Store, ref SessionRef, state *State, opts CollectOptions, guard *writer.RetentionGuard, summary *Summary) (bool, error) {
 	cursor := state.cursor(ref.Path)
 	if ref.SizeBytes < cursor.SizeBytes {
 		cursor.LastLine = 0
@@ -172,7 +226,7 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 		return false, nil
 	}
 	for i, item := range mapped {
-		if err := emit(item.Event, opts); err != nil {
+		if err := emit(item.Event, opts, guard); err != nil {
 			advanceCursorPartial(cursor, mapped, i)
 			return true, err
 		}
@@ -213,7 +267,7 @@ func advanceCursorPartial(cursor *Cursor, mapped []MappedEvent, failedIdx int) {
 	cursor.LastLine = lastCompleteLine
 }
 
-func emit(event schema.Event, opts CollectOptions) error {
+func emit(event schema.Event, opts CollectOptions, guard *writer.RetentionGuard) error {
 	if opts.Print {
 		out := opts.Out
 		if out == nil {
@@ -224,6 +278,6 @@ func emit(event schema.Event, opts CollectOptions) error {
 	if !opts.Write {
 		return nil
 	}
-	_, err := writer.AppendEvent(event, writer.Options{Path: opts.LogPath, UserMode: opts.UserMode})
+	_, err := writer.AppendEvent(event, writer.Options{Path: opts.LogPath, UserMode: opts.UserMode, RotateSize: opts.RotateBytes, Guard: guard})
 	return err
 }

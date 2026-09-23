@@ -74,6 +74,8 @@ runtime.jsonl.4
 runtime.jsonl.5
 ```
 
+Session-file sync commands write through the same rotation. `beacon endpoint claude sync` stops before a rotation would discard its own output and leaves the rest pending; see [large backfills](/runtimes/claude-code#large-backfills-and-log-rotation).
+
 External shippers should continue tailing the active `runtime.jsonl` path and use their normal file-rotation handling to checkpoint offsets. The local dashboard can inspect the active log and numbered archives when you need to review recent rotated events.
 
 ## 4. Test a custom log path
