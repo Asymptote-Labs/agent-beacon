@@ -311,6 +311,39 @@ func (m Manager) Status() Status {
 	return s
 }
 
+// CollectorLog says where the collector's stderr goes under this backend, so a collector that
+// exits during an install's readiness wait can be reported with its own reason rather than a
+// generic "not listening" (#447).
+//
+// Path is set when the output lands in a file Beacon can read back: launchd's StandardErrorPath
+// and the supervised backend's log. Hint says where to look for the backends whose output is not a
+// file: a journalctl command for systemd, and the event log for the Windows service, whose SCM
+// captures no stdout at all.
+type CollectorLog struct {
+	Path string
+	Hint string
+}
+
+// CollectorLog reports where the collector's own error output can be found.
+func (m Manager) CollectorLog() CollectorLog {
+	switch b := m.backend().(type) {
+	case launchdBackend:
+		return CollectorLog{Path: launchdStderrPath(b.label(m.UserMode))}
+	case supervisedBackend:
+		return CollectorLog{Path: supervisedLogPath(m.UserMode)}
+	case systemdBackend:
+		scope := ""
+		if m.UserMode {
+			scope = "--user "
+		}
+		return CollectorLog{Hint: fmt.Sprintf("journalctl %s-u %s -n 50 --no-pager", scope, b.label(m.UserMode))}
+	case windowsBackend:
+		return CollectorLog{Hint: "the Windows Application event log, source " + WindowsServiceName}
+	default:
+		return CollectorLog{}
+	}
+}
+
 // stateDir is where service-owned runtime state (pidfiles) lives. Derived from the endpoint
 // config so it tracks the single SystemBaseDir definition rather than duplicating it.
 func stateDir(userMode bool) string { return endpointconfig.BaseDir(userMode) }

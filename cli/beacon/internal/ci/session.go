@@ -133,6 +133,7 @@ func Provision(opts Options) (*Session, error) {
 	cfg.Collector.SpoolPath = filepath.Join(baseDir, "spool", "otlp.jsonl")
 	cfg.Collector.GRPCPort = grpcPort
 	cfg.Collector.HTTPPort = httpPort
+	cfg.Collector.HealthPort = endpointconfig.DeriveHealthCheckPort(grpcPort, httpPort)
 	cfg.Collector.IncludeCodexSpans = opts.IncludeCodexSpans
 	forward, err := normalizeForward(opts.Forward)
 	if err != nil {

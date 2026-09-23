@@ -21,6 +21,8 @@ Beacon manages different paths depending on whether you install in user mode or 
 | OTLP HTTP | `127.0.0.1:4318` | `127.0.0.1:4318` | `127.0.0.1:4318` | `127.0.0.1:4318` |
 | Collector health check | `127.0.0.1:13133` | `127.0.0.1:13133` | `127.0.0.1:13133` | `127.0.0.1:13133` |
 
+These are the default ports. `--otlp-grpc-port`, `--otlp-http-port`, and `--health-port` change them per install. When `--otlp-http-port` changes and no `--health-port` is given, the health-check port moves by the same amount, so a user-mode collector on alternate ports can run beside the system one. The ports in use are recorded under `collector` in `config.json`.
+
 On Windows the system log directory sits under the base directory rather than in a separate location, because there is no `/var/log` equivalent. `%ProgramData%` and `%ProgramFiles%` are read from the environment rather than hardcoded, so a relocated or localized install is found rather than missed.
 
 ## Service definitions

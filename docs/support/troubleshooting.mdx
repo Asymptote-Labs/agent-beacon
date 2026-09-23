@@ -39,7 +39,7 @@ description: "Solutions for common issues when setting up and using Beacon."
     After uninstalling hooks, restart the affected agent or IDE so new sessions pick up the updated hook configuration. See the [hook command docs](/cli/hooks#beacon-endpoint-hooks-uninstall) for supported harness names and flags.
   </Accordion>
   <Accordion title="beacon endpoint install fails with Collector ports are not listening">
-    A user-mode collector cannot run beside a system-mode one, because the collector health-check port `127.0.0.1:13133` is fixed, so the install rolls back; run `beacon endpoint install --user --no-start` or uninstall the system endpoint first. Tracked as [GitHub issue #447](https://github.com/asymptote-labs/agent-beacon/issues/447).
+    The collector did not start listening, and the install rolled back. The error goes on to quote the collector's own last error line and the path of its log. On systemd and Windows it names where to look instead. A bind error there (`address already in use`) means another process, often a second Beacon collector, holds one of the ports. To run a user-mode endpoint beside a system-mode one, give it alternate OTLP ports, for example `beacon endpoint install --user --otlp-grpc-port 4327 --otlp-http-port 4328`. Its health-check port moves with them, or you can set one with `--health-port`. See [running user and system mode together](/cli/endpoint-install#running-user-and-system-mode-together).
   </Accordion>
   <Accordion title="Endpoint package self-update is not running">
     For signed macOS package installs, self-update is off by default. Check the

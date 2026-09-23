@@ -124,7 +124,7 @@ func (b supervisedBackend) load(userMode bool) error {
 	// started it. Without this, the collector would die with the shell that ran install.
 	cmd.SysProcAttr = detachAttrs()
 	// Logs go to a file next to the runtime log, since there is no journal here.
-	logPath := filepath.Join(stateDir(userMode), "collector.out")
+	logPath := supervisedLogPath(userMode)
 	if f, ferr := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); ferr == nil {
 		cmd.Stdout = f
 		cmd.Stderr = f
@@ -232,4 +232,9 @@ func processAlive(pid int) bool {
 		return false
 	}
 	return pidAlive(pid)
+}
+
+// supervisedLogPath is the file a supervised collector's stdout and stderr are appended to.
+func supervisedLogPath(userMode bool) string {
+	return filepath.Join(stateDir(userMode), "collector.out")
 }

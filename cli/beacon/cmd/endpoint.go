@@ -27,6 +27,7 @@ var endpointOpts struct {
 	jsonOutput               bool
 	grpcPort                 int
 	httpPort                 int
+	healthPort               int
 	collectorPath            string
 	includeRuntimeMetrics    bool
 	includeCodexSpans        bool
@@ -418,6 +419,7 @@ func init() {
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.harnesses, "harness", endpointHarnessAuto, "Harnesses to configure: auto (detected runtimes), all, or a comma-separated list")
 	endpointInstallCmd.Flags().IntVar(&endpointOpts.grpcPort, "otlp-grpc-port", endpointconfig.DefaultGRPCPort, "Local OTLP gRPC port")
 	endpointInstallCmd.Flags().IntVar(&endpointOpts.httpPort, "otlp-http-port", endpointconfig.DefaultHTTPPort, "Local OTLP HTTP port")
+	endpointInstallCmd.Flags().IntVar(&endpointOpts.healthPort, "health-port", 0, "Local collector health-check port; 0 derives it from --otlp-http-port (13133 with the default ports)")
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.collectorPath, "collector", "", "Path to a beacon-otelcol binary")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.includeRuntimeMetrics, "include-runtime-metrics", false, "Include generic process/runtime OTLP metrics and harness operational metrics (OpenClaw, Copilot CLI) in the runtime JSONL log")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.includeCodexSpans, "include-codex-spans", false, "Include high-volume Codex OTLP spans for troubleshooting")
@@ -439,6 +441,7 @@ func init() {
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.harnesses, "harness", endpointHarnessAuto, "Harnesses to configure: auto (detected runtimes), all, or a comma-separated list")
 	endpointRepairCmd.Flags().IntVar(&endpointOpts.grpcPort, "otlp-grpc-port", endpointconfig.DefaultGRPCPort, "Local OTLP gRPC port")
 	endpointRepairCmd.Flags().IntVar(&endpointOpts.httpPort, "otlp-http-port", endpointconfig.DefaultHTTPPort, "Local OTLP HTTP port")
+	endpointRepairCmd.Flags().IntVar(&endpointOpts.healthPort, "health-port", 0, "Local collector health-check port; 0 derives it from --otlp-http-port (13133 with the default ports)")
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.collectorPath, "collector", "", "Path to a beacon-otelcol binary")
 	endpointRepairCmd.Flags().BoolVar(&endpointOpts.includeRuntimeMetrics, "include-runtime-metrics", false, "Include generic process/runtime OTLP metrics and harness operational metrics (OpenClaw, Copilot CLI) in the runtime JSONL log")
 	endpointRepairCmd.Flags().BoolVar(&endpointOpts.includeCodexSpans, "include-codex-spans", false, "Include high-volume Codex OTLP spans for troubleshooting")

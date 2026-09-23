@@ -249,6 +249,12 @@ func serviceDomain(userMode bool) string {
 	return "system"
 }
 
+// launchdStderrPath is the collector job's StandardErrorPath, kept beside the plist template that
+// writes it so the two cannot drift.
+func launchdStderrPath(label string) string {
+	return "/tmp/" + label + ".err"
+}
+
 func plist(label, program, configPath string) string {
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -269,8 +275,8 @@ func plist(label, program, configPath string) string {
   <key>StandardOutPath</key>
   <string>/tmp/%s.out</string>
   <key>StandardErrorPath</key>
-  <string>/tmp/%s.err</string>
+  <string>%s</string>
 </dict>
 </plist>
-`, label, program, configPath, label, label)
+`, label, program, configPath, label, launchdStderrPath(label))
 }
