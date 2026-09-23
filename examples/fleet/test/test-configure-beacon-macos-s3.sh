@@ -45,12 +45,21 @@ start_fake() {
   printf '%s\n' "$2" >"$CASE_DIR/fixture.json"
   LOG="$CASE_DIR/requests.jsonl"
   MARK=0
-  python3 "$FAKE" --fixture "$CASE_DIR/fixture.json" --log "$LOG" --port-file "$CASE_DIR/port" --pkg "$PKG" &
+  python3 "$FAKE" --fixture "$CASE_DIR/fixture.json" --log "$LOG" --port-file "$CASE_DIR/port" --pkg "$PKG" 2>"$CASE_DIR/fake.err" &
   FAKE_PID=$!
+  # A cold CI runner can take several seconds to start Python, so allow 30s,
+  # but stop at once if the server has already exited.
   tries=0
   while [ ! -s "$CASE_DIR/port" ]; do
+    if ! kill -0 "$FAKE_PID" 2>/dev/null; then
+      cat "$CASE_DIR/fake.err" >&2
+      fail "fake Fleet exited before it started listening"
+    fi
     tries=$((tries + 1))
-    [ "$tries" -lt 50 ] || fail "fake Fleet did not start"
+    if [ "$tries" -ge 300 ]; then
+      cat "$CASE_DIR/fake.err" >&2
+      fail "fake Fleet did not start within 30s"
+    fi
     sleep 0.1
   done
   PORT="$(cat "$CASE_DIR/port")"
