@@ -29,6 +29,12 @@ const collectorHealthTimeout = 60 * time.Second
 // injectable so tests can avoid real installer/pkgutil/launchctl calls.
 type runnerFunc func(ctx context.Context, name string, args ...string) (string, error)
 
+// restoreScriptForwarders loads the S3, GCS and Falcon forwarders again after a rollback. The
+// package preinstall stopped them and only the postinstall restarts them, so a rolled-back update
+// would otherwise leave customer forwarding off until the next reboot. A variable so tests never
+// reach the machine's launchd.
+var restoreScriptForwarders = service.RestoreScriptForwarders
+
 func execRun(ctx context.Context, name string, args ...string) (string, error) {
 	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
 	return string(out), err
@@ -505,13 +511,14 @@ func (a *Applier) snapshotInstall() (string, error) {
 	return dst, nil
 }
 
-// rollback restores the pre-update install tree and restarts the collector. It
-// sets result.RolledBack only when a snapshot existed and was restored
-// successfully; with no snapshot (a first update) the failed new version stays
-// in place and RolledBack remains false, so telemetry never over-claims a
-// rollback that did not happen. Endpoint config/plists live outside the tree but
-// reference stable paths and a release-stable schema, so the restored older
-// binaries run against them consistently after the collector restarts.
+// rollback restores the pre-update install tree, restarts the collector and
+// reloads the package-helper forwarders. It sets result.RolledBack only when a
+// snapshot existed and was restored successfully; with no snapshot (a first
+// update) the failed new version stays in place and RolledBack remains false,
+// so telemetry never over-claims a rollback that did not happen. Endpoint
+// config/plists live outside the tree but reference stable paths and a
+// release-stable schema, so the restored older binaries run against them
+// consistently after the collector restarts.
 func (a *Applier) rollback(backup string, result *ApplyResult) error {
 	if backup == "" {
 		return nil
@@ -540,6 +547,9 @@ func (a *Applier) rollback(backup string, result *ApplyResult) error {
 	if !a.AllowInsecureTest {
 		if err := a.restartCollector(); err != nil {
 			return err
+		}
+		if err := restoreScriptForwarders(); err != nil {
+			return fmt.Errorf("restore forwarders: %w", err)
 		}
 	}
 	return nil
