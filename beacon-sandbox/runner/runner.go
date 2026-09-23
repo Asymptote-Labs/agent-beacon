@@ -52,6 +52,9 @@ type Artifacts struct {
 	// ArgvCheckRan records whether the argv scan actually executed, so a skipped check is
 	// never mistaken for a passing one.
 	ArgvCheckRan bool
+	// ForwardedLog is what the ingest stand-in received from the bundled Vector, for scenarios
+	// that verify forwarding. The other forwarding artifacts sit beside it in Dir.
+	ForwardedLog string
 	// Meta records what produced this run.
 	Meta map[string]string
 }
@@ -274,6 +277,7 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 		PreserveEnv: true, PathPrepend: lay.PathPrepend, Timeout: sc.Timeout() + time.Minute,
 	}
 	var res sandbox.Result
+	forwardOK := false
 	if sc.Install != nil {
 		installedLog, err := doInstall(ctx, g, sc, privileged, agent, lay, sh, &art, logf)
 		// Uninstall afterwards when the sandbox is this machine, whether or not the install
@@ -295,6 +299,12 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 			return art, err
 		}
 		logPath = installedLog
+		// Before the session, because the pack tails the log from the end: only lines written
+		// after Vector starts are shipped. A failed setup is recorded and the session still runs,
+		// so the capture half of the verdict is not lost with it.
+		if sc.VerifiesVectorForwarding() {
+			forwardOK = forwardSetup(ctx, g, agent, logPath, &art, logf) == nil
+		}
 		logf("running session against the installed endpoint (budget $%.2f, timeout %s)",
 			sc.Budget(), sc.Timeout())
 		res, err = g.Exec(ctx, sh.PlainSession(sessionDir, claudeFlags(sc, prompt, sh)), sessionOpts)
@@ -468,6 +478,10 @@ func Run(ctx context.Context, p sandbox.Provider, sc scenario.Scenario, opts Opt
 	art.RuntimeLog = localLog
 	logf("collected %s", localLog)
 
+	if sc.VerifiesVectorForwarding() {
+		forwardCollect(ctx, g, agent, logPath, canary, runDir, forwardOK, &art, logf)
+	}
+
 	// Reinstall before uninstall, for the same reason uninstall runs here at all: the log is already
 	// on the host, so restarting the collector cannot disturb a capture assertion.
 	if sc.VerifiesRestartOnReinstall() {
@@ -614,6 +628,7 @@ func imageSpecFor(p sandbox.Platform, sc scenario.Scenario, opts Options,
 		ClaudeVersion: opts.ClaudeVersion,
 		WithDocker:    sc.NeedsRealSystemd(),
 		NSSOnlyUser:   sc.NeedsNSSOnlyUser(),
+		WithVector:    sc.VerifiesVectorForwarding(),
 	}, logf)
 }
 

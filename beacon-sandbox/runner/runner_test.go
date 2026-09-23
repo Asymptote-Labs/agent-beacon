@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/asymptote-labs/agent-beacon/beacon-sandbox/check"
 	"github.com/asymptote-labs/agent-beacon/beacon-sandbox/image"
 	"github.com/asymptote-labs/agent-beacon/beacon-sandbox/scenario"
 )
@@ -257,6 +258,37 @@ func TestArgvSamplerEmitsWhetherItSawTheAgent(t *testing.T) {
 	for _, want := range []string{"saw_agent=0", "saw_agent=$saw_agent", "*claude*"} {
 		if !strings.Contains(script, want) {
 			t.Errorf("sampler no longer records whether the agent was in view (missing %q)", want)
+		}
+	}
+}
+
+// The sampler's device-key matcher has to find a key on a command line and must not fire on the
+// forwarding probe's own script, which spells the key's prefix while generating it. Run through
+// the host's awk, since a pattern this tool only ever reads as a string proves nothing.
+func TestArgvSamplerDeviceKeyMatcher(t *testing.T) {
+	awk, err := exec.LookPath("awk")
+	if err != nil {
+		t.Skip("no awk on this host")
+	}
+	if !strings.Contains(posixShell{}.ArgvSampler(), "/"+deviceKeyAwkPattern+"/") {
+		t.Fatal("the sampler does not use deviceKeyAwkPattern")
+	}
+	cases := map[string]bool{
+		"vector --token bcn_device_test_0123456789abcdef":                      true,
+		"curl -H Authorization: Bearer bcn_device_Ab12Cd34Ef56":                true,
+		`sh -c key="bcn_device_test_$(od -An -tx1 -N16 /dev/urandom)"`:         false,
+		`printf '{"device_key": "%s"}\n' "$key"`:                               false,
+		"/opt/beacon/bin/vector --config /home/agent/.beacon/pack/vector.toml": false,
+	}
+	for line, want := range cases {
+		cmd := exec.Command(awk, "/"+deviceKeyAwkPattern+"/ {found=1} END {exit !found}")
+		cmd.Stdin = strings.NewReader(line + "\n")
+		got := cmd.Run() == nil
+		if got != want {
+			t.Errorf("awk matcher on %q = %v, want %v", line, got, want)
+		}
+		if re := check.DeviceKeyPattern.MatchString(line); re != want {
+			t.Errorf("check.DeviceKeyPattern on %q = %v, want %v; the two must agree", line, re, want)
 		}
 	}
 }

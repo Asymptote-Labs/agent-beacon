@@ -22,6 +22,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/beacon-sandbox/check"
 	"github.com/asymptote-labs/agent-beacon/beacon-sandbox/credentials"
 	"github.com/asymptote-labs/agent-beacon/beacon-sandbox/dispatch"
+	"github.com/asymptote-labs/agent-beacon/beacon-sandbox/image"
 	"github.com/asymptote-labs/agent-beacon/beacon-sandbox/runner"
 	"github.com/asymptote-labs/agent-beacon/beacon-sandbox/sandbox"
 	"github.com/asymptote-labs/agent-beacon/beacon-sandbox/scenario"
@@ -428,8 +429,40 @@ func judge(sc scenario.Scenario, art runner.Artifacts, creds credentials.Resolve
 	check.Reinstall(&v, lifecycle)
 	check.UnprivilegedUninstall(&v, lifecycle)
 	check.FailedReinstallRollback(&v, lifecycle)
+	check.Forwarding(&v, forwardOf(sc, art))
 	v.Resolve()
 	return v, log
+}
+
+// forwardOf gathers what the forwarding probe left behind. Everything comes from the run directory
+// and meta, never from the live probe, so `verify` re-judges a saved run the same way.
+func forwardOf(sc scenario.Scenario, art runner.Artifacts) check.Forward {
+	f := check.Forward{
+		Asked:         sc.VerifiesVectorForwarding(),
+		Ran:           art.Meta["forward_ran"],
+		Err:           art.Meta["forward_error"],
+		VectorExe:     art.Meta["forward_vector_exe"],
+		WantVectorExe: image.VectorPath,
+		Canary:        art.Canary,
+	}
+	if !f.Asked {
+		return f
+	}
+	f.Received, f.ReceivedErr = check.ReadLog(filepath.Join(art.Dir, runner.ForwardedLogName))
+	f.Requests, f.RequestsErr = check.ReadForwardRequests(filepath.Join(art.Dir, runner.ForwardRequestsName))
+	f.Runtime, f.RuntimeErr = check.ReadLog(filepath.Join(art.Dir, runner.ForwardRuntimeName))
+	// Everything else collected, searched for a device key. Meta holds the probe's own output.
+	f.Text = map[string]string{}
+	for _, name := range []string{runner.ForwardVectorOutName, runner.ForwardRequestsName,
+		"runtime.jsonl", "claude-result.json"} {
+		if b, err := os.ReadFile(filepath.Join(art.Dir, name)); err == nil {
+			f.Text[name] = string(b)
+		}
+	}
+	if b, err := json.Marshal(art.Meta); err == nil {
+		f.Text["meta"] = string(b)
+	}
+	return f
 }
 
 // safetyOf folds the out-of-band safety signals into a verdict.
@@ -588,7 +621,7 @@ func judgeRunDir(root, dir, mutate string) (check.Verdict, error) {
 		}
 	}
 
-	art := runner.Artifacts{RuntimeLog: logPath, Meta: meta}
+	art := runner.Artifacts{Dir: dir, RuntimeLog: logPath, Meta: meta}
 	art.Canary = meta["canary"]
 	// Sentinel state is not re-derivable offline, so trust what the run recorded -- including
 	// the detail, which is the evidence a finding quotes. Dropping it made re-judged verdicts

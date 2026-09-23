@@ -205,6 +205,7 @@ go run ./cmd/beacon-sandbox run                        # all of them, ~30 min
 | `s07-denied-tool` | Approvals and denials |
 | `i01-install-supervised` | `beacon endpoint install`, then a session against the installed collector |
 | `i02-install-systemd` | A system-mode install managed by systemd, then a session against it |
+| `i04-vector-forwarding` | The Vector the Linux packages ship, forwarding a session's events to a local stand-in for Beacon's ingest service |
 
 Use one test while you are iterating. Run all of them before opening a pull request.
 

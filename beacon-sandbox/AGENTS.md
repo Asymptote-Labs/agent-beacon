@@ -66,6 +66,7 @@ real money on the user's account, so:
 | Approval or permission handling | `--scenario s07-denied-tool` |
 | `endpoint install`, config paths, service startup | `--scenario i01-install-supervised` |
 | The systemd backend, unit files, Linux system mode | `--scenario i02-install-systemd` |
+| A Vector pack, the bundled Vector version, or its secrets file | `--scenario i04-vector-forwarding` |
 | Anything Windows | `--provider github --scenario w00-probe` |
 | Something broad, or preparing a PR | the whole suite (no `--scenario`) |
 

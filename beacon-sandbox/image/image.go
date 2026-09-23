@@ -31,6 +31,20 @@ const (
 	// build. Empty string means "latest", which makes runs non-reproducible.
 	DefaultClaudeVersion = "2.1.220"
 
+	// VectorVersion and VectorSHA256 pin the Vector that WithVector installs, which is the release
+	// and build the Linux packages bundle. musl because it is the static build: the gnu build links
+	// glibc's loader and would not run on every host the packages support.
+	//
+	// 0.56.0 because it is the newest release that expands ${VAR} and ${VAR:-default} in config
+	// files by default, which every pack Beacon renders relies on. 0.57 stops expanding the
+	// defaulted form and 0.58 stops expanding either without an opt-in flag. Keep this in step with
+	// packaging/linux/fetch-vector.sh.
+	VectorVersion = "0.56.0"
+	VectorSHA256  = "8c114c5e9fd9646516f014d5d837690447cf0d4f43ba4a3746713bc0612b039b"
+	// VectorPath is where the Linux packages install Vector, and the first fixed location Beacon's
+	// Vector discovery tries after --vector-bin and BEACON_VECTOR_BIN.
+	VectorPath = BeaconDir + "/vector"
+
 	// DefaultBase is the only distro in the matrix today. M0 established that Modal
 	// offers no arch selection, so this is amd64.
 	DefaultBase = "ubuntu:24.04"
@@ -189,6 +203,10 @@ type Spec struct {
 	// a directory-backed fleet. See scenario.Install.NSSOnlyUser for why that distinction decides
 	// whether a system-mode install can configure anyone at all.
 	NSSOnlyUser bool
+
+	// WithVector installs the release Vector at VectorPath, where the Linux packages put it. See
+	// scenario.Install.VerifyVectorForwarding.
+	WithVector bool
 }
 
 // LinuxArtifacts are the binaries the sandbox needs, as host paths.
@@ -285,6 +303,10 @@ func Build(spec Spec, log func(string, ...any)) (sandbox.ImageSpec, error) {
 			AgentUser, WorkDir, WorkDir),
 	)
 
+	if spec.WithVector {
+		layers = append(layers, vectorLayer())
+	}
+
 	if spec.WithDocker {
 		// Group membership is set at image build time; adding it later would need a re-login to
 		// take effect, and the session runs as this user.
@@ -344,6 +366,35 @@ func accountLayers(nssOnly bool) []string {
 			"echo 'nss lane broken: %s leaked into /etc/passwd' >&2; exit 1; fi",
 			AgentUser, AgentUser),
 	}
+}
+
+// vectorLayer downloads the release Vector and installs it where the Linux packages do.
+//
+// At image build because that is the only moment with unrestricted egress; a running sandbox can
+// reach nothing but the model API. Appended after the shared layers so every other scenario keeps
+// its cached image.
+//
+// Each check fails the build instead of a paid run. The archive must match the pinned hash, and
+// the release's own SHA256SUMS must list the same hash, so a typo in the pin is caught along with
+// a bad download. The binary must have no PT_INTERP program header, because the reason to ship the
+// musl build is that it is static; this is read with python3 since the image has no readelf. The
+// layer ends by running `vector --version`.
+func vectorLayer() string {
+	archive := fmt.Sprintf("vector-%s-x86_64-unknown-linux-musl.tar.gz", VectorVersion)
+	base := "https://packages.timber.io/vector/" + VectorVersion
+	noInterp := `python3 -c 'import struct,sys; f=open(sys.argv[1],"rb").read(); ` +
+		`o=struct.unpack_from("<Q",f,0x20)[0]; e,n=struct.unpack_from("<HH",f,0x36); ` +
+		`sys.exit(any(struct.unpack_from("<I",f,o+i*e)[0]==3 for i in range(n)))' ` + VectorPath
+	return "RUN set -e; cd /tmp; " +
+		fmt.Sprintf("curl -fsSLO %s/%s; ", base, archive) +
+		fmt.Sprintf("curl -fsSL %s/vector-%s-SHA256SUMS -o vector-sums; ", base, VectorVersion) +
+		fmt.Sprintf("echo '%s  %s' | sha256sum -c -; ", VectorSHA256, archive) +
+		fmt.Sprintf("grep -q '^%s  %s$' vector-sums; ", VectorSHA256, archive) +
+		fmt.Sprintf("mkdir vector-x && tar -xzf %s -C vector-x; ", archive) +
+		fmt.Sprintf(`install -m 0755 "$(find vector-x -path '*/bin/vector' -type f | head -1)" %s; `, VectorPath) +
+		fmt.Sprintf("rm -rf vector-x vector-sums %s; ", archive) +
+		noInterp + " || { echo 'vector is dynamically linked' >&2; exit 1; }; " +
+		VectorPath + " --version"
 }
 
 // PostPushLayers are the commands that must run after the artifact files land. The

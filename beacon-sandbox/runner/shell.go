@@ -142,6 +142,10 @@ func (posixShell) ArgvVerdictPath() string { return "/tmp/beacon-sandbox-argv-ve
 // used `grep -qF "$KEY"`, which the shell expands into grep's argv, so the `ps` in the same
 // pipeline saw the grep process and reported a leak the tool had created. awk reads the key
 // from ENVIRON instead, and the sampler's own processes are skipped as a second guard.
+//
+// It also searches for an Asymptote device key by shape. The forwarding probe generates that key
+// inside the guest, so no process outside it knows the value to search for; see
+// deviceKeyAwkPattern.
 func (s posixShell) ArgvSampler() string {
 	return fmt.Sprintf(`set -u
 rm -f %[1]s
@@ -158,6 +162,11 @@ scan() {
        index($0,k){found=1}
        END{exit !found}'
 }
+scan_device() {
+  awk '/awk|ARGV_SAMPLER_SELF/ {next}
+       /%[3]s/ {found=1}
+       END{exit !found}'
+}
 n=0
 saw_agent=0
 # Bounded so a leaked sandbox cannot spin forever; the instance is destroyed long before this.
@@ -168,7 +177,11 @@ while [ "$n" -lt 900 ]; do
   # process holding the key is not evidence of anything.
   case "$procs" in *claude*) saw_agent=1 ;; esac
   if printf '%%s\n' "$procs" | scan; then
-    echo "ARGV_LEAK samples=$n saw_agent=$saw_agent via=ps" > "$VERDICT"
+    echo "ARGV_LEAK samples=$n saw_agent=$saw_agent via=ps what=api_key" > "$VERDICT"
+    exit 0
+  fi
+  if printf '%%s\n' "$procs" | scan_device; then
+    echo "ARGV_LEAK samples=$n saw_agent=$saw_agent via=ps what=device_key" > "$VERDICT"
     exit 0
   fi
   for f in /proc/[0-9]*/cmdline; do
@@ -176,7 +189,11 @@ while [ "$n" -lt 900 ]; do
     cmd="$(tr '\0' '\n' < "$f" 2>/dev/null || true)"
     case "$cmd" in *claude*) saw_agent=1 ;; esac
     if printf '%%s\n' "$cmd" | scan; then
-      echo "ARGV_LEAK samples=$n saw_agent=$saw_agent via=proc" > "$VERDICT"
+      echo "ARGV_LEAK samples=$n saw_agent=$saw_agent via=proc what=api_key" > "$VERDICT"
+      exit 0
+    fi
+    if printf '%%s\n' "$cmd" | scan_device; then
+      echo "ARGV_LEAK samples=$n saw_agent=$saw_agent via=proc what=device_key" > "$VERDICT"
       exit 0
     fi
   done
@@ -186,8 +203,15 @@ done
 SAMPLER
 chmod +x %[2]s
 nohup %[2]s %[1]s > /dev/null 2>&1 &
-echo ARGV_SAMPLER_STARTED`, s.ArgvVerdictPath(), "/tmp/beacon-sandbox-argv-sampler.sh")
+echo ARGV_SAMPLER_STARTED`, s.ArgvVerdictPath(), "/tmp/beacon-sandbox-argv-sampler.sh", deviceKeyAwkPattern)
 }
+
+// deviceKeyAwkPattern is check.DeviceKeyPattern spelled for awk: "bcn_device_" and at least eight
+// key characters. The eight are written out because mawk, Ubuntu's default awk, has not always
+// supported interval expressions. The minimum length is what keeps the forwarding probe's own
+// script from matching: it contains `bcn_device_test_$(od ...)`, five key characters and then `$`.
+const deviceKeyAwkPattern = `bcn_device_[A-Za-z0-9_][A-Za-z0-9_][A-Za-z0-9_][A-Za-z0-9_]` +
+	`[A-Za-z0-9_][A-Za-z0-9_][A-Za-z0-9_][A-Za-z0-9_]`
 
 // ---------------------------------------------------------------------------
 // PowerShell

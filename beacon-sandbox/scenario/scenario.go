@@ -119,6 +119,15 @@ type Install struct {
 	// Only the account's *visibility* changes; the username, home directory and uid are otherwise
 	// identical, so everything a scenario asserts stays comparable to the local-account lanes.
 	NSSOnlyUser bool `yaml:"nss_only_user,omitempty"`
+	// VerifyVectorForwarding runs the bundled Vector against Beacon's Asymptote pack and checks
+	// what reached a loopback ingest stand-in.
+	//
+	// The Linux packages ship Vector at /opt/beacon/bin/vector, and it is the engine behind Beacon
+	// Managed and six customer-managed destinations. Nothing else in the suite runs it, so a pack
+	// Vector rejects, a secret backend that sends the wrong key, or a binary that does not start
+	// on a stripped host would all ship unnoticed. The stand-in serves the ingest contract on
+	// 127.0.0.1, so the run needs no account and no egress beyond the model API.
+	VerifyVectorForwarding bool `yaml:"verify_vector_forwarding,omitempty"`
 }
 
 // Platform selects the guest OS family a scenario is written for.
@@ -213,6 +222,11 @@ func (s Scenario) Validate() error {
 		return fmt.Errorf("%s: platform %q must be linux or windows", s.ID, s.Platform)
 	}
 	if s.TargetPlatform() == PlatformWindows {
+		// Vector is installed by the Linux image. The Windows runner is provisioned by CI and has
+		// no bundled Vector to run.
+		if s.VerifiesVectorForwarding() {
+			return fmt.Errorf("%s: verify_vector_forwarding is Linux-only", s.ID)
+		}
 		// systemd does not exist on Windows, and the nested-container recipe that provides it is
 		// a Linux arrangement. A scenario asking for both would be arranged as neither and would
 		// then quietly verify whatever backend happened to be selected.
@@ -256,6 +270,13 @@ func (s Scenario) Validate() error {
 			if s.Install.NSSOnlyUser && s.Install.Mode != "system" {
 				return fmt.Errorf("%s: nss_only_user requires mode=system; a user-mode install "+
 					"resolves $HOME and never looks the account up by name", s.ID)
+			}
+			// The probe runs Vector by hand as the agent user, against the user-mode log and secrets
+			// file. System mode keeps both under root-owned paths, and the nested lane runs the
+			// endpoint somewhere the stand-in is not, so either would need a different probe.
+			if s.Install.VerifyVectorForwarding && (s.Install.Mode == "system" || s.Install.NeedsRealSystemd) {
+				return fmt.Errorf("%s: verify_vector_forwarding needs a user-mode install outside the "+
+					"nested systemd lane, because the probe runs Vector as the agent user", s.ID)
 			}
 			// A user-mode uninstall needs no privileges, so there is no privilege failure to catch
 			// and the probe would assert something that cannot happen.
@@ -456,6 +477,11 @@ func (s Scenario) VerifiesUnprivilegedUninstallFails() bool {
 // NeedsNSSOnlyUser reports whether the session account must be resolvable only through NSS.
 func (s Scenario) NeedsNSSOnlyUser() bool {
 	return s.Install != nil && s.Install.NSSOnlyUser
+}
+
+// VerifiesVectorForwarding reports whether the bundled Vector must forward to a loopback stand-in.
+func (s Scenario) VerifiesVectorForwarding() bool {
+	return s.Install != nil && s.Install.VerifyVectorForwarding
 }
 
 // NeedsRealSystemd reports whether this scenario must run somewhere systemd is genuinely PID 1.
