@@ -120,6 +120,7 @@ type ToolInput struct {
 	Pattern     string `json:"pattern,omitempty"`
 	Path        string `json:"path,omitempty"`
 	URL         string `json:"url,omitempty"`
+	OutputMode  string `json:"output_mode,omitempty"`
 	Description string `json:"description,omitempty"`
 }
 

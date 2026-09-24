@@ -212,6 +212,7 @@ func maskedToolInput(in map[string]interface{}) mdr.ToolInput {
 		Pattern:     get("pattern"),
 		Path:        get("path"),
 		URL:         get("url"),
+		OutputMode:  get("output_mode"),
 		Description: get("description"),
 	}
 	if out.Path == "" {

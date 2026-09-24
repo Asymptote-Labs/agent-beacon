@@ -243,6 +243,19 @@ func TestPolicyToolRoutesCredentialFileReads(t *testing.T) {
 	}
 }
 
+func TestPolicyToolSendsTheGrepOutputMode(t *testing.T) {
+	// The judge needs it: content prints matching lines, the default prints file names.
+	judge := &fakeJudge{response: `{"decision":"allow"}`}
+	setupPolicyHookTest(t, judge)
+	runHookWithInput(t, runPolicyTool, map[string]interface{}{
+		"session_id": "s", "tool_name": "Grep",
+		"tool_input": map[string]interface{}{"pattern": "API_KEY", "path": "/Users/zac/Projects/holly/.env.local", "output_mode": "content"},
+	})
+	if len(judge.requests) != 1 || judge.requests[0].Tool.Input.OutputMode != "content" {
+		t.Fatalf("req=%+v", judge.requests)
+	}
+}
+
 func TestPolicyToolIgnoresOtherPlatforms(t *testing.T) {
 	judge := &fakeJudge{response: `{"decision":"deny","message":"blocked"}`}
 	setupPolicyHookTest(t, judge)

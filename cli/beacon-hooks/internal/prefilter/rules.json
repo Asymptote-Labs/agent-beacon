@@ -1,5 +1,5 @@
 {
-  "version": "2026-09-24.2",
+  "version": "2026-09-24.3",
   "rules": [
     {
       "id": "secret-source.npm-config",
@@ -77,12 +77,28 @@
       "pattern": "(?i)(?:(?:^|/)\\.env(?:\\.[\\w.-]+)?\\*?$|(?:^|/)\\.env\\*|\\.npmrc$|pnpm/(?:rc|config\\.yaml)$|\\.yarnrc(?:\\.yml)?$|\\.aws/credentials$|application_default_credentials\\.json$|\\.config/gcloud/|\\.docker/config\\.json$|\\.kube/config$|\\.netrc$|\\.git-credentials$|\\.config/gh/hosts\\.yml$|/id_(?:rsa|ed25519|ecdsa|dsa)$|\\.pgpass$|\\.pypirc$)"
     },
     {
+      "id": "credential-file.transfer",
+      "category": "credential-file",
+      "tools": [
+        "Bash"
+      ],
+      "pattern": "(?i)\\b(?:scp|rsync|sftp)\\b[^\\n;&|]*?(?:(?:^|[\\s/'\"])\\.env(?:\\.[\\w.-]+)?|\\.npmrc|pnpm/(?:rc|config\\.yaml)|\\.aws/credentials|\\.docker/config\\.json|\\.kube/config|\\.netrc|\\.git-credentials|\\.config/gh/hosts\\.yml|\\.pgpass|\\.pypirc)\\b[^\\n;&|]*?\\s[\\w.@-]+:"
+    },
+    {
       "id": "env-dump",
       "category": "env-dump",
       "tools": [
         "Bash"
       ],
-      "pattern": "(?:^|[;&|(]\\s*|\\bsudo\\s+)(?:printenv|env|export\\s+-p|set)\\s*(?:$|[|;&>)])|\\bprintenv\\s+[A-Za-z_]*(?:TOKEN|SECRET|PASSWORD|KEY)|\\becho\\s+[\"']?\\$\\{?[A-Za-z_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|ACCESS_KEY)"
+      "pattern": "(?:^|[;&|(]\\s*|\\bsudo\\s+)(?:printenv|env|export\\s+-p|set)\\s*(?:$|[|;&>)])|\\bprintenv\\s+[A-Za-z_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|KEY\\b)|\\becho\\s+[\"']?\\$\\{?[A-Za-z_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|KEY\\b)"
+    },
+    {
+      "id": "env-dump",
+      "category": "env-dump",
+      "tools": [
+        "Bash"
+      ],
+      "pattern": "\\b(?:node|bun|deno|python3?|ruby|perl)\\b[^\\n]*?\\s(?:-e|-c|-p|--eval|--print)\\s[^\\n]*?(?:(?:process\\.env|Bun\\.env|Deno\\.env\\.get\\(|os\\.environ|os\\.getenv\\(|ENV|\\$ENV\\{)[\\[.('\\\"\\s]*[A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|KEY\\b|APIKEY|CREDENTIAL)|(?:console\\.log|print|puts|JSON\\.stringify|pp)\\(?\\s*(?:process\\.env|Bun\\.env|os\\.environ|ENV)\\s*\\)?(?:[\\s;'\\\"]|$))"
     },
     {
       "id": "secret.on-argv",
