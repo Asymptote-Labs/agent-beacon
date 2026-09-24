@@ -322,6 +322,9 @@ func runPolicyPrompt(cmd *cobra.Command, args []string) {
 	outputJSON(map[string]interface{}{
 		"decision": "block",
 		"reason":   promptBlockReason(findings),
+		// Claude Code otherwise repeats the blocked prompt, secret included,
+		// under the reason.
+		"suppressOriginalPrompt": true,
 	})
 	// The verdict is on stdout; recording and reporting cannot change it.
 	_ = os.Stdout.Sync()
@@ -383,23 +386,25 @@ func runPolicyAllow(cmd *cobra.Command, args []string) {
 	}
 	sessionID := resolveSessionID(input, platformFlag)
 	reason := clipPolicy(secretscan.Mask(strings.TrimSpace(getFirstStr(input, "command_args"))), 500)
-	block := func(msg string) { outputJSON(map[string]interface{}{"decision": "block", "reason": msg}) }
+	block := func(msg string) {
+		outputJSON(map[string]interface{}{"decision": "block", "reason": msg, "suppressOriginalPrompt": true})
+	}
 
 	now := time.Now().UTC()
 	blocked, ok := policystate.LatestPromptBlock(sessionID, now, promptOverrideWindow)
 	if !ok {
-		block("Nothing to override: Beacon has not blocked a prompt in this session in the last 10 minutes.")
+		block("Nothing to override.\nBeacon hasn't blocked a prompt in this session in the last 10 minutes.")
 		return
 	}
 	if reason == "" {
-		block("Add a reason: /beacon-allow <why this is OK to send>. Beacon records it with the override.")
+		block("Add a reason:  /beacon-allow <reason>\nBeacon records it with the override.")
 		return
 	}
 	if err := policystate.GrantPromptOverride(sessionID, blocked.ToolUseID, reason, now); err != nil {
-		block("Beacon could not record the override on this machine; the prompt stays blocked.")
+		block("Beacon couldn't record the override on this machine.\nThe prompt stays blocked.")
 		return
 	}
-	block(fmt.Sprintf("Beacon recorded your override (%q). Resend the blocked prompt within 10 minutes and it will go through once.", reason))
+	block(fmt.Sprintf("Override recorded: %q\nResend the blocked prompt within 10 minutes. It will go through once.", reason))
 	_ = os.Stdout.Sync()
 
 	logger := newHookLogger("policy-allow", platformFlag, sessionID)
@@ -424,13 +429,16 @@ func runPolicyAllow(cmd *cobra.Command, args []string) {
 func promptBlockReason(findings []secretscan.Finding) string {
 	first := findings[0]
 	what := fmt.Sprintf("%s (%s)", first.Label, first.Masked)
-	if len(findings) > 1 {
-		what += fmt.Sprintf(" and %d more secret value(s)", len(findings)-1)
+	if extra := len(findings) - 1; extra == 1 {
+		what += " and 1 more secret"
+	} else if extra > 1 {
+		what += fmt.Sprintf(" and %d more secrets", extra)
 	}
-	return "Beacon blocked this prompt: it contains " + what + ". Secrets must not be sent to the model. " +
-		"Remove the value and refer to the secret by name; to use it in a command, inject it with " +
-		"`infisical run -- <command>`. To send it anyway, run /beacon-allow <why> and then resend the prompt. " +
-		"Policy: Secret exposure."
+	return "A Beacon policy (Secret exposure) blocked this prompt.\n" +
+		"It contains " + what + ". Secrets shouldn't be sent to the model.\n" +
+		"Refer to the secret by name instead, or inject it with: infisical run -- <command>\n" +
+		"\n" +
+		"To send it anyway:  /beacon-allow <reason>"
 }
 
 // ---------------------------------------------------------------------------

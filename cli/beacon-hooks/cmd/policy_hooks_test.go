@@ -466,24 +466,29 @@ func TestBeaconAllowOverridesOneBlockedPromptOnce(t *testing.T) {
 
 	// Nothing to override yet.
 	out := runHookWithInput(t, runPolicyAllow, allowInput("dev token"))
-	if out["decision"] != "block" || !strings.Contains(out["reason"].(string), "Nothing to override") {
+	if out["decision"] != "block" || !strings.HasPrefix(out["reason"].(string), "Nothing to override.") {
 		t.Fatalf("allow before a block: %v", out)
 	}
 
 	out = runHookWithInput(t, runPolicyPrompt, promptInput(prompt))
-	if out["decision"] != "block" || !strings.Contains(out["reason"].(string), "/beacon-allow") {
+	if out["decision"] != "block" || out["suppressOriginalPrompt"] != true {
 		t.Fatalf("block: %v", out)
+	}
+	if lines := strings.Split(out["reason"].(string), "\n"); lines[0] != "A Beacon policy (Secret exposure) blocked this prompt." ||
+		lines[len(lines)-1] != "To send it anyway:  /beacon-allow <reason>" || lines[len(lines)-2] != "" {
+		t.Fatalf("block layout: %q", out["reason"])
 	}
 
 	// A reason is required.
 	out = runHookWithInput(t, runPolicyAllow, allowInput("   "))
-	if !strings.Contains(out["reason"].(string), "Add a reason") {
+	if !strings.HasPrefix(out["reason"].(string), "Add a reason:  /beacon-allow <reason>") {
 		t.Fatalf("allow without a reason: %v", out)
 	}
 
 	out = runHookWithInput(t, runPolicyAllow, allowInput("staging token, rotating it after"))
-	if out["decision"] != "block" || !strings.Contains(out["reason"].(string), "Beacon recorded your override") {
-		t.Fatalf("allow: %v", out)
+	if out["decision"] != "block" || out["suppressOriginalPrompt"] != true ||
+		out["reason"] != "Override recorded: \"staging token, rotating it after\"\nResend the blocked prompt within 10 minutes. It will go through once." {
+		t.Fatalf("allow: %q", out["reason"])
 	}
 	if len(judge.feedback) != 1 {
 		t.Fatalf("feedback: %+v", judge.feedback)
