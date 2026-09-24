@@ -63,6 +63,17 @@ Useful flags:
 `--jev-endpoint` can also come from `BEACON_JEV_ENDPOINT`, and the model can come
 from `BEACON_JEV_MODEL`.
 
+Each completed evaluation stores a `score`, the plain mean of the three rubric
+probabilities. A trace becomes a review candidate only when both hold:
+
+- `task_success` is at least `0.50`. This is a precondition, so a trace the
+  evaluator judged as failed is never promoted, however high the other two
+  answers are.
+- `score` is at least `0.60`.
+
+Text output lists each completed evaluation that was not promoted with the
+reason, for example `Not promoted: eval_... (task_success 0.27 is below 0.50)`.
+
 List and inspect stored evaluations:
 
 ```bash

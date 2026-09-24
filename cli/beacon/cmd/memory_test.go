@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -112,6 +113,93 @@ func TestMemoryEvaluationsRunPersistsMockedJevResult(t *testing.T) {
 	}
 	if len(list) != 1 || !strings.HasPrefix(list[0].ID, "eval_") {
 		t.Fatalf("persisted evaluations = %#v", list)
+	}
+}
+
+// Issue #649: a trace the judge scored as failed must not become a candidate even
+// when the mean clears the score threshold. The stored and printed score is the
+// unchanged mean; only the promotion decision applies the task_success gate.
+func TestMemoryEvaluationsRunDoesNotPromoteFailedTask(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		answers        string
+		wantScore      string
+		wantTextScore  string
+		wantCandidates int
+		wantNote       string
+	}{
+		{
+			name:          "failed task clears the mean",
+			answers:       `{"answers":{"task_success":{"type":"noul","noul":0.27},"reusable_correction":{"type":"noul","noul":0.86},"evidence_supported":{"type":"noul","noul":0.69}}}`,
+			wantScore:     "0.6067",
+			wantTextScore: "0.61",
+			wantNote:      "(task_success 0.27 is below 0.50)",
+		},
+		{
+			name:           "successful task still promotes",
+			answers:        `{"answers":{"task_success":{"type":"noul","noul":0.9},"reusable_correction":{"type":"noul","noul":0.8},"evidence_supported":{"type":"noul","noul":0.7}}}`,
+			wantScore:      "0.8000",
+			wantTextScore:  "0.80",
+			wantCandidates: 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, jsonOutput := range []bool{true, false} {
+				logPath, project := writeMemoryCommandFixture(t)
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_, _ = w.Write([]byte(tc.answers))
+				}))
+				resetMemoryOpts(t)
+				memoryOpts.userMode = true
+				memoryOpts.logPath = logPath
+				memoryOpts.projectPath = project
+				memoryOpts.traceID = "session:cursor:s1"
+				memoryOpts.jsonOutput = jsonOutput
+				memoryOpts.jevEndpoint = server.URL
+				memoryOpts.jevAPIKey = "test-key"
+
+				var out bytes.Buffer
+				cmd := &cobra.Command{}
+				cmd.SetOut(&out)
+				err := runMemoryEvaluationsRun(cmd, nil)
+				server.Close()
+				if err != nil {
+					t.Fatalf("runMemoryEvaluationsRun(json=%v) returned error: %v", jsonOutput, err)
+				}
+				if jsonOutput {
+					var result evaluationRunResult
+					if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+						t.Fatalf("decode result: %v\n%s", err, out.String())
+					}
+					if len(result.Evaluations) != 1 || fmt.Sprintf("%.4f", result.Evaluations[0].Score) != tc.wantScore {
+						t.Fatalf("evaluations = %#v, want one with score %s", result.Evaluations, tc.wantScore)
+					}
+					if len(result.Candidates) != tc.wantCandidates {
+						t.Fatalf("candidates = %#v, want %d", result.Candidates, tc.wantCandidates)
+					}
+				} else {
+					text := out.String()
+					if !strings.Contains(text, "\t"+tc.wantTextScore+"\t") {
+						t.Fatalf("text output does not print the unchanged score %s:\n%s", tc.wantTextScore, text)
+					}
+					switch {
+					case tc.wantNote != "" && !strings.Contains(text, "Not promoted: eval_"):
+						t.Fatalf("text output does not say the evaluation was not promoted:\n%s", text)
+					case tc.wantNote != "" && !strings.Contains(text, tc.wantNote):
+						t.Fatalf("text output missing the gate reason %q:\n%s", tc.wantNote, text)
+					case tc.wantNote == "" && strings.Contains(text, "Not promoted:"):
+						t.Fatalf("promoted evaluation reported as not promoted:\n%s", text)
+					}
+				}
+				stored, err := memoryStore().ListCandidates(learning.Query{ProjectPath: project})
+				if err != nil {
+					t.Fatalf("ListCandidates: %v", err)
+				}
+				if len(stored) != tc.wantCandidates {
+					t.Fatalf("stored candidates = %#v, want %d", stored, tc.wantCandidates)
+				}
+			}
+		})
 	}
 }
 

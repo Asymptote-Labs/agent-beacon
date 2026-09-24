@@ -2,18 +2,74 @@ package learning
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
+// CandidateScoreThreshold is the minimum evaluation score (the mean of the
+// rubric probabilities) a completed evaluation needs to become a candidate.
 const CandidateScoreThreshold = 0.60
 
-func CandidateFromEvaluation(eval asymptoteobserve.LearningEvaluationV1) (asymptoteobserve.LearningCandidateV1, bool) {
+// TaskSuccessQuestionID names the rubric question that asks whether the trace
+// completed the user's task.
+const TaskSuccessQuestionID = "task_success"
+
+// CandidateTaskSuccessThreshold is a precondition that the score cannot stand in
+// for. The score is a mean, so two high answers about reusability and evidence
+// could outvote a judge who said the task failed: 0.27/0.86/0.69 averages 0.6067
+// and cleared CandidateScoreThreshold (#649). A trace whose task_success
+// probability is below this value is never promoted, whatever its score.
+const CandidateTaskSuccessThreshold = 0.50
+
+// PromotionDecision reports whether a completed evaluation should become a
+// memory candidate, and when it should not, why. It applies the task_success
+// precondition before the score threshold, so the stored Score keeps its meaning
+// (the plain mean shown to reviewers) while a failed task can no longer be
+// averaged into a candidate. An evaluation without a task_success answer fails
+// the precondition, because nothing says the task succeeded.
+func PromotionDecision(eval asymptoteobserve.LearningEvaluationV1) (bool, string) {
 	if eval.Status != asymptoteobserve.LearningEvaluationStatusCompleted {
-		return asymptoteobserve.LearningCandidateV1{}, false
+		return false, fmt.Sprintf("evaluation status is %s, not %s", eval.Status, asymptoteobserve.LearningEvaluationStatusCompleted)
+	}
+	taskSuccess, ok := questionProbability(eval, TaskSuccessQuestionID)
+	if !ok {
+		return false, TaskSuccessQuestionID + " was not answered"
+	}
+	if taskSuccess < CandidateTaskSuccessThreshold {
+		return false, fmt.Sprintf("%s %s is below %.2f", TaskSuccessQuestionID, formatBelow(taskSuccess, CandidateTaskSuccessThreshold), CandidateTaskSuccessThreshold)
 	}
 	if eval.Score < CandidateScoreThreshold {
+		return false, fmt.Sprintf("score %s is below %.2f", formatBelow(eval.Score, CandidateScoreThreshold), CandidateScoreThreshold)
+	}
+	return true, ""
+}
+
+// formatBelow renders value, known to be below limit, with the fewest decimals
+// (at least two) that still read as below it, so a reason never says "0.50 is
+// below 0.50" for 0.4999.
+func formatBelow(value, limit float64) string {
+	for precision := 2; precision <= 6; precision++ {
+		text := strconv.FormatFloat(value, 'f', precision, 64)
+		if parsed, err := strconv.ParseFloat(text, 64); err == nil && parsed < limit {
+			return text
+		}
+	}
+	return strconv.FormatFloat(value, 'g', -1, 64)
+}
+
+func questionProbability(eval asymptoteobserve.LearningEvaluationV1, id string) (float64, bool) {
+	for _, question := range eval.Questions {
+		if question.ID == id {
+			return question.Probability, true
+		}
+	}
+	return 0, false
+}
+
+func CandidateFromEvaluation(eval asymptoteobserve.LearningEvaluationV1) (asymptoteobserve.LearningCandidateV1, bool) {
+	if ok, _ := PromotionDecision(eval); !ok {
 		return asymptoteobserve.LearningCandidateV1{}, false
 	}
 	kind := candidateKind(eval)
