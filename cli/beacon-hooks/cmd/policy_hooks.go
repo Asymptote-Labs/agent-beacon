@@ -324,7 +324,10 @@ func runPolicyPrompt(cmd *cobra.Command, args []string) {
 		"reason":   promptBlockReason(findings),
 		// Claude Code otherwise repeats the blocked prompt, secret included,
 		// under the reason.
-		"suppressOriginalPrompt": true,
+		"hookSpecificOutput": map[string]interface{}{
+			"hookEventName":          "UserPromptSubmit",
+			"suppressOriginalPrompt": true,
+		},
 	})
 	// The verdict is on stdout; recording and reporting cannot change it.
 	_ = os.Stdout.Sync()
@@ -387,7 +390,10 @@ func runPolicyAllow(cmd *cobra.Command, args []string) {
 	sessionID := resolveSessionID(input, platformFlag)
 	reason := clipPolicy(secretscan.Mask(strings.TrimSpace(getFirstStr(input, "command_args"))), 500)
 	block := func(msg string) {
-		outputJSON(map[string]interface{}{"decision": "block", "reason": msg, "suppressOriginalPrompt": true})
+		outputJSON(map[string]interface{}{
+			"decision": "block", "reason": msg,
+			"hookSpecificOutput": map[string]interface{}{"hookEventName": "UserPromptExpansion", "suppressOriginalPrompt": true},
+		})
 	}
 
 	now := time.Now().UTC()

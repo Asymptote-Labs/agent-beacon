@@ -471,7 +471,7 @@ func TestBeaconAllowOverridesOneBlockedPromptOnce(t *testing.T) {
 	}
 
 	out = runHookWithInput(t, runPolicyPrompt, promptInput(prompt))
-	if out["decision"] != "block" || out["suppressOriginalPrompt"] != true {
+	if out["decision"] != "block" || out["hookSpecificOutput"].(map[string]interface{})["suppressOriginalPrompt"] != true {
 		t.Fatalf("block: %v", out)
 	}
 	if lines := strings.Split(out["reason"].(string), "\n"); lines[0] != "A Beacon policy (Secret exposure) blocked this prompt." ||
@@ -486,7 +486,7 @@ func TestBeaconAllowOverridesOneBlockedPromptOnce(t *testing.T) {
 	}
 
 	out = runHookWithInput(t, runPolicyAllow, allowInput("staging token, rotating it after"))
-	if out["decision"] != "block" || out["suppressOriginalPrompt"] != true ||
+	if out["decision"] != "block" || out["hookSpecificOutput"].(map[string]interface{})["suppressOriginalPrompt"] != true ||
 		out["reason"] != "Override recorded: \"staging token, rotating it after\"\nResend the blocked prompt within 10 minutes. It will go through once." {
 		t.Fatalf("allow: %q", out["reason"])
 	}
