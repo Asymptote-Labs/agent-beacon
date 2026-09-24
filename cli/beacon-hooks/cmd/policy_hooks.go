@@ -39,6 +39,11 @@ const (
 	policyContextToolCalls = 5
 	policyPriorDecisions   = 5
 	promptReportTimeout    = 1500 * time.Millisecond
+	// promptOverrideWindow bounds both steps of a /beacon-allow override: the
+	// block it answers must be this recent, and the allowance it grants lasts
+	// this long, for one use.
+	promptOverrideWindow = 10 * time.Minute
+	allowCommandName     = "beacon-allow"
 )
 
 var policyToolCmd = &cobra.Command{
@@ -62,6 +67,13 @@ var policySessionCmd = &cobra.Command{
 	Run:    runPolicySession,
 }
 
+var policyAllowCmd = &cobra.Command{
+	Use:    "policy-allow",
+	Short:  "UserPromptExpansion for /beacon-allow: allow the last blocked prompt once, with a reason",
+	Hidden: true,
+	Run:    runPolicyAllow,
+}
+
 var policyResolveCmd = &cobra.Command{
 	Use:    "policy-resolve",
 	Short:  "Stop/SessionEnd: record the developer's answers to asked tool calls",
@@ -77,7 +89,7 @@ var policyScanCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(policyToolCmd, policyPromptCmd, policySessionCmd, policyResolveCmd, policyScanCmd)
+	rootCmd.AddCommand(policyToolCmd, policyPromptCmd, policySessionCmd, policyAllowCmd, policyResolveCmd, policyScanCmd)
 }
 
 // ---------------------------------------------------------------------------
@@ -272,15 +284,41 @@ func runPolicyPrompt(cmd *cobra.Command, args []string) {
 		outputJSON(emptyResponse)
 		return
 	}
-	resolvePolicyAsks(input, resolveSessionID(input, platformFlag), "prompt-submit")
+	sessionID := resolveSessionID(input, platformFlag)
+	resolvePolicyAsks(input, sessionID, "prompt-submit")
 	prompt := getFirstStr(input, "prompt")
 	findings := secretscan.Scan(prompt)
 	if len(findings) == 0 {
 		outputJSON(emptyResponse)
 		return
 	}
-
+	fingerprints := make([]string, 0, len(findings))
+	for _, f := range findings {
+		fingerprints = append(fingerprints, f.Fingerprint)
+	}
 	first := findings[0]
+	now := time.Now().UTC()
+
+	// The developer allowed exactly these secrets with /beacon-allow: let the
+	// prompt through, once.
+	if granted, ok := policystate.ConsumePromptOverride(sessionID, fingerprints, now, promptOverrideWindow); ok {
+		outputJSON(emptyResponse)
+		logger := newHookLogger("policy-prompt", platformFlag, sessionID)
+		fields := sessionFields(sessionID, input)
+		fields["policy"] = map[string]interface{}{
+			"id": granted.PolicyID, "name": firstNonEmpty(granted.PolicyName, "Secret exposure"),
+			"decision": "allow", "enforcement": "override", "reason": granted.Comment,
+		}
+		setToolCallID(fields, granted.ToolUseID)
+		fields["raw"] = map[string]interface{}{"beacon_policy": map[string]interface{}{
+			"phase": "prompt-submit", "override_id": granted.ToolUseID, "detections": promptDetections(findings),
+			"allowed_at": granted.AllowedAt, "policy_binary": version.Version,
+		}}
+		emitHookEvent(logger, "policy.override_used", categoryForAction("policy.override_used"), "medium",
+			"Prompt with a secret sent under the developer's /beacon-allow override", input, fields)
+		return
+	}
+
 	outputJSON(map[string]interface{}{
 		"decision": "block",
 		"reason":   promptBlockReason(findings),
@@ -288,26 +326,23 @@ func runPolicyPrompt(cmd *cobra.Command, args []string) {
 	// The verdict is on stdout; recording and reporting cannot change it.
 	_ = os.Stdout.Sync()
 
-	sessionID := resolveSessionID(input, platformFlag)
 	logger := newHookLogger("policy-prompt", platformFlag, sessionID)
-	detected := make([]map[string]interface{}, 0, len(findings))
-	for _, f := range findings {
-		detected = append(detected, map[string]interface{}{"detector": f.Detector, "masked": f.Masked, "fingerprint": f.Fingerprint})
-	}
+	blockID := "prompt:" + first.Fingerprint
 	fields := sessionFields(sessionID, input)
 	fields["policy"] = map[string]interface{}{
 		"name": "Secret exposure", "decision": "block", "enforcement": "enforce",
 		"reason": fmt.Sprintf("Prompt blocked on the endpoint: it contains %s (%s)", first.Label, first.Masked),
 	}
+	setToolCallID(fields, blockID)
 	fields["raw"] = map[string]interface{}{"beacon_policy": map[string]interface{}{
-		"phase": "prompt-submit", "detections": detected, "policy_binary": version.Version,
+		"phase": "prompt-submit", "detections": promptDetections(findings), "policy_binary": version.Version,
 	}}
 	emitHookEvent(logger, "policy.blocked", categoryForAction("policy.blocked"), "high",
 		fmt.Sprintf("Prompt blocked: it contains %s", first.Label), input, fields)
 
 	cfg := mdr.LoadConfig()
 	cfg.Timeout = promptReportTimeout
-	_, _ = mdr.Consult(context.Background(), cfg, mdr.Request{
+	resp, _ := mdr.Consult(context.Background(), cfg, mdr.Request{
 		Phase:     mdr.PhasePromptSubmit,
 		Harness:   platformFlag,
 		SessionID: sessionID,
@@ -316,6 +351,73 @@ func runPolicyPrompt(cmd *cobra.Command, args []string) {
 		LocalVerdict: &mdr.LocalVerdict{
 			Detector: first.Detector, MaskedExcerpt: first.Masked, Fingerprint: first.Fingerprint, Decision: "block",
 		},
+	})
+	_ = policystate.Append(sessionID, policystate.Entry{
+		At: now, Decision: policystate.DecisionBlock, Tool: policystate.ToolPrompt,
+		Target: "prompt: " + first.Masked, Reason: fmt.Sprintf("contains %s", first.Label),
+		ToolUseID: blockID, PolicyID: resp.PolicyID, PolicyName: resp.PolicyName, Fingerprints: fingerprints,
+	})
+}
+
+func promptDetections(findings []secretscan.Finding) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(findings))
+	for _, f := range findings {
+		out = append(out, map[string]interface{}{"detector": f.Detector, "masked": f.Masked, "fingerprint": f.Fingerprint})
+	}
+	return out
+}
+
+// ---------------------------------------------------------------------------
+// UserPromptExpansion for /beacon-allow
+// ---------------------------------------------------------------------------
+
+// runPolicyAllow handles /beacon-allow <reason>. It grants a one-time
+// allowance for the secrets in the session's most recent blocked prompt,
+// reports the override and reason, and blocks the command itself so neither
+// the command nor the reason reaches the model.
+func runPolicyAllow(cmd *cobra.Command, args []string) {
+	input, err := readStdinJSON()
+	if err != nil || platformFlag != "claude" || getFirstStr(input, "command_name") != allowCommandName {
+		outputJSON(emptyResponse)
+		return
+	}
+	sessionID := resolveSessionID(input, platformFlag)
+	reason := clipPolicy(secretscan.Mask(strings.TrimSpace(getFirstStr(input, "command_args"))), 500)
+	block := func(msg string) { outputJSON(map[string]interface{}{"decision": "block", "reason": msg}) }
+
+	now := time.Now().UTC()
+	blocked, ok := policystate.LatestPromptBlock(sessionID, now, promptOverrideWindow)
+	if !ok {
+		block("Nothing to override: Beacon has not blocked a prompt in this session in the last 10 minutes.")
+		return
+	}
+	if reason == "" {
+		block("Add a reason: /beacon-allow <why this is OK to send>. Beacon records it with the override.")
+		return
+	}
+	if err := policystate.GrantPromptOverride(sessionID, blocked.ToolUseID, reason, now); err != nil {
+		block("Beacon could not record the override on this machine; the prompt stays blocked.")
+		return
+	}
+	block(fmt.Sprintf("Beacon recorded your override (%q). Resend the blocked prompt within 10 minutes and it will go through once.", reason))
+	_ = os.Stdout.Sync()
+
+	logger := newHookLogger("policy-allow", platformFlag, sessionID)
+	fields := sessionFields(sessionID, input)
+	fields["policy"] = map[string]interface{}{
+		"id": blocked.PolicyID, "name": firstNonEmpty(blocked.PolicyName, "Secret exposure"),
+		"decision": "approved", "enforcement": "override", "reason": reason,
+	}
+	fields["approval"] = map[string]interface{}{"required": true, "decision": "allow", "reason": reason}
+	setToolCallID(fields, blocked.ToolUseID)
+	fields["raw"] = map[string]interface{}{"beacon_policy": map[string]interface{}{
+		"outcome": "approved", "comment": reason, "override_id": blocked.ToolUseID, "blocked": blocked.Target,
+		"resolved_via": "beacon-allow", "policy_binary": version.Version,
+	}}
+	emitHookEvent(logger, "policy.overridden", categoryForAction("policy.overridden"), "medium", reason, input, fields)
+	_ = mdr.SendFeedback(context.Background(), mdr.LoadConfig(), mdr.Feedback{
+		SessionID: sessionID, ToolUseID: blocked.ToolUseID, Outcome: "approved", Comment: reason,
+		PolicyID: blocked.PolicyID, ResolvedVia: "beacon-allow", Subject: policySubject(),
 	})
 }
 
@@ -327,7 +429,8 @@ func promptBlockReason(findings []secretscan.Finding) string {
 	}
 	return "Beacon blocked this prompt: it contains " + what + ". Secrets must not be sent to the model. " +
 		"Remove the value and refer to the secret by name; to use it in a command, inject it with " +
-		"`infisical run -- <command>`. Policy: Secret exposure."
+		"`infisical run -- <command>`. To send it anyway, run /beacon-allow <why> and then resend the prompt. " +
+		"Policy: Secret exposure."
 }
 
 // ---------------------------------------------------------------------------

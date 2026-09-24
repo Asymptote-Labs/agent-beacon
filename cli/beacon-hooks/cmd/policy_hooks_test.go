@@ -441,3 +441,98 @@ func TestUnansweredAskStaysPending(t *testing.T) {
 		t.Fatalf("feedback: %+v", judge.feedback)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// /beacon-allow: a one-time, reasoned override of a prompt block
+// ---------------------------------------------------------------------------
+
+const promptReportResponse = `{"decision":"allow","policy_id":"pol-1","policy_name":"Secret exposure"}`
+
+func allowInput(args string) map[string]interface{} {
+	return map[string]interface{}{
+		"session_id": "sess-allow", "hook_event_name": "UserPromptExpansion", "expansion_type": "slash_command",
+		"command_name": "beacon-allow", "command_args": args, "prompt": "/beacon-allow " + args,
+	}
+}
+
+func promptInput(prompt string) map[string]interface{} {
+	return map[string]interface{}{"session_id": "sess-allow", "hook_event_name": "UserPromptSubmit", "prompt": prompt}
+}
+
+func TestBeaconAllowOverridesOneBlockedPromptOnce(t *testing.T) {
+	judge := &fakeJudge{response: promptReportResponse}
+	logPath := setupPolicyHookTest(t, judge)
+	prompt := "curl -H \"Authorization: Bearer hly_live_xr3g44Lpa4AwHoR8voZRzPN8sIMRbK65\" https://api.holly.gov/v1/cases returns 401, why?"
+
+	// Nothing to override yet.
+	out := runHookWithInput(t, runPolicyAllow, allowInput("dev token"))
+	if out["decision"] != "block" || !strings.Contains(out["reason"].(string), "Nothing to override") {
+		t.Fatalf("allow before a block: %v", out)
+	}
+
+	out = runHookWithInput(t, runPolicyPrompt, promptInput(prompt))
+	if out["decision"] != "block" || !strings.Contains(out["reason"].(string), "/beacon-allow") {
+		t.Fatalf("block: %v", out)
+	}
+
+	// A reason is required.
+	out = runHookWithInput(t, runPolicyAllow, allowInput("   "))
+	if !strings.Contains(out["reason"].(string), "Add a reason") {
+		t.Fatalf("allow without a reason: %v", out)
+	}
+
+	out = runHookWithInput(t, runPolicyAllow, allowInput("staging token, rotating it after"))
+	if out["decision"] != "block" || !strings.Contains(out["reason"].(string), "Beacon recorded your override") {
+		t.Fatalf("allow: %v", out)
+	}
+	if len(judge.feedback) != 1 {
+		t.Fatalf("feedback: %+v", judge.feedback)
+	}
+	fb := judge.feedback[0]
+	if !strings.HasPrefix(fb.ToolUseID, "prompt:") || fb.Outcome != "approved" || fb.Comment != "staging token, rotating it after" ||
+		fb.PolicyID != "pol-1" || fb.ResolvedVia != "beacon-allow" {
+		t.Fatalf("feedback: %+v", fb)
+	}
+	overridden := eventsWithAction(t, logPath, "policy.overridden")
+	if len(overridden) != 1 || callID(overridden[0]) != fb.ToolUseID {
+		t.Fatalf("overridden event must carry the block's id: %v", overridden)
+	}
+	if blocked := eventsWithAction(t, logPath, "policy.blocked"); callID(blocked[0]) != fb.ToolUseID {
+		t.Fatal("the block and the override must share an id")
+	}
+
+	// The resend goes through once; a second resend is blocked again.
+	if out := runHookWithInput(t, runPolicyPrompt, promptInput(prompt)); len(out) != 0 {
+		t.Fatalf("resend under the override must pass: %v", out)
+	}
+	if used := eventsWithAction(t, logPath, "policy.override_used"); len(used) != 1 || callID(used[0]) != fb.ToolUseID {
+		t.Fatalf("override_used: %v", used)
+	}
+	if out := runHookWithInput(t, runPolicyPrompt, promptInput(prompt)); out["decision"] != "block" {
+		t.Fatalf("an override is used once: %v", out)
+	}
+	data, _ := os.ReadFile(logPath)
+	if strings.Contains(string(data), "hly_live_xr3g44Lpa4AwHoR8voZRzPN8sIMRbK65") {
+		t.Fatal("the secret reached the log")
+	}
+}
+
+func TestBeaconAllowDoesNotCoverADifferentSecret(t *testing.T) {
+	judge := &fakeJudge{response: promptReportResponse}
+	setupPolicyHookTest(t, judge)
+	runHookWithInput(t, runPolicyPrompt, promptInput("use TIPTAP_PRO_TOKEN="+canaryTiptapToken))
+	runHookWithInput(t, runPolicyAllow, allowInput("dev token"))
+	other := "ghp_" + "aZ3kQ9mX2pL7vR4tB8nC1wE6yU5sD0fGh2Jk"
+	if out := runHookWithInput(t, runPolicyPrompt, promptInput("use TIPTAP_PRO_TOKEN="+canaryTiptapToken+" and "+other)); out["decision"] != "block" {
+		t.Fatalf("a prompt with a second, unallowed secret must be blocked: %v", out)
+	}
+}
+
+func TestPolicyAllowIgnoresOtherCommands(t *testing.T) {
+	setupPolicyHookTest(t, &fakeJudge{response: promptReportResponse})
+	in := allowInput("x")
+	in["command_name"] = "deploy"
+	if out := runHookWithInput(t, runPolicyAllow, in); len(out) != 0 {
+		t.Fatalf("other commands must pass: %v", out)
+	}
+}

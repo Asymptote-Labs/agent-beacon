@@ -29,6 +29,80 @@ type Entry struct {
 	Outcome    string    `json:"outcome,omitempty"`
 	Comment    string    `json:"comment,omitempty"`
 	AnsweredAt time.Time `json:"answered_at,omitempty"`
+	// Prompt blocks: the blocked secrets' fingerprints, when the developer
+	// allowed them with /beacon-allow, and when the resent prompt used that.
+	Fingerprints []string  `json:"fingerprints,omitempty"`
+	AllowedAt    time.Time `json:"allowed_at,omitempty"`
+	UsedAt       time.Time `json:"used_at,omitempty"`
+}
+
+// PromptBlock is the Decision and Tool of a blocked prompt's entry.
+const (
+	DecisionBlock = "block"
+	ToolPrompt    = "prompt"
+)
+
+// LatestPromptBlock returns the most recent prompt block in the session that
+// happened within window of now and has not been allowed yet.
+func LatestPromptBlock(sessionID string, now time.Time, window time.Duration) (Entry, bool) {
+	entries := Load(sessionID)
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		if e.Decision != DecisionBlock || e.Tool != ToolPrompt {
+			continue
+		}
+		if now.Sub(e.At) > window || !e.AllowedAt.IsZero() {
+			return Entry{}, false
+		}
+		return e, true
+	}
+	return Entry{}, false
+}
+
+// GrantPromptOverride marks the prompt block with this id as allowed once.
+func GrantPromptOverride(sessionID, id, reason string, now time.Time) error {
+	entries := Load(sessionID)
+	for i := range entries {
+		if entries[i].ToolUseID == id && entries[i].Decision == DecisionBlock {
+			entries[i].AllowedAt, entries[i].Outcome, entries[i].Comment = now, "approved", reason
+		}
+	}
+	return save(sessionID, entries)
+}
+
+// ConsumePromptOverride finds an allowed, unused prompt block granted within
+// window whose fingerprints cover every secret in the resent prompt, marks it
+// used, and returns it. A prompt carrying any other secret does not qualify.
+func ConsumePromptOverride(sessionID string, fingerprints []string, now time.Time, window time.Duration) (Entry, bool) {
+	entries := Load(sessionID)
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		if e.Decision != DecisionBlock || e.Tool != ToolPrompt || e.AllowedAt.IsZero() || !e.UsedAt.IsZero() {
+			continue
+		}
+		if now.Sub(e.AllowedAt) > window || !covers(e.Fingerprints, fingerprints) {
+			continue
+		}
+		entries[i].UsedAt = now
+		if save(sessionID, entries) != nil {
+			return Entry{}, false
+		}
+		return entries[i], true
+	}
+	return Entry{}, false
+}
+
+func covers(allowed, wanted []string) bool {
+	set := map[string]bool{}
+	for _, a := range allowed {
+		set[a] = true
+	}
+	for _, w := range wanted {
+		if !set[w] {
+			return false
+		}
+	}
+	return len(wanted) > 0
 }
 
 // Pending returns the session's asks that have no recorded answer yet.

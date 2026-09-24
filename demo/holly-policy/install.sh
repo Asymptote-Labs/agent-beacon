@@ -11,7 +11,8 @@
 #   2. Writes ~/.beacon/endpoint/policy.json (0600) with the decide URL and token.
 #      The token is kept out of settings.json on purpose: its env block reaches
 #      the agent's Bash tool.
-#   3. Adds five hooks (UserPromptSubmit, PreToolUse, SessionStart, Stop, SessionEnd) and Read deny
+#   3. Adds six hooks (UserPromptSubmit, PreToolUse, SessionStart, Stop, SessionEnd,
+#      UserPromptExpansion for /beacon-allow), the /beacon-allow command, and Read deny
 #      rules for credential files to the chosen settings.json. Existing entries,
 #      Beacon's included, are left as they are. Running it again changes nothing.
 #   4. Runs a self-test: the prompt scanner and prefilter offline, then one
@@ -152,6 +153,9 @@ ours = {
     # of the session (prompt-submit and pre-tool also record them).
     "Stop": {"hooks": [{"type": "command", "command": command("policy-resolve")}]},
     "SessionEnd": {"hooks": [{"type": "command", "command": command("policy-resolve"), "timeout": 5}]},
+    # /beacon-allow <why>: a one-time, reasoned override of a blocked prompt.
+    "UserPromptExpansion": {"matcher": "beacon-allow",
+                            "hooks": [{"type": "command", "command": command("policy-allow"), "timeout": 10}]},
 }
 
 try:
@@ -198,6 +202,20 @@ if deny_enabled:
             if rule not in entry["deny_rules_added"]:
                 entry["deny_rules_added"].append(rule)
 manifest["log_path"] = log_path
+
+# The /beacon-allow command. The hook blocks its expansion, so this text only
+# reaches the model if the hook is not running.
+commands_dir = os.path.join(os.path.dirname(settings_path), "commands")
+os.makedirs(commands_dir, exist_ok=True)
+command_file = os.path.join(commands_dir, "beacon-allow.md")
+with open(command_file, "w") as fh:
+    fh.write("""---
+description: Send a prompt Beacon blocked for containing a secret, once, with your reason
+argument-hint: <why this is OK to send>
+---
+The developer ran /beacon-allow, but Beacon's policy hook did not handle it, so no override was recorded. Tell the developer the override did not take effect and that Beacon's hooks may not be active in this folder.
+""")
+entry["command_file"] = command_file
 
 mode = os.stat(settings_path).st_mode & 0o777 if os.path.exists(settings_path) else 0o644
 tmp = settings_path + ".beacon-policy.tmp"

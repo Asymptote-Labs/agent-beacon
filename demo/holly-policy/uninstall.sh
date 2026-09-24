@@ -39,6 +39,13 @@ for path, entry in (manifest.get("settings") or {}).items():
             del perms["deny"]
     if "permissions" in settings and not settings["permissions"] and created.get("permissions"):
         del settings["permissions"]
+    command_file = entry.get("command_file")
+    if command_file and os.path.exists(command_file):
+        os.remove(command_file)
+        try:
+            os.rmdir(os.path.dirname(command_file))
+        except OSError:
+            pass
     mode = os.stat(path).st_mode & 0o777
     tmp = path + ".beacon-policy.tmp"
     with open(tmp, "w") as fh:
