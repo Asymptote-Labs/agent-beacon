@@ -191,9 +191,9 @@ func init() {
 	memoryEvaluationsRunCmd.Flags().StringVar(&memoryOpts.since, "since", "", "RFC3339 lower time bound, inclusive")
 	memoryEvaluationsRunCmd.Flags().StringVar(&memoryOpts.until, "until", "", "RFC3339 upper time bound, inclusive")
 	memoryEvaluationsRunCmd.Flags().BoolVar(&memoryOpts.dryRun, "dry-run", false, "Preview selected traces, Jev calls, and estimated cost without writing evaluations")
-	memoryEvaluationsRunCmd.Flags().StringVar(&memoryOpts.jevEndpoint, "jev-endpoint", learning.DefaultJevEndpoint, "Jev System One endpoint")
+	memoryEvaluationsRunCmd.Flags().StringVar(&memoryOpts.jevEndpoint, "jev-endpoint", "", "Jev System One endpoint (defaults to BEACON_JEV_ENDPOINT, then "+learning.DefaultJevEndpoint+")")
 	memoryEvaluationsRunCmd.Flags().StringVar(&memoryOpts.jevAPIKey, "jev-api-key", "", "Jev API key (defaults to TYPESAFE_API_KEY, then BEACON_JEV_API_KEY)")
-	memoryEvaluationsRunCmd.Flags().StringVar(&memoryOpts.jevModel, "jev-model", learning.DefaultJevModel, "Jev model name, such as jev-latest or a pinned Jev version")
+	memoryEvaluationsRunCmd.Flags().StringVar(&memoryOpts.jevModel, "jev-model", "", "Jev model name, such as jev-latest or a pinned Jev version (defaults to BEACON_JEV_MODEL, then "+learning.DefaultJevModel+")")
 	memoryEvaluationsRunCmd.Flags().Float64Var(&memoryOpts.jevCost, "jev-cost-per-trace", learning.DefaultCostPerTrace, "Estimated Jev cost per trace in USD")
 	memoryEvaluationsRunCmd.Flags().DurationVar(&memoryOpts.timeout, "timeout", 10*time.Second, "Jev request timeout")
 }
@@ -208,13 +208,7 @@ func runMemoryEvaluationsRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	evaluatorOpts := learning.EvaluatorOptions{
-		Endpoint:     firstNonEmpty(memoryOpts.jevEndpoint, os.Getenv("BEACON_JEV_ENDPOINT"), learning.DefaultJevEndpoint),
-		APIKey:       firstNonEmpty(memoryOpts.jevAPIKey, os.Getenv("TYPESAFE_API_KEY"), os.Getenv("BEACON_JEV_API_KEY")),
-		Model:        firstNonEmpty(memoryOpts.jevModel, os.Getenv("BEACON_JEV_MODEL"), learning.DefaultJevModel),
-		CostPerTrace: memoryOpts.jevCost,
-		Timeout:      memoryOpts.timeout,
-	}
+	evaluatorOpts := jevEvaluatorOptions()
 	result := evaluationRunResult{
 		DryRun:           memoryOpts.dryRun,
 		Project:          project,
@@ -504,6 +498,19 @@ func parseMemoryTime(name, value string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("%s must be RFC3339: %w", name, err)
 	}
 	return parsed, nil
+}
+
+// jevEvaluatorOptions resolves each Jev setting from its flag, then the environment,
+// then the built-in default. The flags must not carry the defaults themselves, or the
+// environment variables documented for them would never be consulted.
+func jevEvaluatorOptions() learning.EvaluatorOptions {
+	return learning.EvaluatorOptions{
+		Endpoint:     firstNonEmpty(memoryOpts.jevEndpoint, os.Getenv("BEACON_JEV_ENDPOINT"), learning.DefaultJevEndpoint),
+		APIKey:       firstNonEmpty(memoryOpts.jevAPIKey, os.Getenv("TYPESAFE_API_KEY"), os.Getenv("BEACON_JEV_API_KEY")),
+		Model:        firstNonEmpty(memoryOpts.jevModel, os.Getenv("BEACON_JEV_MODEL"), learning.DefaultJevModel),
+		CostPerTrace: memoryOpts.jevCost,
+		Timeout:      memoryOpts.timeout,
+	}
 }
 
 func firstNonEmpty(values ...string) string {
