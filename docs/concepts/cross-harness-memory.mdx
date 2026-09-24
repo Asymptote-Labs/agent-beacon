@@ -48,6 +48,11 @@ presenting the scores as a lesson. Review the source trace before approving it.
 A compatible internal evaluator using the legacy `questions` or `results`
 response shape can also provide a stored `reason`.
 
+A trace becomes a candidate only when the task succeeded (`task_success` of at
+least 0.50) and the mean of the three probabilities is at least 0.60. The
+success answer is a precondition rather than one vote in the mean, so a failed
+task cannot be promoted on the strength of the other two answers.
+
 Use `--dry-run` first to preview selected traces and estimated calls without making
 a network request.
 

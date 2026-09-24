@@ -262,6 +262,14 @@ func runMemoryEvaluationsRun(cmd *cobra.Command, args []string) error {
 	for _, eval := range result.Evaluations {
 		fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%.2f\t%s\n", eval.ID, eval.Trace.ID, eval.Score, eval.Status)
 	}
+	for _, eval := range result.Evaluations {
+		if eval.Status != asymptoteobserve.LearningEvaluationStatusCompleted {
+			continue
+		}
+		if ok, reason := learning.PromotionDecision(eval); !ok {
+			fmt.Fprintf(cmd.OutOrStdout(), "Not promoted: %s (%s)\n", eval.ID, reason)
+		}
+	}
 	if len(result.Candidates) > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "Created %d candidate(s) for review.\n", len(result.Candidates))
 	}

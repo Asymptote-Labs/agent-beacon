@@ -29,7 +29,7 @@ const (
 )
 
 var RubricQuestions = []asymptoteobserve.LearningEvaluationQuestionV1{
-	{ID: "task_success", Prompt: "Did the trace complete the user's engineering task successfully?"},
+	{ID: TaskSuccessQuestionID, Prompt: "Did the trace complete the user's engineering task successfully?"},
 	{ID: "reusable_correction", Prompt: "Does the trace contain a correction or debugging pattern that future agents should reuse?"},
 	{ID: "evidence_supported", Prompt: "Is the reusable lesson supported by concrete events in the trace?"},
 }
