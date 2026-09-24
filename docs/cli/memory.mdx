@@ -59,9 +59,23 @@ Useful flags:
 - `--timeout <duration>` sets the Jev request timeout.
 - `--json` prints machine-readable output.
 
-`--jev-api-key` defaults to `TYPESAFE_API_KEY`, then `BEACON_JEV_API_KEY`.
-`--jev-endpoint` can also come from `BEACON_JEV_ENDPOINT`, and the model can come
-from `BEACON_JEV_MODEL`.
+Each Jev setting is resolved from the flag first, then the environment, then the
+built-in default:
+
+- `--jev-api-key` defaults to `TYPESAFE_API_KEY`, then `BEACON_JEV_API_KEY`.
+- `--jev-endpoint` defaults to `BEACON_JEV_ENDPOINT`, then the hosted TypeSafe
+  endpoint `https://api.typesafe.ai/v1/systemone`.
+- `--jev-model` defaults to `BEACON_JEV_MODEL`, then `jev-latest`.
+
+This is how you point Beacon at a TypeSafe-compatible gateway. For example, to
+evaluate through Vercel AI Gateway with an AI Gateway API key:
+
+```bash
+export TYPESAFE_API_KEY=<AI Gateway API key>
+export BEACON_JEV_ENDPOINT=https://ai-gateway.vercel.sh/typesafe/v1/systemone
+export BEACON_JEV_MODEL=typesafe-ai/jev
+beacon memory evaluations run --limit 10
+```
 
 Each completed evaluation stores a `score`, the plain mean of the three rubric
 probabilities. A trace becomes a review candidate only when both hold:

@@ -329,7 +329,7 @@ func resetMemoryOpts(t *testing.T) {
 		reason      string
 		replacement string
 		force       bool
-	}{userMode: true, limit: 25, page: 1, jevEndpoint: learning.DefaultJevEndpoint, jevModel: learning.DefaultJevModel, jevCost: learning.DefaultCostPerTrace}
+	}{userMode: true, limit: 25, page: 1, jevCost: learning.DefaultCostPerTrace}
 	t.Cleanup(func() { memoryOpts = previous })
 }
 
@@ -420,5 +420,124 @@ func TestMemoryEvaluationsShowHidesPlaceholderReason(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Retry isolates the flaky step.") {
 		t.Fatalf("show dropped a real reason:\n%s", out.String())
+	}
+}
+
+// The --jev-endpoint and --jev-model flags used to default to the hosted TypeSafe
+// values, so BEACON_JEV_ENDPOINT and BEACON_JEV_MODEL were never consulted even
+// though the docs and the --jev-api-key help text promise them. Leaving the flags
+// unset must fall through to the environment, then to the built-in defaults.
+func TestMemoryEvaluationsRunHonoursJevEnvironment(t *testing.T) {
+	logPath, project := writeMemoryCommandFixture(t)
+	var gotModel string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer env-key" {
+			t.Errorf("Authorization = %q, want Bearer env-key", r.Header.Get("Authorization"))
+		}
+		var req struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		gotModel = req.Model
+		_, _ = w.Write([]byte(`{"model":"typesafe-ai/jev","answers":{"task_success":{"type":"noul","noul":0.9},"reusable_correction":{"type":"noul","noul":0.8},"evidence_supported":{"type":"noul","noul":0.7}}}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("BEACON_JEV_ENDPOINT", server.URL)
+	t.Setenv("BEACON_JEV_MODEL", "typesafe-ai/jev")
+	t.Setenv("TYPESAFE_API_KEY", "env-key")
+	t.Setenv("BEACON_JEV_API_KEY", "")
+
+	resetMemoryOpts(t)
+	memoryOpts.userMode = true
+	memoryOpts.logPath = logPath
+	memoryOpts.projectPath = project
+	memoryOpts.traceID = "session:cursor:s1"
+	memoryOpts.jsonOutput = true
+
+	var out bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&out)
+	if err := runMemoryEvaluationsRun(cmd, nil); err != nil {
+		t.Fatalf("runMemoryEvaluationsRun returned error: %v", err)
+	}
+	if gotModel != "typesafe-ai/jev" {
+		t.Fatalf("request model = %q, want typesafe-ai/jev", gotModel)
+	}
+	var result evaluationRunResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode result: %v\n%s", err, out.String())
+	}
+	if len(result.Evaluations) != 1 {
+		t.Fatalf("evaluations = %#v", result.Evaluations)
+	}
+	if got := result.Evaluations[0].Evaluator; !strings.Contains(got, server.URL) {
+		t.Fatalf("evaluator endpoint = %q, want it to reference %s", got, server.URL)
+	}
+}
+
+func TestJevEvaluatorOptionsPrecedence(t *testing.T) {
+	cases := []struct {
+		name         string
+		flagEndpoint string
+		flagModel    string
+		flagKey      string
+		env          map[string]string
+		wantEndpoint string
+		wantModel    string
+		wantKey      string
+	}{
+		{
+			name:         "defaults when nothing is set",
+			env:          map[string]string{"BEACON_JEV_ENDPOINT": "", "BEACON_JEV_MODEL": "", "TYPESAFE_API_KEY": "", "BEACON_JEV_API_KEY": ""},
+			wantEndpoint: learning.DefaultJevEndpoint,
+			wantModel:    learning.DefaultJevModel,
+		},
+		{
+			name: "environment overrides defaults",
+			env: map[string]string{
+				"BEACON_JEV_ENDPOINT": "https://gateway.example/typesafe/v1/systemone",
+				"BEACON_JEV_MODEL":    "typesafe-ai/jev",
+				"TYPESAFE_API_KEY":    "",
+				"BEACON_JEV_API_KEY":  "fallback-key",
+			},
+			wantEndpoint: "https://gateway.example/typesafe/v1/systemone",
+			wantModel:    "typesafe-ai/jev",
+			wantKey:      "fallback-key",
+		},
+		{
+			name:         "flags override environment",
+			flagEndpoint: "https://flag.example/v1/systemone",
+			flagModel:    "jev-1.13.0",
+			flagKey:      "flag-key",
+			env: map[string]string{
+				"BEACON_JEV_ENDPOINT": "https://gateway.example/typesafe/v1/systemone",
+				"BEACON_JEV_MODEL":    "typesafe-ai/jev",
+				"TYPESAFE_API_KEY":    "env-key",
+				"BEACON_JEV_API_KEY":  "fallback-key",
+			},
+			wantEndpoint: "https://flag.example/v1/systemone",
+			wantModel:    "jev-1.13.0",
+			wantKey:      "flag-key",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			resetMemoryOpts(t)
+			memoryOpts.jevEndpoint = tc.flagEndpoint
+			memoryOpts.jevModel = tc.flagModel
+			memoryOpts.jevAPIKey = tc.flagKey
+
+			got := jevEvaluatorOptions()
+			if got.Endpoint != tc.wantEndpoint || got.Model != tc.wantModel || got.APIKey != tc.wantKey {
+				t.Fatalf("jevEvaluatorOptions() = endpoint %q model %q key %q, want %q %q %q",
+					got.Endpoint, got.Model, got.APIKey, tc.wantEndpoint, tc.wantModel, tc.wantKey)
+			}
+		})
 	}
 }
