@@ -371,7 +371,7 @@ func TestDeveloperRejectionWithCommentIsRecordedOnTheAskedCall(t *testing.T) {
 
 	secret := "TIPTAP_PRO_TOKEN=" + canaryTiptapToken
 	appendTranscript(t, transcriptPath, toolResultLine("toolu_13", true,
-		"The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). To tell you how to proceed, the user said:\nagree, and do not print "+secret))
+		"The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). To tell you how to proceed, the user said:\nagree, and do not print "+secret+"\n\nNote: The user's next message may contain a correction or preference. Pay close attention."))
 	runHookWithInput(t, runPolicyResolve, map[string]interface{}{
 		"session_id": "sess-p45", "hook_event_name": "Stop", "transcript_path": transcriptPath,
 	})
@@ -390,7 +390,7 @@ func TestDeveloperRejectionWithCommentIsRecordedOnTheAskedCall(t *testing.T) {
 	if fb.ToolUseID != "toolu_13" || fb.Outcome != "rejected" || fb.FindingID != "f-1" || fb.ResolvedVia != "stop" {
 		t.Fatalf("feedback: %+v", fb)
 	}
-	if !strings.HasPrefix(fb.Comment, "agree, and do not print") || strings.Contains(fb.Comment, canaryTiptapToken) {
+	if !strings.HasPrefix(fb.Comment, "agree, and do not print") || strings.Contains(fb.Comment, canaryTiptapToken) || strings.Contains(fb.Comment, "Note:") {
 		t.Fatalf("comment not masked: %q", fb.Comment)
 	}
 	data, _ := os.ReadFile(logPath)

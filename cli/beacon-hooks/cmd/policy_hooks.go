@@ -385,7 +385,13 @@ func classifyAnswer(res transcript.ToolResult) (outcome, comment string) {
 	switch {
 	case strings.Contains(content, rejectionMarker):
 		if i := strings.Index(content, commentMarker); i >= 0 {
-			comment = strings.TrimSpace(content[i+len(commentMarker):])
+			comment = content[i+len(commentMarker):]
+			// Claude Code appends its own guidance after the developer's words,
+			// separated by a blank line and starting "Note:".
+			if j := strings.Index(comment, "\n\nNote: "); j >= 0 {
+				comment = comment[:j]
+			}
+			comment = strings.TrimSpace(comment)
 		}
 		return "rejected", comment
 	case strings.HasPrefix(content, "[Request interrupted"):
