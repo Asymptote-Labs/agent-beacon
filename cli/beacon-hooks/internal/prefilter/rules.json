@@ -1,5 +1,5 @@
 {
-  "version": "2026-09-24.1",
+  "version": "2026-09-24.2",
   "rules": [
     {
       "id": "secret-source.npm-config",
@@ -63,7 +63,7 @@
       "tools": [
         "Bash"
       ],
-      "pattern": "(?i)(?:^|[\\s;&|(`$])(?:(?:cat|less|more|head|tail|bat|nl|strings|xxd|od|grep|egrep|fgrep|rg|ag|sed|awk|cut|sort|uniq|source|base64|openssl|jq|yq|python3?|node|open|code)\\b|\\.\\s)[^\\n]*?(?:(?:^|[\\s/'\"=])\\.env(?:\\.[\\w.-]+)?\\*?(?:[\\s'\"]|$)|\\.npmrc\\b|pnpm/(?:rc|config\\.yaml)\\b|\\.yarnrc(?:\\.yml)?\\b|\\.aws/credentials\\b|application_default_credentials\\.json|\\.config/gcloud/(?:credentials\\.db|legacy_credentials)|\\.docker/config\\.json|\\.kube/config\\b|\\.netrc\\b|\\.git-credentials\\b|\\.config/gh/hosts\\.yml|\\bid_(?:rsa|ed25519|ecdsa|dsa)(?:[\\s'\"]|$)|\\.pgpass\\b|\\.pypirc\\b|\\.openclaw/\\.env)"
+      "pattern": "(?i)(?:^|[\\s;&|(`$])(?:(?:cat|less|more|head|tail|bat|nl|strings|xxd|od|grep|egrep|fgrep|rg|ag|sed|awk|cut|sort|uniq|source|base64|openssl|jq|yq|python3?|node|open|code)\\b|\\.\\s)[^\\n]*?(?:(?:^|[\\s/'\"=])\\.env(?:\\.[\\w.-]+)?\\*?(?:[\\s'\";|&)>`]|$)|\\.npmrc\\b|pnpm/(?:rc|config\\.yaml)\\b|\\.yarnrc(?:\\.yml)?\\b|\\.aws/credentials\\b|application_default_credentials\\.json|\\.config/gcloud/(?:credentials\\.db|legacy_credentials)|\\.docker/config\\.json|\\.kube/config\\b|\\.netrc\\b|\\.git-credentials\\b|\\.config/gh/hosts\\.yml|\\bid_(?:rsa|ed25519|ecdsa|dsa)(?:[\\s'\";|&)>`]|$)|\\.pgpass\\b|\\.pypirc\\b|\\.openclaw/\\.env)"
     },
     {
       "id": "credential-file.read",

@@ -167,3 +167,29 @@ func TestOverrideReplacesRulesAndBrokenOverrideFallsBack(t *testing.T) {
 		t.Fatalf("broken override must fall back to embedded, got %s", set.Source)
 	}
 }
+
+// A path ends at whitespace, a quote or any shell operator. Session 725ea4f4
+// printed a demo .env through `cat .env;` because the rule only accepted a
+// space, a quote or the end of the line after the name.
+func TestCredentialPathFollowedByAShellOperator(t *testing.T) {
+	set := embedded(t)
+	for _, command := range []string{
+		"cat .env;",
+		"cat .env|head -3",
+		"cat .env && echo done",
+		"(cat .env)",
+		"cat .env>/tmp/copy",
+		`echo "=== .env ==="; cat .env; echo; echo "=== .env.example ==="; cat .env.example`,
+		"cat ~/.ssh/id_ed25519;",
+	} {
+		hits := set.Match("Bash", map[string]interface{}{"command": command})
+		if len(hits) == 0 || hits[0].RuleID != "credential-file.read" {
+			t.Errorf("%q not routed: %v", command, IDs(hits))
+		}
+	}
+	for _, command := range []string{"cat .env.example;", "cp .env.example .env && ls"} {
+		if hits := set.Match("Bash", map[string]interface{}{"command": command}); len(hits) != 0 {
+			t.Errorf("%q routed by %v", command, IDs(hits))
+		}
+	}
+}

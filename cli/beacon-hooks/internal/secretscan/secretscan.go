@@ -115,7 +115,7 @@ var detectors = []detector{
 		accept: acceptJWT,
 	},
 	{
-		id: "bearer_token", label: "a bearer token", prefixKeep: 0,
+		id: "bearer_token", label: "an Authorization header token", prefixKeep: 0,
 		re:     regexp.MustCompile(`(?i)\bbearer\s+([A-Za-z0-9._~+/=-]{20,})`),
 		group:  1,
 		accept: func(v, _ string) bool { return entropy(v) >= 3.5 && !isPlaceholder(v) },
