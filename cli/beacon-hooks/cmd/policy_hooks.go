@@ -404,7 +404,7 @@ func runPolicyAllow(cmd *cobra.Command, args []string) {
 		return
 	}
 	if reason == "" {
-		block("Add a reason:  /beacon-allow <reason>\nBeacon records it with the override.")
+		block("Add a reason:  /beacon-allow <reason>\nBeacon learns from your reason, so please say why.")
 		return
 	}
 	if err := policystate.GrantPromptOverride(sessionID, blocked.ToolUseID, reason, now); err != nil {
@@ -453,7 +453,8 @@ func promptBlockReason(findings []secretscan.Finding) string {
 		"It contains " + what + ". Secrets shouldn't be sent to the model.\n" +
 		"Refer to the secret by name instead, or inject it with: infisical run -- <command>\n" +
 		"\n" +
-		"To send it anyway:  /beacon-allow <reason>"
+		"To send it anyway:  /beacon-allow <reason>\n" +
+		"Beacon learns from your reason, so please say why."
 }
 
 // ---------------------------------------------------------------------------

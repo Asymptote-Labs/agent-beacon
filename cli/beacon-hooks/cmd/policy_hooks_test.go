@@ -475,7 +475,8 @@ func TestBeaconAllowOverridesOneBlockedPromptOnce(t *testing.T) {
 		t.Fatalf("block: %v", out)
 	}
 	if lines := strings.Split(out["reason"].(string), "\n"); lines[0] != "A Beacon policy (Secret exposure) blocked this prompt." ||
-		lines[len(lines)-1] != "To send it anyway:  /beacon-allow <reason>" || lines[len(lines)-2] != "" {
+		lines[len(lines)-2] != "To send it anyway:  /beacon-allow <reason>" || lines[len(lines)-3] != "" ||
+		lines[len(lines)-1] != "Beacon learns from your reason, so please say why." {
 		t.Fatalf("block layout: %q", out["reason"])
 	}
 
