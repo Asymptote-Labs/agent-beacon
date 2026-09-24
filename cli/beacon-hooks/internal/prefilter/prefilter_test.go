@@ -1,0 +1,169 @@
+package prefilter
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+type p45Fixture struct {
+	Calls []struct {
+		Call    int    `json:"call"`
+		Expect  string `json:"expect"`
+		Request struct {
+			Tool struct {
+				Name  string                 `json:"name"`
+				Input map[string]interface{} `json:"input"`
+			} `json:"tool"`
+		} `json:"request"`
+	} `json:"calls"`
+}
+
+func embedded(t *testing.T) *Set {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv(OverrideEnv, "")
+	set := Load()
+	if set.Source != "embedded" {
+		t.Fatalf("expected embedded rules, got %s", set.Source)
+	}
+	return set
+}
+
+// The 13 recorded tool calls from finding P-45. Calls whose expected verdict is
+// "none" never touch a secret source; every other call must be routed to the
+// judge, including the masked reads the judge then allows.
+func TestP45CallsRouteExactly(t *testing.T) {
+	set := embedded(t)
+	data, err := os.ReadFile(filepath.Join("testdata", "p45_calls.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture p45Fixture
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range fixture.Calls {
+		hits := set.Match(c.Request.Tool.Name, c.Request.Tool.Input)
+		routed := len(hits) > 0
+		if routed != (c.Expect != "none") {
+			t.Errorf("call %d: routed=%v hits=%v expect=%s", c.Call, routed, IDs(hits), c.Expect)
+		}
+	}
+}
+
+func TestRoutesSecretSources(t *testing.T) {
+	set := embedded(t)
+	cases := map[string]string{
+		"/opt/homebrew/bin/pnpm config get '//registry.tiptap.dev/:_authToken'":                                                  "secret-source.npm-config",
+		`node -e "require('node:child_process').execFile('pnpm',['config','get','//registry.tiptap.dev/:_authToken'],(e,o)=>1)"`: "secret-source.npm-config",
+		"infisical export --env=prod --path=/data/postgres --format=json":                                                        "secret-source.infisical",
+		"infisical secrets --env=prod --path=/data/postgres | awk '{print $1}'":                                                  "secret-source.infisical",
+		"pulumi env open hollygov/reliability/default":                                                                           "secret-source.pulumi",
+		"pulumi config get ROOTLY_API_TOKEN --show-secrets":                                                                      "secret-source.pulumi",
+		"security find-generic-password -s pnpm -w":                                                                              "secret-source.keychain",
+		"zsh -ic 'pnpm config set \"//registry.tiptap.dev/:_authToken\" \"$(secret get TIPTAP_PRO_TOKEN)\"'":                     "secret-source.helper",
+		"gh auth token": "secret-source.gh",
+		"gcloud secrets versions access latest --secret asymptote-groq-api-key": "secret-source.cloud-cli",
+		"cat .env":     "credential-file.read",
+		"cat ~/.npmrc": "credential-file.read",
+		"source <(ssh host 'cat ~/.openclaw/.env')": "credential-file.read",
+		"env | sort":                             "env-dump",
+		"printenv":                               "env-dump",
+		"echo $GITHUB_TOKEN":                     "env-dump",
+		"NPM_TOKEN=a1b2c3d4e5f6g7h8 npm publish": "secret.on-argv",
+	}
+	for command, want := range cases {
+		hits := set.Match("Bash", map[string]interface{}{"command": command})
+		found := false
+		for _, h := range hits {
+			found = found || h.RuleID == want
+		}
+		if !found {
+			t.Errorf("%q: want %s, got %v", command, want, IDs(hits))
+		}
+	}
+}
+
+func TestRoutesFileToolsOnCredentialPaths(t *testing.T) {
+	set := embedded(t)
+	for _, c := range []struct {
+		tool  string
+		input map[string]interface{}
+	}{
+		{"Read", map[string]interface{}{"file_path": "/Users/zac/Projects/holly/.env"}},
+		{"Read", map[string]interface{}{"file_path": "/Users/zac/Projects/holly/.env.development"}},
+		{"Read", map[string]interface{}{"file_path": "/Users/zac/.npmrc"}},
+		{"Read", map[string]interface{}{"file_path": "/Users/zac/Library/Preferences/pnpm/config.yaml"}},
+		{"Read", map[string]interface{}{"file_path": "/Users/zac/.aws/credentials"}},
+		{"Grep", map[string]interface{}{"pattern": "TOKEN", "path": "/Users/zac/Projects/holly/.env"}},
+		{"Grep", map[string]interface{}{"pattern": "TOKEN", "glob": ".env*"}},
+		{"Glob", map[string]interface{}{"pattern": "**/.env*"}},
+	} {
+		if hits := set.Match(c.tool, c.input); len(hits) == 0 {
+			t.Errorf("%s %v: not routed", c.tool, c.input)
+		}
+	}
+}
+
+func TestLeavesOrdinaryWorkAlone(t *testing.T) {
+	set := embedded(t)
+	for _, command := range []string{
+		"pnpm install",
+		"pnpm config get userconfig",
+		"infisical run --env=dev --path=/apps/web -- pnpm dev",
+		"pulumi env run hollygov/reliability/default -- pnpm deploy",
+		"security find-generic-password -s pnpm 2>&1 | grep -E 'svce|acct'",
+		"md5 -q .env .env.development .npmrc",
+		"ls -la .env* .npmrc",
+		"cp .env.example .env",
+		"cat .env.example",
+		"DATABASE_USER=holly DATABASE_PASSWORD=[REDACTED] docker compose config --quiet",
+		"DATABASE_USER=x DATABASE_PASSWORD=x TIPTAP_PRO_TOKEN='' docker compose config --quiet",
+		"TIPTAP_PRO_TOKEN=$(secret-cli get x) docker build .",
+		"git status && git diff",
+		"grep -rn 'token' src/auth/",
+		"go test ./...",
+		"env GOOS=linux go build ./...",
+		"export PATH=$PATH:/opt/homebrew/bin",
+	} {
+		if hits := set.Match("Bash", map[string]interface{}{"command": command}); len(hits) != 0 {
+			t.Errorf("%q routed by %v", command, IDs(hits))
+		}
+	}
+	for _, path := range []string{"/Users/zac/Projects/holly/src/env.ts", "/Users/zac/Projects/holly/.env.example", "/Users/zac/Projects/holly/README.md"} {
+		if hits := set.Match("Read", map[string]interface{}{"file_path": path}); len(hits) != 0 {
+			t.Errorf("Read %s routed by %v", path, IDs(hits))
+		}
+	}
+}
+
+func TestSecretLiteralsInOutboundToolInput(t *testing.T) {
+	set := embedded(t)
+	token := "ghp_" + "aZ3kQ9mX2pL7vR4tB8nC1wE6yU5sD0fGh2Jk"
+	if hits := set.Match("mcp__slack__post_message", map[string]interface{}{"channel": "#eng", "text": "use " + token}); len(hits) == 0 {
+		t.Error("secret in an MCP message not routed")
+	}
+	if hits := set.Match("WebFetch", map[string]interface{}{"url": "https://api.example.com/v1?access_token=" + "Zx81Kq2Lm9Pw3Rt7Vb5N"}); len(hits) == 0 {
+		t.Error("secret in a fetched URL not routed")
+	}
+}
+
+func TestOverrideReplacesRulesAndBrokenOverrideFallsBack(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	good := filepath.Join(dir, "good.json")
+	os.WriteFile(good, []byte(`{"version":"t","rules":[{"id":"x","category":"c","tools":["Bash"],"pattern":"zzz"}]}`), 0o600)
+	t.Setenv(OverrideEnv, good)
+	set := Load()
+	if set.Version != "t" || len(set.Match("Bash", map[string]interface{}{"command": "cat .env"})) != 0 {
+		t.Fatalf("override not applied: %+v", set)
+	}
+	bad := filepath.Join(dir, "bad.json")
+	os.WriteFile(bad, []byte(`{"rules":[{"id":"x","pattern":"("}]}`), 0o600)
+	t.Setenv(OverrideEnv, bad)
+	if set := Load(); set.Source != "embedded" {
+		t.Fatalf("broken override must fall back to embedded, got %s", set.Source)
+	}
+}

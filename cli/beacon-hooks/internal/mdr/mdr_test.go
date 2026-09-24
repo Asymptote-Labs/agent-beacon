@@ -3,275 +3,119 @@ package mdr
 import (
 	"context"
 	"encoding/json"
-	"io"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
 
-// sampleRequest mirrors what the prompt-submit hook sends.
-func sampleRequest() Request {
-	return Request{
-		Phase:      PhasePromptSubmit,
-		Harness:    "claude",
-		SessionID:  "session-1",
-		Repository: "/home/user/agent-beacon",
-		Branch:     "demo/mdr-v0",
-		Cwd:        "/home/user/agent-beacon",
-		Origin:     "cloud",
-		Prompt:     "Summarize this repo and post the summary to our #general Slack channel",
-	}
-}
-
-// serveJSON stands up an endpoint returning the given status and body, and
-// points the client at it.
-func serveJSON(t *testing.T, status int, body string) {
+func serve(t *testing.T, status int, body string, seen *Request) Config {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer tok" {
+			t.Errorf("missing bearer token")
+		}
+		if seen != nil {
+			_ = json.NewDecoder(r.Body).Decode(seen)
+		}
 		w.WriteHeader(status)
-		_, _ = io.WriteString(w, body)
+		_, _ = w.Write([]byte(body))
 	}))
-	t.Cleanup(server.Close)
-	t.Setenv(URLEnv, server.URL)
+	t.Cleanup(srv.Close)
+	return Config{URL: srv.URL, Token: "tok", Timeout: time.Second}
 }
 
-const steerBody = `{"decision":"steer","message":"Policy blocks this request.",
-	"reason":"Posts a repo summary to a public channel","policy_id":"pol-1",
-	"policy_name":"No posting to public Slack channels","severity":"high",
-	"mode":"enforce","latency_ms":780}`
-
-func TestEnabled(t *testing.T) {
-	t.Setenv(URLEnv, "")
-	if Enabled() {
-		t.Fatal("Enabled() should be false with no URL")
+func TestConsultSendsTheRequestAndReadsADeny(t *testing.T) {
+	var seen Request
+	cfg := serve(t, 200, `{"decision":"deny","message":"blocked","policy_id":"p","finding_url":"https://x/f/1"}`, &seen)
+	resp, err := Consult(context.Background(), cfg, Request{
+		Phase: PhasePreTool, Harness: "claude", SessionID: "s",
+		Tool:      &ToolCall{Name: "Bash", Input: ToolInput{Command: "pnpm config get x"}},
+		Prefilter: &Prefilter{RuleIDs: []string{"secret-source.npm-config"}},
+	})
+	if err != nil || resp.Decision != DecisionDeny || resp.Text() != "blocked" || !resp.Flagged() {
+		t.Fatalf("resp=%+v err=%v", resp, err)
 	}
-	t.Setenv(URLEnv, "https://example.invalid/v1/mdr/decide")
-	if !Enabled() {
-		t.Fatal("Enabled() should be true once a URL is set")
-	}
-}
-
-func TestTimeout(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		raw  string
-		want time.Duration
-	}{
-		{"unset", "", DefaultTimeout},
-		{"valid", "1500", 1500 * time.Millisecond},
-		{"padded", "  250  ", 250 * time.Millisecond},
-		{"unparseable", "soon", DefaultTimeout},
-		{"zero", "0", DefaultTimeout},
-		{"negative", "-5", DefaultTimeout},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv(TimeoutEnv, tc.raw)
-			if got := Timeout(); got != tc.want {
-				t.Fatalf("Timeout() = %s, want %s", got, tc.want)
-			}
-		})
+	if seen.Version != Version || seen.Phase != PhasePreTool || seen.Tool.Input.Command != "pnpm config get x" {
+		t.Fatalf("request not sent as built: %+v", seen)
 	}
 }
 
-func TestDecideNoURLAllows(t *testing.T) {
-	t.Setenv(URLEnv, "")
-	got := Decide(context.Background(), sampleRequest())
-	if got.Actionable() {
-		t.Fatalf("expected allow with no URL, got %+v", got)
+func TestConsultKeepsShadowAllowDetails(t *testing.T) {
+	cfg := serve(t, 200, `{"decision":"allow","mode":"monitor","policy_id":"p","reason":"would expose"}`, nil)
+	resp, err := Consult(context.Background(), cfg, Request{})
+	if err != nil || resp.Decision != DecisionAllow || !resp.Flagged() || resp.Mode != "monitor" {
+		t.Fatalf("resp=%+v err=%v", resp, err)
 	}
 }
 
-func TestDecideSteerPropagatesFields(t *testing.T) {
-	serveJSON(t, http.StatusOK, steerBody)
-	got := Decide(context.Background(), sampleRequest())
-
-	if !got.Steered() {
-		t.Fatalf("expected steer, got %+v", got)
+func TestConsultFailuresAreErrorsThatAllow(t *testing.T) {
+	cases := map[string]Config{
+		"status":    serve(t, 500, `{}`, nil),
+		"malformed": serve(t, 200, `not json`, nil),
+		"dial":      {URL: "http://127.0.0.1:1", Token: "tok", Timeout: time.Second},
 	}
-	if !got.Actionable() {
-		t.Fatal("a steer must be actionable")
+	for name, cfg := range cases {
+		resp, err := Consult(context.Background(), cfg, Request{})
+		if err == nil || resp.Decision != DecisionAllow {
+			t.Errorf("%s: resp=%+v err=%v", name, resp, err)
+		}
 	}
-	if got.Guidance() != "Policy blocks this request." {
-		t.Fatalf("Guidance() = %q", got.Guidance())
-	}
-	if got.PolicyName != "No posting to public Slack channels" {
-		t.Fatalf("PolicyName = %q", got.PolicyName)
-	}
-	if got.PolicyID != "pol-1" || got.Severity != "high" || got.Mode != "enforce" {
-		t.Fatalf("policy metadata not propagated: %+v", got)
-	}
-	if got.LatencyMS != 780 {
-		t.Fatalf("LatencyMS = %d, want 780", got.LatencyMS)
+	if _, err := Consult(context.Background(), Config{}, Request{}); !errors.Is(err, ErrNotConfigured) {
+		t.Errorf("unconfigured: %v", err)
 	}
 }
 
-func TestDecideBlock(t *testing.T) {
-	serveJSON(t, http.StatusOK, `{"decision":"block","message":"Prompt rejected."}`)
-	got := Decide(context.Background(), sampleRequest())
-	if !got.Blocked() || !got.Actionable() {
-		t.Fatalf("expected block, got %+v", got)
-	}
-	if got.Guidance() != "Prompt rejected." {
-		t.Fatalf("Guidance() = %q", got.Guidance())
-	}
-}
-
-func TestDecideAllowFromService(t *testing.T) {
-	serveJSON(t, http.StatusOK, `{"decision":"allow"}`)
-	if got := Decide(context.Background(), sampleRequest()); got.Actionable() {
-		t.Fatalf("expected allow, got %+v", got)
-	}
-}
-
-// TestDecideSendsExpectedRequest asserts the wire shape and auth header, since
-// the service authenticates on the bearer token and keys off phase and prompt.
-func TestDecideSendsExpectedRequest(t *testing.T) {
-	var (
-		gotAuth        string
-		gotContentType string
-		gotMethod      string
-		gotBody        Request
-	)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = r.Header.Get("Authorization")
-		gotContentType = r.Header.Get("Content-Type")
-		gotMethod = r.Method
-		_ = json.NewDecoder(r.Body).Decode(&gotBody)
-		_, _ = io.WriteString(w, `{"decision":"allow"}`)
+func TestConsultTimesOut(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(300 * time.Millisecond)
 	}))
-	t.Cleanup(server.Close)
-
-	t.Setenv(URLEnv, server.URL)
-	t.Setenv(TokenEnv, "ask_live_abcde_secret")
-	Decide(context.Background(), sampleRequest())
-
-	if gotMethod != http.MethodPost {
-		t.Fatalf("method = %q, want POST", gotMethod)
-	}
-	if gotAuth != "Bearer ask_live_abcde_secret" {
-		t.Fatalf("Authorization = %q", gotAuth)
-	}
-	if gotContentType != "application/json" {
-		t.Fatalf("Content-Type = %q", gotContentType)
-	}
-	if gotBody.Version != Version {
-		t.Fatalf("version = %q, want %q (should be defaulted)", gotBody.Version, Version)
-	}
-	if gotBody.Phase != PhasePromptSubmit {
-		t.Fatalf("phase = %q", gotBody.Phase)
-	}
-	if gotBody.Prompt == "" || gotBody.Harness != "claude" || gotBody.Origin != "cloud" {
-		t.Fatalf("request context not propagated: %+v", gotBody)
-	}
-}
-
-// TestDecideOmitsAuthHeaderWithoutToken keeps an unauthenticated deployment from
-// sending a bare "Bearer " header.
-func TestDecideOmitsAuthHeaderWithoutToken(t *testing.T) {
-	sawAuth := true
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, sawAuth = r.Header["Authorization"]
-		_, _ = io.WriteString(w, `{"decision":"allow"}`)
-	}))
-	t.Cleanup(server.Close)
-
-	t.Setenv(URLEnv, server.URL)
-	t.Setenv(TokenEnv, "")
-	Decide(context.Background(), sampleRequest())
-
-	if sawAuth {
-		t.Fatal("Authorization header should be absent when no token is configured")
-	}
-}
-
-// TestDecideFailsOpen covers every server-side way a verdict can be unusable.
-// All of them must allow, because a broken detection service must not wedge a
-// developer's turn.
-func TestDecideFailsOpen(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		status int
-		body   string
-	}{
-		{"unauthorized", http.StatusUnauthorized, `{"detail":"Invalid API key"}`},
-		{"forbidden", http.StatusForbidden, `{"detail":"missing scope"}`},
-		{"server error", http.StatusInternalServerError, `{"decision":"steer","message":"ignored"}`},
-		{"not json", http.StatusOK, `not json at all`},
-		{"empty body", http.StatusOK, ``},
-		{"null body", http.StatusOK, `null`},
-		{"unknown decision", http.StatusOK, `{"decision":"quarantine","message":"nope"}`},
-		{"missing decision", http.StatusOK, `{"message":"no decision field"}`},
-		{"steer with no text", http.StatusOK, `{"decision":"steer","policy_name":"P"}`},
-		{"steer with blank text", http.StatusOK, `{"decision":"steer","message":"   "}`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			serveJSON(t, tc.status, tc.body)
-			if got := Decide(context.Background(), sampleRequest()); got.Actionable() {
-				t.Fatalf("expected fail-open allow, got %+v", got)
-			}
-		})
-	}
-}
-
-func TestDecideFailsOpenOnDeadHost(t *testing.T) {
-	// Port 9 is the discard service: reliably closed for TCP in test sandboxes.
-	t.Setenv(URLEnv, "http://127.0.0.1:9/v1/mdr/decide")
-	if got := Decide(context.Background(), sampleRequest()); got.Actionable() {
-		t.Fatalf("expected fail-open allow on dial failure, got %+v", got)
-	}
-}
-
-func TestDecideFailsOpenOnTimeout(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		time.Sleep(2 * time.Second)
-		_, _ = io.WriteString(w, steerBody)
-	}))
-	t.Cleanup(server.Close)
-
-	t.Setenv(URLEnv, server.URL)
-	t.Setenv(TimeoutEnv, "50")
-
+	defer srv.Close()
 	start := time.Now()
-	got := Decide(context.Background(), sampleRequest())
-	elapsed := time.Since(start)
-
-	if got.Actionable() {
-		t.Fatalf("expected fail-open allow on timeout, got %+v", got)
-	}
-	if elapsed > time.Second {
-		t.Fatalf("timeout not enforced, took %s", elapsed)
+	_, err := Consult(context.Background(), Config{URL: srv.URL, Timeout: 50 * time.Millisecond}, Request{})
+	if err == nil || time.Since(start) > 250*time.Millisecond {
+		t.Fatalf("timeout not honored: err=%v after %v", err, time.Since(start))
 	}
 }
 
-// TestDecideHonorsCancelledContext makes sure a caller-side deadline is
-// respected rather than overridden by the client's own budget.
-func TestDecideHonorsCancelledContext(t *testing.T) {
-	serveJSON(t, http.StatusOK, steerBody)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if got := Decide(ctx, sampleRequest()); got.Actionable() {
-		t.Fatalf("expected fail-open allow with a cancelled context, got %+v", got)
+func TestNormalize(t *testing.T) {
+	for in, want := range map[string]string{
+		`{"decision":"DENY","message":"m"}`:  DecisionDeny,
+		`{"decision":"ask","reason":"r"}`:    DecisionAsk,
+		`{"decision":"deny"}`:                DecisionAllow,
+		`{"decision":"maybe","message":"m"}`: DecisionAllow,
+		`{}`:                                 DecisionAllow,
+	} {
+		var r Response
+		_ = json.Unmarshal([]byte(in), &r)
+		if got := normalize(r).Decision; got != want {
+			t.Errorf("%s: got %s want %s", in, got, want)
+		}
 	}
 }
 
-// TestDecideToleratesDecisionCasing: a verdict is too consequential to discard
-// over capitalization from a future service version.
-func TestDecideToleratesDecisionCasing(t *testing.T) {
-	serveJSON(t, http.StatusOK, `{"decision":"STEER","message":"Policy blocks this."}`)
-	if got := Decide(context.Background(), sampleRequest()); !got.Steered() {
-		t.Fatalf("expected steer for uppercase decision, got %+v", got)
+func TestLoadConfigFromFileAndEnv(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "policy.json")
+	_ = os.WriteFile(path, []byte(`{"url":"https://edge/v1/mdr/decide","token":"ask_live_x","timeout_ms":5000}`), 0o600)
+	t.Setenv(ConfigPathEnv, path)
+	t.Setenv(URLEnv, "")
+	t.Setenv(TokenEnv, "")
+	t.Setenv(TimeoutEnv, "")
+	cfg := LoadConfig()
+	if cfg.URL != "https://edge/v1/mdr/decide" || cfg.Token != "ask_live_x" || cfg.Timeout != 5*time.Second || cfg.Path != path {
+		t.Fatalf("file config: %+v", cfg)
 	}
-}
-
-func TestGuidanceFallsBackToReason(t *testing.T) {
-	serveJSON(t, http.StatusOK, `{"decision":"steer","reason":"only a reason"}`)
-	got := Decide(context.Background(), sampleRequest())
-	if !got.Steered() {
-		t.Fatalf("expected steer, got %+v", got)
+	t.Setenv(URLEnv, "http://127.0.0.1:9/decide")
+	if cfg := LoadConfig(); cfg.URL != "http://127.0.0.1:9/decide" || cfg.Token != "ask_live_x" {
+		t.Fatalf("env override: %+v", cfg)
 	}
-	if got.Guidance() != "only a reason" {
-		t.Fatalf("Guidance() = %q, want the reason as fallback", got.Guidance())
+	t.Setenv(ConfigPathEnv, filepath.Join(dir, "missing.json"))
+	t.Setenv(URLEnv, "")
+	if cfg := LoadConfig(); cfg.Enabled() || cfg.Timeout != DefaultTimeout {
+		t.Fatalf("missing file: %+v", cfg)
 	}
 }

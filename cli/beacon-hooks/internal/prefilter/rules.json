@@ -1,0 +1,99 @@
+{
+  "version": "2026-09-24.1",
+  "rules": [
+    {
+      "id": "secret-source.npm-config",
+      "category": "secret-source",
+      "tools": [
+        "Bash"
+      ],
+      "pattern": "(?i)\\b(?:pnpm|npm|yarn)\\b[^\\n;&|]*?\\bconfig[\\s'\",\\[\\]]+(?:get|list|ls)\\b[^\\n;&|]*?(?:auth|token|password)"
+    },
+    {
+      "id": "secret-source.infisical",
+      "category": "secret-source",
+      "tools": [
+        "Bash"
+      ],
+      "pattern": "(?i)\\binfisical\\s+(?:secrets|export)\\b"
+    },
+    {
+      "id": "secret-source.pulumi",
+      "category": "secret-source",
+      "tools": [
+        "Bash"
+      ],
+      "pattern": "(?i)\\bpulumi\\s+(?:env\\s+(?:open|get)\\b|(?:config|stack)\\b[^\\n;&|]*--show-secrets)"
+    },
+    {
+      "id": "secret-source.keychain",
+      "category": "secret-source",
+      "tools": [
+        "Bash"
+      ],
+      "pattern": "(?i)\\bsecurity\\s+(?:find-(?:generic|internet)-password\\b[^\\n;&|]*\\s-[a-zA-Z]*[wg]\\b|dump-keychain\\b)"
+    },
+    {
+      "id": "secret-source.helper",
+      "category": "secret-source",
+      "tools": [
+        "Bash"
+      ],
+      "pattern": "(?:^|[\\s;&|(`$])secret\\s+(?:get|list|show|export)\\b"
+    },
+    {
+      "id": "secret-source.gh",
+      "category": "secret-source",
+      "tools": [
+        "Bash"
+      ],
+      "pattern": "(?i)\\bgh\\s+(?:secret\\s+list|auth\\s+token)\\b"
+    },
+    {
+      "id": "secret-source.cloud-cli",
+      "category": "secret-source",
+      "tools": [
+        "Bash"
+      ],
+      "pattern": "(?i)\\b(?:aws\\s+(?:configure\\s+get|secretsmanager\\s+get-secret-value|ssm\\s+get-parameters?\\b[^\\n;&|]*--with-decryption)|gcloud\\s+(?:secrets\\s+versions\\s+access|auth\\s+(?:application-default\\s+)?print-(?:access|identity)-token)|vault\\s+(?:kv\\s+get|read)\\b|op\\s+(?:read|item\\s+get)\\b|doppler\\s+secrets\\b|kubectl\\s+get\\s+secrets?\\b[^\\n;&|]*-o)"
+    },
+    {
+      "id": "credential-file.read",
+      "category": "credential-file",
+      "tools": [
+        "Bash"
+      ],
+      "pattern": "(?i)(?:^|[\\s;&|(`$])(?:(?:cat|less|more|head|tail|bat|nl|strings|xxd|od|grep|egrep|fgrep|rg|ag|sed|awk|cut|sort|uniq|source|base64|openssl|jq|yq|python3?|node|open|code)\\b|\\.\\s)[^\\n]*?(?:(?:^|[\\s/'\"=])\\.env(?:\\.[\\w.-]+)?\\*?(?:[\\s'\"]|$)|\\.npmrc\\b|pnpm/(?:rc|config\\.yaml)\\b|\\.yarnrc(?:\\.yml)?\\b|\\.aws/credentials\\b|application_default_credentials\\.json|\\.config/gcloud/(?:credentials\\.db|legacy_credentials)|\\.docker/config\\.json|\\.kube/config\\b|\\.netrc\\b|\\.git-credentials\\b|\\.config/gh/hosts\\.yml|\\bid_(?:rsa|ed25519|ecdsa|dsa)(?:[\\s'\"]|$)|\\.pgpass\\b|\\.pypirc\\b|\\.openclaw/\\.env)"
+    },
+    {
+      "id": "credential-file.read",
+      "category": "credential-file",
+      "tools": [
+        "Read",
+        "Grep",
+        "Glob"
+      ],
+      "field": "path",
+      "pattern": "(?i)(?:(?:^|/)\\.env(?:\\.[\\w.-]+)?\\*?$|(?:^|/)\\.env\\*|\\.npmrc$|pnpm/(?:rc|config\\.yaml)$|\\.yarnrc(?:\\.yml)?$|\\.aws/credentials$|application_default_credentials\\.json$|\\.config/gcloud/|\\.docker/config\\.json$|\\.kube/config$|\\.netrc$|\\.git-credentials$|\\.config/gh/hosts\\.yml$|/id_(?:rsa|ed25519|ecdsa|dsa)$|\\.pgpass$|\\.pypirc$)"
+    },
+    {
+      "id": "env-dump",
+      "category": "env-dump",
+      "tools": [
+        "Bash"
+      ],
+      "pattern": "(?:^|[;&|(]\\s*|\\bsudo\\s+)(?:printenv|env|export\\s+-p|set)\\s*(?:$|[|;&>)])|\\bprintenv\\s+[A-Za-z_]*(?:TOKEN|SECRET|PASSWORD|KEY)|\\becho\\s+[\"']?\\$\\{?[A-Za-z_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|ACCESS_KEY)"
+    },
+    {
+      "id": "secret.on-argv",
+      "category": "secret-on-argv",
+      "tools": [
+        "Bash"
+      ],
+      "pattern": "\\b[A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|ACCESS_KEY)[A-Za-z0-9_]*=[\"']?[^\\s\"'$\\[<({]{8,}"
+    }
+  ],
+  "exclude_paths": [
+    "(?i)\\.env\\.(?:example|sample|template|dist|defaults|schema)\\b"
+  ]
+}

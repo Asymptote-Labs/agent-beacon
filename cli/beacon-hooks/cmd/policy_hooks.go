@@ -1,0 +1,427 @@
+package cmd
+
+// Policy enforcement v0 (Holly POC): three Claude Code hooks built into a
+// separate binary, beacon-policy, that sits beside the telemetry hooks.
+//
+//   policy-prompt  (UserPromptSubmit) blocks a prompt that carries a secret.
+//                  Decided on the machine with no network call; the block is
+//                  reported afterwards with a masked excerpt only.
+//   policy-tool    (PreToolUse) routes secret-touching calls through a local
+//                  prefilter to the cloud judge, and applies its verdict.
+//   policy-session (SessionStart) records that the policy hook is active.
+//
+// Every failure allows. A verdict that could not be fetched is recorded as
+// policy.unavailable so silent fail-opens are countable.
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/user"
+	"strings"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/mdr"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/policystate"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/prefilter"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/secretscan"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/transcript"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/version"
+)
+
+const (
+	policyContextPrompts   = 3
+	policyContextToolCalls = 5
+	policyPriorDecisions   = 5
+	promptReportTimeout    = 1500 * time.Millisecond
+)
+
+var policyToolCmd = &cobra.Command{
+	Use:    "policy-tool",
+	Short:  "PreToolUse policy gate: prefilter locally, ask the policy judge on a match",
+	Hidden: true,
+	Run:    runPolicyTool,
+}
+
+var policyPromptCmd = &cobra.Command{
+	Use:    "policy-prompt",
+	Short:  "UserPromptSubmit policy gate: block prompts that carry a secret",
+	Hidden: true,
+	Run:    runPolicyPrompt,
+}
+
+var policySessionCmd = &cobra.Command{
+	Use:    "policy-session",
+	Short:  "SessionStart: record that the policy hook is active",
+	Hidden: true,
+	Run:    runPolicySession,
+}
+
+var policyScanCmd = &cobra.Command{
+	Use:    "policy-scan",
+	Short:  "Offline: run the prompt scanner or prefilter over JSON lines on stdin",
+	Hidden: true,
+	Run:    runPolicyScan,
+}
+
+func init() {
+	rootCmd.AddCommand(policyToolCmd, policyPromptCmd, policySessionCmd, policyScanCmd)
+}
+
+// ---------------------------------------------------------------------------
+// PreToolUse
+// ---------------------------------------------------------------------------
+
+func runPolicyTool(cmd *cobra.Command, args []string) {
+	started := time.Now()
+	input, err := readStdinJSON()
+	if err != nil || platformFlag != "claude" {
+		outputJSON(emptyResponse)
+		return
+	}
+	toolName := getFirstStr(input, "tool_name")
+	toolInput := resolveToolInput(input)
+	rules := prefilter.Load()
+	hits := rules.Match(toolName, toolInput)
+	if len(hits) == 0 {
+		outputJSON(emptyResponse)
+		return
+	}
+
+	sessionID := resolveSessionID(input, platformFlag)
+	logger := newHookLogger("policy-tool", platformFlag, sessionID)
+	cfg := mdr.LoadConfig()
+	toolUseID := getFirstStr(input, "tool_use_id")
+	target := policyTarget(toolName, toolInput)
+
+	recent := transcript.Read(getFirstStr(input, "transcript_path"), policyContextPrompts, policyContextToolCalls, toolUseID)
+	req := mdr.Request{
+		Phase:          mdr.PhasePreTool,
+		Harness:        platformFlag,
+		SessionID:      sessionID,
+		Cwd:            resolveCwd(input, platformFlag),
+		Repository:     resolveCwd(input, platformFlag),
+		Origin:         strings.TrimSpace(os.Getenv("BEACON_ORIGIN")),
+		ToolUseID:      toolUseID,
+		PermissionMode: getFirstStr(input, "permission_mode"),
+		Tool:           &mdr.ToolCall{Name: toolName, Input: maskedToolInput(toolInput)},
+		Prefilter:      &mdr.Prefilter{RuleIDs: prefilter.IDs(hits), Category: hits[0].Category},
+		Context: &mdr.Context{
+			RecentPrompts:   recent.Prompts,
+			RecentToolCalls: recent.ToolCalls,
+			PriorDecisions:  priorDecisions(sessionID),
+		},
+		Subject: policySubject(),
+	}
+
+	resp, err := mdr.Consult(context.Background(), cfg, req)
+	details := map[string]interface{}{
+		"rule_ids":      prefilter.IDs(hits),
+		"ruleset":       rules.Version + "@" + rules.Hash,
+		"hook_ms":       time.Since(started).Milliseconds(),
+		"server_ms":     resp.LatencyMS,
+		"confidence":    resp.Confidence,
+		"mode":          resp.Mode,
+		"finding_url":   resp.FindingURL,
+		"policy_binary": version.Version,
+	}
+	if err != nil {
+		details["error"] = err.Error()
+		emitPolicyEvent(logger, "policy.unavailable", "low", "Policy verdict unavailable; the call was allowed", input, toolName, toolInput, resp, details)
+		outputJSON(emptyResponse)
+		return
+	}
+
+	switch resp.Decision {
+	case mdr.DecisionDeny:
+		recordPolicyDecision(sessionID, resp, toolName, target)
+		emitPolicyEvent(logger, "policy.blocked", "high", firstNonEmpty(resp.Reason, "Tool call blocked by policy"), input, toolName, toolInput, resp, details)
+		outputJSON(map[string]interface{}{
+			"hookSpecificOutput": map[string]interface{}{
+				"hookEventName":            "PreToolUse",
+				"permissionDecision":       "deny",
+				"permissionDecisionReason": resp.Text(),
+			},
+			"systemMessage": policyBanner("blocked", resp),
+		})
+	case mdr.DecisionAsk:
+		recordPolicyDecision(sessionID, resp, toolName, target)
+		emitPolicyEvent(logger, "policy.asked", "medium", firstNonEmpty(resp.Reason, "Tool call held for approval by policy"), input, toolName, toolInput, resp, details)
+		outputJSON(map[string]interface{}{
+			"hookSpecificOutput": map[string]interface{}{
+				"hookEventName":            "PreToolUse",
+				"permissionDecision":       "ask",
+				"permissionDecisionReason": resp.Text(),
+			},
+		})
+	default:
+		action, severity, message := "policy.allowed", "info", "Policy judge allowed the call"
+		if resp.Flagged() {
+			action, severity, message = "policy.flagged", "medium", firstNonEmpty(resp.Reason, "Policy matched in shadow mode")
+		}
+		emitPolicyEvent(logger, action, severity, message, input, toolName, toolInput, resp, details)
+		outputJSON(emptyResponse)
+	}
+}
+
+// maskedToolInput is what the judge sees: the fields it needs, with any
+// secret literal already masked on the machine.
+func maskedToolInput(in map[string]interface{}) mdr.ToolInput {
+	get := func(key string) string {
+		if v, ok := in[key].(string); ok {
+			return secretscan.Mask(v)
+		}
+		return ""
+	}
+	out := mdr.ToolInput{
+		Command:     get("command"),
+		FilePath:    get("file_path"),
+		Pattern:     get("pattern"),
+		Path:        get("path"),
+		URL:         get("url"),
+		Description: get("description"),
+	}
+	if out.Path == "" {
+		out.Path = get("glob")
+	}
+	if out.Command == "" && out.FilePath == "" && out.Pattern == "" && out.Path == "" && out.URL == "" && len(in) > 0 {
+		// MCP and other tools: the whole argument object, masked.
+		if raw, err := json.Marshal(in); err == nil {
+			out.Command = secretscan.Mask(string(raw))
+		}
+	}
+	return out
+}
+
+func policyTarget(toolName string, in map[string]interface{}) string {
+	t := maskedToolInput(in)
+	return clipPolicy(firstNonEmpty(t.Command, t.FilePath, t.Path, t.Pattern, t.URL, toolName), 200)
+}
+
+func priorDecisions(sessionID string) []string {
+	entries := policystate.Load(sessionID)
+	if len(entries) > policyPriorDecisions {
+		entries = entries[len(entries)-policyPriorDecisions:]
+	}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, fmt.Sprintf("%s %s `%s`: %s", e.Decision, e.Tool, e.Target, e.Reason))
+	}
+	return out
+}
+
+func recordPolicyDecision(sessionID string, resp mdr.Response, toolName, target string) {
+	_ = policystate.Append(sessionID, policystate.Entry{
+		At: time.Now().UTC(), Decision: resp.Decision, Tool: toolName, Target: target, Reason: clipPolicy(resp.Reason, 300),
+	})
+}
+
+func policyBanner(verb string, resp mdr.Response) string {
+	parts := []string{fmt.Sprintf("Beacon %s this tool call", verb)}
+	if name := strings.TrimSpace(resp.PolicyName); name != "" {
+		parts = append(parts, fmt.Sprintf("policy %q", name))
+	}
+	if reason := strings.TrimSpace(resp.Reason); reason != "" {
+		parts = append(parts, reason)
+	}
+	if url := strings.TrimSpace(resp.FindingURL); url != "" {
+		parts = append(parts, url)
+	}
+	return "🛡️ " + strings.Join(parts, " · ")
+}
+
+// ---------------------------------------------------------------------------
+// UserPromptSubmit
+// ---------------------------------------------------------------------------
+
+func runPolicyPrompt(cmd *cobra.Command, args []string) {
+	input, err := readStdinJSON()
+	if err != nil || platformFlag != "claude" {
+		outputJSON(emptyResponse)
+		return
+	}
+	prompt := getFirstStr(input, "prompt")
+	findings := secretscan.Scan(prompt)
+	if len(findings) == 0 {
+		outputJSON(emptyResponse)
+		return
+	}
+
+	first := findings[0]
+	outputJSON(map[string]interface{}{
+		"decision": "block",
+		"reason":   promptBlockReason(findings),
+	})
+	// The verdict is on stdout; recording and reporting cannot change it.
+	_ = os.Stdout.Sync()
+
+	sessionID := resolveSessionID(input, platformFlag)
+	logger := newHookLogger("policy-prompt", platformFlag, sessionID)
+	detected := make([]map[string]interface{}, 0, len(findings))
+	for _, f := range findings {
+		detected = append(detected, map[string]interface{}{"detector": f.Detector, "masked": f.Masked, "fingerprint": f.Fingerprint})
+	}
+	fields := sessionFields(sessionID, input)
+	fields["policy"] = map[string]interface{}{
+		"name": "Secret exposure", "decision": "block", "enforcement": "enforce",
+		"reason": fmt.Sprintf("Prompt blocked on the endpoint: it contains %s (%s)", first.Label, first.Masked),
+	}
+	fields["raw"] = map[string]interface{}{"beacon_policy": map[string]interface{}{
+		"phase": "prompt-submit", "detections": detected, "policy_binary": version.Version,
+	}}
+	emitHookEvent(logger, "policy.blocked", categoryForAction("policy.blocked"), "high",
+		fmt.Sprintf("Prompt blocked: it contains %s", first.Label), input, fields)
+
+	cfg := mdr.LoadConfig()
+	cfg.Timeout = promptReportTimeout
+	_, _ = mdr.Consult(context.Background(), cfg, mdr.Request{
+		Phase:     mdr.PhasePromptSubmit,
+		Harness:   platformFlag,
+		SessionID: sessionID,
+		Cwd:       resolveCwd(input, platformFlag),
+		Subject:   policySubject(),
+		LocalVerdict: &mdr.LocalVerdict{
+			Detector: first.Detector, MaskedExcerpt: first.Masked, Fingerprint: first.Fingerprint, Decision: "block",
+		},
+	})
+}
+
+func promptBlockReason(findings []secretscan.Finding) string {
+	first := findings[0]
+	what := fmt.Sprintf("%s (%s)", first.Label, first.Masked)
+	if len(findings) > 1 {
+		what += fmt.Sprintf(" and %d more secret value(s)", len(findings)-1)
+	}
+	return "Beacon blocked this prompt: it contains " + what + ". Secrets must not be sent to the model. " +
+		"Remove the value and refer to the secret by name; to use it in a command, inject it with " +
+		"`infisical run -- <command>`. Policy: Secret exposure."
+}
+
+// ---------------------------------------------------------------------------
+// SessionStart
+// ---------------------------------------------------------------------------
+
+func runPolicySession(cmd *cobra.Command, args []string) {
+	input, err := readStdinJSON()
+	if err != nil || platformFlag != "claude" {
+		outputJSON(emptyResponse)
+		return
+	}
+	sessionID := resolveSessionID(input, platformFlag)
+	logger := newHookLogger("policy-session", platformFlag, sessionID)
+	rules := prefilter.Load()
+	cfg := mdr.LoadConfig()
+	fields := sessionFields(sessionID, input)
+	fields["policy"] = map[string]interface{}{"name": "Secret exposure", "decision": "active", "enforcement": "hook"}
+	fields["raw"] = map[string]interface{}{"beacon_policy": map[string]interface{}{
+		"policy_binary": version.Version, "ruleset": rules.Version + "@" + rules.Hash, "ruleset_source": rules.Source,
+		"judge_configured": cfg.Enabled(),
+	}}
+	emitHookEvent(logger, "policy.active", "session", "info", "Beacon policy hook active", input, fields)
+	outputJSON(emptyResponse)
+}
+
+// ---------------------------------------------------------------------------
+// Shared
+// ---------------------------------------------------------------------------
+
+func emitPolicyEvent(logger *logging.Logger, action, severity, message string, input map[string]interface{}, toolName string, toolInput map[string]interface{}, resp mdr.Response, details map[string]interface{}) {
+	sessionID := resolveSessionID(input, platformFlag)
+	fields := sessionFields(sessionID, input)
+	mergeMap(fields, toolFields(toolName, toolInput))
+	enforcement := "enforce"
+	if resp.Mode == "monitor" {
+		enforcement = "monitor"
+	}
+	policy := map[string]interface{}{"decision": resp.Decision, "enforcement": enforcement}
+	if resp.PolicyID != "" {
+		policy["id"] = resp.PolicyID
+	}
+	if resp.PolicyName != "" {
+		policy["name"] = resp.PolicyName
+	}
+	if reason := firstNonEmpty(resp.Reason, message); reason != "" {
+		policy["reason"] = reason
+	}
+	fields["policy"] = policy
+	if action == "policy.blocked" {
+		fields["approval"] = map[string]interface{}{"required": true, "decision": "deny", "reason": policy["reason"]}
+	}
+	fields["raw"] = map[string]interface{}{"beacon_policy": details}
+	emitHookEvent(logger, action, categoryForAction(action), severity, message, input, fields)
+}
+
+func policySubject() *mdr.Subject {
+	s := &mdr.Subject{}
+	if host, err := os.Hostname(); err == nil {
+		s.Hostname = host
+	}
+	if u, err := user.Current(); err == nil {
+		s.UserName = u.Username
+	}
+	if path := strings.TrimSpace(os.Getenv("BEACON_ENDPOINT_CONFIG")); path != "" {
+		if data, err := os.ReadFile(path); err == nil {
+			var cfg struct {
+				ManagedIngest struct {
+					DeviceID string `json:"device_id"`
+				} `json:"managed_ingest"`
+			}
+			if json.Unmarshal(data, &cfg) == nil {
+				s.DeviceID = cfg.ManagedIngest.DeviceID
+			}
+		}
+	}
+	return s
+}
+
+func clipPolicy(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if len([]rune(s)) <= n {
+		return s
+	}
+	return string([]rune(s)[:n-1]) + "…"
+}
+
+// ---------------------------------------------------------------------------
+// Offline scan (corpus checks)
+// ---------------------------------------------------------------------------
+
+// runPolicyScan reads JSON lines from stdin and prints one JSON line per input
+// that the prompt scanner (lines with "text") or the prefilter (lines with
+// "tool" and "input") flags. Masked excerpts only.
+func runPolicyScan(cmd *cobra.Command, args []string) {
+	rules := prefilter.Load()
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 0, 1<<20), 64<<20)
+	enc := json.NewEncoder(os.Stdout)
+	for scanner.Scan() {
+		var row struct {
+			ID    string                 `json:"id"`
+			Text  string                 `json:"text"`
+			Tool  string                 `json:"tool"`
+			Input map[string]interface{} `json:"input"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &row) != nil {
+			continue
+		}
+		if row.Tool != "" {
+			if hits := rules.Match(row.Tool, row.Input); len(hits) > 0 {
+				_ = enc.Encode(map[string]interface{}{"id": row.ID, "rule_ids": prefilter.IDs(hits), "target": policyTarget(row.Tool, row.Input)})
+			}
+			continue
+		}
+		if findings := secretscan.Scan(row.Text); len(findings) > 0 {
+			out := make([]map[string]string, 0, len(findings))
+			for _, f := range findings {
+				snippet := secretscan.Mask(row.Text[max(0, f.Start-40):min(len(row.Text), f.End+40)])
+				out = append(out, map[string]string{"detector": f.Detector, "masked": f.Masked, "context": snippet})
+			}
+			_ = enc.Encode(map[string]interface{}{"id": row.ID, "findings": out})
+		}
+	}
+}
