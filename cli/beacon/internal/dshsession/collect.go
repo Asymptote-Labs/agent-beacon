@@ -145,11 +145,11 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 		// two capture paths describe one event identically (same key, same call id), the
 		// surviving copy is the collection_method=hook line doctor's capture check counts,
 		// not the poll backfill of the same moment.
-		if drained, drainErr := drainSessionSpool(ref, opts, seen); drainErr != nil {
+		drained, drainErr := drainSessionSpool(ref, opts, seen)
+		summary.SpoolEvents += drained
+		if drainErr != nil {
 			summary.Errors++
 			errs = append(errs, fmt.Errorf("DeepSeek session %s spool: %w", ref.ID, drainErr))
-		} else if drained > 0 {
-			summary.SpoolEvents += drained
 		}
 		changed, collectErr := collectSession(store, ref, state, opts, &summary)
 		if collectErr != nil {
