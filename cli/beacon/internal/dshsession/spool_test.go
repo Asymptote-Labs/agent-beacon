@@ -355,6 +355,34 @@ func TestCollectOnceDrainsTheWorkspaceSpoolAlongsideTheStore(t *testing.T) {
 	}
 }
 
+func TestCollectOnceCountsSpoolEventsAppendedBeforeDrainFailure(t *testing.T) {
+	root := t.TempDir()
+	workspace := t.TempDir()
+	writeSession(t, filepath.Join(root, "sessions", "s-partial-drain"), SessionFileJSON,
+		record("session", map[string]interface{}{"id": "s-partial-drain", "cwd": workspace}),
+	)
+	base, _ := asymptoteobserve.DSHSpoolPath(workspace, "s-partial-drain")
+	valid := spoolTestEvent(t, "s-partial-drain", "session.started", "id-valid")
+	invalid := spoolTestEvent(t, "s-partial-drain", "prompt.submitted", "id-invalid")
+	invalid.Vendor = ""
+	writeSpoolFile(t, base, valid, invalid)
+
+	opts := CollectOptions{
+		DSHHome:   root,
+		StatePath: filepath.Join(t.TempDir(), "state.json"),
+		Write:     true,
+		LogPath:   filepath.Join(t.TempDir(), "runtime.jsonl"),
+		UserMode:  true,
+	}
+	summary, err := CollectOnce(opts)
+	if err == nil {
+		t.Fatal("CollectOnce succeeded despite the invalid second spool event")
+	}
+	if summary.SpoolEvents != 1 {
+		t.Fatalf("SpoolEvents = %d, want 1 event appended before the drain failed", summary.SpoolEvents)
+	}
+}
+
 // The --workspace / --session-id filters decide which sessions are considered at all; a
 // filtered-out session's spool is left untouched rather than half-drained behind the
 // operator's filter.
