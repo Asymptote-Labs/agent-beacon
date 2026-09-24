@@ -70,9 +70,10 @@ func GrantPromptOverride(sessionID, id, reason string, now time.Time) error {
 	return save(sessionID, entries)
 }
 
-// ConsumePromptOverride finds an allowed, unused prompt block granted within
-// window whose fingerprints cover every secret in the resent prompt, marks it
-// used, and returns it. A prompt carrying any other secret does not qualify.
+// ConsumePromptOverride finds an allowed, unused prompt block from within
+// window of now (measured from the block, the same clock /beacon-allow uses)
+// whose fingerprints cover every secret in the resent prompt, marks it used,
+// and returns it. A prompt carrying any other secret does not qualify.
 func ConsumePromptOverride(sessionID string, fingerprints []string, now time.Time, window time.Duration) (Entry, bool) {
 	entries := Load(sessionID)
 	for i := len(entries) - 1; i >= 0; i-- {
@@ -80,7 +81,7 @@ func ConsumePromptOverride(sessionID string, fingerprints []string, now time.Tim
 		if e.Decision != DecisionBlock || e.Tool != ToolPrompt || e.AllowedAt.IsZero() || !e.UsedAt.IsZero() {
 			continue
 		}
-		if now.Sub(e.AllowedAt) > window || !covers(e.Fingerprints, fingerprints) {
+		if now.Sub(e.At) > window || !covers(e.Fingerprints, fingerprints) {
 			continue
 		}
 		entries[i].UsedAt = now

@@ -70,12 +70,14 @@ func TestPromptOverrideIsOneTimeAndScopedToTheBlockedSecrets(t *testing.T) {
 		t.Fatal("an override is used once")
 	}
 
+	// One clock, started by the block: both the override and the resend must
+	// happen within the window of it.
 	_ = Append("s", Entry{At: now, Decision: DecisionBlock, Tool: ToolPrompt, ToolUseID: "prompt:dd", Fingerprints: []string{"dd"}})
 	if _, ok := LatestPromptBlock("s", now.Add(11*time.Minute), 10*time.Minute); ok {
 		t.Fatal("a stale block cannot be allowed")
 	}
-	_ = GrantPromptOverride("s", "prompt:dd", "late", now)
+	_ = GrantPromptOverride("s", "prompt:dd", "late", now.Add(9*time.Minute))
 	if _, ok := ConsumePromptOverride("s", []string{"dd"}, now.Add(11*time.Minute), 10*time.Minute); ok {
-		t.Fatal("an expired allowance must not pass")
+		t.Fatal("a resend more than 10 minutes after the block must not pass, even if the override came later")
 	}
 }

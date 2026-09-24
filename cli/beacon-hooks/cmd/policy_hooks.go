@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"os/user"
 	"strings"
@@ -39,9 +40,9 @@ const (
 	policyContextToolCalls = 5
 	policyPriorDecisions   = 5
 	promptReportTimeout    = 1500 * time.Millisecond
-	// promptOverrideWindow bounds both steps of a /beacon-allow override: the
-	// block it answers must be this recent, and the allowance it grants lasts
-	// this long, for one use.
+	// promptOverrideWindow is the one clock for a /beacon-allow override: it
+	// starts when the prompt is blocked, and both the override and the single
+	// resend it allows must happen before it runs out.
 	promptOverrideWindow = 10 * time.Minute
 	allowCommandName     = "beacon-allow"
 )
@@ -410,7 +411,15 @@ func runPolicyAllow(cmd *cobra.Command, args []string) {
 		block("Beacon couldn't record the override on this machine.\nThe prompt stays blocked.")
 		return
 	}
-	block(fmt.Sprintf("Override recorded: %q\nResend the blocked prompt within 10 minutes. It will go through once.", reason))
+	left := int(math.Ceil(promptOverrideWindow.Minutes() - now.Sub(blocked.At).Minutes()))
+	if left < 1 {
+		left = 1
+	}
+	unit := "minutes"
+	if left == 1 {
+		unit = "minute"
+	}
+	block(fmt.Sprintf("Override recorded: %q\nResend the blocked prompt within %d %s. It will go through once.", reason, left, unit))
 	_ = os.Stdout.Sync()
 
 	logger := newHookLogger("policy-allow", platformFlag, sessionID)
