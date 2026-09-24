@@ -11,15 +11,46 @@ import (
 	"time"
 )
 
-const maxEntries = 10
+const maxEntries = 50
 
 // Entry is one recorded decision. Target is already masked.
 type Entry struct {
-	At       time.Time `json:"at"`
-	Decision string    `json:"decision"`
-	Tool     string    `json:"tool"`
-	Target   string    `json:"target"`
-	Reason   string    `json:"reason"`
+	At         time.Time `json:"at"`
+	Decision   string    `json:"decision"`
+	Tool       string    `json:"tool"`
+	Target     string    `json:"target"`
+	Reason     string    `json:"reason"`
+	ToolUseID  string    `json:"tool_use_id,omitempty"`
+	PolicyID   string    `json:"policy_id,omitempty"`
+	PolicyName string    `json:"policy_name,omitempty"`
+	FindingID  string    `json:"finding_id,omitempty"`
+	// Outcome is the developer's answer to an ask: approved, rejected or
+	// dismissed. Empty while the ask is pending.
+	Outcome    string    `json:"outcome,omitempty"`
+	Comment    string    `json:"comment,omitempty"`
+	AnsweredAt time.Time `json:"answered_at,omitempty"`
+}
+
+// Pending returns the session's asks that have no recorded answer yet.
+func Pending(sessionID string) []Entry {
+	var out []Entry
+	for _, e := range Load(sessionID) {
+		if e.Decision == "ask" && e.Outcome == "" && e.ToolUseID != "" {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// Answer records the developer's answer on the ask with this tool_use_id.
+func Answer(sessionID, toolUseID, outcome, comment string, at time.Time) error {
+	entries := Load(sessionID)
+	for i := range entries {
+		if entries[i].ToolUseID == toolUseID && entries[i].Outcome == "" {
+			entries[i].Outcome, entries[i].Comment, entries[i].AnsweredAt = outcome, comment, at
+		}
+	}
+	return save(sessionID, entries)
 }
 
 var unsafeChars = regexp.MustCompile(`[^A-Za-z0-9._-]`)
@@ -73,6 +104,17 @@ func Append(sessionID string, e Entry) error {
 	entries := append(Load(sessionID), e)
 	if len(entries) > maxEntries {
 		entries = entries[len(entries)-maxEntries:]
+	}
+	return save(sessionID, entries)
+}
+
+func save(sessionID string, entries []Entry) error {
+	p := path(sessionID)
+	if p == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		return err
 	}
 	data, err := json.Marshal(entries)
 	if err != nil {

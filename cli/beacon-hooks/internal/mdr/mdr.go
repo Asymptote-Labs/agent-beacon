@@ -192,6 +192,8 @@ type Response struct {
 	LatencyMS  int    `json:"latency_ms,omitempty"`
 	FindingID  string `json:"finding_id,omitempty"`
 	FindingURL string `json:"finding_url,omitempty"`
+	// AgentContext is what the agent is told alongside an asked call.
+	AgentContext string `json:"agent_context,omitempty"`
 }
 
 // Text is what to show the agent (or, on an ask, the developer).
@@ -204,6 +206,65 @@ func (r Response) Text() string {
 
 // Flagged reports whether a policy matched, whatever the decision.
 func (r Response) Flagged() bool { return strings.TrimSpace(r.PolicyID) != "" }
+
+// Feedback is the developer's answer to an asked tool call, joined to the
+// decision on ToolUseID.
+type Feedback struct {
+	SessionID   string   `json:"session_id,omitempty"`
+	ToolUseID   string   `json:"tool_use_id"`
+	Outcome     string   `json:"outcome"` // approved | rejected | dismissed
+	Comment     string   `json:"comment,omitempty"`
+	FindingID   string   `json:"finding_id,omitempty"`
+	PolicyID    string   `json:"policy_id,omitempty"`
+	ResolvedVia string   `json:"resolved_via,omitempty"`
+	Subject     *Subject `json:"subject,omitempty"`
+}
+
+// FeedbackURL is the decide URL's sibling, /v1/mdr/feedback.
+func (c Config) FeedbackURL() string {
+	u := strings.TrimRight(strings.TrimSpace(c.URL), "/")
+	if strings.HasSuffix(u, "/decide") {
+		return strings.TrimSuffix(u, "/decide") + "/feedback"
+	}
+	return u + "/feedback"
+}
+
+// SendFeedback POSTs the developer's answer. Best effort: the caller keeps the
+// local record whether or not this succeeds.
+func SendFeedback(ctx context.Context, cfg Config, fb Feedback) error {
+	if !cfg.Enabled() {
+		return ErrNotConfigured
+	}
+	payload, err := json.Marshal(fb)
+	if err != nil {
+		return err
+	}
+	timeout := cfg.Timeout
+	if timeout <= 0 || timeout > 3*time.Second {
+		timeout = 3 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.FeedbackURL(), bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("User-Agent", "beacon-policy/"+version.Version)
+	if token := strings.TrimSpace(cfg.Token); token != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := httpClient.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBytes))
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return fmt.Errorf("feedback endpoint returned HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
 
 // ErrNotConfigured is returned when no endpoint URL is set.
 var ErrNotConfigured = errors.New("policy endpoint not configured")

@@ -11,7 +11,7 @@
 #   2. Writes ~/.beacon/endpoint/policy.json (0600) with the decide URL and token.
 #      The token is kept out of settings.json on purpose: its env block reaches
 #      the agent's Bash tool.
-#   3. Adds three hooks (UserPromptSubmit, PreToolUse, SessionStart) and Read deny
+#   3. Adds five hooks (UserPromptSubmit, PreToolUse, SessionStart, Stop, SessionEnd) and Read deny
 #      rules for credential files to the chosen settings.json. Existing entries,
 #      Beacon's included, are left as they are. Running it again changes nothing.
 #   4. Runs a self-test: the prompt scanner and prefilter offline, then one
@@ -148,6 +148,10 @@ ours = {
     "PreToolUse": {"matcher": "Bash|Read|Grep|Glob|WebFetch|mcp__.*",
                    "hooks": [{"type": "command", "command": command("policy-tool"), "timeout": 15}]},
     "SessionStart": {"hooks": [{"type": "command", "command": command("policy-session")}]},
+    # Record the developer's answers to asked calls at the end of each turn and
+    # of the session (prompt-submit and pre-tool also record them).
+    "Stop": {"hooks": [{"type": "command", "command": command("policy-resolve")}]},
+    "SessionEnd": {"hooks": [{"type": "command", "command": command("policy-resolve"), "timeout": 5}]},
 }
 
 try:

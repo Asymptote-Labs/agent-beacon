@@ -74,3 +74,27 @@ func TestClipsLongPrompts(t *testing.T) {
 		t.Fatalf("len %d", len([]rune(got.Prompts[0])))
 	}
 }
+
+func TestToolResultsFindsRejectionsAndApprovals(t *testing.T) {
+	rejected := "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). To tell you how to proceed, the user said:\nit's a dev key, but keep it out of the chat"
+	path := write(t,
+		toolUse("t1", "Bash", map[string]interface{}{"command": "cat .env"}),
+		user([]interface{}{map[string]interface{}{"type": "tool_result", "tool_use_id": "t1", "is_error": true, "content": rejected}}),
+		toolUse("t2", "Bash", map[string]interface{}{"command": "grep -c . .env"}),
+		user([]interface{}{
+			map[string]interface{}{"type": "tool_result", "tool_use_id": "t2", "content": []interface{}{map[string]interface{}{"type": "text", "text": "6"}}},
+			map[string]interface{}{"type": "text", "text": "fine, counts only"},
+		}),
+		toolUse("t3", "Bash", map[string]interface{}{"command": "ls"}),
+	)
+	got := ToolResults(path, map[string]bool{"t1": true, "t2": true, "t3": true})
+	if r := got["t1"]; !r.IsError || r.Content != rejected {
+		t.Fatalf("t1: %+v", r)
+	}
+	if r := got["t2"]; r.IsError || r.Content != "6" || r.After != "fine, counts only" {
+		t.Fatalf("t2: %+v", r)
+	}
+	if _, ok := got["t3"]; ok {
+		t.Fatal("t3 has no result yet")
+	}
+}

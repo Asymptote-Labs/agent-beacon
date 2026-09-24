@@ -62,6 +62,13 @@ var policySessionCmd = &cobra.Command{
 	Run:    runPolicySession,
 }
 
+var policyResolveCmd = &cobra.Command{
+	Use:    "policy-resolve",
+	Short:  "Stop/SessionEnd: record the developer's answers to asked tool calls",
+	Hidden: true,
+	Run:    runPolicyResolve,
+}
+
 var policyScanCmd = &cobra.Command{
 	Use:    "policy-scan",
 	Short:  "Offline: run the prompt scanner or prefilter over JSON lines on stdin",
@@ -70,7 +77,7 @@ var policyScanCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(policyToolCmd, policyPromptCmd, policySessionCmd, policyScanCmd)
+	rootCmd.AddCommand(policyToolCmd, policyPromptCmd, policySessionCmd, policyResolveCmd, policyScanCmd)
 }
 
 // ---------------------------------------------------------------------------
@@ -84,6 +91,8 @@ func runPolicyTool(cmd *cobra.Command, args []string) {
 		outputJSON(emptyResponse)
 		return
 	}
+	sessionID := resolveSessionID(input, platformFlag)
+	resolvePolicyAsks(input, sessionID, "pre-tool")
 	toolName := getFirstStr(input, "tool_name")
 	toolInput := resolveToolInput(input)
 	rules := prefilter.Load()
@@ -93,7 +102,6 @@ func runPolicyTool(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	sessionID := resolveSessionID(input, platformFlag)
 	logger := newHookLogger("policy-tool", platformFlag, sessionID)
 	cfg := mdr.LoadConfig()
 	toolUseID := getFirstStr(input, "tool_use_id")
@@ -150,15 +158,22 @@ func runPolicyTool(cmd *cobra.Command, args []string) {
 			"systemMessage": policyBanner("blocked", resp),
 		})
 	case mdr.DecisionAsk:
-		recordPolicyDecision(sessionID, resp, toolName, target)
-		emitPolicyEvent(logger, "policy.asked", "medium", firstNonEmpty(resp.Reason, "Tool call held for approval by policy"), input, toolName, toolInput, resp, details)
-		outputJSON(map[string]interface{}{
-			"hookSpecificOutput": map[string]interface{}{
-				"hookEventName":            "PreToolUse",
-				"permissionDecision":       "ask",
-				"permissionDecisionReason": resp.Text(),
-			},
+		_ = policystate.Append(sessionID, policystate.Entry{
+			At: time.Now().UTC(), Decision: mdr.DecisionAsk, Tool: toolName, Target: target,
+			Reason: clipPolicy(resp.Reason, 300), ToolUseID: toolUseID, PolicyID: resp.PolicyID,
+			PolicyName: resp.PolicyName, FindingID: resp.FindingID,
 		})
+		details["finding_id"] = resp.FindingID
+		emitPolicyEvent(logger, "policy.asked", "medium", firstNonEmpty(resp.Reason, "Tool call sent to the developer by policy"), input, toolName, toolInput, resp, details)
+		out := map[string]interface{}{
+			"hookEventName":            "PreToolUse",
+			"permissionDecision":       "ask",
+			"permissionDecisionReason": resp.Text(),
+		}
+		if ctx := strings.TrimSpace(resp.AgentContext); ctx != "" {
+			out["additionalContext"] = ctx
+		}
+		outputJSON(map[string]interface{}{"hookSpecificOutput": out})
 	default:
 		action, severity, message := "policy.allowed", "info", "Policy judge allowed the call"
 		if resp.Flagged() {
@@ -210,7 +225,19 @@ func priorDecisions(sessionID string) []string {
 	}
 	out := make([]string, 0, len(entries))
 	for _, e := range entries {
-		out = append(out, fmt.Sprintf("%s %s `%s`: %s", e.Decision, e.Tool, e.Target, e.Reason))
+		line := fmt.Sprintf("%s %s `%s`: %s", e.Decision, e.Tool, e.Target, e.Reason)
+		switch e.Outcome {
+		case "approved":
+			line += " The developer approved it, overriding the policy"
+		case "rejected":
+			line += " The developer denied it"
+		case "dismissed":
+			line += " The developer dismissed the prompt"
+		}
+		if e.Comment != "" {
+			line += fmt.Sprintf(" (comment: %s)", e.Comment)
+		}
+		out = append(out, line)
 	}
 	return out
 }
@@ -245,6 +272,7 @@ func runPolicyPrompt(cmd *cobra.Command, args []string) {
 		outputJSON(emptyResponse)
 		return
 	}
+	resolvePolicyAsks(input, resolveSessionID(input, platformFlag), "prompt-submit")
 	prompt := getFirstStr(input, "prompt")
 	findings := secretscan.Scan(prompt)
 	if len(findings) == 0 {
@@ -324,6 +352,122 @@ func runPolicySession(cmd *cobra.Command, args []string) {
 	}}
 	emitHookEvent(logger, "policy.active", "session", "info", "Beacon policy hook active", input, fields)
 	outputJSON(emptyResponse)
+}
+
+// ---------------------------------------------------------------------------
+// The developer's answer to an asked call
+// ---------------------------------------------------------------------------
+
+func runPolicyResolve(cmd *cobra.Command, args []string) {
+	input, err := readStdinJSON()
+	if err != nil || platformFlag != "claude" {
+		outputJSON(emptyResponse)
+		return
+	}
+	via := strings.ToLower(firstNonEmpty(getFirstStr(input, "hook_event_name"), "resolve"))
+	resolvePolicyAsks(input, resolveSessionID(input, platformFlag), via)
+	outputJSON(emptyResponse)
+}
+
+const (
+	rejectionMarker = "The user doesn't want to proceed with this tool use"
+	commentMarker   = "the user said:"
+)
+
+// classifyAnswer reads the developer's answer from the result the agent got.
+//
+// Claude Code records a No as an error result that starts with rejectionMarker,
+// with any comment after "the user said:". Anything else means the call ran,
+// so the developer approved it; a comment attached to an approval follows the
+// result in the same message.
+func classifyAnswer(res transcript.ToolResult) (outcome, comment string) {
+	content := strings.TrimSpace(res.Content)
+	switch {
+	case strings.Contains(content, rejectionMarker):
+		if i := strings.Index(content, commentMarker); i >= 0 {
+			comment = strings.TrimSpace(content[i+len(commentMarker):])
+		}
+		return "rejected", comment
+	case strings.HasPrefix(content, "[Request interrupted"):
+		return "dismissed", ""
+	default:
+		return "approved", strings.TrimSpace(res.After)
+	}
+}
+
+// resolvePolicyAsks finds the session's asked calls whose result is now in the
+// transcript, and records the developer's answer: locally as a policy event
+// carrying the original call's tool_use_id, and on the finding through the
+// feedback endpoint. Unanswered asks stay pending for the next hook.
+func resolvePolicyAsks(input map[string]interface{}, sessionID, via string) {
+	pending := policystate.Pending(sessionID)
+	if len(pending) == 0 {
+		return
+	}
+	ids := map[string]bool{}
+	for _, p := range pending {
+		ids[p.ToolUseID] = true
+	}
+	results := transcript.ToolResults(getFirstStr(input, "transcript_path"), ids)
+	if len(results) == 0 {
+		return
+	}
+	logger := newHookLogger("policy-resolve", platformFlag, sessionID)
+	cfg := mdr.LoadConfig()
+	subject := policySubject()
+	for _, p := range pending {
+		res, ok := results[p.ToolUseID]
+		if !ok {
+			continue
+		}
+		outcome, comment := classifyAnswer(res)
+		comment = clipPolicy(secretscan.Mask(comment), 1000)
+		now := time.Now().UTC()
+		_ = policystate.Answer(sessionID, p.ToolUseID, outcome, comment, now)
+		emitPolicyAnswer(logger, input, sessionID, p, outcome, comment, via)
+		_ = mdr.SendFeedback(context.Background(), cfg, mdr.Feedback{
+			SessionID: sessionID, ToolUseID: p.ToolUseID, Outcome: outcome, Comment: comment,
+			FindingID: p.FindingID, PolicyID: p.PolicyID, ResolvedVia: via, Subject: subject,
+		})
+	}
+}
+
+var answerActions = map[string]string{"approved": "policy.overridden", "rejected": "policy.upheld", "dismissed": "policy.dismissed"}
+
+func emitPolicyAnswer(logger *logging.Logger, input map[string]interface{}, sessionID string, p policystate.Entry, outcome, comment, via string) {
+	// The writer takes the event's call ID from the hook payload, which belongs
+	// to whichever hook is running now. Hand it the asked call's ID instead.
+	envelope := cloneFields(input)
+	envelope["tool_use_id"] = p.ToolUseID
+	fields := sessionFields(sessionID, input)
+	target := map[string]interface{}{"command": p.Target}
+	if p.Tool == "Bash" {
+		fields["command"] = target
+		fields["tool"] = map[string]interface{}{"name": p.Tool, "command": p.Target}
+	} else {
+		fields["tool"] = map[string]interface{}{"name": p.Tool}
+		fields["file"] = map[string]interface{}{"path": p.Target}
+	}
+	reason := firstNonEmpty(comment, map[string]string{
+		"approved":  "The developer approved the call, overriding the policy",
+		"rejected":  "The developer denied the call, agreeing with the policy",
+		"dismissed": "The developer dismissed the prompt",
+	}[outcome])
+	fields["policy"] = map[string]interface{}{"id": p.PolicyID, "name": p.PolicyName, "decision": outcome, "enforcement": "ask", "reason": reason}
+	approval := "deny"
+	if outcome == "approved" {
+		approval = "allow"
+	}
+	fields["approval"] = map[string]interface{}{"required": true, "decision": approval, "reason": reason}
+	fields["raw"] = map[string]interface{}{"beacon_policy": map[string]interface{}{
+		"outcome": outcome, "comment": comment, "tool_use_id": p.ToolUseID, "finding_id": p.FindingID,
+		"asked_at": p.At, "resolved_via": via, "policy_binary": version.Version,
+	}}
+	severity := "info"
+	if outcome == "approved" {
+		severity = "medium"
+	}
+	emitHookEvent(logger, answerActions[outcome], categoryForAction(answerActions[outcome]), severity, reason, envelope, fields)
 }
 
 // ---------------------------------------------------------------------------

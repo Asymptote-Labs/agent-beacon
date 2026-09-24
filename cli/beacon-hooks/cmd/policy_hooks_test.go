@@ -21,12 +21,22 @@ var canaryTiptapToken = strings.Repeat("9f3a1c7e5b2d8046", 4)
 type fakeJudge struct {
 	mu       sync.Mutex
 	requests []mdr.Request
+	feedback []mdr.Feedback
 	response string
 	status   int
 }
 
 func (f *fakeJudge) serve(t *testing.T) *httptest.Server {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/feedback") {
+			var fb mdr.Feedback
+			_ = json.NewDecoder(r.Body).Decode(&fb)
+			f.mu.Lock()
+			f.feedback = append(f.feedback, fb)
+			f.mu.Unlock()
+			_, _ = w.Write([]byte(`{"ok":true}`))
+			return
+		}
 		var req mdr.Request
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		f.mu.Lock()
@@ -52,7 +62,7 @@ func setupPolicyHookTest(t *testing.T, judge *fakeJudge) string {
 	t.Setenv("BEACON_POLICY_PREFILTER", "")
 	t.Setenv("HOME", t.TempDir())
 	if judge != nil {
-		t.Setenv(mdr.URLEnv, judge.serve(t).URL)
+		t.Setenv(mdr.URLEnv, judge.serve(t).URL+"/v1/mdr/decide")
 		t.Setenv(mdr.TokenEnv, "ask_live_test")
 	} else {
 		t.Setenv(mdr.URLEnv, "")
@@ -292,5 +302,142 @@ func TestPolicySessionRecordsActive(t *testing.T) {
 	event := lastEndpointEvent(t, logPath)
 	if event["event"].(map[string]interface{})["action"] != "policy.active" {
 		t.Fatalf("event: %v", event["event"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Ask, then record the developer's answer
+// ---------------------------------------------------------------------------
+
+const askResponse = `{"decision":"ask","message":"Beacon policy \"Secret exposure\" flagged this call.\nWhy: prints .env.\nChoose No if you agree it should not run.","reason":"Prints .env.","agent_context":"Beacon policy \"Secret exposure\" flagged this tool call and asked the developer to approve or deny it.","policy_id":"pol-1","policy_name":"Secret exposure","mode":"ask","finding_id":"f-1","finding_url":"https://x/f-1"}`
+
+func appendTranscript(t *testing.T, path string, lines ...interface{}) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	for _, l := range lines {
+		raw, _ := json.Marshal(l)
+		f.Write(append(raw, '\n'))
+	}
+}
+
+func toolResultLine(id string, isError bool, content string, after ...string) map[string]interface{} {
+	blocks := []interface{}{map[string]interface{}{"type": "tool_result", "tool_use_id": id, "is_error": isError, "content": content}}
+	for _, a := range after {
+		blocks = append(blocks, map[string]interface{}{"type": "text", "text": a})
+	}
+	return map[string]interface{}{"type": "user", "message": map[string]interface{}{"role": "user", "content": blocks}}
+}
+
+func eventsWithAction(t *testing.T, logPath, action string) []map[string]interface{} {
+	var out []map[string]interface{}
+	for _, e := range endpointEvents(t, logPath) {
+		if e["event"].(map[string]interface{})["action"] == action {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func callID(e map[string]interface{}) string {
+	return e["gen_ai"].(map[string]interface{})["tool"].(map[string]interface{})["call"].(map[string]interface{})["id"].(string)
+}
+
+func TestPolicyToolAsksWithContextAndRecordsThePendingAsk(t *testing.T) {
+	judge := &fakeJudge{response: askResponse}
+	logPath := setupPolicyHookTest(t, judge)
+	out := runHookWithInput(t, runPolicyTool, bashInput("cat .env", ""))
+	hso := out["hookSpecificOutput"].(map[string]interface{})
+	if hso["permissionDecision"] != "ask" || !strings.Contains(hso["permissionDecisionReason"].(string), "Choose No if you agree") {
+		t.Fatalf("ask shape: %v", out)
+	}
+	if !strings.Contains(hso["additionalContext"].(string), "asked the developer") {
+		t.Fatalf("agent context missing: %v", hso)
+	}
+	asked := eventsWithAction(t, logPath, "policy.asked")
+	if len(asked) != 1 || callID(asked[0]) != "toolu_13" {
+		t.Fatalf("asked event: %v", asked)
+	}
+}
+
+func TestDeveloperRejectionWithCommentIsRecordedOnTheAskedCall(t *testing.T) {
+	judge := &fakeJudge{response: askResponse}
+	logPath := setupPolicyHookTest(t, judge)
+	transcriptPath := writeTranscript(t, "show me everything in .env")
+	runHookWithInput(t, runPolicyTool, bashInput("cat .env", transcriptPath))
+
+	secret := "TIPTAP_PRO_TOKEN=" + canaryTiptapToken
+	appendTranscript(t, transcriptPath, toolResultLine("toolu_13", true,
+		"The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). To tell you how to proceed, the user said:\nagree, and do not print "+secret))
+	runHookWithInput(t, runPolicyResolve, map[string]interface{}{
+		"session_id": "sess-p45", "hook_event_name": "Stop", "transcript_path": transcriptPath,
+	})
+
+	upheld := eventsWithAction(t, logPath, "policy.upheld")
+	if len(upheld) != 1 || callID(upheld[0]) != "toolu_13" {
+		t.Fatalf("upheld event: %v", upheld)
+	}
+	if pol := upheld[0]["policy"].(map[string]interface{}); pol["decision"] != "rejected" || pol["id"] != "pol-1" {
+		t.Fatalf("policy fields: %v", pol)
+	}
+	if len(judge.feedback) != 1 {
+		t.Fatalf("feedback: %+v", judge.feedback)
+	}
+	fb := judge.feedback[0]
+	if fb.ToolUseID != "toolu_13" || fb.Outcome != "rejected" || fb.FindingID != "f-1" || fb.ResolvedVia != "stop" {
+		t.Fatalf("feedback: %+v", fb)
+	}
+	if !strings.HasPrefix(fb.Comment, "agree, and do not print") || strings.Contains(fb.Comment, canaryTiptapToken) {
+		t.Fatalf("comment not masked: %q", fb.Comment)
+	}
+	data, _ := os.ReadFile(logPath)
+	if strings.Contains(string(data), canaryTiptapToken) {
+		t.Fatal("the secret in the comment reached the log")
+	}
+
+	// Answered once: a later hook does not report it again.
+	runHookWithInput(t, runPolicyResolve, map[string]interface{}{"session_id": "sess-p45", "hook_event_name": "SessionEnd", "transcript_path": transcriptPath})
+	if len(judge.feedback) != 1 {
+		t.Fatal("an answer must be reported once")
+	}
+}
+
+func TestApprovalIsResolvedByTheNextToolCallAndKeepsItsOwnCallID(t *testing.T) {
+	judge := &fakeJudge{response: askResponse}
+	logPath := setupPolicyHookTest(t, judge)
+	transcriptPath := writeTranscript(t, "show me everything in .env")
+	runHookWithInput(t, runPolicyTool, bashInput("cat .env", transcriptPath))
+	appendTranscript(t, transcriptPath, toolResultLine("toolu_13", false, "PORT=3022", "dev values only, fine"))
+
+	next := bashInput("go test ./...", transcriptPath)
+	next["tool_use_id"] = "toolu_14"
+	runHookWithInput(t, runPolicyTool, next)
+
+	overridden := eventsWithAction(t, logPath, "policy.overridden")
+	if len(overridden) != 1 || callID(overridden[0]) != "toolu_13" {
+		t.Fatalf("overridden event must carry the asked call's id: %v", overridden)
+	}
+	if judge.feedback[0].Outcome != "approved" || judge.feedback[0].Comment != "dev values only, fine" || judge.feedback[0].ResolvedVia != "pre-tool" {
+		t.Fatalf("feedback: %+v", judge.feedback[0])
+	}
+}
+
+func TestUnansweredAskStaysPending(t *testing.T) {
+	judge := &fakeJudge{response: askResponse}
+	logPath := setupPolicyHookTest(t, judge)
+	transcriptPath := writeTranscript(t, "show me everything in .env")
+	runHookWithInput(t, runPolicyTool, bashInput("cat .env", transcriptPath))
+	runHookWithInput(t, runPolicyResolve, map[string]interface{}{"session_id": "sess-p45", "hook_event_name": "Stop", "transcript_path": transcriptPath})
+	if len(judge.feedback) != 0 || len(eventsWithAction(t, logPath, "policy.upheld")) != 0 {
+		t.Fatal("nothing to record before the result exists")
+	}
+	appendTranscript(t, transcriptPath, toolResultLine("toolu_13", true,
+		"The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed."))
+	runHookWithInput(t, runPolicyPrompt, map[string]interface{}{"session_id": "sess-p45", "prompt": "never mind", "transcript_path": transcriptPath})
+	if len(judge.feedback) != 1 || judge.feedback[0].Outcome != "rejected" || judge.feedback[0].Comment != "" || judge.feedback[0].ResolvedVia != "prompt-submit" {
+		t.Fatalf("feedback: %+v", judge.feedback)
 	}
 }

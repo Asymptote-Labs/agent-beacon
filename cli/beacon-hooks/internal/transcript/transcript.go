@@ -153,3 +153,87 @@ func last(items []string, n int) []string {
 	}
 	return items[len(items)-n:]
 }
+
+// ToolResult is what the transcript recorded for one tool call.
+type ToolResult struct {
+	IsError bool
+	// Content is the text the agent received as the call's result.
+	Content string
+	// After is any text in the same message after the result, where a comment
+	// the developer attached to an approval may land.
+	After string
+}
+
+type resultBlock struct {
+	Type      string          `json:"type"`
+	ToolUseID string          `json:"tool_use_id"`
+	IsError   bool            `json:"is_error"`
+	Content   json.RawMessage `json:"content"`
+	Text      string          `json:"text"`
+}
+
+// ToolResults returns the recorded results for the given tool_use_ids, read
+// from the tail of the transcript. IDs with no result yet are absent.
+func ToolResults(path string, ids map[string]bool) map[string]ToolResult {
+	out := map[string]ToolResult{}
+	if strings.TrimSpace(path) == "" || len(ids) == 0 {
+		return out
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return out
+	}
+	defer f.Close()
+	if info, err := f.Stat(); err == nil && info.Size() > 4*tailBytes {
+		_, _ = f.Seek(info.Size()-4*tailBytes, io.SeekStart)
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return out
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	scanner.Buffer(make([]byte, 0, 64<<10), 16<<20)
+	for scanner.Scan() {
+		var l line
+		if json.Unmarshal(scanner.Bytes(), &l) != nil || l.Type != "user" {
+			continue
+		}
+		var blocks []resultBlock
+		if json.Unmarshal(l.Message.Content, &blocks) != nil {
+			continue
+		}
+		for i, b := range blocks {
+			if b.Type != "tool_result" || !ids[b.ToolUseID] {
+				continue
+			}
+			res := ToolResult{IsError: b.IsError, Content: blockText(b.Content)}
+			var after []string
+			for _, next := range blocks[i+1:] {
+				if next.Type == "text" && strings.TrimSpace(next.Text) != "" {
+					after = append(after, strings.TrimSpace(next.Text))
+				}
+			}
+			res.After = strings.Join(after, "\n")
+			out[b.ToolUseID] = res
+		}
+	}
+	return out
+}
+
+func blockText(raw json.RawMessage) string {
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	var parts []block
+	if json.Unmarshal(raw, &parts) != nil {
+		return ""
+	}
+	var texts []string
+	for _, p := range parts {
+		if p.Type == "text" {
+			texts = append(texts, p.Text)
+		}
+	}
+	return strings.Join(texts, "\n")
+}
