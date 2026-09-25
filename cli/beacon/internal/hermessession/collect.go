@@ -424,6 +424,96 @@ ORDER BY id`, sessionID, afterID)
 	return out, rows.Err()
 }
 
+// SessionDetail is what a session listing needs beyond ListSessions: where the session stands and
+// what spawned it.
+type SessionDetail struct {
+	// Branch is the git branch Hermes recorded for the session's directory. Older databases have no
+	// git_branch column and leave it empty.
+	Branch string
+	// DelegateFrom names the session that spawned this one as a delegate subagent, from the
+	// _delegate_from marker Hermes writes into model_config ("__orphaned__" once that parent is
+	// deleted). Compression continuations and /branch forks also carry a parent_session_id, but no
+	// marker: they continue the conversation rather than run a delegated task.
+	DelegateFrom string
+	// FirstPrompt is the session's first user message.
+	FirstPrompt string
+	// LastMessageAtMS is when the session's latest active message was written.
+	LastMessageAtMS int64
+}
+
+// SessionDetails returns a SessionDetail for every session ListSessions lists, keyed by id.
+func (s *Store) SessionDetails() (map[string]SessionDetail, error) {
+	columns := map[string]bool{}
+	rows, err := s.db.Query(`SELECT name FROM pragma_table_info('sessions')`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		columns[name] = true
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	branch := "NULL"
+	if columns["git_branch"] {
+		branch = "git_branch"
+	}
+	out := map[string]SessionDetail{}
+	rows, err = s.db.Query(`SELECT id, model_config, ` + branch + ` FROM sessions WHERE archived = 0`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id string
+		var modelConfig, gitBranch sql.NullString
+		if err := rows.Scan(&id, &modelConfig, &gitBranch); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		var config struct {
+			DelegateFrom string `json:"_delegate_from"`
+		}
+		_ = json.Unmarshal([]byte(modelConfig.String), &config)
+		out[id] = SessionDetail{Branch: strings.TrimSpace(gitBranch.String), DelegateFrom: strings.TrimSpace(config.DelegateFrom)}
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	rows, err = s.db.Query(`
+SELECT session_id, max(timestamp),
+       (SELECT f.content FROM messages f
+        WHERE f.session_id = m.session_id AND f.active = 1 AND f.role = 'user' AND trim(COALESCE(f.content, '')) != ''
+        ORDER BY f.id LIMIT 1)
+FROM messages m
+WHERE active = 1
+GROUP BY session_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var last sql.NullFloat64
+		var prompt sql.NullString
+		if err := rows.Scan(&id, &last, &prompt); err != nil {
+			return nil, err
+		}
+		detail, ok := out[id]
+		if !ok {
+			continue
+		}
+		detail.LastMessageAtMS = secondsToMillis(last)
+		detail.FirstPrompt = strings.TrimSpace(prompt.String)
+		out[id] = detail
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) LastMessageID(sessionID string) (int64, error) {
 	var last sql.NullInt64
 	if err := s.db.QueryRow(`SELECT max(id) FROM messages WHERE session_id = ? AND active = 1`, sessionID).Scan(&last); err != nil {
@@ -594,6 +684,11 @@ func (m *mapper) mapMessage(message Message) {
 			ev.Prompt = &schema.PromptInfo{Text: text}
 			ev.Content = asymptoteobserve.RetainedContent(text, asymptoteobserve.DefaultStringLimit)
 			m.append(message.ID, "prompt.submitted", ev)
+			if info, ok := asymptoteobserve.ParseHandoffMarker(text); ok {
+				link := m.base(message.TimestampMS, "session.handoff", "session", schema.SeverityInfo, "Session continued from a "+info.SourceHarness+" session")
+				link.Handoff = &info
+				m.append(message.ID, "prompt.submitted.handoff", link)
+			}
 		}
 	case "assistant":
 		for idx, text := range reasoningParts(message) {

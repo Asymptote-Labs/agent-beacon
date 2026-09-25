@@ -10,6 +10,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/copilotsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/dshsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/factorysession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/hermessession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/openclawsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/opencodesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pisession"
@@ -59,6 +60,7 @@ const (
 	HarnessPrime    = primesession.Harness
 	HarnessFactory  = factorysession.Harness
 	HarnessCopilot  = copilotsession.Harness
+	HarnessHermes   = hermessession.Harness
 	HarnessDSH      = dshsession.Harness
 	HarnessOpenClaw = openclawsession.Harness
 
@@ -199,6 +201,29 @@ var runtimes = []Runtime{
 			// directory, or COPILOT_PLAN_THEN_AUTOPILOT, which starts in plan mode and carries the plan
 			// out without waiting. A session Beacon starts never inherits either.
 			Env: map[string]string{"COPILOT_ALLOW_ALL": "", "COPILOT_PLAN_THEN_AUTOPILOT": ""},
+		},
+	},
+	{
+		Harness:   HarnessHermes,
+		Label:     "Hermes Agent",
+		Aliases:   []string{"hermes-agent"},
+		NewSource: func(path string) Source { return &hermesSource{path: path} },
+		Command: &runtimeCommand{
+			Executable: "hermes",
+			Resume: func(s Session) ([]string, bool) {
+				// A delegate subagent ran one task for its parent; reopening it alone reopens a fragment.
+				if s.Subagent {
+					return nil, false
+				}
+				// Hermes looks the id up in its state database, follows a compressed session on to its
+				// latest continuation, and changes into the session's recorded directory itself.
+				return []string{"--resume", s.ID}, true
+			},
+			// NewSession is nil: Hermes has no interactive start with a first message, only one-shot
+			// runs (chat -q, -z), and -z bypasses approvals. It reopens its own sessions only.
+			//
+			// HERMES_YOLO_MODE, inherited from the shell, would bypass every dangerous-command approval.
+			Env: map[string]string{"HERMES_YOLO_MODE": ""},
 		},
 	},
 	{
