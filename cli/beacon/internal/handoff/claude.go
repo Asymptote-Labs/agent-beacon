@@ -39,15 +39,26 @@ func readClaudeHead(path string) claudeHead {
 // scanHead passes the first lines of a JSONL transcript to consume until it returns true, within
 // the listing bounds above. A listing opens every transcript, so it reads only its head.
 func scanHead(path string, consume func(line []byte) (done bool)) {
+	scanHeadLines(path, claudeHeadMaxLineSize, consume)
+}
+
+// scanHeadLines is scanHead for a transcript whose lines can run longer than a listing's usual
+// bound: a line up to maxLineSize is kept, and one past it is skipped. The byte budget grows with
+// the line bound, so the first long line can still be read whole.
+func scanHeadLines(path string, maxLineSize int, consume func(line []byte) (done bool)) {
+	maxBytes := int64(claudeHeadMaxBytes)
+	if int64(maxLineSize) > maxBytes {
+		maxBytes = int64(maxLineSize) + int64(claudeHeadMaxBytes)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return
 	}
 	defer f.Close()
 
-	reader := bufio.NewReaderSize(io.LimitReader(f, claudeHeadMaxBytes), 64<<10)
+	reader := bufio.NewReaderSize(io.LimitReader(f, maxBytes), 64<<10)
 	for lines := 0; lines < claudeHeadMaxLines; lines++ {
-		line, err := readBoundedLine(reader, claudeHeadMaxLineSize)
+		line, err := readBoundedLine(reader, maxLineSize)
 		if len(line) > 0 && consume(line) {
 			return
 		}
