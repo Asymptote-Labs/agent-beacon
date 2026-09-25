@@ -108,7 +108,11 @@ func (f piFamily) endpointEvents(input map[string]interface{}, sessionID string)
 		if prompt == "" {
 			return nil
 		}
-		return []normalizedEvent{f.promptEvent(fields, prompt, getFirstStr(input, "source"))}
+		events := []normalizedEvent{f.promptEvent(fields, prompt, getFirstStr(input, "source"))}
+		if link, ok := handoffLinkEvent(fields, prompt); ok {
+			events = append(events, link)
+		}
+		return events
 
 	case "tool_call":
 		// The pre-execution half of a tool call: the runtime has decided to run it and named its
