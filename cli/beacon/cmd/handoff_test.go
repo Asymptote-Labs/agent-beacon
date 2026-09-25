@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,17 +12,24 @@ import (
 
 	"github.com/spf13/pflag"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/handoff"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 type stubHandoffSource struct {
-	harness  string
-	sessions []handoff.Session
-	err      error
+	harness   string
+	sessions  []handoff.Session
+	err       error
+	events    []schema.Event
+	eventsErr error
 }
 
 func (s stubHandoffSource) Harness() string                  { return s.harness }
 func (s stubHandoffSource) List() ([]handoff.Session, error) { return s.sessions, s.err }
+func (s stubHandoffSource) Events(handoff.Session) ([]schema.Event, error) {
+	return s.events, s.eventsErr
+}
 
 func stubHandoffSources(t *testing.T, sources ...handoff.Source) *handoff.StoreDirs {
 	t.Helper()
@@ -229,5 +237,167 @@ func TestHandoffAge(t *testing.T) {
 	}
 	if got := handoffAge(now.Add(-72*time.Hour), now); len(got) != len("2006-01-02") {
 		t.Fatalf("old sessions show a date, got %q", got)
+	}
+}
+
+func stubHandoffClock(t *testing.T) {
+	t.Helper()
+	prev := handoffNow
+	handoffNow = func() time.Time { return time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { handoffNow = prev })
+}
+
+func exportFixtureSource() stubHandoffSource {
+	return stubHandoffSource{
+		harness:  handoff.HarnessClaude,
+		sessions: []handoff.Session{{Harness: handoff.HarnessClaude, ID: "claude-1", Directory: "/work/api"}},
+		events: []schema.Event{{
+			Timestamp: "2026-09-25T10:00:00Z",
+			Event:     schema.EventInfo{Action: "prompt.submitted"},
+			Prompt:    &schema.PromptInfo{Text: "add a health endpoint"},
+		}},
+	}
+}
+
+// handoffLog writes a runtime log holding one prompt for session id.
+func handoffLog(t *testing.T, harness, id, text string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	line := `{"timestamp":"2026-09-25T09:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"prompt.submitted","category":"prompt"},"severity":"info","endpoint":{"hostname":"h","os":"linux"},"harness":{"name":"` + harness + `"},"session":{"id":"` + id + `","working_directory":"/work/x"},"prompt":{"text":"` + text + `"}}`
+	if err := os.WriteFile(path, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestHandoffExportCommandRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"handoff", "export"})
+	if err != nil || cmd == nil || cmd.Name() != "export" {
+		t.Fatalf("handoff export not registered: %v", err)
+	}
+	for _, flag := range []string{"print", "output-dir", "log-path", "json", "harness", "claude-projects-dir", "codex-dir", "opencode-dir", "cline-dir"} {
+		if cmd.Flags().Lookup(flag) == nil {
+			t.Fatalf("handoff export missing --%s", flag)
+		}
+	}
+	if _, _, err := runHandoff(t, "export"); err == nil {
+		t.Fatal("export without a session id must fail")
+	}
+}
+
+func TestHandoffExportPrint(t *testing.T) {
+	stubHandoffClock(t)
+	stubHandoffSources(t, exportFixtureSource())
+	out, _, err := runHandoff(t, "export", "claude-1", "--print")
+	if err != nil {
+		t.Fatalf("export --print: %v", err)
+	}
+	if !strings.HasPrefix(out, "# Handoff brief") || !strings.Contains(out, "add a health endpoint") || !strings.Contains(out, "Brief written: 2026-09-25T12:00:00Z") {
+		t.Fatalf("printed brief:\n%s", out)
+	}
+}
+
+func TestHandoffExportWritesAPrivateFile(t *testing.T) {
+	stubHandoffClock(t)
+	stubHandoffSources(t, exportFixtureSource())
+	dir := filepath.Join(t.TempDir(), "briefs")
+	out, _, err := runHandoff(t, "export", "claude-1", "--output-dir", dir)
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	path := strings.TrimSpace(out)
+	if filepath.Dir(path) != dir {
+		t.Fatalf("export printed %q, want a path in %s", path, dir)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(data), "add a health endpoint") {
+		t.Fatalf("brief file: %v\n%s", err, data)
+	}
+	if testenv.HasPOSIXFileModes() {
+		if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
+			t.Fatalf("brief mode = %o, want 600", info.Mode().Perm())
+		}
+	}
+
+	jsonOut, _, err := runHandoff(t, "export", "claude-1", "--output-dir", filepath.Join(t.TempDir(), "json"), "--json")
+	if err != nil {
+		t.Fatalf("export --json: %v", err)
+	}
+	var result handoffExportResult
+	if err := json.Unmarshal([]byte(jsonOut), &result); err != nil || result.From != handoff.FromSessionStore || result.Session.ID != "claude-1" || result.Path == "" {
+		t.Fatalf("export --json = %+v, %v\n%s", result, err, jsonOut)
+	}
+}
+
+func TestHandoffExportDefaultsUnderTheBeaconDirectory(t *testing.T) {
+	stubHandoffClock(t)
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	stubHandoffSources(t, exportFixtureSource())
+	out, _, err := runHandoff(t, "export", "claude-1")
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if want := filepath.Join(home, ".beacon", "endpoint", "handoffs"); filepath.Dir(strings.TrimSpace(out)) != want {
+		t.Fatalf("brief written to %q, want under %s", out, want)
+	}
+}
+
+func TestHandoffExportFallsBackToTheRuntimeLog(t *testing.T) {
+	stubHandoffClock(t)
+	stubHandoffSources(t, stubHandoffSource{harness: handoff.HarnessClaude})
+	logPath := handoffLog(t, "cursor", "cursor-conv-1", "rename the module")
+	out, stderr, err := runHandoff(t, "export", "cursor-conv-1", "--log-path", logPath, "--output-dir", t.TempDir())
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	data, err := os.ReadFile(strings.TrimSpace(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "rename the module") || !strings.Contains(string(data), "comes from Beacon's runtime log") {
+		t.Fatalf("log brief:\n%s", data)
+	}
+	if !strings.Contains(stderr, "no longer in its runtime's store") {
+		t.Fatalf("stderr should say where the brief came from: %q", stderr)
+	}
+}
+
+func TestHandoffExportFallsBackWhenTheStoreLosesTheSession(t *testing.T) {
+	stubHandoffClock(t)
+	source := exportFixtureSource()
+	source.eventsErr = handoff.ErrNotFound
+	stubHandoffSources(t, source)
+	logPath := handoffLog(t, handoff.HarnessClaude, "claude-1", "from the log")
+	out, _, err := runHandoff(t, "export", "claude-1", "--print", "--log-path", logPath)
+	if err != nil || !strings.Contains(out, "from the log") {
+		t.Fatalf("export = %v\n%s", err, out)
+	}
+}
+
+func TestHandoffExportErrors(t *testing.T) {
+	stubHandoffClock(t)
+	emptyLog := filepath.Join(t.TempDir(), "runtime.jsonl")
+
+	stubHandoffSources(t, stubHandoffSource{harness: handoff.HarnessClaude})
+	_, _, err := runHandoff(t, "export", "nope-123", "--log-path", emptyLog)
+	if !errors.Is(err, handoff.ErrNotFound) || !strings.Contains(err.Error(), "beacon handoff list") {
+		t.Fatalf("unknown session err = %v", err)
+	}
+
+	logPath := handoffLog(t, "cursor", "cursor-conv-1", "x")
+	if _, _, err := runHandoff(t, "export", "cursor-conv-1", "--harness", "codex", "--log-path", logPath); !errors.Is(err, handoff.ErrNotFound) {
+		t.Fatalf("--harness must also scope the log fallback, got %v", err)
+	}
+
+	broken := exportFixtureSource()
+	broken.eventsErr = errors.New("transcript is unreadable")
+	stubHandoffSources(t, broken)
+	if _, _, err := runHandoff(t, "export", "claude-1", "--print"); err == nil || !strings.Contains(err.Error(), "transcript is unreadable") {
+		t.Fatalf("a store read error must surface, not fall back silently: %v", err)
+	}
+
+	if _, _, err := runHandoff(t, "export", "claude-1", "--print", "--output-dir", "/tmp/x"); err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("--print with --output-dir err = %v", err)
 	}
 }
