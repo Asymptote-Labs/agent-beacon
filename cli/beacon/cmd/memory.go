@@ -173,9 +173,12 @@ var memorySkillsInstallCmd = &cobra.Command{
 	RunE:         runMemorySkillsInstall,
 }
 
+// evaluationRunResult reports one `evaluations run`. Project is set only when --project
+// pinned every trace to one project; otherwise each trace is scoped to its own
+// repository, and the project lives on each preview and evaluation instead.
 type evaluationRunResult struct {
 	DryRun           bool                                    `json:"dry_run"`
-	Project          asymptoteobserve.LearningProjectV1      `json:"project"`
+	Project          *asymptoteobserve.LearningProjectV1     `json:"project,omitempty"`
 	StorePath        string                                  `json:"store_path"`
 	TraceCount       int                                     `json:"trace_count"`
 	EstimatedCalls   int                                     `json:"estimated_calls"`
@@ -303,10 +306,6 @@ func runMemoryShow(cmd *cobra.Command, args []string) error {
 }
 
 func runMemoryEvaluationsRun(cmd *cobra.Command, args []string) error {
-	project, err := learning.ResolveProject(memoryOpts.projectPath)
-	if err != nil {
-		return err
-	}
 	store := memoryStore()
 	inputs, err := selectedEvaluationInputs()
 	if err != nil {
@@ -315,11 +314,17 @@ func runMemoryEvaluationsRun(cmd *cobra.Command, args []string) error {
 	evaluatorOpts := jevEvaluatorOptions()
 	result := evaluationRunResult{
 		DryRun:           memoryOpts.dryRun,
-		Project:          project,
 		StorePath:        store.Path(),
 		TraceCount:       len(inputs),
 		EstimatedCalls:   len(inputs),
 		EstimatedCostUSD: float64(len(inputs)) * memoryOpts.jevCost,
+	}
+	if strings.TrimSpace(memoryOpts.projectPath) != "" {
+		project, err := learning.ResolveProject(memoryOpts.projectPath)
+		if err != nil {
+			return err
+		}
+		result.Project = &project
 	}
 	for _, input := range inputs {
 		input.DryRun = memoryOpts.dryRun
@@ -352,7 +357,7 @@ func runMemoryEvaluationsRun(cmd *cobra.Command, args []string) error {
 	if result.DryRun {
 		fmt.Fprintf(cmd.OutOrStdout(), "Selected %d trace(s); estimated Jev calls: %d; estimated cost: $%.5f\n", result.TraceCount, result.EstimatedCalls, result.EstimatedCostUSD)
 		for _, preview := range result.Previews {
-			fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t$%.5f\n", preview.TraceID, preview.Title, preview.EstimatedCostUSD)
+			fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t$%.5f\n", preview.TraceID, preview.Title, firstNonEmpty(preview.Project.Path, preview.Project.ID), preview.EstimatedCostUSD)
 		}
 		return nil
 	}

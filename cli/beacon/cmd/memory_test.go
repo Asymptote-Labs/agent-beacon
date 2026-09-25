@@ -421,6 +421,40 @@ func TestMemoryEvaluationsRunSkipsSessionlessTraces(t *testing.T) {
 	if result.TraceCount != 1 || len(result.Previews) != 1 || result.Previews[0].TraceID != "session:cursor:s1" {
 		t.Fatalf("expected only the session trace to be selected, got %#v", result)
 	}
+	if result.Project == nil || result.Project.Path != project || result.Previews[0].Project.ID != result.Project.ID {
+		t.Fatalf("with --project the result and every preview should name it, got %#v", result)
+	}
+}
+
+// Without --project each trace is scoped to its own repository, so the result must
+// not claim a single project that the stored records may not belong to.
+func TestMemoryEvaluationsRunReportsProjectOnlyWhenPinned(t *testing.T) {
+	logPath, project := writeMemoryCommandFixture(t)
+	resetMemoryOpts(t)
+	memoryOpts.logPath = logPath
+	memoryOpts.dryRun = true
+	memoryOpts.jsonOutput = true
+
+	var out bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&out)
+	if err := runMemoryEvaluationsRun(cmd, nil); err != nil {
+		t.Fatalf("runMemoryEvaluationsRun returned error: %v", err)
+	}
+	var result evaluationRunResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode result: %v\n%s", err, out.String())
+	}
+	if result.Project != nil {
+		t.Fatalf("result should not name a project without --project, got %#v", result.Project)
+	}
+	want, err := learning.ResolveProject(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Previews) != 1 || result.Previews[0].Project.ID != want.ID {
+		t.Fatalf("preview should carry the trace's repository %s, got %#v", want.ID, result.Previews)
+	}
 }
 
 func TestMemoryCandidatesCreateScopesToTraceRepository(t *testing.T) {
