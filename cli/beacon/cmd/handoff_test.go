@@ -138,18 +138,29 @@ func TestHandoffListJSONIsAnEmptyArrayNotNull(t *testing.T) {
 }
 
 func TestHandoffListFilters(t *testing.T) {
-	stubHandoffSources(t, handoffFixtureSessions()...)
-	out, _, err := runHandoff(t, "list", "--harness", "codex")
-	if err != nil || !strings.Contains(out, "codex-1") || strings.Contains(out, "claude-1") {
-		t.Fatalf("--harness codex = %v\n%s", err, out)
-	}
-	out, _, err = runHandoff(t, "list", "--dir", "/work/api")
-	if err != nil || !strings.Contains(out, "claude-1") || strings.Contains(out, "codex-1") {
-		t.Fatalf("--dir /work/api = %v\n%s", err, out)
-	}
-	out, _, err = runHandoff(t, "list", "--limit", "1")
-	if err != nil || strings.Count(strings.TrimSpace(out), "\n") != 1 {
-		t.Fatalf("--limit 1 = %v\n%s", err, out)
+	api, web := t.TempDir(), t.TempDir()
+	now := time.Now()
+	stubHandoffSources(t,
+		stubHandoffSource{harness: handoff.HarnessClaude, sessions: []handoff.Session{
+			{Harness: handoff.HarnessClaude, ID: "claude-1", Directory: api, UpdatedAt: now.Add(-time.Minute)},
+		}},
+		stubHandoffSource{harness: handoff.HarnessCodex, sessions: []handoff.Session{
+			{Harness: handoff.HarnessCodex, ID: "codex-1", Directory: web, UpdatedAt: now.Add(-time.Hour)},
+		}},
+	)
+	for _, tc := range []struct {
+		args          []string
+		want, without string
+	}{
+		{[]string{"--harness", "codex"}, "codex-1", "claude-1"},
+		{[]string{"--dir", api}, "claude-1", "codex-1"},
+		{[]string{"--dir", web}, "codex-1", "claude-1"},
+		{[]string{"--limit", "1"}, "claude-1", "codex-1"},
+	} {
+		out, _, err := runHandoff(t, append([]string{"list"}, tc.args...)...)
+		if err != nil || !strings.Contains(out, tc.want) || strings.Contains(out, tc.without) {
+			t.Fatalf("list %q = %v (opts %+v)\n%s", tc.args, err, handoffOpts, out)
+		}
 	}
 }
 
