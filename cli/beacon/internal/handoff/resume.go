@@ -72,8 +72,11 @@ func PlanResume(session Session, opts PlanOptions) (Plan, error) {
 		target = opts.Target
 	}
 	targetCommand, ok := commandFor(target)
+	if !ok && opts.Target == "" {
+		return Plan{}, fmt.Errorf("beacon handoff cannot start %s; continue the session in another runtime with --agent (supported: %s)", RuntimeLabel(target), strings.Join(StartableNames(), ", "))
+	}
 	if !ok {
-		return Plan{}, fmt.Errorf("%s sessions cannot be started by beacon handoff (supported: %s)", target, strings.Join(StartableNames(), ", "))
+		return Plan{}, fmt.Errorf("%s cannot be started by beacon handoff (supported: %s)", RuntimeLabel(target), strings.Join(StartableNames(), ", "))
 	}
 	reason := nativeBlocker(session, target, opts)
 	// Said before anything else is checked, since no directory or install fixes it.

@@ -38,7 +38,8 @@ When the session's own runtime can reopen it, it is reopened with its full conte
 
 Otherwise, or with --agent naming another runtime or --new, Beacon writes a handoff brief of the
 session and starts a new session whose first message points at it. The brief is passed by path,
-never inlined into the command line.
+never inlined into the command line. Beacon cannot start DeepSeek Harness, so its sessions continue
+in another runtime named with --agent.
 
 The runtime runs in the session's directory, in this terminal. Beacon asks before launching unless
 --yes is given; --print shows what would run without writing or launching anything. Cline is always
