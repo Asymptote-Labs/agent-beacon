@@ -151,6 +151,11 @@ When Beacon's hook adapter records a prompt carrying this marker, it writes a se
 
 The link event keeps the new session's id, workspace and harness, and leaves the prompt text to the prompt event. Rules can match on `e.handoff.source_harness` and `e.handoff.source_session_id`.
 
-The live hook paths for Claude Code, Cline and OpenCode record the link. Codex CLI prompts reach Beacon over OTLP and through `beacon endpoint codex sync`, not through a prompt hook, so a session continued in Codex is not linked yet.
+Two paths record the link:
+
+- **Live hooks.** The prompt hook for Claude Code and the Cline and OpenCode plugins record it as the prompt is sent (`harness.collection_method: hook`).
+- **Session-store sync.** `beacon endpoint claude sync`, `codex sync`, `opencode sync` and `cline sync` record it when they read the prompt back from the runtime's store (`harness.collection_method: poll`).
+
+Codex CLI prompts reach Beacon over OTLP and through `beacon endpoint codex sync`, not a prompt hook, so a session continued in Codex is linked by the sync. For the other three runtimes, a sync can record the same link a hook already did; the two carry different `collection_method` values, as every other event those runtimes report through both paths does. A sync's link has a deterministic `event.id`, so syncing again never duplicates it.
 
 The marker is a claim made in prompt text, not a verified identity: anyone can type it. `fidelity: observed` records that the marker was seen, not that `beacon handoff resume` wrote it. A native resume keeps the session's own id, so it needs no link.

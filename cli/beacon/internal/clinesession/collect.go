@@ -175,19 +175,22 @@ func collectTrace(store *Store, ref TraceRef, state *State, opts CollectOptions,
 		return false, nil
 	}
 	for i, item := range mapped {
-		if err := emit(item.Event, opts); err != nil {
-			if i > 0 {
-				cursor.LastOrder = mapped[i-1].SourceOrder
-			}
+		if err := emitEvent(item.Event, opts); err != nil {
 			return true, err
 		}
-		cursor.LastOrder = item.SourceOrder
-		if pendingHashes != nil {
-			if h, ok := pendingHashes[item.SourceOrder]; ok {
-				if cursor.KanbanHashes == nil {
-					cursor.KanbanHashes = map[int]string{}
+		// A record can map to several events (a prompt and its session.handoff link). The cursor,
+		// and for a kanban card its content hash, passes a record only once its last event is
+		// written, so a failure partway through retries the whole record rather than skipping what
+		// was left of it.
+		if recordComplete(mapped, i) {
+			cursor.LastOrder = item.SourceOrder
+			if pendingHashes != nil {
+				if h, ok := pendingHashes[item.SourceOrder]; ok {
+					if cursor.KanbanHashes == nil {
+						cursor.KanbanHashes = map[int]string{}
+					}
+					cursor.KanbanHashes[item.SourceOrder] = h
 				}
-				cursor.KanbanHashes[item.SourceOrder] = h
 			}
 		}
 		if item.Event.Event.Action == "session.started" {
@@ -218,6 +221,9 @@ func kanbanContentHash(r Record) string {
 	return hex.EncodeToString(h[:])
 }
 
+// emitEvent is emit, swapped by tests to fail a chosen write.
+var emitEvent = emit
+
 func emit(event schema.Event, opts CollectOptions) error {
 	if opts.Print && opts.Out != nil {
 		data, err := json.Marshal(event)
@@ -234,4 +240,9 @@ func emit(event schema.Event, opts CollectOptions) error {
 		}
 	}
 	return nil
+}
+
+// recordComplete reports whether mapped[i] is the last event of its source record.
+func recordComplete(mapped []MappedEvent, i int) bool {
+	return i+1 == len(mapped) || mapped[i+1].SourceOrder != mapped[i].SourceOrder
 }

@@ -97,6 +97,11 @@ func (m *mapper) emitPrompt(record Record) {
 	ev.Content = asymptoteobserve.RetainedContent(text, asymptoteobserve.DefaultStringLimit)
 	ev.GenAI = &schema.GenAIInfo{Input: &schema.GenAIInputInfo{Messages: asymptoteobserve.TextInputMessages(text)}}
 	m.append(record, "prompt", ev)
+	if info, ok := asymptoteobserve.ParseHandoffMarker(text); ok {
+		link := m.base(record, "session.handoff", "session", schema.SeverityInfo, "Session continued from a "+info.SourceHarness+" session")
+		link.Handoff = &info
+		m.append(record, "handoff", link)
+	}
 }
 
 func (m *mapper) emitAgentMessage(record Record) {

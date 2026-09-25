@@ -90,6 +90,7 @@ type MCPProtocolInfo = asymptoteobserve.MCPProtocolInfo
 type MCPResourceInfo = asymptoteobserve.MCPResourceInfo
 type MCPSessionInfo = asymptoteobserve.MCPSessionInfo
 type ApprovalInfo = asymptoteobserve.ApprovalInfo
+type HandoffInfo = asymptoteobserve.HandoffInfo
 type PolicyInfo = asymptoteobserve.PolicyInfo
 type PromptInfo = asymptoteobserve.PromptInfo
 type ContentInfo = asymptoteobserve.ContentInfo

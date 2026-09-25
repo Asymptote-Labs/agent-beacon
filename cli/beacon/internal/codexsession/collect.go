@@ -172,10 +172,8 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 		return false, nil
 	}
 	for i, item := range mapped {
-		if err := emit(item.Event, opts); err != nil {
-			if i > 0 {
-				cursor.LastLine = mapped[i-1].SourceLine
-			}
+		if err := emitEvent(item.Event, opts); err != nil {
+			advanceCursorPartial(cursor, mapped, i)
 			return true, err
 		}
 		summary.EventsEmitted++
@@ -193,6 +191,9 @@ func advanceCursor(cursor *Cursor, ref SessionRef, lines int) {
 	cursor.ModTimeUnixMS = ref.ModTimeUnixMS
 }
 
+// emitEvent is emit, swapped by tests to fail a chosen write.
+var emitEvent = emit
+
 func emit(event schema.Event, opts CollectOptions) error {
 	if opts.Print {
 		out := opts.Out
@@ -206,4 +207,20 @@ func emit(event schema.Event, opts CollectOptions) error {
 	}
 	_, err := writer.AppendEvent(event, writer.Options{Path: opts.LogPath, UserMode: opts.UserMode})
 	return err
+}
+
+// advanceCursorPartial moves the cursor past source lines whose mapped events were all emitted, so
+// the next sweep retries from the source line that failed. One rollout line can map to several
+// events (a prompt and its session.handoff link); stopping at the last emitted event's line would
+// skip the rest of that line for good. failedIdx is the index into mapped of the event whose emit
+// failed. This is the claudesession rule.
+func advanceCursorPartial(cursor *Cursor, mapped []MappedEvent, failedIdx int) {
+	for i := failedIdx - 1; i >= 0; i-- {
+		if mapped[i].SourceLine != mapped[failedIdx].SourceLine {
+			if mapped[i].SourceLine > cursor.LastLine {
+				cursor.LastLine = mapped[i].SourceLine
+			}
+			return
+		}
+	}
 }
