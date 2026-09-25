@@ -321,8 +321,51 @@ func findGitRoot(path string) string {
 	}
 }
 
+// gitDirs returns the git directory for root and the common directory that holds its
+// config. In a linked worktree, .git is a file naming a gitdir under the main
+// repository's .git/worktrees/<name>, and that gitdir's commondir file points back at
+// the shared .git. Without following both, a session recorded in a worktree would hash
+// to a path-based project instead of the remote its checkout shares.
+func gitDirs(root string) (gitDir, commonDir string) {
+	dotGit := filepath.Join(root, ".git")
+	info, err := os.Stat(dotGit)
+	if err != nil {
+		return "", ""
+	}
+	if info.IsDir() {
+		return dotGit, dotGit
+	}
+	data, err := os.ReadFile(dotGit)
+	if err != nil {
+		return "", ""
+	}
+	text := strings.TrimSpace(string(data))
+	const prefix = "gitdir:"
+	if !strings.HasPrefix(text, prefix) {
+		return "", ""
+	}
+	gitDir = strings.TrimSpace(strings.TrimPrefix(text, prefix))
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(root, gitDir)
+	}
+	gitDir = filepath.Clean(gitDir)
+	commonDir = gitDir
+	if data, err := os.ReadFile(filepath.Join(gitDir, "commondir")); err == nil {
+		common := strings.TrimSpace(string(data))
+		if !filepath.IsAbs(common) {
+			common = filepath.Join(gitDir, common)
+		}
+		commonDir = filepath.Clean(common)
+	}
+	return gitDir, commonDir
+}
+
 func readGitHeadBranch(root string) string {
-	data, err := os.ReadFile(filepath.Join(root, ".git", "HEAD"))
+	gitDir, _ := gitDirs(root)
+	if gitDir == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(gitDir, "HEAD"))
 	if err != nil {
 		return ""
 	}
@@ -335,7 +378,11 @@ func readGitHeadBranch(root string) string {
 }
 
 func readGitConfigValue(root, section, key string) string {
-	data, err := os.ReadFile(filepath.Join(root, ".git", "config"))
+	_, commonDir := gitDirs(root)
+	if commonDir == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(commonDir, "config"))
 	if err != nil {
 		return ""
 	}
