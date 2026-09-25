@@ -13,6 +13,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/fxsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/groksession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/hermessession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/openclawsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/opencodesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pisession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/primesession"
@@ -68,6 +69,7 @@ const (
 	HarnessDSH      = dshsession.Harness
 	HarnessFx       = fxsession.Harness
 	HarnessGrok     = groksession.Harness
+	HarnessOpenClaw = openclawsession.Harness
 
 	// Runtimes Beacon starts but whose sessions it reads only from the runtime log.
 	HarnessOhMyPi      = "omp"
@@ -278,6 +280,27 @@ var runtimes = []Runtime{
 			NewSession: func(prompt string) []string { return []string{"--permission-mode", "default", prompt} },
 			// Grok looks a session id up under the directory it is started in.
 			ResumesInSessionDir: true,
+		},
+	},
+	{
+		Harness:   HarnessOpenClaw,
+		Label:     "OpenClaw Gateway",
+		Aliases:   []string{"openclaw", "openclaw-gateway"},
+		NewSource: func(dir string) Source { return &openClawSource{dir: dir} },
+		// The TUI is a client of the Gateway: it needs the Gateway running, and a conversation lives
+		// on the Gateway under its session key, not its transcript id. --deliver stays off, so
+		// replies are not sent out through the Gateway's chat channels.
+		Command: &runtimeCommand{
+			Executable: "openclaw",
+			Resume: func(s Session) ([]string, bool) {
+				if s.Key == "" {
+					return nil, false
+				}
+				return []string{"tui", "--session", s.Key}, true
+			},
+			NewSession: func(prompt string) []string {
+				return []string{"tui", "--session", openClawNewSessionKey(prompt), "--message", prompt}
+			},
 		},
 	},
 
