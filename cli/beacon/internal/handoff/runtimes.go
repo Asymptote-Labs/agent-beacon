@@ -7,6 +7,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/clinesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/copilotsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/opencodesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pisession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/primesession"
@@ -53,6 +54,7 @@ const (
 	HarnessCline    = clinesession.Harness
 	HarnessPi       = pisession.Harness
 	HarnessPrime    = primesession.Harness
+	HarnessCopilot  = copilotsession.Harness
 )
 
 // runtimes lists every runtime handoff supports, in display order.
@@ -147,6 +149,24 @@ var runtimes = []Runtime{
 				return []string{"--resume", s.SourcePath}, true
 			},
 			NewSession: func(prompt string) []string { return []string{"--", prompt} },
+		},
+	},
+	{
+		Harness:   HarnessCopilot,
+		Label:     "GitHub Copilot CLI",
+		Aliases:   []string{"copilot", "copilot-cli"},
+		NewSource: func(dir string) Source { return &copilotSource{dir: dir} },
+		Command: &runtimeCommand{
+			Executable: "copilot",
+			// --resume takes an optional value, so the id is bound to it with = rather than left to
+			// be read as the next argument.
+			Resume: func(s Session) ([]string, bool) { return []string{"--resume=" + s.ID}, true },
+			// -i starts the interactive TUI and sends the prompt as its first message.
+			NewSession: func(prompt string) []string { return []string{"-i", prompt} },
+			// Copilot asks before each tool call unless COPILOT_ALLOW_ALL=true, which also trusts the
+			// directory, or COPILOT_PLAN_THEN_AUTOPILOT, which starts in plan mode and carries the plan
+			// out without waiting. A session Beacon starts never inherits either.
+			Env: map[string]string{"COPILOT_ALLOW_ALL": "", "COPILOT_PLAN_THEN_AUTOPILOT": ""},
 		},
 	},
 }
