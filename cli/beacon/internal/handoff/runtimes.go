@@ -165,10 +165,12 @@ var runtimes = []Runtime{
 	{
 		Harness:   HarnessDSH,
 		Label:     "DeepSeek Harness",
-		Aliases:   []string{"dsh", "deepseek"},
+		Aliases:   []string{"dsh"},
 		NewSource: func(dir string) Source { return &dshSource{dir: dir} },
 		// dsh has no interactive terminal session to start: `--profile headless` answers one task
 		// and exits, and `dsh web` is a browser UI. Its sessions continue in another runtime.
+		// Bare "deepseek" is not an alias: it names the vendor and its models, and a runtime-log row
+		// stamped with it came from a provider route, not from DeepSeek Harness.
 	},
 
 	// The runtimes below keep no session store Beacon reads. Their sessions come from Beacon's

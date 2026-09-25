@@ -180,10 +180,18 @@ func TestPlanResumeContinuesADSHSessionElsewhere(t *testing.T) {
 }
 
 func TestParseHarnessAcceptsDSHNames(t *testing.T) {
-	for _, name := range []string{"dsh", "deepseek", "deepseek_harness", "DeepSeek-Harness"} {
+	for _, name := range []string{"dsh", "deepseek_harness", "DeepSeek-Harness"} {
 		if got, err := ParseHarness(name); err != nil || got != HarnessDSH {
 			t.Fatalf("ParseHarness(%q) = %q, %v", name, got, err)
 		}
+	}
+	// Bare "deepseek" names the vendor. A log row stamped with it stays as it is rather than being
+	// read as DeepSeek Harness, and it is not accepted as a runtime name.
+	if got := canonicalHarness("deepseek"); got != "deepseek" {
+		t.Fatalf("canonicalHarness(deepseek) = %q, want it left alone", got)
+	}
+	if got, err := ParseHarness("deepseek"); err == nil {
+		t.Fatalf("ParseHarness(deepseek) = %q, want an error", got)
 	}
 	if strings.Contains(strings.Join(StartableNames(), ","), "dsh") {
 		t.Fatalf("StartableNames = %v, want no dsh", StartableNames())
