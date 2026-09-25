@@ -22,9 +22,11 @@ does not call Jev or any other external evaluator.
 The loop is:
 
 1. Capture traces from local agent harnesses.
-2. Run `beacon memory evaluations run` on selected traces.
-3. Review generated candidates with `beacon memory candidates`.
-4. Approve candidates into project memory.
+2. Produce candidates, either by scoring traces with `beacon memory evaluations run`
+   or by reading a trace and writing the lesson with `beacon memory candidates create`.
+3. Review candidates with `beacon memory candidates`.
+4. Approve candidates into project memory, supplying the lesson text for a scored
+   candidate as you do.
 5. Reuse approved memory through Beacon MCP or install it as an Agent Skill.
 
 This is deliberately review-gated. Jev probabilities help rank and classify traces;
@@ -70,9 +72,12 @@ Approved memory is scoped to the resolved project. Cross-project or user-global
 memory is not automatic. If you install a skill, Beacon writes it under the current
 project's `.agents/skills/<slug>/SKILL.md`.
 
-Project scope is derived from the current working directory by default. Use
-`--project <path>` when reviewing a trace for a different repository or when a
-client needs to retrieve memory for a specific project.
+When a command starts from a trace, project scope comes from the repository the trace
+recorded, so a session in one repository becomes memory for that repository even if
+you run the command from another, and a linked worktree counts as its main checkout.
+Commands that list or look up records scope to the current working directory. Use
+`--project <path>` to override either, for example when a client needs to retrieve
+memory for a specific project.
 
 ## Reuse surfaces
 

@@ -184,6 +184,18 @@ func ResolveProject(path string) (asymptoteobserve.LearningProjectV1, error) {
 	return project, nil
 }
 
+// ProjectForTrace resolves the project a trace's memory belongs to. An explicit path
+// wins. Otherwise the trace's own repository path is used when it recorded one, so
+// memory lands with the repository the agent was working in rather than wherever the
+// reviewer happened to run the command. With neither, it falls back to the working
+// directory like ResolveProject.
+func ProjectForTrace(path string, trace asymptoteobserve.TraceSummaryV1) (asymptoteobserve.LearningProjectV1, error) {
+	if strings.TrimSpace(path) == "" && trace.Repository != nil {
+		path = strings.TrimSpace(trace.Repository.Path)
+	}
+	return ResolveProject(path)
+}
+
 func ProjectID(project asymptoteobserve.LearningProjectV1) string {
 	key := firstNonEmpty(project.RemoteURL, project.Path)
 	if key == "" {
