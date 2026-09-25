@@ -353,6 +353,7 @@
                   "cli/scan-ci-gates"
                 ]
               },
+              "cli/handoff",
               "cli/token-usage",
               "cli/version"
             ]

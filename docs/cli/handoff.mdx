@@ -1,0 +1,48 @@
+---
+title: "beacon handoff"
+description: "Pick up a local agent session again, in the same runtime or another one"
+---
+
+## Command overview
+
+`beacon handoff` finds the agent sessions stored on this machine so you can pick one up again.
+
+```bash title="Command syntax"
+beacon handoff list [flags]
+```
+
+Sessions come from each runtime's own local session store, not from Beacon's runtime log. That store is what the runtime resumes from, and it keeps content the runtime log truncates. Every read is local and read-only: nothing is uploaded, and no runtime file is changed.
+
+## Supported runtimes
+
+| Runtime | Session store | `--harness` |
+|---------|---------------|-------------|
+| Claude Code | `~/.claude/projects` | `claude` |
+| Codex CLI | `~/.codex/sessions` | `codex` |
+| OpenCode | `~/.config/opencode` (SQLite and the legacy file store) | `opencode` |
+| Cline | `~/.cline/data` | `cline` |
+
+When a Codex thread has more than one rollout file, `beacon handoff` lists it once, under its newest file. Cline can hold the same task both as a CLI session and in its older task history; the CLI session is the copy that is listed. Cline kanban cards are not sessions and are not listed.
+
+## `beacon handoff list`
+
+Lists resumable sessions, newest first.
+
+```bash
+beacon handoff list
+beacon handoff list --here            # sessions that ran in this directory or below it
+beacon handoff list --harness codex   # one runtime
+beacon handoff list --json
+```
+
+| Flag | Description |
+|------|-------------|
+| `--harness` | Only this runtime: `claude`, `codex`, `opencode`, or `cline`. |
+| `--here` | Only sessions that ran in the current directory or below it. |
+| `--dir` | Only sessions that ran in this directory or below it. |
+| `--subagents` | Include subagent sessions. They are hidden by default, because resuming one resumes a fragment of its parent's task. |
+| `--limit` | Maximum sessions to list. Default `25`; `0` lists all. |
+| `--json` | Print `{"sessions": [...], "warnings": [...]}`. |
+| `--claude-projects-dir`, `--codex-dir`, `--opencode-dir`, `--cline-dir` | Read a runtime's store from a non-default location. |
+
+A store that cannot be read is reported as a warning (on stderr, or under `warnings` in JSON), and the sessions from the other runtimes are still listed.
