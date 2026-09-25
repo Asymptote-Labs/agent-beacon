@@ -157,7 +157,7 @@ func TestPlanResumeReopensAGrokSessionByItsID(t *testing.T) {
 	}{
 		{"subagent", func(s *Session) { s.Subagent = true }, nil, ReasonNotResumable},
 		{"gone", func(s *Session) { s.SourcePath = filepath.Join(t.TempDir(), "missing") }, nil, ReasonSessionGone},
-		{"cwd override", nil, func(o *PlanOptions) { o.Dir = t.TempDir() }, ReasonNotResumable},
+		{"cwd override", nil, func(o *PlanOptions) { o.Dir = t.TempDir() }, ReasonOtherDirectory},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := session
