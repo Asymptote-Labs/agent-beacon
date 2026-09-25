@@ -99,7 +99,11 @@ func resolveHandoffSession(id string) (handoffSubject, error) {
 // than the store does.
 func resolveHandoffLogSession(id, harness string, notFound *handoff.NotFoundError) (handoffSubject, error) {
 	logPath := handoffRuntimeLogPath()
-	session, events, found, err := handoff.LogSession(logPath, id)
+	session, events, found, err := handoff.LogSession(logPath, id, harness)
+	var ambiguous *handoff.AmbiguousError
+	if errors.As(err, &ambiguous) {
+		return handoffSubject{}, fmt.Errorf("in the runtime log %s: %w", logPath, err)
+	}
 	if err != nil {
 		return handoffSubject{}, fmt.Errorf("read runtime log %s: %w", logPath, err)
 	}

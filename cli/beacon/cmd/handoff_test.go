@@ -458,3 +458,13 @@ func TestHandoffExportErrors(t *testing.T) {
 		t.Fatalf("--print with --output-dir err = %v", err)
 	}
 }
+
+func TestHandoffExportFindsALogSessionByPrefix(t *testing.T) {
+	stubHandoffClock(t)
+	stubHandoffSources(t, stubHandoffSource{harness: handoff.HarnessClaude})
+	logPath := handoffLog(t, "cursor", "cursor-conv-1234", "rename the module")
+	out, _, err := runHandoff(t, "export", "cursor-conv", "--print", "--log-path", logPath)
+	if err != nil || !strings.Contains(out, "rename the module") || !strings.Contains(out, "`cursor-conv-1234`") {
+		t.Fatalf("export by prefix = %v\n%s", err, out)
+	}
+}
