@@ -181,3 +181,89 @@ func TestResolveBaseURLPrecedence(t *testing.T) {
 		t.Fatalf("env URL = %q", got)
 	}
 }
+
+// Signing in to a remote machine from a local browser: the redirect to 127.0.0.1 cannot reach the
+// CLI, so the person pastes the address the browser was sent to. A wrong paste is reported and
+// the next line still completes the sign-in.
+func TestLoginNoBrowserCompletesFromAPastedAddress(t *testing.T) {
+	service := newFakeAuthService(t)
+	pasteReader, pasteWriter := io.Pipe()
+	defer pasteWriter.Close()
+
+	var out syncBuffer
+	done := make(chan error, 1)
+	go func() {
+		_, err := Login(context.Background(), LoginOptions{
+			BaseURL:   service.server.URL,
+			NoBrowser: true,
+			OpenBrowser: func(string) error {
+				t.Error("browser must not open with NoBrowser")
+				return nil
+			},
+			HTTPClient: service.server.Client(),
+			Out:        &out,
+			Timeout:    5 * time.Second,
+			PasteInput: pasteReader,
+		})
+		done <- err
+	}()
+
+	var loginURL string
+	deadline := time.Now().Add(3 * time.Second)
+	for loginURL == "" && time.Now().Before(deadline) {
+		for _, line := range strings.Split(out.String(), "\n") {
+			if strings.HasPrefix(line, service.server.URL+LoginPagePath) {
+				loginURL = line
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if loginURL == "" {
+		t.Fatalf("login never printed its URL:\n%s", out.String())
+	}
+	parsed, err := url.Parse(loginURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, port := parsed.Query().Get("state"), parsed.Query().Get("port")
+
+	fmt.Fprintf(pasteWriter, "http://127.0.0.1:%s/callback?state=wrong&exchange_code=nope\n", port)
+	fmt.Fprintf(pasteWriter, "http://127.0.0.1:%s/callback?state=%s&exchange_code=code-123\n", port, state)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Login: %v\n%s", err, out.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("Login did not finish from the pasted address:\n%s", out.String())
+	}
+	text := out.String()
+	for _, want := range []string{"paste it here", "different sign-in", "ssh -L "} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("login output is missing %q:\n%s", want, text)
+		}
+	}
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	if service.exchange["exchange_code"] != "code-123" || service.exchange["code_verifier"] == "" {
+		t.Fatalf("exchange payload = %#v", service.exchange)
+	}
+}
+
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}

@@ -250,3 +250,72 @@ func TestSuccessPageIsStyledAndPointsAtTheTerminal(t *testing.T) {
 		t.Fatalf("the page must not fetch anything:\n%s", page)
 	}
 }
+
+// On a remote machine the browser runs elsewhere and cannot load the 127.0.0.1 redirect, so the
+// person pastes that address back into the terminal. Anything that is not this sign-in's callback
+// must leave the flow open for another try; the real address completes it exactly once.
+func TestCallbackServerCompletesFromAPastedAddress(t *testing.T) {
+	var gotCode, gotState, gotVerifier string
+	calls := 0
+	exchange := func(_ context.Context, code, state, verifier string) error {
+		calls++
+		gotCode, gotState, gotVerifier = code, state, verifier
+		return nil
+	}
+	cs, err := NewCallbackServer("state-abc", "verifier-xyz", exchange, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Shutdown()
+
+	for _, bad := range []string{
+		"",
+		"http://127.0.0.1:43121/callback?state=other&exchange_code=c",
+		"http://127.0.0.1:43121/callback?state=state-abc",
+		"some words that are not a code",
+	} {
+		if err := cs.CompletePasted(context.Background(), bad); !errors.Is(err, ErrInvalidPastedCallback) {
+			t.Fatalf("CompletePasted(%q) = %v, want ErrInvalidPastedCallback", bad, err)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("invalid input ran the exchange %d times", calls)
+	}
+
+	pasted := fmt.Sprintf("  'http://127.0.0.1:%d/callback?state=state-abc&exchange_code=code-123'\n", cs.Port())
+	if err := cs.CompletePasted(context.Background(), pasted); err != nil {
+		t.Fatalf("CompletePasted: %v", err)
+	}
+	if gotCode != "code-123" || gotState != "state-abc" || gotVerifier != "verifier-xyz" {
+		t.Fatalf("exchange got code=%q state=%q verifier=%q", gotCode, gotState, gotVerifier)
+	}
+	result, err := cs.Wait(time.Second)
+	if err != nil || result.Error != "" || result.State != "state-abc" {
+		t.Fatalf("Wait = %#v, %v", result, err)
+	}
+	if err := cs.CompletePasted(context.Background(), pasted); err == nil || errors.Is(err, ErrInvalidPastedCallback) {
+		t.Fatalf("second paste = %v, want an already-finished error", err)
+	}
+	if calls != 1 {
+		t.Fatalf("exchange ran %d times, want 1", calls)
+	}
+}
+
+// A page that shows the exchange code on its own, rather than redirecting, can be pasted as is.
+func TestCallbackServerAcceptsABarePastedCode(t *testing.T) {
+	var gotCode, gotState string
+	cs, err := NewCallbackServer("state-abc", "verifier", func(_ context.Context, code, state, _ string) error {
+		gotCode, gotState = code, state
+		return nil
+	}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Shutdown()
+	if err := cs.CompletePasted(context.Background(), "code-456"); err != nil {
+		t.Fatalf("CompletePasted: %v", err)
+	}
+	if gotCode != "code-456" || gotState != "state-abc" {
+		t.Fatalf("exchange got code=%q state=%q", gotCode, gotState)
+	}
+}

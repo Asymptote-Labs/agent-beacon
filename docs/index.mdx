@@ -40,21 +40,14 @@ Use Beacon to understand agent behavior, debug workflows, and explicitly turn re
     See the [Windows install guide](/platforms/windows) for silent installation, checksum verification, and service management.
   </Tab>
   <Tab title="Linux">
-    Download the `.deb` or `.rpm` for your architecture from the [latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest):
+    Install the latest `.deb` or `.rpm` for your distribution and architecture:
 
-    <CodeGroup>
-      ```bash title="Debian, Ubuntu"
-      sudo apt install ./beacon_<version>_linux_amd64.deb
-      beacon version
-      ```
+    ```bash
+    curl -fsSL https://github.com/asymptote-labs/agent-beacon/releases/latest/download/install.sh | bash
+    beacon version
+    ```
 
-      ```bash title="Fedora, RHEL, Rocky, Alma"
-      sudo dnf install ./beacon_<version>_linux_amd64.rpm
-      beacon version
-      ```
-    </CodeGroup>
-
-    Replace `amd64` with `arm64` on ARM systems. See the [Linux install guide](/platforms/linux) for rootless and tarball installation.
+    The installer verifies the package against the release checksums before installing it. See the [Linux install guide](/platforms/linux) for manual package, rootless, and tarball installation.
   </Tab>
 </Tabs>
 

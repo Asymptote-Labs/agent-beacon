@@ -69,17 +69,13 @@ beacon endpoint install
 <details>
 <summary><strong>Linux</strong></summary>
 
-Download the `.deb` or `.rpm` from the [latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest).
+Install the latest `.deb` or `.rpm` for your distribution and architecture (Debian, Ubuntu, Fedora, RHEL, Rocky, Alma):
 
 ```bash
-sudo apt install ./beacon_<version>_linux_amd64.deb
+curl -fsSL https://github.com/asymptote-labs/agent-beacon/releases/latest/download/install.sh | bash
 ```
 
-or:
-
-```bash
-sudo dnf install ./beacon_<version>_linux_amd64.rpm
-```
+The [installer](packaging/linux/install.sh) verifies the package against the release checksums. To install by hand, download the package from the [latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest) into a directory APT can read (not your home directory, or APT ends with a harmless `Permission denied` notice) and run `sudo apt install ./beacon_<version>_linux_amd64.deb` or `sudo dnf install ./beacon_<version>_linux_amd64.rpm`.
 
 </details>
 

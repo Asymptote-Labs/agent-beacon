@@ -292,6 +292,8 @@ release:
     # The threat-rule pack ships as a separate asset, not embedded in the binary,
     # so the rule corpus can grow without enlarging `beacon`.
     - glob: ./release-rules/threat-rules.tar.gz
+    # The Linux one-line installer, served from releases/latest/download/install.sh.
+    - glob: ../../packaging/linux/install.sh
   footer: |
     ## Installation
 
@@ -299,6 +301,11 @@ release:
     ```bash
     brew tap asymptote-labs/tap
     brew install beacon
+    ```
+
+    ### Linux (Debian, Ubuntu, Fedora, RHEL)
+    ```bash
+    curl -fsSL https://github.com/asymptote-labs/agent-beacon/releases/download/v{{.Version}}/install.sh | BEACON_VERSION={{.Version}} bash
     ```
 
     ### Manual Download

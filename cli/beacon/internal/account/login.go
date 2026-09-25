@@ -1,6 +1,7 @@
 package account
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -50,6 +51,11 @@ type LoginOptions struct {
 	// When it is set, Login writes nothing to Out: a caller rendering its own UI
 	// owns the screen, and stray writes would corrupt an alternate-screen frame.
 	OnPrompt func(LoginPrompt)
+	// PasteInput, when set, lets the user finish signing in from another computer
+	// by pasting the callback address the remote browser could not load. It is read
+	// only when Login prints the URL (NoBrowser, or the browser could not open) and
+	// OnPrompt is unset, so it never competes with a caller that owns the terminal.
+	PasteInput io.Reader
 }
 
 // LoginPrompt is everything a user needs in order to finish signing in.
@@ -188,8 +194,13 @@ func Login(ctx context.Context, opts LoginOptions) (*Session, error) {
 		report = func(LoginPrompt) {}
 	}
 	report(LoginPrompt{URL: loginURL, WillOpen: !opts.NoBrowser, Timeout: timeout, Port: port})
+	paste := opts.PasteInput
+	if opts.OnPrompt != nil {
+		paste = nil
+	}
+	urlShown := true
 	if opts.NoBrowser {
-		printLoginURL(out, loginURL, port)
+		printLoginURL(out, loginURL, port, paste != nil)
 	} else if err := openBrowser(loginURL); err != nil {
 		report(LoginPrompt{URL: loginURL, BrowserErr: err, Timeout: timeout, Port: port})
 		if errors.Is(err, auth.ErrNoDisplay) {
@@ -201,13 +212,19 @@ func Login(ctx context.Context, opts LoginOptions) (*Session, error) {
 		} else {
 			fmt.Fprintln(out, "Could not open a browser automatically.")
 		}
-		printLoginURL(out, loginURL, port)
+		printLoginURL(out, loginURL, port, paste != nil)
 	} else {
+		urlShown = false
 		fmt.Fprintf(out, "Opening %s in your browser...\n", baseURL)
 	}
 	fmt.Fprintln(out, "Waiting for Beacon sign-in...")
 
-	result, err := callback.WaitContext(ctx, timeout)
+	waitCtx, stopWaiting := context.WithCancel(ctx)
+	defer stopWaiting()
+	if paste != nil && urlShown {
+		go readPastedCallback(waitCtx, paste, out, callback)
+	}
+	result, err := callback.WaitContext(waitCtx, timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -281,9 +298,52 @@ func ResolveBaseURL(flagValue string) string {
 }
 
 // printLoginURL shows the sign-in URL and how to use it from another computer.
-func printLoginURL(out io.Writer, loginURL string, port int) {
+func printLoginURL(out io.Writer, loginURL string, port int, acceptsPaste bool) {
 	fmt.Fprintf(out, "Open this URL to sign in to Beacon:\n%s\n", loginURL)
+	if acceptsPaste {
+		fmt.Fprintln(out, "Signing in from another computer? After you approve, that browser cannot reach this")
+		fmt.Fprintln(out, "machine and shows a connection error. Copy the full address from its address bar")
+		fmt.Fprintln(out, "(it starts with http://127.0.0.1) and paste it here, then press Enter.")
+		fmt.Fprintf(out, "Or forward the port over SSH before opening the URL: %s\n", SSHForwardCommand(port))
+		return
+	}
 	fmt.Fprintf(out, "From another computer over SSH, forward the port first: %s\n", SSHForwardCommand(port))
+}
+
+// readPastedCallback feeds lines from in to the callback server until one
+// completes the sign-in or ctx ends. A line that is not this sign-in's callback
+// is reported and the user can paste again.
+//
+// A read from a terminal cannot be interrupted, so after Login returns this
+// goroutine may stay parked on the next line until the process exits; ctx keeps
+// it from writing or acting on anything it reads after that.
+func readPastedCallback(ctx context.Context, in io.Reader, out io.Writer, callback *auth.CallbackServer) {
+	scanner := bufio.NewScanner(in)
+	scanner.Buffer(make([]byte, 0, 4096), 64*1024)
+	for scanner.Scan() {
+		if ctx.Err() != nil {
+			return
+		}
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		err := callback.CompletePasted(ctx, line)
+		if err == nil || !errors.Is(err, auth.ErrInvalidPastedCallback) {
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		fmt.Fprintf(out, "%s. Paste the address again, or press Ctrl+C to cancel.\n", capitalize(err.Error()))
+	}
+}
+
+func capitalize(msg string) string {
+	if msg == "" {
+		return msg
+	}
+	return strings.ToUpper(msg[:1]) + msg[1:]
 }
 
 // SSHForwardCommand is the port forward that lets a browser on the SSH client finish a sign-in

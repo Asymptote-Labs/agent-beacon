@@ -22,19 +22,13 @@ description: "Install Beacon, choose where your data lives, and capture your fir
     See the [Windows install guide](/platforms/windows) for more options.
   </Tab>
   <Tab title="Linux">
-    Install Beacon using the package for your environment:
+    Install the latest `.deb` or `.rpm` for your distribution and architecture:
 
-    <CodeGroup>
-      ```bash title="Debian, Ubuntu"
-      sudo apt install ./beacon_<version>_linux_amd64.deb
-      ```
+    ```bash
+    curl -fsSL https://github.com/asymptote-labs/agent-beacon/releases/latest/download/install.sh | bash
+    ```
 
-      ```bash title="Fedora, RHEL, Rocky, Alma"
-      sudo dnf install ./beacon_<version>_linux_amd64.rpm
-      ```
-    </CodeGroup>
-
-    Replace `amd64` with `arm64` on ARM systems. See the [Linux install guide](/platforms/linux) for more options.
+    The installer verifies the package against the release checksums before installing it. See the [Linux install guide](/platforms/linux) for manual package, tarball, and rootless installs.
   </Tab>
 </Tabs>
 

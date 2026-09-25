@@ -23,33 +23,49 @@ beacon logout
 beacon login
 ```
 
-For a terminal that cannot open a browser automatically:
+For a terminal that cannot open a browser automatically, or a remote or headless
+machine (`--headless` is the same flag):
 
 ```bash
 beacon login --no-browser
 ```
 
-This is still a loopback-callback PKCE flow, not a device-code flow. Open the URL
-in a browser that can reach the same machine's callback listener. For a remote SSH
-session, use a browser on the remote host or forward the callback port shown in
-the printed URL; opening it on an unrelated workstation without port forwarding
-redirects to that workstation's localhost and cannot complete the remote login.
+This is still a loopback-callback PKCE flow, not a device-code flow: after you
+approve, beacon.sh sends the browser to `http://127.0.0.1:<port>/callback` on the
+machine running the CLI.
 
 On Linux, `beacon login` does not try to open a browser when there is no display
 (`DISPLAY` and `WAYLAND_DISPLAY` unset) or in an SSH session. It says so, prints the
-URL and the port forward to run, and waits:
+URL, and waits:
 
 ```text
 No browser can be opened on this machine: this is an SSH session.
 Sign-in finishes when beacon.sh redirects a browser back to this machine.
 Open this URL to sign in to Beacon:
 https://beacon.sh/cli/auth?port=43121&state=...
-From another computer over SSH, forward the port first: ssh -L 43121:127.0.0.1:43121 <this machine>
+Signing in from another computer? After you approve, that browser cannot reach this
+machine and shows a connection error. Copy the full address from its address bar
+(it starts with http://127.0.0.1) and paste it here, then press Enter.
+Or forward the port over SSH before opening the URL: ssh -L 43121:127.0.0.1:43121 <this machine>
 Waiting for Beacon sign-in...
 ```
 
-Run the `ssh -L` command in a second terminal on your own computer, then open the URL
-there. The port changes on every attempt.
+### Signing in to a remote machine
+
+Open the URL in the browser on your own computer and approve. That browser then
+tries to load `http://127.0.0.1:<port>/callback?...`, which is your computer rather
+than the remote one, so the page fails to load. Copy the whole address from the
+address bar, paste it into the waiting terminal, and press Enter. The CLI checks that
+the address belongs to this sign-in, redeems the one-time exchange code, and
+finishes. An address from another attempt is rejected and you can paste again.
+
+Pasting the address is safe for the same reason the loopback redirect is: the
+exchange code is single use and is worthless without the PKCE verifier, which only
+the waiting CLI holds.
+
+Alternatively, run the printed `ssh -L` command in a second terminal on your own
+computer before opening the URL, and the redirect reaches the remote CLI directly.
+The port changes on every attempt.
 
 The session is stored at `~/.beacon/auth/session.json` in a `0700` directory with file mode `0600`. Human and JSON command output never includes the access token. Tokens expire rather than refreshing indefinitely; run `beacon login` again after expiry.
 

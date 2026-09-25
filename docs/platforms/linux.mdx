@@ -9,14 +9,21 @@ Installing the package is the whole setup. It unpacks the binaries, performs the
 
 ## Install
 
-Run the block for your distribution. It downloads the latest package for your architecture, checks it against the release checksums, and installs it.
+```bash title="Debian, Ubuntu, Fedora, RHEL, Rocky, Alma"
+curl -fsSL https://github.com/asymptote-labs/agent-beacon/releases/latest/download/install.sh | bash
+```
+
+The [installer](https://github.com/asymptote-labs/agent-beacon/blob/main/packaging/linux/install.sh) downloads the latest `.deb` or `.rpm` for your architecture into a temporary directory, checks it against the release checksums, installs it with `apt-get` or `dnf`, and cleans up. Set `BEACON_VERSION=<version>` to install a specific release.
+
+To run the same steps yourself, use the block for your distribution:
 
 <CodeGroup>
 ```bash title="Debian, Ubuntu"
 VERSION="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/asymptote-labs/agent-beacon/releases/latest)"; VERSION="${VERSION##*/v}"
 PKG="beacon_${VERSION}_linux_$(dpkg --print-architecture).deb"
 BASE="https://github.com/asymptote-labs/agent-beacon/releases/download/v${VERSION}"
-curl -fsSLO "${BASE}/${PKG}" && curl -fsSLO "${BASE}/checksums.txt"
+DIR="$(mktemp -d /tmp/beacon-install.XXXXXXXX)" && chmod 0711 "$DIR" && cd "$DIR"
+curl -fsSLO "${BASE}/${PKG}" && curl -fsSLO "${BASE}/checksums.txt" && chmod 0644 "${PKG}"
 grep "  ${PKG}$" checksums.txt | sha256sum --check - && sudo apt install "./${PKG}"
 ```
 
@@ -31,6 +38,10 @@ grep "  ${PKG}$" checksums.txt | sha256sum --check - && sudo dnf install "./${PK
 </CodeGroup>
 
 `amd64` and `arm64` packages are published for both formats. The package puts `beacon` on your `PATH`, so every command below works by name.
+
+<Note>
+APT reads a local package as its unprivileged `_apt` user. If the `.deb` sits somewhere `_apt` cannot read, such as your home directory, the install still succeeds, but APT ends with `Download is performed unsandboxed as root` and `pkgAcquire::Run (13: Permission denied)`. That is a warning, not a failure, and there is nothing to repair; `beacon version` confirms the install. The installer and the Debian block above download into a readable directory under `/tmp` so the warning does not appear.
+</Note>
 
 ### Without root, or without a package manager
 
