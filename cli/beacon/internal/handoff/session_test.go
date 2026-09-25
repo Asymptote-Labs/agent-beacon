@@ -16,7 +16,6 @@ func fixtureSources(t *testing.T) (storeFixture, []Source) {
 	t.Helper()
 	// Cline also reads VS Code's global storage under HOME; keep it inside the test.
 	testenv.SetHome(t, t.TempDir())
-	isolateRuntimeEnv(t)
 	f := newStoreFixture(t)
 	return f, DefaultSources(f.dirs)
 }
@@ -143,6 +142,7 @@ func TestListFilters(t *testing.T) {
 
 func TestListToleratesMissingStores(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
+	isolateRuntimeEnv(t)
 	empty := t.TempDir()
 	sources := DefaultSources(StoreDirs{
 		HarnessClaude:   filepath.Join(empty, "claude"),
