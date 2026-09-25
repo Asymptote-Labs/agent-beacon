@@ -62,7 +62,7 @@ func TestListCarriesEachRuntimesMetadata(t *testing.T) {
 	if !claude.UpdatedAt.Equal(claudeUpdated) {
 		t.Fatalf("claude updated = %s, want %s", claude.UpdatedAt, claudeUpdated)
 	}
-	if claude.SourcePath != filepath.Join(f.dirs.ClaudeProjects, "-work-api", "claude-sess-1.jsonl") {
+	if claude.SourcePath != filepath.Join(f.dirs[HarnessClaude], "-work-api", "claude-sess-1.jsonl") {
 		t.Fatalf("claude source = %q", claude.SourcePath)
 	}
 
@@ -144,10 +144,10 @@ func TestListToleratesMissingStores(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	empty := t.TempDir()
 	sources := DefaultSources(StoreDirs{
-		ClaudeProjects: filepath.Join(empty, "claude"),
-		Codex:          filepath.Join(empty, "codex"),
-		OpenCode:       filepath.Join(empty, "opencode"),
-		Cline:          filepath.Join(empty, "cline"),
+		HarnessClaude:   filepath.Join(empty, "claude"),
+		HarnessCodex:    filepath.Join(empty, "codex"),
+		HarnessOpenCode: filepath.Join(empty, "opencode"),
+		HarnessCline:    filepath.Join(empty, "cline"),
 	})
 	sessions, err := List(sources, Filter{})
 	if err != nil || len(sessions) != 0 {

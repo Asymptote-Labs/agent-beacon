@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +51,12 @@ func runHandoff(t *testing.T, args ...string) (string, string, error) {
 	handoffResumeOpts = handoffResumeOptions{}
 	for _, cmd := range handoffCmd.Commands() {
 		cmd.Flags().VisitAll(func(f *pflag.Flag) {
+			if slice, ok := f.Value.(pflag.SliceValue); ok {
+				// Set on a slice flag appends; start it empty again instead.
+				_ = slice.Replace(nil)
+				f.Changed = false
+				return
+			}
 			_ = f.Value.Set(f.DefValue)
 			f.Changed = false
 		})
@@ -225,7 +232,7 @@ func TestHandoffListWarnsAboutUnreadableStores(t *testing.T) {
 
 func TestHandoffListRejectsUnknownRuntime(t *testing.T) {
 	stubHandoffSources(t)
-	if _, _, err := runHandoff(t, "list", "--harness", "cursor"); err == nil || !strings.Contains(err.Error(), "unsupported runtime") {
+	if _, _, err := runHandoff(t, "list", "--harness", "no-such-runtime"); err == nil || !strings.Contains(err.Error(), "unsupported runtime") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -235,9 +242,46 @@ func TestHandoffListPassesStoreDirectories(t *testing.T) {
 	if _, _, err := runHandoff(t, "list", "--claude-projects-dir", "/c", "--codex-dir", "/x", "--opencode-dir", "/o", "--cline-dir", "/l"); err != nil {
 		t.Fatal(err)
 	}
-	want := handoff.StoreDirs{ClaudeProjects: "/c", Codex: "/x", OpenCode: "/o", Cline: "/l"}
-	if *seen != want {
+	want := handoff.StoreDirs{handoff.HarnessClaude: absPath(t, "/c"), handoff.HarnessCodex: absPath(t, "/x"), handoff.HarnessOpenCode: absPath(t, "/o"), handoff.HarnessCline: absPath(t, "/l")}
+	if !reflect.DeepEqual(*seen, want) {
 		t.Fatalf("store dirs = %+v, want %+v", *seen, want)
+	}
+}
+
+func absPath(t *testing.T, path string) string {
+	t.Helper()
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return abs
+}
+
+func TestHandoffStoreDirFlag(t *testing.T) {
+	seen := stubHandoffSources(t)
+	// --store-dir takes any name the runtime answers to; a per-runtime flag wins for its runtime.
+	if _, _, err := runHandoff(t, "list", "--store-dir", "claude-code=/generic", "--store-dir", "codex=/x=y", "--claude-projects-dir", "/c"); err != nil {
+		t.Fatal(err)
+	}
+	want := handoff.StoreDirs{handoff.HarnessClaude: absPath(t, "/c"), handoff.HarnessCodex: absPath(t, "/x=y")}
+	if !reflect.DeepEqual(*seen, want) {
+		t.Fatalf("store dirs = %+v, want %+v", *seen, want)
+	}
+	// A relative store directory is resolved here, not in the session's directory the runtime
+	// starts in.
+	if _, _, err := runHandoff(t, "list", "--store-dir", "codex=rel/codex"); err != nil {
+		t.Fatal(err)
+	}
+	if got := (*seen)[handoff.HarnessCodex]; got != absPath(t, "rel/codex") || !filepath.IsAbs(got) {
+		t.Fatalf("relative store dir = %q, want it made absolute", got)
+	}
+	for _, bad := range []string{"claude", "=/x", "claude=", "no-such-runtime=/x"} {
+		if _, _, err := runHandoff(t, "list", "--store-dir", bad); err == nil || !strings.Contains(err.Error(), "--store-dir") {
+			t.Fatalf("--store-dir %q: err = %v", bad, err)
+		}
+	}
+	if _, _, err := runHandoff(t, "export", "claude-1", "--store-dir", "bogus"); err == nil || !strings.Contains(err.Error(), "--store-dir") {
+		t.Fatalf("export with a bad --store-dir: err = %v", err)
 	}
 }
 
@@ -466,5 +510,21 @@ func TestHandoffExportFindsALogSessionByPrefix(t *testing.T) {
 	out, _, err := runHandoff(t, "export", "cursor-conv", "--print", "--log-path", logPath)
 	if err != nil || !strings.Contains(out, "rename the module") || !strings.Contains(out, "`cursor-conv-1234`") {
 		t.Fatalf("export by prefix = %v\n%s", err, out)
+	}
+}
+
+func TestDescribeHandoffPlanShowsTheEnvironment(t *testing.T) {
+	var out bytes.Buffer
+	describeHandoffPlan(&out, handoff.Plan{
+		Mode: handoff.ModeNative, Source: handoff.Session{Harness: handoff.HarnessClaude, ID: "s-1"},
+		Executable: "/bin/agent", Dir: "/work", Env: map[string]string{"MODE": "approve", "ALLOW_ALL": ""},
+	})
+	if !strings.Contains(out.String(), "  env:       unset ALLOW_ALL, MODE=approve\n") {
+		t.Fatalf("plan = %q", out.String())
+	}
+	out.Reset()
+	describeHandoffPlan(&out, handoff.Plan{Mode: handoff.ModeNative, Source: handoff.Session{Harness: handoff.HarnessClaude, ID: "s-1"}, Executable: "/bin/claude"})
+	if strings.Contains(out.String(), "env:") {
+		t.Fatalf("a plan with no overrides shows no env line: %q", out.String())
 	}
 }

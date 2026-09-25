@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -150,7 +151,28 @@ func describeHandoffPlan(w io.Writer, plan handoff.Plan) {
 		fmt.Fprintf(w, "  brief:     %s\n", plan.BriefPath)
 		fmt.Fprintf(w, "  directory: %s\n", plan.Dir)
 	}
+	if env := describeHandoffEnv(plan.Env); env != "" {
+		fmt.Fprintf(w, "  env:       %s\n", env)
+	}
 	fmt.Fprintf(w, "  command:   %s\n", shellCommand(append([]string{plan.Executable}, plan.Args...)...))
+}
+
+// describeHandoffEnv lists what the runtime's environment differs by, in name order.
+func describeHandoffEnv(env map[string]string) string {
+	names := make([]string, 0, len(env))
+	for name := range env {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		if env[name] == "" {
+			parts = append(parts, "unset "+name)
+		} else {
+			parts = append(parts, name+"="+env[name])
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 func confirmHandoff(in io.Reader, w io.Writer) bool {
@@ -171,7 +193,7 @@ func init() {
 	handoffCmd.AddCommand(handoffResumeCmd)
 	addHandoffStoreFlags(handoffResumeCmd)
 	f := handoffResumeCmd.Flags()
-	f.StringVar(&handoffResumeOpts.agent, "agent", "", "Runtime to continue in: claude, codex, opencode or cline (default the session's own)")
+	f.StringVar(&handoffResumeOpts.agent, "agent", "", "Runtime to continue in: "+strings.Join(handoff.StartableNames(), ", ")+" (default the session's own)")
 	f.BoolVar(&handoffResumeOpts.newOnly, "new", false, "Start a new session from a brief even when the session could be reopened")
 	f.StringVar(&handoffResumeOpts.cwd, "cwd", "", "Directory to start the runtime in (default the session's directory)")
 	f.BoolVar(&handoffResumeOpts.print, "print", false, "Show what would run without writing a brief or launching anything")

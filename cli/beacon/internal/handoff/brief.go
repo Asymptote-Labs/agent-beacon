@@ -249,21 +249,6 @@ func contains(values []string, value string) bool {
 	return false
 }
 
-// RuntimeLabel is how a brief names a runtime to a reader.
-func RuntimeLabel(harness string) string {
-	switch harness {
-	case HarnessClaude:
-		return "Claude Code"
-	case HarnessCodex:
-		return "Codex CLI"
-	case HarnessOpenCode:
-		return "OpenCode"
-	case HarnessCline:
-		return "Cline"
-	}
-	return harness
-}
-
 // Render writes the brief as Markdown no larger than BriefMaxBytes, dropping the oldest
 // recent-activity entries first when it would be larger.
 func (b Brief) Render() string {
