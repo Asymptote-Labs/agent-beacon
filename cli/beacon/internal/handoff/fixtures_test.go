@@ -38,6 +38,8 @@ type storeFixture struct {
 
 func newStoreFixture(t *testing.T) storeFixture {
 	t.Helper()
+	// The fixture leaves the runtimes it does not write at their defaults; keep those under HOME.
+	isolateRuntimeEnv(t)
 	root := t.TempDir()
 	f := storeFixture{
 		root: root,
