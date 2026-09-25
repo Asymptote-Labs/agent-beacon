@@ -11,6 +11,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/dshsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/factorysession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/fxsession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/groksession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/hermessession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/opencodesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pisession"
@@ -66,6 +67,7 @@ const (
 	HarnessHermes   = hermessession.Harness
 	HarnessDSH      = dshsession.Harness
 	HarnessFx       = fxsession.Harness
+	HarnessGrok     = groksession.Harness
 
 	// Runtimes Beacon starts but whose sessions it reads only from the runtime log.
 	HarnessOhMyPi      = "omp"
@@ -253,6 +255,29 @@ var runtimes = []Runtime{
 			ResumesInSessionDir: true,
 			// No NewSession: fx has no interactive session that starts from a prompt (`fx ask` is
 			// one-shot), so it reopens its own sessions but cannot pick one up from a brief.
+		},
+	},
+	{
+		Harness:   HarnessGrok,
+		Label:     "Grok Build",
+		Aliases:   []string{"grok-build"},
+		NewSource: func(dir string) Source { return &grokSource{dir: dir} },
+		// Grok's configured permission mode can be always-approve. A session Beacon starts or
+		// reopens runs in the mode that asks, whatever the config says; the user can still change
+		// the mode inside the TUI.
+		Command: &runtimeCommand{
+			Executable: "grok",
+			Resume: func(s Session) ([]string, bool) {
+				// A subagent is a child of the session that spawned it, not one a person reopens.
+				if s.Subagent {
+					return nil, false
+				}
+				// Grok looks a session up under the directory it runs in, which is the session's own.
+				return []string{"--permission-mode", "default", "--resume", s.ID}, true
+			},
+			NewSession: func(prompt string) []string { return []string{"--permission-mode", "default", prompt} },
+			// Grok looks a session id up under the directory it is started in.
+			ResumesInSessionDir: true,
 		},
 	},
 

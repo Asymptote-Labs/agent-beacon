@@ -1,7 +1,11 @@
 package groksession
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"time"
@@ -88,6 +92,15 @@ func (m *mapper) consumeChat(msg ChatMessage) {
 		ev.Prompt = &schema.PromptInfo{Text: text}
 		ev.Content = contentMarker(text)
 		m.append(ev, SourceChat, msg.Index)
+		if info, ok := asymptoteobserve.ParseHandoffMarker(text); ok {
+			link := m.base("", "session.handoff", "session", schema.SeverityInfo, schema.FidelityObserved, "Session continued from a "+info.SourceHarness+" session")
+			link.Handoff = &info
+			// The writer derives an event's id from its bytes, and a chat line carries no time, so
+			// this link is stamped with the time of the sync. It names its id from where it was
+			// read instead, so reading the prompt again always yields the same link.
+			link.Event.ID = grokEventID(fmt.Sprintf("%s:%s:%d:handoff", m.data.Ref.ID, m.data.Ref.SourcePath, msg.Index))
+			m.append(link, SourceChat, msg.Index)
+		}
 	case "assistant":
 		model := firstNonEmpty(msg.ModelID, m.summary().CurrentModelID)
 		if msg.Reasoning != nil && msg.Reasoning.Text != "" {
@@ -454,6 +467,25 @@ func parseTime(ts string) time.Time {
 		return time.Time{}
 	}
 	return t
+}
+
+var grokIDNamespace = [16]byte{
+	0x6b, 0x2e, 0x91, 0x0c, 0x4f, 0xd3, 0x47, 0x58,
+	0xa2, 0x1b, 0x7e, 0x93, 0x05, 0xc8, 0x3d, 0x61,
+}
+
+// grokEventID is a version 5 UUID of coordinate under grokIDNamespace.
+func grokEventID(coordinate string) string {
+	digest := sha1.New()
+	digest.Write(grokIDNamespace[:])
+	io.WriteString(digest, coordinate)
+	var id [16]byte
+	copy(id[:], digest.Sum(nil))
+	id[6] = (id[6] & 0x0f) | 0x50
+	id[8] = (id[8] & 0x3f) | 0x80
+	out := make([]byte, 32)
+	hex.Encode(out, id[:])
+	return fmt.Sprintf("%s-%s-%s-%s-%s", out[0:8], out[8:12], out[12:16], out[16:20], out[20:32])
 }
 
 func firstNonEmpty(values ...string) string {
