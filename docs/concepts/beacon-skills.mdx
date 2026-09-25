@@ -36,52 +36,40 @@ that accept MCP servers from plugins. When the server is available, recall uses 
 
 ## Install
 
-<Tabs>
-  <Tab title="Claude Code">
-    ```bash
-    /plugin marketplace add asymptote-labs/agent-beacon
-    /plugin install beacon@beacon
-    ```
+Beacon Skills install from the `asymptote-labs/agent-beacon` repository. Most harnesses
+read its plugin marketplace directly:
 
-    The skills appear as `/beacon:beacon-memory-recall`, `/beacon:beacon-memory-distill`,
-    and `/beacon:beacon-memory-promote`, and Claude also loads them when a task matches.
-  </Tab>
-  <Tab title="Codex">
-    ```bash
-    codex plugin marketplace add asymptote-labs/agent-beacon
-    ```
+| Runtime | Install |
+|---------|---------|
+| Claude Code | `/plugin marketplace add asymptote-labs/agent-beacon`, then `/plugin install beacon@beacon` |
+| Claude Cowork | Customize → Plugins → Add marketplace, then enter `asymptote-labs/agent-beacon` |
+| Codex (CLI and desktop) | `codex plugin marketplace add asymptote-labs/agent-beacon`, then `codex plugin add beacon@beacon` |
+| GitHub Copilot CLI | `copilot plugin marketplace add asymptote-labs/agent-beacon`, then `copilot plugin install beacon@beacon` |
+| VS Code | Add `asymptote-labs/agent-beacon` to the `chat.plugins.marketplaces` setting, then install `beacon` |
+| Cursor | An admin imports `https://github.com/asymptote-labs/agent-beacon` under Settings → Plugins → Team Marketplaces; users install `beacon` from Customize |
+| Factory Droid | `droid plugin marketplace add asymptote-labs/agent-beacon`, then `droid plugin install beacon@beacon` |
+| Grok Build | `grok plugin marketplace add asymptote-labs/agent-beacon`, then `grok plugin install beacon` |
+| Devin CLI | `devin plugins install asymptote-labs/agent-beacon#agent-skills` |
+| Qwen Code | `qwen extensions install asymptote-labs/agent-beacon:beacon` |
+| Oh My Pi | `omp plugin marketplace add asymptote-labs/agent-beacon`, then `omp plugin install beacon@beacon` |
+| OpenClaw | `openclaw plugins install beacon --marketplace asymptote-labs/agent-beacon` |
+| Kimi Code | From a clone: `/plugins install ./agent-beacon/agent-skills` |
+| Kiro | Powers → Add Custom Power → Import power from GitHub, then enter `https://github.com/asymptote-labs/agent-beacon/tree/main/agent-skills` |
+| Pi | `pi install git:github.com/asymptote-labs/agent-beacon` |
+| Prime Agent | `prime-agent package install git:github.com/asymptote-labs/agent-beacon` |
+| Gemini CLI | `gemini skills install https://github.com/asymptote-labs/agent-beacon.git --path agent-skills/skills` |
+| Hermes Agent | `hermes skills install asymptote-labs/agent-beacon/agent-skills/skills/<skill>` for each skill |
+| Antigravity CLI, goose, OpenCode, OpenHands, and other skills-capable agents | `npx skills add asymptote-labs/agent-beacon`, optionally with `-a <agent>` |
+| Cline | Copy `agent-skills/skills/*` into `.cline/skills` |
+| DeepSeek Harness, Muse Code, Senpi | Copy `agent-skills/skills/*` into `.agents/skills` |
+| fx | `/skills install asymptote-labs/agent-beacon` |
 
-    Then install the `beacon` plugin from the marketplace.
-  </Tab>
-  <Tab title="GitHub Copilot CLI">
-    ```bash
-    copilot plugin marketplace add asymptote-labs/agent-beacon
-    copilot plugin install beacon@beacon
-    ```
-  </Tab>
-  <Tab title="Factory Droid">
-    ```bash
-    droid plugin marketplace add asymptote-labs/agent-beacon
-    droid plugin install beacon@beacon
-    ```
-  </Tab>
-  <Tab title="Other agents">
-    For Cursor, Gemini CLI, OpenCode, goose, Kiro, Pi, Hermes Agent, and any other agent
-    that reads Agent Skills, use the skills CLI:
+Plugin installs also register Beacon's local MCP server. Package, power, and skills
+installs add the skills only, and recall falls back to `beacon memory list`.
 
-    ```bash
-    npx skills add asymptote-labs/agent-beacon
-    ```
-
-    Pass `-a <agent>` to target one agent, for example `-a gemini-cli` or `-a cursor`,
-    and `--skill <name>` to install a single skill.
-
-    Cline reads `.cline/skills` rather than `.agents/skills`, so copy the skills there
-    from [`agent-skills/skills`](https://github.com/asymptote-labs/agent-beacon/tree/main/agent-skills/skills).
-    The [README](https://github.com/asymptote-labs/agent-beacon#local-agent-coverage)
-    lists the install route for every supported runtime.
-  </Tab>
-</Tabs>
+In Claude Code the skills appear as `/beacon:beacon-memory-recall`,
+`/beacon:beacon-memory-distill`, and `/beacon:beacon-memory-promote`. Every harness also
+loads them on its own when a request matches.
 
 ## Using the skills
 
@@ -160,8 +148,11 @@ flag.
 The skills live in [`agent-skills/`](https://github.com/asymptote-labs/agent-beacon/tree/main/agent-skills)
 in the Beacon repository. One `skills/` directory serves every harness through its own
 manifest: `.claude-plugin/plugin.json` for Claude Code, an Agent Plugins `plugin.json`
-for Codex, Cursor, Copilot, and Kiro, and `gemini-extension.json` for Gemini CLI. The
-repository's root `.claude-plugin/marketplace.json` is the marketplace entry.
+for Codex, Copilot, VS Code, Kiro, and Devin, `.cursor-plugin/plugin.json` for Cursor,
+`kimi.plugin.json` for Kimi Code, and `gemini-extension.json` for Gemini CLI. At the
+repository root, `.claude-plugin/marketplace.json` is the marketplace most harnesses read,
+`.cursor-plugin/marketplace.json` is Cursor's, and `package.json` makes the repository a
+Pi and Prime Agent package.
 
 A test in the CLI checks every `beacon` command and flag the skills mention, so a change
 that renames one fails the same pull request.

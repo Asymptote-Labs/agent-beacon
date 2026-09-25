@@ -15,15 +15,33 @@ harnesses that take MCP servers from plugins.
 
 ## Install
 
-| Harness | Command |
+| Runtime | Install |
 |---------|---------|
 | Claude Code | `/plugin marketplace add asymptote-labs/agent-beacon`, then `/plugin install beacon@beacon` |
-| Codex | `codex plugin marketplace add asymptote-labs/agent-beacon` |
+| Claude Cowork | Customize → Plugins → Add marketplace, then enter `asymptote-labs/agent-beacon` |
+| Codex (CLI and desktop) | `codex plugin marketplace add asymptote-labs/agent-beacon`, then `codex plugin add beacon@beacon` |
 | GitHub Copilot CLI | `copilot plugin marketplace add asymptote-labs/agent-beacon`, then `copilot plugin install beacon@beacon` |
+| VS Code | Add `asymptote-labs/agent-beacon` to the `chat.plugins.marketplaces` setting, then install `beacon` |
+| Cursor | An admin imports `https://github.com/asymptote-labs/agent-beacon` under Settings → Plugins → Team Marketplaces; users install `beacon` from Customize |
 | Factory Droid | `droid plugin marketplace add asymptote-labs/agent-beacon`, then `droid plugin install beacon@beacon` |
-| Gemini CLI | `npx skills add asymptote-labs/agent-beacon -a gemini-cli` (see the note below) |
-| Any skills-capable agent (Cursor, OpenCode, goose, Kiro, Pi, Hermes Agent, …) | `npx skills add asymptote-labs/agent-beacon` |
-| Cline | Copy `skills/*` into `.cline/skills` |
+| Grok Build | `grok plugin marketplace add asymptote-labs/agent-beacon`, then `grok plugin install beacon` |
+| Devin CLI | `devin plugins install asymptote-labs/agent-beacon#agent-skills` |
+| Qwen Code | `qwen extensions install asymptote-labs/agent-beacon:beacon` |
+| Oh My Pi | `omp plugin marketplace add asymptote-labs/agent-beacon`, then `omp plugin install beacon@beacon` |
+| OpenClaw | `openclaw plugins install beacon --marketplace asymptote-labs/agent-beacon` |
+| Kimi Code | From a clone: `/plugins install ./agent-beacon/agent-skills` |
+| Kiro | Powers → Add Custom Power → Import power from GitHub, then enter `https://github.com/asymptote-labs/agent-beacon/tree/main/agent-skills` |
+| Pi | `pi install git:github.com/asymptote-labs/agent-beacon` |
+| Prime Agent | `prime-agent package install git:github.com/asymptote-labs/agent-beacon` |
+| Gemini CLI | `gemini skills install https://github.com/asymptote-labs/agent-beacon.git --path agent-skills/skills` |
+| Hermes Agent | `hermes skills install asymptote-labs/agent-beacon/agent-skills/skills/<skill>` for each skill |
+| Antigravity CLI, goose, OpenCode, OpenHands, and other skills-capable agents | `npx skills add asymptote-labs/agent-beacon`, optionally with `-a <agent>` |
+| Cline | Copy `agent-skills/skills/*` into `.cline/skills` |
+| DeepSeek Harness, Muse Code, Senpi | Copy `agent-skills/skills/*` into `.agents/skills` |
+| fx | `/skills install asymptote-labs/agent-beacon` |
+
+The plugin routes also register the local Beacon MCP server. Package, power, and skills
+routes install the skills only; the recall skill then falls back to `beacon memory list`.
 
 ## Layout
 
@@ -31,15 +49,20 @@ This directory is a self-contained plugin root. Every harness reads the same `sk
 
 ```text
 agent-skills/
-  plugin.json                  Agent Plugins 1.0 manifest (Codex, Cursor, Copilot, VS Code, Kiro)
+  plugin.json                  Agent Plugins 1.0 manifest (Codex, Copilot, VS Code, Kiro, Devin)
   mcp.json                     Agent Plugins MCP config
-  .claude-plugin/plugin.json   Claude Code (also read by Factory Droid)
+  .claude-plugin/plugin.json   Claude Code (also read by Droid, Devin, OpenClaw, Qwen)
   .mcp.json                    Claude Code MCP config
+  .cursor-plugin/plugin.json   Cursor
+  kimi.plugin.json             Kimi Code
   gemini-extension.json        Gemini CLI extension manifest
   skills/<name>/SKILL.md       agentskills.io format, shared by all
 ../.claude-plugin/marketplace.json
                                Marketplace entry, read by Claude Code, Codex, Copilot,
-                               Factory Droid, and the skills CLI
+                               Droid, Grok, Qwen, Oh My Pi, OpenClaw, and the skills CLI
+../.cursor-plugin/marketplace.json
+                               Cursor's marketplace entry
+../package.json                Pi and Prime Agent package manifest (pi.skills)
 ```
 
 `cli/beacon/cmd/agent_skills_test.go` fails when a skill names a `beacon` command or flag
@@ -48,8 +71,9 @@ disagree on name or version.
 
 ## Releasing a new version
 
-1. Bump `version` in `plugin.json`, `.claude-plugin/plugin.json`, `gemini-extension.json`,
-   the marketplace entry, and each skill's `metadata.version`. The Go test enforces this.
+1. Bump `version` in `plugin.json`, `.claude-plugin/plugin.json`, `.cursor-plugin/plugin.json`,
+   `gemini-extension.json`, `kimi.plugin.json`, the Claude marketplace entry, and each
+   skill's `metadata.version`. The Go test enforces this.
 2. Run `go test ./cmd -run AgentSkills` in `cli/beacon`, and `claude plugin validate --strict agent-skills`.
 3. Merge to `main`. Marketplaces that track the repository pick up the change. Listings
    that pin a commit (the Claude community marketplace) need that commit updated.

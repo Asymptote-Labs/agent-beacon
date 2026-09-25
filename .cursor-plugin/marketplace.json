@@ -1,0 +1,14 @@
+{
+  "name": "beacon",
+  "owner": {
+    "name": "Asymptote Labs",
+    "url": "https://beacon.sh"
+  },
+  "plugins": [
+    {
+      "name": "beacon",
+      "source": "agent-skills",
+      "description": "Cross-harness memory from Beacon traces: recall reviewed project lessons, distill agent sessions into approved memory, and promote memory to Agent Skills."
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "agent-beacon",
+  "private": true,
+  "description": "Pi and Prime Agent package manifest for Beacon Skills. The Beacon CLI, SDK, extension, and plugins keep their own package.json files.",
+  "license": "MIT",
+  "keywords": ["pi-package"],
+  "pi": {
+    "skills": ["./agent-skills/skills"]
+  }
+}

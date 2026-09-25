@@ -114,35 +114,64 @@ func TestAgentSkillsManifestsAgree(t *testing.T) {
 		return m
 	}
 	want := read("plugin.json")
-	for _, rel := range []string{".claude-plugin/plugin.json", "gemini-extension.json"} {
+	for _, rel := range []string{".claude-plugin/plugin.json", ".cursor-plugin/plugin.json", "gemini-extension.json", "kimi.plugin.json"} {
 		if got := read(rel); got != want {
 			t.Errorf("%s = %+v, want %+v (same as plugin.json)", rel, got, want)
 		}
 	}
-	data, err := os.ReadFile(filepath.Join(agentSkillsDir, "..", ".claude-plugin", "marketplace.json"))
+	// Claude Code's marketplace is also read by Codex, Copilot, Droid, Grok, Qwen,
+	// Oh My Pi, and OpenClaw. Cursor reads only its own, which names the source
+	// without "./" and takes the version from the plugin manifest.
+	for _, market := range []struct {
+		rel, source    string
+		requireVersion bool
+	}{
+		{".claude-plugin/marketplace.json", "./agent-skills", true},
+		{".cursor-plugin/marketplace.json", "agent-skills", false},
+	} {
+		data, err := os.ReadFile(filepath.Join(agentSkillsDir, "..", market.rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var marketplace struct {
+			Plugins []struct {
+				manifest
+				Source string `json:"source"`
+			} `json:"plugins"`
+		}
+		if err := json.Unmarshal(data, &marketplace); err != nil {
+			t.Fatalf("%s: %v", market.rel, err)
+		}
+		found := false
+		for _, p := range marketplace.Plugins {
+			if p.Source != market.source {
+				continue
+			}
+			found = true
+			if p.Name != want.Name || (market.requireVersion && p.Version != want.Version) || (!market.requireVersion && p.Version != "" && p.Version != want.Version) {
+				t.Errorf("%s entry = %+v, want %+v", market.rel, p.manifest, want)
+			}
+		}
+		if !found {
+			t.Errorf("%s has no entry for %s", market.rel, market.source)
+		}
+	}
+	// Pi and Prime Agent install the whole repository, so the root package.json
+	// points them at the skills directory.
+	data, err := os.ReadFile(filepath.Join(agentSkillsDir, "..", "package.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var marketplace struct {
-		Plugins []struct {
-			manifest
-			Source string `json:"source"`
-		} `json:"plugins"`
+	var pkg struct {
+		Pi struct {
+			Skills []string `json:"skills"`
+		} `json:"pi"`
 	}
-	if err := json.Unmarshal(data, &marketplace); err != nil {
+	if err := json.Unmarshal(data, &pkg); err != nil {
 		t.Fatal(err)
 	}
-	found := false
-	for _, p := range marketplace.Plugins {
-		if p.Source == "./agent-skills" {
-			found = true
-			if p.manifest != want {
-				t.Errorf("marketplace entry = %+v, want %+v", p.manifest, want)
-			}
-		}
-	}
-	if !found {
-		t.Error("marketplace.json has no entry for ./agent-skills")
+	if len(pkg.Pi.Skills) != 1 || filepath.Clean(pkg.Pi.Skills[0]) != "agent-skills/skills" {
+		t.Errorf("package.json pi.skills = %v, want [./agent-skills/skills]", pkg.Pi.Skills)
 	}
 	for _, path := range agentSkillFiles(t) {
 		data, err := os.ReadFile(path)

@@ -243,35 +243,39 @@ Beacon supports local agents, browser agents, cloud agents, CI workflows, and ag
 | Cline | Plugin + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ | ✅ `.cline/skills` |
 | Codex CLI | OTLP + hooks + poll | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ | ✅ Plugin |
 | Codex Desktop | OTLP | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ | ✅ Plugin |
-| Cursor | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ skills CLI |
+| Cursor | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ Plugin |
 | DeepSeek Harness | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ | ✅ `.agents/skills` |
-| Devin CLI | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ skills CLI |
+| Devin CLI | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ Plugin |
 | Devin Desktop | Hooks | – | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ via Devin CLI |
 | Factory Droid | OTLP + hooks + poll | ✅ | ✅ | ✅ | – | ✅ | ✅ | – | – | ✅ Plugin |
 | fx (Vercel Labs) | Poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ | ✅ `/skills install` |
-| Gemini CLI | OTLP | – | ✅ | ✅ | – | ✅ | ✅ | ✅ | – | ✅ skills CLI |
+| Gemini CLI | OTLP | – | ✅ | ✅ | – | ✅ | ✅ | ✅ | – | ✅ `gemini skills install` |
 | GitHub Copilot CLI | OTLP + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ Plugin |
 | goose | Adapter only; manual hooks/OTLP | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ | ✅ skills CLI |
-| Grok Build | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ skills CLI |
-| Hermes Agent | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ skills CLI |
-| Kimi Code | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ skills CLI |
-| Kiro | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ skills CLI |
+| Grok Build | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ Plugin |
+| Hermes Agent | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ `hermes skills install` |
+| Kimi Code | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ Plugin |
+| Kiro | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ Power |
 | Muse Code | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ `.agents/skills` |
-| Oh My Pi | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ `.agents/skills` |
-| OpenClaw Gateway | Plugin + OTLP + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ~ | ✅ skills CLI |
+| Oh My Pi | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ Plugin |
+| OpenClaw Gateway | Plugin + OTLP + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ~ | ✅ Plugin |
 | OpenCode | Plugin + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ skills CLI |
 | OpenHands | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ skills CLI |
-| Pi | Extension + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ | ✅ skills CLI |
-| Prime Agent | Extension + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ | ✅ `.agents/skills` |
-| Qwen Code | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ skills CLI |
+| Pi | Extension + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ | ✅ Package |
+| Prime Agent | Extension + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ | ✅ Package |
+| Qwen Code | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ Plugin |
 | Senpi | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ | ✅ `.agents/skills` |
 | VS Code | OTLP + hooks | ✅ | ✅ | ✅ | ~ | ~ | – | ~ | – | ✅ Plugin |
 
 **Skills** shows how to install [Beacon Skills](https://docs.beacon.sh/concepts/beacon-skills), the Agent Skills that recall and distill project memory from these traces. Every runtime above loads Agent Skills:
 
-- **Plugin**: add the Beacon marketplace, for example `/plugin marketplace add asymptote-labs/agent-beacon` in Claude Code or `codex plugin marketplace add asymptote-labs/agent-beacon`. Claude Cowork adds it under Customize → Plugins, and VS Code through `chat.plugins.marketplaces`.
+- **Plugin**: install the `beacon` plugin from this repository's marketplace, for example `/plugin marketplace add asymptote-labs/agent-beacon` in Claude Code.
+- **Package** (Pi, Prime Agent): `pi install git:github.com/asymptote-labs/agent-beacon`.
+- **Power** (Kiro): import `https://github.com/asymptote-labs/agent-beacon/tree/main/agent-skills` from the Powers panel.
 - **skills CLI**: `npx skills add asymptote-labs/agent-beacon`, optionally with `-a <agent>`.
-- **A directory**: copy `agent-skills/skills/*` from this repository into that project directory. fx installs with `/skills install asymptote-labs/agent-beacon`, and Devin Desktop syncs skills installed through Devin CLI.
+- **A directory**: copy `agent-skills/skills/*` into that project directory.
+
+The [Beacon Skills page](https://docs.beacon.sh/concepts/beacon-skills#install) has the exact command for each runtime.
 
 ### Browser Chat
 
