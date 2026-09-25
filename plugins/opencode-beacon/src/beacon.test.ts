@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { BeaconEndpointPlugin } from "./beacon"
+import BeaconDefinition, { BeaconEndpointPlugin } from "./beacon"
 
 const payloads: any[] = []
 const senderKey = Symbol.for("beacon.opencode.testSender")
@@ -428,5 +428,158 @@ describe("BeaconEndpointPlugin", () => {
     await Bun.sleep(20)
 
     expect(payloads.map((item) => item.type)).toEqual(["tool.execute.before", "session.diff"])
+  })
+})
+
+// A minimal OpenCode 2.x promise-plugin context: hooks are captured so the test
+// can fire them, and the event stream yields whatever the test pushes.
+function v2Context() {
+  const hooks = new Map<string, (input: any) => Promise<void> | void>()
+  const queue: any[] = []
+  let wake: (() => void) | undefined
+  let closed = false
+  const disposed: string[] = []
+  const hook = (domain: string) => async (name: string, callback: any) => {
+    hooks.set(`${domain}.${name}`, callback)
+    return { dispose: async () => void disposed.push(`${domain}.${name}`) }
+  }
+  const ctx = {
+    location: {
+      directory: "/repo",
+      project: { id: "project-1", directory: "/repo", canonical: "/repo" },
+    },
+    session: { hook: hook("session") },
+    tool: { hook: hook("tool") },
+    event: {
+      subscribe: ({ signal }: { signal?: AbortSignal } = {}) => ({
+        async *[Symbol.asyncIterator]() {
+          signal?.addEventListener("abort", () => {
+            closed = true
+            wake?.()
+          })
+          while (!closed) {
+            if (queue.length === 0) await new Promise<void>((resolve) => (wake = resolve))
+            while (queue.length > 0) yield queue.shift()
+          }
+        },
+      }),
+    },
+  }
+  return {
+    ctx,
+    disposed,
+    fire: async (name: string, input: any) => hooks.get(name)!(input),
+    emit: (type: string, data: any, created = 5) => {
+      queue.push({ id: `evt_${queue.length}`, type, created, data })
+      wake?.()
+    },
+  }
+}
+
+describe("OpenCode 2.x plugin definition", () => {
+  test("exports the default definition both loaders accept", () => {
+    expect(BeaconDefinition.id).toBe("beacon.endpoint")
+    expect(typeof BeaconDefinition.setup).toBe("function")
+    expect(BeaconDefinition.server).toBe(BeaconEndpointPlugin)
+  })
+
+  test("maps V2 hooks and events onto the V1 payloads", async () => {
+    const v2 = v2Context()
+    const cleanup = await BeaconDefinition.setup(v2.ctx as any)
+
+    v2.emit("session.created", {
+      sessionID: "ses_1",
+      projectID: "project-1",
+      slug: "s",
+      version: "2.0.15",
+      model: { id: "kimi-k3", providerID: "moonshotai" },
+    })
+    await Bun.sleep(10)
+    await v2.fire("session.prompt", {
+      sessionID: "ses_1",
+      messageID: "msg_user",
+      prompt: { text: "summarize" },
+      delivery: "immediate",
+    })
+    await v2.fire("tool.execute.before", {
+      tool: "shell",
+      sessionID: "ses_1",
+      agent: "build",
+      messageID: "msg_1",
+      id: "call_1",
+      input: { command: "git status --short" },
+    })
+    await v2.fire("tool.execute.after", {
+      tool: "shell",
+      sessionID: "ses_1",
+      agent: "build",
+      messageID: "msg_1",
+      id: "call_1",
+      input: { command: "git status --short" },
+      status: "completed",
+      result: {
+        output: { output: " M a.txt", exit: 0, truncated: false },
+        content: [{ type: "text", text: " M a.txt" }],
+        metadata: { status: "completed" },
+      },
+    })
+    await v2.fire("tool.execute.after", {
+      tool: "read",
+      sessionID: "ses_1",
+      agent: "build",
+      messageID: "msg_1",
+      id: "call_2",
+      input: { filePath: "/repo/missing" },
+      status: "error",
+      error: { _tag: "Tool.Error", message: "not found" },
+    })
+    v2.emit("session.execution.started", { sessionID: "ses_1" })
+    v2.emit("session.status", { sessionID: "ses_1", status: { type: "busy" } })
+    v2.emit("session.text.ended", { sessionID: "ses_1", assistantMessageID: "msg_1", ordinal: 0, text: "Done" })
+    v2.emit("session.step.ended", {
+      sessionID: "ses_1",
+      assistantMessageID: "msg_1",
+      finish: "stop",
+      cost: 0.01,
+      tokens: { input: 3, output: 4, reasoning: 1, cache: { read: 2, write: 0 } },
+    })
+    v2.emit("permission.asked", { id: "per_1", sessionID: "ses_1", action: "bash", resources: ["git push"] })
+    v2.emit("permission.replied", { sessionID: "ses_1", requestID: "per_1", reply: "reject" })
+    v2.emit("session.execution.succeeded", { sessionID: "ses_1" })
+    v2.emit("session.idle", { sessionID: "ses_1" })
+    await Bun.sleep(30)
+    await (cleanup as any)()
+
+    expect(payloads.map((item) => item.type)).toEqual([
+      "session.created",
+      "chat.message",
+      "tool.execute.before",
+      "tool.execute.after",
+      "message.part.updated",
+      "session.status",
+      "message.part.updated",
+      "message.updated",
+      "permission.asked",
+      "permission.replied",
+      "session.status",
+    ])
+    expect(payloads[0]).toMatchObject({ session_id: "ses_1", directory: "/repo", worktree: "/repo" })
+    expect(payloads[1]).toMatchObject({
+      session_id: "ses_1",
+      model: "moonshotai/kimi-k3",
+      output: { parts: [{ type: "text", text: "summarize" }] },
+    })
+    expect(payloads[2]).toMatchObject({ call_id: "call_1", tool_name: "shell", tool_input: { command: "git status --short" } })
+    expect(payloads[3]).toMatchObject({
+      call_id: "call_1",
+      tool_response: { output: " M a.txt", metadata: { exit: 0 } },
+    })
+    expect(payloads[4].part).toMatchObject({ type: "tool", callID: "call_2", state: { status: "error", error: "not found" } })
+    expect(payloads[6]).toMatchObject({ model: "moonshotai/kimi-k3", part: { type: "text", text: "Done" } })
+    expect(payloads[7].properties.info).toMatchObject({ tokens: { input: 3, output: 4 }, cost: 0.01 })
+    expect(payloads[8].properties).toMatchObject({ permission: "bash", patterns: ["git push"] })
+    expect(payloads[9].properties).toMatchObject({ requestID: "per_1", reply: "reject", permission: "bash" })
+    expect(payloads[10].properties.status.type).toBe("idle")
+    expect(v2.disposed.sort()).toEqual(["session.prompt", "tool.execute.after", "tool.execute.before"])
   })
 })
