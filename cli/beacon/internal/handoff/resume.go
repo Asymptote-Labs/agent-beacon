@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/clinesession"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // Resume modes.
@@ -201,10 +202,17 @@ func resumeDir(session Session, override string) (string, error) {
 // NewSessionPrompt is the first message of a session started from a brief. It names the brief by
 // path rather than inlining it: the brief carries prompt text and command output, and a command
 // line is visible to every local user through the process table.
+//
+// The prompt ends with the handoff marker, so whatever records the new session's first prompt can
+// link it to the session it continues (a session.handoff event).
 func NewSessionPrompt(session Session, briefPath string) string {
-	return fmt.Sprintf("Continue the work from an earlier %s session. Beacon wrote a handoff brief of it at %s. "+
+	prompt := fmt.Sprintf("Continue the work from an earlier %s session. Beacon wrote a handoff brief of it at %s. "+
 		"Read that file first, then tell me what you understand the task to be and wait for me to confirm before changing anything.",
 		RuntimeLabel(session.Harness), briefPath)
+	if marker := asymptoteobserve.HandoffMarker(session.Harness, session.ID); marker != "" {
+		prompt += "\n\n" + marker
+	}
+	return prompt
 }
 
 // ReasonText explains a new-session reason to a person.

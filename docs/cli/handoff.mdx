@@ -113,7 +113,7 @@ There are two ways to resume:
   | OpenCode | `opencode --prompt "<prompt>"` |
   | Cline | `cline --tui --auto-approve false "<prompt>"` |
 
-  The prompt names the brief by its path and asks the agent to read it, then confirm the task before changing anything. The brief is never inlined into the command line, because a command line is visible to every local user through the process table.
+  The prompt names the brief by its path and asks the agent to read it, then confirm the task before changing anything. The brief is never inlined into the command line, because a command line is visible to every local user through the process table. The prompt ends with a handoff marker (see below).
 
 Claude Code and Cline subagent sessions, and Cline's older task history, can't be reopened by their CLIs, so they always continue from a brief. A session known only from Beacon's runtime log also continues from a brief, and it needs `--agent` if its own runtime isn't one of the four above.
 
@@ -130,3 +130,27 @@ The runtime runs in this terminal, in the session's recorded directory. If that 
 | `--json` | With `--print`, describe the plan as JSON (`mode`, `reason`, `target`, `executable`, `args`, `dir`, `brief_path`). |
 | `--yes` | Launch without asking. |
 | `--output-dir`, `--log-path`, `--harness`, and the `--*-dir` flags | As for `export`. |
+
+## Linking a new session to the one it continues
+
+A session started from a brief has a new session id. So that the two stay connected in the telemetry, the first prompt of the new session ends with a handoff marker:
+
+```text
+[beacon-handoff from=claude_code session=ea7f210f-402b-53b1-aec2-864a488dfcd3]
+```
+
+When Beacon's hook adapter records a prompt carrying this marker, it writes a second event, `session.handoff`, next to the usual `prompt.submitted`:
+
+```json
+{
+  "event": { "action": "session.handoff", "category": "session", "fidelity": "observed" },
+  "session": { "id": "<the new session>", "working_directory": "/work/api" },
+  "handoff": { "source_harness": "claude_code", "source_session_id": "ea7f210f-402b-53b1-aec2-864a488dfcd3" }
+}
+```
+
+The link event keeps the new session's id, workspace and harness, and leaves the prompt text to the prompt event. Rules can match on `e.handoff.source_harness` and `e.handoff.source_session_id`.
+
+The live hook paths for Claude Code, Cline and OpenCode record the link. Codex CLI prompts reach Beacon over OTLP and through `beacon endpoint codex sync`, not through a prompt hook, so a session continued in Codex is not linked yet.
+
+The marker is a claim made in prompt text, not a verified identity: anyone can type it. `fidelity: observed` records that the marker was seen, not that `beacon handoff resume` wrote it. A native resume keeps the session's own id, so it needs no link.

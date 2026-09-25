@@ -64,7 +64,11 @@ func opencodeEndpointEvents(input map[string]interface{}, sessionID string) []no
 			})
 			fields["content"] = retainedContentFields(prompt)
 		}
-		return one("prompt.submitted", "prompt", "info", "Prompt submitted to opencode", fields)
+		events := one("prompt.submitted", "prompt", "info", "Prompt submitted to opencode", fields)
+		if link, ok := handoffLinkEvent(fields, opencodePromptText(input)); ok {
+			events = append(events, link)
+		}
+		return events
 	case "tool.execute.before":
 		mergeMap(fields, opencodeToolFields(input, false))
 		return one("tool.invoked", "tool", "info", "opencode tool invoked", fields)
