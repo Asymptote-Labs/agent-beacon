@@ -412,3 +412,17 @@ func TestRegistryIsConsistent(t *testing.T) {
 		}
 	}
 }
+
+// A new session is linked to the one it continues only through the marker in its first prompt, so
+// every runtime's name has to fit in one.
+func TestEveryRuntimeCanBeNamedInAHandoffMarker(t *testing.T) {
+	for _, r := range runtimes {
+		if asymptoteobserve.HandoffMarker(r.Harness, "s-1") == "" {
+			t.Errorf("%s cannot be carried in a handoff marker", r.Harness)
+		}
+		prompt := NewSessionPrompt(Session{Harness: r.Harness, ID: "s-1"}, "/tmp/brief.md")
+		if info, ok := asymptoteobserve.ParseHandoffMarker(prompt); !ok || info.SourceHarness != r.Harness || info.SourceSessionID != "s-1" {
+			t.Errorf("%s: the new-session prompt's marker parses back as %+v, %v", r.Harness, info, ok)
+		}
+	}
+}
