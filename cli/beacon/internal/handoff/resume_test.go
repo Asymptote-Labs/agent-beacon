@@ -26,7 +26,7 @@ func installed(names ...string) func(string) (string, error) {
 
 var allRuntimes = installed("claude", "codex", "opencode", "cline", "pi", "prime-agent", "droid",
 	"omp", "gemini", "qwen", "kiro-cli", "agy", "devin", "muse", "openhands", "goose", "copilot",
-	"hermes", "fx", "grok", "cursor-agent")
+	"hermes", "fx", "grok", "openclaw", "cursor-agent")
 
 // resumableSession is a session whose directory and session file both exist.
 func resumableSession(t *testing.T, harness, id string) Session {
@@ -86,6 +86,8 @@ func TestPlanResumeStartsANewSessionInEachRuntime(t *testing.T) {
 		{HarnessFactory, "droid", nil},
 		{HarnessCopilot, "copilot", []string{"-i"}},
 		{HarnessGrok, "grok", []string{"--permission-mode", "default"}},
+		// {key} stands for the fresh Gateway session key the prompt derives.
+		{HarnessOpenClaw, "openclaw", []string{"tui", "--session", "{key}", "--message"}},
 		{HarnessCursor, "cursor-agent", nil},
 		{HarnessOhMyPi, "omp", []string{"--approval-mode=always-ask"}},
 		{HarnessGemini, "gemini", []string{"--approval-mode", "default", "--prompt-interactive"}},
@@ -110,7 +112,12 @@ func TestPlanResumeStartsANewSessionInEachRuntime(t *testing.T) {
 			if plan.Mode != ModeNewSession || plan.Reason != ReasonOtherRuntime || plan.BriefPath != brief {
 				t.Fatalf("plan = %+v", plan)
 			}
-			want := append(append([]string{}, tc.prefix...), NewSessionPrompt(session, brief))
+			prompt := NewSessionPrompt(session, brief)
+			var want []string
+			for _, arg := range tc.prefix {
+				want = append(want, strings.ReplaceAll(arg, "{key}", openClawNewSessionKey(prompt)))
+			}
+			want = append(want, prompt)
 			if plan.Executable != "/bin/"+tc.exe || !reflect.DeepEqual(plan.Args, want) {
 				t.Fatalf("command = %s %q\nwant /bin/%s %q", plan.Executable, plan.Args, tc.exe, want)
 			}

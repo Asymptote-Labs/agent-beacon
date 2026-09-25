@@ -25,7 +25,10 @@ type Session struct {
 	SourcePath string `json:"source_path,omitempty"`
 	// Store names which of a runtime's stores holds the session when it has more than one, such as
 	// Cline's CLI sessions and its older task history.
-	Store     string    `json:"store,omitempty"`
+	Store string `json:"store,omitempty"`
+	// Key is the name the runtime's CLI reopens the session by when that is not its id: an OpenClaw
+	// Gateway session key. Empty when the store does not say.
+	Key       string    `json:"key,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
 	// Subagent marks a child session a runtime spawned for delegated work. Those are listed only on
 	// request, because resuming one resumes a fragment of the parent's task.

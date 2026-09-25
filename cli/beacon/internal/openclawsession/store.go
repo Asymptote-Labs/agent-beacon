@@ -131,7 +131,7 @@ func (s *Store) readSessionsIndex(root string) []TraceRef {
 		return nil
 	}
 	var refs []TraceRef
-	for _, entry := range raw {
+	for key, entry := range raw {
 		sourcePath := resolveIndexedSourcePath(entry.SessionFile, root)
 		if entry.SessionID == "" || sourcePath == "" {
 			continue
@@ -143,6 +143,7 @@ func (s *Store) readSessionsIndex(root string) []TraceRef {
 		dir := firstNonEmpty(entry.WorkspaceDir, directoryFromAny(entry.SystemPromptReport))
 		if ref, ok := s.readTraceMetadata(sourcePath, updated, dir); ok {
 			ref.Profile = profileFromSessionRoot(root)
+			ref.SessionKey = key
 			refs = append(refs, ref)
 		}
 	}
