@@ -1,5 +1,5 @@
 {
-  "version": "2026-09-24.3",
+  "version": "2026-09-25.1",
   "rules": [
     {
       "id": "secret-source.npm-config",
@@ -47,7 +47,7 @@
       "tools": [
         "Bash"
       ],
-      "pattern": "(?i)\\bgh\\s+(?:secret\\s+list|auth\\s+token)\\b"
+      "pattern": "(?i)\\bgh\\s+(?:secret\\s+list|auth\\s+token)\\b|\\bgit\\s+credential(?:-[\\w-]+)?\\s+(?:fill|get)\\b"
     },
     {
       "id": "secret-source.cloud-cli",
@@ -55,7 +55,7 @@
       "tools": [
         "Bash"
       ],
-      "pattern": "(?i)\\b(?:aws\\s+(?:configure\\s+get|secretsmanager\\s+get-secret-value|ssm\\s+get-parameters?\\b[^\\n;&|]*--with-decryption)|gcloud\\s+(?:secrets\\s+versions\\s+access|auth\\s+(?:application-default\\s+)?print-(?:access|identity)-token)|vault\\s+(?:kv\\s+get|read)\\b|op\\s+(?:read|item\\s+get)\\b|doppler\\s+secrets\\b|kubectl\\s+get\\s+secrets?\\b[^\\n;&|]*-o)"
+      "pattern": "(?i)\\b(?:az\\s+account\\s+get-access-token\\b|aws\\s+(?:sts\\s+get-session-token\\b|configure\\s+get|secretsmanager\\s+get-secret-value|ssm\\s+get-parameters?\\b[^\\n;&|]*--with-decryption)|gcloud\\s+(?:secrets\\s+versions\\s+access|auth\\s+(?:application-default\\s+)?print-(?:access|identity)-token)|vault\\s+(?:kv\\s+get|read)\\b|op\\s+(?:read|item\\s+get)\\b|doppler\\s+secrets\\b|kubectl\\s+get\\s+secrets?\\b[^\\n;&|]*-o)"
     },
     {
       "id": "credential-file.read",
@@ -63,7 +63,7 @@
       "tools": [
         "Bash"
       ],
-      "pattern": "(?i)(?:^|[\\s;&|(`$])(?:(?:cat|less|more|head|tail|bat|nl|strings|xxd|od|grep|egrep|fgrep|rg|ag|sed|awk|cut|sort|uniq|source|base64|openssl|jq|yq|python3?|node|open|code)\\b|\\.\\s)[^\\n]*?(?:(?:^|[\\s/'\"=])\\.env(?:\\.[\\w.-]+)?\\*?(?:[\\s'\";|&)>`]|$)|\\.npmrc\\b|pnpm/(?:rc|config\\.yaml)\\b|\\.yarnrc(?:\\.yml)?\\b|\\.aws/credentials\\b|application_default_credentials\\.json|\\.config/gcloud/(?:credentials\\.db|legacy_credentials)|\\.docker/config\\.json|\\.kube/config\\b|\\.netrc\\b|\\.git-credentials\\b|\\.config/gh/hosts\\.yml|\\bid_(?:rsa|ed25519|ecdsa|dsa)(?:[\\s'\";|&)>`]|$)|\\.pgpass\\b|\\.pypirc\\b|\\.openclaw/\\.env)"
+      "pattern": "(?i)(?:^|[\\s;&|(`$])(?:(?:cat|less|more|head|tail|bat|nl|strings|xxd|od|grep|egrep|fgrep|rg|ag|sed|awk|cut|sort|uniq|source|base64|openssl|jq|yq|python3?|node|open|code)\\b|\\.\\s)[^\\n]*?(?:(?:^|[\\s/'\"=])\\.env(?:\\.[\\w.-]+)?\\*?(?:[\\s'\";|&)>`]|$)|\\.npmrc\\b|pnpm/(?:rc|config\\.yaml)\\b|\\.yarnrc(?:\\.yml)?\\b|\\.aws/credentials\\b|application_default_credentials\\.json|\\.config/gcloud/(?:credentials\\.db|legacy_credentials)|\\.docker/config\\.json|\\.kube/config\\b|\\.netrc\\b|\\.git-credentials\\b|\\.config/gh/hosts\\.yml|\\bid_(?:rsa|ed25519|ecdsa|dsa)(?:[\\s'\";|&)>`]|$)|\\.pgpass\\b|\\.pypirc\\b|\\.openclaw/\\.env|\\bsecrets?\\.json\\b|\\bcredentials\\.json\\b|\\bservice[-_]?account[\\w.-]*\\.json\\b|\\bmaster\\.key\\b|\\.tfstate\\b)"
     },
     {
       "id": "credential-file.read",
@@ -74,7 +74,7 @@
         "Glob"
       ],
       "field": "path",
-      "pattern": "(?i)(?:(?:^|/)\\.env(?:\\.[\\w.-]+)?\\*?$|(?:^|/)\\.env\\*|\\.npmrc$|pnpm/(?:rc|config\\.yaml)$|\\.yarnrc(?:\\.yml)?$|\\.aws/credentials$|application_default_credentials\\.json$|\\.config/gcloud/|\\.docker/config\\.json$|\\.kube/config$|\\.netrc$|\\.git-credentials$|\\.config/gh/hosts\\.yml$|/id_(?:rsa|ed25519|ecdsa|dsa)$|\\.pgpass$|\\.pypirc$)"
+      "pattern": "(?i)(?:(?:^|/)\\.env(?:\\.[\\w.-]+)?\\*?$|(?:^|/)\\.env\\*|\\.npmrc$|pnpm/(?:rc|config\\.yaml)$|\\.yarnrc(?:\\.yml)?$|\\.aws/credentials$|application_default_credentials\\.json$|\\.config/gcloud/|\\.docker/config\\.json$|\\.kube/config$|\\.netrc$|\\.git-credentials$|\\.config/gh/hosts\\.yml$|/id_(?:rsa|ed25519|ecdsa|dsa)$|\\.pgpass$|\\.pypirc$|(?:^|/)secrets?\\.json$|(?:^|/)credentials\\.json$|(?:^|/)service[-_]?account[\\w.-]*\\.json$|(?:^|/)master\\.key$|\\.tfstate$)"
     },
     {
       "id": "credential-file.transfer",
@@ -82,7 +82,47 @@
       "tools": [
         "Bash"
       ],
-      "pattern": "(?i)\\b(?:scp|rsync|sftp)\\b[^\\n;&|]*?(?:(?:^|[\\s/'\"])\\.env(?:\\.[\\w.-]+)?|\\.npmrc|pnpm/(?:rc|config\\.yaml)|\\.aws/credentials|\\.docker/config\\.json|\\.kube/config|\\.netrc|\\.git-credentials|\\.config/gh/hosts\\.yml|\\.pgpass|\\.pypirc)\\b[^\\n;&|]*?\\s[\\w.@-]+:"
+      "pattern": "(?i)\\b(?:scp|rsync|sftp)\\b[^\\n;&|]*?(?:(?:^|[\\s/'\"])\\.env(?:\\.[\\w.-]+)?|\\.npmrc|pnpm/(?:rc|config\\.yaml)|\\.aws/credentials|\\.docker/config\\.json|\\.kube/config|\\.netrc|\\.git-credentials|\\.config/gh/hosts\\.yml|\\.pgpass|\\.pypirc|secrets?\\.json|credentials\\.json|service[-_]?account[\\w.-]*\\.json|master\\.key|\\.tfstate)\\b[^\\n;&|]*?\\s[\\w.@-]+:"
+    },
+    {
+      "id": "credential-file.upload",
+      "category": "credential-file",
+      "tools": [
+        "Bash"
+      ],
+      "pattern": "(?i)\\b(?:curl|http|https|wget)\\b[^\\n]*?(?:=@|\\s@|--upload-file\\s+|\\s-T\\s+|\\$\\(\\s*cat\\s+)[\\w./~-]*?(?:\\.env(?:\\.[\\w.-]+)?\\b|\\.npmrc\\b|secrets?\\.json\\b|credentials\\.json\\b|service[-_]?account[\\w.-]*\\.json\\b|master\\.key\\b|\\.tfstate\\b)"
+    },
+    {
+      "id": "credential-file.commit",
+      "category": "credential-file",
+      "tools": [
+        "Bash"
+      ],
+      "pattern": "(?i)\\bgit\\s+add\\b[^\\n;&|]*?(?:(?:^|[\\s/'\\\"=:@])\\.env(?:\\.[\\w.-]+)?\\b|\\.npmrc\\b|\\bsecrets?\\.json\\b|\\bcredentials\\.json\\b|\\bservice[-_]?account[\\w.-]*\\.json\\b|\\bmaster\\.key\\b|\\.tfstate\\b)"
+    },
+    {
+      "id": "credential-file.history",
+      "category": "credential-file",
+      "tools": [
+        "Bash"
+      ],
+      "pattern": "(?i)\\bgit\\s+(?:show|log\\b[^\\n;&|]*\\s-p\\b|log\\b[^\\n;&|]*--patch\\b|diff|cat-file\\s+-p)\\b[^\\n;&|]*?(?:(?:^|[\\s/'\\\"=:@])\\.env(?:\\.[\\w.-]+)?\\b|\\.npmrc\\b|\\bsecrets?\\.json\\b|\\bcredentials\\.json\\b|\\bservice[-_]?account[\\w.-]*\\.json\\b|\\bmaster\\.key\\b|\\.tfstate\\b)"
+    },
+    {
+      "id": "secret-source.terraform",
+      "category": "secret-source",
+      "tools": [
+        "Bash"
+      ],
+      "pattern": "(?i)\\b(?:terraform|tofu)\\s+(?:output\\b[^\\n;&|]*\\s-(?:json|raw)\\b|show\\b[^\\n;&|]*\\s-json\\b|state\\s+pull\\b)"
+    },
+    {
+      "id": "secret.into-file",
+      "category": "secret-on-argv",
+      "tools": [
+        "Bash"
+      ],
+      "pattern": "(?:\\bsed\\s+-i\\b[^\\n]*?\\$\\{?[A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|KEY)\\b\\}?|\\$\\{?[A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|KEY)\\b\\}?[^\\n;&|]*?>>?\\s*[\\\"']?[\\w./~-]+\\.(?:ts|tsx|js|jsx|mjs|cjs|py|go|rb|java|kt|swift|php|json|ya?ml|toml|tf|sh)\\b)"
     },
     {
       "id": "env-dump",
@@ -98,7 +138,7 @@
       "tools": [
         "Bash"
       ],
-      "pattern": "\\b(?:node|bun|deno|python3?|ruby|perl)\\b[^\\n]*?\\s(?:-e|-c|-p|--eval|--print)\\s[^\\n]*?(?:(?:process\\.env|Bun\\.env|Deno\\.env\\.get\\(|os\\.environ|os\\.getenv\\(|ENV|\\$ENV\\{)[\\[.('\\\"\\s]*[A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|KEY\\b|APIKEY|CREDENTIAL)|(?:console\\.log|print|puts|JSON\\.stringify|pp)\\(?\\s*(?:process\\.env|Bun\\.env|os\\.environ|ENV)\\s*\\)?(?:[\\s;'\\\"]|$))"
+      "pattern": "\\b(?:node|bun|deno|python3?|ruby|perl)\\b[^\\n]*?\\s(?:-e|-c|-p|--eval|--print)\\s[^\\n]*?(?:(?:process\\.env|Bun\\.env|Deno\\.env\\.get\\(|os\\.environ|os\\.getenv\\(|ENV|\\$ENV\\{)[\\[.('\\\"\\s]*[A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|KEY\\b|APIKEY|CREDENTIAL)|(?:console\\.log|print|puts|JSON\\.stringify|pp)\\(?\\s*(?:process\\.env|Bun\\.env|os\\.environ|ENV)\\s*\\)?(?:[\\s;'\\\"]|$)|dict\\(\\s*os\\.environ\\s*\\)|JSON\\.stringify\\(\\s*process\\.env\\b)"
     },
     {
       "id": "secret.on-argv",
