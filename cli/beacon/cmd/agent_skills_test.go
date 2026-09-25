@@ -170,7 +170,7 @@ func TestAgentSkillsManifestsAgree(t *testing.T) {
 	if err := json.Unmarshal(data, &pkg); err != nil {
 		t.Fatal(err)
 	}
-	if len(pkg.Pi.Skills) != 1 || filepath.Clean(pkg.Pi.Skills[0]) != "agent-skills/skills" {
+	if len(pkg.Pi.Skills) != 1 || filepath.Clean(pkg.Pi.Skills[0]) != filepath.Join("agent-skills", "skills") {
 		t.Errorf("package.json pi.skills = %v, want [./agent-skills/skills]", pkg.Pi.Skills)
 	}
 	for _, path := range agentSkillFiles(t) {
