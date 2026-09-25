@@ -32,8 +32,9 @@ func LogSession(logPath, id, harness string) (session Session, events []schema.E
 	}
 	session = Session{
 		ID: detail.Session.ID,
-		// Older log rows carry a runtime's raw name ("claude"); every comparison uses the canonical one.
-		Harness:   asymptoteobserve.NormalizeHarnessName(detail.Session.Harness),
+		// Older log rows carry a runtime's raw name ("claude", "devin"); every comparison uses the
+		// canonical one.
+		Harness:   canonicalHarness(asymptoteobserve.NormalizeHarnessName(detail.Session.Harness)),
 		Directory: detail.Session.WorkingDir,
 		Branch:    detail.Session.Branch,
 	}
@@ -59,7 +60,7 @@ func logSessionForPrefix(logPath, prefix, harness string) (string, error) {
 		if event.Session == nil || !strings.HasPrefix(event.Session.ID, prefix) {
 			return nil
 		}
-		name := asymptoteobserve.NormalizeHarnessName(event.Harness.Name)
+		name := canonicalHarness(asymptoteobserve.NormalizeHarnessName(event.Harness.Name))
 		if harness != "" && name != harness {
 			return nil
 		}

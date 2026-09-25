@@ -181,15 +181,16 @@ func TestPlanResumeReopensAHermesSession(t *testing.T) {
 // brief; each case says so before looking for a directory or the executable.
 func TestPlanResumeHermesCannotStartFromABrief(t *testing.T) {
 	brief := filepath.Join(t.TempDir(), "brief.md")
+	targets := strings.Join(BriefTargetNames(), ", ")
 	for _, tc := range []struct {
 		name string
 		edit func(*Session, *PlanOptions)
 		want string
 	}{
 		{"another runtime's session", func(s *Session, o *PlanOptions) { s.Harness = HarnessCodex; o.Target = HarnessHermes },
-			"Hermes Agent can only reopen its own sessions; it cannot start a new session from a brief (pass --agent with one of: claude, codex, opencode, cline, pi, prime)"},
+			"Hermes Agent can only reopen its own sessions; it cannot start a new session from a brief (pass --agent with one of: " + targets + ")"},
 		{"--new", func(s *Session, o *PlanOptions) { o.ForceNew = true },
-			"Hermes Agent cannot start a new session from a brief, which this session needs because a new session was requested; pass --agent to continue in one of: claude, codex, opencode, cline, pi, prime"},
+			"Hermes Agent cannot start a new session from a brief, which this session needs because a new session was requested; pass --agent to continue in one of: " + targets},
 		{"subagent", func(s *Session, o *PlanOptions) { s.Subagent = true },
 			"because this runtime's CLI cannot reopen this kind of session"},
 		{"database gone", func(s *Session, o *PlanOptions) { s.SourcePath = filepath.Join(t.TempDir(), "state.db") },

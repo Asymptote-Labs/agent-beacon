@@ -164,10 +164,8 @@ func loadHandoffBrief(id string) (handoff.Brief, error) {
 
 // handoffLogReason says why a session was read from the runtime log.
 func handoffLogReason(session handoff.Session) string {
-	for _, harness := range handoff.Harnesses {
-		if harness == session.Harness {
-			return fmt.Sprintf("%s session %s is no longer in its runtime's store", session.Harness, session.ID)
-		}
+	if handoff.ReadsStore(session.Harness) {
+		return fmt.Sprintf("%s session %s is no longer in its runtime's store", session.Harness, session.ID)
 	}
 	return fmt.Sprintf("beacon handoff does not read %s session stores", session.Harness)
 }
