@@ -51,8 +51,15 @@ func (s *cursorSource) List() ([]Session, error) {
 		}
 		// A conversation stored twice is listed once: as the transcript when cursor-agent can
 		// reopen it, else as the Composer record, which is Cursor's own conversation store.
-		if prev, ok := byID[ref.ID]; ok && !cursorPrefer(session, prev) {
-			continue
+		prev, seen := byID[ref.ID]
+		if seen && !cursorPrefer(session, prev) {
+			session, prev = prev, session
+		}
+		if seen {
+			// Only the transcript knows a conversation is a subagent's; the Composer record kept
+			// in its place is still that subagent.
+			session.Subagent = session.Subagent || prev.Subagent
+			session.ParentID = firstNonEmpty(session.ParentID, prev.ParentID)
 		}
 		byID[ref.ID] = session
 	}

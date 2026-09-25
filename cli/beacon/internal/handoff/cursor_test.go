@@ -115,6 +115,9 @@ func cursorFixture(t *testing.T) cursorStores {
 		"bubbleId:cli-1:b1":       `{"type":1,"text":"tidy the router"}`,
 		"composerData:ide-2":      composer("ide-2", "Plot the latency", cursorUpdated.Add(-time.Hour)),
 		"bubbleId:ide-2:b1":       `{"type":1,"text":"plot the latency"}`,
+		// Cursor also keeps a Composer record for a subagent; only its transcript says it is one.
+		"composerData:sub-1": composer("sub-1", "read the csv", cursorUpdated.Add(-3*time.Hour)),
+		"bubbleId:sub-1:b1":  `{"type":1,"text":"read the csv"}`,
 	} {
 		if _, err := db.Exec(`INSERT INTO cursorDiskKV(key, value) VALUES (?, ?)`, key, []byte(value)); err != nil {
 			t.Fatal(err)
