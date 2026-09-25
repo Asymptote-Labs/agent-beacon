@@ -7,6 +7,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/clinesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/groksession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/opencodesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pisession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/primesession"
@@ -53,6 +54,7 @@ const (
 	HarnessCline    = clinesession.Harness
 	HarnessPi       = pisession.Harness
 	HarnessPrime    = primesession.Harness
+	HarnessGrok     = groksession.Harness
 )
 
 // runtimes lists every runtime handoff supports, in display order.
@@ -147,6 +149,27 @@ var runtimes = []Runtime{
 				return []string{"--resume", s.SourcePath}, true
 			},
 			NewSession: func(prompt string) []string { return []string{"--", prompt} },
+		},
+	},
+	{
+		Harness:   HarnessGrok,
+		Label:     "Grok Build",
+		Aliases:   []string{"grok-build"},
+		NewSource: func(dir string) Source { return &grokSource{dir: dir} },
+		// Grok's configured permission mode can be always-approve. A session Beacon starts or
+		// reopens runs in the mode that asks, whatever the config says; the user can still change
+		// the mode inside the TUI.
+		Command: &runtimeCommand{
+			Executable: "grok",
+			Resume: func(s Session) ([]string, bool) {
+				// A subagent is a child of the session that spawned it, not one a person reopens.
+				if s.Subagent {
+					return nil, false
+				}
+				// Grok looks a session up under the directory it runs in, which is the session's own.
+				return []string{"--permission-mode", "default", "--resume", s.ID}, true
+			},
+			NewSession: func(prompt string) []string { return []string{"--permission-mode", "default", prompt} },
 		},
 	},
 }
