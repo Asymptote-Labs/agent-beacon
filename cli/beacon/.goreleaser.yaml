@@ -22,6 +22,9 @@ before:
     # Package the external threat-rule pack (repo rules/, not embedded in the binary)
     # as a release asset users install with `beacon rules pull <asset-url>`.
     - bash -c 'mkdir -p release-rules && COPYFILE_DISABLE=1 tar --exclude="._*" --exclude=".DS_Store" -czf release-rules/threat-rules.tar.gz -C ../.. rules'
+    # GoReleaser v2 rejects release extra_files outside its working directory. Stage the
+    # repository-level one-line installer locally before attaching it to the release.
+    - bash -c 'mkdir -p release-install && cp ../../packaging/linux/install.sh release-install/install.sh'
 
 builds:
   - id: beacon
@@ -293,7 +296,7 @@ release:
     # so the rule corpus can grow without enlarging `beacon`.
     - glob: ./release-rules/threat-rules.tar.gz
     # The Linux one-line installer, served from releases/latest/download/install.sh.
-    - glob: ../../packaging/linux/install.sh
+    - glob: ./release-install/install.sh
   footer: |
     ## Installation
 
