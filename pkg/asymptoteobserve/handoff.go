@@ -15,10 +15,10 @@ type HandoffInfo struct {
 // The handoff marker is the one line `beacon handoff resume` adds to a new session's first prompt so
 // that whatever records the prompt can link the new session to the old one. It is a claim made in
 // prompt text, not a verified identity: anyone can type it, and a session.handoff event records that
-// the marker was observed, nothing more.
+// the marker was observed, nothing more. A harness name may carry a hyphen, as devin-cli does.
 var (
-	handoffMarkerPattern = regexp.MustCompile(`\[beacon-handoff from=([a-z0-9_]{1,64}) session=([A-Za-z0-9._:\-]{1,200})\]`)
-	handoffHarnessChars  = regexp.MustCompile(`^[a-z0-9_]{1,64}$`)
+	handoffMarkerPattern = regexp.MustCompile(`\[beacon-handoff from=([a-z0-9_-]{1,64}) session=([A-Za-z0-9._:\-]{1,200})\]`)
+	handoffHarnessChars  = regexp.MustCompile(`^[a-z0-9_-]{1,64}$`)
 	handoffSessionChars  = regexp.MustCompile(`^[A-Za-z0-9._:\-]{1,200}$`)
 )
 
