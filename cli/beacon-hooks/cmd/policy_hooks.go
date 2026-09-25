@@ -511,6 +511,10 @@ const (
 // with any comment after "the user said:". Anything else means the call ran,
 // so the developer approved it; a comment attached to an approval follows the
 // result in the same message.
+// askedMarker is in the ask the judge returns (agent_message on the server),
+// which Claude Code hands back as the tool result when it cannot prompt.
+const askedMarker = "flagged this call."
+
 func classifyAnswer(res transcript.ToolResult) (outcome, comment string) {
 	content := strings.TrimSpace(res.Content)
 	switch {
@@ -526,6 +530,11 @@ func classifyAnswer(res transcript.ToolResult) (outcome, comment string) {
 		}
 		return "rejected", comment
 	case strings.HasPrefix(content, "[Request interrupted"):
+		return "dismissed", ""
+	case res.IsError && strings.Contains(content, askedMarker):
+		// Nobody answered: a session that cannot show the prompt (claude -p, an
+		// SDK or orchestrator run) refuses the call and returns the ask itself as
+		// the error. The call did not run, and no developer overrode anything.
 		return "dismissed", ""
 	default:
 		return "approved", strings.TrimSpace(res.After)

@@ -46,13 +46,14 @@ for path, entry in (manifest.get("settings") or {}).items():
             os.rmdir(os.path.dirname(command_file))
         except OSError:
             pass
-    mode = os.stat(path).st_mode & 0o777
-    tmp = path + ".beacon-policy.tmp"
-    with open(tmp, "w") as fh:
-        json.dump(settings, fh, indent=2)
+    write_path = os.path.realpath(path)  # keep a symlinked settings.json a symlink
+    mode = os.stat(write_path).st_mode & 0o777
+    tmp = write_path + ".beacon-policy.tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(settings, fh, indent=2, ensure_ascii=False)
         fh.write("\n")
     os.chmod(tmp, mode)
-    os.replace(tmp, path)
+    os.replace(tmp, write_path)
     print(f"  cleaned {path}")
 PY
 

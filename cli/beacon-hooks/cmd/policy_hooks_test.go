@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/mdr"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/transcript"
 )
 
 const p45Command = "/opt/homebrew/bin/pnpm config get '//registry.tiptap.dev/:_authToken'"
@@ -398,6 +399,22 @@ func TestPolicyToolAsksWithContextAndRecordsThePendingAsk(t *testing.T) {
 	asked := eventsWithAction(t, logPath, "policy.asked")
 	if len(asked) != 1 || callID(asked[0]) != "toolu_13" {
 		t.Fatalf("asked event: %v", asked)
+	}
+}
+
+func TestAnUnansweredHeadlessAskIsNotAnApproval(t *testing.T) {
+	// claude -p and SDK runs cannot show the prompt: Claude Code refuses the
+	// call and returns the ask as an error result. Seen live on 2.1.280.
+	headless := transcript.ToolResult{IsError: true, Content: "A Beacon policy (Secret exposure) flagged this call.\n" +
+		"Why: Prints all contents of .env.\n\nNo: keep it blocked. You agree with the policy.\n" +
+		"Yes: run it anyway. You're overriding the policy.\nBeacon learns from your answer."}
+	if outcome, _ := classifyAnswer(headless); outcome != "dismissed" {
+		t.Fatalf("an unanswered ask was recorded as %q", outcome)
+	}
+	// An approved call that then fails is still an approval.
+	failed := transcript.ToolResult{IsError: true, Content: "cat: .env: No such file or directory"}
+	if outcome, _ := classifyAnswer(failed); outcome != "approved" {
+		t.Fatalf("an approved call that failed was recorded as %q", outcome)
 	}
 }
 

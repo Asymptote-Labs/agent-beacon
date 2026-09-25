@@ -1,6 +1,7 @@
 #!/bin/bash
 # Beacon policy hooks (secret exposure), POC installer for Claude Code on macOS.
 #
+#   pbpaste | ./install.sh --token-file /dev/stdin                     # key from the clipboard, never on disk
 #   BEACON_POLICY_TOKEN=ask_live_... ./install.sh                       # every Claude Code session (user scope)
 #   BEACON_POLICY_TOKEN=ask_live_... ./install.sh --scope project --project-dir <project>
 #
@@ -225,13 +226,16 @@ The developer ran /beacon-allow, but Beacon's policy hook did not handle it, so 
 """)
 entry["command_file"] = command_file
 
-mode = os.stat(settings_path).st_mode & 0o777 if os.path.exists(settings_path) else 0o644
-tmp = settings_path + ".beacon-policy.tmp"
-with open(tmp, "w") as fh:
-    json.dump(settings, fh, indent=2)
+# Write through a symlink (dotfile managers link settings.json into a repo):
+# replacing the link itself would silently detach the file from the dotfiles.
+write_path = os.path.realpath(settings_path)
+mode = os.stat(write_path).st_mode & 0o777 if os.path.exists(write_path) else 0o644
+tmp = write_path + ".beacon-policy.tmp"
+with open(tmp, "w", encoding="utf-8") as fh:
+    json.dump(settings, fh, indent=2, ensure_ascii=False)
     fh.write("\n")
 os.chmod(tmp, mode)
-os.replace(tmp, settings_path)
+os.replace(tmp, write_path)
 with open(manifest_path, "w") as fh:
     json.dump(manifest, fh, indent=2)
 os.chmod(manifest_path, 0o600)
