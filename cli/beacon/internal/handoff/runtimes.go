@@ -60,7 +60,7 @@ const (
 	HarnessQwen        = "qwen_code"
 	HarnessKiro        = "kiro"
 	HarnessAntigravity = "antigravity_cli"
-	HarnessDevin       = "devin"
+	HarnessDevin       = "devin-cli"
 	HarnessMuse        = "muse_code"
 	HarnessOpenHands   = "openhands"
 	HarnessGoose       = "goose"
@@ -220,7 +220,9 @@ var runtimes = []Runtime{
 	{
 		Harness: HarnessDevin,
 		Label:   "Devin CLI",
-		Aliases: []string{"devin-cli"},
+		// Beacon's Devin CLI hooks record "devin-cli"; hooks written by older versions recorded
+		// "devin", which reaches this entry through its alias.
+		Aliases: []string{"devin"},
 		// DEVIN_PERMISSION_MODE can hold "dangerous", which approves every tool; the flag wins over
 		// it. Devin reads a bare argument as a path to open, so the prompt follows --.
 		Command: &runtimeCommand{
@@ -265,6 +267,28 @@ var Harnesses = func() []string {
 	}
 	return names
 }()
+
+// ReadsStore reports whether Beacon reads harness's own session store.
+func ReadsStore(harness string) bool {
+	r, ok := LookupRuntime(harness)
+	return ok && r.NewSource != nil
+}
+
+// canonicalHarness is the registry's harness for a name a log row carries: the name itself, or the
+// runtime it is an alias of. A name no runtime answers to is returned as it is.
+func canonicalHarness(name string) string {
+	if _, ok := LookupRuntime(name); ok {
+		return name
+	}
+	for _, r := range runtimes {
+		for _, alias := range r.Aliases {
+			if name == alias {
+				return r.Harness
+			}
+		}
+	}
+	return name
+}
 
 // LookupRuntime returns the registry entry for harness.
 func LookupRuntime(harness string) (Runtime, bool) {
