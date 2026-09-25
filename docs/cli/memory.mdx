@@ -36,6 +36,13 @@ agent was working in rather than wherever you ran the command. A linked git work
 resolves to the same project as its main checkout. Pass `--project` to override.
 Commands that list or look up records use `--project` or the current directory.
 
+The repository comes from the trace's events, and not every event records one. A
+trace with no repository falls back to the current directory, so pass `--project`
+for it. A trace whose recorded path no longer exists, such as a removed worktree or a
+log copied from another machine, resolves to the nearest checkout above that path, or
+by the path alone when there is none, and can land in a different project from the one
+it came from; pass `--project` for that too.
+
 ## Evaluate traces
 
 Preview selected traces and estimated Jev calls without a network request:
@@ -100,6 +107,11 @@ session, such as OTLP metric samples. They carry nothing to learn from, and each
 fresh sample would otherwise sort above the real sessions and consume the run's
 Jev calls. `--limit` counts traces before the skip, so a run can select fewer
 sessions than the limit.
+
+Because each trace is scoped to its own repository, the `--json` result names a
+top-level `project` only when `--project` pinned every trace to one. Otherwise that
+field is absent, and each entry in `previews` and `evaluations` carries its own
+`project`.
 
 List and inspect stored evaluations:
 
