@@ -52,6 +52,9 @@ func (s *cursorSource) List() ([]Session, error) {
 		// A conversation stored twice is listed once: as the transcript when cursor-agent can
 		// reopen it, else as the Composer record, which is Cursor's own conversation store.
 		prev, seen := byID[ref.ID]
+		if seen {
+			session, prev = cursorAdoptDirectory(session, prev), cursorAdoptDirectory(prev, session)
+		}
 		if seen && !cursorPrefer(session, prev) {
 			session, prev = prev, session
 		}
@@ -69,6 +72,22 @@ func (s *cursorSource) List() ([]Session, error) {
 	}
 	sort.Slice(sessions, func(i, j int) bool { return sessions[i].ID < sessions[j].ID })
 	return sessions, err
+}
+
+// cursorAdoptDirectory gives a transcript the directory its Composer twin records, when that is the
+// directory cursor-agent keeps the chat under. A transcript's directory is decoded from Cursor's
+// dash-encoded project name, which cannot bring back underscores, spaces or dots; the Composer
+// record keeps the path itself.
+func cursorAdoptDirectory(session, twin Session) Session {
+	if session.Store != string(cursorsession.SourceTranscript) || twin.Directory == "" || twin.Directory == session.Directory || cursorCLIChat(session) {
+		return session
+	}
+	candidate := session
+	candidate.Directory = twin.Directory
+	if cursorCLIChat(candidate) {
+		return candidate
+	}
+	return session
 }
 
 func cursorPrefer(candidate, current Session) bool {

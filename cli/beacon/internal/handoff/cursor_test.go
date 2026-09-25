@@ -165,6 +165,75 @@ func TestListReadsCursorSessions(t *testing.T) {
 	}
 }
 
+// A transcript's directory is decoded from Cursor's dash-encoded project name, which loses the
+// underscore in my_api. The Composer record for the same chat keeps the real path, and that is the
+// path cursor-agent keeps the chat under, so the chat is still listed as one it can reopen.
+func TestCursorCLIChatTakesItsComposerDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows temporary paths do not survive Cursor's project-name encoding")
+	}
+	testenv.SetHome(t, t.TempDir())
+	isolateRuntimeEnv(t)
+	root, err := os.MkdirTemp("/tmp", "beaconcursor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(root) })
+	ws := filepath.Join(root, "work", "my_api")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projects := filepath.Join(t.TempDir(), "projects")
+	path := filepath.Join(projects, cursorProjectName(ws), "agent-transcripts", "cli-9", "cli-9.jsonl")
+	writeFixture(t, path, jsonLine(t, map[string]interface{}{"type": "user_message", "id": "u1", "text": "tidy the router"}))
+	setModTime(t, path, cursorUpdated)
+	writeCursorChatStore(t, ws, "cli-9")
+
+	dbPath := cursorsession.DefaultGlobalDBPath()
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value BLOB)`); err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range map[string]string{
+		"composerData:cli-9": mustJSON(t, map[string]interface{}{
+			"composerId": "cli-9", "name": "Tidy the router", "lastUpdatedAt": cursorUpdated.UnixMilli(),
+			"context":                     map[string]interface{}{"path": ws},
+			"fullConversationHeadersOnly": []interface{}{map[string]interface{}{"bubbleId": "b1", "type": 1}},
+		}),
+		"bubbleId:cli-9:b1": `{"type":1,"text":"tidy the router"}`,
+	} {
+		if _, err := db.Exec(`INSERT INTO cursorDiskKV(key, value) VALUES (?, ?)`, key, []byte(value)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	sessions, err := List(DefaultSources(StoreDirs{HarnessCursor: projects}), Filter{Harness: HarnessCursor})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("sessions = %v, want the chat once", sessionKeys(sessions))
+	}
+	chat := sessions[0]
+	if chat.Store != string(cursorsession.SourceTranscript) || chat.Directory != ws || chat.SourcePath != path {
+		t.Fatalf("chat = %+v, want its transcript in %s", chat, ws)
+	}
+	plan, err := PlanResume(chat, PlanOptions{LookPath: installed("cursor-agent")})
+	if err != nil {
+		t.Fatalf("PlanResume: %v", err)
+	}
+	if plan.Mode != ModeNative || !reflect.DeepEqual(plan.Args, []string{"--resume", "cli-9"}) {
+		t.Fatalf("plan = %+v, want a native resume", plan)
+	}
+}
+
 func TestCursorSessionsBuildABrief(t *testing.T) {
 	f := cursorFixture(t)
 	sources := DefaultSources(f.dirs)
