@@ -66,8 +66,8 @@ that accept MCP servers from plugins. When the server is available, recall uses 
     ```
   </Tab>
   <Tab title="Other agents">
-    For Cursor, Gemini CLI, OpenCode, Amp, goose, Cline, Windsurf, Kiro, and any other
-    agent that reads Agent Skills, use the skills CLI:
+    For Cursor, Gemini CLI, OpenCode, goose, Kiro, Pi, Hermes Agent, and any other agent
+    that reads Agent Skills, use the skills CLI:
 
     ```bash
     npx skills add asymptote-labs/agent-beacon
@@ -75,6 +75,11 @@ that accept MCP servers from plugins. When the server is available, recall uses 
 
     Pass `-a <agent>` to target one agent, for example `-a gemini-cli` or `-a cursor`,
     and `--skill <name>` to install a single skill.
+
+    Cline reads `.cline/skills` rather than `.agents/skills`, so copy the skills there
+    from [`agent-skills/skills`](https://github.com/asymptote-labs/agent-beacon/tree/main/agent-skills/skills).
+    The [README](https://github.com/asymptote-labs/agent-beacon#local-agent-coverage)
+    lists the install route for every supported runtime.
   </Tab>
 </Tabs>
 

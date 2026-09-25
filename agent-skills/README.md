@@ -22,7 +22,8 @@ harnesses that take MCP servers from plugins.
 | GitHub Copilot CLI | `copilot plugin marketplace add asymptote-labs/agent-beacon`, then `copilot plugin install beacon@beacon` |
 | Factory Droid | `droid plugin marketplace add asymptote-labs/agent-beacon`, then `droid plugin install beacon@beacon` |
 | Gemini CLI | `npx skills add asymptote-labs/agent-beacon -a gemini-cli` (see the note below) |
-| Any skills-capable agent (Cursor, OpenCode, Amp, goose, Cline, Windsurf, Kiro, …) | `npx skills add asymptote-labs/agent-beacon` |
+| Any skills-capable agent (Cursor, OpenCode, goose, Kiro, Pi, Hermes Agent, …) | `npx skills add asymptote-labs/agent-beacon` |
+| Cline | Copy `skills/*` into `.cline/skills` |
 
 ## Layout
 
