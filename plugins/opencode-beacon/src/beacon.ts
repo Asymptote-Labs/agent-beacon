@@ -3,6 +3,7 @@
 // Managed by beacon endpoint hooks install --harness opencode.
 
 const beaconCommand = "__BEACON_COMMAND__"
+const pluginID = "beacon.endpoint"
 const debugEnabled = process.env.BEACON_OPENCODE_DEBUG === "1"
 const sendTimeoutMs = 2000
 const directHookTypes = new Set([
@@ -322,7 +323,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
         flushMessageParts(info.id, sid, model, info?.time?.completed)
         if (info?.id) {
           if (completedMessages.has(info.id)) return
-          completedMessages.add(info.id)
+          if (!info.finish || info.finish === "stop") completedMessages.add(info.id)
         }
       }
       if (type === "message.part.delta") {
@@ -386,4 +387,223 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
       if (type === "session.deleted") void queued.finally(() => cleanupSession(sid))
     },
   }
+}
+
+// OpenCode 2.x loads only a default definition with an id and a setup
+// function; 1.x reads the same default export's server field. setup adapts
+// the V2 hooks and event stream onto the V1 handlers above, so both runtimes
+// send the same payloads to beacon-hooks.
+function v2Model(ref) {
+  if (!ref?.id) return undefined
+  return ref.providerID ? { providerID: ref.providerID, modelID: ref.id } : { modelID: ref.id }
+}
+
+function v2PromptParts(prompt) {
+  const parts = []
+  if (prompt?.text) parts.push({ type: "text", text: prompt.text })
+  for (const file of prompt?.files || []) {
+    if (file?.uri) parts.push({ type: "file", filename: file.name || file.uri, url: file.uri })
+  }
+  for (const agent of prompt?.agents || []) {
+    if (agent?.name) parts.push({ type: "agent", name: agent.name })
+  }
+  return parts
+}
+
+function v2ToolResponse(result) {
+  const structured = result?.output
+  const text = (result?.content || [])
+    .filter((item) => item?.type === "text" && typeof item.text === "string")
+    .map((item) => item.text)
+    .join("\n")
+  const output = typeof structured === "string" ? structured : structured?.output ?? text
+  const metadata = { ...(result?.metadata || {}) }
+  if (metadata.exit === undefined && typeof structured?.exit === "number") metadata.exit = structured.exit
+  return { output, metadata }
+}
+
+// Translates one V2 event into the V1 {type, properties} events the handler
+// understands. Tool success and failure arrive through the tool hooks instead.
+function v2Events(event, models) {
+  const data = event?.data || {}
+  const sid = data.sessionID
+  const created = typeof event?.created === "number" ? event.created : Date.now()
+  switch (event?.type) {
+    case "session.created":
+    case "session.model.selected": {
+      const model = v2Model(data.model)
+      if (sid && model) models.set(sid, model)
+      if (event.type !== "session.created") return []
+      return [{ type: "session.created", properties: { ...data, info: { ...data, id: sid, ...(model || {}) } } }]
+    }
+    case "session.deleted":
+    case "session.idle":
+    case "session.status":
+    case "permission.replied":
+      return [{ type: event.type, properties: data }]
+    case "permission.asked":
+      return [
+        {
+          type: "permission.asked",
+          properties: { ...data, permission: data.action, patterns: data.resources },
+        },
+      ]
+    case "session.execution.started":
+      return [{ type: "session.status", properties: { sessionID: sid, status: { type: "busy" } } }]
+    case "session.execution.succeeded":
+    case "session.execution.failed":
+    case "session.execution.interrupted": {
+      const events = []
+      if (event.type === "session.execution.failed") {
+        events.push({ type: "session.error", properties: { sessionID: sid, error: data.error } })
+      }
+      events.push({ type: "session.status", properties: { sessionID: sid, status: { type: "idle" } } })
+      return events
+    }
+    case "session.text.ended":
+    case "session.reasoning.ended": {
+      const messageID = data.assistantMessageID
+      const type = event.type === "session.text.ended" ? "text" : "reasoning"
+      return [
+        {
+          type: "message.updated",
+          properties: { sessionID: sid, info: { id: messageID, role: "assistant", sessionID: sid, ...(models.get(sid) || {}) } },
+        },
+        {
+          type: "message.part.updated",
+          properties: {
+            sessionID: sid,
+            part: {
+              id: `${messageID}:${type}:${data.ordinal ?? 0}`,
+              messageID,
+              sessionID: sid,
+              type,
+              text: data.text || "",
+              time: { start: created, end: created },
+            },
+          },
+        },
+      ]
+    }
+    case "session.step.ended":
+      return [
+        {
+          type: "message.updated",
+          properties: {
+            sessionID: sid,
+            info: {
+              id: data.assistantMessageID,
+              role: "assistant",
+              sessionID: sid,
+              ...(models.get(sid) || {}),
+              finish: data.finish,
+              tokens: data.tokens,
+              cost: data.cost,
+              time: { completed: created },
+            },
+          },
+        },
+      ]
+    default:
+      return []
+  }
+}
+
+export default {
+  id: pluginID,
+  server: BeaconEndpointPlugin,
+  async setup(ctx) {
+    const location = ctx?.location || {}
+    const hooks = await BeaconEndpointPlugin({
+      project: location.project,
+      directory: location.directory,
+      worktree: location.project?.canonical || location.project?.directory || location.directory,
+      client: ctx,
+    })
+    const models = new Map()
+    const registrations = []
+    const register = async (domain, name, callback) => {
+      try {
+        const registration = await domain?.hook?.(name, async (input) => {
+          try {
+            await callback(input)
+          } catch (err) {
+            await debugLog(ctx, "Beacon V2 hook failed", { name, error: String(err) })
+          }
+        })
+        if (registration) registrations.push(registration)
+      } catch (err) {
+        await debugLog(ctx, "Beacon V2 hook registration failed", { name, error: String(err) })
+      }
+    }
+
+    await register(ctx?.session, "prompt", (input) =>
+      hooks["chat.message"](
+        { sessionID: input?.sessionID, messageID: input?.messageID, ...(models.get(input?.sessionID) || {}) },
+        { message: { id: input?.messageID }, parts: v2PromptParts(input?.prompt) },
+      ),
+    )
+    await register(ctx?.tool, "execute.before", (input) =>
+      hooks["tool.execute.before"](
+        { sessionID: input?.sessionID, tool: input?.tool, callID: input?.id },
+        { args: structuredClone(input?.input ?? {}) },
+      ),
+    )
+    await register(ctx?.tool, "execute.after", async (input) => {
+      if (input?.status === "completed") {
+        await hooks["tool.execute.after"](
+          { sessionID: input.sessionID, tool: input.tool, callID: input.id, args: input.input ?? {} },
+          v2ToolResponse(input.result),
+        )
+        return
+      }
+      const now = Date.now()
+      await hooks.event({
+        event: {
+          type: "message.part.updated",
+          properties: {
+            sessionID: input?.sessionID,
+            part: {
+              id: `${input?.messageID}:tool:${input?.id}`,
+              messageID: input?.messageID,
+              sessionID: input?.sessionID,
+              callID: input?.id,
+              type: "tool",
+              tool: input?.tool,
+              state: {
+                status: "error",
+                input: input?.input ?? {},
+                error: input?.error?.message || String(input?.error ?? "tool failed"),
+                time: { start: now, end: now },
+              },
+            },
+          },
+        },
+      })
+    })
+
+    const controller = new AbortController()
+    const consuming = (async () => {
+      if (typeof ctx?.event?.subscribe !== "function") return
+      for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
+        if (controller.signal.aborted) break
+        for (const translated of v2Events(event, models)) {
+          try {
+            await hooks.event({ event: translated })
+          } catch (err) {
+            await debugLog(ctx, "Beacon V2 event failed", { type: translated.type, error: String(err) })
+          }
+        }
+        if (event?.type === "session.deleted") models.delete(event?.data?.sessionID)
+      }
+    })().catch((err) => {
+      if (!controller.signal.aborted) void debugLog(ctx, "Beacon V2 event subscription failed", { error: String(err) })
+    })
+
+    return async () => {
+      controller.abort()
+      await consuming
+      await Promise.all(registrations.map((item) => Promise.resolve(item.dispose?.()).catch(() => undefined)))
+    }
+  },
 }

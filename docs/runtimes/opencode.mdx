@@ -24,6 +24,8 @@ Before enabling OpenCode telemetry, make sure:
 
 Beacon installs an owned OpenCode plugin at `~/.config/opencode/plugins/beacon.ts` for user-level hooks or `./.opencode/plugins/beacon.ts` for project-level hooks. The plugin forwards supported OpenCode hook payloads to Beacon's hook adapter.
 
+The one plugin file loads in both OpenCode 1.x and OpenCode 2.x. Its default export carries the plugin `id`, the 1.x `server` entry, and the 2.x `setup` entry. On 2.x, `setup` registers the session `prompt` hook and the tool `execute.before`/`execute.after` hooks, and it subscribes to the event stream. It translates those into the same payloads the 1.x hooks produce, so events from either version look the same in the runtime log. After upgrading OpenCode from 1.x to 2.x, run `beacon endpoint hooks install --harness opencode` again, because a plugin written by an older Beacon exports only the 1.x factory, and OpenCode 2.x refuses to load it ("Plugin must export a default definition with an id and an effect or setup function").
+
 The integration is plugin-based. OpenCode's native OTLP export is neither configured nor required by Beacon.
 
 For backfill, `beacon endpoint opencode sync` reads OpenCode's local `opencode.db` when present and falls back to the legacy `storage/session`, `storage/message`, `storage/part`, and `storage/project` tree. Those events are marked `harness.collection_method=poll` because Beacon reads committed records after the fact; nothing on that path can hold or deny a tool call.
