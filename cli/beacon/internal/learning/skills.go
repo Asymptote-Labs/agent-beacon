@@ -41,16 +41,20 @@ func CandidateMemoryForSkill(store *Store, candidateID string) (asymptoteobserve
 func RenderSkill(candidate asymptoteobserve.LearningCandidateV1, memory asymptoteobserve.LearningMemoryV1) string {
 	slug := SkillSlug(memory)
 	var b strings.Builder
+	// Provenance lives under metadata, the Agent Skills spec's string map for
+	// client-specific keys, so a generated skill validates and can be published
+	// like any other.
 	b.WriteString("---\n")
 	b.WriteString("name: " + slug + "\n")
-	b.WriteString("description: " + yamlQuote(firstSentence(memory.Title)) + "\n")
-	b.WriteString("beacon_memory_id: " + yamlQuote(memory.ID) + "\n")
-	b.WriteString("beacon_candidate_id: " + yamlQuote(candidate.ID) + "\n")
+	b.WriteString("description: " + yamlQuote(skillDescription(memory)) + "\n")
+	b.WriteString("metadata:\n")
+	b.WriteString("  beacon_memory_id: " + yamlQuote(memory.ID) + "\n")
+	b.WriteString("  beacon_candidate_id: " + yamlQuote(candidate.ID) + "\n")
+	if memory.Kind != "" {
+		b.WriteString("  beacon_memory_kind: " + yamlQuote(memory.Kind) + "\n")
+	}
 	if len(memory.Tags) > 0 {
-		b.WriteString("tags:\n")
-		for _, tag := range memory.Tags {
-			b.WriteString("  - " + yamlQuote(tag) + "\n")
-		}
+		b.WriteString("  beacon_tags: " + yamlQuote(strings.Join(memory.Tags, ", ")) + "\n")
 	}
 	b.WriteString("---\n\n")
 	b.WriteString("# " + memory.Title + "\n\n")
@@ -106,6 +110,7 @@ func SkillSlug(memory asymptoteobserve.LearningMemoryV1) string {
 	}
 	var out strings.Builder
 	lastDash := false
+runes:
 	for _, r := range strings.ToLower(base) {
 		switch {
 		case unicode.IsLetter(r) || unicode.IsDigit(r):
@@ -115,8 +120,10 @@ func SkillSlug(memory asymptoteobserve.LearningMemoryV1) string {
 			out.WriteByte('-')
 			lastDash = true
 		}
+		// Stop at 48 bytes so the name, with the beacon- prefix, stays within the
+		// Agent Skills limit of 64 characters.
 		if out.Len() >= 48 {
-			break
+			break runes
 		}
 	}
 	slug := strings.Trim(out.String(), "-")
@@ -127,6 +134,23 @@ func SkillSlug(memory asymptoteobserve.LearningMemoryV1) string {
 		slug = "beacon-" + slug
 	}
 	return slug
+}
+
+// maxSkillDescription is the Agent Skills limit on the description field.
+const maxSkillDescription = 1024
+
+// skillDescription is what a harness reads to decide when to load the skill, so
+// it names the situation as well as the lesson: the title's first sentence, then
+// the memory's applicability as a "Use ..." clause.
+func skillDescription(memory asymptoteobserve.LearningMemoryV1) string {
+	description := ensureTrailingPeriod(firstSentence(memory.Title))
+	if applies := strings.Join(strings.Fields(memory.Applicability), " "); applies != "" {
+		description += " Use " + ensureTrailingPeriod(applies)
+	}
+	if runes := []rune(description); len(runes) > maxSkillDescription {
+		description = strings.TrimSpace(string(runes[:maxSkillDescription-1])) + "…"
+	}
+	return description
 }
 
 func yamlQuote(value string) string {

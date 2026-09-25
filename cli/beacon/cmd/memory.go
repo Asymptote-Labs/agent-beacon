@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -40,11 +41,31 @@ var memoryOpts struct {
 	reason      string
 	replacement string
 	force       bool
+	title       string
+	body        string
+	bodyFile    string
+	applies     string
+	tags        []string
 }
 
 var memoryCmd = &cobra.Command{
 	Use:   "memory",
 	Short: "Evaluate and review cross-harness agent memory",
+}
+
+var memoryListCmd = &cobra.Command{
+	Use:          "list",
+	Short:        "List approved project memory",
+	SilenceUsage: true,
+	RunE:         runMemoryList,
+}
+
+var memoryShowCmd = &cobra.Command{
+	Use:          "show <memory-id>",
+	Short:        "Show one approved memory item",
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE:         runMemoryShow,
 }
 
 var memoryEvaluationsCmd = &cobra.Command{
@@ -153,6 +174,8 @@ type evaluationRunResult struct {
 
 func init() {
 	rootCmd.AddCommand(memoryCmd)
+	memoryCmd.AddCommand(memoryListCmd)
+	memoryCmd.AddCommand(memoryShowCmd)
 	memoryCmd.AddCommand(memoryEvaluationsCmd)
 	memoryCmd.AddCommand(memoryCandidatesCmd)
 	memoryCmd.AddCommand(memorySkillsCmd)
@@ -167,20 +190,27 @@ func init() {
 	memorySkillsCmd.AddCommand(memorySkillsPreviewCmd)
 	memorySkillsCmd.AddCommand(memorySkillsInstallCmd)
 
-	for _, c := range []*cobra.Command{memoryEvaluationsRunCmd, memoryEvaluationsListCmd, memoryEvaluationsShowCmd, memoryCandidatesListCmd, memoryCandidatesShowCmd, memoryCandidatesApproveCmd, memoryCandidatesRejectCmd, memoryCandidatesSupersedeCmd, memorySkillsPreviewCmd, memorySkillsInstallCmd} {
+	for _, c := range []*cobra.Command{memoryListCmd, memoryShowCmd, memoryEvaluationsRunCmd, memoryEvaluationsListCmd, memoryEvaluationsShowCmd, memoryCandidatesListCmd, memoryCandidatesShowCmd, memoryCandidatesApproveCmd, memoryCandidatesRejectCmd, memoryCandidatesSupersedeCmd, memorySkillsPreviewCmd, memorySkillsInstallCmd} {
 		c.Flags().BoolVar(&memoryOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&memoryOpts.systemMode, "system", false, "Use system endpoint paths")
 		c.Flags().StringVar(&memoryOpts.logPath, "log-path", "", "Runtime JSONL log path")
 		c.Flags().BoolVar(&memoryOpts.jsonOutput, "json", false, "Print machine-readable JSON")
 		c.Flags().StringVar(&memoryOpts.projectPath, "project", "", "Project path for memory scoping (defaults to current directory)")
 	}
-	for _, c := range []*cobra.Command{memoryEvaluationsRunCmd, memoryEvaluationsListCmd, memoryCandidatesListCmd} {
+	for _, c := range []*cobra.Command{memoryListCmd, memoryEvaluationsRunCmd, memoryEvaluationsListCmd, memoryCandidatesListCmd} {
 		c.Flags().IntVar(&memoryOpts.limit, "limit", 25, "Limit returned traces or evaluations")
 		c.Flags().IntVar(&memoryOpts.page, "page", 1, "Page number for collection output")
 		c.Flags().StringVarP(&memoryOpts.query, "query", "q", "", "Free-text query")
 	}
 	memoryCandidatesListCmd.Flags().StringVar(&memoryOpts.state, "state", "", "Filter candidates by state")
 	memoryCandidatesListCmd.Flags().StringVar(&memoryOpts.kind, "kind", "", "Filter candidates by memory kind")
+	memoryListCmd.Flags().StringVar(&memoryOpts.kind, "kind", "", "Filter approved memory by kind")
+	memoryCandidatesApproveCmd.Flags().StringVar(&memoryOpts.title, "title", "", "Title for the approved memory (defaults to the candidate title)")
+	memoryCandidatesApproveCmd.Flags().StringVar(&memoryOpts.body, "body", "", "Lesson text for the approved memory (defaults to the candidate body)")
+	memoryCandidatesApproveCmd.Flags().StringVar(&memoryOpts.bodyFile, "body-file", "", "Read the lesson text from a file, or - for stdin")
+	memoryCandidatesApproveCmd.Flags().StringVar(&memoryOpts.applies, "applicability", "", "When the memory applies, such as \"when package smoke fails on macOS\"")
+	memoryCandidatesApproveCmd.Flags().StringVar(&memoryOpts.kind, "kind", "", "Memory kind: workflow, correction, debugging_pattern, gotcha, or convention")
+	memoryCandidatesApproveCmd.Flags().StringSliceVar(&memoryOpts.tags, "tag", nil, "Tag for the approved memory; repeat or comma-separate (replaces the candidate tags)")
 	for _, c := range []*cobra.Command{memoryCandidatesApproveCmd, memoryCandidatesRejectCmd, memoryCandidatesSupersedeCmd} {
 		c.Flags().StringVar(&memoryOpts.reason, "reason", "", "Review reason recorded with the candidate")
 	}
@@ -196,6 +226,58 @@ func init() {
 	memoryEvaluationsRunCmd.Flags().StringVar(&memoryOpts.jevModel, "jev-model", "", "Jev model name, such as jev-latest or a pinned Jev version (defaults to BEACON_JEV_MODEL, then "+learning.DefaultJevModel+")")
 	memoryEvaluationsRunCmd.Flags().Float64Var(&memoryOpts.jevCost, "jev-cost-per-trace", learning.DefaultCostPerTrace, "Estimated Jev cost per trace in USD")
 	memoryEvaluationsRunCmd.Flags().DurationVar(&memoryOpts.timeout, "timeout", 10*time.Second, "Jev request timeout")
+}
+
+func runMemoryList(cmd *cobra.Command, args []string) error {
+	query, err := memoryQuery()
+	if err != nil {
+		return err
+	}
+	query.Kind = memoryOpts.kind
+	memories, err := memoryStore().ListMemories(query)
+	if err != nil {
+		return err
+	}
+	if memoryOpts.jsonOutput {
+		if memories == nil {
+			memories = []asymptoteobserve.LearningMemoryV1{}
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(memories)
+	}
+	for _, memory := range memories {
+		fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\n", memory.ID, memory.Kind, memory.Title)
+	}
+	return nil
+}
+
+func runMemoryShow(cmd *cobra.Command, args []string) error {
+	memory, ok, err := memoryStore().GetMemory(args[0])
+	if err != nil {
+		return err
+	}
+	if !ok || memory.SupersededBy != "" {
+		return fmt.Errorf("memory not found: %s", args[0])
+	}
+	if memoryOpts.jsonOutput {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(memory)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\n", memory.ID, memory.Kind)
+	fmt.Fprintln(cmd.OutOrStdout(), memory.Title)
+	if memory.Applicability != "" {
+		fmt.Fprintln(cmd.OutOrStdout(), "Applies "+memory.Applicability)
+	}
+	fmt.Fprintln(cmd.OutOrStdout())
+	fmt.Fprintln(cmd.OutOrStdout(), memory.Body)
+	for _, evidence := range memory.Evidence {
+		fmt.Fprintf(cmd.OutOrStdout(), "\nTrace %s", evidence.TraceID)
+		if evidence.Summary != "" {
+			fmt.Fprintf(cmd.OutOrStdout(), ": %s", evidence.Summary)
+		}
+	}
+	if len(memory.Evidence) > 0 {
+		fmt.Fprintln(cmd.OutOrStdout())
+	}
+	return nil
 }
 
 func runMemoryEvaluationsRun(cmd *cobra.Command, args []string) error {
@@ -340,7 +422,11 @@ func runMemoryCandidatesShow(cmd *cobra.Command, args []string) error {
 }
 
 func runMemoryCandidatesApprove(cmd *cobra.Command, args []string) error {
-	candidate, memory, err := learning.ApproveCandidate(memoryStore(), args[0], memoryOpts.reason)
+	edits, err := memoryApprovalEdits(cmd)
+	if err != nil {
+		return err
+	}
+	candidate, memory, err := learning.ApproveCandidateWithEdits(memoryStore(), args[0], memoryOpts.reason, edits)
 	if err != nil {
 		return err
 	}
@@ -349,6 +435,36 @@ func runMemoryCandidatesApprove(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Approved %s as memory %s\n", candidate.ID, memory.ID)
 	return nil
+}
+
+// memoryApprovalEdits collects the reviewer-authored fields for an approval.
+// --body and --body-file are exclusive so it is never ambiguous which text was
+// approved.
+func memoryApprovalEdits(cmd *cobra.Command) (learning.ApprovalEdits, error) {
+	body := memoryOpts.body
+	if memoryOpts.bodyFile != "" {
+		if strings.TrimSpace(body) != "" {
+			return learning.ApprovalEdits{}, fmt.Errorf("use --body or --body-file, not both")
+		}
+		var raw []byte
+		var err error
+		if memoryOpts.bodyFile == "-" {
+			raw, err = io.ReadAll(cmd.InOrStdin())
+		} else {
+			raw, err = os.ReadFile(memoryOpts.bodyFile)
+		}
+		if err != nil {
+			return learning.ApprovalEdits{}, fmt.Errorf("read --body-file: %w", err)
+		}
+		body = string(raw)
+	}
+	return learning.ApprovalEdits{
+		Title:         memoryOpts.title,
+		Body:          body,
+		Applicability: memoryOpts.applies,
+		Kind:          memoryOpts.kind,
+		Tags:          memoryOpts.tags,
+	}, nil
 }
 
 func runMemoryCandidatesReject(cmd *cobra.Command, args []string) error {

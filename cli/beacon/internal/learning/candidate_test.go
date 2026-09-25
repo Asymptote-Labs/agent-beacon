@@ -101,3 +101,48 @@ func testLearningEvaluationWithID(evalID, traceID string) asymptoteobserve.Learn
 		},
 	}
 }
+
+// The evaluator scores traces but writes no lesson, so approval must carry the
+// reviewer's text into the memory while leaving the candidate as it was scored.
+func TestApproveCandidateWithEditsUsesReviewerText(t *testing.T) {
+	store := Open(filepath.Join(t.TempDir(), "memory.db"))
+	candidate, ok := CandidateFromEvaluation(testLearningEvaluation())
+	if !ok {
+		t.Fatal("candidate not created")
+	}
+	if err := store.PutCandidate(candidate); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ApproveCandidateWithEdits(store, candidate.ID, "", ApprovalEdits{Kind: "lesson"}); err == nil {
+		t.Fatal("an unknown kind should be refused")
+	}
+	approved, memory, err := ApproveCandidateWithEdits(store, candidate.ID, "reviewed", ApprovalEdits{
+		Title:         "Run package smoke after build-pkg",
+		Body:          "  Build the package before running smoke-endpoint.sh.\n",
+		Applicability: "when editing packaging/macos",
+		Kind:          asymptoteobserve.LearningMemoryKindWorkflow,
+		Tags:          []string{"packaging", " ", "packaging", "macos"},
+	})
+	if err != nil {
+		t.Fatalf("ApproveCandidateWithEdits: %v", err)
+	}
+	if memory.Title != "Run package smoke after build-pkg" || memory.Body != "Build the package before running smoke-endpoint.sh." {
+		t.Fatalf("memory text = %q / %q", memory.Title, memory.Body)
+	}
+	if memory.Applicability != "when editing packaging/macos" || memory.Kind != asymptoteobserve.LearningMemoryKindWorkflow {
+		t.Fatalf("memory = %#v", memory)
+	}
+	if len(memory.Tags) != 2 || memory.Tags[0] != "packaging" || memory.Tags[1] != "macos" {
+		t.Fatalf("tags = %#v", memory.Tags)
+	}
+	if len(memory.Evidence) != 1 || memory.Evidence[0].TraceID != candidate.Evidence[0].TraceID {
+		t.Fatalf("evidence = %#v", memory.Evidence)
+	}
+	stored, ok, err := store.GetCandidate(candidate.ID)
+	if err != nil || !ok {
+		t.Fatalf("GetCandidate: %v %v", ok, err)
+	}
+	if stored.Title != candidate.Title || stored.Body != candidate.Body || stored.MemoryID != approved.MemoryID {
+		t.Fatalf("candidate should keep the evaluator's text: %#v", stored)
+	}
+}

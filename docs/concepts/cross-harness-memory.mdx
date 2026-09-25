@@ -83,9 +83,40 @@ Beacon exposes approved memory in two local ways:
 - `beacon memory skills preview|install` renders an approved candidate as an Agent
   Skill with Beacon provenance in the frontmatter.
 
+`beacon memory list|show` reads the same approved records from the CLI.
+
 This is what makes the memory portable across harnesses: one agent's reviewed trace
 can become project knowledge that another MCP-capable or skill-capable agent can
 retrieve later.
+
+## Beacon memory skills
+
+The workflow itself ships as installable Agent Skills, so an agent in any harness can
+drive it:
+
+- `beacon-memory-recall` retrieves approved memory before a task.
+- `beacon-memory-distill` runs the loop above. It dry-runs first, asks before the
+  evaluation call, drafts each lesson from the source trace, and approves only what the
+  user confirms.
+- `beacon-memory-promote` installs approved memory as a project skill.
+
+Install them with the harness's plugin marketplace, or with the skills CLI for any
+skills-capable agent:
+
+```bash
+# Claude Code
+/plugin marketplace add asymptote-labs/agent-beacon
+/plugin install beacon@beacon
+
+# Codex, GitHub Copilot CLI, and Factory Droid read the same marketplace
+codex plugin marketplace add asymptote-labs/agent-beacon
+
+# Cursor, OpenCode, Amp, goose, Cline, and others
+npx skills add asymptote-labs/agent-beacon
+```
+
+The skills live in `agent-skills/` in the Beacon repository. See its README for the full
+install and publishing matrix.
 
 ## Privacy boundary
 

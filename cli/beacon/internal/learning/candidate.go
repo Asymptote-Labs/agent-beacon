@@ -97,7 +97,42 @@ func CandidateFromEvaluation(eval asymptoteobserve.LearningEvaluationV1) (asympt
 	return candidate, true
 }
 
+// ApprovalEdits carries reviewer-authored text that replaces the candidate's
+// fields in the approved memory. The evaluator scores traces but does not write
+// lessons, so a reviewer (or an agent the reviewer is working with) supplies the
+// title, body, and applicability after reading the source trace. Empty fields
+// keep the candidate's value. The candidate record itself is left as the
+// evaluator produced it, so the review history shows what was changed.
+type ApprovalEdits struct {
+	Title         string
+	Body          string
+	Applicability string
+	Kind          string
+	Tags          []string
+}
+
+// ValidMemoryKind reports whether kind is one of the memory kinds Beacon defines.
+func ValidMemoryKind(kind string) bool {
+	switch kind {
+	case asymptoteobserve.LearningMemoryKindWorkflow,
+		asymptoteobserve.LearningMemoryKindCorrection,
+		asymptoteobserve.LearningMemoryKindDebuggingPattern,
+		asymptoteobserve.LearningMemoryKindGotcha,
+		asymptoteobserve.LearningMemoryKindConvention:
+		return true
+	}
+	return false
+}
+
 func ApproveCandidate(store *Store, id, reason string) (asymptoteobserve.LearningCandidateV1, asymptoteobserve.LearningMemoryV1, error) {
+	return ApproveCandidateWithEdits(store, id, reason, ApprovalEdits{})
+}
+
+func ApproveCandidateWithEdits(store *Store, id, reason string, edits ApprovalEdits) (asymptoteobserve.LearningCandidateV1, asymptoteobserve.LearningMemoryV1, error) {
+	kind := strings.TrimSpace(edits.Kind)
+	if kind != "" && !ValidMemoryKind(kind) {
+		return asymptoteobserve.LearningCandidateV1{}, asymptoteobserve.LearningMemoryV1{}, fmt.Errorf("unknown memory kind %q (want workflow, correction, debugging_pattern, gotcha, or convention)", kind)
+	}
 	candidate, ok, err := store.GetCandidate(id)
 	if err != nil {
 		return asymptoteobserve.LearningCandidateV1{}, asymptoteobserve.LearningMemoryV1{}, err
@@ -112,11 +147,11 @@ func ApproveCandidate(store *Store, id, reason string) (asymptoteobserve.Learnin
 	memory := asymptoteobserve.LearningMemoryV1{
 		SchemaVersion: asymptoteobserve.LearningSchemaVersion,
 		CandidateID:   candidate.ID,
-		Kind:          candidate.Kind,
-		Title:         candidate.Title,
-		Body:          candidate.Body,
-		Applicability: candidate.Applicability,
-		Tags:          append([]string(nil), candidate.Tags...),
+		Kind:          firstNonEmpty(kind, candidate.Kind),
+		Title:         firstNonEmpty(edits.Title, candidate.Title),
+		Body:          firstNonEmpty(edits.Body, candidate.Body),
+		Applicability: firstNonEmpty(edits.Applicability, candidate.Applicability),
+		Tags:          approvedTags(edits.Tags, candidate.Tags),
 		Project:       candidate.Project,
 		Evidence:      append([]asymptoteobserve.LearningEvidenceV1(nil), candidate.Evidence...),
 		CreatedAt:     now,
@@ -134,6 +169,25 @@ func ApproveCandidate(store *Store, id, reason string) (asymptoteobserve.Learnin
 		return asymptoteobserve.LearningCandidateV1{}, asymptoteobserve.LearningMemoryV1{}, err
 	}
 	return candidate, memory, nil
+}
+
+// approvedTags uses the reviewer's tags when any were given, trimmed and without
+// empties or duplicates, and otherwise the candidate's.
+func approvedTags(edited, original []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, tag := range edited {
+		tag = strings.TrimSpace(tag)
+		if tag == "" || seen[tag] {
+			continue
+		}
+		seen[tag] = true
+		out = append(out, tag)
+	}
+	if len(out) > 0 {
+		return out
+	}
+	return append([]string(nil), original...)
 }
 
 func RejectCandidate(store *Store, id, reason string) (asymptoteobserve.LearningCandidateV1, error) {

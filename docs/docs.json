@@ -74,6 +74,7 @@
                 ]
               },
               "concepts/cross-harness-memory",
+              "concepts/beacon-skills",
               {
                 "group": "Unified Telemetry Schema",
                 "root": "telemetry-schema/event-schema",

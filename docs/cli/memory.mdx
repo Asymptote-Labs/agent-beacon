@@ -10,6 +10,7 @@ approved project memory.
 
 The commands are grouped by resource:
 
+- `beacon memory list|show` for approved memory
 - `beacon memory evaluations run|list|show`
 - `beacon memory candidates list|show|approve|reject|supersede`
 - `beacon memory skills preview|install`
@@ -106,7 +107,7 @@ beacon memory candidates list
 Filter candidate review queues:
 
 ```bash
-beacon memory candidates list --state pending --kind workflow
+beacon memory candidates list --state candidate --kind workflow
 beacon memory candidates list -q "package smoke"
 ```
 
@@ -121,11 +122,40 @@ body therefore says that no lesson text was extracted; check the source trace
 before you approve it. A compatible internal evaluator using the legacy
 `questions` or `results` response shape can provide a stored `reason`.
 
+Candidate states are `candidate` (awaiting review), `approved`, `rejected`, and
+`superseded`.
+
 Approve a candidate into project memory:
 
 ```bash
 beacon memory candidates approve <candidate-id> --reason "reviewed"
 ```
+
+Because the evaluator scores traces without writing a lesson, approve with the lesson
+you wrote after reading the source trace. The reviewed fields go into the approved
+memory; the candidate keeps the evaluator's text so the review history shows what
+changed:
+
+```bash
+beacon memory candidates approve <candidate-id> \
+  --title "Build the embedded hooks binary before running cli/beacon tests" \
+  --kind workflow \
+  --applicability "when running go test in cli/beacon on a fresh checkout" \
+  --tag build --tag testing \
+  --reason "reviewed against trace events 14-19" \
+  --body-file lesson.md
+```
+
+| Flag | Description |
+|------|-------------|
+| `--title <text>` | Title for the approved memory |
+| `--body <text>` | Lesson text |
+| `--body-file <path>` | Read the lesson text from a file, or `-` for stdin. Cannot be combined with `--body` |
+| `--applicability <text>` | When the memory applies |
+| `--kind <kind>` | `workflow`, `correction`, `debugging_pattern`, `gotcha`, or `convention` |
+| `--tag <tag>` | Repeat or comma-separate. Replaces the candidate's tags |
+
+Each flag left out keeps the candidate's value.
 
 Reject or supersede candidates:
 
@@ -137,6 +167,20 @@ beacon memory candidates supersede <candidate-id> --replacement <memory-id>
 Approving creates an approved memory record for the resolved project. Rejecting and
 superseding preserve the review transition with the optional `--reason` so later
 reviews can explain why a candidate was not installed.
+
+## Read approved memory
+
+List and read approved memory for the resolved project. These are the same records the
+MCP memory tools return, for harnesses and scripts without MCP:
+
+```bash
+beacon memory list
+beacon memory list -q "package smoke" --kind workflow --json
+beacon memory show <memory-id>
+```
+
+`-q` matches every term against the memory ID, title, body, and kind. Superseded memory
+is not listed.
 
 ## Install Agent Skills
 
@@ -160,8 +204,12 @@ Beacon writes:
 
 Existing files are not overwritten unless you pass `--force`.
 
-Skill files include Beacon provenance so future reviewers can trace the generated
-instruction back to the approved memory and source trace. Installation is a write
+Skill files include Beacon provenance under the frontmatter `metadata` map
+(`beacon_memory_id`, `beacon_candidate_id`, `beacon_memory_kind`, and `beacon_tags`), so
+future reviewers can trace the generated instruction back to the approved memory and
+source trace, and the file still validates against the Agent Skills specification. The
+skill description combines the memory's title and applicability, because harnesses use
+it to decide when to load the skill. Installation is a write
 to the current project or the path passed with `--project`; it is never triggered
 by endpoint hooks or MCP reads.
 

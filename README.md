@@ -235,37 +235,47 @@ Beacon supports local agents, browser agents, cloud agents, CI workflows, and ag
 
 ### Local Agent Coverage
 
-| Runtime | Collection | Session | Prompt | Tool | Command | File | Approval | MCP | Tokens |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Antigravity CLI | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | – |
-| Claude Code | OTLP + hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Claude Cowork | OTLP | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Cline | Plugin + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
-| Codex CLI | OTLP + hooks + poll | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ |
-| Codex Desktop | OTLP | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ |
-| Cursor | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – |
-| DeepSeek Harness | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
-| Devin CLI | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – |
-| Devin Desktop | Hooks | – | ✅ | ✅ | ✅ | ✅ | – | ✅ | – |
-| Factory Droid | OTLP + hooks + poll | ✅ | ✅ | ✅ | – | ✅ | ✅ | – | – |
-| fx (Vercel Labs) | Poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
-| Gemini CLI | OTLP | – | ✅ | ✅ | – | ✅ | ✅ | ✅ | – |
-| GitHub Copilot CLI | OTLP + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ |
-| goose | Adapter only; manual hooks/OTLP | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
-| Grok Build | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – |
-| Hermes Agent | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – |
-| Kimi Code | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – |
-| Kiro | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | – |
-| Muse Code | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – |
-| Oh My Pi | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| OpenClaw Gateway | Plugin + OTLP + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ~ |
-| OpenCode | Plugin + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| OpenHands | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | – |
-| Pi | Extension + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ |
-| Prime Agent | Extension + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ |
-| Qwen Code | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – |
-| Senpi | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ |
-| VS Code | OTLP + hooks | ✅ | ✅ | ✅ | ~ | ~ | – | ~ | – |
+| Runtime | Collection | Session | Prompt | Tool | Command | File | Approval | MCP | Tokens | Skills |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Antigravity CLI | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | – | ✅ skills CLI |
+| Claude Code | OTLP + hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ Plugin |
+| Claude Cowork | OTLP | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ Plugin |
+| Cline | Plugin + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ | ✅ `.cline/skills` |
+| Codex CLI | OTLP + hooks + poll | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ | ✅ Plugin |
+| Codex Desktop | OTLP | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ | ✅ Plugin |
+| Cursor | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ Plugin |
+| DeepSeek Harness | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ | ✅ `.agents/skills` |
+| Devin CLI | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ Plugin |
+| Devin Desktop | Hooks | – | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ via Devin CLI |
+| Factory Droid | OTLP + hooks + poll | ✅ | ✅ | ✅ | – | ✅ | ✅ | – | – | ✅ Plugin |
+| fx (Vercel Labs) | Poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ | ✅ `/skills install` |
+| Gemini CLI | OTLP | – | ✅ | ✅ | – | ✅ | ✅ | ✅ | – | ✅ `gemini skills install` |
+| GitHub Copilot CLI | OTLP + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ Plugin |
+| goose | Adapter only; manual hooks/OTLP | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ | ✅ skills CLI |
+| Grok Build | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ Plugin |
+| Hermes Agent | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ `hermes skills install` |
+| Kimi Code | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ Plugin |
+| Kiro | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ Power |
+| Muse Code | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ `.agents/skills` |
+| Oh My Pi | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ Plugin |
+| OpenClaw Gateway | Plugin + OTLP + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ~ | ✅ Plugin |
+| OpenCode | Plugin + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ skills CLI |
+| OpenHands | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ skills CLI |
+| Pi | Extension + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ | ✅ Package |
+| Prime Agent | Extension + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ | ✅ Package |
+| Qwen Code | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ Plugin |
+| Senpi | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ | ✅ `.agents/skills` |
+| VS Code | OTLP + hooks | ✅ | ✅ | ✅ | ~ | ~ | – | ~ | – | ✅ Plugin |
+
+**Skills** shows how to install [Beacon Skills](https://docs.beacon.sh/concepts/beacon-skills), the Agent Skills that recall and distill project memory from these traces. Every runtime above loads Agent Skills:
+
+- **Plugin**: install the `beacon` plugin from this repository's marketplace, for example `/plugin marketplace add asymptote-labs/agent-beacon` in Claude Code.
+- **Package** (Pi, Prime Agent): `pi install git:github.com/asymptote-labs/agent-beacon`.
+- **Power** (Kiro): import `https://github.com/asymptote-labs/agent-beacon/tree/main/agent-skills` from the Powers panel.
+- **skills CLI**: `npx skills add asymptote-labs/agent-beacon`, optionally with `-a <agent>`.
+- **A directory**: copy `agent-skills/skills/*` into that project directory.
+
+The [Beacon Skills page](https://docs.beacon.sh/concepts/beacon-skills#install) has the exact command for each runtime.
 
 ### Browser Chat
 

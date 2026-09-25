@@ -1,6 +1,8 @@
 ---
 name: self-verify-beacon-in-sandbox
 description: Verify a Beacon change end to end by running a real Claude Code session inside a disposable Linux cloud sandbox and checking that Beacon captured what the agent actually did. Use when asked to verify, validate, test, or prove that a Beacon change works for real rather than just compiling; when asked whether telemetry, event capture, commands, file paths, prompts, tokens, or approvals are still recorded correctly; when investigating a suspected capture gap; or when preparing a Beacon pull request that touches the CLI, hooks, or the collector exporter.
+metadata:
+  internal: true
 ---
 
 # Verify Beacon in a sandbox

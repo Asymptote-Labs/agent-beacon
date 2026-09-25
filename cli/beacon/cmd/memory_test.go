@@ -21,6 +21,8 @@ import (
 
 func TestMemoryEvaluationCommandsRegistered(t *testing.T) {
 	for _, path := range [][]string{
+		{"memory", "list"},
+		{"memory", "show"},
 		{"memory", "evaluations", "run"},
 		{"memory", "evaluations", "list"},
 		{"memory", "evaluations", "show"},
@@ -226,6 +228,84 @@ func TestMemoryCandidatesApproveCommand(t *testing.T) {
 	}
 }
 
+func TestMemoryApproveWithEditsThenListAndShow(t *testing.T) {
+	logPath, project := writeMemoryCommandFixture(t)
+	resetMemoryOpts(t)
+	memoryOpts.userMode = true
+	memoryOpts.logPath = logPath
+	memoryOpts.projectPath = project
+	candidate := testCommandCandidate(t)
+	resolved, err := learning.ResolveProject(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate.Project = resolved
+	if err := memoryStore().PutCandidate(candidate); err != nil {
+		t.Fatal(err)
+	}
+	bodyFile := filepath.Join(t.TempDir(), "lesson.md")
+	if err := os.WriteFile(bodyFile, []byte("Rerun package smoke once when the failure is a launchctl timeout.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	memoryOpts.title = "Package smoke launchctl timeouts are transient"
+	memoryOpts.bodyFile = bodyFile
+	memoryOpts.kind = asymptoteobserve.LearningMemoryKindGotcha
+	memoryOpts.tags = []string{"packaging"}
+	memoryOpts.jsonOutput = true
+	var approveOut bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&approveOut)
+	if err := runMemoryCandidatesApprove(cmd, []string{candidate.ID}); err != nil {
+		t.Fatalf("runMemoryCandidatesApprove returned error: %v", err)
+	}
+	var approved struct {
+		Memory asymptoteobserve.LearningMemoryV1 `json:"memory"`
+	}
+	if err := json.Unmarshal(approveOut.Bytes(), &approved); err != nil {
+		t.Fatal(err)
+	}
+	if approved.Memory.Body != "Rerun package smoke once when the failure is a launchctl timeout." || approved.Memory.Kind != asymptoteobserve.LearningMemoryKindGotcha {
+		t.Fatalf("approved memory = %#v", approved.Memory)
+	}
+
+	memoryOpts.kind = ""
+	memoryOpts.query = "launchctl"
+	var listOut bytes.Buffer
+	cmd.SetOut(&listOut)
+	if err := runMemoryList(cmd, nil); err != nil {
+		t.Fatalf("runMemoryList returned error: %v", err)
+	}
+	var listed []asymptoteobserve.LearningMemoryV1
+	if err := json.Unmarshal(listOut.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].ID != approved.Memory.ID {
+		t.Fatalf("listed = %#v", listed)
+	}
+
+	memoryOpts.jsonOutput = false
+	var showOut bytes.Buffer
+	cmd.SetOut(&showOut)
+	if err := runMemoryShow(cmd, []string{approved.Memory.ID}); err != nil {
+		t.Fatalf("runMemoryShow returned error: %v", err)
+	}
+	if !strings.Contains(showOut.String(), "launchctl timeout") || !strings.Contains(showOut.String(), "Trace trace-command") {
+		t.Fatalf("show output = %s", showOut.String())
+	}
+	if err := runMemoryShow(cmd, []string{"memory_missing"}); err == nil {
+		t.Fatal("showing an unknown memory should fail")
+	}
+}
+
+func TestMemoryApproveRefusesBodyAndBodyFile(t *testing.T) {
+	resetMemoryOpts(t)
+	memoryOpts.body = "inline"
+	memoryOpts.bodyFile = "-"
+	if _, err := memoryApprovalEdits(&cobra.Command{}); err == nil {
+		t.Fatal("--body with --body-file should be refused")
+	}
+}
+
 func TestMemorySkillsPreviewAndInstallCommands(t *testing.T) {
 	logPath, project := writeMemoryCommandFixture(t)
 	resetMemoryOpts(t)
@@ -329,6 +409,11 @@ func resetMemoryOpts(t *testing.T) {
 		reason      string
 		replacement string
 		force       bool
+		title       string
+		body        string
+		bodyFile    string
+		applies     string
+		tags        []string
 	}{userMode: true, limit: 25, page: 1, jevCost: learning.DefaultCostPerTrace}
 	t.Cleanup(func() { memoryOpts = previous })
 }

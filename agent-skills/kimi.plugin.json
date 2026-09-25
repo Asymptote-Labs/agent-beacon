@@ -1,0 +1,15 @@
+{
+  "name": "beacon",
+  "version": "0.1.0",
+  "description": "Cross-harness memory from Beacon traces: recall reviewed project lessons, distill agent sessions into approved memory, and promote memory to Agent Skills.",
+  "skills": "./skills/",
+  "mcpServers": {
+    "beacon": {
+      "command": "beacon",
+      "args": ["mcp", "serve"]
+    }
+  },
+  "interface": {
+    "displayName": "Beacon memory"
+  }
+}
