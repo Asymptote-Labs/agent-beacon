@@ -82,7 +82,7 @@ checksum="$(awk -v name="$package" '$2 == name { print $1 }' "${tmp}/checksums.t
 chmod 0711 "$tmp"
 chmod 0644 "${tmp}/${package}"
 
-"${sudo[@]}" "${installer[@]}" "${tmp}/${package}"
+${sudo[@]+"${sudo[@]}"} "${installer[@]}" "${tmp}/${package}"
 
 echo
 beacon version
