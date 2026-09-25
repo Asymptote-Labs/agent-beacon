@@ -7,6 +7,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/clinesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/copilotsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/cursorsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/factorysession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/opencodesession"
@@ -59,6 +60,7 @@ const (
 	HarnessPi       = pisession.Harness
 	HarnessPrime    = primesession.Harness
 	HarnessFactory  = factorysession.Harness
+	HarnessCopilot  = copilotsession.Harness
 	HarnessCursor   = cursorsession.Harness
 
 	// Runtimes Beacon starts but whose sessions it reads only from the runtime log.
@@ -180,6 +182,24 @@ var runtimes = []Runtime{
 			// The prompt is droid's positional argument. It starts with a word that is neither an
 			// option nor one of droid's subcommands, so it is read as the prompt.
 			NewSession: func(prompt string) []string { return []string{prompt} },
+		},
+	},
+	{
+		Harness:   HarnessCopilot,
+		Label:     "GitHub Copilot CLI",
+		Aliases:   []string{"copilot", "copilot-cli"},
+		NewSource: func(dir string) Source { return &copilotSource{dir: dir} },
+		Command: &runtimeCommand{
+			Executable: "copilot",
+			// --resume takes an optional value, so the id is bound to it with = rather than left to
+			// be read as the next argument.
+			Resume: func(s Session) ([]string, bool) { return []string{"--resume=" + s.ID}, true },
+			// -i starts the interactive TUI and sends the prompt as its first message.
+			NewSession: func(prompt string) []string { return []string{"-i", prompt} },
+			// Copilot asks before each tool call unless COPILOT_ALLOW_ALL=true, which also trusts the
+			// directory, or COPILOT_PLAN_THEN_AUTOPILOT, which starts in plan mode and carries the plan
+			// out without waiting. A session Beacon starts never inherits either.
+			Env: map[string]string{"COPILOT_ALLOW_ALL": "", "COPILOT_PLAN_THEN_AUTOPILOT": ""},
 		},
 	},
 	{
