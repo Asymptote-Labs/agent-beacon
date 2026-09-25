@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/clinesession"
@@ -142,6 +143,10 @@ func PlanResume(session Session, opts PlanOptions) (Plan, error) {
 	}
 	if opts.BriefPath == "" {
 		return Plan{}, errors.New("a new session needs a brief path")
+	}
+	// The runtime reads the brief from its own directory, so a relative path would name another file.
+	if !filepath.IsAbs(opts.BriefPath) {
+		return Plan{}, fmt.Errorf("brief path %s is not absolute", opts.BriefPath)
 	}
 	plan.Mode, plan.Reason = ModeNewSession, reason
 	plan.BriefPath = opts.BriefPath

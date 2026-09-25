@@ -71,12 +71,24 @@ func runHandoffResume(cmd *cobra.Command, args []string) error {
 	}
 	session := subject.session
 	now := handoffNow()
+	// The runtime starts in the session's directory, not Beacon's, so every path handed to it is
+	// absolute.
+	briefDir, err := filepath.Abs(handoffBriefDir())
+	if err != nil {
+		return fmt.Errorf("resolve brief directory: %w", err)
+	}
+	cwd := strings.TrimSpace(opts.cwd)
+	if cwd != "" {
+		if cwd, err = filepath.Abs(cwd); err != nil {
+			return fmt.Errorf("resolve --cwd: %w", err)
+		}
+	}
 	plan, err := handoff.PlanResume(session, handoff.PlanOptions{
 		Target:         target,
 		ForceNew:       opts.newOnly,
-		Dir:            opts.cwd,
+		Dir:            cwd,
 		FromRuntimeLog: subject.fromLog,
-		BriefPath:      filepath.Join(handoffBriefDir(), handoff.BriefFileName(session, now)),
+		BriefPath:      filepath.Join(briefDir, handoff.BriefFileName(session, now)),
 		LookPath:       handoffLookPath,
 	})
 	if err != nil {

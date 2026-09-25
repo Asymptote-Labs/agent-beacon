@@ -329,3 +329,31 @@ func readRecord(t *testing.T, path string) map[string][]string {
 	}
 	return out
 }
+
+// The runtime starts in the session's directory, so a relative --output-dir or --cwd must reach it
+// as the absolute path Beacon meant.
+func TestHandoffResumeMakesRelativePathsAbsolute(t *testing.T) {
+	f := newResumeFixture(t)
+	work := t.TempDir()
+	t.Chdir(work)
+	if err := os.Mkdir("start-here", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	handoffResumeOpts = handoffResumeOptions{}
+	if _, _, err := runHandoff(t, "resume", "claude-1", "--new", "--output-dir", "briefs", "--cwd", "start-here", "--yes"); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	plan := f.launched[0]
+	if !filepath.IsAbs(plan.BriefPath) || !filepath.IsAbs(plan.Dir) {
+		t.Fatalf("brief %q and dir %q must be absolute", plan.BriefPath, plan.Dir)
+	}
+	if !strings.Contains(plan.Args[0], plan.BriefPath) {
+		t.Fatalf("the prompt must carry the absolute brief path: %q", plan.Args[0])
+	}
+	if _, err := os.Stat(plan.BriefPath); err != nil {
+		t.Fatalf("the brief is not where the prompt says: %v", err)
+	}
+	if filepath.Base(plan.Dir) != "start-here" || filepath.Base(filepath.Dir(plan.BriefPath)) != "briefs" {
+		t.Fatalf("dir %q, brief %q", plan.Dir, plan.BriefPath)
+	}
+}

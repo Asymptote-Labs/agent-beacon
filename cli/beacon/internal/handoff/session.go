@@ -59,8 +59,18 @@ func (e *SourceError) Unwrap() error { return e.Err }
 // List returns the sessions every source has stored, newest first. A source that fails is reported
 // in the returned error while the sessions from the others are still returned.
 func List(sources []Source, filter Filter) ([]Session, error) {
+	sessions, unreadable := listSessions(sources, filter)
+	errs := make([]error, 0, len(unreadable))
+	for _, err := range unreadable {
+		errs = append(errs, err)
+	}
+	return sessions, errors.Join(errs...)
+}
+
+func listSessions(sources []Source, filter Filter) ([]Session, []*SourceError) {
 	var sessions []Session
-	var errs []error
+	var errs []*SourceError
+	within := directoryMatcher(filter.Directory)
 	for _, source := range sources {
 		if filter.Harness != "" && source.Harness() != filter.Harness {
 			continue
@@ -76,7 +86,7 @@ func List(sources []Source, filter Filter) ([]Session, error) {
 			if session.Subagent && !filter.IncludeSubagents {
 				continue
 			}
-			if filter.Directory != "" && !withinDirectory(session.Directory, filter.Directory) {
+			if filter.Directory != "" && !within(session.Directory) {
 				continue
 			}
 			sessions = append(sessions, session)
@@ -94,7 +104,7 @@ func List(sources []Source, filter Filter) ([]Session, error) {
 	if filter.Limit > 0 && len(sessions) > filter.Limit {
 		sessions = sessions[:filter.Limit]
 	}
-	return sessions, errors.Join(errs...)
+	return sessions, errs
 }
 
 // MinPrefixLength is the shortest session id prefix Find accepts, so a stray short argument cannot
@@ -103,6 +113,37 @@ const MinPrefixLength = 6
 
 // ErrNotFound reports that no stored session has the requested id.
 var ErrNotFound = errors.New("session not found")
+
+// NotFoundError is the ErrNotFound Find returns. Unreadable names the stores that could not be
+// searched, so a caller does not mistake "this store could not be read" for "this store does not
+// have the session".
+type NotFoundError struct {
+	ID         string
+	Unreadable []*SourceError
+}
+
+func (e *NotFoundError) Error() string {
+	if len(e.Unreadable) == 0 {
+		return fmt.Sprintf("%v: %s", ErrNotFound, e.ID)
+	}
+	parts := make([]string, 0, len(e.Unreadable))
+	for _, err := range e.Unreadable {
+		parts = append(parts, err.Error())
+	}
+	return fmt.Sprintf("%v: %s (some session stores could not be read: %s)", ErrNotFound, e.ID, strings.Join(parts, "; "))
+}
+
+func (e *NotFoundError) Is(target error) bool { return target == ErrNotFound }
+
+// UnreadableStore returns the error for harness's store when it could not be read.
+func (e *NotFoundError) UnreadableStore(harness string) *SourceError {
+	for _, err := range e.Unreadable {
+		if err.Harness == harness {
+			return err
+		}
+	}
+	return nil
+}
 
 // AmbiguousError reports an id or prefix that names more than one stored session.
 type AmbiguousError struct {
@@ -125,7 +166,7 @@ func Find(sources []Source, harness, id string) (Session, error) {
 	if id == "" {
 		return Session{}, errors.New("session id is required")
 	}
-	sessions, err := List(sources, Filter{Harness: harness, IncludeSubagents: true})
+	sessions, unreadable := listSessions(sources, Filter{Harness: harness, IncludeSubagents: true})
 	var exact, prefixed []Session
 	for _, session := range sessions {
 		switch {
@@ -143,16 +184,58 @@ func Find(sources []Source, harness, id string) (Session, error) {
 	case 1:
 		return matches[0], nil
 	case 0:
-		if err != nil {
-			return Session{}, fmt.Errorf("%w: %s (some session stores could not be read: %v)", ErrNotFound, id, err)
-		}
-		return Session{}, fmt.Errorf("%w: %s", ErrNotFound, id)
+		return Session{}, &NotFoundError{ID: id, Unreadable: unreadable}
 	default:
 		return Session{}, &AmbiguousError{ID: id, Candidates: matches}
 	}
 }
 
-// withinDirectory reports whether a session recorded in dir ran in root or below it.
+// directoryMatcher returns a test for whether a session directory is root or below it. A runtime
+// records the directory it resolved, and a shell reports the one the user typed: on macOS /var and
+// /tmp are symlinks into /private, Windows has short 8.3 names, and home directories are often
+// symlinked. When the paths do not match as written, both are compared with symlinks resolved.
+func directoryMatcher(root string) func(dir string) bool {
+	if root == "" {
+		return func(string) bool { return true }
+	}
+	resolvedRoot := resolveExisting(root)
+	return func(dir string) bool {
+		if dir == "" {
+			return false
+		}
+		if withinDirectory(dir, root) {
+			return true
+		}
+		if resolvedRoot == "" {
+			return false
+		}
+		if withinDirectory(dir, resolvedRoot) {
+			return true
+		}
+		resolved := resolveExisting(dir)
+		return resolved != "" && withinDirectory(resolved, resolvedRoot)
+	}
+}
+
+// resolveExisting resolves the symlinks in path. A path that no longer exists (a deleted project
+// directory) resolves through its nearest existing ancestor, with the rest rejoined as written.
+func resolveExisting(path string) string {
+	path = filepath.Clean(path)
+	var rest []string
+	for {
+		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			return filepath.Join(append([]string{resolved}, rest...)...)
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			return ""
+		}
+		rest = append([]string{filepath.Base(path)}, rest...)
+		path = parent
+	}
+}
+
+// withinDirectory reports whether dir is root or below it, comparing the paths as written.
 func withinDirectory(dir, root string) bool {
 	if dir == "" {
 		return false

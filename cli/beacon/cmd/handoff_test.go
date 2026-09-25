@@ -147,18 +147,29 @@ func TestHandoffListJSONIsAnEmptyArrayNotNull(t *testing.T) {
 }
 
 func TestHandoffListFilters(t *testing.T) {
-	stubHandoffSources(t, handoffFixtureSessions()...)
-	out, _, err := runHandoff(t, "list", "--harness", "codex")
-	if err != nil || !strings.Contains(out, "codex-1") || strings.Contains(out, "claude-1") {
-		t.Fatalf("--harness codex = %v\n%s", err, out)
-	}
-	out, _, err = runHandoff(t, "list", "--dir", "/work/api")
-	if err != nil || !strings.Contains(out, "claude-1") || strings.Contains(out, "codex-1") {
-		t.Fatalf("--dir /work/api = %v\n%s", err, out)
-	}
-	out, _, err = runHandoff(t, "list", "--limit", "1")
-	if err != nil || strings.Count(strings.TrimSpace(out), "\n") != 1 {
-		t.Fatalf("--limit 1 = %v\n%s", err, out)
+	api, web := t.TempDir(), t.TempDir()
+	now := time.Now()
+	stubHandoffSources(t,
+		stubHandoffSource{harness: handoff.HarnessClaude, sessions: []handoff.Session{
+			{Harness: handoff.HarnessClaude, ID: "claude-1", Directory: api, UpdatedAt: now.Add(-time.Minute)},
+		}},
+		stubHandoffSource{harness: handoff.HarnessCodex, sessions: []handoff.Session{
+			{Harness: handoff.HarnessCodex, ID: "codex-1", Directory: web, UpdatedAt: now.Add(-time.Hour)},
+		}},
+	)
+	for _, tc := range []struct {
+		args          []string
+		want, without string
+	}{
+		{[]string{"--harness", "codex"}, "codex-1", "claude-1"},
+		{[]string{"--dir", api}, "claude-1", "codex-1"},
+		{[]string{"--dir", web}, "codex-1", "claude-1"},
+		{[]string{"--limit", "1"}, "claude-1", "codex-1"},
+	} {
+		out, _, err := runHandoff(t, append([]string{"list"}, tc.args...)...)
+		if err != nil || !strings.Contains(out, tc.want) || strings.Contains(out, tc.without) {
+			t.Fatalf("list %q = %v (opts %+v)\n%s", tc.args, err, handoffOpts, out)
+		}
 	}
 }
 
@@ -179,6 +190,15 @@ func TestHandoffListHereUsesTheWorkingDirectory(t *testing.T) {
 	}
 	if !strings.Contains(out, "in-here") || strings.Contains(out, "elsewhere") {
 		t.Fatalf("--here listing:\n%s", out)
+	}
+	for _, rel := range []string{".", "pkg", filepath.Join("pkg", "..")} {
+		out, _, err := runHandoff(t, "list", "--dir", rel)
+		if err != nil || !strings.Contains(out, "in-here") || strings.Contains(out, "elsewhere") {
+			t.Fatalf("--dir %s is relative to the working directory: %v\n%s", rel, err, out)
+		}
+	}
+	if out, _, _ := runHandoff(t, "list", "--dir", "other"); strings.Contains(out, "in-here") {
+		t.Fatalf("--dir other must not match a sibling:\n%s", out)
 	}
 	if _, _, err := runHandoff(t, "list", "--here", "--dir", "/x"); err == nil || !strings.Contains(err.Error(), "cannot be combined") {
 		t.Fatalf("--here with --dir err = %v", err)
@@ -359,8 +379,44 @@ func TestHandoffExportFallsBackToTheRuntimeLog(t *testing.T) {
 	if !strings.Contains(string(data), "rename the module") || !strings.Contains(string(data), "comes from Beacon's runtime log") {
 		t.Fatalf("log brief:\n%s", data)
 	}
-	if !strings.Contains(stderr, "no longer in its runtime's store") {
-		t.Fatalf("stderr should say where the brief came from: %q", stderr)
+	if !strings.Contains(stderr, "beacon handoff does not read cursor session stores") {
+		t.Fatalf("stderr should say why the brief came from the log: %q", stderr)
+	}
+}
+
+func TestHandoffExportRefusesTheLogWhenTheSessionsStoreIsUnreadable(t *testing.T) {
+	stubHandoffClock(t)
+	stubHandoffSources(t, stubHandoffSource{harness: handoff.HarnessClaude, err: errors.New("permission denied")})
+	logPath := handoffLog(t, handoff.HarnessClaude, "claude-9", "from the log")
+	_, _, err := runHandoff(t, "export", "claude-9", "--print", "--log-path", logPath)
+	if err == nil || !strings.Contains(err.Error(), "claude_code session store could not be read (permission denied)") {
+		t.Fatalf("an unreadable store must not be mistaken for a missing session: %v", err)
+	}
+
+	// Another runtime's session in the log is unaffected by the unreadable Claude store.
+	cursorLog := handoffLog(t, "cursor", "cursor-conv-1", "rename the module")
+	out, _, err := runHandoff(t, "export", "cursor-conv-1", "--print", "--log-path", cursorLog)
+	if err != nil || !strings.Contains(out, "rename the module") {
+		t.Fatalf("export = %v\n%s", err, out)
+	}
+
+	// With nothing anywhere, the error names the store it could not search.
+	_, _, err = runHandoff(t, "export", "nope-123", "--log-path", filepath.Join(t.TempDir(), "none.jsonl"))
+	if !errors.Is(err, handoff.ErrNotFound) || !strings.Contains(err.Error(), "claude_code: permission denied") {
+		t.Fatalf("not-found err = %v", err)
+	}
+}
+
+func TestHandoffExportMatchesRawHarnessNamesInTheLog(t *testing.T) {
+	stubHandoffClock(t)
+	stubHandoffSources(t, stubHandoffSource{harness: handoff.HarnessClaude})
+	logPath := handoffLog(t, "claude", "old-row-1", "written by an older Beacon")
+	out, _, err := runHandoff(t, "export", "old-row-1", "--harness", "claude", "--print", "--log-path", logPath)
+	if err != nil || !strings.Contains(out, "written by an older Beacon") {
+		t.Fatalf("a log row naming the runtime \"claude\" must match --harness claude: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "(`claude_code`)") {
+		t.Fatalf("the brief should name the canonical harness:\n%s", out)
 	}
 }
 

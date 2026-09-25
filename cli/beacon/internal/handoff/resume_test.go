@@ -68,7 +68,7 @@ func TestPlanResumeReopensEachRuntimeNatively(t *testing.T) {
 }
 
 func TestPlanResumeStartsANewSessionInEachRuntime(t *testing.T) {
-	brief := "/home/me/.beacon/endpoint/handoffs/brief.md"
+	brief := filepath.Join(t.TempDir(), "handoffs", "brief.md")
 	for _, tc := range []struct {
 		target, exe string
 		prefix      []string
@@ -109,7 +109,7 @@ func TestNewSessionPromptPointsAtTheBriefWithoutInliningIt(t *testing.T) {
 }
 
 func TestPlanResumeFallsBackToANewSession(t *testing.T) {
-	brief := "/tmp/brief.md"
+	brief := filepath.Join(t.TempDir(), "brief.md")
 	cases := []struct {
 		name   string
 		edit   func(*Session, *PlanOptions)
@@ -151,7 +151,7 @@ func TestPlanResumeClineOnlyReopensCLISessions(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			session := resumableSession(t, HarnessCline, "c-1")
 			tc.edit(&session)
-			plan, err := PlanResume(session, PlanOptions{BriefPath: "/tmp/b.md", LookPath: allRuntimes})
+			plan, err := PlanResume(session, PlanOptions{BriefPath: filepath.Join(t.TempDir(), "b.md"), LookPath: allRuntimes})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -184,7 +184,7 @@ func TestPlanResumeErrors(t *testing.T) {
 	if _, err := PlanResume(session, PlanOptions{LookPath: installed("codex")}); !errors.Is(err, ErrRuntimeNotInstalled) || !strings.Contains(err.Error(), "claude was not found") {
 		t.Fatalf("missing runtime err = %v", err)
 	}
-	if _, err := PlanResume(session, PlanOptions{Target: HarnessCodex, BriefPath: "/b", LookPath: installed("claude")}); !errors.Is(err, ErrRuntimeNotInstalled) {
+	if _, err := PlanResume(session, PlanOptions{Target: HarnessCodex, BriefPath: filepath.Join(t.TempDir(), "b.md"), LookPath: installed("claude")}); !errors.Is(err, ErrRuntimeNotInstalled) {
 		t.Fatalf("missing target runtime err = %v", err)
 	}
 	if _, err := PlanResume(session, PlanOptions{Target: "cursor", LookPath: allRuntimes}); err == nil || !strings.Contains(err.Error(), "cannot be started") {
@@ -195,6 +195,9 @@ func TestPlanResumeErrors(t *testing.T) {
 	}
 	if _, err := PlanResume(session, PlanOptions{ForceNew: true, LookPath: allRuntimes}); err == nil || !strings.Contains(err.Error(), "brief path") {
 		t.Fatalf("a new session without a brief path err = %v", err)
+	}
+	if _, err := PlanResume(session, PlanOptions{ForceNew: true, BriefPath: filepath.Join("handoffs", "b.md"), LookPath: allRuntimes}); err == nil || !strings.Contains(err.Error(), "not absolute") {
+		t.Fatalf("a relative brief path names another file from the runtime's directory; err = %v", err)
 	}
 }
 

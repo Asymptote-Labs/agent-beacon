@@ -5,6 +5,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // LogSession reads a session back from Beacon's runtime log, for a session whose runtime no longer
@@ -17,8 +18,9 @@ func LogSession(logPath, id string) (session Session, events []schema.Event, fou
 		return Session{}, nil, false, err
 	}
 	session = Session{
-		ID:        id,
-		Harness:   detail.Session.Harness,
+		ID: id,
+		// Older log rows carry a runtime's raw name ("claude"); every comparison uses the canonical one.
+		Harness:   asymptoteobserve.NormalizeHarnessName(detail.Session.Harness),
 		Directory: detail.Session.WorkingDir,
 		Branch:    detail.Session.Branch,
 	}

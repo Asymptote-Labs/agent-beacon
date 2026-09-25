@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
@@ -88,20 +87,32 @@ func resolveHandoffSession(id string) (handoffSubject, error) {
 	if findErr == nil {
 		return handoffSubject{session: session}, nil
 	}
-	if !errors.Is(findErr, handoff.ErrNotFound) {
+	var notFound *handoff.NotFoundError
+	if !errors.As(findErr, &notFound) {
 		return handoffSubject{}, findErr
 	}
-	return resolveHandoffLogSession(id, harness)
+	return resolveHandoffLogSession(id, harness, notFound)
 }
 
-func resolveHandoffLogSession(id, harness string) (handoffSubject, error) {
+// resolveHandoffLogSession finds id in the runtime log. It refuses a session whose own store could
+// not be read: that session may well still be there, and a brief from the log would keep less of it
+// than the store does.
+func resolveHandoffLogSession(id, harness string, notFound *handoff.NotFoundError) (handoffSubject, error) {
 	logPath := handoffRuntimeLogPath()
 	session, events, found, err := handoff.LogSession(logPath, id)
 	if err != nil {
 		return handoffSubject{}, fmt.Errorf("read runtime log %s: %w", logPath, err)
 	}
 	if !found || (harness != "" && session.Harness != harness) {
-		return handoffSubject{}, fmt.Errorf("%w: %s (not in any runtime session store or in %s; `beacon handoff list` shows what is available)", handoff.ErrNotFound, id, logPath)
+		if notFound == nil {
+			notFound = &handoff.NotFoundError{ID: id}
+		}
+		return handoffSubject{}, fmt.Errorf("%w; not in the runtime log %s either (`beacon handoff list` shows what is available)", notFound, logPath)
+	}
+	if notFound != nil {
+		if storeErr := notFound.UnreadableStore(session.Harness); storeErr != nil {
+			return handoffSubject{}, fmt.Errorf("the %s session store could not be read (%v); fix that rather than build the brief from the runtime log, which keeps less", session.Harness, storeErr.Err)
+		}
 	}
 	return handoffSubject{session: session, fromLog: true, logEvents: events}, nil
 }
@@ -120,7 +131,7 @@ func (subject handoffSubject) brief() (handoff.Brief, error) {
 	if !errors.Is(err, handoff.ErrNotFound) {
 		return handoff.Brief{}, fmt.Errorf("read %s session %s: %w", session.Harness, session.ID, err)
 	}
-	logSubject, logErr := resolveHandoffLogSession(session.ID, session.Harness)
+	logSubject, logErr := resolveHandoffLogSession(session.ID, session.Harness, nil)
 	if logErr != nil {
 		return handoff.Brief{}, logErr
 	}
@@ -133,6 +144,16 @@ func loadHandoffBrief(id string) (handoff.Brief, error) {
 		return handoff.Brief{}, err
 	}
 	return subject.brief()
+}
+
+// handoffLogReason says why a session was read from the runtime log.
+func handoffLogReason(session handoff.Session) string {
+	for _, harness := range handoff.Harnesses {
+		if harness == session.Harness {
+			return fmt.Sprintf("%s session %s is no longer in its runtime's store", session.Harness, session.ID)
+		}
+	}
+	return fmt.Sprintf("beacon handoff does not read %s session stores", session.Harness)
 }
 
 func handoffRuntimeLogPath() string {
@@ -175,7 +196,7 @@ func runHandoffExport(cmd *cobra.Command, args []string) error {
 		return encoder.Encode(handoffExportResult{Path: path, From: brief.From, Session: brief.Session})
 	}
 	if brief.From == handoff.FromRuntimeLog {
-		fmt.Fprintf(cmd.ErrOrStderr(), "note: %s session %s is no longer in its runtime's store; the brief comes from Beacon's runtime log and keeps less of each step\n", brief.Session.Harness, brief.Session.ID)
+		fmt.Fprintf(cmd.ErrOrStderr(), "note: %s; the brief comes from Beacon's runtime log and keeps less of each step\n", handoffLogReason(brief.Session))
 	}
 	fmt.Fprintln(out, path)
 	return nil
@@ -196,11 +217,15 @@ func runHandoffList(cmd *cobra.Command, args []string) error {
 		if filter.Directory != "" {
 			return fmt.Errorf("--here and --dir cannot be combined")
 		}
-		wd, err := os.Getwd()
+		filter.Directory = "."
+	}
+	if filter.Directory != "" {
+		// Recorded session directories are absolute; a relative --dir means relative to here.
+		abs, err := filepath.Abs(filter.Directory)
 		if err != nil {
-			return fmt.Errorf("resolve current directory: %w", err)
+			return fmt.Errorf("resolve --dir %s: %w", filter.Directory, err)
 		}
-		filter.Directory = wd
+		filter.Directory = abs
 	}
 	sessions, listErr := handoff.List(handoffSources(handoffOpts.dirs), filter)
 	out := cmd.OutOrStdout()

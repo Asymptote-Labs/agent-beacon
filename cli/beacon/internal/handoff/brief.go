@@ -284,16 +284,16 @@ func (b Brief) render(tail []TailEntry, omitted int) string {
 	var w strings.Builder
 	s := b.Session
 	w.WriteString("# Handoff brief\n\n")
-	fmt.Fprintf(&w, "Beacon wrote this brief from a %s session stored on this machine, so the session can be picked up again. ", RuntimeLabel(s.Harness))
+	fmt.Fprintf(&w, "Beacon wrote this brief from a %s session stored on this machine, so the session can be picked up again. ", inline(RuntimeLabel(s.Harness)))
 	w.WriteString("It is a summary, not the full transcript: long messages, command output and diffs are cut, secrets Beacon recognises are redacted, and nothing the runtime kept only in memory is here.")
 	if b.From == FromRuntimeLog {
 		w.WriteString(" The runtime's own session file was not available, so this brief comes from Beacon's runtime log, which keeps less of each step.")
 	}
 	w.WriteString("\n\n## Source session\n\n")
-	field(&w, "Runtime", fmt.Sprintf("%s (`%s`)", RuntimeLabel(s.Harness), s.Harness))
-	field(&w, "Session", "`"+s.ID+"`")
+	field(&w, "Runtime", inline(RuntimeLabel(s.Harness))+" ("+code(s.Harness)+")")
+	field(&w, "Session", code(s.ID))
 	if s.Title != "" {
-		field(&w, "Title", s.Title)
+		field(&w, "Title", inline(s.Title))
 	}
 	field(&w, "Directory", code(s.Directory))
 	field(&w, "Branch", code(b.Branch))
@@ -301,7 +301,7 @@ func (b Brief) render(tail []TailEntry, omitted int) string {
 		field(&w, "Last activity", s.UpdatedAt.UTC().Format(time.RFC3339))
 	}
 	if s.SourcePath != "" {
-		field(&w, "Session file", "`"+s.SourcePath+"`")
+		field(&w, "Session file", code(s.SourcePath))
 	}
 	field(&w, "Brief written", b.GeneratedAt.Format(time.RFC3339))
 	fmt.Fprintf(&w, "- Activity: %d prompts, %d agent messages, %d commands, %d files changed, %d tool failures\n",
@@ -321,7 +321,7 @@ func (b Brief) render(tail []TailEntry, omitted int) string {
 			files = files[:briefFilesListed]
 		}
 		for _, f := range files {
-			fmt.Fprintf(&w, "- `%s` (%s", f.Path, strings.Join(f.Operations, ", "))
+			fmt.Fprintf(&w, "- %s (%s", code(f.Path), inline(strings.Join(f.Operations, ", ")))
 			if f.Count > 1 {
 				fmt.Fprintf(&w, ", %d times", f.Count)
 			}
@@ -340,7 +340,7 @@ func (b Brief) render(tail []TailEntry, omitted int) string {
 			commands = commands[len(commands)-briefCommandsListed:]
 		}
 		for _, c := range commands {
-			fmt.Fprintf(&w, "- `%s`%s\n", oneLine(clip(c.Command, 200)), exitSuffix(c.ExitCode))
+			fmt.Fprintf(&w, "- %s%s\n", code(clip(c.Command, 200)), exitSuffix(c.ExitCode))
 		}
 		w.WriteString("\n")
 	}
@@ -355,10 +355,10 @@ func (b Brief) render(tail []TailEntry, omitted int) string {
 	for _, entry := range tail {
 		fmt.Fprintf(&w, "### %s", entry.Kind)
 		if entry.Head != "" {
-			fmt.Fprintf(&w, ": %s", oneLine(clip(entry.Head, 200)))
+			fmt.Fprintf(&w, ": %s", inline(clip(entry.Head, 200)))
 		}
 		if entry.At != "" {
-			fmt.Fprintf(&w, " · %s", entry.At)
+			fmt.Fprintf(&w, " · %s", inline(entry.At))
 		}
 		w.WriteString("\n\n")
 		if body := clip(entry.Body, briefEntryRunes); body != "" {
@@ -379,11 +379,42 @@ func field(w *strings.Builder, name, value string) {
 	fmt.Fprintf(w, "- %s: %s\n", name, value)
 }
 
+// code writes value as an inline code span on one line. The delimiter is longer than any backtick
+// run inside, so the value cannot end the span early.
 func code(value string) string {
+	value = inline(value)
 	if value == "" {
 		return ""
 	}
-	return "`" + value + "`"
+	longest, run := 0, 0
+	for _, r := range value {
+		if r == '`' {
+			run++
+			if run > longest {
+				longest = run
+			}
+		} else {
+			run = 0
+		}
+	}
+	delim := strings.Repeat("`", longest+1)
+	if strings.HasPrefix(value, "`") || strings.HasSuffix(value, "`") {
+		return delim + " " + value + " " + delim
+	}
+	return delim + value + delim
+}
+
+// inline reduces value to one line of text. Every field outside a fenced block goes through it: a
+// path, title or branch carrying a newline would otherwise start its own line, and a line such as
+// "## Before continuing" would read as the brief's own structure.
+func inline(value string) string {
+	value = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || r == 0x2028 || r == 0x2029 || r == 0x85 {
+			return ' '
+		}
+		return r
+	}, value)
+	return oneLine(value)
 }
 
 func quoted(w *strings.Builder, name, text string) {
