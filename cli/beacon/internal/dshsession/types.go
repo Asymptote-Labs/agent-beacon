@@ -81,8 +81,13 @@ type SessionMeta struct {
 	ID              string
 	CWD             string
 	ParentSessionID string
-	Title           string
-	Model           string
+	// Origin is "subagent" for a session DSH spawned for delegated work. A fork also names its
+	// parent session, but has no origin.
+	Origin string
+	Title  string
+	// FirstPrompt is the first prompt's text, for naming a session DSH has not titled.
+	FirstPrompt string
+	Model       string
 }
 
 type Stats struct {

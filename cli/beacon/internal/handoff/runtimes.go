@@ -7,6 +7,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/clinesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/dshsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/opencodesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pisession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/primesession"
@@ -53,6 +54,7 @@ const (
 	HarnessCline    = clinesession.Harness
 	HarnessPi       = pisession.Harness
 	HarnessPrime    = primesession.Harness
+	HarnessDSH      = dshsession.Harness
 )
 
 // runtimes lists every runtime handoff supports, in display order.
@@ -148,6 +150,14 @@ var runtimes = []Runtime{
 			},
 			NewSession: func(prompt string) []string { return []string{"--", prompt} },
 		},
+	},
+	{
+		Harness:   HarnessDSH,
+		Label:     "DeepSeek Harness",
+		Aliases:   []string{"dsh", "deepseek"},
+		NewSource: func(dir string) Source { return &dshSource{dir: dir} },
+		// dsh has no interactive terminal session to start: `--profile headless` answers one task
+		// and exits, and `dsh web` is a browser UI. Its sessions continue in another runtime.
 	},
 }
 
