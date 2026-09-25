@@ -540,3 +540,25 @@ func TestHandoffLogReasonNamesRuntimesWithoutAStore(t *testing.T) {
 		}
 	}
 }
+
+func TestHandoffHelpNamesEveryStoreItReads(t *testing.T) {
+	long := handoffLong()
+	_, list, ok := strings.Cut(long, "session store: ")
+	list, _, _ = strings.Cut(list, ".\n")
+	if !ok || list == "" {
+		t.Fatalf("help has no list of session stores:\n%s", long)
+	}
+	named := map[string]bool{}
+	for _, item := range strings.Split(strings.ReplaceAll(list, " and ", ", "), ", ") {
+		named[item] = true
+	}
+	for _, harness := range handoff.Harnesses {
+		label := handoff.RuntimeLabel(harness)
+		if named[label] != handoff.ReadsStore(harness) {
+			t.Errorf("help names %s = %v, want %v:\n%s", label, named[label], handoff.ReadsStore(harness), long)
+		}
+	}
+	if got := joinWithAnd([]string{"a", "b", "c"}); got != "a, b and c" {
+		t.Fatalf("joinWithAnd = %q", got)
+	}
+}
