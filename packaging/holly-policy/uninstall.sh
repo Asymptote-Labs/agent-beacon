@@ -49,9 +49,12 @@ for path, entry in (manifest.get("settings") or {}).items():
     write_path = os.path.realpath(path)  # keep a symlinked settings.json a symlink
     mode = os.stat(write_path).st_mode & 0o777
     tmp = write_path + ".beacon-policy.tmp"
+    with open(write_path, "rb") as fh:
+        ends_with_newline = fh.read().endswith(b"\n")
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(settings, fh, indent=2, ensure_ascii=False)
-        fh.write("\n")
+        if ends_with_newline:
+            fh.write("\n")
     os.chmod(tmp, mode)
     os.replace(tmp, write_path)
     print(f"  cleaned {path}")

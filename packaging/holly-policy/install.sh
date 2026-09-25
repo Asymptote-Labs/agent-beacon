@@ -236,9 +236,17 @@ entry["command_file"] = command_file
 write_path = os.path.realpath(settings_path)
 mode = os.stat(write_path).st_mode & 0o777 if os.path.exists(write_path) else 0o644
 tmp = write_path + ".beacon-policy.tmp"
+# Keep the file's own ending: Claude Code writes settings.json without a
+# trailing newline, and uninstall must hand back the same bytes.
+ends_with_newline = True
+if os.path.exists(write_path):
+    with open(write_path, "rb") as fh:
+        data = fh.read()
+    ends_with_newline = data.endswith(b"\n") if data.strip() else True
 with open(tmp, "w", encoding="utf-8") as fh:
     json.dump(settings, fh, indent=2, ensure_ascii=False)
-    fh.write("\n")
+    if ends_with_newline:
+        fh.write("\n")
 os.chmod(tmp, mode)
 os.replace(tmp, write_path)
 with open(manifest_path, "w") as fh:
