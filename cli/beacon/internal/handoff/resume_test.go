@@ -24,7 +24,8 @@ func installed(names ...string) func(string) (string, error) {
 	}
 }
 
-var allRuntimes = installed("claude", "codex", "opencode", "cline", "pi", "prime-agent", "omp", "gemini", "qwen", "kiro-cli", "agy", "devin", "muse", "openhands", "goose", "openclaw")
+var allRuntimes = installed("claude", "codex", "opencode", "cline", "pi", "prime-agent", "droid",
+	"omp", "gemini", "qwen", "kiro-cli", "agy", "devin", "muse", "openhands", "goose", "openclaw")
 
 // resumableSession is a session whose directory and session file both exist.
 func resumableSession(t *testing.T, harness, id string) Session {
@@ -48,6 +49,7 @@ func TestPlanResumeReopensEachRuntimeNatively(t *testing.T) {
 		{HarnessCodex, "codex", []string{"resume", "s-1"}},
 		{HarnessOpenCode, "opencode", []string{"--session", "s-1"}},
 		{HarnessCline, "cline", []string{"--tui", "--auto-approve", "false", "--id", "s-1"}},
+		{HarnessFactory, "droid", []string{"--resume", "s-1"}},
 	} {
 		t.Run(tc.harness, func(t *testing.T) {
 			session := resumableSession(t, tc.harness, "s-1")
@@ -80,6 +82,7 @@ func TestPlanResumeStartsANewSessionInEachRuntime(t *testing.T) {
 		{HarnessCline, "cline", []string{"--tui", "--auto-approve", "false"}},
 		{HarnessPi, "pi", []string{"--"}},
 		{HarnessPrime, "prime-agent", []string{"--"}},
+		{HarnessFactory, "droid", nil},
 		// {key} stands for the fresh Gateway session key the prompt derives.
 		{HarnessOpenClaw, "openclaw", []string{"tui", "--session", "{key}", "--message"}},
 		{HarnessOhMyPi, "omp", []string{"--approval-mode=always-ask"}},
