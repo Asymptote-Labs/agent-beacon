@@ -139,7 +139,7 @@ func nativeBlocker(session Session, target string, opts PlanOptions) string {
 	if _, ok := command.Resume(session); !ok {
 		return ReasonNotResumable
 	}
-	if command.ResumesInSessionDir && opts.Dir != "" && !sameDirectory(opts.Dir, session.Directory) {
+	if command.ResumesInSessionDir && opts.Dir != "" && session.Directory != "" && !sameDirectory(opts.Dir, session.Directory) {
 		return ReasonOtherDirectory
 	}
 	if session.SourcePath == "" {

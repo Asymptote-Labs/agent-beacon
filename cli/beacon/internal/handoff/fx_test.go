@@ -154,6 +154,19 @@ func TestPlanResumeReopensAnFxSessionInItsWorkspace(t *testing.T) {
 	}
 }
 
+func TestPlanResumeReopensAnFxSessionWithNoRecordedDirectory(t *testing.T) {
+	session := resumableSession(t, HarnessFx, fxSessionA)
+	cwdDir := session.Directory
+	session.Directory = ""
+	plan, err := PlanResume(session, PlanOptions{Dir: cwdDir, LookPath: installed("fx")})
+	if err != nil {
+		t.Fatalf("PlanResume: %v", err)
+	}
+	if plan.Mode != ModeNative || plan.Executable != "/bin/fx" || plan.Dir != cwdDir {
+		t.Fatalf("plan = %+v, want native resume in %s", plan, cwdDir)
+	}
+}
+
 func TestPlanResumeRefusesToStartANewFxSession(t *testing.T) {
 	brief := filepath.Join(t.TempDir(), "brief.md")
 	fxSession := resumableSession(t, HarnessFx, fxSessionA)
