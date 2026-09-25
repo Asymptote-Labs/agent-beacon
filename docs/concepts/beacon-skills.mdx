@@ -1,0 +1,179 @@
+---
+title: "Beacon Skills"
+description: "Install Agent Skills that turn Beacon traces into reviewed project memory in any harness"
+---
+
+## Overview
+
+Beacon Skills are [Agent Skills](https://agentskills.io) that let an agent in any
+harness run Beacon's [cross-harness memory](/concepts/cross-harness-memory) loop. An
+agent working in Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot, or another
+supported harness can use them to recall what earlier sessions learned about a
+repository. It can also turn a recent session into a reviewed lesson, and promote that
+lesson into a skill the whole team loads.
+
+The skills do not replace Beacon's capture or review model. They tell the agent which
+`beacon` commands to run and when to stop and ask. They keep the person reviewing in
+control of every write to memory.
+
+| Skill | What it does | Network |
+|-------|--------------|---------|
+| `beacon-memory-recall` | Before a task, retrieves approved project memory relevant to it | None |
+| `beacon-memory-distill` | Turns selected traces into reviewed memory: dry run, a consented evaluation, a lesson drafted from the source trace, approval by the user | Evaluator call only, after the user agrees |
+| `beacon-memory-promote` | Installs an approved memory as a project Agent Skill | None |
+
+## Requirements
+
+- The Beacon CLI on `PATH`, with endpoint capture installed so traces exist. See the
+  [quickstart](/get-started/quickstart).
+- For `beacon-memory-distill` only: an evaluator key in `TYPESAFE_API_KEY` or
+  `BEACON_JEV_API_KEY`, or `BEACON_JEV_ENDPOINT` pointing at your organization's
+  compatible evaluator. Recall and promote need no key.
+
+The plugin also registers Beacon's local MCP server (`beacon mcp serve`) in harnesses
+that accept MCP servers from plugins. When the server is available, recall uses the
+`get_memory_context` tool. Otherwise it falls back to `beacon memory list`.
+
+## Install
+
+<Tabs>
+  <Tab title="Claude Code">
+    ```bash
+    /plugin marketplace add asymptote-labs/agent-beacon
+    /plugin install beacon@beacon
+    ```
+
+    The skills appear as `/beacon:beacon-memory-recall`, `/beacon:beacon-memory-distill`,
+    and `/beacon:beacon-memory-promote`, and Claude also loads them when a task matches.
+  </Tab>
+  <Tab title="Codex">
+    ```bash
+    codex plugin marketplace add asymptote-labs/agent-beacon
+    ```
+
+    Then install the `beacon` plugin from the marketplace.
+  </Tab>
+  <Tab title="GitHub Copilot CLI">
+    ```bash
+    copilot plugin marketplace add asymptote-labs/agent-beacon
+    copilot plugin install beacon@beacon
+    ```
+  </Tab>
+  <Tab title="Factory Droid">
+    ```bash
+    droid plugin marketplace add asymptote-labs/agent-beacon
+    droid plugin install beacon@beacon
+    ```
+  </Tab>
+  <Tab title="Other agents">
+    For Cursor, Gemini CLI, OpenCode, Amp, goose, Cline, Windsurf, Kiro, and any other
+    agent that reads Agent Skills, use the skills CLI:
+
+    ```bash
+    npx skills add asymptote-labs/agent-beacon
+    ```
+
+    Pass `-a <agent>` to target one agent, for example `-a gemini-cli` or `-a cursor`,
+    and `--skill <name>` to install a single skill.
+  </Tab>
+</Tabs>
+
+## Using the skills
+
+You rarely name a skill. Each one describes when it applies, and the harness loads it
+when your request matches.
+
+<Steps>
+  <Step title="Recall before work">
+    Starting a non-trivial task, or hitting a failure that might have a known fix,
+    triggers `beacon-memory-recall`. The agent retrieves up to five approved memories
+    for the current repository. When one changes what it does, it cites the memory's
+    ID. It treats memory as lessons from earlier sessions, not as policy. When a memory
+    conflicts with your instructions or the repository's docs, the agent follows you and
+    the docs and says so.
+  </Step>
+  <Step title="Distill a session into memory">
+    Ask something like "turn yesterday's packaging fix into memory" or "review the Beacon
+    memory candidates". `beacon-memory-distill` then:
+
+    1. Selects the traces you named, or proposes a short list.
+    2. Runs `beacon memory evaluations run --dry-run` and shows the selection and
+       estimated cost.
+    3. Asks before the evaluation call, and runs it only on the selection you approved.
+    4. Reads the source trace behind each candidate and drafts a lesson: title, kind,
+       applicability, and body, each tied to the trace events that support it.
+    5. Shows every draft with a recommendation to approve, reject, or supersede, and
+       records only the decisions you confirm.
+  </Step>
+  <Step title="Promote memory to a skill">
+    Ask to "make this a skill". `beacon-memory-promote` previews the generated skill,
+    checks it for anything that should not be committed, and installs it at
+    `.agents/skills/<slug>/SKILL.md` once you confirm. Committing it shares it with
+    every teammate and every harness that reads `.agents/skills`.
+  </Step>
+</Steps>
+
+## Why the agent writes the lesson
+
+The evaluator returns probabilities, such as how likely the task succeeded and how
+likely the trace holds a reusable lesson. It does not return lesson text. On its own, an
+approved candidate would say only that no lesson text was extracted.
+
+`beacon-memory-distill` closes that gap. The agent reads the trace, writes the lesson,
+and you approve it with the reviewed text:
+
+```bash
+beacon memory candidates approve <candidate-id> \
+  --title "Build the embedded hooks binary before running cli/beacon tests" \
+  --kind workflow \
+  --applicability "when running go test in cli/beacon on a fresh checkout" \
+  --body-file lesson.md \
+  --reason "reviewed against trace events 14-19"
+```
+
+The approved memory stores your text. The candidate keeps the evaluator's original, so
+the review history shows what changed. See [`beacon memory`](/cli/memory) for every
+flag.
+
+## Privacy and control
+
+- **Nothing runs from hooks.** The skills act only when an agent loads them in response
+  to a request.
+- **One networked step.** Only the evaluation in `beacon-memory-distill` leaves the
+  machine, after a dry run and your explicit yes. It sends the bounded, redacted trace
+  projection described in [Jev evaluation](/concepts/cross-harness-memory#jev-evaluation).
+- **Keys stay out of the chat.** The agent checks whether a key is set without printing
+  it, never asks you to paste one, and never passes it on the command line.
+- **No silent writes.** Approving, rejecting, superseding, and installing a skill each
+  need your confirmation.
+- **Memory is shared, so it stays clean.** Lessons must not contain secrets, tokens,
+  credentials, internal hostnames, customer data, or personal details, even when the
+  trace does.
+
+## Publishing and source
+
+The skills live in [`agent-skills/`](https://github.com/asymptote-labs/agent-beacon/tree/main/agent-skills)
+in the Beacon repository. One `skills/` directory serves every harness through its own
+manifest: `.claude-plugin/plugin.json` for Claude Code, an Agent Plugins `plugin.json`
+for Codex, Cursor, Copilot, and Kiro, and `gemini-extension.json` for Gemini CLI. The
+repository's root `.claude-plugin/marketplace.json` is the marketplace entry.
+
+A test in the CLI checks every `beacon` command and flag the skills mention, so a change
+that renames one fails the same pull request.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Cross-harness memory" icon="brain" href="/concepts/cross-harness-memory">
+    How traces become reviewed project memory.
+  </Card>
+  <Card title="beacon memory" icon="terminal" href="/cli/memory">
+    Evaluate traces, review candidates, and install skills from the CLI.
+  </Card>
+  <Card title="beacon mcp" icon="server" href="/cli/mcp">
+    Serve approved memory to MCP clients.
+  </Card>
+  <Card title="beacon endpoint traces" icon="magnifying-glass" href="/cli/endpoint-traces">
+    Browse and search the traces the skills read.
+  </Card>
+</Columns>
