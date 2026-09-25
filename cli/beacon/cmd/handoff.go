@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -11,6 +12,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/handoff"
 )
 
@@ -22,6 +26,9 @@ type handoffOptions struct {
 	includeSubagents bool
 	limit            int
 	dirs             handoff.StoreDirs
+	print            bool
+	outputDir        string
+	logPath          string
 }
 
 var handoffOpts handoffOptions
@@ -43,8 +50,138 @@ var handoffListCmd = &cobra.Command{
 	RunE:         runHandoffList,
 }
 
-// handoffSources is swapped by tests.
-var handoffSources = func(dirs handoff.StoreDirs) []handoff.Source { return handoff.DefaultSources(dirs) }
+var handoffExportCmd = &cobra.Command{
+	Use:   "export <session-id>",
+	Short: "Write a handoff brief for a session",
+	Long: `Write a handoff brief for a session: a Markdown summary of what it asked for, what it changed and
+where it stopped, for another agent or person to continue from.
+
+The brief is built from the runtime's own session store. A session its runtime no longer has is
+read from Beacon's runtime log instead, which keeps less of each step. Briefs are written under
+~/.beacon/endpoint/handoffs (0700, files 0600); --print writes to stdout instead.`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE:         runHandoffExport,
+}
+
+// handoffSources and handoffNow are swapped by tests.
+var (
+	handoffSources = func(dirs handoff.StoreDirs) []handoff.Source { return handoff.DefaultSources(dirs) }
+	handoffNow     = time.Now
+)
+
+// loadHandoffBrief builds the brief for id from the runtime's session store, or from the runtime log
+// when the store no longer has the session.
+func loadHandoffBrief(id string) (handoff.Brief, error) {
+	harness, err := handoff.ParseHarness(handoffOpts.harness)
+	if err != nil {
+		return handoff.Brief{}, err
+	}
+	sources := handoffSources(handoffOpts.dirs)
+	session, findErr := handoff.Find(sources, harness, id)
+	var notFound *handoff.NotFoundError
+	switch {
+	case findErr == nil:
+		events, err := handoff.Events(sources, session)
+		if err == nil {
+			return handoff.BuildBrief(session, events, handoff.FromSessionStore, handoffNow()), nil
+		}
+		if !errors.Is(err, handoff.ErrNotFound) {
+			return handoff.Brief{}, fmt.Errorf("read %s session %s: %w", session.Harness, session.ID, err)
+		}
+		id = session.ID
+	case !errors.As(findErr, &notFound):
+		return handoff.Brief{}, findErr
+	}
+	logSession, events, err := loadHandoffLogSession(id, harness, notFound)
+	if err != nil {
+		return handoff.Brief{}, err
+	}
+	return handoff.BuildBrief(logSession, events, handoff.FromRuntimeLog, handoffNow()), nil
+}
+
+// loadHandoffLogSession finds id in the runtime log. It refuses a session whose own store could not
+// be read: that session may well still be there, and a brief from the log would keep less of it
+// than the store does.
+func loadHandoffLogSession(id, harness string, notFound *handoff.NotFoundError) (handoff.Session, []schema.Event, error) {
+	logPath := handoffRuntimeLogPath()
+	session, events, found, err := handoff.LogSession(logPath, id, harness)
+	var ambiguous *handoff.AmbiguousError
+	if errors.As(err, &ambiguous) {
+		return handoff.Session{}, nil, fmt.Errorf("in the runtime log %s: %w", logPath, err)
+	}
+	if err != nil {
+		return handoff.Session{}, nil, fmt.Errorf("read runtime log %s: %w", logPath, err)
+	}
+	if !found || (harness != "" && session.Harness != harness) {
+		if notFound == nil {
+			notFound = &handoff.NotFoundError{ID: id}
+		}
+		return handoff.Session{}, nil, fmt.Errorf("%w; not in the runtime log %s either (`beacon handoff list` shows what is available)", notFound, logPath)
+	}
+	if notFound != nil {
+		if storeErr := notFound.UnreadableStore(session.Harness); storeErr != nil {
+			return handoff.Session{}, nil, fmt.Errorf("the %s session store could not be read (%v); fix that rather than build the brief from the runtime log, which keeps less", session.Harness, storeErr.Err)
+		}
+	}
+	return session, events, nil
+}
+
+// handoffLogReason says why a session was read from the runtime log.
+func handoffLogReason(session handoff.Session) string {
+	for _, harness := range handoff.Harnesses {
+		if harness == session.Harness {
+			return fmt.Sprintf("%s session %s is no longer in its runtime's store", session.Harness, session.ID)
+		}
+	}
+	return fmt.Sprintf("beacon handoff does not read %s session stores", session.Harness)
+}
+
+func handoffRuntimeLogPath() string {
+	return lifecycle.ResolveRuntimeLog(true, handoffOpts.logPath).EffectiveLogPath
+}
+
+func handoffBriefDir() string {
+	if dir := strings.TrimSpace(handoffOpts.outputDir); dir != "" {
+		return dir
+	}
+	return filepath.Join(endpointconfig.BaseDir(true), "handoffs")
+}
+
+type handoffExportResult struct {
+	Path    string          `json:"path"`
+	From    string          `json:"from"`
+	Session handoff.Session `json:"session"`
+}
+
+func runHandoffExport(cmd *cobra.Command, args []string) error {
+	if handoffOpts.print && strings.TrimSpace(handoffOpts.outputDir) != "" {
+		return fmt.Errorf("--print and --output-dir cannot be combined")
+	}
+	brief, err := loadHandoffBrief(args[0])
+	if err != nil {
+		return err
+	}
+	out := cmd.OutOrStdout()
+	if handoffOpts.print {
+		_, err := io.WriteString(out, brief.Render())
+		return err
+	}
+	path, err := handoff.WriteBrief(handoffBriefDir(), brief)
+	if err != nil {
+		return err
+	}
+	if handoffOpts.jsonOutput {
+		encoder := json.NewEncoder(out)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(handoffExportResult{Path: path, From: brief.From, Session: brief.Session})
+	}
+	if brief.From == handoff.FromRuntimeLog {
+		fmt.Fprintf(cmd.ErrOrStderr(), "note: %s; the brief comes from Beacon's runtime log and keeps less of each step\n", handoffLogReason(brief.Session))
+	}
+	fmt.Fprintln(out, path)
+	return nil
+}
 
 func runHandoffList(cmd *cobra.Command, args []string) error {
 	harness, err := handoff.ParseHarness(handoffOpts.harness)
@@ -155,7 +292,14 @@ func addHandoffStoreFlags(cmd *cobra.Command) {
 
 func init() {
 	rootCmd.AddCommand(handoffCmd)
-	handoffCmd.AddCommand(handoffListCmd)
+	handoffCmd.AddCommand(handoffListCmd, handoffExportCmd)
+	addHandoffStoreFlags(handoffExportCmd)
+	ef := handoffExportCmd.Flags()
+	ef.BoolVar(&handoffOpts.print, "print", false, "Write the brief to stdout instead of a file")
+	ef.StringVar(&handoffOpts.outputDir, "output-dir", "", "Directory to write the brief into (default ~/.beacon/endpoint/handoffs)")
+	ef.StringVar(&handoffOpts.logPath, "log-path", "", "Runtime JSONL log to fall back to (default the local runtime log)")
+	ef.BoolVar(&handoffOpts.jsonOutput, "json", false, "Print the written path and session as JSON")
+
 	addHandoffStoreFlags(handoffListCmd)
 	f := handoffListCmd.Flags()
 	f.BoolVar(&handoffOpts.jsonOutput, "json", false, "Print sessions as JSON")

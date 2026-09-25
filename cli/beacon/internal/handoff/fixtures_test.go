@@ -3,6 +3,7 @@ package handoff
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -165,4 +166,69 @@ func mustJSON(t *testing.T, value interface{}) string {
 
 func jsonLine(t *testing.T, value interface{}) string {
 	return mustJSON(t, value) + "\n"
+}
+
+// writeTranscripts gives each fixture session a conversation: one request and one reply, plus a
+// second turn in the thread's newer Codex rollout file.
+func (f storeFixture) writeTranscripts(t *testing.T) {
+	t.Helper()
+	claudeMain := filepath.Join(f.dirs.ClaudeProjects, "-work-api", "claude-sess-1.jsonl")
+	writeFixture(t, claudeMain, jsonLine(t, map[string]interface{}{
+		"type": "user", "uuid": "u1", "sessionId": "claude-sess-1", "cwd": "/work/api", "timestamp": "2026-09-23T08:59:00.000Z",
+		"message": map[string]interface{}{"role": "user", "content": "add a health endpoint"},
+	})+jsonLine(t, map[string]interface{}{
+		"type": "assistant", "uuid": "a1", "parentUuid": "u1", "sessionId": "claude-sess-1", "cwd": "/work/api", "timestamp": "2026-09-23T08:59:30.000Z",
+		"message": map[string]interface{}{"id": "msg_1", "role": "assistant", "model": "claude-sonnet-4-5", "content": []interface{}{
+			map[string]interface{}{"type": "text", "text": "Added GET /healthz."},
+		}},
+	}))
+	setModTime(t, claudeMain, claudeUpdated)
+
+	codexTurn := func(prompt, reply string) string {
+		return jsonLine(t, map[string]interface{}{
+			"timestamp": "2026-09-21T09:00:00.000Z", "type": "session_meta",
+			"payload": map[string]interface{}{"id": "codex-thread-1", "session_id": "codex-thread-1", "cwd": "/work/web"},
+		}) + jsonLine(t, map[string]interface{}{
+			"timestamp": "2026-09-21T09:00:01.000Z", "type": "response_item",
+			"payload": map[string]interface{}{"type": "message", "role": "user", "content": []interface{}{map[string]interface{}{"type": "input_text", "text": prompt}}},
+		}) + jsonLine(t, map[string]interface{}{
+			"timestamp": "2026-09-21T09:00:02.000Z", "type": "response_item",
+			"payload": map[string]interface{}{"type": "message", "role": "assistant", "content": []interface{}{map[string]interface{}{"type": "output_text", "text": reply}}},
+		})
+	}
+	older := filepath.Join(f.dirs.Codex, "sessions", "2026", "09", "20", "rollout-2026-09-20T09-00-00-codex-thread-1.jsonl")
+	newer := filepath.Join(f.dirs.Codex, "sessions", "2026", "09", "21", "rollout-2026-09-21T09-00-00-codex-thread-1.jsonl")
+	writeFixture(t, older, codexTurn("fix the login form", "Working on it."))
+	writeFixture(t, newer, codexTurn("also check the signup form", "The form validates now."))
+	setModTime(t, older, codexUpdated.Add(-24*time.Hour))
+	setModTime(t, newer, codexUpdated)
+
+	db, err := sql.Open("sqlite", filepath.Join(f.dirs.OpenCode, "opencode.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	base := openCodeUpdated.UnixMilli() - 900
+	for i, turn := range []struct{ role, text string }{{"user", "refactor the cache"}, {"assistant", "Cache refactored."}} {
+		msgID := fmt.Sprintf("msg_%d", i)
+		created := base + int64(i*100)
+		if _, err := db.Exec(`INSERT INTO message VALUES (?, 'ses_parent', ?, ?)`, msgID, created, mustJSON(t, map[string]interface{}{
+			"id": msgID, "role": turn.role, "time": map[string]interface{}{"created": created},
+		})); err != nil {
+			t.Fatal(err)
+		}
+		partID := fmt.Sprintf("part_%d", i)
+		if _, err := db.Exec(`INSERT INTO part VALUES (?, ?, 'ses_parent', ?, ?)`, partID, msgID, created+10, mustJSON(t, map[string]interface{}{
+			"id": partID, "type": "text", "text": turn.text,
+		})); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	messages := filepath.Join(f.dirs.Cline, "data", "sessions", "cline-task-1", "cline-task-1.messages.json")
+	writeFixture(t, messages, mustJSON(t, map[string]interface{}{"messages": []interface{}{
+		map[string]interface{}{"role": "user", "content": "Write the release notes", "ts": clineUpdated.Add(-time.Minute).UnixMilli()},
+		map[string]interface{}{"role": "assistant", "content": []interface{}{map[string]interface{}{"type": "text", "text": "Release notes drafted."}}, "ts": clineUpdated.UnixMilli()},
+	}}))
+	setModTime(t, messages, clineUpdated)
 }

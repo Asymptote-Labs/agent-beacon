@@ -352,3 +352,21 @@ func TestResolveExisting(t *testing.T) {
 		}
 	}
 }
+
+func TestFindNotFoundNamesUnreadableStores(t *testing.T) {
+	sources := []Source{
+		fakeSource{harness: HarnessClaude, err: errors.New("permission denied")},
+		fakeSource{harness: HarnessCodex},
+	}
+	_, err := Find(sources, "", "missing-id")
+	var notFound *NotFoundError
+	if !errors.As(err, &notFound) || !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want a NotFoundError", err)
+	}
+	if notFound.UnreadableStore(HarnessClaude) == nil || notFound.UnreadableStore(HarnessCodex) != nil {
+		t.Fatalf("unreadable = %+v, want only claude_code", notFound.Unreadable)
+	}
+	if _, err := Find([]Source{fakeSource{harness: HarnessCodex}}, "", "missing-id"); err.Error() != "session not found: missing-id" {
+		t.Fatalf("plain not-found err = %q", err)
+	}
+}

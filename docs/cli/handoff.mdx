@@ -9,6 +9,7 @@ description: "Pick up a local agent session again, in the same runtime or anothe
 
 ```bash title="Command syntax"
 beacon handoff list [flags]
+beacon handoff export <session-id> [flags]
 ```
 
 Sessions come from each runtime's own local session store, not from Beacon's runtime log. That store is what the runtime resumes from, and it keeps content the runtime log truncates. Every read is local and read-only: nothing is uploaded, and no runtime file is changed.
@@ -46,3 +47,36 @@ beacon handoff list --json
 | `--claude-projects-dir`, `--codex-dir`, `--opencode-dir`, `--cline-dir` | Read a runtime's store from a non-default location. |
 
 A store that cannot be read is reported as a warning (on stderr, or under `warnings` in JSON), and the sessions from the other runtimes are still listed.
+
+## `beacon handoff export`
+
+Writes a handoff brief for one session: a Markdown summary of what it asked for, what it changed, and where it stopped, for another agent or person to continue from.
+
+```bash
+beacon handoff export 7f3c2a91              # writes ~/.beacon/endpoint/handoffs/<runtime>-<id>-<time>.md
+beacon handoff export 7f3c2a91 --print      # write to stdout instead
+```
+
+The session id can be a unique prefix of at least six characters. Pass `--harness` when two runtimes use the same id.
+
+A brief has these sections:
+
+- **Source session**: runtime, session id, title, directory, branch, last activity, session file, and activity counts.
+- **Where it stood**: the first request, the latest request, and the last agent message.
+- **Files changed** and **Recent commands**, with exit codes where the runtime reports them.
+- **Recent activity**: the last 30 steps (prompts, agent messages, commands, file changes, tool failures, MCP calls), each cut to 1,200 characters.
+- **Before continuing**: check the working tree, and confirm the task before changing anything.
+
+A brief is a summary, not the full transcript. Every event goes through the same secret redaction and truncation as the runtime log before any of it is used. Agent reasoning and file reads are left out. A brief is at most 48 KiB; older steps are dropped first to stay under that. Content is placed in code fences longer than any run of backticks inside it, so quoted text can't close its block and pass itself off as part of the brief.
+
+When a session is no longer in its runtime's store (for example, a deleted transcript), `export` reads it from Beacon's runtime log instead. This works for any runtime Beacon captured, but the log keeps less of each step, and the brief says so.
+
+Briefs are written to `~/.beacon/endpoint/handoffs`. The directory is `0700` and each file is `0600`, because a brief carries prompt text and command output. An existing brief is never overwritten.
+
+| Flag | Description |
+|------|-------------|
+| `--print` | Write the brief to stdout instead of a file. |
+| `--output-dir` | Directory to write the brief into. |
+| `--log-path` | Runtime log to fall back to. Defaults to the local runtime log. |
+| `--json` | Print `{"path", "from", "session"}`. `from` is `session_store` or `runtime_log`. |
+| `--harness` and the `--*-dir` flags | As for `list`. |

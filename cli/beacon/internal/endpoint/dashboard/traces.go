@@ -675,6 +675,12 @@ func retainedOutputContent(text string, info *schema.ContentInfo) *TraceContentV
 	return content
 }
 
+// RetainedOutputText is retainedOutputText for readers outside the dashboard, such as the handoff
+// brief, so every reader agrees on which parts are what the assistant said.
+func RetainedOutputText(genAI *schema.GenAIInfo, partType string) string {
+	return retainedOutputText(genAI, partType)
+}
+
 // retainedOutputText joins the assistant parts of partType in
 // gen_ai.output.messages, in order. It reads both shapes Beacon writes: the
 // semconv {"role","parts":[{"type","content"}]} form and the

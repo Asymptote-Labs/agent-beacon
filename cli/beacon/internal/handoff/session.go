@@ -59,8 +59,17 @@ func (e *SourceError) Unwrap() error { return e.Err }
 // List returns the sessions every source has stored, newest first. A source that fails is reported
 // in the returned error while the sessions from the others are still returned.
 func List(sources []Source, filter Filter) ([]Session, error) {
+	sessions, unreadable := listSessions(sources, filter)
+	errs := make([]error, 0, len(unreadable))
+	for _, err := range unreadable {
+		errs = append(errs, err)
+	}
+	return sessions, errors.Join(errs...)
+}
+
+func listSessions(sources []Source, filter Filter) ([]Session, []*SourceError) {
 	var sessions []Session
-	var errs []error
+	var errs []*SourceError
 	within := directoryMatcher(filter.Directory)
 	for _, source := range sources {
 		if filter.Harness != "" && source.Harness() != filter.Harness {
@@ -95,7 +104,7 @@ func List(sources []Source, filter Filter) ([]Session, error) {
 	if filter.Limit > 0 && len(sessions) > filter.Limit {
 		sessions = sessions[:filter.Limit]
 	}
-	return sessions, errors.Join(errs...)
+	return sessions, errs
 }
 
 // MinPrefixLength is the shortest session id prefix Find accepts, so a stray short argument cannot
@@ -104,6 +113,37 @@ const MinPrefixLength = 6
 
 // ErrNotFound reports that no stored session has the requested id.
 var ErrNotFound = errors.New("session not found")
+
+// NotFoundError is the ErrNotFound Find returns. Unreadable names the stores that could not be
+// searched, so a caller does not mistake "this store could not be read" for "this store does not
+// have the session".
+type NotFoundError struct {
+	ID         string
+	Unreadable []*SourceError
+}
+
+func (e *NotFoundError) Error() string {
+	if len(e.Unreadable) == 0 {
+		return fmt.Sprintf("%v: %s", ErrNotFound, e.ID)
+	}
+	parts := make([]string, 0, len(e.Unreadable))
+	for _, err := range e.Unreadable {
+		parts = append(parts, err.Error())
+	}
+	return fmt.Sprintf("%v: %s (some session stores could not be read: %s)", ErrNotFound, e.ID, strings.Join(parts, "; "))
+}
+
+func (e *NotFoundError) Is(target error) bool { return target == ErrNotFound }
+
+// UnreadableStore returns the error for harness's store when it could not be read.
+func (e *NotFoundError) UnreadableStore(harness string) *SourceError {
+	for _, err := range e.Unreadable {
+		if err.Harness == harness {
+			return err
+		}
+	}
+	return nil
+}
 
 // AmbiguousError reports an id or prefix that names more than one stored session.
 type AmbiguousError struct {
@@ -126,7 +166,7 @@ func Find(sources []Source, harness, id string) (Session, error) {
 	if id == "" {
 		return Session{}, errors.New("session id is required")
 	}
-	sessions, err := List(sources, Filter{Harness: harness, IncludeSubagents: true})
+	sessions, unreadable := listSessions(sources, Filter{Harness: harness, IncludeSubagents: true})
 	var exact, prefixed []Session
 	for _, session := range sessions {
 		switch {
@@ -144,10 +184,7 @@ func Find(sources []Source, harness, id string) (Session, error) {
 	case 1:
 		return matches[0], nil
 	case 0:
-		if err != nil {
-			return Session{}, fmt.Errorf("%w: %s (some session stores could not be read: %v)", ErrNotFound, id, err)
-		}
-		return Session{}, fmt.Errorf("%w: %s", ErrNotFound, id)
+		return Session{}, &NotFoundError{ID: id, Unreadable: unreadable}
 	default:
 		return Session{}, &AmbiguousError{ID: id, Candidates: matches}
 	}
