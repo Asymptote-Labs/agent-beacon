@@ -166,14 +166,19 @@ except (FileNotFoundError, ValueError):
     manifest = {}
 entry = manifest.setdefault("settings", {}).setdefault(settings_path, {"deny_rules_added": []})
 # Remember which containers this install created, so uninstall can remove them
-# and leave a file that had them untouched. Only the first install records this.
+# and leave a file that had them untouched. The first install records the
+# containers; every install adds hook events it creates, so an upgrade that
+# brings a new event still uninstalls cleanly.
 if "created" not in entry:
     entry["created"] = {
         "hooks": "hooks" not in settings,
-        "events": [e for e in ours if e not in (settings.get("hooks") or {})],
+        "events": [],
         "permissions": "permissions" not in settings,
         "deny": "deny" not in (settings.get("permissions") or {}),
     }
+for event in ours:
+    if event not in (settings.get("hooks") or {}) and event not in entry["created"]["events"]:
+        entry["created"]["events"].append(event)
 
 hooks = settings.setdefault("hooks", {})
 for event in list(hooks):
