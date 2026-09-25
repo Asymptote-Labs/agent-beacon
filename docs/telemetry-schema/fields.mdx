@@ -27,6 +27,7 @@ Beacon models each event as an action plus a set of typed entities. The [`event`
 | `command` | Shell or process execution context | `command`, `exit_code`, `duration_ms` |
 | `mcp` | MCP server, tool, method, protocol, resource, and session context | `server`, `tool`, `method.name`, `protocol.version`, `resource.uri`, `session.id` |
 | `approval` | Approval or policy decision context | `required`, `decision`, `reason` |
+| `handoff` | On a `session.handoff` event, the session this one continues from a [handoff brief](/cli/handoff#linking-a-new-session-to-the-one-it-continues) | `source_harness`, `source_session_id` |
 | `policy` | Policy metadata when available from a runtime or integration | `id`, `name`, `decision`, `enforcement`, `reason` |
 | `prompt` | Prompt text when the source emits it and content handling allows it | `text` |
 | `content` | Content handling state for the event | `retention`, `included`, `redacted`, `truncated` |
@@ -72,6 +73,7 @@ Optional context fields add detail when available:
 | `mcp` | MCP server, tool, method, protocol, resource, or session metadata |
 | `jsonrpc`, `rpc`, `network`, `server`, `error` | MCP client-span context projected from OpenTelemetry semantic conventions when available |
 | `approval` | Approval requirement, decision, or reason |
+| `handoff` | The session a handed-off session continues: source harness and session id |
 | `policy` | Policy ID, name, decision, enforcement mode, or reason |
 | `content` | Content inclusion, redaction, and truncation state |
 | `gen_ai` | OpenTelemetry GenAI request, response, usage, message, tool, retrieval, evaluation, provider, and workflow metadata |

@@ -113,7 +113,7 @@ func clineEndpointEvents(input map[string]interface{}, sessionID string) []norma
 		// recorded from the same payload rather than waiting for a prompt hook that only the
 		// file-based surface has.
 		if prompt := clinePromptText(input); prompt != "" {
-			events = append(events, clinePromptEvent(cloneFields(fields), prompt))
+			events = append(events, clinePromptEvents(cloneFields(fields), prompt)...)
 		}
 		return events
 	case clineStagePrompt:
@@ -121,7 +121,7 @@ func clineEndpointEvents(input map[string]interface{}, sessionID string) []norma
 		if prompt == "" {
 			return nil
 		}
-		return []normalizedEvent{clinePromptEvent(fields, prompt)}
+		return clinePromptEvents(fields, prompt)
 	case clineStageToolBefore:
 		mergeMap(fields, clineToolFields(input, false))
 		return one("tool.invoked", "tool", "info", "Cline tool invoked", fields)
@@ -195,6 +195,16 @@ func clineBaseFields(input map[string]interface{}, sessionID string) map[string]
 		fields["model"] = model
 	}
 	return fields
+}
+
+// clinePromptEvents is the prompt event plus, when the prompt carries a handoff marker, the
+// session.handoff link.
+func clinePromptEvents(fields map[string]interface{}, prompt string) []normalizedEvent {
+	events := []normalizedEvent{clinePromptEvent(fields, prompt)}
+	if link, ok := handoffLinkEvent(fields, prompt); ok {
+		events = append(events, link)
+	}
+	return events
 }
 
 func clinePromptEvent(fields map[string]interface{}, prompt string) normalizedEvent {
