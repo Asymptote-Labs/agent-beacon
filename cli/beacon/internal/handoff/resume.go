@@ -79,6 +79,16 @@ func PlanResume(session Session, opts PlanOptions) (Plan, error) {
 	if !ok {
 		return Plan{}, fmt.Errorf("%s cannot be started by beacon handoff (supported: %s)", RuntimeLabel(target), strings.Join(StartableNames(), ", "))
 	}
+	reason := nativeBlocker(session, target, opts)
+	// Said before anything else is checked, since no directory or install fixes it.
+	if reason != "" && targetCommand.NewSession == nil {
+		others := strings.Join(BriefTargetNames(), ", ")
+		if reason == ReasonOtherRuntime {
+			return Plan{}, fmt.Errorf("%s can only reopen its own sessions; it cannot start a new session from a brief (pass --agent with one of: %s)", RuntimeLabel(target), others)
+		}
+		return Plan{}, fmt.Errorf("%s cannot start a new session from a brief, which this session needs because %s; pass --agent to continue in one of: %s",
+			RuntimeLabel(target), ReasonText(reason), others)
+	}
 	dir, err := resumeDir(session, opts.Dir)
 	if err != nil {
 		return Plan{}, err
@@ -96,7 +106,6 @@ func PlanResume(session Session, opts PlanOptions) (Plan, error) {
 			plan.Env[name] = value
 		}
 	}
-	reason := nativeBlocker(session, target, opts)
 	if reason == "" {
 		plan.Mode, plan.Args = ModeNative, nativeArgs(targetCommand, session)
 		return plan, nil
@@ -110,9 +119,6 @@ func PlanResume(session Session, opts PlanOptions) (Plan, error) {
 	}
 	plan.Mode, plan.Reason = ModeNewSession, reason
 	plan.BriefPath = opts.BriefPath
-	if targetCommand.NewSession == nil {
-		return Plan{}, fmt.Errorf("%s cannot start a new session from a brief (%s)", RuntimeLabel(target), ReasonText(reason))
-	}
 	plan.Args = targetCommand.NewSession(NewSessionPrompt(session, opts.BriefPath))
 	return plan, nil
 }
@@ -201,6 +207,17 @@ func ReasonText(reason string) string {
 		return "its runtime reopens it only from the directory it ran in"
 	}
 	return reason
+}
+
+// BriefTargetNames names the runtimes Beacon can start a new session in from a brief, for messages.
+func BriefTargetNames() []string {
+	var names []string
+	for i, r := range runtimes {
+		if r.Command != nil && r.Command.NewSession != nil {
+			names = append(names, RuntimeNames()[i])
+		}
+	}
+	return names
 }
 
 // StartableNames names the runtimes Beacon can start, for messages.
