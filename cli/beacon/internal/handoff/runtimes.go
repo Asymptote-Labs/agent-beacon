@@ -8,6 +8,8 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/clinesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/opencodesession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pisession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/primesession"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
@@ -49,6 +51,8 @@ const (
 	HarnessCodex    = codexsession.Harness
 	HarnessOpenCode = opencodesession.Harness
 	HarnessCline    = clinesession.Harness
+	HarnessPi       = pisession.Harness
+	HarnessPrime    = primesession.Harness
 )
 
 // runtimes lists every runtime handoff supports, in display order.
@@ -111,6 +115,38 @@ var runtimes = []Runtime{
 			NewSession: func(prompt string) []string {
 				return []string{"--tui", "--auto-approve", "false", prompt}
 			},
+		},
+	},
+	{
+		Harness:   HarnessPi,
+		Label:     "Pi",
+		Aliases:   []string{"pi", "pi-cli"},
+		NewSource: func(dir string) Source { return &piSource{dir: dir} },
+		Command: &runtimeCommand{
+			Executable: "pi",
+			// --session takes the transcript's path as well as its id; the path names it exactly,
+			// wherever Pi's session directory is.
+			Resume: func(s Session) ([]string, bool) { return []string{"--session", s.SourcePath}, true },
+			// -- ends Pi's options, so the prompt is never read as one.
+			NewSession: func(prompt string) []string { return []string{"--", prompt} },
+		},
+	},
+	{
+		Harness:   HarnessPrime,
+		Label:     "Prime Agent",
+		Aliases:   []string{"prime", "prime-agent"},
+		NewSource: func(dir string) Source { return &primeSource{dir: dir} },
+		Command: &runtimeCommand{
+			Executable: "prime-agent",
+			Resume: func(s Session) ([]string, bool) {
+				// A subagent transcript belongs to the session that spawned it, not to one the CLI
+				// reopens on its own.
+				if s.Subagent {
+					return nil, false
+				}
+				return []string{"--resume", s.SourcePath}, true
+			},
+			NewSession: func(prompt string) []string { return []string{"--", prompt} },
 		},
 	},
 }

@@ -142,6 +142,7 @@ func TestListFilters(t *testing.T) {
 
 func TestListToleratesMissingStores(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
+	isolateRuntimeEnv(t)
 	empty := t.TempDir()
 	sources := DefaultSources(StoreDirs{
 		HarnessClaude:   filepath.Join(empty, "claude"),

@@ -286,6 +286,11 @@ func (m *mapper) emitPrompt(line, index int, timestamp time.Time, text string) {
 	ev.GenAI = ensureGenAI(ev.GenAI)
 	ev.GenAI.Input = &schema.GenAIInputInfo{Messages: asymptoteobserve.TextInputMessages(text)}
 	m.append(line, fmt.Sprintf("user.%d", index), ev)
+	if info, ok := asymptoteobserve.ParseHandoffMarker(text); ok {
+		link := m.base(timestamp, "session.handoff", "session", schema.SeverityInfo, "Session continued from a "+info.SourceHarness+" session")
+		link.Handoff = &info
+		m.append(line, fmt.Sprintf("user.%d.handoff", index), link)
+	}
 }
 
 func (m *mapper) emitToolResult(line int, timestamp time.Time, callID string, message map[string]interface{}) {

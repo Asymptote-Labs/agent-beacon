@@ -20,6 +20,15 @@ var (
 	claudeUpdated   = time.Date(2026, 9, 23, 9, 0, 0, 0, time.UTC)
 )
 
+// isolateRuntimeEnv clears the environment variables that move a runtime's default store, so a
+// runtime the fixture leaves at its default reads only the test's HOME.
+func isolateRuntimeEnv(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{"PI_CODING_AGENT_DIR", "PRIME_AGENT_CODING_AGENT_DIR"} {
+		t.Setenv(name, "")
+	}
+}
+
 // storeFixture lays down one session store per supported runtime, in the formats each runtime
 // writes, under a temporary directory.
 type storeFixture struct {
@@ -29,6 +38,8 @@ type storeFixture struct {
 
 func newStoreFixture(t *testing.T) storeFixture {
 	t.Helper()
+	// The fixture leaves the runtimes it does not write at their defaults; keep those under HOME.
+	isolateRuntimeEnv(t)
 	root := t.TempDir()
 	f := storeFixture{
 		root: root,
