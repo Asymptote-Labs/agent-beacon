@@ -330,6 +330,12 @@ func (m *mapper) emitPrompt(event *Event, text string, images []UserImage) {
 		ev.Raw = mergeRaw(ev.Raw, map[string]interface{}{"images": paths})
 	}
 	m.append(event, fmt.Sprintf("turn.%d.prompt", m.turnIndex), ev)
+	if info, ok := asymptoteobserve.ParseHandoffMarker(text); ok {
+		link := m.base(event, "session.handoff", "session", schema.SeverityInfo, schema.FidelityObserved, "Session continued from a "+info.SourceHarness+" session")
+		link.Timestamp = ev.Timestamp
+		link.Handoff = &info
+		m.append(event, fmt.Sprintf("turn.%d.handoff", m.turnIndex), link)
+	}
 }
 
 func (m *mapper) emitAssistantMessage(event *Event, text string) {

@@ -10,6 +10,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/copilotsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/dshsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/factorysession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/fxsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/hermessession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/openclawsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/opencodesession"
@@ -45,6 +46,9 @@ type runtimeCommand struct {
 	// NewSession returns the arguments that start an interactive session with prompt as its first
 	// message.
 	NewSession func(prompt string) []string
+	// ResumesInSessionDir marks a CLI that finds a session by the directory it is started in, so
+	// a native reopen from any other directory (--cwd) would not find it.
+	ResumesInSessionDir bool
 	// Env overrides the runtime's environment: a variable set to a value is set, one set to "" is
 	// removed. It holds switches only, never credentials, because the plan prints it.
 	Env map[string]string
@@ -62,6 +66,7 @@ const (
 	HarnessCopilot  = copilotsession.Harness
 	HarnessHermes   = hermessession.Harness
 	HarnessDSH      = dshsession.Harness
+	HarnessFx       = fxsession.Harness
 	HarnessOpenClaw = openclawsession.Harness
 
 	// Runtimes Beacon starts but whose sessions it reads only from the runtime log.
@@ -235,6 +240,22 @@ var runtimes = []Runtime{
 		// and exits, and `dsh web` is a browser UI. Its sessions continue in another runtime.
 		// Bare "deepseek" is not an alias: it names the vendor and its models, and a runtime-log row
 		// stamped with it came from a provider route, not from DeepSeek Harness.
+	},
+	{
+		Harness:   HarnessFx,
+		Label:     "fx",
+		Aliases:   []string{"fx"},
+		NewSource: func(dir string) Source { return &fxSource{dir: dir} },
+		Command: &runtimeCommand{
+			Executable: "fx",
+			// fx looks a session id up within the workspace it runs in; the plan starts it in the
+			// session's workspace root.
+			Resume: func(s Session) ([]string, bool) { return []string{"--resume", s.ID}, true },
+			// fx resumes only sessions of the workspace it is started in.
+			ResumesInSessionDir: true,
+			// No NewSession: fx has no interactive session that starts from a prompt (`fx ask` is
+			// one-shot), so it reopens its own sessions but cannot pick one up from a brief.
+		},
 	},
 	{
 		Harness:   HarnessOpenClaw,
