@@ -347,7 +347,7 @@ docker run --rm --platform linux/amd64 homebrew/brew sh -c \
 ```
 
 The release should include the five GoReleaser CLI archives (four `.tar.gz` plus
-`beacon_<version>_windows_amd64.zip`), `checksums.txt`, `threat-rules.tar.gz`,
+`beacon_<version>_windows_amd64.zip`), `checksums.txt`, `threat-rules.tar.gz`, `install.sh` (the Linux one-line installer from `packaging/linux/install.sh`),
 `BeaconEndpointAgent-<version>-arm64.pkg`, its `.sha256`, `update-manifest.json`,
 and `BeaconEndpointAgent-<version>-x64.msi` with its `.sha256`.
 

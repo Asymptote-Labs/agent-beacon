@@ -2,10 +2,12 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"html"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -170,6 +172,61 @@ func (cs *CallbackServer) handleCallback(w http.ResponseWriter, r *http.Request)
 	}
 	cs.resultCh <- &CallbackResult{State: state}
 	cs.sendResponse(w, true, "")
+}
+
+// ErrInvalidPastedCallback reports pasted text that is not a callback for this
+// sign-in. Nothing was consumed, so the caller can ask again.
+var ErrInvalidPastedCallback = errors.New("that is not the sign-in address for this terminal")
+
+// CompletePasted finishes the flow from text the user pasted instead of from a
+// browser request: the full callback address the browser failed to load
+// (http://127.0.0.1:<port>/callback?state=...&exchange_code=...), or the bare
+// exchange code.
+//
+// It exists for signing in on a remote or headless machine, where the browser
+// runs on another computer whose 127.0.0.1 is not this one. That is safe to
+// accept by hand because the exchange code is useless without the PKCE verifier,
+// which never leaves this process.
+//
+// Input that is not a callback for this sign-in returns an error wrapping
+// ErrInvalidPastedCallback and leaves the flow open. Any other error means the
+// flow ended, and Wait returns it too.
+func (cs *CallbackServer) CompletePasted(ctx context.Context, input string) error {
+	input = strings.Trim(strings.TrimSpace(input), `"'<>`)
+	if input == "" {
+		return fmt.Errorf("%w: nothing was pasted", ErrInvalidPastedCallback)
+	}
+	state, exchangeCode, errMsg := cs.state, input, ""
+	if strings.Contains(input, "://") || strings.ContainsAny(input, "?&=") {
+		parsed, err := url.Parse(input)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalidPastedCallback, err)
+		}
+		query := parsed.Query()
+		state, exchangeCode, errMsg = query.Get("state"), query.Get("exchange_code"), query.Get("error")
+		if state != cs.state {
+			return fmt.Errorf("%w: it belongs to a different sign-in", ErrInvalidPastedCallback)
+		}
+		if exchangeCode == "" && errMsg == "" {
+			return fmt.Errorf("%w: it has no exchange code", ErrInvalidPastedCallback)
+		}
+	} else if strings.ContainsAny(input, " \t/") {
+		return fmt.Errorf("%w: paste the whole address from the browser's address bar", ErrInvalidPastedCallback)
+	}
+	if !cs.reserveCompletion() {
+		return errors.New("sign-in already finished")
+	}
+	if errMsg != "" {
+		cs.resultCh <- &CallbackResult{Error: errMsg}
+		return errors.New(errMsg)
+	}
+	if err := cs.exchange(ctx, exchangeCode, state, cs.codeVerifier); err != nil {
+		message := fmt.Sprintf("failed to exchange code: %v", err)
+		cs.resultCh <- &CallbackResult{Error: message}
+		return errors.New(message)
+	}
+	cs.resultCh <- &CallbackResult{State: state}
+	return nil
 }
 
 func (cs *CallbackServer) finishCallback(w http.ResponseWriter, result *CallbackResult, success bool, errorMsg string) {

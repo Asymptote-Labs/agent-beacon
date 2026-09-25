@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -29,6 +31,14 @@ var (
 	accountInspect = account.Inspect
 	accountRevoke  = account.Revoke
 	accountNow     = time.Now
+	// accountPasteInput is where `beacon login` reads a pasted callback address.
+	// Only a terminal qualifies: piped stdin is not a person who can paste.
+	accountPasteInput = func(cmd *cobra.Command) io.Reader {
+		if !isTerminal(os.Stdin) {
+			return nil
+		}
+		return cmd.InOrStdin()
+	}
 )
 
 var loginCmd = &cobra.Command{
@@ -54,7 +64,8 @@ var whoamiCmd = &cobra.Command{
 
 func init() {
 	loginCmd.Flags().StringVar(&accountOpts.baseURL, "auth-url", "", "Beacon authentication URL (defaults to "+account.DefaultBaseURL+", or "+account.BaseURLEnv+")")
-	loginCmd.Flags().BoolVar(&accountOpts.noBrowser, "no-browser", false, "Print the sign-in URL instead of opening a browser")
+	loginCmd.Flags().BoolVar(&accountOpts.noBrowser, "no-browser", false, "Print the sign-in URL instead of opening a browser; on a remote machine, finish by pasting the address the browser was sent to")
+	loginCmd.Flags().BoolVar(&accountOpts.noBrowser, "headless", false, "Alias for --no-browser, for signing in on a remote or headless machine")
 	for _, command := range []*cobra.Command{loginCmd, logoutCmd, whoamiCmd} {
 		command.Flags().BoolVar(&accountOpts.json, "json", false, "Print machine-readable JSON")
 		rootCmd.AddCommand(command)
@@ -67,11 +78,12 @@ func runLogin(cmd *cobra.Command, args []string) error {
 		flowOut = cmd.ErrOrStderr()
 	}
 	session, err := accountLogin(commandContext(cmd), account.LoginOptions{
-		BaseURL:   accountOpts.baseURL,
-		Version:   version.GetVersion(),
-		NoBrowser: accountOpts.noBrowser,
-		Out:       flowOut,
-		Now:       accountNow,
+		BaseURL:    accountOpts.baseURL,
+		Version:    version.GetVersion(),
+		NoBrowser:  accountOpts.noBrowser,
+		Out:        flowOut,
+		Now:        accountNow,
+		PasteInput: accountPasteInput(cmd),
 	})
 	if err != nil {
 		return err
