@@ -12,7 +12,7 @@ The commands are grouped by resource:
 
 - `beacon memory list|show` for approved memory
 - `beacon memory evaluations run|list|show`
-- `beacon memory candidates list|show|approve|reject|supersede`
+- `beacon memory candidates list|show|create|approve|reject|supersede`
 - `beacon memory skills preview|install`
 
 All subcommands accept the common endpoint and project-scope flags:
@@ -22,13 +22,19 @@ All subcommands accept the common endpoint and project-scope flags:
 | `--user` | Use per-user endpoint paths. Enabled by default |
 | `--system` | Use system endpoint paths |
 | `--log-path <path>` | Runtime JSONL log path |
-| `--project <path>` | Project path for memory scoping. Defaults to the current directory |
+| `--project <path>` | Project path for memory scoping. Defaults to the trace's repository, then the current directory |
 | `--json` | Print machine-readable JSON |
 
 Beacon stores learning artifacts in `memory.db` next to the resolved endpoint base
 directory for the runtime log. The store is durable local state and is scoped by
 the resolved project ID, so approved memory for one repository is not automatically
 returned for another.
+
+Commands that start from a trace (`evaluations run` and `candidates create`) scope
+the result to the repository the trace recorded, so memory lands with the project the
+agent was working in rather than wherever you ran the command. A linked git worktree
+resolves to the same project as its main checkout. Pass `--project` to override.
+Commands that list or look up records use `--project` or the current directory.
 
 ## Evaluate traces
 
@@ -89,12 +95,43 @@ probabilities. A trace becomes a review candidate only when both hold:
 Text output lists each completed evaluation that was not promoted with the
 reason, for example `Not promoted: eval_... (task_success 0.27 is below 0.50)`.
 
+Without `--trace`, the selection skips traces that are a single event with no
+session, such as OTLP metric samples. They carry nothing to learn from, and each
+fresh sample would otherwise sort above the real sessions and consume the run's
+Jev calls. `--limit` counts traces before the skip, so a run can select fewer
+sessions than the limit.
+
 List and inspect stored evaluations:
 
 ```bash
 beacon memory evaluations list --limit 25
 beacon memory evaluations show <evaluation-id>
 ```
+
+## Write a candidate yourself
+
+Jev scores a trace; it does not read it. When you, or an agent acting for you, have
+read a trace and know the lesson, write the candidate directly. No evaluator is
+called, so this also works where external evaluation is not allowed:
+
+```bash
+beacon memory candidates create \
+  --trace session:claude_code:03d6d4a7-... \
+  --kind gotcha \
+  --title "Package smoke needs a warm cache" \
+  --applicability "when the first smoke run after a clean checkout fails" \
+  --body-file lesson.md
+```
+
+`--trace` is the trace the lesson came from; its events become the candidate's
+evidence. `--kind`, `--title`, and a body from `--body` or `--body-file` are required.
+`--applicability` and `--tag` take the same forms as on `candidates approve`, below;
+without tags Beacon records `beacon`, the kind, and the harness.
+
+The candidate waits for `candidates approve` like any other, and the same
+[lesson shape](/concepts/cross-harness-memory) applies. It has no
+`source_evaluation_id`, which is how you tell an authored candidate from a Jev-scored
+one in `candidates list --json`.
 
 ## Review candidates
 

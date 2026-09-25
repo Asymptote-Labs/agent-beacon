@@ -17,6 +17,56 @@ func TestPathForRuntimeLogUsesEndpointBaseDir(t *testing.T) {
 	}
 }
 
+// A linked worktree's .git is a file pointing at .git/worktrees/<name> in the main
+// checkout, whose commondir points back at the shared .git. The worktree must resolve
+// to the same project ID as the main checkout, with its own branch.
+func TestResolveProjectFollowsLinkedWorktree(t *testing.T) {
+	main := t.TempDir()
+	mainGit := filepath.Join(main, ".git")
+	worktreeGit := filepath.Join(mainGit, "worktrees", "check-brain")
+	if err := os.MkdirAll(worktreeGit, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for path, body := range map[string]string{
+		filepath.Join(mainGit, "HEAD"):          "ref: refs/heads/main\n",
+		filepath.Join(mainGit, "config"):        "[remote \"origin\"]\n\turl = https://github.com/acme/repo.git\n",
+		filepath.Join(worktreeGit, "HEAD"):      "ref: refs/heads/lawrence/check-brain\n",
+		filepath.Join(worktreeGit, "commondir"): "../..\n",
+	} {
+		if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	worktree := filepath.Join(t.TempDir(), "check-brain")
+	if err := os.MkdirAll(filepath.Join(worktree, "server"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, ".git"), []byte("gitdir: "+worktreeGit+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	fromMain, err := ResolveProject(main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromWorktree, err := ResolveProject(filepath.Join(worktree, "server"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fromWorktree.Path != worktree {
+		t.Fatalf("worktree path = %s, want %s", fromWorktree.Path, worktree)
+	}
+	if fromWorktree.RemoteURL != "https://github.com/acme/repo.git" {
+		t.Fatalf("worktree remote = %q", fromWorktree.RemoteURL)
+	}
+	if fromWorktree.Branch != "lawrence/check-brain" {
+		t.Fatalf("worktree branch = %q", fromWorktree.Branch)
+	}
+	if fromWorktree.ID != fromMain.ID {
+		t.Fatalf("worktree project %s should match main checkout %s", fromWorktree.ID, fromMain.ID)
+	}
+}
+
 func TestResolveProjectUsesGitRootAndOrigin(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".git"), 0755); err != nil {

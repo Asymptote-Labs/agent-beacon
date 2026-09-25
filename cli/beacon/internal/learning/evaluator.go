@@ -50,12 +50,13 @@ type EvaluationInput struct {
 }
 
 type EvaluationPreview struct {
-	TraceID          string  `json:"trace_id"`
-	Title            string  `json:"title,omitempty"`
-	EventCount       int     `json:"event_count"`
-	EstimatedCalls   int     `json:"estimated_calls"`
-	EstimatedCostUSD float64 `json:"estimated_cost_usd"`
-	Reason           string  `json:"reason,omitempty"`
+	TraceID          string                             `json:"trace_id"`
+	Title            string                             `json:"title,omitempty"`
+	EventCount       int                                `json:"event_count"`
+	EstimatedCalls   int                                `json:"estimated_calls"`
+	EstimatedCostUSD float64                            `json:"estimated_cost_usd"`
+	Reason           string                             `json:"reason,omitempty"`
+	Project          asymptoteobserve.LearningProjectV1 `json:"project"`
 }
 
 type Projection struct {
@@ -176,6 +177,7 @@ func Preview(input EvaluationInput, opts EvaluatorOptions) EvaluationPreview {
 		EstimatedCalls:   1,
 		EstimatedCostUSD: costPerTrace(opts),
 		Reason:           "explicit evaluation command; hooks and collectors do not call Jev",
+		Project:          input.Project,
 	}
 }
 
