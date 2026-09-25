@@ -7,6 +7,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/clinesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/cursorsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/opencodesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pisession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/primesession"
@@ -53,6 +54,7 @@ const (
 	HarnessCline    = clinesession.Harness
 	HarnessPi       = pisession.Harness
 	HarnessPrime    = primesession.Harness
+	HarnessCursor   = cursorsession.Harness
 )
 
 // runtimes lists every runtime handoff supports, in display order.
@@ -147,6 +149,24 @@ var runtimes = []Runtime{
 				return []string{"--resume", s.SourcePath}, true
 			},
 			NewSession: func(prompt string) []string { return []string{"--", prompt} },
+		},
+	},
+	{
+		Harness:   HarnessCursor,
+		Label:     "Cursor",
+		NewSource: func(dir string) Source { return &cursorSource{dir: dir} },
+		// cursor-agent asks before running commands unless given --force; Beacon never passes it.
+		Command: &runtimeCommand{
+			Executable: "cursor-agent",
+			Resume: func(s Session) ([]string, bool) {
+				// --resume takes a CLI chat id. IDE conversations and subagent transcripts are not
+				// chats the CLI can load.
+				if !cursorCLIChat(s) {
+					return nil, false
+				}
+				return []string{"--resume", s.ID}, true
+			},
+			NewSession: func(prompt string) []string { return []string{prompt} },
 		},
 	},
 }

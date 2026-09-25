@@ -24,7 +24,7 @@ func installed(names ...string) func(string) (string, error) {
 	}
 }
 
-var allRuntimes = installed("claude", "codex", "opencode", "cline", "pi", "prime-agent")
+var allRuntimes = installed("claude", "codex", "opencode", "cline", "pi", "prime-agent", "cursor-agent")
 
 // resumableSession is a session whose directory and session file both exist.
 func resumableSession(t *testing.T, harness, id string) Session {
@@ -80,6 +80,7 @@ func TestPlanResumeStartsANewSessionInEachRuntime(t *testing.T) {
 		{HarnessCline, "cline", []string{"--tui", "--auto-approve", "false"}},
 		{HarnessPi, "pi", []string{"--"}},
 		{HarnessPrime, "prime-agent", []string{"--"}},
+		{HarnessCursor, "cursor-agent", nil},
 	} {
 		t.Run(tc.target, func(t *testing.T) {
 			source := HarnessCodex
@@ -204,10 +205,10 @@ func TestPlanResumeErrors(t *testing.T) {
 	if _, err := PlanResume(session, PlanOptions{Target: HarnessCodex, BriefPath: filepath.Join(t.TempDir(), "b.md"), LookPath: installed("claude")}); !errors.Is(err, ErrRuntimeNotInstalled) {
 		t.Fatalf("missing target runtime err = %v", err)
 	}
-	if _, err := PlanResume(session, PlanOptions{Target: "cursor", LookPath: allRuntimes}); err == nil || !strings.Contains(err.Error(), "cannot be started") {
+	if _, err := PlanResume(session, PlanOptions{Target: "gemini_cli", LookPath: allRuntimes}); err == nil || !strings.Contains(err.Error(), "cannot be started") {
 		t.Fatalf("unsupported target err = %v", err)
 	}
-	if _, err := PlanResume(Session{Harness: "cursor", ID: "x", Directory: t.TempDir()}, PlanOptions{LookPath: allRuntimes}); err == nil {
+	if _, err := PlanResume(Session{Harness: "gemini_cli", ID: "x", Directory: t.TempDir()}, PlanOptions{LookPath: allRuntimes}); err == nil {
 		t.Fatal("a session from an unsupported runtime needs --agent")
 	}
 	if _, err := PlanResume(session, PlanOptions{ForceNew: true, LookPath: allRuntimes}); err == nil || !strings.Contains(err.Error(), "brief path") {

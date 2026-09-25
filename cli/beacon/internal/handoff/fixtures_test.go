@@ -24,7 +24,7 @@ var (
 // runtime the fixture leaves at its default reads only the test's HOME.
 func isolateRuntimeEnv(t *testing.T) {
 	t.Helper()
-	for _, name := range []string{"PI_CODING_AGENT_DIR", "PRIME_AGENT_CODING_AGENT_DIR"} {
+	for _, name := range []string{"PI_CODING_AGENT_DIR", "PRIME_AGENT_CODING_AGENT_DIR", "XDG_CONFIG_HOME", "APPDATA", "CURSOR_CONFIG_DIR"} {
 		t.Setenv(name, "")
 	}
 }

@@ -34,10 +34,31 @@ func MapTrace(ref TraceRef, records []Record, opts MapOptions) []MappedEvent {
 		if !ok {
 			continue
 		}
-		ev.Event.ID = cursorEventID(fmt.Sprintf("%s:%s:%d:%s:%s", ref.Kind, ref.ID, record.Order, record.NativeID, record.Type))
+		key := fmt.Sprintf("%s:%s:%d:%s:%s", ref.Kind, ref.ID, record.Order, record.NativeID, record.Type)
+		ev.Event.ID = cursorEventID(key)
 		out = append(out, MappedEvent{SourceOrder: record.Order, Event: ev})
+		// The link shares its prompt's record, so a sync that resumes from that record's order
+		// never splits the pair.
+		if link, ok := handoffLink(ref, record); ok {
+			link.Event.ID = cursorEventID(key + ":handoff")
+			out = append(out, MappedEvent{SourceOrder: record.Order, Event: link})
+		}
 	}
 	return out
+}
+
+// handoffLink is the session.handoff event for a prompt that carries the handoff marker.
+func handoffLink(ref TraceRef, record Record) (schema.Event, bool) {
+	if record.Type != "user_message" {
+		return schema.Event{}, false
+	}
+	info, ok := asymptoteobserve.ParseHandoffMarker(record.Content)
+	if !ok {
+		return schema.Event{}, false
+	}
+	link := baseEvent(ref, record, "session.handoff", "session", schema.SeverityInfo, schema.FidelityObserved, "Session continued from a "+info.SourceHarness+" session")
+	link.Handoff = &info
+	return link, true
 }
 
 func mapRecord(ref TraceRef, record Record) (schema.Event, bool) {

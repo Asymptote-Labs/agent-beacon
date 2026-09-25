@@ -238,7 +238,7 @@ func TestHandoffResumeErrors(t *testing.T) {
 	if _, _, err := runResume(t, f, "claude-1", "--agent", "opencode", "--yes"); !errors.Is(err, handoff.ErrRuntimeNotInstalled) {
 		t.Fatalf("uninstalled target err = %v", err)
 	}
-	if _, _, err := runResume(t, f, "claude-1", "--agent", "cursor"); err == nil || !strings.Contains(err.Error(), "--agent") {
+	if _, _, err := runResume(t, f, "claude-1", "--agent", "no-such-runtime"); err == nil || !strings.Contains(err.Error(), "--agent") {
 		t.Fatalf("unsupported --agent err = %v", err)
 	}
 	handoffLaunch = func(handoff.Plan, io.Reader, io.Writer, io.Writer) (int, error) {
@@ -254,9 +254,9 @@ func TestHandoffResumeErrors(t *testing.T) {
 
 func TestHandoffResumeFromTheRuntimeLogStartsANewSession(t *testing.T) {
 	f := newResumeFixture(t)
-	logPath := handoffLog(t, "cursor", "cursor-conv-1", "rename the module")
+	logPath := handoffLog(t, "gemini_cli", "gemini-conv-1", "rename the module")
 	dir := t.TempDir()
-	_, _, err := runResume(t, f, "cursor-conv-1", "--log-path", logPath, "--agent", "claude", "--cwd", dir, "--yes")
+	_, _, err := runResume(t, f, "gemini-conv-1", "--log-path", logPath, "--agent", "claude", "--cwd", dir, "--yes")
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}

@@ -274,7 +274,7 @@ func TestParseHarness(t *testing.T) {
 			t.Fatalf("ParseHarness(%q) = %q, %v; want %q", in, got, err, want)
 		}
 	}
-	if _, err := ParseHarness("cursor"); err == nil || !strings.Contains(err.Error(), "supported") {
+	if _, err := ParseHarness("no-such-runtime"); err == nil || !strings.Contains(err.Error(), "supported") {
 		t.Fatalf("unsupported runtime err = %v", err)
 	}
 }
