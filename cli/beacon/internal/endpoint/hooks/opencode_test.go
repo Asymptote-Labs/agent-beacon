@@ -21,6 +21,9 @@ func TestInstallOpenCodePluginWritesManagedPlugin(t *testing.T) {
 	for _, want := range []string{
 		opencodeManagedPluginMarker,
 		"BeaconEndpointPlugin",
+		"export default {",
+		"server: BeaconEndpointPlugin",
+		"async setup(ctx)",
 		"BEACON_OPENCODE_DEBUG",
 		"--platform opencode",
 		"opencode-event",
