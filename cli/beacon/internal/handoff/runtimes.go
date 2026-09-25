@@ -41,6 +41,9 @@ type runtimeCommand struct {
 	// NewSession returns the arguments that start an interactive session with prompt as its first
 	// message.
 	NewSession func(prompt string) []string
+	// ResumesInSessionDir marks a CLI that finds a session by the directory it is started in, so
+	// a native reopen from any other directory (--cwd) would not find it.
+	ResumesInSessionDir bool
 	// Env overrides the runtime's environment: a variable set to a value is set, one set to "" is
 	// removed. It holds switches only, never credentials, because the plan prints it.
 	Env map[string]string
@@ -161,6 +164,8 @@ var runtimes = []Runtime{
 			// fx looks a session id up within the workspace it runs in; the plan starts it in the
 			// session's workspace root.
 			Resume: func(s Session) ([]string, bool) { return []string{"--resume", s.ID}, true },
+			// fx resumes only sessions of the workspace it is started in.
+			ResumesInSessionDir: true,
 			// No NewSession: fx has no interactive session that starts from a prompt (`fx ask` is
 			// one-shot), so it reopens its own sessions but cannot pick one up from a brief.
 		},

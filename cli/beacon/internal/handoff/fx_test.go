@@ -153,6 +153,8 @@ func TestPlanResumeRefusesToStartANewFxSession(t *testing.T) {
 		{"a new session requested", fxSession, PlanOptions{ForceNew: true}, ReasonRequested},
 		{"the session file is gone", gone, PlanOptions{}, ReasonSessionGone},
 		{"known only from the runtime log", fxSession, PlanOptions{FromRuntimeLog: true}, ReasonFromRuntimeLog},
+		// fx resumes only sessions of the workspace it starts in.
+		{"--cwd outside its workspace", fxSession, PlanOptions{Dir: t.TempDir()}, ReasonOtherDirectory},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.opts.BriefPath, tc.opts.LookPath = brief, allRuntimes
