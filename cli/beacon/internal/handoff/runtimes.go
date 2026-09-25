@@ -55,6 +55,17 @@ const (
 	HarnessPi       = pisession.Harness
 	HarnessPrime    = primesession.Harness
 	HarnessOpenClaw = openclawsession.Harness
+
+	// Runtimes Beacon starts but whose sessions it reads only from the runtime log.
+	HarnessOhMyPi      = "omp"
+	HarnessGemini      = "gemini_cli"
+	HarnessQwen        = "qwen_code"
+	HarnessKiro        = "kiro"
+	HarnessAntigravity = "antigravity_cli"
+	HarnessDevin       = "devin-cli"
+	HarnessMuse        = "muse_code"
+	HarnessOpenHands   = "openhands"
+	HarnessGoose       = "goose"
 )
 
 // runtimes lists every runtime handoff supports, in display order.
@@ -172,6 +183,103 @@ var runtimes = []Runtime{
 			},
 		},
 	},
+
+	// The runtimes below keep no session store Beacon reads. Their sessions come from Beacon's
+	// runtime log, so they always continue from a brief; each can also be the runtime another
+	// session continues in. Where a CLI lets its approval mode be set, the command pins the mode
+	// that asks, so a user or project setting that approves everything does not carry over to a
+	// session Beacon starts.
+	{
+		Harness: HarnessOhMyPi,
+		Label:   "Oh My Pi",
+		Aliases: []string{"oh-my-pi"},
+		// Oh My Pi approves every tool call by default (tools.approvalMode "yolo").
+		Command: &runtimeCommand{
+			Executable: "omp",
+			NewSession: func(prompt string) []string { return []string{"--approval-mode=always-ask", prompt} },
+		},
+	},
+	{
+		Harness: HarnessGemini,
+		Label:   "Gemini CLI",
+		Aliases: []string{"gemini", "gemini-cli"},
+		Command: &runtimeCommand{
+			Executable: "gemini",
+			NewSession: func(prompt string) []string {
+				return []string{"--approval-mode", "default", "--prompt-interactive", prompt}
+			},
+		},
+	},
+	{
+		Harness: HarnessQwen,
+		Label:   "Qwen Code",
+		Aliases: []string{"qwen", "qwen-code"},
+		// A positional prompt is one-shot in Qwen Code; --prompt-interactive keeps the session open.
+		Command: &runtimeCommand{
+			Executable: "qwen",
+			NewSession: func(prompt string) []string {
+				return []string{"--approval-mode", "default", "--prompt-interactive", prompt}
+			},
+		},
+	},
+	{
+		Harness: HarnessKiro,
+		Label:   "Kiro",
+		Aliases: []string{"kiro-cli"},
+		Command: &runtimeCommand{
+			Executable: "kiro-cli",
+			NewSession: func(prompt string) []string { return []string{"chat", prompt} },
+		},
+	},
+	{
+		Harness: HarnessAntigravity,
+		Label:   "Antigravity CLI",
+		Aliases: []string{"antigravity", "agy"},
+		Command: &runtimeCommand{
+			Executable: "agy",
+			NewSession: func(prompt string) []string { return []string{"--prompt-interactive", prompt} },
+		},
+	},
+	{
+		Harness: HarnessDevin,
+		Label:   "Devin CLI",
+		// Beacon's Devin CLI hooks record "devin-cli"; hooks written by older versions recorded
+		// "devin", which reaches this entry through its alias.
+		Aliases: []string{"devin"},
+		// DEVIN_PERMISSION_MODE can hold "dangerous", which approves every tool; the flag wins over
+		// it. Devin reads a bare argument as a path to open, so the prompt follows --.
+		Command: &runtimeCommand{
+			Executable: "devin",
+			NewSession: func(prompt string) []string { return []string{"--permission-mode", "auto", "--", prompt} },
+		},
+	},
+	{
+		Harness: HarnessMuse,
+		Label:   "Muse Code",
+		Aliases: []string{"muse", "muse-code"},
+		Command: &runtimeCommand{
+			Executable: "muse",
+			NewSession: func(prompt string) []string { return []string{"--approval-mode", "on-request", prompt} },
+		},
+	},
+	{
+		Harness: HarnessOpenHands,
+		Label:   "OpenHands",
+		Command: &runtimeCommand{
+			Executable: "openhands",
+			NewSession: func(prompt string) []string { return []string{"--task", prompt} },
+		},
+	},
+	{
+		Harness: HarnessGoose,
+		Label:   "goose",
+		// goose approves every tool call by default and has no flag for its mode, only GOOSE_MODE.
+		Command: &runtimeCommand{
+			Executable: "goose",
+			NewSession: func(prompt string) []string { return []string{"run", "--interactive", "--text", prompt} },
+			Env:        map[string]string{"GOOSE_MODE": "approve"},
+		},
+	},
 }
 
 // Harnesses lists the runtimes handoff supports, in display order.
@@ -182,6 +290,28 @@ var Harnesses = func() []string {
 	}
 	return names
 }()
+
+// ReadsStore reports whether Beacon reads harness's own session store.
+func ReadsStore(harness string) bool {
+	r, ok := LookupRuntime(harness)
+	return ok && r.NewSource != nil
+}
+
+// canonicalHarness is the registry's harness for a name a log row carries: the name itself, or the
+// runtime it is an alias of. A name no runtime answers to is returned as it is.
+func canonicalHarness(name string) string {
+	if _, ok := LookupRuntime(name); ok {
+		return name
+	}
+	for _, r := range runtimes {
+		for _, alias := range r.Aliases {
+			if name == alias {
+				return r.Harness
+			}
+		}
+	}
+	return name
+}
 
 // LookupRuntime returns the registry entry for harness.
 func LookupRuntime(harness string) (Runtime, bool) {

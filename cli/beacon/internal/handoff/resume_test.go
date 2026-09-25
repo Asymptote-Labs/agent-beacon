@@ -24,7 +24,7 @@ func installed(names ...string) func(string) (string, error) {
 	}
 }
 
-var allRuntimes = installed("claude", "codex", "opencode", "cline", "pi", "prime-agent", "openclaw")
+var allRuntimes = installed("claude", "codex", "opencode", "cline", "pi", "prime-agent", "omp", "gemini", "qwen", "kiro-cli", "agy", "devin", "muse", "openhands", "goose", "openclaw")
 
 // resumableSession is a session whose directory and session file both exist.
 func resumableSession(t *testing.T, harness, id string) Session {
@@ -82,6 +82,15 @@ func TestPlanResumeStartsANewSessionInEachRuntime(t *testing.T) {
 		{HarnessPrime, "prime-agent", []string{"--"}},
 		// {key} stands for the fresh Gateway session key the prompt derives.
 		{HarnessOpenClaw, "openclaw", []string{"tui", "--session", "{key}", "--message"}},
+		{HarnessOhMyPi, "omp", []string{"--approval-mode=always-ask"}},
+		{HarnessGemini, "gemini", []string{"--approval-mode", "default", "--prompt-interactive"}},
+		{HarnessQwen, "qwen", []string{"--approval-mode", "default", "--prompt-interactive"}},
+		{HarnessKiro, "kiro-cli", []string{"chat"}},
+		{HarnessAntigravity, "agy", []string{"--prompt-interactive"}},
+		{HarnessDevin, "devin", []string{"--permission-mode", "auto", "--"}},
+		{HarnessMuse, "muse", []string{"--approval-mode", "on-request"}},
+		{HarnessOpenHands, "openhands", []string{"--task"}},
+		{HarnessGoose, "goose", []string{"run", "--interactive", "--text"}},
 	} {
 		t.Run(tc.target, func(t *testing.T) {
 			source := HarnessCodex
@@ -350,5 +359,76 @@ func TestLaunchAppliesThePlansEnvironment(t *testing.T) {
 	}
 	if got := strings.TrimSpace(stdout.String()); got != "mode=approve allow=unset" {
 		t.Fatalf("runtime saw %q", got)
+	}
+}
+
+// A runtime whose sessions Beacon knows only from the runtime log continues them in a new session
+// of its own, with its approvals left on.
+func TestPlanResumeContinuesARuntimeLogSessionInItsOwnRuntime(t *testing.T) {
+	brief := filepath.Join(t.TempDir(), "brief.md")
+	session := Session{Harness: HarnessGoose, ID: "goose-1", Directory: t.TempDir()}
+	plan, err := PlanResume(session, PlanOptions{FromRuntimeLog: true, BriefPath: brief, LookPath: allRuntimes})
+	if err != nil {
+		t.Fatalf("PlanResume: %v", err)
+	}
+	if plan.Mode != ModeNewSession || plan.Reason != ReasonFromRuntimeLog || plan.Target != HarnessGoose {
+		t.Fatalf("plan = %+v", plan)
+	}
+	if !reflect.DeepEqual(plan.Env, map[string]string{"GOOSE_MODE": "approve"}) {
+		t.Fatalf("env = %v, want goose held to approve mode", plan.Env)
+	}
+}
+
+func TestRegistryIsConsistent(t *testing.T) {
+	seen := map[string]string{}
+	for _, r := range runtimes {
+		if r.Label == "" {
+			t.Errorf("%s has no label", r.Harness)
+		}
+		// Events name a runtime by its normalized harness; one the schema spells differently
+		// would never match its own sessions.
+		if got := asymptoteobserve.NormalizeHarnessName(r.Harness); got != r.Harness {
+			t.Errorf("%s normalizes to %s", r.Harness, got)
+		}
+		for _, name := range append([]string{r.Harness}, r.Aliases...) {
+			if other, dup := seen[name]; dup {
+				t.Errorf("%q names both %s and %s", name, other, r.Harness)
+			}
+			seen[name] = r.Harness
+			if got, err := ParseHarness(name); err != nil || got != r.Harness {
+				t.Errorf("ParseHarness(%q) = %q, %v; want %s", name, got, err, r.Harness)
+			}
+		}
+		if r.NewSource == nil && r.Command == nil {
+			t.Errorf("%s can neither be read nor started", r.Harness)
+		}
+		if c := r.Command; c != nil {
+			if c.Executable == "" || (c.Resume == nil && c.NewSession == nil) {
+				t.Errorf("%s has a command that starts nothing", r.Harness)
+			}
+			if r.NewSource == nil && c.Resume != nil {
+				t.Errorf("%s reopens sessions by id but Beacon reads none of its sessions to reopen", r.Harness)
+			}
+			if c.NewSession != nil {
+				args := c.NewSession("PROMPT")
+				if len(args) == 0 || args[len(args)-1] != "PROMPT" {
+					t.Errorf("%s does not pass the prompt as its last argument: %q", r.Harness, args)
+				}
+			}
+		}
+	}
+}
+
+// A new session is linked to the one it continues only through the marker in its first prompt, so
+// every runtime's name has to fit in one.
+func TestEveryRuntimeCanBeNamedInAHandoffMarker(t *testing.T) {
+	for _, r := range runtimes {
+		if asymptoteobserve.HandoffMarker(r.Harness, "s-1") == "" {
+			t.Errorf("%s cannot be carried in a handoff marker", r.Harness)
+		}
+		prompt := NewSessionPrompt(Session{Harness: r.Harness, ID: "s-1"}, "/tmp/brief.md")
+		if info, ok := asymptoteobserve.ParseHandoffMarker(prompt); !ok || info.SourceHarness != r.Harness || info.SourceSessionID != "s-1" {
+			t.Errorf("%s: the new-session prompt's marker parses back as %+v, %v", r.Harness, info, ok)
+		}
 	}
 }
