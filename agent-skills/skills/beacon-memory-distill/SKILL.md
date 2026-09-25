@@ -16,7 +16,8 @@ loop that turns a few of those sessions into **approved project memory** that an
 agent can recall, whichever harness it runs in:
 
 1. Pick traces.
-2. Score them with the evaluator (the one networked step, and only with consent).
+2. Score them with the evaluator (the one networked step, and only with consent), or,
+   where evaluation is not allowed, skip scoring and read the traces yourself.
 3. For each candidate, read the source trace and draft the lesson.
 4. The user confirms, edits, or rejects each draft.
 5. Approve with the reviewed text.
@@ -25,8 +26,9 @@ The evaluator returns probabilities only. It says a trace looks reusable; it doe
 what the lesson is. **You write the lesson, from the trace, and the user approves it.**
 Never approve a candidate with its placeholder body ("no lesson text was extracted").
 
-Run every command from inside the repository the memory is for, or pass
-`--project <path>`.
+Commands that start from a trace (`evaluations run`, `candidates create`) file the
+memory under the repository the trace recorded, wherever you run them. Run every other
+command from inside the repository the memory is for, or pass `--project <path>`.
 
 ## Step 1: preflight
 
@@ -61,12 +63,15 @@ Reading the list:
   session, almost always OTLP metric samples such as `claude_code.active_time.total`.
   They arrive every few seconds and sort to the top, so a short list can be all noise;
   raise `--limit` or use `--page` until you have sessions, and never select them.
+  `evaluations run` skips them on its own when it selects by `--limit`, but never pass
+  one to `--trace`.
 - A session whose `updated_at` is within the last few minutes is still being written.
   Leave it for next time: a lesson drafted from half a session is usually wrong about
   how it ended.
-- `repository` is null for many sessions, because not every event carries one. Such a
-  session cannot tell you which project it belongs to; evaluate it only with an explicit
-  `--project <path>` you can justify from the paths in its commands.
+- A session's `repository` is where its memory will be filed. It is null for many
+  sessions, because not every event carries one, and then Beacon falls back to the
+  current directory. Evaluate or create a candidate for such a session only with an
+  explicit `--project <path>` you can justify from the paths in its commands.
 
 ## Step 3: dry run, then ask
 
@@ -93,8 +98,8 @@ test -n "${TYPESAFE_API_KEY:-}${BEACON_JEV_API_KEY:-}" && echo "evaluator key pr
 With no key, stop and tell the user to export `TYPESAFE_API_KEY` (or point
 `BEACON_JEV_ENDPOINT` at their organization's compatible evaluator). Never ask them to
 paste a key into the chat, and never pass `--jev-api-key` on the command line. If the user
-or their organization does not allow external evaluation, stop here: candidates come only
-from evaluations.
+or their organization does not allow external evaluation, or has no key and does not want
+one, skip Steps 3 and 4 and go to [Without an evaluator](#without-an-evaluator).
 
 ## Step 4: score
 
@@ -201,10 +206,36 @@ now recall these with the `beacon-memory-recall` skill or the Beacon MCP tools, 
 memory worth loading automatically can be installed as a skill with
 `beacon-memory-promote`.
 
+## Without an evaluator
+
+When scoring is not allowed, there is no evaluator to prefilter, so pick fewer traces
+(three at most) and only ones the user named or that clearly hold finished work. For
+each one, read it and draft the lesson exactly as in Step 5, then review the drafts with
+the user as in Step 6. Only after the user confirms a draft, write it as a candidate:
+
+```bash
+beacon memory candidates create --trace <trace-id> \
+  --title "<title>" \
+  --kind <workflow|correction|debugging_pattern|gotcha|convention> \
+  --applicability "<when this applies>" \
+  --tag <tag> --tag <tag> \
+  --body-file - --json <<'LESSON'
+<body>
+LESSON
+```
+
+The trace's events become the candidate's evidence, and it has no
+`source_evaluation_id`. It still waits for approval, so approve it with its candidate ID
+and a `--reason` as in Step 7; the text it was created with carries through, so the
+title, kind, and body flags can be left off. A trace the evaluator scored and did not
+promote is not a reason to write one by hand: that path is for when there is no
+evaluator, not for overturning it.
+
 ## Boundaries
 
 - The evaluation run is the only networked step. Run it only after the dry run and the
-  user's explicit yes, and only on the selection they approved.
+  user's explicit yes, and only on the selection they approved. `candidates create` is
+  local.
 - Memory is shared with every future agent in this project. Never put secrets, tokens,
   credentials, internal hostnames, customer data, or personal information into a title,
   body, tag, or reason, even when the trace contains them. Describe them instead ("the
