@@ -323,7 +323,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
         flushMessageParts(info.id, sid, model, info?.time?.completed)
         if (info?.id) {
           if (completedMessages.has(info.id)) return
-          completedMessages.add(info.id)
+          if (!info.finish || info.finish === "stop") completedMessages.add(info.id)
         }
       }
       if (type === "message.part.delta") {
@@ -603,7 +603,7 @@ export default {
     return async () => {
       controller.abort()
       await consuming
-      await Promise.all(registrations.map((item) => item.dispose?.().catch(() => undefined)))
+      await Promise.all(registrations.map((item) => Promise.resolve(item.dispose?.()).catch(() => undefined)))
     }
   },
 }
