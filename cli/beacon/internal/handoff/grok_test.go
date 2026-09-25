@@ -203,3 +203,25 @@ func TestParseHarnessAcceptsGrokNames(t *testing.T) {
 		t.Fatalf("prompt %q does not end with the Grok marker", prompt)
 	}
 }
+
+// A child session whose summary names only its kind and branch is still a subagent.
+func TestListKeepsAGrokSummaryThatOnlyNamesItsKind(t *testing.T) {
+	dirs, _ := grokFixture(t)
+	childID := "0199a3c4-9999-7a8b-9c0d-1e2f3a4b5c6d"
+	writeGrokSession(t, dirs[HarnessGrok], url.PathEscape("/work/api"), childID, grokUpdated, map[string]interface{}{
+		"session_kind": "subagent", "head_branch": "feat/child",
+	}, "/work/api", "inspect the logs")
+	sessions, err := List(DefaultSources(dirs), Filter{Harness: HarnessGrok, IncludeSubagents: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range sessions {
+		if s.ID == childID {
+			if !s.Subagent || s.Branch != "feat/child" || s.Title != "inspect the logs" {
+				t.Fatalf("child = %+v, want a subagent on feat/child titled by its first prompt", s)
+			}
+			return
+		}
+	}
+	t.Fatalf("child session not listed: %v", sessionKeys(sessions))
+}

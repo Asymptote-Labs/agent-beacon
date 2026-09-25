@@ -75,7 +75,7 @@ func (s *Store) List() ([]SessionRef, error) {
 				if ts := parseMillis(summary.UpdatedAt); ts > ref.ModTimeUnixMS {
 					ref.ModTimeUnixMS = ts
 				}
-				if summary.CurrentModelID == "" && summary.SessionSummary == "" && summary.GeneratedTitle == "" {
+				if summary.CurrentModelID == "" && summary.SessionSummary == "" && summary.GeneratedTitle == "" && summary.HeadBranch == "" && summary.SessionKind == "" {
 					ref.Summary = nil
 				}
 			}
