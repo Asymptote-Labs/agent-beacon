@@ -471,3 +471,26 @@ func TestLogSessionAcceptsAUniquePrefix(t *testing.T) {
 		t.Fatalf("--harness must narrow the prefix (raw \"claude\" rows included): %+v, %v, %v", session, found, err)
 	}
 }
+
+// A log row names a runtime by whatever spelling its hooks wrote; the session takes the registry's
+// harness, so it continues in its own runtime and --harness finds it.
+func TestLogSessionCanonicalizesAnAliasedHarness(t *testing.T) {
+	line := func(harness, id string) string {
+		return `{"timestamp":"2026-09-25T09:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"prompt.submitted","category":"prompt"},"severity":"info","endpoint":{"hostname":"h","os":"linux"},"harness":{"name":"` + harness + `"},"session":{"id":"` + id + `"},"prompt":{"text":"p ` + id + `"}}`
+	}
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	writeFixture(t, logPath, strings.Join([]string{
+		line("devin-cli", "devin-new-123"),
+		line("devin", "devin-old-456"),
+	}, "\n")+"\n")
+	for _, id := range []string{"devin-new-123", "devin-old-456"} {
+		session, _, found, err := LogSession(logPath, id, "")
+		if err != nil || !found || session.Harness != HarnessDevin {
+			t.Fatalf("%s: harness = %q, %v, %v; want %s", id, session.Harness, found, err, HarnessDevin)
+		}
+	}
+	session, _, found, err := LogSession(logPath, "devin-old", HarnessDevin)
+	if err != nil || !found || session.ID != "devin-old-456" {
+		t.Fatalf("--harness must find rows written under the alias: %+v, %v, %v", session, found, err)
+	}
+}
