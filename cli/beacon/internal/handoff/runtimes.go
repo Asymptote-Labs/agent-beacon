@@ -163,7 +163,7 @@ var runtimes = []Runtime{
 			Executable: "fx",
 			// fx looks a session id up within the workspace it runs in; the plan starts it in the
 			// session's workspace root.
-			Resume: func(s Session) ([]string, bool) { return []string{"--resume", s.ID}, true },
+			Resume: func(s Session) ([]string, bool) { return []string{"resume", s.ID}, true },
 			// fx resumes only sessions of the workspace it is started in.
 			ResumesInSessionDir: true,
 			// No NewSession: fx has no interactive session that starts from a prompt (`fx ask` is
