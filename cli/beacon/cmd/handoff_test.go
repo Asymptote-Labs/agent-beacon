@@ -378,8 +378,44 @@ func TestHandoffExportFallsBackToTheRuntimeLog(t *testing.T) {
 	if !strings.Contains(string(data), "rename the module") || !strings.Contains(string(data), "comes from Beacon's runtime log") {
 		t.Fatalf("log brief:\n%s", data)
 	}
-	if !strings.Contains(stderr, "no longer in its runtime's store") {
-		t.Fatalf("stderr should say where the brief came from: %q", stderr)
+	if !strings.Contains(stderr, "beacon handoff does not read cursor session stores") {
+		t.Fatalf("stderr should say why the brief came from the log: %q", stderr)
+	}
+}
+
+func TestHandoffExportRefusesTheLogWhenTheSessionsStoreIsUnreadable(t *testing.T) {
+	stubHandoffClock(t)
+	stubHandoffSources(t, stubHandoffSource{harness: handoff.HarnessClaude, err: errors.New("permission denied")})
+	logPath := handoffLog(t, handoff.HarnessClaude, "claude-9", "from the log")
+	_, _, err := runHandoff(t, "export", "claude-9", "--print", "--log-path", logPath)
+	if err == nil || !strings.Contains(err.Error(), "claude_code session store could not be read (permission denied)") {
+		t.Fatalf("an unreadable store must not be mistaken for a missing session: %v", err)
+	}
+
+	// Another runtime's session in the log is unaffected by the unreadable Claude store.
+	cursorLog := handoffLog(t, "cursor", "cursor-conv-1", "rename the module")
+	out, _, err := runHandoff(t, "export", "cursor-conv-1", "--print", "--log-path", cursorLog)
+	if err != nil || !strings.Contains(out, "rename the module") {
+		t.Fatalf("export = %v\n%s", err, out)
+	}
+
+	// With nothing anywhere, the error names the store it could not search.
+	_, _, err = runHandoff(t, "export", "nope-123", "--log-path", filepath.Join(t.TempDir(), "none.jsonl"))
+	if !errors.Is(err, handoff.ErrNotFound) || !strings.Contains(err.Error(), "claude_code: permission denied") {
+		t.Fatalf("not-found err = %v", err)
+	}
+}
+
+func TestHandoffExportMatchesRawHarnessNamesInTheLog(t *testing.T) {
+	stubHandoffClock(t)
+	stubHandoffSources(t, stubHandoffSource{harness: handoff.HarnessClaude})
+	logPath := handoffLog(t, "claude", "old-row-1", "written by an older Beacon")
+	out, _, err := runHandoff(t, "export", "old-row-1", "--harness", "claude", "--print", "--log-path", logPath)
+	if err != nil || !strings.Contains(out, "written by an older Beacon") {
+		t.Fatalf("a log row naming the runtime \"claude\" must match --harness claude: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "(`claude_code`)") {
+		t.Fatalf("the brief should name the canonical harness:\n%s", out)
 	}
 }
 
