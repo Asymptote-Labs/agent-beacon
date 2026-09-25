@@ -25,10 +25,13 @@ Sessions come from each runtime's own local session store, not from Beacon's run
 | Cline | `~/.cline/data` | `cline` |
 | Pi | `~/.pi/agent/sessions` (or under `PI_CODING_AGENT_DIR`) | `pi` |
 | Prime Agent | `~/.prime/agent`, both `sessions` and `session-artifacts` (or `PRIME_AGENT_CODING_AGENT_DIR`) | `prime` |
+| fx | `~/.fx/sessions` | `fx` |
 
 When a Codex thread has more than one rollout file, `beacon handoff` lists it once, under its newest file. Cline can hold the same task both as a CLI session and in its older task history; the CLI session is the copy that is listed. Cline kanban cards are not sessions and are not listed. Prime Agent subagent transcripts, under `session-artifacts`, are listed as subagents of the session that started them.
 
-`--store-dir <runtime>=<path>` takes the location in the table: for Pi its sessions directory, as `beacon endpoint pi sync --sessions-dir` does, and for Prime Agent the agent directory holding both of its roots.
+`--store-dir <runtime>=<path>` takes the location in the table: for Pi its sessions directory, as `beacon endpoint pi sync --sessions-dir` does, for Prime Agent the agent directory holding both of its roots, and for fx its sessions directory, as `beacon endpoint fx sync --sessions-dir` does.
+
+fx records no session title, so an fx session is listed under its first prompt, and its directory is the workspace fx last bound it to.
 
 ## `beacon handoff list`
 
@@ -110,6 +113,7 @@ There are two ways to resume:
   | Cline | `cline --tui --auto-approve false --id <id>` |
   | Pi | `pi --session <session file>` |
   | Prime Agent | `prime-agent --resume <session file>` |
+  | fx | `fx --resume <id>`, in the session's workspace |
 
 - **Start a new session from a brief.** Otherwise, or with `--agent` naming another runtime or with `--new`, Beacon writes a brief (see `export`) and starts a new session. The first message of that session points at the brief:
 
@@ -126,13 +130,15 @@ There are two ways to resume:
 
 Claude Code, Cline and Prime Agent subagent sessions, and Cline's older task history, can't be reopened by their CLIs, so they always continue from a brief. A session known only from Beacon's runtime log also continues from a brief, and it needs `--agent` if its own runtime isn't one Beacon can start.
 
+fx has no interactive session that starts from a prompt (`fx ask` runs one request and exits), so it is not in the new-session table. Beacon reopens an fx session natively, and continues it in another runtime with `--agent`; `--agent fx` for another runtime's session, `--new` on an fx session, and an fx session whose files are gone stop with an error rather than launching anything. fx looks a session id up within the workspace it runs in, so Beacon starts it in the session's workspace; `--cwd` elsewhere won't find the session. fx's default permission mode is `auto`, where a reviewer resolves permission requests, and fx has no command-line flag to change it. Beacon passes none: it reopens your own session under whatever permission mode your fx configuration sets.
+
 Cline approves every tool call by default. Beacon always passes `--auto-approve false`, so a session Beacon starts never gets auto-approval on Beacon's say-so. You can still turn it on inside the Cline TUI.
 
 The runtime runs in this terminal, in the session's recorded directory. If that directory no longer exists, Beacon stops rather than starting somewhere else; pass `--cwd` to choose a directory. Beacon prints the plan and asks `Continue? [Y/n]` before launching. Without a terminal, it launches only with `--yes`. `beacon handoff resume` exits with the runtime's own exit code.
 
 | Flag | Description |
 |------|-------------|
-| `--agent` | Runtime to continue in: `claude`, `codex`, `opencode`, `cline`, `pi` or `prime`. Defaults to the session's own runtime. |
+| `--agent` | Runtime to continue in: `claude`, `codex`, `opencode`, `cline`, `pi`, `prime` or `fx` (`fx` only for fx's own sessions). Defaults to the session's own runtime. |
 | `--new` | Start a new session from a brief even when the session could be reopened. |
 | `--cwd` | Directory to start the runtime in. |
 | `--print` | Show the plan and command without writing a brief or launching anything. |
@@ -163,7 +169,7 @@ The link event keeps the new session's id, workspace and harness, and leaves the
 Two paths record the link:
 
 - **Live hooks.** The prompt hook for Claude Code and the Cline and OpenCode plugins record it as the prompt is sent (`harness.collection_method: hook`).
-- **Session-store sync.** `beacon endpoint claude sync`, `codex sync`, `opencode sync`, `cline sync`, `pi sync` and `prime sync` record it when they read the prompt back from the runtime's store (`harness.collection_method: poll`).
+- **Session-store sync.** `beacon endpoint claude sync`, `codex sync`, `opencode sync`, `cline sync`, `pi sync`, `prime sync` and `fx sync` record it when they read the prompt back from the runtime's store (`harness.collection_method: poll`).
 
 Codex CLI prompts reach Beacon over OTLP and through `beacon endpoint codex sync`, not a prompt hook, so a session continued in Codex is linked by the sync. For a runtime that also has a prompt hook or plugin, a sync can record the same link the hook already did; the two carry different `collection_method` values, as every other event those runtimes report through both paths does. A sync's link has a deterministic `event.id`, so syncing again never duplicates it.
 

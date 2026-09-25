@@ -7,6 +7,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/clinesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/fxsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/opencodesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pisession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/primesession"
@@ -53,6 +54,7 @@ const (
 	HarnessCline    = clinesession.Harness
 	HarnessPi       = pisession.Harness
 	HarnessPrime    = primesession.Harness
+	HarnessFx       = fxsession.Harness
 )
 
 // runtimes lists every runtime handoff supports, in display order.
@@ -147,6 +149,20 @@ var runtimes = []Runtime{
 				return []string{"--resume", s.SourcePath}, true
 			},
 			NewSession: func(prompt string) []string { return []string{"--", prompt} },
+		},
+	},
+	{
+		Harness:   HarnessFx,
+		Label:     "fx",
+		Aliases:   []string{"fx"},
+		NewSource: func(dir string) Source { return &fxSource{dir: dir} },
+		Command: &runtimeCommand{
+			Executable: "fx",
+			// fx looks a session id up within the workspace it runs in; the plan starts it in the
+			// session's workspace root.
+			Resume: func(s Session) ([]string, bool) { return []string{"--resume", s.ID}, true },
+			// No NewSession: fx has no interactive session that starts from a prompt (`fx ask` is
+			// one-shot), so it reopens its own sessions but cannot pick one up from a brief.
 		},
 	},
 }
