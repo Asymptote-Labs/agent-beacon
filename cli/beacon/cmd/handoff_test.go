@@ -411,8 +411,8 @@ func TestHandoffExportDefaultsUnderTheBeaconDirectory(t *testing.T) {
 func TestHandoffExportFallsBackToTheRuntimeLog(t *testing.T) {
 	stubHandoffClock(t)
 	stubHandoffSources(t, stubHandoffSource{harness: handoff.HarnessClaude})
-	logPath := handoffLog(t, "cursor", "cursor-conv-1", "rename the module")
-	out, stderr, err := runHandoff(t, "export", "cursor-conv-1", "--log-path", logPath, "--output-dir", t.TempDir())
+	logPath := handoffLog(t, "vscode_copilot", "gemini-conv-1", "rename the module")
+	out, stderr, err := runHandoff(t, "export", "gemini-conv-1", "--log-path", logPath, "--output-dir", t.TempDir())
 	if err != nil {
 		t.Fatalf("export: %v", err)
 	}
@@ -423,8 +423,18 @@ func TestHandoffExportFallsBackToTheRuntimeLog(t *testing.T) {
 	if !strings.Contains(string(data), "rename the module") || !strings.Contains(string(data), "comes from Beacon's runtime log") {
 		t.Fatalf("log brief:\n%s", data)
 	}
-	if !strings.Contains(stderr, "beacon handoff does not read cursor session stores") {
+	if !strings.Contains(stderr, "beacon handoff does not read vscode_copilot session stores") {
 		t.Fatalf("stderr should say why the brief came from the log: %q", stderr)
+	}
+
+	// A runtime whose store Beacon reads, but which no longer has the session, says so instead.
+	cursorLog := handoffLog(t, "cursor", "cursor-conv-1", "rename the module")
+	_, stderr, err = runHandoff(t, "export", "cursor-conv-1", "--log-path", cursorLog, "--output-dir", t.TempDir())
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if !strings.Contains(stderr, "cursor session cursor-conv-1 is no longer in its runtime's store") {
+		t.Fatalf("stderr should say the store lost the session: %q", stderr)
 	}
 }
 
@@ -438,8 +448,8 @@ func TestHandoffExportRefusesTheLogWhenTheSessionsStoreIsUnreadable(t *testing.T
 	}
 
 	// Another runtime's session in the log is unaffected by the unreadable Claude store.
-	cursorLog := handoffLog(t, "cursor", "cursor-conv-1", "rename the module")
-	out, _, err := runHandoff(t, "export", "cursor-conv-1", "--print", "--log-path", cursorLog)
+	geminiLog := handoffLog(t, "vscode_copilot", "gemini-conv-1", "rename the module")
+	out, _, err := runHandoff(t, "export", "gemini-conv-1", "--print", "--log-path", geminiLog)
 	if err != nil || !strings.Contains(out, "rename the module") {
 		t.Fatalf("export = %v\n%s", err, out)
 	}
@@ -486,8 +496,8 @@ func TestHandoffExportErrors(t *testing.T) {
 		t.Fatalf("unknown session err = %v", err)
 	}
 
-	logPath := handoffLog(t, "cursor", "cursor-conv-1", "x")
-	if _, _, err := runHandoff(t, "export", "cursor-conv-1", "--harness", "codex", "--log-path", logPath); !errors.Is(err, handoff.ErrNotFound) {
+	logPath := handoffLog(t, "vscode_copilot", "gemini-conv-1", "x")
+	if _, _, err := runHandoff(t, "export", "gemini-conv-1", "--harness", "codex", "--log-path", logPath); !errors.Is(err, handoff.ErrNotFound) {
 		t.Fatalf("--harness must also scope the log fallback, got %v", err)
 	}
 
@@ -506,9 +516,9 @@ func TestHandoffExportErrors(t *testing.T) {
 func TestHandoffExportFindsALogSessionByPrefix(t *testing.T) {
 	stubHandoffClock(t)
 	stubHandoffSources(t, stubHandoffSource{harness: handoff.HarnessClaude})
-	logPath := handoffLog(t, "cursor", "cursor-conv-1234", "rename the module")
-	out, _, err := runHandoff(t, "export", "cursor-conv", "--print", "--log-path", logPath)
-	if err != nil || !strings.Contains(out, "rename the module") || !strings.Contains(out, "`cursor-conv-1234`") {
+	logPath := handoffLog(t, "gemini_cli", "gemini-conv-1234", "rename the module")
+	out, _, err := runHandoff(t, "export", "gemini-conv", "--print", "--log-path", logPath)
+	if err != nil || !strings.Contains(out, "rename the module") || !strings.Contains(out, "`gemini-conv-1234`") {
 		t.Fatalf("export by prefix = %v\n%s", err, out)
 	}
 }
@@ -534,7 +544,7 @@ func TestHandoffLogReasonNamesRuntimesWithoutAStore(t *testing.T) {
 	if !strings.Contains(gone, "no longer in its runtime's store") {
 		t.Fatalf("store-backed runtime: %q", gone)
 	}
-	for _, harness := range []string{handoff.HarnessGoose, "cursor"} {
+	for _, harness := range []string{handoff.HarnessGoose, "vscode_copilot"} {
 		if got := handoffLogReason(handoff.Session{Harness: harness, ID: "s-1"}); !strings.Contains(got, "does not read "+harness+" session stores") {
 			t.Fatalf("%s: %q", harness, got)
 		}
