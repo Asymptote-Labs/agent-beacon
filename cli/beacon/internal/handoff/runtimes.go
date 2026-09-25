@@ -47,6 +47,10 @@ type runtimeCommand struct {
 	// Env overrides the runtime's environment: a variable set to a value is set, one set to "" is
 	// removed. It holds switches only, never credentials, because the plan prints it.
 	Env map[string]string
+	// CwdScopedResume is true when the runtime looks up a session id under its working directory.
+	// A --cwd override that differs from the session's recorded directory makes native resume
+	// impossible, because the id will not be found under the new directory.
+	CwdScopedResume bool
 }
 
 // Harness names, as the endpoint event schema spells them.
@@ -163,7 +167,8 @@ var runtimes = []Runtime{
 		// reopens runs in the mode that asks, whatever the config says; the user can still change
 		// the mode inside the TUI.
 		Command: &runtimeCommand{
-			Executable: "grok",
+			Executable:      "grok",
+			CwdScopedResume: true,
 			Resume: func(s Session) ([]string, bool) {
 				// A subagent is a child of the session that spawned it, not one a person reopens.
 				if s.Subagent {

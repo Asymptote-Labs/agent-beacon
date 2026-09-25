@@ -152,15 +152,23 @@ func TestPlanResumeReopensAGrokSessionByItsID(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		edit   func(*Session)
+		opts   func(*PlanOptions)
 		reason string
 	}{
-		{"subagent", func(s *Session) { s.Subagent = true }, ReasonNotResumable},
-		{"gone", func(s *Session) { s.SourcePath = filepath.Join(t.TempDir(), "missing") }, ReasonSessionGone},
+		{"subagent", func(s *Session) { s.Subagent = true }, nil, ReasonNotResumable},
+		{"gone", func(s *Session) { s.SourcePath = filepath.Join(t.TempDir(), "missing") }, nil, ReasonSessionGone},
+		{"cwd override", nil, func(o *PlanOptions) { o.Dir = t.TempDir() }, ReasonNotResumable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := session
-			tc.edit(&s)
-			plan, err := PlanResume(s, PlanOptions{BriefPath: brief, LookPath: installed("grok")})
+			if tc.edit != nil {
+				tc.edit(&s)
+			}
+			opts := PlanOptions{BriefPath: brief, LookPath: installed("grok")}
+			if tc.opts != nil {
+				tc.opts(&opts)
+			}
+			plan, err := PlanResume(s, opts)
 			if err != nil {
 				t.Fatalf("PlanResume: %v", err)
 			}

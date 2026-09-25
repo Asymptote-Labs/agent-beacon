@@ -130,6 +130,9 @@ func nativeBlocker(session Session, target string, opts PlanOptions) string {
 		return ReasonFromRuntimeLog
 	}
 	command, _ := commandFor(target)
+	if command.CwdScopedResume && opts.Dir != "" && opts.Dir != session.Directory {
+		return ReasonNotResumable
+	}
 	if command.Resume == nil {
 		return ReasonNotResumable
 	}
