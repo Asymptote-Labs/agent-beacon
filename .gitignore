@@ -25,6 +25,7 @@ coverage.html
 cli/beacon/beacon
 cli/beacon/beacon-*
 cli/beacon/dist/
+cli/beacon/release-install/
 cli/beacon/release-rules/
 dist/
 
