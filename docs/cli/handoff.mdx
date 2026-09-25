@@ -27,12 +27,13 @@ Sessions come from each runtime's own local session store, not from Beacon's run
 | Prime Agent | `~/.prime/agent`, both `sessions` and `session-artifacts` (or `PRIME_AGENT_CODING_AGENT_DIR`) | `prime` |
 | Factory Droid | `~/.factory/sessions` | `droid` |
 | GitHub Copilot CLI | `~/.copilot/session-state` | `copilot` |
+| Hermes Agent | `~/.hermes/state.db` | `hermes` |
 | DeepSeek Harness | `~/.dsh/sessions` (or under `DSH_HOME`) | `dsh` |
 | Cursor | `~/.cursor/projects` (agent transcripts) and Cursor's global storage `state.vscdb` (Composer conversations) | `cursor` |
 
-When a Codex thread has more than one rollout file, `beacon handoff` lists it once, under its newest file. Cline can hold the same task both as a CLI session and in its older task history; the CLI session is the copy that is listed. Cline kanban cards are not sessions and are not listed. Prime Agent subagent transcripts, under `session-artifacts`, are listed as subagents of the session that started them. A DeepSeek Harness session that DSH spawned for delegated work is listed as a subagent of the session that started it; a fork of a session is listed as a session of its own. A Cursor conversation can be stored both as a transcript and as a Composer record under one id; it is listed once, as the transcript when `cursor-agent` can reopen it and as the Composer record otherwise. Cursor subagent transcripts are listed as subagents of the conversation that started them.
+When a Codex thread has more than one rollout file, `beacon handoff` lists it once, under its newest file. Cline can hold the same task both as a CLI session and in its older task history; the CLI session is the copy that is listed. Cline kanban cards are not sessions and are not listed. Prime Agent subagent transcripts, under `session-artifacts`, are listed as subagents of the session that started them. Hermes Agent delegate subagents are listed as subagents of the session that spawned them. When Hermes compresses a long conversation it continues it in a new session; each of those sessions is listed, and reopening any of them reopens the latest. A DeepSeek Harness session that DSH spawned for delegated work is listed as a subagent of the session that started it; a fork of a session is listed as a session of its own. A Cursor conversation can be stored both as a transcript and as a Composer record under one id; it is listed once, as the transcript when `cursor-agent` can reopen it and as the Composer record otherwise. Cursor subagent transcripts are listed as subagents of the conversation that started them.
 
-`--store-dir <runtime>=<path>` takes the location in the table: for Pi its sessions directory, as `beacon endpoint pi sync --sessions-dir` does, and for Prime Agent the agent directory holding both of its roots. For Factory Droid it is the sessions directory, as `beacon endpoint factory sync --sessions-dir` does. For GitHub Copilot CLI it is the `~/.copilot` directory that holds `session-state`, as `beacon endpoint copilot sync --copilot-dir` does. For DeepSeek Harness it is its `DSH_HOME`, as `beacon endpoint dsh sync --dsh-home` does. For Cursor it is the projects directory, as `beacon endpoint cursor sync --projects-dir` does. Cursor's global storage database is always read from its default location.
+`--store-dir <runtime>=<path>` takes the location in the table: for Pi its sessions directory, as `beacon endpoint pi sync --sessions-dir` does, and for Prime Agent the agent directory holding both of its roots. For Factory Droid it is the sessions directory, as `beacon endpoint factory sync --sessions-dir` does. For GitHub Copilot CLI it is the `~/.copilot` directory that holds `session-state`, as `beacon endpoint copilot sync --copilot-dir` does. For Hermes Agent it is the `state.db` file, as `beacon endpoint hermes sync --db` does. For DeepSeek Harness it is its `DSH_HOME`, as `beacon endpoint dsh sync --dsh-home` does. For Cursor it is the projects directory, as `beacon endpoint cursor sync --projects-dir` does. Cursor's global storage database is always read from its default location.
 
 ### Runtimes Beacon starts but does not read
 
@@ -65,7 +66,7 @@ beacon handoff list --json
 
 | Flag | Description |
 |------|-------------|
-| `--harness` | Only this runtime: `claude`, `codex`, `opencode`, `cline`, `pi`, `prime`, `droid`, `copilot`, `dsh` or `cursor`. |
+| `--harness` | Only this runtime: `claude`, `codex`, `opencode`, `cline`, `pi`, `prime`, `droid`, `copilot`, `hermes`, `dsh` or `cursor`. |
 | `--here` | Only sessions that ran in the current directory or below it. |
 | `--dir` | Only sessions that ran in this directory or below it. |
 | `--subagents` | Include subagent sessions. They are hidden by default, because resuming one resumes a fragment of its parent's task. |
@@ -134,6 +135,7 @@ There are two ways to resume:
   | Prime Agent | `prime-agent --resume <session file>` |
   | Factory Droid | `droid --resume <id>` |
   | GitHub Copilot CLI | `copilot --resume=<id>` |
+  | Hermes Agent | `hermes --resume <id>` |
   | Cursor | `cursor-agent --resume <chat id>` (chats `cursor-agent` started only) |
 
 - **Start a new session from a brief.** Otherwise, or with `--agent` naming another runtime or with `--new`, Beacon writes a brief (see `export`) and starts a new session. The first message of that session points at the brief:
@@ -161,7 +163,9 @@ There are two ways to resume:
 
   The prompt names the brief by its path and asks the agent to read it, then confirm the task before changing anything. The brief is never inlined into the command line, because a command line is visible to every local user through the process table. The prompt ends with a handoff marker (see below).
 
-Claude Code, Cline and Prime Agent subagent sessions, and Cline's older task history, can't be reopened by their CLIs, so they always continue from a brief. A session known only from Beacon's runtime log also continues from a brief, and it needs `--agent` if its own runtime isn't one Beacon can start.
+Hermes Agent has no row in the second table: its CLI has no way to start an interactive session with a first message, only one-shot runs, so it can't continue a session from a brief. A Hermes session continues from a brief in another runtime (`--agent`), and `--agent hermes` reopens only Hermes's own sessions.
+
+Claude Code, Cline, Prime Agent and Hermes Agent subagent sessions, and Cline's older task history, can't be reopened by their CLIs, so they always continue from a brief. A session known only from Beacon's runtime log also continues from a brief, and it needs `--agent` if its own runtime isn't one Beacon can start.
 
 Beacon cannot start DeepSeek Harness, because it has no interactive terminal session to start: `dsh --profile headless` answers one task and exits, and `dsh web` is a browser UI. A DeepSeek Harness session therefore continues in another runtime, named with `--agent`, and `--agent dsh` is refused.
 
@@ -172,6 +176,8 @@ Cline approves every tool call by default. Beacon always passes `--auto-approve 
 The same holds for every runtime Beacon starts. Oh My Pi and goose approve every tool call by default, so Beacon passes `--approval-mode=always-ask` to Oh My Pi and sets `GOOSE_MODE=approve` for goose. Where a CLI takes an approval mode, Beacon names the mode that asks (Gemini CLI, Qwen Code, Muse Code, and Devin CLI, whose `DEVIN_PERMISSION_MODE` could otherwise hold `dangerous`), so a user or project setting that approves everything does not carry over. Beacon never passes a flag that turns approvals off.
 
 GitHub Copilot CLI asks before each tool call unless `COPILOT_ALLOW_ALL=true` is set, which also trusts the directory, or `COPILOT_PLAN_THEN_AUTOPILOT` starts it in plan mode and carries the plan out without waiting. Beacon removes both from the environment it launches Copilot with (`--print` shows them under `env`), and never passes `--allow-all-tools` or `--yolo`. Copilot sessions are not tied to a directory, but Beacon still starts Copilot in the session's recorded directory.
+
+Hermes Agent asks before dangerous commands by default. Beacon never passes `--yolo`, and it removes `HERMES_YOLO_MODE` from the environment it starts Hermes in, so an exported variable can't turn those prompts off. `hermes --resume` looks the id up in the state database Hermes itself uses (under `HERMES_HOME` when that is set), not in a `--store-dir` path.
 
 The runtime runs in this terminal, in the session's recorded directory. If that directory no longer exists, Beacon stops rather than starting somewhere else; pass `--cwd` to choose a directory. Beacon prints the plan and asks `Continue? [Y/n]` before launching. Without a terminal, it launches only with `--yes`. `beacon handoff resume` exits with the runtime's own exit code.
 
@@ -208,7 +214,7 @@ The link event keeps the new session's id, workspace and harness, and leaves the
 Two paths record the link:
 
 - **Live hooks and plugins.** Every runtime whose prompts Beacon captures as they are sent records it: the shared prompt hook (Claude Code, Cursor, Factory Droid, Qwen Code, Kiro, Kimi Code, Devin, Muse Code, OpenHands, Grok Build, DeepSeek Harness, Hermes Agent, VS Code), Antigravity (including the prompt it recovers from its transcript when the prompt hook does not fire), the Cline, OpenCode and OpenClaw plugins, and the Pi, Oh My Pi, Prime Agent and Senpi extensions (`harness.collection_method` `hook` or `plugin`).
-- **Session-store sync.** `beacon endpoint claude sync`, `codex sync`, `opencode sync`, `cline sync`, `pi sync`, `prime sync`, `factory sync`, `copilot sync`, `dsh sync` and `cursor sync` record it when they read the prompt back from the runtime's store (`harness.collection_method: poll`).
+- **Session-store sync.** `beacon endpoint claude sync`, `codex sync`, `opencode sync`, `cline sync`, `pi sync`, `prime sync`, `factory sync`, `copilot sync`, `hermes sync`, `dsh sync` and `cursor sync` record it when they read the prompt back from the runtime's store (`harness.collection_method: poll`).
 
 Codex CLI prompts reach Beacon over OTLP and through `beacon endpoint codex sync`, not a prompt hook, so a session continued in Codex is linked by the sync. The same holds for GitHub Copilot CLI, whose live path is OTLP: `beacon endpoint copilot sync` records the link. For a runtime that also has a prompt hook or plugin, a sync can record the same link the hook already did; the two carry different `collection_method` values, as every other event those runtimes report through both paths does. A sync's link has a deterministic `event.id`, so syncing again never duplicates it.
 
