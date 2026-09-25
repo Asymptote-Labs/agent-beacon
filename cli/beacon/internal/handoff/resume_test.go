@@ -25,7 +25,8 @@ func installed(names ...string) func(string) (string, error) {
 }
 
 var allRuntimes = installed("claude", "codex", "opencode", "cline", "pi", "prime-agent", "droid",
-	"omp", "gemini", "qwen", "kiro-cli", "agy", "devin", "muse", "openhands", "goose", "copilot", "fx")
+	"omp", "gemini", "qwen", "kiro-cli", "agy", "devin", "muse", "openhands", "goose", "copilot",
+	"hermes", "fx")
 
 // resumableSession is a session whose directory and session file both exist.
 func resumableSession(t *testing.T, harness, id string) Session {

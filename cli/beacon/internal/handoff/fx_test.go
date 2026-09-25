@@ -191,8 +191,13 @@ func TestPlanResumeRefusesToStartANewFxSession(t *testing.T) {
 			if err == nil {
 				t.Fatalf("PlanResume = %+v, want an error: fx cannot start a session from a brief", plan)
 			}
-			if !strings.Contains(err.Error(), "fx cannot start a new session from a brief") || !strings.Contains(err.Error(), ReasonText(tc.reason)) {
-				t.Fatalf("error = %v", err)
+			// Another runtime's session is refused outright; fx's own names why it needs a brief.
+			want := "fx can only reopen its own sessions"
+			if tc.reason != ReasonOtherRuntime {
+				want = "fx cannot start a new session from a brief, which this session needs because " + ReasonText(tc.reason)
+			}
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("error = %v, want it to say %q", err, want)
 			}
 		})
 	}
