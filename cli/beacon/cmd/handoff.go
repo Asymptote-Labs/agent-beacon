@@ -15,6 +15,7 @@ import (
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/handoff"
 )
 
@@ -70,36 +71,68 @@ var (
 	handoffNow     = time.Now
 )
 
-// loadHandoffBrief builds the brief for id from the runtime's session store, or from the runtime log
-// when the store no longer has the session.
-func loadHandoffBrief(id string) (handoff.Brief, error) {
+// handoffSubject is the session a handoff command acts on, found in its runtime's store or, when
+// the store no longer has it, in Beacon's runtime log.
+type handoffSubject struct {
+	session   handoff.Session
+	fromLog   bool
+	logEvents []schema.Event
+}
+
+func resolveHandoffSession(id string) (handoffSubject, error) {
 	harness, err := handoff.ParseHarness(handoffOpts.harness)
+	if err != nil {
+		return handoffSubject{}, err
+	}
+	session, findErr := handoff.Find(handoffSources(handoffOpts.dirs), harness, id)
+	if findErr == nil {
+		return handoffSubject{session: session}, nil
+	}
+	if !errors.Is(findErr, handoff.ErrNotFound) {
+		return handoffSubject{}, findErr
+	}
+	return resolveHandoffLogSession(id, harness)
+}
+
+func resolveHandoffLogSession(id, harness string) (handoffSubject, error) {
+	logPath := handoffRuntimeLogPath()
+	session, events, found, err := handoff.LogSession(logPath, id)
+	if err != nil {
+		return handoffSubject{}, fmt.Errorf("read runtime log %s: %w", logPath, err)
+	}
+	if !found || (harness != "" && session.Harness != harness) {
+		return handoffSubject{}, fmt.Errorf("%w: %s (not in any runtime session store or in %s; `beacon handoff list` shows what is available)", handoff.ErrNotFound, id, logPath)
+	}
+	return handoffSubject{session: session, fromLog: true, logEvents: events}, nil
+}
+
+// brief builds the subject's brief. A session its store loses between lookup and read falls back to
+// the runtime log.
+func (subject handoffSubject) brief() (handoff.Brief, error) {
+	if subject.fromLog {
+		return handoff.BuildBrief(subject.session, subject.logEvents, handoff.FromRuntimeLog, handoffNow()), nil
+	}
+	session := subject.session
+	events, err := handoff.Events(handoffSources(handoffOpts.dirs), session)
+	if err == nil {
+		return handoff.BuildBrief(session, events, handoff.FromSessionStore, handoffNow()), nil
+	}
+	if !errors.Is(err, handoff.ErrNotFound) {
+		return handoff.Brief{}, fmt.Errorf("read %s session %s: %w", session.Harness, session.ID, err)
+	}
+	logSubject, logErr := resolveHandoffLogSession(session.ID, session.Harness)
+	if logErr != nil {
+		return handoff.Brief{}, logErr
+	}
+	return logSubject.brief()
+}
+
+func loadHandoffBrief(id string) (handoff.Brief, error) {
+	subject, err := resolveHandoffSession(id)
 	if err != nil {
 		return handoff.Brief{}, err
 	}
-	sources := handoffSources(handoffOpts.dirs)
-	session, findErr := handoff.Find(sources, harness, id)
-	if findErr == nil {
-		events, err := handoff.Events(sources, session)
-		if err == nil {
-			return handoff.BuildBrief(session, events, handoff.FromSessionStore, handoffNow()), nil
-		}
-		if !errors.Is(err, handoff.ErrNotFound) {
-			return handoff.Brief{}, fmt.Errorf("read %s session %s: %w", session.Harness, session.ID, err)
-		}
-		id = session.ID
-	} else if !errors.Is(findErr, handoff.ErrNotFound) {
-		return handoff.Brief{}, findErr
-	}
-	logPath := handoffRuntimeLogPath()
-	logSession, events, found, err := handoff.LogSession(logPath, id)
-	if err != nil {
-		return handoff.Brief{}, fmt.Errorf("read runtime log %s: %w", logPath, err)
-	}
-	if !found || (harness != "" && logSession.Harness != harness) {
-		return handoff.Brief{}, fmt.Errorf("%w: %s (not in any runtime session store or in %s; `beacon handoff list` shows what is available)", handoff.ErrNotFound, id, logPath)
-	}
-	return handoff.BuildBrief(logSession, events, handoff.FromRuntimeLog, handoffNow()), nil
+	return subject.brief()
 }
 
 func handoffRuntimeLogPath() string {
