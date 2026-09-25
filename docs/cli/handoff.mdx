@@ -165,7 +165,7 @@ The link event keeps the new session's id, workspace and harness, and leaves the
 
 Two paths record the link:
 
-- **Live hooks.** The prompt hook for Claude Code and the Cline and OpenCode plugins record it as the prompt is sent (`harness.collection_method: hook`).
+- **Live hooks and plugins.** Every runtime whose prompts Beacon captures as they are sent records it: the shared prompt hook (Claude Code, Cursor, Factory Droid, Qwen Code, Kiro, Kimi Code, Devin, Muse Code, OpenHands, Grok Build, DeepSeek Harness, Hermes Agent, VS Code), Antigravity (including the prompt it recovers from its transcript when the prompt hook does not fire), the Cline, OpenCode and OpenClaw plugins, and the Pi, Oh My Pi, Prime Agent and Senpi extensions (`harness.collection_method` `hook` or `plugin`).
 - **Session-store sync.** `beacon endpoint claude sync`, `codex sync`, `opencode sync`, `cline sync`, `pi sync`, `prime sync` and `factory sync` record it when they read the prompt back from the runtime's store (`harness.collection_method: poll`).
 
 Codex CLI prompts reach Beacon over OTLP and through `beacon endpoint codex sync`, not a prompt hook, so a session continued in Codex is linked by the sync. For a runtime that also has a prompt hook or plugin, a sync can record the same link the hook already did; the two carry different `collection_method` values, as every other event those runtimes report through both paths does. A sync's link has a deterministic `event.id`, so syncing again never duplicates it.
