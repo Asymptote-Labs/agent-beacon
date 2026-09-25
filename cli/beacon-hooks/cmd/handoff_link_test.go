@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -132,4 +134,91 @@ func TestOpenCodePromptRecordsAHandoffLink(t *testing.T) {
 	if len(plain) != 1 {
 		t.Fatalf("a prompt without a marker yields only the prompt event, got %+v", plain)
 	}
+}
+
+// assertLinkedEvents checks a mapper's output for a marker prompt: the prompt event, then the link,
+// with the prompt event's own fields left intact.
+func assertLinkedEvents(t *testing.T, events []normalizedEvent) {
+	t.Helper()
+	if len(events) != 2 || events[0].action != "prompt.submitted" || events[1].action != "session.handoff" {
+		t.Fatalf("events = %+v, want prompt.submitted then session.handoff", events)
+	}
+	handoff, _ := events[1].fields["handoff"].(map[string]interface{})
+	if handoff["source_harness"] != "claude_code" || handoff["source_session_id"] != "src-session-1" {
+		t.Fatalf("handoff = %#v", events[1].fields["handoff"])
+	}
+	if _, ok := events[1].fields["prompt"]; ok {
+		t.Fatal("the link must not repeat the prompt")
+	}
+	if _, ok := events[0].fields["prompt"]; !ok {
+		t.Fatal("building the link must not strip the prompt event's own fields")
+	}
+}
+
+func TestPiFamilyPromptRecordsAHandoffLink(t *testing.T) {
+	for _, runtime := range []piFamily{piRuntime, ompRuntime, primeRuntime, omoRuntime} {
+		t.Run(runtime.platform, func(t *testing.T) {
+			events := runtime.endpointEvents(map[string]interface{}{
+				"type": "input", "text": handoffTestPrompt, "sessionId": "pi-new-1",
+			}, "pi-new-1")
+			assertLinkedEvents(t, events)
+			plain := runtime.endpointEvents(map[string]interface{}{"type": "input", "text": "hello"}, "pi-new-1")
+			if len(plain) != 1 {
+				t.Fatalf("a prompt without a marker yields only the prompt event, got %+v", plain)
+			}
+		})
+	}
+
+	// End to end through the hook, so the link carries the runtime's harness and session.
+	logPath := piTestLog(t)
+	runHookWithInput(t, runPiEvent, map[string]interface{}{
+		"type": "input", "text": handoffTestPrompt, "sessionId": "pi-new-1", "cwd": "/repo",
+	})
+	links := eventsWithAction(t, logPath, "session.handoff")
+	if len(links) != 1 {
+		t.Fatalf("actions = %v, want one session.handoff", piEventActions(t, logPath))
+	}
+	assertHandoffLink(t, links[0], "pi-new-1", "pi_cli")
+}
+
+func TestOpenClawPromptRecordsAHandoffLink(t *testing.T) {
+	assertLinkedEvents(t, openClawEvents(t, "message_received", map[string]interface{}{
+		"content": handoffTestPrompt, "from": "U42",
+	}, nil))
+	if got := openClawEvents(t, "message_received", map[string]interface{}{"content": "deploy staging"}, nil); len(got) != 1 {
+		t.Fatalf("a prompt without a marker yields only the prompt event, got %+v", got)
+	}
+}
+
+// Antigravity's prompt hook does not always fire; pre-tool then recovers the prompt from the
+// transcript, and that recovered prompt must link too.
+func TestAntigravityTranscriptPromptRecordsAHandoffLink(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "antigravity"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	transcriptPath := filepath.Join(t.TempDir(), "transcript.jsonl")
+	line, err := json.Marshal(map[string]interface{}{
+		"source": "USER_EXPLICIT", "type": "USER_INPUT",
+		"content": "<USER_REQUEST>\n" + handoffTestPrompt + "\n</USER_REQUEST>",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(transcriptPath, append(line, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	input := map[string]interface{}{
+		"conversationId": "ag-new-1",
+		"transcriptPath": transcriptPath,
+		"toolCall":       map[string]interface{}{"name": "list_dir", "args": map[string]interface{}{}},
+	}
+	runHookWithInput(t, runPreTool, input)
+	runHookWithInput(t, runPreTool, input)
+
+	links := eventsWithAction(t, logPath, "session.handoff")
+	if len(links) != 1 {
+		t.Fatalf("session.handoff events = %d, want 1 however many tools run", len(links))
+	}
+	assertHandoffLink(t, links[0], "ag-new-1", "antigravity_cli")
 }

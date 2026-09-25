@@ -242,6 +242,9 @@ func emitAntigravityPromptFromTranscript(logger *logging.Logger, input map[strin
 	})
 	fields["content"] = retainedContentFields(prompt)
 	emitHookEvent(logger, "prompt.submitted", "prompt", "info", "Prompt submitted to agent", input, fields)
+	if link, ok := handoffLinkEvent(fields, prompt); ok {
+		emitHookEvent(logger, link.action, link.category, link.severity, link.message, input, link.fields)
+	}
 	if err := st.SetPromptEmitted(); err != nil {
 		logger.Warn("Failed to persist prompt state", "error", err.Error())
 	}
