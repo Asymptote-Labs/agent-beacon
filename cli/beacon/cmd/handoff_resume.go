@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -150,7 +151,28 @@ func describeHandoffPlan(w io.Writer, plan handoff.Plan) {
 		fmt.Fprintf(w, "  brief:     %s\n", plan.BriefPath)
 		fmt.Fprintf(w, "  directory: %s\n", plan.Dir)
 	}
+	if env := describeHandoffEnv(plan.Env); env != "" {
+		fmt.Fprintf(w, "  env:       %s\n", env)
+	}
 	fmt.Fprintf(w, "  command:   %s\n", shellCommand(append([]string{plan.Executable}, plan.Args...)...))
+}
+
+// describeHandoffEnv lists what the runtime's environment differs by, in name order.
+func describeHandoffEnv(env map[string]string) string {
+	names := make([]string, 0, len(env))
+	for name := range env {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		if env[name] == "" {
+			parts = append(parts, "unset "+name)
+		} else {
+			parts = append(parts, name+"="+env[name])
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 func confirmHandoff(in io.Reader, w io.Writer) bool {

@@ -40,6 +40,9 @@ type runtimeCommand struct {
 	// NewSession returns the arguments that start an interactive session with prompt as its first
 	// message.
 	NewSession func(prompt string) []string
+	// Env overrides the runtime's environment: a variable set to a value is set, one set to "" is
+	// removed. It holds switches only, never credentials, because the plan prints it.
+	Env map[string]string
 }
 
 // Harness names, as the endpoint event schema spells them.

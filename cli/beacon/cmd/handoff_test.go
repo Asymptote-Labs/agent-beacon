@@ -512,3 +512,19 @@ func TestHandoffExportFindsALogSessionByPrefix(t *testing.T) {
 		t.Fatalf("export by prefix = %v\n%s", err, out)
 	}
 }
+
+func TestDescribeHandoffPlanShowsTheEnvironment(t *testing.T) {
+	var out bytes.Buffer
+	describeHandoffPlan(&out, handoff.Plan{
+		Mode: handoff.ModeNative, Source: handoff.Session{Harness: handoff.HarnessClaude, ID: "s-1"},
+		Executable: "/bin/agent", Dir: "/work", Env: map[string]string{"MODE": "approve", "ALLOW_ALL": ""},
+	})
+	if !strings.Contains(out.String(), "  env:       unset ALLOW_ALL, MODE=approve\n") {
+		t.Fatalf("plan = %q", out.String())
+	}
+	out.Reset()
+	describeHandoffPlan(&out, handoff.Plan{Mode: handoff.ModeNative, Source: handoff.Session{Harness: handoff.HarnessClaude, ID: "s-1"}, Executable: "/bin/claude"})
+	if strings.Contains(out.String(), "env:") {
+		t.Fatalf("a plan with no overrides shows no env line: %q", out.String())
+	}
+}
