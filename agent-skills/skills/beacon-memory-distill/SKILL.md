@@ -55,6 +55,19 @@ beacon endpoint traces search "<error text or file>" --json --limit 10
 Prefer traces from this repository. Skip trivial sessions (a single question, an
 abandoned attempt) since they cost evaluator calls and yield nothing.
 
+Reading the list:
+
+- Only `session:` IDs are sessions. IDs starting `event:` are single events with no
+  session, almost always OTLP metric samples such as `claude_code.active_time.total`.
+  They arrive every few seconds and sort to the top, so a short list can be all noise;
+  raise `--limit` or use `--page` until you have sessions, and never select them.
+- A session whose `updated_at` is within the last few minutes is still being written.
+  Leave it for next time: a lesson drafted from half a session is usually wrong about
+  how it ended.
+- `repository` is null for many sessions, because not every event carries one. Such a
+  session cannot tell you which project it belongs to; evaluate it only with an explicit
+  `--project <path>` you can justify from the paths in its commands.
+
 ## Step 3: dry run, then ask
 
 The dry run is local. It shows the traces selected and the estimated cost:
@@ -103,13 +116,31 @@ beacon memory candidates list --state candidate --json
 beacon memory candidates show <candidate-id> --json
 ```
 
-For each candidate, read its evidence trace:
+For each candidate, read its evidence trace. Filter to the event types that carry
+substance and write the JSON to a file before reading it:
 
 ```bash
-beacon endpoint traces show <trace-id> --json --limit 400
-beacon endpoint traces show <trace-id> --json --offset 401 --limit 400
+beacon endpoint traces show <trace-id> --json --event-type user_message,tool_call,command,tool_result,approval,error --limit 150 > trace-1.json
+beacon endpoint traces show <trace-id> --json --event-type user_message,tool_call,command,tool_result,approval,error --offset 151 --limit 150 > trace-2.json
 beacon endpoint traces show <trace-id> --json --around-event <n> --before 5 --after 5
 ```
+
+How to read what comes back:
+
+- `--event-type` filters the coarse `type` field (`user_message`, `tool_call`,
+  `command`, `tool_result`, `approval`, `error`, `session`, `token_usage`, `metric`).
+  Action names such as `prompt.submitted` match nothing.
+- Filter every read. Hooks and OTLP both record, so an unfiltered session is mostly
+  `token_usage` and `session` events, and an unfiltered `traces show` on a large log can
+  take minutes and exceed a tool timeout. Filtered reads return in seconds.
+  `range.total_events` counts the filtered events, so it tells you how much is left.
+- The log usually holds no assistant text and no tool output. For Claude Code, a
+  session's substance is its `user_message` events (the only ones with a `content`
+  object), its `tool_call` and `command` events (tool name and command line), and
+  whether a `tool_result` was a failure. The strongest evidence for a lesson is a
+  failed command followed by a different command that succeeded.
+- A `user_message` with `content.included` false, or only a hash, means Beacon kept
+  metadata only. You cannot draft from a hash; say the trace was unreadable.
 
 Work out, from the events themselves:
 
