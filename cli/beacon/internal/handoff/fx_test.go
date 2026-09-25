@@ -133,7 +133,7 @@ func TestPlanResumeReopensAnFxSessionInItsWorkspace(t *testing.T) {
 		t.Fatalf("PlanResume: %v", err)
 	}
 	// fx scopes sessions to a workspace, so it must start in the session's.
-	if plan.Mode != ModeNative || plan.Executable != "/bin/fx" || !reflect.DeepEqual(plan.Args, []string{"resume", fxSessionA}) || plan.Dir != session.Directory {
+	if plan.Mode != ModeNative || plan.Executable != "/bin/fx" || !reflect.DeepEqual(plan.Args, []string{"--resume", fxSessionA}) || plan.Dir != session.Directory {
 		t.Fatalf("plan = %+v", plan)
 	}
 }
