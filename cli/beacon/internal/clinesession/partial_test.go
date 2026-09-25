@@ -62,3 +62,36 @@ func TestCollectOnceRetriesARecordWhoseLinkFailedToWrite(t *testing.T) {
 		t.Fatalf("session.handoff events after the retry = %d, want 1", links)
 	}
 }
+
+// A kanban card is re-read by content hash rather than order, so the hash must also wait for the
+// card's last event: a card whose link failed to write is retried, not marked seen.
+func TestCollectOnceRetriesAKanbanCardWhoseLinkFailedToWrite(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	f := newSweepFixture(t)
+	f.writeKanbanCard(t, "Continue the work.\n\n"+asymptoteobserve.HandoffMarker("claude_code", "src-1"), "", "2026-01-01T00:01:00Z")
+
+	prev := emitEvent
+	t.Cleanup(func() { emitEvent = prev })
+	emitEvent = func(event schema.Event, opts CollectOptions) error {
+		if event.Event.Action == "session.handoff" {
+			return errors.New("disk full")
+		}
+		return prev(event, opts)
+	}
+	if _, err := CollectOnce(f.options()); err == nil {
+		t.Fatal("the failed link write must surface")
+	}
+	emitEvent = prev
+	if _, err := CollectOnce(f.options()); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	links := 0
+	for _, e := range f.logLines(t) {
+		if e.Event.Action == "session.handoff" {
+			links++
+		}
+	}
+	if links != 1 {
+		t.Fatalf("session.handoff events after the retry = %d, want 1", links)
+	}
+}

@@ -178,18 +178,19 @@ func collectTrace(store *Store, ref TraceRef, state *State, opts CollectOptions,
 		if err := emitEvent(item.Event, opts); err != nil {
 			return true, err
 		}
-		// A record can map to several events (a prompt and its session.handoff link). The cursor
-		// passes a record only once its last event is written, so a failure partway through retries
-		// the whole record rather than skipping what was left of it.
+		// A record can map to several events (a prompt and its session.handoff link). The cursor,
+		// and for a kanban card its content hash, passes a record only once its last event is
+		// written, so a failure partway through retries the whole record rather than skipping what
+		// was left of it.
 		if recordComplete(mapped, i) {
 			cursor.LastOrder = item.SourceOrder
-		}
-		if pendingHashes != nil {
-			if h, ok := pendingHashes[item.SourceOrder]; ok {
-				if cursor.KanbanHashes == nil {
-					cursor.KanbanHashes = map[int]string{}
+			if pendingHashes != nil {
+				if h, ok := pendingHashes[item.SourceOrder]; ok {
+					if cursor.KanbanHashes == nil {
+						cursor.KanbanHashes = map[int]string{}
+					}
+					cursor.KanbanHashes[item.SourceOrder] = h
 				}
-				cursor.KanbanHashes[item.SourceOrder] = h
 			}
 		}
 		if item.Event.Event.Action == "session.started" {
