@@ -218,7 +218,7 @@ func TestOverrideReplacesRulesAndBrokenOverrideFallsBack(t *testing.T) {
 }
 
 // A path ends at whitespace, a quote or any shell operator. Session 725ea4f4
-// printed a demo .env through `cat .env;` because the rule only accepted a
+// printed a .env file through `cat .env;` because the rule only accepted a
 // space, a quote or the end of the line after the name.
 func TestCredentialPathFollowedByAShellOperator(t *testing.T) {
 	set := embedded(t)

@@ -2,7 +2,7 @@
 # Beacon policy hooks (secret exposure), POC installer for Claude Code on macOS.
 #
 #   BEACON_POLICY_TOKEN=ask_live_... ./install.sh                       # every Claude Code session (user scope)
-#   BEACON_POLICY_TOKEN=ask_live_... ./install.sh --scope project --project-dir ~/demo
+#   BEACON_POLICY_TOKEN=ask_live_... ./install.sh --scope project --project-dir <project>
 #
 # What it does:
 #   1. Verifies ./beacon-policy against ./beacon-policy.sha256 and installs it at
