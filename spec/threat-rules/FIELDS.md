@@ -87,6 +87,8 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.gen_ai.usage.output_tokens` | int |
 | `e.gen_ai.usage.reasoning.output_tokens` | int |
 | `e.gen_ai.workflow.name` | string |
+| `e.handoff.source_harness` | string |
+| `e.handoff.source_session_id` | string |
 | `e.harness.collection_method` | string |
 | `e.harness.config_path` | string |
 | `e.harness.executable_path` | string |
