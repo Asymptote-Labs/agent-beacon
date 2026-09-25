@@ -98,8 +98,7 @@ BASE="https://github.com/asymptote-labs/agent-beacon/releases/download/v${VERSIO
 # installs, but APT ends with a harmless "Permission denied" notice.
 DIR="$(mktemp -d /tmp/beacon-install.XXXXXXXX)" && chmod 0711 "$DIR" && cd "$DIR"
 curl -fsSLO "${BASE}/${PKG}" && curl -fsSLO "${BASE}/checksums.txt" && chmod 0644 "${PKG}"
-grep "  ${PKG}$" checksums.txt | sha256sum --check -
-
+grep "  ${PKG}$" checksums.txt | sha256sum --check - && \
 sudo apt install "./${PKG}"   # or: sudo dnf install "./${PKG}"
 ```
 
