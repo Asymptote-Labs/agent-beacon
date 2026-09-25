@@ -26,11 +26,12 @@ Sessions come from each runtime's own local session store, not from Beacon's run
 | Pi | `~/.pi/agent/sessions` (or under `PI_CODING_AGENT_DIR`) | `pi` |
 | Prime Agent | `~/.prime/agent`, both `sessions` and `session-artifacts` (or `PRIME_AGENT_CODING_AGENT_DIR`) | `prime` |
 | Factory Droid | `~/.factory/sessions` | `droid` |
+| GitHub Copilot CLI | `~/.copilot/session-state` | `copilot` |
 | Grok Build | `~/.grok/sessions` | `grok` |
 
 When a Codex thread has more than one rollout file, `beacon handoff` lists it once, under its newest file. Cline can hold the same task both as a CLI session and in its older task history; the CLI session is the copy that is listed. Cline kanban cards are not sessions and are not listed. Prime Agent subagent transcripts, under `session-artifacts`, are listed as subagents of the session that started them. Grok Build keeps its subagents' child sessions in the same tree as other sessions; those whose `summary.json` has a subagent `session_kind` are listed as subagents.
 
-`--store-dir <runtime>=<path>` takes the location in the table: for Pi its sessions directory, as `beacon endpoint pi sync --sessions-dir` does, and for Prime Agent the agent directory holding both of its roots. For Factory Droid it is the sessions directory, as `beacon endpoint factory sync --sessions-dir` does. For Grok Build it is its sessions directory, as `beacon endpoint grok sync --sessions-dir` does. Like that sync, `beacon handoff` does not read `GROK_HOME`; pass `--store-dir grok=$GROK_HOME/sessions` when it is set.
+`--store-dir <runtime>=<path>` takes the location in the table: for Pi its sessions directory, as `beacon endpoint pi sync --sessions-dir` does, and for Prime Agent the agent directory holding both of its roots. For Factory Droid it is the sessions directory, as `beacon endpoint factory sync --sessions-dir` does. For GitHub Copilot CLI it is the `~/.copilot` directory that holds `session-state`, as `beacon endpoint copilot sync --copilot-dir` does. For Grok Build it is its sessions directory, as `beacon endpoint grok sync --sessions-dir` does. Like that sync, `beacon handoff` does not read `GROK_HOME`; pass `--store-dir grok=$GROK_HOME/sessions` when it is set.
 
 ### Runtimes Beacon starts but does not read
 
@@ -63,7 +64,7 @@ beacon handoff list --json
 
 | Flag | Description |
 |------|-------------|
-| `--harness` | Only this runtime: `claude`, `codex`, `opencode`, `cline`, `pi`, `prime`, `droid` or `grok`. |
+| `--harness` | Only this runtime: `claude`, `codex`, `opencode`, `cline`, `pi`, `prime`, `droid`, `copilot` or `grok`. |
 | `--here` | Only sessions that ran in the current directory or below it. |
 | `--dir` | Only sessions that ran in this directory or below it. |
 | `--subagents` | Include subagent sessions. They are hidden by default, because resuming one resumes a fragment of its parent's task. |
@@ -131,6 +132,7 @@ There are two ways to resume:
   | Pi | `pi --session <session file>` |
   | Prime Agent | `prime-agent --resume <session file>` |
   | Factory Droid | `droid --resume <id>` |
+  | GitHub Copilot CLI | `copilot --resume=<id>` |
   | Grok Build | `grok --permission-mode default --resume <id>` |
 
 - **Start a new session from a brief.** Otherwise, or with `--agent` naming another runtime or with `--new`, Beacon writes a brief (see `export`) and starts a new session. The first message of that session points at the brief:
@@ -144,6 +146,7 @@ There are two ways to resume:
   | Pi | `pi -- "<prompt>"` |
   | Prime Agent | `prime-agent -- "<prompt>"` |
   | Factory Droid | `droid "<prompt>"` |
+  | GitHub Copilot CLI | `copilot -i "<prompt>"` |
   | Grok Build | `grok --permission-mode default "<prompt>"` |
   | Oh My Pi | `omp --approval-mode=always-ask "<prompt>"` |
   | Gemini CLI | `gemini --approval-mode default --prompt-interactive "<prompt>"` |
@@ -162,6 +165,8 @@ Claude Code, Cline, Prime Agent and Grok Build subagent sessions, and Cline's ol
 Cline approves every tool call by default. Beacon always passes `--auto-approve false`, so a session Beacon starts never gets auto-approval on Beacon's say-so. You can still turn it on inside the Cline TUI.
 
 The same holds for every runtime Beacon starts. Oh My Pi and goose approve every tool call by default, so Beacon passes `--approval-mode=always-ask` to Oh My Pi and sets `GOOSE_MODE=approve` for goose. Where a CLI takes an approval mode, Beacon names the mode that asks (Gemini CLI, Qwen Code, Muse Code, and Devin CLI, whose `DEVIN_PERMISSION_MODE` could otherwise hold `dangerous`), so a user or project setting that approves everything does not carry over. Beacon never passes a flag that turns approvals off.
+
+GitHub Copilot CLI asks before each tool call unless `COPILOT_ALLOW_ALL=true` is set, which also trusts the directory, or `COPILOT_PLAN_THEN_AUTOPILOT` starts it in plan mode and carries the plan out without waiting. Beacon removes both from the environment it launches Copilot with (`--print` shows them under `env`), and never passes `--allow-all-tools` or `--yolo`. Copilot sessions are not tied to a directory, but Beacon still starts Copilot in the session's recorded directory.
 
 Grok Build's configured permission mode can be always-approve. Beacon always passes `--permission-mode default`, the mode that asks before running tools, so a session Beacon starts or reopens never inherits always-approve from that config. You can still change the mode inside the Grok TUI. Grok looks a session id up under the directory it runs in, which is why the resume runs in the session's recorded directory. With `--cwd` naming another directory, a Grok session continues from a brief instead.
 
@@ -200,8 +205,8 @@ The link event keeps the new session's id, workspace and harness, and leaves the
 Two paths record the link:
 
 - **Live hooks and plugins.** Every runtime whose prompts Beacon captures as they are sent records it: the shared prompt hook (Claude Code, Cursor, Factory Droid, Qwen Code, Kiro, Kimi Code, Devin, Muse Code, OpenHands, Grok Build, DeepSeek Harness, Hermes Agent, VS Code), Antigravity (including the prompt it recovers from its transcript when the prompt hook does not fire), the Cline, OpenCode and OpenClaw plugins, and the Pi, Oh My Pi, Prime Agent and Senpi extensions (`harness.collection_method` `hook` or `plugin`).
-- **Session-store sync.** `beacon endpoint claude sync`, `codex sync`, `opencode sync`, `cline sync`, `pi sync`, `prime sync`, `factory sync` and `grok sync` record it when they read the prompt back from the runtime's store (`harness.collection_method: poll`).
+- **Session-store sync.** `beacon endpoint claude sync`, `codex sync`, `opencode sync`, `cline sync`, `pi sync`, `prime sync`, `factory sync`, `copilot sync` and `grok sync` record it when they read the prompt back from the runtime's store (`harness.collection_method: poll`).
 
-Codex CLI prompts reach Beacon over OTLP and through `beacon endpoint codex sync`, not a prompt hook, so a session continued in Codex is linked by the sync. For a runtime that also has a prompt hook or plugin, a sync can record the same link the hook already did; the two carry different `collection_method` values, as every other event those runtimes report through both paths does. A sync's link has a deterministic `event.id`, so syncing again never duplicates it.
+Codex CLI prompts reach Beacon over OTLP and through `beacon endpoint codex sync`, not a prompt hook, so a session continued in Codex is linked by the sync. The same holds for GitHub Copilot CLI, whose live path is OTLP: `beacon endpoint copilot sync` records the link. For a runtime that also has a prompt hook or plugin, a sync can record the same link the hook already did; the two carry different `collection_method` values, as every other event those runtimes report through both paths does. A sync's link has a deterministic `event.id`, so syncing again never duplicates it.
 
 The marker is a claim made in prompt text, not a verified identity: anyone can type it. `fidelity: observed` records that the marker was seen, not that `beacon handoff resume` wrote it. A native resume keeps the session's own id, so it needs no link.
