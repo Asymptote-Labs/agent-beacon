@@ -335,7 +335,7 @@ func TestEventsForASessionThatIsGone(t *testing.T) {
 	if _, err := Events(sources, session); err == nil || !strings.Contains(err.Error(), "no longer in its store") {
 		t.Fatalf("err = %v", err)
 	}
-	if _, err := Events(sources, Session{Harness: "cursor"}); err == nil {
+	if _, err := Events(sources, Session{Harness: "vscode_copilot"}); err == nil {
 		t.Fatal("an unsupported runtime must be an error")
 	}
 	if _, err := Events([]Source{fakeSource{harness: HarnessClaude}}, Session{Harness: HarnessClaude}); err == nil {
@@ -354,8 +354,8 @@ func actionList(events []schema.Event) string {
 func TestLogSession(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	lines := []string{
-		`{"timestamp":"2026-09-25T09:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"prompt.submitted","category":"prompt"},"severity":"info","endpoint":{"hostname":"h","os":"linux"},"harness":{"name":"cursor"},"session":{"id":"cur-1","working_directory":"/work/x"},"branch":"dev","prompt":{"text":"rename the module"}}`,
-		`{"timestamp":"2026-09-25T09:05:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"prompt.submitted","category":"prompt"},"severity":"info","endpoint":{"hostname":"h","os":"linux"},"harness":{"name":"cursor"},"session":{"id":"other"},"prompt":{"text":"unrelated"}}`,
+		`{"timestamp":"2026-09-25T09:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"prompt.submitted","category":"prompt"},"severity":"info","endpoint":{"hostname":"h","os":"linux"},"harness":{"name":"vscode_copilot"},"session":{"id":"cur-1","working_directory":"/work/x"},"branch":"dev","prompt":{"text":"rename the module"}}`,
+		`{"timestamp":"2026-09-25T09:05:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"prompt.submitted","category":"prompt"},"severity":"info","endpoint":{"hostname":"h","os":"linux"},"harness":{"name":"vscode_copilot"},"session":{"id":"other"},"prompt":{"text":"unrelated"}}`,
 	}
 	writeFixture(t, logPath, strings.Join(lines, "\n")+"\n")
 
@@ -363,14 +363,14 @@ func TestLogSession(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("LogSession = %v, %v", found, err)
 	}
-	if session.Harness != "cursor" || session.Directory != "/work/x" || session.Branch != "dev" || len(events) != 1 {
+	if session.Harness != "vscode_copilot" || session.Directory != "/work/x" || session.Branch != "dev" || len(events) != 1 {
 		t.Fatalf("session = %+v, %d events", session, len(events))
 	}
 	if !session.UpdatedAt.Equal(time.Date(2026, 9, 25, 9, 0, 0, 0, time.UTC)) {
 		t.Fatalf("updated = %s", session.UpdatedAt)
 	}
 	brief := BuildBrief(session, events, FromRuntimeLog, briefNow)
-	if brief.FirstRequest != "rename the module" || !strings.Contains(brief.Render(), "a cursor session") {
+	if brief.FirstRequest != "rename the module" || !strings.Contains(brief.Render(), "a vscode_copilot session") {
 		t.Fatalf("log brief = %+v", brief)
 	}
 	if _, _, found, err := LogSession(logPath, "missing", ""); found || err != nil {

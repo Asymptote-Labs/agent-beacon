@@ -26,7 +26,7 @@ func installed(names ...string) func(string) (string, error) {
 
 var allRuntimes = installed("claude", "codex", "opencode", "cline", "pi", "prime-agent", "droid",
 	"omp", "gemini", "qwen", "kiro-cli", "agy", "devin", "muse", "openhands", "goose", "copilot",
-	"hermes", "fx", "grok", "openclaw")
+	"hermes", "fx", "grok", "openclaw", "cursor-agent")
 
 // resumableSession is a session whose directory and session file both exist.
 func resumableSession(t *testing.T, harness, id string) Session {
@@ -88,6 +88,7 @@ func TestPlanResumeStartsANewSessionInEachRuntime(t *testing.T) {
 		{HarnessGrok, "grok", []string{"--permission-mode", "default"}},
 		// {key} stands for the fresh Gateway session key the prompt derives.
 		{HarnessOpenClaw, "openclaw", []string{"tui", "--session", "{key}", "--message"}},
+		{HarnessCursor, "cursor-agent", nil},
 		{HarnessOhMyPi, "omp", []string{"--approval-mode=always-ask"}},
 		{HarnessGemini, "gemini", []string{"--approval-mode", "default", "--prompt-interactive"}},
 		{HarnessQwen, "qwen", []string{"--approval-mode", "default", "--prompt-interactive"}},
@@ -226,10 +227,10 @@ func TestPlanResumeErrors(t *testing.T) {
 	if _, err := PlanResume(session, PlanOptions{Target: HarnessCodex, BriefPath: filepath.Join(t.TempDir(), "b.md"), LookPath: installed("claude")}); !errors.Is(err, ErrRuntimeNotInstalled) {
 		t.Fatalf("missing target runtime err = %v", err)
 	}
-	if _, err := PlanResume(session, PlanOptions{Target: "cursor", LookPath: allRuntimes}); err == nil || !strings.Contains(err.Error(), "cannot be started") {
+	if _, err := PlanResume(session, PlanOptions{Target: "vscode_copilot", LookPath: allRuntimes}); err == nil || !strings.Contains(err.Error(), "cannot be started") {
 		t.Fatalf("unsupported target err = %v", err)
 	}
-	if _, err := PlanResume(Session{Harness: "cursor", ID: "x", Directory: t.TempDir()}, PlanOptions{LookPath: allRuntimes}); err == nil {
+	if _, err := PlanResume(Session{Harness: "vscode_copilot", ID: "x", Directory: t.TempDir()}, PlanOptions{LookPath: allRuntimes}); err == nil {
 		t.Fatal("a session from an unsupported runtime needs --agent")
 	}
 	if _, err := PlanResume(session, PlanOptions{ForceNew: true, LookPath: allRuntimes}); err == nil || !strings.Contains(err.Error(), "brief path") {
