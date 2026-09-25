@@ -190,6 +190,17 @@ func withinDirectory(dir, root string) bool {
 	}
 	dir = filepath.Clean(dir)
 	root = filepath.Clean(root)
+	if !filepath.IsAbs(root) {
+		if abs, err := filepath.Abs(root); err == nil {
+			root = abs
+		}
+	}
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
 	if dir == root {
 		return true
 	}
