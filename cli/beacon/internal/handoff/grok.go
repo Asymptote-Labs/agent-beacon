@@ -37,8 +37,6 @@ func (s *grokSource) List() ([]Session, error) {
 		var summary groksession.Summary
 		if ref.Summary != nil {
 			summary = *ref.Summary
-		} else {
-			summary = readGrokSummary(ref.SourcePath)
 		}
 		title := oneLine(firstNonEmpty(summary.GeneratedTitle, summary.SessionSummary))
 		if title == "" {
@@ -100,20 +98,6 @@ func grokWorkingDirectory(ref groksession.SessionRef) string {
 		}
 	}
 	return ref.Workspace
-}
-
-// readGrokSummary re-reads summary.json from disk. The store nils Summary when the three display
-// fields are empty, but the handoff list needs session_kind and head_branch which may still be set.
-func readGrokSummary(sourcePath string) groksession.Summary {
-	data, err := os.ReadFile(filepath.Join(sourcePath, "summary.json"))
-	if err != nil {
-		return groksession.Summary{}
-	}
-	var s groksession.Summary
-	if json.Unmarshal(data, &s) != nil {
-		return groksession.Summary{}
-	}
-	return s
 }
 
 // readGrokFirstPrompt returns the first thing a person typed in a Grok chat history.
