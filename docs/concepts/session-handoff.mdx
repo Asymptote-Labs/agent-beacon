@@ -1,0 +1,102 @@
+---
+title: "Session Handoff"
+description: "Continue a local agent session in the same runtime or a different one, and keep the two linked in telemetry"
+---
+
+## Overview
+
+Session handoff lets you pick up an agent session where it stopped. You can reopen it
+in the runtime it ran in, or continue it in a different one. For example, you can move a
+Claude Code session into Codex when you hit a rate limit, or give a stalled task to
+another agent without explaining it all again.
+
+Handoff reads each runtime's own local session store, not Beacon's runtime log. That store is what
+the runtime resumes from, and it keeps content the runtime log truncates. Every read is
+local and read-only. Nothing is uploaded, no runtime file is changed, and no command in
+the handoff path touches the network.
+
+Handoff supports Claude Code, Codex CLI, OpenCode, and Cline. See
+[`beacon handoff`](/cli/handoff) for the full command reference.
+
+## Workflow
+
+```bash
+beacon handoff list --here                     # sessions that ran in this repository
+beacon handoff export 7f3c2a91                 # write a brief for one session
+beacon handoff resume 7f3c2a91 --agent codex   # continue it in another runtime
+```
+
+1. **Find the session.** `beacon handoff list` shows resumable sessions across every
+   supported runtime, newest first. You can filter it by runtime or by directory.
+2. **Summarize it.** `beacon handoff export` writes a handoff brief. The brief is a
+   Markdown summary of what the session asked for, what it changed, and where it stopped.
+3. **Continue it.** `beacon handoff resume` prints its plan, asks you to confirm, and
+   launches the runtime in this terminal, in the session's recorded directory.
+
+## Two ways to resume
+
+**Reopen natively.** Beacon reopens the session with its full context when you continue
+in the same runtime, that runtime's CLI can load the session, and the session file is
+still on this machine. This runs `claude --resume`, `codex resume`,
+`opencode --session`, or `cline --tui --id`. The session keeps its own id.
+
+**Start a new session from a brief.** Beacon starts a new session from a brief when you
+continue in a different runtime, when you pass `--new`, or when the session can't be
+reopened natively. Subagent sessions and sessions known only from Beacon's runtime log
+always take this path. Beacon writes the brief, then starts a new session whose first
+prompt names the brief by its path and asks the agent to confirm the task before it
+changes anything.
+
+## What a brief contains
+
+A brief is a summary, not a full transcript:
+
+- The source runtime, session id, directory, branch, and last activity.
+- The first and latest requests, and the last agent message.
+- Files changed and recent commands, with exit codes where the runtime reports them.
+- The last 30 steps of activity, each cut to 1,200 characters.
+
+Agent reasoning and file reads are left out. A brief is at most 48 KiB, and the oldest
+steps are dropped first to stay under that limit. If a session is no longer in its
+runtime's store, Beacon builds the brief from the runtime log instead. That works for
+any runtime Beacon captured, but the log keeps less of each step, and the brief says so.
+
+## Linking sessions in telemetry
+
+A session started from a brief has a new session id. To keep the two sessions
+connected, its first prompt ends with a handoff marker:
+
+```text
+[beacon-handoff from=claude_code session=ea7f210f-402b-53b1-aec2-864a488dfcd3]
+```
+
+When Beacon records a prompt that carries this marker, it writes a `session.handoff`
+event alongside the usual `prompt.submitted` event. The event's
+`handoff.source_harness` and `handoff.source_session_id` fields name the session it
+continues. Live hooks record the link as the prompt is sent. The `claude`, `codex`,
+`opencode`, and `cline` session-store syncs record it when they read the prompt back.
+This lets you follow one task across runtimes in the runtime log or a forwarded
+destination, and threat rules can match on `e.handoff.*`.
+
+The marker is text in a prompt, not a verified identity, and anyone can type it. The
+`observed` fidelity on the event means Beacon saw the marker. It does not mean that
+`beacon handoff resume` wrote it.
+
+## Safety boundary
+
+- **Local and read-only.** Handoff reads runtime session stores and never writes to
+  them. No step contacts the network.
+- **Redacted briefs.** Every event goes through the same secret redaction and truncation
+  as the runtime log before it reaches a brief.
+- **Private files.** Briefs are written to `~/.beacon/endpoint/handoffs`, a `0700`
+  directory, and each brief is a `0600` file, because briefs carry prompt text and
+  command output. An existing brief is never overwritten.
+- **Nothing on the command line.** The brief is passed by path and never inlined into
+  the launch command, which any local user can see in the process table.
+- **No forged structure.** Quoted content sits in code fences longer than any backtick
+  run inside it, so text from a session can't close its block and pass itself off as
+  part of the brief.
+- **Confirmation before launch.** `resume` asks before it starts a runtime, and it
+  launches without a terminal only with `--yes`. It stops if the session's directory no
+  longer exists, rather than starting somewhere else. Cline sessions are always started
+  with `--auto-approve false`, because Cline approves every tool call by default.

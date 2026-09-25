@@ -357,10 +357,14 @@ func openClawPromptEvents(input, event, fields map[string]interface{}) []normali
 	if len(extra) > 0 {
 		fields["raw"] = mergeNested(fields["raw"], extra)
 	}
-	return []normalizedEvent{{
+	events := []normalizedEvent{{
 		action: "prompt.submitted", category: "prompt", severity: "info",
 		message: "Prompt submitted to OpenClaw", fields: fields,
 	}}
+	if link, ok := handoffLinkEvent(fields, prompt); ok {
+		events = append(events, link)
+	}
+	return events
 }
 
 // openClawLlmOutputEvents records what a finished model response reports: its token usage, and the
