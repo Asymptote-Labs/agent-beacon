@@ -1,6 +1,7 @@
 package handoff
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -358,7 +359,7 @@ func TestLogSession(t *testing.T) {
 	}
 	writeFixture(t, logPath, strings.Join(lines, "\n")+"\n")
 
-	session, events, found, err := LogSession(logPath, "cur-1")
+	session, events, found, err := LogSession(logPath, "cur-1", "")
 	if err != nil || !found {
 		t.Fatalf("LogSession = %v, %v", found, err)
 	}
@@ -372,7 +373,7 @@ func TestLogSession(t *testing.T) {
 	if brief.FirstRequest != "rename the module" || !strings.Contains(brief.Render(), "a cursor session") {
 		t.Fatalf("log brief = %+v", brief)
 	}
-	if _, _, found, err := LogSession(logPath, "missing"); found || err != nil {
+	if _, _, found, err := LogSession(logPath, "missing", ""); found || err != nil {
 		t.Fatalf("missing session = %v, %v", found, err)
 	}
 }
@@ -440,5 +441,33 @@ func TestCodeSpan(t *testing.T) {
 		if got := code(in); got != want {
 			t.Fatalf("code(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestLogSessionAcceptsAUniquePrefix(t *testing.T) {
+	line := func(harness, id string) string {
+		return `{"timestamp":"2026-09-25T09:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"prompt.submitted","category":"prompt"},"severity":"info","endpoint":{"hostname":"h","os":"linux"},"harness":{"name":"` + harness + `"},"session":{"id":"` + id + `"},"prompt":{"text":"p ` + id + `"}}`
+	}
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	writeFixture(t, logPath, strings.Join([]string{
+		line("cursor", "conv-abc123-one"),
+		line("claude", "conv-xyz789-two"),
+		line("cline", "conv-xyz789-three"),
+	}, "\n")+"\n")
+
+	session, events, found, err := LogSession(logPath, "conv-abc", "")
+	if err != nil || !found || session.ID != "conv-abc123-one" || len(events) != 1 {
+		t.Fatalf("unique prefix = %+v, %d events, %v, %v", session, len(events), found, err)
+	}
+	if _, _, found, err := LogSession(logPath, "conv-", ""); found || err != nil {
+		t.Fatalf("a prefix under %d characters must not search: %v, %v", MinPrefixLength, found, err)
+	}
+	var ambiguous *AmbiguousError
+	if _, _, _, err := LogSession(logPath, "conv-xyz", ""); !errors.As(err, &ambiguous) || len(ambiguous.Candidates) != 2 {
+		t.Fatalf("a prefix naming two sessions must be ambiguous, got %v", err)
+	}
+	session, _, found, err = LogSession(logPath, "conv-xyz", HarnessClaude)
+	if err != nil || !found || session.ID != "conv-xyz789-two" || session.Harness != HarnessClaude {
+		t.Fatalf("--harness must narrow the prefix (raw \"claude\" rows included): %+v, %v, %v", session, found, err)
 	}
 }
