@@ -129,7 +129,7 @@ There are two ways to resume:
 
 Claude Code, Cline and Prime Agent subagent sessions, and Cline's older task history, can't be reopened by their CLIs, so they always continue from a brief. A session known only from Beacon's runtime log also continues from a brief, and it needs `--agent` if its own runtime isn't one Beacon can start.
 
-`cursor-agent --resume` reopens only chats the CLI itself started, which it keeps under `~/.cursor/chats` (or `CURSOR_CONFIG_DIR`, or `$XDG_CONFIG_HOME/cursor`) keyed by the directory the chat ran in. Beacon reopens a Cursor session natively only when that chat store exists for the session's recorded directory. Conversations from the Cursor IDE, Composer records, and subagent transcripts continue from a brief. Beacon never passes `--force` or `--yolo`, so `cursor-agent` still asks before running commands.
+`cursor-agent --resume` reopens only chats the CLI itself started, which it keeps under `~/.cursor/chats` (or `CURSOR_CONFIG_DIR`, or `$XDG_CONFIG_HOME/cursor`) keyed by the directory the chat ran in. Beacon reopens a Cursor session natively only when that chat store exists for the session's recorded directory, and only from that directory: with `--cwd` pointing elsewhere, it continues from a brief. Conversations from the Cursor IDE, Composer records, and subagent transcripts continue from a brief. Beacon never passes `--force` or `--yolo`, so `cursor-agent` still asks before running commands.
 
 Cline approves every tool call by default. Beacon always passes `--auto-approve false`, so a session Beacon starts never gets auto-approval on Beacon's say-so. You can still turn it on inside the Cline TUI.
 

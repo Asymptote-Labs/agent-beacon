@@ -262,4 +262,25 @@ func TestPlanResumeReopensOnlyCursorCLIChats(t *testing.T) {
 	if plan.Mode != ModeNewSession || plan.Reason != ReasonSessionGone {
 		t.Fatalf("plan = %+v", plan)
 	}
+
+	// cursor-agent finds the chat from the directory it starts in, so --cwd elsewhere cannot reopen
+	// it; the same directory by another path still can.
+	moved := t.TempDir()
+	plan, err = PlanResume(session, PlanOptions{Dir: moved, BriefPath: brief, LookPath: installed("cursor-agent")})
+	if err != nil {
+		t.Fatalf("PlanResume: %v", err)
+	}
+	if plan.Mode != ModeNewSession || plan.Reason != ReasonOtherDirectory || plan.Dir != moved {
+		t.Fatalf("--cwd elsewhere: plan = %+v", plan)
+	}
+	if testenv.HasPOSIXFileModes() {
+		link := filepath.Join(t.TempDir(), "workspace-link")
+		if err := os.Symlink(f.workspace, link); err != nil {
+			t.Fatal(err)
+		}
+		plan, err = PlanResume(session, PlanOptions{Dir: link, BriefPath: brief, LookPath: installed("cursor-agent")})
+		if err != nil || plan.Mode != ModeNative {
+			t.Fatalf("--cwd through a symlink to the session's directory: plan = %+v, %v", plan, err)
+		}
+	}
 }

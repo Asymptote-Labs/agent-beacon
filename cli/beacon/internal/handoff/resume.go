@@ -25,6 +25,7 @@ const (
 	ReasonNotResumable   = "not_resumable"
 	ReasonSessionGone    = "session_file_missing"
 	ReasonFromRuntimeLog = "runtime_log_only"
+	ReasonOtherDirectory = "other_directory"
 )
 
 // Plan is a resolved resume: what will run, where, and why.
@@ -135,6 +136,9 @@ func nativeBlocker(session Session, target string, opts PlanOptions) string {
 	if _, ok := command.Resume(session); !ok {
 		return ReasonNotResumable
 	}
+	if command.ResumesInSessionDir && opts.Dir != "" && !sameDirectory(opts.Dir, session.Directory) {
+		return ReasonOtherDirectory
+	}
 	if session.SourcePath == "" {
 		return ReasonSessionGone
 	}
@@ -190,6 +194,8 @@ func ReasonText(reason string) string {
 		return "the session file is no longer on this machine"
 	case ReasonFromRuntimeLog:
 		return "the session is known only from Beacon's runtime log"
+	case ReasonOtherDirectory:
+		return "its runtime reopens it only from the directory it ran in"
 	}
 	return reason
 }
@@ -203,4 +209,16 @@ func StartableNames() []string {
 		}
 	}
 	return names
+}
+
+// sameDirectory reports whether a and b name one directory, symlinks resolved.
+func sameDirectory(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	ra, rb := resolveExisting(a), resolveExisting(b)
+	if ra == "" || rb == "" {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	return ra == rb
 }
