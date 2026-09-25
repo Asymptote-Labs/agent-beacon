@@ -335,7 +335,7 @@ func TestEventsForASessionThatIsGone(t *testing.T) {
 	if _, err := Events(sources, session); err == nil || !strings.Contains(err.Error(), "no longer in its store") {
 		t.Fatalf("err = %v", err)
 	}
-	if _, err := Events(sources, Session{Harness: "gemini_cli"}); err == nil {
+	if _, err := Events(sources, Session{Harness: "vscode_copilot"}); err == nil {
 		t.Fatal("an unsupported runtime must be an error")
 	}
 	if _, err := Events([]Source{fakeSource{harness: HarnessClaude}}, Session{Harness: HarnessClaude}); err == nil {
@@ -354,8 +354,8 @@ func actionList(events []schema.Event) string {
 func TestLogSession(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	lines := []string{
-		`{"timestamp":"2026-09-25T09:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"prompt.submitted","category":"prompt"},"severity":"info","endpoint":{"hostname":"h","os":"linux"},"harness":{"name":"gemini_cli"},"session":{"id":"cur-1","working_directory":"/work/x"},"branch":"dev","prompt":{"text":"rename the module"}}`,
-		`{"timestamp":"2026-09-25T09:05:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"prompt.submitted","category":"prompt"},"severity":"info","endpoint":{"hostname":"h","os":"linux"},"harness":{"name":"gemini_cli"},"session":{"id":"other"},"prompt":{"text":"unrelated"}}`,
+		`{"timestamp":"2026-09-25T09:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"prompt.submitted","category":"prompt"},"severity":"info","endpoint":{"hostname":"h","os":"linux"},"harness":{"name":"vscode_copilot"},"session":{"id":"cur-1","working_directory":"/work/x"},"branch":"dev","prompt":{"text":"rename the module"}}`,
+		`{"timestamp":"2026-09-25T09:05:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"prompt.submitted","category":"prompt"},"severity":"info","endpoint":{"hostname":"h","os":"linux"},"harness":{"name":"vscode_copilot"},"session":{"id":"other"},"prompt":{"text":"unrelated"}}`,
 	}
 	writeFixture(t, logPath, strings.Join(lines, "\n")+"\n")
 
@@ -363,14 +363,14 @@ func TestLogSession(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("LogSession = %v, %v", found, err)
 	}
-	if session.Harness != "gemini_cli" || session.Directory != "/work/x" || session.Branch != "dev" || len(events) != 1 {
+	if session.Harness != "vscode_copilot" || session.Directory != "/work/x" || session.Branch != "dev" || len(events) != 1 {
 		t.Fatalf("session = %+v, %d events", session, len(events))
 	}
 	if !session.UpdatedAt.Equal(time.Date(2026, 9, 25, 9, 0, 0, 0, time.UTC)) {
 		t.Fatalf("updated = %s", session.UpdatedAt)
 	}
 	brief := BuildBrief(session, events, FromRuntimeLog, briefNow)
-	if brief.FirstRequest != "rename the module" || !strings.Contains(brief.Render(), "a gemini_cli session") {
+	if brief.FirstRequest != "rename the module" || !strings.Contains(brief.Render(), "a vscode_copilot session") {
 		t.Fatalf("log brief = %+v", brief)
 	}
 	if _, _, found, err := LogSession(logPath, "missing", ""); found || err != nil {
@@ -469,5 +469,28 @@ func TestLogSessionAcceptsAUniquePrefix(t *testing.T) {
 	session, _, found, err = LogSession(logPath, "conv-xyz", HarnessClaude)
 	if err != nil || !found || session.ID != "conv-xyz789-two" || session.Harness != HarnessClaude {
 		t.Fatalf("--harness must narrow the prefix (raw \"claude\" rows included): %+v, %v, %v", session, found, err)
+	}
+}
+
+// A log row names a runtime by whatever spelling its hooks wrote; the session takes the registry's
+// harness, so it continues in its own runtime and --harness finds it.
+func TestLogSessionCanonicalizesAnAliasedHarness(t *testing.T) {
+	line := func(harness, id string) string {
+		return `{"timestamp":"2026-09-25T09:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"prompt.submitted","category":"prompt"},"severity":"info","endpoint":{"hostname":"h","os":"linux"},"harness":{"name":"` + harness + `"},"session":{"id":"` + id + `"},"prompt":{"text":"p ` + id + `"}}`
+	}
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	writeFixture(t, logPath, strings.Join([]string{
+		line("devin-cli", "devin-new-123"),
+		line("devin", "devin-old-456"),
+	}, "\n")+"\n")
+	for _, id := range []string{"devin-new-123", "devin-old-456"} {
+		session, _, found, err := LogSession(logPath, id, "")
+		if err != nil || !found || session.Harness != HarnessDevin {
+			t.Fatalf("%s: harness = %q, %v, %v; want %s", id, session.Harness, found, err, HarnessDevin)
+		}
+	}
+	session, _, found, err := LogSession(logPath, "devin-old", HarnessDevin)
+	if err != nil || !found || session.ID != "devin-old-456" {
+		t.Fatalf("--harness must find rows written under the alias: %+v, %v, %v", session, found, err)
 	}
 }

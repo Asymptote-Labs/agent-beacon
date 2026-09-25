@@ -254,7 +254,7 @@ func TestHandoffResumeErrors(t *testing.T) {
 
 func TestHandoffResumeFromTheRuntimeLogStartsANewSession(t *testing.T) {
 	f := newResumeFixture(t)
-	logPath := handoffLog(t, "gemini_cli", "gemini-conv-1", "rename the module")
+	logPath := handoffLog(t, "vscode_copilot", "gemini-conv-1", "rename the module")
 	dir := t.TempDir()
 	_, _, err := runResume(t, f, "gemini-conv-1", "--log-path", logPath, "--agent", "claude", "--cwd", dir, "--yes")
 	if err != nil {
@@ -355,5 +355,30 @@ func TestHandoffResumeMakesRelativePathsAbsolute(t *testing.T) {
 	}
 	if filepath.Base(plan.Dir) != "start-here" || filepath.Base(filepath.Dir(plan.BriefPath)) != "briefs" {
 		t.Fatalf("dir %q, brief %q", plan.Dir, plan.BriefPath)
+	}
+}
+
+// A runtime Beacon reads only from the runtime log continues its own sessions in a new session of
+// that runtime, with the environment its command asks for.
+func TestHandoffResumeStartsALogOnlyRuntime(t *testing.T) {
+	f := newResumeFixture(t)
+	handoffLookPath = func(name string) (string, error) { return "/bin/" + name, nil }
+	logPath := handoffLog(t, "goose", "goose-sess-1", "port the parser")
+	dir := t.TempDir()
+	out, _, err := runResume(t, f, "goose-sess-1", "--log-path", logPath, "--cwd", dir, "--print")
+	if err != nil {
+		t.Fatalf("resume --print: %v", err)
+	}
+	for _, want := range []string{"Starting a new goose session from goose session goose-sess-1", "env:       GOOSE_MODE=approve", "/bin/goose run --interactive --text"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("plan output missing %q:\n%s", want, out)
+		}
+	}
+	if _, _, err := runResume(t, f, "goose-sess-1", "--log-path", logPath, "--cwd", dir, "--yes"); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	plan := f.launched[len(f.launched)-1]
+	if plan.Target != handoff.HarnessGoose || plan.Env["GOOSE_MODE"] != "approve" || plan.Reason != handoff.ReasonFromRuntimeLog {
+		t.Fatalf("plan = %+v", plan)
 	}
 }
