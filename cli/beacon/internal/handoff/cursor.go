@@ -75,6 +75,12 @@ func cursorPrefer(candidate, current Session) bool {
 	if cursorCLIChat(current) {
 		return false
 	}
+	if current.Subagent && !candidate.Subagent {
+		return false
+	}
+	if candidate.Subagent && !current.Subagent {
+		return true
+	}
 	return cursorCLIChat(candidate) || candidate.Store == string(cursorsession.SourceGlobalStorage)
 }
 
