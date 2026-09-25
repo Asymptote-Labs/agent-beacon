@@ -40,10 +40,7 @@ var handoffOpts handoffOptions
 var handoffCmd = &cobra.Command{
 	Use:   "handoff",
 	Short: "Pick up a local agent session again, in the same runtime or another one",
-	Long: `Pick up a local agent session again, in the same runtime or another one.
-
-Sessions are read from each runtime's own local session store (Claude Code, Codex CLI, OpenCode
-and Cline). Nothing is uploaded and no runtime file is modified.`,
+	// Long is set in init from the runtime registry, so it names every store Beacon reads.
 }
 
 var handoffListCmd = &cobra.Command{
@@ -365,7 +362,31 @@ func addHandoffStoreFlags(cmd *cobra.Command) {
 	f.StringVar(&handoffOpts.clineDir, "cline-dir", "", "Cline directory (default ~/.cline)")
 }
 
+// handoffLong describes the handoff command, naming each runtime whose own session store it reads.
+func handoffLong() string {
+	var labels []string
+	for _, harness := range handoff.Harnesses {
+		if handoff.ReadsStore(harness) {
+			labels = append(labels, handoff.RuntimeLabel(harness))
+		}
+	}
+	return fmt.Sprintf(`Pick up a local agent session again, in the same runtime or another one.
+
+Sessions are read from each runtime's own local session store: %s.
+Sessions of the other runtimes come from Beacon's runtime log. Nothing is uploaded and no runtime
+file is modified.`, joinWithAnd(labels))
+}
+
+// joinWithAnd joins items as prose: "a", "a and b", "a, b and c".
+func joinWithAnd(items []string) string {
+	if len(items) < 2 {
+		return strings.Join(items, "")
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
+}
+
 func init() {
+	handoffCmd.Long = handoffLong()
 	rootCmd.AddCommand(handoffCmd)
 	handoffCmd.AddCommand(handoffListCmd, handoffExportCmd)
 	addHandoffStoreFlags(handoffExportCmd)

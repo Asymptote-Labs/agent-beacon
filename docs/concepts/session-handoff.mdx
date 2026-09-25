@@ -15,8 +15,13 @@ the runtime resumes from, and it keeps content the runtime log truncates. Every 
 local and read-only. Nothing is uploaded, no runtime file is changed, and no command in
 the handoff path touches the network.
 
-Handoff supports Claude Code, Codex CLI, OpenCode, and Cline. See
-[`beacon handoff`](/cli/handoff) for the full command reference.
+Handoff reads the session stores of Claude Code, Codex CLI, OpenCode, Cline, Pi, Prime Agent,
+Factory Droid, GitHub Copilot CLI, Hermes Agent, DeepSeek Harness, fx, Grok Build, OpenClaw
+Gateway, and Cursor. It can also continue a session in Oh My Pi, Gemini CLI, Qwen Code, Kiro,
+Antigravity CLI, Devin CLI, Muse Code, OpenHands, or goose. Beacon keeps no reader for those
+runtimes' own stores, so it knows their sessions only from its runtime log. See
+[`beacon handoff`](/cli/handoff) for the full command reference, including each runtime's
+commands.
 
 ## Workflow
 
@@ -37,8 +42,10 @@ beacon handoff resume 7f3c2a91 --agent codex   # continue it in another runtime
 
 **Reopen natively.** Beacon reopens the session with its full context when you continue
 in the same runtime, that runtime's CLI can load the session, and the session file is
-still on this machine. This runs `claude --resume`, `codex resume`,
-`opencode --session`, or `cline --tui --id`. The session keeps its own id.
+still on this machine. This runs the runtime's own reopen command, such as
+`claude --resume`, `codex resume`, or `opencode --session`. The session keeps its own id.
+Some runtimes reopen a session only from the directory it ran in (fx, Grok Build, and
+Cursor), so with `--cwd` pointing elsewhere their sessions are not reopened natively.
 
 **Start a new session from a brief.** Beacon starts a new session from a brief when you
 continue in a different runtime, when you pass `--new`, or when the session can't be
@@ -46,6 +53,10 @@ reopened natively. Subagent sessions and sessions known only from Beacon's runti
 always take this path. Beacon writes the brief, then starts a new session whose first
 prompt names the brief by its path and asks the agent to confirm the task before it
 changes anything.
+
+A few runtimes can take only one of the two paths. DeepSeek Harness has no interactive
+session for Beacon to start, and Hermes Agent and fx can reopen their own sessions but can't
+start one from a brief. Their sessions continue in another runtime, named with `--agent`.
 
 ## What a brief contains
 
@@ -73,8 +84,11 @@ connected, its first prompt ends with a handoff marker:
 When Beacon records a prompt that carries this marker, it writes a `session.handoff`
 event alongside the usual `prompt.submitted` event. The event's
 `handoff.source_harness` and `handoff.source_session_id` fields name the session it
-continues. Live hooks record the link as the prompt is sent. The `claude`, `codex`,
-`opencode`, and `cline` session-store syncs record it when they read the prompt back.
+continues. Live hooks and plugins record the link as the prompt is sent. The session-store
+syncs record it when they read the prompt back: `beacon endpoint <runtime> sync` for Claude
+Code, Codex CLI, OpenCode, Cline, Pi, Prime Agent, Factory Droid, GitHub Copilot CLI, Hermes
+Agent, DeepSeek Harness, fx, Grok Build, and Cursor, and `beacon endpoint openclaw sessions
+sync` for OpenClaw Gateway.
 This lets you follow one task across runtimes in the runtime log or a forwarded
 destination, and threat rules can match on `e.handoff.*`.
 
@@ -98,5 +112,9 @@ The marker is text in a prompt, not a verified identity, and anyone can type it.
   part of the brief.
 - **Confirmation before launch.** `resume` asks before it starts a runtime, and it
   launches without a terminal only with `--yes`. It stops if the session's directory no
-  longer exists, rather than starting somewhere else. Cline sessions are always started
-  with `--auto-approve false`, because Cline approves every tool call by default.
+  longer exists, rather than starting somewhere else.
+- **Approvals stay on.** Beacon never passes a flag that turns a runtime's approvals off.
+  Where a CLI takes an approval mode, Beacon names the one that asks. For example, Cline
+  is always started with `--auto-approve false`, because it approves every tool call by
+  default. Beacon also removes environment switches that would approve everything, such
+  as `COPILOT_ALLOW_ALL` and `HERMES_YOLO_MODE`.

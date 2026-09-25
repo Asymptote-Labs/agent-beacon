@@ -177,9 +177,7 @@ There are two ways to resume:
 
 Hermes Agent has no row in the second table: its CLI has no way to start an interactive session with a first message, only one-shot runs, so it can't continue a session from a brief. A Hermes session continues from a brief in another runtime (`--agent`), and `--agent hermes` reopens only Hermes's own sessions.
 
-Claude Code, Cline, Prime Agent and Grok Build subagent sessions, and Cline's older task history, can't be reopened by their CLIs, so they always continue from a brief. A session known only from Beacon's runtime log also continues from a brief, and it needs `--agent` if its own runtime isn't one Beacon can start.
-
-Claude Code, Cline, Prime Agent and Hermes Agent subagent sessions, and Cline's older task history, can't be reopened by their CLIs, so they always continue from a brief. A session known only from Beacon's runtime log also continues from a brief, and it needs `--agent` if its own runtime isn't one Beacon can start.
+Claude Code, Cline, Prime Agent, Hermes Agent and Grok Build subagent sessions, and Cline's older task history, can't be reopened by their CLIs, so they always continue from a brief. A session known only from Beacon's runtime log also continues from a brief, and it needs `--agent` if its own runtime isn't one Beacon can start.
 
 Beacon cannot start DeepSeek Harness, because it has no interactive terminal session to start: `dsh --profile headless` answers one task and exits, and `dsh web` is a browser UI. A DeepSeek Harness session therefore continues in another runtime, named with `--agent`, and `--agent dsh` is refused.
 
