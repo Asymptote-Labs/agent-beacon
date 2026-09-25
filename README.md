@@ -75,7 +75,34 @@ Install the latest `.deb` or `.rpm` for your distribution and architecture (Debi
 curl -fsSL https://github.com/asymptote-labs/agent-beacon/releases/latest/download/install.sh | bash
 ```
 
-The [installer](packaging/linux/install.sh) verifies the package against the release checksums. To install by hand, download the package from the [latest release](https://github.com/asymptote-labs/agent-beacon/releases/latest) into a directory APT can read (not your home directory, or APT ends with a harmless `Permission denied` notice) and run `sudo apt install ./beacon_<version>_linux_amd64.deb` or `sudo dnf install ./beacon_<version>_linux_amd64.rpm`.
+The [installer](packaging/linux/install.sh) downloads the package for your architecture, verifies it against the release `checksums.txt`, and installs it with `apt-get` or `dnf`. Set `BEACON_VERSION=<version>` to install a specific release.
+
+**Prefer not to pipe a script into your shell?** Either read the script before you run it:
+
+```bash
+curl -fsSLO https://github.com/asymptote-labs/agent-beacon/releases/latest/download/install.sh
+less install.sh
+bash install.sh
+```
+
+Or skip the script and run its steps yourself: pick a version, download the package and `checksums.txt`, verify the package, and install it with your package manager.
+
+```bash
+VERSION="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/asymptote-labs/agent-beacon/releases/latest)"; VERSION="${VERSION##*/v}"
+case "$(uname -m)" in x86_64) ARCH=amd64 ;; aarch64) ARCH=arm64 ;; esac
+FORMAT=deb   # or rpm for Fedora, RHEL, Rocky, Alma
+PKG="beacon_${VERSION}_linux_${ARCH}.${FORMAT}"
+BASE="https://github.com/asymptote-labs/agent-beacon/releases/download/v${VERSION}"
+
+# Download into a directory APT can read. A package in your home directory still
+# installs, but APT ends with a harmless "Permission denied" notice.
+DIR="$(mktemp -d /tmp/beacon-install.XXXXXXXX)" && chmod 0711 "$DIR" && cd "$DIR"
+curl -fsSLO "${BASE}/${PKG}" && curl -fsSLO "${BASE}/checksums.txt" && chmod 0644 "${PKG}"
+grep "  ${PKG}$" checksums.txt | sha256sum --check - && \
+sudo apt install "./${PKG}"   # or: sudo dnf install "./${PKG}"
+```
+
+`checksums.txt` is published with the release, so it catches a corrupted or swapped download but does not prove who built the release. If that matters to you, pin `VERSION` to a release you have reviewed instead of following `latest`. To install without root, use the tarball in user mode ([Linux install guide](https://docs.asymptotelabs.ai/platforms/linux#without-root-or-without-a-package-manager)).
 
 </details>
 
