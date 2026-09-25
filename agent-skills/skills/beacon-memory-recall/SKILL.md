@@ -46,8 +46,10 @@ continue the task without memory. Do not install it yourself.
 Prefer the Beacon MCP tools when this session has them. They are named `search_memory`,
 `get_memory`, and `get_memory_context`, usually under a server called `beacon`.
 
-1. Call `get_memory_context` with `task` set to a one-sentence description of the current
-   task. It returns up to five relevant approved memories for the current project.
+1. Call `get_memory_context` with `task` set to two or three distinctive keywords from
+   the current task (a tool name, file, error string). Terms are ANDed, so a full
+   sentence will over-constrain the search and return nothing. Drop terms if the first
+   attempt is empty.
 2. Call `get_memory` with an `id` from that result when you need the full body and its
    evidence.
 
