@@ -76,6 +76,22 @@ func TestListReadsFxSessions(t *testing.T) {
 	}
 }
 
+func TestFxOversizedFirstTurnStillListsTitle(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	isolateRuntimeEnv(t)
+	sessions := filepath.Join(t.TempDir(), "fx-sessions")
+	id := fxSessionA
+	log := filepath.Join(sessions, id, "events.jsonl")
+
+	bigReply := strings.Repeat("x", 2<<20) // 2 MiB reply makes the turn exceed 1 MiB
+	writeFixture(t, log, fxStartedFrame(id, "/work/big")+fxTurnFrame(2, "deploy to prod", bigReply))
+
+	head := readFxHead(log)
+	if head.FirstPrompt != "deploy to prod" {
+		t.Fatalf("readFxHead missed oversized turn: FirstPrompt = %q", head.FirstPrompt)
+	}
+}
+
 func TestFxStoreMissingListsNothing(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	sessions, err := (&fxSource{dir: filepath.Join(t.TempDir(), "absent")}).List()

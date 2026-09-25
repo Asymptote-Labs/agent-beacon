@@ -165,7 +165,7 @@ func piHeaderBranch(header map[string]interface{}) string {
 // readPiFirstPrompt returns the first thing a person typed in a Pi-format transcript.
 func readPiFirstPrompt(path string) string {
 	var prompt string
-	scanHead(path, func(line []byte) bool {
+	scanHead(path, claudeHeadMaxLineSize, func(line []byte) bool {
 		var entry struct {
 			Type    string `json:"type"`
 			Message struct {
