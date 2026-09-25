@@ -275,3 +275,71 @@ func TestLaunchReportsAMissingExecutable(t *testing.T) {
 		t.Fatalf("Launch = %d, %v", code, err)
 	}
 }
+
+func TestLaunchEnvSetsAndRemovesVariables(t *testing.T) {
+	environ := []string{"PATH=/bin", "ALLOW_ALL=true", "MODE=auto", "KEEP=1"}
+	got := launchEnv(environ, map[string]string{"ALLOW_ALL": "", "MODE": "approve", "NEW": "x"})
+	want := []string{"PATH=/bin", "KEEP=1", "MODE=approve", "NEW=x"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("env = %q, want %q", got, want)
+	}
+	if got := launchEnv(environ, nil); !reflect.DeepEqual(got, environ) {
+		t.Fatalf("no overrides changed the environment: %q", got)
+	}
+}
+
+// withRuntime registers a runtime for the length of a test.
+func withRuntime(t *testing.T, r Runtime) {
+	t.Helper()
+	prev := runtimes
+	runtimes = append(append([]Runtime{}, runtimes...), r)
+	t.Cleanup(func() { runtimes = prev })
+}
+
+func TestPlanResumeCarriesTheRuntimesEnvironment(t *testing.T) {
+	withRuntime(t, Runtime{Harness: "test_agent", Label: "Test Agent", Command: &runtimeCommand{
+		Executable: "test-agent",
+		Resume:     func(s Session) ([]string, bool) { return []string{"--resume", s.ID}, true },
+		NewSession: func(prompt string) []string { return []string{prompt} },
+		Env:        map[string]string{"TEST_AGENT_MODE": "approve", "TEST_AGENT_ALLOW_ALL": ""},
+	}})
+	session := resumableSession(t, "test_agent", "s-1")
+	plan, err := PlanResume(session, PlanOptions{LookPath: installed("test-agent")})
+	if err != nil {
+		t.Fatalf("PlanResume: %v", err)
+	}
+	want := map[string]string{"TEST_AGENT_MODE": "approve", "TEST_AGENT_ALLOW_ALL": ""}
+	if !reflect.DeepEqual(plan.Env, want) {
+		t.Fatalf("env = %v, want %v", plan.Env, want)
+	}
+	// The plan holds a copy: changing it cannot change what the next plan gets.
+	plan.Env["TEST_AGENT_MODE"] = "yolo"
+	again, _ := PlanResume(session, PlanOptions{LookPath: installed("test-agent")})
+	if again.Env["TEST_AGENT_MODE"] != "approve" {
+		t.Fatal("a plan's environment must not alias the registry's")
+	}
+
+	claude, err := PlanResume(resumableSession(t, HarnessClaude, "s-2"), PlanOptions{LookPath: allRuntimes})
+	if err != nil || claude.Env != nil {
+		t.Fatalf("a runtime with no overrides plans none: %v %v", claude.Env, err)
+	}
+}
+
+func TestLaunchAppliesThePlansEnvironment(t *testing.T) {
+	testenv.RequirePOSIXExecutableFixtures(t)
+	script := filepath.Join(t.TempDir(), "fake-agent")
+	writeFixture(t, script, "#!/bin/sh\necho \"mode=$TEST_AGENT_MODE allow=${TEST_AGENT_ALLOW_ALL-unset}\"\n")
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TEST_AGENT_MODE", "auto")
+	t.Setenv("TEST_AGENT_ALLOW_ALL", "true")
+	var stdout strings.Builder
+	plan := Plan{Executable: script, Dir: t.TempDir(), Env: map[string]string{"TEST_AGENT_MODE": "approve", "TEST_AGENT_ALLOW_ALL": ""}}
+	if _, err := Launch(plan, nil, &stdout, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "mode=approve allow=unset" {
+		t.Fatalf("runtime saw %q", got)
+	}
+}

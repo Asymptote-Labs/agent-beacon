@@ -38,6 +38,9 @@ type Plan struct {
 	Dir        string   `json:"dir"`
 	// BriefPath is where the brief for a new session is written. It is empty for a native resume.
 	BriefPath string `json:"brief_path,omitempty"`
+	// Env is what the runtime's environment differs by: a variable set to a value is set, one set
+	// to "" is removed.
+	Env map[string]string `json:"env,omitempty"`
 }
 
 // PlanOptions steer how a session is picked up.
@@ -83,6 +86,12 @@ func PlanResume(session Session, opts PlanOptions) (Plan, error) {
 		return Plan{}, fmt.Errorf("%w: %s (%s was not found on PATH)", ErrRuntimeNotInstalled, RuntimeLabel(target), targetCommand.Executable)
 	}
 	plan.Executable = executable
+	if len(targetCommand.Env) > 0 {
+		plan.Env = make(map[string]string, len(targetCommand.Env))
+		for name, value := range targetCommand.Env {
+			plan.Env[name] = value
+		}
+	}
 	reason := nativeBlocker(session, target, opts)
 	if reason == "" {
 		plan.Mode, plan.Args = ModeNative, nativeArgs(targetCommand, session)
