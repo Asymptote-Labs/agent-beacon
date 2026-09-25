@@ -182,6 +182,15 @@ func TestHandoffListHereUsesTheWorkingDirectory(t *testing.T) {
 	if !strings.Contains(out, "in-here") || strings.Contains(out, "elsewhere") {
 		t.Fatalf("--here listing:\n%s", out)
 	}
+	for _, rel := range []string{".", "pkg", filepath.Join("pkg", "..")} {
+		out, _, err := runHandoff(t, "list", "--dir", rel)
+		if err != nil || !strings.Contains(out, "in-here") || strings.Contains(out, "elsewhere") {
+			t.Fatalf("--dir %s is relative to the working directory: %v\n%s", rel, err, out)
+		}
+	}
+	if out, _, _ := runHandoff(t, "list", "--dir", "other"); strings.Contains(out, "in-here") {
+		t.Fatalf("--dir other must not match a sibling:\n%s", out)
+	}
 	if _, _, err := runHandoff(t, "list", "--here", "--dir", "/x"); err == nil || !strings.Contains(err.Error(), "cannot be combined") {
 		t.Fatalf("--here with --dir err = %v", err)
 	}

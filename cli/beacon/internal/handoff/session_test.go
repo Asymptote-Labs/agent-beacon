@@ -315,15 +315,18 @@ func TestListDirectoryFilterFollowsSymlinks(t *testing.T) {
 		{Harness: HarnessClaude, ID: "recorded-link", Directory: link},
 		{Harness: HarnessClaude, ID: "elsewhere", Directory: other},
 		{Harness: HarnessClaude, ID: "gone", Directory: filepath.Join(base, "deleted")},
+		{Harness: HarnessClaude, ID: "deleted-under-real", Directory: filepath.Join(real, "removed", "sub")},
 	}}}
 	for _, tc := range []struct {
 		root, want string
 	}{
-		{link, "claude_code/recorded-link,claude_code/recorded-real"},
-		{real, "claude_code/recorded-link,claude_code/recorded-real"},
+		{link, "claude_code/deleted-under-real,claude_code/recorded-link,claude_code/recorded-real"},
+		{real, "claude_code/deleted-under-real,claude_code/recorded-link,claude_code/recorded-real"},
+		{filepath.Join(link, "removed"), "claude_code/deleted-under-real"},
 		{filepath.Join(link, "pkg"), "claude_code/recorded-real"},
 		{other, "claude_code/elsewhere"},
 		{filepath.Join(base, "missing-root"), ""},
+		{filepath.Join(link, "not-created"), ""},
 	} {
 		sessions, err := List(sources, Filter{Directory: tc.root})
 		if err != nil {
@@ -333,6 +336,19 @@ func TestListDirectoryFilterFollowsSymlinks(t *testing.T) {
 		sort.Strings(keys)
 		if got := strings.Join(keys, ","); got != tc.want {
 			t.Fatalf("--dir %s = %q, want %q", tc.root, got, tc.want)
+		}
+	}
+}
+
+func TestResolveExisting(t *testing.T) {
+	base := t.TempDir()
+	real, _ := filepath.EvalSymlinks(base)
+	for _, tc := range []struct{ in, want string }{
+		{base, real},
+		{filepath.Join(base, "a", "b"), filepath.Join(real, "a", "b")},
+	} {
+		if got := resolveExisting(tc.in); got != tc.want {
+			t.Fatalf("resolveExisting(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }

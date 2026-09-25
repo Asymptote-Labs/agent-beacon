@@ -161,10 +161,7 @@ func directoryMatcher(root string) func(dir string) bool {
 	if root == "" {
 		return func(string) bool { return true }
 	}
-	resolvedRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		resolvedRoot = ""
-	}
+	resolvedRoot := resolveExisting(root)
 	return func(dir string) bool {
 		if dir == "" {
 			return false
@@ -178,8 +175,26 @@ func directoryMatcher(root string) func(dir string) bool {
 		if withinDirectory(dir, resolvedRoot) {
 			return true
 		}
-		resolved, err := filepath.EvalSymlinks(dir)
-		return err == nil && withinDirectory(resolved, resolvedRoot)
+		resolved := resolveExisting(dir)
+		return resolved != "" && withinDirectory(resolved, resolvedRoot)
+	}
+}
+
+// resolveExisting resolves the symlinks in path. A path that no longer exists (a deleted project
+// directory) resolves through its nearest existing ancestor, with the rest rejoined as written.
+func resolveExisting(path string) string {
+	path = filepath.Clean(path)
+	var rest []string
+	for {
+		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			return filepath.Join(append([]string{resolved}, rest...)...)
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			return ""
+		}
+		rest = append([]string{filepath.Base(path)}, rest...)
+		path = parent
 	}
 }
 
@@ -190,17 +205,6 @@ func withinDirectory(dir, root string) bool {
 	}
 	dir = filepath.Clean(dir)
 	root = filepath.Clean(root)
-	if !filepath.IsAbs(root) {
-		if abs, err := filepath.Abs(root); err == nil {
-			root = abs
-		}
-	}
-	if resolved, err := filepath.EvalSymlinks(root); err == nil {
-		root = resolved
-	}
-	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
-		dir = resolved
-	}
 	if dir == root {
 		return true
 	}

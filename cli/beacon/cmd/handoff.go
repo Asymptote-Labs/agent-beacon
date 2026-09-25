@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -61,11 +61,15 @@ func runHandoffList(cmd *cobra.Command, args []string) error {
 		if filter.Directory != "" {
 			return fmt.Errorf("--here and --dir cannot be combined")
 		}
-		wd, err := os.Getwd()
+		filter.Directory = "."
+	}
+	if filter.Directory != "" {
+		// Recorded session directories are absolute; a relative --dir means relative to here.
+		abs, err := filepath.Abs(filter.Directory)
 		if err != nil {
-			return fmt.Errorf("resolve current directory: %w", err)
+			return fmt.Errorf("resolve --dir %s: %w", filter.Directory, err)
 		}
-		filter.Directory = wd
+		filter.Directory = abs
 	}
 	sessions, listErr := handoff.List(handoffSources(handoffOpts.dirs), filter)
 	out := cmd.OutOrStdout()
