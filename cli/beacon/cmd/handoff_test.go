@@ -47,6 +47,7 @@ func stubHandoffSources(t *testing.T, sources ...handoff.Source) *handoff.StoreD
 func runHandoff(t *testing.T, args ...string) (string, string, error) {
 	t.Helper()
 	handoffOpts = handoffOptions{}
+	handoffResumeOpts = handoffResumeOptions{}
 	for _, cmd := range handoffCmd.Commands() {
 		cmd.Flags().VisitAll(func(f *pflag.Flag) {
 			_ = f.Value.Set(f.DefValue)

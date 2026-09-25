@@ -70,61 +70,84 @@ var (
 	handoffNow     = time.Now
 )
 
-// loadHandoffBrief builds the brief for id from the runtime's session store, or from the runtime log
-// when the store no longer has the session.
-func loadHandoffBrief(id string) (handoff.Brief, error) {
-	harness, err := handoff.ParseHarness(handoffOpts.harness)
-	if err != nil {
-		return handoff.Brief{}, err
-	}
-	sources := handoffSources(handoffOpts.dirs)
-	session, findErr := handoff.Find(sources, harness, id)
-	var notFound *handoff.NotFoundError
-	switch {
-	case findErr == nil:
-		events, err := handoff.Events(sources, session)
-		if err == nil {
-			return handoff.BuildBrief(session, events, handoff.FromSessionStore, handoffNow()), nil
-		}
-		if !errors.Is(err, handoff.ErrNotFound) {
-			return handoff.Brief{}, fmt.Errorf("read %s session %s: %w", session.Harness, session.ID, err)
-		}
-		id = session.ID
-	case !errors.As(findErr, &notFound):
-		return handoff.Brief{}, findErr
-	}
-	logSession, events, err := loadHandoffLogSession(id, harness, notFound)
-	if err != nil {
-		return handoff.Brief{}, err
-	}
-	return handoff.BuildBrief(logSession, events, handoff.FromRuntimeLog, handoffNow()), nil
+// handoffSubject is the session a handoff command acts on, found in its runtime's store or, when
+// the store no longer has it, in Beacon's runtime log.
+type handoffSubject struct {
+	session   handoff.Session
+	fromLog   bool
+	logEvents []schema.Event
 }
 
-// loadHandoffLogSession finds id in the runtime log. It refuses a session whose own store could not
-// be read: that session may well still be there, and a brief from the log would keep less of it
+func resolveHandoffSession(id string) (handoffSubject, error) {
+	harness, err := handoff.ParseHarness(handoffOpts.harness)
+	if err != nil {
+		return handoffSubject{}, err
+	}
+	session, findErr := handoff.Find(handoffSources(handoffOpts.dirs), harness, id)
+	if findErr == nil {
+		return handoffSubject{session: session}, nil
+	}
+	var notFound *handoff.NotFoundError
+	if !errors.As(findErr, &notFound) {
+		return handoffSubject{}, findErr
+	}
+	return resolveHandoffLogSession(id, harness, notFound)
+}
+
+// resolveHandoffLogSession finds id in the runtime log. It refuses a session whose own store could
+// not be read: that session may well still be there, and a brief from the log would keep less of it
 // than the store does.
-func loadHandoffLogSession(id, harness string, notFound *handoff.NotFoundError) (handoff.Session, []schema.Event, error) {
+func resolveHandoffLogSession(id, harness string, notFound *handoff.NotFoundError) (handoffSubject, error) {
 	logPath := handoffRuntimeLogPath()
 	session, events, found, err := handoff.LogSession(logPath, id, harness)
 	var ambiguous *handoff.AmbiguousError
 	if errors.As(err, &ambiguous) {
-		return handoff.Session{}, nil, fmt.Errorf("in the runtime log %s: %w", logPath, err)
+		return handoffSubject{}, fmt.Errorf("in the runtime log %s: %w", logPath, err)
 	}
 	if err != nil {
-		return handoff.Session{}, nil, fmt.Errorf("read runtime log %s: %w", logPath, err)
+		return handoffSubject{}, fmt.Errorf("read runtime log %s: %w", logPath, err)
 	}
 	if !found || (harness != "" && session.Harness != harness) {
 		if notFound == nil {
 			notFound = &handoff.NotFoundError{ID: id}
 		}
-		return handoff.Session{}, nil, fmt.Errorf("%w; not in the runtime log %s either (`beacon handoff list` shows what is available)", notFound, logPath)
+		return handoffSubject{}, fmt.Errorf("%w; not in the runtime log %s either (`beacon handoff list` shows what is available)", notFound, logPath)
 	}
 	if notFound != nil {
 		if storeErr := notFound.UnreadableStore(session.Harness); storeErr != nil {
-			return handoff.Session{}, nil, fmt.Errorf("the %s session store could not be read (%v); fix that rather than build the brief from the runtime log, which keeps less", session.Harness, storeErr.Err)
+			return handoffSubject{}, fmt.Errorf("the %s session store could not be read (%v); fix that rather than build the brief from the runtime log, which keeps less", session.Harness, storeErr.Err)
 		}
 	}
-	return session, events, nil
+	return handoffSubject{session: session, fromLog: true, logEvents: events}, nil
+}
+
+// brief builds the subject's brief. A session its store loses between lookup and read falls back to
+// the runtime log.
+func (subject handoffSubject) brief() (handoff.Brief, error) {
+	if subject.fromLog {
+		return handoff.BuildBrief(subject.session, subject.logEvents, handoff.FromRuntimeLog, handoffNow()), nil
+	}
+	session := subject.session
+	events, err := handoff.Events(handoffSources(handoffOpts.dirs), session)
+	if err == nil {
+		return handoff.BuildBrief(session, events, handoff.FromSessionStore, handoffNow()), nil
+	}
+	if !errors.Is(err, handoff.ErrNotFound) {
+		return handoff.Brief{}, fmt.Errorf("read %s session %s: %w", session.Harness, session.ID, err)
+	}
+	logSubject, logErr := resolveHandoffLogSession(session.ID, session.Harness, nil)
+	if logErr != nil {
+		return handoff.Brief{}, logErr
+	}
+	return logSubject.brief()
+}
+
+func loadHandoffBrief(id string) (handoff.Brief, error) {
+	subject, err := resolveHandoffSession(id)
+	if err != nil {
+		return handoff.Brief{}, err
+	}
+	return subject.brief()
 }
 
 // handoffLogReason says why a session was read from the runtime log.
