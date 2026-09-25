@@ -236,6 +236,11 @@ func (m *mapper) emitPrompt(record Record) {
 	})
 	ev.Raw = m.raw(record, nil)
 	m.append(record, "prompt.submitted", ev)
+	if info, ok := asymptoteobserve.ParseHandoffMarker(text); ok {
+		link := m.base(record, "session.handoff", "session", schema.SeverityInfo, "Session continued from a "+info.SourceHarness+" session")
+		link.Handoff = &info
+		m.append(record, "prompt.submitted.handoff", link)
+	}
 }
 
 func (m *mapper) emitAssistant(record Record) {
