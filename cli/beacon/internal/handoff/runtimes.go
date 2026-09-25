@@ -8,6 +8,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/clinesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/dshsession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/factorysession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/opencodesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pisession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/primesession"
@@ -54,6 +55,7 @@ const (
 	HarnessCline    = clinesession.Harness
 	HarnessPi       = pisession.Harness
 	HarnessPrime    = primesession.Harness
+	HarnessFactory  = factorysession.Harness
 	HarnessDSH      = dshsession.Harness
 
 	// Runtimes Beacon starts but whose sessions it reads only from the runtime log.
@@ -160,6 +162,21 @@ var runtimes = []Runtime{
 				return []string{"--resume", s.SourcePath}, true
 			},
 			NewSession: func(prompt string) []string { return []string{"--", prompt} },
+		},
+	},
+	{
+		Harness:   HarnessFactory,
+		Label:     "Factory Droid",
+		Aliases:   []string{"droid", "factory-droid"},
+		NewSource: func(dir string) Source { return &factorySource{dir: dir} },
+		// Droid's interactive mode asks before it acts. Beacon never passes --auto, so a session it
+		// starts keeps asking.
+		Command: &runtimeCommand{
+			Executable: "droid",
+			Resume:     func(s Session) ([]string, bool) { return []string{"--resume", s.ID}, true },
+			// The prompt is droid's positional argument. It starts with a word that is neither an
+			// option nor one of droid's subcommands, so it is read as the prompt.
+			NewSession: func(prompt string) []string { return []string{prompt} },
 		},
 	},
 	{
