@@ -9,7 +9,7 @@ bring that memory back to any agent in any harness.
 | `beacon-memory-distill` | Pick traces, score them with the evaluator after a dry run and the user's yes, read each candidate's source trace, draft a grounded lesson, and approve it with the user. | Evaluator call only, with consent |
 | `beacon-memory-promote` | Install an approved memory as `.agents/skills/<slug>/SKILL.md` so harnesses load it automatically. | None |
 
-All three need the [Beacon CLI](https://docs.asymptotelabs.ai/get-started) with endpoint
+All three need the [Beacon CLI](https://docs.beacon.sh/get-started/overview) with endpoint
 capture installed. The plugin also registers the local `beacon mcp serve` server for
 harnesses that take MCP servers from plugins.
 

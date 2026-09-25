@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires the Beacon CLI (beacon) on PATH with endpoint capture installed. Reads only local state and makes no network calls.
 metadata:
   author: asymptote-labs
-  homepage: https://docs.asymptotelabs.ai/concepts/cross-harness-memory
+  homepage: https://docs.beacon.sh/concepts/cross-harness-memory
   version: "0.1.0"
 ---
 
@@ -38,7 +38,7 @@ beacon version
 ```
 
 If `beacon` is not found, tell the user that project memory is unavailable because the
-Beacon CLI is not installed, point them to https://docs.asymptotelabs.ai/get-started, and
+Beacon CLI is not installed, point them to https://docs.beacon.sh/get-started/overview, and
 continue the task without memory. Do not install it yourself.
 
 ## Step 2: retrieve memory

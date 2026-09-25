@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires the Beacon CLI (beacon) on PATH with endpoint capture installed. Scoring calls the configured Jev evaluator over the network (hosted TypeSafe by default) and needs TYPESAFE_API_KEY or BEACON_JEV_API_KEY; every other step is local.
 metadata:
   author: asymptote-labs
-  homepage: https://docs.asymptotelabs.ai/concepts/cross-harness-memory
+  homepage: https://docs.beacon.sh/concepts/cross-harness-memory
   version: "0.1.0"
 ---
 
@@ -36,7 +36,7 @@ beacon endpoint traces status --json
 ```
 
 - If `beacon` is missing, stop and point the user to
-  https://docs.asymptotelabs.ai/get-started. Do not install it yourself.
+  https://docs.beacon.sh/get-started/overview. Do not install it yourself.
 - If the trace store is empty or stale, rebuild it (local only, never touches the log):
   `beacon endpoint traces reindex`.
 

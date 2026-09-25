@@ -2,7 +2,7 @@
   "name": "beacon",
   "owner": {
     "name": "Asymptote Labs",
-    "url": "https://asymptotelabs.ai"
+    "url": "https://beacon.sh"
   },
   "description": "Beacon plugins for AI coding agents.",
   "plugins": [

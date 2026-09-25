@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires the Beacon CLI (beacon) on PATH. Local only. Writes files inside the current project.
 metadata:
   author: asymptote-labs
-  homepage: https://docs.asymptotelabs.ai/cli/memory
+  homepage: https://docs.beacon.sh/cli/memory
   version: "0.1.0"
 ---
 
