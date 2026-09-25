@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/clinesession"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
@@ -27,59 +26,6 @@ const (
 	ReasonSessionGone    = "session_file_missing"
 	ReasonFromRuntimeLog = "runtime_log_only"
 )
-
-// runtimeCommand is how Beacon starts one runtime's CLI. Every argument vector was checked against
-// that CLI's own --help.
-type runtimeCommand struct {
-	Executable string
-	// Resume returns the arguments that reopen session, or ok=false when this runtime's CLI cannot
-	// reopen it.
-	Resume func(session Session) (args []string, ok bool)
-	// NewSession returns the arguments that start an interactive session with prompt as its first
-	// message.
-	NewSession func(prompt string) []string
-}
-
-var runtimeCommands = map[string]runtimeCommand{
-	HarnessClaude: {
-		Executable: "claude",
-		Resume: func(s Session) ([]string, bool) {
-			// A subagent transcript is a sidechain of its parent; `claude --resume` reopens
-			// top-level sessions only.
-			if s.Subagent {
-				return nil, false
-			}
-			return []string{"--resume", s.ID}, true
-		},
-		NewSession: func(prompt string) []string { return []string{prompt} },
-	},
-	HarnessCodex: {
-		Executable: "codex",
-		Resume:     func(s Session) ([]string, bool) { return []string{"resume", s.ID}, true },
-		NewSession: func(prompt string) []string { return []string{prompt} },
-	},
-	HarnessOpenCode: {
-		Executable: "opencode",
-		Resume:     func(s Session) ([]string, bool) { return []string{"--session", s.ID}, true },
-		NewSession: func(prompt string) []string { return []string{"--prompt", prompt} },
-	},
-	HarnessCline: {
-		// Cline approves every tool call unless told otherwise. A session Beacon starts never
-		// gains that on Beacon's say-so; the user can still turn it on inside the TUI.
-		Executable: "cline",
-		Resume: func(s Session) ([]string, bool) {
-			// `cline --id` reopens CLI sessions; the older task history and subagent threads are
-			// not sessions it can load.
-			if s.Store != clinesession.SourceMessages || s.Subagent {
-				return nil, false
-			}
-			return []string{"--tui", "--auto-approve", "false", "--id", s.ID}, true
-		},
-		NewSession: func(prompt string) []string {
-			return []string{"--tui", "--auto-approve", "false", prompt}
-		},
-	},
-}
 
 // Plan is a resolved resume: what will run, where, and why.
 type Plan struct {
@@ -122,9 +68,9 @@ func PlanResume(session Session, opts PlanOptions) (Plan, error) {
 	if opts.Target != "" {
 		target = opts.Target
 	}
-	targetCommand, ok := runtimeCommands[target]
+	targetCommand, ok := commandFor(target)
 	if !ok {
-		return Plan{}, fmt.Errorf("%s sessions cannot be started by beacon handoff (supported: claude, codex, opencode, cline)", target)
+		return Plan{}, fmt.Errorf("%s sessions cannot be started by beacon handoff (supported: %s)", target, strings.Join(StartableNames(), ", "))
 	}
 	dir, err := resumeDir(session, opts.Dir)
 	if err != nil {
@@ -151,11 +97,14 @@ func PlanResume(session Session, opts PlanOptions) (Plan, error) {
 	}
 	plan.Mode, plan.Reason = ModeNewSession, reason
 	plan.BriefPath = opts.BriefPath
+	if targetCommand.NewSession == nil {
+		return Plan{}, fmt.Errorf("%s cannot start a new session from a brief (%s)", RuntimeLabel(target), ReasonText(reason))
+	}
 	plan.Args = targetCommand.NewSession(NewSessionPrompt(session, opts.BriefPath))
 	return plan, nil
 }
 
-func nativeArgs(command runtimeCommand, session Session) []string {
+func nativeArgs(command *runtimeCommand, session Session) []string {
 	args, _ := command.Resume(session)
 	return args
 }
@@ -170,7 +119,11 @@ func nativeBlocker(session Session, target string, opts PlanOptions) string {
 	case opts.FromRuntimeLog:
 		return ReasonFromRuntimeLog
 	}
-	if _, ok := runtimeCommands[target].Resume(session); !ok {
+	command, _ := commandFor(target)
+	if command.Resume == nil {
+		return ReasonNotResumable
+	}
+	if _, ok := command.Resume(session); !ok {
 		return ReasonNotResumable
 	}
 	if session.SourcePath == "" {
@@ -230,4 +183,15 @@ func ReasonText(reason string) string {
 		return "the session is known only from Beacon's runtime log"
 	}
 	return reason
+}
+
+// StartableNames names the runtimes Beacon can start, for messages.
+func StartableNames() []string {
+	var names []string
+	for i, r := range runtimes {
+		if r.Command != nil {
+			names = append(names, RuntimeNames()[i])
+		}
+	}
+	return names
 }

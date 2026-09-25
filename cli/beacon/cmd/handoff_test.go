@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +51,12 @@ func runHandoff(t *testing.T, args ...string) (string, string, error) {
 	handoffResumeOpts = handoffResumeOptions{}
 	for _, cmd := range handoffCmd.Commands() {
 		cmd.Flags().VisitAll(func(f *pflag.Flag) {
+			if slice, ok := f.Value.(pflag.SliceValue); ok {
+				// Set on a slice flag appends; start it empty again instead.
+				_ = slice.Replace(nil)
+				f.Changed = false
+				return
+			}
 			_ = f.Value.Set(f.DefValue)
 			f.Changed = false
 		})
@@ -225,7 +232,7 @@ func TestHandoffListWarnsAboutUnreadableStores(t *testing.T) {
 
 func TestHandoffListRejectsUnknownRuntime(t *testing.T) {
 	stubHandoffSources(t)
-	if _, _, err := runHandoff(t, "list", "--harness", "cursor"); err == nil || !strings.Contains(err.Error(), "unsupported runtime") {
+	if _, _, err := runHandoff(t, "list", "--harness", "no-such-runtime"); err == nil || !strings.Contains(err.Error(), "unsupported runtime") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -235,9 +242,29 @@ func TestHandoffListPassesStoreDirectories(t *testing.T) {
 	if _, _, err := runHandoff(t, "list", "--claude-projects-dir", "/c", "--codex-dir", "/x", "--opencode-dir", "/o", "--cline-dir", "/l"); err != nil {
 		t.Fatal(err)
 	}
-	want := handoff.StoreDirs{ClaudeProjects: "/c", Codex: "/x", OpenCode: "/o", Cline: "/l"}
-	if *seen != want {
+	want := handoff.StoreDirs{handoff.HarnessClaude: "/c", handoff.HarnessCodex: "/x", handoff.HarnessOpenCode: "/o", handoff.HarnessCline: "/l"}
+	if !reflect.DeepEqual(*seen, want) {
 		t.Fatalf("store dirs = %+v, want %+v", *seen, want)
+	}
+}
+
+func TestHandoffStoreDirFlag(t *testing.T) {
+	seen := stubHandoffSources(t)
+	// --store-dir takes any name the runtime answers to; a per-runtime flag wins for its runtime.
+	if _, _, err := runHandoff(t, "list", "--store-dir", "claude-code=/generic", "--store-dir", "codex=/x=y", "--claude-projects-dir", "/c"); err != nil {
+		t.Fatal(err)
+	}
+	want := handoff.StoreDirs{handoff.HarnessClaude: "/c", handoff.HarnessCodex: "/x=y"}
+	if !reflect.DeepEqual(*seen, want) {
+		t.Fatalf("store dirs = %+v, want %+v", *seen, want)
+	}
+	for _, bad := range []string{"claude", "=/x", "claude=", "no-such-runtime=/x"} {
+		if _, _, err := runHandoff(t, "list", "--store-dir", bad); err == nil || !strings.Contains(err.Error(), "--store-dir") {
+			t.Fatalf("--store-dir %q: err = %v", bad, err)
+		}
+	}
+	if _, _, err := runHandoff(t, "export", "claude-1", "--store-dir", "bogus"); err == nil || !strings.Contains(err.Error(), "--store-dir") {
+		t.Fatalf("export with a bad --store-dir: err = %v", err)
 	}
 }
 

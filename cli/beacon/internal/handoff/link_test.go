@@ -15,14 +15,14 @@ import (
 // writes for a new session continuing a Claude Code session.
 func (f storeFixture) writeHandoffPrompts(t *testing.T, prompt string) {
 	t.Helper()
-	claudeMain := filepath.Join(f.dirs.ClaudeProjects, "-work-api", "claude-sess-1.jsonl")
+	claudeMain := filepath.Join(f.dirs[HarnessClaude], "-work-api", "claude-sess-1.jsonl")
 	writeFixture(t, claudeMain, jsonLine(t, map[string]interface{}{
 		"type": "user", "uuid": "u1", "sessionId": "claude-sess-1", "cwd": "/work/api", "timestamp": "2026-09-23T08:59:00.000Z",
 		"message": map[string]interface{}{"role": "user", "content": prompt},
 	}))
 	setModTime(t, claudeMain, claudeUpdated)
 
-	newer := filepath.Join(f.dirs.Codex, "sessions", "2026", "09", "21", "rollout-2026-09-21T09-00-00-codex-thread-1.jsonl")
+	newer := filepath.Join(f.dirs[HarnessCodex], "sessions", "2026", "09", "21", "rollout-2026-09-21T09-00-00-codex-thread-1.jsonl")
 	writeFixture(t, newer, jsonLine(t, map[string]interface{}{
 		"timestamp": "2026-09-21T09:00:00.000Z", "type": "session_meta",
 		"payload": map[string]interface{}{"id": "codex-thread-1", "session_id": "codex-thread-1", "cwd": "/work/web"},
@@ -32,7 +32,7 @@ func (f storeFixture) writeHandoffPrompts(t *testing.T, prompt string) {
 	}))
 	setModTime(t, newer, codexUpdated)
 
-	db, err := sql.Open("sqlite", filepath.Join(f.dirs.OpenCode, "opencode.db"))
+	db, err := sql.Open("sqlite", filepath.Join(f.dirs[HarnessOpenCode], "opencode.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func (f storeFixture) writeHandoffPrompts(t *testing.T, prompt string) {
 		t.Fatal(err)
 	}
 
-	messages := filepath.Join(f.dirs.Cline, "data", "sessions", "cline-task-1", "cline-task-1.messages.json")
+	messages := filepath.Join(f.dirs[HarnessCline], "data", "sessions", "cline-task-1", "cline-task-1.messages.json")
 	writeFixture(t, messages, mustJSON(t, map[string]interface{}{"messages": []interface{}{
 		map[string]interface{}{"role": "user", "content": prompt, "ts": clineUpdated.UnixMilli()},
 	}}))

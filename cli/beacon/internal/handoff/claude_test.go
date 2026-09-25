@@ -44,11 +44,11 @@ func TestClaudeSessionWithoutIndexUsesTheTranscriptCWD(t *testing.T) {
 
 func TestClaudeIndexProjectPathWinsOverTheTranscript(t *testing.T) {
 	f := newStoreFixture(t)
-	path := filepath.Join(f.dirs.ClaudeProjects, "-work-api", "claude-sess-1.jsonl")
+	path := filepath.Join(f.dirs[HarnessClaude], "-work-api", "claude-sess-1.jsonl")
 	// The index says /work/api; a transcript cwd of a subdirectory the agent moved into must not
 	// override it.
 	writeFixture(t, path, claudeLine(t, map[string]interface{}{"type": "user", "cwd": "/work/api/cmd", "message": map[string]interface{}{"role": "user", "content": "hi"}}))
-	sessions, err := (&claudeSource{dir: f.dirs.ClaudeProjects}).List()
+	sessions, err := (&claudeSource{dir: f.dirs[HarnessClaude]}).List()
 	if err != nil {
 		t.Fatal(err)
 	}

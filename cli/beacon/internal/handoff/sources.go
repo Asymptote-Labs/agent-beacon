@@ -1,7 +1,6 @@
 package handoff
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -11,60 +10,6 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/opencodesession"
 )
-
-// Harness names, as the endpoint event schema spells them.
-const (
-	HarnessClaude   = claudesession.Harness
-	HarnessCodex    = codexsession.Harness
-	HarnessOpenCode = opencodesession.Harness
-	HarnessCline    = clinesession.Harness
-)
-
-// Harnesses lists the runtimes handoff supports, in display order.
-var Harnesses = []string{HarnessClaude, HarnessCodex, HarnessOpenCode, HarnessCline}
-
-var harnessAliases = map[string]string{
-	"claude":      HarnessClaude,
-	"claude-code": HarnessClaude,
-	"claude_code": HarnessClaude,
-	"codex":       HarnessCodex,
-	"codex-cli":   HarnessCodex,
-	"codex_cli":   HarnessCodex,
-	"opencode":    HarnessOpenCode,
-	"cline":       HarnessCline,
-}
-
-// ParseHarness resolves a user-supplied runtime name to its harness name. An empty name stays
-// empty, meaning every runtime.
-func ParseHarness(name string) (string, error) {
-	name = strings.ToLower(strings.TrimSpace(name))
-	if name == "" {
-		return "", nil
-	}
-	if harness, ok := harnessAliases[name]; ok {
-		return harness, nil
-	}
-	return "", fmt.Errorf("unsupported runtime %q (supported: claude, codex, opencode, cline)", name)
-}
-
-// StoreDirs overrides where each runtime's session store is read from. An empty field means the
-// runtime's default location.
-type StoreDirs struct {
-	ClaudeProjects string
-	Codex          string
-	OpenCode       string
-	Cline          string
-}
-
-// DefaultSources returns a source for every supported runtime.
-func DefaultSources(dirs StoreDirs) []Source {
-	return []Source{
-		&claudeSource{dir: dirs.ClaudeProjects},
-		&codexSource{dir: dirs.Codex},
-		&openCodeSource{dir: dirs.OpenCode},
-		&clineSource{dir: dirs.Cline},
-	}
-}
 
 func unixMS(ms int64) time.Time {
 	if ms <= 0 {

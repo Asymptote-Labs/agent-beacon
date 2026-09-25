@@ -171,7 +171,7 @@ func init() {
 	handoffCmd.AddCommand(handoffResumeCmd)
 	addHandoffStoreFlags(handoffResumeCmd)
 	f := handoffResumeCmd.Flags()
-	f.StringVar(&handoffResumeOpts.agent, "agent", "", "Runtime to continue in: claude, codex, opencode or cline (default the session's own)")
+	f.StringVar(&handoffResumeOpts.agent, "agent", "", "Runtime to continue in: "+strings.Join(handoff.StartableNames(), ", ")+" (default the session's own)")
 	f.BoolVar(&handoffResumeOpts.newOnly, "new", false, "Start a new session from a brief even when the session could be reopened")
 	f.StringVar(&handoffResumeOpts.cwd, "cwd", "", "Directory to start the runtime in (default the session's directory)")
 	f.BoolVar(&handoffResumeOpts.print, "print", false, "Show what would run without writing a brief or launching anything")

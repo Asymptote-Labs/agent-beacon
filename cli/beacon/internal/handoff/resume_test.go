@@ -183,7 +183,7 @@ func TestPlanResumeClineOnlyReopensCLISessions(t *testing.T) {
 // Every command Beacon builds for Cline must turn auto-approve off, because Cline defaults to
 // approving every tool call.
 func TestEveryClineCommandTurnsAutoApproveOff(t *testing.T) {
-	command := runtimeCommands[HarnessCline]
+	command, _ := commandFor(HarnessCline)
 	resume, _ := command.Resume(Session{ID: "x", Store: "messages"})
 	for _, args := range [][]string{resume, command.NewSession("p")} {
 		joined := strings.Join(args, " ")

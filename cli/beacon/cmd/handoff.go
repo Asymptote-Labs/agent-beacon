@@ -25,7 +25,11 @@ type handoffOptions struct {
 	directory        string
 	includeSubagents bool
 	limit            int
-	dirs             handoff.StoreDirs
+	claudeDir        string
+	codexDir         string
+	openCodeDir      string
+	clineDir         string
+	storeDirs        []string
 	print            bool
 	outputDir        string
 	logPath          string
@@ -83,7 +87,11 @@ func resolveHandoffSession(id string) (handoffSubject, error) {
 	if err != nil {
 		return handoffSubject{}, err
 	}
-	session, findErr := handoff.Find(handoffSources(handoffOpts.dirs), harness, id)
+	dirs, err := handoffStoreDirs()
+	if err != nil {
+		return handoffSubject{}, err
+	}
+	session, findErr := handoff.Find(handoffSources(dirs), harness, id)
 	if findErr == nil {
 		return handoffSubject{session: session}, nil
 	}
@@ -128,7 +136,11 @@ func (subject handoffSubject) brief() (handoff.Brief, error) {
 		return handoff.BuildBrief(subject.session, subject.logEvents, handoff.FromRuntimeLog, handoffNow()), nil
 	}
 	session := subject.session
-	events, err := handoff.Events(handoffSources(handoffOpts.dirs), session)
+	dirs, err := handoffStoreDirs()
+	if err != nil {
+		return handoff.Brief{}, err
+	}
+	events, err := handoff.Events(handoffSources(dirs), session)
 	if err == nil {
 		return handoff.BuildBrief(session, events, handoff.FromSessionStore, handoffNow()), nil
 	}
@@ -231,7 +243,11 @@ func runHandoffList(cmd *cobra.Command, args []string) error {
 		}
 		filter.Directory = abs
 	}
-	sessions, listErr := handoff.List(handoffSources(handoffOpts.dirs), filter)
+	dirs, err := handoffStoreDirs()
+	if err != nil {
+		return err
+	}
+	sessions, listErr := handoff.List(handoffSources(dirs), filter)
 	out := cmd.OutOrStdout()
 	if handoffOpts.jsonOutput {
 		result := handoffListResult{Sessions: sessions}
@@ -304,13 +320,42 @@ func truncateRunes(s string, max int) string {
 	return string(runes[:max-1]) + "…"
 }
 
+// handoffStoreDirs collects the store directory overrides. --store-dir names any runtime; the
+// per-runtime flags predate it and win over it for their runtime.
+func handoffStoreDirs() (handoff.StoreDirs, error) {
+	dirs := handoff.StoreDirs{}
+	for _, entry := range handoffOpts.storeDirs {
+		name, dir, ok := strings.Cut(entry, "=")
+		if !ok || strings.TrimSpace(name) == "" || dir == "" {
+			return nil, fmt.Errorf("--store-dir %q: want <runtime>=<path>", entry)
+		}
+		harness, err := handoff.ParseHarness(name)
+		if err != nil {
+			return nil, fmt.Errorf("--store-dir %q: %w", entry, err)
+		}
+		dirs[harness] = dir
+	}
+	for harness, dir := range map[string]string{
+		handoff.HarnessClaude:   handoffOpts.claudeDir,
+		handoff.HarnessCodex:    handoffOpts.codexDir,
+		handoff.HarnessOpenCode: handoffOpts.openCodeDir,
+		handoff.HarnessCline:    handoffOpts.clineDir,
+	} {
+		if dir != "" {
+			dirs[harness] = dir
+		}
+	}
+	return dirs, nil
+}
+
 func addHandoffStoreFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
-	f.StringVar(&handoffOpts.harness, "harness", "", "Only this runtime: claude, codex, opencode or cline")
-	f.StringVar(&handoffOpts.dirs.ClaudeProjects, "claude-projects-dir", "", "Claude projects directory (default ~/.claude/projects)")
-	f.StringVar(&handoffOpts.dirs.Codex, "codex-dir", "", "Codex directory (default ~/.codex)")
-	f.StringVar(&handoffOpts.dirs.OpenCode, "opencode-dir", "", "OpenCode data directory or opencode.db path")
-	f.StringVar(&handoffOpts.dirs.Cline, "cline-dir", "", "Cline directory (default ~/.cline)")
+	f.StringVar(&handoffOpts.harness, "harness", "", "Only this runtime: "+strings.Join(handoff.RuntimeNames(), ", "))
+	f.StringArrayVar(&handoffOpts.storeDirs, "store-dir", nil, "Read a runtime's sessions from this directory, as <runtime>=<path> (repeatable)")
+	f.StringVar(&handoffOpts.claudeDir, "claude-projects-dir", "", "Claude projects directory (default ~/.claude/projects)")
+	f.StringVar(&handoffOpts.codexDir, "codex-dir", "", "Codex directory (default ~/.codex)")
+	f.StringVar(&handoffOpts.openCodeDir, "opencode-dir", "", "OpenCode data directory or opencode.db path")
+	f.StringVar(&handoffOpts.clineDir, "cline-dir", "", "Cline directory (default ~/.cline)")
 }
 
 func init() {
