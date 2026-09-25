@@ -176,7 +176,7 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 		return false, nil
 	}
 	for i, item := range mapped {
-		if err := emit(item.Event, opts); err != nil {
+		if err := emitEvent(item.Event, opts); err != nil {
 			advanceCursorPartial(cursor, mapped, i)
 			return true, err
 		}
@@ -206,20 +206,29 @@ func advanceCursor(cursor *Cursor, ref SessionRef, records []Record, stats Stats
 	}
 }
 
+// advanceCursorPartial moves the cursor past source lines whose mapped events were all emitted, so
+// the next sweep retries from the source line that failed. One line maps to several events (an
+// assistant message's reasoning, text and token usage); stopping at the last emitted event's line
+// would skip the rest of that line for good. failedIdx is the index into mapped of the event whose
+// emit failed.
 func advanceCursorPartial(cursor *Cursor, mapped []MappedEvent, failedIdx int) {
-	var lastLine int
 	for i := 0; i < failedIdx; i++ {
-		if mapped[i].SourceLine > lastLine {
-			lastLine = mapped[i].SourceLine
-		}
 		if mapped[i].Event.Event.Action == "session.started" {
 			cursor.Started = true
 		}
 	}
-	if lastLine > cursor.LastLine {
-		cursor.LastLine = lastLine
+	for i := failedIdx - 1; i >= 0; i-- {
+		if mapped[i].SourceLine != mapped[failedIdx].SourceLine {
+			if mapped[i].SourceLine > cursor.LastLine {
+				cursor.LastLine = mapped[i].SourceLine
+			}
+			return
+		}
 	}
 }
+
+// emitEvent is emit, swapped by tests to fail a chosen write.
+var emitEvent = emit
 
 func emit(event schema.Event, opts CollectOptions) error {
 	if opts.Print && opts.Out != nil {
