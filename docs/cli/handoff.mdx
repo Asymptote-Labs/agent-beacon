@@ -25,11 +25,12 @@ Sessions come from each runtime's own local session store, not from Beacon's run
 | Cline | `~/.cline/data` | `cline` |
 | Pi | `~/.pi/agent/sessions` (or under `PI_CODING_AGENT_DIR`) | `pi` |
 | Prime Agent | `~/.prime/agent`, both `sessions` and `session-artifacts` (or `PRIME_AGENT_CODING_AGENT_DIR`) | `prime` |
+| Factory Droid | `~/.factory/sessions` | `droid` |
 | fx | `~/.fx/sessions` | `fx` |
 
 When a Codex thread has more than one rollout file, `beacon handoff` lists it once, under its newest file. Cline can hold the same task both as a CLI session and in its older task history; the CLI session is the copy that is listed. Cline kanban cards are not sessions and are not listed. Prime Agent subagent transcripts, under `session-artifacts`, are listed as subagents of the session that started them.
 
-`--store-dir <runtime>=<path>` takes the location in the table: for Pi its sessions directory, as `beacon endpoint pi sync --sessions-dir` does, for Prime Agent the agent directory holding both of its roots, and for fx its sessions directory, as `beacon endpoint fx sync --sessions-dir` does.
+`--store-dir <runtime>=<path>` takes the location in the table: for Pi its sessions directory, as `beacon endpoint pi sync --sessions-dir` does, and for Prime Agent the agent directory holding both of its roots. For Factory Droid it is the sessions directory, as `beacon endpoint factory sync --sessions-dir` does. For fx it is its sessions directory, as `beacon endpoint fx sync --sessions-dir` does.
 
 fx records no session title, so an fx session is listed under its first prompt, and its directory is the workspace fx last bound it to.
 
@@ -64,7 +65,7 @@ beacon handoff list --json
 
 | Flag | Description |
 |------|-------------|
-| `--harness` | Only this runtime: `claude`, `codex`, `opencode`, or `cline`. |
+| `--harness` | Only this runtime: `claude`, `codex`, `opencode`, `cline`, `pi`, `prime`, `droid` or `fx`. |
 | `--here` | Only sessions that ran in the current directory or below it. |
 | `--dir` | Only sessions that ran in this directory or below it. |
 | `--subagents` | Include subagent sessions. They are hidden by default, because resuming one resumes a fragment of its parent's task. |
@@ -131,6 +132,7 @@ There are two ways to resume:
   | Cline | `cline --tui --auto-approve false --id <id>` |
   | Pi | `pi --session <session file>` |
   | Prime Agent | `prime-agent --resume <session file>` |
+  | Factory Droid | `droid --resume <id>` |
   | fx | `fx --resume <id>`, in the session's workspace |
 
 - **Start a new session from a brief.** Otherwise, or with `--agent` naming another runtime or with `--new`, Beacon writes a brief (see `export`) and starts a new session. The first message of that session points at the brief:
@@ -143,6 +145,7 @@ There are two ways to resume:
   | Cline | `cline --tui --auto-approve false "<prompt>"` |
   | Pi | `pi -- "<prompt>"` |
   | Prime Agent | `prime-agent -- "<prompt>"` |
+  | Factory Droid | `droid "<prompt>"` |
   | Oh My Pi | `omp --approval-mode=always-ask "<prompt>"` |
   | Gemini CLI | `gemini --approval-mode default --prompt-interactive "<prompt>"` |
   | Qwen Code | `qwen --approval-mode default --prompt-interactive "<prompt>"` |
@@ -198,7 +201,7 @@ The link event keeps the new session's id, workspace and harness, and leaves the
 Two paths record the link:
 
 - **Live hooks and plugins.** Every runtime whose prompts Beacon captures as they are sent records it: the shared prompt hook (Claude Code, Cursor, Factory Droid, Qwen Code, Kiro, Kimi Code, Devin, Muse Code, OpenHands, Grok Build, DeepSeek Harness, Hermes Agent, VS Code), Antigravity (including the prompt it recovers from its transcript when the prompt hook does not fire), the Cline, OpenCode and OpenClaw plugins, and the Pi, Oh My Pi, Prime Agent and Senpi extensions (`harness.collection_method` `hook` or `plugin`).
-- **Session-store sync.** `beacon endpoint claude sync`, `codex sync`, `opencode sync`, `cline sync`, `pi sync`, `prime sync` and `fx sync` record it when they read the prompt back from the runtime's store (`harness.collection_method: poll`).
+- **Session-store sync.** `beacon endpoint claude sync`, `codex sync`, `opencode sync`, `cline sync`, `pi sync`, `prime sync`, `factory sync` and `fx sync` record it when they read the prompt back from the runtime's store (`harness.collection_method: poll`).
 
 Codex CLI prompts reach Beacon over OTLP and through `beacon endpoint codex sync`, not a prompt hook, so a session continued in Codex is linked by the sync. For a runtime that also has a prompt hook or plugin, a sync can record the same link the hook already did; the two carry different `collection_method` values, as every other event those runtimes report through both paths does. A sync's link has a deterministic `event.id`, so syncing again never duplicates it.
 

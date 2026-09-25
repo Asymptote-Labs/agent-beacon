@@ -112,6 +112,11 @@ func (m *mapper) emitMessage(record *Record) {
 			ev.Content = asymptoteobserve.RetainedContent(text, 0)
 			ev.GenAI = &schema.GenAIInfo{Input: &schema.GenAIInputInfo{Messages: asymptoteobserve.TextInputMessages(text)}}
 			m.append(record, fmt.Sprintf("prompt.%d", i), ev)
+			if info, ok := asymptoteobserve.ParseHandoffMarker(text); ok {
+				link := m.base(record, "session.handoff", "session", schema.SeverityInfo, "Session continued from a "+info.SourceHarness+" session")
+				link.Handoff = &info
+				m.append(record, fmt.Sprintf("prompt.%d.handoff", i), link)
+			}
 		}
 	case RoleAssistant:
 		blocks := messageBlocks(msg)
