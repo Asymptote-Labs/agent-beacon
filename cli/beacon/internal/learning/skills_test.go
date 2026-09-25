@@ -25,6 +25,46 @@ func TestRenderSkillIncludesProvenance(t *testing.T) {
 	}
 }
 
+// A generated skill must pass the Agent Skills spec so it can be published: the
+// name fits in 64 characters, and provenance sits under metadata rather than as
+// top-level keys the spec does not define.
+func TestRenderSkillFollowsAgentSkillsSpec(t *testing.T) {
+	candidate, memory := testApprovedSkillMemory()
+	memory.Title = strings.Repeat("Always rebuild the embedded hooks binary before running tests ", 3)
+	memory.Applicability = "when cli/beacon tests fail\nagainst the placeholder"
+	content := RenderSkill(candidate, memory)
+	frontmatter := strings.SplitN(strings.TrimPrefix(content, "---\n"), "\n---\n", 2)[0]
+	var name, description string
+	for _, line := range strings.Split(frontmatter, "\n") {
+		if !strings.HasPrefix(line, " ") && strings.Contains(line, ":") {
+			key := strings.SplitN(line, ":", 2)[0]
+			switch key {
+			case "name":
+				name = strings.TrimSpace(strings.TrimPrefix(line, "name:"))
+			case "description":
+				description = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
+			case "metadata":
+			default:
+				t.Fatalf("top-level frontmatter key %q is not in the Agent Skills spec:\n%s", key, frontmatter)
+			}
+		}
+	}
+	if len(name) == 0 || len(name) > 64 || strings.Contains(name, "--") || strings.HasSuffix(name, "-") {
+		t.Fatalf("name %q does not meet the spec", name)
+	}
+	if name != SkillSlug(memory) {
+		t.Fatalf("name %q != slug %q", name, SkillSlug(memory))
+	}
+	if !strings.Contains(description, "Use when cli/beacon tests fail against the placeholder.") {
+		t.Fatalf("description should carry the applicability on one line: %s", description)
+	}
+	for _, want := range []string{`  beacon_memory_kind: "debugging_pattern"`, `  beacon_tags: "beacon, debugging_pattern"`} {
+		if !strings.Contains(frontmatter, want) {
+			t.Fatalf("frontmatter missing %q:\n%s", want, frontmatter)
+		}
+	}
+}
+
 func TestInstallSkillWritesAndRefusesOverwrite(t *testing.T) {
 	project := t.TempDir()
 	candidate, memory := testApprovedSkillMemory()

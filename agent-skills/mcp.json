@@ -1,0 +1,10 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "beacon": {
+      "type": "stdio",
+      "command": "beacon",
+      "args": ["mcp", "serve"]
+    }
+  }
+}

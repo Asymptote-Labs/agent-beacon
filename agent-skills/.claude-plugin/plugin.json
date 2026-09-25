@@ -1,0 +1,14 @@
+{
+  "name": "beacon",
+  "displayName": "Beacon memory",
+  "version": "0.1.0",
+  "description": "Cross-harness memory from Beacon traces: recall reviewed project lessons, distill agent sessions into approved memory, and promote memory to Agent Skills.",
+  "author": {
+    "name": "Asymptote Labs",
+    "url": "https://asymptotelabs.ai"
+  },
+  "homepage": "https://docs.asymptotelabs.ai/concepts/cross-harness-memory",
+  "repository": "https://github.com/asymptote-labs/agent-beacon",
+  "license": "MIT",
+  "keywords": ["memory", "traces", "observability", "agent-skills", "beacon", "mcp"]
+}

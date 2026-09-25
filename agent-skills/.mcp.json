@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "beacon": {
+      "command": "beacon",
+      "args": ["mcp", "serve"]
+    }
+  }
+}
