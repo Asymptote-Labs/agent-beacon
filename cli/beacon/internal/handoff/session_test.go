@@ -2,7 +2,9 @@ package handoff
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -291,6 +293,62 @@ func TestWithinDirectory(t *testing.T) {
 	} {
 		if got := withinDirectory(tc.dir, tc.root); got != tc.want {
 			t.Fatalf("withinDirectory(%q, %q) = %v, want %v", tc.dir, tc.root, got, tc.want)
+		}
+	}
+}
+
+// A runtime records the directory it resolved and a shell reports the one the user typed. On macOS
+// /var and /tmp are symlinks into /private, so the two differ for the same place.
+func TestListDirectoryFilterFollowsSymlinks(t *testing.T) {
+	base := t.TempDir()
+	real := filepath.Join(base, "real")
+	if err := os.MkdirAll(filepath.Join(real, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	other := t.TempDir()
+	sources := []Source{fakeSource{harness: HarnessClaude, sessions: []Session{
+		{Harness: HarnessClaude, ID: "recorded-real", Directory: filepath.Join(real, "pkg")},
+		{Harness: HarnessClaude, ID: "recorded-link", Directory: link},
+		{Harness: HarnessClaude, ID: "elsewhere", Directory: other},
+		{Harness: HarnessClaude, ID: "gone", Directory: filepath.Join(base, "deleted")},
+		{Harness: HarnessClaude, ID: "deleted-under-real", Directory: filepath.Join(real, "removed", "sub")},
+	}}}
+	for _, tc := range []struct {
+		root, want string
+	}{
+		{link, "claude_code/deleted-under-real,claude_code/recorded-link,claude_code/recorded-real"},
+		{real, "claude_code/deleted-under-real,claude_code/recorded-link,claude_code/recorded-real"},
+		{filepath.Join(link, "removed"), "claude_code/deleted-under-real"},
+		{filepath.Join(link, "pkg"), "claude_code/recorded-real"},
+		{other, "claude_code/elsewhere"},
+		{filepath.Join(base, "missing-root"), ""},
+		{filepath.Join(link, "not-created"), ""},
+	} {
+		sessions, err := List(sources, Filter{Directory: tc.root})
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys := sessionKeys(sessions)
+		sort.Strings(keys)
+		if got := strings.Join(keys, ","); got != tc.want {
+			t.Fatalf("--dir %s = %q, want %q", tc.root, got, tc.want)
+		}
+	}
+}
+
+func TestResolveExisting(t *testing.T) {
+	base := t.TempDir()
+	real, _ := filepath.EvalSymlinks(base)
+	for _, tc := range []struct{ in, want string }{
+		{base, real},
+		{filepath.Join(base, "a", "b"), filepath.Join(real, "a", "b")},
+	} {
+		if got := resolveExisting(tc.in); got != tc.want {
+			t.Fatalf("resolveExisting(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }

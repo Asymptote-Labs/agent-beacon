@@ -61,6 +61,7 @@ func (e *SourceError) Unwrap() error { return e.Err }
 func List(sources []Source, filter Filter) ([]Session, error) {
 	var sessions []Session
 	var errs []error
+	within := directoryMatcher(filter.Directory)
 	for _, source := range sources {
 		if filter.Harness != "" && source.Harness() != filter.Harness {
 			continue
@@ -76,7 +77,7 @@ func List(sources []Source, filter Filter) ([]Session, error) {
 			if session.Subagent && !filter.IncludeSubagents {
 				continue
 			}
-			if filter.Directory != "" && !withinDirectory(session.Directory, filter.Directory) {
+			if filter.Directory != "" && !within(session.Directory) {
 				continue
 			}
 			sessions = append(sessions, session)
@@ -152,7 +153,52 @@ func Find(sources []Source, harness, id string) (Session, error) {
 	}
 }
 
-// withinDirectory reports whether a session recorded in dir ran in root or below it.
+// directoryMatcher returns a test for whether a session directory is root or below it. A runtime
+// records the directory it resolved, and a shell reports the one the user typed: on macOS /var and
+// /tmp are symlinks into /private, Windows has short 8.3 names, and home directories are often
+// symlinked. When the paths do not match as written, both are compared with symlinks resolved.
+func directoryMatcher(root string) func(dir string) bool {
+	if root == "" {
+		return func(string) bool { return true }
+	}
+	resolvedRoot := resolveExisting(root)
+	return func(dir string) bool {
+		if dir == "" {
+			return false
+		}
+		if withinDirectory(dir, root) {
+			return true
+		}
+		if resolvedRoot == "" {
+			return false
+		}
+		if withinDirectory(dir, resolvedRoot) {
+			return true
+		}
+		resolved := resolveExisting(dir)
+		return resolved != "" && withinDirectory(resolved, resolvedRoot)
+	}
+}
+
+// resolveExisting resolves the symlinks in path. A path that no longer exists (a deleted project
+// directory) resolves through its nearest existing ancestor, with the rest rejoined as written.
+func resolveExisting(path string) string {
+	path = filepath.Clean(path)
+	var rest []string
+	for {
+		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			return filepath.Join(append([]string{resolved}, rest...)...)
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			return ""
+		}
+		rest = append([]string{filepath.Base(path)}, rest...)
+		path = parent
+	}
+}
+
+// withinDirectory reports whether dir is root or below it, comparing the paths as written.
 func withinDirectory(dir, root string) bool {
 	if dir == "" {
 		return false
