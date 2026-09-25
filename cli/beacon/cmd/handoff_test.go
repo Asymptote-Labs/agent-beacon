@@ -242,10 +242,19 @@ func TestHandoffListPassesStoreDirectories(t *testing.T) {
 	if _, _, err := runHandoff(t, "list", "--claude-projects-dir", "/c", "--codex-dir", "/x", "--opencode-dir", "/o", "--cline-dir", "/l"); err != nil {
 		t.Fatal(err)
 	}
-	want := handoff.StoreDirs{handoff.HarnessClaude: "/c", handoff.HarnessCodex: "/x", handoff.HarnessOpenCode: "/o", handoff.HarnessCline: "/l"}
+	want := handoff.StoreDirs{handoff.HarnessClaude: absPath(t, "/c"), handoff.HarnessCodex: absPath(t, "/x"), handoff.HarnessOpenCode: absPath(t, "/o"), handoff.HarnessCline: absPath(t, "/l")}
 	if !reflect.DeepEqual(*seen, want) {
 		t.Fatalf("store dirs = %+v, want %+v", *seen, want)
 	}
+}
+
+func absPath(t *testing.T, path string) string {
+	t.Helper()
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return abs
 }
 
 func TestHandoffStoreDirFlag(t *testing.T) {
@@ -254,9 +263,17 @@ func TestHandoffStoreDirFlag(t *testing.T) {
 	if _, _, err := runHandoff(t, "list", "--store-dir", "claude-code=/generic", "--store-dir", "codex=/x=y", "--claude-projects-dir", "/c"); err != nil {
 		t.Fatal(err)
 	}
-	want := handoff.StoreDirs{handoff.HarnessClaude: "/c", handoff.HarnessCodex: "/x=y"}
+	want := handoff.StoreDirs{handoff.HarnessClaude: absPath(t, "/c"), handoff.HarnessCodex: absPath(t, "/x=y")}
 	if !reflect.DeepEqual(*seen, want) {
 		t.Fatalf("store dirs = %+v, want %+v", *seen, want)
+	}
+	// A relative store directory is resolved here, not in the session's directory the runtime
+	// starts in.
+	if _, _, err := runHandoff(t, "list", "--store-dir", "codex=rel/codex"); err != nil {
+		t.Fatal(err)
+	}
+	if got := (*seen)[handoff.HarnessCodex]; got != absPath(t, "rel/codex") || !filepath.IsAbs(got) {
+		t.Fatalf("relative store dir = %q, want it made absolute", got)
 	}
 	for _, bad := range []string{"claude", "=/x", "claude=", "no-such-runtime=/x"} {
 		if _, _, err := runHandoff(t, "list", "--store-dir", bad); err == nil || !strings.Contains(err.Error(), "--store-dir") {

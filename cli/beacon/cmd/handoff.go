@@ -345,6 +345,15 @@ func handoffStoreDirs() (handoff.StoreDirs, error) {
 			dirs[harness] = dir
 		}
 	}
+	// Session file paths come from these directories, and a runtime is started in the session's
+	// own directory, so a relative store path would name another file there.
+	for harness, dir := range dirs {
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			return nil, fmt.Errorf("resolve the %s store directory %s: %w", harness, dir, err)
+		}
+		dirs[harness] = abs
+	}
 	return dirs, nil
 }
 
