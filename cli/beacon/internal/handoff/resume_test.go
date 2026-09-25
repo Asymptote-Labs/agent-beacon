@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // installed resolves the named executables to /bin/<name>, as if they were on PATH.
@@ -96,6 +97,20 @@ func TestPlanResumeStartsANewSessionInEachRuntime(t *testing.T) {
 				t.Fatalf("command = %s %q\nwant /bin/%s %q", plan.Executable, plan.Args, tc.exe, want)
 			}
 		})
+	}
+}
+
+func TestNewSessionPromptCarriesTheHandoffMarker(t *testing.T) {
+	prompt := NewSessionPrompt(Session{Harness: HarnessCodex, ID: "019a-thread"}, "/tmp/b.md")
+	info, ok := asymptoteobserve.ParseHandoffMarker(prompt)
+	if !ok || info.SourceHarness != HarnessCodex || info.SourceSessionID != "019a-thread" {
+		t.Fatalf("prompt %q carries marker %+v, %v", prompt, info, ok)
+	}
+	if !strings.HasSuffix(prompt, "\n\n[beacon-handoff from=codex_cli session=019a-thread]") {
+		t.Fatalf("the marker is the prompt's last line: %q", prompt)
+	}
+	if strings.Contains(NewSessionPrompt(Session{Harness: HarnessCline, ID: "has space"}, "/tmp/b.md"), "[beacon-handoff") {
+		t.Fatal("an id the marker cannot carry gets no marker rather than a wrong one")
 	}
 }
 

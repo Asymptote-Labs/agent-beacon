@@ -61,6 +61,9 @@ func runPromptSubmit(cmd *cobra.Command, args []string) {
 		fields["content"] = retainedContentFields(prompt)
 	}
 	emitHookEvent(logger, "prompt.submitted", "prompt", "info", "Prompt submitted to agent", input, fields)
+	if link, ok := handoffLinkEvent(fields, prompt); ok {
+		emitHookEvent(logger, link.action, link.category, link.severity, link.message, input, link.fields)
+	}
 
 	if platformFlag == "antigravity" && sessionID != "" && hasPrompt {
 		st := state.NewSessionState(sessionID, "antigravity")
