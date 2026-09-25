@@ -21,7 +21,7 @@ harnesses that take MCP servers from plugins.
 | Codex | `codex plugin marketplace add asymptote-labs/agent-beacon` |
 | GitHub Copilot CLI | `copilot plugin marketplace add asymptote-labs/agent-beacon`, then `copilot plugin install beacon@beacon` |
 | Factory Droid | `droid plugin marketplace add asymptote-labs/agent-beacon`, then `droid plugin install beacon@beacon` |
-| Gemini CLI | `gemini extensions install https://github.com/asymptote-labs/agent-beacon` (see the note below) |
+| Gemini CLI | `npx skills add asymptote-labs/agent-beacon -a gemini-cli` (see the note below) |
 | Any skills-capable agent (Cursor, OpenCode, Amp, goose, Cline, Windsurf, Kiro, …) | `npx skills add asymptote-labs/agent-beacon` |
 
 ## Layout
@@ -64,14 +64,14 @@ disagree on name or version.
 | GitHub `awesome-copilot` | Open a pull request adding the plugin. | To do |
 | skills.sh | Nothing to submit. It lists skills by install count. | Automatic |
 | SkillsMP | Nothing to submit. It crawls public repositories with at least two stars. | Automatic |
-| Gemini CLI gallery | Needs `gemini-extension.json` at the root of a repository with the `gemini-cli-extension` topic. | Needs a mirror repo (below) |
+| Gemini CLI gallery | Needs `gemini-extension.json` at the root of a repository with the `gemini-cli-extension` topic. | Not listed (below) |
 
-### Gemini and the mirror repository
+### Gemini CLI
 
-Gemini CLI reads `gemini-extension.json` from the root of the repository it installs, and
-its gallery crawls repositories by topic. The Beacon monorepo is not a good extension
-root, because installing it would clone everything. Mirror this directory verbatim to a
-small repository (for example `asymptote-labs/beacon-skills`), tag the
-`gemini-cli-extension` topic there, and use that repository for the Gemini gallery, the
-Cursor and Kiro submissions, and anywhere else that wants the plugin at the repository
-root. Everything in this directory already works as a repository root.
+The skills live in this repository so that `agent_skills_test.go` checks them in the
+same CI run as the CLI they describe. Gemini CLI installs an extension from a repository
+root, and its gallery finds extensions by repository topic, so the monorepo is not
+installed with `gemini extensions install` and is not listed in the gallery. Gemini CLI
+users get the skills through the skills CLI instead, since Gemini reads `.agents/skills`.
+`gemini-extension.json` is kept here, so the directory can later be published as an
+extension root without changes, for example by a CI job that mirrors it.
