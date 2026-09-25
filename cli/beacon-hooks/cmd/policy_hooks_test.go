@@ -256,6 +256,31 @@ func TestPolicyToolSendsTheGrepOutputMode(t *testing.T) {
 	}
 }
 
+func TestPolicyToolSendsEveryMCPArgument(t *testing.T) {
+	// A secret in a header must reach the judge (masked) even though the call
+	// also carries a url, which alone used to be all the judge saw.
+	judge := &fakeJudge{response: `{"decision":"allow"}`}
+	setupPolicyHookTest(t, judge)
+	token := "ghp_" + "aZ3kQ9mX2pL7vR4tB8nC1wE6yU5sD0fGh2Jk"
+	runHookWithInput(t, runPolicyTool, map[string]interface{}{
+		"session_id": "s", "tool_name": "mcp__http__request",
+		"tool_input": map[string]interface{}{
+			"url":     "https://api.github.com/user",
+			"headers": map[string]interface{}{"Authorization": "token " + token},
+		},
+	})
+	if len(judge.requests) != 1 {
+		t.Fatalf("the MCP call was not judged: %+v", judge.requests)
+	}
+	in := judge.requests[0].Tool.Input
+	if !strings.Contains(in.Command, "headers") || !strings.Contains(in.Command, "api.github.com") {
+		t.Fatalf("the judge did not see every argument: %+v", in)
+	}
+	if strings.Contains(in.Command, token) {
+		t.Fatalf("the token reached the judge unmasked: %s", in.Command)
+	}
+}
+
 func TestPolicyToolIgnoresOtherPlatforms(t *testing.T) {
 	judge := &fakeJudge{response: `{"decision":"deny","message":"blocked"}`}
 	setupPolicyHookTest(t, judge)

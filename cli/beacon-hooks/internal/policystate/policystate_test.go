@@ -2,6 +2,7 @@ package policystate
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 )
@@ -79,5 +80,38 @@ func TestPromptOverrideIsOneTimeAndScopedToTheBlockedSecrets(t *testing.T) {
 	_ = GrantPromptOverride("s", "prompt:dd", "late", now.Add(9*time.Minute))
 	if _, ok := ConsumePromptOverride("s", []string{"dd"}, now.Add(11*time.Minute), 10*time.Minute); ok {
 		t.Fatal("a resend more than 10 minutes after the block must not pass, even if the override came later")
+	}
+}
+
+func TestParallelWritersKeepEveryEntry(t *testing.T) {
+	// Claude Code runs read-only tools in parallel, so several policy hooks for
+	// one session write at once. Each writer opens its own lock file handle, as
+	// separate hook processes do.
+	t.Setenv("BEACON_POLICY_STATE_DIR", t.TempDir())
+	const writers = 24
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if err := Append("s", Entry{Decision: "ask", ToolUseID: fmt.Sprintf("t%d", i)}); err != nil {
+				t.Error(err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if got := len(Pending("s")); got != writers {
+		t.Fatalf("kept %d of %d parallel asks", got, writers)
+	}
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_ = Answer("s", fmt.Sprintf("t%d", i), "approved", "", time.Now())
+		}(i)
+	}
+	wg.Wait()
+	if got := len(Pending("s")); got != 0 {
+		t.Fatalf("%d answers were lost", got)
 	}
 }

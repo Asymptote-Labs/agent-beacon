@@ -12,8 +12,9 @@
 #      The token is kept out of settings.json on purpose: its env block reaches
 #      the agent's Bash tool.
 #   3. Adds six hooks (UserPromptSubmit, PreToolUse, SessionStart, Stop, SessionEnd,
-#      UserPromptExpansion for /beacon-allow), the /beacon-allow command, and Read deny
-#      rules for credential files to the chosen settings.json. Existing entries,
+#      UserPromptExpansion for /beacon-allow), the /beacon-allow command, Read deny
+#      rules for credential files, and Read and Edit deny rules for Beacon's own
+#      policy config to the chosen settings.json. Existing entries,
 #      Beacon's included, are left as they are. Running it again changes nothing.
 #   4. Runs a self-test: the prompt scanner and prefilter offline, then one
 #      dry-run call to the decide endpoint to prove the token works.
@@ -192,6 +193,13 @@ DENY = [
     "Read(~/.config/gh/hosts.yml)",
     "Read(~/.git-credentials)",
     "Read(~/.netrc)",
+    # Beacon's own policy config: the decide token, the URL, the rule override
+    # and the session state. The agent should neither read the token nor turn
+    # the gate off by rewriting them with its file tools.
+    "Read(~/.beacon/endpoint/policy.json)",
+    "Read(~/.beacon/endpoint/policy/**)",
+    "Edit(~/.beacon/endpoint/policy.json)",
+    "Edit(~/.beacon/endpoint/policy/**)",
 ]
 if deny_enabled:
     perms = settings.setdefault("permissions", {})

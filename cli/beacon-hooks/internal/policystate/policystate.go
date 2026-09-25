@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"time"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
 )
 
 const maxEntries = 50
@@ -61,13 +63,14 @@ func LatestPromptBlock(sessionID string, now time.Time, window time.Duration) (E
 
 // GrantPromptOverride marks the prompt block with this id as allowed once.
 func GrantPromptOverride(sessionID, id, reason string, now time.Time) error {
-	entries := Load(sessionID)
-	for i := range entries {
-		if entries[i].ToolUseID == id && entries[i].Decision == DecisionBlock {
-			entries[i].AllowedAt, entries[i].Outcome, entries[i].Comment = now, "approved", reason
+	return update(sessionID, func(entries []Entry) ([]Entry, bool) {
+		for i := range entries {
+			if entries[i].ToolUseID == id && entries[i].Decision == DecisionBlock {
+				entries[i].AllowedAt, entries[i].Outcome, entries[i].Comment = now, "approved", reason
+			}
 		}
-	}
-	return save(sessionID, entries)
+		return entries, true
+	})
 }
 
 // ConsumePromptOverride finds an allowed, unused prompt block from within
@@ -75,22 +78,27 @@ func GrantPromptOverride(sessionID, id, reason string, now time.Time) error {
 // whose fingerprints cover every secret in the resent prompt, marks it used,
 // and returns it. A prompt carrying any other secret does not qualify.
 func ConsumePromptOverride(sessionID string, fingerprints []string, now time.Time, window time.Duration) (Entry, bool) {
-	entries := Load(sessionID)
-	for i := len(entries) - 1; i >= 0; i-- {
-		e := entries[i]
-		if e.Decision != DecisionBlock || e.Tool != ToolPrompt || e.AllowedAt.IsZero() || !e.UsedAt.IsZero() {
-			continue
+	var used Entry
+	found := false
+	err := update(sessionID, func(entries []Entry) ([]Entry, bool) {
+		for i := len(entries) - 1; i >= 0; i-- {
+			e := entries[i]
+			if e.Decision != DecisionBlock || e.Tool != ToolPrompt || e.AllowedAt.IsZero() || !e.UsedAt.IsZero() {
+				continue
+			}
+			if now.Sub(e.At) > window || !covers(e.Fingerprints, fingerprints) {
+				continue
+			}
+			entries[i].UsedAt = now
+			used, found = entries[i], true
+			return entries, true
 		}
-		if now.Sub(e.At) > window || !covers(e.Fingerprints, fingerprints) {
-			continue
-		}
-		entries[i].UsedAt = now
-		if save(sessionID, entries) != nil {
-			return Entry{}, false
-		}
-		return entries[i], true
+		return entries, false
+	})
+	if err != nil || !found {
+		return Entry{}, false
 	}
-	return Entry{}, false
+	return used, true
 }
 
 func covers(allowed, wanted []string) bool {
@@ -119,13 +127,14 @@ func Pending(sessionID string) []Entry {
 
 // Answer records the developer's answer on the ask with this tool_use_id.
 func Answer(sessionID, toolUseID, outcome, comment string, at time.Time) error {
-	entries := Load(sessionID)
-	for i := range entries {
-		if entries[i].ToolUseID == toolUseID && entries[i].Outcome == "" {
-			entries[i].Outcome, entries[i].Comment, entries[i].AnsweredAt = outcome, comment, at
+	return update(sessionID, func(entries []Entry) ([]Entry, bool) {
+		for i := range entries {
+			if entries[i].ToolUseID == toolUseID && entries[i].Outcome == "" {
+				entries[i].Outcome, entries[i].Comment, entries[i].AnsweredAt = outcome, comment, at
+			}
 		}
-	}
-	return save(sessionID, entries)
+		return entries, true
+	})
 }
 
 var unsafeChars = regexp.MustCompile(`[^A-Za-z0-9._-]`)
@@ -169,6 +178,21 @@ func Load(sessionID string) []Entry {
 
 // Append records a decision, keeping the most recent maxEntries.
 func Append(sessionID string, e Entry) error {
+	return update(sessionID, func(entries []Entry) ([]Entry, bool) {
+		entries = append(entries, e)
+		if len(entries) > maxEntries {
+			entries = entries[len(entries)-maxEntries:]
+		}
+		return entries, true
+	})
+}
+
+// update runs fn over the session's entries while holding an exclusive lock
+// on the session file, and saves the result when fn reports a change. Claude
+// Code runs read-only tools in parallel, so several policy hooks for one
+// session can write at once; without the lock one would drop another's ask,
+// answer or /beacon-allow grant.
+func update(sessionID string, fn func([]Entry) ([]Entry, bool)) error {
 	p := path(sessionID)
 	if p == "" {
 		return nil
@@ -176,9 +200,20 @@ func Append(sessionID string, e Entry) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}
-	entries := append(Load(sessionID), e)
-	if len(entries) > maxEntries {
-		entries = entries[len(entries)-maxEntries:]
+	lockFile, err := os.OpenFile(p+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	// Unlock before closing: LIFO defer ordering means the close listed first runs last.
+	defer lockFile.Close()
+	held, err := filelock.Exclusive(lockFile)
+	if err != nil {
+		return err
+	}
+	defer held.Release()
+	entries, changed := fn(Load(sessionID))
+	if !changed {
+		return nil
 	}
 	return save(sessionID, entries)
 }

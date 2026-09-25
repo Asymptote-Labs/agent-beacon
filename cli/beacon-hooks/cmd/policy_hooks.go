@@ -130,7 +130,7 @@ func runPolicyTool(cmd *cobra.Command, args []string) {
 		Origin:         strings.TrimSpace(os.Getenv("BEACON_ORIGIN")),
 		ToolUseID:      toolUseID,
 		PermissionMode: getFirstStr(input, "permission_mode"),
-		Tool:           &mdr.ToolCall{Name: toolName, Input: maskedToolInput(toolInput)},
+		Tool:           &mdr.ToolCall{Name: toolName, Input: maskedToolInput(toolName, toolInput)},
 		Prefilter:      &mdr.Prefilter{RuleIDs: prefilter.IDs(hits), Category: hits[0].Category},
 		Context: &mdr.Context{
 			RecentPrompts:   recent.Prompts,
@@ -199,7 +199,7 @@ func runPolicyTool(cmd *cobra.Command, args []string) {
 
 // maskedToolInput is what the judge sees: the fields it needs, with any
 // secret literal already masked on the machine.
-func maskedToolInput(in map[string]interface{}) mdr.ToolInput {
+func maskedToolInput(toolName string, in map[string]interface{}) mdr.ToolInput {
 	get := func(key string) string {
 		if v, ok := in[key].(string); ok {
 			return secretscan.Mask(v)
@@ -218,8 +218,11 @@ func maskedToolInput(in map[string]interface{}) mdr.ToolInput {
 	if out.Path == "" {
 		out.Path = get("glob")
 	}
-	if out.Command == "" && out.FilePath == "" && out.Pattern == "" && out.Path == "" && out.URL == "" && len(in) > 0 {
-		// MCP and other tools: the whole argument object, masked.
+	// MCP tools always send their whole argument object, masked: a secret can sit
+	// in any argument (a body, a header), not only in a url or path the call also
+	// carries. Other tools without the standard fields do the same.
+	if len(in) > 0 && (strings.HasPrefix(toolName, "mcp__") ||
+		out.Command == "" && out.FilePath == "" && out.Pattern == "" && out.Path == "" && out.URL == "") {
 		if raw, err := json.Marshal(in); err == nil {
 			out.Command = secretscan.Mask(string(raw))
 		}
@@ -228,7 +231,7 @@ func maskedToolInput(in map[string]interface{}) mdr.ToolInput {
 }
 
 func policyTarget(toolName string, in map[string]interface{}) string {
-	t := maskedToolInput(in)
+	t := maskedToolInput(toolName, in)
 	return clipPolicy(firstNonEmpty(t.Command, t.FilePath, t.Path, t.Pattern, t.URL, toolName), 200)
 }
 

@@ -1,5 +1,5 @@
 {
-  "version": "2026-09-25.1",
+  "version": "2026-09-25.2",
   "rules": [
     {
       "id": "secret-source.npm-config",
@@ -107,6 +107,14 @@
         "Bash"
       ],
       "pattern": "(?i)\\bgit\\s+(?:show|log\\b[^\\n;&|]*\\s-p\\b|log\\b[^\\n;&|]*--patch\\b|diff|cat-file\\s+-p)\\b[^\\n;&|]*?(?:(?:^|[\\s/'\\\"=:@])\\.env(?:\\.[\\w.-]+)?\\b|\\.npmrc\\b|\\bsecrets?\\.json\\b|\\bcredentials\\.json\\b|\\bservice[-_]?account[\\w.-]*\\.json\\b|\\bmaster\\.key\\b|\\.tfstate\\b)"
+    },
+    {
+      "id": "credential-file.search",
+      "category": "credential-file",
+      "tools": [
+        "Bash"
+      ],
+      "pattern": "\\b(?:[ef]?grep\\b[^|;&\\n]*\\s(?:-[a-zA-Z]*[rR][a-zA-Z]*|--recursive|--dereference-recursive)\\b|rg\\b[^|;&\\n]*\\s(?:--no-ignore\\b|-[a-zA-Z]*u[a-zA-Z]*u))[^|;&\\n]*?[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD)\\b"
     },
     {
       "id": "secret-source.terraform",
