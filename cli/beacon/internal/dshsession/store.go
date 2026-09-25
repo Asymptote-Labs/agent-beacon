@@ -164,8 +164,13 @@ func (s *Store) readMeta(ref SessionRef) *SessionMeta {
 			meta.ID = firstString(record.Data, "id", "sessionId", "session_id")
 			meta.CWD = firstString(record.Data, "cwd", "workingDirectory", "working_directory")
 			meta.ParentSessionID = firstString(record.Data, "parentSession", "parent_session", "parentSessionId")
+			meta.Origin = firstString(record.Data, "origin")
 		case "session/title":
 			meta.Title = firstString(record.Data, "title")
+		case "user/message":
+			if meta.FirstPrompt == "" {
+				meta.FirstPrompt = strings.TrimSpace(userMessageText(record.Data))
+			}
 		case "request/header":
 			meta.Model = requestHeaderModel(record.Data)
 		}
@@ -173,7 +178,7 @@ func (s *Store) readMeta(ref SessionRef) *SessionMeta {
 			break
 		}
 	}
-	if meta.ID == "" && meta.CWD == "" && meta.ParentSessionID == "" && meta.Title == "" && meta.Model == "" {
+	if meta.ID == "" && meta.CWD == "" && meta.ParentSessionID == "" && meta.Origin == "" && meta.Title == "" && meta.FirstPrompt == "" && meta.Model == "" {
 		return nil
 	}
 	return meta

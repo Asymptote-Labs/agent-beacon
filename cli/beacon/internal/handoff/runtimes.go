@@ -8,6 +8,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/clinesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/copilotsession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/dshsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/factorysession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/openclawsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/opencodesession"
@@ -58,6 +59,7 @@ const (
 	HarnessPrime    = primesession.Harness
 	HarnessFactory  = factorysession.Harness
 	HarnessCopilot  = copilotsession.Harness
+	HarnessDSH      = dshsession.Harness
 	HarnessOpenClaw = openclawsession.Harness
 
 	// Runtimes Beacon starts but whose sessions it reads only from the runtime log.
@@ -198,6 +200,16 @@ var runtimes = []Runtime{
 			// out without waiting. A session Beacon starts never inherits either.
 			Env: map[string]string{"COPILOT_ALLOW_ALL": "", "COPILOT_PLAN_THEN_AUTOPILOT": ""},
 		},
+	},
+	{
+		Harness:   HarnessDSH,
+		Label:     "DeepSeek Harness",
+		Aliases:   []string{"dsh"},
+		NewSource: func(dir string) Source { return &dshSource{dir: dir} },
+		// dsh has no interactive terminal session to start: `--profile headless` answers one task
+		// and exits, and `dsh web` is a browser UI. Its sessions continue in another runtime.
+		// Bare "deepseek" is not an alias: it names the vendor and its models, and a runtime-log row
+		// stamped with it came from a provider route, not from DeepSeek Harness.
 	},
 	{
 		Harness:   HarnessOpenClaw,
