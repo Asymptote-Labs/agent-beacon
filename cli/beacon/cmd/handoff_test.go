@@ -528,3 +528,15 @@ func TestDescribeHandoffPlanShowsTheEnvironment(t *testing.T) {
 		t.Fatalf("a plan with no overrides shows no env line: %q", out.String())
 	}
 }
+
+func TestHandoffLogReasonNamesRuntimesWithoutAStore(t *testing.T) {
+	gone := handoffLogReason(handoff.Session{Harness: handoff.HarnessClaude, ID: "c-1"})
+	if !strings.Contains(gone, "no longer in its runtime's store") {
+		t.Fatalf("store-backed runtime: %q", gone)
+	}
+	for _, harness := range []string{handoff.HarnessGoose, "cursor"} {
+		if got := handoffLogReason(handoff.Session{Harness: harness, ID: "s-1"}); !strings.Contains(got, "does not read "+harness+" session stores") {
+			t.Fatalf("%s: %q", harness, got)
+		}
+	}
+}
