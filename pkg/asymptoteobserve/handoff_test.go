@@ -12,6 +12,7 @@ func TestHandoffMarkerRoundTrips(t *testing.T) {
 		{"codex_cli", "019a2b3c-thread", "codex_cli"},
 		{"opencode", "ses_4f2a1b", "opencode"},
 		{"cline", "subagent:lead-1:child.2", "cline"},
+		{"devin-cli", "devin-sess-1", "devin-cli"},
 	} {
 		marker := HandoffMarker(tc.harness, tc.id)
 		if marker == "" {
