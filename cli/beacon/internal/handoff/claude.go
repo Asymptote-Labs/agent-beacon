@@ -29,7 +29,7 @@ type claudeHead struct {
 // index entry needs the cwd its transcript records.
 func readClaudeHead(path string) claudeHead {
 	var head claudeHead
-	scanHead(path, claudeHeadMaxLineSize, func(line []byte) bool {
+	scanHead(path, func(line []byte) bool {
 		head.consume(line)
 		return head.CWD != "" && head.GitBranch != "" && head.FirstPrompt != ""
 	})
@@ -38,10 +38,14 @@ func readClaudeHead(path string) claudeHead {
 
 // scanHead passes the first lines of a JSONL transcript to consume until it returns true, within
 // the listing bounds above. A listing opens every transcript, so it reads only its head.
-// maxLineSize controls the largest single line the scanner will keep; lines longer than it are
-// silently skipped so one huge tool result cannot stall a listing. maxBytes caps the total bytes
-// read from the file.
-func scanHead(path string, maxLineSize int, consume func(line []byte) (done bool)) {
+func scanHead(path string, consume func(line []byte) (done bool)) {
+	scanHeadLines(path, claudeHeadMaxLineSize, consume)
+}
+
+// scanHeadLines is scanHead for a transcript whose lines can run longer than a listing's usual
+// bound: a line up to maxLineSize is kept, and one past it is skipped. The byte budget grows with
+// the line bound, so the first long line can still be read whole.
+func scanHeadLines(path string, maxLineSize int, consume func(line []byte) (done bool)) {
 	maxBytes := int64(claudeHeadMaxBytes)
 	if int64(maxLineSize) > maxBytes {
 		maxBytes = int64(maxLineSize) + int64(claudeHeadMaxBytes)

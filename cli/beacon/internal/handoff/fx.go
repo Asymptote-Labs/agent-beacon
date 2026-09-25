@@ -89,7 +89,7 @@ type fxHead struct {
 // log. fx commits a whole turn, prompt included, as one line, so the first prompt is near the top.
 func readFxHead(path string) fxHead {
 	var head fxHead
-	scanHead(path, fxsession.MaxFrameBytes, func(line []byte) bool {
+	scanHeadLines(path, fxsession.MaxFrameBytes, func(line []byte) bool {
 		event, err := fxsession.DecodeEnvelope(line)
 		if err != nil {
 			return false
