@@ -202,13 +202,19 @@ func advanceCursor(cursor *Cursor, ref SessionRef, stats ReadStats) {
 
 func advanceCursorPartial(cursor *Cursor, ref SessionRef, mapped []MappedEvent, failedIdx int) {
 	cursor.SourcePath = ref.Path
+	var lastCompleteLine int
+	found := false
 	for i := 0; i < failedIdx; i++ {
-		if mapped[i].SourceLine > cursor.LastLine {
-			cursor.LastLine = mapped[i].SourceLine
-		}
 		if mapped[i].Event.Event.Action == "session.started" {
 			cursor.Started = true
 		}
+		if i+1 < len(mapped) && mapped[i+1].SourceLine != mapped[i].SourceLine {
+			lastCompleteLine = mapped[i].SourceLine
+			found = true
+		}
+	}
+	if found && lastCompleteLine > cursor.LastLine {
+		cursor.LastLine = lastCompleteLine
 	}
 }
 
