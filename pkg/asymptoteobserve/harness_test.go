@@ -24,6 +24,7 @@ func TestHookPlatformsConvergeOnCanonicalNames(t *testing.T) {
 		"omo":         "omo_senpi",
 		"muse":        "muse_code",
 		"goose":       "goose",
+		"devin":       "devin_cli",
 		"dsh":         "deepseek_harness",
 		"kimi":        "kimi_code",
 	} {
@@ -45,7 +46,7 @@ func TestCanonicalNamesAreStableUnderRenormalization(t *testing.T) {
 		"claude_code", "codex_cli", "codex_desktop", "gemini_cli", "antigravity_cli", "vscode_copilot",
 		"copilot_cli", "claude_web", "chatgpt_web", "claude_cowork", "claude_agent_sdk",
 		"openclaw_gateway", "pi_cli", "omp", "cline", "qwen_code", "prime_agent", "omo_senpi", "vercel_fx",
-		"muse_code", "grok_bot", "goose", "deepseek_harness", "kimi_code",
+		"muse_code", "grok_bot", "goose", "devin_cli", "deepseek_harness", "kimi_code",
 	} {
 		t.Run(canonical, func(t *testing.T) {
 			if got := NormalizeHarnessName(canonical); got != canonical {

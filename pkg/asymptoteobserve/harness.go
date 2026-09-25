@@ -315,6 +315,18 @@ func NormalizeHarnessName(name string) string {
 		lower == "codename_goose" || lower == "codename-goose" || lower == "codename goose" ||
 		lower == "block_goose" || lower == "block-goose" || lower == "block goose":
 		return "goose"
+	// Devin CLI is Cognition's terminal coding agent. The canonical spelling is `devin_cli`,
+	// following codex_cli and gemini_cli, because harness.name uses underscores and the hyphenated
+	// form `devin-cli` cannot be carried in a handoff marker (the marker regex allows only
+	// `[a-z0-9_]`). The `--platform` flag the hook installer writes is `devin` or `devin-cli`;
+	// both arrive here and both leave as `devin_cli`.
+	//
+	// Equality against a closed set rather than Contains(lower, "devin"), because "devin" is a
+	// common given name that can appear in repository paths, user names and hostnames a harness
+	// attribute legitimately carries.
+	case lower == "devin" || lower == "devin_cli" || lower == "devin-cli" || lower == "devin cli" ||
+		lower == "devincli":
+		return "devin_cli"
 	// DeepSeek Harness (`dsh`) is DeepSeek's open agent harness: a TypeScript, plugin-composed
 	// runtime whose CLI, Web, ACP and SDK surfaces all boot from one `$DSH_HOME` and one patch
 	// layer -- so Beacon hooks all of them at once through a single mount and there is one runtime
