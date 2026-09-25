@@ -105,7 +105,11 @@ func loadHandoffBrief(id string) (handoff.Brief, error) {
 // than the store does.
 func loadHandoffLogSession(id, harness string, notFound *handoff.NotFoundError) (handoff.Session, []schema.Event, error) {
 	logPath := handoffRuntimeLogPath()
-	session, events, found, err := handoff.LogSession(logPath, id)
+	session, events, found, err := handoff.LogSession(logPath, id, harness)
+	var ambiguous *handoff.AmbiguousError
+	if errors.As(err, &ambiguous) {
+		return handoff.Session{}, nil, fmt.Errorf("in the runtime log %s: %w", logPath, err)
+	}
 	if err != nil {
 		return handoff.Session{}, nil, fmt.Errorf("read runtime log %s: %w", logPath, err)
 	}
