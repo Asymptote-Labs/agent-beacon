@@ -131,7 +131,7 @@ Claude Code, Cline, Prime Agent and Grok Build subagent sessions, and Cline's ol
 
 Cline approves every tool call by default. Beacon always passes `--auto-approve false`, so a session Beacon starts never gets auto-approval on Beacon's say-so. You can still turn it on inside the Cline TUI.
 
-Grok Build's configured permission mode can be always-approve. Beacon always passes `--permission-mode default`, the mode that asks before running tools, so a session Beacon starts or reopens never inherits always-approve from that config. You can still change the mode inside the Grok TUI. Grok looks a session id up under the directory it runs in, which is why the resume runs in the session's recorded directory.
+Grok Build's configured permission mode can be always-approve. Beacon always passes `--permission-mode default`, the mode that asks before running tools, so a session Beacon starts or reopens never inherits always-approve from that config. You can still change the mode inside the Grok TUI. Grok looks a session id up under the directory it runs in, which is why the resume runs in the session's recorded directory. With `--cwd` naming another directory, a Grok session continues from a brief instead.
 
 The runtime runs in this terminal, in the session's recorded directory. If that directory no longer exists, Beacon stops rather than starting somewhere else; pass `--cwd` to choose a directory. Beacon prints the plan and asks `Continue? [Y/n]` before launching. Without a terminal, it launches only with `--yes`. `beacon handoff resume` exits with the runtime's own exit code.
 

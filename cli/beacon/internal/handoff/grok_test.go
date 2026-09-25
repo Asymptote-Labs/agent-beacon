@@ -172,6 +172,25 @@ func TestPlanResumeReopensAGrokSessionByItsID(t *testing.T) {
 	}
 }
 
+// Grok finds a session id under the directory it starts in, so --cwd elsewhere continues from a
+// brief instead of reopening an id Grok cannot find there.
+func TestPlanResumeReopensAGrokSessionOnlyInItsDirectory(t *testing.T) {
+	session := resumableSession(t, HarnessGrok, grokSessionID)
+	brief := filepath.Join(t.TempDir(), "brief.md")
+	moved := t.TempDir()
+	plan, err := PlanResume(session, PlanOptions{Dir: moved, BriefPath: brief, LookPath: installed("grok")})
+	if err != nil {
+		t.Fatalf("PlanResume: %v", err)
+	}
+	if plan.Mode != ModeNewSession || plan.Reason != ReasonOtherDirectory || plan.Dir != moved {
+		t.Fatalf("--cwd elsewhere: plan = %+v", plan)
+	}
+	plan, err = PlanResume(session, PlanOptions{Dir: session.Directory, BriefPath: brief, LookPath: installed("grok")})
+	if err != nil || plan.Mode != ModeNative {
+		t.Fatalf("--cwd naming the session's own directory: plan = %+v, %v", plan, err)
+	}
+}
+
 // Grok's config can make always-approve the default. No command Beacon runs may inherit it.
 func TestEveryGrokCommandAsksBeforeRunningTools(t *testing.T) {
 	command, _ := commandFor(HarnessGrok)

@@ -41,6 +41,9 @@ type runtimeCommand struct {
 	// NewSession returns the arguments that start an interactive session with prompt as its first
 	// message.
 	NewSession func(prompt string) []string
+	// ResumesInSessionDir marks a CLI that finds a session by the directory it is started in, so
+	// a native reopen from any other directory (--cwd) would not find it.
+	ResumesInSessionDir bool
 	// Env overrides the runtime's environment: a variable set to a value is set, one set to "" is
 	// removed. It holds switches only, never credentials, because the plan prints it.
 	Env map[string]string
@@ -170,6 +173,8 @@ var runtimes = []Runtime{
 				return []string{"--permission-mode", "default", "--resume", s.ID}, true
 			},
 			NewSession: func(prompt string) []string { return []string{"--permission-mode", "default", prompt} },
+			// Grok looks a session id up under the directory it is started in.
+			ResumesInSessionDir: true,
 		},
 	},
 }
