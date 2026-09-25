@@ -169,11 +169,10 @@ func collectTrace(store *Store, ref TraceRef, state *State, opts CollectOptions,
 		}
 		return false, nil
 	}
+	start := cursor.LastOrder
 	for i, item := range mapped {
-		if err := emit(item.Event, opts); err != nil {
-			if i > 0 {
-				cursor.LastOrder = mapped[i-1].SourceOrder
-			}
+		if err := emitEvent(item.Event, opts); err != nil {
+			cursor.LastOrder = partialLastOrder(start, mapped, i)
 			return true, err
 		}
 		cursor.LastOrder = item.SourceOrder
@@ -182,6 +181,26 @@ func collectTrace(store *Store, ref TraceRef, state *State, opts CollectOptions,
 	cursor.UpdatedAtMS = ref.UpdatedAtUnixMS
 	return true, nil
 }
+
+// partialLastOrder is where the cursor stands after the write of mapped[failedIdx] failed: past
+// every record whose events were all written, so the next sweep retries the record that failed.
+// Stopping at the last written event's record would lose the rest of that record's events for
+// good once a record maps to more than one. start is the cursor before this sweep; the cursor
+// never moves back past it.
+func partialLastOrder(start int, mapped []MappedEvent, failedIdx int) int {
+	for i := failedIdx - 1; i >= 0; i-- {
+		if mapped[i].SourceOrder != mapped[failedIdx].SourceOrder {
+			if mapped[i].SourceOrder > start {
+				return mapped[i].SourceOrder
+			}
+			break
+		}
+	}
+	return start
+}
+
+// emitEvent is emit, swapped by tests to fail a chosen write.
+var emitEvent = emit
 
 func emit(event schema.Event, opts CollectOptions) error {
 	if opts.Print && opts.Out != nil {
