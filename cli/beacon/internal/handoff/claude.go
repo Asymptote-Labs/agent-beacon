@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// Bounds for reading the head of a Claude transcript while listing. A listing opens every
+// Bounds for reading the head of a transcript while listing. A listing opens every
 // transcript, so it reads only enough to find where the session ran and what it was about.
 const (
 	claudeHeadMaxLines    = 64
@@ -28,27 +28,33 @@ type claudeHead struct {
 // a dash, which cannot be decoded back when the path itself contains one, so a session without an
 // index entry needs the cwd its transcript records.
 func readClaudeHead(path string) claudeHead {
+	var head claudeHead
+	scanHead(path, func(line []byte) bool {
+		head.consume(line)
+		return head.CWD != "" && head.GitBranch != "" && head.FirstPrompt != ""
+	})
+	return head
+}
+
+// scanHead passes the first lines of a JSONL transcript to consume until it returns true, within
+// the listing bounds above. A listing opens every transcript, so it reads only its head.
+func scanHead(path string, consume func(line []byte) (done bool)) {
 	f, err := os.Open(path)
 	if err != nil {
-		return claudeHead{}
+		return
 	}
 	defer f.Close()
 
-	var head claudeHead
 	reader := bufio.NewReaderSize(io.LimitReader(f, claudeHeadMaxBytes), 64<<10)
 	for lines := 0; lines < claudeHeadMaxLines; lines++ {
 		line, err := readBoundedLine(reader, claudeHeadMaxLineSize)
-		if len(line) > 0 {
-			head.consume(line)
-		}
-		if head.CWD != "" && head.GitBranch != "" && head.FirstPrompt != "" {
-			break
+		if len(line) > 0 && consume(line) {
+			return
 		}
 		if err != nil {
-			break
+			return
 		}
 	}
-	return head
 }
 
 func (h *claudeHead) consume(line []byte) {

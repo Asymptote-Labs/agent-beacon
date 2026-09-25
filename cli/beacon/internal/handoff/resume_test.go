@@ -24,7 +24,7 @@ func installed(names ...string) func(string) (string, error) {
 	}
 }
 
-var allRuntimes = installed("claude", "codex", "opencode", "cline")
+var allRuntimes = installed("claude", "codex", "opencode", "cline", "pi", "prime-agent")
 
 // resumableSession is a session whose directory and session file both exist.
 func resumableSession(t *testing.T, harness, id string) Session {
@@ -78,6 +78,8 @@ func TestPlanResumeStartsANewSessionInEachRuntime(t *testing.T) {
 		{HarnessCodex, "codex", nil},
 		{HarnessOpenCode, "opencode", []string{"--prompt"}},
 		{HarnessCline, "cline", []string{"--tui", "--auto-approve", "false"}},
+		{HarnessPi, "pi", []string{"--"}},
+		{HarnessPrime, "prime-agent", []string{"--"}},
 	} {
 		t.Run(tc.target, func(t *testing.T) {
 			source := HarnessCodex
