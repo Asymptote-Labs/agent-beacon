@@ -25,6 +25,9 @@ type TraceRef struct {
 	Directory       string
 	UpdatedAtUnixMS int64
 	SizeBytes       int64
+	// SessionKey is the Gateway session key the sessions.json index files the transcript under,
+	// such as "agent:main:main". Empty for a transcript found outside the index.
+	SessionKey string
 }
 
 type SessionIndexEntry struct {

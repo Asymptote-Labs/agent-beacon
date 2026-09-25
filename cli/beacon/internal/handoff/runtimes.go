@@ -7,6 +7,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/clinesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/openclawsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/opencodesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pisession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/primesession"
@@ -53,6 +54,7 @@ const (
 	HarnessCline    = clinesession.Harness
 	HarnessPi       = pisession.Harness
 	HarnessPrime    = primesession.Harness
+	HarnessOpenClaw = openclawsession.Harness
 )
 
 // runtimes lists every runtime handoff supports, in display order.
@@ -147,6 +149,27 @@ var runtimes = []Runtime{
 				return []string{"--resume", s.SourcePath}, true
 			},
 			NewSession: func(prompt string) []string { return []string{"--", prompt} },
+		},
+	},
+	{
+		Harness:   HarnessOpenClaw,
+		Label:     "OpenClaw Gateway",
+		Aliases:   []string{"openclaw", "openclaw-gateway"},
+		NewSource: func(dir string) Source { return &openClawSource{dir: dir} },
+		// The TUI is a client of the Gateway: it needs the Gateway running, and a conversation lives
+		// on the Gateway under its session key, not its transcript id. --deliver stays off, so
+		// replies are not sent out through the Gateway's chat channels.
+		Command: &runtimeCommand{
+			Executable: "openclaw",
+			Resume: func(s Session) ([]string, bool) {
+				if s.Key == "" {
+					return nil, false
+				}
+				return []string{"tui", "--session", s.Key}, true
+			},
+			NewSession: func(prompt string) []string {
+				return []string{"tui", "--session", openClawNewSessionKey(prompt), "--message", prompt}
+			},
 		},
 	},
 }
