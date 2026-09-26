@@ -87,6 +87,12 @@ environment secret rather than from your shell, so the artifact leak check has n
 for and reports *unverified*, exactly as `--modal-secret` does. The in-runner argv scan still runs,
 because the key genuinely is present there.
 
+Several dispatches can run at once without mixing up their results. Each sends a random
+`correlation_id` that the workflow puts in the run's title, and each follows only the run that
+carries its own id, so one maintainer's verdict is never built from another's artifacts. The
+workflow reads that input from the dispatched branch, so a branch cut before it existed needs a
+rebase onto main first.
+
 Scenarios say which platform they are written for (`platform: windows`), defaulting to Linux, and
 `run` reports how many it set aside rather than silently narrowing the suite.
 

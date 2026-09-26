@@ -12,6 +12,12 @@
 # reachable from untrusted code, so there is no pull_request trigger here and there must never be
 # a pull_request_target one.
 name: Windows sandbox
+# The correlation id is what lets `beacon-sandbox run --provider github` recognize the run its own
+# dispatch created. `gh workflow run` returns no run id, and two dispatches made moments apart are
+# otherwise indistinguishable: each caller would attach to whichever run appeared first (#681).
+# Manual dispatches leave it empty and keep the plain workflow name as their title. It is only ever
+# rendered into this title, never into a script, so it needs no validation of its own.
+run-name: ${{ inputs.correlation_id && format('Windows sandbox [{0}]', inputs.correlation_id) || 'Windows sandbox' }}
 
 on:
   workflow_dispatch:
@@ -24,6 +30,11 @@ on:
         description: "Claude Code version to pin"
         required: false
         default: "2.1.220"
+        type: string
+      correlation_id:
+        description: "Set by beacon-sandbox to find this dispatch's run; leave empty when dispatching by hand"
+        required: false
+        default: ""
         type: string
 
 permissions:
