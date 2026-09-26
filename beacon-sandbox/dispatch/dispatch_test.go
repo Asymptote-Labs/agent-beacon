@@ -3,6 +3,7 @@ package dispatch
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -68,38 +69,110 @@ func TestFindRunDirsToleratesNothingCollected(t *testing.T) {
 	}
 }
 
-// The bug this pins is one that produced a confident wrong answer rather than an error: the run
-// listing is newest-first, and the freshly dispatched run usually does not exist on the first poll,
-// so accepting "the first id that differs from the pre-dispatch id" returned the second-newest
-// *historical* run. The dispatch then judged a previous run's artifacts as this run's result.
-//
-// Selection is pure given a listing, so it is tested directly rather than through gh.
-func TestNewRunSelectionRequiresAnIDGreaterThanTheFloor(t *testing.T) {
-	// A realistic listing at the moment of dispatch: history only, newest first, none of it ours.
-	history := []ghRun{{DatabaseID: 500}, {DatabaseID: 499}, {DatabaseID: 498}}
-	if got := pickNewRun(history, 500); got != 0 {
-		t.Errorf("with only pre-existing runs the selection must find nothing, got %d", got)
+// Selection is pure given a listing, so it is tested directly rather than through gh. The rules
+// it pins each fixed a confident wrong answer: judging a *historical* run (the listing is
+// newest-first and the fresh run usually does not exist on the first poll), and judging another
+// concurrent invocation's run (#681).
+func TestOwnRunSelectionRequiresTheCorrelationID(t *testing.T) {
+	const ours = "0123456789abcdef01234567"
+	const theirs = "fedcba9876543210fedcba98"
+	titled := func(id int64, correlation string) ghRun {
+		title := "Windows sandbox"
+		if correlation != "" {
+			title += " " + correlationMarker(correlation)
+		}
+		return ghRun{DatabaseID: id, DisplayTitle: title}
 	}
-	// The specific regression: 499 differs from 500 and is listed, but predates the dispatch.
-	if got := pickNewRun(history, 500); got == 499 {
-		t.Error("an older run must never be selected; that is the stale-verdict bug")
+	pick := func(t *testing.T, runs []ghRun, before int64) int64 {
+		t.Helper()
+		got, err := pickOwnRun(runs, before, ours)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return got
+	}
+
+	// A realistic listing at the moment of dispatch: history only, newest first, none of it ours.
+	history := []ghRun{titled(500, ""), titled(499, ""), titled(498, "")}
+	if got := pick(t, history, 500); got != 0 {
+		t.Errorf("with only pre-existing runs the selection must find nothing, got %d", got)
 	}
 
 	// Once ours appears it is selected.
-	withOurs := append([]ghRun{{DatabaseID: 501}}, history...)
-	if got := pickNewRun(withOurs, 500); got != 501 {
-		t.Errorf("the run created after the floor must be selected, got %d", got)
+	withOurs := append([]ghRun{titled(501, ours)}, history...)
+	if got := pick(t, withOurs, 500); got != 501 {
+		t.Errorf("the run carrying our id must be selected, got %d", got)
 	}
 
-	// Two dispatches racing: follow the earlier new run, which is ours.
-	withRace := append([]ghRun{{DatabaseID: 502}, {DatabaseID: 501}}, history...)
-	if got := pickNewRun(withRace, 500); got != 501 {
-		t.Errorf("with two new runs the earlier one is ours, got %d", got)
+	// #681: another dispatch's run landed first. The old rule took the earliest new run, 501,
+	// which is theirs.
+	withRace := append([]ghRun{titled(502, ours), titled(501, theirs)}, history...)
+	if got := pick(t, withRace, 500); got != 502 {
+		t.Errorf("with two new runs ours is the one carrying our id, not the earlier one; got %d", got)
 	}
 
-	// A first-ever dispatch has no history, so the floor is zero and any real run qualifies.
-	if got := pickNewRun([]ghRun{{DatabaseID: 7}}, 0); got != 7 {
-		t.Errorf("a zero floor must accept the first run, got %d", got)
+	// Only another invocation's run, or a manual dispatch, has appeared: not ours, so keep waiting.
+	foreign := append([]ghRun{titled(502, ""), titled(501, theirs)}, history...)
+	if got := pick(t, foreign, 500); got != 0 {
+		t.Errorf("a run without our id must never be selected, got %d", got)
+	}
+
+	// The marker matches the whole id, never a fragment of a longer one.
+	fragment := []ghRun{{DatabaseID: 501, DisplayTitle: "Windows sandbox [" + ours + "ff]"},
+		{DatabaseID: 502, DisplayTitle: "Windows sandbox [ff" + ours + "]"}}
+	if got := pick(t, fragment, 500); got != 0 {
+		t.Errorf("an id embedded in a longer one must not match, got %d", got)
+	}
+
+	// Carrying our id is not enough on its own: a run at or below the floor predates the dispatch.
+	if got := pick(t, []ghRun{titled(500, ours)}, 500); got != 0 {
+		t.Errorf("a run at the floor predates the dispatch and must not be selected, got %d", got)
+	}
+
+	// A first-ever dispatch has no history, so the floor is zero and our run qualifies.
+	if got := pick(t, []ghRun{titled(7, ours)}, 0); got != 7 {
+		t.Errorf("a zero floor must accept our first run, got %d", got)
+	}
+}
+
+// Two runs carrying one dispatch's random id means something reused it, and either could be the
+// run whose verdict would be reported. That is an explicit error, not a choice.
+func TestOwnRunSelectionRefusesTwoRunsCarryingTheID(t *testing.T) {
+	const ours = "0123456789abcdef01234567"
+	runs := []ghRun{
+		{DatabaseID: 503, DisplayTitle: "Windows sandbox " + correlationMarker(ours)},
+		{DatabaseID: 501, DisplayTitle: "Windows sandbox " + correlationMarker(ours)},
+		{DatabaseID: 500, DisplayTitle: "Windows sandbox"},
+	}
+	got, err := pickOwnRun(runs, 500, ours)
+	if err == nil {
+		t.Fatalf("two runs carrying one correlation id must be refused, got run %d", got)
+	}
+	if got != 0 {
+		t.Errorf("an ambiguous selection must not also return a run, got %d", got)
+	}
+	for _, want := range []string{"501", "503", ours, "refusing to guess"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error should mention %q: %v", want, err)
+		}
+	}
+}
+
+// Each dispatch needs an id no concurrent one shares, in a form that survives a run title.
+func TestCorrelationIDsAreUniqueHex(t *testing.T) {
+	seen := map[string]bool{}
+	for range 1000 {
+		id, err := newCorrelationID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !regexp.MustCompile(`^[0-9a-f]{24}$`).MatchString(id) {
+			t.Fatalf("correlation id %q is not 24 lowercase hex characters", id)
+		}
+		if seen[id] {
+			t.Fatalf("correlation id %q repeated", id)
+		}
+		seen[id] = true
 	}
 }
 

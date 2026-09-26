@@ -13,6 +13,8 @@
 package dispatch
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -26,6 +28,11 @@ import (
 
 // Workflow is the workflow file this package drives.
 const Workflow = "windows-sandbox.yml"
+
+// correlationInput is the workflow_dispatch input that ties a run to the dispatch that created it.
+// The workflow puts it in its run-name, so the run's display title carries it from the moment the
+// run exists.
+const correlationInput = "correlation_id"
 
 // Options configures a dispatch.
 type Options struct {
@@ -51,6 +58,11 @@ type Options struct {
 	Timeout time.Duration
 	// Log receives progress lines.
 	Log func(string, ...any)
+
+	// newRunPoll and newRunTimeout bound the wait for the dispatched run to appear. Zero uses the
+	// defaults; they are unexported because only tests have a reason to shorten them.
+	newRunPoll    time.Duration
+	newRunTimeout time.Duration
 }
 
 // Result describes a finished dispatch.
@@ -76,6 +88,12 @@ func Run(opts Options) (Result, error) {
 		// The workflow's own timeout-minutes is 45; allow for queueing on top of it.
 		opts.Timeout = 60 * time.Minute
 	}
+	if opts.newRunPoll <= 0 {
+		opts.newRunPoll = 5 * time.Second
+	}
+	if opts.newRunTimeout <= 0 {
+		opts.newRunTimeout = 5 * time.Minute
+	}
 	if err := requireGH(); err != nil {
 		return Result{}, err
 	}
@@ -92,10 +110,22 @@ func Run(opts Options) (Result, error) {
 	}
 	logf("dispatching against ref %s", opts.Ref)
 
-	// The newest run id *before* dispatching, so the new one can be identified without guessing.
 	// `gh workflow run` prints nothing machine-readable and returns no id, which is the whole
-	// difficulty here: polling for "the newest run" can otherwise latch onto a previous one that
-	// is still in progress and report its result as this dispatch's.
+	// difficulty here: the run this dispatch creates has to be recognized among runs other people
+	// and other invocations create at the same time. So every dispatch carries an id of its own,
+	// the workflow puts it in the run's title, and only a run bearing it is accepted as ours.
+	//
+	// Timing alone cannot do this. An earlier version took the earliest run created after a
+	// snapshot of the newest id, and two callers that snapshot before either dispatch lands then
+	// both pick the first run to appear: one judges the other's artifacts as its own verdict while
+	// its own run goes unobserved (#681).
+	correlationID, err := newCorrelationID()
+	if err != nil {
+		return Result{}, err
+	}
+	// The newest run id before dispatching is kept as a floor. It is no longer what identifies
+	// our run, but a run older than the dispatch can never be ours, and the floor is what lets a
+	// timeout report which runs appeared meanwhile without carrying our id.
 	before, err := latestRunID(opts)
 	if err != nil {
 		return Result{}, err
@@ -114,12 +144,22 @@ func Run(opts Options) (Result, error) {
 	if opts.ClaudeVersion != "" {
 		args = append(args, "-f", "claude_version="+opts.ClaudeVersion)
 	}
+	args = append(args, "-f", correlationInput+"="+correlationID)
 	if out, err := runGH(args...); err != nil {
+		// GitHub reads the workflow from the dispatched ref, so a branch cut before the workflow
+		// declared the correlation input rejects it. Refused rather than retried without it: an
+		// uncorrelated dispatch is exactly the one that can attach to someone else's run.
+		if strings.Contains(out, "Unexpected inputs") && strings.Contains(out, correlationInput) {
+			return Result{}, fmt.Errorf("dispatch %s: the workflow on ref %s does not declare the "+
+				"%s input, so its run could not be told apart from a concurrent dispatch's; "+
+				"merge or rebase onto main so the ref carries the current workflow: %w\n%s",
+				Workflow, opts.Ref, correlationInput, err, out)
+		}
 		return Result{}, fmt.Errorf("dispatch %s: %w\n%s", Workflow, err, out)
 	}
-	logf("dispatched %s; waiting for the run to appear", Workflow)
+	logf("dispatched %s (correlation id %s); waiting for the run to appear", Workflow, correlationID)
 
-	runID, err := awaitNewRun(opts, before, logf)
+	runID, err := awaitNewRun(opts, before, correlationID, logf)
 	if err != nil {
 		return Result{}, err
 	}
@@ -200,17 +240,43 @@ type ghRun struct {
 	Status     string `json:"status"`
 	Conclusion string `json:"conclusion"`
 	URL        string `json:"url"`
+	// DisplayTitle is the run's rendered run-name, which carries the correlation id.
+	DisplayTitle string `json:"displayTitle"`
+}
+
+// newCorrelationID returns an id no other dispatch will carry.
+//
+// Random rather than derived from the time or the process: two callers on different machines can
+// start in the same instant, and the id has to differ precisely then.
+func newCorrelationID() (string, error) {
+	var b [12]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("generate a dispatch correlation id: %w", err)
+	}
+	return hex.EncodeToString(b[:]), nil
+}
+
+// correlationMarker is how the workflow's run-name renders a correlation id in the run's title.
+// Bracketed so the match is on the whole id, never on a fragment of a longer word.
+func correlationMarker(id string) string {
+	return "[" + id + "]"
 }
 
 // listRuns returns the most recent runs of this workflow, newest first.
 func listRuns(opts Options, limit int) ([]ghRun, error) {
 	args := []string{"run", "list", "--workflow", Workflow,
-		"--limit", fmt.Sprint(limit), "--json", "databaseId,status,conclusion,url"}
+		"--limit", fmt.Sprint(limit), "--json", "databaseId,status,conclusion,url,displayTitle"}
 	if opts.Repo != "" {
 		args = append(args, "--repo", opts.Repo)
 	}
 	out, err := runGH(args...)
 	if err != nil {
+		// displayTitle is what carries the correlation id, and a gh too old to know the field
+		// rejects the whole listing. Said plainly, because gh's own message does not suggest it.
+		if strings.Contains(out, "Unknown JSON field") && strings.Contains(out, "displayTitle") {
+			return nil, fmt.Errorf("list runs of %s: this gh does not support the displayTitle "+
+				"field that identifies a dispatch's run; upgrade gh: %w\n%s", Workflow, err, out)
+		}
 		return nil, fmt.Errorf("list runs of %s: %w\n%s", Workflow, err, out)
 	}
 	var runs []ghRun
@@ -235,26 +301,27 @@ func latestRunID(opts Options) (int64, error) {
 	return maxRunID(runs), nil
 }
 
-// awaitNewRun waits for a run created after the dispatch.
+// awaitNewRun waits for the run this dispatch created, identified by its correlation id.
 //
-// Compared numerically, and that is the whole correctness of this function. GitHub run ids
-// increase monotonically, so "created after ours" is exactly "id greater than the newest id that
-// existed before we dispatched".
+// A run is ours only if its title carries our id; being new is necessary but not sufficient. Two
+// earlier rules each produced a confident wrong answer rather than an error:
 //
-// An earlier version accepted the first listed run whose id merely *differed* from that one, which
-// is wrong in a way that produces a confident wrong answer rather than an error: the listing is
-// newest-first, the freshly dispatched run usually does not exist yet on the first poll, so the
-// second-newest *historical* run satisfied "differs" and was returned. The dispatch then waited on,
-// downloaded and judged a previous run's artifacts and reported that stale verdict as this run's
-// result -- the precise confusion this function exists to prevent. Reported by Cursor Bugbot.
+//   - Accepting the first listed run whose id merely differed from the pre-dispatch newest. The
+//     listing is newest-first and the fresh run usually does not exist on the first poll, so a
+//     *historical* run was returned and its stale verdict reported as this run's. Reported by
+//     Cursor Bugbot. The floor below still rules that out.
+//   - Accepting the earliest run above that floor. Two callers that snapshot the same floor before
+//     either dispatch lands both select the first new run, so one of them judges the other's
+//     artifacts while its own run is never matched (#681).
 //
-// The smallest qualifying id is taken rather than the newest, so that if another dispatch lands
-// while we poll, we follow the earlier one -- ours.
-func awaitNewRun(opts Options, before int64, logf func(string, ...any)) (string, error) {
-	deadline := time.Now().Add(5 * time.Minute)
+// Runs that appear without our id are someone else's and are waited past, not taken. If our id
+// never shows up, the error names them rather than guessing which, if any, was ours.
+func awaitNewRun(opts Options, before int64, correlationID string, logf func(string, ...any)) (string, error) {
+	deadline := time.Now().Add(opts.newRunTimeout)
 	var lastErr error
+	var others []int64
 	for time.Now().Before(deadline) {
-		runs, err := listRuns(opts, 10)
+		runs, err := listRuns(opts, 20)
 		if err != nil {
 			// Transient rather than fatal. A single failed API call used to abandon a run that was
 			// proceeding perfectly well, and the dispatch reported failure while the workflow it had
@@ -262,38 +329,85 @@ func awaitNewRun(opts Options, before int64, logf func(string, ...any)) (string,
 			// error kept so a persistent outage still reports the real cause rather than a timeout.
 			lastErr = err
 			logf("could not list runs (%v); retrying", firstLine(err.Error()))
-			time.Sleep(5 * time.Second)
+			time.Sleep(opts.newRunPoll)
 			continue
 		}
 		lastErr = nil
-		if found := pickNewRun(runs, before); found > 0 {
+		found, err := pickOwnRun(runs, before, correlationID)
+		if err != nil {
+			return "", err
+		}
+		if found > 0 {
 			return fmt.Sprint(found), nil
 		}
-		time.Sleep(5 * time.Second)
+		others = newerRuns(runs, before)
+		time.Sleep(opts.newRunPoll)
 	}
 	if lastErr != nil {
-		return "", fmt.Errorf("could not reach the GitHub API while waiting for a new %s run: %w",
-			Workflow, lastErr)
+		return "", fmt.Errorf("could not reach the GitHub API while waiting for the %s run with "+
+			"correlation id %s: %w", Workflow, correlationID, lastErr)
 	}
-	return "", fmt.Errorf("no new %s run appeared within 5 minutes of dispatching; check "+
-		"`gh run list --workflow %s`", Workflow, Workflow)
+	if len(others) > 0 {
+		// Explicitly ambiguous rather than resolved by timing. One of these may be ours with a
+		// title the workflow failed to stamp, or all of them may be other dispatches while ours is
+		// still not listed; nothing here can tell which, and picking one is how a caller ends up
+		// judging another invocation's artifacts.
+		return "", fmt.Errorf("no %s run carrying correlation id %s appeared within %s of "+
+			"dispatching, but %d other run(s) did (%s); refusing to guess which, if any, is this "+
+			"dispatch's. Check `gh run list --workflow %s` and that the dispatched ref's workflow "+
+			"puts inputs.%s in its run-name", Workflow, correlationID, opts.newRunTimeout,
+			len(others), joinIDs(others), Workflow, correlationInput)
+	}
+	return "", fmt.Errorf("no new %s run appeared within %s of dispatching; check "+
+		"`gh run list --workflow %s`", Workflow, opts.newRunTimeout, Workflow)
 }
 
-// pickNewRun returns the earliest run created after the floor, or 0 if none has appeared.
+// pickOwnRun returns the run created after the floor whose title carries the correlation id, or
+// 0 if it has not appeared yet.
 //
-// Separated from the polling loop so the selection rule -- the part that was wrong -- is testable
-// without a GitHub account or a live workflow.
-func pickNewRun(runs []ghRun, before int64) int64 {
-	var found int64
+// Separated from the polling loop so the selection rule -- the part that was wrong, twice -- is
+// testable without a GitHub account or a live workflow. More than one run carrying the id is
+// reported rather than resolved: the id is random per dispatch, so that means something other
+// than this process used it, and either run could be the one whose verdict we would report.
+func pickOwnRun(runs []ghRun, before int64, correlationID string) (int64, error) {
+	marker := correlationMarker(correlationID)
+	var matches []int64
 	for _, r := range runs {
-		if r.DatabaseID <= before {
+		if r.DatabaseID <= before || !strings.Contains(r.DisplayTitle, marker) {
 			continue
 		}
-		if found == 0 || r.DatabaseID < found {
-			found = r.DatabaseID
+		matches = append(matches, r.DatabaseID)
+	}
+	switch len(matches) {
+	case 0:
+		return 0, nil
+	case 1:
+		return matches[0], nil
+	}
+	sort.Slice(matches, func(i, j int) bool { return matches[i] < matches[j] })
+	return 0, fmt.Errorf("%d %s runs (%s) carry correlation id %s, which should belong to exactly "+
+		"one dispatch; refusing to guess which one to judge", len(matches), Workflow,
+		joinIDs(matches), correlationID)
+}
+
+// newerRuns lists the runs created after the floor, oldest first, for an ambiguity report.
+func newerRuns(runs []ghRun, before int64) []int64 {
+	var ids []int64
+	for _, r := range runs {
+		if r.DatabaseID > before {
+			ids = append(ids, r.DatabaseID)
 		}
 	}
-	return found
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
+}
+
+func joinIDs(ids []int64) string {
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = fmt.Sprint(id)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // maxRunID is the floor "created after our dispatch" is measured against.

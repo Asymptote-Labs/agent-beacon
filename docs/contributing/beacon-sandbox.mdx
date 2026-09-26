@@ -242,6 +242,8 @@ gh run watch
 
 Leave `scenario` empty to run every Windows test. Each takes a few minutes, and the whole set takes about fifteen.
 
+`beacon-sandbox run --provider github --scenario <id>` dispatches the same workflow and brings the artifacts home to judge. It also sends a random `correlation_id` input that the workflow puts in the run's title, so it follows only the run its own dispatch created, even when someone else dispatches at the same moment. A run dispatched by hand, as above, leaves that input empty and keeps the plain title.
+
 | Test | Covers |
 |------|--------|
 | `w00-probe` | The `beacon ci exec` collection path. Known to be unreliable on Windows. See [#320](https://github.com/asymptote-labs/agent-beacon/issues/320) |

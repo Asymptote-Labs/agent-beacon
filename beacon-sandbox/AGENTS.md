@@ -218,6 +218,15 @@ it collected; this side downloads it and judges it with the same `check` package
 go run ./cmd/beacon-sandbox run --provider github --scenario w00-probe
 ```
 
+Concurrent dispatches never mix up their results. Each one sends a random `correlation_id`
+input, the workflow stamps it into the run's title, and the dispatch follows only the run carrying
+it; runs without it are waited past. If none carrying it appears, the dispatch fails with an error
+naming the runs it saw rather than judging one of them. A branch cut before the workflow declared
+that input is refused with a request to rebase onto main. The runs still execute one at a time
+(the workflow's concurrency group), and GitHub keeps only one pending run per group, so a third
+concurrent dispatch cancels the one queued before it; that caller reports its own run as
+`cancelled` with nothing collected, which is a reason to re-run, not a Beacon failure.
+
 Four things to tell the user about a Windows run, because none of them are visible in the verdict's
 outcome line:
 
