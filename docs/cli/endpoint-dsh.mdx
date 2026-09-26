@@ -18,10 +18,12 @@ Hooks observe current tool activity and optional policy decisions. Session sync
 backfills assistant text and reasoning, tool failure status, persisted
 command/file/MCP detail, and token usage that the hook bridge does not expose.
 
-Every event from this command is marked
-`harness.collection_method=poll`. Beacon reads committed records after the fact,
-so this path cannot hold, approve, deny, or delay a tool call and does not
-synthesize approval events. Reading is local and offline.
+Every event mapped from a session record is marked `harness.collection_method=poll`. Beacon
+reads committed records after the fact, so this path cannot hold, approve, deny, or delay
+a tool call and does not synthesize approval events. Reading is local and offline. A sweep
+also drains workspace spools: hook events that a sandboxed DeepSeek session staged in
+`<workspace>/.beacon/dsh-spool/` are appended with the `harness.collection_method=hook`
+label they were captured under, so the two sources stay distinguishable in the log.
 
 ## Commands
 
@@ -72,6 +74,19 @@ the endpoint, or leave `--watch` running in the account that owns `$DSH_HOME`.
 A partly written trailing record is left for the next sweep rather than treated
 as corruption.
 
+Each sweep also drains workspace spools. When DeepSeek Harness runs hooks
+inside its session sandbox, a hook that cannot write the runtime log stages the
+event at `<workspace>/.beacon/dsh-spool/<session>.jsonl`; the sweep appends
+those events to the runtime log and deletes the staged files. The report says
+how many landed:
+
+```text
+dsh sync: 3 sessions, 1 changed, 12 events, 0 errors
+  2 spooled hook event(s) drained from workspace spools
+```
+
+Draining runs only in write mode: `--print` leaves spools untouched.
+
 ## Status
 
 ```bash title="Show sessions and collection progress"
@@ -81,6 +96,12 @@ beacon endpoint dsh status
 The cursor prevents scheduled sweeps from re-appending a session's complete
 history. Re-reading is safe: the same source record maps to the same deterministic
 event id.
+
+Status also reports `spool_bytes` per session — hook events staged in that
+session's workspace spool, waiting for the next sweep to drain them into the
+runtime log. Zero is the steady state; anything else means live capture worked
+and the last sweep has not run yet. The text form shows it as
+`(spool N B awaiting drain)`.
 
 ## Related
 

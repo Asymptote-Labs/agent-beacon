@@ -17,9 +17,11 @@ import (
 )
 
 // DeepSeek Harness runs hook commands sandboxed to the session workspace unless the sandbox mode is
-// danger-full-access, so a hook commonly cannot write the runtime log and records nothing while
-// exiting 0 (#605). `beacon endpoint dsh sync` still fills the log with poll events under the same
-// harness name, so harness_observed stays green. dsh_hook_capture is the check that notices.
+// danger-full-access, so a hook commonly cannot write the runtime log while exiting 0 (#605). In
+// workspace-write it stages the event in a workspace spool instead (dsh_spool_pending_drain until a
+// sweep drains it); with nothing writable it records nothing at all. `beacon endpoint dsh sync` still
+// fills the log with poll events under the same harness name, so harness_observed stays green.
+// dsh_hook_capture is the check that notices.
 
 // dshDoctorFixture is a Harness home with a hooks file installed at installedAt, and a runtime log.
 type dshDoctorFixture struct {
