@@ -2,6 +2,7 @@ package gitlink
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -268,5 +269,39 @@ func TestAttributeOlderCommitUsesItsOwnWindow(t *testing.T) {
 	}
 	if got := keys(res.Added); !reflect.DeepEqual(got, []string{"codex_cli/made-old"}) {
 		t.Fatalf("old commit links %v", got)
+	}
+}
+
+func TestAttributeCapsTheNoteAcrossRuns(t *testing.T) {
+	r := newTestRepo(t)
+	ctx := context.Background()
+	r.write("shared.go", "1")
+	r.commitAt("base", t0.Add(-3*time.Hour))
+	root := r.open().Root
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	var events []logEvent
+	for i := 0; i < MaxLinks+8; i++ {
+		events = append(events, logEvent{at: t0.Add(-time.Duration(i+1) * time.Second), harness: "codex_cli",
+			session: fmt.Sprintf("s%02d", i), cwd: root, action: "file.modified", filePath: filepath.Join(root, "shared.go"), operation: "modify"})
+	}
+	writeLog(t, logPath, events...)
+	r.write("shared.go", "2")
+	sha := r.commitAt("change", t0)
+	repo := r.open()
+	for run := 1; run <= 2; run++ {
+		res, err := Attribute(ctx, repo, Options{LogPath: logPath})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run == 1 && len(res.Added) != MaxLinks {
+			t.Fatalf("first run added %d, want %d", len(res.Added), MaxLinks)
+		}
+		if run == 2 && (len(res.Added) != 0 || res.NoteUpdated) {
+			t.Fatalf("rerun added %d past the cap", len(res.Added))
+		}
+		note, _ := ReadNote(ctx, repo.Git, sha)
+		if got := len(ParseNote(note)); got != MaxLinks {
+			t.Fatalf("run %d: note holds %d links, want %d", run, got, MaxLinks)
+		}
 	}
 }
