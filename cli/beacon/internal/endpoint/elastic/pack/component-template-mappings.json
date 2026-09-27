@@ -130,6 +130,13 @@
                 "name": { "type": "keyword" }
               }
             },
+            "vcs": {
+              "properties": {
+                "ref": { "properties": { "head": { "properties": { "revision": { "type": "keyword" }, "name": { "type": "keyword" }, "type": { "type": "keyword" } } } } },
+                "repository": { "properties": { "url": { "properties": { "full": { "type": "keyword" } } } } },
+                "attribution": { "properties": { "method": { "type": "keyword" }, "changed_files": { "type": "long" }, "matched_files": { "type": "long" } } }
+              }
+            },
             "otel": {
               "properties": {
                 "signal": { "type": "keyword" },
@@ -232,7 +239,8 @@
               "properties": {
                 "head": {
                   "properties": {
-                    "name": { "type": "keyword" }
+                    "name": { "type": "keyword" },
+                    "revision": { "type": "keyword" }
                   }
                 }
               }

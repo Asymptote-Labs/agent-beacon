@@ -269,3 +269,44 @@ func TestInputSnippet_DefaultLogPath(t *testing.T) {
 		t.Fatalf("InputSnippet with empty logPath should use DefaultLogPath %q, got: %s", DefaultLogPath, got)
 	}
 }
+
+// The native vcs block (session.commit_linked events) must not collide with the ECS vcs fields the
+// pipeline derives from repository and branch: it is kept whole under beacon.vcs, and the ECS
+// fields prefer its remote URL, branch and revision.
+func TestIngestPipelineKeepsNativeVCS(t *testing.T) {
+	pipeline := mustRead("pack/ingest-pipeline.json")
+	for _, want := range []string{
+		"ctx.remove('vcs')",
+		"beacon.vcs = nativeVcs",
+		"nativeVcs.repository.url.full",
+		"'head').revision = vcsRevision",
+	} {
+		if !strings.Contains(pipeline, want) {
+			t.Fatalf("ingest pipeline missing %s", want)
+		}
+	}
+	// The native block is read before the ECS fields are written, or the first write would replace
+	// the remote URL with the local path.
+	if strings.Index(pipeline, "ctx.remove('vcs')") > strings.Index(pipeline, "ensure(ensure(ctx, 'vcs'), 'repository').url") {
+		t.Fatal("native vcs must be captured before ECS vcs fields are set")
+	}
+	var mappings map[string]interface{}
+	if err := json.Unmarshal([]byte(mustRead("pack/component-template-mappings.json")), &mappings); err != nil {
+		t.Fatal(err)
+	}
+	props := mappings["template"].(map[string]interface{})["mappings"].(map[string]interface{})["properties"].(map[string]interface{})
+	beacon := props["beacon"].(map[string]interface{})["properties"].(map[string]interface{})
+	if _, ok := beacon["vcs"]; !ok {
+		t.Fatal("beacon.vcs is not mapped")
+	}
+	sawLink := false
+	scanner := bufio.NewScanner(strings.NewReader(mustRead("pack/sample-event.jsonl")))
+	for scanner.Scan() {
+		if strings.Contains(scanner.Text(), `"session.commit_linked"`) {
+			sawLink = true
+		}
+	}
+	if !sawLink {
+		t.Fatal("sample events should include a session.commit_linked event")
+	}
+}
