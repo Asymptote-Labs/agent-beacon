@@ -1,0 +1,85 @@
+---
+title: "beacon git"
+description: "Link git commits to the agent sessions that wrote them"
+---
+
+## Command overview
+
+`beacon git` records which agent sessions produced a commit, as a git note on the commit.
+
+```bash title="Command syntax"
+beacon git link [<commit>] [flags]
+beacon git notes [<revision>] [flags]
+```
+
+A link names a session by its harness and session id, for example `beacon:claude_code/0f8e2c1a-…`. The note carries identifiers only, never prompts, output, or diffs: notes can be shared with a remote, and the session's content stays in the local runtime log. `beacon handoff export <session-id>` reads a linked session back.
+
+## How sessions are matched to a commit
+
+Beacon already records every file a supported runtime writes, so matching a commit to its sessions is a read of the local runtime log. No state file is kept and nothing touches the network.
+
+1. **Window.** Beacon reads the log from the parent commit's time up to the commit. The window always covers at least `--min-lookback` (2 hours) and never more than `--max-lookback` (24 hours) before the commit. Events after the commit are ignored, because they cannot have produced it.
+2. **Evidence.** A session wrote a file when the log has, for that session, a `file.created`, `file.modified` or `file.deleted` event, a tool event whose `file.operation` is a write, a shell command whose target is plain to read (`rm`, `mv`, `cp`, `touch`, `tee`, `sed -i`, `git mv`, output redirection), or an `apply_patch` envelope. Reads do not count.
+3. **Overlap.** Beacon compares those paths with the files the commit changes against its first parent, counting both sides of a rename. A session that wrote at least one of them is linked. Sessions are ordered by how many of the commit's files they wrote, then by how recently.
+
+A link is an inference, not an observation. A session that edited a file a person then rewrote by hand is still linked, and a session that wrote nothing the commit kept is not.
+
+## `beacon git link`
+
+Links a commit (default `HEAD`) and writes the note.
+
+```bash
+beacon git link
+beacon git link 3f6aa6c --dry-run
+```
+
+```text title="Example output"
+commit 3f6aa6c04b78  agent change
+window 2026-09-27 15:33:23 .. 2026-09-27 17:34:23
+  linked          claude_code/sess-claude-e2e  3 of 3 file(s): keep.txt, src/app.go, stale.txt
+Wrote 1 link(s) to refs/notes/beacon.
+```
+
+Running `link` again adds only what is new. Links already on the commit, including a teammate's, are kept, as is any other text in the note.
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Show the links without writing the note |
+| `--min-lookback <duration>` | Always read at least this far before the commit (default `2h`) |
+| `--max-lookback <duration>` | Never read further than this before the commit (default `24h`) |
+| `--log-path <path>` | Runtime JSONL log to read (default the local runtime log) |
+| `-C`, `--cwd <dir>` | Repository to operate on |
+| `--json` | Print the result, with every candidate session and its matching files, as JSON |
+
+## `beacon git notes`
+
+Lists recent linked commits reachable from a revision (default `HEAD`).
+
+```bash
+beacon git notes --limit 50
+beacon git notes origin/main --json
+```
+
+| Flag | Description |
+|------|-------------|
+| `--limit <n>` | Number of commits to walk (default 20); commits without links are skipped |
+| `-C`, `--cwd <dir>` | Repository to operate on |
+| `--json` | Print commits and their links as JSON |
+
+## Note format
+
+Links live under `refs/notes/beacon`, one per line:
+
+```text
+beacon:<harness>/<session-id>
+```
+
+`<harness>` is Beacon's canonical harness name (`claude_code`, `codex_cli`, `cursor`, …). A session id has no whitespace, no control or non-ASCII characters, and at most 256 characters. Readers ignore anything after whitespace on a link line, which is reserved for later fields, and ignore lines that do not start with `beacon:`.
+
+Beacon updates the note with a compare-and-swap on the notes ref, so two commits made at the same moment in two worktrees of one repository never lose each other's links.
+
+To see links in `git log`:
+
+```bash
+git log --notes=beacon
+```
