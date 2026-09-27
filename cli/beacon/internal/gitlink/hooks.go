@@ -512,10 +512,35 @@ func removeRewriteRef(ctx context.Context, repo Repo) (bool, error) {
 	return true, nil
 }
 
-// ReplayInProgress reports whether git is replaying existing commits -- a rebase, cherry-pick or
-// revert -- rather than recording new work. Their commits' links, when they have any, travel with
-// notes.rewriteRef; attributing them afresh would credit whoever is rebasing today.
+// replayReflogPrefixes start the HEAD reflog message git writes for a commit that replays an
+// existing one: `git cherry-pick`, `git revert`, `git rebase` (every step: pick, reword, squash,
+// fixup, edit, continue), `git pull --rebase`, `git am`, and the `git commit` that finishes a
+// conflicted cherry-pick. Fresh work reads "commit:", "commit (initial):", "commit (amend):" or
+// "commit (merge):", none of which match.
+var replayReflogPrefixes = []string{
+	"cherry-pick", "revert", "rebase", "pull --rebase", "am:", "commit (cherry-pick)", "commit (revert)",
+}
+
+var revertMessage = regexp.MustCompile(`(?m)^This reverts commit [0-9a-f]{7,64}\.?$`)
+
+// ReplayInProgress reports whether the commit HEAD just moved to replays an existing one -- a
+// cherry-pick, revert, rebase or applied patch -- rather than recording new work. Their commits'
+// links, when they have any, travel with notes.rewriteRef on a rebase; attributing them afresh
+// would credit whoever is replaying them today with work their session did not do.
+//
+// The HEAD reflog is the signal that holds in every case, and git writes it before any post-commit
+// hook runs. The state files a replay leaves in the git dir are not enough on their own: a clean
+// cherry-pick or revert never creates CHERRY_PICK_HEAD or REVERT_HEAD, and the `git commit` that
+// resolves a conflicted one deletes them before running the hook. They are still checked, as is a
+// revert's message, for a repository with the reflog turned off.
 func ReplayInProgress(ctx context.Context, repo Repo) bool {
+	if msg, err := repo.Git.Run(ctx, nil, "reflog", "-1", "--format=%gs", "HEAD", "--"); err == nil {
+		for _, prefix := range replayReflogPrefixes {
+			if strings.HasPrefix(msg, prefix) {
+				return true
+			}
+		}
+	}
 	for _, name := range []string{"rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD", "sequencer"} {
 		path, err := repo.Git.Run(ctx, nil, "rev-parse", "--git-path", name)
 		if err != nil {
@@ -525,6 +550,11 @@ func ReplayInProgress(ctx context.Context, repo Repo) bool {
 			path = filepath.Join(repo.Root, path)
 		}
 		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+	}
+	if body, err := repo.Git.Run(ctx, nil, "show", "-s", "--no-notes", "--format=%B", "HEAD", "--"); err == nil {
+		if strings.HasPrefix(body, "Revert ") && revertMessage.MatchString(body) {
 			return true
 		}
 	}
