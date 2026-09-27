@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -883,5 +884,69 @@ func TestHistoryRefoldsWhenAnEventArrivesLate(t *testing.T) {
 	show, ok, err := ShowTrace(path, "session:claude_code:long", TraceQuery{Limit: 1})
 	if err != nil || !ok || show.Events[0].ID != "late-first" || show.Trace.EventCount != 603 {
 		t.Fatalf("show = %#v ok=%v err=%v", show.Range, ok, err)
+	}
+}
+
+// A retention longer than time.Duration can hold must keep everything, not wrap around and prune
+// everything.
+func TestHistoryVeryLongRetentionKeepsEverything(t *testing.T) {
+	path := newTestLog(t, parityFixture())
+	withHistory(t)
+	for _, days := range []int{maxHistoryRetentionDays, 365000, 1 << 40} {
+		status, err := EnableHistoryStore(path, HistoryOptions{RetentionDays: days})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status.Traces == 0 {
+			t.Fatalf("retention of %d days pruned every trace", days)
+		}
+	}
+	if cutoff := retentionCutoff(time.Now(), 1<<40); cutoff != math.MinInt64 {
+		t.Fatalf("cutoff for an overflowing retention = %d, want no expiry", cutoff)
+	}
+}
+
+// An event the writer left without an ID is named by where it sits in the log, and the name
+// changes when the file rotates. The store renames it too, so show and search keep matching the
+// JSONL path.
+func TestHistoryRenamesIDlessEventsWhenTheirFileRotates(t *testing.T) {
+	withHistory(t)
+	idless := func(ts, session, text string) []byte {
+		return []byte(`{"timestamp":"` + ts + `","event":{"action":"prompt.submitted","category":"prompt"},"harness":{"name":"cursor"},"session":{"id":"` + session + `"},"prompt":{"text":"` + text + `"},"trace":{"id":"t-idless","span_id":"sp-` + text + `"}}`)
+	}
+	path := newTestLog(t, [][]byte{
+		idless("2026-06-11T10:00:00Z", "a", "first-idless"),
+		[]byte(`{"timestamp":"2026-06-11T10:00:01Z","event":{"id":"with-id","action":"command.executed","category":"command"},"harness":{"name":"cursor"},"session":{"id":"a"},"command":{"command":"ls"}}`),
+		idless("2026-06-11T10:00:02Z", "a", "second-idless"),
+	})
+	optIn(t, path)
+	// Rotate: the live file becomes .1 and a new live file starts.
+	if err := os.Rename(path, path+".1"); err != nil {
+		t.Fatal(err)
+	}
+	writeTestLog(t, path, idless("2026-06-11T10:00:03Z", "a", "third-idless"))
+	ids := []string{"trace:t-idless"}
+	history := traceAnswers(t, path, ids)
+	for _, q := range []string{"line-1", "archive-1-line-3", "archive-1", "line-3"} {
+		result, err := SearchTraces(path, TraceQuery{EventQuery: EventQuery{Q: q}, ResultLevel: "event", Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		history["idless "+q] = mustJSON(t, result)
+	}
+	previous := os.Getenv(endpointconfig.HistoryStoreEnv)
+	withoutHistory(t)
+	want := traceAnswers(t, path, ids)
+	for _, q := range []string{"line-1", "archive-1-line-3", "archive-1", "line-3"} {
+		result, err := SearchTraces(path, TraceQuery{EventQuery: EventQuery{Q: q}, ResultLevel: "event", Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want["idless "+q] = mustJSON(t, result)
+	}
+	t.Setenv(endpointconfig.HistoryStoreEnv, previous)
+	compareAnswers(t, want, history)
+	if !strings.Contains(want["idless archive-1-line-3"], "archive-1-line-3") {
+		t.Fatalf("fixture did not produce a rotated ID: %s", want["idless archive-1-line-3"])
 	}
 }

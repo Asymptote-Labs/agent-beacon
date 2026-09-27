@@ -44,6 +44,8 @@ const (
 	historyDerivationVersion = 1
 
 	defaultHistoryRetentionDays = 90
+	// maxHistoryRetentionDays is 100 years: a retention this long or longer means nothing expires.
+	maxHistoryRetentionDays = 100 * 365
 	defaultHistoryMaxBytes      = int64(1) << 30
 
 	// historyMaxLineBytes matches the JSONL scanner's line limit, so a line too long for one path
@@ -304,6 +306,8 @@ func (s *historyStore) ensureSchema() error {
 			file_key TEXT NOT NULL,
 			offset INTEGER NOT NULL,
 			record_id TEXT NOT NULL,
+			line_no INTEGER NOT NULL,
+			idless INTEGER NOT NULL,
 			trace_key TEXT NOT NULL,
 			seq INTEGER NOT NULL,
 			event_type TEXT NOT NULL,
@@ -320,6 +324,9 @@ func (s *historyStore) ensureSchema() error {
 			UNIQUE (source_id, file_key, offset)
 		)`,
 		`CREATE INDEX events_by_trace ON events (source_id, trace_key, seq)`,
+		// Events the writer left without an ID are named by their place in the log, which moves
+		// when the file rotates; this finds them.
+		`CREATE INDEX events_idless ON events (source_id, file_key) WHERE idless = 1`,
 		// traces keeps each trace's running aggregate, so a catch-up updates a summary with the new
 		// events alone instead of rereading the trace.
 		`CREATE TABLE traces (

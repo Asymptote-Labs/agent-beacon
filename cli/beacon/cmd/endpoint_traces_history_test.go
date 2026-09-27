@@ -141,6 +141,7 @@ func TestTraceHistoryReindexRejectsOutOfRangeLimits(t *testing.T) {
 	traceHistoryFixture(t, false, "")
 	for _, set := range []func(){
 		func() { endpointTraceHistoryOpts.retentionDays = -1 },
+		func() { endpointTraceHistoryOpts.retentionDays = maxHistoryRetentionDays + 1 },
 		func() { endpointTraceHistoryOpts.maxSizeMB = -1 },
 		func() { endpointTraceHistoryOpts.maxSizeMB = maxHistorySizeMB + 1 },
 	} {

@@ -137,9 +137,12 @@ var endpointTracesResetCmd = &cobra.Command{
 // maxHistorySizeMB bounds --max-size-mb well above any real disk, so the byte count cannot overflow.
 const maxHistorySizeMB = 1 << 30
 
+// maxHistoryRetentionDays is the longest --retention-days accepted: 100 years, which never expires.
+const maxHistoryRetentionDays = 100 * 365
+
 func runEndpointTracesReindex(cmd *cobra.Command, args []string) error {
-	if endpointTraceHistoryOpts.retentionDays < 0 {
-		return errors.New("--retention-days must be zero (keep the current setting) or more")
+	if endpointTraceHistoryOpts.retentionDays < 0 || endpointTraceHistoryOpts.retentionDays > maxHistoryRetentionDays {
+		return fmt.Errorf("--retention-days must be between 0 (keep the current setting) and %d (never expire)", maxHistoryRetentionDays)
 	}
 	if endpointTraceHistoryOpts.maxSizeMB < 0 || endpointTraceHistoryOpts.maxSizeMB > maxHistorySizeMB {
 		return fmt.Errorf("--max-size-mb must be between 0 (keep the current setting) and %d", maxHistorySizeMB)

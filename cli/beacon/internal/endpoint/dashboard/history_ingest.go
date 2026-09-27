@@ -266,6 +266,11 @@ func (s *historyStore) catchUp(logPath string, progress func(done, total int64),
 		key := lf.key()
 		seen[key] = true
 		cp := checkpoints[key]
+		if cp.archive != lf.archive && cp.offset > 0 && cp.offset <= lf.size {
+			if err := relabelIDlessEvents(tx, sourceID, lf); err != nil {
+				return 0, err
+			}
+		}
 		if cp.offset > lf.size {
 			// Shorter than what was read from it: not the file the checkpoint describes.
 			cp = fileCheckpoint{}
@@ -407,9 +412,9 @@ type historyPass struct {
 const historyFlushEvery = 4096
 
 func newHistoryPass(tx *sql.Tx, sourceID int64) (*historyPass, error) {
-	insertEvent, err := tx.Prepare(`INSERT INTO events (source_id, file_key, offset, record_id, trace_key, seq, event_type, event_id, ts_ns,
+	insertEvent, err := tx.Prepare(`INSERT INTO events (source_id, file_key, offset, record_id, line_no, idless, trace_key, seq, event_type, event_id, ts_ns,
 			ord_ts, ord_seq, span_id, parent_span_id, otel_trace_id, span_name, hay, line)
-		VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (source_id, file_key, offset) DO NOTHING`)
 	if err != nil {
 		return nil, err
@@ -527,7 +532,11 @@ func (p *historyPass) add(fileKey string, offset int64, record EventRecord) erro
 	if err != nil {
 		return err
 	}
-	result, err := p.insertEvent.Exec(p.sourceID, fileKey, offset, record.ID, row.traceKey, row.eventType, row.eventID, row.tsNS,
+	idless := 0
+	if record.Event.Event.ID == "" {
+		idless = 1
+	}
+	result, err := p.insertEvent.Exec(p.sourceID, fileKey, offset, record.ID, record.Line, idless, row.traceKey, row.eventType, row.eventID, row.tsNS,
 		row.order.ts, int64(row.order.seq), row.spanID, row.parentSpanID, row.otelTraceID, row.spanName, row.hay, compressLine(stored))
 	if err != nil {
 		return err
@@ -989,7 +998,7 @@ func (p *historyPass) storedEventsInOrder(traceKey string) ([]*historyEvent, err
 // event numbers of what remains do not move.
 func pruneHistory(tx *sql.Tx, now time.Time, retentionDays, maxBytes int64) (bool, error) {
 	pruned := false
-	cutoff := now.Add(-time.Duration(retentionDays) * 24 * time.Hour).UnixNano()
+	cutoff := retentionCutoff(now, retentionDays)
 	expired, err := historyTraceRows(tx, `SELECT id, source_id, trace_key FROM traces WHERE retain_ns < ? ORDER BY retain_ns`, cutoff)
 	if err != nil {
 		return false, err
@@ -1021,8 +1030,8 @@ func pruneHistory(tx *sql.Tx, now time.Time, retentionDays, maxBytes int64) (boo
 		}
 		// Events are most of the store, so a trace's share of the events estimates its share of the
 		// bytes.
-		excess := used - maxBytes*4/5
-		eventsToFree := (excess*totalEvents + used - 1) / used
+		excess := used - maxBytes/5*4
+		eventsToFree := int64(math.Ceil(float64(excess) / float64(used) * float64(totalEvents)))
 		oldest, err := historyOldestTraces(tx, eventsToFree)
 		if err != nil {
 			return false, err
@@ -1154,11 +1163,68 @@ func historyUsedBytes(tx *sql.Tx) (int64, error) {
 // hasExpiredTraces reports whether any trace is past retention, so an idle log still has its old
 // history pruned on schedule.
 func (s *historyStore) hasExpiredTraces(now time.Time) (bool, error) {
-	days := s.metaInt("retention_days", defaultHistoryRetentionDays)
-	cutoff := now.Add(-time.Duration(days) * 24 * time.Hour).UnixNano()
+	cutoff := retentionCutoff(now, s.metaInt("retention_days", defaultHistoryRetentionDays))
 	var oldest sql.NullInt64
 	if err := s.db.QueryRow(`SELECT MIN(retain_ns) FROM traces`).Scan(&oldest); err != nil {
 		return false, err
 	}
 	return oldest.Valid && oldest.Int64 < cutoff, nil
+}
+
+// retentionCutoff is the time before which a trace's last event is past retention. Retention is
+// capped at maxHistoryRetentionDays, beyond which nothing expires: a longer period would overflow
+// time.Duration, put the cutoff in the future, and prune everything.
+func retentionCutoff(now time.Time, days int64) int64 {
+	if days <= 0 || days >= maxHistoryRetentionDays {
+		return math.MinInt64
+	}
+	return now.Add(-time.Duration(days) * 24 * time.Hour).UnixNano()
+}
+
+// relabelIDlessEvents renames the events of a file that rotated since it was read. An event the
+// writer left without an ID is named by its place in the log -- line-N in the live file,
+// archive-K-line-N once rotation has moved the file to .K -- and the JSONL path names it by where
+// the file is now, so the store follows.
+func relabelIDlessEvents(tx *sql.Tx, sourceID int64, lf logFile) error {
+	rows, err := tx.Query(`SELECT id, line_no, hay, line FROM events WHERE source_id = ? AND file_key = ? AND idless = 1`, sourceID, lf.key())
+	if err != nil {
+		return err
+	}
+	type stored struct {
+		id     int64
+		lineNo int
+		hay    string
+		line   []byte
+	}
+	var events []stored
+	for rows.Next() {
+		var row stored
+		if err := rows.Scan(&row.id, &row.lineNo, &row.hay, &row.line); err != nil {
+			rows.Close()
+			return err
+		}
+		events = append(events, row)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	source := eventSource{path: lf.path, archive: lf.archive}
+	for _, row := range events {
+		event, err := decodeStoredEvent(row.line)
+		if err != nil {
+			return err
+		}
+		recordID := source.lineID(row.lineNo)
+		derived := deriveRow(EventRecord{ID: recordID, Line: row.lineNo, Event: event})
+		if _, err := tx.Exec(`INSERT INTO event_fts (event_fts, rowid, hay) VALUES ('delete', ?, ?)`, row.id, row.hay); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE events SET record_id = ?, event_id = ?, hay = ? WHERE id = ?`, recordID, derived.eventID, derived.hay, row.id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO event_fts (rowid, hay) VALUES (?, ?)`, row.id, derived.hay); err != nil {
+			return err
+		}
+	}
+	return nil
 }
