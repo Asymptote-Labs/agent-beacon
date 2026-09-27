@@ -35,6 +35,7 @@ Beacon models each event as an action plus a set of typed entities. The [`event`
 | `destination` | Output or validation destination state | `type`, `mode`, `status` |
 | `health` | Endpoint or component health state | `component`, `status`, `reason` |
 | `user_agent` | Browser that produced a browser chat event, as the browser names itself | `name`, `version` |
+| `vcs` | On a `session.commit_linked` event, the commit a session was [linked to](/cli/git), in the OpenTelemetry VCS shape | `ref.head.revision`, `ref.head.name`, `ref.head.type`, `repository.url.full`, `attribution.method`, `attribution.changed_files`, `attribution.matched_files` |
 
 Top-level `sequence`, `model`, `repository`, `branch`, `message`, `raw`, and `field_truncated` fields add shared context that can apply across multiple entities. For example, a command event can include both `tool` and `command`; a file edit can include `file`, `session`, `repository`, and `branch`; a CI event can include `origin` and `run`; and a GenAI tool call can include both `tool` and nested `gen_ai.tool` metadata.
 
@@ -80,6 +81,7 @@ Optional context fields add detail when available:
 | `destination` | Output destination state, such as Wazuh localfile validation |
 | `health` | Component health status |
 | `user_agent` | Browser name and major version for browser extension events, such as `Microsoft Edge` or `Brave`. See [Chromium browsers](/runtimes/browser-extension-chromium#which-browser-an-event-came-from) |
+| `vcs` | Commit id, branch, and remote URL (credentials removed) of a commit linked to the session, with how many of its files the session wrote. See [`beacon git`](/cli/git#runtime-log-events) |
 | `model`, `repository`, `branch`, `message`, `raw`, `field_truncated` | Additional runtime context and truncation metadata |
 
 ## Related

@@ -430,6 +430,48 @@ type UserAgentInfo struct {
 	Version string `json:"version,omitempty"`
 }
 
+// VCSInfo is version-control context in the OpenTelemetry VCS semantic convention shape
+// (vcs.ref.head.revision, vcs.ref.head.name, vcs.ref.head.type, vcs.repository.url.full).
+// Attribution is Beacon's own and has no semconv equivalent: on a session.commit_linked event it
+// records how the commit was matched to the session. Everything here is metadata -- identifiers and
+// counts, never file contents or commit messages -- so it survives metadata-only retention.
+type VCSInfo struct {
+	Ref         *VCSRefInfo         `json:"ref,omitempty"`
+	Repository  *VCSRepositoryInfo  `json:"repository,omitempty"`
+	Attribution *VCSAttributionInfo `json:"attribution,omitempty"`
+}
+
+type VCSRefInfo struct {
+	Head *VCSRefHeadInfo `json:"head,omitempty"`
+}
+
+type VCSRefHeadInfo struct {
+	// Revision is the commit id.
+	Revision string `json:"revision,omitempty"`
+	// Name is the branch the commit was made on; empty on a detached HEAD.
+	Name string `json:"name,omitempty"`
+	// Type is "branch" when Name is set.
+	Type string `json:"type,omitempty"`
+}
+
+type VCSRepositoryInfo struct {
+	URL *VCSRepositoryURLInfo `json:"url,omitempty"`
+}
+
+type VCSRepositoryURLInfo struct {
+	// Full is the remote's URL with any credentials removed.
+	Full string `json:"full,omitempty"`
+}
+
+// VCSAttributionInfo records how a commit was matched to a session. Method names the rule
+// (file_overlap: the session wrote files the commit changes); ChangedFiles is how many files the
+// commit changes and MatchedFiles how many of those the session wrote.
+type VCSAttributionInfo struct {
+	Method       string `json:"method,omitempty"`
+	ChangedFiles int    `json:"changed_files,omitempty"`
+	MatchedFiles int    `json:"matched_files,omitempty"`
+}
+
 type HealthInfo struct {
 	Component string `json:"component,omitempty"`
 	Status    string `json:"status,omitempty"`
@@ -484,6 +526,7 @@ type Event struct {
 	Destination   *DestinationInfo       `json:"destination,omitempty"`
 	Health        *HealthInfo            `json:"health,omitempty"`
 	UserAgent     *UserAgentInfo         `json:"user_agent,omitempty"`
+	VCS           *VCSInfo               `json:"vcs,omitempty"`
 	GenAI         *GenAIInfo             `json:"gen_ai,omitempty"`
 	Model         string                 `json:"model,omitempty"`
 	Repository    string                 `json:"repository,omitempty"`

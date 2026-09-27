@@ -146,3 +146,78 @@ func TestGitHookPostRewriteNormalizesRewrittenNotes(t *testing.T) {
 		t.Fatalf("note %q", note)
 	}
 }
+
+func linkEventsIn(t *testing.T, logPath string) []schema.Event {
+	t.Helper()
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []schema.Event
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		var e schema.Event
+		if json.Unmarshal([]byte(line), &e) == nil && e.Event.Action == gitlink.LinkAction {
+			events = append(events, e)
+		}
+	}
+	return events
+}
+
+func TestGitLinkRecordsOneEventPerLink(t *testing.T) {
+	root := gitCommandRepo(t)
+	top := mustGit(t, root, "rev-parse", "--show-toplevel")
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	if err := os.WriteFile(filepath.Join(root, "x.go"), []byte("1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeRuntimeEvent(t, logPath, top, "cur-1", "x.go")
+	mustGit(t, root, "add", "-A")
+	mustGit(t, root, "commit", "-q", "-m", "x")
+	mustGit(t, root, "remote", "add", "origin", "https://ghp_token@github.com/org/repo.git")
+	sha := mustGit(t, root, "rev-parse", "HEAD")
+
+	if _, err := runGit(t, "link", "--cwd", root, "--log-path", logPath, "--dry-run"); err != nil {
+		t.Fatal(err)
+	}
+	if got := linkEventsIn(t, logPath); len(got) != 0 {
+		t.Fatalf("a dry run recorded %d events", len(got))
+	}
+	for run := 0; run < 2; run++ {
+		if _, err := runGit(t, "link", "--cwd", root, "--log-path", logPath); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := linkEventsIn(t, logPath)
+	if len(got) != 1 {
+		t.Fatalf("got %d link events after two runs, want 1", len(got))
+	}
+	e := got[0]
+	if e.Session.ID != "cur-1" || e.Harness.Name != "cursor" || e.VCS.Ref.Head.Revision != sha || e.Branch != "main" || e.Event.ID == "" {
+		t.Fatalf("event %+v", e)
+	}
+	if strings.Contains(e.VCS.Repository.URL.Full, "ghp_token") {
+		t.Fatalf("remote URL kept credentials: %q", e.VCS.Repository.URL.Full)
+	}
+	data, _ := os.ReadFile(logPath)
+	if strings.Contains(string(data), "ghp_token") {
+		t.Fatal("the token reached the runtime log")
+	}
+}
+
+func TestGitHookPostCommitRecordsTheLinkEvent(t *testing.T) {
+	root := gitCommandRepo(t)
+	top := mustGit(t, root, "rev-parse", "--show-toplevel")
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	if err := os.WriteFile(filepath.Join(root, "x.go"), []byte("1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeRuntimeEvent(t, logPath, top, "cur-9", "x.go")
+	mustGit(t, root, "add", "-A")
+	mustGit(t, root, "commit", "-q", "-m", "x")
+	if _, err := runGit(t, "hook", "post-commit", "--cwd", root, "--log-path", logPath); err != nil {
+		t.Fatal(err)
+	}
+	if got := linkEventsIn(t, logPath); len(got) != 1 || got[0].Session.ID != "cur-9" {
+		t.Fatalf("events %+v", got)
+	}
+}

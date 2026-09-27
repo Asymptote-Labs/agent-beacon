@@ -128,6 +128,40 @@ beacon git notes origin/main --json
 | `-C`, `--cwd <dir>` | Repository to operate on |
 | `--json` | Print commits and their links as JSON |
 
+## Runtime log events
+
+Each new link is also recorded in the runtime log as a `session.commit_linked` event in the linked session's own timeline, so the dashboard, `beacon endpoint traces`, handoff briefs, rules and any forwarding destination see the commit alongside the work that produced it. `link` and the hook record an event only for a link they add: a dry run, or a commit already linked to the session, records nothing.
+
+```json title="Example event (abridged)"
+{
+  "event": { "action": "session.commit_linked", "category": "session", "fidelity": "inferred" },
+  "harness": { "name": "claude_code" },
+  "session": { "id": "sess-claude-e2e", "working_directory": "/work/my-repo" },
+  "repository": "/work/my-repo",
+  "branch": "main",
+  "vcs": {
+    "ref": { "head": { "revision": "3f6aa6c04b78…", "name": "main", "type": "branch" } },
+    "repository": { "url": { "full": "https://github.com/org/my-repo.git" } },
+    "attribution": { "method": "file_overlap", "changed_files": 3, "matched_files": 3 }
+  },
+  "message": "commit 3f6aa6c04b78 linked to this session: it wrote 3 of the 3 file(s) the commit changes"
+}
+```
+
+- `event.fidelity` is `inferred`: the link is Beacon's conclusion from file overlap, not something the runtime reported.
+- `vcs.ref.head.name` is the branch HEAD was on at commit time. It is empty for a detached HEAD, or for an older commit linked by hand, whose branch git cannot say.
+- `vcs.repository.url.full` is the URL of the remote the branch tracks, or `origin`, with any user name, token, or query string removed.
+- The event carries identifiers and counts only: no file paths, diff, or commit message.
+
+A rule can match on these fields, for example a commit to `main` that one session wrote in full:
+
+```yaml
+match: >
+  e.event.action == "session.commit_linked" &&
+  e.vcs.ref.head.name == "main" &&
+  e.vcs.attribution.matched_files == e.vcs.attribution.changed_files
+```
+
 ## Note format
 
 Links live under `refs/notes/beacon`, one per line:
