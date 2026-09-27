@@ -74,37 +74,61 @@ func TestChangedFilesCoversRenamesRootAndMerges(t *testing.T) {
 	ctx := context.Background()
 	r.write("a.go", "package a\n\nfunc A() {}\n")
 	r.write("dir/b.go", "package b\n")
-	root := r.commitAt("root", t0)
-	got, err := ChangedFiles(ctx, r.gitClient(), root)
-	if err != nil {
-		t.Fatal(err)
+	r.commitAt("root", t0)
+	changed := func() []string {
+		t.Helper()
+		c, err := ResolveCommit(ctx, r.gitClient(), "HEAD")
+		if err != nil {
+			t.Fatal(err)
+		}
+		files, err := ChangedFiles(ctx, r.gitClient(), c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sort.Strings(files)
+		return files
 	}
-	sort.Strings(got)
+	got := changed()
 	if !reflect.DeepEqual(got, []string{"a.go", "dir/b.go"}) {
 		t.Fatalf("root commit files %q", got)
 	}
 
 	r.git("mv", "a.go", "renamed.go")
 	r.write("dir/b.go", "package b\n\nvar X = 1\n")
-	rename := r.commitAt("rename", t0.Add(time.Minute))
-	got, _ = ChangedFiles(ctx, r.gitClient(), rename)
-	sort.Strings(got)
+	r.commitAt("rename", t0.Add(time.Minute))
+	got = changed()
 	if !reflect.DeepEqual(got, []string{"a.go", "dir/b.go", "renamed.go"}) {
 		t.Fatalf("rename commit files %q", got)
 	}
 
-	// A merge is compared with its first parent: the files the merge brought in.
+	// A clean merge changes nothing it did not bring in from a parent.
 	r.git("checkout", "-q", "-b", "side")
 	r.write("side.txt", "side")
+	r.write("conflict.txt", "side\n")
 	r.commitAt("side", t0.Add(2*time.Minute))
 	r.git("checkout", "-q", "main")
 	r.write("main.txt", "main")
 	r.commitAt("main", t0.Add(3*time.Minute))
+	r.git("checkout", "-q", "-b", "clean")
 	r.git("merge", "-q", "--no-ff", "--no-edit", "side")
-	merge := r.git("rev-parse", "HEAD")
-	got, _ = ChangedFiles(ctx, r.gitClient(), merge)
-	if !reflect.DeepEqual(got, []string{"side.txt"}) {
-		t.Fatalf("merge commit files %q", got)
+	if got := changed(); len(got) != 0 {
+		t.Fatalf("clean merge files %q", got)
+	}
+
+	// A conflicted merge changes the resolution and any edit made while merging, not the files
+	// either side brought.
+	r.git("checkout", "-q", "main")
+	r.write("conflict.txt", "main\n")
+	r.commitAt("main conflict", t0.Add(4*time.Minute))
+	cmd := r.gitClient()
+	if _, err := cmd.Run(ctx, nil, "merge", "-q", "--no-edit", "side"); err == nil {
+		t.Fatal("expected a conflict")
+	}
+	r.write("conflict.txt", "resolved\n")
+	r.write("dir/b.go", "package b\n\n// edited while merging\n")
+	r.commitAt("merge", t0.Add(5*time.Minute))
+	if got := changed(); !reflect.DeepEqual(got, []string{"conflict.txt", "dir/b.go"}) {
+		t.Fatalf("conflicted merge files %q", got)
 	}
 }
 
@@ -115,8 +139,12 @@ func TestChangedFilesKeepsUnusualNames(t *testing.T) {
 		t.Skip("name not representable on this filesystem")
 	}
 	r.write(name, "x")
-	sha := r.commitAt("odd", t0)
-	got, err := ChangedFiles(context.Background(), r.gitClient(), sha)
+	r.commitAt("odd", t0)
+	c, err := ResolveCommit(context.Background(), r.gitClient(), "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ChangedFiles(context.Background(), r.gitClient(), c)
 	if err != nil {
 		t.Fatal(err)
 	}

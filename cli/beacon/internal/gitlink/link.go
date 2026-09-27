@@ -99,7 +99,7 @@ func Attribute(ctx context.Context, repo Repo, opts Options) (Result, error) {
 	since, until := Window(commit, opts.MinLookback, opts.MaxLookback)
 	result := Result{Commit: commit, RepoRoot: repo.Root, Since: since, Until: until, DryRun: opts.DryRun}
 
-	changed, err := ChangedFiles(ctx, repo.Git, commit.SHA)
+	changed, err := ChangedFiles(ctx, repo.Git, commit)
 	if err != nil {
 		return Result{}, err
 	}

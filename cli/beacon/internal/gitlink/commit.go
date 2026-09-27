@@ -52,16 +52,40 @@ func ResolveCommit(ctx context.Context, g Git, rev string) (Commit, error) {
 	return commit, nil
 }
 
-// ChangedFiles returns the repository-relative paths commit changes, compared with its first
-// parent. A rename or copy contributes both its source and its destination: an agent that moved a
-// file edited the path it moved from as much as the one it moved to.
-func ChangedFiles(ctx context.Context, g Git, commit string) ([]string, error) {
-	out, err := g.RunRaw(ctx, "diff-tree", "--no-commit-id", "--name-status", "-r", "-z", "-M", "--root",
-		"--diff-merges=first-parent", commit, "--")
+// ChangedFiles returns the repository-relative paths commit changes. A rename or copy
+// contributes both its source and its destination: an agent that moved a file edited the path it
+// moved from as much as the one it moved to.
+//
+// For a merge it returns only the paths where the result differs from every parent -- conflict
+// resolutions and edits made while merging. The files a merge merely brought in from the other
+// side were written by that side's commits, and linking them again here would make every pull or
+// merge claim the work of whoever wrote the branch. A clean merge therefore changes nothing.
+func ChangedFiles(ctx context.Context, g Git, commit Commit) ([]string, error) {
+	args := []string{"diff-tree", "--no-commit-id", "--name-status", "-r", "-z", "-M", "--root", commit.SHA, "--"}
+	if len(commit.Parents) > 1 {
+		// Combined diff: one status letter per parent and one path, no rename pairs.
+		args = []string{"diff-tree", "--no-commit-id", "--name-status", "-r", "-z", "--cc", commit.SHA, "--"}
+	}
+	out, err := g.RunRaw(ctx, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list files changed by %s: %w", commit, err)
+		return nil, fmt.Errorf("list files changed by %s: %w", commit.SHA, err)
+	}
+	if len(commit.Parents) > 1 {
+		return parseCombinedNameStatusZ(out), nil
 	}
 	return parseNameStatusZ(out), nil
+}
+
+// parseCombinedNameStatusZ reads `--cc --name-status -z` output: pairs of status and path.
+func parseCombinedNameStatusZ(out []byte) []string {
+	fields := strings.Split(string(out), "\x00")
+	var paths []string
+	for i := 0; i+1 < len(fields); i += 2 {
+		if fields[i+1] != "" {
+			paths = append(paths, fields[i+1])
+		}
+	}
+	return paths
 }
 
 // parseNameStatusZ reads `--name-status -z` output: a status field and then one path, or two for a
