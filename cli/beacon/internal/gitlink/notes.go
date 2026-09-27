@@ -43,11 +43,6 @@ func readNote(ctx context.Context, g Git, ref, commit string) (string, error) {
 }
 
 // AddLinks merges links into commit's note and reports whether the note changed.
-//
-// The update is a compare-and-swap on NotesRef: the new notes commit is built on a private working
-// ref and then moved into place only if NotesRef still points where it did when the transaction
-// began. Two hooks committing at once in two worktrees of one repository therefore never lose each
-// other's links; the loser rebuilds on the winner and tries again.
 func AddLinks(ctx context.Context, g Git, commit string, links []Link) (bool, error) {
 	var valid []Link
 	for _, link := range links {
@@ -58,13 +53,31 @@ func AddLinks(ctx context.Context, g Git, commit string, links []Link) (bool, er
 	if len(valid) == 0 {
 		return false, nil
 	}
+	return UpdateNote(ctx, g, commit, func(note string) string { return MergeNote(note, valid) })
+}
+
+// NormalizeNote rewrites commit's note in MergeNote's normal form -- no blank lines, no repeated
+// link -- and reports whether it changed. `git commit --amend` leaves the amended commit's note
+// concatenated onto the one the post-commit hook just wrote; this folds the two back into one.
+func NormalizeNote(ctx context.Context, g Git, commit string) (bool, error) {
+	return UpdateNote(ctx, g, commit, normalizeNote)
+}
+
+// UpdateNote replaces commit's note with update(note) and reports whether it changed. An update
+// returning an empty note removes it.
+//
+// The update is a compare-and-swap on NotesRef: the new notes commit is built on a private working
+// ref and then moved into place only if NotesRef still points where it did when the transaction
+// began. Two hooks committing at once in two worktrees of one repository therefore never lose each
+// other's links; the loser rebuilds on the winner and tries again.
+func UpdateNote(ctx context.Context, g Git, commit string, update func(string) string) (bool, error) {
 	token, err := txToken()
 	if err != nil {
 		return false, err
 	}
 	var lastErr error
 	for attempt := 1; attempt <= noteAttempts; attempt++ {
-		changed, err := addLinksOnce(ctx, g, commit, valid, txRefPrefix+token+"-"+strconv.Itoa(attempt))
+		changed, err := updateNoteOnce(ctx, g, commit, update, txRefPrefix+token+"-"+strconv.Itoa(attempt))
 		if err == nil {
 			return changed, nil
 		}
@@ -78,7 +91,7 @@ func AddLinks(ctx context.Context, g Git, commit string, links []Link) (bool, er
 
 var errRefMoved = errors.New("notes ref moved during update")
 
-func addLinksOnce(ctx context.Context, g Git, commit string, links []Link, txRef string) (changed bool, err error) {
+func updateNoteOnce(ctx context.Context, g Git, commit string, update func(string) string, txRef string) (changed bool, err error) {
 	base, err := resolveRef(ctx, g, NotesRef)
 	if err != nil {
 		return false, err
@@ -100,14 +113,19 @@ func addLinksOnce(ctx context.Context, g Git, commit string, links []Link, txRef
 	if err != nil {
 		return false, err
 	}
-	merged := MergeNote(current, links)
-	if merged == normalizeNote(current) {
+	next := update(current)
+	// git stores a note with exactly one trailing newline and shows it without; compare that way.
+	if strings.TrimRight(next, "\n") == strings.TrimRight(current, "\n") {
 		return false, nil
 	}
-	if _, err := g.Run(ctx, []byte(merged), "notes", "--ref="+txRef, "add", "--force", "--file=-", commit); err != nil {
+	if strings.TrimSpace(next) == "" {
+		if _, err := g.Run(ctx, nil, "notes", "--ref="+txRef, "remove", "--ignore-missing", commit); err != nil {
+			return false, err
+		}
+	} else if _, err := g.Run(ctx, []byte(next), "notes", "--ref="+txRef, "add", "--force", "--file=-", commit); err != nil {
 		return false, err
 	}
-	next, err := resolveRef(ctx, g, txRef)
+	next, err = resolveRef(ctx, g, txRef)
 	if err != nil {
 		return false, err
 	}
