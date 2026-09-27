@@ -455,14 +455,20 @@ func (r *rotatingLog) append(t *testing.T, n int) {
 	}
 }
 
-// appendRotations appends events until the log has rotated exactly n more times.
+// appendRotations appends events until the log has rotated exactly n more times. A rotation is
+// seen as the live file shrinking: it only grows until the writer renames it away. (os.SameFile
+// cannot tell here on Windows, where it resolves both paths' file IDs when it compares them, after
+// the rename, and so always reports the same file.)
 func (r *rotatingLog) appendRotations(t *testing.T, n int) {
 	t.Helper()
-	for rotated := 0; rotated < n; {
+	for rotated, appended := 0, 0; rotated < n; appended++ {
+		if appended > 10000 {
+			t.Fatalf("log rotated %d times in %d appends, want %d", rotated, appended, n)
+		}
 		before, beforeErr := os.Stat(r.path)
 		r.append(t, 1)
 		after, afterErr := os.Stat(r.path)
-		if beforeErr == nil && afterErr == nil && !os.SameFile(before, after) {
+		if beforeErr == nil && afterErr == nil && after.Size() < before.Size() {
 			rotated++
 		}
 	}
@@ -492,6 +498,9 @@ func TestHistoryFollowsTheLogAcrossRotation(t *testing.T) {
 		if _, err := ReadTraceList(log.path, TraceQuery{Limit: 1}); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if _, err := os.Stat(log.path + ".5"); err != nil {
+		t.Fatalf("the log never filled all five archives: %v", err)
 	}
 	log.compare(t)
 	status, err := TraceStoreStatus(log.path)
