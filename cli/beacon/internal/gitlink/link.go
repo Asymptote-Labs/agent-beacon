@@ -26,7 +26,9 @@ type Options struct {
 	// Rev is the commit to attribute, HEAD when empty.
 	Rev string
 	// LogPath is the runtime JSONL log to read sessions from.
-	LogPath     string
+	LogPath string
+	// MinLookback and MaxLookback bound Window; zero means DefaultMinLookback and
+	// DefaultMaxLookback.
 	MinLookback time.Duration
 	MaxLookback time.Duration
 	// DryRun computes the links without writing the note.
@@ -66,8 +68,13 @@ type Result struct {
 // commit can contain. The floor keeps work that straddled the parent, and the cap keeps a stale
 // parent from turning a hook into a scan of the endpoint's whole history.
 func Window(commit Commit, minLookback, maxLookback time.Duration) (since, until time.Time) {
+	// Zero means the default, as it does in Options: a caller that sets neither gets the documented
+	// window rather than one clamped to the floor.
 	if minLookback <= 0 {
 		minLookback = DefaultMinLookback
+	}
+	if maxLookback <= 0 {
+		maxLookback = DefaultMaxLookback
 	}
 	if maxLookback < minLookback {
 		maxLookback = minLookback

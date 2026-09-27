@@ -224,8 +224,10 @@ func TestInstallHooksHonorsCoreHooksPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(r.root, ".husky", "post-commit"); res.Reports[0].Path != want {
-		t.Fatalf("installed at %s, want %s", res.Reports[0].Path, want)
+	// Compare resolved paths: git reports macOS's /var as /private/var.
+	want, _ := filepath.EvalSymlinks(filepath.Join(r.root, ".husky"))
+	if got, _ := filepath.EvalSymlinks(filepath.Dir(res.Reports[0].Path)); got != want || filepath.Base(res.Reports[0].Path) != "post-commit" {
+		t.Fatalf("installed at %s, want %s/post-commit", res.Reports[0].Path, want)
 	}
 	r.write("a", "1")
 	r.commitWithEnv("c")
@@ -352,8 +354,11 @@ func TestReplayInProgress(t *testing.T) {
 		t.Fatal("a conflicted rebase is a replay")
 	}
 	r.git("rebase", "--abort")
+	// The hook asks about the commit that just happened; the next one after an abort is fresh.
+	r.write("g", "new\n")
+	r.commitAt("after abort", t0.Add(3*time.Minute))
 	if ReplayInProgress(ctx, repo) {
-		t.Fatal("an aborted rebase is over")
+		t.Fatal("a fresh commit after an aborted rebase is not a replay")
 	}
 }
 
@@ -431,5 +436,108 @@ func TestNormalizeNoteFoldsAnAmendedCopy(t *testing.T) {
 	}
 	if note, _ := ReadNote(ctx, g, bare); note != "" {
 		t.Fatalf("note appeared: %q", note)
+	}
+}
+
+func TestReplayDetectionAfterEachKindOfCommit(t *testing.T) {
+	r := newTestRepo(t)
+	ctx := context.Background()
+	repo := r.open()
+	run := func(env []string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", r.root}, args...)...)
+		cmd.Env = append(append([]string{}, r.env...), env...)
+		_ = cmd.Run() // conflicts are expected in some steps
+	}
+	check := func(name string, want bool) {
+		t.Helper()
+		if got := ReplayInProgress(ctx, repo); got != want {
+			t.Errorf("%s: replay=%v, want %v (reflog %q)", name, got, want, r.git("reflog", "-1", "--format=%gs", "HEAD"))
+		}
+	}
+	r.write("f", "base\n")
+	r.commitAt("base", t0)
+	check("initial commit", false)
+	r.git("checkout", "-q", "-b", "side")
+	for _, n := range []string{"1", "2", "3"} {
+		r.write("side"+n, n)
+		r.commitAt("side"+n, t0)
+	}
+	check("plain commit", false)
+	r.git("checkout", "-q", "main")
+
+	r.git("cherry-pick", "side~2")
+	check("clean cherry-pick", true)
+	r.git("cherry-pick", "side~1..side")
+	check("clean multi-commit cherry-pick", true)
+	r.git("revert", "--no-edit", "HEAD")
+	check("clean revert", true)
+
+	r.write("f", "fresh\n")
+	r.commitAt("fresh", t0)
+	check("fresh commit after replays", false)
+	r.git("commit", "-q", "--amend", "-m", "fresh (amended)")
+	check("amend", false)
+
+	// A conflicted cherry-pick, resolved with a plain `git commit`, which deletes CHERRY_PICK_HEAD
+	// before post-commit runs.
+	r.git("checkout", "-q", "-b", "conflict", "main~1")
+	r.write("f", "theirs\n")
+	r.commitAt("theirs", t0)
+	r.git("checkout", "-q", "main")
+	run(nil, "cherry-pick", "conflict")
+	r.write("f", "resolved\n")
+	r.git("add", "f")
+	run([]string{"GIT_EDITOR=true"}, "commit", "--no-edit")
+	if _, err := os.Stat(filepath.Join(r.root, ".git", "CHERRY_PICK_HEAD")); !os.IsNotExist(err) {
+		t.Fatal("expected git to have removed CHERRY_PICK_HEAD")
+	}
+	check("conflicted cherry-pick resolved with git commit", true)
+
+	// ...and with `git cherry-pick --continue`.
+	r.git("checkout", "-q", "-b", "conflict2", "main~1")
+	r.write("f", "theirs2\n")
+	r.commitAt("theirs2", t0)
+	r.git("checkout", "-q", "main")
+	run(nil, "cherry-pick", "conflict2")
+	r.write("f", "resolved2\n")
+	r.git("add", "f")
+	run([]string{"GIT_EDITOR=true"}, "cherry-pick", "--continue")
+	check("conflicted cherry-pick resolved with --continue", true)
+
+	// A merge is new work: its resolution is the person's.
+	r.git("checkout", "-q", "-b", "m", "main~1")
+	r.write("f", "merge-side\n")
+	r.commitAt("merge side", t0)
+	r.git("checkout", "-q", "main")
+	run(nil, "merge", "m")
+	r.write("f", "merged\n")
+	r.git("add", "f")
+	run([]string{"GIT_EDITOR=true"}, "commit", "--no-edit")
+	check("conflicted merge", false)
+
+	// Rebase.
+	r.git("checkout", "-q", "-b", "topic", "main~2")
+	r.write("t", "1")
+	r.commitAt("topic", t0)
+	r.git("rebase", "-q", "main")
+	check("rebase", true)
+}
+
+func TestReplayDetectionWithoutAReflog(t *testing.T) {
+	r := newTestRepo(t)
+	ctx := context.Background()
+	r.git("config", "core.logAllRefUpdates", "false")
+	repo := r.open()
+	r.write("f", "1\n")
+	r.commitAt("one", t0)
+	r.write("f", "2\n")
+	r.commitAt("two", t0)
+	if ReplayInProgress(ctx, repo) {
+		t.Fatal("plain commit reported as a replay")
+	}
+	r.git("revert", "--no-edit", "HEAD")
+	if !ReplayInProgress(ctx, repo) {
+		t.Fatal("a revert must be recognized by its message when there is no reflog")
 	}
 }
