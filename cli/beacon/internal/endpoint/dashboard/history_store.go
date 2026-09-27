@@ -75,7 +75,7 @@ type HistoryStatus struct {
 	NewestEventAt string `json:"newest_event_at,omitempty"`
 	Gaps          int    `json:"gaps,omitempty"`
 	GapBytes      int64  `json:"gap_bytes,omitempty"`
-	RetentionDays int    `json:"retention_days,omitempty"`
+	RetentionDays int64  `json:"retention_days,omitempty"`
 	MaxBytes      int64  `json:"max_bytes,omitempty"`
 }
 
@@ -445,7 +445,7 @@ func (s *historyStore) status(sourceID int64) (HistoryStatus, error) {
 		Enabled:       true,
 		SizeBytes:     fileSize(s.path),
 		WALBytes:      fileSize(s.path + "-wal"),
-		RetentionDays: int(s.metaInt("retention_days", defaultHistoryRetentionDays)),
+		RetentionDays: s.metaInt("retention_days", defaultHistoryRetentionDays),
 		MaxBytes:      s.metaInt("max_bytes", defaultHistoryMaxBytes),
 	}
 	var oldest, newest sql.NullInt64

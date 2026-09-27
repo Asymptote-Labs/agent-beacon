@@ -41,6 +41,10 @@ func (lf logFile) key() string {
 }
 
 type fileCheckpoint struct {
+	// dev and ino are as the files table stores them, so the row can be addressed again.
+	dev     int64
+	ino     int64
+	head    string
 	offset  int64
 	lines   int64
 	size    int64
@@ -150,13 +154,11 @@ func (s *historyStore) loadCheckpoints(q queryer, sourceID int64) (map[string]fi
 	defer rows.Close()
 	out := map[string]fileCheckpoint{}
 	for rows.Next() {
-		var dev, ino int64
-		var head string
 		var cp fileCheckpoint
-		if err := rows.Scan(&dev, &ino, &head, &cp.offset, &cp.lines, &cp.size, &cp.archive); err != nil {
+		if err := rows.Scan(&cp.dev, &cp.ino, &cp.head, &cp.offset, &cp.lines, &cp.size, &cp.archive); err != nil {
 			return nil, err
 		}
-		out[fmt.Sprintf("%d:%d:%s", uint64(dev), uint64(ino), head)] = cp
+		out[fmt.Sprintf("%d:%d:%s", uint64(cp.dev), uint64(cp.ino), cp.head)] = cp
 	}
 	return out, rows.Err()
 }
@@ -301,11 +303,7 @@ func (s *historyStore) catchUp(logPath string, progress func(done, total int64),
 		if cp.archive == 0 || cp.size > cp.offset {
 			gaps++
 		}
-		dev, ino, head, err := splitFileKey(key)
-		if err != nil {
-			return 0, err
-		}
-		if _, err := tx.Exec(`DELETE FROM files WHERE source_id = ? AND dev = ? AND ino = ? AND head = ?`, sourceID, dev, ino, head); err != nil {
+		if _, err := tx.Exec(`DELETE FROM files WHERE source_id = ? AND dev = ? AND ino = ? AND head = ?`, sourceID, cp.dev, cp.ino, cp.head); err != nil {
 			return 0, err
 		}
 	}
@@ -338,22 +336,6 @@ func (s *historyStore) catchUp(logPath string, progress func(done, total int64),
 		_, _ = s.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
 	}
 	return sourceID, nil
-}
-
-func splitFileKey(key string) (int64, int64, string, error) {
-	parts := strings.SplitN(key, ":", 3)
-	if len(parts) != 3 {
-		return 0, 0, "", fmt.Errorf("malformed file key %q", key)
-	}
-	dev, err := strconv.ParseUint(parts[0], 10, 64)
-	if err != nil {
-		return 0, 0, "", err
-	}
-	ino, err := strconv.ParseUint(parts[1], 10, 64)
-	if err != nil {
-		return 0, 0, "", err
-	}
-	return int64(dev), int64(ino), parts[2], nil
 }
 
 // historyCheckpointEvery is how often, in events, a trace's running aggregate is saved. An event

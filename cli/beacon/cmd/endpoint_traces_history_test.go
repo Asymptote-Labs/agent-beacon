@@ -136,3 +136,18 @@ func TestTraceHistoryResetNeedsConfirmation(t *testing.T) {
 		t.Fatalf("history still present after reset --yes: %v", err)
 	}
 }
+
+func TestTraceHistoryReindexRejectsOutOfRangeLimits(t *testing.T) {
+	traceHistoryFixture(t, false, "")
+	for _, set := range []func(){
+		func() { endpointTraceHistoryOpts.retentionDays = -1 },
+		func() { endpointTraceHistoryOpts.maxSizeMB = -1 },
+		func() { endpointTraceHistoryOpts.maxSizeMB = maxHistorySizeMB + 1 },
+	} {
+		endpointTraceHistoryOpts.retentionDays, endpointTraceHistoryOpts.maxSizeMB = 0, 0
+		set()
+		if err := runEndpointTracesReindex(&cobra.Command{}, nil); err == nil {
+			t.Fatalf("reindex accepted retention %d, size %d", endpointTraceHistoryOpts.retentionDays, endpointTraceHistoryOpts.maxSizeMB)
+		}
+	}
+}

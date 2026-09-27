@@ -134,7 +134,16 @@ var endpointTracesResetCmd = &cobra.Command{
 	},
 }
 
+// maxHistorySizeMB bounds --max-size-mb well above any real disk, so the byte count cannot overflow.
+const maxHistorySizeMB = 1 << 30
+
 func runEndpointTracesReindex(cmd *cobra.Command, args []string) error {
+	if endpointTraceHistoryOpts.retentionDays < 0 {
+		return errors.New("--retention-days must be zero (keep the current setting) or more")
+	}
+	if endpointTraceHistoryOpts.maxSizeMB < 0 || endpointTraceHistoryOpts.maxSizeMB > maxHistorySizeMB {
+		return fmt.Errorf("--max-size-mb must be between 0 (keep the current setting) and %d", maxHistorySizeMB)
+	}
 	logPath := endpointTraceLogPath()
 	opts := dashboard.HistoryOptions{
 		RetentionDays: endpointTraceHistoryOpts.retentionDays,
