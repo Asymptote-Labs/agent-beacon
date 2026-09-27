@@ -122,7 +122,7 @@ func Attribute(ctx context.Context, repo Repo, opts Options) (Result, error) {
 
 	result.Candidates = rankCandidates(evidence, changed, existing)
 	for _, c := range result.Candidates {
-		if !c.AlreadyLinked && len(result.Added) < MaxLinks {
+		if !c.AlreadyLinked && len(existing)+len(result.Added) < MaxLinks {
 			result.Added = append(result.Added, c.Link)
 		}
 	}
