@@ -112,3 +112,31 @@ func TestGitSetupShareNotesFlag(t *testing.T) {
 		t.Fatalf("status after off:\n%s", out)
 	}
 }
+
+func TestGitSetupShareNotesForeignPrePushMessage(t *testing.T) {
+	root, _ := gitCommandTeam(t)
+	hooks := filepath.Join(root, ".git", "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hooks, "pre-push"), []byte("#!/usr/bin/env python3\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := runGit(t, "setup", "--cwd", root, "--share-notes")
+	if err == nil {
+		t.Fatal("want a refusal")
+	}
+	msg := err.Error()
+	for _, want := range []string{"pre-push hook", `beacon git hook pre-push "$@" || true`, "without --share-notes", "nothing was installed"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message lacks %q:\n%s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "hook post-commit") {
+		t.Errorf("message names the wrong hook:\n%s", msg)
+	}
+	// Linking alone still installs.
+	if _, err := runGit(t, "setup", "--cwd", root); err != nil {
+		t.Fatal(err)
+	}
+}

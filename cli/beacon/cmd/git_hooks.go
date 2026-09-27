@@ -105,7 +105,16 @@ func runGitSetup(cmd *cobra.Command, _ []string) error {
 				"Add this line to its post-commit hook:\n\n    %s\n\n"+
 				"or run `beacon git setup --hooks-path` to install into that directory anyway", err, result.Hooks.Dir, gitlink.HookCall("post-commit"))
 		case errors.Is(err, gitlink.ErrForeignHook):
-			return fmt.Errorf("%w; Beacon only edits shell hooks. Call Beacon from that hook instead:\n\n    %s", err, gitlink.HookCall("post-commit"))
+			var foreign *gitlink.ForeignHookError
+			hook := "post-commit"
+			if errors.As(err, &foreign) && foreign.Hook != "" {
+				hook = foreign.Hook
+			}
+			msg := fmt.Sprintf("%v; Beacon only edits shell hooks, so nothing was installed. Call Beacon from that %s hook instead:\n\n    %s", err, hook, gitlink.HookCall(hook))
+			if hook == gitlink.ShareHook {
+				msg += "\n\nor run `beacon git setup` without --share-notes to link commits without sharing them"
+			}
+			return errors.New(msg)
 		}
 		return err
 	}

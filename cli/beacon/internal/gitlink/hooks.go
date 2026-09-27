@@ -44,6 +44,20 @@ var ErrHooksPathSet = errors.New("core.hooksPath is set")
 // be added to it safely.
 var ErrForeignHook = errors.New("existing hook is not a shell script")
 
+// ForeignHookError names the hook ErrForeignHook refused, so the caller can say which line to add
+// to it by hand.
+type ForeignHookError struct {
+	Hook    string
+	Path    string
+	Shebang string
+}
+
+func (e *ForeignHookError) Error() string {
+	return fmt.Sprintf("%s: %v (%s)", e.Path, ErrForeignHook, e.Shebang)
+}
+
+func (e *ForeignHookError) Unwrap() error { return ErrForeignHook }
+
 // HooksLocation is where git looks for this repository's hooks.
 type HooksLocation struct {
 	Dir string `json:"dir"`
@@ -119,12 +133,19 @@ func InstallHooks(ctx context.Context, repo Repo, opts InstallOptions) (InstallR
 	hooks := append([]string{}, ManagedHooks...)
 	if opts.ShareNotes != nil && *opts.ShareNotes {
 		hooks = append(hooks, ShareHook)
-	} else if opts.ShareNotes == nil && hookInstalled(loc.Dir, ShareHook) {
-		hooks = append(hooks, ShareHook) // refresh the script along with the others
+	} else if opts.ShareNotes == nil && hookPresent(loc.Dir, ShareHook) {
+		// Refresh -- or repair, when only the block or only the script survived -- along with the
+		// others: status says to run setup to fix a broken install, and sharing is part of it.
+		hooks = append(hooks, ShareHook)
 	}
 	// Check every hook before writing any, so a refusal leaves the repository as it was.
 	for _, hook := range hooks {
 		if err := checkHookEditable(filepath.Join(loc.Dir, hook)); err != nil {
+			var foreign *ForeignHookError
+			if errors.As(err, &foreign) {
+				foreign.Hook = hook
+				return result, foreign
+			}
 			return result, fmt.Errorf("%s: %w", filepath.Join(loc.Dir, hook), err)
 		}
 	}
@@ -160,6 +181,12 @@ func InstallHooks(ctx context.Context, repo Repo, opts InstallOptions) (InstallR
 	}
 	result.FetchRemoved, err = UnconfigureFetch(ctx, repo)
 	return result, err
+}
+
+// hookPresent is true when any part of Beacon's hook is there: its block, its script, or both.
+func hookPresent(dir, hook string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, hook))
+	return (err == nil && strings.Contains(string(data), hookBlockStart)) || fileExists(filepath.Join(dir, HookScriptPrefix+hook))
 }
 
 func hookInstalled(dir, hook string) bool {
@@ -255,7 +282,7 @@ func checkHookEditable(path string) error {
 		return nil
 	}
 	if !shellShebang.MatchString(first) {
-		return fmt.Errorf("%w (%s)", ErrForeignHook, strings.TrimSpace(first))
+		return &ForeignHookError{Path: path, Shebang: strings.TrimSpace(first)}
 	}
 	return nil
 }
@@ -271,7 +298,11 @@ func hookBlock(scriptName string) string {
 // HookCall is the line to put in a hook Beacon cannot edit (a hook manager's, or one written in
 // another language) so it links commits too.
 func HookCall(hook string) string {
-	return "beacon git hook " + hook + " || true"
+	if hook == "post-commit" {
+		return "beacon git hook post-commit || true"
+	}
+	// post-rewrite and pre-push take git's arguments (and post-rewrite its stdin) along.
+	return "beacon git hook " + hook + ` "$@" || true`
 }
 
 var hookPurpose = map[string]string{

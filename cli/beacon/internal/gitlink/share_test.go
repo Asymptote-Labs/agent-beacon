@@ -2,6 +2,7 @@ package gitlink
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -258,5 +259,66 @@ func TestErrorSummary(t *testing.T) {
 	}
 	if got := ErrorSummary(context.DeadlineExceeded); got != "context deadline exceeded" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestPlainSetupRepairsAHalfInstalledShareHook(t *testing.T) {
+	tm := newTeam(t)
+	ctx := context.Background()
+	bin, _ := fakeBeacon(t, filepath.Join(t.TempDir(), "bin"))
+	bob := tm.bob.open()
+	on := true
+	if _, err := InstallHooks(ctx, bob, InstallOptions{BeaconPath: bin, ShareNotes: &on}); err != nil {
+		t.Fatal(err)
+	}
+	loc, _ := ResolveHooks(ctx, bob)
+	script := filepath.Join(loc.Dir, HookScriptPrefix+ShareHook)
+	hook := filepath.Join(loc.Dir, ShareHook)
+	for name, breakIt := range map[string]func(){
+		"script missing": func() { _ = os.Remove(script) },
+		"block missing":  func() { _ = os.Remove(hook) },
+	} {
+		breakIt()
+		if st, _ := HookStatus(ctx, bob); st.Sharing {
+			t.Fatalf("%s: status still reports sharing", name)
+		}
+		if _, err := InstallHooks(ctx, bob, InstallOptions{BeaconPath: bin}); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if st, _ := HookStatus(ctx, bob); !st.Sharing {
+			t.Fatalf("%s: plain setup did not repair the share hook", name)
+		}
+	}
+	// A repository that never had sharing does not gain it from a plain setup.
+	other := tm.alice.open()
+	if _, err := InstallHooks(ctx, other, InstallOptions{BeaconPath: bin}); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := HookStatus(ctx, other); st.Sharing {
+		t.Fatal("plain setup turned sharing on")
+	}
+}
+
+func TestShareNotesRefusesAForeignPrePushAndNamesIt(t *testing.T) {
+	tm := newTeam(t)
+	ctx := context.Background()
+	bob := tm.bob.open()
+	loc, _ := ResolveHooks(ctx, bob)
+	_ = os.MkdirAll(loc.Dir, 0o755)
+	if err := os.WriteFile(filepath.Join(loc.Dir, "pre-push"), []byte("#!/usr/bin/env node\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	on := true
+	_, err := InstallHooks(ctx, bob, InstallOptions{BeaconPath: "/x/beacon", ShareNotes: &on})
+	var foreign *ForeignHookError
+	if !errors.As(err, &foreign) || foreign.Hook != ShareHook || !errors.Is(err, ErrForeignHook) {
+		t.Fatalf("got %v", err)
+	}
+	// All or nothing: the core hooks were not half-installed either.
+	if _, err := os.Stat(filepath.Join(loc.Dir, "beacon-post-commit")); !os.IsNotExist(err) {
+		t.Fatal("a refused setup wrote post-commit")
+	}
+	if got := HookCall(ShareHook); got != `beacon git hook pre-push "$@" || true` {
+		t.Fatalf("HookCall(pre-push) = %q", got)
 	}
 }
