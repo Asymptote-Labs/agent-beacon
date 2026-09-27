@@ -30,7 +30,7 @@ var endpointTraceOpts struct {
 
 var endpointTracesCmd = &cobra.Command{
 	Use:   "traces",
-	Short: "Index and search local endpoint traces",
+	Short: "Search local endpoint traces and keep their history",
 }
 
 var topLevelTracesCmd = &cobra.Command{
@@ -44,6 +44,7 @@ var runTraceView = traceview.Run
 
 func runTopLevelTraces(cmd *cobra.Command, args []string) error {
 	logPath := endpointTraceLogPath()
+	offerTraceHistory(logPath, true)
 	if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) || strings.EqualFold(os.Getenv("TERM"), "dumb") {
 		result, err := dashboard.ReadTraceList(logPath, dashboard.TraceQuery{Limit: 100})
 		if err != nil {
@@ -67,10 +68,11 @@ func printPlainTraceList(out io.Writer, result dashboard.TraceListResultV1) {
 
 var endpointTracesStatusCmd = &cobra.Command{
 	Use:          "status",
-	Short:        "Show local trace store status",
+	Short:        "Show the local trace history's status",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logPath := endpointTraceLogPath()
+		offerTraceHistory(logPath, false)
 		status, err := dashboard.TraceStoreStatus(logPath)
 		if err != nil {
 			return err
@@ -78,40 +80,21 @@ var endpointTracesStatusCmd = &cobra.Command{
 		if endpointOpts.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(status)
 		}
-		fmt.Printf("Trace store: %s\n", status.Path)
-		fmt.Printf("Runtime log: %s\n", logPath)
-		fmt.Printf("Traces: %d\nEvents: %d\nIndex rows: %d\n", status.Traces, status.Events, status.IndexRows)
-		fmt.Printf("Size: %d bytes", status.SizeBytes)
-		if status.WALBytes > 0 {
-			fmt.Printf(" (+%d bytes WAL)", status.WALBytes)
-		}
-		fmt.Println()
-		if status.IndexedAt != "" {
-			fmt.Printf("Indexed at: %s\n", status.IndexedAt)
-		}
+		printTraceStoreStatus(cmd.OutOrStdout(), logPath, status)
 		return nil
 	},
 }
 
 var endpointTracesReindexCmd = &cobra.Command{
-	Use:          "reindex",
-	Short:        "Rebuild the local trace store from runtime JSONL",
+	Use:   "reindex",
+	Short: "Create or update the local trace history from the runtime log",
+	Long: `Create or update the local trace history (history.db) from the runtime log.
+
+The runtime log rotates after about 60MB, a day or two of agent activity. The local history keeps
+sessions after that, for --retention-days or until it reaches --max-size-mb, whichever comes
+first, and makes trace search faster. Every trace command keeps it up to date once it exists.`,
 	SilenceUsage: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		logPath := endpointTraceLogPath()
-		if err := dashboard.ReindexTraceStore(logPath); err != nil {
-			return err
-		}
-		status, err := dashboard.TraceStoreStatus(logPath)
-		if err != nil {
-			return err
-		}
-		if endpointOpts.jsonOutput {
-			return json.NewEncoder(os.Stdout).Encode(status)
-		}
-		fmt.Printf("Reindexed %d traces and %d events into %s\n", status.Traces, status.Events, status.Path)
-		return nil
-	},
+	RunE:         runEndpointTracesReindex,
 }
 
 var endpointTracesListCmd = &cobra.Command{
@@ -119,7 +102,9 @@ var endpointTracesListCmd = &cobra.Command{
 	Short:        "List local traces",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		result, err := dashboard.ReadTraceList(endpointTraceLogPath(), endpointTraceQuery())
+		logPath := endpointTraceLogPath()
+		offerTraceHistory(logPath, true)
+		result, err := dashboard.ReadTraceList(logPath, endpointTraceQuery())
 		if err != nil {
 			return err
 		}
@@ -140,7 +125,9 @@ var endpointTracesSearchCmd = &cobra.Command{
 		query := endpointTraceQuery()
 		query.Q = args[0]
 		query.ResultLevel = endpointTraceOpts.resultLevel
-		result, err := dashboard.SearchTraces(endpointTraceLogPath(), query)
+		logPath := endpointTraceLogPath()
+		offerTraceHistory(logPath, true)
+		result, err := dashboard.SearchTraces(logPath, query)
 		if err != nil {
 			return err
 		}
@@ -166,7 +153,9 @@ var endpointTracesShowCmd = &cobra.Command{
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		result, ok, err := dashboard.ShowTrace(endpointTraceLogPath(), args[0], endpointTraceQuery())
+		logPath := endpointTraceLogPath()
+		offerTraceHistory(logPath, true)
+		result, ok, err := dashboard.ShowTrace(logPath, args[0], endpointTraceQuery())
 		if err != nil {
 			return err
 		}

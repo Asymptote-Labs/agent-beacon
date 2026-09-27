@@ -50,6 +50,19 @@ type Profile struct {
 	InstallID     string      `json:"install_id"`
 	Onboarding    Onboarding  `json:"onboarding"`
 	Pending       *Submission `json:"pending_submission,omitempty"`
+	// History records the answer to the local history prompt that `beacon endpoint traces` shows
+	// once, so a "not now" is not asked again.
+	History *History `json:"history,omitempty"`
+}
+
+// History is the answer to the local history prompt.
+type History struct {
+	DeclinedAt string `json:"declined_at,omitempty"`
+}
+
+// HistoryDeclined reports whether the user answered "not now" to the local history prompt.
+func (p Profile) HistoryDeclined() bool {
+	return p.History != nil && p.History.DeclinedAt != ""
 }
 
 // Onboarding records the outcome of the one-time prompt.

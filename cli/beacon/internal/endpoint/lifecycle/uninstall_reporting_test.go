@@ -37,19 +37,21 @@ func TestUninstallAllowsUserModeWithoutPrivileges(t *testing.T) {
 	}
 }
 
-// Rotation turns one log into six files. Removing only runtime.jsonl left the archives -- up to
+// Rotation turns one log into six files, and the local history keeps what rotation deleted. Removing only runtime.jsonl left the archives -- up to
 // 50 MB of retained prompt text and command lines -- on disk after an uninstall that was not asked
 // to keep logs, and invisible, because the file an operator would look for was gone.
 func TestUninstallRemovesRotatedArchivesToo(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
+	t.Setenv("BEACON_HISTORY_DB", "")
 
 	logDir := filepath.Join(home, ".beacon", "endpoint", "logs")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	logPath := filepath.Join(logDir, "runtime.jsonl")
-	written := []string{logPath, logPath + ".1", logPath + ".2", logPath + ".lock"}
+	history := filepath.Join(home, ".beacon", "endpoint", "history.db")
+	written := []string{logPath, logPath + ".1", logPath + ".2", logPath + ".lock", history, history + "-wal"}
 	for _, p := range written {
 		if err := os.WriteFile(p, []byte("{}\n"), 0o600); err != nil {
 			t.Fatal(err)
@@ -71,13 +73,15 @@ func TestUninstallRemovesRotatedArchivesToo(t *testing.T) {
 func TestUninstallKeepLogsKeepsTheArchives(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
+	t.Setenv("BEACON_HISTORY_DB", "")
 
 	logDir := filepath.Join(home, ".beacon", "endpoint", "logs")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	logPath := filepath.Join(logDir, "runtime.jsonl")
-	for _, p := range []string{logPath, logPath + ".1"} {
+	history := filepath.Join(home, ".beacon", "endpoint", "history.db")
+	for _, p := range []string{logPath, logPath + ".1", history} {
 		if err := os.WriteFile(p, []byte("{}\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -87,7 +91,7 @@ func TestUninstallKeepLogsKeepsTheArchives(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, p := range []string{logPath, logPath + ".1"} {
+	for _, p := range []string{logPath, logPath + ".1", history} {
 		if _, err := os.Stat(p); err != nil {
 			t.Errorf("%s was removed despite --keep-logs", filepath.Base(p))
 		}

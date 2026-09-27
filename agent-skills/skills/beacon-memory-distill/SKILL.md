@@ -39,7 +39,9 @@ beacon endpoint traces status --json
 
 - If `beacon` is missing, stop and point the user to
   https://docs.beacon.sh/get-started/overview. Do not install it yourself.
-- If the trace store is empty or stale, rebuild it (local only, never touches the log):
+- If `status` reports `"enabled": false`, there is no local history, and only the last day or
+  two of sessions are still in the runtime log. Suggest creating the history, which keeps
+  sessions for 90 days and stays on this machine, and run it only if the user agrees:
   `beacon endpoint traces reindex`.
 
 ## Step 2: pick traces
