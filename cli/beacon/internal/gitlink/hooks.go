@@ -133,9 +133,13 @@ func InstallHooks(ctx context.Context, repo Repo, opts InstallOptions) (InstallR
 	hooks := append([]string{}, ManagedHooks...)
 	if opts.ShareNotes != nil && *opts.ShareNotes {
 		hooks = append(hooks, ShareHook)
-	} else if opts.ShareNotes == nil && hookPresent(loc.Dir, ShareHook) {
+	} else if opts.ShareNotes == nil && hookPresent(loc.Dir, ShareHook) &&
+		checkHookEditable(filepath.Join(loc.Dir, ShareHook)) == nil {
 		// Refresh -- or repair, when only the block or only the script survived -- along with the
-		// others: status says to run setup to fix a broken install, and sharing is part of it.
+		// others: status says to run setup to fix a broken install, and sharing is part of it. Only
+		// when it can, though: a pre-push since replaced by a hook in another language is left
+		// alone, because a repair nobody asked for must never stop linking from being installed.
+		// An explicit --share-notes still refuses, and says so.
 		hooks = append(hooks, ShareHook)
 	}
 	// Check every hook before writing any, so a refusal leaves the repository as it was.

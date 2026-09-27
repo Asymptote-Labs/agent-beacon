@@ -322,3 +322,38 @@ func TestShareNotesRefusesAForeignPrePushAndNamesIt(t *testing.T) {
 		t.Fatalf("HookCall(pre-push) = %q", got)
 	}
 }
+
+func TestPlainSetupIgnoresALeftoverShareScriptBesideAForeignPrePush(t *testing.T) {
+	tm := newTeam(t)
+	ctx := context.Background()
+	bin, _ := fakeBeacon(t, filepath.Join(t.TempDir(), "bin"))
+	bob := tm.bob.open()
+	on := true
+	if _, err := InstallHooks(ctx, bob, InstallOptions{BeaconPath: bin, ShareNotes: &on}); err != nil {
+		t.Fatal(err)
+	}
+	loc, _ := ResolveHooks(ctx, bob)
+	// Someone replaced pre-push with a Node hook, leaving Beacon's script behind.
+	node := "#!/usr/bin/env node\nconsole.log('theirs')\n"
+	if err := os.WriteFile(filepath.Join(loc.Dir, "pre-push"), []byte(node), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res, err := InstallHooks(ctx, bob, InstallOptions{BeaconPath: bin})
+	if err != nil {
+		t.Fatalf("plain setup must not be blocked by a repair nobody asked for: %v", err)
+	}
+	if len(res.Reports) != len(ManagedHooks) {
+		t.Fatalf("reports %+v", res.Reports)
+	}
+	if data, _ := os.ReadFile(filepath.Join(loc.Dir, "pre-push")); string(data) != node {
+		t.Fatal("the Node hook was modified")
+	}
+	if st, _ := HookStatus(ctx, bob); !st.Installed() {
+		t.Fatal("linking is not installed")
+	}
+	// Asking for sharing explicitly still refuses, naming pre-push.
+	var foreign *ForeignHookError
+	if _, err := InstallHooks(ctx, bob, InstallOptions{BeaconPath: bin, ShareNotes: &on}); !errors.As(err, &foreign) || foreign.Hook != ShareHook {
+		t.Fatalf("explicit share: %v", err)
+	}
+}
