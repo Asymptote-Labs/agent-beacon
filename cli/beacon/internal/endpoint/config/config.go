@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 const (
@@ -300,6 +301,24 @@ func BaseDir(userMode bool) string {
 		return filepath.Join(home, ".beacon", "endpoint")
 	}
 	return SystemBaseDir()
+}
+
+// HistoryStoreFile is the durable local history `beacon endpoint traces` reads once the user
+// opts in to it.
+const HistoryStoreFile = "history.db"
+
+// HistoryStoreEnv overrides where the local history lives.
+const HistoryStoreEnv = "BEACON_HISTORY_DB"
+
+// HistoryStorePath is where the local history lives: BEACON_HISTORY_DB when set, otherwise the
+// user's own endpoint directory, whichever log it indexes. The system log's directory is root's,
+// and the history holds the same prompts and commands the log does, so it belongs to the person
+// reading it.
+func HistoryStorePath() string {
+	if path := strings.TrimSpace(os.Getenv(HistoryStoreEnv)); path != "" {
+		return path
+	}
+	return filepath.Join(BaseDir(true), HistoryStoreFile)
 }
 
 func ConfigPath(userMode bool) string {

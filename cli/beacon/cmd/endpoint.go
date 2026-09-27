@@ -395,6 +395,7 @@ func init() {
 	endpointTracesCmd.AddCommand(endpointTracesListCmd)
 	endpointTracesCmd.AddCommand(endpointTracesSearchCmd)
 	endpointTracesCmd.AddCommand(endpointTracesShowCmd)
+	endpointTracesCmd.AddCommand(endpointTracesResetCmd)
 	endpointCoworkCmd.AddCommand(endpointCoworkPrintConfigCmd)
 	endpointCoworkCmd.AddCommand(endpointCoworkSetupCmd)
 	endpointCoworkCmd.AddCommand(endpointCoworkStatusCmd)
@@ -407,7 +408,7 @@ func init() {
 	endpointVSCodeCmd.AddCommand(endpointVSCodeStatusCmd)
 	endpointVSCodeCmd.AddCommand(endpointVSCodeValidateCmd)
 
-	for _, c := range []*cobra.Command{endpointInstallCmd, endpointStatusCmd, endpointDoctorCmd, endpointInventoryCmd, endpointInventoryHeartbeatCmd, endpointInventoryInstallDaemonCmd, endpointDiscoverCmd, endpointTestEventCmd, endpointBundleDiagnosticsCmd, endpointUninstallCmd, endpointRepairCmd, endpointConfigShowCmd, endpointConfigValidateCmd, endpointIntegrationsValidateCmd, endpointUserConfigRepairInstalledCmd, endpointTracesStatusCmd, endpointTracesReindexCmd, endpointTracesListCmd, endpointTracesSearchCmd, endpointTracesShowCmd, topLevelDoctorCmd, topLevelStatusCmd, topLevelInventoryCmd} {
+	for _, c := range []*cobra.Command{endpointInstallCmd, endpointStatusCmd, endpointDoctorCmd, endpointInventoryCmd, endpointInventoryHeartbeatCmd, endpointInventoryInstallDaemonCmd, endpointDiscoverCmd, endpointTestEventCmd, endpointBundleDiagnosticsCmd, endpointUninstallCmd, endpointRepairCmd, endpointConfigShowCmd, endpointConfigValidateCmd, endpointIntegrationsValidateCmd, endpointUserConfigRepairInstalledCmd, endpointTracesStatusCmd, endpointTracesReindexCmd, endpointTracesListCmd, endpointTracesSearchCmd, endpointTracesShowCmd, endpointTracesResetCmd, topLevelDoctorCmd, topLevelStatusCmd, topLevelInventoryCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and the system collector service")
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
@@ -466,6 +467,10 @@ func init() {
 		c.Flags().IntVar(&endpointTraceOpts.limit, "limit", 100, "Limit returned traces or events")
 		c.Flags().StringVar(&endpointTraceOpts.eventTypes, "event-type", "", "Filter trace events by comma-separated type")
 	}
+	endpointTracesReindexCmd.Flags().IntVar(&endpointTraceHistoryOpts.retentionDays, "retention-days", 0, "Keep traces whose last event is newer than this many days (default 90; kept once set)")
+	endpointTracesReindexCmd.Flags().Int64Var(&endpointTraceHistoryOpts.maxSizeMB, "max-size-mb", 0, "Drop the oldest traces once the history reaches this size (default 1024; kept once set)")
+	endpointTracesReindexCmd.Flags().BoolVar(&endpointTraceHistoryOpts.rebuild, "rebuild", false, "Recompute search text and summaries from the stored events")
+	endpointTracesResetCmd.Flags().BoolVar(&endpointTraceHistoryOpts.yes, "yes", false, "Delete without asking")
 	endpointTracesListCmd.Flags().StringVarP(&endpointTraceOpts.query, "query", "q", "", "Filter traces by text")
 	endpointTracesListCmd.Flags().IntVar(&endpointTraceOpts.page, "page", 1, "Page number for trace listing")
 	endpointTracesListCmd.Flags().StringVar(&endpointTraceOpts.state, "state", "", "Filter by sharing state")

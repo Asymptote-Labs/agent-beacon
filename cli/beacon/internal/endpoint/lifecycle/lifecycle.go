@@ -650,6 +650,14 @@ func Uninstall(opts UninstallOptions) error {
 		for _, path := range runtimeLogFiles(cfg.LogPath) {
 			fail("remove "+path, os.Remove(path))
 		}
+		// The local history holds what the log held, and more, so it goes with the logs. It lives
+		// in the user's own endpoint directory, which a system uninstall does not own.
+		if cfg.UserMode {
+			history := endpointconfig.HistoryStorePath()
+			for _, suffix := range []string{"", "-wal", "-shm", ".lock"} {
+				fail("remove "+history+suffix, os.Remove(history+suffix))
+			}
+		}
 	}
 	fail("remove install manifest", os.Remove(manifestPath(cfg.UserMode)))
 

@@ -316,11 +316,12 @@ func TestTraceContentKeepsPromptText(t *testing.T) {
 // fallback agree on it.
 func TestTraceSearchFindsRetainedAssistantText(t *testing.T) {
 	lines := marshalEvents(t, assistantEvent("agent.message", codexAnswerLabel, asymptoteobserve.TextOutputMessages("rotate the flaky fixture")))
-	for name, path := range map[string]string{
-		"index":    traceStoreIndexedLog(t, lines),
-		"fallback": traceStoreBlockedLog(t, lines),
+	for name, logFor := range map[string]func(*testing.T, [][]byte) string{
+		"index":    traceStoreIndexedLog,
+		"fallback": traceStoreBlockedLog,
 	} {
 		t.Run(name, func(t *testing.T) {
+			path := logFor(t, lines)
 			result, err := SearchTraces(path, TraceQuery{EventQuery: EventQuery{Q: "flaky fixture"}, ResultLevel: "event", Limit: 10})
 			if err != nil {
 				t.Fatalf("SearchTraces: %v", err)
@@ -329,44 +330,5 @@ func TestTraceSearchFindsRetainedAssistantText(t *testing.T) {
 				t.Fatalf("search results = %#v, want the assistant event", result)
 			}
 		})
-	}
-}
-
-// A trace index written before this change holds the label as the assistant
-// content, and its fingerprint still matches an unchanged log, so it would
-// keep serving the label. The schema version bump makes it rebuild.
-func TestTraceStoreRebuildsIndexFromBeforeRetainedOutputText(t *testing.T) {
-	answer := "the retained answer"
-	path := traceStoreIndexedLog(t, marshalEvents(t, assistantEvent("agent.message", codexAnswerLabel, asymptoteobserve.TextOutputMessages(answer))))
-	if _, err := TraceStoreStatus(path); err != nil {
-		t.Fatalf("index trace store: %v", err)
-	}
-
-	// Rewrite the index as the previous build left it: schema version 3, with
-	// the label projected as the content.
-	db, err := openTraceStore(path).db()
-	if err != nil {
-		t.Fatalf("open trace store: %v", err)
-	}
-	stale, err := json.Marshal(TraceEventV1{ID: "evt-agent.message", Number: 1, Type: "agent_message", Action: "agent.message", Summary: codexAnswerLabel, Content: &TraceContentV1{Text: codexAnswerLabel, Retention: "full", Included: true}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`UPDATE trace_events SET event_json = ? WHERE event_type = 'agent_message'`, string(stale)); err != nil {
-		t.Fatalf("write stale event: %v", err)
-	}
-	if _, err := db.Exec(`PRAGMA user_version = 3`); err != nil {
-		t.Fatalf("stamp old version: %v", err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	show, ok, err := ShowTrace(path, "session:codex_cli:s1", TraceQuery{Limit: 10})
-	if err != nil || !ok || len(show.Events) != 1 {
-		t.Fatalf("ShowTrace ok=%v err=%v events=%d", ok, err, len(show.Events))
-	}
-	if content := show.Events[0].Content; content == nil || content.Text != answer {
-		t.Fatalf("content = %#v, want the rebuilt %q rather than the stale label", content, answer)
 	}
 }

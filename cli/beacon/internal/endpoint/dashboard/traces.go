@@ -67,14 +67,14 @@ type traceAggregate struct {
 	titlePriority int
 }
 
-// The local store is an index over the runtime log, never a second source of
-// truth: it answers the same question the JSONL scan below answers, and any
-// error -- a query it does not support, an unreadable database, a stale index
-// it could not rebuild -- falls back to that scan rather than failing the read.
-// The two paths share one free-text matcher (matchesAllTerms) and one pair of
-// haystacks precisely so the fallback cannot change the answer.
+// The local history, once the user has opted in to it, answers the same
+// question the JSONL scan below answers, over a longer window: it keeps what
+// rotation deletes. Any error -- no history, a query it does not support, an
+// unreadable database -- falls back to the scan rather than failing the read.
+// The two paths share one free-text matcher (matchesAllTerms), one pair of
+// haystacks and one event projection so the fallback cannot change the answer.
 func ReadTraceList(path string, query TraceQuery) (TraceListResultV1, error) {
-	if result, err := openTraceStore(path).List(query); err == nil {
+	if result, err := historyList(path, query); err == nil {
 		return result, nil
 	}
 	traces, err := readTraceAggregates(path, withoutFreeText(query.EventQuery))
@@ -119,7 +119,7 @@ func ReadTraceList(path string, query TraceQuery) (TraceListResultV1, error) {
 // SearchTraces prefers the local store and falls back to scanning JSONL; see
 // ReadTraceList on why a store error is not an error here.
 func SearchTraces(path string, query TraceQuery) (TraceSearchResultV1, error) {
-	if result, err := openTraceStore(path).Search(query); err == nil {
+	if result, err := historySearch(path, query); err == nil {
 		return result, nil
 	}
 	if query.ResultLevel == "" {
@@ -181,7 +181,7 @@ func SearchTraces(path string, query TraceQuery) (TraceSearchResultV1, error) {
 // ShowTrace prefers the local store and falls back to scanning JSONL; see
 // ReadTraceList on why a store error is not an error here.
 func ShowTrace(path, id string, query TraceQuery) (TraceShowResultV1, bool, error) {
-	if result, ok, err := openTraceStore(path).Show(id, query); err == nil {
+	if result, ok, err := historyShow(path, id, query); err == nil {
 		return result, ok, nil
 	}
 	traces, err := readTraceAggregates(path, withoutFreeText(query.EventQuery))
@@ -205,7 +205,7 @@ func ShowTrace(path, id string, query TraceQuery) (TraceShowResultV1, bool, erro
 	resp := TraceShowResultV1{
 		Trace:  agg.summary,
 		Events: append([]TraceEventV1(nil), events[offset-1:end]...),
-		Spans:  traceSpanList(agg.spans),
+		Spans:  spansFromEvents(events),
 		Range: TraceRangeV1{
 			TotalEvents:    total,
 			ReturnedEvents: end - (offset - 1),
@@ -246,13 +246,7 @@ func readTraceAggregates(path string, query EventQuery) (map[string]*traceAggreg
 		id := traceProjectionID(event)
 		agg := traces[id]
 		if agg == nil {
-			agg = &traceAggregate{
-				summary:       newTraceSummary(id, event),
-				spans:         map[string]*TraceSpanV1{},
-				models:        map[string]bool{},
-				methods:       map[string]bool{},
-				titlePriority: -1,
-			}
+			agg = newTraceAggregate(id, event)
 			traces[id] = agg
 		}
 		te := traceEventFromRecord(record, len(agg.events)+1)
@@ -263,6 +257,16 @@ func readTraceAggregates(path string, query EventQuery) (map[string]*traceAggreg
 		agg.finish()
 	}
 	return traces, nil
+}
+
+func newTraceAggregate(id string, event schema.Event) *traceAggregate {
+	return &traceAggregate{
+		summary:       newTraceSummary(id, event),
+		spans:         map[string]*TraceSpanV1{},
+		models:        map[string]bool{},
+		methods:       map[string]bool{},
+		titlePriority: -1,
+	}
 }
 
 func newTraceSummary(id string, event schema.Event) TraceSummaryV1 {
