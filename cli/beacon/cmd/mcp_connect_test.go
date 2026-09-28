@@ -580,3 +580,22 @@ func TestMCPStatusCheckUsesTheRecordedURLWithoutAnEnrollment(t *testing.T) {
 		t.Fatalf("err = %v\n%s", err, stdout)
 	}
 }
+
+func TestMCPDisconnectDoesNotSayNothingToRemoveAfterReportingAnEntry(t *testing.T) {
+	fx := newMCPFixture(t, "cursor")
+	if _, _, err := runMCP(t, "connect", "--url", fx.url, "--yes"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(fx.home, ".cursor", "mcp.json")
+	data, _ := os.ReadFile(path)
+	if err := os.WriteFile(path, []byte(strings.Replace(string(data), fx.url, "https://theirs.example", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout, _, err := runMCP(t, "disconnect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, "left alone") || strings.Contains(stdout, "Nothing to remove") {
+		t.Fatalf("output:\n%s", stdout)
+	}
+}
