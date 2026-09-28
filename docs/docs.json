@@ -59,10 +59,7 @@
               "deployment/open-source",
               {
                 "group": "Beacon Managed",
-                "root": "deployment/managed",
-                "pages": [
-                  "deployment/managed-mcp"
-                ]
+                "root": "deployment/managed"
               }
             ]
           },
@@ -98,6 +95,7 @@
             "group": "Manage Beacon",
             "icon": "sliders",
             "pages": [
+              "deployment/managed-mcp",
               {
                 "group": "Inventory",
                 "root": "guides/inventory",
