@@ -11,7 +11,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/gitlink"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 )
 
 type gitOptions struct {
@@ -87,11 +89,31 @@ func runGitLink(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := recordLinkEvents(ctx, repo, result); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: the note was written, but the runtime log was not: %v\n", err)
+	}
 	out := cmd.OutOrStdout()
 	if gitOpts.jsonOutput {
 		return writeIndentedJSON(out, result)
 	}
 	printGitLinkResult(out, result)
+	return nil
+}
+
+// recordLinkEvents writes a session.commit_linked event to the runtime log for each link this run
+// added. A dry run, or a run that found every link already on the note, records nothing, so the log
+// holds one event per link however often a commit is linked.
+func recordLinkEvents(ctx context.Context, repo gitlink.Repo, result gitlink.Result) error {
+	if result.DryRun || !result.NoteUpdated || len(result.Added) == 0 {
+		return nil
+	}
+	cc := gitlink.ResolveCommitContext(ctx, repo, result.Commit)
+	logPath := gitRuntimeLogPath()
+	for _, event := range gitlink.LinkEvents(result, cc, version.GetVersion()) {
+		if _, err := writer.AppendEvent(event, writer.Options{Path: logPath, UserMode: true}); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

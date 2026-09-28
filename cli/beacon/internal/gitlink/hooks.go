@@ -27,6 +27,14 @@ const (
 // the old commit's note across (see NormalizeNote).
 var ManagedHooks = []string{"post-commit", "post-rewrite"}
 
+// ShareHook is the hook `beacon git setup --share-notes` adds. It is off by default because it is
+// the one Beacon hook that reaches the network: during a push the person started, it pushes
+// refs/notes/beacon to the same remote.
+const ShareHook = "pre-push"
+
+// allHooks is every hook Beacon may have installed, which is what remove and status look at.
+var allHooks = append(append([]string{}, ManagedHooks...), ShareHook)
+
 // ErrHooksPathSet is returned by InstallHooks when core.hooksPath points git somewhere other than
 // the repository's own hooks directory -- usually a hook manager's tracked directory -- and the
 // caller did not ask to write there.
@@ -35,6 +43,20 @@ var ErrHooksPathSet = errors.New("core.hooksPath is set")
 // ErrForeignHook is returned when an existing hook is not a shell script, so a shell block cannot
 // be added to it safely.
 var ErrForeignHook = errors.New("existing hook is not a shell script")
+
+// ForeignHookError names the hook ErrForeignHook refused, so the caller can say which line to add
+// to it by hand.
+type ForeignHookError struct {
+	Hook    string
+	Path    string
+	Shebang string
+}
+
+func (e *ForeignHookError) Error() string {
+	return fmt.Sprintf("%s: %v (%s)", e.Path, ErrForeignHook, e.Shebang)
+}
+
+func (e *ForeignHookError) Unwrap() error { return ErrForeignHook }
 
 // HooksLocation is where git looks for this repository's hooks.
 type HooksLocation struct {
@@ -68,6 +90,10 @@ type InstallOptions struct {
 	BeaconPath string
 	// AllowHooksPath installs into core.hooksPath's directory when it is set.
 	AllowHooksPath bool
+	// ShareNotes, when set, turns sharing on (true) or off (false): the pre-push hook and a fetch
+	// refspec on every remote. Nil leaves sharing as it is, so re-running setup to repair an
+	// install does not change it.
+	ShareNotes *bool
 }
 
 // HookReport is what installing or removing did to one hook.
@@ -85,6 +111,9 @@ type InstallResult struct {
 	Hooks         HooksLocation `json:"hooks"`
 	Reports       []HookReport  `json:"reports"`
 	RewriteRefSet bool          `json:"rewrite_ref_set"`
+	// FetchAdded and FetchRemoved are the remotes whose fetch refspec setup changed.
+	FetchAdded   []string `json:"fetch_added,omitempty"`
+	FetchRemoved []string `json:"fetch_removed,omitempty"`
 }
 
 // InstallHooks installs Beacon's hooks. It is idempotent: a second run rewrites the scripts and
@@ -101,13 +130,30 @@ func InstallHooks(ctx context.Context, repo Repo, opts InstallOptions) (InstallR
 	if err := os.MkdirAll(loc.Dir, 0o755); err != nil {
 		return result, err
 	}
+	hooks := append([]string{}, ManagedHooks...)
+	if opts.ShareNotes != nil && *opts.ShareNotes {
+		hooks = append(hooks, ShareHook)
+	} else if opts.ShareNotes == nil && hookPresent(loc.Dir, ShareHook) &&
+		checkHookEditable(filepath.Join(loc.Dir, ShareHook)) == nil {
+		// Refresh -- or repair, when only the block or only the script survived -- along with the
+		// others: status says to run setup to fix a broken install, and sharing is part of it. Only
+		// when it can, though: a pre-push since replaced by a hook in another language is left
+		// alone, because a repair nobody asked for must never stop linking from being installed.
+		// An explicit --share-notes still refuses, and says so.
+		hooks = append(hooks, ShareHook)
+	}
 	// Check every hook before writing any, so a refusal leaves the repository as it was.
-	for _, hook := range ManagedHooks {
+	for _, hook := range hooks {
 		if err := checkHookEditable(filepath.Join(loc.Dir, hook)); err != nil {
+			var foreign *ForeignHookError
+			if errors.As(err, &foreign) {
+				foreign.Hook = hook
+				return result, foreign
+			}
 			return result, fmt.Errorf("%s: %w", filepath.Join(loc.Dir, hook), err)
 		}
 	}
-	for _, hook := range ManagedHooks {
+	for _, hook := range hooks {
 		report, err := installHook(loc.Dir, hook, opts.BeaconPath)
 		if err != nil {
 			return result, err
@@ -119,7 +165,42 @@ func InstallHooks(ctx context.Context, repo Repo, opts InstallOptions) (InstallR
 		return result, err
 	}
 	result.RewriteRefSet = set
-	return result, nil
+	if opts.ShareNotes == nil {
+		return result, nil
+	}
+	if *opts.ShareNotes {
+		remotes, err := Remotes(ctx, repo)
+		if err != nil {
+			return result, err
+		}
+		result.FetchAdded, err = ConfigureFetch(ctx, repo, remotes)
+		return result, err
+	}
+	report, err := removeHook(loc.Dir, ShareHook)
+	if err != nil {
+		return result, err
+	}
+	if report.Action == "removed" {
+		result.Reports = append(result.Reports, report)
+	}
+	result.FetchRemoved, err = UnconfigureFetch(ctx, repo)
+	return result, err
+}
+
+// hookPresent is true when any part of Beacon's hook is there: its block, its script, or both.
+func hookPresent(dir, hook string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, hook))
+	return (err == nil && strings.Contains(string(data), hookBlockStart)) || fileExists(filepath.Join(dir, HookScriptPrefix+hook))
+}
+
+func hookInstalled(dir, hook string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, hook))
+	return err == nil && strings.Contains(string(data), hookBlockStart) && fileExists(filepath.Join(dir, HookScriptPrefix+hook))
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func installHook(dir, hook, beaconPath string) (HookReport, error) {
@@ -205,7 +286,7 @@ func checkHookEditable(path string) error {
 		return nil
 	}
 	if !shellShebang.MatchString(first) {
-		return fmt.Errorf("%w (%s)", ErrForeignHook, strings.TrimSpace(first))
+		return &ForeignHookError{Path: path, Shebang: strings.TrimSpace(first)}
 	}
 	return nil
 }
@@ -221,31 +302,46 @@ func hookBlock(scriptName string) string {
 // HookCall is the line to put in a hook Beacon cannot edit (a hook manager's, or one written in
 // another language) so it links commits too.
 func HookCall(hook string) string {
-	return "beacon git hook " + hook + " || true"
+	if hook == "post-commit" {
+		return "beacon git hook post-commit || true"
+	}
+	// post-rewrite and pre-push take git's arguments (and post-rewrite its stdin) along.
+	return "beacon git hook " + hook + ` "$@" || true`
 }
 
 var hookPurpose = map[string]string{
 	"post-commit":  "links the new commit to the agent sessions that wrote it.",
 	"post-rewrite": "tidies the Beacon note on commits an amend or rebase rewrote.",
+	"pre-push":     "shares refs/notes/beacon with the remote being pushed to.",
 }
 
 func hookScript(hook, beaconPath string) string {
 	// post-rewrite reads the rewritten commits from stdin; the others get nothing to read.
-	stdin := " </dev/null"
-	args := ""
-	if hook == "post-rewrite" {
+	// pre-push needs the remote git passes, and keeps stderr so a failure to share says so.
+	stdin, args, output := " </dev/null", "", " >/dev/null 2>&1"
+	switch hook {
+	case "post-rewrite":
 		stdin, args = "", ` "$@"`
+	case ShareHook:
+		args, output = ` "$@"`, " >/dev/null"
 	}
 	return `#!/bin/sh
 # Beacon ` + hook + ` hook: ` + hookPurpose[hook] + `
 # Installed by: beacon git setup    Removed by: beacon git remove
-# Reads the local runtime log and writes a git note; never touches the network or fails the commit.
+# ` + hookScope(hook) + `
 [ "${` + DisableEnv + `:-1}" = "0" ] && exit 0
 beacon_bin=` + shellQuote(beaconPath) + `
 [ -n "$beacon_bin" ] && [ -x "$beacon_bin" ] || beacon_bin="$(command -v beacon 2>/dev/null)" || exit 0
-"$beacon_bin" git hook ` + hook + args + stdin + ` >/dev/null 2>&1
+"$beacon_bin" git hook ` + hook + args + stdin + output + `
 exit 0
 `
+}
+
+func hookScope(hook string) string {
+	if hook == ShareHook {
+		return "Pushes only Beacon's notes ref, only to this push's remote, and never fails the push."
+	}
+	return "Reads the local runtime log and writes a git note; never touches the network or fails the commit."
 }
 
 func shellQuote(s string) string {
@@ -273,6 +369,32 @@ type RemoveResult struct {
 	Hooks             HooksLocation `json:"hooks"`
 	Reports           []HookReport  `json:"reports"`
 	RewriteRefRemoved bool          `json:"rewrite_ref_removed"`
+	FetchRemoved      []string      `json:"fetch_removed,omitempty"`
+}
+
+func removeHook(dir, hook string) (HookReport, error) {
+	report := HookReport{Hook: hook, Path: filepath.Join(dir, hook), Script: filepath.Join(dir, HookScriptPrefix+hook), Action: "absent"}
+	if err := os.Remove(report.Script); err == nil {
+		report.Action = "removed"
+	} else if !os.IsNotExist(err) {
+		return report, err
+	}
+	data, err := os.ReadFile(report.Path)
+	if err == nil && strings.Contains(string(data), hookBlockStart) {
+		rest := removeBlock(string(data))
+		if onlyShebang(rest) {
+			err = os.Remove(report.Path)
+		} else {
+			err = writeExecutable(report.Path, rest)
+		}
+		if err != nil {
+			return report, err
+		}
+		report.Action = "removed"
+	} else if err != nil && !os.IsNotExist(err) {
+		return report, err
+	}
+	return report, nil
 }
 
 // RemoveHooks removes Beacon's scripts and blocks. A hook left with nothing but a shebang is
@@ -283,29 +405,18 @@ func RemoveHooks(ctx context.Context, repo Repo) (RemoveResult, error) {
 		return RemoveResult{}, err
 	}
 	result := RemoveResult{Hooks: loc}
-	for _, hook := range ManagedHooks {
-		report := HookReport{Hook: hook, Path: filepath.Join(loc.Dir, hook), Script: filepath.Join(loc.Dir, HookScriptPrefix+hook), Action: "absent"}
-		if err := os.Remove(report.Script); err == nil {
-			report.Action = "removed"
-		} else if !os.IsNotExist(err) {
+	for _, hook := range allHooks {
+		report, err := removeHook(loc.Dir, hook)
+		if err != nil {
 			return result, err
 		}
-		data, err := os.ReadFile(report.Path)
-		if err == nil && strings.Contains(string(data), hookBlockStart) {
-			rest := removeBlock(string(data))
-			if onlyShebang(rest) {
-				err = os.Remove(report.Path)
-			} else {
-				err = writeExecutable(report.Path, rest)
-			}
-			if err != nil {
-				return result, err
-			}
-			report.Action = "removed"
-		} else if err != nil && !os.IsNotExist(err) {
-			return result, err
+		if hook == ShareHook && report.Action == "absent" {
+			continue // never installed; not worth a line
 		}
 		result.Reports = append(result.Reports, report)
+	}
+	if result.FetchRemoved, err = UnconfigureFetch(ctx, repo); err != nil {
+		return result, err
 	}
 	removed, err := removeRewriteRef(ctx, repo)
 	if err != nil {
@@ -339,16 +450,25 @@ type Status struct {
 	Hooks      HooksLocation `json:"hooks"`
 	States     []HookState   `json:"states"`
 	RewriteRef bool          `json:"rewrite_ref"`
+	// Sharing is true when the pre-push hook is installed; FetchRemotes are the remotes whose
+	// fetches bring their links along.
+	Sharing      bool     `json:"sharing"`
+	FetchRemotes []string `json:"fetch_remotes,omitempty"`
 }
 
-// Installed is true when every managed hook is installed.
+// Installed is true when every managed hook is installed. Sharing is optional and not counted.
 func (s Status) Installed() bool {
+	n := 0
 	for _, st := range s.States {
+		if st.Hook == ShareHook {
+			continue
+		}
 		if !st.Installed {
 			return false
 		}
+		n++
 	}
-	return len(s.States) > 0
+	return n == len(ManagedHooks)
 }
 
 // HookStatus reports Beacon's git integration in repo.
@@ -358,7 +478,7 @@ func HookStatus(ctx context.Context, repo Repo) (Status, error) {
 		return Status{}, err
 	}
 	status := Status{Hooks: loc}
-	for _, hook := range ManagedHooks {
+	for _, hook := range allHooks {
 		st := HookState{Hook: hook}
 		if data, err := os.ReadFile(filepath.Join(loc.Dir, hook)); err == nil {
 			st.BlockPresent = strings.Contains(string(data), hookBlockStart)
@@ -367,7 +487,20 @@ func HookStatus(ctx context.Context, repo Repo) (Status, error) {
 			st.ScriptExists = true
 		}
 		st.Installed = st.BlockPresent && st.ScriptExists
+		if hook == ShareHook {
+			status.Sharing = st.Installed
+			if !st.BlockPresent && !st.ScriptExists {
+				continue // not installed and not half-installed: nothing to report
+			}
+		}
 		status.States = append(status.States, st)
+	}
+	if remotes, err := Remotes(ctx, repo); err == nil {
+		for _, remote := range remotes {
+			if has, err := hasFetchRefspec(ctx, repo, remote); err == nil && has {
+				status.FetchRemotes = append(status.FetchRemotes, remote)
+			}
+		}
 	}
 	status.RewriteRef, err = hasRewriteRef(ctx, repo)
 	return status, err

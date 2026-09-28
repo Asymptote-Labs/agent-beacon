@@ -26,6 +26,14 @@ type Git struct {
 	// Env, when set, replaces the process environment for every git invocation. Tests use it to
 	// keep the caller's global git configuration out of the repository under test.
 	Env []string
+	// ExtraEnv is added to the environment (Env, or the process's own) for every invocation.
+	ExtraEnv []string
+}
+
+// WithExtraEnv returns g with vars added to every invocation's environment.
+func (g Git) WithExtraEnv(vars ...string) Git {
+	g.ExtraEnv = append(append([]string{}, g.ExtraEnv...), vars...)
+	return g
 }
 
 // ErrNotRepository is returned when Dir is not inside a git work tree.
@@ -48,6 +56,13 @@ func (g Git) run(ctx context.Context, stdin []byte, args ...string) ([]byte, err
 	cmd := exec.CommandContext(ctx, "git", full...)
 	if g.Env != nil {
 		cmd.Env = g.Env
+	}
+	if len(g.ExtraEnv) > 0 {
+		base := cmd.Env
+		if base == nil {
+			base = os.Environ()
+		}
+		cmd.Env = append(append([]string{}, base...), g.ExtraEnv...)
 	}
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
@@ -88,6 +103,25 @@ func (e *GitError) Error() string {
 
 func (e *GitError) Unwrap() error { return e.Err }
 
+// ErrorSummary is err in one line for a person: for a failed git invocation, git's own first
+// complaint without its "fatal:"/"error:" prefix, rather than the command line and every hint.
+func ErrorSummary(err error) string {
+	var gitErr *GitError
+	if !errors.As(err, &gitErr) {
+		return err.Error()
+	}
+	for _, line := range strings.Split(gitErr.Message, "\n") {
+		line = strings.TrimSpace(line)
+		for _, prefix := range []string{"fatal:", "error:", "remote:"} {
+			line = strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		}
+		if line != "" && !strings.HasPrefix(line, "hint:") && !strings.HasPrefix(line, "To ") {
+			return line
+		}
+	}
+	return gitErr.Err.Error()
+}
+
 // Repo is a resolved repository: the top of the work tree, the per-worktree git directory, and the
 // common directory worktrees share (where hooks and refs live).
 type Repo struct {
@@ -124,7 +158,7 @@ func OpenRepo(ctx context.Context, g Git) (Repo, error) {
 		common = filepath.Join(base, common)
 	}
 	return Repo{
-		Git:       Git{Dir: root, Env: g.Env},
+		Git:       Git{Dir: root, Env: g.Env, ExtraEnv: g.ExtraEnv},
 		Root:      root,
 		GitDir:    gitDir,
 		CommonDir: filepath.Clean(common),

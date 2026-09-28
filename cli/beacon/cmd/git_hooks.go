@@ -79,6 +79,7 @@ var gitHookPostRewriteCmd = &cobra.Command{
 
 var gitSetupOpts struct {
 	allowHooksPath bool
+	shareNotes     bool
 }
 
 func runGitSetup(cmd *cobra.Command, _ []string) error {
@@ -87,10 +88,15 @@ func runGitSetup(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	result, err := gitlink.InstallHooks(ctx, repo, gitlink.InstallOptions{
+	opts := gitlink.InstallOptions{
 		BeaconPath:     beaconExecutable(),
 		AllowHooksPath: gitSetupOpts.allowHooksPath,
-	})
+	}
+	if cmd.Flags().Changed("share-notes") {
+		share := gitSetupOpts.shareNotes
+		opts.ShareNotes = &share
+	}
+	result, err := gitlink.InstallHooks(ctx, repo, opts)
 	out := cmd.OutOrStdout()
 	if err != nil {
 		switch {
@@ -99,7 +105,16 @@ func runGitSetup(cmd *cobra.Command, _ []string) error {
 				"Add this line to its post-commit hook:\n\n    %s\n\n"+
 				"or run `beacon git setup --hooks-path` to install into that directory anyway", err, result.Hooks.Dir, gitlink.HookCall("post-commit"))
 		case errors.Is(err, gitlink.ErrForeignHook):
-			return fmt.Errorf("%w; Beacon only edits shell hooks. Call Beacon from that hook instead:\n\n    %s", err, gitlink.HookCall("post-commit"))
+			var foreign *gitlink.ForeignHookError
+			hook := "post-commit"
+			if errors.As(err, &foreign) && foreign.Hook != "" {
+				hook = foreign.Hook
+			}
+			msg := fmt.Sprintf("%v; Beacon only edits shell hooks, so nothing was installed. Call Beacon from that %s hook instead:\n\n    %s", err, hook, gitlink.HookCall(hook))
+			if hook == gitlink.ShareHook {
+				msg += "\n\nor run `beacon git setup` without --share-notes to link commits without sharing them"
+			}
+			return errors.New(msg)
 		}
 		return err
 	}
@@ -111,6 +126,15 @@ func runGitSetup(cmd *cobra.Command, _ []string) error {
 	}
 	if result.RewriteRefSet {
 		fmt.Fprintf(out, "set       notes.rewriteRef = %s\n", gitlink.NotesRef)
+	}
+	for _, remote := range result.FetchAdded {
+		fmt.Fprintf(out, "set       remote.%s.fetch += %s\n", remote, gitlink.FetchRefspec(remote))
+	}
+	for _, remote := range result.FetchRemoved {
+		fmt.Fprintf(out, "unset     remote.%s.fetch %s\n", remote, gitlink.FetchRefspec(remote))
+	}
+	if opts.ShareNotes != nil && *opts.ShareNotes {
+		fmt.Fprintf(out, "Commit links are shared: each `git push` also pushes %s to the same remote, and `git fetch` brings teammates' links.\n", gitlink.NotesRef)
 	}
 	fmt.Fprintln(out, "New commits in this repository are linked to the agent sessions that wrote them.")
 	fmt.Fprintln(out, "See them with `beacon git notes`; link an older commit with `beacon git link <commit>`.")
@@ -136,6 +160,9 @@ func runGitRemove(cmd *cobra.Command, _ []string) error {
 	}
 	if result.RewriteRefRemoved {
 		fmt.Fprintf(out, "unset     notes.rewriteRef = %s\n", gitlink.NotesRef)
+	}
+	for _, remote := range result.FetchRemoved {
+		fmt.Fprintf(out, "unset     remote.%s.fetch %s\n", remote, gitlink.FetchRefspec(remote))
 	}
 	fmt.Fprintf(out, "Links already written stay in %s.\n", gitlink.NotesRef)
 	return nil
@@ -180,6 +207,14 @@ func runGitStatus(cmd *cobra.Command, _ []string) error {
 		rewrite = "set"
 	}
 	fmt.Fprintf(out, "rewriteRef  %s\n", rewrite)
+	sharing := "off (`beacon git setup --share-notes` turns it on)"
+	if status.Sharing {
+		sharing = "on: pushes share links"
+	}
+	fmt.Fprintf(out, "sharing     %s\n", sharing)
+	for _, remote := range status.FetchRemotes {
+		fmt.Fprintf(out, "            fetches from %s bring its links\n", remote)
+	}
 	return nil
 }
 
@@ -208,6 +243,9 @@ func gitPostCommit(ctx context.Context) (gitlink.Result, bool) {
 	if err != nil {
 		return gitlink.Result{}, false
 	}
+	// The note is the link; the event is its echo in the session's timeline. A log the hook cannot
+	// write (a system-mode log this user may not append to) costs only the echo.
+	_ = recordLinkEvents(ctx, repo, result)
 	return result, true
 }
 
@@ -273,4 +311,5 @@ func init() {
 	}
 	gitHookPostCommitCmd.Flags().StringVar(&gitOpts.logPath, "log-path", "", "Runtime JSONL log to read sessions from (default the local runtime log)")
 	gitSetupCmd.Flags().BoolVar(&gitSetupOpts.allowHooksPath, "hooks-path", false, "Install into core.hooksPath's directory when it is set")
+	gitSetupCmd.Flags().BoolVar(&gitSetupOpts.shareNotes, "share-notes", false, "Share links with remotes: push them with each git push and fetch teammates' (--share-notes=false turns it off)")
 }

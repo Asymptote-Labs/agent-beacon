@@ -188,7 +188,8 @@ type LinkedCommit struct {
 }
 
 // ListLinked walks up to limit commits reachable from rev (HEAD when empty), newest first, and
-// returns those whose Beacon note names at least one session.
+// returns those whose Beacon note names at least one session. Links fetched from remotes (see
+// RemoteNotesPrefix) are included alongside local ones.
 func ListLinked(ctx context.Context, g Git, rev string, limit int) ([]LinkedCommit, error) {
 	if rev == "" {
 		rev = "HEAD"
@@ -196,13 +197,27 @@ func ListLinked(ctx context.Context, g Git, rev string, limit int) ([]LinkedComm
 	if limit <= 0 {
 		limit = 20
 	}
-	if exists, err := refExists(ctx, g, NotesRef); err != nil || !exists {
+	args := []string{"log", "--no-notes"}
+	if exists, err := refExists(ctx, g, NotesRef); err != nil {
+		return nil, err
+	} else if exists {
+		args = append(args, "--notes="+NotesRef)
+	}
+	tracking, err := TrackingRefs(ctx, g)
+	if err != nil {
 		return nil, err
 	}
+	if len(tracking) > 0 {
+		args = append(args, "--notes="+RemoteNotesPrefix+"*")
+	}
+	if len(args) == 2 {
+		return nil, nil
+	}
 	// Records end in RS and fields are split by NUL, so a note or subject containing newlines
-	// cannot shift fields. --no-notes first clears any notes.displayRef the user configured.
-	out, err := g.RunRaw(ctx, "log", "--no-notes", "--notes="+NotesRef, "-n", strconv.Itoa(limit),
-		"--format=%H%x00%ct%x00%s%x00%N%x1e", rev, "--")
+	// cannot shift fields. --no-notes first clears any notes.displayRef the user configured. With
+	// several notes refs, %N holds each one's note in turn; ParseNote folds repeats.
+	args = append(args, "-n", strconv.Itoa(limit), "--format=%H%x00%ct%x00%s%x00%N%x1e", rev, "--")
+	out, err := g.RunRaw(ctx, args...)
 	if err != nil {
 		return nil, err
 	}
