@@ -232,6 +232,40 @@ approval hook, Beacon emits an `approval.allowed` event carrying `approval.requi
 approval-shaped detections have something to match. Nothing was gated there, so those events are
 `inferred`.
 
+## Downstream consumers
+
+Beacon Managed MCP searches and reads the session history an endpoint forwards to Beacon Managed,
+and it works from this normalized schema. A schema change can therefore change what Beacon Managed
+search finds, in three ways:
+
+1. **Searchable fields.** Beacon Managed grep searches these fields: `prompt`, `message`,
+   `gen_ai.{input,output,system_instructions,tool,retrieval}`, `tool`, `command`, `file`, `mcp`,
+   `approval`, `policy`, `error`, and `health`. Content in a new field is forwarded and stored, but
+   grep does not find it until Beacon Managed searches that field too.
+2. **Event types and message shapes.** Beacon Managed presents events the way the local trace view
+   (`internal/endpoint/dashboard/traces.go`) does. A new event type or message shape appears there
+   as a generic event until Beacon Managed supports it.
+3. **Harness names.** Beacon Managed groups sessions by the canonical names `NormalizeHarnessName`
+   in `pkg/asymptoteobserve/harness.go` produces. A new harness or spelling is grouped correctly in
+   Beacon Managed only once Beacon Managed knows it too.
+
+Release a change to any of these together with the matching Beacon Managed change.
+
+### What Beacon Managed grep cannot see
+
+Two limits on what Beacon Managed grep and read return come from the endpoint, and both are intended:
+
+- **Per-string limit.** `DefaultStringLimit = 4096` in `pkg/asymptoteobserve/privacy.go` caps each
+  retained string before it is written. Text past the first 4 KB of a long tool output, command
+  output, or diff is never written locally, so it is never forwarded and Beacon Managed grep cannot
+  match it. The event records the cut with `field_truncated` and `content.truncated`. This trades
+  completeness for privacy and a bounded event size; see
+  [Redaction and size limits](/security/retention-redaction).
+- **Metadata-only forwarding.** An endpoint connected to Beacon Managed in Metadata-only mode
+  removes prompts, responses, reasoning, tool arguments and results, command output, and diffs
+  before upload. Those are the fields grep searches, so for such endpoints Beacon Managed grep and
+  read return little beyond identifiers, counts, and token usage.
+
 ## Related
 
 <Columns cols={2}>
