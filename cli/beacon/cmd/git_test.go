@@ -23,6 +23,7 @@ func runGit(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	gitOpts = gitOptions{}
 	gitSetupOpts.allowHooksPath = false
+	gitSetupOpts.shareNotes = false
 	var reset func(*cobra.Command)
 	reset = func(c *cobra.Command) {
 		c.Flags().VisitAll(func(f *pflag.Flag) {
@@ -184,4 +185,32 @@ func TestPrintGitLinkResultLabelsTheLimit(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", want, text)
 		}
 	}
+}
+
+// runGitStderr is runGit with stderr captured into w.
+func runGitStderr(t *testing.T, w *bytes.Buffer, args ...string) (string, error) {
+	t.Helper()
+	var stdout bytes.Buffer
+	gitOpts = gitOptions{}
+	var reset func(*cobra.Command)
+	reset = func(c *cobra.Command) {
+		c.Flags().VisitAll(func(f *pflag.Flag) {
+			_ = f.Value.Set(f.DefValue)
+			f.Changed = false
+		})
+		for _, sub := range c.Commands() {
+			reset(sub)
+		}
+	}
+	reset(gitCmd)
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(w)
+	rootCmd.SetArgs(append([]string{"git"}, args...))
+	t.Cleanup(func() {
+		rootCmd.SetOut(nil)
+		rootCmd.SetErr(nil)
+		rootCmd.SetArgs(nil)
+	})
+	err := rootCmd.Execute()
+	return stdout.String(), err
 }
