@@ -1,6 +1,6 @@
 ---
 title: "beacon mcp"
-description: "Expose local Beacon activity to MCP clients"
+description: "Expose Beacon activity to MCP clients, locally and through Beacon Managed"
 ---
 
 ## Command overview
@@ -19,10 +19,27 @@ and the local `memory.db` store next to the endpoint log base directory. It
 supports stdio for desktop MCP clients and loopback HTTP JSON-RPC for local tools
 that connect to a running server.
 
+## Local and Beacon Managed servers
+
+Beacon has two MCP servers, registered under different names so that neither entry overwrites
+the other:
+
+| Server name | What it reads | Commands |
+|---|---|---|
+| `beacon` | This machine's `runtime.jsonl` and approved local memory, served locally over stdio or loopback HTTP | [`serve`](/cli/mcp-serve), [`doctor`](/cli/mcp-doctor) |
+| `beacon-managed` | The session history this endpoint forwards to Beacon Managed, served by Beacon Managed over HTTPS | [`connect`, `disconnect`, `status`](/cli/mcp-connect) |
+
+`beacon mcp connect` registers `beacon-managed` in Claude Code, Codex CLI, Cursor, VS Code,
+Gemini CLI and OpenCode. By default it writes only the URL, and each harness signs in with OAuth.
+With `--token-env`, the config instead references a personal token from beacon.sh → Dashboard →
+MCP Access, held in an environment variable. For other harnesses it prints the steps to add the
+server by hand.
+
 ## Commands
 
 <span id="beacon-mcp-serve" />
 <span id="beacon-mcp-doctor" />
+<span id="beacon-mcp-connect" />
 
 <Columns cols={2}>
   <Card title="beacon mcp serve" icon="server" href="/cli/mcp-serve">
@@ -31,11 +48,14 @@ that connect to a running server.
   <Card title="beacon mcp doctor" icon="stethoscope" href="/cli/mcp-doctor">
     Validate local Beacon MCP setup and print client configuration.
   </Card>
+  <Card title="beacon mcp connect" icon="plug" href="/cli/mcp-connect">
+    Register Beacon Managed MCP in every harness, and remove or inspect it with `disconnect` and `status`.
+  </Card>
 </Columns>
 
 ## MCP tools
 
-Beacon exposes these MCP tools:
+The local `beacon` server exposes these MCP tools:
 
 | Tool | Description |
 |------|-------------|
@@ -59,6 +79,9 @@ rather than widening the search.
 
 ## Flags
 
+These flags apply to `serve` and `doctor`. For the flags of `connect`, `disconnect` and `status`,
+see [`beacon mcp connect`](/cli/mcp-connect#flags).
+
 | Flag | Description |
 |------|-------------|
 | `--user` | Use per-user endpoint paths. Enabled by default |
@@ -68,9 +91,11 @@ rather than widening the search.
 | `--addr ADDR` | Loopback HTTP JSON-RPC listen address for `--transport http`. Defaults to `127.0.0.1:8766` |
 
 <Note>
-  `beacon mcp` only reads local Beacon runtime logs and approved local memory. It
-  does not require a hosted Beacon account, and HTTP transport should remain bound
-  to loopback.
+  `beacon mcp serve` and `beacon mcp doctor` only read local Beacon runtime logs and
+  approved local memory. They do not require a Beacon account, and HTTP transport
+  should remain bound to loopback. `beacon mcp connect` is the one `beacon mcp`
+  command that makes a network request: an opt-in check of the Beacon Managed MCP
+  URL before it writes harness configs.
 </Note>
 
 ## Related
@@ -81,6 +106,9 @@ rather than widening the search.
   </Card>
   <Card title="beacon mcp doctor" icon="stethoscope" href="/cli/mcp-doctor">
     Validate local Beacon MCP setup.
+  </Card>
+  <Card title="beacon mcp connect" icon="plug" href="/cli/mcp-connect">
+    Register Beacon Managed MCP in your harnesses.
   </Card>
   <Card title="Connect Cursor and Claude Code" icon="plug" href="/guides/local-testing/mcp#4-connect-cursor-and-claude-code">
     Install Beacon MCP in local assistant clients.

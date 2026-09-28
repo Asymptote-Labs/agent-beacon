@@ -519,3 +519,15 @@ func TestMCPServerNamesDoNotCollide(t *testing.T) {
 		t.Fatal("the Beacon Managed server must not share the local stdio server's name")
 	}
 }
+
+func TestInstallSuggestsMCPConnectOnlyAfterTheWizardChoseManaged(t *testing.T) {
+	var buf bytes.Buffer
+	suggestMCPConnect(&buf, false)
+	if buf.Len() != 0 {
+		t.Fatalf("an unattended or --connect install printed %q", buf.String())
+	}
+	suggestMCPConnect(&buf, true)
+	if !strings.Contains(buf.String(), "beacon mcp connect") {
+		t.Fatalf("got %q", buf.String())
+	}
+}

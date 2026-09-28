@@ -331,7 +331,8 @@
                 "root": "cli/mcp",
                 "pages": [
                   "cli/mcp-serve",
-                  "cli/mcp-doctor"
+                  "cli/mcp-doctor",
+                  "cli/mcp-connect"
                 ]
               },
               "cli/memory",

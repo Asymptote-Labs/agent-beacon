@@ -154,6 +154,14 @@ Or inspect the raw event stream:
 > Local to keep everything on this machine, and disconnect any time with
 > `beacon endpoint disconnect`.
 
+If this endpoint forwards to Beacon Managed, your agents can search that history over MCP:
+
+```bash
+beacon mcp connect
+```
+
+This registers the `beacon-managed` MCP server in Claude Code, Codex CLI, Cursor, VS Code, Gemini CLI, and OpenCode, and each harness signs in with OAuth the first time it connects. No token is written. `beacon mcp disconnect` removes exactly what it added. The local `beacon` MCP server (`beacon mcp serve`) is separate and never touches the network. See [`beacon mcp connect`](https://docs.beacon.sh/cli/mcp-connect).
+
 Inspect the account used during interactive setup:
 
 ```bash

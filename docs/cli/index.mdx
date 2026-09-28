@@ -41,7 +41,7 @@ Top-level Agent Beacon CLI commands.
 | [`beacon login`](/cli/account-auth) | Sign in through beacon.sh without enabling telemetry forwarding. |
 | [`beacon logout`](/cli/account-auth#sign-out) | Revoke and remove the local Beacon account session. |
 | [`beacon memory`](/cli/memory) | Evaluate traces, review candidates, and install approved project memory. |
-| [`beacon mcp`](/cli/mcp) | Expose local Beacon activity to MCP clients. |
+| [`beacon mcp`](/cli/mcp) | Expose Beacon activity to MCP clients, locally and through Beacon Managed. |
 | [`beacon rules`](/cli/rules) | Manage and author Beacon threat-detection rules. |
 | [`beacon scan`](/cli/scan) | Run threat-detection rules over local endpoint telemetry. |
 | [`beacon status`](/cli/endpoint-status) | Alias for `beacon endpoint status`. |
@@ -137,6 +137,9 @@ Expose local Beacon runtime activity through MCP.
 |---------|-------------|
 | [`beacon mcp serve`](/cli/mcp-serve) | Run the local Beacon MCP server over stdio or loopback HTTP JSON-RPC. |
 | [`beacon mcp doctor`](/cli/mcp-doctor) | Validate local Beacon MCP setup and print client configuration. |
+| [`beacon mcp connect`](/cli/mcp-connect) | Register Beacon Managed MCP (`beacon-managed`) in every detected harness. |
+| [`beacon mcp disconnect`](/cli/mcp-connect#beacon-mcp-disconnect) | Remove the Beacon Managed MCP entries that connect wrote. |
+| [`beacon mcp status`](/cli/mcp-connect#beacon-mcp-status) | Show where Beacon Managed MCP is configured. |
 
 ## beacon endpoint
 
