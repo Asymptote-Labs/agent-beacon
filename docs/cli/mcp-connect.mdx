@@ -1,0 +1,257 @@
+---
+title: "beacon mcp connect"
+description: "Register Beacon Managed MCP in every harness on this machine"
+---
+
+## Command overview
+
+`beacon mcp connect` adds the Beacon Managed MCP server to the MCP configuration of each harness it
+finds, so an agent can search the session history this endpoint forwards to Beacon Managed.
+`beacon mcp disconnect` removes exactly what connect added, and `beacon mcp status` shows what is
+configured where.
+
+```bash title="Command syntax"
+beacon mcp connect [--harness a,b] [--url URL] [--token-env NAME] [--dry-run] [--yes] [--force]
+beacon mcp disconnect [--harness a,b]
+beacon mcp status [--harness a,b] [--url URL] [--check] [--json]
+```
+
+The server is registered as **`beacon-managed`**. The local server that
+[`beacon mcp serve`](/cli/mcp-serve) runs is called **`beacon`**. The two are different servers
+with different names, so neither entry ever overwrites the other:
+
+| Server name | What it reads | Where it runs | Set up with |
+|---|---|---|---|
+| `beacon` | This machine's `runtime.jsonl` and approved local memory | Locally, over stdio or loopback HTTP | [`beacon mcp doctor`](/cli/mcp-doctor) prints the config |
+| `beacon-managed` | Session history this endpoint forwarded to Beacon Managed | Beacon Managed, over HTTPS | `beacon mcp connect` |
+
+Beacon Managed MCP is read-only. Its tools are `beacon_search_sessions`, `beacon_grep`,
+`beacon_read_session`, `beacon_get_event`, `beacon_lookup` and `beacon_usage`.
+
+<Note>
+  `beacon mcp connect` is an explicit, opt-in command. `beacon endpoint install` and the onboarding
+  wizard never run it; after you choose Beacon Managed in the wizard, the install only suggests it.
+  It refuses to run as root, and in CI or without a terminal it runs only with `--yes`.
+</Note>
+
+## `beacon mcp connect`
+
+```bash
+beacon mcp connect
+```
+
+```text title="Example output"
+Beacon Managed MCP: https://mcp.beacon.sh (checked)
+Server name: beacon-managed
+Auth: OAuth; Beacon writes only the URL, and each harness signs in on first use
+
+HARNESS      FILE                               ACTION   AUTH   NOTE
+Claude Code  ~/.claude.json                     add      oauth  via claude CLI
+Codex CLI    ~/.codex/config.toml               add      oauth
+Cursor       ~/.cursor/mcp.json                 present  oauth  already configured by Beacon
+OpenCode     ~/.config/opencode/opencode.jsonc  add      oauth
+
+Write 3 change(s)? Each changed file is backed up first. [y/N] y
+
+✓ Claude Code: added to ~/.claude.json
+✓ Codex CLI: added to ~/.codex/config.toml
+✓ OpenCode: added to ~/.config/opencode/opencode.jsonc
+
+Next steps:
+  Claude Code: In Claude Code, run /mcp, choose beacon-managed, and sign in.
+  Codex CLI: Run `codex mcp login beacon-managed`.
+  Cursor: In Cursor Settings → MCP, find beacon-managed (marked "Needs login") and sign in.
+  OpenCode: Run `opencode mcp auth beacon-managed`.
+  Restart any harness that is already running so it loads the new server.
+```
+
+Connect works in these steps:
+
+1. **Harnesses.** Without `--harness`, connect acts on every harness `beacon endpoint discover`
+   detects. `--harness` accepts the same names as `beacon endpoint install --harness`, such as
+   `claude`, `codex`, `cursor`, `vscode`, `gemini` and `opencode`.
+2. **URL.** The URL is `--url`, or the Beacon Managed URL recorded by
+   [`beacon endpoint connect`](/cli/endpoint-connect) with `/mcp` added. The Beacon Managed backend
+   may name its own canonical MCP URL, `https://mcp.beacon.sh` in production. When it does, connect
+   uses that URL. Without either, connect stops and asks you to run `beacon endpoint connect` or
+   pass `--url`.
+3. **URL check.** Before writing anything, connect fetches
+   `<origin>/.well-known/oauth-protected-resource` and requires its `resource` to be the URL.
+   The URL must be `https://` (plain `http` is allowed only for a loopback development server).
+   This is the command's only network request. It sends no token or cookie, and it does not
+   follow redirects.
+4. **Plan.** For each harness connect shows the file, the action and the auth mode:
+
+   | Action | Meaning |
+   |---|---|
+   | `add` | No `beacon-managed` entry yet; connect adds one. |
+   | `update` | Beacon's own entry, with a different URL or auth mode; connect updates it. |
+   | `present` | Already configured as asked. Nothing changes. |
+   | `conflict` | A `beacon-managed` entry that Beacon did not write, or one that points at another URL. It is left alone unless you pass `--force`. |
+   | `skip` | The config cannot be read or edited safely, for example because it does not parse. The reason is shown. |
+
+5. **Confirm and write.** Connect asks before writing, unless you pass `--yes`. Each changed file
+   is first backed up next to itself as `<file>.beacon.<UTC time>.bak`, then replaced atomically.
+   The file keeps its permissions, and a file Beacon creates is `0600`.
+
+Running connect again changes nothing. Every file stays byte for byte the same, and no new
+backup is made.
+
+### How files are edited
+
+Harness configs are your files, and several of them hold other servers' credentials. Connect never
+decodes and re-encodes a whole config. It adds or removes its one entry as text, keeping every
+other byte, including comments, trailing commas, indentation and line endings. It then parses the
+result and checks that the only difference from the original is the `beacon-managed` entry.
+If anything else would change, nothing is written. A symlinked config, such as one managed by a
+dotfiles tool, is written through the link.
+
+What connect wrote is recorded in `~/.beacon/mcp/connections.json` (`0600`): the harness, file, URL,
+auth mode, variable name and backup, and never a token. `disconnect` uses this record rather than
+a comment in the config, because some harnesses rewrite their config files and drop comments.
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--harness a,b` | Harnesses to connect. Defaults to every detected harness |
+| `--url URL` | Beacon Managed MCP URL. Defaults to the URL recorded by `beacon endpoint connect` |
+| `--token-env NAME` | Use a personal MCP token read from environment variable `NAME` instead of OAuth |
+| `--dry-run` | Show the plan without checking the URL or writing anything |
+| `--yes` | Write without asking |
+| `--force` | Replace a `beacon-managed` entry that Beacon did not write |
+
+## Authentication: OAuth or a token
+
+**OAuth is the default and the recommended mode.** Connect writes only the URL. The first time the
+harness connects, Beacon Managed answers `401` with a pointer to its OAuth metadata. The harness
+then registers itself, opens a browser, and you approve access on beacon.sh. No secret is written
+by Beacon, and access is revoked from the dashboard.
+
+**A personal token** is for harnesses or setups where browser sign-in does not work. Create one at
+beacon.sh → Dashboard → MCP Access, export it, and connect with `--token-env`:
+
+```bash
+export BEACON_MCP_TOKEN=...   # from beacon.sh → Dashboard → MCP Access
+beacon mcp connect --token-env BEACON_MCP_TOKEN
+```
+
+Each config then references the variable in its harness's own syntax. The token itself is never
+written, and connect refuses a `--token-env` value that looks like a token rather than a variable
+name. The harness must be started from an environment where the variable is set.
+
+<Warning>
+  Beacon does not create MCP tokens. The Beacon account token from `beacon login` is never copied
+  into a harness config, an environment, a log or the command's output.
+</Warning>
+
+## Per-harness notes
+
+Connect writes these entries (OAuth mode shown, then what `--token-env NAME` adds):
+
+| Harness | File | Entry | Token mode | Sign in |
+|---|---|---|---|---|
+| Claude Code | `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json`), user scope. Written with `claude mcp add --scope user` when `claude` is on `PATH` | `{"type": "http", "url": …}` | `headers.Authorization: "Bearer ${NAME}"` | Run `/mcp` and choose `beacon-managed` |
+| Codex CLI | `~/.codex/config.toml` (`$CODEX_HOME`) | `[mcp_servers.beacon-managed]` `url = …` | `bearer_token_env_var = "NAME"` | `codex mcp login beacon-managed` |
+| Cursor | `~/.cursor/mcp.json` | `mcpServers.beacon-managed = {"url": …}` | `"Bearer ${env:NAME}"` | Cursor Settings → MCP, then sign in where it says "Needs login" |
+| VS Code | User-profile `mcp.json` (next to the user `settings.json`) | `servers.beacon-managed = {"type": "http", "url": …}` | `"Bearer ${input:beacon-managed-token}"` and a password prompt input | "MCP: List Servers", then start `beacon-managed` |
+| Gemini CLI | `~/.gemini/settings.json` | `mcpServers.beacon-managed = {"url": …, "type": "http"}` | `"Bearer ${NAME}"` | `/mcp auth beacon-managed` |
+| OpenCode | `~/.config/opencode/opencode.json`, or `opencode.jsonc` | `mcp.beacon-managed = {"type": "remote", "url": …, "enabled": true}` | `"oauth": false`, `"Bearer {env:NAME}"` | `opencode mcp auth beacon-managed` |
+
+- **VS Code** asks for the token the first time the server starts and keeps it in its own secret
+  storage, so in token mode it does not read `NAME`.
+- **Gemini CLI** loads MCP servers only in trusted folders. In an untrusted folder,
+  `beacon-managed` shows as disabled.
+- **OpenCode** reads `opencode.json` when both it and `opencode.jsonc` exist. Connect edits the
+  same file OpenCode's own `opencode mcp add` would.
+
+### Harnesses you add by hand
+
+These harnesses have no MCP OAuth support Beacon has confirmed, so connect writes nothing for them.
+It prints the command or snippet instead, with a `<token>` placeholder for a token from
+beacon.sh → Dashboard → MCP Access:
+
+- GitHub Copilot CLI: `copilot mcp add --transport http beacon-managed <url> --header "Authorization: Bearer <token>"`
+- Cline: a `streamableHttp` entry in `cline_mcp_settings.json`
+- Kiro: `~/.kiro/settings/mcp.json`
+- Devin Desktop: `~/.codeium/windsurf/mcp_config.json` (`serverUrl`)
+- Qwen Code: `~/.qwen/settings.json` (`httpUrl`)
+- Factory Droid: `droid mcp add beacon-managed <url> --type http --header …`
+- Hermes Agent: `mcp_servers` in `~/.hermes/config.yaml`
+- Kimi Code: `kimi mcp add --transport http beacon-managed <url> --header …`
+- Antigravity CLI: `~/.gemini/antigravity/mcp_config.json` (`serverUrl`)
+
+Other detected runtimes are listed as not connected.
+
+## `beacon mcp disconnect`
+
+```bash
+beacon mcp disconnect
+beacon mcp disconnect --harness codex
+```
+
+Disconnect removes only entries that the record says Beacon wrote and that still point at the
+URL Beacon wrote. An entry you added yourself, or one you have since pointed somewhere else, is
+left alone.
+
+- When a file has not changed since connect wrote it, disconnect restores the exact original
+  bytes from the backup.
+- Otherwise, disconnect removes only the `beacon-managed` entry. It also removes any
+  `mcpServers`-style container Beacon created, if nothing else is in it.
+- A config file that connect created is deleted once nothing else is in it.
+
+Backups are kept.
+
+## `beacon mcp status`
+
+```bash
+beacon mcp status
+beacon mcp status --check
+beacon mcp status --json
+```
+
+```text title="Example output"
+Server name: beacon-managed
+Beacon Managed MCP URL: https://mcp.beacon.sh
+URL check: ok
+
+HARNESS             CONFIGURED  URL                    AUTH     BY BEACON  FILE
+Codex CLI           yes         https://mcp.beacon.sh  oauth    yes        ~/.codex/config.toml
+Cursor              yes         https://mcp.beacon.sh  oauth    yes        ~/.cursor/mcp.json
+OpenCode            no          -                      -        -          ~/.config/opencode/opencode.jsonc
+GitHub Copilot CLI  unknown     -                      manual   -          configured by hand; Beacon does not read this runtime's MCP config
+```
+
+Status reads configs and never changes them. `AUTH` is `oauth`, `token-env` (the entry references
+a variable), or `token` (the entry has a header written outside Beacon, whose value is never
+shown). Status makes no network request unless you pass `--check`, which runs the same URL check
+as connect and exits non-zero if it fails.
+
+## What Beacon Managed MCP can find
+
+Beacon Managed MCP searches what this endpoint forwarded, which limits what it can find:
+
+- Each retained string is capped at 4 KB before it is written locally. Text past that point in a
+  long tool output or diff is never forwarded, so it cannot be grepped.
+- An endpoint connected in Metadata-only mode forwards no prompts, responses, tool arguments or
+  output. For such an endpoint, grep and read return little beyond identifiers, counts and token
+  usage.
+
+See [Downstream consumers](/telemetry-schema/normalization#downstream-consumers).
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon mcp" icon="server" href="/cli/mcp">
+    The local Beacon MCP server and its tools.
+  </Card>
+  <Card title="beacon mcp doctor" icon="stethoscope" href="/cli/mcp-doctor">
+    Validate the local server and print its client config.
+  </Card>
+  <Card title="beacon endpoint connect" icon="cloud-arrow-up" href="/cli/endpoint-connect">
+    Connect this endpoint to Beacon Managed.
+  </Card>
+  <Card title="Redaction and size limits" icon="scissors" href="/security/retention-redaction">
+    What is retained, truncated and forwarded.
+  </Card>
+</Columns>

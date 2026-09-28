@@ -522,6 +522,18 @@ func TestMCPServerNamesDoNotCollide(t *testing.T) {
 	}
 }
 
+func TestInstallSuggestsMCPConnectOnlyAfterTheWizardChoseManaged(t *testing.T) {
+	var buf bytes.Buffer
+	suggestMCPConnect(&buf, false)
+	if buf.Len() != 0 {
+		t.Fatalf("an unattended or --connect install printed %q", buf.String())
+	}
+	suggestMCPConnect(&buf, true)
+	if !strings.Contains(buf.String(), "beacon mcp connect") {
+		t.Fatalf("got %q", buf.String())
+	}
+}
+
 // Regression: the backend names a canonical MCP URL different from the ingest URL plus /mcp, and
 // connect writes the canonical one. status without --check makes no request, so it must compare
 // against the URL connect wrote, not the derived one.
