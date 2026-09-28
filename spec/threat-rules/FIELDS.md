@@ -151,4 +151,11 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.user.uid` | string |
 | `e.user_agent.name` | string |
 | `e.user_agent.version` | string |
+| `e.vcs.attribution.changed_files` | int |
+| `e.vcs.attribution.matched_files` | int |
+| `e.vcs.attribution.method` | string |
+| `e.vcs.ref.head.name` | string |
+| `e.vcs.ref.head.revision` | string |
+| `e.vcs.ref.head.type` | string |
+| `e.vcs.repository.url.full` | string |
 | `e.vendor` | string |

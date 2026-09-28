@@ -208,6 +208,9 @@ func gitPostCommit(ctx context.Context) (gitlink.Result, bool) {
 	if err != nil {
 		return gitlink.Result{}, false
 	}
+	// The note is the link; the event is its echo in the session's timeline. A log the hook cannot
+	// write (a system-mode log this user may not append to) costs only the echo.
+	_ = recordLinkEvents(ctx, repo, result)
 	return result, true
 }
 
