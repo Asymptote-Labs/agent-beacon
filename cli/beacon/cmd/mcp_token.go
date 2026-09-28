@@ -71,7 +71,11 @@ func runMCPTokenCreate(cmd *cobra.Command, args []string) error {
 	if name == "" {
 		name = "beacon-cli"
 		if host, err := mcpTokenHostname(); err == nil && host != "" {
-			name = "beacon-cli on " + host
+			candidate := "beacon-cli on " + host
+			if runes := []rune(candidate); len(runes) > account.MaxMCPTokenNameRunes {
+				candidate = string(runes[:account.MaxMCPTokenNameRunes])
+			}
+			name = candidate
 		}
 	}
 	req := account.MCPTokenRequest{Name: name, ExpiresInDays: mcpTokenOpts.expiresInDays}

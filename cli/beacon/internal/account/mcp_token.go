@@ -17,7 +17,8 @@ const (
 	// MaxMCPTokenExpiryDays is the longest lifetime beacon.sh accepts; 0 means the token never
 	// expires.
 	MaxMCPTokenExpiryDays = 366
-	maxMCPTokenNameLength = 100
+	MaxMCPTokenNameRunes  = 100
+	maxMCPTokenNameLength = MaxMCPTokenNameRunes
 	mcpTokenPrefix        = "bcn_mcp_"
 )
 
