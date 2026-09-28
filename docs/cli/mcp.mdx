@@ -27,12 +27,13 @@ the other:
 | Server name | What it reads | Commands |
 |---|---|---|
 | `beacon` | This machine's `runtime.jsonl` and approved local memory, served locally over stdio or loopback HTTP | [`serve`](/cli/mcp-serve), [`doctor`](/cli/mcp-doctor) |
-| `beacon-managed` | The session history this endpoint forwards to Beacon Managed, served by Beacon Managed over HTTPS | [`connect`, `disconnect`, `status`](/cli/mcp-connect) |
+| `beacon-managed` | The session history this endpoint forwards to Beacon Managed, served by Beacon Managed over HTTPS | [`connect`, `disconnect`, `status`, `token create`](/cli/mcp-connect) |
 
 `beacon mcp connect` registers `beacon-managed` in Claude Code, Codex CLI, Cursor, VS Code,
 Gemini CLI and OpenCode. By default it writes only the URL, and each harness signs in with OAuth.
-With `--token-env`, the config instead references a personal token from beacon.sh → Dashboard →
-MCP Access, held in an environment variable. For other harnesses it prints the steps to add the
+With `--token-env`, the config instead references a personal token, created with
+`beacon mcp token create` or at beacon.sh → Dashboard → MCP Access and held in an environment
+variable. For other harnesses it prints the steps to add the
 server by hand.
 
 ## Commands

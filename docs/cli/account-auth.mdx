@@ -95,11 +95,12 @@ Signing out does not stop an already configured managed forwarder. Use `beacon e
 The CLI uses the versioned `2026-09-01` grant contract:
 
 - `POST /api/cli/auth/init` registers the PKCE challenge, state, loopback port, CLI version, operating system, and architecture.
-- `GET /cli/auth?state=...&port=...` authenticates the person and redirects to the loopback callback with `state` and a one-time `exchange_code`.
+- `GET /cli/auth?state=...&port=...&scopes=...` authenticates the person, lists every requested scope (space-separated in `scopes`), and redirects to the loopback callback with `state` and a one-time `exchange_code`.
 - `POST /api/cli/auth/exchange` accepts the exchange code, state, and PKCE verifier. It returns a scoped access token, expiry, user identity, organization memberships, and optional active organization.
+- `POST /api/cli/mcp/tokens` accepts `{"name": ..., "expires_in_days": ...}` with the access token as a Bearer credential and returns a personal Beacon Managed MCP token (`token`, `access_token` metadata, `mcp_url`). It requires `mcp:token:create`.
 - `POST /api/cli/auth/revoke` accepts the access token as a Bearer credential and revokes it.
 
-The intended initial scopes are `profile:read` and `device:enroll`. A later `beacon endpoint connect` can use `device:enroll` to mint a device-specific ingest key without treating the account token as an ingest credential.
+`beacon login` requests `profile:read`, `device:enroll` and `mcp:token:create`. A later `beacon endpoint connect` can use `device:enroll` to mint a device-specific ingest key without treating the account token as an ingest credential, and `beacon mcp token create` uses `mcp:token:create` to mint a personal MCP token. beacon.sh approves the sign-in only when the permissions its page showed match the ones the CLI registered, so a crafted link cannot hide one. A session from an older `beacon login` lacks `mcp:token:create`; run `beacon login` again to create MCP tokens from the CLI.
 
 For that enrollment, `beacon endpoint connect` sends the machine description to
 `POST /api/cli/enroll/account` with the CLI access token. The response uses the
