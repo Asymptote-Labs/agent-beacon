@@ -509,15 +509,20 @@ func runMCPStatus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	report := mcpStatusReport{ServerName: mcpconnect.ServerName}
-	if url, derived, err := mcpconnect.ResolveURL(mcpConnectOpts.url, mcpIngestURL()); err == nil {
-		report.URL = url
+	url, derived, err := mcpconnect.ResolveURL(mcpConnectOpts.url, mcpIngestURL())
+	recorded := mcpconnect.RecordedURL(home)
+	switch {
+	case err != nil && recorded != "":
+		// No --url and no enrollment, but connect has written a URL: that is the one to report
+		// and, with --check, to check. It was given explicitly, so it must match exactly.
+		url, derived, err = recorded, false, nil
+	case err == nil && derived && recorded != "" && !mcpConnectOpts.check:
 		// Without --check nothing is fetched, so a derived URL cannot be turned into the
 		// canonical one; compare against the URL connect checked and wrote instead.
-		if derived && !mcpConnectOpts.check {
-			if recorded := mcpconnect.RecordedURL(home); recorded != "" {
-				report.URL = recorded
-			}
-		}
+		url = recorded
+	}
+	if err == nil {
+		report.URL = url
 		if mcpConnectOpts.check {
 			if canonical, err := mcpconnect.CheckURL(cmd.Context(), mcpHTTPClient, url, derived); err != nil {
 				report.Check = "failed: " + err.Error()
@@ -525,8 +530,6 @@ func runMCPStatus(cmd *cobra.Command, args []string) error {
 				report.URL, report.Check = canonical, "ok"
 			}
 		}
-	} else if recorded := mcpconnect.RecordedURL(home); recorded != "" && !mcpConnectOpts.check {
-		report.URL = recorded
 	} else if mcpConnectOpts.check {
 		report.Check = "failed: " + err.Error()
 	}

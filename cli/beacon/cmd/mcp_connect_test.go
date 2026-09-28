@@ -571,3 +571,24 @@ func TestMCPStatusFallsBackToTheRecordedURLWithoutAnEnrollment(t *testing.T) {
 		t.Fatalf("err = %v\n%s", err, stdout)
 	}
 }
+
+// Regression: after `connect --url` on an endpoint with no enrollment, `status --check` must check
+// the URL connect wrote rather than fail for want of one.
+func TestMCPStatusCheckUsesTheRecordedURLWithoutAnEnrollment(t *testing.T) {
+	fx := newMCPFixture(t, "cursor")
+	if _, _, err := runMCP(t, "connect", "--url", fx.url, "--yes"); err != nil {
+		t.Fatal(err)
+	}
+	stdout, _, err := runMCP(t, "status", "--check")
+	if err != nil || !strings.Contains(stdout, "URL check: ok") || !strings.Contains(stdout, "Beacon Managed MCP URL: "+fx.url) {
+		t.Fatalf("err = %v\n%s", err, stdout)
+	}
+	// With nothing recorded and no enrollment, --check still fails, and says why.
+	if _, _, err := runMCP(t, "disconnect"); err != nil {
+		t.Fatal(err)
+	}
+	stdout, _, err = runMCP(t, "status", "--check")
+	if err == nil || !strings.Contains(stdout, "URL check: failed") {
+		t.Fatalf("err = %v\n%s", err, stdout)
+	}
+}
