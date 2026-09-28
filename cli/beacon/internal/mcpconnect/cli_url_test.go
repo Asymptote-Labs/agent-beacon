@@ -226,3 +226,36 @@ func TestCheckURLFailures(t *testing.T) {
 		}
 	}
 }
+
+// Regression: when replacing through the CLI, a failed `mcp add` must put back the entry the
+// preceding `mcp remove` took out.
+func TestClaudeCLIFailedAddRestoresTheEntryItRemoved(t *testing.T) {
+	home := isolate(t)
+	opts, fake := claudeOptions(t, home)
+	opts.Force = true
+	original := `{"numStartups": 3, "mcpServers": {"beacon-managed": {"type": "http", "url": "https://elsewhere.example", "headers": {"X-Team": "a"}}}}`
+	writeFile(t, fake.path, original)
+	run := fake.run
+	opts.Run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if len(args) > 1 && args[1] == "add" {
+			return []byte("boom"), errors.New("exit status 1")
+		}
+		return run(ctx, name, args...)
+	}
+	plan, _ := Plan(opts, []Target{mustTarget(t, "claude")})
+	applied, _ := Apply(context.Background(), opts, plan)
+	if applied[0].Err == nil {
+		t.Fatal("a failed add was reported as success")
+	}
+	st, err := inspect(mustTarget(t, "claude"), fake.path)
+	if err != nil || !st.exists || st.url != "https://elsewhere.example" {
+		t.Fatalf("the removed entry was not put back: %+v %v\n%s", st.entry, err, readFile(t, fake.path))
+	}
+	if headers, _ := st.entry["headers"].(map[string]any); headers["X-Team"] != "a" {
+		t.Fatalf("the restored entry lost fields: %+v", st.entry)
+	}
+	got, _ := decodeJSONC(readFile(t, fake.path))
+	if got["numStartups"] == nil {
+		t.Fatal("restoring the entry dropped other state")
+	}
+}
