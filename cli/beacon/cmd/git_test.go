@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
@@ -21,12 +22,18 @@ import (
 func runGit(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	gitOpts = gitOptions{}
-	for _, c := range gitCmd.Commands() {
+	gitSetupOpts.allowHooksPath = false
+	var reset func(*cobra.Command)
+	reset = func(c *cobra.Command) {
 		c.Flags().VisitAll(func(f *pflag.Flag) {
 			_ = f.Value.Set(f.DefValue)
 			f.Changed = false
 		})
+		for _, sub := range c.Commands() {
+			reset(sub)
+		}
 	}
+	reset(gitCmd)
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&stderr)
