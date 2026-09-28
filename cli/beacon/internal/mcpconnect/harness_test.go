@@ -735,8 +735,14 @@ func TestOpenCodePrefersAnExistingConfigFile(t *testing.T) {
 		t.Fatalf("path = %s, want the existing opencode.json", got)
 	}
 	writeFile(t, filepath.Join(dir, "opencode.jsonc"), "{}\n")
+	if got := targetPath(t, target, home); got != filepath.Join(dir, "opencode.json") {
+		t.Fatalf("path = %s, want opencode.json when both exist, as `opencode mcp add` chooses", got)
+	}
+	if err := os.Remove(filepath.Join(dir, "opencode.json")); err != nil {
+		t.Fatal(err)
+	}
 	if got := targetPath(t, target, home); got != filepath.Join(dir, "opencode.jsonc") {
-		t.Fatalf("path = %s, want opencode.jsonc when both exist", got)
+		t.Fatalf("path = %s, want the existing opencode.jsonc", got)
 	}
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
 	if got := targetPath(t, target, home); got != filepath.Join(home, "xdg", "opencode", "opencode.jsonc") {

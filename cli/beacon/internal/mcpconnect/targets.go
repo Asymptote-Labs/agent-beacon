@@ -299,14 +299,15 @@ func vscodeMCPPath(string) (string, error) {
 }
 
 // opencodeConfigPath picks the global config OpenCode's own `opencode mcp add` writes to: an
-// existing opencode.jsonc, else an existing opencode.json, else a new opencode.jsonc.
+// existing opencode.json, else an existing opencode.jsonc, else a new opencode.jsonc. (Checked
+// against opencode 1.18: with both files present it writes opencode.json.)
 func opencodeConfigPath(home string) (string, error) {
 	base := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME"))
 	if base == "" {
 		base = filepath.Join(home, ".config")
 	}
 	dir := filepath.Join(base, "opencode")
-	for _, name := range []string{"opencode.jsonc", "opencode.json"} {
+	for _, name := range []string{"opencode.json", "opencode.jsonc"} {
 		if info, err := os.Stat(filepath.Join(dir, name)); err == nil && !info.IsDir() {
 			return filepath.Join(dir, name), nil
 		}
