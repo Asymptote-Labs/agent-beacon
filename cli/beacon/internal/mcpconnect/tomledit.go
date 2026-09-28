@@ -3,7 +3,6 @@ package mcpconnect
 import (
 	"fmt"
 	"regexp"
-	"runtime"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -32,15 +31,13 @@ func tomlString(value string) string {
 	return jsonString(value)
 }
 
-// tomlLineEnding is the line ending the document already uses.
+// tomlLineEnding is the line ending the document already uses. A new document gets "\n" on every
+// platform, as `codex mcp add` writes it.
 func tomlLineEnding(text string) string {
 	if strings.Contains(text, "\r\n") {
 		return "\r\n"
 	}
-	if strings.Contains(text, "\n") || runtime.GOOS != "windows" {
-		return "\n"
-	}
-	return "\r\n"
+	return "\n"
 }
 
 // tomlBlock renders [mcp_servers.<name>] with fields in the order given.

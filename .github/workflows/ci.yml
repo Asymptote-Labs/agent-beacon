@@ -487,6 +487,7 @@ jobs:
             ./internal/hermessession/... `
             ./internal/learning/... `
             ./internal/managedprivacy/... `
+            ./internal/mcpconnect/... `
             ./internal/mcpserver/... `
             ./internal/onboarding/... `
             ./internal/openclawsession/... `
