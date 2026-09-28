@@ -128,11 +128,12 @@ harness connects, Beacon Managed answers `401` with a pointer to its OAuth metad
 then registers itself, opens a browser, and you approve access on beacon.sh. No secret is written
 by Beacon, and access is revoked from the dashboard.
 
-**A personal token** is for harnesses or setups where browser sign-in does not work. Create one at
-beacon.sh → Dashboard → MCP Access, export it, and connect with `--token-env`:
+**A personal token** is for harnesses or setups where browser sign-in does not work. Create one
+with `beacon mcp token create` (or at beacon.sh → Dashboard → MCP Access), export it, and connect
+with `--token-env`:
 
 ```bash
-export BEACON_MCP_TOKEN=...   # from beacon.sh → Dashboard → MCP Access
+export BEACON_MCP_TOKEN="$(beacon mcp token create --name laptop)"
 beacon mcp connect --token-env BEACON_MCP_TOKEN
 ```
 
@@ -141,9 +142,32 @@ written, and connect refuses a `--token-env` value that looks like a token rathe
 name. The harness must be started from an environment where the variable is set.
 
 <Warning>
-  Beacon does not create MCP tokens. The Beacon account token from `beacon login` is never copied
-  into a harness config, an environment, a log or the command's output.
+  `beacon mcp connect` never creates or writes a token. The Beacon account token from
+  `beacon login` is never copied into a harness config, an environment, a log or any command's
+  output.
 </Warning>
+
+## Create a token from the CLI
+
+```bash
+beacon mcp token create [--name NAME] [--expires-in-days N] [--json]
+```
+
+`beacon mcp token create` uses your `beacon login` session to create a personal MCP token. The
+token is printed to stdout once and cannot be shown again; its name, prefix, expiry and the MCP URL
+go to stderr, so `$(...)` captures only the token. `--json` prints the token and its details as
+JSON on stdout instead. Beacon never writes the token to a file.
+
+| Flag | Meaning |
+|---|---|
+| `--name NAME` | Name shown in the dashboard (default `beacon-cli on <hostname>`) |
+| `--expires-in-days N` | Days until the token expires, 1 to 366, or 0 for never (default 90) |
+| `--json` | Print the token and its details as JSON |
+
+The token reads your Beacon Managed data, counts toward the limit of 25 active tokens, and is
+revoked at beacon.sh → Dashboard → MCP Access. It needs the `mcp:token:create` permission, which
+`beacon login` requests and the sign-in page lists; a session from an older `beacon login` is
+refused with a prompt to sign in again.
 
 ## Per-harness notes
 

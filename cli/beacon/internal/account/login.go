@@ -34,7 +34,14 @@ const (
 	CLIGrantVersion   = "2026-09-01"
 	ScopeProfileRead  = "profile:read"
 	ScopeDeviceEnroll = "device:enroll"
+	// ScopeMCPTokenCreate lets the account token mint personal Beacon Managed MCP
+	// tokens (`beacon mcp token create`). The sign-in page lists it, and beacon.sh
+	// approves the sign-in only when the permissions it showed match these.
+	ScopeMCPTokenCreate = "mcp:token:create"
 )
+
+// LoginScopes are the permissions every `beacon login` asks for.
+var LoginScopes = []string{ScopeProfileRead, ScopeDeviceEnroll, ScopeMCPTokenCreate}
 
 type LoginOptions struct {
 	BaseURL     string
@@ -180,13 +187,13 @@ func Login(ctx context.Context, opts LoginOptions) (*Session, error) {
 			Arch:         runtime.GOARCH,
 			GrantVersion: CLIGrantVersion,
 		},
-		Scopes: []string{ScopeProfileRead, ScopeDeviceEnroll},
+		Scopes: LoginScopes,
 	}, nil); err != nil {
 		return nil, fmt.Errorf("start Beacon sign-in: %w", err)
 	}
 
 	port := callback.Port()
-	loginURL := buildLoginURL(baseURL, pkce.State, port)
+	loginURL := buildLoginURL(baseURL, pkce.State, port, LoginScopes)
 	report := opts.OnPrompt
 	if report != nil {
 		out = io.Discard
@@ -352,7 +359,10 @@ func SSHForwardCommand(port int) string {
 	return fmt.Sprintf("ssh -L %d:127.0.0.1:%d <this machine>", port, port)
 }
 
-func buildLoginURL(baseURL, state string, port int) string {
+// buildLoginURL is the sign-in page for this request. scopes goes along space-separated so the
+// page shows every permission requested; beacon.sh refuses the approval if they differ from the
+// ones sent to LoginInitPath.
+func buildLoginURL(baseURL, state string, port int, scopes []string) string {
 	u, err := url.Parse(baseURL + LoginPagePath)
 	if err != nil {
 		return baseURL + LoginPagePath
@@ -360,7 +370,8 @@ func buildLoginURL(baseURL, state string, port int) string {
 	query := u.Query()
 	query.Set("state", state)
 	query.Set("port", fmt.Sprint(port))
-	u.RawQuery = query.Encode()
+	query.Set("scopes", strings.Join(scopes, " "))
+	u.RawQuery = strings.ReplaceAll(query.Encode(), "+", "%20")
 	return u.String()
 }
 

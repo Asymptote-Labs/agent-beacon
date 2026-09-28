@@ -83,6 +83,12 @@ func (s *fakeAuthService) approve(t *testing.T) func(string) error {
 		if parsed.Query().Get("code_challenge") != "" {
 			t.Errorf("login URL leaked code challenge: %s", rawURL)
 		}
+		if got, want := parsed.Query().Get("scopes"), strings.Join(LoginScopes, " "); got != want {
+			t.Errorf("login URL scopes = %q, want %q", got, want)
+		}
+		if strings.Contains(parsed.RawQuery, "+") {
+			t.Errorf("login URL encodes spaces as +: %s", rawURL)
+		}
 		state, port := parsed.Query().Get("state"), parsed.Query().Get("port")
 		go func() {
 			callbackURL := fmt.Sprintf("http://127.0.0.1:%s/callback?state=%s&exchange_code=code-123", port, state)
@@ -131,7 +137,7 @@ func TestLoginUsesPKCEAndReturnsPrivateSession(t *testing.T) {
 		t.Fatalf("client payload = %#v", client)
 	}
 	scopes := service.init["scopes"].([]any)
-	if len(scopes) != 2 || scopes[0] != ScopeProfileRead || scopes[1] != ScopeDeviceEnroll {
+	if len(scopes) != 3 || scopes[0] != ScopeProfileRead || scopes[1] != ScopeDeviceEnroll || scopes[2] != ScopeMCPTokenCreate {
 		t.Fatalf("requested scopes = %#v", scopes)
 	}
 	if service.exchange["state"] != service.init["state"] || service.exchange["exchange_code"] != "code-123" || service.exchange["code_verifier"] == "" {
