@@ -356,6 +356,7 @@
                 ]
               },
               "cli/handoff",
+              "cli/git",
               "cli/token-usage",
               "cli/version"
             ]
