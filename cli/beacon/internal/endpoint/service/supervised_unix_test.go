@@ -50,6 +50,62 @@ func TestPidRunsProgramReadsProcCmdline(t *testing.T) {
 	}
 }
 
+// Regression: cmd.Start returns before the kernel publishes the child's argv, so the collector's
+// cmdline reads empty for a moment after Load. That must not be taken for another program.
+func TestPidRunsProgramWaitsForAnExecInProgress(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{"self", "4242", "4343"} {
+		if err := os.Mkdir(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, pid := range []string{"4242", "4343"} {
+		if err := os.WriteFile(filepath.Join(root, pid, "cmdline"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldRoot, oldRetries, oldDelay := procRoot, cmdlineRetries, cmdlineRetryDelay
+	procRoot, cmdlineRetries, cmdlineRetryDelay = root, 50, 5*time.Millisecond
+	t.Cleanup(func() { procRoot, cmdlineRetries, cmdlineRetryDelay = oldRoot, oldRetries, oldDelay })
+
+	// 4242 finishes its exec a little later; 4343 never shows arguments (a zombie).
+	go func() {
+		time.Sleep(40 * time.Millisecond)
+		_ = os.WriteFile(filepath.Join(root, "4242", "cmdline"), []byte("/tmp/beacon-fake-collector\x00--config\x00x\x00"), 0o644)
+	}()
+	if !pidRunsProgram(4242, "/tmp/beacon-fake-collector") {
+		t.Error("a collector still finishing its exec was taken for another program")
+	}
+	start := time.Now()
+	if pidRunsProgram(4343, "/tmp/beacon-fake-collector") {
+		t.Error("a process that never shows arguments must not match")
+	}
+	if waited := time.Since(start); waited > 2*time.Second {
+		t.Errorf("waited %v for a process with no arguments; the wait must stay bounded", waited)
+	}
+}
+
+// The same race against a real process: ask straight after cmd.Start returns, the way Load then
+// Status does. Before the fix this failed on most attempts on Linux.
+func TestPidRunsProgramRightAfterStart(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("reads procfs")
+	}
+	stub := stubCollectorPath(t)
+	for i := 0; i < 20; i++ {
+		cmd := exec.Command(stub, "--config", "unused")
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		ok := pidRunsProgram(cmd.Process.Pid, stub)
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		if !ok {
+			t.Fatalf("attempt %d: a collector started a moment ago was not recognised", i)
+		}
+	}
+}
+
 // A pidfile that outlived its collector names whatever the kernel gave that pid to next. Status
 // must not call that process the collector, and unload must not signal it.
 func TestSupervisedIgnoresARecycledPID(t *testing.T) {
