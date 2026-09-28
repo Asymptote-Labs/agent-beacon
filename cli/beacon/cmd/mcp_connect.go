@@ -95,7 +95,7 @@ func init() {
 		c.Flags().StringSliceVar(&mcpConnectOpts.harnesses, "harness", nil, "Harnesses to act on, comma-separated (default: every detected harness)")
 	}
 	for _, c := range []*cobra.Command{mcpConnectCmd, mcpStatusCmd} {
-		c.Flags().StringVar(&mcpConnectOpts.url, "url", "", "Beacon Managed MCP URL (default: the URL recorded by `beacon endpoint connect`)")
+		c.Flags().StringVar(&mcpConnectOpts.url, "url", "", "Beacon Managed MCP URL (default: the URL recorded by beacon endpoint connect)")
 	}
 	f := mcpConnectCmd.Flags()
 	f.StringVar(&mcpConnectOpts.tokenEnv, "token-env", "", "Reference a personal MCP token in this environment variable instead of using OAuth")
@@ -573,6 +573,9 @@ func printStatus(out io.Writer, home string, report mcpStatusReport) {
 			if report.URL != "" && !strings.EqualFold(strings.TrimRight(r.URL, "/"), strings.TrimRight(report.URL, "/")) {
 				configured = "yes (other URL)"
 			}
+		}
+		if r.Auth == string(mcpconnect.AuthManual) {
+			configured = "unknown"
 		}
 		auth := r.Auth
 		if auth == "" {
