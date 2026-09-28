@@ -16,6 +16,9 @@ type field struct {
 	Value any
 }
 
+// rawJSON is a value inserted exactly as written, such as an entry's original text.
+type rawJSON string
+
 // jsonStyle is the formatting an edit copies from the document it goes into.
 type jsonStyle struct {
 	unit string // one level of indentation
@@ -65,6 +68,8 @@ func jsonString(value string) string {
 // indentation, or on one line when the surrounding object is written on one line.
 func renderJSON(value any, style jsonStyle, depth int, compact bool, sep string) string {
 	switch v := value.(type) {
+	case rawJSON:
+		return string(v)
 	case ordered:
 		if len(v) == 0 {
 			return "{}"
@@ -277,6 +282,25 @@ func insertJSONMember(text string, path []string, key string, value any) (update
 	sep := keySeparator(text, parent)
 	rendered := jsonString(insertKey) + sep + renderJSON(insertValue, style, parent.depth+1, compact, sep)
 	return insertItem(text, parent, items, rendered, style), len(missing), nil
+}
+
+// rawMember returns the original text of path.key's value, as JSON with comments stripped.
+func rawMember(text string, path []string, key string) (string, bool) {
+	root, err := parseJSONC(text)
+	if err != nil || root == nil || root.kind != jsonObject {
+		return "", false
+	}
+	chain, err := lookupObject(root, path)
+	if err != nil || len(chain) != len(path)+1 {
+		return "", false
+	}
+	_, value := chain[len(chain)-1].member(key)
+	if value == nil {
+		return "", false
+	}
+	var buf bytes.Buffer
+	writeStandardJSON(&buf, text, value)
+	return buf.String(), true
 }
 
 // removeJSONMember returns text without path.key. prune is how many of the innermost path objects

@@ -358,6 +358,10 @@ func applyOne(ctx context.Context, opts Options, m *manifest, it Item) (Record, 
 		if recorded && it.Action == ActionUpdate {
 			rec.CreatedParents = max(rec.CreatedParents, prev.CreatedParents)
 			rec.CreatedInputs = rec.CreatedInputs || (prev.CreatedInputs && opts.TokenEnv != "")
+			// This backup still holds Beacon's previous entry, so it is not a state disconnect
+			// may restore: that would put the old entry back and forget it. Keep the backup for
+			// the person, but leave no baseline, so disconnect splices the entry out instead.
+			rec.BeforeSHA256 = ""
 		}
 	}
 	if err := cf.write(updated); err != nil {
@@ -454,6 +458,14 @@ func verifyDisconnect(t Target, before, after string, rec Record) error {
 		return err
 	}
 	deletePath(b, t.container, ServerName, rec.CreatedParents)
+	if t.format == formatTOML {
+		// [mcp_servers] exists in TOML only through its subtables, so once Beacon's table is
+		// stripped a document with no other server has no mcp_servers key at all. An explicit
+		// empty [mcp_servers] header survives the strip. Either way an empty table and a missing
+		// one are the same configuration.
+		dropEmptyTable(b, t.container[0])
+		dropEmptyTable(a, t.container[0])
+	}
 	if t.vscodeInputs && rec.Auth == AuthTokenEnv {
 		dropBeaconInputs(b)
 		if list, ok := b["inputs"].([]any); ok && len(list) == 0 && rec.CreatedInputs {
@@ -464,6 +476,12 @@ func verifyDisconnect(t Target, before, after string, rec Record) error {
 		return errors.New("Beacon's edit would have changed more than its own " + ServerName + " entry")
 	}
 	return nil
+}
+
+func dropEmptyTable(doc map[string]any, key string) {
+	if m, ok := doc[key].(map[string]any); ok && len(m) == 0 {
+		delete(doc, key)
+	}
 }
 
 func parseBoth(t Target, before, after string) (map[string]any, map[string]any, error) {
@@ -551,27 +569,71 @@ func applyCLI(ctx context.Context, opts Options, it Item, st state, rec Record) 
 		return Record{}, fmt.Errorf("could not back up %s: %w", it.Path, err)
 	}
 	rec.Backup = backup
+	// Replacing through the CLI is remove-then-add. Keep the removed entry's exact text so a
+	// failed add can put it back rather than leave the harness with no server at all.
+	var removed string
 	if st.exists {
+		removed, _ = rawMember(st.file.text, it.Target.container, ServerName)
 		if out, err := opts.run(ctx, it.cliPath, "mcp", "remove", ServerName, "--scope", "user"); err != nil {
 			return Record{}, fmt.Errorf("`%s mcp remove` failed: %v: %s", it.Target.cli, err, strings.TrimSpace(string(out)))
 		}
+	}
+	fail := func(err error) (Record, error) {
+		if removed != "" {
+			if restoreErr := restoreMember(it.Target, it.Path, removed); restoreErr != nil {
+				return Record{}, fmt.Errorf("%w; putting back the previous %s entry also failed (%v); it is in the backup %s", err, ServerName, restoreErr, backup)
+			}
+			return Record{}, fmt.Errorf("%w; the previous %s entry was put back", err, ServerName)
+		}
+		return Record{}, err
 	}
 	args := []string{"mcp", "add", "--transport", "http", "--scope", "user", ServerName, opts.URL}
 	if opts.TokenEnv != "" {
 		args = append(args, "--header", "Authorization: Bearer ${"+opts.TokenEnv+"}")
 	}
 	if out, err := opts.run(ctx, it.cliPath, args...); err != nil {
-		return Record{}, fmt.Errorf("`%s mcp add` failed: %v: %s", it.Target.cli, err, strings.TrimSpace(string(out)))
+		return fail(fmt.Errorf("`%s mcp add` failed: %v: %s", it.Target.cli, err, strings.TrimSpace(string(out))))
 	}
 	after, err := inspect(it.Target, it.Path)
 	if err != nil {
-		return Record{}, err
+		return fail(err)
 	}
 	want := normalizeJSON(it.Target.entry(opts.URL, opts.TokenEnv))
 	if !after.exists || !reflect.DeepEqual(normalizeJSON(after.entry), want) {
-		return Record{}, fmt.Errorf("`%s mcp add` ran, but %s does not hold the expected %s entry", it.Target.cli, it.Path, ServerName)
+		return fail(fmt.Errorf("`%s mcp add` ran, but %s does not hold the expected %s entry", it.Target.cli, it.Path, ServerName))
 	}
 	return rec, nil
+}
+
+// restoreMember puts an entry's original JSON text back under the server name, when the name is
+// free, with the same parse-back check as every other write.
+func restoreMember(t Target, path, raw string) error {
+	st, err := inspect(t, path)
+	if err != nil {
+		return err
+	}
+	if st.exists {
+		return fmt.Errorf("%s already holds a %s entry", path, ServerName)
+	}
+	updated, _, err := insertJSONMember(st.file.text, t.container, ServerName, rawJSON(raw))
+	if err != nil {
+		return err
+	}
+	b, a, err := parseBoth(t, st.file.text, updated)
+	if err != nil {
+		return err
+	}
+	var value any
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return err
+	}
+	setPath(b, t.container, ServerName, value)
+	if !reflect.DeepEqual(normalizeValue(b), normalizeValue(a)) {
+		return errors.New("the restore would have changed more than the entry")
+	}
+	return st.file.write(updated)
 }
 
 // Disconnect removes the entries Beacon wrote for the targets, and nothing else.

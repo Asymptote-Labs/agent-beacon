@@ -960,3 +960,57 @@ func TestNextStepsNameTheServerOrTheVariable(t *testing.T) {
 		}
 	}
 }
+
+// Regression: a Codex config whose only MCP server is Beacon's has no [mcp_servers] table left
+// once Beacon's is stripped, which the disconnect check must accept.
+func TestCodexDisconnectAfterEditWhenBeaconsIsTheOnlyServer(t *testing.T) {
+	home := isolate(t)
+	target := mustTarget(t, "codex")
+	path := targetPath(t, target, home)
+	writeFile(t, path, "model = \"o3\"\n")
+	connect(t, fileOptions(home), target)
+	writeFile(t, path, "# edited later\n"+readFile(t, path))
+	if got := disconnect(t, fileOptions(home), target); got.Action != ActionRemove {
+		t.Fatalf("action = %s (%s)", got.Action, got.Detail)
+	}
+	if got := readFile(t, path); got != "# edited later\nmodel = \"o3\"\n" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// Regression: an update made after the user edited the file must not leave a backup that holds
+// Beacon's previous entry as the thing disconnect restores.
+func TestDisconnectAfterUpdateOnAnEditedFileRemovesTheEntry(t *testing.T) {
+	for _, name := range []string{"cursor", "codex"} {
+		t.Run(name, func(t *testing.T) {
+			home := isolate(t)
+			target := mustTarget(t, name)
+			path := targetPath(t, target, home)
+			original := harnessFixtures[fixtureIndex(name)].existing
+			writeFile(t, path, original)
+			connect(t, fileOptions(home), target)
+			edit := strings.Replace(readFile(t, path), original[:1], original[:1]+userEdit(target), 1)
+			writeFile(t, path, edit)
+			tokenOpts := fileOptions(home)
+			tokenOpts.TokenEnv = "BEACON_MCP_TOKEN"
+			if got := connect(t, tokenOpts, target); got.Action != ActionUpdate {
+				t.Fatalf("action = %s", got.Action)
+			}
+			disconnect(t, fileOptions(home), target)
+			want := strings.Replace(original, original[:1], original[:1]+userEdit(target), 1)
+			if got := readFile(t, path); got != want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+			}
+		})
+	}
+}
+
+func fixtureIndex(name string) int {
+	target, _ := Lookup(name)
+	for i, fx := range harnessFixtures {
+		if fx.name == target.Name {
+			return i
+		}
+	}
+	panic(name)
+}
