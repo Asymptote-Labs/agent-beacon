@@ -134,7 +134,9 @@ func newMCPFixture(t *testing.T, detected ...string) *mcpFixture {
 	// Anything that bypasses mcpHTTPClient is recorded and refused.
 	http.DefaultTransport = recordingTransport{log: fx.strays}
 	mcpLookPath = func(string) (string, error) { return "", errors.New("not on PATH") }
-	mcpRunCLI = func(context.Context, string, ...string) ([]byte, error) { return nil, errors.New("no CLI in unit tests") }
+	mcpRunCLI = func(context.Context, string, ...string) ([]byte, error) {
+		return nil, errors.New("no CLI in unit tests")
+	}
 	mcpIngestURL = func() string { return "" }
 	return fx
 }
@@ -517,5 +519,43 @@ func TestMCPConnectTokenEnvPrintsTheVariable(t *testing.T) {
 func TestMCPServerNamesDoNotCollide(t *testing.T) {
 	if mcpconnect.ServerName == "beacon" {
 		t.Fatal("the Beacon Managed server must not share the local stdio server's name")
+	}
+}
+
+// Regression: the backend names a canonical MCP URL different from the ingest URL plus /mcp, and
+// connect writes the canonical one. status without --check makes no request, so it must compare
+// against the URL connect wrote, not the derived one.
+func TestMCPStatusWithoutCheckUsesTheURLConnectWrote(t *testing.T) {
+	fx := newMCPFixture(t, "cursor")
+	ingest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"resource": fx.url})
+	}))
+	t.Cleanup(ingest.Close)
+	mcpIngestURL = func() string { return ingest.URL }
+	if _, _, err := runMCP(t, "connect", "--yes"); err != nil {
+		t.Fatal(err)
+	}
+	afterConnect := len(fx.requests.all())
+	stdout, _, err := runMCP(t, "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, "Beacon Managed MCP URL: "+fx.url) || strings.Contains(stdout, "other URL") {
+		t.Fatalf("status compared against the derived URL:\n%s", stdout)
+	}
+	if n := len(fx.requests.all()); n != afterConnect {
+		t.Fatalf("status made a request without --check (%d after connect, %d after status)", afterConnect, n)
+	}
+}
+
+func TestMCPStatusFallsBackToTheRecordedURLWithoutAnEnrollment(t *testing.T) {
+	fx := newMCPFixture(t, "cursor")
+	if _, _, err := runMCP(t, "connect", "--url", fx.url, "--yes"); err != nil {
+		t.Fatal(err)
+	}
+	stdout, _, err := runMCP(t, "status")
+	if err != nil || !strings.Contains(stdout, "Beacon Managed MCP URL: "+fx.url) || strings.Contains(stdout, "other URL") {
+		t.Fatalf("err = %v\n%s", err, stdout)
 	}
 }
