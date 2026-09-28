@@ -511,6 +511,13 @@ func runMCPStatus(cmd *cobra.Command, args []string) error {
 	report := mcpStatusReport{ServerName: mcpconnect.ServerName}
 	if url, derived, err := mcpconnect.ResolveURL(mcpConnectOpts.url, mcpIngestURL()); err == nil {
 		report.URL = url
+		// Without --check nothing is fetched, so a derived URL cannot be turned into the
+		// canonical one; compare against the URL connect checked and wrote instead.
+		if derived && !mcpConnectOpts.check {
+			if recorded := mcpconnect.RecordedURL(home); recorded != "" {
+				report.URL = recorded
+			}
+		}
 		if mcpConnectOpts.check {
 			if canonical, err := mcpconnect.CheckURL(cmd.Context(), mcpHTTPClient, url, derived); err != nil {
 				report.Check = "failed: " + err.Error()
@@ -518,6 +525,8 @@ func runMCPStatus(cmd *cobra.Command, args []string) error {
 				report.URL, report.Check = canonical, "ok"
 			}
 		}
+	} else if recorded := mcpconnect.RecordedURL(home); recorded != "" && !mcpConnectOpts.check {
+		report.URL = recorded
 	} else if mcpConnectOpts.check {
 		report.Check = "failed: " + err.Error()
 	}

@@ -75,6 +75,23 @@ func loadManifest(home string) (*manifest, error) {
 	return &m, nil
 }
 
+// RecordedURL is the URL `connect` last wrote, or "" when it has written nothing. It is what an
+// offline status compares entries against: a URL derived from the ingest URL may not be the
+// canonical one connect checked and wrote.
+func RecordedURL(home string) string {
+	m, err := loadManifest(home)
+	if err != nil {
+		return ""
+	}
+	var latest Record
+	for _, r := range m.Records {
+		if latest.URL == "" || r.WrittenAt.After(latest.WrittenAt) {
+			latest = r
+		}
+	}
+	return latest.URL
+}
+
 func (m *manifest) find(harness, path string) (Record, bool) {
 	for _, r := range m.Records {
 		if r.Harness == harness && r.Path == path {
