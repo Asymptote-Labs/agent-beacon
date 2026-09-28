@@ -441,6 +441,7 @@ func runMCPDisconnect(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	removed := 0
+	leftAlone := 0
 	var failed []string
 	for _, it := range items {
 		switch {
@@ -451,10 +452,11 @@ func runMCPDisconnect(cmd *cobra.Command, args []string) error {
 			removed++
 			fmt.Fprintf(out, "✓ %s: %s (%s)\n", it.Target.DisplayName, it.Detail, displayPath(home, it.Path))
 		case it.Action == mcpconnect.ActionAbsent && it.Path != "" && it.Detail != "nothing written by Beacon":
+			leftAlone++
 			fmt.Fprintf(out, "- %s: %s (%s)\n", it.Target.DisplayName, it.Detail, displayPath(home, it.Path))
 		}
 	}
-	if removed == 0 && len(failed) == 0 {
+	if removed == 0 && len(failed) == 0 && leftAlone == 0 {
 		fmt.Fprintln(out, "Nothing to remove: no Beacon Managed MCP entry written by Beacon was found.")
 	}
 	if len(failed) > 0 {
