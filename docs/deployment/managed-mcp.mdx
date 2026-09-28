@@ -1,0 +1,154 @@
+---
+title: "MCP"
+description: "Search your Beacon Managed agent history from the assistants you already use"
+---
+
+Beacon Managed MCP lets an assistant search and read the agent history you forward to Beacon
+Managed. Use it to find a past session, recover a command or tool result, revisit work across
+different harnesses, and inspect token usage without leaving your current agent.
+
+The server is read-only. It cannot change endpoint configuration, edit a session, or run a tool
+on your machine.
+
+## Before you connect
+
+You need:
+
+- Beacon installed and [connected to Beacon Managed](/cli/endpoint-connect)
+- At least one supported MCP client on the machine
+- A Beacon account with access to the forwarded history
+
+<Note>
+  Connecting an endpoint and connecting MCP are separate choices. Endpoint onboarding does not
+  add an MCP server to your harnesses.
+</Note>
+
+## Connect your agents
+
+Run:
+
+```bash
+beacon mcp connect
+```
+
+Beacon discovers supported harnesses, shows every configuration change it plans to make, and asks
+before writing. Each changed file is backed up first.
+
+The server appears as **`beacon-managed`**. By default, Beacon writes only the server URL. Each
+harness asks you to sign in with OAuth the first time it connects.
+
+<Accordion title="Example">
+```text
+Beacon Managed MCP: https://mcp.beacon.sh (checked)
+Server name: beacon-managed
+Auth: OAuth; Beacon writes only the URL, and each harness signs in on first use
+
+HARNESS      ACTION   AUTH
+Claude Code  add      oauth
+Cursor       add      oauth
+OpenCode     add      oauth
+```
+</Accordion>
+
+After connecting, restart any harness that is already running. Then sign in from that harness:
+
+- **Claude Code:** Run `/mcp` and choose `beacon-managed`.
+- **Codex CLI:** Run `codex mcp login beacon-managed`.
+- **Cursor:** Open **Cursor Settings → MCP**, find `beacon-managed`, and sign in.
+- **VS Code:** Run **MCP: List Servers** and start `beacon-managed`.
+- **Gemini CLI:** Run `/mcp auth beacon-managed`.
+- **OpenCode:** Run `opencode mcp auth beacon-managed`.
+
+For supported configuration formats, manual setup for other harnesses, and all command flags, see
+the [`beacon mcp connect` reference](/cli/mcp-connect).
+
+## What your agent can do
+
+Beacon Managed MCP exposes tools for:
+
+- searching sessions by text and structured filters
+- grepping retained prompts, responses, commands, tool calls, and results
+- reading a session timeline
+- retrieving one event by identifier
+- looking up related history
+- reviewing token usage
+
+Try prompts such as:
+
+- “Find the session where I fixed the release workflow last week.”
+- “Show me the command that resolved the failing Go test.”
+- “Search my Claude Code and Cursor history for changes to the MCP connection flow.”
+- “Summarize token usage for this repository over the past seven days.”
+
+Results are limited to history your account can access in Beacon Managed.
+
+## Privacy and retention
+
+MCP can return only what the endpoint forwarded.
+
+- **Standard mode** sends locally retained content, including prompts, responses, tool arguments
+  and results, subject to Beacon's redaction and size limits.
+- **Metadata-only mode** removes prompts, responses, reasoning, tool arguments and results,
+  command output, diffs, and inventory content before upload. Content search and session reading
+  are therefore limited in this mode.
+
+Beacon caps each retained string at 4 KB before writing it locally. Text beyond that limit is not
+available to Beacon Managed MCP.
+
+See [Beacon Managed forwarding](/log-forwarding/asymptote#what-leaves-the-machine) and
+[retention and redaction](/security/retention-redaction) for the complete data flow.
+
+## Authentication options
+
+OAuth is the recommended default. Beacon writes no secret into harness configuration, and you
+approve access in the browser.
+
+If a harness cannot use MCP OAuth, create a personal MCP token and keep it in an environment
+variable:
+
+```bash
+export BEACON_MCP_TOKEN="$(beacon mcp token create --name laptop)"
+beacon mcp connect --token-env BEACON_MCP_TOKEN
+```
+
+Beacon writes only the environment variable reference, never the token value. Tokens can be
+revoked from **beacon.sh → Dashboard → MCP Access**.
+
+## Check or remove the connection
+
+```bash
+beacon mcp status --check
+beacon mcp disconnect
+```
+
+`status` reports which harnesses are configured and can verify the server URL. `disconnect`
+removes only entries previously written by Beacon; it leaves MCP entries you created yourself
+untouched.
+
+## Beacon Managed and local MCP
+
+Beacon offers two separate MCP servers:
+
+| Server | Data | Connection |
+|---|---|---|
+| `beacon-managed` | History forwarded to Beacon Managed across connected endpoints | Hosted HTTPS server configured with `beacon mcp connect` |
+| `beacon` | This machine's local runtime log and approved local memory | Local stdio or loopback server configured with `beacon mcp doctor` |
+
+Use both if you want cross-device managed history and direct access to this machine's local data.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Beacon Managed" icon="cloud" href="/deployment/managed">
+    Learn about hosted storage, search, analytics, and long-term agent history.
+  </Card>
+  <Card title="beacon mcp connect" icon="plug" href="/cli/mcp-connect">
+    Review every command, flag, supported harness, and configuration format.
+  </Card>
+  <Card title="Beacon Managed forwarding" icon="tower-broadcast" href="/log-forwarding/asymptote">
+    Understand what leaves an endpoint and how forwarding works.
+  </Card>
+  <Card title="Local Beacon MCP" icon="server" href="/cli/mcp">
+    Search the runtime log and approved memory stored on this machine.
+  </Card>
+</Columns>

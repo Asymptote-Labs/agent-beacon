@@ -57,7 +57,13 @@
             "pages": [
               "deployment/hosting-options",
               "deployment/open-source",
-              "deployment/managed"
+              {
+                "group": "Beacon Managed",
+                "root": "deployment/managed",
+                "pages": [
+                  "deployment/managed-mcp"
+                ]
+              }
             ]
           },
           {
