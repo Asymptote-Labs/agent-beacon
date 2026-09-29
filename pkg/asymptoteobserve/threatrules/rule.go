@@ -51,7 +51,12 @@ const ScopeSession Scope = "session"
 
 // Rule is a single threat-detection rule. Exactly one of Match or Correlation is set.
 type Rule struct {
-	ID          string                    `yaml:"id"`
+	ID string `yaml:"id"`
+	// Spec is the minimum Threat Rules spec version the rule needs, such as
+	// "threat-rules/v1.1". Empty means the original v1. A rule that uses a feature added
+	// after v1 must declare it, so an engine that predates the feature can tell the rule
+	// is too new instead of failing on an unknown field.
+	Spec        string                    `yaml:"spec,omitempty"`
 	Version     int                       `yaml:"version"`
 	Title       string                    `yaml:"title"`
 	Description string                    `yaml:"description,omitempty"`
@@ -160,6 +165,9 @@ func (r *Rule) Validate() error {
 	if !idPattern.MatchString(r.ID) {
 		return fmt.Errorf("id %q must match %s", r.ID, idPattern.String())
 	}
+	if err := checkSpecSupported(r.ID, r.Spec); err != nil {
+		return err
+	}
 	if r.Version < 1 {
 		return fmt.Errorf("version must be >= 1, got %d", r.Version)
 	}
@@ -239,6 +247,12 @@ func (r *Rule) validateCorrelation() error {
 	case "", OrderSequence, OrderAny:
 	default:
 		return fmt.Errorf("correlation.order %q unsupported (%q or %q)", c.Order, OrderSequence, OrderAny)
+	}
+	if c.Order != "" {
+		// Already known to be parseable and supported (Validate checked it first).
+		if v, _ := parseSpec(r.Spec); specV1_1.newerThan(v) {
+			return fmt.Errorf("correlation.order requires spec: threat-rules/v1.1 or later (engines before v1.1 reject the field)")
+		}
 	}
 	if len(c.Steps) < 2 {
 		return fmt.Errorf("correlation requires >= 2 steps, got %d", len(c.Steps))

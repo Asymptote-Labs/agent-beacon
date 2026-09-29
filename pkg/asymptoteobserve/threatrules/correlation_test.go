@@ -31,8 +31,12 @@ func readThenEgressRule(t *testing.T) *CompiledRule {
 // window, and steps.
 func compileCorrelation(t *testing.T, order Order, window string, steps ...CorrelationStep) *CompiledRule {
 	t.Helper()
+	spec := ""
+	if order != "" {
+		spec = SupportedSpec
+	}
 	rule := &Rule{
-		ID: "rte", Version: 1, Title: "rte",
+		ID: "rte", Spec: spec, Version: 1, Title: "rte",
 		Severity: asymptoteobserve.SeverityHigh, Status: StatusExperimental, Posture: PostureDetect,
 		Emit:        Emit{Reason: "x"},
 		Correlation: &Correlation{Scope: ScopeSession, Window: window, Order: order, Steps: steps},
@@ -324,7 +328,7 @@ func TestCorrelationAnyOrderOneFindingPerSession(t *testing.T) {
 
 func TestCorrelationRejectsUnknownOrder(t *testing.T) {
 	rule := &Rule{
-		ID: "bad-order", Version: 1, Title: "t",
+		ID: "bad-order", Spec: SupportedSpec, Version: 1, Title: "t",
 		Severity: asymptoteobserve.SeverityLow, Status: StatusExperimental, Posture: PostureDetect,
 		Emit: Emit{Reason: "x"},
 		Correlation: &Correlation{Scope: ScopeSession, Window: "60s", Order: "unordered", Steps: []CorrelationStep{

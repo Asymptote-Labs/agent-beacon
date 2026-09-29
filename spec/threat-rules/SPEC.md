@@ -1,4 +1,4 @@
-# Threat Rules — Specification (v1)
+# Threat Rules — Specification (v1.1)
 
 An open detection-rule format for AI-agent security threats, native to the Beacon
 endpoint event schema. A rule is a YAML document whose match conditions are
@@ -9,7 +9,7 @@ This is the "Sigma for agent telemetry" layer: the rule format and corpus are op
 evaluation engine that consumes them may be separate (and closed). Any engine that
 produces the same `verdict` for a rule's fixtures conforms to this spec.
 
-- Spec version: `threat-rules/v1` (see `VERSION`).
+- Spec version: `threat-rules/v1.1` (see `VERSION` and [Versioning](#versioning)).
 - Canonical event schema: the Beacon endpoint event
   (`pkg/asymptoteobserve` `Event`, `schema_version: "1.0"`).
 - Machine-readable structural schema: `schema.json` (JSON Schema, draft 2020-12).
@@ -23,7 +23,8 @@ produces the same `verdict` for a rule's fixtures conforms to this spec.
 
 ```yaml
 id: secret-read-then-egress
-version: 1
+spec: threat-rules/v1.1   # needed only because this rule uses correlation.order
+version: 2
 title: Secret-file read followed by network egress
 description: >
   Flags a session that reads a credential file and then issues an outbound
@@ -38,6 +39,7 @@ taxonomy:
 correlation:
   scope: session
   window: 120s
+  order: any
   steps:
     - id: read_secret
       match: >
@@ -77,6 +79,7 @@ Exactly one of `match` or `correlation` must be present. Required:
 | Field | Required | Type / values | Meaning |
 |---|---|---|---|
 | `id` | yes | string `^[a-z0-9][a-z0-9-]*$` | Stable unique identity. Unique across the pack. Flows to `policy.id` on a finding. |
+| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required (v1.1 or later) when the rule uses a v1.1 feature. See [Versioning](#versioning). |
 | `version` | yes | int ≥ 1 | Rule content revision; bump on logic change. |
 | `title` | yes | string | Human-readable name. Flows to `policy.name`. |
 | `description` | no | string | Documentation only; never evaluated. |
@@ -95,7 +98,7 @@ Exactly one of `match` or `correlation` must be present. Required:
 |---|---|---|---|
 | `scope` | yes | `session` | Grouping key (`e.session.id`). v1 supports `session` only. |
 | `window` | yes | Go duration (`120s`, `5m`) | Max elapsed time from the earliest matched event to the latest. |
-| `order` | no | `sequence` (default) \| `any` | Whether `steps` must occur in listed order. |
+| `order` | no | `sequence` (default) \| `any` | Whether `steps` must occur in listed order. Since v1.1; a rule that sets it MUST declare `spec: threat-rules/v1.1` or later. |
 | `steps` | yes | list ≥ 2 | Step conditions; see `order`. |
 | `steps[].id` | yes | string | Step label (diagnostics). Not evaluated. |
 | `steps[].match` | yes | CEL string → bool | Per-event condition, same contract as top-level `match`. |
@@ -152,6 +155,32 @@ An engine produces one of two verdicts for a rule against an ordered event seque
 
 Conformance is defined entirely in these terms: for each fixture, an engine MUST produce
 the fixture's declared `verdict`.
+
+## Versioning
+
+A spec version is `threat-rules/v<major>.<minor>`; `v1` is `v1.0`. A minor version only adds
+optional fields, so every rule valid under an earlier minor stays valid. A major version may
+change meaning.
+
+A rule declares the version it needs in `spec`, not the version current when it was written,
+so a corpus mixes versions and a rule moves to a newer `spec` only when it adopts a newer
+feature. That keeps the rest of a corpus loadable by an older engine.
+
+An engine MUST read a rule's `spec` before it rejects any unknown field, and MUST NOT evaluate
+a rule whose `spec` is newer than the version it implements. It SHOULD set that rule aside with
+a diagnostic naming the rule, the version the rule needs, and the version the engine supports,
+and continue loading the rest of the corpus. The reference engine skips such rules with a
+warning in `beacon scan`, `beacon rules list`, `add`, and `pull`, and reports them as `SKIP`
+lines that fail `beacon rules lint`.
+
+Engines released before v1.1 do not read `spec`: they reject a rule that carries it, or any
+v1.1 field, as an unknown field, and refuse the directory that contains it.
+
+### Changelog
+
+- **v1.1**: `correlation.order` (`sequence` default, or `any` for order-insensitive steps),
+  and the per-rule `spec` field with the engine rules above.
+- **v1**: initial version.
 
 ## Maturity ladder
 

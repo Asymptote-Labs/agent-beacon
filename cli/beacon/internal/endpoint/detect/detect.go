@@ -9,6 +9,8 @@
 package detect
 
 import (
+	"fmt"
+	"io"
 	"path/filepath"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
@@ -50,9 +52,29 @@ func LoadActive(userMode bool, rulesDir string) ([]LoadedRule, error) {
 	return rulestore.LoadActive(StoreDir(userMode), rulesDir)
 }
 
+// LoadActiveSkipping is LoadActive, setting aside rules that need a newer spec than this
+// binary supports. See rulestore.LoadActiveSkipping.
+func LoadActiveSkipping(userMode bool, rulesDir string) ([]LoadedRule, []threatrules.SkippedRule, error) {
+	return rulestore.LoadActiveSkipping(StoreDir(userMode), rulesDir)
+}
+
 // InstallFiles validates and installs the *.rule.yaml files at src into the store.
 func InstallFiles(userMode bool, src string, force bool) ([]Installed, error) {
 	return rulestore.InstallFiles(StoreDir(userMode), src, force)
+}
+
+// InstallFilesSkipping is InstallFiles, leaving out rules that need a newer spec than
+// this binary supports. See rulestore.InstallFilesSkipping.
+func InstallFilesSkipping(userMode bool, src string, force bool) ([]Installed, []threatrules.SkippedRule, error) {
+	return rulestore.InstallFilesSkipping(StoreDir(userMode), src, force)
+}
+
+// WarnSkipped writes one warning line per skipped rule. Commands send it to stderr so
+// JSON on stdout stays parseable.
+func WarnSkipped(w io.Writer, skipped []threatrules.SkippedRule) {
+	for _, s := range skipped {
+		fmt.Fprintf(w, "warning: skipped %s\n", s)
+	}
 }
 
 // Remove deletes a rule by id from the store and returns the removed path.
