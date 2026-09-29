@@ -51,8 +51,8 @@ With the stdio transport, doctor prints the client configuration for the local s
 }
 ```
 
-This is not the Beacon Managed server. The session history this endpoint forwards to Beacon
-Managed is served by a separate server, registered as `beacon-managed` by
+This is not the Beacon Cloud server. The session history this endpoint forwards to Beacon
+Cloud is served by a separate server, registered as `beacon-managed` by
 [`beacon mcp connect`](/cli/mcp-connect). A harness can have both entries at once, because the
 names differ. Doctor checks only the local server; to see where `beacon-managed` is configured and
 whether its URL answers, run `beacon mcp status --check`.
@@ -103,7 +103,7 @@ sudo beacon mcp doctor --system
     Run the local Beacon MCP server after validation.
   </Card>
   <Card title="beacon mcp connect" icon="plug" href="/cli/mcp-connect">
-    Register the separate Beacon Managed MCP server, `beacon-managed`.
+    Register the separate Beacon Cloud MCP server, `beacon-managed`.
   </Card>
   <Card title="Test MCP Access" icon="server" href="/guides/local-testing/mcp">
     Understand Beacon MCP and test local client access.

@@ -5,7 +5,7 @@ description: "Choose a Beacon Observe integration path for AI SDKs and agent orc
 
 ## Integration overview
 
-Beacon Observe traces supported LLM providers, agent SDKs, and orchestration code through OpenTelemetry. Initialize `Observe`, configure the integration path for the SDK you use, and your model calls or agent turns can flow to Beacon Managed hosted Observe or a customer-managed OTLP collector.
+Beacon Observe traces supported LLM providers, agent SDKs, and orchestration code through OpenTelemetry. Initialize `Observe`, configure the integration path for the SDK you use, and your model calls or agent turns can flow to Beacon Cloud hosted Observe or a customer-managed OTLP collector.
 
 Browse the integrations below to see setup instructions, what is captured, and troubleshooting guidance.
 
@@ -34,7 +34,7 @@ Browse the integrations below to see setup instructions, what is captured, and t
 
 All integration paths start by installing and initializing the SDK:
 
-Hosted Observe export requires a Beacon Managed API key. To get `ASYMPTOTE_API_KEY`, [reach out for a demo](https://asymptotelabs.ai/contact).
+Hosted Observe export requires a Beacon Cloud API key. To get `ASYMPTOTE_API_KEY`, [reach out for a demo](https://asymptotelabs.ai/contact).
 
 ```bash title="Install the SDK"
 npm install @asymptote/sdk
@@ -48,7 +48,7 @@ Observe.initialize({
 });
 ```
 
-See the [SDK quickstart](/sdk/quickstart) for Beacon Managed hosted Observe, customer-managed OTLP, custom exporter, and shutdown options.
+See the [SDK quickstart](/sdk/quickstart) for Beacon Cloud hosted Observe, customer-managed OTLP, custom exporter, and shutdown options.
 
 ## Not supported yet
 

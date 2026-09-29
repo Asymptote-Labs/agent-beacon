@@ -28,13 +28,13 @@ flowchart LR
 | Local storage | Beacon writes one JSON object per line to `runtime.jsonl` | Filesystem permissions and log ownership |
 | Local inspection | The dashboard reads the runtime log over a loopback-only service | Local browser to local dashboard service |
 | Optional forwarding | Wazuh, Elastic/Filebeat, Datadog Agent, Sumo Logic, Rapid7, Microsoft Sentinel, AWS S3, Google Cloud Storage, Splunk HEC, Falcon LogScale HEC, or customer-managed shippers read or receive events | Customer-managed network and SIEM boundary |
-| Beacon Managed forwarding | After an explicit connect, Vector posts Standard or locally transformed metadata-only runtime/inventory NDJSON over HTTPS with a per-device key | Endpoint to Beacon-run service; identity derived from the device key, revocable from the dashboard |
+| Beacon Cloud forwarding | After an explicit connect, Vector posts Standard or locally transformed metadata-only runtime/inventory NDJSON over HTTPS with a per-device key | Endpoint to Beacon-run service; identity derived from the device key, revocable from the dashboard |
 
 ## Threat model
 
 | Risk | Design response |
 |------|-----------------|
-| Unintended hosted telemetry | Account sign-in forwards nothing. Managed is preselected, and confirming it starts forwarding within the same command, which the confirm screen states before the choice is accepted, naming what the selected privacy mode sends. Choosing Local forwards nothing, and `beacon endpoint disconnect` stops a connected endpoint. Runtime forwarding starts at the end of the existing log; inventory starts at the beginning so the service receives the endpoint's current inventory baseline. The active privacy mode is recorded, and forwarding stops within a minute of revocation |
+| Unintended hosted telemetry | Account sign-in forwards nothing. Beacon Cloud is preselected, and confirming it starts forwarding within the same command, which the confirm screen states before the choice is accepted, naming what the selected privacy mode sends. Choosing Local forwards nothing, and `beacon endpoint disconnect` stops a connected endpoint. Runtime forwarding starts at the end of the existing log; inventory starts at the beginning so the service receives the endpoint's current inventory baseline. The active privacy mode is recorded, and forwarding stops within a minute of revocation |
 | Network exposure of collectors | Default OTLP receivers bind to `127.0.0.1` rather than an externally reachable interface |
 | Over-collection of prompt or diff content | Standard applies local sanitization and size controls. Metadata-only additionally strips retained prompts, responses, reasoning, tool arguments/results, command output, raw fields, diffs, inventory content, and MCP definitions in Vector before buffering or upload |
 | Secret leakage in retained content | Beacon applies redaction, sanitization, truncation, and event-size limits before writing supported content fields |

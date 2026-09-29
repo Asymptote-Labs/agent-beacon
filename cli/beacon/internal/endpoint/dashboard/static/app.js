@@ -1058,7 +1058,7 @@ function inventoryTableForView(view, ctx) {
           { label: "Agent Runtime", render: (row) => inventoryRuntimeCell(inventoryRuntimeValue(row)) },
           { label: "Scope", render: (row) => row.source_scope || row.scope ? badge(row.source_scope || row.scope, "badge-muted") : `<span class="muted">-</span>` },
           { label: "Status", render: (row) => badge(row.status || (row.installed ? "configured" : "not_installed"), row.installed ? "badge-ok" : "badge-muted") },
-          { label: "Beacon Managed", render: (row) => row.beacon_managed ? badge("managed", "badge-ok") : `<span class="muted">no</span>` },
+          { label: "Beacon Cloud", render: (row) => row.beacon_managed ? badge("managed", "badge-ok") : `<span class="muted">no</span>` },
           { label: "Modified", className: "nowrap", render: (row) => row.modified_at ? escapeHTML(formatTime(row.modified_at)) : `<span class="muted">-</span>` },
           { label: "Manifest SHA", className: "mono sha-cell", render: (row) => hashCell(row.file_sha256 || row.path_hash) },
           { label: "Manifest", className: "mono path-cell", render: (row) => escapeHTML(row.path || row.path_hash || "") },
@@ -1076,7 +1076,7 @@ function inventoryTableForView(view, ctx) {
           { label: "Kind", render: (row) => escapeHTML(configKindLabel(row.config_kind)) },
           { label: "Parser", render: parserBadge },
           { label: "MCP", render: (row) => escapeHTML(row.mcp_server_count ?? 0) },
-          { label: "Beacon Managed", render: (row) => row.beacon_managed ? badge("managed", "badge-ok") : `<span class="muted">no</span>` },
+          { label: "Beacon Cloud", render: (row) => row.beacon_managed ? badge("managed", "badge-ok") : `<span class="muted">no</span>` },
           { label: "Modified", className: "nowrap", render: (row) => row.modified_at ? escapeHTML(formatTime(row.modified_at)) : `<span class="muted">-</span>` },
           { label: "Manifest SHA", className: "mono sha-cell", render: (row) => hashCell(row.file_sha256) },
           { label: "Path", className: "mono path-cell", render: (row) => escapeHTML(row.path || row.path_hash || "") },
@@ -1367,7 +1367,7 @@ function renderHookInventoryCards(hooks, hookConfigs) {
     { label: "Hook Targets", value: hooks.length, hint: "runtimes probed" },
     { label: "Hooks Installed", value: installed, hint: "reporting to Beacon" },
     { label: "Hook Manifests", value: hookConfigs.length, hint: "discovered files" },
-    { label: "Beacon Managed", value: managed, hint: "managed manifests" },
+    { label: "Beacon Cloud", value: managed, hint: "managed manifests" },
   ];
   el.innerHTML = cards
     .map((card) => `

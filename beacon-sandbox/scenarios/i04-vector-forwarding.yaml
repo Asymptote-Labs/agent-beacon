@@ -1,7 +1,7 @@
 id: i04-vector-forwarding
 # Does the Vector that the Linux packages bundle actually forward Beacon's events?
 #
-# The .deb, .rpm and Linux archives ship Vector at /opt/beacon/bin/vector. It runs Beacon Managed
+# The .deb, .rpm and Linux archives ship Vector at /opt/beacon/bin/vector. It runs Beacon Cloud
 # forwarding and six customer-managed destinations, and nothing else in the suite starts it. So a
 # pack that Vector rejects, a secret backend that sends the wrong key, or a Vector build that will
 # not start on the target host would all go unnoticed.

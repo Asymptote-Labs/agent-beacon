@@ -1,12 +1,12 @@
 ---
 title: "beacon mcp connect"
-description: "Register Beacon Managed MCP in every harness on this machine"
+description: "Register Beacon Cloud MCP in every harness on this machine"
 ---
 
 ## Command overview
 
-`beacon mcp connect` adds the Beacon Managed MCP server to the MCP configuration of each harness it
-finds, so an agent can search the session history this endpoint forwards to Beacon Managed.
+`beacon mcp connect` adds the Beacon Cloud MCP server to the MCP configuration of each harness it
+finds, so an agent can search the session history this endpoint forwards to Beacon Cloud.
 `beacon mcp disconnect` removes exactly what connect added, and `beacon mcp status` shows what is
 configured where.
 
@@ -23,14 +23,14 @@ with different names, so neither entry ever overwrites the other:
 | Server name | What it reads | Where it runs | Set up with |
 |---|---|---|---|
 | `beacon` | This machine's `runtime.jsonl` and approved local memory | Locally, over stdio or loopback HTTP | [`beacon mcp doctor`](/cli/mcp-doctor) prints the config |
-| `beacon-managed` | Session history this endpoint forwarded to Beacon Managed | Beacon Managed, over HTTPS | `beacon mcp connect` |
+| `beacon-managed` | Session history this endpoint forwarded to Beacon Cloud | Beacon Cloud, over HTTPS | `beacon mcp connect` |
 
-Beacon Managed MCP is read-only. Its tools are `beacon_search_sessions`, `beacon_grep`,
+Beacon Cloud MCP is read-only. Its tools are `beacon_search_sessions`, `beacon_grep`,
 `beacon_read_session`, `beacon_get_event`, `beacon_lookup` and `beacon_usage`.
 
 <Note>
   `beacon mcp connect` is an explicit, opt-in command. `beacon endpoint install` and the onboarding
-  wizard never run it; after you choose Beacon Managed in the wizard, the install only suggests it.
+  wizard never run it; after you choose Beacon Cloud in the wizard, the install only suggests it.
   It refuses to run as root, and in CI or without a terminal it runs only with `--yes`.
 </Note>
 
@@ -41,7 +41,7 @@ beacon mcp connect
 ```
 
 ```text title="Example output"
-Beacon Managed MCP: https://mcp.beacon.sh (checked)
+Beacon Cloud MCP: https://mcp.beacon.sh (checked)
 Server name: beacon-managed
 Auth: OAuth; Beacon writes only the URL, and each harness signs in on first use
 
@@ -70,8 +70,8 @@ Connect works in these steps:
 1. **Harnesses.** Without `--harness`, connect acts on every harness `beacon endpoint discover`
    detects. `--harness` accepts the same names as `beacon endpoint install --harness`, such as
    `claude`, `codex`, `cursor`, `vscode`, `gemini` and `opencode`.
-2. **URL.** The URL is `--url`, or the Beacon Managed URL recorded by
-   [`beacon endpoint connect`](/cli/endpoint-connect) with `/mcp` added. The Beacon Managed backend
+2. **URL.** The URL is `--url`, or the Beacon Cloud URL recorded by
+   [`beacon endpoint connect`](/cli/endpoint-connect) with `/mcp` added. The Beacon Cloud backend
    may name its own canonical MCP URL, `https://mcp.beacon.sh` in production. When it does, connect
    uses that URL. Without either, connect stops and asks you to run `beacon endpoint connect` or
    pass `--url`.
@@ -115,7 +115,7 @@ a comment in the config, because some harnesses rewrite their config files and d
 | Flag | Description |
 |------|-------------|
 | `--harness a,b` | Harnesses to connect. Defaults to every detected harness |
-| `--url URL` | Beacon Managed MCP URL. Defaults to the URL recorded by `beacon endpoint connect` |
+| `--url URL` | Beacon Cloud MCP URL. Defaults to the URL recorded by `beacon endpoint connect` |
 | `--token-env NAME` | Use a personal MCP token read from environment variable `NAME` instead of OAuth |
 | `--dry-run` | Show the plan without checking the URL or writing anything |
 | `--yes` | Write without asking |
@@ -124,7 +124,7 @@ a comment in the config, because some harnesses rewrite their config files and d
 ## Authentication: OAuth or a token
 
 **OAuth is the default and the recommended mode.** Connect writes only the URL. The first time the
-harness connects, Beacon Managed answers `401` with a pointer to its OAuth metadata. The harness
+harness connects, Beacon Cloud answers `401` with a pointer to its OAuth metadata. The harness
 then registers itself, opens a browser, and you approve access on beacon.sh. No secret is written
 by Beacon, and access is revoked from the dashboard.
 
@@ -164,7 +164,7 @@ JSON on stdout instead. Beacon never writes the token to a file.
 | `--expires-in-days N` | Days until the token expires, 1 to 366, or 0 for never (default 90) |
 | `--json` | Print the token and its details as JSON |
 
-The token reads your Beacon Managed data, counts toward the limit of 25 active tokens, and is
+The token reads your Beacon Cloud data, counts toward the limit of 25 active tokens, and is
 revoked at beacon.sh → Dashboard → MCP Access. It needs the `mcp:token:create` permission, which
 `beacon login` requests and the sign-in page lists; a session from an older `beacon login` is
 refused with a prompt to sign in again.
@@ -236,7 +236,7 @@ beacon mcp status --json
 
 ```text title="Example output"
 Server name: beacon-managed
-Beacon Managed MCP URL: https://mcp.beacon.sh
+Beacon Cloud MCP URL: https://mcp.beacon.sh
 URL check: ok
 
 HARNESS             CONFIGURED  URL                    AUTH     BY BEACON  FILE
@@ -251,9 +251,9 @@ a variable), or `token` (the entry has a header written outside Beacon, whose va
 shown). Status makes no network request unless you pass `--check`, which runs the same URL check
 as connect and exits non-zero if it fails.
 
-## What Beacon Managed MCP can find
+## What Beacon Cloud MCP can find
 
-Beacon Managed MCP searches what this endpoint forwarded, which limits what it can find:
+Beacon Cloud MCP searches what this endpoint forwarded, which limits what it can find:
 
 - Each retained string is capped at 4 KB before it is written locally. Text past that point in a
   long tool output or diff is never forwarded, so it cannot be grepped.
@@ -273,7 +273,7 @@ See [Downstream consumers](/telemetry-schema/normalization#downstream-consumers)
     Validate the local server and print its client config.
   </Card>
   <Card title="beacon endpoint connect" icon="cloud-arrow-up" href="/cli/endpoint-connect">
-    Connect this endpoint to Beacon Managed.
+    Connect this endpoint to Beacon Cloud.
   </Card>
   <Card title="Redaction and size limits" icon="scissors" href="/security/retention-redaction">
     What is retained, truncated and forwarded.

@@ -41,7 +41,7 @@ Top-level Agent Beacon CLI commands.
 | [`beacon login`](/cli/account-auth) | Sign in through beacon.sh without enabling telemetry forwarding. |
 | [`beacon logout`](/cli/account-auth#sign-out) | Revoke and remove the local Beacon account session. |
 | [`beacon memory`](/cli/memory) | Evaluate traces, review candidates, and install approved project memory. |
-| [`beacon mcp`](/cli/mcp) | Expose Beacon activity to MCP clients, locally and through Beacon Managed. |
+| [`beacon mcp`](/cli/mcp) | Expose Beacon activity to MCP clients, locally and through Beacon Cloud. |
 | [`beacon rules`](/cli/rules) | Manage and author Beacon threat-detection rules. |
 | [`beacon scan`](/cli/scan) | Run threat-detection rules over local endpoint telemetry. |
 | [`beacon status`](/cli/endpoint-status) | Alias for `beacon endpoint status`. |
@@ -137,9 +137,9 @@ Expose local Beacon runtime activity through MCP.
 |---------|-------------|
 | [`beacon mcp serve`](/cli/mcp-serve) | Run the local Beacon MCP server over stdio or loopback HTTP JSON-RPC. |
 | [`beacon mcp doctor`](/cli/mcp-doctor) | Validate local Beacon MCP setup and print client configuration. |
-| [`beacon mcp connect`](/cli/mcp-connect) | Register Beacon Managed MCP (`beacon-managed`) in every detected harness. |
-| [`beacon mcp disconnect`](/cli/mcp-connect#beacon-mcp-disconnect) | Remove the Beacon Managed MCP entries that connect wrote. |
-| [`beacon mcp status`](/cli/mcp-connect#beacon-mcp-status) | Show where Beacon Managed MCP is configured. |
+| [`beacon mcp connect`](/cli/mcp-connect) | Register Beacon Cloud MCP (`beacon-managed`) in every detected harness. |
+| [`beacon mcp disconnect`](/cli/mcp-connect#beacon-mcp-disconnect) | Remove the Beacon Cloud MCP entries that connect wrote. |
+| [`beacon mcp status`](/cli/mcp-connect#beacon-mcp-status) | Show where Beacon Cloud MCP is configured. |
 
 ## beacon endpoint
 
@@ -176,7 +176,7 @@ Manage the local endpoint agent and inspect supported agent harness telemetry.
 | [`beacon endpoint cloudwatch`](/cli/cloudwatch) | Generate AWS CloudWatch Logs forwarding content for Beacon endpoint events. |
 | [`beacon endpoint s3`](/cli/s3) | Generate AWS S3 forwarding content for Beacon endpoint events. |
 | [`beacon endpoint gcs`](/cli/gcs) | Generate Google Cloud Storage forwarding content for Beacon endpoint events. |
-| [`beacon endpoint asymptote`](/cli/asymptote) | Generate the Vector forwarding pack for Beacon managed ingest and write validation events. |
+| [`beacon endpoint asymptote`](/cli/asymptote) | Generate the Vector forwarding pack for Beacon Cloud ingest and write validation events. |
 | [`beacon endpoint hooks`](/cli/hooks) | Manage supported hook-based endpoint telemetry. |
 | [`beacon endpoint opencode`](/cli/endpoint-opencode) | Collect endpoint telemetry from OpenCode session records on this machine. |
 | [`beacon endpoint pi`](/cli/endpoint-pi) | Collect endpoint telemetry from Pi session records on this machine. |
@@ -332,7 +332,7 @@ Generate Google Cloud Storage forwarding content and validation events for Beaco
 beacon endpoint asymptote [command]
 ```
 
-Generate the Vector forwarding pack that sends Beacon endpoint events to Beacon managed ingest, and write validation events.
+Generate the Vector forwarding pack that sends Beacon endpoint events to Beacon Cloud ingest, and write validation events.
 
 | Command | Description |
 |---------|-------------|

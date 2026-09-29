@@ -14,11 +14,11 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
 )
 
-// ErrNoURL means neither --url nor a Beacon Managed connection gives an MCP URL.
-var ErrNoURL = errors.New("no Beacon Managed MCP URL: run `beacon endpoint connect` to connect this endpoint to Beacon Managed, or pass --url")
+// ErrNoURL means neither --url nor a Beacon Cloud connection gives an MCP URL.
+var ErrNoURL = errors.New("no Beacon Cloud MCP URL: run `beacon endpoint connect` to connect this endpoint to Beacon Cloud, or pass --url")
 
 // ResolveURL picks the MCP URL: the --url flag, else the ingest URL `beacon endpoint connect`
-// recorded plus /mcp, which is where the Beacon Managed backend serves MCP by default. derived
+// recorded plus /mcp, which is where the Beacon Cloud backend serves MCP by default. derived
 // reports the second case; CheckURL then accepts the canonical URL the server names for itself.
 func ResolveURL(flag, ingestURL string) (resolved string, derived bool, err error) {
 	if v := strings.TrimSpace(flag); v != "" {
@@ -46,7 +46,7 @@ func resourceMetadataURL(mcpURL string) (string, error) {
 	return u.Scheme + "://" + u.Host + "/.well-known/oauth-protected-resource", nil
 }
 
-// CheckURL confirms that mcpURL is a Beacon Managed MCP server before anything is written: its
+// CheckURL confirms that mcpURL is a Beacon Cloud MCP server before anything is written: its
 // origin must serve resource metadata whose "resource" is mcpURL. This is `beacon mcp connect`'s
 // only network request (two when a derived URL is replaced by the canonical one), and nothing is
 // sent with it -- no token, no cookie.
@@ -103,7 +103,7 @@ func fetchResource(ctx context.Context, client *http.Client, mcpURL string) (str
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("%s answered HTTP %d; it does not look like a Beacon Managed MCP server", metadataURL, resp.StatusCode)
+		return "", fmt.Errorf("%s answered HTTP %d; it does not look like a Beacon Cloud MCP server", metadataURL, resp.StatusCode)
 	}
 	var meta protectedResource
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&meta); err != nil {

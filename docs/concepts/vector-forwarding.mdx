@@ -14,7 +14,7 @@ flowchart LR
     vectorPipeline -->|"other sinks"| customerDestinations["GCS, CloudWatch, Sumo, Rapid7, Falcon"]
   end
 
-  subgraph managedPath [Beacon Managed]
+  subgraph managedPath [Beacon Cloud]
     managedSources["Endpoint, CI, cloud, and SDK telemetry"] -->|"managed ingest"| managedIngest["Beacon ingest"]
     managedIngest --> managedPlatform["Hosted search, detections, governance, investigations"]
   end
@@ -44,7 +44,7 @@ That is where Vector fits. For open-source deployments, Vector is an optional cu
 - Retrying transient failures.
 - Holding destination URLs, tokens, IAM roles, cloud credentials, and destination-specific settings.
 
-In **Beacon Managed**, the main path is different. Managed deployments use Beacon-hosted ingest, retention, search, detections, governance, identity mapping, and investigation workflows. Vector is not the required managed-ingest architecture. You might still use a customer-managed Vector pipeline for an additional archive or downstream copy, but the core managed product provides the central pipeline and operational surface.
+In **Beacon Cloud**, the main path is different. Beacon Cloud deployments use Beacon-hosted ingest, retention, search, detections, governance, identity mapping, and investigation workflows. Vector is not the required managed-ingest architecture. You might still use a customer-managed Vector pipeline for an additional archive or downstream copy, but the core managed product provides the central pipeline and operational surface.
 
 ## Why the handoff is local
 
@@ -299,7 +299,7 @@ Use the official Vector docs when adapting generated templates:
   <Card title="Open Source deployment" icon="code-branch" href="/deployment/open-source">
     See how Agent Beacon runs local-first with customer-controlled storage and forwarding.
   </Card>
-  <Card title="Managed deployment" icon="cloud" href="/deployment/managed">
+  <Card title="Beacon Cloud deployment" icon="cloud" href="/deployment/managed">
     Understand the hosted Beacon ingest, retention, search, detections, governance, and investigation model.
   </Card>
   <Card title="Endpoint event schema" icon="code" href="/telemetry-schema/event-schema">

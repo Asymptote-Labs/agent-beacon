@@ -177,12 +177,12 @@ func TestWizardPresetManagedSkipsDestinationChoice(t *testing.T) {
 	}
 }
 
-// The destination captions are the only place a first-time user learns why Managed
+// The destination captions are the only place a first-time user learns why Beacon Cloud
 // exists. They used to describe the mechanism ("forward new events after you
 // connect") and named no benefit at all.
 func TestDestinationCaptionsNameTheValueNotTheMechanism(t *testing.T) {
 	managedLabel, managedDetail := destinationCopy(DestinationAsymptote)
-	if !strings.Contains(managedLabel, "Beacon Managed") {
+	if !strings.Contains(managedLabel, "Beacon Cloud") {
 		t.Fatalf("managed label = %q", managedLabel)
 	}
 	for _, want := range []string{"Free, unlimited cloud-based retention", "AI\u2011powered search and analytics on Beacon's hosted dashboard", "Rich findings analyzing your AI usage, coming soon.", "full feature set"} {
@@ -197,7 +197,7 @@ func TestDestinationCaptionsNameTheValueNotTheMechanism(t *testing.T) {
 	}
 	// Local is a supported end state, not a penalty, and it is not feature-poor:
 	// the local dashboard ships the same Findings, Detections, Analytics and Token
-	// Usage views. Claiming Managed adds those would be false, so the copy has to
+	// Usage views. Claiming Beacon Cloud adds those would be false, so the copy has to
 	// differentiate on scope, retention and durability instead.
 	for _, want := range []string{"this machine", "Nothing leaves your machine", "testing", "agent activity in one place"} {
 		if !strings.Contains(localDetail, want) {

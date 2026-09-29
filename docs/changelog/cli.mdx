@@ -135,7 +135,7 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   is printed before any browser is opened, so it works when none can be, and
   <kbd>esc</kbd> during the wait returns to the sign-in screen instead of ending the
   install. `beacon endpoint install --no-browser` starts in URL mode.
-- **Choosing Beacon Managed connects the endpoint** · Confirming Managed installs
+- **Choosing Beacon Cloud connects the endpoint** · Confirming Beacon Cloud installs
   Beacon and then enrolls the device and starts the forwarder, rather than printing
   `beacon endpoint connect` for you to run. The confirm screen states that forwarding
   starts and names what the selected privacy mode sends, so that screen is where
@@ -148,7 +148,7 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   path: that screen offers no alternative until an attempt has actually failed.
 - **Clearer, shorter onboarding copy** · The wizard explained itself twice and
   repeated the same reassurance on three screens. The destination choice now
-  describes what each option gives you: Managed as free, unlimited cloud-based
+  describes what each option gives you: Beacon Cloud as free, unlimited cloud-based
   retention of every agent session with AI-powered search and analytics on Beacon's
   hosted dashboard, Local as a dashboard for this machine where nothing leaves it,
   each saying when to pick it. The managed disclosure is plain language.
@@ -229,10 +229,10 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 - **Account sign-in and safer first-run onboarding** · `beacon login`, `whoami`,
   and `logout` add browser PKCE account authentication without enabling forwarding.
   Interactive user installs now use a full-screen wizard that requires sign-in,
-  preselects Beacon Managed, offers Standard or Metadata-only privacy, and records
+  preselects Beacon Cloud, offers Standard or Metadata-only privacy, and records
   intent without moving telemetry. System, package, MDM, CI, dry-run, and
   redirected-input installs remain noninteractive and account-free.
-- **Beacon Managed privacy modes** · Managed forwarding can now use `standard` or
+- **Beacon Cloud privacy modes** · Beacon Cloud forwarding can now use `standard` or
   `metadata-only`. Metadata-only removes retained prompts, responses, reasoning,
   tool arguments and results, command output, raw fields, diffs, inventory
   content, and MCP definitions locally before buffering or upload. Connect now
@@ -401,7 +401,7 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ### v1.3.9 · September 9, 2026
 
-- **Cloud agents can send telemetry to Beacon Managed** · Claude Code cloud sandboxes had two upload targets, a GCS or S3 bucket you own. `BEACON_CLOUD_UPLOAD=asymptote` with `BEACON_CLOUD_INGEST_URL` and a `BEACON_CLOUD_DEVICE_KEY` minted for the environment now posts the sandbox log to managed ingest, the same endpoint the laptop forwarder uses, so cloud-agent sessions appear in the dashboard beside endpoint sessions. New lines are sent on every Stop, in batches under the ingest limits; a revoked key is reported, never retried past the offset. See [Claude Code Cloud Agents](/runtimes/claude-code-cloud-agents).
+- **Cloud agents can send telemetry to Beacon Cloud** · Claude Code cloud sandboxes had two upload targets, a GCS or S3 bucket you own. `BEACON_CLOUD_UPLOAD=asymptote` with `BEACON_CLOUD_INGEST_URL` and a `BEACON_CLOUD_DEVICE_KEY` minted for the environment now posts the sandbox log to managed ingest, the same endpoint the laptop forwarder uses, so cloud-agent sessions appear in the dashboard beside endpoint sessions. New lines are sent on every Stop, in batches under the ingest limits; a revoked key is reported, never retried past the offset. See [Claude Code Cloud Agents](/runtimes/claude-code-cloud-agents).
 
 ### v1.3.8 · September 7, 2026
 
@@ -493,16 +493,16 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
   formula now depends on `vector` so a Homebrew install can connect without a
   second step.
 - **`beacon endpoint connect` and `disconnect`** · Connect an endpoint to
-  Beacon managed ingest from the CLI: it finds Vector (0.56+), opens the
+  Beacon Cloud ingest from the CLI: it finds Vector (0.56+), opens the
   dashboard's device approval page, receives a per-device key through a
   loopback PKCE exchange, stores it in a `0600` secrets file, renders and
   validates the forwarder config, and starts `com.beacon.endpoint.asymptote-forwarder`
   (launchd) or `beacon-asymptote-forwarder.service` (systemd) in user or system
-  mode. `beacon endpoint status` gains an "Beacon managed ingest" line and a
+  mode. `beacon endpoint status` gains an "Beacon Cloud ingest" line and a
   `managed_ingest` JSON object with forwarder state and a live credential check;
   `config.json` gains a non-secret `managed_ingest` block; uninstall removes the
   forwarder and credentials. Re-running connect rotates the key in place.
-- **Beacon Managed forwarding pack** · `beacon endpoint asymptote` generates a
+- **Beacon Cloud forwarding pack** · `beacon endpoint asymptote` generates a
   Vector `http` forwarder that posts the runtime and inventory JSONL to
   Beacon's ingest service with a per-device key read from a `0600` secrets
   file, plus a credential smoke test and sample events. It is the first Beacon
@@ -1123,14 +1123,14 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ### v0.0.59 · June 13, 2026
 
-- **Managed ingest commands** · Added `beacon ingest` commands for checking managed ingest status and uploading endpoint telemetry to configured Beacon Managed destinations.
+- **Managed ingest commands** · Added `beacon ingest` commands for checking managed ingest status and uploading endpoint telemetry to configured Beacon Cloud destinations.
 - **Endpoint token reporting** · Added `beacon endpoint tokens` for local token, cost, model, session, run, harness, and repository attribution from Beacon runtime logs.
 - **Token attribution fixes** · Improved token usage normalization for Claude Code telemetry, cumulative metric batches, composite run IDs, and SDK session attributes.
 
 ### v0.0.58 · June 13, 2026
 
 - **Token usage foundation** · Added token usage aggregation, dashboard token views, and trace identity fields so endpoint activity can report usage and cost consistently.
-- **Managed ingest support** · Added the endpoint ingest plumbing that lets authenticated Beacon clients upload endpoint telemetry to Beacon Managed when configured.
+- **Managed ingest support** · Added the endpoint ingest plumbing that lets authenticated Beacon clients upload endpoint telemetry to Beacon Cloud when configured.
 - **Telemetry schema updates** · Added trace identity, usage cost, and int64 token count fields while preserving local runtime log workflows.
 
 ### v0.0.57 · June 11, 2026

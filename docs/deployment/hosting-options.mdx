@@ -1,11 +1,11 @@
 ---
 title: "Hosting Options"
-description: "Choose between local Beacon and Beacon Managed"
+description: "Choose between local Beacon and Beacon Cloud"
 ---
 
-Both options are free. Run Beacon locally with full control of your data, or use [Beacon Managed](/concepts/core-concepts#beacon-managed) for hosted storage, search, analytics, and unlimited retention.
+Both options are free. Run Beacon locally with full control of your data, or use [Beacon Cloud](/concepts/core-concepts#beacon-cloud) for hosted storage, search, analytics, and unlimited retention.
 
-| Capability | Local | Beacon Managed |
+| Capability | Local | Beacon Cloud |
 | --- | --- | --- |
 | Cross-harness agent telemetry | ✓ | ✓ |
 | Local, CI & cloud collection | ✓ | ✓ |
@@ -81,9 +81,9 @@ The local path preserves `runtime.jsonl` on the endpoint and supports optional f
 
 See [Local](/deployment/open-source) for setup details and [Security & IT Rollout Guide](/security) for managed endpoint deployment.
 
-## Beacon Managed
+## Beacon Cloud
 
-Use Managed when you want hosted visibility, governance, and enterprise rollout support for agent activity.
+Use Beacon Cloud when you want hosted visibility, governance, and enterprise rollout support for agent activity.
 
 1. [Create a Beacon account](https://beacon.sh/sign-up).
 2. Sign the CLI in on each user endpoint:
@@ -101,7 +101,7 @@ beacon endpoint connect --dashboard-url https://beacon.sh
 Interactive `beacon endpoint install` performs the sign-in step when needed.
 System-mode connect remains account-free and uses browser approval instead.
 
-Beacon Managed gives you the open-source Agent Beacon experience without having to run the backend yourself.
+Beacon Cloud gives you the open-source Agent Beacon experience without having to run the backend yourself.
 
 For cloud-hosted agent applications, install the [Observe SDK](/concepts/core-concepts#observe-sdk) and initialize hosted export with a Beacon API key:
 
@@ -117,12 +117,12 @@ Observe.initialize({
 });
 ```
 
-See [Beacon Managed](/deployment/managed) for managed platform capabilities and [SDK Quickstart](/sdk/quickstart) for cloud instrumentation details.
+See [Beacon Cloud](/deployment/managed) for managed platform capabilities and [SDK Quickstart](/sdk/quickstart) for cloud instrumentation details.
 
 ## Related
 
 <Columns cols={2}>
-  <Card title="Beacon Managed" icon="key" href="/deployment/managed">
+  <Card title="Beacon Cloud" icon="key" href="/deployment/managed">
     Review managed ingest, governance, investigations, access control, and rollout support.
   </Card>
   <Card title="Local" icon="download" href="/deployment/open-source">
@@ -135,7 +135,7 @@ See [Beacon Managed](/deployment/managed) for managed platform capabilities and 
     Instrument cloud-hosted agent applications with hosted or customer-managed export.
   </Card>
   <Card title="Beacon Overview" icon="diagram-project" href="/get-started/overview">
-    See how local Beacon fits with Beacon Managed.
+    See how local Beacon fits with Beacon Cloud.
   </Card>
   <Card title="Log Forwarding" icon="tower-broadcast" href="/log-forwarding">
     Forward local Beacon events into security and observability platforms.

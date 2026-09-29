@@ -66,7 +66,7 @@ func ValidateMCPTokenRequest(req MCPTokenRequest) error {
 	return nil
 }
 
-// CreateMCPToken mints a personal Beacon Managed MCP token for the signed-in user. The account
+// CreateMCPToken mints a personal Beacon Cloud MCP token for the signed-in user. The account
 // token authorizes the request and is sent only to the session's own auth service.
 func CreateMCPToken(ctx context.Context, session Session, req MCPTokenRequest, client *http.Client) (*MCPToken, error) {
 	req.Name = strings.TrimSpace(req.Name)

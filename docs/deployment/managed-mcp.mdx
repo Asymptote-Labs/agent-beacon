@@ -1,10 +1,10 @@
 ---
 title: "MCP"
-description: "Search your Beacon Managed agent history from the assistants you already use"
+description: "Search your Beacon Cloud agent history from the assistants you already use"
 ---
 
-Beacon Managed MCP lets an assistant search and read the agent history you forward to Beacon
-Managed. Use it to find a past session, recover a command or tool result, revisit work across
+Beacon Cloud MCP lets an assistant search and read the agent history you forward to Beacon
+Cloud. Use it to find a past session, recover a command or tool result, revisit work across
 different harnesses, and inspect token usage without leaving your current agent.
 
 The server is read-only. It cannot change endpoint configuration, edit a session, or run a tool
@@ -14,7 +14,7 @@ on your machine.
 
 You need:
 
-- Beacon installed and [connected to Beacon Managed](/cli/endpoint-connect)
+- Beacon installed and [connected to Beacon Cloud](/cli/endpoint-connect)
 - At least one supported MCP client on the machine
 - A Beacon account with access to the forwarded history
 
@@ -39,7 +39,7 @@ harness asks you to sign in with OAuth the first time it connects.
 
 <Accordion title="Example">
 ```text
-Beacon Managed MCP: https://mcp.beacon.sh (checked)
+Beacon Cloud MCP: https://mcp.beacon.sh (checked)
 Server name: beacon-managed
 Auth: OAuth; Beacon writes only the URL, and each harness signs in on first use
 
@@ -64,7 +64,7 @@ the [`beacon mcp connect` reference](/cli/mcp-connect).
 
 ## What your agent can do
 
-Beacon Managed MCP exposes tools for:
+Beacon Cloud MCP exposes tools for:
 
 - searching sessions by text and structured filters
 - grepping retained prompts, responses, commands, tool calls, and results
@@ -80,7 +80,7 @@ Try prompts such as:
 - “Search my Claude Code and Cursor history for changes to the MCP connection flow.”
 - “Summarize token usage for this repository over the past seven days.”
 
-Results are limited to history your account can access in Beacon Managed.
+Results are limited to history your account can access in Beacon Cloud.
 
 ## Privacy and retention
 
@@ -93,9 +93,9 @@ MCP can return only what the endpoint forwarded.
   are therefore limited in this mode.
 
 Beacon caps each retained string at 4 KB before writing it locally. Text beyond that limit is not
-available to Beacon Managed MCP.
+available to Beacon Cloud MCP.
 
-See [Beacon Managed forwarding](/log-forwarding/asymptote#what-leaves-the-machine) and
+See [Beacon Cloud forwarding](/log-forwarding/asymptote#what-leaves-the-machine) and
 [retention and redaction](/security/retention-redaction) for the complete data flow.
 
 ## Authentication options
@@ -125,13 +125,13 @@ beacon mcp disconnect
 removes only entries previously written by Beacon; it leaves MCP entries you created yourself
 untouched.
 
-## Beacon Managed and local MCP
+## Beacon Cloud and local MCP
 
 Beacon offers two separate MCP servers:
 
 | Server | Data | Connection |
 |---|---|---|
-| `beacon-managed` | History forwarded to Beacon Managed across connected endpoints | Hosted HTTPS server configured with `beacon mcp connect` |
+| `beacon-managed` | History forwarded to Beacon Cloud across connected endpoints | Hosted HTTPS server configured with `beacon mcp connect` |
 | `beacon` | This machine's local runtime log and approved local memory | Local stdio or loopback server configured with `beacon mcp doctor` |
 
 Use both if you want cross-device managed history and direct access to this machine's local data.
@@ -139,13 +139,13 @@ Use both if you want cross-device managed history and direct access to this mach
 ## Related
 
 <Columns cols={2}>
-  <Card title="Beacon Managed" icon="cloud" href="/deployment/managed">
+  <Card title="Beacon Cloud" icon="cloud" href="/deployment/managed">
     Learn about hosted storage, search, analytics, and long-term agent history.
   </Card>
   <Card title="beacon mcp connect" icon="plug" href="/cli/mcp-connect">
     Review every command, flag, supported harness, and configuration format.
   </Card>
-  <Card title="Beacon Managed forwarding" icon="tower-broadcast" href="/log-forwarding/asymptote">
+  <Card title="Beacon Cloud forwarding" icon="tower-broadcast" href="/log-forwarding/asymptote">
     Understand what leaves an endpoint and how forwarding works.
   </Card>
   <Card title="Local Beacon MCP" icon="server" href="/cli/mcp">

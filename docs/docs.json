@@ -10,7 +10,7 @@
   "fonts": {
     "family": "Familjen Grotesk"
   },
-  "favicon": "/images/beacon-favicon.svg",
+  "favicon": "/logo/favicon.svg",
   "navigation": {
     "style": "sidebar",
     "global": {
@@ -57,10 +57,7 @@
             "pages": [
               "deployment/hosting-options",
               "deployment/open-source",
-              {
-                "group": "Beacon Managed",
-                "root": "deployment/managed"
-              }
+              "deployment/managed"
             ]
           },
           {
@@ -442,7 +439,7 @@
             "pages": [
               "log-forwarding/ci-telemetry-exports",
               {
-                "group": "Beacon Managed",
+                "group": "Beacon Cloud",
                 "expanded": true,
                 "pages": [
                   "log-forwarding/asymptote"

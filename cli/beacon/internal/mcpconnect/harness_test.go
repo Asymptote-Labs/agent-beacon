@@ -237,7 +237,7 @@ bearer_token_env_var = "BEACON_MCP_TOKEN"
     {
       "type": "promptString",
       "id": "beacon-managed-token",
-      "description": "Beacon Managed MCP token (beacon.sh → Dashboard → MCP Access)",
+      "description": "Beacon Cloud MCP token (beacon.sh → Dashboard → MCP Access)",
       "password": true
     }
   ]

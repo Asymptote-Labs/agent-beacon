@@ -10,18 +10,18 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 )
 
-// ServerName is the name Beacon registers the Beacon Managed MCP server under in every harness.
+// ServerName is the name Beacon registers the Beacon Cloud MCP server under in every harness.
 // The local stdio server `beacon mcp serve` is "beacon"; the two names differ so neither entry
 // overwrites the other.
 const ServerName = "beacon-managed"
 
-// TokenPage is where a person creates a personal Beacon Managed MCP token.
+// TokenPage is where a person creates a personal Beacon Cloud MCP token.
 const TokenPage = "beacon.sh → Dashboard → MCP Access"
 
 // vscodeInputID names the VS Code input variable that holds a token in token mode.
 const vscodeInputID = "beacon-managed-token"
 
-// AuthMode is how a harness authenticates to Beacon Managed MCP.
+// AuthMode is how a harness authenticates to Beacon Cloud MCP.
 type AuthMode string
 
 const (

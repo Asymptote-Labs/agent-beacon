@@ -148,7 +148,7 @@ nfpms:
         dst: /opt/beacon/bin/beacon-otelcol
         file_info:
           mode: 0755
-      # Vector runs every forwarder Beacon renders (Beacon Managed, S3, GCS, CloudWatch, Sumo Logic,
+      # Vector runs every forwarder Beacon renders (Beacon Cloud, S3, GCS, CloudWatch, Sumo Logic,
       # Rapid7, Falcon). Same path as the macOS package, which is where FindVector looks. It does not
       # run unless one of those is configured. /opt/beacon/bin is not on PATH, so it cannot shadow
       # another Vector.

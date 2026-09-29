@@ -1,6 +1,6 @@
 ---
 title: "beacon endpoint connect"
-description: "Connect a Beacon endpoint to Beacon managed ingest, or disconnect it, and understand what the forwarder stores and sends."
+description: "Connect a Beacon endpoint to Beacon Cloud ingest, or disconnect it, and understand what the forwarder stores and sends."
 ---
 
 ## Command overview
@@ -39,7 +39,7 @@ A first connect that fails at `vector validate` or at loading the service saves 
 
 Re-running `connect` on a connected machine reuses its install id, so the server rotates the existing device's key in place instead of creating a second device. Because that rotation invalidates the key the running forwarder holds, the new config is validated before enrollment: a re-run whose config Vector rejects leaves the forwarder, its key, and its buffer untouched. Under launchd the new forwarder is loaded only after the old one has exited (Vector drains in-flight requests first), and if the new instance has not started within the wait, `connect` fails and points at `launchctl print` for the job (v1.3.2).
 
-Some steps can only fail after the server has issued the key: storing it, validating the config that carries the server's ingest URL, writing the service unit, starting the service, and recording the enrollment. `connect` writes `asymptote/connect-pending` as soon as the key arrives and removes it only when every step has succeeded. If a step in between fails, `connect` says the connect is incomplete and names the retry, and `beacon endpoint status` reports Beacon Managed as not connected with `connect_incomplete: true` in `--json`. On a re-connect, the forwarder still running holds the key the server just rotated out, so the previous enrollment record and config are not treated as a working connection. On a first connect, Beacon stops and removes any partial forwarder before returning the error, so a later onboarding retry can safely select local-only telemetry. Run `beacon endpoint connect` again once the cause is fixed. An approval that is cancelled or expires before a key is issued rotates nothing and leaves an existing connection as it was.
+Some steps can only fail after the server has issued the key: storing it, validating the config that carries the server's ingest URL, writing the service unit, starting the service, and recording the enrollment. `connect` writes `asymptote/connect-pending` as soon as the key arrives and removes it only when every step has succeeded. If a step in between fails, `connect` says the connect is incomplete and names the retry, and `beacon endpoint status` reports Beacon Cloud as not connected with `connect_incomplete: true` in `--json`. On a re-connect, the forwarder still running holds the key the server just rotated out, so the previous enrollment record and config are not treated as a working connection. On a first connect, Beacon stops and removes any partial forwarder before returning the error, so a later onboarding retry can safely select local-only telemetry. Run `beacon endpoint connect` again once the cause is fixed. An approval that is cancelled or expires before a key is issued rotates nothing and leaves an existing connection as it was.
 
 ## Privacy modes
 
@@ -114,7 +114,7 @@ beacon endpoint disconnect
 `beacon endpoint status` prints one line for managed ingest: whether this endpoint is connected, organization and device identity, active privacy mode, forwarder state, credential validity, and disk-buffer size. `--json` exposes the same under `managed_ingest`.
 
 ```text
-Beacon Managed: connected to Beacon Test as device 807c6a11-…; forwarder loaded=true running=true; privacy Metadata only; credential valid
+Beacon Cloud: connected to Beacon Test as device 807c6a11-…; forwarder loaded=true running=true; privacy Metadata only; credential valid
 ```
 
 `credential revoked` means the key was revoked or expired, or the approving user is no longer a member of the organization; Vector is logging 401s and dropping batches. Run `beacon endpoint connect --dashboard-url https://beacon.sh` again to re-enroll.
@@ -130,7 +130,7 @@ Vector keeps reading into an on-disk buffer (512 MiB for runtime, 256 MiB for in
 ## Related
 
 <Columns cols={2}>
-  <Card title="Beacon Managed forwarding" icon="tower-broadcast" href="/log-forwarding/asymptote">
+  <Card title="Beacon Cloud forwarding" icon="tower-broadcast" href="/log-forwarding/asymptote">
     Wire contract, what leaves the machine, revocation, and offline behavior.
   </Card>
   <Card title="beacon endpoint asymptote" icon="terminal" href="/cli/asymptote">

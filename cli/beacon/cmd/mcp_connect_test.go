@@ -438,7 +438,7 @@ func TestMCPConnectDerivesTheURLFromTheManagedConnection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout, "Beacon Managed MCP: "+fx.url+" (checked)") {
+	if !strings.Contains(stdout, "Beacon Cloud MCP: "+fx.url+" (checked)") {
 		t.Fatalf("output:\n%s", stdout)
 	}
 }
@@ -518,7 +518,7 @@ func TestMCPConnectTokenEnvPrintsTheVariable(t *testing.T) {
 
 func TestMCPServerNamesDoNotCollide(t *testing.T) {
 	if mcpconnect.ServerName == "beacon" {
-		t.Fatal("the Beacon Managed server must not share the local stdio server's name")
+		t.Fatal("the Beacon Cloud server must not share the local stdio server's name")
 	}
 }
 
@@ -553,7 +553,7 @@ func TestMCPStatusWithoutCheckUsesTheURLConnectWrote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout, "Beacon Managed MCP URL: "+fx.url) || strings.Contains(stdout, "other URL") {
+	if !strings.Contains(stdout, "Beacon Cloud MCP URL: "+fx.url) || strings.Contains(stdout, "other URL") {
 		t.Fatalf("status compared against the derived URL:\n%s", stdout)
 	}
 	if n := len(fx.requests.all()); n != afterConnect {
@@ -567,7 +567,7 @@ func TestMCPStatusFallsBackToTheRecordedURLWithoutAnEnrollment(t *testing.T) {
 		t.Fatal(err)
 	}
 	stdout, _, err := runMCP(t, "status")
-	if err != nil || !strings.Contains(stdout, "Beacon Managed MCP URL: "+fx.url) || strings.Contains(stdout, "other URL") {
+	if err != nil || !strings.Contains(stdout, "Beacon Cloud MCP URL: "+fx.url) || strings.Contains(stdout, "other URL") {
 		t.Fatalf("err = %v\n%s", err, stdout)
 	}
 }
@@ -580,7 +580,7 @@ func TestMCPStatusCheckUsesTheRecordedURLWithoutAnEnrollment(t *testing.T) {
 		t.Fatal(err)
 	}
 	stdout, _, err := runMCP(t, "status", "--check")
-	if err != nil || !strings.Contains(stdout, "URL check: ok") || !strings.Contains(stdout, "Beacon Managed MCP URL: "+fx.url) {
+	if err != nil || !strings.Contains(stdout, "URL check: ok") || !strings.Contains(stdout, "Beacon Cloud MCP URL: "+fx.url) {
 		t.Fatalf("err = %v\n%s", err, stdout)
 	}
 	// With nothing recorded and no enrollment, --check still fails, and says why.

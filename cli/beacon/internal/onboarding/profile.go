@@ -76,7 +76,7 @@ type Onboarding struct {
 	// New interactive installs choose local or asymptote; own_infra remains valid for
 	// profiles written by older versions and unattended/admin-managed deployments.
 	Destination string `json:"destination,omitempty"`
-	// PrivacyMode applies only to Beacon Managed forwarding.
+	// PrivacyMode applies only to Beacon Cloud forwarding.
 	PrivacyMode string `json:"privacy_mode,omitempty"`
 }
 

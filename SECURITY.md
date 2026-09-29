@@ -68,7 +68,7 @@ active log rotates at 10 MiB and Beacon keeps up to five numbered local
 archives. Normal endpoint collection does not require a hosted account, remote
 policy fetch, MDM API credentials, or external network connection.
 
-The one opt-in network channel for telemetry is Asymptote Managed forwarding:
+The one opt-in network channel for telemetry is Asymptote Beacon Cloud forwarding:
 a Vector forwarder on the endpoint posts the local runtime and inventory JSONL
 over HTTPS with a per-device key that a member of the organization approved in
 the browser. The key lives in a `0600` secrets file outside Beacon

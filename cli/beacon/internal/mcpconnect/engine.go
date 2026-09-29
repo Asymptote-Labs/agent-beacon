@@ -195,7 +195,7 @@ func vscodeInput() ordered {
 	return ordered{
 		{"type", "promptString"},
 		{"id", vscodeInputID},
-		{"description", "Beacon Managed MCP token (" + TokenPage + ")"},
+		{"description", "Beacon Cloud MCP token (" + TokenPage + ")"},
 		{"password", true},
 	}
 }

@@ -653,7 +653,7 @@ func TestMaybeRunOnboardingConnectsManagedAndRecordsLocal(t *testing.T) {
 		t.Fatalf("connected endpoint destination = %q, want managed", got)
 	}
 
-	// Confirming Managed on a fresh endpoint connects it in the same command.
+	// Confirming Beacon Cloud on a fresh endpoint connects it in the same command.
 	h = newOnboardingHarness(t)
 	h.askable = true
 	h.answers.DestinationAsked = true
@@ -860,7 +860,7 @@ func TestEndpointOnboardingShowsDestination(t *testing.T) {
 	for value, want := range map[string]string{
 		onboarding.DestinationLocal:     "Telemetry destination: local only",
 		onboarding.DestinationOwnInfra:  "Telemetry destination: own infrastructure",
-		onboarding.DestinationAsymptote: "Telemetry destination: Beacon Managed",
+		onboarding.DestinationAsymptote: "Telemetry destination: Beacon Cloud",
 	} {
 		h := newOnboardingHarness(t)
 		h.loaded = onboarding.Profile{InstallID: "abc", Onboarding: onboarding.Onboarding{CompletedAt: "2026-08-01T00:00:00Z", Outcome: onboarding.OutcomeSubmitted, Email: "shukan@asymptotelabs.ai", Usage: onboarding.UsageWork, Destination: value}}
