@@ -85,6 +85,26 @@ correlation:
 
 Use `correlation` when the risk comes from a sequence, such as a secret-bearing file read followed by network egress in the same agent session.
 
+Steps match in the order they are listed unless the correlation sets `order: any`. With `order: any`, each step must be satisfied by a different event, in whatever order those events occurred, and every matched event must fall within `window` of the earliest one. Use it when the combination is the risk regardless of which came first:
+
+```yaml title="Order-insensitive correlation"
+correlation:
+  scope: session
+  window: 120s
+  order: any   # default: sequence
+  steps:
+    - id: read_secret
+      match: >
+        e.event.action == "file.read" &&
+        e.file.path.matches("(\\.env|credentials|id_rsa|\\.aws/)")
+    - id: egress
+      match: >
+        e.event.action == "command.executed" &&
+        e.command.command.matches("curl\\s+.*https?://")
+```
+
+Either order produces at most one finding per session.
+
 ## Tests
 
 Each rule carries test fixtures that define expected verdicts. Fixtures use partial Beacon events, so a test only needs the fields that matter for the rule.

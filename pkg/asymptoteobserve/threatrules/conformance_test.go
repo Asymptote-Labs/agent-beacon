@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -64,3 +65,42 @@ func TestPackConformance(t *testing.T) {
 		})
 	}
 }
+
+// TestPackSharedCredentialRead pins correlation read steps that are meant to reuse
+// credential-file-read's definition of a secret. The format has no include mechanism, so
+// the expression is copied; this fails when one copy changes without the other.
+func TestPackSharedCredentialRead(t *testing.T) {
+	rules, err := LoadDir(rulesDir(t))
+	if err != nil {
+		t.Fatalf("load rule pack: %v", err)
+	}
+	byID := make(map[string]*Rule, len(rules))
+	for _, r := range rules {
+		byID[r.ID] = r
+	}
+	base := byID["credential-file-read"]
+	if base == nil {
+		t.Fatal("credential-file-read missing from the pack")
+	}
+	for _, ref := range []struct{ rule, step string }{
+		{"secret-read-then-destructive", "read_secret"},
+	} {
+		r := byID[ref.rule]
+		if r == nil || r.Correlation == nil {
+			t.Fatalf("%s missing or not a correlation rule", ref.rule)
+		}
+		var got string
+		for _, s := range r.Correlation.Steps {
+			if s.ID == ref.step {
+				got = s.Match
+			}
+		}
+		if normalizeCEL(got) != normalizeCEL(base.Match) {
+			t.Errorf("%s step %s drifted from credential-file-read's match:\n  got:  %s\n  want: %s",
+				ref.rule, ref.step, normalizeCEL(got), normalizeCEL(base.Match))
+		}
+	}
+}
+
+// normalizeCEL collapses whitespace so YAML indentation differences do not count.
+func normalizeCEL(expr string) string { return strings.Join(strings.Fields(expr), " ") }

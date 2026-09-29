@@ -55,6 +55,12 @@
           "description": "Go duration string, e.g. 120s, 5m.",
           "minLength": 1
         },
+        "order": {
+          "type": "string",
+          "enum": ["sequence", "any"],
+          "default": "sequence",
+          "description": "sequence: steps must occur in listed order. any: each step matched by a distinct event within the window, in any order."
+        },
         "steps": {
           "type": "array",
           "minItems": 2,

@@ -77,6 +77,8 @@ correlation:
 
 For `threat-rules/v1`, correlation scope is `session`. Beacon groups events by `e.session.id`, then looks for each step in order. A later step must occur at or after the prior matched step, and the final step must occur within the configured `window` from the first matched step.
 
+A correlation that sets `order: any` drops the ordering requirement: Beacon assigns each step a distinct event from the session, in whatever order they occurred, and every matched event must fall within `window` of the earliest one. The evidence events are reported in the order they happened. Either way a rule reports a session at most once.
+
 Correlation is useful when no single event is suspicious enough on its own, but the sequence is meaningful.
 
 "In order" means the order the events happened, not the order they were written. `beacon

@@ -85,7 +85,7 @@ Exactly one of `match` or `correlation` must be present. Required:
 | `posture` | yes | `detect` \| `enforce-capable` | Observe-only vs. enforcement-eligible. Flows to `policy.enforcement`. |
 | `taxonomy` | no | map<string,string> | External references (OWASP/MITRE/CVE). No runtime lookup. |
 | `match` | one-of | CEL string → bool | Single-event condition over `e`. |
-| `correlation` | one-of | object | Multi-event ordered window (below). |
+| `correlation` | one-of | object | Multi-event session window (below). |
 | `emit.reason` | yes | non-empty string | Finding explanation; flows to `policy.reason`. |
 | `tests` | yes | list ≥ 1 | Embedded conformance fixtures (below). |
 
@@ -94,10 +94,25 @@ Exactly one of `match` or `correlation` must be present. Required:
 | Field | Required | Type / values | Meaning |
 |---|---|---|---|
 | `scope` | yes | `session` | Grouping key (`e.session.id`). v1 supports `session` only. |
-| `window` | yes | Go duration (`120s`, `5m`) | Max elapsed time from first matched step to final matched step. |
-| `steps` | yes | list ≥ 2, ordered | Ordered sequence; each step's event must be at-or-after the previous matched event and within `window` of the first. |
+| `window` | yes | Go duration (`120s`, `5m`) | Max elapsed time from the earliest matched event to the latest. |
+| `order` | no | `sequence` (default) \| `any` | Whether `steps` must occur in listed order. |
+| `steps` | yes | list ≥ 2 | Step conditions; see `order`. |
 | `steps[].id` | yes | string | Step label (diagnostics). Not evaluated. |
 | `steps[].match` | yes | CEL string → bool | Per-event condition, same contract as top-level `match`. |
+
+`order` selects how the steps align with events:
+
+- `sequence` (the default when `order` is omitted): the steps form an ordered sequence. Each
+  step's event must be at-or-after the previous matched event, and the final step's event
+  must be within `window` of the first.
+- `any`: each step must be satisfied by a distinct event, in whatever order those events
+  occurred, with every matched event within `window` of the earliest one. Use it when the
+  risk is the combination rather than the sequence — a secret read and an egress command
+  in one session are an exfiltration signal whichever came first, for instance when an
+  injected instruction says "run this, then read `.env`".
+
+In both modes a rule produces at most one finding per session, so a session that contains
+the steps in both orders still fires once. A single event never satisfies two steps.
 
 ### `tests[]`
 

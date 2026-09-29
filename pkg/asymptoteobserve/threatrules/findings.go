@@ -63,7 +63,8 @@ type Finding struct {
 	SessionID string                    `json:"session_id,omitempty"`
 	Reason    string                    `json:"reason"`
 	// Events is the evidence: the single matching event for a single-event rule, or the
-	// matched step events (in order) for a correlation rule.
+	// matched step events for a correlation rule (in step order for a sequence, in the
+	// order they happened for order: any).
 	Events []asymptoteobserve.Event `json:"events"`
 }
 

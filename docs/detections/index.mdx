@@ -102,10 +102,10 @@ A finding is the runtime result of a rule firing. Findings include the rule iden
 ```json title="Finding shape"
 {
   "rule_id": "secret-read-then-egress",
-  "title": "Secret-file read followed by network egress",
+  "title": "Secret-file read and network egress in one session",
   "severity": "high",
   "posture": "detect",
-  "reason": "Secret file read then network egress within one session",
+  "reason": "Credential file read and network egress within one session window",
   "session_id": "claude-session-123",
   "events": [
     {

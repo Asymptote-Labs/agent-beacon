@@ -65,19 +65,36 @@ type Rule struct {
 	Tests       []Fixture                 `yaml:"tests"`
 }
 
-// Correlation is the ordered-window, session-scoped form of a rule.
+// Order says whether a correlation's steps must occur in the order they are listed.
+type Order string
+
+const (
+	// OrderSequence is the default: each step must occur at or after the previous
+	// matched step. An omitted order means sequence, so existing rules keep their
+	// semantics.
+	OrderSequence Order = "sequence"
+	// OrderAny matches when every step is satisfied by a distinct event inside the
+	// window, in whatever order those events occurred.
+	OrderAny Order = "any"
+)
+
+// Correlation is the windowed, session-scoped form of a rule.
 type Correlation struct {
 	Scope  Scope             `yaml:"scope"`
 	Window string            `yaml:"window"`
+	Order  Order             `yaml:"order,omitempty"`
 	Steps  []CorrelationStep `yaml:"steps"`
 }
+
+// AnyOrder reports whether the steps may be satisfied in any order.
+func (c *Correlation) AnyOrder() bool { return c.Order == OrderAny }
 
 // ParseWindow parses the raw Window duration. Valid to call after Validate succeeds.
 func (c *Correlation) ParseWindow() (time.Duration, error) {
 	return time.ParseDuration(c.Window)
 }
 
-// CorrelationStep is one ordered step of a correlation rule.
+// CorrelationStep is one step of a correlation rule.
 type CorrelationStep struct {
 	ID    string `yaml:"id"`
 	Match string `yaml:"match"`
@@ -217,6 +234,11 @@ func (r *Rule) validateCorrelation() error {
 	}
 	if _, err := c.ParseWindow(); err != nil {
 		return fmt.Errorf("correlation.window %q: %w", c.Window, err)
+	}
+	switch c.Order {
+	case "", OrderSequence, OrderAny:
+	default:
+		return fmt.Errorf("correlation.order %q unsupported (%q or %q)", c.Order, OrderSequence, OrderAny)
 	}
 	if len(c.Steps) < 2 {
 		return fmt.Errorf("correlation requires >= 2 steps, got %d", len(c.Steps))
