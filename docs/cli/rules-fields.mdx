@@ -23,6 +23,7 @@ Threat-rule expressions bind each Beacon event as `e`. Field paths mirror the ev
 | `e.command.command` | Match executed command text |
 | `e.file.path` | Match a file path |
 | `e.prompt.text` | Match prompt text when retained |
+| `e.gen_ai.tool.call.result_text` | Match text a file read, web fetch, or MCP tool returned, when retained (derived by the engine; empty for other actions) |
 | `e.gen_ai.usage.input_tokens` | Match normalized token usage fields |
 
 ## Examples

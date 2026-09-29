@@ -2,6 +2,7 @@ package threatrules
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/cel-go/cel"
@@ -25,6 +26,27 @@ type CompiledRule struct {
 	match  cel.Program   // set for single-event rules
 	steps  []cel.Program // set for correlation rules
 	window time.Duration // parsed correlation window
+	// derived is set when any of the rule's expressions references an engine-derived field
+	// (see withDerivedFields). Only those rules pay to derive it, so the rest of a pack runs
+	// exactly as it did before the field existed.
+	derived bool
+}
+
+// referencesDerivedField reports whether a match expression names an engine-derived field.
+// A textual check is enough: a false positive (the name inside a string literal) only costs
+// the derivation, and a false negative cannot happen because CEL has no other way to reach
+// the field.
+func referencesDerivedField(expr string) bool {
+	return strings.Contains(expr, "result_text")
+}
+
+// eval evaluates one compiled expression against one event, deriving fields first only for
+// rules that reference them.
+func (c *CompiledRule) eval(prog cel.Program, event asymptoteobserve.Event) (bool, error) {
+	if c.derived {
+		event = withDerivedFields(event)
+	}
+	return evalMatch(prog, event)
 }
 
 // Compile validates a rule and compiles its CEL expressions into a reusable evaluator.
@@ -34,10 +56,11 @@ func Compile(rule *Rule) (*CompiledRule, error) {
 	if err := rule.Validate(); err != nil {
 		return nil, err
 	}
-	c := &CompiledRule{rule: rule}
+	c := &CompiledRule{rule: rule, derived: referencesDerivedField(rule.Match)}
 	if rule.Correlation != nil {
 		c.steps = make([]cel.Program, len(rule.Correlation.Steps))
 		for i, step := range rule.Correlation.Steps {
+			c.derived = c.derived || referencesDerivedField(step.Match)
 			prog, err := CompileMatch(step.Match)
 			if err != nil {
 				return nil, fmt.Errorf("correlation.steps[%d] (%s): %w", i, step.ID, err)
@@ -72,7 +95,7 @@ func (c *CompiledRule) Evaluate(events []asymptoteobserve.Event) (Verdict, error
 		return c.evaluateCorrelation(events)
 	}
 	for i := range events {
-		matched, err := EvalMatch(c.match, events[i])
+		matched, err := c.eval(c.match, events[i])
 		if err != nil {
 			return "", err
 		}

@@ -77,6 +77,7 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.gen_ai.retrieval.query_text` | string |
 | `e.gen_ai.token.type` | string |
 | `e.gen_ai.tool.call.id` | string |
+| `e.gen_ai.tool.call.result_text` | string |
 | `e.gen_ai.tool.description` | string |
 | `e.gen_ai.tool.name` | string |
 | `e.gen_ai.tool.type` | string |
@@ -159,3 +160,13 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.vcs.ref.head.type` | string |
 | `e.vcs.repository.url.full` | string |
 | `e.vendor` | string |
+
+## Derived fields
+
+These are computed by the engine from the event just before evaluation. They are
+never written to or read from the log, so a fixture sets the source field, not these.
+
+- `e.gen_ai.tool.call.result_text`: `gen_ai.tool.call.result` as text, only on read-type tool
+  results (`file.read`, `mcp.tool_invoked`, MCP-named tools, web fetch/search tools) whose
+  content was retained. String leaves of an object or list result are joined one per line.
+  Capped at 4096 bytes and secret-redacted like other retained text; empty otherwise.

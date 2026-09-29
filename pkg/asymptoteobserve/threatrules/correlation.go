@@ -36,7 +36,7 @@ func (c *CompiledRule) matchSession(events []asymptoteobserve.Event) ([]asymptot
 	// an early anchor whose final step falls outside the window must not mask a later
 	// anchor that completes in-window with the same downstream event.
 	for start := range events {
-		matched, err := EvalMatch(c.steps[0], events[start])
+		matched, err := c.eval(c.steps[0], events[start])
 		if err != nil {
 			return nil, err
 		}
@@ -70,7 +70,7 @@ func (c *CompiledRule) completeFrom(events []asymptoteobserve.Event, start int) 
 	seq := make([]asymptoteobserve.Event, 1, len(c.steps))
 	seq[0] = events[start]
 	for j := start + 1; j < len(events); j++ {
-		matched, err := EvalMatch(c.steps[stepIdx], events[j])
+		matched, err := c.eval(c.steps[stepIdx], events[j])
 		if err != nil {
 			return nil, err
 		}

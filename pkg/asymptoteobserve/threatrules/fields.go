@@ -62,7 +62,7 @@ func walkFields(t reflect.Type, prefix string, seen map[reflect.Type]bool, out *
 		if !f.IsExported() {
 			continue
 		}
-		name := jsonFieldName(f)
+		name := celFieldName(f)
 		if name == "" || name == "-" {
 			continue
 		}
@@ -87,16 +87,6 @@ func walkFields(t reflect.Type, prefix string, seen map[reflect.Type]bool, out *
 // honest if a time.Time or similar is added.
 func isLeafStruct(t reflect.Type) bool {
 	return t.String() == "time.Time"
-}
-
-// jsonFieldName returns the CEL field name for a struct field: the first segment of its
-// json tag, falling back to the Go field name (mirroring cel-go's json tag handler).
-func jsonFieldName(f reflect.StructField) string {
-	tag := f.Tag.Get("json")
-	if tag == "" {
-		return f.Name
-	}
-	return strings.Split(tag, ",")[0]
 }
 
 func celTypeName(t reflect.Type) string {
@@ -135,5 +125,12 @@ func RenderFieldsMarkdown() string {
 	for _, f := range EventFields() {
 		fmt.Fprintf(&b, "| `e.%s` | %s |\n", f.Path, f.Type)
 	}
+	b.WriteString("\n## Derived fields\n\n")
+	b.WriteString("These are computed by the engine from the event just before evaluation. They are\n")
+	b.WriteString("never written to or read from the log, so a fixture sets the source field, not these.\n\n")
+	fmt.Fprintf(&b, "- `e.%s`: `gen_ai.tool.call.result` as text, only on read-type tool\n", ToolResultTextPath)
+	b.WriteString("  results (`file.read`, `mcp.tool_invoked`, MCP-named tools, web fetch/search tools) whose\n")
+	b.WriteString("  content was retained. String leaves of an object or list result are joined one per line.\n")
+	fmt.Fprintf(&b, "  Capped at %d bytes and secret-redacted like other retained text; empty otherwise.\n", ToolResultTextLimit)
 	return b.String()
 }
