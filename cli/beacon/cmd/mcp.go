@@ -35,7 +35,7 @@ var mcpCmd = &cobra.Command{
 
 serve and doctor run and check the local "beacon" server, which reads this machine's runtime
 log. connect, disconnect and status manage the "beacon-managed" entry that points your harnesses
-at Beacon Managed MCP, which searches the session history this endpoint forwards.`,
+at Beacon Cloud MCP, which searches the session history this endpoint forwards.`,
 }
 
 var mcpServeCmd = &cobra.Command{
@@ -158,7 +158,7 @@ func runMCPDoctor(cmd *cobra.Command, args []string) error {
 		fmt.Println(`}`)
 		fmt.Println()
 		fmt.Println(`"beacon" is the local server: it reads this machine's runtime log and approved memory.`)
-		fmt.Println(`For session history forwarded to Beacon Managed, run ` + "`beacon mcp connect`" + `, which registers`)
+		fmt.Println(`For session history forwarded to Beacon Cloud, run ` + "`beacon mcp connect`" + `, which registers`)
 		fmt.Println(`the separate "beacon-managed" server in your harnesses. The two names never overwrite each other.`)
 	}
 	return nil

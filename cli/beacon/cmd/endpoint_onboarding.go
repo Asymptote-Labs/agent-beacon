@@ -29,7 +29,7 @@ const (
 	// they just have no terminal to type it into.
 	onboardingEnvEmail = "BEACON_ONBOARDING_EMAIL"
 	onboardingEnvUsage = "BEACON_ONBOARDING_USAGE"
-	// managedIngestEnvEnabled set to a false-ish value hides the Beacon Managed row
+	// managedIngestEnvEnabled set to a false-ish value hides the Beacon Cloud row
 	// from the telemetry destination question; Local remains available. Explicit --connect
 	// is unaffected: the
 	// variable hides an offer, it does not override an operator's request.
@@ -93,7 +93,7 @@ func defaultOnboardingIsTTY() bool {
 // run, CI, a dry run and a redirected stdin all return an outcome that asks the
 // installer for nothing.
 type onboardingOutcome struct {
-	// Connect is true when the wizard confirmed Beacon Managed on an endpoint that
+	// Connect is true when the wizard confirmed Beacon Cloud on an endpoint that
 	// is not already enrolled, so the installer should connect it after installing.
 	// An already-connected endpoint is deliberately excluded: enrollment rotates the
 	// device key, and rotating a working forwarder's key to re-learn a destination
@@ -242,7 +242,7 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 		}
 	}
 
-	// Confirming Managed connects this endpoint, unless it already is one. An
+	// Confirming Beacon Cloud connects this endpoint, unless it already is one. An
 	// endpoint that is already enrolled keeps its device key and simply records the
 	// destination it has been using.
 	alreadyConnected := result.Destination == onboarding.DestinationAsymptote && !destinationAskable()
@@ -292,7 +292,7 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 		// The connect output that follows says where events now go; anticipating it
 		// here would only be wrong if enrollment then failed.
 	case result.Destination == onboarding.DestinationAsymptote:
-		fmt.Fprintf(cmd.OutOrStdout(), "Beacon Managed with %s privacy. This endpoint is already connected.\n", managedprivacy.Label(privacyMode))
+		fmt.Fprintf(cmd.OutOrStdout(), "Beacon Cloud with %s privacy. This endpoint is already connected.\n", managedprivacy.Label(privacyMode))
 	case result.Destination == onboarding.DestinationLocal:
 		fmt.Fprintln(cmd.OutOrStdout(), "Local-only telemetry selected. Open it with `beacon traces`.")
 	}
@@ -357,7 +357,7 @@ func destinationLabel(value string) string {
 	case onboarding.DestinationOwnInfra:
 		return "own infrastructure (forwarding pack)"
 	case onboarding.DestinationAsymptote:
-		return "Beacon Managed"
+		return "Beacon Cloud"
 	default:
 		return value
 	}

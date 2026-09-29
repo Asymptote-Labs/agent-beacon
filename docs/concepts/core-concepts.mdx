@@ -3,7 +3,7 @@ title: "Core Concepts"
 description: "Core concepts for Beacon, Agent Beacon, and agent runtime telemetry"
 ---
 
-Beacon observes AI agent runtime activity across supported local endpoints, CI jobs, cloud-agent sandboxes, and SDK-instrumented applications. Agent Beacon is the open-source foundation for local-first collection and customer-controlled forwarding. Beacon Managed builds on that foundation with hosted ingest, retention, search, detections, governance, and investigations.
+Beacon observes AI agent runtime activity across supported local endpoints, CI jobs, cloud-agent sandboxes, and SDK-instrumented applications. Agent Beacon is the open-source foundation for local-first collection and customer-controlled forwarding. Beacon Cloud builds on that foundation with hosted ingest, retention, search, detections, governance, and investigations.
 
 Use this page as a quick reference for terms used across Beacon and Agent Beacon docs.
 
@@ -11,9 +11,9 @@ Use this page as a quick reference for terms used across Beacon and Agent Beacon
 
 **Beacon** is the open-source, local-first telemetry system for supported AI agent activity. It collects events from local endpoints, CI jobs, and cloud-agent surfaces, normalizes them into consistent records, writes local JSONL, serves a local dashboard, and supports customer-managed forwarding. See [Open Source deployment](/deployment/open-source).
 
-## Beacon Managed
+## Beacon Cloud
 
-**Beacon Managed** is the hosted Beacon operating model for centralized ingest, retention, search, detections, fleet visibility, identity mapping, approval visibility, SSO, RBAC, audit trails, and investigation workflows. See [Managed deployment](/deployment/managed).
+**Beacon Cloud** is the hosted Beacon operating model for centralized ingest, retention, search, detections, fleet visibility, identity mapping, approval visibility, SSO, RBAC, audit trails, and investigation workflows. See [Beacon Cloud deployment](/deployment/managed).
 
 ## Endpoint agent
 
@@ -42,7 +42,7 @@ environment becomes available, so early bootstrap turns may precede telemetry.
 
 ## Observe SDK
 
-The **Observe SDK** is the `@asymptote/sdk` TypeScript package for instrumenting cloud-hosted agent applications, services, workers, serverless functions, and agent SDK integrations. It can export to Beacon Managed hosted Observe or to a customer-managed OTLP collector. See [Beacon Observe SDK](/sdk).
+The **Observe SDK** is the `@asymptote/sdk` TypeScript package for instrumenting cloud-hosted agent applications, services, workers, serverless functions, and agent SDK integrations. It can export to Beacon Cloud hosted Observe or to a customer-managed OTLP collector. See [Beacon Observe SDK](/sdk).
 
 ## Local collector
 
@@ -152,7 +152,7 @@ state, Token Usage, and Agent Inventory without requiring a hosted Beacon accoun
 
 <Columns cols={2}>
   <Card title="Hosting Options" icon="cloud" href="/deployment/hosting-options">
-    Compare Beacon, Managed, and Private Deployment paths.
+    Compare local Beacon, Beacon Cloud, and private deployment paths.
   </Card>
   <Card title="Open Source Architecture" icon="diagram-project" href="/architecture/architecture">
     See how runtime telemetry flows through collection, normalization, and local outputs.

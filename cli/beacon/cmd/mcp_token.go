@@ -13,7 +13,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/account"
 )
 
-// `beacon mcp token create` mints a personal Beacon Managed MCP token with the signed-in account.
+// `beacon mcp token create` mints a personal Beacon Cloud MCP token with the signed-in account.
 // The token goes to stdout exactly once, so it can be captured into a variable for
 // `beacon mcp connect --token-env`; everything else goes to stderr. It is never written to a
 // file, and the account token that authorizes the request is never printed.
@@ -35,13 +35,13 @@ var mcpTokenOpts struct {
 
 var mcpTokenCmd = &cobra.Command{
 	Use:   "token",
-	Short: "Manage personal Beacon Managed MCP tokens",
+	Short: "Manage personal Beacon Cloud MCP tokens",
 }
 
 var mcpTokenCreateCmd = &cobra.Command{
 	Use:   "create",
-	Short: "Create a personal Beacon Managed MCP token with your Beacon sign-in",
-	Long: `Create a personal Beacon Managed MCP token for the account signed in with ` + "`beacon login`" + `.
+	Short: "Create a personal Beacon Cloud MCP token with your Beacon sign-in",
+	Long: `Create a personal Beacon Cloud MCP token for the account signed in with ` + "`beacon login`" + `.
 
 The token is printed to stdout once and cannot be shown again; progress and details go to
 stderr. Capture it into a variable and reference that variable with
@@ -50,7 +50,7 @@ stderr. Capture it into a variable and reference that variable with
   export BEACON_MCP_TOKEN="$(beacon mcp token create --name laptop)"
   beacon mcp connect --token-env BEACON_MCP_TOKEN
 
-The token reads your Beacon Managed data and counts toward the limit of 25 active tokens.
+The token reads your Beacon Cloud data and counts toward the limit of 25 active tokens.
 Revoke it at beacon.sh → Dashboard → MCP Access. Beacon never writes it to a file.`,
 	SilenceUsage: true,
 	Args:         cobra.NoArgs,

@@ -17,7 +17,7 @@
 # against the result before shipping it. 0.56.0 matches the signed macOS package. Newer releases
 # break the generated packs, which take destinations and credentials from ${VAR}: 0.57 stops
 # expanding the ${VAR:-default} form, and 0.58 stops expanding ${VAR} at all unless Vector runs
-# with --dangerously-allow-env-var-interpolation. (Beacon Managed's connect is unaffected because
+# with --dangerously-allow-env-var-interpolation. (Beacon Cloud's connect is unaffected because
 # it writes literal values.)
 set -eu
 

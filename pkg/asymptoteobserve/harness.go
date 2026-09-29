@@ -22,8 +22,8 @@ import "strings"
 // Ordering matters. The browser-chat cases must precede the generic "claude" rule, which would
 // otherwise coerce claude_web into claude_code.
 //
-// Beacon Managed groups forwarded sessions by these canonical names, so a new harness or spelling
-// here needs a matching Beacon Managed change in the same release; see "Downstream consumers" in
+// Beacon Cloud groups forwarded sessions by these canonical names, so a new harness or spelling
+// here needs a matching Beacon Cloud change in the same release; see "Downstream consumers" in
 // docs/telemetry-schema/normalization.mdx.
 func NormalizeHarnessName(name string) string {
 	lower := strings.ToLower(strings.TrimSpace(name))

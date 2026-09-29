@@ -1,12 +1,12 @@
 ---
 title: "Claude Code Cloud Agents"
-description: "Capture Claude Code cloud agent telemetry and send each session log to Beacon Managed or to object storage you own"
+description: "Capture Claude Code cloud agent telemetry and send each session log to Beacon Cloud or to object storage you own"
 ---
 
 ## Overview
 
 Use this integration to capture Claude Code cloud-agent activity and send each
-session log to one of three places: [Beacon Managed](/deployment/managed),
+session log to one of three places: [Beacon Cloud](/deployment/managed),
 where it appears in your dashboard next to your laptops' sessions, or a Google
 Cloud Storage or Amazon S3 bucket you own.
 
@@ -21,7 +21,7 @@ Claude Code Cloud Agents run in Anthropic's cloud environment, so Beacon cannot
 use the long-running endpoint agent that local installs use. Instead, the setup
 script installs Beacon hooks inside the sandbox. During a cloud-agent session,
 those hooks write `/tmp/beacon/runtime.jsonl`. When the agent stops, Beacon
-ships that file: to Beacon Managed it posts the new lines to the same ingest
+ships that file: to Beacon Cloud it posts the new lines to the same ingest
 endpoint the laptop forwarder uses, so the session shows up in the dashboard a
 minute or two later; to a bucket it uploads the whole file as one object.
 
@@ -29,7 +29,7 @@ minute or two later; to a bucket it uploads the whole file as one object.
 flowchart LR
   ClaudeWeb["Claude Code Cloud Agents"] --> Hooks["Beacon hooks in sandbox"]
   Hooks --> RuntimeLog["/tmp/beacon/runtime.jsonl"]
-  RuntimeLog --> Managed["Beacon Managed ingest → dashboard"]
+  RuntimeLog --> Managed["Beacon Cloud ingest → dashboard"]
   RuntimeLog --> Storage["Your GCS or S3 bucket"]
 ```
 
@@ -39,7 +39,7 @@ The setup has three parts:
 2. Add Beacon cloud telemetry environment variables to the Claude Code cloud environment.
 3. Paste a Beacon-generated setup script into the Claude cloud environment.
 
-With Beacon Managed, the sessions land in the same per-organization tables as
+With Beacon Cloud, the sessions land in the same per-organization tables as
 your endpoints' telemetry, attributed to the device you created for the cloud
 environment. With a bucket, each Claude Code cloud agent session writes one
 readable JSONL object:
@@ -63,7 +63,7 @@ s3://<bucket>/<prefix>/runtime/date=YYYY-MM-DD/<timestamp>-claude_code_web-<clau
   create buckets, IAM users, inline IAM policies, and access keys.
 - Claude Code cloud agent access for the repository you want to test.
 - A Claude cloud environment with outbound access to:
-  - For Beacon Managed: the ingest host from your device key hand-off
+  - For Beacon Cloud: the ingest host from your device key hand-off
     (currently `beacon-ingest-gulcylfs4a-uw.a.run.app`)
   - For GCS: `oauth2.googleapis.com` and `storage.googleapis.com`
   - For S3: `s3.<region>.amazonaws.com`
@@ -95,9 +95,9 @@ aws sts get-caller-identity
 
 ## 1. Create the upload path
 
-Choose Beacon Managed, GCS, or S3 for the cloud-agent session logs.
+Choose Beacon Cloud, GCS, or S3 for the cloud-agent session logs.
 
-### Beacon Managed
+### Beacon Cloud
 
 A cloud sandbox has no browser and no Vector, so it cannot run
 [`beacon endpoint connect`](/cli/endpoint-connect). Instead it authenticates with
@@ -226,7 +226,7 @@ BEACON_RUN_EPHEMERAL=true
 BEACON_CLOUD_USER_ID_HASH=<stable-user-or-test-id>
 ```
 
-For Beacon Managed, add:
+For Beacon Cloud, add:
 
 ```bash
 BEACON_CLOUD_UPLOAD=asymptote
@@ -295,7 +295,7 @@ Read the README, run pwd && ls, create a tiny temporary markdown note under /tmp
 
 ## 5. Verify upload
 
-For Beacon Managed, open the dashboard: under **Devices** the cloud
+For Beacon Cloud, open the dashboard: under **Devices** the cloud
 environment shows a fresh **last seen** time as soon as the first batch is
 accepted, and the session appears under **Sessions** within a couple of minutes,
 with `run.provider=claude_code_web` and the Claude session id as the run id.
@@ -355,7 +355,7 @@ run.run_id=cse_...
 
 ## Security note
 
-The Beacon Managed flow puts a per-device key in the Claude Code environment.
+The Beacon Cloud flow puts a per-device key in the Claude Code environment.
 It can only append telemetry to your organization's ingest stream; it reads
 nothing and grants no dashboard access, and revoking the device under
 **Devices** stops it within a minute. This is the one place a Beacon
@@ -418,7 +418,7 @@ sandbox-specific configuration and should stay out of commits.
   <Card title="Log forwarding" icon="database" href="/log-forwarding">
     Review local endpoint S3 forwarding for persistent endpoint deployments.
   </Card>
-  <Card title="Beacon Managed" icon="cloud" href="/deployment/managed">
+  <Card title="Beacon Cloud" icon="cloud" href="/deployment/managed">
     Use managed secure ingest for production enterprise cloud-agent telemetry.
   </Card>
   <Card title="Agent Beacon on GitHub" icon="github" href="https://github.com/asymptote-labs/agent-beacon">

@@ -46,7 +46,7 @@ Beacon is an open-source memory layer for AI coding agents that learns from your
 ## 🚀 Quick Start
 
 Beacon is open source and local-first. Interactive endpoint setup signs in through
-beacon.sh and preselects Beacon Managed, with an explicit Local opt-out. Signing in
+beacon.sh and preselects Beacon Cloud, with an explicit Local opt-out. Signing in
 forwards nothing; confirming Managed installs Beacon and connects this machine in
 the same command, and the confirm screen says so before you accept. System, package,
 MDM, and CI installation paths remain noninteractive and account-free.
@@ -148,13 +148,13 @@ Or inspect the raw event stream:
 ```
 
 > [!NOTE]
-> Signing in does not enable forwarding. Confirming the preselected Beacon Managed
+> Signing in does not enable forwarding. Confirming the preselected Beacon Cloud
 > option does: the wizard says so on the confirm screen, names what your chosen
 > privacy mode sends, and connects the endpoint after the install succeeds. Choose
 > Local to keep everything on this machine, and disconnect any time with
 > `beacon endpoint disconnect`.
 
-If this endpoint forwards to Beacon Managed, your agents can search that history over MCP:
+If this endpoint forwards to Beacon Cloud, your agents can search that history over MCP:
 
 ```bash
 beacon mcp connect
@@ -346,7 +346,7 @@ You can also forward the same normalized session history into infrastructure you
 | Destination | Category | Support Path |
 | --- | --- | --- |
 | Local JSONL | Local | Default endpoint log and local dashboard source |
-| Beacon Managed | Hosted forwarding | Signed-in device enrollment with Standard or Metadata-only privacy |
+| Beacon Cloud | Hosted forwarding | Signed-in device enrollment with Standard or Metadata-only privacy |
 | CrowdStrike Falcon LogScale HEC | SIEM | Endpoint forwarding with LogScale ingest tokens |
 | Microsoft Sentinel | SIEM | Azure Monitor Agent and Data Collection Rule content pack |
 | Rapid7 InsightIDR | SIEM | Custom Logs webhook content pack |

@@ -151,7 +151,7 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	// Confirming Beacon Managed connects this endpoint; --connect does the same for
+	// Confirming Beacon Cloud connects this endpoint; --connect does the same for
 	// the paths the wizard did not own.
 	connectAfterInstall := onboarded.Connect || endpointOpts.connect
 	result, err := endpointLifecycleInstall(endpointInstallOptions(selection, serviceKind))
@@ -193,14 +193,14 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// suggestMCPConnect points a person who just chose Beacon Managed in the wizard at
+// suggestMCPConnect points a person who just chose Beacon Cloud in the wizard at
 // `beacon mcp connect`. It only prints: registering the MCP server stays a separate,
 // explicit command, and the unattended install paths never reach the wizard at all.
 func suggestMCPConnect(out io.Writer, chosenInWizard bool) {
 	if !chosenInWizard {
 		return
 	}
-	fmt.Fprintln(out, "To let your agents search this history through Beacon Managed MCP, run `beacon mcp connect`.")
+	fmt.Fprintln(out, "To let your agents search this history through Beacon Cloud MCP, run `beacon mcp connect`.")
 }
 
 func runEndpointStatus(cmd *cobra.Command, args []string) error {

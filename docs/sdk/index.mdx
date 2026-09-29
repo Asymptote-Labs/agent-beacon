@@ -7,13 +7,13 @@ description: "Instrument cloud-hosted agent applications with Beacon-compatible 
 
 Beacon Observe instruments cloud-hosted agent applications and exports OpenTelemetry traces that remain compatible with Beacon's normalized endpoint event model. Use it for servers, serverless functions, workers, and hosted agent platforms where installing the local Beacon endpoint agent is not the right fit.
 
-Hosted Observe ingest is available through Beacon Managed. To get an `ASYMPTOTE_API_KEY`, [reach out for a demo](https://asymptotelabs.ai/contact).
+Hosted Observe ingest is available through Beacon Cloud. To get an `ASYMPTOTE_API_KEY`, [reach out for a demo](https://asymptotelabs.ai/contact).
 
 The open-source `agent-beacon` repository currently includes the TypeScript package `@asymptote/sdk`. It provides the `Observe` module for OpenTelemetry setup, common AI SDK instrumentation, manual span wrappers, lifecycle helpers, and Beacon compatibility attributes.
 
 ## What Beacon captures
 
-Beacon Observe is OpenTelemetry-first. It records supported model calls, agent turns, tool calls, custom orchestration steps, errors, and Beacon compatibility attributes as spans that can be sent to Beacon Managed hosted Observe or a customer-managed OTLP collector.
+Beacon Observe is OpenTelemetry-first. It records supported model calls, agent turns, tool calls, custom orchestration steps, errors, and Beacon compatibility attributes as spans that can be sent to Beacon Cloud hosted Observe or a customer-managed OTLP collector.
 
 Supported cloud SDK paths:
 
@@ -68,4 +68,4 @@ The SDK and Beacon endpoint telemetry share an event contract, but they target d
 | Beacon CI | Ephemeral CI telemetry captured for a single job |
 | Beacon JSONL schema | Normalized event model used by local logs, dashboards, and downstream security pipelines |
 
-Cloud SDK spans set `beacon.origin=cloud` and can include Beacon compatibility attributes such as `beacon.harness.name`, `beacon.event.action`, `beacon.tool.name`, and `beacon.prompt.text`. The same attributes can be consumed by Beacon-compatible collectors or Beacon Managed Observe ingest.
+Cloud SDK spans set `beacon.origin=cloud` and can include Beacon compatibility attributes such as `beacon.harness.name`, `beacon.event.action`, `beacon.tool.name`, and `beacon.prompt.text`. The same attributes can be consumed by Beacon-compatible collectors or Beacon Cloud Observe ingest.

@@ -20,12 +20,12 @@ Beacon does not repeat completed setup.
 The first interactive `beacon endpoint install` opens a full-screen terminal wizard:
 
 1. Sign in through beacon.sh using the same browser PKCE flow as [`beacon login`](/cli/account-auth).
-2. Choose **Local only** or **Beacon Managed**. Managed offers free, unlimited
+2. Choose **Local only** or **Beacon Cloud**. Beacon Cloud offers free, unlimited
    cloud-based retention of every agent session. It adds AI-powered search and
    analytics on Beacon's hosted dashboard, with rich findings analyzing your AI
    usage coming soon. Local is a dashboard for this machine's telemetry,
    kept for as long as the logs are on disk, with nothing leaving the machine.
-3. For Managed, choose **Standard** or **Metadata only** forwarding.
+3. For Beacon Cloud, choose **Standard** or **Metadata only** forwarding.
 4. Review the destination and privacy mode, then confirm installation.
 
 Move between choices with the arrow keys, continue with <kbd>enter</kbd>, and cancel
@@ -56,10 +56,10 @@ are:
 An SSH session with X11 forwarding (`ssh -X`) counts as having a display.
 
 Signing in establishes account identity only. It does not register a managed endpoint,
-start Vector, or send telemetry. Beacon Managed is preselected; choose Local explicitly
+start Vector, or send telemetry. Beacon Cloud is preselected; choose Local explicitly
 to opt out of managed forwarding.
 
-Choosing Beacon Managed shows a separate disclosure: your agents' activity on this
+Choosing Beacon Cloud shows a separate disclosure: your agents' activity on this
 machine will be sent to your Beacon account as it happens, and `beacon endpoint
 disconnect` stops it. The screen makes no claim about data already on disk, because
 the honest version of that claim needs a caveat: runtime events recorded before you
@@ -72,7 +72,7 @@ prompts, responses, reasoning, tool arguments/results, command output, raw field
 diffs, and optional inventory content locally before upload. See
 [`beacon endpoint connect`](/cli/endpoint-connect#privacy-modes) for the exact contract.
 
-Confirming Beacon Managed connects this endpoint in the same command, after the
+Confirming Beacon Cloud connects this endpoint in the same command, after the
 local install succeeds. The confirm screen says so before you press enter, and names
 what the selected privacy mode sends, so it is the point at which forwarding is
 authorized. An endpoint that is already enrolled is not re-enrolled: enrollment
@@ -90,7 +90,7 @@ treating the machine as settled. Verify forwarding with `beacon endpoint status
 --json`. The onboarding record itself is written only after the install succeeds, so
 a failed install leaves nothing behind and asks again next time.
 
-The explicit `beacon endpoint install --connect` flag is unchanged: it presets Managed
+The explicit `beacon endpoint install --connect` flag is unchanged: it presets Beacon Cloud
 and skips the destination question.
 
 The wizard never appears non-interactively. Package postinstall scripts, MDM
@@ -112,7 +112,7 @@ remain account-free.
 
 Set `BEACON_ONBOARDING=0` to suppress the wizard on an install that would otherwise be
 interactive. There is no CLI flag for this: it exists for unattended CI and MDM
-workflows. `BEACON_MANAGED_INGEST=0` hides the Beacon Managed answer; explicit
+workflows. `BEACON_MANAGED_INGEST=0` hides the Beacon Cloud answer; explicit
 `beacon endpoint install --connect` remains unaffected.
 
 ```bash title="Suppress the prompt"
@@ -148,7 +148,7 @@ since no account authorized that run. `--json` exposes all of them:
 | Value | Printed as |
 |-------|------------|
 | `local` | local only (nothing forwarded) |
-| `asymptote` | Beacon Managed |
+| `asymptote` | Beacon Cloud |
 
 `own_infra` remains readable for profiles created by older Beacon versions. New
 interactive installs choose Local and can configure a customer-managed

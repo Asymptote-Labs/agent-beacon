@@ -1,6 +1,6 @@
 ---
 title: "FAQ"
-description: "Clear answers about Agent Beacon open source telemetry and Beacon Managed architecture"
+description: "Clear answers about Agent Beacon open source telemetry and Beacon Cloud architecture"
 ---
 
 This FAQ answers common architecture, telemetry, and deployment questions about
@@ -101,7 +101,7 @@ S3](/guides/fleet-s3-mdm).
 
 For provider-managed cloud-agent proof-of-concept flows, the current self-serve
 path uses Google Cloud Storage. Production cloud-agent ingest is handled through
-Beacon Managed or a customer-approved forwarding design.
+Beacon Cloud or a customer-approved forwarding design.
 
 ### Can open-source Beacon forward logs to Datadog or a SIEM?
 
@@ -145,19 +145,19 @@ No. The open-source endpoint path is local-first. Normal local hook execution,
 local collection, local JSONL, the local dashboard, local scans, and
 customer-managed forwarding do not require a hosted Beacon account.
 
-## Beacon Managed
+## Beacon Cloud
 
-Beacon Managed adds centralized ingest, retention, search, detections,
+Beacon Cloud adds centralized ingest, retention, search, detections,
 governance, identity, approvals, access control, and investigation workflows on
 top of the open-source Beacon foundation.
 
-### Does Beacon Managed provide a central console?
+### Does Beacon Cloud provide a central console?
 
-Yes. Beacon Managed provides the centralized operating layer for fleet-wide
+Yes. Beacon Cloud provides the centralized operating layer for fleet-wide
 visibility, search, detections, investigations, policy workflows, identity
 mapping, approvals, SSO, RBAC, and audit trails.
 
-Use Managed when local JSONL and customer-managed forwarding are not enough for
+Use Beacon Cloud when local JSONL and customer-managed forwarding are not enough for
 company-wide operations.
 
 ### Should telemetry point to Beacon or directly to the SIEM?
@@ -166,11 +166,11 @@ Both patterns are valid.
 
 With Agent Beacon open source, telemetry can go directly from local JSONL into
 customer-controlled SIEM, log, or object-storage destinations. With Beacon
-Managed, telemetry is sent to Beacon for centralized search, detections,
+Cloud, telemetry is sent to Beacon for centralized search, detections,
 governance, and investigations, with downstream forwarding available as part of
 the deployment design.
 
-### Does Beacon Managed replace the SIEM?
+### Does Beacon Cloud replace the SIEM?
 
 No. Beacon is focused on agent-specific visibility, governance, and
 investigation workflows. SIEMs and log platforms remain important downstream
@@ -203,16 +203,16 @@ identify the Beacon collector machine.
 
 ### Where should a cloud AI tenant send OTLP telemetry?
 
-In a Managed deployment, the cloud service or tenant can export OTLP to an
-Beacon-managed collector endpoint when that runtime supports it.
+In a Beacon Cloud deployment, the cloud service or tenant can export OTLP to an
+Beacon Cloud collector endpoint when that runtime supports it.
 
 In a private or customer-managed design, the OTLP endpoint may instead point to a
 customer-controlled collector or forwarding layer. The right target depends on
 the deployment model, data-boundary requirements, and destination architecture.
 
-### Does managed require a customer-hosted management server?
+### Does Beacon Cloud require a customer-hosted management server?
 
-Not necessarily. In Beacon Managed, Beacon operates the managed ingest and
+Not necessarily. In Beacon Cloud, Beacon operates the managed ingest and
 control-plane services. For private deployments or stricter infrastructure
 requirements, Beacon can work with the customer on dedicated or
 customer-controlled deployment boundaries.
@@ -223,7 +223,7 @@ and forward through customer-managed shippers.
 ### Why is telemetry useful for cloud and non-engineering agents?
 
 It is useful when the agent platform, OTLP export, hooks, or SDK instrumentation
-emits prompts, tools, files, commands, approvals, or workflow metadata. Managed
+emits prompts, tools, files, commands, approvals, or workflow metadata. Beacon Cloud
 investigations can then reconstruct what the agent did, which tools it used, what
 content was retained, and which user or workflow it maps to.
 
@@ -235,12 +235,12 @@ runtime signals the platform or instrumented application emits.
 
 <Columns cols={2}>
   <Card title="System Architecture" icon="diagram-project" href="/architecture/system-architecture">
-    Compare the open-source Agent Beacon architecture with Beacon Managed.
+    Compare the open-source Agent Beacon architecture with Beacon Cloud.
   </Card>
   <Card title="Open Source Architecture" icon="diagram-project" href="/architecture/architecture">
     Review local collection, normalization, storage, and forwarding.
   </Card>
-  <Card title="Beacon Managed" icon="cloud" href="/deployment/managed">
+  <Card title="Beacon Cloud" icon="cloud" href="/deployment/managed">
     Review managed ingest, governance, investigations, and rollout support.
   </Card>
   <Card title="Log Forwarding" icon="tower-broadcast" href="/log-forwarding">

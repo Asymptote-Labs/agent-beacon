@@ -1,15 +1,15 @@
 ---
 title: "System Architecture"
-description: "Compare the open-source Agent Beacon architecture with the managed Beacon platform architecture"
+description: "Compare the open-source Agent Beacon architecture with the Beacon Cloud architecture"
 ---
 
-Beacon supports two architecture paths: the open-source [Agent Beacon](/concepts/core-concepts#agent-beacon) architecture, which collects local, browser, in-code, [CI](/concepts/core-concepts#ci-telemetry), and [cloud telemetry](/concepts/core-concepts#cloud-agent-telemetry) on customer-controlled infrastructure, and the [Beacon Managed](/concepts/core-concepts#beacon-managed) architecture for centralized visibility, governance, detections, and investigations.
+Beacon supports two architecture paths: the open-source [Agent Beacon](/concepts/core-concepts#agent-beacon) architecture, which collects local, browser, in-code, [CI](/concepts/core-concepts#ci-telemetry), and [cloud telemetry](/concepts/core-concepts#cloud-agent-telemetry) on customer-controlled infrastructure, and the [Beacon Cloud](/concepts/core-concepts#beacon-cloud) architecture for centralized visibility, governance, detections, and investigations.
 
 <Columns cols={2}>
   <Card title="Open Source Architecture" icon="diagram-project" href="/architecture/architecture">
     See how Agent Beacon collects, normalizes, stores, correlates, and detects agent telemetry across every supported surface.
   </Card>
-  <Card title="Beacon Managed" icon="cloud" href="/deployment/managed">
+  <Card title="Beacon Cloud" icon="cloud" href="/deployment/managed">
     Review managed ingest, governance, investigations, and rollout support.
   </Card>
 </Columns>
@@ -19,13 +19,13 @@ Beacon supports two architecture paths: the open-source [Agent Beacon](/concepts
 | Architecture | Use when |
 | --- | --- |
 | Open Source Architecture | You want [open-source telemetry](/concepts/core-concepts#beacon) for supported local, CI, and cloud agent surfaces, with customer-controlled records and forwarding. |
-| Managed Architecture | You want [managed ingest](/concepts/core-concepts#beacon-managed), retention, search, detections, fleet visibility, identity mapping, approval visibility, SSO, RBAC, audit trails, and investigation workflows. |
+| Beacon Cloud Architecture | You want [managed ingest](/concepts/core-concepts#beacon-cloud), retention, search, detections, fleet visibility, identity mapping, approval visibility, SSO, RBAC, audit trails, and investigation workflows. |
 
 ## Related
 
 <Columns cols={2}>
   <Card title="Hosting Options" icon="cloud" href="/deployment/hosting-options">
-    Choose between Open Source, Managed, and Private Deployment paths.
+    Choose between local Beacon, Beacon Cloud, and private deployment paths.
   </Card>
   <Card title="Core Concepts" icon="book-open" href="/concepts/core-concepts">
     Review the concepts used across Beacon and Agent Beacon docs.

@@ -1,6 +1,6 @@
 # Beacon Endpoint Agent Managed Forwarding Pack
 
-This pack forwards Beacon endpoint JSONL events to Beacon Managed so they appear
+This pack forwards Beacon endpoint JSONL events to Beacon Cloud so they appear
 on the Beacon dashboard. Beacon writes runtime
 activity to `runtime.jsonl` and configuration inventory to
 `inventory_state.jsonl`; Vector tails both files and POSTs gzip-compressed

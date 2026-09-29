@@ -23,7 +23,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/mcpconnect"
 )
 
-// `beacon mcp connect` registers the Beacon Managed MCP server in the harnesses on this machine.
+// `beacon mcp connect` registers the Beacon Cloud MCP server in the harnesses on this machine.
 // It is an explicit, interactive, per-user command: `beacon endpoint install`, onboarding and
 // every unattended path (root, system/MDM installs, CI, piped stdin) never run it. It writes no
 // secret -- OAuth harnesses get only the URL, and --token-env writes a reference to a variable --
@@ -55,8 +55,8 @@ var mcpConnectOpts struct {
 
 var mcpConnectCmd = &cobra.Command{
 	Use:   "connect",
-	Short: "Register Beacon Managed MCP in the harnesses on this machine",
-	Long: `Register the Beacon Managed MCP server, as "beacon-managed", in every detected harness that
+	Short: "Register Beacon Cloud MCP in the harnesses on this machine",
+	Long: `Register the Beacon Cloud MCP server, as "beacon-managed", in every detected harness that
 supports it: Claude Code, Codex CLI, Cursor, VS Code, Gemini CLI and OpenCode.
 
 By default only the URL is written, and each harness signs in with OAuth the first time it
@@ -64,7 +64,7 @@ connects. With --token-env, each config references an environment variable holdi
 MCP token instead; the token itself is never written. Harnesses without confirmed MCP OAuth
 support get the steps to add the server by hand.
 
-The URL is --url, or the Beacon Managed URL recorded by ` + "`beacon endpoint connect`" + `. It is
+The URL is --url, or the Beacon Cloud URL recorded by ` + "`beacon endpoint connect`" + `. It is
 checked against the server's OAuth resource metadata before anything is written; that check is
 this command's only network request. Every changed file is backed up first, and
 ` + "`beacon mcp disconnect`" + ` removes exactly what connect added.`,
@@ -75,7 +75,7 @@ this command's only network request. Every changed file is backed up first, and
 
 var mcpDisconnectCmd = &cobra.Command{
 	Use:          "disconnect",
-	Short:        "Remove the Beacon Managed MCP entries that connect wrote",
+	Short:        "Remove the Beacon Cloud MCP entries that connect wrote",
 	SilenceUsage: true,
 	Args:         cobra.NoArgs,
 	RunE:         runMCPDisconnect,
@@ -83,7 +83,7 @@ var mcpDisconnectCmd = &cobra.Command{
 
 var mcpStatusCmd = &cobra.Command{
 	Use:          "status",
-	Short:        "Show where Beacon Managed MCP is configured",
+	Short:        "Show where Beacon Cloud MCP is configured",
 	SilenceUsage: true,
 	Args:         cobra.NoArgs,
 	RunE:         runMCPStatus,
@@ -95,7 +95,7 @@ func init() {
 		c.Flags().StringSliceVar(&mcpConnectOpts.harnesses, "harness", nil, "Harnesses to act on, comma-separated (default: every detected harness)")
 	}
 	for _, c := range []*cobra.Command{mcpConnectCmd, mcpStatusCmd} {
-		c.Flags().StringVar(&mcpConnectOpts.url, "url", "", "Beacon Managed MCP URL (default: the URL recorded by beacon endpoint connect)")
+		c.Flags().StringVar(&mcpConnectOpts.url, "url", "", "Beacon Cloud MCP URL (default: the URL recorded by beacon endpoint connect)")
 	}
 	f := mcpConnectCmd.Flags()
 	f.StringVar(&mcpConnectOpts.tokenEnv, "token-env", "", "Reference a personal MCP token in this environment variable instead of using OAuth")
@@ -242,7 +242,7 @@ func runMCPConnect(cmd *cobra.Command, args []string) error {
 	}
 	url, derived, err := mcpconnect.ResolveURL(mcpConnectOpts.url, mcpIngestURL())
 	if err != nil {
-		return fmt.Errorf("%w (Beacon Managed serves MCP at https://mcp.beacon.sh)", err)
+		return fmt.Errorf("%w (Beacon Cloud serves MCP at https://mcp.beacon.sh)", err)
 	}
 	checked := "not checked (--dry-run)"
 	if !mcpConnectOpts.dryRun {
@@ -263,7 +263,7 @@ func runMCPConnect(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Fprintf(out, "Beacon Managed MCP: %s (%s)\n", url, checked)
+	fmt.Fprintf(out, "Beacon Cloud MCP: %s (%s)\n", url, checked)
 	fmt.Fprintf(out, "Server name: %s\n", mcpconnect.ServerName)
 	if opts.TokenEnv != "" {
 		fmt.Fprintf(out, "Auth: a personal MCP token read from $%s; Beacon writes only the variable's name\n", opts.TokenEnv)
@@ -457,7 +457,7 @@ func runMCPDisconnect(cmd *cobra.Command, args []string) error {
 		}
 	}
 	if removed == 0 && len(failed) == 0 && leftAlone == 0 {
-		fmt.Fprintln(out, "Nothing to remove: no Beacon Managed MCP entry written by Beacon was found.")
+		fmt.Fprintln(out, "Nothing to remove: no Beacon Cloud MCP entry written by Beacon was found.")
 	}
 	if len(failed) > 0 {
 		return fmt.Errorf("could not disconnect %s", strings.Join(failed, ", "))
@@ -562,9 +562,9 @@ func runMCPStatus(cmd *cobra.Command, args []string) error {
 func printStatus(out io.Writer, home string, report mcpStatusReport) {
 	fmt.Fprintf(out, "Server name: %s\n", report.ServerName)
 	if report.URL != "" {
-		fmt.Fprintf(out, "Beacon Managed MCP URL: %s\n", report.URL)
+		fmt.Fprintf(out, "Beacon Cloud MCP URL: %s\n", report.URL)
 	} else {
-		fmt.Fprintln(out, "Beacon Managed MCP URL: unknown (run `beacon endpoint connect`, or pass --url)")
+		fmt.Fprintln(out, "Beacon Cloud MCP URL: unknown (run `beacon endpoint connect`, or pass --url)")
 	}
 	if report.Check != "" {
 		fmt.Fprintf(out, "URL check: %s\n", report.Check)

@@ -34,7 +34,7 @@ const (
 	CLIGrantVersion   = "2026-09-01"
 	ScopeProfileRead  = "profile:read"
 	ScopeDeviceEnroll = "device:enroll"
-	// ScopeMCPTokenCreate lets the account token mint personal Beacon Managed MCP
+	// ScopeMCPTokenCreate lets the account token mint personal Beacon Cloud MCP
 	// tokens (`beacon mcp token create`). The sign-in page lists it, and beacon.sh
 	// approves the sign-in only when the permissions it showed match these.
 	ScopeMCPTokenCreate = "mcp:token:create"

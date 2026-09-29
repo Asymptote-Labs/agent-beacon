@@ -37,8 +37,8 @@ var (
 
 var endpointConnectCmd = &cobra.Command{
 	Use:   "connect",
-	Short: "Forward this endpoint's telemetry to Beacon Managed",
-	Long: `Connect this endpoint to Beacon Managed.
+	Short: "Forward this endpoint's telemetry to Beacon Cloud",
+	Long: `Connect this endpoint to Beacon Cloud.
 
 For a user endpoint, uses the signed-in Beacon account to mint a device-specific
 ingest key, stores that key in a private secrets file, and starts a Vector
@@ -73,7 +73,7 @@ func init() {
 	endpointConnectCmd.Flags().StringVar(&connectOpts.dashboardURL, "dashboard-url", "", "Beacon service URL (defaults to "+auth.DefaultDashboardURL+", or "+auth.DashboardURLEnv+")")
 	endpointConnectCmd.Flags().BoolVar(&connectOpts.noBrowser, "no-browser", false, "System mode: print the device approval URL instead of opening a browser")
 	endpointConnectCmd.Flags().StringVar(&connectOpts.vectorBin, "vector-bin", "", "Vector binary to run (defaults to "+asymptote.VectorBinEnv+", "+asymptote.PackagedVectorPath+", Homebrew, then PATH)")
-	endpointConnectCmd.Flags().StringVar(&connectOpts.privacyMode, "privacy-mode", "", "Managed forwarding privacy: standard or metadata-only (defaults to onboarding choice)")
+	endpointConnectCmd.Flags().StringVar(&connectOpts.privacyMode, "privacy-mode", "", "Beacon Cloud forwarding privacy: standard or metadata-only (defaults to onboarding choice)")
 	endpointDisconnectCmd.Flags().BoolVar(&connectOpts.keepCredentials, "keep-credentials", false, "Keep the enrollment record and device key so a later connect can reuse this device")
 	endpointCmd.AddCommand(endpointConnectCmd)
 	endpointCmd.AddCommand(endpointDisconnectCmd)
@@ -149,7 +149,7 @@ func connectEndpoint(cmd *cobra.Command, userMode bool, logPath string) error {
 	if endpointOpts.jsonOutput {
 		return json.NewEncoder(os.Stdout).Encode(result)
 	}
-	fmt.Fprintf(out, "Connected to Beacon Managed as device %s", result.Enrollment.DeviceID)
+	fmt.Fprintf(out, "Connected to Beacon Cloud as device %s", result.Enrollment.DeviceID)
 	if result.Enrollment.OrganizationName != "" {
 		fmt.Fprintf(out, " for %s", result.Enrollment.OrganizationName)
 	}
@@ -286,12 +286,12 @@ func dashboardHomeURL(base string) string {
 func managedIngestStatusLine(status asymptote.ManagedIngestStatus) string {
 	if !status.Enabled {
 		if status.Message != "" {
-			return "Beacon Managed: not connected (" + status.Message + ")"
+			return "Beacon Cloud: not connected (" + status.Message + ")"
 		}
-		return "Beacon Managed: not connected (run `beacon endpoint connect`)"
+		return "Beacon Cloud: not connected (run `beacon endpoint connect`)"
 	}
 	var b strings.Builder
-	b.WriteString("Beacon Managed: connected")
+	b.WriteString("Beacon Cloud: connected")
 	if status.OrganizationName != "" {
 		fmt.Fprintf(&b, " to %s", status.OrganizationName)
 	}

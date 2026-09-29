@@ -516,7 +516,7 @@ and a `BeaconRuntime_CL` custom Log Analytics table. Store Azure workspace,
 DCR, endpoint, and credential details in Azure or customer-managed deployment
 tooling, not in Beacon endpoint configuration.
 
-## Beacon Managed
+## Beacon Cloud
 
 ```bash
 ./beacon endpoint connect
@@ -524,7 +524,7 @@ tooling, not in Beacon endpoint configuration.
 ./beacon endpoint disconnect
 ```
 
-Beacon Managed is the Beacon-hosted forwarding destination. User-mode connect
+Beacon Cloud is the Beacon-hosted forwarding destination. User-mode connect
 uses the signed-in account to authorize a separate device key; system mode keeps
 browser approval. The account token is never given to Vector. Connect stores the
 device key in a `0600` secrets file and runs Vector as the

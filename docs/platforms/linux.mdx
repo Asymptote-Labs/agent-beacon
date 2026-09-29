@@ -100,11 +100,11 @@ Collector: grpc=true http=true
 Service: loaded=true running=true
 Harness: Claude Code  telemetry=enabled
 Last event: present
-Beacon Managed: not connected (run `beacon endpoint connect`)
+Beacon Cloud: not connected (run `beacon endpoint connect`)
 Inventory heartbeat: scheduled every 6h0m0s; job loaded=true running=true; last emitted never
 ```
 
-`running=true` and `telemetry=enabled` are the lines that matter. Then run your agent as usual (see [Using it](#using-it)) and its events land in the runtime log. `Beacon Managed: not connected` is expected, because a package install keeps everything on this machine.
+`running=true` and `telemetry=enabled` are the lines that matter. Then run your agent as usual (see [Using it](#using-it)) and its events land in the runtime log. `Beacon Cloud: not connected` is expected, because a package install keeps everything on this machine.
 
 ### If something looks wrong
 
@@ -162,7 +162,7 @@ A new install is local-only. Nothing leaves the machine until you set up a desti
 | [Elastic](/log-forwarding/elastic), [Datadog](/log-forwarding/datadog), [Wazuh](/log-forwarding/wazuh) | That product's own agent, tailing the log |
 | [Microsoft Sentinel](/log-forwarding/microsoft-sentinel) | Vector, through the Logs Ingestion API. Or Azure Monitor Agent, which outside Azure needs Azure Arc first |
 | [S3](/log-forwarding#aws-s3), [GCS](/log-forwarding#google-cloud-storage), [CloudWatch](/log-forwarding/cloudwatch), [Sumo Logic](/log-forwarding/sumo), [Rapid7](/log-forwarding/rapid7), [CrowdStrike Falcon](/log-forwarding/falcon) | Vector |
-| [Beacon Managed](/log-forwarding/asymptote) | Vector, set up by `beacon endpoint connect` |
+| [Beacon Cloud](/log-forwarding/asymptote) | Vector, set up by `beacon endpoint connect` |
 
 Vector comes with Beacon. The `.deb` and `.rpm` install it at `/opt/beacon/bin/vector`, and the tarball carries it as `beacon-vector`. Neither is on PATH by default, and neither runs until a destination needs it. `beacon endpoint connect` finds it on its own. For the other Vector destinations, run the generated `vector.toml` with `/opt/beacon/bin/vector`, or with your own Vector 0.50 or newer.
 

@@ -28,8 +28,8 @@ Function exports are also available for the same operations, including `initiali
 
 | Option | Purpose |
 | --- | --- |
-| `apiKey` | Beacon Managed hosted Observe API key. Defaults to `ASYMPTOTE_API_KEY` |
-| `baseUrl` | Beacon Managed hosted Observe base URL. Defaults to `ASYMPTOTE_BASE_URL` or `https://api.asymptotelabs.ai` |
+| `apiKey` | Beacon Cloud hosted Observe API key. Defaults to `ASYMPTOTE_API_KEY` |
+| `baseUrl` | Beacon Cloud hosted Observe base URL. Defaults to `ASYMPTOTE_BASE_URL` or `https://api.asymptotelabs.ai` |
 | `otlpEndpoint` | Explicit OTLP/HTTP endpoint. Defaults to `OTEL_EXPORTER_OTLP_ENDPOINT` |
 | `headers` | Additional exporter headers |
 | `serviceName` | OpenTelemetry service name. Defaults to `OTEL_SERVICE_NAME` or `asymptote-app` |
@@ -60,7 +60,7 @@ Function exports are also available for the same operations, including `initiali
 
 | Mode | How it is selected |
 | --- | --- |
-| `hosted` | Beacon Managed `apiKey` or `ASYMPTOTE_API_KEY` is present and no explicit OTLP endpoint is configured |
+| `hosted` | Beacon Cloud `apiKey` or `ASYMPTOTE_API_KEY` is present and no explicit OTLP endpoint is configured |
 | `otlp` | `otlpEndpoint` or `OTEL_EXPORTER_OTLP_ENDPOINT` is present |
 | `custom` | Default exporter is disabled or a custom span exporter is provided |
 

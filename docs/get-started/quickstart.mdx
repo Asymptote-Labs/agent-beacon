@@ -48,7 +48,7 @@ Keep your agent history on your machine.
 
 Beacon writes telemetry locally and gives you a local dashboard. Nothing is forwarded unless you explicitly configure it.
 
-### Beacon Managed
+### Beacon Cloud
 
 Send your Beacon telemetry to the hosted service for:
 
@@ -58,7 +58,7 @@ Send your Beacon telemetry to the hosted service for:
 - analytics
 - access from anywhere
 
-Interactive installation signs in, preselects Managed, and asks you to review the
+Interactive installation signs in, preselects Beacon Cloud, and asks you to review the
 privacy choice. Confirming installs Beacon and connects this endpoint in the same
 command, using the signed-in CLI account to authorize a separate device ingest key
 with no second browser approval.
@@ -89,7 +89,7 @@ For the local dashboard:
 beacon endpoint dashboard --open
 ```
 
-If you're using Beacon Managed, your sessions will also appear in the hosted dashboard.
+If you're using Beacon Cloud, your sessions will also appear in the hosted dashboard.
 
 ## Check your setup
 
@@ -97,7 +97,7 @@ If you're using Beacon Managed, your sessions will also appear in the hosted das
 beacon endpoint status
 ```
 
-This shows which harnesses are connected, whether the collector is running, and whether Beacon Managed is enabled.
+This shows which harnesses are connected, whether the collector is running, and whether Beacon Cloud is enabled.
 
 ## Useful commands
 
@@ -105,7 +105,7 @@ This shows which harnesses are connected, whether the collector is running, and 
 | --- | --- |
 | Check status | `beacon endpoint status` |
 | Open local dashboard | `beacon endpoint dashboard --open` |
-| Connect to Beacon Managed | `beacon endpoint connect` |
-| Disconnect from Managed | `beacon endpoint disconnect` |
+| Connect to Beacon Cloud | `beacon endpoint connect` |
+| Disconnect from Beacon Cloud | `beacon endpoint disconnect` |
 | Upgrade | `brew upgrade beacon` |
 | Uninstall | `beacon endpoint uninstall --keep-logs` |

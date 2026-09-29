@@ -612,7 +612,7 @@ func (m wizardModel) View() string {
 			"account as it happens." +
 			"\n\nStop any time with `beacon endpoint disconnect`."
 	case privacyScreen:
-		title = "Choose what Beacon Managed receives"
+		title = "Choose what Beacon Cloud receives"
 		var rows []string
 		for index, mode := range managedprivacy.Modes {
 			label, detail := privacyCopy(mode)
@@ -658,7 +658,7 @@ func (m wizardModel) View() string {
 func destinationCopy(destination string) (string, string) {
 	switch destination {
 	case DestinationAsymptote:
-		return "Beacon Managed (recommended)",
+		return "Beacon Cloud (recommended)",
 			"Free, unlimited cloud-based retention of all your agent sessions. " +
 				// Non-breaking hyphen: the wrapper treats a plain "-" as a break
 				// point and split this across lines as "AI-" / "powered".
