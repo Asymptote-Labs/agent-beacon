@@ -881,6 +881,14 @@ func TestDshUnwritableRuntimeLogStaysNonBlockingAndSaysWhy(t *testing.T) {
 			logPath := filepath.Join(blocker, "runtime.jsonl")
 			t.Setenv("BEACON_ENDPOINT_LOG", logPath)
 
+			// The workspace is made unwritable the same way, for the same reason. With a
+			// writable session cwd a dsh hook no longer loses the event: it stages it in a
+			// workspace spool (#605) and prints nothing, so there would be no NOT-recorded
+			// line to read. The envelope's synthetic cwd (/repo) is creatable on some
+			// platforms -- Windows CI proved it -- so un-writability is stated explicitly
+			// rather than inherited from whichever OS runs this.
+			tc.input["cwd"] = filepath.Join(blocker, "workspace")
+
 			var out map[string]interface{}
 			stderr := captureHookStderr(t, func() {
 				out = runHookWithInput(t, tc.run, tc.input)
