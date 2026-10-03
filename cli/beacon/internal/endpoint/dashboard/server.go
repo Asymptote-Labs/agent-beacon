@@ -3,6 +3,7 @@ package dashboard
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/auth"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/detect"
 	endpointhooks "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
@@ -302,6 +304,15 @@ func Handler(opts Options) (http.Handler, error) {
 		}
 		q := r.URL.Query()
 		resp, err := RunScan(rulesUserMode, opts.LogPath, "", q.Get("session"), q.Get("min_severity"))
+		var noRules *detect.NoRulesError
+		if errors.As(err, &noRules) && len(noRules.Skipped) > 0 {
+			// Every rule needs a newer Beacon: keep the error status, and carry the
+			// skip list so the UI can say which rules and versions.
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error(), "skipped": detect.SkippedStrings(noRules.Skipped)})
+			return
+		}
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
