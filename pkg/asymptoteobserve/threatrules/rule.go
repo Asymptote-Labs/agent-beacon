@@ -51,7 +51,12 @@ const ScopeSession Scope = "session"
 
 // Rule is a single threat-detection rule. Exactly one of Match or Correlation is set.
 type Rule struct {
-	ID          string                    `yaml:"id"`
+	ID string `yaml:"id"`
+	// Spec is the minimum Threat Rules spec version the rule needs, such as
+	// "threat-rules/v1.1". Empty means the original v1. A rule that uses a feature added
+	// after v1 must declare it, so an engine that predates the feature can tell the rule
+	// is too new instead of failing on an unknown field.
+	Spec        string                    `yaml:"spec,omitempty"`
 	Version     int                       `yaml:"version"`
 	Title       string                    `yaml:"title"`
 	Description string                    `yaml:"description,omitempty"`
@@ -65,19 +70,36 @@ type Rule struct {
 	Tests       []Fixture                 `yaml:"tests"`
 }
 
-// Correlation is the ordered-window, session-scoped form of a rule.
+// Order says whether a correlation's steps must occur in the order they are listed.
+type Order string
+
+const (
+	// OrderSequence is the default: each step must occur at or after the previous
+	// matched step. An omitted order means sequence, so existing rules keep their
+	// semantics.
+	OrderSequence Order = "sequence"
+	// OrderAny matches when every step is satisfied by a distinct event inside the
+	// window, in whatever order those events occurred.
+	OrderAny Order = "any"
+)
+
+// Correlation is the windowed, session-scoped form of a rule.
 type Correlation struct {
 	Scope  Scope             `yaml:"scope"`
 	Window string            `yaml:"window"`
+	Order  Order             `yaml:"order,omitempty"`
 	Steps  []CorrelationStep `yaml:"steps"`
 }
+
+// AnyOrder reports whether the steps may be satisfied in any order.
+func (c *Correlation) AnyOrder() bool { return c.Order == OrderAny }
 
 // ParseWindow parses the raw Window duration. Valid to call after Validate succeeds.
 func (c *Correlation) ParseWindow() (time.Duration, error) {
 	return time.ParseDuration(c.Window)
 }
 
-// CorrelationStep is one ordered step of a correlation rule.
+// CorrelationStep is one step of a correlation rule.
 type CorrelationStep struct {
 	ID    string `yaml:"id"`
 	Match string `yaml:"match"`
@@ -142,6 +164,9 @@ func validSeverity(s asymptoteobserve.Severity) bool {
 func (r *Rule) Validate() error {
 	if !idPattern.MatchString(r.ID) {
 		return fmt.Errorf("id %q must match %s", r.ID, idPattern.String())
+	}
+	if err := checkSpecSupported(r.ID, r.Spec); err != nil {
+		return err
 	}
 	if r.Version < 1 {
 		return fmt.Errorf("version must be >= 1, got %d", r.Version)
@@ -217,6 +242,17 @@ func (r *Rule) validateCorrelation() error {
 	}
 	if _, err := c.ParseWindow(); err != nil {
 		return fmt.Errorf("correlation.window %q: %w", c.Window, err)
+	}
+	switch c.Order {
+	case "", OrderSequence, OrderAny:
+	default:
+		return fmt.Errorf("correlation.order %q unsupported (%q or %q)", c.Order, OrderSequence, OrderAny)
+	}
+	if c.Order != "" {
+		// Already known to be parseable and supported (Validate checked it first).
+		if v, _ := parseSpec(r.Spec); specV1_1.newerThan(v) {
+			return fmt.Errorf("correlation.order requires spec: threat-rules/v1.1 or later (engines before v1.1 reject the field)")
+		}
 	}
 	if len(c.Steps) < 2 {
 		return fmt.Errorf("correlation requires >= 2 steps, got %d", len(c.Steps))

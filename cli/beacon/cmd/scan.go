@@ -76,10 +76,11 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 
 	// Load and compile the active rule set.
-	loaded, err := detect.LoadActive(userMode, strings.TrimSpace(scanOpts.rulesDir))
+	loaded, skipped, err := detect.LoadActiveSkipping(userMode, strings.TrimSpace(scanOpts.rulesDir))
 	if err != nil {
 		return fmt.Errorf("load rules: %w", err)
 	}
+	detect.WarnSkipped(cmd.ErrOrStderr(), skipped)
 	if len(loaded) == 0 {
 		return fmt.Errorf("no rules to run (store is empty and baseline missing)")
 	}

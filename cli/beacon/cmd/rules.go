@@ -49,10 +49,11 @@ var rulesListCmd = &cobra.Command{
 	Short:        "List the active threat-detection rules",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		loaded, err := detect.LoadActive(rulesUserMode(), "")
+		loaded, skipped, err := detect.LoadActiveSkipping(rulesUserMode(), "")
 		if err != nil {
 			return err
 		}
+		detect.WarnSkipped(cmd.ErrOrStderr(), skipped)
 		out := cmd.OutOrStdout()
 		if len(loaded) == 0 {
 			fmt.Fprintln(out, "No rules.")
@@ -72,10 +73,11 @@ var rulesAddCmd = &cobra.Command{
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		installed, err := detect.InstallFiles(rulesUserMode(), args[0], rulesOpts.force)
+		installed, skipped, err := detect.InstallFilesSkipping(rulesUserMode(), args[0], rulesOpts.force)
 		if err != nil {
 			return err
 		}
+		detect.WarnSkipped(cmd.ErrOrStderr(), skipped)
 		out := cmd.OutOrStdout()
 		for _, in := range installed {
 			fmt.Fprintf(out, "installed %s -> %s\n", in.ID, in.Path)
@@ -162,10 +164,11 @@ func runRulesPull(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unsupported url: expected a .rule.yaml or .tar.gz/.tgz pack")
 	}
 
-	installed, err := detect.InstallFiles(rulesUserMode(), src, rulesOpts.force)
+	installed, skipped, err := detect.InstallFilesSkipping(rulesUserMode(), src, rulesOpts.force)
 	if err != nil {
 		return err
 	}
+	detect.WarnSkipped(cmd.ErrOrStderr(), skipped)
 	for _, in := range installed {
 		fmt.Fprintf(out, "installed %s -> %s\n", in.ID, in.Path)
 	}
@@ -288,29 +291,39 @@ var rulesFieldsCmd = &cobra.Command{
 	},
 }
 
-func loadRuleFiles(path string) ([]*threatrules.Rule, error) {
+// loadRuleFiles loads a rule file or directory for lint. Rules that need a newer spec
+// than this binary supports come back in skipped rather than failing the load.
+func loadRuleFiles(path string) ([]*threatrules.Rule, []threatrules.SkippedRule, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if info.IsDir() {
-		return threatrules.LoadDir(path)
+		return threatrules.LoadDirSkipping(path)
 	}
 	rule, err := threatrules.LoadRule(path)
-	if err != nil {
-		return nil, err
+	if unsupported, ok := threatrules.AsUnsupportedSpec(err); ok {
+		return nil, []threatrules.SkippedRule{{Path: path, Err: unsupported}}, nil
 	}
-	return []*threatrules.Rule{rule}, nil
+	if err != nil {
+		return nil, nil, err
+	}
+	return []*threatrules.Rule{rule}, nil, nil
 }
 
 func lintRulesPath(cmd *cobra.Command, path string) error {
 	out := cmd.OutOrStdout()
-	rules, err := loadRuleFiles(path)
+	rules, skipped, err := loadRuleFiles(path)
 	if err != nil {
 		return fmt.Errorf("load rules: %w", err)
 	}
-	if len(rules) == 0 {
+	if len(rules) == 0 && len(skipped) == 0 {
 		return fmt.Errorf("no *.rule.yaml files found under %s", filepath.Clean(path))
+	}
+	// Lint cannot vouch for a rule it cannot evaluate, so a skip fails the run, but the
+	// rest of the pack is still checked.
+	for _, s := range skipped {
+		fmt.Fprintf(out, "SKIP %s\n", s)
 	}
 
 	failures, fixtures := 0, 0
@@ -334,9 +347,16 @@ func lintRulesPath(cmd *cobra.Command, path string) error {
 			fmt.Fprintf(out, "ok   %s (%d fixtures)\n", rule.ID, len(results))
 		}
 	}
-	fmt.Fprintf(out, "\n%d rule(s), %d fixture(s), %d failure(s)\n", len(rules), fixtures, failures)
-	if failures > 0 {
+	if len(skipped) > 0 {
+		fmt.Fprintf(out, "\n%d rule(s), %d fixture(s), %d failure(s), %d skipped (need a newer Beacon)\n", len(rules), fixtures, failures, len(skipped))
+	} else {
+		fmt.Fprintf(out, "\n%d rule(s), %d fixture(s), %d failure(s)\n", len(rules), fixtures, failures)
+	}
+	switch {
+	case failures > 0:
 		return fmt.Errorf("%d failure(s)", failures)
+	case len(skipped) > 0:
+		return fmt.Errorf("%d rule(s) need a newer Beacon (supports up to %s)", len(skipped), threatrules.SupportedSpec)
 	}
 	return nil
 }
