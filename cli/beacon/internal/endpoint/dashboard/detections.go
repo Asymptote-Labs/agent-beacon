@@ -63,11 +63,7 @@ func BuildDetections(userMode bool, rulesDir string) (DetectionsResponse, error)
 			Taxonomy:    r.Taxonomy,
 		})
 	}
-	resp := DetectionsResponse{Rules: rules, Count: len(rules)}
-	for _, sk := range skipped {
-		resp.Skipped = append(resp.Skipped, sk.String())
-	}
-	return resp, nil
+	return DetectionsResponse{Rules: rules, Count: len(rules), Skipped: detect.SkippedStrings(skipped)}, nil
 }
 
 // FindingsResponse is the /api/findings payload: the hits from running the
@@ -76,6 +72,8 @@ type FindingsResponse struct {
 	Findings []threatrules.Finding `json:"findings"`
 	Scanned  int                   `json:"scanned"`
 	Count    int                   `json:"count"`
+	// Skipped lists rule files left out because they need a newer Beacon.
+	Skipped []string `json:"skipped,omitempty"`
 }
 
 // RunScan loads and compiles the active rules, streams the runtime log (optionally
@@ -95,13 +93,12 @@ func RunScan(userMode bool, logPath, rulesDir, session, minSeverity string) (Fin
 		}
 	}
 
-	// Rules needing a newer Beacon are left out here and listed by BuildDetections.
-	loaded, _, err := detect.LoadActiveSkipping(userMode, strings.TrimSpace(rulesDir))
+	loaded, skipped, err := detect.LoadActiveSkipping(userMode, strings.TrimSpace(rulesDir))
 	if err != nil {
 		return FindingsResponse{}, fmt.Errorf("load rules: %w", err)
 	}
 	if len(loaded) == 0 {
-		return FindingsResponse{}, fmt.Errorf("no rules to run (store is empty and baseline missing)")
+		return FindingsResponse{}, &detect.NoRulesError{Skipped: skipped}
 	}
 	compiled := make([]*threatrules.CompiledRule, 0, len(loaded))
 	for _, lr := range loaded {
@@ -142,5 +139,5 @@ func RunScan(userMode bool, logPath, rulesDir, session, minSeverity string) (Fin
 	if findings == nil {
 		findings = []threatrules.Finding{}
 	}
-	return FindingsResponse{Findings: findings, Scanned: len(events), Count: len(findings)}, nil
+	return FindingsResponse{Findings: findings, Scanned: len(events), Count: len(findings), Skipped: detect.SkippedStrings(skipped)}, nil
 }

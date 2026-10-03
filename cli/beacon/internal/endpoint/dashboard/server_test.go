@@ -525,8 +525,8 @@ func TestRunScanRejectsEmptyRuleSet(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected empty rule set to be rejected")
 	}
-	if !strings.Contains(err.Error(), "no rules to run") {
-		t.Fatalf("error = %q, want no rules to run", err)
+	if err.Error() != "no rules to run (store is empty and baseline missing)" {
+		t.Fatalf("error = %q, want the unchanged empty-store message", err)
 	}
 }
 

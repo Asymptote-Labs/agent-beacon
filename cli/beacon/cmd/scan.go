@@ -80,10 +80,11 @@ func runScan(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("load rules: %w", err)
 	}
-	detect.WarnSkipped(cmd.ErrOrStderr(), skipped)
 	if len(loaded) == 0 {
-		return fmt.Errorf("no rules to run (store is empty and baseline missing)")
+		// The error names any skipped rules itself, so they are not also warned about.
+		return &detect.NoRulesError{Skipped: skipped}
 	}
+	detect.WarnSkipped(cmd.ErrOrStderr(), skipped)
 	compiled := make([]*threatrules.CompiledRule, 0, len(loaded))
 	for _, lr := range loaded {
 		c, err := threatrules.Compile(lr.Rule)

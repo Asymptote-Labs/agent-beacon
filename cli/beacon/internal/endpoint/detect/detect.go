@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/rulestore"
@@ -67,6 +68,37 @@ func InstallFiles(userMode bool, src string, force bool) ([]Installed, error) {
 // this binary supports. See rulestore.InstallFilesSkipping.
 func InstallFilesSkipping(userMode bool, src string, force bool) ([]Installed, []threatrules.SkippedRule, error) {
 	return rulestore.InstallFilesSkipping(StoreDir(userMode), src, force)
+}
+
+// NoRulesError reports that no rules are left to run. Skipped holds the rules set aside
+// for needing a newer spec; when it is empty, the store is empty and the baseline is
+// missing.
+type NoRulesError struct {
+	Skipped []threatrules.SkippedRule
+}
+
+func (e *NoRulesError) Error() string {
+	if len(e.Skipped) == 0 {
+		return "no rules to run (store is empty and baseline missing)"
+	}
+	parts := make([]string, len(e.Skipped))
+	for i, s := range e.Skipped {
+		parts[i] = fmt.Sprintf("rule %q requires %s (%s)", s.Err.RuleID, s.Err.Required, s.Path)
+	}
+	return fmt.Sprintf("no rules to run: every rule needs a newer Beacon (this one supports up to %s): %s; upgrade Beacon to load them",
+		threatrules.SupportedSpec, strings.Join(parts, ", "))
+}
+
+// SkippedStrings renders skipped rules as one line each, for JSON payloads.
+func SkippedStrings(skipped []threatrules.SkippedRule) []string {
+	if len(skipped) == 0 {
+		return nil
+	}
+	out := make([]string, len(skipped))
+	for i, s := range skipped {
+		out[i] = s.String()
+	}
+	return out
 }
 
 // WarnSkipped writes one warning line per skipped rule. Commands send it to stderr so

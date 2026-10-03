@@ -202,3 +202,44 @@ func TestScanSkipsNewerSpecRuleWithWarning(t *testing.T) {
 		t.Fatalf("want the skip warning on stderr, got %q", stderr.String())
 	}
 }
+
+func TestScanAllRulesSkippedNamesThem(t *testing.T) {
+	scanFixture(t, []string{evSecretRead})
+	// Replace the fixture's only rule with one that needs a newer spec.
+	future := strings.Replace(scanTestRule, "id: scan-test-secret-read\n", "id: scan-future-rule\nspec: threat-rules/v1.2\n", 1)
+	if err := os.WriteFile(filepath.Join(scanOpts.rulesDir, "secret.rule.yaml"), []byte(future), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr := &strings.Builder{}, &strings.Builder{}
+	cmd, _ := newCmd()
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	err := runScan(cmd, nil)
+	if err == nil {
+		t.Fatal("want an error when every rule is skipped")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "store is empty") {
+		t.Fatalf("error must not claim the store is empty: %s", msg)
+	}
+	for _, want := range []string{`rule "scan-future-rule" requires threat-rules/v1.2`, "secret.rule.yaml", "supports up to " + threatrules.SupportedSpec, "upgrade Beacon"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q missing %q", msg, want)
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("the error names the skipped rules; no separate warning expected, got %q", stderr.String())
+	}
+}
+
+func TestScanEmptyRulesDirKeepsMessage(t *testing.T) {
+	scanFixture(t, []string{evSecretRead})
+	if err := os.Remove(filepath.Join(scanOpts.rulesDir, "secret.rule.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	cmd, _ := newCmd()
+	err := runScan(cmd, nil)
+	if err == nil || err.Error() != "no rules to run (store is empty and baseline missing)" {
+		t.Fatalf("want the unchanged empty-store message, got %v", err)
+	}
+}
