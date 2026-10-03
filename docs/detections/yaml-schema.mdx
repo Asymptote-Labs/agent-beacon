@@ -144,6 +144,7 @@ CEL expressions use `e.<field>` paths that match the Beacon event schema. Common
 | `e.command.command` | Match shell or process command text. |
 | `e.file.path` | Match file paths. |
 | `e.prompt.text` | Match prompt text when retained. |
+| `e.gen_ai.tool.call.result_text` | Match what a file read, web fetch, or MCP tool returned, when retained. Derived by the engine, redacted, capped at 4 KB, and empty for other actions. |
 | `e.session.id` | Correlate activity within one session. |
 | `e.mcp.server` | Match MCP-like server context. |
 | `e.approval.decision` | Match approval or policy outcomes. |

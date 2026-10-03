@@ -331,6 +331,16 @@ type GenAIToolCallInfo struct {
 	Arguments interface{} `json:"arguments,omitempty"`
 	ID        string      `json:"id,omitempty"`
 	Result    interface{} `json:"result,omitempty"`
+	// ResultText is Result as plain text, for the threat-rules engine only. Result is
+	// interface{} (a runtime may report a string, an object or a list of content
+	// blocks), and CEL cannot address an interface{} field, so without this no rule
+	// could match on what a file read, a web fetch or an MCP tool returned.
+	//
+	// It is never written or read: `json:"-"` keeps it off the wire, so the JSONL
+	// contract is unchanged and a log line cannot assert it. The engine fills it on
+	// its own copy of each event, from the retained Result, just before evaluation.
+	// See threatrules.ToolResultText for exactly which events get a value.
+	ResultText string `json:"-" cel:"result_text"`
 }
 
 type GenAIToolInfo struct {

@@ -136,6 +136,18 @@ the steps in both orders still fires once. A single event never satisfies two st
   a missing path as an empty/zero value (a `match` referencing a missing field yields
   `false`, never an error at evaluation time).
 - Regular expressions use RE2 via CEL `.matches(re)` (the same engine as Go `regexp`).
+  RE2 runs in time linear in its input and has no backtracking, so a pattern cannot be
+  made to run super-linearly (no ReDoS); cost is bounded by the size of the text matched.
+- Derived fields. `e.gen_ai.tool.call.result_text` is not on the wire: an engine MUST
+  compute it from the event before evaluation, and MUST ignore any value an input
+  claims for it. It is `gen_ai.tool.call.result` as text (a string as is; for an object
+  or list, every string it contains, maps in sorted key order, joined by `\n`, trimmed),
+  capped at 4096 bytes and passed through the event writer's secret redaction. It is
+  the empty string unless the event is a read-type tool result — `event.action` is
+  `file.read` or `mcp.tool_invoked`, `mcp.server`/`mcp.tool` is set, or the tool is named
+  as an MCP tool (`mcp__…`, `MCP:…`) or a web fetch/search tool — and its `content`
+  marker, if present, is `included` with a `retention` other than `metadata`. The
+  reference derivation is `threatrules.ToolResultText`.
 - An engine MUST reject (at load) any rule whose CEL expression fails to compile or does
   not type to `bool`. Because field paths are checked against the event schema, a typo
   like `e.fil.path` is a load-time error.

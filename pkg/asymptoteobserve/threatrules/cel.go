@@ -46,11 +46,31 @@ var (
 func Env() (*cel.Env, error) {
 	celEnvOnce.Do(func() {
 		celEnvInst, celEnvErr = cel.NewEnv(
-			ext.NativeTypes(reflect.TypeOf(asymptoteobserve.Event{}), ext.ParseStructTag("json")),
+			ext.NativeTypes(reflect.TypeOf(asymptoteobserve.Event{}), ext.ParseStructField(celFieldName)),
 			cel.Variable(eventVar, cel.ObjectType(eventCELType)),
 		)
 	})
 	return celEnvInst, celEnvErr
+}
+
+// celFieldName is the CEL name of an event struct field: its `cel` tag when it has one,
+// otherwise the first segment of its json tag, otherwise the Go field name.
+//
+// The json tag is the rule for every field that is on the wire, so expressions read like the
+// event JSON. The `cel` tag exists for the one kind of field that is not: a value the engine
+// derives for rules to match on and never serializes (json:"-"), such as
+// gen_ai.tool.call.result_text. EventFields uses the same function, so the field reference
+// and the environment cannot disagree about a name.
+func celFieldName(f reflect.StructField) string {
+	if tag, ok := f.Tag.Lookup("cel"); ok {
+		if name := strings.Split(tag, ",")[0]; name != "" {
+			return name
+		}
+	}
+	if tag, ok := f.Tag.Lookup("json"); ok {
+		return strings.Split(tag, ",")[0]
+	}
+	return f.Name
 }
 
 // CompileMatch compiles a single match expression and verifies it types to bool. The
@@ -82,7 +102,15 @@ func CompileMatch(expr string) (cel.Program, error) {
 
 // EvalMatch runs a compiled match program against one event and reports whether it
 // matched. A non-bool result is treated as an evaluation error.
+//
+// Derived fields (gen_ai.tool.call.result_text) are filled on a copy of the event first, so
+// a caller holding only a program sees the same values a CompiledRule does. CompiledRule
+// skips that step for rules that never reference a derived field.
 func EvalMatch(prog cel.Program, event asymptoteobserve.Event) (bool, error) {
+	return evalMatch(prog, withDerivedFields(event))
+}
+
+func evalMatch(prog cel.Program, event asymptoteobserve.Event) (bool, error) {
 	out, _, err := prog.Eval(map[string]any{eventVar: event})
 	if err != nil {
 		return false, fmt.Errorf("eval match: %w", err)

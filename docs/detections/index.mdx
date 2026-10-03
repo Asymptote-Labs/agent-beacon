@@ -74,7 +74,7 @@ Beacon ships with a small built-in baseline so `beacon scan` works before any ru
 | `context-exfiltration` | Secret read then egress, credentials in curl data, upload to paste or transfer sites, SSH tunnel egress, archive-then-upload pipelines |
 | `risky-command` | Curl piped to shell, recursive root delete, sudoers tampering, persistence installation, crontab modification, kernel-module load |
 | `sensitive-edit` | CI pipeline edits, dependency manifest edits, shell login file edits, agent control surface edits, SSH authorized_keys edits, /etc/hosts edits, container / IaC file edits |
-| `prompt-injection` | Role override jailbreaks, hidden payloads, markdown-image exfiltration, instruction override markers |
+| `prompt-injection` | Role override jailbreaks, hidden payloads, markdown-image exfiltration, instruction override markers, injected instructions in files, web pages, or MCP results the agent reads |
 | `external-access` | Cloud metadata endpoint access, link-local target fetches, external MCP tool calls |
 | `approval-abuse` | Permission-bypass execution or high-risk approvals without reviewer context, denied-command re-invocation through renamed binaries |
 | `source-control` | Git hook installation, remote tampering, Git config execution injection, history rewriting (filter-branch / filter-repo / rebase -i), force-push to protected branches |

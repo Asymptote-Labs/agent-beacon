@@ -79,7 +79,7 @@ func (c *CompiledRule) Findings(events []asymptoteobserve.Event) ([]Finding, err
 	}
 	var findings []Finding
 	for i := range events {
-		matched, err := EvalMatch(c.match, events[i])
+		matched, err := c.eval(c.match, events[i])
 		if err != nil {
 			return nil, err
 		}
