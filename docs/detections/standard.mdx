@@ -1,6 +1,6 @@
 ---
 title: "Detection Standard"
-description: "The threat-rules/v1 standard for portable AI-agent security detections"
+description: "The threat-rules/v1.1 standard for portable AI-agent security detections"
 ---
 
 ## Standard overview
@@ -11,9 +11,15 @@ This makes the format portable. Any engine that loads the same rule pack and pro
 
 ## Version
 
-The current rule format is `threat-rules/v1`.
+The current rule format is `threat-rules/v1.1`. It adds `correlation.order` to `threat-rules/v1`; every v1 rule is still a valid v1.1 rule.
 
 The version covers the rule document shape, required metadata, CEL contract, correlation model, and fixture semantics. Rule files also include their own integer `version` field, which is the content revision for that individual rule.
+
+A rule that uses a feature added after v1 declares the spec version it needs in its `spec` field, for example `spec: threat-rules/v1.1`. Rules that do not need a newer feature leave `spec` out and stay loadable by older engines. A Beacon build that supports an older version skips a rule declaring a newer one, with a warning that names the rule and tells you to upgrade Beacon, and still runs the rest of the corpus.
+
+<Warning>
+Beacon releases from before `threat-rules/v1.1` do not read `spec`. They refuse any rules directory that contains a v1.1 rule and report an unknown `spec` field. Upgrade Beacon before you pull a corpus that contains v1.1 rules.
+</Warning>
 
 ## Design goals
 

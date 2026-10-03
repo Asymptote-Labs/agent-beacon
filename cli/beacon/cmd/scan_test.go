@@ -174,3 +174,31 @@ func TestScanMinSeverityFilters(t *testing.T) {
 		t.Fatalf("expected high finding filtered by --min-severity critical, got:\n%s", buf.String())
 	}
 }
+
+func TestScanSkipsNewerSpecRuleWithWarning(t *testing.T) {
+	scanFixture(t, []string{evSecretRead})
+	future := strings.Replace(strings.Replace(scanTestRule, "id: scan-test-secret-read\n", "id: scan-future-rule\nspec: threat-rules/v2\n", 1),
+		"emit:", "future_field: true\nemit:", 1)
+	if err := os.WriteFile(filepath.Join(scanOpts.rulesDir, "future.rule.yaml"), []byte(future), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	scanOpts.jsonOutput = true
+	stdout, stderr := &strings.Builder{}, &strings.Builder{}
+	cmd, _ := newCmd()
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	if err := runScan(cmd, nil); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	var findings []threatrules.Finding
+	if err := json.Unmarshal([]byte(stdout.String()), &findings); err != nil {
+		t.Fatalf("stdout must stay valid JSON: %v\n%s", err, stdout.String())
+	}
+	if len(findings) != 1 || findings[0].RuleID != "scan-test-secret-read" {
+		t.Fatalf("the current rule should still run: %+v", findings)
+	}
+	want := `rule "scan-future-rule" requires threat-rules/v2, but this Beacon supports up to ` + threatrules.SupportedSpec + `; upgrade Beacon to load it`
+	if !strings.Contains(stderr.String(), "warning: skipped ") || !strings.Contains(stderr.String(), want) {
+		t.Fatalf("want the skip warning on stderr, got %q", stderr.String())
+	}
+}

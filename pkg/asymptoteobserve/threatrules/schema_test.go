@@ -64,6 +64,9 @@ func TestSchemaJSONInSyncWithGo(t *testing.T) {
 	assertSameSet(t, "correlation.scope enum",
 		[]string{string(ScopeSession)},
 		schema.Properties["correlation"].Properties["scope"].Enum)
+	assertSameSet(t, "correlation.order enum",
+		[]string{string(OrderSequence), string(OrderAny)},
+		schema.Properties["correlation"].Properties["order"].Enum)
 
 	testsItems := schema.Properties["tests"].Items
 	if testsItems == nil {

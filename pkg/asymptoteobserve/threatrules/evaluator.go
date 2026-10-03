@@ -22,10 +22,11 @@ type Evaluator interface {
 // is built once (programs are compiled up front) and is safe to reuse across many
 // Evaluate calls.
 type CompiledRule struct {
-	rule   *Rule
-	match  cel.Program   // set for single-event rules
-	steps  []cel.Program // set for correlation rules
-	window time.Duration // parsed correlation window
+	rule     *Rule
+	match    cel.Program   // set for single-event rules
+	steps    []cel.Program // set for correlation rules
+	window   time.Duration // parsed correlation window
+	anyOrder bool          // correlation steps may match in any order
 	// derived is set when any of the rule's expressions references an engine-derived field
 	// (see withDerivedFields). Only those rules pay to derive it, so the rest of a pack runs
 	// exactly as it did before the field existed.
@@ -72,6 +73,7 @@ func Compile(rule *Rule) (*CompiledRule, error) {
 			return nil, fmt.Errorf("correlation.window: %w", err)
 		}
 		c.window = window
+		c.anyOrder = rule.Correlation.AnyOrder()
 		return c, nil
 	}
 	prog, err := CompileMatch(rule.Match)
@@ -89,7 +91,7 @@ func (c *CompiledRule) Rule() *Rule { return c.rule }
 //
 // A single-event rule matches if any event in the sequence satisfies its expression. A
 // correlation rule matches if any session (events grouped by session.id) satisfies the
-// ordered-window step sequence.
+// windowed steps, in listed order unless the rule declares order: any.
 func (c *CompiledRule) Evaluate(events []asymptoteobserve.Event) (Verdict, error) {
 	if c.steps != nil {
 		return c.evaluateCorrelation(events)

@@ -31,12 +31,14 @@ type DetectionView struct {
 type DetectionsResponse struct {
 	Rules []DetectionView `json:"rules"`
 	Count int             `json:"count"`
+	// Skipped lists rule files left out because they need a newer Beacon.
+	Skipped []string `json:"skipped,omitempty"`
 }
 
 // BuildDetections lists the active rule set (store when present, else the
 // embedded baseline — the same set `beacon scan` would run) as detection views.
 func BuildDetections(userMode bool, rulesDir string) (DetectionsResponse, error) {
-	loaded, err := detect.LoadActive(userMode, strings.TrimSpace(rulesDir))
+	loaded, skipped, err := detect.LoadActiveSkipping(userMode, strings.TrimSpace(rulesDir))
 	if err != nil {
 		return DetectionsResponse{}, err
 	}
@@ -61,7 +63,11 @@ func BuildDetections(userMode bool, rulesDir string) (DetectionsResponse, error)
 			Taxonomy:    r.Taxonomy,
 		})
 	}
-	return DetectionsResponse{Rules: rules, Count: len(rules)}, nil
+	resp := DetectionsResponse{Rules: rules, Count: len(rules)}
+	for _, sk := range skipped {
+		resp.Skipped = append(resp.Skipped, sk.String())
+	}
+	return resp, nil
 }
 
 // FindingsResponse is the /api/findings payload: the hits from running the
@@ -89,7 +95,8 @@ func RunScan(userMode bool, logPath, rulesDir, session, minSeverity string) (Fin
 		}
 	}
 
-	loaded, err := detect.LoadActive(userMode, strings.TrimSpace(rulesDir))
+	// Rules needing a newer Beacon are left out here and listed by BuildDetections.
+	loaded, _, err := detect.LoadActiveSkipping(userMode, strings.TrimSpace(rulesDir))
 	if err != nil {
 		return FindingsResponse{}, fmt.Errorf("load rules: %w", err)
 	}

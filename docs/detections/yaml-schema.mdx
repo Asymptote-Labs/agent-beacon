@@ -7,7 +7,7 @@ description: "Human-readable reference for Beacon threat-rule YAML files"
 
 Beacon detection rules are YAML documents ending in `.rule.yaml`. Each rule describes one security condition over Beacon endpoint events and includes enough metadata and tests for the rule to be validated before it runs.
 
-The structural schema is the `threat-rules/v1` JSON Schema in the Agent Beacon repository. The runtime engine also compiles CEL expressions and checks rule fixtures, because those checks cannot be fully represented by JSON Schema alone.
+The structural schema is the `threat-rules/v1.1` JSON Schema in the Agent Beacon repository. The runtime engine also compiles CEL expressions and checks rule fixtures, because those checks cannot be fully represented by JSON Schema alone.
 
 ## Minimal rule
 
@@ -45,6 +45,7 @@ tests:
 | `status` | Yes | One of `experimental`, `stable`, or `deprecated`. |
 | `posture` | Yes | `detect` for observe-only rules or `enforce-capable` for rules designed to support enforcement. |
 | `taxonomy` | No | External references such as OWASP, MITRE ATLAS, or CVEs. |
+| `spec` | No | Minimum spec version the rule needs, such as `threat-rules/v1.1`. Omit it unless the rule uses a newer feature. Required for `correlation.order`. |
 | `match` | One of `match` or `correlation` | CEL boolean expression for a single event. |
 | `correlation` | One of `match` or `correlation` | Ordered multi-event sequence definition. |
 | `emit.reason` | Yes | Human-readable finding reason. |
@@ -84,6 +85,27 @@ correlation:
 ```
 
 Use `correlation` when the risk comes from a sequence, such as a secret-bearing file read followed by network egress in the same agent session.
+
+Steps match in the order they are listed unless the correlation sets `order: any`, a `threat-rules/v1.1` field. A rule that sets `order` must declare `spec: threat-rules/v1.1`. With `order: any`, each step must be satisfied by a different event, in whatever order those events occurred, and every matched event must fall within `window` of the earliest one. Use it when the combination is the risk regardless of which came first:
+
+```yaml title="Order-insensitive correlation"
+spec: threat-rules/v1.1
+correlation:
+  scope: session
+  window: 120s
+  order: any   # default: sequence
+  steps:
+    - id: read_secret
+      match: >
+        e.event.action == "file.read" &&
+        e.file.path.matches("(\\.env|credentials|id_rsa|\\.aws/)")
+    - id: egress
+      match: >
+        e.event.action == "command.executed" &&
+        e.command.command.matches("curl\\s+.*https?://")
+```
+
+Either order produces at most one finding per session.
 
 ## Tests
 

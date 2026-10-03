@@ -25,6 +25,7 @@ Rules are checked before any event scanning begins.
 
 Beacon:
 
+- reads each rule's `spec` version first, and skips a rule that needs a newer spec than the binary supports, with a warning such as `warning: skipped …/x.rule.yaml: rule "x" requires threat-rules/v1.2, but this Beacon supports up to threat-rules/v1.1; upgrade Beacon to load it`
 - decodes rule YAML strictly
 - rejects unknown structural fields
 - enforces required fields and `match` versus `correlation` exclusivity
@@ -76,6 +77,8 @@ correlation:
 ```
 
 For `threat-rules/v1`, correlation scope is `session`. Beacon groups events by `e.session.id`, then looks for each step in order. A later step must occur at or after the prior matched step, and the final step must occur within the configured `window` from the first matched step.
+
+A correlation that sets `order: any` (a `threat-rules/v1.1` field, so the rule must declare `spec: threat-rules/v1.1`) drops the ordering requirement: Beacon assigns each step a distinct event from the session, in whatever order they occurred, and every matched event must fall within `window` of the earliest one. The evidence events are reported in the order they happened. Either way a rule reports a session at most once.
 
 Correlation is useful when no single event is suspicious enough on its own, but the sequence is meaningful.
 

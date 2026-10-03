@@ -77,6 +77,49 @@ func TestRulesLintFailsOnFixtureMismatch(t *testing.T) {
 	}
 }
 
+// newerSpecRuleYAML declares a spec newer than this binary supports.
+var newerSpecRuleYAML = strings.Replace(strings.Replace(validRuleYAML, "id: cli-test-rule\n", "id: cli-future-rule\nspec: threat-rules/v1.9\n", 1),
+	"emit:", "future_field: true\nemit:", 1)
+
+const upgradeMessage = `rule "cli-future-rule" requires threat-rules/v1.9, but this Beacon supports up to threat-rules/v1.1; upgrade Beacon to load it`
+
+func TestRulesLintReportsNewerSpecAsSkip(t *testing.T) {
+	dir := t.TempDir()
+	writeRuleFile(t, dir, "ok.rule.yaml", validRuleYAML)
+	writeRuleFile(t, dir, "future.rule.yaml", newerSpecRuleYAML)
+	cmd, buf := newCmd()
+	err := lintRulesPath(cmd, dir)
+	if err == nil || !strings.Contains(err.Error(), "need a newer Beacon") {
+		t.Fatalf("want a newer-Beacon lint error, got %v\n%s", err, buf.String())
+	}
+	out := buf.String()
+	if !strings.Contains(out, "ok   cli-test-rule") {
+		t.Errorf("the rest of the pack should still be linted:\n%s", out)
+	}
+	if !strings.Contains(out, "SKIP ") || !strings.Contains(out, "future.rule.yaml: "+upgradeMessage) {
+		t.Errorf("want a SKIP line with the upgrade message:\n%s", out)
+	}
+}
+
+func TestRulesAddSkipsNewerSpec(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	src := t.TempDir()
+	writeRuleFile(t, src, "ok.rule.yaml", validRuleYAML)
+	writeRuleFile(t, src, "future.rule.yaml", newerSpecRuleYAML)
+	cmd, buf := newCmd()
+	rulesOpts.userMode, rulesOpts.systemMode, rulesOpts.force = true, false, false
+	if err := rulesAddCmd.RunE(cmd, []string{src}); err != nil {
+		t.Fatalf("rules add: %v\n%s", err, buf.String())
+	}
+	out := buf.String()
+	if !strings.Contains(out, "installed cli-test-rule") || !strings.Contains(out, "1 rule(s) installed.") {
+		t.Errorf("want the current rule installed:\n%s", out)
+	}
+	if !strings.Contains(out, "warning: skipped ") || !strings.Contains(out, upgradeMessage) {
+		t.Errorf("want a skip warning with the upgrade message:\n%s", out)
+	}
+}
+
 func TestRulesLintEmptyDir(t *testing.T) {
 	cmd, _ := newCmd()
 	if err := lintRulesPath(cmd, t.TempDir()); err == nil {
@@ -235,9 +278,9 @@ func TestRulesPullRejectsUnsupportedPath(t *testing.T) {
 func TestLoadRuleFilesSingleFile(t *testing.T) {
 	dir := t.TempDir()
 	p := writeRuleFile(t, dir, "ok.rule.yaml", validRuleYAML)
-	rules, err := loadRuleFiles(p)
-	if err != nil {
-		t.Fatalf("loadRuleFiles single: %v", err)
+	rules, skipped, err := loadRuleFiles(p)
+	if err != nil || len(skipped) != 0 {
+		t.Fatalf("loadRuleFiles single: %v (skipped %v)", err, skipped)
 	}
 	if len(rules) != 1 || rules[0].ID != "cli-test-rule" {
 		t.Fatalf("unexpected: %+v", rules)
