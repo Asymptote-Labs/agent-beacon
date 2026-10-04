@@ -111,7 +111,42 @@ func lensDataFromShow(show TraceShowResultV1, raw []schema.Event, opts LensDataO
 		data.Findings = findings
 	}
 	data.TokenCoverage = lensTokenCoverage(raw, show.Trace.Harness.Name)
+	data.TokenUsage = lensTokenUsage(raw)
 	return data
+}
+
+// lensTokenUsage counts the trace's usage with the same aggregation `beacon token-usage` and the
+// dashboard's token view use, so a lens's total matches theirs. Summing each event's own usage
+// would not: a runtime that reports one turn on two channels, or as a cumulative counter, would
+// be counted twice. raw is in log append order, which the cumulative handling relies on.
+func lensTokenUsage(raw []schema.Event) *asymptoteobserve.LensTokenUsageV1 {
+	if len(raw) == 0 {
+		return nil
+	}
+	report := tokens.Aggregate(raw, tokens.Options{})
+	out := &asymptoteobserve.LensTokenUsageV1{
+		Totals:          lensUsage(report.Totals),
+		EventsWithUsage: report.EventsWithUsage,
+	}
+	for _, group := range report.ByModel {
+		out.ByModel = append(out.ByModel, asymptoteobserve.LensTokenModelV1{
+			Model:  group.Key,
+			Usage:  lensUsage(group.Usage),
+			Events: group.Usage.Events,
+		})
+	}
+	return out
+}
+
+func lensUsage(u tokens.Usage) TraceUsageV1 {
+	return TraceUsageV1{
+		InputTokens:              u.InputTokens,
+		OutputTokens:             u.OutputTokens,
+		CacheReadInputTokens:     u.CacheReadInputTokens,
+		CacheCreationInputTokens: u.CacheCreationInputTokens,
+		ReasoningOutputTokens:    u.ReasoningOutputTokens,
+		CostUSD:                  u.CostUSD,
+	}
 }
 
 // fitLensEvents keeps the longest prefix of the bundle's events that encodes within budget, and
