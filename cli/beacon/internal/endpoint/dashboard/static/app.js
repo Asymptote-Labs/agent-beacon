@@ -3327,6 +3327,286 @@ $$("[data-preset]").forEach((button) => {
   button.addEventListener("click", () => applyPreset(button.dataset.preset));
 });
 
+// Lens tabs on the session page. Each lens runs in a sandboxed frame served by /lenses/frame/<id>
+// (see spec/lenses/SPEC.md). This is the host half of the protocol: it hands the frame one
+// MessagePort and answers getTrace over it with /api/lens-data. The frame never reaches the
+// dashboard any other way, and a lens that fails or stalls before it renders gives way to the full
+// session view.
+const lensAddedStorageKey = "beacon.dashboard.lenses";
+const lensRenderTimeoutMs = 10000;
+// After the data is delivered, a lens that throws within this window is treated as having failed
+// to render rather than as a lens with a late bug.
+const lensSettleMs = 1000;
+const lensMaxFrameHeight = 200000;
+
+const lensHost = {
+  session: "",
+  lenses: [],
+  added: [],
+  active: "",
+  mount: null,
+  dataPromise: null,
+};
+
+function readAddedLenses() {
+  try {
+    const value = JSON.parse(localStorage.getItem(lensAddedStorageKey) || "[]");
+    return Array.isArray(value) ? value.filter((id) => typeof id === "string") : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function writeAddedLenses(ids) {
+  try {
+    localStorage.setItem(lensAddedStorageKey, JSON.stringify(ids));
+  } catch (_) {
+    // Remembering tabs is a convenience; a browser without storage still works.
+  }
+}
+
+function lensByID(id) {
+  return lensHost.lenses.find((lens) => lens.id === id);
+}
+
+async function initLensTabs() {
+  const params = new URLSearchParams(window.location.search);
+  lensHost.session = (params.get("id") || "").trim();
+  if (!lensHost.session || !$("#lens-tabs")) return;
+  try {
+    lensHost.lenses = (await getJSON("/api/lenses")).lenses || [];
+  } catch (err) {
+    console.warn("lenses unavailable", err);
+    lensHost.lenses = [];
+  }
+  lensHost.added = readAddedLenses().filter((id) => lensByID(id));
+  const wanted = (params.get("lens") || "").trim();
+  if (wanted && lensByID(wanted) && !lensHost.added.includes(wanted)) {
+    lensHost.added.push(wanted);
+    writeAddedLenses(lensHost.added);
+  }
+
+  const addButton = $("#lens-add-button");
+  addButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleLensMenu();
+  });
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest(".lens-add")) toggleLensMenu(false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") toggleLensMenu(false);
+  });
+  window.addEventListener("popstate", () => {
+    const id = new URLSearchParams(window.location.search).get("lens") || "";
+    selectLens(lensByID(id) ? id : "", { history: false });
+  });
+
+  renderLensTabs();
+  selectLens(lensByID(wanted) ? wanted : "", { history: false });
+}
+
+function renderLensTabs() {
+  const tabs = $("#lens-tabs");
+  tabs.replaceChildren();
+  const tab = (id, title) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "lens-tab";
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-selected", String(lensHost.active === id));
+    button.dataset.lens = id;
+    button.addEventListener("click", () => selectLens(id));
+    const label = document.createElement("span");
+    label.textContent = title;
+    button.append(label);
+    return button;
+  };
+  tabs.append(tab("", "Full session"));
+  for (const id of lensHost.added) {
+    const lens = lensByID(id);
+    const button = tab(id, lens.title);
+    const remove = document.createElement("span");
+    remove.className = "lens-tab-remove";
+    remove.setAttribute("role", "button");
+    remove.setAttribute("aria-label", `Remove the ${lens.title} lens`);
+    remove.textContent = "×";
+    remove.addEventListener("click", (event) => {
+      event.stopPropagation();
+      removeLens(id);
+    });
+    button.append(remove);
+    tabs.append(button);
+  }
+  renderLensMenu();
+}
+
+function renderLensMenu() {
+  const menu = $("#lens-menu");
+  menu.replaceChildren();
+  const available = lensHost.lenses.filter((lens) => !lensHost.added.includes(lens.id));
+  if (available.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "lens-menu-empty";
+    empty.textContent = lensHost.lenses.length ? "Every lens is already open." : "No lenses are installed.";
+    menu.append(empty);
+    return;
+  }
+  for (const lens of available) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "lens-menu-item";
+    item.setAttribute("role", "menuitem");
+    const title = document.createElement("span");
+    title.className = "lens-menu-title";
+    title.textContent = lens.title;
+    item.append(title);
+    if (lens.description) {
+      const description = document.createElement("span");
+      description.className = "lens-menu-description";
+      description.textContent = lens.description;
+      item.append(description);
+    }
+    item.addEventListener("click", () => {
+      lensHost.added.push(lens.id);
+      writeAddedLenses(lensHost.added);
+      toggleLensMenu(false);
+      selectLens(lens.id);
+    });
+    menu.append(item);
+  }
+}
+
+function toggleLensMenu(open) {
+  const menu = $("#lens-menu");
+  const button = $("#lens-add-button");
+  if (!menu || !button) return;
+  const show = open === undefined ? menu.hidden : open;
+  menu.hidden = !show;
+  button.setAttribute("aria-expanded", String(show));
+}
+
+function removeLens(id) {
+  lensHost.added = lensHost.added.filter((added) => added !== id);
+  writeAddedLenses(lensHost.added);
+  if (lensHost.active === id) {
+    selectLens("");
+  } else {
+    renderLensTabs();
+  }
+}
+
+function selectLens(id, { history = true } = {}) {
+  lensHost.active = id;
+  if (history) {
+    const params = new URLSearchParams(window.location.search);
+    if (id) params.set("lens", id);
+    else params.delete("lens");
+    window.history.pushState(null, "", `${window.location.pathname}?${params}`);
+  }
+  if (id) $("#lens-notice").hidden = true;
+  $("#session-detail-view").dataset.view = id ? "lens" : "full";
+  $("#lens-view").hidden = !id;
+  renderLensTabs();
+  if (id) mountLens(lensByID(id));
+  else unmountLens();
+}
+
+function lensData() {
+  if (!lensHost.dataPromise) {
+    lensHost.dataPromise = getJSON(`/api/lens-data?session=${encodeURIComponent(lensHost.session)}`);
+    // A failed load is not cached, so reopening the lens tries again.
+    lensHost.dataPromise.catch(() => {
+      lensHost.dataPromise = null;
+    });
+  }
+  return lensHost.dataPromise;
+}
+
+function unmountLens() {
+  const mount = lensHost.mount;
+  if (!mount) return;
+  lensHost.mount = null;
+  clearTimeout(mount.timer);
+  clearTimeout(mount.settleTimer);
+  if (mount.port) mount.port.close();
+  mount.frame.remove();
+}
+
+function mountLens(lens) {
+  unmountLens();
+  const status = $("#lens-status");
+  status.hidden = false;
+  status.textContent = `Loading ${lens.title}...`;
+
+  const frame = document.createElement("iframe");
+  frame.className = "lens-frame";
+  frame.setAttribute("sandbox", "allow-scripts");
+  frame.referrerPolicy = "no-referrer";
+  frame.title = `${lens.title} lens`;
+  frame.src = `/lenses/frame/${encodeURIComponent(lens.id)}`;
+
+  const mount = { lens, frame, port: null, loads: 0, delivered: false, rendered: false, timer: 0, settleTimer: 0 };
+  lensHost.mount = mount;
+  const fail = (reason) => {
+    if (lensHost.mount !== mount) return;
+    const notice = $("#lens-notice");
+    selectLens("", { history: false });
+    const params = new URLSearchParams(window.location.search);
+    params.delete("lens");
+    window.history.replaceState(null, "", `${window.location.pathname}?${params}`);
+    notice.textContent = `The ${lens.title} lens could not be shown (${reason}). Showing the full session instead.`;
+    notice.hidden = false;
+  };
+  const rendered = () => {
+    if (lensHost.mount !== mount || mount.rendered) return;
+    mount.rendered = true;
+    clearTimeout(mount.timer);
+    status.hidden = true;
+  };
+  mount.timer = setTimeout(() => fail("it did not render within 10 seconds"), lensRenderTimeoutMs);
+
+  frame.addEventListener("load", () => {
+    mount.loads += 1;
+    if (mount.loads > 1) {
+      // The lens navigated its own frame. Whatever loaded now is not the lens that was vetted,
+      // so it gets no port and the lens is closed.
+      fail("it navigated away from itself");
+      return;
+    }
+    const channel = new MessageChannel();
+    mount.port = channel.port1;
+    mount.port.onmessage = (event) => {
+      if (lensHost.mount !== mount) return;
+      const message = event.data;
+      if (!message || typeof message !== "object") return;
+      if (message.type === "getTrace") {
+        lensData().then(
+          (data) => mount.port.postMessage({ type: "trace", data }),
+          (err) => mount.port.postMessage({ type: "traceError", message: String(err.message || err) }),
+        ).finally(() => {
+          mount.delivered = true;
+          mount.settleTimer = setTimeout(rendered, lensSettleMs);
+        });
+      } else if (message.type === "resize") {
+        const height = Number(message.height);
+        if (Number.isFinite(height)) {
+          frame.style.height = `${Math.min(Math.max(height, 0), lensMaxFrameHeight)}px`;
+        }
+        if (mount.delivered && height > 0) rendered();
+      } else if (message.type === "error") {
+        const reason = String(message.message || "error").slice(0, 200);
+        if (mount.rendered) console.warn(`lens ${lens.id}: ${reason}`);
+        else fail(`it raised an error: ${reason}`);
+      }
+    };
+    // The frame's origin is opaque, so "*" is the only target that reaches it. The message carries
+    // the port and nothing else; the trace only ever crosses the port.
+    frame.contentWindow.postMessage({ type: "beacon.lens.connect", version: 1 }, "*", [channel.port2]);
+  });
+  $("#lens-frame-slot").append(frame);
+}
+
 if (isDetectionsPage) {
   loadDetections().catch(console.error);
   setInterval(() => loadDetections().catch(console.error), 15000);
@@ -3337,6 +3617,7 @@ if (isDetectionsPage) {
   loadTokens().catch(console.error);
   setInterval(() => loadTokens().catch(console.error), 15000);
 } else if (isSessionDetailPage) {
+  initLensTabs().catch(console.error);
   loadSessionPage().catch(console.error);
   setInterval(() => loadSessionPage().catch(console.error), 15000);
 } else if (isInventoryPage) {
