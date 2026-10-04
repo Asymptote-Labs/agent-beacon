@@ -98,6 +98,19 @@
     return t;
   }
 
+  // Per-model totals from the events themselves, for when Beacon's count is unavailable.
+  function modelsFrom(items) {
+    var byModel = {};
+    items.forEach(function (e) {
+      var key = e.model || "unknown";
+      var m = byModel[key] || (byModel[key] = { model: key, usage: {}, events: 0 });
+      add(m.usage, e.usage);
+      m.events += 1;
+    });
+    return Object.keys(byModel).map(function (k) { return byModel[k]; })
+      .sort(function (a, b) { return tokensOf(b.usage) - tokensOf(a.usage); });
+  }
+
   function coverageNote(cov, harness) {
     if (!cov) return null;
     var name = cov.harness || harness || "This runtime";
@@ -145,23 +158,31 @@
     });
     var reported = items.reduce(function (sum, e) { return add(sum, e.usage); }, {});
 
-    if (!counted || !counted.events_with_usage) {
+    var hasCounted = !!(counted && counted.events_with_usage);
+    if (!hasCounted && items.length === 0) {
       if (!note) root.appendChild(el("p", "No token usage was reported in this trace.", "muted"));
       finish();
       return;
     }
 
-    root.appendChild(el("h2", "Counted usage"));
-    root.appendChild(el("p", number.format(tokensOf(counted.totals)) + " tokens over " + number.format(counted.events_with_usage) +
-      (counted.events_with_usage === 1 ? " usage report" : " usage reports") +
-      (n(counted.totals, "cost_usd") ? " · " + money.format(n(counted.totals, "cost_usd")) + " reported by the runtime" : "") + "."));
-    root.appendChild(usageTable([""], [{ cells: [el("td", "Total")], usage: counted.totals }]));
-    if (tokensOf(reported) !== tokensOf(counted.totals)) {
-      root.appendChild(el("p", "The events below report " + number.format(tokensOf(reported)) + " tokens in total. Beacon counts " +
-        number.format(tokensOf(counted.totals)) + ", after removing usage a runtime reported on more than one channel and turning cumulative counters into deltas.", "muted"));
+    // Beacon's count comes from the live log. When it is missing but the trace's events carry usage
+    // (lines rotated out of the live log, the trace served from history), bill what the events
+    // reported and say that it is not a deduplicated count.
+    var totals = hasCounted ? counted.totals : reported;
+    var reports = hasCounted ? counted.events_with_usage : items.length;
+    root.appendChild(el("h2", hasCounted ? "Counted usage" : "Reported usage"));
+    root.appendChild(el("p", number.format(tokensOf(totals)) + " tokens over " + number.format(reports) +
+      (reports === 1 ? " usage report" : " usage reports") +
+      (n(totals, "cost_usd") ? " · " + money.format(n(totals, "cost_usd")) + " reported by the runtime" : "") + "."));
+    root.appendChild(usageTable([""], [{ cells: [el("td", "Total")], usage: totals }]));
+    if (!hasCounted) {
+      root.appendChild(el("p", "Beacon could not count this trace's usage from the live log, usually because its lines have rotated out. These are the totals its events reported, which can count usage a runtime reported twice.", "muted"));
+    } else if (tokensOf(reported) !== tokensOf(counted.totals)) {
+      root.appendChild(el("p", "The events below report " + number.format(tokensOf(reported)) + " tokens in total; Beacon counts " +
+        number.format(tokensOf(counted.totals)) + ". Beacon removes usage a runtime reported on more than one channel and turns cumulative counters into deltas, and the two can also differ when this trace was truncated or some of its lines are no longer in the live log.", "muted"));
     }
 
-    var models = Array.isArray(counted.by_model) ? counted.by_model : [];
+    var models = hasCounted && Array.isArray(counted.by_model) ? counted.by_model : modelsFrom(items);
     if (models.length) {
       root.appendChild(el("h2", "By model"));
       root.appendChild(usageTable(["Model", { label: "Reports", num: true }], models.map(function (m) {
@@ -194,7 +215,7 @@
       };
     }), { cells: [el("td"), el("td"), el("td", "Reported by events"), el("td")], usage: reported }));
     if (data.truncated) root.appendChild(el("p", "This trace was truncated; later line items are missing.", "muted"));
-    if (n(counted.totals, "cost_usd")) root.appendChild(el("p", "Costs are what the runtime reported. Beacon never estimates cost.", "muted"));
+    if (n(totals, "cost_usd")) root.appendChild(el("p", "Costs are what the runtime reported. Beacon never estimates cost.", "muted"));
     finish();
   }
 
