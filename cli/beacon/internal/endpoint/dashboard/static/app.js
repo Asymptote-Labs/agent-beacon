@@ -3416,7 +3416,11 @@ function renderLensTabs() {
     button.setAttribute("role", "tab");
     button.setAttribute("aria-selected", String(lensHost.active === id));
     button.dataset.lens = id;
-    button.addEventListener("click", () => selectLens(id));
+    button.addEventListener("click", () => {
+      // The active tab is already showing; reselecting it would reload the lens and push a
+      // duplicate history entry.
+      if (lensHost.active !== id) selectLens(id);
+    });
     const label = document.createElement("span");
     label.textContent = title;
     button.append(label);
@@ -3497,6 +3501,11 @@ function removeLens(id) {
 }
 
 function selectLens(id, { history = true } = {}) {
+  if (id && !lensHost.added.includes(id)) {
+    // Reached through history after its tab was removed: show the tab again with the lens.
+    lensHost.added.push(id);
+    writeAddedLenses(lensHost.added);
+  }
   lensHost.active = id;
   if (history) {
     const params = new URLSearchParams(window.location.search);
@@ -3581,10 +3590,18 @@ function mountLens(lens) {
       const message = event.data;
       if (!message || typeof message !== "object") return;
       if (message.type === "getTrace") {
+        // The fetch can outlive this mount (another tab selected, the lens failed); its port is
+        // closed by then, and posting to it would throw.
+        const reply = (payload) => {
+          if (lensHost.mount !== mount) return false;
+          mount.port.postMessage(payload);
+          return true;
+        };
         lensData().then(
-          (data) => mount.port.postMessage({ type: "trace", data }),
-          (err) => mount.port.postMessage({ type: "traceError", message: String(err.message || err) }),
-        ).finally(() => {
+          (data) => reply({ type: "trace", data }),
+          (err) => reply({ type: "traceError", message: String(err.message || err) }),
+        ).then((sent) => {
+          if (!sent) return;
           mount.delivered = true;
           mount.settleTimer = setTimeout(rendered, lensSettleMs);
         });
