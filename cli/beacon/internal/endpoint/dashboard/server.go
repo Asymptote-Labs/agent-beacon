@@ -30,6 +30,9 @@ type Options struct {
 	Addr     string
 	LogPath  string
 	UserMode bool
+	// LensFiles are lens files served alongside the built-ins, read from disk on every request.
+	// They are for developing a lens; the dashboard never writes them.
+	LensFiles []string
 }
 
 type StatusResponse struct {
@@ -92,6 +95,9 @@ func Handler(opts Options) (http.Handler, error) {
 	}
 	lenses, err := loadBuiltinLenses(builtinLensFiles)
 	if err != nil {
+		return nil, err
+	}
+	if err := lenses.addLensFiles(opts.LensFiles); err != nil {
 		return nil, err
 	}
 	mux := http.NewServeMux()

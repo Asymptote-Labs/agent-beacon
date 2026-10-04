@@ -146,6 +146,18 @@ embedded copy under `cli/beacon/internal/endpoint/hooks/assets/`; a Go test fail
 `openclaw-beacon` syncs three files rather than one, because OpenClaw discovers a plugin as a
 directory: the entry plus the two manifests it is declared in.
 
+Run the lens sandbox browser tests (the real dashboard plus hostile fixture lenses; the hooks
+binary must be built first). In a cloud session with a preinstalled Chromium, set `CHROMIUM_PATH`
+instead of installing one:
+
+```bash
+cd cli/beacon && make build-hooks-current
+cd internal/endpoint/dashboard/testdata/lens-e2e
+npm ci
+npx playwright install chromium   # or: export CHROMIUM_PATH=/path/to/chromium
+npx playwright test
+```
+
 Run TypeScript SDK checks:
 
 ```bash
@@ -542,6 +554,7 @@ unpacked through Chrome's developer mode.
 - `linux-test` (ubuntu) and `windows-test` (windows-2025) rerun the Go suites per platform. The Windows job tests a measured package list rather than `./...`; the excluded packages are tracked in #318, and the scope must not be widened back to `./...`.
 - `typescript-sdk` (Node 20, 22, 24): `npm test`, `npm run check`, `npm run build`, `npm run pack:dry-run`, `npm run pack:smoke` in `packages/asymptote-sdk-js`.
 - `browser-extension` (Node 22, matrix over `chromium` and `msedge`): `npm run check`, `npm run test:unit`, `npm run build`, a check that the build is a loadable MV3 extension, `npm run lint:firefox` (the Firefox build plus `web-ext lint --warnings-as-errors`), and the Playwright replay e2e running the real extension headless in that leg's browser (`BROWSER_CHANNEL`) against a local HTTPS replay server; the HTML report and traces upload on failure. Brave, Opera, Vivaldi and Arc have no Playwright channel; `BROWSER_EXECUTABLE` runs the same e2e against their binaries for the manual checklist in `docs/runtimes/browser-extension-chromium.mdx`.
+- `lens-e2e` (ubuntu): runs the real dashboard handler with hostile fixture lenses (`cli/beacon/internal/endpoint/dashboard/e2eserver`, `testdata/lens-e2e`) and drives the session page in headless Chromium. Every escape from the lens sandbox must be refused, and a lens that throws, stalls or navigates must give way to the full session.
 - `beacon-sandbox` (ubuntu): `go build`, `go vet`, and `go test` for the verification harness. Hermetic — no Modal account, no API key, no paid resources.
 - `cross-build` (ubuntu): builds all five release targets and asserts the Linux binaries are statically linked (no `PT_INTERP`).
 - `package-smoke` (macOS): `packaging/macos/test-endpoint-scripts.sh`, a `build-pkg.sh` payload check, and `packaging/macos/smoke-endpoint.sh`.

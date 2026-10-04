@@ -354,6 +354,48 @@ jobs:
             echo "ok: $bin is statically linked"
           done
 
+  # Runs the real dashboard with hostile fixture lenses (testdata/lens-e2e) and drives the session
+  # page in headless Chromium: every way out of the lens sandbox in spec/lenses/SPEC.md must be
+  # refused, and a lens that throws, stalls or navigates must give way to the full session.
+  lens-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: cli/beacon/internal/endpoint/dashboard/testdata/lens-e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-go
+        with:
+          modules: |
+            cli/beacon
+            cli/beacon-hooks
+            pkg/asymptoteobserve
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cli/beacon/internal/endpoint/dashboard/testdata/lens-e2e/package-lock.json
+      - name: Build platform-matched hooks binary
+        working-directory: cli/beacon
+        run: make build-hooks-current
+      - name: Install test dependencies
+        run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run lens sandbox e2e
+        run: npx playwright test
+      - name: Upload Playwright report and traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lens-e2e-playwright-report
+          path: |
+            cli/beacon/internal/endpoint/dashboard/testdata/lens-e2e/playwright-report/
+            cli/beacon/internal/endpoint/dashboard/testdata/lens-e2e/test-results/
+          if-no-files-found: warn
+          retention-days: 14
+
   linux-test:
     runs-on: ubuntu-latest
     steps:
