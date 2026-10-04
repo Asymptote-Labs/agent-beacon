@@ -1053,6 +1053,9 @@ func traceEventHaystack(event TraceEventV1) string {
 		}),
 		valueOrEmpty(event.MCP, func(m *TraceMCPV1) string { return m.Server + " " + m.Tool + " " + m.Method + " " + m.ResourceURI }),
 		valueOrEmpty(event.Approval, func(a *TraceApprovalV1) string { return a.Decision + " " + a.Reason }),
+		valueOrEmpty(event.Policy, func(p *TracePolicyV1) string {
+			return p.ID + " " + p.Name + " " + p.Decision + " " + p.Enforcement + " " + p.Reason
+		}),
 	}, "\n")
 }
 

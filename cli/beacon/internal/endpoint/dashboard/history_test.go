@@ -102,7 +102,7 @@ func traceAnswers(t *testing.T, path string, showIDs []string) map[string]string
 	queries := []string{
 		"", "index", "INDEX LOCAL", "go", "go test", "dashboard go", "endpoint.dashboard", "endpoint/dashboard",
 		"(", `"quoted"`, "a-b", "path:/repo", "*", "AND", "NEAR", "ü", "naïve café", "claude_code.token.usage",
-		"nothing-matches-this", "  ", "evt", "s1", "codex_cli", "retained answer",
+		"nothing-matches-this", "  ", "evt", "s1", "codex_cli", "retained answer", "no-near enforce",
 	}
 	for _, q := range queries {
 		for _, page := range []int{1, 2} {
@@ -984,6 +984,11 @@ func TestTraceEventsCarryThePolicyBlock(t *testing.T) {
 		want := TracePolicyV1{ID: "no-near", Decision: "deny", Enforcement: "enforce", Reason: "provider denied"}
 		if policy == nil || *policy != want {
 			t.Fatalf("%s: e5 policy = %#v, want %#v", name, policy, want)
+		}
+		// The policy block is searchable, like the approval beside it.
+		found, err := SearchTraces(path, TraceQuery{EventQuery: EventQuery{Q: "no-near"}, ResultLevel: "event", Limit: 10})
+		if err != nil || found.TotalMatched != 1 || found.Events[0].Event.ID != "e5" {
+			t.Fatalf("%s: search for the policy id = %+v, %v", name, found, err)
 		}
 	}
 }
