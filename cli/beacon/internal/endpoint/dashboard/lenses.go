@@ -86,6 +86,20 @@ func BuiltinLenses() ([]LensInfo, error) {
 	return registry.list().Lenses, nil
 }
 
+// BuiltinLensManifest returns the manifest of the built-in lens with id, parsed from its file, so
+// callers see the same manifest shape for a built-in lens as for an installed one.
+func BuiltinLensManifest(id string) (asymptoteobserve.LensManifestV1, bool) {
+	if !asymptoteobserve.ValidLensID(id) {
+		return asymptoteobserve.LensManifestV1{}, false
+	}
+	html, err := builtinLensFiles.ReadFile("lenses/" + id + ".lens.html")
+	if err != nil {
+		return asymptoteobserve.LensManifestV1{}, false
+	}
+	manifest, err := asymptoteobserve.CheckLensFile(html)
+	return manifest, err == nil
+}
+
 // BuiltinLensIDs returns the IDs the built-in lenses hold, which the lens store may not use.
 func BuiltinLensIDs() (map[string]bool, error) {
 	builtins, err := BuiltinLenses()

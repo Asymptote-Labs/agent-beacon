@@ -80,6 +80,16 @@ func TestLensesAddListShowRemove(t *testing.T) {
 	if err := lensesShowCmd.RunE(cmd, []string{"activity"}); err != nil || !strings.Contains(buf.String(), `"source": "builtin"`) {
 		t.Fatalf("show builtin = %v, %s", err, buf.String())
 	}
+	// A built-in's manifest has the same shape as an installed lens's: the real manifest.
+	var shown struct {
+		Manifest map[string]interface{} `json:"manifest"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &shown); err != nil {
+		t.Fatal(err)
+	}
+	if shown.Manifest["api"] != "beacon.lens.v1" || shown.Manifest["author"] != "Beacon" || shown.Manifest["source"] != nil {
+		t.Fatalf("built-in manifest = %v", shown.Manifest)
+	}
 
 	cmd, buf = newCmd()
 	if err := lensesRemoveCmd.RunE(cmd, []string{"mine"}); err != nil || !strings.HasPrefix(buf.String(), "removed mine") {

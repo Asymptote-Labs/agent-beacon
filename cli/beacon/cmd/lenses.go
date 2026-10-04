@@ -133,14 +133,8 @@ var lensesShowCmd = &cobra.Command{
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := args[0]
-		builtins, err := dashboard.BuiltinLenses()
-		if err != nil {
-			return err
-		}
-		for _, l := range builtins {
-			if l.ID == id {
-				return writeIndentedJSON(cmd.OutOrStdout(), map[string]interface{}{"manifest": l, "source": l.Source})
-			}
+		if manifest, ok := dashboard.BuiltinLensManifest(id); ok {
+			return writeIndentedJSON(cmd.OutOrStdout(), map[string]interface{}{"manifest": manifest, "source": dashboard.LensSourceBuiltin})
 		}
 		_, manifest, err := lensstore.Read(lensesStoreDir(), id)
 		if err != nil {
