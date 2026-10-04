@@ -3576,6 +3576,9 @@ function mountLens(lens) {
   mount.timer = setTimeout(() => fail("it did not render within 10 seconds"), lensRenderTimeoutMs);
 
   frame.addEventListener("load", () => {
+    // A load queued before this lens was unmounted still fires; the frame is detached by then
+    // and has no window to post to.
+    if (lensHost.mount !== mount) return;
     mount.loads += 1;
     if (mount.loads > 1) {
       // The lens navigated its own frame. Whatever loaded now is not the lens that was vetted,
