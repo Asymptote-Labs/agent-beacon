@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -219,5 +220,38 @@ func TestLensDataEvidenceResolvesAgainstTheHistoryBundle(t *testing.T) {
 				t.Fatalf("finding %s cites %s, missing from the history-served bundle %v", f.RuleID, id, ids)
 			}
 		}
+	}
+}
+
+// A trace that only the history still holds -- its lines rotated out of the live log -- keeps its
+// bundle, but must not claim a clean scan or a coverage verdict it could not compute.
+func TestLensDataForARotatedTraceIsNotScanned(t *testing.T) {
+	path := lensFixture(t)
+	withHistory(t)
+	optIn(t, path)
+	// Rotate: the live log now holds only an unrelated session.
+	other := testSchemaEvent("2026-06-12T10:00:00Z", "cursor", "prompt.submitted", "prompt", "repo-b")
+	other.Event.ID = "evt-later"
+	other.Session = &schema.SessionInfo{ID: "later"}
+	if err := os.Rename(path, path+".1"); err != nil {
+		t.Fatal(err)
+	}
+	writeTestLog(t, path, marshalEvents(t, other)...)
+	if err := os.Remove(path + ".1"); err != nil {
+		t.Fatal(err)
+	}
+
+	data, ok, err := BuildLensData(path, "session:claude_code:s1", LensDataOptions{UserMode: true})
+	if err != nil || !ok {
+		t.Fatalf("BuildLensData = ok %v, err %v; the history should still serve the trace", ok, err)
+	}
+	if len(data.Trace.Events) != 2 {
+		t.Fatalf("bundle has %d events, want the 2 the history kept", len(data.Trace.Events))
+	}
+	if data.Findings != nil {
+		t.Fatalf("findings = %#v, want nil (not scanned) for a trace with no live events", data.Findings)
+	}
+	if data.TokenCoverage != nil {
+		t.Fatalf("token coverage = %#v, want nil", data.TokenCoverage)
 	}
 }

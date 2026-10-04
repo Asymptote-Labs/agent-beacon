@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
@@ -90,6 +91,11 @@ func fitLensEvents(bundle *asymptoteobserve.TraceBundleV1, budget int) bool {
 // lensFindings runs the active rules over the trace's events. Any error, including no active rules
 // (*detect.NoRulesError), leaves the caller's Findings nil: "not scanned".
 func lensFindings(raw []schema.Event, opts LensDataOptions) (*asymptoteobserve.LensFindingsV1, error) {
+	if len(raw) == 0 {
+		// The trace is known only to the history: its lines have rotated out of the live log.
+		// Scanning nothing would report a clean scan of a trace no rule ever saw.
+		return nil, errors.New("no live events to scan")
+	}
 	compiled, skipped, err := compileActiveRules(opts.UserMode, opts.RulesDir)
 	if err != nil {
 		return nil, err
