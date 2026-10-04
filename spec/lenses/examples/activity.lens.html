@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Activity</title>
+<script type="application/beacon-lens+json">
+{
+  "id": "example-activity",
+  "title": "Activity",
+  "description": "Counts what the agent did in this trace, lists the commands it ran, and links each rule finding to its evidence.",
+  "icon": "list",
+  "version": 1,
+  "api": "beacon.lens.v1",
+  "author": "Beacon examples"
+}
+</script>
+<style>
+  /* The host defines the --beacon-* tokens; the fallbacks keep the file readable on its own. */
+  body {
+    margin: 0;
+    color: var(--beacon-text, #111827);
+    font: 400 13px/1.5 var(--beacon-font-sans, ui-sans-serif, system-ui, sans-serif);
+  }
+  h2 { margin: 16px 0 6px; font-size: 13px; font-weight: 400; color: var(--beacon-muted, #6b7280); }
+  h2:first-child { margin-top: 0; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--beacon-line, rgba(0,0,0,0.1)); font-weight: 400; }
+  th { color: var(--beacon-muted, #6b7280); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  code { font: 13px var(--beacon-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); }
+  .fail { color: var(--beacon-danger, #b91c1c); }
+  .muted { color: var(--beacon-muted, #6b7280); }
+</style>
+</head>
+<body>
+<p id="status" class="muted">Loading trace…</p>
+<main id="root" hidden></main>
+<script>
+(function () {
+  "use strict";
+  var root = document.getElementById("root");
+  var status = document.getElementById("status");
+
+  // Every element is built with textContent: trace content is untrusted and never parsed as HTML.
+  function el(tag, text, className) {
+    var node = document.createElement(tag);
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    if (className) node.className = className;
+    return node;
+  }
+  function table(headers, rows) {
+    var t = el("table");
+    var head = t.appendChild(el("tr"));
+    headers.forEach(function (h) { head.appendChild(el("th", h.label, h.num ? "num" : "")); });
+    rows.forEach(function (cells) {
+      var tr = t.appendChild(el("tr"));
+      cells.forEach(function (cell) { tr.appendChild(cell); });
+    });
+    return t;
+  }
+  var fmt = new Intl.NumberFormat();
+
+  function render(data) {
+    var trace = (data && data.trace) || {};
+    var events = Array.isArray(trace.events) ? trace.events : [];
+    var byId = {};
+    var counts = {};
+    events.forEach(function (e) {
+      if (e && e.id) byId[e.id] = e;
+      var type = (e && e.type) || "other";
+      counts[type] = (counts[type] || 0) + 1;
+    });
+
+    root.appendChild(el("h2", "Events by type"));
+    root.appendChild(table([{ label: "Type" }, { label: "Count", num: true }], Object.keys(counts).sort().map(function (type) {
+      return [el("td", type), el("td", fmt.format(counts[type]), "num")];
+    })));
+
+    var commands = events.filter(function (e) { return e && e.command && e.command.command; });
+    root.appendChild(el("h2", "Commands"));
+    if (commands.length === 0) {
+      root.appendChild(el("p", "No commands in this trace.", "muted"));
+    } else {
+      root.appendChild(table([{ label: "#", num: true }, { label: "Command" }, { label: "Exit", num: true }], commands.map(function (e) {
+        var code = e.command.exit_code;
+        var exit = el("td", code === undefined || code === null ? "—" : code, code ? "num fail" : "num");
+        var cmd = el("td");
+        cmd.appendChild(el("code", e.command.command));
+        return [el("td", e.number, "num"), cmd, exit];
+      })));
+    }
+
+    root.appendChild(el("h2", "Findings"));
+    if (!data.findings) {
+      root.appendChild(el("p", "This trace was not scanned.", "muted"));
+    } else if (!data.findings.items || data.findings.items.length === 0) {
+      root.appendChild(el("p", "No rule matched (" + fmt.format(data.findings.rules_evaluated || 0) + " rules evaluated).", "muted"));
+    } else {
+      root.appendChild(table([{ label: "Severity" }, { label: "Rule" }, { label: "Evidence" }], data.findings.items.map(function (f) {
+        var evidence = (f.event_ids || []).map(function (id) {
+          return byId[id] ? "#" + byId[id].number : "outside this bundle";
+        }).join(", ");
+        return [el("td", f.severity || "—"), el("td", f.title || f.rule_id), el("td", evidence || "—")];
+      })));
+    }
+
+    if (data.truncated) {
+      root.appendChild(el("p", "Showing " + fmt.format(events.length) + " of " + fmt.format((trace.range && trace.range.total_events) || events.length) + " events.", "muted"));
+    }
+    status.hidden = true;
+    root.hidden = false;
+  }
+
+  window.beacon.getTrace().then(render, function (err) {
+    status.textContent = "Could not load this trace: " + ((err && err.message) || err);
+  });
+})();
+</script>
+</body>
+</html>
