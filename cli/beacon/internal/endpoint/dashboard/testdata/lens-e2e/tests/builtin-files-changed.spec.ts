@@ -35,3 +35,14 @@ test('files changed: a trace without writes says so', async ({ page }) => {
   const frame = page.frameLocator('iframe.lens-frame');
   await expect(frame.locator('#summary')).toHaveText('No files were changed in this trace.');
 });
+
+test('files changed: diff headers are told apart from content lines that look like them', async ({ page }) => {
+  await page.goto('/session.html?id=sqlish&lens=files-changed');
+  const frame = page.frameLocator('iframe.lens-frame');
+  // "--- removed sql comment" removes "-- removed sql comment"; "+++i;" adds "++i;".
+  await expect(frame.locator('#summary')).toHaveText('1 file changed in 1 edit · +1 −1');
+  const pre = frame.locator('#detail pre');
+  await expect(pre.locator('.hunk')).toHaveCount(4); // diff --git, ---, +++, @@
+  await expect(pre.locator('.del')).toHaveText('--- removed sql comment');
+  await expect(pre.locator('.add')).toHaveText('+++i;');
+});
