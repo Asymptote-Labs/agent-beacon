@@ -14,6 +14,7 @@ severity: high
 status: stable
 posture: detect
 taxonomy:
+  beacon_category: resource-consumption
   owasp_llm: LLM10
 match: >
   (e.event.action == "tool.completed" || e.event.action == "tool.invoked") &&

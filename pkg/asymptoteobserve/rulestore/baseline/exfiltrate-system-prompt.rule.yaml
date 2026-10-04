@@ -8,6 +8,7 @@ severity: medium
 status: stable
 posture: detect
 taxonomy:
+  beacon_category: prompt-injection
   owasp_llm: LLM01
 
 match: >

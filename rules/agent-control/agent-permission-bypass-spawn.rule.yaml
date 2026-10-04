@@ -16,6 +16,7 @@ severity: high
 status: stable
 posture: detect
 taxonomy:
+  beacon_category: agent-control
   owasp_llm: LLM06
 
 # The agent binary must appear as a command head (start of line, after a shell

@@ -15,6 +15,7 @@ severity: high
 status: stable
 posture: detect
 taxonomy:
+  beacon_category: approval-abuse
   owasp_llm: LLM06
 
 match: >
