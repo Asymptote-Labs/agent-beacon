@@ -1,14 +1,25 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { defineConfig } from '@playwright/test';
 
 /**
  * Runs the real dashboard handler (../../e2eserver) with the hostile fixture lenses and drives the
- * session page in Chromium. HOME is a fresh directory so the rule store is empty and the embedded
- * baseline rules run, and no opt-in trace history exists.
+ * session page in Chromium. HOME is a fresh directory, so no opt-in trace history exists, and its
+ * rule store holds the whole open corpus (rules/) rather than the six-rule embedded baseline, so
+ * findings span every category the Security Review lens groups.
  */
+const home = mkdtempSync(join(tmpdir(), 'beacon-lens-e2e-'));
+const store = join(home, '.beacon', 'endpoint', 'rules');
+mkdirSync(store, { recursive: true });
+const corpus = resolve(__dirname, '../../../../../../../rules');
+for (const category of readdirSync(corpus)) {
+  for (const file of readdirSync(join(corpus, category))) {
+    if (file.endsWith('.rule.yaml')) copyFileSync(join(corpus, category, file), join(store, basename(file)));
+  }
+}
+
 const port = Number(process.env.LENS_E2E_PORT || 8798);
 // HOME moves to a fresh directory below, and Go keeps its module cache, build cache and
 // downloaded toolchains under HOME unless told otherwise. Pin them to wherever they are now, or
@@ -38,6 +49,6 @@ export default defineConfig({
     url: `http://127.0.0.1:${port}/api/lenses`,
     timeout: 180_000,
     reuseExistingServer: false,
-    env: { ...goEnv, HOME: mkdtempSync(join(tmpdir(), 'beacon-lens-e2e-')) },
+    env: { ...goEnv, HOME: home },
   },
 });
