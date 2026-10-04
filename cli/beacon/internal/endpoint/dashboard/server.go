@@ -90,6 +90,10 @@ func Handler(opts Options) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	lenses, err := loadBuiltinLenses(builtinLensFiles)
+	if err != nil {
+		return nil, err
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -232,6 +236,14 @@ func Handler(opts Options) (http.Handler, error) {
 		}
 		writeJSON(w, trace)
 	})
+	mux.HandleFunc("/api/lenses", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w)
+			return
+		}
+		writeJSON(w, lenses.list())
+	})
+	mux.HandleFunc(lensFramePrefix, lenses.serveLensFrame)
 	// Lens data is what one lens frame receives from window.beacon.getTrace(). The session page
 	// fetches it and hands it to the frame over a MessageChannel; the frame itself never calls
 	// this route, because its sandbox and CSP give it no network.
