@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +10,12 @@ import { defineConfig } from '@playwright/test';
  * baseline rules run, and no opt-in trace history exists.
  */
 const port = Number(process.env.LENS_E2E_PORT || 8798);
+// HOME moves to a fresh directory below, and Go keeps its module cache, build cache and
+// downloaded toolchains under HOME unless told otherwise. Pin them to wherever they are now, or
+// every run downloads the toolchain and every module again into a directory nobody cleans up.
+const goEnv = Object.fromEntries(
+  ['GOPATH', 'GOMODCACHE', 'GOCACHE'].map((key) => [key, execFileSync('go', ['env', key]).toString().trim()]),
+);
 const lenses = ['probe', 'navigator', 'thrower', 'staller', 'tall']
   .map((id) => `--lens fixtures/${id}.lens.html`)
   .join(' ');
@@ -31,6 +38,6 @@ export default defineConfig({
     url: `http://127.0.0.1:${port}/api/lenses`,
     timeout: 180_000,
     reuseExistingServer: false,
-    env: { HOME: mkdtempSync(join(tmpdir(), 'beacon-lens-e2e-')) },
+    env: { ...goEnv, HOME: mkdtempSync(join(tmpdir(), 'beacon-lens-e2e-')) },
   },
 });

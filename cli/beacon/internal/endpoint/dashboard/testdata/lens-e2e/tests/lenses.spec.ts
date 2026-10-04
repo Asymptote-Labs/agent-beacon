@@ -137,3 +137,30 @@ test('tabs are added from the menu, deep-linked, and removed', async ({ page }) 
   await expect(page.locator('#lens-tabs .lens-tab')).toHaveCount(1);
   await expect(page).not.toHaveURL(/lens=/);
 });
+
+test('going back to a lens whose tab was removed brings the tab back', async ({ page }) => {
+  await page.goto('/session.html?id=s1');
+  await page.evaluate(() => localStorage.clear());
+  await page.goto('/session.html?id=s1&lens=activity');
+  await expect(lensFrame(page).locator('#root')).toBeVisible();
+  await page.locator('.lens-tab', { hasText: 'Activity' }).locator('.lens-tab-remove').click();
+  await expect(page.locator('#lens-tabs .lens-tab')).toHaveCount(1);
+
+  await page.goBack();
+  await expect(page).toHaveURL(/lens=activity/);
+  await expect(page.locator('.lens-tab[aria-selected="true"]')).toContainText('Activity');
+  await expect(lensFrame(page).locator('#root')).toBeVisible();
+});
+
+test('clicking the active tab neither reloads the lens nor adds history', async ({ page }) => {
+  await page.goto('/session.html?id=s1&lens=activity');
+  await expect(lensFrame(page).locator('#root')).toBeVisible();
+  const before = await page.evaluate(() => history.length);
+  const frame = page.locator('iframe.lens-frame');
+  await frame.evaluate((f) => { (f as any).dataset.marker = 'same'; });
+  await page.locator('.lens-tab[aria-selected="true"]').click();
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => history.length)).toBe(before);
+  await expect(page.locator('iframe.lens-frame')).toHaveAttribute('data-marker', 'same');
+});
+
