@@ -147,6 +147,10 @@ The host enforces these rules; a lens does not opt into them.
   `allow-same-origin`. The lens runs in an opaque origin and cannot read the
   dashboard, its cookies, its storage or its API. It also cannot navigate the
   page, open popups or submit forms.
+- A lens must not navigate its own frame. The dashboard's policy refuses any
+  frame navigation off its origin (including `data:` and `blob:` URLs), and
+  the host closes a lens whose frame loads a second document, without giving
+  that document a port.
 - The frame is served with this Content Security Policy:
 
   ```
