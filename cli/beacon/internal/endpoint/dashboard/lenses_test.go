@@ -220,13 +220,16 @@ func TestLensTokensMatchTheSpec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Windows checkouts carry CRLF line endings, and (?m)$ matches only before \n.
+	specText := strings.ReplaceAll(string(spec), "\r\n", "\n")
+	cssText := strings.ReplaceAll(lensTokensCSS, "\r\n", "\n")
 	row := regexp.MustCompile("(?m)^\\s*\\| `(--beacon-[a-z-]+)` \\| (.+?) \\|$")
 	css := regexp.MustCompile(`(?m)^\s*(--beacon-[a-z-]+):\s*(.+?);$`)
 	defined := map[string]string{}
-	for _, m := range css.FindAllStringSubmatch(lensTokensCSS, -1) {
+	for _, m := range css.FindAllStringSubmatch(cssText, -1) {
 		defined[m[1]] = m[2]
 	}
-	documented := row.FindAllStringSubmatch(string(spec), -1)
+	documented := row.FindAllStringSubmatch(specText, -1)
 	if len(documented) == 0 {
 		t.Fatal("no token rows found in SPEC.md")
 	}
