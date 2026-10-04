@@ -69,3 +69,16 @@ test('token usage: a gap between reported and counted usage is explained without
   await expect(frame.locator('#root')).toContainText('The events below report 12,300 tokens in total; Beacon counts 11,300.');
   await expect(frame.locator('#root')).toContainText('can also differ when this trace was truncated');
 });
+
+test('token usage: events that carry usage are never called silent', async ({ page }) => {
+  // The live log has no usage lines left for this trace, but its events, served from history, do.
+  await editLensData(page, (data) => {
+    data.token_usage = { totals: {}, events_with_usage: 0 };
+    data.token_coverage = { status: 'silent', expectation: 'native', reason: 'no usage in the live log' };
+  });
+  await page.goto('/session.html?id=rich&lens=token-usage');
+  const frame = page.frameLocator('iframe.lens-frame');
+  await expect(frame.locator('h2').first()).toHaveText('Reported usage');
+  await expect(frame.locator('#root')).toContainText('12,300 tokens over 2 usage reports');
+  await expect(frame.locator('#root')).not.toContainText('this trace reported none');
+});

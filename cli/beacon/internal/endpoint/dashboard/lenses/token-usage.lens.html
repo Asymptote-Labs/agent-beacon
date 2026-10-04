@@ -132,9 +132,6 @@
     var summary = trace.summary || {};
     var counted = data.token_usage;
 
-    var note = coverageNote(data.token_coverage, summary.harness && summary.harness.name);
-    if (note) root.appendChild(note);
-
     // Line items: every event that reported usage, attributed to the prompt before it.
     var items = [];
     var turns = [];
@@ -157,6 +154,13 @@
       turn.events += 1;
     });
     var reported = items.reduce(function (sum, e) { return add(sum, e.usage); }, {});
+
+    // Coverage is judged from the live log, so a trace served from history can carry usage in its
+    // events while the live log has none. Usage in hand is not a silent runtime.
+    var coverage = data.token_coverage;
+    if (coverage && coverage.status === "silent" && items.length) coverage = null;
+    var note = coverageNote(coverage, summary.harness && summary.harness.name);
+    if (note) root.appendChild(note);
 
     var hasCounted = !!(counted && counted.events_with_usage);
     if (!hasCounted && items.length === 0) {
