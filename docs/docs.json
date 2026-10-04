@@ -76,6 +76,7 @@
               "concepts/cross-harness-memory",
               "concepts/beacon-skills",
               "concepts/session-handoff",
+              "concepts/lenses",
               {
                 "group": "Unified Telemetry Schema",
                 "root": "telemetry-schema/event-schema",
@@ -358,6 +359,7 @@
                 ]
               },
               "cli/handoff",
+              "cli/lenses",
               "cli/git",
               "cli/token-usage",
               "cli/version"

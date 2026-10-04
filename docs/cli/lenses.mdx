@@ -1,0 +1,143 @@
+---
+title: "beacon lenses"
+description: "Manage and author lenses: single-file views of one trace in the local dashboard"
+---
+
+## Command overview
+
+`beacon lenses` manages the lens store and the tools for writing a lens. A
+[lens](/concepts/lenses) is one HTML file that renders one trace as a tab on a session's
+page in the local dashboard ([`beacon endpoint dashboard`](/cli/dashboard)).
+
+```bash title="Command syntax"
+beacon lenses list [--json]
+beacon lenses add <file> [--force]
+beacon lenses remove <id>
+beacon lenses show <id>
+beacon lenses spec [--example]
+beacon lenses data [--session <id> | --trace <id>]
+beacon lenses lint <file>... [--strict] [--json]
+beacon lenses preview <file> [--session <id>] [--addr <host:port>] [--open]
+```
+
+Every command is local. None of them touches the network, and the dashboard only reads the
+store; it never writes it.
+
+## The lens store
+
+Installed lenses live in `~/.beacon/endpoint/lenses` (with `--system`, under the system
+endpoint directory), one `<id>.lens.html` file per lens. The directory is `0700` and each
+file `0600`. The file name comes from the lens's manifest `id`, not from the file you
+installed. The dashboard reads the store on every page load, so an added or removed lens
+shows up without restarting it.
+
+A lens in the store can never take the place of a built-in lens: built-in IDs are refused
+on install, and a store file that claims one is ignored.
+
+## beacon lenses list
+
+Lists the built-in and installed lenses with their version and source (`builtin` or
+`store`). A file in the store that is not a valid lens is named in a warning and left out;
+the other lenses still list.
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Print JSON, including each store lens's path |
+| `--user` / `--system` | Use the per-user (default) or system endpoint paths |
+
+## beacon lenses add
+
+Checks a lens file against the [spec](https://github.com/asymptote-labs/agent-beacon/blob/main/spec/lenses/SPEC.md)
+(at most 16 MiB, one valid manifest) and copies it into the store under its manifest `id`.
+
+Replacing an installed lens needs a higher `version` in the new file's manifest, so adding
+an old copy by mistake does not downgrade it. `--force` replaces it anyway.
+
+```bash
+beacon lenses add ./command-log.lens.html
+# installed command-log v1 (~/.beacon/endpoint/lenses/command-log.lens.html)
+```
+
+| Flag | Description |
+|------|-------------|
+| `--force` | Replace an installed lens even when the new version is not higher |
+| `--user` / `--system` | Use the per-user (default) or system endpoint paths |
+
+## beacon lenses remove
+
+Deletes an installed lens by `id`. Built-in lenses cannot be removed.
+
+## beacon lenses show
+
+Prints a lens's manifest, its source, and, for an installed lens, its path.
+
+## beacon lenses spec
+
+Prints the lens specification: the file format, the manifest, the data
+`window.beacon.getTrace()` returns, the sandbox rules and the style tokens. It is carried in
+the binary, so it works offline and always matches the installed Beacon.
+
+| Flag | Description |
+|------|-------------|
+| `--example` | Print a complete, working lens to start from (the built-in Activity lens) |
+
+## beacon lenses data
+
+Prints exactly what a lens receives from `window.beacon.getTrace()` for one session (as on
+the dashboard's session page) or one trace. With neither flag it uses the most recent
+session in the runtime log.
+
+The output includes whatever content the log retained, such as prompts, command output and
+diffs.
+
+| Flag | Description |
+|------|-------------|
+| `--session <id>` | Session ID |
+| `--trace <id>` | Trace ID, instead of a session |
+| `--log-path <path>` | Runtime JSONL log path |
+| `--user` / `--system` | Use the per-user (default) or system endpoint paths |
+
+## beacon lenses lint
+
+Checks lens files against the spec. **Errors** (an oversized file, a missing or invalid
+manifest) stop a lens from running. **Warnings** name the line where a lens does something
+the sandbox will block or the spec forbids:
+
+- parsing trace content as HTML (`innerHTML`, `insertAdjacentHTML`, `document.write`)
+- network requests (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `sendBeacon`)
+- scripts, images, fonts or stylesheets loaded by URL
+- browser storage and cookies
+- messaging or navigating another window, or its own frame
+- `eval`, `new Function` and workers
+- a root sized to the viewport (`100vh`), which never settles because the frame grows to fit
+- never calling `window.beacon.getTrace()`
+
+The command exits non-zero when there are errors, or warnings with `--strict`.
+
+| Flag | Description |
+|------|-------------|
+| `--strict` | Fail on warnings too |
+| `--json` | Print JSON |
+
+## beacon lenses preview
+
+Lints a lens file, then runs the dashboard with the file added and prints the session page
+that shows it. The file is read again on every page load: edit it and reload. Nothing is
+installed. The command runs until you stop it.
+
+```bash
+beacon lenses preview ./command-log.lens.html --session 5f0c2a9e
+# Previewing Command Log (command-log) from /home/me/command-log.lens.html
+# Open: http://127.0.0.1:8766/session.html?id=5f0c2a9e&lens=command-log
+```
+
+The preview listens on `127.0.0.1:8766` by default, so it can run next to a dashboard on
+the default `8765`. A lens with a built-in's `id` cannot be previewed; give it its own.
+
+| Flag | Description |
+|------|-------------|
+| `--session <id>` | Session to open (default: the most recent session) |
+| `--addr <host:port>` | Loopback address to serve the preview on (default `127.0.0.1:8766`) |
+| `--open` | Open the preview in a browser |
+| `--log-path <path>` | Runtime JSONL log path |
+| `--user` / `--system` | Use the per-user (default) or system endpoint paths |

@@ -256,6 +256,12 @@ beacon endpoint dashboard
 
 Use it to explore session history across harnesses and understand what your agents actually did.
 
+Each session page can also show **lenses**: purpose-built views of one trace, such as files
+changed with their diffs, an itemized token bill, a security review grouped by risk, or the
+approval timeline. A lens is a single HTML file running in a sandboxed, network-less frame,
+so you can have your coding agent write your own (`beacon lenses spec`, `lint`, `preview`,
+`add`). See [Lenses](https://docs.beacon.sh/concepts/lenses).
+
 The underlying JSONL remains directly accessible, so you're never dependent on the UI.
 
 ---
