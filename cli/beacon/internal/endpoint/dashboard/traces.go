@@ -36,6 +36,7 @@ type TraceCommandV1 = asymptoteobserve.TraceCommandV1
 type TraceFileV1 = asymptoteobserve.TraceFileV1
 type TraceMCPV1 = asymptoteobserve.TraceMCPV1
 type TraceApprovalV1 = asymptoteobserve.TraceApprovalV1
+type TracePolicyV1 = asymptoteobserve.TracePolicyV1
 type TraceUsageV1 = asymptoteobserve.TraceUsageV1
 type TraceSpanV1 = asymptoteobserve.TraceSpanV1
 type TraceRangeV1 = asymptoteobserve.TraceRangeV1
@@ -505,6 +506,15 @@ func traceEventFromRecord(record EventRecord, number int) TraceEventV1 {
 	}
 	if event.Approval != nil {
 		te.Approval = &TraceApprovalV1{Required: event.Approval.Required, Decision: event.Approval.Decision, Reason: event.Approval.Reason}
+	}
+	if event.Policy != nil {
+		te.Policy = &TracePolicyV1{
+			ID:          event.Policy.ID,
+			Name:        event.Policy.Name,
+			Decision:    event.Policy.Decision,
+			Enforcement: event.Policy.Enforcement,
+			Reason:      event.Policy.Reason,
+		}
 	}
 	if usage := traceUsage(event); usage != nil {
 		te.Usage = usage
