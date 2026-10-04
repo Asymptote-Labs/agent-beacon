@@ -46,3 +46,18 @@ test('files changed: diff headers are told apart from content lines that look li
   await expect(pre.locator('.del')).toHaveText('--- removed sql comment');
   await expect(pre.locator('.add')).toHaveText('+++i;');
 });
+
+test('files changed: a file read and then edited is not also counted as read', async ({ page }) => {
+  await page.route('**/api/lens-data?*', async (route) => {
+    const response = await route.fetch();
+    const data = await response.json();
+    // Read retry.go before its first edit, as agents do.
+    const edit = data.trace.events.find((e: any) => e.file && String(e.file.path).endsWith('retry/retry.go'));
+    const read = { ...edit, id: 'read-before-edit', action: 'file.read', file: { path: edit.file.path, operation: 'read' } };
+    data.trace.events.splice(data.trace.events.indexOf(edit), 0, read);
+    await route.fulfill({ response, json: data });
+  });
+  await page.goto('/session.html?id=rich&lens=files-changed');
+  const frame = page.frameLocator('iframe.lens-frame');
+  await expect(frame.locator('#summary')).toHaveText('3 files changed in 4 edits · +4 −2 · 1 read');
+});

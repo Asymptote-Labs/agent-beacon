@@ -150,7 +150,9 @@
       f.edits.push({ event: event, text: text });
     });
     order.sort();
-    return { files: files, order: order, reads: Object.keys(reads).length, total: events.length, truncated: !!data.truncated };
+    // Agents read a file before editing it; only files that were read and never changed count as reads.
+    var readOnly = Object.keys(reads).filter(function (path) { return !files[path]; });
+    return { files: files, order: order, reads: readOnly.length, total: events.length, truncated: !!data.truncated };
   }
 
   function renderTree(model, select) {
