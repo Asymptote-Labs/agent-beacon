@@ -13,6 +13,9 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lensstore"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 // lensSpecDir locates spec/lenses from this file, so tests compare against what the spec publishes.
@@ -348,5 +351,55 @@ func TestLensFilesAreCheckedAtStartup(t *testing.T) {
 				t.Fatal("Handler accepted a bad lens file")
 			}
 		})
+	}
+}
+
+// Store lenses appear and disappear without a dashboard restart, and never shadow a built-in.
+func TestStoreLensesAreServedFromTheStore(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	store := lensstore.Dir(true)
+	handler := lensTestHandler(t)
+	listIDs := func() map[string]string {
+		var list LensListResponse
+		if err := json.Unmarshal(serve(handler, http.MethodGet, "/api/lenses").Body.Bytes(), &list); err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, l := range list.Lenses {
+			out[l.ID] = l.Source
+		}
+		return out
+	}
+
+	// Installed after the dashboard started.
+	src := writeLensFile(t, t.TempDir(), "mine", "<p>mine</p>")
+	if _, _, err := lensstore.Install(store, src, lensstore.InstallOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := listIDs(); got["mine"] != LensSourceStore || got["activity"] != LensSourceBuiltin {
+		t.Fatalf("lenses = %v", got)
+	}
+	rec := serve(handler, http.MethodGet, "/lenses/frame/mine")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "<p>mine</p>") || rec.Header().Get("Content-Security-Policy") != lensFrameCSP {
+		t.Fatalf("store lens = %d", rec.Code)
+	}
+
+	// A hand-placed store file with a built-in's id does not shadow it.
+	writeLensFile(t, store, "activity", "<p>impostor</p>")
+	if got := listIDs(); got["activity"] != LensSourceBuiltin {
+		t.Fatalf("activity source = %q", got["activity"])
+	}
+	if body := serve(handler, http.MethodGet, "/lenses/frame/activity").Body.String(); strings.Contains(body, "impostor") {
+		t.Fatal("a store file shadowed the built-in activity lens")
+	}
+
+	if _, err := lensstore.Remove(store, "mine"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := listIDs()["mine"]; ok {
+		t.Fatal("a removed lens is still listed")
+	}
+	if rec := serve(handler, http.MethodGet, "/lenses/frame/mine"); rec.Code != http.StatusNotFound {
+		t.Fatalf("removed lens = %d, want 404", rec.Code)
 	}
 }

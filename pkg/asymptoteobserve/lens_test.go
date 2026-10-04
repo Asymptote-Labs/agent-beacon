@@ -286,3 +286,21 @@ func TestLensManifestSchemaInSync(t *testing.T) {
 		t.Errorf("api const: schema %q, Go %q", props["api"].Const, LensAPIVersion)
 	}
 }
+
+func TestCheckLensFile(t *testing.T) {
+	good := []byte(`<script type="application/beacon-lens+json">{"id":"x","title":"X","version":1,"api":"beacon.lens.v1"}</script>`)
+	if m, err := CheckLensFile(good); err != nil || m.ID != "x" {
+		t.Fatalf("CheckLensFile(good) = %+v, %v", m, err)
+	}
+	if _, err := CheckLensFile([]byte(`<script type="application/beacon-lens+json">{"id":"X","title":"X","version":1,"api":"beacon.lens.v1"}</script>`)); err == nil {
+		t.Fatal("an invalid manifest passed")
+	}
+	if _, err := CheckLensFile(append(good, make([]byte, LensMaxBytes)...)); err == nil || !strings.Contains(err.Error(), "limit") {
+		t.Fatalf("an oversized lens passed: %v", err)
+	}
+	for id, want := range map[string]bool{"files-changed": true, "../etc": false, "a/b": false, "": false, "UP": false} {
+		if ValidLensID(id) != want {
+			t.Errorf("ValidLensID(%q) = %v", id, !want)
+		}
+	}
+}

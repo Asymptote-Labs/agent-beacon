@@ -174,6 +174,24 @@ func lensText(field, value string, maxRunes int, required bool) []error {
 	return problems
 }
 
+// ValidLensID reports whether id is a well-formed lens ID. Callers that turn an ID into a file name
+// check it first, so an ID can never name a path outside the lens store.
+func ValidLensID(id string) bool { return lensIDPattern.MatchString(id) }
+
+// CheckLensFile applies the spec's file-level rules -- the size cap, exactly one manifest, and a
+// valid manifest -- and returns the manifest. Everything that installs, serves or lints a lens
+// uses it, so they cannot disagree about what a lens is.
+func CheckLensFile(html []byte) (LensManifestV1, error) {
+	if len(html) > LensMaxBytes {
+		return LensManifestV1{}, fmt.Errorf("lens is %d bytes, over the %d-byte limit", len(html), LensMaxBytes)
+	}
+	manifest, err := ParseLensManifest(html)
+	if err != nil {
+		return manifest, err
+	}
+	return manifest, manifest.Validate()
+}
+
 // ParseLensManifest reads the manifest out of a lens file. It requires exactly one manifest
 // element and decodes it strictly: an unknown field is an error, so a misspelled key is caught when
 // the lens is linted rather than silently ignored. The result is not validated; call Validate.
