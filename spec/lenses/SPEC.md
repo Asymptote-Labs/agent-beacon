@@ -115,10 +115,13 @@ trace view uses. Its main parts:
   (`command.output`, `file.diff`).
 - `trace.spans[]` and `trace.range` (`total_events`, `returned_events`).
 
-`findings.items[]` are the active threat rules' matches for this trace's
-session: `rule_id`, `title`, `severity` (`info` … `critical`), `posture`,
+`findings.items[]` are the active threat rules' matches over this trace's
+own events: `rule_id`, `title`, `severity` (`info` … `critical`), `posture`,
 `reason`, `taxonomy`, and `event_ids`. The evidence is referenced by
-`trace.events[].id`, not copied.
+`trace.events[].id`, not copied. Findings and `token_coverage` are computed
+from the live runtime log. For a trace whose lines have been rotated out of
+that log (and are kept only in the opt-in trace history), they may be
+missing or partial while `trace` is still complete.
 
 `truncated` is true when the bundle holds fewer events than the trace has,
 because it hit the size cap. A finding's evidence ID may then point at an
