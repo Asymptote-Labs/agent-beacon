@@ -93,20 +93,9 @@ func RunScan(userMode bool, logPath, rulesDir, session, minSeverity string) (Fin
 		}
 	}
 
-	loaded, skipped, err := detect.LoadActiveSkipping(userMode, strings.TrimSpace(rulesDir))
+	compiled, skipped, err := compileActiveRules(userMode, rulesDir)
 	if err != nil {
-		return FindingsResponse{}, fmt.Errorf("load rules: %w", err)
-	}
-	if len(loaded) == 0 {
-		return FindingsResponse{}, &detect.NoRulesError{Skipped: skipped}
-	}
-	compiled := make([]*threatrules.CompiledRule, 0, len(loaded))
-	for _, lr := range loaded {
-		c, err := threatrules.Compile(lr.Rule)
-		if err != nil {
-			return FindingsResponse{}, fmt.Errorf("compile rule %q: %w", lr.Rule.ID, err)
-		}
-		compiled = append(compiled, c)
+		return FindingsResponse{}, err
 	}
 
 	sessionFilter := strings.TrimSpace(session)
@@ -139,5 +128,26 @@ func RunScan(userMode bool, logPath, rulesDir, session, minSeverity string) (Fin
 	if findings == nil {
 		findings = []threatrules.Finding{}
 	}
-	return FindingsResponse{Findings: findings, Scanned: len(events), Count: len(findings), Skipped: detect.SkippedStrings(skipped)}, nil
+	return FindingsResponse{Findings: findings, Scanned: len(events), Count: len(findings), Skipped: skipped}, nil
+}
+
+// compileActiveRules loads and compiles the rules `beacon scan` would run. It returns a
+// *detect.NoRulesError when none are active, so callers can tell "no rules" from a broken rule.
+func compileActiveRules(userMode bool, rulesDir string) ([]*threatrules.CompiledRule, []string, error) {
+	loaded, skipped, err := detect.LoadActiveSkipping(userMode, strings.TrimSpace(rulesDir))
+	if err != nil {
+		return nil, nil, fmt.Errorf("load rules: %w", err)
+	}
+	if len(loaded) == 0 {
+		return nil, nil, &detect.NoRulesError{Skipped: skipped}
+	}
+	compiled := make([]*threatrules.CompiledRule, 0, len(loaded))
+	for _, lr := range loaded {
+		c, err := threatrules.Compile(lr.Rule)
+		if err != nil {
+			return nil, nil, fmt.Errorf("compile rule %q: %w", lr.Rule.ID, err)
+		}
+		compiled = append(compiled, c)
+	}
+	return compiled, detect.SkippedStrings(skipped), nil
 }

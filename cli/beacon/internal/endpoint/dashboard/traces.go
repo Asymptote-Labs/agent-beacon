@@ -952,6 +952,10 @@ func traceRange(query TraceQuery, total int) (int, int) {
 	if offset <= 0 {
 		offset = 1
 	}
+	if query.NoLimit {
+		// Lens data needs the whole trace in one read; the size budget is applied by its caller.
+		limit = total
+	}
 	if query.AroundEvent > 0 {
 		before, after := query.Before, query.After
 		if before <= 0 {
