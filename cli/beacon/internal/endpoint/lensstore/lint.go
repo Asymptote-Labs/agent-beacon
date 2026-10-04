@@ -42,7 +42,7 @@ var lintChecks = []struct {
 		"uses browser storage, which an opaque-origin lens frame does not have; keep state in memory"},
 	{regexp.MustCompile(`\b(window\.)?(parent|top|opener)\.(postMessage|document|location)\b|\blocation\.(href|assign|replace)\b`),
 		"talks to or navigates a window; the host ignores window messages and closes a lens that navigates"},
-	{regexp.MustCompile(`\b100vh\b|\bheight\s*:\s*100%`),
+	{regexp.MustCompile(`\b100vh\b|(^|[^-\w])height\s*:\s*100%`),
 		"sizes to the viewport; the frame grows to fit the document, so a viewport-height root never settles"},
 	{regexp.MustCompile(`new\s+Worker\s*\(|new\s+SharedWorker\s*\(|serviceWorker`),
 		"starts a worker, which the lens CSP blocks"},

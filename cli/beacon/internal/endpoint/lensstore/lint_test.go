@@ -44,6 +44,22 @@ func TestLintFlagsWhatTheSandboxBlocks(t *testing.T) {
 	}
 }
 
+// Only height itself sizes an element to its container; the hyphenated properties do not.
+func TestLintViewportHeightIgnoresOtherHeightProperties(t *testing.T) {
+	for _, css := range []string{"p { line-height: 100% }", "img { max-height: 100% }", "td { min-height: 100% }"} {
+		html := "<!doctype html>\n" + lintManifest + "\n<script>window.beacon.getTrace()</script>\n<style>" + css + "</style>\n"
+		if findings := Lint([]byte(html)); len(findings) != 0 {
+			t.Errorf("Lint(%q) = %+v, want no findings", css, findings)
+		}
+	}
+	for _, css := range []string{"html { height: 100% }", "body{height:100%}"} {
+		html := "<!doctype html>\n" + lintManifest + "\n<script>window.beacon.getTrace()</script>\n<style>" + css + "</style>\n"
+		if findings := Lint([]byte(html)); len(findings) != 1 {
+			t.Errorf("Lint(%q) = %+v, want the viewport warning", css, findings)
+		}
+	}
+}
+
 func TestLintClean(t *testing.T) {
 	html := "<!doctype html>\r\n" + lintManifest + "\r\n<p id=out></p>\r\n<script>\r\nwindow.beacon.getTrace().then(function (d) { out.textContent = d.trace.id; });\r\n</script>\r\n"
 	if findings := Lint([]byte(html)); len(findings) != 0 {
