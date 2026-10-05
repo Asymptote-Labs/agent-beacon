@@ -386,7 +386,15 @@ func TestTokenUsagePricesWithOverrides(t *testing.T) {
 	if err := os.WriteFile(defaultPath, []byte(testOverridesDoc), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if out := runTokenUsageCommand(t, "--log-path", logPath, "--json"); !strings.Contains(out, defaultPath) {
+	// Compared after decoding: JSON escapes the backslashes in a Windows path, so a substring
+	// search of the raw output never finds it there.
+	out := runTokenUsageCommand(t, "--log-path", logPath, "--json")
+	var defaultReport map[string]interface{}
+	if err := json.Unmarshal([]byte(out), &defaultReport); err != nil {
+		t.Fatal(err)
+	}
+	defaultOverrides, _ := defaultReport["pricing"].(map[string]interface{})["overrides"].(map[string]interface{})
+	if defaultOverrides == nil || defaultOverrides["path"] != defaultPath {
 		t.Fatalf("default overrides file not used:\n%s", out)
 	}
 
