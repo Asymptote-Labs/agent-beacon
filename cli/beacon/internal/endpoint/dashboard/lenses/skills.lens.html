@@ -69,6 +69,7 @@
   var PATH_KEYS = ["path", "file_path", "skill_path", "location"];
   var TEXT_KEYS = ["content", "text", "output", "instructions", "body", "result"];
   var WRITE_OPS = { create: 1, modify: 1, delete: 1, write: 1, edit: 1, rename: 1, move: 1 };
+  var WRITE_ACTIONS = { "file.created": 1, "file.modified": 1, "file.deleted": 1, "file.edited": 1 };
   var PREVIEW_LINES = 400;
   var fmt = new Intl.NumberFormat();
 
@@ -141,7 +142,7 @@
     var file = event.file;
     if (file && file.path) {
       var op = String(file.operation || "").toLowerCase();
-      var hit = !WRITE_OPS[op] && skillPath(file.path);
+      var hit = !WRITE_OPS[op] && !WRITE_ACTIONS[event.action] && skillPath(file.path);
       if (hit) {
         return {
           name: hit.name, path: file.path, how: "Read of SKILL.md",
@@ -154,10 +155,11 @@
     if (command && command.command) {
       var shown = skillPath(command.command);
       if (shown) {
+        var cmdContent = command.output || event.content;
         return {
           name: shown.name, path: shown.path, how: "Shell command: " + command.command,
           text: retained(command.output),
-          withheld: command.output && !command.output.included ? command.output : null
+          withheld: cmdContent && !cmdContent.included ? cmdContent : null
         };
       }
     }
