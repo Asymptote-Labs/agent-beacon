@@ -181,6 +181,7 @@ Beacon preserves OpenTelemetry GenAI semantic convention fields under the nested
 | `gen_ai.usage.input_tokens`, `llm.usage.prompt_tokens`, `gen_ai.usage.prompt_tokens` | `gen_ai.usage.input_tokens`, less the cache read and cache creation counts reported beside it (see below) |
 | `gen_ai.usage.output_tokens`, `llm.usage.completion_tokens`, `gen_ai.usage.completion_tokens` | `gen_ai.usage.output_tokens` |
 | `gen_ai.usage.cache_creation.input_tokens`, `gen_ai.usage.cache_write.input_tokens` | `gen_ai.usage.cache_creation.input_tokens` |
+| `gen_ai.usage.cache_creation.ephemeral_1h_input_tokens` (browser extension), Anthropic `usage.cache_creation.ephemeral_1h_input_tokens` (Claude Code session files), Pi `cacheWrite1h` | `gen_ai.usage.cache_creation.ephemeral_1h_input_tokens`: the subset of `cache_creation.input_tokens` written with a one-hour TTL, clamped to it and never added to a total |
 | `gen_ai.usage.cache_read.input_tokens` | `gen_ai.usage.cache_read.input_tokens` |
 | `gen_ai.usage.reasoning.output_tokens` | `gen_ai.usage.reasoning.output_tokens` |
 | `gen_ai.usage.cost`, runtime `*.cost.usage` metric datapoints | `gen_ai.usage.cost_usd` |

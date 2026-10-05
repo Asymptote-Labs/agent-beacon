@@ -163,10 +163,20 @@ export function normalizeTurn(
   // Cache counts use the dotted spelling the collector reads first
   // (GenAIUsageFromAttrs). They are subsets of input_tokens above, and the
   // collector stores them disjoint from the uncached remainder.
-  if (turn.usage?.cacheCreationInputTokens != null)
-    respAttrs.push(
-      int('gen_ai.usage.cache_creation.input_tokens', turn.usage.cacheCreationInputTokens),
-    );
+  if (turn.usage?.cacheCreationInputTokens != null) {
+    const writes = turn.usage.cacheCreationInputTokens;
+    respAttrs.push(int('gen_ai.usage.cache_creation.input_tokens', writes));
+    // The one-hour subset is a breakdown of the writes, not a fourth count, and
+    // can never exceed them.
+    const oneHour = turn.usage.cacheCreation1hInputTokens;
+    if (oneHour != null)
+      respAttrs.push(
+        int(
+          'gen_ai.usage.cache_creation.ephemeral_1h_input_tokens',
+          Math.min(Math.max(oneHour, 0), Math.max(writes, 0)),
+        ),
+      );
+  }
   if (turn.usage?.cacheReadInputTokens != null)
     respAttrs.push(int('gen_ai.usage.cache_read.input_tokens', turn.usage.cacheReadInputTokens));
 

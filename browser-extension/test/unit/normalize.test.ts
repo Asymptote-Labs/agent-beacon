@@ -140,9 +140,31 @@ describe('normalizeTurn — full retention, simple completed turn', () => {
     expect(r['gen_ai.usage.cache_read.input_tokens']).toBe(900);
   });
 
+  it('emits the one-hour cache-write subset, clamped to the write count', () => {
+    const emit = (cacheCreationInputTokens: number, cacheCreation1hInputTokens?: number) =>
+      flat(
+        byAction(
+          normalize(
+            baseTurn({
+              usage: { inputTokens: 37, outputTokens: 214, cacheCreationInputTokens, cacheCreation1hInputTokens },
+            }),
+          ).logRecords,
+          'agent.response.completed',
+        )!.attributes,
+      );
+    const r = emit(20000, 16000);
+    expect(r['gen_ai.usage.cache_creation.input_tokens']).toBe(20000);
+    expect(r['gen_ai.usage.cache_creation.ephemeral_1h_input_tokens']).toBe(16000);
+    // A breakdown larger than its count is a malformed record, not extra writes.
+    expect(emit(500, 900)['gen_ai.usage.cache_creation.ephemeral_1h_input_tokens']).toBe(500);
+    // Unreported stays absent, never a guessed zero.
+    expect(emit(500)['gen_ai.usage.cache_creation.ephemeral_1h_input_tokens']).toBeUndefined();
+  });
+
   it('omits cache attributes entirely when the stream reported none', () => {
     const r = flat(respRec.attributes);
     expect(r['gen_ai.usage.cache_creation.input_tokens']).toBeUndefined();
+    expect(r['gen_ai.usage.cache_creation.ephemeral_1h_input_tokens']).toBeUndefined();
     expect(r['gen_ai.usage.cache_read.input_tokens']).toBeUndefined();
   });
 

@@ -32,9 +32,9 @@
 //     never also inside Input (Beacon subtracts them on the runtimes that report input
 //     inclusively, Codex among them).
 //   - CacheCreation is every token written to the prompt cache. CacheCreation1h is the subset
-//     of those written with a one-hour TTL, so it is clamped to CacheCreation. gen_ai.usage does
-//     not carry the one-hour split today, so callers working from it leave the field zero and
-//     every write is priced at the five-minute rate.
+//     of those written with a one-hour TTL, so it is clamped to CacheCreation. It comes from
+//     gen_ai.usage.cache_creation.ephemeral_1h_input_tokens, which only some sources report;
+//     where it is absent the field is zero and every write is priced at the five-minute rate.
 //   - Reasoning is a breakdown of Output, not an addition to it. That is the gen_ai.usage
 //     contract (reasoning.output_tokens is a sub-field of output, as in the OTel GenAI
 //     semantic conventions), and docs/cli/token-usage.mdx says reasoning tokens "must not be

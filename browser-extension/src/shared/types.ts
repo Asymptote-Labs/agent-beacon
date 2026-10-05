@@ -26,6 +26,10 @@ export interface Usage {
   outputTokens?: number;
   /** Prompt tokens written to the cache on this turn. */
   cacheCreationInputTokens?: number;
+  /** The subset of cacheCreationInputTokens written with a one-hour TTL. A
+   *  breakdown, never added to a total; undefined when the stream did not
+   *  report the split. */
+  cacheCreation1hInputTokens?: number;
   /** Prompt tokens served from the cache on this turn. */
   cacheReadInputTokens?: number;
 }

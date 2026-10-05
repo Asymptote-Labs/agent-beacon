@@ -635,6 +635,48 @@ func TestGenAIUsageFromAttrsNormalizesAliases(t *testing.T) {
 			},
 		},
 		{
+			// The browser extension's Claude adapter emits the one-hour cache-write subset
+			// beside the write count.
+			name: "one-hour cache write subset",
+			attrs: map[string]interface{}{
+				"gen_ai.usage.cache_creation.input_tokens":              int64(20000),
+				"gen_ai.usage.cache_creation.ephemeral_1h_input_tokens": int64(16000),
+			},
+			check: func(t *testing.T, usage *GenAIUsageInfo) {
+				c := usage.CacheCreation
+				if c == nil || c.InputTokens == nil || *c.InputTokens != 20000 || c.Ephemeral1hInputTokens == nil || *c.Ephemeral1hInputTokens != 16000 {
+					t.Fatalf("cache_creation = %#v, want 20000 with 16000 one-hour", c)
+				}
+			},
+		},
+		{
+			name: "one-hour subset clamped to the write count",
+			attrs: map[string]interface{}{
+				"gen_ai.usage.cache_creation.input_tokens":              int64(500),
+				"gen_ai.usage.cache_creation.ephemeral_1h_input_tokens": int64(900),
+			},
+			check: func(t *testing.T, usage *GenAIUsageInfo) {
+				c := usage.CacheCreation
+				if c == nil || c.Ephemeral1hInputTokens == nil || *c.Ephemeral1hInputTokens != 500 {
+					t.Fatalf("cache_creation = %#v, want the subset clamped to 500", c)
+				}
+			},
+		},
+		{
+			// A subset without the count it belongs to cannot be placed; it is dropped rather
+			// than invented into a write count.
+			name: "one-hour subset without a write count",
+			attrs: map[string]interface{}{
+				"gen_ai.usage.input_tokens":                             int64(5),
+				"gen_ai.usage.cache_creation.ephemeral_1h_input_tokens": int64(900),
+			},
+			check: func(t *testing.T, usage *GenAIUsageInfo) {
+				if usage.CacheCreation != nil {
+					t.Fatalf("cache_creation = %#v, want none", usage.CacheCreation)
+				}
+			},
+		},
+		{
 			name:  "runtime reported cost attribute",
 			attrs: map[string]interface{}{"gen_ai.usage.cost": 0.0123},
 			check: func(t *testing.T, usage *GenAIUsageInfo) {
