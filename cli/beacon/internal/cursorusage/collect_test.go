@@ -610,4 +610,41 @@ func TestCollectedEventsRollUpInTheTokenReport(t *testing.T) {
 	if len(report.ByModel) != 1 || report.ByModel[0].Usage.InputTokens != 300 {
 		t.Fatalf("by model = %+v", report.ByModel)
 	}
+	if len(report.ByUser) != 1 || report.ByUser[0].Key != "dev@example.com [cursor:42]" {
+		t.Fatalf("by user = %+v, want the Cursor member", report.ByUser)
+	}
+}
+
+// A team sync on one endpoint keeps each member's spend under that member.
+func TestTeamUsageRollsUpPerMember(t *testing.T) {
+	ana := usageAt(baseNow.Add(-2*time.Hour), 100)
+	ana.UserEmail, ana.UserID = "ana@example.com", "11"
+	bo := usageAt(baseNow.Add(-time.Hour), 200)
+	bo.UserEmail, bo.UserID = "bo@example.com", "22"
+	h := newHarness(t, ana, bo)
+	h.query = Query{}
+	h.sync()
+	report := tokens.Aggregate(h.logged(), tokens.Options{})
+	got := map[string]int64{}
+	for _, g := range report.ByUser {
+		got[g.Key] = g.Usage.InputTokens
+	}
+	if len(got) != 2 || got["ana@example.com [cursor:11]"] != 100 || got["bo@example.com [cursor:22]"] != 200 {
+		t.Fatalf("by user = %#v", got)
+	}
+}
+
+func TestMemberUser(t *testing.T) {
+	if u, ok := MemberUser(UsageEvent{UserID: "42", UserEmail: "dev@example.com"}); !ok || u.UID != "cursor:42" || u.Name != "dev@example.com" {
+		t.Fatalf("member = %+v %v", u, ok)
+	}
+	if u, ok := MemberUser(UsageEvent{UserEmail: "dev@example.com"}); !ok || u.UID != "cursor:dev@example.com" {
+		t.Fatalf("email-only member = %+v %v", u, ok)
+	}
+	if _, ok := MemberUser(UsageEvent{}); ok {
+		t.Fatal("an event naming no member keeps the local user")
+	}
+	if out := MapEvent(UsageEvent{Timestamp: baseNow, Model: "m"}); out.User.UID == "" && out.User.Name == "" && os.Getenv("USER") != "" {
+		t.Fatal("an event naming no member must keep the local user from NewEvent")
+	}
 }

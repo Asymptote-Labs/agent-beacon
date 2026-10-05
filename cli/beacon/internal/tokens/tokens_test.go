@@ -707,3 +707,64 @@ func TestAggregateDoesNotMergeModelsThatOnlyLookAlike(t *testing.T) {
 		t.Fatalf("by-model rows = %d, want 2 -- these are different ids and merging them needs a catalog", len(report.ByModel))
 	}
 }
+
+// A team-wide Cursor Admin API sync writes every member's usage on one endpoint. The members are
+// account users ("cursor:<id>"), and the endpoint fallback that names an OS-only event's person
+// from session context must not fold them into whoever is logged in to the machine.
+func TestAggregateKeepsAccountUsersOutOfTheEndpointFallback(t *testing.T) {
+	contextEvent := schema.Event{
+		Timestamp: "2026-06-11T09:59:00Z",
+		Event:     schema.EventInfo{Kind: "agent_runtime", Action: "session.context", Category: "session"},
+		Endpoint:  schema.EndpointInfo{Hostname: "host-a", OS: "darwin"},
+		User:      schema.UserInfo{Name: "admin", UID: "501"},
+		Harness:   schema.HarnessInfo{Name: "cursor"},
+		Session:   &schema.SessionInfo{ID: "hook-session"},
+	}
+	member := func(ts, email, id string, input int64) schema.Event {
+		return usageEventFixture(ts, "cursor", "", "claude-4.5-sonnet", func(e *schema.Event) {
+			e.Session = nil
+			e.Endpoint = schema.EndpointInfo{Hostname: "host-a", OS: "darwin"}
+			e.User = schema.UserInfo{Name: email, UID: "cursor:" + id}
+			e.GenAI.Usage.InputTokens = int64Ptr(input)
+		})
+	}
+	// An OS-only event with no session on the same endpoint still gets the fallback.
+	osOnly := usageEventFixture("2026-06-11T10:00:09Z", "cursor", "", "claude-4.5-sonnet", func(e *schema.Event) {
+		e.Session = nil
+		e.Endpoint = schema.EndpointInfo{Hostname: "host-a", OS: "darwin"}
+		e.User = schema.UserInfo{Name: "someone-else"}
+		e.GenAI.Usage.InputTokens = int64Ptr(1)
+	})
+	events := []schema.Event{
+		contextEvent,
+		member("2026-06-11T10:00:05Z", "ana@example.com", "11", 100),
+		member("2026-06-11T10:00:06Z", "bo@example.com", "22", 200),
+		osOnly,
+	}
+	report := Aggregate(events, Options{})
+	got := map[string]int64{}
+	for _, g := range report.ByUser {
+		got[g.Key] = g.Usage.InputTokens
+	}
+	want := map[string]int64{
+		"ana@example.com [cursor:11]": 100,
+		"bo@example.com [cursor:22]":  200,
+		"admin [501]":                 1,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("by_user = %#v, want %#v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Fatalf("by_user = %#v, want %#v", got, want)
+		}
+	}
+}
+
+func TestIsAccountUser(t *testing.T) {
+	for uid, want := range map[string]bool{"cursor:42": true, "501": false, "": false, "S-1-5-21-1004336348-1177238915-682003330-512": false} {
+		if got := IsAccountUser(schema.UserInfo{UID: uid}); got != want {
+			t.Errorf("IsAccountUser(%q) = %v, want %v", uid, got, want)
+		}
+	}
+}
