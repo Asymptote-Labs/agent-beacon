@@ -122,6 +122,7 @@ type TraceEventV1 struct {
 	File          *TraceFileV1       `json:"file,omitempty"`
 	MCP           *TraceMCPV1        `json:"mcp,omitempty"`
 	Approval      *TraceApprovalV1   `json:"approval,omitempty"`
+	Policy        *TracePolicyV1     `json:"policy,omitempty"`
 	Model         string             `json:"model,omitempty"`
 	Usage         *TraceUsageV1      `json:"usage,omitempty"`
 	SourceEventID string             `json:"source_event_id"`
@@ -180,6 +181,16 @@ type TraceApprovalV1 struct {
 	Required bool   `json:"required,omitempty"`
 	Decision string `json:"decision,omitempty"`
 	Reason   string `json:"reason,omitempty"`
+}
+
+// TracePolicyV1 is the policy decision an event recorded, such as a deny from the policy seam's
+// provider (policy.enforcement "enforce") or an audit-only verdict.
+type TracePolicyV1 struct {
+	ID          string `json:"id,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Decision    string `json:"decision,omitempty"`
+	Enforcement string `json:"enforcement,omitempty"`
+	Reason      string `json:"reason,omitempty"`
 }
 
 type TraceUsageV1 struct {
