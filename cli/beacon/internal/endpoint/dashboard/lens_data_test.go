@@ -255,3 +255,91 @@ func TestLensDataForARotatedTraceIsNotScanned(t *testing.T) {
 		t.Fatalf("token coverage = %#v, want nil", data.TokenCoverage)
 	}
 }
+
+// A session whose hook events and OTLP spans project to different traces is still one session on
+// the dashboard, and its lens must see every event the session page lists.
+func TestBuildSessionLensDataCoversEveryEventOfTheSession(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	withoutHistory(t)
+	hook := testSchemaEvent("2026-06-11T10:00:00Z", "codex_cli", "command.executed", "command", "repo-a")
+	hook.Event.ID = "evt-hook"
+	hook.Session = &schema.SessionInfo{ID: "codex-1"}
+	hook.Command = &schema.CommandInfo{Command: "rm -rf /"}
+	span := testSchemaEvent("2026-06-11T10:00:05Z", "codex_cli", "tool.invoked", "tool", "repo-a")
+	span.Event.ID = "evt-span"
+	span.Session = hook.Session
+	span.Trace = &schema.TraceInfo{ID: "otel-trace", SpanID: "span-1"}
+	other := testSchemaEvent("2026-06-11T10:00:06Z", "codex_cli", "command.executed", "command", "repo-a")
+	other.Event.ID = "evt-other"
+	other.Session = &schema.SessionInfo{ID: "codex-10"} // shares a prefix; must not match
+	path := newTestLog(t, marshalEvents(t, hook, span, other))
+
+	data, ok, err := BuildSessionLensData(path, "codex-1", LensDataOptions{UserMode: true})
+	if err != nil || !ok {
+		t.Fatalf("BuildSessionLensData = ok %v, err %v", ok, err)
+	}
+	var ids []string
+	for _, event := range data.Trace.Events {
+		ids = append(ids, event.ID)
+	}
+	if strings.Join(ids, ",") != "evt-hook,evt-span" {
+		t.Fatalf("session bundle events = %v, want the hook event and the span", ids)
+	}
+	if data.Trace.ID != "session:codex_cli:codex-1" || data.Trace.Summary.EventCount != 2 {
+		t.Fatalf("bundle = %s with %d events", data.Trace.ID, data.Trace.Summary.EventCount)
+	}
+	if data.Trace.Range == nil || data.Trace.Range.TotalEvents != 2 || data.Trace.Range.ReturnedEvents != 2 {
+		t.Fatalf("range = %#v", data.Trace.Range)
+	}
+	if data.Findings == nil || len(data.Findings.Items) == 0 {
+		t.Fatal("session lens data should carry the rm -rf finding")
+	}
+	for _, f := range data.Findings.Items {
+		for _, id := range f.EventIDs {
+			if id == "evt-other" {
+				t.Fatal("a finding from another session leaked in")
+			}
+		}
+	}
+
+	// The trace projection of the same session holds only the hook event; that is why the session
+	// page asks by session.
+	byTrace, ok, err := BuildLensData(path, "session:codex_cli:codex-1", LensDataOptions{UserMode: true})
+	if err != nil || !ok || len(byTrace.Trace.Events) != 1 {
+		t.Fatalf("trace-scoped lens data = %d events, ok %v, err %v", len(byTrace.Trace.Events), ok, err)
+	}
+
+	if _, ok, err := BuildSessionLensData(path, "codex", LensDataOptions{UserMode: true}); ok || err != nil {
+		t.Fatalf("a session-id prefix matched: ok %v, err %v", ok, err)
+	}
+}
+
+func TestLensDataEndpointBySession(t *testing.T) {
+	path := lensFixture(t)
+	handler, err := Handler(Options{UserMode: true, LogPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := func(url string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
+		return rec
+	}
+	rec := get("/api/lens-data?session=s1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var data asymptoteobserve.LensDataV1
+	if err := json.Unmarshal(rec.Body.Bytes(), &data); err != nil {
+		t.Fatal(err)
+	}
+	if data.Trace.ID != "session:claude_code:s1" || len(data.Trace.Events) != 2 {
+		t.Fatalf("trace = %s with %d events", data.Trace.ID, len(data.Trace.Events))
+	}
+	if rec := get("/api/lens-data?session=s1&trace=session:claude_code:s1"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("both params status = %d, want 400", rec.Code)
+	}
+	if rec := get("/api/lens-data?session=nope"); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown session status = %d, want 404", rec.Code)
+	}
+}

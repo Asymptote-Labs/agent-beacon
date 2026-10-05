@@ -252,12 +252,24 @@ func Handler(opts Options) (http.Handler, error) {
 			methodNotAllowed(w)
 			return
 		}
-		id := r.URL.Query().Get("trace")
-		if strings.TrimSpace(id) == "" {
-			writeError(w, http.StatusBadRequest, fmt.Errorf("trace id is required"))
+		// The session page asks by session (the events it lists); other callers ask by trace.
+		trace := strings.TrimSpace(r.URL.Query().Get("trace"))
+		session := strings.TrimSpace(r.URL.Query().Get("session"))
+		if (trace == "") == (session == "") {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("exactly one of trace or session is required"))
 			return
 		}
-		data, ok, err := BuildLensData(opts.LogPath, id, LensDataOptions{UserMode: rulesUserMode})
+		lensOpts := LensDataOptions{UserMode: rulesUserMode}
+		var (
+			data LensDataV1
+			ok   bool
+			err  error
+		)
+		if trace != "" {
+			data, ok, err = BuildLensData(opts.LogPath, trace, lensOpts)
+		} else {
+			data, ok, err = BuildSessionLensData(opts.LogPath, session, lensOpts)
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return

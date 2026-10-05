@@ -3439,3 +3439,158 @@ pre {
     justify-content: center;
   }
 }
+
+/* Lens tabs on the session page. A lens replaces the full-session panels while it is selected. */
+.session-detail-main[data-view="lens"] .session-overview-panel,
+.session-detail-main[data-view="lens"] .session-activity-panel,
+.session-detail-main[data-view="lens"] .session-events-panel {
+  display: none;
+}
+
+.lens-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.lens-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.lens-tab,
+.lens-add-button {
+  min-height: 1.75rem;
+  border-color: transparent;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #303742;
+  font-size: 0.72rem;
+  font-weight: 650;
+  padding: 0.3rem 0.75rem;
+  box-shadow: none;
+}
+
+.lens-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.lens-tab:hover,
+.lens-add-button:hover {
+  background: #e9eef2;
+}
+
+.lens-tab[aria-selected="true"] {
+  border-color: #94c9dd;
+  background: #dff2fa;
+  color: #075f85;
+}
+
+.lens-tab-remove {
+  border: 0;
+  padding: 0 0.15rem;
+  background: none;
+  color: inherit;
+  font-size: 0.85rem;
+  line-height: 1;
+  opacity: 0.6;
+}
+
+.lens-tab-remove:hover {
+  opacity: 1;
+}
+
+.lens-add {
+  position: relative;
+}
+
+.lens-add-button {
+  width: 1.9rem;
+  padding: 0;
+}
+
+.lens-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  min-width: 16rem;
+  max-width: 22rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow-md);
+  padding: 0.3rem;
+}
+
+.lens-menu[hidden] {
+  display: none;
+}
+
+.lens-menu-item {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 0.45rem;
+  background: none;
+  padding: 0.5rem 0.6rem;
+  text-align: left;
+}
+
+.lens-menu-item:hover,
+.lens-menu-item:focus-visible {
+  background: var(--panel-soft);
+}
+
+.lens-menu-title {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.lens-menu-description,
+.lens-menu-empty {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.lens-menu-empty {
+  padding: 0.5rem 0.6rem;
+}
+
+.lens-notice {
+  margin-bottom: 0;
+  font-size: 0.78rem;
+}
+
+.lens-view {
+  border: 1px solid rgba(17, 24, 39, 0.12);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.98);
+  padding: 1rem 1.25rem;
+}
+
+.lens-view[hidden],
+.lens-notice[hidden],
+.lens-status[hidden] {
+  display: none;
+}
+
+.lens-status {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.lens-frame {
+  display: block;
+  width: 100%;
+  height: 0;
+  border: 0;
+  background: transparent;
+}
+

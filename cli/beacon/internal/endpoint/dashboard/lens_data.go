@@ -39,12 +39,6 @@ func BuildLensData(logPath, traceID string, opts LensDataOptions) (LensDataV1, b
 	if err != nil || !ok {
 		return LensDataV1{}, ok, err
 	}
-	data := LensDataV1{
-		APIVersion: asymptoteobserve.LensAPIVersion,
-		Trace:      TraceBundleFromShow(show, version.Version),
-	}
-	data.Truncated = fitLensEvents(&data.Trace, lensDataEventBudget)
-
 	var raw []schema.Event
 	err = StreamEvents(logPath, func(event schema.Event) error {
 		if traceProjectionID(event) == traceID {
@@ -55,6 +49,61 @@ func BuildLensData(logPath, traceID string, opts LensDataOptions) (LensDataV1, b
 	if err != nil {
 		return LensDataV1{}, false, err
 	}
+	return lensDataFromShow(show, raw, opts), true, nil
+}
+
+// BuildSessionLensData is BuildLensData for the dashboard's session page, which shows every event
+// whose session ID is exactly session. A session is not always one trace: a runtime's hook
+// events project to its session while its OTLP spans project to their own trace IDs. So this
+// projects the same events the session page lists, with the trace projection code, into one bundle
+// identified like a session trace. It reads the live JSONL, as the session page does.
+func BuildSessionLensData(logPath, session string, opts LensDataOptions) (LensDataV1, bool, error) {
+	result, err := ReadEvents(logPath, EventQuery{Session: session, NoLimit: true})
+	if err != nil {
+		return LensDataV1{}, false, err
+	}
+	records := make([]EventRecord, 0, len(result.Events))
+	for _, record := range result.Events {
+		if sessionID(record.Event) == session {
+			records = append(records, record)
+		}
+	}
+	if len(records) == 0 {
+		return LensDataV1{}, false, nil
+	}
+	SortRecordsAppendOrder(records)
+
+	first := records[0].Event
+	harness := asymptoteobserve.NormalizeHarnessName(first.Harness.Name)
+	if harness == "" {
+		harness = strings.TrimSpace(first.Harness.Name)
+	}
+	agg := newTraceAggregate("session:"+harness+":"+session, first)
+	raw := make([]schema.Event, 0, len(records))
+	for _, record := range records {
+		te := traceEventFromRecord(record, len(agg.events)+1)
+		agg.events = append(agg.events, te)
+		agg.update(record.Event, te)
+		raw = append(raw, record.Event)
+	}
+	agg.finish()
+	total := len(agg.events)
+	show := TraceShowResultV1{
+		Trace:  agg.summary,
+		Events: agg.events,
+		Spans:  spansFromEvents(agg.events),
+		Range:  TraceRangeV1{TotalEvents: total, ReturnedEvents: total, Offset: 1, Limit: total},
+	}
+	return lensDataFromShow(show, raw, opts), true, nil
+}
+
+// lensDataFromShow finishes lens data from a projected trace and the endpoint events behind it.
+func lensDataFromShow(show TraceShowResultV1, raw []schema.Event, opts LensDataOptions) LensDataV1 {
+	data := LensDataV1{
+		APIVersion: asymptoteobserve.LensAPIVersion,
+		Trace:      TraceBundleFromShow(show, version.Version),
+	}
+	data.Truncated = fitLensEvents(&data.Trace, lensDataEventBudget)
 	// Findings and coverage are each optional in the contract. A rule pack that fails to load
 	// leaves Findings nil -- "not scanned" -- instead of failing the whole lens, since every other
 	// part of the data is still right.
@@ -62,7 +111,7 @@ func BuildLensData(logPath, traceID string, opts LensDataOptions) (LensDataV1, b
 		data.Findings = findings
 	}
 	data.TokenCoverage = lensTokenCoverage(raw, show.Trace.Harness.Name)
-	return data, true, nil
+	return data
 }
 
 // fitLensEvents keeps the longest prefix of the bundle's events that encodes within budget, and
