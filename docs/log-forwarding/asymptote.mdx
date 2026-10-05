@@ -14,8 +14,11 @@ Generate the pack with [`beacon endpoint asymptote`](/cli/asymptote). `beacon en
 ## What leaves the machine
 
 For runtime telemetry, Standard mode forwards every line written after the
-forwarder starts exactly as Beacon wrote it locally; pre-connect runtime history is
-not sent. Inventory is read from the beginning of `inventory_state.jsonl` so a
+forwarder starts exactly as Beacon wrote it locally. Pre-connect runtime history is
+not sent, except the bounded [session backfill](/cli/endpoint-connect#session-backfill)
+a first user-mode connect stages: the last 30 days of events read from the agents'
+own session stores (at most 24 MiB), which go through the same privacy transform.
+Inventory is read from the beginning of `inventory_state.jsonl` so a
 newly connected endpoint sends its current inventory baseline, including inventory
 records written before connection. Metadata-only mode applies a local Vector
 transform first, removing retained prompts, responses, reasoning, tool

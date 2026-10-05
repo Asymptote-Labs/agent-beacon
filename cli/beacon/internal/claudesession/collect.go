@@ -8,9 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionwindow"
 )
 
 const StateVersion = 1
@@ -40,6 +42,13 @@ type CollectOptions struct {
 	// collector prune archives past the shared count on their next rotation, and readers only
 	// look that far, so a sweep that kept more would lose them anyway.
 	RotateBytes int64
+	// Since, when set, limits the sweep to sessions modified at or after it, newest first. Older
+	// sessions are not read and their cursors do not move, so a later sync still collects them.
+	// The install-time backfill sets it; an ordinary sync leaves it zero.
+	Since time.Time
+	// Budget, when set, caps the bytes this sweep may append. The sweep stops at the first event
+	// that does not fit and returns writer.ErrBudgetSpent, with cursors past only what was written.
+	Budget *writer.Budget
 }
 
 type Summary struct {
@@ -134,6 +143,7 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	if err != nil {
 		return summary, err
 	}
+	refs = sessionwindow.Recent(refs, opts.Since, func(r SessionRef) int64 { return r.ModTimeUnixMS })
 	summary.Sessions = len(refs)
 	if len(refs) == 0 {
 		return summary, nil
@@ -165,6 +175,15 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 			summary.SessionsPending = 1 + countChanged(refs[i+1:], state)
 			errs = append(errs, fmt.Errorf("stopped after %d events with %d Claude session(s) pending: %w",
 				summary.EventsEmitted, summary.SessionsPending, collectErr))
+			break
+		}
+		if errors.Is(collectErr, writer.ErrBudgetSpent) {
+			// Not a failed session: this one and the rest are left for a later sync, with cursors
+			// that have not moved past anything that was not written.
+			if changed {
+				summary.SessionsChanged++
+			}
+			errs = append(errs, collectErr)
 			break
 		}
 		if collectErr != nil {
@@ -278,6 +297,6 @@ func emit(event schema.Event, opts CollectOptions, guard *writer.RetentionGuard)
 	if !opts.Write {
 		return nil
 	}
-	_, err := writer.AppendEvent(event, writer.Options{Path: opts.LogPath, UserMode: opts.UserMode, RotateSize: opts.RotateBytes, Guard: guard})
+	_, err := writer.AppendEvent(event, writer.Options{Path: opts.LogPath, UserMode: opts.UserMode, RotateSize: opts.RotateBytes, Guard: guard, Budget: opts.Budget})
 	return err
 }
