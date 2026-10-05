@@ -304,15 +304,6 @@ Beacon supports local agents, browser agents, cloud agents, CI workflows, and ag
 | Senpi | Extension | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | ✅ | ✅ `.agents/skills` |
 | VS Code | OTLP + hooks | ✅ | ✅ | ✅ | ~ | ~ | – | ~ | – | ✅ Plugin |
 
-**Cursor tokens** come from the Cursor Admin API, because Cursor's hooks and local records carry no token counts. A team admin creates an Admin API key in the Cursor dashboard (Settings → Advanced → Admin API Keys) and runs:
-
-```bash
-export CURSOR_ADMIN_API_KEY=key_...
-beacon endpoint cursor usage sync
-```
-
-Each request becomes a `token.usage` event with input, output and cache tokens and what Cursor charged, so `beacon token-usage` and the dashboard include Cursor. By default only the account signed in to Cursor on that machine is collected; `--team` collects every member under their own name. The key is read from the environment for that run and never stored. This is the one Cursor command that uses the network, and only when you run it. See [`beacon endpoint cursor usage`](https://docs.beacon.sh/cli/endpoint-cursor-usage).
-
 **Skills** shows how to install [Beacon Skills](https://docs.beacon.sh/concepts/beacon-skills), the Agent Skills that recall and distill project memory from these traces. Every runtime above loads Agent Skills:
 
 - **Plugin**: install the `beacon` plugin from this repository's marketplace, for example `/plugin marketplace add asymptote-labs/agent-beacon` in Claude Code.
