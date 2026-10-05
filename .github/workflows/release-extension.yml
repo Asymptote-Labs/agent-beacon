@@ -292,7 +292,10 @@ jobs:
           fi
           find dist-firefox -name '*.map' -delete
           git -C .. archive --format=zip -o "$RUNNER_TEMP/browser-extension-source.zip" HEAD browser-extension
-          npx web-ext sign \
+          # web-ext is not a devDependency: it pulls in @devicefarmer/adbkit and
+          # node-forge (Android debugging only, never loaded by `sign`), and the
+          # PR lint gate calls addons-linter directly. Pinned exactly here.
+          npx --yes web-ext@10.7.0 sign \
             --source-dir dist-firefox \
             --artifacts-dir web-ext-artifacts \
             --channel unlisted \
