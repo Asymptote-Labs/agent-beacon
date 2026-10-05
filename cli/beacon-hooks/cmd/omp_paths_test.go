@@ -137,9 +137,38 @@ func TestOmpDriveAliasPathFollowsTheHost(t *testing.T) {
 		{"C:/Users/me/a.go", "linux", true, "/mnt/c/Users/me/a.go"},
 		{`C:\Users\me\a.go`, "linux", false, `C:\Users\me\a.go`},
 		{"/c/Users/me/a.go", "darwin", false, "/c/Users/me/a.go"},
+		// `..` stops at the drive root, as path.win32.normalize stops it, rather than climbing
+		// out of the drive's mount.
+		{`C:\..\Windows\a.go`, "linux", true, "/mnt/c/Windows/a.go"},
+		{`C:\a\.\b\..\c.go`, "linux", true, "/mnt/c/a/c.go"},
+		{`C:\`, "linux", true, "/mnt/c"},
 	} {
 		if got := ompDriveAliasPath(tc.path, tc.goos, tc.wsl); got != tc.want {
 			t.Errorf("ompDriveAliasPath(%q, %s, wsl=%v) = %q, want %q", tc.path, tc.goos, tc.wsl, got, tc.want)
+		}
+	}
+}
+
+// A `file://` URL names the path Node's url.fileURLToPath gives it on the host, which is how these
+// runtimes read one. On Windows that is a drive or UNC path, not the URL's `/C:/...` path, which is
+// not absolute there.
+func TestFileURLPathFollowsTheHost(t *testing.T) {
+	for _, tc := range []struct{ url, goos, want string }{
+		{"file:///C:/Users/me/a.go", "windows", `C:\Users\me\a.go`},
+		{"file:///c:/my%20docs/a.go", "windows", `c:\my docs\a.go`},
+		{"file://localhost/C:/a.go", "windows", `C:\a.go`},
+		{"file://C:/a.go", "windows", `C:\a.go`},
+		{"file://server/share/a.go", "windows", `\\server\share\a.go`},
+		{"file:///Users/me/a.go", "windows", ""},
+		{"file:///C:/a%5Cb.go", "windows", ""},
+		{"file:///repo/main.go", "darwin", "/repo/main.go"},
+		{"file://localhost/repo/main.go", "linux", "/repo/main.go"},
+		{"file:///repo/my%20notes.md", "linux", "/repo/my notes.md"},
+		{"file://server/share/a.go", "linux", ""},
+		{"file:///repo/a%2Fb.go", "linux", ""},
+	} {
+		if got := fileURLPath(tc.url, tc.goos); got != tc.want {
+			t.Errorf("fileURLPath(%q, %s) = %q, want %q", tc.url, tc.goos, got, tc.want)
 		}
 	}
 }

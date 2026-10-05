@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -394,7 +393,7 @@ func ompDeviceCall(call piToolCall) (piToolCall, bool) {
 // treats as one; the goose mapper refuses web URLs there for the same reason, and the collector
 // accepts only `file://` URIs. The runtime draws the same line: it reports a read's source as a
 // `path`, a `url` or an `internal` resource. A `file://` URI is a path spelled as a URI, and is
-// recorded as the path.
+// recorded as the path; see fileURLPath.
 func piFilePath(target string) string {
 	scheme, _, ok := strings.Cut(target, "://")
 	if !ok || !isURIScheme(scheme) {
@@ -403,11 +402,54 @@ func piFilePath(target string) string {
 	if !strings.EqualFold(scheme, "file") {
 		return ""
 	}
+	return fileURLPath(target, runtime.GOOS)
+}
+
+// fileURLPath returns the path a `file://` URL names on goos, or "" when it names none.
+//
+// It follows Node's url.fileURLToPath, which is what these runtimes, written in TypeScript, use
+// to turn the URL into the path they read. The two platforms disagree. On Windows,
+// `file:///C:/Users/me/a.go` names `C:\Users\me\a.go` and `file://server/share/a.go` names the
+// share `\\server\share\a.go`; a URL with no drive and no host names nothing. Elsewhere the
+// URL's path is the path, and a URL with a host names nothing. An encoded separator never names a
+// path on either. Taking the URL's path as written on Windows gave `/C:/Users/me/a.go`, which is
+// not absolute there, and was then joined onto the working directory.
+func fileURLPath(target, goos string) string {
 	parsed, err := url.Parse(target)
-	if err != nil || (parsed.Host != "" && !strings.EqualFold(parsed.Host, "localhost")) {
+	if err != nil {
 		return ""
 	}
-	return parsed.Path
+	host, escaped := parsed.Host, parsed.EscapedPath()
+	if strings.EqualFold(host, "localhost") {
+		host = ""
+	}
+	// `file://C:/a.go` puts the drive where a host would go; the URL standard reads it as the
+	// path's drive letter.
+	if len(host) == 2 && host[1] == ':' && isDriveLetter(host[:1]) {
+		escaped, host = "/"+host+escaped, ""
+	}
+	lower := strings.ToLower(escaped)
+	if strings.Contains(lower, "%2f") || (goos == "windows" && strings.Contains(lower, "%5c")) {
+		return ""
+	}
+	p, err := url.PathUnescape(escaped)
+	if err != nil {
+		return ""
+	}
+	if goos != "windows" {
+		if host != "" {
+			return ""
+		}
+		return p
+	}
+	p = strings.ReplaceAll(p, "/", `\`)
+	if host != "" {
+		return `\\` + host + p
+	}
+	if len(p) < 3 || !isDriveLetter(p[1:2]) || p[2] != ':' {
+		return ""
+	}
+	return p[1:]
 }
 
 // isURIScheme reports whether s is an RFC 3986 scheme. A single letter is not accepted, so a
@@ -585,6 +627,10 @@ func ompToolPath(target, cwd, goos string, wsl bool) string {
 // its normalizeWindowsDriveAliasPath: on Windows, an MSYS or WSL mount root (`/c/...`,
 // `/mnt/c/...`) is the drive itself (`C:\...`); under WSL, a pasted Windows path (`C:\...`,
 // `C:/...`) is that drive's mount (`/mnt/c/...`). Anywhere else the path is left alone.
+//
+// The WSL direction normalizes the Windows path first, as the runtime does with
+// path.win32.normalize, so a `..` stops at the drive root: `C:\..\Windows` is `/mnt/c/Windows`,
+// never a directory above the drive's mount.
 func ompDriveAliasPath(p, goos string, wsl bool) string {
 	switch {
 	case goos == "windows":
@@ -609,8 +655,23 @@ func ompDriveAliasPath(p, goos string, wsl bool) string {
 		if match == nil {
 			return p
 		}
-		segments := append([]string{"/mnt", strings.ToLower(match[1])}, nonEmpty(strings.Split(match[2], `\`))...)
-		return path.Join(segments...)
+		var segments []string
+		for _, segment := range strings.Split(match[2], `\`) {
+			switch segment {
+			case "", ".":
+			case "..":
+				if len(segments) > 0 {
+					segments = segments[:len(segments)-1]
+				}
+			default:
+				segments = append(segments, segment)
+			}
+		}
+		mount := "/mnt/" + strings.ToLower(match[1])
+		if len(segments) == 0 {
+			return mount
+		}
+		return mount + "/" + strings.Join(segments, "/")
 	default:
 		return p
 	}
