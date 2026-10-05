@@ -351,8 +351,90 @@ type GenAIToolInfo struct {
 	Type        string             `json:"type,omitempty"`
 }
 
+// GenAIUsageCacheCreationInfo is the prompt-cache write count.
+//
+// InputTokens is every token written to the cache. Ephemeral1hInputTokens is the subset of those
+// written with a one-hour TTL, which Anthropic bills at twice the input rate against 1.25x for the
+// default five-minute TTL. It is a breakdown, never a parallel count: like reasoning inside output,
+// it is already inside InputTokens and must not be added to any total. The name mirrors Anthropic's
+// own usage.cache_creation.ephemeral_1h_input_tokens. Only sources that report the split set it, so
+// absent means "not reported", not "no one-hour writes". Build it with NewCacheCreationUsage so it
+// cannot exceed InputTokens.
 type GenAIUsageCacheCreationInfo struct {
-	InputTokens *int64 `json:"input_tokens,omitempty"`
+	InputTokens            *int64 `json:"input_tokens,omitempty"`
+	Ephemeral1hInputTokens *int64 `json:"ephemeral_1h_input_tokens,omitempty"`
+}
+
+// NewCacheCreationUsage builds a cache-creation block from a write count and, when the source
+// reports it, the one-hour subset. The subset is clamped to [0, inputTokens]: a breakdown larger
+// than the count it breaks down is a malformed record, not extra writes.
+func NewCacheCreationUsage(inputTokens int64, ephemeral1h *int64) *GenAIUsageCacheCreationInfo {
+	out := &GenAIUsageCacheCreationInfo{InputTokens: &inputTokens}
+	if ephemeral1h != nil {
+		v := clampCacheSubset(*ephemeral1h, inputTokens)
+		out.Ephemeral1hInputTokens = &v
+	}
+	return out
+}
+
+// OneHourInputTokens is the one-hour subset clamped to the write count, and zero when the source
+// did not report it. Readers use this rather than the raw field, so a log line written by
+// something other than Beacon cannot claim more one-hour writes than writes.
+func (c *GenAIUsageCacheCreationInfo) OneHourInputTokens() int64 {
+	if c == nil || c.Ephemeral1hInputTokens == nil {
+		return 0
+	}
+	var total int64
+	if c.InputTokens != nil {
+		total = *c.InputTokens
+	}
+	return clampCacheSubset(*c.Ephemeral1hInputTokens, total)
+}
+
+// Minus is what c adds over an already-counted snapshot prior of the same usage, for callers
+// that difference repeated or cumulative records field by field. Both counts are differenced and
+// floored at zero, and the one-hour subset stays clamped to the differenced write count, so a
+// delta can never carry more one-hour writes than writes. A nil prior counts as nothing counted.
+func (c *GenAIUsageCacheCreationInfo) Minus(prior *GenAIUsageCacheCreationInfo) *GenAIUsageCacheCreationInfo {
+	if c == nil {
+		return nil
+	}
+	if prior == nil {
+		prior = &GenAIUsageCacheCreationInfo{}
+	}
+	sub := func(next, counted *int64) *int64 {
+		if next == nil {
+			return nil
+		}
+		v := *next
+		if counted != nil {
+			v -= *counted
+		}
+		if v < 0 {
+			v = 0
+		}
+		return &v
+	}
+	out := &GenAIUsageCacheCreationInfo{InputTokens: sub(c.InputTokens, prior.InputTokens)}
+	if oneHour := sub(c.Ephemeral1hInputTokens, prior.Ephemeral1hInputTokens); oneHour != nil {
+		var total int64
+		if out.InputTokens != nil {
+			total = *out.InputTokens
+		}
+		v := clampCacheSubset(*oneHour, total)
+		out.Ephemeral1hInputTokens = &v
+	}
+	return out
+}
+
+func clampCacheSubset(subset, total int64) int64 {
+	switch {
+	case subset < 0 || total < 0:
+		return 0
+	case subset > total:
+		return total
+	}
+	return subset
 }
 
 type GenAIUsageCacheReadInfo struct {

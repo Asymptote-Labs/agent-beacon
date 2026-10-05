@@ -200,13 +200,17 @@ type TraceErrorV1 struct {
 	Type string `json:"type,omitempty"`
 }
 
+// TraceUsageV1 is gen_ai.usage flattened. CacheCreation1hInputTokens is the subset of
+// CacheCreationInputTokens written with a one-hour TTL, where the source reported it; like
+// ReasoningOutputTokens it is a breakdown and never part of a total.
 type TraceUsageV1 struct {
-	InputTokens              int64   `json:"input_tokens,omitempty"`
-	OutputTokens             int64   `json:"output_tokens,omitempty"`
-	CacheReadInputTokens     int64   `json:"cache_read_input_tokens,omitempty"`
-	CacheCreationInputTokens int64   `json:"cache_creation_input_tokens,omitempty"`
-	ReasoningOutputTokens    int64   `json:"reasoning_output_tokens,omitempty"`
-	CostUSD                  float64 `json:"cost_usd,omitempty"`
+	InputTokens                int64   `json:"input_tokens,omitempty"`
+	OutputTokens               int64   `json:"output_tokens,omitempty"`
+	CacheReadInputTokens       int64   `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens   int64   `json:"cache_creation_input_tokens,omitempty"`
+	CacheCreation1hInputTokens int64   `json:"cache_creation_1h_input_tokens,omitempty"`
+	ReasoningOutputTokens      int64   `json:"reasoning_output_tokens,omitempty"`
+	CostUSD                    float64 `json:"cost_usd,omitempty"`
 }
 
 type TraceSpanV1 struct {

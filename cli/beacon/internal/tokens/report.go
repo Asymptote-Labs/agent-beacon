@@ -192,7 +192,7 @@ func writePricingFooter(w io.Writer, report Report) {
 	} else {
 		fmt.Fprintf(w, "  %s tier, no batch, priority or subscription discounts;\n", report.Pricing.Tier)
 	}
-	fmt.Fprintln(w, "  1h cache writes are priced at the 5m rate until Beacon captures the split.")
+	fmt.Fprintln(w, "  cache writes are priced at the 5m rate unless the source reported them as 1h writes.")
 	totals := report.Totals
 	fmt.Fprintf(w, "Effective cost (reported where the runtime reported one, the estimate elsewhere): %s USD",
 		effectiveString(totals))

@@ -41,12 +41,12 @@ const (
 	// historyDerivationVersion covers everything computed from a stored line: trace keys, event
 	// numbers, types, summaries and search text. Bump it when that projection changes; the next
 	// catch-up recomputes it from the stored lines, so history survives the change.
-	historyDerivationVersion = 3 // 2: trace events carry the event's policy block; 3: and its error
+	historyDerivationVersion = 4 // 2: trace events carry the event's policy block; 3: and its error; 4: usage carries the 1h cache-write split
 
 	defaultHistoryRetentionDays = 90
 	// maxHistoryRetentionDays is 100 years: a retention this long or longer means nothing expires.
 	maxHistoryRetentionDays = 100 * 365
-	defaultHistoryMaxBytes      = int64(1) << 30
+	defaultHistoryMaxBytes  = int64(1) << 30
 
 	// historyMaxLineBytes matches the JSONL scanner's line limit, so a line too long for one path
 	// is skipped by the other rather than read by only one of them.

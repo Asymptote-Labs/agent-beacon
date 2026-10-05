@@ -140,12 +140,13 @@ func lensTokenUsage(raw []schema.Event) *asymptoteobserve.LensTokenUsageV1 {
 
 func lensUsage(u tokens.Usage) TraceUsageV1 {
 	return TraceUsageV1{
-		InputTokens:              u.InputTokens,
-		OutputTokens:             u.OutputTokens,
-		CacheReadInputTokens:     u.CacheReadInputTokens,
-		CacheCreationInputTokens: u.CacheCreationInputTokens,
-		ReasoningOutputTokens:    u.ReasoningOutputTokens,
-		CostUSD:                  u.CostUSD,
+		InputTokens:                u.InputTokens,
+		OutputTokens:               u.OutputTokens,
+		CacheReadInputTokens:       u.CacheReadInputTokens,
+		CacheCreationInputTokens:   u.CacheCreationInputTokens,
+		CacheCreation1hInputTokens: u.CacheCreation1hInputTokens,
+		ReasoningOutputTokens:      u.ReasoningOutputTokens,
+		CostUSD:                    u.CostUSD,
 	}
 }
 

@@ -357,7 +357,15 @@ func usageFromMessage(message map[string]interface{}) *schema.GenAIUsageInfo {
 		usage.OutputTokens = &v
 	}
 	if v, ok := int64Value(firstValue(raw, "cache_creation_input_tokens", "cache_creation_tokens")); ok {
-		usage.CacheCreation = &schema.GenAIUsageCacheCreationInfo{InputTokens: &v}
+		// The API response breaks cache writes down by TTL under cache_creation. Only the
+		// one-hour part is kept: it is billed at 2x input against 1.25x for five-minute writes,
+		// and the five-minute part is the remainder. Builds that write no breakdown leave the
+		// split absent rather than zero.
+		var oneHour *int64
+		if h, ok := int64Value(mapValue(raw["cache_creation"])["ephemeral_1h_input_tokens"]); ok {
+			oneHour = &h
+		}
+		usage.CacheCreation = asymptoteobserve.NewCacheCreationUsage(v, oneHour)
 	}
 	if v, ok := int64Value(firstValue(raw, "cache_read_input_tokens", "cache_read_tokens")); ok {
 		usage.CacheRead = &schema.GenAIUsageCacheReadInfo{InputTokens: &v}

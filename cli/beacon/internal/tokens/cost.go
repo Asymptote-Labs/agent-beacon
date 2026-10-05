@@ -116,7 +116,8 @@ type ModelPricing struct {
 	RequestScopedEvents int       `json:"request_scoped_events"`
 	BandsApplied        []BandUse `json:"bands_applied,omitempty"`
 	// Fallbacks names each missing-rate fallback that priced a non-zero count:
-	// cache_read_at_input_rate, cache_write_at_input_rate, reasoning_at_output_rate.
+	// cache_read_at_input_rate, cache_write_at_input_rate, cache_write_1h_at_write_rate,
+	// reasoning_at_output_rate.
 	Fallbacks        []string `json:"fallbacks,omitempty"`
 	EstimatedCostUSD float64  `json:"estimated_cost_usd"`
 
@@ -294,9 +295,9 @@ func priceUsageEvents(events []*usageEvent, pricer *pricing.Pricer) *PricingSumm
 					Output:        u.OutputTokens,
 					CacheRead:     u.CacheReadInputTokens,
 					CacheCreation: u.CacheCreationInputTokens,
-					// gen_ai.usage does not carry the one-hour cache-write split yet, so every
-					// write is priced at the five-minute rate.
-					CacheCreation1h: 0,
+					// Zero for sources that do not report the TTL split, whose writes are all
+					// priced at the five-minute rate.
+					CacheCreation1h: u.CacheCreation1hInputTokens,
 					Reasoning:       u.ReasoningOutputTokens,
 				}, scoped)
 				// A saturated estimate means the counts are corrupt; it is not a price.
@@ -391,6 +392,9 @@ func recordModelPricing(m *ModelPricing, model string, res pricing.Resolution, s
 	}
 	if est.CacheWriteAtInputRate {
 		m.fallbacks["cache_write_at_input_rate"] = true
+	}
+	if est.CacheWrite1hAtWriteRate {
+		m.fallbacks["cache_write_1h_at_write_rate"] = true
 	}
 	if est.ReasoningAtOutputRate {
 		m.fallbacks["reasoning_at_output_rate"] = true

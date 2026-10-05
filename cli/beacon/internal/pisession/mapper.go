@@ -533,7 +533,13 @@ func piUsage(usage map[string]interface{}) *schema.GenAIUsageInfo {
 		out.CacheRead = &schema.GenAIUsageCacheReadInfo{InputTokens: &value}
 	}
 	if value, ok := int64Value(usage["cacheWrite"]); ok {
-		out.CacheCreation = &schema.GenAIUsageCacheCreationInfo{InputTokens: &value}
+		// cacheWrite1h is the subset of cacheWrite written with one-hour retention, which only
+		// Anthropic reports; it stays absent for every other provider.
+		var oneHour *int64
+		if h, ok := int64Value(usage["cacheWrite1h"]); ok {
+			oneHour = &h
+		}
+		out.CacheCreation = asymptoteobserve.NewCacheCreationUsage(value, oneHour)
 	}
 	if value, ok := int64Value(usage["reasoning"]); ok {
 		out.Reasoning = &schema.GenAIUsageReasoningInfo{OutputTokens: &value}
