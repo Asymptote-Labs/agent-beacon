@@ -102,7 +102,7 @@ func traceAnswers(t *testing.T, path string, showIDs []string) map[string]string
 	queries := []string{
 		"", "index", "INDEX LOCAL", "go", "go test", "dashboard go", "endpoint.dashboard", "endpoint/dashboard",
 		"(", `"quoted"`, "a-b", "path:/repo", "*", "AND", "NEAR", "ü", "naïve café", "claude_code.token.usage",
-		"nothing-matches-this", "  ", "evt", "s1", "codex_cli", "retained answer",
+		"nothing-matches-this", "  ", "evt", "s1", "codex_cli", "retained answer", "no-near enforce",
 	}
 	for _, q := range queries {
 		for _, page := range []int{1, 2} {
@@ -140,6 +140,9 @@ func traceAnswers(t *testing.T, path string, showIDs []string) map[string]string
 			"typed":    {Limit: 100, EventTypes: []string{"user_message", "command"}},
 			"around":   {AroundEvent: 3, Before: 1, After: 1},
 			"agent":    {Limit: 100, EventTypes: []string{"agent_text"}},
+			// Lens data reads a whole trace in one call.
+			"no-limit":        {EventQuery: EventQuery{NoLimit: true}},
+			"no-limit-offset": {EventQuery: EventQuery{NoLimit: true}, Offset: 2},
 		} {
 			show, ok, err := ShowTrace(path, id, query)
 			if err != nil {
@@ -171,7 +174,7 @@ func parityFixture() [][]byte {
 		`{"timestamp":"2026-06-11T10:01:00Z","event":{"id":"e3","action":"command.executed","category":"command"},"harness":{"name":"cursor","collection_method":"hook"},"session":{"id":"s1"},"tool":{"name":"Shell","command":"go test ./internal/endpoint/dashboard"},"command":{"command":"go test ./internal/endpoint/dashboard","exit_code":1,"duration_ms":1200,"output":"FAIL a-b path:/repo \"quoted\""}}`,
 		`{"timestamp":"2026-06-11T10:01:30Z","event":{"id":"e3","action":"command.executed","category":"command"},"harness":{"name":"cursor","collection_method":"otlp"},"session":{"id":"s1"},"command":{"command":"go test ./internal/endpoint/dashboard","exit_code":0}}`,
 		`{"timestamp":"2026-06-11T10:02:00Z","event":{"id":"e4","action":"file.modified","category":"file"},"harness":{"name":"cursor"},"session":{"id":"s1"},"file":{"path":"internal/endpoint/dashboard/traces.go","operation":"modify","language":"go","diff":"+ matchesAllTerms","diff_hash":"dh"}}`,
-		`{"timestamp":"2026-06-11T10:02:30Z","event":{"id":"e5","action":"approval.denied","category":"approval"},"harness":{"name":"cursor"},"session":{"id":"s1"},"approval":{"required":true,"decision":"denied","reason":"AND NEAR * not allowed"}}`,
+		`{"timestamp":"2026-06-11T10:02:30Z","event":{"id":"e5","action":"approval.denied","category":"approval"},"harness":{"name":"cursor"},"session":{"id":"s1"},"approval":{"required":true,"decision":"denied","reason":"AND NEAR * not allowed"},"policy":{"id":"no-near","decision":"deny","enforcement":"enforce","reason":"provider denied"}}`,
 		`{"timestamp":"2026-06-11T10:03:00Z","event":{"id":"e6","action":"mcp.tool_invoked","category":"mcp"},"harness":{"name":"cursor"},"session":{"id":"s1"},"mcp":{"server":"beacon","tool":"search_sessions","method":{"name":"tools/call"}},"gen_ai":{"tool":{"name":"mcp__beacon__search_sessions","call":{"id":"call-1","arguments":{"query":"index"},"result":"one session"}}}}`,
 		`{"timestamp":"2026-06-11T10:04:00Z","event":{"action":"session.activity","category":"session"},"harness":{"name":"cursor"},"session":{"id":"s1"},"message":"hook with no event id"}`,
 		`{"timestamp":"2026-06-11T11:00:00Z","event":{"id":"o1","action":"tool.invoked","category":"tool"},"harness":{"name":"claude_code","collection_method":"otlp"},"session":{"id":"s2"},"trace":{"id":"t-abc","span_id":"span-1"},"tool":{"name":"Bash"},"message":"root span","model":"claude-opus-5"}`,
@@ -957,5 +960,35 @@ func TestHistoryRenamesIDlessEventsWhenTheirFileRotates(t *testing.T) {
 	compareAnswers(t, want, history)
 	if !strings.Contains(want["idless archive-1-line-3"], "archive-1-line-3") {
 		t.Fatalf("fixture did not produce a rotated ID: %s", want["idless archive-1-line-3"])
+	}
+}
+
+// The policy block is part of the trace projection, so both the JSONL scan and the history serve it.
+func TestTraceEventsCarryThePolicyBlock(t *testing.T) {
+	path := newTestLog(t, parityFixture())
+	for name, setup := range map[string]func(){
+		"jsonl":   func() { withoutHistory(t) },
+		"history": func() { withHistory(t); optIn(t, path) },
+	} {
+		setup()
+		show, ok, err := ShowTrace(path, "session:cursor:s1", TraceQuery{Limit: 100})
+		if err != nil || !ok {
+			t.Fatalf("%s: ShowTrace = ok %v, err %v", name, ok, err)
+		}
+		var policy *TracePolicyV1
+		for _, event := range show.Events {
+			if event.ID == "e5" {
+				policy = event.Policy
+			}
+		}
+		want := TracePolicyV1{ID: "no-near", Decision: "deny", Enforcement: "enforce", Reason: "provider denied"}
+		if policy == nil || *policy != want {
+			t.Fatalf("%s: e5 policy = %#v, want %#v", name, policy, want)
+		}
+		// The policy block is searchable, like the approval beside it.
+		found, err := SearchTraces(path, TraceQuery{EventQuery: EventQuery{Q: "no-near"}, ResultLevel: "event", Limit: 10})
+		if err != nil || found.TotalMatched != 1 || found.Events[0].Event.ID != "e5" {
+			t.Fatalf("%s: search for the policy id = %+v, %v", name, found, err)
+		}
 	}
 }

@@ -1,0 +1,4 @@
+test-results/
+playwright-report/
+# The fixture log is test input, not a runtime log (the root .gitignore ignores *.jsonl).
+!fixtures/runtime.jsonl

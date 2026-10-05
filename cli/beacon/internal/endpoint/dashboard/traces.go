@@ -36,6 +36,7 @@ type TraceCommandV1 = asymptoteobserve.TraceCommandV1
 type TraceFileV1 = asymptoteobserve.TraceFileV1
 type TraceMCPV1 = asymptoteobserve.TraceMCPV1
 type TraceApprovalV1 = asymptoteobserve.TraceApprovalV1
+type TracePolicyV1 = asymptoteobserve.TracePolicyV1
 type TraceUsageV1 = asymptoteobserve.TraceUsageV1
 type TraceSpanV1 = asymptoteobserve.TraceSpanV1
 type TraceRangeV1 = asymptoteobserve.TraceRangeV1
@@ -506,6 +507,15 @@ func traceEventFromRecord(record EventRecord, number int) TraceEventV1 {
 	if event.Approval != nil {
 		te.Approval = &TraceApprovalV1{Required: event.Approval.Required, Decision: event.Approval.Decision, Reason: event.Approval.Reason}
 	}
+	if event.Policy != nil {
+		te.Policy = &TracePolicyV1{
+			ID:          event.Policy.ID,
+			Name:        event.Policy.Name,
+			Decision:    event.Policy.Decision,
+			Enforcement: event.Policy.Enforcement,
+			Reason:      event.Policy.Reason,
+		}
+	}
 	if usage := traceUsage(event); usage != nil {
 		te.Usage = usage
 	}
@@ -952,6 +962,10 @@ func traceRange(query TraceQuery, total int) (int, int) {
 	if offset <= 0 {
 		offset = 1
 	}
+	if query.NoLimit {
+		// Lens data needs the whole trace in one read; the size budget is applied by its caller.
+		limit = total
+	}
 	if query.AroundEvent > 0 {
 		before, after := query.Before, query.After
 		if before <= 0 {
@@ -1039,6 +1053,9 @@ func traceEventHaystack(event TraceEventV1) string {
 		}),
 		valueOrEmpty(event.MCP, func(m *TraceMCPV1) string { return m.Server + " " + m.Tool + " " + m.Method + " " + m.ResourceURI }),
 		valueOrEmpty(event.Approval, func(a *TraceApprovalV1) string { return a.Decision + " " + a.Reason }),
+		valueOrEmpty(event.Policy, func(p *TracePolicyV1) string {
+			return p.ID + " " + p.Name + " " + p.Decision + " " + p.Enforcement + " " + p.Reason
+		}),
 	}, "\n")
 }
 

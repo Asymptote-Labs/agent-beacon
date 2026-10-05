@@ -104,3 +104,44 @@ func TestPackSharedCredentialRead(t *testing.T) {
 
 // normalizeCEL collapses whitespace so YAML indentation differences do not count.
 func normalizeCEL(expr string) string { return strings.Join(strings.Fields(expr), " ") }
+
+// TestPackCategoriesMatchDirectories pins taxonomy.beacon_category to the directory each rule
+// lives in. The rule store keeps rules flat, so the category travels inside the rule: it is what
+// groups findings by kind of risk (the Security Review lens, for one) once a rule is installed.
+func TestPackCategoriesMatchDirectories(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join(rulesDir(t), "*", "*.rule.yaml"))
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("rule files: %v, %v", paths, err)
+	}
+	for _, path := range paths {
+		rule, err := LoadRule(path)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		want := filepath.Base(filepath.Dir(path))
+		if got := rule.Taxonomy["beacon_category"]; got != want {
+			t.Errorf("%s: taxonomy.beacon_category = %q, want its directory %q", path, got, want)
+		}
+	}
+}
+
+// TestBaselineRulesAreCorpusCopies keeps the embedded baseline byte-identical to the rules it was
+// taken from, so a fix to a corpus rule cannot leave a stale copy in every binary.
+func TestBaselineRulesAreCorpusCopies(t *testing.T) {
+	baseline, err := filepath.Glob(filepath.Join(repoRoot(t), "pkg", "asymptoteobserve", "rulestore", "baseline", "*.rule.yaml"))
+	if err != nil || len(baseline) == 0 {
+		t.Fatalf("baseline rules: %v, %v", baseline, err)
+	}
+	for _, path := range baseline {
+		matches, _ := filepath.Glob(filepath.Join(rulesDir(t), "*", filepath.Base(path)))
+		if len(matches) != 1 {
+			t.Errorf("%s: want exactly one corpus copy, found %v", filepath.Base(path), matches)
+			continue
+		}
+		got, _ := os.ReadFile(path)
+		want, _ := os.ReadFile(matches[0])
+		if string(got) != string(want) {
+			t.Errorf("%s differs from %s; copy the corpus rule over", path, matches[0])
+		}
+	}
+}

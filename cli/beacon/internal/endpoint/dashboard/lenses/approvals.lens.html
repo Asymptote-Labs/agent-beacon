@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Approvals</title>
+<script type="application/beacon-lens+json">
+{
+  "id": "approvals",
+  "title": "Approvals & Policy",
+  "description": "Every approval decision in order: who decided (the operator or a policy), what it was about, and whether the runtime reported it or Beacon inferred it.",
+  "icon": "check",
+  "version": 1,
+  "api": "beacon.lens.v1",
+  "author": "Beacon"
+}
+</script>
+<style>
+  body {
+    margin: 0;
+    color: var(--beacon-text, #111827);
+    font: 400 13px/1.5 var(--beacon-font-sans, ui-sans-serif, system-ui, sans-serif);
+  }
+  .muted { color: var(--beacon-muted, #6b7280); }
+  .mono { font: 13px var(--beacon-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); overflow-wrap: anywhere; }
+  .allowed { color: var(--beacon-ok, #047857); }
+  .denied { color: var(--beacon-danger, #b91c1c); }
+  p { margin: 0 0 8px; }
+  h2 { margin: 18px 0 6px; font-size: 13px; font-weight: 400; color: var(--beacon-muted, #6b7280); }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 4px 8px; border-bottom: 1px solid var(--beacon-line, rgba(0,0,0,0.1)); font-weight: 400; text-align: left; vertical-align: top; }
+  th { color: var(--beacon-muted, #6b7280); white-space: nowrap; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+</style>
+</head>
+<body>
+<p id="status" class="muted">Loading trace…</p>
+<main id="root" hidden></main>
+<script>
+(function () {
+  "use strict";
+  var root = document.getElementById("root");
+  var number = new Intl.NumberFormat();
+  // Runtimes spell decisions differently; these are the spellings Beacon records.
+  var ALLOWED = { allow: 1, allowed: 1, approve: 1, approved: 1, grant: 1, granted: 1, accept: 1, accepted: 1, yes: 1 };
+  var DENIED = { deny: 1, denied: 1, reject: 1, rejected: 1, block: 1, blocked: 1, decline: 1, declined: 1, no: 1 };
+
+  // Every node is built with textContent: commands and reasons are untrusted.
+  function el(tag, text, className) {
+    var node = document.createElement(tag);
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    if (className) node.className = className;
+    return node;
+  }
+
+  function outcome(event) {
+    var raw = String((event.approval && event.approval.decision) || (event.policy && event.policy.decision) || "").toLowerCase();
+    if (ALLOWED[raw]) return { kind: "allowed", label: "allowed" };
+    if (DENIED[raw]) return { kind: "denied", label: "denied" };
+    if (!raw && /\.(denied|rejected)$/.test(event.action || "")) return { kind: "denied", label: "denied" };
+    if (!raw && /\.(granted|approved|allowed)$/.test(event.action || "")) return { kind: "allowed", label: "allowed" };
+    return { kind: "other", label: raw || "requested" };
+  }
+
+  // Who decided: a policy provider when the event carries one, otherwise the operator.
+  function decider(event) {
+    var p = event.policy;
+    if (p && (p.enforcement || p.decision)) {
+      var name = p.name || p.id;
+      return "Policy" + (p.enforcement ? " (" + p.enforcement + ")" : "") + (name ? " · " + name : "");
+    }
+    return "Operator";
+  }
+
+  function subject(event) {
+    if (event.command && event.command.command) return event.command.command;
+    if (event.file && event.file.path) return event.file.path;
+    if (event.mcp && (event.mcp.server || event.mcp.tool)) return "MCP " + [event.mcp.server, event.mcp.tool].filter(Boolean).join(" / ");
+    if (event.tool && (event.tool.command || event.tool.name)) return event.tool.command || event.tool.name;
+    return event.title || event.action;
+  }
+
+  function isDecision(event) {
+    return !!(event && (event.approval || event.policy || event.type === "approval"));
+  }
+
+  function render(data) {
+    var trace = data.trace || {};
+    var events = (Array.isArray(trace.events) ? trace.events : []).filter(isDecision);
+    if (events.length === 0) {
+      root.appendChild(el("p", "No approval decisions were recorded in this trace. Not every runtime exposes approvals to Beacon.", "muted"));
+      return finish();
+    }
+
+    var counts = { allowed: 0, denied: 0, other: 0 };
+    var byPolicy = 0;
+    var inferred = 0;
+    events.forEach(function (e) {
+      var o = outcome(e);
+      counts[o.kind] += 1;
+      if (o.kind === "denied" && e.policy && e.policy.enforcement === "enforce") byPolicy += 1;
+      if (e.fidelity === "inferred") inferred += 1;
+    });
+    var parts = [number.format(counts.allowed) + " allowed", number.format(counts.denied) + " denied" + (byPolicy ? " (" + number.format(byPolicy) + " by policy)" : "")];
+    if (counts.other) parts.push(number.format(counts.other) + " other");
+    root.appendChild(el("p", number.format(events.length) + (events.length === 1 ? " approval decision: " : " approval decisions: ") + parts.join(", ") + "."));
+    if (inferred) {
+      root.appendChild(el("p", number.format(inferred) + (inferred === 1 ? " decision was" : " decisions were") +
+        " inferred by Beacon from an adjacent event rather than reported by the runtime.", "muted"));
+    }
+
+    var t = el("table");
+    var head = t.appendChild(el("thead")).appendChild(el("tr"));
+    [["#", true], ["Time", true], ["Decision"], ["Decided by"], ["About"], ["Reason"], ["Source"]].forEach(function (h) {
+      head.appendChild(el("th", h[0], h[1] ? "num" : ""));
+    });
+    var body = t.appendChild(el("tbody"));
+    events.forEach(function (e) {
+      var o = outcome(e);
+      var when = e.timestamp ? new Date(e.timestamp) : null;
+      var tr = body.appendChild(el("tr"));
+      tr.appendChild(el("td", "#" + e.number, "num"));
+      tr.appendChild(el("td", when && !isNaN(when) ? when.toLocaleTimeString() : "—", "num"));
+      tr.appendChild(el("td", o.label, o.kind));
+      tr.appendChild(el("td", decider(e)));
+      tr.appendChild(el("td", subject(e), "mono"));
+      tr.appendChild(el("td", (e.approval && e.approval.reason) || (e.policy && e.policy.reason) || "—", "muted"));
+      tr.appendChild(el("td", e.fidelity === "inferred" ? "inferred" : "reported", e.fidelity === "inferred" ? "muted" : ""));
+    });
+    root.appendChild(t);
+
+    // Rules about approvals themselves, such as a command run after it was denied.
+    var abuse = ((data.findings && data.findings.items) || []).filter(function (f) {
+      return f.taxonomy && f.taxonomy.beacon_category === "approval-abuse";
+    });
+    if (abuse.length) {
+      root.appendChild(el("h2", "Approval findings"));
+      abuse.forEach(function (f) {
+        root.appendChild(el("p", (f.severity || "") + " · " + (f.title || f.rule_id) + (f.reason ? " — " + f.reason : "")));
+      });
+    }
+    if (data.truncated) root.appendChild(el("p", "This trace was truncated; later decisions are missing.", "muted"));
+    finish();
+  }
+
+  function finish() {
+    document.getElementById("status").hidden = true;
+    root.hidden = false;
+  }
+
+  window.beacon.getTrace().then(render, function (err) {
+    document.getElementById("status").textContent = "Could not load this trace: " + ((err && err.message) || err);
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,132 @@
+---
+title: "Lenses"
+description: "Purpose-built views of one agent trace, as tabs in the local dashboard, and how to make your own"
+---
+
+## Overview
+
+A trace holds everything an agent did in a session: what it was asked, the commands it
+ran, the files it changed, what it spent, and what the threat rules flagged. The full event
+list shows all of it at once. A **lens** shows one trace from one angle: every file the
+agent changed with its diffs, or the run as an itemized bill.
+
+Lenses are tabs on a session's page in the local dashboard
+([`beacon endpoint dashboard`](/cli/dashboard)), next to **Full session**. Click **+** to
+add one; the dashboard remembers which lenses you opened and keeps the selected one in the
+page URL, so a link opens straight to it.
+
+Beacon ships five lenses, and you can add your own. A lens is one HTML file, so any coding
+agent can write one.
+
+## Built-in lenses
+
+| Lens | What it shows |
+|------|---------------|
+| **Activity** | What the agent did, counted by kind, the commands it ran with their exit codes, and each rule finding linked to its evidence. It is also the spec's example lens. |
+| **Files Changed** | Every file the agent created, edited or deleted, as a tree with line counts. Selecting a file shows each of its edits in order, with the diff, or the diff's hash and size when it was not retained. Files only read are counted, not listed. |
+| **Token Usage** | An itemized bill: counted usage and runtime-reported cost, split by model and by turn, then every event that reported usage. When the events' own numbers add up to more than Beacon counts (usage reported on two channels, or as a cumulative counter), the lens says so. It also says when a runtime that should report usage did not, and when a runtime never exposes usage at all. |
+| **Security Review** | [Threat-rule](/detections) findings grouped as **untrusted input** (prompt injection), **sensitive access** (credentials, metadata endpoints) and **consequential action** (exfiltration, destructive commands, sensitive edits). It calls out a trace that has all three, which is how an injected instruction turns into stolen data, and shows each finding's evidence events. |
+| **Approvals & Policy** | Every approval decision in order: allowed or denied, whether the operator or a policy provider (the optional `BEACON_POLICY_PROVIDER` seam) decided, what it was about, and whether the runtime reported it or Beacon inferred it. |
+
+## How a lens runs
+
+A lens is untrusted code looking at sensitive data, so the dashboard runs it on a short
+leash:
+
+- **No network.** The lens runs in a sandboxed frame under a Content Security Policy with
+  `connect-src 'none'`. It cannot fetch, open a socket, load a remote image or font, or
+  navigate its frame anywhere else. A lens that tries to navigate is closed.
+- **No dashboard access.** The frame has an opaque origin. It cannot read the dashboard's
+  pages, storage or API.
+- **One delivery of data.** The trace arrives once, through `window.beacon.getTrace()`,
+  over a private message channel. It is computed from the local log when the page loads and
+  is never refreshed.
+- **Failure is contained.** If a lens throws before it renders, never asks for its trace,
+  or has not rendered after ten seconds, the dashboard closes it and shows the full session
+  with a notice.
+
+The data is the trace bundle every Beacon trace consumer reads, plus the trace's rule
+findings and its token usage as [`beacon token-usage`](/cli/token-usage) counts it. A lens
+sees whatever content the local log retained, after Beacon's redaction: prompts, command
+output and diffs when retention is `full`. It can show that on screen and nowhere else.
+[Forwarding privacy modes](/concepts/vector-forwarding) control what leaves the machine;
+they do not reduce what a local lens receives.
+
+## Make your own lens
+
+The fastest way is to ask your coding agent. The `beacon-lens-create` skill in Beacon's
+[Agent Skills plugin](/concepts/beacon-skills) walks it through the whole loop. Without the
+skill, give it this:
+
+```text
+Build a Beacon lens that <describe the view>. Read `beacon lenses spec` first, look at
+real data with `beacon lenses data`, lint with `beacon lenses lint`, and preview it with
+`beacon lenses preview` before installing it with `beacon lenses add`.
+```
+
+By hand, the loop is the same:
+
+```bash
+beacon lenses spec                       # the format, the data, the sandbox, the style tokens
+beacon lenses spec --example > my.lens.html
+beacon lenses data --session <id>        # exactly what getTrace() returns for a real session
+beacon lenses lint my.lens.html          # spec errors, and code the sandbox would block
+beacon lenses preview my.lens.html       # the dashboard with your lens added; edit and reload
+beacon lenses add my.lens.html           # install it into the lens store
+```
+
+1. **Read the spec.** It defines the manifest every lens carries, the data, the sandbox
+   and the style tokens that match the dashboard.
+2. **Look at real data.** Design for the fields your sessions actually carry, and for
+   sessions that lack them.
+3. **Lint.** Errors stop a lens from running. Warnings name the line where the lens does
+   something the sandbox will block, such as `fetch`, `innerHTML` or a script loaded from a
+   CDN.
+4. **Preview.** `beacon lenses preview` serves the dashboard with the file added and prints
+   the session page to open. The file is read again on every reload.
+5. **Install.** `beacon lenses add` copies the file into the lens store
+   (`~/.beacon/endpoint/lenses`), where every session page offers it. To update a lens, bump
+   the `version` in its manifest and add it again.
+
+See [`beacon lenses`](/cli/lenses) for every command and flag, and the
+[lens specification](https://github.com/asymptote-labs/agent-beacon/blob/main/spec/lenses/SPEC.md)
+for the format.
+
+## What a lens file looks like
+
+```html
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script type="application/beacon-lens+json">
+{ "id": "command-log", "title": "Command Log", "version": 1, "api": "beacon.lens.v1" }
+</script>
+</head>
+<body>
+<p id="status">Loading trace…</p>
+<ol id="commands"></ol>
+<script>
+window.beacon.getTrace().then(function (data) {
+  var list = document.getElementById("commands");
+  data.trace.events.forEach(function (event) {
+    if (!event.command) return;
+    var item = document.createElement("li");
+    item.textContent = event.command.command;   // never innerHTML: trace content is untrusted
+    list.appendChild(item);
+  });
+  document.getElementById("status").hidden = true;
+});
+</script>
+</body>
+</html>
+```
+
+## Limits
+
+- A lens is one file of at most 16 MiB, with everything inline.
+- A lens sees one trace. A view across several sessions is not supported yet.
+- Lenses are local. The store is per user on this machine, and there is no hosted gallery
+  or sharing; to share a lens, share the file.
+- Very large traces are cut to fit: the lens receives the longest prefix of events that
+  fits, and the data says it was truncated.

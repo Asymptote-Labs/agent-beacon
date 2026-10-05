@@ -58,6 +58,11 @@ type LensDataV1 struct {
 	// TokenCoverage says whether this trace's runtime can report token usage at all, so a lens can
 	// distinguish "used no tokens" from "this runtime never reports them". Nil when unknown.
 	TokenCoverage *LensTokenCoverageV1 `json:"token_coverage,omitempty"`
+	// TokenUsage is the trace's usage as `beacon token-usage` counts it: duplicate channels
+	// removed and cumulative counters turned into deltas. Per-event usage in Trace is what each
+	// event reported, so the two can differ; a lens that shows both should say why. Nil when
+	// unknown.
+	TokenUsage *LensTokenUsageV1 `json:"token_usage,omitempty"`
 	// Truncated is true when Trace holds fewer events than the trace has, because the bundle hit
 	// the size cap. Trace.Range then carries the counts.
 	Truncated bool `json:"truncated"`
@@ -90,6 +95,22 @@ type LensTokenCoverageV1 struct {
 	Status      string `json:"status"`
 	Expectation string `json:"expectation"`
 	Reason      string `json:"reason,omitempty"`
+}
+
+// LensTokenUsageV1 is a trace's counted token usage.
+type LensTokenUsageV1 struct {
+	Totals TraceUsageV1 `json:"totals"`
+	// EventsWithUsage counts the events that contributed to Totals.
+	EventsWithUsage int `json:"events_with_usage"`
+	// ByModel splits Totals by model, largest first.
+	ByModel []LensTokenModelV1 `json:"by_model,omitempty"`
+}
+
+// LensTokenModelV1 is one model's share of a trace's counted usage.
+type LensTokenModelV1 struct {
+	Model  string       `json:"model"`
+	Usage  TraceUsageV1 `json:"usage"`
+	Events int          `json:"events"`
 }
 
 var (
@@ -151,6 +172,24 @@ func lensText(field, value string, maxRunes int, required bool) []error {
 		problems = append(problems, fmt.Errorf("%s must be one line without control characters", field))
 	}
 	return problems
+}
+
+// ValidLensID reports whether id is a well-formed lens ID. Callers that turn an ID into a file name
+// check it first, so an ID can never name a path outside the lens store.
+func ValidLensID(id string) bool { return lensIDPattern.MatchString(id) }
+
+// CheckLensFile applies the spec's file-level rules -- the size cap, exactly one manifest, and a
+// valid manifest -- and returns the manifest. Everything that installs, serves or lints a lens
+// uses it, so they cannot disagree about what a lens is.
+func CheckLensFile(html []byte) (LensManifestV1, error) {
+	if len(html) > LensMaxBytes {
+		return LensManifestV1{}, fmt.Errorf("lens is %d bytes, over the %d-byte limit", len(html), LensMaxBytes)
+	}
+	manifest, err := ParseLensManifest(html)
+	if err != nil {
+		return manifest, err
+	}
+	return manifest, manifest.Validate()
 }
 
 // ParseLensManifest reads the manifest out of a lens file. It requires exactly one manifest

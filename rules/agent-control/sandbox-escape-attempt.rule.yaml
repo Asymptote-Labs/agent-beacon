@@ -20,6 +20,7 @@ severity: critical
 status: experimental
 posture: detect
 taxonomy:
+  beacon_category: agent-control
   owasp_llm: LLM06
   mitre_atlas: AML.T0011
 

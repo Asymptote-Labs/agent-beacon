@@ -16,6 +16,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/detect"
 	endpointhooks "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lensstore"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
@@ -30,6 +31,9 @@ type Options struct {
 	Addr     string
 	LogPath  string
 	UserMode bool
+	// LensFiles are lens files served alongside the built-ins, read from disk on every request.
+	// They are for developing a lens; the dashboard never writes them.
+	LensFiles []string
 }
 
 type StatusResponse struct {
@@ -90,6 +94,14 @@ func Handler(opts Options) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	lenses, err := loadBuiltinLenses(builtinLensFiles)
+	if err != nil {
+		return nil, err
+	}
+	if err := lenses.addLensFiles(opts.LensFiles); err != nil {
+		return nil, err
+	}
+	lenses.storeDir = lensstore.Dir(rulesUserMode)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -231,6 +243,50 @@ func Handler(opts Options) (http.Handler, error) {
 			return
 		}
 		writeJSON(w, trace)
+	})
+	mux.HandleFunc("/api/lenses", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w)
+			return
+		}
+		writeJSON(w, lenses.list())
+	})
+	mux.HandleFunc(lensFramePrefix, lenses.serveLensFrame)
+	// Lens data is what one lens frame receives from window.beacon.getTrace(). The session page
+	// fetches it and hands it to the frame over a MessageChannel; the frame itself never calls
+	// this route, because its sandbox and CSP give it no network.
+	mux.HandleFunc("/api/lens-data", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w)
+			return
+		}
+		// The session page asks by session (the events it lists); other callers ask by trace.
+		trace := strings.TrimSpace(r.URL.Query().Get("trace"))
+		session := strings.TrimSpace(r.URL.Query().Get("session"))
+		if (trace == "") == (session == "") {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("exactly one of trace or session is required"))
+			return
+		}
+		lensOpts := LensDataOptions{UserMode: rulesUserMode}
+		var (
+			data LensDataV1
+			ok   bool
+			err  error
+		)
+		if trace != "" {
+			data, ok, err = BuildLensData(opts.LogPath, trace, lensOpts)
+		} else {
+			data, ok, err = BuildSessionLensData(opts.LogPath, session, lensOpts)
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !ok {
+			writeError(w, http.StatusNotFound, fmt.Errorf("trace not found"))
+			return
+		}
+		writeJSON(w, data)
 	})
 	mux.HandleFunc("/api/memory", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

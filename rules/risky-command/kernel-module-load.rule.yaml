@@ -21,6 +21,7 @@ severity: high
 status: experimental
 posture: detect
 taxonomy:
+  beacon_category: risky-command
   owasp_llm: LLM06
   mitre_atlas: AML.T0011
 

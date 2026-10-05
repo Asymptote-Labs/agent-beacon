@@ -49,6 +49,19 @@
         Back to agent activity
       </a>
 
+      <div class="lens-bar">
+        <div id="lens-tabs" class="lens-tabs" role="tablist" aria-label="Session views"></div>
+        <div class="lens-add">
+          <button type="button" id="lens-add-button" class="lens-add-button" aria-haspopup="menu" aria-expanded="false" aria-controls="lens-menu" title="Add a lens">+</button>
+          <div id="lens-menu" class="lens-menu" role="menu" hidden></div>
+        </div>
+      </div>
+      <div id="lens-notice" class="notice lens-notice" role="status" hidden></div>
+      <section id="lens-view" class="lens-view" role="tabpanel" hidden>
+        <p id="lens-status" class="muted lens-status">Loading lens...</p>
+        <div id="lens-frame-slot"></div>
+      </section>
+
       <section class="session-overview-panel">
         <div class="session-overview-head">
           <h2 id="session-page-title">Session Events</h2>

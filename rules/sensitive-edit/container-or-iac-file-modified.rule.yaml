@@ -17,6 +17,7 @@ severity: medium
 status: experimental
 posture: detect
 taxonomy:
+  beacon_category: sensitive-edit
   owasp_llm: LLM03
   mitre_atlas: AML.T0011
 

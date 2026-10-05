@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script type="application/beacon-lens+json">{"id":"tall","title":"Tall","version":1,"api":"beacon.lens.v1"}</script>
+</head>
+<body>
+<div id="block" hidden style="height:2400px">tall</div>
+<script>
+window.beacon.getTrace().then(function () { document.getElementById("block").hidden = false; });
+</script>
+</body>
+</html>
