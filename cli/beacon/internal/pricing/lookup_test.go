@@ -62,6 +62,10 @@ func TestLookupRealModelStrings(t *testing.T) {
 		{"gpt-5.5-high", "gpt-5.5", MatchExact, []string{StrippedEffortSuffix}},
 		{"gpt-5-codex-high", "gpt-5-codex", MatchExact, []string{StrippedEffortSuffix}},
 		{"claude-sonnet-4-5-thinking", "claude-sonnet-4-5", MatchExact, []string{StrippedEffortSuffix}},
+		// Decorations stack in whatever order a runtime appends them: an effort suffix on a dated
+		// snapshot comes off first, and the date it exposes is stripped on the next pass.
+		{"claude-sonnet-4-6-20260101-high", "claude-sonnet-4-6", MatchExact, []string{StrippedEffortSuffix, StrippedDateSnapshot}},
+		{"claude-sonnet-4-6-20260101-thinking[1m]", "claude-sonnet-4-6", MatchExact, []string{StrippedContextWindow, StrippedEffortSuffix, StrippedDateSnapshot}},
 		// Gemini CLI.
 		{"gemini-2.5-pro", "gemini-2.5-pro", MatchExact, nil},
 		{"gemini-3.1-pro-preview", "gemini-3.1-pro-preview", MatchExact, nil},
