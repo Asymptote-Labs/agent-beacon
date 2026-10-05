@@ -140,6 +140,9 @@ func traceAnswers(t *testing.T, path string, showIDs []string) map[string]string
 			"typed":    {Limit: 100, EventTypes: []string{"user_message", "command"}},
 			"around":   {AroundEvent: 3, Before: 1, After: 1},
 			"agent":    {Limit: 100, EventTypes: []string{"agent_text"}},
+			// Lens data reads a whole trace in one call.
+			"no-limit":        {EventQuery: EventQuery{NoLimit: true}},
+			"no-limit-offset": {EventQuery: EventQuery{NoLimit: true}, Offset: 2},
 		} {
 			show, ok, err := ShowTrace(path, id, query)
 			if err != nil {

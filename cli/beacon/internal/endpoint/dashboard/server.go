@@ -232,6 +232,30 @@ func Handler(opts Options) (http.Handler, error) {
 		}
 		writeJSON(w, trace)
 	})
+	// Lens data is what one lens frame receives from window.beacon.getTrace(). The session page
+	// fetches it and hands it to the frame over a MessageChannel; the frame itself never calls
+	// this route, because its sandbox and CSP give it no network.
+	mux.HandleFunc("/api/lens-data", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w)
+			return
+		}
+		id := r.URL.Query().Get("trace")
+		if strings.TrimSpace(id) == "" {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("trace id is required"))
+			return
+		}
+		data, ok, err := BuildLensData(opts.LogPath, id, LensDataOptions{UserMode: rulesUserMode})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !ok {
+			writeError(w, http.StatusNotFound, fmt.Errorf("trace not found"))
+			return
+		}
+		writeJSON(w, data)
+	})
 	mux.HandleFunc("/api/memory", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w)
