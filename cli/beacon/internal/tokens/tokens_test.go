@@ -768,3 +768,394 @@ func TestAggregateDoesNotMergeModelsThatOnlyLookAlike(t *testing.T) {
 		t.Fatalf("by-model rows = %d, want 2 -- these are different ids and merging them needs a catalog", len(report.ByModel))
 	}
 }
+
+// TestAggregatePrefersLiveCaptureOverPollBackfill covers runtimes Beacon reads twice: once live
+// (an OTLP export, a hook, a Beacon-managed plugin) and once after the fact from the session store
+// the runtime commits to disk (`beacon endpoint <runtime> sync`, collection_method=poll). Both
+// paths report the same requests' usage under the same session id, and nothing at write time
+// collapses them: usage events carry no tool-call id, so each path's event.id is a digest of its
+// own line. Live is authoritative from the moment its channel was capturing the session; poll
+// usage before that is the only record of those turns and stays.
+func TestAggregatePrefersLiveCaptureOverPollBackfill(t *testing.T) {
+	type tokens struct {
+		input, output, cacheRead, cacheCreation, reasoning int64
+		cost                                               float64
+	}
+	event := func(ts, harness, method, session, action string, usage *tokens, mutate func(*schema.Event)) schema.Event {
+		e := schema.Event{
+			Timestamp: ts,
+			Endpoint:  schema.EndpointInfo{Hostname: "host-a", OS: "darwin"},
+			Event:     schema.EventInfo{Kind: "agent_runtime", Action: action},
+			Harness:   schema.HarnessInfo{Name: harness, CollectionMethod: method},
+		}
+		if session != "" {
+			e.Session = &schema.SessionInfo{ID: session}
+		}
+		if usage != nil {
+			info := &schema.GenAIUsageInfo{}
+			if usage.input != 0 {
+				info.InputTokens = int64Ptr(usage.input)
+			}
+			if usage.output != 0 {
+				info.OutputTokens = int64Ptr(usage.output)
+			}
+			if usage.cacheRead != 0 {
+				info.CacheRead = &schema.GenAIUsageCacheReadInfo{InputTokens: int64Ptr(usage.cacheRead)}
+			}
+			if usage.cacheCreation != 0 {
+				info.CacheCreation = &schema.GenAIUsageCacheCreationInfo{InputTokens: int64Ptr(usage.cacheCreation)}
+			}
+			if usage.reasoning != 0 {
+				info.Reasoning = &schema.GenAIUsageReasoningInfo{OutputTokens: int64Ptr(usage.reasoning)}
+			}
+			if usage.cost != 0 {
+				info.CostUSD = float64Ptr(usage.cost)
+			}
+			e.GenAI = &schema.GenAIInfo{Usage: info}
+		}
+		if mutate != nil {
+			mutate(&e)
+		}
+		return e
+	}
+	model := func(name string) func(*schema.Event) { return func(e *schema.Event) { e.Model = name } }
+	metric := func(name string) func(*schema.Event) {
+		return func(e *schema.Event) {
+			e.Model = "claude-opus-4-6"
+			e.Raw = map[string]interface{}{"metric_name": name, "metric_temporality": "Delta"}
+		}
+	}
+	const (
+		otlp   = schema.CollectionMethodOTLP
+		plugin = schema.CollectionMethodPlugin
+		hook   = schema.CollectionMethodHook
+		poll   = schema.CollectionMethodPoll
+	)
+
+	cases := []struct {
+		name       string
+		events     []schema.Event
+		want       tokens
+		wantEvents int
+		suppressed int
+	}{
+		{
+			// Claude Code's OTLP api_request log is written when a request completes; the
+			// transcript line `claude sync` reads for the same request is written as the
+			// response streams, so it lands a second or two earlier. The cutover is the session's
+			// first OTLP record (the user_prompt log), not its first usage record, or the first
+			// request of every session would be counted twice.
+			name: "claude otlp api_request log and claude sync",
+			events: []schema.Event{
+				event("2026-06-11T10:00:00.100Z", "claude_code", otlp, "c1", "prompt.submitted", nil, nil),
+				event("2026-06-11T10:00:03.900Z", "claude_code", poll, "c1", "agent.response", &tokens{input: 6, output: 410, cacheRead: 21000, cacheCreation: 3100}, model("claude-opus-4-6")),
+				event("2026-06-11T10:00:05.200Z", "claude_code", otlp, "c1", "tool.invoked", &tokens{input: 6, output: 410, cacheRead: 21000, cacheCreation: 3100, cost: 0.0421}, model("claude-opus-4-6")),
+				event("2026-06-11T10:00:41.000Z", "claude_code", poll, "c1", "agent.response", &tokens{input: 3, output: 95, cacheRead: 24100}, model("claude-opus-4-6")),
+				event("2026-06-11T10:00:42.500Z", "claude_code", otlp, "c1", "tool.invoked", &tokens{input: 3, output: 95, cacheRead: 24100, cost: 0.0153}, model("claude-opus-4-6")),
+			},
+			want:       tokens{input: 9, output: 505, cacheRead: 45100, cacheCreation: 3100, cost: 0.0574},
+			wantEvents: 2,
+			suppressed: 2,
+		},
+		{
+			// Three channels for one session: the api_request log, the token.usage/cost.usage
+			// metrics, and the transcript. The log wins over the metric for tokens (the existing
+			// channel dedupe), cost survives once on the metric, and the poll copy goes.
+			name: "claude log, metric and claude sync counted once",
+			events: []schema.Event{
+				event("2026-06-11T10:00:00Z", "claude_code", otlp, "c2", "prompt.submitted", nil, nil),
+				event("2026-06-11T10:00:04Z", "claude_code", poll, "c2", "agent.response", &tokens{input: 11, output: 826, cacheRead: 119393, cacheCreation: 15751}, model("claude-opus-4-6")),
+				event("2026-06-11T10:00:05Z", "claude_code", otlp, "c2", "tool.invoked", &tokens{input: 11, output: 826, cacheRead: 119393, cacheCreation: 15751}, model("claude-opus-4-6")),
+				event("2026-06-11T10:00:06Z", "claude_code", otlp, "c2", "token.usage", &tokens{input: 11}, metric("claude_code.token.usage")),
+				event("2026-06-11T10:00:06Z", "claude_code", otlp, "c2", "token.usage", &tokens{output: 826}, metric("claude_code.token.usage")),
+				event("2026-06-11T10:00:06Z", "claude_code", otlp, "c2", "token.usage", &tokens{cacheRead: 119393}, metric("claude_code.token.usage")),
+				event("2026-06-11T10:00:06Z", "claude_code", otlp, "c2", "token.usage", &tokens{cacheCreation: 15751}, metric("claude_code.token.usage")),
+				event("2026-06-11T10:00:06Z", "claude_code", otlp, "c2", "cost.usage", &tokens{cost: 0.1788}, metric("claude_code.cost.usage")),
+			},
+			want:       tokens{input: 11, output: 826, cacheRead: 119393, cacheCreation: 15751, cost: 0.1788},
+			wantEvents: 2,
+			suppressed: 1,
+		},
+		{
+			// Metrics exporter only, no logs: the metric is the live channel. The transcript's
+			// pre-cutover turn must not zero the metric's tokens for the whole session, which is
+			// what the log/metric dedupe would do if it read a poll event as the log channel.
+			name: "claude metric only and claude sync",
+			events: []schema.Event{
+				event("2026-06-11T09:30:00Z", "claude_code", poll, "c3", "agent.response", &tokens{input: 40, output: 7}, model("claude-opus-4-6")),
+				event("2026-06-11T10:00:04Z", "claude_code", poll, "c3", "agent.response", &tokens{input: 11, output: 826}, model("claude-opus-4-6")),
+				event("2026-06-11T10:00:00Z", "claude_code", otlp, "c3", "token.usage", &tokens{input: 11}, metric("claude_code.token.usage")),
+				event("2026-06-11T10:00:00Z", "claude_code", otlp, "c3", "token.usage", &tokens{output: 826}, metric("claude_code.token.usage")),
+			},
+			want:       tokens{input: 51, output: 833},
+			wantEvents: 3,
+			suppressed: 1,
+		},
+		{
+			// Codex's turn span carries its own start, which precedes the span's timestamp by the
+			// whole turn; `codex sync` stamps token_count at each request inside the turn. The
+			// turn from before Beacon's collector was running survives from the backfill alone.
+			name: "codex otlp turn span and codex sync",
+			events: []schema.Event{
+				event("2026-06-11T09:50:00Z", "codex_cli", poll, "019a-thread", "token.usage", &tokens{input: 3000, cacheRead: 1200, output: 80}, model("gpt-5.6-sol")),
+				event("2026-06-11T10:00:00Z", "codex_cli", hook, "019a-thread", "session.started", nil, nil),
+				event("2026-06-11T10:00:20Z", "codex_cli", poll, "019a-thread", "token.usage", &tokens{input: 13347, cacheCreation: 13344, output: 512, reasoning: 64}, model("gpt-5.6-sol")),
+				event("2026-06-11T10:00:30Z", "codex_cli", otlp, "019a-thread", "token.usage", &tokens{input: 13347, cacheCreation: 13344, output: 512, reasoning: 64}, func(e *schema.Event) {
+					e.Model = "gpt-5.6-sol"
+					e.Raw = map[string]interface{}{"source": "codex_turn_span", "turn_id": "turn-2", "turn_start_timestamp": "2026-06-11T10:00:01Z"}
+				}),
+			},
+			want:       tokens{input: 16347, cacheRead: 1200, cacheCreation: 13344, output: 592, reasoning: 64},
+			wantEvents: 2,
+			suppressed: 1,
+		},
+		{
+			// Codex's legacy turn metric has no session id, so it cannot claim a session and
+			// leaves the backfill alone; the turn span does claim one, and the span preference
+			// still drops the overlapping metric.
+			name: "codex legacy metric, turn span and codex sync",
+			events: []schema.Event{
+				event("2026-06-11T09:00:00Z", "codex_cli", otlp, "", "token.usage", &tokens{input: 10}, func(e *schema.Event) {
+					e.Model = "gpt-5.6-sol"
+					e.Raw = map[string]interface{}{"metric_name": "codex.turn.token_usage", "metric_temporality": "Delta"}
+				}),
+				event("2026-06-11T09:59:59Z", "codex_cli", otlp, "", "token.usage", &tokens{input: 20}, func(e *schema.Event) {
+					e.Model = "gpt-5.6-sol"
+					e.Raw = map[string]interface{}{"metric_name": "codex.turn.token_usage", "metric_temporality": "Delta"}
+				}),
+				event("2026-06-11T09:59:58Z", "codex_cli", poll, "t2", "token.usage", &tokens{input: 20}, model("gpt-5.6-sol")),
+				event("2026-06-11T10:00:00Z", "codex_cli", otlp, "t2", "token.usage", &tokens{input: 20}, func(e *schema.Event) {
+					e.Model = "gpt-5.6-sol"
+					e.Raw = map[string]interface{}{"source": "codex_turn_span", "turn_start_timestamp": "2026-06-11T09:59:55Z"}
+				}),
+			},
+			want:       tokens{input: 30},
+			wantEvents: 2,
+			suppressed: 1,
+		},
+		{
+			// Cline's plugin reports usage once, on the run result at task end; `cline sync`
+			// reports it per API request from the task's ui_messages. The task-end total covers
+			// every request after the plugin's first event, so all of those poll rows go.
+			name: "cline plugin task end and cline sync",
+			events: []schema.Event{
+				event("2026-06-11T10:00:00Z", "cline", plugin, "1749636000000", "session.started", nil, nil),
+				event("2026-06-11T10:00:10Z", "cline", poll, "1749636000000", "agent.response", &tokens{input: 1200, output: 150, cacheRead: 9000, cost: 0.011}, model("claude-sonnet-4-5")),
+				event("2026-06-11T10:00:40Z", "cline", poll, "1749636000000", "agent.response", &tokens{input: 800, output: 90, cacheRead: 10200, cost: 0.009}, model("claude-sonnet-4-5")),
+				event("2026-06-11T10:01:00Z", "cline", plugin, "1749636000000", "session.ended", &tokens{input: 2000, output: 240, cacheRead: 19200, cost: 0.02}, nil),
+			},
+			want:       tokens{input: 2000, output: 240, cacheRead: 19200, cost: 0.02},
+			wantEvents: 1,
+			suppressed: 2,
+		},
+		{
+			// OpenCode's plugin writes on message.updated, a few milliseconds after the store
+			// stamps the message's time.completed that `opencode sync` reads.
+			name: "opencode plugin and opencode sync",
+			events: []schema.Event{
+				event("2026-06-11T10:00:00Z", "opencode", plugin, "ses_7a1f", "session.started", nil, nil),
+				event("2026-06-11T10:00:10.000Z", "opencode", poll, "ses_7a1f", "token.usage", &tokens{input: 9800, output: 300, reasoning: 120, cacheRead: 4000, cost: 0.0312}, model("claude-sonnet-4-5")),
+				event("2026-06-11T10:00:10.004Z", "opencode", plugin, "ses_7a1f", "agent.response", &tokens{input: 9800, output: 300, reasoning: 120, cacheRead: 4000, cost: 0.0312}, model("claude-sonnet-4-5")),
+			},
+			want:       tokens{input: 9800, output: 300, reasoning: 120, cacheRead: 4000, cost: 0.0312},
+			wantEvents: 1,
+			suppressed: 1,
+		},
+		{
+			name: "openclaw plugin llm_output and session mapper",
+			events: []schema.Event{
+				event("2026-06-11T10:00:00Z", "openclaw_gateway", plugin, "oc-sess-1", "prompt.submitted", nil, nil),
+				event("2026-06-11T10:00:07Z", "openclaw_gateway", poll, "oc-sess-1", "agent.response", &tokens{input: 5200, output: 410, cacheRead: 1100}, model("gpt-5.4")),
+				event("2026-06-11T10:00:08Z", "openclaw_gateway", plugin, "oc-sess-1", "agent.response", &tokens{input: 5200, output: 410, cacheRead: 1100}, model("gpt-5.4")),
+			},
+			want:       tokens{input: 5200, output: 410, cacheRead: 1100},
+			wantEvents: 1,
+			suppressed: 1,
+		},
+		{
+			// The Pi extension reports usage on message_end; the session file stamps the assistant
+			// message when it was created, before it streamed.
+			name: "pi extension and pi sync",
+			events: []schema.Event{
+				event("2026-06-11T10:00:00Z", "pi_cli", plugin, "pi-0197", "session.started", nil, nil),
+				event("2026-06-11T10:00:02Z", "pi_cli", poll, "pi-0197", "agent.response", &tokens{input: 2400, output: 610, cacheRead: 300, cost: 0.0102}, model("claude-sonnet-4-5")),
+				event("2026-06-11T10:00:19Z", "pi_cli", plugin, "pi-0197", "agent.response", &tokens{input: 2400, output: 610, cacheRead: 300, cost: 0.0102}, model("claude-sonnet-4-5")),
+			},
+			want:       tokens{input: 2400, output: 610, cacheRead: 300, cost: 0.0102},
+			wantEvents: 1,
+			suppressed: 1,
+		},
+		{
+			// A harness or session spelling difference must not split one session into two scopes.
+			name: "harness spellings normalize to one session",
+			events: []schema.Event{
+				event("2026-06-11T10:00:00Z", "Claude Code", otlp, "c4", "prompt.submitted", nil, nil),
+				event("2026-06-11T10:00:04Z", "claude_code", poll, "C4", "agent.response", &tokens{input: 5, output: 50}, nil),
+				event("2026-06-11T10:00:05Z", "claude-code", otlp, "c4", "tool.invoked", &tokens{input: 5, output: 50}, nil),
+			},
+			want:       tokens{input: 5, output: 50},
+			wantEvents: 1,
+			suppressed: 1,
+		},
+		{
+			// Beacon installed mid-session: the backfill is the only record of what came before.
+			name: "poll before the live cutover is kept",
+			events: []schema.Event{
+				event("2026-06-11T09:10:00Z", "claude_code", poll, "c5", "agent.response", &tokens{input: 100, output: 10}, nil),
+				event("2026-06-11T09:20:00Z", "claude_code", poll, "c5", "agent.response", &tokens{input: 200, output: 20}, nil),
+				event("2026-06-11T10:00:00Z", "claude_code", otlp, "c5", "prompt.submitted", nil, nil),
+				event("2026-06-11T10:00:04Z", "claude_code", poll, "c5", "agent.response", &tokens{input: 300, output: 30}, nil),
+				event("2026-06-11T10:00:05Z", "claude_code", otlp, "c5", "tool.invoked", &tokens{input: 300, output: 30}, nil),
+			},
+			want:       tokens{input: 600, output: 60},
+			wantEvents: 3,
+			suppressed: 1,
+		},
+		{
+			// Without a session id there is no evidence the two reports are the same turn.
+			name: "no session id is never deduplicated",
+			events: []schema.Event{
+				event("2026-06-11T10:00:00Z", "claude_code", otlp, "", "tool.invoked", &tokens{input: 7}, nil),
+				event("2026-06-11T10:00:01Z", "claude_code", poll, "", "agent.response", &tokens{input: 7}, nil),
+			},
+			want:       tokens{input: 14},
+			wantEvents: 2,
+		},
+		{
+			name: "poll only is untouched",
+			events: []schema.Event{
+				event("2026-06-11T10:00:00Z", "opencode", poll, "ses_1", "token.usage", &tokens{input: 10, cost: 0.001}, nil),
+				event("2026-06-11T10:00:01Z", "opencode", poll, "ses_1", "token.usage", &tokens{input: 20, cost: 0.002}, nil),
+			},
+			want:       tokens{input: 30, cost: 0.003},
+			wantEvents: 2,
+		},
+		{
+			name: "live only is untouched",
+			events: []schema.Event{
+				event("2026-06-11T10:00:00Z", "opencode", plugin, "ses_1", "agent.response", &tokens{input: 10}, nil),
+				event("2026-06-11T10:00:01Z", "opencode", plugin, "ses_1", "agent.response", &tokens{input: 20}, nil),
+			},
+			want:       tokens{input: 30},
+			wantEvents: 2,
+		},
+		{
+			// Each session decides for itself: one with live capture does not suppress another's
+			// backfill, and the same session id on another endpoint is another session.
+			name: "sessions and endpoints are independent",
+			events: []schema.Event{
+				event("2026-06-11T10:00:00Z", "pi_cli", plugin, "pi-a", "session.started", nil, nil),
+				event("2026-06-11T10:00:02Z", "pi_cli", poll, "pi-a", "agent.response", &tokens{input: 100}, nil),
+				event("2026-06-11T10:00:03Z", "pi_cli", plugin, "pi-a", "agent.response", &tokens{input: 100}, nil),
+				event("2026-06-11T10:00:04Z", "pi_cli", poll, "pi-b", "agent.response", &tokens{input: 40}, nil),
+				event("2026-06-11T10:00:05Z", "pi_cli", poll, "pi-a", "agent.response", &tokens{input: 9}, func(e *schema.Event) {
+					e.Endpoint.Hostname = "host-b"
+				}),
+			},
+			want:       tokens{input: 149},
+			wantEvents: 3,
+			suppressed: 1,
+		},
+		{
+			// A live channel that reports how full the window is, and nothing spent, is no
+			// authority on spend: it must not suppress the backfill.
+			name: "context-only live capture does not suppress poll",
+			events: []schema.Event{
+				event("2026-06-11T10:00:00Z", "pi_cli", plugin, "pi-c", "session.context", nil, func(e *schema.Event) {
+					e.Model = "claude-sonnet-4-5"
+					e.GenAI = &schema.GenAIInfo{Context: &schema.GenAIContextInfo{UsedTokens: int64Ptr(52000), LimitTokens: int64Ptr(200000)}}
+				}),
+				event("2026-06-11T10:00:05Z", "pi_cli", poll, "pi-c", "agent.response", &tokens{input: 52000, output: 100}, model("claude-sonnet-4-5")),
+			},
+			want:       tokens{input: 52000, output: 100},
+			wantEvents: 1,
+		},
+		{
+			// A live channel that reports cost only claims cost only: the backfill's tokens
+			// stay, and its cost does not count twice.
+			name: "live fields are suppressed field by field",
+			events: []schema.Event{
+				event("2026-06-11T10:00:00Z", "claude_code", otlp, "c6", "cost.usage", &tokens{cost: 0.05}, metric("claude_code.cost.usage")),
+				event("2026-06-11T10:00:04Z", "claude_code", poll, "c6", "agent.response", &tokens{input: 30, output: 3, cost: 0.05}, nil),
+			},
+			want:       tokens{input: 30, output: 3, cost: 0.05},
+			wantEvents: 2,
+		},
+		{
+			// A record with no usable timestamp cannot be placed against the cutover, and a live
+			// channel with no usable timestamp cannot set one; both stay, as in the Codex span
+			// preference.
+			name: "zero timestamps are kept",
+			events: []schema.Event{
+				event("2026-06-11T10:00:00Z", "opencode", plugin, "ses_z", "agent.response", &tokens{input: 10}, nil),
+				event("", "opencode", poll, "ses_z", "token.usage", &tokens{input: 10}, nil),
+				event("", "cline", plugin, "task-z", "session.ended", &tokens{input: 5}, nil),
+				event("2026-06-11T10:00:00Z", "cline", poll, "task-z", "agent.response", &tokens{input: 5}, nil),
+			},
+			want:       tokens{input: 30},
+			wantEvents: 4,
+		},
+		{
+			// An event with no collection method (a log written before provenance existed) is
+			// not evidence of live capture.
+			name: "unmarked events are not live",
+			events: []schema.Event{
+				event("2026-06-11T10:00:00Z", "claude_code", "", "c7", "tool.invoked", &tokens{input: 8}, nil),
+				event("2026-06-11T10:00:01Z", "claude_code", poll, "c7", "agent.response", &tokens{input: 8}, nil),
+			},
+			want:       tokens{input: 16},
+			wantEvents: 2,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			report := Aggregate(tc.events, Options{})
+			got := report.Totals
+			if got.InputTokens != tc.want.input || got.OutputTokens != tc.want.output ||
+				got.CacheReadInputTokens != tc.want.cacheRead || got.CacheCreationInputTokens != tc.want.cacheCreation ||
+				got.ReasoningOutputTokens != tc.want.reasoning || !closeTo(got.CostUSD, tc.want.cost) {
+				t.Fatalf("totals = %+v, want %+v", got, tc.want)
+			}
+			if report.EventsWithUsage != tc.wantEvents {
+				t.Fatalf("events_with_usage = %d, want %d", report.EventsWithUsage, tc.wantEvents)
+			}
+			if report.SuppressedPollEvents != tc.suppressed {
+				t.Fatalf("suppressed_poll_events = %d, want %d", report.SuppressedPollEvents, tc.suppressed)
+			}
+		})
+	}
+}
+
+// TestAggregateScopedKeepsTheLiveCutoverOutsideTheWindow checks that a time window that starts
+// after a session's first live record does not move the cutover to the first record inside the
+// window, which would let the backfill's copy of the window's first request count twice.
+func TestAggregateScopedKeepsTheLiveCutoverOutsideTheWindow(t *testing.T) {
+	mk := func(ts, method string, input int64) schema.Event {
+		e := usageEventFixture(ts, "claude_code", "c8", "claude-opus-4-6", func(e *schema.Event) {
+			e.Harness.CollectionMethod = method
+		})
+		if input == 0 {
+			e.GenAI = nil
+			e.Event.Action = "prompt.submitted"
+		} else {
+			e.GenAI.Usage.InputTokens = int64Ptr(input)
+		}
+		return e
+	}
+	all := []schema.Event{
+		mk("2026-06-11T09:00:00Z", schema.CollectionMethodOTLP, 0),
+		mk("2026-06-11T09:00:05Z", schema.CollectionMethodOTLP, 10),
+		mk("2026-06-11T10:00:04Z", schema.CollectionMethodPoll, 20),
+		mk("2026-06-11T10:00:05Z", schema.CollectionMethodOTLP, 20),
+	}
+	window := all[2:]
+	report := AggregateScopedWithContexts(window, all, "", Options{})
+	if report.Totals.InputTokens != 20 || report.SuppressedPollEvents != 1 {
+		t.Fatalf("totals = %+v suppressed = %d, want the window's request once", report.Totals, report.SuppressedPollEvents)
+	}
+}
+
+func closeTo(a, b float64) bool {
+	d := a - b
+	return d < 1e-9 && d > -1e-9
+}

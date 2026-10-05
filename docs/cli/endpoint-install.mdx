@@ -51,7 +51,33 @@ The `claude` harness writes both Claude Code's OpenTelemetry settings and its us
 | `--falcon-sourcetype <type>` | Optional Falcon LogScale parser or sourcetype |
 | `--falcon-insecure-skip-verify` | Skip Falcon LogScale HEC TLS certificate verification |
 | `--falcon-ca-file <path>` | Optional CA certificate path for Falcon LogScale HEC TLS verification |
+| `--no-backfill` | Skip the [session backfill](#session-backfill). `BEACON_BACKFILL=0` does the same |
 | `--connect` | After a successful install, attempt to connect this endpoint to Beacon Cloud ingest. User mode uses the signed-in CLI account; system mode opens browser approval. A connection failure does not roll back or fail the completed local install; verify with `beacon endpoint status --json` and retry with [`beacon endpoint connect`](/cli/endpoint-connect) |
+
+## Session backfill
+
+After a successful user-mode install, Beacon reads the last 30 days of agent sessions from each
+runtime's own session store into the runtime log, so the [local dashboard](/cli/dashboard) has
+your recent sessions before any agent runs again. It is the same sweep each runtime's sync command
+runs (`beacon endpoint claude sync`, `codex sync`, `cursor sync`, `opencode sync`, `copilot sync`,
+`cline sync`, `factory sync`, `pi sync`, `prime sync`, `hermes sync`, `dsh sync`, `fx sync`,
+`grok sync`, and `integrations openclaw sessions sync`), and its events carry
+`harness.collection_method=poll` like theirs. It is local only and never touches the network.
+
+The backfill is bounded so a machine with a lot of history cannot crowd live telemetry out of the
+runtime log's rotation window:
+
+- Only sessions modified in the last 30 days are read, newest first.
+- It writes at most 24 MiB in total, and no single runtime takes more than 12 MiB of that.
+
+Nothing past a limit is lost. The collector cursors move only past what was written, and sessions
+left out are not touched, so the runtime's sync command reads the rest; install names the command
+for each runtime that hit the limit. A runtime whose store cannot be read is reported as a warning
+and never fails the install. Re-running install reads only what changed since the last sweep.
+
+The backfill runs only for user-mode installs: system, package, MDM and `--dry-run` installs skip
+it. Turn it off with `--no-backfill` or `BEACON_BACKFILL=0`. If this install also connects to
+Beacon Cloud, the same history is [uploaded on the first connect](/cli/endpoint-connect#session-backfill).
 
 ## Interactive onboarding wizard
 
@@ -60,8 +86,8 @@ signs in through beacon.sh, then asks where this machine's telemetry should go:
 
 | Answer | What happens |
 |--------|--------------|
-| Beacon Cloud (default) | Shows what will be sent, asks for Standard or Metadata-only privacy, then installs Beacon and connects this endpoint. The confirm screen states that forwarding starts before you accept. An endpoint that is already enrolled keeps its device key and is not re-enrolled. |
-| Local only | Explicitly opts out of managed forwarding. Nothing is sent anywhere. |
+| Beacon Cloud (default) | Shows what will be sent, asks for Standard or Metadata-only privacy, then installs Beacon and connects this endpoint. The confirm screen states that forwarding starts, and that the last 30 days of agent sessions are uploaded, before you accept. An endpoint that is already enrolled keeps its device key and is not re-enrolled. |
+| Local only | Explicitly opts out of managed forwarding. Nothing is sent anywhere; the session backfill stays in the local log. |
 
 `--connect` presets Beacon Cloud and skips the destination question. Whether
 connect was chosen in the wizard or by the flag, a failed enrollment leaves the

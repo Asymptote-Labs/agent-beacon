@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
@@ -116,10 +117,16 @@ func ReadEventsAppendOrder(path string, query EventQuery) ([]schema.Event, error
 	return events, nil
 }
 
-// ReadTokenEventsAppendOrder returns query-matched events plus every
-// session.context event in one pass over the log. Session context is kept
-// separate so token totals and TotalEvents still describe only the requested
-// time/model/session slice while user attribution can reach back to SessionStart.
+// ReadTokenEventsAppendOrder returns query-matched events plus the session context
+// the token report reads outside the query, in one pass over the log. Context is
+// kept separate so token totals and TotalEvents still describe only the requested
+// time/model/session slice while session-level facts can reach back past it:
+//
+//   - every session.context event, so user attribution reaches back to SessionStart;
+//   - for each session and live collection method, the earliest event that arrived
+//     over that method (tokens.LiveCaptureKey), so the live/poll cutover is where the
+//     live channel started capturing the session rather than where the window starts
+//     or where its first usage record landed.
 func ReadTokenEventsAppendOrder(path string, query EventQuery) ([]schema.Event, []schema.Event, error) {
 	result, err := ReadEvents(path, EventQuery{NoLimit: true})
 	if err != nil {
@@ -128,13 +135,29 @@ func ReadTokenEventsAppendOrder(path string, query EventQuery) ([]schema.Event, 
 	SortRecordsAppendOrder(result.Events)
 	events := make([]schema.Event, 0, len(result.Events))
 	contexts := make([]schema.Event, 0)
+	type liveStart struct {
+		ts    time.Time
+		event schema.Event
+	}
+	liveStarts := map[string]liveStart{}
+	var liveOrder []string
 	for _, record := range result.Events {
 		if record.Event.Event.Action == "session.context" {
 			contexts = append(contexts, record.Event)
+		} else if key, ts, ok := tokens.LiveCaptureKey(record.Event); ok {
+			if current, seen := liveStarts[key]; !seen {
+				liveStarts[key] = liveStart{ts: ts, event: record.Event}
+				liveOrder = append(liveOrder, key)
+			} else if ts.Before(current.ts) {
+				liveStarts[key] = liveStart{ts: ts, event: record.Event}
+			}
 		}
 		if matchesQuery(record, query) {
 			events = append(events, record.Event)
 		}
+	}
+	for _, key := range liveOrder {
+		contexts = append(contexts, liveStarts[key].event)
 	}
 	return events, contexts, nil
 }

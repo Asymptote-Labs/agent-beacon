@@ -18,11 +18,19 @@ type MappedEvent struct {
 	DedupID    string
 	SourceLine int
 	Event      schema.Event
+	// RetryFrom, when set, is the earliest source line this event accounts for. A sweep that
+	// stops before writing it must not leave its cursor at or past that line, or the next sweep
+	// would treat what the event counts as already counted. Only token.usage events set it: one
+	// response's usage event can account for block lines before its own (see usage.go).
+	RetryFrom int
 }
 
 type MapOptions struct {
 	MinLine            int
 	SkipSessionStarted bool
+	// responses is what this sweep has already counted for each API response across the files
+	// it read before this one. Nil maps the file on its own.
+	responses responseLedger
 }
 
 type toolCall struct {
@@ -36,10 +44,12 @@ type mapper struct {
 	opts  MapOptions
 	out   []MappedEvent
 	tools map[string]toolCall
+	usage map[int]usagePlan
 }
 
 func MapSession(ref SessionRef, records []Record, opts MapOptions) []MappedEvent {
 	m := &mapper{ref: ref, opts: opts, tools: map[string]toolCall{}}
+	m.usage = planUsage(ref, records, opts.MinLine, opts.responses)
 	for i := range records {
 		m.consume(records[i])
 	}
@@ -146,8 +156,8 @@ func (m *mapper) consumeAssistant(record Record, emit bool) {
 		if text := strings.TrimSpace(strings.Join(reasoningParts, "\n")); text != "" {
 			m.emitAgentReasoning(record, text)
 		}
-		if usage := usageFromMessage(entry.Message); usage != nil {
-			m.emitUsage(record, usage)
+		if plan, ok := m.usage[record.Line]; ok {
+			m.emitUsage(record, plan)
 		}
 	}
 }
@@ -242,11 +252,12 @@ func (m *mapper) emitToolResult(record Record, block int, result map[string]inte
 	}
 }
 
-func (m *mapper) emitUsage(record Record, usage *schema.GenAIUsageInfo) {
+func (m *mapper) emitUsage(record Record, plan usagePlan) {
 	ev := m.base(record, "token.usage", "metric", schema.SeverityInfo, schema.FidelityObserved, "Claude Code token usage observed")
-	ev.GenAI = mergeGenAI(ev.GenAI, &schema.GenAIInfo{Usage: usage})
+	ev.GenAI = mergeGenAI(ev.GenAI, &schema.GenAIInfo{Usage: plan.usage})
 	m.applyResponse(&ev, record.Entry)
-	m.append(record, "usage", ev)
+	ev.Event.ID = claudeEventID(plan.coordinate)
+	m.out = append(m.out, MappedEvent{DedupID: ev.Event.ID, SourceLine: record.Line, Event: ev, RetryFrom: plan.retryFrom})
 }
 
 func (m *mapper) emitSummary(record Record) {
@@ -299,7 +310,7 @@ func (m *mapper) base(record Record, action, category string, severity schema.Se
 }
 
 func (m *mapper) append(record Record, suffix string, ev schema.Event) {
-	coordinate := firstNonEmpty(record.Entry.UUID, m.ref.Path+":"+itoa(record.Line)) + ":" + suffix
+	coordinate := recordCoordinate(m.ref, record) + ":" + suffix
 	ev.Event.ID = claudeEventID(coordinate)
 	m.out = append(m.out, MappedEvent{DedupID: ev.Event.ID, SourceLine: record.Line, Event: ev})
 }

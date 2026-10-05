@@ -73,6 +73,7 @@ func init() {
 	endpointConnectCmd.Flags().StringVar(&connectOpts.dashboardURL, "dashboard-url", "", "Beacon service URL (defaults to "+auth.DefaultDashboardURL+", or "+auth.DashboardURLEnv+")")
 	endpointConnectCmd.Flags().BoolVar(&connectOpts.noBrowser, "no-browser", false, "System mode: print the device approval URL instead of opening a browser")
 	endpointConnectCmd.Flags().StringVar(&connectOpts.vectorBin, "vector-bin", "", "Vector binary to run (defaults to "+asymptote.VectorBinEnv+", "+asymptote.PackagedVectorPath+", Homebrew, then PATH)")
+	endpointConnectCmd.Flags().BoolVar(&endpointOpts.noBackfill, "no-backfill", false, "On a first connect, do not upload the last 30 days of agent sessions read from their local session stores (also "+endpointBackfillEnv+"=0)")
 	endpointConnectCmd.Flags().StringVar(&connectOpts.privacyMode, "privacy-mode", "", "Beacon Cloud forwarding privacy: standard or metadata-only (defaults to onboarding choice)")
 	endpointDisconnectCmd.Flags().BoolVar(&connectOpts.keepCredentials, "keep-credentials", false, "Keep the enrollment record and device key so a later connect can reuse this device")
 	endpointCmd.AddCommand(endpointConnectCmd)
@@ -84,13 +85,14 @@ func runEndpointConnect(cmd *cobra.Command, args []string) error {
 	if !userMode && !lifecycle.HasSystemPrivileges() {
 		return fmt.Errorf("connecting a system endpoint needs root: rerun with sudo, or pass --user for a per-user install")
 	}
-	return connectEndpoint(cmd, userMode, loadOrDefaultConfig().LogPath)
+	return connectEndpoint(cmd, userMode, loadOrDefaultConfig().LogPath, false)
 }
 
 // connectEndpoint runs the enrollment and forwarder setup for the given mode and log
 // path, printing the outcome. `endpoint install --connect` and the onboarding offer
-// call it after a successful install; `endpoint connect` calls it directly.
-func connectEndpoint(cmd *cobra.Command, userMode bool, logPath string) error {
+// call it after a successful install; `endpoint connect` calls it directly. backfilled
+// says the caller has just run the session backfill, so connect only ships it.
+func connectEndpoint(cmd *cobra.Command, userMode bool, logPath string, backfilled bool) error {
 	hostname, _ := os.Hostname()
 	out := cmd.OutOrStdout()
 	if endpointOpts.jsonOutput {
@@ -105,6 +107,7 @@ func connectEndpoint(cmd *cobra.Command, userMode bool, logPath string) error {
 		LogPath:     logPath,
 		VectorBin:   connectOpts.vectorBin,
 		PrivacyMode: privacyMode,
+		Backfill:    endpointConnectBackfill(out, userMode, logPath, backfilled),
 		Out:         out,
 		Enroll: asymptote.EnrollOptions{
 			DashboardURL: connectOpts.dashboardURL,
@@ -160,9 +163,14 @@ func connectEndpoint(cmd *cobra.Command, userMode bool, logPath string) error {
 	fmt.Fprintf(out, "Device key: %s (never printed; the Vector forwarder reads it)\n", result.SecretsFile)
 	// Close on what to do next rather than on more state. Setup is finished here,
 	// and this is the moment the user has the most intent and the least idea what
-	// happens now. Nothing is forwarded yet: the runtime source starts at the
-	// connection point, so the dashboard stays empty until an agent actually runs.
+	// happens now. The runtime source starts at the connection point, so apart from
+	// the staged session backfill the dashboard fills as agents run.
 	fmt.Fprintln(out)
+	if result.Backfill != nil && result.Backfill.Events > 0 {
+		fmt.Fprintf(out, "Uploading %d events of recent session history; they appear at %s within a few minutes.\n", result.Backfill.Events, dashboardHomeURL(result.Enrollment.DashboardURL))
+		fmt.Fprintln(out, "Next: keep using your agents as you normally would; new sessions appear within a minute of the activity.")
+		return nil
+	}
 	fmt.Fprintln(out, "Next: run any supported agent as you normally would.")
 	fmt.Fprintf(out, "Its sessions appear at %s within a minute of the activity.\n", dashboardHomeURL(result.Enrollment.DashboardURL))
 	return nil

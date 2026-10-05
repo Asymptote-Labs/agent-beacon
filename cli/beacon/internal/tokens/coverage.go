@@ -84,7 +84,7 @@ var usageExpectation = map[string]struct {
 	"openclaw_gateway":  {ExpectReported, "plugin reports usage per model response when conversation access is granted"},
 	"vercel_fx":         {ExpectReported, "session store carries cumulative usage and cost"},
 	"deepseek_harness":  {ExpectReported, "native session backfill reports usage when DeepSeek persists it"},
-	"copilot_cli":       {ExpectReported, "session store carries output tokens and cumulative model usage"},
+	"copilot_cli":       {ExpectReported, "session store carries output tokens, cumulative model usage, and AI-credit cost"},
 	"asymptote_observe": {ExpectReported, "SDK spans carry semconv usage"},
 	// Read from Gemini CLI's own gemini_cli.api_response log, which it emits for every model
 	// response whenever its telemetry is on -- not from the semconv names -- so a Gemini session
@@ -238,10 +238,7 @@ func Coverage(events []schema.Event, installed []string) CoverageReport {
 	// covered on exactly the events that would contribute to its totals -- including the
 	// dedupe and cumulative-delta handling. Counting raw gen_ai.usage blocks here instead
 	// would report a runtime as covered whose usage the report then discards.
-	usageEvents := collectUsageEvents(events, sessionUserContexts(events))
-	usageEvents = preferCodexTurnSpans(usageEvents)
-	usageEvents = dedupeOverlappingChannels(usageEvents)
-	resolveCumulativeSeries(usageEvents)
+	usageEvents, _ := resolveUsageEvents(events, sessionUserContexts(events), liveCaptureStarts(events))
 
 	for _, event := range events {
 		name := asymptoteobserve.NormalizeHarnessName(strings.TrimSpace(event.Harness.Name))

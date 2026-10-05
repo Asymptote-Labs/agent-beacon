@@ -113,7 +113,7 @@ func TestConnectUsesSignedInAccountAndSelectedPrivacy(t *testing.T) {
 	command := &cobra.Command{}
 	command.SetOut(&out)
 	command.SetErr(&out)
-	if err := connectEndpoint(command, true, "/tmp/runtime.jsonl"); err != nil {
+	if err := connectEndpoint(command, true, "/tmp/runtime.jsonl", false); err != nil {
 		t.Fatalf("connectEndpoint returned error: %v", err)
 	}
 	if captured.AccountEnroll == nil || captured.AccountEnroll.AccessToken != "bcn_cli_secret" {
@@ -177,7 +177,7 @@ func TestConnectRequiresSignedInAccountInUserMode(t *testing.T) {
 		return nil, errors.New("must not run")
 	}
 	command := &cobra.Command{}
-	err := connectEndpoint(command, true, "/tmp/runtime.jsonl")
+	err := connectEndpoint(command, true, "/tmp/runtime.jsonl", false)
 	if err == nil || !strings.Contains(err.Error(), "beacon login") {
 		t.Fatalf("error = %v", err)
 	}

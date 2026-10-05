@@ -18,6 +18,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionwindow"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	_ "modernc.org/sqlite"
 )
@@ -53,6 +54,13 @@ type CollectOptions struct {
 	UserMode  bool
 	Print     bool
 	Out       io.Writer
+	// Since, when set, limits the sweep to sessions modified at or after it, newest first. Older
+	// sessions are not read and their cursors do not move, so a later sync still collects them.
+	// The install-time backfill sets it; an ordinary sync leaves it zero.
+	Since time.Time
+	// Budget, when set, caps the bytes this sweep may append. The sweep stops at the first event
+	// that does not fit and returns writer.ErrBudgetSpent, with cursors past only what was written.
+	Budget *writer.Budget
 }
 
 type Summary struct {
@@ -71,6 +79,7 @@ type Session struct {
 	ParentSessionID  string
 	StartedAtMS      int64
 	EndedAtMS        int64
+	LastMessageAtMS  int64
 	EndReason        string
 	MessageCount     int64
 	ToolCallCount    int64
@@ -198,6 +207,7 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	if err != nil {
 		return summary, err
 	}
+	sessions = sessionwindow.Recent(sessions, opts.Since, func(r Session) int64 { return max(r.StartedAtMS, r.EndedAtMS, r.LastMessageAtMS) })
 	summary.Sessions = len(sessions)
 	state, err := LoadState(opts.StatePath)
 	if err != nil {
@@ -211,6 +221,15 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	var errs []error
 	for _, session := range sessions {
 		changed, collectErr := collectSession(store, session, state, opts, &summary)
+		if errors.Is(collectErr, writer.ErrBudgetSpent) {
+			// Not a failed session: this one and the rest are left for a later sync, with cursors
+			// that have not moved past anything that was not written.
+			if changed {
+				summary.SessionsChanged++
+			}
+			errs = append(errs, collectErr)
+			break
+		}
 		if collectErr != nil {
 			summary.Errors++
 			errs = append(errs, fmt.Errorf("Hermes session %s: %w", session.ID, collectErr))
@@ -307,7 +326,7 @@ func emit(event schema.Event, opts CollectOptions) error {
 		}
 	}
 	if opts.Write {
-		if _, err := writer.AppendEvent(event, writer.Options{Path: opts.LogPath, UserMode: opts.UserMode}); err != nil {
+		if _, err := writer.AppendEvent(event, writer.Options{Path: opts.LogPath, UserMode: opts.UserMode, Budget: opts.Budget}); err != nil {
 			return err
 		}
 	}
@@ -340,7 +359,8 @@ func (s *Store) ListSessions() ([]Session, error) {
 SELECT id, source, model, cwd, title, parent_session_id, started_at, ended_at, end_reason,
        message_count, tool_call_count, input_tokens, output_tokens, cache_read_tokens,
        cache_write_tokens, reasoning_tokens, estimated_cost_usd, actual_cost_usd,
-       cost_status, cost_source
+       cost_status, cost_source,
+       (SELECT max(m.timestamp) FROM messages m WHERE m.session_id = sessions.id AND m.active = 1) AS last_message_at
 FROM sessions
 WHERE archived = 0
 ORDER BY started_at, id`)
@@ -352,12 +372,12 @@ ORDER BY started_at, id`)
 	for rows.Next() {
 		var s Session
 		var model, cwd, title, parent, endReason, costStatus, costSource sql.NullString
-		var started, ended sql.NullFloat64
+		var started, ended, lastMsg sql.NullFloat64
 		var msgCount, toolCount, input, output, cacheRead, cacheWrite, reasoning sql.NullInt64
 		var estimatedCost, actualCost sql.NullFloat64
 		if err := rows.Scan(&s.ID, &s.Source, &model, &cwd, &title, &parent, &started, &ended, &endReason,
 			&msgCount, &toolCount, &input, &output, &cacheRead, &cacheWrite, &reasoning,
-			&estimatedCost, &actualCost, &costStatus, &costSource); err != nil {
+			&estimatedCost, &actualCost, &costStatus, &costSource, &lastMsg); err != nil {
 			return nil, err
 		}
 		s.Model = model.String
@@ -366,6 +386,7 @@ ORDER BY started_at, id`)
 		s.ParentSessionID = parent.String
 		s.StartedAtMS = secondsToMillis(started)
 		s.EndedAtMS = secondsToMillis(ended)
+		s.LastMessageAtMS = secondsToMillis(lastMsg)
 		s.EndReason = endReason.String
 		s.MessageCount = msgCount.Int64
 		s.ToolCallCount = toolCount.Int64
