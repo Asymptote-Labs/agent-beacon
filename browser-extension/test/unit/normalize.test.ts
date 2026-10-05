@@ -106,6 +106,40 @@ describe('normalizeTurn — full retention, simple completed turn', () => {
     expect(r['gen_ai.usage.cache_read.input_tokens']).toBe(18500);
   });
 
+  it('emits the semconv input count, which includes cache reads and writes', () => {
+    // Anthropic's usage.input_tokens excludes both cache counts, but the OTel
+    // GenAI semconv input_tokens "SHOULD include all types of input tokens,
+    // including cached tokens". The collector reduces every semconv input by
+    // the cache counts beside it, so emitting Anthropic's disjoint count here
+    // would have it subtract the cache a second time.
+    const records = normalize(
+      baseTurn({
+        usage: { inputTokens: 37, outputTokens: 214, cacheCreationInputTokens: 1024, cacheReadInputTokens: 18500 },
+      }),
+    ).logRecords;
+    const r = flat(byAction(records, 'agent.response.completed')!.attributes);
+    expect(r['gen_ai.usage.input_tokens']).toBe(37 + 1024 + 18500);
+    expect(r['gen_ai.usage.output_tokens']).toBe(214);
+  });
+
+  it('adds only the cache counts the stream reported to the input count', () => {
+    const records = normalize(
+      baseTurn({ usage: { inputTokens: 37, outputTokens: 5, cacheReadInputTokens: 900 } }),
+    ).logRecords;
+    const r = flat(byAction(records, 'agent.response.completed')!.attributes);
+    expect(r['gen_ai.usage.input_tokens']).toBe(937);
+    expect(r['gen_ai.usage.cache_creation.input_tokens']).toBeUndefined();
+  });
+
+  it('does not invent an input count from cache counts alone', () => {
+    const records = normalize(
+      baseTurn({ usage: { outputTokens: 5, cacheReadInputTokens: 900 } }),
+    ).logRecords;
+    const r = flat(byAction(records, 'agent.response.completed')!.attributes);
+    expect(r['gen_ai.usage.input_tokens']).toBeUndefined();
+    expect(r['gen_ai.usage.cache_read.input_tokens']).toBe(900);
+  });
+
   it('omits cache attributes entirely when the stream reported none', () => {
     const r = flat(respRec.attributes);
     expect(r['gen_ai.usage.cache_creation.input_tokens']).toBeUndefined();

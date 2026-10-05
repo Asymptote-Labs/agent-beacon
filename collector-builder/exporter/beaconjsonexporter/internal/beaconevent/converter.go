@@ -1362,20 +1362,53 @@ func GenAIToolFromAttrs(attrs map[string]interface{}) *GenAIToolInfo {
 	return tool
 }
 
+// inclusiveInputTokenKeys are the input-count names whose value includes cached
+// prompt tokens. The OTel GenAI semconv says of gen_ai.usage.input_tokens "This
+// value SHOULD include all types of input tokens, including cached tokens", and
+// of each cache count "The value SHOULD be included in gen_ai.usage.input_tokens".
+// The deprecated prompt_tokens spellings it replaced carry OpenAI's prompt_tokens,
+// which counts prompt_tokens_details.cached_tokens too. Claude Code's bare
+// input_tokens is deliberately absent: it is Anthropic's usage.input_tokens,
+// which already excludes cache reads and writes.
+var inclusiveInputTokenKeys = []string{"gen_ai.usage.input_tokens", "llm.usage.prompt_tokens", "gen_ai.usage.prompt_tokens"}
+
 // GenAIUsageFromAttrs normalizes runtime token usage into the canonical
 // gen_ai.usage struct. Alongside the OTel GenAI and legacy llm.usage.* semconv
 // names it accepts Claude Code's bare claude_code.llm_request span attribute
 // names (input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens)
 // so span-level usage and the per-step session drilldown carry real counts.
+//
+// Beacon keeps input, cache read and cache creation disjoint, so an inclusive
+// input count (see inclusiveInputTokenKeys) is reduced by the cache counts
+// reported beside it, the same reduction the Codex turn span gets. The raw
+// attributes keep the value as reported.
 func GenAIUsageFromAttrs(attrs map[string]interface{}) *GenAIUsageInfo {
 	usage := &GenAIUsageInfo{}
-	if value, ok := Int64Attr(attrs, "gen_ai.usage.cache_creation.input_tokens", "gen_ai.usage.cache_creation_input_tokens", "cache_creation_tokens"); ok {
+	var cached int64
+	if value, ok := Int64Attr(attrs, "gen_ai.usage.cache_creation.input_tokens", "gen_ai.usage.cache_write.input_tokens", "gen_ai.usage.cache_creation_input_tokens", "cache_creation_tokens"); ok {
 		usage.CacheCreation = &GenAIUsageCacheCreationInfo{InputTokens: &value}
+		if value > 0 {
+			cached += value
+		}
 	}
 	if value, ok := Int64Attr(attrs, "gen_ai.usage.cache_read.input_tokens", "gen_ai.usage.cache_read_input_tokens", "cache_read_tokens"); ok {
 		usage.CacheRead = &GenAIUsageCacheReadInfo{InputTokens: &value}
+		if value > 0 {
+			cached += value
+		}
 	}
-	if value, ok := Int64Attr(attrs, "gen_ai.usage.input_tokens", "llm.usage.prompt_tokens", "gen_ai.usage.prompt_tokens", "input_tokens"); ok {
+	if value, ok := Int64Attr(attrs, inclusiveInputTokenKeys...); ok {
+		// Guard: an input smaller than its own cache counts cannot contain
+		// them, so that source already reports uncached input (Anthropic's
+		// shape under semconv names) and is stored as reported rather than
+		// having real tokens erased. The semconv names both cache reads and
+		// cache writes as part of input, so both are removed; an emitter that
+		// folds in only one of them undercounts input by the other.
+		if cached > 0 && value >= cached {
+			value -= cached
+		}
+		usage.InputTokens = &value
+	} else if value, ok := Int64Attr(attrs, "input_tokens"); ok {
 		usage.InputTokens = &value
 	}
 	if value, ok := Int64Attr(attrs, "gen_ai.usage.output_tokens", "llm.usage.completion_tokens", "gen_ai.usage.completion_tokens", "output_tokens"); ok {

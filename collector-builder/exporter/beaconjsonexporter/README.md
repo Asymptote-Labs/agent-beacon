@@ -55,6 +55,14 @@ Token and cost usage:
   not its anonymous histogram. The exporter keeps that one span by default,
   promotes `thread.id`/`turn.id`/model, and maps cache reads and cache writes to
   disjoint canonical usage fields. Legacy Codex metric events remain readable.
+- Span and log attributes under the OTel GenAI semconv input names
+  (`gen_ai.usage.input_tokens`, and the older `gen_ai.usage.prompt_tokens` /
+  `llm.usage.prompt_tokens`) count cached prompt tokens as part of input, so the
+  exporter subtracts the cache read and cache creation (`cache_write`) counts
+  reported beside them to store uncached input. An input smaller than those
+  cache counts is already uncached and is stored as reported. Claude Code's bare
+  `input_tokens` is Anthropic's uncached count and is never reduced; `raw` keeps
+  every value as the runtime sent it.
 
 Noise controls:
 
