@@ -147,6 +147,7 @@ func tokenUsageFromAny(value interface{}) TokenUsage {
 		Reasoning:  intFromAny(m["reasoning"]),
 		CacheRead:  intFromAny(cache["read"]),
 		CacheWrite: intFromAny(cache["write"]),
+		Total:      intFromAny(m["total"]),
 	}
 }
 

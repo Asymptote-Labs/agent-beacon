@@ -288,7 +288,8 @@ func TestOpenCodeCompletedAssistantNormalizesUsageOnce(t *testing.T) {
 		t.Fatalf("action = %q", action)
 	}
 	usage := fields["gen_ai"].(map[string]interface{})["usage"].(map[string]interface{})
-	if usage["input_tokens"] != 10 || usage["output_tokens"] != 5 || usage["cost_usd"] != 0.42 {
+	// OpenCode stores output without its reasoning (5 + 2).
+	if usage["input_tokens"] != 10 || usage["output_tokens"] != 7 || usage["cost_usd"] != 0.42 {
 		t.Fatalf("usage = %#v", usage)
 	}
 }
@@ -602,4 +603,82 @@ func readOpenCodeFixture(t *testing.T, name string) map[string]interface{} {
 		t.Fatalf("decode opencode fixture %s: %v", name, err)
 	}
 	return payload
+}
+
+// OpenCode stores tokens.output with reasoning already subtracted (getUsage in
+// packages/opencode/src/session/session.ts sets output to outputTokens minus
+// reasoningTokens). Beacon's gen_ai.usage counts reasoning inside
+// output_tokens, so the mapper adds it back and keeps reasoning as the subset.
+func TestOpenCodeUsageCountsReasoningInsideOutput(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		tokens        map[string]interface{}
+		wantOutput    interface{}
+		wantReasoning interface{}
+	}{
+		{
+			name:          "reasoning model",
+			tokens:        map[string]interface{}{"total": 2462, "input": 1200, "output": 412, "reasoning": 850, "cache": map[string]interface{}{"read": 0, "write": 0}},
+			wantOutput:    1262,
+			wantReasoning: 850,
+		},
+		{
+			// OpenCode 2.x step events (session.step.ended, relayed by the
+			// plugin as message.updated) store visibleOutputTokens and no total.
+			name:          "2.x step without total",
+			tokens:        map[string]interface{}{"input": 1200, "output": 412, "reasoning": 850, "cache": map[string]interface{}{"read": 300, "write": 0}},
+			wantOutput:    1262,
+			wantReasoning: 850,
+		},
+		{
+			// Before v1.3.16 output was the provider's outputTokens whole, and
+			// total matches input + cache + output with reasoning already in it.
+			name:          "pre-1.3.16 output already holds reasoning",
+			tokens:        map[string]interface{}{"total": 2462, "input": 900, "output": 1262, "reasoning": 850, "cache": map[string]interface{}{"read": 300, "write": 0}},
+			wantOutput:    1262,
+			wantReasoning: 850,
+		},
+		{
+			// A provider reporting more reasoning than output can only be the
+			// subtracted shape (OpenCode clamps output at zero).
+			name:          "reasoning above output",
+			tokens:        map[string]interface{}{"total": 500, "input": 400, "output": 0, "reasoning": 120, "cache": map[string]interface{}{"read": 0, "write": 0}},
+			wantOutput:    120,
+			wantReasoning: 120,
+		},
+		{
+			name:          "no reasoning",
+			tokens:        map[string]interface{}{"input": 1200, "output": 412, "reasoning": 0, "cache": map[string]interface{}{"read": 64, "write": 0}},
+			wantOutput:    412,
+			wantReasoning: 0,
+		},
+		{
+			name:          "reasoning without output field",
+			tokens:        map[string]interface{}{"input": 10, "reasoning": 6},
+			wantOutput:    6,
+			wantReasoning: 6,
+		},
+		{
+			name:       "no reasoning field",
+			tokens:     map[string]interface{}{"input": 10, "output": 4},
+			wantOutput: 4,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			usage := opencodeUsage(map[string]interface{}{"tokens": tt.tokens})
+			if usage["output_tokens"] != tt.wantOutput {
+				t.Fatalf("output_tokens = %#v, want %#v (usage %#v)", usage["output_tokens"], tt.wantOutput, usage)
+			}
+			reasoning, hasReasoning := usage["reasoning"].(map[string]interface{})
+			if tt.wantReasoning == nil {
+				if hasReasoning {
+					t.Fatalf("reasoning = %#v, want none", reasoning)
+				}
+				return
+			}
+			if !hasReasoning || reasoning["output_tokens"] != tt.wantReasoning {
+				t.Fatalf("reasoning = %#v, want %#v", usage["reasoning"], tt.wantReasoning)
+			}
+		})
+	}
 }
