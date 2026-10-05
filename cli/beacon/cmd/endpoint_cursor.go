@@ -27,7 +27,11 @@ agent transcripts under ~/.cursor/projects. Beacon reads those committed local
 records and converts them into endpoint events marked harness.collection_method=poll.
 
 Reading is local and offline. Run 'sync' on a schedule, or with --watch, to keep
-the runtime log current.`,
+the runtime log current.
+
+Cursor's local records carry no token counts. 'usage sync' collects Cursor's token
+usage and charges from the Cursor Admin API instead; it is the one Cursor command
+that uses the network, and only when you run it.`,
 }
 
 var endpointCursorSyncCmd = &cobra.Command{
