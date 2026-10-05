@@ -765,7 +765,14 @@ func piUsage(usage map[string]interface{}) map[string]interface{} {
 		out["cache_read"] = map[string]interface{}{"input_tokens": value}
 	}
 	if value, ok := firstToolIntAcross(sources, "cacheWrite"); ok {
-		out["cache_creation"] = map[string]interface{}{"input_tokens": value}
+		creation := map[string]interface{}{"input_tokens": value}
+		// cacheWrite1h is the subset of cacheWrite written with one-hour retention, which Pi fills
+		// only for Anthropic (billed at 2x input against 1.25x for five-minute writes). It is a
+		// breakdown inside cache_creation, never a count of its own, and cannot exceed cacheWrite.
+		if oneHour, ok := firstToolIntAcross(sources, "cacheWrite1h"); ok {
+			creation["ephemeral_1h_input_tokens"] = min(max(oneHour, 0), max(value, 0))
+		}
+		out["cache_creation"] = creation
 	}
 	if value, ok := firstToolIntAcross(sources, "reasoning"); ok {
 		out["reasoning"] = map[string]interface{}{"output_tokens": value}

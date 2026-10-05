@@ -848,6 +848,7 @@ func traceUsage(event schema.Event) *TraceUsageV1 {
 	}
 	if usage.CacheCreation != nil && usage.CacheCreation.InputTokens != nil {
 		out.CacheCreationInputTokens = *usage.CacheCreation.InputTokens
+		out.CacheCreation1hInputTokens = usage.CacheCreation.OneHourInputTokens()
 	}
 	if usage.Reasoning != nil && usage.Reasoning.OutputTokens != nil {
 		out.ReasoningOutputTokens = *usage.Reasoning.OutputTokens
@@ -870,6 +871,7 @@ func addTraceUsage(u *TraceUsageV1, delta TraceUsageV1) {
 	u.OutputTokens += delta.OutputTokens
 	u.CacheReadInputTokens += delta.CacheReadInputTokens
 	u.CacheCreationInputTokens += delta.CacheCreationInputTokens
+	u.CacheCreation1hInputTokens += delta.CacheCreation1hInputTokens
 	u.ReasoningOutputTokens += delta.ReasoningOutputTokens
 	u.CostUSD += delta.CostUSD
 }

@@ -60,7 +60,7 @@ func TestTokenUsageTextLabelsReportedAndEstimatedCost(t *testing.T) {
 		"EST COST USD",
 		"COST USD is what the runtimes reported",
 		"list price",
-		"1h cache writes are priced at the 5m rate",
+		"cache writes are priced at the 5m rate unless the source reported them as 1h writes",
 		// 100 input + 40 output tokens of claude-sonnet-4-5 at $3/$15 per MTok.
 		"0.0009",
 	} {
