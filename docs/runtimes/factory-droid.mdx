@@ -57,6 +57,7 @@ For scheduled collection, run `beacon endpoint factory sync --watch`, or run one
 | Prompt telemetry | Supported through `UserPromptSubmit` hooks |
 | Command, tool, and file telemetry | Supported for session, write/edit/create hook payloads, committed session tool calls/results, stop, session-end, and available OTLP telemetry |
 | Historical sessions | Supported through `beacon endpoint factory sync`, which reads `~/.factory/sessions` locally and offline |
+| Token usage | `sync` reads the running totals Factory keeps in each session's `.settings.json` and emits a `token.usage` event with only what they grew by since the last sync, so `beacon token-usage` sums to the session's final total. It counts the session's own `tokenUsage`; `inclusiveTokenUsage` is used only when `tokenUsage` is absent and no child session is listed, because it adds child sessions, which are synced on their own. A total that goes down is treated as a rewritten file and counts nothing. Factory credits are not USD, so they stay in `raw` (`factory_credits_delta`, `factory_credits_total`) rather than `cost_usd` |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported for the endpoint agent. Factory launch environment and user/project hooks are managed in the user's Droid context |
 

@@ -8,9 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionwindow"
 )
 
 const StateVersion = 1
@@ -22,6 +24,9 @@ type Cursor struct {
 	ModTimeUnixMS  int64  `json:"mtime_ms,omitempty"`
 	SizeBytes      int64  `json:"size_bytes,omitempty"`
 	SettingsUnixMS int64  `json:"settings_mtime_ms,omitempty"`
+	// Usage is the cumulative settings usage Beacon has already emitted for this session, the
+	// baseline the next token.usage delta is measured from. Nil means none has been emitted yet.
+	Usage *UsageTotals `json:"usage_totals,omitempty"`
 }
 
 type State struct {
@@ -99,6 +104,13 @@ type CollectOptions struct {
 	UserMode    bool
 	Print       bool
 	Out         io.Writer
+	// Since, when set, limits the sweep to sessions modified at or after it, newest first. Older
+	// sessions are not read and their cursors do not move, so a later sync still collects them.
+	// The install-time backfill sets it; an ordinary sync leaves it zero.
+	Since time.Time
+	// Budget, when set, caps the bytes this sweep may append. The sweep stops at the first event
+	// that does not fit and returns writer.ErrBudgetSpent, with cursors past only what was written.
+	Budget *writer.Budget
 }
 
 type Summary struct {
@@ -119,6 +131,7 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	if err != nil {
 		return summary, err
 	}
+	refs = sessionwindow.Recent(refs, opts.Since, func(r SessionRef) int64 { return r.ModTimeUnixMS })
 	summary.Sessions = len(refs)
 	if len(refs) == 0 {
 		return summary, nil
@@ -136,6 +149,15 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	var errs []error
 	for _, ref := range refs {
 		changed, collectErr := collectSession(store, ref, state, opts, &summary)
+		if errors.Is(collectErr, writer.ErrBudgetSpent) {
+			// Not a failed session: this one and the rest are left for a later sync, with cursors
+			// that have not moved past anything that was not written.
+			if changed {
+				summary.SessionsChanged++
+			}
+			errs = append(errs, collectErr)
+			break
+		}
 		if collectErr != nil {
 			summary.Errors++
 			errs = append(errs, fmt.Errorf("Factory session %s: %w", ref.ID, collectErr))
@@ -157,7 +179,10 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 		cursor.LastLine = 0
 		cursor.Started = false
 		cursor.SettingsUnixMS = 0
+		// Usage stays: the session id is the same session, and its settings totals are still
+		// cumulative from the same start, so forgetting them would count them again.
 	}
+	seedLegacyUsageBaseline(cursor, ref)
 	if cursor.LastLine > 0 &&
 		cursor.ModTimeUnixMS == ref.ModTimeUnixMS &&
 		cursor.SizeBytes == ref.SizeBytes &&
@@ -177,6 +202,7 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 		MinLine:            cursor.LastLine,
 		SkipSessionStarted: cursor.Started,
 		EmitSettingsUsage:  emitSettingsUsage,
+		PreviousUsage:      cursor.Usage,
 	})
 	for i, item := range mapped {
 		if err := emitEvent(item.Event, opts); err != nil {
@@ -189,7 +215,27 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 		}
 	}
 	advanceCursor(cursor, ref, stats)
+	// Committed only once every event is on disk, so a failed write retries the same delta. A
+	// settings file with no usable totals keeps the baseline it had.
+	if emitSettingsUsage {
+		if totals := SettingsUsageTotals(ref.Settings); totals != nil {
+			cursor.Usage = totals
+		}
+	}
 	return len(mapped) > 0 || stats.Lines != cursor.LastLine || emitSettingsUsage, nil
+}
+
+// seedLegacyUsageBaseline upgrades state written before Beacon kept usage totals. That release
+// emitted the whole cumulative total each time the settings mtime changed, so a cursor that has a
+// settings mtime but no totals already holds a token.usage event for exactly the settings it
+// recorded. When the file is still at that mtime, its totals are what was emitted, and they become
+// the baseline instead of being counted again. A file that changed since then cannot be told
+// apart from first sight, so it is counted from zero, as that release would have.
+func seedLegacyUsageBaseline(cursor *Cursor, ref SessionRef) {
+	if cursor.Usage != nil || cursor.SettingsUnixMS == 0 || cursor.SettingsUnixMS != ref.SettingsUnixMS {
+		return
+	}
+	cursor.Usage = SettingsUsageTotals(ref.Settings)
 }
 
 func advanceCursor(cursor *Cursor, ref SessionRef, stats ReadStats) {
@@ -236,7 +282,7 @@ func emit(event schema.Event, opts CollectOptions) error {
 		}
 	}
 	if opts.Write {
-		if _, err := writer.AppendEvent(event, writer.Options{Path: opts.LogPath, UserMode: opts.UserMode}); err != nil {
+		if _, err := writer.AppendEvent(event, writer.Options{Path: opts.LogPath, UserMode: opts.UserMode, Budget: opts.Budget}); err != nil {
 			return err
 		}
 	}

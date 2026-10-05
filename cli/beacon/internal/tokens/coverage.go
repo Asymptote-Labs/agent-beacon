@@ -76,21 +76,45 @@ var usageExpectation = map[string]struct {
 	"pi_cli":        {ExpectReported, "extension reports usage and cost"},
 	"omp":           {ExpectReported, "extension reports usage and cost"},
 	"prime_agent":   {ExpectReported, "extension reports usage and cost"},
-	// Reported by the managed plugin's `llm_output` hook, which is the only OpenClaw surface that
-	// carries usage. It is a conversation hook, so OpenClaw withholds it from a non-bundled plugin
-	// until `plugins.entries.beacon-endpoint.hooks.allowConversationAccess` is set -- which is why
-	// an OpenClaw endpoint can be collecting everything else and reporting no tokens at all.
-	// `beacon endpoint hooks status --harness openclaw` is where that gap is surfaced.
-	"openclaw_gateway":  {ExpectReported, "plugin reports usage per model response when conversation access is granted"},
+	// Senpi's extension forwards the same finalized-message usage object as the rest of the Pi
+	// family, through the same mapper (cli/beacon-hooks/cmd/pi_family.go). Without its own key it
+	// fell to the unrecognized default and was described as a runtime nobody had looked at.
+	"omo_senpi": {ExpectReported, "extension reports usage and cost"},
+	// Reported live by the managed plugin's `llm_output` hook, the only OpenClaw hook that carries
+	// usage. It is a conversation hook, so OpenClaw withholds it from a non-bundled plugin until
+	// `plugins.entries.beacon-endpoint.hooks.allowConversationAccess` is set -- which is why an
+	// OpenClaw endpoint can be collecting everything else live and reporting no tokens at all.
+	// `beacon endpoint hooks status --harness openclaw` is where that gap is surfaced. The
+	// session-file sync reads the usage OpenClaw commits on each assistant message
+	// (openclawsession/records.go), and needs no grant.
+	"openclaw_gateway":  {ExpectReported, "plugin reports usage per model response when conversation access is granted; beacon endpoint integrations openclaw sessions sync reads it from session files"},
 	"vercel_fx":         {ExpectReported, "session store carries cumulative usage and cost"},
 	"deepseek_harness":  {ExpectReported, "native session backfill reports usage when DeepSeek persists it"},
-	"copilot_cli":       {ExpectReported, "session store carries output tokens and cumulative model usage"},
+	"copilot_cli":       {ExpectReported, "session store carries output tokens, cumulative model usage, and AI-credit cost"},
 	"asymptote_observe": {ExpectReported, "SDK spans carry semconv usage"},
+	// Runtimes whose usage reaches Beacon only through a session-store sync. Their hooks carry no
+	// token counts, so a window of hook activity with no usage is spend missing from the total --
+	// silent, which is right -- but the fix is running the sync rather than repairing a hook, so
+	// the note names the command.
+	//
+	// Hermes keeps running per-session totals, cost included, in its state database, and the sync
+	// differences them into token.usage deltas (hermessession/collect.go, mapUsage).
+	"hermes": {ExpectReported, "beacon endpoint hermes sync reads session totals and cost; hook payloads carry none"},
+	// Factory keeps running totals in each session's settings file, and the sync differences them
+	// (factorysession/mapper.go, emitSettingsUsage). Its OTLP export still contributes when it
+	// carries the semconv names; the sync is the path Beacon reads Factory's own record from.
+	"factory": {ExpectReported, "beacon endpoint factory sync reads session settings totals; OTLP only if it emits GenAI semconv usage"},
+	// The factory_droid spelling never comes from the sync, which writes harness "factory" and is
+	// not normalized onto this name. It is what a Factory OTLP export can name itself, so it keeps
+	// the generic-OTLP expectation rather than pointing at a command that cannot clear it.
+	"factory_droid": {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
 
 	"gemini_cli":     {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
 	"vscode_copilot": {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
-	"factory":        {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
-	"factory_droid":  {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
+	// goose's chat spans carry the full semconv usage set, but they reach Beacon only over OTLP
+	// configured by hand, and its hook adapter carries none. Without its own key it fell to the
+	// unrecognized default.
+	"goose": {ExpectGenericOTLP, "chat spans carry GenAI semconv usage, but only over manually configured OTLP"},
 	// Grok Bot runs on a Cursor-hosted cloud computer and reaches Beacon only through Cursor's
 	// server-side OpenTelemetry export, so whether usage arrives depends on whether that export
 	// carries the semconv names -- the generic-OTLP case exactly, not a runtime Beacon reads.
@@ -99,7 +123,6 @@ var usageExpectation = map[string]struct {
 	"cursor":          {ExpectNone, "no usage on any hook payload; preCompact reports context only"},
 	"antigravity_cli": {ExpectNone, "hook payloads carry no token counts"},
 	"grok":            {ExpectNone, "hook payloads carry no token counts"},
-	"hermes":          {ExpectNone, "hook payloads carry no token counts"},
 	// Devin reaches the log under three names, and all three need an entry. The hook installer
 	// writes --platform devin-cli and devin-desktop, an older install still writes plain devin,
 	// and NormalizeHarnessName passes all three through unchanged. Keying only "devin" left the
@@ -234,10 +257,7 @@ func Coverage(events []schema.Event, installed []string) CoverageReport {
 	// covered on exactly the events that would contribute to its totals -- including the
 	// dedupe and cumulative-delta handling. Counting raw gen_ai.usage blocks here instead
 	// would report a runtime as covered whose usage the report then discards.
-	usageEvents := collectUsageEvents(events, sessionUserContexts(events))
-	usageEvents = preferCodexTurnSpans(usageEvents)
-	usageEvents = dedupeOverlappingChannels(usageEvents)
-	resolveCumulativeSeries(usageEvents)
+	usageEvents, _ := resolveUsageEvents(events, sessionUserContexts(events), liveCaptureStarts(events))
 
 	for _, event := range events {
 		name := asymptoteobserve.NormalizeHarnessName(strings.TrimSpace(event.Harness.Name))

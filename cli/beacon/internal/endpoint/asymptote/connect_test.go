@@ -28,6 +28,7 @@ type fakeForwarder struct {
 	removed   int
 	loadErr   error
 	writeErr  error
+	onLoad    func()
 }
 
 func (f *fakeForwarder) Supported() bool           { return f.supported }
@@ -46,7 +47,13 @@ func (f *fakeForwarder) WriteUnit(vectorBin, configPath string) (string, error) 
 	}
 	return f.unitPath, nil
 }
-func (f *fakeForwarder) Load() error   { f.loads++; return f.loadErr }
+func (f *fakeForwarder) Load() error {
+	f.loads++
+	if f.onLoad != nil {
+		f.onLoad()
+	}
+	return f.loadErr
+}
 func (f *fakeForwarder) Unload() error { f.unloads++; return nil }
 func (f *fakeForwarder) RemoveUnits() {
 	f.removed++

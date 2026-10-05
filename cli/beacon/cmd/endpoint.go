@@ -39,6 +39,7 @@ var endpointOpts struct {
 	onboardingReset          bool
 	onboardingResend         bool
 	connect                  bool
+	noBackfill               bool
 	noBrowser                bool
 	fix                      bool
 	allTargets               bool
@@ -428,6 +429,7 @@ func init() {
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.noBrowser, "no-browser", false, "During interactive setup, print the sign-in URL instead of opening a browser")
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.serviceKind, "service", "", "Service manager to use: auto (default), launchd, systemd, or none for a supervised collector process")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.dryRun, "dry-run", false, "Print planned actions without changing endpoint files or services")
+	endpointInstallCmd.Flags().BoolVar(&endpointOpts.noBackfill, "no-backfill", false, "Skip reading the last 30 days of agent sessions from their local session stores into the runtime log (also "+endpointBackfillEnv+"=0)")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.connect, "connect", false, "After installing, attempt to connect this endpoint to Beacon Cloud (user mode uses the signed-in account; system mode opens browser approval)")
 	endpointOnboardingCmd.Flags().BoolVar(&endpointOpts.onboardingReset, "reset", false, "Clear the onboarding record so the question is asked again")
 	endpointOnboardingCmd.Flags().BoolVar(&endpointOpts.onboardingResend, "resend", false, "Retry a signup that could not be delivered")

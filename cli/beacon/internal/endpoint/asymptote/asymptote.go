@@ -142,7 +142,7 @@ func RenderVectorConfig(opts RenderOptions) (string, error) {
 		}
 		content = strings.Replace(content, privacyTransformMarker, strings.TrimSpace(string(transforms)), 1)
 		content = strings.Replace(content,
-			"[sinks.asymptote_runtime]\ntype = \"http\"\ninputs = [\"beacon_runtime\"]",
+			"[sinks.asymptote_runtime]\ntype = \"http\"\ninputs = [\"beacon_runtime\", \"beacon_backfill\"]",
 			"[sinks.asymptote_runtime]\ntype = \"http\"\ninputs = [\"beacon_runtime_metadata\"]", 1)
 		content = strings.Replace(content,
 			"[sinks.asymptote_inventory]\ntype = \"http\"\ninputs = [\"beacon_inventory\"]",

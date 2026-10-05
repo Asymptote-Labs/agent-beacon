@@ -144,13 +144,25 @@ export function normalizeTurn(
   const respAttrs = base(respAction);
   if (turn.requestModel) respAttrs.push(str('gen_ai.request.model', turn.requestModel));
   if (turn.responseModel) respAttrs.push(str('gen_ai.response.model', turn.responseModel));
+  // The turn's inputTokens is uncached input (Anthropic's usage.input_tokens),
+  // but the OTel GenAI semconv input_tokens "SHOULD include all types of input
+  // tokens, including cached tokens", and the collector reads it that way:
+  // GenAIUsageFromAttrs subtracts the cache counts below to store uncached input.
+  // So the semconv count is emitted here, cache reads and writes folded in.
   if (turn.usage?.inputTokens != null)
-    respAttrs.push(int('gen_ai.usage.input_tokens', turn.usage.inputTokens));
+    respAttrs.push(
+      int(
+        'gen_ai.usage.input_tokens',
+        turn.usage.inputTokens +
+          (turn.usage.cacheReadInputTokens ?? 0) +
+          (turn.usage.cacheCreationInputTokens ?? 0),
+      ),
+    );
   if (turn.usage?.outputTokens != null)
     respAttrs.push(int('gen_ai.usage.output_tokens', turn.usage.outputTokens));
   // Cache counts use the dotted spelling the collector reads first
-  // (GenAIUsageFromAttrs), and are disjoint from input_tokens, so a total is
-  // input + output + cache_read + cache_creation with nothing double-counted.
+  // (GenAIUsageFromAttrs). They are subsets of input_tokens above, and the
+  // collector stores them disjoint from the uncached remainder.
   if (turn.usage?.cacheCreationInputTokens != null)
     respAttrs.push(
       int('gen_ai.usage.cache_creation.input_tokens', turn.usage.cacheCreationInputTokens),

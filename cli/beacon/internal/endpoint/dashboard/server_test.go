@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/diagnostics"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
@@ -698,4 +699,74 @@ func TestRequireLoopbackHostRejectsRebindingHosts(t *testing.T) {
 			t.Errorf("Host %q: status = %d, want %d", host, rec.Code, want)
 		}
 	}
+}
+
+// TestTokensEndpointCountsALiveAndBackfilledRequestOnce reads a Claude Code session the way the
+// production readers hand it to the token report: matched events plus a reduced context set. The
+// live OTLP channel's first event is the user_prompt log; the transcript stamps the request as it
+// streamed, before the api_request log that reports the same usage lands. The cutover has to come
+// from that first live event, which is neither a session.context row nor a usage record, or the
+// backfilled copy of the session's first request is counted beside the live one.
+func TestTokensEndpointCountsALiveAndBackfilledRequestOnce(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	line := func(ts, method, action, usage string) string {
+		genAI := ""
+		if usage != "" {
+			genAI = `,"gen_ai":{"usage":` + usage + `}`
+		}
+		return `{"timestamp":"` + ts + `","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"` + action + `","category":"session"},"severity":"info","endpoint":{"os":"linux","hostname":"devbox"},"harness":{"name":"claude_code","collection_method":"` + method + `"},"session":{"id":"sess-live-poll"},"model":"claude-opus-4-6"` + genAI + `,"message":"` + action + `"}`
+	}
+	lines := []string{
+		line("2026-06-11T10:00:00Z", "otlp", "prompt.submitted", ""),
+		line("2026-06-11T10:00:02Z", "poll", "token.usage", `{"input_tokens":6,"output_tokens":120,"cache_read":{"input_tokens":40000}}`),
+		line("2026-06-11T10:00:06Z", "otlp", "token.usage", `{"input_tokens":6,"output_tokens":120,"cache_read":{"input_tokens":40000}}`),
+	}
+	if err := os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatalf("write fixture log: %v", err)
+	}
+
+	events, contexts, err := ReadTokenEventsAppendOrder(logPath, EventQuery{NoLimit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := tokens.AggregateScopedWithContexts(events, contexts, "", tokens.Options{})
+	if report.Totals.OutputTokens != 120 || report.Totals.CacheReadInputTokens != 40000 || report.SuppressedPollEvents != 1 {
+		t.Fatalf("totals = %+v suppressed = %d, want one request (output 120, cache read 40000) and the backfill copy suppressed", report.Totals, report.SuppressedPollEvents)
+	}
+
+	// A window that starts after the live channel's first event must not move the cutover.
+	windowed, windowContexts, err := ReadTokenEventsAppendOrder(logPath, EventQuery{NoLimit: true, Since: mustParseTime(t, "2026-06-11T10:00:01Z")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report = tokens.AggregateScopedWithContexts(windowed, windowContexts, "", tokens.Options{})
+	if report.Totals.OutputTokens != 120 || report.SuppressedPollEvents != 1 {
+		t.Fatalf("windowed totals = %+v suppressed = %d, want one request", report.Totals, report.SuppressedPollEvents)
+	}
+
+	handler, err := Handler(Options{UserMode: true, LogPath: logPath})
+	if err != nil {
+		t.Fatalf("Handler returned error: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tokens", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var served tokens.Report
+	if err := json.Unmarshal(rec.Body.Bytes(), &served); err != nil {
+		t.Fatalf("unmarshal tokens report: %v", err)
+	}
+	if served.Totals.OutputTokens != 120 {
+		t.Fatalf("/api/tokens output = %d, want 120 (the backfill copy counted twice gives 240)", served.Totals.OutputTokens)
+	}
+}
+
+func mustParseTime(t *testing.T, value string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed
 }

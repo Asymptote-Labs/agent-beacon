@@ -8,7 +8,10 @@ description: "Connect a Beacon endpoint to Beacon Cloud ingest, or disconnect it
 `beacon endpoint connect` forwards this endpoint's telemetry to Beacon so it appears on the Beacon dashboard. For a user endpoint, the signed-in CLI account authorizes a device-specific ingest key without another browser approval. The account token is never copied into endpoint state or given to Vector. System mode retains browser approval because unattended/system installs are account-free.
 
 Forwarding is opt-in and revocable. Runtime telemetry starts at the end of the
-existing runtime log, so pre-connect runtime events are not sent. Inventory starts
+existing runtime log, so pre-connect runtime events are not sent, with one bounded
+exception: a first user-mode connect uploads the last 30 days of agent sessions read
+from the runtimes' own session stores, so the dashboard shows your recent work at once
+(see [Session backfill](#session-backfill)). Inventory starts
 at the beginning of `inventory_state.jsonl` so the dashboard receives the endpoint's
 current inventory baseline, including inventory records written before connection.
 Revoking the device from the dashboard stops ingestion within about a minute.
@@ -30,16 +33,37 @@ beacon endpoint disconnect [flags]
 
 1. Locates Vector: `--vector-bin`, then `BEACON_VECTOR_BIN`, then `/opt/beacon/bin/vector`, the `beacon-vector` keg in each Homebrew prefix, a linked `vector` in each Homebrew prefix, then `PATH`. The `beacon-vector` keg is tried ahead of any other Homebrew Vector because it is the copy the tap pins at a supported version.
 2. Renders the forwarder config for the selected privacy mode into a scratch directory, with a placeholder key, and runs `vector validate` on it. A config Vector rejects stops `connect` here, before anything is sent to the server.
-3. Uses the signed-in account's `device:enroll` scope to register this machine's hostname, operating system, architecture, Beacon version, install id, and install mode. The server returns a separate `bcn_device_*` ingest key. System mode uses the existing browser PKCE device approval instead.
-4. Writes the device key once to `asymptote/vector-secrets.json` with mode `0600`. The account token is not persisted by the endpoint flow.
-5. Renders `asymptote/vector.toml` with the selected privacy mode, runs `vector validate` on the file the service will run, installs a service unit, and starts it.
-6. Records the non-secret enrollment, including privacy mode, in `asymptote/enrollment.json` and `config.json`'s `managed_ingest` block.
+3. On a first user-mode connect, runs the [session backfill](#session-backfill) sweep into the runtime log. It is local and runs before any key exists.
+4. Uses the signed-in account's `device:enroll` scope to register this machine's hostname, operating system, architecture, Beacon version, install id, and install mode. The server returns a separate `bcn_device_*` ingest key. System mode uses the existing browser PKCE device approval instead.
+5. Writes the device key once to `asymptote/vector-secrets.json` with mode `0600`. The account token is not persisted by the endpoint flow.
+6. Renders `asymptote/vector.toml` with the selected privacy mode and runs `vector validate` on the file the service will run. On a first connect, stages the session backfill in `cloud-backfill.jsonl` beside the runtime log. Then installs a service unit and starts it.
+7. Records the non-secret enrollment, including privacy mode, in `asymptote/enrollment.json` and `config.json`'s `managed_ingest` block.
 
 A first connect that fails at `vector validate` or at loading the service saves no enrollment record, so the endpoint is not connected and `beacon endpoint disconnect` cleans up what was written. After `disconnect --keep-credentials`, status reports not connected and names the kept device id.
 
 Re-running `connect` on a connected machine reuses its install id, so the server rotates the existing device's key in place instead of creating a second device. Because that rotation invalidates the key the running forwarder holds, the new config is validated before enrollment: a re-run whose config Vector rejects leaves the forwarder, its key, and its buffer untouched. Under launchd the new forwarder is loaded only after the old one has exited (Vector drains in-flight requests first), and if the new instance has not started within the wait, `connect` fails and points at `launchctl print` for the job (v1.3.2).
 
 Some steps can only fail after the server has issued the key: storing it, validating the config that carries the server's ingest URL, writing the service unit, starting the service, and recording the enrollment. `connect` writes `asymptote/connect-pending` as soon as the key arrives and removes it only when every step has succeeded. If a step in between fails, `connect` says the connect is incomplete and names the retry, and `beacon endpoint status` reports Beacon Cloud as not connected with `connect_incomplete: true` in `--json`. On a re-connect, the forwarder still running holds the key the server just rotated out, so the previous enrollment record and config are not treated as a working connection. On a first connect, Beacon stops and removes any partial forwarder before returning the error, so a later onboarding retry can safely select local-only telemetry. Run `beacon endpoint connect` again once the cause is fixed. An approval that is cancelled or expires before a key is issued rotates nothing and leaves an existing connection as it was.
+
+## Session backfill
+
+A first user-mode connect uploads recent session history so the Beacon Cloud dashboard is not
+empty until an agent runs again. Beacon first runs the same bounded sweep as
+[`beacon endpoint install`](/cli/endpoint-install#session-backfill): the last 30 days of sessions
+from each runtime's own session store, newest first, at most 24 MiB. `endpoint install --connect`
+and the onboarding wizard skip that sweep, because the install has just run it. Then, before the
+forwarder starts, Beacon copies the events those sweeps wrote (`harness.collection_method=poll`,
+timestamped in the last 30 days, newest kept up to 24 MiB) from the runtime log and its archives
+into `cloud-backfill.jsonl` beside the runtime log (`0600`). The forwarder reads that file once from
+the beginning into the same runtime upload, through the same privacy transform as live events, so
+Metadata-only strips the backfill exactly as it strips live telemetry. Hook, OTLP and plugin events
+recorded before the connection stay local.
+
+Only a first connect stages the backfill. A re-connect resumes from the forwarder's checkpoints;
+one that changes the privacy mode clears them and deletes the staged file, so nothing is uploaded
+twice. `disconnect` removes the file. The dashboard collapses any re-sent event on its
+deterministic event id. `--no-backfill` or `BEACON_BACKFILL=0` connects without uploading any
+history. System-mode connects never backfill.
 
 ## Privacy modes
 
@@ -66,6 +90,7 @@ are not uploaded under the new one.
 | Pending-connect marker (only while a connect is unfinished) | `~/.beacon/endpoint/asymptote/connect-pending` (0600, timestamp and reconnect flag only) | `…/Endpoint/asymptote/connect-pending` | `/etc/beacon/endpoint/asymptote/connect-pending` |
 | Device key | `~/.beacon/endpoint/asymptote/vector-secrets.json` (0600) | `…/Endpoint/asymptote/vector-secrets.json` | `/etc/beacon/endpoint/asymptote/vector-secrets.json` |
 | Vector config | `~/.beacon/endpoint/asymptote/vector.toml` (0644, no secret) | `…/Endpoint/asymptote/vector.toml` | `/etc/beacon/endpoint/asymptote/vector.toml` |
+| Staged session backfill (first connect only) | `~/.beacon/endpoint/logs/cloud-backfill.jsonl` (0600) | not written | not written |
 | Buffer and checkpoints | `~/.beacon/endpoint/asymptote/vector-data/` | `…/Endpoint/asymptote/vector-data/` | `/etc/beacon/endpoint/asymptote/vector-data/` |
 | Service | `~/Library/LaunchAgents/com.beacon.endpoint.asymptote-forwarder.plist` | `/Library/LaunchDaemons/com.beacon.endpoint.asymptote-forwarder.plist` | `/etc/systemd/system/beacon-asymptote-forwarder.service` (user mode: `~/.config/systemd/user/`) |
 
@@ -79,6 +104,7 @@ The directory is `0700`. The device key appears only in the secrets file, which 
 | `--no-browser` | System mode only: print the approval URL instead of opening a browser |
 | `--vector-bin <path>` | Vector binary to run |
 | `--privacy-mode <mode>` | Override the onboarding choice with `standard` or `metadata-only` |
+| `--no-backfill` | On a first connect, do not upload the [session backfill](#session-backfill). `BEACON_BACKFILL=0` does the same |
 | `--user` | Use per-user endpoint paths. Enabled by default |
 | `--system` | Use system endpoint paths and a LaunchDaemon or system unit. Requires root; the browser opens as the active console user |
 | `--log-path <path>` | Runtime JSONL log path |

@@ -664,6 +664,183 @@ func TestGenAIUsageFromAttrsNormalizesAliases(t *testing.T) {
 	}
 }
 
+// The OTel GenAI semconv input count, and the OpenAI-style prompt_tokens names
+// it replaced, include cached prompt tokens ("This value SHOULD include all
+// types of input tokens, including cached tokens"), while Beacon's gen_ai.usage
+// keeps uncached input disjoint from cache reads and writes. Every inclusive
+// spelling must therefore lose its cached subset, and Claude Code's bare,
+// already-disjoint names must not.
+func TestGenAIUsageFromAttrsReducesInclusiveInputToUncached(t *testing.T) {
+	ptr := func(v int64) *int64 { return &v }
+	tests := []struct {
+		name          string
+		attrs         map[string]interface{}
+		wantInput     *int64
+		wantCacheRead *int64
+		wantCacheCrt  *int64
+	}{
+		{
+			// OpenLLMetry's Anthropic instrumentation: input_tokens is
+			// usage.input_tokens + cache_read + cache_creation.
+			name: "semconv input with underscore cache aliases",
+			attrs: map[string]interface{}{
+				"gen_ai.usage.input_tokens":                int64(19561),
+				"gen_ai.usage.cache_read_input_tokens":     int64(18500),
+				"gen_ai.usage.cache_creation_input_tokens": int64(1024),
+				"gen_ai.usage.output_tokens":               int64(214),
+			},
+			wantInput: ptr(37), wantCacheRead: ptr(18500), wantCacheCrt: ptr(1024),
+		},
+		{
+			name: "semconv input with dotted cache names",
+			attrs: map[string]interface{}{
+				"gen_ai.usage.input_tokens":                int64(1000),
+				"gen_ai.usage.cache_read.input_tokens":     int64(600),
+				"gen_ai.usage.cache_creation.input_tokens": int64(100),
+			},
+			wantInput: ptr(300), wantCacheRead: ptr(600), wantCacheCrt: ptr(100),
+		},
+		{
+			// The GenAI semconv repository renamed cache creation to cache_write.
+			name: "semconv cache_write spelling is cache creation",
+			attrs: map[string]interface{}{
+				"gen_ai.usage.input_tokens":             int64(1000),
+				"gen_ai.usage.cache_write.input_tokens": int64(250),
+			},
+			wantInput: ptr(750), wantCacheCrt: ptr(250),
+		},
+		{
+			// OpenAI's prompt_tokens includes prompt_tokens_details.cached_tokens.
+			name: "legacy gen_ai prompt_tokens with cache read only",
+			attrs: map[string]interface{}{
+				"gen_ai.usage.prompt_tokens":           int64(2048),
+				"gen_ai.usage.cache_read.input_tokens": int64(1920),
+			},
+			wantInput: ptr(128), wantCacheRead: ptr(1920),
+		},
+		{
+			name: "legacy llm.usage prompt_tokens with cache read",
+			attrs: map[string]interface{}{
+				"llm.usage.prompt_tokens":              int64(500),
+				"gen_ai.usage.cache_read_input_tokens": int64(200),
+			},
+			wantInput: ptr(300), wantCacheRead: ptr(200),
+		},
+		{
+			name: "input exactly equal to its cached subsets leaves zero uncached",
+			attrs: map[string]interface{}{
+				"gen_ai.usage.input_tokens":                int64(700),
+				"gen_ai.usage.cache_read.input_tokens":     int64(600),
+				"gen_ai.usage.cache_creation.input_tokens": int64(100),
+			},
+			wantInput: ptr(0), wantCacheRead: ptr(600), wantCacheCrt: ptr(100),
+		},
+		{
+			// A source whose input is smaller than its own cache counts cannot
+			// be inclusive; it already reports uncached input, so subtracting
+			// would erase real tokens.
+			name: "guard: input below cached subsets is already disjoint",
+			attrs: map[string]interface{}{
+				"gen_ai.usage.input_tokens":                int64(37),
+				"gen_ai.usage.cache_read.input_tokens":     int64(18500),
+				"gen_ai.usage.cache_creation.input_tokens": int64(1024),
+			},
+			wantInput: ptr(37), wantCacheRead: ptr(18500), wantCacheCrt: ptr(1024),
+		},
+		{
+			name:      "semconv input without cache counts is unchanged",
+			attrs:     map[string]interface{}{"gen_ai.usage.input_tokens": int64(12)},
+			wantInput: ptr(12),
+		},
+		{
+			name: "zero cache counts leave input unchanged",
+			attrs: map[string]interface{}{
+				"gen_ai.usage.input_tokens":            int64(12),
+				"gen_ai.usage.cache_read.input_tokens": int64(0),
+			},
+			wantInput: ptr(12), wantCacheRead: ptr(0),
+		},
+		{
+			name: "cache counts without an input count stay as reported",
+			attrs: map[string]interface{}{
+				"gen_ai.usage.cache_read.input_tokens": int64(90),
+			},
+			wantCacheRead: ptr(90),
+		},
+		{
+			// Claude Code's claude_code.llm_request span and api_request log use
+			// Anthropic's disjoint usage under bare names.
+			name: "claude code bare names are already disjoint",
+			attrs: map[string]interface{}{
+				"input_tokens":          int64(1200),
+				"cache_read_tokens":     int64(800),
+				"cache_creation_tokens": int64(256),
+			},
+			wantInput: ptr(1200), wantCacheRead: ptr(800), wantCacheCrt: ptr(256),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			usage := GenAIUsageFromAttrs(tt.attrs)
+			if usage == nil {
+				t.Fatalf("usage = nil, want populated usage")
+			}
+			assertInt64Ptr(t, "input_tokens", usage.InputTokens, tt.wantInput)
+			var cacheRead, cacheCreation *int64
+			if usage.CacheRead != nil {
+				cacheRead = usage.CacheRead.InputTokens
+			}
+			if usage.CacheCreation != nil {
+				cacheCreation = usage.CacheCreation.InputTokens
+			}
+			assertInt64Ptr(t, "cache_read", cacheRead, tt.wantCacheRead)
+			assertInt64Ptr(t, "cache_creation", cacheCreation, tt.wantCacheCrt)
+		})
+	}
+}
+
+func assertInt64Ptr(t *testing.T, field string, got, want *int64) {
+	t.Helper()
+	switch {
+	case got == nil && want == nil:
+	case got == nil || want == nil:
+		t.Fatalf("%s = %v, want %v", field, got, want)
+	case *got != *want:
+		t.Fatalf("%s = %d, want %d", field, *got, *want)
+	}
+}
+
+// The semconv gen_ai.client.token.usage histogram has only input and output
+// token types, so an inclusive input datapoint has no cached sibling to
+// double-count against; it is stored as reported.
+func TestEventsFromMetricsSemconvClientTokenUsageKeepsInputAsReported(t *testing.T) {
+	metrics := pmetric.NewMetrics()
+	resourceMetrics := metrics.ResourceMetrics().AppendEmpty()
+	resourceMetrics.Resource().Attributes().PutStr("service.name", "agent-api")
+	metric := resourceMetrics.ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
+	metric.SetName("gen_ai.client.token.usage")
+	histogram := metric.SetEmptyHistogram()
+	for _, dp := range []struct {
+		tokenType string
+		sum       float64
+	}{{"input", 19561}, {"output", 214}} {
+		point := histogram.DataPoints().AppendEmpty()
+		point.SetCount(1)
+		point.SetSum(dp.sum)
+		point.Attributes().PutStr("gen_ai.token.type", dp.tokenType)
+		point.Attributes().PutStr("gen_ai.request.model", "claude-sonnet-4-5")
+	}
+
+	events := NewConverter(Options{}).EventsFromMetrics(metrics)
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(events))
+	}
+	input := events[0].GenAI.Usage
+	if input == nil || input.InputTokens == nil || *input.InputTokens != 19561 || input.CacheRead != nil || input.CacheCreation != nil {
+		t.Fatalf("input datapoint usage = %#v, want input_tokens 19561 and no cache", input)
+	}
+}
+
 func TestPopulateCommonMapsBeaconSessionAttributes(t *testing.T) {
 	span, traces := newObserveSDKTraceSpan("agent.step")
 	span.Attributes().PutStr("beacon.session.id", "cloud-session-42")

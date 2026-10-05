@@ -661,3 +661,35 @@ func TestSignInScreenHonorsNoBrowser(t *testing.T) {
 		}
 	}
 }
+
+// Confirming Beacon Cloud also uploads the session backfill, so the confirm screen, which is the
+// consent point, has to say so; and a local choice says what the install reads.
+func TestConfirmScreenNamesTheSessionBackfill(t *testing.T) {
+	render := func(destination string, days int) string {
+		model := newWizardModel(WizardOptions{
+			SignedIn:          true,
+			Email:             "person@example.com",
+			OfferManaged:      true,
+			DestinationOnly:   true,
+			PresetDestination: destination,
+			PresetPrivacyMode: "standard",
+			BackfillDays:      days,
+		})
+		model.width, model.height = 100, 30
+		model.screen = confirmScreen
+		model.result.Destination = destination
+		model.result.PrivacyMode = "standard"
+		return strings.Join(strings.Fields(model.View()), " ")
+	}
+	if view := render(DestinationAsymptote, 30); !strings.Contains(view, "It also uploads your agent sessions from the last 30 days") {
+		t.Fatalf("managed confirm screen does not name the backfill:\n%s", view)
+	}
+	if view := render(DestinationLocal, 30); !strings.Contains(view, "Beacon reads your agent sessions from the last 30 days into its local log.") {
+		t.Fatalf("local confirm screen does not name the backfill:\n%s", view)
+	}
+	for _, destination := range []string{DestinationAsymptote, DestinationLocal} {
+		if view := render(destination, 0); strings.Contains(view, "last 30 days") || strings.Contains(view, "agent sessions from") {
+			t.Fatalf("confirm screen names a backfill that is off:\n%s", view)
+		}
+	}
+}

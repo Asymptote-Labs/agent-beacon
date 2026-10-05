@@ -219,5 +219,6 @@ func RenderCoverageText(w io.Writer, report CoverageReport) {
 		fmt.Fprintln(w, "\nSilent runtimes produced events but no token usage, and Beacon is built to read")
 		fmt.Fprintln(w, "usage from them. Check that the runtime is current and its hooks or OTLP export")
 		fmt.Fprintln(w, "are still configured: beacon endpoint status, beacon endpoint diagnostics.")
+		fmt.Fprintln(w, "Where the note names a sync command, usage arrives only when that sync runs.")
 	}
 }
