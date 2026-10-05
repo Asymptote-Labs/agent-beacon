@@ -244,7 +244,7 @@ func classifySessions(path string, query EventQuery) (map[string]sessionClassifi
 	groupCounts := map[string]int{}
 	groupKeys := map[string]string{}
 	for id, stat := range stats {
-		if stat.prompt == "" {
+		if stat.prompt == "" || !stat.hasVisibleActivity {
 			continue
 		}
 		key := recurrenceGroupKey(stat)
