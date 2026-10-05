@@ -122,6 +122,8 @@ Detailed tool inputs can contain sensitive command arguments, paths, URLs, searc
 
 `beacon endpoint claude sync` reads committed Claude Code transcripts after Claude has written them. The cursor is stored in Beacon endpoint state, not in Claude's directory, and tracks files by line so scheduled runs do not re-append the same records. A partly written trailing record is left for the next sweep.
 
+Claude Code writes one streamed API response as several transcript lines, one per content block (thinking, text, each tool call), and every line carries a copy of the response's `message.usage`. The sync emits one `token.usage` event per response, not per line: lines are grouped by `message.id` and `requestId`, and the event carries the snapshot with the largest output count, because lines written before the stream finished carry a placeholder output count. When a sweep lands between two lines of one response, the next sweep adds only what the later lines report beyond what was already counted, so the total is the same however the response is split across sweeps. A forked or resumed session that replays earlier responses into another file is counted once when both files are read in the same sweep.
+
 Run `beacon endpoint claude sync --watch`, or schedule one-shot sweeps, if you want the poll path to stay current. The live OTLP and hook paths remain the real-time integrations; the poll path is for backfill and catch-up.
 
 ### Large backfills and log rotation
