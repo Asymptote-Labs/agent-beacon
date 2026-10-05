@@ -132,6 +132,9 @@ type Options struct {
 	SessionID string
 	// TopLimit caps each group list (0 keeps all groups).
 	TopLimit int
+	// Pricer prices the list-price estimate: an overrides file over the catalog. Nil prices
+	// from the embedded catalog alone.
+	Pricer *pricing.Pricer
 }
 
 type Report struct {
@@ -216,7 +219,11 @@ func aggregate(events []schema.Event, opts Options, sessionUsers sessionUserInde
 	// Last, on the final per-event deltas: an estimate made before the passes above would price
 	// tokens they are about to remove as duplicates, and price a cumulative counter's running
 	// total instead of its interval delta.
-	report.Pricing = priceUsageEvents(usageEvents, priceCatalog())
+	pricer := opts.Pricer
+	if pricer == nil {
+		pricer = pricing.NewPricer(priceCatalog(), nil)
+	}
+	report.Pricing = priceUsageEvents(usageEvents, pricer)
 
 	byModel := map[string]*Usage{}
 	bySession := map[string]*Usage{}

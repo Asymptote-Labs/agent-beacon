@@ -115,14 +115,15 @@ Each usage row in the report (totals, every grouping, time buckets, the session 
 
 A runtime's own figure wins because it knows the plan, the discounts and the routing that a list price cannot. The same rule keeps Claude Code right: its cost arrives on a separate `claude_code.cost.usage` metric beside token events that carry none, so its sessions are reported and its token events add no estimate on top.
 
-`unpriced_events` and `unpriced_tokens` count usage whose model the catalog does not price. Those tokens are in every token total and in no estimate: an unknown model stays unknown rather than reading as free.
+`unpriced_events` and `unpriced_tokens` count usage whose model neither the catalog nor your overrides file prices. Those tokens are in every token total and in no estimate: an unknown model stays unknown rather than reading as free. `beacon pricing show <model>` explains why a model is unpriced, and an [overrides file](/cli/pricing#the-overrides-file) can price it.
 
 The text report prints `COST USD` (reported) and `EST COST USD` (estimate) side by side, a footer naming the catalog, and the effective total. A `?` in the estimate column marks a row whose tokens were all unpriced. The dashboard's token view shows both, the estimate marked `~` and labeled "Est.".
 
 ### How the estimate is computed
 
 - **Catalog.** Rates come from a catalog embedded in the binary, generated from LiteLLM's published model price list. The report's `pricing.catalog` block names the source, its upstream commit and the generation date. Nothing is fetched at report time.
-- **Standard tier only.** No batch, flex or priority tiers, regional surcharges, or subscription and enterprise discounts: nothing in a usage record says a call used them.
+- **Overrides.** A local overrides file (`~/.beacon/endpoint/pricing/overrides.json`, or `--pricing-file`) prices models the catalog does not know and replaces list prices with your negotiated rates. It wins over the catalog for every model one of its names matches. `pricing.overrides` records its path and SHA-256 digest, and each `pricing.models[]` entry says `source: override` or `source: catalog` (plus `alias` when a gateway name was mapped). An invalid file is an error, not a silent fallback to list prices; the dashboard, which must keep answering, falls back and reports it in `pricing.overrides.error`. See [beacon pricing](/cli/pricing).
+- **Standard tier only.** The catalog has no batch, flex or priority tiers, regional surcharges, or subscription and enterprise discounts: nothing in a usage record says a call used them. Put negotiated rates in the overrides file.
 - **Model matching.** The model is matched to a catalog entry by exact name, then by canonical spelling (case, provider prefix), dotted versions (`claude-sonnet-4.6`), Bedrock route prefixes, and after stripping a context-window marker (`[1m]`), a snapshot date or an effort suffix. Never by similarity. `pricing.models` records, per model, the catalog key, how it matched, the base rates in USD per million tokens, and any rate fallback used.
 - **Missing rates.** A model with no published cache-read or cache-write price has those tokens priced at its input rate, and the fallback is named in `pricing.models[].fallbacks`.
 - **1h cache writes** are priced at the 5-minute write rate, because `gen_ai.usage` does not yet carry the split.
@@ -225,6 +226,7 @@ By default, the command reads the per-user endpoint runtime log. Use `--system` 
 | `--system` | Use system endpoint paths |
 | `--log-path <path>` | Runtime JSONL log path. In CI, point this at the session log |
 | `--json` | Print the token usage report as JSON |
+| `--pricing-file <path>` | Pricing overrides file for the cost estimate. Defaults to `pricing/overrides.json` in the endpoint directory when it exists. See [beacon pricing](/cli/pricing) |
 
 ## Related
 

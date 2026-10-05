@@ -362,6 +362,7 @@
               "cli/lenses",
               "cli/git",
               "cli/token-usage",
+              "cli/pricing",
               "cli/version"
             ]
           }

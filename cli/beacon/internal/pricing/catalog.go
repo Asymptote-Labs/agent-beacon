@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"sync"
 )
 
@@ -44,9 +43,7 @@ type CatalogFile struct {
 // Catalog is a loaded, validated price list with its lookup indexes.
 type Catalog struct {
 	file CatalogFile
-	keys []string
-	// index[r] maps a key spelled at rung r to every catalog key with that spelling.
-	index [numRungs]map[string][]string
+	*table
 }
 
 var (
@@ -67,7 +64,8 @@ func Default() *Catalog {
 	return defaultCatalog
 }
 
-// Lookup resolves model against the embedded catalog. See Catalog.Lookup.
+// Lookup resolves model against the embedded catalog alone, without any overrides. See
+// Catalog.Lookup.
 func Lookup(model string) (Resolution, bool) {
 	return Default().Lookup(model)
 }
@@ -87,27 +85,12 @@ func LoadCatalog(data []byte) (*Catalog, error) {
 	if len(file.Models) == 0 {
 		return nil, fmt.Errorf("catalog has no models")
 	}
-	c := &Catalog{file: file}
 	for key, rates := range file.Models {
 		if err := validateRates(rates); err != nil {
 			return nil, fmt.Errorf("model %q: %w", key, err)
 		}
-		c.keys = append(c.keys, key)
 	}
-	sort.Strings(c.keys)
-	for r := range c.index {
-		c.index[r] = make(map[string][]string, len(c.keys))
-	}
-	for _, key := range c.keys {
-		for r := rung(0); r < numRungs; r++ {
-			spelled := spell(r, key)
-			if spelled == "" {
-				continue
-			}
-			c.index[r][spelled] = append(c.index[r][spelled], key)
-		}
-	}
-	return c, nil
+	return &Catalog{file: file, table: newTable(file.Models)}, nil
 }
 
 func validateRates(r Rates) error {

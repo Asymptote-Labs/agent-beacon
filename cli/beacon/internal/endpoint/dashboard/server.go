@@ -18,6 +18,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lensstore"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pricing"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
@@ -314,7 +315,13 @@ func Handler(opts Options) (http.Handler, error) {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		writeJSON(w, tokens.AggregateScopedWithContexts(events, contexts, "", tokenOptions(r)))
+		tokenOpts := tokenOptions(r)
+		// The same overrides file `beacon token-usage` reads by default, re-read on every request
+		// so an edit shows on the next reload. The dashboard only reads it. An invalid file does
+		// not fail the view: the estimate falls back to list prices and the response's
+		// pricing.overrides.error says why.
+		tokenOpts.Pricer, _ = pricing.LoadPricer(pricing.Default(), pricing.DefaultOverridesPath(rulesUserMode), false)
+		writeJSON(w, tokens.AggregateScopedWithContexts(events, contexts, "", tokenOpts))
 	})
 	// Coverage answers a different question from the rollup above -- "is this all of it" rather
 	// than "what did it cost" -- so it gets its own route rather than a flag on /api/tokens. A

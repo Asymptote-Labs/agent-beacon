@@ -67,4 +67,20 @@
 // Lookup turns what a runtime called the model into a catalog entry by a strict ladder and
 // never by substring or prefix similarity; see Lookup for the rungs. Two catalog entries that
 // match at the same rung with different rates leave the model unpriced rather than picking one.
+//
+// # Overrides
+//
+// An operator can price what the catalog cannot -- internal models, releases newer than the
+// catalog, gateway names -- and replace list prices with negotiated ones, in a local JSON file
+// (schema "beacon.pricing.overrides/v1", default <BaseDir>/pricing/overrides.json, see
+// DefaultOverridesPath and docs/cli/pricing.mdx). Beacon only reads that file: the CLI and the
+// dashboard load it per run or per request, and nothing in Beacon writes it. Its rates are
+// decimal US dollars per million tokens, converted exactly to integer microdollars; a value that
+// is negative, zero, finer than a microdollar, quoted, or above MaxOverrideUSDPerMTok is refused
+// with an error naming its key, and so is an unknown or repeated key. A row replaces the
+// catalog row of every name that reaches it: an omitted cache rate is unpublished, priced by the
+// fallbacks above, not inherited from the catalog. An alias sends a reported name to an exact
+// row of the file or catalog key. Pricer.Lookup runs the same ladder over the file's names
+// first, and the catalog sees only models no override name reaches. Resolution.Source and
+// Alias say which list decided.
 package pricing

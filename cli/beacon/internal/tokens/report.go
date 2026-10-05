@@ -5,6 +5,8 @@ import (
 	"io"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pricing"
 )
 
 // RenderText writes a human-readable token usage report.
@@ -156,9 +158,40 @@ func writePricingFooter(w io.Writer, report Report) {
 		provenance = "commit " + commit + ", " + provenance
 	}
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "COST USD is what the runtimes reported. EST COST USD is an estimate at list price:")
+	overrides := report.Pricing.Overrides
+	if overrides != nil && overrides.Error == "" {
+		fmt.Fprintln(w, "COST USD is what the runtimes reported. EST COST USD is an estimate at list price,")
+		fmt.Fprintln(w, "or at your overrides file's rate for the models it names:")
+	} else {
+		fmt.Fprintln(w, "COST USD is what the runtimes reported. EST COST USD is an estimate at list price:")
+	}
 	fmt.Fprintf(w, "  prices from %s (%s);\n", catalog.Name, provenance)
-	fmt.Fprintf(w, "  %s tier, no batch, priority or subscription discounts;\n", report.Pricing.Tier)
+	if overrides != nil {
+		if overrides.Error != "" {
+			fmt.Fprintf(w, "  overrides file NOT used, list prices only: %s;\n", overrides.Error)
+		} else {
+			digest := overrides.SHA256
+			if len(digest) > 12 {
+				digest = digest[:12]
+			}
+			var byOverride []string
+			for _, m := range report.Pricing.Models {
+				if m.Source == pricing.SourceOverride || m.Alias != "" {
+					byOverride = append(byOverride, m.Model)
+				}
+			}
+			fmt.Fprintf(w, "  overrides from %s (sha256 %s, %d model(s), %d alias(es));\n",
+				overrides.Path, digest, overrides.Models, overrides.Aliases)
+			if len(byOverride) > 0 {
+				fmt.Fprintf(w, "  priced by the overrides file: %s;\n", strings.Join(byOverride, ", "))
+			}
+		}
+	}
+	if overrides != nil && overrides.Error == "" {
+		fmt.Fprintf(w, "  catalog rates are %s tier, no batch, priority or subscription discounts;\n", report.Pricing.Tier)
+	} else {
+		fmt.Fprintf(w, "  %s tier, no batch, priority or subscription discounts;\n", report.Pricing.Tier)
+	}
 	fmt.Fprintln(w, "  1h cache writes are priced at the 5m rate until Beacon captures the split.")
 	totals := report.Totals
 	fmt.Fprintf(w, "Effective cost (reported where the runtime reported one, the estimate elsewhere): %s USD",
@@ -178,6 +211,7 @@ func writePricingFooter(w io.Writer, report Report) {
 		}
 		fmt.Fprintf(w, "Not in EST COST USD: %d event(s), %d tokens from models the catalog does not price: %s\n",
 			totals.UnpricedEvents, totals.UnpricedTokens, strings.Join(names, ", "))
+		fmt.Fprintln(w, "  'beacon pricing show <model>' explains a lookup; an overrides file can price the rest.")
 	}
 }
 
