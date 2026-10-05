@@ -107,8 +107,10 @@ trace view uses. Its main parts:
 - `trace.events[]`, in order. Each event has `id`, `number` (1-based
   position), `timestamp`, `type`, `action`, and optional `category`,
   `fidelity` (`observed` | `inferred`), `actor`, `title`, `summary`,
-  `content`, `tool`, `command`, `file`, `mcp`, `approval`, `model`, `usage`,
-  `tool_call_id` and `trace` (span IDs).
+  `content`, `tool`, `command`, `file`, `mcp`, `approval`, `policy`, `error`,
+  `model`, `usage`, `tool_call_id` and `trace` (span IDs). `error.type` is set
+  when the runtime reported the action as failed, which can happen on an event
+  whose `type` is not `error` (a failed MCP call keeps type `mcp`).
 - `type` is one of `user_message`, `agent_message`, `agent_reasoning`,
   `tool_call`, `tool_result`, `command`, `file`, `mcp`, `approval`,
   `token_usage`, `session`, `error` or `other`. The list may grow (see
@@ -247,3 +249,4 @@ The host enforces these rules; a lens does not opt into them.
 
 - `lenses/v1`: initial specification.
 - `lenses/v1` (additive): `token_usage`, the counted usage of the trace.
+- `lenses/v1` (additive): `trace.events[].error`, the failure an event recorded.

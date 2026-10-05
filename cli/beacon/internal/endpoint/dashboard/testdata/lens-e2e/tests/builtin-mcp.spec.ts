@@ -7,13 +7,15 @@ test('mcp: calls by server and tool, with arguments, results and failures', asyn
 
   // The pre- and post-tool events of create_issue are one call; the bare mcp__linear__ name counts;
   // the file read does not.
-  await expect(frame.locator('#summary')).toHaveText('4 calls to 4 tools on 3 servers · 1 failed.');
+  await expect(frame.locator('#summary')).toHaveText('5 calls to 5 tools on 3 servers · 2 failed.');
   const servers = frame.locator('#list button.row');
   await expect(servers).toHaveCount(3);
   await expect(servers.nth(0)).toContainText('github');
   await expect(servers.nth(0)).toContainText('1 failed');
-  await expect(servers.nth(1)).toContainText('filesystem');
-  await expect(servers.nth(2)).toContainText('linear');
+  // linear has two calls, one of them a failure recorded only as the event's error.
+  await expect(servers.nth(1)).toContainText('linear');
+  await expect(servers.nth(1)).toContainText('1 failed');
+  await expect(servers.nth(2)).toContainText('filesystem');
 
   const detail = frame.locator('#detail');
   await expect(detail.locator('h2').first()).toHaveText('github');
@@ -36,14 +38,18 @@ test('mcp: calls by server and tool, with arguments, results and failures', asyn
   await expect(calls.nth(1)).toContainText('failed');
 
   // A resource read shows its method and URI.
-  await servers.nth(1).click();
+  await servers.nth(2).click();
   await expect(detail.locator('h2').first()).toHaveText('filesystem');
   await expect(detail.locator('.call')).toContainText('resources/read');
   await expect(detail.locator('.call')).toContainText('file:///work/app/README.md');
 
-  // A call known only by its tool name still lands under its server.
-  await servers.nth(2).click();
+  // A call known only by its tool name still lands under its server, and a session-store failure
+  // that kept the mcp action and a string result is marked from its error type.
+  await servers.nth(1).click();
   await expect(detail.locator('tbody')).toContainText('save_issue');
+  const failedCall = detail.locator('.call', { hasText: 'list_teams' });
+  await expect(failedCall).toContainText('failed');
+  await expect(detail.locator('.call', { hasText: 'save_issue' })).not.toContainText('failed');
 });
 
 test('mcp: a trace without MCP calls says so', async ({ page }) => {

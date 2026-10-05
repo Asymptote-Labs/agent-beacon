@@ -103,8 +103,11 @@
     };
   }
 
-  // A result is a failure when the MCP response says so: isError, an error member, or an error event.
+  // A call failed when the runtime recorded an error on the event (session-store mappers keep the
+  // mcp action and set error), the event is an error, or the MCP result says isError or carries an
+  // error member.
   function failed(event) {
+    if (event.error && event.error.type) return true;
     if (event.type === "error" || /error|fail/i.test(String(event.action || ""))) return true;
     var result = event.tool && event.tool.result;
     if (!result || typeof result !== "object") return false;

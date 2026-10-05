@@ -93,7 +93,8 @@ The result is `LensDataV1`; `beacon lenses spec` has the full shape. The parts y
   `repository`, `model`, `token_usage`.
 - `trace.events[]`, in order, each with `id`, `number`, `timestamp`, `type`, `action` and
   optional `title`, `summary`, `fidelity`, `content`, `tool`, `command`, `file`, `mcp`,
-  `approval`, `model`, `usage`, `tool_call_id`. `type` is one of `user_message`,
+  `approval`, `policy`, `error`, `model`, `usage`, `tool_call_id`. `error.type` is set when the
+  runtime reported the action as failed, even on an event whose `type` is not `error`. `type` is one of `user_message`,
   `agent_message`, `agent_reasoning`, `tool_call`, `tool_result`, `command`, `file`, `mcp`,
   `approval`, `token_usage`, `session`, `error`, `other`, and the list can grow.
 - `findings`: threat-rule matches, each pointing at its evidence by `event_ids`.

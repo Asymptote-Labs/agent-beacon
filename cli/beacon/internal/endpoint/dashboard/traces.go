@@ -37,6 +37,7 @@ type TraceFileV1 = asymptoteobserve.TraceFileV1
 type TraceMCPV1 = asymptoteobserve.TraceMCPV1
 type TraceApprovalV1 = asymptoteobserve.TraceApprovalV1
 type TracePolicyV1 = asymptoteobserve.TracePolicyV1
+type TraceErrorV1 = asymptoteobserve.TraceErrorV1
 type TraceUsageV1 = asymptoteobserve.TraceUsageV1
 type TraceSpanV1 = asymptoteobserve.TraceSpanV1
 type TraceRangeV1 = asymptoteobserve.TraceRangeV1
@@ -503,6 +504,9 @@ func traceEventFromRecord(record EventRecord, number int) TraceEventV1 {
 		if event.MCP.Session != nil {
 			te.MCP.SessionID = event.MCP.Session.ID
 		}
+	}
+	if event.Error != nil && event.Error.Type != "" {
+		te.Error = &TraceErrorV1{Type: event.Error.Type}
 	}
 	if event.Approval != nil {
 		te.Approval = &TraceApprovalV1{Required: event.Approval.Required, Decision: event.Approval.Decision, Reason: event.Approval.Reason}
@@ -1056,6 +1060,7 @@ func traceEventHaystack(event TraceEventV1) string {
 		valueOrEmpty(event.Policy, func(p *TracePolicyV1) string {
 			return p.ID + " " + p.Name + " " + p.Decision + " " + p.Enforcement + " " + p.Reason
 		}),
+		valueOrEmpty(event.Error, func(e *TraceErrorV1) string { return e.Type }),
 	}, "\n")
 }
 
