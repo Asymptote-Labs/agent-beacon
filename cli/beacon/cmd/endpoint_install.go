@@ -181,8 +181,16 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	installHookTargetsFromEndpointInstall(cmd.ErrOrStderr(), selection.Hooks)
 	refreshAgentSkills(cmd.ErrOrStderr())
 	installAgentSkillsFromOnboarding(cmd, onboarded)
+	// Read recent history from the agents' own session stores so the dashboard has sessions
+	// in it before any agent runs again. Local only, bounded, and never a reason to fail the
+	// install; a connect below ships what it wrote rather than sweeping again.
+	backfilled := false
+	if endpointBackfillEnabled(endpointUserMode()) {
+		reportEndpointBackfill(cmd.OutOrStdout(), runEndpointBackfill(result.LogPath))
+		backfilled = true
+	}
 	finishCloudSetup(cmd, onboarded, connectAfterInstall, func() error {
-		return connectEndpoint(cmd, endpointUserMode(), result.LogPath)
+		return connectEndpoint(cmd, endpointUserMode(), result.LogPath, backfilled)
 	})
 	return nil
 }

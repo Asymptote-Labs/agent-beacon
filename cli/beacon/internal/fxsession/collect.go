@@ -8,9 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionwindow"
 )
 
 // StateVersion is the on-disk version of the collector's cursor file. It exists so a future change
@@ -135,6 +137,13 @@ type CollectOptions struct {
 	// StatePath so a dry run shows the same events every time.
 	Print bool
 	Out   io.Writer
+	// Since, when set, limits the sweep to sessions modified at or after it, newest first. Older
+	// sessions are not read and their cursors do not move, so a later sync still collects them.
+	// The install-time backfill sets it; an ordinary sync leaves it zero.
+	Since time.Time
+	// Budget, when set, caps the bytes this sweep may append. The sweep stops at the first event
+	// that does not fit and returns writer.ErrBudgetSpent, with cursors past only what was written.
+	Budget *writer.Budget
 }
 
 // Summary reports what a sweep did. Malformed and PartialSessions are reported rather than logged
@@ -167,6 +176,7 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	if err != nil {
 		return summary, err
 	}
+	refs = sessionwindow.Recent(refs, opts.Since, func(r SessionRef) int64 { return r.ModTimeUnixMS })
 	summary.Sessions = len(refs)
 	if len(refs) == 0 {
 		return summary, nil
@@ -190,6 +200,15 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	var errs []error
 	for _, ref := range refs {
 		changed, collectErr := collectSession(store, ref, state, opts, &summary)
+		if errors.Is(collectErr, writer.ErrBudgetSpent) {
+			// Not a failed session: this one and the rest are left for a later sync, with cursors
+			// that have not moved past anything that was not written.
+			if changed {
+				summary.SessionsChanged++
+			}
+			errs = append(errs, collectErr)
+			break
+		}
 		if collectErr != nil {
 			summary.Errors++
 			errs = append(errs, fmt.Errorf("fx session %s: %w", ref.ID, collectErr))
@@ -360,7 +379,7 @@ func emit(event schema.Event, opts CollectOptions) error {
 		}
 	}
 	if opts.Write {
-		if _, err := writer.AppendEvent(event, writer.Options{Path: opts.LogPath, UserMode: opts.UserMode}); err != nil {
+		if _, err := writer.AppendEvent(event, writer.Options{Path: opts.LogPath, UserMode: opts.UserMode, Budget: opts.Budget}); err != nil {
 			return err
 		}
 	}

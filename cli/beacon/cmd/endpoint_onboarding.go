@@ -170,6 +170,7 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 		PresetDestination: preset,
 		PresetPrivacyMode: profile.Onboarding.PrivacyMode,
 		OfferAgentTools:   true,
+		BackfillDays:      endpointBackfillDays(),
 		NoBrowser:         endpointOpts.noBrowser,
 		NoDisplay:         onboardingDisplayCheck(),
 		Now:               onboardingClock,

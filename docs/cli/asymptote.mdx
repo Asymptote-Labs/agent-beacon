@@ -46,7 +46,7 @@ beacon endpoint asymptote [command]
 | User mode | `~/.beacon/endpoint/logs/runtime.jsonl` |
 | System mode | `/var/log/beacon-agent/runtime.jsonl` |
 
-The inventory log is the sibling `inventory_state.jsonl` in the same directory.
+The inventory log is the sibling `inventory_state.jsonl` in the same directory. The forwarder also reads the sibling `cloud-backfill.jsonl` once from the beginning: the bounded [session backfill](/cli/endpoint-connect#session-backfill) a first `beacon endpoint connect` stages there. A hand-run forwarder ships it only if that file exists.
 
 ## beacon endpoint asymptote print-config
 

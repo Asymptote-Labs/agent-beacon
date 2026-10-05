@@ -63,11 +63,12 @@ to opt out of managed forwarding.
 
 Choosing Beacon Cloud shows a separate disclosure: your agents' activity on this
 machine will be sent to your Beacon account as it happens, and `beacon endpoint
-disconnect` stops it. The screen makes no claim about data already on disk, because
-the honest version of that claim needs a caveat: runtime events recorded before you
-connect stay local, but the inventory snapshot of which agent runtimes, skills, and
-MCP servers are installed does upload once as the endpoint's baseline. That detail is
-documented here rather than shown on the screen where someone is choosing.
+disconnect` stops it. The confirm screen also says that your agent sessions from the
+last 30 days, read from their session history on this machine, are uploaded. Live
+runtime events recorded before you connect stay local, but the inventory snapshot of
+which agent runtimes, skills, and MCP servers are installed does upload once as the
+endpoint's baseline. That detail is documented here rather than shown on the screen
+where someone is choosing.
 
 Standard forwards the complete locally sanitized event. Metadata only strips retained
 prompts, responses, reasoning, tool arguments/results, command output, raw fields,
@@ -81,9 +82,14 @@ authorized. An endpoint that is already enrolled is not re-enrolled: enrollment
 rotates the device key, so a connected machine keeps the key it has and simply
 records the destination.
 
-Pre-connect runtime history is not uploaded. On the first connection, inventory is
-read from the beginning of `inventory_state.jsonl` so the hosted dashboard receives
-the endpoint's current inventory baseline.
+The install reads the last 30 days of agent sessions from each runtime's own session
+store into the local log (the [session backfill](/cli/endpoint-install#session-backfill)).
+Choosing Beacon Cloud uploads that history on the first connection, so the hosted
+dashboard shows your recent sessions immediately, and the confirm screen says so.
+Choosing Local keeps it on this machine. Other pre-connect runtime history (hook, OTLP
+and plugin events) is not uploaded. On the first connection, inventory is read from
+the beginning of `inventory_state.jsonl` so the hosted dashboard receives the
+endpoint's current inventory baseline.
 
 The managed destination is recorded only once enrollment succeeds. If it fails, the
 local install still succeeds and prints `beacon endpoint connect` as the retry

@@ -12,6 +12,7 @@ Beacon manages different paths depending on whether you install in user mode or 
 | Config | `~/.beacon/endpoint/config.json` | `/Library/Application Support/Beacon/Endpoint/config.json` | `/etc/beacon/endpoint/config.json` | `%ProgramData%\Beacon\Endpoint\config.json` |
 | Base directory | `~/.beacon/endpoint` | `/Library/Application Support/Beacon/Endpoint` | `/etc/beacon/endpoint` | `%ProgramData%\Beacon\Endpoint` |
 | Runtime log | `~/.beacon/endpoint/logs/runtime.jsonl` | `/var/log/beacon-agent/runtime.jsonl` | `/var/log/beacon-agent/runtime.jsonl` | `%ProgramData%\Beacon\Endpoint\logs\runtime.jsonl` |
+| Staged Beacon Cloud session backfill (written by a first connect) | `~/.beacon/endpoint/logs/cloud-backfill.jsonl` | not written | not written | not written |
 | Rotated runtime archives | `~/.beacon/endpoint/logs/runtime.jsonl.1` through `.5` | `/var/log/beacon-agent/runtime.jsonl.1` through `.5` | `/var/log/beacon-agent/runtime.jsonl.1` through `.5` | `%ProgramData%\Beacon\Endpoint\logs\runtime.jsonl.1` through `.5` |
 | Threat rule store | `~/.beacon/endpoint/rules` | `/Library/Application Support/Beacon/Endpoint/rules` | `/etc/beacon/endpoint/rules` | `%ProgramData%\Beacon\Endpoint\rules` |
 | Collector config | `~/.beacon/endpoint/otelcol.yaml` | `/Library/Application Support/Beacon/Endpoint/otelcol.yaml` | `/etc/beacon/endpoint/otelcol.yaml` | `%ProgramData%\Beacon\Endpoint\otelcol.yaml` |

@@ -1,6 +1,6 @@
 [transforms.beacon_runtime_metadata]
 type = "remap"
-inputs = ["beacon_runtime"]
+inputs = ["beacon_runtime", "beacon_backfill"]
 drop_on_abort = true
 source = '''
 event = parse_json!(string!(.message))
