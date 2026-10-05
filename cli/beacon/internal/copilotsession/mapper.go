@@ -26,6 +26,11 @@ type mapper struct {
 
 	lastUsage             map[string]usageTotals
 	outputSinceLastTotals map[string]int64
+
+	// sessionStartMS decides whether the session is billed in AI credits;
+	// lastNanoAiu is the cumulative totalNanoAiu of the last shutdown seen.
+	sessionStartMS int64
+	lastNanoAiu    int64
 }
 
 type sessionContext struct {
@@ -94,6 +99,9 @@ func sessionFromRef(ref SessionRef) sessionContext {
 func (m *mapper) consumeContext(record Record) {
 	switch record.Type {
 	case "session.start", "session.resume":
+		if record.Type == "session.start" {
+			m.noteSessionStart(record)
+		}
 		m.applySessionData(record.Data)
 	case "session.model_change":
 		if model := firstString(record.Data, "newModel", "selectedModel"); model != "" {
@@ -360,10 +368,28 @@ func (m *mapper) rememberShutdownTotals(record Record) {
 		m.lastUsage[model] = total
 		m.outputSinceLastTotals[model] = 0
 	}
+	m.shutdownCostDelta(record)
 }
 
+// emitShutdownUsage differences the shutdown's cumulative totals into usage
+// events. Tokens are per model. Cost is not: totalNanoAiu is one session-wide
+// total, so it is recorded once per shutdown and never copied onto each model.
+// When the shutdown names a single model the cost rides that model's event,
+// because the whole session total is then that model's; otherwise it goes on
+// one dedicated usage event with no model, so the totals still sum exactly.
 func (m *mapper) emitShutdownUsage(record Record) {
 	models := shutdownUsage(record.Data)
+	costNano, costOmitted := m.shutdownCostDelta(record)
+	costRaw := func(raw map[string]interface{}) map[string]interface{} {
+		if costNano > 0 {
+			raw["cost_source"] = "session_shutdown_total_nano_aiu_delta"
+			raw["nano_aiu_delta"] = costNano
+		} else if costOmitted != "" {
+			raw["cost_omitted"] = costOmitted
+		}
+		return raw
+	}
+	costOnModel := costNano > 0 && len(models) == 1
 	for model, current := range models {
 		previous := m.lastUsage[model]
 		outputAlreadyReported := m.outputSinceLastTotals[model]
@@ -383,6 +409,10 @@ func (m *mapper) emitShutdownUsage(record Record) {
 		if n := delta(current.Reasoning, previous.Reasoning); n > 0 {
 			usage.Reasoning = &schema.GenAIUsageReasoningInfo{OutputTokens: &n}
 		}
+		if costOnModel {
+			cost := nanoAiuToUSD(costNano)
+			usage.CostUSD = &cost
+		}
 		m.lastUsage[model] = current
 		m.outputSinceLastTotals[model] = 0
 		if emptyUsage(usage) {
@@ -391,14 +421,28 @@ func (m *mapper) emitShutdownUsage(record Record) {
 		ev := m.base(record, "token.usage", "metric", schema.SeverityInfo, "GitHub Copilot CLI shutdown token usage")
 		ev.Model = model
 		ev.GenAI = withGenAI(ev.GenAI, func(genAI *schema.GenAIInfo) { genAI.Usage = usage })
-		ev.Raw = m.raw(record, map[string]interface{}{
+		ev.Raw = m.raw(record, costRaw(map[string]interface{}{
 			"token_source":                      "session_shutdown_model_metrics_delta",
 			"output_tokens_already_reported":    outputAlreadyReported,
 			"cumulative_total_premium_requests": numberValue(record.Data["totalPremiumRequests"]),
 			"cumulative_total_nano_aiu":         numberValue(record.Data["totalNanoAiu"]),
-		})
+		}))
 		m.append(record, "shutdown.usage."+model, ev)
 	}
+	if costNano <= 0 || costOnModel {
+		return
+	}
+	cost := nanoAiuToUSD(costNano)
+	ev := m.base(record, "token.usage", "metric", schema.SeverityInfo, "GitHub Copilot CLI session cost")
+	ev.Model = ""
+	ev.GenAI = withGenAI(ev.GenAI, func(genAI *schema.GenAIInfo) {
+		genAI.Usage = &schema.GenAIUsageInfo{CostUSD: &cost}
+	})
+	ev.Raw = m.raw(record, costRaw(map[string]interface{}{
+		"cumulative_total_premium_requests": numberValue(record.Data["totalPremiumRequests"]),
+		"cumulative_total_nano_aiu":         numberValue(record.Data["totalNanoAiu"]),
+	}))
+	m.append(record, "shutdown.cost", ev)
 }
 
 func (m *mapper) append(record Record, suffix string, ev schema.Event) {

@@ -64,6 +64,7 @@ For a one-command local validation flow, see [Test GitHub Copilot CLI telemetry]
 | Command, tool, and file telemetry | OTLP covers live tool and approval-like activity. Polling reconstructs complete tool calls/results, commands, and file reads or writes from session records |
 | Approvals | Supported from live OTLP permission activity. Polling does not synthesize approval decisions |
 | Token usage | Supported from local session polling. Assistant message output tokens are recorded directly; shutdown model totals are differenced for input, cache, and reasoning usage |
+| Cost | Supported from local session polling for sessions started on or after 2026-06-01, when Copilot billing moved to AI credits. The shutdown's session-wide `totalNanoAiu` is differenced and recorded once as `gen_ai.usage.cost_usd` (10^9 nano-AIU = one AI credit = US$0.01). Earlier sessions were billed per premium request and record no cost. See [Token usage](/cli/token-usage) |
 | Local JSONL and dashboard | Supported after events reach the local runtime log |
 | MDM deployment | Supported for the endpoint agent. Copilot launch-environment configuration stays under MDM or customer policy control |
 
