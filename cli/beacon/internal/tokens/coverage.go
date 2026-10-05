@@ -234,10 +234,7 @@ func Coverage(events []schema.Event, installed []string) CoverageReport {
 	// covered on exactly the events that would contribute to its totals -- including the
 	// dedupe and cumulative-delta handling. Counting raw gen_ai.usage blocks here instead
 	// would report a runtime as covered whose usage the report then discards.
-	usageEvents := collectUsageEvents(events, sessionUserContexts(events))
-	usageEvents = preferCodexTurnSpans(usageEvents)
-	usageEvents = dedupeOverlappingChannels(usageEvents)
-	resolveCumulativeSeries(usageEvents)
+	usageEvents, _ := resolveUsageEvents(events, sessionUserContexts(events), liveCaptureStarts(events))
 
 	for _, event := range events {
 		name := asymptoteobserve.NormalizeHarnessName(strings.TrimSpace(event.Harness.Name))
