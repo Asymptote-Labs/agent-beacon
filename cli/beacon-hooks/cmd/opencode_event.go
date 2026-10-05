@@ -465,13 +465,15 @@ func opencodeUsage(input map[string]interface{}) map[string]interface{} {
 	if value, ok := jsonInt(tokens["input"]); ok {
 		usage["input_tokens"] = value
 	}
-	if value, ok := jsonInt(tokens["output"]); ok {
-		usage["output_tokens"] = value
-	}
-	if value, ok := jsonInt(tokens["reasoning"]); ok {
-		usage["reasoning"] = map[string]interface{}{"output_tokens": value}
-	}
 	cache := firstMap(tokens, "cache")
+	output, hasOutput := jsonInt(tokens["output"])
+	reasoning, hasReasoning := jsonInt(tokens["reasoning"])
+	if hasOutput || hasReasoning {
+		usage["output_tokens"] = opencodeOutputTokens(tokens, cache, output, reasoning)
+	}
+	if hasReasoning {
+		usage["reasoning"] = map[string]interface{}{"output_tokens": reasoning}
+	}
 	if value, ok := jsonInt(cache["read"]); ok {
 		usage["cache_read"] = map[string]interface{}{"input_tokens": value}
 	}
@@ -482,6 +484,46 @@ func opencodeUsage(input map[string]interface{}) map[string]interface{} {
 		usage["cost_usd"] = value
 	}
 	return usage
+}
+
+// opencodeOutputTokens returns gen_ai output_tokens for an OpenCode tokens
+// object. gen_ai.usage counts reasoning inside output_tokens, with
+// reasoning.output_tokens as the subset, and totals leave the subset out so
+// it is counted once. OpenCode has stored output both ways. Since v1.3.16 its
+// getUsage (packages/opencode/src/session/session.ts) sets output to the
+// provider's outputTokens minus reasoningTokens, and the 2.x runtime stores
+// visibleOutputTokens, so reasoning has to be added back or it drops out of
+// every total. Earlier releases stored outputTokens whole, which already
+// holds reasoning, so adding it again would count it twice.
+//
+// tokens.total settles which shape a message has: OpenCode copies the
+// provider's total, which is the full input side plus every output token, so
+// it reaches input + cache + output + reasoning only when output left
+// reasoning out. A reasoning count above output can only mean the same.
+// 2.x step events carry no total at all. Releases before v1.1.57 (February
+// 2026) did not either, but a live event is far more likely to come from the
+// current runtime, so a missing total is taken as the current shape. The poll
+// backfill (cli/beacon/internal/opencodesession) makes the same call, except
+// that a stored message without a total is from those early releases, because
+// 2.x keeps its messages in a table the backfill does not read.
+func opencodeOutputTokens(tokens, cache map[string]interface{}, output, reasoning int) int {
+	if reasoning <= 0 {
+		return output
+	}
+	if reasoning > output {
+		return output + reasoning
+	}
+	total, ok := jsonInt(tokens["total"])
+	if !ok || total <= 0 {
+		return output + reasoning
+	}
+	input, _ := jsonInt(tokens["input"])
+	cacheRead, _ := jsonInt(cache["read"])
+	cacheWrite, _ := jsonInt(cache["write"])
+	if total >= input+cacheRead+cacheWrite+output+reasoning {
+		return output + reasoning
+	}
+	return output
 }
 
 func opencodePartEvents(base map[string]interface{}, part map[string]interface{}) []normalizedEvent {

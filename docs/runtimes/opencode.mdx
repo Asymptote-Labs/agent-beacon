@@ -60,7 +60,7 @@ beacon endpoint opencode sync
 | File telemetry | Read/search/glob and write/edit/patch activity with agent-derived paths; empty session diffs are ignored |
 | Web and MCP telemetry | Web tool arguments/results and normalized MCP server/tool/resource context |
 | Approval telemetry | Requests plus `once`, `always`, and `reject` replies from the live plugin, normalized as requested, allowed, and denied. Approval telemetry is not recovered from the session-store poll path |
-| Model and usage | Provider/model, finish reason, token usage, cache usage, reasoning tokens, and runtime-reported cost where OpenCode reports them |
+| Model and usage | Provider/model, finish reason, token usage, cache usage, reasoning tokens, and runtime-reported cost where OpenCode reports them. Since v1.3.16 OpenCode stores output tokens with reasoning taken out; Beacon adds reasoning back into `output_tokens` so reasoning stays a subset of output, as for every other runtime, and counts once in totals. Messages from earlier releases already include it, and their `tokens.total` tells the two apart |
 | Session telemetry | Live create, busy/idle/end, retry, and error boundaries through the plugin; persisted sessions can be backfilled through `beacon endpoint opencode sync` |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported for the endpoint agent. OpenCode plugins are installed separately in the logged-in user's context |
