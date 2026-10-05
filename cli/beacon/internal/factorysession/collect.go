@@ -22,6 +22,9 @@ type Cursor struct {
 	ModTimeUnixMS  int64  `json:"mtime_ms,omitempty"`
 	SizeBytes      int64  `json:"size_bytes,omitempty"`
 	SettingsUnixMS int64  `json:"settings_mtime_ms,omitempty"`
+	// Usage is the cumulative settings usage Beacon has already emitted for this session, the
+	// baseline the next token.usage delta is measured from. Nil means none has been emitted yet.
+	Usage *UsageTotals `json:"usage_totals,omitempty"`
 }
 
 type State struct {
@@ -157,7 +160,10 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 		cursor.LastLine = 0
 		cursor.Started = false
 		cursor.SettingsUnixMS = 0
+		// Usage stays: the session id is the same session, and its settings totals are still
+		// cumulative from the same start, so forgetting them would count them again.
 	}
+	seedLegacyUsageBaseline(cursor, ref)
 	if cursor.LastLine > 0 &&
 		cursor.ModTimeUnixMS == ref.ModTimeUnixMS &&
 		cursor.SizeBytes == ref.SizeBytes &&
@@ -177,6 +183,7 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 		MinLine:            cursor.LastLine,
 		SkipSessionStarted: cursor.Started,
 		EmitSettingsUsage:  emitSettingsUsage,
+		PreviousUsage:      cursor.Usage,
 	})
 	for i, item := range mapped {
 		if err := emitEvent(item.Event, opts); err != nil {
@@ -189,7 +196,27 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 		}
 	}
 	advanceCursor(cursor, ref, stats)
+	// Committed only once every event is on disk, so a failed write retries the same delta. A
+	// settings file with no usable totals keeps the baseline it had.
+	if emitSettingsUsage {
+		if totals := SettingsUsageTotals(ref.Settings); totals != nil {
+			cursor.Usage = totals
+		}
+	}
 	return len(mapped) > 0 || stats.Lines != cursor.LastLine || emitSettingsUsage, nil
+}
+
+// seedLegacyUsageBaseline upgrades state written before Beacon kept usage totals. That release
+// emitted the whole cumulative total each time the settings mtime changed, so a cursor that has a
+// settings mtime but no totals already holds a token.usage event for exactly the settings it
+// recorded. When the file is still at that mtime, its totals are what was emitted, and they become
+// the baseline instead of being counted again. A file that changed since then cannot be told
+// apart from first sight, so it is counted from zero, as that release would have.
+func seedLegacyUsageBaseline(cursor *Cursor, ref SessionRef) {
+	if cursor.Usage != nil || cursor.SettingsUnixMS == 0 || cursor.SettingsUnixMS != ref.SettingsUnixMS {
+		return
+	}
+	cursor.Usage = SettingsUsageTotals(ref.Settings)
 }
 
 func advanceCursor(cursor *Cursor, ref SessionRef, stats ReadStats) {

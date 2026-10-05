@@ -17,6 +17,10 @@ type MapOptions struct {
 	MinLine            int
 	SkipSessionStarted bool
 	EmitSettingsUsage  bool
+	// PreviousUsage is the cumulative settings usage already emitted for the session; the
+	// token.usage event carries only what was added since. Nil emits the whole total, which is
+	// the delta from zero.
+	PreviousUsage *UsageTotals
 }
 
 func MapSession(ref SessionRef, records []Record, opts MapOptions) []MappedEvent {
@@ -193,26 +197,45 @@ func (m *mapper) rememberToolCalls(msg *Message) {
 	}
 }
 
+// emitSettingsUsage reports what the session's settings totals grew by since the totals Beacon
+// last emitted. Factory rewrites <session-id>.settings.json with running session totals, not
+// per-turn usage, so emitting the totals themselves counted everything spent so far again on
+// every rewrite.
 func (m *mapper) emitSettingsUsage(line int) {
-	usage := m.ref.Settings.TokenUsage
-	if usage == nil {
-		usage = m.ref.Settings.InclusiveTokenUsage
+	current := SettingsUsageTotals(m.ref.Settings)
+	if current == nil {
+		return
 	}
-	if usage == nil {
+	var previous UsageTotals
+	if m.opts.PreviousUsage != nil {
+		previous = *m.opts.PreviousUsage
+	}
+	delta := current.since(previous)
+	if delta.empty() {
 		return
 	}
 	record := &Record{Line: line, Type: "settings", Timestamp: unixMilliToRFC3339(m.ref.SettingsUnixMS)}
 	ev := m.base(record, "token.usage", "metric", schema.SeverityInfo, "Factory Droid token usage")
-	ev.GenAI = &schema.GenAIInfo{Usage: usageInfo(usage)}
-	raw := map[string]any{"source": "factory_settings"}
+	ev.GenAI = &schema.GenAIInfo{Usage: usageInfo(delta)}
+	raw := map[string]any{"token_source": "settings_totals_delta"}
 	if m.ref.Settings.AssistantActiveTimeMs > 0 {
 		raw["assistant_active_time_ms"] = m.ref.Settings.AssistantActiveTimeMs
 	}
-	if usage.FactoryCredits > 0 {
-		raw["factory_credits"] = usage.FactoryCredits
+	// Credits are Factory's own billing unit, not USD, so they stay in raw rather than
+	// gen_ai.usage.cost_usd. The delta sums like the tokens beside it; the total is the session's
+	// running figure as Factory stored it.
+	if delta.FactoryCredits > 0 {
+		raw["factory_credits_delta"] = delta.FactoryCredits
+	}
+	if current.FactoryCredits > 0 {
+		raw["factory_credits_total"] = current.FactoryCredits
 	}
 	ev.Raw = raw
-	m.append(record, fmt.Sprintf("settings.usage.%d", m.ref.SettingsUnixMS), ev)
+	// Keyed on the totals rather than the settings mtime: the same totals always name the same
+	// event, however many times the file is rewritten around them.
+	m.append(record, fmt.Sprintf("settings.usage.%d.%d.%d.%d.%d.%g",
+		current.InputTokens, current.OutputTokens, current.CacheCreationTokens,
+		current.CacheReadTokens, current.ThinkingTokens, current.FactoryCredits), ev)
 }
 
 func (m *mapper) base(record *Record, action, category string, severity schema.Severity, message string) schema.Event {
@@ -374,7 +397,7 @@ func rawString(raw json.RawMessage) string {
 	return string(raw)
 }
 
-func usageInfo(usage *TokenUsage) *schema.GenAIUsageInfo {
+func usageInfo(usage UsageTotals) *schema.GenAIUsageInfo {
 	info := &schema.GenAIUsageInfo{}
 	if usage.InputTokens > 0 {
 		info.InputTokens = int64Ptr(usage.InputTokens)
