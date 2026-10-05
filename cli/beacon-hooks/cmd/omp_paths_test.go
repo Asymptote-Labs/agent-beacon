@@ -23,16 +23,17 @@ func ompFileOf(t *testing.T, events []normalizedEvent) map[string]interface{} {
 // with the selector and `~` the model wrote already resolved by the runtime. tool.path keeps what
 // was written.
 func TestOmpResultRecordsTheFileTheRuntimeResolved(t *testing.T) {
+	root := t.TempDir()
 	for _, tc := range []struct {
 		tool, target string
 		details      map[string]interface{}
 		want         string
 	}{
 		{"read", ".env:1-20", map[string]interface{}{"meta": map[string]interface{}{
-			"source": map[string]interface{}{"type": "path", "value": "/repo/.env"},
-		}}, "/repo/.env"},
-		{"write", "notes.md", map[string]interface{}{"resolvedPath": "/repo/notes.md"}, "/repo/notes.md"},
-		{"edit", "main.go", map[string]interface{}{"path": "/repo/main.go", "diff": "-a\n+b"}, "/repo/main.go"},
+			"source": map[string]interface{}{"type": "path", "value": filepath.Join(root, ".env")},
+		}}, filepath.Join(root, ".env")},
+		{"write", "notes.md", map[string]interface{}{"resolvedPath": filepath.Join(root, "notes.md")}, filepath.Join(root, "notes.md")},
+		{"edit", "main.go", map[string]interface{}{"path": filepath.Join(root, "main.go"), "diff": "-a\n+b"}, filepath.Join(root, "main.go")},
 	} {
 		t.Run(tc.tool, func(t *testing.T) {
 			events := ompRuntime.endpointEvents(map[string]interface{}{
@@ -55,7 +56,11 @@ func TestOmpResultRecordsTheFileTheRuntimeResolved(t *testing.T) {
 func TestOmpPathAsWrittenIsResolvedTheWayTheRuntimeWill(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	cwd := t.TempDir()
+	// A path that starts at the root is absolute to the runtime. On Windows it names no drive, and
+	// lands on the working directory's.
+	rooted := func(p string) string { return filepath.VolumeName(cwd) + filepath.FromSlash(p) }
 	// A file whose real name looks like a selector is kept whole, as the runtime keeps it.
 	if err := os.WriteFile(filepath.Join(cwd, "report:2024"), nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -67,16 +72,16 @@ func TestOmpPathAsWrittenIsResolvedTheWayTheRuntimeWill(t *testing.T) {
 		{"notes.md:1-50:raw", filepath.Join(cwd, "notes.md")},
 		{"log.txt:-60", filepath.Join(cwd, "log.txt")},
 		{"~/.ssh/id_rsa:raw", filepath.Join(home, ".ssh/id_rsa")},
-		{"/etc/hosts", "/etc/hosts"},
+		{"/etc/hosts", rooted("/etc/hosts")},
 		{"report:2024", filepath.Join(cwd, "report:2024")},
 		// Not selector grammar: a range may not end in `+`.
 		{"a.go:12+", filepath.Join(cwd, "a.go:12+")},
 		// The runtime's shorthand, applied the way its expandPath and resolveToCwd apply it.
 		{"/", cwd},
 		{"//", cwd},
-		{"@/etc/hosts", "/etc/hosts"},
+		{"@/etc/hosts", rooted("/etc/hosts")},
 		{"@~/notes.md", filepath.Join(home, "notes.md")},
-		{":/etc/hosts", "/etc/hosts"},
+		{":/etc/hosts", rooted("/etc/hosts")},
 		{":../shared/a.go:1-5", filepath.Join(filepath.Dir(cwd), "shared/a.go")},
 		{"~work/notes.md", filepath.Join(home, "work/notes.md")},
 		{"Screenshot 2026-10-05 at 3.35.12\u202fPM.png", filepath.Join(cwd, "Screenshot 2026-10-05 at 3.35.12 PM.png")},
@@ -176,14 +181,16 @@ func TestFileURLPathFollowsTheHost(t *testing.T) {
 // Oh My Pi's default edit format can change several files in one call. Its result names no single
 // path, so each changed file is recorded as its own file.modified, keeping the edit's operation.
 func TestOmpMultiFileEditRecordsEachFile(t *testing.T) {
+	root := t.TempDir()
+	a, b := filepath.Join(root, "a.go"), filepath.Join(root, "b.go")
 	events := ompRuntime.endpointEvents(map[string]interface{}{
 		"type": "tool_result", "toolName": "edit", "toolCallId": "call-1",
 		"input": map[string]interface{}{"input": "[a.go#1A2B]\n…", "paths": []interface{}{"a.go", "b.go"}},
 		"details": map[string]interface{}{
 			"diff": "a-diff\nb-diff",
 			"perFileResults": []interface{}{
-				map[string]interface{}{"path": "/repo/a.go", "diff": "a-diff", "op": "update"},
-				map[string]interface{}{"path": "/repo/b.go", "diff": "b-diff", "op": "create"},
+				map[string]interface{}{"path": a, "diff": "a-diff", "op": "update"},
+				map[string]interface{}{"path": b, "diff": "b-diff", "op": "create"},
 			},
 		},
 	}, "sess-1")
@@ -196,8 +203,8 @@ func TestOmpMultiFileEditRecordsEachFile(t *testing.T) {
 		got = append(got, [3]string{event.action, path, operation})
 	}
 	want := [][3]string{
-		{"file.modified", "/repo/a.go", "modify"},
-		{"file.modified", "/repo/b.go", "create"},
+		{"file.modified", a, "modify"},
+		{"file.modified", b, "create"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("events = %v, want %v", got, want)

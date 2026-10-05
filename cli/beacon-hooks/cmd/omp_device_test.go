@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -138,15 +139,20 @@ func TestOmpResourceTargetsAreNotFileActivity(t *testing.T) {
 	}
 }
 
-// A `file://` URI is a filesystem path spelled as a URI, and is recorded as the path.
+// A `file://` URI is a filesystem path spelled as a URI, and is recorded as the path it names on
+// the host; fileURLPath's own test covers the other platform's reading.
 func TestOmpFileURIIsRecordedAsItsPath(t *testing.T) {
+	uri, want := "file:///repo/main.go", "/repo/main.go"
+	if runtime.GOOS == "windows" {
+		uri, want = "file:///C:/repo/main.go", `C:\repo\main.go`
+	}
 	events := ompRuntime.endpointEvents(map[string]interface{}{
-		"type": "tool_result", "toolName": "read", "input": map[string]interface{}{"path": "file:///repo/main.go"},
+		"type": "tool_result", "toolName": "read", "input": map[string]interface{}{"path": uri},
 	}, "sess-1")
 	if len(events) != 1 || events[0].action != "file.read" {
 		t.Fatalf("events = %+v, want one file.read", events)
 	}
-	if file, _ := events[0].fields["file"].(map[string]interface{}); file["path"] != "/repo/main.go" {
-		t.Fatalf("file = %v, want /repo/main.go", file)
+	if file, _ := events[0].fields["file"].(map[string]interface{}); file["path"] != want {
+		t.Fatalf("file = %v, want %s", file, want)
 	}
 }

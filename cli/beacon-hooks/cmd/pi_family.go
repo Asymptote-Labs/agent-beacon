@@ -580,9 +580,11 @@ var ompUnicodeSpaces = regexp.MustCompile("[\u00A0\u2000-\u200A\u202F\u205F\u300
 // The rest of the runtime's shorthand is applied the same way its expandPath and resolveToCwd
 // apply it (tools/path-utils.ts), so the path recorded before a call is the one its result will
 // report: Unicode spaces become plain spaces; `~name` is `<home>/name`, the runtime's reading
-// rather than a shell's; a Windows drive alias is translated for the host (ompDriveAliasPath); and
-// a path that is nothing but slashes means the working directory, because the runtime reads `/`
-// as "here" rather than the filesystem root.
+// rather than a shell's; a Windows drive alias is translated for the host (ompDriveAliasPath); a
+// path that is nothing but slashes means the working directory, because the runtime reads `/` as
+// "here" rather than the filesystem root; and on Windows a path that starts at a root but names no
+// drive (`\Users\me\a.go`) is already absolute to the runtime -- Node's path.isAbsolute says so --
+// and lands on the working directory's drive rather than under the working directory.
 //
 // The selector is peeled the way the runtime peels it: from the last colon, only when what follows
 // is selector grammar, at most twice (a range and `raw` may be combined), and not at all when a
@@ -603,6 +605,8 @@ func ompToolPath(target, cwd, goos string, wsl bool) string {
 	switch {
 	case strings.Trim(p, "/") == "" && cwd != "":
 		p = cwd
+	case !filepath.IsAbs(p) && cwd != "" && goos == "windows" && (p[0] == '/' || p[0] == '\\'):
+		p = filepath.VolumeName(cwd) + filepath.FromSlash(p)
 	case !filepath.IsAbs(p) && cwd != "":
 		p = filepath.Join(cwd, p)
 	}
