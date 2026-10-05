@@ -329,6 +329,7 @@ func (c Converter) EventFromLog(resourceAttrs map[string]interface{}, record plo
 	})
 	c.NormalizeCodexLogEvent(&event, attrs)
 	c.NormalizeClaudeLogEvent(&event, attrs, body)
+	NormalizeGeminiLogEvent(&event, attrs)
 	// Last, so it sees the action and category the normalizers settled on rather
 	// than the ones InferAction guessed.
 	c.PromoteRetainedContent(&event, attrs, body)
@@ -951,9 +952,16 @@ func (c Converter) eventsFromUsageMetric(resourceAttrs map[string]interface{}, m
 			"metric_temporality": sum.AggregationTemporality().String(),
 			"metric_monotonic":   sum.IsMonotonic(),
 		}
+		// Gemini CLI's input series includes its cache series and its output series
+		// leaves out its thought series; see gemini_usage.go. Nil for every other metric.
+		geminiSeries := geminiTokenSeriesByScope(metric)
 		for i := 0; i < sum.DataPoints().Len(); i++ {
 			dp := sum.DataPoints().At(i)
-			events = append(events, c.usageEventFromDataPoint(resourceAttrs, metric, dp.Attributes(), dp.Timestamp(), adjustValue(dp.Attributes(), dp.Timestamp(), numberDataPointValue(dp)), extra))
+			event := c.usageEventFromDataPoint(resourceAttrs, metric, dp.Attributes(), dp.Timestamp(), adjustValue(dp.Attributes(), dp.Timestamp(), numberDataPointValue(dp)), extra)
+			if geminiSeries != nil {
+				geminiSeries.apply(&event, dp.Attributes(), dp.Timestamp(), numberDataPointValue(dp))
+			}
+			events = append(events, event)
 		}
 	case pmetric.MetricTypeGauge:
 		gauge := metric.Gauge()

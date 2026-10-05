@@ -268,6 +268,14 @@ func TestNewHarnessesAreClassifiedNotAlerted(t *testing.T) {
 		t.Errorf("kimi_code = %+v, want not_instrumented/none -- no Kimi Code hook payload carries token counts", kimi)
 	}
 
+	// Gemini CLI writes a gemini_cli.api_response record with its counts for every model response
+	// whenever its telemetry is on, so a Gemini session with events and no usage is the case worth
+	// flagging rather than a runtime spelling its attributes some other way.
+	gemini := lineFor(t, Coverage([]schema.Event{plainEvent("gemini_cli")}, []string{"gemini_cli"}), "gemini_cli")
+	if gemini.Status != CoverageSilent || gemini.Expectation != ExpectReported {
+		t.Errorf("gemini_cli = %+v, want silent/reported -- usage is read from Gemini's own api_response log", gemini)
+	}
+
 	grokBot := lineFor(t, Coverage([]schema.Event{plainEvent("grok_bot")}, nil), "grok_bot")
 	if grokBot.Expectation != ExpectGenericOTLP {
 		t.Errorf("grok_bot expectation = %q, want generic_otlp -- it arrives only via Cursor's OTel export", grokBot.Expectation)

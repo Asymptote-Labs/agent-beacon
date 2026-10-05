@@ -51,8 +51,11 @@ from. A turn with no token attribution is a turn whose runtime never reported an
 | fx (Vercel Labs) | input, output, cache read, cache creation | Reported (`cost_usd`) | Yes | Yes |
 | GitHub Copilot CLI | input, output, cache read, cache creation, reasoning | Not reported | Yes | Yes |
 | OpenClaw Gateway | input, output, cache read, cache creation | Not reported on the hook | Yes, per model response | Yes |
+| Gemini CLI | input, output, cache read, reasoning | Not emitted by Gemini CLI | Yes, per model response | When local user context is present |
 
 OpenClaw reports usage on its `llm_output` hook, which is a *conversation* hook -- OpenClaw withholds those from every non-bundled plugin until `plugins.entries.beacon-endpoint.hooks.allowConversationAccess` is set in its config. An OpenClaw endpoint collecting prompts, tools, commands and files while reporting no tokens at all is almost always that key, and `beacon endpoint hooks status --harness openclaw` says so. OpenClaw does compute a per-turn price, from an operator-configured cost table rather than from a provider report, so Beacon does not record it as a reported cost. See [OpenClaw Gateway](/runtimes/openclaw-gateway).
+
+Gemini CLI reports each model response on its `gemini_cli.api_response` log record and again on the `gemini_cli.token.usage` counter, under Gemini's own counts rather than the semconv names. Those counts are not disjoint: Gemini's input (`promptTokenCount`) already includes the cached content, its output (`candidatesTokenCount`) leaves out thinking tokens, and its tool-use prompt tokens are input that the prompt count does not hold. Beacon therefore records input as prompt minus cached plus tool-use prompt, cache read as the cached count, and output as candidates plus thoughts with the thoughts as its reasoning breakdown, so a response's Beacon total equals Gemini's own `total_token_count`. Gemini also restates input and output on a `gen_ai.client.inference.operation.details` record; Beacon reads usage only from `api_response`, so a response is counted once, and the counter is de-duplicated against the log because both carry Gemini's `session.id`. These shapes are pinned from Gemini CLI's telemetry source rather than from a recorded session.
 
 Cline reports usage once per task rather than per model call, because Beacon's rollups sum `gen_ai.usage` across events and reporting at both granularities would count every token twice. fx reports cumulative totals, which Beacon differences into per-turn deltas for the same reason. GitHub Copilot CLI reports assistant message output tokens and cumulative shutdown model totals; Beacon records the message output directly, then differences shutdown totals for input, cache, reasoning, and any output not already counted.
 
@@ -60,8 +63,7 @@ Cline reports usage once per task rather than per model call, because Beacon's r
 
 | Runtime | Status |
 |---------|--------|
-| Gemini CLI | Usage is captured when the runtime emits the OTel GenAI semconv names (`gen_ai.usage.*` attributes, or a `gen_ai.client.token.usage` metric split by `token_type`). The generic path is tested; these runtimes' own payloads have not been captured and pinned. |
-| VS Code Copilot | As above |
+| VS Code Copilot | Usage is captured when the runtime emits the OTel GenAI semconv names (`gen_ai.usage.*` attributes, or a `gen_ai.client.token.usage` metric split by `token_type`). The generic path is tested; these runtimes' own payloads have not been captured and pinned. |
 | Factory Droid | As above |
 | Grok Bot | Reaches Beacon only through Cursor's server-side OpenTelemetry export, so usage arrives only if that export carries the semconv names |
 | goose | goose's `chat` spans carry the full `gen_ai.usage.*` set, cache reads and writes included, under the exact semconv names -- that much is read out of the runtime rather than hoped for. What is conditional is whether it arrives: usage reaches Beacon only over manually configured OTLP, so a hooks-only goose setup is correctly silent rather than faulty. goose reports no cost. See [goose](/runtimes/goose) |
