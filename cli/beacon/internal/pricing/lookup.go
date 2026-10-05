@@ -144,7 +144,7 @@ var reductions = []struct {
 // The model is tried at four spelling rungs -- exact, canonical, dotted version, provider
 // prefix (see the Match constants) -- and the first rung with any match decides. If that fails,
 // trailing decorations are stripped one at a time (context-window marker, then date snapshot,
-// then effort suffix) and all four rungs are tried again after each. There is no substring,
+// then effort suffix, repeated until none is left) and all four rungs are tried again after each. There is no substring,
 // prefix or edit-distance matching: claude-4.5-sonnet is not claude-sonnet-4-5, and a guess
 // that prices the wrong model is worse than no price.
 //
@@ -162,15 +162,22 @@ func (c *Catalog) Lookup(model string) (Resolution, bool) {
 		return res, priced
 	}
 	current := asymptoteobserve.NormalizeModelName(query)
-	for _, red := range reductions {
-		reduced := red.re.ReplaceAllString(current, "")
-		if reduced == current || reduced == "" {
-			continue
-		}
-		current = reduced
-		res.Stripped = append(res.Stripped, red.name)
-		if priced, decided := c.matchSpellings(current, &res); decided {
-			return res, priced
+	// Passes repeat until none of the reductions applies, because a runtime can stack
+	// decorations in any order: claude-sonnet-4-6-20260101-high only exposes its date once the
+	// effort suffix is off. Every strip shortens the name, so the loop ends.
+	for stripped := true; stripped; {
+		stripped = false
+		for _, red := range reductions {
+			reduced := red.re.ReplaceAllString(current, "")
+			if reduced == current || reduced == "" {
+				continue
+			}
+			current = reduced
+			stripped = true
+			res.Stripped = append(res.Stripped, red.name)
+			if priced, decided := c.matchSpellings(current, &res); decided {
+				return res, priced
+			}
 		}
 	}
 	res.Stripped = nil
