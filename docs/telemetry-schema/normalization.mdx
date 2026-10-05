@@ -178,12 +178,14 @@ Beacon preserves OpenTelemetry GenAI semantic convention fields under the nested
 
 | Source signal | Normalized field |
 |---------------|------------------|
-| `gen_ai.usage.input_tokens`, `llm.usage.prompt_tokens`, `gen_ai.usage.prompt_tokens` | `gen_ai.usage.input_tokens` |
+| `gen_ai.usage.input_tokens`, `llm.usage.prompt_tokens`, `gen_ai.usage.prompt_tokens` | `gen_ai.usage.input_tokens`, less the cache read and cache creation counts reported beside it (see below) |
 | `gen_ai.usage.output_tokens`, `llm.usage.completion_tokens`, `gen_ai.usage.completion_tokens` | `gen_ai.usage.output_tokens` |
-| `gen_ai.usage.cache_creation.input_tokens` | `gen_ai.usage.cache_creation.input_tokens` |
+| `gen_ai.usage.cache_creation.input_tokens`, `gen_ai.usage.cache_write.input_tokens` | `gen_ai.usage.cache_creation.input_tokens` |
 | `gen_ai.usage.cache_read.input_tokens` | `gen_ai.usage.cache_read.input_tokens` |
 | `gen_ai.usage.reasoning.output_tokens` | `gen_ai.usage.reasoning.output_tokens` |
 | `gen_ai.usage.cost`, runtime `*.cost.usage` metric datapoints | `gen_ai.usage.cost_usd` |
+
+Beacon's `gen_ai.usage.input_tokens` is uncached input only, disjoint from cache reads and cache creation. The OTel GenAI semantic conventions define the source attribute the other way: `gen_ai.usage.input_tokens` "SHOULD include all types of input tokens, including cached tokens", and each cache count "SHOULD be included in `gen_ai.usage.input_tokens`". OpenAI-style `prompt_tokens` likewise counts cached prompt tokens. So for those three names Beacon stores the input count minus the cache read and cache creation counts on the same span or log record. If the input is smaller than those cache counts it cannot contain them, the source is already reporting uncached input, and it is stored unchanged. Claude Code's bare `input_tokens` attribute is Anthropic's uncached count and is never reduced, and `raw` keeps the value as reported. The semconv `gen_ai.client.token.usage` metric has only `input` and `output` token types, so its input datapoint has no cache count to reduce and is stored as reported.
 
 Usage also arrives as metric datapoints, not just span and log attributes. Claude Code's `claude_code.token.usage` and `claude_code.cost.usage` are expanded per datapoint. Codex's live source is its completed turn span, whose input, cache-read, cache-write, output, and reasoning attributes map into the same `gen_ai.usage` fields with `thread.id` promoted to `session.id`. Legacy `codex.turn.token_usage` metric rows remain supported for older logs. `gen_ai.usage.cost_usd` carries runtime-reported cost only and is never derived from a local pricing table. See [How token attribution works](/cli/token-usage#how-token-attribution-works) for how these normalized fields aggregate into local reports.
 
