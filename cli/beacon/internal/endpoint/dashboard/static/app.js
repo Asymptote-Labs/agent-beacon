@@ -2591,12 +2591,15 @@ function usageTotal(usage = {}) {
     (usage.reasoning_output_tokens || 0);
 }
 
-// The estimate is labeled wherever it appears: it is a list price from the embedded catalog,
-// not what anyone was billed, and it sits beside the runtime-reported cost rather than in it.
+// The estimate is labeled wherever it appears: it is a list price from the embedded catalog
+// (or the operator's pricing overrides file), not what anyone was billed, and it sits beside the
+// runtime-reported cost rather than in it.
 function estimateHint(totals, pricing) {
-  const parts = ["list price"];
+  const overrides = pricing?.overrides;
+  const parts = [overrides && !overrides.error ? "list price + overrides" : "list price"];
   const catalog = pricing?.catalog;
   if (catalog?.generated_at) parts.push(`catalog ${catalog.generated_at}`);
+  if (overrides?.error) parts.push("overrides file invalid, not used");
   if (totals.unpriced_events) parts.push(`${totals.unpriced_events} unpriced events excluded`);
   return parts.join(" · ");
 }

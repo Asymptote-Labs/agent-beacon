@@ -38,13 +38,17 @@ const (
 // call used them.
 const PricingTier = "standard"
 
-// priceCatalog is the catalog estimates are priced from; a variable so tests can substitute one.
+// priceCatalog is the catalog estimates are priced from when Options.Pricer is nil; a variable
+// so tests can substitute one.
 var priceCatalog = pricing.Default
 
 // PricingSummary is the report's account of its estimates.
 type PricingSummary struct {
 	Catalog PricingCatalog `json:"catalog"`
-	Tier    string         `json:"tier"`
+	// Overrides names the overrides file the estimate consulted, by path and digest, so an
+	// estimate drawn from it can be traced to the exact bytes. Nil when there was none.
+	Overrides *PricingOverrides `json:"overrides,omitempty"`
+	Tier      string            `json:"tier"`
 	// Models lists every model the estimate priced, sorted by model.
 	Models []ModelPricing `json:"models,omitempty"`
 	// Unpriced lists the models the estimate could not price, sorted by model. Their tokens are
@@ -60,6 +64,17 @@ type PricingCatalog struct {
 	Commit      string `json:"commit,omitempty"`
 	FetchedAt   string `json:"fetched_at"`
 	GeneratedAt string `json:"generated_at"`
+}
+
+// PricingOverrides is the overrides file behind a report. Error is set when a file was asked
+// for and could not be used; the estimate is then list price alone, and Models and Aliases are
+// zero.
+type PricingOverrides struct {
+	Path    string `json:"path"`
+	SHA256  string `json:"sha256,omitempty"`
+	Models  int    `json:"models"`
+	Aliases int    `json:"aliases"`
+	Error   string `json:"error,omitempty"`
 }
 
 // RatesPerMTok is a rate set in US dollars per million tokens. A zero cache rate means the
@@ -81,9 +96,14 @@ type BandUse struct {
 
 // ModelPricing is how one reported model was priced.
 type ModelPricing struct {
-	// Model is the model as the report groups it; Key is the catalog entry that priced it.
+	// Model is the model as the report groups it; Key is the entry that priced it, and Source
+	// says whether that is a catalog key ("catalog") or a row of the overrides file
+	// ("override"). Alias is set when the model reached Key through an alias in the overrides
+	// file.
 	Model    string   `json:"model"`
 	Key      string   `json:"key"`
+	Source   string   `json:"source"`
+	Alias    string   `json:"alias,omitempty"`
 	Provider string   `json:"provider"`
 	Match    string   `json:"match"`
 	Stripped []string `json:"stripped,omitempty"`
@@ -107,12 +127,14 @@ type ModelPricing struct {
 }
 
 // UnpricedModel is a model the estimate could not price. Model is empty for usage that named no
-// model at all; Candidates is set when several catalog entries matched with different prices.
+// model at all; Candidates is set when several entries matched with different prices, and
+// CandidatesSource says whether they are catalog keys or names in the overrides file.
 type UnpricedModel struct {
-	Model      string   `json:"model"`
-	Events     int      `json:"events"`
-	Tokens     int64    `json:"tokens"`
-	Candidates []string `json:"candidates,omitempty"`
+	Model            string   `json:"model"`
+	Events           int      `json:"events"`
+	Tokens           int64    `json:"tokens"`
+	Candidates       []string `json:"candidates,omitempty"`
+	CandidatesSource string   `json:"candidates_source,omitempty"`
 }
 
 // settle derives the exported cost fields from the exact internal sums.
@@ -224,7 +246,8 @@ type resolvedModel struct {
 
 // priceUsageEvents sets every usage event's estimated and effective cost and returns the
 // report's pricing summary. Context-only events are not spend and are skipped.
-func priceUsageEvents(events []*usageEvent, catalog *pricing.Catalog) *PricingSummary {
+func priceUsageEvents(events []*usageEvent, pricer *pricing.Pricer) *PricingSummary {
+	catalog := pricer.Catalog()
 	source := catalog.Source()
 	summary := &PricingSummary{
 		Catalog: PricingCatalog{
@@ -235,7 +258,8 @@ func priceUsageEvents(events []*usageEvent, catalog *pricing.Catalog) *PricingSu
 			FetchedAt:   source.FetchedAt,
 			GeneratedAt: catalog.GeneratedAt(),
 		},
-		Tier: PricingTier,
+		Tier:      PricingTier,
+		Overrides: overridesSummary(pricer),
 	}
 
 	reportedScopes := map[costScopeKey]bool{}
@@ -261,7 +285,7 @@ func priceUsageEvents(events []*usageEvent, catalog *pricing.Catalog) *PricingSu
 		if tokens > 0 {
 			resolved, seen := lookups[ue.model]
 			if !seen {
-				resolved.res, resolved.priced = catalog.Lookup(ue.model)
+				resolved.res, resolved.priced = pricer.Lookup(ue.model)
 				lookups[ue.model] = resolved
 			}
 			if resolved.priced {
@@ -289,6 +313,9 @@ func priceUsageEvents(events []*usageEvent, catalog *pricing.Catalog) *PricingSu
 				entry := unpriced[ue.model]
 				if entry == nil {
 					entry = &UnpricedModel{Model: ue.model, Candidates: resolved.res.Candidates}
+					if len(entry.Candidates) > 0 {
+						entry.CandidatesSource = resolved.res.Source
+					}
 					unpriced[ue.model] = entry
 				}
 				entry.Events++
@@ -328,15 +355,27 @@ func priceUsageEvents(events []*usageEvent, catalog *pricing.Catalog) *PricingSu
 	return summary
 }
 
+func overridesSummary(pricer *pricing.Pricer) *PricingOverrides {
+	if o := pricer.Overrides(); o != nil {
+		return &PricingOverrides{Path: o.Path(), SHA256: o.SHA256(), Models: len(o.Models()), Aliases: len(o.Aliases())}
+	}
+	if path, err := pricer.OverridesError(); err != nil {
+		return &PricingOverrides{Path: path, Error: err.Error()}
+	}
+	return nil
+}
+
 func recordModelPricing(m *ModelPricing, model string, res pricing.Resolution, scoped bool, est pricing.Estimate) *ModelPricing {
 	if m == nil {
 		m = &ModelPricing{
 			Model:     model,
 			Key:       res.Key,
+			Source:    res.Source,
+			Alias:     res.Alias,
 			Provider:  res.Rates.Provider,
 			Match:     string(res.Match),
 			Stripped:  append([]string(nil), res.Stripped...),
-			Rates:     ratesPerMTok(res.Rates.RateSet),
+			Rates:     RatesUSDPerMTok(res.Rates.RateSet),
 			bands:     map[int64]int{},
 			fallbacks: map[string]bool{},
 		}
@@ -364,7 +403,8 @@ func recordModelPricing(m *ModelPricing, model string, res pricing.Resolution, s
 	return m
 }
 
-func ratesPerMTok(set pricing.RateSet) RatesPerMTok {
+// RatesUSDPerMTok converts a rate set to US dollars per million tokens for display.
+func RatesUSDPerMTok(set pricing.RateSet) RatesPerMTok {
 	usd := func(v int64) float64 { return pricing.Microdollars(v).USD() }
 	return RatesPerMTok{
 		Input:        usd(set.Input),

@@ -3,6 +3,7 @@ package pricing
 import (
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
@@ -42,20 +43,64 @@ const (
 	StrippedEffortSuffix = "effort_suffix"
 )
 
+// Values of Resolution.Source: which price list the rates came from.
+const (
+	SourceCatalog  = "catalog"
+	SourceOverride = "override"
+)
+
 // Resolution is the outcome of Lookup.
 type Resolution struct {
 	// Model is the string that was looked up.
 	Model string
-	// Key is the catalog key that priced it, and Rates its entry. Empty when unpriced.
-	Key   string
-	Rates Rates
+	// Key is the entry that priced it, and Rates its entry. Empty when unpriced. Source says
+	// whether Key is a catalog key (SourceCatalog) or a model in an overrides file
+	// (SourceOverride).
+	Key    string
+	Rates  Rates
+	Source string
+	// Alias is set when the model matched an alias in an overrides file rather than a priced
+	// entry; Key is then the alias's target. Match and Stripped describe how the model met the
+	// alias, since the alias-to-target step is always exact.
+	Alias string
 	// Match is the spelling rung that matched; Stripped lists the reductions that were
 	// needed first, in the order applied. Together they say how loose the match was.
 	Match    Match
 	Stripped []string
-	// Candidates is set when the model was left unpriced because several catalog keys
-	// matched at the same rung with different rates.
+	// Candidates is set when the model was left unpriced because several entries matched at
+	// the same rung with different rates. When the overrides decided the tie, they are names
+	// from the overrides file.
 	Candidates []string
+}
+
+// table is a set of priced names and the spelling indexes Lookup runs over. The catalog is one;
+// an overrides file is another.
+type table struct {
+	models map[string]Rates
+	keys   []string
+	// index[r] maps a key spelled at rung r to every key with that spelling.
+	index [numRungs]map[string][]string
+}
+
+func newTable(models map[string]Rates) *table {
+	t := &table{models: models}
+	for key := range models {
+		t.keys = append(t.keys, key)
+	}
+	sort.Strings(t.keys)
+	for r := range t.index {
+		t.index[r] = make(map[string][]string, len(t.keys))
+	}
+	for _, key := range t.keys {
+		for r := rung(0); r < numRungs; r++ {
+			spelled := spell(r, key)
+			if spelled == "" {
+				continue
+			}
+			t.index[r][spelled] = append(t.index[r][spelled], key)
+		}
+	}
+	return t
 }
 
 type rung int
@@ -153,6 +198,14 @@ var reductions = []struct {
 // Resolution.Candidates names the disagreeing keys. Lookup does not fall through to a looser
 // rung after a tie, since a looser rung can only match more keys.
 func (c *Catalog) Lookup(model string) (Resolution, bool) {
+	res, ok := c.table.lookup(model)
+	if ok || len(res.Candidates) > 0 {
+		res.Source = SourceCatalog
+	}
+	return res, ok
+}
+
+func (c *table) lookup(model string) (Resolution, bool) {
 	res := Resolution{Model: model}
 	query := strings.TrimSpace(model)
 	if query == "" {
@@ -186,23 +239,23 @@ func (c *Catalog) Lookup(model string) (Resolution, bool) {
 
 // matchSpellings runs the spelling rungs for one query. decided reports that some rung
 // matched; priced reports that its candidates agreed on a price.
-func (c *Catalog) matchSpellings(query string, res *Resolution) (priced, decided bool) {
+func (c *table) matchSpellings(query string, res *Resolution) (priced, decided bool) {
 	for r := rung(0); r < numRungs; r++ {
 		spelled := spell(r, query)
 		keys := c.index[r][spelled]
 		if len(keys) == 0 {
 			continue
 		}
-		first := c.file.Models[keys[0]]
+		first := c.models[keys[0]]
 		for _, k := range keys[1:] {
-			if !samePrice(first, c.file.Models[k]) {
+			if !samePrice(first, c.models[k]) {
 				res.Candidates = append([]string(nil), keys...)
 				res.Match = rungMatch[r]
 				return false, true
 			}
 		}
 		res.Key = preferredKey(keys, query)
-		res.Rates = c.file.Models[res.Key]
+		res.Rates = c.models[res.Key]
 		res.Match = rungMatch[r]
 		return true, true
 	}
