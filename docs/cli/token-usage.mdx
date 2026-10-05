@@ -47,12 +47,17 @@ from. A turn with no token attribution is a turn whose runtime never reported an
 | Pi | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes | Yes |
 | Oh My Pi | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes | Yes |
 | Prime Agent | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes | Yes |
+| Senpi | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`) | Yes | Yes |
+| Hermes Agent | input, output, cache read, cache creation, reasoning | Reported (`cost_usd`): Hermes's actual cost, or its own estimate when it recorded no actual | Yes, from `beacon endpoint hermes sync` | Yes |
+| Factory Droid | input, output, cache read, cache creation, reasoning | Not reported in USD; Factory credits stay in `raw` | Yes, from `beacon endpoint factory sync` | Yes |
 | DeepSeek Harness | input, output, cache read, cache creation | Not reported | Yes, from committed session records | Yes |
 | fx (Vercel Labs) | input, output, cache read, cache creation | Reported (`cost_usd`) | Yes | Yes |
 | GitHub Copilot CLI | input, output, cache read, cache creation, reasoning | Not reported | Yes | Yes |
 | OpenClaw Gateway | input, output, cache read, cache creation | Not reported on the hook | Yes, per model response | Yes |
 
-OpenClaw reports usage on its `llm_output` hook, which is a *conversation* hook -- OpenClaw withholds those from every non-bundled plugin until `plugins.entries.beacon-endpoint.hooks.allowConversationAccess` is set in its config. An OpenClaw endpoint collecting prompts, tools, commands and files while reporting no tokens at all is almost always that key, and `beacon endpoint hooks status --harness openclaw` says so. OpenClaw does compute a per-turn price, from an operator-configured cost table rather than from a provider report, so Beacon does not record it as a reported cost. See [OpenClaw Gateway](/runtimes/openclaw-gateway).
+OpenClaw reports usage on its `llm_output` hook, which is a *conversation* hook -- OpenClaw withholds those from every non-bundled plugin until `plugins.entries.beacon-endpoint.hooks.allowConversationAccess` is set in its config. An OpenClaw endpoint collecting prompts, tools, commands and files while reporting no tokens at all is almost always that key, and `beacon endpoint hooks status --harness openclaw` says so. OpenClaw does compute a per-turn price, from an operator-configured cost table rather than from a provider report, so Beacon does not record it as a reported cost. The session-file sync, `beacon endpoint integrations openclaw sessions sync`, reads the usage OpenClaw commits on each assistant message and needs no grant. See [OpenClaw Gateway](/runtimes/openclaw-gateway).
+
+Hermes Agent and Factory Droid report usage only through their session-store sync: neither runtime's hooks carry a token count, so their usage arrives when `beacon endpoint hermes sync` or `beacon endpoint factory sync` runs. Both keep running session totals, which the sync differences into deltas. Until the sync runs, the coverage report lists them as `silent`, with a note naming the command.
 
 Cline reports usage once per task rather than per model call, because Beacon's rollups sum `gen_ai.usage` across events and reporting at both granularities would count every token twice. fx reports cumulative totals, which Beacon differences into per-turn deltas for the same reason. GitHub Copilot CLI reports assistant message output tokens and cumulative shutdown model totals; Beacon records the message output directly, then differences shutdown totals for input, cache, reasoning, and any output not already counted.
 
@@ -62,7 +67,6 @@ Cline reports usage once per task rather than per model call, because Beacon's r
 |---------|--------|
 | Gemini CLI | Usage is captured when the runtime emits the OTel GenAI semconv names (`gen_ai.usage.*` attributes, or a `gen_ai.client.token.usage` metric split by `token_type`). The generic path is tested; these runtimes' own payloads have not been captured and pinned. |
 | VS Code Copilot | As above |
-| Factory Droid | As above |
 | Grok Bot | Reaches Beacon only through Cursor's server-side OpenTelemetry export, so usage arrives only if that export carries the semconv names |
 | goose | goose's `chat` spans carry the full `gen_ai.usage.*` set, cache reads and writes included, under the exact semconv names -- that much is read out of the runtime rather than hoped for. What is conditional is whether it arrives: usage reaches Beacon only over manually configured OTLP, so a hooks-only goose setup is correctly silent rather than faulty. goose reports no cost. See [goose](/runtimes/goose) |
 
@@ -89,7 +93,7 @@ A runtime that reports occupancy and no spend still shows as `not_instrumented` 
 | Runtime | Why |
 |---------|-----|
 | Cursor | No hook payload carries a token count. Cursor does report context occupancy on `preCompact`, which is recorded separately -- see [Context occupancy](#context-occupancy) below |
-| Antigravity CLI, Grok Build, Hermes Agent, Devin CLI, Devin Desktop | No token counts on the hook payloads Beacon receives |
+| Antigravity CLI, Grok Build, Devin CLI, Devin Desktop | No token counts on the hook payloads Beacon receives |
 | Muse Code | Usage arrives on `PostLLMCall` and in Muse's own session log, neither of which Beacon reads. See [Muse Code](/runtimes/muse-code) |
 | Qwen Code | The `Stop` payload carries session-level context counters, not per-call usage. Those counters are recorded as context occupancy rather than spend -- see [Context occupancy](#context-occupancy) below. See [Qwen Code](/runtimes/qwen-code) |
 | OpenHands | None of the six hook payloads carries token counts, and OpenHands exposes no other hook that would. See [OpenHands](/runtimes/openhands) |
