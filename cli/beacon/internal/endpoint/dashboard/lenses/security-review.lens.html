@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Security Review</title>
+<script type="application/beacon-lens+json">
+{
+  "id": "security-review",
+  "title": "Security Review",
+  "description": "Threat-rule findings for this trace, grouped as untrusted input, sensitive access and consequential action, with each finding's evidence.",
+  "icon": "shield",
+  "version": 1,
+  "api": "beacon.lens.v1",
+  "author": "Beacon"
+}
+</script>
+<style>
+  body {
+    margin: 0;
+    color: var(--beacon-text, #111827);
+    font: 400 13px/1.5 var(--beacon-font-sans, ui-sans-serif, system-ui, sans-serif);
+  }
+  .muted { color: var(--beacon-muted, #6b7280); }
+  .mono { font: 13px var(--beacon-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); }
+  p { margin: 0 0 8px; }
+  h2 { margin: 18px 0 6px; font-size: 13px; font-weight: 400; color: var(--beacon-muted, #6b7280); }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 4px 8px; border-bottom: 1px solid var(--beacon-line, rgba(0,0,0,0.1)); font-weight: 400; text-align: left; vertical-align: top; }
+  th { color: var(--beacon-muted, #6b7280); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .alert { border: 1px solid var(--beacon-danger, #b91c1c); border-radius: 4px; padding: 8px 10px; color: var(--beacon-danger, #b91c1c); }
+  .sev-critical, .sev-high { color: var(--beacon-danger, #b91c1c); }
+  .sev-medium { color: var(--beacon-warn, #92400e); }
+  .finding { padding: 8px 0; border-bottom: 1px solid var(--beacon-line, rgba(0,0,0,0.1)); }
+  .finding-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .evidence { margin: 4px 0 0; padding-left: 16px; }
+  .evidence li { margin: 2px 0; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<p id="status" class="muted">Loading trace…</p>
+<main id="root" hidden></main>
+<script>
+(function () {
+  "use strict";
+  var root = document.getElementById("root");
+  var number = new Intl.NumberFormat();
+  var SEVERITY_RANK = { info: 0, low: 1, medium: 2, high: 3, critical: 4 };
+
+  // Each rule names its corpus category in taxonomy.beacon_category. A trace that shows all three
+  // groups is the shape behind most agent data theft: something untrusted steered the agent, it
+  // touched something sensitive, and it did something that cannot be taken back.
+  var GROUPS = [
+    { id: "untrusted", label: "Untrusted input", hint: "Instructions or content the agent should not have trusted.", categories: ["prompt-injection"] },
+    { id: "sensitive", label: "Sensitive access", hint: "Credentials, secrets and privileged endpoints the agent reached.", categories: ["credential-access", "external-access"] },
+    { id: "consequential", label: "Consequential action", hint: "Exfiltration, destructive or hard-to-reverse changes.",
+      categories: ["context-exfiltration", "risky-command", "sensitive-edit", "source-control", "agent-control", "approval-abuse", "resource-consumption"] }
+  ];
+  var OTHER = { id: "other", label: "Other findings", hint: "Rules without a known category." };
+
+  // Every node is built with textContent: rule reasons and evidence are untrusted.
+  function el(tag, text, className) {
+    var node = document.createElement(tag);
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    if (className) node.className = className;
+    return node;
+  }
+
+  function groupOf(finding) {
+    var category = finding.taxonomy && finding.taxonomy.beacon_category;
+    for (var i = 0; i < GROUPS.length; i++) {
+      if (GROUPS[i].categories.indexOf(category) >= 0) return GROUPS[i];
+    }
+    return OTHER;
+  }
+
+  function rank(severity) { return SEVERITY_RANK[severity] === undefined ? -1 : SEVERITY_RANK[severity]; }
+
+  function describe(event) {
+    if (event.command && event.command.command) return event.command.command;
+    if (event.file && event.file.path) return (event.file.operation ? event.file.operation + " " : "") + event.file.path;
+    if (event.mcp && (event.mcp.server || event.mcp.tool)) return "MCP " + [event.mcp.server, event.mcp.tool].filter(Boolean).join(" / ");
+    if (event.content && event.content.included && event.content.text) return String(event.content.text).split("\n")[0];
+    return event.title || event.action || event.type;
+  }
+
+  function renderFinding(f, byId) {
+    var box = el("div", null, "finding");
+    var head = box.appendChild(el("div", null, "finding-head"));
+    head.appendChild(el("span", f.severity || "unknown", "sev-" + (f.severity || "unknown")));
+    head.appendChild(el("span", f.title || f.rule_id));
+    head.appendChild(el("span", f.rule_id, "mono muted"));
+    if (f.reason) box.appendChild(el("p", f.reason, "muted"));
+    var refs = Object.keys(f.taxonomy || {}).filter(function (k) { return k !== "beacon_category"; })
+      .map(function (k) { return k + " " + f.taxonomy[k]; });
+    if (refs.length) box.appendChild(el("p", refs.join(" · "), "muted mono"));
+    var list = box.appendChild(el("ul", null, "evidence"));
+    (f.event_ids || []).forEach(function (id) {
+      var e = byId[id];
+      if (!e) {
+        list.appendChild(el("li", "An event outside this bundle (" + id + ")", "muted"));
+        return;
+      }
+      var item = list.appendChild(el("li"));
+      item.appendChild(el("span", "#" + e.number + " " + (e.type || "") + " · ", "muted"));
+      item.appendChild(el("span", describe(e), "mono"));
+    });
+    return box;
+  }
+
+  function render(data) {
+    var trace = data.trace || {};
+    var byId = {};
+    (Array.isArray(trace.events) ? trace.events : []).forEach(function (e) { if (e && e.id) byId[e.id] = e; });
+    var scan = data.findings;
+    if (!scan) {
+      root.appendChild(el("p", "This trace was not scanned: no threat rules could be loaded. Run beacon rules list to check the rule store.", "muted"));
+      return finish();
+    }
+    var items = Array.isArray(scan.items) ? scan.items.slice() : [];
+    items.sort(function (a, b) { return rank(b.severity) - rank(a.severity); });
+
+    var byGroup = {};
+    items.forEach(function (f) {
+      var g = groupOf(f).id;
+      (byGroup[g] = byGroup[g] || []).push(f);
+    });
+
+    root.appendChild(el("p", (items.length ? number.format(items.length) + (items.length === 1 ? " finding" : " findings") : "No rule matched") +
+      " across " + number.format(scan.rules_evaluated || 0) + " rules evaluated."));
+    if (GROUPS.every(function (g) { return byGroup[g.id]; })) {
+      root.appendChild(el("p", "This trace combines untrusted input, sensitive access and a consequential action. Review it first: that combination is how an injected instruction turns into stolen data.", "alert"));
+    }
+
+    var t = el("table");
+    var head = t.appendChild(el("thead")).appendChild(el("tr"));
+    ["Risk", "", "Findings", "Highest"].forEach(function (h, i) { head.appendChild(el("th", h, i >= 2 ? "num" : "")); });
+    var body = t.appendChild(el("tbody"));
+    GROUPS.forEach(function (g) {
+      var found = byGroup[g.id] || [];
+      var tr = body.appendChild(el("tr"));
+      tr.appendChild(el("td", g.label));
+      tr.appendChild(el("td", g.hint, "muted"));
+      tr.appendChild(el("td", number.format(found.length), "num"));
+      tr.appendChild(el("td", found.length ? found[0].severity : "—", "num" + (found.length ? " sev-" + found[0].severity : "")));
+    });
+    root.appendChild(t);
+
+    GROUPS.concat([OTHER]).forEach(function (g) {
+      var found = byGroup[g.id];
+      if (!found) return;
+      var section = root.appendChild(el("section"));
+      section.dataset.group = g.id;
+      section.appendChild(el("h2", g.label));
+      found.forEach(function (f) { section.appendChild(renderFinding(f, byId)); });
+    });
+
+    if (scan.skipped && scan.skipped.length) {
+      root.appendChild(el("p", number.format(scan.skipped.length) + " rules were skipped because they need a newer Beacon.", "muted"));
+    }
+    if (data.truncated) root.appendChild(el("p", "This trace was truncated; some evidence may be outside the bundle.", "muted"));
+    finish();
+  }
+
+  function finish() {
+    document.getElementById("status").hidden = true;
+    root.hidden = false;
+  }
+
+  window.beacon.getTrace().then(render, function (err) {
+    document.getElementById("status").textContent = "Could not load this trace: " + ((err && err.message) || err);
+  });
+})();
+</script>
+</body>
+</html>
