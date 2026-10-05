@@ -123,6 +123,7 @@ type TraceEventV1 struct {
 	MCP           *TraceMCPV1        `json:"mcp,omitempty"`
 	Approval      *TraceApprovalV1   `json:"approval,omitempty"`
 	Policy        *TracePolicyV1     `json:"policy,omitempty"`
+	Error         *TraceErrorV1      `json:"error,omitempty"`
 	Model         string             `json:"model,omitempty"`
 	Usage         *TraceUsageV1      `json:"usage,omitempty"`
 	SourceEventID string             `json:"source_event_id"`
@@ -191,6 +192,12 @@ type TracePolicyV1 struct {
 	Decision    string `json:"decision,omitempty"`
 	Enforcement string `json:"enforcement,omitempty"`
 	Reason      string `json:"reason,omitempty"`
+}
+
+// TraceErrorV1 is the failure an event recorded, such as a tool or MCP call that a runtime
+// reported as failed while keeping the call's own action.
+type TraceErrorV1 struct {
+	Type string `json:"type,omitempty"`
 }
 
 type TraceUsageV1 struct {

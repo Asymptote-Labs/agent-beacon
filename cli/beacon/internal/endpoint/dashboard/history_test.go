@@ -175,7 +175,7 @@ func parityFixture() [][]byte {
 		`{"timestamp":"2026-06-11T10:01:30Z","event":{"id":"e3","action":"command.executed","category":"command"},"harness":{"name":"cursor","collection_method":"otlp"},"session":{"id":"s1"},"command":{"command":"go test ./internal/endpoint/dashboard","exit_code":0}}`,
 		`{"timestamp":"2026-06-11T10:02:00Z","event":{"id":"e4","action":"file.modified","category":"file"},"harness":{"name":"cursor"},"session":{"id":"s1"},"file":{"path":"internal/endpoint/dashboard/traces.go","operation":"modify","language":"go","diff":"+ matchesAllTerms","diff_hash":"dh"}}`,
 		`{"timestamp":"2026-06-11T10:02:30Z","event":{"id":"e5","action":"approval.denied","category":"approval"},"harness":{"name":"cursor"},"session":{"id":"s1"},"approval":{"required":true,"decision":"denied","reason":"AND NEAR * not allowed"},"policy":{"id":"no-near","decision":"deny","enforcement":"enforce","reason":"provider denied"}}`,
-		`{"timestamp":"2026-06-11T10:03:00Z","event":{"id":"e6","action":"mcp.tool_invoked","category":"mcp"},"harness":{"name":"cursor"},"session":{"id":"s1"},"mcp":{"server":"beacon","tool":"search_sessions","method":{"name":"tools/call"}},"gen_ai":{"tool":{"name":"mcp__beacon__search_sessions","call":{"id":"call-1","arguments":{"query":"index"},"result":"one session"}}}}`,
+		`{"timestamp":"2026-06-11T10:03:00Z","event":{"id":"e6","action":"mcp.tool_invoked","category":"mcp"},"harness":{"name":"cursor"},"session":{"id":"s1"},"mcp":{"server":"beacon","tool":"search_sessions","method":{"name":"tools/call"}},"gen_ai":{"tool":{"name":"mcp__beacon__search_sessions","call":{"id":"call-1","arguments":{"query":"index"},"result":"one session"}}},"error":{"type":"mcp_timeout"}}`,
 		`{"timestamp":"2026-06-11T10:04:00Z","event":{"action":"session.activity","category":"session"},"harness":{"name":"cursor"},"session":{"id":"s1"},"message":"hook with no event id"}`,
 		`{"timestamp":"2026-06-11T11:00:00Z","event":{"id":"o1","action":"tool.invoked","category":"tool"},"harness":{"name":"claude_code","collection_method":"otlp"},"session":{"id":"s2"},"trace":{"id":"t-abc","span_id":"span-1"},"tool":{"name":"Bash"},"message":"root span","model":"claude-opus-5"}`,
 		`{"timestamp":"2026-06-11T11:00:01Z","event":{"id":"o2","action":"tool.completed","category":"tool"},"harness":{"name":"claude_code","collection_method":"otlp"},"session":{"id":"s2"},"trace":{"id":"t-abc","span_id":"span-2","parent_span_id":"span-1"},"tool":{"name":"Bash"}}`,
@@ -960,6 +960,34 @@ func TestHistoryRenamesIDlessEventsWhenTheirFileRotates(t *testing.T) {
 	compareAnswers(t, want, history)
 	if !strings.Contains(want["idless archive-1-line-3"], "archive-1-line-3") {
 		t.Fatalf("fixture did not produce a rotated ID: %s", want["idless archive-1-line-3"])
+	}
+}
+
+// An event's error is part of the trace projection: a session-store MCP failure keeps its mcp
+// action and records only error.type, so without it no lens could tell the call failed.
+func TestTraceEventsCarryTheErrorType(t *testing.T) {
+	path := newTestLog(t, parityFixture())
+	for name, setup := range map[string]func(){
+		"jsonl":   func() { withoutHistory(t) },
+		"history": func() { withHistory(t); optIn(t, path) },
+	} {
+		setup()
+		show, ok, err := ShowTrace(path, "session:cursor:s1", TraceQuery{Limit: 100})
+		if err != nil || !ok {
+			t.Fatalf("%s: ShowTrace = ok %v, err %v", name, ok, err)
+		}
+		for _, event := range show.Events {
+			switch {
+			case event.ID == "e6" && (event.Error == nil || event.Error.Type != "mcp_timeout"):
+				t.Fatalf("%s: e6 error = %#v, want mcp_timeout", name, event.Error)
+			case event.ID != "e6" && event.Error != nil:
+				t.Fatalf("%s: %s error = %#v, want none", name, event.ID, event.Error)
+			}
+		}
+		found, err := SearchTraces(path, TraceQuery{EventQuery: EventQuery{Q: "mcp_timeout"}, ResultLevel: "event", Limit: 10})
+		if err != nil || found.TotalMatched != 1 || found.Events[0].Event.ID != "e6" {
+			t.Fatalf("%s: search for the error type = %+v, %v", name, found, err)
+		}
 	}
 }
 
