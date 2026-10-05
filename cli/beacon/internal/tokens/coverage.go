@@ -104,6 +104,10 @@ var usageExpectation = map[string]struct {
 	// (factorysession/mapper.go, emitSettingsUsage). Its OTLP export still contributes when it
 	// carries the semconv names; the sync is the path Beacon reads Factory's own record from.
 	"factory": {ExpectReported, "beacon endpoint factory sync reads session settings totals; OTLP only if it emits GenAI semconv usage"},
+	// The factory_droid spelling never comes from the sync, which writes harness "factory" and is
+	// not normalized onto this name. It is what a Factory OTLP export can name itself, so it keeps
+	// the generic-OTLP expectation rather than pointing at a command that cannot clear it.
+	"factory_droid": {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
 
 	"gemini_cli":     {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
 	"vscode_copilot": {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
