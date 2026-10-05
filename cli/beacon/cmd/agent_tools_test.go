@@ -149,6 +149,8 @@ func TestOnboardingInstallsSkillsWhenKept(t *testing.T) {
 		}
 	}
 	for _, want := range []string{"installed in ~/.agents/skills", "installed in ~/.claude/skills"} {
+		// displayPath prints native separators, so Windows shows ~\.agents\skills.
+		want = filepath.FromSlash(want)
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
 		}
