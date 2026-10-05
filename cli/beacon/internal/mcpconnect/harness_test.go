@@ -1131,6 +1131,24 @@ func TestOhMyPiConnectWritesTheActiveProfileOnly(t *testing.T) {
 	}
 }
 
+// Disconnect works from what connect recorded, not from where the config would resolve now, so a
+// profile variable that has since become invalid cannot leave Beacon's entry behind.
+func TestDisconnectRemovesARecordedEntryWhenThePathNoLongerResolves(t *testing.T) {
+	home := isolate(t)
+	target := mustTarget(t, "omp")
+	t.Setenv("OMP_PROFILE", "work")
+	connect(t, fileOptions(home), target)
+	path := filepath.Join(home, ".omp", "profiles", "work", "agent", "mcp.json")
+
+	t.Setenv("OMP_PROFILE", "../escape")
+	if got := disconnect(t, fileOptions(home), target); got.Action != ActionRemove || got.Path != path {
+		t.Fatalf("disconnect = %s at %q (%s), want remove at %q", got.Action, got.Path, got.Detail, path)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("disconnect left the file connect created: %v", err)
+	}
+}
+
 // A harness that switches servers off with `enabled` inside the entry gets the person's value
 // back on every write: re-running connect, or changing auth mode, must not turn beacon-managed
 // back on.

@@ -673,17 +673,16 @@ func Disconnect(ctx context.Context, opts Options, targets []Target) ([]Item, er
 		if !t.Automatic {
 			continue
 		}
-		path, err := t.path(opts.Home)
-		if err != nil {
-			continue
-		}
-		it := Item{Target: t, Path: path}
-		// Records are matched by harness and file. A harness whose config moved (CODEX_HOME,
-		// CLAUDE_CONFIG_DIR) is still cleaned up at the path Beacon wrote.
+		// Records are matched by harness and carry the file Beacon wrote, so a harness whose
+		// config has since moved (CODEX_HOME, CLAUDE_CONFIG_DIR, an Oh My Pi profile) or no longer
+		// resolves at all is still cleaned up there.
 		recs := recordsFor(m, t.Name)
 		if len(recs) == 0 {
-			it.Action, it.Detail = ActionAbsent, "nothing written by Beacon"
-			items = append(items, it)
+			path, err := t.path(opts.Home)
+			if err != nil {
+				continue
+			}
+			items = append(items, Item{Target: t, Path: path, Action: ActionAbsent, Detail: "nothing written by Beacon"})
 			continue
 		}
 		for _, rec := range recs {
