@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -40,11 +41,21 @@ type piFamily struct {
 	platform string
 	// displayName is how the runtime is named in an event's human-readable message.
 	displayName string
+	// resolvesToolPaths marks a runtime whose read, edit and write tools take a path the way Oh
+	// My Pi's do -- relative to the session's working directory or to `~`, with an inline selector
+	// such as `main.go:10-40` or `notes.md:raw` -- and whose results report the absolute file they
+	// resolved it to. Such a runtime's file events carry that file; see filePath.
+	//
+	// It is declared rather than inferred because Pi and Prime Agent are also read back from their
+	// session files (pisession, primesession), which record the path as written. A hook event and
+	// a session-file event for the same read are merged only when their file.path matches, so
+	// resolving the path on one side alone would record each read twice.
+	resolvesToolPaths bool
 }
 
 var (
 	piRuntime  = piFamily{platform: "pi", displayName: "Pi"}
-	ompRuntime = piFamily{platform: "omp", displayName: "Oh My Pi"}
+	ompRuntime = piFamily{platform: "omp", displayName: "Oh My Pi", resolvesToolPaths: true}
 	// Prime Agent's `--platform` is `prime` rather than `prime-agent` because the platform value is
 	// also the prefix on this runtime's keys inside `raw`, and `prime_agent_session_reason` reads
 	// as a field of a harness named `prime_agent` -- which is exactly what it is. The harness name
@@ -414,6 +425,110 @@ func isURIScheme(s string) bool {
 	return true
 }
 
+// filePath returns the file a read, edit or write call touched, or "" when its target is not a
+// file.
+//
+// On a runtime that resolves its tool paths, the runtime's own statement of the file is preferred,
+// because it is the one path that is certainly right: it is absolute, and any selector or `~` in
+// what the model wrote has already been resolved. A tool_call or an approval, which happen before
+// the runtime has resolved anything, resolve the target the same way the runtime will.
+func (f piFamily) filePath(call piToolCall, input map[string]interface{}, target string) string {
+	path := piFilePath(target)
+	if path == "" || !f.resolvesToolPaths {
+		return path
+	}
+	if resolved := piResolvedPath(call.details); resolved != "" {
+		return resolved
+	}
+	return ompToolPath(path, resolveCwd(input, f.platform))
+}
+
+// piResolvedPath returns the absolute path a tool result reports having read or written.
+//
+// Oh My Pi reports it in three places, one per tool: a read names its source in `meta.source`
+// when the source was a file, a write names the file in `resolvedPath`, and an edit of one file
+// names it in `path`. A read of anything else -- a URL, or a runtime resource backed by a file in
+// the runtime's own storage -- reports a different source type and is never taken for a file.
+func piResolvedPath(details map[string]interface{}) string {
+	path := getFirstStr(details, "resolvedPath", "path")
+	if source := firstMap(firstMap(details, "meta"), "source"); getFirstStr(source, "type") == "path" {
+		path = getFirstStr(source, "value")
+	}
+	if !filepath.IsAbs(path) {
+		return ""
+	}
+	return path
+}
+
+// ompLineSelector is Oh My Pi's read selector grammar, FILE_LINE_RANGE_RE in its
+// packages/tui/src/tools/read.ts: comma-joined line ranges (`10`, `10-40`, `10..40`, `10+30`,
+// `10-`), a tail (`-60`), or `raw`, `conflicts` or `img`. A range may not end in `+`, which is
+// what the runtime's trailing lookbehind enforces.
+var ompLineSelector = regexp.MustCompile(`(?i)^(?:` + ompLineRange + `(?:,` + ompLineRange + `)*|-\d+|raw|conflicts|img)$`)
+
+const ompLineRange = `L?\d+(?:(?:\.\.|-)(?:L?\d+)?|\+L?\d+)?`
+
+// ompToolPath turns a path as an Oh My Pi tool was given it into the file it names.
+//
+// Oh My Pi resolves a relative path against the session's working directory, expands `~`, and
+// reads a trailing selector as a line range rather than part of the name: `read .env:1-20` reads
+// the first twenty lines of `<cwd>/.env`. Recording the string as written put `.env:1-20` in
+// file.path, which defeats every file rule that anchors its pattern at the end of the name -- the
+// credential-read rules match `(^|/)\.env($|\.)`, not `.env:1-20` -- and filed one file under as
+// many names as it was read with. Cline resolves relative paths for the same reason.
+//
+// The selector is peeled the way the runtime peels it: from the last colon, only when what follows
+// is selector grammar, at most twice (a range and `raw` may be combined), and not at all when a
+// file of that literal name exists, which is the runtime's own tiebreak.
+func ompToolPath(path, cwd string) string {
+	if path == "~" || strings.HasPrefix(path, "~/") || strings.HasPrefix(path, "~"+string(filepath.Separator)) {
+		if home, err := os.UserHomeDir(); err == nil {
+			path = filepath.Join(home, path[1:])
+		}
+	}
+	if !filepath.IsAbs(path) && cwd != "" {
+		path = filepath.Join(cwd, path)
+	}
+	stripped := path
+	for range 2 {
+		i := strings.LastIndexByte(stripped, ':')
+		if i <= 0 || !ompLineSelector.MatchString(stripped[i+1:]) {
+			break
+		}
+		stripped = stripped[:i]
+	}
+	if stripped == path {
+		return path
+	}
+	if _, err := os.Lstat(path); err == nil {
+		return path
+	}
+	return stripped
+}
+
+// ompMCPResourceScheme is the URI scheme through which Oh My Pi's read tool reads an MCP resource:
+// `read mcp://<resource-uri>` asks whichever connected server lists that resource.
+const ompMCPResourceScheme = "mcp://"
+
+// ompMCPResourceURI returns the resource URI a `read mcp://<uri>` call asks for, or "".
+//
+// Such a read is an MCP resources/read, and is recorded as one: the same mcp.tool_invoked other
+// runtimes record for a resource read, with the URI in mcp.resource.uri. The server cannot be
+// named. The runtime picks it by matching the URI against every connected server and reports the
+// choice only in a note its read tool discards. The runtime also sends a resource URI whose scheme
+// it does not handle itself to MCP, but telling those apart from its own schemes would mean
+// copying its scheme registry, so only the explicit `mcp://` form is recognized.
+func ompMCPResourceURI(call piToolCall) string {
+	if !strings.EqualFold(call.name, "read") {
+		return ""
+	}
+	target := getFirstStr(call.args, "path")
+	if len(target) <= len(ompMCPResourceScheme) || !strings.EqualFold(target[:len(ompMCPResourceScheme)], ompMCPResourceScheme) {
+		return ""
+	}
+	return target[len(ompMCPResourceScheme):]
+}
+
 // toolFields builds the tool, command, and file blocks for one Pi-family tool event.
 //
 // The built-in tools have fixed, documented argument shapes -- bash takes `command`, and read,
@@ -451,16 +566,22 @@ func (f piFamily) toolFields(call piToolCall, input map[string]interface{}, with
 			fields["content"] = retainedContentFields(code)
 		}
 	case "read", "edit", "write":
-		// tool.path keeps the target as the tool was given it, URI or not, so the row still says
-		// what was read; only a filesystem target becomes a file block.
+		// tool.path keeps the target as the tool was given it, URI and selector included, so the
+		// row still says what was asked for; only a file becomes a file block, under its real path.
 		if target := getFirstStr(args, "path"); target != "" {
 			tool["path"] = target
-			if path := piFilePath(target); path != "" {
+			if path := f.filePath(call, input, target); path != "" {
 				fields["file"] = map[string]interface{}{
 					"path":      path,
 					"operation": piFileOperation(name),
 					"language":  strings.TrimPrefix(filepath.Ext(path), "."),
 				}
+			}
+		}
+		if uri := ompMCPResourceURI(call); uri != "" {
+			fields["mcp"] = map[string]interface{}{
+				"method":   map[string]interface{}{"name": "resources/read"},
+				"resource": map[string]interface{}{"uri": uri},
 			}
 		}
 	}
@@ -566,6 +687,10 @@ func (f piFamily) toolResultEvents(input map[string]interface{}, fields map[stri
 	if isErr, ok := input["isError"].(bool); ok && isErr {
 		fields["error"] = map[string]interface{}{"type": "tool_error"}
 		return append(f.one("tool.failed", "tool", "high", "tool failed", fields), kernelWrites...)
+	}
+
+	if edits := f.perFileEditEvents(call, fields); len(edits) > 0 {
+		return append(edits, kernelWrites...)
 	}
 
 	if diff := piEditDiff(call.details); diff != "" {
@@ -754,12 +879,69 @@ func piEditDiff(details map[string]interface{}) string {
 	return getFirstStr(details, "patch", "diff")
 }
 
+// perFileEditEvents records an edit that changed several files as one file.modified per file.
+//
+// Oh My Pi's default edit format applies one patch to any number of files. An edit of one file
+// reports that file's path; an edit of several reports no path at all, only a perFileResults list.
+// Without this, such an edit fell through to tool.completed and none of the files it changed was
+// recorded. One event per changed file is the shape pythonDiffEvents produces for a Prime Agent
+// cell and the OpenHands mapper produces for one apply_patch call: a store that files one row per
+// path is the one a "who touched this file" query can answer.
+//
+// Each file keeps the edit's own operation word, so a file the edit created or deleted reads as
+// one, while the action stays in the file.modified family as a single-file edit's does.
+func (f piFamily) perFileEditEvents(call piToolCall, fields map[string]interface{}) []normalizedEvent {
+	if !strings.EqualFold(call.name, "edit") {
+		return nil
+	}
+	results, _ := call.details["perFileResults"].([]interface{})
+	var events []normalizedEvent
+	for _, item := range results {
+		entry, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		path := getFirstStr(entry, "path")
+		if !filepath.IsAbs(path) {
+			continue
+		}
+		values := cloneFields(fields)
+		values["file"] = map[string]interface{}{
+			"path":      path,
+			"operation": ompEditOperation(getFirstStr(entry, "op")),
+			"language":  strings.TrimPrefix(filepath.Ext(path), "."),
+		}
+		delete(values, "content")
+		if diff := piEditDiff(entry); diff != "" {
+			values["content"] = retainedContentFields(diff)
+		}
+		events = append(events, f.one("file.modified", "file", "info", "file modified", values)...)
+	}
+	return events
+}
+
+// ompEditOperation maps the operation Oh My Pi reports for one file of an edit onto the event
+// schema's vocabulary.
+func ompEditOperation(op string) string {
+	switch strings.ToLower(op) {
+	case "create":
+		return "create"
+	case "delete":
+		return "delete"
+	default:
+		return "modify"
+	}
+}
+
 // piToolAction maps a Pi-family tool call onto the endpoint action its completion represents.
 func piToolAction(call piToolCall) (string, string) {
 	switch strings.ToLower(call.name) {
 	case "bash", "ipython":
 		return "command.executed", "command"
 	case "read":
+		if ompMCPResourceURI(call) != "" {
+			return "mcp.tool_invoked", "mcp"
+		}
 		return "file.read", "file"
 	case "edit":
 		return "file.modified", "file"

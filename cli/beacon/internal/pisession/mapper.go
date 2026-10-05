@@ -313,6 +313,9 @@ func (m *mapper) emitToolResult(line int, timestamp time.Time, callID string, me
 		ev.Error = &schema.ErrorInfo{Type: "tool_error"}
 	}
 	m.applyToolCall(&ev, state)
+	if server, tool := piMCPServerTool(state.Name, childMap(message["details"])); server != "" || tool != "" {
+		ev.MCP = &schema.MCPInfo{Server: server, Tool: tool}
+	}
 	if category == "command" {
 		ev.Command = &schema.CommandInfo{Command: commandFor(state.Name, state.Args), Output: output}
 	}
@@ -394,7 +397,7 @@ func (m *mapper) applyToolCall(ev *schema.Event, call toolCallState) {
 		ev.Tool.Path = path
 		ev.File = &schema.FileInfo{Path: path, Operation: fileOperation(call.Name), Language: strings.TrimPrefix(filepath.Ext(path), ".")}
 	}
-	if server, tool := piMCPServerTool(call.Name); server != "" || tool != "" {
+	if server, tool := piMCPServerTool(call.Name, nil); server != "" || tool != "" {
 		ev.MCP = &schema.MCPInfo{Server: server, Tool: tool}
 	}
 	ev.GenAI = ensureGenAI(ev.GenAI)
@@ -498,7 +501,19 @@ func fileOperation(name string) string {
 	}
 }
 
-func piMCPServerTool(toolName string) (string, string) {
+// piMCPServerTool returns the MCP server and tool a Pi tool call reached, when that is known: from
+// the serverName and mcpToolName a result's details carry, or else from the reversible
+// mcp__<server>__<tool> spelling. It reads exactly what the live hook mapper reads (piMCPServerTool
+// in cli/beacon-hooks/cmd/pi_family.go), because a hook event and a session-file event for one call
+// are merged only when they name the same server and tool.
+//
+// A name of the form mcp__<server>_<tool> is not split. That spelling hides where the server ends --
+// Oh My Pi mints it from `beacon-managed` and `beacon_lookup` as mcp__beacon_managed_beacon_lookup --
+// and a guessed server files the call under one it never reached.
+func piMCPServerTool(toolName string, details map[string]interface{}) (string, string) {
+	if server, tool := stringValue(details["serverName"]), stringValue(details["mcpToolName"]); server != "" && tool != "" {
+		return server, tool
+	}
 	rest, ok := strings.CutPrefix(strings.TrimSpace(toolName), "mcp__")
 	if !ok {
 		return "", ""
@@ -506,16 +521,14 @@ func piMCPServerTool(toolName string) (string, string) {
 	if server, tool, ok := strings.Cut(rest, "__"); ok && server != "" && tool != "" {
 		return server, tool
 	}
-	server, tool, ok := strings.Cut(rest, "_")
-	if !ok || server == "" || tool == "" {
-		return "", ""
-	}
-	return server, tool
+	return "", ""
 }
 
+// isMCPTool reports whether a tool is MCP-routed, whether or not its server can be named: mcp__ is
+// the namespace MCP tools are given.
 func isMCPTool(name string) bool {
-	server, tool := piMCPServerTool(name)
-	return server != "" || tool != ""
+	rest, ok := strings.CutPrefix(strings.TrimSpace(name), "mcp__")
+	return ok && rest != ""
 }
 
 func piUsage(usage map[string]interface{}) *schema.GenAIUsageInfo {
