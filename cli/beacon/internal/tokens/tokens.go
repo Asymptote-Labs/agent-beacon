@@ -177,7 +177,7 @@ func aggregate(events []schema.Event, opts Options, contextEvents []schema.Event
 		opts.NearLimitRatio = defaultNearLimitRatio
 	}
 	report := Report{TotalEvents: len(events)}
-	usageEvents, suppressed := resolveUsageEvents(events, sessionUserContexts(contextEvents), liveCaptureStarts(contextEvents))
+	usageEvents, suppressed := resolveUsageEvents(events, sessionUserContexts(contextEvents), liveCaptureStarts(contextEvents, events))
 	report.SuppressedPollEvents = suppressed
 
 	byModel := map[string]*Usage{}
@@ -645,26 +645,46 @@ func isLiveCollectionMethod(method string) bool {
 // any event arrived over that method -- whether or not the event carried usage.
 type liveCaptureIndex map[liveScope]map[string]time.Time
 
-func liveCaptureStarts(events []schema.Event) liveCaptureIndex {
+// LiveCaptureKey names the (endpoint, harness, session, live collection method) an event marks the
+// start of, and reports false for an event that marks none: one without a session, a parseable
+// timestamp, or a live collection method. The live/poll cutover is the earliest such event per
+// key, so a reader that hands the aggregator a reduced context set (see
+// dashboard.ReadTokenEventsAppendOrder) needs to keep only the earliest event per key, not every
+// live event in the log.
+func LiveCaptureKey(event schema.Event) (string, time.Time, bool) {
+	method := strings.ToLower(strings.TrimSpace(event.Harness.CollectionMethod))
+	if !isLiveCollectionMethod(method) || event.Session == nil {
+		return "", time.Time{}, false
+	}
+	scope, ok := liveScopeFor(event.Endpoint.Hostname, event.Harness.Name, event.Session.ID)
+	if !ok {
+		return "", time.Time{}, false
+	}
+	ts, err := schema.ParseTimestamp(event.Timestamp)
+	if err != nil || ts.IsZero() {
+		return "", time.Time{}, false
+	}
+	return strings.Join([]string{scope.endpoint, scope.harness, scope.session, method}, "\x00"), ts, true
+}
+
+// liveCaptureStarts reads the cutover inputs from every source it is given. aggregate passes both
+// the report's own events and its context events: the context set alone is not enough, because
+// a caller may hand over only session.context rows, and the matched events alone are not enough
+// either, because a time window can start after a session's first live event.
+func liveCaptureStarts(sources ...[]schema.Event) liveCaptureIndex {
 	index := liveCaptureIndex{}
-	for _, event := range events {
-		method := strings.ToLower(strings.TrimSpace(event.Harness.CollectionMethod))
-		if !isLiveCollectionMethod(method) || event.Session == nil {
-			continue
-		}
-		scope, ok := liveScopeFor(event.Endpoint.Hostname, event.Harness.Name, event.Session.ID)
-		if !ok {
-			continue
-		}
-		ts, err := schema.ParseTimestamp(event.Timestamp)
-		if err != nil || ts.IsZero() {
-			continue
-		}
-		if index[scope] == nil {
-			index[scope] = map[string]time.Time{}
-		}
-		if current, seen := index[scope][method]; !seen || ts.Before(current) {
-			index[scope][method] = ts
+	for _, events := range sources {
+		for _, event := range events {
+			if _, ts, ok := LiveCaptureKey(event); ok {
+				scope, _ := liveScopeFor(event.Endpoint.Hostname, event.Harness.Name, event.Session.ID)
+				method := strings.ToLower(strings.TrimSpace(event.Harness.CollectionMethod))
+				if index[scope] == nil {
+					index[scope] = map[string]time.Time{}
+				}
+				if current, seen := index[scope][method]; !seen || ts.Before(current) {
+					index[scope][method] = ts
+				}
+			}
 		}
 	}
 	return index
