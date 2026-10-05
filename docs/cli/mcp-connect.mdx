@@ -71,7 +71,7 @@ Connect works in these steps:
 
 1. **Harnesses.** Without `--harness`, connect acts on every harness `beacon endpoint discover`
    detects. `--harness` accepts the same names as `beacon endpoint install --harness`, such as
-   `claude`, `codex`, `cursor`, `vscode`, `gemini` and `opencode`.
+   `claude`, `codex`, `cursor`, `vscode`, `gemini`, `opencode` and `omp`.
 2. **URL.** The URL is `--url`, or the Beacon Cloud URL recorded by
    [`beacon endpoint connect`](/cli/endpoint-connect) with `/mcp` added. The Beacon Cloud backend
    may name its own canonical MCP URL, `https://mcp.beacon.sh` in production. When it does, connect
@@ -90,7 +90,7 @@ Connect works in these steps:
    | `update` | Beacon's own entry, with a different URL or auth mode; connect updates it. |
    | `present` | Already configured as asked. Nothing changes. |
    | `conflict` | A `beacon-managed` entry that Beacon did not write, or one that points at another URL. It is left alone unless you pass `--force`. |
-   | `skip` | The config cannot be read or edited safely, for example because it does not parse. The reason is shown. |
+   | `skip` | The config cannot be read or edited safely, for example because it does not parse, or, for a harness that reads plain JSON, because it has comments or trailing commas. The reason is shown. |
 
 5. **Confirm and write.** Connect asks before writing, unless you pass `--yes`. Each changed file
    is first backed up next to itself as `<file>.beacon.<UTC time>.bak`, then replaced atomically.
@@ -107,6 +107,10 @@ other byte, including comments, trailing commas, indentation and line endings. I
 result and checks that the only difference from the original is the `beacon-managed` entry.
 If anything else would change, nothing is written. A symlinked config, such as one managed by a
 dotfiles tool, is written through the link.
+
+Codex CLI, OpenCode and Oh My Pi turn a server off with an `enabled` key inside its entry. That
+key is yours: if you switch `beacon-managed` off, connect keeps your value whenever it writes the
+entry, so running it again, or changing the auth mode, never turns the server back on.
 
 What connect wrote is recorded in `~/.beacon/mcp/connections.json` (`0600`): the harness, file, URL,
 auth mode, variable name and backup, and never a token. `disconnect` uses this record rather than
@@ -183,6 +187,7 @@ Connect writes these entries (OAuth mode shown, then what `--token-env NAME` add
 | VS Code | User-profile `mcp.json` (next to the user `settings.json`) | `servers.beacon-managed = {"type": "http", "url": …}` | `"Bearer ${input:beacon-managed-token}"` and a password prompt input | "MCP: List Servers", then start `beacon-managed` |
 | Gemini CLI | `~/.gemini/settings.json` | `mcpServers.beacon-managed = {"url": …, "type": "http"}` | `"Bearer ${NAME}"` | `/mcp auth beacon-managed` |
 | OpenCode | `~/.config/opencode/opencode.json`, or `opencode.jsonc` | `mcp.beacon-managed = {"type": "remote", "url": …, "enabled": true}` | `"oauth": false`, `"Bearer {env:NAME}"` | `opencode mcp auth beacon-managed` |
+| Oh My Pi | The active profile's `mcp.json`: `~/.omp/agent/mcp.json`, or `~/.omp/profiles/<name>/agent/mcp.json` under `OMP_PROFILE` (or `PI_PROFILE`). `PI_CODING_AGENT_DIR` replaces the default profile's directory, and `PI_CONFIG_DIR` renames `.omp` | `mcpServers.beacon-managed = {"type": "http", "url": …}` | `headers.Authorization: "Bearer ${NAME}"` | `/mcp reauth beacon-managed` |
 
 - **VS Code** asks for the token the first time the server starts and keeps it in its own secret
   storage, so in token mode it does not read `NAME`.
@@ -190,6 +195,13 @@ Connect writes these entries (OAuth mode shown, then what `--token-env NAME` add
   `beacon-managed` shows as disabled.
 - **OpenCode** reads `opencode.json` when both it and `opencode.jsonc` exist. Connect edits the
   same file OpenCode's own `opencode mcp add` would.
+- **Oh My Pi** signs in only when you run `/mcp reauth beacon-managed`; until then it reports
+  `beacon-managed` as failing to connect each time it starts. It reads `mcp.json` as plain JSON and
+  ignores a file with comments or trailing commas, so connect skips such a file instead of editing
+  it. Connect writes only the active profile; run it with `OMP_PROFILE` set to connect another.
+  Oh My Pi also loads the MCP servers of Claude Code, Codex CLI, Cursor, Gemini CLI and OpenCode,
+  so a `beacon-managed` entry connect wrote for one of those appears in Oh My Pi as well, and stays
+  after `beacon mcp disconnect --harness omp`. Its own entry takes precedence over those.
 
 ### Harnesses you add by hand
 

@@ -36,12 +36,13 @@ Beacon's managed extension is a single TypeScript file in one of Oh My Pi's two 
 
 User level is the default, and `beacon endpoint discover` reports on the user path only.
 
-The two paths resolve asymmetrically, which matters if you set either of Oh My Pi's directory variables:
+The two paths resolve asymmetrically, which matters if you set any of Oh My Pi's directory variables. The user path follows the profile Oh My Pi itself would run under:
 
 | Variable | Effect on the install path |
 |----------|---------------------------|
-| `PI_CODING_AGENT_DIR` | Replaces the user agent directory outright, so the extension goes to `$PI_CODING_AGENT_DIR/extensions/beacon.ts`. Oh My Pi sets this on its own process when a named profile is active, so installing from inside a profiled session lands in `~/.omp/profiles/<name>/agent/extensions/` |
-| `PI_CONFIG_DIR` | Renames the `.omp` directory under your home directory only. The project path stays `./.omp/extensions/` |
+| `OMP_PROFILE`, or `PI_PROFILE` when `OMP_PROFILE` is unset | Names the active profile. A named profile installs to `~/.omp/profiles/<name>/agent/extensions/beacon.ts`; empty or `default` is the default profile. A name Oh My Pi would refuse is refused |
+| `PI_CODING_AGENT_DIR` | Replaces the default profile's agent directory, so the extension goes to `$PI_CODING_AGENT_DIR/extensions/beacon.ts`. A named profile ignores it, as Oh My Pi does. Oh My Pi sets it, with the profile variables, on its own process when a named profile is active |
+| `PI_CONFIG_DIR` | Renames the `.omp` directory under your home directory only, including for a named profile. The project path stays `./.omp/extensions/` |
 
 Beacon identifies its own extension by the marker `beacon-managed-omp-extension:v1`, which is distinct from Pi's. The version suffix is part of the contract with the extension source: it is what lets a repair recognize a stale file instead of leaving it in place. A `beacon.ts` without the marker belongs to somebody else, so install will not overwrite it and discovery does not report it as Beacon telemetry.
 
@@ -64,6 +65,14 @@ Oh My Pi reports as the `omp` harness with capability `plugin`:
 | `enabled` | Beacon's managed extension is in place |
 
 A file carrying Pi's marker at this path is not an Oh My Pi install. The two runtimes read different directories, so it should not arise, but the markers are distinct so the answer does not depend on that staying true.
+
+## Beacon Cloud MCP
+
+[`beacon mcp connect`](/cli/mcp-connect) registers the Beacon Cloud MCP server as `beacon-managed` in the active profile's `mcp.json`, next to any servers already there, so Oh My Pi can search the history this endpoint forwards. It resolves the profile the same way as the extension install above. After connecting, run `/mcp reauth beacon-managed` in Oh My Pi and sign in with beacon.sh.
+
+```bash
+beacon mcp connect --harness omp
+```
 
 ## Install or configuration support
 
@@ -127,7 +136,7 @@ The extension itself sends nothing over the network. It spawns the local `beacon
 - **No enforcement.** As with every other runtime, enforcement stays behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`), which is not wired to Oh My Pi. Its blocking `tool_call` handler and its approval events make it a viable target for that seam later.
 - **Streaming events are not collected.** The extension subscribes to ten of Oh My Pi's event types and ignores the rest, which are provider-request internals, streaming message updates, compaction and retry signals, and TUI plumbing. Assistant output is recorded once when a message finalizes rather than token by token, so Beacon stays out of the streaming path.
 - **MCP notifications are not collected.** `mcp_notification` fires for every JSON-RPC notification a connected server sends, most of them routine tools and resources list refreshes. It describes MCP transport plumbing rather than an action the agent took. MCP tool calls the agent makes *are* collected.
-- **Named profiles need the environment variable.** Beacon installs into the agent directory `PI_CODING_AGENT_DIR` names, or the default one when it is unset. It does not enumerate `~/.omp/profiles/`, so instrumenting a named profile means running the install with that variable set — which is what Oh My Pi itself does inside a profiled session.
+- **One profile at a time.** Beacon installs into the active profile, named by `OMP_PROFILE` or `PI_PROFILE`, or into the default profile. It does not enumerate `~/.omp/profiles/`, so instrumenting another profile means running the install with that profile's variable set.
 - **Session switches are not distinguished.** Oh My Pi's `session_start` carries no reason, and its `session_switch`, `session_branch`, and `session_tree` events are not subscribed to, so a resumed or forked session is not marked as such.
 
 ## Deployment notes

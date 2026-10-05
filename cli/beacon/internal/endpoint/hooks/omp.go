@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	ompextension "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks/assets/omp"
 )
@@ -35,15 +37,84 @@ const (
 	// ompConfigDirName is the config directory Oh My Pi keeps under the home directory.
 	ompConfigDirName = ".omp"
 
-	// ompAgentDirEnv overrides the agent directory outright. Oh My Pi reads it itself, and sets it
-	// on its own process when a named profile is active, so an install performed from inside a
-	// profiled session lands in that profile's extension directory rather than the default one.
+	// ompAgentDirEnv overrides the agent directory of the default profile. A named profile ignores
+	// it, though Oh My Pi exports it (with the profile variables) on its own process when one is
+	// active, so a child of a profiled session sees the two agree.
 	ompAgentDirEnv = "PI_CODING_AGENT_DIR"
 
 	// ompConfigDirEnv renames the config directory under the home directory. Oh My Pi applies it
 	// only to that home-directory root, never to the project directory -- see ompExtensionDir.
 	ompConfigDirEnv = "PI_CONFIG_DIR"
+
+	// ompProfileEnv names the active profile. ompLegacyProfileEnv is read only when ompProfileEnv
+	// is unset, so an explicitly empty OMP_PROFILE selects the default profile.
+	ompProfileEnv       = "OMP_PROFILE"
+	ompLegacyProfileEnv = "PI_PROFILE"
 )
+
+// The profile names Oh My Pi accepts (normalizeProfileName in its utils/dirs.ts). It refuses to
+// start with any other name, so Beacon refuses to resolve one rather than write where nothing
+// reads.
+var (
+	ompProfileNamePattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+	ompReservedProfileName = regexp.MustCompile(`(?i)^(?:CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])(?:\..*)?$`)
+)
+
+// ompProfileName normalizes a profile name as Oh My Pi does: blank and "default" are the default
+// profile, returned as "".
+func ompProfileName(raw string) (string, error) {
+	name := strings.TrimSpace(raw)
+	if name == "" || name == "default" {
+		return "", nil
+	}
+	if name == "." || name == ".." || strings.HasSuffix(name, ".") ||
+		!ompProfileNamePattern.MatchString(name) || ompReservedProfileName.MatchString(name) {
+		return "", fmt.Errorf("Oh My Pi profile %q is not a valid profile name", raw)
+	}
+	return name, nil
+}
+
+// OmpAgentDirForHome resolves Oh My Pi's user agent directory for the active profile: the
+// directory that holds its user mcp.json and its extensions directory.
+//
+// It follows the runtime's own order (getAgentDir in its utils/dirs.ts). The active profile is
+// OMP_PROFILE, or PI_PROFILE when OMP_PROFILE is unset; a named profile lives at
+// `~/<config>/profiles/<name>/agent` and ignores PI_CODING_AGENT_DIR. The default profile honors
+// PI_CODING_AGENT_DIR, except a value that is PI_PROFILE's own profile directory -- what a child
+// of a profiled session that switched back to the default inherits -- and otherwise lives at
+// `~/<config>/agent`. `<config>` is PI_CONFIG_DIR, or `.omp`.
+func OmpAgentDirForHome(home string) (string, error) {
+	configDir := ompConfigDirName
+	if named := os.Getenv(ompConfigDirEnv); named != "" {
+		configDir = named
+	}
+	profileDir := func(name string) string {
+		return filepath.Join(home, configDir, "profiles", name, "agent")
+	}
+	rawProfile, set := os.LookupEnv(ompProfileEnv)
+	if !set {
+		rawProfile = os.Getenv(ompLegacyProfileEnv)
+	}
+	profile, err := ompProfileName(rawProfile)
+	if err != nil {
+		return "", err
+	}
+	if profile == "" {
+		if agentDir := os.Getenv(ompAgentDirEnv); agentDir != "" {
+			legacy, err := ompProfileName(os.Getenv(ompLegacyProfileEnv))
+			if err != nil || legacy == "" || home == "" || agentDir != profileDir(legacy) {
+				return filepath.Abs(agentDir)
+			}
+		}
+	}
+	if home == "" {
+		return "", fmt.Errorf("home directory is required to resolve the Oh My Pi agent directory")
+	}
+	if profile != "" {
+		return profileDir(profile), nil
+	}
+	return filepath.Join(home, configDir, "agent"), nil
+}
 
 type OmpOptions struct {
 	Level    Level
@@ -147,30 +218,21 @@ func OmpExtensionPathForHome(home string, level Level) (string, error) {
 // ompExtensionDir resolves the directory Oh My Pi actually scans for extension modules.
 //
 // The two levels resolve asymmetrically, and the asymmetry is Oh My Pi's rather than a
-// simplification here. Its user root is the *agent* directory -- `~/.omp/agent` -- which
-// `PI_CODING_AGENT_DIR` replaces outright and `PI_CONFIG_DIR` renames the `.omp` half of; a named
-// profile moves it to `~/.omp/profiles/<name>/agent`, which the runtime signals by setting
-// `PI_CODING_AGENT_DIR` on its own process, so a profiled install is reached through that variable
-// rather than by Beacon guessing a profile name. Its project root is the plain `.omp` directory in
-// the working directory, with no `agent` segment and no environment override at all: the runtime
-// joins the literal there.
+// simplification here. Its user root is the active profile's *agent* directory, which
+// OmpAgentDirForHome resolves. Its project root is the plain `.omp` directory in the working
+// directory, with no `agent` segment and no environment override at all: the runtime joins the
+// literal there.
 //
 // Deriving either path from the other, or applying `PI_CONFIG_DIR` to both, would write the file
 // where Oh My Pi does not look -- and the install would report success and collect nothing.
 func ompExtensionDir(home string, level Level) (string, error) {
 	switch level {
 	case "", LevelUser:
-		if agentDir := os.Getenv(ompAgentDirEnv); agentDir != "" {
-			return filepath.Join(agentDir, "extensions"), nil
+		agentDir, err := OmpAgentDirForHome(home)
+		if err != nil {
+			return "", err
 		}
-		if home == "" {
-			return "", fmt.Errorf("home directory is required to resolve the Oh My Pi extension path")
-		}
-		configDir := ompConfigDirName
-		if named := os.Getenv(ompConfigDirEnv); named != "" {
-			configDir = named
-		}
-		return filepath.Join(home, configDir, "agent", "extensions"), nil
+		return filepath.Join(agentDir, "extensions"), nil
 	case LevelProject:
 		cwd, err := os.Getwd()
 		if err != nil {

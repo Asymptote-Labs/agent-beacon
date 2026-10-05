@@ -3,6 +3,7 @@ package mcpconnect
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -40,12 +41,17 @@ func tomlLineEnding(text string) string {
 	return "\n"
 }
 
-// tomlBlock renders [mcp_servers.<name>] with fields in the order given.
+// tomlBlock renders [mcp_servers.<name>] with fields in the order given. Values are strings, or
+// the person's own `enabled` boolean that connect carries over.
 func tomlBlock(table string, name string, fields []field, eol string) string {
 	var b strings.Builder
 	b.WriteString("[" + table + "." + tomlKey(name) + "]" + eol)
 	for _, f := range fields {
-		b.WriteString(f.Key + " = " + tomlString(fmt.Sprint(f.Value)) + eol)
+		value := tomlString(fmt.Sprint(f.Value))
+		if v, ok := f.Value.(bool); ok {
+			value = strconv.FormatBool(v)
+		}
+		b.WriteString(f.Key + " = " + value + eol)
 	}
 	return b.String()
 }

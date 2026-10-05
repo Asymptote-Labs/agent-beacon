@@ -163,6 +163,38 @@ func TestMCPConnectEndToEndOpenCode(t *testing.T) {
 	}
 }
 
+// Oh My Pi lists its MCP servers with `/mcp list`, a slash command inside a session, and has no CLI
+// subcommand a test can run instead. `omp read mcp://…` loads the configured MCP servers the way a
+// session does -- discovery, ${VAR} expansion, stored credentials -- and connects to each before it
+// looks the resource up, so a request reaching the fixture proves the entry was loaded at the
+// connected URL. The read itself fails: no server has that resource.
+func TestMCPConnectEndToEndOhMyPi(t *testing.T) {
+	bin := realCLI(t, "omp")
+	fx := realCLIFixture(t, "omp")
+	probe := func() []string {
+		before := len(fx.auth.all())
+		_, _ = runCLI(t, fx.home, bin, "read", "mcp://beacon-e2e/probe")
+		return fx.auth.all()[before:]
+	}
+
+	connectReal(t, fx, "omp")
+	if got := probe(); len(got) == 0 || got[0] != "" {
+		t.Fatalf("Oh My Pi did not connect to %s without credentials; saw %q", fx.url, got)
+	}
+	if _, _, err := runMCP(t, "disconnect", "--harness", "omp"); err != nil {
+		t.Fatal(err)
+	}
+	if got := probe(); len(got) != 0 {
+		t.Fatalf("Oh My Pi still connected after disconnect; saw %q", got)
+	}
+
+	t.Setenv("BEACON_MCP_TOKEN", e2eToken)
+	connectReal(t, fx, "omp", "--token-env", "BEACON_MCP_TOKEN")
+	if got := probe(); !containsString(got, "Bearer "+e2eToken) {
+		t.Fatalf("Oh My Pi did not send the token from BEACON_MCP_TOKEN; saw %q", got)
+	}
+}
+
 // Copilot CLI is a manual target: connect prints the command. Running that command, with a
 // placeholder token, must produce a server Copilot lists at the URL.
 func TestMCPConnectEndToEndCopilotManualStep(t *testing.T) {

@@ -350,10 +350,11 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 	work := t.TempDir()
 	t.Setenv("SHELL", "/bin/bash")
 	// Oh My Pi's user extension path is the one candidate an environment variable can move, so the
-	// two it reads are cleared: a developer who happens to run Oh My Pi under a profile would
+	// variables it reads are cleared: a developer who happens to run Oh My Pi under a profile would
 	// otherwise see this test fail on a path that is correct for their machine.
-	t.Setenv("PI_CODING_AGENT_DIR", "")
-	t.Setenv("PI_CONFIG_DIR", "")
+	for _, name := range []string{"PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "OMP_PROFILE", "PI_PROFILE"} {
+		t.Setenv(name, "")
+	}
 	// Senpi reads the same PI_CODING_AGENT_DIR as its last fallback, plus two of its own; all three
 	// are cleared for the same reason.
 	t.Setenv("OMO_CODING_AGENT_DIR", "")

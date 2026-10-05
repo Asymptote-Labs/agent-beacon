@@ -75,7 +75,7 @@ func newMCPFixture(t *testing.T, detected ...string) *mcpFixture {
 	t.Helper()
 	fx := &mcpFixture{home: t.TempDir(), requests: &requestLog{}, strays: &requestLog{}, auth: &requestLog{}}
 	testenv.SetHome(t, fx.home)
-	for _, key := range []string{"XDG_CONFIG_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "CI", "CONTINUOUS_INTEGRATION", "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE", "JENKINS_URL", "TEAMCITY_VERSION"} {
+	for _, key := range []string{"XDG_CONFIG_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "OMP_PROFILE", "PI_PROFILE", "CI", "CONTINUOUS_INTEGRATION", "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE", "JENKINS_URL", "TEAMCITY_VERSION"} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
 	}
@@ -191,7 +191,7 @@ func filesUnder(t *testing.T, dir string) map[string]string {
 	return out
 }
 
-var allAutomatic = []string{"claude_code", "codex_cli", "cursor", "vscode", "gemini_cli", "opencode"}
+var allAutomatic = []string{"claude_code", "codex_cli", "cursor", "vscode", "gemini_cli", "opencode", "omp"}
 
 func TestMCPConnectSubcommandsAreRegistered(t *testing.T) {
 	for _, sub := range []string{"connect", "disconnect", "status"} {
@@ -280,8 +280,8 @@ func TestMCPConnectWritesEveryDetectedHarnessThenDisconnectRestores(t *testing.T
 	}
 	for _, want := range []string{
 		"(checked)", "Server name: beacon-managed", "Auth: OAuth",
-		"✓ Claude Code", "✓ Codex CLI", "✓ Cursor", "✓ VS Code", "✓ Gemini CLI", "✓ OpenCode",
-		"codex mcp login beacon-managed", "opencode mcp auth beacon-managed", "run /mcp",
+		"✓ Claude Code", "✓ Codex CLI", "✓ Cursor", "✓ VS Code", "✓ Gemini CLI", "✓ OpenCode", "✓ Oh My Pi",
+		"codex mcp login beacon-managed", "opencode mcp auth beacon-managed", "run /mcp", "/mcp reauth beacon-managed",
 		"Add by hand", "copilot mcp add --transport http beacon-managed " + fx.url,
 		"Not connected (Beacon does not know how these configure MCP servers): pi_cli",
 	} {

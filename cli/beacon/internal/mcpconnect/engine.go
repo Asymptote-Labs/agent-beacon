@@ -131,6 +131,9 @@ func inspect(t Target, path string) (state, error) {
 		}
 		st.entry, st.exists = tomlTableEntry(parsed, t.container[0], ServerName)
 	default:
+		if t.strictJSON && strings.TrimSpace(cf.text) != "" && !json.Valid([]byte(cf.text)) {
+			return st, fmt.Errorf("%s is not plain JSON; %s ignores a config with comments or trailing commas, so Beacon leaves it alone", path, t.DisplayName)
+		}
 		parsed, err := decodeJSONC(cf.text)
 		if err != nil {
 			return st, fmt.Errorf("%s is not valid JSON (%v)", path, err)
@@ -214,6 +217,25 @@ func sameURL(a, b string) bool {
 	return strings.TrimRight(strings.TrimSpace(a), "/") == strings.TrimRight(strings.TrimSpace(b), "/")
 }
 
+// desiredEntry is the entry connect puts in place: Beacon's, keeping the person's own `enabled`
+// value from the existing entry where the harness switches a server off that way. Turning
+// beacon-managed off in the harness is the person's decision, and re-running connect must not undo
+// it.
+func (t Target) desiredEntry(opts Options, existing map[string]any) ordered {
+	entry := t.entry(opts.URL, opts.TokenEnv)
+	enabled, ok := existing["enabled"].(bool)
+	if !t.switchable || !ok {
+		return entry
+	}
+	for i := range entry {
+		if entry[i].Key == "enabled" {
+			entry[i].Value = enabled
+			return entry
+		}
+	}
+	return append(entry, field{"enabled", enabled})
+}
+
 // Plan works out what connect would do for each target without writing anything.
 func Plan(opts Options, targets []Target) ([]Item, error) {
 	m, err := loadManifest(opts.Home)
@@ -253,7 +275,7 @@ func planOne(opts Options, m *manifest, t Target) Item {
 	it.ExistingURL = st.url
 	rec, recorded := m.find(t.Name, path)
 	ours := recorded && st.exists && sameURL(st.url, rec.URL)
-	want := normalizeJSON(t.entry(opts.URL, opts.TokenEnv))
+	want := normalizeJSON(t.desiredEntry(opts, st.entry))
 	same := st.exists && reflect.DeepEqual(normalizeJSON(st.entry), want)
 	if opts.TokenEnv != "" && t.vscodeInputs && !st.inputOK && !(recorded && rec.Auth == AuthTokenEnv) {
 		if opts.Force {
@@ -373,7 +395,7 @@ func applyOne(ctx context.Context, opts Options, m *manifest, it Item) (Record, 
 
 // editForConnect returns the config text with Beacon's entry in place.
 func editForConnect(t Target, text string, st state, opts Options) (updated string, created int, createdInputs bool, err error) {
-	entry := t.entry(opts.URL, opts.TokenEnv)
+	entry := t.desiredEntry(opts, st.entry)
 	if t.format == formatTOML {
 		eol := tomlLineEnding(text)
 		stripped := text
@@ -427,16 +449,20 @@ func isBeaconInput(v any) bool {
 // entry set: every other key, at every depth, deeply equal. It is the safety net under the text
 // splicing, the same check the Kimi Code installer runs before it replaces config.toml.
 func verifyConnect(t Target, before, after string, opts Options) error {
+	if t.strictJSON && !json.Valid([]byte(after)) {
+		return errors.New("Beacon's edit would not be plain JSON, which " + t.DisplayName + " requires")
+	}
 	b, a, err := parseBoth(t, before, after)
 	if err != nil {
 		return err
 	}
+	existing, _ := dig(b, t.container)[ServerName].(map[string]any)
 	if strings.TrimSpace(before) == "" && len(t.skeleton) > 0 {
 		for _, f := range t.skeleton {
 			b[f.Key] = normalizeJSON(f.Value)
 		}
 	}
-	setPath(b, t.container, ServerName, normalizeJSON(t.entry(opts.URL, opts.TokenEnv)))
+	setPath(b, t.container, ServerName, normalizeJSON(t.desiredEntry(opts, existing)))
 	if t.vscodeInputs {
 		dropBeaconInputs(b)
 		if opts.TokenEnv != "" {
