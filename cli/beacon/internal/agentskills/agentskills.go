@@ -261,7 +261,7 @@ func write(dir, name string) error {
 		return err
 	}
 	if old != "" {
-		return os.RemoveAll(old)
+		_ = os.RemoveAll(old)
 	}
 	return nil
 }
