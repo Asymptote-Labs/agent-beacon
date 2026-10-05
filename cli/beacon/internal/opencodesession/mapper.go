@@ -184,8 +184,7 @@ func (m *mapper) emitUsage(record Record) {
 		value := record.Tokens.Input
 		usage.InputTokens = &value
 	}
-	if record.Tokens.Output > 0 {
-		value := record.Tokens.Output
+	if value := record.Tokens.outputTokens(); value > 0 {
 		usage.OutputTokens = &value
 	}
 	if record.Tokens.Reasoning > 0 {
@@ -210,6 +209,37 @@ func (m *mapper) emitUsage(record Record) {
 	ev := m.base(record, "token.usage", "metric", schema.SeverityInfo, "opencode token usage")
 	ev.GenAI = &schema.GenAIInfo{Usage: usage}
 	m.append(record, "usage", ev)
+}
+
+// outputTokens returns gen_ai output_tokens for a stored OpenCode message.
+// gen_ai.usage counts reasoning inside output_tokens, with
+// reasoning.output_tokens as the subset, and totals leave the subset out so
+// it is counted once. OpenCode has stored output both ways. Since v1.3.16 its
+// getUsage (packages/opencode/src/session/session.ts) sets output to the
+// provider's outputTokens minus reasoningTokens, so reasoning has to be added
+// back or it drops out of every total. Earlier releases, including every
+// message in the legacy file store, stored outputTokens whole, which already
+// holds reasoning, so adding it again would count it twice.
+//
+// Total settles which shape a message has: OpenCode copies the provider's
+// total, which is the full input side plus every output token, so it reaches
+// input + cache + output + reasoning only when output left reasoning out. A
+// reasoning count above output can only mean the same. A message with no
+// total predates v1.1.57 (the 2.x runtime keeps its messages in
+// session_message, which this store does not read), so it keeps its output.
+// The live hook mapper (cli/beacon-hooks/cmd/opencode_event.go) makes the
+// same call, except that it takes a missing total as a 2.x step event.
+func (u TokenUsage) outputTokens() int64 {
+	if u.Reasoning <= 0 {
+		return u.Output
+	}
+	if u.Reasoning > u.Output {
+		return u.Output + u.Reasoning
+	}
+	if u.Total > 0 && u.Total >= u.Input+u.CacheRead+u.CacheWrite+u.Output+u.Reasoning {
+		return u.Output + u.Reasoning
+	}
+	return u.Output
 }
 
 func classifyTool(name string, record Record) (action, category string, severity schema.Severity, message string) {

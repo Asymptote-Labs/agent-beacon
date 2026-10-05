@@ -47,5 +47,9 @@ type TokenUsage struct {
 	Reasoning  int64
 	CacheRead  int64
 	CacheWrite int64
-	CostUSD    float64
+	// Total is OpenCode's tokens.total, the provider's own count of every
+	// input and output token. It is kept only to tell which way Output was
+	// stored (see outputTokens); zero when the message carried none.
+	Total   int64
+	CostUSD float64
 }
