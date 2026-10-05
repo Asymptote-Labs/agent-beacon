@@ -383,6 +383,58 @@ func toolFieldsWithResponse(toolName string, toolInput, toolResponse map[string]
 	return fields
 }
 
+// applyIngestedToolResult records the result of a tool that brought outside content into the
+// agent's context -- a file read, a web fetch -- as gen_ai.tool.call.result, with the retention
+// marker that describes it.
+//
+// toolFieldsWithResponse writes gen_ai.tool.call.result for MCP calls only, so before this the live
+// hook path dropped the response of every other tool (#743). A Read or WebFetch was recorded with
+// its path and nothing it returned, and the threat-rules field derived from the result,
+// gen_ai.tool.call.result_text, was empty on every event a live install wrote: indirect prompt
+// injection was visible to `beacon scan` after `claude sync` and invisible in real time.
+//
+// The scope is the shared one in pkg/asymptoteobserve, the same predicate the rules engine reads,
+// so a capture path cannot drop a result the engine would match or record one it ignores. It is
+// deliberately not every tool: a shell command's output already has command.output, a write echoes
+// what the agent itself produced, and recording either again would only grow the log.
+//
+// Called once the action is known, because the action is half of the scope. An MCP call already
+// carries its result from toolFieldsWithResponse and is left exactly as it was. The value goes out
+// through the logger's sanitizer like every other field -- secret redaction, the per-string limit
+// and the 64 KiB event ceiling, which drops the result and marks content not included -- and the
+// marker is computed over the text before that, so its hash and byte count describe what the tool
+// returned, not the stored copy.
+func applyIngestedToolResult(fields map[string]interface{}, action, toolName string, toolResponse map[string]interface{}) {
+	if len(toolResponse) == 0 {
+		return
+	}
+	if !asymptoteobserve.IngestedContentAction(action) && !asymptoteobserve.IngestedContentToolName(toolName) {
+		return
+	}
+	genAI := mutableChild(fields["gen_ai"])
+	tool := mutableChild(genAI["tool"])
+	call := mutableChild(tool["call"])
+	if _, exists := call["result"]; exists {
+		return
+	}
+	call["result"] = toolResponse
+	tool["call"] = call
+	if _, exists := tool["name"]; !exists && toolName != "" {
+		tool["name"] = toolName
+	}
+	genAI["tool"] = tool
+	if _, exists := genAI["operation"]; !exists {
+		genAI["operation"] = map[string]interface{}{"name": "execute_tool"}
+	}
+	fields["gen_ai"] = genAI
+	// The marker describes this result only when nothing more specific was already retained.
+	if _, exists := fields["content"]; !exists {
+		if marker := retainedContentFields(asymptoteobserve.ToolResultPlainText(toolResponse)); marker != nil {
+			fields["content"] = marker
+		}
+	}
+}
+
 // toolCallIDFromEnvelope reads the runtime's own identifier for one tool
 // invocation out of a hook payload's top level.
 //

@@ -1,10 +1,6 @@
 package threatrules
 
 import (
-	"encoding/json"
-	"sort"
-	"strings"
-
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
@@ -47,9 +43,7 @@ func ToolResultText(event asymptoteobserve.Event) string {
 	if result == nil || !toolResultIsIngestedContent(event) || !contentRetained(event.Content) {
 		return ""
 	}
-	var parts []string
-	collectStrings(result, &parts)
-	text := strings.TrimSpace(strings.Join(parts, "\n"))
+	text := asymptoteobserve.ToolResultPlainText(result)
 	if text == "" {
 		return ""
 	}
@@ -85,24 +79,15 @@ func contentRetained(content *asymptoteobserve.ContentInfo) bool {
 	return content.Included && content.Retention != asymptoteobserve.ContentRetentionMetadata
 }
 
-// toolNameSeparators folds web_fetch, web-fetch and WebFetch to one spelling.
-var toolNameSeparators = strings.NewReplacer("_", "", "-", "")
-
 func toolResultIsIngestedContent(event asymptoteobserve.Event) bool {
-	switch event.Event.Action {
-	case "file.read", "mcp.tool_invoked":
+	if asymptoteobserve.IngestedContentAction(event.Event.Action) {
 		return true
 	}
 	if event.MCP != nil && (event.MCP.Server != "" || event.MCP.Tool != "") {
 		return true
 	}
 	for _, name := range toolNames(event) {
-		lower := strings.ToLower(strings.TrimSpace(name))
-		if strings.HasPrefix(lower, "mcp__") || strings.HasPrefix(lower, "mcp:") {
-			return true
-		}
-		switch toolNameSeparators.Replace(lower) {
-		case "webfetch", "websearch", "fetch", "fetchurl", "readurl":
+		if asymptoteobserve.IngestedContentToolName(name) {
 			return true
 		}
 	}
@@ -118,43 +103,4 @@ func toolNames(event asymptoteobserve.Event) []string {
 		names = append(names, event.GenAI.Tool.Name)
 	}
 	return names
-}
-
-// collectStrings appends every string in v, walking maps in sorted key order so the text is
-// the same for the same result on every run.
-func collectStrings(v interface{}, out *[]string) {
-	switch typed := v.(type) {
-	case string:
-		if strings.TrimSpace(typed) != "" {
-			*out = append(*out, typed)
-		}
-	case map[string]interface{}:
-		keys := make([]string, 0, len(typed))
-		for key := range typed {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			collectStrings(typed[key], out)
-		}
-	case []interface{}:
-		for _, item := range typed {
-			collectStrings(item, out)
-		}
-	case nil, bool, float64, int, int64, json.Number:
-		// Scalars other than strings are sizes, counts and flags, not content.
-	default:
-		// A typed value from an in-process caller (a mapper's struct or []map) rather than
-		// the generic shape a log line decodes to. Normalize it through JSON once.
-		data, err := json.Marshal(typed)
-		if err != nil {
-			return
-		}
-		var generic interface{}
-		if json.Unmarshal(data, &generic) == nil {
-			// generic is now a string, map, list or scalar, all handled above without
-			// reaching this case again.
-			collectStrings(generic, out)
-		}
-	}
 }

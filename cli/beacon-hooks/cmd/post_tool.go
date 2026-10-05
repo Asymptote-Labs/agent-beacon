@@ -502,6 +502,7 @@ func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) 
 		return
 	}
 	action := actionForTool(hookEvent, toolName, toolInput, toolResponse)
+	applyIngestedToolResult(fields, action, toolName, toolResponse)
 	category := "tool"
 	if strings.HasPrefix(action, "file.") {
 		category = "file"
