@@ -26,13 +26,15 @@ const manifestSchemaVersion = 1
 
 // Record is one entry Beacon wrote into one harness config.
 type Record struct {
-	Harness    string   `json:"harness"`
-	Path       string   `json:"path"`
-	ServerName string   `json:"server_name"`
-	URL        string   `json:"url"`
-	Auth       AuthMode `json:"auth"`
-	TokenEnv   string   `json:"token_env,omitempty"`
-	Method     string   `json:"method"`
+	Harness    string `json:"harness"`
+	Path       string `json:"path"`
+	ServerName string `json:"server_name"`
+	URL        string `json:"url"`
+	// Command is the executable a local stdio entry runs; empty for Beacon Cloud entries.
+	Command  string   `json:"command,omitempty"`
+	Auth     AuthMode `json:"auth"`
+	TokenEnv string   `json:"token_env,omitempty"`
+	Method   string   `json:"method"`
 	// CreatedFile is set when the config did not exist before connect, so disconnect can remove a
 	// file that holds nothing else.
 	CreatedFile bool `json:"created_file,omitempty"`
@@ -58,7 +60,11 @@ func manifestPath(home string) string {
 }
 
 func loadManifest(home string) (*manifest, error) {
-	data, err := os.ReadFile(manifestPath(home))
+	return loadManifestAt(manifestPath(home))
+}
+
+func loadManifestAt(path string) (*manifest, error) {
+	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return &manifest{SchemaVersion: manifestSchemaVersion}, nil
 	}
@@ -67,10 +73,10 @@ func loadManifest(home string) (*manifest, error) {
 	}
 	var m manifest
 	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("%s is not valid JSON: %w", manifestPath(home), err)
+		return nil, fmt.Errorf("%s is not valid JSON: %w", path, err)
 	}
 	if m.SchemaVersion != manifestSchemaVersion {
-		return nil, fmt.Errorf("%s has schema version %d; this Beacon understands %d", manifestPath(home), m.SchemaVersion, manifestSchemaVersion)
+		return nil, fmt.Errorf("%s has schema version %d; this Beacon understands %d", path, m.SchemaVersion, manifestSchemaVersion)
 	}
 	return &m, nil
 }
@@ -125,7 +131,10 @@ func (m *manifest) drop(harness, path string) {
 // save writes the manifest 0600 in a 0700 directory, like the rest of ~/.beacon. An empty
 // manifest is removed rather than left behind.
 func (m *manifest) save(home string) error {
-	path := manifestPath(home)
+	return m.saveAt(manifestPath(home))
+}
+
+func (m *manifest) saveAt(path string) error {
 	if len(m.Records) == 0 {
 		err := os.Remove(path)
 		if errors.Is(err, os.ErrNotExist) {

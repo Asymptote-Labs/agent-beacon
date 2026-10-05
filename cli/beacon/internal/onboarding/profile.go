@@ -78,6 +78,24 @@ type Onboarding struct {
 	Destination string `json:"destination,omitempty"`
 	// PrivacyMode applies only to Beacon Cloud forwarding.
 	PrivacyMode string `json:"privacy_mode,omitempty"`
+	// MCPServer and AgentSkills record the agent tools answer: "installed" when the person
+	// kept the tool selected, "declined" when they turned it off, empty when never asked.
+	MCPServer   string `json:"mcp_server,omitempty"`
+	AgentSkills string `json:"agent_skills,omitempty"`
+}
+
+// Answers to the agent tools question.
+const (
+	AgentToolInstalled = "installed"
+	AgentToolDeclined  = "declined"
+)
+
+// AgentToolAnswer is how a kept or turned-off agent tool is recorded.
+func AgentToolAnswer(kept bool) string {
+	if kept {
+		return AgentToolInstalled
+	}
+	return AgentToolDeclined
 }
 
 // Answers to the telemetry destination question.

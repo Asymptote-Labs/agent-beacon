@@ -34,7 +34,7 @@ var mcpCmd = &cobra.Command{
 	Long: `Expose Beacon activity through MCP.
 
 serve and doctor run and check the local "beacon" server, which reads this machine's runtime
-log. connect, disconnect and status manage the "beacon-managed" entry that points your harnesses
+log; install and uninstall register it in your harnesses or remove it. connect, disconnect and status manage the "beacon-managed" entry that points your harnesses
 at Beacon Cloud MCP, which searches the session history this endpoint forwards.`,
 }
 

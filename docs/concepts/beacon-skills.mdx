@@ -37,7 +37,16 @@ that accept MCP servers from plugins. When the server is available, recall uses 
 
 ## Install
 
-Beacon Skills install from the `asymptote-labs/agent-beacon` repository. Most harnesses
+The interactive [`beacon endpoint install`](/cli/endpoint-onboarding#agent-tools)
+installs the skills for every project, and registers the local MCP server, unless you
+turn them off in the wizard. To do the same at any other time:
+
+```bash
+beacon skills install   # ~/.agents/skills, and ~/.claude/skills when Claude Code is set up
+beacon mcp install      # registers `beacon mcp serve` in detected harnesses
+```
+
+Beacon Skills also install from the `asymptote-labs/agent-beacon` repository. Most harnesses
 read its plugin marketplace directly:
 
 | Runtime | Install |

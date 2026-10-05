@@ -1,0 +1,61 @@
+---
+title: "beacon mcp install"
+description: "Register the local Beacon MCP server in your harnesses, or remove it"
+---
+
+## Command overview
+
+`beacon mcp install` registers the local Beacon MCP server, [`beacon mcp serve`](/cli/mcp-serve),
+in the user-level config of every detected harness Beacon can write. `beacon mcp uninstall`
+removes the entries it wrote.
+
+```bash title="Command syntax"
+beacon mcp install [--harness NAME]...
+beacon mcp uninstall
+```
+
+The interactive [`beacon endpoint install`](/cli/endpoint-onboarding#agent-tools) runs
+`beacon mcp install` for you unless you turn the Beacon MCP server off in the wizard.
+
+The entry is named `beacon` and runs the `beacon` executable by its absolute path with
+`mcp serve`, because harnesses started from a desktop launcher do not see your shell's
+`PATH`. The server reads this machine's runtime log, so it works whether telemetry stays
+local or is also forwarded to Beacon Cloud. Nothing here touches the network.
+
+| Harness | Config |
+|---------|--------|
+| Claude Code | `~/.claude.json`, through `claude mcp add --scope user` when the `claude` CLI is on `PATH` |
+| Codex CLI | `~/.codex/config.toml` (or `$CODEX_HOME/config.toml`) |
+| Cursor | `~/.cursor/mcp.json` |
+| VS Code | the user profile's `mcp.json` |
+| Gemini CLI | `~/.gemini/settings.json` |
+| OpenCode | `~/.config/opencode/opencode.json` or `opencode.jsonc` |
+
+Beacon adds the entry only where the name `beacon` is free. An existing `beacon` entry,
+whoever wrote it, is left as it is. Configs are edited the way
+[`beacon mcp connect`](/cli/mcp-connect) edits them: never re-serialized, backed up first,
+and parsed back to prove nothing else changed. What was written is recorded in
+`~/.beacon/mcp/local.json`.
+
+`beacon mcp uninstall` removes only the entries recorded there, and only while each one
+still runs the command Beacon wrote. An entry you have since changed is yours and stays.
+
+This is a different entry from Beacon Cloud MCP (`beacon-managed`), which
+`beacon mcp connect` manages. Neither command touches the other's entry.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--harness NAME` | Harness to configure (repeatable). Defaults to every detected harness |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon mcp serve" icon="server" href="/cli/mcp-serve">
+    The local server the entry runs.
+  </Card>
+  <Card title="beacon skills" icon="book" href="/cli/skills">
+    Install the Beacon Skills for every project.
+  </Card>
+</Columns>

@@ -661,3 +661,98 @@ func TestSignInScreenHonorsNoBrowser(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentToolsAreOfferedForEitherDestinationAndStartSelected(t *testing.T) {
+	for _, destination := range []string{DestinationLocal, DestinationAsymptote} {
+		model := newWizardModel(WizardOptions{
+			SignedIn:        true,
+			Email:           "person@example.com",
+			OfferManaged:    true,
+			OfferAgentTools: true,
+		})
+		model.width, model.height = 100, 40
+		model, _ = advanceWizard(t, model, "enter")
+		if destination == DestinationLocal {
+			model, _ = advanceWizard(t, model, "j")
+		}
+		model, _ = advanceWizard(t, model, "enter")
+		if destination == DestinationAsymptote {
+			model, _ = advanceWizard(t, model, "enter") // disclosure
+			model, _ = advanceWizard(t, model, "enter") // privacy
+		}
+		if model.screen != agentToolsScreen {
+			t.Fatalf("%s: screen = %v, want agent tools", destination, model.screen)
+		}
+		if !model.result.InstallMCP || !model.result.InstallSkills {
+			t.Fatalf("%s: agent tools should start selected: %#v", destination, model.result)
+		}
+		view := model.View()
+		for _, want := range []string{"[x] Beacon MCP server", "[x] Beacon agent skills", "space"} {
+			if !strings.Contains(view, want) {
+				t.Fatalf("%s: agent tools screen missing %q:\n%s", destination, want, view)
+			}
+		}
+		model, _ = advanceWizard(t, model, "enter")
+		if model.screen != confirmScreen {
+			t.Fatalf("%s: screen = %v, want confirm", destination, model.screen)
+		}
+		if view := model.View(); !strings.Contains(view, "Agent tools: Beacon MCP server, Beacon agent skills") {
+			t.Fatalf("%s: confirm screen should list the agent tools:\n%s", destination, view)
+		}
+		model, _ = advanceWizard(t, model, "enter")
+		if !model.result.Completed || model.result.Destination != destination {
+			t.Fatalf("%s: result = %#v", destination, model.result)
+		}
+	}
+}
+
+func TestAgentToolsCanBeTurnedOff(t *testing.T) {
+	model := newWizardModel(WizardOptions{
+		SignedIn:          true,
+		OfferManaged:      true,
+		OfferAgentTools:   true,
+		DestinationOnly:   true,
+		PresetDestination: DestinationLocal,
+	})
+	model.width, model.height = 100, 40
+	if model.screen != agentToolsScreen {
+		t.Fatalf("screen = %v, want agent tools", model.screen)
+	}
+	model, _ = advanceWizard(t, model, " ")
+	if model.result.InstallMCP || !model.result.InstallSkills {
+		t.Fatalf("space should turn off the MCP server only: %#v", model.result)
+	}
+	if view := model.View(); !strings.Contains(view, "[ ] Beacon MCP server") {
+		t.Fatalf("turned-off tool should render unchecked:\n%s", view)
+	}
+	model, _ = advanceWizard(t, model, "j")
+	model, _ = advanceWizard(t, model, " ")
+	model, _ = advanceWizard(t, model, "enter")
+	if view := model.View(); !strings.Contains(view, "Agent tools: none") {
+		t.Fatalf("confirm should say no agent tools:\n%s", view)
+	}
+	model, _ = advanceWizard(t, model, "enter")
+	if !model.result.Completed || model.result.InstallMCP || model.result.InstallSkills {
+		t.Fatalf("result = %#v", model.result)
+	}
+}
+
+func TestFinishingWithoutAnAccountStillOffersAgentTools(t *testing.T) {
+	model := newWizardModel(WizardOptions{OfferManaged: true, OfferAgentTools: true, NoDisplay: errors.New("no display")})
+	model.width, model.height = 100, 40
+	model, _ = advanceWizard(t, model, "enter")
+	if model.screen != signInFailedScreen {
+		t.Fatalf("screen = %v, want recovery", model.screen)
+	}
+	model, _ = advanceWizard(t, model, "enter") // finish without an account
+	if model.screen != agentToolsScreen || !model.result.InstallMCP || !model.result.InstallSkills {
+		t.Fatalf("screen = %v result = %#v", model.screen, model.result)
+	}
+}
+
+func TestAgentToolsScreenIsSkippedWhenNotOffered(t *testing.T) {
+	model := newWizardModel(WizardOptions{SignedIn: true, OfferManaged: true, DestinationOnly: true, PresetDestination: DestinationLocal})
+	if model.screen != confirmScreen || model.result.InstallMCP || model.result.InstallSkills {
+		t.Fatalf("screen = %v result = %#v", model.screen, model.result)
+	}
+}

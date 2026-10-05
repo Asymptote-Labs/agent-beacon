@@ -179,6 +179,8 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	}
 	printLingerGap(cmd.ErrOrStderr(), result)
 	installHookTargetsFromEndpointInstall(cmd.ErrOrStderr(), selection.Hooks)
+	refreshAgentSkills(cmd.ErrOrStderr())
+	installAgentTools(cmd, onboarded)
 	if connectAfterInstall {
 		// The install is complete and stands on its own; a failed connect is reported
 		// with the retry command rather than turning a working install into an error.
@@ -330,6 +332,7 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Endpoint repaired. Manifest: %s\n", result.ManifestPath)
 	printLingerGap(cmd.ErrOrStderr(), result)
 	installHookTargetsFromEndpointInstall(cmd.ErrOrStderr(), selection.Hooks)
+	refreshAgentSkills(cmd.ErrOrStderr())
 	return nil
 }
 

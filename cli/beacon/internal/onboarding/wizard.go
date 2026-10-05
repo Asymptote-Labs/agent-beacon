@@ -60,6 +60,9 @@ type WizardOptions struct {
 	DestinationOnly   bool
 	PresetDestination string
 	PresetPrivacyMode string
+	// OfferAgentTools adds the agent tools screen before confirm, whichever destination is
+	// chosen. Both tools start selected: turning one off is the person's choice to make.
+	OfferAgentTools bool
 
 	// SignIn signs in in place. When nil the wizard keeps its original contract:
 	// it exits with NeedLogin and the caller signs in and runs it again.
@@ -89,6 +92,11 @@ type WizardResult struct {
 	// a sign-in failure. Destination is then always local: managed forwarding has
 	// nothing to authorize it.
 	WithoutAccount bool
+
+	// InstallMCP and InstallSkills are the agent tools the person kept selected. Both are
+	// false when the screen was not offered.
+	InstallMCP    bool
+	InstallSkills bool
 }
 
 type wizardScreen int
@@ -101,7 +109,15 @@ const (
 	destinationScreen
 	managedDisclosureScreen
 	privacyScreen
+	agentToolsScreen
 	confirmScreen
+)
+
+// Rows of the agent tools screen.
+const (
+	agentToolMCP = iota
+	agentToolSkills
+	agentToolCount
 )
 
 type wizardModel struct {
@@ -189,7 +205,12 @@ var (
 
 func newWizardModel(options WizardOptions) wizardModel {
 	screen := welcomeScreen
-	result := WizardResult{Destination: options.PresetDestination, PrivacyMode: options.PresetPrivacyMode}
+	result := WizardResult{
+		Destination:   options.PresetDestination,
+		PrivacyMode:   options.PresetPrivacyMode,
+		InstallMCP:    options.OfferAgentTools,
+		InstallSkills: options.OfferAgentTools,
+	}
 	needSignIn := false
 	if options.DestinationOnly {
 		switch {
@@ -198,7 +219,7 @@ func newWizardModel(options WizardOptions) wizardModel {
 		case options.PresetDestination == DestinationAsymptote:
 			screen = managedDisclosureScreen
 		case options.PresetDestination != "":
-			screen = confirmScreen
+			screen = beforeConfirm(options)
 		default:
 			screen = destinationScreen
 		}
@@ -292,6 +313,10 @@ func (m wizardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if n := m.choiceCount(); m.isPicker() && n > 0 {
 				m.selected = (m.selected + 1) % n
 			}
+		case " ", "space", "x":
+			if m.screen == agentToolsScreen {
+				m.toggleAgentTool()
+			}
 		case "enter":
 			return m.advance()
 		}
@@ -300,7 +325,16 @@ func (m wizardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m wizardModel) isPicker() bool {
-	return m.screen == destinationScreen || m.screen == privacyScreen || m.screen == signInFailedScreen
+	return m.screen == destinationScreen || m.screen == privacyScreen || m.screen == signInFailedScreen || m.screen == agentToolsScreen
+}
+
+func (m *wizardModel) toggleAgentTool() {
+	switch m.selected {
+	case agentToolMCP:
+		m.result.InstallMCP = !m.result.InstallMCP
+	case agentToolSkills:
+		m.result.InstallSkills = !m.result.InstallSkills
+	}
 }
 
 func (m *wizardModel) stopSignIn() {
@@ -380,10 +414,24 @@ func (m wizardModel) afterSignIn() wizardScreen {
 	case m.options.PresetDestination == DestinationAsymptote:
 		return managedDisclosureScreen
 	case m.options.PresetDestination != "":
-		return confirmScreen
+		return beforeConfirm(m.options)
 	default:
 		return destinationScreen
 	}
+}
+
+// beforeConfirm is the screen that precedes confirm: the agent tools when they are offered.
+func beforeConfirm(options WizardOptions) wizardScreen {
+	if options.OfferAgentTools {
+		return agentToolsScreen
+	}
+	return confirmScreen
+}
+
+// toConfirm moves to the screen before confirm, with the cursor on its first row.
+func (m *wizardModel) toConfirm() {
+	m.selected = 0
+	m.screen = beforeConfirm(m.options)
 }
 
 func (m wizardModel) advance() (tea.Model, tea.Cmd) {
@@ -395,7 +443,7 @@ func (m wizardModel) advance() (tea.Model, tea.Cmd) {
 		case m.options.PresetDestination == DestinationAsymptote:
 			m.screen = managedDisclosureScreen
 		case m.options.PresetDestination != "":
-			m.screen = confirmScreen
+			m.toConfirm()
 		default:
 			m.screen = destinationScreen
 		}
@@ -417,13 +465,15 @@ func (m wizardModel) advance() (tea.Model, tea.Cmd) {
 		if m.result.Destination == DestinationAsymptote {
 			m.screen = managedDisclosureScreen
 		} else {
-			m.screen = confirmScreen
+			m.toConfirm()
 		}
 	case managedDisclosureScreen:
 		m.selected = privacyIndex(m.result.PrivacyMode)
 		m.screen = privacyScreen
 	case privacyScreen:
 		m.result.PrivacyMode = managedprivacy.Modes[m.selected]
+		m.toConfirm()
+	case agentToolsScreen:
 		m.screen = confirmScreen
 	case confirmScreen:
 		m.result.Completed = true
@@ -445,6 +495,8 @@ func (m wizardModel) choiceCount() int {
 		return len(managedprivacy.Modes)
 	case signInFailedScreen:
 		return len(m.recoveryChoices())
+	case agentToolsScreen:
+		return agentToolCount
 	default:
 		return len(m.destinations())
 	}
@@ -517,7 +569,7 @@ func (m wizardModel) recover() (tea.Model, tea.Cmd) {
 		// would show an account on the confirm screen next to "not signed in".
 		m.options.Email = ""
 		m.options.SignedIn = false
-		m.screen = confirmScreen
+		m.toConfirm()
 		return m, nil
 	default:
 		return m, tea.Quit
@@ -623,6 +675,23 @@ func (m wizardModel) View() string {
 			rows = append(rows, line, choiceDetail(detail, contentWidth))
 		}
 		body = strings.Join(rows, "\n")
+	case agentToolsScreen:
+		title = "Set up your agents"
+		body = "Give your agents their own history. Both run on this machine and send nothing anywhere.\n\n"
+		var rows []string
+		for index := 0; index < agentToolCount; index++ {
+			label, detail := agentToolCopy(index)
+			box := "[ ] "
+			if m.agentToolOn(index) {
+				box = "[x] "
+			}
+			line := "    " + box + label
+			if index == m.selected {
+				line = wizardChoice.Render("  ❯ " + box + label)
+			}
+			rows = append(rows, line, choiceDetail(detail, contentWidth))
+		}
+		body += strings.Join(rows, "\n")
 	case confirmScreen:
 		title = "Ready to set up Beacon"
 		label, _ := destinationCopy(m.result.Destination)
@@ -639,7 +708,9 @@ func (m wizardModel) View() string {
 			if m.result.WithoutAccount {
 				body += " You are not signed in; connect later with `beacon endpoint connect`."
 			}
-
+		}
+		if m.options.OfferAgentTools {
+			body += "\n\nAgent tools: " + m.agentToolsSummary()
 		}
 	}
 
@@ -653,6 +724,41 @@ func (m wizardModel) View() string {
 	}
 	card += "\n\n" + wizardDim.Render(m.hint())
 	return lipgloss.NewStyle().Padding(1, 3).Render(card)
+}
+
+func (m wizardModel) agentToolOn(index int) bool {
+	switch index {
+	case agentToolMCP:
+		return m.result.InstallMCP
+	case agentToolSkills:
+		return m.result.InstallSkills
+	}
+	return false
+}
+
+func (m wizardModel) agentToolsSummary() string {
+	var on []string
+	if m.result.InstallMCP {
+		on = append(on, "Beacon MCP server")
+	}
+	if m.result.InstallSkills {
+		on = append(on, "Beacon agent skills")
+	}
+	if len(on) == 0 {
+		return "none"
+	}
+	return strings.Join(on, ", ")
+}
+
+func agentToolCopy(index int) (string, string) {
+	if index == agentToolMCP {
+		return "Beacon MCP server",
+			"Registers `beacon mcp serve` with Claude Code, Codex, Cursor, VS Code, Gemini CLI and " +
+				"OpenCode, so agents can search this machine's sessions."
+	}
+	return "Beacon agent skills",
+		"Installs the Beacon skills for every project (~/.agents/skills, and ~/.claude/skills for " +
+			"Claude Code): recall lessons from past sessions, distill new ones, and build lenses."
 }
 
 func destinationCopy(destination string) (string, string) {
@@ -751,6 +857,8 @@ func (m wizardModel) wizardHint(screen wizardScreen) string {
 		return "↑/↓ choose · enter continue · esc cancel"
 	case privacyScreen:
 		return "↑/↓ choose · enter continue · esc cancel"
+	case agentToolsScreen:
+		return "↑/↓ move · space turn on/off · enter continue · esc cancel"
 	case signInScreen:
 		if m.options.NoBrowser {
 			return "enter show the sign-in URL · esc cancel"

@@ -1,0 +1,49 @@
+---
+title: "beacon skills"
+description: "Install the Beacon Skills for every project, or remove them"
+---
+
+## Command overview
+
+`beacon skills install` installs the [Beacon Skills](/concepts/beacon-skills) into the
+user-level skill directories agent runtimes read, so every project on this machine sees
+them. `beacon skills uninstall` removes the copies Beacon installed.
+
+```bash title="Command syntax"
+beacon skills install
+beacon skills uninstall
+```
+
+The interactive [`beacon endpoint install`](/cli/endpoint-onboarding#agent-tools) runs
+`beacon skills install` for you unless you turn the Beacon agent skills off in the wizard.
+
+The skills are carried in the `beacon` binary, so installing them needs no network. They go to:
+
+| Directory | Read by |
+|-----------|---------|
+| `~/.agents/skills` | Codex CLI, Gemini CLI, OpenCode, Pi and other runtimes that read the shared location |
+| `~/.claude/skills` (or `$CLAUDE_CONFIG_DIR/skills`) | Claude Code. Written only when Claude Code is set up on this machine |
+
+Each skill directory Beacon writes carries a `.beacon-managed` marker. Beacon replaces or
+removes only directories that carry it, so a skill of the same name that you wrote or
+installed another way is left alone.
+
+Running `beacon skills install` again updates Beacon's copies. Every
+`beacon endpoint install` and `beacon endpoint repair` also brings them up to date with
+the installed binary, so an upgrade never leaves an agent following instructions for
+commands that changed. Neither ever installs skills you removed.
+
+If you also installed the Beacon plugin from a marketplace, a harness may list the skills
+twice: once from the plugin and once from the user-level directory. Remove one copy with
+`beacon skills uninstall` or by uninstalling the plugin.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Beacon Skills" icon="book" href="/concepts/beacon-skills">
+    What each skill does and how to use it.
+  </Card>
+  <Card title="beacon mcp install" icon="server" href="/cli/mcp-install">
+    Register the local Beacon MCP server.
+  </Card>
+</Columns>

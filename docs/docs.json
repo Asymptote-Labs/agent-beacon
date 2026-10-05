@@ -334,10 +334,12 @@
                 "pages": [
                   "cli/mcp-serve",
                   "cli/mcp-doctor",
+                  "cli/mcp-install",
                   "cli/mcp-connect"
                 ]
               },
               "cli/memory",
+              "cli/skills",
               {
                 "group": "beacon rules",
                 "root": "cli/rules",
