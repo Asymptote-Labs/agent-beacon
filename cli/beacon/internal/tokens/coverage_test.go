@@ -185,6 +185,15 @@ func TestRenderCoverageTextExplainsSilentRuntimes(t *testing.T) {
 	if !strings.Contains(out, "silent") || !strings.Contains(out, "beacon endpoint diagnostics") {
 		t.Fatalf("silent report did not tell the reader what to do:\n%s", out)
 	}
+
+	// A runtime whose usage arrives only through a session sync is silent until the sync runs;
+	// hook and OTLP advice alone would send that reader to the wrong place.
+	sb.Reset()
+	RenderCoverageText(&sb, Coverage([]schema.Event{plainEvent("hermes")}, nil))
+	out = sb.String()
+	if !strings.Contains(out, "beacon endpoint hermes sync") || !strings.Contains(out, "usage arrives only when that sync runs") {
+		t.Fatalf("silent report for a sync-sourced runtime did not point at the sync:\n%s", out)
+	}
 }
 
 // Every expectation entry must key on a name that survives normalization, or the lookup silently
@@ -211,9 +220,9 @@ func TestEveryScannedRuntimeHasAnExpectation(t *testing.T) {
 	// Mirrors the runtime identifiers in internal/endpoint/inventory/inventory.go.
 	scanned := []string{
 		"antigravity_cli", "claude_code", "cline", "codex_cli", "copilot_cli", "cursor",
-		"devin-cli", "devin-desktop", "factory", "gemini_cli", "grok", "hermes",
-		"kimi_code", "kiro", "muse_code", "omp", "opencode", "openhands", "pi_cli", "qwen_code",
-		"vscode",
+		"deepseek_harness", "devin-cli", "devin-desktop", "factory", "gemini_cli", "grok", "hermes",
+		"kimi_code", "kiro", "muse_code", "omo_senpi", "omp", "openclaw_gateway", "opencode",
+		"openhands", "pi_cli", "prime_agent", "qwen_code", "vscode",
 	}
 	for _, runtime := range scanned {
 		harness := normalizedHarnessForTest(runtime)
@@ -379,5 +388,98 @@ func TestCoverageDoesNotCountContextOnlyEventsAsUsage(t *testing.T) {
 	}
 	if report.Covered != 0 {
 		t.Errorf("covered = %d, want 0", report.Covered)
+	}
+}
+
+// pollUsageEvent is a token.usage event shaped like the ones the session-store sync commands
+// write: collected by poll, carrying a session and canonical usage.
+func pollUsageEvent(harness, session string, input, output int64, mutate func(*schema.Event)) schema.Event {
+	event := usageEventFixture("2026-06-11T10:05:00Z", harness, session, "claude-opus-4-7", func(e *schema.Event) {
+		e.Harness.CollectionMethod = schema.CollectionMethodPoll
+		e.GenAI.Usage.InputTokens = int64Ptr(input)
+		e.GenAI.Usage.OutputTokens = int64Ptr(output)
+	})
+	if mutate != nil {
+		mutate(&event)
+	}
+	return event
+}
+
+// hookEvent is what a runtime's live hooks write: activity, never usage.
+func hookEvent(harness, session string) schema.Event {
+	event := plainEvent(harness)
+	event.Harness.CollectionMethod = schema.CollectionMethodHook
+	event.Session = &schema.SessionInfo{ID: session}
+	return event
+}
+
+// Some runtimes report usage only through their session-store sync: Hermes Agent's hooks carry
+// no token counts, but `beacon endpoint hermes sync` differences the session totals Hermes keeps
+// in its state database, cost included; Factory Droid's usage lives in each session's settings
+// file, which `beacon endpoint factory sync` reads. Both are runtimes Beacon is built to read
+// usage from, so a window with their hook activity and no usage is spend missing from the total
+// -- silent, with a note that names the sync -- and their poll-collected usage covers them.
+func TestCoverageCountsPollSourcedUsage(t *testing.T) {
+	for _, tc := range []struct {
+		harness, command string
+	}{
+		{"hermes", "beacon endpoint hermes sync"},
+		{"factory", "beacon endpoint factory sync"},
+	} {
+		silent := lineFor(t, Coverage([]schema.Event{hookEvent(tc.harness, "s1")}, []string{tc.harness}), tc.harness)
+		if silent.Status != CoverageSilent || silent.Expectation != ExpectReported {
+			t.Errorf("%s hooks only = %s/%s, want silent/reported -- its usage is read by %s",
+				tc.harness, silent.Status, silent.Expectation, tc.command)
+		}
+		if !strings.Contains(silent.Reason, tc.command) {
+			t.Errorf("%s reason = %q, want it to name %q, the only path its usage arrives on",
+				tc.harness, silent.Reason, tc.command)
+		}
+
+		events := []schema.Event{
+			hookEvent(tc.harness, "s1"),
+			pollUsageEvent(tc.harness, "s1", 400, 75, func(e *schema.Event) {
+				if tc.harness == "hermes" {
+					e.GenAI.Usage.CostUSD = float64Ptr(0.25)
+				}
+			}),
+		}
+		covered := lineFor(t, Coverage(events, []string{tc.harness}), tc.harness)
+		if covered.Status != CoverageCovered || covered.UsageEvents != 1 || covered.Tokens != 475 {
+			t.Errorf("%s with synced usage = %+v, want covered with one usage event and 475 tokens", tc.harness, covered)
+		}
+	}
+}
+
+// Every runtime Beacon reads usage from on its own surface names that surface in the note, and
+// none falls through to the unrecognized-runtime default, whose note would tell a reader that
+// nobody has looked at the runtime.
+func TestCoverageExpectationsMatchTheCaptureCode(t *testing.T) {
+	for _, tc := range []struct {
+		harness, expect, reasonHas string
+	}{
+		// The Senpi extension forwards message_end usage and cost through the shared Pi-family
+		// mapper (cli/beacon-hooks/cmd/pi_family.go), exactly as Pi, Oh My Pi and Prime do.
+		{"omo_senpi", ExpectReported, "extension"},
+		// The OpenClaw session-file sync reads per-message usage from committed sessions, which
+		// does not depend on the plugin's conversation-access grant.
+		{"openclaw_gateway", ExpectReported, "beacon endpoint integrations openclaw sessions sync"},
+		// goose's chat spans carry the semconv names, but only over OTLP configured by hand.
+		{"goose", ExpectGenericOTLP, "OTLP"},
+		// The factory sync writes harness "factory"; "factory_droid" only arrives over OTLP, so
+		// its note must not name a sync that can never report under that name.
+		{"factory", ExpectReported, "beacon endpoint factory sync"},
+		{"factory_droid", ExpectGenericOTLP, "semconv"},
+	} {
+		expect, reason := expectationFor(tc.harness)
+		if expect != tc.expect {
+			t.Errorf("%s expectation = %q, want %q", tc.harness, expect, tc.expect)
+		}
+		if !strings.Contains(reason, tc.reasonHas) {
+			t.Errorf("%s reason = %q, want it to mention %q", tc.harness, reason, tc.reasonHas)
+		}
+		if _, ok := usageExpectation[tc.harness]; !ok {
+			t.Errorf("%s has no usageExpectation entry and falls to the unrecognized default", tc.harness)
+		}
 	}
 }
