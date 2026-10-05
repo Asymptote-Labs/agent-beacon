@@ -59,7 +59,7 @@ var mcpConnectCmd = &cobra.Command{
 	Use:   "connect",
 	Short: "Register Beacon Cloud MCP in the harnesses on this machine",
 	Long: `Register the Beacon Cloud MCP server, as "beacon-managed", in every detected harness that
-supports it: Claude Code, Codex CLI, Cursor, VS Code, Gemini CLI and OpenCode.
+supports it: Claude Code, Codex CLI, Cursor, VS Code, Gemini CLI, OpenCode and Oh My Pi.
 
 By default only the URL is written, and each harness signs in with OAuth the first time it
 connects. With --token-env, each config references an environment variable holding a personal

@@ -30,7 +30,7 @@ the other:
 | `beacon-managed` | The session history this endpoint forwards to Beacon Cloud, served by Beacon Cloud over HTTPS | [`connect`, `disconnect`, `status`, `token create`](/cli/mcp-connect) |
 
 `beacon mcp connect` registers `beacon-managed` in Claude Code, Codex CLI, Cursor, VS Code,
-Gemini CLI and OpenCode. By default it writes only the URL, and each harness signs in with OAuth.
+Gemini CLI, OpenCode and Oh My Pi. By default it writes only the URL, and each harness signs in with OAuth.
 With `--token-env`, the config instead references a personal token, created with
 `beacon mcp token create` or at beacon.sh → Dashboard → MCP Access and held in an environment
 variable. For other harnesses it prints the steps to add the

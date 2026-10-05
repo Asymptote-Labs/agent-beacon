@@ -67,8 +67,9 @@ func TestOmpEndpointTargetIsHookShaped(t *testing.T) {
 func TestInstallEndpointHookTargetHandlesOmp(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
-	t.Setenv("PI_CODING_AGENT_DIR", "")
-	t.Setenv("PI_CONFIG_DIR", "")
+	for _, name := range []string{"PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "OMP_PROFILE", "PI_PROFILE"} {
+		t.Setenv(name, "")
+	}
 
 	previousLevel := endpointOpts.hookLevel
 	endpointOpts.hookLevel = string(endpointhooks.LevelUser)

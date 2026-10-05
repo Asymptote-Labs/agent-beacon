@@ -779,7 +779,7 @@ func (m wizardModel) agentToolsSummary() string {
 func agentToolCopy(tool int) (string, string) {
 	if tool == agentToolCloudMCP {
 		return "Beacon Cloud MCP",
-			"Adds Beacon Cloud MCP to Claude Code, Codex, Cursor, VS Code, Gemini CLI and OpenCode, " +
+			"Adds Beacon Cloud MCP to Claude Code, Codex, Cursor, VS Code, Gemini CLI, OpenCode and Oh My Pi, " +
 				"so your agents can search the history this machine forwards. Each signs in with " +
 				"beacon.sh the first time; no token is written."
 	}

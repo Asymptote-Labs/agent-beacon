@@ -145,8 +145,7 @@ func TestPrimePiAndOmpInstallToDifferentDirectories(t *testing.T) {
 	testenv.SetHome(t, home)
 	t.Chdir(cwd)
 	t.Setenv(primeAgentDirEnv, "")
-	t.Setenv(ompAgentDirEnv, "")
-	t.Setenv(ompConfigDirEnv, "")
+	clearOmpEnv(t)
 
 	for _, level := range []Level{LevelUser, LevelProject} {
 		prime, err := PrimeExtensionPath(level)

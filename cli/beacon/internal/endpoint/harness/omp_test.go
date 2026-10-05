@@ -23,7 +23,7 @@ func writeOmpExtension(t *testing.T, home, contents string) string {
 	return path
 }
 
-// Every Oh My Pi discovery test empties PATH and the two environment variables that move its
+// Every Oh My Pi discovery test empties PATH and the environment variables that move its
 // extension directory. Without that, the result depends on whether the machine running the suite
 // happens to have `omp` installed or a profile active -- exactly the kind of environment-dependent
 // assertion the repo's deterministic-test rule exists to prevent.
@@ -32,8 +32,9 @@ func setupOmpDiscovery(t *testing.T) string {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
 	t.Setenv("PATH", t.TempDir())
-	t.Setenv("PI_CODING_AGENT_DIR", "")
-	t.Setenv("PI_CONFIG_DIR", "")
+	for _, name := range []string{"PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "OMP_PROFILE", "PI_PROFILE"} {
+		t.Setenv(name, "")
+	}
 	return home
 }
 

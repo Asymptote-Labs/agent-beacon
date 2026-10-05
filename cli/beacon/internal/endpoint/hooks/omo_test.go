@@ -206,8 +206,7 @@ func TestOmoPiAndPrimeInstallToDifferentDirectories(t *testing.T) {
 		t.Setenv(name, "")
 	}
 	t.Setenv(primeAgentDirEnv, "")
-	t.Setenv(ompAgentDirEnv, "")
-	t.Setenv(ompConfigDirEnv, "")
+	clearOmpEnv(t)
 
 	for _, level := range []Level{LevelUser, LevelProject} {
 		omo, err := OmoExtensionPath(level)

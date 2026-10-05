@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 )
 
 // ServerName is the name Beacon registers the Beacon Cloud MCP server under in every harness.
@@ -20,6 +21,11 @@ const TokenPage = "beacon.sh → Dashboard → MCP Access"
 
 // vscodeInputID names the VS Code input variable that holds a token in token mode.
 const vscodeInputID = "beacon-managed-token"
+
+// ompMCPSchema is the $schema Oh My Pi writes at the top of every mcp.json it creates or saves.
+// A file Beacon creates starts with the same line, so it reads as one Oh My Pi made, and a later
+// save by Oh My Pi leaves nothing behind that disconnect would not recognize as Beacon's.
+const ompMCPSchema = "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json"
 
 // AuthMode is how a harness authenticates to Beacon Cloud MCP.
 type AuthMode string
@@ -67,6 +73,12 @@ type Target struct {
 	cli string
 	// vscodeInputs is set for VS Code, whose token mode uses a prompted input.
 	vscodeInputs bool
+	// strictJSON is set for a harness that parses its config as plain JSON and ignores a file
+	// with comments or trailing commas: Beacon neither edits such a file nor writes one.
+	strictJSON bool
+	// switchable is set for a harness that turns a server off with an `enabled` key inside its
+	// entry. That key is the person's: connect keeps its value whenever it writes the entry.
+	switchable bool
 
 	oauthNext string
 	tokenNext string // may contain %s for the variable name
@@ -95,6 +107,7 @@ func Targets() []Target {
 		{
 			Name: "codex_cli", DisplayName: "Codex CLI", Aliases: []string{"codex", "codex-cli"},
 			Automatic: true, format: formatTOML, path: codexConfigPath, container: []string{"mcp_servers"},
+			switchable: true,
 			entry: func(url, tokenEnv string) ordered {
 				e := ordered{{"url", url}}
 				if tokenEnv != "" {
@@ -148,7 +161,8 @@ func Targets() []Target {
 		{
 			Name: "opencode", DisplayName: "OpenCode", Aliases: []string{"opencode", "open-code"},
 			Automatic: true, format: formatJSON, path: opencodeConfigPath, container: []string{"mcp"},
-			skeleton: ordered{{"$schema", "https://opencode.ai/config.json"}},
+			switchable: true,
+			skeleton:   ordered{{"$schema", "https://opencode.ai/config.json"}},
 			entry: func(url, tokenEnv string) ordered {
 				e := ordered{{"type", "remote"}, {"url", url}, {"enabled", true}}
 				if tokenEnv != "" {
@@ -158,6 +172,21 @@ func Targets() []Target {
 			},
 			oauthNext: "Run `opencode mcp auth " + ServerName + "`.",
 			tokenNext: "Set %s in the environment OpenCode starts from.",
+		},
+		{
+			Name: "omp", DisplayName: "Oh My Pi", Aliases: []string{"omp", "oh-my-pi", "ohmypi"},
+			Automatic: true, format: formatJSON, path: ompMCPConfigPath, container: []string{"mcpServers"},
+			skeleton:   ordered{{"$schema", ompMCPSchema}},
+			strictJSON: true, switchable: true,
+			entry: func(url, tokenEnv string) ordered {
+				e := ordered{{"type", "http"}, {"url", url}}
+				if tokenEnv != "" {
+					e = append(e, field{"headers", ordered{{"Authorization", "Bearer ${" + tokenEnv + "}"}}})
+				}
+				return e
+			},
+			oauthNext: "In Oh My Pi, run /mcp reauth " + ServerName + " and sign in. Until then it reports " + ServerName + " as failing to connect.",
+			tokenNext: "Set %s in the environment Oh My Pi starts from.",
 		},
 
 		// Manual targets: no MCP OAuth support Beacon has confirmed, so Beacon writes nothing
@@ -313,6 +342,16 @@ func opencodeConfigPath(home string) (string, error) {
 		}
 	}
 	return filepath.Join(dir, "opencode.jsonc"), nil
+}
+
+// ompMCPConfigPath is the user-level mcp.json of the active Oh My Pi profile, the file its own
+// `/mcp add` writes at user level.
+func ompMCPConfigPath(home string) (string, error) {
+	dir, err := hooks.OmpAgentDirForHome(home)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "mcp.json"), nil
 }
 
 // NextStep is what the person does after connect for an automatic target.
