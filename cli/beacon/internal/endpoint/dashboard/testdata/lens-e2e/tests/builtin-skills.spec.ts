@@ -5,13 +5,15 @@ test('skills: each skill, where it entered the run, and what the agent was told'
   const frame = page.frameLocator('iframe.lens-frame');
   await expect(frame.locator('#root')).toBeVisible();
 
-  // A Skill tool call (twice), a cat of a SKILL.md and a read of one; an edit of a SKILL.md is not a load.
-  await expect(frame.locator('#summary')).toHaveText('3 skills loaded 4 times · instructions captured for 2 of 4.');
+  // A Skill tool call (twice), two shell reads of a SKILL.md and a file read of one. Edits of a SKILL.md
+  // are not loads, whether the event names the write in its operation or only in its action.
+  await expect(frame.locator('#summary')).toHaveText('3 skills loaded 5 times · instructions captured for 2 of 5.');
   const skills = frame.locator('#list button.row');
   await expect(skills).toHaveCount(3);
   await expect(skills.nth(0)).toContainText('pdf');
   await expect(skills.nth(0)).toContainText('×2');
   await expect(skills.nth(1)).toContainText('brand-voice');
+  await expect(skills.nth(1)).toContainText('×2');
   await expect(skills.nth(2)).toContainText('release-notes');
 
   // Claude Code's unnamed OTLP activation is counted, not listed.
@@ -38,8 +40,10 @@ test('skills: each skill, where it entered the run, and what the agent was told'
   // A shell command that printed a SKILL.md: its output is what the agent was told.
   await skills.nth(1).click();
   await expect(detail.locator('h2')).toHaveText('brand-voice');
-  await expect(detail).toContainText('Shell command: cat ~/.codex/skills/brand-voice/SKILL.md');
-  await expect(detail.locator('pre')).toContainText('No exclamation marks.');
+  await expect(loads.nth(0)).toContainText('Shell command: cat ~/.codex/skills/brand-voice/SKILL.md');
+  await expect(loads.nth(0).locator('pre')).toContainText('No exclamation marks.');
+  // A shell read whose output was not retained keeps its hash and size, from the event's content.
+  await expect(loads.nth(1)).toContainText('The text was not retained · retention metadata · 512 bytes · sha256:fff.');
 
   // A read whose content was not retained: hash and size instead of text.
   await skills.nth(2).click();

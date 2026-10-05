@@ -68,7 +68,9 @@
   var NAME_KEYS = ["skill", "skill_name", "skillName", "name", "command"];
   var PATH_KEYS = ["path", "file_path", "skill_path", "location"];
   var TEXT_KEYS = ["content", "text", "output", "instructions", "body", "result"];
+  // The file.operation values and actions that change a file, as the Files Changed lens counts them.
   var WRITE_OPS = { create: 1, modify: 1, delete: 1, write: 1, edit: 1, rename: 1, move: 1 };
+  var WRITE_ACTIONS = { "file.created": 1, "file.modified": 1, "file.deleted": 1, "file.edited": 1 };
   var PREVIEW_LINES = 400;
   var fmt = new Intl.NumberFormat();
 
@@ -117,6 +119,10 @@
     return "";
   }
 
+  function withheldContent(content) {
+    return content && !content.included ? content : null;
+  }
+
   function retained(content) {
     return content && content.included && typeof content.text === "string" && content.text ? content : null;
   }
@@ -141,7 +147,7 @@
     var file = event.file;
     if (file && file.path) {
       var op = String(file.operation || "").toLowerCase();
-      var hit = !WRITE_OPS[op] && skillPath(file.path);
+      var hit = !WRITE_OPS[op] && !WRITE_ACTIONS[event.action] && skillPath(file.path);
       if (hit) {
         return {
           name: hit.name, path: file.path, how: "Read of SKILL.md",
@@ -157,7 +163,8 @@
         return {
           name: shown.name, path: shown.path, how: "Shell command: " + command.command,
           text: retained(command.output),
-          withheld: command.output && !command.output.included ? command.output : null
+          // Output that was not kept leaves no command.output at all; its metadata is on the event.
+          withheld: withheldContent(command.output) || (!command.output ? withheldContent(event.content) : null)
         };
       }
     }
