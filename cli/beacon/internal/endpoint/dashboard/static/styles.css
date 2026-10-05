@@ -1016,7 +1016,7 @@ main {
 }
 
 .nav-toggle::before {
-  content: "Asymptote";
+  content: "Beacon";
   position: absolute;
   top: 0.75rem;
   left: 0.95rem;
@@ -2689,6 +2689,11 @@ body[data-page="sessions"] .filter-section {
   border-bottom: 1px solid rgba(17, 24, 39, 0.08);
 }
 
+.session-filter-help {
+  margin: 0.6rem 0 0;
+  font-size: 0.72rem;
+}
+
 .session-filter-tabs button,
 body[data-page="sessions"] .quick-filters button {
   min-height: 2rem;
@@ -2843,6 +2848,18 @@ body[data-page="session-detail"] td {
   font-size: 0.68rem;
   font-weight: 700;
   line-height: 1.3;
+}
+
+.session-recurring-indicator {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #4338ca;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0.3rem 0.55rem;
 }
 
 .session-activity-summary {

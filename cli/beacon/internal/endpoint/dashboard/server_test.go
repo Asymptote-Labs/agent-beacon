@@ -632,15 +632,15 @@ func TestStaticDashboardPagesServe(t *testing.T) {
 		path string
 		want string
 	}{
-		{path: "/", want: "Beacon Endpoint Agent Activity"},
-		{path: "/session.html", want: "Beacon Endpoint Session Events"},
-		{path: "/overview.html", want: "Beacon Endpoint Agent Activity"},
-		{path: "/tokens.html", want: "Beacon Endpoint Token Usage"},
-		{path: "/memory.html", want: "Beacon Memory"},
-		{path: "/detections.html", want: "Beacon Endpoint Detections"},
-		{path: "/findings.html", want: "Beacon Endpoint Findings"},
-		{path: "/inventory.html", want: "Beacon Endpoint Agent Inventory"},
-		{path: "/inventory-hooks.html", want: "Beacon Endpoint Agent Inventory"},
+		{path: "/", want: "Beacon | Self‑improving memory for coding agents"},
+		{path: "/session.html", want: "Beacon | Self‑improving memory for coding agents"},
+		{path: "/overview.html", want: "Beacon | Self‑improving memory for coding agents"},
+		{path: "/tokens.html", want: "Beacon | Self‑improving memory for coding agents"},
+		{path: "/memory.html", want: "Beacon | Self‑improving memory for coding agents"},
+		{path: "/detections.html", want: "Beacon | Self‑improving memory for coding agents"},
+		{path: "/findings.html", want: "Beacon | Self‑improving memory for coding agents"},
+		{path: "/inventory.html", want: "Beacon | Self‑improving memory for coding agents"},
+		{path: "/inventory-hooks.html", want: "Beacon | Self‑improving memory for coding agents"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.path, func(t *testing.T) {
@@ -652,6 +652,9 @@ func TestStaticDashboardPagesServe(t *testing.T) {
 			}
 			if !strings.Contains(rec.Body.String(), tc.want) {
 				t.Fatalf("body did not contain %q", tc.want)
+			}
+			if !strings.Contains(rec.Body.String(), `href="/favicon.svg"`) {
+				t.Fatal("body did not reference the Beacon favicon")
 			}
 			if count := strings.Count(rec.Body.String(), `href="/memory.html"`); count != 1 {
 				t.Fatalf("memory nav link count = %d, want 1", count)

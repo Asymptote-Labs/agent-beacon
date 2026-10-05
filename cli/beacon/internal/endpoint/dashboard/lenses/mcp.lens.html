@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MCP Calls</title>
+<script type="application/beacon-lens+json">
+{
+  "id": "mcp",
+  "title": "MCP Calls",
+  "description": "Every MCP tool call by server and tool: what the agent sent, what came back, and which calls failed.",
+  "icon": "plug",
+  "version": 1,
+  "api": "beacon.lens.v1",
+  "author": "Beacon"
+}
+</script>
+<style>
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    color: var(--beacon-text, #111827);
+    font: 400 13px/1.5 var(--beacon-font-sans, ui-sans-serif, system-ui, sans-serif);
+  }
+  .muted { color: var(--beacon-muted, #6b7280); }
+  .bad { color: var(--beacon-danger, #b91c1c); }
+  .mono, pre, code { font: 13px/1.45 var(--beacon-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); }
+  #summary, .note { margin: 0 0 10px; }
+  .layout { display: grid; grid-template-columns: minmax(12rem, 18rem) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 640px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+  .list { border-right: 1px solid var(--beacon-line, rgba(0,0,0,0.1)); padding-right: 8px; }
+  .row { display: flex; align-items: baseline; gap: 6px; width: 100%; padding: 2px 6px; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .count { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .row:hover { background: var(--beacon-panel-soft, #f9fafb); }
+  .row[aria-current="true"] { background: var(--beacon-accent-soft, #e2f0f8); }
+  .row:focus-visible, summary:focus-visible { outline: 2px solid var(--beacon-accent, #036aa2); outline-offset: -2px; }
+  h2 { margin: 0 0 8px; font-size: 13px; font-weight: 400; word-break: break-all; }
+  h2 + h2, table + h2 { margin-top: 16px; }
+  table { width: 100%; border-collapse: collapse; margin: 0 0 12px; }
+  th, td { text-align: left; padding: 3px 8px; border-bottom: 1px solid var(--beacon-line, rgba(0,0,0,0.1)); font-weight: 400; vertical-align: top; }
+  th { color: var(--beacon-muted, #6b7280); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .call { padding: 6px 0; border-bottom: 1px solid var(--beacon-line, rgba(0,0,0,0.1)); }
+  .call-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+  details { margin-top: 4px; }
+  summary { cursor: pointer; color: var(--beacon-muted, #6b7280); }
+  pre { margin: 4px 0 0; padding: 6px 8px; overflow-x: auto; border: 1px solid var(--beacon-line, rgba(0,0,0,0.1)); border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .more { margin: 8px 0 0; padding: 0; border: 0; background: none; color: var(--beacon-accent, #036aa2); font: inherit; cursor: pointer; }
+</style>
+</head>
+<body>
+<p id="status" class="muted">Loading trace…</p>
+<main id="root" hidden>
+  <p id="summary" class="muted"></p>
+  <div id="notes"></div>
+  <div id="layout" class="layout">
+    <nav id="list" class="list" aria-label="MCP servers"></nav>
+    <section id="detail" aria-live="polite"></section>
+  </div>
+</main>
+<script>
+(function () {
+  "use strict";
+  var UNKNOWN = "(server not reported)";
+  var PAGE = 100;
+  var fmt = new Intl.NumberFormat();
+
+  // Every node is built with textContent: arguments and results are untrusted trace content.
+  function el(tag, text, className) {
+    var node = document.createElement(tag);
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    if (className) node.className = className;
+    return node;
+  }
+
+  function str(value) {
+    return typeof value === "string" ? value.trim() : "";
+  }
+
+  // The server and tool a Claude-style name carries: mcp__<server>__<tool>, or MCP:<tool>.
+  function fromName(name) {
+    var text = str(name);
+    var lower = text.toLowerCase();
+    if (lower.indexOf("mcp__") === 0) {
+      var parts = text.split("__");
+      if (parts.length >= 3) return { server: parts[1], tool: parts.slice(2).join("__") };
+    }
+    if (lower.indexOf("mcp:") === 0) return { server: "", tool: text.slice(4).trim() };
+    return null;
+  }
+
+  // classify returns the MCP call an event is part of, or null.
+  function classify(event) {
+    var mcp = event.mcp;
+    var named = fromName(event.tool && event.tool.name);
+    if (!mcp && !named && event.type !== "mcp") return null;
+    mcp = mcp || {};
+    return {
+      server: str(mcp.server) || (named && named.server) || "",
+      tool: str(mcp.tool) || (named && named.tool) || str(event.tool && event.tool.name) || str(mcp.method) || "(tool not reported)",
+      method: str(mcp.method),
+      resource: str(mcp.resource_uri)
+    };
+  }
+
+  // A call failed when the runtime recorded an error on the event (session-store mappers keep the
+  // mcp action and set error), the event is an error, or the MCP result says isError or carries an
+  // error member.
+  function failed(event) {
+    if (event.error && event.error.type) return true;
+    if (event.type === "error" || /error|fail/i.test(String(event.action || ""))) return true;
+    var result = event.tool && event.tool.result;
+    if (!result || typeof result !== "object") return false;
+    if (result.isError === true || result.is_error === true || String(result.isError) === "true") return true;
+    return result.error !== undefined && result.error !== null && result.error !== false && result.error !== "";
+  }
+
+  function collect(data) {
+    var trace = data.trace || {};
+    var events = (Array.isArray(trace.events) ? trace.events : []).filter(Boolean).slice();
+    events.sort(function (a, b) { return (a.number || 0) - (b.number || 0); });
+    var calls = [];
+    var byID = {};
+    events.forEach(function (event) {
+      var found = classify(event);
+      if (!found) return;
+      var tool = event.tool || {};
+      // The pre-tool and post-tool events of one call share a tool_call_id: they are one call.
+      var call = event.tool_call_id ? byID[event.tool_call_id] : null;
+      if (!call) {
+        call = {
+          server: found.server, tool: found.tool, method: found.method, resource: found.resource,
+          first: event, events: [], args: undefined, result: undefined, failed: false
+        };
+        calls.push(call);
+        if (event.tool_call_id) byID[event.tool_call_id] = call;
+      }
+      if (!call.server && found.server) call.server = found.server;
+      if (!call.method && found.method) call.method = found.method;
+      if (!call.resource && found.resource) call.resource = found.resource;
+      if (call.args === undefined && tool.arguments !== undefined && tool.arguments !== null) call.args = tool.arguments;
+      if (tool.result !== undefined && tool.result !== null) call.result = tool.result;
+      if (event.approval && event.approval.decision) call.approval = event.approval.decision;
+      if (failed(event)) call.failed = true;
+      call.events.push(event.number);
+    });
+    return { trace: trace, calls: calls };
+  }
+
+  function group(calls) {
+    var servers = {};
+    var order = [];
+    calls.forEach(function (call) {
+      var key = call.server || UNKNOWN;
+      var server = servers[key];
+      if (!server) {
+        server = servers[key] = { name: key, known: !!call.server, calls: [], tools: {}, toolOrder: [], failed: 0 };
+        order.push(key);
+      }
+      server.calls.push(call);
+      if (call.failed) server.failed += 1;
+      var tool = server.tools[call.tool];
+      if (!tool) {
+        tool = server.tools[call.tool] = { name: call.tool, calls: 0, failed: 0 };
+        server.toolOrder.push(call.tool);
+      }
+      tool.calls += 1;
+      if (call.failed) tool.failed += 1;
+    });
+    order.sort(function (a, b) { return servers[b].calls.length - servers[a].calls.length || (a < b ? -1 : 1); });
+    return { servers: servers, order: order };
+  }
+
+  function json(value) {
+    if (typeof value === "string") return value;
+    try { return JSON.stringify(value, null, 2); } catch (e) { return String(value); }
+  }
+
+  // A payload is rendered only when its <details> is first opened, so a long trace stays light.
+  function payload(label, value) {
+    var details = el("details");
+    details.appendChild(el("summary", label));
+    details.addEventListener("toggle", function () {
+      if (details.open && details.childNodes.length === 1) details.appendChild(el("pre", json(value)));
+    });
+    return details;
+  }
+
+  function when(timestamp) {
+    var date = new Date(timestamp);
+    return isNaN(date.getTime()) ? "" : date.toLocaleTimeString();
+  }
+
+  function renderCall(call) {
+    var box = el("div", null, "call");
+    var head = el("div", null, "call-head");
+    head.appendChild(el("span", "#" + call.first.number, "mono muted"));
+    head.appendChild(el("span", call.tool, "mono"));
+    if (call.method) head.appendChild(el("span", call.method, "mono muted"));
+    if (call.failed) head.appendChild(el("span", "failed", "bad"));
+    if (call.approval) head.appendChild(el("span", "approval: " + call.approval, call.approval === "deny" ? "bad" : "muted"));
+    var at = when(call.first.timestamp);
+    if (at) head.appendChild(el("span", at, "muted"));
+    if (call.first.fidelity === "inferred") head.appendChild(el("span", "inferred", "muted"));
+    box.appendChild(head);
+    if (call.resource) box.appendChild(el("div", call.resource, "mono muted"));
+    if (call.args !== undefined) box.appendChild(payload("Arguments", call.args));
+    if (call.result !== undefined) box.appendChild(payload("Result", call.result));
+    if (call.args === undefined && call.result === undefined) {
+      box.appendChild(el("div", "The runtime reported neither the arguments nor the result.", "muted"));
+    }
+    return box;
+  }
+
+  function renderDetail(server) {
+    var detail = document.getElementById("detail");
+    detail.textContent = "";
+    detail.appendChild(el("h2", server.name, server.known ? "mono" : "muted"));
+
+    var table = el("table");
+    var head = el("tr");
+    [["Tool"], ["Calls", "num"], ["Failed", "num"]].forEach(function (c) { head.appendChild(el("th", c[0], c[1])); });
+    table.appendChild(el("thead")).appendChild(head);
+    var body = table.appendChild(el("tbody"));
+    server.toolOrder.slice().sort(function (a, b) { return server.tools[b].calls - server.tools[a].calls || (a < b ? -1 : 1); })
+      .forEach(function (name) {
+        var tool = server.tools[name];
+        var tr = el("tr");
+        tr.appendChild(el("td", tool.name, "mono"));
+        tr.appendChild(el("td", fmt.format(tool.calls), "num"));
+        tr.appendChild(el("td", tool.failed ? fmt.format(tool.failed) : "—", "num" + (tool.failed ? " bad" : " muted")));
+        body.appendChild(tr);
+      });
+    detail.appendChild(table);
+
+    detail.appendChild(el("h2", "Calls in order"));
+    var list = el("div");
+    detail.appendChild(list);
+    var shown = 0;
+    function more() {
+      server.calls.slice(shown, shown + PAGE).forEach(function (call) { list.appendChild(renderCall(call)); });
+      shown = Math.min(server.calls.length, shown + PAGE);
+      if (button) {
+        if (shown >= server.calls.length) button.remove();
+        else button.textContent = "Show more (" + fmt.format(server.calls.length - shown) + " left)";
+      }
+    }
+    var button = null;
+    if (server.calls.length > PAGE) {
+      button = el("button", "", "more");
+      button.type = "button";
+      button.addEventListener("click", more);
+    }
+    more();
+    if (button && shown < server.calls.length) detail.appendChild(button);
+  }
+
+  function render(data) {
+    var collected = collect(data || {});
+    var calls = collected.calls;
+    var model = group(calls);
+    var trace = collected.trace;
+    var total = trace.summary && trace.summary.event_count;
+    var shownEvents = Array.isArray(trace.events) ? trace.events.length : 0;
+    var partial = (data && data.truncated) || (typeof total === "number" && shownEvents < total);
+
+    var text;
+    if (!calls.length) {
+      text = "No MCP tool calls in this trace";
+    } else {
+      var tools = 0;
+      var failures = 0;
+      model.order.forEach(function (key) {
+        tools += model.servers[key].toolOrder.length;
+        failures += model.servers[key].failed;
+      });
+      text = fmt.format(calls.length) + (calls.length === 1 ? " call" : " calls") + " to " +
+        fmt.format(tools) + (tools === 1 ? " tool" : " tools") + " on " +
+        fmt.format(model.order.length) + (model.order.length === 1 ? " server" : " servers") +
+        " · " + (failures ? fmt.format(failures) + " failed" : "none failed");
+    }
+    if (partial) text += ", over the first " + fmt.format(shownEvents) + (typeof total === "number" ? " of " + fmt.format(total) : "") + " events";
+    document.getElementById("summary").textContent = text + ".";
+
+    if (!calls.length) {
+      document.getElementById("notes").appendChild(el("p",
+        "Beacon records an MCP call when the runtime reports one, or when a tool is named mcp__<server>__<tool>.", "muted note"));
+      document.getElementById("layout").hidden = true;
+      finish();
+      return;
+    }
+
+    var list = document.getElementById("list");
+    var buttons = [];
+    model.order.forEach(function (key) {
+      var server = model.servers[key];
+      var button = el("button", null, "row");
+      button.type = "button";
+      button.title = server.name;
+      button.appendChild(el("span", server.name, "name" + (server.known ? " mono" : " muted")));
+      if (server.failed) button.appendChild(el("span", fmt.format(server.failed) + " failed", "count bad"));
+      button.appendChild(el("span", fmt.format(server.calls.length), "count muted"));
+      button.addEventListener("click", function () {
+        buttons.forEach(function (b) { b.setAttribute("aria-current", b === button ? "true" : "false"); });
+        renderDetail(server);
+      });
+      buttons.push(button);
+      list.appendChild(button);
+    });
+    buttons[0].setAttribute("aria-current", "true");
+    renderDetail(model.servers[model.order[0]]);
+    finish();
+  }
+
+  function finish() {
+    document.getElementById("status").hidden = true;
+    document.getElementById("root").hidden = false;
+  }
+
+  window.beacon.getTrace().then(render, function (err) {
+    document.getElementById("status").textContent = "Could not load this trace: " + ((err && err.message) || err);
+  });
+})();
+</script>
+</body>
+</html>

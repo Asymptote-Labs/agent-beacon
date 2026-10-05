@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -413,6 +415,197 @@ func TestReadSessionsCountsEachEventInOneActivityCategory(t *testing.T) {
 	}
 }
 
+func TestRecurringSessionsNormalizePromptHarnessAndRepository(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	events := []schema.Event{
+		recurringTestEvent("2026-05-13T01:00:00Z", "session-a", "  Investigate The Dashboard  ", " Claude ", "  Repo-A ", "Alice"),
+		recurringTestEvent("2026-05-13T01:01:00Z", "session-b", "investigate the dashboard", "claude_code", "repo-a", " alice "),
+	}
+	writeTestLog(t, path, marshalEvents(t, events...)...)
+
+	result, err := ReadSessions(path, EventQuery{Limit: 10})
+	if err != nil {
+		t.Fatalf("ReadSessions returned error: %v", err)
+	}
+	for _, session := range result.Sessions {
+		if !session.IsRecurring || session.RecurrenceCount != 2 {
+			t.Fatalf("session %#v, want recurring count 2", session)
+		}
+	}
+}
+
+func TestRecurringSessionsRequireSameRepositoryAndHarness(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	events := []schema.Event{
+		recurringTestEvent("2026-05-13T01:00:00Z", "base", "same prompt", "cursor", "repo-a", "alice"),
+		recurringTestEvent("2026-05-13T01:01:00Z", "other-repo", "same prompt", "cursor", "repo-b", "alice"),
+		recurringTestEvent("2026-05-13T01:02:00Z", "other-harness", "same prompt", "codex_cli", "repo-a", "alice"),
+		recurringTestEvent("2026-05-13T01:03:00Z", "other-user", "same prompt", "cursor", "repo-a", "bob"),
+	}
+	writeTestLog(t, path, marshalEvents(t, events...)...)
+
+	result, err := ReadSessions(path, EventQuery{Limit: 10})
+	if err != nil {
+		t.Fatalf("ReadSessions returned error: %v", err)
+	}
+	for _, session := range result.Sessions {
+		if session.IsRecurring || session.RecurrenceCount != 0 {
+			t.Fatalf("session %#v must not recur across repository or harness", session)
+		}
+	}
+}
+
+func TestRecurringSessionsExcludeMissingAndBlankPrompts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	missing := recurringTestEvent("2026-05-13T01:00:00Z", "missing", "", "cursor", "repo-a", "alice")
+	missing.Prompt = nil
+	missing.Message = ""
+	blank := recurringTestEvent("2026-05-13T01:01:00Z", "blank", " \t ", "cursor", "repo-a", "alice")
+	writeTestLog(t, path, marshalEvents(t, missing, blank)...)
+
+	result, err := ReadSessions(path, EventQuery{Limit: 10})
+	if err != nil {
+		t.Fatalf("ReadSessions returned error: %v", err)
+	}
+	for _, session := range result.Sessions {
+		if session.IsRecurring || session.RecurrenceCount != 0 {
+			t.Fatalf("session %#v with no captured prompt must not recur", session)
+		}
+	}
+}
+
+func TestRecurringSessionsCompareMissingHarnessAndRepositoryConsistently(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	events := []schema.Event{
+		recurringTestEvent("2026-05-13T01:00:00Z", "session-a", "same prompt", "", "", "alice"),
+		recurringTestEvent("2026-05-13T01:01:00Z", "session-b", "same prompt", "  ", "  ", "alice"),
+	}
+	writeTestLog(t, path, marshalEvents(t, events...)...)
+
+	result, err := ReadSessions(path, EventQuery{Limit: 10})
+	if err != nil {
+		t.Fatalf("ReadSessions returned error: %v", err)
+	}
+	for _, session := range result.Sessions {
+		if !session.IsRecurring || session.RecurrenceCount != 2 {
+			t.Fatalf("session %#v, want missing harness/repository recurring count 2", session)
+		}
+	}
+}
+
+func TestRecurringSessionsCountsTwoAndMoreOccurrences(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	events := []schema.Event{
+		recurringTestEvent("2026-05-13T01:00:00Z", "pair-a", "pair", "cursor", "repo-a", "alice"),
+		recurringTestEvent("2026-05-13T01:01:00Z", "pair-b", "pair", "cursor", "repo-a", "alice"),
+		recurringTestEvent("2026-05-13T02:00:00Z", "triple-a", "triple", "cursor", "repo-a", "alice"),
+		recurringTestEvent("2026-05-13T02:01:00Z", "triple-b", "triple", "cursor", "repo-a", "alice"),
+		recurringTestEvent("2026-05-13T02:02:00Z", "triple-c", "triple", "cursor", "repo-a", "alice"),
+	}
+	writeTestLog(t, path, marshalEvents(t, events...)...)
+
+	result, err := ReadSessions(path, EventQuery{Limit: 10})
+	if err != nil {
+		t.Fatalf("ReadSessions returned error: %v", err)
+	}
+	for _, session := range result.Sessions {
+		want := 2
+		if strings.HasPrefix(session.ID, "triple-") {
+			want = 3
+		}
+		if !session.IsRecurring || session.RecurrenceCount != want {
+			t.Fatalf("session %q recurrence = %t/%d, want true/%d", session.ID, session.IsRecurring, session.RecurrenceCount, want)
+		}
+	}
+}
+
+func TestRecurringSessionsRespectInclusiveDateRange(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	events := []schema.Event{
+		recurringTestEvent("2026-05-13T09:59:59Z", "before", "bounded", "cursor", "repo-a", "alice"),
+		recurringTestEvent("2026-05-13T10:00:00Z", "lower-bound", "bounded", "cursor", "repo-a", "alice"),
+		recurringTestEvent("2026-05-13T11:00:00Z", "upper-bound", "bounded", "cursor", "repo-a", "alice"),
+		recurringTestEvent("2026-05-13T11:00:01Z", "after", "bounded", "cursor", "repo-a", "alice"),
+	}
+	writeTestLog(t, path, marshalEvents(t, events...)...)
+	since, _ := time.Parse(time.RFC3339, "2026-05-13T10:00:00Z")
+	until, _ := time.Parse(time.RFC3339, "2026-05-13T11:00:00Z")
+
+	result, err := ReadSessions(path, EventQuery{Since: since, Until: until, Limit: 10})
+	if err != nil {
+		t.Fatalf("ReadSessions returned error: %v", err)
+	}
+	if result.TotalSessions != 2 {
+		t.Fatalf("total sessions = %d, want the two boundary sessions", result.TotalSessions)
+	}
+	for _, session := range result.Sessions {
+		if !session.IsRecurring || session.RecurrenceCount != 2 {
+			t.Fatalf("boundary session %#v, want recurring count 2", session)
+		}
+	}
+}
+
+func TestRecurringClassificationPrecedesResultLimit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	events := []schema.Event{
+		recurringTestEvent("2026-05-13T01:00:00Z", "session-a", "limited", "cursor", "repo-a", "alice"),
+		recurringTestEvent("2026-05-13T01:01:00Z", "session-b", "limited", "cursor", "repo-a", "alice"),
+		recurringTestEvent("2026-05-13T01:02:00Z", "session-c", "limited", "cursor", "repo-a", "alice"),
+	}
+	writeTestLog(t, path, marshalEvents(t, events...)...)
+
+	result, err := ReadSessions(path, EventQuery{SessionState: "recurring", Limit: 1})
+	if err != nil {
+		t.Fatalf("ReadSessions returned error: %v", err)
+	}
+	if result.TotalSessions != 3 || len(result.Sessions) != 1 || !result.Truncated {
+		t.Fatalf("limited result = total %d returned %d truncated %t, want 3/1/true", result.TotalSessions, len(result.Sessions), result.Truncated)
+	}
+	if !result.Sessions[0].IsRecurring || result.Sessions[0].RecurrenceCount != 3 {
+		t.Fatalf("limited row %#v, want recurring count 3", result.Sessions[0])
+	}
+
+	filtered, err := ReadSessions(path, EventQuery{SessionState: "recurring", Session: "session-a", Limit: 1})
+	if err != nil {
+		t.Fatalf("ReadSessions filtered to one group member returned error: %v", err)
+	}
+	if filtered.TotalSessions != 1 || filtered.Sessions[0].RecurrenceCount != 3 {
+		t.Fatalf("filtered row = total %d %#v, want one row with group count 3", filtered.TotalSessions, filtered.Sessions)
+	}
+}
+
+func TestSessionClassificationsAreMutuallyExclusive(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	recurringA := recurringTestEvent("2026-05-13T01:00:00Z", "recurring-a", "repeat", "cursor", "repo-a", "alice")
+	recurringB := recurringTestEvent("2026-05-13T01:01:00Z", "recurring-b", "repeat", "cursor", "repo-a", "alice")
+	captured := recurringTestEvent("2026-05-13T01:02:00Z", "captured", "unique", "cursor", "repo-a", "alice")
+	emptyLifecycle := testSchemaEvent("2026-05-13T01:03:00Z", "cursor", "session.started", "session", "repo-a")
+	emptyLifecycle.Session = &schema.SessionInfo{ID: "empty-lifecycle"}
+	emptyMetric := testSchemaEvent("2026-05-13T01:04:00Z", "cursor", "token.usage", "metric", "repo-a")
+	emptyMetric.Session = &schema.SessionInfo{ID: "empty-metric"}
+	writeTestLog(t, path, marshalEvents(t, recurringA, recurringB, captured, emptyLifecycle, emptyMetric)...)
+
+	want := map[string]map[string]bool{
+		"recurring": {"recurring-a": true, "recurring-b": true},
+		"captured":  {"captured": true},
+		"empty":     {"empty-lifecycle": true, "empty-metric": true},
+		"":          {"recurring-a": true, "recurring-b": true, "captured": true, "empty-lifecycle": true, "empty-metric": true},
+	}
+	for state, wantIDs := range want {
+		result, err := ReadSessions(path, EventQuery{SessionState: state, Limit: 10})
+		if err != nil {
+			t.Fatalf("ReadSessions state %q returned error: %v", state, err)
+		}
+		got := map[string]bool{}
+		for _, session := range result.Sessions {
+			got[session.ID] = true
+		}
+		if !reflect.DeepEqual(got, wantIDs) {
+			t.Fatalf("state %q sessions = %#v, want %#v", state, got, wantIDs)
+		}
+	}
+}
+
 func TestHandlerSessionDetailReturnsRawEventsInTimelineOrder(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	events := []schema.Event{
@@ -656,6 +849,14 @@ func testSchemaEvent(ts, harness, action, category, repo string) schema.Event {
 		Repository:    repo,
 		Message:       action,
 	}
+}
+
+func recurringTestEvent(ts, id, prompt, harness, repo, user string) schema.Event {
+	event := testSchemaEvent(ts, harness, "prompt.submitted", "prompt", repo)
+	event.Session = &schema.SessionInfo{ID: id}
+	event.Prompt = &schema.PromptInfo{Text: prompt}
+	event.User = schema.UserInfo{Name: user}
+	return event
 }
 
 func marshalEvents(t *testing.T, events ...schema.Event) [][]byte {

@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Beacon Endpoint Agent Activity</title>
-    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <title>Beacon | Self‑improving memory for coding agents</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body data-page="sessions">
@@ -58,8 +58,10 @@
             <div class="session-filter-tabs" aria-label="Session filters">
               <button type="button" data-session-state="all">All sessions</button>
               <button type="button" data-session-state="captured" class="active" aria-pressed="true">Captured sessions</button>
+              <button type="button" data-session-state="recurring">Recurring sessions</button>
               <button type="button" data-session-state="empty">Empty sessions</button>
             </div>
+            <p class="session-filter-help muted">Recurring sessions are repeated executions of the same prompt in the same repository and agent harness by the same user.</p>
             <div class="session-filter-grid">
               <label>
                 <select id="range-filter" aria-label="Date range">

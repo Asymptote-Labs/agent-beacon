@@ -798,9 +798,11 @@ const inventoryViewLabels = {
 const inventoryRuntimeLogos = {
   antigravity: "/runtime-logos/antigravity.png",
   antigravity_cli: "/runtime-logos/antigravity.png",
+  chatgpt_web: "/runtime-logos/chatgpt.svg",
   claude: "/runtime-logos/claude-code.png",
   claude_code: "/runtime-logos/claude-code.png",
   claude_cowork: "/runtime-logos/claude-code.png",
+  claude_web: "/runtime-logos/claude-code.png",
   cline: "/runtime-logos/cline.png",
   cline_cli: "/runtime-logos/cline.png",
   codex: "/runtime-logos/codex.png",
@@ -1595,6 +1597,7 @@ function sessionRowHTML(session) {
       <td class="col-message">
         <span class="session-list-prompt">
           ${models.length ? `<strong class="session-list-prompt-model">${models.map(escapeHTML).join(" · ")}</strong>` : ""}
+          ${session.is_recurring ? `<strong class="session-recurring-indicator">Recurring ×${escapeHTML(session.recurrence_count)}</strong>` : ""}
           <span>${prompt}</span>
         </span>
       </td>
@@ -2328,9 +2331,11 @@ function renderDatalist(id, values) {
 
 function harnessLabel(value) {
   const labels = {
+    chatgpt_web: "ChatGPT Web",
     cline: "Cline",
     cursor: "Cursor",
     claude_code: "Claude Code",
+    claude_web: "Claude Web",
     codex_cli: "Codex CLI",
     codex_desktop: "Codex Desktop",
     copilot_cli: "GitHub Copilot CLI",
