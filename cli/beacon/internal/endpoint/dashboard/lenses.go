@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
 	"path"
 	"sort"
 	"strings"
@@ -35,8 +36,13 @@ const lensFrameCSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 
 // lensFramePrefix is where the frame for a lens is served: /lenses/frame/<id>.
 const lensFramePrefix = "/lenses/frame/"
 
-// LensSourceBuiltin marks a lens that ships in the binary.
-const LensSourceBuiltin = "builtin"
+// Lens sources.
+const (
+	// LensSourceBuiltin marks a lens that ships in the binary.
+	LensSourceBuiltin = "builtin"
+	// LensSourceFile marks a lens read from a file named in Options.LensFiles.
+	LensSourceFile = "file"
+)
 
 // LensInfo is one lens as the dashboard lists it.
 type LensInfo struct {
@@ -55,7 +61,8 @@ type LensListResponse struct {
 
 type lens struct {
 	info LensInfo
-	html []byte
+	html []byte // a built-in's document
+	path string // a file lens's location, read on every request
 }
 
 type lensRegistry struct {
@@ -76,37 +83,91 @@ func loadBuiltinLenses(files fs.FS) (*lensRegistry, error) {
 		if err != nil {
 			return nil, err
 		}
-		if len(html) > asymptoteobserve.LensMaxBytes {
-			return nil, fmt.Errorf("built-in lens %s is %d bytes, over the %d-byte limit", name, len(html), asymptoteobserve.LensMaxBytes)
-		}
-		manifest, err := asymptoteobserve.ParseLensManifest(html)
+		manifest, err := checkLensFile(html)
 		if err != nil {
-			return nil, fmt.Errorf("built-in lens %s: %w", name, err)
-		}
-		if err := manifest.Validate(); err != nil {
 			return nil, fmt.Errorf("built-in lens %s: %w", name, err)
 		}
 		if want := manifest.ID + ".lens.html"; path.Base(name) != want {
 			return nil, fmt.Errorf("built-in lens %s declares id %q; name the file %s", name, manifest.ID, want)
 		}
-		if _, dup := registry.byID[manifest.ID]; dup {
-			return nil, fmt.Errorf("two built-in lenses declare id %q", manifest.ID)
+		if err := registry.add(lens{info: lensInfo(manifest, LensSourceBuiltin), html: html}); err != nil {
+			return nil, err
 		}
-		registry.byID[manifest.ID] = lens{
-			info: LensInfo{
-				ID:          manifest.ID,
-				Title:       manifest.Title,
-				Description: manifest.Description,
-				Icon:        manifest.Icon,
-				Version:     manifest.Version,
-				Source:      LensSourceBuiltin,
-			},
-			html: html,
-		}
-		registry.order = append(registry.order, manifest.ID)
 	}
-	sort.Strings(registry.order)
 	return registry, nil
+}
+
+// addLensFiles registers lenses read from disk, such as a lens under development. Each file is
+// checked now and again on every request, so an edit shows on the next reload and a file that
+// stops being a valid lens stops being served. A file lens cannot take a built-in's ID.
+func (r *lensRegistry) addLensFiles(paths []string) error {
+	for _, file := range paths {
+		html, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		manifest, err := checkLensFile(html)
+		if err != nil {
+			return fmt.Errorf("lens %s: %w", file, err)
+		}
+		if err := r.add(lens{info: lensInfo(manifest, LensSourceFile), path: file}); err != nil {
+			return fmt.Errorf("lens %s: %w", file, err)
+		}
+	}
+	return nil
+}
+
+func (r *lensRegistry) add(l lens) error {
+	if _, dup := r.byID[l.info.ID]; dup {
+		return fmt.Errorf("lens id %q is already taken", l.info.ID)
+	}
+	r.byID[l.info.ID] = l
+	r.order = append(r.order, l.info.ID)
+	sort.Strings(r.order)
+	return nil
+}
+
+// checkLensFile applies the spec's file rules: the size cap and a valid manifest.
+func checkLensFile(html []byte) (asymptoteobserve.LensManifestV1, error) {
+	if len(html) > asymptoteobserve.LensMaxBytes {
+		return asymptoteobserve.LensManifestV1{}, fmt.Errorf("%d bytes is over the %d-byte limit", len(html), asymptoteobserve.LensMaxBytes)
+	}
+	manifest, err := asymptoteobserve.ParseLensManifest(html)
+	if err != nil {
+		return manifest, err
+	}
+	return manifest, manifest.Validate()
+}
+
+func lensInfo(manifest asymptoteobserve.LensManifestV1, source string) LensInfo {
+	return LensInfo{
+		ID:          manifest.ID,
+		Title:       manifest.Title,
+		Description: manifest.Description,
+		Icon:        manifest.Icon,
+		Version:     manifest.Version,
+		Source:      source,
+	}
+}
+
+// document returns the lens document to serve. A file lens is re-read and re-checked, and must
+// still declare the ID it was registered under.
+func (l lens) document() ([]byte, error) {
+	if l.path == "" {
+		return l.html, nil
+	}
+	html, err := os.ReadFile(l.path)
+	if err != nil {
+		return nil, err
+	}
+	manifest, err := checkLensFile(html)
+	if err != nil {
+		return nil, err
+	}
+	if manifest.ID != l.info.ID {
+		return nil, fmt.Errorf("lens now declares id %q, not %q", manifest.ID, l.info.ID)
+	}
+	return html, nil
 }
 
 func (r *lensRegistry) list() LensListResponse {
@@ -158,6 +219,11 @@ func (r *lensRegistry) serveLensFrame(w http.ResponseWriter, req *http.Request) 
 		http.NotFound(w, req)
 		return
 	}
+	document, err := found.document()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("lens %s: %w", id, err))
+		return
+	}
 	h := w.Header()
 	h.Set("Content-Security-Policy", lensFrameCSP)
 	h.Del("X-Frame-Options")
@@ -168,5 +234,5 @@ func (r *lensRegistry) serveLensFrame(w http.ResponseWriter, req *http.Request) 
 	if req.Method == http.MethodHead {
 		return
 	}
-	_, _ = w.Write(withLensPrelude(found.html))
+	_, _ = w.Write(withLensPrelude(document))
 }

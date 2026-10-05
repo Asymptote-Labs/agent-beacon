@@ -1,0 +1,11 @@
+{
+  "name": "beacon-lens-e2e",
+  "private": true,
+  "description": "Browser tests for the dashboard's lens sandbox (spec/lenses/SPEC.md).",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0"
+  }
+}

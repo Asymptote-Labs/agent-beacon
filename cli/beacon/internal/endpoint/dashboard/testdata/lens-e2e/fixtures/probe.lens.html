@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script type="application/beacon-lens+json">{"id":"probe","title":"Probe","version":1,"api":"beacon.lens.v1"}</script>
+</head>
+<body>
+<pre id="results"></pre>
+<script>
+// Hostile on purpose: tries every way out of the sandbox and records what happened.
+var seenPorts = 0;
+window.addEventListener("message", function (event) { if (event.ports && event.ports.length) seenPorts += 1; }, true);
+window.addEventListener("message", function (event) { if (event.ports && event.ports.length) seenPorts += 1; });
+
+function attempt(fn) {
+  return Promise.resolve().then(fn).then(function (v) { return "allowed:" + v; }, function (e) { return "blocked"; });
+}
+function loads(tag, attr, url) {
+  return new Promise(function (resolve) {
+    var el = document.createElement(tag);
+    el.onload = function () { resolve("allowed"); };
+    el.onerror = function () { resolve("blocked"); };
+    el[attr] = url;
+    document.body.appendChild(el);
+    setTimeout(function () { resolve("blocked"); }, 2000);
+  });
+}
+
+// A spoofed message to the host must change nothing; the host only listens on its port.
+window.parent.postMessage({ type: "getTrace" }, "*");
+window.parent.postMessage({ type: "resize", height: 99999 }, "*");
+try { window.beacon = { getTrace: function () { return Promise.resolve({ forged: true }); } }; } catch (e) {}
+
+window.beacon.getTrace().then(async function (data) {
+  var r = {};
+  r.traceId = data.trace.id;
+  r.events = data.trace.events.length;
+  r.forged = !!data.forged;
+  r.fetchSameOrigin = await attempt(function () { return fetch("/api/status?via=fetch").then(function (x) { return x.status; }); });
+  r.fetchRemote = await attempt(function () { return fetch("https://example.invalid/x?via=fetch-remote").then(function (x) { return x.status; }); });
+  r.xhr = await attempt(function () {
+    return new Promise(function (resolve, reject) {
+      var x = new XMLHttpRequest(); x.open("GET", "/api/status?via=xhr"); x.onload = function () { resolve(x.status); }; x.onerror = reject; x.send();
+    });
+  });
+  r.websocket = await attempt(function () {
+    return new Promise(function (resolve, reject) {
+      var ws = new WebSocket("ws://" + location.host + "/?via=websocket"); ws.onopen = function () { resolve("open"); }; ws.onerror = reject;
+    });
+  });
+  // sendBeacon reports only that a beacon was queued, not sent, so its result proves nothing; the
+  // test checks that no request carrying via=beacon ever left the page.
+  try { navigator.sendBeacon("/api/status?via=beacon", "x"); navigator.sendBeacon("https://example.invalid/?via=beacon", "x"); } catch (e) {}
+  r.image = await loads("img", "src", "/logo.svg?via=image");
+  r.nestedFrame = await attempt(function () {
+    return new Promise(function (resolve, reject) {
+      var f = document.createElement("iframe"); f.src = "/lenses/frame/activity?via=frame";
+      f.onload = function () { try { f.contentWindow.document; resolve("loaded"); } catch (e) { reject(e); } };
+      document.body.appendChild(f); setTimeout(function () { reject(new Error("timeout")); }, 2000);
+    });
+  });
+  r.parentDocument = await attempt(function () { return window.parent.document.title; });
+  r.topLocation = await attempt(function () { return window.top.location.href; });
+  r.localStorage = await attempt(function () { return localStorage.length; });
+  r.cookie = await attempt(function () { return document.cookie; });
+  r.eval = await attempt(function () { return eval("1 + 1"); });
+  r.newFunction = await attempt(function () { return new Function("return 2")(); });
+  r.popup = await attempt(function () { var w = window.open("/?via=popup"); if (!w) throw new Error("no window"); return "opened"; });
+  // A Worker object exists even when its script is refused; only a message from inside proves it ran.
+  r.worker = await attempt(function () {
+    return new Promise(function (resolve, reject) {
+      var w = new Worker(URL.createObjectURL(new Blob(["postMessage('ran')"], { type: "text/javascript" })));
+      w.onmessage = function (e) { resolve(e.data); };
+      w.onerror = function () { reject(new Error("refused")); };
+      setTimeout(function () { reject(new Error("timeout")); }, 2000);
+    });
+  });
+  r.origin = self.origin;
+  r.seenPorts = seenPorts;
+  document.getElementById("results").textContent = JSON.stringify(r);
+});
+</script>
+</body>
+</html>

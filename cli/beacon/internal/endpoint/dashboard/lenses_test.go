@@ -249,3 +249,80 @@ func TestLensTokensMatchTheSpec(t *testing.T) {
 		}
 	}
 }
+
+func writeLensFile(t *testing.T, dir, id, body string) string {
+	t.Helper()
+	path := filepath.Join(dir, id+".lens.html")
+	html := `<!doctype html><script type="application/beacon-lens+json">{"id":"` + id + `","title":"Dev ` + id + `","version":1,"api":"beacon.lens.v1"}</script>` + body
+	if err := os.WriteFile(path, []byte(html), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestLensFilesAreServedAndReReadOnEveryRequest(t *testing.T) {
+	dir := t.TempDir()
+	path := writeLensFile(t, dir, "dev-lens", "<p>first</p>")
+	handler, err := Handler(Options{UserMode: true, LogPath: filepath.Join(dir, "runtime.jsonl"), LensFiles: []string{path}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var list LensListResponse
+	if err := json.Unmarshal(serve(handler, http.MethodGet, "/api/lenses").Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	sources := map[string]string{}
+	for _, l := range list.Lenses {
+		sources[l.ID] = l.Source
+	}
+	if sources["dev-lens"] != LensSourceFile || sources["activity"] != LensSourceBuiltin {
+		t.Fatalf("lens sources = %v", sources)
+	}
+
+	rec := serve(handler, http.MethodGet, "/lenses/frame/dev-lens")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "<p>first</p>") || rec.Header().Get("Content-Security-Policy") != lensFrameCSP {
+		t.Fatalf("file lens = %d %q", rec.Code, rec.Body.String())
+	}
+	writeLensFile(t, dir, "dev-lens", "<p>second</p>")
+	if body := serve(handler, http.MethodGet, "/lenses/frame/dev-lens").Body.String(); !strings.Contains(body, "<p>second</p>") {
+		t.Fatal("an edited lens file was not re-read")
+	}
+
+	// A file that stops being the same valid lens stops being served.
+	writeLensFile(t, dir, "renamed", "")
+	if err := os.Rename(filepath.Join(dir, "renamed.lens.html"), path); err != nil {
+		t.Fatal(err)
+	}
+	if rec := serve(handler, http.MethodGet, "/lenses/frame/dev-lens"); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("lens that changed its id = %d, want 500", rec.Code)
+	}
+	if err := os.WriteFile(path, []byte("<p>no manifest</p>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if rec := serve(handler, http.MethodGet, "/lenses/frame/dev-lens"); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("lens without a manifest = %d, want 500", rec.Code)
+	}
+}
+
+func TestLensFilesAreCheckedAtStartup(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "runtime.jsonl")
+	broken := filepath.Join(dir, "broken.lens.html")
+	if err := os.WriteFile(broken, []byte("<p>no manifest</p>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string][]string{
+		"missing file":       {filepath.Join(dir, "absent.lens.html")},
+		"no manifest":        {broken},
+		"built-in id":        {writeLensFile(t, dir, "activity", "")},
+		"duplicate file ids": {writeLensFile(t, dir, "twin", ""), writeLensFile(t, t.TempDir(), "twin", "")},
+	}
+	for name, files := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Handler(Options{UserMode: true, LogPath: logPath, LensFiles: files}); err == nil {
+				t.Fatal("Handler accepted a bad lens file")
+			}
+		})
+	}
+}
