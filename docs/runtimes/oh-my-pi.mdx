@@ -112,7 +112,18 @@ Unlike Pi, a project-level install needs no trust prompt: Oh My Pi loads `.omp` 
 
 ### File paths
 
-Oh My Pi's tools take a path the way the model wrote it: relative to the session's working directory or to `~`, often with a line selector such as `.env:1-20`, `main.go:5-16,960-973`, or `notes.md:raw`. Beacon records the file that path names, as an absolute path, so file rules and queries see `/repo/.env` rather than `.env:1-20`. Results use the path Oh My Pi reports having resolved. The `tool.invoked` before a call, and any approval for it, resolve the path the same way Oh My Pi will: against the working directory, with `~` expanded and the selector removed, unless a file of that literal name exists. `tool.path` keeps the path as written, selector included.
+Oh My Pi's tools take a path the way the model wrote it: relative to the session's working directory or to `~`, often with a line selector such as `.env:1-20`, `main.go:5-16,960-973`, or `notes.md:raw`. Beacon records the file that path names, as an absolute path, so file rules and queries see `/repo/.env` rather than `.env:1-20`. Results use the path Oh My Pi reports having resolved. `tool.path` keeps the path as written, selector included.
+
+The `tool.invoked` before a call, and any approval for it, resolve the path the same way Oh My Pi will:
+
+- against the session's working directory, even when the session has extra workspace directories (`--add-dir`), which Oh My Pi's tools only reach by absolute path;
+- with `~` expanded, including Oh My Pi's reading of `~name` as `<home>/name`;
+- with a stray leading `:` dropped, and a leading `@` dropped before `/`, `~`, a Windows absolute path, or a URL;
+- with Unicode spaces read as plain spaces, and a Windows drive alias translated for the host (`/c/...` on Windows, `C:\...` under WSL);
+- with a path of nothing but slashes read as the working directory;
+- with the selector removed, unless a file of that literal name exists.
+
+A result Oh My Pi reports as a URL or one of its own resources is never recorded as a file, even when a file backs it. The event before a call cannot follow what Oh My Pi decides by looking at the disk after the path it resolved turns out not to exist: a unique-suffix search under the working directory, an edit rebound by its snapshot tag, or a macOS spelling variant of a filename. Only the result records the file Oh My Pi used in those cases.
 
 Oh My Pi's default edit format can change several files in one call. Such an edit is recorded as one `file.modified` per file, each with that file's diff and its own operation (`create`, `modify`, or `delete`).
 

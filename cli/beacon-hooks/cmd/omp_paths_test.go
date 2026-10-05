@@ -71,6 +71,17 @@ func TestOmpPathAsWrittenIsResolvedTheWayTheRuntimeWill(t *testing.T) {
 		{"report:2024", filepath.Join(cwd, "report:2024")},
 		// Not selector grammar: a range may not end in `+`.
 		{"a.go:12+", filepath.Join(cwd, "a.go:12+")},
+		// The runtime's shorthand, applied the way its expandPath and resolveToCwd apply it.
+		{"/", cwd},
+		{"//", cwd},
+		{"@/etc/hosts", "/etc/hosts"},
+		{"@~/notes.md", filepath.Join(home, "notes.md")},
+		{":/etc/hosts", "/etc/hosts"},
+		{":../shared/a.go:1-5", filepath.Join(filepath.Dir(cwd), "shared/a.go")},
+		{"~work/notes.md", filepath.Join(home, "work/notes.md")},
+		{"Screenshot 2026-10-05 at 3.35.12\u202fPM.png", filepath.Join(cwd, "Screenshot 2026-10-05 at 3.35.12 PM.png")},
+		// A leading `@` before anything else is part of the name.
+		{"@notes.md", filepath.Join(cwd, "@notes.md")},
 	} {
 		t.Run(tc.target, func(t *testing.T) {
 			for _, typ := range []string{"tool_call", "tool_approval_requested"} {
@@ -83,6 +94,53 @@ func TestOmpPathAsWrittenIsResolvedTheWayTheRuntimeWill(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A read the runtime reports as a URL or one of its own resources is not a file read, even when a
+// file in the runtime's storage backs it and the spelling looked like a path: the runtime routes
+// `local:/plan.md` as `local://plan.md`. And a URL behind an `@` mention marker is a URL, not a
+// file named `@skill:/…`; the runtime refuses to read it as a path at all.
+func TestOmpResourceReadIsNotAFileWhateverItsSpelling(t *testing.T) {
+	for _, payload := range []map[string]interface{}{
+		{"type": "tool_result", "toolName": "read", "input": map[string]interface{}{"path": "local:/plan.md"},
+			"details": map[string]interface{}{
+				"resolvedPath": "/home/u/.omp/agent/sessions/s/local/plan.md",
+				"meta":         map[string]interface{}{"source": map[string]interface{}{"type": "internal", "value": "local://plan.md"}},
+			}},
+		{"type": "tool_call", "toolName": "read", "input": map[string]interface{}{"path": "@skill://self-verify-beacon-in-sandbox"}},
+		{"type": "tool_result", "toolName": "read", "input": map[string]interface{}{"path": "@skill://self-verify-beacon-in-sandbox"},
+			"isError": true},
+	} {
+		payload["toolCallId"], payload["cwd"] = "call-1", "/repo"
+		events := ompRuntime.endpointEvents(payload, "sess-1")
+		if len(events) != 1 {
+			t.Fatalf("%v produced %d events, want 1", payload, len(events))
+		}
+		if file, ok := events[0].fields["file"]; ok {
+			t.Fatalf("%s of %v grew a file block: %v", payload["type"], payload["input"], file)
+		}
+	}
+}
+
+func TestOmpDriveAliasPathFollowsTheHost(t *testing.T) {
+	for _, tc := range []struct {
+		path, goos string
+		wsl        bool
+		want       string
+	}{
+		{"/c/Users/me/a.go", "windows", false, `C:\Users\me\a.go`},
+		{"/mnt/d/src/a.go", "windows", false, `D:\src\a.go`},
+		{"/c", "windows", false, `C:\`},
+		{"/home/me/a.go", "windows", false, "/home/me/a.go"},
+		{`C:\Users\me\a.go`, "linux", true, "/mnt/c/Users/me/a.go"},
+		{"C:/Users/me/a.go", "linux", true, "/mnt/c/Users/me/a.go"},
+		{`C:\Users\me\a.go`, "linux", false, `C:\Users\me\a.go`},
+		{"/c/Users/me/a.go", "darwin", false, "/c/Users/me/a.go"},
+	} {
+		if got := ompDriveAliasPath(tc.path, tc.goos, tc.wsl); got != tc.want {
+			t.Errorf("ompDriveAliasPath(%q, %s, wsl=%v) = %q, want %q", tc.path, tc.goos, tc.wsl, got, tc.want)
+		}
 	}
 }
 

@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/diff"
@@ -430,34 +432,49 @@ func isURIScheme(s string) bool {
 //
 // On a runtime that resolves its tool paths, the runtime's own statement of the file is preferred,
 // because it is the one path that is certainly right: it is absolute, and any selector or `~` in
-// what the model wrote has already been resolved. A tool_call or an approval, which happen before
-// the runtime has resolved anything, resolve the target the same way the runtime will.
+// what the model wrote has already been resolved. A result whose source the runtime reports as a
+// URL or one of its own resources is not a file, whatever file backs it. A tool_call or an
+// approval, which happen before the runtime has resolved anything, resolve the target the same way
+// the runtime will.
 func (f piFamily) filePath(call piToolCall, input map[string]interface{}, target string) string {
+	if f.resolvesToolPaths {
+		target = ompStripPathMarker(target)
+	}
 	path := piFilePath(target)
 	if path == "" || !f.resolvesToolPaths {
 		return path
 	}
-	if resolved := piResolvedPath(call.details); resolved != "" {
-		return resolved
-	}
-	return ompToolPath(path, resolveCwd(input, f.platform))
-}
-
-// piResolvedPath returns the absolute path a tool result reports having read or written.
-//
-// Oh My Pi reports it in three places, one per tool: a read names its source in `meta.source`
-// when the source was a file, a write names the file in `resolvedPath`, and an edit of one file
-// names it in `path`. A read of anything else -- a URL, or a runtime resource backed by a file in
-// the runtime's own storage -- reports a different source type and is never taken for a file.
-func piResolvedPath(details map[string]interface{}) string {
-	path := getFirstStr(details, "resolvedPath", "path")
-	if source := firstMap(firstMap(details, "meta"), "source"); getFirstStr(source, "type") == "path" {
-		path = getFirstStr(source, "value")
-	}
-	if !filepath.IsAbs(path) {
+	resolved, isFile := piResolvedPath(call.details)
+	if !isFile {
 		return ""
 	}
-	return path
+	if resolved != "" {
+		return resolved
+	}
+	return ompToolPath(path, resolveCwd(input, f.platform), runtime.GOOS, ompIsWSL())
+}
+
+// piResolvedPath returns the absolute path a tool result reports having read or written, and
+// whether the result describes a file at all.
+//
+// Oh My Pi reports the path in three places, one per tool: a read names its source in
+// `meta.source`, a write names the file in `resolvedPath`, and an edit of one file names it in
+// `path`. A read whose source is a URL or an `internal` resource is not a file read, even when a
+// file in the runtime's own storage backs it and `resolvedPath` names that file.
+func piResolvedPath(details map[string]interface{}) (string, bool) {
+	var path string
+	switch source := firstMap(firstMap(details, "meta"), "source"); getFirstStr(source, "type") {
+	case "path":
+		path = getFirstStr(source, "value")
+	case "":
+		path = getFirstStr(details, "resolvedPath", "path")
+	default:
+		return "", false
+	}
+	if !filepath.IsAbs(path) {
+		return "", true
+	}
+	return path, true
 }
 
 // ompLineSelector is Oh My Pi's read selector grammar, FILE_LINE_RANGE_RE in its
@@ -468,6 +485,47 @@ var ompLineSelector = regexp.MustCompile(`(?i)^(?:` + ompLineRange + `(?:,` + om
 
 const ompLineRange = `L?\d+(?:(?:\.\.|-)(?:L?\d+)?|\+L?\d+)?`
 
+// ompStrayColon matches the stray `:` some models put in front of a path (`:/abs`, `:../rel`,
+// `:C:\repo`), which Oh My Pi drops before resolving: no real path starts with `:`.
+var ompStrayColon = regexp.MustCompile(`^:(?:[/\\~]|\.\.?[/\\]|[A-Za-z]:)`)
+
+// ompWindowsAbsolute matches a Windows absolute path: a drive (`C:\`, `C:/`), a UNC share, or a
+// root-relative `\path`, the forms Node's path.win32.isAbsolute accepts.
+var ompWindowsAbsolute = regexp.MustCompile(`^(?:[A-Za-z]:[\\/]|[\\/]{2}|\\)`)
+
+// ompStripPathMarker drops the marker characters Oh My Pi strips from the front of a path before
+// it reads one, mirroring the first steps of its expandPath (tools/path-utils.ts).
+//
+// A stray `:` goes before a path shape. A leading `@` -- a mention marker -- goes only before `/`,
+// `~`, a Windows absolute path, or an internal URL, so a file literally named `@notes.md` keeps its
+// name. The runtime recognizes an internal URL by its own scheme registry; any `scheme://` other
+// than a file or web URL is taken for one here, because it is not a file either way. Stripping the
+// `@` before the URI check is what keeps `@skill://name` from being read as a file path.
+func ompStripPathMarker(target string) string {
+	if ompStrayColon.MatchString(target) {
+		target = target[1:]
+	}
+	rest, ok := strings.CutPrefix(target, "@")
+	if !ok {
+		return target
+	}
+	if strings.HasPrefix(rest, "/") || rest == "~" || strings.HasPrefix(rest, "~/") || ompWindowsAbsolute.MatchString(rest) {
+		return rest
+	}
+	if scheme, _, ok := strings.Cut(rest, "://"); ok && isURIScheme(scheme) {
+		switch strings.ToLower(scheme) {
+		case "file", "http", "https":
+		default:
+			return rest
+		}
+	}
+	return target
+}
+
+// ompUnicodeSpaces are the space characters Oh My Pi reads as a plain space in a path: no-break,
+// the U+2000 block, narrow no-break, medium mathematical and ideographic.
+var ompUnicodeSpaces = regexp.MustCompile("[\u00A0\u2000-\u200A\u202F\u205F\u3000]")
+
 // ompToolPath turns a path as an Oh My Pi tool was given it into the file it names.
 //
 // Oh My Pi resolves a relative path against the session's working directory, expands `~`, and
@@ -477,19 +535,36 @@ const ompLineRange = `L?\d+(?:(?:\.\.|-)(?:L?\d+)?|\+L?\d+)?`
 // credential-read rules match `(^|/)\.env($|\.)`, not `.env:1-20` -- and filed one file under as
 // many names as it was read with. Cline resolves relative paths for the same reason.
 //
+// The rest of the runtime's shorthand is applied the same way its expandPath and resolveToCwd
+// apply it (tools/path-utils.ts), so the path recorded before a call is the one its result will
+// report: Unicode spaces become plain spaces; `~name` is `<home>/name`, the runtime's reading
+// rather than a shell's; a Windows drive alias is translated for the host (ompDriveAliasPath); and
+// a path that is nothing but slashes means the working directory, because the runtime reads `/`
+// as "here" rather than the filesystem root.
+//
 // The selector is peeled the way the runtime peels it: from the last colon, only when what follows
 // is selector grammar, at most twice (a range and `raw` may be combined), and not at all when a
 // file of that literal name exists, which is the runtime's own tiebreak.
-func ompToolPath(path, cwd string) string {
-	if path == "~" || strings.HasPrefix(path, "~/") || strings.HasPrefix(path, "~"+string(filepath.Separator)) {
+//
+// What this cannot reproduce is anything the runtime decides by looking at the disk once the path
+// it resolved turns out not to exist -- a unique-suffix search under the working directory, an
+// edit rebound by its snapshot tag, or a macOS spelling variant of the name. Those reach only the
+// result, which reports the file the runtime actually used.
+func ompToolPath(target, cwd, goos string, wsl bool) string {
+	p := ompUnicodeSpaces.ReplaceAllString(target, " ")
+	if strings.HasPrefix(p, "~") {
 		if home, err := os.UserHomeDir(); err == nil {
-			path = filepath.Join(home, path[1:])
+			p = filepath.Join(home, p[1:])
 		}
 	}
-	if !filepath.IsAbs(path) && cwd != "" {
-		path = filepath.Join(cwd, path)
+	p = ompDriveAliasPath(p, goos, wsl)
+	switch {
+	case strings.Trim(p, "/") == "" && cwd != "":
+		p = cwd
+	case !filepath.IsAbs(p) && cwd != "":
+		p = filepath.Join(cwd, p)
 	}
-	stripped := path
+	stripped := p
 	for range 2 {
 		i := strings.LastIndexByte(stripped, ':')
 		if i <= 0 || !ompLineSelector.MatchString(stripped[i+1:]) {
@@ -497,13 +572,69 @@ func ompToolPath(path, cwd string) string {
 		}
 		stripped = stripped[:i]
 	}
-	if stripped == path {
-		return path
+	if stripped == p {
+		return p
 	}
-	if _, err := os.Lstat(path); err == nil {
-		return path
+	if _, err := os.Lstat(p); err == nil {
+		return p
 	}
 	return stripped
+}
+
+// ompDriveAliasPath translates a Windows drive alias for the host the runtime runs on, mirroring
+// its normalizeWindowsDriveAliasPath: on Windows, an MSYS or WSL mount root (`/c/...`,
+// `/mnt/c/...`) is the drive itself (`C:\...`); under WSL, a pasted Windows path (`C:\...`,
+// `C:/...`) is that drive's mount (`/mnt/c/...`). Anywhere else the path is left alone.
+func ompDriveAliasPath(p, goos string, wsl bool) string {
+	switch {
+	case goos == "windows":
+		parts := strings.Split(p, "/")
+		if len(parts) < 2 || parts[0] != "" {
+			return p
+		}
+		var drive string
+		tail := parts[2:]
+		if isDriveLetter(parts[1]) {
+			drive = strings.ToUpper(parts[1])
+		} else if len(parts) >= 3 && strings.EqualFold(parts[1], "mnt") && isDriveLetter(parts[2]) {
+			drive = strings.ToUpper(parts[2])
+			tail = parts[3:]
+		}
+		if drive == "" {
+			return p
+		}
+		return drive + `:\` + strings.Join(nonEmpty(tail), `\`)
+	case wsl:
+		match := ompWindowsDrivePath.FindStringSubmatch(strings.ReplaceAll(strings.TrimSpace(p), "/", `\`))
+		if match == nil {
+			return p
+		}
+		segments := append([]string{"/mnt", strings.ToLower(match[1])}, nonEmpty(strings.Split(match[2], `\`))...)
+		return path.Join(segments...)
+	default:
+		return p
+	}
+}
+
+var ompWindowsDrivePath = regexp.MustCompile(`^([A-Za-z]):\\(.*)$`)
+
+func isDriveLetter(s string) bool {
+	return len(s) == 1 && (s[0] >= 'a' && s[0] <= 'z' || s[0] >= 'A' && s[0] <= 'Z')
+}
+
+func nonEmpty(parts []string) []string {
+	out := parts[:0:0]
+	for _, part := range parts {
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+// ompIsWSL reports whether the hook runs under WSL, the way Oh My Pi's isWsl decides it.
+func ompIsWSL() bool {
+	return runtime.GOOS == "linux" && (os.Getenv("WSL_DISTRO_NAME") != "" || os.Getenv("WSL_INTEROP") != "")
 }
 
 // ompMCPResourceScheme is the URI scheme through which Oh My Pi's read tool reads an MCP resource:
