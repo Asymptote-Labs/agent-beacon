@@ -212,6 +212,67 @@ func TestAggregateDedupesDualChannelUsage(t *testing.T) {
 	}
 }
 
+// Gemini CLI reports each response on the gemini_cli.api_response log and again on the
+// cumulative gemini_cli.token.usage counter, and puts its session.id on both, so the two land in
+// one (harness, session) scope and the log channel wins. The events are shaped as the exporter
+// writes them: the log already carries the disjoint reading (input = prompt - cached + tool,
+// output = candidates + thoughts), and so does each metric line.
+func TestAggregateCountsGeminiLogAndMetricChannelsOnce(t *testing.T) {
+	const session = "8c4f0d2e-5b1a-4e7c-9f3d-2a6b8e1c7d40"
+	response := func(ts string, input, output, cacheRead, reasoning int64) schema.Event {
+		return usageEventFixture(ts, "gemini_cli", session, "gemini-2.5-pro", func(e *schema.Event) {
+			e.Event.Action = "tool.invoked"
+			e.Event.Category = "tool"
+			e.Message = "API response from gemini-2.5-pro. Status: 200. Duration: 2311ms."
+			e.GenAI.Usage.InputTokens = int64Ptr(input)
+			e.GenAI.Usage.OutputTokens = int64Ptr(output)
+			e.GenAI.Usage.CacheRead = &schema.GenAIUsageCacheReadInfo{InputTokens: int64Ptr(cacheRead)}
+			e.GenAI.Usage.Reasoning = &schema.GenAIUsageReasoningInfo{OutputTokens: int64Ptr(reasoning)}
+		})
+	}
+	counter := func(ts, tokenType string, mutate func(*schema.GenAIUsageInfo)) schema.Event {
+		return usageEventFixture(ts, "gemini_cli", session, "gemini-2.5-pro", func(e *schema.Event) {
+			e.Message = "gemini_cli.token.usage"
+			e.GenAI.Token = &schema.GenAITokenInfo{Type: tokenType}
+			mutate(e.GenAI.Usage)
+			e.Raw = map[string]interface{}{"metric_name": "gemini_cli.token.usage", "metric_temporality": "Cumulative"}
+		})
+	}
+	collection := func(ts string, input, output, cacheRead, reasoning int64) []schema.Event {
+		return []schema.Event{
+			counter(ts, "input", func(u *schema.GenAIUsageInfo) { u.InputTokens = int64Ptr(input) }),
+			counter(ts, "output", func(u *schema.GenAIUsageInfo) { u.OutputTokens = int64Ptr(output) }),
+			counter(ts, "cache", func(u *schema.GenAIUsageInfo) {
+				u.CacheRead = &schema.GenAIUsageCacheReadInfo{InputTokens: int64Ptr(cacheRead)}
+			}),
+			counter(ts, "thought", func(u *schema.GenAIUsageInfo) {
+				u.Reasoning = &schema.GenAIUsageReasoningInfo{OutputTokens: int64Ptr(reasoning)}
+			}),
+			counter(ts, "tool", func(u *schema.GenAIUsageInfo) {}),
+		}
+	}
+	events := []schema.Event{
+		// prompt 12000 (8000 cached), candidates 350, thoughts 420: total 12770.
+		response("2026-10-05T09:30:00Z", 4000, 770, 8000, 420),
+		// prompt 5000, tool-use prompt 600, candidates 100: total 5700.
+		response("2026-10-05T09:30:40Z", 5600, 100, 0, 0),
+	}
+	events = append(events, collection("2026-10-05T09:31:00Z", 9600, 870, 8000, 420)...)
+	events = append(events, collection("2026-10-05T09:32:00Z", 9600, 870, 8000, 420)...)
+
+	report := Aggregate(events, Options{})
+	got := report.Totals
+	if got.InputTokens != 9600 || got.OutputTokens != 870 || got.CacheReadInputTokens != 8000 || got.ReasoningOutputTokens != 420 {
+		t.Fatalf("totals = %#v, want the log channel once: input 9600, output 870, cache read 8000, reasoning 420", got)
+	}
+	if got.TotalTokens() != 12770+5700 {
+		t.Fatalf("total tokens = %d, want Gemini's own totals 12770 + 5700", got.TotalTokens())
+	}
+	if got.Events != 2 {
+		t.Fatalf("events = %d, want the two api_response lines only", got.Events)
+	}
+}
+
 func TestAggregatePrefersCodexTurnSpansAfterCutover(t *testing.T) {
 	codexMetric := func(ts string, input int64) schema.Event {
 		return usageEventFixture(ts, "codex_cli", "", "gpt-5.6-sol", func(e *schema.Event) {

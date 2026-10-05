@@ -92,6 +92,12 @@ var usageExpectation = map[string]struct {
 	"deepseek_harness":  {ExpectReported, "native session backfill reports usage when DeepSeek persists it"},
 	"copilot_cli":       {ExpectReported, "session store carries output tokens, cumulative model usage, and AI-credit cost"},
 	"asymptote_observe": {ExpectReported, "SDK spans carry semconv usage"},
+	// Read from Gemini CLI's own gemini_cli.api_response log, which it emits for every model
+	// response whenever its telemetry is on -- not from the semconv names -- so a Gemini session
+	// with events and no usage is a fault worth reporting. The record shape is pinned from Gemini
+	// CLI's telemetry source rather than from a recorded session.
+	"gemini_cli": {ExpectReported, "api_response log reports input, cache, thought and tool tokens; Gemini CLI emits no cost"},
+
 	// Runtimes whose usage reaches Beacon only through a session-store sync. Their hooks carry no
 	// token counts, so a window of hook activity with no usage is spend missing from the total --
 	// silent, which is right -- but the fix is running the sync rather than repairing a hook, so
@@ -109,7 +115,6 @@ var usageExpectation = map[string]struct {
 	// the generic-OTLP expectation rather than pointing at a command that cannot clear it.
 	"factory_droid": {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
 
-	"gemini_cli":     {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
 	"vscode_copilot": {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
 	// goose's chat spans carry the full semconv usage set, but they reach Beacon only over OTLP
 	// configured by hand, and its hook adapter carries none. Without its own key it fell to the
