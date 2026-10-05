@@ -71,7 +71,7 @@ func ReadEvents(path string, query EventQuery) (EventResult, error) {
 	limit := normalizeLimit(query.Limit)
 	state := normalizeSessionState(query.SessionState)
 	query.SessionState = state
-	if state != "" {
+	if state != "" && query.sessionStateIDs == nil {
 		ids, err := sessionIDsForState(path, query, state)
 		if err != nil {
 			return EventResult{}, err
@@ -193,20 +193,47 @@ func streamSource(source eventSource, fn func(schema.Event) error) error {
 }
 
 type sessionStateStats struct {
-	lifecycleEvents    int
-	nonLifecycleEvents int
-	capturedPrompts    int
+	hasVisibleActivity bool
+	prompt             string
+	promptAt           time.Time
+	harness            string
+	harnessAt          time.Time
+	repository         string
+	repositoryAt       time.Time
+	user               string
+	userAt             time.Time
+}
+
+type sessionClassification struct {
+	state           string
+	recurrenceCount int
 }
 
 func sessionIDsForState(path string, query EventQuery, state string) (map[string]bool, error) {
+	classifications, err := classifySessions(path, query)
+	if err != nil {
+		return nil, err
+	}
+	ids := map[string]bool{}
+	for id, classification := range classifications {
+		if classification.state == state {
+			ids[id] = true
+		}
+	}
+	return ids, nil
+}
+
+// classifySessions assigns one mutually exclusive category to every session active
+// in the selected time window. Recurrence is computed over that complete set before
+// any event or session result limit is applied.
+func classifySessions(path string, query EventQuery) (map[string]sessionClassification, error) {
 	// Session state is a property of the whole session, not the filtered slice.
-	// Use only time bounds and session/harness scope so content filters
-	// (category, action, search, etc.) do not affect the classification.
+	// Only the selected time window scopes recurrence. The owner is part of the
+	// recurrence key; content, harness and individual-session filters must not
+	// change a group's classification or count.
 	stateQuery := EventQuery{
-		Since:   query.Since,
-		Until:   query.Until,
-		Harness: query.Harness,
-		Session: query.Session,
+		Since: query.Since,
+		Until: query.Until,
 	}
 	stats := map[string]*sessionStateStats{}
 	for _, source := range eventSources(path) {
@@ -214,14 +241,28 @@ func sessionIDsForState(path string, query EventQuery, state string) (map[string
 			return nil, err
 		}
 	}
-	ids := map[string]bool{}
+	groupCounts := map[string]int{}
+	groupKeys := map[string]string{}
 	for id, stat := range stats {
-		empty := isEmptySession(stat)
-		if (state == "empty" && empty) || (state == "captured" && !empty) {
-			ids[id] = true
+		if stat.prompt == "" {
+			continue
 		}
+		key := recurrenceGroupKey(stat)
+		groupKeys[id] = key
+		groupCounts[key]++
 	}
-	return ids, nil
+	classifications := make(map[string]sessionClassification, len(stats))
+	for id, stat := range stats {
+		classification := sessionClassification{state: "captured"}
+		if !stat.hasVisibleActivity {
+			classification.state = "empty"
+		} else if key := groupKeys[id]; key != "" && groupCounts[key] >= 2 {
+			classification.state = "recurring"
+			classification.recurrenceCount = groupCounts[key]
+		}
+		classifications[id] = classification
+	}
+	return classifications, nil
 }
 
 func collectSessionStateStats(source eventSource, query EventQuery, stats map[string]*sessionStateStats) error {
@@ -265,30 +306,55 @@ func collectSessionStateStats(source eventSource, query EventQuery, stats map[st
 			stat = &sessionStateStats{}
 			stats[event.Session.ID] = stat
 		}
-		if hasCapturedPromptText(event) {
-			stat.capturedPrompts++
+		if prompt := strings.TrimSpace(promptText(event)); prompt != "" && (stat.prompt == "" || eventComesBefore(parsed, stat.promptAt)) {
+			stat.prompt = prompt
+			stat.promptAt = parsed
 		}
-		if isLifecycleSessionEvent(event) {
-			stat.lifecycleEvents++
-		} else {
-			stat.nonLifecycleEvents++
+		if harness := strings.TrimSpace(event.Harness.Name); harness != "" && (stat.harness == "" || eventComesBefore(parsed, stat.harnessAt)) {
+			stat.harness = harness
+			stat.harnessAt = parsed
+		}
+		if repository := strings.TrimSpace(event.Repository); repository != "" && (stat.repository == "" || eventComesBefore(parsed, stat.repositoryAt)) {
+			stat.repository = repository
+			stat.repositoryAt = parsed
+		}
+		if user := normalizedSessionUser(event); user != "" && (stat.user == "" || eventComesBefore(parsed, stat.userAt)) {
+			stat.user = user
+			stat.userAt = parsed
+		}
+		if !isInternalSessionEvent(event) {
+			stat.hasVisibleActivity = true
 		}
 	}
 	return scanner.Err()
 }
 
-func isEmptySession(stat *sessionStateStats) bool {
-	return stat != nil && stat.capturedPrompts == 0 && stat.lifecycleEvents > 0 && stat.nonLifecycleEvents == 0
+func eventComesBefore(candidate, current time.Time) bool {
+	return !candidate.IsZero() && (current.IsZero() || candidate.Before(current))
 }
 
-func hasCapturedPromptText(event schema.Event) bool {
-	if !isPromptEvent(event) {
-		return false
+func recurrenceGroupKey(stat *sessionStateStats) string {
+	return strings.Join([]string{
+		normalizeComparisonValue(stat.user),
+		normalizeComparisonValue(stat.prompt),
+		normalizeComparisonValue(asymptoteobserve.NormalizeHarnessName(stat.harness)),
+		normalizeComparisonValue(stat.repository),
+	}, "\x00")
+}
+
+func normalizeComparisonValue(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func normalizedSessionUser(event schema.Event) string {
+	if uid := normalizeComparisonValue(event.User.UID); uid != "" {
+		return "uid:" + uid
 	}
-	if event.Prompt != nil && strings.TrimSpace(event.Prompt.Text) != "" {
-		return true
+	if name := normalizeComparisonValue(event.User.Name); name != "" {
+		return "name:" + name
 	}
-	return strings.TrimSpace(rawString(event.Raw, "first_prompt")) != ""
+	// Empty is the consistent identity for events without an owner in this local scope.
+	return ""
 }
 
 func isPromptEvent(event schema.Event) bool {
@@ -308,6 +374,24 @@ func isLifecycleSessionEvent(event schema.Event) bool {
 	return false
 }
 
+func isInternalSessionEvent(event schema.Event) bool {
+	if isLifecycleSessionEvent(event) {
+		return true
+	}
+	category := strings.ToLower(strings.TrimSpace(event.Event.Category))
+	switch category {
+	case "inventory", "validation", "metric":
+		return true
+	}
+	action := strings.ToLower(strings.TrimSpace(event.Event.Action))
+	for _, prefix := range []string{"inventory.", "validation.", "metric.", "endpoint.", "telemetry."} {
+		if strings.HasPrefix(action, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizedLifecycleValue(value string) string {
 	replacer := strings.NewReplacer(".", " ", "_", " ", "-", " ")
 	return strings.Join(strings.Fields(strings.ToLower(replacer.Replace(strings.TrimSpace(value)))), " ")
@@ -319,6 +403,8 @@ func normalizeSessionState(value string) string {
 		return "empty"
 	case "captured":
 		return "captured"
+	case "recurring":
+		return "recurring"
 	default:
 		return ""
 	}
