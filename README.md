@@ -154,7 +154,14 @@ Or inspect the raw event stream:
 > Local to keep everything on this machine, and disconnect any time with
 > `beacon endpoint disconnect`.
 
-If this endpoint forwards to Beacon Cloud, your agents can search that history over MCP:
+Whichever destination you choose, the wizard also installs the
+[Beacon Skills](https://docs.beacon.sh/concepts/beacon-skills) into `~/.agents/skills`
+and `~/.claude/skills` unless you turn them off; redo or undo that with
+`beacon skills install|uninstall`.
+
+If you choose Beacon Cloud, the wizard also registers Beacon Cloud MCP in your harnesses
+unless you turn it off, so your agents can search the forwarded history. To do it later,
+or for an endpoint connected another way:
 
 ```bash
 beacon mcp connect

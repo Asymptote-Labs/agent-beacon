@@ -179,6 +179,8 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	}
 	printLingerGap(cmd.ErrOrStderr(), result)
 	installHookTargetsFromEndpointInstall(cmd.ErrOrStderr(), selection.Hooks)
+	refreshAgentSkills(cmd.ErrOrStderr())
+	installAgentSkillsFromOnboarding(cmd, onboarded)
 	// Read recent history from the agents' own session stores so the dashboard has sessions
 	// in it before any agent runs again. Local only, bounded, and never a reason to fail the
 	// install; a connect below ships what it wrote rather than sweeping again.
@@ -187,23 +189,45 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 		reportEndpointBackfill(cmd.OutOrStdout(), runEndpointBackfill(result.LogPath))
 		backfilled = true
 	}
-	if connectAfterInstall {
-		// The install is complete and stands on its own; a failed connect is reported
-		// with the retry command rather than turning a working install into an error.
-		fmt.Fprintln(cmd.OutOrStdout())
-		if err := connectEndpoint(cmd, endpointUserMode(), result.LogPath, backfilled); err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "beacon: managed ingest was not connected (%v). Run `beacon endpoint connect` to try again.\n", err)
-		} else {
-			recordDestinationAsymptote(cmd)
-			suggestMCPConnect(cmd.OutOrStdout(), onboarded.Connect)
-		}
-	}
+	finishCloudSetup(cmd, onboarded, connectAfterInstall, func() error {
+		return connectEndpoint(cmd, endpointUserMode(), result.LogPath, backfilled)
+	})
 	return nil
 }
 
-// suggestMCPConnect points a person who just chose Beacon Cloud in the wizard at
-// `beacon mcp connect`. It only prints: registering the MCP server stays a separate,
-// explicit command, and the unattended install paths never reach the wizard at all.
+// finishCloudSetup connects the endpoint when the wizard or --connect asked for it, and then
+// registers Beacon Cloud MCP when the wizard kept it selected. MCP is registered only once the
+// endpoint forwards to Beacon Cloud, since there is nothing for it to search otherwise.
+func finishCloudSetup(cmd *cobra.Command, onboarded onboardingOutcome, connectAfterInstall bool, connect func() error) {
+	if !connectAfterInstall {
+		if onboarded.ConnectCloudMCP {
+			// An endpoint that was already connected keeps its device key and is not
+			// re-enrolled, but the person still asked for Beacon Cloud MCP.
+			connectCloudMCPFromOnboarding(cmd)
+		}
+		return
+	}
+	// The install is complete and stands on its own; a failed connect is reported with the
+	// retry command rather than turning a working install into an error.
+	fmt.Fprintln(cmd.OutOrStdout())
+	if err := connect(); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "beacon: managed ingest was not connected (%v). Run `beacon endpoint connect` to try again.\n", err)
+		if onboarded.ConnectCloudMCP {
+			fmt.Fprintln(cmd.ErrOrStderr(), "beacon: Beacon Cloud MCP was not registered either; run `beacon mcp connect` once the endpoint is connected.")
+		}
+		return
+	}
+	recordDestinationAsymptote(cmd)
+	if onboarded.ConnectCloudMCP {
+		connectCloudMCPFromOnboarding(cmd)
+		return
+	}
+	suggestMCPConnect(cmd.OutOrStdout(), onboarded.Connect)
+}
+
+// suggestMCPConnect points a person who chose Beacon Cloud in the wizard, but turned Beacon
+// Cloud MCP off, at `beacon mcp connect`. It only prints, and the unattended install paths never
+// reach the wizard at all.
 func suggestMCPConnect(out io.Writer, chosenInWizard bool) {
 	if !chosenInWizard {
 		return
@@ -338,6 +362,7 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Endpoint repaired. Manifest: %s\n", result.ManifestPath)
 	printLingerGap(cmd.ErrOrStderr(), result)
 	installHookTargetsFromEndpointInstall(cmd.ErrOrStderr(), selection.Hooks)
+	refreshAgentSkills(cmd.ErrOrStderr())
 	return nil
 }
 
