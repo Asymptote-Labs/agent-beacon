@@ -179,11 +179,19 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	}
 	printLingerGap(cmd.ErrOrStderr(), result)
 	installHookTargetsFromEndpointInstall(cmd.ErrOrStderr(), selection.Hooks)
+	// Read recent history from the agents' own session stores so the dashboard has sessions
+	// in it before any agent runs again. Local only, bounded, and never a reason to fail the
+	// install; a connect below ships what it wrote rather than sweeping again.
+	backfilled := false
+	if endpointBackfillEnabled(endpointUserMode()) {
+		reportEndpointBackfill(cmd.OutOrStdout(), runEndpointBackfill(result.LogPath))
+		backfilled = true
+	}
 	if connectAfterInstall {
 		// The install is complete and stands on its own; a failed connect is reported
 		// with the retry command rather than turning a working install into an error.
 		fmt.Fprintln(cmd.OutOrStdout())
-		if err := connectEndpoint(cmd, endpointUserMode(), result.LogPath); err != nil {
+		if err := connectEndpoint(cmd, endpointUserMode(), result.LogPath, backfilled); err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "beacon: managed ingest was not connected (%v). Run `beacon endpoint connect` to try again.\n", err)
 		} else {
 			recordDestinationAsymptote(cmd)

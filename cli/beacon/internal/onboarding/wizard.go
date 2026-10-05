@@ -60,6 +60,10 @@ type WizardOptions struct {
 	DestinationOnly   bool
 	PresetDestination string
 	PresetPrivacyMode string
+	// BackfillDays is how far back the install reads agent sessions from their local session
+	// stores, and a first connect uploads them; zero when the backfill is off. The confirm screen
+	// names it, because it is part of what confirming Beacon Cloud sends.
+	BackfillDays int
 
 	// SignIn signs in in place. When nil the wizard keeps its original contract:
 	// it exits with NeedLogin and the caller signs in and runs it again.
@@ -634,8 +638,14 @@ func (m wizardModel) View() string {
 			body += "\nPrivacy: " + managedprivacy.Label(m.result.PrivacyMode) +
 				"\n\n" + wizardWarn.Render("This installs Beacon and starts forwarding to beacon.sh.") +
 				"\n" + wizardDim.Render(privacySends(m.result.PrivacyMode))
+			if m.options.BackfillDays > 0 {
+				body += "\n" + wizardDim.Render(fmt.Sprintf("It also uploads your agent sessions from the last %d days, read from their session history on this machine.", m.options.BackfillDays))
+			}
 		} else {
 			body += "\n\nYour telemetry stays on this machine."
+			if m.options.BackfillDays > 0 {
+				body += fmt.Sprintf(" Beacon reads your agent sessions from the last %d days into its local log.", m.options.BackfillDays)
+			}
 			if m.result.WithoutAccount {
 				body += " You are not signed in; connect later with `beacon endpoint connect`."
 			}

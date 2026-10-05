@@ -26,6 +26,13 @@ include = ["{{LOG_PATH}}"]
 # Nothing recorded before the device was approved is shipped.
 read_from = "end"
 
+# The bounded session backfill a first connect stages from the agents' own
+# session stores, so the dashboard shows recent history at once. Read once.
+[sources.beacon_backfill]
+type = "file"
+include = ["{{BACKFILL_LOG_PATH}}"]
+read_from = "beginning"
+
 [sources.beacon_inventory]
 type = "file"
 include = ["{{INVENTORY_LOG_PATH}}"]
@@ -35,7 +42,7 @@ read_from = "beginning"
 
 [sinks.asymptote_runtime]
 type = "http"
-inputs = ["beacon_runtime"]
+inputs = ["beacon_runtime", "beacon_backfill"]
 uri = "${BEACON_ASYMPTOTE_INGEST_URL}/v1/ingest/runtime"
 method = "post"
 compression = "gzip"

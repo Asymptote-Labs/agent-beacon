@@ -33,6 +33,9 @@ type Options struct {
 	// Guard, when set, keeps this append from rotating out anything the guard's earlier appends
 	// wrote, and records where this one landed. See RetentionGuard.
 	Guard *RetentionGuard
+	// Budget, when set, caps what this append may add to the log; an event that does not fit
+	// is refused with ErrBudgetSpent. See Budget.
+	Budget *Budget
 }
 
 // SystemLogPath is the system-mode runtime log, resolved per platform.
@@ -101,7 +104,14 @@ func AppendEvent(event schema.Event, opts Options) (string, error) {
 			data = stamped
 		}
 	}
-	if err := appendJSONL(opts.Path, append(data, '\n'), opts.RotateSize, opts.RotateArchives, opts.Guard); err != nil {
+	line := append(data, '\n')
+	if opts.Budget != nil && !opts.Budget.reserve(int64(len(line))) {
+		return "", ErrBudgetSpent
+	}
+	if err := appendJSONL(opts.Path, line, opts.RotateSize, opts.RotateArchives, opts.Guard); err != nil {
+		if opts.Budget != nil {
+			opts.Budget.release(int64(len(line)))
+		}
 		return "", err
 	}
 	return opts.Path, nil
