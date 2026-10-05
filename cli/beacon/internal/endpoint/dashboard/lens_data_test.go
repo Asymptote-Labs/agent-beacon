@@ -12,6 +12,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
@@ -341,5 +342,36 @@ func TestLensDataEndpointBySession(t *testing.T) {
 	}
 	if rec := get("/api/lens-data?session=nope"); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown session status = %d, want 404", rec.Code)
+	}
+}
+
+// The lens total is the token report's count, computed by the same aggregation, so a lens and
+// `beacon token-usage` cannot disagree about one trace.
+func TestLensTokenUsageMatchesTheTokenReport(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	withoutHistory(t)
+	turn := func(id string, input, output int64, cost float64, model string) schema.Event {
+		e := testSchemaEvent("2026-06-11T10:00:00Z", "claude_code", "agent.message", "agent", "repo-a")
+		e.Event.ID = id
+		e.Session = &schema.SessionInfo{ID: "u1"}
+		e.Model = model
+		e.GenAI = &schema.GenAIInfo{Usage: &schema.GenAIUsageInfo{InputTokens: int64Ptr(input), OutputTokens: int64Ptr(output), CostUSD: &cost}}
+		return e
+	}
+	events := []schema.Event{turn("a", 100, 10, 0.01, "model-a"), turn("b", 300, 30, 0.03, "model-b")}
+	path := newTestLog(t, marshalEvents(t, events...))
+
+	data, ok, err := BuildSessionLensData(path, "u1", LensDataOptions{UserMode: true})
+	if err != nil || !ok {
+		t.Fatalf("BuildSessionLensData = ok %v, err %v", ok, err)
+	}
+	want := tokens.Aggregate(events, tokens.Options{})
+	got := data.TokenUsage
+	if got == nil || got.Totals.InputTokens != want.Totals.InputTokens || got.Totals.OutputTokens != want.Totals.OutputTokens ||
+		got.EventsWithUsage != want.EventsWithUsage || len(got.ByModel) != len(want.ByModel) {
+		t.Fatalf("token usage = %#v, want the token report's %#v", got, want.Totals)
+	}
+	if got.Totals.InputTokens != 400 || got.ByModel[0].Model != "model-b" || got.ByModel[0].Events != 1 {
+		t.Fatalf("token usage = %#v", got)
 	}
 }

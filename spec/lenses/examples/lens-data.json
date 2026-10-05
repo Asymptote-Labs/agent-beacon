@@ -216,5 +216,26 @@
     "expectation": "reported",
     "reason": "OTLP token and cost telemetry"
   },
+  "token_usage": {
+    "totals": {
+      "input_tokens": 18234,
+      "output_tokens": 1650,
+      "cache_read_input_tokens": 120400,
+      "cost_usd": 0.0912
+    },
+    "events_with_usage": 1,
+    "by_model": [
+      {
+        "model": "claude-sonnet-5-5",
+        "usage": {
+          "input_tokens": 18234,
+          "output_tokens": 1650,
+          "cache_read_input_tokens": 120400,
+          "cost_usd": 0.0912
+        },
+        "events": 1
+      }
+    ]
+  },
   "truncated": false
 }

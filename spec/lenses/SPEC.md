@@ -89,6 +89,11 @@ const data = await window.beacon.getTrace();
     "expectation": "reported",  // reported | generic_otlp | none
     "reason": "OTLP token and cost telemetry"
   },
+  "token_usage": {              // absent: unknown
+    "totals": { "input_tokens": 18234, "output_tokens": 1650, "cost_usd": 0.0912 },
+    "events_with_usage": 1,
+    "by_model": [{ "model": "claude-sonnet-5-5", "usage": { /* same shape */ }, "events": 1 }]
+  },
   "truncated": false
 }
 ```
@@ -118,10 +123,17 @@ trace view uses. Its main parts:
 `findings.items[]` are the active threat rules' matches over this trace's
 own events: `rule_id`, `title`, `severity` (`info` … `critical`), `posture`,
 `reason`, `taxonomy`, and `event_ids`. The evidence is referenced by
-`trace.events[].id`, not copied. Findings and `token_coverage` are computed
-from the live runtime log. For a trace whose lines have been rotated out of
-that log (and are kept only in the opt-in trace history), they may be
-missing or partial while `trace` is still complete.
+`trace.events[].id`, not copied. Findings, `token_coverage` and
+`token_usage` are computed from the live runtime log. For a trace whose lines
+have been rotated out of that log (and are kept only in the opt-in trace
+history), they may be missing or partial while `trace` is still complete.
+
+`token_usage` is the trace's usage as `beacon token-usage` counts it, with
+duplicate channels removed and cumulative counters turned into deltas. Each
+event's own `usage` is what that event reported, so summing those can count
+the same tokens twice; use `token_usage.totals` for the total, and say so if
+you show both. `cost_usd` is only ever what the runtime reported; Beacon never
+estimates cost.
 
 `truncated` is true when the bundle holds fewer events than the trace has,
 because it hit the size cap. A finding's evidence ID may then point at an
@@ -234,3 +246,4 @@ The host enforces these rules; a lens does not opt into them.
 ### Changelog
 
 - `lenses/v1`: initial specification.
+- `lenses/v1` (additive): `token_usage`, the counted usage of the trace.

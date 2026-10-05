@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Token Usage</title>
+<script type="application/beacon-lens+json">
+{
+  "id": "token-usage",
+  "title": "Token Usage",
+  "description": "An itemized bill: counted usage by turn and by model, every event that reported usage, and whether this runtime reports usage at all.",
+  "icon": "coins",
+  "version": 1,
+  "api": "beacon.lens.v1",
+  "author": "Beacon"
+}
+</script>
+<style>
+  body {
+    margin: 0;
+    color: var(--beacon-text, #111827);
+    font: 400 13px/1.5 var(--beacon-font-sans, ui-sans-serif, system-ui, sans-serif);
+  }
+  .muted { color: var(--beacon-muted, #6b7280); }
+  .warn { color: var(--beacon-warn, #92400e); }
+  h2 { margin: 18px 0 6px; font-size: 13px; font-weight: 400; color: var(--beacon-muted, #6b7280); }
+  h2:first-of-type { margin-top: 0; }
+  p { margin: 0 0 8px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 4px 8px; border-bottom: 1px solid var(--beacon-line, rgba(0,0,0,0.1)); font-weight: 400; text-align: left; vertical-align: top; }
+  th { color: var(--beacon-muted, #6b7280); white-space: nowrap; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tfoot td { border-bottom: 0; }
+  .mono { font: 13px var(--beacon-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); }
+  .clip { max-width: 28rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+</style>
+</head>
+<body>
+<p id="status" class="muted">Loading trace…</p>
+<main id="root" hidden></main>
+<script>
+(function () {
+  "use strict";
+  var root = document.getElementById("root");
+  var number = new Intl.NumberFormat();
+  var money = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  var FIELDS = [
+    { key: "input_tokens", label: "Input" },
+    { key: "output_tokens", label: "Output" },
+    { key: "cache_read_input_tokens", label: "Cache read" },
+    { key: "cache_creation_input_tokens", label: "Cache write" },
+    { key: "reasoning_output_tokens", label: "Reasoning" }
+  ];
+
+  // Every node is built with textContent: prompts and titles are untrusted trace content.
+  function el(tag, text, className) {
+    var node = document.createElement(tag);
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    if (className) node.className = className;
+    return node;
+  }
+  function n(u, key) { return (u && Number(u[key])) || 0; }
+  function add(into, u) {
+    FIELDS.forEach(function (f) { into[f.key] = n(into, f.key) + n(u, f.key); });
+    into.cost_usd = n(into, "cost_usd") + n(u, "cost_usd");
+    return into;
+  }
+  function tokensOf(u) { return n(u, "input_tokens") + n(u, "output_tokens") + n(u, "cache_read_input_tokens") + n(u, "cache_creation_input_tokens"); }
+
+  // Columns are the usage fields any row in this table reports, plus cost when any row has one.
+  function columnsFor(rows) {
+    var cols = FIELDS.filter(function (f) { return rows.some(function (r) { return n(r.usage, f.key); }); });
+    if (rows.some(function (r) { return n(r.usage, "cost_usd"); })) cols.push({ key: "cost_usd", label: "Cost", money: true });
+    return cols;
+  }
+  function cell(u, col) {
+    var v = n(u, col.key);
+    return el("td", v ? (col.money ? money.format(v) : number.format(v)) : "—", "num");
+  }
+
+  // rows: [{ cells: [Node...], usage: {...} }], lead: header labels for the leading cells.
+  function usageTable(lead, rows, footer) {
+    var cols = columnsFor(rows.concat(footer ? [footer] : []));
+    var t = el("table");
+    var head = t.appendChild(el("thead")).appendChild(el("tr"));
+    lead.forEach(function (h) { head.appendChild(el("th", h.label || h, h.num ? "num" : "")); });
+    cols.forEach(function (c) { head.appendChild(el("th", c.label, "num")); });
+    var body = t.appendChild(el("tbody"));
+    rows.forEach(function (r) {
+      var tr = body.appendChild(el("tr"));
+      r.cells.forEach(function (c) { tr.appendChild(c); });
+      cols.forEach(function (c) { tr.appendChild(cell(r.usage, c)); });
+    });
+    if (footer) {
+      var tr = t.appendChild(el("tfoot")).appendChild(el("tr"));
+      footer.cells.forEach(function (c) { tr.appendChild(c); });
+      cols.forEach(function (c) { tr.appendChild(cell(footer.usage, c)); });
+    }
+    return t;
+  }
+
+  // Per-model totals from the events themselves, for when Beacon's count is unavailable.
+  function modelsFrom(items) {
+    var byModel = {};
+    items.forEach(function (e) {
+      var key = e.model || "unknown";
+      var m = byModel[key] || (byModel[key] = { model: key, usage: {}, events: 0 });
+      add(m.usage, e.usage);
+      m.events += 1;
+    });
+    return Object.keys(byModel).map(function (k) { return byModel[k]; })
+      .sort(function (a, b) { return tokensOf(b.usage) - tokensOf(a.usage); });
+  }
+
+  function coverageNote(cov, harness) {
+    if (!cov) return null;
+    var name = cov.harness || harness || "This runtime";
+    if (cov.status === "silent") {
+      return el("p", name + " is a runtime Beacon reads usage from, but this trace reported none. Its hooks or telemetry export may not be delivering usage (" + (cov.reason || cov.expectation) + ").", "warn");
+    }
+    if (cov.status === "not_instrumented" || cov.expectation === "none") {
+      return el("p", name + " does not expose token usage to Beacon, so no usage here is expected rather than a gap.", "muted");
+    }
+    if (cov.expectation === "generic_otlp") {
+      return el("p", name + " reports usage only if it emits OpenTelemetry GenAI usage; totals may be partial.", "muted");
+    }
+    return null;
+  }
+
+  function render(data) {
+    var trace = data.trace || {};
+    var events = Array.isArray(trace.events) ? trace.events : [];
+    var summary = trace.summary || {};
+    var counted = data.token_usage;
+
+    // Line items: every event that reported usage, attributed to the prompt before it.
+    var items = [];
+    var turns = [];
+    var turn = null;
+    events.forEach(function (e) {
+      if (!e) return;
+      if (e.type === "user_message") {
+        var text = (e.content && e.content.included && e.content.text) || e.title || "Prompt";
+        turn = { prompt: String(text).split("\n")[0], number: e.number, usage: {}, events: 0 };
+        turns.push(turn);
+        return;
+      }
+      if (!e.usage) return;
+      items.push(e);
+      if (!turn) {
+        turn = { prompt: "Before the first prompt", number: null, usage: {}, events: 0 };
+        turns.push(turn);
+      }
+      add(turn.usage, e.usage);
+      turn.events += 1;
+    });
+    var reported = items.reduce(function (sum, e) { return add(sum, e.usage); }, {});
+
+    // Coverage is judged from the live log, so a trace served from history can carry usage in its
+    // events while the live log has none. Usage in hand is not a silent runtime.
+    var coverage = data.token_coverage;
+    if (coverage && coverage.status === "silent" && items.length) coverage = null;
+    var note = coverageNote(coverage, summary.harness && summary.harness.name);
+    if (note) root.appendChild(note);
+
+    var hasCounted = !!(counted && counted.events_with_usage);
+    if (!hasCounted && items.length === 0) {
+      if (!note) root.appendChild(el("p", "No token usage was reported in this trace.", "muted"));
+      finish();
+      return;
+    }
+
+    // Beacon's count comes from the live log. When it is missing but the trace's events carry usage
+    // (lines rotated out of the live log, the trace served from history), bill what the events
+    // reported and say that it is not a deduplicated count.
+    var totals = hasCounted ? counted.totals : reported;
+    var reports = hasCounted ? counted.events_with_usage : items.length;
+    root.appendChild(el("h2", hasCounted ? "Counted usage" : "Reported usage"));
+    root.appendChild(el("p", number.format(tokensOf(totals)) + " tokens over " + number.format(reports) +
+      (reports === 1 ? " usage report" : " usage reports") +
+      (n(totals, "cost_usd") ? " · " + money.format(n(totals, "cost_usd")) + " reported by the runtime" : "") + "."));
+    root.appendChild(usageTable([""], [{ cells: [el("td", "Total")], usage: totals }]));
+    if (!hasCounted) {
+      root.appendChild(el("p", "Beacon could not count this trace's usage from the live log, usually because its lines have rotated out. These are the totals its events reported, which can count usage a runtime reported twice.", "muted"));
+    } else if (tokensOf(reported) !== tokensOf(counted.totals)) {
+      root.appendChild(el("p", "The events below report " + number.format(tokensOf(reported)) + " tokens in total; Beacon counts " +
+        number.format(tokensOf(counted.totals)) + ". Beacon removes usage a runtime reported on more than one channel and turns cumulative counters into deltas, and the two can also differ when this trace was truncated or some of its lines are no longer in the live log.", "muted"));
+    }
+
+    var models = hasCounted && Array.isArray(counted.by_model) ? counted.by_model : modelsFrom(items);
+    if (models.length) {
+      root.appendChild(el("h2", "By model"));
+      root.appendChild(usageTable(["Model", { label: "Reports", num: true }], models.map(function (m) {
+        return { cells: [el("td", m.model || "unknown", "mono"), el("td", number.format(m.events || 0), "num")], usage: m.usage };
+      })));
+    }
+
+    var billed = turns.filter(function (t) { return t.events; });
+    if (billed.length) {
+      root.appendChild(el("h2", "By turn"));
+      root.appendChild(usageTable([{ label: "#", num: true }, "Prompt", { label: "Reports", num: true }], billed.map(function (t) {
+        return {
+          cells: [el("td", t.number ? "#" + t.number : "—", "num"), el("td", t.prompt, "clip"), el("td", number.format(t.events), "num")],
+          usage: t.usage
+        };
+      })));
+    }
+
+    root.appendChild(el("h2", "Line items"));
+    root.appendChild(usageTable([{ label: "#", num: true }, { label: "Time", num: true }, "Event", "Model"], items.map(function (e) {
+      var when = e.timestamp ? new Date(e.timestamp) : null;
+      return {
+        cells: [
+          el("td", "#" + e.number, "num"),
+          el("td", when && !isNaN(when) ? when.toLocaleTimeString() : "—", "num"),
+          el("td", e.title || e.action || e.type, "clip"),
+          el("td", e.model || "—", "mono")
+        ],
+        usage: e.usage
+      };
+    }), { cells: [el("td"), el("td"), el("td", "Reported by events"), el("td")], usage: reported }));
+    if (data.truncated) root.appendChild(el("p", "This trace was truncated; later line items are missing.", "muted"));
+    if (n(totals, "cost_usd")) root.appendChild(el("p", "Costs are what the runtime reported. Beacon never estimates cost.", "muted"));
+    finish();
+  }
+
+  function finish() {
+    document.getElementById("status").hidden = true;
+    root.hidden = false;
+  }
+
+  window.beacon.getTrace().then(render, function (err) {
+    document.getElementById("status").textContent = "Could not load this trace: " + ((err && err.message) || err);
+  });
+})();
+</script>
+</body>
+</html>
