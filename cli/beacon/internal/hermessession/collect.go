@@ -79,6 +79,7 @@ type Session struct {
 	ParentSessionID  string
 	StartedAtMS      int64
 	EndedAtMS        int64
+	LastMessageAtMS  int64
 	EndReason        string
 	MessageCount     int64
 	ToolCallCount    int64
@@ -206,7 +207,7 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	if err != nil {
 		return summary, err
 	}
-	sessions = sessionwindow.Recent(sessions, opts.Since, func(r Session) int64 { return max(r.StartedAtMS, r.EndedAtMS) })
+	sessions = sessionwindow.Recent(sessions, opts.Since, func(r Session) int64 { return max(r.StartedAtMS, r.EndedAtMS, r.LastMessageAtMS) })
 	summary.Sessions = len(sessions)
 	state, err := LoadState(opts.StatePath)
 	if err != nil {
@@ -358,7 +359,8 @@ func (s *Store) ListSessions() ([]Session, error) {
 SELECT id, source, model, cwd, title, parent_session_id, started_at, ended_at, end_reason,
        message_count, tool_call_count, input_tokens, output_tokens, cache_read_tokens,
        cache_write_tokens, reasoning_tokens, estimated_cost_usd, actual_cost_usd,
-       cost_status, cost_source
+       cost_status, cost_source,
+       (SELECT max(m.timestamp) FROM messages m WHERE m.session_id = sessions.id AND m.active = 1) AS last_message_at
 FROM sessions
 WHERE archived = 0
 ORDER BY started_at, id`)
@@ -370,12 +372,12 @@ ORDER BY started_at, id`)
 	for rows.Next() {
 		var s Session
 		var model, cwd, title, parent, endReason, costStatus, costSource sql.NullString
-		var started, ended sql.NullFloat64
+		var started, ended, lastMsg sql.NullFloat64
 		var msgCount, toolCount, input, output, cacheRead, cacheWrite, reasoning sql.NullInt64
 		var estimatedCost, actualCost sql.NullFloat64
 		if err := rows.Scan(&s.ID, &s.Source, &model, &cwd, &title, &parent, &started, &ended, &endReason,
 			&msgCount, &toolCount, &input, &output, &cacheRead, &cacheWrite, &reasoning,
-			&estimatedCost, &actualCost, &costStatus, &costSource); err != nil {
+			&estimatedCost, &actualCost, &costStatus, &costSource, &lastMsg); err != nil {
 			return nil, err
 		}
 		s.Model = model.String
@@ -384,6 +386,7 @@ ORDER BY started_at, id`)
 		s.ParentSessionID = parent.String
 		s.StartedAtMS = secondsToMillis(started)
 		s.EndedAtMS = secondsToMillis(ended)
+		s.LastMessageAtMS = secondsToMillis(lastMsg)
 		s.EndReason = endReason.String
 		s.MessageCount = msgCount.Int64
 		s.ToolCallCount = toolCount.Int64
