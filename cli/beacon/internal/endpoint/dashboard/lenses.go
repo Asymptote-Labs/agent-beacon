@@ -3,6 +3,7 @@ package dashboard
 import (
 	"bytes"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lensstore"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
@@ -42,6 +44,8 @@ const (
 	LensSourceBuiltin = "builtin"
 	// LensSourceFile marks a lens read from a file named in Options.LensFiles.
 	LensSourceFile = "file"
+	// LensSourceStore marks a lens installed with `beacon lenses add`.
+	LensSourceStore = "store"
 )
 
 // LensInfo is one lens as the dashboard lists it.
@@ -68,6 +72,45 @@ type lens struct {
 type lensRegistry struct {
 	byID  map[string]lens
 	order []string
+	// storeDir is the lens store, read on every request so `beacon lenses add` and `remove` take
+	// effect without restarting the dashboard. A store lens never shadows a built-in or file lens.
+	storeDir string
+}
+
+// BuiltinLenses returns the lenses that ship in the binary, sorted by ID.
+func BuiltinLenses() ([]LensInfo, error) {
+	registry, err := loadBuiltinLenses(builtinLensFiles)
+	if err != nil {
+		return nil, err
+	}
+	return registry.list().Lenses, nil
+}
+
+// BuiltinLensManifest returns the manifest of the built-in lens with id, parsed from its file, so
+// callers see the same manifest shape for a built-in lens as for an installed one.
+func BuiltinLensManifest(id string) (asymptoteobserve.LensManifestV1, bool) {
+	if !asymptoteobserve.ValidLensID(id) {
+		return asymptoteobserve.LensManifestV1{}, false
+	}
+	html, err := builtinLensFiles.ReadFile("lenses/" + id + ".lens.html")
+	if err != nil {
+		return asymptoteobserve.LensManifestV1{}, false
+	}
+	manifest, err := asymptoteobserve.CheckLensFile(html)
+	return manifest, err == nil
+}
+
+// BuiltinLensIDs returns the IDs the built-in lenses hold, which the lens store may not use.
+func BuiltinLensIDs() (map[string]bool, error) {
+	builtins, err := BuiltinLenses()
+	if err != nil {
+		return nil, err
+	}
+	ids := make(map[string]bool, len(builtins))
+	for _, l := range builtins {
+		ids[l.ID] = true
+	}
+	return ids, nil
 }
 
 // loadBuiltinLenses reads every built-in lens. A built-in that breaks the spec is a build defect,
@@ -83,7 +126,7 @@ func loadBuiltinLenses(files fs.FS) (*lensRegistry, error) {
 		if err != nil {
 			return nil, err
 		}
-		manifest, err := checkLensFile(html)
+		manifest, err := asymptoteobserve.CheckLensFile(html)
 		if err != nil {
 			return nil, fmt.Errorf("built-in lens %s: %w", name, err)
 		}
@@ -106,7 +149,7 @@ func (r *lensRegistry) addLensFiles(paths []string) error {
 		if err != nil {
 			return err
 		}
-		manifest, err := checkLensFile(html)
+		manifest, err := asymptoteobserve.CheckLensFile(html)
 		if err != nil {
 			return fmt.Errorf("lens %s: %w", file, err)
 		}
@@ -125,18 +168,6 @@ func (r *lensRegistry) add(l lens) error {
 	r.order = append(r.order, l.info.ID)
 	sort.Strings(r.order)
 	return nil
-}
-
-// checkLensFile applies the spec's file rules: the size cap and a valid manifest.
-func checkLensFile(html []byte) (asymptoteobserve.LensManifestV1, error) {
-	if len(html) > asymptoteobserve.LensMaxBytes {
-		return asymptoteobserve.LensManifestV1{}, fmt.Errorf("%d bytes is over the %d-byte limit", len(html), asymptoteobserve.LensMaxBytes)
-	}
-	manifest, err := asymptoteobserve.ParseLensManifest(html)
-	if err != nil {
-		return manifest, err
-	}
-	return manifest, manifest.Validate()
 }
 
 func lensInfo(manifest asymptoteobserve.LensManifestV1, source string) LensInfo {
@@ -160,7 +191,7 @@ func (l lens) document() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	manifest, err := checkLensFile(html)
+	manifest, err := asymptoteobserve.CheckLensFile(html)
 	if err != nil {
 		return nil, err
 	}
@@ -174,6 +205,15 @@ func (r *lensRegistry) list() LensListResponse {
 	out := LensListResponse{Lenses: make([]LensInfo, 0, len(r.order))}
 	for _, id := range r.order {
 		out.Lenses = append(out.Lenses, r.byID[id].info)
+	}
+	if r.storeDir != "" {
+		// A broken store file is left out here; `beacon lenses list` names it.
+		stored, _, _ := lensstore.List(r.storeDir)
+		for _, l := range stored {
+			if _, taken := r.byID[l.Manifest.ID]; !taken {
+				out.Lenses = append(out.Lenses, lensInfo(l.Manifest, LensSourceStore))
+			}
+		}
 	}
 	return out
 }
@@ -214,12 +254,22 @@ func (r *lensRegistry) serveLensFrame(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	id := strings.TrimPrefix(req.URL.Path, lensFramePrefix)
-	found, ok := r.byID[id]
-	if !ok {
+	var (
+		document []byte
+		err      error
+	)
+	if found, ok := r.byID[id]; ok {
+		document, err = found.document()
+	} else if r.storeDir != "" && asymptoteobserve.ValidLensID(id) {
+		document, _, err = lensstore.Read(r.storeDir, id)
+		if errors.Is(err, os.ErrNotExist) {
+			http.NotFound(w, req)
+			return
+		}
+	} else {
 		http.NotFound(w, req)
 		return
 	}
-	document, err := found.document()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("lens %s: %w", id, err))
 		return
