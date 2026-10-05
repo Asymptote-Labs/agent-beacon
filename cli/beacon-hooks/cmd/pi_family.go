@@ -1,7 +1,10 @@
 package cmd
 
 import (
+	"encoding/json"
+	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/diff"
@@ -120,8 +123,9 @@ func (f piFamily) endpointEvents(input map[string]interface{}, sessionID string)
 		// mapper's tool_before stage, and deliberately not as an approval -- a tool_call handler
 		// can block, but that is an extension deciding rather than an operator being asked. Oh My
 		// Pi's real approval decisions arrive as their own events and are mapped there.
-		mergeMap(fields, f.toolFields(input, false))
-		f.applyPythonMarker(fields, piToolName(input))
+		call := piToolCallOf(input)
+		mergeMap(fields, f.toolFields(call, input, false))
+		f.applyPythonMarker(fields, call.name)
 		applyToolCallID(fields, input)
 		return f.one("tool.invoked", "tool", "info", "tool invoked", fields)
 
@@ -204,11 +208,10 @@ func (f piFamily) endpointEvents(input map[string]interface{}, sessionID string)
 // the tool.invoked that does carry the arguments, which is why it is promoted here as carefully as
 // on the tool events themselves.
 func (f piFamily) approvalEvents(input, fields map[string]interface{}, action, decision, messageSuffix string) []normalizedEvent {
-	toolName := piToolName(input)
-	if toolName != "" {
+	if piToolName(input) != "" {
 		// toolFields resolves the command, file and MCP blocks from the decided call's arguments
 		// when the extension attached them, and yields just the tool name when it did not.
-		mergeMap(fields, f.toolFields(input, false))
+		mergeMap(fields, f.toolFields(piToolCallOf(input), input, false))
 	}
 
 	approval := map[string]interface{}{"required": true, "decision": decision}
@@ -288,15 +291,137 @@ func piToolInput(input map[string]interface{}) map[string]interface{} {
 	return map[string]interface{}{}
 }
 
+// piToolCall is the tool call one Pi-family tool event describes: the tool that ran, the arguments
+// it ran with, and the details the runtime reported for it.
+//
+// It is usually just the payload's own toolName, input and details. The exception is a call routed
+// through Oh My Pi's tool-device transport, which reaches the tool by writing to an `xd://` URI;
+// see ompDeviceCall.
+type piToolCall struct {
+	name    string
+	args    map[string]interface{}
+	details map[string]interface{}
+}
+
+// piToolCallOf reads the tool call a tool_call, tool_result or approval payload describes.
+func piToolCallOf(input map[string]interface{}) piToolCall {
+	call := piToolCall{name: piToolName(input), args: piToolInput(input), details: firstMap(input, "details")}
+	if device, ok := ompDeviceCall(call); ok {
+		return device
+	}
+	return call
+}
+
+// ompDeviceScheme is the URI scheme through which Oh My Pi's read and write tools reach a tool
+// device: `read xd://<tool>` returns the tool's documentation, and `write xd://<tool>` with a JSON
+// payload calls it.
+const ompDeviceScheme = "xd://"
+
+// ompDeviceHelpContent matches a device write that asks for documentation rather than making a
+// call: an empty payload, `?`, or `help`. It mirrors HELP_CONTENT_RE in Oh My Pi's tools/xdev.ts,
+// which is how the runtime itself tells the two apart before anything has run.
+var ompDeviceHelpContent = regexp.MustCompile(`(?i)^\s*(\?|help)?\s*$`)
+
+// ompDeviceCall resolves a write to `xd://<tool>` into the call of <tool> it carries.
+//
+// Oh My Pi exposes MCP tools and its optional built-in tools as devices rather than as top-level
+// tools, so the model calls one by writing its arguments to the device's URI. Nothing is written
+// anywhere: the write tool is the transport, and the device is the tool that ran. Recording the
+// write as itself would put a file.created for `xd://mcp__…` in the log, and would name the call
+// `write` -- a different tool from the one every other runtime records when its agent calls the same
+// MCP server. So the call is recorded as the device: its name, the arguments it was given, and the
+// details it reported, which the runtime nests under `details.xdev`.
+//
+// The runtime also reports most device calls a second time from inside the dispatch, as the
+// device's own tool_call and tool_result under the same toolCallId. Both reports now describe the
+// same tool with the same call id, which is exactly what the endpoint writer's call-id dedupe treats
+// as one call -- so the call lands in the log once, as it would on any other runtime. Devices the
+// runtime handles in-process (report_issue, and its plan resolve/reject/propose devices) send no
+// second report, and are recorded from the write alone; nothing here needs to know which is which.
+//
+// A help request is a documentation lookup, the same as reading the device's URI, and is left as
+// the write it is.
+func ompDeviceCall(call piToolCall) (piToolCall, bool) {
+	if !strings.EqualFold(call.name, "write") {
+		return piToolCall{}, false
+	}
+	device, ok := strings.CutPrefix(getFirstStr(call.args, "path"), ompDeviceScheme)
+	if !ok || device == "" || strings.Contains(device, "/") {
+		return piToolCall{}, false
+	}
+	xdev := firstMap(call.details, "xdev")
+	if xdev != nil {
+		if getFirstStr(xdev, "mode") != "execute" {
+			return piToolCall{}, false
+		}
+	} else if ompDeviceHelpContent.MatchString(getFirstStr(call.args, "content")) {
+		return piToolCall{}, false
+	}
+
+	dispatched := piToolCall{name: device, args: firstMap(xdev, "args"), details: firstMap(xdev, "inner")}
+	if dispatched.args == nil {
+		// The tool_call and approval halves carry only the payload the model wrote. The result
+		// carries the runtime's validated arguments instead, but not when validation is what failed.
+		_ = json.Unmarshal([]byte(getFirstStr(call.args, "content")), &dispatched.args)
+	}
+	if dispatched.args == nil {
+		dispatched.args = map[string]interface{}{}
+	}
+	return dispatched, true
+}
+
+// piFilePath returns the filesystem path a read, edit or write target names, or "" when the target
+// is not a file.
+//
+// Oh My Pi's read and write tools take URIs as well as paths: `https://` fetches a web page, and its
+// internal schemes -- `artifact://`, `agent://`, `skill://`, `local://`, `proc://`, `xd://` and the
+// rest -- address runtime resources such as a spilled tool output, a subagent's report, a background
+// job, or a tool device. None of those is file activity, and recording one under file.path would put
+// a value that is not a filesystem path into the field every file rule, git helper and SIEM query
+// treats as one; the goose mapper refuses web URLs there for the same reason, and the collector
+// accepts only `file://` URIs. The runtime draws the same line: it reports a read's source as a
+// `path`, a `url` or an `internal` resource. A `file://` URI is a path spelled as a URI, and is
+// recorded as the path.
+func piFilePath(target string) string {
+	scheme, _, ok := strings.Cut(target, "://")
+	if !ok || !isURIScheme(scheme) {
+		return target
+	}
+	if !strings.EqualFold(scheme, "file") {
+		return ""
+	}
+	parsed, err := url.Parse(target)
+	if err != nil || (parsed.Host != "" && !strings.EqualFold(parsed.Host, "localhost")) {
+		return ""
+	}
+	return parsed.Path
+}
+
+// isURIScheme reports whether s is an RFC 3986 scheme. A single letter is not accepted, so a
+// Windows drive letter is never mistaken for one.
+func isURIScheme(s string) bool {
+	if len(s) < 2 {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z':
+		case i > 0 && (r >= '0' && r <= '9' || r == '+' || r == '-' || r == '.'):
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // toolFields builds the tool, command, and file blocks for one Pi-family tool event.
 //
 // The built-in tools have fixed, documented argument shapes -- bash takes `command`, and read,
 // edit and write all take `path` -- so these are read by name rather than by guessing across
 // spellings. A custom tool registered by another extension carries an arbitrary shape, and gets
 // tool.name plus its raw arguments without a command or file block invented for it.
-func (f piFamily) toolFields(input map[string]interface{}, withResult bool) map[string]interface{} {
-	name := piToolName(input)
-	args := piToolInput(input)
+func (f piFamily) toolFields(call piToolCall, input map[string]interface{}, withResult bool) map[string]interface{} {
+	name, args := call.name, call.args
 	fields := map[string]interface{}{}
 	tool := map[string]interface{}{}
 	if name != "" {
@@ -326,21 +451,24 @@ func (f piFamily) toolFields(input map[string]interface{}, withResult bool) map[
 			fields["content"] = retainedContentFields(code)
 		}
 	case "read", "edit", "write":
-		if path := getFirstStr(args, "path"); path != "" {
-			tool["path"] = path
-			file := map[string]interface{}{
-				"path":      path,
-				"operation": piFileOperation(name),
+		// tool.path keeps the target as the tool was given it, URI or not, so the row still says
+		// what was read; only a filesystem target becomes a file block.
+		if target := getFirstStr(args, "path"); target != "" {
+			tool["path"] = target
+			if path := piFilePath(target); path != "" {
+				fields["file"] = map[string]interface{}{
+					"path":      path,
+					"operation": piFileOperation(name),
+					"language":  strings.TrimPrefix(filepath.Ext(path), "."),
+				}
 			}
-			file["language"] = strings.TrimPrefix(filepath.Ext(path), ".")
-			fields["file"] = file
 		}
 	}
 
 	if len(tool) > 0 {
 		fields["tool"] = tool
 	}
-	f.applyMCPAttribution(fields, name)
+	f.applyMCPAttribution(fields, call)
 	if withResult {
 		if usage := piUsage(firstMap(input, "usage")); len(usage) > 0 {
 			fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{"usage": usage})
@@ -361,13 +489,13 @@ func piFileOperation(name string) string {
 	}
 }
 
-// applyMCPAttribution fills the `mcp` block when a tool name names an MCP-routed tool.
+// applyMCPAttribution fills the `mcp` block when the call is known to have reached an MCP server.
 //
 // Without it an MCP call lands in the log as a tool named `mcp__github_create_issue` and nothing
 // else -- no server, no tool -- so the two questions actually asked about MCP activity ("which
 // server did this agent reach, and what did it call there") have no field to answer them.
-func (f piFamily) applyMCPAttribution(fields map[string]interface{}, toolName string) {
-	server, tool := piMCPServerTool(toolName)
+func (f piFamily) applyMCPAttribution(fields map[string]interface{}, call piToolCall) {
+	server, tool := piMCPServerTool(call)
 	if server == "" && tool == "" {
 		return
 	}
@@ -384,39 +512,48 @@ func (f piFamily) applyMCPAttribution(fields map[string]interface{}, toolName st
 	})
 }
 
-// piMCPServerTool splits a Pi-family MCP tool name into its server and tool halves.
+// piMCPServerTool returns the MCP server and tool a Pi-family call reached, when that is known.
 //
-// Two spellings reach here and they disagree about the separator. `mcp__<server>__<tool>` is the
-// widely used double-underscore form, and deriveMCPServerTool already reads it; Oh My Pi mints
-// `mcp__<server>_<tool>` with a single underscore (createMCPToolName in its mcp/tool-bridge.ts),
-// which that function returns nothing for because it needs three `__`-separated parts.
+// The runtime's own statement wins, as it does in the shared hook mapper and the collector: Oh My
+// Pi's MCP results carry `serverName` and `mcpToolName` in their details, on failures as well as
+// successes, and those are the server's configured name and the tool's own name exactly.
 //
-// The double-underscore form is tried first because it is unambiguous. The single-underscore
-// fallback splits on the first underscore, which is exactly what Oh My Pi's own parseMCPToolName
-// does -- including its ambiguity, since a server named `my_server` yields `mcp__my_server_run` and
-// both parsers read that as server `my`. Reproducing the runtime's reading rather than inventing a
-// better one is deliberate: Beacon's `mcp.server` should say what the runtime itself would say, so
-// an operator comparing the two never finds them disagreeing.
-func piMCPServerTool(toolName string) (string, string) {
-	if server, tool := deriveMCPServerTool(toolName); server != "" || tool != "" {
+// Without them only the reversible `mcp__<server>__<tool>` spelling is read. Oh My Pi's own names
+// are not reversible, so a tool_call or approval that carries nothing but one is given no server
+// rather than a guessed one. The runtime mints `mcp__<server>_<tool>` by lowercasing both halves,
+// turning every other character run into `_`, dropping a tool's redundant server prefix, and
+// hashing names past 64 characters -- so `beacon-managed`'s `beacon_lookup` becomes
+// `mcp__beacon_managed_beacon_lookup`, and no split of that string recovers the server. Splitting at
+// the first underscore reported it as server `beacon`, the name of Beacon's own local server. The
+// call's result, joined to it by gen_ai.tool.call.id, names the server.
+func piMCPServerTool(call piToolCall) (string, string) {
+	server := getFirstStr(call.details, "serverName")
+	tool := getFirstStr(call.details, "mcpToolName")
+	if server != "" && tool != "" {
 		return server, tool
 	}
-	rest, ok := strings.CutPrefix(strings.TrimSpace(toolName), "mcp__")
-	if !ok {
-		return "", ""
+	return deriveMCPServerTool(call.name)
+}
+
+// piIsMCPTool reports whether a call is MCP activity, whether or not its server is known.
+//
+// `mcp__` is the namespace Oh My Pi reserves for MCP tools, and the test its own isMCPToolName
+// applies, so a call carrying the prefix is MCP activity even where only its result can say which
+// server it reached.
+func piIsMCPTool(call piToolCall) bool {
+	if server, tool := piMCPServerTool(call); server != "" || tool != "" {
+		return true
 	}
-	server, tool, ok := strings.Cut(rest, "_")
-	if !ok || server == "" || tool == "" {
-		return "", ""
-	}
-	return server, tool
+	rest, ok := strings.CutPrefix(strings.TrimSpace(call.name), "mcp__")
+	return ok && rest != ""
 }
 
 // toolResultEvents maps a completed tool call onto its outcome event.
 func (f piFamily) toolResultEvents(input map[string]interface{}, fields map[string]interface{}) []normalizedEvent {
-	mergeMap(fields, f.toolFields(input, true))
+	call := piToolCallOf(input)
+	mergeMap(fields, f.toolFields(call, input, true))
 	applyToolCallID(fields, input)
-	name := piToolName(input)
+	name := call.name
 	f.applyPythonMarker(fields, name)
 
 	// Both of these read Prime Agent's `ipython` result and are no-ops for every other tool, so Pi
@@ -431,15 +568,15 @@ func (f piFamily) toolResultEvents(input map[string]interface{}, fields map[stri
 		return append(f.one("tool.failed", "tool", "high", "tool failed", fields), kernelWrites...)
 	}
 
-	if diff := piEditDiff(input); diff != "" {
+	if diff := piEditDiff(call.details); diff != "" {
 		fields["content"] = retainedContentFields(diff)
 	}
 
-	action, category := piToolAction(name)
+	action, category := piToolAction(call)
 	// A file action with no file is not a file action. The read tool accepts a path that failed to
-	// resolve, and a custom tool can share a built-in's name, so reporting file.read with no file
-	// field would produce a row every file-scoped query matches and none can explain -- the same
-	// guard clineToolAfterEvents applies for the same reason.
+	// resolve and a target that is not a file at all, and a custom tool can share a built-in's name,
+	// so reporting file.read with no file field would produce a row every file-scoped query matches
+	// and none can explain -- the same guard clineToolAfterEvents applies for the same reason.
 	if strings.HasPrefix(action, "file.") {
 		if _, ok := fields["file"]; !ok {
 			action, category = "tool.completed", "tool"
@@ -613,17 +750,13 @@ func (f piFamily) pythonDiffEvents(toolName string, input, fields map[string]int
 // EditToolDetails carries both a display-oriented `diff` and a standard unified `patch`. The patch
 // is preferred because it is the machine-readable one; the diff is a fallback for a details object
 // that carried only the display form.
-func piEditDiff(input map[string]interface{}) string {
-	details := firstMap(input, "details")
-	if details == nil {
-		return ""
-	}
+func piEditDiff(details map[string]interface{}) string {
 	return getFirstStr(details, "patch", "diff")
 }
 
-// piToolAction maps a Pi-family tool name onto the endpoint action its completion represents.
-func piToolAction(name string) (string, string) {
-	switch strings.ToLower(name) {
+// piToolAction maps a Pi-family tool call onto the endpoint action its completion represents.
+func piToolAction(call piToolCall) (string, string) {
+	switch strings.ToLower(call.name) {
 	case "bash", "ipython":
 		return "command.executed", "command"
 	case "read":
@@ -637,7 +770,7 @@ func piToolAction(name string) (string, string) {
 		// and mcp.tool_invoked is the action every other Beacon capture path already uses for it --
 		// so an MCP call through Oh My Pi joins the same rows a detection reads for Cline, Cursor
 		// and Claude Code rather than hiding under tool.completed.
-		if server, tool := piMCPServerTool(name); server != "" || tool != "" {
+		if piIsMCPTool(call) {
 			return "mcp.tool_invoked", "mcp"
 		}
 		// grep, glob, and any tool another extension registered. These are real tool activity with
