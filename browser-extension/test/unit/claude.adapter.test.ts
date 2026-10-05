@@ -107,6 +107,37 @@ describe('claude adapter -- usage counts', () => {
   });
 });
 
+// The Messages API breaks cache writes down by TTL under usage.cache_creation.
+// The one-hour part is billed at 2x input against 1.25x for five-minute writes,
+// so it is kept as the subset of cache_creation_input_tokens it is.
+describe('claude adapter -- one-hour cache writes', () => {
+  const turn = run('with-cache-ttl', 'What is the capital of France?')!.getTurn()!;
+
+  it('captures the one-hour subset beside the write count', () => {
+    expect(turn.usage?.cacheCreationInputTokens).toBe(20000);
+    expect(turn.usage?.cacheCreation1hInputTokens).toBe(16000);
+  });
+
+  it('keeps the subset when message_delta repeats the counts without the breakdown', () => {
+    // message_delta repeats the flat counts but not cache_creation; a payload
+    // that omits a field must never clear it.
+    expect(turn.usage?.outputTokens).toBe(214);
+    expect(turn.usage?.cacheCreation1hInputTokens).toBe(16000);
+  });
+
+  it('leaves the subset out of the disjoint total', () => {
+    const u = turn.usage!;
+    const total =
+      u.inputTokens! + u.outputTokens! + u.cacheCreationInputTokens! + u.cacheReadInputTokens!;
+    expect(total).toBe(37 + 214 + 20000 + 18500);
+  });
+
+  it('reports no subset for a stream without the breakdown', () => {
+    const plain = run('with-usage', 'What is the capital of France?')!.getTurn()!;
+    expect(plain.usage?.cacheCreation1hInputTokens).toBeUndefined();
+  });
+});
+
 describe('claude adapter -- partial stream usage', () => {
   it('reports no output tokens when the stream aborts before message_delta', () => {
     const parser = claudeAdapter.createParser(1);

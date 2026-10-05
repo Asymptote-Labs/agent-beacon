@@ -258,6 +258,8 @@ jobs:
           ./beacon rules --help > /tmp/beacon-rules-help.txt
           ./beacon rules lint --help > /tmp/beacon-rules-lint-help.txt
           ./beacon lenses --help > /tmp/beacon-lenses-help.txt
+          ./beacon pricing --help > /tmp/beacon-pricing-help.txt
+          ./beacon pricing info > /tmp/beacon-pricing-info.txt
           for forbidden in init update claude cursor dep-scan config; do
             if grep -E "^[[:space:]]+$forbidden([[:space:]]|$)" /tmp/beacon-help.txt; then
               echo "forbidden command exposed: $forbidden"

@@ -121,8 +121,19 @@ func TestCollectOnceEmitsFactorySettingsUsageAsDeltas(t *testing.T) {
 		ReasoningOutputTokens:    20,
 		Events:                   3,
 	}
-	if report.Totals != want {
-		t.Fatalf("aggregated totals = %+v, want the final cumulative value %+v", report.Totals, want)
+	// Compare the counts only: the report also carries a list-price estimate, which this test
+	// does not pin.
+	got := tokens.Usage{
+		InputTokens:              report.Totals.InputTokens,
+		OutputTokens:             report.Totals.OutputTokens,
+		CacheCreationInputTokens: report.Totals.CacheCreationInputTokens,
+		CacheReadInputTokens:     report.Totals.CacheReadInputTokens,
+		ReasoningOutputTokens:    report.Totals.ReasoningOutputTokens,
+		CostUSD:                  report.Totals.CostUSD,
+		Events:                   report.Totals.Events,
+	}
+	if got != want {
+		t.Fatalf("aggregated totals = %+v, want the final cumulative value %+v", got, want)
 	}
 
 	usage := f.usageEvents()

@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -267,6 +268,16 @@ func TestTokensEndpointAggregatesUsage(t *testing.T) {
 	}
 	if report.Totals.InputTokens != 160 || report.Totals.OutputTokens != 60 || report.Totals.CostUSD != 0.5 {
 		t.Fatalf("totals = %#v", report.Totals)
+	}
+	// The list-price estimate rides beside the reported cost: claude-sonnet-4-5 100 x $3 + 40 x
+	// $15 per MTok, plus gpt-4o-mini 60 x $0.15 + 20 x $0.60 = $0.000921. The Claude session
+	// reported its cost, so its effective cost is that; the cloud session's is its estimate.
+	if report.Totals.EstimatedCostUSD != 0.000921 || report.Totals.CostSource != tokens.CostSourceMixed ||
+		math.Abs(report.Totals.EffectiveCostUSD-0.500021) > 1e-12 {
+		t.Fatalf("cost fields = %#v", report.Totals)
+	}
+	if report.Pricing == nil || report.Pricing.Catalog.Commit == "" || len(report.Pricing.Models) != 2 {
+		t.Fatalf("pricing = %#v", report.Pricing)
 	}
 	if len(report.ByModel) != 2 || report.ByModel[0].Key != "claude-sonnet-4-5" {
 		t.Fatalf("by_model = %#v", report.ByModel)

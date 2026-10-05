@@ -25,7 +25,7 @@ test('token usage: counted totals, by model, by turn and line items', async ({ p
   const items = tables.nth(3);
   await expect(items.locator('tbody tr')).toHaveCount(2);
   await expect(items.locator('tfoot')).toContainText('Reported by events');
-  await expect(frame.locator('#root')).toContainText('Beacon never estimates cost.');
+  await expect(frame.locator('#root')).toContainText('Costs are what the runtime reported. List-price estimates are on the Tokens page, not in lens data.');
 });
 
 test('token usage: a runtime that should report usage but did not is flagged', async ({ page }) => {

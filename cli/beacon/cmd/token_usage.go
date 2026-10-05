@@ -10,6 +10,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
 	endpointinventory "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pricing"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
@@ -29,6 +30,8 @@ type tokenUsageOptions struct {
 	bucket     string
 	top        int
 	coverage   bool
+	// pricingFile names an overrides file to price with instead of the default location.
+	pricingFile string
 }
 
 var tokenUsageOpts tokenUsageOptions
@@ -73,9 +76,14 @@ func runTokenUsage(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	pricer, err := tokenUsagePricer(userMode, tokenUsageOpts.pricingFile)
+	if err != nil {
+		return err
+	}
 	opts := tokens.Options{
 		SessionID: tokenUsageOpts.session,
 		TopLimit:  tokenUsageOpts.top,
+		Pricer:    pricer,
 	}
 	if bucket := strings.TrimSpace(tokenUsageOpts.bucket); bucket != "" {
 		parsed, err := time.ParseDuration(bucket)
@@ -93,6 +101,17 @@ func runTokenUsage(cmd *cobra.Command, args []string) error {
 	}
 	tokens.RenderText(out, report)
 	return nil
+}
+
+// tokenUsagePricer loads the overrides file the estimate prices with. The default location may
+// hold nothing, which is fine; a file named with --pricing-file must exist. An invalid file is
+// an error in both cases, because a report that quietly fell back to list prices would read as
+// priced at the rates the file was written to set.
+func tokenUsagePricer(userMode bool, explicit string) (*pricing.Pricer, error) {
+	if path := strings.TrimSpace(explicit); path != "" {
+		return pricing.LoadPricer(pricing.Default(), path, true)
+	}
+	return pricing.LoadPricer(pricing.Default(), pricing.DefaultOverridesPath(userMode), false)
 }
 
 // runTokenCoverage answers "is this total all of it", which the usage report itself cannot: a
@@ -185,5 +204,6 @@ func init() {
 	tokenUsageCmd.Flags().StringVar(&tokenUsageOpts.runID, "run-id", "", "Filter by CI run id")
 	tokenUsageCmd.Flags().StringVar(&tokenUsageOpts.bucket, "bucket", "", "Time-series bucket size (for example 1h or 15m)")
 	tokenUsageCmd.Flags().IntVar(&tokenUsageOpts.top, "top", 0, "Limit each grouping to the top N entries (0 keeps all)")
+	tokenUsageCmd.Flags().StringVar(&tokenUsageOpts.pricingFile, "pricing-file", "", "Pricing overrides file for the cost estimate (defaults to <endpoint>/pricing/overrides.json when present)")
 	tokenUsageCmd.Flags().BoolVar(&tokenUsageOpts.coverage, "coverage", false, "Report which runtimes contributed token telemetry instead of the usage totals")
 }

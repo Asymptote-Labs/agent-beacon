@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pricing"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
@@ -17,14 +18,45 @@ const defaultNearLimitRatio = 0.8
 
 // Usage sums the canonical gen_ai.usage fields across events. Field names
 // match the event schema so report consumers see one vocabulary.
+//
+// It carries three different costs, and they must not be confused (see cost.go):
+//
+//   - CostUSD is what runtimes reported, summed. It has exactly the meaning of
+//     gen_ai.usage.cost_usd and Beacon never fills it in.
+//   - EstimatedCostUSD is a list-price estimate of every token the catalog could price,
+//     whether or not the runtime also reported a cost: what the same tokens would cost at the
+//     provider's published API price.
+//   - EffectiveCostUSD is the best single figure: the reported cost wherever a runtime
+//     reported one, the estimate everywhere else. CostSource says which it is made of.
+//
+// UnpricedEvents and UnpricedTokens count what the estimate is missing: usage whose model the
+// catalog does not price.
 type Usage struct {
-	InputTokens              int64   `json:"input_tokens"`
-	OutputTokens             int64   `json:"output_tokens"`
-	CacheReadInputTokens     int64   `json:"cache_read_input_tokens"`
-	CacheCreationInputTokens int64   `json:"cache_creation_input_tokens"`
-	ReasoningOutputTokens    int64   `json:"reasoning_output_tokens"`
-	CostUSD                  float64 `json:"cost_usd"`
-	Events                   int     `json:"events"`
+	InputTokens              int64 `json:"input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+	// CacheCreation1hInputTokens is the subset of CacheCreationInputTokens written with a
+	// one-hour TTL, from gen_ai.usage.cache_creation.ephemeral_1h_input_tokens. It is a breakdown
+	// like ReasoningOutputTokens: never part of TotalTokens, and omitted when no source reported it.
+	CacheCreation1hInputTokens int64   `json:"cache_creation_1h_input_tokens,omitempty"`
+	ReasoningOutputTokens      int64   `json:"reasoning_output_tokens"`
+	CostUSD                    float64 `json:"cost_usd"`
+	EstimatedCostUSD           float64 `json:"estimated_cost_usd"`
+	EffectiveCostUSD           float64 `json:"effective_cost_usd"`
+	CostSource                 string  `json:"cost_source,omitempty"`
+	UnpricedEvents             int     `json:"unpriced_events,omitempty"`
+	UnpricedTokens             int64   `json:"unpriced_tokens,omitempty"`
+	Events                     int     `json:"events"`
+
+	// The exported cost fields above are derived from these by settle, so sums stay exact:
+	// estimates are summed in integer microdollars and converted once, and the effective cost
+	// keeps its reported and estimated parts apart until it is printed.
+	estimated          pricing.Microdollars
+	effectiveReported  float64
+	effectiveEstimated pricing.Microdollars
+	reportedEvents     int
+	estimatedEvents    int
 }
 
 func (u Usage) TotalTokens() int64 {
@@ -36,9 +68,18 @@ func (u *Usage) add(delta Usage) {
 	u.OutputTokens += delta.OutputTokens
 	u.CacheReadInputTokens += delta.CacheReadInputTokens
 	u.CacheCreationInputTokens += delta.CacheCreationInputTokens
+	u.CacheCreation1hInputTokens += delta.CacheCreation1hInputTokens
 	u.ReasoningOutputTokens += delta.ReasoningOutputTokens
 	u.CostUSD += delta.CostUSD
+	u.UnpricedEvents += delta.UnpricedEvents
+	u.UnpricedTokens += delta.UnpricedTokens
 	u.Events += delta.Events
+	u.estimated += delta.estimated
+	u.effectiveReported += delta.effectiveReported
+	u.effectiveEstimated += delta.effectiveEstimated
+	u.reportedEvents += delta.reportedEvents
+	u.estimatedEvents += delta.estimatedEvents
+	u.settle()
 }
 
 type Group struct {
@@ -96,6 +137,9 @@ type Options struct {
 	SessionID string
 	// TopLimit caps each group list (0 keeps all groups).
 	TopLimit int
+	// Pricer prices the list-price estimate: an overrides file over the catalog. Nil prices
+	// from the embedded catalog alone.
+	Pricer *pricing.Pricer
 }
 
 type Report struct {
@@ -111,6 +155,9 @@ type Report struct {
 	SessionDetail   *SessionDetail     `json:"session_detail,omitempty"`
 	EventsWithUsage int                `json:"events_with_usage"`
 	TotalEvents     int                `json:"total_events"`
+	// Pricing says where every estimate in the report came from: the catalog, the rates each
+	// model was priced at, and the models it could not price.
+	Pricing *PricingSummary `json:"pricing,omitempty"`
 	// SuppressedPollEvents counts poll-backfill usage events (collection_method=poll) dropped
 	// because a live channel had already reported the same session's usage from that point on.
 	// They are left out of every total and of EventsWithUsage; the count is here so a reader can
@@ -150,8 +197,12 @@ type usageEvent struct {
 	seriesValue  float64
 
 	// collectionMethod is harness.collection_method, lowercased: whether this usage came from
-	// live capture or from a poll of the runtime's own session store.
-	collectionMethod string
+	// live capture or from a poll of the runtime's own session store. requestScoped (cost.go)
+	// also reads it, with codexSessionSource and tokenSource, to tell one model request from a
+	// sum of several.
+	collectionMethod   string
+	codexSessionSource string
+	tokenSource        string
 }
 
 // Aggregate builds a token usage report from endpoint events. Events from
@@ -179,6 +230,14 @@ func aggregate(events []schema.Event, opts Options, contextEvents []schema.Event
 	report := Report{TotalEvents: len(events)}
 	usageEvents, suppressed := resolveUsageEvents(events, sessionUserContexts(contextEvents), liveCaptureStarts(contextEvents, events))
 	report.SuppressedPollEvents = suppressed
+	// Last, on the final per-event deltas: an estimate made before the passes above would price
+	// tokens they are about to remove as duplicates, and price a cumulative counter's running
+	// total instead of its interval delta.
+	pricer := opts.Pricer
+	if pricer == nil {
+		pricer = pricing.NewPricer(priceCatalog(), nil)
+	}
+	report.Pricing = priceUsageEvents(usageEvents, pricer)
 
 	byModel := map[string]*Usage{}
 	bySession := map[string]*Usage{}
@@ -508,6 +567,8 @@ func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []
 		}
 		if usage.CacheCreation != nil && usage.CacheCreation.InputTokens != nil {
 			ue.usage.CacheCreationInputTokens = *usage.CacheCreation.InputTokens
+			// Clamped to the write count it is a subset of.
+			ue.usage.CacheCreation1hInputTokens = usage.CacheCreation.OneHourInputTokens()
 		}
 		if usage.Reasoning != nil && usage.Reasoning.OutputTokens != nil {
 			ue.usage.ReasoningOutputTokens = *usage.Reasoning.OutputTokens
@@ -549,6 +610,10 @@ func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []
 			}
 			ue.metricName, _ = event.Raw["metric_name"].(string)
 			ue.rawSource, _ = event.Raw["source"].(string)
+			ue.tokenSource, _ = event.Raw["token_source"].(string)
+			if codex, ok := event.Raw["codex_session"].(map[string]interface{}); ok {
+				ue.codexSessionSource, _ = codex["source"].(string)
+			}
 			if rawStart, _ := event.Raw["turn_start_timestamp"].(string); rawStart != "" {
 				ue.sourceStart, _ = schema.ParseTimestamp(rawStart)
 			}
@@ -865,7 +930,9 @@ func (fs *usageFieldSet) clear(u *Usage) bool {
 		u.CacheReadInputTokens = 0
 	}
 	if fs.cacheCreation {
+		// The one-hour subset is part of the writes, not a field of its own.
 		u.CacheCreationInputTokens = 0
+		u.CacheCreation1hInputTokens = 0
 	}
 	if fs.reasoning {
 		u.ReasoningOutputTokens = 0
@@ -902,14 +969,27 @@ func resolveCumulativeSeries(events []*usageEvent) {
 			return points[i].ts.Before(points[j].ts)
 		})
 		previous := 0.0
+		var previous1h int64
 		for _, point := range points {
 			delta := point.seriesValue - previous
-			if delta < 0 {
+			reset := delta < 0
+			if reset {
 				// Counter reset: the raw value is the new interval's total.
 				delta = point.seriesValue
 			}
 			previous = point.seriesValue
+			oneHour := point.usage.CacheCreation1hInputTokens
 			setUsageField(&point.usage, point.seriesField, delta)
+			if point.seriesField == "cache_creation_input_tokens" {
+				// The one-hour subset of a cumulative write counter is cumulative too, and is
+				// differenced alongside it, resetting when the counter does.
+				delta1h := oneHour
+				if !reset {
+					delta1h -= previous1h
+				}
+				previous1h = oneHour
+				point.usage.CacheCreation1hInputTokens = min(max(delta1h, 0), point.usage.CacheCreationInputTokens)
+			}
 		}
 	}
 }

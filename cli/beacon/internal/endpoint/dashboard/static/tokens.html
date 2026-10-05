@@ -40,7 +40,7 @@
       <section class="dashboard-hero analytics-hero">
         <div>
           <h2>Token usage analytics</h2>
-          <p class="muted">Token consumption, runtime-reported cost, cache usage, and context-window pressure across local AI agents.</p>
+          <p class="muted">Token consumption, runtime-reported and list-price estimated cost, cache usage, and context-window pressure across local AI agents.</p>
         </div>
         <div class="range-pills" aria-label="Local token analytics range">
           <span class="active">Local log</span>
@@ -59,7 +59,7 @@
         <div class="section-head overview-head">
           <div>
             <h2>Token Totals</h2>
-            <p class="muted">Prompt, completion, cache, reasoning, and runtime-reported cost across all captured telemetry.</p>
+            <p class="muted">Prompt, completion, cache, reasoning, runtime-reported cost and a list-price estimate across all captured telemetry.</p>
           </div>
           <div id="token-meta" class="muted"></div>
         </div>
@@ -108,7 +108,7 @@
         <h2>By Model</h2>
         <table>
           <thead>
-            <tr><th>Model</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Cache Create</th><th>Reasoning</th><th>Cost USD</th><th>Events</th></tr>
+            <tr><th>Model</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Cache Create</th><th>Reasoning</th><th title="What the runtime reported">Reported USD</th><th title="List-price estimate from the embedded catalog">Est. USD</th><th>Events</th></tr>
           </thead>
           <tbody id="token-models"></tbody>
         </table>
@@ -119,7 +119,7 @@
         <p class="muted">Select a session to inspect per-step usage.</p>
         <table>
           <thead>
-            <tr><th>Session</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Cache Create</th><th>Reasoning</th><th>Cost USD</th><th>Events</th></tr>
+            <tr><th>Session</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Cache Create</th><th>Reasoning</th><th title="What the runtime reported">Reported USD</th><th title="List-price estimate from the embedded catalog">Est. USD</th><th>Events</th></tr>
           </thead>
           <tbody id="token-sessions"></tbody>
         </table>
@@ -129,7 +129,7 @@
         <h2>By User</h2>
         <table>
           <thead>
-            <tr><th>User</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Cache Create</th><th>Reasoning</th><th>Cost USD</th><th>Events</th></tr>
+            <tr><th>User</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Cache Create</th><th>Reasoning</th><th title="What the runtime reported">Reported USD</th><th title="List-price estimate from the embedded catalog">Est. USD</th><th>Events</th></tr>
           </thead>
           <tbody id="token-users"></tbody>
         </table>
@@ -139,7 +139,7 @@
         <h2 id="token-session-title">Session Detail</h2>
         <table>
           <thead>
-            <tr><th>Step</th><th>Model</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Cache Create</th><th>Reasoning</th><th>Cost USD</th></tr>
+            <tr><th>Step</th><th>Model</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Cache Create</th><th>Reasoning</th><th title="What the runtime reported">Reported USD</th><th title="List-price estimate from the embedded catalog">Est. USD</th></tr>
           </thead>
           <tbody id="token-session-detail"></tbody>
         </table>
@@ -149,7 +149,7 @@
         <h2>By CI Run</h2>
         <table>
           <thead>
-            <tr><th>Run</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Cache Create</th><th>Reasoning</th><th>Cost USD</th><th>Events</th></tr>
+            <tr><th>Run</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Cache Create</th><th>Reasoning</th><th title="What the runtime reported">Reported USD</th><th title="List-price estimate from the embedded catalog">Est. USD</th><th>Events</th></tr>
           </thead>
           <tbody id="token-runs"></tbody>
         </table>
@@ -159,7 +159,7 @@
         <h2>By Harness</h2>
         <table>
           <thead>
-            <tr><th>Harness</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Cache Create</th><th>Reasoning</th><th>Cost USD</th><th>Events</th></tr>
+            <tr><th>Harness</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Cache Create</th><th>Reasoning</th><th title="What the runtime reported">Reported USD</th><th title="List-price estimate from the embedded catalog">Est. USD</th><th>Events</th></tr>
           </thead>
           <tbody id="token-harnesses"></tbody>
         </table>

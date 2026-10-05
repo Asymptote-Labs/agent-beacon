@@ -192,13 +192,9 @@ func usageDelta(best, prior *schema.GenAIUsageInfo) *schema.GenAIUsageInfo {
 		InputTokens:  sub(best.InputTokens, prior.InputTokens),
 		OutputTokens: sub(best.OutputTokens, prior.OutputTokens),
 	}
-	if best.CacheCreation != nil {
-		var counted *int64
-		if prior.CacheCreation != nil {
-			counted = prior.CacheCreation.InputTokens
-		}
-		out.CacheCreation = &schema.GenAIUsageCacheCreationInfo{InputTokens: sub(best.CacheCreation.InputTokens, counted)}
-	}
+	// Minus differences the one-hour subset with the writes it belongs to, so a correction for a
+	// grown snapshot carries the one-hour writes it adds and never more than its own writes.
+	out.CacheCreation = best.CacheCreation.Minus(prior.CacheCreation)
 	if best.CacheRead != nil {
 		var counted *int64
 		if prior.CacheRead != nil {

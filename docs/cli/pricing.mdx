@@ -1,0 +1,222 @@
+---
+title: "beacon pricing"
+description: "Inspect the price list behind token cost estimates, and price models with your own rates"
+---
+
+## Command overview
+
+`beacon pricing` shows how [`beacon token-usage`](/cli/token-usage) and the dashboard's token
+view turn tokens into an estimated cost, and checks the overrides file you can use to price
+models with your own rates.
+
+```bash title="Command syntax"
+beacon pricing show <model> [--json]
+beacon pricing list [--provider <name>] [--json]
+beacon pricing info [--json]
+beacon pricing validate [--json]
+```
+
+Every command takes `--pricing-file <path>` to use a specific overrides file, and `--user`
+(the default) or `--system` to pick which endpoint's default file is read. Every command is
+offline: nothing is fetched, and nothing is written.
+
+## Where prices come from
+
+Estimates come from two lists, checked in this order:
+
+1. **Your overrides file**, if there is one. It can price models the catalog cannot know
+   (internal or proprietary models, releases newer than your Beacon build, names a gateway
+   invents) and replace list prices with the rates your organisation actually pays.
+2. **The catalog** embedded in Beacon: the providers' published standard-tier API list
+   prices, generated from LiteLLM's model price list. `beacon pricing info` prints its source,
+   upstream commit and generation date.
+
+A model that neither list prices is left out of every estimate and counted as unpriced. It is
+never treated as free.
+
+## The overrides file
+
+Beacon reads the overrides file from the endpoint directory:
+
+| Mode | Path |
+|------|------|
+| User (default) | `~/.beacon/endpoint/pricing/overrides.json` |
+| System (`--system`) | `/Library/Application Support/Beacon/Endpoint/pricing/overrides.json` on macOS, `/etc/beacon/endpoint/pricing/overrides.json` on Linux |
+
+The file is yours. Beacon never creates, edits or rewrites it, and the dashboard only reads it;
+write it by hand or from your own tooling. If it is missing, estimates use the catalog alone.
+`beacon token-usage --pricing-file <path>` and `beacon pricing --pricing-file <path>` read a
+different file instead; a file named that way must exist.
+
+Keep it readable only by you (`chmod 600`, in a `0700` directory) if the rates are
+confidential: Beacon does not put rates in any event, but the file itself is plain JSON.
+
+```json title="~/.beacon/endpoint/pricing/overrides.json"
+{
+  "schema": "beacon.pricing.overrides/v1",
+  "comment": "Acme enterprise agreement, effective 2026-07-01",
+  "models": {
+    "claude-sonnet-4-5": {
+      "provider": "anthropic",
+      "comment": "20% off list",
+      "input_usd_per_mtok": 2.4,
+      "output_usd_per_mtok": 12,
+      "cache_read_usd_per_mtok": 0.24,
+      "cache_write_usd_per_mtok": 3,
+      "cache_write_1h_usd_per_mtok": 4.8,
+      "bands": [
+        { "above_tokens": 200000, "input_usd_per_mtok": 4.8, "output_usd_per_mtok": 18,
+          "cache_read_usd_per_mtok": 0.48, "cache_write_usd_per_mtok": 6,
+          "cache_write_1h_usd_per_mtok": 9.6 }
+      ]
+    },
+    "acme-coder-2": {
+      "provider": "acme",
+      "input_usd_per_mtok": 1,
+      "output_usd_per_mtok": 4
+    }
+  },
+  "aliases": {
+    "my-gateway-model": "claude-sonnet-4-5",
+    "router/fast": "gpt-5-mini"
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `schema` | Required. Must be `beacon.pricing.overrides/v1` |
+| `comment` | Optional note about the file, such as the agreement it comes from |
+| `models` | Price rows, keyed by the model name a runtime reports |
+| `models.<name>.input_usd_per_mtok` | Required. US dollars per million uncached input tokens |
+| `models.<name>.output_usd_per_mtok` | Required. US dollars per million output tokens (reasoning tokens are part of output) |
+| `models.<name>.cache_read_usd_per_mtok` | Optional. Price of a prompt-cache hit |
+| `models.<name>.cache_write_usd_per_mtok` | Optional. Price of a cache write with the default (five-minute) TTL |
+| `models.<name>.cache_write_1h_usd_per_mtok` | Optional. Price of a one-hour cache write |
+| `models.<name>.bands` | Optional long-context bands: `above_tokens` plus any rates that change above it |
+| `models.<name>.provider` | Optional label shown in reports |
+| `models.<name>.comment` | Optional note shown by `beacon pricing show` |
+| `aliases` | Map from a reported model name to an exact model in this file or catalog key |
+
+### Rules
+
+- **Rates are US dollars per million tokens**, written as JSON numbers: `3`, `0.3`, `2.5e-1`.
+  Beacon converts each one exactly to integer microdollars, so `0.3` is exactly 300,000
+  microdollars per million tokens. A value finer than one microdollar per million tokens (more
+  than six decimal places) is refused rather than rounded.
+- **Refused values**, each with an error naming the key: negative numbers, `0` (leave a field
+  out when a rate is unpublished; a zero would make tokens free), quoted numbers such as
+  `"3.00"`, anything above $100,000 per million tokens (almost always a per-token or
+  per-thousand price in the wrong field), unknown fields (usually a misspelled rate), and a key
+  written twice.
+- **A row replaces the catalog row whole.** Fields you leave out are unpublished, not
+  inherited from the catalog, and are priced the way the catalog prices a missing rate: cache
+  reads and cache writes at the row's input rate, one-hour writes at its five-minute write
+  rate. Those fallbacks are named in the report's `pricing.models[].fallbacks` and by
+  `beacon pricing show`.
+- **Bands** apply to every token of a single request whose prompt (input plus cache read plus
+  cache write) is above `above_tokens`, exactly as the catalog's bands do, and only to usage
+  Beacon knows is one request (see [How the estimate is computed](/cli/token-usage#how-the-estimate-is-computed)).
+  A band needs to state only what changes; every rate it leaves out is the row's base rate.
+  Bands may be listed in any order; two bands at the same threshold are refused.
+- **Matching.** A row or alias name is matched with the same ladder as the catalog: the exact
+  reported name first, then case and provider prefix (`anthropic/Claude-Sonnet-4-5`), dotted
+  versions (`claude-sonnet-4.5`), Bedrock route prefixes, and after stripping a `[1m]` marker,
+  a snapshot date or an effort suffix. So a row for `claude-sonnet-4-5` also prices
+  `claude-sonnet-4-5-20250929`, even though the catalog has a row for that exact snapshot.
+- **Overrides win.** When any name in the file matches a model, the file decides; the catalog
+  is consulted only for models no override name reaches. If two names in the file match a model
+  at the same rung with different prices, the model is left unpriced rather than priced at a
+  list price the file was written to replace; `beacon pricing validate` warns about such names.
+- **Aliases** point at an exact name: a row in this file (checked first) or a catalog key from
+  `beacon pricing list`. An alias cannot also be a row, and a target that exists in neither list
+  is refused.
+
+## Auditing an estimate
+
+When an overrides file is in use, the report's `pricing` block says so:
+
+```json
+"pricing": {
+  "catalog": { "name": "LiteLLM model_prices_and_context_window.json", "commit": "1238cfe9...", "generated_at": "2026-10-05" },
+  "overrides": {
+    "path": "/Users/alice/.beacon/endpoint/pricing/overrides.json",
+    "sha256": "db4de2c8d714...",
+    "models": 2,
+    "aliases": 2
+  },
+  "models": [
+    { "model": "acme-coder-2", "key": "acme-coder-2", "source": "override", "match": "exact", "...": "..." },
+    { "model": "my-gateway-model", "key": "claude-sonnet-4-5", "source": "override", "alias": "my-gateway-model", "...": "..." }
+  ]
+}
+```
+
+`source` is `override` for a model priced by a row of the file and `catalog` for one priced by
+the catalog; `alias` is set when the model reached its entry through an alias (an alias to a
+catalog key has `source: catalog`). The `sha256` is the digest of the file's bytes, so an
+estimate can be traced to the exact file that produced it. The text report prints the same
+path and digest in its footer and lists the models the file priced.
+
+If the default overrides file is invalid, `beacon token-usage` fails with the error rather than
+quietly printing list prices. The dashboard keeps answering: it prices from the catalog alone
+and reports the problem in `pricing.overrides.error`.
+
+## beacon pricing show
+
+Explains how one model name resolves: the entry that priced it (catalog key or override), the
+match rung and any stripped decorations, the rates in USD per million tokens, its bands, and
+which rates are unpublished. For an unpriced model it says so, and lists the tied candidates
+when several entries matched with different prices.
+
+```bash
+beacon pricing show 'claude-sonnet-4-5-20250929[1m]'
+```
+
+```text
+Model:      claude-sonnet-4-5-20250929[1m]
+Priced by:  catalog key "claude-sonnet-4-5-20250929"
+Provider:   anthropic
+Match:      exact after stripping context_window
+Rates (USD per million tokens):
+  input             3.00
+  output            15.00
+  cache read        0.30
+  cache write (5m)  3.75
+  cache write (1h)  6.00
+Long-context bands (a single request whose prompt is above the threshold is billed at the band's rates for every token):
+  above 200000: input 6.00, output 22.50, cache read 0.60, cache write 7.50, cache write 1h 12.00
+```
+
+## beacon pricing list
+
+Lists every catalog entry and every row and alias of the overrides file, with base rates in USD
+per million tokens. Override rows come first; a catalog entry replaced by a row of the same
+name is marked `catalog*` (`"overridden": true` in JSON). `--provider` keeps only the entries
+of one provider, such as `anthropic`, `openai`, `gemini` or `bedrock_converse`.
+
+## beacon pricing info
+
+Prints the catalog's provenance (source URL, upstream commit, fetch and generation dates, model
+count, tier) and the overrides file that would be used, with its digest, or why it cannot be.
+`info` reports an invalid file instead of failing on it.
+
+## beacon pricing validate
+
+Checks the overrides file: every error names the key, and on success it lists each row (and
+whether it replaces a catalog entry), each alias and its target, and the rates each row leaves
+unpublished. Name collisions that would leave a model unpriced are printed as warnings on
+stderr. It fails when the file is missing.
+
+```bash
+beacon pricing validate --pricing-file ./overrides.json
+```
+
+```text
+ok: ./overrides.json (sha256 db4de2c8d714): 2 model(s), 2 alias(es)
+  model  acme-coder-2
+         unpublished, priced by fallback: cache_read_at_input_rate, cache_write_at_input_rate, cache_write_1h_at_write_rate
+  model  claude-sonnet-4-5 replaces the catalog entry of the same name
+  alias  my-gateway-model -> claude-sonnet-4-5 (override)
+  alias  router/fast -> gpt-5-mini (catalog)
+```

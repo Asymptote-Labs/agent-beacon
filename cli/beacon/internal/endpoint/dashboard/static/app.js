@@ -1990,7 +1990,7 @@ function renderSessionMetadata(session, events) {
     },
     { label: "Model", value: models.length ? escapeHTML(models.join(", ")) : `<span class="muted">-</span>`, className: "mono" },
     { label: "Tokens", value: usage.tokens ? escapeHTML(formatCompactTokens(usage.tokens)) : `<span class="muted">-</span>` },
-    { label: "Est. Cost", value: usage.cost ? `$${escapeHTML(usage.cost.toFixed(4))}` : `<span class="muted">-</span>` },
+    { label: "Reported Cost", value: usage.cost ? `$${escapeHTML(usage.cost.toFixed(4))}` : `<span class="muted">-</span>` },
     { label: "Repository", value: session.repository ? escapeHTML(repositoryOptionLabel(session.repository)) : `<span class="muted">-</span>`, className: "mono" },
     { label: "Branch", value: session.branch ? escapeHTML(session.branch) : `<span class="muted">-</span>`, className: "mono" },
   ];
@@ -2570,7 +2570,7 @@ async function loadTokens() {
 function renderTokensPage(report, session) {
   setText("#log-path", state.status?.log_path || "Runtime log unavailable");
   setText("#token-meta", `${report.events_with_usage} of ${report.total_events} events carry usage`);
-  renderTokenCards(report.totals || {});
+  renderTokenCards(report.totals || {}, report.pricing);
   renderTokenThroughput(report.series || []);
   renderTokenSplit(report.totals || {});
   renderTokenBreakdowns(report);
@@ -2591,7 +2591,25 @@ function usageTotal(usage = {}) {
     (usage.reasoning_output_tokens || 0);
 }
 
-function renderTokenCards(totals) {
+// The estimate is labeled wherever it appears: it is a list price from the embedded catalog
+// (or the operator's pricing overrides file), not what anyone was billed, and it sits beside the
+// runtime-reported cost rather than in it.
+function estimateHint(totals, pricing) {
+  const overrides = pricing?.overrides;
+  const parts = [overrides && !overrides.error ? "list price + overrides" : "list price"];
+  const catalog = pricing?.catalog;
+  if (catalog?.generated_at) parts.push(`catalog ${catalog.generated_at}`);
+  if (overrides?.error) parts.push("overrides file invalid, not used");
+  if (totals.unpriced_events) parts.push(`${totals.unpriced_events} unpriced events excluded`);
+  return parts.join(" · ");
+}
+
+function formatEstimatedCost(usage = {}) {
+  if (usage.estimated_cost_usd) return `~${usage.estimated_cost_usd.toFixed(4)}`;
+  return usage.unpriced_events ? "?" : "-";
+}
+
+function renderTokenCards(totals, pricing) {
   if (!$("#token-cards")) return;
   const totalTokens = usageTotal(totals);
   const cards = [
@@ -2600,7 +2618,8 @@ function renderTokenCards(totals) {
     { label: "Output Tokens", value: formatTokens((totals.output_tokens || 0) + (totals.reasoning_output_tokens || 0)), hint: "completion + reasoning" },
     { label: "Cached Tokens", value: formatTokens((totals.cache_read_input_tokens || 0) + (totals.cache_creation_input_tokens || 0)) },
     { label: "Reasoning", value: formatTokens(totals.reasoning_output_tokens) },
-    { label: "Cost (USD)", value: totals.cost_usd ? totals.cost_usd.toFixed(4) : "-", hint: "runtime-reported only" },
+    { label: "Reported cost (USD)", value: totals.cost_usd ? totals.cost_usd.toFixed(4) : "-", hint: "runtime-reported only" },
+    { label: "Est. cost (USD)", value: formatEstimatedCost(totals), hint: estimateHint(totals, pricing) },
   ];
   $("#token-cards").innerHTML = cards
     .map((card) => `
@@ -2811,7 +2830,7 @@ function renderUsageGroupRows(selector, groups, filterKey) {
   const tbody = $(selector);
   if (!tbody) return;
   if (!groups.length) {
-    tbody.innerHTML = `<tr><td colspan="8" class="muted">No usage captured yet.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="muted">No usage captured yet.</td></tr>`;
     return;
   }
   tbody.innerHTML = groups
@@ -2857,7 +2876,7 @@ function renderSessionDetail(detail, session) {
   walk(detail.steps, 0);
   $("#token-session-detail").innerHTML = rows.length
     ? rows.join("")
-    : `<tr><td colspan="8" class="muted">No usage-bearing steps in this session.</td></tr>`;
+    : `<tr><td colspan="9" class="muted">No usage-bearing steps in this session.</td></tr>`;
 }
 
 function usageCells(usage = {}, { events = true } = {}) {
@@ -2868,6 +2887,7 @@ function usageCells(usage = {}, { events = true } = {}) {
     formatTokens(usage.cache_creation_input_tokens),
     formatTokens(usage.reasoning_output_tokens),
     usage.cost_usd ? usage.cost_usd.toFixed(4) : "-",
+    formatEstimatedCost(usage),
   ];
   if (events) cells.push(String(usage.events ?? 0));
   return cells.map((value) => `<td>${escapeHTML(value)}</td>`).join("");
