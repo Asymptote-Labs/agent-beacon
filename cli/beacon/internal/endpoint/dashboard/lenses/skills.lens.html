@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Skills</title>
+<script type="application/beacon-lens+json">
+{
+  "id": "skills",
+  "title": "Skills",
+  "description": "Which skills loaded, where each entered the run, and exactly what the agent was told.",
+  "icon": "book",
+  "version": 1,
+  "api": "beacon.lens.v1",
+  "author": "Beacon"
+}
+</script>
+<style>
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    color: var(--beacon-text, #111827);
+    font: 400 13px/1.5 var(--beacon-font-sans, ui-sans-serif, system-ui, sans-serif);
+  }
+  .muted { color: var(--beacon-muted, #6b7280); }
+  .warn { color: var(--beacon-warn, #92400e); }
+  .mono, pre { font: 13px/1.45 var(--beacon-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); }
+  #summary { margin: 0 0 10px; }
+  .note { margin: 0 0 10px; }
+  .layout { display: grid; grid-template-columns: minmax(12rem, 18rem) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 640px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+  .list { border-right: 1px solid var(--beacon-line, rgba(0,0,0,0.1)); padding-right: 8px; }
+  .row { display: flex; align-items: baseline; gap: 6px; width: 100%; padding: 2px 6px; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .count { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .row:hover { background: var(--beacon-panel-soft, #f9fafb); }
+  .row[aria-current="true"] { background: var(--beacon-accent-soft, #e2f0f8); }
+  .row:focus-visible { outline: 2px solid var(--beacon-accent, #036aa2); outline-offset: -2px; }
+  h2 { margin: 0 0 8px; font-size: 13px; font-weight: 400; word-break: break-all; }
+  .load { margin: 0 0 16px; padding-top: 8px; border-top: 1px solid var(--beacon-line, rgba(0,0,0,0.1)); }
+  .load:first-of-type { border-top: 0; padding-top: 0; }
+  dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 12px; margin: 0 0 8px; }
+  dt { color: var(--beacon-muted, #6b7280); }
+  dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  .label { margin: 0 0 4px; color: var(--beacon-muted, #6b7280); }
+  pre { margin: 0; padding: 6px 8px; overflow-x: auto; border: 1px solid var(--beacon-line, rgba(0,0,0,0.1)); border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .more { margin-top: 4px; padding: 0; border: 0; background: none; color: var(--beacon-accent, #036aa2); font: inherit; cursor: pointer; }
+  .more:focus-visible { outline: 2px solid var(--beacon-accent, #036aa2); }
+</style>
+</head>
+<body>
+<p id="status" class="muted">Loading trace…</p>
+<main id="root" hidden>
+  <p id="summary" class="muted"></p>
+  <div id="notes"></div>
+  <div id="layout" class="layout">
+    <nav id="list" class="list" aria-label="Skills"></nav>
+    <section id="detail" aria-live="polite"></section>
+  </div>
+</main>
+<script>
+(function () {
+  "use strict";
+  // A load is recognised three ways, because runtimes deliver skills three ways: a dedicated tool
+  // (Claude Code's Skill, Pi's skill, goose's load_skill, OpenHands' invoke_skill, ...), a file read
+  // of a SKILL.md, or a shell command that prints one (Codex and others read skills with cat or sed).
+  var SKILL_TOOL = /^(skills?|(load|read|invoke|use|activate|run|get|view)[_-]?skill)$/i;
+  var SKILL_PATH = /((?:[^\s"'`=<>|;&]*[\/\\])?([^\/\\\s"'`=<>|;&]+)[\/\\]SKILL\.md)(?![\w.])/i;
+  var NAME_KEYS = ["skill", "skill_name", "skillName", "name", "command"];
+  var PATH_KEYS = ["path", "file_path", "skill_path", "location"];
+  var TEXT_KEYS = ["content", "text", "output", "instructions", "body", "result"];
+  // The file.operation values and actions that change a file, as the Files Changed lens counts them.
+  var WRITE_OPS = { create: 1, modify: 1, delete: 1, write: 1, edit: 1, rename: 1, move: 1 };
+  var WRITE_ACTIONS = { "file.created": 1, "file.modified": 1, "file.deleted": 1, "file.edited": 1 };
+  var PREVIEW_LINES = 400;
+  var fmt = new Intl.NumberFormat();
+
+  // Every node is built with textContent: skill names and instructions are untrusted trace content.
+  function el(tag, text, className) {
+    var node = document.createElement(tag);
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    if (className) node.className = className;
+    return node;
+  }
+
+  function str(value) {
+    return typeof value === "string" ? value.trim() : "";
+  }
+
+  // The first SKILL.md path in a string, and the directory it names, which is the skill's name.
+  function skillPath(text) {
+    var match = SKILL_PATH.exec(String(text || ""));
+    return match ? { path: match[1], name: match[2] } : null;
+  }
+
+  function argument(args, keys) {
+    if (!args || typeof args !== "object") return "";
+    for (var i = 0; i < keys.length; i++) {
+      var value = str(args[keys[i]]);
+      if (value) return value;
+    }
+    return "";
+  }
+
+  // What a skill tool returned, as text: a string, an object holding the text, or content blocks.
+  function resultText(result) {
+    if (typeof result === "string") return result;
+    if (Array.isArray(result)) {
+      var parts = result.map(function (block) {
+        return block && typeof block === "object" ? str(block.text) : typeof block === "string" ? block : "";
+      }).filter(Boolean);
+      return parts.length ? parts.join("\n\n") : "";
+    }
+    if (result && typeof result === "object") {
+      for (var i = 0; i < TEXT_KEYS.length; i++) {
+        var nested = resultText(result[TEXT_KEYS[i]]);
+        if (nested) return nested;
+      }
+    }
+    return "";
+  }
+
+  function withheldContent(content) {
+    return content && !content.included ? content : null;
+  }
+
+  function retained(content) {
+    return content && content.included && typeof content.text === "string" && content.text ? content : null;
+  }
+
+  // classify turns one event into evidence of a skill load, or null.
+  function classify(event) {
+    var tool = event.tool;
+    if (tool && SKILL_TOOL.test(String(tool.name || ""))) {
+      var name = argument(tool.arguments, NAME_KEYS).replace(/^\//, "");
+      var path = argument(tool.arguments, PATH_KEYS) || str(tool.path);
+      var found = skillPath(path);
+      var text = resultText(tool.result);
+      return {
+        name: name || (found && found.name) || "",
+        path: path,
+        how: "Tool call: " + tool.name,
+        text: text ? { text: text, included: true } : retained(event.content),
+        withheld: !text && event.content && !event.content.included ? event.content : null,
+        result: !text && tool.result !== undefined && tool.result !== null ? tool.result : undefined
+      };
+    }
+    var file = event.file;
+    if (file && file.path) {
+      var op = String(file.operation || "").toLowerCase();
+      var hit = !WRITE_OPS[op] && !WRITE_ACTIONS[event.action] && skillPath(file.path);
+      if (hit) {
+        return {
+          name: hit.name, path: file.path, how: "Read of SKILL.md",
+          text: retained(event.content),
+          withheld: event.content && !event.content.included ? event.content : null
+        };
+      }
+    }
+    var command = event.command;
+    if (command && command.command) {
+      var shown = skillPath(command.command);
+      if (shown) {
+        return {
+          name: shown.name, path: shown.path, how: "Shell command: " + command.command,
+          text: retained(command.output),
+          // Output that was not kept leaves no command.output at all; its metadata is on the event.
+          withheld: withheldContent(command.output) || (!command.output ? withheldContent(event.content) : null)
+        };
+      }
+    }
+    return null;
+  }
+
+  function collect(data) {
+    var trace = data.trace || {};
+    var events = (Array.isArray(trace.events) ? trace.events : []).filter(Boolean).slice();
+    events.sort(function (a, b) { return (a.number || 0) - (b.number || 0); });
+    var loads = [];
+    var byCall = {};
+    var reported = 0;
+    var turn = null;
+    events.forEach(function (event) {
+      if (event.type === "user_message") {
+        var prompt = (event.content && event.content.included && event.content.text) || event.title || "";
+        turn = { number: event.number, prompt: String(prompt).split("\n")[0] };
+        return;
+      }
+      // Claude Code also reports skill_activated over OTLP, but that event reaches the trace without
+      // the skill's name, so it is counted rather than listed.
+      if (/skill_activated/.test(String(event.summary || "") + " " + String(event.title || ""))) {
+        reported += 1;
+        return;
+      }
+      var found = classify(event);
+      if (!found) return;
+      // A call and its result share a tool_call_id: they are one load, entered at the call.
+      var load = event.tool_call_id ? byCall[event.tool_call_id] : null;
+      if (load) {
+        if (!load.name && found.name) load.name = found.name;
+        if (!load.path && found.path) load.path = found.path;
+        if (!load.text && found.text) load.text = found.text;
+        if (!load.text && !load.withheld && found.withheld) load.withheld = found.withheld;
+        if (load.result === undefined && found.result !== undefined) load.result = found.result;
+        load.events.push(event.number);
+      } else {
+        load = {
+          name: found.name, path: found.path, how: found.how, text: found.text, withheld: found.withheld,
+          result: found.result, entry: event, turn: turn, events: [event.number]
+        };
+        if (event.tool_call_id) byCall[event.tool_call_id] = load;
+        loads.push(load);
+      }
+    });
+    return { loads: loads, reported: reported, trace: trace };
+  }
+
+  // Loads are grouped by skill only after every call has met its result, so a name that only the
+  // result carried still lands under the right skill.
+  function group(loads) {
+    var model = { skills: {}, order: [] };
+    loads.forEach(function (load) {
+      var key = load.name || "(unnamed skill)";
+      if (!model.skills[key]) {
+        model.skills[key] = { name: key, named: !!load.name, loads: [] };
+        model.order.push(key);
+      }
+      model.skills[key].loads.push(load);
+    });
+    return model;
+  }
+
+  function when(timestamp) {
+    var date = new Date(timestamp);
+    return isNaN(date.getTime()) ? "" : date.toLocaleString();
+  }
+
+  function instructions(load) {
+    var box = el("div");
+    if (load.text) {
+      var label = "What the agent was told";
+      if (load.text.truncated) label += " (cut short by Beacon's size limit)";
+      if (load.text.redacted) label += " (with redactions)";
+      box.appendChild(el("p", label, "label"));
+      var lines = String(load.text.text).split("\n");
+      var pre = el("pre", lines.length > PREVIEW_LINES ? lines.slice(0, PREVIEW_LINES).join("\n") : load.text.text);
+      box.appendChild(pre);
+      if (lines.length > PREVIEW_LINES) {
+        var more = el("button", "Show all " + fmt.format(lines.length) + " lines", "more");
+        more.type = "button";
+        more.addEventListener("click", function () {
+          pre.textContent = load.text.text;
+          more.remove();
+        });
+        box.appendChild(more);
+      }
+      return box;
+    }
+    if (load.withheld) {
+      var parts = ["The text was not retained"];
+      if (load.withheld.redacted) parts = ["The text was redacted"];
+      if (load.withheld.retention) parts.push("retention " + load.withheld.retention);
+      if (load.withheld.bytes) parts.push(fmt.format(load.withheld.bytes) + " bytes");
+      if (load.withheld.hash) parts.push(load.withheld.hash);
+      box.appendChild(el("p", parts.join(" · ") + ".", "muted"));
+      return box;
+    }
+    if (load.result !== undefined) {
+      box.appendChild(el("p", "The runtime's result for this call carried no skill text. It returned:", "label"));
+      var raw;
+      try { raw = JSON.stringify(load.result, null, 2); } catch (e) { raw = String(load.result); }
+      box.appendChild(el("pre", raw));
+      return box;
+    }
+    box.appendChild(el("p", "This runtime did not report what the skill said, so Beacon has no text for this load.", "muted"));
+    return box;
+  }
+
+  function renderLoad(load, index) {
+    var section = el("article", null, "load");
+    section.appendChild(el("p", "Load " + (index + 1), "label"));
+    var dl = el("dl");
+    function row(term, value, mono) {
+      if (!value) return;
+      dl.appendChild(el("dt", term));
+      dl.appendChild(el("dd", value, mono ? "mono" : ""));
+    }
+    var entered = "Event #" + load.entry.number;
+    var at = when(load.entry.timestamp);
+    if (at) entered += " · " + at;
+    row("Entered", entered);
+    row("During", load.turn ? (load.turn.number ? "Prompt at event #" + load.turn.number + ": " : "") + (load.turn.prompt || "(prompt not retained)") : "Before the first prompt");
+    row("How", load.how, true);
+    row("Path", load.path, true);
+    if (load.entry.fidelity === "inferred") row("Fidelity", "Inferred by Beacon, not reported by the runtime");
+    if (load.events.length > 1) row("Events", load.events.map(function (n) { return "#" + n; }).join(", "));
+    section.appendChild(dl);
+    section.appendChild(instructions(load));
+    return section;
+  }
+
+  function renderDetail(skill) {
+    var detail = document.getElementById("detail");
+    detail.textContent = "";
+    detail.appendChild(el("h2", skill.name, skill.named ? "mono" : "muted"));
+    if (!skill.named) {
+      detail.appendChild(el("p", "These loads used a skill tool but did not name the skill.", "muted note"));
+    }
+    skill.loads.forEach(function (load, i) { detail.appendChild(renderLoad(load, i)); });
+  }
+
+  function render(data) {
+    var collected = collect(data || {});
+    var loads = collected.loads;
+    var model = group(loads);
+    model.reported = collected.reported;
+
+    var trace = collected.trace;
+    var summary = trace.summary || {};
+    var total = summary.event_count;
+    var shown = Array.isArray(trace.events) ? trace.events.length : 0;
+    var partial = data && data.truncated || (typeof total === "number" && shown < total);
+    var withText = loads.filter(function (l) { return !!l.text; }).length;
+
+    var summaryText;
+    if (!loads.length) {
+      summaryText = "No skills were loaded in this trace";
+    } else {
+      summaryText = fmt.format(model.order.length) + (model.order.length === 1 ? " skill" : " skills") + " loaded " +
+        fmt.format(loads.length) + (loads.length === 1 ? " time" : " times") + " · instructions captured for " +
+        fmt.format(withText) + " of " + fmt.format(loads.length);
+    }
+    if (partial) summaryText += ", over the first " + fmt.format(shown) + (typeof total === "number" ? " of " + fmt.format(total) : "") + " events";
+    document.getElementById("summary").textContent = summaryText + ".";
+
+    var notes = document.getElementById("notes");
+    if (model.reported) {
+      notes.appendChild(el("p", "The runtime also reported " + fmt.format(model.reported) +
+        (model.reported === 1 ? " skill activation" : " skill activations") +
+        " over telemetry. Those events do not carry the skill's name, so they are not listed here.", "muted note"));
+    }
+    if (!loads.length) {
+      notes.appendChild(el("p", "Beacon recognises a skill load from a skill tool call (such as Skill, skill or load_skill), a read of a SKILL.md file, or a shell command that prints one.", "muted note"));
+      document.getElementById("layout").hidden = true;
+      finish();
+      return;
+    }
+
+    var list = document.getElementById("list");
+    var buttons = [];
+    model.order.forEach(function (key) {
+      var skill = model.skills[key];
+      var button = el("button", null, "row");
+      button.type = "button";
+      button.appendChild(el("span", skill.name, "name" + (skill.named ? " mono" : " muted")));
+      button.appendChild(el("span", "×" + fmt.format(skill.loads.length), "count muted"));
+      button.title = skill.name;
+      button.addEventListener("click", function () {
+        buttons.forEach(function (b) { b.setAttribute("aria-current", b === button ? "true" : "false"); });
+        renderDetail(skill);
+      });
+      buttons.push(button);
+      list.appendChild(button);
+    });
+    buttons[0].setAttribute("aria-current", "true");
+    renderDetail(model.skills[model.order[0]]);
+    finish();
+  }
+
+  function finish() {
+    document.getElementById("status").hidden = true;
+    document.getElementById("root").hidden = false;
+  }
+
+  window.beacon.getTrace().then(render, function (err) {
+    document.getElementById("status").textContent = "Could not load this trace: " + ((err && err.message) || err);
+  });
+})();
+</script>
+</body>
+</html>
