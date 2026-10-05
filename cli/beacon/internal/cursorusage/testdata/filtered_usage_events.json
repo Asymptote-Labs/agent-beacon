@@ -1,0 +1,59 @@
+{
+  "totalUsageEventsCount": 3,
+  "pagination": {
+    "numPages": 1,
+    "currentPage": 1,
+    "pageSize": 100,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "usageEventsDisplay": [
+    {
+      "timestamp": "1750979225854",
+      "model": "claude-4-opus",
+      "kind": "Usage-based",
+      "maxMode": true,
+      "requestsCosts": 5,
+      "isTokenBasedCall": true,
+      "tokenUsage": {
+        "inputTokens": 126,
+        "outputTokens": 450,
+        "cacheWriteTokens": 6112,
+        "cacheReadTokens": 11964,
+        "totalCents": 20.18232
+      },
+      "isChargeable": true,
+      "chargedCents": 20.18232,
+      "cursorTokenFee": 0.5,
+      "isHeadless": false,
+      "userId": 152683922,
+      "userEmail": "developer@company.com"
+    },
+    {
+      "timestamp": "1750979173824",
+      "model": "gpt-5.5-high",
+      "kind": "USAGE_EVENT_KIND_INCLUDED_IN_BUSINESS",
+      "maxMode": false,
+      "isTokenBasedCall": true,
+      "tokenUsage": {
+        "inputTokens": "42",
+        "outputTokens": 18,
+        "cacheWriteTokens": 4,
+        "cacheReadTokens": 8,
+        "totalCents": 0.11
+      },
+      "isChargeable": false,
+      "chargedCents": 0,
+      "isHeadless": true,
+      "userId": "152683922",
+      "userEmail": "developer@company.com"
+    },
+    {
+      "timestamp": "2025-06-26T23:05:00Z",
+      "model": "auto",
+      "kindLabel": "Included in Pro",
+      "isTokenBasedCall": false,
+      "userEmail": "developer@company.com"
+    }
+  ]
+}
