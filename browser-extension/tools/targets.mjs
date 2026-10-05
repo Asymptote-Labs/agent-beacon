@@ -31,7 +31,7 @@ export const FIREFOX_MIN_VERSION = '140.0';
 
 /**
  * Firefox for Android shipped `data_collection_permissions` two releases later
- * than desktop. Declaring it keeps `web-ext lint` clean (it warns when the
+ * than desktop. Declaring it keeps `addons-linter` clean (it warns when the
  * desktop minimum predates Android support for a key the manifest uses). The
  * extension is built and tested for desktop; this is not a claim of Android
  * support beyond what the manifest keys allow.

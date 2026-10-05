@@ -81,7 +81,7 @@ npm run build         # bundle src/ → dist/ (esbuild, Chrome target)
 npm run build:watch   # rebuild on change
 npm run build:firefox # bundle src/ → dist-firefox/ with the Gecko manifest
 npm run build:safari  # bundle src/ → dist-safari/ (input to packaging/macos/safari; not loadable alone)
-npm run lint:firefox  # build:firefox, then Mozilla's web-ext lint (warnings fail)
+npm run lint:firefox  # build:firefox, then Mozilla's addons-linter (warnings fail)
 npm run check         # tsc --noEmit
 npm run test:unit     # pure adapter + normalization tests (vitest, no browser)
 npm test              # builds dist/, runs the Playwright replay e2e (THE autonomous loop)
@@ -249,7 +249,7 @@ staging one. Prefer a throwaway account where practical.
 - **Firefox smoke** — Playwright cannot load an extension into Firefox, so Firefox does **not**
   get the replay e2e. Its automated coverage is reduced, not equal: the unit tests for the
   manifest generator, the API shim and the permission flow, a real `build:firefox`, and
-  `web-ext lint --warnings-as-errors` over the output (`npm run lint:firefox`, run in CI).
+  `addons-linter --warnings-as-errors` over the output (`npm run lint:firefox`, run in CI).
   Capture on a real Firefox is a manual check, following the [Firefox](#firefox) steps.
 - **(c) collector conformance** *(planned)* — now that this lives in the agent-beacon monorepo,
   the consumer of these envelopes is in-tree at `collector-builder/exporter/beaconjsonexporter`.
@@ -291,7 +291,7 @@ dashboard), including interleaved sessions with no cross-contamination.
 - ✅ Content-script context-invalidation guard (survives extension reloads)
 - ✅ ChatGPT capture (`delta_encoding: v1` parser) + autonomous replay e2e
 - ✅ Firefox build target (`npm run build:firefox`): Gecko manifest, `browser.*` shim, host-permission
-  grant flow; covered by unit tests and `web-ext lint`, **not** by the replay e2e
+  grant flow; covered by unit tests and `addons-linter`, **not** by the replay e2e
 - ⬜ ChatGPT stream-handoff/resume case (see limitations); DOM-fallback capture, XHR transport
 - ⬜ Real-collector integration test + live-smoke/fixture-recorder as CI layers
 
