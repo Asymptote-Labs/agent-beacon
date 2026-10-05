@@ -403,3 +403,30 @@ func TestStoreLensesAreServedFromTheStore(t *testing.T) {
 		t.Fatalf("removed lens = %d, want 404", rec.Code)
 	}
 }
+
+// Built-in lenses are the examples users and agents copy, so they lint clean.
+func TestBuiltinLensesLintClean(t *testing.T) {
+	names, err := fs.Glob(builtinLensFiles, "lenses/*.lens.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range names {
+		html, _ := builtinLensFiles.ReadFile(name)
+		if findings := lensstore.Lint(html); len(findings) != 0 {
+			t.Errorf("%s: %+v", name, findings)
+		}
+	}
+}
+
+func TestEmbeddedLensSpecIsThePublishedSpec(t *testing.T) {
+	published, err := os.ReadFile(filepath.Join(lensSpecDir(t), "SPEC.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if LensSpec() != string(published) {
+		t.Fatal("lenses/SPEC.md drifted from spec/lenses/SPEC.md; copy the spec over")
+	}
+	if !bytes.Contains(ExampleLens(), []byte(`"id": "activity"`)) {
+		t.Fatal("ExampleLens is not the activity lens")
+	}
+}

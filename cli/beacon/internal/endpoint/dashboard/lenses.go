@@ -28,6 +28,21 @@ var lensPreludeJS string
 //go:embed lenses/tokens.css
 var lensTokensCSS string
 
+// lensSpec is spec/lenses/SPEC.md, carried in the binary so `beacon lenses spec` works offline. A
+// test keeps the copy identical to the published spec.
+//
+//go:embed lenses/SPEC.md
+var lensSpec string
+
+// LensSpec returns the lens specification.
+func LensSpec() string { return lensSpec }
+
+// ExampleLens returns the spec's example lens, which is also the built-in activity lens.
+func ExampleLens() []byte {
+	html, _ := builtinLensFiles.ReadFile("lenses/activity.lens.html")
+	return html
+}
+
 // lensFrameCSP is the policy spec/lenses/SPEC.md promises. The sandbox directive repeats the
 // iframe's sandbox attribute, so a lens URL opened on its own -- outside the dashboard's frame --
 // still runs in an opaque origin with no network.
