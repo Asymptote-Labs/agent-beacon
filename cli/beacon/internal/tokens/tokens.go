@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pricing"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
@@ -17,6 +18,19 @@ const defaultNearLimitRatio = 0.8
 
 // Usage sums the canonical gen_ai.usage fields across events. Field names
 // match the event schema so report consumers see one vocabulary.
+//
+// It carries three different costs, and they must not be confused (see cost.go):
+//
+//   - CostUSD is what runtimes reported, summed. It has exactly the meaning of
+//     gen_ai.usage.cost_usd and Beacon never fills it in.
+//   - EstimatedCostUSD is a list-price estimate of every token the catalog could price,
+//     whether or not the runtime also reported a cost: what the same tokens would cost at the
+//     provider's published API price.
+//   - EffectiveCostUSD is the best single figure: the reported cost wherever a runtime
+//     reported one, the estimate everywhere else. CostSource says which it is made of.
+//
+// UnpricedEvents and UnpricedTokens count what the estimate is missing: usage whose model the
+// catalog does not price.
 type Usage struct {
 	InputTokens              int64   `json:"input_tokens"`
 	OutputTokens             int64   `json:"output_tokens"`
@@ -24,7 +38,21 @@ type Usage struct {
 	CacheCreationInputTokens int64   `json:"cache_creation_input_tokens"`
 	ReasoningOutputTokens    int64   `json:"reasoning_output_tokens"`
 	CostUSD                  float64 `json:"cost_usd"`
+	EstimatedCostUSD         float64 `json:"estimated_cost_usd"`
+	EffectiveCostUSD         float64 `json:"effective_cost_usd"`
+	CostSource               string  `json:"cost_source,omitempty"`
+	UnpricedEvents           int     `json:"unpriced_events,omitempty"`
+	UnpricedTokens           int64   `json:"unpriced_tokens,omitempty"`
 	Events                   int     `json:"events"`
+
+	// The exported cost fields above are derived from these by settle, so sums stay exact:
+	// estimates are summed in integer microdollars and converted once, and the effective cost
+	// keeps its reported and estimated parts apart until it is printed.
+	estimated          pricing.Microdollars
+	effectiveReported  float64
+	effectiveEstimated pricing.Microdollars
+	reportedEvents     int
+	estimatedEvents    int
 }
 
 func (u Usage) TotalTokens() int64 {
@@ -38,7 +66,15 @@ func (u *Usage) add(delta Usage) {
 	u.CacheCreationInputTokens += delta.CacheCreationInputTokens
 	u.ReasoningOutputTokens += delta.ReasoningOutputTokens
 	u.CostUSD += delta.CostUSD
+	u.UnpricedEvents += delta.UnpricedEvents
+	u.UnpricedTokens += delta.UnpricedTokens
 	u.Events += delta.Events
+	u.estimated += delta.estimated
+	u.effectiveReported += delta.effectiveReported
+	u.effectiveEstimated += delta.effectiveEstimated
+	u.reportedEvents += delta.reportedEvents
+	u.estimatedEvents += delta.estimatedEvents
+	u.settle()
 }
 
 type Group struct {
@@ -111,6 +147,9 @@ type Report struct {
 	SessionDetail   *SessionDetail     `json:"session_detail,omitempty"`
 	EventsWithUsage int                `json:"events_with_usage"`
 	TotalEvents     int                `json:"total_events"`
+	// Pricing says where every estimate in the report came from: the catalog, the rates each
+	// model was priced at, and the models it could not price.
+	Pricing *PricingSummary `json:"pricing,omitempty"`
 }
 
 // usageEvent is one usage-bearing event with its usage normalized to a delta
@@ -140,9 +179,14 @@ type usageEvent struct {
 	cumulative   bool
 	metricName   string
 	rawSource    string
-	sourceStart  time.Time
-	seriesField  string
-	seriesValue  float64
+	// collectionMethod, codexSessionSource and tokenSource are what requestScoped (cost.go)
+	// reads to tell one model request from a sum of several.
+	collectionMethod   string
+	codexSessionSource string
+	tokenSource        string
+	sourceStart        time.Time
+	seriesField        string
+	seriesValue        float64
 }
 
 // Aggregate builds a token usage report from endpoint events. Events from
@@ -169,6 +213,10 @@ func aggregate(events []schema.Event, opts Options, sessionUsers sessionUserInde
 	usageEvents = preferCodexTurnSpans(usageEvents)
 	usageEvents = dedupeOverlappingChannels(usageEvents)
 	resolveCumulativeSeries(usageEvents)
+	// Last, on the final per-event deltas: an estimate made before the passes above would price
+	// tokens they are about to remove as duplicates, and price a cumulative counter's running
+	// total instead of its interval delta.
+	report.Pricing = priceUsageEvents(usageEvents, priceCatalog())
 
 	byModel := map[string]*Usage{}
 	bySession := map[string]*Usage{}
@@ -439,6 +487,8 @@ func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []
 			model:      asymptoteobserve.NormalizeModelName(event.Model),
 			repository: event.Repository,
 			usage:      Usage{Events: 1},
+
+			collectionMethod: event.Harness.CollectionMethod,
 		}
 		if ts, err := schema.ParseTimestamp(event.Timestamp); err == nil {
 			ue.ts = ts
@@ -522,6 +572,10 @@ func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []
 			}
 			ue.metricName, _ = event.Raw["metric_name"].(string)
 			ue.rawSource, _ = event.Raw["source"].(string)
+			ue.tokenSource, _ = event.Raw["token_source"].(string)
+			if codex, ok := event.Raw["codex_session"].(map[string]interface{}); ok {
+				ue.codexSessionSource, _ = codex["source"].(string)
+			}
 			if rawStart, _ := event.Raw["turn_start_timestamp"].(string); rawStart != "" {
 				ue.sourceStart, _ = schema.ParseTimestamp(rawStart)
 			}

@@ -114,7 +114,8 @@ Things that are easy to get wrong:
 - **Do not sum `usage` across events for a total.** Some runtimes report the same tokens on two
   channels or as cumulative counters. `token_usage.totals` is the deduplicated count; if you
   also show per-event figures, say they can add up to more. `cost_usd` is only ever what the
-  runtime reported; Beacon never estimates cost, and neither should a lens.
+  runtime reported. Lens data carries no estimate (Beacon's list-price estimates live in
+  `beacon token-usage` and the Tokens page), and a lens must not compute one.
 - **`fidelity: "inferred"`** marks an action Beacon derived rather than observed (for example an
   approval built from a pre-tool notification). Show the difference when it matters.
 - **Pair calls with results on `tool_call_id`**, not on adjacency, and order by `number` or

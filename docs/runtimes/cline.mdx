@@ -72,7 +72,7 @@ A cancelled task ends rather than fails. Cline fires its cancel hook for the cle
 
 Cancels and failures reach Beacon two ways: the file-based hooks name them in the hook itself, and the plugin reports them as a status on its run-completion handler. Both are read, so the distinction holds on the surface Beacon installs. A run that reports no recognized outcome is recorded as a completion.
 
-Token usage is recorded at task end only. Beacon's token rollups sum `gen_ai.usage` across events, so reporting the same tokens at a per-model-call boundary would double every Cline task's totals. Cost is recorded only as Cline reports it. Beacon never derives cost from a local price table.
+Token usage is recorded at task end only. Beacon's token rollups sum `gen_ai.usage` across events, so reporting the same tokens at a per-model-call boundary would double every Cline task's totals. Cost is recorded only as Cline reports it. Beacon never writes a derived cost into an event; token reports keep their list-price estimate separate from the reported figure.
 
 The session sync path reads what Cline has already committed to disk. It can recover prompts, assistant messages, agent reasoning, tool calls/results, command/file/MCP-shaped tool activity, model ids, and token counts where the stored history carries them. It cannot hold or deny tool calls, and it does not imply that Beacon observed the event at runtime.
 

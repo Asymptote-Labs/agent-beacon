@@ -219,7 +219,7 @@
       };
     }), { cells: [el("td"), el("td"), el("td", "Reported by events"), el("td")], usage: reported }));
     if (data.truncated) root.appendChild(el("p", "This trace was truncated; later line items are missing.", "muted"));
-    if (n(totals, "cost_usd")) root.appendChild(el("p", "Costs are what the runtime reported. Beacon never estimates cost.", "muted"));
+    if (n(totals, "cost_usd")) root.appendChild(el("p", "Costs are what the runtime reported. List-price estimates are on the Tokens page, not in lens data.", "muted"));
     finish();
   }
 
