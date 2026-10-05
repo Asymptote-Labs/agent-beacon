@@ -111,6 +111,11 @@ type Report struct {
 	SessionDetail   *SessionDetail     `json:"session_detail,omitempty"`
 	EventsWithUsage int                `json:"events_with_usage"`
 	TotalEvents     int                `json:"total_events"`
+	// SuppressedPollEvents counts poll-backfill usage events (collection_method=poll) dropped
+	// because a live channel had already reported the same session's usage from that point on.
+	// They are left out of every total and of EventsWithUsage; the count is here so a reader can
+	// see the overlap was found rather than wonder where a backfill's rows went.
+	SuppressedPollEvents int `json:"suppressed_poll_events,omitempty"`
 }
 
 // usageEvent is one usage-bearing event with its usage normalized to a delta
@@ -143,6 +148,10 @@ type usageEvent struct {
 	sourceStart  time.Time
 	seriesField  string
 	seriesValue  float64
+
+	// collectionMethod is harness.collection_method, lowercased: whether this usage came from
+	// live capture or from a poll of the runtime's own session store.
+	collectionMethod string
 }
 
 // Aggregate builds a token usage report from endpoint events. Events from
@@ -157,18 +166,19 @@ type usageEvent struct {
 // slice order to recover the emission sequence. Passing events newest-first
 // makes each cumulative step-down look like a counter reset and inflates totals.
 func Aggregate(events []schema.Event, opts Options) Report {
-	return aggregate(events, opts, sessionUserContexts(events))
+	return aggregate(events, opts, events)
 }
 
-func aggregate(events []schema.Event, opts Options, sessionUsers sessionUserIndex) Report {
+// aggregate reports on events. contextEvents is the unfiltered set the session-level context is
+// read from -- who the session's user is, and when each live channel started capturing it -- so a
+// report narrowed by time or model still resolves both the way the whole log would.
+func aggregate(events []schema.Event, opts Options, contextEvents []schema.Event) Report {
 	if opts.NearLimitRatio <= 0 {
 		opts.NearLimitRatio = defaultNearLimitRatio
 	}
 	report := Report{TotalEvents: len(events)}
-	usageEvents := collectUsageEvents(events, sessionUsers)
-	usageEvents = preferCodexTurnSpans(usageEvents)
-	usageEvents = dedupeOverlappingChannels(usageEvents)
-	resolveCumulativeSeries(usageEvents)
+	usageEvents, suppressed := resolveUsageEvents(events, sessionUserContexts(contextEvents), liveCaptureStarts(contextEvents))
+	report.SuppressedPollEvents = suppressed
 
 	byModel := map[string]*Usage{}
 	bySession := map[string]*Usage{}
@@ -236,9 +246,8 @@ func AggregateScoped(events []schema.Event, runID string, opts Options) Report {
 func AggregateScopedWithContexts(events, contextEvents []schema.Event, runID string, opts Options) Report {
 	session := strings.TrimSpace(opts.SessionID)
 	runID = strings.TrimSpace(runID)
-	sessionUsers := sessionUserContexts(contextEvents)
 	if session == "" && runID == "" {
-		return aggregate(events, opts, sessionUsers)
+		return aggregate(events, opts, contextEvents)
 	}
 	filtered := make([]schema.Event, 0, len(events))
 	for _, event := range events {
@@ -253,7 +262,24 @@ func AggregateScopedWithContexts(events, contextEvents []schema.Event, runID str
 		}
 		filtered = append(filtered, event)
 	}
-	return aggregate(filtered, opts, sessionUsers)
+	return aggregate(filtered, opts, contextEvents)
+}
+
+// resolveUsageEvents is the one pipeline from raw events to the usage contributions every report
+// sums, so the token report and the coverage report cannot disagree about what was counted. It
+// returns the contributions and the number of poll events dropped as copies of live capture.
+//
+// Order matters. The Codex span preference and the live/poll preference each drop whole events
+// before the log/metric dedupe, which reads what the surviving non-metric events report; a poll
+// copy still present at that point would claim fields for the metric's whole session. All three
+// run before cumulative resolution so a dropped event never seeds or breaks a counter series.
+func resolveUsageEvents(events []schema.Event, sessionUsers sessionUserIndex, liveStarts liveCaptureIndex) ([]*usageEvent, int) {
+	usageEvents := collectUsageEvents(events, sessionUsers)
+	usageEvents = preferCodexTurnSpans(usageEvents)
+	usageEvents, suppressed := preferLiveOverPoll(usageEvents, liveStarts)
+	usageEvents = dedupeOverlappingChannels(usageEvents)
+	resolveCumulativeSeries(usageEvents)
+	return usageEvents, suppressed
 }
 
 type sessionContextKey struct {
@@ -440,6 +466,7 @@ func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []
 			repository: event.Repository,
 			usage:      Usage{Events: 1},
 		}
+		ue.collectionMethod = strings.ToLower(strings.TrimSpace(event.Harness.CollectionMethod))
 		if ts, err := schema.ParseTimestamp(event.Timestamp); err == nil {
 			ue.ts = ts
 		}
@@ -579,6 +606,164 @@ func preferCodexTurnSpans(events []*usageEvent) []*usageEvent {
 	return out
 }
 
+// liveScope is one session on one endpoint, the unit within which a live report and a poll
+// report of the same usage can be recognized as the same. The harness is normalized so the
+// spellings a runtime's OTLP resource, hook adapter and session store use land on one key.
+type liveScope struct {
+	endpoint string
+	harness  string
+	session  string
+}
+
+// liveScopeFor returns the scope for an event, or false when the event names no session. Two
+// session-less reports are not evidence of one turn -- they could be any two sessions on the
+// machine -- so they never take part in the live/poll preference.
+func liveScopeFor(endpoint, harness, session string) (liveScope, bool) {
+	session = strings.ToLower(strings.TrimSpace(session))
+	if session == "" {
+		return liveScope{}, false
+	}
+	return liveScope{
+		endpoint: strings.ToLower(strings.TrimSpace(endpoint)),
+		harness:  asymptoteobserve.NormalizeHarnessName(harness),
+		session:  session,
+	}, true
+}
+
+// isLiveCollectionMethod reports whether a collection method observed the runtime as it worked.
+// An unset method is not live: it is a log written before provenance existed, or an event Beacon
+// emitted about itself, and neither is evidence that a live channel covered the session.
+func isLiveCollectionMethod(method string) bool {
+	switch method {
+	case schema.CollectionMethodHook, schema.CollectionMethodOTLP, schema.CollectionMethodPlugin:
+		return true
+	}
+	return false
+}
+
+// liveCaptureIndex records, per session scope and live collection method, the earliest timestamp
+// any event arrived over that method -- whether or not the event carried usage.
+type liveCaptureIndex map[liveScope]map[string]time.Time
+
+func liveCaptureStarts(events []schema.Event) liveCaptureIndex {
+	index := liveCaptureIndex{}
+	for _, event := range events {
+		method := strings.ToLower(strings.TrimSpace(event.Harness.CollectionMethod))
+		if !isLiveCollectionMethod(method) || event.Session == nil {
+			continue
+		}
+		scope, ok := liveScopeFor(event.Endpoint.Hostname, event.Harness.Name, event.Session.ID)
+		if !ok {
+			continue
+		}
+		ts, err := schema.ParseTimestamp(event.Timestamp)
+		if err != nil || ts.IsZero() {
+			continue
+		}
+		if index[scope] == nil {
+			index[scope] = map[string]time.Time{}
+		}
+		if current, seen := index[scope][method]; !seen || ts.Before(current) {
+			index[scope][method] = ts
+		}
+	}
+	return index
+}
+
+// preferLiveOverPoll makes live capture authoritative over a poll backfill of the same session.
+//
+// Several runtimes are read twice: live, over OTLP or a hook or a Beacon-managed plugin, and
+// after the fact by `beacon endpoint <runtime> sync`, which reads the session store the runtime
+// commits to disk (collection_method=poll). Claude Code's api_request log and its transcript,
+// Codex's turn span and its rollout file, and the Cline, OpenCode, OpenClaw and Pi plugins and
+// their session stores each report one request's usage twice under one session id. Nothing at
+// write time collapses the two -- a usage event carries no tool-call id, so each path's event.id
+// is a digest of its own line -- so without this step every such session counts double.
+//
+// Per session scope where live events report usage, the cutover is the moment the live channel
+// that reported it started capturing the session: the earliest event of any kind over that
+// collection method (the unfiltered liveStarts), or the earliest live usage event or Codex turn
+// start if that is sooner. It is deliberately not the first live usage timestamp. A live usage
+// record is written when its request completes, while the session store stamps the same request
+// when it began or as it streamed, so a cutover on the live record would leave every session's
+// first request on both sides of it. The earliest same-channel event -- Claude's user_prompt log,
+// a plugin's session start -- precedes the first request instead.
+//
+// Poll usage at or after the cutover gives up the fields the live channel reports in that scope
+// and is dropped once nothing is left, the same field-wise rule the log/metric dedupe uses: a
+// live channel that reports only cost (Claude Code's cost.usage metric without its token.usage
+// sibling) leaves the backfill's tokens standing, and one that reports tokens without cost leaves
+// the backfill's cost, rather than either being lost. Poll usage before the
+// cutover is the only record of turns from before Beacon's live capture started and is kept, as
+// is any poll event with no usable timestamp, which cannot be placed against the cutover.
+//
+// Context-only live events do not count: occupancy is not spend, so a live channel that reports
+// only how full the window was is no authority on what the session cost.
+func preferLiveOverPoll(events []*usageEvent, liveStarts liveCaptureIndex) ([]*usageEvent, int) {
+	type liveCoverage struct {
+		fields  usageFieldSet
+		methods map[string]bool
+		cutover time.Time
+	}
+	earlier := func(current, candidate time.Time) time.Time {
+		if candidate.IsZero() || (!current.IsZero() && !candidate.Before(current)) {
+			return current
+		}
+		return candidate
+	}
+	coverage := map[liveScope]*liveCoverage{}
+	hasPoll := false
+	for _, ue := range events {
+		if ue.contextOnly {
+			continue
+		}
+		if ue.collectionMethod == schema.CollectionMethodPoll {
+			hasPoll = true
+			continue
+		}
+		if !isLiveCollectionMethod(ue.collectionMethod) {
+			continue
+		}
+		scope, ok := liveScopeFor(ue.endpoint, ue.harness, ue.session)
+		if !ok {
+			continue
+		}
+		c := coverage[scope]
+		if c == nil {
+			c = &liveCoverage{methods: map[string]bool{}}
+			coverage[scope] = c
+		}
+		c.fields.mark(ue.usage)
+		c.methods[ue.collectionMethod] = true
+		c.cutover = earlier(c.cutover, ue.ts)
+		c.cutover = earlier(c.cutover, ue.sourceStart)
+	}
+	if !hasPoll || len(coverage) == 0 {
+		return events, 0
+	}
+	for scope, c := range coverage {
+		for method := range c.methods {
+			c.cutover = earlier(c.cutover, liveStarts[scope][method])
+		}
+	}
+	suppressed := 0
+	out := events[:0]
+	for _, ue := range events {
+		if ue.collectionMethod == schema.CollectionMethodPoll && !ue.contextOnly && !ue.ts.IsZero() {
+			if scope, ok := liveScopeFor(ue.endpoint, ue.harness, ue.session); ok {
+				if c := coverage[scope]; c != nil && c.fields.any() && !c.cutover.IsZero() && !ue.ts.Before(c.cutover) {
+					if !c.fields.clear(&ue.usage) {
+						suppressed++
+						continue
+					}
+				}
+			}
+		}
+		out = append(out, ue)
+	}
+	return out, suppressed
+}
+
 // dedupeOverlappingChannels removes double-counted usage when a runtime reports
 // the same tokens through two OTel channels. Claude Code emits each request's
 // usage on both a claude_code.api_request log record and the
@@ -591,27 +776,24 @@ func preferCodexTurnSpans(events []*usageEvent) []*usageEvent {
 // (Claude Code reports cost only on claude_code.cost.usage) survive on the
 // metric channel, so cost still lands exactly once. Runtimes that emit only
 // metrics have no log/span channel in scope and are left untouched.
+//
+// Poll events are not the log channel. A poll backfill has no metric_name either, but it is a
+// copy of the session's history, not a third OTel channel, and preferLiveOverPoll has already
+// removed the part of it a live channel covers. What survives is from before live capture began,
+// so letting it claim fields here would zero the metric's tokens for the rest of the session.
 func dedupeOverlappingChannels(events []*usageEvent) []*usageEvent {
-	type fieldSet struct {
-		input, output, cacheRead, cacheCreation, reasoning, cost bool
-	}
 	scopeKey := func(ue *usageEvent) string { return ue.harness + "\x00" + ue.session }
-	logFields := map[string]*fieldSet{}
+	logFields := map[string]*usageFieldSet{}
 	for _, ue := range events {
-		if ue.metricName != "" {
+		if ue.metricName != "" || ue.collectionMethod == schema.CollectionMethodPoll {
 			continue
 		}
 		fs := logFields[scopeKey(ue)]
 		if fs == nil {
-			fs = &fieldSet{}
+			fs = &usageFieldSet{}
 			logFields[scopeKey(ue)] = fs
 		}
-		fs.input = fs.input || ue.usage.InputTokens != 0
-		fs.output = fs.output || ue.usage.OutputTokens != 0
-		fs.cacheRead = fs.cacheRead || ue.usage.CacheReadInputTokens != 0
-		fs.cacheCreation = fs.cacheCreation || ue.usage.CacheCreationInputTokens != 0
-		fs.reasoning = fs.reasoning || ue.usage.ReasoningOutputTokens != 0
-		fs.cost = fs.cost || ue.usage.CostUSD != 0
+		fs.mark(ue.usage)
 	}
 	if len(logFields) == 0 {
 		return events
@@ -620,27 +802,9 @@ func dedupeOverlappingChannels(events []*usageEvent) []*usageEvent {
 	for _, ue := range events {
 		if ue.metricName != "" {
 			if fs := logFields[scopeKey(ue)]; fs != nil {
-				if fs.input {
-					ue.usage.InputTokens = 0
-				}
-				if fs.output {
-					ue.usage.OutputTokens = 0
-				}
-				if fs.cacheRead {
-					ue.usage.CacheReadInputTokens = 0
-				}
-				if fs.cacheCreation {
-					ue.usage.CacheCreationInputTokens = 0
-				}
-				if fs.reasoning {
-					ue.usage.ReasoningOutputTokens = 0
-				}
-				if fs.cost {
-					ue.usage.CostUSD = 0
-				}
 				// Drop a metric event left with no usage so it neither inflates
 				// event counts nor seeds an empty cumulative series.
-				if ue.usage.TotalTokens() == 0 && ue.usage.ReasoningOutputTokens == 0 && ue.usage.CostUSD == 0 {
+				if !fs.clear(&ue.usage) {
 					continue
 				}
 			}
@@ -648,6 +812,48 @@ func dedupeOverlappingChannels(events []*usageEvent) []*usageEvent {
 		out = append(out, ue)
 	}
 	return out
+}
+
+// usageFieldSet records which usage fields a channel reported anywhere in a scope, so a second
+// channel can give up exactly those fields and keep the ones only it reports.
+type usageFieldSet struct {
+	input, output, cacheRead, cacheCreation, reasoning, cost bool
+}
+
+func (fs *usageFieldSet) mark(u Usage) {
+	fs.input = fs.input || u.InputTokens != 0
+	fs.output = fs.output || u.OutputTokens != 0
+	fs.cacheRead = fs.cacheRead || u.CacheReadInputTokens != 0
+	fs.cacheCreation = fs.cacheCreation || u.CacheCreationInputTokens != 0
+	fs.reasoning = fs.reasoning || u.ReasoningOutputTokens != 0
+	fs.cost = fs.cost || u.CostUSD != 0
+}
+
+func (fs *usageFieldSet) any() bool {
+	return fs.input || fs.output || fs.cacheRead || fs.cacheCreation || fs.reasoning || fs.cost
+}
+
+// clear zeroes the fields in the set on u and reports whether u still carries any usage.
+func (fs *usageFieldSet) clear(u *Usage) bool {
+	if fs.input {
+		u.InputTokens = 0
+	}
+	if fs.output {
+		u.OutputTokens = 0
+	}
+	if fs.cacheRead {
+		u.CacheReadInputTokens = 0
+	}
+	if fs.cacheCreation {
+		u.CacheCreationInputTokens = 0
+	}
+	if fs.reasoning {
+		u.ReasoningOutputTokens = 0
+	}
+	if fs.cost {
+		u.CostUSD = 0
+	}
+	return u.TotalTokens() != 0 || u.ReasoningOutputTokens != 0 || u.CostUSD != 0
 }
 
 // resolveCumulativeSeries rewrites cumulative metric contributions into
