@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "source": {"name":"LiteLLM model_prices_and_context_window.json","license":"MIT","url":"https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json","commit":"0123456789abcdef0123456789abcdef01234567","fetched_at":"2026-10-01"},
+  "generated_at": "2026-10-02",
+  "unit": "microdollars per million tokens",
+  "models": {
+    "claude-sonnet-4-5": {"provider":"anthropic","input":3000000,"output":15000000,"cache_read":300000,"cache_write":3750000,"cache_write_1h":6000000,"bands":[{"above_tokens":200000,"input":6000000,"output":22500000,"cache_read":600000,"cache_write":7500000,"cache_write_1h":12000000}]},
+    "deepseek/deepseek-chat": {"provider":"deepseek","input":280000,"output":420000,"cache_read":28000},
+    "gemini/gemini-2.5-pro": {"provider":"gemini","input":1250000,"output":10000000,"cache_read":125000,"bands":[{"above_tokens":200000,"input":2500000,"output":15000000,"cache_read":250000}]},
+    "gpt-5-codex": {"provider":"openai","input":1250000,"output":10000000,"cache_read":125000},
+    "gpt-5.4": {"provider":"openai","input":2500000,"output":15000000,"cache_read":250000,"bands":[{"above_tokens":272000,"input":5000000,"output":22500000,"cache_read":500000}]},
+    "mistral/devstral-medium-latest": {"provider":"mistral","input":400000,"output":2000000},
+    "openrouter/moonshotai/kimi-k2": {"provider":"openrouter","input":570000,"output":2300000},
+    "us.anthropic.claude-sonnet-4-5-20250929-v1:0": {"provider":"bedrock_converse","input":3300000,"output":16500000,"cache_read":330000,"cache_write":4125000},
+    "xai/grok-code-fast-1": {"provider":"xai","input":1000000,"output":2000000,"cache_read":200000,"bands":[{"above_tokens":200000,"input":2000000,"output":4000000,"cache_read":200000}]},
+    "zai/glm-4.6": {"provider":"zai","input":600000,"output":2200000,"cache_read":110000}
+  }
+}
