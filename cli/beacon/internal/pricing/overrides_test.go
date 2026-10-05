@@ -97,6 +97,11 @@ func TestOverridesRejectBadValuesNamingTheKey(t *testing.T) {
 		{"alias is a model", `{"schema":"beacon.pricing.overrides/v1","models":{"m":{"input_usd_per_mtok":1,"output_usd_per_mtok":2}},"aliases":{"m":"gpt-5"}}`, `aliases["m"]: "m" is also a model in this file`},
 		{"alias loose target", `{"schema":"beacon.pricing.overrides/v1","aliases":{"gw":"Claude-Sonnet-4-5"}}`, `target "Claude-Sonnet-4-5" is neither`},
 		{"trailing data", `{"schema":"beacon.pricing.overrides/v1"} {}`, `trailing data`},
+		// A stray closer after a complete document: the decoder's More() reports false in front
+		// of it, so only an explicit end-of-input check refuses it.
+		{"trailing bracket", `{"schema":"beacon.pricing.overrides/v1"}]`, `trailing data`},
+		{"trailing brace", `{"schema":"beacon.pricing.overrides/v1"}}`, `trailing data`},
+		{"lone bracket", `]`, `parse`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

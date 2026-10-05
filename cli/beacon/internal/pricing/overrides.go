@@ -219,7 +219,9 @@ func LoadOverrides(data []byte, catalog *Catalog) (*Overrides, error) {
 	if err := dec.Decode(&file); err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
-	if dec.More() {
+	// More() reports false before a stray closing bracket or brace, so the end of input is
+	// required explicitly: anything after the document, even a lone "]", is refused.
+	if _, err := dec.Token(); err != io.EOF {
 		return nil, fmt.Errorf("parse: trailing data after the document")
 	}
 	if file.Schema != OverridesSchema {
@@ -470,7 +472,7 @@ func checkDuplicateKeys(data []byte) error {
 		}
 		if top != nil && top.object && top.expectKey {
 			if tok == json.Delim('}') {
-				stack = stack[:len(stack)-1]
+				stack = stack[:len(stack)-1] // top != nil, so the stack is not empty
 				valueDone()
 				continue
 			}
@@ -503,6 +505,11 @@ func checkDuplicateKeys(data []byte) error {
 		case json.Delim('['):
 			stack = append(stack, &frame{path: path})
 		case json.Delim(']'):
+			// The decoder refuses a "]" that closes nothing, but the stack is checked anyway so
+			// a malformed file can only ever produce an error here, never a panic.
+			if len(stack) == 0 {
+				return fmt.Errorf("parse: unexpected ']'")
+			}
 			stack = stack[:len(stack)-1]
 			valueDone()
 		default:
