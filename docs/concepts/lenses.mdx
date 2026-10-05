@@ -15,7 +15,7 @@ Lenses are tabs on a session's page in the local dashboard
 add one; the dashboard remembers which lenses you opened and keeps the selected one in the
 page URL, so a link opens straight to it.
 
-Beacon ships five lenses, and you can add your own. A lens is one HTML file, so any coding
+Beacon ships six lenses, and you can add your own. A lens is one HTML file, so any coding
 agent can write one.
 
 ## Built-in lenses
@@ -27,6 +27,7 @@ agent can write one.
 | **Token Usage** | An itemized bill: counted usage and runtime-reported cost, split by model and by turn, then every event that reported usage. When the events' own numbers add up to more than Beacon counts (usage reported on two channels, or as a cumulative counter), the lens says so. It also says when a runtime that should report usage did not, and when a runtime never exposes usage at all. |
 | **Security Review** | [Threat-rule](/detections) findings grouped as **untrusted input** (prompt injection), **sensitive access** (credentials, metadata endpoints) and **consequential action** (exfiltration, destructive commands, sensitive edits). It calls out a trace that has all three, which is how an injected instruction turns into stolen data, and shows each finding's evidence events. |
 | **Approvals & Policy** | Every approval decision in order: allowed or denied, whether the operator or a policy provider (the optional `BEACON_POLICY_PROVIDER` seam) decided, what it was about, and whether the runtime reported it or Beacon inferred it. |
+| **Skills** | Every skill the agent loaded, where each entered the run (the event, and the prompt it came under) and how (a skill tool call, a read of a `SKILL.md`, or a shell command that printed one), and the exact instructions the agent received, when the runtime reported them and the log retained them. A load whose text was not retained shows its hash and size instead. |
 
 ## How a lens runs
 
