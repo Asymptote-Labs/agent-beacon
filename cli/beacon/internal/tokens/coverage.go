@@ -96,7 +96,11 @@ var usageExpectation = map[string]struct {
 	// carries the semconv names -- the generic-OTLP case exactly, not a runtime Beacon reads.
 	"grok_bot": {ExpectGenericOTLP, "only if Cursor's server-side OTel export carries GenAI semconv usage"},
 
-	"cursor":          {ExpectNone, "no usage on any hook payload; preCompact reports context only"},
+	// Cursor's hooks and local records carry no spend, so a hook-only Cursor is correctly silent.
+	// Its usage comes only from the Cursor Admin API through the explicit `beacon endpoint cursor
+	// usage sync`; once that has run, the token.usage events it writes make Cursor covered like
+	// any runtime that reported usage.
+	"cursor":          {ExpectNone, "hooks carry no usage; run `beacon endpoint cursor usage sync` to collect it from the Cursor Admin API"},
 	"antigravity_cli": {ExpectNone, "hook payloads carry no token counts"},
 	"grok":            {ExpectNone, "hook payloads carry no token counts"},
 	"hermes":          {ExpectNone, "hook payloads carry no token counts"},

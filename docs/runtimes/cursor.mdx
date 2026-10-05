@@ -60,8 +60,8 @@ beacon endpoint hooks install --harness cursor --level project
 | Command, tool, and file telemetry | Supported for tool, shell command, MCP-like, approval, and file edit payloads where Cursor exposes them; Cursor Cloud support is limited to Cursor's [cloud-supported command hooks](https://cursor.com/docs/hooks#cloud-agent-support). |
 | Agent reasoning telemetry | Supported for local Cursor through `afterAgentThought` hooks. Each completed thinking block is recorded as an `agent.reasoning` event carrying the reasoning text in the OpenTelemetry GenAI output-messages shape (`gen_ai.output.messages` with a `reasoning` part), plus a `content` marker with the original text's hash and byte count. Reasoning is only available for models/modes where Cursor exposes visible thinking text. |
 | Repository and branch context | Events include the workspace path as `repository`, and `branch` is resolved from the workspace's local git checkout (`.git/HEAD`) when Cursor does not supply one; disable local git resolution with `BEACON_DISABLE_GIT_METADATA=1`. |
-| Token usage and cost | Not collected. No Cursor hook payload carries a token count or a cost. |
-| Context occupancy | Supported through `preCompact`, which reports `context_tokens` and `context_window_size`. Recorded as `gen_ai.context` (`used_tokens`, `limit_tokens`) and used by the token-usage utilization view. This is a level, not spend: it is never summed into a total, and Cursor still reports as `not_instrumented` in `beacon token-usage --coverage` because it has not said what a turn cost. The sibling `context_usage_percent` is derivable from the pair and stays in the retained payload. |
+| Token usage and cost | Collected from the Cursor Admin API by [`beacon endpoint cursor usage sync`](/cli/endpoint-cursor-usage), which needs a team admin key in `CURSOR_ADMIN_API_KEY`. Each request Cursor reports becomes a `token.usage` event with input, output and cache tokens, and `cost_usd` from what Cursor charged. These events carry no session, because the Admin API does not name the conversation a request came from. No Cursor hook payload carries a token count or a cost. |
+| Context occupancy | Supported through `preCompact`, which reports `context_tokens` and `context_window_size`. Recorded as `gen_ai.context` (`used_tokens`, `limit_tokens`) and used by the token-usage utilization view. This is a level, not spend: it is never summed into a total, and on its own it leaves Cursor reported as `not_instrumented` in `beacon token-usage --coverage`, because it says nothing about what a turn cost. Cursor shows as `covered` once `beacon endpoint cursor usage sync` has written usage. The sibling `context_usage_percent` is derivable from the pair and stays in the retained payload. |
 | Historical session sync | Supported through `beacon endpoint cursor sync`; marked as poll collection |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported for the endpoint agent. Cursor hooks are installed separately in the logged-in user's context |
@@ -71,6 +71,17 @@ beacon endpoint hooks install --harness cursor --level project
 `beacon endpoint cursor sync` reads Cursor records after Cursor has committed them. It can recover committed prompts, assistant text, tool and command activity, file activity where the stored record names a path, and session metadata present in Cursor's local stores. It cannot hold or deny tool calls, and it does not imply that Beacon observed the event at runtime.
 
 Run `beacon endpoint cursor sync --watch`, or schedule one-shot sweeps, if you want the poll path to stay current.
+
+## Token usage
+
+Cursor's hooks and local session stores carry no token counts. To collect Cursor's usage and charges, a team admin creates a Cursor Admin API key and runs:
+
+```bash
+export CURSOR_ADMIN_API_KEY=key_...
+beacon endpoint cursor usage sync
+```
+
+By default this collects only the Cursor account signed in on the machine. It is the one Cursor command that uses the network, and only when you run it. See [`beacon endpoint cursor usage`](/cli/endpoint-cursor-usage).
 
 ## Deployment notes
 
