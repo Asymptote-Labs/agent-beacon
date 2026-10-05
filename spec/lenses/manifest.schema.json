@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://beacon.dev/spec/lenses/v1/manifest.schema.json",
+  "title": "Beacon Lens Manifest",
+  "description": "The JSON object inside a lens file's <script type=\"application/beacon-lens+json\"> element (lenses/v1).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "title", "version", "api"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+      "description": "Stable identity. Unique on the endpoint; built-in lens IDs are reserved."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60,
+      "description": "Tab label. One line."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 280,
+      "description": "One or two sentences shown in the lens picker. One line."
+    },
+    "icon": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,31}$",
+      "description": "One generic word naming an icon. The dashboard falls back to a default icon for a word it does not know."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Lens content revision; bump on every change."
+    },
+    "api": {
+      "const": "beacon.lens.v1",
+      "description": "The data contract the lens was written against."
+    },
+    "author": {
+      "type": "string",
+      "maxLength": 100,
+      "description": "Free-text attribution. One line."
+    }
+  }
+}
