@@ -3,6 +3,8 @@ package claudesession
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 )
 
 // claudeUsageLine is an assistant record carrying usage exactly as Claude Code writes it to the
@@ -84,5 +86,45 @@ func TestUsageCarriesTheOneHourCacheWriteSplit(t *testing.T) {
 				t.Fatalf("cache_creation = %v, want ephemeral_1h_input_tokens %v", got, tc.oneHour)
 			}
 		})
+	}
+}
+
+// TestUsageDeltaCarriesTheOneHourSubset covers the correction a later sweep emits when it finds a
+// larger snapshot of a response an earlier sweep already counted: the one-hour subset of the cache
+// writes is differenced with the writes, so a split response prices its 1h writes exactly once.
+func TestUsageDeltaCarriesTheOneHourSubset(t *testing.T) {
+	i64 := func(v int64) *int64 { return &v }
+	prior := &schema.GenAIUsageInfo{
+		InputTokens:   i64(4),
+		OutputTokens:  i64(8),
+		CacheCreation: &schema.GenAIUsageCacheCreationInfo{InputTokens: i64(1200), Ephemeral1hInputTokens: i64(1000)},
+	}
+	best := &schema.GenAIUsageInfo{
+		InputTokens:   i64(4),
+		OutputTokens:  i64(300),
+		CacheCreation: &schema.GenAIUsageCacheCreationInfo{InputTokens: i64(2000), Ephemeral1hInputTokens: i64(1600)},
+	}
+	delta := usageDelta(best, prior)
+	if got := delta.CacheCreation; got == nil || got.InputTokens == nil || *got.InputTokens != 800 ||
+		got.Ephemeral1hInputTokens == nil || *got.Ephemeral1hInputTokens != 600 {
+		t.Fatalf("delta cache_creation = %+v, want 800 writes of which 600 one-hour", got)
+	}
+
+	// End to end over every split point of a streamed response: the one-hour writes are counted
+	// once in total, whichever sweep emits them.
+	ref := SessionRef{ID: "sess-1", Path: "/tmp/sess-1.jsonl"}
+	lines := []string{userLine("sess-1", "p", "go")}
+	lines = append(lines, splitResponse("sess-1", "r1", "msg_01H", "req_01H", 300)...)
+	records := decodeFixture(t, lines)
+	for cut := 1; cut <= len(records); cut++ {
+		first := MapSession(ref, records[:cut], MapOptions{})
+		second := MapSession(ref, records, MapOptions{MinLine: records[cut-1].Line, SkipSessionStarted: true})
+		var oneHour int64
+		for _, item := range append(usageEvents(first), usageEvents(second)...) {
+			oneHour += item.Event.GenAI.Usage.CacheCreation.OneHourInputTokens()
+		}
+		if oneHour != 1200 {
+			t.Errorf("cut after line %d: one-hour writes counted %d, want 1200", records[cut-1].Line, oneHour)
+		}
 	}
 }
