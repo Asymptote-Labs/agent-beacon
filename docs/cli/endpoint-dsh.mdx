@@ -85,6 +85,19 @@ dsh sync: 3 sessions, 1 changed, 12 events, 0 errors
   2 spooled hook event(s) drained from workspace spools
 ```
 
+Only lines that are DeepSeek Harness hook events for the spool's own session
+are appended; anything else (another session or harness, a `poll` label, an
+inventory record, a commit link) is refused and counted, and the JSON report
+carries the count as `spool_rejected`:
+
+```text
+  1 staged line(s) refused: not hook events for the session whose spool held them
+```
+
+A staged `event.id` is kept only when it derives from the line itself, and the
+sweep never follows a symlinked spool directory, data file, or lock; a
+symlinked directory is reported as an error for that session.
+
 Draining runs only in write mode: `--print` leaves spools untouched.
 
 ## Status

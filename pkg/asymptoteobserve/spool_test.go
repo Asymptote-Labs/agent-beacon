@@ -1,8 +1,12 @@
 package asymptoteobserve
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -86,5 +90,76 @@ func TestDSHSpoolFilesAndPendingBytes(t *testing.T) {
 	}
 	if pending := DSHSpoolPendingBytes(workspace, "sess-1"); pending != 7 {
 		t.Errorf("PendingBytes = %d, want 7 (5+2; lock and other-session files excluded)", pending)
+	}
+}
+
+// A spool directory reached through a symlink is refused on both the staging and the
+// draining side; a missing one is reported as not existing, which callers treat as "nothing
+// staged".
+func TestCheckDSHSpoolDirRefusesSymlinks(t *testing.T) {
+	workspace := t.TempDir()
+	if err := CheckDSHSpoolDir(workspace); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing spool: err = %v, want ErrNotExist", err)
+	}
+	if err := os.MkdirAll(DSHSpoolDir(workspace), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckDSHSpoolDir(workspace); err != nil {
+		t.Fatalf("real spool directory refused: %v", err)
+	}
+	if runtime.GOOS == "windows" {
+		return
+	}
+	linked := t.TempDir()
+	if err := os.Mkdir(filepath.Join(linked, ".beacon"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), filepath.Join(linked, ".beacon", "dsh-spool")); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckDSHSpoolDir(linked); err == nil || errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("symlinked dsh-spool: err = %v, want a refusal", err)
+	}
+	base, _ := DSHSpoolPath(workspace, "sess-1")
+	if err := os.Symlink(filepath.Join(t.TempDir(), "elsewhere"), base); err != nil {
+		t.Fatal(err)
+	}
+	if files := DSHSpoolFiles(workspace, "sess-1"); len(files) != 0 {
+		t.Fatalf("symlinked spool file listed: %v", files)
+	}
+}
+
+// VerifiedEventID accepts exactly the ids a writer stamps over the line's own bytes.
+func TestVerifiedEventID(t *testing.T) {
+	event := map[string]interface{}{
+		"event":   map[string]interface{}{"action": "prompt.submitted", "kind": "event"},
+		"message": "a <b> & c",
+		"n":       json.Number("9007199254740993"),
+		"session": map[string]interface{}{"id": "sess-1"},
+	}
+	unstamped, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event["event"].(map[string]interface{})["id"] = EventIDForLine(unstamped)
+	stamped, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id, ok := VerifiedEventID(stamped); !ok || id == "" {
+		t.Fatalf("writer-stamped id did not verify: %q", id)
+	}
+	tampered := bytes.Replace(stamped, []byte("sess-1"), []byte("sess-2"), 1)
+	if bytes.Equal(tampered, stamped) {
+		t.Fatal("tamper did not apply")
+	}
+	if _, ok := VerifiedEventID(tampered); ok {
+		t.Fatal("id verified for a line whose content changed after stamping")
+	}
+	if _, ok := VerifiedEventID(unstamped); ok {
+		t.Fatal("a line with no id verified")
+	}
+	if _, ok := VerifiedEventID([]byte("not json")); ok {
+		t.Fatal("garbage verified")
 	}
 }

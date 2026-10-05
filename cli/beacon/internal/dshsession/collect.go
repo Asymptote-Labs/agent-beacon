@@ -45,6 +45,10 @@ type Summary struct {
 	SessionsChanged int `json:"sessions_changed"`
 	EventsEmitted   int `json:"events_emitted"`
 	SpoolEvents     int `json:"spool_events,omitempty"`
+	// SpoolRejected counts staged lines a drain refused because they were not events the
+	// session's own hook could have staged (spoolLineAccepted). Anything in the workspace
+	// can write a spool, so a nonzero count means something other than Beacon's hook did.
+	SpoolRejected   int `json:"spool_rejected,omitempty"`
 	Errors          int `json:"errors"`
 	MalformedLines  int `json:"malformed_lines"`
 	PartialSessions int `json:"partial_sessions"`
@@ -146,7 +150,8 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 		// surviving copy is the collection_method=hook line doctor's capture check counts,
 		// not the poll backfill of the same moment.
 		drained, drainErr := drainSessionSpool(ref, opts, seen)
-		summary.SpoolEvents += drained
+		summary.SpoolEvents += drained.Drained
+		summary.SpoolRejected += drained.Rejected
 		if drainErr != nil {
 			summary.Errors++
 			errs = append(errs, fmt.Errorf("DeepSeek session %s spool: %w", ref.ID, drainErr))

@@ -197,22 +197,29 @@ func TestReportDshSweepCountsDrainedSpoolEvents(t *testing.T) {
 	cmd := &cobra.Command{}
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
-	reportDshSweep(cmd, dshsession.Summary{Sessions: 1, SpoolEvents: 3})
+	reportDshSweep(cmd, dshsession.Summary{Sessions: 1, SpoolEvents: 3, SpoolRejected: 2})
 	if !strings.Contains(out.String(), "3 spooled hook event(s) drained") {
 		t.Fatalf("sweep report does not mention the drain:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "2 staged line(s) refused") {
+		t.Fatalf("sweep report does not mention refused lines:\n%s", out.String())
 	}
 
 	out.Reset()
 	endpointOpts.jsonOutput = true
-	reportDshSweep(cmd, dshsession.Summary{Sessions: 1, SpoolEvents: 3})
+	reportDshSweep(cmd, dshsession.Summary{Sessions: 1, SpoolEvents: 3, SpoolRejected: 2})
 	var decoded struct {
-		SpoolEvents int `json:"spool_events"`
+		SpoolEvents   int `json:"spool_events"`
+		SpoolRejected int `json:"spool_rejected"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &decoded); err != nil {
 		t.Fatalf("sweep JSON: %v\n%s", err, out.String())
 	}
 	if decoded.SpoolEvents != 3 {
 		t.Errorf("sweep JSON spool_events = %d, want 3", decoded.SpoolEvents)
+	}
+	if decoded.SpoolRejected != 2 {
+		t.Errorf("sweep JSON spool_rejected = %d, want 2", decoded.SpoolRejected)
 	}
 	restore()
 }

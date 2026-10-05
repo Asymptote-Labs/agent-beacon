@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -88,29 +89,39 @@ func loadDrainedIDs(logPath string) map[string]struct{} {
 // every rotation of these files takes -- so the file set cannot change under it and a hook
 // firing during the drain blocks rather than drops (filelock.Exclusive blocks by design).
 // Delete-after-append plus loadDrainedIDs makes a crash mid-drain re-deliverable without
-// double-counting.
-func drainSessionSpool(ref SessionRef, opts CollectOptions, seen map[string]struct{}) (int, error) {
+// double-counting. Each staged line must pass spoolLineAccepted; refused lines are counted,
+// not appended, and leave with the file.
+func drainSessionSpool(ref SessionRef, opts CollectOptions, seen map[string]struct{}) (spoolDrain, error) {
 	if !opts.Write || opts.Print {
-		return 0, nil
+		return spoolDrain{}, nil
 	}
 	if ref.Meta == nil || strings.TrimSpace(ref.Meta.CWD) == "" {
-		return 0, nil
+		return spoolDrain{}, nil
 	}
 	base, ok := asymptoteobserve.DSHSpoolPath(ref.Meta.CWD, ref.ID)
 	if !ok {
-		return 0, nil
+		return spoolDrain{}, nil
+	}
+	// The workspace is writable from inside the sandbox and this runs outside it, so every
+	// path below is checked not to lead somewhere else: a symlinked spool directory, lock or
+	// data file would point the drain at files the sandbox itself cannot reach.
+	if err := asymptoteobserve.CheckDSHSpoolDir(ref.Meta.CWD); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return spoolDrain{}, nil
+		}
+		return spoolDrain{}, err
 	}
 	if files := asymptoteobserve.DSHSpoolFiles(ref.Meta.CWD, ref.ID); len(files) == 0 {
-		return 0, nil
+		return spoolDrain{}, nil
 	}
-	lock, err := os.OpenFile(base+".lock", os.O_CREATE|os.O_RDWR, 0o666)
+	lock, err := openSpoolFile(base+".lock", os.O_CREATE|os.O_RDWR)
 	if err != nil {
-		return 0, fmt.Errorf("open spool lock %s: %w", base+".lock", err)
+		return spoolDrain{}, fmt.Errorf("open spool lock %s: %w", base+".lock", err)
 	}
 	held, err := filelock.Exclusive(lock)
 	if err != nil {
 		_ = lock.Close()
-		return 0, fmt.Errorf("lock spool %s: %w", base, err)
+		return spoolDrain{}, fmt.Errorf("lock spool %s: %w", base, err)
 	}
 	// Unlock before closing: the close listed first runs last.
 	defer lock.Close()
@@ -119,29 +130,96 @@ func drainSessionSpool(ref SessionRef, opts CollectOptions, seen map[string]stru
 	// Re-enumerate under the lock: a hook staged or rotated a file between the first stat
 	// and here, and rotation runs under this same lock, so the set is now stable.
 	files := asymptoteobserve.DSHSpoolFiles(ref.Meta.CWD, ref.ID)
-	drained := 0
+	var result spoolDrain
 	for _, path := range files {
-		n, err := drainSpoolFile(path, opts, seen)
-		drained += n
+		n, err := drainSpoolFile(path, ref, opts, seen)
+		result.Drained += n.Drained
+		result.Rejected += n.Rejected
 		if err != nil {
-			return drained, err
+			return result, err
 		}
 	}
-	return drained, nil
+	return result, nil
+}
+
+// spoolDrain counts what one drain did: events appended to the runtime log, and staged lines
+// refused because they were not events the session's own hook could have staged.
+type spoolDrain struct {
+	Drained  int
+	Rejected int
+}
+
+// openSpoolFile opens a spool path only if it is a regular file, never through a symlink:
+// it refuses a non-regular file it finds, then confirms the file it opened is the one it
+// checked, which closes the window for swapping a link in between.
+func openSpoolFile(path string, flag int) (*os.File, error) {
+	if info, err := os.Lstat(path); err == nil && !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file (mode %s); refusing to follow it", path, info.Mode().Type())
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	f, err := os.OpenFile(path, flag, asymptoteobserve.DSHSpoolFileMode)
+	if err != nil {
+		return nil, err
+	}
+	opened, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	linked, err := os.Lstat(path)
+	if err != nil || !linked.Mode().IsRegular() || !os.SameFile(opened, linked) {
+		_ = f.Close()
+		return nil, fmt.Errorf("%s changed while it was opened; refusing to follow it", path)
+	}
+	return f, nil
+}
+
+// spoolLineAccepted reports whether a staged event is one this session's sandboxed hook
+// could have staged: a DeepSeek Harness hook event naming the session whose spool holds it,
+// and not one of the actions only Beacon itself writes.
+//
+// The spool is the one place sandboxed code can hand bytes to a writer running outside the
+// sandbox, and anything in the workspace -- the agent included -- can write it. Without this
+// check a staged line could claim another harness, another session, an approval for another
+// runtime, or a Beacon-internal record such as an inventory snapshot or a commit link, and
+// it would land in the log as an observed hook event. This does not make a staged event
+// trustworthy -- whatever runs in the workspace can still write events for its own session
+// -- but it confines what the workspace can say to what its own hook could have said.
+func spoolLineAccepted(event schema.Event, ref SessionRef) bool {
+	if asymptoteobserve.NormalizeHarnessName(event.Harness.Name) != Harness {
+		return false
+	}
+	if event.Harness.CollectionMethod != asymptoteobserve.CollectionMethodHook {
+		return false
+	}
+	if event.Session == nil || event.Session.ID != ref.ID {
+		return false
+	}
+	action := strings.ToLower(strings.TrimSpace(event.Event.Action))
+	if action == "" || strings.HasPrefix(action, "inventory.") || action == "session.commit_linked" {
+		return false
+	}
+	return true
 }
 
 // drainSpoolFile appends one spool file's events to the runtime log and removes the file.
 // An append failure returns early with the file left in place: the events already appended
 // carry ids into seen, so the next sweep redelivers only what is left.
-func drainSpoolFile(path string, opts CollectOptions, seen map[string]struct{}) (int, error) {
-	data, err := os.ReadFile(path)
+func drainSpoolFile(path string, ref SessionRef, opts CollectOptions, seen map[string]struct{}) (spoolDrain, error) {
+	var result spoolDrain
+	f, err := openSpoolFile(path, os.O_RDONLY)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return 0, nil
+			return result, nil
 		}
-		return 0, fmt.Errorf("read spool %s: %w", path, err)
+		return result, fmt.Errorf("read spool %s: %w", path, err)
 	}
-	drained := 0
+	data, err := io.ReadAll(f)
+	_ = f.Close()
+	if err != nil {
+		return result, fmt.Errorf("read spool %s: %w", path, err)
+	}
 	for _, line := range bytes.Split(data, []byte("\n")) {
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
@@ -153,21 +231,32 @@ func drainSpoolFile(path string, opts CollectOptions, seen map[string]struct{}) 
 			// blocking the drain of the valid events around it.
 			continue
 		}
+		if !spoolLineAccepted(event, ref) {
+			result.Rejected++
+			continue
+		}
+		// A staged id is trusted only when it re-derives from the line itself, which every
+		// line the hook writer stages does. An id that does not was set by something else,
+		// and trusting it would let a staged line mark a genuine event as already recorded;
+		// the writer derives a fresh one instead.
+		if _, verified := asymptoteobserve.VerifiedEventID(line); !verified {
+			event.Event.ID = ""
+		}
 		if event.Event.ID != "" {
 			if _, duplicate := seen[event.Event.ID]; duplicate {
 				continue
 			}
 		}
 		if _, err := writer.AppendEvent(event, writer.Options{Path: opts.LogPath, UserMode: opts.UserMode}); err != nil {
-			return drained, fmt.Errorf("append spooled event from %s: %w", path, err)
+			return result, fmt.Errorf("append spooled event from %s: %w", path, err)
 		}
 		if event.Event.ID != "" {
 			seen[event.Event.ID] = struct{}{}
 		}
-		drained++
+		result.Drained++
 	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return drained, fmt.Errorf("remove drained spool %s: %w", path, err)
+		return result, fmt.Errorf("remove drained spool %s: %w", path, err)
 	}
-	return drained, nil
+	return result, nil
 }

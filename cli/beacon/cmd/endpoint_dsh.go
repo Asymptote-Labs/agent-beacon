@@ -134,6 +134,9 @@ func reportDshSweep(cmd *cobra.Command, summary dshsession.Summary) {
 	if summary.SpoolEvents > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "  %d spooled hook event(s) drained from workspace spools\n", summary.SpoolEvents)
 	}
+	if summary.SpoolRejected > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "  %d staged line(s) refused: not hook events for the session whose spool held them\n", summary.SpoolRejected)
+	}
 	if summary.MalformedLines > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "  %d unreadable line(s) in DeepSeek session logs\n", summary.MalformedLines)
 	}

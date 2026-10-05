@@ -3,9 +3,13 @@ package logging
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // When the runtime log is unreachable but the workspace is writable -- the normal
@@ -155,68 +159,206 @@ func TestUnwritableLogAndWorkspaceReportsLossAsBefore(t *testing.T) {
 	}
 }
 
-// First spool use hides the directory from git status via .git/info/exclude (the local,
-// unshared mechanism -- never .gitignore), exactly once, relative to the worktree root even
-// when the session cwd sits below it.
-func TestFirstSpoolUseExcludesTheDirectoryFromGitStatus(t *testing.T) {
-	isolateHookHome(t)
-	logPath := unwritableEndpointLog(t)
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-	root := t.TempDir()
-	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	sub := filepath.Join(root, "pkg", "app")
-	if err := os.MkdirAll(sub, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	stage := func() {
-		logger := NewSessionLogger("session-start", "dsh", "sess-git-1")
-		_ = logger.EndpointEvent("session.started", "session", "info", "Agent started",
+// stageDshEvent stages one session.started event for sessionID with the given workspace and
+// returns what EndpointEvent printed on stderr and the error it reported.
+func stageDshEvent(t *testing.T, sessionID, workspace string) (string, error) {
+	t.Helper()
+	var writeErr error
+	stderr := captureStderr(t, func() {
+		logger := NewSessionLogger("session-start", "dsh", sessionID)
+		writeErr = logger.EndpointEvent("session.started", "session", "info", "Agent started",
 			map[string]interface{}{
-				"session": map[string]interface{}{"id": "sess-git-1", "working_directory": sub},
+				"session": map[string]interface{}{"id": sessionID, "working_directory": workspace},
 			})
-	}
-	stage() // second call proves the entry is not appended twice
-	stage()
+	})
+	return stderr, writeErr
+}
 
-	exclude := filepath.Join(root, ".git", "info", "exclude")
-	data, err := os.ReadFile(exclude)
+func runGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("exclude file not written: %v", err)
+		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
-	want := "pkg/app/.beacon/dsh-spool/"
-	if got := strings.Count(string(data), want); got != 1 {
-		t.Fatalf("exclude lists %q %d times, want once:\n%s", want, got, data)
+	return string(out)
+}
+
+// The spool holds retained content inside what is usually a repository, and agents commit
+// with `git add -A`. The ignore file the hook writes inside the spool directory must keep it
+// out of git in a plain checkout and in a linked worktree (where .git is a file and an
+// .git/info/exclude entry would not apply), without touching any file Beacon does not own.
+func TestFirstSpoolUseKeepsTheSpoolOutOfGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
 	}
-	if strings.Contains(string(data), ".gitignore") {
-		t.Errorf("spool containment must use .git/info/exclude, not .gitignore:\n%s", data)
+	isolateHookHome(t)
+	t.Setenv("BEACON_ENDPOINT_LOG", unwritableEndpointLog(t))
+	root := t.TempDir()
+	runGit(t, root, "init", "-q")
+	runGit(t, root, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init")
+	worktree := filepath.Join(t.TempDir(), "wt")
+	runGit(t, root, "worktree", "add", "-q", worktree)
+	excludeBefore, _ := os.ReadFile(filepath.Join(root, ".git", "info", "exclude"))
+
+	for _, workspace := range []string{filepath.Join(root, "pkg", "app"), worktree} {
+		if err := os.MkdirAll(workspace, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 2; i++ { // the second stage proves an existing ignore file is left alone
+			if stderr, err := stageDshEvent(t, "sess-git-1", workspace); err != nil || stderr != "" {
+				t.Fatalf("stage in %s: err=%v stderr=%q", workspace, err, stderr)
+			}
+		}
+		if status := runGit(t, workspace, "status", "--porcelain", "--untracked-files=all", "--ignored=no"); strings.TrimSpace(status) != "" {
+			t.Errorf("spool visible to git in %s:\n%s", workspace, status)
+		}
+		runGit(t, workspace, "add", "-A")
+		if staged := runGit(t, workspace, "diff", "--cached", "--name-only"); strings.TrimSpace(staged) != "" {
+			t.Errorf("git add -A staged spool files in %s:\n%s", workspace, staged)
+		}
+		if _, err := os.Stat(filepath.Join(workspace, ".gitignore")); !os.IsNotExist(err) {
+			t.Errorf("the workspace's own .gitignore was touched in %s: %v", workspace, err)
+		}
+	}
+	excludeAfter, _ := os.ReadFile(filepath.Join(root, ".git", "info", "exclude"))
+	if string(excludeBefore) != string(excludeAfter) {
+		t.Errorf(".git/info/exclude changed:\nbefore:\n%s\nafter:\n%s", excludeBefore, excludeAfter)
 	}
 }
 
-// A workspace that is not a git worktree is the common non-repo case: staging must work and
-// simply skip containment without erroring or walking anywhere odd.
-func TestSpoolOutsideAGitWorktreeSkipsContainment(t *testing.T) {
+// A workspace that is not a git worktree is the common non-repo case: staging works and the
+// ignore file is written all the same, so a directory that becomes a repository later is
+// already covered.
+func TestSpoolOutsideAGitWorktreeStillWritesTheIgnoreFile(t *testing.T) {
 	isolateHookHome(t)
-	logPath := unwritableEndpointLog(t)
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_ENDPOINT_LOG", unwritableEndpointLog(t))
 	workspace := t.TempDir()
-
-	logger := NewSessionLogger("session-start", "dsh", "sess-nogit-1")
-	if err := logger.EndpointEvent("session.started", "session", "info", "Agent started",
-		map[string]interface{}{
-			"session": map[string]interface{}{"id": "sess-nogit-1", "working_directory": workspace},
-		}); err != nil {
+	if _, err := stageDshEvent(t, "sess-nogit-1", workspace); err != nil {
 		t.Fatalf("staged write outside a repo: %v", err)
 	}
-	spool := filepath.Join(workspace, ".beacon", "dsh-spool", "sess-nogit-1.jsonl")
-	if _, err := os.Stat(spool); err != nil {
+	spoolDir := filepath.Join(workspace, ".beacon", "dsh-spool")
+	if _, err := os.Stat(filepath.Join(spoolDir, "sess-nogit-1.jsonl")); err != nil {
 		t.Fatalf("spool file missing outside a repo: %v", err)
 	}
-	for _, up := range []string{".git", "info"} {
-		if _, err := os.Stat(filepath.Join(workspace, up)); !os.IsNotExist(err) {
-			t.Errorf("%s appeared in a non-repo workspace: %v", up, err)
+	data, err := os.ReadFile(filepath.Join(spoolDir, ".gitignore"))
+	if err != nil || !strings.Contains(string(data), "\n*\n") {
+		t.Fatalf("spool ignore file = %q, %v; want a `*` line", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".git")); !os.IsNotExist(err) {
+		t.Errorf(".git appeared in a non-repo workspace: %v", err)
+	}
+}
+
+// Staged events carry the same retained content as the runtime log, in a directory that is
+// usually readable by more than its owner, so the spool is private to the session's user.
+func TestSpoolFilesArePrivateToTheUser(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX file modes")
+	}
+	isolateHookHome(t)
+	t.Setenv("BEACON_ENDPOINT_LOG", unwritableEndpointLog(t))
+	workspace := t.TempDir()
+	if _, err := stageDshEvent(t, "sess-mode-1", workspace); err != nil {
+		t.Fatal(err)
+	}
+	spoolDir := filepath.Join(workspace, ".beacon", "dsh-spool")
+	for path, want := range map[string]os.FileMode{
+		spoolDir: 0o700,
+		filepath.Join(spoolDir, "sess-mode-1.jsonl"):      0o600,
+		filepath.Join(spoolDir, "sess-mode-1.jsonl.lock"): 0o600,
+	} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Errorf("%s mode = %o, want %o", path, got, want)
+		}
+	}
+}
+
+// The drain runs outside the sandbox and refuses a spool reached through a symlink, so the
+// hook must not stage into one either: it would lose the event without saying so. The loss
+// is reported, and nothing lands where the link points.
+func TestSymlinkedSpoolDirectoryIsNotStagedInto(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	isolateHookHome(t)
+	t.Setenv("BEACON_ENDPOINT_LOG", unwritableEndpointLog(t))
+	workspace := t.TempDir()
+	target := t.TempDir()
+	if err := os.Symlink(target, filepath.Join(workspace, ".beacon")); err != nil {
+		t.Fatal(err)
+	}
+	stderr, err := stageDshEvent(t, "sess-link-1", workspace)
+	if err == nil {
+		t.Fatal("EndpointEvent reported success for an event staged through a symlink")
+	}
+	if !strings.Contains(stderr, "this event was NOT recorded") {
+		t.Fatalf("loss not reported:\n%s", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(target, "dsh-spool", "sess-link-1.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("event written through the symlink: %v", err)
+	}
+}
+
+// The drain accepts a staged event only when it names the spool's own session; an event the
+// hook would stage under a different session id is reported as lost instead.
+func TestEventNamingAnotherSessionIsNotStaged(t *testing.T) {
+	isolateHookHome(t)
+	t.Setenv("BEACON_ENDPOINT_LOG", unwritableEndpointLog(t))
+	workspace := t.TempDir()
+	var writeErr error
+	stderr := captureStderr(t, func() {
+		logger := NewSessionLogger("session-start", "dsh", "sess-own-1")
+		writeErr = logger.EndpointEvent("session.started", "session", "info", "Agent started",
+			map[string]interface{}{
+				"session": map[string]interface{}{"id": "sess-other-1", "working_directory": workspace},
+			})
+	})
+	if writeErr == nil || !strings.Contains(stderr, "this event was NOT recorded") {
+		t.Fatalf("err=%v stderr=%q; want the loss reported", writeErr, stderr)
+	}
+	if files := asymptoteobserve.DSHSpoolFiles(workspace, "sess-own-1"); len(files) != 0 {
+		t.Fatalf("staged %v", files)
+	}
+}
+
+// The drain trusts a staged event.id only when it re-derives from the line itself. Every
+// line the hook writer stages must pass that check, or genuine events would lose their
+// redelivery protection.
+func TestStagedEventIDVerifiesAgainstTheLine(t *testing.T) {
+	isolateHookHome(t)
+	t.Setenv("BEACON_ENDPOINT_LOG", unwritableEndpointLog(t))
+	workspace := t.TempDir()
+	logger := NewSessionLogger("pre-tool", "dsh", "sess-id-1")
+	for _, fields := range []map[string]interface{}{
+		{"session": map[string]interface{}{"id": "sess-id-1", "working_directory": workspace}},
+		{
+			"session": map[string]interface{}{"id": "sess-id-1", "working_directory": workspace},
+			"tool":    map[string]interface{}{"name": "run_shell", "input": map[string]interface{}{"command": "echo <a&b> 1e21 \u2028", "timeout": 1.5, "n": 9007199254740993}},
+			"command": map[string]interface{}{"line": "echo hi", "exit_code": 0},
+		},
+	} {
+		if err := logger.EndpointEvent("tool.invoked", "tool", "info", "Tool <invoked> & done", fields); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(workspace, ".beacon", "dsh-spool", "sess-id-1.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want 2 staged lines, got %d", len(lines))
+	}
+	for _, line := range lines {
+		if id, ok := asymptoteobserve.VerifiedEventID([]byte(line)); !ok {
+			t.Errorf("staged event.id %q does not verify:\n%s", id, line)
 		}
 	}
 }

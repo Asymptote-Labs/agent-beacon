@@ -142,7 +142,7 @@ func (l *Logger) EndpointEventWithFidelity(action, category, severity, message, 
 		// NOT-recorded explanation below fires unchanged, which is the honest report for an
 		// event nothing captured.
 		if spoolPath := l.dshSpoolPath(event); spoolPath != "" {
-			if spoolErr := writeEndpointJSON(spoolPath, event); spoolErr == nil {
+			if spoolErr := writeEndpointJSONMode(spoolPath, event, asymptoteobserve.DSHSpoolFileMode); spoolErr == nil {
 				return nil
 			}
 		}
@@ -170,10 +170,14 @@ func (l *Logger) dshSpoolPath(event map[string]interface{}) string {
 	if !asymptoteobserve.ValidDSHSessionIDForSpool(l.sessionID) {
 		return ""
 	}
-	cwd := ""
-	if session, ok := event["session"].(map[string]interface{}); ok {
-		cwd, _ = session["working_directory"].(string)
+	// The drain accepts a staged event only when it names the session whose spool it sits
+	// in, so an event carrying any other session id would be staged only to be refused.
+	// Report it as lost now instead.
+	session, _ := event["session"].(map[string]interface{})
+	if id, _ := session["id"].(string); id != l.sessionID {
+		return ""
 	}
+	cwd, _ := session["working_directory"].(string)
 	cwd = strings.TrimSpace(cwd)
 	if cwd == "" {
 		cwd, _ = os.Getwd()
@@ -184,10 +188,15 @@ func (l *Logger) dshSpoolPath(event map[string]interface{}) string {
 	}
 	// Creating the directory here doubles as the eligibility probe: if the workspace itself
 	// is not writable (read-only mode), there is no spool and the caller reports the loss.
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), asymptoteobserve.DSHSpoolDirMode); err != nil {
 		return ""
 	}
-	ensureSpoolGitExclude(filepath.Dir(path))
+	// The drain refuses a spool reached through a symlink, so staging into one would lose
+	// the event silently; refusing here reports the loss instead.
+	if err := asymptoteobserve.CheckDSHSpoolDir(cwd); err != nil {
+		return ""
+	}
+	ensureSpoolGitignore(filepath.Dir(path))
 	return path
 }
 
@@ -441,6 +450,13 @@ func firstEnv(keys ...string) string {
 }
 
 func writeEndpointJSON(path string, event map[string]interface{}) error {
+	return writeEndpointJSONMode(path, event, endpointRuntimeFileMode)
+}
+
+// writeEndpointJSONMode is writeEndpointJSON with the mode new files are created with. The
+// runtime log is shared with Beacon's other writers and keeps endpointRuntimeFileMode; a
+// workspace spool is private to the session's user.
+func writeEndpointJSONMode(path string, event map[string]interface{}, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
@@ -480,7 +496,7 @@ func writeEndpointJSON(path string, event map[string]interface{}) error {
 	if data, err = withEndpointEventID(event, data); err != nil {
 		return err
 	}
-	return appendEndpointJSONL(path, append(data, '\n'), defaultEndpointRotateBytes, defaultEndpointRotateArchives)
+	return appendEndpointJSONLMode(path, append(data, '\n'), defaultEndpointRotateBytes, defaultEndpointRotateArchives, mode)
 }
 
 // withEndpointEventID fills event.id on an event assembled as a map and returns
@@ -604,10 +620,14 @@ func truncateEndpoint(value string, limit int) string {
 
 // Keep this rotation contract mirrored with the endpoint CLI and beaconjson exporter.
 func appendEndpointJSONL(path string, line []byte, rotateBytes int64, rotateArchives int) error {
+	return appendEndpointJSONLMode(path, line, rotateBytes, rotateArchives, endpointRuntimeFileMode)
+}
+
+func appendEndpointJSONLMode(path string, line []byte, rotateBytes int64, rotateArchives int, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	lock, err := openEndpointRuntimeFile(path+".lock", os.O_CREATE|os.O_RDWR)
+	lock, err := openEndpointFile(path+".lock", os.O_CREATE|os.O_RDWR, mode)
 	if err != nil {
 		return err
 	}
@@ -625,7 +645,7 @@ func appendEndpointJSONL(path string, line []byte, rotateBytes int64, rotateArch
 	if err := rotateEndpointLogIfNeeded(path, rotateBytes, rotateArchives, int64(len(line))); err != nil {
 		return err
 	}
-	f, err := openEndpointRuntimeFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY)
+	f, err := openEndpointFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, mode)
 	if err != nil {
 		return err
 	}
@@ -634,7 +654,7 @@ func appendEndpointJSONL(path string, line []byte, rotateBytes int64, rotateArch
 	return err
 }
 
-func openEndpointRuntimeFile(path string, flag int) (*os.File, error) {
+func openEndpointFile(path string, flag int, mode os.FileMode) (*os.File, error) {
 	existed := true
 	if _, err := os.Stat(path); err != nil {
 		if !os.IsNotExist(err) {
@@ -642,11 +662,11 @@ func openEndpointRuntimeFile(path string, flag int) (*os.File, error) {
 		}
 		existed = false
 	}
-	f, err := os.OpenFile(path, flag, endpointRuntimeFileMode)
+	f, err := os.OpenFile(path, flag, mode)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.Chmod(path, endpointRuntimeFileMode); err != nil && !existed {
+	if err := os.Chmod(path, mode); err != nil && !existed {
 		_ = f.Close()
 		return nil, err
 	}
