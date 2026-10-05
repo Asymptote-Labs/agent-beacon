@@ -111,11 +111,6 @@ type state struct {
 }
 
 func inspect(t Target, path string) (state, error) {
-	return inspectNamed(t, path, ServerName)
-}
-
-// inspectNamed reads what a config holds under one server name.
-func inspectNamed(t Target, path, name string) (state, error) {
 	var st state
 	cf, err := readConfig(path)
 	if err != nil {
@@ -134,7 +129,7 @@ func inspectNamed(t Target, path, name string) (state, error) {
 				return st, fmt.Errorf("%s: %q is not a table", path, t.container[0])
 			}
 		}
-		st.entry, st.exists = tomlTableEntry(parsed, t.container[0], name)
+		st.entry, st.exists = tomlTableEntry(parsed, t.container[0], ServerName)
 	default:
 		parsed, err := decodeJSONC(cf.text)
 		if err != nil {
@@ -146,12 +141,12 @@ func inspectNamed(t Target, path, name string) (state, error) {
 			if err != nil {
 				return st, fmt.Errorf("%s: %v", path, err)
 			}
-			if len(chain) == len(t.container)+1 && chain[len(chain)-1].memberCount(name) > 1 {
-				return st, fmt.Errorf("%s: %q appears more than once", path, name)
+			if len(chain) == len(t.container)+1 && chain[len(chain)-1].memberCount(ServerName) > 1 {
+				return st, fmt.Errorf("%s: %q appears more than once", path, ServerName)
 			}
 		}
 		container := dig(parsed, t.container)
-		if raw, ok := container[name]; ok {
+		if raw, ok := container[ServerName]; ok {
 			st.exists = true
 			st.entry, _ = raw.(map[string]any)
 			if st.entry == nil {

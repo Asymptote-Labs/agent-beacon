@@ -60,8 +60,9 @@ type WizardOptions struct {
 	DestinationOnly   bool
 	PresetDestination string
 	PresetPrivacyMode string
-	// OfferAgentTools adds the agent tools screen before confirm, whichever destination is
-	// chosen. Both tools start selected: turning one off is the person's choice to make.
+	// OfferAgentTools adds the agent tools screen before confirm. The Beacon agent skills are
+	// offered whichever destination is chosen; Beacon Cloud MCP only with Beacon Cloud. Every
+	// offered tool starts selected: turning one off is the person's choice to make.
 	OfferAgentTools bool
 
 	// SignIn signs in in place. When nil the wizard keeps its original contract:
@@ -93,10 +94,11 @@ type WizardResult struct {
 	// nothing to authorize it.
 	WithoutAccount bool
 
-	// InstallMCP and InstallSkills are the agent tools the person kept selected. Both are
-	// false when the screen was not offered.
-	InstallMCP    bool
-	InstallSkills bool
+	// ConnectCloudMCP and InstallSkills are the agent tools the person kept selected. Both are
+	// false when the screen was not offered, and ConnectCloudMCP is false unless the
+	// destination is Beacon Cloud.
+	ConnectCloudMCP bool
+	InstallSkills   bool
 }
 
 type wizardScreen int
@@ -113,11 +115,10 @@ const (
 	confirmScreen
 )
 
-// Rows of the agent tools screen.
+// Agent tools the wizard can offer.
 const (
-	agentToolMCP = iota
+	agentToolCloudMCP = iota
 	agentToolSkills
-	agentToolCount
 )
 
 type wizardModel struct {
@@ -206,10 +207,10 @@ var (
 func newWizardModel(options WizardOptions) wizardModel {
 	screen := welcomeScreen
 	result := WizardResult{
-		Destination:   options.PresetDestination,
-		PrivacyMode:   options.PresetPrivacyMode,
-		InstallMCP:    options.OfferAgentTools,
-		InstallSkills: options.OfferAgentTools,
+		Destination:     options.PresetDestination,
+		PrivacyMode:     options.PresetPrivacyMode,
+		ConnectCloudMCP: options.OfferAgentTools,
+		InstallSkills:   options.OfferAgentTools,
 	}
 	needSignIn := false
 	if options.DestinationOnly {
@@ -328,10 +329,22 @@ func (m wizardModel) isPicker() bool {
 	return m.screen == destinationScreen || m.screen == privacyScreen || m.screen == signInFailedScreen || m.screen == agentToolsScreen
 }
 
+// agentTools are the rows of the agent tools screen, in order.
+func (m wizardModel) agentTools() []int {
+	if m.result.Destination == DestinationAsymptote {
+		return []int{agentToolCloudMCP, agentToolSkills}
+	}
+	return []int{agentToolSkills}
+}
+
 func (m *wizardModel) toggleAgentTool() {
-	switch m.selected {
-	case agentToolMCP:
-		m.result.InstallMCP = !m.result.InstallMCP
+	tools := m.agentTools()
+	if m.selected < 0 || m.selected >= len(tools) {
+		return
+	}
+	switch tools[m.selected] {
+	case agentToolCloudMCP:
+		m.result.ConnectCloudMCP = !m.result.ConnectCloudMCP
 	case agentToolSkills:
 		m.result.InstallSkills = !m.result.InstallSkills
 	}
@@ -476,6 +489,9 @@ func (m wizardModel) advance() (tea.Model, tea.Cmd) {
 	case agentToolsScreen:
 		m.screen = confirmScreen
 	case confirmScreen:
+		if m.result.Destination != DestinationAsymptote {
+			m.result.ConnectCloudMCP = false
+		}
 		m.result.Completed = true
 		return m, tea.Quit
 	}
@@ -496,7 +512,7 @@ func (m wizardModel) choiceCount() int {
 	case signInFailedScreen:
 		return len(m.recoveryChoices())
 	case agentToolsScreen:
-		return agentToolCount
+		return len(m.agentTools())
 	default:
 		return len(m.destinations())
 	}
@@ -677,12 +693,12 @@ func (m wizardModel) View() string {
 		body = strings.Join(rows, "\n")
 	case agentToolsScreen:
 		title = "Set up your agents"
-		body = "Give your agents their own history. Both run on this machine and send nothing anywhere.\n\n"
+		body = "Give your agents their own history.\n\n"
 		var rows []string
-		for index := 0; index < agentToolCount; index++ {
-			label, detail := agentToolCopy(index)
+		for index, tool := range m.agentTools() {
+			label, detail := agentToolCopy(tool)
 			box := "[ ] "
-			if m.agentToolOn(index) {
+			if m.agentToolOn(tool) {
 				box = "[x] "
 			}
 			line := "    " + box + label
@@ -726,10 +742,10 @@ func (m wizardModel) View() string {
 	return lipgloss.NewStyle().Padding(1, 3).Render(card)
 }
 
-func (m wizardModel) agentToolOn(index int) bool {
-	switch index {
-	case agentToolMCP:
-		return m.result.InstallMCP
+func (m wizardModel) agentToolOn(tool int) bool {
+	switch tool {
+	case agentToolCloudMCP:
+		return m.result.ConnectCloudMCP
 	case agentToolSkills:
 		return m.result.InstallSkills
 	}
@@ -738,11 +754,11 @@ func (m wizardModel) agentToolOn(index int) bool {
 
 func (m wizardModel) agentToolsSummary() string {
 	var on []string
-	if m.result.InstallMCP {
-		on = append(on, "Beacon MCP server")
-	}
-	if m.result.InstallSkills {
-		on = append(on, "Beacon agent skills")
+	for _, tool := range m.agentTools() {
+		if m.agentToolOn(tool) {
+			label, _ := agentToolCopy(tool)
+			on = append(on, label)
+		}
 	}
 	if len(on) == 0 {
 		return "none"
@@ -750,15 +766,17 @@ func (m wizardModel) agentToolsSummary() string {
 	return strings.Join(on, ", ")
 }
 
-func agentToolCopy(index int) (string, string) {
-	if index == agentToolMCP {
-		return "Beacon MCP server",
-			"Registers `beacon mcp serve` with Claude Code, Codex, Cursor, VS Code, Gemini CLI and " +
-				"OpenCode, so agents can search this machine's sessions."
+func agentToolCopy(tool int) (string, string) {
+	if tool == agentToolCloudMCP {
+		return "Beacon Cloud MCP",
+			"Adds Beacon Cloud MCP to Claude Code, Codex, Cursor, VS Code, Gemini CLI and OpenCode, " +
+				"so your agents can search the history this machine forwards. Each signs in with " +
+				"beacon.sh the first time; no token is written."
 	}
 	return "Beacon agent skills",
 		"Installs the Beacon skills for every project (~/.agents/skills, and ~/.claude/skills for " +
-			"Claude Code): recall lessons from past sessions, distill new ones, and build lenses."
+			"Claude Code): recall lessons from past sessions, distill new ones, and build lenses. " +
+			"Installed on this machine; nothing is sent."
 }
 
 func destinationCopy(destination string) (string, string) {

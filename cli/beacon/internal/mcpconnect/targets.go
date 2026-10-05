@@ -61,8 +61,6 @@ type Target struct {
 	path      func(home string) (string, error)
 	container []string // path to the object holding servers, e.g. ["mcpServers"]
 	entry     func(url, tokenEnv string) ordered
-	// localEntry is the entry for the local stdio server `beacon mcp serve`, run by command.
-	localEntry func(command string) ordered
 	// skeleton is the content of a config Beacon creates, besides the server entry.
 	skeleton ordered
 	// cli names a CLI whose own `mcp add`/`mcp remove` Beacon prefers when it is on PATH.
@@ -91,9 +89,6 @@ func Targets() []Target {
 				}
 				return e
 			},
-			localEntry: func(command string) ordered {
-				return ordered{{"type", "stdio"}, {"command", command}, {"args", localArgs()}}
-			},
 			oauthNext: "In Claude Code, run /mcp, choose " + ServerName + ", and sign in.",
 			tokenNext: "Set %s in the environment Claude Code starts from.",
 		},
@@ -107,9 +102,6 @@ func Targets() []Target {
 				}
 				return e
 			},
-			localEntry: func(command string) ordered {
-				return ordered{{"command", command}, {"args", localArgs()}}
-			},
 			oauthNext: "Run `codex mcp login " + ServerName + "`.",
 			tokenNext: "Set %s in the environment Codex starts from.",
 		},
@@ -122,9 +114,6 @@ func Targets() []Target {
 					e = append(e, field{"headers", ordered{{"Authorization", "Bearer ${env:" + tokenEnv + "}"}}})
 				}
 				return e
-			},
-			localEntry: func(command string) ordered {
-				return ordered{{"command", command}, {"args", localArgs()}}
 			},
 			oauthNext: "In Cursor Settings → MCP, find " + ServerName + " (marked \"Needs login\") and sign in.",
 			tokenNext: "Set %s in the environment Cursor starts from.",
@@ -140,9 +129,6 @@ func Targets() []Target {
 				}
 				return e
 			},
-			localEntry: func(command string) ordered {
-				return ordered{{"type", "stdio"}, {"command", command}, {"args", localArgs()}}
-			},
 			oauthNext: "In VS Code, run \"MCP: List Servers\", start " + ServerName + ", and sign in.",
 			tokenNext: "VS Code asks for the token the first time " + ServerName + " starts and keeps it in its secret storage; it does not read %s.",
 		},
@@ -155,9 +141,6 @@ func Targets() []Target {
 					e = append(e, field{"headers", ordered{{"Authorization", "Bearer ${" + tokenEnv + "}"}}})
 				}
 				return e
-			},
-			localEntry: func(command string) ordered {
-				return ordered{{"command", command}, {"args", localArgs()}}
 			},
 			oauthNext: "In Gemini CLI, run /mcp auth " + ServerName + ". Gemini CLI loads MCP servers only in trusted folders.",
 			tokenNext: "Set %s in the environment Gemini CLI starts from. Gemini CLI loads MCP servers only in trusted folders.",
@@ -172,9 +155,6 @@ func Targets() []Target {
 					e = append(e, field{"oauth", false}, field{"headers", ordered{{"Authorization", "Bearer {env:" + tokenEnv + "}"}}})
 				}
 				return e
-			},
-			localEntry: func(command string) ordered {
-				return ordered{{"type", "local"}, {"command", append([]any{command}, localArgs()...)}, {"enabled", true}}
 			},
 			oauthNext: "Run `opencode mcp auth " + ServerName + "`.",
 			tokenNext: "Set %s in the environment OpenCode starts from.",

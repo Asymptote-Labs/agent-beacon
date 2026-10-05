@@ -104,11 +104,12 @@ type onboardingOutcome struct {
 	// machine marked onboarded, so the retry took the already-completed branch, said
 	// nothing, and never offered the destination again.
 	Persist func() error
-	// InstallMCP and InstallSkills are the agent tools the person kept selected. They are
-	// offered whichever destination was chosen, and installed after lifecycle.Install
-	// returns, like everything else the wizard decided.
-	InstallMCP    bool
-	InstallSkills bool
+	// ConnectCloudMCP and InstallSkills are the agent tools the person kept selected, acted
+	// on after lifecycle.Install returns like everything else the wizard decided. The skills
+	// are offered whichever destination was chosen; Beacon Cloud MCP only with Beacon Cloud,
+	// and it is registered only once the endpoint forwards there.
+	ConnectCloudMCP bool
+	InstallSkills   bool
 }
 
 // maybeRunOnboarding runs the one-time account and destination wizard when this
@@ -263,11 +264,15 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 	}
 
 	decided := onboardingOutcome{
-		Connect:       connectAfterInstall,
-		InstallMCP:    result.InstallMCP,
-		InstallSkills: result.InstallSkills,
+		Connect:         connectAfterInstall,
+		ConnectCloudMCP: result.Destination == onboarding.DestinationAsymptote && result.ConnectCloudMCP,
+		InstallSkills:   result.InstallSkills,
 	}
-	mcpAnswer := onboarding.AgentToolAnswer(result.InstallMCP)
+	// Beacon Cloud MCP is only asked with Beacon Cloud, so a Local run records no answer.
+	cloudMCPAnswer := ""
+	if result.Destination == onboarding.DestinationAsymptote {
+		cloudMCPAnswer = onboarding.AgentToolAnswer(decided.ConnectCloudMCP)
+	}
 	skillsAnswer := onboarding.AgentToolAnswer(result.InstallSkills)
 	email := status.User.Email
 	// A run that never signed in is recorded as skipped, not authenticated.
@@ -284,14 +289,14 @@ func runAccountOnboarding(cmd *cobra.Command, profile *onboarding.Profile, desti
 				BeaconVersion: version.GetVersion(),
 				Destination:   recordedDestination,
 				PrivacyMode:   privacyMode,
-				MCPServer:     mcpAnswer,
+				CloudMCP:      cloudMCPAnswer,
 				AgentSkills:   skillsAnswer,
 			}
 			profile.Pending = nil
 		} else {
 			profile.Onboarding.Destination = recordedDestination
 			profile.Onboarding.PrivacyMode = privacyMode
-			profile.Onboarding.MCPServer = mcpAnswer
+			profile.Onboarding.CloudMCP = cloudMCPAnswer
 			profile.Onboarding.AgentSkills = skillsAnswer
 		}
 		if _, err := onboarding.EnsureInstallID(profile); err != nil {
@@ -554,7 +559,7 @@ type endpointOnboardingStatus struct {
 	BeaconVersion string `json:"beacon_version,omitempty"`
 	Destination   string `json:"destination,omitempty"`
 	PrivacyMode   string `json:"privacy_mode,omitempty"`
-	MCPServer     string `json:"mcp_server,omitempty"`
+	CloudMCP      string `json:"cloud_mcp,omitempty"`
 	AgentSkills   string `json:"agent_skills,omitempty"`
 	Pending       bool   `json:"pending_submission"`
 	SkipReason    string `json:"skip_reason,omitempty"`
@@ -596,7 +601,7 @@ func runEndpointOnboarding(cmd *cobra.Command, args []string) error {
 		BeaconVersion: profile.Onboarding.BeaconVersion,
 		Destination:   profile.Onboarding.Destination,
 		PrivacyMode:   profile.Onboarding.PrivacyMode,
-		MCPServer:     profile.Onboarding.MCPServer,
+		CloudMCP:      profile.Onboarding.CloudMCP,
 		AgentSkills:   profile.Onboarding.AgentSkills,
 		Pending:       profile.Pending != nil,
 		SkipReason:    reason,
@@ -628,8 +633,8 @@ func runEndpointOnboarding(cmd *cobra.Command, args []string) error {
 	if status.PrivacyMode != "" {
 		fmt.Fprintf(out, "Managed privacy: %s\n", managedprivacy.Label(status.PrivacyMode))
 	}
-	if status.MCPServer != "" {
-		fmt.Fprintf(out, "Beacon MCP server: %s\n", status.MCPServer)
+	if status.CloudMCP != "" {
+		fmt.Fprintf(out, "Beacon Cloud MCP: %s\n", status.CloudMCP)
 	}
 	if status.AgentSkills != "" {
 		fmt.Fprintf(out, "Beacon agent skills: %s\n", status.AgentSkills)

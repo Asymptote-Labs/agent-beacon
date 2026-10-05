@@ -45,21 +45,9 @@ func tomlBlock(table string, name string, fields []field, eol string) string {
 	var b strings.Builder
 	b.WriteString("[" + table + "." + tomlKey(name) + "]" + eol)
 	for _, f := range fields {
-		b.WriteString(f.Key + " = " + tomlValue(f.Value) + eol)
+		b.WriteString(f.Key + " = " + tomlString(fmt.Sprint(f.Value)) + eol)
 	}
 	return b.String()
-}
-
-// tomlValue renders a string, or an array of strings, the way `codex mcp add` writes them.
-func tomlValue(value any) string {
-	if list, ok := value.([]any); ok {
-		parts := make([]string, len(list))
-		for i, v := range list {
-			parts[i] = tomlString(fmt.Sprint(v))
-		}
-		return "[" + strings.Join(parts, ", ") + "]"
-	}
-	return tomlString(fmt.Sprint(value))
 }
 
 var bareTOMLKey = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)

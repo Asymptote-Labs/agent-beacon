@@ -154,13 +154,14 @@ Or inspect the raw event stream:
 > Local to keep everything on this machine, and disconnect any time with
 > `beacon endpoint disconnect`.
 
-Whichever destination you choose, the wizard also sets up two agent tools unless you
-turn them off: the local `beacon` MCP server (`beacon mcp serve`) in every detected
-harness, and the [Beacon Skills](https://docs.beacon.sh/concepts/beacon-skills) in
-`~/.agents/skills` and `~/.claude/skills`. Both read local data only. Redo or undo
-them with `beacon mcp install|uninstall` and `beacon skills install|uninstall`.
+Whichever destination you choose, the wizard also installs the
+[Beacon Skills](https://docs.beacon.sh/concepts/beacon-skills) into `~/.agents/skills`
+and `~/.claude/skills` unless you turn them off; redo or undo that with
+`beacon skills install|uninstall`.
 
-If this endpoint forwards to Beacon Cloud, your agents can search that history over MCP:
+If you choose Beacon Cloud, the wizard also registers Beacon Cloud MCP in your harnesses
+unless you turn it off, so your agents can search the forwarded history. To do it later,
+or for an endpoint connected another way:
 
 ```bash
 beacon mcp connect

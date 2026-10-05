@@ -7,36 +7,19 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/agentskills"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/mcpconnect"
 )
 
-// Agent tools are what onboarding sets up for the person's agents, whichever destination they
-// chose: the local Beacon MCP server registered in each detected harness, and the Beacon Agent
-// Skills installed user-wide. Both are selected by default in the wizard and turned off there;
-// `beacon mcp install|uninstall` and `beacon skills install|uninstall` redo or undo them later.
-// Neither touches the network.
+// Agent tools are what onboarding sets up for the person's agents once the install succeeds:
+// Beacon Cloud MCP, offered only when Beacon Cloud was chosen, and the Beacon Agent Skills,
+// offered whichever destination was chosen. Both start selected in the wizard and are turned
+// off there. `beacon mcp connect|disconnect` and `beacon skills install|uninstall` redo or
+// undo them later. Installing the skills never touches the network.
 
 // Seams for tests.
 var (
-	agentToolsHome       = mcpHome
-	agentToolsExecutable = beaconExecutable
+	agentToolsHome            = mcpHome
+	agentToolsConnectCloudMCP = connectCloudMCP
 )
-
-var mcpInstallCmd = &cobra.Command{
-	Use:          "install",
-	Short:        "Register the local Beacon MCP server in detected harnesses",
-	SilenceUsage: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return installLocalMCP(cmd.OutOrStdout(), cmd)
-	},
-}
-
-var mcpUninstallCmd = &cobra.Command{
-	Use:          "uninstall",
-	Short:        "Remove the local Beacon MCP server entries Beacon registered",
-	SilenceUsage: true,
-	RunE:         runMCPUninstall,
-}
 
 var skillsCmd = &cobra.Command{
 	Use:   "skills",
@@ -65,114 +48,34 @@ var skillsUninstallCmd = &cobra.Command{
 }
 
 func init() {
-	mcpCmd.AddCommand(mcpInstallCmd, mcpUninstallCmd)
-	mcpInstallCmd.Flags().StringSliceVar(&mcpConnectOpts.harnesses, "harness", nil, "Harness to configure (repeatable; default: every detected harness)")
 	rootCmd.AddCommand(skillsCmd)
 	skillsCmd.AddCommand(skillsInstallCmd, skillsUninstallCmd)
-	mcpInstallCmd.PreRunE = refuseRoot("beacon mcp install")
-	mcpUninstallCmd.PreRunE = refuseRoot("beacon mcp uninstall")
 	skillsInstallCmd.PreRunE = refuseRoot("beacon skills install")
 	skillsUninstallCmd.PreRunE = refuseRoot("beacon skills uninstall")
 }
 
-func localMCPOptions(home string) mcpconnect.LocalOptions {
-	return mcpconnect.LocalOptions{Home: home, Command: agentToolsExecutable(), LookPath: mcpLookPath, Run: mcpRunCLI}
-}
-
-// installAgentTools carries out the agent tools the wizard kept selected. It runs after the local
-// install has succeeded, and a failure is a warning: the endpoint works without them.
-func installAgentTools(cmd *cobra.Command, decided onboardingOutcome) {
-	if !decided.InstallMCP && !decided.InstallSkills {
+// installAgentSkillsFromOnboarding installs the skills the wizard kept selected. It runs after
+// the local install has succeeded, and a failure is a warning: the endpoint works without them.
+func installAgentSkillsFromOnboarding(cmd *cobra.Command, decided onboardingOutcome) {
+	if !decided.InstallSkills {
 		return
 	}
-	out := cmd.OutOrStdout()
-	if decided.InstallMCP {
-		if err := installLocalMCP(out, cmd); err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "beacon: the Beacon MCP server was not registered (%v). Run `beacon mcp install` to try again.\n", err)
-		}
-	}
-	if decided.InstallSkills {
-		if err := installAgentSkills(out); err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "beacon: the Beacon agent skills were not installed (%v). Run `beacon skills install` to try again.\n", err)
-		}
+	if err := installAgentSkills(cmd.OutOrStdout()); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "beacon: the Beacon agent skills were not installed (%v). Run `beacon skills install` to try again.\n", err)
 	}
 }
 
-func installLocalMCP(out io.Writer, cmd *cobra.Command) error {
-	home, err := agentToolsHome()
+// connectCloudMCPFromOnboarding registers Beacon Cloud MCP in the detected harnesses, as
+// `beacon mcp connect --yes` would, once this endpoint forwards to Beacon Cloud. Leaving the
+// row selected on the wizard's agent tools screen is the confirmation connect would otherwise
+// ask for. It writes only the URL (each harness signs in with OAuth on first use) and never a
+// token. A failure is a warning naming the retry.
+func connectCloudMCPFromOnboarding(cmd *cobra.Command) {
+	fmt.Fprintln(cmd.OutOrStdout())
+	err := agentToolsConnectCloudMCP(commandContext(cmd), cmd.OutOrStdout(), cloudMCPRequest{yes: true})
 	if err != nil {
-		return err
+		fmt.Fprintf(cmd.ErrOrStderr(), "beacon: Beacon Cloud MCP was not registered (%v). Run `beacon mcp connect` to try again.\n", err)
 	}
-	targets, _, err := resolveMCPTargets(mcpConnectOpts.harnesses)
-	if err != nil {
-		return err
-	}
-	var local []mcpconnect.Target
-	for _, t := range targets {
-		if t.LocalSupported() {
-			local = append(local, t)
-		}
-	}
-	if len(local) == 0 {
-		fmt.Fprintln(out, "Beacon MCP server: no harness Beacon can register it in was detected.")
-		return nil
-	}
-	items, err := mcpconnect.InstallLocal(commandContext(cmd), localMCPOptions(home), local)
-	if err != nil {
-		return err
-	}
-	var failed int
-	for _, it := range items {
-		where := displayPath(home, it.Path)
-		switch {
-		case it.Err != nil:
-			failed++
-			fmt.Fprintf(out, "Beacon MCP server: %s not registered: %v\n", it.Target.DisplayName, it.Err)
-		case it.Action == mcpconnect.ActionAdd:
-			fmt.Fprintf(out, "Beacon MCP server: registered for %s (%s)\n", it.Target.DisplayName, where)
-		case it.Action == mcpconnect.ActionPresent:
-			fmt.Fprintf(out, "Beacon MCP server: %s already has a %q entry; left as is\n", it.Target.DisplayName, mcpconnect.LocalServerName)
-		default:
-			fmt.Fprintf(out, "Beacon MCP server: %s skipped: %s\n", it.Target.DisplayName, it.Detail)
-		}
-	}
-	if failed > 0 {
-		return fmt.Errorf("%d harness(es) could not be configured", failed)
-	}
-	return nil
-}
-
-func runMCPUninstall(cmd *cobra.Command, args []string) error {
-	out := cmd.OutOrStdout()
-	home, err := agentToolsHome()
-	if err != nil {
-		return err
-	}
-	items, err := mcpconnect.UninstallLocal(commandContext(cmd), localMCPOptions(home))
-	if err != nil {
-		return err
-	}
-	if len(items) == 0 {
-		fmt.Fprintln(out, "No local Beacon MCP server entries written by Beacon.")
-		return nil
-	}
-	var failed int
-	for _, it := range items {
-		where := displayPath(home, it.Path)
-		switch {
-		case it.Err != nil:
-			failed++
-			fmt.Fprintf(out, "%s: %v\n", it.Target.DisplayName, it.Err)
-		case it.Action == mcpconnect.ActionRemove:
-			fmt.Fprintf(out, "Removed from %s (%s)\n", it.Target.DisplayName, where)
-		default:
-			fmt.Fprintf(out, "%s: %s\n", it.Target.DisplayName, it.Detail)
-		}
-	}
-	if failed > 0 {
-		return fmt.Errorf("%d entr(ies) could not be removed", failed)
-	}
-	return nil
 }
 
 func installAgentSkills(out io.Writer) error {

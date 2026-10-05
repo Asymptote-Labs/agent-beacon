@@ -29,9 +29,11 @@ Beacon Cloud MCP is read-only. Its tools are `beacon_search_sessions`, `beacon_g
 `beacon_read_session`, `beacon_get_event`, `beacon_lookup` and `beacon_usage`.
 
 <Note>
-  `beacon mcp connect` is an explicit, opt-in command. `beacon endpoint install` and the onboarding
-  wizard never run it; after you choose Beacon Cloud in the wizard, the install only suggests it.
-  It refuses to run as root, and in CI or without a terminal it runs only with `--yes`.
+  `beacon mcp connect` never runs on an unattended install. The interactive onboarding wizard runs
+  it for you after you choose Beacon Cloud, unless you turn "Beacon Cloud MCP" off on its
+  [agent tools screen](/cli/endpoint-onboarding#agent-tools); if you turn it off, the install
+  suggests it instead. It refuses to run as root, and in CI or without a terminal it runs only
+  with `--yes`.
 </Note>
 
 ## `beacon mcp connect`
