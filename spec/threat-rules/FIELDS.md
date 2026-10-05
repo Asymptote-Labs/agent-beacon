@@ -81,6 +81,7 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.gen_ai.tool.description` | string |
 | `e.gen_ai.tool.name` | string |
 | `e.gen_ai.tool.type` | string |
+| `e.gen_ai.usage.cache_creation.ephemeral_1h_input_tokens` | int |
 | `e.gen_ai.usage.cache_creation.input_tokens` | int |
 | `e.gen_ai.usage.cache_read.input_tokens` | int |
 | `e.gen_ai.usage.cost_usd` | double |

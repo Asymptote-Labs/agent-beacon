@@ -32,18 +32,22 @@ const defaultNearLimitRatio = 0.8
 // UnpricedEvents and UnpricedTokens count what the estimate is missing: usage whose model the
 // catalog does not price.
 type Usage struct {
-	InputTokens              int64   `json:"input_tokens"`
-	OutputTokens             int64   `json:"output_tokens"`
-	CacheReadInputTokens     int64   `json:"cache_read_input_tokens"`
-	CacheCreationInputTokens int64   `json:"cache_creation_input_tokens"`
-	ReasoningOutputTokens    int64   `json:"reasoning_output_tokens"`
-	CostUSD                  float64 `json:"cost_usd"`
-	EstimatedCostUSD         float64 `json:"estimated_cost_usd"`
-	EffectiveCostUSD         float64 `json:"effective_cost_usd"`
-	CostSource               string  `json:"cost_source,omitempty"`
-	UnpricedEvents           int     `json:"unpriced_events,omitempty"`
-	UnpricedTokens           int64   `json:"unpriced_tokens,omitempty"`
-	Events                   int     `json:"events"`
+	InputTokens              int64 `json:"input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+	// CacheCreation1hInputTokens is the subset of CacheCreationInputTokens written with a
+	// one-hour TTL, from gen_ai.usage.cache_creation.ephemeral_1h_input_tokens. It is a breakdown
+	// like ReasoningOutputTokens: never part of TotalTokens, and omitted when no source reported it.
+	CacheCreation1hInputTokens int64   `json:"cache_creation_1h_input_tokens,omitempty"`
+	ReasoningOutputTokens      int64   `json:"reasoning_output_tokens"`
+	CostUSD                    float64 `json:"cost_usd"`
+	EstimatedCostUSD           float64 `json:"estimated_cost_usd"`
+	EffectiveCostUSD           float64 `json:"effective_cost_usd"`
+	CostSource                 string  `json:"cost_source,omitempty"`
+	UnpricedEvents             int     `json:"unpriced_events,omitempty"`
+	UnpricedTokens             int64   `json:"unpriced_tokens,omitempty"`
+	Events                     int     `json:"events"`
 
 	// The exported cost fields above are derived from these by settle, so sums stay exact:
 	// estimates are summed in integer microdollars and converted once, and the effective cost
@@ -64,6 +68,7 @@ func (u *Usage) add(delta Usage) {
 	u.OutputTokens += delta.OutputTokens
 	u.CacheReadInputTokens += delta.CacheReadInputTokens
 	u.CacheCreationInputTokens += delta.CacheCreationInputTokens
+	u.CacheCreation1hInputTokens += delta.CacheCreation1hInputTokens
 	u.ReasoningOutputTokens += delta.ReasoningOutputTokens
 	u.CostUSD += delta.CostUSD
 	u.UnpricedEvents += delta.UnpricedEvents
@@ -531,6 +536,8 @@ func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []
 		}
 		if usage.CacheCreation != nil && usage.CacheCreation.InputTokens != nil {
 			ue.usage.CacheCreationInputTokens = *usage.CacheCreation.InputTokens
+			// Clamped to the write count it is a subset of.
+			ue.usage.CacheCreation1hInputTokens = usage.CacheCreation.OneHourInputTokens()
 		}
 		if usage.Reasoning != nil && usage.Reasoning.OutputTokens != nil {
 			ue.usage.ReasoningOutputTokens = *usage.Reasoning.OutputTokens
@@ -684,7 +691,9 @@ func dedupeOverlappingChannels(events []*usageEvent) []*usageEvent {
 					ue.usage.CacheReadInputTokens = 0
 				}
 				if fs.cacheCreation {
+					// The one-hour subset is part of the writes, not a field of its own.
 					ue.usage.CacheCreationInputTokens = 0
+					ue.usage.CacheCreation1hInputTokens = 0
 				}
 				if fs.reasoning {
 					ue.usage.ReasoningOutputTokens = 0
@@ -730,14 +739,27 @@ func resolveCumulativeSeries(events []*usageEvent) {
 			return points[i].ts.Before(points[j].ts)
 		})
 		previous := 0.0
+		var previous1h int64
 		for _, point := range points {
 			delta := point.seriesValue - previous
-			if delta < 0 {
+			reset := delta < 0
+			if reset {
 				// Counter reset: the raw value is the new interval's total.
 				delta = point.seriesValue
 			}
 			previous = point.seriesValue
+			oneHour := point.usage.CacheCreation1hInputTokens
 			setUsageField(&point.usage, point.seriesField, delta)
+			if point.seriesField == "cache_creation_input_tokens" {
+				// The one-hour subset of a cumulative write counter is cumulative too, and is
+				// differenced alongside it, resetting when the counter does.
+				delta1h := oneHour
+				if !reset {
+					delta1h -= previous1h
+				}
+				previous1h = oneHour
+				point.usage.CacheCreation1hInputTokens = min(max(delta1h, 0), point.usage.CacheCreationInputTokens)
+			}
 		}
 	}
 }

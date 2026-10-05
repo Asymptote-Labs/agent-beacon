@@ -250,3 +250,6 @@ The host enforces these rules; a lens does not opt into them.
 - `lenses/v1`: initial specification.
 - `lenses/v1` (additive): `token_usage`, the counted usage of the trace.
 - `lenses/v1` (additive): `trace.events[].error`, the failure an event recorded.
+- `lenses/v1` (additive): `cache_creation_1h_input_tokens` in every usage object,
+  the subset of `cache_creation_input_tokens` written with a one-hour TTL where
+  the source reported it. It is a breakdown; never add it to a total.

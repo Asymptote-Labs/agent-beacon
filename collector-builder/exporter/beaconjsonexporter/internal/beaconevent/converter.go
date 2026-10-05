@@ -1362,7 +1362,13 @@ func GenAIToolFromAttrs(attrs map[string]interface{}) *GenAIToolInfo {
 func GenAIUsageFromAttrs(attrs map[string]interface{}) *GenAIUsageInfo {
 	usage := &GenAIUsageInfo{}
 	if value, ok := Int64Attr(attrs, "gen_ai.usage.cache_creation.input_tokens", "gen_ai.usage.cache_creation_input_tokens", "cache_creation_tokens"); ok {
-		usage.CacheCreation = &GenAIUsageCacheCreationInfo{InputTokens: &value}
+		// The one-hour subset of the writes, from the browser extension's Claude adapter.
+		// Claude Code's own api_request log reports only the cache_creation_tokens total.
+		var oneHour *int64
+		if h, ok := Int64Attr(attrs, "gen_ai.usage.cache_creation.ephemeral_1h_input_tokens"); ok {
+			oneHour = &h
+		}
+		usage.CacheCreation = asymptoteobserve.NewCacheCreationUsage(value, oneHour)
 	}
 	if value, ok := Int64Attr(attrs, "gen_ai.usage.cache_read.input_tokens", "gen_ai.usage.cache_read_input_tokens", "cache_read_tokens"); ok {
 		usage.CacheRead = &GenAIUsageCacheReadInfo{InputTokens: &value}
