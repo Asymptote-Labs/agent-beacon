@@ -61,6 +61,9 @@ func MapEvent(ev UsageEvent) schema.Event {
 	})
 	out.Timestamp = schema.FormatTimestamp(ev.Timestamp)
 	out.Model = ev.Model
+	if user, ok := MemberUser(ev); ok {
+		out.User = user
+	}
 
 	usage := &schema.GenAIUsageInfo{}
 	if n := ev.TokenUsage.InputTokens; n > 0 {
@@ -111,6 +114,27 @@ func MapEvent(ev UsageEvent) schema.Event {
 	}
 	out.Raw = map[string]interface{}{"cursor": raw}
 	return out
+}
+
+// MemberUser is the Cursor team member who made the request, as the event's user.
+//
+// NewEvent fills the user with whoever ran the sync, which is right for an event a local agent
+// produced and wrong here: a --team sync collects every member's requests, and crediting all of
+// them to the admin who ran it would put the whole team's spend under one person in every by-user
+// rollup. So the user is the member Cursor names. The UID is namespaced ("cursor:<id>") because it
+// is a Cursor account id rather than an OS uid; the token rollups read a namespaced UID as an
+// account identity and never reattribute it to the endpoint's local user.
+//
+// An event naming no member keeps the local user, since there is nobody else to credit.
+func MemberUser(ev UsageEvent) (schema.UserInfo, bool) {
+	id := strings.TrimSpace(ev.UserID)
+	if id == "" {
+		id = strings.TrimSpace(ev.UserEmail)
+	}
+	if id == "" {
+		return schema.UserInfo{}, false
+	}
+	return schema.UserInfo{Name: strings.TrimSpace(ev.UserEmail), UID: "cursor:" + id}, true
 }
 
 // Fingerprint is an event's identity built from everything the Admin API says about it. The API

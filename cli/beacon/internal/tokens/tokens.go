@@ -346,6 +346,18 @@ func sessionKey(event schema.Event) sessionContextKey {
 	}
 }
 
+// IsAccountUser reports whether an event's user is an account in a runtime's own records rather
+// than the local OS user. Such users carry a namespaced UID ("cursor:42"); OS uids are numbers or
+// Windows SIDs and never contain a colon.
+//
+// The endpoint fallbacks below exist to name the person behind an event that only knows the OS
+// user of the machine. An account user already names the person, and on a team-wide Cursor Admin
+// API sync it names someone other than whoever is logged in to the endpoint, so the fallback must
+// not replace it.
+func IsAccountUser(user schema.UserInfo) bool {
+	return strings.Contains(user.UID, ":")
+}
+
 func userKey(user schema.UserInfo) string {
 	name := strings.TrimSpace(user.Name)
 	uid := strings.TrimSpace(user.UID)
@@ -449,7 +461,7 @@ func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []
 				ue.user = contextualUser
 			}
 		}
-		if ue.user == userKey(event.User) {
+		if ue.user == userKey(event.User) && !IsAccountUser(event.User) {
 			endpoint := endpointKey(event)
 			nameKey := endpointUserNameKey{
 				endpoint: endpoint.endpoint,
