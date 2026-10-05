@@ -3,6 +3,7 @@ package dashboard
 import (
 	"bytes"
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -73,6 +74,29 @@ func TestBuiltinLensesLoad(t *testing.T) {
 	activity, ok := registry.byID["activity"]
 	if !ok || activity.info.Source != LensSourceBuiltin || activity.info.Title != "Activity" {
 		t.Fatalf("activity lens = %#v, %v", activity.info, ok)
+	}
+}
+
+// Built-in lenses are what users copy, so each one is held to the rules the spec sets for every
+// lens: untrusted content never goes through an HTML parser, and nothing is loaded by URL.
+func TestBuiltinLensesFollowTheSpecRules(t *testing.T) {
+	names, err := fs.Glob(builtinLensFiles, "lenses/*.lens.html")
+	if err != nil || len(names) == 0 {
+		t.Fatalf("built-in lenses: %v, %v", names, err)
+	}
+	for _, name := range names {
+		html, err := builtinLensFiles.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, banned := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "://", "fetch(", "XMLHttpRequest", "localStorage", "eval("} {
+			if bytes.Contains(html, []byte(banned)) {
+				t.Errorf("%s uses %q, which the spec forbids", name, banned)
+			}
+		}
+		if !bytes.Contains(html, []byte("window.beacon.getTrace()")) {
+			t.Errorf("%s does not call window.beacon.getTrace()", name)
+		}
 	}
 }
 
