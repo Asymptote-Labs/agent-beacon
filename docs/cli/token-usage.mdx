@@ -51,8 +51,11 @@ from. A turn with no token attribution is a turn whose runtime never reported an
 | fx (Vercel Labs) | input, output, cache read, cache creation | Reported (`cost_usd`) | Yes | Yes |
 | GitHub Copilot CLI | input, output, cache read, cache creation, reasoning | Not reported | Yes | Yes |
 | OpenClaw Gateway | input, output, cache read, cache creation | Not reported on the hook | Yes, per model response | Yes |
+| Cursor | input, output, cache read, cache creation | Reported as charged (`cost_usd`), via the Admin API sync | No: the Admin API names no conversation | Yes, the Cursor team member who made the request |
 
 OpenClaw reports usage on its `llm_output` hook, which is a *conversation* hook -- OpenClaw withholds those from every non-bundled plugin until `plugins.entries.beacon-endpoint.hooks.allowConversationAccess` is set in its config. An OpenClaw endpoint collecting prompts, tools, commands and files while reporting no tokens at all is almost always that key, and `beacon endpoint hooks status --harness openclaw` says so. OpenClaw does compute a per-turn price, from an operator-configured cost table rather than from a provider report, so Beacon does not record it as a reported cost. See [OpenClaw Gateway](/runtimes/openclaw-gateway).
+
+Cursor's hooks carry no token counts, so Cursor's usage comes from the Cursor Admin API instead, through the explicit [`beacon endpoint cursor usage sync`](/cli/endpoint-cursor-usage). It needs a team admin key in `CURSOR_ADMIN_API_KEY` and is the one Cursor path that uses the network. Each request becomes a `token.usage` event with input, output and cache tokens, and `cost_usd` from what Cursor reports it charged. The events carry no session, because the Admin API does not name the conversation a request came from. They count in totals and in the model, harness, user and time rollups, but not under any session. Each event's user is the Cursor team member who made the request (`user.uid` is `cursor:<id>`), so a `--team` sync credits each member rather than whoever ran it. Without a sync, Cursor reports no usage, and Cursor's `preCompact` context occupancy is recorded separately -- see [Context occupancy](#context-occupancy).
 
 Cline reports usage once per task rather than per model call, because Beacon's rollups sum `gen_ai.usage` across events and reporting at both granularities would count every token twice. fx reports cumulative totals, which Beacon differences into per-turn deltas for the same reason. GitHub Copilot CLI reports assistant message output tokens and cumulative shutdown model totals; Beacon records the message output directly, then differences shutdown totals for input, cache, reasoning, and any output not already counted.
 
@@ -88,7 +91,6 @@ A runtime that reports occupancy and no spend still shows as `not_instrumented` 
 
 | Runtime | Why |
 |---------|-----|
-| Cursor | No hook payload carries a token count. Cursor does report context occupancy on `preCompact`, which is recorded separately -- see [Context occupancy](#context-occupancy) below |
 | Antigravity CLI, Grok Build, Hermes Agent, Devin CLI, Devin Desktop | No token counts on the hook payloads Beacon receives |
 | Muse Code | Usage arrives on `PostLLMCall` and in Muse's own session log, neither of which Beacon reads. See [Muse Code](/runtimes/muse-code) |
 | Qwen Code | The `Stop` payload carries session-level context counters, not per-call usage. Those counters are recorded as context occupancy rather than spend -- see [Context occupancy](#context-occupancy) below. See [Qwen Code](/runtimes/qwen-code) |
@@ -120,7 +122,7 @@ RUNTIME      STATUS            INSTALLED  EVENTS  USAGE EVENTS  TOKENS   NOTE
 codex_cli    silent            yes        412     0             0        per-turn usage trace; Codex emits no cost
 claude_code  covered           yes        3106    288           4271883  OTLP token and cost telemetry
 cline        covered           yes        190     12            283740   plugin reports usage once per task
-cursor       not_instrumented  yes        1104    0             0        Cursor hook payloads carry no token counts
+cursor       not_instrumented  yes        1104    0             0        hooks carry no usage; run `beacon endpoint cursor usage sync` to collect it from the Cursor Admin API
 ```
 
 The status column is the report:
@@ -132,7 +134,7 @@ The status column is the report:
 | `inactive` | Beacon configured this runtime, but it produced no events at all in the window. Usually means it was not used; can also mean its hooks or OTLP export stopped firing |
 | `not_instrumented` | The runtime ran, and Beacon cannot read token usage from it. Expected, not a fault. The note column says why |
 
-The `not_instrumented` distinction is what makes the report worth reading. Without it Cursor would appear as a problem on every run, and a column that always shows a problem is a column people stop reading.
+The `not_instrumented` distinction is what makes the report worth reading. Without it, a hook-only Cursor would appear as a problem on every run, and a column that always shows a problem is a column people stop reading. Once `beacon endpoint cursor usage sync` has written Cursor usage into the window, Cursor shows as `covered`.
 
 The `INSTALLED` column means "Beacon configured this runtime", not "this product is on the machine". Only configuration Beacon wrote counts — a hook command, a managed plugin marker, or a local OTLP endpoint it set. That is the population where silence is informative: Beacon wired it up, so it should be reporting. A runtime present but configured by hand would not be reporting through Beacon either way, so it appears only if it actually emits events.
 

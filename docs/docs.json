@@ -305,6 +305,7 @@
                   "cli/endpoint-copilot",
                   "cli/endpoint-dsh",
                   "cli/endpoint-fx",
+                  "cli/endpoint-cursor-usage",
                   "cli/endpoint-traces",
                   "cli/dashboard",
                   "cli/wazuh",

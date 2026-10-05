@@ -1,0 +1,160 @@
+---
+title: "beacon endpoint cursor usage"
+description: "Collect Cursor token usage and charges from the Cursor Admin API"
+---
+
+## Command overview
+
+`beacon endpoint cursor usage` collects [Cursor](/runtimes/cursor)'s token usage and charges from the Cursor Admin API and writes them to the runtime log, so [`beacon token-usage`](/cli/token-usage) and the dashboard token view include Cursor.
+
+```bash title="Command syntax"
+beacon endpoint cursor usage [command]
+```
+
+Cursor's hooks and its local session records carry no token counts. The Cursor Admin API does: it reports every model request a team member made, with its input, output and cache tokens and what Cursor charged for it. `sync` reads those events and writes one `token.usage` event per request.
+
+This is the one Cursor command that uses the network. It calls `https://api.cursor.com` only when you run it. Cursor hooks and `beacon endpoint cursor sync` stay local and offline.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `beacon endpoint cursor usage sync` | Read new Cursor Admin API usage events into the runtime log |
+| `beacon endpoint cursor usage status` | Show whether the key is set, whose usage a sync collects, and what has been collected |
+
+## Set up the key
+
+The Admin API needs a Cursor Admin API key, which only a team admin can create. In the Cursor dashboard, open **Settings → Advanced → Admin API Keys** and create one. Then set it in your environment:
+
+```bash title="Collect Cursor usage"
+export CURSOR_ADMIN_API_KEY=key_...
+beacon endpoint cursor usage sync
+```
+
+Beacon reads the key from the environment for that run only:
+
+- It is never accepted as a flag value, so it stays out of shell history and the process list.
+- It is never written to Beacon's config, collector state or runtime log.
+- It is never printed. `status` says only whether the variable is set.
+- It is sent only as the basic-auth header of requests to the Admin API host, over https.
+
+To read the key from a different variable, pass `--api-key-env`:
+
+```bash
+ACME_CURSOR_KEY=key_... beacon endpoint cursor usage sync --api-key-env ACME_CURSOR_KEY
+```
+
+## Whose usage is collected
+
+An admin key can read the usage of the whole team. By default, `sync` collects only the Cursor account signed in on this machine. Beacon reads that account's email from the `cursorAuth/cachedEmail` row of Cursor's local `state.vscdb`, opening the database read-only and reading only that row. The access and refresh token rows in the same table are never read.
+
+| Flag | Collects |
+|------|----------|
+| (none) | The Cursor account signed in on this machine |
+| `--email <address>` | One team member, by email |
+| `--user-id <id>` | One team member, by numeric Cursor user ID |
+| `--team` | Every member of the team |
+
+Pass at most one of these flags. If nobody is signed in to Cursor on the machine and none is given, `sync` refuses rather than collecting the whole team. Each choice keeps its own collection progress, so switching between them never skips or repeats usage.
+
+## Flags
+
+Both subcommands accept:
+
+| Flag | Description |
+|------|-------------|
+| `--api-key-env <name>` | Environment variable holding the key. Defaults to `CURSOR_ADMIN_API_KEY` |
+| `--email`, `--user-id`, `--team` | Whose usage to collect. See above |
+| `--global-db <path>` | Cursor `state.vscdb` the signed-in account is read from. Defaults to Cursor's OS-specific location |
+| `--state <path>` | Collector state file. Defaults to `~/.beacon/endpoint/state/cursor-usage.json` |
+| `--json` | Print the result as JSON |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths. The state file moves beside the system runtime log |
+
+`sync` also accepts:
+
+| Flag | Description |
+|------|-------------|
+| `--since <date>` | Collect from this date (`YYYY-MM-DD` or RFC 3339). Defaults to 7 days back on the first sync, then from the last sync |
+| `--lookback <duration>` | How far behind the last sync each sync re-reads, to catch events Cursor posts late. Defaults to `48h` |
+| `--page-size <n>` | Events per Admin API request. Defaults to `100` |
+| `--base-url <url>` | Admin API base URL. Defaults to `https://api.cursor.com`. Must be https; plain http is allowed only to a loopback address |
+| `--log-path <path>` | Runtime JSONL log path. Defaults to the resolved endpoint log |
+| `--print` | Print mapped events as JSON without writing them or advancing the collector state |
+
+## Syncing
+
+```bash title="Sync new usage"
+beacon endpoint cursor usage sync
+```
+
+```
+cursor usage sync (email:dev@example.com): 214 fetched, 214 written, 0 already collected, 3 without usage
+  window 2026-09-28T12:00:00Z .. 2026-10-05T12:00:00Z
+```
+
+```bash title="Backfill further back"
+beacon endpoint cursor usage sync --since 2026-07-01
+```
+
+```bash title="Preview without writing anything"
+beacon endpoint cursor usage sync --print
+```
+
+Syncs are safe to repeat and to run on a schedule:
+
+- **Late events:** each sync re-reads the lookback window behind the previous one, and skips every event it already wrote.
+- **Identical requests:** two requests that match in every field Cursor reports are still counted as two.
+- **Backfills:** a backfill reaching further back than earlier syncs fetches only the span not yet collected.
+- **Long ranges** are fetched in 30-day pieces.
+- **Failures:** a sync that fails partway keeps track of what it wrote, so the next run writes only the rest.
+
+Rate limiting (429) and server errors are retried with backoff. An authentication failure stops the sync and says to check the key.
+
+`--print` is a dry run: it writes neither the runtime log nor the collector state.
+
+## What is recorded
+
+Each Admin API usage event becomes one event:
+
+| Field | Value |
+|-------|-------|
+| `event.action` | `token.usage` |
+| `harness.name` | `cursor` |
+| `harness.collection_method` | `poll` |
+| `event.fidelity` | `observed` |
+| `model` | The model Cursor reports, for example `claude-4.5-sonnet` |
+| `user.name`, `user.uid` | The team member who made the request: their email, and `cursor:<user id>` |
+| `gen_ai.usage.input_tokens` | `inputTokens` |
+| `gen_ai.usage.output_tokens` | `outputTokens` |
+| `gen_ai.usage.cache_read.input_tokens` | `cacheReadTokens` |
+| `gen_ai.usage.cache_creation.input_tokens` | `cacheWriteTokens` |
+| `gen_ai.usage.cost_usd` | `chargedCents / 100`, what Cursor reports it charged |
+| `raw.cursor` | `kind`, `max_mode`, `token_based`, `token_cents`, `charged_cents`, `cursor_token_fee_cents`, `requests_costs`, `chargeable`, `headless`, `user_id`, `user_email` |
+
+`cost_usd` is the charge, not Cursor's token price. A request included in a plan has a token price (`token_cents`) and no charge, and a cost report built on token prices would show a bill nobody received.
+
+Requests with no tokens and no charge are not written. Some requests are billed per request rather than by token, and these carry no token counts.
+
+The events carry no `session`. The Admin API reports requests per team member, not per conversation, and nothing in an event names the Composer it came from. So Cursor usage appears in the totals and in the model, harness, user and time rollups of `beacon token-usage`, but not under a session.
+
+The user is the Cursor member, not whoever ran the sync, so a `--team` sync shows each member's spend under that member.
+
+## Status
+
+```bash
+beacon endpoint cursor usage status
+```
+
+```
+Cursor Admin API key: CURSOR_ADMIN_API_KEY is set
+Scope: email:dev@example.com
+State: /Users/dev/.beacon/endpoint/state/cursor-usage.json
+  email:dev@example.com  collected 2026-07-01T00:00:00Z .. 2026-10-05T12:00:00Z  last sync 2026-10-05T12:00:00Z
+```
+
+## Related
+
+- [Cursor](/runtimes/cursor)
+- [beacon token-usage](/cli/token-usage)
+- [beacon endpoint](/cli/endpoint)

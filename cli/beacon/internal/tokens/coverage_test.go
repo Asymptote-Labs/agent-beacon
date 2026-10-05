@@ -86,6 +86,32 @@ func TestCoverageDoesNotFlagRuntimesThatCannotReportUsage(t *testing.T) {
 	}
 }
 
+// Cursor's usage arrives from the Admin API sync as poll-collected token.usage events. Once it
+// has, Cursor is covered, and the note on a hook-only Cursor says how to get there.
+func TestCoverageCountsCursorAdminAPIUsage(t *testing.T) {
+	hookOnly := Coverage([]schema.Event{plainEvent("cursor")}, []string{"cursor"})
+	if line := lineFor(t, hookOnly, "cursor"); line.Status != CoverageNotInstrumented || !strings.Contains(line.Reason, "beacon endpoint cursor usage sync") {
+		t.Fatalf("hook-only cursor = %+v", line)
+	}
+
+	input, output := int64(1200), int64(80)
+	cost := 0.05
+	usage := plainEvent("cursor")
+	usage.Event.Action = "token.usage"
+	usage.Event.Category = "metric"
+	usage.Harness.CollectionMethod = schema.CollectionMethodPoll
+	usage.Model = "claude-4.5-sonnet"
+	usage.GenAI = &schema.GenAIInfo{Usage: &schema.GenAIUsageInfo{InputTokens: &input, OutputTokens: &output, CostUSD: &cost}}
+	report := Coverage([]schema.Event{plainEvent("cursor"), usage}, []string{"cursor"})
+	line := lineFor(t, report, "cursor")
+	if line.Status != CoverageCovered || line.UsageEvents != 1 || line.Tokens != 1280 {
+		t.Fatalf("cursor with Admin API usage = %+v", line)
+	}
+	if report.Silent != 0 || report.Covered != 1 {
+		t.Fatalf("report = silent %d covered %d", report.Silent, report.Covered)
+	}
+}
+
 // Installed but never run is not the same as installed and broken, and conflating them would
 // make every machine look faulty on the day someone did not use one of their agents.
 func TestCoverageSeparatesInactiveFromSilent(t *testing.T) {
