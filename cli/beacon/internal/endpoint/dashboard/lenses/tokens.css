@@ -1,0 +1,13 @@
+:root {
+  --beacon-text: #111827;
+  --beacon-muted: #6b7280;
+  --beacon-line: rgba(0, 0, 0, 0.1);
+  --beacon-panel-soft: #f9fafb;
+  --beacon-accent: #036aa2;
+  --beacon-accent-soft: #e2f0f8;
+  --beacon-danger: #b91c1c;
+  --beacon-warn: #92400e;
+  --beacon-ok: #047857;
+  --beacon-font-sans: "Familjen Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --beacon-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
