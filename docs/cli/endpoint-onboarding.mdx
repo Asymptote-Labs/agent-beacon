@@ -26,7 +26,9 @@ The first interactive `beacon endpoint install` opens a full-screen terminal wiz
    usage coming soon. Local is a dashboard for this machine's telemetry,
    kept for as long as the logs are on disk, with nothing leaving the machine.
 3. For Beacon Cloud, choose **Standard** or **Metadata only** forwarding.
-4. Review the destination and privacy mode, then confirm installation.
+4. Choose the agent tools to set up: Beacon Cloud MCP (Beacon Cloud only) and the
+   Beacon agent skills. Each is selected; press <kbd>space</kbd> to turn one off.
+5. Review the destination, privacy mode and agent tools, then confirm installation.
 
 Move between choices with the arrow keys, continue with <kbd>enter</kbd>, and cancel
 with <kbd>esc</kbd>.
@@ -95,6 +97,40 @@ command, and the next `beacon endpoint install` offers the question again rather
 treating the machine as settled. Verify forwarding with `beacon endpoint status
 --json`. The onboarding record itself is written only after the install succeeds, so
 a failed install leaves nothing behind and asks again next time.
+
+## Agent tools
+
+After the destination, the wizard offers agent tools. Each is selected by default, so
+setting them up is opt-out:
+
+- **Beacon Cloud MCP**, offered only when you choose Beacon Cloud, runs
+  [`beacon mcp connect`](/cli/mcp-connect) for you: it registers the Beacon Cloud MCP
+  server as `beacon-managed` in every detected harness Beacon can configure (Claude
+  Code, Codex CLI, Cursor, VS Code, Gemini CLI and OpenCode), so your agents can search
+  the history this machine forwards. It uses OAuth, so Beacon writes only the URL and
+  each harness signs in with beacon.sh the first time it connects. Leaving the row
+  selected is the confirmation `beacon mcp connect` would otherwise ask for.
+- **Beacon agent skills**, offered whichever destination you choose, installs the
+  [Beacon Skills](/concepts/beacon-skills) for every project: into `~/.agents/skills`,
+  and into `~/.claude/skills` when Claude Code is set up. See [`beacon skills`](/cli/skills).
+  This writes local files only and sends nothing.
+
+The skills are installed after the local install succeeds, alongside the runtime hooks.
+Beacon Cloud MCP is registered only once the endpoint is connected to Beacon Cloud (or
+already was): if enrollment fails, MCP is skipped too and the install says to run
+`beacon mcp connect` after `beacon endpoint connect`. Either failure is a warning that
+names the command to retry, never a failed install. A skill directory of the same name
+that Beacon did not write is left as it is, and `beacon mcp connect` leaves any
+`beacon-managed` entry it did not write alone.
+
+Turning a tool off writes nothing for it. The answers are recorded in the onboarding
+record as `onboarding.cloud_mcp` (Beacon Cloud only) and `onboarding.agent_skills`
+(`installed` or `declined`). Set up or remove either one later with
+`beacon mcp connect|disconnect` and `beacon skills install|uninstall`.
+
+Every later `beacon endpoint install` and `beacon endpoint repair` updates the skill
+copies Beacon installed to match the new binary. It never installs skills that were
+turned off or removed.
 
 The explicit `beacon endpoint install --connect` flag is unchanged: it presets Beacon Cloud
 and skips the destination question.

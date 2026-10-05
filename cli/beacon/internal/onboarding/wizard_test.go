@@ -662,6 +662,119 @@ func TestSignInScreenHonorsNoBrowser(t *testing.T) {
 	}
 }
 
+func TestManagedWizardOffersCloudMCPAndSkillsSelected(t *testing.T) {
+	model := newWizardModel(WizardOptions{
+		SignedIn:        true,
+		Email:           "person@example.com",
+		OfferManaged:    true,
+		OfferAgentTools: true,
+	})
+	model.width, model.height = 100, 40
+	model, _ = advanceWizard(t, model, "enter") // welcome
+	model, _ = advanceWizard(t, model, "enter") // Beacon Cloud
+	model, _ = advanceWizard(t, model, "enter") // disclosure
+	model, _ = advanceWizard(t, model, "enter") // privacy
+	if model.screen != agentToolsScreen {
+		t.Fatalf("screen = %v, want agent tools", model.screen)
+	}
+	view := model.View()
+	for _, want := range []string{"[x] Beacon Cloud MCP", "[x] Beacon agent skills", "space"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("agent tools screen missing %q:\n%s", want, view)
+		}
+	}
+	model, _ = advanceWizard(t, model, "enter")
+	if view := model.View(); !strings.Contains(view, "Agent tools: Beacon Cloud MCP, Beacon agent skills") {
+		t.Fatalf("confirm screen should list the agent tools:\n%s", view)
+	}
+	model, _ = advanceWizard(t, model, "enter")
+	if !model.result.Completed || !model.result.ConnectCloudMCP || !model.result.InstallSkills {
+		t.Fatalf("result = %#v", model.result)
+	}
+}
+
+func TestManagedWizardCanTurnOffCloudMCP(t *testing.T) {
+	model := newWizardModel(WizardOptions{
+		SignedIn:          true,
+		OfferManaged:      true,
+		OfferAgentTools:   true,
+		DestinationOnly:   true,
+		PresetDestination: DestinationAsymptote,
+	})
+	model.width, model.height = 100, 40
+	model, _ = advanceWizard(t, model, "enter") // disclosure
+	model, _ = advanceWizard(t, model, "enter") // privacy
+	model, _ = advanceWizard(t, model, " ")
+	if model.result.ConnectCloudMCP || !model.result.InstallSkills {
+		t.Fatalf("space should turn off Beacon Cloud MCP only: %#v", model.result)
+	}
+	if view := model.View(); !strings.Contains(view, "[ ] Beacon Cloud MCP") {
+		t.Fatalf("turned-off tool should render unchecked:\n%s", view)
+	}
+	model, _ = advanceWizard(t, model, "j")
+	model, _ = advanceWizard(t, model, " ")
+	model, _ = advanceWizard(t, model, "enter")
+	if view := model.View(); !strings.Contains(view, "Agent tools: none") {
+		t.Fatalf("confirm should say no agent tools:\n%s", view)
+	}
+	model, _ = advanceWizard(t, model, "enter")
+	if !model.result.Completed || model.result.ConnectCloudMCP || model.result.InstallSkills {
+		t.Fatalf("result = %#v", model.result)
+	}
+}
+
+func TestLocalWizardOffersOnlySkills(t *testing.T) {
+	model := newWizardModel(WizardOptions{
+		SignedIn:        true,
+		OfferManaged:    true,
+		OfferAgentTools: true,
+	})
+	model.width, model.height = 100, 40
+	model, _ = advanceWizard(t, model, "enter") // welcome
+	model, _ = advanceWizard(t, model, "j")
+	model, _ = advanceWizard(t, model, "enter") // Local
+	if model.screen != agentToolsScreen {
+		t.Fatalf("screen = %v, want agent tools", model.screen)
+	}
+	view := model.View()
+	if strings.Contains(view, "Cloud MCP") || !strings.Contains(view, "[x] Beacon agent skills") {
+		t.Fatalf("local agent tools screen should offer only the skills:\n%s", view)
+	}
+	model, _ = advanceWizard(t, model, "enter")
+	model, _ = advanceWizard(t, model, "enter")
+	if !model.result.Completed || model.result.ConnectCloudMCP || !model.result.InstallSkills {
+		t.Fatalf("result = %#v", model.result)
+	}
+}
+
+func TestFinishingWithoutAnAccountStillOffersSkills(t *testing.T) {
+	model := newWizardModel(WizardOptions{OfferManaged: true, OfferAgentTools: true, NoDisplay: errors.New("no display")})
+	model.width, model.height = 100, 40
+	model, _ = advanceWizard(t, model, "enter")
+	if model.screen != signInFailedScreen {
+		t.Fatalf("screen = %v, want recovery", model.screen)
+	}
+	model, _ = advanceWizard(t, model, "enter") // finish without an account
+	if model.screen != agentToolsScreen || !model.result.InstallSkills {
+		t.Fatalf("screen = %v result = %#v", model.screen, model.result)
+	}
+	if view := model.View(); strings.Contains(view, "Cloud MCP") {
+		t.Fatalf("no Cloud MCP without Beacon Cloud:\n%s", view)
+	}
+	model, _ = advanceWizard(t, model, "enter")
+	model, _ = advanceWizard(t, model, "enter")
+	if model.result.ConnectCloudMCP {
+		t.Fatalf("result = %#v", model.result)
+	}
+}
+
+func TestAgentToolsScreenIsSkippedWhenNotOffered(t *testing.T) {
+	model := newWizardModel(WizardOptions{SignedIn: true, OfferManaged: true, DestinationOnly: true, PresetDestination: DestinationLocal})
+	if model.screen != confirmScreen || model.result.ConnectCloudMCP || model.result.InstallSkills {
+		t.Fatalf("screen = %v result = %#v", model.screen, model.result)
+	}
+}
+
 // Confirming Beacon Cloud also uploads the session backfill, so the confirm screen, which is the
 // consent point, has to say so; and a local choice says what the install reads.
 func TestConfirmScreenNamesTheSessionBackfill(t *testing.T) {

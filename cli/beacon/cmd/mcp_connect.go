@@ -24,8 +24,10 @@ import (
 )
 
 // `beacon mcp connect` registers the Beacon Cloud MCP server in the harnesses on this machine.
-// It is an explicit, interactive, per-user command: `beacon endpoint install`, onboarding and
-// every unattended path (root, system/MDM installs, CI, piped stdin) never run it. It writes no
+// It is an explicit, per-user command. The one other caller is the interactive onboarding
+// wizard, which runs the same flow after the person chose Beacon Cloud and left "Beacon Cloud
+// MCP" selected on its agent tools screen; that screen is the confirmation. Every unattended path
+// (root, system/MDM installs, CI, piped stdin) never reaches it. It writes no
 // secret -- OAuth harnesses get only the URL, and --token-env writes a reference to a variable --
 // and it never reads the Beacon account token in ~/.beacon/auth/session.json. Its only network
 // request is the resource-metadata check of the URL, which --dry-run skips.
@@ -203,10 +205,25 @@ func mcpTargetNames() []string {
 }
 
 func mcpOptions(home, url string) mcpconnect.Options {
+	return mcpOptionsFor(home, url, mcpConnectOpts.tokenEnv, mcpConnectOpts.force)
+}
+
+func mcpOptionsFor(home, url, tokenEnv string, force bool) mcpconnect.Options {
 	return mcpconnect.Options{
-		Home: home, URL: url, TokenEnv: mcpConnectOpts.tokenEnv, Force: mcpConnectOpts.force,
+		Home: home, URL: url, TokenEnv: tokenEnv, Force: force,
 		LookPath: mcpLookPath, Run: mcpRunCLI,
 	}
+}
+
+// cloudMCPRequest is one run of the connect flow: the flags of `beacon mcp connect`, or what
+// onboarding asks for (detected harnesses, OAuth, already confirmed).
+type cloudMCPRequest struct {
+	harnesses []string
+	url       string
+	tokenEnv  string
+	dryRun    bool
+	yes       bool
+	force     bool
 }
 
 // connectRefusal is why connect will not run here, or "" when it may.
@@ -225,28 +242,38 @@ func connectRefusal() string {
 }
 
 func runMCPConnect(cmd *cobra.Command, args []string) error {
-	out := cmd.OutOrStdout()
 	if reason := connectRefusal(); reason != "" {
 		return errors.New(reason)
 	}
-	if err := validateTokenEnv(mcpConnectOpts.tokenEnv); err != nil {
+	return connectCloudMCP(commandContext(cmd), cmd.OutOrStdout(), cloudMCPRequest{
+		harnesses: mcpConnectOpts.harnesses,
+		url:       mcpConnectOpts.url,
+		tokenEnv:  mcpConnectOpts.tokenEnv,
+		dryRun:    mcpConnectOpts.dryRun,
+		yes:       mcpConnectOpts.yes,
+		force:     mcpConnectOpts.force,
+	})
+}
+
+func connectCloudMCP(ctx context.Context, out io.Writer, req cloudMCPRequest) error {
+	if err := validateTokenEnv(req.tokenEnv); err != nil {
 		return err
 	}
 	home, err := mcpHome()
 	if err != nil {
 		return err
 	}
-	targets, unsupported, err := resolveMCPTargets(mcpConnectOpts.harnesses)
+	targets, unsupported, err := resolveMCPTargets(req.harnesses)
 	if err != nil {
 		return err
 	}
-	url, derived, err := mcpconnect.ResolveURL(mcpConnectOpts.url, mcpIngestURL())
+	url, derived, err := mcpconnect.ResolveURL(req.url, mcpIngestURL())
 	if err != nil {
 		return fmt.Errorf("%w (Beacon Cloud serves MCP at https://mcp.beacon.sh)", err)
 	}
 	checked := "not checked (--dry-run)"
-	if !mcpConnectOpts.dryRun {
-		canonical, err := mcpconnect.CheckURL(cmd.Context(), mcpHTTPClient, url, derived)
+	if !req.dryRun {
+		canonical, err := mcpconnect.CheckURL(ctx, mcpHTTPClient, url, derived)
 		if err != nil {
 			return fmt.Errorf("the MCP URL check failed, so nothing was written: %w", err)
 		}
@@ -257,7 +284,7 @@ func runMCPConnect(cmd *cobra.Command, args []string) error {
 		printUnsupported(out, unsupported)
 		return nil
 	}
-	opts := mcpOptions(home, url)
+	opts := mcpOptionsFor(home, url, req.tokenEnv, req.force)
 	plan, err := mcpconnect.Plan(opts, targets)
 	if err != nil {
 		return err
@@ -281,7 +308,7 @@ func runMCPConnect(cmd *cobra.Command, args []string) error {
 			writes++
 		}
 	}
-	if mcpConnectOpts.dryRun {
+	if req.dryRun {
 		fmt.Fprintln(out, "\nDry run: nothing was written.")
 		return nil
 	}
@@ -290,14 +317,14 @@ func runMCPConnect(cmd *cobra.Command, args []string) error {
 		printNextSteps(out, plan, opts)
 		return nil
 	}
-	if !mcpConnectOpts.yes {
+	if !req.yes {
 		fmt.Fprintf(out, "\nWrite %d change(s)? Each changed file is backed up first. [y/N] ", writes)
 		if !confirmNo(mcpStdin) {
 			fmt.Fprintln(out, "Nothing was written.")
 			return nil
 		}
 	}
-	applied, err := mcpconnect.Apply(cmd.Context(), opts, plan)
+	applied, err := mcpconnect.Apply(ctx, opts, plan)
 	if err != nil {
 		return err
 	}
