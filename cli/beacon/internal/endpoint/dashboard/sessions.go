@@ -9,27 +9,29 @@ import (
 )
 
 type SessionRecord struct {
-	ID             string `json:"id"`
-	FirstEventAt   string `json:"first_event_at,omitempty"`
-	LastEventAt    string `json:"last_event_at,omitempty"`
-	EventCount     int    `json:"event_count"`
-	ReviewCount    int    `json:"review_count"`
-	MaxSeverity    string `json:"max_severity,omitempty"`
-	Harness        string `json:"harness,omitempty"`
-	Model          string `json:"model,omitempty"`
-	Repository     string `json:"repository,omitempty"`
-	Branch         string `json:"branch,omitempty"`
-	WorkingDir     string `json:"working_directory,omitempty"`
-	OriginalPrompt string `json:"original_prompt,omitempty"`
-	LastAction     string `json:"last_action,omitempty"`
-	LastMessage    string `json:"last_message,omitempty"`
-	LastArtifact   string `json:"last_artifact,omitempty"`
-	CommandCount   int    `json:"command_count"`
-	FileCount      int    `json:"file_count"`
-	MCPCount       int    `json:"mcp_count"`
-	ApprovalCount  int    `json:"approval_count"`
-	PromptCount    int    `json:"prompt_count"`
-	ToolCount      int    `json:"tool_count"`
+	ID              string `json:"id"`
+	FirstEventAt    string `json:"first_event_at,omitempty"`
+	LastEventAt     string `json:"last_event_at,omitempty"`
+	EventCount      int    `json:"event_count"`
+	ReviewCount     int    `json:"review_count"`
+	MaxSeverity     string `json:"max_severity,omitempty"`
+	Harness         string `json:"harness,omitempty"`
+	Model           string `json:"model,omitempty"`
+	Repository      string `json:"repository,omitempty"`
+	Branch          string `json:"branch,omitempty"`
+	WorkingDir      string `json:"working_directory,omitempty"`
+	OriginalPrompt  string `json:"original_prompt,omitempty"`
+	LastAction      string `json:"last_action,omitempty"`
+	LastMessage     string `json:"last_message,omitempty"`
+	LastArtifact    string `json:"last_artifact,omitempty"`
+	CommandCount    int    `json:"command_count"`
+	FileCount       int    `json:"file_count"`
+	MCPCount        int    `json:"mcp_count"`
+	ApprovalCount   int    `json:"approval_count"`
+	PromptCount     int    `json:"prompt_count"`
+	ToolCount       int    `json:"tool_count"`
+	IsRecurring     bool   `json:"is_recurring"`
+	RecurrenceCount int    `json:"recurrence_count"`
 }
 
 type SessionResult struct {
@@ -60,6 +62,20 @@ type SessionDetail struct {
 
 func ReadSessions(path string, query EventQuery) (SessionResult, error) {
 	limit := normalizeLimit(query.Limit)
+	classifications, err := classifySessions(path, query)
+	if err != nil {
+		return SessionResult{}, err
+	}
+	state := normalizeSessionState(query.SessionState)
+	query.SessionState = state
+	if state != "" {
+		query.sessionStateIDs = map[string]bool{}
+		for id, classification := range classifications {
+			if classification.state == state {
+				query.sessionStateIDs[id] = true
+			}
+		}
+	}
 	query.NoLimit = true
 	events, err := ReadEvents(path, query)
 	if err != nil {
@@ -80,7 +96,11 @@ func ReadSessions(path string, query EventQuery) (SessionResult, error) {
 		acc.add(record)
 	}
 	sessions := make([]SessionRecord, 0, len(byID))
-	for _, acc := range byID {
+	for id, acc := range byID {
+		if classification := classifications[id]; classification.state == "recurring" {
+			acc.record.IsRecurring = true
+			acc.record.RecurrenceCount = classification.recurrenceCount
+		}
 		sessions = append(sessions, acc.record)
 	}
 	sort.SliceStable(sessions, func(i, j int) bool {
