@@ -103,8 +103,7 @@ var usageExpectation = map[string]struct {
 	// Factory keeps running totals in each session's settings file, and the sync differences them
 	// (factorysession/mapper.go, emitSettingsUsage). Its OTLP export still contributes when it
 	// carries the semconv names; the sync is the path Beacon reads Factory's own record from.
-	"factory":       {ExpectReported, "beacon endpoint factory sync reads session settings totals; OTLP only if it emits GenAI semconv usage"},
-	"factory_droid": {ExpectReported, "beacon endpoint factory sync reads session settings totals; OTLP only if it emits GenAI semconv usage"},
+	"factory": {ExpectReported, "beacon endpoint factory sync reads session settings totals; OTLP only if it emits GenAI semconv usage"},
 
 	"gemini_cli":     {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},
 	"vscode_copilot": {ExpectGenericOTLP, "only if it emits OTel GenAI semconv usage"},

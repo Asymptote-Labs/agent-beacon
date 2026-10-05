@@ -466,7 +466,6 @@ func TestCoverageExpectationsMatchTheCaptureCode(t *testing.T) {
 		{"openclaw_gateway", ExpectReported, "beacon endpoint integrations openclaw sessions sync"},
 		// goose's chat spans carry the semconv names, but only over OTLP configured by hand.
 		{"goose", ExpectGenericOTLP, "OTLP"},
-		{"factory_droid", ExpectReported, "beacon endpoint factory sync"},
 	} {
 		expect, reason := expectationFor(tc.harness)
 		if expect != tc.expect {
