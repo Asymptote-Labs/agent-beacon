@@ -11,6 +11,7 @@ severity: high
 status: stable
 posture: detect
 taxonomy:
+  beacon_category: sensitive-edit
   owasp_llm: LLM05
   mitre_atlas: AML.T0011
 

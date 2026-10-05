@@ -17,6 +17,7 @@ severity: medium
 status: experimental
 posture: detect
 taxonomy:
+  beacon_category: source-control
   owasp_llm: LLM03
 
 match: >

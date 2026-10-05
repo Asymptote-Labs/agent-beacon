@@ -10,6 +10,7 @@ severity: medium
 status: stable
 posture: detect
 taxonomy:
+  beacon_category: credential-access
   owasp_llm: LLM06
   mitre_atlas: AML.T0024
 

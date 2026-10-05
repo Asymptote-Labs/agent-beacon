@@ -17,6 +17,7 @@ severity: high
 status: experimental
 posture: detect
 taxonomy:
+  beacon_category: context-exfiltration
   owasp_llm: LLM06
   mitre_atlas: AML.T0024
 

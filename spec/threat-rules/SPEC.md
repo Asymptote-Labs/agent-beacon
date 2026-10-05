@@ -86,7 +86,7 @@ Exactly one of `match` or `correlation` must be present. Required:
 | `severity` | yes | `info` \| `low` \| `medium` \| `high` \| `critical` | Mirrors the event severity enum. |
 | `status` | yes | `experimental` \| `stable` \| `deprecated` | Maturity; drives conformance gates. |
 | `posture` | yes | `detect` \| `enforce-capable` | Observe-only vs. enforcement-eligible. Flows to `policy.enforcement`. |
-| `taxonomy` | no | map<string,string> | External references (OWASP/MITRE/CVE). No runtime lookup. |
+| `taxonomy` | no | map<string,string> | External references (OWASP/MITRE/CVE), plus `beacon_category`: the corpus directory the rule belongs to (`credential-access`, `prompt-injection`, ...), which survives installation into the flat rule store. No runtime lookup. |
 | `match` | one-of | CEL string → bool | Single-event condition over `e`. |
 | `correlation` | one-of | object | Multi-event session window (below). |
 | `emit.reason` | yes | non-empty string | Finding explanation; flows to `policy.reason`. |

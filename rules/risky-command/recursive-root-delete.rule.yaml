@@ -8,6 +8,7 @@ severity: critical
 status: stable
 posture: detect
 taxonomy:
+  beacon_category: risky-command
   owasp_llm: LLM08
 
 match: >
