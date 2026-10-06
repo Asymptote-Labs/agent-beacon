@@ -25,7 +25,9 @@ history.
 This hand-run pack uses Standard privacy. `beacon endpoint connect
 --privacy-mode metadata-only` renders an endpoint-specific config that removes
 retained text, raw fields, diffs, inventory content, and MCP definitions before
-buffering or upload.
+buffering or upload. It keeps metadata: on a `session.context` skill index, the
+`system_context` block that says what the event is and names each listed skill,
+while the index text in `gen_ai.system_instructions` is removed.
 
 ## Prerequisites
 

@@ -46,6 +46,11 @@ func runOmpEvent(cmd *cobra.Command, args []string) {
 // signal Beacon has always refused to synthesize on runtimes that do not report it; `user_python`
 // is the operator's own `$` code, which no tool event covers.
 //
+// `context` fires before every model call and carries the whole conversation, which is the kind of
+// event this list otherwise refuses. It is here because its handler context is the only supported
+// way to read the effective system prompt: the extension sends nothing for it but the `<skills>`
+// index the model was shown, and only when that index changes.
+//
 // `mcp_notification` is deliberately absent. It fires for every JSON-RPC notification a connected
 // server sends, most of them routine tools/resources list refreshes, and it describes MCP transport
 // plumbing rather than an action the agent took. The MCP activity worth recording is the agent
@@ -56,6 +61,7 @@ func supportedOmpEventTypes() []string {
 		"session_start",
 		"session_shutdown",
 		"input",
+		"context",
 		"tool_call",
 		"tool_result",
 		"user_bash",

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 func TestScanCurrentUserMCPInventory(t *testing.T) {
@@ -637,6 +639,10 @@ func TestScanCurrentUserAndProjectSkillInventory(t *testing.T) {
 	}
 	if deploy.SourceScope != ScopeUser || !deploy.Exists || !deploy.Readable || deploy.ParserStatus != StatusOK {
 		t.Fatalf("Claude skill status = %#v", deploy)
+	}
+	// The same hash a session.context skill listing names the skill under, so the two join.
+	if deploy.SkillNameHash != asymptoteobserve.SkillNameHash("deploy") || deploy.SkillNameHash != hashString("deploy") {
+		t.Fatalf("skill_name_hash = %q, want the skill-listing hash of its name", deploy.SkillNameHash)
 	}
 	if deploy.FileSHA256 == "" || deploy.SkillNameHash == "" || deploy.RootPathHash == "" || deploy.ManifestPathHash == "" {
 		t.Fatalf("Claude skill missing hashes: %#v", deploy)

@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 func TestListFindsClaudeSessionsAndSubagents(t *testing.T) {
@@ -73,6 +76,79 @@ func TestMapClaudeTranscriptProducesEndpointEvents(t *testing.T) {
 	usage := findAction(t, mapped, "token.usage")
 	if usage.GenAI == nil || usage.GenAI.Usage == nil || usage.GenAI.Usage.InputTokens == nil || *usage.GenAI.Usage.InputTokens != 10 {
 		t.Fatalf("usage = %+v, want input tokens", usage.GenAI)
+	}
+}
+
+// The skill_listing line is a Claude Code 2.1.291 transcript entry recorded by a beacon-oracle
+// c01-presence run, trimmed to two skills: the index is one string in `content`, and `rendered`
+// is the system-role text the model was sent.
+func TestMapSkillListingAttachmentAsSystemContext(t *testing.T) {
+	const session = "2cf4b751-7e9a-420d-81c6-99a7dd772fab"
+	ref := SessionRef{ID: session, Path: "/tmp/" + session + ".jsonl", ProjectPath: "/home/agent/project"}
+	listing := "- oracle-index: Lists the repository conventions. Skill index marker BCN-3WH4ST-C01I.\n- oracle-probe: Runs the repository probe procedure."
+	records := decodeFixture(t, []string{
+		`{"type":"attachment","attachment":{"type":"environment","snapshot":{"workingDirectory":"/home/agent/project"}},"uuid":"a0","timestamp":"2026-10-06T20:20:49.000Z","sessionId":"` + session + `","cwd":"/home/agent/project"}`,
+		`{"parentUuid":"cb3d1f0e-5d1b-44c8-8ed1-60b2e7922da2","isSidechain":false,"attachment":{"type":"skill_listing","content":"- oracle-index: Lists the repository conventions. Skill index marker BCN-3WH4ST-C01I.\n- oracle-probe: Runs the repository probe procedure.","skillCount":2,"isInitial":true,"names":["oracle-index","oracle-probe"]},"type":"attachment","uuid":"f9b0a9f9-1240-4592-b7f7-3a0654c21ed4","timestamp":"2026-10-06T20:20:49.170Z","rendered":[{"content":"<system-reminder>\nThe following skills are available for use with the Skill tool:\n\n- oracle-index: Lists the repository conventions. Skill index marker BCN-3WH4ST-C01I.\n- oracle-probe: Runs the repository probe procedure.\n</system-reminder>"}],"renderedRole":"system","userType":"external","entrypoint":"sdk-cli","cwd":"/home/agent/project","sessionId":"` + session + `","version":"2.1.291","gitBranch":"master"}`,
+		`{"type":"user","isMeta":true,"message":{"role":"user","content":"skill body"},"uuid":"u1","timestamp":"2026-10-06T20:20:50.000Z","sessionId":"` + session + `"}`,
+	})
+
+	mapped := MapSession(ref, records, MapOptions{})
+	if got, want := strings.Join(actions(mapped), ","), "session.started,session.context"; got != want {
+		t.Fatalf("actions = %q, want %q", got, want)
+	}
+	ev := findAction(t, mapped, "session.context")
+	if ev.GenAI == nil {
+		t.Fatal("session.context carries no gen_ai block")
+	}
+	parts := asymptoteobserve.GenAIText(ev.GenAI.SystemInstructions, "", asymptoteobserve.GenAIPartTypeText)
+	if want := strings.Split(listing, "\n"); !slices.Equal(parts, want) {
+		t.Fatalf("gen_ai.system_instructions parts = %q, want one per skill %q", parts, want)
+	}
+	if ev.Prompt != nil || ev.GenAI.Input != nil {
+		t.Fatalf("the listing was recorded as operator input: prompt=%+v gen_ai.input=%+v", ev.Prompt, ev.GenAI.Input)
+	}
+	wantContext := &schema.SystemContextInfo{
+		Kind:   asymptoteobserve.SystemContextSkillListing,
+		Source: asymptoteobserve.SystemContextSourceTranscript,
+		Skills: []schema.SkillRefInfo{
+			{SkillName: "oracle-index", SkillNameHash: asymptoteobserve.SkillNameHash("oracle-index")},
+			{SkillName: "oracle-probe", SkillNameHash: asymptoteobserve.SkillNameHash("oracle-probe")},
+		},
+	}
+	if !reflect.DeepEqual(ev.SystemContext, wantContext) {
+		t.Fatalf("system_context = %+v, want %+v", ev.SystemContext, wantContext)
+	}
+	if ev.Content == nil || !ev.Content.Included || ev.Content.Bytes != len(listing) {
+		t.Fatalf("content = %+v, want the retained listing's marker", ev.Content)
+	}
+	provenance, _ := ev.Raw["claude_attachment"].(map[string]interface{})
+	if provenance["type"] != "skill_listing" || provenance["is_initial"] != true || provenance["skill_count"] != float64(2) {
+		t.Fatalf("raw.claude_attachment = %#v, want the attachment's type, isInitial and skillCount", ev.Raw["claude_attachment"])
+	}
+	if err := ev.Validate(); err != nil {
+		t.Fatalf("context event failed validation: %v", err)
+	}
+}
+
+// A subagent transcript starts its events with gen_ai.agent already set, so the listing has to be
+// recorded alongside it; and a listing written as text blocks, without names, reads the same as a
+// string.
+func TestMapSkillListingOnSubagentTranscriptWithBlockContent(t *testing.T) {
+	ref := SessionRef{ID: "agent-a", Path: "/tmp/sess-1/subagents/agent-a.jsonl", ProjectPath: "/tmp/repo", IsSidechain: true, ParentSessionID: "sess-1"}
+	records := decodeFixture(t, []string{
+		`{"type":"attachment","isSidechain":true,"attachment":{"type":"skill_listing","content":[{"type":"text","text":"- deploy: Deploy applications."},{"type":"text","text":"- review: Review a diff."}]},"uuid":"a1","timestamp":"2026-09-19T22:00:01.000Z","sessionId":"sess-1","cwd":"/tmp/repo"}`,
+	})
+
+	ev := findAction(t, MapSession(ref, records, MapOptions{}), "session.context")
+	if ev.GenAI == nil || ev.GenAI.Agent == nil {
+		t.Fatalf("gen_ai = %+v, want the subagent's agent info", ev.GenAI)
+	}
+	want := []string{"- deploy: Deploy applications.", "- review: Review a diff."}
+	if got := asymptoteobserve.GenAIText(ev.GenAI.SystemInstructions, "", asymptoteobserve.GenAIPartTypeText); !slices.Equal(got, want) {
+		t.Fatalf("subagent gen_ai.system_instructions = %q, want %q", got, want)
+	}
+	if ev.SystemContext == nil || len(ev.SystemContext.Skills) != 2 {
+		t.Fatalf("subagent system_context = %+v, want both skills named", ev.SystemContext)
 	}
 }
 

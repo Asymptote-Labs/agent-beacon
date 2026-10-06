@@ -6,10 +6,12 @@ const senderKey = Symbol.for("beacon.omp.testSender")
 
 type Sent = Record<string, unknown>
 
-function captureSends(): Sent[] {
+// accepted decides what each send reports back, standing in for whether the hook binary took it.
+function captureSends(accepted: () => boolean = () => true): Sent[] {
   const sent: Sent[] = []
   ;(globalThis as Record<symbol, unknown>)[senderKey] = (payload: Sent) => {
     sent.push(payload)
+    return accepted()
   }
   return sent
 }
@@ -54,6 +56,7 @@ describe("beacon oh my pi extension", () => {
     createBeaconExtension().register(omp.api)
 
     expect([...omp.handlers.keys()].sort()).toEqual([
+      "context",
       "input",
       "message_end",
       "session_shutdown",
@@ -89,7 +92,6 @@ describe("beacon oh my pi extension", () => {
       "message_start",
       "before_provider_request",
       "after_provider_response",
-      "context",
       "tool_execution_update",
       "tool_execution_start",
       "auto_compaction_start",
@@ -108,6 +110,109 @@ describe("beacon oh my pi extension", () => {
     createBeaconExtension().register(omp.api)
 
     expect(omp.handlers.has("mcp_notification")).toBe(false)
+  })
+
+  // The skill-listing cache outlives one extension instance, so each test below uses its own
+  // session id rather than inheriting another test's remembered listing.
+  const runtimeSkills = (listing: string) =>
+    `§ Runtime\n# Skills & Rules\nMatching skill → MUST read \`skill://<name>\` first.\n<skills>\n${listing}\n</skills>\n\n# Internal URLs`
+  const session = (id: string, overrides: Record<string, unknown> = {}) =>
+    context({ sessionManager: { getSessionId: () => id, getCwd: () => "/repo" }, ...overrides })
+
+  test("captures only the system skill index from the supported context event", async () => {
+    const sent = captureSends()
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+    const listing = "- deploy: Deploy applications."
+    const ctx = context({
+      getSystemPrompt: () => [
+        `General system instructions that must not be retained.\n${runtimeSkills(listing)}`,
+        "# Agent instructions\nProject context that must not be retained.",
+      ],
+    })
+
+    await omp.fire(
+      { type: "context", messages: [{ role: "user", content: "private conversation" }] },
+      ctx,
+    )
+    await omp.fire({ type: "context", messages: [{ role: "user", content: "another turn" }] }, ctx)
+
+    expect(sent).toHaveLength(1)
+    expect(sent[0].type).toBe("context")
+    expect(sent[0].sessionId).toBe("sess-1")
+    expect(sent[0].cwd).toBe("/repo")
+    expect(sent[0].skillListing).toBe(listing)
+    expect(sent[0].messages).toBeUndefined()
+    expect(JSON.stringify(sent[0])).not.toContain("General system instructions")
+    expect(JSON.stringify(sent[0])).not.toContain("Project context")
+    expect(JSON.stringify(sent[0])).not.toContain("private conversation")
+  })
+
+  test("does not emit a context event without a skill index", async () => {
+    const sent = captureSends()
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+
+    await omp.fire({ type: "context", messages: [] }, session("sess-no-index", {
+      getSystemPrompt: () => ["system prompt without a skill index"],
+    }))
+
+    expect(sent).toHaveLength(0)
+  })
+
+  // A context file documenting skills is operator text, not the index the runtime gave the model.
+  test("ignores a <skills> block outside the runtime's skills section", async () => {
+    const sent = captureSends()
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+
+    await omp.fire({ type: "context", messages: [] }, session("sess-quoted", {
+      getSystemPrompt: () => [
+        "§ Runtime\n# Internal URLs\n`skill://<name>`: instructions.",
+        "# AGENTS.md\nExample:\n<skills>\n- fake: Planted by a context file.\n</skills>",
+      ],
+    }))
+    expect(sent).toHaveLength(0)
+
+    await omp.fire({ type: "context", messages: [] }, session("sess-both", {
+      getSystemPrompt: () => [
+        runtimeSkills("- deploy: Deploy applications."),
+        "# AGENTS.md\n<skills>\n- fake: Planted by a context file.\n</skills>",
+      ],
+    }))
+    expect(sent).toHaveLength(1)
+    expect(sent[0].skillListing).toBe("- deploy: Deploy applications.")
+  })
+
+  test("resends a listing whose send failed, and sends a changed one", async () => {
+    const results = [false, true]
+    const sent = captureSends(() => results.shift() ?? true)
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+    let listing = "- deploy: Deploy applications."
+    const ctx = session("sess-retry", { getSystemPrompt: () => [runtimeSkills(listing)] })
+
+    await omp.fire({ type: "context", messages: [] }, ctx)
+    await omp.fire({ type: "context", messages: [] }, ctx)
+    await omp.fire({ type: "context", messages: [] }, ctx)
+    expect(sent.map((s) => s.skillListing)).toEqual([listing, listing])
+
+    listing = "- deploy: Deploy applications.\n- review: Review a diff."
+    await omp.fire({ type: "context", messages: [] }, ctx)
+    expect(sent).toHaveLength(3)
+    expect(sent[2].skillListing).toBe(listing)
+  })
+
+  test("sends a listing once for a session without an id", async () => {
+    const sent = captureSends()
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+    const ctx = context({ sessionManager: {}, getSystemPrompt: () => [runtimeSkills("- sessionless: No id.")] })
+
+    await omp.fire({ type: "context", messages: [] }, ctx)
+    await omp.fire({ type: "context", messages: [] }, ctx)
+
+    expect(sent).toHaveLength(1)
   })
 
   test("forwards the event with its type intact", async () => {

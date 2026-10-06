@@ -15,8 +15,14 @@ del(event.command.output)
 del(event.file.diff)
 del(event.gen_ai.input)
 del(event.gen_ai.output)
+del(event.gen_ai.system_instructions)
 del(event.gen_ai.tool.call.arguments)
 del(event.gen_ai.tool.call.result)
+if is_object(event.gen_ai) && is_empty(object!(event.gen_ai)) {
+  del(event.gen_ai)
+}
+# system_context says what a session.context event recorded and names the skills a skill index
+# listed, the way inventory names skills on disk; its text was in gen_ai.system_instructions.
 if is_object(event.content) {
   event.content.retention = "metadata"
   event.content.included = false

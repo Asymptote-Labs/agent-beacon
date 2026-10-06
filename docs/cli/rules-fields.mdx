@@ -25,6 +25,8 @@ Threat-rule expressions bind each Beacon event as `e`. Field paths mirror the ev
 | `e.prompt.text` | Match prompt text when retained |
 | `e.prompt.id` | Group the events of one turn: the prompt and everything the agent did for it |
 | `e.gen_ai.tool.call.result_text` | Match text a file read, web fetch, or MCP tool returned, when retained (derived by the engine; empty for other actions) |
+| `e.gen_ai.system_instructions_text` | Match runtime-provided system instructions, such as the skill index on `session.context`, when retained (derived by the engine from text parts) |
+| `e.system_context.kind` | Tell a skill index (`skill_listing`) from other `session.context` events |
 | `e.gen_ai.usage.input_tokens` | Match normalized token usage fields |
 
 ## Examples

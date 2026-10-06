@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -308,6 +309,48 @@ func TestIngestPipelineKeepsNativeVCS(t *testing.T) {
 	}
 	if !sawLink {
 		t.Fatal("sample events should include a session.commit_linked event")
+	}
+}
+
+// system_context says what a session.context event recorded, so it is copied under beacon.* and
+// mapped as keywords. gen_ai.system_instructions stays where the semconv puts it, mapped as the
+// parts list every writer now emits, so an index cannot be fixed to another shape by whichever
+// event arrives first.
+func TestIngestPipelineKeepsSystemContext(t *testing.T) {
+	pipeline := mustRead("pack/ingest-pipeline.json")
+	if !strings.Contains(pipeline, "if (ctx.system_context instanceof Map) { beacon.system_context = ctx.system_context; }") {
+		t.Fatal("ingest pipeline does not copy system_context under beacon")
+	}
+	var parsed struct {
+		Processors []map[string]map[string]interface{} `json:"processors"`
+	}
+	if err := json.Unmarshal([]byte(pipeline), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	removed := false
+	for _, processor := range parsed.Processors {
+		fields, _ := processor["remove"]["field"].([]interface{})
+		removed = removed || slices.Contains(fields, interface{}("system_context"))
+	}
+	if !removed {
+		t.Fatal("the source system_context is not removed after it is copied")
+	}
+
+	var mappings map[string]interface{}
+	if err := json.Unmarshal([]byte(mustRead("pack/component-template-mappings.json")), &mappings); err != nil {
+		t.Fatal(err)
+	}
+	props := mappings["template"].(map[string]interface{})["mappings"].(map[string]interface{})["properties"].(map[string]interface{})
+	context := props["beacon"].(map[string]interface{})["properties"].(map[string]interface{})["system_context"].(map[string]interface{})["properties"].(map[string]interface{})
+	skills := context["skills"].(map[string]interface{})["properties"].(map[string]interface{})
+	for name, mapping := range map[string]interface{}{"kind": context["kind"], "skill_name": skills["skill_name"], "skill_name_hash": skills["skill_name_hash"]} {
+		if mapping.(map[string]interface{})["type"] != "keyword" {
+			t.Fatalf("beacon.system_context %s mapping = %#v, want keyword", name, mapping)
+		}
+	}
+	instructions := props["gen_ai"].(map[string]interface{})["properties"].(map[string]interface{})["system_instructions"].(map[string]interface{})["properties"].(map[string]interface{})
+	if instructions["content"].(map[string]interface{})["type"] != "match_only_text" {
+		t.Fatalf("gen_ai.system_instructions.content mapping = %#v, want text", instructions["content"])
 	}
 }
 

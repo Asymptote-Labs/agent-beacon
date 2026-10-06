@@ -39,6 +39,7 @@ interface OmpContext {
   model?: { id?: string; name?: string; provider?: string } | undefined
   mode?: string
   agent?: { kind?: string }
+  getSystemPrompt?: () => string[]
 }
 
 // The events Beacon subscribes to, and nothing else.
@@ -48,6 +49,10 @@ interface OmpContext {
 // got its work done rather than what the agent did. Subscribing to all of them would fill the
 // runtime log with rows no investigation asks for and would put Beacon in the path of every
 // streaming token update.
+//
+// `context` is the one exception: its supported handler context exposes the effective system
+// prompt. Beacon extracts only the `<skills>` index and discards the conversation messages and
+// every other system-prompt section.
 //
 // `tool_call` and `tool_result` are the pair carrying tool activity: the first names the tool and
 // its arguments before it runs, the second carries the outcome. `user_bash` and `user_python` are
@@ -70,6 +75,7 @@ const subscribedEvents = [
   "session_start",
   "session_shutdown",
   "input",
+  "context",
   "tool_call",
   "tool_result",
   "tool_approval_requested",
@@ -78,6 +84,42 @@ const subscribedEvents = [
   "user_python",
   "message_end",
 ] as const
+
+// Oh My Pi renders its skill index under this heading in the runtime section of the system prompt,
+// after a line of instructions. The match is anchored to the heading because the prompt also
+// carries operator text -- project context files, appended prompts -- and a `<skills>` block quoted
+// there is not the index the runtime gave the model.
+const skillsSection = /^# Skills & Rules\n(?:[^\n]*\n){0,3}?<skills>\s*([\s\S]*?)\s*<\/skills>/m
+
+// How many sessions' last-sent listings are remembered, least recently sent evicted first.
+const maxRememberedSkillSessions = 64
+
+function skillListing(ctx: OmpContext | undefined): string {
+  try {
+    const prompt = ctx?.getSystemPrompt?.()
+    if (!Array.isArray(prompt)) return ""
+    for (const block of prompt) {
+      if (typeof block !== "string") continue
+      const match = skillsSection.exec(block)
+      const listing = match?.[1]?.trim()
+      if (listing) return listing
+    }
+  } catch (err) {
+    debugLog("system prompt could not be read", err)
+  }
+  return ""
+}
+
+function rememberSkillListing(seen: Map<string, string>, key: string, listing: string) {
+  // Re-inserted rather than updated so the map's insertion order is send order, and eviction
+  // drops the session that has gone longest without a change.
+  seen.delete(key)
+  if (seen.size >= maxRememberedSkillSessions) {
+    const oldest = seen.keys().next().value
+    if (oldest !== undefined) seen.delete(oldest)
+  }
+  seen.set(key, listing)
+}
 
 // How many in-flight tool calls the approval enrichment below will remember at once.
 //
@@ -100,6 +142,7 @@ const maxPendingToolCalls = 64
 // process, so remembering it until `tool_result` is exact: the join is the runtime's own call id,
 // not a timestamp or a guess.
 const pendingToolCalls = new Map<string, unknown>()
+const rememberedSkillListings = new Map<string, string>()
 
 function rememberToolCall(event: OmpEvent) {
   const id = typeof event.toolCallId === "string" ? event.toolCallId : ""
@@ -198,15 +241,17 @@ function safeClone(value: unknown, depth = 0, seen = new WeakSet<object>()): unk
   }
 }
 
-async function sendToBeacon(payload: Record<string, unknown>): Promise<void> {
+// sendToBeacon resolves true only when the hook binary read the event and exited cleanly. Every
+// failure is still swallowed -- telemetry never interrupts the run -- but a caller that sends
+// something once rather than per event needs to know whether to try again.
+async function sendToBeacon(payload: Record<string, unknown>): Promise<boolean> {
   // Flattened before anything else sees it, so every consumer of this function is handed plain
   // data rather than a live event with cycles and functions still attached.
   const safe = safeClone(payload)
 
   const testSender = (globalThis as Record<symbol, unknown>)[Symbol.for("beacon.omp.testSender")]
   if (typeof testSender === "function") {
-    await (testSender as (value: unknown) => unknown)(safe)
-    return
+    return (await (testSender as (value: unknown) => unknown)(safe)) !== false
   }
 
   let body: string
@@ -214,21 +259,21 @@ async function sendToBeacon(payload: Record<string, unknown>): Promise<void> {
     body = JSON.stringify(safe)
   } catch (err) {
     debugLog("payload could not be serialized", err)
-    return
+    return false
   }
-  if (!body) return
+  if (!body) return false
 
   try {
     // Imported lazily so a host without node:child_process fails to send rather than failing to
     // load: a throwing import at module scope would surface to the user as a broken extension, and
     // Oh My Pi reports an extension that throws at load time rather than continuing without it.
     const { spawn } = await import("node:child_process")
-    await new Promise<void>((resolve) => {
+    return await new Promise<boolean>((resolve) => {
       let settled = false
-      const finish = () => {
+      const finish = (ok: boolean) => {
         if (settled) return
         settled = true
-        resolve()
+        resolve(ok)
       }
       let child
       try {
@@ -238,7 +283,7 @@ async function sendToBeacon(payload: Record<string, unknown>): Promise<void> {
         })
       } catch (err) {
         debugLog("hook binary could not be spawned", err)
-        finish()
+        finish(false)
         return
       }
       const timer = setTimeout(() => {
@@ -248,19 +293,19 @@ async function sendToBeacon(payload: Record<string, unknown>): Promise<void> {
           // Already gone.
         }
         debugLog("hook binary timed out", { type: payload?.type })
-        finish()
+        finish(false)
       }, sendTimeoutMs)
       // An unreferenced timer cannot keep Oh My Pi alive at exit waiting on Beacon telemetry.
       if (typeof timer.unref === "function") timer.unref()
-      const done = () => {
+      const done = (ok: boolean) => {
         clearTimeout(timer)
-        finish()
+        finish(ok)
       }
       child.on("error", (err) => {
         debugLog("hook binary failed", err)
-        done()
+        done(false)
       })
-      child.on("close", done)
+      child.on("close", (code: number | null) => done(code === 0))
       // Without this, a hook binary that exits before reading stdin turns an EPIPE into an
       // unhandled error event in the host process. Beacon telemetry must never do that.
       child.stdin?.on("error", () => {})
@@ -273,6 +318,7 @@ async function sendToBeacon(payload: Record<string, unknown>): Promise<void> {
   } catch (err) {
     debugLog("send failed", err)
     // Beacon telemetry must never interrupt Oh My Pi execution.
+    return false
   }
 }
 
@@ -343,10 +389,24 @@ export function createBeaconExtension() {
 
   const forward = async (event: OmpEvent, ctx: OmpContext) => {
     try {
+      const fields = identity(ctx)
+      if (event.type === "context") {
+        // Only the listing leaves the extension, and only when it changed: `context` fires before
+        // every model call and carries the whole conversation. It is remembered after a send that
+        // landed, so a failed send is retried on the next call instead of losing the listing.
+        const listing = skillListing(ctx)
+        // A session without an id is remembered under "", so it is still sent once rather than
+        // before every model call.
+        const key = typeof fields.sessionId === "string" ? fields.sessionId : ""
+        if (!listing || rememberedSkillListings.get(key) === listing) return
+        if (await sendToBeacon({ ...fields, type: "context", skillListing: listing })) {
+          rememberSkillListing(rememberedSkillListings, key, listing)
+        }
+        return
+      }
       // The event is spread last so a field it carries itself wins over the context's. `user_bash`
       // and `user_python` both carry their own cwd, and the approval events carry their own
       // sessionId -- in each case the event's is the one that describes this action.
-      const fields = identity(ctx)
       const envelope: Record<string, unknown> = { ...fields, ...event }
       const sessionId = typeof envelope.sessionId === "string" ? envelope.sessionId : ""
 
@@ -373,6 +433,7 @@ export function createBeaconExtension() {
         // visible in one place.
         pendingToolCalls.clear()
         inputSessionId = null
+        rememberedSkillListings.delete(sessionId)
       } else if (event.type === "tool_approval_requested" || event.type === "tool_approval_resolved") {
         // Attached under `input`, the same key `tool_call` uses, so the mapper reads one shape for
         // both and an approval resolves to the same command or file path its tool call did.

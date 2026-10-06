@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 const maxSkillsPerRoot = 200
@@ -146,7 +148,7 @@ func inspectSkillManifest(root skillRoot, name, manifestPath, redaction string, 
 	skill := Skill{
 		Runtime:          root.runtime,
 		SkillName:        valueForName(name, redaction),
-		SkillNameHash:    hashString(name),
+		SkillNameHash:    asymptoteobserve.SkillNameHash(name),
 		RootPath:         valueForPath(root.path, redaction),
 		RootPathHash:     hashString(root.path),
 		SourceScope:      root.scope,

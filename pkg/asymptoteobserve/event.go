@@ -235,6 +235,38 @@ type PromptInfo struct {
 	Text string `json:"text,omitempty"`
 }
 
+// SystemContextInfo says what a session.context event recorded when the runtime gave the model
+// context of its own, outside the conversation: which kind it was, where Beacon read it, and for a
+// skill index, which skills it listed. The text itself is in gen_ai.system_instructions. This block
+// is metadata, so it stays on an event whose text is removed, as metadata-only forwarding does.
+type SystemContextInfo struct {
+	Kind   string         `json:"kind"`
+	Source string         `json:"source,omitempty"`
+	Skills []SkillRefInfo `json:"skills,omitempty"`
+}
+
+// SkillRefInfo names one skill. The fields are spelled and SkillNameHash is computed the way the
+// configuration inventory records a skill it found on disk, so a skill the model was shown joins
+// to the SKILL.md it came from.
+type SkillRefInfo struct {
+	SkillName     string `json:"skill_name,omitempty"`
+	SkillNameHash string `json:"skill_name_hash,omitempty"`
+}
+
+// SystemContextInfo.Kind values.
+const (
+	// SystemContextSkillListing is a skill index: each skill's name and description, which the
+	// runtime lists so the model can choose one. A skill's body is not part of it.
+	SystemContextSkillListing = "skill_listing"
+)
+
+// SystemContextInfo.Source values: where the runtime exposed the context to Beacon. With
+// harness.name they say exactly which reader produced an event.
+const (
+	SystemContextSourceSystemPrompt = "system_prompt"
+	SystemContextSourceTranscript   = "transcript"
+)
+
 // ContentInfo marks how an event's retained raw content was handled. Hash and
 // Bytes describe the original content before redaction/truncation, so events
 // keep a stable identifier and size even when the stored text was cut down.
@@ -508,10 +540,15 @@ type GenAIInfo struct {
 	Response           *GenAIResponseInfo     `json:"response,omitempty"`
 	Retrieval          *GenAIRetrievalInfo    `json:"retrieval,omitempty"`
 	SystemInstructions interface{}            `json:"system_instructions,omitempty"`
-	Token              *GenAITokenInfo        `json:"token,omitempty"`
-	Tool               *GenAIToolInfo         `json:"tool,omitempty"`
-	Usage              *GenAIUsageInfo        `json:"usage,omitempty"`
-	Workflow           *GenAIWorkflowInfo     `json:"workflow,omitempty"`
+	// SystemInstructionsText is SystemInstructions as plain text, for the threat-rules
+	// engine only, for the same reason as GenAIToolCallInfo.ResultText: CEL cannot address
+	// the interface{} semconv value. It is never written or read; the engine fills it on its
+	// own copy of each event. See threatrules.SystemInstructionsText.
+	SystemInstructionsText string             `json:"-" cel:"system_instructions_text"`
+	Token                  *GenAITokenInfo    `json:"token,omitempty"`
+	Tool                   *GenAIToolInfo     `json:"tool,omitempty"`
+	Usage                  *GenAIUsageInfo    `json:"usage,omitempty"`
+	Workflow               *GenAIWorkflowInfo `json:"workflow,omitempty"`
 }
 
 type DestinationInfo struct {
@@ -622,6 +659,7 @@ type Event struct {
 	Approval      *ApprovalInfo          `json:"approval,omitempty"`
 	Policy        *PolicyInfo            `json:"policy,omitempty"`
 	Prompt        *PromptInfo            `json:"prompt,omitempty"`
+	SystemContext *SystemContextInfo     `json:"system_context,omitempty"`
 	Content       *ContentInfo           `json:"content,omitempty"`
 	Destination   *DestinationInfo       `json:"destination,omitempty"`
 	Health        *HealthInfo            `json:"health,omitempty"`

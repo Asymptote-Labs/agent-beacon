@@ -56,18 +56,26 @@ func ToolResultText(event asymptoteobserve.Event) string {
 // the path are copied rather than written through, so the caller's event -- which is shared
 // across rules and may be evidence in a Finding -- is never mutated.
 func withDerivedFields(event asymptoteobserve.Event) asymptoteobserve.Event {
-	text := ToolResultText(event)
-	if text == "" && (event.GenAI == nil || event.GenAI.Tool == nil || event.GenAI.Tool.Call == nil || event.GenAI.Tool.Call.ResultText == "") {
+	if event.GenAI == nil {
 		return event
 	}
-	// Either there is text to set or an in-process caller set the field itself; the field is
+	resultText := ToolResultText(event)
+	instructionsText := SystemInstructionsText(event)
+	callAsserted := event.GenAI.Tool != nil && event.GenAI.Tool.Call != nil && event.GenAI.Tool.Call.ResultText != ""
+	if resultText == "" && !callAsserted && instructionsText == "" && event.GenAI.SystemInstructionsText == "" {
+		return event
+	}
+	// Either there is text to set or an in-process caller set a field itself; the fields are
 	// derived, never asserted, so the second case is cleared.
 	genAI := *event.GenAI
-	tool := *genAI.Tool
-	call := *tool.Call
-	call.ResultText = text
-	tool.Call = &call
-	genAI.Tool = &tool
+	genAI.SystemInstructionsText = instructionsText
+	if resultText != "" || callAsserted {
+		tool := *genAI.Tool
+		call := *tool.Call
+		call.ResultText = resultText
+		tool.Call = &call
+		genAI.Tool = &tool
+	}
 	event.GenAI = &genAI
 	return event
 }

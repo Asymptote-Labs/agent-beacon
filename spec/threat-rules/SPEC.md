@@ -153,6 +153,23 @@ the steps in both orders still fires once. A single event never satisfies two st
   as an MCP tool (`mcp__…`, `MCP:…`) or a web fetch/search tool — and its `content`
   marker, if present, is `included` with a `retention` other than `metadata`. The
   reference derivation is `threatrules.ToolResultText`.
+- `e.gen_ai.system_instructions_text` is derived under the same rules (computed, never
+  read from input, secret redaction, empty unless the `content` marker, if present, is
+  `included` with a `retention` other than `metadata`). It is `gen_ai.system_instructions`
+  read in its OpenTelemetry GenAI semconv shape, a list of message parts: the text of each
+  part whose `type` is `text` (its `content`, or its `text` when `content` is empty), each
+  trimmed and capped at 4096 bytes, in order, joined by `\n`, and the whole capped at 65536
+  bytes. A bare string, as the whole value or as a list element, is taken as text; parts of
+  any other type contribute nothing. The cap is per part because a skill index holds one
+  part per skill, and a cap on the joined text would hide every skill after the first few.
+  It is runtime-provided model instructions (for example the skill index on
+  `session.context`), never operator-submitted prompt text. The reference derivation is
+  `threatrules.SystemInstructionsText`.
+- `e.system_context` is on the wire, not derived: on `session.context` it names what the
+  runtime gave the model. `kind` is `skill_listing` for a skill index, `source` is where
+  Beacon read it (`system_prompt`, `transcript`), and `skills` names each listed skill as
+  `skill_name` and `skill_name_hash`, so a rule can select an index without matching its
+  text: `e.system_context.skills.exists(s, s.skill_name == "deploy")`.
 - An engine MUST reject (at load) any rule whose CEL expression fails to compile or does
   not type to `bool`. Because field paths are checked against the event schema, a typo
   like `e.fil.path` is a load-time error.
