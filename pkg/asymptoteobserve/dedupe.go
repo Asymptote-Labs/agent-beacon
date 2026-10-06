@@ -17,11 +17,13 @@ const (
 )
 
 type endpointDedupeEvent struct {
-	action  string
-	harness string
-	key     string
-	callID  string
-	ts      time.Time
+	action    string
+	harness   string
+	key       string
+	callID    string
+	hasOutput bool
+	polled    bool
+	ts        time.Time
 }
 
 // IsDuplicateEndpointEvent reports whether candidateLine duplicates a recently
@@ -89,8 +91,14 @@ func duplicateEndpointEvents(existing, candidate endpointDedupeEvent, effectiveW
 	// runs and the collector writes when its batch flushes, so the two reports
 	// of one call routinely land five seconds apart -- past the two-second
 	// window that is the only thing that ever collapsed them.
+	//
+	// The one exception is a live report that retains command output the earlier one lacks. The
+	// log is append-only, so the earlier line cannot be completed; suppressing the later one would
+	// silently lose the output whenever a path that has none -- Claude Code's OTLP tool_result --
+	// happened to be written first. A polled copy is backfill and stays suppressed: keeping it
+	// would put every command an install without hooks ran into the log twice.
 	if existing.callID != "" && existing.callID == candidate.callID {
-		return true
+		return existing.hasOutput || !candidate.hasOutput || candidate.polled
 	}
 	// Without matching IDs, only the timing heuristic is left, and only across
 	// capture paths: two adjacent calls from one path can legitimately touch the
@@ -170,7 +178,12 @@ func endpointDedupeCandidate(line []byte) (endpointDedupeEvent, bool) {
 		strings.ToLower(workspace),
 		target,
 	}, "\x00")
-	return endpointDedupeEvent{action: strings.ToLower(action), harness: harness, key: key, callID: callID, ts: ts.UTC()}, true
+	return endpointDedupeEvent{
+		action: strings.ToLower(action), harness: harness, key: key, callID: callID,
+		hasOutput: nestedString(event, "command", "output") != "",
+		polled:    nestedString(event, "harness", "collection_method") == CollectionMethodPoll,
+		ts:        ts.UTC(),
+	}, true
 }
 
 func endpointDedupeWindow(action string, fallback time.Duration) time.Duration {

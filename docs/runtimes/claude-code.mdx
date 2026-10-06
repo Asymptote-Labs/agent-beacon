@@ -76,7 +76,7 @@ Beacon detects Claude Code through the `claude` executable and Claude settings p
 |------|---------|
 | Prompt telemetry | Supported when emitted through Claude Code OTLP or hooks |
 | Turn identity | Supported. Claude Code's `prompt.id` is kept as `prompt.id` on OTLP events; hook events after the prompt read the same id from the session transcript, and `beacon endpoint claude sync` reads it from `promptId`. The hook-recorded prompt itself takes its id from the OTLP `user_prompt` event, because the hook runs before Claude Code records the prompt |
-| Command, tool, and file telemetry | Supported through Claude Code OTLP with detailed tool inputs enabled |
+| Command, tool, and file telemetry | Supported through Claude Code OTLP with detailed tool inputs enabled; with hooks installed, Bash results also carry command output and, for a failed command, its exit code |
 | Token usage and cost | Supported through OTLP token and cost metrics, with per-model and per-session attribution |
 | Hook lifecycle and tool telemetry | Optional through `beacon endpoint hooks install --harness claude` |
 | Historical session sync | Supported through `beacon endpoint claude sync`; marked as poll collection |
@@ -113,9 +113,26 @@ attributes remain under `raw.attributes`, subject to the configured redaction
 and event-size controls. Future full-body `claude_code.*` lifecycle records
 default to `session.activity` until Beacon assigns a more specific mapping.
 
-Optional hook events are an additional telemetry source. A hook pre-tool
-observation can appear as `tool.invoked`; the completed OTLP `tool_result` is
-the record that supplies the canonical command or file action.
+Optional hook events complement OTLP. Pre-tool observations can appear as
+`tool.invoked`. A Bash `PostToolUse` records `tool_response.stdout` followed by
+`tool_response.stderr` in `command.output`; Claude reports the two streams
+separately, so the order in which the command interleaved them is not kept, and
+no exit code is reported for a success. A failed Bash command arrives as
+`PostToolUseFailure` with no tool response, only an `error` whose first line is
+`Exit code N`, followed by the output with both streams interleaved. Beacon
+records it as a high-severity `command.executed` with `command.exit_code` set to
+N and the remaining text in `command.output`. Claude may middle-truncate long
+output or add lines of its own, such as a timeout notice. An `error` without that
+line means the shell never started; it is recorded as `tool.failed` without
+output. An interrupted command's partial output is marked
+`raw.claude_interrupted: true`. Retained output is subject to Beacon's local
+redaction and size limits.
+
+The hook event carries Claude's tool call ID, so the later `claude sync` copy of
+the same call, which has the same output, is suppressed as a duplicate. The OTLP
+`command.executed` for the call has no output and no working directory, so it is
+kept as a separate event. If a report without output is ever written first, the
+hook event is still kept, so the output is not lost.
 
 Detailed tool inputs can contain sensitive command arguments, paths, URLs, search terms, and MCP request data. Beacon sends this telemetry only to the configured local collector during normal endpoint execution; apply the same access, retention, and redaction controls used for other retained prompt and tool data.
 

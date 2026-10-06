@@ -433,6 +433,13 @@ func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) 
 	for key, value := range toolFieldsWithResponse(toolName, toolInput, toolResponse) {
 		fields[key] = value
 	}
+	// A Bash command that ran and exited non-zero is recorded the way the OTLP and transcript paths
+	// record the same call: command.executed, high severity. As tool.failed it would never match
+	// their copies, and each copy would keep the command's output in the log.
+	if platformFlag == "claude" && applyClaudeBashResult(fields, input, toolName, toolResponse) {
+		emitHookEvent(logger, "command.executed", "command", "high", "Shell command failed", input, fields)
+		return
+	}
 	// Kimi Code's result is read before the shared failure branch below, unlike every other
 	// runtime's, and the ordering is the whole point. Kimi Code reports a failure by sending
 	// `PostToolUseFailure` -- the exact spelling that branch matches -- so it is the branch that
