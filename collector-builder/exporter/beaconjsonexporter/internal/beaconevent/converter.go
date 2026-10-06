@@ -643,6 +643,7 @@ func (c Converter) NormalizeClaudeLogEvent(event *Event, attrs map[string]interf
 	if preserveCategory {
 		event.Event.Category = originalCategory
 	}
+	NormalizeClaudeWebFetchAuxiliaryRequest(event, attrs)
 }
 
 func ClaudeLogEventName(attrs map[string]interface{}, body string) string {
