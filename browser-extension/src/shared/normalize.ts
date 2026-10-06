@@ -107,6 +107,7 @@ export function normalizeTurn(
     str('beacon.content.retention', retention),
     str('beacon.record.id', recordId(tid, action, index)),
     str('beacon.capture.mode', turn.captureMode),
+    ...promptIdAttr(turn),
   ];
 
   // ---- prompt.submitted ----
@@ -207,6 +208,16 @@ export function normalizeTurn(
   return { resourceAttributes, logRecords };
 }
 
+/**
+ * The turn's id as beacon.prompt.id, which the collector promotes to the
+ * event's prompt.id: one chat request is one prompt and everything the reply
+ * did for it. Only an id the adapter derived from the request is used; the
+ * session-level fallback in tid would put every unidentified turn under one id.
+ */
+function promptIdAttr(turn: ChatTurn): KeyValue[] {
+  return turn.turnId ? [str('beacon.prompt.id', turn.turnId)] : [];
+}
+
 function toolRecord(
   turn: ChatTurn,
   tool: ToolCall,
@@ -223,6 +234,7 @@ function toolRecord(
     str('gen_ai.conversation.id', turn.sessionId),
     str('beacon.content.retention', retention),
     str('beacon.record.id', recordId(tid, action, index)),
+    ...promptIdAttr(turn),
     str('tool.name', tool.name),
     str('gen_ai.tool.call.id', tool.id),
     str('gen_ai.tool.call.name', tool.name),

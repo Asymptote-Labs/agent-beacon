@@ -82,7 +82,7 @@ func (c Converter) PromoteRetainedContent(event *Event, attrs map[string]interfa
 	if promptText == "" && isPromptEvent(event) {
 		promptText = FirstNonEmpty(FirstTextAttr(attrs, PromptTextKeys...), FirstMessageText(event.GenAI))
 		if promptText != "" {
-			event.Prompt = &PromptInfo{Text: promptText}
+			SetPromptText(event, promptText)
 		}
 	}
 
