@@ -45,6 +45,11 @@ type mapper struct {
 	out   []MappedEvent
 	tools map[string]toolCall
 	usage map[int]usagePlan
+	// promptID is the prompt the records being read belong to. Claude Code stamps promptId on a
+	// prompt and on every tool result that follows it, but not on assistant entries, which belong
+	// to the same prompt by their place in the file. The whole file is read on every sync, so the
+	// value is right even for the first record past the cursor.
+	promptID string
 }
 
 func MapSession(ref SessionRef, records []Record, opts MapOptions) []MappedEvent {
@@ -61,6 +66,9 @@ func (m *mapper) consume(record Record) {
 	emit := record.Line > m.opts.MinLine
 	if emit && !m.opts.SkipSessionStarted && len(m.out) == 0 && entry.SessionID != "" {
 		m.emitSessionStarted(record)
+	}
+	if id := strings.TrimSpace(entry.PromptID); id != "" {
+		m.promptID = id
 	}
 
 	switch entry.Type {
@@ -170,7 +178,7 @@ func (m *mapper) emitSessionStarted(record Record) {
 
 func (m *mapper) emitPrompt(record Record, text string) {
 	ev := m.base(record, "prompt.submitted", "prompt", schema.SeverityInfo, schema.FidelityObserved, "Prompt submitted to Claude Code")
-	ev.Prompt = &schema.PromptInfo{Text: text}
+	ev.Prompt = &schema.PromptInfo{ID: m.promptID, Text: text}
 	ev.Content = contentMarker(text)
 	ev.GenAI = mergeGenAI(ev.GenAI, &schema.GenAIInfo{Input: &schema.GenAIInputInfo{Messages: asymptoteobserve.TextInputMessages(text)}})
 	m.append(record, "prompt", ev)
@@ -306,6 +314,7 @@ func (m *mapper) base(record Record, action, category string, severity schema.Se
 	if entry.IsSidechain || m.ref.IsSidechain {
 		ev.GenAI = mergeGenAI(ev.GenAI, &schema.GenAIInfo{Agent: m.agentInfo(entry)})
 	}
+	asymptoteobserve.SetPromptID(&ev, m.promptID)
 	return ev
 }
 

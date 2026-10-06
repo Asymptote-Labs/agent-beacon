@@ -290,7 +290,7 @@ func (m *mapper) consumeTokenUsageRecord(record Record, emit bool) {
 
 func (m *mapper) emitPrompt(record Record, text string) {
 	ev := m.base(record, "prompt.submitted", "prompt", schema.SeverityInfo, schema.FidelityObserved, "Prompt submitted to Codex")
-	ev.Prompt = &schema.PromptInfo{Text: text}
+	ev.Prompt = &schema.PromptInfo{ID: m.turnID, Text: text}
 	ev.Content = contentMarker(text)
 	ev.GenAI = mergeGenAI(ev.GenAI, &schema.GenAIInfo{Input: &schema.GenAIInputInfo{Messages: asymptoteobserve.TextInputMessages(text)}})
 	m.append(record, "prompt", ev)
@@ -368,6 +368,10 @@ func (m *mapper) base(record Record, action, category string, severity schema.Se
 	if m.model != "" {
 		ev.Model = m.model
 	}
+	// Codex brackets each turn with TurnStarted and TurnComplete, both carrying turn_id, and
+	// records the user's message inside the bracket, so the turn being read is the prompt every
+	// event here belongs to.
+	asymptoteobserve.SetPromptID(&ev, m.turnID)
 	return ev
 }
 
