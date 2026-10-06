@@ -628,7 +628,7 @@
     "primary": {
       "type": "button",
       "label": "Sign In",
-      "href": "https://beacon.sh/signin"
+      "href": "https://beacon.sh/sign-in"
     }
   },
   "contextual": {
