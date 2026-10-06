@@ -1,7 +1,12 @@
 package cmd
 
 import (
+	"encoding/json"
+	"net/url"
+	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/diff"
@@ -37,11 +42,21 @@ type piFamily struct {
 	platform string
 	// displayName is how the runtime is named in an event's human-readable message.
 	displayName string
+	// resolvesToolPaths marks a runtime whose read, edit and write tools take a path the way Oh
+	// My Pi's do -- relative to the session's working directory or to `~`, with an inline selector
+	// such as `main.go:10-40` or `notes.md:raw` -- and whose results report the absolute file they
+	// resolved it to. Such a runtime's file events carry that file; see filePath.
+	//
+	// It is declared rather than inferred because Pi and Prime Agent are also read back from their
+	// session files (pisession, primesession), which record the path as written. A hook event and
+	// a session-file event for the same read are merged only when their file.path matches, so
+	// resolving the path on one side alone would record each read twice.
+	resolvesToolPaths bool
 }
 
 var (
 	piRuntime  = piFamily{platform: "pi", displayName: "Pi"}
-	ompRuntime = piFamily{platform: "omp", displayName: "Oh My Pi"}
+	ompRuntime = piFamily{platform: "omp", displayName: "Oh My Pi", resolvesToolPaths: true}
 	// Prime Agent's `--platform` is `prime` rather than `prime-agent` because the platform value is
 	// also the prefix on this runtime's keys inside `raw`, and `prime_agent_session_reason` reads
 	// as a field of a harness named `prime_agent` -- which is exactly what it is. The harness name
@@ -120,8 +135,9 @@ func (f piFamily) endpointEvents(input map[string]interface{}, sessionID string)
 		// mapper's tool_before stage, and deliberately not as an approval -- a tool_call handler
 		// can block, but that is an extension deciding rather than an operator being asked. Oh My
 		// Pi's real approval decisions arrive as their own events and are mapped there.
-		mergeMap(fields, f.toolFields(input, false))
-		f.applyPythonMarker(fields, piToolName(input))
+		call := piToolCallOf(input)
+		mergeMap(fields, f.toolFields(call, input, false))
+		f.applyPythonMarker(fields, call.name)
 		applyToolCallID(fields, input)
 		return f.one("tool.invoked", "tool", "info", "tool invoked", fields)
 
@@ -204,11 +220,10 @@ func (f piFamily) endpointEvents(input map[string]interface{}, sessionID string)
 // the tool.invoked that does carry the arguments, which is why it is promoted here as carefully as
 // on the tool events themselves.
 func (f piFamily) approvalEvents(input, fields map[string]interface{}, action, decision, messageSuffix string) []normalizedEvent {
-	toolName := piToolName(input)
-	if toolName != "" {
+	if piToolName(input) != "" {
 		// toolFields resolves the command, file and MCP blocks from the decided call's arguments
 		// when the extension attached them, and yields just the tool name when it did not.
-		mergeMap(fields, f.toolFields(input, false))
+		mergeMap(fields, f.toolFields(piToolCallOf(input), input, false))
 	}
 
 	approval := map[string]interface{}{"required": true, "decision": decision}
@@ -288,15 +303,436 @@ func piToolInput(input map[string]interface{}) map[string]interface{} {
 	return map[string]interface{}{}
 }
 
+// piToolCall is the tool call one Pi-family tool event describes: the tool that ran, the arguments
+// it ran with, and the details the runtime reported for it.
+//
+// It is usually just the payload's own toolName, input and details. The exception is a call routed
+// through Oh My Pi's tool-device transport, which reaches the tool by writing to an `xd://` URI;
+// see ompDeviceCall.
+type piToolCall struct {
+	name    string
+	args    map[string]interface{}
+	details map[string]interface{}
+}
+
+// piToolCallOf reads the tool call a tool_call, tool_result or approval payload describes.
+func piToolCallOf(input map[string]interface{}) piToolCall {
+	call := piToolCall{name: piToolName(input), args: piToolInput(input), details: firstMap(input, "details")}
+	if device, ok := ompDeviceCall(call); ok {
+		return device
+	}
+	return call
+}
+
+// ompDeviceScheme is the URI scheme through which Oh My Pi's read and write tools reach a tool
+// device: `read xd://<tool>` returns the tool's documentation, and `write xd://<tool>` with a JSON
+// payload calls it.
+const ompDeviceScheme = "xd://"
+
+// ompDeviceHelpContent matches a device write that asks for documentation rather than making a
+// call: an empty payload, `?`, or `help`. It mirrors HELP_CONTENT_RE in Oh My Pi's tools/xdev.ts,
+// which is how the runtime itself tells the two apart before anything has run.
+var ompDeviceHelpContent = regexp.MustCompile(`(?i)^\s*(\?|help)?\s*$`)
+
+// ompDeviceCall resolves a write to `xd://<tool>` into the call of <tool> it carries.
+//
+// Oh My Pi exposes MCP tools and its optional built-in tools as devices rather than as top-level
+// tools, so the model calls one by writing its arguments to the device's URI. Nothing is written
+// anywhere: the write tool is the transport, and the device is the tool that ran. Recording the
+// write as itself would put a file.created for `xd://mcp__…` in the log, and would name the call
+// `write` -- a different tool from the one every other runtime records when its agent calls the same
+// MCP server. So the call is recorded as the device: its name, the arguments it was given, and the
+// details it reported, which the runtime nests under `details.xdev`.
+//
+// The runtime also reports most device calls a second time from inside the dispatch, as the
+// device's own tool_call and tool_result under the same toolCallId. Both reports now describe the
+// same tool with the same call id, which is exactly what the endpoint writer's call-id dedupe treats
+// as one call -- so the call lands in the log once, as it would on any other runtime. Devices the
+// runtime handles in-process (report_issue, and its plan resolve/reject/propose devices) send no
+// second report, and are recorded from the write alone; nothing here needs to know which is which.
+//
+// A help request is a documentation lookup, the same as reading the device's URI, and is left as
+// the write it is.
+func ompDeviceCall(call piToolCall) (piToolCall, bool) {
+	if !strings.EqualFold(call.name, "write") {
+		return piToolCall{}, false
+	}
+	device, ok := strings.CutPrefix(getFirstStr(call.args, "path"), ompDeviceScheme)
+	if !ok || device == "" || strings.Contains(device, "/") {
+		return piToolCall{}, false
+	}
+	xdev := firstMap(call.details, "xdev")
+	if xdev != nil {
+		if getFirstStr(xdev, "mode") != "execute" {
+			return piToolCall{}, false
+		}
+	} else if ompDeviceHelpContent.MatchString(getFirstStr(call.args, "content")) {
+		return piToolCall{}, false
+	}
+
+	dispatched := piToolCall{name: device, args: firstMap(xdev, "args"), details: firstMap(xdev, "inner")}
+	if dispatched.args == nil {
+		// The tool_call and approval halves carry only the payload the model wrote. The result
+		// carries the runtime's validated arguments instead, but not when validation is what failed.
+		_ = json.Unmarshal([]byte(getFirstStr(call.args, "content")), &dispatched.args)
+	}
+	if dispatched.args == nil {
+		dispatched.args = map[string]interface{}{}
+	}
+	return dispatched, true
+}
+
+// piFilePath returns the filesystem path a read, edit or write target names, or "" when the target
+// is not a file.
+//
+// Oh My Pi's read and write tools take URIs as well as paths: `https://` fetches a web page, and its
+// internal schemes -- `artifact://`, `agent://`, `skill://`, `local://`, `proc://`, `xd://` and the
+// rest -- address runtime resources such as a spilled tool output, a subagent's report, a background
+// job, or a tool device. None of those is file activity, and recording one under file.path would put
+// a value that is not a filesystem path into the field every file rule, git helper and SIEM query
+// treats as one; the goose mapper refuses web URLs there for the same reason, and the collector
+// accepts only `file://` URIs. The runtime draws the same line: it reports a read's source as a
+// `path`, a `url` or an `internal` resource. A `file://` URI is a path spelled as a URI, and is
+// recorded as the path; see fileURLPath.
+func piFilePath(target string) string {
+	scheme, _, ok := strings.Cut(target, "://")
+	if !ok || !isURIScheme(scheme) {
+		return target
+	}
+	if !strings.EqualFold(scheme, "file") {
+		return ""
+	}
+	return fileURLPath(target, runtime.GOOS)
+}
+
+// fileURLPath returns the path a `file://` URL names on goos, or "" when it names none.
+//
+// It follows Node's url.fileURLToPath, which is what these runtimes, written in TypeScript, use
+// to turn the URL into the path they read. The two platforms disagree. On Windows,
+// `file:///C:/Users/me/a.go` names `C:\Users\me\a.go` and `file://server/share/a.go` names the
+// share `\\server\share\a.go`; a URL with no drive and no host names nothing. Elsewhere the
+// URL's path is the path, and a URL with a host names nothing. An encoded separator never names a
+// path on either. Taking the URL's path as written on Windows gave `/C:/Users/me/a.go`, which is
+// not absolute there, and was then joined onto the working directory.
+func fileURLPath(target, goos string) string {
+	parsed, err := url.Parse(target)
+	if err != nil {
+		return ""
+	}
+	host, escaped := parsed.Host, parsed.EscapedPath()
+	if strings.EqualFold(host, "localhost") {
+		host = ""
+	}
+	// `file://C:/a.go` puts the drive where a host would go; the URL standard reads it as the
+	// path's drive letter.
+	if len(host) == 2 && host[1] == ':' && isDriveLetter(host[:1]) {
+		escaped, host = "/"+host+escaped, ""
+	}
+	lower := strings.ToLower(escaped)
+	if strings.Contains(lower, "%2f") || (goos == "windows" && strings.Contains(lower, "%5c")) {
+		return ""
+	}
+	p, err := url.PathUnescape(escaped)
+	if err != nil {
+		return ""
+	}
+	if goos != "windows" {
+		if host != "" {
+			return ""
+		}
+		return p
+	}
+	p = strings.ReplaceAll(p, "/", `\`)
+	if host != "" {
+		return `\\` + host + p
+	}
+	if len(p) < 3 || !isDriveLetter(p[1:2]) || p[2] != ':' {
+		return ""
+	}
+	return p[1:]
+}
+
+// isURIScheme reports whether s is an RFC 3986 scheme. A single letter is not accepted, so a
+// Windows drive letter is never mistaken for one.
+func isURIScheme(s string) bool {
+	if len(s) < 2 {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z':
+		case i > 0 && (r >= '0' && r <= '9' || r == '+' || r == '-' || r == '.'):
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// filePath returns the file a read, edit or write call touched, or "" when its target is not a
+// file.
+//
+// On a runtime that resolves its tool paths, the runtime's own statement of the file is preferred,
+// because it is the one path that is certainly right: it is absolute, and any selector or `~` in
+// what the model wrote has already been resolved. A result whose source the runtime reports as a
+// URL or one of its own resources is not a file, whatever file backs it. A tool_call or an
+// approval, which happen before the runtime has resolved anything, resolve the target the same way
+// the runtime will.
+func (f piFamily) filePath(call piToolCall, input map[string]interface{}, target string) string {
+	if f.resolvesToolPaths {
+		target = ompStripPathMarker(target)
+	}
+	path := piFilePath(target)
+	if path == "" || !f.resolvesToolPaths {
+		return path
+	}
+	resolved, isFile := piResolvedPath(call.details)
+	if !isFile {
+		return ""
+	}
+	if resolved != "" {
+		return resolved
+	}
+	return ompToolPath(path, resolveCwd(input, f.platform), runtime.GOOS, ompIsWSL())
+}
+
+// piResolvedPath returns the absolute path a tool result reports having read or written, and
+// whether the result describes a file at all.
+//
+// Oh My Pi reports the path in three places, one per tool: a read names its source in
+// `meta.source`, a write names the file in `resolvedPath`, and an edit of one file names it in
+// `path`. A read whose source is a URL or an `internal` resource is not a file read, even when a
+// file in the runtime's own storage backs it and `resolvedPath` names that file.
+func piResolvedPath(details map[string]interface{}) (string, bool) {
+	var path string
+	switch source := firstMap(firstMap(details, "meta"), "source"); getFirstStr(source, "type") {
+	case "path":
+		path = getFirstStr(source, "value")
+	case "":
+		path = getFirstStr(details, "resolvedPath", "path")
+	default:
+		return "", false
+	}
+	if !filepath.IsAbs(path) {
+		return "", true
+	}
+	return path, true
+}
+
+// ompLineSelector is Oh My Pi's read selector grammar, FILE_LINE_RANGE_RE in its
+// packages/tui/src/tools/read.ts: comma-joined line ranges (`10`, `10-40`, `10..40`, `10+30`,
+// `10-`), a tail (`-60`), or `raw`, `conflicts` or `img`. A range may not end in `+`, which is
+// what the runtime's trailing lookbehind enforces.
+var ompLineSelector = regexp.MustCompile(`(?i)^(?:` + ompLineRange + `(?:,` + ompLineRange + `)*|-\d+|raw|conflicts|img)$`)
+
+const ompLineRange = `L?\d+(?:(?:\.\.|-)(?:L?\d+)?|\+L?\d+)?`
+
+// ompStrayColon matches the stray `:` some models put in front of a path (`:/abs`, `:../rel`,
+// `:C:\repo`), which Oh My Pi drops before resolving: no real path starts with `:`.
+var ompStrayColon = regexp.MustCompile(`^:(?:[/\\~]|\.\.?[/\\]|[A-Za-z]:)`)
+
+// ompWindowsAbsolute matches a Windows absolute path: a drive (`C:\`, `C:/`), a UNC share, or a
+// root-relative `\path`, the forms Node's path.win32.isAbsolute accepts.
+var ompWindowsAbsolute = regexp.MustCompile(`^(?:[A-Za-z]:[\\/]|[\\/]{2}|\\)`)
+
+// ompStripPathMarker drops the marker characters Oh My Pi strips from the front of a path before
+// it reads one, mirroring the first steps of its expandPath (tools/path-utils.ts).
+//
+// A stray `:` goes before a path shape. A leading `@` -- a mention marker -- goes only before `/`,
+// `~`, a Windows absolute path, or an internal URL, so a file literally named `@notes.md` keeps its
+// name. The runtime recognizes an internal URL by its own scheme registry; any `scheme://` other
+// than a file or web URL is taken for one here, because it is not a file either way. Stripping the
+// `@` before the URI check is what keeps `@skill://name` from being read as a file path.
+func ompStripPathMarker(target string) string {
+	if ompStrayColon.MatchString(target) {
+		target = target[1:]
+	}
+	rest, ok := strings.CutPrefix(target, "@")
+	if !ok {
+		return target
+	}
+	if strings.HasPrefix(rest, "/") || rest == "~" || strings.HasPrefix(rest, "~/") || ompWindowsAbsolute.MatchString(rest) {
+		return rest
+	}
+	if scheme, _, ok := strings.Cut(rest, "://"); ok && isURIScheme(scheme) {
+		switch strings.ToLower(scheme) {
+		case "file", "http", "https":
+		default:
+			return rest
+		}
+	}
+	return target
+}
+
+// ompUnicodeSpaces are the space characters Oh My Pi reads as a plain space in a path: no-break,
+// the U+2000 block, narrow no-break, medium mathematical and ideographic.
+var ompUnicodeSpaces = regexp.MustCompile("[\u00A0\u2000-\u200A\u202F\u205F\u3000]")
+
+// ompToolPath turns a path as an Oh My Pi tool was given it into the file it names.
+//
+// Oh My Pi resolves a relative path against the session's working directory, expands `~`, and
+// reads a trailing selector as a line range rather than part of the name: `read .env:1-20` reads
+// the first twenty lines of `<cwd>/.env`. Recording the string as written put `.env:1-20` in
+// file.path, which defeats every file rule that anchors its pattern at the end of the name -- the
+// credential-read rules match `(^|/)\.env($|\.)`, not `.env:1-20` -- and filed one file under as
+// many names as it was read with. Cline resolves relative paths for the same reason.
+//
+// The rest of the runtime's shorthand is applied the same way its expandPath and resolveToCwd
+// apply it (tools/path-utils.ts), so the path recorded before a call is the one its result will
+// report: Unicode spaces become plain spaces; `~name` is `<home>/name`, the runtime's reading
+// rather than a shell's; a Windows drive alias is translated for the host (ompDriveAliasPath); a
+// path that is nothing but slashes means the working directory, because the runtime reads `/` as
+// "here" rather than the filesystem root; and on Windows a path that starts at a root but names no
+// drive (`\Users\me\a.go`) is already absolute to the runtime -- Node's path.isAbsolute says so --
+// and lands on the working directory's drive rather than under the working directory.
+//
+// The selector is peeled the way the runtime peels it: from the last colon, only when what follows
+// is selector grammar, at most twice (a range and `raw` may be combined), and not at all when a
+// file of that literal name exists, which is the runtime's own tiebreak.
+//
+// What this cannot reproduce is anything the runtime decides by looking at the disk once the path
+// it resolved turns out not to exist -- a unique-suffix search under the working directory, an
+// edit rebound by its snapshot tag, or a macOS spelling variant of the name. Those reach only the
+// result, which reports the file the runtime actually used.
+func ompToolPath(target, cwd, goos string, wsl bool) string {
+	p := ompUnicodeSpaces.ReplaceAllString(target, " ")
+	if strings.HasPrefix(p, "~") {
+		if home, err := os.UserHomeDir(); err == nil {
+			p = filepath.Join(home, p[1:])
+		}
+	}
+	p = ompDriveAliasPath(p, goos, wsl)
+	switch {
+	case strings.Trim(p, "/") == "" && cwd != "":
+		p = cwd
+	case !filepath.IsAbs(p) && cwd != "" && goos == "windows" && (p[0] == '/' || p[0] == '\\'):
+		p = filepath.VolumeName(cwd) + filepath.FromSlash(p)
+	case !filepath.IsAbs(p) && cwd != "":
+		p = filepath.Join(cwd, p)
+	}
+	stripped := p
+	for range 2 {
+		i := strings.LastIndexByte(stripped, ':')
+		if i <= 0 || !ompLineSelector.MatchString(stripped[i+1:]) {
+			break
+		}
+		stripped = stripped[:i]
+	}
+	if stripped == p {
+		return p
+	}
+	if _, err := os.Lstat(p); err == nil {
+		return p
+	}
+	return stripped
+}
+
+// ompDriveAliasPath translates a Windows drive alias for the host the runtime runs on, mirroring
+// its normalizeWindowsDriveAliasPath: on Windows, an MSYS or WSL mount root (`/c/...`,
+// `/mnt/c/...`) is the drive itself (`C:\...`); under WSL, a pasted Windows path (`C:\...`,
+// `C:/...`) is that drive's mount (`/mnt/c/...`). Anywhere else the path is left alone.
+//
+// The WSL direction normalizes the Windows path first, as the runtime does with
+// path.win32.normalize, so a `..` stops at the drive root: `C:\..\Windows` is `/mnt/c/Windows`,
+// never a directory above the drive's mount.
+func ompDriveAliasPath(p, goos string, wsl bool) string {
+	switch {
+	case goos == "windows":
+		parts := strings.Split(p, "/")
+		if len(parts) < 2 || parts[0] != "" {
+			return p
+		}
+		var drive string
+		tail := parts[2:]
+		if isDriveLetter(parts[1]) {
+			drive = strings.ToUpper(parts[1])
+		} else if len(parts) >= 3 && strings.EqualFold(parts[1], "mnt") && isDriveLetter(parts[2]) {
+			drive = strings.ToUpper(parts[2])
+			tail = parts[3:]
+		}
+		if drive == "" {
+			return p
+		}
+		return drive + `:\` + strings.Join(nonEmpty(tail), `\`)
+	case wsl:
+		match := ompWindowsDrivePath.FindStringSubmatch(strings.ReplaceAll(strings.TrimSpace(p), "/", `\`))
+		if match == nil {
+			return p
+		}
+		var segments []string
+		for _, segment := range strings.Split(match[2], `\`) {
+			switch segment {
+			case "", ".":
+			case "..":
+				if len(segments) > 0 {
+					segments = segments[:len(segments)-1]
+				}
+			default:
+				segments = append(segments, segment)
+			}
+		}
+		mount := "/mnt/" + strings.ToLower(match[1])
+		if len(segments) == 0 {
+			return mount
+		}
+		return mount + "/" + strings.Join(segments, "/")
+	default:
+		return p
+	}
+}
+
+var ompWindowsDrivePath = regexp.MustCompile(`^([A-Za-z]):\\(.*)$`)
+
+func isDriveLetter(s string) bool {
+	return len(s) == 1 && (s[0] >= 'a' && s[0] <= 'z' || s[0] >= 'A' && s[0] <= 'Z')
+}
+
+func nonEmpty(parts []string) []string {
+	out := parts[:0:0]
+	for _, part := range parts {
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+// ompIsWSL reports whether the hook runs under WSL, the way Oh My Pi's isWsl decides it.
+func ompIsWSL() bool {
+	return runtime.GOOS == "linux" && (os.Getenv("WSL_DISTRO_NAME") != "" || os.Getenv("WSL_INTEROP") != "")
+}
+
+// ompMCPResourceScheme is the URI scheme through which Oh My Pi's read tool reads an MCP resource:
+// `read mcp://<resource-uri>` asks whichever connected server lists that resource.
+const ompMCPResourceScheme = "mcp://"
+
+// ompMCPResourceURI returns the resource URI a `read mcp://<uri>` call asks for, or "".
+//
+// Such a read is an MCP resources/read, and is recorded as one: the same mcp.tool_invoked other
+// runtimes record for a resource read, with the URI in mcp.resource.uri. The server cannot be
+// named. The runtime picks it by matching the URI against every connected server and reports the
+// choice only in a note its read tool discards. The runtime also sends a resource URI whose scheme
+// it does not handle itself to MCP, but telling those apart from its own schemes would mean
+// copying its scheme registry, so only the explicit `mcp://` form is recognized.
+func ompMCPResourceURI(call piToolCall) string {
+	if !strings.EqualFold(call.name, "read") {
+		return ""
+	}
+	target := getFirstStr(call.args, "path")
+	if len(target) <= len(ompMCPResourceScheme) || !strings.EqualFold(target[:len(ompMCPResourceScheme)], ompMCPResourceScheme) {
+		return ""
+	}
+	return target[len(ompMCPResourceScheme):]
+}
+
 // toolFields builds the tool, command, and file blocks for one Pi-family tool event.
 //
 // The built-in tools have fixed, documented argument shapes -- bash takes `command`, and read,
 // edit and write all take `path` -- so these are read by name rather than by guessing across
 // spellings. A custom tool registered by another extension carries an arbitrary shape, and gets
 // tool.name plus its raw arguments without a command or file block invented for it.
-func (f piFamily) toolFields(input map[string]interface{}, withResult bool) map[string]interface{} {
-	name := piToolName(input)
-	args := piToolInput(input)
+func (f piFamily) toolFields(call piToolCall, input map[string]interface{}, withResult bool) map[string]interface{} {
+	name, args := call.name, call.args
 	fields := map[string]interface{}{}
 	tool := map[string]interface{}{}
 	if name != "" {
@@ -326,21 +762,30 @@ func (f piFamily) toolFields(input map[string]interface{}, withResult bool) map[
 			fields["content"] = retainedContentFields(code)
 		}
 	case "read", "edit", "write":
-		if path := getFirstStr(args, "path"); path != "" {
-			tool["path"] = path
-			file := map[string]interface{}{
-				"path":      path,
-				"operation": piFileOperation(name),
+		// tool.path keeps the target as the tool was given it, URI and selector included, so the
+		// row still says what was asked for; only a file becomes a file block, under its real path.
+		if target := getFirstStr(args, "path"); target != "" {
+			tool["path"] = target
+			if path := f.filePath(call, input, target); path != "" {
+				fields["file"] = map[string]interface{}{
+					"path":      path,
+					"operation": piFileOperation(name),
+					"language":  strings.TrimPrefix(filepath.Ext(path), "."),
+				}
 			}
-			file["language"] = strings.TrimPrefix(filepath.Ext(path), ".")
-			fields["file"] = file
+		}
+		if uri := ompMCPResourceURI(call); uri != "" {
+			fields["mcp"] = map[string]interface{}{
+				"method":   map[string]interface{}{"name": "resources/read"},
+				"resource": map[string]interface{}{"uri": uri},
+			}
 		}
 	}
 
 	if len(tool) > 0 {
 		fields["tool"] = tool
 	}
-	f.applyMCPAttribution(fields, name)
+	f.applyMCPAttribution(fields, call)
 	if withResult {
 		if usage := piUsage(firstMap(input, "usage")); len(usage) > 0 {
 			fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{"usage": usage})
@@ -361,13 +806,13 @@ func piFileOperation(name string) string {
 	}
 }
 
-// applyMCPAttribution fills the `mcp` block when a tool name names an MCP-routed tool.
+// applyMCPAttribution fills the `mcp` block when the call is known to have reached an MCP server.
 //
 // Without it an MCP call lands in the log as a tool named `mcp__github_create_issue` and nothing
 // else -- no server, no tool -- so the two questions actually asked about MCP activity ("which
 // server did this agent reach, and what did it call there") have no field to answer them.
-func (f piFamily) applyMCPAttribution(fields map[string]interface{}, toolName string) {
-	server, tool := piMCPServerTool(toolName)
+func (f piFamily) applyMCPAttribution(fields map[string]interface{}, call piToolCall) {
+	server, tool := piMCPServerTool(call)
 	if server == "" && tool == "" {
 		return
 	}
@@ -384,39 +829,48 @@ func (f piFamily) applyMCPAttribution(fields map[string]interface{}, toolName st
 	})
 }
 
-// piMCPServerTool splits a Pi-family MCP tool name into its server and tool halves.
+// piMCPServerTool returns the MCP server and tool a Pi-family call reached, when that is known.
 //
-// Two spellings reach here and they disagree about the separator. `mcp__<server>__<tool>` is the
-// widely used double-underscore form, and deriveMCPServerTool already reads it; Oh My Pi mints
-// `mcp__<server>_<tool>` with a single underscore (createMCPToolName in its mcp/tool-bridge.ts),
-// which that function returns nothing for because it needs three `__`-separated parts.
+// The runtime's own statement wins, as it does in the shared hook mapper and the collector: Oh My
+// Pi's MCP results carry `serverName` and `mcpToolName` in their details, on failures as well as
+// successes, and those are the server's configured name and the tool's own name exactly.
 //
-// The double-underscore form is tried first because it is unambiguous. The single-underscore
-// fallback splits on the first underscore, which is exactly what Oh My Pi's own parseMCPToolName
-// does -- including its ambiguity, since a server named `my_server` yields `mcp__my_server_run` and
-// both parsers read that as server `my`. Reproducing the runtime's reading rather than inventing a
-// better one is deliberate: Beacon's `mcp.server` should say what the runtime itself would say, so
-// an operator comparing the two never finds them disagreeing.
-func piMCPServerTool(toolName string) (string, string) {
-	if server, tool := deriveMCPServerTool(toolName); server != "" || tool != "" {
+// Without them only the reversible `mcp__<server>__<tool>` spelling is read. Oh My Pi's own names
+// are not reversible, so a tool_call or approval that carries nothing but one is given no server
+// rather than a guessed one. The runtime mints `mcp__<server>_<tool>` by lowercasing both halves,
+// turning every other character run into `_`, dropping a tool's redundant server prefix, and
+// hashing names past 64 characters -- so `beacon-managed`'s `beacon_lookup` becomes
+// `mcp__beacon_managed_beacon_lookup`, and no split of that string recovers the server. Splitting at
+// the first underscore reported it as server `beacon`, the name of Beacon's own local server. The
+// call's result, joined to it by gen_ai.tool.call.id, names the server.
+func piMCPServerTool(call piToolCall) (string, string) {
+	server := getFirstStr(call.details, "serverName")
+	tool := getFirstStr(call.details, "mcpToolName")
+	if server != "" && tool != "" {
 		return server, tool
 	}
-	rest, ok := strings.CutPrefix(strings.TrimSpace(toolName), "mcp__")
-	if !ok {
-		return "", ""
+	return deriveMCPServerTool(call.name)
+}
+
+// piIsMCPTool reports whether a call is MCP activity, whether or not its server is known.
+//
+// `mcp__` is the namespace Oh My Pi reserves for MCP tools, and the test its own isMCPToolName
+// applies, so a call carrying the prefix is MCP activity even where only its result can say which
+// server it reached.
+func piIsMCPTool(call piToolCall) bool {
+	if server, tool := piMCPServerTool(call); server != "" || tool != "" {
+		return true
 	}
-	server, tool, ok := strings.Cut(rest, "_")
-	if !ok || server == "" || tool == "" {
-		return "", ""
-	}
-	return server, tool
+	rest, ok := strings.CutPrefix(strings.TrimSpace(call.name), "mcp__")
+	return ok && rest != ""
 }
 
 // toolResultEvents maps a completed tool call onto its outcome event.
 func (f piFamily) toolResultEvents(input map[string]interface{}, fields map[string]interface{}) []normalizedEvent {
-	mergeMap(fields, f.toolFields(input, true))
+	call := piToolCallOf(input)
+	mergeMap(fields, f.toolFields(call, input, true))
 	applyToolCallID(fields, input)
-	name := piToolName(input)
+	name := call.name
 	f.applyPythonMarker(fields, name)
 
 	// Both of these read Prime Agent's `ipython` result and are no-ops for every other tool, so Pi
@@ -431,15 +885,19 @@ func (f piFamily) toolResultEvents(input map[string]interface{}, fields map[stri
 		return append(f.one("tool.failed", "tool", "high", "tool failed", fields), kernelWrites...)
 	}
 
-	if diff := piEditDiff(input); diff != "" {
+	if edits := f.perFileEditEvents(call, fields); len(edits) > 0 {
+		return append(edits, kernelWrites...)
+	}
+
+	if diff := piEditDiff(call.details); diff != "" {
 		fields["content"] = retainedContentFields(diff)
 	}
 
-	action, category := piToolAction(name)
+	action, category := piToolAction(call)
 	// A file action with no file is not a file action. The read tool accepts a path that failed to
-	// resolve, and a custom tool can share a built-in's name, so reporting file.read with no file
-	// field would produce a row every file-scoped query matches and none can explain -- the same
-	// guard clineToolAfterEvents applies for the same reason.
+	// resolve and a target that is not a file at all, and a custom tool can share a built-in's name,
+	// so reporting file.read with no file field would produce a row every file-scoped query matches
+	// and none can explain -- the same guard clineToolAfterEvents applies for the same reason.
 	if strings.HasPrefix(action, "file.") {
 		if _, ok := fields["file"]; !ok {
 			action, category = "tool.completed", "tool"
@@ -613,20 +1071,73 @@ func (f piFamily) pythonDiffEvents(toolName string, input, fields map[string]int
 // EditToolDetails carries both a display-oriented `diff` and a standard unified `patch`. The patch
 // is preferred because it is the machine-readable one; the diff is a fallback for a details object
 // that carried only the display form.
-func piEditDiff(input map[string]interface{}) string {
-	details := firstMap(input, "details")
-	if details == nil {
-		return ""
-	}
+func piEditDiff(details map[string]interface{}) string {
 	return getFirstStr(details, "patch", "diff")
 }
 
-// piToolAction maps a Pi-family tool name onto the endpoint action its completion represents.
-func piToolAction(name string) (string, string) {
-	switch strings.ToLower(name) {
+// perFileEditEvents records an edit that changed several files as one file.modified per file.
+//
+// Oh My Pi's default edit format applies one patch to any number of files. An edit of one file
+// reports that file's path; an edit of several reports no path at all, only a perFileResults list.
+// Without this, such an edit fell through to tool.completed and none of the files it changed was
+// recorded. One event per changed file is the shape pythonDiffEvents produces for a Prime Agent
+// cell and the OpenHands mapper produces for one apply_patch call: a store that files one row per
+// path is the one a "who touched this file" query can answer.
+//
+// Each file keeps the edit's own operation word, so a file the edit created or deleted reads as
+// one, while the action stays in the file.modified family as a single-file edit's does.
+func (f piFamily) perFileEditEvents(call piToolCall, fields map[string]interface{}) []normalizedEvent {
+	if !strings.EqualFold(call.name, "edit") {
+		return nil
+	}
+	results, _ := call.details["perFileResults"].([]interface{})
+	var events []normalizedEvent
+	for _, item := range results {
+		entry, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		path := getFirstStr(entry, "path")
+		if !filepath.IsAbs(path) {
+			continue
+		}
+		values := cloneFields(fields)
+		values["file"] = map[string]interface{}{
+			"path":      path,
+			"operation": ompEditOperation(getFirstStr(entry, "op")),
+			"language":  strings.TrimPrefix(filepath.Ext(path), "."),
+		}
+		delete(values, "content")
+		if diff := piEditDiff(entry); diff != "" {
+			values["content"] = retainedContentFields(diff)
+		}
+		events = append(events, f.one("file.modified", "file", "info", "file modified", values)...)
+	}
+	return events
+}
+
+// ompEditOperation maps the operation Oh My Pi reports for one file of an edit onto the event
+// schema's vocabulary.
+func ompEditOperation(op string) string {
+	switch strings.ToLower(op) {
+	case "create":
+		return "create"
+	case "delete":
+		return "delete"
+	default:
+		return "modify"
+	}
+}
+
+// piToolAction maps a Pi-family tool call onto the endpoint action its completion represents.
+func piToolAction(call piToolCall) (string, string) {
+	switch strings.ToLower(call.name) {
 	case "bash", "ipython":
 		return "command.executed", "command"
 	case "read":
+		if ompMCPResourceURI(call) != "" {
+			return "mcp.tool_invoked", "mcp"
+		}
 		return "file.read", "file"
 	case "edit":
 		return "file.modified", "file"
@@ -637,7 +1148,7 @@ func piToolAction(name string) (string, string) {
 		// and mcp.tool_invoked is the action every other Beacon capture path already uses for it --
 		// so an MCP call through Oh My Pi joins the same rows a detection reads for Cline, Cursor
 		// and Claude Code rather than hiding under tool.completed.
-		if server, tool := piMCPServerTool(name); server != "" || tool != "" {
+		if piIsMCPTool(call) {
 			return "mcp.tool_invoked", "mcp"
 		}
 		// grep, glob, and any tool another extension registered. These are real tool activity with

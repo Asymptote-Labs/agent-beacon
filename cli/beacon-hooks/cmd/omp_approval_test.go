@@ -243,72 +243,84 @@ func TestOmpEmptyUserPythonProducesNothing(t *testing.T) {
 }
 
 // MCP attribution. Without it an MCP call lands in the log as a tool named
-// `mcp__github_create_issue` and nothing else, so the two questions actually asked about MCP
-// activity -- which server did this agent reach, and what did it call there -- have no field to
-// answer them.
-func TestOmpMCPToolIsAttributedToItsServer(t *testing.T) {
-	logPath := ompTestLog(t)
+// `mcp__beacon_managed_beacon_lookup` and nothing else, so the two questions actually asked about
+// MCP activity -- which server did this agent reach, and what did it call there -- have no field to
+// answer them. The server is the one the runtime names in the result's details: a split of the
+// minted name reads this one as server `beacon`, which is Beacon's local stdio server, not the
+// hosted `beacon-managed` one the call actually reached.
+func TestOmpMCPToolIsAttributedToTheServerTheRuntimeNames(t *testing.T) {
+	for _, isError := range []bool{false, true} {
+		logPath := ompTestLog(t)
 
-	runHookWithInput(t, runOmpEvent, map[string]interface{}{
-		"type": "tool_result", "toolName": "mcp__github_create_issue", "toolCallId": "call-1",
-		"input": map[string]interface{}{"title": "bug"}, "sessionId": "sess-1",
-	})
+		runHookWithInput(t, runOmpEvent, map[string]interface{}{
+			"type": "tool_result", "toolName": "mcp__beacon_managed_beacon_lookup", "toolCallId": "call-1",
+			"input": map[string]interface{}{"kind": "harness"}, "sessionId": "sess-1", "isError": isError,
+			"details": map[string]interface{}{"serverName": "beacon-managed", "mcpToolName": "beacon_lookup"},
+		})
 
-	event := ompEventWithAction(t, logPath, "mcp.tool_invoked")
-	mcp := nested(t, event, "mcp")
-	if mcp["server"] != "github" || mcp["tool"] != "create_issue" {
-		t.Fatalf("mcp = %v, want the github server and its create_issue tool", mcp)
-	}
-	if meta := nested(t, event, "event"); meta["category"] != "mcp" {
-		t.Fatalf("category = %v, want mcp", meta["category"])
+		action, category := "mcp.tool_invoked", "mcp"
+		if isError {
+			action, category = "tool.failed", "tool"
+		}
+		event := ompEventWithAction(t, logPath, action)
+		if mcp := nested(t, event, "mcp"); mcp["server"] != "beacon-managed" || mcp["tool"] != "beacon_lookup" {
+			t.Fatalf("isError=%v: mcp = %v, want the beacon-managed server and its beacon_lookup tool", isError, mcp)
+		}
+		if meta := nested(t, event, "event"); meta["category"] != category {
+			t.Fatalf("isError=%v: category = %v, want %s", isError, meta["category"], category)
+		}
 	}
 }
 
-// Both spellings must resolve. `mcp__<server>__<tool>` is the widely used double-underscore form;
-// Oh My Pi mints `mcp__<server>_<tool>` with a single underscore. The single-underscore split
-// deliberately reproduces Oh My Pi's own parseMCPToolName, ambiguity included -- a server named
-// `my_server` reads as `my` in both, so Beacon's mcp.server always says what the runtime would say.
-func TestPiMCPServerToolReadsBothSpellings(t *testing.T) {
+func TestPiMCPServerToolReadsOnlyWhatIsStated(t *testing.T) {
+	runtime := map[string]interface{}{"serverName": "beacon-managed", "mcpToolName": "beacon_lookup"}
 	for _, tc := range []struct {
 		name         string
+		call         piToolCall
 		server, tool string
+		isMCP        bool
 	}{
-		{"mcp__github_create_issue", "github", "create_issue"},
-		{"mcp__github__create_issue", "github", "create_issue"},
-		{"mcp__puppeteer_screenshot", "puppeteer", "screenshot"},
-		{"mcp__my_server_run", "my", "server_run"},
-		// Not MCP names, and must not be forced into one.
-		{"bash", "", ""},
-		{"read", "", ""},
-		{"my_custom_tool", "", ""},
-		{"", "", ""},
-		// Prefixed but with no tool half to speak of.
-		{"mcp__github", "", ""},
-		{"mcp__", "", ""},
+		{"runtime details", piToolCall{name: "mcp__beacon_managed_beacon_lookup", details: runtime}, "beacon-managed", "beacon_lookup", true},
+		{"double-underscore spelling", piToolCall{name: "mcp__github__create_issue"}, "github", "create_issue", true},
+		// Oh My Pi's minted spelling cannot be split back into its halves, so it names no server --
+		// but it is still MCP activity, which is what the `mcp__` namespace means to the runtime.
+		{"minted spelling alone", piToolCall{name: "mcp__beacon_managed_beacon_lookup"}, "", "", true},
+		{"minted spelling, simple server", piToolCall{name: "mcp__github_create_issue"}, "", "", true},
+		{"bare prefix", piToolCall{name: "mcp__"}, "", "", false},
+		{"bash", piToolCall{name: "bash"}, "", "", false},
+		{"custom tool", piToolCall{name: "my_custom_tool"}, "", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			server, tool := piMCPServerTool(tc.name)
-			if server != tc.server || tool != tc.tool {
-				t.Fatalf("piMCPServerTool(%q) = (%q, %q), want (%q, %q)",
-					tc.name, server, tool, tc.server, tc.tool)
+			if server, tool := piMCPServerTool(tc.call); server != tc.server || tool != tc.tool {
+				t.Fatalf("piMCPServerTool = (%q, %q), want (%q, %q)", server, tool, tc.server, tc.tool)
+			}
+			if got := piIsMCPTool(tc.call); got != tc.isMCP {
+				t.Fatalf("piIsMCPTool = %v, want %v", got, tc.isMCP)
 			}
 		})
 	}
 }
 
-// An approval for an MCP tool is attributed too. "Who approved a call to which server" is the
-// question an approval-abuse investigation asks, and it cannot be answered from a tool name alone.
-func TestOmpApprovalForAnMCPToolCarriesTheServer(t *testing.T) {
-	logPath := ompTestLog(t)
-
-	runHookWithInput(t, runOmpEvent, map[string]interface{}{
-		"type": "tool_approval_resolved", "sessionId": "sess-1",
-		"toolName": "mcp__github_create_issue", "toolCallId": "call-1", "approved": true,
-	})
-
-	event := ompEventWithAction(t, logPath, "approval.allowed")
-	if mcp := nested(t, event, "mcp"); mcp["server"] != "github" || mcp["tool"] != "create_issue" {
-		t.Fatalf("mcp = %v, want the github server and its create_issue tool", mcp)
+// The tool_call and the approval for an MCP call carry the minted name and nothing else. They must
+// not guess a server from it: a wrong mcp.server files the call under a server it never reached,
+// where an absent one leaves the call's result -- joined by gen_ai.tool.call.id -- to say.
+func TestOmpMCPNameAloneNamesNoServer(t *testing.T) {
+	for _, payload := range []map[string]interface{}{
+		{"type": "tool_call", "toolName": "mcp__beacon_managed_beacon_lookup", "toolCallId": "call-1",
+			"input": map[string]interface{}{"kind": "harness"}},
+		{"type": "tool_approval_resolved", "toolName": "mcp__beacon_managed_beacon_lookup", "toolCallId": "call-1",
+			"approved": true},
+	} {
+		events := ompRuntime.endpointEvents(payload, "sess-1")
+		if len(events) != 1 {
+			t.Fatalf("%s produced %d events, want 1", payload["type"], len(events))
+		}
+		if mcp, ok := events[0].fields["mcp"]; ok {
+			t.Fatalf("%s guessed an mcp block from the tool name: %v", payload["type"], mcp)
+		}
+		if tool, _ := events[0].fields["tool"].(map[string]interface{}); tool["name"] != "mcp__beacon_managed_beacon_lookup" {
+			t.Fatalf("%s tool = %v, want the tool name kept", payload["type"], tool)
+		}
 	}
 }
 

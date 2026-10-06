@@ -98,6 +98,33 @@ func TestMapSessionSupportsTopLevelToolRecords(t *testing.T) {
 	}
 }
 
+// The server and tool come from what the result states, never from splitting a name whose halves
+// cannot be told apart. The live hook mapper reads the same way, and a hook event and a session-file
+// event for one call are merged only when they agree.
+func TestMapSessionAttributesMCPToTheServerTheResultNames(t *testing.T) {
+	ref := SessionRef{ID: "session-1", Path: "/tmp/pi-session-1.jsonl", Header: map[string]interface{}{"type": "session", "id": "session-1"}}
+	entries := []Entry{
+		{Line: 1, Data: ref.Header},
+		{Line: 2, Data: map[string]interface{}{"type": "tool_call", "id": "call-1", "toolName": "mcp__beacon_managed_beacon_lookup", "input": map[string]interface{}{"kind": "harness"}}},
+		{Line: 3, Data: map[string]interface{}{"type": "tool_result", "toolCallId": "call-1",
+			"details": map[string]interface{}{"serverName": "beacon-managed", "mcpToolName": "beacon_lookup"}}},
+		{Line: 4, Data: map[string]interface{}{"type": "tool_call", "id": "call-2", "toolName": "mcp__github_create_issue", "input": map[string]interface{}{}}},
+		{Line: 5, Data: map[string]interface{}{"type": "tool_result", "toolCallId": "call-2"}},
+	}
+	mapped := MapSession(ref, entries, MapOptions{})
+	if got := actionsOf(mapped); len(got) != 5 || got[2] != "mcp.tool_invoked" || got[4] != "mcp.tool_invoked" {
+		t.Fatalf("actions = %#v", got)
+	}
+	if mcp := mapped[2].Event.MCP; mcp == nil || mcp.Server != "beacon-managed" || mcp.Tool != "beacon_lookup" {
+		t.Fatalf("stated result mcp = %#v, want beacon-managed/beacon_lookup", mcp)
+	}
+	for _, i := range []int{1, 3, 4} {
+		if mcp := mapped[i].Event.MCP; mcp != nil {
+			t.Fatalf("%s for %s guessed mcp = %#v from the name", mapped[i].Event.Event.Action, mapped[i].Event.Tool.Name, mcp)
+		}
+	}
+}
+
 func actionsOf(items []MappedEvent) []string {
 	out := make([]string, 0, len(items))
 	for _, item := range items {

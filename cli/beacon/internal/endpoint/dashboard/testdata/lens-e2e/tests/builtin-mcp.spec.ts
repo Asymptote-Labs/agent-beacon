@@ -52,6 +52,23 @@ test('mcp: calls by server and tool, with arguments, results and failures', asyn
   await expect(detail.locator('.call', { hasText: 'save_issue' })).not.toContainText('failed');
 });
 
+test('mcp: a call whose name does not split is joined to the result that names its server', async ({ page }) => {
+  // Oh My Pi's mcp__<server>_<tool> names cannot be split, so its pre-tool event and its approval
+  // carry no server; the result does. All three are one call, under the server the result names,
+  // with the approval decided on it.
+  await page.goto('/session.html?id=ompmcp&lens=mcp');
+  const frame = page.frameLocator('iframe.lens-frame');
+  await expect(frame.locator('#summary')).toHaveText('1 call to 1 tool on 1 server · none failed.');
+  await expect(frame.locator('#list button.row')).toHaveCount(1);
+  await expect(frame.locator('#list button.row').first()).toContainText('beacon-managed');
+
+  const call = frame.locator('#detail .call');
+  await expect(call).toHaveCount(1);
+  await expect(call).toContainText('beacon_lookup');
+  await expect(call).not.toContainText('mcp__beacon_managed_beacon_lookup');
+  await expect(call).toContainText('approval: approve');
+});
+
 test('mcp: a trace without MCP calls says so', async ({ page }) => {
   await page.goto('/session.html?id=rich&lens=mcp');
   const frame = page.frameLocator('iframe.lens-frame');

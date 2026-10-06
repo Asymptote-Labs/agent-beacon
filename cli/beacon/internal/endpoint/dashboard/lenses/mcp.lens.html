@@ -77,27 +77,35 @@
     return typeof value === "string" ? value.trim() : "";
   }
 
-  // The server and tool a Claude-style name carries: mcp__<server>__<tool>, or MCP:<tool>.
+  // The server and tool a Claude-style name carries: mcp__<server>__<tool>, or MCP:<tool>. Any other
+  // name in the mcp__ namespace is an MCP call whose halves the name cannot tell apart -- Oh My Pi's
+  // mcp__<server>_<tool> -- so it names neither, and the event that reports them, joined by
+  // tool_call_id, supplies both.
   function fromName(name) {
     var text = str(name);
     var lower = text.toLowerCase();
     if (lower.indexOf("mcp__") === 0) {
       var parts = text.split("__");
       if (parts.length >= 3) return { server: parts[1], tool: parts.slice(2).join("__") };
+      if (text.length > 5) return { server: "", tool: "" };
     }
     if (lower.indexOf("mcp:") === 0) return { server: "", tool: text.slice(4).trim() };
     return null;
   }
 
-  // classify returns the MCP call an event is part of, or null.
+  // classify returns the MCP call an event is part of, or null. toolKnown says whether the tool is
+  // the MCP tool's own name rather than the runtime's name for it, so a later event of the same call
+  // that does know it can replace it.
   function classify(event) {
     var mcp = event.mcp;
     var named = fromName(event.tool && event.tool.name);
     if (!mcp && !named && event.type !== "mcp") return null;
     mcp = mcp || {};
+    var tool = str(mcp.tool) || (named && named.tool) || "";
     return {
       server: str(mcp.server) || (named && named.server) || "",
-      tool: str(mcp.tool) || (named && named.tool) || str(event.tool && event.tool.name) || str(mcp.method) || "(tool not reported)",
+      tool: tool || str(event.tool && event.tool.name) || str(mcp.method) || "(tool not reported)",
+      toolKnown: !!tool,
       method: str(mcp.method),
       resource: str(mcp.resource_uri)
     };
@@ -129,13 +137,17 @@
       var call = event.tool_call_id ? byID[event.tool_call_id] : null;
       if (!call) {
         call = {
-          server: found.server, tool: found.tool, method: found.method, resource: found.resource,
+          server: found.server, tool: found.tool, toolKnown: found.toolKnown, method: found.method, resource: found.resource,
           first: event, events: [], args: undefined, result: undefined, failed: false
         };
         calls.push(call);
         if (event.tool_call_id) byID[event.tool_call_id] = call;
       }
       if (!call.server && found.server) call.server = found.server;
+      if (!call.toolKnown && found.toolKnown) {
+        call.tool = found.tool;
+        call.toolKnown = true;
+      }
       if (!call.method && found.method) call.method = found.method;
       if (!call.resource && found.resource) call.resource = found.resource;
       if (call.args === undefined && tool.arguments !== undefined && tool.arguments !== null) call.args = tool.arguments;
