@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -169,5 +171,202 @@ func TestCursorTurnCarriesOneIDAcrossHookFamilies(t *testing.T) {
 		if id == "" {
 			t.Fatalf("%s has no prompt.id; events: %v", key, seen)
 		}
+	}
+}
+
+// writeClaudeTranscript writes a Claude Code transcript with the shape Claude Code gives it: the
+// prompt and every tool result carry promptId, assistant entries do not.
+func writeClaudeTranscript(t *testing.T, lines ...string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "claude-session.jsonl")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// Claude Code's hook payloads carry no prompt id. Its transcript does, under the same UUID its
+// OTLP events carry as prompt.id, so a tool hook reads the newest one there and joins the OTLP
+// events of its turn.
+func TestClaudeToolHookReadsPromptIDFromTranscript(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "claude"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_DISABLE_GIT_METADATA", "1")
+	transcript := writeClaudeTranscript(t,
+		`{"type":"user","promptId":"p-old","message":{"role":"user","content":"first"}}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[]}}`,
+		`{"type":"user","promptId":"p-new","message":{"role":"user","content":"second"}}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[]}}`,
+		`{"type":"user","promptId":"p-new","message":{"role":"user","content":[{"type":"tool_result"}]}}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[]}}`,
+		`{"type":"last-prompt","lastPrompt":"second"}`,
+	)
+
+	runHookWithInput(t, runPostTool, map[string]interface{}{
+		"session_id":      "claude-session",
+		"transcript_path": transcript,
+		"cwd":             "/repo",
+		"hook_event_name": "PostToolUse",
+		"tool_name":       "Bash",
+		"tool_use_id":     "toolu_1",
+		"tool_input":      map[string]interface{}{"command": "echo hi"},
+		"tool_response":   map[string]interface{}{"stdout": "hi"},
+	})
+
+	if got := promptIDOfEvent(lastEndpointEvent(t, logPath)); got != "p-new" {
+		t.Fatalf("prompt.id = %q, want the newest promptId in the transcript", got)
+	}
+}
+
+// UserPromptSubmit runs before Claude Code records the prompt, so the newest id in the transcript
+// is the previous prompt's. Stamping it would file the new prompt under the old turn.
+func TestClaudePromptSubmitDoesNotTakeThePreviousPromptsID(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "claude"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_DISABLE_GIT_METADATA", "1")
+	transcript := writeClaudeTranscript(t, `{"type":"user","promptId":"p-old","message":{"role":"user","content":"first"}}`)
+
+	runHookWithInput(t, runPromptSubmit, map[string]interface{}{
+		"session_id":      "claude-session",
+		"transcript_path": transcript,
+		"cwd":             "/repo",
+		"hook_event_name": "UserPromptSubmit",
+		"prompt":          "second",
+	})
+
+	for _, event := range endpointEvents(t, logPath) {
+		if got := promptIDOfEvent(event); got != "" {
+			t.Fatalf("%s prompt.id = %q, want none", leaf(event, "event", "action"), got)
+		}
+	}
+}
+
+func TestNewestPromptIDFromTranscriptTail(t *testing.T) {
+	for name, tc := range map[string]struct {
+		tail    string
+		partial bool
+		want    string
+	}{
+		"newest wins":           {`{"promptId":"a"}` + "\n" + `{"promptId":"b"}` + "\n", false, "b"},
+		"skips entries without": {`{"promptId":"a"}` + "\n" + `{"type":"assistant"}` + "\n", false, "a"},
+		"skips malformed":       {`{"promptId":"a"}` + "\n" + `{"promptId":` + "\n", false, "a"},
+		"partial first line":    {`ptId":"cut"}` + "\n" + `{"type":"assistant"}`, true, ""},
+		"none":                  {`{"type":"assistant"}`, false, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := newestPromptID([]byte(tc.tail), tc.partial); got != tc.want {
+				t.Fatalf("newestPromptID = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// A transcript longer than the read window is read from its end only, and the fragment the window
+// starts in is not mistaken for an entry.
+func TestClaudeTranscriptPromptIDReadsOnlyTheTail(t *testing.T) {
+	filler := `{"type":"assistant","message":{"content":"` + strings.Repeat("x", 4096) + `"}}`
+	lines := []string{`{"type":"user","promptId":"p-early"}`}
+	for i := 0; i < (claudeTranscriptTailBytes/len(filler))+8; i++ {
+		lines = append(lines, filler)
+	}
+	lines = append(lines, `{"type":"user","promptId":"p-late"}`, filler)
+	path := writeClaudeTranscript(t, lines...)
+
+	if got := claudeTranscriptPromptID(path); got != "p-late" {
+		t.Fatalf("claudeTranscriptPromptID = %q, want p-late", got)
+	}
+	if got := claudeTranscriptPromptID(filepath.Join(t.TempDir(), "missing.jsonl")); got != "" {
+		t.Fatalf("missing transcript gave %q", got)
+	}
+	if got := claudeTranscriptPromptID(t.TempDir()); got != "" {
+		t.Fatalf("a directory gave %q", got)
+	}
+}
+
+// The reader works backwards a chunk at a time. An entry that straddles a chunk boundary, one
+// several chunks back, and one beyond the read window are the cases that chunking can get wrong.
+func TestClaudeTranscriptPromptIDAcrossChunkBoundaries(t *testing.T) {
+	// filler builds assistant lines of an exact byte length, newline included.
+	filler := func(total int) []string {
+		var lines []string
+		for total > 0 {
+			n := 8192
+			if total < n {
+				n = total
+			}
+			if n < 64 {
+				// A line too short to hold the JSON is folded into the previous one.
+				lines[len(lines)-1] = lines[len(lines)-1][:len(lines[len(lines)-1])] + strings.Repeat(" ", n)
+				break
+			}
+			body := `{"type":"assistant","pad":"` + strings.Repeat("x", n-len(`{"type":"assistant","pad":""}`)-1) + `"}`
+			lines = append(lines, body)
+			total -= n
+		}
+		return lines
+	}
+	idLine := func(id string) string { return `{"type":"user","promptId":"` + id + `"}` }
+
+	for name, tc := range map[string]struct {
+		after int // bytes of filler written after the newest id line
+		want  string
+	}{
+		"in the last chunk":             {after: 1000, want: "p-new"},
+		"straddling the chunk boundary": {after: claudeTranscriptChunkBytes - 10, want: "p-new"},
+		"exactly at the boundary":       {after: claudeTranscriptChunkBytes, want: "p-new"},
+		"several chunks back":           {after: 5*claudeTranscriptChunkBytes + 123, want: "p-new"},
+		"beyond the window":             {after: claudeTranscriptTailBytes + 4096, want: ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			lines := append([]string{idLine("p-old")}, filler(3*claudeTranscriptChunkBytes)...)
+			lines = append(lines, idLine("p-new"))
+			lines = append(lines, filler(tc.after)...)
+			path := writeClaudeTranscript(t, lines...)
+			if got := claudeTranscriptPromptID(path); got != tc.want {
+				t.Fatalf("claudeTranscriptPromptID = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Quoted text that mentions promptId -- a tool result that printed a transcript, say -- is escaped
+// inside a JSON string and never matches the bare key.
+func TestNewestPromptIDIgnoresQuotedMentions(t *testing.T) {
+	tail := `{"type":"user","promptId":"real"}` + "\n" +
+		`{"type":"assistant","message":{"content":"{\"promptId\":\"forged\"}"}}` + "\n"
+	if got := newestPromptID([]byte(tail), false); got != "real" {
+		t.Fatalf("newestPromptID = %q, want real", got)
+	}
+}
+
+// Muse Code and DeepSeek Harness send Claude-shaped payloads with a transcript_path, but their
+// transcripts are their own format, and promptId in them would not be Claude Code's prompt id.
+// Only the claude platform reads one.
+func TestOnlyClaudeReadsTheTranscriptForAPromptID(t *testing.T) {
+	transcript := writeClaudeTranscript(t, `{"type":"user","promptId":"p-claude"}`)
+	for _, platform := range []string{"muse", "dsh", "qwen"} {
+		t.Run(platform, func(t *testing.T) {
+			saved := platformFlag
+			t.Cleanup(func() { platformFlag = saved })
+			platformFlag = platform
+			fields := map[string]interface{}{"command": map[string]interface{}{"command": "ls"}}
+			applyPromptID(fields, map[string]interface{}{
+				"hook_event_name": "PostToolUse",
+				"transcript_path": transcript,
+			})
+			if _, ok := fields["prompt"]; ok {
+				t.Fatalf("%s took a prompt id from the transcript: %#v", platform, fields["prompt"])
+			}
+		})
+	}
+	platformFlag = "claude"
+	fields := map[string]interface{}{}
+	applyPromptID(fields, map[string]interface{}{"hook_event_name": "PostToolUse", "transcript_path": transcript})
+	if got := leaf(fields, "prompt", "id"); got != "p-claude" {
+		t.Fatalf("claude prompt.id = %q, want p-claude", got)
 	}
 }

@@ -75,7 +75,7 @@ Beacon detects Claude Code through the `claude` executable and Claude settings p
 | Area | Support |
 |------|---------|
 | Prompt telemetry | Supported when emitted through Claude Code OTLP or hooks |
-| Turn identity | Supported on OTLP events, where Claude Code's `prompt.id` is kept as `prompt.id` |
+| Turn identity | Supported. Claude Code's `prompt.id` is kept as `prompt.id` on OTLP events, and hook events after the prompt read the same id from the session transcript. The hook-recorded prompt itself takes its id from the OTLP `user_prompt` event, because the hook runs before Claude Code records the prompt |
 | Command, tool, and file telemetry | Supported through Claude Code OTLP with detailed tool inputs enabled |
 | Token usage and cost | Supported through OTLP token and cost metrics, with per-model and per-session attribution |
 | Hook lifecycle and tool telemetry | Optional through `beacon endpoint hooks install --harness claude` |
