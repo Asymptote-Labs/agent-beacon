@@ -39,9 +39,9 @@ func emitInferredHookEvent(logger *logging.Logger, action, category, severity, m
 //
 // These runtimes carry real signal with no endpoint-schema field of its own -- Qwen's
 // `permission_mode` on every tool event, its `source` on SessionStart and the `context_usage` /
-// `context_limit` / `input_tokens` trio on Stop; Muse Code's `turn_id`, which is the only per-turn
-// boundary anything in its payload offers. Keeping the payload preserves them without inventing
-// schema fields for one runtime. It is the whole event's own path through SanitizeMap, so raw is
+// `context_limit` / `input_tokens` trio on Stop; Muse Code's `permission_mode` and SessionStart
+// `source`. Keeping the payload preserves them without inventing schema fields for one runtime. It
+// is the whole event's own path through SanitizeMap, so raw is
 // secret-redacted and string-limited like every other field, and it is the first thing dropped when
 // an event exceeds the 64 KiB ceiling.
 //
@@ -142,6 +142,7 @@ func emitHookEventWithFidelity(logger *logging.Logger, action, category, severit
 		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{key: input})
 	}
 	applyToolCallID(fields, input)
+	applyPromptID(fields, input)
 	applyContextSize(fields, input)
 	if model := getFirstStr(input, "model"); model != "" {
 		fields["model"] = model

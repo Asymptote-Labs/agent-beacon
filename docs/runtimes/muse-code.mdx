@@ -123,6 +123,7 @@ beacon endpoint hooks uninstall --harness muse
 | Approval decisions | Supported. Observed from `PermissionRequest`, not synthesized from pre-tool |
 | Context compaction | Supported. `session.compacting` and `session.compacted` |
 | Tool call identity | Supported. Muse's `tool_use_id` is promoted to `gen_ai.tool.call.id` and joins pre-tool, approval and post-tool events |
+| Turn identity | Supported. Muse's `turn_id` is promoted to `prompt.id` on every event of the turn |
 | Token usage and cost | Not collected. See [Known gaps](#known-gaps) |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported for the endpoint agent. Muse hooks are installed separately in the logged-in user's context |
@@ -147,7 +148,7 @@ Enforcement stays behind the optional, off-by-default policy provider seam (`BEA
 
 Muse Code content is handled like every other runtime. Prompts, tool arguments, commands, paths, and diffs are retained in local or customer-controlled logs, with local secret redaction and per-string limits applied before writing, and a hash and byte count on each content-bearing event. Events over the 64 KiB limit drop raw and retained content, preserve stable metadata, and set `field_truncated`.
 
-Muse carries signal with no endpoint-schema field of its own — most importantly `turn_id`, which is the only per-turn boundary anything in its payload offers, plus `permission_mode` on tool events and `source` on `SessionStart`. Beacon preserves the verbatim payload under `raw.muse` rather than inventing schema fields for one runtime. It travels the event's normal path through sanitization, so `raw` is secret-redacted and string-limited like every other field, and it is the first thing dropped when an event exceeds the size ceiling.
+Muse's `turn_id`, the only per-turn boundary anything in its payload offers, is promoted to `prompt.id`. Muse also carries signal with no endpoint-schema field of its own: `permission_mode` on tool events and `source` on `SessionStart`. Beacon preserves the verbatim payload under `raw.muse` rather than inventing schema fields for one runtime. It travels the event's normal path through sanitization, so `raw` is secret-redacted and string-limited like every other field, and it is the first thing dropped when an event exceeds the size ceiling.
 
 ## Known gaps
 

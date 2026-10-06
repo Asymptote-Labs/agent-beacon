@@ -196,9 +196,9 @@ func TestMusePermissionRequestIsRecordedAsAnObservedApproval(t *testing.T) {
 	}
 }
 
-// turn_id is the only per-turn boundary anything in a Muse payload offers, and the endpoint schema
-// has no field for it. Keeping the whole payload under raw.muse preserves it -- along with
-// permission_mode and the SessionStart `source` -- without inventing schema fields for one runtime.
+// turn_id is the only per-turn boundary anything in a Muse payload offers. It is promoted to
+// prompt.id like every runtime's turn id, and the whole payload is still kept under raw.muse for
+// permission_mode and the SessionStart `source`, which have no schema field.
 func TestMuseRawPayloadPreservesTheTurnID(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "muse"
@@ -219,6 +219,9 @@ func TestMuseRawPayloadPreservesTheTurnID(t *testing.T) {
 	event := lastEndpointEvent(t, logPath)
 	if got := leaf(event, "raw", "muse", "turn_id"); got != "turn-7" {
 		t.Fatalf("raw.muse.turn_id = %q, want turn-7", got)
+	}
+	if got := leaf(event, "prompt", "id"); got != "turn-7" {
+		t.Fatalf("prompt.id = %q, want turn-7", got)
 	}
 	if got := leaf(event, "raw", "muse", "permission_mode"); got != "acceptEdits" {
 		t.Fatalf("raw.muse.permission_mode = %q, want acceptEdits", got)

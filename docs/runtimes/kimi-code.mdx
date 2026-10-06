@@ -105,7 +105,7 @@ The seven events Beacon does not register:
 
 - **`SessionHeartbeat`** is the one where subscribing would *create* the behavior rather than observe it. Kimi Code starts its sixty-second timer only when a hook is configured for it, so Beacon would be spawning a process a minute in every session to write an event saying nothing happened.
 - **`UserPromptQueued`** fires when a message is typed while a turn is still running; the prompt is recorded when it is submitted, and recording the queueing too would count one prompt twice.
-- **`TurnStarted`** carries a turn id the endpoint schema has no field for, and its `prompt` is the text `UserPromptSubmit` already carried.
+- **`TurnStarted`** adds nothing: its turn id reaches `prompt.id` from the other turn-scoped events, and its `prompt` is the text `UserPromptSubmit` already carried.
 - **`TaskStarted`** and **`Notification`** report background tasks, and the tool that started one — a `Bash` with `run_in_background`, an `Agent`, an `AskUserQuestion` — is already recorded as itself.
 - **`StopFailure`** reports a turn that failed on an API or runtime error rather than anything the agent did.
 - **`Interrupt`** fires in place of `Stop` when you cancel a turn. Beacon's closing action is `tool.completed`, which states the agent finished; a cancelled turn did not, and there is no action in the endpoint schema that says so. The session is still closed by `SessionEnd`.
@@ -143,6 +143,7 @@ Uninstall removes Beacon's entries and leaves your own hooks, settings, and comm
 | Session lifecycle | Supported. `session.started` from `SessionStart`, `tool.completed` from `Stop`, and `session.ended` from `SessionEnd` |
 | Prompts | Supported. `prompt.submitted` from `UserPromptSubmit` |
 | Tool use | Supported for pre-tool and post-tool activity, with `gen_ai.tool.call.id` from `tool_call_id` |
+| Turn identity | Supported. Kimi Code's numbered `turn_id` is promoted to `prompt.id` |
 | Commands | Supported. `command.executed` with the command and its output, plus `command.exit_code` on a failure |
 | File activity | Supported. `file.read` and `file.modified` with paths, operations, and diffs |
 | MCP activity | Supported. Recognized from `mcp__<server>__<tool>`, with the server and tool split out |
