@@ -38,6 +38,7 @@ interface OmpContext {
   sessionManager?: OmpSessionManager
   model?: { id?: string; name?: string; provider?: string } | undefined
   mode?: string
+  agent?: { kind?: string }
 }
 
 // The events Beacon subscribes to, and nothing else.
@@ -62,6 +63,9 @@ interface OmpContext {
 // server sends, most of them routine tools/resources list refreshes. It describes MCP transport
 // plumbing rather than an action the agent took. The MCP activity worth recording is the agent
 // calling an MCP tool, which already arrives as a tool_call/tool_result pair.
+//
+// `message_end` carries each finalized assistant message, and on print and ACP -- which never emit
+// `input` -- the operator's own prompt message as well (see submittedPromptText).
 const subscribedEvents = [
   "session_start",
   "session_shutdown",
@@ -124,6 +128,25 @@ function decidedToolInput(event: OmpEvent): unknown {
   const id = typeof event.toolCallId === "string" ? event.toolCallId : ""
   if (!id) return undefined
   return pendingToolCalls.get(id)
+}
+
+// The text of a user message Oh My Pi delivered to the model, or "" when the message is not an
+// operator's prompt.
+//
+// Runtime-generated turns (auto-continue, reminders) are marked `synthetic`, and messages one agent
+// hands to another carry `attribution: "agent"`; neither is something an operator asked. Image
+// parts are left out: the prompt row records what was asked, not the attachment bytes.
+function userMessageText(message: unknown): string {
+  if (!message || typeof message !== "object") return ""
+  const { role, synthetic, attribution, content } = message as Record<string, unknown>
+  if (role !== "user" || synthetic === true || attribution === "agent") return ""
+  if (typeof content === "string") return content
+  if (!Array.isArray(content)) return ""
+  const texts: string[] = []
+  for (const part of content as Array<{ type?: unknown; text?: unknown } | null>) {
+    if (part?.type === "text" && typeof part.text === "string") texts.push(part.text)
+  }
+  return texts.join("\n")
 }
 
 function debugLog(message: string, extra?: unknown) {
@@ -302,12 +325,42 @@ type OmpExtensionAPI = {
 
 // createBeaconExtension is exported for tests; Oh My Pi loads the default export below.
 export function createBeaconExtension() {
+  // The id of the current session once it has emitted `input` ("" for a session without one), or
+  // null until it has. Interactive and RPC sessions emit `input` for every submission; ACP and
+  // print never do. RPC and ACP both report `ctx.mode` "rpc", so this is what tells them apart.
+  let inputSessionId: string | null = null
+
+  // submittedPromptText decides whether a user message is a prompt no `input` event recorded.
+  //
+  // Interactive sessions are excluded outright: every prompt typed there arrives as `input`, and a
+  // user message without one was sent by an extension, not typed. A session that has emitted
+  // `input` is an RPC client, which reports every submission the same way. A subagent's messages
+  // come from its parent's task, not an operator.
+  const submittedPromptText = (message: unknown, ctx: OmpContext | undefined, sessionId: string) => {
+    if (ctx?.mode === "tui" || ctx?.agent?.kind === "sub" || inputSessionId === sessionId) return ""
+    return userMessageText(message)
+  }
+
   const forward = async (event: OmpEvent, ctx: OmpContext) => {
     try {
       // The event is spread last so a field it carries itself wins over the context's. `user_bash`
       // and `user_python` both carry their own cwd, and the approval events carry their own
       // sessionId -- in each case the event's is the one that describes this action.
-      const envelope: Record<string, unknown> = { ...identity(ctx), ...event }
+      const fields = identity(ctx)
+      const envelope: Record<string, unknown> = { ...fields, ...event }
+      const sessionId = typeof envelope.sessionId === "string" ? envelope.sessionId : ""
+
+      if (event.type === "input") {
+        inputSessionId = sessionId
+      } else if (event.type === "message_end" && (event.message as { role?: unknown })?.role === "user") {
+        // Only the role and text leave the extension: a user message can also carry image bytes
+        // and runtime bookkeeping the prompt row has no use for. One that is not a prompt is not
+        // sent at all; the mapper records nothing for it.
+        const prompt = submittedPromptText(event.message, ctx, sessionId)
+        if (!prompt) return
+        await sendToBeacon({ ...fields, type: "message_end", message: { role: "user" }, prompt })
+        return
+      }
 
       if (event.type === "tool_call") {
         rememberToolCall(event)
@@ -319,6 +372,7 @@ export function createBeaconExtension() {
         // Done here rather than in a second `pi.on` registration so the whole cache lifecycle is
         // visible in one place.
         pendingToolCalls.clear()
+        inputSessionId = null
       } else if (event.type === "tool_approval_requested" || event.type === "tool_approval_resolved") {
         // Attached under `input`, the same key `tool_call` uses, so the mapper reads one shape for
         // both and an approval resolves to the same command or file path its tool call did.

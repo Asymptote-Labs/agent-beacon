@@ -218,6 +218,49 @@ func TestOmpEventPromptRecordsTextAndSource(t *testing.T) {
 	}
 }
 
+// Print and ACP never emit `input`; the extension forwards the delivered user message instead,
+// with its text under `prompt`. The row names that origin, because the text is what Oh My Pi sent
+// the model after expanding templates and commands, not what an `input` event would carry.
+func TestOmpEventUserMessagePromptRecordsDeliveredText(t *testing.T) {
+	logPath := ompTestLog(t)
+
+	runHookWithInput(t, runOmpEvent, map[string]interface{}{
+		"type": "message_end", "message": map[string]interface{}{"role": "user"},
+		"prompt": "summarize the changes", "sessionId": "sess-print", "ompMode": "print",
+	})
+
+	event := ompEventWithAction(t, logPath, "prompt.submitted")
+	if prompt := nested(t, event, "prompt"); prompt["text"] != "summarize the changes" {
+		t.Fatalf("prompt.text = %v, want the delivered text", prompt["text"])
+	}
+	if content := nested(t, event, "content"); content["included"] != true || content["hash"] == "" {
+		t.Fatalf("content = %v, want retained content with a hash", content)
+	}
+	raw := nested(t, event, "raw")
+	if raw["omp_prompt_origin"] != "message_end" {
+		t.Fatalf("raw.omp_prompt_origin = %v, want message_end", raw["omp_prompt_origin"])
+	}
+	if _, ok := raw["omp_input_source"]; ok {
+		t.Fatalf("raw.omp_input_source = %v, want none: no input event reported a source", raw["omp_input_source"])
+	}
+}
+
+// A user message the extension did not mark as a prompt -- every one an older extension forwarded
+// -- records nothing, so an interactive or RPC prompt already recorded from `input` is never
+// counted twice.
+func TestOmpEventUnmarkedUserMessageProducesNothing(t *testing.T) {
+	events := ompRuntime.endpointEvents(map[string]interface{}{
+		"type": "message_end",
+		"message": map[string]interface{}{
+			"role":    "user",
+			"content": []interface{}{map[string]interface{}{"type": "text", "text": "typed"}},
+		},
+	}, "sess-1")
+	if len(events) != 0 {
+		t.Fatalf("unmarked user message produced %v, want nothing", events)
+	}
+}
+
 // A tool_call is not an approval. Oh My Pi's tool_call handler can block a call, but that is an
 // extension deciding rather than an operator being asked; the runtime's real operator decisions
 // arrive as their own approval events. Recording a block as an approval would be indistinguishable
