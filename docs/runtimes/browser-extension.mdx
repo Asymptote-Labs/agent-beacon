@@ -205,6 +205,7 @@ Coverage that is the same for both sites:
 | Area | Support |
 |------|---------|
 | Prompt telemetry | Supported, with full prompt text under `full` and `redacted` retention |
+| Turn identity | Supported. Each chat request's turn id is sent as `beacon.prompt.id` and lands in `prompt.id` |
 | Assistant response telemetry | Supported, including the response text and model |
 | Command and file telemetry | Not applicable. Browser chat performs no local commands or file edits |
 | Approval telemetry | Not available. Neither site exposes approval decisions to a page script |

@@ -309,3 +309,22 @@ describe('normalizeTurn — browser identity', () => {
     ]);
   });
 });
+
+describe('normalizeTurn — prompt id', () => {
+  it('puts the turn id on every record as beacon.prompt.id', () => {
+    const { logRecords } = normalize(
+      baseTurn({ toolCalls: [{ id: 'tool-1', name: 'web_search', arguments: { q: 'x' } }] }),
+    );
+    expect(logRecords.length).toBeGreaterThanOrEqual(3);
+    for (const rec of logRecords) {
+      expect(flat(rec.attributes)['beacon.prompt.id']).toBe('conv-123:1');
+    }
+  });
+
+  it('omits it when the adapter had no turn id, rather than sharing one fallback id', () => {
+    const { logRecords } = normalize(baseTurn({ turnId: '' }));
+    for (const rec of logRecords) {
+      expect(flat(rec.attributes)['beacon.prompt.id']).toBeUndefined();
+    }
+  });
+});

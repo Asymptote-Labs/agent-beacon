@@ -1185,8 +1185,17 @@ func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 	}
 	if event.Event.Category == "prompt" {
 		if text := FirstNonEmpty(FirstTextAttr(attrs, PromptTextKeys...), FirstMessageText(event.GenAI)); text != "" {
-			event.Prompt = &PromptInfo{Text: text}
+			SetPromptText(event, text)
 		}
+	}
+	// The prompt this event belongs to. Claude Code writes it as prompt.id on every event of a
+	// turn, Gemini CLI as prompt_id, Codex as turn.id; the alias list is shared with the hook path
+	// so both capture paths put one turn under one value.
+	if id := asymptoteobserve.PromptIDFrom(attrs); id != "" {
+		if event.Prompt == nil {
+			event.Prompt = &PromptInfo{}
+		}
+		event.Prompt.ID = id
 	}
 }
 
@@ -2107,6 +2116,14 @@ func HasToolCall(attrs map[string]interface{}) bool {
 		return true
 	}
 	return IsMeaningfulValue(attrs["gen_ai.tool.call.arguments"])
+}
+
+// SetPromptText records an event's prompt text, keeping the prompt id already on it.
+func SetPromptText(event *Event, text string) {
+	if event.Prompt == nil {
+		event.Prompt = &PromptInfo{}
+	}
+	event.Prompt.Text = text
 }
 
 // ToolCallID reads the runtime's own identifier for one tool invocation.
