@@ -122,6 +122,143 @@ describe("beacon oh my pi extension", () => {
     expect(sent[0].text).toBe("do the thing")
   })
 
+  // Print and ACP never emit `input`, so the user message Oh My Pi delivers is the only record of
+  // the prompt. Only its role and text leave the extension.
+  test("forwards a print prompt from its user message", async () => {
+    const sent = captureSends()
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+
+    await omp.fire(
+      {
+        type: "message_end",
+        message: {
+          role: "user",
+          attribution: "user",
+          content: [
+            { type: "text", text: "summarize the changes" },
+            { type: "image", data: "aW1hZ2UtYnl0ZXM=", mimeType: "image/png" },
+          ],
+          timestamp: 1,
+        },
+      },
+      context({ mode: "print" }),
+    )
+
+    expect(sent).toEqual([
+      {
+        cwd: "/repo",
+        ompMode: "print",
+        sessionId: "sess-1",
+        type: "message_end",
+        message: { role: "user" },
+        prompt: "summarize the changes",
+      },
+    ])
+  })
+
+  // ACP reports `ctx.mode` "rpc" like an RPC client, but never emits `input`.
+  test("forwards an ACP prompt, which arrives with no input event", async () => {
+    const sent = captureSends()
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+
+    await omp.fire({ type: "message_end", message: { role: "user", content: "fix the test" } }, context({ mode: "rpc" }))
+
+    expect(sent.map((event) => event.prompt)).toEqual(["fix the test"])
+  })
+
+  test("does not record an RPC client's prompt twice", async () => {
+    const sent = captureSends()
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+    const ctx = context({ mode: "rpc" })
+
+    await omp.fire({ type: "input", text: "fix the test", source: "rpc" }, ctx)
+    await omp.fire({ type: "message_end", message: { role: "user", content: "fix the test" } }, ctx)
+
+    expect(sent.map((event) => event.type)).toEqual(["input"])
+  })
+
+  // An image-only submission still shows the session reports its prompts as `input`.
+  test("an input without text still marks the session as reporting input", async () => {
+    const sent = captureSends()
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+    const ctx = context({ mode: "rpc" })
+
+    await omp.fire({ type: "input", text: "first", source: "rpc" }, ctx)
+    await omp.fire({ type: "input", text: "", source: "rpc" }, ctx)
+    await omp.fire({ type: "message_end", message: { role: "user", content: "first" } }, ctx)
+
+    expect(sent.map((event) => event.type)).toEqual(["input", "input"])
+  })
+
+  // Every prompt typed in the terminal arrives as `input`. A user message without one was sent by
+  // an extension, so it is not recorded as a prompt even before the first `input`.
+  test("never records an interactive user message as a prompt", async () => {
+    const sent = captureSends()
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+
+    await omp.fire({ type: "message_end", message: { role: "user", content: "sent by an extension" } }, context())
+    await omp.fire({ type: "input", text: "typed", source: "interactive" }, context())
+    await omp.fire({ type: "message_end", message: { role: "user", content: "typed" } }, context())
+
+    expect(sent.map((event) => event.type)).toEqual(["input"])
+  })
+
+  test("does not record runtime-generated or agent-handed messages as prompts", async () => {
+    const sent = captureSends()
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+    const ctx = context({ mode: "print" })
+
+    await omp.fire({ type: "message_end", message: { role: "user", synthetic: true, content: "continue" } }, ctx)
+    await omp.fire({ type: "message_end", message: { role: "user", attribution: "agent", content: "handoff" } }, ctx)
+    await omp.fire({ type: "message_end", message: { role: "developer", content: "reminder" } }, ctx)
+
+    expect(sent.filter((event) => "prompt" in event)).toEqual([])
+  })
+
+  test("does not record a subagent's task as a prompt", async () => {
+    const sent = captureSends()
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+
+    await omp.fire(
+      { type: "message_end", message: { role: "user", content: "explore the repo" } },
+      context({ mode: "print", agent: { kind: "sub" } }),
+    )
+
+    expect(sent).toEqual([])
+  })
+
+  test("judges a new session on its own input", async () => {
+    const sent = captureSends()
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+
+    await omp.fire({ type: "input", text: "first", source: "rpc" }, context({ mode: "rpc" }))
+    await omp.fire({ type: "session_start" }, context({ mode: "rpc" }))
+    const next = context({ mode: "rpc", sessionManager: { getSessionId: () => "sess-2" } })
+    await omp.fire({ type: "message_end", message: { role: "user", content: "second" } }, next)
+
+    expect(sent.map((event) => event.type)).toEqual(["input", "session_start", "message_end"])
+  })
+
+  test("records repeated identical print prompts each time", async () => {
+    const sent = captureSends()
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+    const ctx = context({ mode: "print", sessionManager: undefined })
+
+    await omp.fire({ type: "message_end", message: { role: "user", content: "repeat" } }, ctx)
+    await omp.fire({ type: "message_end", message: { role: "user", content: "repeat" } }, ctx)
+
+    expect(sent.map((event) => event.prompt)).toEqual(["repeat", "repeat"])
+  })
+
   test("forwards an approval decision with its outcome intact", async () => {
     const sent = captureSends()
     const omp = fakeOmp()

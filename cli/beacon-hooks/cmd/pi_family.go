@@ -1178,18 +1178,48 @@ func piToolMessageSuffix(action string) string {
 	}
 }
 
+// userMessagePromptEvents records a user message as a submitted prompt when the extension has
+// marked it as one by attaching its text under `prompt`.
+//
+// The extension makes that call because only it has the state to: interactive and RPC sessions
+// report every submission as `input` first, and recording the user message there as well would
+// count each prompt twice. On print and ACP, which never emit `input`, the user message is the
+// only record of what was asked. A user message without `prompt` -- every one an older extension
+// forwarded -- produces nothing.
+//
+// The text is the message Oh My Pi delivered to the model, after it expanded slash commands,
+// prompt templates and model mentions, not the keystrokes an `input` event carries. The origin is
+// recorded so a reader can tell the two shapes apart.
+func (f piFamily) userMessagePromptEvents(input, fields map[string]interface{}) []normalizedEvent {
+	prompt := getFirstStr(input, "prompt")
+	if prompt == "" {
+		return nil
+	}
+	fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{f.rawKey("prompt_origin"): "message_end"})
+	events := []normalizedEvent{f.promptEvent(fields, prompt, "")}
+	if link, ok := handoffLinkEvent(fields, prompt); ok {
+		events = append(events, link)
+	}
+	return events
+}
+
 // messageEndEvents records what a finished assistant message tells us: its token usage, and the
-// model's reasoning when the provider returned any.
+// model's reasoning when the provider returned any. A user message is a prompt; see
+// userMessagePromptEvents.
 //
 // A finalized message is the only place these runtimes report usage, and message_end fires for
-// user and toolResult messages too, so a message with neither usage nor reasoning produces nothing
-// rather than an empty row per turn.
+// toolResult messages too, so a message with neither usage nor reasoning produces nothing rather
+// than an empty row per turn.
 func (f piFamily) messageEndEvents(input map[string]interface{}, fields map[string]interface{}) []normalizedEvent {
 	message := firstMap(input, "message")
 	if message == nil {
 		return nil
 	}
-	if role := getFirstStr(message, "role"); role != "assistant" {
+	role := getFirstStr(message, "role")
+	if role == "user" {
+		return f.userMessagePromptEvents(input, fields)
+	}
+	if role != "assistant" {
 		return nil
 	}
 	if model := getFirstStr(message, "model", "responseModel"); model != "" {
