@@ -119,6 +119,7 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.policy.name` | string |
 | `e.policy.reason` | string |
 | `e.product` | string |
+| `e.prompt.id` | string |
 | `e.prompt.text` | string |
 | `e.repository` | string |
 | `e.rpc.response.status_code` | string |

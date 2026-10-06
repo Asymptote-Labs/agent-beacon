@@ -382,7 +382,9 @@ func normalizedSessionUser(event schema.Event) string {
 
 func isPromptEvent(event schema.Event) bool {
 	action := normalizedLifecycleValue(event.Event.Action)
-	return strings.EqualFold(event.Event.Category, "prompt") || strings.Contains(action, "prompt") || event.Prompt != nil
+	// Prompt text, not the prompt object: every event of a turn carries prompt.id, and a tool call
+	// is not a prompt because it names the prompt it belongs to.
+	return strings.EqualFold(event.Event.Category, "prompt") || strings.Contains(action, "prompt") || (event.Prompt != nil && event.Prompt.Text != "")
 }
 
 func isLifecycleSessionEvent(event schema.Event) bool {
