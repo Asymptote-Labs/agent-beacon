@@ -310,3 +310,31 @@ func TestIngestPipelineKeepsNativeVCS(t *testing.T) {
 		t.Fatal("sample events should include a session.commit_linked event")
 	}
 }
+
+// prompt.id names the turn an event belongs to and is on events that carry no prompt text, so the
+// pipeline copies it into beacon.prompt on its own -- not only alongside the text -- before the
+// remove processor drops the source prompt object, and the template maps it as a keyword.
+func TestIngestPipelineKeepsPromptID(t *testing.T) {
+	pipeline := mustRead("pack/ingest-pipeline.json")
+	for _, want := range []string{
+		"if (ctx.prompt.id != null) { ensure(beacon, 'prompt').id = ctx.prompt.id; }",
+		"if (ctx.prompt.text != null) { ensure(beacon, 'prompt').text = ctx.prompt.text; }",
+	} {
+		if !strings.Contains(pipeline, want) {
+			t.Fatalf("ingest pipeline missing %s", want)
+		}
+	}
+	if strings.Contains(pipeline, "ctx.prompt instanceof Map && ctx.prompt.text != null") {
+		t.Fatal("prompt is copied only when it has text, which drops prompt.id from every other event of a turn")
+	}
+	var mappings map[string]interface{}
+	if err := json.Unmarshal([]byte(mustRead("pack/component-template-mappings.json")), &mappings); err != nil {
+		t.Fatal(err)
+	}
+	props := mappings["template"].(map[string]interface{})["mappings"].(map[string]interface{})["properties"].(map[string]interface{})
+	beacon := props["beacon"].(map[string]interface{})["properties"].(map[string]interface{})
+	prompt := beacon["prompt"].(map[string]interface{})["properties"].(map[string]interface{})
+	if id, _ := prompt["id"].(map[string]interface{}); id["type"] != "keyword" {
+		t.Fatalf("beacon.prompt.id mapping = %#v, want keyword", prompt["id"])
+	}
+}
