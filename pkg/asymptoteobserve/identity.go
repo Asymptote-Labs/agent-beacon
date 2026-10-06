@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
+	"strconv"
 	"strings"
 )
 
@@ -37,6 +39,101 @@ var ToolCallIDKeys = []string{
 	// session by this key. It is the only place Beacon learns the id, because Grok Bot runs on
 	// a Cursor-hosted computer and has no hook path that would carry a runtime-native spelling.
 	"cursor.grok_bot.tool_call.id",
+}
+
+// PromptIDKeys are the names a runtime uses for the identifier it assigns to one
+// user prompt and all the work done for it, until the next prompt -- what a
+// person would call a turn. They are promoted to prompt.id on every capture
+// path from this single list, the way ToolCallIDKeys is promoted to
+// gen_ai.tool.call.id.
+//
+// OpenTelemetry's GenAI conventions define no attribute for this, so the field
+// takes the name the runtimes themselves use: Claude Code's prompt.id, which it
+// documents as correlating "a user prompt with all subsequent events until the
+// next prompt", and which Gemini CLI spells prompt_id with the same meaning.
+//
+// A spelling belongs here only when the runtime's value means exactly that.
+// Each entry names the runtime that writes it and the evidence:
+//
+//   - prompt.id: Claude Code OTLP events. The same UUID is written as promptId
+//     on the transcript's prompt and tool-result entries.
+//   - promptId: Claude Code session transcripts.
+//   - prompt_id: Gemini CLI OTLP events.
+//   - turn.id: Codex OTLP turn spans.
+//   - turn_id: Codex hooks ("the active Codex turn id" on every turn-scoped
+//     hook), Muse Code hooks, and Kimi Code hooks, where it is a number.
+//   - generation_id: Cursor hooks ("the current generation that changes with
+//     every user message"; conversation_id is the session).
+//
+// GitHub Copilot's turn ids are deliberately absent: Copilot opens a new turn
+// for each model call inside one prompt, so its turn id is finer than a prompt.
+//
+// Canonical names come first so an explicitly mapped value always beats a
+// runtime-native one; no payload carries two of the native names.
+var PromptIDKeys = []string{
+	"prompt.id",
+	"beacon.prompt.id",
+	"promptId",
+	"prompt_id",
+	"turn.id",
+	"turn_id",
+	"generation_id",
+}
+
+// PromptIDFrom reads the first prompt identifier in m under PromptIDKeys.
+//
+// Strings are trimmed. Integral numbers are accepted and rendered in base 10,
+// because Kimi Code numbers its turns and a decoded JSON payload holds that as
+// a float64. Anything else -- a fractional number, an object, a bool -- is not
+// an identifier and is skipped.
+func PromptIDFrom(m map[string]interface{}) string {
+	for _, key := range PromptIDKeys {
+		if id := identifierString(m[key]); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+func identifierString(value interface{}) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case float64:
+		if typed == math.Trunc(typed) && !math.IsInf(typed, 0) && math.Abs(typed) < 1<<53 {
+			return strconv.FormatInt(int64(typed), 10)
+		}
+	case int:
+		return strconv.Itoa(typed)
+	case int64:
+		return strconv.FormatInt(typed, 10)
+	case json.Number:
+		if n, err := typed.Int64(); err == nil {
+			return strconv.FormatInt(n, 10)
+		}
+	}
+	return ""
+}
+
+// SetPromptID records the prompt an event belongs to, keeping any prompt text
+// already on it. An empty id leaves the event alone.
+func SetPromptID(event *Event, id string) {
+	id = strings.TrimSpace(id)
+	if event == nil || id == "" {
+		return
+	}
+	if event.Prompt == nil {
+		event.Prompt = &PromptInfo{}
+	}
+	event.Prompt.ID = id
+}
+
+// PromptID returns the prompt identifier recorded on an event.
+func PromptID(event *Event) string {
+	if event == nil || event.Prompt == nil {
+		return ""
+	}
+	return strings.TrimSpace(event.Prompt.ID)
 }
 
 // eventIDNamespace is the fixed UUID namespace every Beacon event ID is derived

@@ -218,7 +218,7 @@ func TestRenderVectorConfigSelectsMetadataOnlyTransforms(t *testing.T) {
 		`inputs = ["beacon_runtime_metadata"]`,
 		`inputs = ["beacon_inventory_metadata"]`,
 		`drop_on_abort = true`,
-		`del(event.prompt)`,
+		`del(event.prompt.text)`,
 		`del(event.command.output)`,
 		`del(event.file.diff)`,
 		`del(event.gen_ai.tool.call.arguments)`,

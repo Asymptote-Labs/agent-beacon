@@ -223,7 +223,15 @@ type PolicyInfo struct {
 	Reason      string `json:"reason,omitempty"`
 }
 
+// PromptInfo describes the user prompt an event belongs to.
+//
+// Text is set only on the prompt itself. ID is set on every event the prompt led to, from the
+// prompt through the agent's response until the next prompt, so one value selects a whole turn.
+// It is the runtime's own identifier, normalized from its spelling by PromptIDKeys; a present
+// prompt object therefore no longer means the event is a prompt -- Text, or the prompt category,
+// says that.
 type PromptInfo struct {
+	ID   string `json:"id,omitempty"`
 	Text string `json:"text,omitempty"`
 }
 

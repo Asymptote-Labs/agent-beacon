@@ -2143,7 +2143,7 @@ function sessionEventCategory(event) {
   if (event.file) return "file";
   if (event.mcp) return "mcp";
   if (event.approval || event.policy) return "approval";
-  if (event.prompt) return "prompt";
+  if (event.prompt?.text) return "prompt";
   if (event.tool) return "tool";
   return "other";
 }

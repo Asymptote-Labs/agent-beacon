@@ -91,6 +91,8 @@ Beacon writes one JSON object per line to the [runtime JSONL log](/concepts/core
 
 Events from every surface share session, run, tool-call, and event identifiers, so one agent session reconstructs as an ordered timeline instead of disconnected records. `gen_ai.tool.call.id` carries the runtime's own name for a tool invocation, and `event.id` is derived from the event itself, so a hook and an OTLP capture of the same action agree on identity.
 
+`prompt.id` names the turn an event belongs to: one user prompt and everything the agent did for it, until the next prompt. It is set on the prompt and on every tool call, command, file change, approval, response and token count that followed, so filtering on one value returns the whole turn. OpenTelemetry's GenAI conventions define no attribute for this, so Beacon uses the name the runtimes do, and normalizes each runtime's own spelling of its identifier into it: Claude Code's `prompt.id` (and the matching `promptId` in its transcripts), Gemini CLI's `prompt_id`, Codex's `turn_id`, Cursor's `generation_id`, and Muse Code's and Kimi Code's `turn_id`. The value is the runtime's own, so it also matches that runtime's logs. It is unique within a session, so a turn is identified by harness, `session.id` and `prompt.id` together. Runtimes that expose no per-turn identifier leave the field empty, and metadata-only forwarding keeps it while removing the prompt text.
+
 The local [dashboard](/concepts/core-concepts#dashboard) reads recent runtime logs
 over a loopback-only service for rollout validation and investigation, with
 session timelines, activity summaries, Detections and Findings, Token Usage,

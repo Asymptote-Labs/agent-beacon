@@ -4,7 +4,11 @@ inputs = ["beacon_runtime", "beacon_backfill"]
 drop_on_abort = true
 source = '''
 event = parse_json!(string!(.message))
-del(event.prompt)
+# prompt.id names the turn an event belongs to and is kept; the prompt's text is content.
+del(event.prompt.text)
+if is_object(event.prompt) && is_empty(object!(event.prompt)) {
+  del(event.prompt)
+}
 del(event.message)
 del(event.raw)
 del(event.command.output)
