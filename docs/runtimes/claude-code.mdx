@@ -66,7 +66,9 @@ Beacon detects Claude Code through the `claude` executable and Claude settings p
 
 ## Install or configuration support
 
-`beacon endpoint install` configures Claude telemetry settings so Claude Code sends OTLP data to the local collector. It enables detailed tool logging so tool-result events include inputs such as Bash commands, file paths, URLs, search patterns, and MCP server/tool arguments. Claude bounds or truncates some input values; tool output content is not enabled by this setting.
+`beacon endpoint install` configures Claude telemetry settings so Claude Code sends OTLP data to the local collector. It enables detailed tool logging so tool-result events include inputs such as Bash commands, file paths, URLs, search patterns, and MCP server/tool arguments. Claude bounds or truncates some input values.
+
+Installation enables inline API-body logs (`OTEL_LOG_RAW_API_BODIES=1`) unless that setting is already present; an explicit opt-out or capture mode is preserved. These bodies can contain conversation history, system prompts, tools, and tool results. For the WebFetch summarizer request (`query_source=web_fetch_apply`), the local Collector retains only user-role text as `prompt.text` on a `session.activity` event. It removes `body` and `body_ref` from all Claude API request/response-body events and never reads referenced body files. The stored input is the fetched page and summarizer prompt, not the summary returned to the main model. Invalid or truncated JSON bodies produce no auxiliary text. Managed-ingest privacy remains a separate forwarding policy, not a switch for local collection.
 
 `beacon endpoint hooks install --harness claude` adds Beacon-managed Claude Code hooks while preserving existing Claude settings and non-Beacon hooks. `beacon endpoint hooks uninstall --harness claude` removes only Beacon-managed Claude hook entries. Install, repair, and uninstall write every non-Beacon hook back exactly as they found it, including `http`, `prompt`, and `agent` hooks and any fields Beacon does not use itself, such as an http hook's `url` and `headers`.
 

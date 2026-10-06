@@ -385,6 +385,11 @@ func ConfigureClaude(opts ConfigureOptions) (string, error) {
 	// identity/arguments needed to reconstruct agent activity from OTel events.
 	env["OTEL_LOG_TOOL_DETAILS"] = "1"
 	env["OTEL_LOG_USER_PROMPTS"] = "1"
+	// Inline API bodies let the collector select auxiliary model inputs without
+	// following body files. Preserve an explicit user opt-out or capture mode.
+	if _, configured := env["OTEL_LOG_RAW_API_BODIES"]; !configured {
+		env["OTEL_LOG_RAW_API_BODIES"] = "1"
+	}
 	settings["env"] = env
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return "", err

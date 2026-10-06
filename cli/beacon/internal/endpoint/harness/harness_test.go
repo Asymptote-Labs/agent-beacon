@@ -120,6 +120,44 @@ func TestConfigureClaudeEnablesPromptLogging(t *testing.T) {
 	}
 }
 
+func TestConfigureClaudePreservesExplicitRawBodyCapturePolicy(t *testing.T) {
+	for _, policy := range []string{"0", "file:/private/claude-bodies"} {
+		t.Run(policy, func(t *testing.T) {
+			home := t.TempDir()
+			testenv.SetHome(t, home)
+			path := filepath.Join(home, ".claude", "settings.json")
+			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+				t.Fatal(err)
+			}
+			before, err := json.Marshal(map[string]interface{}{
+				"env": map[string]string{"OTEL_LOG_RAW_API_BODIES": policy},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, before, 0600); err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				if _, err := ConfigureClaude(ConfigureOptions{Endpoint: "http://127.0.0.1:4317"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var settings map[string]map[string]string
+			if err := json.Unmarshal(data, &settings); err != nil {
+				t.Fatal(err)
+			}
+			if got := settings["env"]["OTEL_LOG_RAW_API_BODIES"]; got != policy {
+				t.Fatalf("install or reinstall changed explicit capture policy: got %q, want %q", got, policy)
+			}
+		})
+	}
+}
+
 func TestClaudeStatusVariants(t *testing.T) {
 	dir := t.TempDir()
 	tests := []struct {
