@@ -49,13 +49,22 @@ If no logged-in user can be identified at all, this reports a warning rather tha
 
 ### `dsh_hook_capture`
 
-This check runs only when DeepSeek Harness is detected and Beacon's hooks for it are installed. It catches a failure no other check sees: the hooks are loaded, but they cannot write the runtime log because `dsh` runs them inside its session sandbox. `harness_observed` stays green in this state, because `beacon endpoint dsh sync` fills the log with poll events under the same harness name.
+This check runs only when DeepSeek Harness is detected and Beacon's hooks for it are installed. It catches a failure no other check sees: the hooks are loaded, but they cannot write the runtime log because `dsh` runs them inside its session sandbox. In `workspace-write` the hook stages the event in the session workspace instead; in `read-only` nothing is writable and nothing is captured. `harness_observed` stays green in either state, because `beacon endpoint dsh sync` fills the log with poll events under the same harness name.
 
 ```
 dsh_hook_capture: warn target=deepseek_harness (2 DeepSeek Harness session(s) ran without a live
   hook event (newest 2026-09-21T11:00:00Z; no hook event since the hooks were installed). The usual
   cause is dsh's sandbox: ...)
   action="run `beacon endpoint dsh sync` to backfill those sessions from DeepSeek's session store; ..."
+```
+
+Sessions with staged events count differently. When a session's workspace spool still holds hook events, the check reports `dsh_spool_pending_drain` — capture is working, the sweep has not run — with the action `run beacon endpoint dsh sync`. Those sessions are not counted as missed, and once drained their events land as `harness.collection_method=hook` and satisfy the check like any other live capture.
+
+```
+dsh_spool_pending_drain: warn target=deepseek_harness (1 DeepSeek Harness session(s) have hook
+  events staged in their workspace spool; capture is working, but the events are not in
+  ~/.beacon/endpoint/logs/runtime.jsonl yet)
+  action="run `beacon endpoint dsh sync` to drain the staged events into the runtime log"
 ```
 
 Doctor cannot reproduce the sandbox, because running the hook command from doctor runs it outside `dsh`, where it succeeds. So the check compares evidence instead. It counts native sessions that DeepSeek wrote after the hooks were installed and more than a few minutes after the last event with `harness.collection_method=hook`. The live log and every rotated archive are searched for that event. Each of those sessions is one the live hooks did not capture. Once rotation has started discarding history, sessions older than the oldest retained event are not counted, because their hook events may have rotated out. Evidence doctor cannot read, such as a missing hooks file, is reported as a warning rather than a pass. The other cause is a `dsh` process that was already running when the hooks were installed and has not been restarted.

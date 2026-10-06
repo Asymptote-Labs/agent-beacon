@@ -132,11 +132,63 @@ func (l *Logger) EndpointEventWithFidelity(action, category, severity, message, 
 	normalizeEventModel(event)
 	attachDerivedTrace(event)
 	if err := writeEndpointJSON(path, event); err != nil {
+		// DeepSeek Harness runs hook commands inside the session sandbox, which cannot reach
+		// ~/.beacon but CAN write the session workspace in workspace-write mode (#605).
+		// Staging the event there keeps capture live; `beacon endpoint dsh sync` drains the
+		// spool from outside the sandbox. A staged event is deliberately silent: one process
+		// per event would print a note on every event into the runtime's hook stderr stream,
+		// so the staged state surfaces through `dsh status`, `dsh sync` and `doctor` instead.
+		// When the spool write fails too -- read-only mode, no workspace, unsafe ids -- the
+		// NOT-recorded explanation below fires unchanged, which is the honest report for an
+		// event nothing captured.
+		if spoolPath := l.dshSpoolPath(event); spoolPath != "" {
+			if spoolErr := writeEndpointJSON(spoolPath, event); spoolErr == nil {
+				return nil
+			}
+		}
 		fmt.Fprintf(os.Stderr, "logging: failed to write endpoint event to %s: %v\n", path, err)
 		reportEndpointWriteFailure(os.Stderr, l.platform, path, err)
 		return err
 	}
 	return nil
+}
+
+// dshSpoolPath resolves the workspace spool file a sandboxed DeepSeek Harness hook should
+// stage one event in when the runtime log cannot be written, or "" when no spool applies.
+//
+// Spooling is dsh-only: its sandbox is the reason the log write fails (#605), and staging
+// another runtime's events into a project checkout would be new pollution with no drain
+// path. The session id must be a safe filename component on BOTH the writing and the
+// draining side (ValidDSHSessionIDForSpool is what they share), and the workspace comes
+// from the event's own session.working_directory -- the envelope value the bridge stamped
+// from session.header.cwd, the same directory the sandbox confines writes to -- with the
+// process cwd as the fallback for callers that did not carry the field.
+func (l *Logger) dshSpoolPath(event map[string]interface{}) string {
+	if l == nil || asymptoteobserve.NormalizeHarnessName(l.platform) != dshHarnessName {
+		return ""
+	}
+	if !asymptoteobserve.ValidDSHSessionIDForSpool(l.sessionID) {
+		return ""
+	}
+	cwd := ""
+	if session, ok := event["session"].(map[string]interface{}); ok {
+		cwd, _ = session["working_directory"].(string)
+	}
+	cwd = strings.TrimSpace(cwd)
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	path, ok := asymptoteobserve.DSHSpoolPath(cwd, l.sessionID)
+	if !ok {
+		return ""
+	}
+	// Creating the directory here doubles as the eligibility probe: if the workspace itself
+	// is not writable (read-only mode), there is no spool and the caller reports the loss.
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return ""
+	}
+	ensureSpoolGitExclude(filepath.Dir(path))
+	return path
 }
 
 // reportedWriteFailures remembers which runtime log paths this process has already explained a
