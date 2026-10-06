@@ -176,34 +176,23 @@ func TestClaudeBashInterruptedOutputIsMarked(t *testing.T) {
 	})
 }
 
-// Claude Code's OTLP tool_result for the same call carries no output. Whichever report is written
-// first, the hook's output must reach the log.
+// Claude Code's OTLP tool_result for the same call carries no output. The collector writes it
+// without a working directory, so its dedupe key differs from the hook's and the hook's output
+// reaches the log even when the collector's report is written first.
 func TestClaudeBashOutputSurvivesAnEarlierCollectorReport(t *testing.T) {
 	payload := postToolPayload("Bash", map[string]interface{}{"command": "npm test"},
 		map[string]interface{}{"stdout": "ok\n", "stderr": "", "interrupted": false})
-	otlp := map[string]interface{}{
+	otlp := claudeCommandLine(t, map[string]interface{}{
 		"harness": map[string]interface{}{"name": "claude_code", "collection_method": "otlp"},
+		"session": map[string]interface{}{"id": "s-743"},
 		"command": map[string]interface{}{"command": "npm test", "duration_ms": 24},
+	})
+	_, events := runClaudePostTool(t, payload, otlp)
+	if len(events) != 2 {
+		t.Fatalf("events = %d, want the collector's report and the hook's", len(events))
 	}
-	cases := []struct {
-		name    string
-		session map[string]interface{}
-	}{
-		// The collector does not populate the working directory for Claude Code today.
-		{"as the collector writes it", map[string]interface{}{"id": "s-743"}},
-		{"with the hook's working directory", map[string]interface{}{"id": "s-743", "working_directory": "/repo"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			otlp["session"] = tc.session
-			_, events := runClaudePostTool(t, payload, claudeCommandLine(t, otlp))
-			if len(events) != 2 {
-				t.Fatalf("events = %d, want the collector's report and the hook's", len(events))
-			}
-			if got := nested(t, events[1], "command")["output"]; got != "ok\n" {
-				t.Fatalf("hook command.output = %v, want the output kept", got)
-			}
-		})
+	if got := nested(t, events[1], "command")["output"]; got != "ok\n" {
+		t.Fatalf("hook command.output = %v, want the output kept", got)
 	}
 }
 

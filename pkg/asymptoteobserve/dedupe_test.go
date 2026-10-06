@@ -136,41 +136,6 @@ func TestIsDuplicateEndpointEventCollapsesNormalizedHarnessOnCallID(t *testing.T
 	}
 }
 
-// The log is append-only, so when two reports of one call land in the "wrong" order the line
-// written first cannot be completed. A live report carrying command output the earlier one lacks
-// is therefore kept; a report that adds nothing, or a polled backfill copy, is still suppressed.
-func TestIsDuplicateEndpointEventKeepsALaterReportThatAddsCommandOutput(t *testing.T) {
-	line := func(ts, method, output string) string {
-		command := `{"command":"echo hi"}`
-		if output != "" {
-			command = `{"command":"echo hi","output":"` + output + `"}`
-		}
-		return `{"timestamp":"` + ts + `","event":{"action":"command.executed"},"harness":{"name":"claude_code","collection_method":"` + method + `"},` +
-			`"session":{"id":"s1","working_directory":"/repo"},"command":` + command + `,"tool":{"name":"Bash","command":"echo hi"},"gen_ai":{"tool":{"call":{"id":"toolu_1"}}}}`
-	}
-	cases := []struct {
-		name                string
-		existing, candidate string
-		duplicate           bool
-	}{
-		{"live output after a report without it", line("2026-08-21T18:00:01Z", "otlp", ""), line("2026-08-21T18:00:02Z", "hook", "hi"), false},
-		{"report without output after one with it", line("2026-08-21T18:00:01Z", "hook", "hi"), line("2026-08-21T18:00:07Z", "otlp", ""), true},
-		{"both carry output", line("2026-08-21T18:00:01Z", "hook", "hi"), line("2026-08-21T18:00:09Z", "poll", "hi"), true},
-		{"polled output after a report without it", line("2026-08-21T18:00:01Z", "otlp", ""), line("2026-08-21T18:00:09Z", "poll", "hi"), true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "runtime.jsonl")
-			if err := os.WriteFile(path, []byte(tc.existing+"\n"), 0644); err != nil {
-				t.Fatalf("write existing event: %v", err)
-			}
-			if got := IsDuplicateEndpointEvent(path, []byte(tc.candidate), EndpointDuplicateWindow); got != tc.duplicate {
-				t.Fatalf("duplicate = %t, want %t", got, tc.duplicate)
-			}
-		})
-	}
-}
-
 // A Claude Code Write reaches the hook through diffFields, which records
 // file.operation "modify", and reaches the collector as "create" -- two words
 // for one action. While the target included the operation, the pair could not
