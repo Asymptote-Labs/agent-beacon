@@ -202,7 +202,7 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 		sessionID, _ = input["session_id"].(string)
 		toolName, _ = input["tool_name"].(string)
 		toolInput, _ = input["tool_input"].(map[string]interface{})
-		toolResponse, _ = input["tool_response"].(map[string]interface{})
+		toolResponse = resolveToolResponse(input)
 	}
 
 	if !isFileEditTool(platformFlag, toolName) {
@@ -395,6 +395,12 @@ func resolveToolResponse(input map[string]interface{}) map[string]interface{} {
 				return map[string]interface{}{"result": result}
 			}
 		}
+	}
+	// MCP tool responses may arrive as content-block lists. Keep the full block
+	// payload under the canonical content key; text consumers select text blocks
+	// without flattening media payloads into output.
+	if content, ok := input["tool_response"].([]interface{}); ok {
+		return map[string]interface{}{"content": content}
 	}
 	// If tool_response is a plain string, wrap it for downstream compatibility
 	if respStr, ok := input["tool_response"].(string); ok && respStr != "" {

@@ -42,8 +42,9 @@ func IngestedContentToolName(name string) bool {
 }
 
 // ToolResultPlainText renders a tool result as text: a string as is; for an object or list (a
-// hook's tool_response, an MCP content-block list), every string it contains, maps in sorted key
-// order, one per line, trimmed. Numbers, booleans and nulls are sizes, counts and flags rather
+// hook's tool_response, an MCP content-block list), every ordinary string it contains and text
+// from MCP text blocks, with maps in sorted key order, one per line. MCP media blocks do not
+// contribute their binary data. Numbers, booleans and nulls are sizes, counts and flags rather
 // than content and contribute nothing. Deterministic for the same result on every run.
 //
 // It does no redaction or truncation; callers apply the limit that governs where the text goes.
@@ -60,6 +61,20 @@ func collectToolResultStrings(v interface{}, out *[]string) {
 			*out = append(*out, typed)
 		}
 	case map[string]interface{}:
+		// MCP image/audio blocks carry encoded bytes rather than model-visible text.
+		// Other response objects can also have a type discriminator, so do not
+		// discard arbitrary typed objects or textual embedded resources.
+		switch typed["type"] {
+		case "image", "audio":
+			if _, encoded := typed["data"]; encoded {
+				return
+			}
+		case "text":
+			if text, ok := typed["text"].(string); ok {
+				collectToolResultStrings(text, out)
+				return
+			}
+		}
 		keys := make([]string, 0, len(typed))
 		for key := range typed {
 			keys = append(keys, key)
