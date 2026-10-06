@@ -38,6 +38,7 @@ Gemini CLI is not currently configured through Beacon's hook adapter.
 | Area | Support |
 |------|---------|
 | Prompt telemetry | Supported when emitted through Gemini OTLP |
+| Turn identity | Supported. Gemini CLI's `prompt_id` is promoted to `prompt.id` |
 | Command, tool, and file telemetry | Supported for prompts, tool calls, MCP activity, file operations, and approval-related events emitted through OTLP |
 | Token usage | Supported from the `gemini_cli.api_response` log and `gemini_cli.token.usage` counter: input, output, cache read, and thinking tokens as reasoning, per session. Gemini CLI reports no cost. See [Token usage](/cli/token-usage) for how Gemini's overlapping counts are made disjoint |
 | Local JSONL and dashboard | Supported |
