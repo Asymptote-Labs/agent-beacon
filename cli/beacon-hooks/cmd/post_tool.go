@@ -328,6 +328,7 @@ func recordLocalEdit(params *evaluationParams, input map[string]interface{}, log
 	if platformFlag == "dsh" {
 		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"dsh": input})
 	}
+	applyPromptID(fields, input)
 	logger.EndpointEvent("file.modified", "file", "info", "File edit observed", fields)
 }
 
