@@ -180,6 +180,32 @@ func TestStartDetachedWritesStateAndExports(t *testing.T) {
 	}
 }
 
+// A CI job opts in to WebFetch capture by setting OTEL_LOG_RAW_API_BODIES itself.
+func TestRunChildPassesTheCallersWebFetchOptIn(t *testing.T) {
+	testenv.RequirePOSIXExecutableFixtures(t)
+	dir := t.TempDir()
+	output := filepath.Join(dir, "env.txt")
+	child := fakeExecutable(t, "child", "#!/bin/sh\nenv > \"$1\"\n")
+	t.Setenv("OTEL_LOG_RAW_API_BODIES", "1")
+	session := &Session{
+		BaseDir:      dir,
+		ConfigPath:   filepath.Join(dir, "otelcol.yaml"),
+		LogPath:      filepath.Join(dir, "runtime.jsonl"),
+		GRPCEndpoint: "http://127.0.0.1:4317",
+		cfg:          endpointconfig.Default(true, filepath.Join(dir, "runtime.jsonl")),
+	}
+	if _, err := session.RunChild(context.Background(), []string{child, output}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "\nOTEL_LOG_RAW_API_BODIES=1\n") && !strings.HasPrefix(string(data), "OTEL_LOG_RAW_API_BODIES=1\n") {
+		t.Fatalf("child env lost the caller's OTEL_LOG_RAW_API_BODIES=1:\n%s", data)
+	}
+}
+
 func TestRunChildInjectsClaudeEnvAndBeaconPaths(t *testing.T) {
 	testenv.RequirePOSIXExecutableFixtures(t)
 	dir := t.TempDir()

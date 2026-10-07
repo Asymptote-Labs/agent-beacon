@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -88,5 +89,68 @@ func TestRepairWithExplicitEmptyHarnessesLeavesClaudeAndCodexConfigAlone(t *test
 	}
 	if len(cfg.Harnesses) != 0 {
 		t.Fatalf("config.json harnesses = %#v, want the explicit empty selection, not the prior default", cfg.Harnesses)
+	}
+}
+
+// WebFetch capture follows the flag of the install or repair that ran last: on with it, off again
+// after a repair without it, in Claude Code's settings and in config.json alike.
+func TestClaudeWebFetchCaptureFollowsTheLatestInstallOrRepair(t *testing.T) {
+	testenv.RequirePOSIXExecutableFixtures(t)
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	installFakeInventoryJob(t, false)
+	collectorPath := filepath.Join(home, "bin", "beacon-otelcol")
+	if err := os.MkdirAll(filepath.Dir(collectorPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(collectorPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	opts := InstallOptions{
+		UserMode:      true,
+		LogPath:       filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl"),
+		Harnesses:     []string{"claude"},
+		GRPCPort:      freePort(t),
+		HTTPPort:      freePort(t),
+		HealthPort:    freePort(t),
+		CollectorPath: collectorPath,
+		ServiceKind:   service.KindSupervised,
+	}
+	rawBodies := func() (string, bool) {
+		data, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var settings struct {
+			Env map[string]string `json:"env"`
+		}
+		if err := json.Unmarshal(data, &settings); err != nil {
+			t.Fatal(err)
+		}
+		value, set := settings.Env["OTEL_LOG_RAW_API_BODIES"]
+		return value, set
+	}
+	recorded := func() bool {
+		cfg, err := endpointconfig.Load(true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cfg.ClaudeCaptureWebFetch
+	}
+
+	opts.ClaudeCaptureWebFetch = true
+	if _, err := Install(opts); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if value, _ := rawBodies(); value != "1" || !recorded() {
+		t.Fatalf("after install with the flag: OTEL_LOG_RAW_API_BODIES = %q, recorded = %t; want 1 and true", value, recorded())
+	}
+
+	opts.ClaudeCaptureWebFetch = false
+	if _, err := Repair(opts); err != nil {
+		t.Fatalf("Repair: %v", err)
+	}
+	if value, set := rawBodies(); set || recorded() {
+		t.Fatalf("after repair without the flag: OTEL_LOG_RAW_API_BODIES = %q (set %t), recorded = %t; want capture off", value, set, recorded())
 	}
 }

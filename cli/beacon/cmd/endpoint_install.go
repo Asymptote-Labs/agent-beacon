@@ -126,6 +126,7 @@ func endpointInstallOptions(selection endpointTargetSelection, serviceKind servi
 		StartService:          !endpointOpts.noStart,
 		IncludeRuntimeMetrics: endpointOpts.includeRuntimeMetrics,
 		IncludeCodexSpans:     endpointOpts.includeCodexSpans,
+		ClaudeCaptureWebFetch: endpointOpts.claudeCaptureWebFetch,
 		SplunkHEC:             splunkHECOptions(),
 		FalconHEC:             falconHECOptions(),
 		ServiceKind:           serviceKind,

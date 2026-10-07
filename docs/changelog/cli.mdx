@@ -59,15 +59,23 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 - **RPM coverage** · The package smoke test now installs, upgrades, and removes
   the `.rpm` on Rocky 9 in CI, alongside the `.deb` on Ubuntu, and checks that
   `apt purge` removes config and logs.
-- **Claude Code WebFetch pages reach threat rules** · Install and `ci exec` now
-  enable Claude Code's inline API-body logs, unless you already set
-  `OTEL_LOG_RAW_API_BODIES`. Beacon records the page WebFetch hands its
-  summarizer model as a `WebFetch` tool result, which
-  `indirect-injection-in-tool-result` evaluates. A new collector processor,
-  `claude_api_body`, runs before every destination, Splunk HEC included. It keeps
-  only that page text and drops every other API body. If you had already enabled
-  raw bodies yourself, they no longer appear in `raw.attributes.body` or reach
-  your SIEM.
+- **Opt-in capture of Claude Code WebFetch pages** · `beacon endpoint install
+  --claude-capture-web-fetch` (and the same flag on `repair`) turns on Claude
+  Code's API-body logs. Beacon then records the page WebFetch hands its summarizer
+  model as a `WebFetch` tool result, which `indirect-injection-in-tool-result`
+  evaluates. Without the flag, install and repair remove an inline
+  `OTEL_LOG_RAW_API_BODIES` (`1` or `true`) from `~/.claude/settings.json`; `0`
+  and `file:<dir>` are left alone. A CI job opts in by setting
+  `OTEL_LOG_RAW_API_BODIES=1` in its environment.
+- **API bodies are filtered before every destination** · A new collector
+  processor, `claude_api_body`, runs ahead of every exporter, Splunk HEC included.
+  It drops every Claude Code API body except the WebFetch page text, which leaves
+  redacted and capped at 2048 characters. If you had enabled raw bodies yourself,
+  they no longer appear in `raw.attributes.body` or reach your SIEM.
+- **`ci exec` keeps your telemetry timing** · A value you set for
+  `OTEL_METRIC_EXPORT_INTERVAL`, `OTEL_BLRP_SCHEDULE_DELAY` or
+  `OTEL_BSP_SCHEDULE_DELAY` now reaches Claude Code. Before, `ci exec` replaced it
+  with its own default.
 
 ### v1.3.21 · September 23, 2026
 

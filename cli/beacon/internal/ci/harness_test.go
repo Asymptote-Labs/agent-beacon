@@ -15,7 +15,6 @@ func TestClaudeEnvIncludesDetailedToolAndPromptLogging(t *testing.T) {
 		"OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta",
 		"OTEL_LOG_TOOL_DETAILS=1",
 		"OTEL_LOG_USER_PROMPTS=1",
-		"OTEL_LOG_RAW_API_BODIES=1",
 	} {
 		if !strings.Contains(env, want) {
 			t.Fatalf("ClaudeEnv missing %q in:\n%s", want, env)
@@ -26,31 +25,24 @@ func TestClaudeEnvIncludesDetailedToolAndPromptLogging(t *testing.T) {
 // ci exec builds the child's env through BuildHarnessConfig and lays it over the caller's own, so a
 // value the caller set survives only if BuildHarnessConfig hands it to ClaudeEnv.
 func TestBuildHarnessConfigKeepsTheCallersClaudeDefaults(t *testing.T) {
-	for _, policy := range []string{"0", "file:/tmp/claude-bodies"} {
-		base := []string{"OTEL_LOG_RAW_API_BODIES=" + policy, "OTEL_METRIC_EXPORT_INTERVAL=30000", "SECRET_TOKEN=not-copied"}
-		cfg, err := BuildHarnessConfig(base, "claude", "http://127.0.0.1:4317", t.TempDir(), nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := cfg.Env["OTEL_LOG_RAW_API_BODIES"]; got != policy {
-			t.Fatalf("OTEL_LOG_RAW_API_BODIES = %q, want the caller's %q", got, policy)
-		}
-		if got := cfg.Env["OTEL_METRIC_EXPORT_INTERVAL"]; got != "30000" {
-			t.Fatalf("OTEL_METRIC_EXPORT_INTERVAL = %q, want the caller's 30000", got)
-		}
-		if got := cfg.Env["OTEL_BSP_SCHEDULE_DELAY"]; got != "1000" {
-			t.Fatalf("OTEL_BSP_SCHEDULE_DELAY = %q, want the default for a key the caller left unset", got)
-		}
-		if _, copied := cfg.Env["SECRET_TOKEN"]; copied {
-			t.Fatal("BuildHarnessConfig copied the caller's whole environment")
-		}
-	}
-	cfg, err := BuildHarnessConfig(nil, "claude", "http://127.0.0.1:4317", t.TempDir(), nil)
+	base := []string{"OTEL_METRIC_EXPORT_INTERVAL=30000", "OTEL_LOG_RAW_API_BODIES=1", "SECRET_TOKEN=not-copied"}
+	cfg, err := BuildHarnessConfig(base, "claude", "http://127.0.0.1:4317", t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Env["OTEL_LOG_RAW_API_BODIES"]; got != "1" {
-		t.Fatalf("OTEL_LOG_RAW_API_BODIES = %q, want 1 by default", got)
+	if got := cfg.Env["OTEL_METRIC_EXPORT_INTERVAL"]; got != "30000" {
+		t.Fatalf("OTEL_METRIC_EXPORT_INTERVAL = %q, want the caller's 30000", got)
+	}
+	if got := cfg.Env["OTEL_BSP_SCHEDULE_DELAY"]; got != "1000" {
+		t.Fatalf("OTEL_BSP_SCHEDULE_DELAY = %q, want the default for a key the caller left unset", got)
+	}
+	if _, copied := cfg.Env["SECRET_TOKEN"]; copied {
+		t.Fatal("BuildHarnessConfig copied the caller's whole environment")
+	}
+	// WebFetch capture is the caller's opt-in: ci exec neither sets nor clears it, so whatever
+	// the caller's environment says reaches the child.
+	if got, set := cfg.Env["OTEL_LOG_RAW_API_BODIES"]; set {
+		t.Fatalf("OTEL_LOG_RAW_API_BODIES = %q, want it left to the caller's environment", got)
 	}
 }
 

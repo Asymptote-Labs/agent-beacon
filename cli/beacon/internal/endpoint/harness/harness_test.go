@@ -2,6 +2,7 @@ package harness
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
@@ -72,11 +73,13 @@ func TestConfigureClaudeWritesTelemetryEnvAndBackup(t *testing.T) {
 		"OTEL_EXPORTER_OTLP_ENDPOINT":                       "http://127.0.0.1:4317",
 		"OTEL_LOG_TOOL_DETAILS":                             "1",
 		"OTEL_LOG_USER_PROMPTS":                             "1",
-		"OTEL_LOG_RAW_API_BODIES":                           "1",
 	} {
 		if got := env[key]; got != want {
 			t.Fatalf("env[%s] = %q, want %q; env=%#v", key, got, want, env)
 		}
+	}
+	if got, set := env["OTEL_LOG_RAW_API_BODIES"]; set {
+		t.Fatalf("OTEL_LOG_RAW_API_BODIES = %q without the WebFetch capture opt-in", got)
 	}
 	backups, err := filepath.Glob(path + ".beacon.*.bak")
 	if err != nil {
@@ -121,18 +124,38 @@ func TestConfigureClaudeEnablesPromptLogging(t *testing.T) {
 	}
 }
 
-func TestConfigureClaudePreservesExplicitRawBodyCapturePolicy(t *testing.T) {
-	for _, policy := range []string{"0", "file:/private/claude-bodies"} {
-		t.Run(policy, func(t *testing.T) {
+// WebFetch capture is opt-in. The opt-in sets inline API bodies only where nothing is set, and
+// install without it removes an inline setting, so a repair without the flag turns capture off.
+// Neither overrides 0 or file:<dir>.
+func TestConfigureClaudeRawBodiesFollowTheWebFetchOptIn(t *testing.T) {
+	const unset = "<unset>"
+	tests := []struct {
+		capture      bool
+		before, want string
+	}{
+		{capture: true, before: unset, want: "1"},
+		{capture: true, before: "1", want: "1"},
+		{capture: true, before: "0", want: "0"},
+		{capture: true, before: "file:/private/claude-bodies", want: "file:/private/claude-bodies"},
+		{capture: false, before: unset, want: unset},
+		{capture: false, before: "1", want: unset},
+		{capture: false, before: "true", want: unset},
+		{capture: false, before: "0", want: "0"},
+		{capture: false, before: "file:/private/claude-bodies", want: "file:/private/claude-bodies"},
+	}
+	for _, tc := range tests {
+		t.Run(fmt.Sprintf("capture=%t/%s", tc.capture, tc.before), func(t *testing.T) {
 			home := t.TempDir()
 			testenv.SetHome(t, home)
 			path := filepath.Join(home, ".claude", "settings.json")
 			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 				t.Fatal(err)
 			}
-			before, err := json.Marshal(map[string]interface{}{
-				"env": map[string]string{"OTEL_LOG_RAW_API_BODIES": policy},
-			})
+			env := map[string]string{}
+			if tc.before != unset {
+				env["OTEL_LOG_RAW_API_BODIES"] = tc.before
+			}
+			before, err := json.Marshal(map[string]interface{}{"env": env})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -140,7 +163,7 @@ func TestConfigureClaudePreservesExplicitRawBodyCapturePolicy(t *testing.T) {
 				t.Fatal(err)
 			}
 			for range 2 {
-				if _, err := ConfigureClaude(ConfigureOptions{Endpoint: "http://127.0.0.1:4317"}); err != nil {
+				if _, err := ConfigureClaude(ConfigureOptions{Endpoint: "http://127.0.0.1:4317", CaptureWebFetch: tc.capture}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -152,8 +175,12 @@ func TestConfigureClaudePreservesExplicitRawBodyCapturePolicy(t *testing.T) {
 			if err := json.Unmarshal(data, &settings); err != nil {
 				t.Fatal(err)
 			}
-			if got := settings["env"]["OTEL_LOG_RAW_API_BODIES"]; got != policy {
-				t.Fatalf("install or reinstall changed explicit capture policy: got %q, want %q", got, policy)
+			got, set := settings["env"]["OTEL_LOG_RAW_API_BODIES"]
+			if !set {
+				got = unset
+			}
+			if got != tc.want {
+				t.Fatalf("OTEL_LOG_RAW_API_BODIES after install and reinstall = %q, want %q", got, tc.want)
 			}
 		})
 	}

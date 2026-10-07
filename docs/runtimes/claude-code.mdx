@@ -72,18 +72,24 @@ Beacon detects Claude Code through the `claude` executable and Claude settings p
 
 ### Fetched web pages
 
-Claude Code's WebFetch tool does not return the page to the main model. It sends the page to a separate summarizer model call, and the main model only receives the summary. The only place Claude Code reports that page is the summarizer call's API request body. So `beacon endpoint install` and `beacon ci exec` enable inline API-body logs (`OTEL_LOG_RAW_API_BODIES=1`). If the setting is already present, Beacon keeps it, so `0` (off) or `file:<dir>` (bodies written to files) stays as you set it.
+Claude Code's WebFetch tool does not return the page to the main model. It sends the page to a separate summarizer model call, and the main model only receives the summary. The only place Claude Code reports that page is the summarizer call's API request body, so recording it means turning on Claude Code's API-body logs. Those logs also carry the system prompt, the whole conversation, tool definitions, and tool results on every model call, so Beacon leaves them off unless you opt in:
 
-API bodies can contain the system prompt, the whole conversation, tool definitions, and tool results, so the collector filters them in its `claude_api_body` processor. The processor runs before every destination, including the local runtime log, Falcon, and Splunk HEC:
+```bash title="Record the pages Claude Code's WebFetch fetches"
+beacon endpoint install --claude-capture-web-fetch
+```
 
-- **The WebFetch summarizer request** (`query_source=web_fetch_apply`) is kept, but only the text of its user messages: the fetched page and the summarizer prompt. Beacon removes `body` and `body_ref` and forwards that text as `beacon.web_fetch.input`. It never includes the summarizer's system prompt, tool definitions, or non-text blocks.
+With the flag, install and repair set `OTEL_LOG_RAW_API_BODIES=1` in `~/.claude/settings.json`, and the choice is recorded as `claude_capture_web_fetch` in Beacon's `config.json`. Without it, they remove an inline setting (`1` or `true`), so a repair without the flag turns capture off. Neither touches `0` (off) or `file:<dir>` (bodies written to files). `beacon ci exec` does not set the variable; a CI job opts in by setting `OTEL_LOG_RAW_API_BODIES=1` in its own environment.
+
+Whatever turned the bodies on, the collector filters them in its `claude_api_body` processor. The processor runs before every destination, including the local runtime log, Falcon, and Splunk HEC:
+
+- **The WebFetch summarizer request** (`query_source=web_fetch_apply`) is kept, but only the text of its user messages: the fetched page and the summarizer prompt. Beacon removes `body` and `body_ref` and forwards that text as `beacon.web_fetch.input`, with secrets redacted and capped at 2048 characters. It never includes the summarizer's system prompt, tool definitions, or non-text blocks.
 - **Every other request and response body is dropped,** including the summarizer's response. The `claude_code.api_request` event already records each model call.
 
 In the runtime log, the page is a `tool.invoked` event for the `WebFetch` tool, with the text in `gen_ai.tool.call.result`. It is not recorded as `prompt.text`, because it is third-party content, not something the user typed. Threat rules see it as `e.gen_ai.tool.call.result_text`, the same as fetched pages from other runtimes, and `indirect-injection-in-tool-result` evaluates it.
 
 Limits:
 
-- `gen_ai.tool.call.result` is stored at 2048 characters, after secret redaction. The `content` marker's hash and byte count describe the whole text Beacon received.
+- Every destination gets the same copy: secrets redacted, then at most 2048 characters. The `content` marker describes that stored copy, and `content.redacted` and `content.truncated` say what was done to it.
 - Claude Code truncates long inline bodies and sets `body_truncated`. Beacon then keeps the page text up to the cut and marks the event `content.truncated`.
 - Beacon never reads body files, so `file:<dir>` mode does not record the page.
 - Beacon selects the summarizer request by its `query_source` value, as observed in Claude Code 2.1.291. If a later release renames that value, the page is no longer recorded.
