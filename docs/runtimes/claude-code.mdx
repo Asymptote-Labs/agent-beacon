@@ -113,6 +113,7 @@ Limits:
 - Claude Code lists MCP tools after its built-in tools, and the tools array comes after the conversation and system prompt. With capture on, install sets `CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH=262144` for inline bodies unless you set a limit yourself, and turning capture off removes it unless you changed it. A request cut short keeps only the tools that arrived whole. In a one-prompt session the MCP tools start about 72 KB in.
 - With the flag, the local OTLP receiver accepts gRPC messages up to 32 MiB, so a Claude Code export that carries several request bodies is not rejected along with the events batched with it.
 - Beacon never reads body files, so `file:<dir>` mode does not record descriptions.
+- The processor counts a tool as listed when it hands the record on. Exports run later, and their errors do not reach the processor, so a listing that a destination fails to write is not sent again for that session until the description changes or the collector restarts. Without the processor, the local log and Falcon count a listing only once they have written it.
 
 Managed-ingest privacy is a separate forwarding policy and does not switch off local collection.
 

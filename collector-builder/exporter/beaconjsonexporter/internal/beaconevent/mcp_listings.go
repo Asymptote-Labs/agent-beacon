@@ -25,17 +25,87 @@ type MCPListings struct {
 
 // Fresh reports whether a session has not yet listed this tool with this description, and
 // remembers that it now has.
+//
+// The processor uses it as it hands a record on. The batch processor after it exports later and
+// keeps export errors to itself, so there is no later point at which the processor could learn that
+// a listing was not delivered.
 func (l *MCPListings) Fresh(session, tool, description string) bool {
 	if l == nil {
 		return true
 	}
+	key, digest := listingKey(session, tool, description)
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	key := session + "\x00" + tool
-	digest := sha256.Sum256([]byte(description))
-	if previous, ok := l.seen[key]; ok && previous == digest {
+	if l.listedLocked(key, digest) {
 		return false
 	}
+	l.rememberLocked(key, digest)
+	return true
+}
+
+// Filter drops the mcp.tool_listed events a session already listed, and repeats of one listing
+// within events. Every other event passes through in order.
+//
+// It does not remember the listings it keeps. An exporter calls Remember for the ones it wrote or
+// sent, so a listing whose write or send failed is listed again on the session's next request rather
+// than taken for one already delivered.
+func (l *MCPListings) Filter(events []Event) []Event {
+	if l == nil {
+		return events
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	kept := make([]Event, 0, len(events))
+	inBatch := map[string][sha256.Size]byte{}
+	for _, event := range events {
+		if key, digest, ok := eventListingKey(event); ok {
+			if previous, repeat := inBatch[key]; (repeat && previous == digest) || l.listedLocked(key, digest) {
+				continue
+			}
+			inBatch[key] = digest
+		}
+		kept = append(kept, event)
+	}
+	return kept
+}
+
+// Remember records the mcp.tool_listed events among events as listed. Exporters call it once they
+// have written or sent them.
+func (l *MCPListings) Remember(events ...Event) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, event := range events {
+		if key, digest, ok := eventListingKey(event); ok {
+			l.rememberLocked(key, digest)
+		}
+	}
+}
+
+func listingKey(session, tool, description string) (string, [sha256.Size]byte) {
+	return session + "\x00" + tool, sha256.Sum256([]byte(description))
+}
+
+func eventListingKey(event Event) (string, [sha256.Size]byte, bool) {
+	if event.Event.Action != "mcp.tool_listed" || event.GenAI == nil || event.GenAI.Tool == nil {
+		return "", [sha256.Size]byte{}, false
+	}
+	session := ""
+	if event.Session != nil {
+		session = event.Session.ID
+	}
+	key, digest := listingKey(session, event.GenAI.Tool.Name, event.GenAI.Tool.Description)
+	return key, digest, true
+}
+
+func (l *MCPListings) listedLocked(key string, digest [sha256.Size]byte) bool {
+	previous, ok := l.seen[key]
+	return ok && previous == digest
+}
+
+func (l *MCPListings) rememberLocked(key string, digest [sha256.Size]byte) {
 	if l.seen == nil {
 		l.seen = map[string][sha256.Size]byte{}
 	}
@@ -47,27 +117,4 @@ func (l *MCPListings) Fresh(session, tool, description string) bool {
 		delete(l.seen, l.order[0])
 		l.order = l.order[1:]
 	}
-	return true
-}
-
-// Filter drops the mcp.tool_listed events a session already listed. Every other event passes through
-// in order.
-func (l *MCPListings) Filter(events []Event) []Event {
-	if l == nil {
-		return events
-	}
-	kept := make([]Event, 0, len(events))
-	for _, event := range events {
-		if event.Event.Action == "mcp.tool_listed" && event.GenAI != nil && event.GenAI.Tool != nil {
-			session := ""
-			if event.Session != nil {
-				session = event.Session.ID
-			}
-			if !l.Fresh(session, event.GenAI.Tool.Name, event.GenAI.Tool.Description) {
-				continue
-			}
-		}
-		kept = append(kept, event)
-	}
-	return kept
 }

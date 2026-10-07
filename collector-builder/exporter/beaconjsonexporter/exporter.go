@@ -82,9 +82,13 @@ func (e *beaconExporter) consumeLogs(ctx context.Context, logs plog.Logs) error 
 	var firstErr error
 	for _, event := range e.listings.Filter(e.eventConverter().EventsFromLogs(logs)) {
 		e.stampSequence(&event)
-		if err := e.writer.append(event); err != nil && firstErr == nil {
-			firstErr = err
+		if err := e.writer.append(event); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
+		e.listings.Remember(event)
 	}
 	return firstErr
 }

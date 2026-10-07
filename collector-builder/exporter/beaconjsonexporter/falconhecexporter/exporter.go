@@ -93,7 +93,12 @@ func httpClient(cfg *Config) (*http.Client, error) {
 }
 
 func (e *falconExporter) consumeLogs(ctx context.Context, logs plog.Logs) error {
-	return e.sendEvents(ctx, e.listings.Filter(e.converter.EventsFromLogs(logs)))
+	events := e.listings.Filter(e.converter.EventsFromLogs(logs))
+	if err := e.sendEvents(ctx, events); err != nil {
+		return err
+	}
+	e.listings.Remember(events...)
+	return nil
 }
 
 func (e *falconExporter) consumeTraces(ctx context.Context, traces ptrace.Traces) error {
