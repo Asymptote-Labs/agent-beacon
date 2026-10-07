@@ -51,8 +51,8 @@ interface OmpContext {
 // streaming token update.
 //
 // `context` is the one exception: its supported handler context exposes the effective system
-// prompt. Beacon extracts only the `<skills>` index and discards the conversation messages and
-// every other system-prompt section.
+// prompt. Beacon extracts only the `<skills>` index and the MCP tool routes, and discards the
+// conversation messages and every other system-prompt section.
 //
 // `tool_call` and `tool_result` are the pair carrying tool activity: the first names the tool and
 // its arguments before it runs, the second carries the outcome. `user_bash` and `user_python` are
@@ -96,42 +96,85 @@ const subscribedEvents = [
 // skill's description cut off its own remaining text and every skill listed after it.
 const skillsSection = /^# Skills & Rules\n(?:[^\n]*\n){0,3}?<skills>\n([\s\S]*?)\n<\/skills>$/m
 
-// How many sessions' last-sent listings are remembered, least recently sent evicted first.
-const maxRememberedSkillSessions = 64
+// Oh My Pi mounts each MCP tool as an `xd://` device and lists the devices in their own section of
+// the system prompt: this heading, a line of instructions, then one row per tool. A row ends in the
+// tool's description when its server gave one -- Oh My Pi's summary of it, which is the text the
+// model reads before deciding to call the tool. Anchored to the heading for the same reason as
+// skillsSection.
+const mcpToolRoutesSection = /^## MCP Tool Routes\n(?:(?!- )[^\n]*\n){0,3}((?:- [^\n]*(?:\n|$))+)/gm
+const mcpToolRouteRow = /^- "[^"]+" → `xd:\/\/(mcp__[^`]+)` — (.+)$/
+
+// How many routes one listing carries. A session with more MCP tools than this has its first ones
+// recorded rather than one payload per model call that grows with every server it connects.
+const maxMCPToolRoutes = 256
+
+interface MCPToolRoute {
+  name: string
+  description: string
+}
+
+// How many sessions' last-sent listings are remembered per kind, least recently sent evicted first.
+const maxRememberedSessions = 64
 
 // A listing the hook did not record is sent again on later model calls, up to this many attempts
 // in all. The cap keeps a hook that can never record it -- no endpoint log configured, a hook binary
 // older than this extension -- from costing a spawn before every model call.
-const maxSkillListingAttempts = 3
+const maxListingAttempts = 3
 
-interface RememberedSkillListing {
+interface RememberedListing {
   listing: string
   attempts: number
-  // Recorded, or given up on after maxSkillListingAttempts.
+  // Recorded, or given up on after maxListingAttempts.
   done: boolean
 }
 
-function skillListing(ctx: OmpContext | undefined): string {
+// The effective system prompt, read through Oh My Pi's supported accessor. An accessor that throws
+// or is missing costs the listings, not the model call.
+function systemPrompt(ctx: OmpContext | undefined): string[] {
   try {
     const prompt = ctx?.getSystemPrompt?.()
-    if (!Array.isArray(prompt)) return ""
-    for (const block of prompt) {
-      if (typeof block !== "string") continue
-      const match = skillsSection.exec(block)
-      const listing = match?.[1]?.trim()
-      if (listing) return listing
-    }
+    if (Array.isArray(prompt)) return prompt.filter((block): block is string => typeof block === "string")
   } catch (err) {
     debugLog("system prompt could not be read", err)
+  }
+  return []
+}
+
+function skillListing(prompt: string[]): string {
+  for (const block of prompt) {
+    const listing = skillsSection.exec(block)?.[1]?.trim()
+    if (listing) return listing
   }
   return ""
 }
 
-function rememberSkillListing(seen: Map<string, RememberedSkillListing>, key: string, listing: RememberedSkillListing) {
+// The MCP tool routes the model was shown, each as the device name the model calls and the
+// description its row carries. A route without a description is left out: it advertises nothing a
+// rule could read.
+//
+// A section under the same heading that yields no routes -- operator text in a context file that
+// borrows the heading for its own bullet list -- does not end the search, so it cannot hide the
+// runtime's own section after it.
+function mcpToolRoutes(prompt: string[]): MCPToolRoute[] {
+  for (const block of prompt) {
+    for (const [, rows = ""] of block.matchAll(mcpToolRoutesSection)) {
+      const routes: MCPToolRoute[] = []
+      for (const row of rows.split("\n")) {
+        const [, name, description] = mcpToolRouteRow.exec(row) ?? []
+        if (name && description?.trim()) routes.push({ name, description: description.trim() })
+        if (routes.length === maxMCPToolRoutes) break
+      }
+      if (routes.length > 0) return routes
+    }
+  }
+  return []
+}
+
+function rememberListing(seen: Map<string, RememberedListing>, key: string, listing: RememberedListing) {
   // Re-inserted rather than updated so the map's insertion order is send order, and eviction
   // drops the session that has gone longest without a change.
   seen.delete(key)
-  if (seen.size >= maxRememberedSkillSessions) {
+  if (seen.size >= maxRememberedSessions) {
     const oldest = seen.keys().next().value
     if (oldest !== undefined) seen.delete(oldest)
   }
@@ -159,7 +202,8 @@ const maxPendingToolCalls = 64
 // process, so remembering it until `tool_result` is exact: the join is the runtime's own call id,
 // not a timestamp or a guess.
 const pendingToolCalls = new Map<string, unknown>()
-const rememberedSkillListings = new Map<string, RememberedSkillListing>()
+const rememberedSkillListings = new Map<string, RememberedListing>()
+const rememberedMCPToolRoutes = new Map<string, RememberedListing>()
 
 function rememberToolCall(event: OmpEvent) {
   const id = typeof event.toolCallId === "string" ? event.toolCallId : ""
@@ -197,16 +241,23 @@ function decidedToolInput(event: OmpEvent): unknown {
 // hands to another carry `attribution: "agent"`; neither is something an operator asked. Image
 // parts are left out: the prompt row records what was asked, not the attachment bytes.
 function userMessageText(message: unknown): string {
-  if (!message || typeof message !== "object") return ""
-  const { role, synthetic, attribution, content } = message as Record<string, unknown>
+  if (!isRecord(message)) return ""
+  const { role, synthetic, attribution, content } = message
   if (role !== "user" || synthetic === true || attribution === "agent") return ""
   if (typeof content === "string") return content
   if (!Array.isArray(content)) return ""
   const texts: string[] = []
-  for (const part of content as Array<{ type?: unknown; text?: unknown } | null>) {
-    if (part?.type === "text" && typeof part.text === "string") texts.push(part.text)
+  for (const part of content) {
+    if (isRecord(part) && part.type === "text" && typeof part.text === "string") texts.push(part.text)
   }
   return texts.join("\n")
+}
+
+// isRecord narrows a value from an Oh My Pi event to an object whose fields can be read, each as
+// unknown until checked. The events are the runtime's own objects, so their shape is checked field
+// by field where it is read rather than assumed.
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
 }
 
 function debugLog(message: string, extra?: unknown) {
@@ -234,27 +285,26 @@ function safeClone(value: unknown, depth = 0, seen = new WeakSet<object>()): unk
   const kind = typeof value
   if (kind === "function" || kind === "symbol" || kind === "undefined") return undefined
   if (kind === "bigint") return String(value)
-  if (kind !== "object") return value
+  if (typeof value !== "object") return value
   if (depth >= maxDepth) return undefined
 
-  const object = value as object
-  if (seen.has(object)) return undefined
+  if (seen.has(value)) return undefined
   if (value instanceof Error) return { name: value.name, message: value.message }
   if (value instanceof Date) return value.toISOString()
 
-  seen.add(object)
+  seen.add(value)
   try {
     if (Array.isArray(value)) {
       return value.map((item) => safeClone(item, depth + 1, seen))
     }
     const out: Record<string, unknown> = {}
-    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    for (const [key, nested] of Object.entries(value)) {
       const cloned = safeClone(nested, depth + 1, seen)
       if (cloned !== undefined) out[key] = cloned
     }
     return out
   } finally {
-    seen.delete(object)
+    seen.delete(value)
   }
 }
 
@@ -283,9 +333,9 @@ async function sendToBeacon(payload: Record<string, unknown>): Promise<boolean> 
   // data rather than a live event with cycles and functions still attached.
   const safe = safeClone(payload)
 
-  const testSender = (globalThis as Record<symbol, unknown>)[Symbol.for("beacon.omp.testSender")]
+  const testSender: unknown = Reflect.get(globalThis, Symbol.for("beacon.omp.testSender"))
   if (typeof testSender === "function") {
-    return (await (testSender as (value: unknown) => unknown)(safe)) !== false
+    return (await testSender(safe)) !== false
   }
 
   let body: string
@@ -362,6 +412,27 @@ async function sendToBeacon(payload: Record<string, unknown>): Promise<boolean> 
   }
 }
 
+// sendListing sends a listing read from the system prompt the first time a session shows it and
+// again whenever it changes. One the hook did not record is sent again on the next model call, so a
+// failed send does not lose it for the session. `listing` is what a session is compared on, and
+// `payload` is what leaves the extension.
+async function sendListing(
+  seen: Map<string, RememberedListing>,
+  key: string,
+  listing: string,
+  payload: Record<string, unknown>,
+) {
+  const remembered = seen.get(key)
+  const same = remembered?.listing === listing
+  if (!listing || (same && remembered?.done)) return
+  const attempts = same && remembered ? remembered.attempts + 1 : 1
+  const recorded = await sendToBeacon(payload)
+  if (!recorded && attempts >= maxListingAttempts) {
+    debugLog("listing was not recorded; not sending it again", { attempts })
+  }
+  rememberListing(seen, key, { listing, attempts, done: recorded || attempts >= maxListingAttempts })
+}
+
 // identity lifts the session and workspace fields Beacon needs to the top level of the envelope.
 //
 // Oh My Pi keeps them on the handler context rather than on the event, and behind accessor
@@ -431,25 +502,21 @@ export function createBeaconExtension() {
     try {
       const fields = identity(ctx)
       if (event.type === "context") {
-        // Only the listing leaves the extension, and only when it changed: `context` fires before
-        // every model call and carries the whole conversation. A listing the hook did not record
-        // is sent again on the next call, so one failed send does not lose it for the session.
-        const listing = skillListing(ctx)
+        // Only the listings leave the extension, and only when one changed: `context` fires before
+        // every model call and carries the whole conversation. The skill index and the MCP routes
+        // are sent and remembered apart, so a change to one does not resend the other.
+        //
         // A session without an id is remembered under "", so it is still sent once rather than
         // before every model call.
         const key = typeof fields.sessionId === "string" ? fields.sessionId : ""
-        const remembered = rememberedSkillListings.get(key)
-        const same = remembered?.listing === listing
-        if (!listing || (same && remembered?.done)) return
-        const attempts = same && remembered ? remembered.attempts + 1 : 1
-        const recorded = await sendToBeacon({ ...fields, type: "context", skillListing: listing })
-        if (!recorded && attempts >= maxSkillListingAttempts) {
-          debugLog("skill listing was not recorded; not sending it again", { attempts })
-        }
-        rememberSkillListing(rememberedSkillListings, key, {
-          listing,
-          attempts,
-          done: recorded || attempts >= maxSkillListingAttempts,
+        const prompt = systemPrompt(ctx)
+        const listing = skillListing(prompt)
+        await sendListing(rememberedSkillListings, key, listing, { ...fields, type: "context", skillListing: listing })
+        const routes = mcpToolRoutes(prompt)
+        await sendListing(rememberedMCPToolRoutes, key, routes.length > 0 ? JSON.stringify(routes) : "", {
+          ...fields,
+          type: "context",
+          mcpToolRoutes: routes,
         })
         return
       }
@@ -461,7 +528,7 @@ export function createBeaconExtension() {
 
       if (event.type === "input") {
         inputSessionId = sessionId
-      } else if (event.type === "message_end" && (event.message as { role?: unknown })?.role === "user") {
+      } else if (event.type === "message_end" && isRecord(event.message) && event.message.role === "user") {
         // Only the role and text leave the extension: a user message can also carry image bytes
         // and runtime bookkeeping the prompt row has no use for. One that is not a prompt is not
         // sent at all; the mapper records nothing for it.
@@ -483,6 +550,7 @@ export function createBeaconExtension() {
         pendingToolCalls.clear()
         inputSessionId = null
         rememberedSkillListings.delete(sessionId)
+        rememberedMCPToolRoutes.delete(sessionId)
       } else if (event.type === "tool_approval_requested" || event.type === "tool_approval_resolved") {
         // Attached under `input`, the same key `tool_call` uses, so the mapper reads one shape for
         // both and an approval resolves to the same command or file path its tool call did.

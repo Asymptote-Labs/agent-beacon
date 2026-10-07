@@ -132,7 +132,17 @@ func (w jsonlWriter) sanitize(event beaconEvent) beaconEvent {
 		event.MCP = sanitizeTyped(event.MCP, w.sanitizeMap)
 	}
 	if event.GenAI != nil {
+		description := ""
+		if event.GenAI.Tool != nil {
+			description = event.GenAI.Tool.Description
+		}
 		event.GenAI = sanitizeTyped(event.GenAI, w.sanitizeMap)
+		// A tool description is text the model reads, so it gets the prompt-text limit rather than
+		// the raw-attribute one: under 2 KB a padded description would hide its instructions past
+		// the point the poisoning rule sees.
+		if description != "" && event.GenAI.Tool != nil {
+			event.GenAI.Tool.Description = w.cleanString(description, asymptoteobserve.DefaultStringLimit)
+		}
 	}
 	if event.Raw != nil {
 		event.Raw = w.sanitizeMap(event.Raw)

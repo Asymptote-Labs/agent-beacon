@@ -11,6 +11,28 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## October 2026
 
+- **Model-visible MCP tool descriptions on Claude Code** · With `--claude-capture-model-context`, the collector also keeps the name and description of each MCP tool a Claude Code request advertises, and records one `mcp.tool_listed` per tool per session, again only when its description changes. The `claude_api_body` processor sends each destination that same once-per-session list as `beacon.mcp.tools`, in place of the body. Install also raises Claude Code's inline content limit to 256 KB unless you set one, because MCP tools come last in a request body, and the local OTLP receiver accepts gRPC messages up to 32 MiB. Independently, `gen_ai.tool.description` now keeps up to 4 KB on every event rather than 2 KB, so a padded description cannot hide its instructions from `mcp-poisoned-tool-description`.
+- **Model-visible MCP tool descriptions on Oh My Pi** · The Oh My Pi extension reads the MCP tool routes from the same system prompt as the skill index and records one `mcp.tool_listed` per described tool, with the description the model was shown in `gen_ai.tool.description`. Each session sends a listing once and again only when it changes. `mcp-poisoned-tool-description` (now version 2) matches these listings as well as `mcp.tool_invoked`, so a poisoned description is flagged when the model sees it rather than only once the tool runs. Metadata-only managed forwarding removes `gen_ai.tool.description` and keeps the tool name.
+- **Opt-in capture of Claude Code model context** · `beacon endpoint install
+  --claude-capture-model-context` (and the same flag on `repair`) turns on Claude
+  Code's API-body logs, so Beacon can record context Claude Code gives the model
+  that no other event reports. The first is the page WebFetch hands its summarizer
+  model, recorded as a `WebFetch` tool result, which `indirect-injection-in-tool-result`
+  evaluates. Without the flag, install and repair remove an inline
+  `OTEL_LOG_RAW_API_BODIES` (`1` or `true`) from `~/.claude/settings.json`; `0`
+  and `file:<dir>` are left alone. A CI job opts in by setting
+  `OTEL_LOG_RAW_API_BODIES=1` in its environment.
+- **API bodies are filtered before every destination** · A new collector
+  processor, `claude_api_body`, runs ahead of every exporter, Splunk HEC included.
+  It drops every Claude Code API body, and with the opt-in keeps only the WebFetch
+  page text, redacted and capped at 2048 characters. If you had enabled raw bodies
+  yourself, they no longer appear in `raw.attributes.body` or reach your SIEM.
+  Install stops with an error if the collector binary it would use is too old to
+  have the processor.
+- **`ci exec` keeps your telemetry timing** · A value you set for
+  `OTEL_METRIC_EXPORT_INTERVAL`, `OTEL_BLRP_SCHEDULE_DELAY` or
+  `OTEL_BSP_SCHEDULE_DELAY` now reaches Claude Code. Before, `ci exec` replaced it
+  with its own default.
 - **Model-visible skill listings** · Claude transcript sync and the Oh My Pi extension capture only the skill index the model was shown, as a `session.context` event rather than an operator prompt. `gen_ai.system_instructions` holds one OpenTelemetry GenAI `text` part per skill, so each skill's description is limited on its own and none is cut off by the ones before it. A new `system_context` block says the event is a skill index and names each skill with the `skill_name_hash` the configuration inventory uses; it is metadata, so metadata-only forwarding keeps it while removing the text. Invoked skill bodies and unrelated system instructions remain outside this signal.
 - **New rule field `e.gen_ai.system_instructions_text`** · Threat rules can match the text of `gen_ai.system_instructions`, whether Beacon recorded it or an OTLP producer reported it. Like `e.gen_ai.tool.call.result_text`, it is derived by the engine from text parts only, redacted, capped at 4 KB per part, and empty when content was not retained. `e.system_context.kind` and `e.system_context.skills` select a skill index without matching its text.
 - **Pi-family tool results reach the rules** · Oh My Pi, Pi, Prime Agent and Senpi kept every tool result only under `raw`, which no rule can match. A file or skill the agent read, a web page fetched through Oh My Pi's `read`, and an MCP reply are now in `gen_ai.tool.call.result`, matched by `e.gen_ai.tool.call.result_text`, and `bash` output is in `command.output`. The scope is the one every runtime shares, which now also includes any result whose `tool.path` is an http or https URL. An Oh My Pi `skill://` read is recorded as a `file.read` of the `SKILL.md` it read, and media in an MCP reply is kept as its size and SHA-256.

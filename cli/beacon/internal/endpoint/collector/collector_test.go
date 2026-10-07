@@ -53,6 +53,10 @@ func TestConfigYAMLIncludesReleaseContractFields(t *testing.T) {
 		"level: none",
 		"receivers: [otlp]",
 		"exporters: [beaconjson]",
+		"  claude_api_body:\n",
+		// Ahead of the fan-out to exporters, so Claude Code API bodies are filtered for every
+		// destination, not only the local runtime log.
+		"processors: [memory_limiter, claude_api_body, batch]",
 	} {
 		if !strings.Contains(yaml, want) {
 			t.Fatalf("ConfigYAML missing %q:\n%s", want, yaml)
@@ -83,6 +87,47 @@ func TestConfigYAMLIncludesCodexSpansOptIn(t *testing.T) {
 	yaml := ConfigYAML(cfg)
 	if !strings.Contains(yaml, "include_codex_spans: true") {
 		t.Fatalf("ConfigYAML missing Codex spans opt-in:\n%s", yaml)
+	}
+}
+
+// The processor and each converting exporter decide on their own whether to keep anything from a
+// Claude Code API body, so the opt-in reaches all of them or none.
+func TestConfigYAMLWritesTheModelContextOptInToEveryComponentThatReadsBodies(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Destinations = &endpointconfig.Destinations{FalconHEC: &endpointconfig.FalconHEC{
+		Endpoint: "https://cloud.us.humio.com/api/v1/ingest/hec",
+		Token:    "ingest-token",
+	}}
+	if yaml := ConfigYAML(cfg); strings.Contains(yaml, "capture_model_context") {
+		t.Fatalf("ConfigYAML opted in without the flag:\n%s", yaml)
+	}
+	cfg.ClaudeCaptureModelContext = true
+	yaml := ConfigYAML(cfg)
+	for _, want := range []string{
+		"  claude_api_body:\n    capture_model_context: true\n",
+		"    redact_secrets: true\n    capture_model_context: true\n",
+		"  falcon_hec:\n",
+	} {
+		if !strings.Contains(yaml, want) {
+			t.Fatalf("ConfigYAML missing %q:\n%s", want, yaml)
+		}
+	}
+	if got := strings.Count(yaml, "capture_model_context: true"); got != 3 {
+		t.Fatalf("capture_model_context appears %d times, want processor, beaconjson and falcon_hec:\n%s", got, yaml)
+	}
+}
+
+// Only with --claude-capture-model-context, which turns on Claude Code's raw API bodies, does a gRPC
+// export grow past the receiver's 4 MiB default, so only then is the limit raised.
+func TestConfigYAMLRaisesTheGRPCLimitOnlyForClaudeModelContext(t *testing.T) {
+	cfg := testConfig(t)
+	if yaml := ConfigYAML(cfg); strings.Contains(yaml, "max_recv_msg_size_mib") {
+		t.Fatalf("ConfigYAML raised the gRPC limit by default:\n%s", yaml)
+	}
+	cfg.ClaudeCaptureModelContext = true
+	yaml := ConfigYAML(cfg)
+	if !strings.Contains(yaml, "      grpc:\n        endpoint: 127.0.0.1:14317\n        max_recv_msg_size_mib: 32\n      http:\n") {
+		t.Fatalf("ConfigYAML missing the gRPC receiver limit under grpc:\n%s", yaml)
 	}
 }
 

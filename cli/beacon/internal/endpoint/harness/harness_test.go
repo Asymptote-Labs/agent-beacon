@@ -2,6 +2,7 @@ package harness
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
@@ -77,6 +78,9 @@ func TestConfigureClaudeWritesTelemetryEnvAndBackup(t *testing.T) {
 			t.Fatalf("env[%s] = %q, want %q; env=%#v", key, got, want, env)
 		}
 	}
+	if got, set := env["OTEL_LOG_RAW_API_BODIES"]; set {
+		t.Fatalf("OTEL_LOG_RAW_API_BODIES = %q without the model-context capture opt-in", got)
+	}
 	backups, err := filepath.Glob(path + ".beacon.*.bak")
 	if err != nil {
 		t.Fatalf("glob backups: %v", err)
@@ -117,6 +121,133 @@ func TestConfigureClaudeEnablesPromptLogging(t *testing.T) {
 	}
 	if got := settings["env"]["OTEL_LOG_USER_PROMPTS"]; got != "1" {
 		t.Fatalf("OTEL_LOG_USER_PROMPTS = %q, want 1; env=%#v", got, settings["env"])
+	}
+}
+
+// Model-context capture is opt-in. The opt-in sets inline API bodies only where nothing is set, and
+// install without it removes an inline setting, so a repair without the flag turns capture off.
+// Neither overrides 0 or file:<dir>.
+func TestConfigureClaudeRawBodiesFollowTheWebFetchOptIn(t *testing.T) {
+	const unset = "<unset>"
+	tests := []struct {
+		capture      bool
+		before, want string
+	}{
+		{capture: true, before: unset, want: "1"},
+		{capture: true, before: "1", want: "1"},
+		{capture: true, before: "0", want: "0"},
+		{capture: true, before: "file:/private/claude-bodies", want: "file:/private/claude-bodies"},
+		{capture: false, before: unset, want: unset},
+		{capture: false, before: "1", want: unset},
+		{capture: false, before: "true", want: unset},
+		{capture: false, before: "0", want: "0"},
+		{capture: false, before: "file:/private/claude-bodies", want: "file:/private/claude-bodies"},
+	}
+	for _, tc := range tests {
+		t.Run(fmt.Sprintf("capture=%t/%s", tc.capture, tc.before), func(t *testing.T) {
+			home := t.TempDir()
+			testenv.SetHome(t, home)
+			path := filepath.Join(home, ".claude", "settings.json")
+			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+				t.Fatal(err)
+			}
+			env := map[string]string{}
+			if tc.before != unset {
+				env["OTEL_LOG_RAW_API_BODIES"] = tc.before
+			}
+			before, err := json.Marshal(map[string]interface{}{"env": env})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, before, 0600); err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				if _, err := ConfigureClaude(ConfigureOptions{Endpoint: "http://127.0.0.1:4317", CaptureModelContext: tc.capture}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var settings map[string]map[string]string
+			if err := json.Unmarshal(data, &settings); err != nil {
+				t.Fatal(err)
+			}
+			got, set := settings["env"]["OTEL_LOG_RAW_API_BODIES"]
+			if !set {
+				got = unset
+			}
+			if got != tc.want {
+				t.Fatalf("OTEL_LOG_RAW_API_BODIES after install and reinstall = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// MCP tools come last in a request body, so the opt-in raises Claude Code's inline content limit
+// for inline bodies, never over a limit the user set, and turning it off removes the limit only
+// while it is still Beacon's value.
+func TestConfigureClaudeContentLimitFollowsTheModelContextOptIn(t *testing.T) {
+	const unset = "<unset>"
+	tests := []struct {
+		steps               []bool
+		bodies, limit, want string
+	}{
+		{steps: []bool{true}, bodies: unset, limit: unset, want: "262144"},
+		{steps: []bool{true}, bodies: unset, limit: "81920", want: "81920"},
+		{steps: []bool{true}, bodies: "0", limit: unset, want: unset},
+		{steps: []bool{true}, bodies: "file:/private/claude-bodies", limit: unset, want: unset},
+		{steps: []bool{true}, bodies: "1", limit: unset, want: "262144"},
+		{steps: []bool{true, false}, bodies: unset, limit: unset, want: unset},
+		{steps: []bool{true, false}, bodies: "1", limit: unset, want: unset},
+		{steps: []bool{false}, bodies: "1", limit: "262144", want: unset},
+		{steps: []bool{false}, bodies: unset, limit: "81920", want: "81920"},
+		{steps: []bool{true, false}, bodies: unset, limit: "81920", want: "81920"},
+	}
+	for _, tc := range tests {
+		t.Run(fmt.Sprintf("%v/bodies=%s/limit=%s", tc.steps, tc.bodies, tc.limit), func(t *testing.T) {
+			home := t.TempDir()
+			testenv.SetHome(t, home)
+			path := filepath.Join(home, ".claude", "settings.json")
+			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+				t.Fatal(err)
+			}
+			env := map[string]string{}
+			for key, value := range map[string]string{"OTEL_LOG_RAW_API_BODIES": tc.bodies, "CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH": tc.limit} {
+				if value != unset {
+					env[key] = value
+				}
+			}
+			before, err := json.Marshal(map[string]interface{}{"env": env})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, before, 0600); err != nil {
+				t.Fatal(err)
+			}
+			for _, capture := range tc.steps {
+				if _, err := ConfigureClaude(ConfigureOptions{Endpoint: "http://127.0.0.1:4317", CaptureModelContext: capture}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var settings map[string]map[string]string
+			if err := json.Unmarshal(data, &settings); err != nil {
+				t.Fatal(err)
+			}
+			got, set := settings["env"]["CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH"]
+			if !set {
+				got = unset
+			}
+			if got != tc.want {
+				t.Fatalf("CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

@@ -97,6 +97,22 @@ func TestEndpointRepairHookOnlyHarnessConfiguresNoOTLPRuntime(t *testing.T) {
 	assertNoOTLPHarnesses(t, "repair --harness omp", opts.Harnesses)
 }
 
+// Model-context capture has Claude Code export every API body, so it stays off unless the flag asks for
+// it, and repair takes it from its own flags like install, so a repair without it turns it off.
+func TestEndpointInstallAndRepairCaptureClaudeWebFetchOnlyWhenAsked(t *testing.T) {
+	for _, repair := range []bool{false, true} {
+		// The first recorded run restores every endpoint option when the test ends.
+		endpointOpts.claudeCaptureModelContext = false
+		if opts := runRecordedEndpointCommand(t, repair, "claude"); opts.ClaudeCaptureModelContext {
+			t.Fatalf("repair=%t: Model-context capture is on without --claude-capture-model-context", repair)
+		}
+		endpointOpts.claudeCaptureModelContext = true
+		if opts := runRecordedEndpointCommand(t, repair, "claude"); !opts.ClaudeCaptureModelContext {
+			t.Fatalf("repair=%t: --claude-capture-model-context did not reach the lifecycle", repair)
+		}
+	}
+}
+
 // `--harness ""` is the documented collector-only install (splitHarnessCSV keeps it an empty
 // list on purpose), so it must configure no runtime at all.
 func TestEndpointInstallCollectorOnlyHarnessConfiguresNoOTLPRuntime(t *testing.T) {

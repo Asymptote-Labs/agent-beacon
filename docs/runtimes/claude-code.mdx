@@ -66,9 +66,56 @@ Beacon detects Claude Code through the `claude` executable and Claude settings p
 
 ## Install or configuration support
 
-`beacon endpoint install` configures Claude telemetry settings so Claude Code sends OTLP data to the local collector. It enables detailed tool logging so tool-result events include inputs such as Bash commands, file paths, URLs, search patterns, and MCP server/tool arguments. Claude bounds or truncates some input values; tool output content is not enabled by this setting.
+`beacon endpoint install` configures Claude telemetry settings so Claude Code sends OTLP data to the local collector. It enables detailed tool logging so tool-result events include inputs such as Bash commands, file paths, URLs, search patterns, and MCP server/tool arguments. Claude bounds or truncates some input values.
 
 `beacon endpoint hooks install --harness claude` adds Beacon-managed Claude Code hooks while preserving existing Claude settings and non-Beacon hooks. `beacon endpoint hooks uninstall --harness claude` removes only Beacon-managed Claude hook entries. Install, repair, and uninstall write every non-Beacon hook back exactly as they found it, including `http`, `prompt`, and `agent` hooks and any fields Beacon does not use itself, such as an http hook's `url` and `headers`.
+
+### Model context from API bodies
+
+Some of what Claude Code gives the model appears in no OTLP event except its API-body logs (`OTEL_LOG_RAW_API_BODIES`). Those logs also carry the system prompt, the whole conversation, tool definitions, and tool results on every model call, so Beacon leaves them off unless you opt in:
+
+```bash title="Record model context Claude Code reports only in its API bodies"
+beacon endpoint install --claude-capture-model-context
+```
+
+With the flag, install and repair set `OTEL_LOG_RAW_API_BODIES=1` in `~/.claude/settings.json`, and the choice is recorded as `claude_capture_model_context` in Beacon's `config.json`. Without it, they remove an inline setting (`1` or `true`), so a repair without the flag turns capture off. Neither touches `0` (off) or `file:<dir>` (bodies written to files). `beacon ci exec` does not set the variable; a CI job opts in by setting `OTEL_LOG_RAW_API_BODIES=1` (or `true`) in its own environment, and the job's collector then keeps the same context an opted-in endpoint does.
+
+Whatever turned the bodies on, the collector filters them in its `claude_api_body` processor. The processor runs before every destination, including the local runtime log, Falcon, and Splunk HEC. With capture on, it keeps only the context listed below. With capture off, it drops every body, so turning `OTEL_LOG_RAW_API_BODIES` on yourself sends Beacon nothing it keeps. The `claude_code.api_request` event already records each model call.
+
+The generated collector config names the `claude_api_body` processor, which collectors older than this release do not have. Install checks the collector binary it is about to use and stops with an error if the processor is missing, for example when an older `beacon-otelcol` is earlier on `PATH` or passed with `--collector`.
+
+#### Fetched web pages
+
+Claude Code's WebFetch tool does not return the page to the main model. It sends the page to a separate summarizer model call, and the main model only receives the summary. The only place Claude Code reports that page is the summarizer call's API request body.
+
+- **The WebFetch summarizer request** (`query_source=web_fetch_apply`) is kept, but only the text of its user messages: the fetched page and the summarizer prompt. Beacon removes `body` and `body_ref` and forwards that text as `beacon.web_fetch.input`, with secrets redacted and capped at 2048 characters. It never includes the summarizer's system prompt, tool definitions, or non-text blocks.
+- **The summarizer's response is dropped** with every other body.
+
+In the runtime log, the page is a `tool.invoked` event for the `WebFetch` tool, with the text in `gen_ai.tool.call.result`. It is not recorded as `prompt.text`, because it is third-party content, not something the user typed. Threat rules see it as `e.gen_ai.tool.call.result_text`, the same as fetched pages from other runtimes, and `indirect-injection-in-tool-result` evaluates it.
+
+Limits:
+
+- Every destination gets the same copy: secrets redacted, then at most 2048 characters. The `content` marker describes that stored copy, and `content.redacted` and `content.truncated` say what was done to it.
+- Claude Code truncates long inline bodies and sets `body_truncated`. Beacon then keeps the page text up to the cut and marks the event `content.truncated`.
+- Beacon never reads body files, so `file:<dir>` mode does not record the page.
+- Beacon selects the summarizer request by its `query_source` value, as observed in Claude Code 2.1.291. If a later release renames that value, the page is no longer recorded.
+
+#### MCP tool descriptions
+
+Every model request carries the tool definitions Claude Code shows the model, and its API request body is the only place Claude Code reports them. A description is server-authored text the model reads before it decides to call anything, which is where tool poisoning puts its instructions.
+
+- **From each request body,** Beacon keeps only the name and description of each MCP tool (`mcp__<server>__<tool>`). Built-in tools, input schemas, the conversation, and the system prompt are not kept. Each description is redacted and capped at 4096 characters.
+- **Each tool is listed once per session,** and again only when its description changes. Every request repeats the whole tools array, so the processor remembers what it has sent for each session and forwards only what is new, as `beacon.mcp.tools`, in place of the body. A collector restart forgets that, which costs one more listing per tool.
+- **In the runtime log,** each tool is an `mcp.tool_listed` event with `mcp.server`, `mcp.tool`, `gen_ai.tool.name`, and `gen_ai.tool.description`. It is an advertisement, not a call, so it is never counted as MCP activity. `mcp-poisoned-tool-description` matches it, so a poisoned description raises an alert when the model is shown it rather than only once the tool runs.
+
+Limits:
+
+- Claude Code lists MCP tools after its built-in tools, and the tools array comes after the conversation and system prompt. With capture on, install sets `CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH=262144` for inline bodies unless you set a limit yourself, and turning capture off removes it unless you changed it. A request cut short keeps only the tools that arrived whole. In a one-prompt session the MCP tools start about 72 KB in.
+- With the flag, the local OTLP receiver accepts gRPC messages up to 32 MiB, so a Claude Code export that carries several request bodies is not rejected along with the events batched with it.
+- Beacon never reads body files, so `file:<dir>` mode does not record descriptions.
+- The processor counts a tool as listed when it hands the record on. Exports run later, and their errors do not reach the processor, so a listing that a destination fails to write is not sent again for that session until the description changes or the collector restarts. Without the processor, the local log and Falcon count a listing only once they have written it.
+
+Managed-ingest privacy is a separate forwarding policy and does not switch off local collection.
 
 ## Telemetry coverage
 
@@ -82,6 +129,7 @@ Beacon detects Claude Code through the `claude` executable and Claude settings p
 | Historical session sync | Supported through `beacon endpoint claude sync`; marked as poll collection |
 | Claude Code cloud agent sessions | Supported through cloud sandbox hooks with GCS upload |
 | Model-visible skill listings | Supported through Claude transcript `attachment.type=skill_listing`, one part per skill in `gen_ai.system_instructions`, with the skills named in `system_context`; invoked skill file bodies remain excluded |
+| Model-visible MCP tool descriptions | Opt-in with `--claude-capture-model-context`. One `mcp.tool_listed` per MCP tool per session; see [MCP tool descriptions](#mcp-tool-descriptions) |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported through the system-mode package or MDM-managed settings |
 

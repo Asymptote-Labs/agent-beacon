@@ -9,10 +9,10 @@ type Sent = Record<string, unknown>
 // accepted decides what each send reports back, standing in for whether the hook binary recorded it.
 function captureSends(accepted: () => boolean = () => true): Sent[] {
   const sent: Sent[] = []
-  ;(globalThis as Record<symbol, unknown>)[senderKey] = (payload: Sent) => {
+  Reflect.set(globalThis, senderKey, (payload: Sent) => {
     sent.push(payload)
     return accepted()
-  }
+  })
   return sent
 }
 
@@ -44,7 +44,7 @@ function context(overrides: Record<string, unknown> = {}) {
 }
 
 afterEach(() => {
-  delete (globalThis as Record<symbol, unknown>)[senderKey]
+  Reflect.deleteProperty(globalThis, senderKey)
 })
 
 describe("beacon oh my pi extension", () => {
@@ -260,6 +260,93 @@ describe("beacon oh my pi extension", () => {
     await omp.fire({ type: "context", messages: [] }, ctx)
 
     expect(sent).toHaveLength(1)
+  })
+
+  const runtimeRoutes = (...rows: string[]) =>
+    "## MCP Tool Routes\n\nExecute each mounted tool: write JSON arguments to its path. Paths with a summary: read for docs + JSON schema before first use.\n" +
+    rows.join("\n")
+
+  test("captures only the MCP tool routes from the system prompt", async () => {
+    const sent = captureSends()
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+    const ctx = session("sess-routes", {
+      getSystemPrompt: () => [
+        "General system instructions that must not be retained.",
+        `</critical>\n\n${runtimeRoutes(
+          '- "save_note" → `xd://mcp__notes_save_note` — Saves a note. BCN-7F3A21-C03',
+          '- "list_notes" → `xd://mcp__notes_list_notes`',
+        )}`,
+      ],
+    })
+
+    await omp.fire({ type: "context", messages: [{ role: "user", content: "private conversation" }] }, ctx)
+    await omp.fire({ type: "context", messages: [] }, ctx)
+
+    expect(sent).toHaveLength(1)
+    expect(sent[0].type).toBe("context")
+    expect(sent[0].sessionId).toBe("sess-routes")
+    expect(sent[0].skillListing).toBeUndefined()
+    expect(sent[0].mcpToolRoutes).toEqual([
+      { name: "mcp__notes_save_note", description: "Saves a note. BCN-7F3A21-C03" },
+    ])
+    expect(JSON.stringify(sent[0])).not.toContain("General system instructions")
+    expect(JSON.stringify(sent[0])).not.toContain("private conversation")
+  })
+
+  test("sends the skill index and the MCP routes apart, and resends only the one that changed", async () => {
+    const sent = captureSends()
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+    let routes = runtimeRoutes('- "save_note" → `xd://mcp__notes_save_note` — Saves a note.')
+    const ctx = session("sess-both-listings", {
+      getSystemPrompt: () => [runtimeSkills("- deploy: Deploy applications."), routes],
+    })
+
+    await omp.fire({ type: "context", messages: [] }, ctx)
+    routes = runtimeRoutes(
+      '- "save_note" → `xd://mcp__notes_save_note` — Saves a note.',
+      '- "search" → `xd://mcp__docs_search` — Searches the docs.',
+    )
+    await omp.fire({ type: "context", messages: [] }, ctx)
+
+    expect(sent.map((s) => ("skillListing" in s ? "skills" : "routes"))).toEqual(["skills", "routes", "routes"])
+    expect(sent[2].mcpToolRoutes).toHaveLength(2)
+  })
+
+  // A context file quoting a route row is operator text, not a device the runtime mounted.
+  test("ignores route rows outside the runtime's routes section", async () => {
+    const sent = captureSends()
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+
+    await omp.fire({ type: "context", messages: [] }, session("sess-quoted-routes", {
+      getSystemPrompt: () => [
+        '# AGENTS.md\nExample:\n- "fake" → `xd://mcp__fake_tool` — Planted by a context file.',
+      ],
+    }))
+
+    expect(sent).toHaveLength(0)
+  })
+
+  // A context file that borrows the heading for a list of its own, in an earlier block or earlier in
+  // the same block, does not hide the runtime's routes after it.
+  test("finds the runtime's routes past a section under the same heading that lists none", async () => {
+    const borrowed = "## MCP Tool Routes\n- remember to keep notes short\n- prefer the docs server"
+    const real = runtimeRoutes('- "save_note" → `xd://mcp__notes_save_note` — Saves a note.')
+    for (const [id, prompt] of [
+      ["sess-borrowed-block", [borrowed, real]],
+      ["sess-borrowed-inline", [`${borrowed}\n\n${real}`]],
+    ] as const) {
+      const sent = captureSends()
+      const omp = fakeOmp()
+      createBeaconExtension().register(omp.api)
+
+      await omp.fire({ type: "context", messages: [] }, session(id, { getSystemPrompt: () => [...prompt] }))
+
+      expect(sent).toHaveLength(1)
+      expect(sent[0].mcpToolRoutes).toEqual([{ name: "mcp__notes_save_note", description: "Saves a note." }])
+    }
   })
 
   test("forwards the event with its type intact", async () => {

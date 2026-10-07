@@ -27,6 +27,13 @@ type HarnessConfig struct {
 
 func ClaudeEnv(base []string, endpoint string) []string {
 	env := envMap(base)
+	return flattenEnv(claudeEnv(env, env, endpoint))
+}
+
+// claudeEnv sets Claude Code's telemetry variables in env. caller is the environment the session
+// runs under, which is where a deliberately tuned export timing is read from; it is env itself
+// unless env holds only what is being added to that environment.
+func claudeEnv(env, caller map[string]string, endpoint string) map[string]string {
 	env["CLAUDE_CODE_ENABLE_TELEMETRY"] = "1"
 	env["OTEL_LOGS_EXPORTER"] = "otlp"
 	env["OTEL_METRICS_EXPORTER"] = "otlp"
@@ -40,7 +47,19 @@ func ClaudeEnv(base []string, endpoint string) []string {
 	delete(env, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
 	env["OTEL_LOG_TOOL_DETAILS"] = "1"
 	env["OTEL_LOG_USER_PROMPTS"] = "1"
+	for key, value := range claudeEnvDefaults {
+		if strings.TrimSpace(caller[key]) != "" {
+			value = caller[key]
+		}
+		env[key] = value
+	}
+	return env
+}
 
+// claudeEnvDefaults are set only when the caller has not set them. Someone who has deliberately
+// tuned these has a reason, and this is a wrapper around their session rather than an owner of
+// their telemetry configuration.
+var claudeEnvDefaults = map[string]string{
 	// Export on a timer that fits the session, instead of relying on the flush at shutdown.
 	//
 	// The OpenTelemetry default metric interval is 60 seconds, and `ci exec` wraps sessions that
@@ -52,22 +71,12 @@ func ClaudeEnv(base []string, endpoint string) []string {
 	//
 	// A shutdown flush is still the backstop and still has to work. This just stops it being the only
 	// thing between a captured session and an empty log.
-	//
-	// Set only when the caller has not. Someone who has deliberately tuned these has a reason, and
-	// this is a wrapper around their session rather than an owner of their telemetry configuration.
-	for key, value := range map[string]string{
-		"OTEL_METRIC_EXPORT_INTERVAL": "5000",
-		// The batch processors default to 1s and 5s respectively, which is already inside a short
-		// session -- pinned anyway so the whole pipeline's timing is stated in one place rather than
-		// inherited from three different SDK defaults.
-		"OTEL_BLRP_SCHEDULE_DELAY": "1000",
-		"OTEL_BSP_SCHEDULE_DELAY":  "1000",
-	} {
-		if strings.TrimSpace(env[key]) == "" {
-			env[key] = value
-		}
-	}
-	return flattenEnv(env)
+	"OTEL_METRIC_EXPORT_INTERVAL": "5000",
+	// The batch processors default to 1s and 5s respectively, which is already inside a short
+	// session -- pinned anyway so the whole pipeline's timing is stated in one place rather than
+	// inherited from three different SDK defaults.
+	"OTEL_BLRP_SCHEDULE_DELAY": "1000",
+	"OTEL_BSP_SCHEDULE_DELAY":  "1000",
 }
 
 func BuildHarnessConfig(base []string, harnessList, grpcEndpoint, baseDir string, run *schema.RunInfo) (HarnessConfig, error) {
@@ -84,7 +93,9 @@ func BuildHarnessConfig(base []string, harnessList, grpcEndpoint, baseDir string
 	for _, harness := range harnesses {
 		switch harness {
 		case HarnessClaude:
-			env = envMap(ClaudeEnv(flattenEnv(env), grpcEndpoint))
+			// RunChild lays env over the caller's own environment, so the defaults have to be
+			// decided against that environment, not against the handful of keys env holds.
+			env = claudeEnv(env, baseEnv, grpcEndpoint)
 		case HarnessCodex:
 			codexHome := filepath.Join(baseDir, "codex-home")
 			if err := writeCodexConfig(codexHome, grpcEndpoint); err != nil {
@@ -214,6 +225,16 @@ func percentEncodeResourceValue(value string) string {
 	// OTEL_RESOURCE_ATTRIBUTES uses W3C Baggage-style percent encoding. QueryEscape
 	// escapes delimiters such as comma and equals; spaces must remain percent-encoded.
 	return strings.ReplaceAll(url.QueryEscape(value), "+", "%20")
+}
+
+// inlineRawBodies reports whether an OTEL_LOG_RAW_API_BODIES value has Claude Code put API bodies
+// inline in its log events, rather than leave them off or write them to files Beacon never reads.
+func inlineRawBodies(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true":
+		return true
+	}
+	return false
 }
 
 func envMap(values []string) map[string]string {

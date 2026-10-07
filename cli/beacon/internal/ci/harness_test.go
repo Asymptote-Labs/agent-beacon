@@ -22,6 +22,30 @@ func TestClaudeEnvIncludesDetailedToolAndPromptLogging(t *testing.T) {
 	}
 }
 
+// ci exec builds the child's env through BuildHarnessConfig and lays it over the caller's own, so a
+// value the caller set survives only if BuildHarnessConfig hands it to ClaudeEnv.
+func TestBuildHarnessConfigKeepsTheCallersClaudeDefaults(t *testing.T) {
+	base := []string{"OTEL_METRIC_EXPORT_INTERVAL=30000", "OTEL_LOG_RAW_API_BODIES=1", "SECRET_TOKEN=not-copied"}
+	cfg, err := BuildHarnessConfig(base, "claude", "http://127.0.0.1:4317", t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Env["OTEL_METRIC_EXPORT_INTERVAL"]; got != "30000" {
+		t.Fatalf("OTEL_METRIC_EXPORT_INTERVAL = %q, want the caller's 30000", got)
+	}
+	if got := cfg.Env["OTEL_BSP_SCHEDULE_DELAY"]; got != "1000" {
+		t.Fatalf("OTEL_BSP_SCHEDULE_DELAY = %q, want the default for a key the caller left unset", got)
+	}
+	if _, copied := cfg.Env["SECRET_TOKEN"]; copied {
+		t.Fatal("BuildHarnessConfig copied the caller's whole environment")
+	}
+	// Model-context capture is the caller's opt-in: ci exec neither sets nor clears it, so whatever
+	// the caller's environment says reaches the child.
+	if got, set := cfg.Env["OTEL_LOG_RAW_API_BODIES"]; set {
+		t.Fatalf("OTEL_LOG_RAW_API_BODIES = %q, want it left to the caller's environment", got)
+	}
+}
+
 func TestBuildHarnessConfigWritesCodexHome(t *testing.T) {
 	baseDir := t.TempDir()
 	cfg, err := BuildHarnessConfig(nil, "codex", "http://127.0.0.1:4317", baseDir, nil)

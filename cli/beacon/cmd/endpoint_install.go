@@ -116,19 +116,20 @@ var (
 func endpointInstallOptions(selection endpointTargetSelection, serviceKind service.Kind) lifecycle.InstallOptions {
 	harnesses := append([]string{}, selection.OTLP...)
 	return lifecycle.InstallOptions{
-		UserMode:              endpointUserMode(),
-		LogPath:               endpointOpts.logPath,
-		Harnesses:             harnesses,
-		GRPCPort:              endpointOpts.grpcPort,
-		HTTPPort:              endpointOpts.httpPort,
-		HealthPort:            endpointOpts.healthPort,
-		CollectorPath:         endpointOpts.collectorPath,
-		StartService:          !endpointOpts.noStart,
-		IncludeRuntimeMetrics: endpointOpts.includeRuntimeMetrics,
-		IncludeCodexSpans:     endpointOpts.includeCodexSpans,
-		SplunkHEC:             splunkHECOptions(),
-		FalconHEC:             falconHECOptions(),
-		ServiceKind:           serviceKind,
+		UserMode:                  endpointUserMode(),
+		LogPath:                   endpointOpts.logPath,
+		Harnesses:                 harnesses,
+		GRPCPort:                  endpointOpts.grpcPort,
+		HTTPPort:                  endpointOpts.httpPort,
+		HealthPort:                endpointOpts.healthPort,
+		CollectorPath:             endpointOpts.collectorPath,
+		StartService:              !endpointOpts.noStart,
+		IncludeRuntimeMetrics:     endpointOpts.includeRuntimeMetrics,
+		IncludeCodexSpans:         endpointOpts.includeCodexSpans,
+		ClaudeCaptureModelContext: endpointOpts.claudeCaptureModelContext,
+		SplunkHEC:                 splunkHECOptions(),
+		FalconHEC:                 falconHECOptions(),
+		ServiceKind:               serviceKind,
 	}
 }
 
