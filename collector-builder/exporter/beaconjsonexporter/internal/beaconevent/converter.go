@@ -111,7 +111,9 @@ func (c Converter) EventsFromLogs(logs plog.Logs) []Event {
 				if ShouldDropLog(resourceAttrs, record) {
 					continue
 				}
-				events = append(events, c.EventFromLog(resourceAttrs, record))
+				if event, keep := c.eventFromLog(resourceAttrs, record); keep {
+					events = append(events, event)
+				}
 			}
 		}
 	}
@@ -158,8 +160,9 @@ func (c Converter) EventsFromMetrics(metrics pmetric.Metrics) []Event {
 
 func ShouldDropLog(resourceAttrs map[string]interface{}, record plog.LogRecord) bool {
 	attrs := MergeMaps(resourceAttrs, AttrsToMap(record.Attributes()))
-	if SanitizeClaudeAPIBody(attrs, record.Body().AsString()) {
-		return true
+	if name := ClaudeLogEventName(attrs, record.Body().AsString()); isClaudeAPIBody(name) {
+		// A summarizer request is decided once its body is parsed, in eventFromLog.
+		return !isClaudeWebFetchSummarizerRequest(name, FirstString(attrs, "query_source"))
 	}
 	harness := HarnessName(attrs, record.Body().AsString())
 	if isCodexHarness(harness) {
@@ -305,10 +308,16 @@ func shouldDropCopilotMetric(resourceAttrs map[string]interface{}, name string, 
 }
 
 func (c Converter) EventFromLog(resourceAttrs map[string]interface{}, record plog.LogRecord) Event {
+	event, _ := c.eventFromLog(resourceAttrs, record)
+	return event
+}
+
+// eventFromLog converts a log record, and reports whether the event is worth keeping: it is not
+// for a Claude Code API body event that leaves no text behind once its body is removed.
+func (c Converter) eventFromLog(resourceAttrs map[string]interface{}, record plog.LogRecord) (Event, bool) {
 	attrs := MergeMaps(resourceAttrs, AttrsToMap(record.Attributes()))
 	body := record.Body().AsString()
-	SanitizeClaudeAPIBody(attrs, body)
-	webFetchInput := takeClaudeWebFetchInput(attrs, body)
+	webFetchInput, isAPIBody := takeClaudeAPIBody(attrs, ClaudeLogEventName(attrs, body))
 	ts := Timestamp(record.Timestamp().AsTime())
 	// An action the record states outright is observed by definition; only the fallback has to
 	// account for how it got there.
@@ -339,7 +348,7 @@ func (c Converter) EventFromLog(resourceAttrs map[string]interface{}, record plo
 	// Last, so it sees the action and category the normalizers settled on rather
 	// than the ones InferAction guessed.
 	c.PromoteRetainedContent(&event, attrs, body)
-	return event
+	return event, !isAPIBody || webFetchInput.text != ""
 }
 
 func (c Converter) EventFromSpan(resourceAttrs map[string]interface{}, span ptrace.Span) Event {
@@ -652,10 +661,14 @@ func (c Converter) NormalizeClaudeLogEvent(event *Event, attrs map[string]interf
 }
 
 func ClaudeLogEventName(attrs map[string]interface{}, body string) string {
+	return claudeLogEventName(FirstString(attrs, "event.name"), body)
+}
+
+func claudeLogEventName(eventName, body string) string {
 	if normalized := strings.ToLower(strings.TrimSpace(body)); strings.HasPrefix(normalized, "claude_code.") {
 		return normalized
 	}
-	normalized := strings.ToLower(strings.TrimSpace(FirstString(attrs, "event.name")))
+	normalized := strings.ToLower(strings.TrimSpace(eventName))
 	if strings.HasPrefix(normalized, "claude_code.") {
 		return normalized
 	}
