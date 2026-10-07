@@ -27,6 +27,13 @@ type HarnessConfig struct {
 
 func ClaudeEnv(base []string, endpoint string) []string {
 	env := envMap(base)
+	return flattenEnv(claudeEnv(env, env, endpoint))
+}
+
+// claudeEnv sets Claude Code's telemetry variables in env. caller is the environment the session
+// runs under, which is where a deliberately tuned export timing is read from; it is env itself
+// unless env holds only what is being added to that environment.
+func claudeEnv(env, caller map[string]string, endpoint string) map[string]string {
 	env["CLAUDE_CODE_ENABLE_TELEMETRY"] = "1"
 	env["OTEL_LOGS_EXPORTER"] = "otlp"
 	env["OTEL_METRICS_EXPORTER"] = "otlp"
@@ -41,11 +48,12 @@ func ClaudeEnv(base []string, endpoint string) []string {
 	env["OTEL_LOG_TOOL_DETAILS"] = "1"
 	env["OTEL_LOG_USER_PROMPTS"] = "1"
 	for key, value := range claudeEnvDefaults {
-		if strings.TrimSpace(env[key]) == "" {
-			env[key] = value
+		if strings.TrimSpace(caller[key]) != "" {
+			value = caller[key]
 		}
+		env[key] = value
 	}
-	return flattenEnv(env)
+	return env
 }
 
 // claudeEnvDefaults are set only when the caller has not set them. Someone who has deliberately
@@ -85,14 +93,9 @@ func BuildHarnessConfig(base []string, harnessList, grpcEndpoint, baseDir string
 	for _, harness := range harnesses {
 		switch harness {
 		case HarnessClaude:
-			// ClaudeEnv keeps a caller's value for these, so it has to be given the caller's.
-			// RunChild lays this env over the caller's own, so leaving them out would overwrite it.
-			for key := range claudeEnvDefaults {
-				if value := baseEnv[key]; strings.TrimSpace(value) != "" {
-					env[key] = value
-				}
-			}
-			env = envMap(ClaudeEnv(flattenEnv(env), grpcEndpoint))
+			// RunChild lays env over the caller's own environment, so the defaults have to be
+			// decided against that environment, not against the handful of keys env holds.
+			env = claudeEnv(env, baseEnv, grpcEndpoint)
 		case HarnessCodex:
 			codexHome := filepath.Join(baseDir, "codex-home")
 			if err := writeCodexConfig(codexHome, grpcEndpoint); err != nil {
