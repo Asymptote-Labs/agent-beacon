@@ -144,6 +144,42 @@ func TestProcessorForwardsEachMCPToolOncePerSessionAndDescription(t *testing.T) 
 	}
 }
 
+// The stored description is the redacted, capped copy, so a listing's content marker says when
+// Beacon changed it -- by the converter alone or through the processor -- and not otherwise.
+func TestClaudeMCPListingMarksADescriptionBeaconRedactedOrCut(t *testing.T) {
+	secret := "sk-" + strings.Repeat("a", 32)
+	padded := "Saves a note. api_key=" + secret + " " + strings.Repeat("x", 2*asymptoteobserve.DefaultStringLimit)
+	logsOf := func(record plog.LogRecord) plog.Logs {
+		logs := plog.NewLogs()
+		record.CopyTo(logs.ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty().LogRecords().AppendEmpty())
+		return logs
+	}
+	listed := func(t *testing.T, description string, viaProcessor bool) Event {
+		t.Helper()
+		record := claudeBodyRecord("api_request_body", "sdk", mainRequestBody(description))
+		if viaProcessor && SanitizeClaudeAPIBodyRecord(record, true, &MCPListings{}) {
+			t.Fatal("the processor dropped the request")
+		}
+		events := listingsOf(NewConverter(captureModelContext).EventsFromLogs(logsOf(record)))
+		if len(events) != 1 || events[0].Content == nil {
+			t.Fatalf("listings = %v, want one with a content marker", actionsOf(events))
+		}
+		return events[0]
+	}
+	for _, viaProcessor := range []bool{false, true} {
+		event := listed(t, padded, viaProcessor)
+		if description := event.GenAI.Tool.Description; strings.Contains(description, secret) || len(description) > asymptoteobserve.DefaultStringLimit {
+			t.Fatalf("processor=%t: stored description (%d bytes) kept the secret or the padding", viaProcessor, len(description))
+		}
+		if !event.Content.Truncated || !event.Content.Redacted {
+			t.Fatalf("processor=%t: content = %+v, want truncated and redacted", viaProcessor, event.Content)
+		}
+		if plain := listed(t, "Saves a note.", viaProcessor); plain.Content.Truncated || plain.Content.Redacted {
+			t.Fatalf("processor=%t: an untouched description is marked %+v", viaProcessor, plain.Content)
+		}
+	}
+}
+
 func actionsOf(events []Event) []string {
 	var actions []string
 	for _, event := range events {

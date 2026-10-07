@@ -18,6 +18,10 @@ var errInvalidClaudeToolKey = errors.New("invalid Claude MCP tool JSON key")
 type claudeMCPToolDescription struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	// Truncated and Redacted say what claudeMCPTools did to Description, which is the stored copy
+	// rather than what the server sent, so a listing's content marker can say so.
+	Truncated bool `json:"-"`
+	Redacted  bool `json:"-"`
 }
 
 // extractClaudeMCPToolDescriptions reads only MCP tool identity and description from a Claude Code
@@ -145,20 +149,28 @@ func skipJSONValue(decoder *json.Decoder) error {
 
 // ClaudeMCPToolsAttr holds the MCP tools a Claude Code request body advertised to the model once the
 // body itself is gone: a list of {name, description}, each description redacted and capped at
-// DefaultStringLimit, the limit gen_ai.tool.description is stored at. The claude_api_body processor
-// leaves only the tools new to their session in it, so each destination is sent a tool once.
+// DefaultStringLimit, the limit gen_ai.tool.description is stored at, with truncated and redacted
+// set on an entry whose description that changed. The claude_api_body processor leaves only the
+// tools new to their session in it, so each destination is sent a tool once.
 const ClaudeMCPToolsAttr = "beacon.mcp.tools"
 
 // claudeMCPTools reads the MCP tools a request body advertised, redacted and capped the way every
 // destination keeps them. A body with no MCP tool name in it is not walked: every model request
 // carries one, and most sessions connect no MCP server.
+//
+// Secrets are replaced before the cap, as for the WebFetch page, so a secret that straddles the cut
+// cannot survive as a prefix.
 func claudeMCPTools(body string) []claudeMCPToolDescription {
 	if !strings.Contains(body, `"mcp__`) {
 		return nil
 	}
 	tools := extractClaudeMCPToolDescriptions(body)
 	for i := range tools {
-		tools[i].Description = asymptoteobserve.CleanString(tools[i].Description, asymptoteobserve.DefaultStringLimit, true)
+		redacted := asymptoteobserve.RedactString(tools[i].Description)
+		kept := asymptoteobserve.TruncateString(redacted, asymptoteobserve.DefaultStringLimit)
+		tools[i].Redacted = redacted != tools[i].Description
+		tools[i].Truncated = kept != redacted
+		tools[i].Description = kept
 	}
 	return tools
 }
@@ -170,6 +182,8 @@ func claudeMCPToolsFromAttr(value interface{}) []claudeMCPToolDescription {
 	for _, entry := range entries {
 		fields, _ := entry.(map[string]interface{})
 		tool := claudeMCPToolDescription{Name: FirstString(fields, "name"), Description: FirstString(fields, "description")}
+		tool.Truncated, _ = BoolAttr(fields, "truncated")
+		tool.Redacted, _ = BoolAttr(fields, "redacted")
 		if tool.Name != "" && tool.Description != "" {
 			tools = append(tools, tool)
 		}
@@ -183,6 +197,12 @@ func putClaudeMCPTools(attrs pcommon.Map, tools []claudeMCPToolDescription) {
 		entry := list.AppendEmpty().SetEmptyMap()
 		entry.PutStr("name", tool.Name)
 		entry.PutStr("description", tool.Description)
+		if tool.Truncated {
+			entry.PutBool("truncated", true)
+		}
+		if tool.Redacted {
+			entry.PutBool("redacted", true)
+		}
 	}
 }
 
@@ -206,7 +226,11 @@ func (c Converter) claudeMCPToolListings(attrs map[string]interface{}, record pl
 			event.GenAI = &GenAIInfo{}
 		}
 		event.GenAI.Tool = &GenAIToolInfo{Name: tool.Name, Description: tool.Description}
+		// The description is already redacted and capped, so the marker describes the stored copy and
+		// the flags carry what was done to it.
 		event.Content = asymptoteobserve.RetainedContent(tool.Description, asymptoteobserve.DefaultStringLimit)
+		event.Content.Truncated = event.Content.Truncated || tool.Truncated
+		event.Content.Redacted = event.Content.Redacted || tool.Redacted
 		event.Raw = map[string]interface{}{
 			"otel_signal":     "logs",
 			"source":          ClaudeAPIRequestBody,
