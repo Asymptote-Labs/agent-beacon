@@ -1,8 +1,12 @@
 package asymptoteobserve
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -66,17 +70,24 @@ var contentBlockTypes = map[string]bool{
 	"text": true, "image": true, "audio": true, "document": true, "resource": true, "resource_link": true,
 }
 
-// skipContentBlockField reports whether a field of a content block, or of a resource block's
-// embedded resource, is metadata or encoded bytes rather than text the model reads.
+// contentBlock returns a list element as a content block, when it is one.
+func contentBlock(item interface{}) (map[string]interface{}, bool) {
+	block, ok := item.(map[string]interface{})
+	if !ok {
+		return nil, false
+	}
+	blockType, _ := block["type"].(string)
+	return block, contentBlockTypes[blockType]
+}
+
+// isEncodedBytes reports whether a field of a content block, or of a resource block's embedded
+// resource, holds encoded bytes rather than text the model reads: an image's or audio clip's
+// base64 "data", an Anthropic block's base64 "source", or an embedded resource's "blob".
 //
-// Encoded bytes are an image's or audio clip's base64 "data", an Anthropic block's base64
-// "source", and an embedded resource's "blob". They are skipped because they are not text, and
-// because a run of them would otherwise use up the result_text cap before a text block that
-// follows them. "sha256" is the digest a capture path records in their place.
-func skipContentBlockField(key string, value interface{}) bool {
+// It is the one definition both readers of content blocks share: ToolResultPlainText leaves these
+// fields out of the text, and SummarizeEncodedContent replaces them with a size and digest.
+func isEncodedBytes(key string, value interface{}) bool {
 	switch key {
-	case "type", "mimeType", "annotations", "_meta", "sha256":
-		return true
 	case "data", "blob":
 		_, encoded := value.(string)
 		return encoded
@@ -85,6 +96,74 @@ func skipContentBlockField(key string, value interface{}) bool {
 		return ok && source["type"] == "base64"
 	}
 	return false
+}
+
+// skipContentBlockField reports whether a field of a content block, or of a resource block's
+// embedded resource, is metadata or encoded bytes rather than text the model reads.
+//
+// Encoded bytes are skipped because they are not text, and because a run of them would otherwise
+// use up the result_text cap before a text block that follows them. "sha256" is the digest
+// SummarizeEncodedContent records in their place.
+func skipContentBlockField(key string, value interface{}) bool {
+	switch key {
+	case "type", "mimeType", "annotations", "_meta", "sha256":
+		return true
+	}
+	return isEncodedBytes(key, value)
+}
+
+// SummarizeEncodedContent returns a list of content blocks with the encoded bytes in each block
+// replaced by "bytes" (the decoded size) and "sha256" (of the decoded data), keeping every other
+// field and the block order. A value that is not valid base64 is not encoded bytes and is kept.
+// The input is not modified.
+//
+// A capture path stores this rather than the bytes because the writer cuts every string at
+// DefaultStringLimit, so a stored copy could never be decoded, and each copy costs that much of
+// the event's size budget: enough images and the writer drops the whole result, text included.
+// The size and digest still identify the media.
+func SummarizeEncodedContent(blocks []interface{}) []interface{} {
+	out := make([]interface{}, len(blocks))
+	for i, item := range blocks {
+		out[i] = item
+		if block, ok := contentBlock(item); ok {
+			out[i], _ = summarizeEncodedFields(block)
+		}
+	}
+	return out
+}
+
+// summarizeEncodedFields returns m with its encoded fields summarized, reporting whether any were.
+// An embedded resource and an Anthropic base64 source hold their bytes one level down, and are
+// summarized the same way. When nothing changes, m itself is returned.
+func summarizeEncodedFields(m map[string]interface{}) (map[string]interface{}, bool) {
+	out := maps.Clone(m)
+	changed := false
+	for key, value := range m {
+		if nested, ok := value.(map[string]interface{}); ok {
+			if key != "resource" && !isEncodedBytes(key, value) {
+				continue
+			}
+			if summary, ok := summarizeEncodedFields(nested); ok {
+				out[key], changed = summary, true
+			}
+			continue
+		}
+		if !isEncodedBytes(key, value) {
+			continue
+		}
+		decoded, err := base64.StdEncoding.DecodeString(value.(string))
+		if err != nil {
+			continue
+		}
+		sum := sha256.Sum256(decoded)
+		delete(out, key)
+		out["bytes"], out["sha256"] = len(decoded), hex.EncodeToString(sum[:])
+		changed = true
+	}
+	if !changed {
+		return m, false
+	}
+	return out, true
 }
 
 func collectToolResultStrings(v interface{}, out *[]string) {
@@ -97,11 +176,9 @@ func collectToolResultStrings(v interface{}, out *[]string) {
 		collectMapStrings(typed, nil, out)
 	case []interface{}:
 		for _, item := range typed {
-			if block, ok := item.(map[string]interface{}); ok {
-				if blockType, _ := block["type"].(string); contentBlockTypes[blockType] {
-					collectMapStrings(block, skipContentBlockField, out)
-					continue
-				}
+			if block, ok := contentBlock(item); ok {
+				collectMapStrings(block, skipContentBlockField, out)
+				continue
 			}
 			collectToolResultStrings(item, out)
 		}
@@ -124,12 +201,7 @@ func collectToolResultStrings(v interface{}, out *[]string) {
 // collectMapStrings walks m in sorted key order, leaving out the fields skip names. A content
 // block's embedded resource is walked with the same skip, since its blob is encoded bytes too.
 func collectMapStrings(m map[string]interface{}, skip func(string, interface{}) bool, out *[]string) {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
+	for _, key := range slices.Sorted(maps.Keys(m)) {
 		value := m[key]
 		if skip != nil && skip(key, value) {
 			continue

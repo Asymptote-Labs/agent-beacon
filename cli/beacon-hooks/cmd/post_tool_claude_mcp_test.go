@@ -90,38 +90,3 @@ func TestClaudeMCPPostToolWithNoContentRecordsNoResult(t *testing.T) {
 	}
 }
 
-// MCP's own media shapes, which a runtime that passes blocks through unchanged would send, are
-// summarized the same way; anything that is not base64 is left as it is, and the input is not
-// modified.
-func TestSummarizeEncodedContent(t *testing.T) {
-	digest := func(s string) string {
-		sum := sha256.Sum256([]byte(s))
-		return hex.EncodeToString(sum[:])
-	}
-	in := []interface{}{
-		map[string]interface{}{"type": "image", "mimeType": "image/png", "data": base64.StdEncoding.EncodeToString([]byte("img"))},
-		map[string]interface{}{"type": "audio", "mimeType": "audio/wav", "data": base64.StdEncoding.EncodeToString([]byte("audio"))},
-		map[string]interface{}{"type": "resource", "resource": map[string]interface{}{"uri": "file:///r.bin", "blob": base64.StdEncoding.EncodeToString([]byte("bin"))}},
-		map[string]interface{}{"type": "resource", "resource": map[string]interface{}{"uri": "file:///r.txt", "text": "notes"}},
-		map[string]interface{}{"type": "image", "data": "not base64!"},
-		map[string]interface{}{"type": "text", "text": "kept"},
-		"not a block",
-	}
-	before, err := json.Marshal(in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := summarizeEncodedContent(in)
-	want := []interface{}{
-		map[string]interface{}{"type": "image", "mimeType": "image/png", "bytes": 3, "sha256": digest("img")},
-		map[string]interface{}{"type": "audio", "mimeType": "audio/wav", "bytes": 5, "sha256": digest("audio")},
-		map[string]interface{}{"type": "resource", "resource": map[string]interface{}{"uri": "file:///r.bin", "bytes": 3, "sha256": digest("bin")}},
-		in[3], in[4], in[5], in[6],
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("summarized blocks:\ngot  %#v\nwant %#v", got, want)
-	}
-	if after, _ := json.Marshal(in); string(after) != string(before) {
-		t.Errorf("input was modified:\nbefore %s\nafter  %s", before, after)
-	}
-}

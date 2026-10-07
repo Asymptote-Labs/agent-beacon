@@ -1,6 +1,13 @@
 package asymptoteobserve
 
-import "testing"
+import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"reflect"
+	"testing"
+)
 
 func TestIngestedContentScope(t *testing.T) {
 	for action, want := range map[string]bool{
@@ -61,4 +68,49 @@ func TestToolResultPlainText(t *testing.T) {
 // blocks is a hook's tool_response for an MCP tool: the content blocks under "content".
 func blocks(items ...interface{}) map[string]interface{} {
 	return map[string]interface{}{"content": items}
+}
+
+// Every shape isEncodedBytes names is summarized: MCP data, an embedded resource's blob, and the
+// Anthropic base64 source Claude Code sends. Anything that is not base64 is kept, other fields and
+// the block order are kept, and the input is not modified.
+func TestSummarizeEncodedContent(t *testing.T) {
+	encode := func(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
+	digest := func(s string) string {
+		sum := sha256.Sum256([]byte(s))
+		return hex.EncodeToString(sum[:])
+	}
+	in := []interface{}{
+		map[string]interface{}{"type": "image", "mimeType": "image/png", "data": encode("img")},
+		map[string]interface{}{"type": "audio", "mimeType": "audio/wav", "data": encode("audio")},
+		map[string]interface{}{"type": "image", "source": map[string]interface{}{"type": "base64", "media_type": "image/png", "data": encode("png")}},
+		map[string]interface{}{"type": "resource", "resource": map[string]interface{}{"uri": "file:///r.bin", "blob": encode("bin")}},
+		map[string]interface{}{"type": "resource", "resource": map[string]interface{}{"uri": "file:///r.txt", "text": "notes"}},
+		map[string]interface{}{"type": "image", "source": map[string]interface{}{"type": "url", "url": "https://example.test/a.png"}},
+		map[string]interface{}{"type": "image", "data": "not base64!"},
+		map[string]interface{}{"type": "text", "text": "kept"},
+		map[string]interface{}{"data": encode("not a block")},
+		"not a map",
+	}
+	before, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := SummarizeEncodedContent(in)
+	want := []interface{}{
+		map[string]interface{}{"type": "image", "mimeType": "image/png", "bytes": 3, "sha256": digest("img")},
+		map[string]interface{}{"type": "audio", "mimeType": "audio/wav", "bytes": 5, "sha256": digest("audio")},
+		map[string]interface{}{"type": "image", "source": map[string]interface{}{"type": "base64", "media_type": "image/png", "bytes": 3, "sha256": digest("png")}},
+		map[string]interface{}{"type": "resource", "resource": map[string]interface{}{"uri": "file:///r.bin", "bytes": 3, "sha256": digest("bin")}},
+		in[4], in[5], in[6], in[7], in[8], in[9],
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("summarized blocks:\ngot  %#v\nwant %#v", got, want)
+	}
+	if after, _ := json.Marshal(in); string(after) != string(before) {
+		t.Errorf("input was modified:\nbefore %s\nafter  %s", before, after)
+	}
+	// What the summary leaves behind contributes nothing to the rule text but the text block.
+	if text := ToolResultPlainText(map[string]interface{}{"content": got[:4]}); text != "file:///r.bin" {
+		t.Errorf("summarized media contributes %q to the rule text, want only the resource URI", text)
+	}
 }

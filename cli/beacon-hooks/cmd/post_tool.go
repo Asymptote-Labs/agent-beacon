@@ -10,6 +10,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/diff"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 var postToolCmd = &cobra.Command{
@@ -404,7 +405,7 @@ func resolveToolResponse(input map[string]interface{}) map[string]interface{} {
 		if len(content) == 0 {
 			return nil
 		}
-		return map[string]interface{}{"content": summarizeEncodedContent(content)}
+		return map[string]interface{}{"content": asymptoteobserve.SummarizeEncodedContent(content)}
 	}
 	// If tool_response is a plain string, wrap it for downstream compatibility
 	if respStr, ok := input["tool_response"].(string); ok && respStr != "" {
