@@ -15,9 +15,19 @@ func TestClaudeEnvIncludesDetailedToolAndPromptLogging(t *testing.T) {
 		"OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta",
 		"OTEL_LOG_TOOL_DETAILS=1",
 		"OTEL_LOG_USER_PROMPTS=1",
+		"OTEL_LOG_RAW_API_BODIES=1",
 	} {
 		if !strings.Contains(env, want) {
 			t.Fatalf("ClaudeEnv missing %q in:\n%s", want, env)
+		}
+	}
+}
+
+func TestClaudeEnvKeepsTheCallersRawBodyPolicy(t *testing.T) {
+	for _, policy := range []string{"0", "file:/tmp/claude-bodies"} {
+		env := envMap(ClaudeEnv([]string{"OTEL_LOG_RAW_API_BODIES=" + policy}, "http://127.0.0.1:4317"))
+		if got := env["OTEL_LOG_RAW_API_BODIES"]; got != policy {
+			t.Fatalf("OTEL_LOG_RAW_API_BODIES = %q, want the caller's %q", got, policy)
 		}
 	}
 }

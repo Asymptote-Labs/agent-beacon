@@ -40,6 +40,12 @@ func ClaudeEnv(base []string, endpoint string) []string {
 	delete(env, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
 	env["OTEL_LOG_TOOL_DETAILS"] = "1"
 	env["OTEL_LOG_USER_PROMPTS"] = "1"
+	// The same WebFetch page capture an endpoint install enables; ci exec runs the same
+	// collector config, so its claude_api_body processor drops every other body. A value the
+	// caller set (0, or file:<dir>) is theirs.
+	if _, configured := env["OTEL_LOG_RAW_API_BODIES"]; !configured {
+		env["OTEL_LOG_RAW_API_BODIES"] = "1"
+	}
 
 	// Export on a timer that fits the session, instead of relying on the flush at shutdown.
 	//

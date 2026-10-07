@@ -92,7 +92,9 @@ When Splunk HEC is configured, Beacon writes a collector pipeline with both expo
 exporters: [beaconjson, splunk_hec]
 ```
 
-The `beaconjson` exporter preserves the local runtime log. The `splunk_hec` exporter sends OTLP logs, traces, and metrics to Splunk HEC.
+The `beaconjson` exporter preserves the local runtime log. The `splunk_hec` exporter sends OTLP logs, traces, and metrics to Splunk HEC, with their attributes as received.
+
+Before log records reach either exporter, the logs pipeline runs Beacon's `claude_api_body` processor (`processors: [memory_limiter, claude_api_body, batch]`). It drops Claude Code API request and response bodies, which can contain the system prompt, conversation history, and tool results. The one exception is the WebFetch summarizer request, which is forwarded with its body replaced by the fetched page text in `beacon.web_fetch.input`. See [Claude Code: fetched web pages](/runtimes/claude-code#fetched-web-pages).
 
 ## Validate forwarding
 

@@ -9,6 +9,9 @@ receivers:
 processors:
   - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.121.0
   - gomod: go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.121.0
+  - gomod: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter v0.0.0
+    import: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/claudeapibodyprocessor
+    path: ./exporter/beaconjsonexporter
 
 exporters:
   - gomod: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter v0.0.0

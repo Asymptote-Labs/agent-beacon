@@ -163,6 +163,7 @@ processors:
   batch:
     timeout: 5s
     send_batch_size: 128
+  claude_api_body:
 
 exporters:
   beaconjson:
@@ -184,7 +185,7 @@ service:
   pipelines:
     logs:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, claude_api_body, batch]
       exporters: %s
     traces:
       receivers: [otlp]
