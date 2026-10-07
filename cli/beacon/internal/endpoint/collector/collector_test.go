@@ -117,6 +117,20 @@ func TestConfigYAMLWritesTheModelContextOptInToEveryComponentThatReadsBodies(t *
 	}
 }
 
+// Only with --claude-capture-model-context, which turns on Claude Code's raw API bodies, does a gRPC
+// export grow past the receiver's 4 MiB default, so only then is the limit raised.
+func TestConfigYAMLRaisesTheGRPCLimitOnlyForClaudeModelContext(t *testing.T) {
+	cfg := testConfig(t)
+	if yaml := ConfigYAML(cfg); strings.Contains(yaml, "max_recv_msg_size_mib") {
+		t.Fatalf("ConfigYAML raised the gRPC limit by default:\n%s", yaml)
+	}
+	cfg.ClaudeCaptureModelContext = true
+	yaml := ConfigYAML(cfg)
+	if !strings.Contains(yaml, "      grpc:\n        endpoint: 127.0.0.1:14317\n        max_recv_msg_size_mib: 32\n      http:\n") {
+		t.Fatalf("ConfigYAML missing the gRPC receiver limit under grpc:\n%s", yaml)
+	}
+}
+
 func TestConfigYAMLIncludesSplunkHECWhenConfigured(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.Destinations = &endpointconfig.Destinations{SplunkHEC: &endpointconfig.SplunkHEC{

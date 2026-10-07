@@ -30,6 +30,7 @@ type falconExporter struct {
 	client    *http.Client
 	logger    *zap.Logger
 	converter beaconevent.Converter
+	listings  *beaconevent.MCPListings
 }
 
 type hecPayload struct {
@@ -64,6 +65,7 @@ func newExporter(raw component.Config, set exporter.Settings) (*falconExporter, 
 			IncludeCodexSpans:     cfg.IncludeCodexSpans,
 			CaptureModelContext:   cfg.CaptureModelContext,
 		}),
+		listings: &beaconevent.MCPListings{},
 	}, nil
 }
 
@@ -91,7 +93,7 @@ func httpClient(cfg *Config) (*http.Client, error) {
 }
 
 func (e *falconExporter) consumeLogs(ctx context.Context, logs plog.Logs) error {
-	return e.sendEvents(ctx, e.converter.EventsFromLogs(logs))
+	return e.sendEvents(ctx, e.listings.Filter(e.converter.EventsFromLogs(logs)))
 }
 
 func (e *falconExporter) consumeTraces(ctx context.Context, traces ptrace.Traces) error {

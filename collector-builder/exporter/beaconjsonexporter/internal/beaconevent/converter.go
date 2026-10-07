@@ -114,7 +114,9 @@ func (c Converter) EventsFromLogs(logs plog.Logs) []Event {
 				if ShouldDropLog(resourceAttrs, record) {
 					continue
 				}
-				if event, keep := c.eventFromLog(resourceAttrs, record); keep {
+				event, keep, listings := c.eventFromLog(resourceAttrs, record)
+				events = append(events, listings...)
+				if keep {
 					events = append(events, event)
 				}
 			}
@@ -164,8 +166,9 @@ func (c Converter) EventsFromMetrics(metrics pmetric.Metrics) []Event {
 func ShouldDropLog(resourceAttrs map[string]interface{}, record plog.LogRecord) bool {
 	attrs := MergeMaps(resourceAttrs, AttrsToMap(record.Attributes()))
 	if name := ClaudeLogEventName(attrs, record.Body().AsString()); isClaudeAPIBody(name) {
-		// A summarizer request is decided once its body is parsed, in eventFromLog.
-		return !isClaudeWebFetchSummarizerRequest(name, FirstString(attrs, "query_source"))
+		// A request body is decided once it is parsed, in eventFromLog: it is kept for a WebFetch
+		// page or for the MCP tools it advertised. Nothing is kept from a response body.
+		return name != ClaudeAPIRequestBody
 	}
 	harness := HarnessName(attrs, record.Body().AsString())
 	if isCodexHarness(harness) {
@@ -311,16 +314,18 @@ func shouldDropCopilotMetric(resourceAttrs map[string]interface{}, name string, 
 }
 
 func (c Converter) EventFromLog(resourceAttrs map[string]interface{}, record plog.LogRecord) Event {
-	event, _ := c.eventFromLog(resourceAttrs, record)
+	event, _, _ := c.eventFromLog(resourceAttrs, record)
 	return event
 }
 
 // eventFromLog converts a log record, and reports whether the event is worth keeping: it is not
-// for a Claude Code API body event that leaves no text behind once its body is removed.
-func (c Converter) eventFromLog(resourceAttrs map[string]interface{}, record plog.LogRecord) (Event, bool) {
+// for a Claude Code API body event that leaves no page text behind once its body is removed.
+// listings are the mcp.tool_listed events for the MCP tools a Claude Code request body advertised,
+// which are kept in its place.
+func (c Converter) eventFromLog(resourceAttrs map[string]interface{}, record plog.LogRecord) (event Event, keep bool, listings []Event) {
 	attrs := MergeMaps(resourceAttrs, AttrsToMap(record.Attributes()))
 	body := record.Body().AsString()
-	webFetchInput, isAPIBody := takeClaudeAPIBody(attrs, ClaudeLogEventName(attrs, body), c.opts.CaptureModelContext)
+	kept, isAPIBody := takeClaudeAPIBody(attrs, ClaudeLogEventName(attrs, body), c.opts.CaptureModelContext)
 	ts := Timestamp(record.Timestamp().AsTime())
 	// An action the record states outright is observed by definition; only the fallback has to
 	// account for how it got there.
@@ -330,7 +335,7 @@ func (c Converter) eventFromLog(resourceAttrs map[string]interface{}, record plo
 		action, fidelity = InferActionWithFidelity(attrs, body)
 	}
 	message := FirstNonEmpty(body, FirstString(attrs, "message", "log.message", "event.name"))
-	event := NewEvent(action, EventCategory(action, FirstString(attrs, "beacon.event.category", "event.category", "category")), Severity(record.SeverityText(), record.SeverityNumber().String()), HarnessName(attrs, message), ts)
+	event = NewEvent(action, EventCategory(action, FirstString(attrs, "beacon.event.category", "event.category", "category")), Severity(record.SeverityText(), record.SeverityNumber().String()), HarnessName(attrs, message), ts)
 	event.Event.Fidelity = fidelity
 	event.Message = message
 	c.PopulateCommon(&event, attrs)
@@ -347,11 +352,11 @@ func (c Converter) eventFromLog(resourceAttrs map[string]interface{}, record plo
 	c.NormalizeCodexLogEvent(&event, attrs)
 	c.NormalizeClaudeLogEvent(&event, attrs, body)
 	NormalizeGeminiLogEvent(&event, attrs)
-	normalizeClaudeWebFetchInput(&event, webFetchInput)
+	normalizeClaudeWebFetchInput(&event, kept.webFetch)
 	// Last, so it sees the action and category the normalizers settled on rather
 	// than the ones InferAction guessed.
 	c.PromoteRetainedContent(&event, attrs, body)
-	return event, !isAPIBody || webFetchInput.text != ""
+	return event, !isAPIBody || kept.webFetch.text != "", c.claudeMCPToolListings(attrs, record, kept.mcpTools)
 }
 
 func (c Converter) EventFromSpan(resourceAttrs map[string]interface{}, span ptrace.Span) Event {

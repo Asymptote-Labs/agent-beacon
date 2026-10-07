@@ -34,16 +34,17 @@ const (
 // event name, never the harness name, so the Agent SDK or anything else that emits these events
 // under another service name is held to it too.
 //
-// A body can carry the system prompt, the whole conversation, tool schemas and tool results. The
-// one Beacon keeps is the WebFetch summarizer request, the only model call that carries the
-// fetched page, and of that only its user-role text. Every other body event, request or response,
-// is dropped -- claude_code.api_request already records the call -- and so is a summarizer request
-// with no text left to keep.
+// A body can carry the system prompt, the whole conversation, tool schemas and tool results. Beacon
+// keeps two things from request bodies, the model context no other Claude Code event reports: the
+// user-role text of the WebFetch summarizer request, the only model call that carries the fetched
+// page, and the name and description of each MCP tool a request advertised. Every other body event,
+// request or response, is dropped -- claude_code.api_request already records the call -- and so is
+// a request with nothing left to keep.
 //
-// Even the summarizer text is kept only when the endpoint was installed with
-// --claude-capture-model-context, which the collector config carries as capture_model_context.
-// Claude Code sends bodies whenever OTEL_LOG_RAW_API_BODIES is on, and a user can turn that on
-// without asking Beacon to keep anything; without the opt-in, every body event is dropped.
+// Even those are kept only when the endpoint was installed with --claude-capture-model-context,
+// which the collector config carries as capture_model_context. Claude Code sends bodies whenever
+// OTEL_LOG_RAW_API_BODIES is on, and a user can turn that on without asking Beacon to keep
+// anything; without the opt-in, every body event is dropped.
 
 func isClaudeAPIBody(eventName string) bool {
 	return eventName == ClaudeAPIRequestBody || eventName == ClaudeAPIResponseBody
@@ -67,45 +68,61 @@ func retainedClaudeWebFetchInput(text string, partial bool) claudeWebFetchInput 
 	return claudeWebFetchInput{text: kept, truncated: partial || kept != redacted, redacted: redacted != text}
 }
 
-// takeClaudeAPIBody removes the body, body_ref and summarizer input of a Claude Code API body
-// event from attrs, and returns the text Beacon keeps: the summarizer request's user text when
-// capture is on, or nothing. isBody reports whether eventName is a body event at all. A record the
-// claude_api_body processor already rewrote carries the text in ClaudeWebFetchInputAttr, so its
-// body is not parsed again.
-func takeClaudeAPIBody(attrs map[string]interface{}, eventName string, capture bool) (input claudeWebFetchInput, isBody bool) {
+// claudeAPIBodyKept is what Beacon keeps from one API body event.
+type claudeAPIBodyKept struct {
+	webFetch claudeWebFetchInput
+	mcpTools []claudeMCPToolDescription
+}
+
+// takeClaudeAPIBody removes the body, body_ref and kept context of a Claude Code API body event from
+// attrs, and returns what Beacon keeps when capture is on: the summarizer request's user text, the
+// MCP tools a request advertised, or nothing. isBody reports whether eventName is a body event at
+// all. A record the claude_api_body processor already rewrote carries what it kept in
+// ClaudeWebFetchInputAttr and ClaudeMCPToolsAttr, so its body is not parsed again.
+func takeClaudeAPIBody(attrs map[string]interface{}, eventName string, capture bool) (kept claudeAPIBodyKept, isBody bool) {
 	if !isClaudeAPIBody(eventName) {
-		return claudeWebFetchInput{}, false
+		return claudeAPIBodyKept{}, false
 	}
 	body, _ := attrs["body"].(string)
+	input := claudeWebFetchInput{}
 	input.text, _ = attrs[ClaudeWebFetchInputAttr].(string)
 	input.truncated, _ = BoolAttr(attrs, ClaudeWebFetchInputTruncatedAttr)
 	input.redacted, _ = BoolAttr(attrs, ClaudeWebFetchInputRedactedAttr)
+	kept.mcpTools = claudeMCPToolsFromAttr(attrs[ClaudeMCPToolsAttr])
 	for _, key := range claudeAPIBodyAttrs {
 		delete(attrs, key)
 	}
-	if !capture || !isClaudeWebFetchSummarizerRequest(eventName, FirstString(attrs, "query_source")) {
-		return claudeWebFetchInput{}, true
+	if !capture || eventName != ClaudeAPIRequestBody {
+		return claudeAPIBodyKept{}, true
+	}
+	if kept.mcpTools == nil {
+		kept.mcpTools = claudeMCPTools(body)
+	}
+	if !isClaudeWebFetchSummarizerRequest(eventName, FirstString(attrs, "query_source")) {
+		return kept, true
 	}
 	if input.text != "" {
-		return input, true
+		kept.webFetch = input
+		return kept, true
 	}
 	bodyTruncated, _ := BoolAttr(attrs, "body_truncated")
-	text, partial, ok := claudeUserText(body, bodyTruncated)
-	if !ok {
-		return claudeWebFetchInput{}, true
+	if text, partial, ok := claudeUserText(body, bodyTruncated); ok {
+		kept.webFetch = retainedClaudeWebFetchInput(text, partial)
 	}
-	return retainedClaudeWebFetchInput(text, partial), true
+	return kept, true
 }
 
 // claudeAPIBodyAttrs are the attributes that carry body content, removed from every body event.
-var claudeAPIBodyAttrs = []string{"body", "body_ref", ClaudeWebFetchInputAttr, ClaudeWebFetchInputTruncatedAttr, ClaudeWebFetchInputRedactedAttr}
+var claudeAPIBodyAttrs = []string{"body", "body_ref", ClaudeWebFetchInputAttr, ClaudeWebFetchInputTruncatedAttr, ClaudeWebFetchInputRedactedAttr, ClaudeMCPToolsAttr}
 
 // SanitizeClaudeAPIBodyRecord applies the API body policy to a log record in place, and reports
 // whether the record is dropped. With capture on, a kept summarizer request leaves with its text in
-// ClaudeWebFetchInputAttr in place of body and body_ref; with it off, every body event is dropped.
-// The claude_api_body processor calls it so the policy holds before any exporter sees the record,
-// including ones such as splunk_hec that forward OTLP attributes as they arrive.
-func SanitizeClaudeAPIBodyRecord(record plog.LogRecord, capture bool) (drop bool) {
+// ClaudeWebFetchInputAttr, and a request that advertised MCP tools with the ones listings has not
+// seen for its session in ClaudeMCPToolsAttr, in place of body and body_ref; with it off, every
+// body event is dropped. The claude_api_body processor calls it so the policy holds before any
+// exporter sees the record, including ones such as splunk_hec that forward OTLP attributes as they
+// arrive.
+func SanitizeClaudeAPIBodyRecord(record plog.LogRecord, capture bool, listings *MCPListings) (drop bool) {
 	attrs := record.Attributes()
 	eventName := ""
 	if value, ok := attrs.Get("event.name"); ok {
@@ -115,19 +132,33 @@ func SanitizeClaudeAPIBodyRecord(record plog.LogRecord, capture bool) (drop bool
 	if !isClaudeAPIBody(name) {
 		return false
 	}
-	input, _ := takeClaudeAPIBody(AttrsToMap(attrs), name, capture)
-	if input.text == "" {
+	fields := AttrsToMap(attrs)
+	kept, _ := takeClaudeAPIBody(fields, name, capture)
+	session := FirstString(fields, "session.id")
+	var tools []claudeMCPToolDescription
+	for _, tool := range kept.mcpTools {
+		if listings.Fresh(session, tool.Name, tool.Description) {
+			tools = append(tools, tool)
+		}
+	}
+	input := kept.webFetch
+	if input.text == "" && len(tools) == 0 {
 		return true
 	}
 	for _, key := range claudeAPIBodyAttrs {
 		attrs.Remove(key)
 	}
-	attrs.PutStr(ClaudeWebFetchInputAttr, input.text)
+	if input.text != "" {
+		attrs.PutStr(ClaudeWebFetchInputAttr, input.text)
+	}
 	if input.truncated {
 		attrs.PutBool(ClaudeWebFetchInputTruncatedAttr, true)
 	}
 	if input.redacted {
 		attrs.PutBool(ClaudeWebFetchInputRedactedAttr, true)
+	}
+	if len(tools) > 0 {
+		putClaudeMCPTools(attrs, tools)
 	}
 	return false
 }

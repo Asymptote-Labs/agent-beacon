@@ -15,10 +15,10 @@ description: >
   so it fires on the injection, not on a downstream effect.
 
   Scoped experimental because it depends on the tool description reaching telemetry:
-  the Observe SDK trace path carries gen_ai.tool.description, and Oh My Pi records the
-  description from its system prompt's MCP routes, but the Claude Code and Codex OTel
-  log paths do not emit it today, so this rule is blind on those runtimes until the
-  tools/list description is captured. It complements
+  the Observe SDK trace path carries gen_ai.tool.description, Oh My Pi records the
+  description from its system prompt's MCP routes, and Claude Code records it when the
+  endpoint was installed with --claude-capture-model-context. Without that option,
+  and on the Codex OTel log path, this rule is blind. It complements
   secret-read-then-mcp-tool-handoff, which catches the same attack by its effect where
   the description is unavailable.
 severity: high

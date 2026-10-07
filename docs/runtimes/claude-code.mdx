@@ -100,6 +100,20 @@ Limits:
 - Beacon never reads body files, so `file:<dir>` mode does not record the page.
 - Beacon selects the summarizer request by its `query_source` value, as observed in Claude Code 2.1.291. If a later release renames that value, the page is no longer recorded.
 
+#### MCP tool descriptions
+
+Every model request carries the tool definitions Claude Code shows the model, and its API request body is the only place Claude Code reports them. A description is server-authored text the model reads before it decides to call anything, which is where tool poisoning puts its instructions.
+
+- **From each request body,** Beacon keeps only the name and description of each MCP tool (`mcp__<server>__<tool>`). Built-in tools, input schemas, the conversation, and the system prompt are not kept. Each description is redacted and capped at 4096 characters.
+- **Each tool is listed once per session,** and again only when its description changes. Every request repeats the whole tools array, so the processor remembers what it has sent for each session and forwards only what is new, as `beacon.mcp.tools`, in place of the body. A collector restart forgets that, which costs one more listing per tool.
+- **In the runtime log,** each tool is an `mcp.tool_listed` event with `mcp.server`, `mcp.tool`, `gen_ai.tool.name`, and `gen_ai.tool.description`. It is an advertisement, not a call, so it is never counted as MCP activity. `mcp-poisoned-tool-description` matches it, so a poisoned description raises an alert when the model is shown it rather than only once the tool runs.
+
+Limits:
+
+- Claude Code lists MCP tools after its built-in tools, and the tools array comes after the conversation and system prompt. With capture on, install sets `CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH=262144` for inline bodies unless you set a limit yourself, and turning capture off removes it unless you changed it. A request cut short keeps only the tools that arrived whole. In a one-prompt session the MCP tools start about 72 KB in.
+- With the flag, the local OTLP receiver accepts gRPC messages up to 32 MiB, so a Claude Code export that carries several request bodies is not rejected along with the events batched with it.
+- Beacon never reads body files, so `file:<dir>` mode does not record descriptions.
+
 Managed-ingest privacy is a separate forwarding policy and does not switch off local collection.
 
 ## Telemetry coverage
@@ -114,6 +128,7 @@ Managed-ingest privacy is a separate forwarding policy and does not switch off l
 | Historical session sync | Supported through `beacon endpoint claude sync`; marked as poll collection |
 | Claude Code cloud agent sessions | Supported through cloud sandbox hooks with GCS upload |
 | Model-visible skill listings | Supported through Claude transcript `attachment.type=skill_listing`, one part per skill in `gen_ai.system_instructions`, with the skills named in `system_context`; invoked skill file bodies remain excluded |
+| Model-visible MCP tool descriptions | Opt-in with `--claude-capture-model-context`. One `mcp.tool_listed` per MCP tool per session; see [MCP tool descriptions](#mcp-tool-descriptions) |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported through the system-mode package or MDM-managed settings |
 

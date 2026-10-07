@@ -38,13 +38,15 @@ func NewFactory() processor.Factory {
 
 func createLogs(ctx context.Context, set processor.Settings, cfg component.Config, next consumer.Logs) (processor.Logs, error) {
 	capture := cfg.(*Config).CaptureModelContext
-	return processorhelper.NewLogs(ctx, set, cfg, next, processLogs(capture),
+	return processorhelper.NewLogs(ctx, set, cfg, next, processLogs(capture, &beaconevent.MCPListings{}),
 		processorhelper.WithCapabilities(consumer.Capabilities{MutatesData: true}))
 }
 
-func processLogs(capture bool) processorhelper.ProcessLogsFunc {
+// processLogs applies the policy with listings remembering, for the life of the processor, which MCP
+// tools each session has already been sent.
+func processLogs(capture bool, listings *beaconevent.MCPListings) processorhelper.ProcessLogsFunc {
 	drop := func(record plog.LogRecord) bool {
-		return beaconevent.SanitizeClaudeAPIBodyRecord(record, capture)
+		return beaconevent.SanitizeClaudeAPIBodyRecord(record, capture, listings)
 	}
 	return func(_ context.Context, logs plog.Logs) (plog.Logs, error) {
 		logs.ResourceLogs().RemoveIf(func(resource plog.ResourceLogs) bool {

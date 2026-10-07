@@ -37,7 +37,7 @@ The `claude` harness writes both Claude Code's OpenTelemetry settings and its us
 | `--dry-run` | Print planned actions without changing endpoint files or services |
 | `--include-runtime-metrics` | Include generic process, runtime, and harness operational OTLP metrics in Beacon JSONL. By default, low-signal metrics such as process CPU, memory, Node.js event loop, V8 heap, GitHub Copilot CLI, and OpenClaw operational metrics are filtered out |
 | `--include-codex-spans` | Include every high-volume Codex OTLP span for troubleshooting. By default, Beacon keeps semantic logs and only the usage-bearing completed turn span |
-| `--claude-capture-model-context` | Record context Claude Code gives the model that no other event reports, such as the pages its WebFetch tool fetches. Turns on Claude Code's API-body logs; the collector keeps only that context and drops every body. Off by default; an install without the flag turns it off. See [Claude Code: model context from API bodies](/runtimes/claude-code#model-context-from-api-bodies) |
+| `--claude-capture-model-context` | Record context Claude Code gives the model that no other event reports: the pages its WebFetch tool fetches, and the MCP tool descriptions it shows the model as `mcp.tool_listed`. Turns on Claude Code's API-body logs; the collector keeps only that context and drops every body. Off by default; an install without the flag turns it off. See [Claude Code: model context from API bodies](/runtimes/claude-code#model-context-from-api-bodies) |
 | `--splunk-hec-endpoint <url>` | Splunk HEC endpoint URL |
 | `--splunk-hec-token <token>` | Splunk HEC token |
 | `--splunk-index <index>` | Optional Splunk index |

@@ -28,6 +28,9 @@ type beaconExporter struct {
 	// instant; the counter is what recovers their emission order without falling back
 	// to where the lines landed in the file.
 	sequence *asymptoteobserve.Sequencer
+	// listings keeps one mcp.tool_listed per tool per session out of the copy Claude Code sends
+	// with every model request.
+	listings *beaconevent.MCPListings
 }
 
 const (
@@ -65,6 +68,7 @@ func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, 
 		},
 		logger:   set.Logger,
 		sequence: &asymptoteobserve.Sequencer{},
+		listings: &beaconevent.MCPListings{},
 		converter: beaconevent.NewConverter(beaconevent.Options{
 			IncludeRuntimeMetrics: cfg.IncludeRuntimeMetrics,
 			IncludeCodexSpans:     cfg.IncludeCodexSpans,
@@ -76,7 +80,7 @@ func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, 
 func (e *beaconExporter) consumeLogs(ctx context.Context, logs plog.Logs) error {
 	_ = ctx
 	var firstErr error
-	for _, event := range e.eventConverter().EventsFromLogs(logs) {
+	for _, event := range e.listings.Filter(e.eventConverter().EventsFromLogs(logs)) {
 		e.stampSequence(&event)
 		if err := e.writer.append(event); err != nil && firstErr == nil {
 			firstErr = err

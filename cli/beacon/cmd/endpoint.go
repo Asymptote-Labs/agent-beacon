@@ -90,7 +90,7 @@ var endpointOpts struct {
 	inventoryTriggerHarness   string
 }
 
-const claudeCaptureModelContextUsage = "Record context Claude Code gives the model that no other event reports, such as the pages its WebFetch tool fetches. " +
+const claudeCaptureModelContextUsage = "Record context Claude Code gives the model that no other event reports: the pages its WebFetch tool fetches and the MCP tool descriptions it shows the model. " +
 	"Turns on Claude Code's API body logs; the collector keeps only that context and drops every body"
 
 var endpointCmd = &cobra.Command{

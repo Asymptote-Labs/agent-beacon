@@ -151,15 +151,21 @@ func ConfigYAML(cfg endpointconfig.Config) string {
 	// The processor and the exporters each decide from their own config whether to keep anything
 	// from a Claude Code API body, so the opt-in is written to all of them.
 	modelContextYAML := ""
+	// Claude Code batches its log records into one gRPC export, and with raw API bodies on each
+	// model request adds a request and a response body of up to the content limit install sets.
+	// The receiver's 4 MiB default rejects a whole export over it, and with it every prompt and
+	// tool event in the batch. The receiver applies the limit before claude_api_body runs.
+	grpcLimitYAML := ""
 	if cfg.ClaudeCaptureModelContext {
 		modelContextYAML = "    capture_model_context: true\n"
+		grpcLimitYAML = "        max_recv_msg_size_mib: 32\n"
 	}
 	return fmt.Sprintf(`receivers:
   otlp:
     protocols:
       grpc:
         endpoint: 127.0.0.1:%d
-      http:
+%s      http:
         endpoint: 127.0.0.1:%d
 
 processors:
@@ -201,7 +207,7 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, batch]
       exporters: %s
-`, cfg.Collector.GRPCPort, cfg.Collector.HTTPPort, modelContextYAML, cfg.LogPath, runtimeMetricsYAML+codexSpansYAML+modelContextYAML+splunkExporter+falconExporter, endpointconfig.HealthCheckPort(cfg.Collector), exporters, exporters, exporters)
+`, cfg.Collector.GRPCPort, grpcLimitYAML, cfg.Collector.HTTPPort, modelContextYAML, cfg.LogPath, runtimeMetricsYAML+codexSpansYAML+modelContextYAML+splunkExporter+falconExporter, endpointconfig.HealthCheckPort(cfg.Collector), exporters, exporters, exporters)
 }
 
 func splunkHECYAML(cfg endpointconfig.Config) string {

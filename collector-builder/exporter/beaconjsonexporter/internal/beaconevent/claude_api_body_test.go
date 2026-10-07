@@ -231,7 +231,7 @@ func TestClaudeWebFetchInputIsRedactedAndCappedOnEveryPath(t *testing.T) {
 	direct := NewConverter(captureModelContext).EventFromLog(nil, claudeBodyRecord("api_request_body", claudeWebFetchApplyQuerySource, string(body)))
 
 	record := claudeBodyRecord("api_request_body", claudeWebFetchApplyQuerySource, string(body))
-	if SanitizeClaudeAPIBodyRecord(record, true) {
+	if SanitizeClaudeAPIBodyRecord(record, true, nil) {
 		t.Fatal("the processor dropped the summarizer request")
 	}
 	for _, key := range []string{"body", "body_ref"} {
@@ -277,19 +277,19 @@ func TestClaudeAPIBodiesAreDroppedWithoutTheOptIn(t *testing.T) {
 	}
 	processed := claudeBodyRecord("api_request_body", claudeWebFetchApplyQuerySource, summarizerBody)
 	processed.Attributes().PutStr(ClaudeWebFetchInputAttr, "PAGE-CANARY")
-	if !SanitizeClaudeAPIBodyRecord(processed, false) {
+	if !SanitizeClaudeAPIBodyRecord(processed, false, nil) {
 		t.Fatal("without the opt-in the processor kept the summarizer request")
 	}
 }
 
 func TestSanitizeClaudeAPIBodyRecordDropsOtherBodiesAndLeavesOtherRecords(t *testing.T) {
-	if !SanitizeClaudeAPIBodyRecord(claudeBodyRecord("api_response_body", "sdk", `{}`), true) {
+	if !SanitizeClaudeAPIBodyRecord(claudeBodyRecord("api_response_body", "sdk", `{}`), true, nil) {
 		t.Fatal("the processor kept a main-loop body")
 	}
 	other := plog.NewLogRecord()
 	other.Body().SetStr("claude_code.user_prompt")
 	other.Attributes().PutStr("body", "not an API body")
-	if SanitizeClaudeAPIBodyRecord(other, false) {
+	if SanitizeClaudeAPIBodyRecord(other, false, nil) {
 		t.Fatal("the processor dropped a record that is not an API body")
 	}
 	if value, _ := other.Attributes().Get("body"); value.Str() != "not an API body" {
