@@ -128,7 +128,6 @@ func TestPostToolDoesNotRecordResultsForOtherTools(t *testing.T) {
 		name, tool, action string
 		input, response    map[string]interface{}
 	}{
-		{"Bash", "Bash", "command.executed", map[string]interface{}{"command": "cat NOTES.md"}, map[string]interface{}{"stdout": ingestedInjection}},
 		{"Write", "Write", "file.modified", map[string]interface{}{"file_path": "/repo/OUT.md", "content": ingestedInjection}, map[string]interface{}{"type": "create", "content": ingestedInjection}},
 		{"TodoWrite", "TodoWrite", "tool.invoked", map[string]interface{}{"todos": []interface{}{}}, map[string]interface{}{"newTodos": []interface{}{ingestedInjection}}},
 		{"Task", "Task", "tool.invoked", map[string]interface{}{"prompt": "x"}, map[string]interface{}{"content": ingestedInjection}},
@@ -238,6 +237,38 @@ func TestPostToolIngestedResultIsRedactedAndBounded(t *testing.T) {
 		}
 		if ev.Content == nil || ev.Content.Included {
 			t.Fatalf("content = %+v, want included=false after compaction", ev.Content)
+		}
+	})
+}
+
+func TestClaudeBashOutputIsRedactedAndBounded(t *testing.T) {
+	const secret = "sk-abcdefghijklmnopqrstuvwxyz0123"
+	t.Run("redacted", func(t *testing.T) {
+		raw, event := runPostToolOnce(t, "claude", postToolPayload("Bash",
+			map[string]interface{}{"command": "printf secret"},
+			map[string]interface{}{"stdout": "api_key=" + secret}))
+		data, _ := json.Marshal(raw)
+		if strings.Contains(string(data), secret) {
+			t.Fatalf("secret reached the log: %s", data)
+		}
+		if event.Command == nil || !strings.Contains(event.Command.Output, "[REDACTED]") {
+			t.Fatalf("command = %+v, want redacted output", event.Command)
+		}
+		if event.Content == nil || !event.Content.Redacted {
+			t.Fatalf("content = %+v, want redacted=true", event.Content)
+		}
+	})
+	t.Run("per-string limit", func(t *testing.T) {
+		long := strings.Repeat("a", asymptoteobserve.DefaultStringLimit*2)
+		_, event := runPostToolOnce(t, "claude", postToolPayload("Bash",
+			map[string]interface{}{"command": "printf long"},
+			map[string]interface{}{"stdout": long}))
+		if event.Command == nil || len(event.Command.Output) > asymptoteobserve.DefaultStringLimit ||
+			!strings.HasSuffix(event.Command.Output, "...[truncated]") {
+			t.Fatalf("command.output length=%d, want <= %d and marked truncated", len(event.Command.Output), asymptoteobserve.DefaultStringLimit)
+		}
+		if event.Content == nil || !event.Content.Truncated || event.Content.Bytes != len(long) {
+			t.Fatalf("content = %+v, want truncated with original byte count", event.Content)
 		}
 	})
 }

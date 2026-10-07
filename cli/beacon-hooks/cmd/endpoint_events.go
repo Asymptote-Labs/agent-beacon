@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -434,6 +435,69 @@ func applyIngestedToolResult(fields map[string]interface{}, action, toolName str
 			fields["content"] = marker
 		}
 	}
+}
+
+// claudeBashExitLine is the first line Claude Code writes into a failed Bash call's `error` when
+// the command ran and exited. Its absence means the shell itself could not be started.
+var claudeBashExitLine = regexp.MustCompile(`^Exit code (-?\d+)$`)
+
+// applyClaudeBashResult maps the result of Claude Code's Bash tool onto the command field, and
+// reports whether the payload is a failure of a command that ran and exited.
+//
+// The two outcomes arrive in different shapes. A success (`PostToolUse`) carries `tool_response`
+// with `stdout` and `stderr` as separate strings and no exit code. They are stored stdout first,
+// then stderr, so the order in which the command interleaved them is lost. A failure
+// (`PostToolUseFailure`) carries no tool response, only a top-level `error`: a first line
+// `Exit code N`, then the output with both streams interleaved as Claude saw it. That line is
+// the only exit code Claude reports, so it is parsed rather than synthesized. An `error` without
+// it is a shell that never started; that is a message, not command output, and is not recorded.
+//
+// Claude reports an interrupted command as a success with `interrupted` set, or as a failure with
+// `is_interrupt`, and its output is partial either way, so that is recorded beside it.
+func applyClaudeBashResult(fields, input map[string]interface{}, toolName string, toolResponse map[string]interface{}) bool {
+	if !strings.EqualFold(strings.TrimSpace(toolName), "bash") {
+		return false
+	}
+	var output string
+	var exitCode int
+	exited := false
+	if errText := getFirstStr(input, "error"); errText != "" {
+		firstLine, rest, _ := strings.Cut(errText, "\n")
+		match := claudeBashExitLine.FindStringSubmatch(strings.TrimSpace(firstLine))
+		if match == nil {
+			return false
+		}
+		code, err := strconv.Atoi(match[1])
+		if err != nil {
+			return false
+		}
+		output, exitCode, exited = rest, code, true
+	} else if toolResponse != nil {
+		output = getFirstStr(toolResponse, "stdout")
+		if stderr := getFirstStr(toolResponse, "stderr"); stderr != "" {
+			if output != "" && !strings.HasSuffix(output, "\n") {
+				output += "\n"
+			}
+			output += stderr
+		}
+	}
+	command := mutableChild(fields["command"])
+	if exited {
+		command["exit_code"] = exitCode
+	}
+	if output != "" {
+		command["output"] = output
+		if _, exists := fields["content"]; !exists {
+			fields["content"] = retainedContentFields(output)
+		}
+	}
+	if len(command) > 0 {
+		fields["command"] = command
+	}
+	if interrupted, _ := toolResponse["interrupted"].(bool); interrupted || input["is_interrupt"] == true {
+		fields["raw"] = mergeNested(fields["raw"], map[string]interface{}{"claude_interrupted": true})
+	}
+	return exited
 }
 
 // toolCallIDFromEnvelope reads the runtime's own identifier for one tool

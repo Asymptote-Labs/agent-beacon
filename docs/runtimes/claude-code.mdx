@@ -76,7 +76,7 @@ Beacon detects Claude Code through the `claude` executable and Claude settings p
 |------|---------|
 | Prompt telemetry | Supported when emitted through Claude Code OTLP or hooks |
 | Turn identity | Supported. Claude Code's `prompt.id` is kept as `prompt.id` on OTLP events; hook events after the prompt read the same id from the session transcript, and `beacon endpoint claude sync` reads it from `promptId`. The hook-recorded prompt itself takes its id from the OTLP `user_prompt` event, because the hook runs before Claude Code records the prompt |
-| Command, tool, and file telemetry | Supported through Claude Code OTLP with detailed tool inputs enabled |
+| Command, tool, and file telemetry | Supported through Claude Code OTLP with detailed tool inputs enabled. Command output requires hooks |
 | Token usage and cost | Supported through OTLP token and cost metrics, with per-model and per-session attribution |
 | Hook lifecycle and tool telemetry | Optional through `beacon endpoint hooks install --harness claude` |
 | Historical session sync | Supported through `beacon endpoint claude sync`; marked as poll collection |
@@ -113,9 +113,13 @@ attributes remain under `raw.attributes`, subject to the configured redaction
 and event-size controls. Future full-body `claude_code.*` lifecycle records
 default to `session.activity` until Beacon assigns a more specific mapping.
 
-Optional hook events are an additional telemetry source. A hook pre-tool
-observation can appear as `tool.invoked`; the completed OTLP `tool_result` is
-the record that supplies the canonical command or file action.
+Optional hooks add detail that OTLP does not report. A pre-tool hook can appear
+as `tool.invoked`, and the Bash post-tool hook records the command's output in
+`command.output`. For a successful command, Claude reports stdout and stderr
+separately, so Beacon stores stdout first and stderr after it. When a command
+exits with a non-zero status, Beacon also records the exit code in
+`command.exit_code` and sets the event's severity to `high`. Output is redacted
+and size-limited like other retained content.
 
 Detailed tool inputs can contain sensitive command arguments, paths, URLs, search terms, and MCP request data. Beacon sends this telemetry only to the configured local collector during normal endpoint execution; apply the same access, retention, and redaction controls used for other retained prompt and tool data.
 
