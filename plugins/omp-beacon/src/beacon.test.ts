@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { createBeaconExtension } from "./beacon"
+import { createBeaconExtension, hookRecorded } from "./beacon"
 
 const senderKey = Symbol.for("beacon.omp.testSender")
 
 type Sent = Record<string, unknown>
 
-// accepted decides what each send reports back, standing in for whether the hook binary took it.
+// accepted decides what each send reports back, standing in for whether the hook binary recorded it.
 function captureSends(accepted: () => boolean = () => true): Sent[] {
   const sent: Sent[] = []
   ;(globalThis as Record<symbol, unknown>)[senderKey] = (payload: Sent) => {
@@ -201,6 +201,33 @@ describe("beacon oh my pi extension", () => {
     await omp.fire({ type: "context", messages: [] }, ctx)
     expect(sent).toHaveLength(3)
     expect(sent[2].skillListing).toBe(listing)
+  })
+
+  // A hook that can never record the listing -- no endpoint log, an older hook binary -- must not
+  // cost a spawn before every model call. A changed listing is a new listing and is tried again.
+  test("stops resending a listing the hook never records, and tries a changed one", async () => {
+    const sent = captureSends(() => false)
+    const omp = fakeOmp()
+    createBeaconExtension().register(omp.api)
+    let listing = "- deploy: Deploy applications."
+    const ctx = session("sess-never", { getSystemPrompt: () => [runtimeSkills(listing)] })
+
+    for (let i = 0; i < 6; i++) await omp.fire({ type: "context", messages: [] }, ctx)
+    expect(sent).toHaveLength(3)
+
+    listing = "- review: Review a diff."
+    await omp.fire({ type: "context", messages: [] }, ctx)
+    expect(sent).toHaveLength(4)
+    expect(sent[3].skillListing).toBe(listing)
+  })
+
+  // The hook exits 0 whether or not it wrote anything, so only its reply says the event landed.
+  test("reads only a reply reporting a recorded event as delivered", () => {
+    expect(hookRecorded('{"recorded":1}\n')).toBe(true)
+    expect(hookRecorded('{"recorded":2}')).toBe(true)
+    for (const reply of ['{"recorded":0}', "{}", "", "not json", '{"recorded":"1"}', "null", "1"]) {
+      expect(hookRecorded(reply)).toBe(false)
+    }
   })
 
   test("sends a listing once for a session without an id", async () => {

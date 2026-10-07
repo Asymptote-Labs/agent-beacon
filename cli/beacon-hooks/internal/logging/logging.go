@@ -514,6 +514,13 @@ func minimalEndpointEvent(event map[string]interface{}) map[string]interface{} {
 	return out
 }
 
+// EndpointLogConfigured reports whether this process has a runtime log to write to. Without one,
+// EndpointEvent records nothing and returns nil, so a caller reporting what it recorded checks this
+// rather than reading a nil error as a write.
+func EndpointLogConfigured() bool {
+	return endpointLogPath() != ""
+}
+
 func endpointLogPath() string {
 	if path := firstEnv("BEACON_ENDPOINT_LOG", "BEACON_CLOUD_LOG_PATH", "BEACON_LOG_PATH", "BEACON_RUNTIME_LOG"); path != "" {
 		return path

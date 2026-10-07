@@ -94,6 +94,18 @@ const skillsSection = /^# Skills & Rules\n(?:[^\n]*\n){0,3}?<skills>\s*([\s\S]*?
 // How many sessions' last-sent listings are remembered, least recently sent evicted first.
 const maxRememberedSkillSessions = 64
 
+// A listing the hook did not record is sent again on later model calls, up to this many attempts
+// in all. The cap keeps a hook that can never record it -- no endpoint log configured, a hook binary
+// older than this extension -- from costing a spawn before every model call.
+const maxSkillListingAttempts = 3
+
+interface RememberedSkillListing {
+  listing: string
+  attempts: number
+  // Recorded, or given up on after maxSkillListingAttempts.
+  done: boolean
+}
+
 function skillListing(ctx: OmpContext | undefined): string {
   try {
     const prompt = ctx?.getSystemPrompt?.()
@@ -110,7 +122,7 @@ function skillListing(ctx: OmpContext | undefined): string {
   return ""
 }
 
-function rememberSkillListing(seen: Map<string, string>, key: string, listing: string) {
+function rememberSkillListing(seen: Map<string, RememberedSkillListing>, key: string, listing: RememberedSkillListing) {
   // Re-inserted rather than updated so the map's insertion order is send order, and eviction
   // drops the session that has gone longest without a change.
   seen.delete(key)
@@ -142,7 +154,7 @@ const maxPendingToolCalls = 64
 // process, so remembering it until `tool_result` is exact: the join is the runtime's own call id,
 // not a timestamp or a guess.
 const pendingToolCalls = new Map<string, unknown>()
-const rememberedSkillListings = new Map<string, string>()
+const rememberedSkillListings = new Map<string, RememberedSkillListing>()
 
 function rememberToolCall(event: OmpEvent) {
   const id = typeof event.toolCallId === "string" ? event.toolCallId : ""
@@ -241,9 +253,26 @@ function safeClone(value: unknown, depth = 0, seen = new WeakSet<object>()): unk
   }
 }
 
-// sendToBeacon resolves true only when the hook binary read the event and exited cleanly. Every
-// failure is still swallowed -- telemetry never interrupts the run -- but a caller that sends
-// something once rather than per event needs to know whether to try again.
+// The most of the hook binary's reply that is read. The reply is one small object, {"recorded": n}.
+const maxReplyBytes = 4096
+
+// hookRecorded reads the hook binary's reply: whether it wrote at least one event. The exit status
+// cannot say, because the hook exits 0 whether or not it wrote anything -- a hook that failed must
+// not fail the run -- so a reply that is missing, unparseable or reports nothing means not recorded.
+// Exported for tests.
+export function hookRecorded(reply: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(reply)
+    return typeof parsed === "object" && parsed !== null && "recorded" in parsed &&
+      typeof parsed.recorded === "number" && parsed.recorded > 0
+  } catch {
+    return false
+  }
+}
+
+// sendToBeacon resolves true only when the hook binary reports it recorded the event. Every failure
+// is still swallowed -- telemetry never interrupts the run -- but a caller that sends something once
+// rather than per event needs to know whether to try again.
 async function sendToBeacon(payload: Record<string, unknown>): Promise<boolean> {
   // Flattened before anything else sees it, so every consumer of this function is handed plain
   // data rather than a live event with cycles and functions still attached.
@@ -278,7 +307,7 @@ async function sendToBeacon(payload: Record<string, unknown>): Promise<boolean> 
       let child
       try {
         child = spawn(beaconArgv[0], beaconArgv.slice(1), {
-          stdio: ["pipe", "ignore", "ignore"],
+          stdio: ["pipe", "pipe", "ignore"],
           windowsHide: true,
         })
       } catch (err) {
@@ -305,7 +334,13 @@ async function sendToBeacon(payload: Record<string, unknown>): Promise<boolean> 
         debugLog("hook binary failed", err)
         done(false)
       })
-      child.on("close", (code: number | null) => done(code === 0))
+      let reply = ""
+      child.stdout?.on("data", (chunk: Buffer) => {
+        if (reply.length < maxReplyBytes) reply += chunk.toString("utf8")
+      })
+      child.stdout?.on("error", () => {})
+      // `close` fires after the child's stdio has closed, so the whole reply has arrived.
+      child.on("close", (code: number | null) => done(code === 0 && hookRecorded(reply)))
       // Without this, a hook binary that exits before reading stdin turns an EPIPE into an
       // unhandled error event in the host process. Beacon telemetry must never do that.
       child.stdin?.on("error", () => {})
@@ -392,16 +427,25 @@ export function createBeaconExtension() {
       const fields = identity(ctx)
       if (event.type === "context") {
         // Only the listing leaves the extension, and only when it changed: `context` fires before
-        // every model call and carries the whole conversation. It is remembered after a send that
-        // landed, so a failed send is retried on the next call instead of losing the listing.
+        // every model call and carries the whole conversation. A listing the hook did not record
+        // is sent again on the next call, so one failed send does not lose it for the session.
         const listing = skillListing(ctx)
         // A session without an id is remembered under "", so it is still sent once rather than
         // before every model call.
         const key = typeof fields.sessionId === "string" ? fields.sessionId : ""
-        if (!listing || rememberedSkillListings.get(key) === listing) return
-        if (await sendToBeacon({ ...fields, type: "context", skillListing: listing })) {
-          rememberSkillListing(rememberedSkillListings, key, listing)
+        const remembered = rememberedSkillListings.get(key)
+        const same = remembered?.listing === listing
+        if (!listing || (same && remembered?.done)) return
+        const attempts = same && remembered ? remembered.attempts + 1 : 1
+        const recorded = await sendToBeacon({ ...fields, type: "context", skillListing: listing })
+        if (!recorded && attempts >= maxSkillListingAttempts) {
+          debugLog("skill listing was not recorded; not sending it again", { attempts })
         }
+        rememberSkillListing(rememberedSkillListings, key, {
+          listing,
+          attempts,
+          done: recorded || attempts >= maxSkillListingAttempts,
+        })
         return
       }
       // The event is spread last so a field it carries itself wins over the context's. `user_bash`

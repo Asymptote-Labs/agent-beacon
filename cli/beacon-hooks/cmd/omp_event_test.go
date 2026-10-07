@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -245,6 +246,45 @@ func TestOmpEventSkillListingIsWrittenAsSystemContext(t *testing.T) {
 	}
 	if _, ok := event["prompt"]; ok {
 		t.Fatalf("skill listing recorded as a prompt: %v", event["prompt"])
+	}
+}
+
+// The extension decides whether to resend a skill listing from this reply, because the hook exits 0
+// whether or not it wrote anything. Every way an event is dropped must report nothing recorded.
+func TestOmpEventReplyReportsWhatWasRecorded(t *testing.T) {
+	listing := map[string]interface{}{"type": "context", "sessionId": "sess-1", "skillListing": "- deploy: Deploy applications."}
+	noLog := func(t *testing.T) {
+		for _, key := range []string{"BEACON_ENDPOINT_LOG", "BEACON_CLOUD_LOG_PATH", "BEACON_LOG_PATH", "BEACON_RUNTIME_LOG", "BEACON_ENDPOINT_MODE"} {
+			t.Setenv(key, "")
+		}
+	}
+	unwritable := func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "runtime.jsonl")
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("BEACON_ENDPOINT_LOG", dir)
+	}
+	for _, tc := range []struct {
+		name    string
+		input   map[string]interface{}
+		setup   func(*testing.T)
+		written float64
+	}{
+		{"written", listing, nil, 1},
+		{"log not writable", listing, unwritable, 0},
+		{"no endpoint log configured", listing, noLog, 0},
+		{"type this build does not map", map[string]interface{}{"type": "message_update", "sessionId": "sess-1"}, nil, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ompTestLog(t)
+			if tc.setup != nil {
+				tc.setup(t)
+			}
+			if out := runHookWithInput(t, runOmpEvent, tc.input); out["recorded"] != tc.written {
+				t.Fatalf("reply = %v, want recorded = %v", out, tc.written)
+			}
+		})
 	}
 }
 
