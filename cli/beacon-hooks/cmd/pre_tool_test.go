@@ -996,6 +996,20 @@ func setupHookConfigDirs(t *testing.T) {
 	})
 }
 
+// readHookFixture decodes a runtime's hook payload fixture from cli/beacon-hooks/testdata/<runtime>.
+func readHookFixture(t *testing.T, runtime, name string) map[string]interface{} {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("..", "testdata", runtime, name))
+	if err != nil {
+		t.Fatalf("read %s fixture %s: %v", runtime, name, err)
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("decode %s fixture %s: %v", runtime, name, err)
+	}
+	return payload
+}
+
 func runHookWithInput(t *testing.T, run func(cmd *cobra.Command, args []string), input map[string]interface{}) map[string]interface{} {
 	t.Helper()
 	stdinR, stdinW, err := os.Pipe()

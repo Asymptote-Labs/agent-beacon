@@ -1,26 +1,11 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
-
-func readQwenFixture(t *testing.T, name string) map[string]interface{} {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "testdata", "qwen", name))
-	if err != nil {
-		t.Fatalf("read qwen fixture %s: %v", name, err)
-	}
-	var payload map[string]interface{}
-	if err := json.Unmarshal(data, &payload); err != nil {
-		t.Fatalf("decode qwen fixture %s: %v", name, err)
-	}
-	return payload
-}
 
 // setupQwenHook wires a hook run for --platform qwen against a fresh runtime log.
 func setupQwenHook(t *testing.T) string {
@@ -133,7 +118,7 @@ func TestQwenTaxonomyIsScopedToTheQwenPlatform(t *testing.T) {
 func TestQwenFailedToolIsNotRecordedAsASuccessfulEdit(t *testing.T) {
 	logPath := setupQwenHook(t)
 
-	runHookWithInput(t, runPostTool, readQwenFixture(t, "post_tool_failure.json"))
+	runHookWithInput(t, runPostTool, readHookFixture(t, "qwen", "post_tool_failure.json"))
 
 	event := lastEndpointEvent(t, logPath)
 	if got := qwenAction(t, event); got != "tool.failed" {
@@ -153,7 +138,7 @@ func TestQwenFailedToolIsNotRecordedAsASuccessfulEdit(t *testing.T) {
 func TestQwenInterruptedToolIsNotRecordedAsASuccessfulEdit(t *testing.T) {
 	logPath := setupQwenHook(t)
 
-	runHookWithInput(t, runPostTool, readQwenFixture(t, "post_tool_interrupt.json"))
+	runHookWithInput(t, runPostTool, readHookFixture(t, "qwen", "post_tool_interrupt.json"))
 
 	event := lastEndpointEvent(t, logPath)
 	if got := qwenAction(t, event); got != "tool.failed" {
@@ -169,7 +154,7 @@ func TestQwenInterruptedToolIsNotRecordedAsASuccessfulEdit(t *testing.T) {
 func TestQwenShellCommandIsRecordedAsACommand(t *testing.T) {
 	logPath := setupQwenHook(t)
 
-	runHookWithInput(t, runPostTool, readQwenFixture(t, "post_tool_shell.json"))
+	runHookWithInput(t, runPostTool, readHookFixture(t, "qwen", "post_tool_shell.json"))
 
 	event := lastEndpointEvent(t, logPath)
 	if got := qwenAction(t, event); got != "command.executed" {
@@ -195,7 +180,7 @@ func TestQwenShellCommandIsRecordedAsACommand(t *testing.T) {
 func TestQwenWriteFileRecordsPathOperationAndDiff(t *testing.T) {
 	logPath := setupQwenHook(t)
 
-	runHookWithInput(t, runPostTool, readQwenFixture(t, "post_tool_write_file.json"))
+	runHookWithInput(t, runPostTool, readHookFixture(t, "qwen", "post_tool_write_file.json"))
 
 	event := lastEndpointEvent(t, logPath)
 	if got := qwenAction(t, event); got != "file.modified" {
@@ -255,7 +240,7 @@ func TestQwenPreToolDistinguishesAWholeFileWriteFromAnEdit(t *testing.T) {
 func TestQwenEditRecordsBothSidesOfTheReplacement(t *testing.T) {
 	logPath := setupQwenHook(t)
 
-	runHookWithInput(t, runPostTool, readQwenFixture(t, "post_tool_edit.json"))
+	runHookWithInput(t, runPostTool, readHookFixture(t, "qwen", "post_tool_edit.json"))
 
 	event := lastEndpointEvent(t, logPath)
 	if got := qwenAction(t, event); got != "file.modified" {
@@ -277,7 +262,7 @@ func TestQwenEditRecordsBothSidesOfTheReplacement(t *testing.T) {
 func TestQwenLegacyReplaceIdBehavesLikeEdit(t *testing.T) {
 	logPath := setupQwenHook(t)
 
-	payload := readQwenFixture(t, "post_tool_edit.json")
+	payload := readHookFixture(t, "qwen", "post_tool_edit.json")
 	payload["tool_name"] = "replace"
 	runHookWithInput(t, runPostTool, payload)
 
@@ -333,7 +318,7 @@ func TestQwenReadFileResolvesTheAbsolutePathParameter(t *testing.T) {
 func TestQwenRawPayloadPreservesFieldsWithNoSchemaHome(t *testing.T) {
 	logPath := setupQwenHook(t)
 
-	runHookWithInput(t, runPreTool, readQwenFixture(t, "pre_tool_shell.json"))
+	runHookWithInput(t, runPreTool, readHookFixture(t, "qwen", "pre_tool_shell.json"))
 
 	event := lastEndpointEvent(t, logPath)
 	raw, ok := event["raw"].(map[string]interface{})
@@ -371,7 +356,7 @@ func TestQwenRawPayloadPreservesFieldsWithNoSchemaHome(t *testing.T) {
 func TestQwenStopContextFieldsAreNotNormalizedIntoTokenUsage(t *testing.T) {
 	logPath := setupQwenHook(t)
 
-	input := readQwenFixture(t, "stop.json")
+	input := readHookFixture(t, "qwen", "stop.json")
 	sessionID, _ := resolveSessionIDWithTranscript(input, platformFlag)
 	if sessionID == "" {
 		t.Fatal("stop fixture has no session id; the mapping under test would not run")
@@ -413,7 +398,7 @@ func TestQwenStopContextFieldsAreNotNormalizedIntoTokenUsage(t *testing.T) {
 func TestQwenStopContextIsNormalizedIntoGenAIContext(t *testing.T) {
 	logPath := setupQwenHook(t)
 
-	input := readQwenFixture(t, "stop.json")
+	input := readHookFixture(t, "qwen", "stop.json")
 	sessionID, _ := resolveSessionIDWithTranscript(input, platformFlag)
 	logger := newHookLogger("stop", platformFlag, sessionID)
 	emitHookEvent(logger, "tool.completed", "tool", "info", "Agent response completed", input, sessionFields(sessionID, input))
@@ -452,7 +437,7 @@ func TestQwenStopContextIsNormalizedIntoGenAIContext(t *testing.T) {
 func TestQwenSessionLifecycleIsRecorded(t *testing.T) {
 	logPath := setupQwenHook(t)
 
-	runHookWithInput(t, runSessionStart, readQwenFixture(t, "session_start.json"))
+	runHookWithInput(t, runSessionStart, readHookFixture(t, "qwen", "session_start.json"))
 	start := lastEndpointEvent(t, logPath)
 	if got := qwenAction(t, start); got != "session.started" {
 		t.Fatalf("event.action = %q, want session.started", got)
@@ -461,7 +446,7 @@ func TestQwenSessionLifecycleIsRecorded(t *testing.T) {
 		t.Fatalf("model = %q, want the session model", got)
 	}
 
-	runHookWithInput(t, runPromptSubmit, readQwenFixture(t, "user_prompt_submit.json"))
+	runHookWithInput(t, runPromptSubmit, readHookFixture(t, "qwen", "user_prompt_submit.json"))
 	prompt := lastEndpointEvent(t, logPath)
 	if got := qwenAction(t, prompt); got != "prompt.submitted" {
 		t.Fatalf("event.action = %q, want prompt.submitted", got)
@@ -502,7 +487,7 @@ func TestQwenRawPayloadSurvivesTheFileEditPath(t *testing.T) {
 
 	for _, fixture := range []string{"post_tool_write_file.json", "post_tool_edit.json"} {
 		t.Run(fixture, func(t *testing.T) {
-			runHookWithInput(t, runPostTool, readQwenFixture(t, fixture))
+			runHookWithInput(t, runPostTool, readHookFixture(t, "qwen", fixture))
 			event := lastEndpointEvent(t, logPath)
 			if got := qwenAction(t, event); got != "file.modified" {
 				t.Fatalf("event.action = %q, want file.modified", got)
@@ -543,7 +528,7 @@ func TestQwenEveryFailureSignalIsClassifiedAsAFailure(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			logPath := setupQwenHook(t)
-			payload := readQwenFixture(t, "post_tool_write_file.json")
+			payload := readHookFixture(t, "qwen", "post_tool_write_file.json")
 			for key, value := range overrides {
 				payload[key] = value
 			}
@@ -570,7 +555,7 @@ func TestQwenEveryFailureSignalIsClassifiedAsAFailure(t *testing.T) {
 	// The control: the same payload with no failure signal is still a successful edit, so the
 	// guard above cannot be satisfied by classifying everything as a failure.
 	logPath := setupQwenHook(t)
-	runHookWithInput(t, runPostTool, readQwenFixture(t, "post_tool_write_file.json"))
+	runHookWithInput(t, runPostTool, readHookFixture(t, "qwen", "post_tool_write_file.json"))
 	event := lastEndpointEvent(t, logPath)
 	if got := qwenAction(t, event); got != "file.modified" {
 		t.Fatalf("a clean write was classified %q, want file.modified", got)
@@ -635,7 +620,7 @@ func TestQwenNotebookEditRecordsThePathWithoutClaimingADiff(t *testing.T) {
 func TestQwenStopEventCarriesNoModel(t *testing.T) {
 	logPath := setupQwenHook(t)
 
-	input := readQwenFixture(t, "stop.json")
+	input := readHookFixture(t, "qwen", "stop.json")
 	if _, ok := input["model"]; ok {
 		t.Fatalf("stop fixture now has a model; the reader-side session lookup may no longer be needed: %#v", input)
 	}

@@ -5,8 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -14,25 +12,12 @@ import (
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
-func readClaudeFixture(t *testing.T, name string) map[string]interface{} {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "testdata", "claude", name))
-	if err != nil {
-		t.Fatalf("read claude fixture %s: %v", name, err)
-	}
-	var payload map[string]interface{}
-	if err := json.Unmarshal(data, &payload); err != nil {
-		t.Fatalf("decode claude fixture %s: %v", name, err)
-	}
-	return payload
-}
-
 // The result of an MCP tool, as Claude Code 2.1.291 hands it to PostToolUse: a bare list of
 // content blocks, with the server's image as an Anthropic block and everything else as text. The
 // live event keeps every block in order, records the image's size and digest instead of its bytes,
 // and its result text is exactly the text blocks the model read.
 func TestClaudeMCPPostToolRecordsCapturedContentBlocks(t *testing.T) {
-	payload := readClaudeFixture(t, "post_tool_use_mcp_media.json")
+	payload := readHookFixture(t, "claude", "post_tool_use_mcp_media.json")
 	sent := payload["tool_response"].([]interface{})
 	var texts []string
 	var png []byte
@@ -80,7 +65,7 @@ func TestClaudeMCPPostToolRecordsCapturedContentBlocks(t *testing.T) {
 // A tool that returned no content blocks reaches the hook as an empty list, and is recorded with
 // no result rather than an empty one.
 func TestClaudeMCPPostToolWithNoContentRecordsNoResult(t *testing.T) {
-	_, events := runClaudePostTool(t, readClaudeFixture(t, "post_tool_use_mcp_empty.json"))
+	_, events := runClaudePostTool(t, readHookFixture(t, "claude", "post_tool_use_mcp_empty.json"))
 	if len(events) != 1 {
 		t.Fatalf("events = %#v, want one", events)
 	}
@@ -89,4 +74,3 @@ func TestClaudeMCPPostToolWithNoContentRecordsNoResult(t *testing.T) {
 		t.Errorf("gen_ai.tool.call.result = %#v, want none", result)
 	}
 }
-
