@@ -3,6 +3,7 @@ package ci
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -203,6 +204,33 @@ func TestRunChildPassesTheCallersWebFetchOptIn(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "\nOTEL_LOG_RAW_API_BODIES=1\n") && !strings.HasPrefix(string(data), "OTEL_LOG_RAW_API_BODIES=1\n") {
 		t.Fatalf("child env lost the caller's OTEL_LOG_RAW_API_BODIES=1:\n%s", data)
+	}
+}
+
+// The collector a CI job runs is its own, so it keeps what the job asked Claude Code to send: inline
+// bodies the job turned on reach the collector config as capture_model_context, and anything else
+// leaves it dropping every body.
+func TestProvisionCapturesModelContextWhenTheJobTurnsInlineBodiesOn(t *testing.T) {
+	collector := fakeExecutable(t, "collector", "#!/bin/sh\nsleep 60\n")
+	oldResolve := resolveCollectorBinary
+	resolveCollectorBinary = func(string) (string, error) { return collector, nil }
+	t.Cleanup(func() { resolveCollectorBinary = oldResolve })
+	for value, want := range map[string]bool{"": false, "0": false, "file:/tmp/claude-bodies": false, "1": true, "true": true} {
+		t.Run(fmt.Sprintf("OTEL_LOG_RAW_API_BODIES=%q", value), func(t *testing.T) {
+			t.Setenv("RUNNER_TEMP", t.TempDir())
+			t.Setenv("OTEL_LOG_RAW_API_BODIES", value)
+			session, err := Provision(Options{CollectorPath: collector, Harness: "claude"})
+			if err != nil {
+				t.Fatalf("Provision returned error: %v", err)
+			}
+			data, err := os.ReadFile(session.ConfigPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(string(data), "capture_model_context: true"); got != want {
+				t.Fatalf("collector config capture_model_context = %t, want %t:\n%s", got, want, data)
+			}
+		})
 	}
 }
 

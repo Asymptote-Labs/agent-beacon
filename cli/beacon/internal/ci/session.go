@@ -135,6 +135,10 @@ func Provision(opts Options) (*Session, error) {
 	cfg.Collector.HTTPPort = httpPort
 	cfg.Collector.HealthPort = endpointconfig.DeriveHealthCheckPort(grpcPort, httpPort)
 	cfg.Collector.IncludeCodexSpans = opts.IncludeCodexSpans
+	// A CI job opts in to model-context capture by setting OTEL_LOG_RAW_API_BODIES itself, and the
+	// collector is this job's alone, so it keeps what the job asked Claude Code to send. Without
+	// this the collector would drop every body the job turned on.
+	cfg.ClaudeCaptureModelContext = inlineRawBodies(os.Getenv("OTEL_LOG_RAW_API_BODIES"))
 	forward, err := normalizeForward(opts.Forward)
 	if err != nil {
 		return nil, err

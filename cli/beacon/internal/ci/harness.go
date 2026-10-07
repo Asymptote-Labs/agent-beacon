@@ -227,6 +227,16 @@ func percentEncodeResourceValue(value string) string {
 	return strings.ReplaceAll(url.QueryEscape(value), "+", "%20")
 }
 
+// inlineRawBodies reports whether an OTEL_LOG_RAW_API_BODIES value has Claude Code put API bodies
+// inline in its log events, rather than leave them off or write them to files Beacon never reads.
+func inlineRawBodies(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true":
+		return true
+	}
+	return false
+}
+
 func envMap(values []string) map[string]string {
 	out := map[string]string{}
 	for _, value := range values {
