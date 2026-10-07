@@ -241,16 +241,23 @@ function decidedToolInput(event: OmpEvent): unknown {
 // hands to another carry `attribution: "agent"`; neither is something an operator asked. Image
 // parts are left out: the prompt row records what was asked, not the attachment bytes.
 function userMessageText(message: unknown): string {
-  if (!message || typeof message !== "object") return ""
-  const { role, synthetic, attribution, content } = message as Record<string, unknown>
+  if (!isRecord(message)) return ""
+  const { role, synthetic, attribution, content } = message
   if (role !== "user" || synthetic === true || attribution === "agent") return ""
   if (typeof content === "string") return content
   if (!Array.isArray(content)) return ""
   const texts: string[] = []
-  for (const part of content as Array<{ type?: unknown; text?: unknown } | null>) {
-    if (part?.type === "text" && typeof part.text === "string") texts.push(part.text)
+  for (const part of content) {
+    if (isRecord(part) && part.type === "text" && typeof part.text === "string") texts.push(part.text)
   }
   return texts.join("\n")
+}
+
+// isRecord narrows a value from an Oh My Pi event to an object whose fields can be read, each as
+// unknown until checked. The events are the runtime's own objects, so their shape is checked field
+// by field where it is read rather than assumed.
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
 }
 
 function debugLog(message: string, extra?: unknown) {
@@ -278,27 +285,26 @@ function safeClone(value: unknown, depth = 0, seen = new WeakSet<object>()): unk
   const kind = typeof value
   if (kind === "function" || kind === "symbol" || kind === "undefined") return undefined
   if (kind === "bigint") return String(value)
-  if (kind !== "object") return value
+  if (typeof value !== "object") return value
   if (depth >= maxDepth) return undefined
 
-  const object = value as object
-  if (seen.has(object)) return undefined
+  if (seen.has(value)) return undefined
   if (value instanceof Error) return { name: value.name, message: value.message }
   if (value instanceof Date) return value.toISOString()
 
-  seen.add(object)
+  seen.add(value)
   try {
     if (Array.isArray(value)) {
       return value.map((item) => safeClone(item, depth + 1, seen))
     }
     const out: Record<string, unknown> = {}
-    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    for (const [key, nested] of Object.entries(value)) {
       const cloned = safeClone(nested, depth + 1, seen)
       if (cloned !== undefined) out[key] = cloned
     }
     return out
   } finally {
-    seen.delete(object)
+    seen.delete(value)
   }
 }
 
@@ -327,9 +333,9 @@ async function sendToBeacon(payload: Record<string, unknown>): Promise<boolean> 
   // data rather than a live event with cycles and functions still attached.
   const safe = safeClone(payload)
 
-  const testSender = (globalThis as Record<symbol, unknown>)[Symbol.for("beacon.omp.testSender")]
+  const testSender: unknown = Reflect.get(globalThis, Symbol.for("beacon.omp.testSender"))
   if (typeof testSender === "function") {
-    return (await (testSender as (value: unknown) => unknown)(safe)) !== false
+    return (await testSender(safe)) !== false
   }
 
   let body: string
@@ -522,7 +528,7 @@ export function createBeaconExtension() {
 
       if (event.type === "input") {
         inputSessionId = sessionId
-      } else if (event.type === "message_end" && (event.message as { role?: unknown })?.role === "user") {
+      } else if (event.type === "message_end" && isRecord(event.message) && event.message.role === "user") {
         // Only the role and text leave the extension: a user message can also carry image bytes
         // and runtime bookkeeping the prompt row has no use for. One that is not a prompt is not
         // sent at all; the mapper records nothing for it.

@@ -9,10 +9,10 @@ type Sent = Record<string, unknown>
 // accepted decides what each send reports back, standing in for whether the hook binary recorded it.
 function captureSends(accepted: () => boolean = () => true): Sent[] {
   const sent: Sent[] = []
-  ;(globalThis as Record<symbol, unknown>)[senderKey] = (payload: Sent) => {
+  Reflect.set(globalThis, senderKey, (payload: Sent) => {
     sent.push(payload)
     return accepted()
-  }
+  })
   return sent
 }
 
@@ -44,7 +44,7 @@ function context(overrides: Record<string, unknown> = {}) {
 }
 
 afterEach(() => {
-  delete (globalThis as Record<symbol, unknown>)[senderKey]
+  Reflect.deleteProperty(globalThis, senderKey)
 })
 
 describe("beacon oh my pi extension", () => {
