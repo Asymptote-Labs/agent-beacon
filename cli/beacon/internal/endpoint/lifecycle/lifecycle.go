@@ -406,6 +406,9 @@ func Install(opts InstallOptions) (InstallResult, error) {
 	if err != nil {
 		return InstallResult{}, err
 	}
+	if err := endpointcollector.CheckComponents(collectorBinary); err != nil {
+		return InstallResult{}, err
+	}
 
 	manifest := Manifest{
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
