@@ -19,7 +19,7 @@ var privateBodyParts = []string{"system-private", "assistant-private", "file-pri
 func claudeBodyRecord(eventName, querySource, body string) plog.LogRecord {
 	record := plog.NewLogRecord()
 	record.Body().SetStr("claude_code." + eventName)
-	record.SetTimestamp(pcommonTimestamp(1700000000))
+	record.SetTimestamp(pcommon.NewTimestampFromTime(time.Unix(1700000000, 0).UTC()))
 	attrs := record.Attributes()
 	attrs.PutStr("service.name", "claude-code")
 	attrs.PutStr("service.version", "2.1.291")
@@ -37,6 +37,14 @@ func claudeBodyRecord(eventName, querySource, body string) plog.LogRecord {
 	return record
 }
 
+// convertedLog runs record through EventsFromLogs, the path the exporters take, and reports whether
+// it survived as an event.
+func convertedLog(record plog.LogRecord) bool {
+	logs := plog.NewLogs()
+	record.CopyTo(logs.ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty().LogRecords().AppendEmpty())
+	return len(NewConverter(Options{}).EventsFromLogs(logs)) == 1
+}
+
 func encodedEvent(t *testing.T, event Event) string {
 	t.Helper()
 	encoded, err := json.Marshal(event)
@@ -48,7 +56,7 @@ func encodedEvent(t *testing.T, event Event) string {
 
 func TestClaudeWebFetchSummarizerInputIsRecordedAsAWebFetchResult(t *testing.T) {
 	record := claudeBodyRecord("api_request_body", claudeWebFetchApplyQuerySource, summarizerBody)
-	if ShouldDropLog(nil, record) {
+	if !convertedLog(record) {
 		t.Fatal("the WebFetch summarizer request was dropped")
 	}
 	event := NewConverter(Options{}).EventFromLog(nil, record)
@@ -110,12 +118,15 @@ func TestClaudeAPIBodiesOtherThanTheSummarizerRequestAreDropped(t *testing.T) {
 		"summarizer, top-level array":  claudeBodyRecord("api_request_body", claudeWebFetchApplyQuerySource, `[{"role":"user","content":"x"}]`),
 		"summarizer, empty text block": claudeBodyRecord("api_request_body", claudeWebFetchApplyQuerySource, `{"messages":[{"role":"user","content":[{"type":"text","text":""}]}]}`),
 	}
+	claimed := claudeBodyRecord("api_request_body", "sdk", "")
+	claimed.Attributes().PutStr(ClaudeWebFetchInputAttr, "PAGE-CANARY")
+	cases["main request claiming processed input"] = claimed
 	for name, record := range cases {
 		t.Run(name, func(t *testing.T) {
-			if !ShouldDropLog(nil, record) {
+			if convertedLog(record) {
 				t.Fatal("body event was kept")
 			}
-			// A caller that converts without asking ShouldDropLog still gets no body.
+			// A caller that converts one record directly still gets no body.
 			encoded := encodedEvent(t, NewConverter(Options{}).EventFromLog(nil, record))
 			for _, forbidden := range append(privateBodyParts, "private-body", "PARTIAL-PAGE", "PAGE-CANARY", "/private/body.json") {
 				if strings.Contains(encoded, forbidden) {
@@ -135,7 +146,7 @@ func TestClaudeAPIBodyPolicyIsKeyedOnTheEventName(t *testing.T) {
 		record.Attributes().Remove("event.name")
 		return record
 	}
-	if !ShouldDropLog(nil, sdk("sdk")) {
+	if convertedLog(sdk("sdk")) {
 		t.Fatal("an Agent SDK main-loop body was kept")
 	}
 	event := NewConverter(Options{}).EventFromLog(nil, sdk(claudeWebFetchApplyQuerySource))
@@ -166,7 +177,7 @@ func TestClaudeTruncatedSummarizerBodyKeepsTheReadablePrefix(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			record := claudeBodyRecord("api_request_body", claudeWebFetchApplyQuerySource, body)
 			record.Attributes().PutStr("body_truncated", "true")
-			if ShouldDropLog(nil, record) {
+			if !convertedLog(record) {
 				t.Fatal("a truncated summarizer request was dropped with its page prefix")
 			}
 			event := NewConverter(Options{}).EventFromLog(nil, record)
@@ -184,7 +195,7 @@ func TestClaudeTruncatedSummarizerBodyKeepsTheReadablePrefix(t *testing.T) {
 	}
 	cutBeforeText := claudeBodyRecord("api_request_body", claudeWebFetchApplyQuerySource, full[:strings.Index(full, `"text":"Web`)])
 	cutBeforeText.Attributes().PutBool("body_truncated", true)
-	if !ShouldDropLog(nil, cutBeforeText) {
+	if convertedLog(cutBeforeText) {
 		t.Fatal("a body cut before any user text was kept")
 	}
 }
@@ -237,8 +248,4 @@ func TestSanitizeClaudeAPIBodyRecordMatchesTheConverter(t *testing.T) {
 	if value, _ := other.Attributes().Get("body"); value.Str() != "not an API body" {
 		t.Fatal("the processor changed a record that is not an API body")
 	}
-}
-
-func pcommonTimestamp(seconds int64) pcommon.Timestamp {
-	return pcommon.Timestamp(uint64(time.Unix(seconds, 0).UnixNano()))
 }

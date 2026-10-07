@@ -28,72 +28,22 @@ const (
 	claudeWebFetchToolName         = "WebFetch"
 )
 
-// SanitizeClaudeAPIBody applies Beacon's policy for Claude Code's API body events
-// (OTEL_LOG_RAW_API_BODIES) to attrs in place, and reports whether the record is dropped. It is
-// keyed on the event name, never the harness name, so the Agent SDK or anything else that emits
-// these events under another service name is held to the same policy.
+// Beacon's policy for Claude Code's API body events (OTEL_LOG_RAW_API_BODIES) is keyed on the
+// event name, never the harness name, so the Agent SDK or anything else that emits these events
+// under another service name is held to it too.
 //
 // A body can carry the system prompt, the whole conversation, tool schemas and tool results. The
 // one Beacon keeps is the WebFetch summarizer request, the only model call that carries the
-// fetched page: its user-role text moves to ClaudeWebFetchInputAttr, and body and body_ref are
-// removed. Every other body event, request or response, is dropped -- claude_code.api_request
-// already records the call -- and so is a summarizer request with no text left to keep.
-//
-// It is idempotent: a record the claude_api_body processor already rewrote passes through
-// unchanged.
-func SanitizeClaudeAPIBody(attrs map[string]interface{}, recordBody string) (drop bool) {
-	name := ClaudeLogEventName(attrs, recordBody)
-	if name != ClaudeAPIRequestBody && name != ClaudeAPIResponseBody {
-		return false
-	}
-	body, _ := attrs["body"].(string)
-	delete(attrs, "body")
-	delete(attrs, "body_ref")
-	if name != ClaudeAPIRequestBody || FirstString(attrs, "query_source") != claudeWebFetchApplyQuerySource {
-		return true
-	}
-	if text, _ := attrs[ClaudeWebFetchInputAttr].(string); text != "" {
-		return false
-	}
-	truncated, _ := BoolAttr(attrs, "body_truncated")
-	text, partial, ok := claudeUserText(body, truncated)
-	if !ok || text == "" {
-		return true
-	}
-	attrs[ClaudeWebFetchInputAttr] = text
-	if partial {
-		attrs[ClaudeWebFetchInputTruncatedAttr] = true
-	}
-	return false
+// fetched page, and of that only its user-role text. Every other body event, request or response,
+// is dropped -- claude_code.api_request already records the call -- and so is a summarizer request
+// with no text left to keep.
+
+func isClaudeAPIBody(eventName string) bool {
+	return eventName == ClaudeAPIRequestBody || eventName == ClaudeAPIResponseBody
 }
 
-// SanitizeClaudeAPIBodyRecord is SanitizeClaudeAPIBody on a log record. The claude_api_body
-// processor calls it so the policy holds before any exporter sees the record, including ones such
-// as splunk_hec that forward OTLP attributes as they arrive.
-func SanitizeClaudeAPIBodyRecord(record plog.LogRecord) (drop bool) {
-	attrs := record.Attributes()
-	name := map[string]interface{}{}
-	if value, ok := attrs.Get("event.name"); ok {
-		name["event.name"] = value.AsString()
-	}
-	switch ClaudeLogEventName(name, record.Body().AsString()) {
-	case ClaudeAPIRequestBody, ClaudeAPIResponseBody:
-	default:
-		return false
-	}
-	sanitized := AttrsToMap(attrs)
-	if SanitizeClaudeAPIBody(sanitized, record.Body().AsString()) {
-		return true
-	}
-	attrs.Remove("body")
-	attrs.Remove("body_ref")
-	if text, ok := sanitized[ClaudeWebFetchInputAttr].(string); ok {
-		attrs.PutStr(ClaudeWebFetchInputAttr, text)
-	}
-	if truncated, _ := BoolAttr(sanitized, ClaudeWebFetchInputTruncatedAttr); truncated {
-		attrs.PutBool(ClaudeWebFetchInputTruncatedAttr, true)
-	}
-	return false
+func isClaudeWebFetchSummarizerRequest(eventName, querySource string) bool {
+	return eventName == ClaudeAPIRequestBody && querySource == claudeWebFetchApplyQuerySource
 }
 
 type claudeWebFetchInput struct {
@@ -101,17 +51,62 @@ type claudeWebFetchInput struct {
 	truncated bool
 }
 
-// takeClaudeWebFetchInput removes the summarizer input from attrs so that raw.attributes does not
-// hold a second copy of the page beside gen_ai.tool.call.result.
-func takeClaudeWebFetchInput(attrs map[string]interface{}, recordBody string) claudeWebFetchInput {
-	if ClaudeLogEventName(attrs, recordBody) != ClaudeAPIRequestBody {
-		return claudeWebFetchInput{}
+// takeClaudeAPIBody removes the body, body_ref and summarizer input of a Claude Code API body
+// event from attrs, and returns the text Beacon keeps: the summarizer request's user text, or
+// nothing. isBody reports whether eventName is a body event at all. A record the claude_api_body
+// processor already rewrote carries the text in ClaudeWebFetchInputAttr, so its body is not
+// parsed again.
+func takeClaudeAPIBody(attrs map[string]interface{}, eventName string) (input claudeWebFetchInput, isBody bool) {
+	if !isClaudeAPIBody(eventName) {
+		return claudeWebFetchInput{}, false
 	}
-	text, _ := attrs[ClaudeWebFetchInputAttr].(string)
-	truncated, _ := BoolAttr(attrs, ClaudeWebFetchInputTruncatedAttr)
-	delete(attrs, ClaudeWebFetchInputAttr)
-	delete(attrs, ClaudeWebFetchInputTruncatedAttr)
-	return claudeWebFetchInput{text: text, truncated: truncated}
+	body, _ := attrs["body"].(string)
+	input.text, _ = attrs[ClaudeWebFetchInputAttr].(string)
+	input.truncated, _ = BoolAttr(attrs, ClaudeWebFetchInputTruncatedAttr)
+	for _, key := range []string{"body", "body_ref", ClaudeWebFetchInputAttr, ClaudeWebFetchInputTruncatedAttr} {
+		delete(attrs, key)
+	}
+	if !isClaudeWebFetchSummarizerRequest(eventName, FirstString(attrs, "query_source")) {
+		return claudeWebFetchInput{}, true
+	}
+	if input.text != "" {
+		return input, true
+	}
+	bodyTruncated, _ := BoolAttr(attrs, "body_truncated")
+	text, partial, ok := claudeUserText(body, bodyTruncated)
+	if !ok {
+		return claudeWebFetchInput{}, true
+	}
+	return claudeWebFetchInput{text: text, truncated: partial}, true
+}
+
+// SanitizeClaudeAPIBodyRecord applies the API body policy to a log record in place, and reports
+// whether the record is dropped. A kept summarizer request leaves with its text in
+// ClaudeWebFetchInputAttr in place of body and body_ref. The claude_api_body processor calls it so
+// the policy holds before any exporter sees the record, including ones such as splunk_hec that
+// forward OTLP attributes as they arrive.
+func SanitizeClaudeAPIBodyRecord(record plog.LogRecord) (drop bool) {
+	attrs := record.Attributes()
+	eventName := ""
+	if value, ok := attrs.Get("event.name"); ok {
+		eventName = value.AsString()
+	}
+	name := claudeLogEventName(eventName, record.Body().AsString())
+	if !isClaudeAPIBody(name) {
+		return false
+	}
+	input, _ := takeClaudeAPIBody(AttrsToMap(attrs), name)
+	if input.text == "" {
+		return true
+	}
+	for _, key := range []string{"body", "body_ref", ClaudeWebFetchInputTruncatedAttr} {
+		attrs.Remove(key)
+	}
+	attrs.PutStr(ClaudeWebFetchInputAttr, input.text)
+	if input.truncated {
+		attrs.PutBool(ClaudeWebFetchInputTruncatedAttr, true)
+	}
+	return false
 }
 
 // normalizeClaudeWebFetchInput records the summarizer input as what it is: content the WebFetch

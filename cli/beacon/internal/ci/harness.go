@@ -40,13 +40,18 @@ func ClaudeEnv(base []string, endpoint string) []string {
 	delete(env, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
 	env["OTEL_LOG_TOOL_DETAILS"] = "1"
 	env["OTEL_LOG_USER_PROMPTS"] = "1"
-	// The same WebFetch page capture an endpoint install enables; ci exec runs the same
-	// collector config, so its claude_api_body processor drops every other body. A value the
-	// caller set (0, or file:<dir>) is theirs.
-	if _, configured := env["OTEL_LOG_RAW_API_BODIES"]; !configured {
-		env["OTEL_LOG_RAW_API_BODIES"] = "1"
+	for key, value := range claudeEnvDefaults {
+		if strings.TrimSpace(env[key]) == "" {
+			env[key] = value
+		}
 	}
+	return flattenEnv(env)
+}
 
+// claudeEnvDefaults are set only when the caller has not set them. Someone who has deliberately
+// tuned these has a reason, and this is a wrapper around their session rather than an owner of
+// their telemetry configuration.
+var claudeEnvDefaults = map[string]string{
 	// Export on a timer that fits the session, instead of relying on the flush at shutdown.
 	//
 	// The OpenTelemetry default metric interval is 60 seconds, and `ci exec` wraps sessions that
@@ -58,22 +63,16 @@ func ClaudeEnv(base []string, endpoint string) []string {
 	//
 	// A shutdown flush is still the backstop and still has to work. This just stops it being the only
 	// thing between a captured session and an empty log.
-	//
-	// Set only when the caller has not. Someone who has deliberately tuned these has a reason, and
-	// this is a wrapper around their session rather than an owner of their telemetry configuration.
-	for key, value := range map[string]string{
-		"OTEL_METRIC_EXPORT_INTERVAL": "5000",
-		// The batch processors default to 1s and 5s respectively, which is already inside a short
-		// session -- pinned anyway so the whole pipeline's timing is stated in one place rather than
-		// inherited from three different SDK defaults.
-		"OTEL_BLRP_SCHEDULE_DELAY": "1000",
-		"OTEL_BSP_SCHEDULE_DELAY":  "1000",
-	} {
-		if strings.TrimSpace(env[key]) == "" {
-			env[key] = value
-		}
-	}
-	return flattenEnv(env)
+	"OTEL_METRIC_EXPORT_INTERVAL": "5000",
+	// The batch processors default to 1s and 5s respectively, which is already inside a short
+	// session -- pinned anyway so the whole pipeline's timing is stated in one place rather than
+	// inherited from three different SDK defaults.
+	"OTEL_BLRP_SCHEDULE_DELAY": "1000",
+	"OTEL_BSP_SCHEDULE_DELAY":  "1000",
+	// The same WebFetch page capture an endpoint install enables. ci exec writes the same collector
+	// config, so its claude_api_body processor drops every other body. 0 or file:<dir> is the
+	// caller's.
+	"OTEL_LOG_RAW_API_BODIES": "1",
 }
 
 func BuildHarnessConfig(base []string, harnessList, grpcEndpoint, baseDir string, run *schema.RunInfo) (HarnessConfig, error) {
@@ -90,6 +89,13 @@ func BuildHarnessConfig(base []string, harnessList, grpcEndpoint, baseDir string
 	for _, harness := range harnesses {
 		switch harness {
 		case HarnessClaude:
+			// ClaudeEnv keeps a caller's value for these, so it has to be given the caller's.
+			// RunChild lays this env over the caller's own, so leaving them out would overwrite it.
+			for key := range claudeEnvDefaults {
+				if value := baseEnv[key]; strings.TrimSpace(value) != "" {
+					env[key] = value
+				}
+			}
 			env = envMap(ClaudeEnv(flattenEnv(env), grpcEndpoint))
 		case HarnessCodex:
 			codexHome := filepath.Join(baseDir, "codex-home")
