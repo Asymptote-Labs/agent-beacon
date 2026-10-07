@@ -424,6 +424,9 @@ func fieldsToolCallResult(event map[string]interface{}) interface{} {
 // of these results was kept only under raw.omp, which no rule can match: the model read the file,
 // the page, the skill and the MCP reply, and nothing a detection reads held any of them.
 func TestOmpToolResultsAreRecordedWhereRulesReadThem(t *testing.T) {
+	// The runtime reports a skill's file as an absolute path on its own host, so the fixture's is
+	// one on the test's: `C:\...` on Windows, where a path from the root names no drive.
+	skillFile := filepath.Join(t.TempDir(), ".omp", "skills", "oracle-probe", "SKILL.md")
 	for _, tc := range []struct {
 		name    string
 		payload map[string]interface{}
@@ -455,13 +458,13 @@ func TestOmpToolResultsAreRecordedWhereRulesReadThem(t *testing.T) {
 			payload: map[string]interface{}{
 				"toolName": "read", "input": map[string]interface{}{"path": "skill://oracle-probe"},
 				"details": map[string]interface{}{
-					"resolvedPath": "/home/agent/project/.omp/skills/oracle-probe/SKILL.md",
+					"resolvedPath": skillFile,
 					"meta":         map[string]interface{}{"source": map[string]interface{}{"type": "internal", "value": "skill://oracle-probe"}},
 				},
-				"content": ompTextBlocks("[Skill file: /home/agent/project/.omp/skills/oracle-probe/SKILL.md]\n---\nname: oracle-probe\n---\nSkill body marker BCN-R5H6GL-C01.\n"),
+				"content": ompTextBlocks("[Skill file: " + skillFile + "]\n---\nname: oracle-probe\n---\nSkill body marker BCN-R5H6GL-C01.\n"),
 			},
 			check: func(t *testing.T, event map[string]interface{}) {
-				if got := nested(t, event, "file")["path"]; got != "/home/agent/project/.omp/skills/oracle-probe/SKILL.md" {
+				if got := nested(t, event, "file")["path"]; got != skillFile {
 					t.Fatalf("file.path = %v, want the SKILL.md the runtime read", got)
 				}
 				if got := nested(t, event, "tool")["path"]; got != "skill://oracle-probe" {
