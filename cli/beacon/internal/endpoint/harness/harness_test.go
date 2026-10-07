@@ -125,29 +125,26 @@ func TestConfigureClaudeEnablesPromptLogging(t *testing.T) {
 }
 
 // Model-context capture is opt-in. The opt-in sets inline API bodies only where nothing is set, and
-// install without it removes only a setting Beacon wrote, so a repair without the flag turns
-// Beacon's capture off and leaves a user's own setting alone. Neither overrides 0 or file:<dir>.
-func TestConfigureClaudeRawBodiesFollowTheModelContextOptIn(t *testing.T) {
+// install without it removes an inline setting, so a repair without the flag turns capture off.
+// Neither overrides 0 or file:<dir>.
+func TestConfigureClaudeRawBodiesFollowTheWebFetchOptIn(t *testing.T) {
 	const unset = "<unset>"
 	tests := []struct {
-		steps        []bool
+		capture      bool
 		before, want string
 	}{
-		{steps: []bool{true}, before: unset, want: "1"},
-		{steps: []bool{true}, before: "1", want: "1"},
-		{steps: []bool{true}, before: "0", want: "0"},
-		{steps: []bool{true}, before: "file:/private/claude-bodies", want: "file:/private/claude-bodies"},
-		{steps: []bool{false}, before: unset, want: unset},
-		{steps: []bool{false}, before: "1", want: "1"},
-		{steps: []bool{false}, before: "true", want: "true"},
-		{steps: []bool{false}, before: "0", want: "0"},
-		{steps: []bool{false}, before: "file:/private/claude-bodies", want: "file:/private/claude-bodies"},
-		{steps: []bool{true, false}, before: unset, want: unset},
-		{steps: []bool{true, true, false}, before: unset, want: unset},
-		{steps: []bool{true, false}, before: "1", want: "1"},
+		{capture: true, before: unset, want: "1"},
+		{capture: true, before: "1", want: "1"},
+		{capture: true, before: "0", want: "0"},
+		{capture: true, before: "file:/private/claude-bodies", want: "file:/private/claude-bodies"},
+		{capture: false, before: unset, want: unset},
+		{capture: false, before: "1", want: unset},
+		{capture: false, before: "true", want: unset},
+		{capture: false, before: "0", want: "0"},
+		{capture: false, before: "file:/private/claude-bodies", want: "file:/private/claude-bodies"},
 	}
 	for _, tc := range tests {
-		t.Run(fmt.Sprintf("%v/%s", tc.steps, tc.before), func(t *testing.T) {
+		t.Run(fmt.Sprintf("capture=%t/%s", tc.capture, tc.before), func(t *testing.T) {
 			home := t.TempDir()
 			testenv.SetHome(t, home)
 			path := filepath.Join(home, ".claude", "settings.json")
@@ -165,8 +162,8 @@ func TestConfigureClaudeRawBodiesFollowTheModelContextOptIn(t *testing.T) {
 			if err := os.WriteFile(path, before, 0600); err != nil {
 				t.Fatal(err)
 			}
-			for _, capture := range tc.steps {
-				if _, err := ConfigureClaude(ConfigureOptions{Endpoint: "http://127.0.0.1:4317", CaptureModelContext: capture}); err != nil {
+			for range 2 {
+				if _, err := ConfigureClaude(ConfigureOptions{Endpoint: "http://127.0.0.1:4317", CaptureModelContext: tc.capture}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -183,10 +180,7 @@ func TestConfigureClaudeRawBodiesFollowTheModelContextOptIn(t *testing.T) {
 				got = unset
 			}
 			if got != tc.want {
-				t.Fatalf("OTEL_LOG_RAW_API_BODIES after installs %v = %q, want %q", tc.steps, got, tc.want)
-			}
-			if marker, set := settings["env"][claudeModelContextMarker]; set && !tc.steps[len(tc.steps)-1] {
-				t.Fatalf("%s = %q left behind after an install without the opt-in", claudeModelContextMarker, marker)
+				t.Fatalf("OTEL_LOG_RAW_API_BODIES after install and reinstall = %q, want %q", got, tc.want)
 			}
 		})
 	}

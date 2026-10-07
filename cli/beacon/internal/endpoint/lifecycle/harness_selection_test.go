@@ -93,11 +93,9 @@ func TestRepairWithExplicitEmptyHarnessesLeavesClaudeAndCodexConfigAlone(t *test
 	}
 }
 
-// Model-context capture is on after an install with the flag, stays on through a repair that does
-// not mention it -- the package upgrades, MDM repairs and self-updates that re-run install -- and is
-// off after a repair that turns it off, in Claude Code's settings, config.json and the collector
-// config alike.
-func TestClaudeModelContextCaptureFollowsTheLastInstallThatChoseIt(t *testing.T) {
+// Model-context capture follows the flag of the install or repair that ran last: on with it, off again
+// after a repair without it, in Claude Code's settings, config.json and the collector config alike.
+func TestClaudeWebFetchCaptureFollowsTheLatestInstallOrRepair(t *testing.T) {
 	testenv.RequirePOSIXExecutableFixtures(t)
 	home := t.TempDir()
 	testenv.SetHome(t, home)
@@ -147,9 +145,8 @@ func TestClaudeModelContextCaptureFollowsTheLastInstallThatChoseIt(t *testing.T)
 		}
 		return cfg.ClaudeCaptureModelContext
 	}
-	on, off := true, false
 
-	opts.ClaudeCaptureModelContext = &on
+	opts.ClaudeCaptureModelContext = true
 	if _, err := Install(opts); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -157,19 +154,11 @@ func TestClaudeModelContextCaptureFollowsTheLastInstallThatChoseIt(t *testing.T)
 		t.Fatalf("after install with the flag: OTEL_LOG_RAW_API_BODIES = %q, recorded = %t; want 1 and true", value, recorded())
 	}
 
-	opts.ClaudeCaptureModelContext = nil
-	if _, err := Repair(opts); err != nil {
-		t.Fatalf("Repair: %v", err)
-	}
-	if value, _ := rawBodies(); value != "1" || !recorded() {
-		t.Fatalf("after repair without the flag: OTEL_LOG_RAW_API_BODIES = %q, recorded = %t; want capture still on", value, recorded())
-	}
-
-	opts.ClaudeCaptureModelContext = &off
+	opts.ClaudeCaptureModelContext = false
 	if _, err := Repair(opts); err != nil {
 		t.Fatalf("Repair: %v", err)
 	}
 	if value, set := rawBodies(); set || recorded() {
-		t.Fatalf("after repair with the flag false: OTEL_LOG_RAW_API_BODIES = %q (set %t), recorded = %t; want capture off", value, set, recorded())
+		t.Fatalf("after repair without the flag: OTEL_LOG_RAW_API_BODIES = %q (set %t), recorded = %t; want capture off", value, set, recorded())
 	}
 }

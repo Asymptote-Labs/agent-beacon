@@ -55,11 +55,6 @@ if (-not [string]::IsNullOrWhiteSpace($collector)) { $installArgs += @('--collec
 # install. Passing it explicitly is for a fleet that wants the supervised fallback instead.
 if (-not [string]::IsNullOrWhiteSpace($service)) { $installArgs += @('--service', $service) }
 if ($noStart -eq '1') { $installArgs += '--no-start' }
-# Unset leaves the endpoint's recorded choice alone, so a package upgrade neither opts in nor out.
-switch -Regex (Get-EnvOrDefault 'BEACON_CLAUDE_CAPTURE_MODEL_CONTEXT' '') {
-    '^(1|true|yes)$' { $installArgs += '--claude-capture-model-context' }
-    '^(0|false|no)$' { $installArgs += '--claude-capture-model-context=false' }
-}
 
 Write-Output "beacon: installing the system endpoint"
 & $beaconBin @installArgs

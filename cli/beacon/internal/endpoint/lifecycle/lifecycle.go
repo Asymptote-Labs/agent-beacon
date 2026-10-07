@@ -193,15 +193,12 @@ type InstallOptions struct {
 	HTTPPort  int
 	// HealthPort is the collector health_check port. Zero derives it from the OTLP ports
 	// (endpointconfig.DeriveHealthCheckPort), which keeps 13133 for the default ports.
-	HealthPort            int
-	CollectorPath         string
-	StartService          bool
-	IncludeRuntimeMetrics bool
-	IncludeCodexSpans     bool
-	// ClaudeCaptureModelContext is --claude-capture-model-context. nil keeps the choice the
-	// endpoint's config.json records, so an install or repair that does not pass the flag neither
-	// opts in nor out.
-	ClaudeCaptureModelContext *bool
+	HealthPort                int
+	CollectorPath             string
+	StartService              bool
+	IncludeRuntimeMetrics     bool
+	IncludeCodexSpans         bool
+	ClaudeCaptureModelContext bool
 	SplunkHEC                 *endpointconfig.SplunkHEC
 	FalconHEC                 *endpointconfig.FalconHEC
 	// ServiceKind selects the service manager. Empty auto-detects: launchd on macOS,
@@ -717,14 +714,6 @@ func Repair(opts InstallOptions) (InstallResult, error) {
 			priorAutoUpdateMode = mode
 		}
 	}
-	// The uninstall below removes config.json with the rest of the manifest, so a choice the repair
-	// does not make is read before it goes.
-	if opts.ClaudeCaptureModelContext == nil {
-		if prior, err := endpointconfig.Load(opts.UserMode); err == nil {
-			capture := prior.ClaudeCaptureModelContext
-			opts.ClaudeCaptureModelContext = &capture
-		}
-	}
 	_ = Uninstall(repairUninstallOptions(opts))
 	result, err := Install(opts)
 	if err != nil {
@@ -902,8 +891,6 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 	// managed_ingest block is owned by connect/disconnect, so carry the existing one over.
 	// The same goes for inventory_heartbeat: an operator's `enabled: false` must survive the
 	// package upgrade that re-runs install, or the scheduled job would come back.
-	// And the model-context opt-in, unless this install says otherwise: packages, MDM repairs and
-	// self-update all re-run install without the flag, and must not opt the endpoint out.
 	if existing, err := endpointconfig.Load(opts.UserMode); err == nil {
 		if existing.ManagedIngest != nil {
 			cfg.ManagedIngest = existing.ManagedIngest
@@ -911,7 +898,6 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 		if existing.Inventory != nil {
 			cfg.Inventory = existing.Inventory
 		}
-		cfg.ClaudeCaptureModelContext = existing.ClaudeCaptureModelContext
 	}
 	if opts.Harnesses != nil {
 		cfg.Harnesses = opts.Harnesses
@@ -933,9 +919,7 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 	cfg.Collector.BinaryPath = opts.CollectorPath
 	cfg.Collector.IncludeRuntimeMetrics = opts.IncludeRuntimeMetrics
 	cfg.Collector.IncludeCodexSpans = opts.IncludeCodexSpans
-	if opts.ClaudeCaptureModelContext != nil {
-		cfg.ClaudeCaptureModelContext = *opts.ClaudeCaptureModelContext
-	}
+	cfg.ClaudeCaptureModelContext = opts.ClaudeCaptureModelContext
 	if opts.SplunkHEC != nil {
 		if cfg.Destinations == nil {
 			cfg.Destinations = &endpointconfig.Destinations{}

@@ -52,10 +52,4 @@ set -- endpoint install --system \
 [ "$BEACON_SPLUNK_INSECURE_SKIP_VERIFY" = "1" ] && set -- "$@" --splunk-insecure-skip-verify
 [ -n "$BEACON_SPLUNK_CA_FILE" ] && set -- "$@" --splunk-ca-file "$BEACON_SPLUNK_CA_FILE"
 
-# Unset leaves the endpoint's recorded choice alone, so a package upgrade neither opts in nor out.
-case "${BEACON_CLAUDE_CAPTURE_MODEL_CONTEXT:-}" in
-  1|true|TRUE|yes|YES) set -- "$@" --claude-capture-model-context ;;
-  0|false|FALSE|no|NO) set -- "$@" --claude-capture-model-context=false ;;
-esac
-
 exec "$BEACON_BIN" "$@"

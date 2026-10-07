@@ -74,14 +74,5 @@ esac
 if [ -n "$BEACON_FALCON_CA_FILE" ]; then
   set -- "$@" --falcon-ca-file "$BEACON_FALCON_CA_FILE"
 fi
-# Unset leaves the endpoint's recorded choice alone, so a repair neither opts in nor out.
-case "${BEACON_CLAUDE_CAPTURE_MODEL_CONTEXT:-}" in
-  1|true|TRUE|yes|YES)
-    set -- "$@" --claude-capture-model-context
-    ;;
-  0|false|FALSE|no|NO)
-    set -- "$@" --claude-capture-model-context=false
-    ;;
-esac
 
 exec "$BEACON_BIN" "$@"
