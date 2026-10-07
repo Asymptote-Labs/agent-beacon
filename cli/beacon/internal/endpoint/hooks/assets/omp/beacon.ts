@@ -89,7 +89,12 @@ const subscribedEvents = [
 // after a line of instructions. The match is anchored to the heading because the prompt also
 // carries operator text -- project context files, appended prompts -- and a `<skills>` block quoted
 // there is not the index the runtime gave the model.
-const skillsSection = /^# Skills & Rules\n(?:[^\n]*\n){0,3}?<skills>\s*([\s\S]*?)\s*<\/skills>/m
+//
+// The index ends at the `</skills>` that is a line of its own. Oh My Pi writes each skill as one
+// `- name: description` line, collapsing a description's newlines, so a `</skills>` a skill author
+// puts in a description is always mid-line. Ending at the first `</skills>` anywhere would let one
+// skill's description cut off its own remaining text and every skill listed after it.
+const skillsSection = /^# Skills & Rules\n(?:[^\n]*\n){0,3}?<skills>\n([\s\S]*?)\n<\/skills>$/m
 
 // How many sessions' last-sent listings are remembered, least recently sent evicted first.
 const maxRememberedSkillSessions = 64
