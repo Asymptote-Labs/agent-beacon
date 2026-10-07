@@ -193,14 +193,14 @@ type InstallOptions struct {
 	HTTPPort  int
 	// HealthPort is the collector health_check port. Zero derives it from the OTLP ports
 	// (endpointconfig.DeriveHealthCheckPort), which keeps 13133 for the default ports.
-	HealthPort            int
-	CollectorPath         string
-	StartService          bool
-	IncludeRuntimeMetrics bool
-	IncludeCodexSpans     bool
-	ClaudeCaptureWebFetch bool
-	SplunkHEC             *endpointconfig.SplunkHEC
-	FalconHEC             *endpointconfig.FalconHEC
+	HealthPort                int
+	CollectorPath             string
+	StartService              bool
+	IncludeRuntimeMetrics     bool
+	IncludeCodexSpans         bool
+	ClaudeCaptureModelContext bool
+	SplunkHEC                 *endpointconfig.SplunkHEC
+	FalconHEC                 *endpointconfig.FalconHEC
 	// ServiceKind selects the service manager. Empty auto-detects: launchd on macOS,
 	// systemd when it is PID 1, otherwise a supervised child process.
 	ServiceKind service.Kind
@@ -916,7 +916,7 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 	cfg.Collector.BinaryPath = opts.CollectorPath
 	cfg.Collector.IncludeRuntimeMetrics = opts.IncludeRuntimeMetrics
 	cfg.Collector.IncludeCodexSpans = opts.IncludeCodexSpans
-	cfg.ClaudeCaptureWebFetch = opts.ClaudeCaptureWebFetch
+	cfg.ClaudeCaptureModelContext = opts.ClaudeCaptureModelContext
 	if opts.SplunkHEC != nil {
 		if cfg.Destinations == nil {
 			cfg.Destinations = &endpointconfig.Destinations{}
@@ -1121,7 +1121,7 @@ func configureHarnesses(cfg endpointconfig.Config) ([]string, error) {
 	for _, name := range cfg.Harnesses {
 		switch name {
 		case "claude", "claude_code":
-			path, err := harness.ConfigureClaude(harness.ConfigureOptions{Endpoint: grpcEndpoint, UserMode: cfg.UserMode, CaptureWebFetch: cfg.ClaudeCaptureWebFetch})
+			path, err := harness.ConfigureClaude(harness.ConfigureOptions{Endpoint: grpcEndpoint, UserMode: cfg.UserMode, CaptureModelContext: cfg.ClaudeCaptureModelContext})
 			if err != nil {
 				return paths, err
 			}

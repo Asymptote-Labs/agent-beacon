@@ -105,13 +105,13 @@ type Config struct {
 	Collector       Collector `json:"collector"`
 	Harnesses       []string  `json:"harnesses"`
 	EventCategories []string  `json:"event_categories,omitempty"`
-	// ClaudeCaptureWebFetch is the --claude-capture-web-fetch opt-in, recorded so the per-user
+	// ClaudeCaptureModelContext is the --claude-capture-model-context opt-in, recorded so the per-user
 	// config repair writes Claude Code's settings the way the install did.
-	ClaudeCaptureWebFetch bool           `json:"claude_capture_web_fetch,omitempty"`
-	Inventory             *Inventory     `json:"inventory_heartbeat,omitempty"`
-	Destinations          *Destinations  `json:"destinations,omitempty"`
-	ManagedIngest         *ManagedIngest `json:"managed_ingest,omitempty"`
-	AutoUpdate            *AutoUpdate    `json:"auto_update,omitempty"`
+	ClaudeCaptureModelContext bool           `json:"claude_capture_model_context,omitempty"`
+	Inventory                 *Inventory     `json:"inventory_heartbeat,omitempty"`
+	Destinations              *Destinations  `json:"destinations,omitempty"`
+	ManagedIngest             *ManagedIngest `json:"managed_ingest,omitempty"`
+	AutoUpdate                *AutoUpdate    `json:"auto_update,omitempty"`
 }
 
 // ManagedIngest records that this endpoint forwards to Asymptote managed ingest. It holds

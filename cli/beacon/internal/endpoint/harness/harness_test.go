@@ -79,7 +79,7 @@ func TestConfigureClaudeWritesTelemetryEnvAndBackup(t *testing.T) {
 		}
 	}
 	if got, set := env["OTEL_LOG_RAW_API_BODIES"]; set {
-		t.Fatalf("OTEL_LOG_RAW_API_BODIES = %q without the WebFetch capture opt-in", got)
+		t.Fatalf("OTEL_LOG_RAW_API_BODIES = %q without the model-context capture opt-in", got)
 	}
 	backups, err := filepath.Glob(path + ".beacon.*.bak")
 	if err != nil {
@@ -124,7 +124,7 @@ func TestConfigureClaudeEnablesPromptLogging(t *testing.T) {
 	}
 }
 
-// WebFetch capture is opt-in. The opt-in sets inline API bodies only where nothing is set, and
+// Model-context capture is opt-in. The opt-in sets inline API bodies only where nothing is set, and
 // install without it removes an inline setting, so a repair without the flag turns capture off.
 // Neither overrides 0 or file:<dir>.
 func TestConfigureClaudeRawBodiesFollowTheWebFetchOptIn(t *testing.T) {
@@ -163,7 +163,7 @@ func TestConfigureClaudeRawBodiesFollowTheWebFetchOptIn(t *testing.T) {
 				t.Fatal(err)
 			}
 			for range 2 {
-				if _, err := ConfigureClaude(ConfigureOptions{Endpoint: "http://127.0.0.1:4317", CaptureWebFetch: tc.capture}); err != nil {
+				if _, err := ConfigureClaude(ConfigureOptions{Endpoint: "http://127.0.0.1:4317", CaptureModelContext: tc.capture}); err != nil {
 					t.Fatal(err)
 				}
 			}

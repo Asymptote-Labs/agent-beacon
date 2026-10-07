@@ -40,9 +40,10 @@ type Harness struct {
 type ConfigureOptions struct {
 	Endpoint string
 	UserMode bool
-	// CaptureWebFetch has Claude Code log its API bodies so the collector can keep the pages
-	// WebFetch fetches. Off removes an inline setting a previous install wrote.
-	CaptureWebFetch bool
+	// CaptureModelContext has Claude Code log its API bodies so the collector can keep the context
+	// Claude Code gives the model that no other event reports, such as the pages WebFetch fetches.
+	// Off removes an inline setting a previous install wrote.
+	CaptureModelContext bool
 }
 
 type ValidationResult struct {
@@ -390,14 +391,14 @@ func ConfigureClaude(opts ConfigureOptions) (string, error) {
 	env["OTEL_LOG_USER_PROMPTS"] = "1"
 	// Inline API bodies carry the page WebFetch sends to its summarizer model, the
 	// only place Claude Code reports it, and also the system prompt and the whole
-	// conversation. The collector's claude_api_body processor keeps only the page,
+	// conversation. The collector's claude_api_body processor keeps only that context,
 	// but Claude Code is asked for them only on opt-in. Neither branch overrides 0 or
 	// file:<dir>; without the opt-in an inline value goes, so opting out works.
 	rawBodies, configured := env["OTEL_LOG_RAW_API_BODIES"]
 	switch {
-	case opts.CaptureWebFetch && !configured:
+	case opts.CaptureModelContext && !configured:
 		env["OTEL_LOG_RAW_API_BODIES"] = "1"
-	case !opts.CaptureWebFetch && claudeInlineRawBodies(rawBodies):
+	case !opts.CaptureModelContext && claudeInlineRawBodies(rawBodies):
 		delete(env, "OTEL_LOG_RAW_API_BODIES")
 	}
 	settings["env"] = env

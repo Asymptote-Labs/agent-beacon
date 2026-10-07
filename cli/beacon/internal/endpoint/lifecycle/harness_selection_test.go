@@ -92,7 +92,7 @@ func TestRepairWithExplicitEmptyHarnessesLeavesClaudeAndCodexConfigAlone(t *test
 	}
 }
 
-// WebFetch capture follows the flag of the install or repair that ran last: on with it, off again
+// Model-context capture follows the flag of the install or repair that ran last: on with it, off again
 // after a repair without it, in Claude Code's settings and in config.json alike.
 func TestClaudeWebFetchCaptureFollowsTheLatestInstallOrRepair(t *testing.T) {
 	testenv.RequirePOSIXExecutableFixtures(t)
@@ -135,10 +135,10 @@ func TestClaudeWebFetchCaptureFollowsTheLatestInstallOrRepair(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return cfg.ClaudeCaptureWebFetch
+		return cfg.ClaudeCaptureModelContext
 	}
 
-	opts.ClaudeCaptureWebFetch = true
+	opts.ClaudeCaptureModelContext = true
 	if _, err := Install(opts); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestClaudeWebFetchCaptureFollowsTheLatestInstallOrRepair(t *testing.T) {
 		t.Fatalf("after install with the flag: OTEL_LOG_RAW_API_BODIES = %q, recorded = %t; want 1 and true", value, recorded())
 	}
 
-	opts.ClaudeCaptureWebFetch = false
+	opts.ClaudeCaptureModelContext = false
 	if _, err := Repair(opts); err != nil {
 		t.Fatalf("Repair: %v", err)
 	}

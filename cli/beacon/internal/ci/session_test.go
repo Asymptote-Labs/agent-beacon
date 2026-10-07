@@ -180,7 +180,7 @@ func TestStartDetachedWritesStateAndExports(t *testing.T) {
 	}
 }
 
-// A CI job opts in to WebFetch capture by setting OTEL_LOG_RAW_API_BODIES itself.
+// A CI job opts in to model-context capture by setting OTEL_LOG_RAW_API_BODIES itself.
 func TestRunChildPassesTheCallersWebFetchOptIn(t *testing.T) {
 	testenv.RequirePOSIXExecutableFixtures(t)
 	dir := t.TempDir()

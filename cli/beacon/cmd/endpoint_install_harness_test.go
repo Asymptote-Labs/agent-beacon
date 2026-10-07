@@ -97,18 +97,18 @@ func TestEndpointRepairHookOnlyHarnessConfiguresNoOTLPRuntime(t *testing.T) {
 	assertNoOTLPHarnesses(t, "repair --harness omp", opts.Harnesses)
 }
 
-// WebFetch capture has Claude Code export every API body, so it stays off unless the flag asks for
+// Model-context capture has Claude Code export every API body, so it stays off unless the flag asks for
 // it, and repair takes it from its own flags like install, so a repair without it turns it off.
 func TestEndpointInstallAndRepairCaptureClaudeWebFetchOnlyWhenAsked(t *testing.T) {
 	for _, repair := range []bool{false, true} {
 		// The first recorded run restores every endpoint option when the test ends.
-		endpointOpts.claudeCaptureWebFetch = false
-		if opts := runRecordedEndpointCommand(t, repair, "claude"); opts.ClaudeCaptureWebFetch {
-			t.Fatalf("repair=%t: WebFetch capture is on without --claude-capture-web-fetch", repair)
+		endpointOpts.claudeCaptureModelContext = false
+		if opts := runRecordedEndpointCommand(t, repair, "claude"); opts.ClaudeCaptureModelContext {
+			t.Fatalf("repair=%t: Model-context capture is on without --claude-capture-model-context", repair)
 		}
-		endpointOpts.claudeCaptureWebFetch = true
-		if opts := runRecordedEndpointCommand(t, repair, "claude"); !opts.ClaudeCaptureWebFetch {
-			t.Fatalf("repair=%t: --claude-capture-web-fetch did not reach the lifecycle", repair)
+		endpointOpts.claudeCaptureModelContext = true
+		if opts := runRecordedEndpointCommand(t, repair, "claude"); !opts.ClaudeCaptureModelContext {
+			t.Fatalf("repair=%t: --claude-capture-model-context did not reach the lifecycle", repair)
 		}
 	}
 }

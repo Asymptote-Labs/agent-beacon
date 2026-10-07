@@ -39,7 +39,7 @@ func TestBuildHarnessConfigKeepsTheCallersClaudeDefaults(t *testing.T) {
 	if _, copied := cfg.Env["SECRET_TOKEN"]; copied {
 		t.Fatal("BuildHarnessConfig copied the caller's whole environment")
 	}
-	// WebFetch capture is the caller's opt-in: ci exec neither sets nor clears it, so whatever
+	// Model-context capture is the caller's opt-in: ci exec neither sets nor clears it, so whatever
 	// the caller's environment says reaches the child.
 	if got, set := cfg.Env["OTEL_LOG_RAW_API_BODIES"]; set {
 		t.Fatalf("OTEL_LOG_RAW_API_BODIES = %q, want it left to the caller's environment", got)
