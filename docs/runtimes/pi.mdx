@@ -92,8 +92,8 @@ Install writes one file and refuses to touch a `beacon.ts` it did not write, so 
 | Session lifecycle | Supported. `session.started` and `session.ended`, carrying why the session started or stopped |
 | Prompts | Supported. `prompt.submitted`, with whether the input was typed, delivered over RPC, or injected by another extension |
 | Tool use | Supported. `tool.invoked` before execution, then `tool.completed` or `tool.failed` |
-| Commands | Supported. `command.executed` for the agent's `bash` tool and for commands you run with Pi's `!` prefix, which are marked as operator-initiated |
-| File activity | Supported. `file.read`, `file.created`, and `file.modified`, with the unified patch on an edit |
+| Commands | Supported. `command.executed` for the agent's `bash` tool, with its output in `command.output`, and for commands you run with Pi's `!` prefix, which are marked as operator-initiated |
+| File activity | Supported. `file.read`, `file.created`, and `file.modified`, with the unified patch on an edit. A read's result is kept in `gen_ai.tool.call.result`, which rules match as `e.gen_ai.tool.call.result_text` |
 | Agent reasoning | Supported. `agent.reasoning` from an assistant message's thinking parts, in the OTel GenAI reasoning-part shape |
 | Token usage and cost | Supported. `token.usage` normalized into `gen_ai.usage`, including cache and reasoning tokens and runtime-reported cost |
 | Approval decisions | Not available. Pi exposes no operator approval decision to observe. See [Known gaps](#known-gaps) |

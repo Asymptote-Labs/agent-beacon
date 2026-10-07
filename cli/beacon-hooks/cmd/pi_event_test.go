@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -25,6 +26,33 @@ func piEventActions(t *testing.T, logPath string) []string {
 		actions = append(actions, meta["action"].(string))
 	}
 	return actions
+}
+
+// The tool results are mapped by the code the whole Pi family shares, so Pi's bash output and the
+// file it read reach the same fields Oh My Pi's do, under the path as Pi was given it.
+func TestPiToolResultsAreRecordedWhereRulesReadThem(t *testing.T) {
+	logPath := piTestLog(t)
+	runHookWithInput(t, runPiEvent, map[string]interface{}{
+		"type": "tool_result", "toolName": "bash", "toolCallId": "call-1", "sessionId": "sess-1",
+		"input": map[string]interface{}{"command": "cat notes.md"}, "isError": false,
+		"content": ompTextBlocks("Pi shell output marker"),
+	})
+	runHookWithInput(t, runPiEvent, map[string]interface{}{
+		"type": "tool_result", "toolName": "read", "toolCallId": "call-2", "sessionId": "sess-1",
+		"input": map[string]interface{}{"path": "notes.md"}, "isError": false,
+		"content": ompTextBlocks("Pi file content marker"),
+	})
+
+	if got := nested(t, piEventWithAction(t, logPath, "command.executed"), "command")["output"]; got != "Pi shell output marker" {
+		t.Fatalf("command.output = %v, want the bash tool's output", got)
+	}
+	read := piEventWithAction(t, logPath, "file.read")
+	if got := nested(t, read, "file")["path"]; got != "notes.md" {
+		t.Fatalf("file.path = %v, want the path as Pi was given it", got)
+	}
+	if !reflect.DeepEqual(fieldsToolCallResult(read), map[string]interface{}{"content": ompTextBlocks("Pi file content marker")}) {
+		t.Fatalf("gen_ai.tool.call.result = %v, want the file the model read", fieldsToolCallResult(read))
+	}
 }
 
 func piEventWithAction(t *testing.T, logPath, action string) map[string]interface{} {

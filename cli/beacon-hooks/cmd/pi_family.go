@@ -491,12 +491,16 @@ func isURIScheme(s string) bool {
 // On a runtime that resolves its tool paths, the runtime's own statement of the file is preferred,
 // because it is the one path that is certainly right: it is absolute, and any selector or `~` in
 // what the model wrote has already been resolved. A result whose source the runtime reports as a
-// URL or one of its own resources is not a file, whatever file backs it. A tool_call or an
+// URL or one of its own resources is not a file, whatever file backs it, except a skill, whose file
+// its author wrote (ompSkillFile). A tool_call or an
 // approval, which happen before the runtime has resolved anything, resolve the target the same way
 // the runtime will.
 func (f piFamily) filePath(call piToolCall, input map[string]interface{}, target string) string {
 	if f.resolvesToolPaths {
 		target = ompStripPathMarker(target)
+		if path := ompSkillFile(target, call.details); path != "" {
+			return path
+		}
 	}
 	path := piFilePath(target)
 	if path == "" || !f.resolvesToolPaths {
@@ -512,13 +516,34 @@ func (f piFamily) filePath(call piToolCall, input map[string]interface{}, target
 	return ompToolPath(path, resolveCwd(input, f.platform), runtime.GOOS, ompIsWSL())
 }
 
+// ompSkillFile returns the file a `read skill://…` result reports having read, or "".
+//
+// A skill is a file its author wrote, in the project's or the user's skill directories, and
+// `skill://<name>` is how the model reads its SKILL.md -- or, with a path after the name, a file the
+// skill bundles. That makes it the one internal resource whose backing file is not the runtime's
+// own storage, so it is recorded as the file read it is, under the path the result reports in
+// `resolvedPath`: the same row a read of that path records, and the SKILL.md read the Skills lens
+// and every other runtime's skill load are recognized by. A tool_call, an approval or a failed
+// read has no `resolvedPath`, and names no file.
+func ompSkillFile(target string, details map[string]interface{}) string {
+	scheme, _, ok := strings.Cut(target, "://")
+	if !ok || !strings.EqualFold(scheme, "skill") {
+		return ""
+	}
+	if path := getFirstStr(details, "resolvedPath"); filepath.IsAbs(path) {
+		return path
+	}
+	return ""
+}
+
 // piResolvedPath returns the absolute path a tool result reports having read or written, and
 // whether the result describes a file at all.
 //
 // Oh My Pi reports the path in three places, one per tool: a read names its source in
 // `meta.source`, a write names the file in `resolvedPath`, and an edit of one file names it in
 // `path`. A read whose source is a URL or an `internal` resource is not a file read, even when a
-// file in the runtime's own storage backs it and `resolvedPath` names that file.
+// file in the runtime's own storage backs it and `resolvedPath` names that file. A skill, whose
+// file is not the runtime's, is resolved before this; see ompSkillFile.
 func piResolvedPath(details map[string]interface{}) (string, bool) {
 	var path string
 	switch source := firstMap(firstMap(details, "meta"), "source"); getFirstStr(source, "type") {
@@ -896,8 +921,18 @@ func (f piFamily) toolResultEvents(input map[string]interface{}, fields map[stri
 	f.applyPythonResult(fields, name, input)
 	kernelWrites := f.pythonDiffEvents(name, input, fields)
 
+	// The result is what the tool returned to the model: a list of content blocks, which the
+	// runtime also keeps verbatim under `raw`. Recorded the way every capture path records one, and
+	// only where the shared scope puts it -- outside content and a shell's output -- because a
+	// write or an edit echoes what the agent itself produced.
+	blocks, _ := input["content"].([]interface{})
+	response := contentBlockResponse(blocks)
+	applyShellOutput(fields, name, blocks)
+
 	if isErr, ok := input["isError"].(bool); ok && isErr {
 		fields["error"] = map[string]interface{}{"type": "tool_error"}
+		// What a failing MCP server or web page returned still reached the model.
+		applyIngestedToolResult(fields, "tool.failed", name, response)
 		return append(f.one("tool.failed", "tool", "high", "tool failed", fields), kernelWrites...)
 	}
 
@@ -924,7 +959,26 @@ func (f piFamily) toolResultEvents(input map[string]interface{}, fields map[stri
 			action, category = "tool.completed", "tool"
 		}
 	}
+	applyIngestedToolResult(fields, action, name, response)
 	return append(f.one(action, category, "info", piToolMessageSuffix(action), fields), kernelWrites...)
+}
+
+// applyShellOutput records what the agent's `bash` tool printed as command.output, the field the
+// risky-command and exfiltration rules match on. The runtime reports no exit code, so none is
+// recorded, and the output is the text the model was given, the runtime's own trailing notes (Oh My
+// Pi's `Wall time`) included. The retention marker stays the command's: it is the more specific
+// claim, the same precedence applyPythonResult uses.
+func applyShellOutput(fields map[string]interface{}, toolName string, blocks []interface{}) {
+	if !strings.EqualFold(toolName, "bash") {
+		return
+	}
+	output := asymptoteobserve.ToolResultPlainText(blocks)
+	if output == "" {
+		return
+	}
+	command := mutableChild(fields["command"])
+	command["output"] = output
+	fields["command"] = command
 }
 
 // applyPythonMarker notes that a command block holds Python rather than a shell command line.

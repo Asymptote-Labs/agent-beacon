@@ -138,8 +138,9 @@ func RenderFieldsMarkdown() string {
 // rendered. TestEveryDerivedFieldIsDocumented requires one per field.
 var derivedFieldDocs = map[string]string{
 	ToolResultTextPath: "`gen_ai.tool.call.result` as text, only on read-type tool\n" +
-		"  results (`file.read`, `mcp.tool_invoked`, MCP-named tools, web fetch/search tools) whose\n" +
-		"  content was retained. String leaves of an object or list result are joined one per line;\n" +
+		"  results (`file.read`, `mcp.tool_invoked`, MCP-named tools, web fetch/search tools, a\n" +
+		"  `tool.path` that is an http(s) URL) whose content was retained. String leaves of an\n" +
+		"  object or list result are joined one per line;\n" +
 		"  content blocks in a list contribute their text without metadata or encoded bytes.\n" +
 		fmt.Sprintf("  Capped at %d bytes and secret-redacted like other retained text; empty otherwise.", ToolResultTextLimit),
 	SystemInstructionsTextPath: "`gen_ai.system_instructions` as text: the `content` of each\n" +

@@ -101,8 +101,8 @@ Install writes one file and refuses to touch a `beacon.ts` it did not write, so 
 | Session lifecycle | Supported. `session.started` and `session.ended`, carrying why the session started or stopped — a fork and a resume both produce a session with history behind it |
 | Prompts | Supported. `prompt.submitted`, with whether the input was typed, delivered over RPC, or injected by another extension |
 | Tool use | Supported. `tool.invoked` before execution, then `tool.completed` or `tool.failed` |
-| Commands | Supported. `command.executed` for the `bash` tool and for commands you run with the `!` prefix, which are marked as operator-initiated |
-| File activity | Supported. `file.read`, `file.created`, and `file.modified` for the `read`, `write`, and `edit` tools, the last carrying the unified patch |
+| Commands | Supported. `command.executed` for the `bash` tool, with its output in `command.output`, and for commands you run with the `!` prefix, which are marked as operator-initiated |
+| File activity | Supported. `file.read`, `file.created`, and `file.modified` for the `read`, `write`, and `edit` tools, the last carrying the unified patch. A read's result is kept in `gen_ai.tool.call.result`, which rules match as `e.gen_ai.tool.call.result_text` |
 | Agent reasoning | Supported. `agent.reasoning` from an assistant message's thinking parts, in the OTel GenAI reasoning-part shape |
 | Token usage and cost | Supported. `token.usage` normalized into `gen_ai.usage`, including cache and reasoning tokens and runtime-reported cost |
 | Approval decisions | Not available. Senpi exposes no operator approval decision through its extension API. See [Known gaps](#known-gaps) |

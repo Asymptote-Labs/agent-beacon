@@ -410,7 +410,10 @@ func applyIngestedToolResult(fields map[string]interface{}, action, toolName str
 	if len(toolResponse) == 0 {
 		return
 	}
-	if !asymptoteobserve.IngestedContentAction(action) && !asymptoteobserve.IngestedContentToolName(toolName) {
+	// The target is read from the event's own tool.path, the field the engine reads it from.
+	target, _ := mutableChild(fields["tool"])["path"].(string)
+	if !asymptoteobserve.IngestedContentAction(action) && !asymptoteobserve.IngestedContentToolName(toolName) &&
+		!asymptoteobserve.IngestedContentTarget(target) {
 		return
 	}
 	genAI := mutableChild(fields["gen_ai"])

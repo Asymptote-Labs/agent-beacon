@@ -402,6 +402,176 @@ func TestOmpEventFailedToolIsRecordedAsAFailure(t *testing.T) {
 	}
 }
 
+// ompTextBlocks is a tool result's content as Oh My Pi delivers it: a list of text blocks.
+func ompTextBlocks(texts ...string) []interface{} {
+	blocks := make([]interface{}, len(texts))
+	for i, text := range texts {
+		blocks[i] = map[string]interface{}{"type": "text", "text": text}
+	}
+	return blocks
+}
+
+// fieldsToolCallResult reads gen_ai.tool.call.result, the value e.gen_ai.tool.call.result_text is
+// derived from, or nil when the event carries none.
+func fieldsToolCallResult(event map[string]interface{}) interface{} {
+	genAI, _ := event["gen_ai"].(map[string]interface{})
+	tool, _ := genAI["tool"].(map[string]interface{})
+	call, _ := tool["call"].(map[string]interface{})
+	return call["result"]
+}
+
+// The payloads are Oh My Pi 18.6.3's, as a beacon-oracle run recorded them. Before this, every one
+// of these results was kept only under raw.omp, which no rule can match: the model read the file,
+// the page, the skill and the MCP reply, and nothing a detection reads held any of them.
+func TestOmpToolResultsAreRecordedWhereRulesReadThem(t *testing.T) {
+	// The runtime reports a skill's file as an absolute path on its own host, so the fixture's is
+	// one on the test's: `C:\...` on Windows, where a path from the root names no drive.
+	skillFile := filepath.Join(t.TempDir(), ".omp", "skills", "oracle-probe", "SKILL.md")
+	for _, tc := range []struct {
+		name    string
+		payload map[string]interface{}
+		action  string
+		// marker is text the result carries; "" means the result is out of scope and not recorded.
+		marker string
+		check  func(t *testing.T, event map[string]interface{})
+	}{
+		{
+			name: "file read", action: "file.read", marker: "File content marker BCN-5WWWUQ-D01",
+			payload: map[string]interface{}{
+				"toolName": "read", "input": map[string]interface{}{"path": "notes/canary.txt"},
+				"details": map[string]interface{}{"meta": map[string]interface{}{"source": map[string]interface{}{"type": "path", "value": "/home/agent/project/notes/canary.txt"}}},
+				"content": ompTextBlocks("[notes/canary.txt#5B60]\n1:File content marker BCN-5WWWUQ-D01."),
+			},
+		},
+		{
+			name: "web page through read", action: "tool.completed", marker: "Web page marker BCN-BALBZ7-D06",
+			payload: map[string]interface{}{
+				"toolName": "read", "input": map[string]interface{}{"path": "https://docs.fixture.test/guide"},
+				"details": map[string]interface{}{"url": "https://docs.fixture.test/guide", "meta": map[string]interface{}{"source": map[string]interface{}{"type": "url", "value": "https://docs.fixture.test/guide"}}},
+				"content": ompTextBlocks("URL: https://docs.fixture.test/guide\n\n---\n\n<p>Web page marker BCN-BALBZ7-D06.</p>"),
+			},
+		},
+		{
+			// A skill body is the skill author's file, read from disk: recorded as the read of that
+			// SKILL.md, the row the Skills lens and every other runtime's skill load are found by.
+			name: "skill body", action: "file.read", marker: "Skill body marker BCN-R5H6GL-C01",
+			payload: map[string]interface{}{
+				"toolName": "read", "input": map[string]interface{}{"path": "skill://oracle-probe"},
+				"details": map[string]interface{}{
+					"resolvedPath": skillFile,
+					"meta":         map[string]interface{}{"source": map[string]interface{}{"type": "internal", "value": "skill://oracle-probe"}},
+				},
+				"content": ompTextBlocks("[Skill file: " + skillFile + "]\n---\nname: oracle-probe\n---\nSkill body marker BCN-R5H6GL-C01.\n"),
+			},
+			check: func(t *testing.T, event map[string]interface{}) {
+				if got := nested(t, event, "file")["path"]; got != skillFile {
+					t.Fatalf("file.path = %v, want the SKILL.md the runtime read", got)
+				}
+				if got := nested(t, event, "tool")["path"]; got != "skill://oracle-probe" {
+					t.Fatalf("tool.path = %v, want the target as the model asked for it", got)
+				}
+			},
+		},
+		{
+			// Media is kept as its size and digest, the way the Claude Code hook records it: a stored
+			// copy of the bytes could never be decoded, and would spend the event's size budget.
+			name: "MCP result with media", action: "mcp.tool_invoked", marker: "Text block marker BCN-GRDUR6-D19",
+			payload: map[string]interface{}{
+				"toolName": "mcp__media_capture", "input": map[string]interface{}{"target": "screen"},
+				"details": map[string]interface{}{"serverName": "media", "mcpToolName": "capture"},
+				"content": []interface{}{
+					map[string]interface{}{"type": "text", "text": "Captured. Text block marker BCN-GRDUR6-D19."},
+					map[string]interface{}{"type": "image", "mimeType": "image/png", "data": "aW1hZ2UtYnl0ZXM="},
+				},
+			},
+			check: func(t *testing.T, event map[string]interface{}) {
+				blocks, _ := fieldsToolCallResult(event).(map[string]interface{})["content"].([]interface{})
+				image, _ := blocks[1].(map[string]interface{})
+				if _, kept := image["data"]; kept || image["bytes"] != float64(11) || image["sha256"] == "" {
+					t.Fatalf("image block = %v, want its size and digest in place of the bytes", image)
+				}
+			},
+		},
+		{
+			// What a failing server returned reached the model as well.
+			name: "failed MCP call", action: "tool.failed", marker: "MCP error marker",
+			payload: map[string]interface{}{
+				"toolName": "mcp__media_capture", "isError": true, "input": map[string]interface{}{"target": "screen"},
+				"details": map[string]interface{}{"serverName": "media", "mcpToolName": "capture"},
+				"content": ompTextBlocks("MCP error marker: capture device busy."),
+			},
+		},
+		{
+			// A shell's output has its own field; it is not recorded a second time as a result.
+			name: "shell output", action: "command.executed",
+			payload: map[string]interface{}{
+				"toolName": "bash", "input": map[string]interface{}{"command": "sh scripts/probe.sh"},
+				"details": map[string]interface{}{"wallTimeMs": 16.9},
+				"content": ompTextBlocks("Shell output marker BCN-MBS2GE-D03.\n\n\nWall time: 0.02 seconds"),
+			},
+			check: func(t *testing.T, event map[string]interface{}) {
+				command := nested(t, event, "command")
+				if command["output"] != "Shell output marker BCN-MBS2GE-D03.\n\n\nWall time: 0.02 seconds" || command["command"] != "sh scripts/probe.sh" {
+					t.Fatalf("command = %v, want the command and the output the model was given", command)
+				}
+			},
+		},
+		{
+			// A subagent's report is the runtime's own storage, not outside content.
+			name: "runtime resource", action: "tool.completed",
+			payload: map[string]interface{}{
+				"toolName": "read", "input": map[string]interface{}{"path": "agent://reviewer"},
+				"details": map[string]interface{}{
+					"resolvedPath": "/home/u/.omp/agent/sessions/s/agents/reviewer.md",
+					"meta":         map[string]interface{}{"source": map[string]interface{}{"type": "internal", "value": "agent://reviewer"}},
+				},
+				"content": ompTextBlocks("Subagent report."),
+			},
+		},
+		{
+			// A write's result echoes what the agent itself produced.
+			name: "file write", action: "file.created",
+			payload: map[string]interface{}{
+				"toolName": "write", "input": map[string]interface{}{"path": "/repo/out.md", "content": "notes"},
+				"details": map[string]interface{}{"resolvedPath": "/repo/out.md"},
+				"content": ompTextBlocks("Wrote /repo/out.md."),
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logPath := ompTestLog(t)
+			payload := cloneFields(tc.payload)
+			payload["type"], payload["toolCallId"], payload["sessionId"], payload["cwd"] = "tool_result", "call-1", "sess-1", "/home/agent/project"
+			if _, ok := payload["isError"]; !ok {
+				payload["isError"] = false
+			}
+			runHookWithInput(t, runOmpEvent, payload)
+
+			event := ompEventWithAction(t, logPath, tc.action)
+			result := fieldsToolCallResult(event)
+			if tc.marker == "" {
+				if result != nil {
+					t.Fatalf("gen_ai.tool.call.result = %v, want none for a result outside the scope", result)
+				}
+			} else {
+				if text := asymptoteobserve.ToolResultPlainText(result); !strings.Contains(text, tc.marker) {
+					t.Fatalf("gen_ai.tool.call.result = %v, want the content blocks the model read", result)
+				}
+				if content := nested(t, event, "content"); content["included"] != true {
+					t.Fatalf("content = %v, want the result's retention marker", content)
+				}
+			}
+			// raw keeps the payload verbatim whatever was promoted from it.
+			if !reflect.DeepEqual(nested(t, event, "raw", "omp")["content"], payload["content"]) {
+				t.Fatalf("raw.omp.content = %v, want the result as the runtime sent it", nested(t, event, "raw", "omp")["content"])
+			}
+			if tc.check != nil {
+				tc.check(t, event)
+			}
+		})
+	}
+}
+
 func TestOmpEventEditResultRecordsTheUnifiedPatch(t *testing.T) {
 	logPath := ompTestLog(t)
 	patch := "--- a/main.go\n+++ b/main.go\n@@ -1 +1 @@\n-old\n+new\n"

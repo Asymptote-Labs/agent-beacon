@@ -20,7 +20,8 @@ const ToolResultTextLimit = asymptoteobserve.DefaultStringLimit
 //
 //   - The event carries gen_ai.tool.call.result.
 //   - The event is a read-type tool result: file.read, mcp.tool_invoked, a tool named as an
-//     MCP tool (mcp__server__tool, MCP:tool), or a web fetch/search tool. These are the
+//     MCP tool (mcp__server__tool, MCP:tool), a web fetch/search tool, or a tool whose
+//     tool.path is an http or https URL. These are the
 //     results whose content came from somewhere other than the agent itself, which is where
 //     indirect prompt injection arrives. A shell command's output already has its own field
 //     (command.output), and a write or edit echoes what the agent produced.
@@ -94,6 +95,9 @@ func toolResultIsIngestedContent(event asymptoteobserve.Event) bool {
 		return true
 	}
 	if event.MCP != nil && (event.MCP.Server != "" || event.MCP.Tool != "") {
+		return true
+	}
+	if event.Tool != nil && asymptoteobserve.IngestedContentTarget(event.Tool.Path) {
 		return true
 	}
 	for _, name := range toolNames(event) {
