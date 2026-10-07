@@ -397,21 +397,27 @@ func resolveToolResponse(input map[string]interface{}) map[string]interface{} {
 			}
 		}
 	}
-	// Claude Code sends an MCP tool's result as a bare list of content blocks. It is kept under
-	// "content", where an MCP CallToolResult holds its blocks, so the result reads the same
-	// whichever path recorded it. A list from any other runtime is read the same way: until this,
-	// every list response was dropped. An empty list is a result with no content.
+	// Claude Code sends an MCP tool's result as a bare list of content blocks. A list from any
+	// other runtime is read the same way: until this, every list response was dropped.
 	if content, ok := input["tool_response"].([]interface{}); ok {
-		if len(content) == 0 {
-			return nil
-		}
-		return map[string]interface{}{"content": asymptoteobserve.SummarizeEncodedContent(content)}
+		return contentBlockResponse(content)
 	}
 	// If tool_response is a plain string, wrap it for downstream compatibility
 	if respStr, ok := input["tool_response"].(string); ok && respStr != "" {
 		return map[string]interface{}{"result": respStr}
 	}
 	return nil
+}
+
+// contentBlockResponse is a tool result that arrived as a list of content blocks, in the shape every
+// capture path records one: under "content", where an MCP CallToolResult holds its blocks, so a
+// result reads the same whichever path or runtime recorded it, with each block's encoded bytes
+// replaced by their size and digest. An empty list is a result with no content.
+func contentBlockResponse(blocks []interface{}) map[string]interface{} {
+	if len(blocks) == 0 {
+		return nil
+	}
+	return map[string]interface{}{"content": asymptoteobserve.SummarizeEncodedContent(blocks)}
 }
 
 func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) {

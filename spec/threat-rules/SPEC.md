@@ -150,7 +150,8 @@ the steps in both orders still fires once. A single event never satisfies two st
   the same way. Objects outside a list are never treated as content blocks. It is
   the empty string unless the event is a read-type tool result — `event.action` is
   `file.read` or `mcp.tool_invoked`, `mcp.server`/`mcp.tool` is set, or the tool is named
-  as an MCP tool (`mcp__…`, `MCP:…`) or a web fetch/search tool — and its `content`
+  as an MCP tool (`mcp__…`, `MCP:…`) or a web fetch/search tool, or `tool.path` is an
+  `http` or `https` URL with a host — and its `content`
   marker, if present, is `included` with a `retention` other than `metadata`. The
   reference derivation is `threatrules.ToolResultText`.
 - `e.gen_ai.system_instructions_text` is derived under the same rules (computed, never

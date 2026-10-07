@@ -27,6 +27,15 @@ func TestIngestedContentScope(t *testing.T) {
 			t.Errorf("IngestedContentToolName(%q) = %v, want %v", name, got, want)
 		}
 	}
+	for target, want := range map[string]bool{
+		"https://docs.example/guide": true, "HTTP://docs.example/guide": true, " https://x.test ": true,
+		"https://": false, "/repo/NOTES.md": false, "notes.md": false, "file:///repo/NOTES.md": false,
+		"skill://review": false, "mcp://notes/1": false, "ftp://files.example/a": false, "": false,
+	} {
+		if got := IngestedContentTarget(target); got != want {
+			t.Errorf("IngestedContentTarget(%q) = %v, want %v", target, got, want)
+		}
+	}
 }
 
 func TestToolResultPlainText(t *testing.T) {

@@ -123,6 +123,26 @@ func TestToolResultTextEmptyWhenContentNotRetained(t *testing.T) {
 	})
 }
 
+// Oh My Pi's `read` fetches a URL as well as a file, and is recorded as a `read` with the URL as its
+// target. Only the target places the page in scope: the action is tool.completed and the name is
+// the file tool's.
+func TestToolResultTextReadsAResultFromAWebTarget(t *testing.T) {
+	for path, want := range map[string]bool{
+		"https://docs.example/guide": true, "HTTP://docs.example/guide": true,
+		"/repo/NOTES.md": false, "file:///repo/NOTES.md": false, "skill://guide": false, "https://": false,
+	} {
+		t.Run(path, func(t *testing.T) {
+			event := toolResultEvent("tool.completed", "read", map[string]interface{}{"content": []interface{}{
+				map[string]interface{}{"type": "text", "text": injectedNotes},
+			}})
+			event.Tool.Path = path
+			if got := mustMatch(t, `e.gen_ai.tool.call.result_text.matches("SYSTEM OVERRIDE")`, event); got != want {
+				t.Fatalf("matched = %v, want %v; derived text = %q", got, want, ToolResultText(event))
+			}
+		})
+	}
+}
+
 func TestToolResultTextNotPopulatedForOtherActions(t *testing.T) {
 	cases := map[string]asymptoteobserve.Event{
 		"command.executed": toolResultEvent("command.executed", "Bash", injectedNotes),

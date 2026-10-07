@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"maps"
+	"net/url"
 	"slices"
 	"strings"
 )
@@ -14,10 +15,10 @@ import (
 // from outside the agent -- a file it read, an MCP server's reply -- and so is where indirect
 // prompt injection arrives.
 //
-// This and IngestedContentToolName are the one definition of that scope. The threat-rules engine
-// reads them to decide which events expose gen_ai.tool.call.result_text, and the hook adapter
-// reads them to decide which tool results it records, so a capture path cannot drop a result the
-// engine would have matched on, or record one the engine ignores.
+// This, IngestedContentToolName and IngestedContentTarget are the one definition of that scope.
+// The threat-rules engine reads them to decide which events expose gen_ai.tool.call.result_text,
+// and the hook adapter reads them to decide which tool results it records, so a capture path
+// cannot drop a result the engine would have matched on, or record one the engine ignores.
 func IngestedContentAction(action string) bool {
 	switch action {
 	case "file.read", "mcp.tool_invoked":
@@ -43,6 +44,20 @@ func IngestedContentToolName(name string) bool {
 		return true
 	}
 	return false
+}
+
+// IngestedContentTarget reports whether a tool's target, its tool.path, is a web address: an
+// http or https URL with a host. Whatever the tool is called, its result came from that server.
+//
+// It exists for the runtimes whose general-purpose tools also fetch: Oh My Pi's `read` takes a URL
+// as well as a path and returns the page, recorded as a `read` with the URL as its target, which
+// neither the action nor the tool's name places in scope.
+func IngestedContentTarget(target string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(target))
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	return strings.EqualFold(parsed.Scheme, "http") || strings.EqualFold(parsed.Scheme, "https")
 }
 
 // ToolResultPlainText renders a tool result as text: a string as is; for an object or list (a
