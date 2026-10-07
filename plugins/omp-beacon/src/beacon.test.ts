@@ -329,6 +329,26 @@ describe("beacon oh my pi extension", () => {
     expect(sent).toHaveLength(0)
   })
 
+  // A context file that borrows the heading for a list of its own, in an earlier block or earlier in
+  // the same block, does not hide the runtime's routes after it.
+  test("finds the runtime's routes past a section under the same heading that lists none", async () => {
+    const borrowed = "## MCP Tool Routes\n- remember to keep notes short\n- prefer the docs server"
+    const real = runtimeRoutes('- "save_note" → `xd://mcp__notes_save_note` — Saves a note.')
+    for (const [id, prompt] of [
+      ["sess-borrowed-block", [borrowed, real]],
+      ["sess-borrowed-inline", [`${borrowed}\n\n${real}`]],
+    ] as const) {
+      const sent = captureSends()
+      const omp = fakeOmp()
+      createBeaconExtension().register(omp.api)
+
+      await omp.fire({ type: "context", messages: [] }, session(id, { getSystemPrompt: () => [...prompt] }))
+
+      expect(sent).toHaveLength(1)
+      expect(sent[0].mcpToolRoutes).toEqual([{ name: "mcp__notes_save_note", description: "Saves a note." }])
+    }
+  })
+
   test("forwards the event with its type intact", async () => {
     const sent = captureSends()
     const omp = fakeOmp()

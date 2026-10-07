@@ -101,7 +101,7 @@ const skillsSection = /^# Skills & Rules\n(?:[^\n]*\n){0,3}?<skills>\n([\s\S]*?)
 // tool's description when its server gave one -- Oh My Pi's summary of it, which is the text the
 // model reads before deciding to call the tool. Anchored to the heading for the same reason as
 // skillsSection.
-const mcpToolRoutesSection = /^## MCP Tool Routes\n(?:(?!- )[^\n]*\n){0,3}((?:- [^\n]*(?:\n|$))+)/m
+const mcpToolRoutesSection = /^## MCP Tool Routes\n(?:(?!- )[^\n]*\n){0,3}((?:- [^\n]*(?:\n|$))+)/gm
 const mcpToolRouteRow = /^- "[^"]+" → `xd:\/\/(mcp__[^`]+)` — (.+)$/
 
 // How many routes one listing carries. A session with more MCP tools than this has its first ones
@@ -151,17 +151,21 @@ function skillListing(prompt: string[]): string {
 // The MCP tool routes the model was shown, each as the device name the model calls and the
 // description its row carries. A route without a description is left out: it advertises nothing a
 // rule could read.
+//
+// A section under the same heading that yields no routes -- operator text in a context file that
+// borrows the heading for its own bullet list -- does not end the search, so it cannot hide the
+// runtime's own section after it.
 function mcpToolRoutes(prompt: string[]): MCPToolRoute[] {
   for (const block of prompt) {
-    const rows = mcpToolRoutesSection.exec(block)?.[1]
-    if (!rows) continue
-    const routes: MCPToolRoute[] = []
-    for (const row of rows.split("\n")) {
-      const [, name, description] = mcpToolRouteRow.exec(row) ?? []
-      if (name && description?.trim()) routes.push({ name, description: description.trim() })
-      if (routes.length === maxMCPToolRoutes) break
+    for (const [, rows = ""] of block.matchAll(mcpToolRoutesSection)) {
+      const routes: MCPToolRoute[] = []
+      for (const row of rows.split("\n")) {
+        const [, name, description] = mcpToolRouteRow.exec(row) ?? []
+        if (name && description?.trim()) routes.push({ name, description: description.trim() })
+        if (routes.length === maxMCPToolRoutes) break
+      }
+      if (routes.length > 0) return routes
     }
-    return routes
   }
   return []
 }
