@@ -10,6 +10,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/diff"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 var postToolCmd = &cobra.Command{
@@ -395,6 +396,16 @@ func resolveToolResponse(input map[string]interface{}) map[string]interface{} {
 				return map[string]interface{}{"result": result}
 			}
 		}
+	}
+	// Claude Code sends an MCP tool's result as a bare list of content blocks. It is kept under
+	// "content", where an MCP CallToolResult holds its blocks, so the result reads the same
+	// whichever path recorded it. A list from any other runtime is read the same way: until this,
+	// every list response was dropped. An empty list is a result with no content.
+	if content, ok := input["tool_response"].([]interface{}); ok {
+		if len(content) == 0 {
+			return nil
+		}
+		return map[string]interface{}{"content": asymptoteobserve.SummarizeEncodedContent(content)}
 	}
 	// If tool_response is a plain string, wrap it for downstream compatibility
 	if respStr, ok := input["tool_response"].(string); ok && respStr != "" {

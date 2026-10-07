@@ -214,7 +214,7 @@ func TestHookEventsCarryAnEventID(t *testing.T) {
 func TestQwenFileEditCarriesBothTheCallIDAndTheRawPayload(t *testing.T) {
 	logPath := setupQwenHook(t)
 
-	runHookWithInput(t, runPostTool, readQwenFixture(t, "post_tool_write_file.json"))
+	runHookWithInput(t, runPostTool, readHookFixture(t, "qwen", "post_tool_write_file.json"))
 
 	event := lastEndpointEvent(t, logPath)
 	if got := qwenAction(t, event); got != "file.modified" {

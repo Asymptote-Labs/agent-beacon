@@ -28,7 +28,9 @@ const ToolResultTextLimit = asymptoteobserve.DefaultStringLimit
 //     retention other than "metadata").
 //
 // A string result is used as is. An object or list result -- a hook's tool_response, an MCP
-// content-block list -- contributes every string it contains, in key order, one per line.
+// content-block list -- contributes every string it contains, in key order, one per line,
+// except that a content block in a list contributes its text without its metadata or encoded
+// bytes (asymptoteobserve.ToolResultPlainText says exactly which fields).
 // The text is then capped at ToolResultTextLimit and passed through the same secret redaction
 // the writers apply, so a rule never sees more than was retained and never sees a credential
 // the writer would have removed, whichever path produced the event.

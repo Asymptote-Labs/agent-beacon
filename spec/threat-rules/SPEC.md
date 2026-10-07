@@ -142,7 +142,12 @@ the steps in both orders still fires once. A single event never satisfies two st
   compute it from the event before evaluation, and MUST ignore any value an input
   claims for it. It is `gen_ai.tool.call.result` as text (a string as is; for an object
   or list, every string it contains, maps in sorted key order, joined by `\n`, trimmed),
-  capped at 4096 bytes and passed through the event writer's secret redaction. It is
+  capped at 4096 bytes and passed through the event writer's secret redaction. One case
+  differs: a list element whose `type` is `text`, `image`, `audio`, `document`,
+  `resource` or `resource_link` is a content block, and contributes none of its `type`,
+  `mimeType`, `annotations`, `_meta` or `sha256` fields, no string `data` or `blob`, and
+  no `source` whose `type` is `base64`; the embedded object of a `resource` block is read
+  the same way. Objects outside a list are never treated as content blocks. It is
   the empty string unless the event is a read-type tool result — `event.action` is
   `file.read` or `mcp.tool_invoked`, `mcp.server`/`mcp.tool` is set, or the tool is named
   as an MCP tool (`mcp__…`, `MCP:…`) or a web fetch/search tool — and its `content`

@@ -1,0 +1,55 @@
+{
+  "session_id": "f55ad3fe-6c94-4a38-99c3-37ed657bcd04",
+  "transcript_path": "/home/agent/.claude/projects/-home-agent-project/f55ad3fe-6c94-4a38-99c3-37ed657bcd04.jsonl",
+  "cwd": "/home/agent/project",
+  "prompt_id": "32104abc-03f2-49cb-84d8-e9cc4f7d8f0b",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "mcp__media__capture",
+  "tool_input": {
+    "target": "screen"
+  },
+  "tool_response": [
+    {
+      "type": "text",
+      "text": "Captured. Text block marker BCN-53KWBK-D19."
+    },
+    {
+      "type": "image",
+      "source": {
+        "type": "base64",
+        "media_type": "image/png",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAbElEQVR4nBXNQRUAUQhCUaMYhShGeVGIQhSizB+XXA7ODDtouIHBQ4YOM8suWm5h8ZKl+0CskDiBsIioHhx76LiDw0eO3oN/4FVf+J8h0PduzBqZ8x/bxNQPwgaFy192SGgelC0q13/CJaXlA8Z7WAGfV950AAAAAElFTkSuQmCC"
+      }
+    },
+    {
+      "type": "text",
+      "text": "[Image: source: /home/agent/.claude/projects/-home-agent-project/f55ad3fe-6c94-4a38-99c3-37ed657bcd04/tool-results/mcp-media-blob-1791381677084-ederrn.png]"
+    },
+    {
+      "type": "text",
+      "text": "[Audio from media] Binary content (audio/wav, 60 bytes) saved to /home/agent/.claude/projects/-home-agent-project/f55ad3fe-6c94-4a38-99c3-37ed657bcd04/tool-results/mcp-media-blob-1791381677084-t7hwkp.wav"
+    },
+    {
+      "type": "text",
+      "text": "[Resource from media at file:///captures/notes.txt] Notes resource marker BCN-53KWBK-D19R."
+    },
+    {
+      "type": "text",
+      "text": "[Resource from media at file:///captures/raw.bin] Binary content (application/octet-stream, 48 bytes) saved to /home/agent/.claude/projects/-home-agent-project/f55ad3fe-6c94-4a38-99c3-37ed657bcd04/tool-results/mcp-media-blob-1791381677084-mbrhrg.bin"
+    },
+    {
+      "type": "text",
+      "text": "[Resource link: Report link marker BCN-53KWBK-D19L] file:///captures/report.pdf"
+    }
+  ],
+  "tool_use_id": "toolu_oracle_00",
+  "duration_ms": 3,
+  "mcp_server": {
+    "name": "media",
+    "source": "user"
+  }
+}

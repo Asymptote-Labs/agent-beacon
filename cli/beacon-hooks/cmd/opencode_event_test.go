@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -61,7 +60,7 @@ func TestOpenCodeEventFixtureRecordsPrompt(t *testing.T) {
 	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
 	t.Setenv("BEACON_CONTENT_RETENTION", "full")
 
-	input := readOpenCodeFixture(t, "chat_message.json")
+	input := readHookFixture(t, "opencode", "chat_message.json")
 	runHookWithInput(t, runOpenCodeEvent, input)
 	event := lastEndpointEvent(t, logPath)
 	if action := event["event"].(map[string]interface{})["action"]; action != "prompt.submitted" {
@@ -83,7 +82,7 @@ func TestOpenCodeFixtureContracts(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {
-			input := readOpenCodeFixture(t, tt.file)
+			input := readHookFixture(t, "opencode", tt.file)
 			sessionID := resolveSessionID(input, "opencode")
 			action, category, _, _, fields := opencodeEndpointEvent(input, sessionID)
 			if action != tt.action || category != tt.category {
@@ -590,19 +589,6 @@ func forwardedEventsFromPluginSource(t *testing.T, source string) []string {
 		}
 	}
 	return events
-}
-
-func readOpenCodeFixture(t *testing.T, name string) map[string]interface{} {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "testdata", "opencode", name))
-	if err != nil {
-		t.Fatalf("read opencode fixture %s: %v", name, err)
-	}
-	var payload map[string]interface{}
-	if err := json.Unmarshal(data, &payload); err != nil {
-		t.Fatalf("decode opencode fixture %s: %v", name, err)
-	}
-	return payload
 }
 
 // OpenCode stores tokens.output with reasoning already subtracted (getUsage in

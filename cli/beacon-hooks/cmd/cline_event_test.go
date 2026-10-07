@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,19 +39,6 @@ func clineEventWithAction(t *testing.T, logPath, action string) map[string]inter
 	}
 	t.Fatalf("no %s event in log; got %v", action, clineEventActions(t, logPath))
 	return nil
-}
-
-func readClineFixture(t *testing.T, name string) map[string]interface{} {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "testdata", "cline", name))
-	if err != nil {
-		t.Fatalf("read cline fixture %s: %v", name, err)
-	}
-	var payload map[string]interface{}
-	if err := json.Unmarshal(data, &payload); err != nil {
-		t.Fatalf("decode cline fixture %s: %v", name, err)
-	}
-	return payload
 }
 
 func nested(t *testing.T, event map[string]interface{}, keys ...string) map[string]interface{} {
@@ -222,7 +208,7 @@ func TestClineEventResolvesWorkspaceRelativePaths(t *testing.T) {
 
 func TestClineEventWriteToFileRecordsDiff(t *testing.T) {
 	logPath := clineTestLog(t)
-	runHookWithInput(t, runClineEvent, readClineFixture(t, "tool_after_write.json"))
+	runHookWithInput(t, runClineEvent, readHookFixture(t, "cline", "tool_after_write.json"))
 
 	event := clineEventWithAction(t, logPath, "file.modified")
 	file := nested(t, event, "file")
@@ -280,7 +266,7 @@ func TestClineEventReplaceInFilePassesTheDiffThrough(t *testing.T) {
 
 func TestClineEventExecuteCommandRecordsCommand(t *testing.T) {
 	logPath := clineTestLog(t)
-	runHookWithInput(t, runClineEvent, readClineFixture(t, "tool_after_command.json"))
+	runHookWithInput(t, runClineEvent, readHookFixture(t, "cline", "tool_after_command.json"))
 
 	event := clineEventWithAction(t, logPath, "command.executed")
 	command := nested(t, event, "command")
@@ -381,7 +367,7 @@ func TestClineEventFileActionWithoutAPathBecomesToolCompleted(t *testing.T) {
 
 func TestClineEventTaskEndRecordsUsage(t *testing.T) {
 	logPath := clineTestLog(t)
-	runHookWithInput(t, runClineEvent, readClineFixture(t, "run_end_usage.json"))
+	runHookWithInput(t, runClineEvent, readHookFixture(t, "cline", "run_end_usage.json"))
 
 	event := clineEventWithAction(t, logPath, "session.ended")
 	usage := nested(t, event, "gen_ai", "usage")

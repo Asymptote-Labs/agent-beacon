@@ -1,0 +1,22 @@
+{
+  "session_id": "f55ad3fe-6c94-4a38-99c3-37ed657bcd04",
+  "transcript_path": "/home/agent/.claude/projects/-home-agent-project/f55ad3fe-6c94-4a38-99c3-37ed657bcd04.jsonl",
+  "cwd": "/home/agent/project",
+  "prompt_id": "32104abc-03f2-49cb-84d8-e9cc4f7d8f0b",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "mcp__media__clear",
+  "tool_input": {
+    "target": "screen"
+  },
+  "tool_response": [],
+  "tool_use_id": "toolu_oracle_01",
+  "duration_ms": 1,
+  "mcp_server": {
+    "name": "media",
+    "source": "user"
+  }
+}
