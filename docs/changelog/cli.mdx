@@ -11,6 +11,7 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## October 2026
 
+- **Model-visible MCP tool descriptions on Oh My Pi** · The Oh My Pi extension reads the MCP tool routes from the same system prompt as the skill index and records one `mcp.tool_listed` per described tool, with the description the model was shown in `gen_ai.tool.description`. Each session sends a listing once and again only when it changes. `mcp-poisoned-tool-description` (now version 2) matches these listings as well as `mcp.tool_invoked`, so a poisoned description is flagged when the model sees it rather than only once the tool runs. Metadata-only managed forwarding removes `gen_ai.tool.description` and keeps the tool name.
 - **Opt-in capture of Claude Code model context** · `beacon endpoint install
   --claude-capture-model-context` (and the same flag on `repair`) turns on Claude
   Code's API-body logs, so Beacon can record context Claude Code gives the model

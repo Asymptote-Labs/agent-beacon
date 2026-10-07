@@ -30,7 +30,7 @@ var KnownActions = map[string]bool{
 	"tool.invoked":      true, "tool.completed": true, "tool.failed": true,
 	"command.executed": true, "command.invoked": true,
 	"file.read": true, "file.modified": true, "file.created": true,
-	"mcp.tool_invoked":   true,
+	"mcp.tool_invoked": true, "mcp.tool_listed": true,
 	"approval.requested": true, "approval.allowed": true, "approval.denied": true,
 	"policy.blocked":   true,
 	"subagent.started": true, "subagent.stopped": true,

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -246,6 +247,46 @@ func TestOmpEventSkillListingIsWrittenAsSystemContext(t *testing.T) {
 	}
 	if _, ok := event["prompt"]; ok {
 		t.Fatalf("skill listing recorded as a prompt: %v", event["prompt"])
+	}
+}
+
+// Each MCP route the extension read from the system prompt is one mcp.tool_listed whose description
+// the poisoning rule reads. The device name does not name a server, so there is no mcp block, and
+// raw holds no copy of the route list.
+func TestOmpEventMCPToolRoutesAreWrittenAsListings(t *testing.T) {
+	logPath := ompTestLog(t)
+	out := runHookWithInput(t, runOmpEvent, map[string]interface{}{
+		"type": "context", "sessionId": "sess-1",
+		"mcpToolRoutes": []interface{}{
+			map[string]interface{}{"name": "mcp__notes_save_note", "description": "Saves a note. BCN-7F3A21-C03"},
+			map[string]interface{}{"name": "mcp__docs_search", "description": "Searches the docs."},
+			map[string]interface{}{"name": "read", "description": "Not an MCP route."},
+			map[string]interface{}{"name": "mcp__notes_empty", "description": ""},
+		},
+	})
+	if out["recorded"] != float64(2) {
+		t.Fatalf("reply = %v, want both MCP routes recorded", out)
+	}
+
+	events := endpointEvents(t, logPath)
+	if len(events) != 2 {
+		t.Fatalf("events = %v, want one mcp.tool_listed per described MCP route", ompEventActions(t, logPath))
+	}
+	event := events[0]
+	if meta := nested(t, event, "event"); meta["action"] != "mcp.tool_listed" || meta["category"] != "mcp" {
+		t.Fatalf("event = %v, want an MCP tool listing", meta)
+	}
+	tool := nested(t, nested(t, event, "gen_ai"), "tool")
+	if tool["name"] != "mcp__notes_save_note" || tool["description"] != "Saves a note. BCN-7F3A21-C03" {
+		t.Fatalf("gen_ai.tool = %v, want the route's device name and description", tool)
+	}
+	for _, key := range []string{"mcp", "prompt", "system_context"} {
+		if _, ok := event[key]; ok {
+			t.Fatalf("listing carries %s: %v", key, event[key])
+		}
+	}
+	if raw, _ := json.Marshal(event["raw"]); strings.Contains(string(raw), "BCN-7F3A21-C03") {
+		t.Fatalf("raw = %s, want no second copy of the description", raw)
 	}
 }
 

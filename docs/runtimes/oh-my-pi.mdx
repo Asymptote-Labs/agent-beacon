@@ -107,6 +107,7 @@ Unlike Pi, a project-level install needs no trust prompt: Oh My Pi loads `.omp` 
 | MCP activity | Supported. `tool.invoked` then `mcp.tool_invoked`, whether the model called the tool directly or through its `xd://` device. `mcp.server` and `mcp.tool` are the server's configured name and the tool's own name, read from the result Oh My Pi reports. A `read mcp://<uri>` is recorded as an MCP `resources/read` with `mcp.resource.uri` |
 | Agent reasoning | Supported. `agent.reasoning` from an assistant message's thinking parts, in the OTel GenAI reasoning-part shape |
 | Model-visible skill listings | Supported through the `context` event's `ctx.getSystemPrompt()`; Beacon retains only the `<skills>` index under the system prompt's `# Skills & Rules` heading, one part per skill in `gen_ai.system_instructions` with the skills named in `system_context`, not the full system prompt or skill bodies |
+| Model-visible MCP tool descriptions | Supported through the same `context` event. Beacon reads only the rows under the system prompt's `## MCP Tool Routes` heading and records one `mcp.tool_listed` per described tool, with the device name in `gen_ai.tool.name` and the description in `gen_ai.tool.description`, once per session and again when it changes |
 | Token usage and cost | Supported. `token.usage` normalized into `gen_ai.usage`, including cache and reasoning tokens and runtime-reported cost |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported for the endpoint agent. The extension installs separately in the logged-in user's context |
@@ -168,12 +169,26 @@ system prompt, from which Beacon extracts only the `<skills>` index under the
 operator prompt. Other system-prompt instructions and the conversation messages
 delivered with `context` are discarded by the extension.
 
+The extension also reads the MCP tool routes from the same prompt: the rows under
+the `## MCP Tool Routes` heading, one per MCP tool Oh My Pi mounts as an `xd://`
+device. Each described row becomes an `mcp.tool_listed` event with the device name
+in `gen_ai.tool.name` and the row's description in `gen_ai.tool.description`, which
+is the text `mcp-poisoned-tool-description` matches. The description is Oh My Pi's
+summary of what the server advertised, the text the model reads before choosing a
+tool. The full schema is a `read` of the device away, and that read is recorded as
+the tool call it is. There is no `mcp` block, because the device name does not
+name the server. A listing is a per-session advertisement, not a call: it is sent
+the first time a session shows it and again only when a description changes, and
+the skill index and the routes are tracked separately, so a change to one does
+not resend the other. Metadata-only managed forwarding removes the description
+before upload and keeps the tool name.
+
 The extension itself sends nothing over the network. It spawns the local `beacon-hooks` binary with a fixed argv and writes the event to its stdin. A send that has not completed in two seconds is abandoned so Beacon cannot stall Oh My Pi's agent loop, and a failure to spawn costs the event rather than the run. Every handler returns nothing, so Oh My Pi never reads a directive back from Beacon — the extension cannot block a tool call, revise its arguments, or answer a question that was put to the operator.
 
 ## Known gaps
 
 - **No enforcement.** As with every other runtime, enforcement stays behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`), which is not wired to Oh My Pi. Its blocking `tool_call` handler and its approval events make it a viable target for that seam later.
-- **Streaming events are not collected.** The extension subscribes to eleven of Oh My Pi's event types and ignores the rest, which are provider-request internals, streaming message updates, compaction and retry signals, and TUI plumbing. The `context` event is narrowly used only to extract the skill index from the supported system-prompt accessor; its conversation messages are discarded. Assistant output is recorded once when a message finalizes rather than token by token, so Beacon stays out of the streaming path.
+- **Streaming events are not collected.** The extension subscribes to eleven of Oh My Pi's event types and ignores the rest, which are provider-request internals, streaming message updates, compaction and retry signals, and TUI plumbing. The `context` event is narrowly used only to extract the skill index and the MCP tool routes from the supported system-prompt accessor; its conversation messages are discarded. Assistant output is recorded once when a message finalizes rather than token by token, so Beacon stays out of the streaming path.
 - **MCP notifications are not collected.** `mcp_notification` fires for every JSON-RPC notification a connected server sends, most of them routine tools and resources list refreshes. It describes MCP transport plumbing rather than an action the agent took. MCP tool calls the agent makes *are* collected.
 - **One profile at a time.** Beacon installs into the active profile, named by `OMP_PROFILE` or `PI_PROFILE`, or into the default profile. It does not enumerate `~/.omp/profiles/`, so instrumenting another profile means running the install with that profile's variable set.
 - **Print and ACP prompts are recorded as delivered, not as typed.** Oh My Pi expands slash commands, prompt templates, and model mentions before it delivers a user message, so on print and ACP `prompt.text` holds the expanded text, which can include a template's body, and carries no input source. Runtime-generated turns, messages one agent hands another, and subagent tasks are not recorded as prompts. A message an extension sends as the user is, because Oh My Pi attributes it to the user. `/skill:` invocations are delivered as a different message type and are not recorded on these surfaces.

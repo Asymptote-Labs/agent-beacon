@@ -130,20 +130,21 @@ func (f piFamily) endpointEvents(input map[string]interface{}, sessionID string)
 		return events
 
 	case "context":
-		// The skill index the model was shown, which the extension reads from the system prompt
-		// and sends in place of the event itself. It is system context, not a prompt: the operator
-		// did not write it, so it is never recorded under `prompt` or as input.
+		// What the extension read from the system prompt, sent in place of the event itself: the
+		// skill index, or the MCP tool routes. The skill index is system context, not a prompt:
+		// the operator did not write it, so it is never recorded under `prompt` or as input.
+		routes := f.mcpToolListedEvents(input, sessionID)
 		listing := asymptoteobserve.ParseSkillListing(asymptoteobserve.SystemContextSourceSystemPrompt, getFirstStr(input, "skillListing"), nil)
 		skill := listing.Fields(asymptoteobserve.DefaultStringLimit)
 		if skill == nil {
-			return nil
+			return routes
 		}
 		fields["gen_ai"] = mergeNested(fields["gen_ai"], skill["gen_ai"].(map[string]interface{}))
 		fields["system_context"] = skill["system_context"]
 		fields["content"] = skill["content"]
 		// baseFields copied the whole input under raw, which would store the listing a second time.
 		fields["raw"] = map[string]interface{}{f.platform: map[string]interface{}{"type": "context"}}
-		return f.one("session.context", "session", "info", "system skill listing exposed to the model", fields)
+		return append(f.one("session.context", "session", "info", "system skill listing exposed to the model", fields), routes...)
 
 	case "tool_call":
 		// The pre-execution half of a tool call: the runtime has decided to run it and named its
@@ -891,6 +892,35 @@ func piMCPServerTool(call piToolCall) (string, string) {
 		return server, tool
 	}
 	return deriveMCPServerTool(call.name)
+}
+
+// mcpToolListedEvents records each MCP tool route the extension read from Oh My Pi's system prompt,
+// one event per tool: the device name the model calls and the description the model was shown.
+//
+// They are advertisements rather than calls, so they are mcp.tool_listed, which no tool or MCP
+// activity count includes. There is no mcp block, because the device name does not split back into
+// a server and a tool (see piMCPServerTool) and nothing else in the route names them.
+func (f piFamily) mcpToolListedEvents(input map[string]interface{}, sessionID string) []normalizedEvent {
+	routes, _ := input["mcpToolRoutes"].([]interface{})
+	var events []normalizedEvent
+	for _, value := range routes {
+		route, _ := value.(map[string]interface{})
+		name := getFirstStr(route, "name")
+		description := getFirstStr(route, "description")
+		if !strings.HasPrefix(name, "mcp__") || description == "" {
+			continue
+		}
+		fields := f.baseFields(input, sessionID)
+		fields["gen_ai"] = map[string]interface{}{
+			"tool": map[string]interface{}{"name": name, "description": description},
+		}
+		fields["content"] = retainedContentFields(description)
+		// baseFields copied the whole route list under raw, which would store every description
+		// again on every one of these events.
+		fields["raw"] = map[string]interface{}{f.platform: map[string]interface{}{"type": "context"}}
+		events = append(events, f.one("mcp.tool_listed", "mcp", "info", "MCP tool advertised to the model", fields)...)
+	}
+	return events
 }
 
 // piIsMCPTool reports whether a call is MCP activity, whether or not its server is known.

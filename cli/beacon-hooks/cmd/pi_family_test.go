@@ -83,6 +83,28 @@ func TestOmpContextEventMapsSkillListingAsSystemContext(t *testing.T) {
 	}
 }
 
+// One context payload can carry both listings. The skill index keeps its own event, and each route
+// is built from the envelope rather than from the skill event's fields.
+func TestOmpContextEventMapsSkillListingAndMCPRoutesApart(t *testing.T) {
+	events := ompRuntime.endpointEvents(map[string]interface{}{
+		"type":         "context",
+		"skillListing": "- deploy: Deploy applications.",
+		"mcpToolRoutes": []interface{}{
+			map[string]interface{}{"name": "mcp__notes_save_note", "description": "Saves a note."},
+		},
+	}, "sess-1")
+	if len(events) != 2 || events[0].action != "session.context" || events[1].action != "mcp.tool_listed" {
+		t.Fatalf("events = %+v, want session.context then mcp.tool_listed", events)
+	}
+	if _, ok := events[1].fields["system_context"]; ok {
+		t.Fatalf("route listing inherited the skill listing's system_context: %#v", events[1].fields)
+	}
+	genAI, _ := events[1].fields["gen_ai"].(map[string]interface{})
+	if _, ok := genAI["system_instructions"]; ok {
+		t.Fatalf("route listing inherited the skill listing's system_instructions: %#v", genAI)
+	}
+}
+
 // The call ID must survive onto whatever action the completion resolved to, not just onto the
 // generic tool.completed. A file.modified with no join key cannot be tied back to the tool.invoked
 // that proposed the edit, which is exactly the link an investigation follows.

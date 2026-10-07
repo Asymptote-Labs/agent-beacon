@@ -49,7 +49,7 @@ func runOmpEvent(cmd *cobra.Command, args []string) {
 // `context` fires before every model call and carries the whole conversation, which is the kind of
 // event this list otherwise refuses. It is here because its handler context is the only supported
 // way to read the effective system prompt: the extension sends nothing for it but the `<skills>`
-// index the model was shown, and only when that index changes.
+// index and the MCP tool routes the model was shown, each only when it changes.
 //
 // `mcp_notification` is deliberately absent. It fires for every JSON-RPC notification a connected
 // server sends, most of them routine tools/resources list refreshes, and it describes MCP transport
