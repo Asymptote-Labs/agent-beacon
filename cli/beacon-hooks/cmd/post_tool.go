@@ -202,7 +202,7 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 		sessionID, _ = input["session_id"].(string)
 		toolName, _ = input["tool_name"].(string)
 		toolInput, _ = input["tool_input"].(map[string]interface{})
-		toolResponse = resolveToolResponse(input)
+		toolResponse, _ = input["tool_response"].(map[string]interface{})
 	}
 
 	if !isFileEditTool(platformFlag, toolName) {
@@ -396,11 +396,15 @@ func resolveToolResponse(input map[string]interface{}) map[string]interface{} {
 			}
 		}
 	}
-	// MCP tool responses may arrive as content-block lists. Keep the full block
-	// payload under the canonical content key; text consumers select text blocks
-	// without flattening media payloads into output.
+	// Claude Code sends an MCP tool's result as a bare list of content blocks. It is kept under
+	// "content", where an MCP CallToolResult holds its blocks, so the result reads the same
+	// whichever path recorded it. A list from any other runtime is read the same way: until this,
+	// every list response was dropped. An empty list is a result with no content.
 	if content, ok := input["tool_response"].([]interface{}); ok {
-		return map[string]interface{}{"content": content}
+		if len(content) == 0 {
+			return nil
+		}
+		return map[string]interface{}{"content": summarizeEncodedContent(content)}
 	}
 	// If tool_response is a plain string, wrap it for downstream compatibility
 	if respStr, ok := input["tool_response"].(string); ok && respStr != "" {

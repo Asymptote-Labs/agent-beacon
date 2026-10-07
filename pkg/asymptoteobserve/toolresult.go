@@ -42,16 +42,49 @@ func IngestedContentToolName(name string) bool {
 }
 
 // ToolResultPlainText renders a tool result as text: a string as is; for an object or list (a
-// hook's tool_response, an MCP content-block list), every ordinary string it contains and text
-// from MCP text blocks, with maps in sorted key order, one per line. MCP media blocks do not
-// contribute their binary data. Numbers, booleans and nulls are sizes, counts and flags rather
-// than content and contribute nothing. Deterministic for the same result on every run.
+// hook's tool_response, an MCP content-block list), every string it contains, with maps in sorted
+// key order, one per line. Numbers, booleans and nulls are sizes, counts and flags rather than
+// content and contribute nothing. Deterministic for the same result on every run.
+//
+// Content blocks are the one exception. A list element whose "type" is text, image, audio,
+// document, resource or resource_link is an MCP or Anthropic content block, and contributes the
+// text the model reads rather than its metadata or its encoded bytes; see skipContentBlockField.
+// Only list elements are treated this way, because a tool's own response object can carry a
+// "type" too: Claude Code's Read result is {"type": "text", "file": {...}}.
 //
 // It does no redaction or truncation; callers apply the limit that governs where the text goes.
 func ToolResultPlainText(result interface{}) string {
 	var parts []string
 	collectToolResultStrings(result, &parts)
 	return strings.TrimSpace(strings.Join(parts, "\n"))
+}
+
+// contentBlockTypes are the content-block types a tool result list can hold: MCP's text, image,
+// audio, resource and resource_link, and the Anthropic image and document blocks Claude Code
+// rewrites MCP media into.
+var contentBlockTypes = map[string]bool{
+	"text": true, "image": true, "audio": true, "document": true, "resource": true, "resource_link": true,
+}
+
+// skipContentBlockField reports whether a field of a content block, or of a resource block's
+// embedded resource, is metadata or encoded bytes rather than text the model reads.
+//
+// Encoded bytes are an image's or audio clip's base64 "data", an Anthropic block's base64
+// "source", and an embedded resource's "blob". They are skipped because they are not text, and
+// because a run of them would otherwise use up the result_text cap before a text block that
+// follows them. "sha256" is the digest a capture path records in their place.
+func skipContentBlockField(key string, value interface{}) bool {
+	switch key {
+	case "type", "mimeType", "annotations", "_meta", "sha256":
+		return true
+	case "data", "blob":
+		_, encoded := value.(string)
+		return encoded
+	case "source":
+		source, ok := value.(map[string]interface{})
+		return ok && source["type"] == "base64"
+	}
+	return false
 }
 
 func collectToolResultStrings(v interface{}, out *[]string) {
@@ -61,30 +94,15 @@ func collectToolResultStrings(v interface{}, out *[]string) {
 			*out = append(*out, typed)
 		}
 	case map[string]interface{}:
-		// MCP image/audio blocks carry encoded bytes rather than model-visible text.
-		// Other response objects can also have a type discriminator, so do not
-		// discard arbitrary typed objects or textual embedded resources.
-		switch typed["type"] {
-		case "image", "audio":
-			if _, encoded := typed["data"]; encoded {
-				return
-			}
-		case "text":
-			if text, ok := typed["text"].(string); ok {
-				collectToolResultStrings(text, out)
-				return
-			}
-		}
-		keys := make([]string, 0, len(typed))
-		for key := range typed {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			collectToolResultStrings(typed[key], out)
-		}
+		collectMapStrings(typed, nil, out)
 	case []interface{}:
 		for _, item := range typed {
+			if block, ok := item.(map[string]interface{}); ok {
+				if blockType, _ := block["type"].(string); contentBlockTypes[blockType] {
+					collectMapStrings(block, skipContentBlockField, out)
+					continue
+				}
+			}
 			collectToolResultStrings(item, out)
 		}
 	case nil, bool, float64, float32, int, int64, int32, json.Number:
@@ -100,5 +118,26 @@ func collectToolResultStrings(v interface{}, out *[]string) {
 		if json.Unmarshal(data, &generic) == nil {
 			collectToolResultStrings(generic, out)
 		}
+	}
+}
+
+// collectMapStrings walks m in sorted key order, leaving out the fields skip names. A content
+// block's embedded resource is walked with the same skip, since its blob is encoded bytes too.
+func collectMapStrings(m map[string]interface{}, skip func(string, interface{}) bool, out *[]string) {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		value := m[key]
+		if skip != nil && skip(key, value) {
+			continue
+		}
+		if resource, ok := value.(map[string]interface{}); ok && skip != nil && key == "resource" {
+			collectMapStrings(resource, skip, out)
+			continue
+		}
+		collectToolResultStrings(value, out)
 	}
 }

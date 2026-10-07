@@ -130,7 +130,8 @@ func RenderFieldsMarkdown() string {
 	b.WriteString("never written to or read from the log, so a fixture sets the source field, not these.\n\n")
 	fmt.Fprintf(&b, "- `e.%s`: `gen_ai.tool.call.result` as text, only on read-type tool\n", ToolResultTextPath)
 	b.WriteString("  results (`file.read`, `mcp.tool_invoked`, MCP-named tools, web fetch/search tools) whose\n")
-	b.WriteString("  content was retained. String leaves of an object or list result are joined one per line.\n")
+	b.WriteString("  content was retained. String leaves of an object or list result are joined one per line;\n")
+	b.WriteString("  content blocks in a list contribute their text without metadata or encoded bytes.\n")
 	fmt.Fprintf(&b, "  Capped at %d bytes and secret-redacted like other retained text; empty otherwise.\n", ToolResultTextLimit)
 	return b.String()
 }

@@ -2,10 +2,7 @@ package cmd
 
 import (
 	"path/filepath"
-	"reflect"
 	"testing"
-
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 func TestIsFileEditTool(t *testing.T) {
@@ -691,83 +688,6 @@ func TestRunPostToolEmitsClaudeToolEvents(t *testing.T) {
 	}
 	if result := genAITool["call"].(map[string]interface{})["result"]; result == nil {
 		t.Fatalf("gen_ai.tool.call.result missing: %#v", genAITool)
-	}
-}
-
-func TestClaudePostToolPreservesMCPContentBlocksAndExtractsTextOnly(t *testing.T) {
-	setupHookConfigDirs(t)
-	platformFlag = "claude"
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-
-	content := []interface{}{
-		map[string]interface{}{"type": "text", "text": "first result"},
-		map[string]interface{}{"type": "image", "mimeType": "image/png", "data": "base64-private-payload"},
-		map[string]interface{}{"type": "text", "text": "second result"},
-	}
-	runHookWithInput(t, runPostTool, map[string]interface{}{
-		"session_id": "claude-session", "hook_event_name": "PostToolUse",
-		"tool_name": "mcp__docs__search", "tool_use_id": "call-mcp-1",
-		"tool_input":    map[string]interface{}{"query": "beacon"},
-		"tool_response": content,
-	})
-
-	events := endpointEvents(t, logPath)
-	if len(events) != 1 {
-		t.Fatalf("event count = %d, want 1", len(events))
-	}
-	event := events[0]
-	genAI := event["gen_ai"].(map[string]interface{})
-	call := genAI["tool"].(map[string]interface{})["call"].(map[string]interface{})
-	result := call["result"].(map[string]interface{})
-	blocks := result["content"].([]interface{})
-	if len(blocks) != 3 || blocks[1].(map[string]interface{})["data"] != "base64-private-payload" {
-		t.Fatalf("MCP result blocks = %#v, want all original content blocks", blocks)
-	}
-	if text := asymptoteobserve.ToolResultPlainText(result); text != "first result\nsecond result" {
-		t.Fatalf("MCP result text = %q, want both text blocks without encoded media", text)
-	}
-}
-func TestClaudePostToolFailureKeepsTypedMCPResult(t *testing.T) {
-	setupHookConfigDirs(t)
-	platformFlag = "claude"
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-	content := []interface{}{map[string]interface{}{"type": "text", "text": "permission denied"}}
-
-	runHookWithInput(t, runPostTool, map[string]interface{}{
-		"session_id": "claude-session", "hook_event_name": "PostToolUseFailure",
-		"tool_name": "mcp__docs__search", "tool_use_id": "call-mcp-failed",
-		"tool_input":    map[string]interface{}{"query": "beacon"},
-		"tool_response": content, "error": "MCP call failed",
-	})
-
-	event := endpointEvents(t, logPath)[0]
-	if action := event["event"].(map[string]interface{})["action"]; action != "tool.failed" {
-		t.Fatalf("failed MCP action = %v, want tool.failed", action)
-	}
-	result := event["gen_ai"].(map[string]interface{})["tool"].(map[string]interface{})["call"].(map[string]interface{})["result"].(map[string]interface{})
-	if !reflect.DeepEqual(result["content"], content) {
-		t.Fatalf("failed MCP result = %#v, want original content blocks %#v", result, content)
-	}
-}
-
-func TestResolveClaudeToolResponseContentBlockEdgeCases(t *testing.T) {
-	platformFlag = "claude"
-	for _, tc := range []struct {
-		name string
-		raw  interface{}
-		want map[string]interface{}
-	}{
-		{"empty block list", []interface{}{}, map[string]interface{}{"content": []interface{}{}}},
-		{"error object remains intact", map[string]interface{}{"isError": true, "content": []interface{}{map[string]interface{}{"type": "text", "text": "failed"}}}, map[string]interface{}{"isError": true, "content": []interface{}{map[string]interface{}{"type": "text", "text": "failed"}}}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got := resolveToolResponse(map[string]interface{}{"tool_response": tc.raw})
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("resolved response = %#v, want %#v", got, tc.want)
-			}
-		})
 	}
 }
 

@@ -85,11 +85,8 @@ Beacon detects Claude Code through the `claude` executable and Claude settings p
 | MDM deployment | Supported through the system-mode package or MDM-managed settings |
 
 Claude Code hooks cover `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `SubagentStart`, `SubagentStop`, `PermissionRequest`, and `SessionEnd`. Pre-tool matching includes common Claude tools such as `Bash`, `Edit`, `Write`, `MultiEdit`, `Read`, `Glob`, `Grep`, `WebFetch`, `WebSearch`, `Agent`, and `mcp__.*`.
-Claude's live `PostToolUse` hook retains MCP tool responses in their content-block
-form, including mixed text and media blocks. Text summaries and content-retention
-markers use text blocks only, so binary media data is not rendered as base64
-output. Failure hook events remain classified as `tool.failed`.
 
+The `PostToolUse` hook records an MCP tool's result on its live `mcp.tool_invoked` event, in `gen_ai.tool.call.result.content`. Claude Code rewrites the server's result before the hook sees it: an image stays an image, and text, audio, embedded resources and resource links arrive as text blocks, with audio and binary resources as notes naming the file Claude Code saved them to. Beacon stores an image as its media type, decoded size and SHA-256 rather than its bytes. Detection rules match the text blocks.
 
 ## Normalized OTLP events
 
