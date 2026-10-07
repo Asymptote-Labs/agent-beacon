@@ -37,6 +37,7 @@ The `claude` harness writes both Claude Code's OpenTelemetry settings and its us
 | `--dry-run` | Print planned actions without changing endpoint files or services |
 | `--include-runtime-metrics` | Include generic process, runtime, and harness operational OTLP metrics in Beacon JSONL. By default, low-signal metrics such as process CPU, memory, Node.js event loop, V8 heap, GitHub Copilot CLI, and OpenClaw operational metrics are filtered out |
 | `--include-codex-spans` | Include every high-volume Codex OTLP span for troubleshooting. By default, Beacon keeps semantic logs and only the usage-bearing completed turn span |
+| `--claude-capture-web-fetch` | Record the pages Claude Code's WebFetch tool fetches. Turns on Claude Code's API-body logs; the collector keeps only the page text and drops every other body. Off by default; an install without the flag turns it off. See [Claude Code: fetched web pages](/runtimes/claude-code#fetched-web-pages) |
 | `--splunk-hec-endpoint <url>` | Splunk HEC endpoint URL |
 | `--splunk-hec-token <token>` | Splunk HEC token |
 | `--splunk-index <index>` | Optional Splunk index |

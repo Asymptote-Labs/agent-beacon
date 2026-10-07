@@ -59,6 +59,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	cfg.Collector.BinaryPath = filepath.Join(home, "bin", "otelcol")
 	cfg.Collector.IncludeRuntimeMetrics = true
 	cfg.Collector.IncludeCodexSpans = true
+	cfg.ClaudeCaptureWebFetch = true
 	cfg.EventCategories = []string{"tool", "session"}
 	enabled := true
 	cfg.Inventory = &Inventory{Enabled: &enabled, Runtimes: []string{"cursor"}}
@@ -86,6 +87,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if !loaded.Collector.IncludeCodexSpans {
 		t.Fatal("IncludeCodexSpans = false, want true")
+	}
+	if !loaded.ClaudeCaptureWebFetch {
+		t.Fatal("ClaudeCaptureWebFetch = false, want true")
 	}
 	if len(loaded.EventCategories) != 2 || loaded.EventCategories[1] != "session" {
 		t.Fatalf("EventCategories did not round-trip: %#v", loaded.EventCategories)

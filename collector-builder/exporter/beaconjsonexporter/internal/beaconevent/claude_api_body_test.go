@@ -215,10 +215,18 @@ func TestClaudeUserTextReadsEveryUserTextPartInAnyKeyOrder(t *testing.T) {
 	}
 }
 
-func TestSanitizeClaudeAPIBodyRecordMatchesTheConverter(t *testing.T) {
-	direct := NewConverter(Options{}).EventFromLog(nil, claudeBodyRecord("api_request_body", claudeWebFetchApplyQuerySource, summarizerBody))
+// splunk_hec forwards what the processor leaves, so the page leaves it redacted and capped the way
+// the runtime log stores it, and converting with or without the processor records the same thing.
+func TestClaudeWebFetchInputIsRedactedAndCappedOnEveryPath(t *testing.T) {
+	secret := "sk-" + strings.Repeat("a", 32)
+	page := "Web page content:\n---\nPAGE-CANARY api_key=" + secret + "\n" + strings.Repeat("x", 3*asymptoteobserve.DefaultRawStringLimit)
+	body, err := json.Marshal(map[string]interface{}{"messages": []interface{}{map[string]interface{}{"role": "user", "content": page}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct := NewConverter(Options{}).EventFromLog(nil, claudeBodyRecord("api_request_body", claudeWebFetchApplyQuerySource, string(body)))
 
-	record := claudeBodyRecord("api_request_body", claudeWebFetchApplyQuerySource, summarizerBody)
+	record := claudeBodyRecord("api_request_body", claudeWebFetchApplyQuerySource, string(body))
 	if SanitizeClaudeAPIBodyRecord(record) {
 		t.Fatal("the processor dropped the summarizer request")
 	}
@@ -227,15 +235,31 @@ func TestSanitizeClaudeAPIBodyRecordMatchesTheConverter(t *testing.T) {
 			t.Fatalf("the processor forwarded %q", key)
 		}
 	}
-	if value, ok := record.Attributes().Get(ClaudeWebFetchInputAttr); !ok || !strings.Contains(value.Str(), "PAGE-CANARY") {
-		t.Fatalf("the processor did not forward the summarizer input")
+	value, _ := record.Attributes().Get(ClaudeWebFetchInputAttr)
+	forwarded := value.Str()
+	if !strings.Contains(forwarded, "PAGE-CANARY") || strings.Contains(forwarded, secret) || len(forwarded) > asymptoteobserve.DefaultRawStringLimit {
+		t.Fatalf("forwarded input (%d bytes) = %.120q, want the page prefix, redacted and capped at %d", len(forwarded), forwarded, asymptoteobserve.DefaultRawStringLimit)
+	}
+	for _, key := range []string{ClaudeWebFetchInputTruncatedAttr, ClaudeWebFetchInputRedactedAttr} {
+		if flag, ok := record.Attributes().Get(key); !ok || !flag.Bool() {
+			t.Fatalf("the processor did not forward %s", key)
+		}
 	}
 	processed := NewConverter(Options{}).EventFromLog(nil, record)
-	if processed.GenAI.Tool.Call.Result != direct.GenAI.Tool.Call.Result || *processed.Content != *direct.Content {
-		t.Fatalf("processed then converted = %#v %+v, converted directly = %#v %+v",
-			processed.GenAI.Tool.Call.Result, processed.Content, direct.GenAI.Tool.Call.Result, direct.Content)
+	for path, event := range map[string]Event{"direct": direct, "processed": processed} {
+		if result, _ := event.GenAI.Tool.Call.Result.(string); result != forwarded {
+			t.Fatalf("%s: stored result differs from what the processor forwards", path)
+		}
+		if event.Content == nil || !event.Content.Truncated || !event.Content.Redacted {
+			t.Fatalf("%s: content marker = %+v, want truncated and redacted", path, event.Content)
+		}
 	}
+	if *processed.Content != *direct.Content {
+		t.Fatalf("processed marker %+v, direct marker %+v", processed.Content, direct.Content)
+	}
+}
 
+func TestSanitizeClaudeAPIBodyRecordDropsOtherBodiesAndLeavesOtherRecords(t *testing.T) {
 	if !SanitizeClaudeAPIBodyRecord(claudeBodyRecord("api_response_body", "sdk", `{}`)) {
 		t.Fatal("the processor kept a main-loop body")
 	}

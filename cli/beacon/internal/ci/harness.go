@@ -69,10 +69,6 @@ var claudeEnvDefaults = map[string]string{
 	// inherited from three different SDK defaults.
 	"OTEL_BLRP_SCHEDULE_DELAY": "1000",
 	"OTEL_BSP_SCHEDULE_DELAY":  "1000",
-	// The same WebFetch page capture an endpoint install enables. ci exec writes the same collector
-	// config, so its claude_api_body processor drops every other body. 0 or file:<dir> is the
-	// caller's.
-	"OTEL_LOG_RAW_API_BODIES": "1",
 }
 
 func BuildHarnessConfig(base []string, harnessList, grpcEndpoint, baseDir string, run *schema.RunInfo) (HarnessConfig, error) {

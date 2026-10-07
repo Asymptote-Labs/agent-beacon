@@ -143,7 +143,7 @@ func repairNativeRuntimeConfigForUser(info consoleUserInfo, cfg endpointconfig.C
 				if seen["claude"] {
 					continue
 				}
-				path, err := harness.ConfigureClaude(harness.ConfigureOptions{Endpoint: grpcEndpoint, UserMode: true})
+				path, err := harness.ConfigureClaude(harness.ConfigureOptions{Endpoint: grpcEndpoint, UserMode: true, CaptureWebFetch: cfg.ClaudeCaptureWebFetch})
 				if err != nil {
 					return struct{}{}, err
 				}

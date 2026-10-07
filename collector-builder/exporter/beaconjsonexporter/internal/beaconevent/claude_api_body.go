@@ -17,10 +17,12 @@ const (
 
 	// ClaudeWebFetchInputAttr holds the user-role text of Claude Code's WebFetch summarizer
 	// request -- the fetched page and the summarizer prompt -- once the request body itself is
-	// gone. ClaudeWebFetchInputTruncatedAttr says Claude Code cut the body short and the text is
-	// the part that survived.
+	// gone, with secrets redacted and capped at DefaultRawStringLimit. The Truncated attribute
+	// says the text is a prefix, because Claude Code cut the body or the cap did; the Redacted
+	// one says secrets were replaced.
 	ClaudeWebFetchInputAttr          = "beacon.web_fetch.input"
 	ClaudeWebFetchInputTruncatedAttr = "beacon.web_fetch.input_truncated"
+	ClaudeWebFetchInputRedactedAttr  = "beacon.web_fetch.input_redacted"
 
 	// Claude Code 2.1.291 sends the fetched page to a separate summarizer model call and tags that
 	// call's body events with this query_source; the main model only ever gets the summary.
@@ -49,6 +51,15 @@ func isClaudeWebFetchSummarizerRequest(eventName, querySource string) bool {
 type claudeWebFetchInput struct {
 	text      string
 	truncated bool
+	redacted  bool
+}
+
+// retainedClaudeWebFetchInput is the page text as Beacon keeps it at every destination, Splunk
+// included: secrets redacted, then capped at the limit gen_ai is stored at.
+func retainedClaudeWebFetchInput(text string, partial bool) claudeWebFetchInput {
+	redacted := asymptoteobserve.RedactString(text)
+	kept := asymptoteobserve.TruncateString(redacted, asymptoteobserve.DefaultRawStringLimit)
+	return claudeWebFetchInput{text: kept, truncated: partial || kept != redacted, redacted: redacted != text}
 }
 
 // takeClaudeAPIBody removes the body, body_ref and summarizer input of a Claude Code API body
@@ -63,7 +74,8 @@ func takeClaudeAPIBody(attrs map[string]interface{}, eventName string) (input cl
 	body, _ := attrs["body"].(string)
 	input.text, _ = attrs[ClaudeWebFetchInputAttr].(string)
 	input.truncated, _ = BoolAttr(attrs, ClaudeWebFetchInputTruncatedAttr)
-	for _, key := range []string{"body", "body_ref", ClaudeWebFetchInputAttr, ClaudeWebFetchInputTruncatedAttr} {
+	input.redacted, _ = BoolAttr(attrs, ClaudeWebFetchInputRedactedAttr)
+	for _, key := range claudeAPIBodyAttrs {
 		delete(attrs, key)
 	}
 	if !isClaudeWebFetchSummarizerRequest(eventName, FirstString(attrs, "query_source")) {
@@ -77,8 +89,11 @@ func takeClaudeAPIBody(attrs map[string]interface{}, eventName string) (input cl
 	if !ok {
 		return claudeWebFetchInput{}, true
 	}
-	return claudeWebFetchInput{text: text, truncated: partial}, true
+	return retainedClaudeWebFetchInput(text, partial), true
 }
+
+// claudeAPIBodyAttrs are the attributes that carry body content, removed from every body event.
+var claudeAPIBodyAttrs = []string{"body", "body_ref", ClaudeWebFetchInputAttr, ClaudeWebFetchInputTruncatedAttr, ClaudeWebFetchInputRedactedAttr}
 
 // SanitizeClaudeAPIBodyRecord applies the API body policy to a log record in place, and reports
 // whether the record is dropped. A kept summarizer request leaves with its text in
@@ -99,12 +114,15 @@ func SanitizeClaudeAPIBodyRecord(record plog.LogRecord) (drop bool) {
 	if input.text == "" {
 		return true
 	}
-	for _, key := range []string{"body", "body_ref", ClaudeWebFetchInputTruncatedAttr} {
+	for _, key := range claudeAPIBodyAttrs {
 		attrs.Remove(key)
 	}
 	attrs.PutStr(ClaudeWebFetchInputAttr, input.text)
 	if input.truncated {
 		attrs.PutBool(ClaudeWebFetchInputTruncatedAttr, true)
+	}
+	if input.redacted {
+		attrs.PutBool(ClaudeWebFetchInputRedactedAttr, true)
 	}
 	return false
 }
@@ -134,11 +152,11 @@ func normalizeClaudeWebFetchInput(event *Event, input claudeWebFetchInput) {
 		event.GenAI.Tool.Call = &GenAIToolCallInfo{}
 	}
 	event.GenAI.Tool.Call.Result = input.text
-	// gen_ai is stored at the raw-attribute limit, so that is the limit the marker describes.
+	// The text is already redacted and capped, so the marker describes the stored copy and the
+	// flags carry what was done to it.
 	event.Content = asymptoteobserve.RetainedContent(input.text, asymptoteobserve.DefaultRawStringLimit)
-	if input.truncated {
-		event.Content.Truncated = true
-	}
+	event.Content.Truncated = event.Content.Truncated || input.truncated
+	event.Content.Redacted = event.Content.Redacted || input.redacted
 }
 
 // claudeUserText returns the text parts of the user messages in an Anthropic Messages request
