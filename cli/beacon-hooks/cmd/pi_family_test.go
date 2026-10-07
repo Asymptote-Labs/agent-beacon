@@ -1,6 +1,11 @@
 package cmd
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
+)
 
 // piFamilyRuntimes is every runtime the shared Pi-family mapper serves. Tests that assert a
 // property of the shape rather than of one product walk this, so a runtime added later inherits
@@ -49,6 +54,32 @@ func TestPiFamilyPromotesTheToolCallIDOnBothHalves(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestOmpContextEventMapsSkillListingAsSystemContext(t *testing.T) {
+	listing := "- oracle-index: Lists conventions. Canary BCN-2AFE23-C01I.\n- oracle-probe: Runs the probe."
+	events := ompRuntime.endpointEvents(map[string]interface{}{
+		"type":         "context",
+		"skillListing": listing,
+	}, "sess-1")
+	if len(events) != 1 || events[0].action != "session.context" || events[0].category != "session" {
+		t.Fatalf("events = %+v, want one session.context", events)
+	}
+	want := asymptoteobserve.ParseSkillListing(asymptoteobserve.SystemContextSourceSystemPrompt, listing, nil).Fields(asymptoteobserve.DefaultStringLimit)
+	genAI, _ := events[0].fields["gen_ai"].(map[string]interface{})
+	if !reflect.DeepEqual(genAI, want["gen_ai"]) {
+		t.Fatalf("gen_ai = %#v, want only the listing's system_instructions, one part per skill", genAI)
+	}
+	if !reflect.DeepEqual(events[0].fields["system_context"], want["system_context"]) || !reflect.DeepEqual(events[0].fields["content"], want["content"]) {
+		t.Fatalf("system_context = %#v content = %#v, want the shared builder's", events[0].fields["system_context"], events[0].fields["content"])
+	}
+	if _, ok := events[0].fields["prompt"]; ok {
+		t.Fatalf("session context was mislabeled as operator prompt: %#v", events[0].fields["prompt"])
+	}
+	raw, _ := events[0].fields["raw"].(map[string]interface{})
+	if !reflect.DeepEqual(raw, map[string]interface{}{"omp": map[string]interface{}{"type": "context"}}) {
+		t.Fatalf("raw = %#v, want event-type metadata without a copy of the listing", raw)
 	}
 }
 

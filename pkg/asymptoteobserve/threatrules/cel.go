@@ -103,9 +103,10 @@ func CompileMatch(expr string) (cel.Program, error) {
 // EvalMatch runs a compiled match program against one event and reports whether it
 // matched. A non-bool result is treated as an evaluation error.
 //
-// Derived fields (gen_ai.tool.call.result_text) are filled on a copy of the event first, so
-// a caller holding only a program sees the same values a CompiledRule does. CompiledRule
-// skips that step for rules that never reference a derived field.
+// Derived fields (gen_ai.tool.call.result_text, gen_ai.system_instructions_text) are filled
+// on a copy of the event first, so a caller holding only a program sees the same values a
+// CompiledRule does. CompiledRule skips that step for rules that never reference a derived
+// field.
 func EvalMatch(prog cel.Program, event asymptoteobserve.Event) (bool, error) {
 	return evalMatch(prog, withDerivedFields(event))
 }

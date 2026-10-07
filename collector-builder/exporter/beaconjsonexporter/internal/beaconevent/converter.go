@@ -1267,7 +1267,7 @@ func GenAIFromAttrs(attrs map[string]interface{}) *GenAIInfo {
 		genai.Retrieval = &GenAIRetrievalInfo{QueryText: query}
 	}
 	if instructions, ok := AnyAttr(attrs, "gen_ai.system_instructions"); ok {
-		genai.SystemInstructions = instructions
+		genai.SystemInstructions = SystemInstructionParts(instructions)
 	}
 	if tokenType := FirstString(attrs, "gen_ai.token.type"); tokenType != "" {
 		genai.Token = &GenAITokenInfo{Type: tokenType}
@@ -1926,30 +1926,30 @@ func FirstMessageText(genai *GenAIInfo) string {
 	return firstTextFromAny(genai.Input.Messages)
 }
 
+// firstTextFromAny is the first meaningful text part in a messages, parts or prompt value, read the
+// way every Beacon reader reads one.
 func firstTextFromAny(value interface{}) string {
-	switch typed := value.(type) {
-	case string:
-		return meaningfulText(typed)
-	case []interface{}:
-		for _, item := range typed {
-			if text := firstTextFromAny(item); text != "" {
-				return text
-			}
-		}
-	case map[string]interface{}:
-		if content, ok := typed["content"]; ok {
-			if text := firstTextFromAny(content); text != "" {
-				return text
-			}
-		}
-		if parts, ok := typed["parts"]; ok {
-			return firstTextFromAny(parts)
-		}
-		if messages, ok := typed["messages"]; ok {
-			return firstTextFromAny(messages)
+	for _, text := range asymptoteobserve.GenAIText(value, "", asymptoteobserve.GenAIPartTypeText) {
+		if text = meaningfulText(text); text != "" {
+			return text
 		}
 	}
 	return ""
+}
+
+// SystemInstructionParts puts a gen_ai.system_instructions value in the semconv shape, a list of
+// parts. Producers that predate the convention send the instructions as one string, and AnyAttr
+// keeps a value that is not JSON as that string. Stored as is, the field would hold a string on
+// some events and a list on others, and a typed log index such as Elasticsearch's rejects every
+// event whose shape differs from the first it saw. A single part object becomes a one-part list.
+func SystemInstructionParts(value interface{}) interface{} {
+	switch typed := value.(type) {
+	case string:
+		return asymptoteobserve.SystemInstructionParts(typed)
+	case map[string]interface{}:
+		return []interface{}{typed}
+	}
+	return value
 }
 
 func meaningfulText(value string) string {

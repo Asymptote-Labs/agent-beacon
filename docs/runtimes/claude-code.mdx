@@ -81,6 +81,7 @@ Beacon detects Claude Code through the `claude` executable and Claude settings p
 | Hook lifecycle and tool telemetry | Optional through `beacon endpoint hooks install --harness claude` |
 | Historical session sync | Supported through `beacon endpoint claude sync`; marked as poll collection |
 | Claude Code cloud agent sessions | Supported through cloud sandbox hooks with GCS upload |
+| Model-visible skill listings | Supported through Claude transcript `attachment.type=skill_listing`, one part per skill in `gen_ai.system_instructions`, with the skills named in `system_context`; invoked skill file bodies remain excluded |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported through the system-mode package or MDM-managed settings |
 
@@ -130,6 +131,17 @@ Detailed tool inputs can contain sensitive command arguments, paths, URLs, searc
 `beacon endpoint claude sync` reads committed Claude Code transcripts after Claude has written them. The cursor is stored in Beacon endpoint state, not in Claude's directory, and tracks files by line so scheduled runs do not re-append the same records. A partly written trailing record is left for the next sweep.
 
 Claude Code writes one streamed API response as several transcript lines, one per content block (thinking, text, each tool call), and every line carries a copy of the response's `message.usage`. The sync emits one `token.usage` event per response, not per line: lines are grouped by `message.id` and `requestId`, and the event carries the snapshot with the largest output count, because lines written before the stream finished carry a placeholder output count. When a sweep lands between two lines of one response, the next sweep adds only what the later lines report beyond what was already counted, so the total is the same however the response is split across sweeps. A forked or resumed session that replays earlier responses into another file is counted once when both files are read in the same sweep.
+
+When Claude Code records an `attachment` whose type is `skill_listing`, sync emits
+`session.context` with one `text` part per skill in `gen_ai.system_instructions`,
+split on the skill names the attachment reports, and a `system_context` block
+(`kind: skill_listing`, `source: transcript`) naming each skill with the same
+`skill_name_hash` the configuration inventory records. Rules match the text as
+`e.gen_ai.system_instructions_text`. This is the model-visible index (skill
+names and descriptions), not an operator prompt, so it is never written to
+`prompt` or `gen_ai.input`. Other attachments and invoked skill bodies are not
+captured by this mapping. Metadata-only managed forwarding removes the listing
+text before upload and keeps `system_context`.
 
 Run `beacon endpoint claude sync --watch`, or schedule one-shot sweeps, if you want the poll path to stay current. The live OTLP and hook paths remain the real-time integrations; the poll path is for backfill and catch-up.
 

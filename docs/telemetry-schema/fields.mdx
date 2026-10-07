@@ -30,6 +30,7 @@ Beacon models each event as an action plus a set of typed entities. The [`event`
 | `handoff` | On a `session.handoff` event, the session this one continues from a [handoff brief](/cli/handoff#linking-a-new-session-to-the-one-it-continues) | `source_harness`, `source_session_id` |
 | `policy` | Policy metadata when available from a runtime or integration | `id`, `name`, `decision`, `enforcement`, `reason` |
 | `prompt` | Prompt text when the source emits it and content handling allows it | `text` |
+| `system_context` | On a `session.context` event, what the runtime gave the model outside the conversation. Metadata, so it is kept when content is not; the text is in `gen_ai.system_instructions` | `kind` (`skill_listing`), `source` (`system_prompt`, `transcript`), `skills[].skill_name`, `skills[].skill_name_hash` |
 | `content` | Content handling state for the event | `retention`, `included`, `redacted`, `truncated` |
 | `gen_ai` | OpenTelemetry GenAI semantic convention context | `agent`, `conversation`, `input`, `output`, `provider`, `request`, `response`, `retrieval`, `system_instructions`, `tool`, `usage`, `workflow` |
 | `destination` | Output or validation destination state | `type`, `mode`, `status` |
@@ -53,6 +54,7 @@ When a runtime emits OpenTelemetry GenAI semantic convention attributes, Beacon 
 | `gen_ai.response` | Response metadata such as `id`, `model`, `finish_reasons`, and `time_to_first_chunk` |
 | `gen_ai.usage` | Token counters such as `input_tokens`, `output_tokens`, `cache_creation.input_tokens` (with its optional one-hour subset `cache_creation.ephemeral_1h_input_tokens`), `cache_read.input_tokens`, and `reasoning.output_tokens`, plus runtime-reported `cost_usd` |
 | `gen_ai.input.messages`, `gen_ai.output.messages` | Message arrays or objects emitted by the runtime |
+| `gen_ai.system_instructions` | Instructions given to the model outside the conversation, as a list of parts (`type`, `content`). A skill index on `session.context` has one `text` part per skill, so each skill is limited on its own |
 | `gen_ai.tool` | Tool metadata such as `name`, `type`, `description`, `definitions`, and `call.id`, `call.arguments`, or `call.result` |
 | `gen_ai.retrieval` | Retrieval context such as `query_text` and `documents` |
 | `gen_ai.evaluation` | Evaluation metadata such as `name`, `explanation`, `score.label`, and `score.value` |

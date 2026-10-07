@@ -22,7 +22,7 @@ const MaxEventBytes = 64 * 1024
 // unrecognized action is reported rather than ignored.
 var KnownActions = map[string]bool{
 	// agent runtime activity
-	"session.started": true, "session.ended": true, "session.activity": true,
+	"session.started": true, "session.ended": true, "session.activity": true, "session.context": true,
 	"session.compacting": true, "session.event": true, "session.created": true,
 	"session.deleted": true, "session.idle": true, "session.error": true,
 	"session.compacted": true,

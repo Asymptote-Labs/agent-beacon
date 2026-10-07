@@ -150,7 +150,7 @@ Beacon preserves OpenTelemetry GenAI semantic convention fields under the nested
 | `gen_ai.operation.name` | `gen_ai.operation.name` |
 | `gen_ai.prompt.name` | `gen_ai.prompt.name` |
 | `gen_ai.provider.name`, `gen_ai.system` | `gen_ai.provider.name` |
-| `gen_ai.system_instructions` | `gen_ai.system_instructions` |
+| `gen_ai.system_instructions` | `gen_ai.system_instructions`, always a list of parts: a plain string becomes one `text` part and a single part object a one-part list |
 | `gen_ai.retrieval.query.text`, `gen_ai.retrieval.documents` | `gen_ai.retrieval.*` |
 | `gen_ai.token.type` | `gen_ai.token.type` |
 | `gen_ai.workflow.name` | `gen_ai.workflow.name` |

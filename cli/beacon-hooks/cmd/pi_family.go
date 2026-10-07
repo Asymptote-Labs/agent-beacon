@@ -129,6 +129,22 @@ func (f piFamily) endpointEvents(input map[string]interface{}, sessionID string)
 		}
 		return events
 
+	case "context":
+		// The skill index the model was shown, which the extension reads from the system prompt
+		// and sends in place of the event itself. It is system context, not a prompt: the operator
+		// did not write it, so it is never recorded under `prompt` or as input.
+		listing := asymptoteobserve.ParseSkillListing(asymptoteobserve.SystemContextSourceSystemPrompt, getFirstStr(input, "skillListing"), nil)
+		skill := listing.Fields(asymptoteobserve.DefaultStringLimit)
+		if skill == nil {
+			return nil
+		}
+		fields["gen_ai"] = mergeNested(fields["gen_ai"], skill["gen_ai"].(map[string]interface{}))
+		fields["system_context"] = skill["system_context"]
+		fields["content"] = skill["content"]
+		// baseFields copied the whole input under raw, which would store the listing a second time.
+		fields["raw"] = map[string]interface{}{f.platform: map[string]interface{}{"type": "context"}}
+		return f.one("session.context", "session", "info", "system skill listing exposed to the model", fields)
+
 	case "tool_call":
 		// The pre-execution half of a tool call: the runtime has decided to run it and named its
 		// arguments, but nothing has happened yet. Recorded as tool.invoked to match the Cline

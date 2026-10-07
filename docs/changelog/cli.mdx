@@ -9,6 +9,14 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ---
 
+## October 2026
+
+- **Model-visible skill listings** · Claude transcript sync and the Oh My Pi extension capture only the skill index the model was shown, as a `session.context` event rather than an operator prompt. `gen_ai.system_instructions` holds one OpenTelemetry GenAI `text` part per skill, so each skill's description is limited on its own and none is cut off by the ones before it. A new `system_context` block says the event is a skill index and names each skill with the `skill_name_hash` the configuration inventory uses; it is metadata, so metadata-only forwarding keeps it while removing the text. Invoked skill bodies and unrelated system instructions remain outside this signal.
+- **New rule field `e.gen_ai.system_instructions_text`** · Threat rules can match the text of `gen_ai.system_instructions`, whether Beacon recorded it or an OTLP producer reported it. Like `e.gen_ai.tool.call.result_text`, it is derived by the engine from text parts only, redacted, capped at 4 KB per part, and empty when content was not retained. `e.system_context.kind` and `e.system_context.skills` select a skill index without matching its text.
+- **System instructions are always a list of parts** · The collector now writes an OTLP `gen_ai.system_instructions` that arrives as a plain string or a single part as a parts list, so the field has one shape on every event and a typed index such as the Elastic pack's maps it consistently.
+
+---
+
 ## September 2026
 
 ### v1.3.22 · September 23, 2026

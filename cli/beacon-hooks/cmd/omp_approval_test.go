@@ -198,7 +198,7 @@ func TestOmpOnlyEventTypesAreNotInPis(t *testing.T) {
 	for _, name := range supportedPiEventTypes() {
 		pi[name] = true
 	}
-	for _, name := range []string{"tool_approval_requested", "tool_approval_resolved", "user_python"} {
+	for _, name := range []string{"tool_approval_requested", "tool_approval_resolved", "user_python", "context"} {
 		if pi[name] {
 			t.Fatalf("Pi's extension subscribes to %q; Pi exposes no such event, and subscribing "+
 				"to one would put a decision nobody made into the log", name)

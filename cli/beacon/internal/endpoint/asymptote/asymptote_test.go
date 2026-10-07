@@ -4,12 +4,17 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
 
+	"github.com/pelletier/go-toml/v2"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
@@ -261,6 +266,79 @@ func TestRenderedPrivacyConfigsValidateWithVector(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+// Runs the metadata-only transform on every sample event with Vector's own VRL runtime. No retained
+// text survives, and a session.context skill index still says what it was and which skills it
+// listed, so the backend can tell it from any other session.context and join it to inventory.
+func TestMetadataTransformKeepsSystemContextWithVector(t *testing.T) {
+	vector := os.Getenv("BEACON_TEST_VECTOR_BIN")
+	if vector == "" {
+		t.Skip("set BEACON_TEST_VECTOR_BIN to run the metadata transform with Vector")
+	}
+	var transforms struct {
+		Transforms map[string]struct {
+			Source string `toml:"source"`
+		} `toml:"transforms"`
+	}
+	data, err := fs.ReadFile(packFS, privacyTransformAsset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := toml.Unmarshal(data, &transforms); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	program := filepath.Join(dir, "runtime.vrl")
+	if err := os.WriteFile(program, []byte(transforms.Transforms["beacon_runtime_metadata"].Source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	samples, err := fs.ReadFile(packFS, "pack/sample-event.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var input strings.Builder
+	for _, line := range strings.Split(strings.TrimSpace(string(samples)), "\n") {
+		wrapped, _ := json.Marshal(map[string]string{"message": line})
+		input.Write(append(wrapped, '\n'))
+	}
+	inputPath := filepath.Join(dir, "input.jsonl")
+	if err := os.WriteFile(inputPath, []byte(input.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(vector, "vrl", "--input", inputPath, "--program", program, "--print-object").CombinedOutput()
+	if err != nil {
+		t.Fatalf("vector vrl: %v\n%s", err, out)
+	}
+	sawListing := false
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		var wrapped struct {
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(line), &wrapped); err != nil || wrapped.Message == "" {
+			continue
+		}
+		var event schema.Event
+		if err := json.Unmarshal([]byte(wrapped.Message), &event); err != nil {
+			t.Fatalf("transformed event is not an event: %v\n%s", err, wrapped.Message)
+		}
+		if event.GenAI != nil && (event.GenAI.SystemInstructions != nil || event.GenAI.Input != nil) {
+			t.Fatalf("metadata-only kept retained text: %s", wrapped.Message)
+		}
+		if event.SystemContext == nil {
+			continue
+		}
+		sawListing = true
+		if event.SystemContext.Kind != schema.SystemContextSkillListing || len(event.SystemContext.Skills) == 0 || event.SystemContext.Skills[0].SkillNameHash == "" {
+			t.Fatalf("system_context = %+v, want the listing's kind and named skills", event.SystemContext)
+		}
+		if strings.Contains(wrapped.Message, "release checklist") || event.Content == nil || event.Content.Retention != schema.ContentRetentionMetadata {
+			t.Fatalf("skill listing text or retention survived metadata-only: %s", wrapped.Message)
+		}
+	}
+	if !sawListing {
+		t.Fatal("no sample event carries a skill listing; the pack's samples should show one")
 	}
 }
 

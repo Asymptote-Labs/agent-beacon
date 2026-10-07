@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // ompTestLog puts an Oh My Pi extension run in a temp endpoint log and returns its path.
@@ -47,6 +51,7 @@ func ompPayloads() map[string]map[string]interface{} {
 		"session_start":    {"type": "session_start", "reason": "startup"},
 		"session_shutdown": {"type": "session_shutdown", "reason": "quit"},
 		"input":            {"type": "input", "text": "do the thing", "source": "interactive"},
+		"context":          {"type": "context", "skillListing": "- deploy: Deploy applications."},
 		"tool_call":        {"type": "tool_call", "toolName": "bash", "toolCallId": "c1", "input": map[string]interface{}{"command": "ls"}},
 		"tool_result":      {"type": "tool_result", "toolName": "bash", "toolCallId": "c1", "input": map[string]interface{}{"command": "ls"}},
 		"user_bash":        {"type": "user_bash", "command": "git status", "cwd": "/repo"},
@@ -215,6 +220,71 @@ func TestOmpEventPromptRecordsTextAndSource(t *testing.T) {
 	// "A human typed this" and "a script sent this" are different facts about the same prompt.
 	if raw := nested(t, event, "raw"); raw["omp_input_source"] != "interactive" {
 		t.Fatalf("raw.omp_input_source = %v, want interactive", raw["omp_input_source"])
+	}
+}
+
+// The skill index the extension reads from the system prompt reaches the log as the shared builder
+// shapes it: system_context names each skill and gen_ai.system_instructions keeps one part per
+// skill, and the hook logger's per-string limit applies to each part rather than to the index.
+func TestOmpEventSkillListingIsWrittenAsSystemContext(t *testing.T) {
+	logPath := ompTestLog(t)
+	long := strings.Repeat("Describes the release procedure. ", 150)
+	runHookWithInput(t, runOmpEvent, map[string]interface{}{
+		"type": "context", "sessionId": "sess-1",
+		"skillListing": "- deploy: " + long + "\n- review: Reviews a diff. BCN-2AFE23-C01I",
+	})
+
+	event := ompEventWithAction(t, logPath, "session.context")
+	context := nested(t, event, "system_context")
+	skills, _ := context["skills"].([]interface{})
+	if context["kind"] != "skill_listing" || context["source"] != "system_prompt" || len(skills) != 2 {
+		t.Fatalf("system_context = %v, want both skills of a system-prompt skill_listing", context)
+	}
+	parts := asymptoteobserve.GenAIText(nested(t, event, "gen_ai")["system_instructions"], "", asymptoteobserve.GenAIPartTypeText)
+	if len(parts) != 2 || !strings.HasSuffix(parts[1], "BCN-2AFE23-C01I") {
+		t.Fatalf("system_instructions parts = %d, want the second skill kept whole after a long first one", len(parts))
+	}
+	if _, ok := event["prompt"]; ok {
+		t.Fatalf("skill listing recorded as a prompt: %v", event["prompt"])
+	}
+}
+
+// The extension decides whether to resend a skill listing from this reply, because the hook exits 0
+// whether or not it wrote anything. Every way an event is dropped must report nothing recorded.
+func TestOmpEventReplyReportsWhatWasRecorded(t *testing.T) {
+	listing := map[string]interface{}{"type": "context", "sessionId": "sess-1", "skillListing": "- deploy: Deploy applications."}
+	noLog := func(t *testing.T) {
+		for _, key := range []string{"BEACON_ENDPOINT_LOG", "BEACON_CLOUD_LOG_PATH", "BEACON_LOG_PATH", "BEACON_RUNTIME_LOG", "BEACON_ENDPOINT_MODE"} {
+			t.Setenv(key, "")
+		}
+	}
+	unwritable := func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "runtime.jsonl")
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("BEACON_ENDPOINT_LOG", dir)
+	}
+	for _, tc := range []struct {
+		name    string
+		input   map[string]interface{}
+		setup   func(*testing.T)
+		written float64
+	}{
+		{"written", listing, nil, 1},
+		{"log not writable", listing, unwritable, 0},
+		{"no endpoint log configured", listing, noLog, 0},
+		{"type this build does not map", map[string]interface{}{"type": "message_update", "sessionId": "sess-1"}, nil, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ompTestLog(t)
+			if tc.setup != nil {
+				tc.setup(t)
+			}
+			if out := runHookWithInput(t, runOmpEvent, tc.input); out["recorded"] != tc.written {
+				t.Fatalf("reply = %v, want recorded = %v", out, tc.written)
+			}
+		})
 	}
 }
 

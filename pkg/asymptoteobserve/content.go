@@ -3,6 +3,8 @@ package asymptoteobserve
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"strings"
 )
 
 // Roles and part types Beacon writes into gen_ai.input.messages and
@@ -12,6 +14,7 @@ import (
 const (
 	RoleUser      = "user"
 	RoleAssistant = "assistant"
+	RoleSystem    = "system"
 
 	GenAIPartTypeText      = "text"
 	GenAIPartTypeReasoning = "reasoning"
@@ -33,6 +36,97 @@ func GenAIMessages(role, partType, text string) []interface{} {
 				map[string]interface{}{"type": partType, "content": text},
 			},
 		},
+	}
+}
+
+// SystemInstructionParts is text in the gen_ai.system_instructions shape. The
+// semconv defines that attribute as a bare list of message parts -- no role and
+// no message wrapper, unlike gen_ai.input.messages -- so a Beacon-written value
+// and one an OTLP producer sends are read the same way.
+func SystemInstructionParts(text string) []interface{} {
+	return []interface{}{
+		map[string]interface{}{"type": GenAIPartTypeText, "content": text},
+	}
+}
+
+// GenAIText returns the content of every part of partType in a GenAI messages or
+// parts value, in order, each trimmed, blanks dropped. It is the one reader for
+// gen_ai.input.messages, gen_ai.output.messages and gen_ai.system_instructions,
+// and it accepts every shape the capture paths write or receive:
+//
+//   - the semconv message list, [{"role", "parts": [{"type", "content"}]}];
+//   - a bare parts list, the gen_ai.system_instructions shape;
+//   - a message whose body is "content" rather than "parts", as a string or a
+//     block list, and a part whose text is under "text" rather than "content",
+//     the shapes several session mappers and providers write;
+//   - a {"messages": [...]} wrapper;
+//   - a bare string, as the whole value, a message body or a list element,
+//     which is text and never reasoning;
+//   - a typed value from an in-process caller, normalized through JSON.
+//
+// A map with a role, a parts list or type "message" is a message, any other map
+// with a type is a part, and a map with neither is a message. role, when not
+// empty, keeps only messages from that role or naming none; a part outside any
+// message is kept.
+//
+// It does no redaction or truncation; callers apply the limit that governs
+// where the text goes.
+func GenAIText(value interface{}, role, partType string) []string {
+	var out []string
+	collectGenAIText(value, role, partType, &out)
+	return out
+}
+
+func collectGenAIText(v interface{}, role, partType string, out *[]string) {
+	switch typed := v.(type) {
+	case string:
+		if text := strings.TrimSpace(typed); text != "" && partType == GenAIPartTypeText {
+			*out = append(*out, text)
+		}
+	case []interface{}:
+		for _, item := range typed {
+			collectGenAIText(item, role, partType, out)
+		}
+	case map[string]interface{}:
+		if messages, ok := typed["messages"]; ok {
+			collectGenAIText(messages, role, partType, out)
+			return
+		}
+		kind, _ := typed["type"].(string)
+		_, hasRole := typed["role"]
+		body, hasParts := typed["parts"]
+		if kind != "" && kind != "message" && !hasRole && !hasParts {
+			if kind != partType {
+				return
+			}
+			text, _ := typed["content"].(string)
+			if strings.TrimSpace(text) == "" {
+				text, _ = typed["text"].(string)
+			}
+			if text = strings.TrimSpace(text); text != "" {
+				*out = append(*out, text)
+			}
+			return
+		}
+		if messageRole, _ := typed["role"].(string); role != "" && messageRole != "" && messageRole != role {
+			return
+		}
+		if !hasParts {
+			body = typed["content"]
+		}
+		collectGenAIText(body, role, partType, out)
+	case nil, bool, float64, float32, int, int64, int32, json.Number:
+	default:
+		// A typed value from an in-process caller rather than the generic shape a log
+		// line decodes to. Normalized through JSON once; the result is handled above.
+		data, err := json.Marshal(typed)
+		if err != nil {
+			return
+		}
+		var generic interface{}
+		if json.Unmarshal(data, &generic) == nil {
+			collectGenAIText(generic, role, partType, out)
+		}
 	}
 }
 
@@ -104,7 +198,10 @@ func RetainedContent(text string, storeLimit int) *ContentInfo {
 // integers: a float64 byte count would serialize the same but sit next to
 // file.diff_bytes, an int, in the same fields map.
 func RetainedContentFields(text string, storeLimit int) map[string]interface{} {
-	info := RetainedContent(text, storeLimit)
+	return contentFields(RetainedContent(text, storeLimit))
+}
+
+func contentFields(info *ContentInfo) map[string]interface{} {
 	if info == nil {
 		return nil
 	}

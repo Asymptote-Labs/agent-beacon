@@ -104,6 +104,18 @@
                 "text": { "type": "match_only_text" }
               }
             },
+            "system_context": {
+              "properties": {
+                "kind": { "type": "keyword" },
+                "source": { "type": "keyword" },
+                "skills": {
+                  "properties": {
+                    "skill_name": { "type": "keyword" },
+                    "skill_name_hash": { "type": "keyword" }
+                  }
+                }
+              }
+            },
             "content": {
               "properties": {
                 "retention": { "type": "keyword" },
@@ -225,6 +237,12 @@
             "request": {
               "properties": {
                 "model": { "type": "keyword" }
+              }
+            },
+            "system_instructions": {
+              "properties": {
+                "type": { "type": "keyword" },
+                "content": { "type": "match_only_text" }
               }
             }
           }

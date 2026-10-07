@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 )
 
 // pi-event is the single entry point for every Pi lifecycle payload.
@@ -32,21 +34,30 @@ func runPiEvent(cmd *cobra.Command, args []string) {
 //
 // Shared by pi-event and omp-event because the transport is identical -- the extension spawns the
 // hook binary and writes one JSON object to its stdin -- and only the runtime it describes differs.
+//
+// The reply, {"recorded": n}, is how many events reached the log, a duplicate the log already holds
+// included. It is the only way the extension can learn that: the exit status is 0 whether or not
+// anything was written, because a hook that fails must not fail the run it observes, and an
+// envelope that did not parse, a log that cannot be written, a log that is not configured and an
+// event type this build does not map all end the same way.
 func runPiFamilyEvent(runtime piFamily) {
 	input, err := readStdinJSON()
 	if err != nil {
-		outputJSON(emptyResponse)
+		outputJSON(map[string]interface{}{"recorded": 0})
 		return
 	}
 	sessionID := resolveSessionID(input, runtime.platform)
 	logger := newHookLogger(runtime.platform+"-event", runtime.platform, sessionID)
+	recorded := 0
 	for _, event := range runtime.endpointEvents(input, sessionID) {
 		if event.action == "" {
 			continue
 		}
-		_ = logger.EndpointEvent(event.action, event.category, event.severity, event.message, event.fields)
+		if logger.EndpointEvent(event.action, event.category, event.severity, event.message, event.fields) == nil && logging.EndpointLogConfigured() {
+			recorded++
+		}
 	}
-	outputJSON(emptyResponse)
+	outputJSON(map[string]interface{}{"recorded": recorded})
 }
 
 // supportedPiEventTypes lists every Pi event type this mapper handles.

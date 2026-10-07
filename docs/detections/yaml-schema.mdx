@@ -145,6 +145,8 @@ CEL expressions use `e.<field>` paths that match the Beacon event schema. Common
 | `e.file.path` | Match file paths. |
 | `e.prompt.text` | Match prompt text when retained. |
 | `e.gen_ai.tool.call.result_text` | Match what a file read, web fetch, or MCP tool returned, when retained. Derived by the engine, redacted, capped at 4 KB, and empty for other actions. |
+| `e.gen_ai.system_instructions_text` | Match runtime-provided system instructions, such as the skill index on `session.context`, when retained. Derived by the engine from `gen_ai.system_instructions` text parts, redacted, and capped at 4 KB per part, so every skill of an index is visible. Never operator prompt text. |
+| `e.system_context.kind`, `e.system_context.skills` | Select a skill index without matching its text: `e.system_context.kind == "skill_listing" && e.system_context.skills.exists(s, s.skill_name == "deploy")`. |
 | `e.session.id` | Correlate activity within one session. |
 | `e.mcp.server` | Match MCP-like server context. |
 | `e.approval.decision` | Match approval or policy outcomes. |

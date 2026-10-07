@@ -2,7 +2,6 @@ package threatrules
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/cel-go/cel"
@@ -31,14 +30,6 @@ type CompiledRule struct {
 	// (see withDerivedFields). Only those rules pay to derive it, so the rest of a pack runs
 	// exactly as it did before the field existed.
 	derived bool
-}
-
-// referencesDerivedField reports whether a match expression names an engine-derived field.
-// A textual check is enough: a false positive (the name inside a string literal) only costs
-// the derivation, and a false negative cannot happen because CEL has no other way to reach
-// the field.
-func referencesDerivedField(expr string) bool {
-	return strings.Contains(expr, "result_text")
 }
 
 // eval evaluates one compiled expression against one event, deriving fields first only for

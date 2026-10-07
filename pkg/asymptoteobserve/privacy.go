@@ -143,6 +143,9 @@ func SanitizeEvent(event Event, maxBytes int) Event {
 	if event.MCP != nil {
 		event.MCP = sanitizeTyped(event.MCP, PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
 	}
+	if event.SystemContext != nil {
+		event.SystemContext = sanitizeTyped(event.SystemContext, PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
+	}
 	if event.GenAI != nil {
 		event.GenAI = sanitizeTyped(event.GenAI, PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
 	}

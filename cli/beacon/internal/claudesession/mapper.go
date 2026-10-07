@@ -76,6 +76,10 @@ func (m *mapper) consume(record Record) {
 		m.consumeUser(record, emit)
 	case "assistant":
 		m.consumeAssistant(record, emit)
+	case "attachment":
+		if emit && stringValue(entry.Attachment["type"]) == "skill_listing" {
+			m.emitSkillListing(record, entry.Attachment)
+		}
 	case "summary":
 		if emit {
 			m.emitSummary(record)
@@ -174,6 +178,32 @@ func (m *mapper) emitSessionStarted(record Record) {
 	ev := m.base(record, "session.started", "session", schema.SeverityInfo, schema.FidelityObserved, "Claude Code session started")
 	ev.Raw = map[string]interface{}{"claude_session": m.raw(record)}
 	m.append(record, "session.started", ev)
+}
+
+// emitSkillListing records the skill index Claude Code showed the model. The attachment's names are
+// the skills it listed, which is what splits the index into one entry per skill. isInitial and
+// skillCount are kept as provenance: an attachment that is not the initial one may list only the
+// skills added since, which the index text alone does not say.
+func (m *mapper) emitSkillListing(record Record, attachment map[string]interface{}) {
+	var names []string
+	listed, _ := attachment["names"].([]interface{})
+	for _, name := range listed {
+		names = append(names, stringValue(name))
+	}
+	listing := asymptoteobserve.ParseSkillListing(asymptoteobserve.SystemContextSourceTranscript, toolResultText(attachment["content"]), names)
+	if len(listing.Entries) == 0 {
+		return
+	}
+	ev := m.base(record, "session.context", "session", schema.SeverityInfo, schema.FidelityObserved, "Claude Code skill listing exposed to the model")
+	listing.Apply(&ev, asymptoteobserve.DefaultRawStringLimit)
+	provenance := map[string]interface{}{"type": "skill_listing"}
+	for key, field := range map[string]string{"isInitial": "is_initial", "skillCount": "skill_count"} {
+		if value, ok := attachment[key]; ok {
+			provenance[field] = value
+		}
+	}
+	ev.Raw = map[string]interface{}{"claude_session": m.raw(record), "claude_attachment": provenance}
+	m.append(record, "session.context:skill_listing", ev)
 }
 
 func (m *mapper) emitPrompt(record Record, text string) {
