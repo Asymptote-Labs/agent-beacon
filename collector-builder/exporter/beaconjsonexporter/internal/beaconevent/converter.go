@@ -89,6 +89,9 @@ var noisyCodexLogMessages = []string{
 type Options struct {
 	IncludeRuntimeMetrics bool
 	IncludeCodexSpans     bool
+	// CaptureModelContext keeps what Beacon records from Claude Code's API bodies. Off, every body
+	// event is dropped; see takeClaudeAPIBody.
+	CaptureModelContext bool
 }
 
 type Converter struct {
@@ -317,7 +320,7 @@ func (c Converter) EventFromLog(resourceAttrs map[string]interface{}, record plo
 func (c Converter) eventFromLog(resourceAttrs map[string]interface{}, record plog.LogRecord) (Event, bool) {
 	attrs := MergeMaps(resourceAttrs, AttrsToMap(record.Attributes()))
 	body := record.Body().AsString()
-	webFetchInput, isAPIBody := takeClaudeAPIBody(attrs, ClaudeLogEventName(attrs, body))
+	webFetchInput, isAPIBody := takeClaudeAPIBody(attrs, ClaudeLogEventName(attrs, body), c.opts.CaptureModelContext)
 	ts := Timestamp(record.Timestamp().AsTime())
 	// An action the record states outright is observed by definition; only the fallback has to
 	// account for how it got there.

@@ -68,6 +68,7 @@ func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, 
 		converter: beaconevent.NewConverter(beaconevent.Options{
 			IncludeRuntimeMetrics: cfg.IncludeRuntimeMetrics,
 			IncludeCodexSpans:     cfg.IncludeCodexSpans,
+			CaptureModelContext:   cfg.CaptureModelContext,
 		}),
 	}, nil
 }
@@ -168,6 +169,7 @@ func (e *beaconExporter) eventConverter() beaconevent.Converter {
 	return beaconevent.NewConverter(beaconevent.Options{
 		IncludeRuntimeMetrics: e.cfg.IncludeRuntimeMetrics,
 		IncludeCodexSpans:     e.cfg.IncludeCodexSpans,
+		CaptureModelContext:   e.cfg.CaptureModelContext,
 	})
 }
 

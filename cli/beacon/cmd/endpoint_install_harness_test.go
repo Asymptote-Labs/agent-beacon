@@ -97,21 +97,59 @@ func TestEndpointRepairHookOnlyHarnessConfiguresNoOTLPRuntime(t *testing.T) {
 	assertNoOTLPHarnesses(t, "repair --harness omp", opts.Harnesses)
 }
 
-// Model-context capture has Claude Code export every API body, so it stays off unless the flag asks for
-// it, and repair takes it from its own flags like install, so a repair without it turns it off.
-func TestEndpointInstallAndRepairCaptureClaudeWebFetchOnlyWhenAsked(t *testing.T) {
+// Model-context capture has Claude Code export every API body, so it changes only when the flag says
+// so: without it the lifecycle is told nothing and keeps the endpoint's recorded choice, which is
+// what the package upgrades and MDM repairs that re-run install rely on.
+func TestEndpointInstallAndRepairPassTheModelContextChoiceOnlyWhenGiven(t *testing.T) {
 	for _, repair := range []bool{false, true} {
-		// The first recorded run restores every endpoint option when the test ends.
-		endpointOpts.claudeCaptureModelContext = false
-		if opts := runRecordedEndpointCommand(t, repair, "claude"); opts.ClaudeCaptureModelContext {
-			t.Fatalf("repair=%t: Model-context capture is on without --claude-capture-model-context", repair)
-		}
-		endpointOpts.claudeCaptureModelContext = true
-		if opts := runRecordedEndpointCommand(t, repair, "claude"); !opts.ClaudeCaptureModelContext {
-			t.Fatalf("repair=%t: --claude-capture-model-context did not reach the lifecycle", repair)
+		for _, tc := range []struct {
+			flag string
+			want *bool
+		}{
+			{"", nil},
+			{"true", ptrTo(true)},
+			{"false", ptrTo(false)},
+		} {
+			// The first recorded run restores every endpoint option when the test ends.
+			endpointOpts.claudeCaptureModelContext = optionalBool{}
+			if tc.flag != "" {
+				if err := endpointOpts.claudeCaptureModelContext.Set(tc.flag); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got := runRecordedEndpointCommand(t, repair, "claude").ClaudeCaptureModelContext
+			if (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {
+				t.Fatalf("repair=%t flag=%q: lifecycle got %v, want %v", repair, tc.flag, got, tc.want)
+			}
 		}
 	}
 }
+
+// The bare flag opts in and --claude-capture-model-context=false opts out, on install and repair.
+func TestClaudeCaptureModelContextFlagParses(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{nil, "unset"},
+		{[]string{"--claude-capture-model-context"}, "true"},
+		{[]string{"--claude-capture-model-context=false"}, "false"},
+		{[]string{"--claude-capture-model-context=true"}, "true"},
+	} {
+		var value optionalBool
+		cmd := &cobra.Command{Use: "install", RunE: func(*cobra.Command, []string) error { return nil }}
+		registerOptionalBool(cmd, &value, "claude-capture-model-context", "")
+		cmd.SetArgs(tc.args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("%v: %v", tc.args, err)
+		}
+		if got := value.String(); got != tc.want {
+			t.Fatalf("%v parsed to %s, want %s", tc.args, got, tc.want)
+		}
+	}
+}
+
+func ptrTo[T any](v T) *T { return &v }
 
 // `--harness ""` is the documented collector-only install (splitHarnessCSV keeps it an empty
 // list on purpose), so it must configure no runtime at all.

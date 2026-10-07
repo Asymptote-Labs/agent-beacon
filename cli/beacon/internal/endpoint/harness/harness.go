@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -389,18 +390,7 @@ func ConfigureClaude(opts ConfigureOptions) (string, error) {
 	// identity/arguments needed to reconstruct agent activity from OTel events.
 	env["OTEL_LOG_TOOL_DETAILS"] = "1"
 	env["OTEL_LOG_USER_PROMPTS"] = "1"
-	// Inline API bodies carry the page WebFetch sends to its summarizer model, the
-	// only place Claude Code reports it, and also the system prompt and the whole
-	// conversation. The collector's claude_api_body processor keeps only that context,
-	// but Claude Code is asked for them only on opt-in. Neither branch overrides 0 or
-	// file:<dir>; without the opt-in an inline value goes, so opting out works.
-	rawBodies, configured := env["OTEL_LOG_RAW_API_BODIES"]
-	switch {
-	case opts.CaptureModelContext && !configured:
-		env["OTEL_LOG_RAW_API_BODIES"] = "1"
-	case !opts.CaptureModelContext && claudeInlineRawBodies(rawBodies):
-		delete(env, "OTEL_LOG_RAW_API_BODIES")
-	}
+	configureClaudeModelContext(env, opts.CaptureModelContext)
 	settings["env"] = env
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return "", err
@@ -802,14 +792,55 @@ func commandVersion(path string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// claudeInlineRawBodies reports whether an OTEL_LOG_RAW_API_BODIES value has Claude Code put
-// API bodies inline in its log events, rather than leave them off or write them to files.
-func claudeInlineRawBodies(value interface{}) bool {
-	switch strings.ToLower(strings.TrimSpace(fmt.Sprint(value))) {
-	case "1", "true":
-		return true
+// claudeModelContextMarker names, in Claude Code's own env block, the settings Beacon wrote for
+// --claude-capture-model-context. Install and repair without the opt-in remove those and nothing
+// else: a value the user set themselves is theirs, and the collector keeps nothing from the bodies
+// it produces unless the endpoint was installed with the opt-in. Claude Code ignores the key.
+const claudeModelContextMarker = "BEACON_CLAUDE_MODEL_CONTEXT"
+
+// claudeModelContextValues are the values Beacon writes for --claude-capture-model-context.
+var claudeModelContextValues = map[string]string{
+	"OTEL_LOG_RAW_API_BODIES": "1",
+}
+
+// configureClaudeModelContext sets or removes Beacon's model-context settings in Claude Code's env.
+//
+// Inline API bodies carry the page WebFetch sends to its summarizer model, the only place Claude
+// Code reports it, and also the system prompt and the whole conversation. The collector's
+// claude_api_body processor keeps only that context, and only on the opt-in, but Claude Code is
+// asked for the bodies only on the opt-in too. The opt-in sets a setting only where none is set, so
+// 0, file:<dir> and a user's own 1 are never taken over; without it, a setting Beacon wrote goes
+// unless it has been changed since.
+func configureClaudeModelContext(env map[string]interface{}, capture bool) {
+	owned := map[string]bool{}
+	for _, key := range strings.Split(fmt.Sprint(env[claudeModelContextMarker]), ",") {
+		if _, known := claudeModelContextValues[key]; known {
+			owned[key] = true
+		}
 	}
-	return false
+	if capture {
+		if _, set := env["OTEL_LOG_RAW_API_BODIES"]; !set {
+			env["OTEL_LOG_RAW_API_BODIES"] = claudeModelContextValues["OTEL_LOG_RAW_API_BODIES"]
+			owned["OTEL_LOG_RAW_API_BODIES"] = true
+		}
+	} else {
+		for key := range owned {
+			if fmt.Sprint(env[key]) == claudeModelContextValues[key] {
+				delete(env, key)
+			}
+		}
+		owned = nil
+	}
+	var keys []string
+	for key := range owned {
+		keys = append(keys, key)
+	}
+	if len(keys) == 0 {
+		delete(env, claudeModelContextMarker)
+		return
+	}
+	sort.Strings(keys)
+	env[claudeModelContextMarker] = strings.Join(keys, ",")
 }
 
 func backup(path string, data []byte) error {

@@ -37,12 +37,16 @@ func claudeBodyRecord(eventName, querySource, body string) plog.LogRecord {
 	return record
 }
 
+// captureModelContext is the converter of an endpoint installed with --claude-capture-model-context,
+// the only one that keeps anything from an API body.
+var captureModelContext = Options{CaptureModelContext: true}
+
 // convertedLog runs record through EventsFromLogs, the path the exporters take, and reports whether
 // it survived as an event.
 func convertedLog(record plog.LogRecord) bool {
 	logs := plog.NewLogs()
 	record.CopyTo(logs.ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty().LogRecords().AppendEmpty())
-	return len(NewConverter(Options{}).EventsFromLogs(logs)) == 1
+	return len(NewConverter(captureModelContext).EventsFromLogs(logs)) == 1
 }
 
 func encodedEvent(t *testing.T, event Event) string {
@@ -59,7 +63,7 @@ func TestClaudeWebFetchSummarizerInputIsRecordedAsAWebFetchResult(t *testing.T) 
 	if !convertedLog(record) {
 		t.Fatal("the WebFetch summarizer request was dropped")
 	}
-	event := NewConverter(Options{}).EventFromLog(nil, record)
+	event := NewConverter(captureModelContext).EventFromLog(nil, record)
 
 	if event.Event.Action != "tool.invoked" || event.Event.Category != "tool" {
 		t.Fatalf("event = %s/%s, want tool.invoked/tool", event.Event.Action, event.Event.Category)
@@ -127,7 +131,7 @@ func TestClaudeAPIBodiesOtherThanTheSummarizerRequestAreDropped(t *testing.T) {
 				t.Fatal("body event was kept")
 			}
 			// A caller that converts one record directly still gets no body.
-			encoded := encodedEvent(t, NewConverter(Options{}).EventFromLog(nil, record))
+			encoded := encodedEvent(t, NewConverter(captureModelContext).EventFromLog(nil, record))
 			for _, forbidden := range append(privateBodyParts, "private-body", "PARTIAL-PAGE", "PAGE-CANARY", "/private/body.json") {
 				if strings.Contains(encoded, forbidden) {
 					t.Fatalf("converted event leaked %q: %s", forbidden, encoded)
@@ -149,7 +153,7 @@ func TestClaudeAPIBodyPolicyIsKeyedOnTheEventName(t *testing.T) {
 	if convertedLog(sdk("sdk")) {
 		t.Fatal("an Agent SDK main-loop body was kept")
 	}
-	event := NewConverter(Options{}).EventFromLog(nil, sdk(claudeWebFetchApplyQuerySource))
+	event := NewConverter(captureModelContext).EventFromLog(nil, sdk(claudeWebFetchApplyQuerySource))
 	if event.Harness.Name != "claude_agent_sdk" {
 		t.Fatalf("harness = %q, want claude_agent_sdk", event.Harness.Name)
 	}
@@ -180,7 +184,7 @@ func TestClaudeTruncatedSummarizerBodyKeepsTheReadablePrefix(t *testing.T) {
 			if !convertedLog(record) {
 				t.Fatal("a truncated summarizer request was dropped with its page prefix")
 			}
-			event := NewConverter(Options{}).EventFromLog(nil, record)
+			event := NewConverter(captureModelContext).EventFromLog(nil, record)
 			result, _ := event.GenAI.Tool.Call.Result.(string)
 			if !strings.HasPrefix(result, "Web page content:\n---\nPAGE-START caf") {
 				t.Fatalf("result = %q, want the page prefix", result)
@@ -224,10 +228,10 @@ func TestClaudeWebFetchInputIsRedactedAndCappedOnEveryPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	direct := NewConverter(Options{}).EventFromLog(nil, claudeBodyRecord("api_request_body", claudeWebFetchApplyQuerySource, string(body)))
+	direct := NewConverter(captureModelContext).EventFromLog(nil, claudeBodyRecord("api_request_body", claudeWebFetchApplyQuerySource, string(body)))
 
 	record := claudeBodyRecord("api_request_body", claudeWebFetchApplyQuerySource, string(body))
-	if SanitizeClaudeAPIBodyRecord(record) {
+	if SanitizeClaudeAPIBodyRecord(record, true) {
 		t.Fatal("the processor dropped the summarizer request")
 	}
 	for _, key := range []string{"body", "body_ref"} {
@@ -245,7 +249,7 @@ func TestClaudeWebFetchInputIsRedactedAndCappedOnEveryPath(t *testing.T) {
 			t.Fatalf("the processor did not forward %s", key)
 		}
 	}
-	processed := NewConverter(Options{}).EventFromLog(nil, record)
+	processed := NewConverter(captureModelContext).EventFromLog(nil, record)
 	for path, event := range map[string]Event{"direct": direct, "processed": processed} {
 		if result, _ := event.GenAI.Tool.Call.Result.(string); result != forwarded {
 			t.Fatalf("%s: stored result differs from what the processor forwards", path)
@@ -259,14 +263,33 @@ func TestClaudeWebFetchInputIsRedactedAndCappedOnEveryPath(t *testing.T) {
 	}
 }
 
+// A user can turn Claude Code's API bodies on without asking Beacon to keep anything. Without the
+// opt-in, even the summarizer request is dropped, by the converter and by the processor.
+func TestClaudeAPIBodiesAreDroppedWithoutTheOptIn(t *testing.T) {
+	logs := plog.NewLogs()
+	claudeBodyRecord("api_request_body", claudeWebFetchApplyQuerySource, summarizerBody).CopyTo(logs.ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty().LogRecords().AppendEmpty())
+	if events := NewConverter(Options{}).EventsFromLogs(logs); len(events) != 0 {
+		t.Fatalf("without the opt-in the converter kept %d events, want none", len(events))
+	}
+	encoded := encodedEvent(t, NewConverter(Options{}).EventFromLog(nil, claudeBodyRecord("api_request_body", claudeWebFetchApplyQuerySource, summarizerBody)))
+	if strings.Contains(encoded, "PAGE-CANARY") || strings.Contains(encoded, "/private/body.json") {
+		t.Fatalf("a directly converted record leaked the body: %s", encoded)
+	}
+	processed := claudeBodyRecord("api_request_body", claudeWebFetchApplyQuerySource, summarizerBody)
+	processed.Attributes().PutStr(ClaudeWebFetchInputAttr, "PAGE-CANARY")
+	if !SanitizeClaudeAPIBodyRecord(processed, false) {
+		t.Fatal("without the opt-in the processor kept the summarizer request")
+	}
+}
+
 func TestSanitizeClaudeAPIBodyRecordDropsOtherBodiesAndLeavesOtherRecords(t *testing.T) {
-	if !SanitizeClaudeAPIBodyRecord(claudeBodyRecord("api_response_body", "sdk", `{}`)) {
+	if !SanitizeClaudeAPIBodyRecord(claudeBodyRecord("api_response_body", "sdk", `{}`), true) {
 		t.Fatal("the processor kept a main-loop body")
 	}
 	other := plog.NewLogRecord()
 	other.Body().SetStr("claude_code.user_prompt")
 	other.Attributes().PutStr("body", "not an API body")
-	if SanitizeClaudeAPIBodyRecord(other) {
+	if SanitizeClaudeAPIBodyRecord(other, false) {
 		t.Fatal("the processor dropped a record that is not an API body")
 	}
 	if value, _ := other.Attributes().Get("body"); value.Str() != "not an API body" {

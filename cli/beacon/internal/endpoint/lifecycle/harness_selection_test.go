@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
@@ -92,9 +93,11 @@ func TestRepairWithExplicitEmptyHarnessesLeavesClaudeAndCodexConfigAlone(t *test
 	}
 }
 
-// Model-context capture follows the flag of the install or repair that ran last: on with it, off again
-// after a repair without it, in Claude Code's settings and in config.json alike.
-func TestClaudeWebFetchCaptureFollowsTheLatestInstallOrRepair(t *testing.T) {
+// Model-context capture is on after an install with the flag, stays on through a repair that does
+// not mention it -- the package upgrades, MDM repairs and self-updates that re-run install -- and is
+// off after a repair that turns it off, in Claude Code's settings, config.json and the collector
+// config alike.
+func TestClaudeModelContextCaptureFollowsTheLastInstallThatChoseIt(t *testing.T) {
 	testenv.RequirePOSIXExecutableFixtures(t)
 	home := t.TempDir()
 	testenv.SetHome(t, home)
@@ -135,10 +138,18 @@ func TestClaudeWebFetchCaptureFollowsTheLatestInstallOrRepair(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		collectorConfig, err := os.ReadFile(cfg.Collector.ConfigPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if inCollector := strings.Contains(string(collectorConfig), "capture_model_context: true"); inCollector != cfg.ClaudeCaptureModelContext {
+			t.Fatalf("config.json records %t but the collector config has capture_model_context %t", cfg.ClaudeCaptureModelContext, inCollector)
+		}
 		return cfg.ClaudeCaptureModelContext
 	}
+	on, off := true, false
 
-	opts.ClaudeCaptureModelContext = true
+	opts.ClaudeCaptureModelContext = &on
 	if _, err := Install(opts); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -146,11 +157,19 @@ func TestClaudeWebFetchCaptureFollowsTheLatestInstallOrRepair(t *testing.T) {
 		t.Fatalf("after install with the flag: OTEL_LOG_RAW_API_BODIES = %q, recorded = %t; want 1 and true", value, recorded())
 	}
 
-	opts.ClaudeCaptureModelContext = false
+	opts.ClaudeCaptureModelContext = nil
+	if _, err := Repair(opts); err != nil {
+		t.Fatalf("Repair: %v", err)
+	}
+	if value, _ := rawBodies(); value != "1" || !recorded() {
+		t.Fatalf("after repair without the flag: OTEL_LOG_RAW_API_BODIES = %q, recorded = %t; want capture still on", value, recorded())
+	}
+
+	opts.ClaudeCaptureModelContext = &off
 	if _, err := Repair(opts); err != nil {
 		t.Fatalf("Repair: %v", err)
 	}
 	if value, set := rawBodies(); set || recorded() {
-		t.Fatalf("after repair without the flag: OTEL_LOG_RAW_API_BODIES = %q (set %t), recorded = %t; want capture off", value, set, recorded())
+		t.Fatalf("after repair with the flag false: OTEL_LOG_RAW_API_BODIES = %q (set %t), recorded = %t; want capture off", value, set, recorded())
 	}
 }

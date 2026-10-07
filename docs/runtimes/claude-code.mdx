@@ -78,9 +78,13 @@ Some of what Claude Code gives the model appears in no OTLP event except its API
 beacon endpoint install --claude-capture-model-context
 ```
 
-With the flag, install and repair set `OTEL_LOG_RAW_API_BODIES=1` in `~/.claude/settings.json`, and the choice is recorded as `claude_capture_model_context` in Beacon's `config.json`. Without it, they remove an inline setting (`1` or `true`), so a repair without the flag turns capture off. Neither touches `0` (off) or `file:<dir>` (bodies written to files). `beacon ci exec` does not set the variable; a CI job opts in by setting `OTEL_LOG_RAW_API_BODIES=1` in its own environment.
+The choice is recorded as `claude_capture_model_context` in Beacon's `config.json` and kept until an install or repair changes it, so package upgrades, MDM repairs, and self-updates that re-run install without the flag leave it as it was. To turn capture off, pass `--claude-capture-model-context=false`. A package or MDM install can set `BEACON_CLAUDE_CAPTURE_MODEL_CONTEXT=1` or `0` instead of the flag.
 
-Whatever turned the bodies on, the collector filters them in its `claude_api_body` processor. The processor runs before every destination, including the local runtime log, Falcon, and Splunk HEC. It keeps only the context listed below, and drops every other request and response body. The `claude_code.api_request` event already records each model call.
+With capture on, install sets `OTEL_LOG_RAW_API_BODIES=1` in `~/.claude/settings.json` if it is unset, and marks the settings it wrote in `BEACON_CLAUDE_MODEL_CONTEXT` in the same `env` block. With capture off, install removes only what that marker names. A value you set yourself, including `0`, `1`, and `file:<dir>` (bodies written to files), is never changed. `beacon ci exec` does not set the variable; a CI job opts in by setting `OTEL_LOG_RAW_API_BODIES=1` in its own environment.
+
+Whatever turned the bodies on, the collector filters them in its `claude_api_body` processor. The processor runs before every destination, including the local runtime log, Falcon, and Splunk HEC. With capture on, it keeps only the context listed below. With capture off, it drops every body, so turning `OTEL_LOG_RAW_API_BODIES` on yourself sends Beacon nothing it keeps. The `claude_code.api_request` event already records each model call.
+
+The generated collector config names the `claude_api_body` processor, which collectors older than this release do not have. Install checks the collector binary it is about to use and stops with an error if the processor is missing, for example when an older `beacon-otelcol` is earlier on `PATH` or passed with `--collector`.
 
 #### Fetched web pages
 

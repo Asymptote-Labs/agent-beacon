@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,7 +32,7 @@ var endpointOpts struct {
 	collectorPath             string
 	includeRuntimeMetrics     bool
 	includeCodexSpans         bool
-	claudeCaptureModelContext bool
+	claudeCaptureModelContext optionalBool
 	keepLogs                  bool
 	keepConfig                bool
 	noStart                   bool
@@ -91,7 +92,38 @@ var endpointOpts struct {
 }
 
 const claudeCaptureModelContextUsage = "Record context Claude Code gives the model that no other event reports, such as the pages its WebFetch tool fetches. " +
-	"Turns on Claude Code's API body logs; the collector keeps only that context and drops every body"
+	"Turns on Claude Code's API body logs; the collector keeps only that context and drops every body. " +
+	"Kept until an install or repair passes --claude-capture-model-context=false"
+
+// optionalBool is a boolean flag that also records whether it was given, for an opt-in that an
+// install or repair without the flag must leave as it was.
+type optionalBool struct {
+	value *bool
+}
+
+func (b *optionalBool) Set(s string) error {
+	v, err := strconv.ParseBool(s)
+	if err != nil {
+		return err
+	}
+	b.value = &v
+	return nil
+}
+
+func (b *optionalBool) String() string {
+	if b == nil || b.value == nil {
+		return "unset"
+	}
+	return strconv.FormatBool(*b.value)
+}
+
+func (b *optionalBool) Type() string { return "bool" }
+
+// registerOptionalBool registers b so that the bare flag means true and --flag=false means false.
+func registerOptionalBool(cmd *cobra.Command, b *optionalBool, name, usage string) {
+	cmd.Flags().Var(b, name, usage)
+	cmd.Flags().Lookup(name).NoOptDefVal = "true"
+}
 
 var endpointCmd = &cobra.Command{
 	Use:   "endpoint",
@@ -429,7 +461,7 @@ func init() {
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.collectorPath, "collector", "", "Path to a beacon-otelcol binary")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.includeRuntimeMetrics, "include-runtime-metrics", false, "Include generic process/runtime OTLP metrics and harness operational metrics (OpenClaw, Copilot CLI) in the runtime JSONL log")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.includeCodexSpans, "include-codex-spans", false, "Include high-volume Codex OTLP spans for troubleshooting")
-	endpointInstallCmd.Flags().BoolVar(&endpointOpts.claudeCaptureModelContext, "claude-capture-model-context", false, claudeCaptureModelContextUsage)
+	registerOptionalBool(endpointInstallCmd, &endpointOpts.claudeCaptureModelContext, "claude-capture-model-context", claudeCaptureModelContextUsage)
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.noStart, "no-start", false, "Write files without starting the collector service")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.noBrowser, "no-browser", false, "During interactive setup, print the sign-in URL instead of opening a browser")
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.serviceKind, "service", "", "Service manager to use: auto (default), launchd, systemd, or none for a supervised collector process")
@@ -453,7 +485,7 @@ func init() {
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.collectorPath, "collector", "", "Path to a beacon-otelcol binary")
 	endpointRepairCmd.Flags().BoolVar(&endpointOpts.includeRuntimeMetrics, "include-runtime-metrics", false, "Include generic process/runtime OTLP metrics and harness operational metrics (OpenClaw, Copilot CLI) in the runtime JSONL log")
 	endpointRepairCmd.Flags().BoolVar(&endpointOpts.includeCodexSpans, "include-codex-spans", false, "Include high-volume Codex OTLP spans for troubleshooting")
-	endpointRepairCmd.Flags().BoolVar(&endpointOpts.claudeCaptureModelContext, "claude-capture-model-context", false, claudeCaptureModelContextUsage)
+	registerOptionalBool(endpointRepairCmd, &endpointOpts.claudeCaptureModelContext, "claude-capture-model-context", claudeCaptureModelContextUsage)
 	endpointRepairCmd.Flags().BoolVar(&endpointOpts.noStart, "no-start", false, "Write files without starting the collector service")
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.serviceKind, "service", "", "Service manager to use: auto (default), launchd, systemd, or none for a supervised collector process")
 	endpointRepairCmd.Flags().BoolVar(&endpointOpts.dryRun, "dry-run", false, "Print planned actions without changing endpoint files or services")

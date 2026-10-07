@@ -25,7 +25,7 @@ func appendBody(records plog.LogRecordSlice, eventName, querySource, body string
 // policy: no API body, no body file path, and the summarizer input under its own attribute.
 func TestProcessorForwardsOnlyTheSummarizerInput(t *testing.T) {
 	sink := new(consumertest.LogsSink)
-	proc, err := NewFactory().CreateLogs(context.Background(), processortest.NewNopSettings(componentType), &Config{}, sink)
+	proc, err := NewFactory().CreateLogs(context.Background(), processortest.NewNopSettings(componentType), &Config{CaptureModelContext: true}, sink)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,5 +69,31 @@ func TestProcessorForwardsOnlyTheSummarizerInput(t *testing.T) {
 	}
 	if len(sink.AllLogs()) != 1 {
 		t.Fatal("a batch with nothing left in it was forwarded")
+	}
+}
+
+// The default config is an endpoint installed without --claude-capture-model-context. A user who
+// turned Claude Code's bodies on themselves gets nothing past the processor, the page included.
+func TestProcessorWithoutTheOptInForwardsNoBody(t *testing.T) {
+	sink := new(consumertest.LogsSink)
+	proc, err := NewFactory().CreateLogs(context.Background(), processortest.NewNopSettings(componentType), NewFactory().CreateDefaultConfig(), sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs := plog.NewLogs()
+	records := logs.ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty().LogRecords()
+	appendBody(records, "api_request_body", "web_fetch_apply", summarizerBody)
+	prompt := records.AppendEmpty()
+	prompt.Body().SetStr("claude_code.user_prompt")
+
+	if err := proc.ConsumeLogs(context.Background(), logs); err != nil {
+		t.Fatal(err)
+	}
+	got := sink.AllLogs()
+	if len(got) != 1 || got[0].LogRecordCount() != 1 {
+		t.Fatalf("forwarded %d batches, want one holding only the prompt", len(got))
+	}
+	if body := got[0].ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0).Body().Str(); body != "claude_code.user_prompt" {
+		t.Fatalf("forwarded %q, want only the prompt", body)
 	}
 }

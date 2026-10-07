@@ -62,6 +62,7 @@ func newExporter(raw component.Config, set exporter.Settings) (*falconExporter, 
 		converter: beaconevent.NewConverter(beaconevent.Options{
 			IncludeRuntimeMetrics: cfg.IncludeRuntimeMetrics,
 			IncludeCodexSpans:     cfg.IncludeCodexSpans,
+			CaptureModelContext:   cfg.CaptureModelContext,
 		}),
 	}, nil
 }

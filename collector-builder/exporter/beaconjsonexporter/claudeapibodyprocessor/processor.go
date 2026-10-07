@@ -21,7 +21,12 @@ import (
 
 var componentType = component.MustNewType("claude_api_body")
 
-type Config struct{}
+// Config is rendered by `beacon endpoint install`. CaptureModelContext is the
+// --claude-capture-model-context opt-in; without it every API body event is dropped, whoever
+// turned the bodies on.
+type Config struct {
+	CaptureModelContext bool `mapstructure:"capture_model_context"`
+}
 
 func NewFactory() processor.Factory {
 	return processor.NewFactory(
@@ -32,20 +37,26 @@ func NewFactory() processor.Factory {
 }
 
 func createLogs(ctx context.Context, set processor.Settings, cfg component.Config, next consumer.Logs) (processor.Logs, error) {
-	return processorhelper.NewLogs(ctx, set, cfg, next, processLogs,
+	capture := cfg.(*Config).CaptureModelContext
+	return processorhelper.NewLogs(ctx, set, cfg, next, processLogs(capture),
 		processorhelper.WithCapabilities(consumer.Capabilities{MutatesData: true}))
 }
 
-func processLogs(_ context.Context, logs plog.Logs) (plog.Logs, error) {
-	logs.ResourceLogs().RemoveIf(func(resource plog.ResourceLogs) bool {
-		resource.ScopeLogs().RemoveIf(func(scope plog.ScopeLogs) bool {
-			scope.LogRecords().RemoveIf(beaconevent.SanitizeClaudeAPIBodyRecord)
-			return scope.LogRecords().Len() == 0
-		})
-		return resource.ScopeLogs().Len() == 0
-	})
-	if logs.LogRecordCount() == 0 {
-		return logs, processorhelper.ErrSkipProcessingData
+func processLogs(capture bool) processorhelper.ProcessLogsFunc {
+	drop := func(record plog.LogRecord) bool {
+		return beaconevent.SanitizeClaudeAPIBodyRecord(record, capture)
 	}
-	return logs, nil
+	return func(_ context.Context, logs plog.Logs) (plog.Logs, error) {
+		logs.ResourceLogs().RemoveIf(func(resource plog.ResourceLogs) bool {
+			resource.ScopeLogs().RemoveIf(func(scope plog.ScopeLogs) bool {
+				scope.LogRecords().RemoveIf(drop)
+				return scope.LogRecords().Len() == 0
+			})
+			return resource.ScopeLogs().Len() == 0
+		})
+		if logs.LogRecordCount() == 0 {
+			return logs, processorhelper.ErrSkipProcessingData
+		}
+		return logs, nil
+	}
 }

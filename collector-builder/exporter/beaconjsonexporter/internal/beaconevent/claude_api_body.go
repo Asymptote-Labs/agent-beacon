@@ -39,6 +39,11 @@ const (
 // fetched page, and of that only its user-role text. Every other body event, request or response,
 // is dropped -- claude_code.api_request already records the call -- and so is a summarizer request
 // with no text left to keep.
+//
+// Even the summarizer text is kept only when the endpoint was installed with
+// --claude-capture-model-context, which the collector config carries as capture_model_context.
+// Claude Code sends bodies whenever OTEL_LOG_RAW_API_BODIES is on, and a user can turn that on
+// without asking Beacon to keep anything; without the opt-in, every body event is dropped.
 
 func isClaudeAPIBody(eventName string) bool {
 	return eventName == ClaudeAPIRequestBody || eventName == ClaudeAPIResponseBody
@@ -63,11 +68,11 @@ func retainedClaudeWebFetchInput(text string, partial bool) claudeWebFetchInput 
 }
 
 // takeClaudeAPIBody removes the body, body_ref and summarizer input of a Claude Code API body
-// event from attrs, and returns the text Beacon keeps: the summarizer request's user text, or
-// nothing. isBody reports whether eventName is a body event at all. A record the claude_api_body
-// processor already rewrote carries the text in ClaudeWebFetchInputAttr, so its body is not
-// parsed again.
-func takeClaudeAPIBody(attrs map[string]interface{}, eventName string) (input claudeWebFetchInput, isBody bool) {
+// event from attrs, and returns the text Beacon keeps: the summarizer request's user text when
+// capture is on, or nothing. isBody reports whether eventName is a body event at all. A record the
+// claude_api_body processor already rewrote carries the text in ClaudeWebFetchInputAttr, so its
+// body is not parsed again.
+func takeClaudeAPIBody(attrs map[string]interface{}, eventName string, capture bool) (input claudeWebFetchInput, isBody bool) {
 	if !isClaudeAPIBody(eventName) {
 		return claudeWebFetchInput{}, false
 	}
@@ -78,7 +83,7 @@ func takeClaudeAPIBody(attrs map[string]interface{}, eventName string) (input cl
 	for _, key := range claudeAPIBodyAttrs {
 		delete(attrs, key)
 	}
-	if !isClaudeWebFetchSummarizerRequest(eventName, FirstString(attrs, "query_source")) {
+	if !capture || !isClaudeWebFetchSummarizerRequest(eventName, FirstString(attrs, "query_source")) {
 		return claudeWebFetchInput{}, true
 	}
 	if input.text != "" {
@@ -96,11 +101,11 @@ func takeClaudeAPIBody(attrs map[string]interface{}, eventName string) (input cl
 var claudeAPIBodyAttrs = []string{"body", "body_ref", ClaudeWebFetchInputAttr, ClaudeWebFetchInputTruncatedAttr, ClaudeWebFetchInputRedactedAttr}
 
 // SanitizeClaudeAPIBodyRecord applies the API body policy to a log record in place, and reports
-// whether the record is dropped. A kept summarizer request leaves with its text in
-// ClaudeWebFetchInputAttr in place of body and body_ref. The claude_api_body processor calls it so
-// the policy holds before any exporter sees the record, including ones such as splunk_hec that
-// forward OTLP attributes as they arrive.
-func SanitizeClaudeAPIBodyRecord(record plog.LogRecord) (drop bool) {
+// whether the record is dropped. With capture on, a kept summarizer request leaves with its text in
+// ClaudeWebFetchInputAttr in place of body and body_ref; with it off, every body event is dropped.
+// The claude_api_body processor calls it so the policy holds before any exporter sees the record,
+// including ones such as splunk_hec that forward OTLP attributes as they arrive.
+func SanitizeClaudeAPIBodyRecord(record plog.LogRecord, capture bool) (drop bool) {
 	attrs := record.Attributes()
 	eventName := ""
 	if value, ok := attrs.Get("event.name"); ok {
@@ -110,7 +115,7 @@ func SanitizeClaudeAPIBodyRecord(record plog.LogRecord) (drop bool) {
 	if !isClaudeAPIBody(name) {
 		return false
 	}
-	input, _ := takeClaudeAPIBody(AttrsToMap(attrs), name)
+	input, _ := takeClaudeAPIBody(AttrsToMap(attrs), name, capture)
 	if input.text == "" {
 		return true
 	}

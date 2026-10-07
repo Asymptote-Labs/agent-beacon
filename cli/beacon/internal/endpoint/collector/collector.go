@@ -148,6 +148,12 @@ func ConfigYAML(cfg endpointconfig.Config) string {
 	if cfg.Collector.IncludeCodexSpans {
 		codexSpansYAML = "    include_codex_spans: true\n"
 	}
+	// The processor and the exporters each decide from their own config whether to keep anything
+	// from a Claude Code API body, so the opt-in is written to all of them.
+	modelContextYAML := ""
+	if cfg.ClaudeCaptureModelContext {
+		modelContextYAML = "    capture_model_context: true\n"
+	}
 	return fmt.Sprintf(`receivers:
   otlp:
     protocols:
@@ -164,7 +170,7 @@ processors:
     timeout: 5s
     send_batch_size: 128
   claude_api_body:
-
+%s
 exporters:
   beaconjson:
     path: %q
@@ -195,7 +201,7 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, batch]
       exporters: %s
-`, cfg.Collector.GRPCPort, cfg.Collector.HTTPPort, cfg.LogPath, runtimeMetricsYAML+codexSpansYAML+splunkExporter+falconExporter, endpointconfig.HealthCheckPort(cfg.Collector), exporters, exporters, exporters)
+`, cfg.Collector.GRPCPort, cfg.Collector.HTTPPort, modelContextYAML, cfg.LogPath, runtimeMetricsYAML+codexSpansYAML+modelContextYAML+splunkExporter+falconExporter, endpointconfig.HealthCheckPort(cfg.Collector), exporters, exporters, exporters)
 }
 
 func splunkHECYAML(cfg endpointconfig.Config) string {
@@ -242,6 +248,9 @@ func falconHECYAML(cfg endpointconfig.Config) string {
 	}
 	if cfg.Collector.IncludeCodexSpans {
 		fmt.Fprintf(&b, "    include_codex_spans: true\n")
+	}
+	if cfg.ClaudeCaptureModelContext {
+		fmt.Fprintf(&b, "    capture_model_context: true\n")
 	}
 	if falcon.Source != "" {
 		fmt.Fprintf(&b, "    source: %q\n", falcon.Source)
