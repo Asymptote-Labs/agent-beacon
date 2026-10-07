@@ -16,6 +16,9 @@ del(event.file.diff)
 del(event.gen_ai.input)
 del(event.gen_ai.output)
 del(event.gen_ai.system_instructions)
+# A tool description is server-authored text the model was shown, removed for the reason inventory
+# removes an MCP server's definition; the tool's name stays.
+del(event.gen_ai.tool.description)
 del(event.gen_ai.tool.call.arguments)
 del(event.gen_ai.tool.call.result)
 if is_object(event.gen_ai) && is_empty(object!(event.gen_ai)) {
