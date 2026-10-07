@@ -1121,8 +1121,17 @@ func TestCapturedCodexLogPromotesItsOwnCallID(t *testing.T) {
 
 func TestCapturedClaudeCodeLifecycleTaxonomy(t *testing.T) {
 	fixture, events := capturedLogEvents(t, "claude-code-lifecycle-2.1.220.json")
-	if len(events) != len(fixture.Records) {
-		t.Fatalf("events = %d, want %d", len(events), len(fixture.Records))
+	// API body events are dropped unless they are the WebFetch summarizer request, and the
+	// fixture's are not.
+	dropped := map[string]bool{"api_request_body": true, "api_response_body": true}
+	var kept []string
+	for _, captured := range fixture.Records {
+		if !dropped[captured.Name] {
+			kept = append(kept, captured.Name)
+		}
+	}
+	if len(events) != len(kept) {
+		t.Fatalf("events = %d, want %d", len(events), len(kept))
 	}
 	expected := map[string]eventClassification{
 		"user_prompt":             {action: "prompt.submitted", category: "prompt"},
@@ -1151,18 +1160,18 @@ func TestCapturedClaudeCodeLifecycleTaxonomy(t *testing.T) {
 	if len(claudeLogEventClassifications) != len(expected)+2 {
 		t.Fatalf("documented Claude taxonomy has %d events, want %d", len(claudeLogEventClassifications), len(expected)+2)
 	}
-	for i, captured := range fixture.Records {
-		want, ok := expected[captured.Name]
+	for i, name := range kept {
+		want, ok := expected[name]
 		if !ok {
-			t.Fatalf("fixture %q has no expected classification", captured.Name)
+			t.Fatalf("fixture %q has no expected classification", name)
 		}
 		event := events[i]
 		if event.Event.Action != want.action || event.Event.Category != want.category {
-			t.Errorf("%s event = %#v, want %s/%s", captured.Name, event.Event, want.action, want.category)
+			t.Errorf("%s event = %#v, want %s/%s", name, event.Event, want.action, want.category)
 		}
 		switch event.Event.Action {
 		case "tool.invoked", "command.executed", "mcp.tool_invoked":
-			t.Errorf("%s lifecycle event incorrectly classified as %s", captured.Name, event.Event.Action)
+			t.Errorf("%s lifecycle event incorrectly classified as %s", name, event.Event.Action)
 		}
 	}
 	if prompt := events[0].Prompt; prompt == nil || prompt.Text != "CLAUDE_LIFECYCLE_MARKER" {

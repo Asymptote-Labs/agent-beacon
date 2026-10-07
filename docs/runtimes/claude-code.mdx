@@ -68,9 +68,27 @@ Beacon detects Claude Code through the `claude` executable and Claude settings p
 
 `beacon endpoint install` configures Claude telemetry settings so Claude Code sends OTLP data to the local collector. It enables detailed tool logging so tool-result events include inputs such as Bash commands, file paths, URLs, search patterns, and MCP server/tool arguments. Claude bounds or truncates some input values.
 
-Installation enables inline API-body logs (`OTEL_LOG_RAW_API_BODIES=1`) unless that setting is already present; an explicit opt-out or capture mode is preserved. These bodies can contain conversation history, system prompts, tools, and tool results. For the WebFetch summarizer request (`query_source=web_fetch_apply`), the local Collector retains only user-role text as `prompt.text` on a `session.activity` event. It removes `body` and `body_ref` from all Claude API request/response-body events and never reads referenced body files. The stored input is the fetched page and summarizer prompt, not the summary returned to the main model. Invalid or truncated JSON bodies produce no auxiliary text. Managed-ingest privacy remains a separate forwarding policy, not a switch for local collection.
-
 `beacon endpoint hooks install --harness claude` adds Beacon-managed Claude Code hooks while preserving existing Claude settings and non-Beacon hooks. `beacon endpoint hooks uninstall --harness claude` removes only Beacon-managed Claude hook entries. Install, repair, and uninstall write every non-Beacon hook back exactly as they found it, including `http`, `prompt`, and `agent` hooks and any fields Beacon does not use itself, such as an http hook's `url` and `headers`.
+
+### Fetched web pages
+
+Claude Code's WebFetch tool does not return the page to the main model. It sends the page to a separate summarizer model call, and the main model only receives the summary. The only place Claude Code reports that page is the summarizer call's API request body. So `beacon endpoint install` and `beacon ci exec` enable inline API-body logs (`OTEL_LOG_RAW_API_BODIES=1`). If the setting is already present, Beacon keeps it, so `0` (off) or `file:<dir>` (bodies written to files) stays as you set it.
+
+API bodies can contain the system prompt, the whole conversation, tool definitions, and tool results, so the collector filters them in its `claude_api_body` processor. The processor runs before every destination, including the local runtime log, Falcon, and Splunk HEC:
+
+- **The WebFetch summarizer request** (`query_source=web_fetch_apply`) is kept, but only the text of its user messages: the fetched page and the summarizer prompt. Beacon removes `body` and `body_ref` and forwards that text as `beacon.web_fetch.input`. It never includes the summarizer's system prompt, tool definitions, or non-text blocks.
+- **Every other request and response body is dropped,** including the summarizer's response. The `claude_code.api_request` event already records each model call.
+
+In the runtime log, the page is a `tool.invoked` event for the `WebFetch` tool, with the text in `gen_ai.tool.call.result`. It is not recorded as `prompt.text`, because it is third-party content, not something the user typed. Threat rules see it as `e.gen_ai.tool.call.result_text`, the same as fetched pages from other runtimes, and `indirect-injection-in-tool-result` evaluates it.
+
+Limits:
+
+- `gen_ai.tool.call.result` is stored at 2048 characters, after secret redaction. The `content` marker's hash and byte count describe the whole text Beacon received.
+- Claude Code truncates long inline bodies and sets `body_truncated`. Beacon then keeps the page text up to the cut and marks the event `content.truncated`.
+- Beacon never reads body files, so `file:<dir>` mode does not record the page.
+- Beacon selects the summarizer request by its `query_source` value, as observed in Claude Code 2.1.291. If a later release renames that value, the page is no longer recorded.
+
+Managed-ingest privacy is a separate forwarding policy and does not switch off local collection.
 
 ## Telemetry coverage
 

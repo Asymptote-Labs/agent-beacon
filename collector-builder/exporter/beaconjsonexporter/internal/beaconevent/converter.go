@@ -46,8 +46,8 @@ var claudeLogEventClassifications = map[string]eventClassification{
 	ClaudeAPIRequest:                      {action: "session.activity", category: "session"},
 	"claude_code.api_error":               {action: "session.error", category: "session"},
 	"claude_code.api_refusal":             {action: "session.status", category: "session"},
-	"claude_code.api_request_body":        {action: "session.activity", category: "session"},
-	"claude_code.api_response_body":       {action: "session.activity", category: "session"},
+	ClaudeAPIRequestBody:                  {action: "session.activity", category: "session"},
+	ClaudeAPIResponseBody:                 {action: "session.activity", category: "session"},
 	ClaudeToolDecision:                    {},
 	"claude_code.permission_mode_changed": {action: "session.status", category: "session"},
 	"claude_code.auth":                    {action: "session.activity", category: "session"},
@@ -158,6 +158,9 @@ func (c Converter) EventsFromMetrics(metrics pmetric.Metrics) []Event {
 
 func ShouldDropLog(resourceAttrs map[string]interface{}, record plog.LogRecord) bool {
 	attrs := MergeMaps(resourceAttrs, AttrsToMap(record.Attributes()))
+	if SanitizeClaudeAPIBody(attrs, record.Body().AsString()) {
+		return true
+	}
 	harness := HarnessName(attrs, record.Body().AsString())
 	if isCodexHarness(harness) {
 		return isNoisyCodexLog(attrs, record.Body().AsString())
@@ -304,6 +307,8 @@ func shouldDropCopilotMetric(resourceAttrs map[string]interface{}, name string, 
 func (c Converter) EventFromLog(resourceAttrs map[string]interface{}, record plog.LogRecord) Event {
 	attrs := MergeMaps(resourceAttrs, AttrsToMap(record.Attributes()))
 	body := record.Body().AsString()
+	SanitizeClaudeAPIBody(attrs, body)
+	webFetchInput := takeClaudeWebFetchInput(attrs, body)
 	ts := Timestamp(record.Timestamp().AsTime())
 	// An action the record states outright is observed by definition; only the fallback has to
 	// account for how it got there.
@@ -330,6 +335,7 @@ func (c Converter) EventFromLog(resourceAttrs map[string]interface{}, record plo
 	c.NormalizeCodexLogEvent(&event, attrs)
 	c.NormalizeClaudeLogEvent(&event, attrs, body)
 	NormalizeGeminiLogEvent(&event, attrs)
+	normalizeClaudeWebFetchInput(&event, webFetchInput)
 	// Last, so it sees the action and category the normalizers settled on rather
 	// than the ones InferAction guessed.
 	c.PromoteRetainedContent(&event, attrs, body)
@@ -643,7 +649,6 @@ func (c Converter) NormalizeClaudeLogEvent(event *Event, attrs map[string]interf
 	if preserveCategory {
 		event.Event.Category = originalCategory
 	}
-	NormalizeClaudeWebFetchAuxiliaryRequest(event, attrs)
 }
 
 func ClaudeLogEventName(attrs map[string]interface{}, body string) string {

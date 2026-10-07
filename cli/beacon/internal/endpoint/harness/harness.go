@@ -385,8 +385,10 @@ func ConfigureClaude(opts ConfigureOptions) (string, error) {
 	// identity/arguments needed to reconstruct agent activity from OTel events.
 	env["OTEL_LOG_TOOL_DETAILS"] = "1"
 	env["OTEL_LOG_USER_PROMPTS"] = "1"
-	// Inline API bodies let the collector select auxiliary model inputs without
-	// following body files. Preserve an explicit user opt-out or capture mode.
+	// Inline API bodies carry the page WebFetch sends to its summarizer model, the
+	// only place Claude Code reports it. The collector's claude_api_body processor
+	// keeps that text and drops every other body before any exporter sees it.
+	// Preserve an explicit user opt-out or capture mode.
 	if _, configured := env["OTEL_LOG_RAW_API_BODIES"]; !configured {
 		env["OTEL_LOG_RAW_API_BODIES"] = "1"
 	}

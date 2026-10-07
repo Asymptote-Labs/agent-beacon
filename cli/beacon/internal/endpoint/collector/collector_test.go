@@ -53,6 +53,10 @@ func TestConfigYAMLIncludesReleaseContractFields(t *testing.T) {
 		"level: none",
 		"receivers: [otlp]",
 		"exporters: [beaconjson]",
+		"  claude_api_body:\n",
+		// Ahead of the fan-out to exporters, so Claude Code API bodies are filtered for every
+		// destination, not only the local runtime log.
+		"processors: [memory_limiter, claude_api_body, batch]",
 	} {
 		if !strings.Contains(yaml, want) {
 			t.Fatalf("ConfigYAML missing %q:\n%s", want, yaml)
