@@ -23,6 +23,16 @@
   <a href="https://docs.beacon.sh/cli">Commands</a>
 </p>
 
+<p align="center">
+  <a href="https://www.star-history.com/asymptote-labs/agent-beacon">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=asymptote-labs/agent-beacon&type=rank&theme=dark">
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/badge?repo=asymptote-labs/agent-beacon&type=rank">
+      <img alt="Star History Rank" src="https://api.star-history.com/badge?repo=asymptote-labs/agent-beacon&type=rank">
+    </picture>
+  </a>
+</p>
+
 Beacon captures **agent session history** across Claude Code, Cursor, Codex, OpenCode, and 20+ other harnesses, then turns useful workflows, corrections, and debugging patterns into reusable knowledge for future agents.
 
 **A problem solved by one agent shouldn't need to be learned from scratch by another.**
