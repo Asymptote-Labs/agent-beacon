@@ -26,9 +26,9 @@
 <p align="center">
   <a href="https://www.star-history.com/asymptote-labs/agent-beacon">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=asymptote-labs/agent-beacon&type=rank&theme=dark">
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/badge?repo=asymptote-labs/agent-beacon&type=rank">
-      <img alt="Star History Rank" src="https://api.star-history.com/badge?repo=asymptote-labs/agent-beacon&type=rank">
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=Asymptote-Labs/agent-beacon&type=trending&theme=dark">
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/badge?repo=Asymptote-Labs/agent-beacon&type=trending">
+      <img alt="GitHub Trending Repository of the Day" src="https://api.star-history.com/badge?repo=Asymptote-Labs/agent-beacon&type=trending">
     </picture>
   </a>
 </p>
