@@ -70,16 +70,33 @@ echo "Console user: $CONSOLE_USER"
 echo "Home directory: $HOME_DIR"
 
 echo "Resetting Beacon hook binary ownership for $CONSOLE_USER..."
-USER_GROUP="$(id -gn "$CONSOLE_USER")"
 HOOK_DIR="$HOME_DIR/.beacon/endpoint/hooks"
 HOOK_BIN="$HOOK_DIR/beacon-hooks"
-mkdir -p "$HOOK_DIR"
-chown -R "$CONSOLE_USER:$USER_GROUP" "$HOME_DIR/.beacon"
-chmod 755 "$HOME_DIR/.beacon" "$HOME_DIR/.beacon/endpoint" "$HOOK_DIR"
-rm -f "$HOOK_BIN"
+# Everything under the user's home is created and changed as the user, never as
+# root: the user controls these paths, so a root chown/chmod/rm there follows any
+# symlink or hard link they planted (a hard link to /opt/beacon/bin/beacon would be
+# handed to them by a recursive chown). A directory root left behind is renamed
+# aside (rename never follows links) so the user can recreate it.
+for dir in "$HOME_DIR/.beacon" "$HOME_DIR/.beacon/endpoint" "$HOOK_DIR"; do
+  if [ -L "$dir" ]; then
+    echo "Refusing to repair hooks: $dir is a symbolic link" >&2
+    exit 1
+  fi
+  if [ -e "$dir" ] && [ "$(stat -f %Su "$dir")" != "$CONSOLE_USER" ]; then
+    aside="$dir.not-owned.$(date +%Y%m%d%H%M%S)"
+    echo "Moving $dir (not owned by $CONSOLE_USER) aside to $aside" >&2
+    mv "$dir" "$aside"
+  fi
+done
+sudo -u "$CONSOLE_USER" mkdir -p "$HOOK_DIR"
+sudo -u "$CONSOLE_USER" chmod 755 "$HOME_DIR/.beacon" "$HOME_DIR/.beacon/endpoint" "$HOOK_DIR"
+sudo -u "$CONSOLE_USER" rm -f "$HOOK_BIN"
 
 echo "Granting $CONSOLE_USER append access to Beacon runtime and inventory logs..."
-chmod +a "$CONSOLE_USER allow list,search,add_file,delete_child,readattr,writeattr" "$RUNTIME_DIR" || true
+# The directory stays root-owned 0755 with no extra grant: hooks only append to the
+# files above. Letting the user add or delete entries here would let them swap a log
+# for a symlink that the root collector and inventory job then open and chmod.
+chmod -a "$CONSOLE_USER allow list,search,add_file,delete_child,readattr,writeattr" "$RUNTIME_DIR" 2>/dev/null || true
 chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$RUNTIME_LOG" || true
 chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$RUNTIME_LOCK" || true
 chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$INVENTORY_LOG" || true

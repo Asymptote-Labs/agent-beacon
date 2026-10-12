@@ -34,6 +34,11 @@ if ! grep -q 'INVENTORY_STATE' "$ROOT_DIR/packaging/macos/jamf/claude/common/rep
   echo "repair-hooks should prepare inventory heartbeat state files" >&2
   exit 1
 fi
+REPAIR_HOOKS_SCRIPT="$ROOT_DIR/packaging/macos/jamf/claude/common/repair-hooks.sh"
+if grep -q 'chown -R' "$REPAIR_HOOKS_SCRIPT" || grep -q 'chmod +a "$CONSOLE_USER allow[^"]*add_file' "$REPAIR_HOOKS_SCRIPT"; then
+  echo "repair-hooks must not chown the user's home recursively as root or let the user add entries to the root log directory" >&2
+  exit 1
+fi
 if ! grep -q 'restore_existing_forwarder' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
   echo "postinstall should restore existing optional forwarders" >&2
   exit 1
