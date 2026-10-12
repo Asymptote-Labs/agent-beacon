@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -381,6 +382,10 @@ func (a *Applier) download(ctx context.Context, url, dest string) error {
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Minute}
 	}
+	if err := updatecheck.RequireSecureURL(url); err != nil {
+		return err
+	}
+	client = updatecheck.SecureRedirects(client)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -436,8 +441,13 @@ func (a *Applier) verifyGatekeeper(ctx context.Context, pkgPath, teamID string) 
 	if err != nil {
 		return fmt.Errorf("pkgutil --check-signature: %s: %w", strings.TrimSpace(out), err)
 	}
-	if teamID != "" && !strings.Contains(out, teamID) {
-		return fmt.Errorf("package signature does not match expected team id %s", teamID)
+	// The team is compared exactly with the one named in the installer signature, and an unknown
+	// team is refused: notarization alone says some Developer ID signed the package, not Beacon's.
+	if teamID == "" {
+		return fmt.Errorf("no expected signing team id; refusing to install an unattributed package")
+	}
+	if signer := installerSignerTeamID(out); signer != teamID {
+		return fmt.Errorf("package is signed by team %q, want %s", signer, teamID)
 	}
 	if out, err := run(ctx, "stapler", "validate", pkgPath); err != nil {
 		if !staplerUnavailable(out, err) {
@@ -448,6 +458,34 @@ func (a *Applier) verifyGatekeeper(ctx context.Context, pkgPath, teamID string) 
 		return fmt.Errorf("spctl assessment failed: %s: %w", strings.TrimSpace(out), err)
 	}
 	return nil
+}
+
+var (
+	installerSignerPattern = regexp.MustCompile(`Developer ID Installer: [^\n]*\(([A-Z0-9]+)\)`)
+	codesignTeamPattern    = regexp.MustCompile(`(?m)^TeamIdentifier=([A-Z0-9]+)\s*$`)
+)
+
+// installerSignerTeamID is the team id in the leaf "Developer ID Installer: Name (TEAMID)" line of
+// pkgutil --check-signature output, or "" when there is none.
+func installerSignerTeamID(out string) string {
+	if m := installerSignerPattern.FindStringSubmatch(out); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// expectedTeamID is the team a new package must be signed by: the team that signed the installed
+// beacon binary. The manifest is not signed, so the team id it names is used only when the
+// installed binary carries none (an install that predates signing, or a test prefix); otherwise
+// anyone able to rewrite the manifest could name their own team.
+func (a *Applier) expectedTeamID(ctx context.Context, manifestTeamID string) string {
+	installed := filepath.Join(a.prefix(), "opt", "beacon", "bin", "beacon")
+	if out, err := a.runner()(ctx, "codesign", "-dv", "--verbose=2", installed); err == nil {
+		if m := codesignTeamPattern.FindStringSubmatch(out); m != nil {
+			return m[1]
+		}
+	}
+	return strings.TrimSpace(manifestTeamID)
 }
 
 func staplerUnavailable(out string, err error) bool {

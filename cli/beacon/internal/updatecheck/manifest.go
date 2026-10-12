@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"runtime"
 	"strings"
@@ -102,6 +104,10 @@ func (s ManifestSource) Fetch(ctx context.Context) (UpdateManifest, error) {
 		client = http.DefaultClient
 	}
 
+	if err := RequireSecureURL(endpoint); err != nil {
+		return UpdateManifest{}, fmt.Errorf("update manifest: %w", err)
+	}
+	client = SecureRedirects(client)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return UpdateManifest{}, err
@@ -167,4 +173,50 @@ func EvaluateManifest(current string, m UpdateManifest) (ManifestResult, error) 
 		}
 	}
 	return result, nil
+}
+
+// RequireSecureURL refuses a URL an update could be fetched from unless it is https, or plain http
+// to a loopback host (a local mirror or a test server). The manifest and the package it names drive
+// a root install, so neither may come over a connection anyone on the path can rewrite.
+func RequireSecureURL(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return err
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		if u.Host == "" {
+			return fmt.Errorf("%q has no host", raw)
+		}
+		return nil
+	case "http":
+		host := u.Hostname()
+		if host == "localhost" {
+			return nil
+		}
+		if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+			return nil
+		}
+	}
+	return fmt.Errorf("refusing non-https update URL %q", raw)
+}
+
+// SecureRedirects returns a copy of client that follows a redirect only to a URL RequireSecureURL
+// accepts, so an https request cannot be redirected onto plain http.
+func SecureRedirects(client *http.Client) *http.Client {
+	copied := *client
+	next := client.CheckRedirect
+	copied.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if err := RequireSecureURL(req.URL.String()); err != nil {
+			return err
+		}
+		if next != nil {
+			return next(req, via)
+		}
+		if len(via) >= 10 {
+			return fmt.Errorf("stopped after 10 redirects")
+		}
+		return nil
+	}
+	return &copied
 }
