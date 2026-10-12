@@ -10,3 +10,6 @@ func processOwnsHome(string) bool { return true }
 
 // ownedByProcess is always true off Unix, where file modes do not decide who can read the log.
 func ownedByProcess(os.FileInfo) bool { return true }
+
+// elevatedOpenFlags adds nothing off Unix.
+func elevatedOpenFlags() int { return 0 }

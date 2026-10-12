@@ -34,3 +34,12 @@ func ownedByProcess(info os.FileInfo) bool {
 	}
 	return int(stat.Uid) == os.Geteuid()
 }
+
+// elevatedOpenFlags are added when root opens a runtime log: never follow a symlink in the last
+// component, and never block opening a FIFO.
+func elevatedOpenFlags() int {
+	if os.Geteuid() != 0 {
+		return 0
+	}
+	return syscall.O_NOFOLLOW | syscall.O_NONBLOCK
+}
