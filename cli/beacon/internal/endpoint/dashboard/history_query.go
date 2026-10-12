@@ -397,7 +397,7 @@ func (s *historyStore) show(sourceID int64, id string, query TraceQuery) (TraceS
 		return TraceShowResultV1{}, false, err
 	}
 	total := len(filtered)
-	offset, limit := traceRange(query, total)
+	offset, limit := traceShowRange(query, total, func(i int) int { return filtered[i].seq })
 	end := offset - 1 + limit
 	if end > total {
 		end = total

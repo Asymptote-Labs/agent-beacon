@@ -110,10 +110,12 @@ All commands accept:
 
 | Flag | Description |
 |------|-------------|
-| `--offset <n>` | Start at this event number. Defaults to `1` |
+| `--offset <n>` | Start at this position in the filtered events. Defaults to `1` |
 | `--around-event <n>` | Center output around this event number |
 | `--before <n>` | Events before `--around-event`. Defaults to `3` |
 | `--after <n>` | Events after `--around-event`. Defaults to `3` |
+
+`--around-event` refers to the original event number, even with `--event-type`. Its before and after context counts matching events. If the named event does not match the filter, the window contains matching events before and after its position without an extra slot for the missing event. Returned events retain their original numbers; range offsets and totals describe the filtered events.
 
 ## Examples
 

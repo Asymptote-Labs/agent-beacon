@@ -296,7 +296,7 @@ func ShowTrace(path, id string, query TraceQuery) (TraceShowResultV1, bool, erro
 	}
 	events := filterTraceEvents(agg.events, query.EventTypes)
 	total := len(events)
-	offset, limit := traceRange(query, total)
+	offset, limit := traceShowRange(query, total, func(i int) int { return events[i].Number })
 	end := offset - 1 + limit
 	if end > total {
 		end = total
@@ -442,6 +442,36 @@ func filterTraceEvents(events []TraceEventV1, eventTypes []string) []TraceEventV
 		}
 	}
 	return out
+}
+
+// traceShowRange keeps pagination in filtered coordinates, but around-event names
+// an original event number. If that event is filtered out, its insertion point
+// separates the matching events before and after it without adding an anchor slot.
+func traceShowRange(query TraceQuery, total int, numberAt func(int) int) (int, int) {
+	if query.AroundEvent <= 0 || len(query.EventTypes) == 0 {
+		return traceRange(query, total)
+	}
+	before, after := query.Before, query.After
+	if before <= 0 {
+		before = 3
+	}
+	if after <= 0 {
+		after = 3
+	}
+	anchor := sort.Search(total, func(i int) bool { return numberAt(i) >= query.AroundEvent })
+	start := anchor - before
+	if start < 0 {
+		start = 0
+	}
+	end := anchor
+	if anchor < total && numberAt(anchor) == query.AroundEvent {
+		end++
+	}
+	if after > total-end {
+		after = total - end
+	}
+	end += after
+	return start + 1, end - start
 }
 
 func traceRange(query TraceQuery, total int) (int, int) {
