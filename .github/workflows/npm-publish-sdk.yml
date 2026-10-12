@@ -38,8 +38,14 @@ jobs:
       - name: Install SDK dependencies
         working-directory: packages/asymptote-sdk-js
         run: npm ci
+      - name: Require an SDK release tag
+        # workflow_dispatch can run from any branch; publishing must only ever
+        # happen from a pushed sdk-js-v* tag, never from unreviewed branch code.
+        if: github.ref_type != 'tag' || !startsWith(github.ref_name, 'sdk-js-v')
+        run: |
+          echo "npm publish runs only from an sdk-js-v* tag (got ${GITHUB_REF})" >&2
+          exit 1
       - name: Verify tag matches SDK version
-        if: startsWith(github.ref, 'refs/tags/')
         working-directory: packages/asymptote-sdk-js
         shell: bash
         run: |

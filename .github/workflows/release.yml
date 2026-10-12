@@ -118,7 +118,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist/vector
-          curl -fsSLO "https://packages.timber.io/vector/${VECTOR_VERSION}/vector-${VECTOR_VERSION}-SHA256SUMS"
+          # Checked against checksums pinned in the repository, not a file from the download host.
+          cp "packaging/vector/vector-${VECTOR_VERSION}-SHA256SUMS" .
           for ARCH in $BEACON_PKG_ARCHES; do
             case "$ARCH" in
               arm64) VECTOR_ARCH="arm64" ;;
