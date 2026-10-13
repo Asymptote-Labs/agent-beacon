@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,7 +90,9 @@ func sqliteURI(path string) string {
 	if err != nil {
 		abs = path
 	}
-	return "file:" + filepath.ToSlash(abs) + "?_pragma=busy_timeout(5000)"
+	// Escape URI delimiters while preserving filesystem separators and drive letters.
+	uri := url.URL{Path: filepath.ToSlash(abs)}
+	return "file:" + uri.EscapedPath() + "?_pragma=busy_timeout(5000)"
 }
 
 func ensureSchema(db *sql.DB) error {

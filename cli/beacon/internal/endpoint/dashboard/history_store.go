@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -233,7 +234,9 @@ func historyURI(path string) string {
 	if err != nil {
 		abs = path
 	}
-	return "file:" + filepath.ToSlash(abs) + "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
+	// Escape URI delimiters while preserving filesystem separators and drive letters.
+	uri := url.URL{Path: filepath.ToSlash(abs)}
+	return "file:" + uri.EscapedPath() + "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
 }
 
 func (s *historyStore) close() {
