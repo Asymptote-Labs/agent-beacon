@@ -776,7 +776,11 @@ func TestCodexInlineTableIsNotRewritten(t *testing.T) {
 
 func TestCodexHonorsCodexHome(t *testing.T) {
 	home := isolate(t)
+	// Codex requires CODEX_HOME to be an existing directory.
 	codexHome := filepath.Join(home, "elsewhere")
+	if err := os.MkdirAll(codexHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("CODEX_HOME", codexHome)
 	connect(t, fileOptions(home), mustTarget(t, "codex"))
 	if !strings.Contains(readFile(t, filepath.Join(codexHome, "config.toml")), "[mcp_servers.beacon-managed]") {

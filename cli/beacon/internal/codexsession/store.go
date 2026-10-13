@@ -46,25 +46,35 @@ type IndexEntry struct {
 	UpdatedAt  string `json:"updated_at,omitempty"`
 }
 
+// HomeDir resolves Codex's home directory the way Codex does: a nonempty CODEX_HOME is a
+// literal path (no trimming or shell expansion) that must be an existing directory and is
+// canonicalized; otherwise it is <home>/.codex.
+func HomeDir(home string) (string, error) {
+	override := os.Getenv("CODEX_HOME")
+	if override == "" {
+		return filepath.Join(home, ".codex"), nil
+	}
+	info, err := sessionfs.Stat(override)
+	if err != nil {
+		return "", fmt.Errorf("read CODEX_HOME %q: %w", override, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("CODEX_HOME %q is not a directory", override)
+	}
+	canonical, err := filepath.EvalSymlinks(override)
+	if err != nil {
+		return "", fmt.Errorf("resolve CODEX_HOME %q: %w", override, err)
+	}
+	absolute, err := filepath.Abs(canonical)
+	if err != nil {
+		return "", fmt.Errorf("resolve CODEX_HOME %q: %w", override, err)
+	}
+	return absolute, nil
+}
+
 func DefaultCodexDir() (string, error) {
-	// Codex treats a nonempty CODEX_HOME as a literal path, not shell syntax.
-	if override := os.Getenv("CODEX_HOME"); override != "" {
-		info, err := sessionfs.Stat(override)
-		if err != nil {
-			return "", fmt.Errorf("read CODEX_HOME %q: %w", override, err)
-		}
-		if !info.IsDir() {
-			return "", fmt.Errorf("CODEX_HOME %q is not a directory", override)
-		}
-		canonical, err := filepath.EvalSymlinks(override)
-		if err != nil {
-			return "", fmt.Errorf("resolve CODEX_HOME %q: %w", override, err)
-		}
-		absolute, err := filepath.Abs(canonical)
-		if err != nil {
-			return "", fmt.Errorf("resolve CODEX_HOME %q: %w", override, err)
-		}
-		return absolute, nil
+	if os.Getenv("CODEX_HOME") != "" {
+		return HomeDir("")
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -73,7 +83,7 @@ func DefaultCodexDir() (string, error) {
 	if strings.TrimSpace(home) == "" {
 		return "", errors.New("home directory is empty")
 	}
-	return filepath.Join(home, ".codex"), nil
+	return HomeDir(home)
 }
 
 func NewStore(dir string) (*Store, error) {

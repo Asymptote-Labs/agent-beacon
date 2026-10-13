@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 )
@@ -310,12 +311,13 @@ func claudeConfigPath(home string) (string, error) {
 	return filepath.Join(home, ".claude.json"), nil
 }
 
-// codexConfigPath honors CODEX_HOME, as Codex does.
+// codexConfigPath resolves CODEX_HOME exactly as Codex and Beacon's session reader do.
 func codexConfigPath(home string) (string, error) {
-	if dir := strings.TrimSpace(os.Getenv("CODEX_HOME")); dir != "" {
-		return filepath.Join(dir, "config.toml"), nil
+	dir, err := codexsession.HomeDir(home)
+	if err != nil {
+		return "", err
 	}
-	return filepath.Join(home, ".codex", "config.toml"), nil
+	return filepath.Join(dir, "config.toml"), nil
 }
 
 // vscodeMCPPath is the user-profile mcp.json, next to the settings.json VS Code discovery uses.

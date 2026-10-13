@@ -38,7 +38,7 @@ Use `beacon endpoint codex sync --print` to preview mapped events without writin
 
 Codex rollout files can contain prompts, assistant responses, tool inputs, command output, and code. Sync is therefore explicit: Beacon does not read `~/.codex/sessions` during normal Codex hook execution, and it never reads `~/.codex/auth.json`.
 
-Session status, sync, and handoff honor Codex's literal `CODEX_HOME` directory: it must exist, and relative paths resolve from the current working directory. Unlike shell syntax, `~` and environment-variable references in the value are not expanded. Pass `--codex-dir <path>` to select a store explicitly.
+Session status, sync, handoff, and `beacon mcp connect` honor Codex's literal `CODEX_HOME` directory: it must exist, and relative paths resolve from the current working directory. Unlike shell syntax, `~` and environment-variable references in the value are not expanded. Pass `--codex-dir <path>` to select a session store explicitly.
 
 ### Token usage and cost
 
