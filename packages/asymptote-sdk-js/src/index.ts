@@ -523,12 +523,7 @@ function finishResult<T>(result: T, span: Span, options?: ObserveOptions): unkno
   if (isPromiseLike(result)) {
     return result.then(
       value => {
-        if (!options?.ignoreOutput) {
-          span.setAttribute("asymptote.observe.output.type", typeof value);
-        }
-        span.setStatus({ code: SpanStatusCode.OK });
-        span.end();
-        return value;
+        return finishResult(value, span, options);
       },
       error => {
         endSpanWithError(span, error);
@@ -547,17 +542,49 @@ function finishResult<T>(result: T, span: Span, options?: ObserveOptions): unkno
   return result;
 }
 
-async function* finishAsyncIterable(iterable: AsyncIterable<unknown>, span: Span): AsyncGenerator<unknown> {
-  try {
-    for await (const item of iterable) {
-      yield item;
+function finishAsyncIterable(iterable: AsyncIterable<unknown>, span: Span): AsyncIterableIterator<unknown> {
+  const spanContext = trace.setSpan(context.active(), span);
+  let iterator: AsyncIterator<unknown> | undefined;
+  let ended = false;
+  const getIterator = () => iterator ??= iterable[Symbol.asyncIterator]();
+  const invoke = async (
+    operation: () => Promise<IteratorResult<unknown>>,
+    closing = false,
+  ): Promise<IteratorResult<unknown>> => {
+    try {
+      const result = await context.with(spanContext, operation);
+      if (!ended && (result.done || closing)) {
+        ended = true;
+        span.setStatus({ code: SpanStatusCode.OK });
+        span.end();
+      }
+      return result;
+    } catch (error) {
+      if (!ended) {
+        ended = true;
+        endSpanWithError(span, error);
+      }
+      throw error;
     }
-    span.setStatus({ code: SpanStatusCode.OK });
-    span.end();
-  } catch (error) {
-    endSpanWithError(span, error);
-    throw error;
-  }
+  };
+  return {
+    [Symbol.asyncIterator]() { return this; },
+    next(...args: [] | [unknown]) { return invoke(() => getIterator().next(...args)); },
+    return(value?: unknown) {
+      return invoke(() => {
+        const inner = getIterator();
+        return inner.return ? inner.return(value) : Promise.resolve<IteratorResult<unknown>>({ done: true, value });
+      }, true);
+    },
+    throw(error?: unknown) {
+      return invoke(async () => {
+        const inner = getIterator();
+        if (inner.throw) return inner.throw(error);
+        await inner.return?.();
+        throw error;
+      });
+    },
+  };
 }
 
 function endSpanWithError(span: Span, error: unknown): void {

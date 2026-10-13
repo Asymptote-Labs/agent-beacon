@@ -144,6 +144,12 @@ const plan = Observe.observe(
 Call `Observe.flush()` before short-lived scripts exit, or
 `Observe.shutdown()` when the process owns the provider lifecycle.
 
+For async streams, the observed span stays open until iteration finishes, fails,
+or the consumer closes it with `break` or `return()`. Streams resolved through a
+promise follow the same lifecycle. Deferred stream work and cleanup run in that
+span's context; iterator values and cleanup are forwarded to the original stream.
+Closing an unconsumed stream exports its span but does not invent token usage.
+
 ## Token Usage Attribution
 
 The OpenLLMetry instrumentations record `gen_ai.usage.*` token counts on every
