@@ -13,6 +13,26 @@ afterEach(() => {
   delete (globalThis as any)[senderKey]
 })
 
+test.each(["synchronous", "asynchronous"])("disposes every V2 hook after a %s cleanup failure", async (kind) => {
+  const disposed: string[] = []
+  const register = async (name: string) => ({
+    dispose() {
+      disposed.push(name)
+      if (name === "prompt") {
+        if (kind === "synchronous") throw new Error("synthetic disposal failure")
+        return Promise.reject(new Error("synthetic disposal failure"))
+      }
+    },
+  })
+  const dispose = await BeaconDefinition.setup({
+    session: { hook: register },
+    tool: { hook: register },
+    event: { async *subscribe() {} },
+  } as any)
+  await expect(dispose()).resolves.toBeUndefined()
+  expect(disposed).toEqual(["prompt", "execute.before", "execute.after"])
+})
+
 async function plugin() {
   return BeaconEndpointPlugin({
     project: { id: "project-1" },

@@ -603,7 +603,7 @@ export default {
     return async () => {
       controller.abort()
       await consuming
-      await Promise.all(registrations.map((item) => Promise.resolve(item.dispose?.()).catch(() => undefined)))
+      await Promise.all(registrations.map((item) => Promise.resolve().then(() => item.dispose?.()).catch(() => undefined)))
     }
   },
 }
