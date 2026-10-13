@@ -173,6 +173,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
     const next = structuredClone(part)
     const delta = partDeltas.get(key)
     if ((next.type === "text" || next.type === "reasoning") && !next.text && delta) next.text = delta
+    if ((next.type === "text" || next.type === "reasoning") && typeof next.text === "string") partDeltas.set(key, next.text)
     if (next.type === "tool") {
       const status = next.state?.status
       if (status !== "completed" && status !== "error") return
@@ -327,8 +328,12 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
         }
       }
       if (type === "message.part.delta") {
+        if (properties?.field && properties.field !== "text") return
         const key = `${sid}:${properties?.messageID || ""}:${properties?.partID || ""}`
-        partDeltas.set(key, (partDeltas.get(key) || "") + (properties?.delta || ""))
+        const text = (partDeltas.get(key) || "") + (properties?.delta || "")
+        partDeltas.set(key, text)
+        const pending = pendingParts.get(key)
+        if (pending && (pending.part.type === "text" || pending.part.type === "reasoning")) pending.part.text = text
         return
       }
       if (type === "message.part.updated") {
