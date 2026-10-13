@@ -232,3 +232,13 @@ describe("beacon pi extension", () => {
     expect(sent[0].cwd).toBe("/other")
   })
 })
+
+for (const invalid of [false, true]) {
+  test(`keeps the event when a date is ${invalid ? "invalid" : "valid"}`, async () => {
+    const sent = captureSends(); const pi = fakePi(); createBeaconExtension().register(pi.api);
+    const date = new Date(invalid ? NaN : "2026-01-01T00:00:00Z");
+    await pi.fire({ type: "tool_result", toolName: "read", details: { date, output: "retained" } }, context());
+    expect(sent).toHaveLength(1);
+    expect(sent[0].details).toEqual({ date: invalid ? null : date.toISOString(), output: "retained" });
+  });
+}

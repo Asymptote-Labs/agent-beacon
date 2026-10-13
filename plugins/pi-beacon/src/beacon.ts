@@ -97,7 +97,7 @@ function safeClone(value: unknown, depth = 0, seen = new WeakSet<object>()): unk
   const object = value as object
   if (seen.has(object)) return undefined
   if (value instanceof Error) return { name: value.name, message: value.message }
-  if (value instanceof Date) return value.toISOString()
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString()
 
   seen.add(object)
   try {

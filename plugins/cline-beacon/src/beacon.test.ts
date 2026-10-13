@@ -141,3 +141,14 @@ describe("beacon cline plugin", () => {
     expect(() => JSON.stringify(sent[0])).not.toThrow()
   })
 })
+
+for (const invalid of [false, true]) {
+  test(`keeps the hook event when a date is ${invalid ? "invalid" : "valid"}`, async () => {
+    const sent = captureSends(); const plugin = createBeaconPlugin();
+    const date = new Date(invalid ? NaN : "2026-01-01T00:00:00Z");
+    await plugin.hooks.afterTool({ taskId: "task-date", details: { date, output: "retained" } });
+    expect(sent).toHaveLength(1);
+    expect(JSON.stringify(sent[0])).toContain('"output":"retained"');
+    expect(JSON.stringify(sent[0])).toContain(invalid ? '"date":null' : '"date":"2026-01-01T00:00:00.000Z"');
+  });
+}
