@@ -46,6 +46,12 @@ func findHeadFile(cwd string) string {
 		}
 	}
 
+	// A directory alias can point inside a different repository. Git discovers
+	// ancestors of the physical working directory, not parents of the alias.
+	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = resolved
+	}
+
 	dir := cwd
 	for {
 		gitPath := filepath.Join(dir, ".git")
