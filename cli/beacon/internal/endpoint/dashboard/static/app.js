@@ -185,7 +185,15 @@ function updateURL(query) {
   window.history.replaceState(null, "", next);
 }
 
+let activityLoadGeneration = 0;
+let activityLoadInFlight = false;
+
 async function load({ updateLocation = false, mode = "replace" } = {}) {
+  // Do not let the poll timer continually supersede a slow local log scan.
+  // Explicit filter changes still start immediately and replace the old view.
+  if (mode === "poll" && activityLoadInFlight) return;
+  const generation = ++activityLoadGeneration;
+  activityLoadInFlight = true;
   const query = queryFromFilters();
   if (updateLocation) updateURL(query);
   const suffix = query ? `?${query}` : "";
@@ -201,6 +209,7 @@ async function load({ updateLocation = false, mode = "replace" } = {}) {
       getJSON(`/api/summary${suffix}`),
       getJSON(`${activityPath}${suffix}`),
     ]);
+    if (generation !== activityLoadGeneration) return;
     const previousEvents = state.events;
     const previousQuery = state.currentQuery;
     state.status = status;
@@ -216,10 +225,13 @@ async function load({ updateLocation = false, mode = "replace" } = {}) {
       rendered = true;
     }
   } catch (err) {
-    state.error = err;
+    if (generation === activityLoadGeneration) state.error = err;
   } finally {
-    state.loading = false;
-    if (!rendered) render();
+    if (generation === activityLoadGeneration) {
+      activityLoadInFlight = false;
+      state.loading = false;
+      if (!rendered) render();
+    }
   }
 }
 
