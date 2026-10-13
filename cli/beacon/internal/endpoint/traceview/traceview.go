@@ -216,10 +216,13 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyMsg:
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
 		if m.searching {
 			return m.updateSearch(msg)
 		}
-		if msg.String() == "ctrl+c" || msg.String() == "q" {
+		if msg.String() == "q" {
 			return m, tea.Quit
 		}
 		if m.loading {

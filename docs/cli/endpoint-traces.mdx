@@ -13,7 +13,7 @@ Run the top-level command on an interactive terminal to open the full-screen loc
 beacon traces
 ```
 
-Use the arrow keys or `j`/`k` to move, `enter` to open a trace, `/` to search, and `1`–`4` to filter an open trace by event type. Page Up and Page Down scroll long event details. The browser reads only local Beacon state and does not contact the network.
+Use the arrow keys or `j`/`k` to move, `enter` to open a trace, `/` to search, and `1`–`4` to filter an open trace by event type. Page Up and Page Down scroll long event details. Press Ctrl+C to quit, including while entering a search. The browser reads only local Beacon state and does not contact the network.
 
 A trace shared with [`beacon share`](/cli/share) is marked `shared` in the list, or `shared (stale)` when the session has activity newer than its last share or refresh (Beacon's own records, such as a commit link, do not count). An open trace shows its link and, when it is stale, the `beacon share refresh …` command to run. The plain list adds a last column for shared traces with the state, the link and, when stale, that command. In `--json` output, `sharing.refresh_command` carries the command for any shared trace.
 
