@@ -372,6 +372,66 @@ describe("Asymptote Observe SDK", () => {
     expect(exporter.getFinishedSpans()).toHaveLength(1);
   });
 
+  it("preserves stream control methods and their original receiver", async () => {
+    const exporter = new InMemorySpanExporter();
+    initialize({ spanExporter: exporter, disableDefaultExporter: true, disableBatch: true });
+    class Stream {
+      #interrupted = false;
+      async interrupt() { this.#interrupted = true; }
+      get interrupted() { return this.#interrupted; }
+      async *[Symbol.asyncIterator]() { if (!this.#interrupted) yield "message"; }
+    }
+    const original = new Stream();
+    const query = wrapClaudeAgentQuery(() => original);
+    const stream = query();
+    expect(stream.interrupt).toBe(stream.interrupt);
+    await stream.interrupt();
+    expect(original.interrupted).toBe(true);
+    expect(stream.interrupted).toBe(true);
+    const messages = [];
+    for await (const message of stream) messages.push(message);
+    expect(messages).toEqual([]);
+    await flush();
+    expect(exporter.getFinishedSpans()).toHaveLength(1);
+  });
+
+  it("keeps direct iterator methods traced when a control closes the real source", async () => {
+    const exporter = new InMemorySpanExporter();
+    initialize({ spanExporter: exporter, disableDefaultExporter: true, disableBatch: true });
+    let cleaned = false;
+    const source = (async function* () {
+      try { yield "first"; yield "second"; } finally { cleaned = true; }
+    })();
+    const interrupt = async () => { await source.return(); };
+    const original = Object.assign(source, { interrupt, stop: interrupt });
+    Object.defineProperty(original, "stop", { value: original.interrupt, configurable: false, writable: false });
+    const stream = wrapClaudeAgentQuery(() => original)();
+    expect(stream[Symbol.asyncIterator]()).toBe(stream);
+    expect(await stream.next()).toEqual({ value: "first", done: false });
+    await stream.stop();
+    expect(cleaned).toBe(true);
+    expect(await stream.next()).toEqual({ value: undefined, done: true });
+    await flush();
+    expect(exporter.getFinishedSpans()).toHaveLength(1);
+  });
+
+  it("traces explicit iterator throw and preserves source cleanup", async () => {
+    const exporter = new InMemorySpanExporter();
+    initialize({ spanExporter: exporter, disableDefaultExporter: true, disableBatch: true });
+    let cleaned = false;
+    const original = (async function* () {
+      try { yield "first"; } finally { cleaned = true; }
+    })();
+    const stream = wrapClaudeAgentQuery(() => original)();
+    await stream.next();
+    const failure = new Error("consumer failed");
+    await expect(stream.throw(failure)).rejects.toBe(failure);
+    expect(cleaned).toBe(true);
+    await flush();
+    expect(exporter.getFinishedSpans()).toHaveLength(1);
+    expect(exporter.getFinishedSpans()[0]?.status.code).toBe(SpanStatusCode.ERROR);
+  });
+
   it("provides a tracer compatible with Vercel-style telemetry hooks", async () => {
     const exporter = new InMemorySpanExporter();
     initialize({ spanExporter: exporter, disableDefaultExporter: true, disableBatch: true });
