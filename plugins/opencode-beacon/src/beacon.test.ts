@@ -23,6 +23,39 @@ async function plugin() {
 }
 
 describe("BeaconEndpointPlugin", () => {
+  test("keeps another session's diff for a recently changed file", async () => {
+    const hooks = await plugin()
+    await hooks["tool.execute.before"]!(
+      { tool: "write", sessionID: "ses_writer", callID: "call_writer" },
+      { args: { filePath: "/repo/shared.ts", content: "first" } },
+    )
+    const diff = { file: "/repo/shared.ts", before: "first", after: "second", additions: 1, deletions: 1 }
+    await hooks.event!({ event: { type: "session.diff", properties: { sessionID: "ses_other", diff: [diff] } } } as any)
+    // Drain the real plugin's asynchronous event queue through a subsequent hook.
+    await hooks["command.execute.before"]!({ sessionID: "ses_other", command: "check" }, {})
+    expect(payloads.filter(item => item.type === "session.diff")).toEqual([
+      expect.objectContaining({ session_id: "ses_other", properties: expect.objectContaining({ diff: [diff] }) }),
+    ])
+    await hooks.event!({ event: { type: "session.diff", properties: { sessionID: "ses_writer", diff: [diff] } } } as any)
+    await hooks["command.execute.before"]!({ sessionID: "ses_writer", command: "check" }, {})
+    expect(payloads.filter(item => item.type === "session.diff")).toHaveLength(1)
+  })
+
+  test("deduplicates interleaved writes by both session and path", async () => {
+    const hooks = await plugin()
+    for (const sessionID of ["ses_first", "ses_second"]) {
+      await hooks["tool.execute.before"]!(
+        { tool: "write", sessionID, callID: `call_${sessionID}` },
+        { args: { filePath: "/repo/shared.ts", content: sessionID } },
+      )
+    }
+    for (const sessionID of ["ses_first", "ses_second"]) {
+      await hooks.event!({ event: { type: "session.diff", properties: { sessionID, diff: [{ file: "/repo/shared.ts", before: "old", after: "new" }] } } } as any)
+    }
+    await hooks["command.execute.before"]!({ sessionID: "ses_second", command: "check" }, {})
+    expect(payloads.filter(item => item.type === "session.diff")).toEqual([])
+  })
+
   test("forwards prompts and correlated tool lifecycle payloads", async () => {
     const hooks = await plugin()
 

@@ -71,6 +71,8 @@ OpenCode prompts, completed assistant text and reasoning, tool arguments and res
 
 The plugin uses OpenCode session, message, part, permission request, and tool call identifiers for correlation. The poll path uses OpenCode's persisted session, message, part, and tool call identifiers. It does not create file events without an agent-derived path, so object-storage ingestion paths are not treated as files the agent touched.
 
+File watcher duplicates are suppressed within the session that reported the tool activity. A recent change in another session does not suppress this session's file diff, even when both sessions work on the same path.
+
 ## Deployment notes
 
 Restart OpenCode after installing or removing hooks so new sessions pick up the updated plugin configuration.

@@ -162,7 +162,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
     const paths = []
     if (isFileMutationTool(tool) && filePath(args)) paths.push(filePath(args))
     if (includeShell) paths.push(...shellMutationPaths(tool, args))
-    for (const path of paths) recentFilePaths.set(path, { time: Date.now(), sessionID: sid, callID })
+    for (const path of paths) recentFilePaths.set(JSON.stringify([sid, path]), { time: Date.now(), sessionID: sid, callID })
   }
   const partKey = (part, fallbackSessionID) =>
     `${part?.sessionID || fallbackSessionID || ""}:${part?.messageID || ""}:${part?.id || ""}`
@@ -369,7 +369,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
         const filtered = diffs.filter((item) => {
           const path = filePath(item)
           if (!path) return false
-          const seen = recentFilePaths.get(path)
+          const seen = recentFilePaths.get(JSON.stringify([sid, path]))
           if (seen && now - seen.time < 5000) return false
           return item?.before !== item?.after || item?.additions || item?.deletions
         })
