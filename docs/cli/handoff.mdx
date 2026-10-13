@@ -21,7 +21,7 @@ Sessions come from each runtime's own local session store, not from Beacon's run
 |---------|---------------|-------------|
 | Claude Code | `~/.claude/projects` | `claude` |
 | Codex CLI | `~/.codex/sessions` | `codex` |
-| OpenCode | `~/.config/opencode` (SQLite and the legacy file store) | `opencode` |
+| OpenCode | `~/.local/share/opencode` (or `$XDG_DATA_HOME/opencode`; SQLite and the legacy file store) | `opencode` |
 | Cline | `~/.cline/data` | `cline` |
 | Pi | `~/.pi/agent/sessions` (or under `PI_CODING_AGENT_DIR`) | `pi` |
 | Prime Agent | `~/.prime/agent`, both `sessions` and `session-artifacts` (or `PRIME_AGENT_CODING_AGENT_DIR`) | `prime` |
@@ -35,6 +35,8 @@ Sessions come from each runtime's own local session store, not from Beacon's run
 | Cursor | `~/.cursor/projects` (agent transcripts) and Cursor's global storage `state.vscdb` (Composer conversations) | `cursor` |
 
 When a Codex thread has more than one rollout file, `beacon handoff` lists it once, under its newest file. Cline can hold the same task both as a CLI session and in its older task history; the CLI session is the copy that is listed. Cline kanban cards are not sessions and are not listed. Prime Agent subagent transcripts, under `session-artifacts`, are listed as subagents of the session that started them. Hermes Agent delegate subagents are listed as subagents of the session that spawned them. When Hermes compresses a long conversation it continues it in a new session; each of those sessions is listed, and reopening any of them reopens the latest. A DeepSeek Harness session that DSH spawned for delegated work is listed as a subagent of the session that started it; a fork of a session is listed as a session of its own. Grok Build keeps its subagents' child sessions in the same tree as other sessions; those whose `summary.json` has a subagent `session_kind` are listed as subagents. OpenClaw transcript ids are unique only within one agent. When two agents hold the same id, both are listed, and `export` and `resume` report the id as ambiguous rather than pick one. A Cursor conversation can be stored both as a transcript and as a Composer record under one id; it is listed once, as the transcript when `cursor-agent` can reopen it and as the Composer record otherwise. Cursor subagent transcripts are listed as subagents of the conversation that started them.
+
+OpenCode uses its data directory, distinct from its plugin/configuration directory. If no recognized store is present there, Beacon also checks the configuration location used by older Beacon releases. An explicit `--store-dir opencode=...` overrides discovery.
 
 OpenClaw Gateway sessions are read from the JSONL transcripts and the `sessions.json` index in each agent's `sessions` directory, as `beacon endpoint openclaw sessions sync` reads them. Recent OpenClaw releases keep live sessions in a per-agent SQLite database and treat that directory as legacy, so sessions that exist only in the database are not listed.
 

@@ -32,6 +32,13 @@ type Store struct {
 func NewStore(dataDir string) (*Store, error) {
 	if strings.TrimSpace(dataDir) == "" {
 		dataDir = DefaultDataDir()
+		// Older Beacon releases looked in the configuration directory. Keep a
+		// recognized store there as a fallback, while preferring producer data.
+		if dataDir != "" && !hasStoreAt(dataDir) {
+			if legacy := legacyDataDir(); legacy != "" && hasStoreAt(legacy) {
+				dataDir = legacy
+			}
+		}
 	}
 	if strings.TrimSpace(dataDir) == "" {
 		return nil, errors.New("opencode data directory is empty")
@@ -52,6 +59,21 @@ func NewStore(dataDir string) (*Store, error) {
 }
 
 func DefaultDataDir() string {
+	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
+		return filepath.Join(xdg, "opencode")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return ""
+	}
+	return filepath.Join(home, ".local", "share", "opencode")
+}
+
+func hasStoreAt(dir string) bool {
+	return fileExists(filepath.Join(dir, "opencode.db")) || dirExists(filepath.Join(dir, "storage"))
+}
+
+func legacyDataDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
 		return ""
