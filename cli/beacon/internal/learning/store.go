@@ -14,6 +14,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sqliteuri"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
@@ -70,7 +71,7 @@ func (s *Store) db() (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(s.dbPath), 0700); err != nil && filepath.Dir(s.dbPath) != "." {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", sqliteURI(s.dbPath))
+	db, err := sql.Open("sqlite", sqliteuri.File(s.dbPath, url.Values{"_pragma": {"busy_timeout(5000)"}}))
 	if err != nil {
 		return nil, err
 	}
@@ -83,16 +84,6 @@ func (s *Store) db() (*sql.DB, error) {
 		return nil, err
 	}
 	return db, nil
-}
-
-func sqliteURI(path string) string {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		abs = path
-	}
-	// Escape URI delimiters while preserving filesystem separators and drive letters.
-	uri := url.URL{Path: filepath.ToSlash(abs)}
-	return "file:" + uri.EscapedPath() + "?_pragma=busy_timeout(5000)"
 }
 
 func ensureSchema(db *sql.DB) error {
