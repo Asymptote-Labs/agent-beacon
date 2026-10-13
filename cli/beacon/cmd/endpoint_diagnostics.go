@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/atomicfile"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/dshsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/embedded"
 
@@ -1732,7 +1733,7 @@ func restoreRepairFile(path string, snapshot repairFileSnapshot) error {
 	if mode == 0 {
 		mode = 0600
 	}
-	return os.WriteFile(path, snapshot.data, mode)
+	return atomicfile.Write(path, snapshot.data, mode)
 }
 
 func checkLogWritable(cfg endpointconfig.Config) diagnostics.Check {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/atomicfile"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
@@ -95,7 +96,7 @@ func setConfigAutoUpdateModeAt(path, mode string) error {
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 			return err
 		}
-		return os.WriteFile(path, data, 0644)
+		return atomicfile.Write(path, data, 0644)
 	}
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -114,7 +115,7 @@ func setConfigAutoUpdateModeAt(path, mode string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, out, perm)
+	return atomicfile.Write(path, out, perm)
 }
 
 func requireRootForUpdater() error {

@@ -38,12 +38,9 @@ func CurrentBranch(cwd string) string {
 // per-worktree gitdir, which holds this checkout's HEAD; the shared commondir
 // HEAD would report another worktree's branch.
 func findHeadFile(cwd string) string {
+	cwd = physicalDir(cwd)
 	if cwd == "" {
-		var err error
-		cwd, err = os.Getwd()
-		if err != nil {
-			return ""
-		}
+		return ""
 	}
 
 	dir := cwd
@@ -71,6 +68,23 @@ func findHeadFile(cwd string) string {
 		}
 		dir = parent
 	}
+}
+
+// physicalDir returns the directory Git would start discovery from: cwd (or the
+// process working directory when empty) with symlinks resolved. A directory alias can
+// point inside a different repository, and Git walks the physical path's ancestors, not
+// the alias's. An unresolvable cwd is returned as given.
+func physicalDir(cwd string) string {
+	if cwd == "" {
+		var err error
+		if cwd, err = os.Getwd(); err != nil {
+			return ""
+		}
+	}
+	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+		return resolved
+	}
+	return cwd
 }
 
 // parseGitDirPointer reads a ".git" pointer file ("gitdir: <path>") and
@@ -153,12 +167,9 @@ func GetRemoteInfo(cwd string) (owner, name string) {
 // Handles both normal repositories (.git is a directory) and worktrees (.git is a file
 // containing a "gitdir:" reference).
 func findGitDir(cwd string) string {
+	cwd = physicalDir(cwd)
 	if cwd == "" {
-		var err error
-		cwd, err = os.Getwd()
-		if err != nil {
-			return ""
-		}
+		return ""
 	}
 
 	dir := cwd
