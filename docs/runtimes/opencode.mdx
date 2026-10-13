@@ -100,3 +100,5 @@ Validate a system-mode installation after restarting OpenCode:
     Backfill OpenCode sessions from the local session store.
   </Card>
 </Columns>
+
+Terminal tool parts release their in-flight argument snapshots, including failures delivered through OpenCode 2.x events rather than a successful completion hook. Tools still running retain their snapshots until completion or session cleanup.
