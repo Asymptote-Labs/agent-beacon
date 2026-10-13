@@ -19,6 +19,8 @@ interface QueueItem {
   endpoint: string;
   envelope: LogsEnvelope;
   attempts: number;
+  /** Persisted deadline so new turns cannot consume retries before backoff. */
+  nextAttemptAt?: number;
 }
 
 async function readQueue(): Promise<QueueItem[]> {
@@ -79,10 +81,16 @@ export async function flush(): Promise<void> {
       // queued by an older build, or a tampered queue, must not reach anything
       // but the local collector. Such an item is dropped, not retried.
       if (!isAllowedEndpoint(item.endpoint)) continue;
+      if (item.nextAttemptAt != null && item.nextAttemptAt > Date.now()) {
+        remaining.push(item);
+        anyFailed = true;
+        continue;
+      }
       const ok = await post(item);
       if (!ok) {
         item.attempts += 1;
         if (item.attempts < MAX_ATTEMPTS) {
+          item.nextAttemptAt = Date.now() + retryDelay(item.attempts);
           remaining.push(item);
           anyFailed = true;
         } // else: give up, drop it (avoid an unbounded queue)
@@ -110,16 +118,17 @@ async function post(item: QueueItem): Promise<boolean> {
   }
 }
 
+function retryDelay(attempts: number): number {
+  return Math.min(250 * 2 ** attempts, 60_000);
+}
+
 function scheduleRetry(queue: QueueItem[]): void {
-  const minAttempts = Math.min(...queue.map((i) => i.attempts));
-  // We compute an exponential backoff, but note MV3 clamps chrome.alarms to a
-  // ~30s minimum — so in practice the first retry lands at ~30s regardless of
-  // this value. That's acceptable here: the collector is a local loopback
-  // endpoint that is almost always reachable, so retries are the rare path and
-  // the durable queue (chrome.storage) guarantees eventual delivery. We use
-  // alarms rather than setTimeout because they survive service-worker suspension.
-  const backoffMs = Math.min(250 * 2 ** minAttempts, 60_000);
-  ext.alarms.create(ALARM, { when: Date.now() + backoffMs });
+  // Preserve each failed batch's deadline when unrelated new turns arrive.
+  // Chrome may clamp alarm cadence, but an enqueue must never accelerate a
+  // retry or repeatedly postpone the existing earliest scheduled deadline.
+  const when = Math.min(...queue.map((item) =>
+    item.nextAttemptAt ?? Date.now() + retryDelay(item.attempts)));
+  ext.alarms.create(ALARM, { when });
 }
 
 /** Wire the alarm listener (called once from the SW entry). */
