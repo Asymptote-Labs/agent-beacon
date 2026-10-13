@@ -432,6 +432,19 @@ describe("Asymptote Observe SDK", () => {
     expect(exporter.getFinishedSpans()[0]?.status.code).toBe(SpanStatusCode.ERROR);
   });
 
+  it("ends async iterable spans when the caller stops consumption early", async () => {
+    const exporter = new InMemorySpanExporter();
+    initialize({ spanExporter: exporter, disableDefaultExporter: true, disableBatch: true });
+    let cleaned = false;
+    const query = wrapClaudeAgentQuery(async function* () {
+      try { yield { type: "first" }; yield { type: "second" }; }
+      finally { cleaned = true; }
+    });
+    for await (const _message of query()) { break; }
+    await flush();
+    expect(cleaned).toBe(true);
+    expect(exporter.getFinishedSpans()).toHaveLength(1);
+  });
   it("provides a tracer compatible with Vercel-style telemetry hooks", async () => {
     const exporter = new InMemorySpanExporter();
     initialize({ spanExporter: exporter, disableDefaultExporter: true, disableBatch: true });

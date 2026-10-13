@@ -598,15 +598,18 @@ function finishResult<T>(result: T, span: Span, options?: ObserveOptions): unkno
 }
 
 async function* finishAsyncIterable(iterable: AsyncIterable<unknown>, span: Span): AsyncGenerator<unknown> {
+  let endedWithError = false;
   try {
     for await (const item of iterable) {
       yield item;
     }
     span.setStatus({ code: SpanStatusCode.OK });
-    span.end();
   } catch (error) {
+    endedWithError = true;
     endSpanWithError(span, error);
     throw error;
+  } finally {
+    if (!endedWithError) span.end();
   }
 }
 
