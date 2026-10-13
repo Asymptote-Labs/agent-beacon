@@ -448,3 +448,46 @@ func TestRetainedLogPathsMatchesWhatRotationKeeps(t *testing.T) {
 		t.Fatalf("RetainedLogPaths(\"\") = %v, want nil", got)
 	}
 }
+
+// Command text is case-sensitive even on a case-insensitive filesystem. The
+// native writer must retain both different commands.
+func TestAppendEventPreservesCommandTextIdentity(t *testing.T) {
+	for _, commands := range [][2]string{{"printf A", "printf a"}, {"printf foo__bar", "printf foo:bar"}} {
+		t.Run(commands[0], func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "runtime.jsonl")
+			first := schema.NewEvent(schema.NewEventOptions{Action: "command.executed", Harness: schema.HarnessInfo{Name: "cursor"}, Message: "Shell command executed"})
+			first.Timestamp = "2026-10-13T12:00:00Z"
+			first.Session = &schema.SessionInfo{ID: "command-case", WorkingDirectory: "/repo"}
+			first.Command = &schema.CommandInfo{Command: commands[0]}
+			second := first
+			second.Harness.Name = "claude"
+			second.Timestamp = "2026-10-13T12:00:01Z"
+			second.Command = &schema.CommandInfo{Command: commands[1]}
+			replay := second
+			replay.Harness.Name = "cursor"
+			for _, event := range []schema.Event{first, second} {
+				if _, err := AppendEvent(event, Options{Path: path}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+			if len(lines) != 2 {
+				t.Fatalf("distinct commands lost: got %d lines: %s", len(lines), data)
+			}
+			if _, err := AppendEvent(replay, Options{Path: path}); err != nil {
+				t.Fatal(err)
+			}
+			afterReplay, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(afterReplay) != string(data) {
+				t.Fatalf("a true replay was retained: %s", afterReplay)
+			}
+		})
+	}
+}

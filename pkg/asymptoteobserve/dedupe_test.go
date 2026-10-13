@@ -1,6 +1,7 @@
 package asymptoteobserve
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -167,5 +168,28 @@ func TestIsDuplicateEndpointEventKeepsEditsToDifferentFiles(t *testing.T) {
 
 	if IsDuplicateEndpointEvent(path, second, EndpointDuplicateWindow) {
 		t.Fatal("two files edited by one MultiEdit are two edits and must both survive")
+	}
+}
+
+func TestDuplicateEndpointLinesPreservesExactFileAndWorkspaceIdentity(t *testing.T) {
+	base := map[string]interface{}{"timestamp": "2026-10-13T12:00:00Z", "event": map[string]string{"action": "file.modified"}, "harness": map[string]string{"name": "claude_code"}, "session": map[string]string{"id": "s1", "working_directory": "/repo"}, "file": map[string]string{"path": "/repo/A.go"}, "gen_ai": map[string]interface{}{"tool": map[string]interface{}{"call": map[string]string{"id": "multi-edit"}}}}
+	first, _ := json.Marshal(base)
+	for _, tt := range []struct {
+		name, path, workspace string
+		duplicate             bool
+	}{
+		{"exact replay", "/repo/A.go", "/repo", true},
+		{"different file case", "/repo/a.go", "/repo", false},
+		{"different file punctuation", "/repo/A__go", "/repo", false},
+		{"different workspace case", "/repo/A.go", "/Repo", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			base["file"] = map[string]string{"path": tt.path}
+			base["session"] = map[string]string{"id": "s1", "working_directory": tt.workspace}
+			second, _ := json.Marshal(base)
+			if got := DuplicateEndpointLines(first, second, EndpointDuplicateWindow); got != tt.duplicate {
+				t.Fatalf("duplicate=%v, want %v", got, tt.duplicate)
+			}
+		})
 	}
 }

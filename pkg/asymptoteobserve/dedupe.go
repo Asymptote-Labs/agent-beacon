@@ -167,7 +167,7 @@ func endpointDedupeCandidate(line []byte) (endpointDedupeEvent, bool) {
 	key := strings.Join([]string{
 		strings.ToLower(action),
 		sessionID,
-		strings.ToLower(workspace),
+		workspace,
 		target,
 	}, "\x00")
 	return endpointDedupeEvent{action: strings.ToLower(action), harness: harness, key: key, callID: callID, ts: ts.UTC()}, true
@@ -210,7 +210,7 @@ func dedupeTarget(action string, event map[string]interface{}) string {
 			),
 		)
 	case "command.executed":
-		return canonicalTarget("command", nestedString(event, "command", "command"), nestedString(event, "tool", "command"))
+		return literalTarget("command", nestedString(event, "command", "command"), nestedString(event, "tool", "command"))
 	case "file.read", "file.modified":
 		// The path alone, deliberately. file.operation is the one part of a file
 		// event the two capture paths describe differently for the same action:
@@ -224,7 +224,7 @@ func dedupeTarget(action string, event map[string]interface{}) string {
 		// between two words for the same event -- so it discriminated nothing
 		// and disagreed often. The sandbox checker's mirror of this key has
 		// always used the path alone.
-		return canonicalTarget("file", nestedString(event, "file", "path"))
+		return literalTarget("file", nestedString(event, "file", "path"))
 	case "tool.completed":
 		return canonicalTarget("tool.completed", stringValue(event["model"]), stringValue(event["message"]))
 	case "tool.invoked", "tool.failed":
@@ -232,6 +232,22 @@ func dedupeTarget(action string, event map[string]interface{}) string {
 	default:
 		return ""
 	}
+}
+
+// Commands and file paths are literal targets, not MCP/tool labels. Case and
+// double underscores can identify different commands or files, so label aliases
+// must not change the identity used to suppress an event.
+func literalTarget(prefix string, values ...string) string {
+	var parts []string
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" && value != "<nil>" {
+			parts = append(parts, value)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return prefix + ":" + strings.Join(parts, "|")
 }
 
 func canonicalTarget(prefix string, values ...string) string {
