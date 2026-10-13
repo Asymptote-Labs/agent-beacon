@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
 )
@@ -455,7 +456,8 @@ func (m Model) listView() string {
 			lastDate = date
 		}
 		titleWidth := max(12, m.width-35)
-		line := fmt.Sprintf("%-8s  %-*s  %s", clock, titleWidth, truncate(trace.Title, titleWidth), trace.Harness.Name)
+		title := lipgloss.NewStyle().Width(titleWidth).Render(truncate(trace.Title, titleWidth))
+		line := fmt.Sprintf("%-8s  %s  %s", clock, title, trace.Harness.Name)
 		meta := fmt.Sprintf("           %s · %d events · %s%s", tracePath(trace), trace.EventCount, contentLabel(trace), sharingLabel(trace))
 		if i == m.selected {
 			b.WriteString(selectedStyle.Render(fit("  ❯ "+line, m.width)) + "\n")
@@ -683,12 +685,7 @@ func wrapLines(value string, width int) []string {
 			out = append(out, "")
 			continue
 		}
-		for len([]rune(line)) > width {
-			runes := []rune(line)
-			out = append(out, string(runes[:width]))
-			line = string(runes[width:])
-		}
-		out = append(out, line)
+		out = append(out, strings.Split(ansi.Hardwrap(line, width, true), "\n")...)
 	}
 	return out
 }
@@ -698,14 +695,11 @@ func fit(value string, width int) string {
 }
 
 func truncate(value string, width int) string {
-	runes := []rune(strings.ReplaceAll(value, "\n", " "))
-	if width <= 0 || len(runes) <= width {
-		return string(runes)
+	value = strings.ReplaceAll(value, "\n", " ")
+	if width <= 0 {
+		return value
 	}
-	if width == 1 {
-		return "…"
-	}
-	return string(runes[:width-1]) + "…"
+	return ansi.Truncate(value, width, "…")
 }
 
 func firstNonEmpty(values ...string) string {
