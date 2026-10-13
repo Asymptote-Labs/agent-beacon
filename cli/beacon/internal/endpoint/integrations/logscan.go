@@ -73,7 +73,7 @@ func HasHarnessEventSince(logPath, harnessName string, since time.Time) bool {
 }
 
 func LastHarnessEvent(logPath, harnessName string) (time.Time, bool) {
-	return lastHarnessEvent(logPath, harnessName)
+	return lastHarnessEvent(logPath, harnessName, "")
 }
 
 // LastHarnessEventByCollectionMethod is LastHarnessEvent restricted to events whose
@@ -89,16 +89,6 @@ func LastHarnessEventByCollectionMethod(logPath, harnessName, method string) (ti
 		return time.Time{}, false
 	}
 	return lastHarnessEvent(logPath, harnessName, method)
-}
-
-// LastHarnessEventByCollectionMethods restricts the result to the listed collection methods.
-// An empty string explicitly includes legacy events written before provenance was recorded.
-// An empty list matches nothing; LastHarnessEvent remains the unrestricted reader.
-func LastHarnessEventByCollectionMethods(logPath, harnessName string, methods ...string) (time.Time, bool) {
-	if len(methods) == 0 {
-		return time.Time{}, false
-	}
-	return lastHarnessEvent(logPath, harnessName, methods...)
 }
 
 // FirstEventTime returns the timestamp of the first event in logPath that carries a parseable one.
@@ -129,7 +119,7 @@ func FirstEventTime(logPath string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-func lastHarnessEvent(logPath, harnessName string, methods ...string) (time.Time, bool) {
+func lastHarnessEvent(logPath, harnessName, method string) (time.Time, bool) {
 	if logPath == "" || strings.TrimSpace(harnessName) == "" {
 		return time.Time{}, false
 	}
@@ -161,20 +151,8 @@ func lastHarnessEvent(logPath, harnessName string, methods ...string) (time.Time
 		}
 		if harness, ok := event["harness"].(map[string]interface{}); ok {
 			if name, _ := harness["name"].(string); asymptoteobserve.NormalizeHarnessName(name) == want {
-				if len(methods) > 0 {
-					value, present := harness["collection_method"]
-					got, isString := value.(string)
-					if present && !isString {
-						continue
-					}
-					matched := false
-					for _, method := range methods {
-						if got == method {
-							matched = true
-							break
-						}
-					}
-					if !matched {
+				if method != "" {
+					if got, _ := harness["collection_method"].(string); got != method {
 						continue
 					}
 				}

@@ -34,7 +34,7 @@ func TestOpenClawEventStatusAndSince(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	data := strings.Join([]string{
 		`{"timestamp":"2026-05-13T16:18:40Z","harness":{"name":"cursor"}}`,
-		`{"timestamp":"2026-05-13T16:20:40Z","harness":{"name":"openclaw_gateway"}}`,
+		`{"timestamp":"2026-05-13T16:20:40Z","harness":{"name":"openclaw_gateway","collection_method":"otlp"}}`,
 		"",
 	}, "\n")
 	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
@@ -72,7 +72,6 @@ func TestOTLPValidationSeparatesOtherCollectionMethods(t *testing.T) {
 		observed bool
 		last     time.Time
 	}{
-		{"legacy", []string{row("", old)}, true, old},
 		{"otlp", []string{row("otlp", old)}, true, old},
 		{"plugin", []string{row("plugin", recent)}, false, time.Time{}},
 		{"poll", []string{row("poll", recent)}, false, time.Time{}},

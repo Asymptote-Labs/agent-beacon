@@ -143,7 +143,6 @@ func HasOpenClawEventSince(logPath string, since time.Time) bool {
 }
 
 func LastOpenClawEvent(logPath string) (time.Time, bool) {
-	// This integration validates gateway OTLP, not the separate plugin or poll paths.
-	// Unmarked records preserve compatibility with logs written before provenance.
-	return integrations.LastHarnessEventByCollectionMethods(logPath, Name, asymptoteobserve.CollectionMethodOTLP, "")
+	// This integration validates gateway OTLP; plugin and poll events share the harness name.
+	return integrations.LastHarnessEventByCollectionMethod(logPath, Name, asymptoteobserve.CollectionMethodOTLP)
 }
