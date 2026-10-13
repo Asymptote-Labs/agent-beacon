@@ -1,6 +1,10 @@
 package diff
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -389,5 +393,33 @@ func TestFromEditFragmentsReturnsNothingForAnUnchangedSpan(t *testing.T) {
 	}
 	if got := FromEditFragments("", "before", "after"); got != "" {
 		t.Fatalf("FromEditFragments = %q, want empty without a path", got)
+	}
+}
+
+// patch is an independent consumer of the unified diff; comparing its output
+// bytes catches a reconstructed trailing blank line that substring checks miss.
+func TestFromToolResponseNewlineTerminatedWriteAppliesExactContent(t *testing.T) {
+	patch, err := exec.LookPath("patch")
+	if err != nil {
+		t.Skip("native patch unavailable")
+	}
+	for _, content := range []string{"new\n", "new\n\n", "\n"} {
+		t.Run(fmt.Sprintf("%q", content), func(t *testing.T) {
+			dir := t.TempDir()
+			diff := FromToolResponse("Write", map[string]interface{}{"file_path": "/repo/result.txt", "content": content}, nil)
+			cmd := exec.Command(patch, "-p1")
+			cmd.Dir = dir
+			cmd.Stdin = strings.NewReader(diff + "\n")
+			if output, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("apply actual emitted diff: %v\n%s\n%s", err, output, diff)
+			}
+			got, err := os.ReadFile(filepath.Join(dir, "result.txt"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != content {
+				t.Fatalf("patched bytes=%q, expected runtime content=%q", got, content)
+			}
+		})
 	}
 }

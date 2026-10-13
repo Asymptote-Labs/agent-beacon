@@ -312,7 +312,9 @@ func splitLines(s string) []string {
 	if s == "" {
 		return []string{}
 	}
-	return strings.Split(s, "\n")
+	// A trailing newline terminates the last line; it is not another blank line.
+	// Remove just one terminator so actual trailing blank lines remain.
+	return strings.Split(strings.TrimSuffix(s, "\n"), "\n")
 }
 
 // NormalizePath strips surrounding double quotes and whitespace from a path string.
