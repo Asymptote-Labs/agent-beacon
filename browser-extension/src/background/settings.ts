@@ -6,6 +6,7 @@ import { DEFAULT_SETTINGS, type Settings, type SiteName } from '../shared/types.
 import { parseSettingsPatch } from '../shared/validate.js';
 
 const KEY = 'settings';
+let settingsWrite: Promise<unknown> = Promise.resolve();
 
 /**
  * Merge stored settings over the defaults, keeping only stored values that
@@ -34,15 +35,22 @@ export async function getSettings(): Promise<Settings> {
 }
 
 /** Apply an already-validated patch (see parseSettingsPatch). */
-export async function saveSettings(patch: Partial<Settings>): Promise<Settings> {
-  const current = await getSettings();
-  const next: Settings = {
-    ...current,
-    ...patch,
-    sites: { ...current.sites, ...(patch.sites ?? {}) },
-  };
-  await ext.storage.local.set({ [KEY]: next });
-  return next;
+export function saveSettings(patch: Partial<Settings>): Promise<Settings> {
+  // Read and merge inside the queue: concurrent popup/options patches must
+  // observe the preceding write rather than replace it with an older snapshot.
+  const write = settingsWrite.then(async () => {
+    const current = await getSettings();
+    const next: Settings = {
+      ...current,
+      ...patch,
+      sites: { ...current.sites, ...(patch.sites ?? {}) },
+    };
+    await ext.storage.local.set({ [KEY]: next });
+    return next;
+  });
+  // A failed storage operation must not poison subsequent settings saves.
+  settingsWrite = write.catch(() => {});
+  return write;
 }
 
 export function siteEnabled(settings: Settings, site: SiteName): boolean {
