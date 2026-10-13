@@ -153,9 +153,11 @@ How to read what comes back:
   failed command followed by a different command that succeeded.
 - A `user_message` with `content.included` false, or only a hash, means Beacon kept
   metadata only. You cannot draft from a hash; say the trace was unreadable.
-- `--around-event` centres on the unfiltered event number. Combined with `--event-type`
-  it can return no events at all, so read a small unfiltered window around the number
-  and skip the `token_usage` and `session` rows yourself.
+- `--around-event` names the original event number, including with `--event-type`.
+  Before and after context counts matching events. If the named event is filtered
+  out, the window contains matching events before and after its position without
+  an extra slot for the missing event. Returned event numbers stay unchanged;
+  offsets and `range.total_events` still count the filtered events.
 
 Work out, from the events themselves:
 
