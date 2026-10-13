@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -407,7 +408,13 @@ func TestFromToolResponseNewlineTerminatedWriteAppliesExactContent(t *testing.T)
 		t.Run(fmt.Sprintf("%q", content), func(t *testing.T) {
 			dir := t.TempDir()
 			diff := FromToolResponse("Write", map[string]interface{}{"file_path": "/repo/result.txt", "content": content}, nil)
-			cmd := exec.Command(patch, "-p1")
+			args := []string{"-p1"}
+			// GNU patch otherwise converts LF output to CRLF on Windows. This is a
+			// byte oracle: preserve the event's bytes rather than normalizing output.
+			if runtime.GOOS == "windows" {
+				args = append(args, "--binary")
+			}
+			cmd := exec.Command(patch, args...)
 			cmd.Dir = dir
 			cmd.Stdin = strings.NewReader(diff + "\n")
 			if output, err := cmd.CombinedOutput(); err != nil {
@@ -444,7 +451,13 @@ func TestWholeFileWritePreservesFinalNewlineState(t *testing.T) {
 				}
 			}
 			diff := FromToolResponse("Write", map[string]interface{}{"file_path": "/repo/result.txt", "content": tc.after}, map[string]interface{}{"originalFile": tc.before})
-			cmd := exec.Command(patch, "-p1")
+			args := []string{"-p1"}
+			// GNU patch otherwise converts LF output to CRLF on Windows. This is a
+			// byte oracle: preserve the event's bytes rather than normalizing output.
+			if runtime.GOOS == "windows" {
+				args = append(args, "--binary")
+			}
+			cmd := exec.Command(patch, args...)
 			cmd.Dir = dir
 			cmd.Stdin = strings.NewReader(diff + "\n")
 			if out, err := cmd.CombinedOutput(); err != nil {
