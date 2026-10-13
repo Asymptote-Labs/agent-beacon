@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/atomicfile"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/managedprivacy"
@@ -175,7 +176,7 @@ func ReconcileForwarder(opts ReconcileOptions) (ReconcileResult, error) {
 		result.Warning = fmt.Sprintf("kept the existing config because Vector rejected the new one: %v", err)
 		return result, nil
 	}
-	if err := writeFileAtomic(configPath, []byte(rendered), 0o644); err != nil {
+	if err := atomicfile.Write(configPath, []byte(rendered), 0o644); err != nil {
 		return result, fmt.Errorf("could not write the validated forwarder config %s: %w", configPath, err)
 	}
 	result.Updated = true

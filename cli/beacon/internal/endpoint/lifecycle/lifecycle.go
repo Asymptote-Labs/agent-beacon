@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/atomicfile"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/brewpath"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
 	endpointcollector "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/collector"
@@ -844,7 +845,7 @@ func setAutoUpdateModeInConfigFile(path, mode string) error {
 	if info, err := os.Stat(path); err == nil {
 		perm = info.Mode().Perm()
 	}
-	return os.WriteFile(path, out, perm)
+	return atomicfile.Write(path, out, perm)
 }
 
 func GetStatus(userMode bool, logPath string) Status {
@@ -1084,7 +1085,7 @@ func restoreFile(path string, snapshot fileSnapshot) {
 	if mode == 0 {
 		mode = 0600
 	}
-	_ = os.WriteFile(path, snapshot.Data, mode)
+	_ = atomicfile.Write(path, snapshot.Data, mode)
 }
 
 func preflight(cfg endpointconfig.Config, startService bool, kind service.Kind) error {
