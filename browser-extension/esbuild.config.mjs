@@ -1,4 +1,5 @@
 import * as esbuild from 'esbuild';
+import { watch as watchFiles } from 'node:fs';
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -54,7 +55,8 @@ async function copyStatic() {
   for (const surface of ['popup', 'options']) {
     await cp(path.join(src, surface, `${surface}.html`), path.join(dist, `${surface}.html`));
   }
-  // icons/ is optional; copy if present.
+  // icons/ is optional; remove stale output when a watched asset disappears.
+  await rm(path.join(dist, 'icons'), { recursive: true, force: true });
   await cp(path.join(src, 'icons'), path.join(dist, 'icons'), { recursive: true }).catch(() => {});
 }
 
@@ -78,6 +80,18 @@ async function run() {
     const ctx = await esbuild.context(buildOptions);
     await copyStatic();
     await ctx.watch();
+    // esbuild watches its module graph, not the files copied into the bundle.
+    // Keep static refreshes serialized so a burst of edits cannot race writes.
+    let staticRefresh = Promise.resolve();
+    watchFiles(src, { recursive: true }, (_event, filename) => {
+      const name = filename?.replaceAll('\\', '/');
+      if (name && name !== 'manifest.json' && name !== 'popup/popup.html' &&
+          name !== 'options/options.html' && name !== 'icons' && !name.startsWith('icons/')) return;
+      staticRefresh = staticRefresh.then(async () => {
+        await copyStatic();
+        console.log('[esbuild] static assets refreshed');
+      }).catch((err) => console.error(err));
+    });
     console.log('[esbuild] watching…');
   } else {
     await esbuild.build(buildOptions);

@@ -92,6 +92,9 @@ npm run record:fixtures -- --site claude|chatgpt --name <n>   # capture a fixtur
 npm run report        # open the last HTML report
 ```
 
+Watch mode also refreshes the manifest, popup/options HTML and icons. Reload the unpacked
+extension to apply manifest changes; reload an extension page to see its updated markup.
+
 ## Loading the extension in your own browser
 
 One build serves every Chromium browser: Chrome, Edge, Brave, Opera, Vivaldi and Arc. The
