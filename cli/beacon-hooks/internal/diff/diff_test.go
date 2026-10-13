@@ -423,3 +423,46 @@ func TestFromToolResponseNewlineTerminatedWriteAppliesExactContent(t *testing.T)
 		})
 	}
 }
+
+func TestWholeFileWritePreservesFinalNewlineState(t *testing.T) {
+	patch, err := exec.LookPath("patch")
+	if err != nil {
+		t.Skip("native patch unavailable")
+	}
+	for _, tc := range []struct{ name, before, after string }{
+		{"create without newline", "", "new"},
+		{"replace both unterminated", "old", "new"},
+		{"remove final newline", "same\n", "same"},
+		{"add final newline", "same", "same\n"},
+		{"replace trailing blank line", "old\n\n", "new"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tc.before != "" {
+				if err := os.WriteFile(filepath.Join(dir, "result.txt"), []byte(tc.before), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			diff := FromToolResponse("Write", map[string]interface{}{"file_path": "/repo/result.txt", "content": tc.after}, map[string]interface{}{"originalFile": tc.before})
+			cmd := exec.Command(patch, "-p1")
+			cmd.Dir = dir
+			cmd.Stdin = strings.NewReader(diff + "\n")
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("patch: %v\n%s\n%s", err, out, diff)
+			}
+			got, err := os.ReadFile(filepath.Join(dir, "result.txt"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tc.after {
+				t.Fatalf("patched bytes=%q expected=%q", got, tc.after)
+			}
+		})
+	}
+}
+
+func TestEditFragmentsDoNotClaimEndOfFile(t *testing.T) {
+	if got := FromEditFragments("/repo/result.txt", "old", "new"); strings.Contains(got, "\\ No newline at end of file") {
+		t.Fatalf("partial edit claims EOF: %s", got)
+	}
+}

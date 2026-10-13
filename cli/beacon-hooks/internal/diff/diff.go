@@ -282,30 +282,27 @@ func fromWriteTool(filePath, content, originalFile string) string {
 	filename := filepath.Base(filePath)
 	newLines := splitLines(content)
 	oldLines := splitLines(originalFile)
-
-	lines := []string{
-		fmt.Sprintf("--- a/%s", filename),
-		fmt.Sprintf("+++ b/%s", filename),
-	}
-
+	lines := []string{fmt.Sprintf("--- a/%s", filename), fmt.Sprintf("+++ b/%s", filename)}
 	if originalFile != "" {
-		// This is an update - show as replacement
 		lines = append(lines, fmt.Sprintf("@@ -1,%d +1,%d @@", len(oldLines), len(newLines)))
-		for _, line := range oldLines {
-			lines = append(lines, "-"+line)
-		}
-		for _, line := range newLines {
-			lines = append(lines, "+"+line)
-		}
+		lines = appendWholeFileLines(lines, oldLines, originalFile, "-")
 	} else {
-		// This is a new file
 		lines = append(lines, fmt.Sprintf("@@ -0,0 +1,%d @@", len(newLines)))
-		for _, line := range newLines {
-			lines = append(lines, "+"+line)
-		}
 	}
-
+	lines = appendWholeFileLines(lines, newLines, content, "+")
 	return strings.Join(lines, "\n")
+}
+
+// Whole-file observations establish EOF; edit fragments do not. Emit the unified
+// diff marker only here so an unterminated replaced span is not mistaken for EOF.
+func appendWholeFileLines(lines, fileLines []string, content, prefix string) []string {
+	for _, line := range fileLines {
+		lines = append(lines, prefix+line)
+	}
+	if content != "" && !strings.HasSuffix(content, "\n") {
+		lines = append(lines, "\\ No newline at end of file")
+	}
+	return lines
 }
 
 func splitLines(s string) []string {
