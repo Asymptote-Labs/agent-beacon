@@ -161,7 +161,8 @@ export class Observe {
 
 export function initialize(options: InitializeOptions = {}): void {
   if (state) {
-    if (options.instrumentModules) {
+    const changesConfiguration = Object.entries(options).some(([name, value]) => name !== "instrumentModules" && value !== undefined);
+    if (options.instrumentModules && !changesConfiguration) {
       patch(options.instrumentModules);
       return;
     }
