@@ -13,6 +13,7 @@ import { isAllowedEndpoint } from '../shared/validate.js';
 const QUEUE_KEY = 'delivery_queue';
 const ALARM = 'beacon_flush';
 const MAX_ATTEMPTS = 6;
+const POST_TIMEOUT_MS = 10_000;
 
 interface QueueItem {
   id: string;
@@ -99,6 +100,9 @@ async function post(item: QueueItem): Promise<boolean> {
   try {
     const res = await fetch(item.endpoint, {
       method: 'POST',
+      // Release the serialized queue even if a local listener never replies.
+      // A timeout follows the same durable retry path as any failed POST.
+      signal: AbortSignal.timeout(POST_TIMEOUT_MS),
       headers: { 'content-type': 'application/json' },
       // A loopback listener must not be able to bounce chat content elsewhere.
       redirect: 'error',

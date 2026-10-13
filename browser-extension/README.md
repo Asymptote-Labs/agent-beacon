@@ -302,8 +302,10 @@ dashboard), including interleaved sessions with no cross-contamination.
   stall between chunks could drop a turn. The durable delivery queue (in `chrome.storage`) protects
   everything *after* a turn is assembled, not during. Persisting partial assembler state is a
   future item.
-- **Delivery retry cadence.** Retries use `chrome.alarms`, which MV3 clamps to a ~30s minimum, so
-  the first retry lands at ~30s rather than the computed sub-second backoff. Fine for a
+- **Delivery retry cadence.** Each POST has a ten-second deadline, so a collector that accepts
+  a connection but never responds cannot hold the queue indefinitely. Timed-out batches remain
+  durable and follow the existing retry limit. Retries use `chrome.alarms`, which MV3 clamps
+  to a ~30s minimum, so the first retry lands at ~30s rather than the computed sub-second backoff. Fine for a
   local-loopback collector that is almost always reachable; the queue guarantees eventual delivery.
 - **Capture depends on `window.fetch`.** Confirmed correct for claude.ai. Sites using XHR or a page
   service worker for streaming would need additional interception (deferred).
