@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,19 +28,20 @@ type Store struct {
 	LegacyStorageDir string
 }
 
+// NewStore opens the OpenCode store at dataDir, which is a data directory or an opencode.db path.
+// Empty means where OpenCode itself writes: its data directory, with the database named by
+// OPENCODE_DB when that is set.
 func NewStore(dataDir string) (*Store, error) {
 	if strings.TrimSpace(dataDir) == "" {
-		dataDir = DefaultDataDir()
-		// Older Beacon releases looked in the configuration directory. Keep a
-		// recognized store there as a fallback, while preferring producer data.
-		if dataDir != "" && !hasStoreAt(dataDir) {
-			if legacy := legacyDataDir(); legacy != "" && hasStoreAt(legacy) {
-				dataDir = legacy
-			}
+		data := DefaultDataDir()
+		if data == "" {
+			return nil, errors.New("opencode data directory is empty")
 		}
-	}
-	if strings.TrimSpace(dataDir) == "" {
-		return nil, errors.New("opencode data directory is empty")
+		return &Store{
+			DataDir:          data,
+			SQLitePath:       defaultDBPath(data),
+			LegacyStorageDir: filepath.Join(data, "storage"),
+		}, nil
 	}
 	dataDir = filepath.Clean(dataDir)
 	if strings.HasSuffix(dataDir, ".db") {
@@ -58,6 +58,9 @@ func NewStore(dataDir string) (*Store, error) {
 	}, nil
 }
 
+// DefaultDataDir is OpenCode's data directory, which holds opencode.db and the legacy storage tree.
+// OpenCode uses XDG paths on every platform, Windows included. Its plugins and configuration live in
+// a separate directory (~/.config/opencode) that holds no sessions.
 func DefaultDataDir() string {
 	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
 		return filepath.Join(xdg, "opencode")
@@ -69,27 +72,18 @@ func DefaultDataDir() string {
 	return filepath.Join(home, ".local", "share", "opencode")
 }
 
-func hasStoreAt(dir string) bool {
-	return fileExists(filepath.Join(dir, "opencode.db")) || dirExists(filepath.Join(dir, "storage"))
-}
-
-func legacyDataDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		return ""
+// defaultDBPath resolves OPENCODE_DB as OpenCode does: an absolute path is used as given and a
+// relative one is resolved against the data directory. Unset, or the in-memory name, means
+// opencode.db.
+func defaultDBPath(data string) string {
+	name := os.Getenv("OPENCODE_DB")
+	if name == "" || name == ":memory:" {
+		return filepath.Join(data, "opencode.db")
 	}
-	switch runtime.GOOS {
-	case "windows":
-		if appData := strings.TrimSpace(os.Getenv("APPDATA")); appData != "" {
-			return filepath.Join(appData, "opencode")
-		}
-		return filepath.Join(home, "AppData", "Roaming", "opencode")
-	default:
-		if xdg := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); xdg != "" {
-			return filepath.Join(xdg, "opencode")
-		}
-		return filepath.Join(home, ".config", "opencode")
+	if filepath.IsAbs(name) {
+		return filepath.Clean(name)
 	}
+	return filepath.Join(data, name)
 }
 
 func (s *Store) Exists() bool {
