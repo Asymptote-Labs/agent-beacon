@@ -32,11 +32,13 @@ Beacon can also recover Codex CLI activity from Codex's local rollout files with
 beacon endpoint codex sync
 ```
 
-This reads committed files under `~/.codex/sessions` and appends mapped events to the local runtime log with `harness.collection_method=poll`. It is useful for historical sessions or sessions that ran before OTLP was configured. The sync path is not part of hook execution and cannot approve, deny, or delay tool calls.
+This reads committed files under `$CODEX_HOME/sessions` when `CODEX_HOME` is nonempty, otherwise `~/.codex/sessions` and appends mapped events to the local runtime log with `harness.collection_method=poll`. It is useful for historical sessions or sessions that ran before OTLP was configured. The sync path is not part of hook execution and cannot approve, deny, or delay tool calls.
 
 Use `beacon endpoint codex sync --print` to preview mapped events without writing the runtime log or advancing the cursor. Use `beacon endpoint codex status` to see which session files are present and how far Beacon has read each one.
 
 Codex rollout files can contain prompts, assistant responses, tool inputs, command output, and code. Sync is therefore explicit: Beacon does not read `~/.codex/sessions` during normal Codex hook execution, and it never reads `~/.codex/auth.json`.
+
+Session status, sync, and handoff honor Codex's literal `CODEX_HOME` directory: it must exist, and relative paths resolve from the current working directory. Unlike shell syntax, `~` and environment-variable references in the value are not expanded. Pass `--codex-dir <path>` to select a store explicitly.
 
 ### Token usage and cost
 

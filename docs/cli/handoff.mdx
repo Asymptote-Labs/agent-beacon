@@ -20,7 +20,7 @@ Sessions come from each runtime's own local session store, not from Beacon's run
 | Runtime | Session store | `--harness` |
 |---------|---------------|-------------|
 | Claude Code | `~/.claude/projects` | `claude` |
-| Codex CLI | `~/.codex/sessions` | `codex` |
+| Codex CLI | `$CODEX_HOME/sessions` when set; otherwise `~/.codex/sessions` | `codex` |
 | OpenCode | `~/.config/opencode` (SQLite and the legacy file store) | `opencode` |
 | Cline | `~/.cline/data` | `cline` |
 | Pi | `~/.pi/agent/sessions` (or under `PI_CODING_AGENT_DIR`) | `pi` |
