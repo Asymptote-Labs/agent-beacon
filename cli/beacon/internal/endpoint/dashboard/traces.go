@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
@@ -652,6 +653,9 @@ func truncateString(value string, limit int) string {
 	value = strings.TrimSpace(value)
 	if len(value) <= limit {
 		return value
+	}
+	for limit > 0 && !utf8.RuneStart(value[limit]) {
+		limit--
 	}
 	return value[:limit]
 }

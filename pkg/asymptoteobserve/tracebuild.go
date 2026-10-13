@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // This file is the one projection of Beacon endpoint events into the beacon.trace.v1 model in
@@ -787,11 +788,14 @@ func traceFirstNonEmpty(values ...string) string {
 	return ""
 }
 
-// traceTruncate trims value and cuts it to limit bytes.
+// traceTruncate trims value and cuts it to at most limit bytes without splitting UTF-8.
 func traceTruncate(value string, limit int) string {
 	value = strings.TrimSpace(value)
 	if len(value) <= limit {
 		return value
+	}
+	for limit > 0 && !utf8.RuneStart(value[limit]) {
+		limit--
 	}
 	return value[:limit]
 }
