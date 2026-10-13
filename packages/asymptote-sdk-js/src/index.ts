@@ -218,7 +218,7 @@ export function initialize(options: InitializeOptions = {}): void {
   });
   provider.register();
   if (instrumentations.length > 0) {
-    registerInstrumentations({ instrumentations });
+    registerInstrumentations({ instrumentations, tracerProvider: provider });
   }
   state = { instrumentations, instrumentationsDisabled: !!options.disableInstrumentations, provider, mode: resolved.mode, observeUrl: resolved.observeUrl, options };
 

@@ -61,6 +61,8 @@ If the SDK is already initialized, a later `Observe.initialize({ instrumentModul
 
 That call keeps the active configuration. Repeating the same options, as each integration guide's setup does, is fine. If its other options differ from the active ones, they are ignored and a warning names them; shut down first to change exporter or resource settings.
 
+After shutdown and reinitialization, both provider-instrumented model calls and custom observed steps use the exporter and resource attributes configured by the new initialization.
+
 ## Short-lived example
 
 ```typescript title="Short-lived job example" lines
