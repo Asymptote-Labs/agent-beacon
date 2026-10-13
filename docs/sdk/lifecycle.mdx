@@ -28,7 +28,7 @@ Flushing inside every web request can add latency. In long-running services, let
 
 ## Shutdown
 
-`Observe.shutdown()` disables instrumentations, shuts down the provider, and clears SDK state so the process can initialize again with different options.
+`Observe.shutdown()` disables instrumentations, shuts down the provider, and clears SDK state so the process can initialize again with different options. Exporter shutdown failures are still reported to the caller, but the stopped provider is released so a later initialization can recover.
 
 ```typescript title="Shut down tracing" lines
 await Observe.shutdown();

@@ -359,9 +359,15 @@ export async function flush(): Promise<void> {
 }
 
 export async function shutdown(): Promise<void> {
-  state?.instrumentations.forEach(instrumentation => instrumentation.disable());
-  await state?.provider.shutdown();
-  state = undefined;
+  const current = state;
+  if (!current) return;
+  current.instrumentations.forEach(instrumentation => instrumentation.disable());
+  try {
+    await current.provider.shutdown();
+  } finally {
+    // A stopped provider cannot resume exporting, even when its exporter rejects.
+    if (state === current) state = undefined;
+  }
 }
 
 export function isInitialized(): boolean {
