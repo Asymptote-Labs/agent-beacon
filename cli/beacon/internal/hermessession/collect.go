@@ -150,51 +150,14 @@ func DefaultDBPath() string {
 
 var hermesEnvReference = regexp.MustCompile(`\$\{([^}]*)\}|\$([A-Za-z0-9_]+)`)
 
-// Hermes uses Python expandvars, which preserves references to unset variables.
+// hermesExpandVars expands $VAR and ${VAR} like Python's os.path.expandvars, which Hermes
+// uses: references to unset variables are left as written.
 func hermesExpandVars(path string) string {
-	if runtime.GOOS == "windows" {
-		return hermesExpandWindowsVars(path)
-	}
 	return hermesEnvReference.ReplaceAllStringFunc(path, func(reference string) string {
 		parts := hermesEnvReference.FindStringSubmatch(reference)
 		name := parts[1]
 		if parts[2] != "" {
 			name = parts[2]
-		}
-		if value, ok := os.LookupEnv(name); ok {
-			return value
-		}
-		return reference
-	})
-}
-
-// Python's Windows path expansion also supports %VAR%, escaped %%/$$, and
-// leaves single-quoted path segments untouched. Replacements are not rescanned.
-var hermesWindowsEnvReference = regexp.MustCompile(`'[^']*(?:'|$)|%%|%[^%]*%|%[^%]*$|\$\$|\$\{[^}]*\}|\$\{[^}]*$|\$[A-Za-z0-9_-]+`)
-
-func hermesExpandWindowsVars(path string) string {
-	return hermesWindowsEnvReference.ReplaceAllStringFunc(path, func(reference string) string {
-		if reference[0] == '\'' {
-			return reference
-		}
-		if reference == "%%" {
-			return "%"
-		}
-		if reference == "$$" {
-			return "$"
-		}
-		if (reference[0] == '%' && (len(reference) < 2 || reference[len(reference)-1] != '%')) ||
-			(strings.HasPrefix(reference, "${") && reference[len(reference)-1] != '}') {
-			return reference
-		}
-		var name string
-		switch {
-		case reference[0] == '%':
-			name = reference[1 : len(reference)-1]
-		case strings.HasPrefix(reference, "${"):
-			name = reference[2 : len(reference)-1]
-		default:
-			name = reference[1:]
 		}
 		if value, ok := os.LookupEnv(name); ok {
 			return value

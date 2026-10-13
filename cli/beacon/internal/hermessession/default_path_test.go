@@ -9,7 +9,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
-func TestDefaultDBPathFollowsHermesProfile(t *testing.T) {
+func TestDefaultDBPathFollowsHermesHome(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
 	profile := filepath.Join(home, "profiles", "work")
@@ -38,36 +38,7 @@ func TestDefaultDBPathFollowsHermesProfile(t *testing.T) {
 	}
 }
 
-// Expected paths come from the actual Python ntpath producer expansion oracle.
-func TestWindowsHermesProfileExpansionMatchesProducer(t *testing.T) {
-	t.Setenv("BEACON_UNSET_FIXTURE", "")
-	if err := os.Unsetenv("BEACON_UNSET_FIXTURE"); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("BEACON_PROFILE_FIXTURE", `C:\owned\profile`)
-	t.Setenv("BEACON_NONRECURSIVE_FIXTURE", "$BEACON_PROFILE_FIXTURE")
-	for _, tc := range []struct{ path, want string }{
-		{"%BEACON_PROFILE_FIXTURE%/work", "C:\\owned\\profile/work"},
-		{"$BEACON_PROFILE_FIXTURE/work", "C:\\owned\\profile/work"},
-		{"${BEACON_PROFILE_FIXTURE}/work", "C:\\owned\\profile/work"},
-		{"%BEACON_UNSET_FIXTURE%/work", "%BEACON_UNSET_FIXTURE%/work"},
-		{"%%profile%%", "%profile%"},
-		{"$$profile", "$profile"},
-		{"'$BEACON_PROFILE_FIXTURE'/work", "'$BEACON_PROFILE_FIXTURE'/work"},
-		{"%BEACON_PROFILE_FIXTURE%/$BEACON_UNSET_FIXTURE", "C:\\owned\\profile/$BEACON_UNSET_FIXTURE"},
-		{"%missing$BEACON_PROFILE_FIXTURE", "%missing$BEACON_PROFILE_FIXTURE"},
-		{"${missing$BEACON_PROFILE_FIXTURE", "${missing$BEACON_PROFILE_FIXTURE"},
-		{"%BEACON_NONRECURSIVE_FIXTURE%/work", "$BEACON_PROFILE_FIXTURE/work"},
-		{"%", "%"},
-		{"${", "${"},
-	} {
-		if got := hermesExpandWindowsVars(tc.path); got != tc.want {
-			t.Errorf("Windows profile expansion(%q)=%q, want %q", tc.path, got, tc.want)
-		}
-	}
-}
-
-func TestHermesExpansionPreservesUnsetUnixReference(t *testing.T) {
+func TestHermesExpansionPreservesUnsetReference(t *testing.T) {
 	t.Setenv("BEACON_UNSET_FIXTURE", "")
 	if err := os.Unsetenv("BEACON_UNSET_FIXTURE"); err != nil {
 		t.Fatal(err)
