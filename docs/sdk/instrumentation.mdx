@@ -86,6 +86,8 @@ Observe.patch({
 
 `Observe.patch()` requires at least one module. It applies supported OpenLLMetry instrumentation and wraps Claude Agent SDK query functions when the module object is writable.
 
+Provider selections remain in effect for `instrumentModules` and later `Observe.patch()` calls. Setting both `instrumentationOptions.openAI` and `instrumentationOptions.anthropic` to `false` keeps both providers disabled when modules are supplied manually.
+
 ## Existing OpenTelemetry providers
 
 If your application already owns OpenTelemetry setup, use `Observe.instrumentations()` with your provider instead of calling `Observe.initialize()` twice.

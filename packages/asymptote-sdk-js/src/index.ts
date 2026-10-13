@@ -475,15 +475,7 @@ function patchOpenLLMetryModules(modules: InstrumentModules): void {
   if (state?.instrumentationsDisabled) {
     return;
   }
-  let instrumentations: Instrumentation[];
-  if (state?.instrumentations.length) {
-    instrumentations = state.instrumentations;
-  } else {
-    instrumentations = initializeAsymptoteInstrumentations();
-    if (state) {
-      state.instrumentations = instrumentations;
-    }
-  }
+  const instrumentations = state ? state.instrumentations : initializeAsymptoteInstrumentations();
   manuallyInstrumentModules(instrumentations, modules);
 }
 
