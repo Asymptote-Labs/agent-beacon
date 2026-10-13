@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -120,10 +122,85 @@ type MappedEvent struct {
 }
 
 func DefaultDBPath() string {
+	if override := strings.TrimSpace(os.Getenv("HERMES_HOME")); override != "" {
+		path := hermesExpandVars(override)
+		if home, err := os.UserHomeDir(); err == nil {
+			if path == "~" {
+				path = home
+			} else if strings.HasPrefix(path, "~/") || (runtime.GOOS == "windows" && strings.HasPrefix(path, `~\`)) {
+				path = filepath.Join(home, path[2:])
+			}
+		}
+		return filepath.Join(path, "state.db")
+	}
+	suffix := os.Getenv("HERMES_DATA_DIR_SUFFIX")
+	if runtime.GOOS == "windows" {
+		if base := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); base != "" {
+			return filepath.Join(base, "hermes"+suffix, "state.db")
+		}
+	}
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		return filepath.Join(home, ".hermes", "state.db")
+		if runtime.GOOS == "windows" {
+			return filepath.Join(home, "AppData", "Local", "hermes"+suffix, "state.db")
+		}
+		return filepath.Join(home, ".hermes"+suffix, "state.db")
 	}
 	return filepath.Join(os.TempDir(), "hermes", "state.db")
+}
+
+var hermesEnvReference = regexp.MustCompile(`\$\{([^}]*)\}|\$([A-Za-z0-9_]+)`)
+
+// Hermes uses Python expandvars, which preserves references to unset variables.
+func hermesExpandVars(path string) string {
+	if runtime.GOOS == "windows" {
+		return hermesExpandWindowsVars(path)
+	}
+	return hermesEnvReference.ReplaceAllStringFunc(path, func(reference string) string {
+		parts := hermesEnvReference.FindStringSubmatch(reference)
+		name := parts[1]
+		if parts[2] != "" {
+			name = parts[2]
+		}
+		if value, ok := os.LookupEnv(name); ok {
+			return value
+		}
+		return reference
+	})
+}
+
+// Python's Windows path expansion also supports %VAR%, escaped %%/$$, and
+// leaves single-quoted path segments untouched. Replacements are not rescanned.
+var hermesWindowsEnvReference = regexp.MustCompile(`'[^']*(?:'|$)|%%|%[^%]*%|%[^%]*$|\$\$|\$\{[^}]*\}|\$\{[^}]*$|\$[A-Za-z0-9_-]+`)
+
+func hermesExpandWindowsVars(path string) string {
+	return hermesWindowsEnvReference.ReplaceAllStringFunc(path, func(reference string) string {
+		if reference[0] == '\'' {
+			return reference
+		}
+		if reference == "%%" {
+			return "%"
+		}
+		if reference == "$$" {
+			return "$"
+		}
+		if (reference[0] == '%' && (len(reference) < 2 || reference[len(reference)-1] != '%')) ||
+			(strings.HasPrefix(reference, "${") && reference[len(reference)-1] != '}') {
+			return reference
+		}
+		var name string
+		switch {
+		case reference[0] == '%':
+			name = reference[1 : len(reference)-1]
+		case strings.HasPrefix(reference, "${"):
+			name = reference[2 : len(reference)-1]
+		default:
+			name = reference[1:]
+		}
+		if value, ok := os.LookupEnv(name); ok {
+			return value
+		}
+		return reference
+	})
 }
 
 func DefaultStatePath() string {

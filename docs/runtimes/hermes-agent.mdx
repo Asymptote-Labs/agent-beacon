@@ -60,7 +60,9 @@ Hermes Agent hooks support user-level config only. Project-level installs are re
 
 ## Session database sync
 
-`beacon endpoint hermes sync` reads committed rows from Hermes Agent's state database after Hermes has written them. The cursor is stored in Beacon endpoint state and advances by session message id. Use `--print` to preview mapped events without writing the runtime log or advancing the cursor.
+`beacon endpoint hermes sync` reads committed rows from Hermes Agent's state database after Hermes has written them. Session status, sync, and handoff use `$HERMES_HOME/state.db` when `HERMES_HOME` is set, including ordinary `~/` and environment-variable expansion. Otherwise they use Hermes's native data root: `~/.hermes` on macOS/Linux or `%LOCALAPPDATA%/hermes` on Windows, with `HERMES_DATA_DIR_SUFFIX` appended when set. Pass `--db <path>` to status/sync or `--store-dir hermes=<path>` to handoff to select a database explicitly.
+
+The cursor is stored in Beacon endpoint state and advances by session message id. Use `--print` to preview mapped events without writing the runtime log or advancing the cursor.
 
 For scheduled collection, run `beacon endpoint hermes sync --watch`, or run one-shot `sync` from your scheduler. Live hooks remain the real-time path.
 
