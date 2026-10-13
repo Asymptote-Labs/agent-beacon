@@ -958,13 +958,13 @@ func (c Converter) eventsFromUsageMetric(resourceAttrs map[string]interface{}, m
 	// and cache creation disjoint, so reduce input by both per-turn subsets;
 	// otherwise totals double-count cached prompt tokens. Returns nil (no-op)
 	// for every other usage metric.
-	inputSubsetsByTurn := codexInputSubsetsByTimestamp(metric)
-	adjustValue := func(dpAttrs pcommon.Map, ts pcommon.Timestamp, value float64) float64 {
+	inputSubsetsByTurn := codexInputSubsetsBySeries(metric)
+	adjustValue := func(dpAttrs pcommon.Map, start, ts pcommon.Timestamp, value float64) float64 {
 		if inputSubsetsByTurn == nil {
 			return value
 		}
 		if tt := FirstString(AttrsToMap(dpAttrs), "token_type"); strings.EqualFold(tt, "input") {
-			subsets := inputSubsetsByTurn[ts.AsTime().UnixNano()]
+			subsets := inputSubsetsByTurn[codexTokenSeriesScope(dpAttrs, start, ts)]
 			if value -= subsets.cached + subsets.cacheWrite; value < 0 {
 				value = 0
 			}
@@ -984,7 +984,7 @@ func (c Converter) eventsFromUsageMetric(resourceAttrs map[string]interface{}, m
 		geminiSeries := geminiTokenSeriesByScope(metric)
 		for i := 0; i < sum.DataPoints().Len(); i++ {
 			dp := sum.DataPoints().At(i)
-			event := c.usageEventFromDataPoint(resourceAttrs, metric, dp.Attributes(), dp.Timestamp(), adjustValue(dp.Attributes(), dp.Timestamp(), numberDataPointValue(dp)), extra)
+			event := c.usageEventFromDataPoint(resourceAttrs, metric, dp.Attributes(), dp.Timestamp(), adjustValue(dp.Attributes(), dp.StartTimestamp(), dp.Timestamp(), numberDataPointValue(dp)), extra)
 			if geminiSeries != nil {
 				geminiSeries.apply(&event, dp.Attributes(), dp.Timestamp(), numberDataPointValue(dp))
 			}
@@ -995,7 +995,7 @@ func (c Converter) eventsFromUsageMetric(resourceAttrs map[string]interface{}, m
 		extra := map[string]interface{}{"metric_type": metric.Type().String()}
 		for i := 0; i < gauge.DataPoints().Len(); i++ {
 			dp := gauge.DataPoints().At(i)
-			events = append(events, c.usageEventFromDataPoint(resourceAttrs, metric, dp.Attributes(), dp.Timestamp(), adjustValue(dp.Attributes(), dp.Timestamp(), numberDataPointValue(dp)), extra))
+			events = append(events, c.usageEventFromDataPoint(resourceAttrs, metric, dp.Attributes(), dp.Timestamp(), adjustValue(dp.Attributes(), dp.StartTimestamp(), dp.Timestamp(), numberDataPointValue(dp)), extra))
 		}
 	case pmetric.MetricTypeHistogram:
 		histogram := metric.Histogram()
@@ -1009,7 +1009,7 @@ func (c Converter) eventsFromUsageMetric(resourceAttrs map[string]interface{}, m
 				"metric_temporality": histogram.AggregationTemporality().String(),
 				"metric_count":       int64(dp.Count()),
 			}
-			events = append(events, c.usageEventFromDataPoint(resourceAttrs, metric, dp.Attributes(), dp.Timestamp(), adjustValue(dp.Attributes(), dp.Timestamp(), dp.Sum()), extra))
+			events = append(events, c.usageEventFromDataPoint(resourceAttrs, metric, dp.Attributes(), dp.Timestamp(), adjustValue(dp.Attributes(), dp.StartTimestamp(), dp.Timestamp(), dp.Sum()), extra))
 		}
 	}
 	return events
@@ -1020,24 +1020,24 @@ type codexInputSubsets struct {
 	cacheWrite float64
 }
 
-// codexInputSubsetsByTimestamp collects each turn's cached and cache-write
-// datapoints so Codex's inclusive input count can be reduced to the canonical
-// uncached remainder. Returns nil for every other metric.
-func codexInputSubsetsByTimestamp(metric pmetric.Metric) map[int64]codexInputSubsets {
+// codexInputSubsetsBySeries pairs each input series with its own cache subsets.
+// A collection shares timestamps across models, so time alone is not identity.
+// Returns nil for every other metric.
+func codexInputSubsetsBySeries(metric pmetric.Metric) map[string]codexInputSubsets {
 	if !strings.EqualFold(strings.TrimSpace(metric.Name()), "codex.turn.token_usage") {
 		return nil
 	}
 	if metric.Type() != pmetric.MetricTypeHistogram {
 		return nil
 	}
-	out := map[int64]codexInputSubsets{}
+	out := map[string]codexInputSubsets{}
 	dps := metric.Histogram().DataPoints()
 	for i := 0; i < dps.Len(); i++ {
 		dp := dps.At(i)
 		if !dp.HasSum() {
 			continue
 		}
-		key := dp.Timestamp().AsTime().UnixNano()
+		key := codexTokenSeriesScope(dp.Attributes(), dp.StartTimestamp(), dp.Timestamp())
 		subsets := out[key]
 		switch strings.ToLower(FirstString(AttrsToMap(dp.Attributes()), "token_type")) {
 		case "cached_input":
@@ -1050,6 +1050,51 @@ func codexInputSubsetsByTimestamp(metric pmetric.Metric) map[int64]codexInputSub
 		out[key] = subsets
 	}
 	return out
+}
+
+// The token_type dimension selects sibling measurements; all other attributes
+// and the collection window identify the stream whose subsets they describe.
+func codexTokenSeriesScope(attrs pcommon.Map, start, end pcommon.Timestamp) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d/%d:", start, end)
+	appendMetricSeriesMapKey(&b, attrs, "token_type")
+	return b.String()
+}
+
+func appendMetricSeriesMapKey(b *strings.Builder, attrs pcommon.Map, skip string) {
+	keys := make([]string, 0, attrs.Len())
+	attrs.Range(func(key string, _ pcommon.Value) bool {
+		if skip == "" || key != skip {
+			keys = append(keys, key)
+		}
+		return true
+	})
+	sort.Strings(keys)
+	b.WriteByte('{')
+	for _, key := range keys {
+		fmt.Fprintf(b, "%q:", key)
+		value, _ := attrs.Get(key)
+		appendMetricSeriesValueKey(b, value)
+	}
+	b.WriteByte('}')
+}
+
+func appendMetricSeriesValueKey(b *strings.Builder, value pcommon.Value) {
+	fmt.Fprintf(b, "%d:", value.Type())
+	switch value.Type() {
+	case pcommon.ValueTypeMap:
+		appendMetricSeriesMapKey(b, value.Map(), "")
+	case pcommon.ValueTypeSlice:
+		b.WriteByte('[')
+		for i := 0; i < value.Slice().Len(); i++ {
+			appendMetricSeriesValueKey(b, value.Slice().At(i))
+		}
+		b.WriteByte(']')
+	case pcommon.ValueTypeDouble:
+		fmt.Fprintf(b, "%016x;", math.Float64bits(value.Double()))
+	default:
+		fmt.Fprintf(b, "%q;", value.AsString())
+	}
 }
 
 func numberDataPointValue(dp pmetric.NumberDataPoint) float64 {
