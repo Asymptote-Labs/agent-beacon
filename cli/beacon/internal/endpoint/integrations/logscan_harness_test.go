@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func writeLog(t *testing.T, lines ...string) string {
@@ -108,5 +109,31 @@ func TestLastHarnessEventByCollectionMethodIgnoresOtherPaths(t *testing.T) {
 	}
 	if _, ok := LastHarnessEventByCollectionMethod(log, "deepseek_harness", ""); ok {
 		t.Fatal("an empty method must not match everything; callers use LastHarnessEvent for that")
+	}
+}
+
+func TestCollectionMethodFiltersKeepLegacyAndGeneralReadersDistinct(t *testing.T) {
+	path := writeLog(t,
+		`{"timestamp":"2026-10-13T10:00:00Z","harness":{"name":"openclaw_gateway","collection_method":"otlp"}}`,
+		`{"timestamp":"2026-10-13T11:00:00Z","harness":{"name":"openclaw_gateway"}}`,
+		`{"timestamp":"2026-10-13T12:00:00Z","harness":{"name":"openclaw_gateway","collection_method":"plugin"}}`,
+	)
+	all, ok := LastHarnessEvent(path, "openclaw")
+	if !ok || all.Format(time.RFC3339) != "2026-10-13T12:00:00Z" {
+		t.Fatalf("general reader = %s, %v; want newest plugin event", all, ok)
+	}
+	strict, ok := LastHarnessEventByCollectionMethod(path, "openclaw", "otlp")
+	if !ok || strict.Format(time.RFC3339) != "2026-10-13T10:00:00Z" {
+		t.Fatalf("strict reader = %s, %v; want marked OTLP only", strict, ok)
+	}
+	legacy, ok := LastHarnessEventByCollectionMethods(path, "openclaw", "otlp", "")
+	if !ok || legacy.Format(time.RFC3339) != "2026-10-13T11:00:00Z" {
+		t.Fatalf("legacy-compatible reader = %s, %v; want latest OTLP-compatible event", legacy, ok)
+	}
+	if _, ok := LastHarnessEventByCollectionMethod(path, "openclaw", ""); ok {
+		t.Fatal("the existing strict helper must continue rejecting an empty filter")
+	}
+	if _, ok := LastHarnessEventByCollectionMethods(path, "openclaw"); ok {
+		t.Fatal("an empty explicit filter list must not become a wildcard")
 	}
 }
