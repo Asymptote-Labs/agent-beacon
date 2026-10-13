@@ -62,6 +62,17 @@ afterEach(() => {
 })
 
 describe("beacon openclaw plugin", () => {
+  test("retains an event containing an invalid Date with native JSON date semantics", async () => {
+    const sent = captureSends()
+    const metadata = { invalid: new Date(NaN), valid: new Date("2026-01-02T03:04:05Z") }
+    const expected = JSON.parse(JSON.stringify(metadata))
+    const gateway = fakeGateway()
+    createBeaconPlugin().register(gateway.api)
+    await gateway.fire("session_start", { sessionId: "session-date", metadata }, context())
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({ hook: "session_start", sessionId: "session-date", event: { metadata: expected } })
+  })
+
   // These strings are the contract between this plugin and the openclaw-event mapper in the hook
   // adapter. A typo on either side produces no telemetry rather than an error, so the list is
   // pinned here and asserted against the mapper's own list on the Go side.

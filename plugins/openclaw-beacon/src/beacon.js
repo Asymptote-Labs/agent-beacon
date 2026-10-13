@@ -141,7 +141,8 @@ function safeClone(value, depth = 0, seen = new WeakSet()) {
 
   if (seen.has(value)) return undefined
   if (value instanceof Error) return { name: value.name, message: value.message }
-  if (value instanceof Date) return value.toISOString()
+  // Match native JSON: an invalid Date is null, not a lost event.
+  if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.toISOString() : null
 
   seen.add(value)
   try {

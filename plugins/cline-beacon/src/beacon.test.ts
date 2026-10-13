@@ -19,6 +19,16 @@ afterEach(() => {
 })
 
 describe("beacon cline plugin", () => {
+  test("retains an event containing an invalid Date with native JSON date semantics", async () => {
+    const sent = captureSends()
+    const metadata = { invalid: new Date(NaN), valid: new Date("2026-01-02T03:04:05Z") }
+    const expected = JSON.parse(JSON.stringify(metadata))
+    const plugin = createBeaconPlugin()
+    await plugin.hooks.beforeRun({ taskId: "task-date", metadata })
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({ type: "beforeRun", taskId: "task-date", metadata: expected })
+  })
+
   test("declares itself as a hooks plugin", () => {
     const plugin = createBeaconPlugin()
     expect(plugin.manifest.capabilities).toEqual(["hooks"])

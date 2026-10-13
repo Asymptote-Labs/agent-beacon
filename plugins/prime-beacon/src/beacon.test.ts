@@ -45,6 +45,17 @@ afterEach(() => {
 })
 
 describe("beacon prime agent extension", () => {
+  test("retains an event containing an invalid Date with native JSON date semantics", async () => {
+    const sent = captureSends()
+    const metadata = { invalid: new Date(NaN), valid: new Date("2026-01-02T03:04:05Z") }
+    const expected = JSON.parse(JSON.stringify(metadata))
+    const host = fakePi()
+    createBeaconExtension().register(host.api)
+    await host.fire({ type: "session_start", metadata }, context())
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({ type: "session_start", sessionId: "sess-1", metadata: expected })
+  })
+
   // These strings are the contract between this extension and the prime-event mapper in the hook
   // adapter. A typo on either side produces no telemetry rather than an error, so the list is
   // pinned here and asserted against the mapper's own list on the Go side.
