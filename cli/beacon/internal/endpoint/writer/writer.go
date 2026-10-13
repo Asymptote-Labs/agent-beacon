@@ -109,13 +109,7 @@ func AppendEvent(event schema.Event, opts Options) (string, error) {
 		}
 	}
 	line := append(data, '\n')
-	if opts.Budget != nil && !opts.Budget.reserve(int64(len(line))) {
-		return "", ErrBudgetSpent
-	}
-	if err := appendJSONL(opts.Path, line, opts.RotateSize, opts.RotateArchives, opts.Guard); err != nil {
-		if opts.Budget != nil {
-			opts.Budget.release(int64(len(line)))
-		}
+	if err := appendJSONL(opts.Path, line, opts.RotateSize, opts.RotateArchives, opts.Guard, opts.Budget); err != nil {
 		return "", err
 	}
 	return opts.Path, nil
@@ -217,7 +211,7 @@ func SanitizeEvent(event schema.Event, maxBytes int) schema.Event {
 }
 
 // Keep this rotation and file-mode contract mirrored with the hook adapter and beaconjson exporter.
-func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int, guard *RetentionGuard) error {
+func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int, guard *RetentionGuard, budget *Budget) (err error) {
 	_, dirMode, _ := asymptoteobserve.RuntimeLogModes(path)
 	if err := os.MkdirAll(filepath.Dir(path), dirMode); err != nil {
 		return err
@@ -256,6 +250,18 @@ func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int
 				return ErrRetentionWindowFull
 			}
 		}
+	}
+	// A replay adds no bytes. Reserve only after the duplicate check under the
+	// existing log lock, so suppressed events cannot spend backfill capacity.
+	if budget != nil {
+		if !budget.reserve(int64(len(line))) {
+			return ErrBudgetSpent
+		}
+		defer func() {
+			if err != nil {
+				budget.release(int64(len(line)))
+			}
+		}()
 	}
 	if err := rotateIfNeeded(path, rotateBytes, rotateArchives, int64(len(line))); err != nil && !rotationRefused(err) {
 		return err

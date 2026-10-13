@@ -92,7 +92,7 @@ func TestAppendJSONLAppendsWhenRotationIsRefused(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 
 	line := []byte("{\"next\":true}\n")
-	if err := appendJSONL(path, line, 8, DefaultRotateArchives, nil); err != nil {
+	if err := appendJSONL(path, line, 8, DefaultRotateArchives, nil, nil); err != nil {
 		t.Fatalf("append with rotation refused: %v", err)
 	}
 	data, err := os.ReadFile(path)
