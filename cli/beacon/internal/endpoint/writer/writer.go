@@ -234,6 +234,18 @@ func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int
 	if asymptoteobserve.IsDuplicateEndpointEvent(path, line, asymptoteobserve.EndpointDuplicateWindow) {
 		return nil
 	}
+	// A replay adds no bytes. Reserve only after the duplicate check under the
+	// existing log lock, so suppressed events cannot spend backfill capacity.
+	if budget != nil {
+		if !budget.reserve(int64(len(line))) {
+			return ErrBudgetSpent
+		}
+		defer func() {
+			if err != nil {
+				budget.release(int64(len(line)))
+			}
+		}()
+	}
 	if guard != nil {
 		// Decided under the lock, so no other Beacon writer can rotate between the check and the
 		// rotation it permits.
@@ -250,18 +262,6 @@ func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int
 				return ErrRetentionWindowFull
 			}
 		}
-	}
-	// A replay adds no bytes. Reserve only after the duplicate check under the
-	// existing log lock, so suppressed events cannot spend backfill capacity.
-	if budget != nil {
-		if !budget.reserve(int64(len(line))) {
-			return ErrBudgetSpent
-		}
-		defer func() {
-			if err != nil {
-				budget.release(int64(len(line)))
-			}
-		}()
 	}
 	if err := rotateIfNeeded(path, rotateBytes, rotateArchives, int64(len(line))); err != nil && !rotationRefused(err) {
 		return err
