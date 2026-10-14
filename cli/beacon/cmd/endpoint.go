@@ -485,7 +485,7 @@ func init() {
 	endpointTracesListCmd.Flags().StringVar(&endpointTraceOpts.state, "state", "", "Filter by sharing state: local_only, shared (including stale) or stale")
 	endpointTracesListCmd.Flags().StringVar(&endpointTraceOpts.visibility, "visibility", "", "Filter by sharing visibility")
 	endpointTracesSearchCmd.Flags().StringVar(&endpointTraceOpts.resultLevel, "result-level", "trace", "Return trace or event results")
-	endpointTracesShowCmd.Flags().IntVar(&endpointTraceOpts.offset, "offset", 1, "Start at this event number")
+	endpointTracesShowCmd.Flags().IntVar(&endpointTraceOpts.offset, "offset", 1, "Start at this position in the filtered events")
 	endpointTracesShowCmd.Flags().IntVar(&endpointTraceOpts.aroundEvent, "around-event", 0, "Center output on this event number")
 	endpointTracesShowCmd.Flags().IntVar(&endpointTraceOpts.before, "before", 3, "Events before --around-event")
 	endpointTracesShowCmd.Flags().IntVar(&endpointTraceOpts.after, "after", 3, "Events after --around-event")
