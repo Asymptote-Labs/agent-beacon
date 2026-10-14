@@ -65,7 +65,7 @@ func init() {
 
 	for _, c := range []*cobra.Command{endpointClaudeSyncCmd, endpointClaudeStatusCmd} {
 		f := c.Flags()
-		f.StringVar(&endpointClaudeOpts.projectsDir, "projects-dir", "", "Claude projects directory (default ~/.claude/projects)")
+		f.StringVar(&endpointClaudeOpts.projectsDir, "projects-dir", "", "Claude projects directory (default $CLAUDE_CONFIG_DIR/projects, else ~/.claude/projects)")
 		f.StringVar(&endpointClaudeOpts.statePath, "state", "", "Collector cursor file (default ~/.beacon/endpoint/state/claude.json)")
 		f.BoolVar(&endpointOpts.jsonOutput, "json", false, "Print the result as JSON")
 		f.BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")

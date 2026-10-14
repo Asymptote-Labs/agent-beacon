@@ -47,7 +47,12 @@ type Stats struct {
 	FirstError  error
 }
 
+// DefaultProjectsDir is where Claude Code keeps session transcripts: projects under
+// CLAUDE_CONFIG_DIR when that is set, as Claude Code does, otherwise ~/.claude/projects.
 func DefaultProjectsDir() (string, error) {
+	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
+		return filepath.Join(dir, "projects"), nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve home directory: %w", err)

@@ -33,7 +33,7 @@ User-level hooks are written to `~/.claude/settings.json`. Project-level hooks a
 beacon endpoint hooks install --harness claude --level project
 ```
 
-For backfill, Beacon can also read Claude Code's committed JSONL session files under `~/.claude/projects`:
+For backfill, Beacon can also read Claude Code's committed JSONL session files under `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/projects` when `CLAUDE_CONFIG_DIR` is set, as Claude Code does):
 
 ```bash title="Sync Claude Code session files"
 beacon endpoint claude status

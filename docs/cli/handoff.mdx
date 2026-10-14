@@ -19,7 +19,7 @@ Sessions come from each runtime's own local session store, not from Beacon's run
 
 | Runtime | Session store | `--harness` |
 |---------|---------------|-------------|
-| Claude Code | `~/.claude/projects` | `claude` |
+| Claude Code | `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/projects` when set) | `claude` |
 | Codex CLI | `$CODEX_HOME/sessions` when set; otherwise `~/.codex/sessions` | `codex` |
 | OpenCode | `~/.local/share/opencode` (or `$XDG_DATA_HOME/opencode`, and `OPENCODE_DB` when set; SQLite and the legacy file store) | `opencode` |
 | Cline | `~/.cline/data` | `cline` |
