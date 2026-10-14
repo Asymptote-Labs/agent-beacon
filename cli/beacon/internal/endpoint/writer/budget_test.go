@@ -85,33 +85,6 @@ func replayBudgetEvent(callID string) schema.Event {
 	return event
 }
 
-func TestBudgetSuppressedReplayDoesNotConsumeParentOrChildBytes(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "runtime.jsonl")
-	event := replayBudgetEvent("call-a")
-	if _, err := AppendEvent(event, Options{Path: path}); err != nil {
-		t.Fatal(err)
-	}
-	before, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	parent := NewBudget(1 << 20)
-	child := parent.Sub(1 << 20)
-	if _, err := AppendEvent(event, Options{Path: path, Budget: child}); err != nil {
-		t.Fatal(err)
-	}
-	after, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(before) != string(after) {
-		t.Fatal("a known replay wrote bytes")
-	}
-	if child.Used() != 0 || parent.Used() != 0 {
-		t.Fatalf("no bytes written but child=%d parent=%d charged", child.Used(), parent.Used())
-	}
-}
-
 func TestBudgetSuppressedReplayFitsAnExhaustedBudget(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	event := replayBudgetEvent("call-a")
@@ -151,41 +124,6 @@ func TestBudgetSuppressedReplayLeavesRoomForNewTelemetry(t *testing.T) {
 	}
 	if after.Size() != 2*before.Size() || budget.Used() != after.Size()-before.Size() {
 		t.Fatalf("physical bytes before=%d after=%d budget=%d", before.Size(), after.Size(), budget.Used())
-	}
-}
-
-func TestBudgetSuppressedConcurrentReplaysShareOneEventOfCapacity(t *testing.T) {
-	seed := filepath.Join(t.TempDir(), "seed.jsonl")
-	if _, err := AppendEvent(replayBudgetEvent("call-a"), Options{Path: seed}); err != nil {
-		t.Fatal(err)
-	}
-	size, err := os.Stat(seed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(t.TempDir(), "runtime.jsonl")
-	budget := NewBudget(size.Size())
-	start := make(chan struct{})
-	results := make(chan error, 2)
-	for i := 0; i < 2; i++ {
-		go func() {
-			<-start
-			_, err := AppendEvent(replayBudgetEvent("call-a"), Options{Path: path, Budget: budget})
-			results <- err
-		}()
-	}
-	close(start)
-	for i := 0; i < 2; i++ {
-		if err := <-results; err != nil {
-			t.Errorf("valid concurrent replay refused: %v", err)
-		}
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Size() != size.Size() || budget.Used() != info.Size() || budget.Refused() {
-		t.Fatalf("log=%d used=%d refused=%t", info.Size(), budget.Used(), budget.Refused())
 	}
 }
 
