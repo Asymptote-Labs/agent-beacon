@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/atomicfile"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/siempack"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
@@ -93,7 +94,7 @@ func StageBackfill(logPath string, opts BackfillOptions) (BackfillResult, error)
 	for _, line := range lines {
 		data = append(append(data, line...), '\n')
 	}
-	if err := writeFileAtomic(result.Path, data, 0o600); err != nil {
+	if err := atomicfile.Write(result.Path, data, 0o600); err != nil {
 		return result, fmt.Errorf("stage the session backfill: %w", err)
 	}
 	result.Events = len(lines)

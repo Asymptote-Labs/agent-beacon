@@ -86,10 +86,7 @@ func ReadEvents(path string, query EventQuery) (EventResult, error) {
 		}
 	}
 	sort.SliceStable(result.Events, func(i, j int) bool {
-		if result.Events[i].Parsed.Equal(result.Events[j].Parsed) {
-			return result.Events[i].ID > result.Events[j].ID
-		}
-		return result.Events[i].Parsed.After(result.Events[j].Parsed)
+		return recordBefore(result.Events[j], result.Events[i])
 	})
 	result.Returned = len(result.Events)
 	result.Truncated = result.TotalMatched > len(result.Events)
@@ -101,8 +98,8 @@ func ReadEvents(path string, query EventQuery) (EventResult, error) {
 // order because runtime timestamps are second-resolution, so a batch of
 // cumulative datapoints from one export commonly shares a timestamp; the
 // cumulative dedup then relies on append order to recover the emission sequence.
-// The newest-first ReadEvents sort breaks such ties on lexicographic line IDs,
-// which mis-orders line-9 vs line-10 within a second.
+// Restore oldest-first emission order after the newest-first ReadEvents sort
+// before aggregating cumulative counters.
 func ReadEventsAppendOrder(path string, query EventQuery) ([]schema.Event, error) {
 	query.NoLimit = true
 	result, err := ReadEvents(path, query)
@@ -550,30 +547,34 @@ func rawString(raw map[string]interface{}, key string) string {
 // tie on the timestamp however precise it is, and the cumulative dedup needs
 // their emission order back. Sequence recovers it directly; the archive-and-line
 // tiebreak below is the fallback for events written before sequence stamping,
-// and is still needed because the newest-first ReadEvents sort breaks ties on
-// lexicographic line IDs, which mis-orders line-9 against line-10.
+// and is also used in reverse by the newest-first ReadEvents sort so limiting
+// a result cannot discard newer events on lexicographic line-ID ties.
 func SortRecordsAppendOrder(records []EventRecord) {
 	sort.SliceStable(records, func(i, j int) bool {
-		if !records[i].Parsed.Equal(records[j].Parsed) {
-			return records[i].Parsed.Before(records[j].Parsed)
-		}
-		si, sj := records[i].Event.Sequence, records[j].Event.Sequence
-		iHasSeq := si != 0
-		jHasSeq := sj != 0
-		if iHasSeq != jHasSeq {
-			return !iHasSeq // unsequenced before sequenced
-		}
-		if iHasSeq && si != sj {
-			return si < sj
-		}
-		ai, li, _ := parseRecordID(records[i].ID)
-		aj, lj, _ := parseRecordID(records[j].ID)
-		if ai != aj {
-			// Higher archive index is an older rotation, so it comes first.
-			return ai > aj
-		}
-		return li < lj
+		return recordBefore(records[i], records[j])
 	})
+}
+
+func recordBefore(a, b EventRecord) bool {
+	if !a.Parsed.Equal(b.Parsed) {
+		return a.Parsed.Before(b.Parsed)
+	}
+	si, sj := a.Event.Sequence, b.Event.Sequence
+	iHasSeq := si != 0
+	jHasSeq := sj != 0
+	if iHasSeq != jHasSeq {
+		return !iHasSeq // unsequenced before sequenced
+	}
+	if iHasSeq && si != sj {
+		return si < sj
+	}
+	ai, li, _ := parseRecordID(a.ID)
+	aj, lj, _ := parseRecordID(b.ID)
+	if ai != aj {
+		// Higher archive index is an older rotation, so it comes first.
+		return ai > aj
+	}
+	return li < lj
 }
 
 func readEventsFromSource(source eventSource, query EventQuery, result *EventResult, limit int) error {
@@ -618,10 +619,7 @@ func readEventsFromSource(source eventSource, query EventQuery, result *EventRes
 		result.Events = append(result.Events, record)
 		if !query.NoLimit {
 			sort.SliceStable(result.Events, func(i, j int) bool {
-				if result.Events[i].Parsed.Equal(result.Events[j].Parsed) {
-					return result.Events[i].ID > result.Events[j].ID
-				}
-				return result.Events[i].Parsed.After(result.Events[j].Parsed)
+				return recordBefore(result.Events[j], result.Events[i])
 			})
 			if len(result.Events) > limit {
 				result.Events = result.Events[:limit]

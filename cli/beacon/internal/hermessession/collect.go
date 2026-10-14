@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +22,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionwindow"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sqliteuri"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	_ "modernc.org/sqlite"
 )
@@ -120,10 +123,48 @@ type MappedEvent struct {
 }
 
 func DefaultDBPath() string {
+	if override := strings.TrimSpace(os.Getenv("HERMES_HOME")); override != "" {
+		path := hermesExpandVars(override)
+		if home, err := os.UserHomeDir(); err == nil {
+			if path == "~" {
+				path = home
+			} else if strings.HasPrefix(path, "~/") || (runtime.GOOS == "windows" && strings.HasPrefix(path, `~\`)) {
+				path = filepath.Join(home, path[2:])
+			}
+		}
+		return filepath.Join(path, "state.db")
+	}
+	suffix := os.Getenv("HERMES_DATA_DIR_SUFFIX")
+	if runtime.GOOS == "windows" {
+		if base := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); base != "" {
+			return filepath.Join(base, "hermes"+suffix, "state.db")
+		}
+	}
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		return filepath.Join(home, ".hermes", "state.db")
+		if runtime.GOOS == "windows" {
+			return filepath.Join(home, "AppData", "Local", "hermes"+suffix, "state.db")
+		}
+		return filepath.Join(home, ".hermes"+suffix, "state.db")
 	}
 	return filepath.Join(os.TempDir(), "hermes", "state.db")
+}
+
+var hermesEnvReference = regexp.MustCompile(`\$\{([^}]*)\}|\$([A-Za-z0-9_]+)`)
+
+// hermesExpandVars expands $VAR and ${VAR} like Python's os.path.expandvars, which Hermes
+// uses: references to unset variables are left as written.
+func hermesExpandVars(path string) string {
+	return hermesEnvReference.ReplaceAllStringFunc(path, func(reference string) string {
+		parts := hermesEnvReference.FindStringSubmatch(reference)
+		name := parts[1]
+		if parts[2] != "" {
+			name = parts[2]
+		}
+		if value, ok := os.LookupEnv(name); ok {
+			return value
+		}
+		return reference
+	})
 }
 
 func DefaultStatePath() string {
@@ -549,16 +590,7 @@ func openSQLiteReadOnly(path string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	uriPath := filepath.ToSlash(path)
-	if !strings.HasPrefix(uriPath, "/") {
-		uriPath = "/" + uriPath
-	}
-	u := url.URL{Scheme: "file", Path: uriPath}
-	q := u.Query()
-	q.Set("mode", "ro")
-	q.Set("_pragma", "busy_timeout(1000)")
-	u.RawQuery = q.Encode()
-	return sql.Open("sqlite", u.String())
+	return sql.Open("sqlite", sqliteuri.File(path, url.Values{"mode": {"ro"}, "_pragma": {"busy_timeout(1000)"}}))
 }
 
 // MapSession maps one session's new messages into endpoint events. It also returns the tool calls

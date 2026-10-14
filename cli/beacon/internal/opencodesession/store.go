@@ -6,11 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sqliteuri"
 	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,12 +29,20 @@ type Store struct {
 	LegacyStorageDir string
 }
 
+// NewStore opens the OpenCode store at dataDir, which is a data directory or an opencode.db path.
+// Empty means where OpenCode itself writes: its data directory, with the database named by
+// OPENCODE_DB when that is set.
 func NewStore(dataDir string) (*Store, error) {
 	if strings.TrimSpace(dataDir) == "" {
-		dataDir = DefaultDataDir()
-	}
-	if strings.TrimSpace(dataDir) == "" {
-		return nil, errors.New("opencode data directory is empty")
+		data := DefaultDataDir()
+		if data == "" {
+			return nil, errors.New("opencode data directory is empty")
+		}
+		return &Store{
+			DataDir:          data,
+			SQLitePath:       defaultDBPath(data),
+			LegacyStorageDir: filepath.Join(data, "storage"),
+		}, nil
 	}
 	dataDir = filepath.Clean(dataDir)
 	if strings.HasSuffix(dataDir, ".db") {
@@ -51,23 +59,32 @@ func NewStore(dataDir string) (*Store, error) {
 	}, nil
 }
 
+// DefaultDataDir is OpenCode's data directory, which holds opencode.db and the legacy storage tree.
+// OpenCode uses XDG paths on every platform, Windows included. Its plugins and configuration live in
+// a separate directory (~/.config/opencode) that holds no sessions.
 func DefaultDataDir() string {
+	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
+		return filepath.Join(xdg, "opencode")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
 		return ""
 	}
-	switch runtime.GOOS {
-	case "windows":
-		if appData := strings.TrimSpace(os.Getenv("APPDATA")); appData != "" {
-			return filepath.Join(appData, "opencode")
-		}
-		return filepath.Join(home, "AppData", "Roaming", "opencode")
-	default:
-		if xdg := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); xdg != "" {
-			return filepath.Join(xdg, "opencode")
-		}
-		return filepath.Join(home, ".config", "opencode")
+	return filepath.Join(home, ".local", "share", "opencode")
+}
+
+// defaultDBPath resolves OPENCODE_DB as OpenCode does: an absolute path is used as given and a
+// relative one is resolved against the data directory. Unset, or the in-memory name, means
+// opencode.db.
+func defaultDBPath(data string) string {
+	name := os.Getenv("OPENCODE_DB")
+	if name == "" || name == ":memory:" {
+		return filepath.Join(data, "opencode.db")
 	}
+	if filepath.IsAbs(name) {
+		return filepath.Clean(name)
+	}
+	return filepath.Join(data, name)
 }
 
 func (s *Store) Exists() bool {
@@ -634,54 +651,14 @@ func legacyProjectDirectory(path string) string {
 	return firstNonEmpty(stringFromMap(raw, "worktree"), stringFromMap(raw, "directory"), stringFromMap(raw, "name"))
 }
 
+// openSQLiteReadOnly opens OpenCode's store read-only. modernc.org/sqlite opens every database
+// READWRITE|CREATE, so mode=ro in the URI is the one thing keeping this read from writing to it.
 func openSQLiteReadOnly(path string) (*sql.DB, error) {
 	path, err := sessionfs.SQLitePath(path)
 	if err != nil {
 		return nil, err
 	}
-	return sql.Open("sqlite", sqliteFileURI(path))
-}
-
-// sqliteFileURI renders an OS path as the file: URI the driver needs to honour mode=ro.
-//
-// The URI form is not optional: modernc.org/sqlite only forwards query parameters to SQLite when
-// the DSN starts with "file:", and it opens every database with READWRITE|CREATE flags, so mode=ro
-// is the one thing keeping a read of OpenCode's store from writing to it.
-//
-// Handing url.URL a raw OS path does not produce that URI on Windows. A path like
-// C:\Users\me\opencode.db has no leading slash, so URL.String emits "file://C:%5CUsers%5C..." and
-// SQLite reads "C:" as the URI's authority -- every list and read then fails, and OpenCode sync
-// collects nothing. The path is made absolute, switched to forward slashes, and split into the host
-// and path a file: URI actually has.
-func sqliteFileURI(path string) string {
-	abs := path
-	if resolved, err := filepath.Abs(path); err == nil {
-		abs = resolved
-	}
-	u := fileURL(filepath.ToSlash(abs))
-	q := u.Query()
-	q.Set("mode", "ro")
-	q.Set("_pragma", "query_only(1)")
-	u.RawQuery = q.Encode()
-	return u.String()
-}
-
-// fileURL splits an already slash-separated path into the host and path of a file: URL.
-//
-// A UNC path (\\server\share\opencode.db, slashed to //server/share/opencode.db) names a host, and
-// is the one case where a file: URI has one. Everything else is a plain local path and gets the
-// leading slash that keeps a Windows drive letter inside the path instead of in the authority.
-func fileURL(slashed string) url.URL {
-	if rest, ok := strings.CutPrefix(slashed, "//"); ok {
-		host, remainder, _ := strings.Cut(rest, "/")
-		if host != "" {
-			return url.URL{Scheme: "file", Host: host, Path: "/" + remainder}
-		}
-	}
-	if !strings.HasPrefix(slashed, "/") {
-		slashed = "/" + slashed
-	}
-	return url.URL{Scheme: "file", Path: slashed}
+	return sql.Open("sqlite", sqliteuri.File(path, url.Values{"mode": {"ro"}, "_pragma": {"query_only(1)"}}))
 }
 
 func sqliteTableExists(db *sql.DB, table string) bool {

@@ -1,0 +1,133 @@
+{
+  "env": {
+    "EXISTING": "1"
+  },
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/opt/beacon hooks/beacon-hooks' --platform claude --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' permission-request"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/opt/beacon hooks/beacon-hooks' --platform claude --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' post-tool"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/opt/beacon hooks/beacon-hooks' --platform claude --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' post-tool"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "http",
+            "url": "https://guard.example/check",
+            "headers": {
+              "X": "1"
+            }
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit|Read|Glob|Grep|WebFetch|WebSearch|Agent|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/opt/beacon hooks/beacon-hooks' --platform claude --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' pre-tool"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/opt/beacon hooks/beacon-hooks' --platform claude --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' session-end"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo keep"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/opt/beacon hooks/beacon-hooks' --platform claude --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' session-start"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/opt/beacon hooks/beacon-hooks' --platform claude --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' stop",
+            "timeout": 45
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/opt/beacon hooks/beacon-hooks' --platform claude --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' subagent-start"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/opt/beacon hooks/beacon-hooks' --platform claude --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' subagent-stop"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/opt/beacon hooks/beacon-hooks' --platform claude --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' prompt-submit",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

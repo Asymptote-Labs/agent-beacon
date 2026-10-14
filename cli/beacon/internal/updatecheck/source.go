@@ -9,6 +9,12 @@ import (
 
 const DefaultLatestReleaseURL = "https://api.github.com/repos/asymptote-labs/agent-beacon/releases/latest"
 
+// PublicReleases says whether this build updates from Beacon's public GitHub releases. It is true
+// for every build of this repository. A build distributed through another channel sets it to
+// false, which turns off the startup notice, `beacon version check`, and the endpoint
+// self-updater, so a public release never replaces that build.
+var PublicReleases = true
+
 // Release is the latest Beacon release known to an update source.
 type Release struct {
 	Version string

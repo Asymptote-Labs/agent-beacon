@@ -494,3 +494,42 @@ func TestLogSessionCanonicalizesAnAliasedHarness(t *testing.T) {
 		t.Fatalf("--harness must find rows written under the alias: %+v, %v, %v", session, found, err)
 	}
 }
+
+func TestCodexBriefUsesTranscriptTimeAfterOlderRolloutIsTouched(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	f := newStoreFixture(t)
+	f.writeTranscripts(t)
+	older := filepath.Join(f.dirs[HarnessCodex], "sessions", "2026", "09", "20", "rollout-2026-09-20T09-00-00-codex-thread-1.jsonl")
+	data, err := os.ReadFile(older)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, older, strings.ReplaceAll(string(data), "2026-09-21T09:", "2026-09-20T09:"))
+	// Copying or touching an old transcript must not make its requests newer.
+	setModTime(t, older, codexUpdated.Add(time.Hour))
+	sources := DefaultSources(f.dirs)
+	session, err := Find(sources, HarnessCodex, "codex-thread-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := Events(sources, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	brief := BuildBrief(session, events, FromSessionStore, briefNow)
+	if brief.FirstRequest != "fix the login form" || brief.LatestRequest != "also check the signup form" || brief.LastMessage != "The form validates now." {
+		t.Fatalf("handoff inverted durable conversation chronology: first=%q latest=%q reply=%q", brief.FirstRequest, brief.LatestRequest, brief.LastMessage)
+	}
+	started := 0
+	for _, event := range events {
+		if event.Event.Action == "session.started" {
+			started++
+			if !strings.HasPrefix(event.Timestamp, "2026-09-20T") {
+				t.Fatalf("session start chosen from later rollout: %s", event.Timestamp)
+			}
+		}
+	}
+	if started != 1 {
+		t.Fatalf("session starts = %d, want one", started)
+	}
+}

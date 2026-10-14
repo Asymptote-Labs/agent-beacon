@@ -51,16 +51,16 @@ func (s *claudeSource) List() ([]Session, error) {
 			Subagent:   ref.IsSidechain,
 			ParentID:   ref.ParentSessionID,
 		}
-		var indexPath string
 		if ref.Index != nil {
-			indexPath = ref.Index.ProjectPath
 			session.Title = oneLine(firstNonEmpty(ref.Index.Summary, ref.Index.FirstPrompt))
 			session.Branch = ref.Index.GitBranch
 		}
-		if indexPath == "" || session.Title == "" || session.Branch == "" {
-			head := readClaudeHead(ref.Path)
-			if indexPath == "" && head.CWD != "" {
-				session.Directory = head.CWD
+		if session.Title == "" || session.Branch == "" {
+			// List already read the head when the index did not name the workspace.
+			head := ref.Head
+			if head == nil {
+				read := claudesession.ReadHead(ref.Path)
+				head = &read
 			}
 			session.Title = firstNonEmpty(session.Title, oneLine(head.FirstPrompt))
 			session.Branch = firstNonEmpty(session.Branch, head.GitBranch)

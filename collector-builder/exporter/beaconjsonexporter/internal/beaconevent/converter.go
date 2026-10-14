@@ -955,16 +955,16 @@ func (c Converter) eventsFromUsageMetric(resourceAttrs map[string]interface{}, m
 	var events []Event
 	// Codex reports input tokens inclusive of both cached_input and
 	// cache_write_input. Beacon's gen_ai.usage keeps uncached input, cache read,
-	// and cache creation disjoint, so reduce input by both per-turn subsets;
-	// otherwise totals double-count cached prompt tokens. Returns nil (no-op)
-	// for every other usage metric.
-	inputSubsetsByTurn := codexInputSubsetsByTimestamp(metric)
+	// and cache creation disjoint, so reduce input by both subsets of the same
+	// series; otherwise totals double-count cached prompt tokens. Returns nil
+	// (no-op) for every other usage metric.
+	inputSubsetsBySeries := codexInputSubsetsBySeries(metric)
 	adjustValue := func(dpAttrs pcommon.Map, ts pcommon.Timestamp, value float64) float64 {
-		if inputSubsetsByTurn == nil {
+		if inputSubsetsBySeries == nil {
 			return value
 		}
-		if tt := FirstString(AttrsToMap(dpAttrs), "token_type"); strings.EqualFold(tt, "input") {
-			subsets := inputSubsetsByTurn[ts.AsTime().UnixNano()]
+		if scope, tokenType := tokenSeriesScope(dpAttrs, ts, codexTokenTypeAttribute); tokenType == "input" {
+			subsets := inputSubsetsBySeries[scope]
 			if value -= subsets.cached + subsets.cacheWrite; value < 0 {
 				value = 0
 			}
@@ -1020,26 +1020,28 @@ type codexInputSubsets struct {
 	cacheWrite float64
 }
 
-// codexInputSubsetsByTimestamp collects each turn's cached and cache-write
+const codexTokenTypeAttribute = "token_type"
+
+// codexInputSubsetsBySeries collects each series' cached and cache-write
 // datapoints so Codex's inclusive input count can be reduced to the canonical
 // uncached remainder. Returns nil for every other metric.
-func codexInputSubsetsByTimestamp(metric pmetric.Metric) map[int64]codexInputSubsets {
+func codexInputSubsetsBySeries(metric pmetric.Metric) map[string]codexInputSubsets {
 	if !strings.EqualFold(strings.TrimSpace(metric.Name()), "codex.turn.token_usage") {
 		return nil
 	}
 	if metric.Type() != pmetric.MetricTypeHistogram {
 		return nil
 	}
-	out := map[int64]codexInputSubsets{}
+	out := map[string]codexInputSubsets{}
 	dps := metric.Histogram().DataPoints()
-	for i := 0; i < dps.Len(); i++ {
+	for i := range dps.Len() {
 		dp := dps.At(i)
 		if !dp.HasSum() {
 			continue
 		}
-		key := dp.Timestamp().AsTime().UnixNano()
-		subsets := out[key]
-		switch strings.ToLower(FirstString(AttrsToMap(dp.Attributes()), "token_type")) {
+		scope, tokenType := tokenSeriesScope(dp.Attributes(), dp.Timestamp(), codexTokenTypeAttribute)
+		subsets := out[scope]
+		switch tokenType {
 		case "cached_input":
 			subsets.cached += dp.Sum()
 		case "cache_write_input":
@@ -1047,9 +1049,31 @@ func codexInputSubsetsByTimestamp(metric pmetric.Metric) map[int64]codexInputSub
 		default:
 			continue
 		}
-		out[key] = subsets
+		out[scope] = subsets
 	}
 	return out
+}
+
+// tokenSeriesScope returns a token-usage datapoint's series identity without its token type,
+// plus the type (lowercased). Every other attribute and the timestamp are part of the identity,
+// so sibling datapoints of one series share a scope while two sessions or two models in one
+// export never do.
+func tokenSeriesScope(attrs pcommon.Map, ts pcommon.Timestamp, typeAttribute string) (string, string) {
+	values := AttrsToMap(attrs)
+	tokenType := strings.ToLower(strings.TrimSpace(FirstString(values, typeAttribute)))
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		if key != typeAttribute {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d", ts.AsTime().UnixNano())
+	for _, key := range keys {
+		fmt.Fprintf(&b, "\x00%s=%v", key, values[key])
+	}
+	return b.String(), tokenType
 }
 
 func numberDataPointValue(dp pmetric.NumberDataPoint) float64 {

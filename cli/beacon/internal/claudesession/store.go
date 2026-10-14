@@ -30,6 +30,9 @@ type SessionRef struct {
 	ParentSessionID string
 	Meta            *SubagentMeta
 	Index           *IndexEntry
+	// Head is the transcript head List read to find the workspace when the index did not name
+	// it; nil when the index supplied the workspace and the head was not read.
+	Head *Head
 }
 
 type Store struct {
@@ -119,6 +122,13 @@ func (s *Store) List() ([]SessionRef, error) {
 				}
 				ref.IsSidechain = idx.IsSidechain
 			}
+			if ref.Index == nil || ref.Index.ProjectPath == "" {
+				head := ReadHead(path)
+				ref.Head = &head
+				if head.CWD != "" {
+					ref.ProjectPath = head.CWD
+				}
+			}
 			if filepath.Base(filepath.Dir(path)) == "subagents" {
 				ref.IsSidechain = true
 				ref.ParentSessionID = filepath.Base(filepath.Dir(filepath.Dir(path)))
@@ -154,7 +164,7 @@ func decodeRecords(r io.Reader) ([]Record, Stats, error) {
 	var stats Stats
 	lineNo := 0
 	for {
-		line, status, readErr := readLine(br)
+		line, status, readErr := readLine(br, MaxLineBytes)
 		switch status {
 		case lineEOF:
 			return records, stats, nil
@@ -200,15 +210,16 @@ const (
 	lineError                // I/O error
 )
 
-// readLine reads one JSONL line from br, handling oversized lines (consumed and
-// discarded so later lines are still reachable) and partial tails (unterminated
-// trailing fragments from a file still being written).
-func readLine(br *bufio.Reader) ([]byte, lineStatus, error) {
+// readLine reads one JSONL line of at most max bytes from br, handling oversized lines (consumed
+// and discarded so later lines are still reachable) and partial tails (unterminated trailing
+// fragments from a file still being written, returned with linePartial for a caller that wants
+// them).
+func readLine(br *bufio.Reader, max int) ([]byte, lineStatus, error) {
 	var buf []byte
 	oversized := false
 	for {
 		chunk, err := br.ReadSlice('\n')
-		if oversized || len(buf)+len(chunk) > MaxLineBytes {
+		if oversized || len(buf)+len(chunk) > max {
 			oversized = true
 			buf = nil
 		} else {
@@ -222,7 +233,7 @@ func readLine(br *bufio.Reader) ([]byte, lineStatus, error) {
 				return nil, lineOversized, nil
 			}
 			if len(buf) > 0 {
-				return nil, linePartial, nil
+				return bytes.TrimSuffix(buf, []byte("\r")), linePartial, nil
 			}
 			return nil, lineEOF, nil
 		}

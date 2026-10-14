@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 const (
@@ -132,13 +133,16 @@ func GetStatus(logPath string) Status {
 }
 
 func HasRecentOpenClawEvent(logPath string) bool {
-	return integrations.HasRecentHarnessEvent(logPath, Name)
+	_, ok := LastOpenClawEvent(logPath)
+	return ok
 }
 
 func HasOpenClawEventSince(logPath string, since time.Time) bool {
-	return integrations.HasHarnessEventSince(logPath, Name, since)
+	last, ok := LastOpenClawEvent(logPath)
+	return ok && !last.IsZero() && !last.Before(since)
 }
 
 func LastOpenClawEvent(logPath string) (time.Time, bool) {
-	return integrations.LastHarnessEvent(logPath, Name)
+	// This integration validates gateway OTLP; plugin and poll events share the harness name.
+	return integrations.LastHarnessEventByCollectionMethod(logPath, Name, asymptoteobserve.CollectionMethodOTLP)
 }

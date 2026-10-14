@@ -19,7 +19,8 @@ var endpointCodexCmd = &cobra.Command{
 	Long: `Collect endpoint telemetry from Codex CLI's local rollout session files.
 
 Beacon's normal Codex integration uses local OpenTelemetry logs and traces for live
-capture. This command reads Codex's committed JSONL session files under ~/.codex/sessions
+capture. This command reads Codex's committed JSONL session files under $CODEX_HOME/sessions
+when set, otherwise ~/.codex/sessions
 so historical sessions and sessions that ran without Beacon OTLP can still be represented
 in the local endpoint log. Every emitted event is marked harness.collection_method=poll:
 Beacon sees what Codex already wrote, so nothing here can hold or deny a tool call.`,
@@ -55,7 +56,7 @@ func init() {
 
 	for _, c := range []*cobra.Command{endpointCodexSyncCmd, endpointCodexStatusCmd} {
 		f := c.Flags()
-		f.StringVar(&endpointCodexOpts.codexDir, "codex-dir", "", "Codex directory (default ~/.codex)")
+		f.StringVar(&endpointCodexOpts.codexDir, "codex-dir", "", "Codex directory (default $CODEX_HOME when nonempty, otherwise ~/.codex)")
 		f.StringVar(&endpointCodexOpts.statePath, "state", "", "Collector cursor file (default ~/.beacon/endpoint/state/codex.json)")
 		f.BoolVar(&endpointOpts.jsonOutput, "json", false, "Print the result as JSON")
 		f.BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")

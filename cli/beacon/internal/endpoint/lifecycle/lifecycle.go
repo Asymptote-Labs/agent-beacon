@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/atomicfile"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/brewpath"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
 	endpointcollector "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/collector"
@@ -252,7 +253,9 @@ type InstallResult struct {
 }
 
 type Status struct {
-	Version       string                        `json:"version"`
+	Version string `json:"version"`
+	// Edition is set only for a build that is not the default edition (see version.Edition).
+	Edition       string                        `json:"edition,omitempty"`
 	ConfigPath    string                        `json:"config_path"`
 	LogPath       string                        `json:"log_path"`
 	RuntimeLog    RuntimeLogSource              `json:"runtime_log"`
@@ -844,7 +847,7 @@ func setAutoUpdateModeInConfigFile(path, mode string) error {
 	if info, err := os.Stat(path); err == nil {
 		perm = info.Mode().Perm()
 	}
-	return os.WriteFile(path, out, perm)
+	return atomicfile.Write(path, out, perm)
 }
 
 func GetStatus(userMode bool, logPath string) Status {
@@ -878,6 +881,7 @@ func buildStatus(requestedUserMode bool, effectiveCfg endpointconfig.Config, run
 	}
 	return Status{
 		Version:            version.GetVersion(),
+		Edition:            version.ReportedEdition(),
 		ConfigPath:         endpointconfig.ConfigPath(effectiveCfg.UserMode),
 		LogPath:            effectiveCfg.LogPath,
 		RuntimeLog:         runtimeLog,
@@ -1084,7 +1088,7 @@ func restoreFile(path string, snapshot fileSnapshot) {
 	if mode == 0 {
 		mode = 0600
 	}
-	_ = os.WriteFile(path, snapshot.Data, mode)
+	_ = atomicfile.Write(path, snapshot.Data, mode)
 }
 
 func preflight(cfg endpointconfig.Config, startService bool, kind service.Kind) error {

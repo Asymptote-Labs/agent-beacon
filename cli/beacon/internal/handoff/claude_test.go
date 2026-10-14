@@ -59,40 +59,6 @@ func TestClaudeIndexProjectPathWinsOverTheTranscript(t *testing.T) {
 	}
 }
 
-func TestClaudeHeadSkipsAnOversizedLine(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "big.jsonl")
-	huge := `{"type":"assistant","message":{"content":"` + strings.Repeat("x", claudeHeadMaxLineSize+10) + `"}}` + "\n"
-	writeFixture(t, path, huge+claudeLine(t, map[string]interface{}{"type": "user", "cwd": "/after/huge", "message": map[string]interface{}{"role": "user", "content": "second line"}}))
-	head := readClaudeHead(path)
-	if head.CWD != "/after/huge" || head.FirstPrompt != "second line" {
-		t.Fatalf("head = %+v; a line over the size cap must be skipped, not stop the read", head)
-	}
-}
-
-func TestClaudeHeadStopsAfterTheLineBudget(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "long.jsonl")
-	var b strings.Builder
-	for i := 0; i < claudeHeadMaxLines; i++ {
-		b.WriteString(`{"type":"attachment"}` + "\n")
-	}
-	b.WriteString(claudeLine(t, map[string]interface{}{"type": "user", "cwd": "/too/late"}))
-	writeFixture(t, path, b.String())
-	if head := readClaudeHead(path); head.CWD != "" {
-		t.Fatalf("head read past its %d-line budget: %+v", claudeHeadMaxLines, head)
-	}
-}
-
-func TestClaudeHeadToleratesMissingAndMalformedFiles(t *testing.T) {
-	if head := readClaudeHead(filepath.Join(t.TempDir(), "missing.jsonl")); head != (claudeHead{}) {
-		t.Fatalf("missing file head = %+v", head)
-	}
-	path := filepath.Join(t.TempDir(), "bad.jsonl")
-	writeFixture(t, path, "not json\n{\"type\":\"user\",\"cwd\":\"/ok\"}")
-	if head := readClaudeHead(path); head.CWD != "/ok" {
-		t.Fatalf("malformed line must be skipped and an unterminated last line read, got %+v", head)
-	}
-}
-
 func TestReadBoundedLine(t *testing.T) {
 	r := bufio.NewReaderSize(strings.NewReader("short\r\n"+strings.Repeat("y", 40)+"\nlast"), 16)
 	for _, want := range []string{"short", "", "last"} {

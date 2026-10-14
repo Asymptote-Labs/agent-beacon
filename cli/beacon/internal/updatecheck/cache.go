@@ -33,6 +33,9 @@ type Cache struct {
 // Disabled reports whether the automatic update check is turned off by the environment.
 // CI runs never check: nobody is there to read the notice.
 func Disabled(getenv func(string) string) bool {
+	if !PublicReleases {
+		return true
+	}
 	switch strings.ToLower(strings.TrimSpace(getenv(DisableEnv))) {
 	case "0", "false", "off", "no":
 		return true

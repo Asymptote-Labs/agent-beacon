@@ -32,6 +32,10 @@ var (
 	versionCheckTimeout = 2 * time.Second
 )
 
+// notUpdatedFromPublicReleases is what the update commands print in a build that is not updated
+// from Beacon's public releases (updatecheck.PublicReleases is false).
+const notUpdatedFromPublicReleases = "This build of Beacon is not updated from Beacon's public releases."
+
 // versionRefreshCmd is the background half of the startup notice: bare `beacon` starts it
 // detached when the cache is stale, and it only updates the cache. It prints nothing, so a
 // failure leaves the previous cached release in place until the next TTL.
@@ -79,6 +83,10 @@ func checkAndRecord(cmd *cobra.Command) (updatecheck.Result, error) {
 }
 
 func runVersionCheck(cmd *cobra.Command, args []string) error {
+	if !updatecheck.PublicReleases {
+		fmt.Fprintln(cmd.OutOrStdout(), notUpdatedFromPublicReleases)
+		return nil
+	}
 	result, err := checkAndRecord(cmd)
 	if err != nil {
 		return fmt.Errorf("unable to check for Beacon updates: %w", err)

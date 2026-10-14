@@ -198,9 +198,10 @@ func ReadTraceList(path string, query TraceQuery) (TraceListResultV1, error) {
 	if page <= 0 {
 		page = 1
 	}
-	start := (page - 1) * limit
-	if start > len(filtered) {
-		start = len(filtered)
+	// Clamp before multiplying: a valid positive page can overflow an int.
+	start := len(filtered)
+	if page-1 <= len(filtered)/limit {
+		start = (page - 1) * limit
 	}
 	end := start + limit
 	if end > len(filtered) {
@@ -465,7 +466,7 @@ func traceRange(query TraceQuery, total int) (int, int) {
 		if offset < 1 {
 			offset = 1
 		}
-		limit = before + 1 + after
+		limit = min(before, total) + 1 + min(after, total)
 	}
 	if total == 0 {
 		return 1, 0

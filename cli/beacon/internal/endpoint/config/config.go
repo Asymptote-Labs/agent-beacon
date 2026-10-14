@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/atomicfile"
 )
 
 const (
@@ -369,11 +371,8 @@ func Save(cfg Config) (string, error) {
 	if HasSecretDestinations(cfg) {
 		perm = 0600
 	}
-	if err := os.WriteFile(path, data, perm); err != nil {
+	if err := atomicfile.Write(path, data, perm); err != nil {
 		return "", err
-	}
-	if HasSecretDestinations(cfg) {
-		return path, os.Chmod(path, perm)
 	}
 	return path, nil
 }

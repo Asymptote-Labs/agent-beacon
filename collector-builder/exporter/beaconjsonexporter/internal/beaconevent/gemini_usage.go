@@ -1,9 +1,7 @@
 package beaconevent
 
 import (
-	"fmt"
 	"math"
-	"sort"
 	"strings"
 
 	"go.opentelemetry.io/collector/pdata/pcommon"
@@ -122,33 +120,13 @@ func geminiTokenSeriesByScope(metric pmetric.Metric) geminiTokenSeries {
 	dps := metric.Sum().DataPoints()
 	for i := 0; i < dps.Len(); i++ {
 		dp := dps.At(i)
-		scope, tokenType := geminiSeriesScope(dp.Attributes(), dp.Timestamp())
+		scope, tokenType := tokenSeriesScope(dp.Attributes(), dp.Timestamp(), geminiTokenTypeAttribute)
 		if out[scope] == nil {
 			out[scope] = map[string]float64{}
 		}
 		out[scope][tokenType] += numberDataPointValue(dp)
 	}
 	return out
-}
-
-// geminiSeriesScope returns the series identity without its type, plus the type. Every attribute
-// is part of the identity, so two sessions or two models in one export never share siblings.
-func geminiSeriesScope(attrs pcommon.Map, ts pcommon.Timestamp) (string, string) {
-	values := AttrsToMap(attrs)
-	tokenType := strings.ToLower(strings.TrimSpace(FirstString(values, geminiTokenTypeAttribute)))
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		if key != geminiTokenTypeAttribute {
-			keys = append(keys, key)
-		}
-	}
-	sort.Strings(keys)
-	var b strings.Builder
-	fmt.Fprintf(&b, "%d", ts.AsTime().UnixNano())
-	for _, key := range keys {
-		fmt.Fprintf(&b, "\x00%s=%v", key, values[key])
-	}
-	return b.String(), tokenType
 }
 
 // apply replaces the usage usageEventFromDataPoint read from one datapoint's own type and value
@@ -172,7 +150,7 @@ func (series geminiTokenSeries) apply(event *Event, attrs pcommon.Map, ts pcommo
 // its own type, which ApplyTokenUsage leaves unmapped (raw only), because its count is already
 // folded into the input series.
 func (series geminiTokenSeries) adjust(attrs pcommon.Map, ts pcommon.Timestamp, value float64) (float64, string) {
-	scope, tokenType := geminiSeriesScope(attrs, ts)
+	scope, tokenType := tokenSeriesScope(attrs, ts, geminiTokenTypeAttribute)
 	siblings := series[scope]
 	switch tokenType {
 	case geminiTokenTypeInput:

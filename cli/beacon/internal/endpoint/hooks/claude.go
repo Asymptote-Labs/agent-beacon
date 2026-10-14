@@ -60,6 +60,23 @@ func claudeStatusFromRuntime(status runtimeStatus) ClaudeStatus {
 	}
 }
 
+// Extension points for a build of Beacon that compiles in hook subcommands of its own (see
+// version.Edition). Both are nil in this build, which installs exactly the hooks listed in
+// installClaudeSettings.
+var (
+	// claudeExtraHookGroups returns further hook groups to install for Claude Code, keyed by
+	// event, given the command prefix Beacon's own hooks use. Their commands carry that prefix,
+	// so repair, status and uninstall treat them as Beacon's hooks: a reinstall replaces them and
+	// an uninstall removes them.
+	claudeExtraHookGroups func(prefix string) map[string][]settingsHookGroup
+
+	// claudeSettingsChanged runs after Beacon has written its hooks into a Claude Code settings
+	// file (installed true) or taken them out (installed false). It runs as whoever ran the
+	// install, which for a system install's per-user repair is the console user, so files kept
+	// next to the settings, such as a command under .claude/commands, stay in step with the hooks.
+	claudeSettingsChanged func(settingsPath string, installed bool) error
+)
+
 func installClaudeSettings(path, binaryPath, logPath, configPath string) error {
 	prefix := endpointCommandPrefix("claude", binaryPath, logPath, configPath)
 	endpointHooks := map[string]settingsHookGroup{
@@ -74,11 +91,35 @@ func installClaudeSettings(path, binaryPath, logPath, configPath string) error {
 		"PermissionRequest":  {Matcher: "*", Hooks: []settingsHookRef{{Type: "command", Command: prefix + " permission-request"}}},
 		"SessionEnd":         {Hooks: []settingsHookRef{{Type: "command", Command: prefix + " session-end"}}},
 	}
-	return installSettingsEndpointHooks(path, "claude", endpointHooks)
+	groups := make(map[string][]settingsHookGroup, len(endpointHooks))
+	for event, group := range endpointHooks {
+		groups[event] = []settingsHookGroup{group}
+	}
+	if claudeExtraHookGroups != nil {
+		for event, extra := range claudeExtraHookGroups(prefix) {
+			groups[event] = append(groups[event], extra...)
+		}
+	}
+	if err := installSettingsEndpointHookGroups(path, "claude", groups); err != nil {
+		return err
+	}
+	if claudeSettingsChanged != nil {
+		return claudeSettingsChanged(path, true)
+	}
+	return nil
 }
 
 func removeClaudeEndpointHooks(path string) (bool, error) {
-	return removeSettingsEndpointHooks(path, "claude")
+	removed, err := removeSettingsEndpointHooks(path, "claude")
+	if err != nil {
+		return removed, err
+	}
+	if claudeSettingsChanged != nil {
+		if err := claudeSettingsChanged(path, false); err != nil {
+			return removed, err
+		}
+	}
+	return removed, nil
 }
 
 func isClaudeInstalledAt(path string) bool {

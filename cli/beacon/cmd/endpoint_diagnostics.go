@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/atomicfile"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/dshsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/embedded"
 
@@ -606,6 +607,9 @@ func writeInventorySnapshotEvents(cfg endpointconfig.Config, settings endpointco
 		// Metadata only (mode and hashes). It is what distinguishes a liveness heartbeat written
 		// with nobody at the console from one for an unchanged inventory.
 		"user_scope": result.UserScope,
+	}
+	if edition := version.ReportedEdition(); edition != "" {
+		inventoryMeta["edition"] = edition
 	}
 	if previousDigest == "" {
 		inventoryMeta["change_reason"] = "initial"
@@ -1732,7 +1736,7 @@ func restoreRepairFile(path string, snapshot repairFileSnapshot) error {
 	if mode == 0 {
 		mode = 0600
 	}
-	return os.WriteFile(path, snapshot.data, mode)
+	return atomicfile.Write(path, snapshot.data, mode)
 }
 
 func checkLogWritable(cfg endpointconfig.Config) diagnostics.Check {

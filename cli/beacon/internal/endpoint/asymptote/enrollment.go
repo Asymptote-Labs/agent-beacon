@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/atomicfile"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 )
 
@@ -66,7 +67,7 @@ func markConnectPending(userMode bool, at time.Time, reconnect bool) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(ConnectPendingPath(userMode), append(data, '\n'), 0o600)
+	return atomicfile.Write(ConnectPendingPath(userMode), append(data, '\n'), 0o600)
 }
 
 func loadConnectPending(userMode bool) (connectPending, error) {
@@ -103,7 +104,7 @@ func WriteInstallID(userMode bool, installID string) error {
 	if err := ensureDir(userMode); err != nil {
 		return err
 	}
-	return writeFileAtomic(InstallIDPath(userMode), []byte(installID+"\n"), 0o600)
+	return atomicfile.Write(InstallIDPath(userMode), []byte(installID+"\n"), 0o600)
 }
 
 // Connected reports whether this endpoint is enrolled and has its forwarder configured: both
@@ -170,7 +171,7 @@ func SaveEnrollment(userMode bool, enrollment Enrollment) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(EnrollmentPath(userMode), append(data, '\n'), 0o600)
+	return atomicfile.Write(EnrollmentPath(userMode), append(data, '\n'), 0o600)
 }
 
 // WriteSecrets stores the device key in the file Vector's secret backend reads.
@@ -181,7 +182,7 @@ func WriteSecrets(userMode bool, deviceKey string) error {
 	if err := ensureDir(userMode); err != nil {
 		return err
 	}
-	return writeFileAtomic(SecretsPath(userMode), []byte(SecretsFileContent(deviceKey)), 0o600)
+	return atomicfile.Write(SecretsPath(userMode), []byte(SecretsFileContent(deviceKey)), 0o600)
 }
 
 // ReadDeviceKey returns the stored device key, for the credential check.
@@ -231,35 +232,4 @@ func ensureDir(userMode bool) error {
 	// MkdirAll leaves an existing directory's mode alone; tighten it in case it was created
 	// by an older tool or by hand.
 	return os.Chmod(dir, 0o700)
-}
-
-// writeFileAtomic writes via a temp file in the same directory so a crash never leaves a
-// half-written credential, and sets the mode before the rename so the content is never
-// readable with wider permissions.
-func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	cleanup := func() { _ = os.Remove(tmpName) }
-	if err := tmp.Chmod(mode); err != nil {
-		tmp.Close()
-		cleanup()
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		cleanup()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		cleanup()
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		cleanup()
-		return err
-	}
-	return nil
 }

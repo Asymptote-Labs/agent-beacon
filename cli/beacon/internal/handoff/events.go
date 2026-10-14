@@ -67,8 +67,8 @@ func claudeEvents(mapped []claudesession.MappedEvent) []schema.Event {
 	return events
 }
 
-// Events reads every rollout file of the thread, oldest first, so a thread resumed into a new file
-// keeps its earlier turns.
+// Events reads every rollout file of the thread, ordering mapped activity by
+// durable event timestamps so touching an older file cannot invert its turns.
 func (s *codexSource) Events(session Session) ([]schema.Event, error) {
 	store, err := s.store()
 	if err != nil {
@@ -89,17 +89,32 @@ func (s *codexSource) Events(session Session) ([]schema.Event, error) {
 	}
 	sort.SliceStable(thread, func(i, j int) bool { return thread[i].ModTimeUnixMS < thread[j].ModTimeUnixMS })
 	var events []schema.Event
-	for i, ref := range thread {
+	for _, ref := range thread {
 		records, _, err := store.Read(ref)
 		if err != nil {
 			return nil, err
 		}
-		// A later rollout file repeats the thread's session_meta; only the first starts the session.
-		for _, m := range codexsession.MapSession(ref, records, codexsession.MapOptions{SkipSessionStarted: i > 0}) {
+		for _, m := range codexsession.MapSession(ref, records, codexsession.MapOptions{}) {
 			events = append(events, m.Event)
 		}
 	}
-	return events, nil
+	// The mapper renders every timestamp in fixed-width UTC form, making its
+	// byte order chronological. Keep source order for simultaneous activity.
+	sort.SliceStable(events, func(i, j int) bool { return events[i].Timestamp < events[j].Timestamp })
+	// Resumed rollouts repeat session_meta. Keep only the earliest mapped start
+	// after sorting, rather than choosing it by the file's modification time.
+	out := events[:0]
+	started := false
+	for _, event := range events {
+		if event.Event.Action == "session.started" {
+			if started {
+				continue
+			}
+			started = true
+		}
+		out = append(out, event)
+	}
+	return out, nil
 }
 
 func (s *openCodeSource) Events(session Session) ([]schema.Event, error) {

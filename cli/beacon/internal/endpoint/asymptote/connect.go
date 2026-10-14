@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/atomicfile"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/auth"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
@@ -304,7 +305,7 @@ func Connect(ctx context.Context, opts ConnectOptions) (_ *ConnectResult, err er
 			return nil, fmt.Errorf("could not remove the staged session backfill: %w", err)
 		}
 	}
-	if err := writeFileAtomic(configPath, []byte(rendered), 0o644); err != nil {
+	if err := atomicfile.Write(configPath, []byte(rendered), 0o644); err != nil {
 		return nil, err
 	}
 	firstConnectForwarderTouched = !reconnect

@@ -11,7 +11,7 @@ description: "Collect endpoint telemetry from OpenCode session records"
 beacon endpoint opencode [command]
 ```
 
-Beacon reads `opencode.db` when present and falls back to OpenCode's legacy `storage/session`, `storage/message`, `storage/part`, and `storage/project` tree. This path is useful for historical sessions and sessions that ran before Beacon's OpenCode plugin was installed or loaded.
+Beacon reads `opencode.db` from OpenCode's data directory when present and falls back to OpenCode's legacy `storage/session`, `storage/message`, `storage/part`, and `storage/project` tree. The data directory is `$XDG_DATA_HOME/opencode` or `~/.local/share/opencode` on every platform, separate from the `~/.config/opencode` directory that holds plugins and configuration. When `OPENCODE_DB` is set, Beacon reads that database as OpenCode does: an absolute path as given, a relative one inside the data directory. An explicit `--data-dir` overrides discovery. This path is useful for historical sessions and sessions that ran before Beacon's OpenCode plugin was installed or loaded.
 
 Every event is marked `harness.collection_method=poll`. Beacon sees what OpenCode already wrote, so nothing here can hold or deny a tool call. Keep the managed plugin installed when you need live approval telemetry and richer hook timing.
 
@@ -30,7 +30,7 @@ Both subcommands accept:
 
 | Flag | Description |
 |------|-------------|
-| `--data-dir <path>` | OpenCode data directory or `opencode.db` path. Defaults to `~/.config/opencode` |
+| `--data-dir <path>` | OpenCode data directory or `opencode.db` path. Defaults to `$XDG_DATA_HOME/opencode` or `~/.local/share/opencode`, honoring `OPENCODE_DB` |
 | `--state <path>` | Collector cursor file. Defaults to `~/.beacon/endpoint/state/opencode-sessions.json`, or a file beside the system runtime log with `--system` |
 | `--json` | Print the result as JSON |
 | `--user` | Use per-user endpoint paths. Enabled by default |

@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/updatecheck"
 )
 
 // Mode controls self-updater behavior.
@@ -77,6 +79,9 @@ func loadManagedConfig() (managedConfig, bool) {
 // A managed layer can therefore always override the local default without a
 // code change, which keeps the door open for an enterprise update path.
 func ResolveMode(localMode string) Mode {
+	if !updatecheck.PublicReleases {
+		return ModeOff
+	}
 	if env := os.Getenv(AutoUpdateEnv); strings.TrimSpace(env) != "" {
 		if m, ok := ParseMode(env); ok {
 			return m

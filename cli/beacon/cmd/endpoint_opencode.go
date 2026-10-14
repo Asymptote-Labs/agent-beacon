@@ -56,7 +56,7 @@ func init() {
 
 	for _, c := range []*cobra.Command{endpointOpenCodeSyncCmd, endpointOpenCodeStatusCmd} {
 		f := c.Flags()
-		f.StringVar(&endpointOpenCodeOpts.dataDir, "data-dir", "", "OpenCode data directory or opencode.db path (default ~/.config/opencode)")
+		f.StringVar(&endpointOpenCodeOpts.dataDir, "data-dir", "", "OpenCode data directory or opencode.db path (default $XDG_DATA_HOME/opencode or ~/.local/share/opencode, honoring OPENCODE_DB)")
 		f.StringVar(&endpointOpenCodeOpts.statePath, "state", "", "Collector cursor file (default ~/.beacon/endpoint/state/opencode-sessions.json)")
 		f.BoolVar(&endpointOpts.jsonOutput, "json", false, "Print the result as JSON")
 		f.BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")

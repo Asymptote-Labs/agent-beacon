@@ -11,6 +11,8 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## October 2026
 
+- **OpenCode sessions found in OpenCode's data directory** · `beacon endpoint opencode status` and `sync`, `beacon handoff`, and the session backfill now read OpenCode's store from `$XDG_DATA_HOME/opencode` or `~/.local/share/opencode`, where OpenCode writes `opencode.db`, on every platform. They previously looked in `~/.config/opencode` (`%APPDATA%\opencode` on Windows), which holds only plugins and configuration, so they found no sessions unless `--data-dir` was passed. `OPENCODE_DB` is honored as OpenCode resolves it.
+
 ### v1.3.35 · October 10, 2026
 
 - **Interactive update notices without startup delay** · Running bare `beacon` in
