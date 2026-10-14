@@ -10,15 +10,11 @@ export interface MockCollector {
   url: string;
   received: LogsEnvelope[];
   reset(): void;
-  holdResponses(): void;
-  releaseResponses(): void;
   close(): Promise<void>;
 }
 
 export async function startMockCollector(): Promise<MockCollector> {
   const received: LogsEnvelope[] = [];
-  let held = false;
-  const pending = new Set<http.ServerResponse>();
 
   const server = http.createServer((req, res) => {
     // CORS preflight from the extension SW (content-type: application/json).
@@ -36,12 +32,8 @@ export async function startMockCollector(): Promise<MockCollector> {
         } catch {
           /* ignore malformed */
         }
-        if (held) {
-          pending.add(res);
-          res.once('close', () => pending.delete(res));
-        } else {
-          acknowledge(res);
-        }
+        res.writeHead(200, { 'content-type': 'application/json', ...corsHeaders() });
+        res.end('{}');
       });
       return;
     }
@@ -56,16 +48,7 @@ export async function startMockCollector(): Promise<MockCollector> {
     url: `http://127.0.0.1:${port}/v1/logs`,
     received,
     reset: () => (received.length = 0),
-    holdResponses: () => { held = true; },
-    releaseResponses: () => {
-      held = false;
-      for (const res of pending) acknowledge(res);
-      pending.clear();
-    },
-    close: () => new Promise<void>((resolve) => {
-      server.closeAllConnections();
-      server.close(() => resolve());
-    }),
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }
 
@@ -75,9 +58,4 @@ function corsHeaders(): http.OutgoingHttpHeaders {
     'access-control-allow-methods': 'POST, OPTIONS',
     'access-control-allow-headers': 'content-type',
   };
-}
-
-function acknowledge(res: http.ServerResponse): void {
-  res.writeHead(200, { 'content-type': 'application/json', ...corsHeaders() });
-  res.end('{}');
 }
