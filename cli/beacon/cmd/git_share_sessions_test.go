@@ -34,6 +34,7 @@ func writeSharedEvent(t *testing.T, logPath, harness, session, url string) {
 }
 
 func TestGitHookPostCommitWritesAKnownShareURL(t *testing.T) {
+	relaxGitBudgets(t)
 	root := gitCommandRepo(t)
 	top := mustGit(t, root, "rev-parse", "--show-toplevel")
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
@@ -66,6 +67,7 @@ func TestGitHookPostCommitWritesAKnownShareURL(t *testing.T) {
 }
 
 func TestGitPrePushSharesLinkedSessions(t *testing.T) {
+	relaxGitBudgets(t)
 	t.Setenv(gitlink.HookStdinEnv, "1") // as Beacon's hook block runs it
 	root, remote := gitCommandTeam(t)
 	env := newShareEnv(t)
@@ -219,6 +221,7 @@ func TestGitPrePushWithoutTheBlockLeavesStdinAloneAndSharesNothing(t *testing.T)
 // Pre-push sharing to a trace that already exists keeps the title set on it earlier (with --title
 // or a rename on beacon.sh) and its visibility.
 func TestGitPrePushKeepsAnExistingTracesTitle(t *testing.T) {
+	relaxGitBudgets(t)
 	root, remote := gitCommandTeam(t)
 	env := newShareEnv(t)
 	srv := newFakeShareServer(t)
@@ -259,6 +262,7 @@ func TestGitPrePushKeepsAnExistingTracesTitle(t *testing.T) {
 // still written into the notes: the note updates run on their own context. The slow upload ends the
 // hook's context itself, so the test does not depend on how long reading the notes and stores takes.
 func TestGitShareOnPushWritesFinishedURLsWhenUploadsRunOutOfTime(t *testing.T) {
+	relaxGitBudgets(t)
 	root, _ := gitCommandTeam(t)
 	env := newShareEnv(t)
 	srv := newFakeShareServer(t)
@@ -312,6 +316,7 @@ func TestGitShareOnPushWritesFinishedURLsWhenUploadsRunOutOfTime(t *testing.T) {
 // ahead of one's own do not use up its slots. Each runtime's store is listed once per push and the
 // runtime log read once, however many links there are.
 func TestGitShareOnPushCapsOnlySessionsThatResolve(t *testing.T) {
+	relaxGitBudgets(t)
 	root, _ := gitCommandTeam(t)
 	env := newShareEnv(t)
 	srv := newFakeShareServer(t)
@@ -376,8 +381,9 @@ func TestGitShareOnPushCapsOnlySessionsThatResolve(t *testing.T) {
 
 // The share phase is held to the clock: an upload that never returns, and ignores its context, does
 // not hold up the push. The notes still get the URLs of the uploads that finished, the notes ref is
-// pushed, and the hook returns within its budget. The upload budget is short against the hook's but
-// long enough for a slow runner to read the notes and stores before it, so the fast upload lands.
+// pushed, and the hook returns within its production budget. The upload budget is short against
+// that budget but long enough for a slow runner to read the notes and stores before it, so the fast
+// upload lands.
 func TestGitPrePushAbandonsAnUploadThatNeverReturns(t *testing.T) {
 	t.Setenv(gitlink.HookStdinEnv, "1")
 	root, remote := gitCommandTeam(t)
