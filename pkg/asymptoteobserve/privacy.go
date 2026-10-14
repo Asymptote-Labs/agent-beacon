@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -281,6 +282,21 @@ func isSecretKeyName(key string) bool {
 var redactKeySuffixes = []string{
 	"password", "passwd", "passphrase", "secret", "token", "apikey", "accesskey", "secretkey",
 	"privatekey", "authorization", "credential", "credentials", "cookie",
+}
+
+// TruncateUTF8 cuts value to at most limit bytes, backing up to the start of a character so a
+// multi-byte character is never split into invalid UTF-8.
+func TruncateUTF8(value string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	if len(value) <= limit {
+		return value
+	}
+	for limit > 0 && !utf8.RuneStart(value[limit]) {
+		limit--
+	}
+	return value[:limit]
 }
 
 func TruncateString(value string, limit int) string {

@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
@@ -568,7 +567,7 @@ func traceSnippet(event TraceEventV1, query string) string {
 			continue
 		}
 		if query == "" || strings.Contains(strings.ToLower(candidate), strings.ToLower(strings.Fields(query)[0])) {
-			return truncateString(candidate, 240)
+			return asymptoteobserve.TruncateUTF8(strings.TrimSpace(candidate), 240)
 		}
 	}
 	return ""
@@ -647,17 +646,6 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func truncateString(value string, limit int) string {
-	value = strings.TrimSpace(value)
-	if len(value) <= limit {
-		return value
-	}
-	for limit > 0 && !utf8.RuneStart(value[limit]) {
-		limit--
-	}
-	return value[:limit]
 }
 
 func valueOrEmpty[T any](value *T, render func(*T) string) string {

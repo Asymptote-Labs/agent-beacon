@@ -3,7 +3,8 @@ package inventory
 import (
 	"regexp"
 	"strings"
-	"unicode/utf8"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // DefaultMaxContentBytes caps how much redacted text is retained per captured
@@ -62,7 +63,7 @@ func captureContent(data []byte, maxBytes int) *CapturedContent {
 	redacted, count := redactSecrets(string(data))
 	truncated := false
 	if maxBytes > 0 && len(redacted) > maxBytes {
-		redacted = truncateUTF8(redacted, maxBytes)
+		redacted = asymptoteobserve.TruncateUTF8(redacted, maxBytes)
 		truncated = true
 	}
 	return &CapturedContent{
@@ -254,17 +255,4 @@ func yamlBlockScalarIndent(header string, keyIndent int) int {
 		}
 	}
 	return 0
-}
-
-func truncateUTF8(s string, max int) string {
-	if max <= 0 {
-		return ""
-	}
-	if len(s) <= max {
-		return s
-	}
-	for max > 0 && !utf8.RuneStart(s[max]) {
-		max--
-	}
-	return s[:max]
 }

@@ -360,3 +360,25 @@ func TestCleanStringWidensTheWindowWhenRedactionShrinksIt(t *testing.T) {
 		t.Fatalf("CleanString = %d bytes, want at most %d", len(got), limit)
 	}
 }
+
+func TestTruncateUTF8NeverSplitsACharacter(t *testing.T) {
+	for _, tc := range []struct {
+		name, value string
+		limit       int
+		want        string
+	}{
+		{"fits", "abc", 3, "abc"},
+		{"ascii cut", "abcdef", 4, "abcd"},
+		{"cut inside a 3-byte character backs up", strings.Repeat("界", 3), 7, strings.Repeat("界", 2)},
+		{"cut inside a 4-byte character backs up", "a😀b", 3, "a"},
+		{"cut exactly at a character boundary", strings.Repeat("界", 3), 6, strings.Repeat("界", 2)},
+		{"limit shorter than the first character", "界", 2, ""},
+		{"zero limit", "abc", 0, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := TruncateUTF8(tc.value, tc.limit); got != tc.want {
+				t.Fatalf("TruncateUTF8(%q, %d) = %q, want %q", tc.value, tc.limit, got, tc.want)
+			}
+		})
+	}
+}
