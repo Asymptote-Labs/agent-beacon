@@ -1,7 +1,9 @@
 package state
 
 import (
+	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -98,5 +100,59 @@ func TestSessionStateSurfacesSaveFailure(t *testing.T) {
 	st := NewSessionState("test-session", "cursor")
 	if err := st.SetModel("gpt-5.5"); err == nil {
 		t.Fatal("SetModel returned nil, want save failure")
+	}
+}
+
+// TestHelperProcessIncrement is not a test: it is the body of the child processes started by
+// TestStateIsSafeAcrossProcesses, which stand in for concurrent hook invocations.
+func TestHelperProcessIncrement(t *testing.T) {
+	dir := os.Getenv("BEACON_STATE_HELPER_DIR")
+	if dir == "" {
+		t.Skip("helper process only")
+	}
+	config.CursorDir = dir
+	st := NewSessionState("shared-session", "cursor")
+	for i := 0; i < 40; i++ {
+		if _, err := st.IncrementRepromptCount(); err != nil {
+			t.Fatalf("IncrementRepromptCount: %v", err)
+		}
+	}
+}
+
+// Hooks run as separate processes, so the state file needs cross-process exclusion: the
+// in-process mutex cannot stop two hook invocations from losing each other's update.
+func TestStateIsSafeAcrossProcesses(t *testing.T) {
+	dir, cleanup := setupTestStateDir(t)
+	defer cleanup()
+
+	const procs, perProc = 4, 40
+	var cmds []*exec.Cmd
+	var outputs []*bytes.Buffer
+	for i := 0; i < procs; i++ {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestHelperProcessIncrement$")
+		cmd.Env = append(os.Environ(), "BEACON_STATE_HELPER_DIR="+dir)
+		out := &bytes.Buffer{}
+		cmd.Stdout, cmd.Stderr = out, out
+		outputs = append(outputs, out)
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("start helper: %v", err)
+		}
+		cmds = append(cmds, cmd)
+	}
+	for i, cmd := range cmds {
+		if err := cmd.Wait(); err != nil {
+			t.Fatalf("helper failed: %v\n%s", err, outputs[i])
+		}
+	}
+
+	if got, want := NewSessionState("shared-session", "cursor").GetRepromptCount(), procs*perProc; got != want {
+		t.Fatalf("reprompt count = %d, want %d: concurrent processes lost updates", got, want)
+	}
+	if leftovers, _ := filepath.Glob(filepath.Join(dir, "state.json.*")); len(leftovers) > 0 {
+		for _, f := range leftovers {
+			if filepath.Base(f) != "state.json.lock" {
+				t.Fatalf("temporary state file left behind: %s", f)
+			}
+		}
 	}
 }

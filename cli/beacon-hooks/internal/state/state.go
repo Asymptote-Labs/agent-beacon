@@ -8,9 +8,65 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/config"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
 )
 
 var stateMutex sync.Mutex
+
+// lockState serializes access to the platform's state file. Hooks run as separate processes, one per
+// event, so the in-process mutex is not enough: without the file lock two concurrent hooks read the same
+// state and the later write drops the earlier one's change. The lock is advisory, taken on a sibling
+// file so that replacing state.json never invalidates it. If the lock file cannot be opened the caller
+// proceeds without cross-process exclusion, as before, rather than failing a hook.
+func lockState(platform string) (unlock func()) {
+	stateMutex.Lock()
+	if err := config.EnsureStateDir(platform); err != nil {
+		return stateMutex.Unlock
+	}
+	file, err := os.OpenFile(filepath.Join(config.GetStateDir(platform), "state.json.lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return stateMutex.Unlock
+	}
+	held, err := filelock.Exclusive(file)
+	if err != nil {
+		_ = file.Close()
+		return stateMutex.Unlock
+	}
+	return func() {
+		_ = held.Release()
+		_ = file.Close()
+		stateMutex.Unlock()
+	}
+}
+
+// writeStateFile replaces path through a uniquely named temporary file, so concurrent writers never
+// share one and a reader never sees a partial file.
+func writeStateFile(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "state.json.*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
+}
 
 const (
 	staleEvaluationTTLHours = 2
@@ -72,13 +128,7 @@ func (s *SessionState) saveStateFile(state map[string]*SessionData) error {
 		return err
 	}
 
-	// Write to temp file first, then rename (atomic)
-	tmpPath := s.stateFilePath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		return err
-	}
-
-	return os.Rename(tmpPath, s.stateFilePath)
+	return writeStateFile(s.stateFilePath, data)
 }
 
 func (s *SessionState) ensureSession(state map[string]*SessionData) {
@@ -93,8 +143,7 @@ func (s *SessionState) ensureSession(state map[string]*SessionData) {
 
 // SetModel stores the AI model name for this session
 func (s *SessionState) SetModel(model string) error {
-	stateMutex.Lock()
-	defer stateMutex.Unlock()
+	defer lockState(s.platform)()
 
 	state := s.loadStateFile()
 	s.ensureSession(state)
@@ -104,8 +153,7 @@ func (s *SessionState) SetModel(model string) error {
 
 // GetModel returns the AI model name for this session
 func (s *SessionState) GetModel() string {
-	stateMutex.Lock()
-	defer stateMutex.Unlock()
+	defer lockState(s.platform)()
 
 	state := s.loadStateFile()
 	if sessionData, ok := state[s.sessionID]; ok {
@@ -115,8 +163,7 @@ func (s *SessionState) GetModel() string {
 }
 
 func (s *SessionState) HasPromptEmitted() bool {
-	stateMutex.Lock()
-	defer stateMutex.Unlock()
+	defer lockState(s.platform)()
 
 	state := s.loadStateFile()
 	if sessionData, ok := state[s.sessionID]; ok {
@@ -126,8 +173,7 @@ func (s *SessionState) HasPromptEmitted() bool {
 }
 
 func (s *SessionState) SetPromptEmitted() error {
-	stateMutex.Lock()
-	defer stateMutex.Unlock()
+	defer lockState(s.platform)()
 
 	state := s.loadStateFile()
 	s.ensureSession(state)
@@ -136,8 +182,7 @@ func (s *SessionState) SetPromptEmitted() error {
 }
 
 func (s *SessionState) MarkPromptEmittedIfNeeded() (bool, error) {
-	stateMutex.Lock()
-	defer stateMutex.Unlock()
+	defer lockState(s.platform)()
 
 	state := s.loadStateFile()
 	s.ensureSession(state)
@@ -153,8 +198,7 @@ func (s *SessionState) MarkPromptEmittedIfNeeded() (bool, error) {
 
 // AddEvaluation adds a new pending evaluation
 func (s *SessionState) AddEvaluation(evaluationID, filePath string) error {
-	stateMutex.Lock()
-	defer stateMutex.Unlock()
+	defer lockState(s.platform)()
 
 	state := s.loadStateFile()
 	s.ensureSession(state)
@@ -170,8 +214,7 @@ func (s *SessionState) AddEvaluation(evaluationID, filePath string) error {
 
 // GetPendingEvaluations returns pending evaluations for this session
 func (s *SessionState) GetPendingEvaluations() []Evaluation {
-	stateMutex.Lock()
-	defer stateMutex.Unlock()
+	defer lockState(s.platform)()
 
 	state := s.loadStateFile()
 	if sessionData, ok := state[s.sessionID]; ok {
@@ -182,8 +225,7 @@ func (s *SessionState) GetPendingEvaluations() []Evaluation {
 
 // ClearEvaluations removes all evaluations for this session
 func (s *SessionState) ClearEvaluations() error {
-	stateMutex.Lock()
-	defer stateMutex.Unlock()
+	defer lockState(s.platform)()
 
 	state := s.loadStateFile()
 	s.ensureSession(state)
@@ -193,8 +235,7 @@ func (s *SessionState) ClearEvaluations() error {
 
 // GetRepromptCount returns the current re-prompt count
 func (s *SessionState) GetRepromptCount() int {
-	stateMutex.Lock()
-	defer stateMutex.Unlock()
+	defer lockState(s.platform)()
 
 	state := s.loadStateFile()
 	if sessionData, ok := state[s.sessionID]; ok {
@@ -205,8 +246,7 @@ func (s *SessionState) GetRepromptCount() int {
 
 // IncrementRepromptCount increments and returns the re-prompt count
 func (s *SessionState) IncrementRepromptCount() (int, error) {
-	stateMutex.Lock()
-	defer stateMutex.Unlock()
+	defer lockState(s.platform)()
 
 	state := s.loadStateFile()
 	s.ensureSession(state)
@@ -220,8 +260,7 @@ func (s *SessionState) IncrementRepromptCount() (int, error) {
 
 // ResetRepromptCount resets the re-prompt count to 0
 func (s *SessionState) ResetRepromptCount() error {
-	stateMutex.Lock()
-	defer stateMutex.Unlock()
+	defer lockState(s.platform)()
 
 	state := s.loadStateFile()
 	s.ensureSession(state)
@@ -231,8 +270,7 @@ func (s *SessionState) ResetRepromptCount() error {
 
 // CleanupStaleForPlatform removes stale evaluations for the given platform
 func CleanupStaleForPlatform(platform string) int {
-	stateMutex.Lock()
-	defer stateMutex.Unlock()
+	defer lockState(platform)()
 
 	stateFilePath := filepath.Join(config.GetStateDir(platform), "state.json")
 
@@ -285,10 +323,7 @@ func CleanupStaleForPlatform(platform string) int {
 		config.EnsureStateDir(platform)
 		jsonData, err := json.MarshalIndent(state, "", "  ")
 		if err == nil {
-			tmpPath := stateFilePath + ".tmp"
-			if err := os.WriteFile(tmpPath, jsonData, 0644); err == nil {
-				os.Rename(tmpPath, stateFilePath)
-			}
+			_ = writeStateFile(stateFilePath, jsonData)
 		}
 	}
 
