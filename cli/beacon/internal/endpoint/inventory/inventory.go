@@ -15,6 +15,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"gopkg.in/yaml.v3"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 )
 
@@ -272,13 +273,21 @@ func claudeCandidates(home, wd string) []candidate {
 	}
 }
 
+// codexCandidates resolves the user-scope files through CODEX_HOME, as Codex does, and leaves them
+// out when CODEX_HOME names something Codex itself would refuse to start with. Project scope is
+// always <wd>/.codex.
 func codexCandidates(home, wd string) []candidate {
-	return []candidate{
-		{runtime: "codex_cli", path: filepath.Join(home, ".codex", "config.toml"), scope: ScopeUser, format: formatTOML, kind: KindNativeConfig},
-		{runtime: "codex_cli", path: filepath.Join(home, ".codex", "hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
-		{runtime: "codex_cli", path: filepath.Join(wd, ".codex", "config.toml"), scope: ScopeProject, format: formatTOML, kind: KindNativeConfig},
-		{runtime: "codex_cli", path: filepath.Join(wd, ".codex", "hooks.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+	items := []candidate{}
+	if dir, err := codexsession.HomeDir(home); err == nil {
+		items = append(items,
+			candidate{runtime: "codex_cli", path: filepath.Join(dir, "config.toml"), scope: ScopeUser, format: formatTOML, kind: KindNativeConfig},
+			candidate{runtime: "codex_cli", path: filepath.Join(dir, "hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		)
 	}
+	return append(items,
+		candidate{runtime: "codex_cli", path: filepath.Join(wd, ".codex", "config.toml"), scope: ScopeProject, format: formatTOML, kind: KindNativeConfig},
+		candidate{runtime: "codex_cli", path: filepath.Join(wd, ".codex", "hooks.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+	)
 }
 
 func cursorCandidates(home, wd string) []candidate {

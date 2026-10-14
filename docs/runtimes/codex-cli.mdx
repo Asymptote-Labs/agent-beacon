@@ -38,11 +38,11 @@ Use `beacon endpoint codex sync --print` to preview mapped events without writin
 
 Codex rollout files can contain prompts, assistant responses, tool inputs, command output, and code. Sync is therefore explicit: Beacon does not read `~/.codex/sessions` during normal Codex hook execution, and it never reads `~/.codex/auth.json`.
 
-Session status, sync, handoff, and `beacon mcp connect` honor Codex's literal `CODEX_HOME` directory: it must exist, and relative paths resolve from the current working directory. Unlike shell syntax, `~` and environment-variable references in the value are not expanded. Pass `--codex-dir <path>` to select a session store explicitly.
+Install, hook install, discovery, inventory, session status, sync, handoff, and `beacon mcp connect` honor Codex's literal `CODEX_HOME` directory: it must exist, and relative paths resolve from the current working directory. Unlike shell syntax, `~` and environment-variable references in the value are not expanded. Project-level `.codex` files are not affected. Pass `--codex-dir <path>` to select a session store explicitly.
 
 ### Token usage and cost
 
-`beacon endpoint install` configures Codex's log and trace exporters in `~/.codex/config.toml`. Beacon normalizes the completed turn span into the same canonical `gen_ai.usage` fields used for Claude Code: uncached `input_tokens`, `output_tokens`, `cache_read.input_tokens`, `cache_creation.input_tokens`, and `reasoning.output_tokens`. Codex's input count includes both cache reads and cache writes, so Beacon subtracts both before recording uncached input.
+`beacon endpoint install` configures Codex's log and trace exporters in `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`). Beacon normalizes the completed turn span into the same canonical `gen_ai.usage` fields used for Claude Code: uncached `input_tokens`, `output_tokens`, `cache_read.input_tokens`, `cache_creation.input_tokens`, and `reasoning.output_tokens`. Codex's input count includes both cache reads and cache writes, so Beacon subtracts both before recording uncached input.
 
 The span directly supplies the model and `session.id` (from Codex `thread.id`). Beacon joins the matching SessionStart context event to attribute local reports by OS user. The runtime log therefore contains both the token event and its session identity context, and both forward through configured JSONL shippers.
 
@@ -83,11 +83,11 @@ Beacon can also capture Codex telemetry in CI with `beacon ci start` and `beacon
 
 ## Discovery and status
 
-Beacon detects Codex CLI through the `codex` executable and `~/.codex/config.toml`. Codex Desktop shares the same user-level configuration file, so Desktop app-server events appear once the app emits OTLP to Beacon's local collector. Use `beacon endpoint discover` or `beacon endpoint status` to confirm that Codex configuration is present.
+Beacon detects Codex CLI through the `codex` executable and `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`). Codex Desktop shares the same user-level configuration file, so Desktop app-server events appear once the app emits OTLP to Beacon's local collector. Use `beacon endpoint discover` or `beacon endpoint status` to confirm that Codex configuration is present.
 
 ## Install or configuration support
 
-`beacon endpoint install` writes Codex OTLP exporter tables to `~/.codex/config.toml`.
+`beacon endpoint install` writes Codex OTLP exporter tables to `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`).
 
 `beacon endpoint install --harness codex` installs the required user-level
 session context and inventory hooks with the OTLP configuration. To refresh
@@ -97,7 +97,7 @@ them independently, run:
 beacon endpoint hooks install --harness codex
 ```
 
-The hook installer writes the metadata-only session context hook to `~/.codex/hooks.json` or project `.codex/hooks.json`, depending on `--level`. A successful user-level install prints:
+The hook installer writes the metadata-only session context hook to `$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`) or project `.codex/hooks.json`, depending on `--level`. A successful user-level install prints:
 
 ```text
 Codex CLI endpoint hooks installed: /Users/you/.codex/hooks.json

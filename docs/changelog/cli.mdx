@@ -11,6 +11,8 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## October 2026
 
+- **Codex install, hooks and inventory follow `CODEX_HOME`** · `beacon endpoint install`, `beacon endpoint hooks install --harness codex`, `beacon endpoint discover` and inventory now read and write `$CODEX_HOME/config.toml` and `$CODEX_HOME/hooks.json` when `CODEX_HOME` is set, as Codex does. They previously always used `~/.codex`, so with `CODEX_HOME` set, Codex never saw the OTLP exporter or the SessionStart hook and live capture silently recorded nothing. A `CODEX_HOME` that is not an existing directory is now an install error rather than a silent write to `~/.codex`. Project-level `.codex` files are unchanged.
+
 ### v1.3.40 · October 14, 2026
 
 - **Status shows customer forwarders and stops sending MDM installs to `connect`** · `beacon endpoint status` prints one line for each S3, GCS or Falcon LogScale forwarder the package helpers installed, such as `S3 forwarder: loaded=true running=true`, and `--json` adds `script_forwarders`. The `Beacon Cloud: not connected` line and its `beacon endpoint connect` hint are left out on a system install that was never connected and on any install with its own forwarder, where the line read as an unfinished step and named a command that needs a personal sign-in. A connected or partly connected endpoint still shows the line, and per-user installs keep the hint.

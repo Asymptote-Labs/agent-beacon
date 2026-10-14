@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
 )
 
 type CodexOptions struct {
@@ -87,7 +89,11 @@ func codexHooksPath(level Level) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return filepath.Join(home, ".codex", "hooks.json"), nil
+		dir, err := codexsession.HomeDir(home)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(dir, "hooks.json"), nil
 	case LevelProject:
 		cwd, err := os.Getwd()
 		if err != nil {

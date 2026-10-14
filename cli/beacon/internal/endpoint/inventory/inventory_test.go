@@ -347,6 +347,28 @@ func TestMissingCandidatesAreReportedAsNotFound(t *testing.T) {
 	}
 }
 
+// With CODEX_HOME set, the user-scope Codex files inventory reads are the ones Codex reads.
+func TestScanReadsCodexUserConfigFromCodexHome(t *testing.T) {
+	home := t.TempDir()
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	writeFile(t, filepath.Join(codexHome, "config.toml"), "[mcp_servers.github]\ncommand = \"gh\"\n")
+	writeFile(t, filepath.Join(home, ".codex", "config.toml"), "[mcp_servers.stale]\ncommand = \"old\"\n")
+	resolved, err := filepath.EvalSymlinks(codexHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := Scan(Options{HomeDir: home, SkipProjectScope: true, Runtimes: []string{"codex_cli"}, Now: fixedNow})
+	config := findConfig(result.Configs, "codex_cli", filepath.Join(resolved, "config.toml"))
+	if config == nil || !config.Exists || config.MCPServerCount != 1 {
+		t.Fatalf("CODEX_HOME config.toml = %#v, want it read with one MCP server", config)
+	}
+	if stale := findConfig(result.Configs, "codex_cli", filepath.Join(home, ".codex", "config.toml")); stale != nil {
+		t.Fatalf("inventory reported ~/.codex/config.toml, which Codex does not read with CODEX_HOME set: %#v", stale)
+	}
+}
+
 func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 	home := t.TempDir()
 	work := t.TempDir()
@@ -361,6 +383,8 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 	// are cleared for the same reason.
 	t.Setenv("OMO_CODING_AGENT_DIR", "")
 	t.Setenv("SENPI_CODING_AGENT_DIR", "")
+	// Codex's user-scope files follow CODEX_HOME.
+	t.Setenv("CODEX_HOME", "")
 
 	result := Scan(Options{
 		HomeDir:    home,

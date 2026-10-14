@@ -355,6 +355,59 @@ func TestConfigureCodexEnablesPromptLogging(t *testing.T) {
 	}
 }
 
+// Codex reads config.toml from CODEX_HOME when it is set, so an install that wrote ~/.codex would
+// leave Codex without the exporter and discovery reporting a file Codex never reads.
+func TestCodexConfigFollowsCodexHome(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	t.Setenv("PATH", t.TempDir())
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	resolved, err := filepath.EvalSymlinks(codexHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(resolved, "config.toml")
+
+	written, err := ConfigureCodex(ConfigureOptions{Endpoint: "http://127.0.0.1:4317", UserMode: true})
+	if err != nil {
+		t.Fatalf("ConfigureCodex returned error: %v", err)
+	}
+	if written != want {
+		t.Fatalf("ConfigureCodex path = %q, want %q", written, want)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex")); !os.IsNotExist(err) {
+		t.Fatalf("ConfigureCodex touched ~/.codex with CODEX_HOME set: %v", err)
+	}
+	h := DiscoverCodex()
+	if h.ConfigPath != want || h.TelemetryStatus != TelemetryEnabled {
+		t.Fatalf("DiscoverCodex = path %q status %q, want %q enabled", h.ConfigPath, h.TelemetryStatus, want)
+	}
+}
+
+// Codex refuses to start when CODEX_HOME is not an existing directory, so Beacon must not quietly
+// configure ~/.codex instead, or create the directory and hide the mistake.
+func TestCodexConfigRefusesMissingCodexHome(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	t.Setenv("PATH", t.TempDir())
+	missing := filepath.Join(home, "missing")
+	t.Setenv("CODEX_HOME", missing)
+
+	if _, err := ConfigureCodex(ConfigureOptions{Endpoint: "http://127.0.0.1:4317", UserMode: true}); err == nil {
+		t.Fatal("ConfigureCodex accepted a CODEX_HOME that does not exist")
+	}
+	for _, dir := range []string{missing, filepath.Join(home, ".codex")} {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Fatalf("ConfigureCodex created %s: %v", dir, err)
+		}
+	}
+	h := DiscoverCodex()
+	if h.TelemetryStatus != TelemetryMissing || !strings.Contains(h.Message, "CODEX_HOME") {
+		t.Fatalf("DiscoverCodex = status %q message %q, want missing naming CODEX_HOME", h.TelemetryStatus, h.Message)
+	}
+}
+
 func TestDiscoverCodexDoesNotDetectConfigDirectoryOnly(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 func TestInstallCodexHooksWritesSessionContextOnly(t *testing.T) {
@@ -70,5 +72,42 @@ func TestRemoveCodexEndpointHooksPreservesOtherHooks(t *testing.T) {
 	}
 	if strings.Contains(text, "--platform codex") {
 		t.Fatalf("Codex endpoint hook was not removed:\n%s", text)
+	}
+}
+
+// Codex reads its user hooks.json from CODEX_HOME when that is set; project hooks stay in
+// <cwd>/.codex, which CODEX_HOME does not move.
+func TestCodexHooksPathFollowsCodexHome(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	resolved, err := filepath.EvalSymlinks(codexHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := codexHooksPath(LevelUser)
+	if err != nil {
+		t.Fatalf("codexHooksPath(user): %v", err)
+	}
+	if want := filepath.Join(resolved, "hooks.json"); path != want {
+		t.Fatalf("codexHooksPath(user) = %q, want %q", path, want)
+	}
+
+	t.Chdir(t.TempDir())
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err = codexHooksPath(LevelProject)
+	if err != nil {
+		t.Fatalf("codexHooksPath(project): %v", err)
+	}
+	if want := filepath.Join(cwd, ".codex", "hooks.json"); path != want {
+		t.Fatalf("codexHooksPath(project) = %q, want %q", path, want)
+	}
+
+	t.Setenv("CODEX_HOME", filepath.Join(codexHome, "missing"))
+	if path, err := codexHooksPath(LevelUser); err == nil {
+		t.Fatalf("codexHooksPath(user) = %q for a CODEX_HOME that does not exist, want an error", path)
 	}
 }

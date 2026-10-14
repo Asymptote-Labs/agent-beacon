@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/cowork"
 	"gopkg.in/yaml.v3"
@@ -140,7 +141,13 @@ func DiscoverCodex() Harness {
 	h := Harness{Name: "codex_cli", DisplayName: "Codex CLI", Capability: "otel_config"}
 	detectExecutable(&h, "codex")
 	home, _ := os.UserHomeDir()
-	h.ConfigPath = filepath.Join(home, ".codex", "config.toml")
+	dir, err := codexsession.HomeDir(home)
+	if err != nil {
+		h.TelemetryStatus = TelemetryMissing
+		h.Message = "Codex home directory could not be resolved: " + err.Error()
+		return h
+	}
+	h.ConfigPath = filepath.Join(dir, "config.toml")
 	if fileExists(h.ConfigPath) {
 		status, msg := codexStatus(h.ConfigPath)
 		h.TelemetryStatus = status
@@ -426,7 +433,11 @@ func ConfigureCodex(opts ConfigureOptions) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(home, ".codex", "config.toml")
+	dir, err := codexsession.HomeDir(home)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "config.toml")
 	var existing string
 	if data, err := os.ReadFile(path); err == nil {
 		existing = string(data)

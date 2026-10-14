@@ -31,7 +31,7 @@ beacon endpoint hooks [command]
 |---------|-------------------|----------------------|-------------|-------------|
 | Antigravity CLI | `~/.gemini/config/hooks.json` | `./.agents/hooks.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
 | Claude Code | `~/.claude/settings.json` | `./.claude/settings.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
-| Codex CLI | `~/.codex/hooks.json` | `./.codex/hooks.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| Codex CLI | `$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`) | `./.codex/hooks.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
 | Cursor | `~/.cursor/hooks.json` | `./.cursor/hooks.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
 | Devin CLI | `~/.config/devin/config.json` | `./.devin/hooks.v1.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
 | Devin Desktop | `~/.codeium/windsurf/hooks.json` | `./.windsurf/hooks.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
@@ -446,7 +446,7 @@ Beacon's `PreToolUse` hook answers with an empty object on purpose. Qwen reads `
 
 ## Codex CLI troubleshooting
 
-Beacon writes Codex CLI endpoint hooks to `~/.codex/hooks.json` for user-level installs or `./.codex/hooks.json` for project-level installs. `SessionStart` writes local OS-user/session context. This metadata-only hook does not replace the Codex OTLP runtime path for prompt, tool, or token events, and it no longer triggers inventory: that is the scheduled inventory job's work, in every mode, whether or not Codex runs.
+Beacon writes Codex CLI endpoint hooks to `$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`) for user-level installs or `./.codex/hooks.json` for project-level installs. `SessionStart` writes local OS-user/session context. This metadata-only hook does not replace the Codex OTLP runtime path for prompt, tool, or token events, and it no longer triggers inventory: that is the scheduled inventory job's work, in every mode, whether or not Codex runs.
 
 If Codex session context is missing, check the selected level, confirm the hook file contains a command with `--platform codex`, and restart Codex CLI so new sessions pick up the updated hook configuration.
 
