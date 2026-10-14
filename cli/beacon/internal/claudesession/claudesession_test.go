@@ -326,3 +326,53 @@ func TestListUsesRecordedWorkspaceWhenIndexDoesNotNameIt(t *testing.T) {
 		})
 	}
 }
+
+func TestDefaultProjectsDirFollowsClaudeConfigDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	got, err := DefaultProjectsDir()
+	if err != nil {
+		t.Fatalf("DefaultProjectsDir: %v", err)
+	}
+	if want := filepath.Join(home, ".claude", "projects"); got != want {
+		t.Fatalf("default projects dir = %q, want %q", got, want)
+	}
+
+	config := filepath.Join(t.TempDir(), "claude-alt")
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	got, err = DefaultProjectsDir()
+	if err != nil {
+		t.Fatalf("DefaultProjectsDir with CLAUDE_CONFIG_DIR: %v", err)
+	}
+	if want := filepath.Join(config, "projects"); got != want {
+		t.Fatalf("projects dir with CLAUDE_CONFIG_DIR = %q, want %q", got, want)
+	}
+
+	// An explicit directory still wins over the environment.
+	explicit := t.TempDir()
+	store, err := NewStore(explicit)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	if store.ProjectsDir != explicit {
+		t.Fatalf("explicit dir = %q, want %q", store.ProjectsDir, explicit)
+	}
+
+	// With no explicit directory the store reads sessions from the relocated config directory.
+	project := filepath.Join(config, "projects", "-tmp-repo")
+	writeFile(t, filepath.Join(project, "sess-1.jsonl"), userLine("sess-1", "u1", "ship it")+"\n")
+	store, err = NewStore("")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	refs, err := store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(refs) != 1 || refs[0].ID != "sess-1" {
+		t.Fatalf("List under CLAUDE_CONFIG_DIR = %+v, want sess-1", refs)
+	}
+}

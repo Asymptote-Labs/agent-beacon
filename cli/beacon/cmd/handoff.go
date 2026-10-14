@@ -356,7 +356,7 @@ func addHandoffStoreFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
 	f.StringVar(&handoffOpts.harness, "harness", "", "Only this runtime: "+strings.Join(handoff.RuntimeNames(), ", "))
 	f.StringArrayVar(&handoffOpts.storeDirs, "store-dir", nil, "Read a runtime's sessions from this directory, as <runtime>=<path> (repeatable)")
-	f.StringVar(&handoffOpts.claudeDir, "claude-projects-dir", "", "Claude projects directory (default ~/.claude/projects)")
+	f.StringVar(&handoffOpts.claudeDir, "claude-projects-dir", "", "Claude projects directory (default $CLAUDE_CONFIG_DIR/projects, else ~/.claude/projects)")
 	f.StringVar(&handoffOpts.codexDir, "codex-dir", "", "Codex directory (default ~/.codex)")
 	f.StringVar(&handoffOpts.openCodeDir, "opencode-dir", "", "OpenCode data directory or opencode.db path")
 	f.StringVar(&handoffOpts.clineDir, "cline-dir", "", "Cline directory (default ~/.cline)")
