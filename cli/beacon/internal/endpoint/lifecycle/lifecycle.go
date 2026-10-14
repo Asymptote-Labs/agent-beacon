@@ -10,6 +10,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/atomicfile"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/brewpath"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
 	endpointcollector "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/collector"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
@@ -43,7 +44,7 @@ var (
 	// newInventoryJob and removeInventoryJob are the seams tests replace so Install, Uninstall
 	// and Repair can be exercised without touching launchd or systemd.
 	newInventoryJob = func(userMode bool, kind service.Kind) inventoryJobController {
-		return service.InventoryManager{UserMode: userMode, Kind: kind}
+		return service.InventoryManager{UserMode: userMode, Kind: kind, Env: inventoryJobEnv(userMode)}
 	}
 	removeInventoryJob = func(userMode bool) {
 		job := newInventoryJob(userMode, service.KindAuto)
@@ -130,6 +131,25 @@ func reconcileInventoryJobWith(job inventoryJobController, opts InventoryJobOpti
 		result.Loaded = true
 	}
 	return result, nil
+}
+
+// inventoryJobEnv is the environment written into a per-user inventory job. launchd and systemd
+// start the job without the user's shell environment, so a CODEX_HOME exported in a shell profile
+// would not reach it and the scheduled scan would inventory ~/.codex while Codex reads
+// $CODEX_HOME. The value is resolved now, from the install's shell, as Codex resolves it: an
+// absolute path, so a relative CODEX_HOME still means the directory it named at install time. An
+// unset or invalid CODEX_HOME records nothing, and the job falls back to ~/.codex as before.
+//
+// System mode records nothing: this process's environment is root's, not the console user's.
+func inventoryJobEnv(userMode bool) map[string]string {
+	if !userMode || os.Getenv("CODEX_HOME") == "" {
+		return nil
+	}
+	dir, err := codexsession.HomeDir("")
+	if err != nil {
+		return nil
+	}
+	return map[string]string{"CODEX_HOME": dir}
 }
 
 // inventoryEnabledFromConfigFile reads only the inventory_heartbeat.enabled key. A missing or

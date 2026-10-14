@@ -19,7 +19,7 @@ func TestInventoryPlistIsAOneShotIntervalJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := inventoryPlist(InventoryLabel, "/opt/beacon/bin/beacon", args, 6*time.Hour, sysOut, sysErr)
+	got := inventoryPlist(InventoryLabel, "/opt/beacon/bin/beacon", args, 6*time.Hour, sysOut, sysErr, nil)
 	for _, want := range []string{
 		"<string>com.beacon.endpoint.inventory</string>",
 		"<string>/opt/beacon/bin/beacon</string>",
@@ -33,7 +33,7 @@ func TestInventoryPlistIsAOneShotIntervalJob(t *testing.T) {
 			t.Fatalf("plist missing %q:\n%s", want, got)
 		}
 	}
-	for _, forbidden := range []string{"KeepAlive", "StartCalendarInterval", "--log-path", "/tmp/"} {
+	for _, forbidden := range []string{"KeepAlive", "StartCalendarInterval", "--log-path", "/tmp/", "EnvironmentVariables"} {
 		if strings.Contains(got, forbidden) {
 			t.Fatalf("plist must not contain %q:\n%s", forbidden, got)
 		}
@@ -44,7 +44,7 @@ func TestInventoryPlistIsAOneShotIntervalJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	user := inventoryPlist(InventoryLabel, "/usr/local/bin/beacon", inventoryJobArgs(true, "/Users/me/.beacon/endpoint/logs/runtime.jsonl"), time.Hour, userOut, userErr)
+	user := inventoryPlist(InventoryLabel, "/usr/local/bin/beacon", inventoryJobArgs(true, "/Users/me/.beacon/endpoint/logs/runtime.jsonl"), time.Hour, userOut, userErr, nil)
 	if !strings.Contains(user, "<string>--user</string>") || strings.Contains(user, "<string>--system</string>") {
 		t.Fatalf("user-mode plist must carry --user:\n%s", user)
 	}
@@ -57,7 +57,7 @@ func TestInventoryPlistIsAOneShotIntervalJob(t *testing.T) {
 	if !strings.Contains(user, "<string>"+userLogs+".err</string>") || strings.Contains(user, "<string>/Library/Logs/Beacon/") {
 		t.Fatalf("user-mode plist must log under the user's home, got:\n%s", user)
 	}
-	escaped := inventoryPlist("l", "/tmp/a&b", []string{"--log-path", "/tmp/<c>.jsonl"}, time.Hour, "/x/l.out", "/x/l.err")
+	escaped := inventoryPlist("l", "/tmp/a&b", []string{"--log-path", "/tmp/<c>.jsonl"}, time.Hour, "/x/l.out", "/x/l.err", nil)
 	if !strings.Contains(escaped, "/tmp/a&amp;b") || !strings.Contains(escaped, "&lt;c&gt;") {
 		t.Fatalf("plist must XML-escape program and arguments:\n%s", escaped)
 	}
@@ -72,7 +72,7 @@ func TestInventoryIntervalEnvOverride(t *testing.T) {
 	if got := InventoryInterval(); got != time.Minute {
 		t.Fatalf("overridden interval = %s, want 1m", got)
 	}
-	plist := inventoryPlist(InventoryLabel, "/opt/beacon/bin/beacon", inventoryJobArgs(false, ""), InventoryInterval(), "/x/l.out", "/x/l.err")
+	plist := inventoryPlist(InventoryLabel, "/opt/beacon/bin/beacon", inventoryJobArgs(false, ""), InventoryInterval(), "/x/l.out", "/x/l.err", nil)
 	if !strings.Contains(plist, "<key>StartInterval</key>\n  <integer>60</integer>") {
 		t.Fatalf("plist should use the overridden interval:\n%s", plist)
 	}
@@ -88,7 +88,7 @@ func TestInventoryIntervalEnvOverride(t *testing.T) {
 }
 
 func TestInventorySystemdUnitsPairTimerWithOneshot(t *testing.T) {
-	system := inventoryServiceUnit("/usr/bin/beacon", inventoryJobArgs(false, ""), false)
+	system := inventoryServiceUnit("/usr/bin/beacon", inventoryJobArgs(false, ""), false, nil)
 	for _, want := range []string{
 		"Type=oneshot",
 		`ExecStart="/usr/bin/beacon" "endpoint" "inventory" "heartbeat" "--scheduled" "--system"`,
@@ -99,7 +99,10 @@ func TestInventorySystemdUnitsPairTimerWithOneshot(t *testing.T) {
 			t.Fatalf("system service unit missing %q:\n%s", want, system)
 		}
 	}
-	user := inventoryServiceUnit("/home/me/.local/bin/beacon", inventoryJobArgs(true, "/home/me/.beacon/endpoint/logs/runtime.jsonl"), true)
+	user := inventoryServiceUnit("/home/me/.local/bin/beacon", inventoryJobArgs(true, "/home/me/.beacon/endpoint/logs/runtime.jsonl"), true, nil)
+	if strings.Contains(user, "Environment=") {
+		t.Fatalf("a job with no environment must not set one:\n%s", user)
+	}
 	if strings.Contains(user, "User=root") {
 		t.Fatalf("user service unit must not run as root:\n%s", user)
 	}
@@ -120,6 +123,21 @@ func TestInventorySystemdUnitsPairTimerWithOneshot(t *testing.T) {
 	}
 	if strings.Contains(timer, "OnCalendar") {
 		t.Fatal("the inventory timer is interval-based, not calendar-based")
+	}
+}
+
+// The job's environment reaches the scan only if the unit sets it: launchd and systemd do not pass
+// on the installing shell's variables. Values are escaped for each format, since a path can hold
+// characters XML or systemd would otherwise interpret.
+func TestInventoryUnitsCarryTheJobEnvironment(t *testing.T) {
+	env := map[string]string{"CODEX_HOME": `/Users/me/codex & "100%"`}
+	plist := inventoryPlist(InventoryLabel, "/usr/local/bin/beacon", inventoryJobArgs(true, ""), time.Hour, "/x/l.out", "/x/l.err", env)
+	if want := "  <key>EnvironmentVariables</key>\n  <dict>\n    <key>CODEX_HOME</key>\n    <string>/Users/me/codex &amp; &quot;100%&quot;</string>\n  </dict>\n"; !strings.Contains(plist, want) {
+		t.Fatalf("plist missing escaped environment %q:\n%s", want, plist)
+	}
+	unit := inventoryServiceUnit("/usr/local/bin/beacon", inventoryJobArgs(true, ""), true, env)
+	if want := `Environment="CODEX_HOME=/Users/me/codex & \"100%%\""`; !strings.Contains(unit, want) {
+		t.Fatalf("service unit missing escaped environment %q:\n%s", want, unit)
 	}
 }
 

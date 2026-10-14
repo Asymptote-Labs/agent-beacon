@@ -40,6 +40,8 @@ Codex rollout files can contain prompts, assistant responses, tool inputs, comma
 
 Install, hook install, discovery, inventory, session status, sync, handoff, and `beacon mcp connect` honor Codex's literal `CODEX_HOME` directory: it must exist, and relative paths resolve from the current working directory. Unlike shell syntax, `~` and environment-variable references in the value are not expanded. Project-level `.codex` files are not affected. Pass `--codex-dir <path>` to select a session store explicitly.
 
+The scheduled inventory job starts without your shell's environment, so a per-user `beacon endpoint install` or `repair` writes the `CODEX_HOME` it resolved into the job's launchd or systemd definition. If you change `CODEX_HOME` later, run `beacon endpoint repair` from a shell that has the new value. System-mode installs do not record it.
+
 ### Token usage and cost
 
 `beacon endpoint install` configures Codex's log and trace exporters in `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`). Beacon normalizes the completed turn span into the same canonical `gen_ai.usage` fields used for Claude Code: uncached `input_tokens`, `output_tokens`, `cache_read.input_tokens`, `cache_creation.input_tokens`, and `reasoning.output_tokens`. Codex's input count includes both cache reads and cache writes, so Beacon subtracts both before recording uncached input.

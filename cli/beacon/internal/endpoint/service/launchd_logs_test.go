@@ -39,7 +39,7 @@ func TestSystemLaunchDaemonsNeverLogToTmp(t *testing.T) {
 	out, errPath = paths(UpdaterLabel)
 	plists[UpdaterLabel] = updaterPlist(UpdaterLabel, "/opt/beacon/bin/beacon", out, errPath)
 	out, errPath = paths(InventoryLabel)
-	plists[InventoryLabel] = inventoryPlist(InventoryLabel, "/opt/beacon/bin/beacon", inventoryJobArgs(false, ""), InventoryInterval(), out, errPath)
+	plists[InventoryLabel] = inventoryPlist(InventoryLabel, "/opt/beacon/bin/beacon", inventoryJobArgs(false, ""), InventoryInterval(), out, errPath, nil)
 
 	for label, content := range plists {
 		if strings.Contains(content, "/tmp/") {
