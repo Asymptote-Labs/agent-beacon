@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudesession"
 )
 
 type ClaudeOptions struct {
@@ -133,7 +135,7 @@ func claudeSettingsPath(level Level) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return filepath.Join(home, ".claude", "settings.json"), nil
+		return filepath.Join(claudesession.ConfigDir(home), "settings.json"), nil
 	case LevelProject:
 		cwd, err := os.Getwd()
 		if err != nil {

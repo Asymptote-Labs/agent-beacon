@@ -30,7 +30,7 @@ beacon endpoint hooks [command]
 | Runtime | User-level config | Project-level config | Hook binary | Runtime log |
 |---------|-------------------|----------------------|-------------|-------------|
 | Antigravity CLI | `~/.gemini/config/hooks.json` | `./.agents/hooks.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
-| Claude Code | `~/.claude/settings.json` | `./.claude/settings.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
+| Claude Code | `~/.claude/settings.json` (`$CLAUDE_CONFIG_DIR/settings.json` when set) | `./.claude/settings.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
 | Codex CLI | `$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`) | `./.codex/hooks.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
 | Cursor | `~/.cursor/hooks.json` | `./.cursor/hooks.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |
 | Devin CLI | `~/.config/devin/config.json` | `./.devin/hooks.v1.json` | `~/.beacon/endpoint/hooks/beacon-hooks` | `~/.beacon/endpoint/logs/runtime.jsonl` |

@@ -147,3 +147,37 @@ func TestClaudeHookStatusDetectsInstalled(t *testing.T) {
 		t.Fatalf("SettingsPath = %q, want %q", status.SettingsPath, path)
 	}
 }
+
+func TestClaudeSettingsPathUserLevelFollowsClaudeConfigDir(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	got, err := claudeSettingsPath(LevelUser)
+	if err != nil {
+		t.Fatalf("claudeSettingsPath returned error: %v", err)
+	}
+	if want := filepath.Join(home, ".claude", "settings.json"); got != want {
+		t.Fatalf("default user settings path = %q, want %q", got, want)
+	}
+
+	config := filepath.Join(t.TempDir(), "claude-alt")
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	got, err = claudeSettingsPath(LevelUser)
+	if err != nil {
+		t.Fatalf("claudeSettingsPath returned error: %v", err)
+	}
+	if want := filepath.Join(config, "settings.json"); got != want {
+		t.Fatalf("user settings path with CLAUDE_CONFIG_DIR = %q, want %q", got, want)
+	}
+
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	got, err = claudeSettingsPath(LevelProject)
+	if err != nil {
+		t.Fatalf("claudeSettingsPath returned error: %v", err)
+	}
+	if want := filepath.Join(cwd, ".claude", "settings.json"); got != want {
+		t.Fatalf("project settings path = %q, want %q (CLAUDE_CONFIG_DIR must not move it)", got, want)
+	}
+}

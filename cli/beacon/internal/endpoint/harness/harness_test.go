@@ -1098,3 +1098,29 @@ func TestGeminiSettingsHonorGeminiCLIHome(t *testing.T) {
 		t.Fatalf("DiscoverGemini config path = %q, want %q", got, want)
 	}
 }
+
+func TestClaudeConfigFollowsClaudeConfigDir(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	config := filepath.Join(t.TempDir(), "claude-alt")
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+
+	written, err := ConfigureClaude(ConfigureOptions{Endpoint: "http://127.0.0.1:4317", UserMode: true})
+	if err != nil {
+		t.Fatalf("ConfigureClaude returned error: %v", err)
+	}
+	if want := filepath.Join(config, "settings.json"); written != want {
+		t.Fatalf("ConfigureClaude path = %q, want %q", written, want)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude", "settings.json")); !os.IsNotExist(err) {
+		t.Fatalf("~/.claude/settings.json must be left alone, stat err = %v", err)
+	}
+
+	h := DiscoverClaude()
+	if want := filepath.Join(config, "settings.json"); h.ConfigPath != want {
+		t.Fatalf("DiscoverClaude config path = %q, want %q", h.ConfigPath, want)
+	}
+	if h.TelemetryStatus != TelemetryEnabled {
+		t.Fatalf("DiscoverClaude status = %q (%s), want enabled", h.TelemetryStatus, h.Message)
+	}
+}

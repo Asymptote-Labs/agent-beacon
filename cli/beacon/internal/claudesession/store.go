@@ -47,11 +47,20 @@ type Stats struct {
 	FirstError  error
 }
 
-// DefaultProjectsDir is where Claude Code keeps session transcripts: projects under
-// CLAUDE_CONFIG_DIR when that is set, as Claude Code does, otherwise ~/.claude/projects.
-func DefaultProjectsDir() (string, error) {
+// ConfigDir is Claude Code's config directory: CLAUDE_CONFIG_DIR when that is set, as Claude Code
+// resolves it, otherwise <home>/.claude. settings.json, skills and projects live under it.
+func ConfigDir(home string) string {
 	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
-		return filepath.Join(dir, "projects"), nil
+		return dir
+	}
+	return filepath.Join(home, ".claude")
+}
+
+// DefaultProjectsDir is where Claude Code keeps session transcripts: <config dir>/projects.
+func DefaultProjectsDir() (string, error) {
+	if strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")) != "" {
+		// No home directory is needed when the config directory is named outright.
+		return filepath.Join(ConfigDir(""), "projects"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -60,7 +69,7 @@ func DefaultProjectsDir() (string, error) {
 	if strings.TrimSpace(home) == "" {
 		return "", errors.New("home directory is empty")
 	}
-	return filepath.Join(home, ".claude", "projects"), nil
+	return filepath.Join(ConfigDir(home), "projects"), nil
 }
 
 func NewStore(dir string) (*Store, error) {
