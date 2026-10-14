@@ -1,34 +1,39 @@
 import * as Anthropic from "@anthropic-ai/sdk";
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
-import { afterEach, expect, it } from "vitest";
-import { flush, initialize, isInitialized, observe, shutdown } from "./index.js";
+import { afterEach, beforeEach, expect, it, vi, type MockInstance } from "vitest";
+import { flush, initialize, observe, shutdown } from "./index.js";
 
-afterEach(async () => { await shutdown(); });
+let warn: MockInstance<typeof console.warn>;
+beforeEach(() => { warn = vi.spyOn(console, "warn").mockImplementation(() => {}); });
+afterEach(async () => { warn.mockRestore(); await shutdown(); });
 
-it("rejects changed configuration even when manual modules accompany it", async () => {
+// Each integration guide calls initialize({ apiKey, instrumentModules }); an app following two of
+// them repeats the same options and must neither fail nor warn.
+it("accepts a repeat of the active options with additional modules", () => {
+  const headers = { "x-team": "core" };
+  initialize({ apiKey: "key-1", headers, disableDefaultExporter: true, disableInstrumentations: true });
+  expect(() => initialize({ apiKey: "key-1", headers: { "x-team": "core" }, instrumentModules: { Anthropic } })).not.toThrow();
+  expect(warn).not.toHaveBeenCalled();
+});
+
+it("keeps the active configuration and names the options it ignores", async () => {
   const original = new InMemorySpanExporter();
   const replacement = new InMemorySpanExporter();
-  initialize({ serviceName: "original-service", spanExporter: original, disableBatch: true, disableInstrumentations: true });
-  expect(() => initialize({ serviceName: "replacement-service", spanExporter: replacement, instrumentModules: { Anthropic } })).toThrow(/already initialized/);
-  expect(isInitialized()).toBe(true);
-  observe({ name: "original-provider-control" }, () => 1)();
+  initialize({ apiKey: "key-1", serviceName: "original-service", spanExporter: original, disableBatch: true, disableInstrumentations: true });
+  initialize({ apiKey: "key-2", serviceName: "original-service", spanExporter: replacement, instrumentModules: { Anthropic } });
+  expect(warn).toHaveBeenCalledTimes(1);
+  const message = String(warn.mock.calls[0][0]);
+  expect(message).toContain("apiKey, spanExporter");
+  expect(message).not.toContain("serviceName");
+  expect(message).not.toContain("key-2");
+  observe({ name: "original-provider" }, () => 1)();
   await flush();
   expect(original.getFinishedSpans()).toHaveLength(1);
-  expect(original.getFinishedSpans()[0].resource.attributes["service.name"]).toBe("original-service");
   expect(replacement.getFinishedSpans()).toHaveLength(0);
 });
 
-it("continues to accept the documented modules-only initialization shortcut", async () => {
-  const exporter = new InMemorySpanExporter();
-  initialize({ serviceName: "original-service", spanExporter: exporter, disableBatch: true, disableInstrumentations: true });
-  expect(() => initialize({ instrumentModules: { Anthropic } })).not.toThrow();
-  observe({ name: "modules-only-control" }, () => 1)();
-  await flush();
-  expect(exporter.getFinishedSpans()).toHaveLength(1);
-  expect(exporter.getFinishedSpans()[0].resource.attributes["service.name"]).toBe("original-service");
-});
-
-it("does not treat an explicitly undefined option as a configuration change", () => {
+it("does not treat an explicitly undefined option as a change", () => {
   initialize({ disableDefaultExporter: true, disableInstrumentations: true });
-  expect(() => initialize({ serviceName: undefined, instrumentModules: { Anthropic } })).not.toThrow();
+  initialize({ serviceName: undefined, instrumentModules: { Anthropic } });
+  expect(warn).not.toHaveBeenCalled();
 });

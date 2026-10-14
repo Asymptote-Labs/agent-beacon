@@ -25,6 +25,7 @@ import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import {
   AnthropicInstrumentation,
   type AnthropicInstrumentationConfig,
@@ -113,6 +114,8 @@ interface SDKState {
   provider: NodeTracerProvider;
   mode: ExportMode;
   observeUrl?: string;
+  /** The options the active configuration was built from, to tell a repeat from a conflict. */
+  options: InitializeOptions;
 }
 
 type ClaudeAgentQueryFunction<T extends (...args: any[]) => any = (...args: any[]) => any> = T & {
@@ -161,8 +164,14 @@ export class Observe {
 
 export function initialize(options: InitializeOptions = {}): void {
   if (state) {
-    const changesConfiguration = Object.entries(options).some(([name, value]) => name !== "instrumentModules" && value !== undefined);
-    if (options.instrumentModules && !changesConfiguration) {
+    if (options.instrumentModules) {
+      const ignored = changedOptions(state.options, options);
+      if (ignored.length > 0) {
+        console.warn(
+          `Asymptote Observe is already initialized; ignoring changed options: ${ignored.join(", ")}. ` +
+            "Call shutdown() before reinitializing with new options.",
+        );
+      }
       patch(options.instrumentModules);
       return;
     }
@@ -211,7 +220,7 @@ export function initialize(options: InitializeOptions = {}): void {
   if (instrumentations.length > 0) {
     registerInstrumentations({ instrumentations });
   }
-  state = { instrumentations, instrumentationsDisabled: !!options.disableInstrumentations, provider, mode: resolved.mode, observeUrl: resolved.observeUrl };
+  state = { instrumentations, instrumentationsDisabled: !!options.disableInstrumentations, provider, mode: resolved.mode, observeUrl: resolved.observeUrl, options };
 
   if (options.instrumentModules) {
     try {
@@ -223,6 +232,24 @@ export function initialize(options: InitializeOptions = {}): void {
       throw error;
     }
   }
+}
+
+// changedOptions names the options in next, other than instrumentModules, that differ from the
+// active configuration's. Repeating the same options, as the integration guides do in each module
+// they set up, is not a change. Plain objects (headers, resource attributes) compare by value;
+// exporters, processors and arrays of them compare by identity, since two distinct exporter
+// instances can look alike field by field.
+function changedOptions(active: InitializeOptions, next: InitializeOptions): string[] {
+  return (Object.keys(next) as (keyof InitializeOptions)[]).filter(name => {
+    if (name === "instrumentModules" || next[name] === undefined) return false;
+    const a = active[name];
+    const b = next[name];
+    return isPlainObject(a) && isPlainObject(b) ? !isDeepStrictEqual(a, b) : a !== b;
+  });
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && Object.getPrototypeOf(value) === Object.prototype;
 }
 
 export function getTracer(name = DEFAULT_TRACER_NAME, version = SDK_VERSION): Tracer {

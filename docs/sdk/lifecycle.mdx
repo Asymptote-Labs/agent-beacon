@@ -59,7 +59,7 @@ Observe.initialize({
 
 If the SDK is already initialized, a later `Observe.initialize({ instrumentModules })` call patches additional modules without replacing the provider.
 
-That shortcut accepts only `instrumentModules` and options whose values are `undefined`. Other defined initialization options are rejected rather than silently ignored. Use `Observe.patch(modules)` to add modules while keeping the configuration, or shut down before changing exporter or resource settings.
+That call keeps the active configuration. Repeating the same options, as each integration guide's setup does, is fine. If its other options differ from the active ones, they are ignored and a warning names them; shut down first to change exporter or resource settings.
 
 ## Short-lived example
 
