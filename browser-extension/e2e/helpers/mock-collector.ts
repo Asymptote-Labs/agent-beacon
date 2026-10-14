@@ -10,13 +10,11 @@ export interface MockCollector {
   url: string;
   received: LogsEnvelope[];
   reset(): void;
-  setStatus(status: number): void;
   close(): Promise<void>;
 }
 
 export async function startMockCollector(): Promise<MockCollector> {
   const received: LogsEnvelope[] = [];
-  let status = 200;
 
   const server = http.createServer((req, res) => {
     // CORS preflight from the extension SW (content-type: application/json).
@@ -34,7 +32,7 @@ export async function startMockCollector(): Promise<MockCollector> {
         } catch {
           /* ignore malformed */
         }
-        res.writeHead(status, { 'content-type': 'application/json', ...corsHeaders() });
+        res.writeHead(200, { 'content-type': 'application/json', ...corsHeaders() });
         res.end('{}');
       });
       return;
@@ -50,7 +48,6 @@ export async function startMockCollector(): Promise<MockCollector> {
     url: `http://127.0.0.1:${port}/v1/logs`,
     received,
     reset: () => (received.length = 0),
-    setStatus: (value) => { status = value; },
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }

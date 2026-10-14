@@ -5,7 +5,9 @@ vi.mock('../../src/shared/browser.js', () => ({ ext: {
   storage: { local: { get: api.get, set: api.set } },
   alarms: { create: api.alarm },
 } }));
-let queue: any[];
+// The persisted shape of a delivery queue item, as delivery.ts stores it.
+type StoredItem = { id: string; endpoint: string; envelope: object; attempts: number; nextAttemptAt?: number };
+let queue: StoredItem[];
 let send: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   vi.resetModules();
@@ -13,7 +15,7 @@ beforeEach(() => {
   vi.setSystemTime(10_000);
   queue = [{ id: 'turn', endpoint: 'http://127.0.0.1:4318/v1/logs', envelope: {}, attempts: 1, nextAttemptAt: 11_000 }];
   api.get.mockImplementation(async () => ({ delivery_queue: structuredClone(queue) }));
-  api.set.mockImplementation(async ({ delivery_queue }) => { queue = structuredClone(delivery_queue); });
+  api.set.mockImplementation(async ({ delivery_queue }: { delivery_queue: StoredItem[] }) => { queue = structuredClone(delivery_queue); });
   api.alarm.mockClear();
   send = vi.fn().mockResolvedValue({ ok: false });
   vi.stubGlobal('fetch', send);
