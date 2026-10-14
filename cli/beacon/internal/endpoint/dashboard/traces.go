@@ -466,14 +466,7 @@ func traceRange(query TraceQuery, total int) (int, int) {
 		if offset < 1 {
 			offset = 1
 		}
-		// Bound each side to the available trace before adding them. Context
-		// widths are user supplied and their sum can otherwise overflow.
-		limit = 1
-		if before >= total || after >= total || before >= total-1-after {
-			limit = total
-		} else {
-			limit += before + after
-		}
+		limit = min(before, total) + 1 + min(after, total)
 	}
 	if total == 0 {
 		return 1, 0
