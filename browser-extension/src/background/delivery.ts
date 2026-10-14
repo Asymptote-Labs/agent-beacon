@@ -9,6 +9,7 @@ import { turnToEnvelope } from '../shared/normalize.js';
 import type { LogsEnvelope } from '../shared/otlp.js';
 import type { BrowserIdentity } from '../shared/browser-identity.js';
 import { isAllowedEndpoint } from '../shared/validate.js';
+import { serial } from '../shared/serial.js';
 
 const QUEUE_KEY = 'delivery_queue';
 const ALARM = 'beacon_flush';
@@ -30,19 +31,9 @@ async function writeQueue(items: QueueItem[]): Promise<void> {
   await ext.storage.local.set({ [QUEUE_KEY]: items });
 }
 
-// Serialize every read-modify-write on the queue. The service worker is a single
-// JS context, but async interleaving of enqueue/flush would otherwise let two
-// read→write cycles clobber each other's writes (dropping queued telemetry).
-// Only this SW writes QUEUE_KEY, so an in-memory promise-chain mutex suffices.
-let queueLock: Promise<unknown> = Promise.resolve();
-function withQueueLock<T>(fn: () => Promise<T>): Promise<T> {
-  const result = queueLock.then(fn, fn);
-  queueLock = result.then(
-    () => undefined,
-    () => undefined,
-  );
-  return result;
-}
+// Every read-modify-write on the queue goes through here, so enqueue and flush never clobber
+// each other's writes (dropping queued telemetry).
+const withQueueLock = serial();
 
 /** Normalize a turn and enqueue it for delivery, then kick a flush. */
 export async function enqueueTurn(

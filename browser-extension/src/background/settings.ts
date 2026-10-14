@@ -2,11 +2,13 @@
 // survives service-worker suspension.
 
 import { ext } from '../shared/browser.js';
+import { serial } from '../shared/serial.js';
 import { DEFAULT_SETTINGS, type Settings, type SiteName } from '../shared/types.js';
 import { parseSettingsPatch } from '../shared/validate.js';
 
 const KEY = 'settings';
-let settingsWrite: Promise<unknown> = Promise.resolve();
+// Concurrent popup and options patches must merge over the preceding write, not a stale snapshot.
+const withSettingsLock = serial();
 
 /**
  * Merge stored settings over the defaults, keeping only stored values that
@@ -36,9 +38,7 @@ export async function getSettings(): Promise<Settings> {
 
 /** Apply an already-validated patch (see parseSettingsPatch). */
 export function saveSettings(patch: Partial<Settings>): Promise<Settings> {
-  // Read and merge inside the queue: concurrent popup/options patches must
-  // observe the preceding write rather than replace it with an older snapshot.
-  const write = settingsWrite.then(async () => {
+  return withSettingsLock(async () => {
     const current = await getSettings();
     const next: Settings = {
       ...current,
@@ -48,9 +48,6 @@ export function saveSettings(patch: Partial<Settings>): Promise<Settings> {
     await ext.storage.local.set({ [KEY]: next });
     return next;
   });
-  // A failed storage operation must not poison subsequent settings saves.
-  settingsWrite = write.catch(() => {});
-  return write;
 }
 
 export function siteEnabled(settings: Settings, site: SiteName): boolean {
