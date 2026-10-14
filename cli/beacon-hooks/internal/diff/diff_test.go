@@ -1,11 +1,6 @@
 package diff
 
 import (
-	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -397,78 +392,26 @@ func TestFromEditFragmentsReturnsNothingForAnUnchangedSpan(t *testing.T) {
 	}
 }
 
-// patch is an independent consumer of the unified diff; comparing its output
-// bytes catches a reconstructed trailing blank line that substring checks miss.
-func TestFromToolResponseNewlineTerminatedWriteAppliesExactContent(t *testing.T) {
-	patch, err := exec.LookPath("patch")
-	if err != nil {
-		t.Skip("native patch unavailable")
-	}
-	for _, content := range []string{"new\n", "new\n\n", "\n"} {
-		t.Run(fmt.Sprintf("%q", content), func(t *testing.T) {
-			dir := t.TempDir()
-			diff := FromToolResponse("Write", map[string]interface{}{"file_path": "/repo/result.txt", "content": content}, nil)
-			args := []string{"-p1"}
-			// GNU patch otherwise converts LF output to CRLF on Windows. This is a
-			// byte oracle: preserve the event's bytes rather than normalizing output.
-			if runtime.GOOS == "windows" {
-				args = append(args, "--binary")
-			}
-			cmd := exec.Command(patch, args...)
-			cmd.Dir = dir
-			cmd.Stdin = strings.NewReader(diff + "\n")
-			if output, err := cmd.CombinedOutput(); err != nil {
-				t.Fatalf("apply actual emitted diff: %v\n%s\n%s", err, output, diff)
-			}
-			got, err := os.ReadFile(filepath.Join(dir, "result.txt"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if string(got) != content {
-				t.Fatalf("patched bytes=%q, expected runtime content=%q", got, content)
-			}
-		})
-	}
-}
-
-func TestWholeFileWritePreservesFinalNewlineState(t *testing.T) {
-	patch, err := exec.LookPath("patch")
-	if err != nil {
-		t.Skip("native patch unavailable")
-	}
-	for _, tc := range []struct{ name, before, after string }{
-		{"create without newline", "", "new"},
-		{"replace both unterminated", "old", "new"},
-		{"remove final newline", "same\n", "same"},
-		{"add final newline", "same", "same\n"},
-		{"replace trailing blank line", "old\n\n", "new"},
+// A whole-file Write diff carries the file's exact line boundaries: a terminating newline is not
+// an extra blank line, real trailing blank lines stay, and unterminated content gets the unified
+// diff EOF marker.
+func TestWholeFileWriteDiffPreservesFinalLineBoundaries(t *testing.T) {
+	const header = "--- a/result.txt\n+++ b/result.txt\n"
+	const eof = "\\ No newline at end of file"
+	for _, tc := range []struct{ name, before, after, want string }{
+		{"create terminated", "", "new\n", "@@ -0,0 +1,1 @@\n+new"},
+		{"create with trailing blank line", "", "new\n\n", "@@ -0,0 +1,2 @@\n+new\n+"},
+		{"create a lone newline", "", "\n", "@@ -0,0 +1,1 @@\n+"},
+		{"create unterminated", "", "new", "@@ -0,0 +1,1 @@\n+new\n" + eof},
+		{"replace both unterminated", "old", "new", "@@ -1,1 +1,1 @@\n-old\n" + eof + "\n+new\n" + eof},
+		{"remove final newline", "same\n", "same", "@@ -1,1 +1,1 @@\n-same\n+same\n" + eof},
+		{"add final newline", "same", "same\n", "@@ -1,1 +1,1 @@\n-same\n" + eof + "\n+same"},
+		{"replace trailing blank line", "old\n\n", "new", "@@ -1,2 +1,1 @@\n-old\n-\n+new\n" + eof},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			if tc.before != "" {
-				if err := os.WriteFile(filepath.Join(dir, "result.txt"), []byte(tc.before), 0600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			diff := FromToolResponse("Write", map[string]interface{}{"file_path": "/repo/result.txt", "content": tc.after}, map[string]interface{}{"originalFile": tc.before})
-			args := []string{"-p1"}
-			// GNU patch otherwise converts LF output to CRLF on Windows. This is a
-			// byte oracle: preserve the event's bytes rather than normalizing output.
-			if runtime.GOOS == "windows" {
-				args = append(args, "--binary")
-			}
-			cmd := exec.Command(patch, args...)
-			cmd.Dir = dir
-			cmd.Stdin = strings.NewReader(diff + "\n")
-			if out, err := cmd.CombinedOutput(); err != nil {
-				t.Fatalf("patch: %v\n%s\n%s", err, out, diff)
-			}
-			got, err := os.ReadFile(filepath.Join(dir, "result.txt"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if string(got) != tc.after {
-				t.Fatalf("patched bytes=%q expected=%q", got, tc.after)
+			got := FromToolResponse("Write", map[string]interface{}{"file_path": "/repo/result.txt", "content": tc.after}, map[string]interface{}{"originalFile": tc.before})
+			if want := header + tc.want; got != want {
+				t.Fatalf("diff:\n%s\nwant:\n%s", got, want)
 			}
 		})
 	}
