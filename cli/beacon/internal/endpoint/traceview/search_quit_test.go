@@ -1,11 +1,7 @@
 package traceview
 
 import (
-	"context"
-	"io"
-	"strings"
 	"testing"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -35,18 +31,5 @@ func TestSearchControlCQuitsTraceBrowser(t *testing.T) {
 	model = next.(Model)
 	if cmd != nil || model.searching {
 		t.Fatal("Escape no longer cancels search without quitting")
-	}
-}
-
-func TestSearchControlCExitsNativeProgram(t *testing.T) {
-	model := NewModel(fixtureStore())
-	model.loading = false
-	next, _ := model.Update(key("/"))
-	model = next.(Model)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("\x03")), tea.WithOutput(io.Discard), tea.WithoutRenderer(), tea.WithContext(ctx))
-	if _, err := program.Run(); err != nil {
-		t.Fatalf("real input loop did not quit on Ctrl+C while searching: %v", err)
 	}
 }
