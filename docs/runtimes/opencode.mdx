@@ -69,8 +69,6 @@ beacon endpoint opencode sync
 
 OpenCode prompts, completed assistant text and reasoning, tool arguments and results, commands, command output, paths, and diffs are retained in local or customer-controlled logs. Beacon applies local secret redaction and per-string limits before writing. Each content-bearing event includes a hash and byte count for the original value. Events over the 64 KiB limit drop raw and retained content, preserve stable metadata, and set `field_truncated`.
 
-When an idle or message-completion event closes a stream without a final part snapshot, the plugin retains the text and reasoning chunks already received. A completed part snapshot takes precedence over earlier chunks.
-
 The plugin uses OpenCode session, message, part, permission request, and tool call identifiers for correlation. The poll path uses OpenCode's persisted session, message, part, and tool call identifiers. It does not create file events without an agent-derived path, so object-storage ingestion paths are not treated as files the agent touched.
 
 ## Deployment notes
