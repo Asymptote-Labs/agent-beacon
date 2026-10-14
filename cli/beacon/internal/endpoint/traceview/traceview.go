@@ -456,7 +456,8 @@ func (m Model) listView() string {
 			lastDate = date
 		}
 		titleWidth := max(12, m.width-35)
-		title := lipgloss.NewStyle().Width(titleWidth).Render(truncate(trace.Title, titleWidth))
+		title := truncate(trace.Title, titleWidth)
+		title += strings.Repeat(" ", titleWidth-ansi.StringWidth(title))
 		line := fmt.Sprintf("%-8s  %s  %s", clock, title, trace.Harness.Name)
 		meta := fmt.Sprintf("           %s · %d events · %s%s", tracePath(trace), trace.EventCount, contentLabel(trace), sharingLabel(trace))
 		if i == m.selected {

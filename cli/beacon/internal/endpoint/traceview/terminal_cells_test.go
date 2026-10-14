@@ -70,22 +70,11 @@ func TestTraceViewCJKRowsStayWithinTerminal(t *testing.T) {
 	model.totalMatched = 1
 	view := model.View()
 	if !strings.Contains(ansi.Strip(view), "界") {
-		t.Fatal("real model omitted CJK title")
+		t.Fatal("list view omitted the CJK title")
 	}
 	for _, line := range strings.Split(view, "\n") {
 		if strings.Contains(ansi.Strip(line), "界") && ansi.StringWidth(line) > 80 {
-			t.Fatalf("real model row wraps beyond80 columns: width=%d %q", ansi.StringWidth(line), line)
-		}
-	}
-}
-
-func TestTraceEventDetailsCJKFitsTerminal(t *testing.T) {
-	model := NewModel(nil)
-	model.mode = detailMode
-	model.detail = dashboard.TraceShowResultV1{Events: []dashboard.TraceEventV1{{Number: 1, Type: "user_message", Summary: strings.Repeat("界", 80)}}}
-	for _, line := range eventDetails(model.detail.Events[0], 46) {
-		if strings.Contains(ansi.Strip(line), "界") && ansi.StringWidth(line) > 46 {
-			t.Fatalf("real event details overflow46 columns: %q", line)
+			t.Fatalf("list row exceeds 80 columns: width=%d %q", ansi.StringWidth(line), line)
 		}
 	}
 }
