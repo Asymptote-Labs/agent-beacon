@@ -609,6 +609,8 @@ async function* finishAsyncIterable(iterable: AsyncIterable<unknown>, span: Span
     endSpanWithError(span, error);
     throw error;
   } finally {
+    // A consumer that breaks out early reaches only this block (via return()); end the span here
+    // with its status unset, since the stream neither completed nor failed.
     if (!endedWithError) span.end();
   }
 }
