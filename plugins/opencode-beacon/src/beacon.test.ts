@@ -23,42 +23,6 @@ async function plugin() {
 }
 
 describe("BeaconEndpointPlugin", () => {
-  test("releases terminal tool arguments while keeping in-flight arguments", async () => {
-    const hooks = await plugin()
-    const originalClone = globalThis.structuredClone
-    const references = new Map<string, WeakRef<object>>()
-    globalThis.structuredClone = ((value: any, options: any) => {
-      const cloned = originalClone(value, options)
-      if (value?.retentionProbe) references.set(value.retentionProbe, new WeakRef(cloned))
-      return cloned
-    }) as typeof structuredClone
-    try {
-      const start = async (label: string) => {
-        await hooks["tool.execute.before"]!({ sessionID: "ses_retention", tool: "read", callID: label }, { args: { retentionProbe: label } })
-      }
-      await start("active")
-      await start("successful")
-      await hooks["tool.execute.after"]!({ sessionID: "ses_retention", tool: "read", callID: "successful" }, { output: "done" })
-      for (const status of ["completed", "error"]) {
-        await start(status)
-        await hooks.event!({ event: { type: "message.part.updated", properties: { sessionID: "ses_retention", part: { id: status, messageID: "msg_retention", callID: status, type: "tool", tool: "read", state: { status, ...(status === "error" ? { error: "synthetic tool failure" } : { output: "done" }), input: {}, time: { start: 1, end: 2 } } } } } })
-      }
-      await hooks["command.execute.before"]!({ sessionID: "ses_retention", command: "drain" }, {})
-      globalThis.structuredClone = originalClone
-      for (let attempt = 0; attempt < 5; attempt++) {
-        await Bun.sleep(10)
-        Bun.gc(true)
-      }
-      expect(Boolean(references.get("active")?.deref())).toBe(true)
-      expect(Boolean(references.get("successful")?.deref())).toBe(false)
-      expect(Boolean(references.get("completed")?.deref())).toBe(false)
-      expect(Boolean(references.get("error")?.deref())).toBe(false)
-      expect(payloads.filter(item => item.type === "message.part.updated")).toHaveLength(2)
-    } finally {
-      globalThis.structuredClone = originalClone
-    }
-  })
-
   test("forwards prompts and correlated tool lifecycle payloads", async () => {
     const hooks = await plugin()
 

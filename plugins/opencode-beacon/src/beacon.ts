@@ -176,9 +176,8 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
     if (next.type === "tool") {
       const status = next.state?.status
       if (status !== "completed" && status !== "error") return
-      // V1 terminal parts and V2 failures may finish without tool.execute.after.
-      // Their input snapshots are no longer needed once the tool has terminated.
-      activeCalls.delete(next.callID)
+      // A failed tool never reaches tool.execute.after, which is what releases its arguments.
+      if (status === "error") activeCalls.delete(next.callID)
       if (status === "completed" && completedCalls.has(next.callID)) return
     } else if (next.type === "text" || next.type === "reasoning") {
       if (next.type === "text") {
