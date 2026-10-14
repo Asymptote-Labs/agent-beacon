@@ -537,6 +537,11 @@ function finishResult<T>(result: T, span: Span, options?: ObserveOptions): unkno
     );
   }
   if (isAsyncIterable(result)) {
+    // A stream such as the Claude Agent SDK's Query carries controls (interrupt(), setModel(), ...)
+    // beside its iterator. Iteration goes through the traced iterator; every other read goes to
+    // the original stream, with functions bound to it so private-field methods keep working, and
+    // cached so repeated reads return the same function. The proxy targets the wrapper rather
+    // than the original, whose read-only properties would make a binding get trap invalid.
     const iterator = finishAsyncIterable(result, span);
     const methods = {
       next: iterator.next.bind(iterator),
