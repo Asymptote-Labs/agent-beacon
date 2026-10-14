@@ -9,14 +9,11 @@ const state = {
   inventory: null,
   loading: false,
   error: null,
-  currentQuery: "",
-  newEventCount: 0,
   lastDetectionHashScroll: "",
   findings: [],
   findingsRules: null,
   findingsSessions: new Map(),
   findingsExpanded: new Set(),
-  activityView: "summary",
   inventoryView: "configs",
   inventoryRuntime: "",
   inventoryUser: "",
@@ -33,7 +30,6 @@ const state = {
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 const navCollapsedStorageKey = "beacon.dashboard.navCollapsed";
-const isActivityPage = !document.body.dataset.page;
 const isSessionsPage = document.body.dataset.page === "sessions";
 const isSessionDetailPage = document.body.dataset.page === "session-detail";
 const isOverviewPage = document.body.dataset.page === "overview";
@@ -65,7 +61,6 @@ const formFields = [
   "limit",
   "review",
 ];
-state.activityView = initialActivityView();
 
 const presets = {
   all: { limit: "500" },
@@ -122,35 +117,6 @@ function hydrateFiltersFromURL() {
   }
 }
 
-function initialActivityView() {
-  const params = new URLSearchParams(window.location.search);
-  if (params.get("view") === "detailed") return "detailed";
-  for (const field of formFields) {
-    if (field !== "limit" && params.has(field)) return "detailed";
-  }
-  return "summary";
-}
-
-function renderActivityView() {
-  if (!isActivityPage) return;
-  const summary = $("#activity-summary");
-  const detailed = $("#activity-detailed");
-  if (summary) summary.hidden = state.activityView !== "summary";
-  if (detailed) detailed.hidden = state.activityView !== "detailed";
-  $$("[data-activity-view]").forEach((button) => {
-    const active = button.dataset.activityView === state.activityView;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-selected", active ? "true" : "false");
-  });
-}
-
-function setActivityView(view, { updateLocation = false } = {}) {
-  if (!isActivityPage) return;
-  state.activityView = view === "detailed" ? "detailed" : "summary";
-  renderActivityView();
-  if (updateLocation) updateURL(queryFromFilters());
-}
-
 // The limit control is a fixed <select>; a URL like ?limit=5 would otherwise
 // silently deselect it and the query would fall back to the server default,
 // so add the requested limit as a selectable option.
@@ -167,11 +133,6 @@ function ensureLimitOption(select, value) {
 
 function updateURL(query) {
   const params = new URLSearchParams(query);
-  if (isActivityPage && state.activityView === "detailed") {
-    params.set("view", "detailed");
-  } else {
-    params.delete("view");
-  }
   const range = $("#range-filter");
   if (range) {
     if (range.value && range.value !== "30d") {
@@ -202,7 +163,6 @@ async function load({ updateLocation = false, mode = "replace" } = {}) {
   state.loading = !quiet;
   state.error = null;
   if (!quiet) renderLoading();
-  let rendered = false;
   try {
     const [status, summary, events] = await Promise.all([
       getJSON("/api/status"),
@@ -210,27 +170,19 @@ async function load({ updateLocation = false, mode = "replace" } = {}) {
       getJSON(`${activityPath}${suffix}`),
     ]);
     if (generation !== activityLoadGeneration) return;
-    const previousEvents = state.events;
-    const previousQuery = state.currentQuery;
     state.status = status;
     state.summary = summary;
     state.eventResult = isSessionsPage ? null : events;
     state.sessionResult = isSessionsPage ? events : null;
-    state.currentQuery = query;
     state.events = isSessionsPage ? [] : (events.events || []);
     state.sessions = isSessionsPage ? (events.sessions || []) : [];
-    if (quiet && previousQuery === query && canPatchEvents(previousEvents, state.events)) {
-      patchEvents(previousEvents, state.events);
-      renderSummaryOnly();
-      rendered = true;
-    }
   } catch (err) {
     if (generation === activityLoadGeneration) state.error = err;
   } finally {
     if (generation === activityLoadGeneration) {
       activityLoadInFlight = false;
       state.loading = false;
-      if (!rendered) render();
+      render();
     }
   }
 }
@@ -238,8 +190,6 @@ async function load({ updateLocation = false, mode = "replace" } = {}) {
 function render() {
   setText("#log-path", state.status?.log_path || "Runtime log unavailable");
   setText("#last-updated", state.summary?.last_event_time ? `Last event ${formatTime(state.summary.last_event_time)}` : "");
-  renderActivityView();
-  renderNewEventsIndicator();
   renderFilterOptions();
   renderCards();
   renderActivityAnalytics();
@@ -409,18 +359,6 @@ function renderSearchState() {
   $$("[data-clear-filter]").forEach((button) => {
     button.addEventListener("click", () => clearFilter(button.dataset.clearFilter));
   });
-}
-
-function renderSummaryOnly() {
-  setText("#log-path", state.status?.log_path || "Runtime log unavailable");
-  setText("#last-updated", state.summary?.last_event_time ? `Last event ${formatTime(state.summary.last_event_time)}` : "");
-  renderActivityView();
-  renderNewEventsIndicator();
-  renderFilterOptions();
-  renderCards();
-  renderActivityAnalytics();
-  renderInsights();
-  renderSearchState();
 }
 
 async function loadSessionPage() {
@@ -1552,26 +1490,7 @@ function configKindLabel(kind) {
 
 function renderEvents() {
   if (!$("#events")) return;
-  if (isSessionsPage) {
-    renderSessions();
-    return;
-  }
-  if (state.loading) {
-    renderLoading();
-    return;
-  }
-  if (state.error) {
-    $("#events").innerHTML = `<tr><td colspan="8">Failed to load dashboard: ${escapeHTML(state.error.message)}</td></tr>`;
-    return;
-  }
-  if (!state.events.length) {
-    $("#events").innerHTML = `<tr><td colspan="8">No events match this search. Clear filters or broaden the query.</td></tr>`;
-    return;
-  }
-  $("#events").innerHTML = state.events
-    .map((record) => eventRowHTML(record))
-    .join("");
-  bindEventRows();
+  if (isSessionsPage) renderSessions();
 }
 
 function renderSessions() {
@@ -1677,128 +1596,6 @@ function sessionPageURL(id) {
   return `/session.html?id=${encodeURIComponent(id)}`;
 }
 
-function eventRowHTML(record) {
-  const event = record.event || {};
-  const session = event.session || {};
-  return `
-    <tr data-id="${escapeHTML(record.id)}">
-      <td class="mono">${escapeHTML(formatSessionID(session.id))}</td>
-      <td>${badge(event.severity || "unknown", `severity-${event.severity || "unknown"}`)}</td>
-      <td class="col-timestamp timestamp-cell">${timestampCellHTML(event.timestamp)}</td>
-      <td>${harnessCell(event)}</td>
-      <td>${escapeHTML(repositoryShortLabel(event))}</td>
-      <td>${signalCell(record)}</td>
-      <td class="col-artifact">${artifactCell(event)}</td>
-      <td class="col-message">${escapeHTML(event.message || "")}</td>
-    </tr>
-  `;
-}
-
-function bindEventRows(scope = document) {
-  const rows = scope.matches?.("tr[data-id]") ? [scope] : Array.from(scope.querySelectorAll("#events tr, tr[data-id]"));
-  rows.forEach((row) => {
-    row.addEventListener("click", (event) => {
-      if (event.target.closest("button")) return;
-      showEvent(row.dataset.id);
-    });
-  });
-  Array.from(scope.querySelectorAll("[data-apply-filter]")).forEach((button) => {
-    button.addEventListener("click", () => applyFilters({ [button.dataset.applyFilter]: button.dataset.value }));
-  });
-}
-
-function canPatchEvents(previousEvents, nextEvents) {
-  return $("#events") && previousEvents.length > 0 && nextEvents.length > 0;
-}
-
-function patchEvents(previousEvents, nextEvents) {
-  const tbody = $("#events");
-  if (!tbody) return;
-  const existing = new Set(previousEvents.map((record) => record.id));
-  const newest = [];
-  for (const record of nextEvents) {
-    if (existing.has(record.id)) break;
-    newest.push(record);
-  }
-  if (newest.length) prependEventRows(newest);
-  trimEventRows(nextEvents.length);
-}
-
-// trimEventRows drops trailing rows so the poll path's prepends never grow the
-// table past the active limit; nextEvents is the server's limited slice, so its
-// length is the row budget for the current view.
-function trimEventRows(maxRows) {
-  const tbody = $("#events");
-  if (!tbody || !(maxRows > 0)) return;
-  while (tbody.children.length > maxRows) {
-    tbody.removeChild(tbody.lastElementChild);
-  }
-}
-
-function prependEventRows(records) {
-  const tbody = $("#events");
-  if (!tbody) return;
-  const nearTop = window.scrollY < 160;
-  const beforeTop = tbody.getBoundingClientRect().top;
-  const template = document.createElement("template");
-  template.innerHTML = records.map((record) => eventRowHTML(record)).join("");
-  const rows = Array.from(template.content.children);
-  const fragment = document.createDocumentFragment();
-  rows.forEach((row) => fragment.appendChild(row));
-  tbody.prepend(fragment);
-  rows.forEach((row) => bindEventRows(row));
-  if (!nearTop) {
-    const afterTop = tbody.getBoundingClientRect().top;
-    window.scrollBy(0, afterTop - beforeTop);
-    state.newEventCount += records.length;
-  } else {
-    state.newEventCount = 0;
-  }
-  renderNewEventsIndicator();
-}
-
-function renderNewEventsIndicator() {
-  const button = $("#new-events");
-  if (!button) return;
-  if (state.newEventCount > 0) {
-    button.hidden = false;
-    button.textContent = `${state.newEventCount} new event${state.newEventCount === 1 ? "" : "s"} available`;
-  } else {
-    button.hidden = true;
-    button.textContent = "";
-  }
-}
-
-function showNewEvents() {
-  state.newEventCount = 0;
-  renderNewEventsIndicator();
-  window.scrollTo({ top: 0, behavior: "smooth" });
-}
-
-async function showEvent(id) {
-  if (!$("#drawer")) return;
-  const record = await getJSON(`/api/event?id=${encodeURIComponent(id)}`);
-  setText("#drawer .drawer-head h2", "Event Detail");
-  $("#event-summary").innerHTML = detailSummary(record);
-  $("#event-json").textContent = JSON.stringify(record.event, null, 2);
-  $$("#event-summary [data-apply-filter]").forEach((button) => {
-    button.addEventListener("click", () => applyFilters({ [button.dataset.applyFilter]: button.dataset.value }));
-  });
-  $("#drawer").classList.add("open");
-  $("#drawer").setAttribute("aria-hidden", "false");
-}
-
-async function showSession(id) {
-  if (!$("#drawer")) return;
-  const detail = await getJSON(`/api/session?id=${encodeURIComponent(id)}`);
-  setText("#drawer .drawer-head h2", "Session Detail");
-  $("#event-summary").innerHTML = sessionDetailSummary(detail);
-  const rawEvents = (detail.events || []).map((record) => record.raw_event || record.event || {});
-  $("#event-json").textContent = JSON.stringify(rawEvents, null, 2);
-  $("#drawer").classList.add("open");
-  $("#drawer").setAttribute("aria-hidden", "false");
-}
-
 function closeDrawer() {
   if (!$("#drawer")) return;
   $("#drawer").classList.remove("open");
@@ -1809,16 +1606,6 @@ function renderLoading() {
   setText("#result-meta", "Loading...");
   const columns = isSessionDetailPage ? 11 : (isSessionsPage ? 9 : 8);
   if ($("#events")) $("#events").innerHTML = `<tr><td colspan="${columns}">Loading ${isSessionsPage ? "sessions" : "events"}...</td></tr>`;
-}
-
-function signalCell(record) {
-  const event = record.event || {};
-  const info = event.event || {};
-  const parts = [
-    `<strong>${escapeHTML(signalAction(record))}</strong>`,
-    `<span class="muted">${escapeHTML(info.category || "uncategorized")}${event.model ? ` · ${escapeHTML(event.model)}` : ""}</span>`,
-  ].filter(Boolean);
-  return parts.join("<br />");
 }
 
 function harnessCell(event) {
@@ -1914,20 +1701,6 @@ function primaryArtifact(event) {
   return event.model || event.branch || "";
 }
 
-function artifactCell(event) {
-  const artifact = primaryArtifact(event);
-  const meta = [
-    event.command?.exit_code !== undefined ? `exit ${event.command.exit_code}` : "",
-    event.command?.duration_ms ? `${event.command.duration_ms}ms` : "",
-    event.file?.language,
-    event.mcp?.server,
-  ].filter(Boolean);
-  return `
-    <div class="artifact">${escapeHTML(truncateMiddle(artifact || event.message || "", 140))}</div>
-    ${meta.length ? `<div class="muted">${escapeHTML(meta.join(" · "))}</div>` : ""}
-  `;
-}
-
 function detailSummary(record) {
   const event = record.event || {};
   const info = event.event || {};
@@ -1959,36 +1732,6 @@ function detailSummary(record) {
       `;
     })
     .join("");
-}
-
-function sessionDetailSummary(detail) {
-  const session = detail.session || {};
-  const events = detail.events || [];
-  const rows = [
-    ["Session", session.id],
-    ["Events", `${events.length || session.event_count || 0}`],
-    ["First event", session.first_event_at ? formatTime(session.first_event_at) : ""],
-    ["Last event", session.last_event_at ? formatTime(session.last_event_at) : ""],
-    ["Harness", session.harness],
-    ["Model", session.model],
-    ["Repository", sessionRepositoryLabel(session)],
-    ["Session prompt", session.original_prompt],
-    ["Working directory", session.working_directory],
-    ["Max severity", session.max_severity],
-    ["Needs review", session.review_count ? `${session.review_count} event${session.review_count === 1 ? "" : "s"}` : ""],
-  ].filter(([, value]) => value);
-  return `
-    ${rows.map(([label, value]) => `
-      <div>
-        <span class="muted">${escapeHTML(label)}</span>
-        <strong>${escapeHTML(label === "Session" ? formatSessionID(value) : value)}</strong>
-      </div>
-    `).join("")}
-    <div class="session-raw-note">
-      <span class="muted">Raw events</span>
-      <strong>Full JSON timeline shown below</strong>
-    </div>
-  `;
 }
 
 function renderSessionOverview(detail) {
@@ -2283,18 +2026,6 @@ function repositoryLabel(event) {
   return [event.repository, event.branch].filter(Boolean).join(" @ ");
 }
 
-function sessionRepositoryLabel(session) {
-  return [session.repository, session.branch].filter(Boolean).join(" @ ");
-}
-
-function repositoryShortLabel(event) {
-  if (!event.repository) return event.branch || "";
-  const parts = event.repository.split("/").filter(Boolean);
-  const repo = parts[parts.length - 1] || event.repository;
-  const label = parts.length > 1 ? `../${repo}` : repo;
-  return [label, event.branch].filter(Boolean).join(" @ ");
-}
-
 function formatSessionID(value, fallback = "") {
   const sessionID = String(value || "").trim();
   if (!sessionID) return fallback;
@@ -2526,7 +2257,6 @@ function detailFilterKey(label) {
 
 function setFilters(filters, { reset = false } = {}) {
   if (reset) clearFields(false);
-  state.newEventCount = 0;
   for (const [key, value] of Object.entries(filters)) {
     const input = $(`[name="${key}"]`);
     if (input) input.value = value;
@@ -2543,7 +2273,6 @@ function applyFilters(filters, options = {}) {
     window.location.href = `/?${params.toString()}`;
     return;
   }
-  if (isActivityPage) setActivityView("detailed");
   setFilters(filters, options);
 }
 
@@ -2557,7 +2286,6 @@ function queryStringFromObject(values) {
 
 function clearFilter(key) {
   if (!$("#filters")) return;
-  state.newEventCount = 0;
   const input = $(`[name="${key}"]`);
   if (input) input.value = "";
   load({ updateLocation: true }).catch(console.error);
@@ -2565,7 +2293,6 @@ function clearFilter(key) {
 
 function clearFields(loadAfter = true) {
   if (!$("#filters")) return;
-  state.newEventCount = 0;
   const sessionState = $("#session-state-filter")?.value || "captured";
   for (const field of formFields) {
     const input = $(`[name="${field}"]`);
@@ -3404,13 +3131,7 @@ $("#filters")?.addEventListener("submit", (event) => {
 });
 $("#clear-search")?.addEventListener("click", clearSearch);
 $("#close-drawer")?.addEventListener("click", closeDrawer);
-$("#new-events")?.addEventListener("click", showNewEvents);
 window.addEventListener("hashchange", () => scrollDetectionHashIntoView({ force: true }));
-$$("[data-activity-view]").forEach((button) => {
-  button.addEventListener("click", () => {
-    setActivityView(button.dataset.activityView, { updateLocation: true });
-  });
-});
 $$("[data-preset]").forEach((button) => {
   button.addEventListener("click", () => applyPreset(button.dataset.preset));
 });

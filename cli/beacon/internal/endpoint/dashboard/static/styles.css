@@ -443,19 +443,6 @@ button.chip {
   margin-bottom: 1rem;
 }
 
-.new-events {
-  display: block;
-  width: fit-content;
-  margin: 0 0 1rem;
-  border-color: #0284c7;
-  color: var(--accent);
-  background: #eff6ff;
-}
-
-.new-events[hidden] {
-  display: none;
-}
-
 .table-wrap {
   overflow-x: auto;
 }
@@ -2601,20 +2588,6 @@ button.stacked-chart-column:hover {
   box-shadow: var(--shadow-sm);
 }
 
-.activity-view[hidden] {
-  display: none;
-}
-
-#activity-summary {
-  display: grid;
-  gap: 1.5rem;
-}
-
-#activity-summary[hidden],
-#activity-detailed[hidden] {
-  display: none;
-}
-
 button,
 input,
 select {
@@ -2741,8 +2714,7 @@ body[data-page="sessions"] .advanced-filters select {
 }
 
 body[data-page="sessions"] .quick-filters button,
-body[data-page="sessions"] .chip,
-body[data-page="sessions"] .new-events {
+body[data-page="sessions"] .chip {
   min-height: 1.85rem;
   border-color: transparent;
   background: #f3f4f6;

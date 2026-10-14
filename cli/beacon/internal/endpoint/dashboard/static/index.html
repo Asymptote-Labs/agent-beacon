@@ -52,7 +52,7 @@
         <div id="last-updated" class="muted"></div>
       </section>
 
-      <section id="activity-detailed" class="panel search-panel activity-view">
+      <section class="panel search-panel">
         <form id="filters" class="search-form">
           <div class="filter-section">
             <div class="session-filter-tabs" aria-label="Session filters">
@@ -157,7 +157,6 @@
         </form>
         <div id="active-filters" class="chips"></div>
         <div id="notice" class="notice" hidden></div>
-        <button type="button" id="new-events" class="new-events" hidden></button>
         <div class="table-wrap">
           <table>
             <thead>
@@ -179,15 +178,6 @@
       </section>
 
     </main>
-
-    <aside id="drawer" class="drawer" aria-hidden="true">
-      <div class="drawer-head">
-        <h2>Session Detail</h2>
-        <button id="close-drawer">Close</button>
-      </div>
-      <div id="event-summary" class="event-summary"></div>
-      <pre id="event-json"></pre>
-    </aside>
 
     <script src="/app.js"></script>
   </body>
