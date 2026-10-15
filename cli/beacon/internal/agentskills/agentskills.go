@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudesession"
 )
 
 //go:embed skills
@@ -64,15 +66,12 @@ func Names() []string {
 
 // Roots are the user-level skill directories Beacon installs into: ~/.agents/skills, the
 // cross-runtime location (Codex CLI, Gemini CLI, OpenCode, Pi and others read it), and Claude
-// Code's own ~/.claude/skills when Claude Code is set up on this machine. Claude Code does not
-// read ~/.agents/skills.
+// Code's own skills directory (under CLAUDE_CONFIG_DIR, or ~/.claude) when Claude Code is set up on
+// this machine. Claude Code does not read ~/.agents/skills.
 func Roots(home string) []string {
 	roots := []string{filepath.Join(home, ".agents", "skills")}
-	claudeDir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR"))
-	if claudeDir == "" {
-		claudeDir = filepath.Join(home, ".claude")
-	}
-	if info, err := os.Stat(claudeDir); err == nil && info.IsDir() {
+	claudeDir := claudesession.ConfigDir(home)
+	if info, err := os.Stat(claudeDir); claudeDir != "" && err == nil && info.IsDir() {
 		roots = append(roots, filepath.Join(claudeDir, "skills"))
 	}
 	return roots

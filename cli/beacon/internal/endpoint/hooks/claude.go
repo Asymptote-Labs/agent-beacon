@@ -135,7 +135,11 @@ func claudeSettingsPath(level Level) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return filepath.Join(claudesession.ConfigDir(home), "settings.json"), nil
+		dir := claudesession.ConfigDir(home)
+		if dir == "" {
+			return "", fmt.Errorf("home directory is empty")
+		}
+		return filepath.Join(dir, "settings.json"), nil
 	case LevelProject:
 		cwd, err := os.Getwd()
 		if err != nil {

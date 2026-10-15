@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudesession"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
@@ -69,8 +70,11 @@ func filterSkillRoots(items []skillRoot, runtimes []string) []skillRoot {
 }
 
 func skillRoots(home, wd string) []skillRoot {
-	items := []skillRoot{
-		{runtime: "claude_code", path: filepath.Join(home, ".claude", "skills"), scope: ScopeUser},
+	items := []skillRoot{}
+	if dir := claudesession.ConfigDir(home); dir != "" {
+		items = append(items, skillRoot{runtime: "claude_code", path: filepath.Join(dir, "skills"), scope: ScopeUser})
+	}
+	items = append(items, []skillRoot{
 		{runtime: "claude_code", path: filepath.Join(wd, ".claude", "skills"), scope: ScopeProject},
 		{runtime: "cursor", path: filepath.Join(home, ".cursor", "skills"), scope: ScopeUser},
 		{runtime: "cursor", path: filepath.Join(wd, ".cursor", "skills"), scope: ScopeProject},
@@ -78,7 +82,7 @@ func skillRoots(home, wd string) []skillRoot {
 		{runtime: "cursor", path: filepath.Join(wd, ".cursor", "skills-cursor"), scope: ScopeProject},
 		{runtime: "agent_skills", path: filepath.Join(home, ".agents", "skills"), scope: ScopeUser},
 		{runtime: "agent_skills", path: filepath.Join(wd, ".agents", "skills"), scope: ScopeProject},
-	}
+	}...)
 	seen := map[string]bool{}
 	out := make([]skillRoot, 0, len(items))
 	for _, item := range items {

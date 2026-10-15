@@ -115,14 +115,18 @@ func DiscoverClaude() Harness {
 	h := Harness{Name: "claude_code", DisplayName: "Claude Code", Capability: "otel_env"}
 	detectExecutable(&h, "claude")
 	home, _ := os.UserHomeDir()
-	userConfig := filepath.Join(claudesession.ConfigDir(home), "settings.json")
+	configDir := claudesession.ConfigDir(home)
+	userConfig := ""
+	if configDir != "" {
+		userConfig = filepath.Join(configDir, "settings.json")
+	}
 	managedConfig := "/Library/Application Support/ClaudeCode/managed-settings.json"
 	if fileExists(managedConfig) {
 		h.ConfigPath = managedConfig
 		status, msg := claudeStatus(managedConfig)
 		h.TelemetryStatus = status
 		h.Message = msg
-	} else if fileExists(userConfig) {
+	} else if userConfig != "" && fileExists(userConfig) {
 		h.ConfigPath = userConfig
 		status, msg := claudeStatus(userConfig)
 		h.TelemetryStatus = status
@@ -132,7 +136,7 @@ func DiscoverClaude() Harness {
 		h.TelemetryStatus = TelemetryMissing
 		h.Message = "Claude settings file was not found"
 	}
-	if !h.Detected && dirExists(claudesession.ConfigDir(home)) {
+	if !h.Detected && configDir != "" && dirExists(configDir) {
 		h.Detected = true
 	}
 	return h

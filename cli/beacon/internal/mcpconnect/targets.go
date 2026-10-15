@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
@@ -302,13 +303,13 @@ func homePath(parts ...string) func(string) (string, error) {
 	}
 }
 
-// claudeConfigPath is the file `claude mcp add --scope user` writes: ~/.claude.json, or
-// .claude.json inside CLAUDE_CONFIG_DIR when that is set.
+// claudeConfigPath is the file `claude mcp add --scope user` writes: claudesession.StateFile.
 func claudeConfigPath(home string) (string, error) {
-	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
-		return filepath.Join(dir, ".claude.json"), nil
+	path := claudesession.StateFile(home)
+	if path == "" {
+		return "", errors.New("home directory is empty")
 	}
-	return filepath.Join(home, ".claude.json"), nil
+	return path, nil
 }
 
 // codexConfigPath resolves CODEX_HOME exactly as Codex and Beacon's session reader do.

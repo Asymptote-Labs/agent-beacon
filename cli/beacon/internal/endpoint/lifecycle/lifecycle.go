@@ -134,14 +134,15 @@ func reconcileInventoryJobWith(job inventoryJobController, opts InventoryJobOpti
 }
 
 // inventoryJobEnv is the environment written into a per-user inventory job. launchd and systemd
-// start the job without the user's shell environment, so a CODEX_HOME, CLINE_DIR or GEMINI_CLI_HOME
-// exported in a shell profile would not reach it and the scheduled scan would inventory ~/.codex,
-// ~/.cline or ~/.gemini while the runtime reads the moved directory. Each value is resolved now,
-// from the install's shell, as its runtime resolves it, and recorded as an absolute path so a
-// relative value still means the directory it named at install time:
+// start the job without the user's shell environment, so a CODEX_HOME, CLINE_DIR, GEMINI_CLI_HOME
+// or CLAUDE_CONFIG_DIR exported in a shell profile would not reach it and the scheduled scan would
+// inventory ~/.codex, ~/.cline, ~/.gemini or ~/.claude while the runtime reads the moved directory.
+// Each value is resolved now, from the install's shell, as its runtime resolves it, and recorded as
+// an absolute path so a relative value still means the directory it named at install time:
 //   - CODEX_HOME must name an existing directory, as Codex requires; otherwise nothing is recorded.
 //   - CLINE_DIR is used whenever it is non-empty after trimming, as Cline uses it.
 //   - GEMINI_CLI_HOME is used whenever it is non-empty, as Gemini CLI uses it.
+//   - CLAUDE_CONFIG_DIR is used whenever it is non-empty after trimming, as Claude Code uses it.
 //
 // A variable that is unset records nothing, and the job falls back to the default as before.
 // System mode records nothing: this process's environment is root's, not the console user's.
@@ -163,6 +164,11 @@ func inventoryJobEnv(userMode bool) map[string]string {
 	if value := os.Getenv("GEMINI_CLI_HOME"); value != "" {
 		if dir, err := filepath.Abs(value); err == nil {
 			env["GEMINI_CLI_HOME"] = dir
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); value != "" {
+		if dir, err := filepath.Abs(value); err == nil {
+			env["CLAUDE_CONFIG_DIR"] = dir
 		}
 	}
 	if len(env) == 0 {

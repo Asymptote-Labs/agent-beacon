@@ -213,6 +213,36 @@ func TestInventoryJobEnvRecordsGeminiCLIHomeForUserInstalls(t *testing.T) {
 	}
 }
 
+// Claude Code uses a trimmed, non-empty CLAUDE_CONFIG_DIR as is, so the job gets its absolute form
+// whenever it is set. It is recorded beside CODEX_HOME, not instead of it.
+func TestInventoryJobEnvRecordsClaudeConfigDirForUserInstalls(t *testing.T) {
+	work := t.TempDir()
+	t.Chdir(work)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	codexHome := filepath.Join(work, "codex-home")
+	if err := os.Mkdir(codexHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", codexHome)
+	t.Setenv("CLINE_DIR", "")
+	t.Setenv("GEMINI_CLI_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", " claude-alt ")
+
+	env := inventoryJobEnv(true)
+	if want := filepath.Join(cwd, "claude-alt"); env["CLAUDE_CONFIG_DIR"] != want {
+		t.Fatalf("CLAUDE_CONFIG_DIR = %q, want %q", env["CLAUDE_CONFIG_DIR"], want)
+	}
+	if env["CODEX_HOME"] == "" || len(env) != 2 {
+		t.Fatalf("env = %v, want both CODEX_HOME and CLAUDE_CONFIG_DIR", env)
+	}
+	if got := inventoryJobEnv(false); got != nil {
+		t.Fatalf("system mode env = %v, want none", got)
+	}
+}
+
 func TestReconcileInventoryJobWritesWithoutLoadingWhenAsked(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	calls := installFakeInventoryJob(t, true)

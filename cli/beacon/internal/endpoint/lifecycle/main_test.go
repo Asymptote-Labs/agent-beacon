@@ -17,7 +17,11 @@ import (
 //
 // The stand-ins answer as a machine with nothing installed, which is what CI sees, and refuse
 // anything that would register or start a service.
+//
+// It also clears CLAUDE_CONFIG_DIR, which a developer's shell may set: tests that write Claude Code
+// settings assume ~/.claude unless they set the variable themselves.
 func TestMain(m *testing.M) {
+	_ = os.Unsetenv("CLAUDE_CONFIG_DIR")
 	os.Exit(runWithServiceManagerStandIns(m))
 }
 

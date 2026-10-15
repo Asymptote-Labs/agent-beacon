@@ -15,6 +15,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"gopkg.in/yaml.v3"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/clinesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
@@ -266,13 +267,20 @@ func candidates(home, wd string) []candidate {
 	return out
 }
 
+// claudeCandidates resolves the user-scope files through CLAUDE_CONFIG_DIR, as Claude Code does.
+// Project and managed scope are unaffected.
 func claudeCandidates(home, wd string) []candidate {
-	return []candidate{
-		{runtime: "claude_code", path: filepath.Join(home, ".claude.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig, volatile: true},
-		{runtime: "claude_code", path: filepath.Join(home, ".claude", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig},
-		{runtime: "claude_code", path: filepath.Join(wd, ".claude", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindNativeConfig},
-		{runtime: "claude_code", path: "/Library/Application Support/ClaudeCode/managed-settings.json", scope: ScopeManaged, format: formatJSON, kind: KindManagedConfig},
+	items := []candidate{}
+	if state := claudesession.StateFile(home); state != "" {
+		items = append(items, candidate{runtime: "claude_code", path: state, scope: ScopeUser, format: formatJSON, kind: KindNativeConfig, volatile: true})
 	}
+	if dir := claudesession.ConfigDir(home); dir != "" {
+		items = append(items, candidate{runtime: "claude_code", path: filepath.Join(dir, "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig})
+	}
+	return append(items,
+		candidate{runtime: "claude_code", path: filepath.Join(wd, ".claude", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindNativeConfig},
+		candidate{runtime: "claude_code", path: "/Library/Application Support/ClaudeCode/managed-settings.json", scope: ScopeManaged, format: formatJSON, kind: KindManagedConfig},
+	)
 }
 
 // codexCandidates resolves the user-scope files through CODEX_HOME, as Codex does, and leaves them

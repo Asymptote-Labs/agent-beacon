@@ -404,6 +404,40 @@ func TestScanReadsGeminiSettingsFromGeminiCLIHome(t *testing.T) {
 	}
 }
 
+// With CLAUDE_CONFIG_DIR set, the Claude Code files inventory reads are the ones Claude Code reads:
+// settings.json, .claude.json and skills all move with it.
+func TestScanReadsClaudeUserFilesFromClaudeConfigDir(t *testing.T) {
+	home := t.TempDir()
+	configDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
+	writeFile(t, filepath.Join(configDir, "settings.json"), `{"mcpServers":{"github":{"command":"gh"}}}`)
+	writeFile(t, filepath.Join(configDir, ".claude.json"), `{"mcpServers":{"memory":{"command":"npx"}}}`)
+	writeFile(t, filepath.Join(configDir, "skills", "demo", "SKILL.md"), "---\nname: demo\ndescription: demo skill\n---\n")
+	writeFile(t, filepath.Join(home, ".claude", "settings.json"), `{"mcpServers":{"stale":{"command":"old"}}}`)
+	writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"stale":{"command":"old"}}}`)
+
+	result := Scan(Options{HomeDir: home, SkipProjectScope: true, Runtimes: []string{"claude_code"}, Now: fixedNow})
+	for _, path := range []string{filepath.Join(configDir, "settings.json"), filepath.Join(configDir, ".claude.json")} {
+		if config := findConfig(result.Configs, "claude_code", path); config == nil || !config.Exists || config.MCPServerCount != 1 {
+			t.Fatalf("%s = %#v, want it read with one MCP server", path, config)
+		}
+	}
+	for _, stale := range []string{filepath.Join(home, ".claude", "settings.json"), filepath.Join(home, ".claude.json")} {
+		if config := findConfig(result.Configs, "claude_code", stale); config != nil {
+			t.Fatalf("inventory reported %s, which Claude Code does not read with CLAUDE_CONFIG_DIR set: %#v", stale, config)
+		}
+	}
+	found := false
+	for _, skill := range result.Skills {
+		if skill.Runtime == "claude_code" && skill.SkillName == "demo" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("skills = %#v, want the demo skill under CLAUDE_CONFIG_DIR/skills", result.Skills)
+	}
+}
+
 func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 	home := t.TempDir()
 	work := t.TempDir()

@@ -42,6 +42,8 @@ beacon endpoint claude sync
 
 The sync path is local and offline. It appends mapped events to the runtime log with `harness.collection_method=poll`, so it can recover historical sessions or sessions that ran before hooks were installed, but it cannot hold, approve, deny, or delay tool calls. Use `beacon endpoint claude sync --print` to preview mapped events without writing the runtime log or advancing the cursor.
 
+Install, hook install, discovery, inventory, session sync, `beacon handoff`, `beacon mcp connect` and Beacon's skills install honor `CLAUDE_CONFIG_DIR` as Claude Code does: when it is set, `settings.json`, `.claude.json`, `skills` and `projects` are read and written there instead of `~/.claude` and `~/.claude.json`. The scheduled inventory job starts without your shell's environment, so a per-user `beacon endpoint install` or `repair` writes the `CLAUDE_CONFIG_DIR` it resolved into the job's launchd or systemd definition. If you change `CLAUDE_CONFIG_DIR` later, run `beacon endpoint repair` from a shell that has the new value. System-mode installs do not record it.
+
 ## Claude Code Cloud Agents
 
 Beacon also supports proof-of-concept telemetry capture from Claude Code
