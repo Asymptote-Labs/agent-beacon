@@ -349,7 +349,7 @@ func (s *Store) readGlobalStorage(ref TraceRef) ([]Record, error) {
 	}
 	if summary := compactionSummary(composer); summary != nil {
 		used, limit := contextFromAny(composer, composer.Context, summary)
-		records = append(records, Record{Order: order, NativeID: "compaction:" + stringValue(summary["compacted_through_id"]), Type: "system_event", Subtype: "compaction", TimestampMS: ref.UpdatedAtUnixMS, ContextUsedTokens: used, ContextLimitTokens: limit, Data: summary})
+		records = append(records, Record{Order: 0, NativeID: "compaction:" + stringValue(summary["compacted_through_id"]), Type: "system_event", Subtype: "compaction", TimestampMS: ref.UpdatedAtUnixMS, ContextUsedTokens: used, ContextLimitTokens: limit, Data: summary})
 	}
 	return records, nil
 }

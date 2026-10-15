@@ -18,16 +18,29 @@ import (
 type MappedEvent struct {
 	SourceOrder int
 	Event       schema.Event
+	// CompactionID is the native id of the compaction record this event reports, empty for every
+	// other event. The cursor remembers it, because a compaction has no stable place in the order.
+	CompactionID string
 }
 
 type MapOptions struct {
 	MinOrder int
+	// CompactionID is the compaction the cursor already reported.
+	CompactionID string
 }
 
 func MapTrace(ref TraceRef, records []Record, opts MapOptions) []MappedEvent {
 	var out []MappedEvent
 	for _, record := range records {
-		if record.Order <= opts.MinOrder {
+		// A compaction is not positioned among the bubbles: it describes the composer as a whole
+		// and is rebuilt on every read. Ordering it after the last bubble would hand its order to
+		// the next bubble, which the cursor would then skip, so it is reported once by identity.
+		isCompaction := record.Subtype == "compaction"
+		if isCompaction {
+			if record.NativeID == opts.CompactionID {
+				continue
+			}
+		} else if record.Order <= opts.MinOrder {
 			continue
 		}
 		ev, ok := mapRecord(ref, record)
@@ -36,7 +49,11 @@ func MapTrace(ref TraceRef, records []Record, opts MapOptions) []MappedEvent {
 		}
 		key := fmt.Sprintf("%s:%s:%d:%s:%s", ref.Kind, ref.ID, record.Order, record.NativeID, record.Type)
 		ev.Event.ID = cursorEventID(key)
-		out = append(out, MappedEvent{SourceOrder: record.Order, Event: ev})
+		mapped := MappedEvent{SourceOrder: record.Order, Event: ev}
+		if isCompaction {
+			mapped.CompactionID = record.NativeID
+		}
+		out = append(out, mapped)
 		// The link shares its prompt's record, so a sync that resumes from that record's order
 		// never splits the pair.
 		if link, ok := handoffLink(ref, record); ok {

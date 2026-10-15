@@ -20,6 +20,8 @@ const StateVersion = 1
 type Cursor struct {
 	LastOrder   int   `json:"last_order"`
 	UpdatedAtMS int64 `json:"updated_at_ms,omitempty"`
+	// CompactionID is the last compaction record reported for the trace.
+	CompactionID string `json:"compaction_id,omitempty"`
 }
 
 type State struct {
@@ -180,11 +182,13 @@ func collectTrace(store *Store, ref TraceRef, state *State, opts CollectOptions,
 	if err != nil {
 		return false, err
 	}
-	mapped := MapTrace(ref, records, MapOptions{MinOrder: cursor.LastOrder})
+	mapped := MapTrace(ref, records, MapOptions{MinOrder: cursor.LastOrder, CompactionID: cursor.CompactionID})
 	if len(mapped) == 0 {
 		cursor.UpdatedAtMS = ref.UpdatedAtUnixMS
-		if len(records) > 0 && records[len(records)-1].Order > cursor.LastOrder {
-			cursor.LastOrder = records[len(records)-1].Order
+		for _, record := range records {
+			if record.Order > cursor.LastOrder {
+				cursor.LastOrder = record.Order
+			}
 		}
 		return false, nil
 	}
@@ -194,7 +198,12 @@ func collectTrace(store *Store, ref TraceRef, state *State, opts CollectOptions,
 			cursor.LastOrder = partialLastOrder(start, mapped, i)
 			return true, err
 		}
-		cursor.LastOrder = item.SourceOrder
+		if item.SourceOrder > cursor.LastOrder {
+			cursor.LastOrder = item.SourceOrder
+		}
+		if item.CompactionID != "" {
+			cursor.CompactionID = item.CompactionID
+		}
 		summary.EventsEmitted++
 	}
 	cursor.UpdatedAtMS = ref.UpdatedAtUnixMS
