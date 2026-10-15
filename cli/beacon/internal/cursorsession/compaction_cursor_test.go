@@ -13,13 +13,13 @@ import (
 // reported the compaction again under a new id.
 func TestCollectGlobalStorageKeepsBubbleAddedAfterCompaction(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "state.vscdb")
-	composer := func(headers string) string {
-		return `{"composerId":"c1","createdAt":"2026-09-19T20:00:00Z","lastUpdatedAt":"` + `2026-09-19T20:00:0` + headers[:1] + `Z",
+	composer := func(lastUpdatedAt, headers string) string {
+		return `{"composerId":"c1","createdAt":"2026-09-19T20:00:00Z","lastUpdatedAt":"` + lastUpdatedAt + `",
 			"latestConversationSummary":{"lastBubbleId":"a1","summary":{"truncationLastBubbleIdInclusive":"u1","summary":"s"}},
-			"fullConversationHeadersOnly":` + headers[1:] + `}`
+			"fullConversationHeadersOnly":` + headers + `}`
 	}
 	writeCursorDB(t, dbPath, map[string]string{
-		"composerData:c1": composer(`3[{"bubbleId":"u1","type":1},{"bubbleId":"a1","type":2}]`),
+		"composerData:c1": composer("2026-09-19T20:00:03Z", `[{"bubbleId":"u1","type":1},{"bubbleId":"a1","type":2}]`),
 		"bubbleId:c1:u1":  `{"type":1,"text":"first prompt","createdAt":"2026-09-19T20:00:00Z"}`,
 		"bubbleId:c1:a1":  `{"type":2,"text":"first answer","createdAt":"2026-09-19T20:00:01Z"}`,
 	})
@@ -41,7 +41,7 @@ func TestCollectGlobalStorageKeepsBubbleAddedAfterCompaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if _, err := db.Exec(`UPDATE cursorDiskKV SET value=? WHERE key='composerData:c1'`, []byte(composer(`4[{"bubbleId":"u1","type":1},{"bubbleId":"a1","type":2},{"bubbleId":"u2","type":1}]`))); err != nil {
+	if _, err := db.Exec(`UPDATE cursorDiskKV SET value=? WHERE key='composerData:c1'`, []byte(composer("2026-09-19T20:00:04Z", `[{"bubbleId":"u1","type":1},{"bubbleId":"a1","type":2},{"bubbleId":"u2","type":1}]`))); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO cursorDiskKV(key,value) VALUES ('bubbleId:c1:u2', ?)`, []byte(`{"type":1,"text":"second prompt","createdAt":"2026-09-19T20:00:04Z"}`)); err != nil {
