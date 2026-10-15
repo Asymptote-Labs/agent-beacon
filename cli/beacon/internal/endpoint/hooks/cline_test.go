@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 // clineRenderedArgv extracts the argv the installer substituted into the plugin.
@@ -185,8 +187,8 @@ func TestClineEmbeddedPluginMatchesRootSource(t *testing.T) {
 
 func TestClinePluginPathsPerLevel(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
+	testenv.SetHome(t, home)
+	t.Setenv("CLINE_DIR", "")
 
 	userPath, err := clinePluginPath(LevelUser)
 	if err != nil {
@@ -206,6 +208,33 @@ func TestClinePluginPathsPerLevel(t *testing.T) {
 
 	if _, err := clinePluginPath("nonsense"); err == nil {
 		t.Error("clinePluginPath accepted an unknown level")
+	}
+}
+
+// Cline loads global plugins from $CLINE_DIR/plugins when CLINE_DIR is set, so the user-level
+// plugin goes there; a project plugin stays in <cwd>/.cline/plugins.
+func TestClinePluginPathFollowsClineDir(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	clineDir := t.TempDir()
+	t.Setenv("CLINE_DIR", clineDir)
+	userPath, err := clinePluginPath(LevelUser)
+	if err != nil {
+		t.Fatalf("clinePluginPath(user): %v", err)
+	}
+	if want := filepath.Join(clineDir, "plugins", "beacon.ts"); userPath != want {
+		t.Fatalf("user plugin path = %q, want %q", userPath, want)
+	}
+	t.Chdir(t.TempDir())
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectPath, err := clinePluginPath(LevelProject)
+	if err != nil {
+		t.Fatalf("clinePluginPath(project): %v", err)
+	}
+	if want := filepath.Join(cwd, ".cline", "plugins", "beacon.ts"); projectPath != want {
+		t.Fatalf("project plugin path = %q, want %q", projectPath, want)
 	}
 }
 

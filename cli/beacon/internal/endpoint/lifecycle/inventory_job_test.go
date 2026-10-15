@@ -132,6 +132,7 @@ func TestInventoryJobEnvRecordsCodexHomeForUserInstalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(work)
+	t.Setenv("CLINE_DIR", "")
 
 	// Relative, so the job, which starts elsewhere, needs the absolute form.
 	t.Setenv("CODEX_HOME", "codex-home")
@@ -150,6 +151,34 @@ func TestInventoryJobEnvRecordsCodexHomeForUserInstalls(t *testing.T) {
 	t.Setenv("CODEX_HOME", "")
 	if got := inventoryJobEnv(true); got != nil {
 		t.Fatalf("env with CODEX_HOME unset = %v, want none", got)
+	}
+}
+
+// Cline uses a trimmed, non-empty CLINE_DIR as is, so the job gets its absolute form whenever it is
+// set. It is recorded beside CODEX_HOME, not instead of it.
+func TestInventoryJobEnvRecordsClineDirForUserInstalls(t *testing.T) {
+	work := t.TempDir()
+	t.Chdir(work)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	codexHome := filepath.Join(work, "codex-home")
+	if err := os.Mkdir(codexHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", codexHome)
+	t.Setenv("CLINE_DIR", " cline-state ")
+
+	env := inventoryJobEnv(true)
+	if want := filepath.Join(cwd, "cline-state"); env["CLINE_DIR"] != want {
+		t.Fatalf("CLINE_DIR = %q, want %q", env["CLINE_DIR"], want)
+	}
+	if env["CODEX_HOME"] == "" || len(env) != 2 {
+		t.Fatalf("env = %v, want both CODEX_HOME and CLINE_DIR", env)
+	}
+	if got := inventoryJobEnv(false); got != nil {
+		t.Fatalf("system mode env = %v, want none", got)
 	}
 }
 

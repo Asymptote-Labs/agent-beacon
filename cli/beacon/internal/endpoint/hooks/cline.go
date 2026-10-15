@@ -2,11 +2,13 @@ package hooks
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/clinesession"
 	clineplugin "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks/assets/cline"
 )
 
@@ -184,11 +186,16 @@ func clinePluginPath(level Level) (string, error) {
 func clinePluginDir(level Level) (string, error) {
 	switch level {
 	case "", LevelUser:
+		// Cline loads global plugins from <CLINE_DIR or ~/.cline>/plugins.
 		home, err := os.UserHomeDir()
-		if err != nil {
+		dir := clinesession.ClineDir(home)
+		if dir == "" {
+			if err == nil {
+				err = errors.New("home directory is empty")
+			}
 			return "", err
 		}
-		return filepath.Join(home, ".cline", "plugins"), nil
+		return filepath.Join(dir, "plugins"), nil
 	case LevelProject:
 		cwd, err := os.Getwd()
 		if err != nil {

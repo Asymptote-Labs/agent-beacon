@@ -15,6 +15,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"gopkg.in/yaml.v3"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/clinesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 )
@@ -338,11 +339,14 @@ func opencodeCandidates(home, wd string) []candidate {
 	}
 }
 
+// clineCandidates resolves the user plugin through CLINE_DIR, as Cline does. Project scope is
+// always <wd>/.cline.
 func clineCandidates(home, wd string) []candidate {
-	return []candidate{
-		{runtime: "cline", path: filepath.Join(home, ".cline", "plugins", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
-		{runtime: "cline", path: filepath.Join(wd, ".cline", "plugins", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
+	items := []candidate{}
+	if dir := clinesession.ClineDir(home); dir != "" {
+		items = append(items, candidate{runtime: "cline", path: filepath.Join(dir, "plugins", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin})
 	}
+	return append(items, candidate{runtime: "cline", path: filepath.Join(wd, ".cline", "plugins", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin})
 }
 
 // piCandidates covers both documented Pi extension locations.

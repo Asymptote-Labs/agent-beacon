@@ -958,6 +958,7 @@ func clearCopilotEnv(t *testing.T) {
 func TestDiscoverClineDetectsConfigDirectoryWithoutAnExecutable(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
+	t.Setenv("CLINE_DIR", "")
 	t.Setenv("PATH", t.TempDir())
 	if err := os.MkdirAll(filepath.Join(home, ".cline"), 0755); err != nil {
 		t.Fatalf("mkdir cline config dir: %v", err)
@@ -979,6 +980,7 @@ func TestDiscoverClineDetectsConfigDirectoryWithoutAnExecutable(t *testing.T) {
 }
 
 func TestDiscoverClineTelemetryStatusVariants(t *testing.T) {
+	t.Setenv("CLINE_DIR", "")
 	cases := []struct {
 		name    string
 		plugin  string
@@ -1046,6 +1048,7 @@ func TestDiscoverClineDoesNotFallBackToAProjectPluginWhenHomeIsUnresolvable(t *t
 	// Windows.
 	t.Setenv("HOME", "")
 	t.Setenv("USERPROFILE", "")
+	t.Setenv("CLINE_DIR", "")
 
 	pluginPath := filepath.Join(work, ".cline", "plugins", "beacon.ts")
 	if err := os.MkdirAll(filepath.Dir(pluginPath), 0755); err != nil {

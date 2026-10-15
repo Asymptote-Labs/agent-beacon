@@ -20,7 +20,7 @@ Before enabling Cline telemetry, make sure:
 
 ## Collection paths
 
-Beacon installs an owned Cline plugin at `~/.cline/plugins/beacon.ts` for user-level hooks or `./.cline/plugins/beacon.ts` for project-level hooks. Cline auto-discovers plugin files in those directories, so no plugin registry command is required. That is also why the install works for the VS Code and JetBrains hosts, neither of which ships a `cline` executable.
+Beacon installs an owned Cline plugin at `$CLINE_DIR/plugins/beacon.ts` (default `~/.cline/plugins/beacon.ts`) for user-level hooks or `./.cline/plugins/beacon.ts` for project-level hooks. Cline auto-discovers plugin files in those directories, so no plugin registry command is required. That is also why the install works for the VS Code and JetBrains hosts, neither of which ships a `cline` executable.
 
 The plugin forwards `beforeRun`, `beforeTool`, `afterTool`, and `afterRun` hook payloads to Beacon's hook adapter. It spawns the adapter directly with an argument vector rather than through a shell, so the same plugin works unchanged on macOS, Linux, and Windows.
 
@@ -32,11 +32,13 @@ Beacon can also recover Cline activity from Cline's committed local session stor
 beacon endpoint cline sync
 ```
 
-The sync path reads `~/.cline/data/tasks`, `~/.cline/tasks`, Cline's VS Code global-storage task directory, `~/.cline/data/sessions`, and `~/.cline/kanban/workspaces`. It is local and offline, emits events with `harness.collection_method=poll`, and is useful for historical sessions or sessions that ran before the Beacon plugin was installed. Use `--print` to inspect mapped events without writing the runtime log or advancing the cursor.
+The sync path reads `data/tasks`, `tasks`, `data/sessions`, and `kanban/workspaces` under `$CLINE_DIR` (default `~/.cline`), plus Cline's VS Code global-storage task directory. It is local and offline, emits events with `harness.collection_method=poll`, and is useful for historical sessions or sessions that ran before the Beacon plugin was installed. Use `--print` to inspect mapped events without writing the runtime log or advancing the cursor.
+
+Plugin install, discovery, inventory, and session sync honor `CLINE_DIR` as Cline does: when it is set, it replaces `~/.cline`. The scheduled inventory job starts without your shell's environment, so a per-user `beacon endpoint install` or `repair` writes the `CLINE_DIR` it resolved into the job's launchd or systemd definition. If you change `CLINE_DIR` later, run `beacon endpoint repair` from a shell that has the new value. System-mode installs do not record it. Project-level `.cline` files are not affected.
 
 ## Discovery and status
 
-Beacon detects Cline through the `~/.cline` directory, treating a `cline` executable on `PATH` as an additional signal rather than the deciding one. A binary check alone would report "not detected" for the IDE hosts, which are the majority of installs.
+Beacon detects Cline through the `$CLINE_DIR` directory (default `~/.cline`), treating a `cline` executable on `PATH` as an additional signal rather than the deciding one. A binary check alone would report "not detected" for the IDE hosts, which are the majority of installs.
 
 Use `beacon endpoint hooks status --harness cline` to inspect Cline plugin status. Status reports installed only when the plugin references the hook binary that is actually present, so a plugin left behind by a removed or relocated install is reported as not installed rather than as working telemetry.
 

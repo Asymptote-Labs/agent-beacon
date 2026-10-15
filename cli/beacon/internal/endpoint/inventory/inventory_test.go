@@ -369,6 +369,23 @@ func TestScanReadsCodexUserConfigFromCodexHome(t *testing.T) {
 	}
 }
 
+// With CLINE_DIR set, the user plugin inventory reports is the one Cline loads.
+func TestScanReadsClinePluginFromClineDir(t *testing.T) {
+	home := t.TempDir()
+	clineDir := t.TempDir()
+	t.Setenv("CLINE_DIR", clineDir)
+	writeFile(t, filepath.Join(clineDir, "plugins", "beacon.ts"), `// beacon-managed-cline-plugin:v1`)
+	writeFile(t, filepath.Join(home, ".cline", "plugins", "beacon.ts"), `// beacon-managed-cline-plugin:v1`)
+
+	result := Scan(Options{HomeDir: home, SkipProjectScope: true, Runtimes: []string{"cline"}, Now: fixedNow})
+	if config := findConfig(result.Configs, "cline", filepath.Join(clineDir, "plugins", "beacon.ts")); config == nil || !config.Exists {
+		t.Fatalf("CLINE_DIR plugin = %#v, want it reported as present", config)
+	}
+	if stale := findConfig(result.Configs, "cline", filepath.Join(home, ".cline", "plugins", "beacon.ts")); stale != nil {
+		t.Fatalf("inventory reported ~/.cline/plugins/beacon.ts, which Cline does not load with CLINE_DIR set: %#v", stale)
+	}
+}
+
 func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 	home := t.TempDir()
 	work := t.TempDir()
@@ -383,8 +400,9 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 	// are cleared for the same reason.
 	t.Setenv("OMO_CODING_AGENT_DIR", "")
 	t.Setenv("SENPI_CODING_AGENT_DIR", "")
-	// Codex's user-scope files follow CODEX_HOME.
+	// Codex's and Cline's user-scope files follow CODEX_HOME and CLINE_DIR.
 	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLINE_DIR", "")
 
 	result := Scan(Options{
 		HomeDir:    home,
@@ -512,6 +530,7 @@ func TestScanYAMLAndMetadataOnlyConfigs(t *testing.T) {
 	home := t.TempDir()
 	work := t.TempDir()
 	t.Setenv("SHELL", "/bin/zsh")
+	t.Setenv("CLINE_DIR", "")
 	writeFile(t, filepath.Join(home, ".hermes", "config.yaml"), `
 mcpServers:
   memory:

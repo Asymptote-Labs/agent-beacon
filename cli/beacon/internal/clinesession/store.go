@@ -59,16 +59,23 @@ func NewStore(clineDir string) (*Store, error) {
 	}, nil
 }
 
-// DefaultClineDir is the Cline data directory: CLINE_DIR when set, else ~/.cline.
-func DefaultClineDir() string {
+// ClineDir is the Cline data directory for home, as Cline resolves it (resolveClineDir in
+// sdk/packages/shared/src/storage/paths.ts): a trimmed, non-empty CLINE_DIR, else <home>/.cline.
+// It is empty when CLINE_DIR is unset and home is empty.
+func ClineDir(home string) string {
 	if override := strings.TrimSpace(os.Getenv("CLINE_DIR")); override != "" {
 		return override
 	}
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
+	if strings.TrimSpace(home) == "" {
 		return ""
 	}
 	return filepath.Join(home, ".cline")
+}
+
+// DefaultClineDir is ClineDir for the current user's home directory.
+func DefaultClineDir() string {
+	home, _ := os.UserHomeDir()
+	return ClineDir(home)
 }
 
 func DefaultClineVSCodeStorageDir() string {

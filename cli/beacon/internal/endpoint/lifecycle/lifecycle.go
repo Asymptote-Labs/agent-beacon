@@ -134,22 +134,35 @@ func reconcileInventoryJobWith(job inventoryJobController, opts InventoryJobOpti
 }
 
 // inventoryJobEnv is the environment written into a per-user inventory job. launchd and systemd
-// start the job without the user's shell environment, so a CODEX_HOME exported in a shell profile
-// would not reach it and the scheduled scan would inventory ~/.codex while Codex reads
-// $CODEX_HOME. The value is resolved now, from the install's shell, as Codex resolves it: an
-// absolute path, so a relative CODEX_HOME still means the directory it named at install time. An
-// unset or invalid CODEX_HOME records nothing, and the job falls back to ~/.codex as before.
+// start the job without the user's shell environment, so a CODEX_HOME or CLINE_DIR exported in a
+// shell profile would not reach it and the scheduled scan would inventory ~/.codex or ~/.cline
+// while the runtime reads the moved directory. Each value is resolved now, from the install's
+// shell, as its runtime resolves it, and recorded as an absolute path so a relative value still
+// means the directory it named at install time:
+//   - CODEX_HOME must name an existing directory, as Codex requires; otherwise nothing is recorded.
+//   - CLINE_DIR is used whenever it is non-empty after trimming, as Cline uses it.
 //
+// A variable that is unset records nothing, and the job falls back to the default as before.
 // System mode records nothing: this process's environment is root's, not the console user's.
 func inventoryJobEnv(userMode bool) map[string]string {
-	if !userMode || os.Getenv("CODEX_HOME") == "" {
+	if !userMode {
 		return nil
 	}
-	dir, err := codexsession.HomeDir("")
-	if err != nil {
+	env := map[string]string{}
+	if os.Getenv("CODEX_HOME") != "" {
+		if dir, err := codexsession.HomeDir(""); err == nil {
+			env["CODEX_HOME"] = dir
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("CLINE_DIR")); value != "" {
+		if dir, err := filepath.Abs(value); err == nil {
+			env["CLINE_DIR"] = dir
+		}
+	}
+	if len(env) == 0 {
 		return nil
 	}
-	return map[string]string{"CODEX_HOME": dir}
+	return env
 }
 
 // inventoryEnabledFromConfigFile reads only the inventory_heartbeat.enabled key. A missing or

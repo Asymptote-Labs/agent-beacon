@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 func TestStoreListsTaskHistoryAndMapsEvents(t *testing.T) {
@@ -204,8 +206,7 @@ func writeJSON(t *testing.T, path string, value interface{}) {
 
 func TestDefaultClineDirHonorsClineDir(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
+	testenv.SetHome(t, home)
 	t.Setenv("CLINE_DIR", "")
 	if got := DefaultClineDir(); got != filepath.Join(home, ".cline") {
 		t.Fatalf("default dir = %q", got)

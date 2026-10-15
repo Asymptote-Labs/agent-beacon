@@ -35,6 +35,7 @@ func TestHookStatusesReportClineWithItsPluginPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("CLINE_DIR", "")
 
 	for _, status := range hookStatuses(filepath.Join(t.TempDir(), "runtime.jsonl"), true) {
 		if status.Target != "cline" {
