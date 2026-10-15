@@ -288,6 +288,15 @@ func emitAntigravityPromptFromTranscript(logger *logging.Logger, input map[strin
 	if prompt == "" {
 		return
 	}
+	// Claim the prompt before recording it. Parallel tool calls run parallel PreToolUse hooks, and
+	// a check followed by a later set let each of them see "not emitted" and record the prompt.
+	// A claim that could not be saved still records it: a duplicate beats a lost prompt.
+	claimed, err := st.MarkPromptEmittedIfNeeded()
+	if err != nil {
+		logger.Warn("Failed to persist prompt state", "error", err.Error())
+	} else if !claimed {
+		return
+	}
 	fields := sessionFields(sessionID, input)
 	fields["prompt"] = map[string]interface{}{"text": prompt}
 	fields["gen_ai"] = mergeNested(fields["gen_ai"], map[string]interface{}{
@@ -297,9 +306,6 @@ func emitAntigravityPromptFromTranscript(logger *logging.Logger, input map[strin
 	emitHookEvent(logger, "prompt.submitted", "prompt", "info", "Prompt submitted to agent", input, fields)
 	if link, ok := handoffLinkEvent(fields, prompt); ok {
 		emitHookEvent(logger, link.action, link.category, link.severity, link.message, input, link.fields)
-	}
-	if err := st.SetPromptEmitted(); err != nil {
-		logger.Warn("Failed to persist prompt state", "error", err.Error())
 	}
 }
 

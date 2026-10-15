@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -728,6 +729,41 @@ func TestRunPreToolSynthesizesAntigravityPromptFromTranscript(t *testing.T) {
 	}
 	if got := events[1]["file"].(map[string]interface{})["path"]; got != "/repo" {
 		t.Fatalf("file.path = %q, want normalized /repo", got)
+	}
+}
+
+// Parallel tool calls run parallel PreToolUse hooks. Each may fall back to the transcript, and the
+// prompt it finds must be recorded once, not once per hook that saw it unclaimed.
+func TestAntigravityTranscriptPromptIsRecordedOnceByParallelHooks(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "antigravity"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_CONTENT_RETENTION", "full")
+	transcriptPath := filepath.Join(t.TempDir(), "transcript.jsonl")
+	if err := os.WriteFile(transcriptPath, []byte(`{"source":"USER_EXPLICIT","type":"USER_INPUT","content":"<USER_REQUEST>\nrefactor the parser\n</USER_REQUEST>"}`+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			input := map[string]interface{}{"conversationId": "ag-parallel", "transcriptPath": transcriptPath}
+			emitAntigravityPromptFromTranscript(newHookLogger("pre-tool", "antigravity", "ag-parallel"), input, "ag-parallel")
+		}()
+	}
+	wg.Wait()
+
+	prompts := 0
+	for _, event := range endpointEvents(t, logPath) {
+		if event["event"].(map[string]interface{})["action"] == "prompt.submitted" {
+			prompts++
+		}
+	}
+	if prompts != 1 {
+		t.Fatalf("prompt.submitted recorded %d times by parallel hooks, want once", prompts)
 	}
 }
 
