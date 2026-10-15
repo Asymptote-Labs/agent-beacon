@@ -59,7 +59,11 @@ func NewStore(clineDir string) (*Store, error) {
 	}, nil
 }
 
+// DefaultClineDir is the Cline data directory: CLINE_DIR when set, else ~/.cline.
 func DefaultClineDir() string {
+	if override := strings.TrimSpace(os.Getenv("CLINE_DIR")); override != "" {
+		return override
+	}
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
 		return ""

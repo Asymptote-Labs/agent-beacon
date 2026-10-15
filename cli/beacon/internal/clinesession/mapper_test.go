@@ -201,3 +201,22 @@ func writeJSON(t *testing.T, path string, value interface{}) {
 		t.Fatal(err)
 	}
 }
+
+func TestDefaultClineDirHonorsClineDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("CLINE_DIR", "")
+	if got := DefaultClineDir(); got != filepath.Join(home, ".cline") {
+		t.Fatalf("default dir = %q", got)
+	}
+	custom := filepath.Join(t.TempDir(), "cline-state")
+	t.Setenv("CLINE_DIR", custom)
+	if got := DefaultClineDir(); got != custom {
+		t.Fatalf("CLINE_DIR dir = %q, want %q", got, custom)
+	}
+	store, err := NewStore("")
+	if err != nil || store.SessionsDir != filepath.Join(custom, "data", "sessions") {
+		t.Fatalf("store = %+v, %v", store, err)
+	}
+}
