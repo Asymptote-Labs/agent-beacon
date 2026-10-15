@@ -17,6 +17,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/clinesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 )
 
@@ -301,7 +302,7 @@ func cursorCandidates(home, wd string) []candidate {
 }
 
 func geminiCandidates(home string) []candidate {
-	return []candidate{{runtime: "gemini_cli", path: filepath.Join(home, ".gemini", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig}}
+	return []candidate{{runtime: "gemini_cli", path: harness.GeminiSettingsPath(home), scope: ScopeUser, format: formatJSON, kind: KindNativeConfig}}
 }
 
 func antigravityCandidates(home, wd string) []candidate {

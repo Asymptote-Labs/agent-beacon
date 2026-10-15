@@ -8,11 +8,20 @@ import (
 	"strings"
 )
 
+// GeminiSettingsPath is the user-scope Gemini CLI settings file. Gemini CLI looks for its
+// `.gemini` directory under GEMINI_CLI_HOME when that is set, and under the OS home otherwise.
+func GeminiSettingsPath(home string) string {
+	if override := strings.TrimSpace(os.Getenv("GEMINI_CLI_HOME")); override != "" {
+		home = override
+	}
+	return filepath.Join(home, ".gemini", "settings.json")
+}
+
 func DiscoverGemini() Harness {
 	h := Harness{Name: "gemini_cli", DisplayName: "Gemini CLI", Capability: "otel_config"}
 	detectExecutable(&h, "gemini")
 	home, _ := os.UserHomeDir()
-	h.ConfigPath = filepath.Join(home, ".gemini", "settings.json")
+	h.ConfigPath = GeminiSettingsPath(home)
 	if fileExists(h.ConfigPath) {
 		status, msg := geminiStatus(h.ConfigPath)
 		h.TelemetryStatus = status
@@ -29,7 +38,7 @@ func ConfigureGemini(opts ConfigureOptions) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(home, ".gemini", "settings.json")
+	path := GeminiSettingsPath(home)
 	settings := map[string]interface{}{}
 	if data, err := os.ReadFile(path); err == nil {
 		if err := json.Unmarshal(data, &settings); err != nil {

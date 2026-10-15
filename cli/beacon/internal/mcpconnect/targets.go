@@ -148,7 +148,7 @@ func Targets() []Target {
 		},
 		{
 			Name: "gemini_cli", DisplayName: "Gemini CLI", Aliases: []string{"gemini", "gemini-cli"},
-			Automatic: true, format: formatJSON, path: homePath(".gemini", "settings.json"), container: []string{"mcpServers"},
+			Automatic: true, format: formatJSON, path: func(home string) (string, error) { return harness.GeminiSettingsPath(home), nil }, container: []string{"mcpServers"},
 			entry: func(url, tokenEnv string) ordered {
 				e := ordered{{"url", url}, {"type", "http"}}
 				if tokenEnv != "" {

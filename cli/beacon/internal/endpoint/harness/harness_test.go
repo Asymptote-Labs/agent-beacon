@@ -1072,3 +1072,29 @@ func TestDiscoverClineDoesNotFallBackToAProjectPluginWhenHomeIsUnresolvable(t *t
 		t.Errorf("Message = %q, want it to name the unresolved directory", h.Message)
 	}
 }
+
+func TestGeminiSettingsHonorGeminiCLIHome(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	t.Setenv("GEMINI_CLI_HOME", "")
+	if got, want := GeminiSettingsPath(home), filepath.Join(home, ".gemini", "settings.json"); got != want {
+		t.Fatalf("default path = %q, want %q", got, want)
+	}
+
+	geminiHome := t.TempDir()
+	t.Setenv("GEMINI_CLI_HOME", geminiHome)
+	want := filepath.Join(geminiHome, ".gemini", "settings.json")
+	written, err := ConfigureGemini(ConfigureOptions{Endpoint: "http://127.0.0.1:4317", UserMode: true})
+	if err != nil {
+		t.Fatalf("ConfigureGemini returned error: %v", err)
+	}
+	if written != want {
+		t.Fatalf("ConfigureGemini path = %q, want %q", written, want)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".gemini")); !os.IsNotExist(err) {
+		t.Fatalf("settings were also written under the OS home: %v", err)
+	}
+	if got := DiscoverGemini().ConfigPath; got != want {
+		t.Fatalf("DiscoverGemini config path = %q, want %q", got, want)
+	}
+}
