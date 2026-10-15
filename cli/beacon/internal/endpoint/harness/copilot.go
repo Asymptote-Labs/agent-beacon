@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/copilotsession"
 )
 
 func DiscoverCopilotCLI() Harness {
@@ -15,7 +17,7 @@ func discoverCopilotCLI(expectedEndpoint string) Harness {
 	h := Harness{Name: "copilot_cli", DisplayName: "GitHub Copilot CLI", Capability: "otel_env"}
 	detectExecutable(&h, "copilot")
 	home, _ := os.UserHomeDir()
-	if !h.Detected && fileExists(filepath.Join(home, ".copilot", "config.json")) {
+	if dir, err := copilotsession.DefaultCopilotDir(); !h.Detected && err == nil && fileExists(filepath.Join(dir, "config.json")) {
 		h.Detected = true
 	}
 	h.ConfigPath = factoryProfilePath(home)

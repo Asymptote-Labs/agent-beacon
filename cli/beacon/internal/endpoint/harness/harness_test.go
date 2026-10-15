@@ -731,6 +731,7 @@ func TestDiscoverCopilotCLIDetectsConfigFile(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
 	t.Setenv("PATH", t.TempDir())
+	t.Setenv("COPILOT_HOME", "")
 	configPath := filepath.Join(home, ".copilot", "config.json")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
 		t.Fatalf("mkdir copilot config dir: %v", err)
@@ -742,6 +743,33 @@ func TestDiscoverCopilotCLIDetectsConfigFile(t *testing.T) {
 	h := DiscoverCopilotCLI()
 	if !h.Detected {
 		t.Fatalf("DiscoverCopilotCLI did not detect config file: %#v", h)
+	}
+}
+
+// With COPILOT_HOME set, the config file that marks Copilot CLI as present is the one under it; a
+// stale ~/.copilot/config.json does not count.
+func TestDiscoverCopilotCLIDetectsConfigFileUnderCopilotHome(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	t.Setenv("PATH", t.TempDir())
+	copilotHome := t.TempDir()
+	t.Setenv("COPILOT_HOME", copilotHome)
+	if err := os.WriteFile(filepath.Join(copilotHome, "config.json"), []byte(`{}`), 0600); err != nil {
+		t.Fatalf("write copilot config: %v", err)
+	}
+	if h := DiscoverCopilotCLI(); !h.Detected {
+		t.Fatalf("DiscoverCopilotCLI did not detect $COPILOT_HOME/config.json: %#v", h)
+	}
+
+	t.Setenv("COPILOT_HOME", filepath.Join(copilotHome, "empty"))
+	if err := os.MkdirAll(filepath.Join(home, ".copilot"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".copilot", "config.json"), []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if h := DiscoverCopilotCLI(); h.Detected {
+		t.Fatalf("DiscoverCopilotCLI detected ~/.copilot/config.json with COPILOT_HOME pointing elsewhere: %#v", h)
 	}
 }
 

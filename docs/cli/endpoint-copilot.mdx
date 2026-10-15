@@ -5,7 +5,7 @@ description: "Collect endpoint telemetry from GitHub Copilot CLI session records
 
 ## Command overview
 
-`beacon endpoint copilot` collects telemetry from [GitHub Copilot CLI](/runtimes/github-copilot-cli) by reading the session records Copilot commits under `~/.copilot/session-state` and converting them into Beacon [endpoint events](/concepts/core-concepts#endpoint-event).
+`beacon endpoint copilot` collects telemetry from [GitHub Copilot CLI](/runtimes/github-copilot-cli) by reading the session records Copilot commits under `$COPILOT_HOME/session-state` (default `~/.copilot/session-state`) and converting them into Beacon [endpoint events](/concepts/core-concepts#endpoint-event).
 
 ```bash title="Command syntax"
 beacon endpoint copilot [command]
@@ -30,7 +30,7 @@ Both subcommands accept:
 
 | Flag | Description |
 |------|-------------|
-| `--copilot-dir <path>` | GitHub Copilot CLI directory. Defaults to `~/.copilot` |
+| `--copilot-dir <path>` | GitHub Copilot CLI directory. Defaults to `$COPILOT_HOME` when set, otherwise `~/.copilot` |
 | `--state <path>` | Collector cursor file. Defaults to `~/.beacon/endpoint/state/copilot.json` |
 | `--workspace <path>` | Only include sessions whose recorded cwd matches this workspace |
 | `--session-id <id>` | Only include one Copilot CLI session id |
@@ -63,7 +63,7 @@ beacon endpoint copilot sync --print
 beacon endpoint copilot sync --watch --interval 5m
 ```
 
-Nothing sweeps on its own. Run `sync` under whatever scheduler the platform already uses, or leave `--watch` running in the account that owns `~/.copilot`.
+Nothing sweeps on its own. Run `sync` under whatever scheduler the platform already uses, or leave `--watch` running in the account that owns the Copilot directory. A scheduler that starts `sync` without your shell's environment needs `COPILOT_HOME` set in it, or `--copilot-dir`.
 
 ## Status
 

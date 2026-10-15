@@ -26,7 +26,7 @@ Sessions come from each runtime's own local session store, not from Beacon's run
 | Pi | `~/.pi/agent/sessions` (or under `PI_CODING_AGENT_DIR`) | `pi` |
 | Prime Agent | `~/.prime/agent`, both `sessions` and `session-artifacts` (or `PRIME_AGENT_CODING_AGENT_DIR`) | `prime` |
 | Factory Droid | `~/.factory/sessions` | `droid` |
-| GitHub Copilot CLI | `~/.copilot/session-state` | `copilot` |
+| GitHub Copilot CLI | `$COPILOT_HOME/session-state` when set; otherwise `~/.copilot/session-state` | `copilot` |
 | Hermes Agent | `$HERMES_HOME/state.db` when set; otherwise `~/.hermes/state.db` (Windows: `%LOCALAPPDATA%/hermes/state.db`) | `hermes` |
 | DeepSeek Harness | `~/.dsh/sessions` (or under `DSH_HOME`) | `dsh` |
 | fx | `~/.fx/sessions` | `fx` |

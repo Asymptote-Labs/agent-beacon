@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 func writeCopilotFixture(t *testing.T, root string) (string, string) {
@@ -322,8 +323,7 @@ func readFile(t *testing.T, path string) string {
 
 func TestDefaultCopilotDirHonorsCopilotHome(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
+	testenv.SetHome(t, home)
 	t.Setenv("COPILOT_HOME", "")
 	got, err := DefaultCopilotDir()
 	if err != nil || got != filepath.Join(home, ".copilot") {

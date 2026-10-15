@@ -18,7 +18,7 @@ var endpointCopilotCmd = &cobra.Command{
 	Short: "Collect telemetry from GitHub Copilot CLI sessions",
 	Long: `Collect endpoint telemetry from GitHub Copilot CLI's native session store.
 
-Copilot CLI persists local session records under ~/.copilot/session-state. Beacon
+Copilot CLI persists local session records under $COPILOT_HOME/session-state (default ~/.copilot/session-state). Beacon
 reads those records after the fact and maps them to endpoint events with
 harness.collection_method=poll. This complements the live OTLP integration:
 OTLP still provides live approvals and spans, while session sync backfills
@@ -58,7 +58,7 @@ func init() {
 
 	for _, c := range []*cobra.Command{endpointCopilotSyncCmd, endpointCopilotStatusCmd} {
 		f := c.Flags()
-		f.StringVar(&endpointCopilotOpts.copilotDir, "copilot-dir", "", "GitHub Copilot CLI directory (default ~/.copilot)")
+		f.StringVar(&endpointCopilotOpts.copilotDir, "copilot-dir", "", "GitHub Copilot CLI directory (default $COPILOT_HOME when set, otherwise ~/.copilot)")
 		f.StringVar(&endpointCopilotOpts.statePath, "state", "", "Collector cursor file (default ~/.beacon/endpoint/state/copilot.json)")
 		f.StringVar(&endpointCopilotOpts.workspace, "workspace", "", "Only include sessions whose cwd matches this workspace")
 		f.StringVar(&endpointCopilotOpts.sessionID, "session-id", "", "Only include one GitHub Copilot CLI session id")

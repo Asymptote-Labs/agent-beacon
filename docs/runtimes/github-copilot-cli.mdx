@@ -16,19 +16,19 @@ Before enabling GitHub Copilot CLI telemetry, make sure:
 - The Copilot CLI launch environment sets `COPILOT_OTEL_ENABLED=true`.
 - The Copilot CLI launch environment sets `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` or `COPILOT_OTEL_ENDPOINT=http://127.0.0.1:4318`.
 - Copilot CLI is restarted after launch-environment changes so new sessions use the updated settings.
-- For local session backfill, Copilot CLI has written sessions under `~/.copilot/session-state`.
+- For local session backfill, Copilot CLI has written sessions under `$COPILOT_HOME/session-state` (default `~/.copilot/session-state`).
 
 ## Collection path
 
 GitHub Copilot CLI exports OTLP HTTP telemetry to Beacon's local collector. Beacon normalizes Copilot spans into endpoint events for prompt submission, session activity, tool invocation, and approval-like permission activity.
 
-Beacon can also read committed session records from `~/.copilot/session-state` through [`beacon endpoint copilot sync`](/cli/endpoint-copilot). Polling backfills assistant text, complete tool results, command and file activity, and Copilot's persisted token usage. Every event from that path is marked `harness.collection_method=poll`, so readers can tell it was observed after Copilot committed the record rather than during the live tool call.
+Beacon can also read committed session records from `$COPILOT_HOME/session-state` (default `~/.copilot/session-state`) through [`beacon endpoint copilot sync`](/cli/endpoint-copilot). Polling backfills assistant text, complete tool results, command and file activity, and Copilot's persisted token usage. Every event from that path is marked `harness.collection_method=poll`, so readers can tell it was observed after Copilot committed the record rather than during the live tool call.
 
 Copilot CLI metrics are filtered from the local runtime JSONL log by default so endpoint timelines stay focused on user and agent activity. Use `--include-runtime-metrics` during install or repair only when you need low-level Copilot metrics for troubleshooting.
 
 ## Discovery and status
 
-Beacon detects GitHub Copilot CLI through the `copilot` executable or `~/.copilot/config.json`. Use `beacon endpoint discover` or `beacon endpoint status` to confirm that Copilot CLI is present and exporting to Beacon's local OTLP HTTP receiver.
+Beacon detects GitHub Copilot CLI through the `copilot` executable or `$COPILOT_HOME/config.json` (default `~/.copilot/config.json`). Use `beacon endpoint discover` or `beacon endpoint status` to confirm that Copilot CLI is present and exporting to Beacon's local OTLP HTTP receiver.
 
 Use `beacon endpoint copilot status` to inspect local session files and see how far the poll cursor has collected them.
 
