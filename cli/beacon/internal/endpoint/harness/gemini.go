@@ -9,9 +9,10 @@ import (
 )
 
 // GeminiSettingsPath is the user-scope Gemini CLI settings file. Gemini CLI looks for its
-// `.gemini` directory under GEMINI_CLI_HOME when that is set, and under the OS home otherwise.
+// `.gemini` directory under GEMINI_CLI_HOME when that is non-empty, used as is, and under the OS
+// home otherwise (homedir in packages/core/src/utils/paths.ts).
 func GeminiSettingsPath(home string) string {
-	if override := strings.TrimSpace(os.Getenv("GEMINI_CLI_HOME")); override != "" {
+	if override := os.Getenv("GEMINI_CLI_HOME"); override != "" {
 		home = override
 	}
 	return filepath.Join(home, ".gemini", "settings.json")

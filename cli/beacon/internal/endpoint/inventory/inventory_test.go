@@ -386,6 +386,24 @@ func TestScanReadsClinePluginFromClineDir(t *testing.T) {
 	}
 }
 
+// With GEMINI_CLI_HOME set, the Gemini CLI settings inventory reads are the ones Gemini reads.
+func TestScanReadsGeminiSettingsFromGeminiCLIHome(t *testing.T) {
+	home := t.TempDir()
+	geminiHome := t.TempDir()
+	t.Setenv("GEMINI_CLI_HOME", geminiHome)
+	writeFile(t, filepath.Join(geminiHome, ".gemini", "settings.json"), `{"mcpServers":{"github":{"command":"gh"}}}`)
+	writeFile(t, filepath.Join(home, ".gemini", "settings.json"), `{"mcpServers":{"stale":{"command":"old"}}}`)
+
+	result := Scan(Options{HomeDir: home, SkipProjectScope: true, Runtimes: []string{"gemini_cli"}, Now: fixedNow})
+	config := findConfig(result.Configs, "gemini_cli", filepath.Join(geminiHome, ".gemini", "settings.json"))
+	if config == nil || !config.Exists || config.MCPServerCount != 1 {
+		t.Fatalf("GEMINI_CLI_HOME settings.json = %#v, want it read with one MCP server", config)
+	}
+	if stale := findConfig(result.Configs, "gemini_cli", filepath.Join(home, ".gemini", "settings.json")); stale != nil {
+		t.Fatalf("inventory reported ~/.gemini/settings.json, which Gemini does not read with GEMINI_CLI_HOME set: %#v", stale)
+	}
+}
+
 func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 	home := t.TempDir()
 	work := t.TempDir()
@@ -400,9 +418,11 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 	// are cleared for the same reason.
 	t.Setenv("OMO_CODING_AGENT_DIR", "")
 	t.Setenv("SENPI_CODING_AGENT_DIR", "")
-	// Codex's and Cline's user-scope files follow CODEX_HOME and CLINE_DIR.
+	// Codex's, Cline's and Gemini CLI's user-scope files follow CODEX_HOME, CLINE_DIR and
+	// GEMINI_CLI_HOME.
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("CLINE_DIR", "")
+	t.Setenv("GEMINI_CLI_HOME", "")
 
 	result := Scan(Options{
 		HomeDir:    home,

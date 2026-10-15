@@ -187,7 +187,7 @@ Connect writes these entries (OAuth mode shown, then what `--token-env NAME` add
 | Codex CLI | `~/.codex/config.toml` (`$CODEX_HOME`) | `[mcp_servers.beacon-managed]` `url = …` | `bearer_token_env_var = "NAME"` | `codex mcp login beacon-managed` |
 | Cursor | `~/.cursor/mcp.json` | `mcpServers.beacon-managed = {"url": …}` | `"Bearer ${env:NAME}"` | Cursor Settings → MCP, then sign in where it says "Needs login" |
 | VS Code | User-profile `mcp.json` (next to the user `settings.json`) | `servers.beacon-managed = {"type": "http", "url": …}` | `"Bearer ${input:beacon-managed-token}"` and a password prompt input | "MCP: List Servers", then start `beacon-managed` |
-| Gemini CLI | `~/.gemini/settings.json` | `mcpServers.beacon-managed = {"url": …, "type": "http"}` | `"Bearer ${NAME}"` | `/mcp auth beacon-managed` |
+| Gemini CLI | `~/.gemini/settings.json` (`$GEMINI_CLI_HOME/.gemini/settings.json`) | `mcpServers.beacon-managed = {"url": …, "type": "http"}` | `"Bearer ${NAME}"` | `/mcp auth beacon-managed` |
 | OpenCode | `~/.config/opencode/opencode.json`, or `opencode.jsonc` | `mcp.beacon-managed = {"type": "remote", "url": …, "enabled": true}` | `"oauth": false`, `"Bearer {env:NAME}"` | `opencode mcp auth beacon-managed` |
 | Oh My Pi | The active profile's `mcp.json`: `~/.omp/agent/mcp.json`, or `~/.omp/profiles/<name>/agent/mcp.json` under `OMP_PROFILE` (or `PI_PROFILE`). `PI_CODING_AGENT_DIR` replaces the default profile's directory, and `PI_CONFIG_DIR` renames `.omp` | `mcpServers.beacon-managed = {"type": "http", "url": …}` | `headers.Authorization: "Bearer ${NAME}"` | `/mcp reauth beacon-managed` |
 

@@ -133,6 +133,7 @@ func TestInventoryJobEnvRecordsCodexHomeForUserInstalls(t *testing.T) {
 	}
 	t.Chdir(work)
 	t.Setenv("CLINE_DIR", "")
+	t.Setenv("GEMINI_CLI_HOME", "")
 
 	// Relative, so the job, which starts elsewhere, needs the absolute form.
 	t.Setenv("CODEX_HOME", "codex-home")
@@ -169,6 +170,7 @@ func TestInventoryJobEnvRecordsClineDirForUserInstalls(t *testing.T) {
 	}
 	t.Setenv("CODEX_HOME", codexHome)
 	t.Setenv("CLINE_DIR", " cline-state ")
+	t.Setenv("GEMINI_CLI_HOME", "")
 
 	env := inventoryJobEnv(true)
 	if want := filepath.Join(cwd, "cline-state"); env["CLINE_DIR"] != want {
@@ -176,6 +178,35 @@ func TestInventoryJobEnvRecordsClineDirForUserInstalls(t *testing.T) {
 	}
 	if env["CODEX_HOME"] == "" || len(env) != 2 {
 		t.Fatalf("env = %v, want both CODEX_HOME and CLINE_DIR", env)
+	}
+	if got := inventoryJobEnv(false); got != nil {
+		t.Fatalf("system mode env = %v, want none", got)
+	}
+}
+
+// Gemini CLI uses a non-empty GEMINI_CLI_HOME as is, without requiring it to exist, so the job gets
+// its absolute form whenever it is set. It is recorded beside CODEX_HOME, not instead of it.
+func TestInventoryJobEnvRecordsGeminiCLIHomeForUserInstalls(t *testing.T) {
+	work := t.TempDir()
+	t.Chdir(work)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	codexHome := filepath.Join(work, "codex-home")
+	if err := os.Mkdir(codexHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", codexHome)
+	t.Setenv("CLINE_DIR", "")
+	t.Setenv("GEMINI_CLI_HOME", "gemini-home")
+
+	env := inventoryJobEnv(true)
+	if want := filepath.Join(cwd, "gemini-home"); env["GEMINI_CLI_HOME"] != want {
+		t.Fatalf("GEMINI_CLI_HOME = %q, want %q", env["GEMINI_CLI_HOME"], want)
+	}
+	if env["CODEX_HOME"] == "" || len(env) != 2 {
+		t.Fatalf("env = %v, want both CODEX_HOME and GEMINI_CLI_HOME", env)
 	}
 	if got := inventoryJobEnv(false); got != nil {
 		t.Fatalf("system mode env = %v, want none", got)

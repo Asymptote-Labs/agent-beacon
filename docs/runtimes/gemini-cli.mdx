@@ -23,13 +23,15 @@ Gemini CLI exports local OpenTelemetry data to Beacon's localhost collector when
 
 ## Discovery and status
 
-Beacon detects Gemini CLI through the `gemini` executable and `~/.gemini/settings.json`. Use `beacon endpoint discover` or `beacon endpoint status` to confirm that Gemini CLI is present and configured.
+Beacon detects Gemini CLI through the `gemini` executable and `$GEMINI_CLI_HOME/.gemini/settings.json` (default `~/.gemini/settings.json`). Use `beacon endpoint discover` or `beacon endpoint status` to confirm that Gemini CLI is present and configured.
+
+Install, discovery, inventory, and `beacon mcp connect` honor `GEMINI_CLI_HOME` as Gemini CLI does: when it is set, its `.gemini` directory replaces `~/.gemini`. The scheduled inventory job starts without your shell's environment, so a per-user `beacon endpoint install` or `repair` writes the `GEMINI_CLI_HOME` it resolved into the job's launchd or systemd definition. If you change `GEMINI_CLI_HOME` later, run `beacon endpoint repair` from a shell that has the new value. System-mode installs do not record it.
 
 ## Install or configuration support
 
 The default `beacon endpoint install` configures Gemini automatically when it is detected. Run `beacon endpoint install --harness claude,codex,gemini` to select it explicitly instead.
 
-Beacon writes local OTLP settings to `~/.gemini/settings.json`, sets `target` to `local`, uses OTLP gRPC, enables collector mode, and removes `outfile` so telemetry flows to Beacon.
+Beacon writes local OTLP settings to `$GEMINI_CLI_HOME/.gemini/settings.json` (default `~/.gemini/settings.json`), sets `target` to `local`, uses OTLP gRPC, enables collector mode, and removes `outfile` so telemetry flows to Beacon.
 
 Gemini CLI is not currently configured through Beacon's hook adapter.
 

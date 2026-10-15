@@ -433,6 +433,7 @@ func isolate(t *testing.T) string {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("CODEX_HOME", "")
+	t.Setenv("GEMINI_CLI_HOME", "")
 	// An explicitly empty OMP_PROFILE is Oh My Pi's default profile even when PI_PROFILE is set.
 	for _, name := range []string{"PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "OMP_PROFILE", "PI_PROFILE"} {
 		t.Setenv(name, "")
@@ -785,6 +786,16 @@ func TestCodexHonorsCodexHome(t *testing.T) {
 	connect(t, fileOptions(home), mustTarget(t, "codex"))
 	if !strings.Contains(readFile(t, filepath.Join(codexHome, "config.toml")), "[mcp_servers.beacon-managed]") {
 		t.Fatal("CODEX_HOME was not honored")
+	}
+}
+
+func TestGeminiHonorsGeminiCLIHome(t *testing.T) {
+	home := isolate(t)
+	geminiHome := filepath.Join(home, "elsewhere")
+	t.Setenv("GEMINI_CLI_HOME", geminiHome)
+	connect(t, fileOptions(home), mustTarget(t, "gemini"))
+	if !strings.Contains(readFile(t, filepath.Join(geminiHome, ".gemini", "settings.json")), "beacon-managed") {
+		t.Fatal("GEMINI_CLI_HOME was not honored")
 	}
 }
 
