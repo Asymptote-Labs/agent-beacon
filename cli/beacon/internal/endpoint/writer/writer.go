@@ -91,6 +91,17 @@ func AppendEvent(event schema.Event, opts Options) (string, error) {
 		}
 	}
 	if len(data) > opts.MaxBytes {
+		// Retained content is the next thing to go after raw, as in the hook adapter and the
+		// collector exporter. Each string is capped but their number is not (a multi-edit's
+		// arguments, a long todo list), and an error here makes a session sweep stop at the line
+		// and meet it again on every later sweep.
+		compactRetainedContent(&event)
+		data, err = json.Marshal(event)
+		if err != nil {
+			return "", err
+		}
+	}
+	if len(data) > opts.MaxBytes {
 		return "", fmt.Errorf("event exceeds maximum size after truncation: %d bytes", len(data))
 	}
 	// Stamped last, over the bytes that are actually about to be written, so the
@@ -113,6 +124,33 @@ func AppendEvent(event schema.Event, opts Options) (string, error) {
 		return "", err
 	}
 	return opts.Path, nil
+}
+
+// compactRetainedContent drops an event's retained text and records that it did, so a reader can
+// still tell what the event was about and that its content was held back rather than never
+// captured. Mirrors the collector exporter's step of the same name.
+func compactRetainedContent(event *schema.Event) {
+	if event.File != nil {
+		event.File.Diff = ""
+	}
+	if event.Command != nil {
+		event.Command.Output = ""
+	}
+	if event.Prompt != nil {
+		event.Prompt.Text = ""
+	}
+	if event.GenAI != nil {
+		event.GenAI.Input = nil
+		event.GenAI.Output = nil
+		if event.GenAI.Tool != nil && event.GenAI.Tool.Call != nil {
+			event.GenAI.Tool.Call.Arguments = nil
+			event.GenAI.Tool.Call.Result = nil
+		}
+	}
+	if event.Content != nil {
+		event.Content.Included = false
+		event.Content.Truncated = true
+	}
 }
 
 // EnsureSystemLogWritable prepares a machine-wide runtime log so the people whose agent sessions

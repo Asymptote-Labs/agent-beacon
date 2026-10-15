@@ -448,3 +448,49 @@ func TestRetainedLogPathsMatchesWhatRotationKeeps(t *testing.T) {
 		t.Fatalf("RetainedLogPaths(\"\") = %v, want nil", got)
 	}
 }
+
+// A tool call whose arguments hold many strings (a multi-edit, a long todo list) stays over the size
+// limit after raw is dropped and the message is cut, because each string is capped but their number
+// is not. The hook adapter and the collector exporter then drop the retained content and keep the
+// event; this writer used to fail it, and a session sweep that gets an error stops at that line and
+// meets it again on every later sweep.
+func TestAppendEventKeepsAnOversizedToolCallWithoutItsRetainedContent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	edits := make([]interface{}, 0, 40)
+	for i := 0; i < 40; i++ {
+		edits = append(edits, map[string]interface{}{
+			"old_string": strings.Repeat("a", 3000),
+			"new_string": strings.Repeat("b", 3000),
+		})
+	}
+	event := schema.NewEvent(schema.NewEventOptions{
+		Action:  "tool.invoked",
+		Harness: schema.HarnessInfo{Name: "test"},
+		Message: "MultiEdit",
+	})
+	event.GenAI = &schema.GenAIInfo{Tool: &schema.GenAIToolInfo{
+		Name: "MultiEdit",
+		Call: &schema.GenAIToolCallInfo{ID: "call_1", Arguments: map[string]interface{}{"edits": edits}},
+	}}
+
+	if _, err := AppendEvent(event, Options{Path: path}); err != nil {
+		t.Fatalf("AppendEvent dropped the event instead of compacting it: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if len(data) > MaxEventBytes+1 {
+		t.Fatalf("line is %d bytes, over the %d byte limit", len(data), MaxEventBytes)
+	}
+	var decoded schema.Event
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("line is not an event: %v", err)
+	}
+	if !decoded.Truncated {
+		t.Fatal("a compacted event must say it was truncated")
+	}
+	if decoded.GenAI == nil || decoded.GenAI.Tool == nil || decoded.GenAI.Tool.Call == nil || decoded.GenAI.Tool.Call.ID != "call_1" {
+		t.Fatalf("the tool call's identity must survive compaction: %+v", decoded.GenAI)
+	}
+}
