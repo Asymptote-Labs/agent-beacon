@@ -494,3 +494,32 @@ func TestAppendEventKeepsAnOversizedToolCallWithoutItsRetainedContent(t *testing
 		t.Fatalf("the tool call's identity must survive compaction: %+v", decoded.GenAI)
 	}
 }
+
+// A prompt event whose gen_ai held only the turn's input is left with nothing in gen_ai once the
+// input goes, and the line must not carry an empty "gen_ai":{} object.
+func TestAppendEventDropsAnEmptiedGenAIObject(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	parts := make([]interface{}, 0, 40)
+	for i := 0; i < 40; i++ {
+		parts = append(parts, map[string]interface{}{"type": "text", "content": strings.Repeat("p", 3000)})
+	}
+	event := schema.NewEvent(schema.NewEventOptions{
+		Action:  "prompt.submitted",
+		Harness: schema.HarnessInfo{Name: "test"},
+		Message: "prompt",
+	})
+	event.GenAI = &schema.GenAIInfo{Input: &schema.GenAIInputInfo{Messages: []interface{}{
+		map[string]interface{}{"role": "user", "parts": parts},
+	}}}
+
+	if _, err := AppendEvent(event, Options{Path: path}); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if strings.Contains(string(data), `"gen_ai"`) {
+		t.Fatalf("compacted line kept an empty gen_ai object:\n%s", data)
+	}
+}

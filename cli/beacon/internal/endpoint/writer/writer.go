@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -145,6 +146,11 @@ func compactRetainedContent(event *schema.Event) {
 		if event.GenAI.Tool != nil && event.GenAI.Tool.Call != nil {
 			event.GenAI.Tool.Call.Arguments = nil
 			event.GenAI.Tool.Call.Result = nil
+		}
+		// An event whose only gen_ai content was the turn text drops the object rather than
+		// writing "gen_ai":{}, as the exporter does.
+		if reflect.ValueOf(*event.GenAI).IsZero() {
+			event.GenAI = nil
 		}
 	}
 	if event.Content != nil {
