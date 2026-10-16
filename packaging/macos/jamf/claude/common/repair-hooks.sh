@@ -70,16 +70,44 @@ echo "Console user: $CONSOLE_USER"
 echo "Home directory: $HOME_DIR"
 
 echo "Resetting Beacon hook binary ownership for $CONSOLE_USER..."
-USER_GROUP="$(id -gn "$CONSOLE_USER")"
 HOOK_DIR="$HOME_DIR/.beacon/endpoint/hooks"
 HOOK_BIN="$HOOK_DIR/beacon-hooks"
-mkdir -p "$HOOK_DIR"
-chown -R "$CONSOLE_USER:$USER_GROUP" "$HOME_DIR/.beacon"
-chmod 755 "$HOME_DIR/.beacon" "$HOME_DIR/.beacon/endpoint" "$HOOK_DIR"
-rm -f "$HOOK_BIN"
+# Everything under the user's home is created and changed as the user, never as
+# root: the user controls these paths, so a root chown/chmod/rm there follows any
+# symlink or hard link they planted (a hard link to /opt/beacon/bin/beacon would be
+# handed to them by a recursive chown). A directory root left behind is renamed
+# aside (rename never follows links) so the user can recreate it.
+for dir in "$HOME_DIR/.beacon" "$HOME_DIR/.beacon/endpoint" "$HOOK_DIR"; do
+  if [ -L "$dir" ]; then
+    echo "Refusing to repair hooks: $dir is a symbolic link" >&2
+    exit 1
+  fi
+  if [ -e "$dir" ] && [ "$(stat -f %Su "$dir")" != "$CONSOLE_USER" ]; then
+    aside="$dir.not-owned.$(date +%Y%m%d%H%M%S)"
+    echo "Moving $dir (not owned by $CONSOLE_USER) aside to $aside" >&2
+    mv "$dir" "$aside"
+  fi
+done
+sudo -u "$CONSOLE_USER" mkdir -p "$HOOK_DIR"
+sudo -u "$CONSOLE_USER" chmod 755 "$HOME_DIR/.beacon" "$HOME_DIR/.beacon/endpoint" "$HOOK_DIR"
+sudo -u "$CONSOLE_USER" rm -f "$HOOK_BIN"
 
 echo "Granting $CONSOLE_USER append access to Beacon runtime and inventory logs..."
-chmod +a "$CONSOLE_USER allow list,search,add_file,delete_child,readattr,writeattr" "$RUNTIME_DIR" || true
+# The directory stays root-owned 0755 with no grant to add or remove entries: hooks only append
+# to the files below. Such a grant would let a user swap a log for a link that the root collector
+# and inventory job then open. Earlier versions of this script, and the Jamf guide's snippet,
+# granted add_file (with or without delete_child) to whoever was the console user then, so every
+# such allow entry is removed, whoever it names, highest index first so the indexes still to
+# remove do not shift. Read-only grants stay.
+revoke_entry_grants() {
+  ls -led "$1" |
+    awk '$1 ~ /^[0-9]+:$/ && / allow / && /add_file|add_subdirectory|delete_child/ { sub(":", "", $1); print $1 }' |
+    sort -rn |
+    while read -r index; do
+      chmod -a# "$index" "$1"
+    done
+}
+revoke_entry_grants "$RUNTIME_DIR"
 chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$RUNTIME_LOG" || true
 chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$RUNTIME_LOCK" || true
 chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$INVENTORY_LOG" || true
