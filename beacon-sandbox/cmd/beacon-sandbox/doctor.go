@@ -69,7 +69,7 @@ func cmdDoctor(args []string) error {
 	} else {
 		add(doctorCheck{Name: "go", Status: statusFail,
 			Detail: "go not found on PATH",
-			Fix:    "install Go 1.24+ from https://go.dev/dl/"})
+			Fix:    "install Go 1.27+ from https://go.dev/dl/"})
 	}
 
 	// The checks are per-provider, because a check that cannot apply must not be reported as a
