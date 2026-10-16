@@ -38,6 +38,11 @@ func TestShellWrittenPaths(t *testing.T) {
 		{"(cd sub && rm x)", nil}, // x is sub/x, which this parser does not follow
 		{"cd /tmp && rm /abs/path.txt && rm rel.txt", []string{"/abs/path.txt"}},
 		{"rm before.txt; cd sub; rm after.txt", []string{"before.txt"}},
+		{"command cd sub && rm after.txt", nil},
+		{"ROOT=sub cd sub && touch after.txt", nil},
+		{"command cd sub && rm /abs/path.txt", []string{"/abs/path.txt"}},
+		{"touch before.txt; command pushd sub; rm after.txt", []string{"before.txt"}},
+		{"command popd; rm after.txt", nil},
 		{"ls -la; go test ./...", nil},
 		{"cat <<EOF > gen.txt\nhello\nEOF", []string{"gen.txt"}},
 	} {
