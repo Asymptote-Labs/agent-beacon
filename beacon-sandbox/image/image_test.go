@@ -691,3 +691,21 @@ func TestBuildInstallsTheBundledVectorOnlyWhenAsked(t *testing.T) {
 		t.Errorf("the layer must end by running Vector, so a bad binary fails the build:\n%s", layer)
 	}
 }
+
+// The release packages check Vector against packaging/vector/, and this image against
+// VectorSHA256. Both must name the same archive, or i04 tests a Vector the packages do not ship;
+// a Vector bump that updates one pin and not the other fails here.
+func TestVectorPinMatchesTheReleasePin(t *testing.T) {
+	path := filepath.Join("..", "..", "packaging", "vector", "vector-"+VectorVersion+"-SHA256SUMS")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("the release pins no checksums for Vector %s: %v", VectorVersion, err)
+	}
+	want := VectorSHA256 + "  vector-" + VectorVersion + "-x86_64-unknown-linux-musl.tar.gz"
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == want {
+			return
+		}
+	}
+	t.Fatalf("%s has no line %q:\n%s", path, want, data)
+}

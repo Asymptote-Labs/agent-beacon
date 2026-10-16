@@ -17,7 +17,20 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # The protection that holds against a rewritten workflow: the npm-publish environment allows
+    # deployments only from sdk-js-v* tags, and npm's trusted publisher for @asymptote/sdk requires
+    # this environment. A branch that drops this line gets no token npm accepts; one that keeps it
+    # is refused by GitHub before the job starts.
+    environment: npm-publish
     steps:
+      - name: Require an SDK release tag
+        # Catches an accidental dispatch from a branch, before any branch code is installed with
+        # id-token: write. It is not the security boundary: workflow_dispatch runs the workflow
+        # file from the dispatched ref, which can omit this step. The environment above is.
+        if: github.ref_type != 'tag' || !startsWith(github.ref_name, 'sdk-js-v')
+        run: |
+          echo "npm publish runs only from an sdk-js-v* tag (got ${GITHUB_REF})" >&2
+          exit 1
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -39,7 +52,6 @@ jobs:
         working-directory: packages/asymptote-sdk-js
         run: npm ci
       - name: Verify tag matches SDK version
-        if: startsWith(github.ref, 'refs/tags/')
         working-directory: packages/asymptote-sdk-js
         shell: bash
         run: |

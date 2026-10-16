@@ -327,7 +327,7 @@ separate Vector install.
 
 The Linux `.deb`, `.rpm`, and release archives carry Vector too. Run
 `sh packaging/linux/fetch-vector.sh` before GoReleaser: it downloads the static
-(musl) build for both arches, checks it against Vector's published checksums and
+(musl) build for both arches, checks it against the checksums pinned in `packaging/vector/` (never a file from the download host) and
 for a program interpreter, and stages it under `cli/beacon/release-vector/`. The
 GoReleaser before-hook fails without it. The packages install it as
 `/opt/beacon/bin/vector`; the archives carry it as `beacon-vector`, which the

@@ -681,7 +681,7 @@ jobs:
         id: vector-cache
         with:
           path: cli/beacon/release-vector
-          key: release-vector-${{ hashFiles('packaging/linux/fetch-vector.sh') }}
+          key: release-vector-${{ hashFiles('packaging/linux/fetch-vector.sh', 'packaging/vector/*') }}
       - name: Download Vector for the Linux packages
         if: steps.vector-cache.outputs.cache-hit != 'true'
         run: sh packaging/linux/fetch-vector.sh

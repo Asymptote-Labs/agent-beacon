@@ -19,6 +19,11 @@
 # expanding the ${VAR:-default} form, and 0.58 stops expanding ${VAR} at all unless Vector runs
 # with --dangerously-allow-env-var-interpolation. (Beacon Cloud's connect is unaffected because
 # it writes literal values.)
+#
+# The archives are checked against packaging/vector/vector-<version>-SHA256SUMS, committed in this
+# repository, not against a checksum file fetched from the same host as the archives: the binary
+# is signed into Beacon's packages and runs as the root forwarder, so a compromised download host
+# must not be able to supply both. A new version needs its pinned checksums committed first.
 set -eu
 
 VECTOR_VERSION="${VECTOR_VERSION:-0.56.0}"
@@ -42,7 +47,9 @@ fi
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT INT TERM
 sums="vector-${VECTOR_VERSION}-SHA256SUMS"
-curl -fsSL --retry 3 -o "$work/$sums" "$BASE_URL/$sums"
+pinned="$ROOT_DIR/packaging/vector/$sums"
+[ -f "$pinned" ] || { echo "fetch-vector: no pinned checksums at $pinned; commit them for Vector $VECTOR_VERSION first" >&2; exit 1; }
+cp "$pinned" "$work/$sums"
 
 for arch in $ARCHES; do
   case "$arch" in
@@ -53,7 +60,7 @@ for arch in $ARCHES; do
   archive="vector-${VECTOR_VERSION}-${triple}.tar.gz"
   curl -fsSL --retry 3 -o "$work/$archive" "$BASE_URL/$archive"
   line="$(awk -v a="$archive" '$2 == a { print }' "$work/$sums")"
-  [ -n "$line" ] || { echo "fetch-vector: no checksum for $archive in $sums" >&2; exit 1; }
+  [ -n "$line" ] || { echo "fetch-vector: no pinned checksum for $archive in $pinned" >&2; exit 1; }
   (cd "$work" && printf '%s\n' "$line" | sha256_check)
 
   mkdir -p "$work/$arch"
