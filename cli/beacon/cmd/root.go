@@ -141,7 +141,7 @@ func printRootSplash(cmd *cobra.Command) {
 	out := cmd.OutOrStdout()
 	cmd.SetOut(out)
 	printBeaconBanner(out, shouldUseColor(out))
-	fmt.Fprintln(out, "Open-source telemetry layer for AI agents.")
+	fmt.Fprintln(out, "Self-improving memory for coding agents.")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Start with:")
 	fmt.Fprintln(out, "  beacon endpoint install")
