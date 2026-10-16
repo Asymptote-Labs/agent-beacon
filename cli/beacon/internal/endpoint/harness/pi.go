@@ -18,9 +18,6 @@ func DiscoverPi() Harness {
 	h := Harness{Name: "pi_cli", DisplayName: "Pi", Capability: "plugin"}
 	detectExecutable(&h, "pi")
 
-	home, _ := os.UserHomeDir()
-	agentDir := filepath.Join(home, ".pi", "agent")
-
 	// A missing home directory leaves the config path empty rather than resolving to a relative
 	// path like ".pi/agent/extensions/beacon.ts", which would make discovery report on whatever
 	// happens to sit under the current working directory.
@@ -37,7 +34,7 @@ func DiscoverPi() Harness {
 	// is still there. Treating that directory as evidence keeps `endpoint discover` from reporting
 	// "not detected" for a runtime the user is actively using, which is the same fallback the
 	// opencode, Cursor and Hermes probes make for the same reason.
-	if !h.Detected && dirExists(agentDir) {
+	if !h.Detected && dirExists(filepath.Dir(filepath.Dir(extensionPath))) {
 		h.Detected = true
 	}
 

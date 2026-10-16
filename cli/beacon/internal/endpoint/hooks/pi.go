@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	piextension "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks/assets/pi"
 )
@@ -15,6 +16,10 @@ import (
 // plugin, and the handling of that file lives in managedExtension, shared with Oh My Pi.
 const (
 	piExtensionFileName = "beacon.ts"
+
+	// piAgentDirEnv replaces Pi's user-level agent directory outright, which is where the user
+	// extension root lives. Pi's session store (pisession) honors the same variable.
+	piAgentDirEnv = "PI_CODING_AGENT_DIR"
 
 	// PiManagedExtensionMarker identifies an extension file as one Beacon wrote.
 	//
@@ -118,7 +123,7 @@ func piExtensionDir(level Level) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return filepath.Join(home, ".pi", "agent", "extensions"), nil
+		return piUserExtensionDir(home)
 	case LevelProject:
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -128,4 +133,36 @@ func piExtensionDir(level Level) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown hook level %q", level)
 	}
+}
+
+// PiExtensionPathForHome is the user-level extension file for home. Inventory uses it so a scan
+// reports the file the installer writes, including where PI_CODING_AGENT_DIR moves it.
+func PiExtensionPathForHome(home string) (string, error) {
+	dir, err := piUserExtensionDir(home)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, piExtensionFileName), nil
+}
+
+// piUserExtensionDir is <PI_CODING_AGENT_DIR or ~/.pi/agent>/extensions. A leading `~` in the
+// override is expanded, as Pi does, so the install never creates a literal `~` directory.
+func piUserExtensionDir(home string) (string, error) {
+	if override := strings.TrimSpace(os.Getenv(piAgentDirEnv)); override != "" {
+		if override == "~" || strings.HasPrefix(override, "~/") || strings.HasPrefix(override, `~\`) {
+			if home == "" {
+				return "", fmt.Errorf("home directory is required to resolve %s=%q", piAgentDirEnv, override)
+			}
+			if override == "~" {
+				override = home
+			} else {
+				override = filepath.Join(home, filepath.FromSlash(override[2:]))
+			}
+		}
+		return filepath.Join(override, "extensions"), nil
+	}
+	if home == "" {
+		return "", fmt.Errorf("home directory is required to resolve the Pi extension path")
+	}
+	return filepath.Join(home, ".pi", "agent", "extensions"), nil
 }

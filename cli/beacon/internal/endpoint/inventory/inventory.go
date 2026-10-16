@@ -369,11 +369,13 @@ func clineCandidates(home, wd string) []candidate {
 func piCandidates(home, wd string) []candidate {
 	items := []candidate{}
 	if home != "" {
-		items = append(items, candidate{
-			runtime: "pi_cli",
-			path:    filepath.Join(home, ".pi", "agent", "extensions", "beacon.ts"),
-			scope:   ScopeUser, format: formatMetadataOnly, kind: KindPlugin,
-		})
+		if path, err := hooks.PiExtensionPathForHome(home); err == nil {
+			items = append(items, candidate{
+				runtime: "pi_cli",
+				path:    path,
+				scope:   ScopeUser, format: formatMetadataOnly, kind: KindPlugin,
+			})
+		}
 	}
 	if wd != "" {
 		items = append(items, candidate{

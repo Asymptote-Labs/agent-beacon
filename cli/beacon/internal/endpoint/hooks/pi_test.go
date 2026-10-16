@@ -293,3 +293,45 @@ func TestPiExtensionReferencesBinaryHandlesWindowsPaths(t *testing.T) {
 		t.Fatal("piExtensionReferencesBinary matched an empty binary path")
 	}
 }
+
+// PI_CODING_AGENT_DIR replaces Pi's user agent directory outright, and Beacon's Pi session store
+// already reads it. An install that ignored it would write the extension where Pi does not look.
+func TestPiExtensionPathHonorsTheAgentDirOverride(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	agentDir := filepath.Join(home, "elsewhere", "agent")
+	t.Setenv(piAgentDirEnv, agentDir)
+
+	got, err := PiExtensionPath(LevelUser)
+	if err != nil {
+		t.Fatalf("PiExtensionPath returned error: %v", err)
+	}
+	if want := filepath.Join(agentDir, "extensions", "beacon.ts"); got != want {
+		t.Fatalf("PiExtensionPath = %q, want %q", got, want)
+	}
+
+	t.Setenv(piAgentDirEnv, "~/custom/agent")
+	got, err = PiExtensionPath(LevelUser)
+	if err != nil {
+		t.Fatalf("PiExtensionPath returned error: %v", err)
+	}
+	if want := filepath.Join(home, "custom", "agent", "extensions", "beacon.ts"); got != want {
+		t.Fatalf("PiExtensionPath with ~ = %q, want %q", got, want)
+	}
+}
+
+func TestPiAgentDirOverrideDoesNotMoveTheProjectPath(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	testenv.SetHome(t, home)
+	t.Chdir(cwd)
+	t.Setenv(piAgentDirEnv, filepath.Join(home, "elsewhere", "agent"))
+
+	got, err := PiExtensionPath(LevelProject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(cwd, ".pi", "extensions", "beacon.ts"); got != want {
+		t.Fatalf("PiExtensionPath(project) = %q, want %q", got, want)
+	}
+}
