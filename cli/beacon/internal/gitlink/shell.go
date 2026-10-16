@@ -36,7 +36,7 @@ func unwrappedCommand(words []string) []string {
 			words = words[1:]
 			continue
 		}
-		if w == "sudo" || w == "command" || w == "exec" || w == "nohup" || w == "time" {
+		if w == "sudo" || w == "command" || w == "builtin" || w == "exec" || w == "nohup" || w == "time" {
 			words = words[1:]
 			continue
 		}

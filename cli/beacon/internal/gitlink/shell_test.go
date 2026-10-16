@@ -40,6 +40,7 @@ func TestShellWrittenPaths(t *testing.T) {
 		{"rm before.txt; cd sub; rm after.txt", []string{"before.txt"}},
 		{"command cd sub && rm after.txt", nil},
 		{"ROOT=sub cd sub && touch after.txt", nil},
+		{"builtin cd sub && rm after.txt", nil},
 		{"command cd sub && rm /abs/path.txt", []string{"/abs/path.txt"}},
 		{"touch before.txt; command pushd sub; rm after.txt", []string{"before.txt"}},
 		{"command popd; rm after.txt", nil},
