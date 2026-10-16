@@ -277,17 +277,32 @@ A pushed `v*` tag runs the full release end-to-end via
    staples, and uploads the `.pkg`, `.sha256`, and `update-manifest.json`.
    GoReleaser still publishes multi-arch CLI tarballs; the signed endpoint
    `.pkg` is arm64-only so it can carry a current Vector release.
-3. `windows-package` (windows-2025, `needs: goreleaser`) builds the x64 MSI from
-   the published archive, installs and uninstalls it on the runner to prove it
-   works, and attaches the `.msi` and its `.sha256`. Deliberately **not** in the
-   `release` environment: that environment gates signing secrets, and the MSI is
-   unsigned, so this job has none to gate.
+3. `windows-package` (windows-2025, `needs: goreleaser`, `environment: release`)
+   builds the x64 MSI from the published archive, signs it when signing is
+   configured, installs and uninstalls it on the runner to prove it works, and
+   attaches the `.msi` and its `.sha256`.
+
+Windows Authenticode signing goes through Azure Trusted Signing with jsign
+(`packaging/windows/sign-authenticode.ps1`), signed in by OIDC through
+`.github/actions/trusted-signing-login`. It is off until the
+`AZURE_TRUSTED_SIGNING_ACCOUNT` variable is set; without it every signing step is
+a no-op and the release ships unsigned, as before. When it is set, goreleaser's
+build hooks sign `beacon.exe`, `beacon-hooks.exe` and the embedded hooks copy,
+the `goreleaser` job signs `beacon-otelcol.exe`, `windows-package` signs the MSI
+before its `.sha256` is written, and `packaging/windows/assert-authenticode.ps1`
+fails the release unless all four published files are `Valid`, timestamped, and
+signed by `Asymptote Labs, Inc.`.
 
 Required `release`-environment secrets: `HOMEBREW_TAP_TOKEN`,
 `DEVELOPER_ID_APP_CERT_P12`, `DEVELOPER_ID_APP_CERT_PASSWORD`,
 `DEVELOPER_ID_INSTALLER_CERT_P12`, `DEVELOPER_ID_INSTALLER_CERT_PASSWORD`,
 `NOTARY_API_KEY_P8`, `NOTARY_API_KEY_ID`, `NOTARY_API_ISSUER`; plus Variables
 `DEVELOPER_ID_APP_IDENTITY`, `DEVELOPER_ID_INSTALLER_IDENTITY`, `APPLE_TEAM_ID`.
+Windows signing adds secrets `AZURE_CLIENT_ID` and `AZURE_TENANT_ID` (an Entra app
+with a federated credential for this repository's `release` environment and the
+Trusted Signing Certificate Profile Signer role) and Variables
+`AZURE_TRUSTED_SIGNING_ENDPOINT` (e.g. `https://eus.codesigning.azure.net`),
+`AZURE_TRUSTED_SIGNING_ACCOUNT`, `AZURE_TRUSTED_SIGNING_PROFILE`.
 Keep one-time Apple-side onboarding steps out of the repo and share them with
 the release maintainer directly. Never use `pull_request_target` or build
 untrusted PR code in the signing job.
@@ -384,11 +399,13 @@ The release should include the five GoReleaser CLI archives (four `.tar.gz` plus
 `BeaconEndpointAgent-<version>-arm64.pkg`, its `.sha256`, `update-manifest.json`,
 and `BeaconEndpointAgent-<version>-x64.msi` with its `.sha256`.
 
-The MSI is unsigned, so `pkgutil`/`stapler`/`spctl` have no Windows counterpart to
-run. Its `.sha256` is therefore the only integrity check it has, and the release
-job proves the package works by installing it on a runner before attaching it —
-verification by execution rather than by signature. Both change when Authenticode
-signing is added. Verify the package before announcing the release:
+Until Windows signing is configured the MSI is unsigned, so its `.sha256` is the
+only integrity check it has, and the release job proves the package works by
+installing it on a runner before attaching it. Once signing is configured, check it
+on Windows with `Get-AuthenticodeSignature BeaconEndpointAgent-<version>-x64.msi`
+(`Status` `Valid`, signer `CN=Asymptote Labs, Inc.`), or anywhere with
+`osslsigncode verify -in BeaconEndpointAgent-<version>-x64.msi`. Verify the macOS
+package before announcing the release:
 
 ```bash
 tmpdir="$(mktemp -d)"
@@ -580,7 +597,7 @@ unpacked through Chrome's developer mode.
 - `cross-build` (ubuntu): builds all five release targets and asserts the Linux binaries are statically linked (no `PT_INTERP`).
 - `package-smoke` (macOS): `packaging/macos/test-endpoint-scripts.sh`, a `build-pkg.sh` payload check, and `packaging/macos/smoke-endpoint.sh`.
 - `linux-systemd-smoke` and `linux-package-smoke` (ubuntu): the real systemd install path, and installing the built `.deb` in a systemd container.
-- `windows-package-smoke` (windows-2025): `packaging/windows/test-endpoint-scripts.ps1`, then building the MSI and installing it.
+- `windows-package-smoke` (windows-2025): `packaging/windows/test-endpoint-scripts.ps1` (which also checks that the signing helper is a no-op without signing configured and that `assert-authenticode.ps1` refuses unsigned and foreign-signed files), then building the MSI and installing it.
 
 The Go jobs build the embedded hooks binary first (`make build-hooks-current`); `cli/beacon` tests
 fail against the placeholder because `InstallFactory` requires a real binary.

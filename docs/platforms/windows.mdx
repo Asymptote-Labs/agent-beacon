@@ -24,13 +24,14 @@ msiexec /i BeaconEndpointAgent-<version>-x64.msi /qn /l*v install.log
 The install needs administrator rights, because it writes under `%ProgramData%` and registers a service. Elevation is requested for you when you double-click the package. A silent install must already be running elevated, which is the normal case for Intune, SCCM, or a management agent.
 
 <Warning>
-  **The installer is not code-signed yet.** Windows SmartScreen warns that the publisher is unknown, and you need to choose "More info" then "Run anyway". Verify what you downloaded against the published `.sha256` first:
+  **Releases are not Authenticode-signed yet.** The release pipeline signs the MSI and `beacon.exe`, `beacon-hooks.exe` and `beacon-otelcol.exe` as Asymptote Labs, Inc. once a signing certificate is in place. Check what you downloaded:
 
   ```powershell
+  Get-AuthenticodeSignature BeaconEndpointAgent-<version>-x64.msi | Format-List Status, SignerCertificate
   (Get-FileHash BeaconEndpointAgent-<version>-x64.msi -Algorithm SHA256).Hash
   ```
 
-  Authenticode signing is planned. Until then, the checksum is the only integrity check the package has.
+  A signed package reports `Status: Valid` with a signer of `CN=Asymptote Labs, Inc.`. An unsigned one reports `NotSigned`. Windows SmartScreen then warns that the publisher is unknown, and you need to choose "More info" then "Run anyway". Compare the hash with the published `.sha256` first, because for an unsigned package the checksum is the only integrity check it has.
 </Warning>
 
 <Note>
@@ -209,7 +210,7 @@ msiexec /i BeaconEndpointAgent-<newer>-x64.msi /qn
 The upgrade stops the endpoint, replaces the binaries, and brings it back. That ordering is required: Windows cannot replace a file a running process holds open, so an upgrade that left the collector running would fail, defer the replacement to your next reboot, or silently keep the old binary. Your configuration and collected log survive the upgrade.
 
 <Note>
-  `beacon endpoint update --apply` does not work on Windows yet. It reports that automatic apply is only supported for a package install it recognizes, rather than pretending to update. Self-update is waiting on code signing, because downloading and running an unsigned installer automatically is a worse trade than doing it by hand.
+  `beacon endpoint update --apply` does not work on Windows yet. It reports that automatic apply is only supported for a package install it recognizes, rather than pretending to update. Self-update is waiting on signed releases, because downloading and running an installer automatically is only safe when Beacon can check that Asymptote Labs signed it.
 </Note>
 
 ## Uninstall
@@ -240,7 +241,7 @@ beacon endpoint uninstall --system
 
 | Gap | Status |
 |---|---|
-| The installer is unsigned | SmartScreen warns. Verify the published `.sha256`. Authenticode signing is planned |
+| The installer is unsigned | SmartScreen warns. Verify the published `.sha256`. Signing is built into the release pipeline and waits on a certificate |
 | `beacon endpoint update --apply` | Not supported on Windows. It refuses rather than pretending. Waiting on signing |
 | `beacon ci exec` | Captures intermittently on Windows ([#320](https://github.com/asymptote-labs/agent-beacon/issues/320)). The installed-hook path on this page is unaffected |
 | User-mode collectors | Do not restart and do not survive sign-out, because Windows has no per-user service manager |

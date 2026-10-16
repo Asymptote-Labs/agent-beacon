@@ -20,7 +20,7 @@ function Fail {
     $script:failures++
 }
 
-$scripts = @('install-endpoint.ps1', 'uninstall-endpoint.ps1', 'build-msi.ps1')
+$scripts = @('install-endpoint.ps1', 'uninstall-endpoint.ps1', 'build-msi.ps1', 'sign-authenticode.ps1', 'assert-authenticode.ps1')
 foreach ($name in $scripts) {
     $path = Join-Path $scriptDir $name
     if (-not (Test-Path -LiteralPath $path)) {
@@ -79,6 +79,33 @@ foreach ($needle in @('install-endpoint.ps1', 'uninstall-endpoint.ps1')) {
 }
 if ($wxs -match 'ExeCommand="[^"]*beacon\.exe') {
     Fail "beacon.wxs invokes beacon.exe directly; the install contract belongs in one place, not two"
+}
+
+# Without signing configured a release must still ship, unsigned, exactly as before.
+$probe = Join-Path ([System.IO.Path]::GetTempPath()) ("beacon-sign-probe-" + [Guid]::NewGuid().ToString('N') + '.ps1')
+"Write-Output 'unsigned'" | Set-Content -LiteralPath $probe -Encoding ascii
+try {
+    $before = (Get-FileHash -LiteralPath $probe).Hash
+    $env:AZURE_TRUSTED_SIGNING_ACCOUNT = $null
+    & pwsh -NoProfile -File (Join-Path $scriptDir 'sign-authenticode.ps1') -Path $probe | Out-Null
+    if ($LASTEXITCODE -ne 0) { Fail "sign-authenticode.ps1 fails when signing is not configured; an unsigned release must still succeed" }
+    elseif ((Get-FileHash -LiteralPath $probe).Hash -ne $before) { Fail "sign-authenticode.ps1 changed a file when signing is not configured" }
+    else { Write-Output 'ok: sign-authenticode.ps1 leaves files alone when signing is not configured' }
+
+    if ($IsWindows) {
+        $assert = Join-Path $scriptDir 'assert-authenticode.ps1'
+        & pwsh -NoProfile -File $assert -Path $probe | Out-Null
+        if ($LASTEXITCODE -eq 0) { Fail "assert-authenticode.ps1 accepted an unsigned file" }
+        # pwsh itself is validly signed, by Microsoft: refused for the wrong publisher, accepted for
+        # the right one, so a pass is not just a check that always fails.
+        $pwsh = (Get-Process -Id $PID).Path
+        & pwsh -NoProfile -File $assert -Path $pwsh | Out-Null
+        if ($LASTEXITCODE -eq 0) { Fail "assert-authenticode.ps1 accepted a file signed by another publisher" }
+        & pwsh -NoProfile -File $assert -Path $pwsh -Publisher 'Microsoft Corporation'
+        if ($LASTEXITCODE -ne 0) { Fail "assert-authenticode.ps1 refused a validly signed file" }
+    }
+} finally {
+    Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
 }
 
 if ($failures -gt 0) {
