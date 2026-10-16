@@ -137,7 +137,8 @@ func reconcileInventoryJobWith(job inventoryJobController, opts InventoryJobOpti
 // inventoryJobEnv is the environment written into a per-user inventory job. launchd and systemd
 // start the job without the user's shell environment, so a CODEX_HOME, HERMES_HOME, CLINE_DIR,
 // GEMINI_CLI_HOME or CLAUDE_CONFIG_DIR exported in a shell profile would not reach it and the
-// scheduled scan would inventory ~/.codex, ~/.hermes, ~/.cline, ~/.gemini or ~/.claude while the
+// scheduled scan would inventory ~/.codex, ~/.hermes, ~/.cline, ~/.gemini, ~/.claude (or the
+// default Kiro, Kimi Code, Harness and OpenHands directories) while the
 // runtime reads the moved directory. Each value is resolved now, from the install's shell, as its
 // runtime resolves it, and recorded as an absolute path so a relative value still means the
 // directory it named at install time:
@@ -148,6 +149,8 @@ func reconcileInventoryJobWith(job inventoryJobController, opts InventoryJobOpti
 //   - CLINE_DIR is used whenever it is non-empty after trimming, as Cline uses it.
 //   - GEMINI_CLI_HOME is used whenever it is non-empty, as Gemini CLI uses it.
 //   - CLAUDE_CONFIG_DIR is used whenever it is non-empty after trimming, as Claude Code uses it.
+//   - KIRO_HOME, KIMI_CODE_HOME, DSH_HOME and OH_PERSISTENCE_DIR are used whenever they are
+//     non-empty after trimming, as the inventory scan uses them.
 //
 // A variable that is unset records nothing, and the job falls back to the default as before.
 // System mode records nothing: this process's environment is root's, not the console user's.
@@ -180,6 +183,13 @@ func inventoryJobEnv(userMode bool) map[string]string {
 	if value := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); value != "" {
 		if dir, err := filepath.Abs(value); err == nil {
 			env["CLAUDE_CONFIG_DIR"] = dir
+		}
+	}
+	for _, name := range []string{"KIRO_HOME", "KIMI_CODE_HOME", "DSH_HOME", "OH_PERSISTENCE_DIR"} {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			if dir, err := filepath.Abs(value); err == nil {
+				env[name] = dir
+			}
 		}
 	}
 	if len(env) == 0 {

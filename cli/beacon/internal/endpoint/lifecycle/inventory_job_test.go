@@ -530,3 +530,34 @@ func TestRepairTeardownKeepsScriptForwarders(t *testing.T) {
 		t.Fatalf("repair's uninstall step changed what it keeps: %+v", opts)
 	}
 }
+
+// The scheduled job starts without the installing shell's environment, so the variables that move
+// the other runtimes' user directories the inventory scan reads (Kiro, Kimi Code, Harness and
+// OpenHands) are recorded too, as absolute paths. Without them the job scans ~/.kiro and the rest
+// while the runtime reads the moved directory.
+func TestInventoryJobEnvRecordsTheRemainingInventoryRootVariables(t *testing.T) {
+	work := t.TempDir()
+	t.Chdir(work)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"CODEX_HOME", "HERMES_HOME", "HERMES_DATA_DIR_SUFFIX", "CLINE_DIR", "GEMINI_CLI_HOME", "CLAUDE_CONFIG_DIR"} {
+		t.Setenv(name, "")
+	}
+	for _, name := range []string{"KIRO_HOME", "KIMI_CODE_HOME", "DSH_HOME", "OH_PERSISTENCE_DIR"} {
+		t.Setenv(name, name+"-dir")
+	}
+	env := inventoryJobEnv(true)
+	if len(env) != 4 {
+		t.Fatalf("user mode env = %v, want the four inventory root variables", env)
+	}
+	for _, name := range []string{"KIRO_HOME", "KIMI_CODE_HOME", "DSH_HOME", "OH_PERSISTENCE_DIR"} {
+		if want := filepath.Join(cwd, name+"-dir"); env[name] != want {
+			t.Fatalf("%s = %q, want %q", name, env[name], want)
+		}
+	}
+	if got := inventoryJobEnv(false); got != nil {
+		t.Fatalf("system mode env = %v, want none", got)
+	}
+}
