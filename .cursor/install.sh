@@ -31,7 +31,7 @@ go_is_compatible() {
   local go_binary="$1"
   local current_version
   current_version="$("$go_binary" version 2>/dev/null | awk '{print $3}')"
-  [[ "$current_version" =~ ^go1\.([0-9]+) ]] && [ "${BASH_REMATCH[1]}" -ge 24 ]
+  [[ "$current_version" =~ ^go1\.([0-9]+) ]] && [ "${BASH_REMATCH[1]}" -ge 27 ]
 }
 
 install_go() {
@@ -49,7 +49,7 @@ install_go() {
     fi
   fi
 
-  local go_version="${BEACON_GO_VERSION:-1.24.4}"
+  local go_version="${BEACON_GO_VERSION:-1.27.2}"
   local arch
 
   case "$(uname -m)" in

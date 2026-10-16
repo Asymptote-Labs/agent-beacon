@@ -57,7 +57,7 @@ maintainer asks otherwise.
 
 ## Development Setup
 
-Install Go 1.24 or newer. The repository has separate Go modules for the CLI,
+Install Go 1.27 or newer. The repository has separate Go modules for the CLI,
 hook adapter, and Collector exporter, so run Go commands from the module you are
 working in.
 

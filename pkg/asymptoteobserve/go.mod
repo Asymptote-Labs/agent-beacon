@@ -1,6 +1,8 @@
 module github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve
 
-go 1.25.0
+go 1.27.0
+
+toolchain go1.27.2
 
 require (
 	github.com/google/cel-go v0.30.0

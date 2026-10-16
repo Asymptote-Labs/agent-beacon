@@ -1,6 +1,8 @@
 module github.com/asymptote-labs/agent-beacon/cli/beacon
 
-go 1.25.0
+go 1.27.0
+
+toolchain go1.27.2
 
 require (
 	github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve v0.0.0
