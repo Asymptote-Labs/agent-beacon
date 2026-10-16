@@ -11,6 +11,8 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## October 2026
 
+- **The scheduled inventory job follows every moved runtime directory** · The job starts without your shell's environment, so a per-user install or repair records the variables that move a runtime's user directory into it. It recorded `CODEX_HOME`, `HERMES_HOME`, `CLINE_DIR`, `GEMINI_CLI_HOME` and `CLAUDE_CONFIG_DIR`, and now also `KIRO_HOME`, `KIMI_CODE_HOME`, `DSH_HOME`, `OH_PERSISTENCE_DIR`, `OPENCLAW_STATE_DIR`, `XDG_CONFIG_HOME` (Muse, and VS Code on Linux), `PI_CODING_AGENT_DIR`, `OMO_CODING_AGENT_DIR`, `SENPI_CODING_AGENT_DIR`, `PRIME_AGENT_CODING_AGENT_DIR`, and Oh My Pi's `PI_CONFIG_DIR`, `OMP_PROFILE` and `PI_PROFILE`. With one of these set only in your shell, the job used to inventory the default directory while the runtime read the moved one. See [Inventory heartbeats](/cli/endpoint-inventory#inventory-heartbeats).
+
 ### v1.3.42 · October 15, 2026
 
 - **The install wizard says what confirming Beacon Cloud sends** · Choosing Beacon Cloud now says your agent sessions are sent to your Beacon account and kept while the account is active, and that unless you opt out Asymptote uses them for research and AI training and may share de-identified data ([beacon.sh/privacy](https://beacon.sh/privacy)). The confirm screen names the signed-in account, Asymptote Labs, Inc. as the operator, the destination and the capture mode, and says how to turn off research and AI training (profile picture, then Settings), change the mode (`beacon endpoint connect --privacy-mode`), stop sending (`beacon endpoint disconnect`), or delete the data (privacy@asymptotelabs.ai). That screen is where forwarding is authorized. See [Onboarding](/cli/endpoint-onboarding).
