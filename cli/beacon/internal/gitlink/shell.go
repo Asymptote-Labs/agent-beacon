@@ -114,9 +114,17 @@ func stripRedirections(words []shellWord) (rest, targets []string) {
 			op, target = redirection(w.text)
 		}
 		if op == "" {
-			if !w.expands {
-				rest = append(rest, w.text)
+			text := w.text
+			if w.expands {
+				// Keep unknown words in place: deleting one can promote an argument
+				// to the command, or a copy source to the destination.
+				text = ""
+				if eq := strings.IndexByte(w.text, '='); eq > 0 && len(unwrappedCommand(rest)) == 0 && !strings.HasPrefix(w.text, "-") {
+					// An assignment's value is irrelevant when unwrapping the command.
+					text = w.text[:eq+1]
+				}
 			}
+			rest = append(rest, text)
 			continue
 		}
 		if target == "" && i+1 < len(words) {
