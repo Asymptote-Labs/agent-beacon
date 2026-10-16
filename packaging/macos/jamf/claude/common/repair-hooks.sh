@@ -75,8 +75,11 @@ HOOK_BIN="$HOOK_DIR/beacon-hooks"
 # Everything under the user's home is created and changed as the user, never as
 # root: the user controls these paths, so a root chown/chmod/rm there follows any
 # symlink or hard link they planted (a hard link to /opt/beacon/bin/beacon would be
-# handed to them by a recursive chown). A directory root left behind is renamed
-# aside (rename never follows links) so the user can recreate it.
+# handed to them by a recursive chown). An entry the user does not own is renamed
+# aside, as the user too: the destination is a name in a directory the user
+# controls, and mv follows a symlink planted there, so as root it would move the
+# entry wherever the user pointed it. Renaming within the same directory needs no
+# permission on the entry itself, so the user can always do it.
 for dir in "$HOME_DIR/.beacon" "$HOME_DIR/.beacon/endpoint" "$HOOK_DIR"; do
   if [ -L "$dir" ]; then
     echo "Refusing to repair hooks: $dir is a symbolic link" >&2
@@ -85,7 +88,7 @@ for dir in "$HOME_DIR/.beacon" "$HOME_DIR/.beacon/endpoint" "$HOOK_DIR"; do
   if [ -e "$dir" ] && [ "$(stat -f %Su "$dir")" != "$CONSOLE_USER" ]; then
     aside="$dir.not-owned.$(date +%Y%m%d%H%M%S)"
     echo "Moving $dir (not owned by $CONSOLE_USER) aside to $aside" >&2
-    mv "$dir" "$aside"
+    sudo -u "$CONSOLE_USER" mv "$dir" "$aside"
   fi
 done
 sudo -u "$CONSOLE_USER" mkdir -p "$HOOK_DIR"
