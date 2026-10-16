@@ -119,7 +119,7 @@ func stripRedirections(words []shellWord) (rest, targets []string) {
 				// Keep unknown words in place: deleting one can promote an argument
 				// to the command, or a copy source to the destination.
 				text = ""
-				if eq := strings.IndexByte(w.text, '='); eq > 0 && len(unwrappedCommand(rest)) == 0 && !strings.HasPrefix(w.text, "-") {
+				if eq := strings.IndexByte(w.text, '='); w.assignment && len(unwrappedCommand(rest)) == 0 {
 					// An assignment's value is irrelevant when unwrapping the command.
 					text = w.text[:eq+1]
 				}
@@ -210,24 +210,26 @@ func splitShellSegments(command string) []string {
 // shellWord is one word of a simple command. quoted records that some of it was quoted, which
 // stops it being read as an operator; expands records that its value depends on an expansion ($,
 // `, a glob), which makes it unknown here -- such a word is never reported as a path.
+// assignment means an unquoted shell identifier and equals sign preceded its value.
 type shellWord struct {
-	text    string
-	quoted  bool
-	expands bool
+	text       string
+	quoted     bool
+	expands    bool
+	assignment bool
 }
 
 // shellWords splits a simple command into words, honoring quotes and backslashes.
 func shellWords(segment string) []shellWord {
 	var words []shellWord
 	var cur strings.Builder
-	inWord, expands, quoted := false, false, false
+	inWord, expands, quoted, assignment := false, false, false, false
 	quote := byte(0)
 	flush := func() {
 		if inWord {
-			words = append(words, shellWord{text: cur.String(), quoted: quoted, expands: expands})
+			words = append(words, shellWord{text: cur.String(), quoted: quoted, expands: expands, assignment: assignment})
 		}
 		cur.Reset()
-		inWord, expands, quoted = false, false, false
+		inWord, expands, quoted, assignment = false, false, false, false
 	}
 	for i := 0; i < len(segment); i++ {
 		c := segment[i]
@@ -262,6 +264,9 @@ func shellWords(segment string) []shellWord {
 		case c == '(' || c == ')' || c == '{' || c == '}':
 			flush()
 		default:
+			if c == '=' && !quoted && shellAssignmentName(cur.String()) {
+				assignment = true
+			}
 			if c == '$' || c == '`' || c == '*' || c == '?' || c == '[' || c == '~' {
 				expands = true
 			}
@@ -271,6 +276,19 @@ func shellWords(segment string) []shellWord {
 	}
 	flush()
 	return words
+}
+
+// shellAssignmentName recognizes the unquoted name before an assignment's equals sign.
+func shellAssignmentName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, c := range name {
+		if c != '_' && !(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') && !(i > 0 && c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
 }
 
 // PatchPaths returns the files an apply_patch envelope touches: Add, Update, Delete, and the
