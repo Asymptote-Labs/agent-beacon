@@ -129,7 +129,8 @@ func SettleRuntimeLogFileMode(path, logPath string, created bool) error {
 // than by path. It is the one way the CLI, the hook adapter and the collector exporter open the log.
 //
 // Running as root it refuses a symlink in the last component, opens without blocking, and refuses
-// anything that is not a regular file. The shared log's directory is root-owned, but a root writer
+// anything that is not a regular file or that has another hard link. The shared log's directory is
+// root-owned, but a root writer
 // must still not be steerable -- by a link or FIFO someone planted where it appends -- into
 // appending to, chmodding or hanging on a file of the planter's choosing.
 func OpenRuntimeLogFile(path, logPath string, flag int) (*os.File, error) {
@@ -153,6 +154,10 @@ func OpenRuntimeLogFile(path, logPath string, flag int) (*os.File, error) {
 	if !info.Mode().IsRegular() {
 		_ = f.Close()
 		return nil, fmt.Errorf("runtime log %s is not a regular file", path)
+	}
+	if linkedElsewhere(info) {
+		_ = f.Close()
+		return nil, fmt.Errorf("runtime log %s has another hard link", path)
 	}
 	if err := settleRuntimeLogFileMode(path, logPath, !existed, func(string) (os.FileInfo, error) { return info, nil }, f.Chmod); err != nil {
 		_ = f.Close()

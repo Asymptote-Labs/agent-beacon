@@ -10,12 +10,20 @@ import (
 	"time"
 )
 
+// asRoot makes OpenRuntimeLogFile take its root path for the rest of the test. The refusals it adds
+// (O_NOFOLLOW, O_NONBLOCK, the regular-file and link-count checks) behave the same for any user,
+// so the tests need not run as root to prove them.
+func asRoot(t *testing.T) {
+	t.Helper()
+	prev := runningAsRoot
+	runningAsRoot = func() bool { return true }
+	t.Cleanup(func() { runningAsRoot = prev })
+}
+
 // A shared log path that someone replaced with a symlink must not lead a root writer to append to
 // or chmod the link's target (a binary root later runs, say).
 func TestOpenRuntimeLogFileAsRootRefusesSymlink(t *testing.T) {
-	if os.Geteuid() != 0 {
-		t.Skip("needs root")
-	}
+	asRoot(t)
 	dir := t.TempDir()
 	target := filepath.Join(dir, "beacon")
 	writeMode(t, target, 0o755)
@@ -40,16 +48,15 @@ func TestOpenRuntimeLogFileAsRootRefusesSymlink(t *testing.T) {
 }
 
 func TestOpenRuntimeLogFileAsRootRefusesFIFOWithoutBlocking(t *testing.T) {
-	if os.Geteuid() != 0 {
-		t.Skip("needs root")
-	}
+	asRoot(t)
 	log := filepath.Join(t.TempDir(), "runtime.jsonl")
 	if err := syscall.Mkfifo(log, 0o666); err != nil {
 		t.Skip(err)
 	}
 	done := make(chan error, 1)
 	go func() {
-		f, err := OpenRuntimeLogFile(log, log, os.O_RDWR|os.O_APPEND)
+		// The writers' own flags: O_WRONLY on a FIFO with no reader blocks unless O_NONBLOCK is set.
+		f, err := OpenRuntimeLogFile(log, log, os.O_APPEND|os.O_CREATE|os.O_WRONLY)
 		if f != nil {
 			_ = f.Close()
 		}
@@ -62,6 +69,26 @@ func TestOpenRuntimeLogFileAsRootRefusesFIFOWithoutBlocking(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("opening a FIFO runtime log blocked")
+	}
+}
+
+// A hard link to a root-owned file is a regular file, so it passes O_NOFOLLOW and the regular-file
+// check; a root writer must still not append to it.
+func TestOpenRuntimeLogFileAsRootRefusesAHardLink(t *testing.T) {
+	asRoot(t)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "hosts")
+	writeMode(t, target, 0o644)
+	log := filepath.Join(dir, "runtime.jsonl")
+	if err := os.Link(target, log); err != nil {
+		t.Skip(err)
+	}
+	if f, err := OpenRuntimeLogFile(log, log, os.O_CREATE|os.O_WRONLY|os.O_APPEND); err == nil {
+		_ = f.Close()
+		t.Fatal("root opened a hard-linked runtime log")
+	}
+	if data, _ := os.ReadFile(target); string(data) != "{}\n" {
+		t.Fatalf("target content = %q, want unchanged", data)
 	}
 }
 

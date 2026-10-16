@@ -35,11 +35,27 @@ func ownedByProcess(info os.FileInfo) bool {
 	return int(stat.Uid) == os.Geteuid()
 }
 
+// runningAsRoot reports whether this process writes the log as root, the only case in which a link
+// or FIFO someone planted where it appends could escalate. A variable so the refusals can be tested
+// without root.
+var runningAsRoot = func() bool { return os.Geteuid() == 0 }
+
 // elevatedOpenFlags are added when root opens a runtime log: never follow a symlink in the last
 // component, and never block opening a FIFO.
 func elevatedOpenFlags() int {
-	if os.Geteuid() != 0 {
+	if !runningAsRoot() {
 		return 0
 	}
 	return syscall.O_NOFOLLOW | syscall.O_NONBLOCK
+}
+
+// linkedElsewhere reports whether root opened a log that has another hard link. A runtime log has
+// exactly one, rotation included (it renames), so a second is one someone planted: a hard link to
+// a root-owned file passes O_NOFOLLOW and the regular-file check, and root would append to it.
+func linkedElsewhere(info os.FileInfo) bool {
+	if !runningAsRoot() {
+		return false
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && stat.Nlink > 1
 }
