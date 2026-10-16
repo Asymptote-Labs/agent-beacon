@@ -35,8 +35,13 @@ if ! grep -q 'INVENTORY_STATE' "$ROOT_DIR/packaging/macos/jamf/claude/common/rep
   exit 1
 fi
 REPAIR_HOOKS_SCRIPT="$ROOT_DIR/packaging/macos/jamf/claude/common/repair-hooks.sh"
+JAMF_GUIDE="$ROOT_DIR/docs/guides/jamf-anthropic-openai-cursor-mdm.mdx"
 if grep -q 'chown -R' "$REPAIR_HOOKS_SCRIPT" || grep -q 'chmod +a "$CONSOLE_USER allow[^"]*add_file' "$REPAIR_HOOKS_SCRIPT"; then
   echo "repair-hooks must not chown the user's home recursively as root or let the user add entries to the root log directory" >&2
+  exit 1
+fi
+if grep -q 'chmod +a "$CONSOLE_USER allow[^"]*add_file[^"]*" "$RUNTIME_DIR" ||' "$JAMF_GUIDE"; then
+  echo "the Jamf guide's snippet must not let the console user add entries to the root log directory" >&2
   exit 1
 fi
 if ! grep -q 'restore_existing_forwarder' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then

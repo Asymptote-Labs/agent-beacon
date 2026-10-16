@@ -93,10 +93,21 @@ sudo -u "$CONSOLE_USER" chmod 755 "$HOME_DIR/.beacon" "$HOME_DIR/.beacon/endpoin
 sudo -u "$CONSOLE_USER" rm -f "$HOOK_BIN"
 
 echo "Granting $CONSOLE_USER append access to Beacon runtime and inventory logs..."
-# The directory stays root-owned 0755 with no extra grant: hooks only append to the
-# files above. Letting the user add or delete entries here would let them swap a log
-# for a symlink that the root collector and inventory job then open and chmod.
-chmod -a "$CONSOLE_USER allow list,search,add_file,delete_child,readattr,writeattr" "$RUNTIME_DIR" 2>/dev/null || true
+# The directory stays root-owned 0755 with no grant to add or remove entries: hooks only append
+# to the files below. Such a grant would let a user swap a log for a link that the root collector
+# and inventory job then open. Earlier versions of this script, and the Jamf guide's snippet,
+# granted add_file (with or without delete_child) to whoever was the console user then, so every
+# such allow entry is removed, whoever it names, highest index first so the indexes still to
+# remove do not shift. Read-only grants stay.
+revoke_entry_grants() {
+  ls -led "$1" |
+    awk '$1 ~ /^[0-9]+:$/ && / allow / && /add_file|add_subdirectory|delete_child/ { sub(":", "", $1); print $1 }' |
+    sort -rn |
+    while read -r index; do
+      chmod -a# "$index" "$1"
+    done
+}
+revoke_entry_grants "$RUNTIME_DIR"
 chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$RUNTIME_LOG" || true
 chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$RUNTIME_LOCK" || true
 chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$INVENTORY_LOG" || true
