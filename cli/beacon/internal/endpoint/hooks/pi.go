@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	piextension "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks/assets/pi"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pisession"
 )
 
 // Pi (pi.dev) has no hooks configuration file and no OpenTelemetry support, so neither of Beacon's
@@ -118,7 +119,7 @@ func piExtensionDir(level Level) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return filepath.Join(home, ".pi", "agent", "extensions"), nil
+		return piUserExtensionDir(home)
 	case LevelProject:
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -128,4 +129,24 @@ func piExtensionDir(level Level) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown hook level %q", level)
 	}
+}
+
+// PiExtensionPathForHome is the user-level extension file for home. Inventory uses it so a scan
+// reports the file the installer writes, including where PI_CODING_AGENT_DIR moves it.
+func PiExtensionPathForHome(home string) (string, error) {
+	dir, err := piUserExtensionDir(home)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, piExtensionFileName), nil
+}
+
+// piUserExtensionDir is the extensions directory in Pi's agent directory (pisession.AgentDir), which
+// PI_CODING_AGENT_DIR moves.
+func piUserExtensionDir(home string) (string, error) {
+	agentDir, err := pisession.AgentDir(home)
+	if err != nil {
+		return "", fmt.Errorf("resolve the Pi extension path: %w", err)
+	}
+	return filepath.Join(agentDir, "extensions"), nil
 }

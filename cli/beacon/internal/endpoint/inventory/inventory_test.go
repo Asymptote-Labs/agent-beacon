@@ -1399,3 +1399,18 @@ func TestSnapshotDigestIgnoresVolatileStateFileChurn(t *testing.T) {
 		t.Fatal("an edit to settings.json must still change the digest")
 	}
 }
+
+func TestScanFollowsPiAgentDirForTheUserExtension(t *testing.T) {
+	home := t.TempDir()
+	agentDir := filepath.Join(t.TempDir(), "pi-agent")
+	t.Setenv("PI_CODING_AGENT_DIR", agentDir)
+
+	var got []string
+	for _, c := range piCandidates(home, "") {
+		got = append(got, c.path)
+	}
+	want := filepath.Join(agentDir, "extensions", "beacon.ts")
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("pi user candidates = %v, want [%s]", got, want)
+	}
+}

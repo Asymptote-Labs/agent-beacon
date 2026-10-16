@@ -168,3 +168,23 @@ func TestDiscoverPiUsesCanonicalHarnessName(t *testing.T) {
 			"hook and OTLP paths agree", name, got)
 	}
 }
+
+// PI_CODING_AGENT_DIR moves Pi's agent directory, so discovery has to report the extension, and
+// look for the state directory, where the override puts them rather than under ~/.pi/agent.
+func TestDiscoverPiFollowsTheAgentDirOverride(t *testing.T) {
+	home := setupPiDiscovery(t)
+	agentDir := filepath.Join(home, "elsewhere", "agent")
+	t.Setenv("PI_CODING_AGENT_DIR", agentDir)
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	h := DiscoverPi()
+	want := filepath.Join(agentDir, "extensions", "beacon.ts")
+	if h.ConfigPath != want {
+		t.Fatalf("ConfigPath = %q, want %q", h.ConfigPath, want)
+	}
+	if !h.Detected {
+		t.Fatal("DiscoverPi reported not detected with an overridden agent directory present")
+	}
+}
