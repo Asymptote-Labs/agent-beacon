@@ -21,14 +21,14 @@ func ShellWrittenPaths(command string) []string {
 			found = absoluteOnly(found)
 		}
 		paths = append(paths, found...)
-		if len(words) > 0 && (words[0] == "cd" || words[0] == "pushd" || words[0] == "popd") {
+		if command := unwrappedCommand(words); len(command) > 0 && (command[0] == "cd" || command[0] == "pushd" || command[0] == "popd") {
 			moved = true
 		}
 	}
 	return dedupe(paths)
 }
 
-func commandTargets(words []string) []string {
+func unwrappedCommand(words []string) []string {
 	// Skip environment assignments and the wrappers that run the real command.
 	for len(words) > 0 {
 		w := words[0]
@@ -36,12 +36,17 @@ func commandTargets(words []string) []string {
 			words = words[1:]
 			continue
 		}
-		if w == "sudo" || w == "command" || w == "exec" || w == "nohup" || w == "time" {
+		if w == "sudo" || w == "command" || w == "builtin" || w == "exec" || w == "nohup" || w == "time" {
 			words = words[1:]
 			continue
 		}
 		break
 	}
+	return words
+}
+
+func commandTargets(words []string) []string {
+	words = unwrappedCommand(words)
 	if len(words) == 0 {
 		return nil
 	}
