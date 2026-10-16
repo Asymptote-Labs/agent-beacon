@@ -135,12 +135,12 @@ func reconcileInventoryJobWith(job inventoryJobController, opts InventoryJobOpti
 }
 
 // inventoryJobEnv is the environment written into a per-user inventory job. launchd and systemd
-// start the job without the user's shell environment, so a CODEX_HOME, HERMES_HOME, CLINE_DIR,
-// GEMINI_CLI_HOME or CLAUDE_CONFIG_DIR exported in a shell profile would not reach it and the
-// scheduled scan would inventory ~/.codex, ~/.hermes, ~/.cline, ~/.gemini or ~/.claude while the
-// runtime reads the moved directory. Each value is resolved now, from the install's shell, as its
-// runtime resolves it, and recorded as an absolute path so a relative value still means the
-// directory it named at install time:
+// start the job without the user's shell environment, so a variable exported in a shell profile
+// that moves a runtime's user directory -- CODEX_HOME, HERMES_HOME, CLINE_DIR, GEMINI_CLI_HOME,
+// CLAUDE_CONFIG_DIR, or one in inventoryJobPathEnv or inventoryJobNameEnv -- would not reach it,
+// and the scheduled scan would inventory the default directory while the runtime reads the moved
+// one. Each value is taken from the install's shell, so a relative path still means the directory
+// it named at install time:
 //   - CODEX_HOME must name an existing directory, as Codex requires; otherwise nothing is recorded.
 //   - HERMES_HOME is trimmed and expanded as Hermes does, and HERMES_DATA_DIR_SUFFIX is recorded as
 //     it is. HERMES_HOME is recorded before profiles are applied, so the job still follows a later
@@ -148,6 +148,9 @@ func reconcileInventoryJobWith(job inventoryJobController, opts InventoryJobOpti
 //   - CLINE_DIR is used whenever it is non-empty after trimming, as Cline uses it.
 //   - GEMINI_CLI_HOME is used whenever it is non-empty, as Gemini CLI uses it.
 //   - CLAUDE_CONFIG_DIR is used whenever it is non-empty after trimming, as Claude Code uses it.
+//   - The rest are recorded whenever they are set, even to an empty value, because Oh My Pi's
+//     OMP_PROFILE and OMO's agent-directory overrides treat a set-but-empty variable differently
+//     from an unset one. See inventoryJobPathValue for how a path is recorded.
 //
 // A variable that is unset records nothing, and the job falls back to the default as before.
 // System mode records nothing: this process's environment is root's, not the console user's.
@@ -182,10 +185,57 @@ func inventoryJobEnv(userMode bool) map[string]string {
 			env["CLAUDE_CONFIG_DIR"] = dir
 		}
 	}
+	for _, name := range inventoryJobPathEnv {
+		if value, ok := os.LookupEnv(name); ok {
+			env[name] = inventoryJobPathValue(value)
+		}
+	}
+	for _, name := range inventoryJobNameEnv {
+		if value, ok := os.LookupEnv(name); ok {
+			env[name] = value
+		}
+	}
 	if len(env) == 0 {
 		return nil
 	}
 	return env
+}
+
+// inventoryJobPathEnv are the variables naming a directory that the inventory scan resolves
+// through a runtime's own path rules (inventory's *UserDir helpers, and the hooks installers'
+// *PathForHome resolvers it calls), beyond the ones inventoryJobEnv resolves itself.
+var inventoryJobPathEnv = []string{
+	"KIRO_HOME",
+	"KIMI_CODE_HOME",
+	"DSH_HOME",
+	"OH_PERSISTENCE_DIR",
+	"OPENCLAW_STATE_DIR",
+	"XDG_CONFIG_HOME",              // Muse, and VS Code on Linux
+	"PI_CODING_AGENT_DIR",          // Pi, Oh My Pi's default profile, and OMO's last fallback
+	"OMO_CODING_AGENT_DIR",         // OMO
+	"SENPI_CODING_AGENT_DIR",       // OMO's legacy name
+	"PRIME_AGENT_CODING_AGENT_DIR", // Prime Agent
+}
+
+// inventoryJobNameEnv are the variables the inventory scan reads as names rather than paths, so
+// they are recorded exactly as set: Oh My Pi's config directory name under the home directory and
+// its active profile.
+var inventoryJobNameEnv = []string{"PI_CONFIG_DIR", "OMP_PROFILE", "PI_PROFILE"}
+
+// inventoryJobPathValue is how one inventoryJobPathEnv value is recorded. A relative path is made
+// absolute against the install's working directory, after trimming, which every resolver that
+// trims ignores. Anything else is recorded exactly as set: an absolute path already means the same
+// thing in the job, an empty value means what unset does, and a leading `~` is left for each
+// resolver to expand against the same HOME the job runs with, as it did at install time.
+func inventoryJobPathValue(value string) string {
+	path := strings.TrimSpace(value)
+	if path == "" || filepath.IsAbs(path) || path == "~" || strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) {
+		return value
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return value
 }
 
 // inventoryEnabledFromConfigFile reads only the inventory_heartbeat.enabled key. A missing or

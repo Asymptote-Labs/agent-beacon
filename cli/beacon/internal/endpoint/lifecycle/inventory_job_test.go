@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -528,5 +529,60 @@ func TestRepairTeardownKeepsScriptForwarders(t *testing.T) {
 	}
 	if !opts.KeepConfig || !opts.KeepLogs || !opts.KeepUpdater {
 		t.Fatalf("repair's uninstall step changed what it keeps: %+v", opts)
+	}
+}
+
+// The scheduled job starts without the installing shell's environment, so every other variable the
+// inventory scan follows to a runtime's user directory is recorded too. A relative path is made
+// absolute against the install's working directory; an absolute or `~` path, and a name (Oh My
+// Pi's config directory and profile), are recorded exactly as set, since the job resolves them
+// against the same HOME. A variable set to an empty value is recorded, because OMP_PROFILE and
+// OMO's overrides read set-but-empty differently from unset.
+func TestInventoryJobEnvRecordsTheOtherInventoryRootVariables(t *testing.T) {
+	work := t.TempDir()
+	t.Chdir(work)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"CODEX_HOME", "HERMES_HOME", "HERMES_DATA_DIR_SUFFIX", "CLINE_DIR", "GEMINI_CLI_HOME", "CLAUDE_CONFIG_DIR"} {
+		t.Setenv(name, "")
+	}
+	set := map[string]string{
+		"KIRO_HOME":                    " kiro-dir ",
+		"KIMI_CODE_HOME":               "/abs/kimi",
+		"PI_CODING_AGENT_DIR":          "~/pi-alt",
+		"PRIME_AGENT_CODING_AGENT_DIR": "~",
+		"OMO_CODING_AGENT_DIR":         "",
+		"PI_CONFIG_DIR":                ".omp-alt",
+		"OMP_PROFILE":                  "",
+		"PI_PROFILE":                   "work",
+	}
+	for name, value := range set {
+		t.Setenv(name, value)
+	}
+	want := map[string]string{
+		"KIRO_HOME":                    filepath.Join(cwd, "kiro-dir"),
+		"KIMI_CODE_HOME":               "/abs/kimi",
+		"PI_CODING_AGENT_DIR":          "~/pi-alt",
+		"PRIME_AGENT_CODING_AGENT_DIR": "~",
+		"OMO_CODING_AGENT_DIR":         "",
+		"PI_CONFIG_DIR":                ".omp-alt",
+		"OMP_PROFILE":                  "",
+		"PI_PROFILE":                   "work",
+	}
+	if runtime.GOOS == "windows" {
+		// Not absolute without a drive letter, so it is resolved like any relative path.
+		abs, err := filepath.Abs("/abs/kimi")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want["KIMI_CODE_HOME"] = abs
+	}
+	if env := inventoryJobEnv(true); !reflect.DeepEqual(env, want) {
+		t.Fatalf("user mode env = %v, want %v", env, want)
+	}
+	if got := inventoryJobEnv(false); got != nil {
+		t.Fatalf("system mode env = %v, want none", got)
 	}
 }
