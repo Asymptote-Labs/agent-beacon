@@ -330,26 +330,11 @@ func openRuntimeFile(path string, flag int) (*os.File, error) {
 }
 
 // openRuntimeFileAs opens path (the log or its lock) with the mode logPath calls for, and settles
-// its mode with asymptoteobserve.SettleRuntimeLogFileMode: a new file gets that mode whatever the
-// umask, and an existing one is only ever narrowed toward it, by its owner.
+// its mode through asymptoteobserve.OpenRuntimeLogFile: a new file gets that mode whatever the
+// umask, an existing one is only ever narrowed toward it, by its owner, and root never follows a
+// symlink or opens anything but a regular file there.
 func openRuntimeFileAs(path, logPath string, flag int) (*os.File, error) {
-	fileMode, _, _ := asymptoteobserve.RuntimeLogModes(logPath)
-	existed := true
-	if _, err := os.Stat(path); err != nil {
-		if !os.IsNotExist(err) {
-			return nil, err
-		}
-		existed = false
-	}
-	f, err := os.OpenFile(path, flag, fileMode)
-	if err != nil {
-		return nil, err
-	}
-	if err := asymptoteobserve.SettleRuntimeLogFileMode(path, logPath, !existed); err != nil {
-		_ = f.Close()
-		return nil, err
-	}
-	return f, nil
+	return asymptoteobserve.OpenRuntimeLogFile(path, logPath, flag)
 }
 
 // RetainedLogPaths returns the runtime log at path followed by every archive the rotation contract
