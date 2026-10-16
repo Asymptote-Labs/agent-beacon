@@ -9,6 +9,9 @@ name: Release
 #   3. windows-package — (after goreleaser) builds the Windows MSI from the archive
 #                    goreleaser just published, installs it to prove it works, and
 #                    attaches it. Unsigned for now, so it needs no secrets.
+#   4. finalize    — (after all three) adds the .pkg, .msi and install.sh to checksums.txt and
+#                    records a GitHub build-provenance attestation for every file
+#                    checksums.txt lists.
 #
 # Triggered only by pushed version tags, so outside contributors (whose fork PRs
 # never receive secrets) cannot run it. All release secrets live in the protected
@@ -27,15 +30,15 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: cli/beacon/go.mod
 
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
         with:
           version: "v2.13.3"
           install-only: true
@@ -96,11 +99,11 @@ jobs:
       BEACON_PKG_ARCHES: "arm64"
       VECTOR_VERSION: "0.56.0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: cli/beacon/go.mod
 
@@ -323,7 +326,7 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Fetch the published Windows archive
         env:
@@ -400,3 +403,58 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & gh release upload $env:TAG (Get-ChildItem dist\windows -Filter '*.msi').FullName (Get-ChildItem dist\windows -Filter '*.msi.sha256').FullName --repo $env:REPO --clobber
           if ($LASTEXITCODE -ne 0) { throw "uploading the MSI failed" }
+
+  # One checksums.txt for everything a user installs, and signed provenance for all of it.
+  #
+  # goreleaser writes checksums.txt before the .pkg and .msi exist, so they are appended here from the
+  # bytes on the release. The attestation is a Sigstore-signed statement, made with this workflow's
+  # OIDC identity, that this repository's release workflow built each file at this tag; anyone can
+  # check a download with `gh attestation verify <file> --repo Asymptote-Labs/agent-beacon`. Unlike
+  # checksums.txt, it cannot be replaced by someone who can only edit the release.
+  #
+  # Runs when goreleaser succeeded even if a packaging job failed, so the archives and Linux packages
+  # are still covered; a missing .pkg or .msi is simply not appended.
+  finalize:
+    needs: [goreleaser, package, windows-package]
+    if: ${{ !cancelled() && needs.goreleaser.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Add the .pkg, .msi and install.sh to checksums.txt
+        run: |
+          set -euo pipefail
+          mkdir -p dist/release && cd dist/release
+          gh release download "$TAG" --repo "$REPO" --pattern checksums.txt
+          # install.sh is what `curl -fsSL https://beacon.sh/install.sh | bash` runs (beacon.sh
+          # redirects to this release's copy), so it is attested like the packages it installs.
+          for pattern in 'BeaconEndpointAgent-*.pkg' 'BeaconEndpointAgent-*.msi' 'install.sh'; do
+            gh release download "$TAG" --repo "$REPO" --pattern "$pattern" || echo "::warning::no $pattern on the release"
+          done
+          for f in BeaconEndpointAgent-*.pkg BeaconEndpointAgent-*.msi install.sh; do
+            [ -f "$f" ] || continue
+            # A rerun must not list a file twice: install.sh refuses a name with two checksums.
+            awk -v name="$f" '$2 == name { found = 1 } END { exit found }' checksums.txt || continue
+            sha256sum "$f" >> checksums.txt
+          done
+          sha256sum --check checksums.txt --ignore-missing
+          gh release upload "$TAG" checksums.txt --repo "$REPO" --clobber
+
+      - name: Download every file checksums.txt lists
+        working-directory: dist/release
+        run: |
+          set -euo pipefail
+          awk '{ print $2 }' checksums.txt | while read -r name; do
+            [ -f "$name" ] || gh release download "$TAG" --repo "$REPO" --pattern "$name"
+          done
+          sha256sum --check --strict checksums.txt
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/release/checksums.txt

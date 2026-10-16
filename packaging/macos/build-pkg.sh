@@ -152,5 +152,7 @@ if [ -n "${NOTARYTOOL_PROFILE:-}" ]; then
   xcrun stapler staple "$PKG_PATH"
 fi
 
-shasum -a 256 "$PKG_PATH" > "$PKG_PATH.sha256"
+# Hash from the package's directory so the sidecar names the file, not this machine's path, and
+# `shasum -a 256 -c` works beside the downloaded package.
+(cd "$(dirname "$PKG_PATH")" && shasum -a 256 "$(basename "$PKG_PATH")") > "$PKG_PATH.sha256"
 echo "$PKG_PATH"
