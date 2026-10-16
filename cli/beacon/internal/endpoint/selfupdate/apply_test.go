@@ -346,7 +346,7 @@ func TestVerifyGatekeeperSkipsUnavailableStapler(t *testing.T) {
 		calls = append(calls, name)
 		switch name {
 		case "pkgutil":
-			return "Developer ID Installer: Example (TEAMID)", nil
+			return "Developer ID Installer: Example (" + AppleTeamID + ")", nil
 		case "stapler":
 			return "xcode-select: error: tool 'stapler' requires Xcode, but active developer directory '/Library/Developer/CommandLineTools' is a command line tools instance", fmt.Errorf("exit status 1")
 		case "spctl":
@@ -356,7 +356,7 @@ func TestVerifyGatekeeperSkipsUnavailableStapler(t *testing.T) {
 		}
 	}
 
-	if err := a.verifyGatekeeper(context.Background(), filepath.Join(t.TempDir(), "Beacon.pkg"), "TEAMID"); err != nil {
+	if err := a.verifyGatekeeper(context.Background(), filepath.Join(t.TempDir(), "Beacon.pkg")); err != nil {
 		t.Fatalf("verifyGatekeeper should skip unavailable stapler, got %v", err)
 	}
 	if strings.Join(calls, ",") != "pkgutil,stapler,spctl" {
@@ -369,7 +369,7 @@ func TestVerifyGatekeeperFailsStaplerValidationFailure(t *testing.T) {
 	a.run = func(ctx context.Context, name string, args ...string) (string, error) {
 		switch name {
 		case "pkgutil":
-			return "Developer ID Installer: Example (TEAMID)", nil
+			return "Developer ID Installer: Example (" + AppleTeamID + ")", nil
 		case "stapler":
 			return "The validate action worked! The staple and validate action failed!", fmt.Errorf("exit status 65")
 		default:
@@ -377,7 +377,7 @@ func TestVerifyGatekeeperFailsStaplerValidationFailure(t *testing.T) {
 		}
 	}
 
-	err := a.verifyGatekeeper(context.Background(), filepath.Join(t.TempDir(), "Beacon.pkg"), "TEAMID")
+	err := a.verifyGatekeeper(context.Background(), filepath.Join(t.TempDir(), "Beacon.pkg"))
 	if err == nil || !strings.Contains(err.Error(), "stapler validate") {
 		t.Fatalf("verifyGatekeeper error = %v, want stapler validation failure", err)
 	}
@@ -405,7 +405,7 @@ func TestApplyRestartsCollectorBeforeHealthCheck(t *testing.T) {
 	a.run = func(ctx context.Context, name string, args ...string) (string, error) {
 		switch filepath.Base(name) {
 		case "pkgutil":
-			return "Developer ID Installer: Example (TEAMID)", nil
+			return "Developer ID Installer: Example (" + AppleTeamID + ")", nil
 		case "stapler", "spctl", "installer", "dpkg", "rpm":
 			return "", nil
 		case "beacon":
@@ -787,7 +787,7 @@ func TestApplyRollbackRestoresScriptForwarders(t *testing.T) {
 	a.run = func(ctx context.Context, name string, args ...string) (string, error) {
 		switch filepath.Base(name) {
 		case "pkgutil":
-			return "Developer ID Installer: Example (TEAMID)", nil
+			return "Developer ID Installer: Example (" + AppleTeamID + ")", nil
 		case "installer", "dpkg", "rpm":
 			return "postinstall failed", fmt.Errorf("exit status 1")
 		default:

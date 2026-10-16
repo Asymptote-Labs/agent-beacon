@@ -142,8 +142,8 @@ func TestInstallPackageRefusesBeforeDownloading(t *testing.T) {
 		want     string
 	}{
 		"plain http": {
-			pkg:  Package{URL: srv.URL + "/artifact.tar.gz", SHA256: sha, Version: "1.3.41"},
-			want: "https is required",
+			pkg:  Package{URL: "http://updates.example.com/artifact.tar.gz", SHA256: sha, Version: "1.3.41"},
+			want: "non-https",
 		},
 		"not a release version": {
 			insecure: true,
@@ -166,7 +166,7 @@ func TestInstallPackageRefusesBeforeDownloading(t *testing.T) {
 	}
 }
 
-func TestInstallPackageChecksTheTeamItWasGiven(t *testing.T) {
+func TestInstallPackageRequiresBeaconsSigningTeam(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("Gatekeeper verification is macOS-only")
 	}
@@ -190,9 +190,9 @@ func TestInstallPackageChecksTheTeamItWasGiven(t *testing.T) {
 		return "", fmt.Errorf("%s must not run", name)
 	}
 	_, err := a.InstallPackage(context.Background(), Package{
-		URL: srv.URL + "/artifact.pkg", SHA256: sha, Version: "1.3.41", TeamID: "3A98D35XJR",
+		URL: srv.URL + "/artifact.pkg", SHA256: sha, Version: "1.3.41",
 	})
-	if err == nil || !strings.Contains(err.Error(), "expected team id 3A98D35XJR") {
+	if err == nil || !strings.Contains(err.Error(), "want "+AppleTeamID) {
 		t.Fatalf("err = %v", err)
 	}
 	if strings.Join(calls, ",") != "pkgutil" {

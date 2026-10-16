@@ -32,9 +32,6 @@ const (
 	Enterprise = "enterprise"
 	// DownloadPath is the platform route that answers with a package for a device key.
 	DownloadPath = "/api/cli/enforcement/download"
-	// AppleTeamID is the Apple Developer team that signs every Beacon package. Pinned here
-	// rather than taken from the platform's answer.
-	AppleTeamID = "3A98D35XJR"
 
 	requestTimeout = 30 * time.Second
 	maxAnswer      = 64 << 10
@@ -133,7 +130,6 @@ func Install(ctx context.Context, rel Release, currentVersion, logPath string) (
 		URL:     rel.URL,
 		SHA256:  rel.SHA256,
 		Version: rel.Version,
-		TeamID:  AppleTeamID,
 		Edition: Enterprise,
 	})
 }

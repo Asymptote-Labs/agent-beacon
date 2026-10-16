@@ -27,7 +27,7 @@ func TestParseManifest(t *testing.T) {
 	if m.Version != "0.0.69" {
 		t.Fatalf("version = %q", m.Version)
 	}
-	if m.TeamID != "TEAMID" || m.PkgIdentifier != "ai.asymptote.beacon.endpoint" {
+	if m.PkgIdentifier != "ai.asymptote.beacon.endpoint" {
 		t.Fatalf("metadata not parsed: %+v", m)
 	}
 	a, ok := m.ArtifactFor("darwin_arm64")
