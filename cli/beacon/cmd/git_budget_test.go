@@ -15,6 +15,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/gitlink"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // The hook budget tests never wait on the wall clock (#859 exists because tests that did flaked on
@@ -98,7 +99,7 @@ func budgetEventsIn(t *testing.T, logPath string) []schema.Event {
 	var events []schema.Event
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		var e schema.Event
-		if json.Unmarshal([]byte(line), &e) == nil && e.Event.Action == gitlink.BudgetAction {
+		if json.Unmarshal([]byte(line), &e) == nil && e.Event.Action == asymptoteobserve.ActionGitHookBudgetExceeded {
 			events = append(events, e)
 		}
 	}

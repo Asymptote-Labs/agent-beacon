@@ -17,9 +17,8 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/account"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/gitlink"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/handoff"
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/shareauto"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // `beacon share --follow` keeps a shared trace current while its session runs: it re-reads the
@@ -259,14 +258,13 @@ func shareLogRecordsEnd(session handoff.Session, storeLatest time.Time) bool {
 }
 
 // shareSessionEnd reports whether events, in order, end with session.ended followed by nothing but
-// Beacon's bookkeeping (session.shared, session.share_requested, session.commit_linked), and the
-// newest timestamp among the activity it considered (the end's, when it ended).
+// Beacon's bookkeeping (asymptoteobserve.IsBeaconOnlyAction), and the newest timestamp among the
+// activity it considered (the end's, when it ended).
 func shareSessionEnd(events []schema.Event) (bool, time.Time) {
 	ended := false
 	var latest time.Time
 	for _, e := range events {
-		switch e.Event.Action {
-		case SessionSharedAction, shareauto.ActionShareRequested, gitlink.LinkAction:
+		if asymptoteobserve.IsBeaconOnlyAction(e.Event.Action) {
 			continue
 		}
 		ended = e.Event.Action == "session.ended"

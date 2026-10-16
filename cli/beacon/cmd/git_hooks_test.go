@@ -12,6 +12,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/gitlink"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // relaxGitBudgets lifts the git hooks' wall-clock budgets for a test of what a hook writes. A hook
@@ -174,7 +175,7 @@ func linkEventsIn(t *testing.T, logPath string) []schema.Event {
 	var events []schema.Event
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		var e schema.Event
-		if json.Unmarshal([]byte(line), &e) == nil && e.Event.Action == gitlink.LinkAction {
+		if json.Unmarshal([]byte(line), &e) == nil && e.Event.Action == asymptoteobserve.ActionCommitLinked {
 			events = append(events, e)
 		}
 	}

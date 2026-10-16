@@ -15,11 +15,12 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/gitlink"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/handoff"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 func writeSharedEvent(t *testing.T, logPath, harness, session, url string) {
 	t.Helper()
-	event := schema.NewEvent(schema.NewEventOptions{Action: SessionSharedAction, Category: "session", Harness: schema.HarnessInfo{Name: harness}})
+	event := schema.NewEvent(schema.NewEventOptions{Action: asymptoteobserve.ActionSessionShared, Category: "session", Harness: schema.HarnessInfo{Name: harness}})
 	event.Session = &schema.SessionInfo{ID: session}
 	event.Raw = map[string]interface{}{"shared_url": url}
 	line, _ := json.Marshal(event)

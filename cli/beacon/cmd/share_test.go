@@ -386,7 +386,7 @@ func TestShareUploadsAndRecordsTheShareLocally(t *testing.T) {
 	if err := json.Unmarshal(bytes.TrimSpace(data), &event); err != nil {
 		t.Fatal(err)
 	}
-	if event.Event.Action != SessionSharedAction || event.Event.Fidelity != asymptoteobserve.FidelityInferred || event.Harness.CollectionMethod != "" || event.Session.ID != shareTestSession {
+	if event.Event.Action != asymptoteobserve.ActionSessionShared || event.Event.Fidelity != asymptoteobserve.FidelityInferred || event.Harness.CollectionMethod != "" || event.Session.ID != shareTestSession {
 		t.Fatalf("session.shared event = %+v", event)
 	}
 

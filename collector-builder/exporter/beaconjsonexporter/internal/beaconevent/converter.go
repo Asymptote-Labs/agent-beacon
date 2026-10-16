@@ -313,21 +313,13 @@ func shouldDropCopilotMetric(resourceAttrs map[string]interface{}, name string, 
 	return true
 }
 
-// beaconOnlyActions are written only by the Beacon CLI and hook logger about a session: the record
-// of a share, an auto-share request (which Beacon Cloud publishes on), and a commit link. Anything
-// that can reach the loopback OTLP receiver can state an action, so one of these arriving over OTLP
-// is not believed and the action is inferred as if none were stated.
-var beaconOnlyActions = map[string]bool{
-	"session.shared":          true,
-	"session.share_requested": true,
-	"session.commit_linked":   true,
-}
-
 // statedAction is the first action the attributes state, unless it is one only Beacon itself
-// writes.
+// writes (asymptoteobserve.IsBeaconOnlyAction). Anything that can reach the loopback OTLP
+// receiver can state an action, so one of those arriving over OTLP is not believed and the action
+// is inferred as if none were stated.
 func statedAction(attrs map[string]interface{}, keys ...string) string {
 	action := FirstString(attrs, keys...)
-	if beaconOnlyActions[strings.ToLower(strings.TrimSpace(action))] {
+	if asymptoteobserve.IsBeaconOnlyAction(action) {
 		return ""
 	}
 	return action

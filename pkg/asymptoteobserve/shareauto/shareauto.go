@@ -36,10 +36,6 @@ const (
 	// SchemaVersion is written into both files.
 	SchemaVersion = "beacon.share_settings.v1"
 
-	// ActionShareRequested is the event the hook adapter writes once per session when auto-share
-	// applies to it.
-	ActionShareRequested = "session.share_requested"
-
 	// maxWalk bounds how many directories are searched above a working directory for a project.
 	maxWalk = 64
 )

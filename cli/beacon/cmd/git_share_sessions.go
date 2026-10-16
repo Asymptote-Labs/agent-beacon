@@ -133,13 +133,13 @@ func localShareURLs(logPath string) map[string]string {
 		return urls
 	}
 	defer f.Close()
-	marker := []byte(`"` + SessionSharedAction + `"`)
+	marker := []byte(`"` + asymptoteobserve.ActionSessionShared + `"`)
 	reader := bufio.NewReaderSize(f, 256*1024)
 	for {
 		line, err := reader.ReadBytes('\n')
 		if len(line) > 0 && bytes.Contains(line, marker) {
 			var event schema.Event
-			if json.Unmarshal(line, &event) == nil && event.Event.Action == SessionSharedAction && event.Session != nil && event.Session.ID != "" {
+			if json.Unmarshal(line, &event) == nil && event.Event.Action == asymptoteobserve.ActionSessionShared && event.Session != nil && event.Session.ID != "" {
 				if u, _ := event.Raw["shared_url"].(string); gitlink.ValidShareURL(u) {
 					urls[gitShareKey(event.Harness.Name, event.Session.ID)] = u
 				}

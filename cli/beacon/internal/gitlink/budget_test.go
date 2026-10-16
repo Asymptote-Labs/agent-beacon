@@ -177,7 +177,7 @@ func TestHookRunEvent(t *testing.T) {
 	if err := event.Validate(); err != nil {
 		t.Fatalf("event does not validate: %v", err)
 	}
-	if event.Event.Action != BudgetAction || event.Event.Category != "system" || event.Event.Kind != "beacon_system" ||
+	if event.Event.Action != asymptoteobserve.ActionGitHookBudgetExceeded || event.Event.Category != "system" || event.Event.Kind != "beacon_system" ||
 		event.Event.Fidelity != asymptoteobserve.FidelityObserved || event.Harness.Name != "beacon" ||
 		event.Severity != schema.SeverityLow || event.Repository != "/work/repo" || event.Endpoint.AgentVersion != "1.2.3" {
 		t.Fatalf("event %+v", event)
@@ -253,9 +253,9 @@ func TestScanBudgetOverruns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	link := schema.NewEvent(schema.NewEventOptions{Action: LinkAction, Harness: schema.HarnessInfo{Name: "cursor"}, Message: BudgetAction})
+	link := schema.NewEvent(schema.NewEventOptions{Action: asymptoteobserve.ActionCommitLinked, Harness: schema.HarnessInfo{Name: "cursor"}, Message: asymptoteobserve.ActionGitHookBudgetExceeded})
 	linkLine, _ := json.Marshal(link)
-	_, _ = f.Write([]byte(`not json "` + BudgetAction + `"` + "\n" + string(linkLine) + "\n"))
+	_, _ = f.Write([]byte(`not json "` + asymptoteobserve.ActionGitHookBudgetExceeded + `"` + "\n" + string(linkLine) + "\n"))
 	f.Close()
 
 	all := ScanBudgetOverruns(logPath, "", since)

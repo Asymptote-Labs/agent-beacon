@@ -10,9 +10,6 @@ import (
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
-// LinkAction is the event action recorded in the runtime log when a commit is linked to a session.
-const LinkAction = "session.commit_linked"
-
 // AttributionFileOverlap is the only attribution method today: the session wrote files the commit
 // changes.
 const AttributionFileOverlap = "file_overlap"
@@ -97,7 +94,7 @@ func LinkEvents(result Result, cc CommitContext, agentVersion string) []schema.E
 	for _, link := range result.Added {
 		c := candidates[link.Key()]
 		event := schema.NewEvent(schema.NewEventOptions{
-			Action:       LinkAction,
+			Action:       asymptoteobserve.ActionCommitLinked,
 			Category:     "session",
 			Severity:     schema.SeverityInfo,
 			AgentVersion: agentVersion,
