@@ -9,7 +9,7 @@ name: Release
 #   3. windows-package — (after goreleaser) builds the Windows MSI from the archive
 #                    goreleaser just published, installs it to prove it works, and
 #                    attaches it. Unsigned for now, so it needs no secrets.
-#   4. finalize    — (after all three) adds the .pkg and .msi to checksums.txt and
+#   4. finalize    — (after all three) adds the .pkg, .msi and install.sh to checksums.txt and
 #                    records a GitHub build-provenance attestation for every file
 #                    checksums.txt lists.
 #
@@ -426,15 +426,17 @@ jobs:
       TAG: ${{ github.ref_name }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Add the .pkg and .msi to checksums.txt
+      - name: Add the .pkg, .msi and install.sh to checksums.txt
         run: |
           set -euo pipefail
           mkdir -p dist/release && cd dist/release
           gh release download "$TAG" --repo "$REPO" --pattern checksums.txt
-          for pattern in 'BeaconEndpointAgent-*.pkg' 'BeaconEndpointAgent-*.msi'; do
+          # install.sh is what `curl -fsSL https://beacon.sh/install.sh | bash` runs (beacon.sh
+          # redirects to this release's copy), so it is attested like the packages it installs.
+          for pattern in 'BeaconEndpointAgent-*.pkg' 'BeaconEndpointAgent-*.msi' 'install.sh'; do
             gh release download "$TAG" --repo "$REPO" --pattern "$pattern" || echo "::warning::no $pattern on the release"
           done
-          for f in BeaconEndpointAgent-*.pkg BeaconEndpointAgent-*.msi; do
+          for f in BeaconEndpointAgent-*.pkg BeaconEndpointAgent-*.msi install.sh; do
             [ -f "$f" ] || continue
             # A rerun must not list a file twice: install.sh refuses a name with two checksums.
             awk -v name="$f" '$2 == name { found = 1 } END { exit found }' checksums.txt || continue
