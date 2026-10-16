@@ -1,0 +1,30 @@
+name: Trusted Signing login
+description: >-
+  Signs in to Azure with the workflow's OIDC token and exports AZURE_TRUSTED_SIGNING_TOKEN, the
+  access token packaging/windows/sign-authenticode.ps1 signs with. The job needs id-token: write.
+
+inputs:
+  client-id:
+    description: Client ID of the Entra app with the Trusted Signing Certificate Profile Signer role.
+    required: true
+  tenant-id:
+    description: Entra tenant ID.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2.3.1
+      with:
+        client-id: ${{ inputs.client-id }}
+        tenant-id: ${{ inputs.tenant-id }}
+        allow-no-subscriptions: true
+
+    # Fetched now rather than per file: the federated credential az signed in with expires within
+    # minutes, and the access token lasts the rest of the job.
+    - shell: pwsh
+      run: |
+        $token = az account get-access-token --resource https://codesigning.azure.net --query accessToken -o tsv
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($token)) { throw 'could not get a Trusted Signing access token' }
+        Write-Output "::add-mask::$token"
+        "AZURE_TRUSTED_SIGNING_TOKEN=$token" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
