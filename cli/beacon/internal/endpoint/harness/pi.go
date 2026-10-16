@@ -2,10 +2,10 @@ package harness
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pisession"
 )
 
 // DiscoverPi reports whether Pi (pi.dev) is present and whether Beacon is observing it.
@@ -34,8 +34,12 @@ func DiscoverPi() Harness {
 	// is still there. Treating that directory as evidence keeps `endpoint discover` from reporting
 	// "not detected" for a runtime the user is actively using, which is the same fallback the
 	// opencode, Cursor and Hermes probes make for the same reason.
-	if !h.Detected && dirExists(filepath.Dir(filepath.Dir(extensionPath))) {
-		h.Detected = true
+	if !h.Detected {
+		if home, err := os.UserHomeDir(); err == nil {
+			if agentDir, err := pisession.AgentDir(home); err == nil && dirExists(agentDir) {
+				h.Detected = true
+			}
+		}
 	}
 
 	h.TelemetryStatus, h.Message = piStatus(extensionPath)

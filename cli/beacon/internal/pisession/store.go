@@ -73,7 +73,18 @@ func defaultAgentDir() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve home directory: %w", err)
 	}
+	return AgentDir(home)
+}
+
+// AgentDir resolves Pi's user agent directory for home, the way Pi does: PI_CODING_AGENT_DIR,
+// trimmed and with a leading `~` expanded against home, or ~/.pi/agent. Pi keeps its sessions and
+// its user extensions under it, so the session reader, the extension installer, discovery and
+// inventory all resolve it here.
+func AgentDir(home string) (string, error) {
 	if override := strings.TrimSpace(os.Getenv(piAgentDirEnv)); override != "" {
+		if strings.TrimSpace(home) == "" && (override == "~" || strings.HasPrefix(override, "~/") || strings.HasPrefix(override, `~\`)) {
+			return "", fmt.Errorf("home directory is required to resolve %s=%q", piAgentDirEnv, override)
+		}
 		return expandTilde(override, home), nil
 	}
 	if strings.TrimSpace(home) == "" {

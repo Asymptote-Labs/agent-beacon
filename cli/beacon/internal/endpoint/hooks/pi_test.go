@@ -300,7 +300,7 @@ func TestPiExtensionPathHonorsTheAgentDirOverride(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
 	agentDir := filepath.Join(home, "elsewhere", "agent")
-	t.Setenv(piAgentDirEnv, agentDir)
+	t.Setenv("PI_CODING_AGENT_DIR", agentDir)
 
 	got, err := PiExtensionPath(LevelUser)
 	if err != nil {
@@ -310,7 +310,7 @@ func TestPiExtensionPathHonorsTheAgentDirOverride(t *testing.T) {
 		t.Fatalf("PiExtensionPath = %q, want %q", got, want)
 	}
 
-	t.Setenv(piAgentDirEnv, "~/custom/agent")
+	t.Setenv("PI_CODING_AGENT_DIR", "~/custom/agent")
 	got, err = PiExtensionPath(LevelUser)
 	if err != nil {
 		t.Fatalf("PiExtensionPath returned error: %v", err)
@@ -325,7 +325,7 @@ func TestPiAgentDirOverrideDoesNotMoveTheProjectPath(t *testing.T) {
 	cwd := t.TempDir()
 	testenv.SetHome(t, home)
 	t.Chdir(cwd)
-	t.Setenv(piAgentDirEnv, filepath.Join(home, "elsewhere", "agent"))
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(home, "elsewhere", "agent"))
 
 	got, err := PiExtensionPath(LevelProject)
 	if err != nil {

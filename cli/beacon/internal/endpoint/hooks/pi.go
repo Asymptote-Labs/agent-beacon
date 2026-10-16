@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	piextension "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks/assets/pi"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pisession"
 )
 
 // Pi (pi.dev) has no hooks configuration file and no OpenTelemetry support, so neither of Beacon's
@@ -16,10 +16,6 @@ import (
 // plugin, and the handling of that file lives in managedExtension, shared with Oh My Pi.
 const (
 	piExtensionFileName = "beacon.ts"
-
-	// piAgentDirEnv replaces Pi's user-level agent directory outright, which is where the user
-	// extension root lives. Pi's session store (pisession) honors the same variable.
-	piAgentDirEnv = "PI_CODING_AGENT_DIR"
 
 	// PiManagedExtensionMarker identifies an extension file as one Beacon wrote.
 	//
@@ -145,24 +141,12 @@ func PiExtensionPathForHome(home string) (string, error) {
 	return filepath.Join(dir, piExtensionFileName), nil
 }
 
-// piUserExtensionDir is <PI_CODING_AGENT_DIR or ~/.pi/agent>/extensions. A leading `~` in the
-// override is expanded, as Pi does, so the install never creates a literal `~` directory.
+// piUserExtensionDir is the extensions directory in Pi's agent directory (pisession.AgentDir), which
+// PI_CODING_AGENT_DIR moves.
 func piUserExtensionDir(home string) (string, error) {
-	if override := strings.TrimSpace(os.Getenv(piAgentDirEnv)); override != "" {
-		if override == "~" || strings.HasPrefix(override, "~/") || strings.HasPrefix(override, `~\`) {
-			if home == "" {
-				return "", fmt.Errorf("home directory is required to resolve %s=%q", piAgentDirEnv, override)
-			}
-			if override == "~" {
-				override = home
-			} else {
-				override = filepath.Join(home, filepath.FromSlash(override[2:]))
-			}
-		}
-		return filepath.Join(override, "extensions"), nil
+	agentDir, err := pisession.AgentDir(home)
+	if err != nil {
+		return "", fmt.Errorf("resolve the Pi extension path: %w", err)
 	}
-	if home == "" {
-		return "", fmt.Errorf("home directory is required to resolve the Pi extension path")
-	}
-	return filepath.Join(home, ".pi", "agent", "extensions"), nil
+	return filepath.Join(agentDir, "extensions"), nil
 }
