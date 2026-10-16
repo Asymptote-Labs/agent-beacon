@@ -174,7 +174,7 @@ func shareEventsIn(t *testing.T, logPath string) []schema.Event {
 	var out []schema.Event
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		var e schema.Event
-		if json.Unmarshal([]byte(line), &e) == nil && e.Event.Action == SessionSharedAction {
+		if json.Unmarshal([]byte(line), &e) == nil && e.Event.Action == asymptoteobserve.ActionSessionShared {
 			out = append(out, e)
 		}
 	}

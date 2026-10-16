@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 func TestSanitizeRemoteURL(t *testing.T) {
@@ -57,7 +58,7 @@ func TestLinkEventsShape(t *testing.T) {
 	if err := e.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if e.Event.Action != LinkAction || e.Event.Fidelity != "inferred" || e.Harness.Name != "claude_code" || e.Harness.CollectionMethod != "" {
+	if e.Event.Action != asymptoteobserve.ActionCommitLinked || e.Event.Fidelity != "inferred" || e.Harness.Name != "claude_code" || e.Harness.CollectionMethod != "" {
 		t.Fatalf("event info %+v harness %+v", e.Event, e.Harness)
 	}
 	if e.Session == nil || e.Session.ID != "s1" || e.Session.WorkingDirectory != "/work/repo" || e.Repository != "/work/repo" || e.Branch != "main" {

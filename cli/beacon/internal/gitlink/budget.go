@@ -16,11 +16,6 @@ import (
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
-// BudgetAction is the event action recorded in the runtime log when one of Beacon's git hooks runs
-// out of its time budget. The hooks give up quietly when that happens (a post-commit hook that runs
-// out leaves the commit unlinked), so the event is the only record of it.
-const BudgetAction = "git.hook_budget_exceeded"
-
 type spawnCounterKey struct{}
 
 // countSpawn adds one to the git spawn counter ctx carries, when it carries one.
@@ -136,7 +131,7 @@ func (r *HookRun) Event(repoRoot, agentVersion string) (schema.Event, bool) {
 		outcome = "its work was cut short"
 	}
 	event := schema.NewEvent(schema.NewEventOptions{
-		Action:       BudgetAction,
+		Action:       asymptoteobserve.ActionGitHookBudgetExceeded,
 		Category:     "system",
 		Severity:     severity,
 		AgentVersion: agentVersion,
@@ -192,13 +187,13 @@ func scanBudgetOverrunFile(path, repoRoot string, since time.Time, summary *Budg
 		return
 	}
 	defer f.Close()
-	marker := []byte(`"` + BudgetAction + `"`)
+	marker := []byte(`"` + asymptoteobserve.ActionGitHookBudgetExceeded + `"`)
 	reader := bufio.NewReaderSize(f, 256*1024)
 	for {
 		line, err := reader.ReadBytes('\n')
 		if len(line) > 0 && bytes.Contains(line, marker) {
 			var event schema.Event
-			if json.Unmarshal(line, &event) == nil && event.Event.Action == BudgetAction && event.VCS != nil && event.VCS.Hook != nil &&
+			if json.Unmarshal(line, &event) == nil && event.Event.Action == asymptoteobserve.ActionGitHookBudgetExceeded && event.VCS != nil && event.VCS.Hook != nil &&
 				(repoRoot == "" || event.Repository == repoRoot) {
 				if at, perr := asymptoteobserve.ParseTimestamp(event.Timestamp); perr == nil && !at.Before(since) {
 					summary.Count++
