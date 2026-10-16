@@ -34,11 +34,13 @@ type Artifact struct {
 
 // UpdateManifest is the small JSON document published as a release asset that
 // tells an installed agent what the latest version is and where to fetch it.
+// The release still writes a team_id for updaters older than the compiled-in
+// pin (selfupdate.AppleTeamID); this one ignores it, since the manifest is not
+// signed.
 type UpdateManifest struct {
 	Schema              int                 `json:"schema"`
 	Version             string              `json:"version"`
 	MinSupportedVersion string              `json:"min_supported_version,omitempty"`
-	TeamID              string              `json:"team_id,omitempty"`
 	PkgIdentifier       string              `json:"pkg_identifier,omitempty"`
 	Artifacts           map[string]Artifact `json:"artifacts"`
 }

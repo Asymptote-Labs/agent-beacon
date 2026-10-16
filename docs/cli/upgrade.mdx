@@ -44,9 +44,10 @@ Behind the scenes, `beacon endpoint update` reads `update-manifest.json`, select
 the package artifact for the local architecture, downloads it into the endpoint
 update staging directory, verifies the manifest checksum, Developer ID Installer
 signature, and Gatekeeper install assessment, then runs Apple's `installer`. The
-package must be signed by the same Apple team as the installed `beacon` binary
-(the manifest's `team_id` is used only when the installed binary is unsigned),
-and both the manifest and the package must be fetched over `https`. The
+package's installer signature must come from Asymptote Labs' Apple team
+(`3A98D35XJR`), which is built into `beacon` rather than read from the unsigned
+manifest, and both the manifest and the package must be fetched over `https`
+(plain `http` only to a loopback mirror, and never through a redirect). The
 package postinstall restarts the local collector, restores configured Vector
 forwarders, re-renders a connected endpoint's Beacon Cloud forwarder config from
 the new version's pack (see [Keeping the forwarder config current](/cli/endpoint-connect#keeping-the-forwarder-config-current)),

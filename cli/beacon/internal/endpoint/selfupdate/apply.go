@@ -153,7 +153,7 @@ func (a *Applier) Apply(ctx context.Context) (ApplyResult, error) {
 		a.emit(false, result, fmt.Sprintf("no update artifact this host can install (looked for %s)", key))
 		return result, fmt.Errorf("no update artifact this host can install (looked for %s)", key)
 	}
-	pkg := Package{URL: artifact.URL, SHA256: artifact.SHA256, Version: manifest.Version, TeamID: manifest.TeamID}
+	pkg := Package{URL: artifact.URL, SHA256: artifact.SHA256, Version: manifest.Version}
 	return a.installPackage(ctx, pkg, result, fmt.Sprintf("updated %s -> %s", a.CurrentVersion, manifest.Version))
 }
 
@@ -163,9 +163,6 @@ type Package struct {
 	URL     string
 	SHA256  string
 	Version string
-	// TeamID is the Apple team that must have signed the package. Empty skips only the team
-	// match; the signature and Gatekeeper checks still run.
-	TeamID string
 	// Edition, when set, must be the edition the installed `beacon version` reports.
 	Edition string
 }
@@ -184,9 +181,6 @@ func (a *Applier) InstallPackage(ctx context.Context, pkg Package) (ApplyResult,
 	result := ApplyResult{FromVersion: a.CurrentVersion, ToVersion: pkg.Version}
 	if !updatecheck.CanCheckVersion(pkg.Version) {
 		return result, fmt.Errorf("package version %q is not a release version", pkg.Version)
-	}
-	if !a.AllowInsecureTest && !strings.HasPrefix(pkg.URL, "https://") {
-		return result, fmt.Errorf("refusing to download a package over %q: https is required", pkg.URL)
 	}
 	message := "installed " + pkg.Version
 	if pkg.Edition != "" {
@@ -242,7 +236,7 @@ func (a *Applier) installPackage(ctx context.Context, pkg Package, result ApplyR
 		result.Verification = "sha256 (notarization check skipped)"
 	default:
 		result.Verification = "sha256+notarization"
-		if err := a.verifyGatekeeper(ctx, pkgPath, pkg.TeamID); err != nil {
+		if err := a.verifyGatekeeper(ctx, pkgPath); err != nil {
 			a.emit(false, result, err.Error())
 			return result, fmt.Errorf("verify signature/notarization: %w", err)
 		}
@@ -431,23 +425,24 @@ func verifySHA256(path, want string) error {
 	return nil
 }
 
-// verifyGatekeeper confirms the .pkg is Developer ID Installer-signed and
-// accepted by Gatekeeper before it is run. stapler validation is best-effort:
-// endpoint machines commonly have only Command Line Tools installed, where the
+// AppleTeamID is the Apple Developer team that signs every Beacon package. It is compiled in, not
+// taken from the update manifest or a platform answer: neither is signed, so a team named there
+// would let whoever can rewrite it pick the signer of a package the updater installs as root.
+const AppleTeamID = "3A98D35XJR"
+
+// verifyGatekeeper confirms the .pkg is signed by Beacon's Developer ID Installer certificate and
+// accepted by Gatekeeper before it is run. Notarization alone only says some Developer ID signed
+// it, so the installer signer's team must be AppleTeamID exactly. stapler validation is
+// best-effort: endpoint machines commonly have only Command Line Tools installed, where the
 // stapler shim exists but refuses to run without full Xcode.
-func (a *Applier) verifyGatekeeper(ctx context.Context, pkgPath, teamID string) error {
+func (a *Applier) verifyGatekeeper(ctx context.Context, pkgPath string) error {
 	run := a.runner()
 	out, err := run(ctx, "pkgutil", "--check-signature", pkgPath)
 	if err != nil {
 		return fmt.Errorf("pkgutil --check-signature: %s: %w", strings.TrimSpace(out), err)
 	}
-	// The team is compared exactly with the one named in the installer signature, and an unknown
-	// team is refused: notarization alone says some Developer ID signed the package, not Beacon's.
-	if teamID == "" {
-		return fmt.Errorf("no expected signing team id; refusing to install an unattributed package")
-	}
-	if signer := installerSignerTeamID(out); signer != teamID {
-		return fmt.Errorf("package is signed by team %q, want %s", signer, teamID)
+	if signer := installerSignerTeamID(out); signer != AppleTeamID {
+		return fmt.Errorf("package is signed by team %q, want %s", signer, AppleTeamID)
 	}
 	if out, err := run(ctx, "stapler", "validate", pkgPath); err != nil {
 		if !staplerUnavailable(out, err) {
@@ -460,10 +455,7 @@ func (a *Applier) verifyGatekeeper(ctx context.Context, pkgPath, teamID string) 
 	return nil
 }
 
-var (
-	installerSignerPattern = regexp.MustCompile(`Developer ID Installer: [^\n]*\(([A-Z0-9]+)\)`)
-	codesignTeamPattern    = regexp.MustCompile(`(?m)^TeamIdentifier=([A-Z0-9]+)\s*$`)
-)
+var installerSignerPattern = regexp.MustCompile(`Developer ID Installer: [^\n]*\(([A-Z0-9]+)\)`)
 
 // installerSignerTeamID is the team id in the leaf "Developer ID Installer: Name (TEAMID)" line of
 // pkgutil --check-signature output, or "" when there is none.
@@ -472,20 +464,6 @@ func installerSignerTeamID(out string) string {
 		return m[1]
 	}
 	return ""
-}
-
-// expectedTeamID is the team a new package must be signed by: the team that signed the installed
-// beacon binary. The manifest is not signed, so the team id it names is used only when the
-// installed binary carries none (an install that predates signing, or a test prefix); otherwise
-// anyone able to rewrite the manifest could name their own team.
-func (a *Applier) expectedTeamID(ctx context.Context, manifestTeamID string) string {
-	installed := filepath.Join(a.prefix(), "opt", "beacon", "bin", "beacon")
-	if out, err := a.runner()(ctx, "codesign", "-dv", "--verbose=2", installed); err == nil {
-		if m := codesignTeamPattern.FindStringSubmatch(out); m != nil {
-			return m[1]
-		}
-	}
-	return strings.TrimSpace(manifestTeamID)
 }
 
 func staplerUnavailable(out string, err error) bool {
