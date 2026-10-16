@@ -32,7 +32,20 @@ func TestShellWrittenPaths(t *testing.T) {
 		{`rm "file with spaces.txt"`, []string{"file with spaces.txt"}},
 		{`rm file\ two.txt`, []string{"file two.txt"}},
 		{"echo '> not a redirect' ; ls", nil},
-		{"rm $TARGET", nil},       // unknown value
+		{"rm $TARGET", nil},
+		{`"$TOOL" rm victim.txt`, nil},
+		{`command "$TOOL" rm victim.txt`, nil},
+		{`cp first.txt second.txt "$DEST"`, nil},
+		{`cp "$SOURCE" output.txt`, []string{"output.txt"}},
+		{`rm known.txt "$UNKNOWN"`, []string{"known.txt"}},
+		{`"$TOOL" rm victim.txt > known.log`, []string{"known.log"}},
+		{`ROOT="$DIR" cd sub && rm relative.txt`, nil},
+		{`ROOT="$DIR" rm known.txt`, []string{"known.txt"}},
+		{`"ROOT=$DIR" rm victim.txt`, nil},
+		{`"$TOOL=x" rm victim.txt`, nil},
+		{`"ROOT"=$DIR rm victim.txt`, nil},
+		{`ROOT\=$DIR rm victim.txt`, nil},
+		{`ROOT=$DIR rm known.txt`, []string{"known.txt"}}, // unknown value
 		{"rm *.log", nil},         // glob
 		{"rm \"$(pwd)/x\"", nil},  // expansion inside quotes
 		{"(cd sub && rm x)", nil}, // x is sub/x, which this parser does not follow
