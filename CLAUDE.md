@@ -266,7 +266,7 @@ local GoReleaser publish only as a fallback when CI release automation is not
 available or the maintainer explicitly asks for a local release.
 
 A pushed `v*` tag runs the full release end-to-end via
-`.github/workflows/release.yml` (no local publish steps required), in three jobs:
+`.github/workflows/release.yml` (no local publish steps required), in four jobs:
 
 1. `goreleaser` (ubuntu, `environment: release`) builds the collector dists,
    publishes the GitHub release + changelog and tarballs, and updates the
@@ -282,6 +282,15 @@ A pushed `v*` tag runs the full release end-to-end via
    works, and attaches the `.msi` and its `.sha256`. Deliberately **not** in the
    `release` environment: that environment gates signing secrets, and the MSI is
    unsigned, so this job has none to gate.
+4. `finalize` (ubuntu, `needs` all three, runs whenever `goreleaser` succeeded)
+   appends the `.pkg` and `.msi` to `checksums.txt` from the released bytes and
+   records a GitHub build-provenance attestation (Sigstore, keyless, through the
+   workflow's OIDC token) for every file `checksums.txt` lists. It needs
+   `id-token: write` and `attestations: write` and no `release`-environment secrets.
+
+Every third-party action in `release.yml` and `release-extension.yml` is pinned to
+a full commit SHA with the version in a trailing comment, because these jobs hold
+the signing secrets. Bump them by SHA, never back to a tag.
 
 Required `release`-environment secrets: `HOMEBREW_TAP_TOKEN`,
 `DEVELOPER_ID_APP_CERT_P12`, `DEVELOPER_ID_APP_CERT_PASSWORD`,
@@ -382,7 +391,9 @@ docker run --rm --platform linux/amd64 homebrew/brew sh -c \
 The release should include the five GoReleaser CLI archives (four `.tar.gz` plus
 `beacon_<version>_windows_amd64.zip`), `checksums.txt`, `threat-rules.tar.gz`, `install.sh` (the Linux one-line installer from `packaging/linux/install.sh`),
 `BeaconEndpointAgent-<version>-arm64.pkg`, its `.sha256`, `update-manifest.json`,
-and `BeaconEndpointAgent-<version>-x64.msi` with its `.sha256`.
+and `BeaconEndpointAgent-<version>-x64.msi` with its `.sha256`. `checksums.txt` lists
+the archives, the Linux packages, the `.pkg` and the `.msi`, and each of those has a
+build-provenance attestation.
 
 The MSI is unsigned, so `pkgutil`/`stapler`/`spctl` have no Windows counterpart to
 run. Its `.sha256` is therefore the only integrity check it has, and the release
@@ -394,9 +405,8 @@ signing is added. Verify the package before announcing the release:
 tmpdir="$(mktemp -d)"
 cd "$tmpdir"
 gh release download <tag> --repo Asymptote-Labs/agent-beacon --pattern 'BeaconEndpointAgent-*-arm64.pkg*' --pattern update-manifest.json
-expected="$(awk '{print $1}' BeaconEndpointAgent-*-arm64.pkg.sha256)"
-actual="$(shasum -a 256 BeaconEndpointAgent-*-arm64.pkg | awk '{print $1}')"
-test "$expected" = "$actual"
+shasum -a 256 -c BeaconEndpointAgent-*-arm64.pkg.sha256
+gh attestation verify BeaconEndpointAgent-*-arm64.pkg --repo Asymptote-Labs/agent-beacon
 pkgutil --check-signature BeaconEndpointAgent-*-arm64.pkg
 xcrun stapler validate BeaconEndpointAgent-*-arm64.pkg
 spctl --assess --type install -vv BeaconEndpointAgent-*-arm64.pkg
