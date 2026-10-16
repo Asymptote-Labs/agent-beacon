@@ -40,7 +40,12 @@ func TestShellWrittenPaths(t *testing.T) {
 		{`rm known.txt "$UNKNOWN"`, []string{"known.txt"}},
 		{`"$TOOL" rm victim.txt > known.log`, []string{"known.log"}},
 		{`ROOT="$DIR" cd sub && rm relative.txt`, nil},
-		{`ROOT="$DIR" rm known.txt`, []string{"known.txt"}}, // unknown value
+		{`ROOT="$DIR" rm known.txt`, []string{"known.txt"}},
+		{`"ROOT=$DIR" rm victim.txt`, nil},
+		{`"$TOOL=x" rm victim.txt`, nil},
+		{`"ROOT"=$DIR rm victim.txt`, nil},
+		{`ROOT\=$DIR rm victim.txt`, nil},
+		{`ROOT=$DIR rm known.txt`, []string{"known.txt"}}, // unknown value
 		{"rm *.log", nil},         // glob
 		{"rm \"$(pwd)/x\"", nil},  // expansion inside quotes
 		{"(cd sub && rm x)", nil}, // x is sub/x, which this parser does not follow
