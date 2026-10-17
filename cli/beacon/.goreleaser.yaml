@@ -23,8 +23,9 @@ before:
     # as a release asset users install with `beacon rules pull <asset-url>`.
     - bash -c 'mkdir -p release-rules && COPYFILE_DISABLE=1 tar --exclude="._*" --exclude=".DS_Store" -czf release-rules/threat-rules.tar.gz -C ../.. rules'
     # GoReleaser v2 rejects release extra_files outside its working directory. Stage the
-    # repository-level one-line installer locally before attaching it to the release.
-    - bash -c 'mkdir -p release-install && cp ../../packaging/linux/install.sh release-install/install.sh'
+    # repository-level one-line installer locally before attaching it to the release, pinning the
+    # Linux release key the self-updater embeds.
+    - bash -c 'mkdir -p release-install && fprs="$(xargs < internal/endpoint/selfupdate/release-key.fingerprint | tr " " ,)" && sed "s/^release_key_fingerprints=$/release_key_fingerprints=$fprs/" ../../packaging/linux/install.sh > release-install/install.sh && grep -qx "release_key_fingerprints=$fprs" release-install/install.sh'
 
 builds:
   - id: beacon
@@ -190,6 +191,9 @@ nfpms:
       - systemd
     rpm:
       group: Applications/System
+      # Signed with the Linux release key when release.yml imports one, and unsigned otherwise.
+      signature:
+        key_file: '{{ envOrDefault "BEACON_LINUX_SIGNING_KEY_FILE" "" }}'
       scripts:
         # rpm runs the outgoing package's %preun after the incoming package's %post during an
         # upgrade, so an older package can stop the service the new one just started -- and nothing
@@ -199,6 +203,8 @@ nfpms:
     deb:
       fields:
         Bugs: https://github.com/asymptote-labs/agent-beacon/issues
+      signature:
+        key_file: '{{ envOrDefault "BEACON_LINUX_SIGNING_KEY_FILE" "" }}'
 
 checksum:
   name_template: "checksums.txt"
