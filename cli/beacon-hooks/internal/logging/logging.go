@@ -159,7 +159,7 @@ func (l *Logger) EndpointEventWithFidelity(action, category, severity, message, 
 // originated it: no runtime reported a share request.
 func (l *Logger) requestShareOnce(event map[string]interface{}) {
 	info, _ := event["event"].(map[string]interface{})
-	if action, _ := info["action"].(string); action == shareauto.ActionShareRequested {
+	if action, _ := info["action"].(string); action == asymptoteobserve.ActionShareRequested {
 		return
 	}
 	session, _ := event["session"].(map[string]interface{})
@@ -195,7 +195,7 @@ func (l *Logger) requestShareOnce(event map[string]interface{}) {
 	if branch, _ := event["branch"].(string); branch != "" {
 		fields["branch"] = branch
 	}
-	if err := l.EndpointEventWithFidelity(shareauto.ActionShareRequested, "session", "info", "Auto-share requested for this session", asymptoteobserve.FidelityInferred, fields); err != nil {
+	if err := l.EndpointEventWithFidelity(asymptoteobserve.ActionShareRequested, "session", "info", "Auto-share requested for this session", asymptoteobserve.FidelityInferred, fields); err != nil {
 		// The request was not written (a read-only log, a sandbox): take the mark back so the next
 		// hook of the session asks again, rather than leave the session marked and never requested.
 		// Like the rest of this path it stays silent and never fails the hook.
@@ -690,26 +690,11 @@ func openEndpointRuntimeFile(path string, flag int) (*os.File, error) {
 }
 
 // openEndpointRuntimeFileAs opens path (the log or its lock) with the mode logPath calls for, and
-// settles its mode with asymptoteobserve.SettleRuntimeLogFileMode: a new file gets that mode
-// whatever the umask, and an existing one is only ever narrowed toward it, by its owner.
+// settles its mode through asymptoteobserve.OpenRuntimeLogFile: a new file gets that mode
+// whatever the umask, an existing one is only ever narrowed toward it, by its owner, and root never
+// follows a symlink or opens anything but a regular file there.
 func openEndpointRuntimeFileAs(path, logPath string, flag int) (*os.File, error) {
-	fileMode, _, _ := asymptoteobserve.RuntimeLogModes(logPath)
-	existed := true
-	if _, err := os.Stat(path); err != nil {
-		if !os.IsNotExist(err) {
-			return nil, err
-		}
-		existed = false
-	}
-	f, err := os.OpenFile(path, flag, fileMode)
-	if err != nil {
-		return nil, err
-	}
-	if err := asymptoteobserve.SettleRuntimeLogFileMode(path, logPath, !existed); err != nil {
-		_ = f.Close()
-		return nil, err
-	}
-	return f, nil
+	return asymptoteobserve.OpenRuntimeLogFile(path, logPath, flag)
 }
 
 func rotateEndpointLogIfNeeded(path string, maxSize int64, archives int, nextWriteBytes int64) error {

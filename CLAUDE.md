@@ -266,7 +266,7 @@ local GoReleaser publish only as a fallback when CI release automation is not
 available or the maintainer explicitly asks for a local release.
 
 A pushed `v*` tag runs the full release end-to-end via
-`.github/workflows/release.yml` (no local publish steps required), in three jobs:
+`.github/workflows/release.yml` (no local publish steps required), in four jobs:
 
 1. `goreleaser` (ubuntu, `environment: release`) builds the collector dists,
    publishes the GitHub release + changelog and tarballs, and updates the
@@ -281,6 +281,15 @@ A pushed `v*` tag runs the full release end-to-end via
    builds the x64 MSI from the published archive, signs it when signing is
    configured, installs and uninstalls it on the runner to prove it works, and
    attaches the `.msi` and its `.sha256`.
+4. `finalize` (ubuntu, `needs` all three, runs whenever `goreleaser` succeeded)
+   appends the `.pkg`, `.msi` and `install.sh` to `checksums.txt` from the released bytes and
+   records a GitHub build-provenance attestation (Sigstore, keyless, through the
+   workflow's OIDC token) for every file `checksums.txt` lists. It needs
+   `id-token: write` and `attestations: write` and no `release`-environment secrets.
+
+Every third-party action in `release.yml` and `release-extension.yml` is pinned to
+a full commit SHA with the version in a trailing comment, because these jobs hold
+the signing secrets. Bump them by SHA, never back to a tag.
 
 Windows Authenticode signing goes through Azure Trusted Signing with jsign
 (`packaging/windows/sign-authenticode.ps1`), signed in by OIDC through
@@ -289,7 +298,8 @@ Windows Authenticode signing goes through Azure Trusted Signing with jsign
 a no-op and the release ships unsigned, as before. When it is set, goreleaser's
 build hooks sign `beacon.exe`, `beacon-hooks.exe` and the embedded hooks copy,
 the `goreleaser` job signs `beacon-otelcol.exe`, `windows-package` signs the MSI
-before its `.sha256` is written, and `packaging/windows/assert-authenticode.ps1`
+before its `.sha256` is written (and so before `finalize` hashes it into
+`checksums.txt`), and `packaging/windows/assert-authenticode.ps1`
 fails the release unless all four published files are `Valid`, timestamped, and
 signed by `Asymptote Labs, Inc.`.
 
@@ -397,10 +407,12 @@ docker run --rm --platform linux/amd64 homebrew/brew sh -c \
 The release should include the five GoReleaser CLI archives (four `.tar.gz` plus
 `beacon_<version>_windows_amd64.zip`), `checksums.txt`, `threat-rules.tar.gz`, `install.sh` (the Linux one-line installer from `packaging/linux/install.sh`),
 `BeaconEndpointAgent-<version>-arm64.pkg`, its `.sha256`, `update-manifest.json`,
-and `BeaconEndpointAgent-<version>-x64.msi` with its `.sha256`.
+and `BeaconEndpointAgent-<version>-x64.msi` with its `.sha256`. `checksums.txt` lists
+the archives, the Linux packages, the `.pkg`, the `.msi` and `install.sh`, and each of those has a
+build-provenance attestation.
 
-Until Windows signing is configured the MSI is unsigned, so its `.sha256` is the
-only integrity check it has, and the release job proves the package works by
+Until Windows signing is configured the MSI is unsigned, so its `.sha256` and its
+build-provenance attestation are the only integrity checks it has, and the release job proves the package works by
 installing it on a runner before attaching it. Once signing is configured, check it
 on Windows with `Get-AuthenticodeSignature BeaconEndpointAgent-<version>-x64.msi`
 (`Status` `Valid`, signer `CN=Asymptote Labs, Inc.`), or anywhere with
@@ -411,9 +423,8 @@ package before announcing the release:
 tmpdir="$(mktemp -d)"
 cd "$tmpdir"
 gh release download <tag> --repo Asymptote-Labs/agent-beacon --pattern 'BeaconEndpointAgent-*-arm64.pkg*' --pattern update-manifest.json
-expected="$(awk '{print $1}' BeaconEndpointAgent-*-arm64.pkg.sha256)"
-actual="$(shasum -a 256 BeaconEndpointAgent-*-arm64.pkg | awk '{print $1}')"
-test "$expected" = "$actual"
+shasum -a 256 -c BeaconEndpointAgent-*-arm64.pkg.sha256
+gh attestation verify BeaconEndpointAgent-*-arm64.pkg --repo Asymptote-Labs/agent-beacon
 pkgutil --check-signature BeaconEndpointAgent-*-arm64.pkg
 xcrun stapler validate BeaconEndpointAgent-*-arm64.pkg
 spctl --assess --type install -vv BeaconEndpointAgent-*-arm64.pkg

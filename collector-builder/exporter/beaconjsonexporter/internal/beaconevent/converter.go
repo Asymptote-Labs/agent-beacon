@@ -313,6 +313,18 @@ func shouldDropCopilotMetric(resourceAttrs map[string]interface{}, name string, 
 	return true
 }
 
+// statedAction is the first action the attributes state, unless it is one only Beacon itself
+// writes (asymptoteobserve.IsBeaconOnlyAction). Anything that can reach the loopback OTLP
+// receiver can state an action, so one of those arriving over OTLP is not believed and the action
+// is inferred as if none were stated.
+func statedAction(attrs map[string]interface{}, keys ...string) string {
+	action := FirstString(attrs, keys...)
+	if asymptoteobserve.IsBeaconOnlyAction(action) {
+		return ""
+	}
+	return action
+}
+
 func (c Converter) EventFromLog(resourceAttrs map[string]interface{}, record plog.LogRecord) Event {
 	event, _, _ := c.eventFromLog(resourceAttrs, record)
 	return event
@@ -329,7 +341,7 @@ func (c Converter) eventFromLog(resourceAttrs map[string]interface{}, record plo
 	ts := Timestamp(record.Timestamp().AsTime())
 	// An action the record states outright is observed by definition; only the fallback has to
 	// account for how it got there.
-	action := FirstString(attrs, "beacon.event.action", "event.action", "gen_ai.agent.action", "ai.agent.action")
+	action := statedAction(attrs, "beacon.event.action", "event.action", "gen_ai.agent.action", "ai.agent.action")
 	fidelity := asymptoteobserve.FidelityObserved
 	if action == "" {
 		action, fidelity = InferActionWithFidelity(attrs, body)
@@ -362,7 +374,7 @@ func (c Converter) eventFromLog(resourceAttrs map[string]interface{}, record plo
 func (c Converter) EventFromSpan(resourceAttrs map[string]interface{}, span ptrace.Span) Event {
 	attrs := MergeMaps(resourceAttrs, AttrsToMap(span.Attributes()))
 	codexTurnUsage := IsCodexTurnUsageSpan(attrs, span.Name())
-	action := FirstString(attrs, "beacon.event.action", "event.action", "gen_ai.agent.action", "ai.agent.action")
+	action := statedAction(attrs, "beacon.event.action", "event.action", "gen_ai.agent.action", "ai.agent.action")
 	fidelity := asymptoteobserve.FidelityObserved
 	if action == "" {
 		action, fidelity = InferActionWithFidelity(attrs, span.Name())
@@ -620,7 +632,7 @@ func (c Converter) NormalizeClaudeLogEvent(event *Event, attrs map[string]interf
 	normalizeClaudeCoworkContext(event, attrs)
 	originalAction := event.Event.Action
 	originalCategory := event.Event.Category
-	preserveAction := FirstString(attrs, "beacon.event.action", "event.action", "gen_ai.agent.action", "ai.agent.action") != ""
+	preserveAction := statedAction(attrs, "beacon.event.action", "event.action", "gen_ai.agent.action", "ai.agent.action") != ""
 	preserveCategory := preserveAction || FirstString(attrs, "beacon.event.category", "event.category", "category") != ""
 
 	originalFidelity := event.Event.Fidelity
@@ -876,7 +888,7 @@ func JSONMapAttr(attrs map[string]interface{}, key string) map[string]interface{
 
 func (c Converter) EventFromMetric(resourceAttrs map[string]interface{}, metric pmetric.Metric) Event {
 	attrs := MergeMaps(resourceAttrs, map[string]interface{}{})
-	action := FirstString(attrs, "beacon.event.action", "event.action")
+	action := statedAction(attrs, "beacon.event.action", "event.action")
 	if action == "" {
 		action = "metric.observed"
 	}

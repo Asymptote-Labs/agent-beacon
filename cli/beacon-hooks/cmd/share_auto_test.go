@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/activesession"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/shareauto"
 )
@@ -60,7 +61,7 @@ func shareRequests(t *testing.T, logPath string) []map[string]interface{} {
 	t.Helper()
 	var out []map[string]interface{}
 	for _, event := range endpointEvents(t, logPath) {
-		if info, _ := event["event"].(map[string]interface{}); info["action"] == shareauto.ActionShareRequested {
+		if info, _ := event["event"].(map[string]interface{}); info["action"] == asymptoteobserve.ActionShareRequested {
 			out = append(out, event)
 		}
 	}
@@ -93,7 +94,7 @@ func TestAutoShareWritesOneRequestPerSession(t *testing.T) {
 	}
 	// It follows the session's first event, which is SessionStart here.
 	events := endpointEvents(t, logPath)
-	if events[0]["event"].(map[string]interface{})["action"] != "session.started" || events[1]["event"].(map[string]interface{})["action"] != shareauto.ActionShareRequested {
+	if events[0]["event"].(map[string]interface{})["action"] != "session.started" || events[1]["event"].(map[string]interface{})["action"] != asymptoteobserve.ActionShareRequested {
 		t.Fatalf("order: %v then %v", events[0]["event"], events[1]["event"])
 	}
 }

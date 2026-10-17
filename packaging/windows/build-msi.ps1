@@ -86,7 +86,9 @@ try {
     # only integrity check available on an unsigned artifact, and it stays mandatory once signing is
     # added rather than being replaced by it.
     $hash = (Get-FileHash -LiteralPath $OutFile -Algorithm SHA256).Hash.ToLower()
-    "$hash  $(Split-Path -Leaf $OutFile)" | Set-Content -LiteralPath "$OutFile.sha256" -Encoding ascii
+    # LF, not Set-Content's CRLF: with a trailing CR, `shasum -c` and `sha256sum -c` on macOS and
+    # Linux look for a file whose name ends in \r and report it missing.
+    "$hash  $(Split-Path -Leaf $OutFile)`n" | Set-Content -LiteralPath "$OutFile.sha256" -Encoding ascii -NoNewline
     Write-Output "sha256: $hash"
     Write-Output $OutFile
 } finally {

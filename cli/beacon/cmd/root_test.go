@@ -25,7 +25,7 @@ func TestPrintRootSplash(t *testing.T) {
 	got := out.String()
 	for _, want := range []string{
 		"██████╗ ███████╗ █████╗  ██████╗ ██████╗ ███╗   ██╗",
-		"Open-source telemetry layer for AI agents.",
+		"Self-improving memory for coding agents.",
 		"Start with:",
 		"beacon endpoint install",
 		"beacon endpoint status",

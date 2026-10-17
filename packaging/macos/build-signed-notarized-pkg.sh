@@ -118,6 +118,6 @@ if [ "$SKIP_VERIFY" -eq 0 ]; then
   spctl -a -vv -t install "$PKG_PATH"
 fi
 
-shasum -a 256 "$PKG_PATH" > "$PKG_PATH.sha256"
+(cd "$(dirname "$PKG_PATH")" && shasum -a 256 "$(basename "$PKG_PATH")") > "$PKG_PATH.sha256"
 echo "signed and notarized package: $PKG_PATH"
 echo "checksum: $PKG_PATH.sha256"

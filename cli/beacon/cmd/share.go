@@ -41,9 +41,6 @@ import (
 // errShareNothingYet is a session with no events to share yet. --follow waits for some.
 var errShareNothingYet = errors.New("has nothing to share yet")
 
-// SessionSharedAction is the runtime-log action recorded after a session is shared or refreshed.
-const SessionSharedAction = "session.shared"
-
 var (
 	shareAccountLoad           = account.Load
 	shareHTTPClient            = &http.Client{Timeout: 60 * time.Second}
@@ -1070,7 +1067,7 @@ func shareRecordEvent(session handoff.Session, result shareResult, refresh bool,
 		verb = "refreshed"
 	}
 	event := schema.NewEvent(schema.NewEventOptions{
-		Action:       SessionSharedAction,
+		Action:       asymptoteobserve.ActionSessionShared,
 		Category:     "session",
 		Severity:     schema.SeverityInfo,
 		AgentVersion: version.GetVersion(),

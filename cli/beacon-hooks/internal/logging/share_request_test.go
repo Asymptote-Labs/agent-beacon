@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/activesession"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/shareauto"
 )
@@ -30,7 +31,7 @@ func TestShareRequestMarkIsRolledBackWhenTheWriteFails(t *testing.T) {
 	failing := true
 	prev := writeEndpointJSON
 	writeEndpointJSON = func(path string, event map[string]interface{}) error {
-		if info, _ := event["event"].(map[string]interface{}); failing && info["action"] == shareauto.ActionShareRequested {
+		if info, _ := event["event"].(map[string]interface{}); failing && info["action"] == asymptoteobserve.ActionShareRequested {
 			return errors.New("read-only file system")
 		}
 		return prev(path, event)
@@ -62,13 +63,13 @@ func TestShareRequestMarkIsRolledBackWhenTheWriteFails(t *testing.T) {
 	if len(record.Sessions) == 0 || len(record.ShareRequested) != 0 {
 		t.Fatalf("record = %s, want the session noted and no share-request mark", data)
 	}
-	if got := countActions(t, logPath, shareauto.ActionShareRequested); got != 0 {
+	if got := countActions(t, logPath, asymptoteobserve.ActionShareRequested); got != 0 {
 		t.Fatalf("share requests while failing = %d", got)
 	}
 	failing = false
 	hook()
 	hook()
-	if got := countActions(t, logPath, shareauto.ActionShareRequested); got != 1 {
+	if got := countActions(t, logPath, asymptoteobserve.ActionShareRequested); got != 1 {
 		t.Fatalf("share requests = %d, want exactly one", got)
 	}
 }
