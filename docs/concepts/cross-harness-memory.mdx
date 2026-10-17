@@ -100,6 +100,28 @@ This is what makes the memory portable across harnesses: one agent's reviewed tr
 can become project knowledge that another MCP-capable or skill-capable agent can
 retrieve later.
 
+## Memory in Beacon Cloud
+
+When an endpoint forwards its sessions to Beacon Cloud, the same loop runs over
+[Beacon Cloud MCP](/deployment/managed-mcp#memory), so any agent connected to it can turn a
+forwarded session into memory, whatever machine or harness the session came from. Sessions
+are read from Beacon Cloud, so the agent needs no local trace history or CLI:
+
+- `beacon_memory_candidate_create` files a lesson the agent drafted from a session, with the
+  event IDs it rests on, once the user confirms it.
+- `beacon_memory_candidates_list` and `beacon_memory_candidate_get` read candidates back.
+- `beacon_memory_candidate_review` approves a candidate with the reviewed text, rejects it, or
+  supersedes it with an existing memory.
+- `beacon_memory_search` and `beacon_memory_get` recall approved memory.
+- `beacon_memory_skill` renders an approved memory as the same Agent Skill
+  `beacon memory skills install` writes, for the agent to save in the repository.
+
+Records use the same `beacon.learning.v1` shapes and IDs as the local store. Beacon Cloud has no
+evaluator, so every candidate there is drafted by the agent and confirmed by you, which is the
+same path as [writing a candidate yourself](/cli/memory#write-a-candidate-yourself). Memory approved in Beacon Cloud stays in
+Beacon Cloud and local memory stays on the machine; neither is copied to the other. Filing and
+reviewing need a connection with write access.
+
 ## Beacon memory skills
 
 The workflow itself ships as installable Agent Skills, so an agent in any harness can

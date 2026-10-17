@@ -113,8 +113,9 @@ When your client signs in, the Beacon approval page asks what to allow:
 - **Read** is always granted. The agent can search and read your sessions (prompts, responses,
   tool calls and output, commands and file edits) and your findings.
 - **Write** is optional and only offered when the client asks for it. Tick the checkbox to let the
-  agent share your sessions, create, upload, release and publish lenses under your account, and
-  record your feedback on findings or resolve and dismiss them.
+  agent share your sessions, create, upload, release and publish lenses under your account,
+  record your feedback on findings or resolve and dismiss them, and file and review memory
+  candidates.
 
 Neither lets the agent change your sessions, your devices, or anything on your machine, or read
 anyone else's data. A tool that needs write access is hidden from read-only connections.
@@ -137,6 +138,13 @@ anyone else's data. A tool that needs write access is hidden from read-only conn
 | `beacon_findings_list` | Lists your findings, the ones that still need review first, filtered by severity or kind |
 | `beacon_get_finding` | Returns one finding in full: detail, recommendation, cited sessions and evidence, and the prompt in effect |
 | `beacon_finding_feedback` | Marks a finding helpful or not helpful with a note, and/or sets it resolved, dismissed or open (write access) |
+| `beacon_memory_candidate_create` | Files a lesson drafted from one of your sessions as a memory candidate, after you confirm it (write access) |
+| `beacon_memory_candidates_list` | Lists your memory candidates by state (awaiting review, approved, rejected, superseded) and repository |
+| `beacon_memory_candidate_get` | Returns one memory candidate in full, with the session evidence it rests on |
+| `beacon_memory_candidate_review` | Approves a candidate with the reviewed text, rejects it, or supersedes it with an existing memory (write access) |
+| `beacon_memory_search` | Searches your approved memory; every word must match |
+| `beacon_memory_get` | Returns one approved memory in full |
+| `beacon_memory_skill` | Renders an approved memory as an Agent Skill (`SKILL.md`) for the agent to save in your repository |
 
 Time filters accept a relative window such as `24h`, `7d` or `2w`, or exact `after` and `before`
 dates. `beacon_read_session` also accepts a dashboard session URL.
@@ -150,6 +158,20 @@ Feedback and status set over MCP are the same review you give on the dashboard: 
 reads your feedback and note, so it stops repeating what you rejected. `beacon_get_finding` and
 `beacon_finding_feedback` also accept a finding's dashboard URL.
 
+## Memory
+
+Memory turns lessons from your sessions into reviewed knowledge that any agent connected to
+Beacon Cloud can recall, the same workflow as [`beacon memory`](/cli/memory) on a machine. The
+agent reads a session, drafts the lesson, and shows it to you; it files the candidate only after
+you confirm, and records your decision to approve, reject or supersede it. There is no evaluator
+in Beacon Cloud, so every candidate is one you reviewed. Approved memory is recalled with
+`beacon_memory_search`, and `beacon_memory_skill` renders one as the same Agent Skill
+`beacon memory skills install` writes. Beacon Cloud cannot write to your repository, so the agent
+saves the file after you confirm. The [Beacon Agent Skills](/concepts/beacon-skills)
+`beacon-memory-distill`, `beacon-memory-recall` and `beacon-memory-promote` drive this workflow
+for you. Memory in Beacon Cloud is separate from the local memory store on your machines; see
+[Memory in Beacon Cloud](/concepts/cross-harness-memory#memory-in-beacon-cloud).
+
 ## Example prompts
 
 - "Find the session where I fixed the release workflow last week."
@@ -158,6 +180,8 @@ reads your feedback and note, so it stops repeating what you rejected. `beacon_g
 - "Summarize token usage for this repository over the past seven days, by model."
 - "Build a lens that shows every failed command and publish it." (needs write access)
 - "Which of my Beacon findings are high severity? Open the first one and check its evidence."
+- "Turn yesterday's fix for the flaky release test into Beacon memory." (needs write access)
+- "Have we solved this ENOSPC error before? Check my Beacon memory."
 - "Dismiss that finding as not helpful: the key it flagged is a test fixture." (needs write access)
 
 Session titles and summaries are metadata. For exact claims about commands, files or errors, have
