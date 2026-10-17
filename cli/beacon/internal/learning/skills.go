@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"unicode"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
@@ -38,43 +37,10 @@ func CandidateMemoryForSkill(store *Store, candidateID string) (asymptoteobserve
 	return candidate, memory, nil
 }
 
+// RenderSkill renders an approved memory as a SKILL.md. The renderer lives in
+// pkg/asymptoteobserve so Beacon Cloud MCP produces the same file.
 func RenderSkill(candidate asymptoteobserve.LearningCandidateV1, memory asymptoteobserve.LearningMemoryV1) string {
-	slug := SkillSlug(memory)
-	var b strings.Builder
-	// Provenance lives under metadata, the Agent Skills spec's string map for
-	// client-specific keys, so a generated skill validates and can be published
-	// like any other.
-	b.WriteString("---\n")
-	b.WriteString("name: " + slug + "\n")
-	b.WriteString("description: " + yamlQuote(skillDescription(memory)) + "\n")
-	b.WriteString("metadata:\n")
-	b.WriteString("  beacon_memory_id: " + yamlQuote(memory.ID) + "\n")
-	b.WriteString("  beacon_candidate_id: " + yamlQuote(candidate.ID) + "\n")
-	if memory.Kind != "" {
-		b.WriteString("  beacon_memory_kind: " + yamlQuote(memory.Kind) + "\n")
-	}
-	if len(memory.Tags) > 0 {
-		b.WriteString("  beacon_tags: " + yamlQuote(strings.Join(memory.Tags, ", ")) + "\n")
-	}
-	b.WriteString("---\n\n")
-	b.WriteString("# " + memory.Title + "\n\n")
-	if memory.Applicability != "" {
-		b.WriteString("Use this skill " + ensureTrailingPeriod(memory.Applicability) + "\n\n")
-	}
-	b.WriteString("## Guidance\n\n")
-	b.WriteString(strings.TrimSpace(memory.Body))
-	b.WriteString("\n\n")
-	if len(memory.Evidence) > 0 {
-		b.WriteString("## Beacon Evidence\n\n")
-		for _, evidence := range memory.Evidence {
-			b.WriteString("- Trace `" + evidence.TraceID + "`")
-			if evidence.Summary != "" {
-				b.WriteString(": " + evidence.Summary)
-			}
-			b.WriteString("\n")
-		}
-	}
-	return b.String()
+	return asymptoteobserve.RenderLearningSkill(candidate, memory)
 }
 
 func InstallSkill(projectPath string, candidate asymptoteobserve.LearningCandidateV1, memory asymptoteobserve.LearningMemoryV1, force bool) (SkillInstallResult, error) {
@@ -85,7 +51,7 @@ func InstallSkill(projectPath string, candidate asymptoteobserve.LearningCandida
 		return SkillInstallResult{}, fmt.Errorf("project path is required to install a skill")
 	}
 	slug := SkillSlug(memory)
-	path := filepath.Join(projectPath, ".agents", "skills", slug, "SKILL.md")
+	path := filepath.Join(projectPath, filepath.FromSlash(asymptoteobserve.LearningSkillPath(slug)))
 	if !force {
 		if _, err := os.Stat(path); err == nil {
 			return SkillInstallResult{}, fmt.Errorf("skill already exists: %s (use --force to overwrite)", path)
@@ -104,81 +70,5 @@ func InstallSkill(projectPath string, candidate asymptoteobserve.LearningCandida
 }
 
 func SkillSlug(memory asymptoteobserve.LearningMemoryV1) string {
-	base := strings.TrimSpace(memory.Title)
-	if base == "" {
-		base = memory.ID
-	}
-	var out strings.Builder
-	lastDash := false
-runes:
-	for _, r := range strings.ToLower(base) {
-		switch {
-		case unicode.IsLetter(r) || unicode.IsDigit(r):
-			out.WriteRune(r)
-			lastDash = false
-		case !lastDash:
-			out.WriteByte('-')
-			lastDash = true
-		}
-		// Stop at 48 bytes so the name, with the beacon- prefix, stays within the
-		// Agent Skills limit of 64 characters.
-		if out.Len() >= 48 {
-			break runes
-		}
-	}
-	slug := strings.Trim(out.String(), "-")
-	if slug == "" {
-		slug = "beacon-memory"
-	}
-	if !strings.HasPrefix(slug, "beacon-") {
-		slug = "beacon-" + slug
-	}
-	return slug
-}
-
-// maxSkillDescription is the Agent Skills limit on the description field.
-const maxSkillDescription = 1024
-
-// skillDescription is what a harness reads to decide when to load the skill, so
-// it names the situation as well as the lesson: the title's first sentence, then
-// the memory's applicability as a "Use ..." clause.
-func skillDescription(memory asymptoteobserve.LearningMemoryV1) string {
-	description := ensureTrailingPeriod(firstSentence(memory.Title))
-	if applies := strings.Join(strings.Fields(memory.Applicability), " "); applies != "" {
-		description += " Use " + ensureTrailingPeriod(applies)
-	}
-	if runes := []rune(description); len(runes) > maxSkillDescription {
-		description = strings.TrimSpace(string(runes[:maxSkillDescription-1])) + "…"
-	}
-	return description
-}
-
-func yamlQuote(value string) string {
-	escaped := strings.ReplaceAll(value, `\`, `\\`)
-	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
-	return `"` + escaped + `"`
-}
-
-func firstSentence(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "Beacon approved project memory."
-	}
-	for _, sep := range []string{".", "\n"} {
-		if idx := strings.Index(value, sep); idx > 0 {
-			return strings.TrimSpace(value[:idx])
-		}
-	}
-	return value
-}
-
-func ensureTrailingPeriod(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	if strings.HasSuffix(value, ".") {
-		return value
-	}
-	return value + "."
+	return asymptoteobserve.LearningSkillSlug(memory)
 }
