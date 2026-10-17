@@ -9,10 +9,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// requiredProcessors are the processors ConfigYAML puts in every pipeline that a collector older
-// than this CLI does not have. A collector refuses a whole config that names a component it does
-// not know, so one of these missing stops capture for every runtime, not just the one it serves.
-var requiredProcessors = []string{"claude_api_body"}
+// requiredComponents are the components ConfigYAML always writes that a collector older than this
+// CLI does not have. A collector refuses a whole config that names a component it does not know,
+// so one of these missing stops capture for every runtime, not just the one it serves.
+var requiredComponents = map[string][]string{
+	"processor": {"claude_api_body"},
+	"extension": {"loopback_host"},
+}
 
 // listComponents runs `beacon-otelcol components`, which prints what the binary was built with.
 var listComponents = func(ctx context.Context, binary string) ([]byte, error) {
@@ -36,22 +39,29 @@ func CheckComponents(binary string) error {
 	if err != nil {
 		return nil
 	}
+	type named []struct {
+		Name string `yaml:"name"`
+	}
 	var listed struct {
-		Processors []struct {
-			Name string `yaml:"name"`
-		} `yaml:"processors"`
+		Processors named `yaml:"processors"`
+		Extensions named `yaml:"extensions"`
 	}
 	if yaml.Unmarshal(out, &listed) != nil || len(listed.Processors) == 0 {
 		return nil
 	}
 	have := map[string]bool{}
-	for _, processor := range listed.Processors {
-		have[processor.Name] = true
+	for _, c := range listed.Processors {
+		have["processor/"+c.Name] = true
 	}
-	for _, name := range requiredProcessors {
-		if !have[name] {
-			return fmt.Errorf("collector %s is older than this beacon CLI: it has no %q processor, which the collector config needs; "+
-				"use the %s from the same Beacon release, or pass --collector with one", binary, name, BinaryName)
+	for _, c := range listed.Extensions {
+		have["extension/"+c.Name] = true
+	}
+	for _, kind := range []string{"processor", "extension"} {
+		for _, name := range requiredComponents[kind] {
+			if !have[kind+"/"+name] {
+				return fmt.Errorf("collector %s is older than this beacon CLI: it has no %q %s, which the collector config needs; "+
+					"use the %s from the same Beacon release, or pass --collector with one", binary, name, kind, BinaryName)
+			}
 		}
 	}
 	return nil
