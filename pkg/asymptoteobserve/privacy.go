@@ -295,6 +295,11 @@ func isRedactedJWTPrefix(value string) bool {
 	return value == "eyJ"
 }
 
+// isRedactedValue keeps a value an earlier pass already replaced, so redaction stays idempotent.
+func isRedactedValue(value string) bool {
+	return value == redactedValue
+}
+
 // isLiteralOrAuthScheme is isAuthScheme, plus the JSON literals that carry no secret.
 func isLiteralOrAuthScheme(value string) bool {
 	switch value {
@@ -337,6 +342,13 @@ var redactionRules = concatRules([]redactionRule{
 	// usually write arguments: `--password "x y"`, `--token='x'`.
 }, quotedRules(quotedFlag, nil), []redactionRule{
 	{pattern: lazyPattern(`(?i)(` + redactFlag + `)([^\s"'-][^\s"']*)`), replacement: "${1}" + redactedValue, needles: redactFlagNeedles},
+	// curl's basic-auth credentials: `-u user:pass`, `--user user:pass` and `--proxy-user user:pass`.
+	// The user name and the colon stay. A bare `-u user` (curl prompts for the password) has nothing
+	// to redact, and the rule is limited to curl lines so `docker run -u 1000:1000` is left alone.
+	foldedRule(`(?i)(\bcurl\b[^\n]*?\s(?:-[a-z]*u|--user|--proxy-user)(?:=|\s+)["']?[^:\s"']*:)([^\s"']+)`, "${1}"+redactedValue, nil, "curl"),
+	// A Cookie or Set-Cookie header: the whole value is a session credential, as the field-name rule
+	// in SanitizeMap already treats a structured `cookie` field.
+	foldedRule(`(?i)(\b(?:set-)?cookie["']?\s*:\s*["']?)([^\n"'\\]+)`, "${1}"+redactedValue, isRedactedValue, "cookie"),
 	// The password in a URL's userinfo: `postgres://user:pw@host`, `https://x-access-token:t@github.com`.
 	foldedRule(`(?i)(\b[a-z][a-z0-9+.-]*://[^/\s:@"'<>]+:)([^@/\s"'<>]+)(@)`, "${1}"+redactedValue+"${3}", nil, "://"),
 	// Credentials recognizable by their own shape, wherever they appear. The type prefix is public
