@@ -481,15 +481,14 @@ function makeSpanProcessor(exporter: SpanExporter, options: InitializeOptions): 
 }
 
 function observeURL(endpoint: string): string {
-  let end = endpoint.length;
-  while (end > 0 && endpoint.charCodeAt(end - 1) === 47) {
+  const url = new URL(endpoint);
+  let end = url.pathname.length;
+  while (end > 0 && url.pathname.charCodeAt(end - 1) === 47) {
     end -= 1;
   }
-  const trimmed = endpoint.slice(0, end);
-  if (trimmed.endsWith(DEFAULT_OBSERVE_PATH)) {
-    return trimmed;
-  }
-  return `${trimmed}${DEFAULT_OBSERVE_PATH}`;
+  const trimmed = url.pathname.slice(0, end);
+  url.pathname = trimmed.endsWith(DEFAULT_OBSERVE_PATH) ? trimmed : `${trimmed}${DEFAULT_OBSERVE_PATH}`;
+  return url.toString();
 }
 
 function readSDKVersion(): string {
