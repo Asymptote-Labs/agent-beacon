@@ -568,10 +568,58 @@ function finishResult<T>(result: T, span: Span, options?: ObserveOptions): unkno
     // cached so repeated reads return the same function. The proxy targets the wrapper rather
     // than the original, whose read-only properties would make a binding get trap invalid.
     const iterator = finishAsyncIterable(result, span);
+    let started = false;
+    let earlyClose: Promise<IteratorResult<unknown>> | undefined;
+    function afterEarlyClose(operation: () => Promise<IteratorResult<unknown>>) {
+      return earlyClose ? earlyClose.then(operation, operation) : operation();
+    }
+    function closeBeforeStart(value: unknown, throwing: boolean) {
+      // An unstarted async generator never enters its finally block. Close that wrapper now,
+      // then explicitly close an already-created query without starting a bare iterable factory.
+      void iterator.return(undefined);
+      const completion = (throwing ? iterator.throw(value) : iterator.return(value)).then(
+        value => ({ ok: true as const, value }),
+        error => ({ ok: false as const, error }),
+      );
+      // Install earlyClose before source cleanup can synchronously reenter the stream.
+      return Promise.resolve().then(async () => {
+        try {
+          const outcome = await completion;
+          try {
+            const close = (result as AsyncIterable<unknown> & Partial<AsyncIterator<unknown>>).return;
+            if (typeof close === "function") {
+              const closed = await close.call(result);
+              if (closed === null || typeof closed !== "object") {
+                throw new TypeError("Iterator return result is not an object");
+              }
+            }
+          } catch (error) {
+            // A throw or rejected return value takes precedence over cleanup failure.
+            if (outcome.ok) throw error;
+          }
+          if (!outcome.ok) throw outcome.error;
+          span.end();
+          return outcome.value;
+        } catch (error) {
+          endSpanWithError(span, error);
+          throw error;
+        }
+      });
+    }
     const methods = {
-      next: iterator.next.bind(iterator),
-      return: iterator.return.bind(iterator),
-      throw: iterator.throw.bind(iterator),
+      next(value?: unknown) {
+        return afterEarlyClose(() => { started = true; return iterator.next(value); });
+      },
+      return(value?: unknown) {
+        if (started) return afterEarlyClose(() => iterator.return(value));
+        started = true;
+        return earlyClose = closeBeforeStart(value, false);
+      },
+      throw(error?: unknown) {
+        if (started) return afterEarlyClose(() => iterator.throw(error));
+        started = true;
+        return earlyClose = closeBeforeStart(error, true);
+      },
     };
     const spanContext = trace.setSpan(context.active(), span);
     const tracedMethods = {
