@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
@@ -710,14 +711,33 @@ func TestRepairPreservesExistingConfigWhenReinstallFails(t *testing.T) {
 	}
 }
 
+var (
+	freePortsMu     sync.Mutex
+	freePortsIssued = map[int]bool{}
+)
+
+// freePort returns a port that was free when asked and that no earlier call
+// in this test binary returned. The listener is closed before returning, so
+// the kernel can hand the same port out again; without the record, two ports
+// of one install (say the health port and an OTLP port) could collide.
 func freePort(t *testing.T) int {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen for free port: %v", err)
+	freePortsMu.Lock()
+	defer freePortsMu.Unlock()
+	for attempt := 0; attempt < 100; attempt++ {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("listen for free port: %v", err)
+		}
+		port := ln.Addr().(*net.TCPAddr).Port
+		ln.Close()
+		if !freePortsIssued[port] {
+			freePortsIssued[port] = true
+			return port
+		}
 	}
-	defer ln.Close()
-	return ln.Addr().(*net.TCPAddr).Port
+	t.Fatal("no unused free port after 100 attempts")
+	return 0
 }
 
 func TestConfigureHarnessesAcceptsClaude(t *testing.T) {
