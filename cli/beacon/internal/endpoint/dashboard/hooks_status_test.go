@@ -63,6 +63,7 @@ func TestHookStatusesReportQwenWithItsSettingsPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("QWEN_HOME", "")
 
 	rows := 0
 	for _, status := range hookStatuses(filepath.Join(t.TempDir(), "runtime.jsonl"), true) {

@@ -302,6 +302,7 @@ func TestQwenDetectionDoesNotClaimAnotherRuntimesHooks(t *testing.T) {
 func TestQwenSettingsPathUserAndProjectLevels(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
+	t.Setenv("QWEN_HOME", "")
 
 	userPath, err := QwenSettingsPath(LevelUser)
 	if err != nil {
@@ -347,6 +348,7 @@ func TestQwenProjectInstallSaysItNeedsATrustedFolder(t *testing.T) {
 func TestQwenHookStatusDetectsAnInstall(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
+	t.Setenv("QWEN_HOME", "")
 	path := filepath.Join(home, ".qwen", "settings.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
@@ -466,5 +468,61 @@ func TestOnlyQwenDeclaresAHookShell(t *testing.T) {
 	}
 	if got := readFileString(t, path); strings.Contains(got, `"shell"`) {
 		t.Fatalf("Claude settings carry a shell field:\n%s", got)
+	}
+}
+
+// Qwen Code keeps its user directory under QWEN_HOME when that is set (getGlobalQwenDir in
+// packages/core/src/config/storage.ts): a leading `~` is expanded, a relative path is made absolute
+// and the directory is used as is, with no `.qwen` appended. An install that wrote ~/.qwen would
+// report success while Qwen kept reading the moved directory.
+func TestQwenSettingsPathHonorsQwenHome(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	project := t.TempDir()
+	t.Chdir(project)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	moved := filepath.Join(t.TempDir(), "qwen-moved")
+	for name, tc := range map[string]struct{ value, want string }{
+		"absolute": {moved, filepath.Join(moved, "settings.json")},
+		"tilde":    {"~/qwen-alt", filepath.Join(home, "qwen-alt", "settings.json")},
+		"relative": {"qwen-rel", filepath.Join(cwd, "qwen-rel", "settings.json")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("QWEN_HOME", tc.value)
+			got, err := QwenSettingsPath(LevelUser)
+			if err != nil || got != tc.want {
+				t.Fatalf("QwenSettingsPath(user) = %q, %v; want %q", got, err, tc.want)
+			}
+			if forHome, err := QwenSettingsPathForHome(LevelUser, home); err != nil || forHome != tc.want {
+				t.Fatalf("QwenSettingsPathForHome(user) = %q, %v; want %q", forHome, err, tc.want)
+			}
+			// The project file never moves.
+			projectPath, err := QwenSettingsPath(LevelProject)
+			if want := filepath.Join(cwd, ".qwen", "settings.json"); err != nil || projectPath != want {
+				t.Fatalf("QwenSettingsPath(project) = %q, %v; want %q", projectPath, err, want)
+			}
+		})
+	}
+
+	// The installer and the status check both go through the same resolver, so a hook written under
+	// QWEN_HOME is the one that is reported.
+	t.Setenv("QWEN_HOME", moved)
+	want := filepath.Join(moved, "settings.json")
+	if err := os.MkdirAll(moved, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(want, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"'/tmp/beacon-hooks' --platform qwen --log '/tmp/runtime.jsonl' stop"}]}]}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	status := QwenHookStatus(QwenOptions{Level: LevelUser, UserMode: true})
+	if !status.Installed || status.SettingsPath != want {
+		t.Fatalf("QwenHookStatus = %#v, want installed at %q", status, want)
+	}
+	if configured, err := qwenRuntime.configPath(LevelUser); err != nil || configured != want {
+		t.Fatalf("installer config path = %q, %v; want %q", configured, err, want)
 	}
 }

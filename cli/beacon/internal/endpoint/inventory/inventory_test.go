@@ -474,6 +474,24 @@ func TestScanReadsGeminiSettingsFromGeminiCLIHome(t *testing.T) {
 	}
 }
 
+// With QWEN_HOME set, the Qwen Code settings inventory reads are the ones Qwen reads.
+func TestScanReadsQwenSettingsFromQwenHome(t *testing.T) {
+	home := t.TempDir()
+	qwenHome := t.TempDir()
+	t.Setenv("QWEN_HOME", qwenHome)
+	writeFile(t, filepath.Join(qwenHome, "settings.json"), `{"mcpServers":{"github":{"command":"gh"}}}`)
+	writeFile(t, filepath.Join(home, ".qwen", "settings.json"), `{"mcpServers":{"stale":{"command":"old"}}}`)
+
+	result := Scan(Options{HomeDir: home, SkipProjectScope: true, Runtimes: []string{"qwen_code"}, Now: fixedNow})
+	config := findConfig(result.Configs, "qwen_code", filepath.Join(qwenHome, "settings.json"))
+	if config == nil || !config.Exists {
+		t.Fatalf("QWEN_HOME settings.json = %#v, want it read", config)
+	}
+	if stale := findConfig(result.Configs, "qwen_code", filepath.Join(home, ".qwen", "settings.json")); stale != nil {
+		t.Fatalf("inventory reported ~/.qwen/settings.json, which Qwen does not read with QWEN_HOME set: %#v", stale)
+	}
+}
+
 // With CLAUDE_CONFIG_DIR set, the Claude Code files inventory reads are the ones Claude Code reads:
 // settings.json, .claude.json and skills all move with it.
 func TestScanReadsClaudeUserFilesFromClaudeConfigDir(t *testing.T) {
@@ -527,6 +545,8 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("CLINE_DIR", "")
 	t.Setenv("GEMINI_CLI_HOME", "")
+	// Qwen Code's settings.json follows QWEN_HOME.
+	t.Setenv("QWEN_HOME", "")
 	// Hermes's config.yaml follows HERMES_HOME, its data-dir suffix and, on Windows, LOCALAPPDATA.
 	hermesRoot := hermesDefaultRoot(t, home)
 

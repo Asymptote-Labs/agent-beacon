@@ -19,7 +19,7 @@ beacon endpoint hooks install --harness qwen
 
 Before enabling Qwen Code telemetry, make sure:
 
-- Qwen Code is installed and available as the `qwen` executable, or has a local config directory at `~/.qwen`.
+- Qwen Code is installed and available as the `qwen` executable, or has a local config directory at `~/.qwen` (or `$QWEN_HOME`).
 - `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
 - On Windows, `bash` is on `PATH`. Beacon's hooks declare `shell: bash`. See [Hook shell](#hook-shell).
 - Project-level hooks are only used in a folder Qwen Code trusts. See [Known gaps](#known-gaps).
@@ -31,8 +31,10 @@ Qwen Code reads settings from two locations, with project settings taking preced
 
 | Level | Settings path |
 |-------|---------------|
-| User | `~/.qwen/settings.json` |
+| User | `~/.qwen/settings.json`, or `$QWEN_HOME/settings.json` when `QWEN_HOME` is set |
 | Project | `./.qwen/settings.json` |
+
+Install, discovery and inventory honor `QWEN_HOME` as Qwen Code does: when it is set, a leading `~` is expanded, a relative path is made absolute, and that directory is used as is, with no `.qwen` appended. The scheduled inventory job starts without your shell's environment, so a per-user `beacon endpoint install` or `repair` writes the `QWEN_HOME` it resolved into the job's launchd or systemd definition. If you change `QWEN_HOME` later, run `beacon endpoint repair` from a shell that has the new value.
 
 User level is the default. A project-level install only takes effect once Qwen trusts the folder, and `beacon endpoint discover` reports on the user path only, so a project-level install does not appear in discovery output.
 
@@ -73,7 +75,7 @@ Beacon does not register Qwen's fire-and-forget events: `MessageDisplay`, `StopF
 
 ## Discovery and status
 
-Beacon detects Qwen Code through the `qwen` executable, and treats the `~/.qwen` config directory as an additional signal. Qwen Code installs through npm, so a version manager, a shell alias, or a per-project install can hide the binary from the endpoint process's `PATH` while `~/.qwen` is still present. The OpenCode, Cursor, Pi, and Hermes probes use the same fallback.
+Beacon detects Qwen Code through the `qwen` executable, and treats its user config directory (`~/.qwen`, or `$QWEN_HOME`) as an additional signal. Qwen Code installs through npm, so a version manager, a shell alias, or a per-project install can hide the binary from the endpoint process's `PATH` while that directory is still present. The OpenCode, Cursor, Pi, and Hermes probes use the same fallback.
 
 ```bash title="Show Qwen Code discovery state"
 beacon endpoint discover --all --json
@@ -83,7 +85,7 @@ Qwen Code reports as the `qwen_code` harness with capability `hooks`:
 
 | Telemetry status | Meaning |
 |------------------|---------|
-| `missing` | No `~/.qwen/settings.json`, or it could not be read |
+| `missing` | No user `settings.json` (`~/.qwen/settings.json` or `$QWEN_HOME/settings.json`), or it could not be read |
 | `misconfigured` | `settings.json` exists but its JSON is invalid, so install will refuse to touch it |
 | `disabled` | Hooks are turned off by `disableAllHooks`, or the file exists with no Beacon `--platform qwen` entry |
 | `enabled` | Beacon's Qwen Code hooks are configured |
@@ -115,7 +117,7 @@ A project-level install reports that Qwen Code runs project hooks only in a trus
 
 | Area | Support |
 |------|---------|
-| Runtime discovery | Supported through executable and `~/.qwen` detection, settings path, and telemetry status |
+| Runtime discovery | Supported through executable and `~/.qwen` (or `$QWEN_HOME`) detection, settings path, and telemetry status |
 | Harness attribution | Supported. `qwen`, `qwen_code`, `qwen-code`, `qwen code`, `qwencode`, `qwen_cli`, `qwen-cli`, `qwen cli`, `qwen_coder`, `qwen-coder`, and `qwen coder` all normalize to `qwen_code` |
 | Hook install, status, uninstall, and repair | Supported |
 | Session lifecycle | Supported through `SessionStart` and `SessionEnd`, with the start `source` preserved |

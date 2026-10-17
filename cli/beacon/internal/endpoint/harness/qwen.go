@@ -3,7 +3,6 @@ package harness
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
@@ -34,11 +33,11 @@ func DiscoverQwen() Harness {
 	h.ConfigPath = settingsPath
 
 	// Qwen Code installs through npm, and a version manager, a shell alias or a per-project install
-	// all hide the binary from the PATH this process inherited while ~/.qwen is still there.
-	// Treating that directory as evidence keeps `endpoint discover` from reporting "not detected"
-	// for a runtime the user is actively using -- the same fallback the opencode, Cursor, Pi and
-	// Hermes probes make for the same reason.
-	if !h.Detected && dirExists(filepath.Join(home, ".qwen")) {
+	// all hide the binary from the PATH this process inherited while Qwen's directory (~/.qwen, or
+	// QWEN_HOME when set) is still there. Treating that directory as evidence keeps `endpoint
+	// discover` from reporting "not detected" for a runtime the user is actively using -- the same fallback the
+	// opencode, Cursor, Pi and Hermes probes make for the same reason.
+	if dir, err := hooks.QwenUserDir(home); err == nil && !h.Detected && dirExists(dir) {
 		h.Detected = true
 	}
 

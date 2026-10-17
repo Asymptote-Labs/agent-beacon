@@ -54,6 +54,7 @@ func TestEndpointHooksInstallAndUninstallQwen(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("QWEN_HOME", "")
 	cfg := endpointconfig.Config{LogPath: filepath.Join(home, "runtime.jsonl"), UserMode: true}
 
 	origLevel := endpointOpts.hookLevel
