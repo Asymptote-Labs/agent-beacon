@@ -386,6 +386,11 @@ You can also forward the same normalized session history into infrastructure you
 | AWS S3 | Object storage | Vector, CI upload, or cloud-agent snapshots |
 | Google Cloud Storage | Object storage | Vector, CI upload, or cloud-agent snapshots |
 
+Install, repair and package upgrades reconcile existing Beacon Cloud forwarders. On
+macOS, legacy service log paths are migrated to `~/Library/Logs/Beacon` in user
+mode or `/Library/Logs/Beacon` in system mode, even when the Vector config is
+already current. A running forwarder reloads; a stopped one remains stopped.
+
 ---
 
 ## Architecture
