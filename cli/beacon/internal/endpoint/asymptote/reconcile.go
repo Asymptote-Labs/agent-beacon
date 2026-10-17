@@ -28,14 +28,16 @@ type ReconcileResult struct {
 	// Skipped names why nothing was checked: the endpoint is not connected, the forwarder is not
 	// installed, or the service manager cannot run it here.
 	Skipped string `json:"skipped,omitempty"`
-	// Unchanged is true when the rendered config already matched the one on disk.
+	// Unchanged is true when both the config and the service log paths are current.
 	Unchanged bool `json:"unchanged,omitempty"`
 	// Updated is true when a validated config replaced the old one.
 	Updated bool `json:"updated,omitempty"`
-	// Restarted is true when the forwarder was restarted to load the updated config.
+	// UnitUpdated is true when a stale service unit was rewritten.
+	UnitUpdated bool `json:"unit_updated,omitempty"`
+	// Restarted is true when the forwarder was restarted to load an updated config or unit.
 	Restarted bool `json:"restarted,omitempty"`
-	// Warning says why a connected forwarder kept its old config, or why an updated one was not
-	// restarted. The old config stays in place and keeps running in either case.
+	// Warning explains a refused check/update or a failed restart. Updated and UnitUpdated
+	// report any changes already written; a warning does not imply those were rolled back.
 	Warning string `json:"warning,omitempty"`
 }
 
@@ -44,6 +46,15 @@ func (r ReconcileResult) Message() string {
 	switch {
 	case r.Warning != "":
 		return "Beacon Cloud forwarder: " + r.Warning
+	case r.UnitUpdated:
+		what := "service unit"
+		if r.Updated {
+			what = "config and service unit"
+		}
+		if r.Restarted {
+			return "Beacon Cloud forwarder " + what + " updated and the forwarder restarted."
+		}
+		return "Beacon Cloud forwarder " + what + " updated; it takes effect when the forwarder next starts."
 	case r.Updated && r.Restarted:
 		return "Beacon Cloud forwarder config updated and the forwarder restarted (" + r.VectorConfig + ")."
 	case r.Updated:
@@ -66,7 +77,7 @@ func (r ReconcileResult) Message() string {
 // endpoint's runtime log. It never enrolls, never reads the device key or rewrites the secrets
 // file, makes no network request, and leaves the Vector data directory and its checkpoints
 // alone. The new config is validated by Vector exactly as connect validates it before it
-// replaces the old one, and the forwarder is restarted only when the content changed. A config
+// replaces the old one, and the forwarder is restarted only when the config or launchd log paths changed. A config
 // Vector rejects is reported as a warning and the running forwarder keeps the old one.
 //
 // The returned error is reserved for a failure that leaves something to fix by hand (the
@@ -162,24 +173,46 @@ func ReconcileForwarder(opts ReconcileOptions) (ReconcileResult, error) {
 		result.Warning = fmt.Sprintf("kept the existing config: %v", err)
 		return result, nil
 	}
-	if bytes.Equal(current, []byte(rendered)) {
+	configCurrent := bytes.Equal(current, []byte(rendered))
+	unitCurrent := true
+	// Keep Forwarder compatible with other supervisors. The production manager
+	// checks only launchd's log paths, not unrelated operator unit settings.
+	if checker, ok := manager.(interface{ LogPathsCurrent() (bool, error) }); ok {
+		unitCurrent, err = checker.LogPathsCurrent()
+		if err != nil {
+			result.Warning = fmt.Sprintf("kept the existing config and service unit: could not check forwarder log paths: %v", err)
+			return result, nil
+		}
+	}
+	if configCurrent && unitCurrent {
 		result.Unchanged = true
 		return result, nil
 	}
-	// Vector refuses a data_dir that does not exist. Creating a missing one loses nothing: its
-	// checkpoints were already gone. An existing one is never cleared here.
-	if err := os.MkdirAll(dataDir, 0o700); err != nil {
-		result.Warning = fmt.Sprintf("kept the existing config: %v", err)
-		return result, nil
+	if !configCurrent {
+		// Creating a missing data directory loses no existing checkpoints.
+		if err := os.MkdirAll(dataDir, 0o700); err != nil {
+			result.Warning = fmt.Sprintf("kept the existing config: %v", err)
+			return result, nil
+		}
+		if err := preValidateVectorConfig(vector.Path, configPath, []byte(rendered)); err != nil {
+			result.Warning = fmt.Sprintf("kept the existing config because Vector rejected the new one: %v", err)
+			return result, nil
+		}
+		if err := atomicfile.Write(configPath, []byte(rendered), 0o644); err != nil {
+			return result, fmt.Errorf("could not write the validated forwarder config %s: %w", configPath, err)
+		}
+		result.Updated = true
 	}
-	if err := preValidateVectorConfig(vector.Path, configPath, []byte(rendered)); err != nil {
-		result.Warning = fmt.Sprintf("kept the existing config because Vector rejected the new one: %v", err)
-		return result, nil
+	if !unitCurrent {
+		if _, err := manager.WriteUnit(vector.Path, configPath); err != nil {
+			result.Warning = fmt.Sprintf("could not update the forwarder service unit: %v", err)
+			if result.Updated {
+				result.Warning = fmt.Sprintf("config updated (%s) but the forwarder service unit could not be updated: %v", configPath, err)
+			}
+			return result, nil
+		}
+		result.UnitUpdated = true
 	}
-	if err := atomicfile.Write(configPath, []byte(rendered), 0o644); err != nil {
-		return result, fmt.Errorf("could not write the validated forwarder config %s: %w", configPath, err)
-	}
-	result.Updated = true
 	// Restart only a forwarder that is running, so reconcile never starts one an operator stopped.
 	// Loaded is not enough: on systemd an enabled unit that was stopped still reports Loaded. A
 	// forwarder that is not running reads the new config when it is next started.
@@ -187,7 +220,7 @@ func ReconcileForwarder(opts ReconcileOptions) (ReconcileResult, error) {
 		return result, nil
 	}
 	if err := manager.Load(); err != nil {
-		result.Warning = fmt.Sprintf("config updated (%s) but the forwarder could not be restarted: %v", configPath, err)
+		result.Warning = fmt.Sprintf("forwarder updated (%s) but it could not be restarted: %v", configPath, err)
 		return result, nil
 	}
 	result.Restarted = true
