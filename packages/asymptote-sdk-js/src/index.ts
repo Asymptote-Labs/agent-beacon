@@ -549,12 +549,12 @@ function finishResult<T>(result: T, span: Span, options?: ObserveOptions): unkno
   if (isPromiseLike(result)) {
     return result.then(
       value => {
-        if (!options?.ignoreOutput) {
-          span.setAttribute("asymptote.observe.output.type", typeof value);
+        try {
+          return finishResult(value, span, options);
+        } catch (error) {
+          endSpanWithError(span, error);
+          throw error;
         }
-        span.setStatus({ code: SpanStatusCode.OK });
-        span.end();
-        return value;
       },
       error => {
         endSpanWithError(span, error);
