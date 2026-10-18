@@ -186,9 +186,13 @@ func DiscoverOpenCode() Harness {
 	h := Harness{Name: "opencode", DisplayName: "opencode", Capability: "plugin"}
 	detectExecutable(&h, "opencode")
 	home, _ := os.UserHomeDir()
-	pluginPath := filepath.Join(home, ".config", "opencode", "plugins", "beacon.ts")
+	configDir, dirErr := hooks.OpenCodeConfigDir(home)
+	pluginPath := filepath.Join(configDir, "plugins", "beacon.ts")
+	if dirErr != nil {
+		pluginPath = filepath.Join(".config", "opencode", "plugins", "beacon.ts")
+	}
 	h.ConfigPath = pluginPath
-	if !h.Detected && dirExists(filepath.Join(home, ".config", "opencode")) {
+	if !h.Detected && dirErr == nil && dirExists(configDir) {
 		h.Detected = true
 	}
 	if fileExists(pluginPath) {

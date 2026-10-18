@@ -149,6 +149,7 @@ func TestOpenCodeInstalledUsesManagedMarker(t *testing.T) {
 func TestOpenCodePluginPathLevels(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
+	t.Setenv("XDG_CONFIG_HOME", "")
 	if got, want := mustOpenCodePluginPath(t, LevelUser), filepath.Join(home, ".config", "opencode", "plugins", "beacon.ts"); got != want {
 		t.Fatalf("user plugin path = %q, want %q", got, want)
 	}
@@ -167,4 +168,53 @@ func mustOpenCodePluginPath(t *testing.T, level Level) string {
 		t.Fatalf("opencodePluginPath returned error: %v", err)
 	}
 	return path
+}
+
+// OpenCode roots its config directory at $XDG_CONFIG_HOME/opencode when that is set
+// (packages/util/src/global-roots.ts). An install that wrote ~/.config/opencode/plugins would report
+// success while OpenCode loaded plugins from the moved directory.
+func TestOpenCodePluginPathHonorsXDGConfigHome(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	project := t.TempDir()
+	t.Chdir(project)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	xdg := filepath.Join(t.TempDir(), "xdg")
+	for name, tc := range map[string]struct{ value, want string }{
+		"absolute": {xdg, filepath.Join(xdg, "opencode", "plugins", "beacon.ts")},
+		"relative": {"rel-xdg", filepath.Join(cwd, "rel-xdg", "opencode", "plugins", "beacon.ts")},
+		"empty":    {"", filepath.Join(home, ".config", "opencode", "plugins", "beacon.ts")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("XDG_CONFIG_HOME", tc.value)
+			if got := mustOpenCodePluginPath(t, LevelUser); got != tc.want {
+				t.Fatalf("user plugin path = %q, want %q", got, tc.want)
+			}
+			// The project plugin never moves.
+			if got, want := mustOpenCodePluginPath(t, LevelProject), filepath.Join(cwd, ".opencode", "plugins", "beacon.ts"); got != want {
+				t.Fatalf("project plugin path = %q, want %q", got, want)
+			}
+		})
+	}
+
+	// The status check goes through the same resolver as the installer.
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	want := filepath.Join(xdg, "opencode", "plugins", "beacon.ts")
+	if err := os.MkdirAll(filepath.Dir(want), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(want, []byte("// "+opencodeManagedPluginMarker), 0600); err != nil {
+		t.Fatal(err)
+	}
+	opts := OpenCodeOptions{Level: LevelUser, UserMode: true}
+	if status := OpenCodeHookStatus(opts); status.PluginPath != want {
+		t.Fatalf("OpenCodeHookStatus plugin path = %q, want %q", status.PluginPath, want)
+	}
+	if !IsOpenCodeInstalled(opts) {
+		t.Fatalf("IsOpenCodeInstalled = false for a managed plugin at %q", want)
+	}
 }
