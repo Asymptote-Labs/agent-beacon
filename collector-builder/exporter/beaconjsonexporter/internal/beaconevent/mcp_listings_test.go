@@ -96,3 +96,31 @@ func TestNilMCPListingsKeepsEverything(t *testing.T) {
 	}
 	listings.Remember(batch...)
 }
+
+// Description changes must reach the destination in order, even when the final
+// request in a batch returns to the description remembered before that batch.
+func TestMCPListingsKeepsDescriptionReversionWithinBatch(t *testing.T) {
+	var listings MCPListings
+	original := listing("s1", "mcp__notes__save", "Original description")
+	changed := listing("s1", "mcp__notes__save", "Changed description")
+	listings.Remember(original)
+	batch := []Event{changed, original, original}
+	for attempt := 0; attempt < 2; attempt++ {
+		kept := listings.Filter(batch)
+		if len(kept) != 2 {
+			t.Fatalf("attempt %d: kept %d listings, want both description changes", attempt, len(kept))
+		}
+		if kept[0].GenAI.Tool.Description != "Changed description" || kept[1].GenAI.Tool.Description != "Original description" {
+			t.Fatalf("description changes lost their order: %v", kept)
+		}
+	}
+	// Filtering alone does not remember a failed delivery: both attempts above
+	// must retain both changes. Remember only after the successful delivery.
+	listings.Remember(listings.Filter(batch)...)
+	if kept := listings.Filter([]Event{original}); len(kept) != 0 {
+		t.Fatalf("successfully delivered final description should be deduplicated, kept %d", len(kept))
+	}
+	if kept := listings.Filter([]Event{changed}); len(kept) != 1 {
+		t.Fatalf("a subsequent changed description should be kept, got %d", len(kept))
+	}
+}
