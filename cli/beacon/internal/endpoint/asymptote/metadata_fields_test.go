@@ -14,6 +14,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // metadataOnlyRemoved is every event field Metadata-only forwarding removes: free text, documents,
@@ -272,6 +273,55 @@ func sentinelEvent(t reflect.Type, prefix string) map[string]interface{} {
 
 func metadataSentinel(path string) string { return "SENTINEL:" + path + ":END" }
 
+// metadataSentinelLeaks lists the content fields whose sentinel is still in an event's JSON and the
+// metadata fields whose sentinel is gone.
+func metadataSentinelLeaks(transformed string) (leaked, missing []string) {
+	for _, leaf := range eventLeaves(reflect.TypeOf(schema.Event{}), "") {
+		if !leaf.Text || leaf.Path == "content.retention" {
+			continue // Metadata-only rewrites retention to "metadata"
+		}
+		present := strings.Contains(transformed, metadataSentinel(leaf.Path))
+		if removedByMetadataOnly(leaf.Path) && present {
+			leaked = append(leaked, leaf.Path)
+		}
+		if !removedByMetadataOnly(leaf.Path) && !present {
+			missing = append(missing, leaf.Path)
+		}
+	}
+	sort.Strings(leaked)
+	sort.Strings(missing)
+	return leaked, missing
+}
+
+// StripToMetadata is the Go twin of the Metadata-only transform, used where Beacon publishes an
+// endpoint's events itself (`beacon share`). On an event with every field set, it removes exactly
+// the fields the transform removes and keeps every other one.
+func TestStripToMetadataRemovesExactlyWhatTheTransformRemoves(t *testing.T) {
+	data, err := json.Marshal(sentinelEvent(reflect.TypeOf(schema.Event{}), ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var event schema.Event
+	if err := json.Unmarshal(data, &event); err != nil {
+		t.Fatal(err)
+	}
+	asymptoteobserve.StripToMetadata(&event)
+	stripped, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaked, missing := metadataSentinelLeaks(string(stripped))
+	if len(leaked) > 0 {
+		t.Errorf("StripToMetadata kept content fields %v: add each to StripToMetadata along with its del() in the transform\n%s", leaked, stripped)
+	}
+	if len(missing) > 0 {
+		t.Errorf("StripToMetadata removed metadata fields %v:\n%s", missing, stripped)
+	}
+	if event.Content == nil || event.Content.Retention != schema.ContentRetentionMetadata || event.Content.Included || !event.Content.Redacted {
+		t.Errorf("content marker = %+v, want metadata retention", event.Content)
+	}
+}
+
 // Runs the Metadata-only transform with Vector's own VRL runtime on an event with every field set,
 // and checks that every content field is gone and every metadata field is still there.
 func TestMetadataTransformRemovesEveryContentFieldWithVector(t *testing.T) {
@@ -313,21 +363,7 @@ func TestMetadataTransformRemovesEveryContentFieldWithVector(t *testing.T) {
 	if err := json.Unmarshal([]byte(transformed), &parsed); err != nil {
 		t.Fatalf("transformed event is not an event: %v\n%s", err, transformed)
 	}
-	var missing, leaked []string
-	for _, leaf := range eventLeaves(reflect.TypeOf(schema.Event{}), "") {
-		if !leaf.Text || leaf.Path == "content.retention" {
-			continue // the transform rewrites retention to "metadata"
-		}
-		present := strings.Contains(transformed, metadataSentinel(leaf.Path))
-		if removedByMetadataOnly(leaf.Path) && present {
-			leaked = append(leaked, leaf.Path)
-		}
-		if !removedByMetadataOnly(leaf.Path) && !present {
-			missing = append(missing, leaf.Path)
-		}
-	}
-	sort.Strings(leaked)
-	sort.Strings(missing)
+	leaked, missing := metadataSentinelLeaks(transformed)
 	if len(leaked) > 0 {
 		t.Errorf("Metadata-only forwarded content fields %v:\n%s", leaked, transformed)
 	}

@@ -21,6 +21,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/handoff"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/managedprivacy"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
@@ -105,7 +106,10 @@ when Beacon reads that runtime's store, and from Beacon's runtime log otherwise.
 What is uploaded: the session's prompts, assistant text and reasoning, tool calls with their
 arguments, commands, file paths and diffs, and tool output, after the same secret redaction and size
 limits the runtime log applies. Paths are rewritten relative to the session's directory, and the
-home directory becomes ~. Use --print to see exactly what would be sent without sending it.
+home directory becomes ~. When this endpoint forwards to Beacon Cloud in Metadata-only mode, the
+share leaves out what forwarding leaves out: prompts, answers, reasoning, tool arguments and results,
+command output, diffs and the derived title. Use --print to see exactly what would be sent without
+sending it.
 
 Visibility: direct (the default for a new trace) means anyone with the link; private means only
 you; public lists the trace in Discover for anyone, and asks for confirmation first. Re-sharing
@@ -153,7 +157,7 @@ func init() {
 		f.StringVar(&shareOpts.cwd, "cwd", "", "Use the most recent session that ran in this directory (default: the current directory)")
 		f.BoolVar(&shareOpts.print, "print", false, "Print the payload that would be uploaded and send nothing")
 		f.BoolVar(&shareOpts.dryRun, "dry-run", false, "Same as --print")
-		f.StringVar(&shareOpts.title, "title", "", "Title for the shared trace (default for a new trace: the session's title or first prompt; an existing trace keeps its title)")
+		f.StringVar(&shareOpts.title, "title", "", "Title for the shared trace (default for a new trace: the session's title or first prompt, or none in Metadata-only mode; an existing trace keeps its title)")
 	}
 	f := shareCmd.Flags()
 	f.StringVar(&shareOpts.session, "session", "", "Session id, or a unique prefix of at least 6 characters")
@@ -900,6 +904,14 @@ func shareHasProjectable(events []schema.Event) bool {
 	return false
 }
 
+// shareMetadataOnly reports whether this endpoint forwards to Beacon Cloud in Metadata-only mode
+// (user or system mode). A share from it then leaves out what forwarding leaves out, so publishing a
+// session never sends more than the endpoint's privacy mode allows.
+func shareMetadataOnly() bool {
+	connected, mode := shareAutoCloud()
+	return connected && mode == managedprivacy.MetadataOnly
+}
+
 func buildSharePayload(subject shareSubject) (sharePayload, error) {
 	subject, events, err := shareEvents(subject)
 	if err != nil {
@@ -907,10 +919,12 @@ func buildSharePayload(subject shareSubject) (sharePayload, error) {
 	}
 	session := subject.session
 	sort.SliceStable(events, func(i, j int) bool { return shareEventTime(events[i]).Before(shareEventTime(events[j])) })
+	metadataOnly := shareMetadataOnly()
 	bundle := asymptoteobserve.BuildShareBundle(events, asymptoteobserve.ShareOptions{
 		WorkingDirectory: session.Directory,
 		BeaconVersion:    version.GetVersion(),
 		GeneratedAt:      shareNow(),
+		MetadataOnly:     metadataOnly,
 	})
 	if len(bundle.Events) == 0 {
 		return sharePayload{}, fmt.Errorf("%s session %s %w", session.Harness, session.ID, errShareNothingYet)
@@ -923,10 +937,17 @@ func buildSharePayload(subject shareSubject) (sharePayload, error) {
 	if name := asymptoteobserve.NormalizeHarnessName(trace.Summary.Harness.Name); name != "" {
 		trace.Summary.Harness.Name = name
 	}
-	if title := strings.TrimSpace(shareOpts.title); title != "" {
-		trace.Title = asymptoteobserve.ShareTitle(title)
-	} else if title := asymptoteobserve.ShareTitle(session.Title); title != "" {
-		trace.Title = asymptoteobserve.RedactString(title)
+	switch {
+	case strings.TrimSpace(shareOpts.title) != "":
+		trace.Title = asymptoteobserve.ShareTitle(shareOpts.title)
+	case metadataOnly:
+		// Most runtimes title a session with its first prompt, which Metadata-only keeps off the
+		// trace like every other prompt. Only a title the person typed is sent.
+		trace.Title = ""
+	default:
+		if title := asymptoteobserve.ShareTitle(session.Title); title != "" {
+			trace.Title = asymptoteobserve.RedactString(title)
+		}
 	}
 	shareSummaryFromSession(&trace.Summary, session)
 	if session.Subagent && session.ParentID != "" {

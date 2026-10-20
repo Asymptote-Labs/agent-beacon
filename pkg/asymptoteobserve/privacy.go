@@ -343,17 +343,23 @@ var redactionRules = concatRules([]redactionRule{
 	// and stays (`ghp_[REDACTED]`, `AKIA[REDACTED]`), the way secret scanners report a finding: the
 	// line still says a GitHub token or an AWS key was there, which is what detection rules match on
 	// in the log, and none of the credential is left.
-	rule(`\b(sk-)[A-Za-z0-9_-]{20,}`, "${1}"+redactedValue, nil, "sk-"),                                         // Anthropic sk-ant-, OpenAI sk-proj- and sk-
-	rule(`\b(AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}\b`, "${1}"+redactedValue, nil, "AKIA", "ASIA", "ABIA", "ACCA"),    // AWS access key id
-	rule(`\b(gh[pousr]_)[A-Za-z0-9]{30,}`, "${1}"+redactedValue, nil, "ghp_", "gho_", "ghu_", "ghs_", "ghr_"),   // GitHub tokens
-	rule(`\b(github_pat_)[A-Za-z0-9_]{22,}`, "${1}"+redactedValue, nil, "github_pat_"),                          // GitHub fine-grained tokens
-	rule(`\b(glpat-)[A-Za-z0-9_-]{20,}`, "${1}"+redactedValue, nil, "glpat-"),                                   // GitLab
-	rule(`\b(xox[abposr]-)[A-Za-z0-9-]{10,}`, "${1}"+redactedValue, nil, "xox"),                                 // Slack
-	rule(`\b([rs]k_(?:live|test)_)[A-Za-z0-9]{16,}`, "${1}"+redactedValue, nil, "k_live_", "k_test_"),           // Stripe
-	rule(`\b(AIza)[0-9A-Za-z_-]{35}`, "${1}"+redactedValue, nil, "AIza"),                                        // Google API key
-	rule(`\b(npm_)[A-Za-z0-9]{36}`, "${1}"+redactedValue, nil, "npm_"),                                          // npm
-	rule(`\b(hf_)[A-Za-z0-9]{30,}`, "${1}"+redactedValue, nil, "hf_"),                                           // Hugging Face
-	rule(`\b(bcn_(?:api|device|mcp|enfdev)_)[A-Za-z0-9_-]{8,}`, "${1}"+redactedValue, nil, "bcn_"),              // Beacon's own keys
+	rule(`\b(sk-)[A-Za-z0-9_-]{20,}`, "${1}"+redactedValue, nil, "sk-"), // Anthropic sk-ant-, OpenAI sk-proj- and sk-
+	// An AWS secret access key has no shape of its own, but where it follows its key id within a few
+	// separators (a credentials CSV, `aws configure` output, a table, a JSON array) it is the 40
+	// characters after them. This runs before the key id rule below replaces the id it keys on.
+	rule(`(\b(?:AKIA|ASIA)[A-Z0-9]{16}\b[\s,:|"']{1,8})[A-Za-z0-9/+]{40}([^A-Za-z0-9/+=]|$)`, "${1}"+redactedValue+"${2}", nil, "AKIA", "ASIA"),
+	rule(`\b(AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}\b`, "${1}"+redactedValue, nil, "AKIA", "ASIA", "ABIA", "ACCA"),  // AWS access key id
+	rule(`\b(gh[pousr]_)[A-Za-z0-9]{30,}`, "${1}"+redactedValue, nil, "ghp_", "gho_", "ghu_", "ghs_", "ghr_"), // GitHub tokens
+	rule(`\b(github_pat_)[A-Za-z0-9_]{22,}`, "${1}"+redactedValue, nil, "github_pat_"),                        // GitHub fine-grained tokens
+	rule(`\b(glpat-)[A-Za-z0-9_-]{20,}`, "${1}"+redactedValue, nil, "glpat-"),                                 // GitLab
+	rule(`\b(xox[abposr]-)[A-Za-z0-9-]{10,}`, "${1}"+redactedValue, nil, "xox"),                               // Slack
+	rule(`\b([rs]k_(?:live|test)_)[A-Za-z0-9]{16,}`, "${1}"+redactedValue, nil, "k_live_", "k_test_"),         // Stripe
+	rule(`\b(AIza)[0-9A-Za-z_-]{35}`, "${1}"+redactedValue, nil, "AIza"),                                      // Google API key
+	rule(`\b(npm_)[A-Za-z0-9]{36}`, "${1}"+redactedValue, nil, "npm_"),                                        // npm
+	rule(`\b(hf_)[A-Za-z0-9]{30,}`, "${1}"+redactedValue, nil, "hf_"),                                         // Hugging Face
+	// Beacon's own keys and tokens: API keys, device and enforcement keys, MCP tokens and their refresh
+	// tokens, and the CLI sign-in's access token, authorization code, client and exchange values.
+	rule(`\b(bcn_(?:api|device|mcprt|mcp|enfdev|cli|code|client|exchange)_)[A-Za-z0-9_-]{8,}`, "${1}"+redactedValue, nil, "bcn_"),
 	rule(`\b(eyJ)[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`, "${1}"+redactedValue, nil, "eyJ"), // JWT
 })
 
