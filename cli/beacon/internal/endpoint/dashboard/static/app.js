@@ -2801,8 +2801,37 @@ async function loadFindings() {
   }
 }
 
+// A finding is the rule's match over its ordered supporting events, not its
+// current row number. Legacy events without IDs use their complete JSON value.
+function findingExpansionKey(finding) {
+  if (!finding.events?.length) return null;
+  const evidence = finding.events.map((event) => event.event?.id
+    ? ["id", event.event.id]
+    : ["event", JSON.stringify(event, (_key, value) => {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        return Object.fromEntries(Object.keys(value).sort().map((key) => [key, value[key]]));
+      }
+      return value;
+    })]);
+  return JSON.stringify([finding.rule_id, finding.session_id || "", evidence]);
+}
+
+function remapFindingExpansions(previous, findings, expanded) {
+  const previousKeys = previous.map(findingExpansionKey);
+  const nextKeys = findings.map(findingExpansionKey);
+  const counts = (keys) => keys.reduce((map, key) => map.set(key, (map.get(key) || 0) + 1), new Map());
+  const previousCounts = counts(previousKeys);
+  const nextCounts = counts(nextKeys);
+  const selected = new Set(previousKeys.filter((key, i) => key !== null
+    && expanded.has(i) && previousCounts.get(key) === 1));
+  // Identical duplicate findings have no unambiguous identity. Collapse them
+  // rather than selecting both or moving the user's choice to another row.
+  return new Set(nextKeys.flatMap((key, i) => selected.has(key) && nextCounts.get(key) === 1 ? [i] : []));
+}
+
 function renderFindings(resp) {
   const findings = resp?.findings || [];
+  state.findingsExpanded = remapFindingExpansions(state.findings, findings, state.findingsExpanded);
   state.findings = findings;
   setText("#findings-meta", `${findings.length} finding${findings.length === 1 ? "" : "s"} across ${resp?.scanned || 0} events`);
   const tbody = $("#findings-rows");
