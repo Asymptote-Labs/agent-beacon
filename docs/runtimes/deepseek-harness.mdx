@@ -5,7 +5,7 @@ description: "Beacon support details for DeepSeek Harness (dsh) endpoint telemet
 
 ## Runtime overview
 
-Beacon supports DeepSeek Harness — DeepSeek's open agent harness, run as `dsh` — through the Claude Code hook bridge DeepSeek ships in the CLI, sent to `beacon-hooks`, plus a local poll of DeepSeek's native session files.
+Beacon supports DeepSeek Harness — DeepSeek's open agent harness, run as `dsh` — through the Claude Code hook bridge DeepSeek publishes for every `dsh` release, sent to `beacon-hooks`, plus a local poll of DeepSeek's native session files.
 
 ```bash
 beacon endpoint hooks install --harness dsh
@@ -16,14 +16,19 @@ beacon endpoint hooks install --harness dsh
 DeepSeek Harness is composed rather than configured: every capability is a plugin, and the CLI, Web, ACP, and SDK surfaces are four compositions of one harness booting from one Harness home. There is one integration rather than one per surface, and one harness name — `deepseek_harness` — rather than a name per surface.
 
 <Note>
-**`dsh` does not read a hooks file until something mounts a reader at it.** `@deepseek-ai/dsh-hooks-claude-code` ships as a dependency of the `dsh` CLI but is not in the default plugin tree, so there is no convention that picks a hooks file up. That is why a Beacon install here is **two files**: the hooks file, and one row mounting the bridge at it.
+**`dsh` does not read a hooks file until something mounts a reader at it.** That reader is `@deepseek-ai/dsh-hooks-claude-code`, which is not in the default plugin tree, so there is no convention that picks a hooks file up. That is why a Beacon install here is **two files**: the hooks file, and one row mounting the bridge at it.
 </Note>
+
+<Warning>
+**The bridge is not shipped with `dsh`.** It is only a development dependency of the `dsh` CLI, so a profile has it only when it has been [installed into that profile](#installing-the-hook-bridge), together with `@deepseek-ai/dsh-hook-protocol`, at exactly the `dsh` version. A mount `dsh` cannot load does not stop it from starting: the profile boots with `warning: 1 entry did not activate` and runs with no hooks. Beacon checks for a loadable bridge before it mounts one, and refuses rather than writing a mount that records nothing.
+</Warning>
 
 ## Prerequisites
 
 Before enabling DeepSeek Harness telemetry, make sure:
 
 - `dsh` is installed and has been run at least once, so the Harness home exists.
+- The hook bridge is installed in the profiles you use, at your `dsh` version. See [Installing the hook bridge](#installing-the-hook-bridge). Session sync needs no bridge.
 - `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
 - `dsh` is restarted after hook install or removal, unless your profile enables HMR — the config watcher picks the patch layer up live, and without it the plugin tree is read at startup.
 
@@ -52,6 +57,35 @@ The row Beacon adds looks like this:
 ```
 
 The home-level patch layer is applied over **every** profile and outranks each profile's own, so one install covers `dsh`, `dsh web`, the ACP server, and the SDK. `configPath` is absolute because the bridge resolves a relative path against the directory the process was launched from, which for an agent runtime is wherever you happened to be standing.
+
+### Installing the hook bridge
+
+The row names the bridge by package, and `dsh` resolves it from each profile's directory. Install it into every profile you run, with DeepSeek's own plugin manager, at exactly your `dsh` version:
+
+```bash
+dsh --version                       # for example 0.2.1-rc.2
+dsh plugin --profile web add \
+  @deepseek-ai/dsh-hooks-claude-code@0.2.1-rc.2 \
+  @deepseek-ai/dsh-hook-protocol@0.2.1-rc.2
+```
+
+Both packages are published for every `dsh` release and pin their `dsh` peers to it exactly, so a bridge for another version fails to load the same quiet way a missing one does. Upgrading `dsh` means installing the bridge again at the new version.
+
+Beacon never installs these packages itself. Before it writes the row, `beacon endpoint hooks install --harness dsh` checks, read-only, whether a matching bridge and protocol resolve:
+
+- from the `dsh` installation, for a release that ships the bridge;
+- from each profile under `$DSH_HOME/profiles`; or
+- through a row that already mounts a bridge **by absolute path** at Beacon's hooks file, in the home layer or a profile's own layer. This is how a declarative setup installs it, for example a Nix store path. Beacon treats it as installed, writes only the hooks file, and adds no row of its own (removing one an earlier install wrote), because a second mount would run every hook twice. A bridge mounted by path does not see the packages `dsh` ships, which `dsh` provides only to profile plugins, so its declared `@deepseek-ai/*` peers (`dsh-agent`, `dsh-llm`, `cordis` and the rest) and the protocol must resolve from where it sits, for example as `node_modules` links into the `dsh` installation. Without them `dsh` fails to import it with `Cannot find package '@deepseek-ai/dsh-llm'`, and Beacon reports the mount as `peers_missing` rather than installed.
+
+| What Beacon finds | `hooks install --harness dsh` | `hooks install --all`, `endpoint install` |
+|-------------------|-------------------------------|-------------------------------------------|
+| No route loads a matching bridge | Refuses, exits non-zero, writes nothing | Skips DeepSeek Harness with a warning; other runtimes install |
+| Some profiles have it, others do not | Installs, and names the profiles that will boot without hooks | Same |
+| A matching path mount | Writes the hooks file only | Same |
+
+Every refusal and warning gives the `dsh plugin --profile <name> add …` command at your version, and points at [`beacon endpoint dsh sync`](/cli/endpoint-dsh), which collects sessions from the session store with no bridge at all.
+
+The `dsh` version is read from the installation the `dsh` on `PATH` launches, following wrapper scripts, and from `dsh --version` when the installation cannot be found that way.
 
 Beacon also reads committed native session records from `$DSH_HOME/sessions` through:
 
@@ -125,7 +159,9 @@ Beacon's hooks carry no `matcher`. An absent matcher is the match-all form in th
 beacon endpoint hooks status --harness dsh
 ```
 
-Status reports **both** paths, because `installed` is the conjunction of the two files: a hooks file with nothing mounted at it is a file nothing reads, and a mount pointing at a missing hooks file is a bridge that logs a warning and registers nothing. `beacon endpoint inventory` lists both for the same reason, so a half-install is visible as a half-install.
+Status reports **both** paths, because `installed` is the conjunction of the two files: a hooks file with nothing mounted at it is a file nothing reads, and a mount pointing at a missing hooks file is a bridge that logs a warning and registers nothing. `beacon endpoint inventory` lists both for the same reason, so a half-install is visible as a half-install. A bridge mounted by path in a profile's own `cordis.patch.yml` counts as the mount, and inventory lists each profile's patch layer.
+
+Status also reports `active`: the files are in place **and** some route loads a bridge matching the running `dsh`. `--json` carries the detail under `bridge`: the `dsh` version, each profile with the bridge and protocol versions it resolves and a status (`ok`, `missing`, `protocol_missing`, `version_mismatch`, or `unverified` when the `dsh` version is unknown), and any path mounts, which can also be `peers_missing`. Discovery reports an installed but inactive integration as misconfigured, and `beacon endpoint doctor` explains it under [`dsh_hook_bridge`](/cli/endpoint-doctor#dsh_hook_bridge).
 
 DeepSeek Harness reports as the `deepseek_harness` harness with capability `hooks+session_log`. Live hook events carry `harness.collection_method=hook`; backfilled native session events carry `harness.collection_method=poll`. The bridge is a plugin, but it is DeepSeek's plugin, shipped and versioned with the CLI; what Beacon contributes is command hooks, and the thing that runs on each hook event is the same `beacon-hooks` binary every other hook runtime runs.
 
@@ -262,6 +298,7 @@ grep '"name":"deepseek_harness"' ~/.beacon/endpoint/logs/runtime.jsonl | tail -3
 
 If DeepSeek Harness telemetry is missing:
 
+- Run `beacon endpoint doctor`. If it reports `dsh_hook_bridge: warn`, `dsh` cannot load the bridge, or some profiles cannot: it names the `dsh` and bridge versions and the command that installs a matching bridge. The startup line `warning: 1 entry did not activate` with `Cannot find package '@deepseek-ai/dsh-hooks-claude-code'` (or `dsh-hook-protocol`) is the same problem seen from `dsh`. See [Installing the hook bridge](#installing-the-hook-bridge).
 - Run `beacon endpoint doctor`. If it reports `dsh_hook_capture: warn`, the hooks are loaded but cannot write the log, which is almost always the session sandbox. See [Live hooks and the DeepSeek Harness sandbox](#live-hooks-and-the-deepseek-harness-sandbox). Hook stderr, and `dsh`'s own hook output, will show `beacon-hooks: this event was NOT recorded`.
 - Confirm **both** files exist. `beacon endpoint hooks status --harness dsh` prints both paths; either one alone is inert.
 - Check `$DSH_HOME`: if it is set, both files are under that directory, not `~/.dsh`.

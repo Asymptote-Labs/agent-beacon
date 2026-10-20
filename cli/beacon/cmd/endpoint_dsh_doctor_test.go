@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks/dshtest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -179,6 +180,7 @@ func TestDshHookCaptureCheckFindsARealInstall(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	dshHome := filepath.Join(home, "dsh")
 	t.Setenv("DSH_HOME", dshHome)
+	dshtest.Ready(t, dshHome, "0.2.1-rc.2")
 	origLevel := endpointOpts.hookLevel
 	t.Cleanup(func() { endpointOpts.hookLevel = origLevel })
 	endpointOpts.hookLevel = "user"

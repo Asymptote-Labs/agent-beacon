@@ -124,3 +124,36 @@ func TestScanReportsNoProjectScopedDshConfig(t *testing.T) {
 		}
 	}
 }
+
+// A declarative setup mounts the bridge by absolute path in a profile's own patch layer, pointing
+// it at Beacon's hooks file. That layer is reported, and as Beacon-managed even though it names no
+// package, so a working install is not shown as a half-install.
+func TestScanReportsAProfileLayerThatMountsTheBridgeByPath(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	t.Setenv("DSH_HOME", "")
+	dir := filepath.Join(home, ".dsh")
+	hooksPath := filepath.Join(dir, "beacon-endpoint-hooks.json")
+	layer := filepath.Join(dir, "profiles", "web", "cordis.patch.yml")
+	other := filepath.Join(dir, "profiles", "tui", "cordis.patch.yml")
+	for path, content := range map[string]string{
+		layer: "- insert:\n    - id: hooks-bridge\n      name: /nix/store/abc-bridge/lib/index.js\n      config:\n        configPath: " + hooksPath + "\n",
+		other: "- id: tools\n  config: {}\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result := Scan(Options{HomeDir: home, WorkingDir: work})
+	mounted := findConfig(result.Configs, "deepseek_harness", layer)
+	if mounted == nil || !mounted.BeaconManaged {
+		t.Fatalf("profile layer mounting the bridge at Beacon's hooks file = %+v, want reported and Beacon-managed", mounted)
+	}
+	unrelated := findConfig(result.Configs, "deepseek_harness", other)
+	if unrelated == nil || unrelated.BeaconManaged {
+		t.Fatalf("an unrelated profile layer = %+v, want reported and not Beacon-managed", unrelated)
+	}
+}

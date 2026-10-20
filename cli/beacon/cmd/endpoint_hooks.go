@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -50,9 +51,21 @@ func runEndpointHooksInstall(cmd *cobra.Command, args []string) error {
 		}
 		return printPlannedActions(actions)
 	}
-	cfg := loadOrDefaultConfig()
+	return installEndpointHookTargets(os.Stderr, targets, loadOrDefaultConfig(), endpointOpts.allTargets)
+}
+
+// installEndpointHookTargets installs each target in turn and stops at the first error, except
+// that a DeepSeek Harness which cannot load the hook bridge is skipped with a warning when it was
+// swept up by --all rather than named. That is a property of the machine, not a failed write:
+// named explicitly it is an error, and in a sweep it must not abort every target after it.
+func installEndpointHookTargets(warnings io.Writer, targets []string, cfg endpointconfig.Config, sweep bool) error {
 	for _, name := range targets {
 		if err := installEndpointHookTarget(name, cfg); err != nil {
+			var unavailable *endpointhooks.DshBridgeUnavailableError
+			if sweep && errors.As(err, &unavailable) {
+				fmt.Fprintf(warnings, "Warning: skipped DeepSeek Harness: %v\n", err)
+				continue
+			}
 			return err
 		}
 	}
@@ -268,7 +281,20 @@ func installEndpointHookTargetTo(report, notes io.Writer, name string, cfg endpo
 		// least likely to guess at. Naming only the hooks file would send somebody looking for a
 		// mount that is not there.
 		fmt.Fprintf(report, "DeepSeek Harness hooks installed: %s\n", status.HooksPath)
-		fmt.Fprintf(report, "DeepSeek Harness hook bridge mounted in: %s\n", status.PatchPath)
+		if status.PathMounted {
+			fmt.Fprintf(report, "DeepSeek Harness hook bridge: already mounted by path, no row written (%s)\n", status.Bridge.Summary())
+		} else {
+			fmt.Fprintf(report, "DeepSeek Harness hook bridge mounted in: %s\n", status.PatchPath)
+		}
+		// A row mounted by package name resolves only in profiles that have the bridge installed;
+		// the others boot with "1 entry did not activate" and run without hooks. Said here so
+		// that warning is expected rather than a surprise.
+		if status.Bridge != nil && !status.PathMounted {
+			if missing := status.Bridge.ProfilesWithoutBridge(); len(missing) > 0 {
+				fmt.Fprintf(notes, "DeepSeek Harness profile(s) %s do not have the hook bridge installed and will boot without hooks. "+
+					"To add it to one: %s\n", strings.Join(missing, ", "), status.Bridge.InstallCommand(missing[0]))
+			}
+		}
 		// Said on every install, because a running dsh will not pick this up on its own unless the
 		// profile enabled HMR -- and the symptom otherwise is a successful install collecting
 		// nothing until the next restart, which reads as a broken install.
@@ -855,9 +881,12 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 			// Both paths again, and here it is diagnostic rather than informational: installed is
 			// the conjunction of the two files, so an operator reading installed=false needs to
 			// know which one to look at.
-			fmt.Printf("DeepSeek Harness hooks: installed=%t path=%s patch=%s\n",
-				status.Installed, status.HooksPath, status.PatchPath)
+			fmt.Printf("DeepSeek Harness hooks: installed=%t active=%t path=%s patch=%s\n",
+				status.Installed, status.Active, status.HooksPath, status.PatchPath)
 			fmt.Println(status.Message)
+			if status.Bridge != nil && !status.Installed {
+				fmt.Println(status.Bridge.Summary())
+			}
 		case "kimi":
 			status := statuses["kimi"].(endpointhooks.KimiStatus)
 			fmt.Printf("Kimi Code hooks: installed=%t path=%s\n", status.Installed, status.HooksPath)

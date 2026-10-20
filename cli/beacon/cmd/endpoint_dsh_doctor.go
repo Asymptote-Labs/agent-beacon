@@ -53,6 +53,67 @@ func dshHookCaptureCheck(logPath string) (diagnostics.Check, bool) {
 	return dshHookCaptureCheckAt(logPath, status.HooksPath, store.DSHHome), true
 }
 
+// doctorDshHookBridgeCheck is the bridge check doctor runs, indirected like the capture check.
+var doctorDshHookBridgeCheck = dshHookBridgeCheck
+
+// dshHookBridgeCheck reports whether dsh can load the hook bridge the installed hooks depend on.
+//
+// The capture check above can only see that sessions ran without hook events. This one says why
+// when the cause is the bridge: dsh does not ship it, so it has to be installed into a profile at
+// exactly the dsh version (or mounted by path), and a dsh upgrade leaves an installed bridge one
+// version behind. In each case dsh skips the mount with a warning and the hooks record nothing.
+func dshHookBridgeCheck() (diagnostics.Check, bool) {
+	status := endpointhooks.DshHookStatus(endpointhooks.DshOptions{Level: endpointhooks.LevelUser})
+	if !status.Installed || status.Bridge == nil {
+		return diagnostics.Check{}, false
+	}
+	return dshHookBridgeCheckFor(*status.Bridge, status.PathMounted), true
+}
+
+func dshHookBridgeCheckFor(bridge endpointhooks.DshBridgeReport, pathMounted bool) diagnostics.Check {
+	check := diagnostics.Check{
+		Name:     "dsh_hook_bridge",
+		Target:   dshsession.Harness,
+		Status:   diagnostics.StatusOK,
+		Severity: diagnostics.SeverityInfo,
+		Evidence: "dsh_hook_bridge_loads",
+		Message:  "DeepSeek Harness " + bridge.Summary(),
+	}
+	missing := bridge.ProfilesWithoutBridge()
+	switch {
+	case !bridge.Ready:
+		check.Status = diagnostics.StatusWarn
+		check.Severity = diagnostics.SeverityMedium
+		check.Evidence = "dsh_hook_bridge_unavailable"
+		check.Message = "DeepSeek Harness hooks are installed but dsh cannot load them: " + bridge.Summary() +
+			". dsh skips the mount with a warning at boot, so no hook event is recorded"
+		check.Action = dshBridgeAction(bridge, "")
+	case bridge.DshVersion == "":
+		check.Status = diagnostics.StatusWarn
+		check.Severity = diagnostics.SeverityLow
+		check.Evidence = "dsh_version_unknown"
+		check.Message = "the DeepSeek Harness hook bridge resolves, but the running dsh version could not be determined (" +
+			bridge.DshVersionError + "), so Beacon cannot confirm the bridge matches it"
+		check.Action = "make sure `dsh` is on PATH for this user, then run beacon endpoint doctor again"
+	case !pathMounted && len(missing) > 0:
+		check.Status = diagnostics.StatusWarn
+		check.Severity = diagnostics.SeverityLow
+		check.Evidence = "dsh_hook_bridge_partial"
+		check.Message = fmt.Sprintf("DeepSeek Harness %s; sessions in those profiles record no hook events", bridge.Summary())
+		check.Action = dshBridgeAction(bridge, missing[0])
+	}
+	return check
+}
+
+// dshBridgeAction says how to add the bridge, without suggesting Beacon will do it.
+func dshBridgeAction(bridge endpointhooks.DshBridgeReport, profile string) string {
+	add := "install @deepseek-ai/dsh-hooks-claude-code and @deepseek-ai/dsh-hook-protocol at exactly the dsh version into the profile"
+	if cmd := bridge.InstallCommand(profile); cmd != "" {
+		add = "run `" + cmd + "`"
+	}
+	return add + " (Beacon does not install packages), then restart dsh; until then `beacon endpoint dsh sync` collects sessions from DeepSeek's session store"
+}
+
 // dshHookCaptureCheckAt is dshHookCaptureCheck with its inputs resolved, so it can be tested
 // against a temporary Harness home and runtime log.
 func dshHookCaptureCheckAt(logPath, hooksPath, dshHome string) diagnostics.Check {
