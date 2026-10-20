@@ -112,6 +112,14 @@ type onboardingOutcome struct {
 	InstallSkills   bool
 }
 
+// briefClose reports whether the install closes on the wizard's short summary (cloudSummary)
+// rather than its full report: the person confirmed Beacon Cloud in the wizard, and this install
+// connects the endpoint. Every other path, `install --connect` without the wizard included, keeps
+// the full output.
+func (o onboardingOutcome) briefClose() bool {
+	return o.Connect
+}
+
 // maybeRunOnboarding runs the one-time account and destination wizard when this
 // install is interactive.
 //

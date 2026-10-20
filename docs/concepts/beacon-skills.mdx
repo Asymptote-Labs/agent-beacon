@@ -18,9 +18,9 @@ control of every write to memory.
 
 | Skill | What it does | Network |
 |-------|--------------|---------|
-| `beacon-memory-recall` | Before a task, retrieves approved project memory relevant to it | None |
-| `beacon-memory-distill` | Turns selected traces into reviewed memory: dry run, a consented evaluation, a lesson drafted from the source trace, approval by the user | Evaluator call only, after the user agrees |
-| `beacon-memory-promote` | Installs an approved memory as a project Agent Skill | None |
+| `beacon-memory-recall` | Before a task, retrieves approved project memory relevant to it, locally or from Beacon Cloud | None locally; Beacon Cloud MCP when connected |
+| `beacon-memory-distill` | Turns selected traces into reviewed memory: dry run, a consented evaluation, a lesson drafted from the source trace, approval by the user. Over Beacon Cloud MCP, drafts from forwarded sessions and files only what the user confirms | Evaluator call only, after the user agrees; Beacon Cloud MCP on that path |
+| `beacon-memory-promote` | Installs an approved memory as a project Agent Skill | None locally; Beacon Cloud MCP for memory approved there |
 | `beacon-lens-create` | Builds a [lens](/concepts/lenses) for the local dashboard: reads the spec, inspects real trace data, writes, lints and previews the file with the user, then installs it | None |
 | `beacon-trace-share` | Shares the current session as a trace on beacon.sh with [`beacon share --current`](/cli/share#sharing-this-session) and posts the link. Direct (link-only) by default, asks before public | Uploads the session to beacon.sh, only when you ask |
 
@@ -37,6 +37,11 @@ control of every write to memory.
 The plugin also registers Beacon's local MCP server (`beacon mcp serve`) in harnesses
 that accept MCP servers from plugins. When the server is available, recall uses the
 `get_memory_context` tool. Otherwise it falls back to `beacon memory list`.
+
+With [Beacon Cloud MCP](/deployment/managed-mcp#memory) connected (`beacon mcp connect`),
+the three memory skills also work on sessions forwarded to Beacon Cloud and on the memory
+approved there, without the CLI. Filing and reviewing candidates needs a connection with
+write access. See [Memory in Beacon Cloud](/concepts/cross-harness-memory#memory-in-beacon-cloud).
 
 ## Install
 

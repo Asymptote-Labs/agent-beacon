@@ -2508,8 +2508,11 @@ func TestEndpointInstallHookFailureIsAWarningAndOtherHooksStillInstall(t *testin
 		t.Fatal(err)
 	}
 
-	var out bytes.Buffer
-	installHookTargetsFromEndpointInstall(&out, []string{"claude", "codex"})
+	var report, out bytes.Buffer
+	installHookTargetsFromEndpointInstall(&report, &out, []string{"claude", "codex"})
+	if !strings.Contains(report.String(), "Codex CLI endpoint hooks installed:") || strings.Contains(report.String(), "Warning:") {
+		t.Fatalf("report = %q, want the Codex hooks written and no warnings", report.String())
+	}
 
 	if !strings.Contains(out.String(), "Warning: claude hooks were not installed") {
 		t.Fatalf("expected a claude warning, got:\n%s", out.String())

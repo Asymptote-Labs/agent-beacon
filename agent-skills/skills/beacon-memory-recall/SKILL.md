@@ -2,7 +2,7 @@
 name: beacon-memory-recall
 description: Retrieve reviewed project memory that Beacon distilled from earlier agent sessions in any harness (Claude Code, Cursor, Codex, OpenCode, and others) before starting work. Use at the start of a non-trivial task in a repository, when the user asks "have we seen this before", "what did we learn last time", or "how did we fix this in Cursor/Codex", or when a build, test, or deploy step fails in a way that may have a known fix.
 license: MIT
-compatibility: Requires the Beacon CLI (beacon) on PATH with endpoint capture installed. Reads only local state and makes no network calls.
+compatibility: Requires the Beacon CLI (beacon) on PATH with endpoint capture installed, or a Beacon Cloud MCP connection (beacon-managed). The CLI path reads only local state and makes no network calls; the Beacon Cloud path reads memory approved through Beacon Cloud.
 metadata:
   author: asymptote-labs
   homepage: https://docs.beacon.sh/concepts/cross-harness-memory
@@ -31,29 +31,49 @@ everything you say.
 Skip it for trivial edits, and recall at most once per task unless the task changes
 direction.
 
-## Step 1: check that Beacon is available
+## Step 1: find where memory lives
+
+Memory is kept in one of two places, and a session may have either or both:
+
+- **Local** memory, approved with the Beacon CLI on this machine. Read it with the local
+  Beacon MCP tools (`search_memory`, `get_memory`, `get_memory_context`, usually under a
+  server called `beacon`) or the CLI.
+- **Beacon Cloud** memory, approved through Beacon Cloud MCP. Read it with
+  `beacon_memory_search` and `beacon_memory_get`, under the server called
+  `beacon-managed`.
+
+Use every source this session has. When it has the Beacon Cloud tools, use them even if
+the CLI is missing. Otherwise check for the CLI:
 
 ```bash
 beacon version
 ```
 
-If `beacon` is not found, tell the user that project memory is unavailable because the
-Beacon CLI is not installed, point them to https://docs.beacon.sh/get-started/overview, and
-continue the task without memory. Do not install it yourself.
+If neither is available, tell the user that project memory is unavailable, point them to
+https://docs.beacon.sh/get-started/overview (or `beacon mcp connect` for Beacon Cloud), and
+continue the task without memory. Do not install anything yourself.
 
 ## Step 2: retrieve memory
 
-Prefer the Beacon MCP tools when this session has them. They are named `search_memory`,
-`get_memory`, and `get_memory_context`, usually under a server called `beacon`.
+Search with two or three distinctive keywords from the current task (a tool name, file,
+error string). Terms are ANDed everywhere, so a full sentence will over-constrain the
+search and return nothing. Drop terms if the first attempt is empty.
 
-1. Call `get_memory_context` with `task` set to two or three distinctive keywords from
-   the current task (a tool name, file, error string). Terms are ANDed, so a full
-   sentence will over-constrain the search and return nothing. Drop terms if the first
-   attempt is empty.
+**Beacon Cloud MCP** (`beacon-managed`):
+
+1. Call `beacon_memory_search` with `query` set to the keywords. Add `repository` (a
+   substring such as the repository's name) when memory for other repositories comes
+   back.
+2. Call `beacon_memory_get` with a `memory_id` from that result when you need the full
+   body and its evidence.
+
+**Local Beacon MCP** (`beacon`):
+
+1. Call `get_memory_context` with `task` set to the keywords.
 2. Call `get_memory` with an `id` from that result when you need the full body and its
    evidence.
 
-Without the MCP tools, use the CLI from inside the repository:
+Without either MCP server, use the CLI from inside the repository:
 
 ```bash
 # Up to five memories matching the task's key terms (every term must match)
@@ -66,12 +86,11 @@ beacon memory list --limit 25
 beacon memory show <memory-id>
 ```
 
-Search terms are ANDed, so start with two or three distinctive words (a tool, a file, an
-error string) and drop terms if nothing matches. `--kind` narrows to `workflow`,
-`correction`, `debugging_pattern`, `gotcha`, or `convention`.
+`--kind` (or `kind` on `beacon_memory_search`) narrows to `workflow`, `correction`,
+`debugging_pattern`, `gotcha`, or `convention`.
 
-Memory is scoped to the project resolved from the current directory. Run from inside the
-repository, or pass `--project <path>`.
+Local memory is scoped to the project resolved from the current directory. Run from
+inside the repository, or pass `--project <path>`.
 
 ## Step 3: use what you found
 
@@ -87,7 +106,8 @@ repository, or pass `--project <path>`.
 ## Raw history, only when asked
 
 When the user explicitly asks what happened in an earlier session ("what did Cursor do
-yesterday on the release script?"), you can search raw traces:
+yesterday on the release script?"), you can search raw traces: with Beacon Cloud MCP,
+`beacon_search_sessions`, `beacon_grep`, and `beacon_read_session`; locally:
 
 ```bash
 beacon endpoint traces search "<terms>" --json --limit 10
@@ -101,7 +121,8 @@ suggest the `beacon-memory-distill` workflow so a person can review it.
 
 ## Boundaries
 
-- Read-only. Never approve, reject, or edit memory from this skill.
+- Read-only. Never file, approve, reject, or edit memory from this skill, locally or
+  through Beacon Cloud MCP.
 - Never run `beacon memory evaluations run` here. That step sends trace data to an
   evaluator over the network and belongs to `beacon-memory-distill`, where the user
   consents to it.
