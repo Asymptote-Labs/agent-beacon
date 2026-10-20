@@ -9,8 +9,15 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ---
 
+## Unreleased
+
+- **Dashboard output tokens count reasoning once** · The local dashboard's token view added reasoning tokens to output, but `gen_ai.usage.output_tokens` already includes them, so models that report reasoning had their output and total tokens overstated. Output and the total now count reasoning once, the split bar no longer shows reasoning as a separate segment, and a note below it gives the reasoning count included in output. `beacon token-usage` already counted it this way.
+
+---
+
 ## October 2026
 
+- **Status and doctor recognize the hooks install writes** · Since v1.2.0, install writes hook commands with `--log` and `--config` flags in place of the `BEACON_ENDPOINT_MODE=1` prefix, but `beacon endpoint status`, `beacon endpoint doctor` and discovery still looked for the prefix. Every fresh install therefore reported Cursor, Antigravity CLI, Devin CLI, Devin Desktop and Hermes Agent as "hooks exist but endpoint hooks were not found", with telemetry disabled, though the hooks were correct and running, and inventory marked their hooks files as not Beacon-managed. They now use the same check install, repair and uninstall use, which accepts both spellings.
 - **The collector's OTLP HTTP receiver rejects non-loopback Host headers** · A web page that DNS-rebinds its own hostname to `127.0.0.1` could post forged logs and spans to `127.0.0.1:4318`, which landed in the runtime log and every destination. The receiver now answers 401 unless the Host header names localhost or a loopback IP, as the dashboard and MCP server already do. Runtimes, the SDK and the browser extension send a loopback Host and are unaffected; gRPC on 4317 is unchanged. Use the `beacon-otelcol` from the same release, since an older one refuses the new config.
 
 ### v1.3.44 · October 19, 2026

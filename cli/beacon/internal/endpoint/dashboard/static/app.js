@@ -2377,8 +2377,7 @@ function usageTotal(usage = {}) {
   return (usage.input_tokens || 0) +
     (usage.output_tokens || 0) +
     (usage.cache_read_input_tokens || 0) +
-    (usage.cache_creation_input_tokens || 0) +
-    (usage.reasoning_output_tokens || 0);
+    (usage.cache_creation_input_tokens || 0);
 }
 
 // The estimate is labeled wherever it appears: it is a list price from the embedded catalog
@@ -2405,7 +2404,7 @@ function renderTokenCards(totals, pricing) {
   const cards = [
     { label: "Total Tokens", value: formatTokens(totalTokens), hint: "local captured usage" },
     { label: "Input Tokens", value: formatTokens((totals.input_tokens || 0) + (totals.cache_read_input_tokens || 0) + (totals.cache_creation_input_tokens || 0)), hint: "fresh + cached" },
-    { label: "Output Tokens", value: formatTokens((totals.output_tokens || 0) + (totals.reasoning_output_tokens || 0)), hint: "completion + reasoning" },
+    { label: "Output Tokens", value: formatTokens(totals.output_tokens), hint: "includes reasoning" },
     { label: "Cached Tokens", value: formatTokens((totals.cache_read_input_tokens || 0) + (totals.cache_creation_input_tokens || 0)) },
     { label: "Reasoning", value: formatTokens(totals.reasoning_output_tokens) },
     { label: "Reported cost (USD)", value: totals.cost_usd ? totals.cost_usd.toFixed(4) : "-", hint: "runtime-reported only" },
@@ -2433,7 +2432,6 @@ function renderTokenSplit(totals) {
     { name: "Input (fresh)", value: freshInput, color: "#0f7498" },
     { name: "Cached input", value: cached, color: "#10b981" },
     { name: "Output", value: output, color: "#7dd3fc" },
-    { name: "Reasoning", value: reasoning, color: "#f59e0b" },
   ].filter((segment) => segment.value > 0);
   const total = segments.reduce((sum, segment) => sum + segment.value, 0);
   if (!total) {
@@ -2462,6 +2460,7 @@ function renderTokenSplit(totals) {
         </div>
       `).join("")}
     </div>
+    ${reasoning > 0 && output > 0 ? `<p class="muted token-reasoning-note">Reasoning: ${escapeHTML(formatTokens(reasoning))} tokens (included in output).</p>` : ""}
   `;
 }
 
@@ -2577,7 +2576,7 @@ function renderTokenThroughput(series) {
     .map((bucket) => {
       const usage = bucket.usage || {};
       const input = (usage.input_tokens || 0) + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
-      const output = (usage.output_tokens || 0) + (usage.reasoning_output_tokens || 0);
+      const output = usage.output_tokens || 0;
       const inputWidth = Math.max(0, Math.round((input / max) * 100));
       const outputWidth = Math.max(0, Math.round((output / max) * 100));
       return `

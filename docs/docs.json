@@ -57,7 +57,8 @@
             "pages": [
               "deployment/hosting-options",
               "deployment/open-source",
-              "deployment/managed"
+              "deployment/managed",
+              "deployment/plans"
             ]
           },
           {
@@ -72,6 +73,7 @@
                 ]
               },
               "cloud/sessions",
+              "cloud/findings",
               "deployment/managed-mcp",
               {
                 "group": "Lenses",
@@ -630,6 +632,7 @@
             "icon": "clock",
             "pages": [
               "changelog/cli",
+              "changelog/cloud",
               "changelog/sdk"
             ]
           }
@@ -696,6 +699,14 @@
     {
       "source": "/guides/claude-s3-system",
       "destination": "/guides/macos-object-storage-system"
+    },
+    {
+      "source": "/pricing",
+      "destination": "/deployment/plans"
+    },
+    {
+      "source": "/cloud-changelog",
+      "destination": "/changelog/cloud"
     },
     {
       "source": "/product-changelog",
