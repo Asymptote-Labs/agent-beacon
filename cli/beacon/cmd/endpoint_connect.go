@@ -187,12 +187,12 @@ func connectEndpointFor(cmd *cobra.Command, userMode bool, logPath string, backf
 	// the staged session backfill the dashboard fills as agents run.
 	fmt.Fprintln(out)
 	if result.Backfill != nil && result.Backfill.Events > 0 {
-		fmt.Fprintf(out, "Uploading %d events of recent session history; they appear at %s within a few minutes.\n", result.Backfill.Events, dashboardHomeURL(result.Enrollment.DashboardURL))
-		fmt.Fprintln(out, "Next: keep using your agents as you normally would; new sessions appear within a minute of the activity.")
+		fmt.Fprintf(out, "Uploading %d events of recent session history; they appear at %s within about 15 seconds.\n", result.Backfill.Events, dashboardHomeURL(result.Enrollment.DashboardURL))
+		fmt.Fprintln(out, "Next: keep using your agents as you normally would; new sessions appear within about 15 seconds of the activity.")
 		return nil
 	}
 	fmt.Fprintln(out, "Next: run any supported agent as you normally would.")
-	fmt.Fprintf(out, "Its sessions appear at %s within a minute of the activity.\n", dashboardHomeURL(result.Enrollment.DashboardURL))
+	fmt.Fprintf(out, "Its sessions appear at %s within about 15 seconds of the activity.\n", dashboardHomeURL(result.Enrollment.DashboardURL))
 	return nil
 }
 
