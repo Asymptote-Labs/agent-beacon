@@ -9,6 +9,12 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ---
 
+## Unreleased
+
+- **Dashboard output tokens count reasoning once** · The local dashboard's token view added reasoning tokens to output, but `gen_ai.usage.output_tokens` already includes them, so models that report reasoning had their output and total tokens overstated. Output and the total now count reasoning once, the split bar no longer shows reasoning as a separate segment, and a note below it gives the reasoning count included in output. `beacon token-usage` already counted it this way.
+
+---
+
 ## October 2026
 
 ### v1.3.44 · October 19, 2026

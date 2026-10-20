@@ -1,0 +1,48 @@
+---
+title: Beacon Cloud Changelog
+description: Latest updates to Beacon Cloud at beacon.sh
+---
+
+## Latest updates
+
+Changes to the hosted Beacon Cloud dashboard, findings and MCP server at
+[beacon.sh](https://beacon.sh). Beacon Cloud updates continuously, so entries are grouped by date
+rather than version. CLI releases are in the [CLI changelog](/changelog/cli).
+
+---
+
+## October 2026
+
+### October 20, 2026
+
+- **Your first findings arrive by email** · Beacon Cloud now analyzes a new account as soon as its first sessions arrive, and sends one email with the first findings right after that analysis. Later findings go out in the daily digest on the free plan. See [Findings](/cloud/findings#your-first-findings).
+- **New devices show their upload in progress** · For a few minutes after a device connects, while its 30-day session backfill reaches the dashboard, an empty session list now says the device is connected and shows a spinner, instead of "No sessions yet".
+
+### October 19, 2026
+
+- **Beacon Cloud Pro** · Beacon Cloud stays free, and Pro ($20 a month, or $15 a month billed annually) adds unlimited findings, findings, feedback and memory over MCP, skills pulled from your sessions, the full evidence trail on every finding, real-time email alerts and priority support. The [pricing page](https://beacon.sh/pricing) compares Open Source, Beacon Cloud, Pro and Enterprise. See [Plans and pricing](/deployment/plans).
+- **Free accounts include 50 findings** · A free account gets 50 findings over its lifetime; Pro is unlimited. Once the allowance is used, new activity is no longer analyzed, while sessions keep uploading and stay searchable. Findings resume from the next new telemetry after an upgrade.
+- **Findings and memory MCP tools are part of Pro** · `beacon_findings_list`, `beacon_get_finding`, `beacon_finding_feedback` and the `beacon_memory_*` tools now need Beacon Cloud Pro. Called from a free account, they return an error naming Pro with a link to pricing, so your agent can explain. Session search, lenses and sharing stay on every plan, and an upgrade reaches your agents within a minute. See [Beacon Cloud MCP](/deployment/managed-mcp#tools).
+- **Fix prompt for an empty Agent Inventory** · When a device reports no inventory, the Agent Inventory page offers a prompt to paste into your agent to find and fix the cause.
+- **Trace Marketplace** · The Discover menu's **Agent sessions marketplace** is now **Trace Marketplace**.
+- **Setup prompt offers three plans** · The copy-and-paste setup prompt at [beacon.sh/start.md](https://beacon.sh/start.md) now offers Beacon Cloud, Beacon Cloud Pro and Local, asks whether to set up Beacon MCP and the Beacon Agent Skills before installing, and opens Beacon at the end. For Pro it opens the Billing page to finish upgrading; it never handles payment details.
+
+### October 18, 2026
+
+- **Memory over MCP** · Agents connected to [Beacon Cloud MCP](/deployment/managed-mcp#memory) can file a lesson from one of your sessions as a memory candidate once you confirm it, list and read candidates, approve, reject or supersede them, search and read approved memory, and render an approved memory as an Agent Skill (`beacon_memory_skill`) to save in your repository. The `beacon-memory-recall`, `beacon-memory-distill` and `beacon-memory-promote` skills use these tools when Beacon Cloud MCP is connected.
+
+### October 16, 2026
+
+- **Billing page** · [beacon.sh/dashboard/billing](https://beacon.sh/dashboard/billing) shows your plan, starts a Pro checkout or free trial, and cancels a subscription. A canceled subscription keeps Pro until the end of the paid period.
+- **Pricing page** · [beacon.sh/pricing](https://beacon.sh/pricing) lists the plans with a monthly and annual toggle and a full comparison table, and explains the three kinds of findings.
+- **Findings over MCP** · `beacon_findings_list`, `beacon_get_finding` and `beacon_finding_feedback` let your agent list your findings, read one with its evidence and recommendation, and record your feedback or set it resolved, dismissed or open.
+- **Findings at onboarding** · A new account's findings are produced from its first sessions instead of waiting for the next hourly run.
+- **Session History** · **Sessions** under Agent Activity is now a group; its **Session History** entry opens the session list. Existing `/dashboard/sessions` links are unchanged.
+- **Security headers** · beacon.sh, the API and the MCP host now send HSTS, `nosniff` and a referrer policy, and every page refuses to be framed.
+
+### October 15, 2026
+
+- **Download skill beside the finding title** · A skill finding's **Download skill** button now sits next to its title.
+- **MCP write access names session sharing** · The OAuth consent page and **MCP Access** now say that write access also lets an agent share your sessions, including publicly, and change or remove shared traces.
+- **A device can only share its own sessions** · An [auto-share](/sharing/agent-hooks) request sent with one device's key is honored only for a session that device recorded, and never changes the visibility of a trace that already exists.
+- **Revoked devices stay revoked** · A revoked machine can no longer enroll again under a new install id with the account token it still holds. Sign in again from your own browser, or **Reinstate device**, to allow it.

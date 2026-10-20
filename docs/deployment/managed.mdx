@@ -17,14 +17,32 @@ so there is no database, bucket or pipeline to run.
 - **Lenses.** Focused views of a session, such as files changed, token spend or security
   findings. Use the built-in lenses, add more from the [marketplace](/cloud/lenses/adding-lenses),
   [build your own](/cloud/lenses/creating-lenses), and manage them on the dashboard's **Lenses** page.
-- **MCP.** Let the agent you are working in search and read your past sessions, and publish lenses
-  for you. See [Beacon Cloud MCP](/deployment/managed-mcp).
+- **MCP.** Let the agent you are working in search and read your past sessions, share them, and
+  publish lenses for you. On Pro it can also read your findings and keep memory. See
+  [Beacon Cloud MCP](/deployment/managed-mcp).
+- **Sharing.** Publish a session as a link with [`beacon share`](/sharing/index), from the
+  dashboard, or from your agent.
 - **Analytics.** Token usage and cost by model, agent activity over time, and the harnesses,
   models and repositories you use most.
-- **Findings and inventory.** Threat-rule findings with their evidence, plus the configs, MCP
-  servers, skills and hooks each device reports.
+- **Findings.** Security risks, workflows worth turning into skills, and habits that cost you time
+  or money, found by an hourly review of your sessions. See [Findings](/cloud/findings).
+- **Inventory.** The configs, MCP servers, skills and hooks each device reports.
 - **Profile.** An optional public page of aggregate activity. See
   [Configure your profile](/manage/profile).
+
+## Plans
+
+Beacon Cloud is free. **Beacon Cloud Pro** ($20 a month, or $15 a month billed annually) adds:
+
+- Unlimited findings, where the free plan includes 50.
+- Findings, feedback and memory over MCP, so your agents can review findings and recall lessons
+  from your history.
+- Skills pulled from your sessions, the full evidence trail on every finding, real-time email
+  alerts and priority support.
+
+Upgrade, start a trial or cancel on [beacon.sh/dashboard/billing](https://beacon.sh/dashboard/billing).
+Your devices need no change. See [Plans and pricing](/deployment/plans) for the full comparison,
+including Enterprise.
 
 ## Get started
 
@@ -79,5 +97,11 @@ flow.
   </Card>
   <Card title="Beacon Cloud MCP" icon="plug" href="/deployment/managed-mcp">
     Bring your history into the agent you are using.
+  </Card>
+  <Card title="Findings" icon="magnifying-glass" href="/cloud/findings">
+    Review what Beacon Cloud noticed in your sessions.
+  </Card>
+  <Card title="Plans and pricing" icon="tag" href="/deployment/plans">
+    Compare Beacon Cloud, Pro and Enterprise.
   </Card>
 </Columns>
