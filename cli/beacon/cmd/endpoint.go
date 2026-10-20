@@ -432,7 +432,7 @@ func init() {
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.includeCodexSpans, "include-codex-spans", false, "Include high-volume Codex OTLP spans for troubleshooting")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.claudeCaptureModelContext, "claude-capture-model-context", false, claudeCaptureModelContextUsage)
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.noStart, "no-start", false, "Write files without starting the collector service")
-	endpointInstallCmd.Flags().BoolVar(&endpointOpts.noBrowser, "no-browser", false, "During interactive setup, print the sign-in URL instead of opening a browser")
+	endpointInstallCmd.Flags().BoolVar(&endpointOpts.noBrowser, "no-browser", false, "During interactive setup, print the sign-in and dashboard URLs instead of opening a browser")
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.serviceKind, "service", "", "Service manager to use: auto (default), launchd, systemd, or none for a supervised collector process")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.dryRun, "dry-run", false, "Print planned actions without changing endpoint files or services")
 	endpointInstallCmd.Flags().BoolVar(&endpointOpts.noBackfill, "no-backfill", false, "Skip reading the last 30 days of agent sessions from their local session stores into the runtime log (also "+endpointBackfillEnv+"=0)")
