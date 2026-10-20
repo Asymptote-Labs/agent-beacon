@@ -223,8 +223,9 @@ func TestShareAutoRepositoryOptOutOverridesAProjectEnable(t *testing.T) {
 }
 
 // A system-mode connection keeps its enrollment in a directory only root can read. A share run as
-// the signed-in user must still find a Metadata-only connection there, and must count one it
-// cannot read at all as Metadata-only, or it would upload content forwarding withholds.
+// the signed-in user must still find a Metadata-only connection there, and must treat a mode it
+// cannot read at all as Metadata-only, or it would upload content forwarding withholds, without
+// claiming a connection it could not confirm.
 func TestUnreadableCloudConnectionFailsClosed(t *testing.T) {
 	testenv.RequirePOSIXFileModes(t)
 	if os.Geteuid() == 0 {
@@ -255,8 +256,8 @@ func TestUnreadableCloudConnectionFailsClosed(t *testing.T) {
 		{"connect from before privacy modes", `{"managed_ingest":{"enabled":true}}`, true, managedprivacy.Standard},
 		{"unknown mode", `{"managed_ingest":{"enabled":true,"privacy_mode":"redacted"}}`, true, managedprivacy.MetadataOnly},
 		{"not connected", `{"user_mode":false}`, false, ""},
-		{"config not valid JSON", `{`, true, managedprivacy.MetadataOnly},
-		{"no config", "", true, managedprivacy.MetadataOnly},
+		{"config not valid JSON", `{`, false, managedprivacy.MetadataOnly},
+		{"unreadable config", "", false, managedprivacy.MetadataOnly},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

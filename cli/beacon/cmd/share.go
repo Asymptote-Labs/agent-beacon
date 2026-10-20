@@ -905,11 +905,12 @@ func shareHasProjectable(events []schema.Event) bool {
 }
 
 // shareMetadataOnly reports whether this endpoint forwards to Beacon Cloud in Metadata-only mode
-// (user or system mode). A share from it then leaves out what forwarding leaves out, so publishing a
-// session never sends more than the endpoint's privacy mode allows.
+// (user or system mode), or has a system-mode privacy mode this user cannot read. A share then
+// leaves out what forwarding leaves out, so publishing a session never sends more than the
+// endpoint's privacy mode allows.
 func shareMetadataOnly() bool {
-	connected, mode := shareAutoCloud()
-	return connected && mode == managedprivacy.MetadataOnly
+	_, mode := shareAutoCloud()
+	return mode == managedprivacy.MetadataOnly
 }
 
 func buildSharePayload(subject shareSubject) (sharePayload, error) {

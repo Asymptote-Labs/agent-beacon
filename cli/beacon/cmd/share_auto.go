@@ -26,8 +26,9 @@ import (
 // to Beacon Cloud the setting does nothing but write that event; enable says so.
 
 // shareAutoCloud reports whether this endpoint forwards to Beacon Cloud (user or system mode) and
-// with which privacy mode. Sharing strips content when the mode is Metadata-only, so whenever the
-// mode cannot be read it is reported as Metadata-only rather than Standard. A seam for tests.
+// with which privacy mode. Sharing strips content whenever the mode is Metadata-only, connected or
+// not, so a mode that cannot be read is reported as Metadata-only rather than Standard, and a
+// connection that cannot be confirmed as not connected. A seam for tests.
 var shareAutoCloud = func() (connected bool, privacyMode string) {
 	for _, userMode := range []bool{true, false} {
 		if asymptote.Connected(userMode) {
@@ -63,19 +64,19 @@ func recordedPrivacyMode(value string) string {
 // see. The system enrollment is in a directory only root can read, so `beacon share`, `--follow`
 // and the git pre-push hook, which run as the signed-in user, get a permission error where root
 // would find it. The managed_ingest block of the system config.json, which everyone can read, then
-// says whether the endpoint forwards and in which privacy mode, and a config that cannot be read
-// either counts as a Metadata-only connection.
+// says whether the endpoint forwards and in which privacy mode. A config that cannot be read either
+// (it is 0600 when it holds a HEC token) confirms no connection but still yields Metadata-only.
 func unreadableCloudConnection(enrollmentPath, configPath string) (bool, string) {
 	if _, err := os.Stat(enrollmentPath); !errors.Is(err, fs.ErrPermission) {
 		return false, ""
 	}
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return true, managedprivacy.MetadataOnly
+		return false, managedprivacy.MetadataOnly
 	}
 	var cfg endpointconfig.Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return true, managedprivacy.MetadataOnly
+		return false, managedprivacy.MetadataOnly
 	}
 	if cfg.ManagedIngest == nil || !cfg.ManagedIngest.Enabled {
 		return false, ""
@@ -281,19 +282,21 @@ func buildShareAutoStatus(path string, settings shareauto.Settings, dir string) 
 	decision := shareauto.Resolve(settings, dir)
 	connected, mode := shareAutoCloud()
 	status := shareAutoStatus{
-		SettingsPath:     path,
-		Directory:        dir,
-		Enabled:          decision.Enabled,
-		Visibility:       decision.Visibility,
-		Source:           decision.Source,
-		Project:          decision.Project,
-		UntrustedMarker:  decision.UntrustedMarker,
-		Overridden:       decision.Overridden,
-		UserEnabled:      settings.Global() == shareauto.GlobalOn,
-		UserState:        settings.Global(),
-		UserVisibility:   settings.Auto.Visibility,
-		CloudConnected:   connected,
-		CloudPrivacyMode: mode,
+		SettingsPath:    path,
+		Directory:       dir,
+		Enabled:         decision.Enabled,
+		Visibility:      decision.Visibility,
+		Source:          decision.Source,
+		Project:         decision.Project,
+		UntrustedMarker: decision.UntrustedMarker,
+		Overridden:      decision.Overridden,
+		UserEnabled:     settings.Global() == shareauto.GlobalOn,
+		UserState:       settings.Global(),
+		UserVisibility:  settings.Auto.Visibility,
+		CloudConnected:  connected,
+	}
+	if connected {
+		status.CloudPrivacyMode = mode
 	}
 	for _, p := range settings.Projects {
 		status.Projects = append(status.Projects, shareAutoProject{
