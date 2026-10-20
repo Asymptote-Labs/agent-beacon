@@ -10,6 +10,7 @@ There are two ways in, and which one you want depends on whether you are setting
 ## Your own machine
 
 ```bash title="Install the CLI, then the endpoint"
+brew update
 brew trust asymptote-labs/tap
 brew tap asymptote-labs/tap
 brew install beacon
@@ -114,7 +115,7 @@ sudo beacon endpoint update --apply
 
 `--apply` downloads the release package, verifies its SHA-256 **and** its Apple notarization, installs it, restarts the collector, and rolls back if the new version fails its health check. The command reports which verification it performed, so a mixed fleet can tell the two platforms apart: macOS gets `sha256+notarization`, Linux gets `sha256` because there is no OS-level equivalent.
 
-`--apply` requires a package install. A Homebrew install is upgraded with `brew upgrade beacon`.
+`--apply` requires a package install. A Homebrew install is upgraded with `brew update && brew upgrade beacon`.
 
 ## Uninstall
 

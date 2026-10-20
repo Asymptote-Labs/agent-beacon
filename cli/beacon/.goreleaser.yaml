@@ -302,6 +302,8 @@ release:
 
     ### Homebrew (macOS/Linux)
     ```bash
+    brew update
+    brew trust asymptote-labs/tap
     brew tap asymptote-labs/tap
     brew install beacon
     ```

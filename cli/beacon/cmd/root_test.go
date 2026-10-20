@@ -58,7 +58,7 @@ func TestPrintRootUpdateNotice(t *testing.T) {
 		install selfupdate.Install
 		command string
 	}{
-		{name: "homebrew", install: selfupdate.Install{Kind: selfupdate.InstallHomebrew}, command: "brew upgrade beacon"},
+		{name: "homebrew", install: selfupdate.Install{Kind: selfupdate.InstallHomebrew}, command: "brew update && brew upgrade beacon"},
 		{name: "system package", install: selfupdate.Install{Kind: selfupdate.InstallSystemPkg}, command: "sudo beacon endpoint update --apply"},
 	}
 	for _, tt := range tests {
