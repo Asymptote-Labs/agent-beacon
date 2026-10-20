@@ -141,6 +141,13 @@ func TestRedactStringRedactsCommonCredentialFormats(t *testing.T) {
 		{"jwt", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U", "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"},
 		{"beacon device key", "bcn_device_abcdefgh_0123456789abcdef", "0123456789abcdef"},
 		{"beacon machine credential", "bcn_enfdev_abcdefgh_0123456789abcdef", "0123456789abcdef"},
+		{"beacon cli token", "Authorization header was bcn_cli_Zx9Qw8Er7Ty6Ui5Op4As3Df2 earlier", "Zx9Qw8Er7Ty6Ui5Op4As3Df2"},
+		{"beacon mcp refresh token", "refresh with bcn_mcprt_Lk2Jh3Gf4Ds5Aq6Ws7Ed8Rf9", "Lk2Jh3Gf4Ds5Aq6Ws7Ed8Rf9"},
+		{"beacon mcp token", "bcn_mcp_Pq1Wo2Ei3Ru4Ty5Yt6Ur7Ie8", "Pq1Wo2Ei3Ru4Ty5Yt6Ur7Ie8"},
+		{"beacon authorization code", "callback ?code=x&c=bcn_code_Mn1Bv2Cx3Zl4Kj5Hg6Fd7", "Mn1Bv2Cx3Zl4Kj5Hg6Fd7"},
+		{"aws credentials csv", "Access key ID,Secret access key\nAKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
+		{"aws key pair", "use AKIAIOSFODNN7EXAMPLE wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY for the bucket", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
+		{"aws key pair ending in a slash", `["ASIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKE/"]`, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKE/"},
 		{"rsa key", "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAsecretbody\n-----END RSA PRIVATE KEY-----", "MIIEowIBAAKCAQEAsecretbody"},
 		{"openssh key cut short", "cat ~/.ssh/id_ed25519\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA", "b3BlbnNzaC1rZXktdjEAAAAA"},
 	}
@@ -150,6 +157,22 @@ func TestRedactStringRedactsCommonCredentialFormats(t *testing.T) {
 				t.Fatalf("RedactString(%q) = %q, want %q removed", tc.input, got, tc.secret)
 			}
 		})
+	}
+}
+
+// An AWS secret key is recognized only next to its key id, keeps the separators around it, and a
+// longer run of key characters there is not taken for one.
+func TestRedactStringRedactsAnAWSSecretBesideItsKeyID(t *testing.T) {
+	for input, want := range map[string]string{
+		"AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n":         "AKIA[REDACTED],[REDACTED]\n",
+		"| AKIAIOSFODNN7EXAMPLE | wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY |":     "| AKIA[REDACTED] | [REDACTED] |",
+		"ASIAIOSFODNN7EXAMPLE wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY":           "ASIA[REDACTED] [REDACTED]",
+		"AKIAIOSFODNN7EXAMPLE wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEYplus":       "AKIA[REDACTED] wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEYplus",
+		"commit wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY has no key id beside it": "commit wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY has no key id beside it",
+	} {
+		if got := RedactString(input); got != want {
+			t.Errorf("RedactString(%q) = %q, want %q", input, got, want)
+		}
 	}
 }
 

@@ -113,7 +113,7 @@ func TestWizardInstallClosesOnAShortSummaryAndOpensTheDashboard(t *testing.T) {
 		"Beacon is installed and connected to Beacon Cloud as person@example.com (device dev_7f3a, Standard privacy).",
 		"Session backfill: ",
 		"  Claude Code: stopped at the backfill size limit; `beacon endpoint claude sync` reads the rest.",
-		"Dashboard: https://beacon.sh/dashboard (your recent sessions appear within a few minutes)",
+		"Dashboard: https://beacon.sh/dashboard (your recent sessions appear within a minute)",
 		"Beacon Cloud MCP added to Claude Code, Cursor, VS Code; sign in to beacon-managed once in each app (Claude Code: /mcp in a new session).",
 	}
 	if len(lines) != len(want) {
@@ -171,7 +171,7 @@ func TestWizardCloudConnectOpensTheDashboardOnlyWhereThePersonCanSeeIt(t *testin
 				t.Fatalf("opened %q", (*opened)[0])
 			}
 			text := h.stdout.String()
-			if got := strings.Contains(text, "Dashboard: https://beacon.sh/dashboard (sessions appear within a minute of agent activity)"); got != tc.wantLine {
+			if got := strings.Contains(text, "Dashboard: https://beacon.sh/dashboard (sessions appear within about 15 seconds of agent activity)"); got != tc.wantLine {
 				t.Fatalf("Dashboard line shown = %t, want %t:\n%s", got, tc.wantLine, text)
 			}
 			// The backfill report is said either way: a failed connect still leaves that history
@@ -199,7 +199,7 @@ func TestWizardDashboardOpenFailureIsSilent(t *testing.T) {
 	if h.stderr.Len() != 0 {
 		t.Fatalf("stderr: %s", h.stderr)
 	}
-	if !strings.Contains(h.stdout.String(), "Dashboard: https://beacon.sh/dashboard (your recent sessions appear within a few minutes)") {
+	if !strings.Contains(h.stdout.String(), "Dashboard: https://beacon.sh/dashboard (your recent sessions appear within a minute)") {
 		t.Fatalf("stdout:\n%s", h.stdout)
 	}
 }

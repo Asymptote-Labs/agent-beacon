@@ -1,6 +1,9 @@
 <p align="center">
-  <img src="images/beacon-hero.png" alt="Beacon" width="860">
+  <img src="images/beacon-lockup-light-mode.svg#gh-light-mode-only" alt="Beacon" width="480">
+  <img src="images/beacon-lockup-dark-mode.svg#gh-dark-mode-only" alt="Beacon" width="480">
 </p>
+
+<h1 align="center">Self‑improving memory for coding agents</h1>
 
 <p align="center">
   <a href="https://github.com/asymptote-labs/agent-beacon/releases"><img src="https://img.shields.io/github/v/release/asymptote-labs/agent-beacon" alt="GitHub release"></a>
@@ -50,6 +53,12 @@ Beacon is an open-source memory layer for AI coding agents that learns from your
 - **Shared agent memory** - reviewed knowledge future agents can retrieve through MCP or Agent Skills
 - **Exact session replay** - prompts, responses, tools, commands, edits, approvals, MCP activity, and tokens in one trace
 - **Local-first portability** - durable JSONL, explicit destinations, and no harness lock-in
+
+---
+
+## 🎬 Demo
+
+https://github.com/user-attachments/assets/38995612-84e9-4989-a905-0099f77955f0
 
 ---
 

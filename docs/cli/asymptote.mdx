@@ -123,7 +123,7 @@ vector --config ./beacon-asymptote-pack/vector.toml
 beacon endpoint asymptote validate
 ```
 
-The command writes the local event only. If the forwarder is running, the event reaches the ingest service within its batch window (60 seconds) and appears on the dashboard telemetry page a minute or so later. Search for the message `Beacon endpoint Beacon validation event`.
+The command writes the local event only. If the forwarder is running, the event reaches the ingest service within its batch window (10 seconds) and appears on the dashboard telemetry page within about 15 seconds of being written. Search for the message `Beacon endpoint Beacon validation event`.
 
 Expected validation fields:
 

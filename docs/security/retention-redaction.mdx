@@ -27,9 +27,10 @@ Redaction runs on retained text (prompts, command output, diffs, tool arguments 
 | Authorization headers and flags | `Authorization: Bearer …`, `Authorization: Basic …`, `--password …`, `--token=…` |
 | URL credentials | the password in `postgres://user:…@host`, `https://x-access-token:…@github.com` |
 | Private keys | PEM and OpenSSH `PRIVATE KEY` blocks, including a block cut off before its end line |
-| Recognizable tokens (the public type prefix stays, as in `ghp_[REDACTED]`) | Anthropic and OpenAI `sk-…`, AWS `AKIA…`/`ASIA…`, GitHub `ghp_…`/`github_pat_…`, GitLab `glpat-…`, Slack `xox…-`, Stripe `sk_live_…`, Google `AIza…`, npm, Hugging Face, Beacon `bcn_…` keys, and JWTs |
+| Recognizable tokens (the public type prefix stays, as in `ghp_[REDACTED]`) | Anthropic and OpenAI `sk-…`, AWS `AKIA…`/`ASIA…`, GitHub `ghp_…`/`github_pat_…`, GitLab `glpat-…`, Slack `xox…-`, Stripe `sk_live_…`, Google `AIza…`, npm, Hugging Face, Beacon keys and tokens (`bcn_api_…`, `bcn_device_…`, `bcn_enfdev_…`, `bcn_mcp_…`, `bcn_mcprt_…`, and the `beacon login` token `bcn_cli_…` with its `bcn_code_…`, `bcn_client_…` and `bcn_exchange_…` values), and JWTs |
+| An AWS secret key beside its key id | the 40-character secret that follows an `AKIA…` or `ASIA…` key id within a few spaces, commas, colons, pipes or quotes, as in a credentials CSV (`AKIA…,wJalr…`) or a table |
 
-Redaction is pattern-based. A credential with no label and no recognizable shape, such as a bare random password, is not detected, so treat retained content as sensitive. Metadata-only forwarding is the control for keeping content off Beacon Cloud entirely.
+Redaction is pattern-based. A credential with no label and no recognizable shape, such as a bare random password, is not detected, so treat retained content as sensitive. Metadata-only forwarding is the control for keeping content off Beacon Cloud entirely, and [`beacon share`](/cli/share#metadata-only-endpoints) follows it: a Metadata-only endpoint shares no content either.
 
 ## Prompt event example
 
