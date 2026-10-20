@@ -16,7 +16,8 @@ const withSettingsLock = serial();
  * (an endpoint off loopback, say) falls back to its default.
  */
 export function resolveSettings(stored: unknown): Settings {
-  const s = (stored ?? {}) as Partial<Settings>;
+  const s = (stored != null && typeof stored === 'object' && !Array.isArray(stored)
+    ? stored : {}) as Partial<Settings>;
   const out: Settings = { ...DEFAULT_SETTINGS, sites: { ...DEFAULT_SETTINGS.sites } };
   for (const key of ['enabled', 'retention', 'endpoint'] as const) {
     if (!(key in s)) continue;
