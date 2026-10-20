@@ -84,6 +84,7 @@ Read https://beacon.sh/start.md then set me up on Beacon
 <summary><strong>macOS</strong></summary>
 
 ```bash
+brew update
 brew trust asymptote-labs/tap
 brew tap asymptote-labs/tap
 brew install beacon

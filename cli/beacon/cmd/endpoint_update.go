@@ -164,7 +164,7 @@ func maybeReturnAfterUpdateReport(res selfupdate.CheckResult) error {
 		switch res.Install.Kind {
 		case selfupdate.InstallHomebrew:
 			fmt.Println("Installed via Homebrew. Update with:")
-			fmt.Println("  brew upgrade beacon")
+			fmt.Println("  brew update && brew upgrade beacon")
 			return nil
 		case selfupdate.InstallOther:
 			fmt.Printf("Endpoint package checks apply only to the system package install.\n")
@@ -182,7 +182,7 @@ func maybeReturnAfterUpdateReport(res selfupdate.CheckResult) error {
 		switch res.Install.Kind {
 		case selfupdate.InstallHomebrew:
 			fmt.Println("Installed via Homebrew. Update with:")
-			fmt.Println("  brew upgrade beacon")
+			fmt.Println("  brew update && brew upgrade beacon")
 			return fmt.Errorf("manual apply is not supported for Homebrew installs")
 		case selfupdate.InstallOther:
 			return fmt.Errorf("manual apply is supported only for the system package install (detected: %s)", res.Install.Kind)
