@@ -21,6 +21,9 @@ func TestMain(m *testing.M) {
 	}
 	_ = os.Setenv(endpointconfig.HistoryStoreEnv, filepath.Join(dir, "absent", "history.db"))
 	_ = os.Setenv(endpointBackfillEnv, "0")
+	// A wizard install under test that reaches the end of a Beacon Cloud connect must not open
+	// the developer's browser; tests that check the opening stub this themselves.
+	onboardingOpenDashboard = func(string) error { return nil }
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)

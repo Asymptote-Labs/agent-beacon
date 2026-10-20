@@ -54,6 +54,9 @@ type ConnectOptions struct {
 	// nothing recorded before the connection point.
 	Backfill *ConnectBackfill
 	Out      io.Writer
+	// Quiet leaves the progress lines (which Vector was found, that the account authorized the
+	// device) out of Out and keeps the warnings, for a caller that closes on a summary of its own.
+	Quiet bool
 	// Now is injectable for tests.
 	Now func() time.Time
 }
@@ -101,6 +104,10 @@ func Connect(ctx context.Context, opts ConnectOptions) (_ *ConnectResult, err er
 	if out == nil {
 		out = io.Discard
 	}
+	progress := out
+	if opts.Quiet {
+		progress = io.Discard
+	}
 	now := opts.Now
 	if now == nil {
 		now = time.Now
@@ -141,7 +148,7 @@ func Connect(ctx context.Context, opts ConnectOptions) (_ *ConnectResult, err er
 	if err != nil {
 		return nil, err
 	}
-	fmt.Fprintf(out, "Using Vector %s at %s\n", vector.Version, vector.Path)
+	fmt.Fprintf(progress, "Using Vector %s at %s\n", vector.Version, vector.Path)
 
 	previous, err := LoadEnrollment(opts.UserMode)
 	if err != nil && !errors.Is(err, ErrNotEnrolled) {
@@ -230,9 +237,9 @@ func Connect(ctx context.Context, opts ConnectOptions) (_ *ConnectResult, err er
 		return nil, fmt.Errorf("could not record that connect is in progress: %w", err)
 	}
 	if opts.AccountEnroll != nil {
-		fmt.Fprintf(out, "Account authorized device enrollment for %s (device %s, key %s)\n", displayOrg(result), result.DeviceID, result.KeyPrefix)
+		fmt.Fprintf(progress, "Account authorized device enrollment for %s (device %s, key %s)\n", displayOrg(result), result.DeviceID, result.KeyPrefix)
 	} else {
-		fmt.Fprintf(out, "Approved for %s (device %s, key %s)\n", displayOrg(result), result.DeviceID, result.KeyPrefix)
+		fmt.Fprintf(progress, "Approved for %s (device %s, key %s)\n", displayOrg(result), result.DeviceID, result.KeyPrefix)
 	}
 
 	// Secrets first, then the config that references them, then the unit that runs it.

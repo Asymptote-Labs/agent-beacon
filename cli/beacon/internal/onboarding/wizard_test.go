@@ -448,6 +448,38 @@ func TestSignInWaitShowsAnUnwrappedURLAndAClock(t *testing.T) {
 	}
 }
 
+// The browser that opens is the default one, which is not always the one signed in to
+// beacon.sh. Once a browser has been opened, the wait says where the URL belongs; when none
+// was, there is no other browser to warn about.
+func TestSignInWaitSaysWhichBrowserTheURLBelongsIn(t *testing.T) {
+	url := "https://beacon.sh/cli/auth?port=54123&state=abc"
+	for _, tc := range []struct {
+		name   string
+		prompt SignInPrompt
+		want   bool
+	}{
+		{"browser opened", SignInPrompt{URL: url, WillOpen: true}, true},
+		{"browser failed", SignInPrompt{URL: url, WillOpen: true, BrowserErr: errors.New("no xdg-open")}, false},
+		{"no browser", SignInPrompt{URL: url}, false},
+	} {
+		model := signInWizard(t, neverReturns)
+		model.screen = signInScreen
+		model, _ = advanceWizard(t, model, "enter")
+		next, _ := model.Update(signInPromptMsg{attempt: 1, prompt: tc.prompt})
+		model = next.(wizardModel)
+		model.stopSignIn()
+
+		flat := strings.Join(strings.Fields(model.View()), " ")
+		got := strings.Contains(flat, "Open it in the browser where you are signed in to beacon.sh. If a different browser opened, copy the URL there.")
+		if got != tc.want {
+			t.Fatalf("%s: hint shown = %t, want %t:\n%s", tc.name, got, tc.want, model.View())
+		}
+		if !strings.Contains(model.View(), url) {
+			t.Fatalf("%s: the URL must stay on one unbroken line:\n%s", tc.name, model.View())
+		}
+	}
+}
+
 // Abandoning the browser must not end the install. It used to: the wait was
 // uncancellable, so ctrl+c during it killed the whole command.
 func TestEscDuringSignInGoesBackWithoutEndingTheInstall(t *testing.T) {

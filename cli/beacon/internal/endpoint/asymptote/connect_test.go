@@ -253,6 +253,40 @@ func TestConnectUsesAccountEnrollmentWithoutOpeningBrowser(t *testing.T) {
 	}
 }
 
+// The onboarding wizard closes on a summary of its own, so it asks Connect for its warnings only.
+func TestConnectQuietLeavesOutTheProgressLines(t *testing.T) {
+	for _, quiet := range []bool{false, true} {
+		testenv.SetHome(t, t.TempDir())
+		isolateVectorDiscovery(t)
+		accountServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"device_id":       "dev-account",
+				"device_key":      "bcn_device_abcdefgh_" + strings.Repeat("k", 43),
+				"key_prefix":      "bcn_device_abcdefgh",
+				"ingest_url":      "https://ingest.example.test",
+				"organization_id": "org-1",
+				"scopes":          []string{"ingest:write"},
+			})
+		}))
+		fd := newFakeDashboard(t)
+		opts := connectOptions(t, fd, &fakeForwarder{supported: true}, fakeVector(t, "0.56.0", 0))
+		opts.AccountEnroll = &AccountEnrollOptions{BaseURL: accountServer.URL, AccessToken: "bcn_cli_account_token", HTTPClient: accountServer.Client()}
+		var out strings.Builder
+		opts.Out = &out
+		opts.Quiet = quiet
+		_, err := Connect(context.Background(), opts)
+		accountServer.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range []string{"Using Vector 0.56.0", "Account authorized device enrollment"} {
+			if strings.Contains(out.String(), line) == quiet {
+				t.Fatalf("quiet=%t: output %q, line %q", quiet, out.String(), line)
+			}
+		}
+	}
+}
+
 func TestConnectStopsBeforeTheBrowserWhenVectorIsMissingOrOld(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
