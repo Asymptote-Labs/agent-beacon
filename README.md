@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="images/beacon-wordmark-dark-mode.svg">
-    <source media="(prefers-color-scheme: light)" srcset="images/beacon-wordmark-light-mode.svg">
-    <img src="images/beacon-wordmark-light-mode.svg" alt="Beacon" width="420">
+    <source media="(prefers-color-scheme: dark)" srcset="images/beacon-lockup-dark-mode.svg">
+    <source media="(prefers-color-scheme: light)" srcset="images/beacon-lockup-light-mode.svg">
+    <img src="images/beacon-lockup-light-mode.svg" alt="Beacon" width="480">
   </picture>
 </p>
 
