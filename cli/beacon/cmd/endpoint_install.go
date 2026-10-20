@@ -297,9 +297,9 @@ func showDashboard(cmd *cobra.Command, summary *cloudSummary) {
 	}
 	line := "Dashboard: " + url
 	if summary.uploading > 0 {
-		line += " (your recent sessions appear within a few minutes)"
+		line += " (your recent sessions appear within a minute)"
 	} else {
-		line += " (sessions appear within a minute of agent activity)"
+		line += " (sessions appear within about 15 seconds of agent activity)"
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), line)
 	if endpointOpts.noBrowser || os.Getenv("SSH_CONNECTION") != "" || os.Getenv("SSH_TTY") != "" {

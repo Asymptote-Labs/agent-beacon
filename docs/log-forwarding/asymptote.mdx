@@ -45,7 +45,7 @@ The ingest service checks three things on every request: the key is known and no
 
 - `POST <ingest url>/v1/ingest/runtime` and `POST <ingest url>/v1/ingest/inventory` with `Authorization: Bearer <device key>`, `Content-Type: application/x-ndjson`, and `Content-Encoding: gzip`. HTTPS only; the CLI and pack refuse other schemes.
 - Each line must be a Beacon endpoint event: `vendor=beacon`, `product=endpoint-agent`, `schema_version`, a parseable `timestamp`, and `event.kind` and `event.action`. Malformed lines are counted and reported; a batch fails only if every line is bad.
-- Limits per request: 8 MiB compressed, 10,000 lines, 1 MiB per line. The pack batches at 5 MB or 5,000 events or 60 seconds, whichever comes first.
+- Limits per request: 8 MiB compressed, 10,000 lines, 1 MiB per line. The pack batches at 5 MB or 5,000 events or 10 seconds, whichever comes first, and sends runtime batches at most once a second, the rate the ingest service allows each device.
 - Responses: `200` with accepted and rejected counts and the object written; `401` for an unknown, revoked, or expired key, or an approver who left the organization; `403` when the organization is not enabled; `413` when a limit is exceeded; `429` and `5xx` are retried by Vector with backoff. Other `4xx` responses are dropped, which is the intended behavior for a revoked key.
 - `GET /v1/ingest/health` (or `HEAD`) with the bearer key returns `200` or `401` and is the credential check the forwarder's startup healthcheck and the smoke-test script use.
 
@@ -67,7 +67,7 @@ The pack includes `README.md`, `vector.toml`, `asymptote-ingest-smoke-test.sh`, 
 
 1. Run `sh ./beacon-asymptote-pack/asymptote-ingest-smoke-test.sh` with `BEACON_ASYMPTOTE_INGEST_URL` and `BEACON_ASYMPTOTE_SECRETS_FILE` set. It checks the key (`200` valid, `401` revoked) and posts the log tail once.
 2. With Vector running, write a validation event: `beacon endpoint asymptote validate`.
-3. Within a minute or two, search the dashboard telemetry page for `Beacon endpoint Beacon validation event`.
+3. Within about 15 seconds, search the dashboard telemetry page for `Beacon endpoint Beacon validation event`.
 
 ## Revocation
 

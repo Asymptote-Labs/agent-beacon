@@ -135,7 +135,7 @@ func TestConnectUsesSignedInAccountAndSelectedPrivacy(t *testing.T) {
 		"Next: run any supported agent",
 		// The recorded service URL is the marketing root; the app is at /dashboard.
 		"sessions appear at https://beacon.sh/dashboard",
-		"within a minute",
+		"within about 15 seconds",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("connect should close on next steps, missing %q:\n%s", want, text)
@@ -144,7 +144,7 @@ func TestConnectUsesSignedInAccountAndSelectedPrivacy(t *testing.T) {
 	if strings.Contains(text, "/dashboard/endpoints") || strings.Contains(text, "Revoke this device") {
 		t.Fatalf("the closing lines should be next steps, not device administration:\n%s", text)
 	}
-	if last := strings.TrimSpace(text); !strings.HasSuffix(last, "within a minute of the activity.") {
+	if last := strings.TrimSpace(text); !strings.HasSuffix(last, "within about 15 seconds of the activity.") {
 		t.Fatalf("the dashboard should be the last thing said:\n%s", text)
 	}
 }

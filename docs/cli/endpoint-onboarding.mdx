@@ -170,7 +170,7 @@ files it wrote:
 Beacon is installed and connected to Beacon Cloud as you@example.com (device dev_7f3a, Standard privacy).
 Session backfill: 8 events from the last 30 days (Claude Code 6, Codex 2).
   Claude Code: stopped at the backfill size limit; `beacon endpoint claude sync` reads the rest.
-Dashboard: https://beacon.sh/dashboard (your recent sessions appear within a few minutes)
+Dashboard: https://beacon.sh/dashboard (your recent sessions appear within a minute)
 Beacon Cloud MCP added to Claude Code, Cursor, VS Code; sign in to beacon-managed once in each app (Claude Code: /mcp in a new session).
 ```
 
@@ -179,8 +179,8 @@ In order, the lines give:
 1. The account, device and privacy mode this machine forwards with.
 2. What the [session backfill](/cli/endpoint-install#session-backfill) read, with the
    sync command for any runtime that had more history than the backfill takes.
-3. The hosted dashboard. Sessions from the backfill take a few minutes to appear there;
-   new sessions appear within a minute of agent activity.
+3. The hosted dashboard. Sessions from the backfill appear there within a minute;
+   new sessions appear within about 15 seconds of agent activity.
 4. Where Beacon Cloud MCP was added and what is left to do in each app. A harness that
    takes it only by hand is named on a line of its own, and
    `beacon mcp connect --dry-run` prints its steps. If you turned Beacon Cloud MCP off,
