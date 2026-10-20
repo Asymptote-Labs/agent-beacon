@@ -46,6 +46,10 @@ function capBytes(text: string, max = MAX_FIELD_BYTES): [string, boolean] {
     if (encoder.encode(text.slice(0, mid)).length <= max) lo = mid;
     else hi = mid - 1;
   }
+  // UTF-16 indices may land between the two halves of an astral character.
+  if (lo > 0 && lo < text.length &&
+      text.charCodeAt(lo - 1) >= 0xd800 && text.charCodeAt(lo - 1) <= 0xdbff &&
+      text.charCodeAt(lo) >= 0xdc00 && text.charCodeAt(lo) <= 0xdfff) lo--;
   return [text.slice(0, lo), true];
 }
 
