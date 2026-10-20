@@ -64,6 +64,11 @@ type Record struct {
 	TimeMS int64
 	Data   map[string]interface{}
 	Raw    json.RawMessage
+	// SurfaceReplace reports a message event that replaces earlier surface nodes rather than
+	// appending one (`surfaceOp: {op: "replace", ...}`). Compaction writes these: a pruned tool
+	// result is the same call's result again, and a checkpoint stands in for earlier history, so
+	// neither is new activity.
+	SurfaceReplace bool
 }
 
 type SessionRef struct {
@@ -115,6 +120,7 @@ type envelope struct {
 	Time      interface{}     `json:"time"`
 	CreatedAt interface{}     `json:"createdAt"`
 	Data      json.RawMessage `json:"data"`
+	SurfaceOp json.RawMessage `json:"surfaceOp"`
 }
 
 func decodeRecord(line []byte, lineNo int) (*Record, error) {
@@ -130,6 +136,13 @@ func decodeRecord(line []byte, lineNo int) (*Record, error) {
 		if err := json.Unmarshal(env.Data, &data); err != nil {
 			return nil, fmt.Errorf("decode dsh record data: %w", err)
 		}
+	} else if env.Type == "session" {
+		// The session header is not an event: DSH writes its fields (id, cwd, parentSession,
+		// origin, delegationDepth, ...) at the top level of the line rather than under `data`.
+		if err := json.Unmarshal(line, &data); err != nil {
+			return nil, fmt.Errorf("decode dsh session header: %w", err)
+		}
+		delete(data, "type")
 	}
 	return &Record{
 		Line:   lineNo,
@@ -137,7 +150,14 @@ func decodeRecord(line []byte, lineNo int) (*Record, error) {
 		TimeMS: firstTimeMS(env.Time, env.CreatedAt),
 		Data:   data,
 		Raw:    append(json.RawMessage(nil), line...),
+		// Only the string "append" (or no surfaceOp at all, as on log-only events and older
+		// formats) adds a node; the object form replaces existing ones.
+		SurfaceReplace: surfaceReplaces(env.SurfaceOp),
 	}, nil
+}
+
+func surfaceReplaces(op json.RawMessage) bool {
+	return strings.HasPrefix(strings.TrimSpace(string(op)), "{")
 }
 
 func firstTimeMS(values ...interface{}) int64 {
