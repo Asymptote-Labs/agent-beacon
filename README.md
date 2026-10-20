@@ -53,6 +53,12 @@ Beacon is an open-source memory layer for AI coding agents that learns from your
 
 ---
 
+## 🎬 Demo
+
+https://github.com/user-attachments/assets/38995612-84e9-4989-a905-0099f77955f0
+
+---
+
 ## 🚀 Quick Start
 
 Beacon is open source and local-first. Interactive endpoint setup signs in through
