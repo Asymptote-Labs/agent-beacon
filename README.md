@@ -1,9 +1,6 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="images/beacon-lockup-dark-mode.svg">
-    <source media="(prefers-color-scheme: light)" srcset="images/beacon-lockup-light-mode.svg">
-    <img src="images/beacon-lockup-light-mode.svg" alt="Beacon" width="480">
-  </picture>
+  <img src="images/beacon-lockup-light-mode.svg#gh-light-mode-only" alt="Beacon" width="480">
+  <img src="images/beacon-lockup-dark-mode.svg#gh-dark-mode-only" alt="Beacon" width="480">
 </p>
 
 <h1 align="center">Self‑improving memory for coding agents</h1>
