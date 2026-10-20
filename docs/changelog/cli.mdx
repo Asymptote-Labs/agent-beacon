@@ -17,6 +17,8 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ## October 2026
 
+- **Status and doctor recognize the hooks install writes** · Since v1.2.0, install writes hook commands with `--log` and `--config` flags in place of the `BEACON_ENDPOINT_MODE=1` prefix, but `beacon endpoint status`, `beacon endpoint doctor` and discovery still looked for the prefix. Every fresh install therefore reported Cursor, Antigravity CLI, Devin CLI, Devin Desktop and Hermes Agent as "hooks exist but endpoint hooks were not found", with telemetry disabled, though the hooks were correct and running, and inventory marked their hooks files as not Beacon-managed. They now use the same check install, repair and uninstall use, which accepts both spellings.
+
 ### v1.3.44 · October 19, 2026
 
 - **Setup ends at the dashboard** · Confirming Beacon Cloud in the `beacon endpoint install` wizard used to end on some forty lines of file paths, connect details, an MCP table and per-runtime steps, and nothing pointed to the hosted dashboard. It now ends on four lines: the account, device and privacy mode; the session backfill; the dashboard URL; and where Beacon Cloud MCP was added. Beacon then opens the dashboard in your browser, except with `--no-browser`, over SSH, or on Linux without a display. The sign-in wait screen now also asks you to open the URL in the browser where you are signed in to beacon.sh, and cancelling the wizard says that nothing was installed and how to start again. `beacon endpoint connect` and `beacon mcp connect` print the same output as before. See [Onboarding](/cli/endpoint-onboarding#when-setup-finishes).

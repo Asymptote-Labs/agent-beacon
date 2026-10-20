@@ -1039,6 +1039,10 @@ func beaconManaged(item candidate, data []byte) bool {
 		if strings.Contains(text, "BEACON_ENDPOINT_MODE=1") {
 			return true
 		}
+		// Hooks written since the settings moved to --log/--config flags carry no prefix.
+		if managed, _ := hooks.ConfigHasEndpointHook(data, ""); managed {
+			return true
+		}
 	case "opencode":
 		return strings.Contains(text, "beacon-managed-opencode-plugin:v1")
 	case "cline":

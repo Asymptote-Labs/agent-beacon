@@ -287,7 +287,7 @@ func DiscoverCursor() Harness {
 	}
 	if fileExists(h.ConfigPath) {
 		data, _ := os.ReadFile(h.ConfigPath)
-		if strings.Contains(string(data), "BEACON_ENDPOINT_MODE=1") {
+		if configured, _ := hooks.ConfigHasEndpointHook(data, "cursor"); configured {
 			h.TelemetryStatus = TelemetryEnabled
 			h.Message = "Cursor endpoint hooks are configured"
 		} else {
@@ -650,22 +650,20 @@ func hasBeaconDevinHooks(data []byte, platforms ...string) (bool, error) {
 	if raw, ok := root["hooks"]; ok {
 		rawHooks = raw
 	}
-	var hooks map[string][]struct {
+	var events map[string][]struct {
 		Hooks []struct {
 			Command string `json:"command"`
 		} `json:"hooks"`
 	}
-	if err := json.Unmarshal(rawHooks, &hooks); err != nil {
+	if err := json.Unmarshal(rawHooks, &events); err != nil {
 		return false, nil
 	}
-	for _, groups := range hooks {
+	for _, groups := range events {
 		for _, group := range groups {
 			for _, hook := range group.Hooks {
-				if strings.Contains(hook.Command, "BEACON_ENDPOINT_MODE=1") {
-					for _, platform := range platforms {
-						if commandHasPlatform(hook.Command, platform) {
-							return true, nil
-						}
+				for _, platform := range platforms {
+					if hooks.IsEndpointHookCommand(hook.Command, platform) {
+						return true, nil
 					}
 				}
 			}
@@ -696,9 +694,9 @@ func hasBeaconWindsurfHooks(data []byte, platform string) (bool, error) {
 	if err := json.Unmarshal(data, &root); err != nil {
 		return false, err
 	}
-	for _, hooks := range root.Hooks {
-		for _, hook := range hooks {
-			if strings.Contains(hook.Command, "BEACON_ENDPOINT_MODE=1") && commandHasPlatform(hook.Command, platform) {
+	for _, refs := range root.Hooks {
+		for _, hook := range refs {
+			if hooks.IsEndpointHookCommand(hook.Command, platform) {
 				return true, nil
 			}
 		}
@@ -735,25 +733,12 @@ func hasBeaconHermesHooks(data []byte) (bool, error) {
 	}
 	for _, refs := range root.Hooks {
 		for _, ref := range refs {
-			if strings.Contains(ref.Command, "BEACON_ENDPOINT_MODE=1") && commandHasPlatform(ref.Command, "hermes") {
+			if hooks.IsEndpointHookCommand(ref.Command, "hermes") {
 				return true, nil
 			}
 		}
 	}
 	return false, nil
-}
-
-func commandHasPlatform(command, platform string) bool {
-	fields := strings.Fields(command)
-	for i, field := range fields {
-		if field == "--platform" && i+1 < len(fields) {
-			return strings.Trim(fields[i+1], `"'`) == platform
-		}
-		if strings.HasPrefix(field, "--platform=") {
-			return strings.Trim(strings.TrimPrefix(field, "--platform="), `"'`) == platform
-		}
-	}
-	return false
 }
 
 func antigravityStatus(path string) (TelemetryStatus, string) {
@@ -776,12 +761,7 @@ func hasBeaconAntigravityHooks(data []byte) (bool, error) {
 	if err := json.Unmarshal(data, &blocks); err != nil {
 		return false, err
 	}
-	for _, raw := range blocks {
-		if strings.Contains(string(raw), "BEACON_ENDPOINT_MODE=1") && strings.Contains(string(raw), "--platform antigravity") {
-			return true, nil
-		}
-	}
-	return false, nil
+	return hooks.ConfigHasEndpointHook(data, "antigravity")
 }
 
 func shellExportValue(text, key string) string {
