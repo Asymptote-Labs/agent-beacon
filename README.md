@@ -74,6 +74,12 @@ installation paths remain noninteractive and account-free.
 
 ### 1. Install Beacon
 
+**Copy & paste setup prompt into your coding agent**
+
+```text
+Read https://beacon.sh/start.md then set me up on Beacon
+```
+
 <details open>
 <summary><strong>macOS</strong></summary>
 
