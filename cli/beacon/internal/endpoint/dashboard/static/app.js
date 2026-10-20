@@ -1920,9 +1920,16 @@ function bindSessionOverviewActions(sessionID) {
 }
 
 function sessionActivityBuckets(records, bucketCount) {
-  const timestamps = records.map((record) => new Date(record.event?.timestamp || 0).getTime()).filter(Number.isFinite);
-  const start = Math.min(...timestamps);
-  const end = Math.max(...timestamps);
+  // Session detail contains every event, including hidden internal telemetry.
+  // Do not pass an unbounded session as arguments to Math.min/Math.max.
+  let start = Infinity;
+  let end = -Infinity;
+  for (const record of records) {
+    const timestamp = new Date(record.event?.timestamp || 0).getTime();
+    if (!Number.isFinite(timestamp)) continue;
+    start = Math.min(start, timestamp);
+    end = Math.max(end, timestamp);
+  }
   const span = Math.max(1, end - start);
   const buckets = Array.from({ length: bucketCount }, () => ({
     total: 0,
