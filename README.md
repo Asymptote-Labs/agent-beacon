@@ -1,6 +1,12 @@
 <p align="center">
-  <img src="images/beacon-hero.png" alt="Beacon" width="860">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="images/beacon-lockup-dark-mode.svg">
+    <source media="(prefers-color-scheme: light)" srcset="images/beacon-lockup-light-mode.svg">
+    <img src="images/beacon-lockup-light-mode.svg" alt="Beacon" width="480">
+  </picture>
 </p>
+
+<h1 align="center">Self‑improving memory for coding agents</h1>
 
 <p align="center">
   <a href="https://github.com/asymptote-labs/agent-beacon/releases"><img src="https://img.shields.io/github/v/release/asymptote-labs/agent-beacon" alt="GitHub release"></a>
