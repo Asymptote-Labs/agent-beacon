@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/managedprivacy"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/shareauto"
 )
 
@@ -217,5 +219,68 @@ func TestShareAutoRepositoryOptOutOverridesAProjectEnable(t *testing.T) {
 	stdout, _, err := runShareAuto(t, "status", "--project", project)
 	if err != nil || !strings.Contains(stdout, ": off") || !strings.Contains(stdout, "disabled by the repository file") || !strings.Contains(stdout, "overrides your setting") {
 		t.Fatalf("status = %q (%v)", stdout, err)
+	}
+}
+
+// A system-mode connection keeps its enrollment in a directory only root can read. A share run as
+// the signed-in user must still find a Metadata-only connection there, and must count one it
+// cannot read at all as Metadata-only, or it would upload content forwarding withholds.
+func TestUnreadableCloudConnectionFailsClosed(t *testing.T) {
+	testenv.RequirePOSIXFileModes(t)
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a 0700 directory, so there is no permission error to test")
+	}
+	base := t.TempDir()
+	stateDir := filepath.Join(base, "asymptote")
+	if err := os.Mkdir(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	enrollmentPath := filepath.Join(stateDir, "enrollment.json")
+	if err := os.WriteFile(enrollmentPath, []byte(`{"privacy_mode":"standard"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(stateDir, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(stateDir, 0o700) })
+
+	tests := []struct {
+		name          string
+		config        string
+		wantConnected bool
+		wantMode      string
+	}{
+		{"metadata-only in the config", `{"managed_ingest":{"enabled":true,"privacy_mode":"metadata_only"}}`, true, managedprivacy.MetadataOnly},
+		{"standard in the config", `{"managed_ingest":{"enabled":true,"privacy_mode":"standard"}}`, true, managedprivacy.Standard},
+		{"connect from before privacy modes", `{"managed_ingest":{"enabled":true}}`, true, managedprivacy.Standard},
+		{"unknown mode", `{"managed_ingest":{"enabled":true,"privacy_mode":"redacted"}}`, true, managedprivacy.MetadataOnly},
+		{"not connected", `{"user_mode":false}`, false, ""},
+		{"config not valid JSON", `{`, true, managedprivacy.MetadataOnly},
+		{"no config", "", true, managedprivacy.MetadataOnly},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "config.json")
+			if tc.config != "" {
+				if err := os.WriteFile(configPath, []byte(tc.config), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			connected, mode := unreadableCloudConnection(enrollmentPath, configPath)
+			if connected != tc.wantConnected || mode != tc.wantMode {
+				t.Fatalf("unreadableCloudConnection = (%v, %q), want (%v, %q)", connected, mode, tc.wantConnected, tc.wantMode)
+			}
+		})
+	}
+
+	// An enrollment the user can see past is decided by asymptote.Connected, not here, and no
+	// system enrollment at all is no connection.
+	if err := os.Chmod(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{enrollmentPath, filepath.Join(base, "missing", "enrollment.json")} {
+		if connected, mode := unreadableCloudConnection(path, filepath.Join(base, "config.json")); connected || mode != "" {
+			t.Fatalf("unreadableCloudConnection(%s) = (%v, %q), want no connection", path, connected, mode)
+		}
 	}
 }
