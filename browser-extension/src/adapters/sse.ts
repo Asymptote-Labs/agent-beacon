@@ -1,6 +1,6 @@
 // Minimal, robust SSE frame parser. Handles chunks that split mid-line or
 // mid-event (the common source of streaming bugs), multi-line `data:` fields,
-// and CRLF. Site adapters feed raw chunks in; they get whole events out.
+// and all SSE line endings. Site adapters feed raw chunks in; they get whole events out.
 
 export interface SSEEvent {
   event: string; // the `event:` field, or 'message' if absent
@@ -9,14 +9,18 @@ export interface SSEEvent {
 
 export class SSEParser {
   private buffer = '';
+  private skipLeadingLF = false;
 
   /** Push a raw chunk; returns any complete events it produced. */
   push(chunk: string): SSEEvent[] {
-    this.buffer += chunk;
+    if (chunk === '') return [];
+    // A CR is a line ending itself. If its optional LF arrives in the next
+    // chunk, consume that LF rather than inventing a second (blank) line.
+    if (this.skipLeadingLF && chunk.startsWith('\n')) chunk = chunk.slice(1);
+    this.skipLeadingLF = chunk.endsWith('\r');
+    this.buffer += chunk.replace(/\r\n?/g, '\n');
     const out: SSEEvent[] = [];
-    // Events are separated by a blank line. Normalize CRLF first.
-    const normalized = this.buffer.replace(/\r\n/g, '\n');
-    const frames = normalized.split('\n\n');
+    const frames = this.buffer.split('\n\n');
     // The last element may be a partial frame — keep it buffered.
     this.buffer = frames.pop() ?? '';
     for (const frame of frames) {
