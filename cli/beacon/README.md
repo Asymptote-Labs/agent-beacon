@@ -677,18 +677,11 @@ harness composes itself from a plugin tree, and `@deepseek-ai/dsh-hooks-claude-c
 -- the Claude Code hook bridge DeepSeek publishes for every dsh release -- is not
 in the default tree. So Beacon writes `$DSH_HOME/beacon-endpoint-hooks.json`, a
 hooks file it owns outright, and adds one row to `$DSH_HOME/cordis.patch.yml`
-mounting the bridge at it. `$DSH_HOME` defaults to `~/.dsh`.
-
-The bridge does not ship with the CLI (it is a development dependency only), so
-it must be installed into each profile with its protocol peer at exactly the dsh
-version: `dsh plugin --profile <name> add @deepseek-ai/dsh-hooks-claude-code@<v>
-@deepseek-ai/dsh-hook-protocol@<v>`. A mount dsh cannot load is skipped at boot
-with a warning, so install checks first and refuses (skips with a warning under
-`--all` and `endpoint install`) when no profile, the installation, or an existing
-by-path mount at Beacon's hooks file loads a matching bridge. Beacon never
-installs the packages itself. A by-path mount (a Nix store path, say) counts as
-installed and gets no second row. `hooks status` reports `active` and the bridge
-detail, and doctor reports `dsh_hook_bridge`. The home-level patch
+mounting the bridge at it. `$DSH_HOME` defaults to `~/.dsh`. The bridge does not
+ship with the CLI, so it must be installed into each profile at exactly the dsh
+version (`dsh plugin --profile <name> add @deepseek-ai/dsh-hooks-claude-code@<v>
+@deepseek-ai/dsh-hook-protocol@<v>`), and install refuses when nothing can load
+it. The home-level patch
 layer applies over every profile, so one install covers the CLI, Web, ACP and SDK
 surfaces; there is no project scope, because the bridge's `configPath` is
 process-level and a repository has nowhere to mount from, so `--level project` is
