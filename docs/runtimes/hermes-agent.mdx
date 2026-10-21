@@ -76,9 +76,15 @@ The scheduled inventory job runs without your shell's environment, so a per-user
 
 `beacon endpoint hermes sync` reads committed rows from Hermes Agent's state database after Hermes has written them. Session status, sync, and handoff use the `state.db` in the [Hermes home directory](#hermes-home-and-profiles), following `HERMES_HOME` and a sticky profile. Pass `--db <path>` to status/sync or `--store-dir hermes=<path>` to handoff to select a database explicitly.
 
-The cursor is stored in Beacon endpoint state and advances by session message id. Use `--print` to preview mapped events without writing the runtime log or advancing the cursor.
+The cursor is stored in Beacon endpoint state and advances by session message id. Each database has its own default cursor, selected by its canonical absolute path, so switching profiles does not apply one profile's progress to another. Selecting the same database through `HERMES_HOME`, an active profile, a symlink, or `--db` selects the same cursor. Poll events identify the source database in `harness.config_path`; their existing session and event IDs stay unchanged. Copied histories can therefore still share runtime IDs downstream even though their source paths and collection progress are distinct.
 
-For scheduled collection, run `beacon endpoint hermes sync --watch`, or run one-shot `sync` from your scheduler. Live hooks remain the real-time path.
+The native, unsuffixed default database (`~/.hermes/state.db`, or `%LOCALAPPDATA%/hermes/state.db` on Windows) keeps its existing cursor: `~/.beacon/endpoint/state/hermes.json` in user mode, or `hermes-state.json` beside the system runtime log in system mode. Every other database, including a custom root or `HERMES_DATA_DIR_SUFFIX`, uses a filename with a hash of the canonical database path in the same state directory. `status`, `sync`, and install-time backfill use the same selection. An explicit `--state <path>` is used exactly as supplied; choosing to reuse that file across databases also shares their progress.
+
+On upgrade, profiles and custom databases start with fresh cursors and may collect retained history once more. Install-time backfill keeps its existing budgets. Beacon does not import, delete, or rewrite their old shared cursor. That legacy file records no source identity, so previously mixed profile progress cannot be attributed or repaired automatically; preserving it for the native default is a compatibility convention. Rolling back preserves that file, but an older binary uses the shared legacy checkpoint again and may replay or skip profile history. The new source-specific cursors do not make that older behavior safe.
+
+Use `--print` to preview mapped events without writing the runtime log or advancing the cursor.
+
+For scheduled collection, run `beacon endpoint hermes sync --watch`, or run one-shot `sync` from your scheduler. A watch keeps the database path and cursor selected when it starts; restart it after switching profiles or retargeting a store symlink. Each new one-shot sync resolves the current profile. Live hooks remain the real-time path.
 
 ## Deployment notes
 

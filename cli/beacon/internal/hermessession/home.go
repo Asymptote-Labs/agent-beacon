@@ -105,7 +105,11 @@ func resolveHome(home string) (base, dir string, err error) {
 
 // nativeRoot is Hermes's platform default home, or empty when there is no home to put it in.
 func nativeRoot(home string) string {
-	name := "hermes" + os.Getenv("HERMES_DATA_DIR_SUFFIX")
+	return nativeRootWithSuffix(home, os.Getenv("HERMES_DATA_DIR_SUFFIX"))
+}
+
+func nativeRootWithSuffix(home, suffix string) string {
+	name := "hermes" + suffix
 	if runtime.GOOS == "windows" {
 		if base := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); base != "" {
 			return filepath.Join(base, name)

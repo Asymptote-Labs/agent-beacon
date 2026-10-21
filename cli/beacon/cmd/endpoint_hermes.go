@@ -59,7 +59,7 @@ func init() {
 	for _, c := range []*cobra.Command{endpointHermesSyncCmd, endpointHermesStatusCmd} {
 		f := c.Flags()
 		f.StringVar(&endpointHermesOpts.dbPath, "db", "", "Hermes state database (default $HERMES_HOME/state.db when set, otherwise the native Hermes data root)")
-		f.StringVar(&endpointHermesOpts.statePath, "state", "", "Collector cursor file (default ~/.beacon/endpoint/state/hermes.json)")
+		f.StringVar(&endpointHermesOpts.statePath, "state", "", "Collector cursor file (default store-specific path in Beacon endpoint state)")
 		f.BoolVar(&endpointOpts.jsonOutput, "json", false, "Print the result as JSON")
 		f.BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		f.BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths")
@@ -74,15 +74,23 @@ func init() {
 
 func runEndpointHermesSync(cmd *cobra.Command, args []string) error {
 	userMode := endpointUserMode()
+	dbPath := endpointHermesOpts.dbPath
+	if dbPath == "" {
+		dbPath = hermessession.DefaultDBPath()
+	}
 	opts := hermessession.CollectOptions{
-		DBPath:   endpointHermesOpts.dbPath,
+		DBPath:   dbPath,
 		Print:    endpointHermesOpts.print,
 		Out:      cmd.OutOrStdout(),
 		Write:    !endpointHermesOpts.print,
 		UserMode: userMode,
 	}
 	if !endpointHermesOpts.print {
-		opts.StatePath = resolveHermesStatePath(endpointHermesOpts.statePath, userMode)
+		statePath, err := resolveHermesStatePath(endpointHermesOpts.statePath, dbPath, userMode)
+		if err != nil {
+			return err
+		}
+		opts.StatePath = statePath
 		opts.LogPath = lifecycle.ResolveRuntimeLog(userMode, endpointHermesOpts.logPath).EffectiveLogPath
 	}
 
@@ -152,7 +160,10 @@ func runEndpointHermesStatus(cmd *cobra.Command, args []string) error {
 	if dbPath == "" {
 		dbPath = hermessession.DefaultDBPath()
 	}
-	statePath := resolveHermesStatePath(endpointHermesOpts.statePath, endpointUserMode())
+	statePath, err := resolveHermesStatePath(endpointHermesOpts.statePath, dbPath, endpointUserMode())
+	if err != nil {
+		return err
+	}
 	report := hermesStatusReport{DBPath: dbPath, StatePath: statePath}
 
 	store, err := hermessession.OpenStore(dbPath)
@@ -218,18 +229,16 @@ func runEndpointHermesStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// resolveHermesStatePath keeps the cursor beside the log the sweep writes to. A system-mode sweep
-// collects on behalf of the machine, so its cursor belongs next to the system runtime log rather
-// than in whichever home the operator happened to run from; everything else uses the per-user
-// default in hermessession.DefaultStatePath.
-func resolveHermesStatePath(path string, userMode bool) string {
+// resolveHermesStatePath separates stores and collection modes without moving an explicit cursor.
+// System checkpoints stay beside the system log; user checkpoints stay in the user's Beacon state.
+func resolveHermesStatePath(path, dbPath string, userMode bool) (string, error) {
 	if strings.TrimSpace(path) != "" {
-		return path
+		return path, nil
 	}
 	if !userMode {
 		if dir := filepath.Dir(lifecycle.ResolveRuntimeLog(false, "").EffectiveLogPath); dir != "" && dir != "." {
-			return filepath.Join(dir, "hermes-state.json")
+			return hermessession.StatePathForDB(dbPath, filepath.Join(dir, "hermes-state.json"))
 		}
 	}
-	return hermessession.DefaultStatePath()
+	return hermessession.StatePathForDB(dbPath, hermessession.DefaultStatePath())
 }

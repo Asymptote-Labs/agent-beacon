@@ -254,6 +254,7 @@ func collectSession(store *Store, session Session, state *State, opts CollectOpt
 		return false, nil
 	}
 	for _, item := range mapped {
+		item.Event.Harness.ConfigPath = store.Path()
 		if err := emit(item.Event, opts); err != nil {
 			return true, err
 		}
@@ -334,6 +335,10 @@ type Store struct {
 }
 
 func OpenStore(path string) (*Store, error) {
+	sourcePath, err := canonicalDBPath(path)
+	if err != nil {
+		return nil, err
+	}
 	db, err := openSQLiteReadOnly(path)
 	if err != nil {
 		return nil, err
@@ -342,7 +347,7 @@ func OpenStore(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &Store{path: path, db: db}, nil
+	return &Store{path: sourcePath, db: db}, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
