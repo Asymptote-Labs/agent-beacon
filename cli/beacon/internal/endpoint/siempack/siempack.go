@@ -39,6 +39,20 @@ func RenderLogPath(content, logPath string) string {
 	return strings.ReplaceAll(content, backfillLogPathToken, BackfillLogPath(logPath))
 }
 
+func renderTOMLLogPath(content, logPath string) string {
+	return strings.NewReplacer(
+		logPathToken, tomlStringContent(logPath),
+		inventoryLogPathToken, tomlStringContent(InventoryLogPath(logPath)),
+		backfillLogPathToken, tomlStringContent(BackfillLogPath(logPath)),
+	).Replace(content)
+}
+
+func tomlStringContent(value string) string {
+	// JSON string escapes are also valid in TOML basic strings, but TOML additionally forbids
+	// a literal DEL. Derive sibling paths before encoding so escapes never reach filepath.Dir.
+	return strings.ReplaceAll(JSONEscapeForString(value), "\x7f", `\u007f`)
+}
+
 // BackfillLogPath is BackfillLogName beside logPath.
 func BackfillLogPath(logPath string) string {
 	if logPath == "" {
@@ -68,11 +82,14 @@ func Install(outputDir string, files []File, logPath string) error {
 	for _, file := range files {
 		content := file.Content
 		if file.TemplateLogPath {
-			lp := logPath
-			if file.JSONEscape {
-				lp = JSONEscapeForString(lp)
+			switch {
+			case file.JSONEscape:
+				content = RenderLogPath(content, JSONEscapeForString(logPath))
+			case filepath.Ext(file.Name) == ".toml":
+				content = renderTOMLLogPath(content, logPath)
+			default:
+				content = RenderLogPath(content, logPath)
 			}
-			content = RenderLogPath(content, lp)
 		}
 		if err := os.WriteFile(filepath.Join(outputDir, file.Name), []byte(content), Mode(file.Name)); err != nil {
 			return err
@@ -166,6 +183,9 @@ func (p Pack) Render(assetPath, logPath string) (string, error) {
 	content, err := p.Read(assetPath)
 	if err != nil {
 		return "", err
+	}
+	if filepath.Ext(strings.TrimSuffix(assetPath, ".tmpl")) == ".toml" {
+		return renderTOMLLogPath(content, logPath), nil
 	}
 	return RenderLogPath(content, logPath), nil
 }
