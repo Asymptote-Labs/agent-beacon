@@ -156,6 +156,10 @@ remain available for scripting and JSON output.
 ./beacon endpoint dashboard --open
 ```
 
+Each session ID is a link: use Tab and Enter to open its details, or
+modifier-click or middle-click to open the details in another tab and keep the
+list open. Clicking the rest of a session row opens its details in the current tab.
+
 The dashboard reads the configured runtime JSONL log and serves a local,
 read-only view on loopback. It has no external network dependency during normal
 use.
