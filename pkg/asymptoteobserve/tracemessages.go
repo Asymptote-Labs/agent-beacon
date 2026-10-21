@@ -196,6 +196,16 @@ func TraceMessages(bundle TraceBundleV1) []TraceMessageV1 {
 	}
 	out := make([]TraceMessageV1, 0, len(b.messages))
 	for i, message := range b.messages {
+		// Later captures can fill tool parts after the message was created. Derive its text
+		// from the final parts so the flat and structured views show the same content.
+		for _, part := range message.Parts {
+			switch content := part.Content.(type) {
+			case *TraceToolCallContentV1:
+				message.Text = traceToolCallText(content)
+			case *TraceToolResultContentV1:
+				message.Text = traceToolResultText(content)
+			}
+		}
 		message.Order = i + 1
 		out = append(out, *message)
 	}
