@@ -26,6 +26,7 @@ func TestHookPlatformsConvergeOnCanonicalNames(t *testing.T) {
 		"goose":       "goose",
 		"dsh":         "deepseek_harness",
 		"kimi":        "kimi_code",
+		"autopilot":   "autopilot",
 	} {
 		t.Run(platform, func(t *testing.T) {
 			if got := NormalizeHarnessName(platform); got != want {
@@ -45,7 +46,7 @@ func TestCanonicalNamesAreStableUnderRenormalization(t *testing.T) {
 		"claude_code", "codex_cli", "codex_desktop", "gemini_cli", "antigravity_cli", "vscode_copilot",
 		"copilot_cli", "claude_web", "chatgpt_web", "claude_cowork", "claude_agent_sdk",
 		"openclaw_gateway", "pi_cli", "omp", "cline", "qwen_code", "prime_agent", "omo_senpi", "vercel_fx",
-		"muse_code", "grok_bot", "goose", "deepseek_harness", "kimi_code",
+		"muse_code", "grok_bot", "goose", "deepseek_harness", "kimi_code", "autopilot",
 	} {
 		t.Run(canonical, func(t *testing.T) {
 			if got := NormalizeHarnessName(canonical); got != canonical {
@@ -921,5 +922,40 @@ func TestKimiCodeIsStableUnderRenormalization(t *testing.T) {
 	once := NormalizeHarnessName("kimi")
 	if twice := NormalizeHarnessName(once); twice != once {
 		t.Fatalf("NormalizeHarnessName(%q) = %q; the canonical name must be stable", once, twice)
+	}
+}
+
+// Autopilot reaches Beacon over two paths that each name it themselves: the hook payloads carry
+// `beacon.harness.name: autopilot` and the OTLP export sets service.name to the same string, while
+// the hook path is written with --platform autopilot. Every spelling the npm package name adds
+// must land on the one canonical name, or one session is recorded under two.
+func TestAutopilotSpellingsAreOneHarness(t *testing.T) {
+	for _, in := range []string{
+		"autopilot", "Autopilot", " AUTOPILOT ", "autopilot-ai", "autopilot_ai", "Autopilot AI",
+		"autopilot-cli", "autopilot_cli",
+	} {
+		t.Run(in, func(t *testing.T) {
+			if got := NormalizeHarnessName(in); got != "autopilot" {
+				t.Errorf("NormalizeHarnessName(%q) = %q, want autopilot", in, got)
+			}
+		})
+	}
+}
+
+// "autopilot" is an ordinary word, so names that merely contain it are not this runtime, and the
+// Copilot products keep their own names.
+func TestAutopilotIsMatchedByEqualityOnly(t *testing.T) {
+	for in, want := range map[string]string{
+		"github-copilot":      "copilot_cli",
+		"copilot_cli":         "copilot_cli",
+		"vscode-copilot":      "vscode_copilot",
+		"ci-autopilot-runner": "ci-autopilot-runner",
+		"autopilotx":          "autopilotx",
+	} {
+		t.Run(in, func(t *testing.T) {
+			if got := NormalizeHarnessName(in); got != want {
+				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, want)
+			}
+		})
 	}
 }

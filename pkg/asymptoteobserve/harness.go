@@ -392,6 +392,25 @@ func NormalizeHarnessName(name string) string {
 		lower == "kimi_code_acp" || lower == "kimi-code-acp" ||
 		lower == "moonshot_kimi_code" || lower == "moonshot-kimi-code":
 		return "kimi_code"
+	// Autopilot (npm `autopilot-ai`) is one agent core behind its terminal UI, print mode, its
+	// JSON-RPC server and its SDK, and every one of them stamps the same identity: the hook
+	// payloads carry `"beacon.harness.name": "autopilot"` and its OpenTelemetry export sets
+	// `service.name` and `beacon.harness.name` to the same string. The `--platform` value Beacon's
+	// installer writes is that string too, so the hook path and the OTLP path already agree, and
+	// this case exists to keep them agreeing while pinning the spellings the package name adds.
+	//
+	// Equality against a closed set rather than Contains(lower, "autopilot"), because the word is
+	// an ordinary one that other products use for features rather than for this runtime -- an
+	// "autopilot mode" in another agent, a CI runner's "autopilot" job, a vehicle-telemetry
+	// service. A substring rule would file any harness attribute that mentioned one of those as an
+	// Autopilot session. It also needs no ordering care against the Copilot rules above: "autopilot"
+	// does not contain "copilot", so neither rule can claim the other's names.
+	//
+	// The canonical spelling is plain `autopilot`, the product and binary name, rather than a CLI
+	// suffix that would name one of its four surfaces and not the others.
+	case lower == "autopilot" || lower == "autopilot-ai" || lower == "autopilot_ai" || lower == "autopilot ai" ||
+		lower == "autopilot-cli" || lower == "autopilot_cli" || lower == "autopilot cli":
+		return "autopilot"
 	case name != "":
 		// An unrecognized runtime keeps its own name rather than being coerced or dropped. A new
 		// harness should show up in the log as itself, not as "unknown".

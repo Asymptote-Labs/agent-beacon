@@ -142,6 +142,9 @@ func TestCollectionMethodForPlatform(t *testing.T) {
 		// `/reload`, and choosing it would have changed this field as a side effect of an install
 		// mechanic rather than of what runs on each event.
 		"kimi": CollectionMethodHook,
+		// Autopilot is hook-shaped: Beacon adds command entries to Autopilot's own settings.json
+		// and ships nothing the runtime loads.
+		"autopilot": CollectionMethodHook,
 		// vscode is the case that justifies keying on --platform rather than on the normalized
 		// harness name: its hook and OTLP telemetry both normalize to vscode_copilot, so the
 		// harness name cannot distinguish them and only the flag can.
