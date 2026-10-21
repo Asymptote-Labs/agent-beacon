@@ -359,10 +359,11 @@ func runMemoryEvaluationsRun(cmd *cobra.Command, args []string) error {
 		}
 		result.Evaluations = append(result.Evaluations, eval)
 		if candidate, ok := learning.CandidateFromEvaluation(eval); ok {
-			if err := store.PutCandidate(candidate); err != nil {
+			stored, err := store.InsertCandidate(candidate)
+			if err != nil {
 				return err
 			}
-			result.Candidates = append(result.Candidates, candidate)
+			result.Candidates = append(result.Candidates, stored)
 		}
 	}
 	if memoryOpts.jsonOutput {
@@ -387,8 +388,8 @@ func runMemoryEvaluationsRun(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(cmd.OutOrStdout(), "Not promoted: %s (%s)\n", eval.ID, reason)
 		}
 	}
-	if len(result.Candidates) > 0 {
-		fmt.Fprintf(cmd.OutOrStdout(), "Created %d candidate(s) for review.\n", len(result.Candidates))
+	for _, candidate := range result.Candidates {
+		fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\n", candidate.ID, candidate.State, candidate.Kind)
 	}
 	return nil
 }
@@ -485,13 +486,14 @@ func runMemoryCandidatesCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := memoryStore().PutCandidate(candidate); err != nil {
+	candidate, err = memoryStore().InsertCandidate(candidate)
+	if err != nil {
 		return err
 	}
 	if memoryOpts.jsonOutput {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(candidate)
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Created candidate %s (%s) for project %s\n", candidate.ID, candidate.Kind, firstNonEmpty(project.Path, project.ID))
+	fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\n", candidate.ID, candidate.State, candidate.Kind, firstNonEmpty(candidate.Project.Path, candidate.Project.ID))
 	return nil
 }
 

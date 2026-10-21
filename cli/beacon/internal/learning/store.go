@@ -465,6 +465,63 @@ func (s *Store) GetEvaluation(id string) (asymptoteobserve.LearningEvaluationV1,
 }
 
 func (s *Store) PutCandidate(c asymptoteobserve.LearningCandidateV1) error {
+	c, data, err := prepareCandidate(c)
+	if err != nil {
+		return err
+	}
+	db, err := s.db()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	_, err = db.Exec(`INSERT INTO candidates (id, project_id, state, kind, title, source_evaluation_id, memory_id, created_at, updated_at, candidate_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET state = excluded.state, kind = excluded.kind, title = excluded.title, memory_id = excluded.memory_id, updated_at = excluded.updated_at, candidate_json = excluded.candidate_json`,
+		c.ID, c.Project.ID, c.State, c.Kind, c.Title, c.SourceEvaluationID, c.MemoryID, c.CreatedAt, c.UpdatedAt, string(data))
+	return err
+}
+
+// InsertCandidate inserts a generated candidate only when its ID is absent and
+// returns the stored record. Regeneration must not rewrite an existing review.
+func (s *Store) InsertCandidate(c asymptoteobserve.LearningCandidateV1) (asymptoteobserve.LearningCandidateV1, error) {
+	c, data, err := prepareCandidate(c)
+	if err != nil {
+		return asymptoteobserve.LearningCandidateV1{}, err
+	}
+	db, err := s.db()
+	if err != nil {
+		return asymptoteobserve.LearningCandidateV1{}, err
+	}
+	defer db.Close()
+	tx, err := db.Begin()
+	if err != nil {
+		return asymptoteobserve.LearningCandidateV1{}, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`INSERT INTO candidates (id, project_id, state, kind, title, source_evaluation_id, memory_id, created_at, updated_at, candidate_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO NOTHING`, c.ID, c.Project.ID, c.State, c.Kind, c.Title, c.SourceEvaluationID, c.MemoryID, c.CreatedAt, c.UpdatedAt, string(data)); err != nil {
+		return asymptoteobserve.LearningCandidateV1{}, err
+	}
+	var raw string
+	if err := tx.QueryRow(`SELECT candidate_json FROM candidates WHERE id = ?`, c.ID).Scan(&raw); err != nil {
+		return asymptoteobserve.LearningCandidateV1{}, err
+	}
+	var stored asymptoteobserve.LearningCandidateV1
+	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
+		return asymptoteobserve.LearningCandidateV1{}, err
+	}
+	// Null and empty objects decode without an error but do not identify this row.
+	if stored.ID != c.ID {
+		return asymptoteobserve.LearningCandidateV1{}, fmt.Errorf("stored candidate %q has invalid ID %q", c.ID, stored.ID)
+	}
+	if err := tx.Commit(); err != nil {
+		return asymptoteobserve.LearningCandidateV1{}, err
+	}
+	return stored, nil
+}
+
+func prepareCandidate(c asymptoteobserve.LearningCandidateV1) (asymptoteobserve.LearningCandidateV1, []byte, error) {
 	if c.SchemaVersion == "" {
 		c.SchemaVersion = asymptoteobserve.LearningSchemaVersion
 	}
@@ -480,19 +537,7 @@ func (s *Store) PutCandidate(c asymptoteobserve.LearningCandidateV1) error {
 		c.ID = CandidateID(c)
 	}
 	data, err := json.Marshal(c)
-	if err != nil {
-		return err
-	}
-	db, err := s.db()
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	_, err = db.Exec(`INSERT INTO candidates (id, project_id, state, kind, title, source_evaluation_id, memory_id, created_at, updated_at, candidate_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET state = excluded.state, kind = excluded.kind, title = excluded.title, memory_id = excluded.memory_id, updated_at = excluded.updated_at, candidate_json = excluded.candidate_json`,
-		c.ID, c.Project.ID, c.State, c.Kind, c.Title, c.SourceEvaluationID, c.MemoryID, c.CreatedAt, c.UpdatedAt, string(data))
-	return err
+	return c, data, err
 }
 
 func (s *Store) ListCandidates(query Query) ([]asymptoteobserve.LearningCandidateV1, error) {
