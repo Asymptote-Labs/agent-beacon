@@ -115,6 +115,10 @@ type redactionRule struct {
 	// needles are literals the pattern cannot match without: when the text holds none of them,
 	// the rule is skipped without running the pattern.
 	needles *redactNeedles
+	// repeat applies the rule until the text stops changing. A rule scoped to a command line
+	// matches from the command to the value, so a second such value on the line lies inside the
+	// first match and is reached only by another pass.
+	repeat bool
 }
 
 // redactNeedles is a set of literals a pattern cannot match without. folded needles are lower
@@ -154,6 +158,14 @@ func rule(expr, replacement string, keep func(string) bool, needles ...string) r
 // of needles, which must be lower case.
 func foldedRule(expr, replacement string, keep func(string) bool, needles ...string) redactionRule {
 	return lazyRule(expr, replacement, keep, newRedactNeedles(true, needles...))
+}
+
+// curlRule is a foldedRule scoped to a curl command line. A flag curl accepts more than once (two
+// -b cookie strings) is redacted at every occurrence on the line.
+func curlRule(expr, replacement string) redactionRule {
+	r := foldedRule(expr, replacement, nil, "curl")
+	r.repeat = true
+	return r
 }
 
 // lazyRule compiles its pattern the first time text gets past the needles. A hook is a process
@@ -342,13 +354,18 @@ var redactionRules = concatRules([]redactionRule{
 	// usually write arguments: `--password "x y"`, `--token='x'`.
 }, quotedRules(quotedFlag, nil), []redactionRule{
 	{pattern: lazyPattern(`(?i)(` + redactFlag + `)([^\s"'-][^\s"']*)`), replacement: "${1}" + redactedValue, needles: redactFlagNeedles},
-	// curl's basic-auth credentials: `-u user:pass`, `--user user:pass` and `--proxy-user user:pass`.
-	// The user name and the colon stay. A bare `-u user` (curl prompts for the password) has nothing
-	// to redact, and the rule is limited to curl lines so `docker run -u 1000:1000` is left alone.
-	foldedRule(`(?i)(\bcurl\b[^\n]*?\s(?:-[a-z]*u|--user|--proxy-user)(?:=|\s+)["']?[^:\s"']*:)([^\s"']+)`, "${1}"+redactedValue, nil, "curl"),
+	// curl's basic-auth credentials: `-u user:pass`, `-uuser:pass`, `--user user:pass` and
+	// `--proxy-user user:pass`. The user name and the colon stay. A bare `-u user` (curl prompts for
+	// the password) has nothing to redact, and the rule is limited to curl lines so `docker run -u
+	// 1000:1000` is left alone.
+	curlRule(`(?i)(\bcurl\b[^\n]*?\s(?:-[a-z]*u\s*|(?:--user|--proxy-user)(?:=|\s+))["']?[^:\s"']*:)([^\s"']+)`, "${1}"+redactedValue),
+	// curl's cookie flag with a cookie string: `-b 'sid=x; csrf=y'`, `--cookie sid=x`. Only a value
+	// holding `=` is cookies; anything else names a cookie file, which stays. The quotes stay.
+	curlRule(`(?i)(\bcurl\b[^\n]*?\s(?:-[a-z]*b\s*|--cookie(?:=|\s+)))(?:(')[^'\n]*=[^'\n]*(')|(")[^"\n]*=[^"\n]*(")|[^\s"'=]+=[^\s"']*)`, "${1}${2}${4}"+redactedValue+"${3}${5}"),
 	// A Cookie or Set-Cookie header: the whole value is a session credential, as the field-name rule
-	// in SanitizeMap already treats a structured `cookie` field.
-	foldedRule(`(?i)(\b(?:set-)?cookie["']?\s*:\s*["']?)([^\n"'\\]+)`, "${1}"+redactedValue, isRedactedValue, "cookie"),
+	// in SanitizeMap already treats a structured `cookie` field. Only where a header or key can
+	// start (a line, a quote, curl's -H), so prose that says "cookie:" keeps its sentence.
+	foldedRule(`(?im)((?:^\s*|["']\s*|(?:-H|--header)(?:=|\s+)["']?)(?:set-)?cookie["']?\s*:\s*["']?)([^\n"'\\]+)`, "${1}"+redactedValue, isRedactedValue, "cookie"),
 	// The password in a URL's userinfo: `postgres://user:pw@host`, `https://x-access-token:t@github.com`.
 	foldedRule(`(?i)(\b[a-z][a-z0-9+.-]*://[^/\s:@"'<>]+:)([^@/\s"'<>]+)(@)`, "${1}"+redactedValue+"${3}", nil, "://"),
 	// Credentials recognizable by their own shape, wherever they appear. The type prefix is public
@@ -386,7 +403,12 @@ func concatRules(groups ...[]redactionRule) []redactionRule {
 func (rule redactionRule) apply(value string) string {
 	pattern := rule.pattern()
 	if rule.keep == nil {
-		return pattern.ReplaceAllString(value, rule.replacement)
+		out := pattern.ReplaceAllString(value, rule.replacement)
+		// Each pass redacts at least one more value, and a redacted value matches no further.
+		for pass := 0; rule.repeat && out != value && pass < 16; pass++ {
+			value, out = out, pattern.ReplaceAllString(out, rule.replacement)
+		}
+		return out
 	}
 	index := pattern.SubexpIndex("value")
 	if index < 0 {
