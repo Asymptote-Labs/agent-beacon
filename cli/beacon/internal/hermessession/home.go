@@ -161,6 +161,19 @@ func resolveExisting(path string) string {
 	}
 }
 
+// canonicalHome is the form two spellings of one Hermes home share: absolute, with symlinks
+// resolved, and case-folded on Windows, whose paths are case-insensitive.
+func canonicalHome(dir string) string {
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	dir = resolveExisting(dir)
+	if runtime.GOOS == "windows" {
+		dir = strings.ToLower(dir)
+	}
+	return dir
+}
+
 // activeProfile reads the sticky profile name from <root>/active_profile. A missing, unreadable or
 // empty file, or the name "default", selects no profile, as in Hermes.
 func activeProfile(root string) (string, bool) {

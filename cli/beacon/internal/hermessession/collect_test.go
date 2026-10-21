@@ -136,7 +136,7 @@ func TestCollectOnceKeepsHermesProfilesApart(t *testing.T) {
 		}
 		dbPath := filepath.Join(dir, "state.db")
 		createHermesFixtureDB(t, dbPath)
-		if _, err := CollectOnce(CollectOptions{DBPath: dbPath, StatePath: DefaultStatePath(profile), LogPath: logPath, Write: true, UserMode: true}); err != nil {
+		if _, err := CollectOnce(CollectOptions{DBPath: dbPath, StatePath: DefaultStatePath(dir), LogPath: logPath, Write: true, UserMode: true}); err != nil {
 			t.Fatalf("sync %s: %v", profile, err)
 		}
 	}
@@ -146,9 +146,6 @@ func TestCollectOnceKeepsHermesProfilesApart(t *testing.T) {
 	}
 	if len(got) != len(want) || got["default"] != want["default"] || got["work"] != want["work"] {
 		t.Fatalf("profile -> config_path = %v, want %v", got, want)
-	}
-	if DefaultStatePath("work") == DefaultStatePath("default") {
-		t.Fatalf("profiles share cursor %s", DefaultStatePath("work"))
 	}
 }
 

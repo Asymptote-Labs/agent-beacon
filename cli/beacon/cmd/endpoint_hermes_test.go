@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/hermessession"
 )
 
 // The cursor is what keeps a scheduled sweep from re-appending every Hermes session's whole
@@ -23,14 +25,28 @@ func TestHermesStatePathFollowsTheSweepItBelongsTo(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("HERMES_HOME", "")
 
-	// The default profile keeps the cursor file installs had before profiles were keyed.
+	// The native root keeps the cursor file installs had before homes were keyed, however its
+	// database is named.
 	user := resolveHermesStatePath("", "", true)
 	if want := filepath.Join(home, ".beacon", "endpoint", "state", "hermes.json"); user != want {
 		t.Errorf("user cursor = %q, want %q", user, want)
 	}
-	work := resolveHermesStatePath("", filepath.Join(home, ".hermes", "profiles", "work", "state.db"), true)
-	if want := filepath.Join(home, ".beacon", "endpoint", "state", "hermes-work.json"); work != want {
-		t.Errorf("work profile cursor = %q, want %q", work, want)
+	if explicit := resolveHermesStatePath("", hermessession.DefaultDBPath(), true); explicit != user {
+		t.Errorf("--db naming the native store moved its cursor to %q", explicit)
+	}
+	// Every other home gets its own cursor: a profile, a custom HERMES_HOME (the default profile of
+	// its own root), and a same-named profile under that root.
+	seen := map[string]string{user: "native root"}
+	for _, dir := range []string{
+		filepath.Join(home, ".hermes", "profiles", "work"),
+		filepath.Join(home, "custom-hermes"),
+		filepath.Join(home, "custom-hermes", "profiles", "work"),
+	} {
+		cursor := resolveHermesStatePath("", filepath.Join(dir, "state.db"), true)
+		if other, ok := seen[cursor]; ok {
+			t.Errorf("%s shares cursor %q with %s", dir, cursor, other)
+		}
+		seen[cursor] = dir
 	}
 
 	system := resolveHermesStatePath("", "", false)

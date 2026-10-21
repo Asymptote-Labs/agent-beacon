@@ -120,21 +120,27 @@ type MappedEvent struct {
 	Event           schema.Event
 }
 
-func DefaultStatePath(profile string) string {
+func DefaultStatePath(hermesHome string) string {
 	base := filepath.Join(os.TempDir(), "beacon")
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
 		base = filepath.Join(home, ".beacon")
 	}
-	return filepath.Join(base, "endpoint", "state", StateFileName("hermes", profile))
+	return filepath.Join(base, "endpoint", "state", StateFileName("hermes", hermesHome))
 }
 
-// StateFileName keys a cursor file by profile. The default profile keeps the unkeyed name, so an
-// existing install resumes from the cursor it already has.
-func StateFileName(stem, profile string) string {
-	if profile == "" || profile == DefaultProfile {
+// StateFileName names the cursor file for the Hermes home a sweep reads. The native root keeps the
+// unkeyed name, so an existing install resumes from the cursor it already has. Every other home, a
+// profile or a custom HERMES_HOME, gets a file named for its profile and keyed by its resolved path,
+// so two homes never share a cursor even when both are the default profile of their own root or
+// hold profiles of the same name.
+func StateFileName(stem, hermesHome string) string {
+	resolved := canonicalHome(hermesHome)
+	userHome, _ := os.UserHomeDir()
+	if root := nativeRoot(userHome); root != "" && canonicalHome(root) == resolved {
 		return stem + ".json"
 	}
-	return stem + "-" + profile + ".json"
+	sum := sha256.Sum256([]byte(resolved))
+	return fmt.Sprintf("%s-%s-%x.json", stem, Profile(hermesHome), sum[:6])
 }
 
 func LoadState(path string) (*State, error) {
