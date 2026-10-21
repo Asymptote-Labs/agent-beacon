@@ -110,18 +110,17 @@ class ChatGptParser implements TurnParser {
   private apply(op: string, path: string, v: any): void {
     switch (op) {
       case 'add':
+      case 'replace':
         if (path === '' || path === '/') {
           this.root = v;
           this.trackAssistant();
         } else {
           setAt(this.root, path, v);
+          if (path === '/message') this.trackAssistant();
         }
         break;
       case 'append':
         appendAt(this.root, path, v);
-        break;
-      case 'replace':
-        setAt(this.root, path, v);
         break;
       case 'patch':
         if (Array.isArray(v)) for (const s of v) this.apply(s.o, s.p ?? '', s.v);
@@ -129,7 +128,7 @@ class ChatGptParser implements TurnParser {
     }
   }
 
-  /** After an add at root, record the visible assistant message reference. */
+  /** After a structural update, record the visible assistant message reference. */
   private trackAssistant(): void {
     const m = this.root?.message;
     if (!m || m.author?.role !== 'assistant') return;
