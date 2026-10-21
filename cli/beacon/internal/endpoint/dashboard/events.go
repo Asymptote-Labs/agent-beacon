@@ -907,6 +907,7 @@ func searchFields(record EventRecord) []string {
 		event.Harness.Version,
 		event.Harness.ExecutablePath,
 		event.Harness.ConfigPath,
+		event.Harness.Profile,
 		event.Model,
 		event.Repository,
 		event.Branch,

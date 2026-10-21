@@ -96,6 +96,7 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.harness.config_path` | string |
 | `e.harness.executable_path` | string |
 | `e.harness.name` | string |
+| `e.harness.profile` | string |
 | `e.harness.version` | string |
 | `e.health.component` | string |
 | `e.health.reason` | string |

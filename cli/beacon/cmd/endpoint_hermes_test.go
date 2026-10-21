@@ -11,23 +11,29 @@ import (
 // its cursor under the operator's home lets a later user-mode run skip sessions the user log never
 // received, and vice versa.
 func TestHermesStatePathFollowsTheSweepItBelongsTo(t *testing.T) {
-	if got := resolveHermesStatePath("/explicit/path.json", true); got != "/explicit/path.json" {
+	if got := resolveHermesStatePath("/explicit/path.json", "", true); got != "/explicit/path.json" {
 		t.Errorf("an explicit --state was overridden: %q", got)
 	}
-	if got := resolveHermesStatePath("/explicit/path.json", false); got != "/explicit/path.json" {
+	if got := resolveHermesStatePath("/explicit/path.json", "", false); got != "/explicit/path.json" {
 		t.Errorf("an explicit --state was overridden in system mode: %q", got)
 	}
 
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("HERMES_HOME", "")
 
-	user := resolveHermesStatePath("", true)
+	// The default profile keeps the cursor file installs had before profiles were keyed.
+	user := resolveHermesStatePath("", "", true)
 	if want := filepath.Join(home, ".beacon", "endpoint", "state", "hermes.json"); user != want {
 		t.Errorf("user cursor = %q, want %q", user, want)
 	}
+	work := resolveHermesStatePath("", filepath.Join(home, ".hermes", "profiles", "work", "state.db"), true)
+	if want := filepath.Join(home, ".beacon", "endpoint", "state", "hermes-work.json"); work != want {
+		t.Errorf("work profile cursor = %q, want %q", work, want)
+	}
 
-	system := resolveHermesStatePath("", false)
+	system := resolveHermesStatePath("", "", false)
 	if !filepath.IsAbs(system) {
 		t.Errorf("system cursor = %q, which is not somewhere a sweep can reliably write", system)
 	}

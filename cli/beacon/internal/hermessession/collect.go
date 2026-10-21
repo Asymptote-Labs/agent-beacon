@@ -120,12 +120,21 @@ type MappedEvent struct {
 	Event           schema.Event
 }
 
-func DefaultStatePath() string {
+func DefaultStatePath(profile string) string {
 	base := filepath.Join(os.TempDir(), "beacon")
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
 		base = filepath.Join(home, ".beacon")
 	}
-	return filepath.Join(base, "endpoint", "state", "hermes.json")
+	return filepath.Join(base, "endpoint", "state", StateFileName("hermes", profile))
+}
+
+// StateFileName keys a cursor file by profile. The default profile keeps the unkeyed name, so an
+// existing install resumes from the cursor it already has.
+func StateFileName(stem, profile string) string {
+	if profile == "" || profile == DefaultProfile {
+		return stem + ".json"
+	}
+	return stem + "-" + profile + ".json"
 }
 
 func LoadState(path string) (*State, error) {
@@ -247,6 +256,11 @@ func collectSession(store *Store, session Session, state *State, opts CollectOpt
 		return false, err
 	}
 	mapped, pending := MapSession(session, messages, cursor)
+	home := filepath.Dir(store.Path())
+	for i := range mapped {
+		mapped[i].Event.Harness.ConfigPath = home
+		mapped[i].Event.Harness.Profile = Profile(home)
+	}
 	if len(mapped) == 0 {
 		cursor.PendingCalls = pending
 		advanceCursorMessages(cursor, messages)

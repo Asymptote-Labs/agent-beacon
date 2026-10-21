@@ -59,7 +59,7 @@ func init() {
 	for _, c := range []*cobra.Command{endpointHermesSyncCmd, endpointHermesStatusCmd} {
 		f := c.Flags()
 		f.StringVar(&endpointHermesOpts.dbPath, "db", "", "Hermes state database (default $HERMES_HOME/state.db when set, otherwise the native Hermes data root)")
-		f.StringVar(&endpointHermesOpts.statePath, "state", "", "Collector cursor file (default ~/.beacon/endpoint/state/hermes.json)")
+		f.StringVar(&endpointHermesOpts.statePath, "state", "", "Collector cursor file (default ~/.beacon/endpoint/state/hermes.json, or hermes-<profile>.json for a named profile)")
 		f.BoolVar(&endpointOpts.jsonOutput, "json", false, "Print the result as JSON")
 		f.BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		f.BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths")
@@ -82,7 +82,7 @@ func runEndpointHermesSync(cmd *cobra.Command, args []string) error {
 		UserMode: userMode,
 	}
 	if !endpointHermesOpts.print {
-		opts.StatePath = resolveHermesStatePath(endpointHermesOpts.statePath, userMode)
+		opts.StatePath = resolveHermesStatePath(endpointHermesOpts.statePath, endpointHermesOpts.dbPath, userMode)
 		opts.LogPath = lifecycle.ResolveRuntimeLog(userMode, endpointHermesOpts.logPath).EffectiveLogPath
 	}
 
@@ -152,7 +152,7 @@ func runEndpointHermesStatus(cmd *cobra.Command, args []string) error {
 	if dbPath == "" {
 		dbPath = hermessession.DefaultDBPath()
 	}
-	statePath := resolveHermesStatePath(endpointHermesOpts.statePath, endpointUserMode())
+	statePath := resolveHermesStatePath(endpointHermesOpts.statePath, dbPath, endpointUserMode())
 	report := hermesStatusReport{DBPath: dbPath, StatePath: statePath}
 
 	store, err := hermessession.OpenStore(dbPath)
@@ -221,15 +221,20 @@ func runEndpointHermesStatus(cmd *cobra.Command, args []string) error {
 // resolveHermesStatePath keeps the cursor beside the log the sweep writes to. A system-mode sweep
 // collects on behalf of the machine, so its cursor belongs next to the system runtime log rather
 // than in whichever home the operator happened to run from; everything else uses the per-user
-// default in hermessession.DefaultStatePath.
-func resolveHermesStatePath(path string, userMode bool) string {
+// default in hermessession.DefaultStatePath. Either default is keyed by the profile dbPath belongs
+// to, so syncing one profile never moves another's cursor.
+func resolveHermesStatePath(path, dbPath string, userMode bool) string {
 	if strings.TrimSpace(path) != "" {
 		return path
 	}
+	if dbPath == "" {
+		dbPath = hermessession.DefaultDBPath()
+	}
+	profile := hermessession.Profile(filepath.Dir(dbPath))
 	if !userMode {
 		if dir := filepath.Dir(lifecycle.ResolveRuntimeLog(false, "").EffectiveLogPath); dir != "" && dir != "." {
-			return filepath.Join(dir, "hermes-state.json")
+			return filepath.Join(dir, hermessession.StateFileName("hermes-state", profile))
 		}
 	}
-	return hermessession.DefaultStatePath()
+	return hermessession.DefaultStatePath(profile)
 }

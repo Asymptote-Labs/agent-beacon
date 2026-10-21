@@ -121,6 +121,18 @@ func nativeRoot(home string) string {
 	return filepath.Join(home, "."+name)
 }
 
+// DefaultProfile is the name Hermes gives the profile whose home is the root itself.
+const DefaultProfile = "default"
+
+// Profile names the Hermes profile whose home is dir: <root>/profiles/<name> is <name>, and any
+// other home is the default profile.
+func Profile(dir string) string {
+	if isProfileDir(dir) {
+		return filepath.Base(dir)
+	}
+	return DefaultProfile
+}
+
 // isProfileDir is the launcher's test for a HERMES_HOME that already selects a profile: its parent
 // directory is named "profiles".
 func isProfileDir(path string) bool {

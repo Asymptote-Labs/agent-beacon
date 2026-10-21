@@ -51,7 +51,7 @@ var metadataOnlyKept = []string{
 	"event.id", "event.kind", "event.action", "event.category", "event.fidelity",
 	"endpoint.hostname", "endpoint.os", "endpoint.agent_version",
 	"user.name", "user.uid",
-	"harness.name", "harness.version", "harness.executable_path", "harness.config_path", "harness.collection_method",
+	"harness.name", "harness.version", "harness.executable_path", "harness.config_path", "harness.profile", "harness.collection_method",
 	"error.type",
 	"run.provider", "run.run_id", "run.run_attempt", "run.workflow", "run.job", "run.event_name",
 	"run.commit", "run.repository", "run.branch", "run.pr", "run.pr_number", "run.actor",
