@@ -562,7 +562,7 @@ function finishResult<T>(result: T, span: Span, options?: ObserveOptions): unkno
       },
     );
   }
-  if (isAsyncIterable(result)) {
+  if (isAsyncIterator(result)) {
     // A stream such as the Claude Agent SDK's Query carries controls (interrupt(), setModel(), ...)
     // beside its iterator. Iteration goes through the traced iterator; every other read goes to
     // the original stream, with functions bound to it so private-field methods keep working, and
@@ -629,8 +629,17 @@ function isPromiseLike(value: unknown): value is Promise<unknown> {
   return Boolean(value && typeof (value as Promise<unknown>).then === "function");
 }
 
-function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
-  return Boolean(value && typeof (value as AsyncIterable<unknown>)[Symbol.asyncIterator] === "function");
+// Only an async iterator, such as an async generator or the Claude Agent SDK's Query, is traced
+// through consumption: its next() is the only way to read it. Other async iterables, such as the
+// Anthropic SDK's Stream, ReadableStream or a Node Readable, can also be read through their own
+// APIs (toReadableStream(), getReader(), pipe(), events), which a wrapper never sees, so wrapping
+// them would leave the span open forever and break instanceof. Those are returned as values.
+function isAsyncIterator(value: unknown): value is AsyncIterable<unknown> & AsyncIterator<unknown> {
+  return Boolean(
+    value &&
+      typeof (value as AsyncIterable<unknown>)[Symbol.asyncIterator] === "function" &&
+      typeof (value as AsyncIterator<unknown>).next === "function",
+  );
 }
 
 function firstStringArg(args: unknown[]): string {
