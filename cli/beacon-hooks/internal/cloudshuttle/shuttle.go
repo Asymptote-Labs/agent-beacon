@@ -152,56 +152,56 @@ func ResetFromEnv() error {
 	if strings.TrimSpace(os.Getenv("BEACON_ORIGIN")) != "cloud" {
 		return nil
 	}
-	if err := preserveExistingLog(cfg); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	release, err := lockUpload(ctx, cfg.StatePath)
+	if err != nil {
 		return err
 	}
-	for _, path := range []string{cfg.LogPath + ".lock", cfg.StatePath} {
-		if path == "" {
-			continue
-		}
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return err
-		}
+	defer release()
+	if err := preserveExistingLogLocked(ctx, cfg); err != nil {
+		return err
+	}
+	// Lock files are stable protocol identities: unlinking one lets another process
+	// lock a new inode while an existing holder still owns the old inode.
+	if err := os.Remove(cfg.StatePath); err != nil && !os.IsNotExist(err) {
+		return err
 	}
 	return nil
 }
 
 func Upload(ctx context.Context, cfg Config, force bool) error {
 	cfg = normalizeConfig(cfg)
-	if !uploadConfigured(cfg) {
+	if !uploadConfigured(cfg) || strings.TrimSpace(cfg.RunID) == "" || !force {
 		return nil
 	}
-	if strings.TrimSpace(cfg.RunID) == "" {
-		return nil
+	release, err := lockUpload(ctx, cfg.StatePath)
+	if err != nil {
+		return err
 	}
-	info, err := os.Stat(cfg.LogPath)
+	defer release()
+
+	snapshot, cleanup, err := snapshotLog(ctx, cfg.LogPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
 		return err
 	}
-	if info.Size() == 0 {
-		return nil
-	}
-	if !force {
-		return nil
-	}
-	snapshot, cleanup, err := snapshotLog(cfg.LogPath)
-	if err != nil {
-		return err
-	}
 	defer cleanup()
+	if snapshot.info.Size() == 0 {
+		return nil
+	}
 	if cfg.Upload == uploadAsymptote {
-		return uploadAsymptoteIncremental(ctx, cfg, snapshot, info.Size())
+		return uploadAsymptoteIncremental(ctx, cfg, snapshot.path, snapshot.info.Size())
 	}
 	objectName := uploadObjectName(cfg)
-	if err := uploadSnapshot(ctx, cfg, objectName, snapshot); err != nil {
+	if err := uploadSnapshot(ctx, cfg, objectName, snapshot.path); err != nil {
 		return err
 	}
 	return writeState(cfg.StatePath, state{
 		LastUpload: time.Now().UTC().Format(time.RFC3339),
-		LastSize:   info.Size(),
+		LastSize:   snapshot.info.Size(),
 		LastObject: objectName,
 		Provider:   cfg.Provider,
 		RunID:      cfg.RunID,
@@ -242,50 +242,53 @@ func ObjectName(cfg Config) string {
 	return path.Join(parts...)
 }
 
-func snapshotLog(logPath string) (string, func(), error) {
+type logSnapshot struct {
+	path string
+	info os.FileInfo
+}
+
+func snapshotLog(ctx context.Context, logPath string) (logSnapshot, func(), error) {
 	lock, err := os.OpenFile(logPath+".lock", os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
-		return "", func() {}, err
+		return logSnapshot{}, func() {}, err
 	}
-	held, err := filelock.Shared(lock)
+	defer lock.Close()
+	held, err := filelock.SharedContext(ctx, lock)
 	if err != nil {
-		_ = lock.Close()
-		return "", func() {}, err
+		return logSnapshot{}, func() {}, err
 	}
-	// Registered close-first so LIFO runs it last: the lock is released, then the handle closed.
-	// The previous order relied on closing the descriptor to drop the lock implicitly, which left
-	// the explicit unlock failing on a closed handle with its error discarded.
-	defer func() {
-		if err := lock.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "cloudshuttle: failed to close lock file %s.lock: %v\n", logPath, err)
-		}
-	}()
 	defer held.Release()
 
 	source, err := os.Open(logPath)
 	if err != nil {
-		return "", func() {}, err
+		return logSnapshot{}, func() {}, err
 	}
 	defer source.Close()
-	if err := os.MkdirAll(filepath.Dir(logPath), 0755); err != nil {
-		return "", func() {}, err
+	// Identity and length belong to the same opened source under the writer lock.
+	// A separate pre-lock Stat can describe a different generation or older size.
+	info, err := source.Stat()
+	if err != nil {
+		return logSnapshot{}, func() {}, err
 	}
 	temp, err := os.CreateTemp(filepath.Dir(logPath), "beacon-cloud-*.jsonl")
 	if err != nil {
-		return "", func() {}, err
+		return logSnapshot{}, func() {}, err
 	}
-	tempPath := temp.Name()
-	cleanup := func() { _ = os.Remove(tempPath) }
-	if _, err := io.Copy(temp, source); err != nil {
+	cleanup := func() { _ = os.Remove(temp.Name()) }
+	if _, err := io.CopyN(temp, source, info.Size()); err != nil {
 		_ = temp.Close()
 		cleanup()
-		return "", func() {}, err
+		return logSnapshot{}, func() {}, err
 	}
 	if err := temp.Close(); err != nil {
 		cleanup()
-		return "", func() {}, err
+		return logSnapshot{}, func() {}, err
 	}
-	return tempPath, cleanup, nil
+	if err := ctx.Err(); err != nil {
+		cleanup()
+		return logSnapshot{}, func() {}, err
+	}
+	return logSnapshot{path: temp.Name(), info: info}, cleanup, nil
 }
 
 func accessToken(ctx context.Context, credentialsB64 string) (string, error) {
@@ -576,55 +579,68 @@ func writeState(path string, st state) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	temp, err := os.CreateTemp(filepath.Dir(path), ".shuttle-state-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(temp.Name())
+	defer temp.Close()
+	if err := temp.Chmod(0644); err != nil {
+		return err
+	}
+	if _, err := temp.Write(data); err != nil {
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temp.Name(), path)
 }
 
 func preserveExistingLog(cfg Config) error {
 	cfg = normalizeConfig(cfg)
-	info, err := os.Stat(cfg.LogPath)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	release, err := lockUpload(ctx, cfg.StatePath)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return preserveExistingLogLocked(ctx, cfg)
+}
+
+// The caller owns the upload transaction; this must never acquire that lock again.
+func preserveExistingLogLocked(ctx context.Context, cfg Config) error {
+	snapshot, cleanup, err := snapshotLog(ctx, cfg.LogPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
 		return err
 	}
-	if info.Size() == 0 {
-		return os.Remove(cfg.LogPath)
-	}
+	defer cleanup()
+	uploaded := snapshot.info.Size() == 0
 	st, stateErr := readState(cfg.StatePath)
 	hasState := stateErr == nil && st.LastObject != ""
-	// Bucket targets can only re-upload under the object name a previous run already used, so
-	// they need state. Managed ingest is addressed by the lines' own session ids, so a log from
-	// a run that never got a successful batch out (no state) is shipped whole rather than
-	// renamed aside, where an ephemeral sandbox would lose it.
-	if uploadConfigured(cfg) && (hasState || cfg.Upload == uploadAsymptote) {
-		snapshot, cleanup, err := snapshotLog(cfg.LogPath)
-		if err == nil {
-			defer cleanup()
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			var uploadErr error
-			if cfg.Upload == uploadAsymptote {
-				// Ship whatever the previous run's last hook did not get to, under that run's
-				// identity so the stored offset applies and nothing is sent twice.
-				previous := cfg
-				if hasState {
-					previous.Provider, previous.RunID = st.Provider, st.RunID
-				}
-				uploadErr = uploadAsymptoteIncremental(ctx, previous, snapshot, info.Size())
-			} else {
-				uploadErr = uploadSnapshot(ctx, cfg, st.LastObject, snapshot)
+	// Bucket targets retain their previous run object. Managed ingest can ship a
+	// never-uploaded run because each line carries its own session identity.
+	if !uploaded && uploadConfigured(cfg) && (hasState || cfg.Upload == uploadAsymptote) {
+		var uploadErr error
+		if cfg.Upload == uploadAsymptote {
+			previous := cfg
+			if hasState {
+				previous.Provider, previous.RunID = st.Provider, st.RunID
 			}
-			if uploadErr == nil {
-				return os.Remove(cfg.LogPath)
-			}
+			uploadErr = uploadAsymptoteIncremental(ctx, previous, snapshot.path, snapshot.info.Size())
+		} else {
+			uploadErr = uploadSnapshot(ctx, cfg, st.LastObject, snapshot.path)
 		}
+		uploaded = uploadErr == nil
 	}
-	preservedPath := fmt.Sprintf("%s.previous-%d", cfg.LogPath, time.Now().UTC().UnixNano())
-	if err := os.Rename(cfg.LogPath, preservedPath); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
+	return finishPreservation(ctx, cfg, snapshot, uploaded)
 }
 
 func resolveRunID() string {

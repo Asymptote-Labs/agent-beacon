@@ -13,7 +13,11 @@
 // has to get right anyway.
 package filelock
 
-import "os"
+import (
+	"context"
+	"os"
+	"time"
+)
 
 // Lock is a held lock. Release unlocks; closing the file is the caller's business, since the
 // caller opened it.
@@ -59,10 +63,50 @@ func TryExclusive(f *os.File) (*Lock, error) {
 	if f == nil {
 		return nil, os.ErrInvalid
 	}
-	if err := tryLockFile(f); err != nil {
+	if err := tryLockFile(f, true); err != nil {
 		return nil, err
 	}
 	return &Lock{file: f}, nil
+}
+
+// ExclusiveContext waits for an exclusive lock until ctx is cancelled. Only actual lock
+// contention is retried; invalid handles and other operating-system errors are returned.
+func ExclusiveContext(ctx context.Context, f *os.File) (*Lock, error) {
+	return lockContext(ctx, f, true)
+}
+
+// SharedContext is Shared with a cancellable contention wait.
+func SharedContext(ctx context.Context, f *os.File) (*Lock, error) {
+	return lockContext(ctx, f, false)
+}
+
+func lockContext(ctx context.Context, f *os.File, exclusive bool) (*Lock, error) {
+	if f == nil {
+		return nil, os.ErrInvalid
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		err := tryLockFile(f, exclusive)
+		if err == nil {
+			if err := ctx.Err(); err != nil {
+				_ = unlockFile(f)
+				return nil, err
+			}
+			return &Lock{file: f}, nil
+		}
+		if !isContention(err) {
+			return nil, err
+		}
+		timer := time.NewTimer(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 // Release unlocks. Safe to call more than once, so `defer l.Release()` alongside an explicit

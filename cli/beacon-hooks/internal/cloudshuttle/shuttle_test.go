@@ -70,7 +70,7 @@ func useSandbox(t *testing.T, dir string) {
 	t.Cleanup(func() { SandboxDir = prev })
 }
 
-func TestResetFromEnvRemovesCloudRuntimeFiles(t *testing.T) {
+func TestResetFromEnvPreservesLockFiles(t *testing.T) {
 	dir := t.TempDir()
 	useSandbox(t, dir)
 	logPath := filepath.Join(dir, "runtime.jsonl")
@@ -87,10 +87,13 @@ func TestResetFromEnvRemovesCloudRuntimeFiles(t *testing.T) {
 	if err := ResetFromEnv(); err != nil {
 		t.Fatalf("ResetFromEnv returned error: %v", err)
 	}
-	for _, path := range []string{logPath, logPath + ".lock", statePath} {
+	for _, path := range []string{logPath, statePath} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("%s still exists, stat err=%v", path, err)
 		}
+	}
+	if _, err := os.Stat(logPath + ".lock"); err != nil {
+		t.Fatalf("runtime lock must retain its stable identity: %v", err)
 	}
 }
 
