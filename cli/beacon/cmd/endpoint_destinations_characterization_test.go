@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/siempack"
 )
 
 // These characterization tests pin the externally observable behavior of every
@@ -144,7 +146,8 @@ func TestDestinationCommandsCharacterization(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%s print-config returned error: %v", tc.group, err)
 				}
-				if !strings.Contains(out, logPath) {
+				// TOML configs write the path escaped; on Windows that doubles its backslashes.
+				if !strings.Contains(out, logPath) && !strings.Contains(out, siempack.TOMLEscape(logPath)) {
 					t.Fatalf("%s print-config did not wire --log-path %q through to output:\n%s", tc.group, logPath, out)
 				}
 			})

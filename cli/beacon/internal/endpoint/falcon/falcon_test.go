@@ -9,6 +9,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/siempack"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
@@ -243,7 +244,7 @@ func TestConfigSnippet_DefaultLogPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConfigSnippet with empty path returned error: %v", err)
 	}
-	if !strings.Contains(got, DefaultLogPath) {
+	if !strings.Contains(got, siempack.TOMLEscape(DefaultLogPath)) {
 		t.Fatalf("ConfigSnippet with empty logPath should use DefaultLogPath %q, got: %s", DefaultLogPath, got)
 	}
 }

@@ -39,6 +39,21 @@ func RenderLogPath(content, logPath string) string {
 	return strings.ReplaceAll(content, backfillLogPathToken, BackfillLogPath(logPath))
 }
 
+func renderTOMLLogPath(content, logPath string) string {
+	return strings.NewReplacer(
+		logPathToken, TOMLEscape(logPath),
+		inventoryLogPathToken, TOMLEscape(InventoryLogPath(logPath)),
+		backfillLogPathToken, TOMLEscape(BackfillLogPath(logPath)),
+	).Replace(content)
+}
+
+// TOMLEscape is value as it is written inside a TOML basic string. JSON string escapes are also
+// valid there, but TOML additionally forbids a literal DEL. Sibling paths are derived before
+// encoding, so escapes never reach filepath.Dir.
+func TOMLEscape(value string) string {
+	return strings.ReplaceAll(JSONEscapeForString(value), "\x7f", `\u007f`)
+}
+
 // BackfillLogPath is BackfillLogName beside logPath.
 func BackfillLogPath(logPath string) string {
 	if logPath == "" {
@@ -68,11 +83,14 @@ func Install(outputDir string, files []File, logPath string) error {
 	for _, file := range files {
 		content := file.Content
 		if file.TemplateLogPath {
-			lp := logPath
-			if file.JSONEscape {
-				lp = JSONEscapeForString(lp)
+			switch {
+			case file.JSONEscape:
+				content = RenderLogPath(content, JSONEscapeForString(logPath))
+			case isTOMLAsset(file.Name):
+				content = renderTOMLLogPath(content, logPath)
+			default:
+				content = RenderLogPath(content, logPath)
 			}
-			content = RenderLogPath(content, lp)
 		}
 		if err := os.WriteFile(filepath.Join(outputDir, file.Name), []byte(content), Mode(file.Name)); err != nil {
 			return err
@@ -167,7 +185,16 @@ func (p Pack) Render(assetPath, logPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if isTOMLAsset(assetPath) {
+		return renderTOMLLogPath(content, logPath), nil
+	}
 	return RenderLogPath(content, logPath), nil
+}
+
+// isTOMLAsset reports whether name, with or without its .tmpl suffix, is a TOML file, whose log
+// paths must be escaped for a basic string.
+func isTOMLAsset(name string) bool {
+	return filepath.Ext(strings.TrimSuffix(name, ".tmpl")) == ".toml"
 }
 
 // Install writes the pack files to outputDir (defaulting to DefaultOutputDir),
