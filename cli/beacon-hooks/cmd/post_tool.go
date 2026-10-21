@@ -213,11 +213,6 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 	if platformFlag == "antigravity" && getFirstStr(input, "error") != "" {
 		return nil
 	}
-	// A reconstructable Grok write must reach the failure emitter before its
-	// requested content can be recorded as a completed edit.
-	if platformFlag == "grok" && reportedPostToolFailure(getFirstStr(input, "hook_event_name", "hookEventName"), input) {
-		return nil
-	}
 
 	// A failure is not an edit.
 	//
@@ -228,11 +223,15 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 	// missing the event: the log would assert a file changed when it did not.
 	//
 	// Returning nil hands the payload back to emitPostToolObserved, which classifies it as
-	// `tool.failed` at high severity. Antigravity guards the same way just above, for the same
-	// reason. Scoped to the platform rather than applied to every runtime because the branch above
-	// establishes that each runtime's failure signal is its own; widening it would change Claude
-	// Code's recorded behavior with no fixture to say what that behavior should become.
+	// `tool.failed` at high severity. Antigravity guards the same way just above, and Grok just
+	// below, for the same reason. Scoped to the platform rather than applied to every runtime
+	// because the branch above establishes that each runtime's failure signal is its own; widening
+	// it would change Claude Code's recorded behavior with no fixture to say what that behavior
+	// should become.
 	if platformFlag == "qwen" && qwenToolFailed(input) {
+		return nil
+	}
+	if platformFlag == "grok" && reportedPostToolFailure(getFirstStr(input, "hook_event_name", "hookEventName"), input) {
 		return nil
 	}
 
