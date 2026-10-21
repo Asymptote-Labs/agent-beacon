@@ -1784,6 +1784,23 @@ func TestEventFromLogOmitsUserAgentWithoutIdentity(t *testing.T) {
 	}
 }
 
+// The browser extension cuts an oversized prompt, response or tool field before sending and says
+// so on the record. The flag has to reach field_truncated: metadata-only forwarding drops raw
+// attributes, and field_truncated is what downstream consumers read.
+func TestEventFromLogPromotesBrowserFieldTruncated(t *testing.T) {
+	for _, truncated := range []bool{true, false} {
+		logs := browserExtensionLogs(false)
+		record := logs.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0)
+		if truncated {
+			record.Attributes().PutBool("beacon.field_truncated", true)
+		}
+		events := NewConverter(Options{}).EventsFromLogs(logs)
+		if len(events) != 1 || events[0].Truncated != truncated {
+			t.Fatalf("beacon.field_truncated=%v: field_truncated = %v", truncated, events[0].Truncated)
+		}
+	}
+}
+
 func TestUserAgentFromAttrs(t *testing.T) {
 	cases := []struct {
 		name  string
