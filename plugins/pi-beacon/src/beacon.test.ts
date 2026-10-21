@@ -45,6 +45,35 @@ afterEach(() => {
 })
 
 describe("beacon pi extension", () => {
+  test("retains a public tool result around an unreadable optional metadata getter", async () => {
+    const sent = captureSends()
+    const pi = fakePi()
+    createBeaconExtension().register(pi.api)
+    let reads = 0
+    const details = Object.defineProperty({ text: "kept", nested: { count: 2n } }, "optional", {
+      enumerable: true, get() { reads++; throw new Error("provider state unavailable") },
+    })
+    const before = Object.getOwnPropertyDescriptors(details)
+    const event = { type: "tool_result", toolCallId: "call-salvage", toolName: "read", details }
+    await expect(pi.fire(event, context())).resolves.toBeUndefined()
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({ type: "tool_result", sessionId: "sess-1", cwd: "/repo", toolCallId: "call-salvage", details: { text: "kept", nested: { count: "2" } } })
+    expect(reads).toBe(1)
+    expect(Object.getOwnPropertyDescriptors(details)).toEqual(before)
+    expect(event.details).toBe(details)
+  })
+
+  test("retains a public tool envelope when unreadable proxy metadata cannot enumerate", async () => {
+    const sent = captureSends()
+    const pi = fakePi()
+    createBeaconExtension().register(pi.api)
+    const details = new Proxy({}, { ownKeys() { throw new Error("metadata unavailable") } })
+    await pi.fire({ type: "tool_result", toolName: "read", details, result: "kept" }, context())
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({ type: "tool_result", sessionId: "sess-1", result: "kept" })
+    expect(sent[0]).not.toHaveProperty("details")
+  })
+
   test("retains an event containing an invalid Date with native JSON date semantics", async () => {
     const sent = captureSends()
     const metadata = { invalid: new Date(NaN), valid: new Date("2026-01-02T03:04:05Z") }

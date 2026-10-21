@@ -110,21 +110,66 @@ function safeClone(value: unknown, depth = 0, seen = new WeakSet<object>()): unk
   if (depth >= maxDepth) return undefined
 
   if (seen.has(value)) return undefined
-  if (value instanceof Error) return { name: value.name, message: value.message }
-  // Match native JSON: an invalid Date is null, not a lost event.
-  if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.toISOString() : null
-
   seen.add(value)
   try {
+    // Use native Date behavior without calling provider-overridden methods or toJSON.
+    if (value instanceof Date) {
+      return Number.isFinite(Date.prototype.getTime.call(value)) ? Date.prototype.toISOString.call(value) : null
+    }
     if (Array.isArray(value)) {
-      return value.map((item) => safeClone(item, depth + 1, seen))
+      const length = Reflect.getOwnPropertyDescriptor(value, "length")?.value
+      if (!Number.isInteger(length) || length < 0 || length > 0xffffffff) return undefined
+      const out = new Array(length)
+      // map also consults inherited slots and methods, and probes every sparse position.
+      for (const key of Reflect.ownKeys(value)) {
+        if (typeof key !== "string") continue
+        const index = Number(key)
+        if (!Number.isInteger(index) || index < 0 || index >= length || String(index) !== key) continue
+        try {
+          if (Reflect.getOwnPropertyDescriptor(value, key)?.enumerable) {
+            out[index] = safeClone(Reflect.get(value, key), depth + 1, seen)
+          }
+        } catch {
+          // An unreadable slot stays a hole without losing the rest of the array.
+        }
+      }
+      return out
     }
     const out: Record<string, unknown> = {}
-    for (const [key, nested] of Object.entries(value)) {
-      const cloned = safeClone(nested, depth + 1, seen)
-      if (cloned !== undefined) out[key] = cloned
+    if (value instanceof Error) {
+      for (const key of ["name", "message"]) {
+        try {
+          let owner = value
+          let descriptor
+          for (let level = 0; owner && level <= maxDepth; level++) {
+            descriptor = Reflect.getOwnPropertyDescriptor(owner, key)
+            if (descriptor) break
+            owner = Reflect.getPrototypeOf(owner)
+          }
+          // Preserve native inherited data names, never inherited accessor execution.
+          if (!descriptor || (owner !== value && !("value" in descriptor))) continue
+          const cloned = safeClone(Reflect.get(value, key), depth + 1, seen)
+          if (cloned !== undefined) out[key] = cloned
+        } catch {
+          // Error overrides can expire just like other live runtime properties.
+        }
+      }
+      return out
+    }
+    for (const key of Reflect.ownKeys(value)) {
+      if (typeof key !== "string" || key === "__proto__") continue
+      try {
+        if (!Reflect.getOwnPropertyDescriptor(value, key)?.enumerable) continue
+        const cloned = safeClone(Reflect.get(value, key), depth + 1, seen)
+        if (cloned !== undefined) out[key] = cloned
+      } catch {
+        // A bad getter or proxy read costs its field, not the enclosing event.
+      }
     }
     return out
+  } catch {
+    // Enumeration and revoked proxies can make a whole container inaccessible.
+    return undefined
   } finally {
     seen.delete(value)
   }

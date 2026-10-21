@@ -51,6 +51,167 @@ const implementations: Array<[string, SafeClone]> = [
 ]
 
 describe.each(implementations)("%s", (_name, safeClone) => {
+  describe("own-property salvage", () => {
+    test("omits one unreadable own field while retaining siblings and single reads", () => {
+      let goodReads = 0
+      let badReads = 0
+      const value = Object.defineProperties({ before: 1, after: { text: "kept" } }, {
+        readable: { enumerable: true, get() { goodReads++; return 2 } },
+        unavailable: { enumerable: true, get() { badReads++; throw new Error("optional field unavailable") } },
+      })
+      const before = Object.getOwnPropertyDescriptors(value)
+      expect(safeClone(value)).toEqual({ before: 1, after: { text: "kept" }, readable: 2 })
+      expect(goodReads).toBe(1)
+      expect(badReads).toBe(1)
+      expect(Object.getOwnPropertyDescriptors(value)).toEqual(before)
+    })
+
+    test("keeps own class data without inherited, hidden, symbol or toJSON execution", () => {
+      let unwantedReads = 0
+      class LiveResult {
+        text = "kept"
+        #private = "secret"
+        get inherited() { unwantedReads++; throw new Error(this.#private) }
+        toJSON() { unwantedReads++; return "replacement" }
+      }
+      const value = new LiveResult()
+      Object.defineProperty(value, "hidden", { get() { unwantedReads++; throw new Error("hidden") } })
+      Object.defineProperty(value, Symbol("private"), { enumerable: true, get() { unwantedReads++; throw new Error("symbol") } })
+      expect(JSON.stringify(safeClone(value))).toBe('{"text":"kept"}')
+      expect(unwantedReads).toBe(0)
+    })
+
+    test("retains array positions around an unreadable own accessor", () => {
+      let reads = 0
+      const value = [1, 2, 3]
+      Object.defineProperty(value, "1", { enumerable: true, get() { reads++; throw new Error("unreadable slot") } })
+      const out = safeClone(value) as unknown[]
+      expect(out.length).toBe(3)
+      expect(1 in out).toBe(false)
+      expect(JSON.stringify(out)).toBe("[1,null,3]")
+      expect(reads).toBe(1)
+    })
+
+    test("never reads inherited array slots, hidden slots or an overridden map", () => {
+      let reads = 0
+      const value = [1, 2, 3, , 5]
+      Object.defineProperty(value, "1", { value: 2, enumerable: false })
+      Object.defineProperty(value, "map", { get() { reads++; throw new Error("custom map") } })
+      Object.setPrototypeOf(value, Object.create(Array.prototype, {
+        3: { get() { reads++; throw new Error("inherited slot") } },
+      }))
+      const out = safeClone(value) as unknown[]
+      expect(out.length).toBe(5)
+      expect(1 in out).toBe(false)
+      expect(3 in out).toBe(false)
+      expect(JSON.stringify(out)).toBe("[1,null,3,null,5]")
+      expect(reads).toBe(0)
+    })
+
+    test("walks sparse own entries without probing every absent array position", () => {
+      let probes = 0
+      const value = new Array(100000)
+      value[99999] = "last"
+      const proxy = new Proxy(value, {
+        has(target, key) { if (++probes > 10) throw new Error("unbounded absent-slot probing"); return Reflect.has(target, key) },
+      })
+      const out = safeClone(proxy) as unknown[]
+      expect(out.length).toBe(100000)
+      expect(out[99999]).toBe("last")
+      expect(0 in out).toBe(false)
+      expect(probes).toBe(0)
+    })
+
+    test("omits an array whose proxy reports an invalid length descriptor", () => {
+      const broken = new Proxy(["private"], {
+        getOwnPropertyDescriptor(target, key) {
+          const descriptor = Reflect.getOwnPropertyDescriptor(target, key)
+          return key === "length" ? { ...descriptor, value: "not a length" } : descriptor
+        },
+      })
+      expect(safeClone({ broken, keep: "kept" })).toEqual({ keep: "kept" })
+    })
+
+    test("isolates a throwing proxy descriptor from the remaining own keys", () => {
+      const reads: string[] = []
+      const proxy = new Proxy({ first: 1, unavailable: 2, last: 3 }, {
+        getOwnPropertyDescriptor(target, key) {
+          if (key === "unavailable") throw new Error("descriptor unavailable")
+          return Reflect.getOwnPropertyDescriptor(target, key)
+        },
+        get(target, key, receiver) { reads.push(String(key)); return Reflect.get(target, key, receiver) },
+      })
+      expect(safeClone(proxy)).toEqual({ first: 1, last: 3 })
+      expect(reads).toEqual(["first", "last"])
+    })
+
+    test("guards each proxy read once without bypassing its access refusal", () => {
+      const reads: string[] = []
+      const proxy = new Proxy({ first: 1, unavailable: "private", last: 3 }, {
+        get(target, key, receiver) {
+          reads.push(String(key))
+          if (key === "unavailable") throw new Error("read denied")
+          return Reflect.get(target, key, receiver)
+        },
+      })
+      expect(safeClone(proxy)).toEqual({ first: 1, last: 3 })
+      expect(reads).toEqual(["first", "unavailable", "last"])
+    })
+
+    test.each(["ownKeys", "revoked"])("omits only a container with %s failure", (kind) => {
+      let broken: unknown
+      if (kind === "ownKeys") broken = new Proxy({ private: "not exposed" }, { ownKeys() { throw new Error("keys unavailable") } })
+      else {
+        const value = Proxy.revocable({}, {})
+        value.revoke()
+        broken = value.proxy
+      }
+      expect(safeClone({ before: 1, broken, after: 2 })).toEqual({ before: 1, after: 2 })
+    })
+
+    test("guards Error metadata and never invokes an inherited error getter", () => {
+      let ownReads = 0
+      let inheritedReads = 0
+      const own = new Error("kept")
+      Object.defineProperty(own, "name", { get() { ownReads++; throw new Error("name unavailable") } })
+      class ProviderError extends Error {}
+      Object.defineProperty(ProviderError.prototype, "name", { get() { inheritedReads++; throw new Error("inherited name") } })
+      expect(safeClone({ own, inherited: new ProviderError("kept too"), tail: true })).toEqual({
+        own: { message: "kept" }, inherited: { message: "kept too" }, tail: true,
+      })
+      expect(ownReads).toBe(1)
+      expect(inheritedReads).toBe(0)
+    })
+
+    test("does not leak a live cyclic object through overridden Error metadata", () => {
+      const error = new Error("kept")
+      Object.defineProperty(error, "name", { value: error, enumerable: true })
+      expect(safeClone(error)).toEqual({ message: "kept" })
+      expect(JSON.stringify(safeClone(error))).toBe('{"message":"kept"}')
+    })
+
+    test("uses native Date values without executing overridden methods or toJSON", () => {
+      let calls = 0
+      const date = new Date(0)
+      Object.defineProperty(date, "getTime", { get() { calls++; throw new Error("custom getTime") } })
+      date.toISOString = () => { calls++; throw new Error("custom ISO") }
+      date.toJSON = () => { calls++; throw new Error("custom JSON") }
+      const invalid = new Date(NaN)
+      invalid.getTime = () => 0
+      invalid.toISOString = () => "not a date"
+      expect(safeClone({ date, invalid })).toEqual({ date: "1970-01-01T00:00:00.000Z", invalid: null })
+      expect(calls).toBe(0)
+    })
+
+    test("preserves existing healthy class, date, error, bigint, cycle and depth controls", () => {
+      class Result { text = "kept" }
+      const shared = new Result()
+      const value: any = { first: shared, second: shared, date: new Date(0), error: new TypeError("bad"), count: 9n, deep: chain(40, "deep") }
+      value.self = value
+      expect(safeClone(value)).toEqual({ first: { text: "kept" }, second: { text: "kept" }, date: "1970-01-01T00:00:00.000Z", error: { name: "TypeError", message: "bad" }, count: "9", deep: chain(6, {}) })
+    })
+  })
+
   describe("primitives", () => {
     test("pass through unchanged", () => {
       expect(safeClone("text")).toBe("text")
