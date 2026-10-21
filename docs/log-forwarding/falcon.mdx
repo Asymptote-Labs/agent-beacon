@@ -303,7 +303,7 @@ sudo launchctl print system/com.beacon.endpoint.collector
 
 ## Content handling
 
-Beacon applies redaction, sanitization, truncation, and event-size limits before events are written locally or forwarded through Falcon HEC. Review repository access, parser behavior, retention, and downstream consumers so retained telemetry matches your approved collection policy.
+Beacon redacts secrets before events are written locally or forwarded through Falcon HEC. Truncation and event-size limits apply to the local runtime log only, so forwarded events can carry longer content than the log does. Review repository access, parser behavior, retention, and downstream consumers so retained telemetry matches your approved collection policy.
 
 ## Related
 

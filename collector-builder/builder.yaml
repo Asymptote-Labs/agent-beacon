@@ -12,6 +12,9 @@ processors:
   - gomod: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter v0.0.0
     import: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/claudeapibodyprocessor
     path: ./exporter/beaconjsonexporter
+  - gomod: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter v0.0.0
+    import: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/privacyprocessor
+    path: ./exporter/beaconjsonexporter
 
 exporters:
   - gomod: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter v0.0.0

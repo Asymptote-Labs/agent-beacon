@@ -12,7 +12,7 @@ import (
 // requiredProcessors are the processors ConfigYAML puts in every pipeline that a collector older
 // than this CLI does not have. A collector refuses a whole config that names a component it does
 // not know, so one of these missing stops capture for every runtime, not just the one it serves.
-var requiredProcessors = []string{"claude_api_body"}
+var requiredProcessors = []string{"claude_api_body", "beacon_privacy"}
 
 // listComponents runs `beacon-otelcol components`, which prints what the binary was built with.
 var listComponents = func(ctx context.Context, binary string) ([]byte, error) {
