@@ -194,8 +194,11 @@ func TraceEventType(event Event) string {
 		return "user_message"
 	case action == "agent.reasoning" || strings.Contains(action, "reasoning"):
 		return "agent_reasoning"
-	case action == "agent.message" || action == "assistant.message" || action == "agent.response":
-		// OpenCode records the assistant's text as agent.response.
+	case action == "agent.response.completed" && category == "session" && RetainedOutputText(event.GenAI, GenAIPartTypeText) == "":
+		// OpenCode reports the answer separately from its session completion's usage.
+		return "session"
+	case action == "agent.message" || action == "assistant.message" || action == "agent.response" ||
+		action == "agent.response.completed" || action == "agent.plan":
 		return "agent_message"
 	case strings.HasPrefix(action, "tool.invoked") || action == "tool.started":
 		return "tool_call"
@@ -269,6 +272,10 @@ func traceEventContent(event Event) *TraceContentV1 {
 		// retained.
 		if text := RetainedOutputText(event.GenAI, partType); text != "" {
 			return retainedOutputContent(text, event.Content)
+		}
+		if strings.EqualFold(event.Event.Action, "agent.response.completed") {
+			// The completion's message is a lifecycle label, not a retained answer.
+			return contentFromContentInfo(event.Content)
 		}
 		if event.Message != "" {
 			return contentFromText(event.Message, event.Content)
