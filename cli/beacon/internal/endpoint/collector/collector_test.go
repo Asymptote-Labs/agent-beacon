@@ -34,39 +34,53 @@ func testConfig(t *testing.T) endpointconfig.Config {
 	}
 }
 
-func TestPrivacyRunsBeforeFanoutForEverySignal(t *testing.T) {
-	cfg := testConfig(t)
-	cfg.Destinations = &endpointconfig.Destinations{
-		SplunkHEC: &endpointconfig.SplunkHEC{Endpoint: "https://splunk.example/services/collector", Token: "test-token"},
-		FalconHEC: &endpointconfig.FalconHEC{Endpoint: "https://falcon.example/api/v1/ingest/hec", Token: "test-token"},
-	}
-	var rendered struct {
-		Processors map[string]any `yaml:"processors"`
-		Service    struct {
-			Pipelines map[string]struct {
-				Processors []string `yaml:"processors"`
-				Exporters  []string `yaml:"exporters"`
-			} `yaml:"pipelines"`
-		} `yaml:"service"`
-	}
-	if err := yaml.Unmarshal([]byte(ConfigYAML(cfg)), &rendered); err != nil {
-		t.Fatal(err)
-	}
-	if _, exists := rendered.Processors["beacon_privacy"]; !exists {
-		t.Fatal("privacy processor not configured")
-	}
-	for _, signal := range []string{"logs", "traces", "metrics"} {
-		pipeline := rendered.Service.Pipelines[signal]
-		want := "memory_limiter,beacon_privacy,batch"
-		if signal == "logs" {
-			want = "memory_limiter,claude_api_body,beacon_privacy,batch"
-		}
-		if strings.Join(pipeline.Processors, ",") != want {
-			t.Fatalf("%s processor order = %v", signal, pipeline.Processors)
-		}
-		if strings.Join(pipeline.Exporters, ",") != "beaconjson,splunk_hec,falcon_hec" {
-			t.Fatalf("%s fanout = %v", signal, pipeline.Exporters)
-		}
+// The direct HEC exporters send what they receive, so privacy has to run before the fanout. The
+// local writer redacts on its own, so a config without them keeps its pipelines unchanged.
+func TestPrivacyRunsBeforeHECFanoutForEverySignal(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		destinations *endpointconfig.Destinations
+		privacy      string
+		exporters    string
+	}{
+		{"hec", &endpointconfig.Destinations{
+			SplunkHEC: &endpointconfig.SplunkHEC{Endpoint: "https://splunk.example/services/collector", Token: "test-token"},
+			FalconHEC: &endpointconfig.FalconHEC{Endpoint: "https://falcon.example/api/v1/ingest/hec", Token: "test-token"},
+		}, "beacon_privacy,", "beaconjson,splunk_hec,falcon_hec"},
+		{"local only", nil, "", "beaconjson"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testConfig(t)
+			cfg.Destinations = tc.destinations
+			var rendered struct {
+				Processors map[string]any `yaml:"processors"`
+				Service    struct {
+					Pipelines map[string]struct {
+						Processors []string `yaml:"processors"`
+						Exporters  []string `yaml:"exporters"`
+					} `yaml:"pipelines"`
+				} `yaml:"service"`
+			}
+			if err := yaml.Unmarshal([]byte(ConfigYAML(cfg)), &rendered); err != nil {
+				t.Fatal(err)
+			}
+			if _, exists := rendered.Processors["beacon_privacy"]; exists != (tc.privacy != "") {
+				t.Fatalf("beacon_privacy declared = %v, want %v", exists, tc.privacy != "")
+			}
+			for _, signal := range []string{"logs", "traces", "metrics"} {
+				pipeline := rendered.Service.Pipelines[signal]
+				want := "memory_limiter," + tc.privacy + "batch"
+				if signal == "logs" {
+					want = "memory_limiter,claude_api_body," + tc.privacy + "batch"
+				}
+				if strings.Join(pipeline.Processors, ",") != want {
+					t.Fatalf("%s processor order = %v, want %s", signal, pipeline.Processors, want)
+				}
+				if strings.Join(pipeline.Exporters, ",") != tc.exporters {
+					t.Fatalf("%s fanout = %v", signal, pipeline.Exporters)
+				}
+			}
+		})
 	}
 }
 
@@ -94,7 +108,7 @@ func TestConfigYAMLIncludesReleaseContractFields(t *testing.T) {
 		"  claude_api_body:\n",
 		// Ahead of the fan-out to exporters, so Claude Code API bodies are filtered for every
 		// destination, not only the local runtime log.
-		"processors: [memory_limiter, claude_api_body, beacon_privacy, batch]",
+		"processors: [memory_limiter, claude_api_body, batch]",
 	} {
 		if !strings.Contains(yaml, want) {
 			t.Fatalf("ConfigYAML missing %q:\n%s", want, yaml)
