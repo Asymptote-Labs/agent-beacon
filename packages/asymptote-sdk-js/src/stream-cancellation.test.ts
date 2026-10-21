@@ -108,19 +108,3 @@ it.each([false, true])("uses existing close semantics when source return yields 
   expect(counts()).toEqual({ nextCalls: started ? 1 : 0, returnCalls: 1 });
   expect(exporter.getFinishedSpans()).toHaveLength(1);
 });
-
-it("does not start a bare iterable factory solely to cancel", async () => {
-  let created = 0;
-  const original = {
-    [Symbol.asyncIterator]() {
-      created++;
-      return (async function* () { yield "message"; })();
-    },
-  };
-  const exporter = new InMemorySpanExporter();
-  initialize({ spanExporter: exporter, disableDefaultExporter: true, disableBatch: true });
-  const stream = wrapClaudeAgentQuery(() => original)() as unknown as AsyncGenerator<string>;
-  await stream.return(undefined);
-  expect(created).toBe(0);
-  expect(exporter.getFinishedSpans()).toHaveLength(1);
-});

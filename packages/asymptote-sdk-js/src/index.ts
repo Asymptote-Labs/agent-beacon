@@ -570,7 +570,7 @@ function finishResult<T>(result: T, span: Span, options?: ObserveOptions): unkno
     const iterator = finishAsyncIterable(result, span);
     // return() or throw() on an unstarted async generator settles it without running its finally
     // block, so the span would never end and an already-created query (which owns the Claude CLI
-    // process) would never be closed. Do both here. A bare iterable is never started to close it.
+    // process) would never be closed. Do both here.
     let started = false;
     async function closeUnstarted(settled: Promise<IteratorResult<unknown>>) {
       const close = (result as Partial<AsyncIterator<unknown>>).return;
