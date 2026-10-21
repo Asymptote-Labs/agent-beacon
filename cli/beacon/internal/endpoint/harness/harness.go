@@ -13,6 +13,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/devinsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/cowork"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/hermessession"
@@ -314,13 +315,17 @@ func DiscoverDevin() Harness {
 	if !h.Detected && (dirExists(filepath.Join(home, ".config", "devin")) || dirExists(".devin")) {
 		h.Detected = true
 	}
+	if dbPath := devinsession.DefaultDBPath(); fileExists(dbPath) {
+		h.Detected = true
+		h.Message = fmt.Sprintf(" Session history found at %s; read it with beacon endpoint devin sync.", dbPath)
+	}
 	if fileExists(h.ConfigPath) {
 		status, msg := devinStatus(h.ConfigPath, "devin", "devin-cli")
 		h.TelemetryStatus = status
-		h.Message = msg
+		h.Message = msg + h.Message
 	} else {
 		h.TelemetryStatus = TelemetryMissing
-		h.Message = "Devin CLI endpoint hooks were not found"
+		h.Message = "Devin CLI endpoint hooks were not found" + h.Message
 	}
 	return h
 }
