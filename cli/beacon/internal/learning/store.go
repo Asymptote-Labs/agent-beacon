@@ -454,11 +454,20 @@ func (s *Store) ListEvaluations(query Query) ([]asymptoteobserve.LearningEvaluat
 	}
 	defer db.Close()
 	where, args := queryWhere(query, "project_id", "status", "")
-	rows, err := db.Query(`SELECT evaluation_json FROM evaluations`+where+` ORDER BY updated_at DESC LIMIT ? OFFSET ?`, append(args, normalizeLimit(query.Limit), offset(query))...)
+	hasTextFilter := strings.TrimSpace(query.Q) != ""
+	sqlQuery := `SELECT evaluation_json FROM evaluations` + where + ` ORDER BY updated_at DESC`
+	if !hasTextFilter {
+		args = append(args, normalizeLimit(query.Limit), offset(query))
+		sqlQuery += ` LIMIT ? OFFSET ?`
+	}
+	rows, err := db.Query(sqlQuery, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	limit := normalizeLimit(query.Limit)
+	skip := offset(query)
+	matches := 0
 	var out []asymptoteobserve.LearningEvaluationV1
 	for rows.Next() {
 		var raw string
@@ -469,7 +478,19 @@ func (s *Store) ListEvaluations(query Query) ([]asymptoteobserve.LearningEvaluat
 		if err := json.Unmarshal([]byte(raw), &value); err != nil {
 			return nil, err
 		}
-		if query.Q == "" || matchesText(query.Q, value.ID, value.Trace.ID, value.Trace.Title, value.Evaluator, value.Status) {
+		if hasTextFilter {
+			if !matchesText(query.Q, value.ID, value.Trace.ID, value.Trace.Title, value.Evaluator, value.Status) {
+				continue
+			}
+			matches++
+			if matches <= skip {
+				continue
+			}
+			out = append(out, value)
+			if len(out) >= limit {
+				break
+			}
+		} else {
 			out = append(out, value)
 		}
 	}
@@ -528,11 +549,20 @@ func (s *Store) ListCandidates(query Query) ([]asymptoteobserve.LearningCandidat
 	}
 	defer db.Close()
 	where, args := queryWhere(query, "project_id", "state", "kind")
-	rows, err := db.Query(`SELECT candidate_json FROM candidates`+where+` ORDER BY updated_at DESC LIMIT ? OFFSET ?`, append(args, normalizeLimit(query.Limit), offset(query))...)
+	hasTextFilter := strings.TrimSpace(query.Q) != ""
+	sqlQuery := `SELECT candidate_json FROM candidates` + where + ` ORDER BY updated_at DESC`
+	if !hasTextFilter {
+		args = append(args, normalizeLimit(query.Limit), offset(query))
+		sqlQuery += ` LIMIT ? OFFSET ?`
+	}
+	rows, err := db.Query(sqlQuery, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	limit := normalizeLimit(query.Limit)
+	skip := offset(query)
+	matches := 0
 	var out []asymptoteobserve.LearningCandidateV1
 	for rows.Next() {
 		var raw string
@@ -543,7 +573,19 @@ func (s *Store) ListCandidates(query Query) ([]asymptoteobserve.LearningCandidat
 		if err := json.Unmarshal([]byte(raw), &value); err != nil {
 			return nil, err
 		}
-		if query.Q == "" || matchesText(query.Q, value.ID, value.Title, value.Body, value.Kind, value.State) {
+		if hasTextFilter {
+			if !matchesText(query.Q, value.ID, value.Title, value.Body, value.Kind, value.State) {
+				continue
+			}
+			matches++
+			if matches <= skip {
+				continue
+			}
+			out = append(out, value)
+			if len(out) >= limit {
+				break
+			}
+		} else {
 			out = append(out, value)
 		}
 	}
