@@ -118,3 +118,63 @@ func TestValidateCollectorPortsRejectsAHealthPortTheCollectorCannotBind(t *testi
 		}
 	}
 }
+
+func TestValidateCollectorPortsRejectsInvalidReceiverEndpoints(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		collector Collector
+		flags     []string
+	}{
+		{"negative gRPC", Collector{GRPCPort: -1, HTTPPort: 4318}, []string{"--otlp-grpc-port"}},
+		{"zero gRPC", Collector{GRPCPort: 0, HTTPPort: 4318}, []string{"--otlp-grpc-port"}},
+		{"oversized gRPC", Collector{GRPCPort: 65536, HTTPPort: 4318}, []string{"--otlp-grpc-port"}},
+		{"negative HTTP", Collector{GRPCPort: 4317, HTTPPort: -1}, []string{"--otlp-http-port"}},
+		{"zero HTTP", Collector{GRPCPort: 4317, HTTPPort: 0}, []string{"--otlp-http-port"}},
+		{"oversized HTTP", Collector{GRPCPort: 4317, HTTPPort: 65536}, []string{"--otlp-http-port"}},
+		{"same receiver ports", Collector{GRPCPort: 4317, HTTPPort: 4317}, []string{"--otlp-grpc-port", "--otlp-http-port"}},
+		{"negative health", Collector{GRPCPort: 4317, HTTPPort: 4318, HealthPort: -1}, []string{"--health-port"}},
+		{"oversized health", Collector{GRPCPort: 4317, HTTPPort: 4318, HealthPort: 65536}, []string{"--health-port"}},
+		{"health equals gRPC", Collector{GRPCPort: 4317, HTTPPort: 4318, HealthPort: 4317}, []string{"--health-port"}},
+		{"health equals HTTP", Collector{GRPCPort: 4317, HTTPPort: 4318, HealthPort: 4318}, []string{"--health-port"}},
+		{"legacy health equals gRPC", Collector{GRPCPort: DefaultHealthCheckPort, HTTPPort: 4318}, []string{"--health-port"}},
+		{"legacy health equals HTTP", Collector{GRPCPort: 4317, HTTPPort: DefaultHealthCheckPort}, []string{"--health-port"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := tc.collector
+			err := ValidateCollectorPorts(tc.collector)
+			if err == nil {
+				t.Fatalf("accepted unbindable collector endpoints: %+v", tc.collector)
+			}
+			for _, flag := range tc.flags {
+				if !strings.Contains(err.Error(), flag) {
+					t.Errorf("error %q does not name %s", err, flag)
+				}
+			}
+			if tc.collector != before {
+				t.Fatal("validation changed the collector configuration")
+			}
+		})
+	}
+}
+
+func TestValidateCollectorPortsAcceptsDistinctBoundaryAndLegacyPorts(t *testing.T) {
+	for name, collector := range map[string]Collector{
+		"legacy defaults":       {GRPCPort: 4317, HTTPPort: 4318},
+		"legacy alternate OTLP": {GRPCPort: 4327, HTTPPort: 4328},
+		"derived alternate":     {GRPCPort: 4327, HTTPPort: 4328, HealthPort: 13143},
+		"gRPC minimum":          {GRPCPort: 1, HTTPPort: 65535, HealthPort: 2},
+		"HTTP minimum":          {GRPCPort: 65535, HTTPPort: 1, HealthPort: 65534},
+		"health minimum":        {GRPCPort: 4317, HTTPPort: 4318, HealthPort: 1},
+		"health maximum":        {GRPCPort: 4317, HTTPPort: 4318, HealthPort: 65535},
+	} {
+		t.Run(name, func(t *testing.T) {
+			before := collector
+			if err := ValidateCollectorPorts(collector); err != nil {
+				t.Fatalf("valid collector ports rejected: %v", err)
+			}
+			if collector != before {
+				t.Fatal("validation changed the collector configuration")
+			}
+		})
+	}
+}
