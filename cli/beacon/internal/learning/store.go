@@ -27,6 +27,11 @@ type Store struct {
 	dbPath string
 }
 
+type recordDB interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
 // Query selects stored learning records.
 //
 // ProjectPath is the trust boundary of this package. The CLI resolves an
@@ -465,15 +470,19 @@ func (s *Store) GetEvaluation(id string) (asymptoteobserve.LearningEvaluationV1,
 }
 
 func (s *Store) PutCandidate(c asymptoteobserve.LearningCandidateV1) error {
-	c, data, err := prepareCandidate(c)
-	if err != nil {
-		return err
-	}
 	db, err := s.db()
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+	return putCandidate(db, c)
+}
+
+func putCandidate(db recordDB, c asymptoteobserve.LearningCandidateV1) error {
+	c, data, err := prepareCandidate(c)
+	if err != nil {
+		return err
+	}
 	_, err = db.Exec(`INSERT INTO candidates (id, project_id, state, kind, title, source_evaluation_id, memory_id, created_at, updated_at, candidate_json)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET state = excluded.state, kind = excluded.kind, title = excluded.title, memory_id = excluded.memory_id, updated_at = excluded.updated_at, candidate_json = excluded.candidate_json`,
@@ -533,8 +542,17 @@ func (s *Store) ListCandidates(query Query) ([]asymptoteobserve.LearningCandidat
 }
 
 func (s *Store) GetCandidate(id string) (asymptoteobserve.LearningCandidateV1, bool, error) {
+	db, err := s.db()
+	if err != nil {
+		return asymptoteobserve.LearningCandidateV1{}, false, err
+	}
+	defer db.Close()
+	return getCandidate(db, id)
+}
+
+func getCandidate(db recordDB, id string) (asymptoteobserve.LearningCandidateV1, bool, error) {
 	var raw string
-	ok, err := s.getJSON(`SELECT candidate_json FROM candidates WHERE id = ?`, id, &raw)
+	ok, err := getJSON(db, `SELECT candidate_json FROM candidates WHERE id = ?`, id, &raw)
 	if err != nil || !ok {
 		return asymptoteobserve.LearningCandidateV1{}, ok, err
 	}
@@ -543,6 +561,15 @@ func (s *Store) GetCandidate(id string) (asymptoteobserve.LearningCandidateV1, b
 }
 
 func (s *Store) PutMemory(m asymptoteobserve.LearningMemoryV1) error {
+	db, err := s.db()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	return putMemory(db, m)
+}
+
+func putMemory(db recordDB, m asymptoteobserve.LearningMemoryV1) error {
 	if m.SchemaVersion == "" {
 		m.SchemaVersion = asymptoteobserve.LearningSchemaVersion
 	}
@@ -558,11 +585,6 @@ func (s *Store) PutMemory(m asymptoteobserve.LearningMemoryV1) error {
 	if err != nil {
 		return err
 	}
-	db, err := s.db()
-	if err != nil {
-		return err
-	}
-	defer db.Close()
 	_, err = db.Exec(`INSERT INTO memories (id, candidate_id, project_id, kind, title, created_at, updated_at, superseded_by, memory_json)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET title = excluded.title, updated_at = excluded.updated_at, superseded_by = excluded.superseded_by, memory_json = excluded.memory_json`,
@@ -639,8 +661,17 @@ func listJSON[T any](s *Store, query Query, selectSQL string, args []interface{}
 }
 
 func (s *Store) GetMemory(id string) (asymptoteobserve.LearningMemoryV1, bool, error) {
+	db, err := s.db()
+	if err != nil {
+		return asymptoteobserve.LearningMemoryV1{}, false, err
+	}
+	defer db.Close()
+	return getMemory(db, id)
+}
+
+func getMemory(db recordDB, id string) (asymptoteobserve.LearningMemoryV1, bool, error) {
 	var raw string
-	ok, err := s.getJSON(`SELECT memory_json FROM memories WHERE id = ?`, id, &raw)
+	ok, err := getJSON(db, `SELECT memory_json FROM memories WHERE id = ?`, id, &raw)
 	if err != nil || !ok {
 		return asymptoteobserve.LearningMemoryV1{}, ok, err
 	}
@@ -654,7 +685,11 @@ func (s *Store) getJSON(query, id string, dest *string) (bool, error) {
 		return false, err
 	}
 	defer db.Close()
-	err = db.QueryRow(query, id).Scan(dest)
+	return getJSON(db, query, id, dest)
+}
+
+func getJSON(db recordDB, query, id string, dest *string) (bool, error) {
+	err := db.QueryRow(query, id).Scan(dest)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}

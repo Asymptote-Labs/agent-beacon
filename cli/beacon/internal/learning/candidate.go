@@ -133,7 +133,17 @@ func ApproveCandidateWithEdits(store *Store, id, reason string, edits ApprovalEd
 	if kind != "" && !ValidMemoryKind(kind) {
 		return asymptoteobserve.LearningCandidateV1{}, asymptoteobserve.LearningMemoryV1{}, fmt.Errorf("unknown memory kind %q (want workflow, correction, debugging_pattern, gotcha, or convention)", kind)
 	}
-	candidate, ok, err := store.GetCandidate(id)
+	db, err := store.db()
+	if err != nil {
+		return asymptoteobserve.LearningCandidateV1{}, asymptoteobserve.LearningMemoryV1{}, err
+	}
+	defer db.Close()
+	tx, err := db.Begin()
+	if err != nil {
+		return asymptoteobserve.LearningCandidateV1{}, asymptoteobserve.LearningMemoryV1{}, err
+	}
+	defer tx.Rollback()
+	candidate, ok, err := getCandidate(tx, id)
 	if err != nil {
 		return asymptoteobserve.LearningCandidateV1{}, asymptoteobserve.LearningMemoryV1{}, err
 	}
@@ -162,10 +172,13 @@ func ApproveCandidateWithEdits(store *Store, id, reason string, edits ApprovalEd
 	candidate.MemoryID = memory.ID
 	candidate.ApprovedAt = now
 	candidate.ReviewReason = strings.TrimSpace(reason)
-	if err := store.PutMemory(memory); err != nil {
+	if err := putMemory(tx, memory); err != nil {
 		return asymptoteobserve.LearningCandidateV1{}, asymptoteobserve.LearningMemoryV1{}, err
 	}
-	if err := store.PutCandidate(candidate); err != nil {
+	if err := putCandidate(tx, candidate); err != nil {
+		return asymptoteobserve.LearningCandidateV1{}, asymptoteobserve.LearningMemoryV1{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return asymptoteobserve.LearningCandidateV1{}, asymptoteobserve.LearningMemoryV1{}, err
 	}
 	return candidate, memory, nil
@@ -191,7 +204,17 @@ func approvedTags(edited, original []string) []string {
 }
 
 func RejectCandidate(store *Store, id, reason string) (asymptoteobserve.LearningCandidateV1, error) {
-	candidate, ok, err := store.GetCandidate(id)
+	db, err := store.db()
+	if err != nil {
+		return asymptoteobserve.LearningCandidateV1{}, err
+	}
+	defer db.Close()
+	tx, err := db.Begin()
+	if err != nil {
+		return asymptoteobserve.LearningCandidateV1{}, err
+	}
+	defer tx.Rollback()
+	candidate, ok, err := getCandidate(tx, id)
 	if err != nil {
 		return asymptoteobserve.LearningCandidateV1{}, err
 	}
@@ -204,7 +227,10 @@ func RejectCandidate(store *Store, id, reason string) (asymptoteobserve.Learning
 	candidate.State = asymptoteobserve.LearningCandidateStateRejected
 	candidate.RejectedAt = nowString()
 	candidate.ReviewReason = strings.TrimSpace(reason)
-	if err := store.PutCandidate(candidate); err != nil {
+	if err := putCandidate(tx, candidate); err != nil {
+		return asymptoteobserve.LearningCandidateV1{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return asymptoteobserve.LearningCandidateV1{}, err
 	}
 	return candidate, nil
@@ -214,14 +240,24 @@ func SupersedeCandidate(store *Store, id, replacementMemoryID, reason string) (a
 	if strings.TrimSpace(replacementMemoryID) == "" {
 		return asymptoteobserve.LearningCandidateV1{}, fmt.Errorf("replacement memory id is required")
 	}
-	replacement, ok, err := store.GetMemory(replacementMemoryID)
+	db, err := store.db()
+	if err != nil {
+		return asymptoteobserve.LearningCandidateV1{}, err
+	}
+	defer db.Close()
+	tx, err := db.Begin()
+	if err != nil {
+		return asymptoteobserve.LearningCandidateV1{}, err
+	}
+	defer tx.Rollback()
+	replacement, ok, err := getMemory(tx, replacementMemoryID)
 	if err != nil {
 		return asymptoteobserve.LearningCandidateV1{}, err
 	}
 	if !ok {
 		return asymptoteobserve.LearningCandidateV1{}, fmt.Errorf("replacement memory not found: %s", replacementMemoryID)
 	}
-	candidate, ok, err := store.GetCandidate(id)
+	candidate, ok, err := getCandidate(tx, id)
 	if err != nil {
 		return asymptoteobserve.LearningCandidateV1{}, err
 	}
@@ -236,21 +272,24 @@ func SupersedeCandidate(store *Store, id, replacementMemoryID, reason string) (a
 	candidate.SupersededAt = now
 	candidate.SupersededBy = replacement.ID
 	candidate.ReviewReason = strings.TrimSpace(reason)
-	if err := store.PutCandidate(candidate); err != nil {
+	if err := putCandidate(tx, candidate); err != nil {
 		return asymptoteobserve.LearningCandidateV1{}, err
 	}
 	if candidate.MemoryID != "" {
-		memory, ok, err := store.GetMemory(candidate.MemoryID)
+		memory, ok, err := getMemory(tx, candidate.MemoryID)
 		if err != nil {
 			return asymptoteobserve.LearningCandidateV1{}, err
 		}
 		if ok {
 			memory.SupersededBy = replacement.ID
 			memory.UpdatedAt = now
-			if err := store.PutMemory(memory); err != nil {
+			if err := putMemory(tx, memory); err != nil {
 				return asymptoteobserve.LearningCandidateV1{}, err
 			}
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return asymptoteobserve.LearningCandidateV1{}, err
 	}
 	return candidate, nil
 }
