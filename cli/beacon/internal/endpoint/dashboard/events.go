@@ -125,6 +125,14 @@ func ReadEventsAppendOrder(path string, query EventQuery) ([]schema.Event, error
 //     live channel started capturing the session rather than where the window starts
 //     or where its first usage record landed.
 func ReadTokenEventsAppendOrder(path string, query EventQuery) ([]schema.Event, []schema.Event, error) {
+	query.SessionState = normalizeSessionState(query.SessionState)
+	if query.SessionState != "" && query.sessionStateIDs == nil {
+		ids, err := sessionIDsForState(path, query, query.SessionState)
+		if err != nil {
+			return nil, nil, err
+		}
+		query.sessionStateIDs = ids
+	}
 	result, err := ReadEvents(path, EventQuery{NoLimit: true})
 	if err != nil {
 		return nil, nil, err
