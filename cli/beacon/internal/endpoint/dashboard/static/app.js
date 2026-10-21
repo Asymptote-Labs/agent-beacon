@@ -113,8 +113,20 @@ function hydrateFiltersFromURL() {
     if (!params.has(field)) continue;
     const value = params.get(field);
     if (field === "limit") ensureLimitOption(input, value);
+    ensureFacetOption(input, value);
     input.value = value;
   }
+}
+
+// Dynamic facet options may not have loaded yet, or may be absent from a
+// filtered summary. Preserve explicit query values until the user clears them.
+function ensureFacetOption(select, value) {
+  if (!(select instanceof HTMLSelectElement) || !["harness", "model", "repository"].includes(select.name) || !value) return;
+  if (Array.from(select.options).some((option) => option.value === value)) return;
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = select.name === "harness" ? harnessLabel(value) : select.name === "repository" ? repositoryOptionLabel(value) : value;
+  select.append(option);
 }
 
 // The limit control is a fixed <select>; a URL like ?limit=5 would otherwise
@@ -2082,7 +2094,8 @@ function renderHarnessSelect(values) {
     ...values.map((item) => `<option value="${escapeHTML(item.name)}">${escapeHTML(harnessLabel(item.name))} (${escapeHTML(item.count)})</option>`),
   ];
   select.innerHTML = options.join("");
-  select.value = values.some((item) => item.name === current) ? current : "";
+  ensureFacetOption(select, current);
+  select.value = current;
 }
 
 function renderModelSelect(values) {
@@ -2094,7 +2107,8 @@ function renderModelSelect(values) {
     ...values.map((item) => `<option value="${escapeHTML(item.name)}">${escapeHTML(item.name)} (${escapeHTML(item.count)})</option>`),
   ];
   select.innerHTML = options.join("");
-  select.value = values.some((item) => item.name === current) ? current : "";
+  ensureFacetOption(select, current);
+  select.value = current;
 }
 
 function renderRepositorySelect(values) {
@@ -2105,10 +2119,8 @@ function renderRepositorySelect(values) {
     `<option value="">All repositories</option>`,
     ...values.map((item) => `<option value="${escapeHTML(item.name)}">${escapeHTML(repositoryOptionLabel(item.name))} (${escapeHTML(item.count)})</option>`),
   ];
-  if (current && !values.some((item) => item.name === current)) {
-    options.push(`<option value="${escapeHTML(current)}">${escapeHTML(repositoryOptionLabel(current))}</option>`);
-  }
   select.innerHTML = options.join("");
+  ensureFacetOption(select, current);
   select.value = current;
 }
 
