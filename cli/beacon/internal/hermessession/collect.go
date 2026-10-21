@@ -46,6 +46,14 @@ type Cursor struct {
 type State struct {
 	Version  int                `json:"version"`
 	Sessions map[string]*Cursor `json:"sessions"`
+	// LegacyIDs marks the home whose cursor was seeded from the unkeyed legacy cursor. That home
+	// keeps the unkeyed event ids it wrote before cursors were keyed, so share refresh still finds
+	// them; see EventIDKey.
+	LegacyIDs bool `json:"legacy_ids,omitempty"`
+	// LegacyIDsHome, on the legacy cursor itself, is the key of the home that took over its unkeyed
+	// ids. While it is set, the home that owns the legacy file (the native root) is keyed instead, so
+	// exactly one home ever writes unkeyed ids.
+	LegacyIDsHome string `json:"legacy_ids_home,omitempty"`
 }
 
 type CollectOptions struct {
@@ -98,9 +106,11 @@ type Session struct {
 	ActualCostUSD    float64
 	CostStatus       string
 	CostSource       string
-	// Home is the Hermes home the row was read from. Outside the native root it is part of every
-	// event id, so a session id two homes share (a cloned profile) still names two sets of events.
+	// Home is the Hermes home the row was read from.
 	Home string
+	// IDKey prefixes every event id mapped from the session, so a session id two homes share (a
+	// cloned profile) still names two sets of events. Empty is the unkeyed form; see EventIDKey.
+	IDKey string
 }
 
 type Message struct {
@@ -141,26 +151,78 @@ func DefaultStatePath(hermesHome string) string {
 // so two homes never share a cursor even when both are the default profile of their own root or
 // hold profiles of the same name.
 func StateFileName(stem, hermesHome string) string {
-	key := homeKey(hermesHome)
-	if key == "" {
+	if isNativeRoot(hermesHome) {
 		return stem + ".json"
 	}
-	return fmt.Sprintf("%s-%s-%s.json", stem, Profile(hermesHome), key)
+	return fmt.Sprintf("%s-%s-%s.json", stem, Profile(hermesHome), homeKey(hermesHome))
 }
 
-// homeKey identifies a Hermes home other than the native root by its resolved path. It is empty for
-// the native root, and for an unknown home, so whatever that root has already written keeps its name.
+// homeKey identifies a Hermes home by its resolved path.
 func homeKey(hermesHome string) string {
-	if strings.TrimSpace(hermesHome) == "" {
-		return ""
-	}
-	resolved := canonicalHome(hermesHome)
-	userHome, _ := os.UserHomeDir()
-	if root := nativeRoot(userHome); root != "" && canonicalHome(root) == resolved {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(resolved))
+	sum := sha256.Sum256([]byte(canonicalHome(hermesHome)))
 	return fmt.Sprintf("%x", sum[:6])
+}
+
+// isNativeRoot reports whether hermesHome is the native Hermes data root, the home whose cursor is
+// the unkeyed legacy file. An unknown (empty) home counts as the native root.
+func isNativeRoot(hermesHome string) bool {
+	if strings.TrimSpace(hermesHome) == "" {
+		return true
+	}
+	userHome, _ := os.UserHomeDir()
+	root := nativeRoot(userHome)
+	return root != "" && canonicalHome(root) == canonicalHome(hermesHome)
+}
+
+// EventIDKey is the prefix a home's event ids are derived with, or empty for the unkeyed form every
+// id had before homes were keyed. Exactly one home is unkeyed: the one whose cursor was seeded from
+// the legacy cursor (state.LegacyIDs), or, when none was, the native root. The rule is stored rather
+// than read from DefaultDBPath(), which changes with every `hermes profile use` and would rename a
+// home's ids each time. state is the home's own cursor; the native root's is the legacy file.
+func EventIDKey(hermesHome string, state *State) string {
+	if state != nil && state.LegacyIDs {
+		return ""
+	}
+	if isNativeRoot(hermesHome) && (state == nil || state.LegacyIDsHome == "") {
+		return ""
+	}
+	return homeKey(hermesHome)
+}
+
+// HomeEventIDKey is EventIDKey for a reader without a sweep's cursor, such as share and handoff: it
+// consults the home's per-user cursor, read-only.
+func HomeEventIDKey(hermesHome string) string {
+	state, err := LoadState(DefaultStatePath(hermesHome))
+	if err != nil {
+		state = nil
+	}
+	return EventIDKey(hermesHome, state)
+}
+
+// loadSweepState loads the sweep's cursor. The first sweep of a home whose keyed cursor is still
+// empty starts from the legacy cursor it had been advancing; the first home to do so also takes over
+// the legacy unkeyed ids, recorded on both cursors so the choice survives a later profile switch.
+func loadSweepState(opts CollectOptions, home string) (*State, error) {
+	state, err := LoadState(opts.StatePath)
+	if err != nil || len(state.Sessions) > 0 || opts.LegacyStatePath == "" || opts.LegacyStatePath == opts.StatePath {
+		return state, err
+	}
+	legacy, err := LoadState(opts.LegacyStatePath)
+	if err != nil || len(legacy.Sessions) == 0 {
+		return state, err
+	}
+	state.Sessions = legacy.Sessions
+	key := homeKey(home)
+	if legacy.LegacyIDsHome == "" || legacy.LegacyIDsHome == key {
+		state.LegacyIDs = true
+		if legacy.LegacyIDsHome == "" && opts.Write {
+			legacy.LegacyIDsHome = key
+			if err := legacy.Save(opts.LegacyStatePath); err != nil {
+				return nil, fmt.Errorf("record Hermes legacy event ids: %w", err)
+			}
+		}
+	}
+	return state, nil
 }
 
 // LoadStateSeeded loads the cursor at path, or the one at legacy while path holds no sessions yet, as
@@ -195,6 +257,8 @@ func LoadState(path string) (*State, error) {
 		return state, nil
 	}
 	state.Sessions = stored.Sessions
+	state.LegacyIDs = stored.LegacyIDs
+	state.LegacyIDsHome = stored.LegacyIDsHome
 	return state, nil
 }
 
@@ -251,9 +315,14 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	}
 	sessions = sessionwindow.Recent(sessions, opts.Since, func(r Session) int64 { return max(r.StartedAtMS, r.EndedAtMS, r.LastMessageAtMS) })
 	summary.Sessions = len(sessions)
-	state, err := LoadStateSeeded(opts.StatePath, opts.LegacyStatePath)
+	home := filepath.Dir(store.Path())
+	state, err := loadSweepState(opts, home)
 	if err != nil {
 		return summary, err
+	}
+	idKey := EventIDKey(home, state)
+	if opts.StatePath == "" {
+		idKey = HomeEventIDKey(home) // a --print preview shows the ids a sync would write
 	}
 	defer func() {
 		if saveErr := state.Save(opts.StatePath); saveErr != nil && err == nil {
@@ -262,6 +331,7 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	}()
 	var errs []error
 	for _, session := range sessions {
+		session.IDKey = idKey
 		changed, collectErr := collectSession(store, session, state, opts, &summary)
 		if errors.Is(collectErr, writer.ErrBudgetSpent) {
 			// Not a failed session: this one and the rest are left for a later sync, with cursors
@@ -611,7 +681,7 @@ func openSQLiteReadOnly(path string) (*sql.DB, error) {
 // cursor is what earlier sweeps collected; a zero Cursor maps the whole session, session-total
 // usage included, as a first sync does.
 func MapSession(session Session, messages []Message, cursor *Cursor) ([]MappedEvent, map[string]json.RawMessage) {
-	m := &mapper{session: session, cursor: cursor, calls: map[string]toolCall{}, homeKey: homeKey(session.Home)}
+	m := &mapper{session: session, cursor: cursor, calls: map[string]toolCall{}}
 	for id, raw := range cursor.PendingCalls {
 		var call toolCall
 		if json.Unmarshal(raw, &call) == nil && call.ID != "" {
@@ -651,7 +721,6 @@ type mapper struct {
 	out             []MappedEvent
 	calls           map[string]toolCall
 	lastTimestampMS int64
-	homeKey         string
 }
 
 type toolCall struct {
@@ -882,9 +951,8 @@ func (m *mapper) toolEvent(timestampMS int64, call toolCall, action, category st
 
 func (m *mapper) append(sourceMessageID int64, suffix string, ev schema.Event) {
 	dedupID := fmt.Sprintf("%s:%d:%s", m.session.ID, sourceMessageID, suffix)
-	if m.homeKey != "" {
-		// The native root keeps the unkeyed form, so the ids it has already written do not change.
-		dedupID = m.homeKey + ":" + dedupID
+	if m.session.IDKey != "" {
+		dedupID = m.session.IDKey + ":" + dedupID
 	}
 	ev.Event.ID = hermesEventID(dedupID)
 	m.out = append(m.out, MappedEvent{SourceMessageID: sourceMessageID, Event: ev})
