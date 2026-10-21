@@ -1,0 +1,32 @@
+{
+  "event": "PostToolUse",
+  "session_id": "2026-10-21T05-24-15-760Z_scenario-fixtures-exercise-the-tools",
+  "cwd": "/home/dev/proj",
+  "tool": "read",
+  "tool_call_id": "call_4",
+  "args": {
+    "path": "hello.py"
+  },
+  "tier": "light",
+  "result": {
+    "ok": true,
+    "content": "File: 3 lines total\n\nPreview (lines 1\u20133):\n1\thello Beacon\n2\tWORLD\n3\t\n[output reduced \u2014 full raw stored as artifact art_5]\nUse expand_artifact for full file, or read with offset/limit for a specific slice."
+  },
+  "hook_event_name": "PostToolUse",
+  "client": "autopilot",
+  "beacon.harness.name": "autopilot",
+  "transcript_path": "/home/dev/.local/share/kimiflare/sessions/2026-10-21T05-24-15-760Z_scenario-fixtures-exercise-the-tools.jsonl",
+  "transcript_format": "claude-jsonl",
+  "tool_name": "Read",
+  "autopilot_tool_name": "read",
+  "tool_input": {
+    "file_path": "/home/dev/proj/hello.py"
+  },
+  "tool_response": {
+    "ok": true,
+    "content": "File: 3 lines total\n\nPreview (lines 1\u20133):\n1\thello Beacon\n2\tWORLD\n3\t\n[output reduced \u2014 full raw stored as artifact art_5]\nUse expand_artifact for full file, or read with offset/limit for a specific slice.",
+    "success": true,
+    "is_error": false
+  },
+  "tool_use_id": "call_4"
+}

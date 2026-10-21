@@ -1,0 +1,11 @@
+{
+  "event": "SessionEnd",
+  "session_id": "2026-10-21T05-24-15-760Z_scenario-fixtures-exercise-the-tools",
+  "cwd": "/home/dev/proj",
+  "reason": "exit",
+  "hook_event_name": "SessionEnd",
+  "client": "autopilot",
+  "beacon.harness.name": "autopilot",
+  "transcript_path": "/home/dev/.local/share/kimiflare/sessions/2026-10-21T05-24-15-760Z_scenario-fixtures-exercise-the-tools.jsonl",
+  "transcript_format": "claude-jsonl"
+}

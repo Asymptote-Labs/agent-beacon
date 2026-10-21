@@ -1,0 +1,36 @@
+{
+  "event": "PostToolUse",
+  "session_id": "2026-10-21T05-24-16-536Z_scenario-permission-run-one-command",
+  "cwd": "/home/dev/proj",
+  "tool": "bash",
+  "tool_call_id": "call_0",
+  "args": {
+    "command": "echo needs-approval"
+  },
+  "tier": "light",
+  "result": {
+    "ok": false,
+    "content": "Permission denied by user. Do not retry this exact call; ask the user what they want to do differently.",
+    "errorCode": "permission_denied"
+  },
+  "hook_event_name": "PostToolUse",
+  "client": "autopilot",
+  "beacon.harness.name": "autopilot",
+  "transcript_path": "/home/dev/.local/share/kimiflare/sessions/2026-10-21T05-24-16-536Z_scenario-permission-run-one-command.jsonl",
+  "transcript_format": "claude-jsonl",
+  "tool_name": "Bash",
+  "autopilot_tool_name": "bash",
+  "tool_input": {
+    "command": "echo needs-approval"
+  },
+  "tool_response": {
+    "ok": false,
+    "content": "Permission denied by user. Do not retry this exact call; ask the user what they want to do differently.",
+    "errorCode": "permission_denied",
+    "success": false,
+    "is_error": true
+  },
+  "error": "Permission denied by user. Do not retry this exact call; ask the user what they want to do differently.",
+  "is_interrupt": false,
+  "tool_use_id": "call_0"
+}

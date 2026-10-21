@@ -1,0 +1,53 @@
+{
+  "event": "PostToolUse",
+  "session_id": "2026-10-21T05-24-15-760Z_scenario-fixtures-exercise-the-tools",
+  "cwd": "/home/dev/proj",
+  "tool": "edit",
+  "tool_call_id": "call_3",
+  "args": {
+    "path": "hello.py",
+    "edits": [
+      {
+        "old_string": "world",
+        "new_string": "WORLD"
+      },
+      {
+        "old_string": "beacon",
+        "new_string": "Beacon"
+      }
+    ]
+  },
+  "tier": "light",
+  "result": {
+    "ok": true,
+    "content": "Applied 2 edits (2 replacement(s)) in hello.py."
+  },
+  "hook_event_name": "PostToolUse",
+  "client": "autopilot",
+  "beacon.harness.name": "autopilot",
+  "transcript_path": "/home/dev/.local/share/kimiflare/sessions/2026-10-21T05-24-15-760Z_scenario-fixtures-exercise-the-tools.jsonl",
+  "transcript_format": "claude-jsonl",
+  "tool_name": "MultiEdit",
+  "autopilot_tool_name": "edit",
+  "tool_input": {
+    "file_path": "/home/dev/proj/hello.py",
+    "edits": [
+      {
+        "old_string": "world",
+        "new_string": "WORLD"
+      },
+      {
+        "old_string": "beacon",
+        "new_string": "Beacon"
+      }
+    ]
+  },
+  "tool_response": {
+    "ok": true,
+    "content": "Applied 2 edits (2 replacement(s)) in hello.py.",
+    "success": true,
+    "is_error": false,
+    "filePath": "/home/dev/proj/hello.py"
+  },
+  "tool_use_id": "call_3"
+}

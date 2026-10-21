@@ -1,0 +1,24 @@
+{
+  "event": "PermissionRequest",
+  "session_id": "2026-10-21T05-24-16-536Z_scenario-permission-run-one-command",
+  "cwd": "/home/dev/proj",
+  "tool": "bash",
+  "tool_call_id": "call_0",
+  "args": {
+    "command": "echo needs-approval"
+  },
+  "tier": "light",
+  "mode": "edit",
+  "hook_event_name": "PermissionRequest",
+  "client": "autopilot",
+  "beacon.harness.name": "autopilot",
+  "transcript_path": "/home/dev/.local/share/kimiflare/sessions/2026-10-21T05-24-16-536Z_scenario-permission-run-one-command.jsonl",
+  "transcript_format": "claude-jsonl",
+  "tool_name": "Bash",
+  "autopilot_tool_name": "bash",
+  "tool_input": {
+    "command": "echo needs-approval"
+  },
+  "tool_use_id": "call_0",
+  "permission_mode": "default"
+}

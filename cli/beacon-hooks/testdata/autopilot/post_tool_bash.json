@@ -1,0 +1,40 @@
+{
+  "event": "PostToolUse",
+  "session_id": "2026-10-21T05-24-15-760Z_scenario-fixtures-exercise-the-tools",
+  "cwd": "/home/dev/proj",
+  "tool": "bash",
+  "tool_call_id": "call_0",
+  "args": {
+    "command": "echo hi"
+  },
+  "tier": "light",
+  "result": {
+    "ok": true,
+    "content": "exit=0\n--- stdout ---\nhi",
+    "exitCode": 0,
+    "stdout": "hi\n",
+    "stderr": "",
+    "interrupted": false
+  },
+  "hook_event_name": "PostToolUse",
+  "client": "autopilot",
+  "beacon.harness.name": "autopilot",
+  "transcript_path": "/home/dev/.local/share/kimiflare/sessions/2026-10-21T05-24-15-760Z_scenario-fixtures-exercise-the-tools.jsonl",
+  "transcript_format": "claude-jsonl",
+  "tool_name": "Bash",
+  "autopilot_tool_name": "bash",
+  "tool_input": {
+    "command": "echo hi"
+  },
+  "tool_response": {
+    "ok": true,
+    "content": "exit=0\n--- stdout ---\nhi",
+    "success": true,
+    "is_error": false,
+    "stdout": "hi\n",
+    "stderr": "",
+    "exit_code": 0,
+    "interrupted": false
+  },
+  "tool_use_id": "call_0"
+}

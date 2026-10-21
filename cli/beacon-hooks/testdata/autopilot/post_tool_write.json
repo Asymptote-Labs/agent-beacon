@@ -1,0 +1,35 @@
+{
+  "event": "PostToolUse",
+  "session_id": "2026-10-21T05-24-15-760Z_scenario-fixtures-exercise-the-tools",
+  "cwd": "/home/dev/proj",
+  "tool": "write",
+  "tool_call_id": "call_1",
+  "args": {
+    "path": "hello.py",
+    "content": "hello\nworld\n"
+  },
+  "tier": "light",
+  "result": {
+    "ok": true,
+    "content": "Created hello.py (12 chars)."
+  },
+  "hook_event_name": "PostToolUse",
+  "client": "autopilot",
+  "beacon.harness.name": "autopilot",
+  "transcript_path": "/home/dev/.local/share/kimiflare/sessions/2026-10-21T05-24-15-760Z_scenario-fixtures-exercise-the-tools.jsonl",
+  "transcript_format": "claude-jsonl",
+  "tool_name": "Write",
+  "autopilot_tool_name": "write",
+  "tool_input": {
+    "file_path": "/home/dev/proj/hello.py",
+    "content": "hello\nworld\n"
+  },
+  "tool_response": {
+    "ok": true,
+    "content": "Created hello.py (12 chars).",
+    "success": true,
+    "is_error": false,
+    "filePath": "/home/dev/proj/hello.py"
+  },
+  "tool_use_id": "call_1"
+}

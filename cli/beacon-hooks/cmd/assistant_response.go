@@ -17,6 +17,9 @@ import (
 // for a runtime that never wrote it is a guess about what it would mean there.
 var lastAssistantMessagePlatforms = map[string]bool{
 	"claude": true,
+	// Autopilot documents the field on Stop under the same name, as the text of the turn's final
+	// reply when it ended on one.
+	autopilotPlatform: true,
 }
 
 // stopAssistantResponse is the agent's final reply as this platform's Stop payload reports it, or

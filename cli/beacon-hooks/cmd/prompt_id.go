@@ -35,7 +35,7 @@ func applyPromptID(fields, input map[string]interface{}) {
 		}
 	}
 	id := asymptoteobserve.PromptIDFrom(input)
-	if id == "" && platformFlag == "claude" && claudeTurnScopedHook(input) {
+	if id == "" && sendsClaudeCodePayloads(platformFlag) && claudeTurnScopedHook(input) {
 		id = claudeTranscriptPromptID(getFirstStr(input, "transcript_path", "transcriptPath"))
 	}
 	if id == "" {

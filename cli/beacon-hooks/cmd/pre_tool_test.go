@@ -1012,6 +1012,7 @@ func setupHookConfigDirs(t testing.TB) {
 		"factory":     &hookconfig.FactoryDir,
 		"grok":        &hookconfig.GrokDir,
 		"hermes":      &hookconfig.HermesDir,
+		"autopilot":   &hookconfig.AutopilotDir,
 		"kimi":        &hookconfig.KimiDir,
 		"muse":        &hookconfig.MuseDir,
 		"openhands":   &hookconfig.OpenHandsDir,

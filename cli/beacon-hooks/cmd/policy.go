@@ -310,7 +310,9 @@ func policyDenyResponse(reason string, phase policycontract.Phase) map[string]in
 	//
 	// Qwen Code's PermissionRequestHookOutput reads the same `decision.behavior` and `message` and
 	// does not check hookEventName; the name is set anyway so one object is right for both.
-	case platformFlag == "claude" || platformFlag == "qwen":
+	//
+	// Autopilot reads both of Claude Code's objects, each in its own phase (see autopilot.go).
+	case sendsClaudeCodePayloads(platformFlag) || platformFlag == "qwen":
 		return claudePolicyDenyResponse(reason, phase)
 	// DeepSeek Harness shares Claude Code's PreToolUse deny shape because its bridge exists to run
 	// Claude Code hooks: the decoder reads `hookSpecificOutput.permissionDecision` as
