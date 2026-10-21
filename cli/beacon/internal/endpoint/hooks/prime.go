@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	primeextension "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks/assets/prime"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/homepath"
 )
 
 // Prime Agent (Prime Intellect) is integrated the same shape as Pi, which it forked: no hooks
@@ -160,7 +161,7 @@ func primeExtensionDir(home string, level Level) (string, error) {
 	switch level {
 	case "", LevelUser:
 		if agentDir := os.Getenv(primeAgentDirEnv); agentDir != "" {
-			expanded, err := expandTilde(agentDir, home)
+			expanded, err := homepath.ExpandTilde(agentDir, home)
 			if err != nil {
 				return "", err
 			}

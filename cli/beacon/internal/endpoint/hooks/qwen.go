@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/homepath"
 )
 
 // Qwen Code hook timeouts are milliseconds.
@@ -169,7 +171,7 @@ const qwenHomeEnv = "QWEN_HOME"
 // for the default and for a `~` override, so an absolute QWEN_HOME resolves without one.
 func QwenUserDir(home string) (string, error) {
 	if override := os.Getenv(qwenHomeEnv); override != "" {
-		dir, err := expandTilde(override, home)
+		dir, err := homepath.ExpandTilde(override, home)
 		if err != nil {
 			return "", fmt.Errorf("resolve %s: %w", qwenHomeEnv, err)
 		}

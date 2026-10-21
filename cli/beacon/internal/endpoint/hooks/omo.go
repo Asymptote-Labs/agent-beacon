@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	omoextension "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks/assets/omo"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/homepath"
 )
 
 // Senpi is the standalone edition of oh-my-openagent (OMO): an in-flight fork of pi-mono
@@ -197,7 +198,7 @@ func omoExtensionDir(home string, level Level) (string, error) {
 	switch level {
 	case "", LevelUser:
 		if agentDir := omoAgentDirOverride(); agentDir != "" {
-			expanded, err := expandTilde(agentDir, home)
+			expanded, err := homepath.ExpandTilde(agentDir, home)
 			if err != nil {
 				return "", err
 			}

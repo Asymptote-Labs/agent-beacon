@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/homepath"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 	"io/fs"
 	"os"
@@ -88,22 +89,12 @@ func defaultAgentDir() (string, error) {
 		return "", fmt.Errorf("resolve home directory: %w", err)
 	}
 	if override := strings.TrimSpace(os.Getenv(primeAgentDirEnv)); override != "" {
-		return expandTilde(override, home), nil
+		return homepath.ExpandTilde(override, home)
 	}
 	if strings.TrimSpace(home) == "" {
 		return "", errors.New("home directory is empty")
 	}
 	return filepath.Join(home, ".prime", "agent"), nil
-}
-
-func expandTilde(path, home string) string {
-	if path == "~" {
-		return home
-	}
-	if strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) {
-		return filepath.Join(home, filepath.FromSlash(path[2:]))
-	}
-	return path
 }
 
 func (s *Store) Exists() bool {

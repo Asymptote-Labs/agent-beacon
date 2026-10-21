@@ -421,20 +421,3 @@ func underSystemLocation(path string) bool {
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
-
-// expandTilde resolves a leading `~` in a runtime's directory override, as the runtime does before
-// using the value. Without it, an install would create a literal `~` directory beside the working
-// directory and report success while the runtime kept reading the real home. Only a bare `~` or a
-// `~/`- or `~\`-rooted path is expanded, the runtimes' own rule; `~user/...` is left alone.
-func expandTilde(path, home string) (string, error) {
-	if path != "~" && !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, `~\`) {
-		return path, nil
-	}
-	if home == "" {
-		return "", fmt.Errorf("home directory is required to resolve %q", path)
-	}
-	if path == "~" {
-		return home, nil
-	}
-	return filepath.Join(home, filepath.FromSlash(path[2:])), nil
-}
