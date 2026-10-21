@@ -2119,10 +2119,8 @@ function renderRepositorySelect(values) {
     `<option value="">All repositories</option>`,
     ...values.map((item) => `<option value="${escapeHTML(item.name)}">${escapeHTML(repositoryOptionLabel(item.name))} (${escapeHTML(item.count)})</option>`),
   ];
-  if (current && !values.some((item) => item.name === current)) {
-    options.push(`<option value="${escapeHTML(current)}">${escapeHTML(repositoryOptionLabel(current))}</option>`);
-  }
   select.innerHTML = options.join("");
+  ensureFacetOption(select, current);
   select.value = current;
 }
 

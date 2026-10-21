@@ -168,9 +168,7 @@ SessionStart hook enables local OS-user rollups.
 Use the search bar to find events by action, command, file path, MCP tool,
 approval decision, repository, session, or message. Quick filters surface
 high-severity events, failures, approvals, MCP activity, file changes, and events
-that may need review. Harness, model, and repository selections are retained in
-shared dashboard URLs and remain selected when a search has no matching events.
-Choose the corresponding All option to clear a selection.
+that may need review.
 
 ## Agent Telemetry in CI
 
