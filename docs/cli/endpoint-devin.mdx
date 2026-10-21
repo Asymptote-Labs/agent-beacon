@@ -1,0 +1,98 @@
+---
+title: "beacon endpoint devin"
+description: "Collect endpoint telemetry from Devin CLI's local session database"
+---
+
+## Command overview
+
+`beacon endpoint devin` reads the committed SQLite session store Devin CLI keeps
+at `~/.local/share/devin/cli/sessions.db` (`%APPDATA%\devin\cli\sessions.db`
+on Windows) and maps it into Beacon
+[endpoint events](/concepts/core-concepts#endpoint-event).
+
+```bash title="Command syntax"
+beacon endpoint devin [command]
+```
+
+This complements the live [Devin CLI hooks](/runtimes/devin). Hooks remain the
+real-time integration; the sync adds what the hook payload cannot carry:
+assistant replies, reasoning, per-message token metrics and the per-turn model.
+See [Session database sync](/runtimes/devin#session-database-sync).
+
+Every event from this command is marked
+`harness.collection_method=poll`. Beacon reads committed records after the fact,
+so this path cannot hold, approve, deny, or delay a tool call. Reading is local,
+offline and read-only.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `beacon endpoint devin sync` | Read new Devin CLI session rows into the runtime log |
+| `beacon endpoint devin status` | Show Devin CLI sessions on this machine and how much has been collected |
+
+## Flags
+
+Both subcommands accept:
+
+| Flag | Description |
+|------|-------------|
+| `--db <path>` | Devin CLI session database. Defaults to `~/.local/share/devin/cli/sessions.db`, `%APPDATA%\devin\cli\sessions.db` on Windows |
+| `--state <path>` | Collector cursor file. Defaults to `~/.beacon/endpoint/state/devin.json` |
+| `--json` | Print the result as JSON |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths |
+
+`sync` also accepts:
+
+| Flag | Description |
+|------|-------------|
+| `--log-path <path>` | Runtime JSONL log path. Defaults to the resolved endpoint log |
+| `--print` | Print mapped events as JSON without writing them or advancing the cursor |
+| `--watch` | Sweep continuously on `--interval` |
+| `--interval <duration>` | Sweep interval for `--watch`. Defaults to `1m`, with a 5-second floor |
+| `--rotate-bytes <bytes>` | Rotate the runtime log at this many bytes while this sync writes it. Defaults to 10485760, the size every Beacon writer uses; must not be smaller |
+
+## Sweeping
+
+```bash title="Sweep once"
+beacon endpoint devin sync
+```
+
+```bash title="Preview without writing or advancing the cursor"
+beacon endpoint devin sync --print
+```
+
+```bash title="Sweep continuously"
+beacon endpoint devin sync --watch --interval 5m
+```
+
+Nothing schedules a sweep automatically. Run `sync` from the scheduler used on
+the endpoint, or leave `--watch` running in the account that owns the Devin CLI
+data directory.
+
+When the runtime log shows live hook coverage for a session, the sweep skips the
+prompts, tool calls and results and session start the hooks already recorded and
+keeps only the events the hook payload cannot carry, so nothing is counted
+twice.
+
+## Status
+
+```bash title="Show sessions and collection progress"
+beacon endpoint devin status
+```
+
+The cursor prevents scheduled sweeps from re-appending a session's complete
+history. Each source record always maps to the same deterministic event id, so
+a re-read after a cursor reset appends events with the ids they had before.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Devin CLI" icon="code" href="/runtimes/devin">
+    Hook installation, telemetry coverage, and the session database sync.
+  </Card>
+  <Card title="beacon endpoint hooks" icon="plug" href="/cli/hooks">
+    Install and inspect the live Devin CLI hook integration.
+  </Card>
+</Columns>

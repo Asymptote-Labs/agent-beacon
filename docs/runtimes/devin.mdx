@@ -5,7 +5,7 @@ description: "Beacon support details for Devin CLI endpoint telemetry"
 
 ## Runtime overview
 
-Beacon supports Devin CLI through native Devin hook payloads sent to `beacon-hooks`.
+Beacon supports Devin CLI through native Devin hook payloads sent to `beacon-hooks`, and by reading Devin CLI's committed session database for history and per-message detail the hooks do not carry.
 
 ## Prerequisites
 
@@ -21,11 +21,20 @@ Before enabling Devin CLI hooks, make sure:
 
 Devin CLI invokes Beacon's hook adapter from hook entries in Devin configuration. The adapter writes normalized endpoint events to the configured runtime JSONL log.
 
+Beacon can also read Devin CLI's committed SQLite session store:
+
+```bash title="Sync Devin CLI sessions"
+beacon endpoint devin status
+beacon endpoint devin sync
+```
+
+The sync path reads `sessions.db` locally, offline and read-only. It writes mapped events with `harness.collection_method=poll`, so it can recover historical sessions or sessions that ran before hooks were installed, but it cannot hold, approve, deny, or delay tool calls. See [Session database sync](#session-database-sync).
+
 ## Discovery and status
 
-Beacon detects Devin CLI through the `devin` executable, `~/.config/devin`, or `./.devin`, then checks Beacon hook configuration.
+Beacon detects Devin CLI through the `devin` executable, `~/.config/devin`, `./.devin`, or the session database, then checks Beacon hook configuration.
 
-Use `beacon endpoint hooks status --harness devin-cli` to inspect Devin CLI hook status.
+Use `beacon endpoint hooks status --harness devin-cli` to inspect Devin CLI hook status. Use `beacon endpoint devin status` to inspect committed local sessions and how much Beacon has synced.
 
 ## Install or configuration support
 
@@ -47,9 +56,28 @@ beacon endpoint hooks install --harness devin-cli --level project
 |------|---------|
 | Prompt telemetry | Supported through `UserPromptSubmit` hooks |
 | Command, tool, and file telemetry | Supported for session, prompt, pre-tool, post-tool, permission request, stop, session-end, approval, and file telemetry where Devin CLI exposes payloads |
-| Approvals | Permission requests are recorded as `approval.requested`. Devin CLI does not report the operator's answer to hooks, so Beacon does not record one, and the hook returns no decision: Devin asks the operator as it would without Beacon |
+| Agent responses and reasoning | `agent.message` and `agent.reasoning` from the session database sync; the hook payload does not carry them |
+| Token usage | `token.usage` per assistant message from the session database sync: input, output, cache read, and cache creation counts. Devin records credits/ACUs, not dollars, so no USD cost is reported |
+| Model attribution | The session database sync stamps the per-turn `generation_model` on every event and records `session.context` model-change events; the hook payload carries no model |
+| Approvals | Permission requests are recorded as `approval.requested`. Devin CLI does not report the operator's answer to hooks, so the hook records no decision and returns none: Devin asks the operator as it would without Beacon. The session database does record rejections, so the sync reports `approval.denied` for a rejected tool call, whether the operator rejected it or it was rejected without prompting; it does not record interactive approvals, so none are reported |
+| Historical session sync | `beacon endpoint devin sync` reads the committed session database into the runtime log |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported for the endpoint agent. Devin CLI hooks are installed separately in the logged-in user's context or project context |
+
+## Session database sync
+
+`beacon endpoint devin sync` reads the session store Devin CLI commits locally:
+
+- macOS and Linux: `~/.local/share/devin/cli/sessions.db` (`$XDG_DATA_HOME/devin/cli/sessions.db` when it exists)
+- Windows: `%APPDATA%\devin\cli\sessions.db`
+
+The macOS path is verified against Devin CLI 3000.11.92; the Linux and Windows paths follow Devin's documented CLI data directory but are best effort, not yet verified.
+
+The store is read read-only, in pages, never loaded whole. A cursor in `~/.beacon/endpoint/state/devin.json` (beside the system runtime log as `devin-state.json` in system mode) advances by `message_nodes.row_id`, so repeated sweeps read only new rows. `beacon endpoint devin sync --print` previews the mapped events without writing them or advancing the cursor, and `--watch` sweeps continuously on `--interval`.
+
+Over the hooks the sync adds assistant replies (`agent.message`), reasoning (`agent.reasoning`), per-message token usage (`token.usage`), the per-turn model on every event plus `session.context` model-change events, compaction summaries (`session.compacted`), and `approval.denied` when a tool call was rejected. When the runtime log shows live hook coverage for a session, the sync skips the prompts, tool calls and results and session start the hooks already recorded and adds only what the hook payload cannot carry, so nothing is counted twice; sessions from before hooks were installed are collected whole. Devin re-inserts history on resume and compaction, which the sync dedupes by message id and request id.
+
+For large stores, the runtime log's retention guard and `--rotate-bytes` behave as for `beacon endpoint claude sync`. A system-mode install backfill copies SQLite stores only up to 512 MiB; a larger Devin store is skipped there and named in the report, so run `beacon endpoint devin sync` as the user. The install backfill includes Devin CLI like the other session stores (30-day window, shared byte budget).
 
 ## Deployment notes
 
