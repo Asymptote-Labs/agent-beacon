@@ -213,6 +213,11 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 	if platformFlag == "antigravity" && getFirstStr(input, "error") != "" {
 		return nil
 	}
+	// A reconstructable Grok write must reach the failure emitter before its
+	// requested content can be recorded as a completed edit.
+	if platformFlag == "grok" && reportedPostToolFailure(getFirstStr(input, "hook_event_name", "hookEventName"), input) {
+		return nil
+	}
 
 	// A failure is not an edit.
 	//
@@ -480,7 +485,7 @@ func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) 
 	if platformFlag == kimiPlatform {
 		applyKimiToolResult(fields, toolName, toolInput, input)
 	}
-	if hookEvent == "PostToolUseFailure" || hookEvent == "postToolUseFailure" || hookEvent == "post_tool_use_failure" || getFirstStr(input, "error") != "" {
+	if reportedPostToolFailure(hookEvent, input) {
 		emitHookEvent(logger, "tool.failed", "tool", "high", "Tool execution failed", input, fields)
 		return
 	}
@@ -552,6 +557,11 @@ func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) 
 		message = "Shell command executed"
 	}
 	emitHookEvent(logger, action, category, "info", message, input, fields)
+}
+
+func reportedPostToolFailure(hookEvent string, input map[string]interface{}) bool {
+	return hookEvent == "PostToolUseFailure" || hookEvent == "postToolUseFailure" ||
+		hookEvent == "post_tool_use_failure" || getFirstStr(input, "error") != ""
 }
 
 func emitCursorPostHookObserved(logger *logging.Logger, input map[string]interface{}) bool {
