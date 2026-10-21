@@ -1,0 +1,187 @@
+---
+title: "Autopilot"
+description: "Beacon support details for Autopilot endpoint telemetry"
+---
+
+## Runtime overview
+
+Beacon supports [Autopilot](https://github.com/sinameraji/autopilot) (npm `autopilot-ai`) through native hook payloads sent to `beacon-hooks`.
+
+Autopilot is a terminal coding agent that brings its own model provider (OpenRouter, OpenAI, DeepSeek, Ollama, any OpenAI-compatible endpoint, and others). Its hook runner sends Claude Code's payload shape on purpose: Claude Code's field names, Claude Code's tool names (`Bash`, `Edit`, `MultiEdit`, `Write`, `Read`, ...) and argument spellings, and a `transcript_path` pointing at a Claude Code-format JSONL transcript. Beacon therefore reads Autopilot through the same readers it uses for Claude Code, under a platform of its own so sessions are recorded as `harness.name: autopilot` rather than `claude_code`.
+
+```bash
+beacon endpoint hooks install --harness autopilot
+```
+
+`--harness autopilot-ai` and `autopilot_ai` are also accepted.
+
+## Prerequisites
+
+Before enabling Autopilot telemetry, make sure:
+
+- Autopilot is installed and available as the `autopilot` executable, or has a config directory at `$XDG_CONFIG_HOME/autopilot` (default `~/.config/autopilot`).
+- `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
+- A new Autopilot session is started (or `/hooks reload` is run in an open one) after hook install or removal.
+
+## Collection path
+
+Autopilot reads hooks from these settings files, merged in this order:
+
+| Level | Settings path | Written by Beacon |
+|-------|---------------|-------------------|
+| User (legacy) | `$XDG_CONFIG_HOME/kimiflare/settings.json` | No |
+| User | `$XDG_CONFIG_HOME/autopilot/settings.json` (default `~/.config/autopilot/settings.json`) | Yes, the default |
+| Project (legacy) | `./.kimiflare/settings.json` | No |
+| Project | `./.autopilot/settings.json` | Yes, with `--level project` |
+
+The `kimiflare` paths are from before the product was renamed. Autopilot still reads them, and Beacon never writes them.
+
+Autopilot's hook schema is flat. Each event maps to a list of entries with their own `id`, `command` and `timeoutMs`, rather than Claude Code's matcher groups:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      { "id": "beacon-pre-tool", "command": "'~/.beacon/endpoint/hooks/beacon-hooks' --platform autopilot --log '...' --config '...' pre-tool", "timeoutMs": 10000 }
+    ]
+  }
+}
+```
+
+The file also holds the user's own hooks and other settings. Install merges into it: every other top-level key and every non-Beacon hook entry is kept as written, including fields Beacon does not model such as `enabled`, `failClosed`, `matcher` and `description`. A re-install replaces Beacon's entries instead of adding a second copy, and uninstall removes only Beacon's entries. Beacon recognizes its entries by the `--platform autopilot` argument in the hook command.
+
+Install refuses to touch a settings file that is not a JSON object, or whose `hooks` key or an event Beacon writes has the wrong type. Autopilot ignores such a file when it loads hooks, so writing Beacon's entries into a replacement would discard what the user had.
+
+### Registered events
+
+| Autopilot event | Entry id | Adapter subcommand | Timeout |
+|-----------------|----------|--------------------|---------|
+| `SessionStart` | `beacon-session-start` | `session-start` | Autopilot default (30000 ms) |
+| `UserPromptSubmit` | `beacon-prompt` | `prompt-submit` | 30000 ms |
+| `PreToolUse` | `beacon-pre-tool` | `pre-tool` | 10000 ms |
+| `PostToolUse` | `beacon-post-tool` | `post-tool` | 10000 ms |
+| `PermissionRequest` | `beacon-permission` | `permission-request` | 10000 ms |
+| `PreCompact` | `beacon-pre-compact` | `pre-compact` | Autopilot default |
+| `Stop` | `beacon-stop` | `stop` | 45000 ms |
+| `SessionEnd` | `beacon-session-end` | `session-end` | Autopilot default |
+
+No `matcher` is written, so every hook matches every tool, including MCP tools and tools called from inside Autopilot's Code Mode. No hook is `failClosed`: a Beacon hook that fails never blocks a call.
+
+`PostToolUseFailure` is deliberately not registered. Autopilot fires `PostToolUse` for every call, including failures, and fires `PostToolUseFailure` beside it for a failure. Binding both would record each failure twice.
+
+The entry ids are the ones Autopilot's own Beacon guide told users to write when they used Beacon's Claude Code mode before this integration existed. Autopilot runs one entry per id across its merged settings files, so those hand-written `--platform claude` entries, including any in the legacy `kimiflare` file, are superseded at runtime by Beacon's instead of recording every event twice. Beacon does not edit or remove them, and they take effect again if Beacon's hooks are uninstalled.
+
+## Discovery and status
+
+Beacon detects Autopilot through the `autopilot` executable, and treats the `autopilot` config directory as an additional signal, since an npm install under a version manager can hide the binary from the endpoint process's `PATH`.
+
+```bash title="Show Autopilot discovery state"
+beacon endpoint discover --all --json
+```
+
+Autopilot reports as the `autopilot` harness with capability `hooks`:
+
+| Telemetry status | Meaning |
+|------------------|---------|
+| `missing` | No user-level `settings.json`, or it could not be read |
+| `misconfigured` | `settings.json` exists but its JSON is invalid |
+| `disabled` | The file has no Beacon `--platform autopilot` entry, or every Beacon entry was switched off with `/hooks disable` |
+| `enabled` | Beacon's Autopilot hooks are configured and enabled |
+
+```bash title="Show Autopilot hook status"
+beacon endpoint hooks status --harness autopilot
+```
+
+## Install or configuration support
+
+```bash
+beacon endpoint hooks install --harness autopilot                    # user level (default)
+beacon endpoint hooks install --harness autopilot --level project
+beacon endpoint hooks status --harness autopilot
+beacon endpoint hooks uninstall --harness autopilot
+```
+
+`beacon endpoint install --harness autopilot` installs the same hooks.
+
+## Telemetry coverage
+
+Verified end to end against Autopilot 2.0.0 on macOS, in print mode (`autopilot -p`) and in an interactive session, with a local mock model driving the tool calls.
+
+| Area | Support |
+|------|---------|
+| Runtime discovery | Supported through executable and config directory detection, settings path, and telemetry status |
+| Harness attribution | Supported. `autopilot`, `autopilot-ai`, `autopilot_ai`, `autopilot ai`, `autopilot-cli`, `autopilot_cli` and `autopilot cli` all normalize to `autopilot`, the same name Autopilot's own payloads and OTLP export carry |
+| Hook install, status, uninstall, and repair | Supported |
+| Session lifecycle | Supported through `SessionStart` and `SessionEnd` |
+| Prompts | Supported in interactive sessions through `UserPromptSubmit`. See [Known gaps](#known-gaps) |
+| Tool use | Supported for pre-tool and post-tool activity, with `tool.failed` for a failed or refused call |
+| Commands | Supported. `command.executed` for `Bash`, with output, and with the exit code and high severity when the command exited non-zero |
+| File activity | Supported. `file.read` for `Read`, `file.modified` with a diff for `Write`, `Edit` and `MultiEdit` |
+| Assistant replies | Supported. `agent.message` from `Stop`'s `last_assistant_message` |
+| Approval decisions | Supported. `approval.requested` observed from `PermissionRequest`, not synthesized from pre-tool |
+| Tool call identity | Supported. `tool_use_id` is promoted to `gen_ai.tool.call.id` and joins pre-tool and post-tool events |
+| Prompt identity | Supported on events inside a turn. `prompt.id` is read from the newest `promptId` in Autopilot's Claude Code-format transcript |
+| Context compaction | Registered (`session.compacting` from `PreCompact`), not exercised end to end |
+| Token usage and cost | Not collected from hooks. See [Known gaps](#known-gaps) |
+| Local JSONL and dashboard | Supported |
+
+Harness names are matched against a closed set of spellings rather than by substring, because "autopilot" is an ordinary word that other products use for features.
+
+### Tool names
+
+Autopilot reports its tools under Claude Code's names, so Beacon's classification is Claude Code's:
+
+| Autopilot tool | `tool_name` | Action |
+|----------------|-------------|--------|
+| `bash` | `Bash` | `command.executed` |
+| `write` | `Write` | `file.modified` |
+| `edit` | `Edit`, or `MultiEdit` with `edits[]` | `file.modified` |
+| `read` | `Read` | `file.read` |
+| `glob`, `grep` | `Glob`, `Grep` | as for Claude Code |
+| `web_fetch`, `search_web` | `WebFetch`, `WebSearch` | as for Claude Code |
+| MCP, LSP, memory, subagent and other tools | unchanged | `tool.invoked`, or the MCP actions for `mcp__` tools |
+
+A failed write or edit keeps Autopilot's lowercase name (`write`, `edit`) in `tool_name`, so it is recorded as `tool.failed` and never as a `file.modified` for a change that did not land.
+
+## Approvals and enforcement
+
+Approval telemetry comes from Autopilot's `PermissionRequest` event and is recorded as observed. Beacon's `PreToolUse` and `PermissionRequest` hooks answer with an empty object, which carries no decision, so Autopilot's own permission flow runs untouched.
+
+Enforcement stays behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`), which is inert unless it names an executable and fails open on any error. When a provider denies a call, Beacon answers with Claude Code's deny shape for the phase, and Autopilot honors both: from `PreToolUse`, `hookSpecificOutput.permissionDecision: "deny"`; from `PermissionRequest`, `hookSpecificOutput.decision.behavior: "deny"`. Both phases were verified to block the call in Autopilot 2.0.0 and to record `approval.denied` with the provider's rule id.
+
+## Data handling
+
+Autopilot content is handled like every other runtime. Prompts, tool arguments, commands, paths, diffs and replies are retained in local or customer-controlled logs, with local secret redaction and per-string limits applied before writing. Autopilot's own copies of the tool fields (`tool`, `args`, `result`, `autopilot_tool_name`) are not kept: the Claude Code fields carry the same call.
+
+## Known gaps
+
+- **No prompt event in print mode.** Autopilot fires `UserPromptSubmit` only in its interactive session, not in `autopilot -p`, `--emit-events`, `autopilot serve` or the SDK. Sessions from those hosts have no `prompt.submitted` event; the turn's tool calls still carry `prompt.id`.
+- **The first prompt of a new interactive session has no session id.** Autopilot fires `UserPromptSubmit` before the session exists, so that one `prompt.submitted` event arrives with an empty `session.id`, and before `session.started`. Later prompts carry it.
+- **Token usage and cost are not on any hook payload.** Autopilot reports them in its transcript and in its own OpenTelemetry export (`KIMIFLARE_OTEL_ENDPOINT`, `autopilot.api_request` with `gen_ai.usage.*`). That export is configured in Autopilot's environment, not by Beacon, and is not covered by this page.
+- **Diffs are rebuilt from the call's arguments.** Autopilot's `tool_response` has no `structuredPatch` or `originalFile`, so an `Edit` diff carries no real line numbers and a `Write` over an existing file is shown as a whole-file create.
+- **Windows is not verified.** Autopilot runs hook commands through the platform shell and has no per-hook shell setting, and Beacon's command is POSIX-quoted.
+
+## Deployment notes
+
+```bash
+beacon endpoint discover --all --json
+beacon endpoint hooks status --harness autopilot
+grep '"name":"autopilot"' ~/.beacon/endpoint/logs/runtime.jsonl | tail -3
+```
+
+If Autopilot telemetry is missing:
+
+- Check the selected level, user or project, and that `XDG_CONFIG_HOME` is the same for Beacon's install and for Autopilot.
+- Confirm `settings.json` contains commands with `--platform autopilot`, and that `/hooks list` in Autopilot shows them enabled.
+- Start a new Autopilot session, or run `/hooks reload`.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Supported agent harnesses" icon="list-check" href="/runtimes">
+    Return to the runtime support overview.
+  </Card>
+  <Card title="Agent harness integration model" icon="plug" href="/runtimes/integration-model">
+    See how Beacon discovers and configures each runtime.
+  </Card>
+</Columns>

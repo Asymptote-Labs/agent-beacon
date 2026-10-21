@@ -158,6 +158,7 @@
                     "group": "Coding",
                     "pages": [
                       "runtimes/antigravity-cli",
+                      "runtimes/autopilot",
                       "runtimes/claude-code",
                       "runtimes/cline",
                       "runtimes/codex-cli",

@@ -313,6 +313,7 @@ Beacon supports local agents, browser agents, cloud agents, CI workflows, and ag
 | Runtime | Collection | Session | Prompt | Tool | Command | File | Approval | MCP | Tokens | Skills |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Antigravity CLI | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | – | – | – | ✅ skills CLI |
+| Autopilot | Hooks | ✅ | ~ | ✅ | ✅ | ✅ | ✅ | ~ | – | – |
 | Claude Code | OTLP + hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ Plugin |
 | Claude Cowork | OTLP | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ Plugin |
 | Cline | Plugin + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ | ✅ `.cline/skills` |
