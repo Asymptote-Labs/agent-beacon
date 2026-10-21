@@ -174,15 +174,10 @@ func ReconcileForwarder(opts ReconcileOptions) (ReconcileResult, error) {
 		return result, nil
 	}
 	configCurrent := bytes.Equal(current, []byte(rendered))
-	unitCurrent := true
-	// Keep Forwarder compatible with other supervisors. The production manager
-	// checks only launchd's log paths, not unrelated operator unit settings.
-	if checker, ok := manager.(interface{ LogPathsCurrent() (bool, error) }); ok {
-		unitCurrent, err = checker.LogPathsCurrent()
-		if err != nil {
-			result.Warning = fmt.Sprintf("kept the existing config and service unit: could not check forwarder log paths: %v", err)
-			return result, nil
-		}
+	unitCurrent, err := manager.UnitCurrent(vector.Path, configPath)
+	if err != nil {
+		result.Warning = fmt.Sprintf("kept the existing config and service unit: could not read the forwarder service unit: %v", err)
+		return result, nil
 	}
 	if configCurrent && unitCurrent {
 		result.Unchanged = true

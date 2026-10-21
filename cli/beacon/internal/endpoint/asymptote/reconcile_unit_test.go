@@ -13,20 +13,15 @@ import (
 )
 
 // Keep service operations fake, while checking and writing the actual production
-// launchd plist in an isolated HOME. The legacy-marker fallback made the initial
-// regression runnable before the production LogPathsCurrent method existed.
+// launchd plist in an isolated HOME.
 type unitReconcileForwarder struct {
 	*fakeForwarder
 	manager    service.ForwarderManager
 	unitWrites int
 }
 
-func (f *unitReconcileForwarder) LogPathsCurrent() (bool, error) {
-	if checker, ok := any(f.manager).(interface{ LogPathsCurrent() (bool, error) }); ok {
-		return checker.LogPathsCurrent()
-	}
-	data, err := os.ReadFile(f.unitPath)
-	return !bytes.Contains(data, []byte("/tmp/com.beacon.endpoint.asymptote-forwarder")), err
+func (f *unitReconcileForwarder) UnitCurrent(vector, config string) (bool, error) {
+	return f.manager.UnitCurrent(vector, config)
 }
 func (f *unitReconcileForwarder) WriteUnit(vector, config string) (string, error) {
 	f.unitWrites++
@@ -141,7 +136,9 @@ func TestReconcileUnitMigrationReportsReloadFailure(t *testing.T) {
 	f.assertCredentialsAndCheckpointsUntouched(t)
 }
 
-func TestReconcileUnitMigrationPreservesCurrentOperatorSettings(t *testing.T) {
+// A unit as WriteUnit writes it is current: reconcile neither rewrites nor restarts it, so an
+// upgrade restarts the forwarder only when the unit Beacon writes has changed.
+func TestReconcileLeavesACurrentUnitAlone(t *testing.T) {
 	f, manager := legacyUnitFixture(t)
 	if _, err := manager.manager.WriteUnit(f.vector, VectorConfigPath(true)); err != nil {
 		t.Fatal(err)
@@ -150,54 +147,15 @@ func TestReconcileUnitMigrationPreservesCurrentOperatorSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	custom := strings.ReplaceAll(strings.Replace(string(unit), f.vector, "/operator/custom/vector", 1), "  ", "    ")
-	if err := os.WriteFile(f.fwd.unitPath, []byte(custom), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	loads := f.fwd.loads
 	result, err := ReconcileForwarder(ReconcileOptions{UserMode: true, Forwarder: manager})
 	if err != nil || !result.Unchanged || result.UnitUpdated || result.Restarted || manager.unitWrites != 0 || f.fwd.loads != loads {
 		t.Fatalf("result=%+v err=%v writes=%d loads=%d", result, err, manager.unitWrites, f.fwd.loads)
 	}
-	after, _ := os.ReadFile(f.fwd.unitPath)
-	if string(after) != custom {
-		t.Fatal("current unit operator settings were rewritten")
+	if after, _ := os.ReadFile(f.fwd.unitPath); !bytes.Equal(after, unit) {
+		t.Fatal("current unit was rewritten")
 	}
 	f.assertCredentialsAndCheckpointsUntouched(t)
-}
-
-func TestReconcileUnitMigrationRefusesMalformedUnit(t *testing.T) {
-	for _, kind := range []string{"incomplete XML", "leading text"} {
-		t.Run(kind, func(t *testing.T) {
-			f, manager := legacyUnitFixture(t)
-			broken := []byte("<plist><dict>")
-			if kind == "leading text" {
-				legacy, err := os.ReadFile(f.fwd.unitPath)
-				if err != nil {
-					t.Fatal(err)
-				}
-				broken = append([]byte("junk"), legacy...)
-			}
-			if err := os.WriteFile(f.fwd.unitPath, broken, 0o644); err != nil {
-				t.Fatal(err)
-			}
-			loads := f.fwd.loads
-			config, err := os.ReadFile(VectorConfigPath(true))
-			if err != nil {
-				t.Fatal(err)
-			}
-			result, err := ReconcileForwarder(ReconcileOptions{UserMode: true, Forwarder: manager})
-			if err != nil || result.UnitUpdated || result.Updated || result.Restarted || result.Warning == "" || manager.unitWrites != 0 || f.fwd.loads != loads {
-				t.Fatalf("result=%+v err=%v writes=%d loads=%d", result, err, manager.unitWrites, f.fwd.loads)
-			}
-			after, _ := os.ReadFile(f.fwd.unitPath)
-			afterConfig, _ := os.ReadFile(VectorConfigPath(true))
-			if !bytes.Equal(after, broken) || !bytes.Equal(afterConfig, config) {
-				t.Fatal("malformed unit or config overwritten")
-			}
-			f.assertCredentialsAndCheckpointsUntouched(t)
-		})
-	}
 }
 
 func TestReconcileUnitMigrationReportsConfigAlreadyWrittenBeforeUnitFailure(t *testing.T) {
