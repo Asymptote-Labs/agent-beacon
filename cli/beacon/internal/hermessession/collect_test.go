@@ -149,6 +149,50 @@ func TestCollectOnceKeepsHermesProfilesApart(t *testing.T) {
 	}
 }
 
+// Cloned profiles hold the same session and message ids, so only the home tells their events apart.
+// The native root keeps the ids it had before homes were keyed.
+func TestHermesEventIDsAreKeyedByHome(t *testing.T) {
+	home, native := hermesFixtureHome(t)
+	homes := []string{native, filepath.Join(native, "profiles", "work"), filepath.Join(home, "custom-hermes")}
+	ids := map[string][]string{}
+	for _, dir := range homes {
+		mkdirAll(t, dir)
+		dbPath := filepath.Join(dir, "state.db")
+		createHermesFixtureDB(t, dbPath)
+		logPath := filepath.Join(dir, "runtime.jsonl")
+		if _, err := CollectOnce(CollectOptions{DBPath: dbPath, StatePath: DefaultStatePath(dir), LogPath: logPath, Write: true, UserMode: true}); err != nil {
+			t.Fatalf("sync %s: %v", dir, err)
+		}
+		for _, ev := range readEvents(t, logPath) {
+			ids[dir] = append(ids[dir], ev.Event.ID)
+		}
+	}
+	want := []string{
+		"9cb4ead8-df8e-558e-b4c2-df1366305b07",
+		"e87a3e65-57fb-5fd5-9096-dc0410fa4387",
+		"05b16741-580d-520e-9af5-e6e7aa9a0101",
+		"8f05ae20-f638-5d56-a575-87560b7d5856",
+		"e62fa517-ffa4-54cb-b0a3-83d03be1ebc5",
+		"bc335649-a99a-5b38-a076-df55428ef4ab",
+		"36454ef9-0ba3-595b-a0aa-42cabd23244f",
+	}
+	if got := strings.Join(ids[native], ","); got != strings.Join(want, ",") {
+		t.Fatalf("native root ids = %v, want %v", ids[native], want)
+	}
+	seen := map[string]string{}
+	for _, dir := range homes {
+		if len(ids[dir]) != len(want) {
+			t.Fatalf("%s emitted %d events, want %d", dir, len(ids[dir]), len(want))
+		}
+		for _, id := range ids[dir] {
+			if other, ok := seen[id]; ok {
+				t.Errorf("%s and %s both emit event.id %s", other, dir, id)
+			}
+			seen[id] = dir
+		}
+	}
+}
+
 func createHermesFixtureDB(t *testing.T, path string) {
 	t.Helper()
 	db, err := sql.Open("sqlite", path)

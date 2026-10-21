@@ -98,6 +98,9 @@ type Session struct {
 	ActualCostUSD    float64
 	CostStatus       string
 	CostSource       string
+	// Home is the Hermes home the row was read from. Event ids mapped from the session are keyed by
+	// it (see eventIDKey); empty maps the unkeyed ids.
+	Home string
 }
 
 type Message struct {
@@ -138,13 +141,34 @@ func DefaultStatePath(hermesHome string) string {
 // so two homes never share a cursor even when both are the default profile of their own root or
 // hold profiles of the same name.
 func StateFileName(stem, hermesHome string) string {
-	resolved := canonicalHome(hermesHome)
-	userHome, _ := os.UserHomeDir()
-	if root := nativeRoot(userHome); root != "" && canonicalHome(root) == resolved {
+	if isNativeRoot(hermesHome) {
 		return stem + ".json"
 	}
-	sum := sha256.Sum256([]byte(resolved))
-	return fmt.Sprintf("%s-%s-%x.json", stem, Profile(hermesHome), sum[:6])
+	return fmt.Sprintf("%s-%s-%s.json", stem, Profile(hermesHome), homeKey(hermesHome))
+}
+
+// isNativeRoot reports whether hermesHome is the native Hermes data root.
+func isNativeRoot(hermesHome string) bool {
+	userHome, _ := os.UserHomeDir()
+	root := nativeRoot(userHome)
+	return root != "" && SameHome(root, hermesHome)
+}
+
+// homeKey identifies a Hermes home by its resolved path.
+func homeKey(hermesHome string) string {
+	sum := sha256.Sum256([]byte(canonicalHome(hermesHome)))
+	return fmt.Sprintf("%x", sum[:6])
+}
+
+// eventIDKey prefixes the event ids of a session read from hermesHome, so a session id two homes
+// share (a cloned profile) still names two sets of events. It follows StateFileName: the native
+// root, like an unknown home, keeps the unkeyed ids every home had before, and any other home is
+// keyed by the same path digest as its cursor file.
+func eventIDKey(hermesHome string) string {
+	if hermesHome == "" || isNativeRoot(hermesHome) {
+		return ""
+	}
+	return homeKey(hermesHome)
 }
 
 // LoadStateSeeded loads the cursor at path, or the one at legacy while path holds no sessions yet, as
@@ -399,9 +423,10 @@ ORDER BY started_at, id`)
 		return nil, err
 	}
 	defer rows.Close()
+	home := filepath.Dir(s.path)
 	var out []Session
 	for rows.Next() {
-		var s Session
+		s := Session{Home: home}
 		var model, cwd, title, parent, endReason, costStatus, costSource sql.NullString
 		var started, ended, lastMsg sql.NullFloat64
 		var msgCount, toolCount, input, output, cacheRead, cacheWrite, reasoning sql.NullInt64
@@ -594,7 +619,7 @@ func openSQLiteReadOnly(path string) (*sql.DB, error) {
 // cursor is what earlier sweeps collected; a zero Cursor maps the whole session, session-total
 // usage included, as a first sync does.
 func MapSession(session Session, messages []Message, cursor *Cursor) ([]MappedEvent, map[string]json.RawMessage) {
-	m := &mapper{session: session, cursor: cursor, calls: map[string]toolCall{}}
+	m := &mapper{session: session, cursor: cursor, calls: map[string]toolCall{}, idKey: eventIDKey(session.Home)}
 	for id, raw := range cursor.PendingCalls {
 		var call toolCall
 		if json.Unmarshal(raw, &call) == nil && call.ID != "" {
@@ -634,6 +659,7 @@ type mapper struct {
 	out             []MappedEvent
 	calls           map[string]toolCall
 	lastTimestampMS int64
+	idKey           string
 }
 
 type toolCall struct {
@@ -863,7 +889,11 @@ func (m *mapper) toolEvent(timestampMS int64, call toolCall, action, category st
 }
 
 func (m *mapper) append(sourceMessageID int64, suffix string, ev schema.Event) {
-	ev.Event.ID = hermesEventID(fmt.Sprintf("%s:%d:%s", m.session.ID, sourceMessageID, suffix))
+	dedupID := fmt.Sprintf("%s:%d:%s", m.session.ID, sourceMessageID, suffix)
+	if m.idKey != "" {
+		dedupID = m.idKey + ":" + dedupID
+	}
+	ev.Event.ID = hermesEventID(dedupID)
 	m.out = append(m.out, MappedEvent{SourceMessageID: sourceMessageID, Event: ev})
 }
 

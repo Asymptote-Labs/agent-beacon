@@ -2,6 +2,7 @@ package handoff
 
 import (
 	"errors"
+	"fmt"
 	"os"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
@@ -86,6 +87,22 @@ func (s *hermesSource) List() ([]Session, error) {
 const hermesOrphanedDelegate = "__orphaned__"
 
 func (s *hermesSource) Events(session Session) ([]schema.Event, error) {
+	return s.events(session, false)
+}
+
+// LegacyHermesEvents reads session as Events does, with the unkeyed event ids every Hermes home
+// had before ids were keyed by home. A session shared from a profile or a custom HERMES_HOME
+// before then holds those ids on beacon.sh.
+func LegacyHermesEvents(sources []Source, session Session) ([]schema.Event, error) {
+	for _, source := range sources {
+		if s, ok := source.(*hermesSource); ok {
+			return s.events(session, true)
+		}
+	}
+	return nil, fmt.Errorf("no session store for %s", session.Harness)
+}
+
+func (s *hermesSource) events(session Session, legacyIDs bool) ([]schema.Event, error) {
 	store, err := s.open()
 	if err != nil {
 		return nil, err
@@ -105,6 +122,9 @@ func (s *hermesSource) Events(session Session) ([]schema.Event, error) {
 		messages, err := store.ReadMessages(h.ID, 0)
 		if err != nil {
 			return nil, err
+		}
+		if legacyIDs {
+			h.Home = ""
 		}
 		// A zero cursor includes session-total usage, as a first sync would.
 		mapped, _ := hermessession.MapSession(h, messages, &hermessession.Cursor{})

@@ -461,6 +461,15 @@ func alignShareSource(subject shareSubject, payload sharePayload, state *asympto
 	if state == nil || state.LastEventID == "" || hasShareEvent(payload.Events, state.LastEventID) {
 		return subject, payload, nil
 	}
+	if subject.session.Harness == handoff.HarnessHermes && !subject.fromLog && !subject.legacyIDs {
+		// Shared from a Hermes home other than the native root before its event ids were keyed by
+		// home: the trace keeps the unkeyed ids it was built with.
+		legacy := subject
+		legacy.legacyIDs = true
+		if legacyPayload, err := buildSharePayload(legacy); err == nil && hasShareEvent(legacyPayload.Events, state.LastEventID) {
+			return legacy, legacyPayload, nil
+		}
+	}
 	var other shareSubject
 	if subject.fromLog {
 		// A session found in the log carries no store path, which store readers match on, so the
@@ -506,6 +515,8 @@ type shareSubject struct {
 	logEvents []schema.Event
 	// selectedBy says how the session was chosen (see shareResult.SelectedBy).
 	selectedBy string
+	// legacyIDs reads a Hermes store with the unkeyed event ids (handoff.LegacyHermesEvents).
+	legacyIDs bool
 }
 
 func shareSourceNote(subject shareSubject) string {
@@ -873,7 +884,11 @@ func shareEvents(subject shareSubject) (shareSubject, []schema.Event, error) {
 	if err != nil {
 		return subject, nil, err
 	}
-	events, err := handoff.Events(handoffSources(dirs), subject.session)
+	read := handoff.Events
+	if subject.legacyIDs {
+		read = handoff.LegacyHermesEvents
+	}
+	events, err := read(handoffSources(dirs), subject.session)
 	if err == nil {
 		return subject, events, nil
 	}

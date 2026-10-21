@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -553,6 +554,88 @@ func TestShareRefreshRefusesToDuplicateFromAnotherSource(t *testing.T) {
 	}
 	if len(srv.events) != 4 {
 		t.Fatalf("server holds %d events after a refused refresh", len(srv.events))
+	}
+}
+
+// A Hermes session shared from a profile before event ids were keyed by home holds the unkeyed ids
+// on beacon.sh. A refresh continues after the last of them rather than uploading a second copy.
+func TestShareRefreshResumesAHermesShareWithUnkeyedIDs(t *testing.T) {
+	env := newShareEnv(t)
+	srv := newFakeShareServer(t)
+	srv.signIn(account.ScopeTracesWrite)
+	dbPath := filepath.Join(env.home, ".hermes", "profiles", "work", "state.db")
+	writeShareHermesStore(t, dbPath)
+	stubHandoffSources(t, handoff.DefaultSources(handoff.StoreDirs{handoff.HarnessHermes: dbPath})...)
+	shareOpts = shareOptions{logPath: env.logPath}
+	session, err := handoff.Find(handoffSources(nil), handoff.HarnessHermes, "20261001_100000_aaaaaa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyed, err := buildSharePayload(shareSubject{session: session})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := buildSharePayload(shareSubject{session: session, legacyIDs: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(legacy.Events) < 4 || hasShareEvent(keyed.Events, legacy.Events[0].ID) {
+		t.Fatalf("want a profile's ids keyed: %d events", len(legacy.Events))
+	}
+	// Shared by an earlier Beacon before the session's last two events.
+	srv.trace = &asymptoteobserve.ShareTraceV1{}
+	srv.events = append([]asymptoteobserve.TraceEventV1(nil), legacy.Events[:len(legacy.Events)-2]...)
+
+	if _, stderr, err := runShareCommand(t, "refresh", legacy.ExternalID, "--log-path", env.logPath); err != nil {
+		t.Fatalf("refresh: %v\n%s", err, stderr)
+	}
+	var got, want []string
+	for _, e := range srv.events {
+		got = append(got, e.ID)
+	}
+	for _, e := range legacy.Events {
+		want = append(want, e.ID)
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("server events after refresh = %v, want %v", got, want)
+	}
+}
+
+// writeShareHermesStore writes a Hermes state.db holding one session.
+func writeShareHermesStore(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, stmt := range []string{
+		`CREATE TABLE sessions (
+			id TEXT PRIMARY KEY, source TEXT NOT NULL, user_id TEXT, model TEXT, model_config TEXT,
+			system_prompt TEXT, parent_session_id TEXT, started_at REAL NOT NULL, ended_at REAL,
+			end_reason TEXT, message_count INTEGER DEFAULT 0, tool_call_count INTEGER DEFAULT 0,
+			input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0, cache_read_tokens INTEGER DEFAULT 0,
+			cache_write_tokens INTEGER DEFAULT 0, reasoning_tokens INTEGER DEFAULT 0, cwd TEXT,
+			git_branch TEXT, git_repo_root TEXT, estimated_cost_usd REAL, actual_cost_usd REAL,
+			cost_status TEXT, cost_source TEXT, title TEXT, archived INTEGER NOT NULL DEFAULT 0)`,
+		`CREATE TABLE messages (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, role TEXT NOT NULL,
+			content TEXT, tool_call_id TEXT, tool_calls TEXT, tool_name TEXT, timestamp REAL NOT NULL,
+			token_count INTEGER, finish_reason TEXT, reasoning TEXT, reasoning_content TEXT,
+			reasoning_details TEXT, platform_message_id TEXT, observed INTEGER DEFAULT 0,
+			active INTEGER NOT NULL DEFAULT 1)`,
+		`INSERT INTO sessions (id, source, model, cwd, title, started_at) VALUES ('20261001_100000_aaaaaa', 'cli', 'gpt-5', '/work/api', 'Tidy the router', 1790000000)`,
+		`INSERT INTO messages (session_id, role, content, timestamp) VALUES ('20261001_100000_aaaaaa', 'user', 'tidy the router', 1790000001)`,
+		`INSERT INTO messages (session_id, role, content, timestamp) VALUES ('20261001_100000_aaaaaa', 'assistant', 'Reading it now.', 1790000002)`,
+		`INSERT INTO messages (session_id, role, content, timestamp) VALUES ('20261001_100000_aaaaaa', 'user', 'split the handlers', 1790000003)`,
+		`INSERT INTO messages (session_id, role, content, timestamp) VALUES ('20261001_100000_aaaaaa', 'assistant', 'Done.', 1790000004)`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
