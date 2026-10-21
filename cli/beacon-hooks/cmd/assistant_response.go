@@ -51,8 +51,16 @@ func emitStopAssistantResponse(logger *logging.Logger, input map[string]interfac
 // nothing: an empty agent.message would assert the agent answered with nothing, which is different
 // from the runtime not reporting an answer.
 func emitAssistantMessage(logger *logging.Logger, input, fields map[string]interface{}, text string) {
+	event := assistantMessageEvent(fields, text)
+	if event.action != "" {
+		emitHookEvent(logger, event.action, event.category, event.severity, event.message, input, event.fields)
+	}
+}
+
+// assistantMessageEvent shares the reply shape with stream mappers that return events for writing.
+func assistantMessageEvent(fields map[string]interface{}, text string) normalizedEvent {
 	if strings.TrimSpace(text) == "" {
-		return
+		return normalizedEvent{}
 	}
 	if fields == nil {
 		fields = map[string]interface{}{}
@@ -61,5 +69,8 @@ func emitAssistantMessage(logger *logging.Logger, input, fields map[string]inter
 		"output": map[string]interface{}{"messages": asymptoteobserve.TextOutputMessages(text)},
 	})
 	fields["content"] = retainedContentFields(text)
-	emitHookEvent(logger, "agent.message", "session", "info", "Agent response captured", input, fields)
+	return normalizedEvent{
+		action: "agent.message", category: "session", severity: "info",
+		message: "Agent response captured", fields: fields,
+	}
 }
