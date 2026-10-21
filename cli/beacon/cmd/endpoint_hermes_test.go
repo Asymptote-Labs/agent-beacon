@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -58,5 +59,26 @@ func TestHermesStatePathFollowsTheSweepItBelongsTo(t *testing.T) {
 	}
 	if system == user {
 		t.Errorf("system and user sweeps share one cursor at %q", system)
+	}
+}
+
+// The command fixes its database once: the default is not re-resolved per sweep, and a relative
+// --db run from inside a profile names that profile's home rather than ".".
+func TestHermesDBPathIsResolvedOnceAndAbsolute(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HERMES_HOME", "")
+	if got := resolveHermesDBPath(""); got != hermessession.DefaultDBPath() {
+		t.Errorf("default db = %q, want %q", got, hermessession.DefaultDBPath())
+	}
+	work := filepath.Join(home, ".hermes", "profiles", "work")
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(work)
+	got := resolveHermesDBPath("state.db")
+	if !filepath.IsAbs(got) || hermessession.Profile(filepath.Dir(got)) != "work" {
+		t.Errorf("relative --db resolved to %q, want an absolute path in the work profile", got)
 	}
 }

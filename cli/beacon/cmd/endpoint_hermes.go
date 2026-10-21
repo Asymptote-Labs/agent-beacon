@@ -74,15 +74,16 @@ func init() {
 
 func runEndpointHermesSync(cmd *cobra.Command, args []string) error {
 	userMode := endpointUserMode()
+	dbPath := resolveHermesDBPath(endpointHermesOpts.dbPath)
 	opts := hermessession.CollectOptions{
-		DBPath:   endpointHermesOpts.dbPath,
+		DBPath:   dbPath,
 		Print:    endpointHermesOpts.print,
 		Out:      cmd.OutOrStdout(),
 		Write:    !endpointHermesOpts.print,
 		UserMode: userMode,
 	}
 	if !endpointHermesOpts.print {
-		opts.StatePath = resolveHermesStatePath(endpointHermesOpts.statePath, endpointHermesOpts.dbPath, userMode)
+		opts.StatePath = resolveHermesStatePath(endpointHermesOpts.statePath, dbPath, userMode)
 		opts.LogPath = lifecycle.ResolveRuntimeLog(userMode, endpointHermesOpts.logPath).EffectiveLogPath
 	}
 
@@ -148,10 +149,7 @@ type hermesStatusReport struct {
 }
 
 func runEndpointHermesStatus(cmd *cobra.Command, args []string) error {
-	dbPath := endpointHermesOpts.dbPath
-	if dbPath == "" {
-		dbPath = hermessession.DefaultDBPath()
-	}
+	dbPath := resolveHermesDBPath(endpointHermesOpts.dbPath)
 	statePath := resolveHermesStatePath(endpointHermesOpts.statePath, dbPath, endpointUserMode())
 	report := hermesStatusReport{DBPath: dbPath, StatePath: statePath}
 
@@ -216,6 +214,20 @@ func runEndpointHermesStatus(cmd *cobra.Command, args []string) error {
 			session.SessionID, mark, session.CollectedMessageID, session.LastMessageID, session.Title)
 	}
 	return nil
+}
+
+// resolveHermesDBPath fixes the database a command reads once, before anything is derived from it.
+// The default is resolved here rather than per sweep, so a --watch that outlives `hermes profile use`
+// keeps reading the store its cursor belongs to, and a relative --db is made absolute so the home,
+// profile and cursor name come from the real directory rather than ".".
+func resolveHermesDBPath(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return hermessession.DefaultDBPath()
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
 }
 
 // resolveHermesStatePath keeps the cursor beside the log the sweep writes to. A system-mode sweep
