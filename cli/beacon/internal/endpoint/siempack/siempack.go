@@ -41,15 +41,16 @@ func RenderLogPath(content, logPath string) string {
 
 func renderTOMLLogPath(content, logPath string) string {
 	return strings.NewReplacer(
-		logPathToken, tomlStringContent(logPath),
-		inventoryLogPathToken, tomlStringContent(InventoryLogPath(logPath)),
-		backfillLogPathToken, tomlStringContent(BackfillLogPath(logPath)),
+		logPathToken, TOMLEscape(logPath),
+		inventoryLogPathToken, TOMLEscape(InventoryLogPath(logPath)),
+		backfillLogPathToken, TOMLEscape(BackfillLogPath(logPath)),
 	).Replace(content)
 }
 
-func tomlStringContent(value string) string {
-	// JSON string escapes are also valid in TOML basic strings, but TOML additionally forbids
-	// a literal DEL. Derive sibling paths before encoding so escapes never reach filepath.Dir.
+// TOMLEscape is value as it is written inside a TOML basic string. JSON string escapes are also
+// valid there, but TOML additionally forbids a literal DEL. Sibling paths are derived before
+// encoding, so escapes never reach filepath.Dir.
+func TOMLEscape(value string) string {
 	return strings.ReplaceAll(JSONEscapeForString(value), "\x7f", `\u007f`)
 }
 

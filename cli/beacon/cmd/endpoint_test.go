@@ -22,6 +22,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/siempack"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/updatecheck"
 
@@ -2244,7 +2245,7 @@ func TestEndpointCloudWatchPrintConfigPrintsVectorConfig(t *testing.T) {
 		"aws_cloudwatch_logs",
 		"BEACON_CLOUDWATCH_LOG_GROUP",
 		"BEACON_CLOUDWATCH_LOG_STREAM_PREFIX",
-		endpointOpts.logPath,
+		siempack.TOMLEscape(endpointOpts.logPath),
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("CloudWatch print-config output missing %q: %s", want, output)
