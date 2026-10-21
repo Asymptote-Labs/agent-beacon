@@ -177,6 +177,7 @@ processors:
     send_batch_size: 128
   claude_api_body:
 %s
+  beacon_privacy: {}
 exporters:
   beaconjson:
     path: %q
@@ -197,15 +198,15 @@ service:
   pipelines:
     logs:
       receivers: [otlp]
-      processors: [memory_limiter, claude_api_body, batch]
+      processors: [memory_limiter, claude_api_body, beacon_privacy, batch]
       exporters: %s
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, beacon_privacy, batch]
       exporters: %s
     metrics:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, beacon_privacy, batch]
       exporters: %s
 `, cfg.Collector.GRPCPort, grpcLimitYAML, cfg.Collector.HTTPPort, modelContextYAML, cfg.LogPath, runtimeMetricsYAML+codexSpansYAML+modelContextYAML+splunkExporter+falconExporter, endpointconfig.HealthCheckPort(cfg.Collector), exporters, exporters, exporters)
 }

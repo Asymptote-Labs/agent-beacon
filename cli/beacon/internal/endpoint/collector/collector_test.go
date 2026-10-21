@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 )
 
@@ -29,6 +31,42 @@ func testConfig(t *testing.T) endpointconfig.Config {
 			HTTPPort:   14318,
 			SpoolPath:  filepath.Join(dir, "spool", "otlp.jsonl"),
 		},
+	}
+}
+
+func TestPrivacyRunsBeforeFanoutForEverySignal(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Destinations = &endpointconfig.Destinations{
+		SplunkHEC: &endpointconfig.SplunkHEC{Endpoint: "https://splunk.example/services/collector", Token: "test-token"},
+		FalconHEC: &endpointconfig.FalconHEC{Endpoint: "https://falcon.example/api/v1/ingest/hec", Token: "test-token"},
+	}
+	var rendered struct {
+		Processors map[string]any `yaml:"processors"`
+		Service    struct {
+			Pipelines map[string]struct {
+				Processors []string `yaml:"processors"`
+				Exporters  []string `yaml:"exporters"`
+			} `yaml:"pipelines"`
+		} `yaml:"service"`
+	}
+	if err := yaml.Unmarshal([]byte(ConfigYAML(cfg)), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := rendered.Processors["beacon_privacy"]; !exists {
+		t.Fatal("privacy processor not configured")
+	}
+	for _, signal := range []string{"logs", "traces", "metrics"} {
+		pipeline := rendered.Service.Pipelines[signal]
+		want := "memory_limiter,beacon_privacy,batch"
+		if signal == "logs" {
+			want = "memory_limiter,claude_api_body,beacon_privacy,batch"
+		}
+		if strings.Join(pipeline.Processors, ",") != want {
+			t.Fatalf("%s processor order = %v", signal, pipeline.Processors)
+		}
+		if strings.Join(pipeline.Exporters, ",") != "beaconjson,splunk_hec,falcon_hec" {
+			t.Fatalf("%s fanout = %v", signal, pipeline.Exporters)
+		}
 	}
 }
 
@@ -56,7 +94,7 @@ func TestConfigYAMLIncludesReleaseContractFields(t *testing.T) {
 		"  claude_api_body:\n",
 		// Ahead of the fan-out to exporters, so Claude Code API bodies are filtered for every
 		// destination, not only the local runtime log.
-		"processors: [memory_limiter, claude_api_body, batch]",
+		"processors: [memory_limiter, claude_api_body, beacon_privacy, batch]",
 	} {
 		if !strings.Contains(yaml, want) {
 			t.Fatalf("ConfigYAML missing %q:\n%s", want, yaml)
