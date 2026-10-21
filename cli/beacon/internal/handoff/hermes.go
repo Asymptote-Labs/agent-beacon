@@ -106,8 +106,6 @@ func (s *hermesSource) Events(session Session) ([]schema.Event, error) {
 		if err != nil {
 			return nil, err
 		}
-		// The same ids a sync of this home writes, so a share matches what was collected.
-		h.IDKey = hermessession.HomeEventIDKey(h.Home)
 		// A zero cursor includes session-total usage, as a first sync would.
 		mapped, _ := hermessession.MapSession(h, messages, &hermessession.Cursor{})
 		events := make([]schema.Event, 0, len(mapped))

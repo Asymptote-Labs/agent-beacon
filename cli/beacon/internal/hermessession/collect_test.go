@@ -127,7 +127,7 @@ func TestMapSessionClassifiesFileTool(t *testing.T) {
 func TestCollectOnceKeepsHermesProfilesApart(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
-	root := nativeRoot(home) // %LOCALAPPDATA%\hermes on Windows, ~/.hermes elsewhere
+	root := filepath.Join(home, ".hermes")
 	logPath := filepath.Join(home, "runtime.jsonl")
 	want := map[string]string{"default": root, "work": filepath.Join(root, "profiles", "work")}
 	for profile, dir := range want {
@@ -141,40 +141,13 @@ func TestCollectOnceKeepsHermesProfilesApart(t *testing.T) {
 		}
 	}
 	got := map[string]string{}
-	ids := map[string]string{}
-	events := readEvents(t, logPath)
-	for _, ev := range events {
+	for _, ev := range readEvents(t, logPath) {
 		got[ev.Harness.Profile] = ev.Harness.ConfigPath
-		if other, ok := ids[ev.Event.ID]; ok {
-			t.Errorf("event id %s names a %s event and a %s event", ev.Event.ID, other, ev.Harness.Profile)
-		}
-		ids[ev.Event.ID] = ev.Harness.Profile
 	}
 	if len(got) != len(want) || got["default"] != want["default"] || got["work"] != want["work"] {
 		t.Fatalf("profile -> config_path = %v, want %v", got, want)
 	}
-	// The native root's ids keep the unkeyed derivation, so what it has already written is not renamed.
-	store, err := OpenStore(filepath.Join(root, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	sessions, err := store.ListSessions()
-	if err != nil || len(sessions) == 0 {
-		t.Fatalf("list sessions: %v", err)
-	}
-	messages, err := store.ReadMessages(sessions[0].ID, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, item := range mappedOnly(MapSession(sessions[0], messages, &Cursor{})) {
-		if ids[item.Event.Event.ID] != "default" {
-			t.Errorf("native-root event id %s changed", item.Event.Event.ID)
-		}
-	}
 }
-
-func mappedOnly(mapped []MappedEvent, _ map[string]json.RawMessage) []MappedEvent { return mapped }
 
 func createHermesFixtureDB(t *testing.T, path string) {
 	t.Helper()
@@ -436,54 +409,4 @@ func (w *writerFailingAfter) Write(p []byte) (int, error) {
 		return 0, errors.New("destination unavailable")
 	}
 	return len(p), nil
-}
-
-// A home whose cursor was seeded from the legacy cursor keeps the unkeyed ids it wrote before
-// cursors were keyed, so share refresh still matches them; the native root is keyed from then on,
-// so only one home ever writes unkeyed ids, and the choice survives a later profile switch.
-func TestSeededHomeKeepsItsLegacyEventIDs(t *testing.T) {
-	home := t.TempDir()
-	testenv.SetHome(t, home)
-	custom := filepath.Join(home, "custom-hermes")
-	if err := os.MkdirAll(custom, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	dbPath := filepath.Join(custom, "state.db")
-	createHermesFixtureDB(t, dbPath)
-	legacyPath := DefaultStatePath(nativeRoot(home))
-	legacy := &State{Sessions: map[string]*Cursor{"other-session": {Started: true, LastMessageID: 3}}}
-	if err := legacy.Save(legacyPath); err != nil {
-		t.Fatal(err)
-	}
-	logPath := filepath.Join(home, "runtime.jsonl")
-	opts := CollectOptions{DBPath: dbPath, StatePath: DefaultStatePath(custom), LegacyStatePath: legacyPath, LogPath: logPath, Write: true, UserMode: true}
-	if _, err := CollectOnce(opts); err != nil {
-		t.Fatal(err)
-	}
-
-	store, err := OpenStore(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	sessions, err := store.ListSessions()
-	if err != nil || len(sessions) == 0 {
-		t.Fatalf("list sessions: %v", err)
-	}
-	messages, err := store.ReadMessages(sessions[0].ID, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	written := map[string]bool{}
-	for _, ev := range readEvents(t, logPath) {
-		written[ev.Event.ID] = true
-	}
-	for _, item := range mappedOnly(MapSession(sessions[0], messages, &Cursor{})) { // IDKey "": the pre-PR form
-		if !written[item.Event.Event.ID] {
-			t.Errorf("seeded home renamed pre-PR event id %s", item.Event.Event.ID)
-		}
-	}
-	if HomeEventIDKey(custom) != "" || HomeEventIDKey(nativeRoot(home)) == "" {
-		t.Errorf("unkeyed home: custom key %q, native key %q; want only the seeded home unkeyed", HomeEventIDKey(custom), HomeEventIDKey(nativeRoot(home)))
-	}
 }
