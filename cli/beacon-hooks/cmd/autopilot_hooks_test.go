@@ -4,10 +4,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	hookconfig "github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/policy"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/policycontract"
 )
 
@@ -307,6 +309,11 @@ func TestAutopilotPolicyDenyUsesClaudeCodesShapePerPhase(t *testing.T) {
 
 func TestPreToolPolicyDenyAutopilot(t *testing.T) {
 	logPath := setupPolicyTest(t, autopilotPlatform, denyResponse)
+	// The provider is a shell script; on a loaded machine its start-up alone can approach the 2s
+	// production timeout, and a timeout fails open, which would read as a missing deny.
+	origTimeout := policy.Timeout
+	t.Cleanup(func() { policy.Timeout = origTimeout })
+	policy.Timeout = 10 * time.Second
 	payload := readHookFixture(t, "autopilot", "pre_tool_bash.json")
 	delete(payload, "transcript_path")
 	out := runHookWithInput(t, runPreTool, payload)
