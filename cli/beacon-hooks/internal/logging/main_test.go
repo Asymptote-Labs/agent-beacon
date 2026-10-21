@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/activesession"
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/shareauto"
 )
 
 // TestMain keeps the active-session record every endpoint event updates out of the real home
@@ -18,7 +17,8 @@ func TestMain(m *testing.M) {
 	}
 	os.Setenv(activesession.PathEnv, filepath.Join(dir, activesession.FileName))
 	// Auto-share is off unless a test turns it on in a settings file of its own.
-	os.Setenv(shareauto.PathEnv, filepath.Join(dir, "share-settings.json"))
+	settingsPath := filepath.Join(dir, "share-settings.json")
+	ShareSettingsPath = func() string { return settingsPath }
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)

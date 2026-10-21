@@ -22,7 +22,9 @@ func TestShareRequestMarkIsRolledBackWhenTheWriteFails(t *testing.T) {
 	settingsPath := filepath.Join(dir, "share.json")
 	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
 	t.Setenv(activesession.PathEnv, recordPath)
-	t.Setenv(shareauto.PathEnv, settingsPath)
+	prevPath := ShareSettingsPath
+	ShareSettingsPath = func() string { return settingsPath }
+	t.Cleanup(func() { ShareSettingsPath = prevPath })
 	var settings shareauto.Settings
 	settings.SetGlobal(shareauto.GlobalOn)
 	if err := shareauto.Save(settingsPath, settings); err != nil {

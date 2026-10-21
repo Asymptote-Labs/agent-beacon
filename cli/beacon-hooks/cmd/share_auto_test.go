@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/activesession"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/shareauto"
@@ -31,7 +32,7 @@ func shareAutoHookEnv(t *testing.T, settings *shareauto.Settings) string {
 	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
 	t.Setenv(activesession.PathEnv, filepath.Join(dir, activesession.FileName))
 	settingsPath := filepath.Join(dir, "share.json")
-	t.Setenv(shareauto.PathEnv, settingsPath)
+	setShareSettingsPath(t, func() string { return settingsPath })
 	if settings != nil {
 		if err := shareauto.Save(settingsPath, *settings); err != nil {
 			t.Fatal(err)
@@ -41,6 +42,13 @@ func shareAutoHookEnv(t *testing.T, settings *shareauto.Settings) string {
 	http.DefaultTransport = failingTransport{t}
 	t.Cleanup(func() { http.DefaultTransport = prev })
 	return logPath
+}
+
+func setShareSettingsPath(t *testing.T, path func() string) {
+	t.Helper()
+	prev := logging.ShareSettingsPath
+	logging.ShareSettingsPath = path
+	t.Cleanup(func() { logging.ShareSettingsPath = prev })
 }
 
 func runClaudeSessionHooks(t *testing.T, sessionID string) {
@@ -109,6 +117,26 @@ func TestAutoShareOffWritesNothing(t *testing.T) {
 	runClaudeSessionHooks(t, "sess-c")
 	if n := len(shareRequests(t, logPath)); n != 0 {
 		t.Fatalf("share requests with auto-share disabled = %d", n)
+	}
+}
+
+// The hook's environment can come from the repository, so the settings-file override must not point
+// it at a file that turns auto-share on.
+func TestAutoShareIgnoresRepoSuppliedSettingsPath(t *testing.T) {
+	logPath := shareAutoHookEnv(t, nil)
+	setShareSettingsPath(t, shareauto.HookPath)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	override := filepath.Join(t.TempDir(), ".beacon", "user.json")
+	if err := shareauto.Save(override, shareauto.Settings{Auto: shareauto.Auto{Enabled: true, Visibility: "public"}}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(shareauto.PathEnv, override)
+
+	runClaudeSessionHooks(t, "sess-a")
+	if n := len(shareRequests(t, logPath)); n != 0 {
+		t.Fatalf("share requests from a repo-supplied settings file = %d", n)
 	}
 }
 

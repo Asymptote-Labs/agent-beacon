@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	endpointhooks "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
+	"github.com/spf13/cobra"
 )
 
 func TestCloudCommandsRegistered(t *testing.T) {
@@ -234,5 +235,20 @@ func TestS3UploadPolicyScopesToPrefix(t *testing.T) {
 	}
 	if policy.Statement[0].Resource != "arn:aws:s3:::bucket/prefix/*" {
 		t.Fatalf("Resource = %q", policy.Statement[0].Resource)
+	}
+}
+
+// The shuttle uploads only from /tmp/beacon, so a hook log elsewhere would never be shipped.
+func TestCloudPrintHooksRejectsLogPathOutsideSandbox(t *testing.T) {
+	prev := cloudOpts
+	t.Cleanup(func() { cloudOpts = prev })
+	for _, cmd := range []*cobra.Command{cloudClaudeWebPrintHooksCmd, cloudCursorPrintHooksCmd} {
+		cloudOpts.binaryPath = "/tmp/beacon/bin/beacon-hooks"
+		for _, logPath := range []string{"/workspace/.beacon/runtime.jsonl", "/tmp/beacon/../etc/runtime.jsonl", "/tmp/beacon"} {
+			cloudOpts.logPath = logPath
+			if err := cmd.RunE(cmd, nil); err == nil || !strings.Contains(err.Error(), "/tmp/beacon") {
+				t.Fatalf("%s --log-path %s: err = %v, want a rejection naming /tmp/beacon", cmd.Parent().Name(), logPath, err)
+			}
+		}
 	}
 }
