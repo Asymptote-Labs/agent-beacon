@@ -70,14 +70,9 @@ type EventResult struct {
 
 func ReadEvents(path string, query EventQuery) (EventResult, error) {
 	limit := normalizeLimit(query.Limit)
-	state := normalizeSessionState(query.SessionState)
-	query.SessionState = state
-	if state != "" && query.sessionStateIDs == nil {
-		ids, err := sessionIDsForState(path, query, state)
-		if err != nil {
-			return EventResult{}, err
-		}
-		query.sessionStateIDs = ids
+	query, err := resolveSessionState(path, query)
+	if err != nil {
+		return EventResult{}, err
 	}
 	result := EventResult{Limit: limit, Query: strings.TrimSpace(query.Q), Filters: activeFilters(query)}
 	for _, source := range eventSources(path) {
@@ -91,6 +86,20 @@ func ReadEvents(path string, query EventQuery) (EventResult, error) {
 	result.Returned = len(result.Events)
 	result.Truncated = result.TotalMatched > len(result.Events)
 	return result, nil
+}
+
+// resolveSessionState normalizes query's session-state filter and, when one is set, resolves the
+// sessions in that state, which every reader must do before it matches a single event.
+func resolveSessionState(path string, query EventQuery) (EventQuery, error) {
+	query.SessionState = normalizeSessionState(query.SessionState)
+	if query.SessionState != "" && query.sessionStateIDs == nil {
+		ids, err := sessionIDsForState(path, query, query.SessionState)
+		if err != nil {
+			return query, err
+		}
+		query.sessionStateIDs = ids
+	}
+	return query, nil
 }
 
 // ReadEventsAppendOrder reads the full matching log (NoLimit) and returns the
@@ -125,6 +134,10 @@ func ReadEventsAppendOrder(path string, query EventQuery) ([]schema.Event, error
 //     live channel started capturing the session rather than where the window starts
 //     or where its first usage record landed.
 func ReadTokenEventsAppendOrder(path string, query EventQuery) ([]schema.Event, []schema.Event, error) {
+	query, err := resolveSessionState(path, query)
+	if err != nil {
+		return nil, nil, err
+	}
 	result, err := ReadEvents(path, EventQuery{NoLimit: true})
 	if err != nil {
 		return nil, nil, err
