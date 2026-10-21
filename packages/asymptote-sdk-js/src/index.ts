@@ -1,4 +1,5 @@
 import {
+  ProxyTracerProvider,
   SpanKind,
   SpanStatusCode,
   context,
@@ -54,6 +55,7 @@ const DEFAULT_TRACER_NAME = "asymptote-sdk";
 const DEFAULT_SERVICE_NAME = "asymptote-app";
 const SDK_VERSION = readSDKVersion();
 const CLAUDE_AGENT_QUERY_WRAPPED = Symbol.for("@asymptote/sdk.claude-agent-query-wrapped");
+const NOOP_TRACER_PROVIDER = new ProxyTracerProvider().getDelegate();
 
 export type ExportMode = "hosted" | "otlp" | "custom";
 
@@ -112,6 +114,7 @@ interface SDKState {
   instrumentations: Instrumentation[];
   instrumentationsDisabled: boolean;
   provider: NodeTracerProvider;
+  ownsGlobalTracer: boolean;
   mode: ExportMode;
   observeUrl?: string;
   /** The options the active configuration was built from, to tell a repeat from a conflict. */
@@ -123,6 +126,7 @@ type ClaudeAgentQueryFunction<T extends (...args: any[]) => any = (...args: any[
 };
 
 let state: SDKState | undefined;
+let defaultRegistrationAttempted = false;
 
 export class Observe {
   static initialize(options: InitializeOptions = {}): void {
@@ -216,22 +220,58 @@ export function initialize(options: InitializeOptions = {}): void {
     }),
     spanProcessors: processors,
   });
-  provider.register();
-  if (instrumentations.length > 0) {
-    registerInstrumentations({ instrumentations, tracerProvider: provider });
-  }
-  state = { instrumentations, instrumentationsDisabled: !!options.disableInstrumentations, provider, mode: resolved.mode, observeUrl: resolved.observeUrl, options };
-
-  if (options.instrumentModules) {
-    try {
-      patch(options.instrumentModules);
-    } catch (error) {
-      instrumentations.forEach(i => i.disable());
-      provider.shutdown().catch(() => {});
-      state = undefined;
-      throw error;
+  const current: SDKState = {
+    instrumentations,
+    instrumentationsDisabled: !!options.disableInstrumentations,
+    provider,
+    ownsGlobalTracer: false,
+    mode: resolved.mode,
+    observeUrl: resolved.observeUrl,
+    options,
+  };
+  try {
+    registerGlobalTracer(current);
+    if (instrumentations.length > 0) {
+      registerInstrumentations({ instrumentations, tracerProvider: provider });
     }
+    state = current;
+    if (options.instrumentModules) {
+      patch(options.instrumentModules);
+    }
+  } catch (error) {
+    releaseGlobalTracer(current);
+    instrumentations.forEach(i => i.disable());
+    provider.shutdown().catch(() => {});
+    if (state === current) state = undefined;
+    throw error;
   }
+}
+
+function registerGlobalTracer(current: SDKState): void {
+  const global = trace.getTracerProvider();
+  // A virgin public proxy has a NOOP delegate; a host's registration must remain untouched.
+  if (!(global instanceof ProxyTracerProvider) || global.getDelegate() !== NOOP_TRACER_PROVIDER) return;
+  if (!defaultRegistrationAttempted) {
+    // Context and propagation defaults live for the process, independently of this provider.
+    defaultRegistrationAttempted = true;
+    try {
+      current.provider.register();
+    } finally {
+      // register() returns void; only an exact public delegate match proves success.
+      current.ownsGlobalTracer = isCurrentGlobalProvider(current.provider);
+    }
+  } else {
+    current.ownsGlobalTracer = trace.setGlobalTracerProvider(current.provider) && isCurrentGlobalProvider(current.provider);
+  }
+}
+
+function isCurrentGlobalProvider(provider: NodeTracerProvider): boolean {
+  const global = trace.getTracerProvider();
+  return global instanceof ProxyTracerProvider && global.getDelegate() === provider;
+}
+
+function releaseGlobalTracer(current: SDKState): void {
+  if (current.ownsGlobalTracer && isCurrentGlobalProvider(current.provider)) trace.disable();
 }
 
 // changedOptions names the options in next, other than instrumentModules, that differ from the
@@ -393,6 +433,7 @@ export async function shutdown(): Promise<void> {
   try {
     await current.provider.shutdown();
   } finally {
+    releaseGlobalTracer(current);
     // A stopped provider cannot resume exporting, even when its exporter rejects.
     if (state === current) state = undefined;
   }
