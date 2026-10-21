@@ -573,11 +573,23 @@ function finishResult<T>(result: T, span: Span, options?: ObserveOptions): unkno
       return: iterator.return.bind(iterator),
       throw: iterator.throw.bind(iterator),
     };
+    const spanContext = trace.setSpan(context.active(), span);
+    const tracedMethods = {
+      next(...args: [] | [unknown]) {
+        return context.with(spanContext, () => methods.next(...args));
+      },
+      return(value?: unknown) {
+        return context.with(spanContext, () => methods.return(value));
+      },
+      throw(error?: unknown) {
+        return context.with(spanContext, () => methods.throw(error));
+      },
+    };
     const controls = new Map<Function, Function>();
     const stream: AsyncGenerator<unknown> = new Proxy(iterator, {
       get(_target, key) {
         if (key === Symbol.asyncIterator) return iteratorForStream;
-        if (key === "next" || key === "return" || key === "throw") return methods[key];
+        if (key === "next" || key === "return" || key === "throw") return tracedMethods[key];
         const value = Reflect.get(result, key, result);
         if (typeof value !== "function" || key === "constructor") return value;
         let control = controls.get(value);
