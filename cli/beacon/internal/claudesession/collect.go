@@ -1,7 +1,6 @@
 package claudesession
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionwindow"
 )
 
@@ -80,47 +79,16 @@ func DefaultStatePath() string {
 	return filepath.Join(base, "endpoint", "state", "claude.json")
 }
 
-func LoadState(path string) (*State, error) {
-	state := &State{Version: StateVersion, Files: map[string]*Cursor{}}
-	if path == "" {
-		return state, nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return state, nil
-		}
-		return nil, err
-	}
-	var stored State
-	if err := json.Unmarshal(data, &stored); err != nil {
-		return nil, fmt.Errorf("read Claude collector state %s: %w", path, err)
-	}
-	if stored.Version != StateVersion || stored.Files == nil {
-		return state, nil
-	}
-	state.Files = stored.Files
-	return state, nil
+var stateFile = sessionsync.StateFile[State]{
+	Name:  "Claude",
+	New:   func() *State { return &State{Version: StateVersion, Files: map[string]*Cursor{}} },
+	Valid: func(s *State) bool { return s.Version == StateVersion && s.Files != nil },
+	Stamp: func(s *State) { s.Version = StateVersion },
 }
 
-func (s *State) Save(path string) error {
-	if path == "" {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	s.Version = StateVersion
-	data, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
+func LoadState(path string) (*State, error) { return stateFile.Load(path) }
+
+func (s *State) Save(path string) error { return stateFile.Save(path, s) }
 
 func (s *State) cursor(path string) *Cursor {
 	if s.Files == nil {
@@ -158,14 +126,12 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 		}
 	}()
 
-	var guard *writer.RetentionGuard
-	if opts.Write && !opts.Print {
-		guard = &writer.RetentionGuard{}
-	}
+	sink := opts.sink()
+	sink.GuardRetention()
 	var errs []error
 	responses := responseLedger{}
 	for i, ref := range refs {
-		changed, collectErr := collectSession(store, ref, state, opts, guard, responses, &summary)
+		changed, collectErr := collectSession(store, ref, state, opts, sink, responses, &summary)
 		if errors.Is(collectErr, writer.ErrRetentionWindowFull) {
 			// Not a failed session: this one and the rest are simply left for the next sweep,
 			// with cursors that have not moved past anything that was not written.
@@ -196,13 +162,10 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 			summary.SessionsChanged++
 		}
 	}
-	if guard != nil {
-		summary.EventsRetained = guard.Retained()
-		summary.EventsRotatedOut = guard.Written() - summary.EventsRetained
-		if summary.EventsRotatedOut > 0 {
-			errs = append(errs, fmt.Errorf("%d of the %d events this sweep wrote were rotated out of the runtime log by another writer before it finished",
-				summary.EventsRotatedOut, guard.Written()))
-		}
+	var rotatedOut error
+	summary.EventsRetained, summary.EventsRotatedOut, rotatedOut = sink.Retention()
+	if rotatedOut != nil {
+		errs = append(errs, rotatedOut)
 	}
 	if len(errs) > 0 {
 		return summary, errors.Join(errs...)
@@ -223,7 +186,7 @@ func countChanged(refs []SessionRef, state *State) int {
 	return n
 }
 
-func collectSession(store *Store, ref SessionRef, state *State, opts CollectOptions, guard *writer.RetentionGuard, responses responseLedger, summary *Summary) (bool, error) {
+func collectSession(store *Store, ref SessionRef, state *State, opts CollectOptions, sink sessionsync.Sink, responses responseLedger, summary *Summary) (bool, error) {
 	cursor := state.cursor(ref.Path)
 	if ref.SizeBytes < cursor.SizeBytes {
 		cursor.LastLine = 0
@@ -246,7 +209,7 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 		return false, nil
 	}
 	for i, item := range mapped {
-		if err := emit(item.Event, opts, guard); err != nil {
+		if err := sink.Emit(item.Event); err != nil {
 			advanceCursorPartial(cursor, mapped, i)
 			return true, err
 		}
@@ -296,17 +259,6 @@ func advanceCursorPartial(cursor *Cursor, mapped []MappedEvent, failedIdx int) {
 	cursor.LastLine = lastCompleteLine
 }
 
-func emit(event schema.Event, opts CollectOptions, guard *writer.RetentionGuard) error {
-	if opts.Print {
-		out := opts.Out
-		if out == nil {
-			out = io.Discard
-		}
-		return json.NewEncoder(out).Encode(event)
-	}
-	if !opts.Write {
-		return nil
-	}
-	_, err := writer.AppendEvent(event, writer.Options{Path: opts.LogPath, UserMode: opts.UserMode, RotateSize: opts.RotateBytes, Guard: guard, Budget: opts.Budget})
-	return err
+func (o CollectOptions) sink() sessionsync.Sink {
+	return sessionsync.Sink{Print: o.Print, Out: o.Out, Write: o.Write, PrintOnly: true, Log: writer.Options{Path: o.LogPath, UserMode: o.UserMode, RotateSize: o.RotateBytes, Budget: o.Budget}}
 }

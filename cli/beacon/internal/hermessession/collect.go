@@ -8,9 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -19,8 +17,9 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionwindow"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sqliteuri"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	_ "modernc.org/sqlite"
 )
@@ -159,47 +158,16 @@ func LoadStateSeeded(path, legacy string) (*State, error) {
 	return LoadState(legacy)
 }
 
-func LoadState(path string) (*State, error) {
-	state := &State{Version: StateVersion, Sessions: map[string]*Cursor{}}
-	if path == "" {
-		return state, nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return state, nil
-		}
-		return nil, err
-	}
-	var stored State
-	if err := json.Unmarshal(data, &stored); err != nil {
-		return nil, fmt.Errorf("read Hermes collector state %s: %w", path, err)
-	}
-	if stored.Version != StateVersion || stored.Sessions == nil {
-		return state, nil
-	}
-	state.Sessions = stored.Sessions
-	return state, nil
+var stateFile = sessionsync.StateFile[State]{
+	Name:  "Hermes",
+	New:   func() *State { return &State{Version: StateVersion, Sessions: map[string]*Cursor{}} },
+	Valid: func(s *State) bool { return s.Version == StateVersion && s.Sessions != nil },
+	Stamp: func(s *State) { s.Version = StateVersion },
 }
 
-func (s *State) Save(path string) error {
-	if path == "" {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	s.Version = StateVersion
-	data, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
+func LoadState(path string) (*State, error) { return stateFile.Load(path) }
+
+func (s *State) Save(path string) error { return stateFile.Save(path, s) }
 
 func (s *State) cursor(sessionID string) *Cursor {
 	if s.Sessions == nil {
@@ -290,7 +258,7 @@ func collectSession(store *Store, session Session, state *State, opts CollectOpt
 		return false, nil
 	}
 	for _, item := range mapped {
-		if err := emit(item.Event, opts); err != nil {
+		if err := opts.sink().Emit(item.Event); err != nil {
 			return true, err
 		}
 		summary.EventsEmitted++
@@ -346,22 +314,8 @@ func updateCursorTotals(cursor *Cursor, session Session) {
 	}
 }
 
-func emit(event schema.Event, opts CollectOptions) error {
-	if opts.Print && opts.Out != nil {
-		data, err := json.Marshal(event)
-		if err != nil {
-			return err
-		}
-		if _, err := opts.Out.Write(append(data, '\n')); err != nil {
-			return err
-		}
-	}
-	if opts.Write {
-		if _, err := writer.AppendEvent(event, writer.Options{Path: opts.LogPath, UserMode: opts.UserMode, Budget: opts.Budget}); err != nil {
-			return err
-		}
-	}
-	return nil
+func (o CollectOptions) sink() sessionsync.Sink {
+	return sessionsync.Sink{Print: o.Print, Out: o.Out, Write: o.Write, Log: writer.Options{Path: o.LogPath, UserMode: o.UserMode, Budget: o.Budget}}
 }
 
 type Store struct {
@@ -373,7 +327,7 @@ type Store struct {
 }
 
 func OpenStore(path string) (*Store, error) {
-	db, err := openSQLiteReadOnly(path)
+	db, err := sessionsync.OpenSQLite(path, "busy_timeout(1000)")
 	if err != nil {
 		return nil, err
 	}
@@ -600,14 +554,6 @@ func (s *Store) LastMessageID(sessionID string) (int64, error) {
 		return 0, err
 	}
 	return last.Int64, nil
-}
-
-func openSQLiteReadOnly(path string) (*sql.DB, error) {
-	path, err := sessionfs.SQLitePath(path)
-	if err != nil {
-		return nil, err
-	}
-	return sql.Open("sqlite", sqliteuri.File(path, url.Values{"mode": {"ro"}, "_pragma": {"busy_timeout(1000)"}}))
 }
 
 // MapSession maps one session's new messages into endpoint events. It also returns the tool calls

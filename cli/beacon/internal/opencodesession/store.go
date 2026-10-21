@@ -5,15 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sqliteuri"
 	"io/fs"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
 
 	_ "modernc.org/sqlite"
 )
@@ -832,14 +832,9 @@ func legacyProjectDirectory(path string) string {
 	return firstNonEmpty(stringFromMap(raw, "worktree"), stringFromMap(raw, "directory"), stringFromMap(raw, "name"))
 }
 
-// openSQLiteReadOnly opens OpenCode's store read-only. modernc.org/sqlite opens every database
-// READWRITE|CREATE, so mode=ro in the URI is the one thing keeping this read from writing to it.
+// openSQLiteReadOnly opens OpenCode's store read-only, with query_only in place of a busy timeout.
 func openSQLiteReadOnly(path string) (*sql.DB, error) {
-	path, err := sessionfs.SQLitePath(path)
-	if err != nil {
-		return nil, err
-	}
-	return sql.Open("sqlite", sqliteuri.File(path, url.Values{"mode": {"ro"}, "_pragma": {"query_only(1)"}}))
+	return sessionsync.OpenSQLite(path, "query_only(1)")
 }
 
 func sqliteTableExists(db *sql.DB, table string) bool {

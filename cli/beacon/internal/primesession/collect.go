@@ -1,14 +1,13 @@
 package primesession
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"time"
 
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionwindow"
 )
 
@@ -110,7 +109,7 @@ func collectFile(store *Store, ref SessionRef, state *State, opts CollectOptions
 		return false, nil
 	}
 	for i, item := range mapped {
-		if err := emit(item.Event, opts); err != nil {
+		if err := opts.sink().Emit(item.Event); err != nil {
 			advancePartial(cursor, mapped, i, parent)
 			return true, err
 		}
@@ -153,20 +152,6 @@ func advancePartial(cursor *Cursor, mapped []MappedEvent, failedIdx int, parent 
 	cursor.SubagentOf = parent
 }
 
-func emit(event schema.Event, opts CollectOptions) error {
-	if opts.Print && opts.Out != nil {
-		data, err := json.Marshal(event)
-		if err != nil {
-			return err
-		}
-		if _, err := opts.Out.Write(append(data, '\n')); err != nil {
-			return err
-		}
-	}
-	if opts.Write {
-		if _, err := writer.AppendEvent(event, writer.Options{Path: opts.LogPath, UserMode: opts.UserMode, Budget: opts.Budget}); err != nil {
-			return err
-		}
-	}
-	return nil
+func (o CollectOptions) sink() sessionsync.Sink {
+	return sessionsync.Sink{Print: o.Print, Out: o.Out, Write: o.Write, Log: writer.Options{Path: o.LogPath, UserMode: o.UserMode, Budget: o.Budget}}
 }

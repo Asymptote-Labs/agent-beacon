@@ -1,7 +1,6 @@
 package fxsession
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionwindow"
 )
 
@@ -43,54 +42,23 @@ type State struct {
 	Sessions map[string]*Cursor `json:"sessions"`
 }
 
+var stateFile = sessionsync.StateFile[State]{
+	Name:  "fx",
+	New:   func() *State { return &State{Version: StateVersion, Sessions: map[string]*Cursor{}} },
+	Valid: func(s *State) bool { return s.Version == StateVersion && s.Sessions != nil },
+	Stamp: func(s *State) { s.Version = StateVersion },
+}
+
 // LoadState reads the cursor file. A missing file is an empty state, which is what a first run
 // looks like. An empty path yields state that is never persisted, which is what --print uses.
 //
 // A file from another state version is discarded rather than parsed: re-collecting a session
 // appends events that the writer's own duplicate window and the deterministic event ids already
 // make harmless, while reading a cursor under the wrong meaning skips events for good.
-func LoadState(path string) (*State, error) {
-	state := &State{Version: StateVersion, Sessions: map[string]*Cursor{}}
-	if path == "" {
-		return state, nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return state, nil
-		}
-		return nil, err
-	}
-	var stored State
-	if err := json.Unmarshal(data, &stored); err != nil {
-		return nil, fmt.Errorf("read fx collector state %s: %w", path, err)
-	}
-	if stored.Version != StateVersion || stored.Sessions == nil {
-		return state, nil
-	}
-	state.Sessions = stored.Sessions
-	return state, nil
-}
+func LoadState(path string) (*State, error) { return stateFile.Load(path) }
 
 // Save writes the cursor file atomically. An empty path is a no-op.
-func (s *State) Save(path string) error {
-	if path == "" {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	s.Version = StateVersion
-	data, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
+func (s *State) Save(path string) error { return stateFile.Save(path, s) }
 
 func (s *State) cursor(sessionID string) *Cursor {
 	if s.Sessions == nil {
@@ -271,7 +239,7 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 	}
 
 	for i, item := range mapped {
-		if err := emit(item.Event, opts); err != nil {
+		if err := opts.sink().Emit(item.Event); err != nil {
 			// Advance the cursor to cover events that were fully emitted so the
 			// next sweep does not re-append them. Only source events whose entire
 			// set of mapped events was written are advanced past; the partially
@@ -368,20 +336,6 @@ func generationOf(events []Event) string {
 	return events[len(events)-1].LogGeneration
 }
 
-func emit(event schema.Event, opts CollectOptions) error {
-	if opts.Print && opts.Out != nil {
-		data, err := json.Marshal(event)
-		if err != nil {
-			return err
-		}
-		if _, err := opts.Out.Write(append(data, '\n')); err != nil {
-			return err
-		}
-	}
-	if opts.Write {
-		if _, err := writer.AppendEvent(event, writer.Options{Path: opts.LogPath, UserMode: opts.UserMode, Budget: opts.Budget}); err != nil {
-			return err
-		}
-	}
-	return nil
+func (o CollectOptions) sink() sessionsync.Sink {
+	return sessionsync.Sink{Print: o.Print, Out: o.Out, Write: o.Write, Log: writer.Options{Path: o.LogPath, UserMode: o.UserMode, Budget: o.Budget}}
 }
