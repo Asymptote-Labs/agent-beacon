@@ -141,13 +141,42 @@ func TestCollectOnceKeepsHermesProfilesApart(t *testing.T) {
 		}
 	}
 	got := map[string]string{}
-	for _, ev := range readEvents(t, logPath) {
+	ids := map[string]string{}
+	events := readEvents(t, logPath)
+	for _, ev := range events {
 		got[ev.Harness.Profile] = ev.Harness.ConfigPath
+		if other, ok := ids[ev.Event.ID]; ok {
+			t.Errorf("event id %s names a %s event and a %s event", ev.Event.ID, other, ev.Harness.Profile)
+		}
+		ids[ev.Event.ID] = ev.Harness.Profile
 	}
 	if len(got) != len(want) || got["default"] != want["default"] || got["work"] != want["work"] {
 		t.Fatalf("profile -> config_path = %v, want %v", got, want)
 	}
+	// The native root's ids keep the unkeyed derivation, so what it has already written is not renamed.
+	store, err := OpenStore(filepath.Join(root, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	sessions, err := store.ListSessions()
+	if err != nil || len(sessions) == 0 {
+		t.Fatalf("list sessions: %v", err)
+	}
+	messages, err := store.ReadMessages(sessions[0].ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unkeyed := sessions[0]
+	unkeyed.Home = ""
+	for _, item := range mappedOnly(MapSession(unkeyed, messages, &Cursor{})) {
+		if ids[item.Event.Event.ID] != "default" {
+			t.Errorf("native-root event id %s changed", item.Event.Event.ID)
+		}
+	}
 }
+
+func mappedOnly(mapped []MappedEvent, _ map[string]json.RawMessage) []MappedEvent { return mapped }
 
 func createHermesFixtureDB(t *testing.T, path string) {
 	t.Helper()

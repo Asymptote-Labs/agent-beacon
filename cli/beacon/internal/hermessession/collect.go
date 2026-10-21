@@ -98,6 +98,9 @@ type Session struct {
 	ActualCostUSD    float64
 	CostStatus       string
 	CostSource       string
+	// Home is the Hermes home the row was read from. Outside the native root it is part of every
+	// event id, so a session id two homes share (a cloned profile) still names two sets of events.
+	Home string
 }
 
 type Message struct {
@@ -138,13 +141,26 @@ func DefaultStatePath(hermesHome string) string {
 // so two homes never share a cursor even when both are the default profile of their own root or
 // hold profiles of the same name.
 func StateFileName(stem, hermesHome string) string {
+	key := homeKey(hermesHome)
+	if key == "" {
+		return stem + ".json"
+	}
+	return fmt.Sprintf("%s-%s-%s.json", stem, Profile(hermesHome), key)
+}
+
+// homeKey identifies a Hermes home other than the native root by its resolved path. It is empty for
+// the native root, and for an unknown home, so whatever that root has already written keeps its name.
+func homeKey(hermesHome string) string {
+	if strings.TrimSpace(hermesHome) == "" {
+		return ""
+	}
 	resolved := canonicalHome(hermesHome)
 	userHome, _ := os.UserHomeDir()
 	if root := nativeRoot(userHome); root != "" && canonicalHome(root) == resolved {
-		return stem + ".json"
+		return ""
 	}
 	sum := sha256.Sum256([]byte(resolved))
-	return fmt.Sprintf("%s-%s-%x.json", stem, Profile(hermesHome), sum[:6])
+	return fmt.Sprintf("%x", sum[:6])
 }
 
 // LoadStateSeeded loads the cursor at path, or the one at legacy while path holds no sessions yet, as
@@ -399,9 +415,10 @@ ORDER BY started_at, id`)
 		return nil, err
 	}
 	defer rows.Close()
+	home := filepath.Dir(s.path)
 	var out []Session
 	for rows.Next() {
-		var s Session
+		s := Session{Home: home}
 		var model, cwd, title, parent, endReason, costStatus, costSource sql.NullString
 		var started, ended, lastMsg sql.NullFloat64
 		var msgCount, toolCount, input, output, cacheRead, cacheWrite, reasoning sql.NullInt64
@@ -594,7 +611,7 @@ func openSQLiteReadOnly(path string) (*sql.DB, error) {
 // cursor is what earlier sweeps collected; a zero Cursor maps the whole session, session-total
 // usage included, as a first sync does.
 func MapSession(session Session, messages []Message, cursor *Cursor) ([]MappedEvent, map[string]json.RawMessage) {
-	m := &mapper{session: session, cursor: cursor, calls: map[string]toolCall{}}
+	m := &mapper{session: session, cursor: cursor, calls: map[string]toolCall{}, homeKey: homeKey(session.Home)}
 	for id, raw := range cursor.PendingCalls {
 		var call toolCall
 		if json.Unmarshal(raw, &call) == nil && call.ID != "" {
@@ -634,6 +651,7 @@ type mapper struct {
 	out             []MappedEvent
 	calls           map[string]toolCall
 	lastTimestampMS int64
+	homeKey         string
 }
 
 type toolCall struct {
@@ -863,7 +881,12 @@ func (m *mapper) toolEvent(timestampMS int64, call toolCall, action, category st
 }
 
 func (m *mapper) append(sourceMessageID int64, suffix string, ev schema.Event) {
-	ev.Event.ID = hermesEventID(fmt.Sprintf("%s:%d:%s", m.session.ID, sourceMessageID, suffix))
+	dedupID := fmt.Sprintf("%s:%d:%s", m.session.ID, sourceMessageID, suffix)
+	if m.homeKey != "" {
+		// The native root keeps the unkeyed form, so the ids it has already written do not change.
+		dedupID = m.homeKey + ":" + dedupID
+	}
+	ev.Event.ID = hermesEventID(dedupID)
 	m.out = append(m.out, MappedEvent{SourceMessageID: sourceMessageID, Event: ev})
 }
 
