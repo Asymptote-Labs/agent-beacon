@@ -5,7 +5,7 @@
 // endpoint/user/timestamp itself, so we MUST NOT emit those. We emit the
 // beacon.* + gen_ai.* attributes that converter.go maps into the Event schema.
 
-import type { ChatTurn, Retention, ToolCall } from './types.js';
+import type { ChatTurn, Msg, Retention, ToolCall } from './types.js';
 import {
   type KeyValue,
   type LogRecord,
@@ -75,6 +75,52 @@ function shapeText(text: string, retention: Retention): Shaped | null {
   return { text: capped, truncated };
 }
 
+/** Message fields must remain valid semconv JSON, including when capped. Keep
+ *  complete messages in order, then the largest text prefix of the last one.
+ *  Budget the serialized form: quotes, escapes and message wrappers count too. */
+function shapeMessages(messages: Msg[], retention: Retention): Shaped | null {
+  if (retention === 'metadata') return null;
+  const encoded: string[] = [];
+  let bytes = 2; // array brackets
+  let truncated = false;
+  for (const message of messages) {
+    const wrap = (content: string) =>
+      JSON.stringify({ role: message.role, parts: [{ type: 'text', content }] });
+    const comma = encoded.length ? 1 : 0;
+    const budget = MAX_FIELD_BYTES - bytes - comma - encoder.encode(wrap('')).length;
+    if (budget < 0) {
+      truncated = true;
+      break;
+    }
+    const shown = retention === 'redacted' ? scrub(message.text) : message.text;
+    // Search only complete UTF-16 code points. JSON escapes can cost more than
+    // UTF-8 text, so capBytes (a plain-text budget) cannot be used here.
+    const prefix = (end: number): string => {
+      if (end > 0 && end < shown.length &&
+          shown.charCodeAt(end - 1) >= 0xd800 && shown.charCodeAt(end - 1) <= 0xdbff &&
+          shown.charCodeAt(end) >= 0xdc00 && shown.charCodeAt(end) <= 0xdfff) end--;
+      return shown.slice(0, end);
+    };
+    let lo = 0;
+    let hi = Math.min(shown.length, budget);
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      // The empty wrapper already accounts for the string's two quotes.
+      if (encoder.encode(JSON.stringify(prefix(mid))).length - 2 <= budget) lo = mid;
+      else hi = mid - 1;
+    }
+    const kept = prefix(lo);
+    const serialized = wrap(kept);
+    encoded.push(serialized);
+    bytes += comma + encoder.encode(serialized).length;
+    if (kept.length < shown.length) {
+      truncated = true;
+      break;
+    }
+  }
+  return { text: `[${encoded.join(',')}]`, truncated };
+}
+
 /**
  * Normalize a chat turn into 1..N OTLP log records:
  *  - one response record (agent.response.completed, or agent.response if partial)
@@ -120,7 +166,7 @@ export function normalizeTurn(
   // only does so for prompt-category events). Without this, the prompt stays
   // buried in raw.attributes and never reaches the queryable prompt.text column.
   const prompt = shapeText(turn.promptText, retention);
-  const inputMsgs = shapeText(JSON.stringify(turn.inputMessages), retention);
+  const inputMsgs = shapeMessages(turn.inputMessages, retention);
   if (prompt || inputMsgs) {
     const attrs = base('prompt.submitted');
     if (turn.requestModel) attrs.push(str('gen_ai.request.model', turn.requestModel));
@@ -186,7 +232,7 @@ export function normalizeTurn(
     respAttrs.push(int('gen_ai.usage.cache_read.input_tokens', turn.usage.cacheReadInputTokens));
 
   let respTrunc = false;
-  const outputMsgs = shapeText(JSON.stringify(turn.outputMessages), retention);
+  const outputMsgs = shapeMessages(turn.outputMessages, retention);
   if (outputMsgs) {
     respAttrs.push(str('gen_ai.output.messages', outputMsgs.text));
     respTrunc ||= outputMsgs.truncated;
