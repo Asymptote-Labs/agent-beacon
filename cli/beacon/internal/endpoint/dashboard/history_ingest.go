@@ -172,7 +172,7 @@ func needsCatchUp(files []logFile, checkpoints map[string]fileCheckpoint) bool {
 			continue
 		}
 		cp, ok := checkpoints[lf.key()]
-		if !ok || cp.offset != lf.size {
+		if !ok || cp.offset != lf.size || cp.size > lf.size {
 			return true
 		}
 		seen[lf.key()] = true
@@ -185,15 +185,31 @@ func needsCatchUp(files []logFile, checkpoints map[string]fileCheckpoint) bool {
 	return false
 }
 
+// Older catch-ups could advance past a rewritten line without storing it. A derivation rebuild
+// cannot recover that line, so each source must replay its still-present files once. Keep this
+// separate from derivation_version, which is global and only rebuilds already-stored lines.
+func generationReconciliationKey(sourceID int64) string {
+	return fmt.Sprintf("generation_reconciled:%d", sourceID)
+}
+
+func generationReconciled(q queryer, sourceID int64) (bool, error) {
+	var value string
+	err := q.QueryRow(`SELECT value FROM meta WHERE key = ?`, generationReconciliationKey(sourceID)).Scan(&value)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return value == "1", err
+}
+
 // catchUp appends whatever the log gained since the last catch-up, prunes what is past retention or
 // over the size cap, and returns the log's source ID. With nothing to do it is a stat of each log
-// file and two small queries. force runs a full pass regardless, for a settings change.
+// file and small metadata queries. force runs a full pass regardless, for a settings change.
 func (s *historyStore) catchUp(logPath string, progress func(done, total int64), force bool) (int64, error) {
 	files, err := snapshotLogFiles(logPath)
 	if err != nil {
 		return 0, err
 	}
-	defer closeLogFiles(files)
+	defer func() { closeLogFiles(files) }()
 
 	derivationCurrent := s.metaInt("derivation_version", 0) == historyDerivationVersion
 	sourceID, err := s.sourceID(s.db, logPath, false)
@@ -201,6 +217,10 @@ func (s *historyStore) catchUp(logPath string, progress func(done, total int64),
 		return 0, err
 	}
 	if sourceID != 0 && derivationCurrent && !force {
+		reconciled, err := generationReconciled(s.db, sourceID)
+		if err != nil {
+			return 0, err
+		}
 		checkpoints, err := s.loadCheckpoints(s.db, sourceID)
 		if err != nil {
 			return 0, err
@@ -209,7 +229,7 @@ func (s *historyStore) catchUp(logPath string, progress func(done, total int64),
 		if err != nil {
 			return 0, err
 		}
-		if !needsCatchUp(files, checkpoints) && !expired {
+		if reconciled && !needsCatchUp(files, checkpoints) && !expired {
 			return sourceID, nil
 		}
 	}
@@ -219,6 +239,13 @@ func (s *historyStore) catchUp(logPath string, progress func(done, total int64),
 		return 0, err
 	}
 	defer unlock()
+	// Another pass may have advanced the checkpoint while this reader waited. Its older
+	// snapshot must not turn an ordinary append into a supposed shrink and retire live rows.
+	closeLogFiles(files)
+	files, err = snapshotLogFiles(logPath)
+	if err != nil {
+		return 0, err
+	}
 	retentionDays := s.metaInt("retention_days", defaultHistoryRetentionDays)
 	maxBytes := s.metaInt("max_bytes", defaultHistoryMaxBytes)
 	// Re-read under the lock: another process may have caught up, or rebuilt, while this one
@@ -239,6 +266,10 @@ func (s *historyStore) catchUp(logPath string, progress func(done, total int64),
 	if err != nil {
 		return 0, err
 	}
+	reconciled, err := generationReconciled(tx, sourceID)
+	if err != nil {
+		return 0, err
+	}
 	checkpoints, err := s.loadCheckpoints(tx, sourceID)
 	if err != nil {
 		return 0, err
@@ -252,7 +283,7 @@ func (s *historyStore) catchUp(logPath string, progress func(done, total int64),
 
 	var total, done int64
 	for _, lf := range files {
-		if cp, ok := checkpoints[lf.key()]; ok && cp.offset <= lf.size {
+		if cp, ok := checkpoints[lf.key()]; reconciled && ok && cp.offset <= lf.size && cp.size <= lf.size {
 			total += lf.size - cp.offset
 		} else {
 			total += lf.size
@@ -266,17 +297,12 @@ func (s *historyStore) catchUp(logPath string, progress func(done, total int64),
 		key := lf.key()
 		seen[key] = true
 		cp := checkpoints[key]
-		if cp.archive != lf.archive && cp.offset > 0 && cp.offset <= lf.size {
-			if err := relabelIDlessEvents(tx, sourceID, lf); err != nil {
-				return 0, err
-			}
+		start, lineNo := cp.offset, cp.lines
+		if !reconciled || cp.offset > lf.size || cp.size > lf.size {
+			// Upgrade replay also recovers rows the old code skipped before advancing to EOF.
+			start, lineNo = 0, 0
 		}
-		if cp.offset > lf.size {
-			// Shorter than what was read from it: not the file the checkpoint describes.
-			cp = fileCheckpoint{}
-		}
-		start := cp.offset
-		offset, lines, err := pass.ingestFile(lf, cp.offset, cp.lines, func(n int64) {
+		offset, lines, err := pass.ingestFile(lf, start, lineNo, func(n int64) {
 			if progress != nil {
 				progress(done+n, total)
 			}
@@ -285,6 +311,13 @@ func (s *historyStore) catchUp(logPath string, progress func(done, total int64),
 			return 0, err
 		}
 		done += offset - start
+		if cp.archive != lf.archive && cp.offset > 0 {
+			// Retire conflicting old rows first: only the current generation follows this file
+			// to its archive label. Retained generations keep their original public IDs.
+			if err := relabelIDlessEvents(tx, sourceID, lf); err != nil {
+				return 0, err
+			}
+		}
 		if _, err := tx.Exec(`INSERT INTO files (source_id, dev, ino, head, offset, lines, size, archive) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (source_id, dev, ino, head) DO UPDATE SET offset = excluded.offset, lines = excluded.lines, size = excluded.size, archive = excluded.archive`,
 			sourceID, int64(lf.dev), int64(lf.ino), lf.head, offset, lines, lf.size, lf.archive); err != nil {
@@ -322,6 +355,9 @@ func (s *historyStore) catchUp(logPath string, progress func(done, total int64),
 	}
 	pruned, err := pruneHistory(tx, time.Now(), retentionDays, maxBytes)
 	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(`INSERT INTO meta (key, value) VALUES (?, '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value`, generationReconciliationKey(sourceID)); err != nil {
 		return 0, err
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -453,6 +489,12 @@ func (p *historyPass) ingestFile(lf logFile, offset, lines int64, progress func(
 	reader := bufio.NewReaderSize(io.NewSectionReader(lf.f, offset, lf.size-offset), 256*1024)
 	source := eventSource{path: lf.path, archive: lf.archive}
 	key := lf.key()
+	var replay bool
+	if offset == 0 {
+		if err := p.tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM events WHERE source_id = ? AND file_key = ?)`, p.sourceID, key).Scan(&replay); err != nil {
+			return 0, 0, err
+		}
+	}
 	pos := offset
 	var read int64
 	for {
@@ -471,16 +513,31 @@ func (p *historyPass) ingestFile(lf logFile, offset, lines int64, progress func(
 			progress(read)
 		}
 		trimmed := bytes.TrimSpace(line)
-		if len(trimmed) == 0 || len(trimmed) > historyMaxLineBytes {
-			continue
-		}
 		var event schema.Event
-		if err := json.Unmarshal(trimmed, &event); err != nil {
+		valid := len(trimmed) > 0 && len(trimmed) <= historyMaxLineBytes && json.Unmarshal(trimmed, &event) == nil
+		if replay {
+			// A longer replacement line can cover old coordinates, and a malformed/blank line
+			// can replace an old event. Those retained rows no longer belong to this file.
+			first := start
+			if valid {
+				first++ // add compares the event at the line's own coordinate below.
+			}
+			if _, err := p.tx.Exec(`UPDATE events SET file_key = 'retired:' || id WHERE source_id = ? AND file_key = ? AND offset >= ? AND offset < ?`, p.sourceID, key, first, pos); err != nil {
+				return 0, 0, err
+			}
+		}
+		if !valid {
 			continue
 		}
 		normalizeDashboardEvent(&event)
 		record := EventRecord{ID: source.lineID(int(lines)), Line: int(lines), Event: event, Raw: trimmed}
 		if err := p.add(key, start, record); err != nil {
+			return 0, 0, err
+		}
+	}
+	if replay {
+		// Old rows beyond the new complete EOF must not follow this generation's rotations.
+		if _, err := p.tx.Exec(`UPDATE events SET file_key = 'retired:' || id WHERE source_id = ? AND file_key = ? AND offset >= ?`, p.sourceID, key, pos); err != nil {
 			return 0, 0, err
 		}
 	}
@@ -536,14 +593,42 @@ func (p *historyPass) add(fileKey string, offset int64, record EventRecord) erro
 	if record.Event.Event.ID == "" {
 		idless = 1
 	}
-	result, err := p.insertEvent.Exec(p.sourceID, fileKey, offset, record.ID, record.Line, idless, row.traceKey, row.eventType, row.eventID, row.tsNS,
-		row.order.ts, int64(row.order.seq), row.spanID, row.parentSpanID, row.otelTraceID, row.spanName, row.hay, compressLine(stored))
+	insert := func() (sql.Result, error) {
+		return p.insertEvent.Exec(p.sourceID, fileKey, offset, record.ID, record.Line, idless, row.traceKey, row.eventType, row.eventID, row.tsNS,
+			row.order.ts, int64(row.order.seq), row.spanID, row.parentSpanID, row.otelTraceID, row.spanName, row.hay, compressLine(stored))
+	}
+	result, err := insert()
 	if err != nil {
 		return err
 	}
-	if n, err := result.RowsAffected(); err != nil || n == 0 {
-		// Already stored: a checkpoint lost after a crash re-reads lines the store has.
+	n, err := result.RowsAffected()
+	if err != nil {
 		return err
+	}
+	if n == 0 {
+		var previousID int64
+		var compressed []byte
+		if err := p.tx.QueryRow(`SELECT id, line FROM events WHERE source_id = ? AND file_key = ? AND offset = ?`, p.sourceID, fileKey, offset).Scan(&previousID, &compressed); err != nil {
+			return err
+		}
+		previous, err := decompressLine(compressed)
+		if err != nil {
+			return err
+		}
+		if bytes.Equal(previous, stored) {
+			// A lost checkpoint or upgrade replay re-read the same retained content.
+			return nil
+		}
+		// Device, inode and head can survive an in-place rewrite. Release this coordinate
+		// without changing the retained row's identity, raw bytes, public ID or derived data.
+		// Physical file keys always start with a device number; this namespace cannot collide.
+		if _, err := p.tx.Exec(`UPDATE events SET file_key = ? WHERE id = ?`, fmt.Sprintf("retired:%d", previousID), previousID); err != nil {
+			return err
+		}
+		result, err = insert()
+		if err != nil {
+			return err
+		}
 	}
 	id, err := result.LastInsertId()
 	if err != nil {
