@@ -85,7 +85,7 @@ func Install(outputDir string, files []File, logPath string) error {
 			switch {
 			case file.JSONEscape:
 				content = RenderLogPath(content, JSONEscapeForString(logPath))
-			case filepath.Ext(file.Name) == ".toml":
+			case isTOMLAsset(file.Name):
 				content = renderTOMLLogPath(content, logPath)
 			default:
 				content = RenderLogPath(content, logPath)
@@ -184,10 +184,16 @@ func (p Pack) Render(assetPath, logPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if filepath.Ext(strings.TrimSuffix(assetPath, ".tmpl")) == ".toml" {
+	if isTOMLAsset(assetPath) {
 		return renderTOMLLogPath(content, logPath), nil
 	}
 	return RenderLogPath(content, logPath), nil
+}
+
+// isTOMLAsset reports whether name, with or without its .tmpl suffix, is a TOML file, whose log
+// paths must be escaped for a basic string.
+func isTOMLAsset(name string) bool {
+	return filepath.Ext(strings.TrimSuffix(name, ".tmpl")) == ".toml"
 }
 
 // Install writes the pack files to outputDir (defaulting to DefaultOutputDir),
