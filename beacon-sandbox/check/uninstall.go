@@ -1,6 +1,7 @@
 package check
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -16,6 +17,8 @@ type Removal struct {
 	Ran string
 	// ExitCode is `endpoint uninstall`'s status, as text.
 	ExitCode string
+	// ExecError is a transport/operation failure, even when no exit status was returned.
+	ExecError string
 	// Output is what it printed.
 	Output string
 	// ServiceKind and ServiceLabel identify what was registered at install time.
@@ -34,6 +37,9 @@ type Removal struct {
 	LogRetained string
 	// Status is `endpoint status --json` after the removal, which is Beacon's own account of itself.
 	Status string
+	// Empty status exit/error fields support older artifacts that only recorded stdout.
+	StatusExitCode  string
+	StatusExecError string
 }
 
 // Uninstall judges whether a removal actually removed anything.
@@ -55,11 +61,15 @@ func Uninstall(v *Verdict, r Removal) {
 		return
 	}
 
-	if r.ExitCode != "0" {
+	if r.ExitCode != "0" || r.ExecError != "" {
+		detail := r.Output
+		if r.ExecError != "" {
+			detail = r.ExecError + ": " + detail
+		}
 		v.Add(Finding{
 			Check:    "uninstall.command_succeeded",
 			Severity: SevFail,
-			Summary:  fmt.Sprintf("`endpoint uninstall` exited %s: %s", r.ExitCode, oneLineOf(r.Output)),
+			Summary:  fmt.Sprintf("`endpoint uninstall` did not complete (exit=%s): %s", r.ExitCode, oneLineOf(detail)),
 			Why: "An uninstall that cannot complete leaves the endpoint in a state no one asked for: " +
 				"binaries possibly gone, service possibly still registered.",
 		})
@@ -88,7 +98,7 @@ func Uninstall(v *Verdict, r Removal) {
 		v.Add(Finding{
 			Check:    "uninstall.service_removed",
 			Severity: SevWarn,
-			Summary: fmt.Sprintf("the service manager was not asked whether %q is gone (kind=%q)",
+			Summary: fmt.Sprintf("the service manager did not establish whether %q is gone (kind=%q)",
 				r.ServiceLabel, r.ServiceKind),
 			Why: "Removal of the service registration is unverified for this run. It is not evidence " +
 				"that anything was left behind, and it is not evidence that nothing was.",
@@ -128,13 +138,42 @@ func Uninstall(v *Verdict, r Removal) {
 	// Beacon's own account, checked against the machine's. A status still describing a running
 	// collector after a successful removal means the two disagree, and the disagreement is worth a
 	// finding of its own even when the service really is gone.
-	if strings.Contains(r.Status, `"running":true`) {
+	var status struct {
+		Service struct {
+			Running *bool `json:"running"`
+		} `json:"service"`
+	}
+	var problem string
+	switch {
+	case r.StatusExecError != "":
+		problem = "the status probe failed: " + oneLineOf(r.StatusExecError)
+	case r.StatusExitCode != "" && r.StatusExitCode != "0":
+		problem = "the status command exited " + oneLineOf(r.StatusExitCode)
+	default:
+		if err := json.Unmarshal([]byte(r.Status), &status); err != nil {
+			problem = "the status is not valid JSON: " + oneLineOf(err.Error())
+		} else if status.Service.Running == nil {
+			problem = "the status has no boolean service.running observation"
+		}
+	}
+	if problem != "" {
+		v.Add(Finding{
+			Check:    "uninstall.status_agrees",
+			Severity: SevWarn,
+			Summary:  "`endpoint status` after uninstall is unverified: " + problem,
+			Why:      "A missing, invalid or failed status observation cannot establish that the collector stopped.",
+			Evidence: []string{"meta.json:uninstall_status"},
+		})
+		return
+	}
+	if *status.Service.Running {
 		v.Add(Finding{
 			Check:    "uninstall.status_agrees",
 			Severity: SevFail,
 			Summary:  "`endpoint status` still reports a running collector after uninstall",
 			Why: "Beacon's view of itself and the machine's have to agree, or one of them is lying to " +
 				"whoever reads it next.",
+			Evidence: []string{"meta.json:uninstall_status"},
 		})
 	}
 }

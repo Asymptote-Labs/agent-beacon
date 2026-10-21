@@ -402,15 +402,18 @@ func judge(sc scenario.Scenario, art runner.Artifacts, creds credentials.Resolve
 	// Read from meta rather than from a live probe, so `verify` re-judges a saved run's removal for
 	// free exactly as it re-judges its capture.
 	check.Uninstall(&v, check.Removal{
-		Ran:          art.Meta["uninstall_ran"],
-		ExitCode:     art.Meta["uninstall_rc"],
-		Output:       art.Meta["uninstall_output"],
-		ServiceKind:  art.Meta["service_kind"],
-		ServiceLabel: art.Meta["service_label"],
-		ServiceGone:  art.Meta["uninstall_service_gone"],
-		ServiceQuery: art.Meta["uninstall_service_query"],
-		LogRetained:  art.Meta["uninstall_log_retained"],
-		Status:       art.Meta["uninstall_status"],
+		Ran:             art.Meta["uninstall_ran"],
+		ExitCode:        art.Meta["uninstall_rc"],
+		ExecError:       art.Meta["uninstall_exec_error"],
+		Output:          art.Meta["uninstall_output"],
+		ServiceKind:     art.Meta["service_kind"],
+		ServiceLabel:    art.Meta["service_label"],
+		ServiceGone:     art.Meta["uninstall_service_gone"],
+		ServiceQuery:    art.Meta["uninstall_service_query"],
+		LogRetained:     art.Meta["uninstall_log_retained"],
+		Status:          art.Meta["uninstall_status"],
+		StatusExitCode:  art.Meta["uninstall_status_rc"],
+		StatusExecError: art.Meta["uninstall_status_exec_error"],
 	})
 	lifecycle := check.Lifecycle{
 		Restarted:           art.Meta["reinstall_restarted"],
