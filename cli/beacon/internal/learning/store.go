@@ -448,53 +448,10 @@ func (s *Store) ListEvaluations(query Query) ([]asymptoteobserve.LearningEvaluat
 	if err != nil {
 		return nil, err
 	}
-	db, err := s.db()
-	if err != nil {
-		return nil, err
-	}
-	defer db.Close()
 	where, args := queryWhere(query, "project_id", "status", "")
-	hasTextFilter := strings.TrimSpace(query.Q) != ""
-	sqlQuery := `SELECT evaluation_json FROM evaluations` + where + ` ORDER BY updated_at DESC`
-	if !hasTextFilter {
-		args = append(args, normalizeLimit(query.Limit), offset(query))
-		sqlQuery += ` LIMIT ? OFFSET ?`
-	}
-	rows, err := db.Query(sqlQuery, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	limit := normalizeLimit(query.Limit)
-	skip := offset(query)
-	matches := 0
-	var out []asymptoteobserve.LearningEvaluationV1
-	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
-			return nil, err
-		}
-		var value asymptoteobserve.LearningEvaluationV1
-		if err := json.Unmarshal([]byte(raw), &value); err != nil {
-			return nil, err
-		}
-		if hasTextFilter {
-			if !matchesText(query.Q, value.ID, value.Trace.ID, value.Trace.Title, value.Evaluator, value.Status) {
-				continue
-			}
-			matches++
-			if matches <= skip {
-				continue
-			}
-			out = append(out, value)
-			if len(out) >= limit {
-				break
-			}
-		} else {
-			out = append(out, value)
-		}
-	}
-	return out, rows.Err()
+	return listJSON(s, query, `SELECT evaluation_json FROM evaluations`+where, args, func(e asymptoteobserve.LearningEvaluationV1) []string {
+		return []string{e.ID, e.Trace.ID, e.Trace.Title, e.Evaluator, e.Status}
+	})
 }
 
 func (s *Store) GetEvaluation(id string) (asymptoteobserve.LearningEvaluationV1, bool, error) {
@@ -543,53 +500,10 @@ func (s *Store) ListCandidates(query Query) ([]asymptoteobserve.LearningCandidat
 	if err != nil {
 		return nil, err
 	}
-	db, err := s.db()
-	if err != nil {
-		return nil, err
-	}
-	defer db.Close()
 	where, args := queryWhere(query, "project_id", "state", "kind")
-	hasTextFilter := strings.TrimSpace(query.Q) != ""
-	sqlQuery := `SELECT candidate_json FROM candidates` + where + ` ORDER BY updated_at DESC`
-	if !hasTextFilter {
-		args = append(args, normalizeLimit(query.Limit), offset(query))
-		sqlQuery += ` LIMIT ? OFFSET ?`
-	}
-	rows, err := db.Query(sqlQuery, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	limit := normalizeLimit(query.Limit)
-	skip := offset(query)
-	matches := 0
-	var out []asymptoteobserve.LearningCandidateV1
-	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
-			return nil, err
-		}
-		var value asymptoteobserve.LearningCandidateV1
-		if err := json.Unmarshal([]byte(raw), &value); err != nil {
-			return nil, err
-		}
-		if hasTextFilter {
-			if !matchesText(query.Q, value.ID, value.Title, value.Body, value.Kind, value.State) {
-				continue
-			}
-			matches++
-			if matches <= skip {
-				continue
-			}
-			out = append(out, value)
-			if len(out) >= limit {
-				break
-			}
-		} else {
-			out = append(out, value)
-		}
-	}
-	return out, rows.Err()
+	return listJSON(s, query, `SELECT candidate_json FROM candidates`+where, args, func(c asymptoteobserve.LearningCandidateV1) []string {
+		return []string{c.ID, c.Title, c.Body, c.Kind, c.State}
+	})
 }
 
 func (s *Store) GetCandidate(id string) (asymptoteobserve.LearningCandidateV1, bool, error) {
@@ -635,55 +549,61 @@ func (s *Store) ListMemories(query Query) ([]asymptoteobserve.LearningMemoryV1, 
 	if err != nil {
 		return nil, err
 	}
-	db, err := s.db()
-	if err != nil {
-		return nil, err
-	}
-	defer db.Close()
 	where, args := queryWhere(query, "project_id", "", "kind")
 	if where == "" {
 		where = ` WHERE (superseded_by IS NULL OR superseded_by = '')`
 	} else {
 		where += ` AND (superseded_by IS NULL OR superseded_by = '')`
 	}
-	hasTextFilter := strings.TrimSpace(query.Q) != ""
-	sqlQuery := `SELECT memory_json FROM memories` + where + ` ORDER BY updated_at DESC`
-	if !hasTextFilter {
-		args = append(args, normalizeLimit(query.Limit), offset(query))
-		sqlQuery += ` LIMIT ? OFFSET ?`
+	return listJSON(s, query, `SELECT memory_json FROM memories`+where, args, func(m asymptoteobserve.LearningMemoryV1) []string {
+		return []string{m.ID, m.Title, m.Body, m.Kind}
+	})
+}
+
+// listJSON runs selectSQL, a SELECT of one JSON column, newest first, and returns the requested
+// page of decoded records. A text query is matched against text(record) after decoding, so the page
+// counts matching records: paging in SQL would count rows the query then drops, returning empty or
+// shifted pages whenever newer non-matching records fill the SQL page.
+func listJSON[T any](s *Store, query Query, selectSQL string, args []interface{}, text func(T) []string) ([]T, error) {
+	db, err := s.db()
+	if err != nil {
+		return nil, err
 	}
-	rows, err := db.Query(sqlQuery, args...)
+	defer db.Close()
+	limit, skip := normalizeLimit(query.Limit), offset(query)
+	filter := strings.TrimSpace(query.Q) != ""
+	selectSQL += ` ORDER BY updated_at DESC`
+	if !filter {
+		selectSQL += ` LIMIT ? OFFSET ?`
+		args = append(args, limit, skip)
+	}
+	rows, err := db.Query(selectSQL, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	limit := normalizeLimit(query.Limit)
-	skip := offset(query)
-	matches := 0
-	var out []asymptoteobserve.LearningMemoryV1
+	var out []T
+	matched := 0
 	for rows.Next() {
 		var raw string
 		if err := rows.Scan(&raw); err != nil {
 			return nil, err
 		}
-		var value asymptoteobserve.LearningMemoryV1
+		var value T
 		if err := json.Unmarshal([]byte(raw), &value); err != nil {
 			return nil, err
 		}
-		if hasTextFilter {
-			if !matchesText(query.Q, value.ID, value.Title, value.Body, value.Kind) {
+		if filter {
+			if !matchesText(query.Q, text(value)...) {
 				continue
 			}
-			matches++
-			if matches <= skip {
+			if matched++; matched <= skip {
 				continue
 			}
-			out = append(out, value)
-			if len(out) >= limit {
-				break
-			}
-		} else {
-			out = append(out, value)
+		}
+		out = append(out, value)
+		if filter && len(out) >= limit {
+			break
 		}
 	}
 	if err := rows.Err(); err != nil {
