@@ -554,14 +554,15 @@ func openSQLiteReadOnly(path string) (*sql.DB, error) {
 // The pending calls are returned rather than written onto the cursor so the caller can persist them
 // only once every event in the batch is written. Recording them earlier would drop a call's
 // arguments when a later emit fails and the sweep retries the same messages.
+//
+// cursor is what earlier sweeps collected; a zero Cursor maps the whole session, session-total
+// usage included, as a first sync does.
 func MapSession(session Session, messages []Message, cursor *Cursor) ([]MappedEvent, map[string]json.RawMessage) {
 	m := &mapper{session: session, cursor: cursor, calls: map[string]toolCall{}}
-	if cursor != nil {
-		for id, raw := range cursor.PendingCalls {
-			var call toolCall
-			if json.Unmarshal(raw, &call) == nil && call.ID != "" {
-				m.calls[id] = call
-			}
+	for id, raw := range cursor.PendingCalls {
+		var call toolCall
+		if json.Unmarshal(raw, &call) == nil && call.ID != "" {
+			m.calls[id] = call
 		}
 	}
 	m.mapSession()
@@ -606,7 +607,7 @@ type toolCall struct {
 }
 
 func (m *mapper) mapSession() {
-	if m.cursor != nil && m.cursor.Started {
+	if m.cursor.Started {
 		return
 	}
 	ev := m.base(m.session.StartedAtMS, "session.started", "session", schema.SeverityInfo, "Hermes session started")
@@ -619,7 +620,7 @@ func (m *mapper) mapSession() {
 }
 
 func (m *mapper) mapSessionEnd() {
-	if m.session.EndedAtMS == 0 || (m.cursor != nil && m.cursor.EndedAtMS == m.session.EndedAtMS) {
+	if m.session.EndedAtMS == 0 || m.cursor.EndedAtMS == m.session.EndedAtMS {
 		return
 	}
 	ev := m.base(m.session.EndedAtMS, "session.ended", "session", schema.SeverityInfo, "Hermes session ended")
@@ -630,9 +631,6 @@ func (m *mapper) mapSessionEnd() {
 }
 
 func (m *mapper) mapUsage() {
-	if m.cursor == nil {
-		return
-	}
 	usage := &schema.GenAIUsageInfo{}
 	if delta := m.session.InputTokens - m.cursor.InputTokens; delta > 0 {
 		usage.InputTokens = &delta
