@@ -1,0 +1,54 @@
+{
+  "event": "PostToolUse",
+  "session_id": "2026-10-21T11-21-32-042Z_scenario-fixtures-exercise-the-tools",
+  "cwd": "/home/dev/proj",
+  "tool": "edit",
+  "tool_call_id": "call_2",
+  "args": {
+    "path": "hello.py",
+    "old_string": "hello",
+    "new_string": "hello beacon"
+  },
+  "tier": "light",
+  "result": {
+    "ok": true,
+    "content": "Replaced 1 occurrence(s) in hello.py."
+  },
+  "hook_event_name": "PostToolUse",
+  "client": "autopilot",
+  "beacon.harness.name": "autopilot",
+  "transcript_path": "/home/dev/.local/share/kimiflare/sessions/2026-10-21T11-21-32-042Z_scenario-fixtures-exercise-the-tools.jsonl",
+  "transcript_format": "claude-jsonl",
+  "tool_name": "Edit",
+  "autopilot_tool_name": "edit",
+  "tool_input": {
+    "file_path": "/home/dev/proj/hello.py",
+    "old_string": "hello",
+    "new_string": "hello beacon"
+  },
+  "tool_response": {
+    "ok": true,
+    "content": "Replaced 1 occurrence(s) in hello.py.",
+    "success": true,
+    "is_error": false,
+    "filePath": "/home/dev/proj/hello.py",
+    "oldString": "hello",
+    "newString": "hello beacon",
+    "replaceAll": false,
+    "originalFile": "hello\nworld\n",
+    "structuredPatch": [
+      {
+        "oldStart": 1,
+        "oldLines": 2,
+        "newStart": 1,
+        "newLines": 2,
+        "lines": [
+          "-hello",
+          "+hello beacon",
+          " world"
+        ]
+      }
+    ]
+  },
+  "tool_use_id": "call_2"
+}

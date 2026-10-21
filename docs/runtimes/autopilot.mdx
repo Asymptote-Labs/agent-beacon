@@ -19,7 +19,7 @@ beacon endpoint hooks install --harness autopilot
 
 Before enabling Autopilot telemetry, make sure:
 
-- Autopilot is installed and available as the `autopilot` executable, or has a config directory at `$XDG_CONFIG_HOME/autopilot` (default `~/.config/autopilot`).
+- Autopilot 2.2.0 or later is installed for full coverage (see [Telemetry coverage](#telemetry-coverage) for what 2.0.x lacks), and available as the `autopilot` executable, or has a config directory at `$XDG_CONFIG_HOME/autopilot` (default `~/.config/autopilot`).
 - `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
 - A new Autopilot session is started (or `/hooks reload` is run in an open one) after hook install or removal.
 
@@ -105,7 +105,7 @@ beacon endpoint hooks uninstall --harness autopilot
 
 ## Telemetry coverage
 
-Verified end to end against Autopilot 2.0.0 on macOS, in print mode (`autopilot -p`) and in an interactive session, with a local mock model driving the tool calls.
+Verified end to end against Autopilot 2.2.0 on macOS, in print mode (`autopilot -p`) and in an interactive session ended with `/exit` and with Ctrl+C twice, with a local mock model driving the tool calls. 2.2.0 is the minimum version for full support. Autopilot 2.0.x also works, with three differences: it fires `UserPromptSubmit` only in interactive sessions, so print-mode and SDK sessions have no `prompt.submitted`; the first prompt of an interactive session arrives before `session.started` and with an empty `session.id`; and its `tool_response` has no `structuredPatch`, so Beacon rebuilds diffs from the call's arguments, with no real line numbers and a `Write` over an existing file shown as a create.
 
 | Area | Support |
 |------|---------|
@@ -113,14 +113,14 @@ Verified end to end against Autopilot 2.0.0 on macOS, in print mode (`autopilot 
 | Harness attribution | Supported. `autopilot`, `autopilot-ai`, `autopilot_ai`, `autopilot ai`, `autopilot-cli`, `autopilot_cli` and `autopilot cli` all normalize to `autopilot`, the same name Autopilot's own payloads and OTLP export carry |
 | Hook install, status, uninstall, and repair | Supported |
 | Session lifecycle | Supported through `SessionStart` and `SessionEnd` |
-| Prompts | Supported in interactive sessions through `UserPromptSubmit`. See [Known gaps](#known-gaps) |
+| Prompts | Supported through `UserPromptSubmit` in every Autopilot host (interactive, `autopilot -p`, `--emit-events`, `autopilot serve`, the SDK), after `session.started` and with the session id |
 | Tool use | Supported for pre-tool and post-tool activity, with `tool.failed` for a failed or refused call |
 | Commands | Supported. `command.executed` for `Bash`, with output, and with the exit code and high severity when the command exited non-zero |
-| File activity | Supported. `file.read` for `Read`, `file.modified` with a diff for `Write`, `Edit` and `MultiEdit` |
+| File activity | Supported. `file.read` for `Read`, `file.modified` with a diff for `Write`, `Edit` and `MultiEdit`, built from Autopilot's `structuredPatch` (real line numbers and context; a `Write` over an existing file shows the lines it replaced). Without `structuredPatch` (Autopilot 2.0.x), the diff is rebuilt from the call's arguments |
 | Assistant replies | Supported. `agent.message` from `Stop`'s `last_assistant_message` |
 | Approval decisions | Supported. `approval.requested` observed from `PermissionRequest`, not synthesized from pre-tool |
 | Tool call identity | Supported. `tool_use_id` is promoted to `gen_ai.tool.call.id` and joins pre-tool and post-tool events |
-| Prompt identity | Supported on events inside a turn. `prompt.id` is read from the newest `promptId` in Autopilot's Claude Code-format transcript |
+| Prompt identity | Supported. `prompt.submitted` carries the prompt text and session id, and events inside the turn carry `prompt.id`, read from the newest `promptId` in Autopilot's Claude Code-format transcript |
 | Context compaction | Registered (`session.compacting` from `PreCompact`), not exercised end to end |
 | Token usage and cost | Not collected from hooks. See [Known gaps](#known-gaps) |
 | Local JSONL and dashboard | Supported |
@@ -147,7 +147,7 @@ A failed write or edit keeps Autopilot's lowercase name (`write`, `edit`) in `to
 
 Approval telemetry comes from Autopilot's `PermissionRequest` event and is recorded as observed. Beacon's `PreToolUse` and `PermissionRequest` hooks answer with an empty object, which carries no decision, so Autopilot's own permission flow runs untouched.
 
-Enforcement stays behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`), which is inert unless it names an executable and fails open on any error. When a provider denies a call, Beacon answers with Claude Code's deny shape for the phase, and Autopilot honors both: from `PreToolUse`, `hookSpecificOutput.permissionDecision: "deny"`; from `PermissionRequest`, `hookSpecificOutput.decision.behavior: "deny"`. Both phases were verified to block the call in Autopilot 2.0.0 and to record `approval.denied` with the provider's rule id.
+Enforcement stays behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`), which is inert unless it names an executable and fails open on any error. When a provider denies a call, Beacon answers with Claude Code's deny shape for the phase, and Autopilot honors both: from `PreToolUse`, `hookSpecificOutput.permissionDecision: "deny"`; from `PermissionRequest`, `hookSpecificOutput.decision.behavior: "deny"`. Both phases were verified to block the call in Autopilot 2.2.0 (and 2.0.0) and to record `approval.denied` with the provider's rule id.
 
 ## Data handling
 
@@ -155,10 +155,10 @@ Autopilot content is handled like every other runtime. Prompts, tool arguments, 
 
 ## Known gaps
 
-- **No prompt event in print mode.** Autopilot fires `UserPromptSubmit` only in its interactive session, not in `autopilot -p`, `--emit-events`, `autopilot serve` or the SDK. Sessions from those hosts have no `prompt.submitted` event; the turn's tool calls still carry `prompt.id`.
-- **The first prompt of a new interactive session has no session id.** Autopilot fires `UserPromptSubmit` before the session exists, so that one `prompt.submitted` event arrives with an empty `session.id`, and before `session.started`. Later prompts carry it.
 - **Token usage and cost are not on any hook payload.** Autopilot reports them in its transcript and in its own OpenTelemetry export (`KIMIFLARE_OTEL_ENDPOINT`, `autopilot.api_request` with `gen_ai.usage.*`). That export is configured in Autopilot's environment, not by Beacon, and is not covered by this page.
-- **Diffs are rebuilt from the call's arguments.** Autopilot's `tool_response` has no `structuredPatch` or `originalFile`, so an `Edit` diff carries no real line numbers and a `Write` over an existing file is shown as a whole-file create.
+- **Very large files get the rebuilt diff.** Autopilot leaves `structuredPatch` out when the file is over 1 MiB (and `originalFile` out over 256 KiB), so for such a file Beacon rebuilds the diff from the call's arguments, as for 2.0.x.
+- **A session with no prompt is not recorded.** Autopilot fires `SessionStart` with the first prompt, so opening Autopilot and quitting without sending anything leaves no `session.started` or `session.ended`.
+- **Ctrl+C twice must be quick.** Autopilot's renderer quits on two Ctrl+C presses close together (1 second apart quit in testing, 2 seconds apart did not). Presses further apart leave Autopilot running, and `session.ended` is recorded whenever the process does exit, including when its terminal is closed.
 - **Windows is not verified.** Autopilot runs hook commands through the platform shell and has no per-hook shell setting, and Beacon's command is POSIX-quoted.
 
 ## Deployment notes

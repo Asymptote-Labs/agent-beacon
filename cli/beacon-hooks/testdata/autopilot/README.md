@@ -32,6 +32,23 @@ Covered payloads:
 - `stop.json` — `Stop` with `last_assistant_message`
 - `session_end.json` — `SessionEnd`, `reason: "exit"`
 
-Not covered, because print mode does not fire it: `UserPromptSubmit`. Autopilot fires it only from
-its interactive session. `PreCompact` is not covered either: it needs a session long enough to
-auto-compact. Replace a fixture with a fresh capture when an Autopilot release changes the shape.
+Not covered by the 2.0.0 set: `UserPromptSubmit`, which 2.0.0 fired only from its interactive
+session. `PreCompact` is not covered either: it needs a session long enough to auto-compact.
+
+## `2.2.0/`
+
+Captured the same way from Autopilot 2.2.0 (npm `autopilot-ai@2.2.0`), where a Write over an
+existing `hello.py` (`old line`) replaced the file and the edits then ran on the new content.
+2.2.0 adds Claude Code's `structuredPatch` and `originalFile` to a successful Write, Edit or
+MultiEdit `tool_response` (and `type: "create" | "update"` to a Write), and fires
+`UserPromptSubmit` in print mode, after `SessionStart` and with the session id.
+
+- `user_prompt_submit.json` — `UserPromptSubmit` from print mode, with `session_id` and `tier`
+- `post_tool_write_update.json` — `Write` over an existing file: `type: "update"`, `originalFile`,
+  one hunk replacing the old line
+- `post_tool_edit.json` — `Edit` with a `structuredPatch` hunk that carries a context line
+- `post_tool_multiedit_line8.json` — `MultiEdit` on line 8 of a 12-line file (a separate session):
+  the hunk starts at line 5 with three lines of context on each side
+- `transcript.jsonl` — the transcript of the session the first three come from
+
+Replace a fixture with a fresh capture when an Autopilot release changes the shape.

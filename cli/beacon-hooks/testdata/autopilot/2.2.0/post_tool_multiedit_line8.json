@@ -1,0 +1,70 @@
+{
+  "event": "PostToolUse",
+  "session_id": "2026-10-21T11-21-38-776Z_scenario-multi-edit-line-eight",
+  "cwd": "/home/dev/proj",
+  "tool": "edit",
+  "tool_call_id": "call_0",
+  "args": {
+    "path": "hello.py",
+    "edits": [
+      {
+        "old_string": "hello",
+        "new_string": "HELLO"
+      }
+    ]
+  },
+  "tier": "medium",
+  "result": {
+    "ok": true,
+    "content": "Replaced 1 occurrence(s) in hello.py."
+  },
+  "hook_event_name": "PostToolUse",
+  "client": "autopilot",
+  "beacon.harness.name": "autopilot",
+  "transcript_path": "/home/dev/.local/share/kimiflare/sessions/2026-10-21T11-21-38-776Z_scenario-multi-edit-line-eight.jsonl",
+  "transcript_format": "claude-jsonl",
+  "tool_name": "MultiEdit",
+  "autopilot_tool_name": "edit",
+  "tool_input": {
+    "file_path": "/home/dev/proj/hello.py",
+    "edits": [
+      {
+        "old_string": "hello",
+        "new_string": "HELLO"
+      }
+    ]
+  },
+  "tool_response": {
+    "ok": true,
+    "content": "Replaced 1 occurrence(s) in hello.py.",
+    "success": true,
+    "is_error": false,
+    "filePath": "/home/dev/proj/hello.py",
+    "edits": [
+      {
+        "old_string": "hello",
+        "new_string": "HELLO"
+      }
+    ],
+    "originalFile": "l1\nl2\nl3\nl4\nl5\nl6\nl7\nhello there\nl9\nl10\nl11\nl12\n",
+    "structuredPatch": [
+      {
+        "oldStart": 5,
+        "oldLines": 7,
+        "newStart": 5,
+        "newLines": 7,
+        "lines": [
+          " l5",
+          " l6",
+          " l7",
+          "-hello there",
+          "+HELLO there",
+          " l9",
+          " l10",
+          " l11"
+        ]
+      }
+    ]
+  },
+  "tool_use_id": "call_0"
+}

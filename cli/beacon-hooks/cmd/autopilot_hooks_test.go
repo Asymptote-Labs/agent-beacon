@@ -14,23 +14,39 @@ import (
 )
 
 // Autopilot's payloads are Claude Code's shape by design, so most of what these tests check is that
-// the Claude Code readers apply to them unchanged. The fixtures are captured from Autopilot 2.0.0
-// (see testdata/autopilot/README.md); a test here failing after a fixture is refreshed means the
-// runtime changed what it sends, not that the fixture is wrong.
+// the Claude Code readers apply to them unchanged. The fixtures are captured from Autopilot 2.0.0,
+// and those under 2.2.0/ from Autopilot 2.2.0 (see testdata/autopilot/README.md); a test here
+// failing after a fixture is refreshed means the runtime changed what it sends, not that the
+// fixture is wrong.
 
 // runAutopilotHook feeds one captured Autopilot payload to a subcommand and returns the hook's
 // stdout and every event it wrote. transcript_path is pointed at the captured transcript so the
 // prompt-id reader sees the file the runtime wrote for the same session.
 func runAutopilotHook(t *testing.T, run func(cmd *cobra.Command, args []string), fixture string) (map[string]interface{}, []map[string]interface{}) {
 	t.Helper()
+	logPath := prepareAutopilotHook(t)
+	payload := readHookFixture(t, "autopilot", fixture)
+	return runAutopilotPayload(t, run, fixture, payload, logPath)
+}
+
+// prepareAutopilotHook points the hook at a fresh endpoint log under the autopilot platform and
+// returns the log's path.
+func prepareAutopilotHook(t *testing.T) string {
+	t.Helper()
 	setupHookConfigDirs(t)
 	platformFlag = autopilotPlatform
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	t.Setenv("BEACON_ENDPOINT_MODE", "1")
 	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-	payload := readHookFixture(t, "autopilot", fixture)
+	return logPath
+}
+
+// runAutopilotPayload runs an already loaded (and possibly edited) fixture. The transcript is the
+// one captured beside the fixture, so a fixture under testdata/autopilot/2.2.0 reads that session's.
+func runAutopilotPayload(t *testing.T, run func(cmd *cobra.Command, args []string), fixture string, payload map[string]interface{}, logPath string) (map[string]interface{}, []map[string]interface{}) {
+	t.Helper()
 	if _, ok := payload["transcript_path"]; ok {
-		payload["transcript_path"] = filepath.Join("..", "testdata", "autopilot", "transcript.jsonl")
+		payload["transcript_path"] = filepath.Join("..", "testdata", "autopilot", filepath.Dir(fixture), "transcript.jsonl")
 	}
 	out := runHookWithInput(t, run, payload)
 	return out, endpointEventsIfAny(t, logPath)
@@ -324,6 +340,75 @@ func TestPreToolPolicyDenyAutopilot(t *testing.T) {
 	assertDenialEvent(t, logPath)
 	event := lastEndpointEvent(t, logPath)
 	if got := autopilotField(event, "harness", "name"); got != "autopilot" {
+		t.Fatalf("harness.name = %v, want autopilot", got)
+	}
+}
+
+const autopilot220Session = "2026-10-21T11-21-32-042Z_scenario-fixtures-exercise-the-tools"
+
+// Autopilot 2.2.0 sends Claude Code's structuredPatch and originalFile on Write, Edit and
+// MultiEdit, so the diff is the one the runtime computed against the file: real line numbers,
+// context lines, and an overwrite shown with what it replaced. Older releases sent neither, and
+// TestAutopilotFileWritesCarryADiff covers the diff rebuilt from the arguments for those.
+func TestAutopilot220DiffsComeFromStructuredPatch(t *testing.T) {
+	for fixture, want := range map[string]struct{ tool, diff string }{
+		// The context line " world" exists only in the patch: the arguments know nothing about it.
+		"2.2.0/post_tool_edit.json": {"Edit", "--- a/hello.py\n+++ b/hello.py\n@@ -1,2 +1,2 @@\n-hello\n+hello beacon\n world"},
+		// An edit on line 8 of a 12-line file is placed at its line, with three lines of context.
+		"2.2.0/post_tool_multiedit_line8.json": {"MultiEdit", "@@ -5,7 +5,7 @@\n l5\n l6\n l7\n-hello there\n+HELLO there\n l9\n l10\n l11"},
+		// A Write over an existing file (tool_response.type "update") shows the lines it replaced.
+		"2.2.0/post_tool_write_update.json": {"Write", "@@ -1,1 +1,2 @@\n-old line\n+hello\n+world"},
+	} {
+		t.Run(fixture, func(t *testing.T) {
+			_, events := runAutopilotHook(t, runPostTool, fixture)
+			event := onlyAutopilotEvent(t, events)
+			if got := autopilotAction(event); got != "file.modified" {
+				t.Fatalf("event.action = %q, want file.modified", got)
+			}
+			if got := autopilotField(event, "tool", "name"); got != want.tool {
+				t.Fatalf("tool.name = %v, want %s", got, want.tool)
+			}
+			if diff, _ := autopilotField(event, "file", "diff").(string); !strings.Contains(diff, want.diff) {
+				t.Fatalf("file.diff = %q, want it to contain %q", diff, want.diff)
+			}
+		})
+	}
+}
+
+// Without structuredPatch (Autopilot before 2.2.0), the same Edit falls back to the diff rebuilt
+// from old_string/new_string, which has no context and no line numbers of its own.
+func TestAutopilotEditWithoutStructuredPatchFallsBackToTheArguments(t *testing.T) {
+	logPath := prepareAutopilotHook(t)
+	fixture := "2.2.0/post_tool_edit.json"
+	payload := readHookFixture(t, "autopilot", fixture)
+	response := payload["tool_response"].(map[string]interface{})
+	delete(response, "structuredPatch")
+	delete(response, "originalFile")
+	_, events := runAutopilotPayload(t, runPostTool, fixture, payload, logPath)
+	event := onlyAutopilotEvent(t, events)
+	want := "--- a/hello.py\n+++ b/hello.py\n@@ -1,1 +1,1 @@\n-hello\n+hello beacon"
+	if diff, _ := autopilotField(event, "file", "diff").(string); diff != want {
+		t.Fatalf("file.diff = %q, want %q", diff, want)
+	}
+}
+
+// Since 2.2.0 Autopilot fires UserPromptSubmit in print mode too, after SessionStart and with the
+// session id; 2.0.x fired it only from the interactive session, and the first one had no id.
+func TestAutopilot220PromptIsSubmittedWithTheSessionID(t *testing.T) {
+	_, events := runAutopilotHook(t, runPromptSubmit, "2.2.0/user_prompt_submit.json")
+	var prompt map[string]interface{}
+	for _, event := range events {
+		if autopilotAction(event) == "prompt.submitted" {
+			prompt = event
+		}
+	}
+	if prompt == nil {
+		t.Fatalf("no prompt.submitted event in %#v", events)
+	}
+	if got := autopilotField(prompt, "session", "id"); got != autopilot220Session {
+		t.Fatalf("session.id = %v, want %s", got, autopilot220Session)
+	}
+	if got := autopilotField(prompt, "harness", "name"); got != "autopilot" {
 		t.Fatalf("harness.name = %v, want autopilot", got)
 	}
 }
