@@ -78,14 +78,14 @@ func BuildSessionLensData(logPath, session string, opts LensDataOptions) (LensDa
 	if harness == "" {
 		harness = strings.TrimSpace(first.Harness.Name)
 	}
-	builder := asymptoteobserve.NewTraceBuilder("session:"+harness+":"+session, first)
+	fold := newTraceFold("session:"+harness+":"+session, first)
 	for _, record := range records {
-		builder.Add(record.Event, traceEventFromRecord(record, 0))
+		fold.add(record.Event, traceEventFromRecord(record, 0))
 	}
-	events := builder.Events()
+	events := fold.builder.Events()
 	total := len(events)
 	show := TraceShowResultV1{
-		Trace:  builder.Summary(),
+		Trace:  fold.summary(),
 		Events: events,
 		Spans:  asymptoteobserve.TraceSpans(events),
 		Range:  TraceRangeV1{TotalEvents: total, ReturnedEvents: total, Offset: 1, Limit: total},
