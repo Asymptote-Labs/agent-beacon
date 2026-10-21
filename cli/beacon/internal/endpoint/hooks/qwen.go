@@ -169,15 +169,9 @@ const qwenHomeEnv = "QWEN_HOME"
 // for the default and for a `~` override, so an absolute QWEN_HOME resolves without one.
 func QwenUserDir(home string) (string, error) {
 	if override := os.Getenv(qwenHomeEnv); override != "" {
-		dir := override
-		if dir == "~" || strings.HasPrefix(dir, "~/") || strings.HasPrefix(dir, `~\`) {
-			if home == "" {
-				return "", fmt.Errorf("home directory is required to resolve %s=%q", qwenHomeEnv, override)
-			}
-			dir = home
-			if override != "~" {
-				dir = filepath.Join(home, filepath.FromSlash(strings.ReplaceAll(override[2:], `\`, "/")))
-			}
+		dir, err := expandTilde(override, home)
+		if err != nil {
+			return "", fmt.Errorf("resolve %s: %w", qwenHomeEnv, err)
 		}
 		return filepath.Abs(dir)
 	}

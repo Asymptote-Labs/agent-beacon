@@ -34,7 +34,7 @@ Qwen Code reads settings from two locations, with project settings taking preced
 | User | `~/.qwen/settings.json`, or `$QWEN_HOME/settings.json` when `QWEN_HOME` is set |
 | Project | `./.qwen/settings.json` |
 
-Install, discovery and inventory honor `QWEN_HOME` as Qwen Code does: when it is set, a leading `~` is expanded, a relative path is made absolute, and that directory is used as is, with no `.qwen` appended. The scheduled inventory job starts without your shell's environment, so a per-user `beacon endpoint install` or `repair` writes the `QWEN_HOME` it resolved into the job's launchd or systemd definition. If you change `QWEN_HOME` later, run `beacon endpoint repair` from a shell that has the new value.
+`QWEN_HOME` is read as Qwen Code reads it: a leading `~` is expanded, a relative path is made absolute, and `settings.json` sits directly in that directory. If you change `QWEN_HOME` after installing, run `beacon endpoint repair` from a shell that has the new value; see [Agent inventory](/cli/endpoint-inventory) for why the scheduled scan needs it.
 
 User level is the default. A project-level install only takes effect once Qwen trusts the folder, and `beacon endpoint discover` reports on the user path only, so a project-level install does not appear in discovery output.
 

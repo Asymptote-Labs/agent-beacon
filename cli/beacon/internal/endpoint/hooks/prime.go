@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	primeextension "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks/assets/prime"
 )
@@ -161,7 +160,7 @@ func primeExtensionDir(home string, level Level) (string, error) {
 	switch level {
 	case "", LevelUser:
 		if agentDir := os.Getenv(primeAgentDirEnv); agentDir != "" {
-			expanded, err := primeExpandTilde(agentDir, home)
+			expanded, err := expandTilde(agentDir, home)
 			if err != nil {
 				return "", err
 			}
@@ -180,23 +179,4 @@ func primeExtensionDir(home string, level Level) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown hook level %q", level)
 	}
-}
-
-// primeExpandTilde resolves a leading `~` in the agent-directory override.
-//
-// Prime Agent expands it itself before using the value, so a Beacon install that did not would
-// create a literal `~` directory beside the working directory and report success while the runtime
-// kept reading the real home. Only a bare `~` or a `~/`-rooted path is expanded, which is the
-// runtime's own rule -- `~user/...` is left alone by both.
-func primeExpandTilde(path, home string) (string, error) {
-	if path != "~" && !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, `~\`) {
-		return path, nil
-	}
-	if home == "" {
-		return "", fmt.Errorf("home directory is required to resolve %s=%q", primeAgentDirEnv, path)
-	}
-	if path == "~" {
-		return home, nil
-	}
-	return filepath.Join(home, filepath.FromSlash(path[2:])), nil
 }
