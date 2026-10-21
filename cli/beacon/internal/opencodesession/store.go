@@ -363,7 +363,12 @@ func sessionMessageRecords(id, typ string, created int64, raw map[string]interfa
 			ToolName: "bash", CallID: firstNonEmpty(stringFromMap(raw, "shellID"), id), Args: map[string]interface{}{"command": stringFromMap(raw, "command")},
 			Output: output, Status: status, Raw: map[string]interface{}{"message": raw}}}
 	case "compaction":
-		return []Record{{NativeID: id, TimestampMS: created, Type: "compaction", ModelID: model, Raw: map[string]interface{}{"message": raw}}}
+		// A completed compaction carries the usage of the model call that summarized the history.
+		out := []Record{{NativeID: id, TimestampMS: created, Type: "compaction", ModelID: model, Raw: map[string]interface{}{"message": raw}}}
+		if usage, ok := sessionMessageUsage(id, raw, created, model); ok {
+			out = append(out, usage)
+		}
+		return out
 	case "assistant":
 	default:
 		return nil
@@ -388,19 +393,27 @@ func sessionMessageRecords(id, typ string, created int64, raw map[string]interfa
 			out = append(out, sessionToolRecord(id, item, created, model))
 		}
 	}
-	timeMap := mapFromAny(raw["time"])
-	completed := firstNonZero(normalizeMillis(intFromAny(timeMap["completed"])), created)
-	tokens := tokenUsageFromAny(raw["tokens"])
-	// 2.x stores output without reasoning; a total that covers both tells outputTokens to add it back.
-	tokens.Total = tokens.Input + tokens.CacheRead + tokens.CacheWrite + tokens.Output + tokens.Reasoning
-	tokens.CostUSD = floatFromAny(raw["cost"])
-	if hasUsage(tokens) {
-		out = append(out, Record{NativeID: id + ":usage", TimestampMS: completed, Type: "token_usage", ModelID: model, Tokens: &tokens})
+	if usage, ok := sessionMessageUsage(id, raw, created, model); ok {
+		out = append(out, usage)
 	}
+	completed := firstNonZero(normalizeMillis(intFromAny(mapFromAny(raw["time"])["completed"])), created)
 	if errMap := mapFromAny(raw["error"]); len(content) == 0 && len(errMap) > 0 {
 		out = append(out, Record{NativeID: id + ":error", TimestampMS: completed, Type: "error", Content: stringFromMap(errMap, "message", "type"), ModelID: model, Raw: map[string]interface{}{"message": raw}})
 	}
 	return out
+}
+
+// sessionMessageUsage is the token_usage record for a session_message row's tokens and cost.
+func sessionMessageUsage(id string, raw map[string]interface{}, created int64, model string) (Record, bool) {
+	completed := firstNonZero(normalizeMillis(intFromAny(mapFromAny(raw["time"])["completed"])), created)
+	tokens := tokenUsageFromAny(raw["tokens"])
+	// 2.x stores output without reasoning; a total that covers both tells outputTokens to add it back.
+	tokens.Total = tokens.Input + tokens.CacheRead + tokens.CacheWrite + tokens.Output + tokens.Reasoning
+	tokens.CostUSD = floatFromAny(raw["cost"])
+	if !hasUsage(tokens) {
+		return Record{}, false
+	}
+	return Record{NativeID: id + ":usage", TimestampMS: completed, Type: "token_usage", ModelID: model, Tokens: &tokens}, true
 }
 
 func sessionToolRecord(messageID string, item map[string]interface{}, created int64, model string) Record {

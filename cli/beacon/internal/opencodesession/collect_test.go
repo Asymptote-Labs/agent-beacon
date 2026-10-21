@@ -177,6 +177,12 @@ func TestCollectOnceReadsOpenCode2Sessions(t *testing.T) {
 		"tokens": map[string]interface{}{"input": 100, "output": 20, "reasoning": 5, "cache": map[string]interface{}{"read": 0, "write": 0}},
 		"cost":   0.01,
 	})
+	// A completed compaction carries the usage of the summarizing model call.
+	insertJSON(t, db, insert, "msg_5", "ses_2", "compaction", 3, int64(1770000001450), map[string]interface{}{
+		"status": "completed", "model": map[string]interface{}{"id": "claude-sonnet-4-5", "providerID": "anthropic"},
+		"tokens": map[string]interface{}{"input": 400, "output": 50, "reasoning": 0, "cache": map[string]interface{}{"read": 0, "write": 0}},
+		"cost":   0.02,
+	})
 
 	logPath := filepath.Join(dir, "runtime.jsonl")
 	if _, err := CollectOnce(CollectOptions{DataDir: dir, StatePath: filepath.Join(dir, "state.json"), LogPath: logPath, Write: true}); err != nil {
@@ -186,7 +192,7 @@ func TestCollectOnceReadsOpenCode2Sessions(t *testing.T) {
 	for _, action := range loggedActions(t, logPath) {
 		got[action]++
 	}
-	want := map[string]int{"prompt.submitted": 3, "agent.message": 1, "command.executed": 1, "token.usage": 1}
+	want := map[string]int{"prompt.submitted": 3, "agent.message": 1, "command.executed": 1, "token.usage": 2}
 	for action, n := range want {
 		if got[action] != n {
 			t.Fatalf("logged %v, want %v", got, want)
