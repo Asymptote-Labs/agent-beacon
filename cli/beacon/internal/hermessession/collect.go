@@ -63,6 +63,10 @@ type CollectOptions struct {
 	// Budget, when set, caps the bytes this sweep may append. The sweep stops at the first event
 	// that does not fit and returns writer.ErrBudgetSpent, with cursors past only what was written.
 	Budget *writer.Budget
+	// LegacyStatePath, when set, is the unkeyed cursor this home was advancing before cursors were
+	// keyed by home. A sweep whose StatePath holds no sessions yet starts from it, so an upgrade does not
+	// re-emit history that was already collected; the cursor is then saved to StatePath.
+	LegacyStatePath string
 }
 
 type Summary struct {
@@ -120,12 +124,39 @@ type MappedEvent struct {
 	Event           schema.Event
 }
 
-func DefaultStatePath() string {
+func DefaultStatePath(hermesHome string) string {
 	base := filepath.Join(os.TempDir(), "beacon")
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
 		base = filepath.Join(home, ".beacon")
 	}
-	return filepath.Join(base, "endpoint", "state", "hermes.json")
+	return filepath.Join(base, "endpoint", "state", StateFileName("hermes", hermesHome))
+}
+
+// StateFileName names the cursor file for the Hermes home a sweep reads. The native root keeps the
+// unkeyed name, so an existing install resumes from the cursor it already has. Every other home, a
+// profile or a custom HERMES_HOME, gets a file named for its profile and keyed by its resolved path,
+// so two homes never share a cursor even when both are the default profile of their own root or
+// hold profiles of the same name.
+func StateFileName(stem, hermesHome string) string {
+	resolved := canonicalHome(hermesHome)
+	userHome, _ := os.UserHomeDir()
+	if root := nativeRoot(userHome); root != "" && canonicalHome(root) == resolved {
+		return stem + ".json"
+	}
+	sum := sha256.Sum256([]byte(resolved))
+	return fmt.Sprintf("%s-%s-%x.json", stem, Profile(hermesHome), sum[:6])
+}
+
+// LoadStateSeeded loads the cursor at path, or the one at legacy while path holds no sessions yet, as
+// on the first sweep after cursors were keyed by home. Nothing is written: the caller's next Save
+// puts the seeded cursor at path. Cursors are per session id, so a legacy entry for a session this
+// home does not have is inert.
+func LoadStateSeeded(path, legacy string) (*State, error) {
+	state, err := LoadState(path)
+	if err != nil || legacy == "" || legacy == path || len(state.Sessions) > 0 {
+		return state, err
+	}
+	return LoadState(legacy)
 }
 
 func LoadState(path string) (*State, error) {
@@ -204,7 +235,7 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	}
 	sessions = sessionwindow.Recent(sessions, opts.Since, func(r Session) int64 { return max(r.StartedAtMS, r.EndedAtMS, r.LastMessageAtMS) })
 	summary.Sessions = len(sessions)
-	state, err := LoadState(opts.StatePath)
+	state, err := LoadStateSeeded(opts.StatePath, opts.LegacyStatePath)
 	if err != nil {
 		return summary, err
 	}
@@ -247,6 +278,11 @@ func collectSession(store *Store, session Session, state *State, opts CollectOpt
 		return false, err
 	}
 	mapped, pending := MapSession(session, messages, cursor)
+	home := filepath.Dir(store.Path())
+	for i := range mapped {
+		mapped[i].Event.Harness.ConfigPath = home
+		mapped[i].Event.Harness.Profile = Profile(home)
+	}
 	if len(mapped) == 0 {
 		cursor.PendingCalls = pending
 		advanceCursorMessages(cursor, messages)

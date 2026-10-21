@@ -230,7 +230,7 @@ func TestHermesSessionUsageInShares(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(again, events) {
 				t.Errorf("repeated read changed events or identities: err=%v", err)
 			}
-			if _, err := os.Stat(filepath.Dir(hermessession.DefaultStatePath())); !errors.Is(err, os.ErrNotExist) {
+			if _, err := os.Stat(filepath.Dir(hermessession.DefaultStatePath(filepath.Dir(path)))); !errors.Is(err, os.ErrNotExist) {
 				t.Errorf("reading a session created collection state: %v", err)
 			}
 		})
