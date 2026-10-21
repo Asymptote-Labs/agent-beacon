@@ -166,6 +166,13 @@ func ReadTokenEventsAppendOrder(path string, query EventQuery) ([]schema.Event, 
 // lines are skipped; a missing active log is not an error. If fn returns an error,
 // streaming stops and returns it.
 func StreamEvents(path string, fn func(schema.Event) error) error {
+	return streamEventRecords(path, func(record EventRecord) error {
+		return fn(record.Event)
+	})
+}
+
+// streamEventRecords retains source/line identity for readers that link raw events to projections.
+func streamEventRecords(path string, fn func(EventRecord) error) error {
 	sources := eventSources(path) // [active, archive1, archive2, ...] (archives ascending)
 	// Chronological order is oldest first: highest archive index down to 1, then the
 	// active log last. Within a file, lines are already in append order.
@@ -176,14 +183,14 @@ func StreamEvents(path string, fn func(schema.Event) error) error {
 	ordered = append(ordered, sources[0])
 
 	for _, source := range ordered {
-		if err := streamSource(source, fn); err != nil {
+		if err := streamRecordSource(source, fn); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func streamSource(source eventSource, fn func(schema.Event) error) error {
+func streamRecordSource(source eventSource, fn func(EventRecord) error) error {
 	file, err := os.Open(source.path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -195,7 +202,9 @@ func streamSource(source eventSource, fn func(schema.Event) error) error {
 
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	lineNo := 0
 	for scanner.Scan() {
+		lineNo++
 		line := bytes.TrimSpace(scanner.Bytes())
 		if len(line) == 0 {
 			continue
@@ -205,7 +214,7 @@ func streamSource(source eventSource, fn func(schema.Event) error) error {
 			continue // skip malformed
 		}
 		normalizeDashboardEvent(&event)
-		if err := fn(event); err != nil {
+		if err := fn(EventRecord{ID: source.lineID(lineNo), Line: lineNo, Event: event}); err != nil {
 			return err
 		}
 	}
