@@ -123,7 +123,9 @@ func ConfigFromEnv() Config {
 }
 
 // inSandbox is p when it lies under SandboxDir, else the default file there. A refused p is
-// reported on stderr, never stdout, which some runtimes add to the model's context.
+// reported on stderr, never stdout, which some runtimes add to the model's context, and only
+// under BEACON_ORIGIN=cloud: local installs always set BEACON_ENDPOINT_LOG outside the sandbox
+// and reach this through every SessionStart, Stop and SessionEnd, where the shuttle is inert.
 func inSandbox(label, p, name string) string {
 	fallback := filepath.Join(SandboxDir, name)
 	if p == "" {
@@ -135,7 +137,9 @@ func inSandbox(label, p, name string) string {
 			return p
 		}
 	}
-	fmt.Fprintf(os.Stderr, "beacon-hooks: cloud shuttle ignores %s %s outside %s; using %s\n", label, p, SandboxDir, fallback)
+	if strings.TrimSpace(os.Getenv("BEACON_ORIGIN")) == "cloud" {
+		fmt.Fprintf(os.Stderr, "beacon-hooks: cloud shuttle ignores %s %s outside %s; using %s\n", label, p, SandboxDir, fallback)
+	}
 	return fallback
 }
 

@@ -124,6 +124,31 @@ func TestMaybeUploadRefusesALogOutsideTheSandbox(t *testing.T) {
 	}
 }
 
+// Local installs set BEACON_ENDPOINT_LOG outside the sandbox, and every local SessionStart, Stop
+// and SessionEnd reads the shuttle config, so the refusal notice is for cloud runs only.
+func TestConfigFromEnvIsSilentOutsideCloud(t *testing.T) {
+	dir := t.TempDir()
+	useSandbox(t, filepath.Join(dir, "sandbox"))
+	t.Setenv("BEACON_ORIGIN", "")
+	t.Setenv("BEACON_ENDPOINT_LOG", filepath.Join(dir, "runtime.jsonl"))
+	t.Setenv("BEACON_CLOUD_SHUTTLE_STATE", filepath.Join(dir, "state.json"))
+	captured, err := os.CreateTemp(dir, "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer captured.Close()
+	prev := os.Stderr
+	os.Stderr = captured
+	cfg := ConfigFromEnv()
+	os.Stderr = prev
+	if cfg.LogPath != filepath.Join(SandboxDir, defaultLogName) {
+		t.Fatalf("LogPath = %q, want the sandbox default", cfg.LogPath)
+	}
+	if out, err := os.ReadFile(captured.Name()); err != nil || len(out) != 0 {
+		t.Fatalf("stderr = %q (err %v), want nothing", out, err)
+	}
+}
+
 func TestUploadSendsJSONLToGCS(t *testing.T) {
 	restore := stubNow(t, time.Date(2026, 7, 12, 20, 17, 3, 0, time.UTC))
 	defer restore()
