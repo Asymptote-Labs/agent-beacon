@@ -63,6 +63,10 @@ type CollectOptions struct {
 	// Budget, when set, caps the bytes this sweep may append. The sweep stops at the first event
 	// that does not fit and returns writer.ErrBudgetSpent, with cursors past only what was written.
 	Budget *writer.Budget
+	// LegacyStatePath, when set, is the unkeyed cursor this home was advancing before cursors were
+	// keyed by home. A sweep whose StatePath holds no sessions yet starts from it, so an upgrade does not
+	// re-emit history that was already collected; the cursor is then saved to StatePath.
+	LegacyStatePath string
 }
 
 type Summary struct {
@@ -143,6 +147,18 @@ func StateFileName(stem, hermesHome string) string {
 	return fmt.Sprintf("%s-%s-%x.json", stem, Profile(hermesHome), sum[:6])
 }
 
+// LoadStateSeeded loads the cursor at path, or the one at legacy while path holds no sessions yet, as
+// on the first sweep after cursors were keyed by home. Nothing is written: the caller's next Save
+// puts the seeded cursor at path. Cursors are per session id, so a legacy entry for a session this
+// home does not have is inert.
+func LoadStateSeeded(path, legacy string) (*State, error) {
+	state, err := LoadState(path)
+	if err != nil || legacy == "" || legacy == path || len(state.Sessions) > 0 {
+		return state, err
+	}
+	return LoadState(legacy)
+}
+
 func LoadState(path string) (*State, error) {
 	state := &State{Version: StateVersion, Sessions: map[string]*Cursor{}}
 	if path == "" {
@@ -219,7 +235,7 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	}
 	sessions = sessionwindow.Recent(sessions, opts.Since, func(r Session) int64 { return max(r.StartedAtMS, r.EndedAtMS, r.LastMessageAtMS) })
 	summary.Sessions = len(sessions)
-	state, err := LoadState(opts.StatePath)
+	state, err := LoadStateSeeded(opts.StatePath, opts.LegacyStatePath)
 	if err != nil {
 		return summary, err
 	}

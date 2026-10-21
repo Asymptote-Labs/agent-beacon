@@ -82,3 +82,33 @@ func TestHermesDBPathIsResolvedOnceAndAbsolute(t *testing.T) {
 		t.Errorf("relative --db resolved to %q, want an absolute path in the work profile", got)
 	}
 }
+
+// Before cursors were keyed by home, every default sweep advanced hermes.json, including one whose
+// default home was a custom HERMES_HOME. Its first keyed sweep starts from that cursor rather than
+// re-emitting the history it already collected; another home never inherits it.
+func TestHermesKeyedCursorSeedsFromTheLegacyCursor(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HERMES_HOME", filepath.Join(home, "custom-hermes"))
+
+	legacy := legacyHermesStatePath("", "", true)
+	if want := filepath.Join(home, ".beacon", "endpoint", "state", "hermes.json"); legacy != want {
+		t.Fatalf("legacy cursor = %q, want %q", legacy, want)
+	}
+	seed := &hermessession.State{Version: hermessession.StateVersion, Sessions: map[string]*hermessession.Cursor{"s1": {Started: true, LastMessageID: 7}}}
+	if err := seed.Save(legacy); err != nil {
+		t.Fatal(err)
+	}
+	keyed := resolveHermesStatePath("", "", true)
+	state, err := hermessession.LoadStateSeeded(keyed, legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := state.Sessions["s1"]; c == nil || c.LastMessageID != 7 {
+		t.Errorf("keyed cursor %q did not start from the legacy cursor: %+v", keyed, state.Sessions)
+	}
+	if other := legacyHermesStatePath("", filepath.Join(home, "elsewhere", "state.db"), true); other != "" {
+		t.Errorf("a non-default home would inherit the legacy cursor %q", other)
+	}
+}

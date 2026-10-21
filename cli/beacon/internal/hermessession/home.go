@@ -163,6 +163,11 @@ func resolveExisting(path string) string {
 
 // canonicalHome is the form two spellings of one Hermes home share: absolute, with symlinks
 // resolved, and case-folded on Windows, whose paths are case-insensitive.
+// SameHome reports whether two Hermes home directories resolve to the same place.
+func SameHome(a, b string) bool {
+	return canonicalHome(a) == canonicalHome(b)
+}
+
 func canonicalHome(dir string) string {
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
