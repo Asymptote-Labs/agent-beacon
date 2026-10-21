@@ -210,7 +210,7 @@ var inventoryJobPathEnv = []string{
 	"DSH_HOME",
 	"OH_PERSISTENCE_DIR",
 	"OPENCLAW_STATE_DIR",
-	"XDG_CONFIG_HOME",              // Muse, and VS Code on Linux
+	"XDG_CONFIG_HOME",              // Muse, Autopilot, and VS Code on Linux
 	"PI_CODING_AGENT_DIR",          // Pi, Oh My Pi's default profile, and OMO's last fallback
 	"OMO_CODING_AGENT_DIR",         // OMO
 	"SENPI_CODING_AGENT_DIR",       // OMO's legacy name

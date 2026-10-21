@@ -569,6 +569,8 @@ func hookStatuses(logPath string, userMode bool) []HookStatus {
 	add("dsh", dsh.Installed, dsh.HooksPath, dsh.BinaryPath, dsh.Message)
 	kimi := endpointhooks.KimiHookStatus(endpointhooks.KimiOptions{Level: level, LogPath: logPath, UserMode: userMode})
 	add("kimi", kimi.Installed, kimi.HooksPath, kimi.BinaryPath, kimi.Message)
+	autopilot := endpointhooks.AutopilotHookStatus(endpointhooks.AutopilotOptions{Level: level, LogPath: logPath, UserMode: userMode})
+	add("autopilot", autopilot.Installed, autopilot.SettingsPath, autopilot.BinaryPath, autopilot.Message)
 	muse := endpointhooks.MuseHookStatus(endpointhooks.MuseOptions{Level: level, LogPath: logPath, UserMode: userMode})
 	add("muse", muse.Installed, muse.HooksPath, muse.BinaryPath, muse.Message)
 	qwen := endpointhooks.QwenHookStatus(endpointhooks.QwenOptions{Level: level, LogPath: logPath, UserMode: userMode})

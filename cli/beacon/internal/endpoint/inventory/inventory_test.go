@@ -628,6 +628,10 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 		// rather than the file existing. The project scope is absent because Kimi Code reads one
 		// user-level config file and has no project-level config mechanism at all.
 		{runtime: "kimi_code", path: filepath.Join(kimiUserDir(home), "config.toml"), scope: ScopeUser, format: formatTOML, kind: KindNativeConfig},
+		// Autopilot's settings.json is shared with the user's own hooks, so it is a hook config
+		// detected by the command Beacon writes, at both scopes Autopilot reads.
+		{runtime: "autopilot", path: filepath.Join(autopilotConfigBase(home), "autopilot", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "autopilot", path: filepath.Join(work, ".autopilot", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
 		// fx has no Beacon-written file, so all three are its own configuration. The two MCP files
 		// are the ones that carry information nothing else here reports: fx's profile server list
 		// and the workspace servers it shares with Claude-compatible runtimes.

@@ -155,6 +155,10 @@ var usageExpectation = map[string]struct {
 	// backfill, there is no poll path here to read usage from: Beacon collects Kimi Code through
 	// hooks only, and the runtime's own session store is not read.
 	"kimi_code": {ExpectNone, "hook payloads carry no token counts; PreCompact reports context only"},
+	// Autopilot's hook payloads carry no usage. Its OpenTelemetry export (KIMIFLARE_OTEL_ENDPOINT)
+	// does, as gen_ai.usage.* on autopilot.api_request, and that export is configured in
+	// Autopilot's launch environment rather than by endpoint install -- the generic-OTLP case.
+	"autopilot": {ExpectGenericOTLP, "hook payloads carry no token counts; only if its OTLP export is pointed at the collector"},
 }
 
 // InstalledConfig is the part of a config-scanner row that install detection reads.

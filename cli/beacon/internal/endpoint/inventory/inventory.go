@@ -254,6 +254,7 @@ func candidates(home, wd string) []candidate {
 	items = append(items, kiroCandidates(home, wd)...)
 	items = append(items, dshCandidates(home)...)
 	items = append(items, kimiCandidates(home)...)
+	items = append(items, autopilotCandidates(home, wd)...)
 	items = append(items, fxCandidates(home, wd)...)
 	seen := map[string]bool{}
 	out := make([]candidate, 0, len(items))
@@ -528,6 +529,26 @@ func qwenCandidates(home, wd string) []candidate {
 		{runtime: "qwen_code", path: filepath.Join(home, ".qwen", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
 		{runtime: "qwen_code", path: filepath.Join(wd, ".qwen", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
 	}
+}
+
+// Autopilot keeps hooks in a settings.json it shares with the user's own hooks, so it is classified
+// KindHookConfig and detected by the hook command, the Qwen Code shape. The user path follows
+// XDG_CONFIG_HOME the way Autopilot and the installer do. The legacy kimiflare settings files
+// Autopilot still reads are not listed: Beacon never writes them.
+func autopilotCandidates(home, wd string) []candidate {
+	return []candidate{
+		{runtime: "autopilot", path: filepath.Join(autopilotConfigBase(home), "autopilot", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
+		{runtime: "autopilot", path: filepath.Join(wd, ".autopilot", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+	}
+}
+
+// autopilotConfigBase is Autopilot's config root, `$XDG_CONFIG_HOME` or `~/.config`, mirroring the
+// runtime and the installer.
+func autopilotConfigBase(home string) string {
+	if base := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); base != "" {
+		return base
+	}
+	return filepath.Join(home, ".config")
 }
 
 // Muse Code is two files: the managed hooks file Beacon owns outright, and Muse's own settings.json,
@@ -1120,6 +1141,10 @@ func beaconManaged(item candidate, data []byte) bool {
 	// is still running.
 	case "kimi_code":
 		return strings.Contains(text, "--platform kimi") || strings.Contains(text, "--platform=kimi")
+	// Matched on the hook command, the Qwen Code reason: Beacon merges into Autopilot's own
+	// settings.json and has no file of its own there to stamp.
+	case "autopilot":
+		return strings.Contains(text, "--platform autopilot") || strings.Contains(text, "--platform=autopilot")
 	}
 	if item.runtime == "claude_code" || item.runtime == "codex_cli" {
 		if strings.Contains(text, "OTEL_EXPORTER_OTLP_ENDPOINT") && localEndpointText(text) {

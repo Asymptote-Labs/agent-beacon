@@ -76,6 +76,7 @@ func DiscoverAll() []Harness {
 		DiscoverDsh(),
 		DiscoverQwen(),
 		DiscoverKimi(),
+		DiscoverAutopilot(),
 		DiscoverKiro(),
 		DiscoverMuse(),
 		DiscoverOpenHands(),

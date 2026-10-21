@@ -273,6 +273,19 @@ func installEndpointHookTargetTo(report, notes io.Writer, name string, cfg endpo
 		// profile enabled HMR -- and the symptom otherwise is a successful install collecting
 		// nothing until the next restart, which reads as a broken install.
 		fmt.Fprintln(notes, "Restart dsh (or rely on its config watcher, if your profile enables HMR) for the hooks to take effect.")
+	case "autopilot":
+		status, err := endpointhooks.InstallAutopilot(endpointhooks.AutopilotOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(report, "Autopilot hooks installed: %s\n", status.SettingsPath)
+		// Autopilot loads hook settings when a session starts, so a running one keeps the hooks it
+		// started with until it reloads them.
+		fmt.Fprintln(notes, "Start a new Autopilot session (or run /hooks reload) for the hooks to take effect.")
 	case "kimi":
 		status, err := endpointhooks.InstallKimi(endpointhooks.KimiOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -554,6 +567,16 @@ func uninstallEndpointHookTarget(name string, cfg endpointconfig.Config) error {
 			return err
 		}
 		fmt.Println(status.Message)
+	case "autopilot":
+		status, err := endpointhooks.UninstallAutopilot(endpointhooks.AutopilotOptions{
+			Level:    endpointhooks.Level(endpointOpts.hookLevel),
+			LogPath:  cfg.LogPath,
+			UserMode: cfg.UserMode,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Println(status.Message)
 	case "kimi":
 		status, err := endpointhooks.UninstallKimi(endpointhooks.KimiOptions{
 			Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -736,6 +759,12 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 				LogPath:  cfg.LogPath,
 				UserMode: cfg.UserMode,
 			})
+		case "autopilot":
+			statuses["autopilot"] = endpointhooks.AutopilotHookStatus(endpointhooks.AutopilotOptions{
+				Level:    endpointhooks.Level(endpointOpts.hookLevel),
+				LogPath:  cfg.LogPath,
+				UserMode: cfg.UserMode,
+			})
 		case "kimi":
 			statuses["kimi"] = endpointhooks.KimiHookStatus(endpointhooks.KimiOptions{
 				Level:    endpointhooks.Level(endpointOpts.hookLevel),
@@ -857,6 +886,10 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 			// know which one to look at.
 			fmt.Printf("DeepSeek Harness hooks: installed=%t path=%s patch=%s\n",
 				status.Installed, status.HooksPath, status.PatchPath)
+			fmt.Println(status.Message)
+		case "autopilot":
+			status := statuses["autopilot"].(endpointhooks.AutopilotStatus)
+			fmt.Printf("Autopilot hooks: installed=%t path=%s\n", status.Installed, status.SettingsPath)
 			fmt.Println(status.Message)
 		case "kimi":
 			status := statuses["kimi"].(endpointhooks.KimiStatus)

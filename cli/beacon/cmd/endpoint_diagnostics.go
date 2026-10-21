@@ -1001,7 +1001,7 @@ var userScopeOnlyHookTargets = map[string]bool{
 }
 
 func allHookTargetsForLevel() []string {
-	all := []string{"cursor", "codex", "vscode", "factory", "opencode", "openhands", "kiro", "kimi", "dsh", "cline", "pi", "omp", "prime", "omo", "openclaw", "grok", "qwen", "muse", "hermes", "devin-cli", "devin-desktop", "antigravity"}
+	all := []string{"cursor", "codex", "vscode", "factory", "opencode", "openhands", "kiro", "kimi", "autopilot", "dsh", "cline", "pi", "omp", "prime", "omo", "openclaw", "grok", "qwen", "muse", "hermes", "devin-cli", "devin-desktop", "antigravity"}
 	if endpointOpts.hookLevel != "project" {
 		return all
 	}
@@ -1079,6 +1079,9 @@ func hookStatusesWithConfig(targets []string, cfg endpointconfig.Config) map[str
 			// mounts the bridge at it rides along in Raw, where the JSON output keeps it -- this
 			// struct carries one path and the install has two.
 			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.HooksPath, Raw: status}
+		case "autopilot":
+			status := endpointhooks.AutopilotHookStatus(endpointhooks.AutopilotOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
+			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.SettingsPath, Raw: status}
 		case "kimi":
 			status := endpointhooks.KimiHookStatus(endpointhooks.KimiOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
 			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.HooksPath, Raw: status}

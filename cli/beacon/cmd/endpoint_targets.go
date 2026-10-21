@@ -61,6 +61,7 @@ var autoEndpointTargets = map[string]autoEndpointTarget{
 	"deepseek_harness": {Hooks: []string{"dsh"}},
 	"qwen_code":        {Hooks: []string{"qwen"}},
 	"kimi_code":        {Hooks: []string{"kimi"}},
+	"autopilot":        {Hooks: []string{"autopilot"}},
 	"kiro":             {Hooks: []string{"kiro"}},
 	"muse_code":        {Hooks: []string{"muse"}},
 	"openhands":        {Skip: "the CLI and GUI require project-level hooks installed from inside each repository"},
@@ -173,6 +174,11 @@ var harnessTargets = []harnessTarget{
 	// someone ask to install hooks for a model -- the same reason NormalizeHarnessName leaves them
 	// unmapped. Bare "kimi" is accepted here and not there for the same reason it is accepted in
 	// the harness normalizer: it is the name of the thing the operator runs.
+	// Autopilot (npm `autopilot-ai`). One row for every surface -- the terminal UI, print mode, the
+	// RPC server and the SDK read the same settings files. "autopilot" is the binary, the --platform
+	// value and the canonical harness name; "autopilot-ai" is the npm package name people reach for
+	// ("autopilot_ai" folds onto it through normalizeHarnessKey).
+	{name: "autopilot", endpointKind: endpointTargetHook, endpointAliases: []string{"autopilot", "autopilot-ai"}, hookAliases: []string{"autopilot", "autopilot-ai"}},
 	{name: "kimi", endpointKind: endpointTargetHook, endpointAliases: []string{"kimi", "kimi-code", "kimi-code-cli"}, hookAliases: []string{"kimi", "kimi-code", "kimi-code-cli"}},
 	// OpenClaw Gateway. One row, and it is the plugin row: `--harness openclaw` installs the
 	// Beacon-managed plugin, which is the path that collects the agent's work. The gateway's other
