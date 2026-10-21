@@ -70,9 +70,9 @@ func TestCoverageFlagsARuntimeThatShouldHaveReportedUsage(t *testing.T) {
 // Cursor contributing nothing is correct behavior. Reporting it as silent every week would train
 // a reader to ignore the column that matters.
 func TestCoverageDoesNotFlagRuntimesThatCannotReportUsage(t *testing.T) {
-	events := []schema.Event{plainEvent("cursor"), plainEvent("qwen_code"), plainEvent("muse_code"), plainEvent("devin-cli"), plainEvent("devin-desktop")}
-	report := Coverage(events, []string{"cursor", "qwen_code", "muse_code", "devin-cli", "devin-desktop"})
-	for _, harness := range []string{"cursor", "qwen_code", "muse_code", "devin-cli", "devin-desktop"} {
+	events := []schema.Event{plainEvent("cursor"), plainEvent("qwen_code"), plainEvent("muse_code"), plainEvent("devin"), plainEvent("devin-desktop")}
+	report := Coverage(events, []string{"cursor", "qwen_code", "muse_code", "devin", "devin-desktop"})
+	for _, harness := range []string{"cursor", "qwen_code", "muse_code", "devin", "devin-desktop"} {
 		line := lineFor(t, report, harness)
 		if line.Status != CoverageNotInstrumented {
 			t.Errorf("%s status = %q, want not_instrumented", harness, line.Status)
@@ -233,17 +233,28 @@ func TestEveryScannedRuntimeHasAnExpectation(t *testing.T) {
 	}
 }
 
-// The Devin regression in report form: a Devin CLI or Devin Desktop session that reports no
-// tokens must not be alerted on.
-func TestCoverageDoesNotFlagAnyDevinSpelling(t *testing.T) {
-	for _, harness := range []string{"devin", "devin-cli", "devin-desktop"} {
+// The Devin regression in report form: a Devin spelling whose only collection path cannot carry
+// token counts must not be alerted on. Plain "devin" and "devin-desktop" are hook-only and stay
+// not_instrumented; "devin-cli" is expected to report once `beacon endpoint devin sync` has run,
+// so a covered session with no sync yet is silent and the reason names the fix.
+func TestCoverageFlagsDevinSpellingsByWhatBeaconCanRead(t *testing.T) {
+	for _, harness := range []string{"devin", "devin-desktop"} {
 		report := Coverage([]schema.Event{plainEvent(harness)}, []string{harness})
 		if got := lineFor(t, report, harness).Status; got != CoverageNotInstrumented {
-			t.Errorf("%s status = %q, want not_instrumented -- Devin reports no token counts", harness, got)
+			t.Errorf("%s status = %q, want not_instrumented -- these hooks report no token counts", harness, got)
 		}
 		if report.Silent != 0 {
 			t.Errorf("%s produced silent=%d, want 0", harness, report.Silent)
 		}
+	}
+
+	report := Coverage([]schema.Event{plainEvent("devin-cli")}, []string{"devin-cli"})
+	line := lineFor(t, report, "devin-cli")
+	if line.Status != CoverageSilent {
+		t.Fatalf("devin-cli status = %q, want silent until the session sync runs", line.Status)
+	}
+	if !strings.Contains(line.Reason, "beacon endpoint devin sync") {
+		t.Fatalf("devin-cli reason = %q, want it to name the sync that reports usage", line.Reason)
 	}
 }
 
