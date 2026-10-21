@@ -568,10 +568,45 @@ function finishResult<T>(result: T, span: Span, options?: ObserveOptions): unkno
     // cached so repeated reads return the same function. The proxy targets the wrapper rather
     // than the original, whose read-only properties would make a binding get trap invalid.
     const iterator = finishAsyncIterable(result, span);
+    // return() or throw() on an unstarted async generator settles it without running its finally
+    // block, so the span would never end and an already-created query (which owns the Claude CLI
+    // process) would never be closed. Do both here.
+    let started = false;
+    async function closeUnstarted(settled: Promise<IteratorResult<unknown>>) {
+      const close = (result as Partial<AsyncIterator<unknown>>).return;
+      let outcome: IteratorResult<unknown>;
+      try {
+        outcome = await settled;
+      } catch (error) {
+        // The consumer's error takes precedence over a cleanup failure.
+        await Promise.resolve(typeof close === "function" ? close.call(result) : undefined).catch(() => {});
+        endSpanWithError(span, error);
+        throw error;
+      }
+      try {
+        if (typeof close === "function") await close.call(result);
+      } catch (error) {
+        endSpanWithError(span, error);
+        throw error;
+      }
+      span.end();
+      return outcome;
+    }
     const methods = {
-      next: iterator.next.bind(iterator),
-      return: iterator.return.bind(iterator),
-      throw: iterator.throw.bind(iterator),
+      next(value?: unknown) {
+        started = true;
+        return iterator.next(value);
+      },
+      return(value?: unknown) {
+        if (started) return iterator.return(value);
+        started = true;
+        return closeUnstarted(iterator.return(value));
+      },
+      throw(error?: unknown) {
+        if (started) return iterator.throw(error);
+        started = true;
+        return closeUnstarted(iterator.throw(error));
+      },
     };
     const spanContext = trace.setSpan(context.active(), span);
     const tracedMethods = {
