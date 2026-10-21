@@ -3,7 +3,16 @@ set -euo pipefail
 
 echo "Installing Beacon Cursor Cloud binaries..."
 
-BEACON_HOME="${BEACON_HOME:-/tmp/beacon}"
+# The cloud shuttle uploads only from /tmp/beacon, so a BEACON_HOME outside it is refused.
+case "${BEACON_HOME:=/tmp/beacon}" in
+  */../* | */..) BEACON_HOME_OK=0 ;;
+  /tmp/beacon | /tmp/beacon/*) BEACON_HOME_OK=1 ;;
+  *) BEACON_HOME_OK=0 ;;
+esac
+if [ "$BEACON_HOME_OK" != 1 ]; then
+  echo "Beacon ignores BEACON_HOME=$BEACON_HOME outside /tmp/beacon." >&2
+  BEACON_HOME=/tmp/beacon
+fi
 BEACON_BIN_DIR="$BEACON_HOME/bin"
 REPO_ROOT="${BEACON_CLOUD_REPO_DIR:-${CURSOR_PROJECT_DIR:-$(pwd)}}"
 

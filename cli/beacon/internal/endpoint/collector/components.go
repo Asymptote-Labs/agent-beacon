@@ -13,7 +13,7 @@ import (
 // CLI does not have. A collector refuses a whole config that names a component it does not know,
 // so one of these missing stops capture for every runtime, not just the one it serves.
 var requiredComponents = map[string][]string{
-	"processor": {"claude_api_body"},
+	"processor": {"claude_api_body", "beacon_privacy"},
 	"extension": {"loopback_host"},
 }
 

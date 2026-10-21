@@ -44,7 +44,9 @@ Observe.initialize({
 });
 ```
 
-The SDK appends `/v1/observe` when the endpoint does not already include it.
+The SDK appends `/v1/observe` to the URL pathname when it is not already present,
+preserving query parameters and fragments. Supply an absolute URL; invalid or
+relative endpoints are rejected during configuration.
 Cloud spans carry `beacon.origin=cloud` and the compatibility
 attributes documented in `docs/asymptote-observe-sdk.md`.
 

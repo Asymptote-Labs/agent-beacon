@@ -14,7 +14,7 @@ beacon version
 Running `beacon` by itself in an interactive terminal also tells you when a newer
 release is out. When one is available, an orange notice shows the installed and latest
 versions, links to the [CLI changelog](/changelog/cli), and prints how to update for the
-detected installation: `brew upgrade beacon` for Homebrew,
+detected installation: `brew update && brew upgrade beacon` for Homebrew,
 `sudo beacon endpoint update --apply` for the system package, and the release download
 for every other install (tarball, `install.sh`, `go install`, the Windows MSI, or a
 source build).
@@ -54,7 +54,7 @@ When an update is available, Beacon prints the latest version, the installed ver
 $ beacon version check
 
 Beacon v0.0.95 is available. Current version: v0.0.94
-If installed with Homebrew: brew upgrade beacon
+If installed with Homebrew: brew update && brew upgrade beacon
 Download: https://github.com/asymptote-labs/agent-beacon/releases/tag/v0.0.95
 ```
 </Accordion>
@@ -74,8 +74,8 @@ Use `beacon version check` before upgrading to confirm whether a newer release i
 
 ```bash title="Use beacon version check before upgrading to confirm whether a newer release is available"
 beacon version check
-brew trust asymptote-labs/tap
 brew update
+brew trust asymptote-labs/tap
 brew upgrade beacon
 ```
 

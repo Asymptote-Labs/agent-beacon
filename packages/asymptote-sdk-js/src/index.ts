@@ -481,15 +481,14 @@ function makeSpanProcessor(exporter: SpanExporter, options: InitializeOptions): 
 }
 
 function observeURL(endpoint: string): string {
-  let end = endpoint.length;
-  while (end > 0 && endpoint.charCodeAt(end - 1) === 47) {
+  const url = new URL(endpoint);
+  let end = url.pathname.length;
+  while (end > 0 && url.pathname.charCodeAt(end - 1) === 47) {
     end -= 1;
   }
-  const trimmed = endpoint.slice(0, end);
-  if (trimmed.endsWith(DEFAULT_OBSERVE_PATH)) {
-    return trimmed;
-  }
-  return `${trimmed}${DEFAULT_OBSERVE_PATH}`;
+  const trimmed = url.pathname.slice(0, end);
+  url.pathname = trimmed.endsWith(DEFAULT_OBSERVE_PATH) ? trimmed : `${trimmed}${DEFAULT_OBSERVE_PATH}`;
+  return url.toString();
 }
 
 function readSDKVersion(): string {
@@ -562,23 +561,70 @@ function finishResult<T>(result: T, span: Span, options?: ObserveOptions): unkno
       },
     );
   }
-  if (isAsyncIterable(result)) {
+  if (isAsyncIterator(result)) {
     // A stream such as the Claude Agent SDK's Query carries controls (interrupt(), setModel(), ...)
     // beside its iterator. Iteration goes through the traced iterator; every other read goes to
     // the original stream, with functions bound to it so private-field methods keep working, and
     // cached so repeated reads return the same function. The proxy targets the wrapper rather
     // than the original, whose read-only properties would make a binding get trap invalid.
     const iterator = finishAsyncIterable(result, span);
+    // return() or throw() on an unstarted async generator settles it without running its finally
+    // block, so the span would never end and an already-created query (which owns the Claude CLI
+    // process) would never be closed. Do both here.
+    let started = false;
+    async function closeUnstarted(settled: Promise<IteratorResult<unknown>>) {
+      const close = (result as Partial<AsyncIterator<unknown>>).return;
+      let outcome: IteratorResult<unknown>;
+      try {
+        outcome = await settled;
+      } catch (error) {
+        // The consumer's error takes precedence over a cleanup failure.
+        await Promise.resolve(typeof close === "function" ? close.call(result) : undefined).catch(() => {});
+        endSpanWithError(span, error);
+        throw error;
+      }
+      try {
+        if (typeof close === "function") await close.call(result);
+      } catch (error) {
+        endSpanWithError(span, error);
+        throw error;
+      }
+      span.end();
+      return outcome;
+    }
     const methods = {
-      next: iterator.next.bind(iterator),
-      return: iterator.return.bind(iterator),
-      throw: iterator.throw.bind(iterator),
+      next(value?: unknown) {
+        started = true;
+        return iterator.next(value);
+      },
+      return(value?: unknown) {
+        if (started) return iterator.return(value);
+        started = true;
+        return closeUnstarted(iterator.return(value));
+      },
+      throw(error?: unknown) {
+        if (started) return iterator.throw(error);
+        started = true;
+        return closeUnstarted(iterator.throw(error));
+      },
+    };
+    const spanContext = trace.setSpan(context.active(), span);
+    const tracedMethods = {
+      next(...args: [] | [unknown]) {
+        return context.with(spanContext, () => methods.next(...args));
+      },
+      return(value?: unknown) {
+        return context.with(spanContext, () => methods.return(value));
+      },
+      throw(error?: unknown) {
+        return context.with(spanContext, () => methods.throw(error));
+      },
     };
     const controls = new Map<Function, Function>();
     const stream: AsyncGenerator<unknown> = new Proxy(iterator, {
       get(_target, key) {
         if (key === Symbol.asyncIterator) return iteratorForStream;
-        if (key === "next" || key === "return" || key === "throw") return methods[key];
+        if (key === "next" || key === "return" || key === "throw") return tracedMethods[key];
         const value = Reflect.get(result, key, result);
         if (typeof value !== "function" || key === "constructor") return value;
         let control = controls.get(value);
@@ -629,8 +675,17 @@ function isPromiseLike(value: unknown): value is Promise<unknown> {
   return Boolean(value && typeof (value as Promise<unknown>).then === "function");
 }
 
-function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
-  return Boolean(value && typeof (value as AsyncIterable<unknown>)[Symbol.asyncIterator] === "function");
+// Only an async iterator, such as an async generator or the Claude Agent SDK's Query, is traced
+// through consumption: its next() is the only way to read it. Other async iterables, such as the
+// Anthropic SDK's Stream, ReadableStream or a Node Readable, can also be read through their own
+// APIs (toReadableStream(), getReader(), pipe(), events), which a wrapper never sees, so wrapping
+// them would leave the span open forever and break instanceof. Those are returned as values.
+function isAsyncIterator(value: unknown): value is AsyncIterable<unknown> & AsyncIterator<unknown> {
+  return Boolean(
+    value &&
+      typeof (value as AsyncIterable<unknown>)[Symbol.asyncIterator] === "function" &&
+      typeof (value as AsyncIterator<unknown>).next === "function",
+  );
 }
 
 function firstStringArg(args: unknown[]): string {

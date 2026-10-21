@@ -123,7 +123,7 @@ func TestRunVersionCheckReportsAvailableUpdate(t *testing.T) {
 	})
 	for _, want := range []string{
 		"Beacon v0.0.12 is available. Current version: v0.0.10",
-		"If installed with Homebrew: brew upgrade beacon",
+		"If installed with Homebrew: brew update && brew upgrade beacon",
 		"Download: https://example.test/releases/v0.0.12",
 	} {
 		if !strings.Contains(got, want) {

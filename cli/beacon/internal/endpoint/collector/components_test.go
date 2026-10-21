@@ -36,9 +36,17 @@ func TestCheckComponentsRefusesACollectorWithoutTheBodyProcessor(t *testing.T) {
 
 func TestCheckComponentsAcceptsACollectorWithTheBodyProcessor(t *testing.T) {
 	stubComponents(t, releaseComponents+"    - name: claude_api_body\n      module: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter v0.0.0\n"+
+		"    - name: beacon_privacy\n"+
 		"extensions:\n    - name: loopback_host\n      module: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter v0.0.0\n", nil)
 	if err := CheckComponents("beacon-otelcol"); err != nil {
 		t.Fatalf("CheckComponents = %v, want a collector that has claude_api_body accepted", err)
+	}
+}
+
+func TestCheckComponentsRefusesACollectorWithoutPrivacy(t *testing.T) {
+	stubComponents(t, releaseComponents+"    - name: claude_api_body\n", nil)
+	if err := CheckComponents("beacon-otelcol"); err == nil || !strings.Contains(err.Error(), `"beacon_privacy"`) {
+		t.Fatalf("CheckComponents = %v, want missing privacy processor", err)
 	}
 }
 

@@ -140,6 +140,13 @@ func ConfigYAML(cfg endpointconfig.Config) string {
 		exporterNames = append(exporterNames, "falcon_hec")
 	}
 	exporters := "[" + strings.Join(exporterNames, ", ") + "]"
+	// The direct HEC exporters send what they receive, so beacon_privacy redacts before the
+	// fanout. beaconjson redacts in its own writer; with no HEC exporter the processor would only
+	// repeat that on every record.
+	privacyYAML, privacyStep := "", ""
+	if len(exporterNames) > 1 {
+		privacyYAML, privacyStep = "  beacon_privacy: {}\n", "beacon_privacy, "
+	}
 	runtimeMetricsYAML := ""
 	if cfg.Collector.IncludeRuntimeMetrics {
 		runtimeMetricsYAML = "    include_runtime_metrics: true\n"
@@ -180,7 +187,7 @@ processors:
     send_batch_size: 128
   claude_api_body:
 %s
-exporters:
+%sexporters:
   beaconjson:
     path: %q
     max_event_bytes: 65536
@@ -201,17 +208,17 @@ service:
   pipelines:
     logs:
       receivers: [otlp]
-      processors: [memory_limiter, claude_api_body, batch]
+      processors: [memory_limiter, claude_api_body, %sbatch]
       exporters: %s
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, %sbatch]
       exporters: %s
     metrics:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, %sbatch]
       exporters: %s
-`, cfg.Collector.GRPCPort, grpcLimitYAML, cfg.Collector.HTTPPort, modelContextYAML, cfg.LogPath, runtimeMetricsYAML+codexSpansYAML+modelContextYAML+splunkExporter+falconExporter, endpointconfig.HealthCheckPort(cfg.Collector), exporters, exporters, exporters)
+`, cfg.Collector.GRPCPort, grpcLimitYAML, cfg.Collector.HTTPPort, modelContextYAML, privacyYAML, cfg.LogPath, runtimeMetricsYAML+codexSpansYAML+modelContextYAML+splunkExporter+falconExporter, endpointconfig.HealthCheckPort(cfg.Collector), privacyStep, exporters, privacyStep, exporters, privacyStep, exporters)
 }
 
 func splunkHECYAML(cfg endpointconfig.Config) string {

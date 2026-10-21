@@ -59,7 +59,7 @@ func init() {
 	for _, c := range []*cobra.Command{endpointHermesSyncCmd, endpointHermesStatusCmd} {
 		f := c.Flags()
 		f.StringVar(&endpointHermesOpts.dbPath, "db", "", "Hermes state database (default $HERMES_HOME/state.db when set, otherwise the native Hermes data root)")
-		f.StringVar(&endpointHermesOpts.statePath, "state", "", "Collector cursor file (default ~/.beacon/endpoint/state/hermes.json)")
+		f.StringVar(&endpointHermesOpts.statePath, "state", "", "Collector cursor file (default ~/.beacon/endpoint/state/hermes.json for the native Hermes root, hermes-<profile>-<id>.json for any other home)")
 		f.BoolVar(&endpointOpts.jsonOutput, "json", false, "Print the result as JSON")
 		f.BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		f.BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths")
@@ -74,15 +74,17 @@ func init() {
 
 func runEndpointHermesSync(cmd *cobra.Command, args []string) error {
 	userMode := endpointUserMode()
+	dbPath := resolveHermesDBPath(endpointHermesOpts.dbPath)
 	opts := hermessession.CollectOptions{
-		DBPath:   endpointHermesOpts.dbPath,
+		DBPath:   dbPath,
 		Print:    endpointHermesOpts.print,
 		Out:      cmd.OutOrStdout(),
 		Write:    !endpointHermesOpts.print,
 		UserMode: userMode,
 	}
 	if !endpointHermesOpts.print {
-		opts.StatePath = resolveHermesStatePath(endpointHermesOpts.statePath, userMode)
+		opts.StatePath = resolveHermesStatePath(endpointHermesOpts.statePath, dbPath, userMode)
+		opts.LegacyStatePath = legacyHermesStatePath(endpointHermesOpts.statePath, dbPath, userMode)
 		opts.LogPath = lifecycle.ResolveRuntimeLog(userMode, endpointHermesOpts.logPath).EffectiveLogPath
 	}
 
@@ -148,11 +150,9 @@ type hermesStatusReport struct {
 }
 
 func runEndpointHermesStatus(cmd *cobra.Command, args []string) error {
-	dbPath := endpointHermesOpts.dbPath
-	if dbPath == "" {
-		dbPath = hermessession.DefaultDBPath()
-	}
-	statePath := resolveHermesStatePath(endpointHermesOpts.statePath, endpointUserMode())
+	dbPath := resolveHermesDBPath(endpointHermesOpts.dbPath)
+	statePath := resolveHermesStatePath(endpointHermesOpts.statePath, dbPath, endpointUserMode())
+	legacyStatePath := legacyHermesStatePath(endpointHermesOpts.statePath, dbPath, endpointUserMode())
 	report := hermesStatusReport{DBPath: dbPath, StatePath: statePath}
 
 	store, err := hermessession.OpenStore(dbPath)
@@ -167,7 +167,7 @@ func runEndpointHermesStatus(cmd *cobra.Command, args []string) error {
 	defer store.Close()
 	report.Present = true
 
-	state, err := hermessession.LoadState(statePath)
+	state, err := hermessession.LoadStateSeeded(statePath, legacyStatePath)
 	if err != nil {
 		return err
 	}
@@ -218,18 +218,73 @@ func runEndpointHermesStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// resolveHermesDBPath fixes the database a command reads once, before anything is derived from it.
+// The default is resolved here rather than per sweep, so a --watch that outlives `hermes profile use`
+// keeps reading the store its cursor belongs to, and a relative --db is made absolute so the home,
+// profile and cursor name come from the real directory rather than ".".
+func resolveHermesDBPath(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return hermessession.DefaultDBPath()
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
+}
+
 // resolveHermesStatePath keeps the cursor beside the log the sweep writes to. A system-mode sweep
 // collects on behalf of the machine, so its cursor belongs next to the system runtime log rather
 // than in whichever home the operator happened to run from; everything else uses the per-user
-// default in hermessession.DefaultStatePath.
-func resolveHermesStatePath(path string, userMode bool) string {
+// default in hermessession.DefaultStatePath. Either default is keyed by the Hermes home dbPath is
+// in, so syncing one profile or store never moves another's cursor.
+func resolveHermesStatePath(path, dbPath string, userMode bool) string {
 	if strings.TrimSpace(path) != "" {
 		return path
 	}
-	if !userMode {
-		if dir := filepath.Dir(lifecycle.ResolveRuntimeLog(false, "").EffectiveLogPath); dir != "" && dir != "." {
-			return filepath.Join(dir, "hermes-state.json")
-		}
+	if dbPath == "" {
+		dbPath = hermessession.DefaultDBPath()
 	}
-	return hermessession.DefaultStatePath()
+	hermesHome := filepath.Dir(dbPath)
+	if dir := hermesSystemStateDir(userMode); dir != "" {
+		return filepath.Join(dir, hermessession.StateFileName("hermes-state", hermesHome))
+	}
+	return hermessession.DefaultStatePath(hermesHome)
+}
+
+// legacyHermesStatePath is the unkeyed cursor a default sweep advanced before cursors were keyed by
+// home: hermes.json, or hermes-state.json beside the system log. Every default sweep used it, so it
+// belongs to whatever home DefaultDBPath() resolves to, which need not be the native root when
+// HERMES_HOME or a sticky profile is set. It is empty for an explicit --state, for any other home,
+// and when the keyed cursor already is the legacy file.
+func legacyHermesStatePath(path, dbPath string, userMode bool) string {
+	if strings.TrimSpace(path) != "" {
+		return ""
+	}
+	if dbPath == "" {
+		dbPath = hermessession.DefaultDBPath()
+	}
+	if !hermessession.SameHome(filepath.Dir(dbPath), filepath.Dir(hermessession.DefaultDBPath())) {
+		return ""
+	}
+	keyed := resolveHermesStatePath("", dbPath, userMode)
+	name := "hermes.json"
+	if hermesSystemStateDir(userMode) != "" {
+		name = "hermes-state.json"
+	}
+	if legacy := filepath.Join(filepath.Dir(keyed), name); legacy != keyed {
+		return legacy
+	}
+	return ""
+}
+
+// hermesSystemStateDir is the directory beside the system runtime log that a system-mode sweep keeps
+// its cursor in, or empty in user mode or when that log has no usable directory.
+func hermesSystemStateDir(userMode bool) string {
+	if userMode {
+		return ""
+	}
+	if dir := filepath.Dir(lifecycle.ResolveRuntimeLog(false, "").EffectiveLogPath); dir != "" && dir != "." {
+		return dir
+	}
+	return ""
 }

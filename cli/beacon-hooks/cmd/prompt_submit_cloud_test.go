@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/cloudshuttle"
 )
 
 func TestRunPromptSubmitUploadsCursorCloudTelemetryToS3(t *testing.T) {
@@ -47,6 +49,9 @@ func TestRunPromptSubmitUploadsCursorCloudTelemetryToS3(t *testing.T) {
 	defer server.Close()
 
 	tempDir := t.TempDir()
+	prevSandbox := cloudshuttle.SandboxDir
+	cloudshuttle.SandboxDir = tempDir
+	t.Cleanup(func() { cloudshuttle.SandboxDir = prevSandbox })
 	logPath := filepath.Join(tempDir, "runtime.jsonl")
 	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
 	t.Setenv("BEACON_CLOUD_SHUTTLE_STATE", filepath.Join(tempDir, "shuttle-state.json"))

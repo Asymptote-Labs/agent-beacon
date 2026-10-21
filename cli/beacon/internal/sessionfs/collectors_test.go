@@ -16,7 +16,7 @@ import (
 var backfillCollectors = []string{
 	"claudesession", "codexsession", "cursorsession", "opencodesession", "copilotsession",
 	"clinesession", "factorysession", "pisession", "primesession", "hermessession",
-	"dshsession", "fxsession", "groksession", "openclawsession",
+	"dshsession", "fxsession", "groksession", "openclawsession", "devinsession",
 }
 
 // directReads are the calls that would read a session store around the confinement.
@@ -35,6 +35,7 @@ var allowedDirectReads = map[string]bool{
 	"cursorsession.openSQLiteReadOnly.sql.Open":   true,
 	"hermessession.openSQLiteReadOnly.sql.Open":   true,
 	"opencodesession.openSQLiteReadOnly.sql.Open": true,
+	"devinsession.openSQLiteReadOnly.sql.Open":    true,
 	// Existence checks on project paths named inside a transcript, to infer the workspace. They
 	// read no content and the paths are usually outside the home.
 	"cursorsession.normalizeDirectoryCandidate.os.Stat":        true,

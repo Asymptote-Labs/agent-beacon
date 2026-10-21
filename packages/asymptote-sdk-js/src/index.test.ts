@@ -2,6 +2,8 @@ import { SpanStatusCode } from "@opentelemetry/api";
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
 import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage } from "node:http";
+import { Readable, Writable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -377,9 +379,15 @@ describe("Asymptote Observe SDK", () => {
     initialize({ spanExporter: exporter, disableDefaultExporter: true, disableBatch: true });
     class Stream {
       #interrupted = false;
+      #sent = false;
       async interrupt() { this.#interrupted = true; }
       get interrupted() { return this.#interrupted; }
-      async *[Symbol.asyncIterator]() { if (!this.#interrupted) yield "message"; }
+      async next(): Promise<IteratorResult<string>> {
+        if (this.#interrupted || this.#sent) return { value: undefined, done: true };
+        this.#sent = true;
+        return { value: "message", done: false };
+      }
+      [Symbol.asyncIterator]() { return this; }
     }
     const original = new Stream();
     const query = wrapClaudeAgentQuery(() => original);
@@ -444,6 +452,30 @@ describe("Asymptote Observe SDK", () => {
     await flush();
     expect(cleaned).toBe(true);
     expect(exporter.getFinishedSpans()).toHaveLength(1);
+  });
+
+  // An iterable with its own reading API is returned untouched: a wrapper would see only for-await,
+  // so reading it any other way would leave the span open and never export it.
+  it.each([
+    ["ReadableStream.getReader()", () => new ReadableStream({ start(c) { c.enqueue("x"); c.close(); } }), async (s: ReadableStream) => {
+      expect(s).toBeInstanceOf(ReadableStream);
+      await s.getReader().read();
+    }],
+    ["Readable.pipe()", () => Readable.from(["x"]), async (s: Readable) => {
+      expect(s).toBeInstanceOf(Readable);
+      await pipeline(s, new Writable({ write(_chunk, _encoding, done) { done(); } }));
+    }],
+  ])("returns an async iterable that is not an iterator as a value (%s)", async (_name, make, consume) => {
+    const exporter = new InMemorySpanExporter();
+    initialize({ spanExporter: exporter, disableDefaultExporter: true, disableBatch: true });
+    const original = make();
+    const sync = observe({ name: "sync" }, () => original)();
+    const promised = await observe({ name: "promised" }, async () => make())();
+    expect(sync).toBe(original);
+    await consume(sync as never);
+    await consume(promised as never);
+    await flush();
+    expect(exporter.getFinishedSpans().map(span => span.name).sort()).toEqual(["promised", "sync"]);
   });
   it("provides a tracer compatible with Vercel-style telemetry hooks", async () => {
     const exporter = new InMemorySpanExporter();

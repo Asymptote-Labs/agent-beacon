@@ -18,6 +18,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // Every test in this package runs with the local history pointed at a path that does not exist,
@@ -739,6 +740,89 @@ func TestHistoryRebuildsDerivedDataForANewProjection(t *testing.T) {
 	result, err := SearchTraces(path, TraceQuery{EventQuery: EventQuery{Q: "retained answer"}, ResultLevel: "event", Limit: 10})
 	if err != nil || result.TotalMatched != 1 {
 		t.Fatalf("search after rebuild = %#v err=%v", result, err)
+	}
+}
+
+func TestHistoryRebuildsVersion14AssistantCompletion(t *testing.T) {
+	line := []byte(`{"timestamp":"2026-10-01T10:00:02Z","event":{"id":"completed-answer","action":"agent.response.completed","category":"agent"},"harness":{"name":"chatgpt_web","collection_method":"otlp"},"session":{"id":"browser-session"},"message":"chatgpt_web assistant response completed","model":"gpt-5","gen_ai":{"output":{"messages":[{"role":"assistant","parts":[{"type":"text","content":"A uniquely retained browser answer."}]}]},"usage":{"input_tokens":10,"output_tokens":4}}}`)
+	path := traceStoreBlockedLog(t, [][]byte{line})
+	const traceID = "session:chatgpt_web:browser-session"
+	want, ok, err := ShowTrace(path, traceID, TraceQuery{Limit: 100})
+	if err != nil || !ok {
+		t.Fatalf("fresh ShowTrace ok=%v err=%v", ok, err)
+	}
+	withHistory(t)
+	optIn(t, path)
+	store, err := openHistoryStore(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var aggregate, storedLine string
+	if err := store.db.QueryRow(`SELECT aggregate FROM traces WHERE trace_key = ?`, traceID).Scan(&aggregate); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.db.QueryRow(`SELECT hex(line) FROM events`).Scan(&storedLine); err != nil {
+		t.Fatal(err)
+	}
+	var prior traceAggregateState
+	if err := json.Unmarshal([]byte(aggregate), &prior); err != nil {
+		t.Fatal(err)
+	}
+	prior.Summary.Title = "agent.response.completed"
+	prior.Summary.Preview = "chatgpt_web assistant response completed"
+	prior.Summary.LocalMessageCount = 0
+	prior.TitlePriority = 0
+	if _, err := store.db.Exec(`UPDATE traces SET aggregate = ?, hay = 'stale completion'`, mustJSON(t, prior)); err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`UPDATE events SET event_type = 'other', hay = 'stale completion'`,
+		`INSERT INTO event_fts (event_fts) VALUES ('rebuild')`,
+		`INSERT INTO trace_fts (trace_fts) VALUES ('rebuild')`,
+		`UPDATE meta SET value = '14' WHERE key = 'derivation_version'`,
+	} {
+		if _, err := store.db.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store.close()
+
+	got, ok, err := ShowTrace(path, traceID, TraceQuery{Limit: 100})
+	if err != nil || !ok {
+		t.Fatalf("upgraded ShowTrace ok=%v err=%v", ok, err)
+	}
+	if mustJSON(t, got) != mustJSON(t, want) {
+		t.Fatalf("version 14 projection was not rebuilt\n got %s\nwant %s", mustJSON(t, got), mustJSON(t, want))
+	}
+	if len(got.Events) != 1 || got.Events[0].Type != "agent_message" || got.Events[0].Content == nil || got.Events[0].Content.Text != "A uniquely retained browser answer." || got.Trace.LocalMessageCount != 1 {
+		t.Fatalf("completed answer was not projected: %+v", got)
+	}
+	messages := asymptoteobserve.TraceMessages(TraceBundleV1{Events: got.Events})
+	if len(messages) != 1 || messages[0].Role != "assistant" || messages[0].Text != "A uniquely retained browser answer." {
+		t.Fatalf("completed answer missing from chat: %+v", messages)
+	}
+	search, err := SearchTraces(path, TraceQuery{EventQuery: EventQuery{Q: "uniquely retained browser answer"}, ResultLevel: "event", Limit: 10})
+	if err != nil || search.TotalMatched != 1 {
+		t.Fatalf("completed answer search = %+v err=%v", search, err)
+	}
+	store, err = openHistoryStore(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.close()
+	if got := store.metaInt("derivation_version", 0); got != historyDerivationVersion || got <= 14 {
+		t.Fatalf("derivation version = %d, want current version above 14", got)
+	}
+	var count int
+	var eventType, unchangedLine string
+	if err := store.db.QueryRow(`SELECT count(*), event_type, hex(line) FROM events`).Scan(&count, &eventType, &unchangedLine); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || eventType != "agent_message" || unchangedLine != storedLine {
+		t.Fatalf("stored events changed: count=%d type=%q same-line=%v", count, eventType, unchangedLine == storedLine)
+	}
+	if again, ok, err := ShowTrace(path, traceID, TraceQuery{Limit: 100}); err != nil || !ok || mustJSON(t, again) != mustJSON(t, got) {
+		t.Fatalf("unchanged second read differs: ok=%v err=%v", ok, err)
 	}
 }
 

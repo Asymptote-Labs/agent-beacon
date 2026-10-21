@@ -63,8 +63,16 @@ func TestUploadNoopsWithoutCredentials(t *testing.T) {
 	}
 }
 
+func useSandbox(t *testing.T, dir string) {
+	t.Helper()
+	prev := SandboxDir
+	SandboxDir = dir
+	t.Cleanup(func() { SandboxDir = prev })
+}
+
 func TestResetFromEnvRemovesCloudRuntimeFiles(t *testing.T) {
 	dir := t.TempDir()
+	useSandbox(t, dir)
 	logPath := filepath.Join(dir, "runtime.jsonl")
 	statePath := filepath.Join(dir, "state.json")
 	for _, path := range []string{logPath, logPath + ".lock", statePath} {
@@ -83,6 +91,61 @@ func TestResetFromEnvRemovesCloudRuntimeFiles(t *testing.T) {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("%s still exists, stat err=%v", path, err)
 		}
+	}
+}
+
+// A target the environment supplies cannot select a log outside the sandbox directory, so a
+// repository cannot have a host's runtime log, every project's sessions, uploaded to its bucket.
+func TestMaybeUploadRefusesALogOutsideTheSandbox(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected upload: %s %s", r.Method, r.URL)
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	useSandbox(t, filepath.Join(dir, "sandbox"))
+	hostLog := filepath.Join(dir, "runtime.jsonl")
+	if err := os.WriteFile(hostLog, []byte("{\"event\":\"host\"}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEACON_ORIGIN", "cloud")
+	t.Setenv("BEACON_CLOUD_UPLOAD", "s3")
+	t.Setenv("BEACON_CLOUD_S3_BUCKET", "bucket")
+	t.Setenv("BEACON_CLOUD_S3_ENDPOINT", server.URL)
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIATEST")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")
+	t.Setenv("BEACON_RUN_ID", "run")
+	t.Setenv("BEACON_CLOUD_SHUTTLE_STATE", filepath.Join(dir, "state.json"))
+	for _, key := range []string{"BEACON_CLOUD_LOG_PATH", "BEACON_ENDPOINT_LOG"} {
+		t.Setenv(key, hostLog)
+		if err := MaybeUpload(context.Background(), true); err != nil {
+			t.Fatalf("%s: MaybeUpload returned error: %v", key, err)
+		}
+		t.Setenv(key, "")
+	}
+}
+
+// Local installs set BEACON_ENDPOINT_LOG outside the sandbox, and every local SessionStart, Stop
+// and SessionEnd reads the shuttle config, so the refusal notice is for cloud runs only.
+func TestConfigFromEnvIsSilentOutsideCloud(t *testing.T) {
+	dir := t.TempDir()
+	useSandbox(t, filepath.Join(dir, "sandbox"))
+	t.Setenv("BEACON_ORIGIN", "")
+	t.Setenv("BEACON_ENDPOINT_LOG", filepath.Join(dir, "runtime.jsonl"))
+	t.Setenv("BEACON_CLOUD_SHUTTLE_STATE", filepath.Join(dir, "state.json"))
+	captured, err := os.CreateTemp(dir, "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer captured.Close()
+	prev := os.Stderr
+	os.Stderr = captured
+	cfg := ConfigFromEnv()
+	os.Stderr = prev
+	if cfg.LogPath != filepath.Join(SandboxDir, defaultLogName) {
+		t.Fatalf("LogPath = %q, want the sandbox default", cfg.LogPath)
+	}
+	if out, err := os.ReadFile(captured.Name()); err != nil || len(out) != 0 {
+		t.Fatalf("stderr = %q (err %v), want nothing", out, err)
 	}
 }
 

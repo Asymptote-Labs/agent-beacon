@@ -1522,7 +1522,7 @@ function sessionRowHTML(session) {
     : `<span class="muted">No prompt captured</span>`;
   return `
     <tr class="row-link" data-session-id="${escapeHTML(session.id)}">
-      <td class="mono"><span class="cell-link">${escapeHTML(formatSessionID(session.id))}</span></td>
+      <td class="mono"><a class="cell-link" href="${escapeHTML(sessionPageURL(session.id))}">${escapeHTML(formatSessionID(session.id))}</a></td>
       <td>${badge(session.max_severity || "unknown", `severity-${session.max_severity || "unknown"}`)}${review ? `<br /><span class="muted">${escapeHTML(review)} review</span>` : ""}</td>
       <td>${sessionHarnessCell(session)}</td>
       <td class="col-message">
@@ -1586,7 +1586,8 @@ function bindShareRefreshCopy(scope = document) {
 function bindSessionRows(scope = document) {
   const rows = scope.matches?.("tr[data-session-id]") ? [scope] : Array.from(scope.querySelectorAll("tr[data-session-id]"));
   rows.forEach((row) => {
-    row.addEventListener("click", () => {
+    row.addEventListener("click", (event) => {
+      if (event.defaultPrevented || event.target.closest("a, button, input, select, textarea")) return;
       window.location.href = sessionPageURL(row.dataset.sessionId);
     });
   });

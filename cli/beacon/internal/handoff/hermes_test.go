@@ -10,7 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/hermessession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 var hermesUpdated = time.Date(2026, 9, 24, 11, 0, 0, 0, time.UTC)
@@ -138,6 +141,99 @@ func TestHermesSessionBuildsABrief(t *testing.T) {
 	}
 	if rendered := brief.Render(); !strings.Contains(rendered, "Hermes Agent") || !strings.Contains(rendered, "Reading it now.") {
 		t.Fatalf("the brief should name Hermes Agent and carry its reply:\n%s", rendered)
+	}
+}
+
+func TestHermesSessionUsageInShares(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		actualCost    float64
+		estimatedCost float64
+		wantCost      float64
+		usage         bool
+	}{
+		{"actual cost preferred", 0.125, 0.5, 0.125, true},
+		{"estimated cost fallback", 0, 0.5, 0.5, true},
+		{"zero usage", 0, 0, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs, path := hermesFixture(t)
+			want := asymptoteobserve.TraceUsageV1{}
+			if tc.usage {
+				want = asymptoteobserve.TraceUsageV1{
+					InputTokens: 100, OutputTokens: 25, CacheReadInputTokens: 10,
+					CacheCreationInputTokens: 5, ReasoningOutputTokens: 3, CostUSD: tc.wantCost,
+				}
+			}
+			db, err := sql.Open("sqlite", path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = db.Exec(`UPDATE sessions SET input_tokens = ?, output_tokens = ?,
+				cache_read_tokens = ?, cache_write_tokens = ?, reasoning_tokens = ?,
+				actual_cost_usd = ?, estimated_cost_usd = ? WHERE id = '20260924_100000_aaaaaa'`,
+				want.InputTokens, want.OutputTokens, want.CacheReadInputTokens,
+				want.CacheCreationInputTokens, want.ReasoningOutputTokens, tc.actualCost, tc.estimatedCost)
+			closeErr := db.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if closeErr != nil {
+				t.Fatal(closeErr)
+			}
+
+			sources := DefaultSources(dirs)
+			session, err := Find(sources, HarnessHermes, "20260924_100000_aaaaaa")
+			if err != nil {
+				t.Fatal(err)
+			}
+			events, err := Events(sources, session)
+			if err != nil {
+				t.Fatal(err)
+			}
+			actions := map[string]int{}
+			for _, event := range events {
+				actions[event.Event.Action]++
+			}
+			wantUsageEvents := 0
+			if tc.usage {
+				wantUsageEvents = 1
+			}
+			if actions["token.usage"] != wantUsageEvents {
+				t.Fatalf("usage events = %d, want %d; actions = %v", actions["token.usage"], wantUsageEvents, actions)
+			}
+			for _, action := range []string{"session.started", "prompt.submitted", "agent.message", "session.ended"} {
+				if actions[action] != 1 {
+					t.Errorf("%s events = %d, want 1", action, actions[action])
+				}
+			}
+
+			bundle := asymptoteobserve.BuildShareBundle(events, asymptoteobserve.ShareOptions{GeneratedAt: hermesUpdated})
+			if tc.usage {
+				if !reflect.DeepEqual(bundle.Summary.TokenUsage, &want) {
+					t.Errorf("share usage = %+v, want %+v", bundle.Summary.TokenUsage, want)
+				}
+			} else if bundle.Summary.TokenUsage != nil {
+				t.Errorf("zero-usage share = %+v, want no usage", bundle.Summary.TokenUsage)
+			}
+			// The share command uses these aggregate totals instead of the bundle's plain sum.
+			totals := tokens.Aggregate(events, tokens.Options{}).Totals
+			got := asymptoteobserve.TraceUsageV1{
+				InputTokens: totals.InputTokens, OutputTokens: totals.OutputTokens,
+				CacheReadInputTokens: totals.CacheReadInputTokens, CacheCreationInputTokens: totals.CacheCreationInputTokens,
+				ReasoningOutputTokens: totals.ReasoningOutputTokens, CostUSD: totals.CostUSD,
+			}
+			if got != want {
+				t.Errorf("aggregated share usage = %+v, want %+v", got, want)
+			}
+			again, err := Events(sources, session)
+			if err != nil || !reflect.DeepEqual(again, events) {
+				t.Errorf("repeated read changed events or identities: err=%v", err)
+			}
+			if _, err := os.Stat(filepath.Dir(hermessession.DefaultStatePath(filepath.Dir(path)))); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("reading a session created collection state: %v", err)
+			}
+		})
 	}
 }
 

@@ -133,8 +133,10 @@ var usageExpectation = map[string]struct {
 	// and NormalizeHarnessName passes all three through unchanged. Keying only "devin" left the
 	// other two unrecognized, which classified a Devin session that correctly reported no tokens
 	// as silent -- the one status this table exists to keep clean.
-	"devin":         {ExpectNone, "hook payloads carry no token counts"},
-	"devin-cli":     {ExpectNone, "hook payloads carry no token counts"},
+	"devin": {ExpectNone, "hook payloads carry no token counts"},
+	// Devin CLI's committed session store carries per-message metrics and the per-turn model,
+	// which the hook payload never sees -- same shape as DeepSeek Harness above.
+	"devin-cli":     {ExpectReported, "beacon endpoint devin sync reads per-message token metrics; hook payloads carry none"},
 	"devin-desktop": {ExpectNone, "Cascade/Windsurf hook payloads carry no token counts"},
 	"muse_code":     {ExpectNone, "usage arrives on PostLLMCall, which Beacon does not subscribe to"},
 	"qwen_code":     {ExpectNone, "Stop reports context occupancy, not per-call usage"},

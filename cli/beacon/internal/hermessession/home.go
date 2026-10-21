@@ -121,6 +121,18 @@ func nativeRoot(home string) string {
 	return filepath.Join(home, "."+name)
 }
 
+// DefaultProfile is the name Hermes gives the profile whose home is the root itself.
+const DefaultProfile = "default"
+
+// Profile names the Hermes profile whose home is dir: <root>/profiles/<name> is <name>, and any
+// other home is the default profile.
+func Profile(dir string) string {
+	if isProfileDir(dir) {
+		return filepath.Base(dir)
+	}
+	return DefaultProfile
+}
+
 // isProfileDir is the launcher's test for a HERMES_HOME that already selects a profile: its parent
 // directory is named "profiles".
 func isProfileDir(path string) bool {
@@ -147,6 +159,24 @@ func resolveExisting(path string) string {
 		}
 		rest = filepath.Join(filepath.Base(dir), rest)
 	}
+}
+
+// SameHome reports whether two Hermes home directories resolve to the same place.
+func SameHome(a, b string) bool {
+	return canonicalHome(a) == canonicalHome(b)
+}
+
+// canonicalHome is the form two spellings of one Hermes home share: absolute, with symlinks
+// resolved, and case-folded on Windows, whose paths are case-insensitive.
+func canonicalHome(dir string) string {
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	dir = resolveExisting(dir)
+	if runtime.GOOS == "windows" {
+		dir = strings.ToLower(dir)
+	}
+	return dir
 }
 
 // activeProfile reads the sticky profile name from <root>/active_profile. A missing, unreadable or

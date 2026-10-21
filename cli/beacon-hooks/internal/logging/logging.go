@@ -148,6 +148,10 @@ func (l *Logger) EndpointEventWithFidelity(action, category, severity, message, 
 	return nil
 }
 
+// ShareSettingsPath locates the user's share settings. It is never taken from the environment,
+// which a repository can supply; tests replace it.
+var ShareSettingsPath = shareauto.HookPath
+
 // requestShareOnce writes one session.share_requested event for the event's session when the person
 // turned auto-share on for its working directory (`beacon share auto enable`). It is the first event
 // of the session the hooks see -- SessionStart where the runtime has one -- and never more than one
@@ -173,7 +177,7 @@ func (l *Logger) requestShareOnce(event map[string]interface{}) {
 	if id == "" || dir == "" || name == "" {
 		return
 	}
-	decision := shareauto.ForHook(shareauto.DefaultPath(), dir)
+	decision := shareauto.ForHook(ShareSettingsPath(), dir)
 	if !decision.Enabled {
 		return
 	}

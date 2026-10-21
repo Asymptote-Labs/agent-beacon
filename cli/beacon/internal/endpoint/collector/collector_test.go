@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 )
 
@@ -29,6 +31,56 @@ func testConfig(t *testing.T) endpointconfig.Config {
 			HTTPPort:   14318,
 			SpoolPath:  filepath.Join(dir, "spool", "otlp.jsonl"),
 		},
+	}
+}
+
+// The direct HEC exporters send what they receive, so privacy has to run before the fanout. The
+// local writer redacts on its own, so a config without them keeps its pipelines unchanged.
+func TestPrivacyRunsBeforeHECFanoutForEverySignal(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		destinations *endpointconfig.Destinations
+		privacy      string
+		exporters    string
+	}{
+		{"hec", &endpointconfig.Destinations{
+			SplunkHEC: &endpointconfig.SplunkHEC{Endpoint: "https://splunk.example/services/collector", Token: "test-token"},
+			FalconHEC: &endpointconfig.FalconHEC{Endpoint: "https://falcon.example/api/v1/ingest/hec", Token: "test-token"},
+		}, "beacon_privacy,", "beaconjson,splunk_hec,falcon_hec"},
+		{"local only", nil, "", "beaconjson"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testConfig(t)
+			cfg.Destinations = tc.destinations
+			var rendered struct {
+				Processors map[string]any `yaml:"processors"`
+				Service    struct {
+					Pipelines map[string]struct {
+						Processors []string `yaml:"processors"`
+						Exporters  []string `yaml:"exporters"`
+					} `yaml:"pipelines"`
+				} `yaml:"service"`
+			}
+			if err := yaml.Unmarshal([]byte(ConfigYAML(cfg)), &rendered); err != nil {
+				t.Fatal(err)
+			}
+			if _, exists := rendered.Processors["beacon_privacy"]; exists != (tc.privacy != "") {
+				t.Fatalf("beacon_privacy declared = %v, want %v", exists, tc.privacy != "")
+			}
+			for _, signal := range []string{"logs", "traces", "metrics"} {
+				pipeline := rendered.Service.Pipelines[signal]
+				want := "memory_limiter," + tc.privacy + "batch"
+				if signal == "logs" {
+					want = "memory_limiter,claude_api_body," + tc.privacy + "batch"
+				}
+				if strings.Join(pipeline.Processors, ",") != want {
+					t.Fatalf("%s processor order = %v, want %s", signal, pipeline.Processors, want)
+				}
+				if strings.Join(pipeline.Exporters, ",") != tc.exporters {
+					t.Fatalf("%s fanout = %v", signal, pipeline.Exporters)
+				}
+			}
+		})
 	}
 }
 

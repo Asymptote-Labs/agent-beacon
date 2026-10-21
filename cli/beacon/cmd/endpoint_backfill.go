@@ -14,6 +14,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/copilotsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/cursorsession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/devinsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/dshsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
@@ -114,7 +115,11 @@ var endpointBackfillRunners = func() []endpointBackfillRunner {
 			return s.EventsEmitted, err
 		}},
 		{Name: "Hermes Agent", Sync: "beacon endpoint hermes sync", Run: func(r endpointBackfillRun) (int, error) {
-			s, err := hermessession.CollectOnce(hermessession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveHermesStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
+			s, err := hermessession.CollectOnce(hermessession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveHermesStatePath("", "", r.UserMode), LegacyStatePath: legacyHermesStatePath("", "", r.UserMode), Since: r.Since, Budget: r.Budget})
+			return s.EventsEmitted, err
+		}},
+		{Name: "Devin CLI", Sync: "beacon endpoint devin sync", Run: func(r endpointBackfillRun) (int, error) {
+			s, err := devinsession.CollectOnce(devinsession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveEndpointDevinStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget, LiveCoverage: endpointDevinLiveCoverage(r.LogPath)})
 			return s.EventsEmitted, err
 		}},
 		{Name: "DeepSeek Harness", Sync: "beacon endpoint dsh sync", Run: func(r endpointBackfillRun) (int, error) {

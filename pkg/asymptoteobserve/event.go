@@ -78,6 +78,9 @@ type HarnessInfo struct {
 	Version        string `json:"version,omitempty"`
 	ExecutablePath string `json:"executable_path,omitempty"`
 	ConfigPath     string `json:"config_path,omitempty"`
+	// Profile names the runtime profile the event came from, for runtimes that keep separate
+	// configuration and state per profile on one host.
+	Profile string `json:"profile,omitempty"`
 	// CollectionMethod records the mechanism that carried this event off the runtime.
 	// See the CollectionMethod* constants in provenance.go. Empty for events Beacon emits
 	// about itself, which no harness collected.
