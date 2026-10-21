@@ -158,6 +158,13 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
       .catch((err) => debugLog(client, "Beacon event queue failed", { error: String(err), type: value?.type }))
     return eventQueue
   }
+  // Only the caller times out; ordered delivery still governs session cleanup.
+  const enqueueDirect = (value) => {
+    const completed = enqueue(value)
+    let timer
+    const deadline = new Promise((resolve) => { timer = setTimeout(resolve, sendTimeoutMs) })
+    return Promise.race([completed, deadline]).finally(() => clearTimeout(timer))
+  }
   const rememberFilePath = (tool, args, sid, callID, includeShell = false) => {
     const paths = []
     if (isFileMutationTool(tool) && filePath(args)) paths.push(filePath(args))
@@ -248,7 +255,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
         messageRoles.set(output.message.id, "user")
         messageSessions.set(output.message.id, sessionID(input))
       }
-      await enqueue({
+      await enqueueDirect({
         type: "chat.message",
         session_id: sessionID(input),
         model: modelName(input),
@@ -258,7 +265,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
       })
     },
     "command.execute.before": async (input, output) => {
-      await enqueue(
+      await enqueueDirect(
         payload("command.execute.before", {
           session_id: sessionID(input),
           command_name: input?.command,
@@ -276,7 +283,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
         started_at: Date.now(),
       })
       rememberFilePath(input?.tool, output?.args || {}, sid, input?.callID)
-      await enqueue(
+      await enqueueDirect(
         payload("tool.execute.before", {
           session_id: sessionID(input),
           tool_name: input?.tool,
@@ -290,7 +297,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
       const args = input?.args || active?.args || {}
       const exitCode = output?.metadata?.exit ?? output?.metadata?.exitCode ?? output?.metadata?.exit_code
       rememberFilePath(input?.tool, args, sessionID(input), input?.callID, exitCode === 0)
-      await enqueue(
+      await enqueueDirect(
         payload("tool.execute.after", {
           session_id: sessionID(input),
           tool_name: input?.tool,
