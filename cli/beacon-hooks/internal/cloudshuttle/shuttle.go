@@ -30,8 +30,8 @@ import (
 )
 
 const (
-	defaultLogPath     = "/tmp/beacon/runtime.jsonl"
-	defaultStatePath   = "/tmp/beacon/shuttle-state.json"
+	defaultLogName     = "runtime.jsonl"
+	defaultStateName   = "shuttle-state.json"
 	defaultTokenURI    = "https://oauth2.googleapis.com/token"
 	defaultGCSEndpoint = "https://storage.googleapis.com"
 	defaultS3Region    = "us-east-1"
@@ -42,6 +42,11 @@ const (
 )
 
 var httpClient = http.DefaultClient
+
+// SandboxDir is the cloud sandbox's Beacon directory. The shuttle reads and writes only under it,
+// so an environment a repository supplies cannot select a host log to upload. Tests point it
+// elsewhere.
+var SandboxDir = "/tmp/beacon"
 var nowUTC = func() time.Time { return time.Now().UTC() }
 
 type Config struct {
@@ -87,7 +92,7 @@ type tokenResponse struct {
 }
 
 func ConfigFromEnv() Config {
-	statePath := firstEnvDefault(defaultStatePath, "BEACON_CLOUD_SHUTTLE_STATE")
+	statePath := inSandbox("state path", firstEnv("BEACON_CLOUD_SHUTTLE_STATE"), defaultStateName)
 	upload := cloudUploadFromEnv()
 	bucket := strings.TrimSpace(os.Getenv("BEACON_CLOUD_GCS_BUCKET"))
 	prefix := strings.Trim(strings.TrimSpace(os.Getenv("BEACON_CLOUD_GCS_PREFIX")), "/")
@@ -97,7 +102,7 @@ func ConfigFromEnv() Config {
 	}
 	return Config{
 		Upload:         upload,
-		LogPath:        firstEnvDefault(defaultLogPath, "BEACON_CLOUD_LOG_PATH", "BEACON_ENDPOINT_LOG", "BEACON_LOG_PATH", "BEACON_RUNTIME_LOG"),
+		LogPath:        inSandbox("log path", firstEnv("BEACON_CLOUD_LOG_PATH", "BEACON_ENDPOINT_LOG", "BEACON_LOG_PATH", "BEACON_RUNTIME_LOG"), defaultLogName),
 		StatePath:      statePath,
 		Bucket:         bucket,
 		Prefix:         prefix,
@@ -115,6 +120,27 @@ func ConfigFromEnv() Config {
 		IngestURL:      strings.TrimRight(firstEnv("BEACON_CLOUD_INGEST_URL"), "/"),
 		DeviceKey:      firstEnv("BEACON_CLOUD_DEVICE_KEY"),
 	}
+}
+
+// inSandbox is p when it lies under SandboxDir, else the default file there. A refused p is
+// reported on stderr, never stdout, which some runtimes add to the model's context, and only
+// under BEACON_ORIGIN=cloud: local installs always set BEACON_ENDPOINT_LOG outside the sandbox
+// and reach this through every SessionStart, Stop and SessionEnd, where the shuttle is inert.
+func inSandbox(label, p, name string) string {
+	fallback := filepath.Join(SandboxDir, name)
+	if p == "" {
+		return fallback
+	}
+	if filepath.IsAbs(p) {
+		rel, err := filepath.Rel(SandboxDir, p)
+		if err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return p
+		}
+	}
+	if strings.TrimSpace(os.Getenv("BEACON_ORIGIN")) == "cloud" {
+		fmt.Fprintf(os.Stderr, "beacon-hooks: cloud shuttle ignores %s %s outside %s; using %s\n", label, p, SandboxDir, fallback)
+	}
+	return fallback
 }
 
 func MaybeUpload(ctx context.Context, force bool) error {
@@ -628,10 +654,10 @@ func normalizeConfig(cfg Config) Config {
 		}
 	}
 	if cfg.LogPath == "" {
-		cfg.LogPath = defaultLogPath
+		cfg.LogPath = filepath.Join(SandboxDir, defaultLogName)
 	}
 	if cfg.StatePath == "" {
-		cfg.StatePath = defaultStatePath
+		cfg.StatePath = filepath.Join(SandboxDir, defaultStateName)
 	}
 	if cfg.GCSEndpoint == "" {
 		cfg.GCSEndpoint = defaultGCSEndpoint

@@ -146,6 +146,17 @@ func init() {
 	shareAutoEnableCmd.Flags().BoolVar(&shareAutoOpts.yes, "yes", false, "Enable public auto-share without asking")
 }
 
+// shareAutoHookMismatch says the hooks will not read path, or "" when they do. The CLI honors
+// BEACON_SHARE_SETTINGS_FILE, but the hooks never read it: their environment can come from a
+// repository.
+func shareAutoHookMismatch(path string) string {
+	hook := shareauto.HookPath()
+	if hook == "" || filepath.Clean(hook) == filepath.Clean(path) {
+		return ""
+	}
+	return fmt.Sprintf("the hooks read %s, not %s (%s), so this setting will not apply to hook sessions", hook, path, shareauto.PathEnv)
+}
+
 type shareAutoStatus struct {
 	SettingsPath    string `json:"settings_path"`
 	Directory       string `json:"directory"`
@@ -252,6 +263,9 @@ func shareAutoSet(cmd *cobra.Command, enable bool) error {
 	}
 	if err := shareauto.Save(path, settings); err != nil {
 		return err
+	}
+	if w := shareAutoHookMismatch(path); enable && w != "" {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
 	}
 	if project != "" {
 		if err := shareauto.SaveMarker(project, shareauto.Marker{Auto: shareauto.Auto{Enabled: enable, Visibility: visibility}}); err != nil {
@@ -375,6 +389,9 @@ func runShareAutoStatus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	status := buildShareAutoStatus(path, settings, dir)
+	if w := shareAutoHookMismatch(path); w != "" {
+		status.Warnings = append(status.Warnings, w)
+	}
 	out := cmd.OutOrStdout()
 	if shareAutoOpts.jsonOutput {
 		return json.NewEncoder(out).Encode(map[string]any{"ok": true, "data": status})
