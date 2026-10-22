@@ -4,10 +4,9 @@ import { initialize, observe, flush, shutdown, resolveExporterConfig } from "./i
 
 afterEach(async () => { await shutdown(); });
 
+// One real export proves the exporter posts to the resolved URL; the pathname rules themselves are
+// covered by the resolveExporterConfig tests below and in index.test.ts.
 for (const [name, suffix, expected] of [
-  ["base trailing slash", "/", "/v1/observe"],
-  ["complete path", "/v1/observe/", "/v1/observe"],
-  ["complete path with query", "/v1/observe?project=fixture", "/v1/observe?project=fixture"],
   ["base path with query", "/collector/?project=fixture", "/collector/v1/observe?project=fixture"],
 ]) {
   it(`exports to the expected loopback route for ${name}`, async () => {

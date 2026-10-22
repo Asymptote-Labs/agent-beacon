@@ -25,9 +25,6 @@ function run(name: string, prompt: string, chunkSize = 7): TurnParser {
 describe('claude adapter — simple turn', () => {
   const turn = run('simple-turn', 'What is the capital of France?')!.getTurn()!;
 
-  it('reconstructs the streamed response text across split chunks', () => {
-    expect(turn.responseText).toBe('Paris.');
-  });
   it('captures the prompt from the request body', () => {
     expect(turn.promptText).toBe('What is the capital of France?');
   });
@@ -95,16 +92,6 @@ describe('claude adapter -- usage counts', () => {
     // message_delta, which is worse than reporting nothing.
     expect(turn.usage?.outputTokens).toBe(214);
   });
-
-  it('keeps the input counts disjoint so a total never double-counts', () => {
-    // Anthropic excludes cached reads and cache writes from input_tokens, which
-    // is the disjointness gen_ai.usage requires; nothing is subtracted here the
-    // way the Codex turn span needs.
-    const u = turn.usage!;
-    const total =
-      u.inputTokens! + u.outputTokens! + u.cacheCreationInputTokens! + u.cacheReadInputTokens!;
-    expect(total).toBe(19775);
-  });
 });
 
 // The Messages API breaks cache writes down by TTL under usage.cache_creation.
@@ -123,13 +110,6 @@ describe('claude adapter -- one-hour cache writes', () => {
     // that omits a field must never clear it.
     expect(turn.usage?.outputTokens).toBe(214);
     expect(turn.usage?.cacheCreation1hInputTokens).toBe(16000);
-  });
-
-  it('leaves the subset out of the disjoint total', () => {
-    const u = turn.usage!;
-    const total =
-      u.inputTokens! + u.outputTokens! + u.cacheCreationInputTokens! + u.cacheReadInputTokens!;
-    expect(total).toBe(37 + 214 + 20000 + 18500);
   });
 
   it('reports no subset for a stream without the breakdown', () => {

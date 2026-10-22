@@ -107,23 +107,27 @@ func TestOmpContextEventMapsSkillListingAndMCPRoutesApart(t *testing.T) {
 
 // The call ID must survive onto whatever action the completion resolved to, not just onto the
 // generic tool.completed. A file.modified with no join key cannot be tied back to the tool.invoked
-// that proposed the edit, which is exactly the link an investigation follows.
+// that proposed the edit, which is exactly the link an investigation follows. A failure is the
+// case an investigation is most likely to be reading, so it gets the join key too.
 func TestPiFamilyToolCallIDSurvivesOntoFileAndCommandActions(t *testing.T) {
 	for _, runtime := range piFamilyRuntimes {
 		for _, tc := range []struct {
-			tool   string
-			args   map[string]interface{}
-			action string
+			tool    string
+			args    map[string]interface{}
+			isError bool
+			action  string
 		}{
-			{"edit", map[string]interface{}{"path": "/repo/main.go"}, "file.modified"},
-			{"write", map[string]interface{}{"path": "/repo/new.go"}, "file.created"},
-			{"read", map[string]interface{}{"path": "/repo/main.go"}, "file.read"},
-			{"bash", map[string]interface{}{"command": "ls"}, "command.executed"},
-			{"grep", map[string]interface{}{"pattern": "TODO"}, "tool.completed"},
+			{"edit", map[string]interface{}{"path": "/repo/main.go"}, false, "file.modified"},
+			{"write", map[string]interface{}{"path": "/repo/new.go"}, false, "file.created"},
+			{"read", map[string]interface{}{"path": "/repo/main.go"}, false, "file.read"},
+			{"bash", map[string]interface{}{"command": "ls"}, false, "command.executed"},
+			{"grep", map[string]interface{}{"pattern": "TODO"}, false, "tool.completed"},
+			{"bash", map[string]interface{}{"command": "false"}, true, "tool.failed"},
 		} {
-			t.Run(runtime.platform+"/"+tc.tool, func(t *testing.T) {
+			t.Run(runtime.platform+"/"+tc.action, func(t *testing.T) {
 				events := runtime.endpointEvents(map[string]interface{}{
 					"type": "tool_result", "toolName": tc.tool, "toolCallId": "call-9", "input": tc.args,
+					"isError": tc.isError,
 				}, "sess-1")
 				if len(events) != 1 || events[0].action != tc.action {
 					t.Fatalf("events = %v, want a single %s", events, tc.action)
@@ -133,25 +137,6 @@ func TestPiFamilyToolCallIDSurvivesOntoFileAndCommandActions(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-// A failed tool still gets the join key. A failure is the case an investigation is most likely to
-// be reading, and it is the one where the tool.invoked that preceded it matters most.
-func TestPiFamilyFailedToolKeepsTheToolCallID(t *testing.T) {
-	for _, runtime := range piFamilyRuntimes {
-		t.Run(runtime.platform, func(t *testing.T) {
-			events := runtime.endpointEvents(map[string]interface{}{
-				"type": "tool_result", "toolName": "bash", "toolCallId": "call-5",
-				"input": map[string]interface{}{"command": "false"}, "isError": true,
-			}, "sess-1")
-			if len(events) != 1 || events[0].action != "tool.failed" {
-				t.Fatalf("events = %v, want a single tool.failed", events)
-			}
-			if got := piFamilyToolCallID(t, events[0]); got != "call-5" {
-				t.Fatalf("gen_ai.tool.call.id = %q, want call-5", got)
-			}
-		})
 	}
 }
 

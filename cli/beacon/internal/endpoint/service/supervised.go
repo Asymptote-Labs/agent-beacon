@@ -194,7 +194,7 @@ func (b supervisedBackend) unload(userMode bool) error {
 		if !st.running() {
 			break
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(supervisedStopPoll)
 	}
 	if st.running() {
 		_ = proc.Kill()
@@ -202,6 +202,9 @@ func (b supervisedBackend) unload(userMode bool) error {
 	st.PID = 0
 	return b.write(userMode, st)
 }
+
+// supervisedStopPoll is how often unload re-checks a collector it asked to stop; tests shorten it.
+var supervisedStopPoll = 100 * time.Millisecond
 
 func (b supervisedBackend) restart(userMode bool) error {
 	if err := b.unload(userMode); err != nil {

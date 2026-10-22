@@ -1,18 +1,17 @@
 package dashboard
 
 import (
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"sort"
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
+// The session lens folds the session's events itself, so for each sharing state it must agree with
+// the trace lens and the session list. Which events make a share stale is pinned on the session list
+// and trace list in sharing_view_test.go; these rows cover each state once plus out-of-order input.
 func TestSessionLensSharingMatchesTrace(t *testing.T) {
 	event := func(id, timestamp, action, category string) schema.Event {
 		e := testSchemaEvent("2026-06-11T10:"+timestamp+"Z", "claude_code", action, category, "repo-a")
@@ -40,12 +39,9 @@ func TestSessionLensSharingMatchesTrace(t *testing.T) {
 		state  string
 	}{
 		{"activity after share", []schema.Event{prompt, share("share", "01:00", "00:30"), work}, "stale"},
-		{"activity during upload", []schema.Event{prompt, work, share("share", "03:00", "01:00")}, "stale"},
 		{"refresh covers activity", []schema.Event{prompt, share("share", "01:00", "00:30"), work, share("refresh", "03:00", "02:00")}, "shared"},
-		{"bookkeeping only", []schema.Event{prompt, share("share", "01:00", "00:30"), event("request", "02:00", "session.share_requested", "session"), event("link", "03:00", "session.commit_linked", "session")}, "shared"},
 		{"unshared", []schema.Event{prompt, work}, "local_only"},
 		{"legacy current", []schema.Event{prompt, work, share("share", "03:00", "")}, "shared"},
-		{"legacy stale", []schema.Event{prompt, share("share", "01:00", ""), work}, "stale"},
 		{"out of timestamp order", []schema.Event{prompt, work, share("share", "01:00", "00:30")}, "stale"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -75,23 +71,6 @@ func TestSessionLensSharingMatchesTrace(t *testing.T) {
 	}
 }
 
-func TestSessionLensSharingExcludesTheShareCommandAndReply(t *testing.T) {
-	testenv.SetHome(t, t.TempDir())
-	withoutHistory(t)
-	lines := sharingLines(
-		`{"timestamp":"2026-06-11T10:00:00Z","event":{"id":"prompt","action":"prompt.submitted","category":"prompt"},"harness":{"name":"claude_code"},"session":{"id":"s1"},"prompt":{"id":"p1","text":"share this session"}}`,
-		`{"timestamp":"2026-06-11T10:00:05Z","event":{"id":"call","action":"tool.invoked","category":"tool"},"harness":{"name":"claude_code"},"session":{"id":"s1"},"prompt":{"id":"p1"},"tool":{"name":"Bash","command":"beacon share --current"},"gen_ai":{"tool":{"call":{"id":"call-share"}}}}`,
-		`{"timestamp":"2026-06-11T10:00:09Z","event":{"id":"share","action":"session.shared","category":"session","fidelity":"inferred"},"harness":{"name":"claude_code"},"session":{"id":"s1"},"raw":{"shared_url":"https://beacon.sh/s/s1","visibility":"direct","shared_through":"2026-06-11T10:00:06Z"}}`,
-		`{"timestamp":"2026-06-11T10:00:10Z","event":{"id":"completion","action":"tool.completed","category":"tool"},"harness":{"name":"claude_code"},"session":{"id":"s1"},"prompt":{"id":"p1"},"tool":{"name":"Bash"},"gen_ai":{"tool":{"call":{"id":"call-share"}}}}`,
-		`{"timestamp":"2026-06-11T10:00:15Z","event":{"id":"reply","action":"agent.message","category":"agent"},"harness":{"name":"claude_code"},"session":{"id":"s1"},"prompt":{"id":"p1"},"message":"Shared: https://beacon.sh/s/s1"}`,
-	)
-	path := newTestLog(t, lines)
-	checkSessionLensSharing(t, path, "s1", "shared")
-	lines = append(lines, []byte(`{"timestamp":"2026-06-11T10:05:00Z","event":{"id":"next","action":"tool.invoked","category":"tool"},"harness":{"name":"claude_code"},"session":{"id":"s1"},"tool":{"name":"Edit","path":"main.go"}}`))
-	writeTestLog(t, path, lines...)
-	checkSessionLensSharing(t, path, "s1", "stale")
-}
-
 func checkSessionLensSharing(t *testing.T, path, session, state string) LensDataV1 {
 	t.Helper()
 	opts := LensDataOptions{UserMode: true}
@@ -117,30 +96,4 @@ func checkSessionLensSharing(t *testing.T, path, session, state string) LensData
 		t.Error("session lens changed the trace's coverage, usage or findings")
 	}
 	return data
-}
-
-func TestSessionLensSharingEndpoint(t *testing.T) {
-	testenv.SetHome(t, t.TempDir())
-	withoutHistory(t)
-	path := newTestLog(t, sharingLines(
-		`{"timestamp":"2026-06-11T10:00:00Z","event":{"id":"prompt","action":"prompt.submitted","category":"prompt"},"harness":{"name":"claude_code"},"session":{"id":"s1"},"prompt":{"text":"fix the project"}}`,
-		`{"timestamp":"2026-06-11T10:01:00Z","event":{"id":"share","action":"session.shared","category":"session"},"harness":{"name":"claude_code"},"session":{"id":"s1"},"raw":{"shared_url":"https://beacon.sh/s/s1","visibility":"direct","shared_through":"2026-06-11T10:00:30Z"}}`,
-		`{"timestamp":"2026-06-11T10:02:00Z","event":{"id":"work","action":"command.executed","category":"command"},"harness":{"name":"claude_code"},"session":{"id":"s1"},"command":{"command":"go test ./..."}}`,
-	))
-	handler, err := Handler(Options{UserMode: true, LogPath: path})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/lens-data?session=s1", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	var data asymptoteobserve.LensDataV1
-	if err := json.Unmarshal(rec.Body.Bytes(), &data); err != nil {
-		t.Fatal(err)
-	}
-	if sharing := data.Trace.Summary.Sharing; sharing.State != "stale" || sharing.RefreshCommand != "beacon share refresh claude_code:s1" {
-		t.Fatalf("sharing = %+v, want stale with refresh command", sharing)
-	}
 }

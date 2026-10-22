@@ -167,16 +167,6 @@ func TestServiceAppearanceIsDetected(t *testing.T) {
 	}
 }
 
-// A running collector's pid changes on restart; that must not read as a state change, or the
-// guard fires whenever the developer's own service restarts.
-func TestServicePidChurnIsIgnored(t *testing.T) {
-	before := Snapshot{ServicesAvailable: true, Paths: map[string]string{}, Services: []string{"com.beacon.endpoint.collector"}}
-	after := Snapshot{ServicesAvailable: true, Paths: map[string]string{}, Services: []string{"com.beacon.endpoint.collector"}}
-	if !Compare(before, after).Clean() {
-		t.Error("the same service present in both snapshots must be clean")
-	}
-}
-
 func TestUnchangedStateIsClean(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "config.json")

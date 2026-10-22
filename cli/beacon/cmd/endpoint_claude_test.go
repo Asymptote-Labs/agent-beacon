@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudesession"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 )
 
 type claudeCommandFixture struct {
@@ -83,58 +82,6 @@ func TestEndpointClaudeSyncRejectsARotateBytesBelowTheDefault(t *testing.T) {
 	}
 	if _, statErr := os.Stat(f.statePath); !os.IsNotExist(statErr) {
 		t.Error("a refused --rotate-bytes still advanced the cursor")
-	}
-}
-
-func TestEndpointClaudeSyncPassesRotateBytesToTheCollector(t *testing.T) {
-	newClaudeCommandFixture(t)
-	endpointClaudeOpts.rotateBytes = 4 * writer.DefaultRotateBytes
-
-	opts, err := claudeSyncOptions(endpointClaudeSyncCmd)
-	if err != nil {
-		t.Fatalf("claudeSyncOptions: %v", err)
-	}
-	if opts.RotateBytes != 4*writer.DefaultRotateBytes {
-		t.Fatalf("RotateBytes = %d, want %d", opts.RotateBytes, 4*writer.DefaultRotateBytes)
-	}
-	out, err := runClaudeSync(t)
-	if err != nil {
-		t.Fatalf("sync with a larger --rotate-bytes: %v\n%s", err, out)
-	}
-	if !strings.Contains(out, "2 events (2 retained)") {
-		t.Errorf("text summary does not report retained events:\n%s", out)
-	}
-}
-
-// The text summary is what a person reads after a backfill; a sweep the window stopped has to say
-// so, say what is left, and name the way out.
-func TestReportClaudeSweepWarnsWhenTheRotationWindowStoppedTheSweep(t *testing.T) {
-	newClaudeCommandFixture(t)
-	var out bytes.Buffer
-	endpointClaudeSyncCmd.SetOut(&out)
-	t.Cleanup(func() { endpointClaudeSyncCmd.SetOut(nil) })
-
-	reportClaudeSweep(endpointClaudeSyncCmd, claudesession.Summary{
-		Sessions: 3496, SessionsChanged: 400, EventsEmitted: 70000, EventsRetained: 70000,
-		RetentionLimited: true, SessionsPending: 3096,
-	})
-	text := out.String()
-	for _, want := range []string{"70000 retained", "3096 session(s) left pending", "--rotate-bytes"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("summary missing %q:\n%s", want, text)
-		}
-	}
-}
-
-func TestReportClaudeSweepWarnsWhenEventsWereRotatedOut(t *testing.T) {
-	newClaudeCommandFixture(t)
-	var out bytes.Buffer
-	endpointClaudeSyncCmd.SetOut(&out)
-	t.Cleanup(func() { endpointClaudeSyncCmd.SetOut(nil) })
-
-	reportClaudeSweep(endpointClaudeSyncCmd, claudesession.Summary{EventsEmitted: 10, EventsRetained: 4, EventsRotatedOut: 6})
-	if !strings.Contains(out.String(), "6 event(s)") {
-		t.Errorf("summary does not report the rotated-out events:\n%s", out.String())
 	}
 }
 

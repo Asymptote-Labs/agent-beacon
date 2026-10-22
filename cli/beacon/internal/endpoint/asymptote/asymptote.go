@@ -77,10 +77,6 @@ var pack = siempack.Pack{
 // mustRead returns the embedded asset at path or panics. Retained for test use.
 func mustRead(path string) string { return pack.MustRead(path) }
 
-// filesFromFS builds the file list from the supplied FS; tests use it to inject
-// read-error conditions.
-func filesFromFS(fsys fs.FS) ([]File, error) { return pack.WithFS(fsys).Files() }
-
 // Files returns all pack files, propagating any embedded asset read error.
 func Files() ([]File, error) { return pack.Files() }
 

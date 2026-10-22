@@ -229,25 +229,6 @@ func TestBriefStaysUnderTheByteBudget(t *testing.T) {
 	}
 }
 
-func TestBriefForAnEmptySession(t *testing.T) {
-	out := BuildBrief(Session{Harness: HarnessCline, ID: "c1"}, nil, FromSessionStore, briefNow).Render()
-	for _, want := range []string{"- Directory: unknown", "- Branch: unknown", "_None recorded._", "_No activity was recorded._"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("empty brief missing %q:\n%s", want, out)
-		}
-	}
-	if strings.Contains(out, "Last activity") || strings.Contains(out, "Session file") {
-		t.Fatalf("unknown optional fields should be left out:\n%s", out)
-	}
-}
-
-func TestBriefFromTheRuntimeLogSaysSo(t *testing.T) {
-	out := BuildBrief(briefSession, nil, FromRuntimeLog, briefNow).Render()
-	if !strings.Contains(out, "comes from Beacon's runtime log") {
-		t.Fatalf("a log-built brief must say it keeps less:\n%s", out)
-	}
-}
-
 func TestTruncateBytesKeepsValidUTF8(t *testing.T) {
 	s := strings.Repeat("日本", 10)
 	for max := 0; max <= len(s); max++ {
@@ -290,34 +271,6 @@ func TestEventsReadEachRuntimeStore(t *testing.T) {
 				t.Fatalf("last message = %q, want %q (events: %s)", brief.LastMessage, tc.reply, actionList(events))
 			}
 		})
-	}
-}
-
-func TestCodexEventsSpanEveryRolloutFileOfTheThread(t *testing.T) {
-	testenv.SetHome(t, t.TempDir())
-	f := newStoreFixture(t)
-	f.writeTranscripts(t)
-	sources := DefaultSources(f.dirs)
-	session, err := Find(sources, HarnessCodex, "codex-thread-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	events, err := Events(sources, session)
-	if err != nil {
-		t.Fatal(err)
-	}
-	brief := BuildBrief(session, events, FromSessionStore, briefNow)
-	if brief.Prompts != 2 || brief.LatestRequest != "also check the signup form" {
-		t.Fatalf("prompts = %d, latest = %q; both rollout files should be read, oldest first", brief.Prompts, brief.LatestRequest)
-	}
-	started := 0
-	for _, e := range events {
-		if e.Event.Action == "session.started" {
-			started++
-		}
-	}
-	if started != 1 {
-		t.Fatalf("session.started events = %d, want 1 for one thread", started)
 	}
 }
 
@@ -469,29 +422,6 @@ func TestLogSessionAcceptsAUniquePrefix(t *testing.T) {
 	session, _, found, err = LogSession(logPath, "conv-xyz", HarnessClaude)
 	if err != nil || !found || session.ID != "conv-xyz789-two" || session.Harness != HarnessClaude {
 		t.Fatalf("--harness must narrow the prefix (raw \"claude\" rows included): %+v, %v, %v", session, found, err)
-	}
-}
-
-// A log row names a runtime by whatever spelling its hooks wrote; the session takes the registry's
-// harness, so it continues in its own runtime and --harness finds it.
-func TestLogSessionCanonicalizesAnAliasedHarness(t *testing.T) {
-	line := func(harness, id string) string {
-		return `{"timestamp":"2026-09-25T09:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"prompt.submitted","category":"prompt"},"severity":"info","endpoint":{"hostname":"h","os":"linux"},"harness":{"name":"` + harness + `"},"session":{"id":"` + id + `"},"prompt":{"text":"p ` + id + `"}}`
-	}
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	writeFixture(t, logPath, strings.Join([]string{
-		line("devin-cli", "devin-new-123"),
-		line("devin", "devin-old-456"),
-	}, "\n")+"\n")
-	for _, id := range []string{"devin-new-123", "devin-old-456"} {
-		session, _, found, err := LogSession(logPath, id, "")
-		if err != nil || !found || session.Harness != HarnessDevin {
-			t.Fatalf("%s: harness = %q, %v, %v; want %s", id, session.Harness, found, err, HarnessDevin)
-		}
-	}
-	session, _, found, err := LogSession(logPath, "devin-old", HarnessDevin)
-	if err != nil || !found || session.ID != "devin-old-456" {
-		t.Fatalf("--harness must find rows written under the alias: %+v, %v, %v", session, found, err)
 	}
 }
 

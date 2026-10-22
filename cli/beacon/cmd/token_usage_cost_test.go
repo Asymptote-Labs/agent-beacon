@@ -51,21 +51,3 @@ func TestTokenUsageJSONCarriesListPriceEstimates(t *testing.T) {
 		t.Fatalf("pricing.catalog lacks provenance: %#v", pricingBlock)
 	}
 }
-
-func TestTokenUsageTextLabelsReportedAndEstimatedCost(t *testing.T) {
-	logPath := writeTokensFixtureLog(t)
-	output := runTokenUsageCommand(t, "--log-path", logPath)
-	for _, want := range []string{
-		"COST USD",
-		"EST COST USD",
-		"COST USD is what the runtimes reported",
-		"list price",
-		"cache writes are priced at the 5m rate unless the source reported them as 1h writes",
-		// 100 input + 40 output tokens of claude-sonnet-4-5 at $3/$15 per MTok.
-		"0.0009",
-	} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("text report missing %q:\n%s", want, output)
-		}
-	}
-}

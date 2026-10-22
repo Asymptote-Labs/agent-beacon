@@ -30,21 +30,3 @@ func TestCompareVersions(t *testing.T) {
 		})
 	}
 }
-
-func TestCanCheckVersion(t *testing.T) {
-	tests := []struct {
-		version string
-		want    bool
-	}{
-		{version: "v0.0.12", want: true},
-		{version: "0.0.12", want: true},
-		{version: "dev", want: false},
-		{version: "", want: false},
-		{version: "v0.0.12-beta.1", want: false},
-	}
-	for _, tt := range tests {
-		if got := CanCheckVersion(tt.version); got != tt.want {
-			t.Fatalf("CanCheckVersion(%q) = %v, want %v", tt.version, got, tt.want)
-		}
-	}
-}

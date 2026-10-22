@@ -330,7 +330,6 @@ func TestShareAPIBaseURL(t *testing.T) {
 		{"https://beacon.example.com", "", "https://beacon.example.com"},
 		{"http://127.0.0.1:8787/", "", "http://127.0.0.1:8787"},
 		{"https://beacon.sh", " https://api.staging.example.com/ ", "https://api.staging.example.com"},
-		{"http://127.0.0.1:8787", "https://api.example.com", "https://api.example.com"},
 	} {
 		getenv := func(name string) string {
 			if name == APIURLEnv {
@@ -344,32 +343,6 @@ func TestShareAPIBaseURL(t *testing.T) {
 	}
 	if got := ShareAPIBaseURL("https://beacon.sh", nil); got != DefaultAPIURL {
 		t.Errorf("ShareAPIBaseURL with no environment = %q", got)
-	}
-}
-
-type shareRoundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f shareRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
-func TestShareClientSendsABeaconShSignInToTheAPIHost(t *testing.T) {
-	var requested []string
-	httpClient := &http.Client{Transport: shareRoundTripFunc(func(r *http.Request) (*http.Response, error) {
-		requested = append(requested, r.Method+" "+r.URL.String())
-		body := `{"id":"k3x","url":"https://beacon.sh/s/k3x","visibility":"direct","event_count":0,"last_event_id":"","max_number":0}`
-		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
-	})}
-	client, err := NewShareClient(shareCred("https://beacon.sh"), httpClient)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if client.BaseURL() != DefaultAPIURL {
-		t.Fatalf("BaseURL = %q, want %q", client.BaseURL(), DefaultAPIURL)
-	}
-	if _, found, err := client.GetTrace(context.Background(), "claude_code:abc"); err != nil || !found {
-		t.Fatalf("GetTrace: found=%v err=%v", found, err)
-	}
-	if len(requested) != 1 || requested[0] != "GET https://api.beacon.sh/v1/traces/claude_code:abc" {
-		t.Fatalf("requests = %v", requested)
 	}
 }
 

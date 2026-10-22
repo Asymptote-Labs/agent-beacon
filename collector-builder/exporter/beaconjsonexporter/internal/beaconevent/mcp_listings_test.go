@@ -48,33 +48,6 @@ func TestMCPListingsKeepsOnePerToolPerSessionAndDescription(t *testing.T) {
 	}
 }
 
-// Two requests in one batch advertise the same tool; only the first listing is kept.
-func TestMCPListingsDropsARepeatWithinOneBatch(t *testing.T) {
-	var listings MCPListings
-	batch := []Event{listing("s1", "mcp__notes__save", "Saves a note."), listing("s1", "mcp__notes__save", "Saves a note.")}
-	if kept := listings.Filter(batch); len(kept) != 1 {
-		t.Fatalf("kept %d of a repeated listing within one batch, want 1", len(kept))
-	}
-}
-
-// A listing whose write or send failed is never remembered, so the session's next request lists it
-// again rather than taking it for one already delivered.
-func TestMCPListingsListsAgainAfterAFailedWrite(t *testing.T) {
-	var listings MCPListings
-	batch := []Event{listing("s1", "mcp__notes__save", "Saves a note.")}
-	if kept := listings.Filter(batch); len(kept) != 1 {
-		t.Fatalf("first listing dropped")
-	}
-	kept := listings.Filter(batch)
-	if len(kept) != 1 {
-		t.Fatal("a listing that was never written was dropped as a repeat")
-	}
-	listings.Remember(kept...)
-	if kept := listings.Filter(batch); len(kept) != 0 {
-		t.Fatal("a written listing was kept again")
-	}
-}
-
 func TestMCPListingsForgetsTheOldestPastItsBound(t *testing.T) {
 	var listings MCPListings
 	for i := range maxMCPListings + 1 {

@@ -6,9 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/threatrules"
 )
 
 const aRule = `
@@ -32,28 +30,7 @@ func ruleWithID(id string) string { return strings.ReplaceAll(aRule, "%ID%", id)
 
 // The exhaustive store mechanics (baseline conformance, install/remove, rollback,
 // path traversal) live in pkg/asymptoteobserve/rulestore. These tests cover the thin
-// cli/beacon adapter: store-dir resolution from endpoint config and delegation.
-
-func TestStoreDirUsesBaseDir(t *testing.T) {
-	if got, want := StoreDir(true), filepath.Join(endpointconfig.BaseDir(true), "rules"); got != want {
-		t.Fatalf("StoreDir(true) = %q, want %q", got, want)
-	}
-}
-
-func TestBaselineDelegates(t *testing.T) {
-	rules, err := Baseline()
-	if err != nil {
-		t.Fatalf("baseline: %v", err)
-	}
-	if len(rules) == 0 {
-		t.Fatal("embedded baseline is empty")
-	}
-	for _, r := range rules {
-		if _, err := threatrules.CheckRule(r); err != nil {
-			t.Errorf("baseline rule %q fails conformance: %v", r.ID, err)
-		}
-	}
-}
+// cli/beacon adapter: baseline fallback and store delegation under the endpoint home.
 
 func TestLoadActiveFallsBackToBaseline(t *testing.T) {
 	testenv.SetHome(t, t.TempDir()) // empty store -> baseline

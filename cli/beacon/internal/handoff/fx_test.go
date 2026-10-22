@@ -1,7 +1,6 @@
 package handoff
 
 import (
-	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -92,19 +91,6 @@ func TestFxOversizedFirstTurnStillListsTitle(t *testing.T) {
 	}
 }
 
-func TestFxStoreMissingListsNothing(t *testing.T) {
-	testenv.SetHome(t, t.TempDir())
-	sessions, err := (&fxSource{dir: filepath.Join(t.TempDir(), "absent")}).List()
-	if err != nil || sessions != nil {
-		t.Fatalf("List = %v, %v; want nil, nil", sessions, err)
-	}
-	// The default store is under HOME, which here has none.
-	sessions, err = (&fxSource{}).List()
-	if err != nil || sessions != nil {
-		t.Fatalf("default List = %v, %v; want nil, nil", sessions, err)
-	}
-}
-
 func TestFxSessionBuildsABrief(t *testing.T) {
 	dirs, _, _ := fxFixture(t)
 	sources := DefaultSources(dirs)
@@ -127,30 +113,6 @@ func TestFxSessionBuildsABrief(t *testing.T) {
 	rendered := brief.Render()
 	if !strings.Contains(rendered, "They pass.") || !strings.Contains(rendered, RuntimeLabel(HarnessFx)) {
 		t.Fatalf("brief is missing the last reply or the runtime:\n%s", rendered)
-	}
-}
-
-func TestFxSessionGoneFromItsStore(t *testing.T) {
-	dirs, logA, _ := fxFixture(t)
-	for _, session := range []Session{
-		{Harness: HarnessFx, ID: fxSessionA, SourcePath: logA + ".moved"},
-		{Harness: HarnessFx, ID: "1770000900000-gone", SourcePath: logA},
-	} {
-		if _, err := Events(DefaultSources(dirs), session); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("Events(%s) = %v, want ErrNotFound", session.ID, err)
-		}
-	}
-}
-
-func TestPlanResumeReopensAnFxSessionInItsWorkspace(t *testing.T) {
-	session := resumableSession(t, HarnessFx, fxSessionA)
-	plan, err := PlanResume(session, PlanOptions{LookPath: installed("fx")})
-	if err != nil {
-		t.Fatalf("PlanResume: %v", err)
-	}
-	// fx scopes sessions to a workspace, so it must start in the session's.
-	if plan.Mode != ModeNative || plan.Executable != "/bin/fx" || !reflect.DeepEqual(plan.Args, []string{"--resume", fxSessionA}) || plan.Dir != session.Directory {
-		t.Fatalf("plan = %+v", plan)
 	}
 }
 

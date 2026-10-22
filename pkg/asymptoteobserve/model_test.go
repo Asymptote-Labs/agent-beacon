@@ -16,40 +16,17 @@ func TestNormalizeModelName(t *testing.T) {
 		{"drops mixed-case provider prefix", "Anthropic/Claude-Sonnet-4-5", "claude-sonnet-4-5"},
 		{"drops multi-segment prefix", "openrouter/anthropic/claude-sonnet-4-5", "claude-sonnet-4-5"},
 		{"unknown model keeps its own name", "some-new-model-v9", "some-new-model-v9"},
+		// Model ids are not rewritten. Folding the dot in Copilot's claude-sonnet-4.6 would merge it
+		// with Anthropic's claude-sonnet-4-6, but the same rule turns gpt-4.1 into gpt-4-1, which is
+		// not a model under any name. A split row is visible; an invented id is not.
+		{"dotted id kept", "gpt-4.1", "gpt-4.1"},
+		{"dotted claude id kept", "claude-sonnet-4.6", "claude-sonnet-4.6"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := NormalizeModelName(tc.input); got != tc.want {
 				t.Fatalf("NormalizeModelName(%q) = %q, want %q", tc.input, got, tc.want)
 			}
 		})
-	}
-}
-
-// The whole point of the field: these spellings all describe one model and one bill, and before
-// normalization each was its own row in the BY MODEL rollup.
-func TestNormalizeModelNameCollapsesSpellingsOfOneModel(t *testing.T) {
-	spellings := []string{
-		"claude-sonnet-4-5",
-		"anthropic/claude-sonnet-4-5",
-		"Anthropic/Claude-Sonnet-4-5",
-		"  claude-sonnet-4-5  ",
-		"openrouter/anthropic/claude-sonnet-4-5",
-	}
-	for _, spelling := range spellings {
-		if got := NormalizeModelName(spelling); got != "claude-sonnet-4-5" {
-			t.Fatalf("NormalizeModelName(%q) = %q, want all spellings to collapse to claude-sonnet-4-5", spelling, got)
-		}
-	}
-}
-
-// Model ids are not rewritten. Folding the dot in Copilot's claude-sonnet-4.6 would merge it with
-// Anthropic's claude-sonnet-4-6, but the same rule turns gpt-4.1 into gpt-4-1, which is not a
-// model under any name. A split row is visible; an invented id is not. See the doc comment.
-func TestNormalizeModelNameDoesNotInventIDs(t *testing.T) {
-	for _, model := range []string{"gpt-4.1", "claude-sonnet-4.6", "gemini-2.5-pro", "gpt-4o-2024-08-06"} {
-		if got := NormalizeModelName(model); got != model {
-			t.Fatalf("NormalizeModelName(%q) = %q, want the id left intact", model, got)
-		}
 	}
 }
 

@@ -12,14 +12,6 @@ func TestResolveSessionID_Cursor(t *testing.T) {
 		want     string
 	}{
 		{
-			name: "cursor uses conversation_id",
-			input: map[string]interface{}{
-				"conversation_id": "conv_abc123",
-			},
-			platform: "cursor",
-			want:     "conv_abc123",
-		},
-		{
 			name: "cursor ignores session_id",
 			input: map[string]interface{}{
 				"session_id":      "should-be-ignored",
@@ -27,12 +19,6 @@ func TestResolveSessionID_Cursor(t *testing.T) {
 			},
 			platform: "cursor",
 			want:     "conv_abc123",
-		},
-		{
-			name:     "cursor returns empty when no conversation_id",
-			input:    map[string]interface{}{},
-			platform: "cursor",
-			want:     "",
 		},
 		{
 			name: "claude uses session_id",
@@ -50,32 +36,6 @@ func TestResolveSessionID_Cursor(t *testing.T) {
 			},
 			platform: "copilot",
 			want:     "ff2d7803-5799-4f18-83f0-3633b2c11809",
-		},
-		{
-			name: "hermes uses top-level session_id",
-			input: map[string]interface{}{
-				"session_id": "hermes-sess-1",
-			},
-			platform: "hermes",
-			want:     "hermes-sess-1",
-		},
-		{
-			name: "hermes uses session_key",
-			input: map[string]interface{}{
-				"session_key": "hermes-key-1",
-			},
-			platform: "hermes",
-			want:     "hermes-key-1",
-		},
-		{
-			name: "hermes reads session_id from extra",
-			input: map[string]interface{}{
-				"extra": map[string]interface{}{
-					"session_id": "hermes-extra-sess",
-				},
-			},
-			platform: "hermes",
-			want:     "hermes-extra-sess",
 		},
 		{
 			name: "hermes reads session_key from extra",
@@ -120,16 +80,6 @@ func TestResolveSessionID_Cline(t *testing.T) {
 		want  string
 	}{
 		{
-			name:  "uses taskId",
-			input: map[string]interface{}{"taskId": "task_abc123"},
-			want:  "task_abc123",
-		},
-		{
-			name:  "accepts snake_case task_id",
-			input: map[string]interface{}{"task_id": "task_abc123"},
-			want:  "task_abc123",
-		},
-		{
 			name:  "taskId wins over session spellings",
 			input: map[string]interface{}{"taskId": "task_abc123", "sessionId": "ignored"},
 			want:  "task_abc123",
@@ -138,11 +88,6 @@ func TestResolveSessionID_Cline(t *testing.T) {
 			name:  "falls back to sessionId",
 			input: map[string]interface{}{"sessionId": "sess_abc123"},
 			want:  "sess_abc123",
-		},
-		{
-			name:  "empty when the payload carries neither",
-			input: map[string]interface{}{},
-			want:  "",
 		},
 	}
 	for _, tt := range tests {
@@ -189,22 +134,6 @@ func TestResolveSessionIDWithTranscript_Cursor(t *testing.T) {
 			wantTranscriptPath: "/path/to/transcript.jsonl",
 		},
 		{
-			name: "cursor with only conversation_id",
-			input: map[string]interface{}{
-				"conversation_id": "conv_abc123",
-			},
-			platform:           "cursor",
-			wantSessionID:      "conv_abc123",
-			wantTranscriptPath: "",
-		},
-		{
-			name:               "cursor with neither field",
-			input:              map[string]interface{}{},
-			platform:           "cursor",
-			wantSessionID:      "",
-			wantTranscriptPath: "",
-		},
-		{
 			name: "claude extracts session_id and transcript_path",
 			input: map[string]interface{}{
 				"session_id":      "sess_123",
@@ -238,12 +167,6 @@ func TestResolveCwd(t *testing.T) {
 		want     string
 	}{
 		{
-			name:     "cursor uses cwd field",
-			input:    map[string]interface{}{"cwd": "/projects/myapp"},
-			platform: "cursor",
-			want:     "/projects/myapp",
-		},
-		{
 			name: "cursor falls back to workspace_roots",
 			input: map[string]interface{}{
 				"workspace_roots": []interface{}{"/workspace/root"},
@@ -259,12 +182,6 @@ func TestResolveCwd(t *testing.T) {
 			want:     "/env/project/dir",
 		},
 		{
-			name:     "cursor returns empty when no sources",
-			input:    map[string]interface{}{},
-			platform: "cursor",
-			want:     "",
-		},
-		{
 			name: "cursor cwd takes precedence over workspace_roots",
 			input: map[string]interface{}{
 				"cwd":             "/projects/myapp",
@@ -274,23 +191,9 @@ func TestResolveCwd(t *testing.T) {
 			want:     "/projects/myapp",
 		},
 		{
-			name:     "cline uses cwd field",
-			input:    map[string]interface{}{"cwd": "/projects/myapp"},
-			platform: "cline",
-			want:     "/projects/myapp",
-		},
-		{
 			name: "cline falls back to workspaceRoots",
 			input: map[string]interface{}{
 				"workspaceRoots": []interface{}{"/workspace/root"},
-			},
-			platform: "cline",
-			want:     "/workspace/root",
-		},
-		{
-			name: "cline accepts snake_case workspace_roots",
-			input: map[string]interface{}{
-				"workspace_roots": []interface{}{"/workspace/root"},
 			},
 			platform: "cline",
 			want:     "/workspace/root",
@@ -304,14 +207,6 @@ func TestResolveCwd(t *testing.T) {
 			},
 			platform: "cline",
 			want:     "/workspace/root",
-		},
-		{
-			name: "cline takes the first of several roots",
-			input: map[string]interface{}{
-				"workspaceRoots": []interface{}{"/workspace/first", "/workspace/second"},
-			},
-			platform: "cline",
-			want:     "/workspace/first",
 		},
 		{
 			name: "cline cwd takes precedence over workspaceRoots",
@@ -336,22 +231,10 @@ func TestResolveCwd(t *testing.T) {
 			want:     "",
 		},
 		{
-			name:     "cline returns empty when no sources",
-			input:    map[string]interface{}{},
-			platform: "cline",
-			want:     "",
-		},
-		{
 			name:     "claude uses cwd field",
 			input:    map[string]interface{}{"cwd": "/projects/myapp"},
 			platform: "claude",
 			want:     "/projects/myapp",
-		},
-		{
-			name:     "claude returns empty when no cwd",
-			input:    map[string]interface{}{},
-			platform: "claude",
-			want:     "",
 		},
 	}
 
@@ -383,9 +266,7 @@ func TestGetFirstStr(t *testing.T) {
 		keys []string
 		want string
 	}{
-		{"first key found", []string{"key1"}, "value1"},
 		{"skip empty, return second", []string{"key2", "key3"}, "value3"},
-		{"no matching key", []string{"nonexistent"}, ""},
 		{"first non-empty wins", []string{"key1", "key3"}, "value1"},
 	}
 

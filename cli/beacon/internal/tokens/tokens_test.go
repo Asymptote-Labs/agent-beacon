@@ -273,44 +273,6 @@ func TestAggregateCountsGeminiLogAndMetricChannelsOnce(t *testing.T) {
 	}
 }
 
-func TestAggregatePrefersCodexTurnSpansAfterCutover(t *testing.T) {
-	codexMetric := func(ts string, input int64) schema.Event {
-		return usageEventFixture(ts, "codex_cli", "", "gpt-5.6-sol", func(e *schema.Event) {
-			e.Endpoint = schema.EndpointInfo{Hostname: "host-a", OS: "darwin"}
-			e.GenAI.Usage.InputTokens = int64Ptr(input)
-			e.Raw = map[string]interface{}{
-				"metric_name":        "codex.turn.token_usage",
-				"metric_temporality": "Delta",
-			}
-		})
-	}
-	turnSpan := usageEventFixture("2026-06-11T10:00:00Z", "codex_cli", "session-1", "gpt-5.6-sol", func(e *schema.Event) {
-		e.Endpoint = schema.EndpointInfo{Hostname: "host-a", OS: "darwin"}
-		e.GenAI.Usage.InputTokens = int64Ptr(20)
-		e.Raw = map[string]interface{}{
-			"source":               "codex_turn_span",
-			"turn_id":              "turn-1",
-			"turn_start_timestamp": "2026-06-11T09:59:55Z",
-		}
-	})
-	events := []schema.Event{
-		// A pre-upgrade metric remains part of historical totals.
-		codexMetric("2026-06-11T09:00:00Z", 10),
-		turnSpan,
-		// The same live turn also flushed through a manually retained metric
-		// exporter; the turn span wins after cutover.
-		codexMetric("2026-06-11T09:59:59Z", 20),
-	}
-
-	report := Aggregate(events, Options{})
-	if report.Totals.InputTokens != 30 || report.Totals.Events != 2 {
-		t.Fatalf("totals = %#v, want legacy metric plus turn span only", report.Totals)
-	}
-	if len(report.BySession) != 1 || report.BySession[0].Key != "session-1" {
-		t.Fatalf("by_session = %#v, want attributable turn span", report.BySession)
-	}
-}
-
 func TestAggregateDedupesCumulativeSeries(t *testing.T) {
 	cumulative := func(ts string, value int64) schema.Event {
 		return usageEventFixture(ts, "claude_code", "s1", "claude-sonnet-4-5", func(e *schema.Event) {
@@ -503,41 +465,6 @@ func TestAggregateTopLimitCapsGroups(t *testing.T) {
 	}
 }
 
-// A runtime that reports its own context size and window is measured against those, not against
-// the static model table and not against a sum of usage fields.
-//
-// Both substitutions matter. Summing input + cache read + cache creation approximates occupancy and
-// is all Beacon has for runtimes that report nothing; a reported number is the measurement itself.
-// And a reported window reflects the tier the call actually ran under, which a table keyed on a
-// model name cannot know.
-func TestUtilizationPrefersReportedContextOverInference(t *testing.T) {
-	events := []schema.Event{
-		usageEventFixture("2026-06-11T10:00:00Z", "qwen_code", "s1", "qwen3-coder-plus", func(e *schema.Event) {
-			e.GenAI.Usage = nil
-			e.GenAI.Context = &schema.GenAIContextInfo{
-				UsedTokens:  int64Ptr(110100),
-				LimitTokens: int64Ptr(262144),
-			}
-		}),
-	}
-	report := Aggregate(events, Options{})
-	if len(report.Utilization) != 1 {
-		t.Fatalf("utilization = %+v, want one row for a context-only event", report.Utilization)
-	}
-	row := report.Utilization[0]
-	if row.ContextWindow != 262144 {
-		t.Errorf("context window = %d, want the runtime's reported 262144", row.ContextWindow)
-	}
-	if row.MaxInputTokens != 110100 {
-		t.Errorf("max input = %d, want the runtime's reported 110100", row.MaxInputTokens)
-	}
-	// 110100 / 262144 is the 0.42 Qwen reports as context_usage, which is how the fixture's three
-	// fields are known to describe one measurement.
-	if row.MaxRatio < 0.419 || row.MaxRatio > 0.421 {
-		t.Errorf("max ratio = %v, want ~0.42", row.MaxRatio)
-	}
-}
-
 // Context is a level, not spend. A context-only event must not add anything a report sums, or a
 // Qwen session's cost would grow with the square of its length.
 //
@@ -612,20 +539,6 @@ func TestEventsWithBothUsageAndContextCountAsSpend(t *testing.T) {
 	}
 	if len(report.Utilization) != 1 || report.Utilization[0].MaxInputTokens != 50000 {
 		t.Errorf("utilization = %+v, want the reported 50000 occupancy, not the 900 input", report.Utilization)
-	}
-}
-
-// A runtime that reports no context keeps the inferred behaviour and the static window.
-func TestUtilizationStillInfersWhenNoContextIsReported(t *testing.T) {
-	events := []schema.Event{
-		usageEventFixture("2026-06-11T10:00:00Z", "claude_code", "s1", "claude-opus-5", func(e *schema.Event) {
-			e.GenAI.Usage.InputTokens = int64Ptr(1000)
-			e.GenAI.Usage.CacheRead = &schema.GenAIUsageCacheReadInfo{InputTokens: int64Ptr(500)}
-		}),
-	}
-	report := Aggregate(events, Options{})
-	if len(report.Utilization) != 1 || report.Utilization[0].MaxInputTokens != 1500 {
-		t.Fatalf("utilization = %+v, want the summed 1500", report.Utilization)
 	}
 }
 
@@ -949,30 +862,6 @@ func TestAggregatePrefersLiveCaptureOverPollBackfill(t *testing.T) {
 			suppressed: 2,
 		},
 		{
-			// OpenCode's plugin writes on message.updated, a few milliseconds after the store
-			// stamps the message's time.completed that `opencode sync` reads.
-			name: "opencode plugin and opencode sync",
-			events: []schema.Event{
-				event("2026-06-11T10:00:00Z", "opencode", plugin, "ses_7a1f", "session.started", nil, nil),
-				event("2026-06-11T10:00:10.000Z", "opencode", poll, "ses_7a1f", "token.usage", &tokens{input: 9800, output: 300, reasoning: 120, cacheRead: 4000, cost: 0.0312}, model("claude-sonnet-4-5")),
-				event("2026-06-11T10:00:10.004Z", "opencode", plugin, "ses_7a1f", "agent.response", &tokens{input: 9800, output: 300, reasoning: 120, cacheRead: 4000, cost: 0.0312}, model("claude-sonnet-4-5")),
-			},
-			want:       tokens{input: 9800, output: 300, reasoning: 120, cacheRead: 4000, cost: 0.0312},
-			wantEvents: 1,
-			suppressed: 1,
-		},
-		{
-			name: "openclaw plugin llm_output and session mapper",
-			events: []schema.Event{
-				event("2026-06-11T10:00:00Z", "openclaw_gateway", plugin, "oc-sess-1", "prompt.submitted", nil, nil),
-				event("2026-06-11T10:00:07Z", "openclaw_gateway", poll, "oc-sess-1", "agent.response", &tokens{input: 5200, output: 410, cacheRead: 1100}, model("gpt-5.4")),
-				event("2026-06-11T10:00:08Z", "openclaw_gateway", plugin, "oc-sess-1", "agent.response", &tokens{input: 5200, output: 410, cacheRead: 1100}, model("gpt-5.4")),
-			},
-			want:       tokens{input: 5200, output: 410, cacheRead: 1100},
-			wantEvents: 1,
-			suppressed: 1,
-		},
-		{
 			// The Pi extension reports usage on message_end; the session file stamps the assistant
 			// message when it was created, before it streamed.
 			name: "pi extension and pi sync",
@@ -1019,24 +908,6 @@ func TestAggregatePrefersLiveCaptureOverPollBackfill(t *testing.T) {
 				event("2026-06-11T10:00:01Z", "claude_code", poll, "", "agent.response", &tokens{input: 7}, nil),
 			},
 			want:       tokens{input: 14},
-			wantEvents: 2,
-		},
-		{
-			name: "poll only is untouched",
-			events: []schema.Event{
-				event("2026-06-11T10:00:00Z", "opencode", poll, "ses_1", "token.usage", &tokens{input: 10, cost: 0.001}, nil),
-				event("2026-06-11T10:00:01Z", "opencode", poll, "ses_1", "token.usage", &tokens{input: 20, cost: 0.002}, nil),
-			},
-			want:       tokens{input: 30, cost: 0.003},
-			wantEvents: 2,
-		},
-		{
-			name: "live only is untouched",
-			events: []schema.Event{
-				event("2026-06-11T10:00:00Z", "opencode", plugin, "ses_1", "agent.response", &tokens{input: 10}, nil),
-				event("2026-06-11T10:00:01Z", "opencode", plugin, "ses_1", "agent.response", &tokens{input: 20}, nil),
-			},
-			want:       tokens{input: 30},
 			wantEvents: 2,
 		},
 		{

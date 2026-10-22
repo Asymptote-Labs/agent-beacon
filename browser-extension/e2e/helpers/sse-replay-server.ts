@@ -100,7 +100,8 @@ function streamFixture(res: import('node:http').ServerResponse, c: ReplayCase): 
   });
   const body = readFixture(c.site, c.name);
   // Chunk on a coarse boundary that does NOT respect SSE frame boundaries, to
-  // exercise the parser's buffering; write with small delays to simulate streaming.
+  // exercise the parser's buffering; write each piece on its own timer tick so
+  // they arrive as separate network reads.
   const pieces = chunkify(body);
   let i = 0;
   const tick = () => {
@@ -109,7 +110,7 @@ function streamFixture(res: import('node:http').ServerResponse, c: ReplayCase): 
       return;
     }
     res.write(pieces[i++]);
-    setTimeout(tick, 5);
+    setTimeout(tick, 1);
   };
   tick();
 }

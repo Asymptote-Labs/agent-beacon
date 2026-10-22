@@ -39,77 +39,26 @@ func TestKiroManagedDetectionReadsTheHookCommand(t *testing.T) {
 	}
 }
 
-// Kiro merges hook files across scopes rather than taking the first it finds, so a user-scope and
-// a project-scope install are both live at once. Reporting both is what keeps the inventory from
-// understating an install -- the opposite of the OpenHands case, where showing one scope would
-// overstate it.
-func TestKiroCandidatesCoverBothScopes(t *testing.T) {
-	t.Setenv("KIRO_HOME", "")
-	home := t.TempDir()
-	work := t.TempDir()
-
-	items := kiroCandidates(home, work)
-	if len(items) != 2 {
-		t.Fatalf("kiroCandidates returned %d entries, want one per scope: %+v", len(items), items)
-	}
-	byScope := map[string]candidate{}
-	for _, item := range items {
-		byScope[item.scope] = item
-	}
-	user, ok := byScope[ScopeUser]
-	if !ok {
-		t.Fatalf("no user-scope candidate: %+v", items)
-	}
-	if want := filepath.Join(home, ".kiro", "hooks", "beacon-endpoint.json"); user.path != want {
-		t.Errorf("user candidate = %q, want %q", user.path, want)
-	}
-	project, ok := byScope[ScopeProject]
-	if !ok {
-		t.Fatalf("no project-scope candidate: %+v", items)
-	}
-	if want := filepath.Join(work, ".kiro", "hooks", "beacon-endpoint.json"); project.path != want {
-		t.Errorf("project candidate = %q, want %q", project.path, want)
-	}
-}
-
 // KIRO_HOME moves the global Kiro directory, and on a machine that sets it ~/.kiro is not where
 // Kiro looks. An inventory scanning the wrong directory reports "not installed" for a working
-// install, which is the direction that matters: it understates coverage silently.
-func TestKiroUserCandidateHonorsKiroHome(t *testing.T) {
-	home := t.TempDir()
+// install, which is the direction that matters: it understates coverage silently. The project
+// scope does not consult KIRO_HOME: that variable moves the global directory, not the workspace one.
+func TestKiroCandidatesHonorKiroHomeForTheUserScopeOnly(t *testing.T) {
 	profile := t.TempDir()
 	t.Setenv("KIRO_HOME", profile)
-
-	items := kiroCandidates(home, t.TempDir())
-	want := filepath.Join(profile, "hooks", "beacon-endpoint.json")
-	found := false
-	for _, item := range items {
-		if item.path == want {
-			found = true
-		}
-		if item.scope == ScopeUser && item.path != want {
-			t.Errorf("user candidate = %q, want %q", item.path, want)
-		}
-	}
-	if !found {
-		t.Fatalf("no candidate under KIRO_HOME: %+v", items)
-	}
-}
-
-// The project scope does not consult KIRO_HOME: that variable moves the global directory, not the
-// workspace one.
-func TestKiroProjectCandidateIgnoresKiroHome(t *testing.T) {
-	t.Setenv("KIRO_HOME", t.TempDir())
 	work := t.TempDir()
 
-	for _, item := range kiroCandidates(t.TempDir(), work) {
-		if item.scope != ScopeProject {
-			continue
-		}
-		if want := filepath.Join(work, ".kiro", "hooks", "beacon-endpoint.json"); item.path != want {
-			t.Fatalf("project candidate = %q, want %q", item.path, want)
-		}
-		return
+	want := map[string]string{
+		ScopeUser:    filepath.Join(profile, "hooks", "beacon-endpoint.json"),
+		ScopeProject: filepath.Join(work, ".kiro", "hooks", "beacon-endpoint.json"),
 	}
-	t.Fatal("no project-scope candidate")
+	items := kiroCandidates(t.TempDir(), work)
+	if len(items) != len(want) {
+		t.Fatalf("kiroCandidates returned %d entries, want one per scope: %+v", len(items), items)
+	}
+	for _, item := range items {
+		if item.path != want[item.scope] {
+			t.Errorf("%s candidate = %q, want %q", item.scope, item.path, want[item.scope])
+		}
+	}
 }

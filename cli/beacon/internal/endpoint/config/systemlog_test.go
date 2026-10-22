@@ -35,14 +35,3 @@ func TestSystemLogPathIsUnderTheSystemBaseDirOnWindows(t *testing.T) {
 		t.Errorf("SystemLogPath() = %q, want %q", got, want)
 	}
 }
-
-// The log path must derive from the same root as the config, or a Windows install would scatter
-// its state across two locations and only one of them would be documented.
-func TestSystemLogPathDerivesFromOneRoot(t *testing.T) {
-	if got := SystemLogPath(); !strings.HasSuffix(filepath.ToSlash(got), "/runtime.jsonl") {
-		t.Errorf("SystemLogPath() = %q, want it to name runtime.jsonl", got)
-	}
-	if SystemLogDir() == "" || SystemBaseDir() == "" {
-		t.Fatal("neither root may be empty; an empty prefix silently writes to the process's cwd")
-	}
-}

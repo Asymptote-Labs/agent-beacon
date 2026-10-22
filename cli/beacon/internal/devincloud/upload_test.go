@@ -16,7 +16,8 @@ import (
 )
 
 func TestGCSUploaderSignsJWTAndPuts(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	// 1024 bits is the smallest key crypto/rsa accepts; signing cost is all this test needs.
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	if err != nil {
 		t.Fatalf("gen key: %v", err)
 	}

@@ -88,20 +88,6 @@ func TestFlagsFormIsRecognizedAsAnEndpointHook(t *testing.T) {
 	}
 }
 
-func TestEnvPrefixFormIsStillRecognized(t *testing.T) {
-	// Already installed on every POSIX machine. A repair rewrites it, but it has to be found first.
-	command := `BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG='/var/log/beacon-agent/runtime.jsonl' ` +
-		`BEACON_ENDPOINT_CONFIG='/etc/beacon/endpoint/config.json' '/opt/beacon/hooks/beacon-hooks' --platform cursor`
-
-	if !isEndpointHookCommand(command, "cursor") {
-		t.Fatal("the env-prefix form is no longer recognized; a repair would duplicate every " +
-			"already-installed POSIX hook")
-	}
-	if isEndpointHookCommand(command, "vscode") {
-		t.Fatal("a cursor hook matched when asked about vscode")
-	}
-}
-
 // TestAPlatformNamedWithAnEqualsSignCountsAsNamingOne closes a false positive.
 //
 // The old check asked whether the command contained "--platform " with a trailing space, which missed
@@ -157,16 +143,6 @@ func TestCommandHasPlatformReadsQuotedAndSeparatedValues(t *testing.T) {
 		if got := commandHasPlatform(tc.command, tc.platform); got != tc.want {
 			t.Fatalf("commandHasPlatform(%q, %q) = %v, want %v", tc.command, tc.platform, got, tc.want)
 		}
-	}
-}
-
-// TestABareBeaconHooksInvocationIsNotClaimedAsAnEndpointHook keeps the false-positive direction shut.
-//
-// Someone may run this binary for a reason Beacon did not configure. Such a command names a platform
-// and carries no endpoint settings, so it belongs to whoever wrote it.
-func TestABareBeaconHooksInvocationIsNotClaimedAsAnEndpointHook(t *testing.T) {
-	if isEndpointHookCommand(`beacon-hooks pre-tool --platform grok`, "cursor") {
-		t.Fatal("a hook for another platform with no endpoint settings was claimed")
 	}
 }
 

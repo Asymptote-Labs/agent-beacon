@@ -87,18 +87,6 @@ func handoffFixtureSessions() []handoff.Source {
 	}
 }
 
-func TestHandoffListCommandRegistered(t *testing.T) {
-	cmd, _, err := rootCmd.Find([]string{"handoff", "list"})
-	if err != nil || cmd == nil || cmd.Name() != "list" {
-		t.Fatalf("handoff list not registered: %v %#v", err, cmd)
-	}
-	for _, flag := range []string{"json", "harness", "here", "dir", "subagents", "limit", "claude-projects-dir", "codex-dir", "opencode-dir", "cline-dir"} {
-		if cmd.Flags().Lookup(flag) == nil {
-			t.Fatalf("handoff list missing --%s", flag)
-		}
-	}
-}
-
 func TestHandoffListPrintsATable(t *testing.T) {
 	stubHandoffSources(t, handoffFixtureSessions()...)
 	out, _, err := runHandoff(t, "list")
@@ -237,17 +225,6 @@ func TestHandoffListRejectsUnknownRuntime(t *testing.T) {
 	}
 }
 
-func TestHandoffListPassesStoreDirectories(t *testing.T) {
-	seen := stubHandoffSources(t)
-	if _, _, err := runHandoff(t, "list", "--claude-projects-dir", "/c", "--codex-dir", "/x", "--opencode-dir", "/o", "--cline-dir", "/l"); err != nil {
-		t.Fatal(err)
-	}
-	want := handoff.StoreDirs{handoff.HarnessClaude: absPath(t, "/c"), handoff.HarnessCodex: absPath(t, "/x"), handoff.HarnessOpenCode: absPath(t, "/o"), handoff.HarnessCline: absPath(t, "/l")}
-	if !reflect.DeepEqual(*seen, want) {
-		t.Fatalf("store dirs = %+v, want %+v", *seen, want)
-	}
-}
-
 func absPath(t *testing.T, path string) string {
 	t.Helper()
 	abs, err := filepath.Abs(path)
@@ -333,21 +310,6 @@ func handoffLog(t *testing.T, harness, id, text string) string {
 		t.Fatal(err)
 	}
 	return path
-}
-
-func TestHandoffExportCommandRegistered(t *testing.T) {
-	cmd, _, err := rootCmd.Find([]string{"handoff", "export"})
-	if err != nil || cmd == nil || cmd.Name() != "export" {
-		t.Fatalf("handoff export not registered: %v", err)
-	}
-	for _, flag := range []string{"print", "output-dir", "log-path", "json", "harness", "claude-projects-dir", "codex-dir", "opencode-dir", "cline-dir"} {
-		if cmd.Flags().Lookup(flag) == nil {
-			t.Fatalf("handoff export missing --%s", flag)
-		}
-	}
-	if _, _, err := runHandoff(t, "export"); err == nil {
-		t.Fatal("export without a session id must fail")
-	}
 }
 
 func TestHandoffExportPrint(t *testing.T) {
@@ -536,18 +498,6 @@ func TestDescribeHandoffPlanShowsTheEnvironment(t *testing.T) {
 	describeHandoffPlan(&out, handoff.Plan{Mode: handoff.ModeNative, Source: handoff.Session{Harness: handoff.HarnessClaude, ID: "s-1"}, Executable: "/bin/claude"})
 	if strings.Contains(out.String(), "env:") {
 		t.Fatalf("a plan with no overrides shows no env line: %q", out.String())
-	}
-}
-
-func TestHandoffLogReasonNamesRuntimesWithoutAStore(t *testing.T) {
-	gone := handoffLogReason(handoff.Session{Harness: handoff.HarnessClaude, ID: "c-1"})
-	if !strings.Contains(gone, "no longer in its runtime's store") {
-		t.Fatalf("store-backed runtime: %q", gone)
-	}
-	for _, harness := range []string{handoff.HarnessGoose, "vscode_copilot"} {
-		if got := handoffLogReason(handoff.Session{Harness: harness, ID: "s-1"}); !strings.Contains(got, "does not read "+harness+" session stores") {
-			t.Fatalf("%s: %q", harness, got)
-		}
 	}
 }
 

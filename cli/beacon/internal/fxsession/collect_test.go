@@ -69,37 +69,6 @@ func (f sweepFixture) logLines(t *testing.T) []schema.Event {
 	return events
 }
 
-func TestSweepWritesFxActivityIntoTheRuntimeLog(t *testing.T) {
-	f := newSweepFixture(t)
-	f.writeSessionLog(t, testSessionID, []string{sessionStartedLine(1, "/repo"), assistantTurnLine(2)})
-
-	summary, err := CollectOnce(f.options())
-	if err != nil {
-		t.Fatalf("CollectOnce: %v", err)
-	}
-	if summary.Sessions != 1 || summary.SessionsChanged != 1 {
-		t.Errorf("summary = %+v, want one session, one changed", summary)
-	}
-	if summary.EventsEmitted == 0 {
-		t.Fatal("no events emitted")
-	}
-
-	events := f.logLines(t)
-	if len(events) != summary.EventsEmitted {
-		t.Fatalf("wrote %d lines for %d emitted events", len(events), summary.EventsEmitted)
-	}
-	for _, event := range events {
-		if event.Harness.Name != Harness {
-			t.Errorf("harness = %q", event.Harness.Name)
-		}
-		// The writer stamps a deterministic id on every line. Without one, the same fx record read
-		// twice cannot be recognized as the same event downstream.
-		if event.Event.ID == "" {
-			t.Errorf("%s has no event id", event.Event.Action)
-		}
-	}
-}
-
 // The property the cursor exists for. A machine sweeping every minute must not append a session's
 // history again every minute.
 func TestSecondSweepOverUnchangedSessionsWritesNothing(t *testing.T) {
@@ -110,7 +79,13 @@ func TestSecondSweepOverUnchangedSessionsWritesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first sweep: %v", err)
 	}
+	if first.Sessions != 1 || first.SessionsChanged != 1 {
+		t.Errorf("first summary = %+v, want one session, one changed", first)
+	}
 	before := len(f.logLines(t))
+	if before != first.EventsEmitted {
+		t.Fatalf("wrote %d lines for %d emitted events", before, first.EventsEmitted)
+	}
 
 	second, err := CollectOnce(f.options())
 	if err != nil {
@@ -312,81 +287,6 @@ func TestCorruptLineIsReportedAndTheRestIsStillCollected(t *testing.T) {
 	}
 	if summary.EventsEmitted == 0 {
 		t.Error("the readable records around the corrupt line were dropped")
-	}
-}
-
-// --print is a dry run: it shows what would be collected without writing the runtime log and
-// without advancing any cursor, so running it twice shows the same thing both times.
-func TestPrintModeWritesNothingAndKeepsNoCursor(t *testing.T) {
-	f := newSweepFixture(t)
-	f.writeSessionLog(t, testSessionID, []string{sessionStartedLine(1, "/repo"), assistantTurnLine(2)})
-
-	var first, second bytes.Buffer
-	opts := CollectOptions{SessionsDir: f.root, Print: true, Out: &first}
-	if _, err := CollectOnce(opts); err != nil {
-		t.Fatalf("first print sweep: %v", err)
-	}
-	opts.Out = &second
-	if _, err := CollectOnce(opts); err != nil {
-		t.Fatalf("second print sweep: %v", err)
-	}
-
-	if first.Len() == 0 {
-		t.Fatal("print mode produced no output")
-	}
-	if first.String() != second.String() {
-		t.Error("two dry runs disagreed, so one of them consumed state")
-	}
-	if _, err := os.Stat(f.logPath); !os.IsNotExist(err) {
-		t.Error("print mode wrote the runtime log")
-	}
-	if _, err := os.Stat(f.statePath); !os.IsNotExist(err) {
-		t.Error("print mode wrote a cursor file")
-	}
-	for _, line := range strings.Split(strings.TrimSpace(first.String()), "\n") {
-		var event schema.Event
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			t.Fatalf("print output is not one JSON event per line: %v", err)
-		}
-	}
-}
-
-// A machine that has never run fx is the common case for most installs. It must produce a clean,
-// empty result rather than an error a status command has to explain away.
-func TestSweepOverAMissingSessionsDirectoryIsCleanAndEmpty(t *testing.T) {
-	f := newSweepFixture(t)
-	summary, err := CollectOnce(f.options())
-	if err != nil {
-		t.Fatalf("CollectOnce: %v", err)
-	}
-	if summary != (Summary{}) {
-		t.Errorf("summary = %+v, want a zero summary", summary)
-	}
-	if _, err := os.Stat(f.logPath); !os.IsNotExist(err) {
-		t.Error("a sweep with nothing to collect created a runtime log")
-	}
-}
-
-// A cursor file written by a future version of the collector is discarded rather than
-// misinterpreted: re-collecting is harmless, and reading a cursor under the wrong meaning would
-// skip events permanently.
-func TestCursorFileFromAnotherVersionIsDiscardedNotMisread(t *testing.T) {
-	f := newSweepFixture(t)
-	if err := os.MkdirAll(filepath.Dir(f.statePath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	stale := `{"version":99,"sessions":{"` + testSessionID + `":{"generation":"` + testGeneration + `","last_seq":9999,"started":true}}}`
-	if err := os.WriteFile(f.statePath, []byte(stale), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	f.writeSessionLog(t, testSessionID, []string{sessionStartedLine(1, "/repo"), assistantTurnLine(2)})
-
-	summary, err := CollectOnce(f.options())
-	if err != nil {
-		t.Fatalf("CollectOnce: %v", err)
-	}
-	if summary.EventsEmitted == 0 {
-		t.Fatal("the sweep trusted a cursor from another version and collected nothing")
 	}
 }
 

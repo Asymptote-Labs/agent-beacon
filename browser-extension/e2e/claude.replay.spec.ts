@@ -1,5 +1,5 @@
-import { test, expect, seedSettings } from './fixtures.js';
-import { flatAttrs, recordByAction, resourceAttrs } from './helpers/otlp-assertions.js';
+import { test, expect, seedSettings, browserTarget } from './fixtures.js';
+import { allRecords, flatAttrs, recordByAction, resourceAttrs } from './helpers/otlp-assertions.js';
 
 const CONV = '11111111-2222-3333-4444-555555555555';
 const COMPLETION_PATH = '/api/organizations/org-test/chat_conversations/{conv}/completion';
@@ -63,6 +63,29 @@ test('captures a simple Claude turn end-to-end into normalized OTLP', async ({
   expect(JSON.parse(String(attrs['gen_ai.output.messages']))).toEqual([
     { role: 'assistant', parts: [{ type: 'text', content: 'Paris.' }] },
   ]);
+
+  // Every envelope says which browser produced it. This runs in whatever browser
+  // the fixture launched (BROWSER_CHANNEL / BROWSER_EXECUTABLE); the ground truth
+  // is what the same service worker that built the envelope reports.
+  const seen = await serviceWorker.evaluate(() => {
+    const uad = (navigator as Navigator & { userAgentData?: { brands: { brand: string; version: string }[] } })
+      .userAgentData;
+    return { brands: uad?.brands.map((b) => `${b.brand} ${b.version}`) ?? [], ua: navigator.userAgent };
+  });
+  for (const env of mockCollector.received) {
+    const identity = resourceAttrs(env);
+    const name = identity['user_agent.name'];
+    expect(typeof name, `user_agent.name missing in ${browserTarget.label}`).toBe('string');
+    expect(identity['user_agent.original']).toBe(seen.ua);
+    if (seen.brands.length > 0) expect(identity['browser.brands']).toEqual(seen.brands);
+    if (browserTarget.expectedUserAgentNames) {
+      expect(browserTarget.expectedUserAgentNames).toContain(name);
+    }
+  }
+  test.info().annotations.push({
+    type: 'browser',
+    description: `${browserTarget.label}: user_agent.name=${res['user_agent.name']}`,
+  });
 });
 
 test('captures the prompt when the page uses fetch(new Request(...))', async ({
@@ -100,54 +123,25 @@ test('captures the prompt when the page uses fetch(new Request(...))', async ({
   expect(p['beacon.prompt.text']).toBe('What is the capital of France?');
 });
 
-test('captures a Claude tool call as a tool.invoked record', async ({
-  context,
-  serviceWorker,
-  replay,
-  mockCollector,
-}) => {
-  replay.setCase({
-    site: 'claude',
-    name: 'with-tool-call',
-    conversationId: CONV,
-    prompt: 'What is the weather today?',
-    completionPath: COMPLETION_PATH,
-  });
-  await seedSettings(serviceWorker, {
-    enabled: true,
-    retention: 'full',
-    endpoint: mockCollector.url,
-    sites: { claude_web: true, chatgpt_web: true },
-  });
-
-  const page = await context.newPage();
-  await page.goto('https://claude.ai/chat');
-  await expect(page.locator('[data-testid="assistant-message"]')).toHaveAttribute(
-    'data-complete',
-    '1',
-  );
-
-  await expect
-    .poll(() => recordByAction(mockCollector.received, 'tool.invoked'), { timeout: 10_000 })
-    .toBeTruthy();
-
-  const tool = flatAttrs(recordByAction(mockCollector.received, 'tool.invoked')!.attributes);
-  expect(tool['tool.name']).toBe('web_search');
-  expect(tool['gen_ai.tool.call.id']).toBe('toolu_abc');
-  expect(String(tool['gen_ai.tool.call.arguments'])).toContain('weather today');
-});
-
 test('respects the disabled toggle (no delivery)', async ({
   context,
   serviceWorker,
   replay,
   mockCollector,
 }) => {
+  const LATER = '22222222-3333-4444-5555-666666666666';
   replay.setCase({
     site: 'claude',
     name: 'simple-turn',
     conversationId: CONV,
     prompt: 'What is the capital of France?',
+    completionPath: COMPLETION_PATH,
+  });
+  replay.setCase({
+    site: 'claude',
+    name: 'simple-turn',
+    conversationId: LATER,
+    prompt: 'Captured once re-enabled',
     completionPath: COMPLETION_PATH,
   });
   await seedSettings(serviceWorker, {
@@ -158,12 +152,25 @@ test('respects the disabled toggle (no delivery)', async ({
   });
 
   const page = await context.newPage();
-  await page.goto('https://claude.ai/chat');
+  await page.goto(`https://claude.ai/chat?conv=${CONV}`);
   await expect(page.locator('[data-testid="assistant-message"]')).toHaveAttribute(
     'data-complete',
     '1',
   );
-  // Give any (erroneous) delivery a chance to arrive, then assert none did.
-  await page.waitForTimeout(1000);
-  expect(mockCollector.received).toHaveLength(0);
+
+  // Re-enable and capture a later turn. Delivery is ordered, so once the later
+  // turn has landed, anything the disabled turn wrongly produced would have too.
+  await seedSettings(serviceWorker, { enabled: true });
+  const later = await context.newPage();
+  await later.goto(`https://claude.ai/chat?conv=${LATER}`);
+  await expect(later.locator('[data-testid="assistant-message"]')).toHaveAttribute(
+    'data-complete',
+    '1',
+  );
+  await expect
+    .poll(() => recordByAction(mockCollector.received, 'agent.response.completed'), { timeout: 10_000 })
+    .toBeTruthy();
+
+  const sessions = allRecords(mockCollector.received).map((r) => flatAttrs(r.attributes)['beacon.session.id']);
+  expect(new Set(sessions)).toEqual(new Set([LATER]));
 });

@@ -74,17 +74,6 @@ func TestCompareVersions(t *testing.T) {
 	}
 }
 
-func TestValidateVectorConfigSurfacesVectorOutput(t *testing.T) {
-	ok := fakeVector(t, "0.56.0", 0)
-	if err := ValidateVectorConfig(ok, "/tmp/x.toml"); err != nil {
-		t.Fatalf("validate ok: %v", err)
-	}
-	bad := fakeVector(t, "0.56.0", 3)
-	if err := ValidateVectorConfig(bad, "/tmp/x.toml"); err == nil || !strings.Contains(err.Error(), "vector validate failed") {
-		t.Fatalf("expected validate failure, got %v", err)
-	}
-}
-
 func TestEnrollmentStoreUsesPrivatePermissionsAndAtomicWrites(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)

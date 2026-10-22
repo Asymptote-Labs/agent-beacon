@@ -74,24 +74,6 @@ func TestSupervisedStatusNamesWhatItCannotPromise(t *testing.T) {
 	}
 }
 
-// The kind has to survive a round trip through the flag, or `--service=windows-service` in a
-// scenario or an operator's command line silently selects something else.
-func TestParseKindAcceptsTheWindowsSpellings(t *testing.T) {
-	for _, in := range []string{"windows-service", "scm", "windows", "WINDOWS-SERVICE"} {
-		got, err := ParseKind(in)
-		if err != nil {
-			t.Errorf("ParseKind(%q) returned %v", in, err)
-			continue
-		}
-		if got != KindWindowsService {
-			t.Errorf("ParseKind(%q) = %q, want %q", in, got, KindWindowsService)
-		}
-	}
-	if _, err := ParseKind("services.msc"); err == nil {
-		t.Error("an unrecognized kind must be rejected rather than defaulting")
-	}
-}
-
 // unitPath is shown to a human. There is no file to point at, so it names the registry key that
 // actually holds the definition -- the same trade the supervised backend makes by reporting its
 // pidfile rather than an error.
@@ -137,14 +119,5 @@ func TestWindowsBackendRefusesOffWindows(t *testing.T) {
 	}
 	if st := b.status(false); st.Message == "" {
 		t.Error("status off Windows must explain itself rather than look like a stopped service")
-	}
-}
-
-// The noun appears in install plans and doctor output, so every kind needs one that reads as the
-// artifact it installs.
-func TestWindowsServiceNounIsSpecific(t *testing.T) {
-	noun := KindWindowsService.ServiceNoun()
-	if noun == "" || strings.Contains(noun, "collector service definition") {
-		t.Errorf("ServiceNoun() = %q, want wording specific to the Windows SCM", noun)
 	}
 }

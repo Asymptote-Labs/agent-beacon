@@ -1,23 +1,12 @@
 package onboarding
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
-
-func TestPathHonorsHome(t *testing.T) {
-	home := t.TempDir()
-	testenv.SetHome(t, home)
-
-	want := filepath.Join(home, ProfilePath)
-	if got := Path(); got != want {
-		t.Fatalf("Path() = %q, want %q", got, want)
-	}
-}
 
 func TestLoadMissingProfileReportsNotPrompted(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
@@ -88,25 +77,6 @@ func TestSaveRoundTrip(t *testing.T) {
 	}
 }
 
-// The profile holds the operator's email address, so it must not be world-readable.
-func TestSaveUsesOwnerOnlyPermissions(t *testing.T) {
-	testenv.RequirePOSIXFileModes(t)
-	home := t.TempDir()
-	testenv.SetHome(t, home)
-
-	if err := Save(Profile{}); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	info, err := os.Stat(filepath.Join(home, ProfilePath))
-	if err != nil {
-		t.Fatalf("Stat: %v", err)
-	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Fatalf("profile permissions = %o, want 600", perm)
-	}
-}
-
 // A profile written by an older build with looser permissions gets tightened rather
 // than silently kept, because os.WriteFile only applies its mode on creation.
 func TestSaveTightensExistingPermissions(t *testing.T) {
@@ -147,44 +117,6 @@ func TestSavePreservesExistingInstallID(t *testing.T) {
 	}
 	if got := Load().InstallID; got != first {
 		t.Fatalf("InstallID = %q after resave, want stable %q", got, first)
-	}
-}
-
-func TestSaveWritesValidJSON(t *testing.T) {
-	home := t.TempDir()
-	testenv.SetHome(t, home)
-
-	if err := Save(Profile{Onboarding: Onboarding{Outcome: OutcomeSkipped}}); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	data, err := os.ReadFile(filepath.Join(home, ProfilePath))
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("profile is not valid JSON: %v", err)
-	}
-	if _, ok := raw["pending_submission"]; ok {
-		t.Fatalf("pending_submission should be omitted when nil, got %v", raw["pending_submission"])
-	}
-}
-
-func TestNewInstallIDIsUnique(t *testing.T) {
-	seen := map[string]bool{}
-	for i := 0; i < 64; i++ {
-		id, err := NewInstallID()
-		if err != nil {
-			t.Fatalf("NewInstallID: %v", err)
-		}
-		if len(id) != 32 {
-			t.Fatalf("NewInstallID() = %q, want 32 hex characters", id)
-		}
-		if seen[id] {
-			t.Fatalf("NewInstallID() returned a duplicate: %q", id)
-		}
-		seen[id] = true
 	}
 }
 

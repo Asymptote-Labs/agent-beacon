@@ -77,10 +77,10 @@ func TestAntigravityPreToolWritesNothing(t *testing.T) {
 }
 
 // The runtimes that reach the default answer -- Grok Build, and the ones whose pre-tool hook only a
-// hand-written config installs -- get an object with no decision in it, and Beacon records the call
-// without claiming an approval for the runtimes it does not synthesize one on.
+// hand-written config installs -- get an object with no decision in it. They share one branch, so
+// one runtime of each kind stands for the rest; preToolResponse's own test names every runtime.
 func TestObservingPreToolDoesNotApproveOnDefaultRuntimes(t *testing.T) {
-	for _, platform := range []string{"grok", "codex", "copilot", "factory", "cline"} {
+	for _, platform := range []string{"grok", "codex"} {
 		t.Run(platform, func(t *testing.T) {
 			setupHookConfigDirs(t)
 			platformFlag = platform

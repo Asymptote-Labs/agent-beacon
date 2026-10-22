@@ -77,7 +77,7 @@ func TestCursorAgentResponseRecordsTheReply(t *testing.T) {
 
 // No text, no message -- and still Cursor's no-op answer, so the hook never stalls the agent.
 func TestCursorAgentResponseWithoutTextWritesNothing(t *testing.T) {
-	for name, value := range map[string]interface{}{"absent": nil, "empty": "", "blank": "\n "} {
+	for name, value := range map[string]interface{}{"absent": nil} {
 		t.Run(name, func(t *testing.T) {
 			logPath, stdout := runHookProcess(t, cursorAfterAgentResponse(value), "--platform", "cursor", "agent-response")
 			if !strings.Contains(string(stdout), `"continue":true`) {

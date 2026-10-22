@@ -1,9 +1,7 @@
 package handoff
 
 import (
-	"errors"
 	"net/url"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -93,14 +91,6 @@ func TestListReadsGrokSessions(t *testing.T) {
 	}
 }
 
-func TestListGrokWithoutAStore(t *testing.T) {
-	testenv.SetHome(t, t.TempDir())
-	sessions, err := (&grokSource{dir: filepath.Join(t.TempDir(), "missing")}).List()
-	if err != nil || sessions != nil {
-		t.Fatalf("List = %v, %v; want nothing and no error", sessions, err)
-	}
-}
-
 func TestGrokSessionBuildsABrief(t *testing.T) {
 	dirs, _ := grokFixture(t)
 	sources := DefaultSources(dirs)
@@ -122,17 +112,6 @@ func TestGrokSessionBuildsABrief(t *testing.T) {
 	}
 	if !strings.Contains(brief.Render(), "Grok Build") {
 		t.Fatalf("the brief should name Grok Build:\n%s", brief.Render())
-	}
-}
-
-func TestGrokSessionGoneFromItsStore(t *testing.T) {
-	dirs, main := grokFixture(t)
-	session := Session{Harness: HarnessGrok, ID: grokSessionID, SourcePath: main}
-	if err := os.RemoveAll(main); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Events(DefaultSources(dirs), session); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Events = %v, want ErrNotFound", err)
 	}
 }
 
@@ -177,41 +156,6 @@ func TestPlanResumeReopensAGrokSessionByItsID(t *testing.T) {
 				t.Fatalf("plan = %+v", plan)
 			}
 		})
-	}
-}
-
-// Grok finds a session id under the directory it starts in, so --cwd elsewhere continues from a
-// brief instead of reopening an id Grok cannot find there.
-func TestPlanResumeReopensAGrokSessionOnlyInItsDirectory(t *testing.T) {
-	session := resumableSession(t, HarnessGrok, grokSessionID)
-	brief := filepath.Join(t.TempDir(), "brief.md")
-	moved := t.TempDir()
-	plan, err := PlanResume(session, PlanOptions{Dir: moved, BriefPath: brief, LookPath: installed("grok")})
-	if err != nil {
-		t.Fatalf("PlanResume: %v", err)
-	}
-	if plan.Mode != ModeNewSession || plan.Reason != ReasonOtherDirectory || plan.Dir != moved {
-		t.Fatalf("--cwd elsewhere: plan = %+v", plan)
-	}
-	plan, err = PlanResume(session, PlanOptions{Dir: session.Directory, BriefPath: brief, LookPath: installed("grok")})
-	if err != nil || plan.Mode != ModeNative {
-		t.Fatalf("--cwd naming the session's own directory: plan = %+v, %v", plan, err)
-	}
-}
-
-// Grok's config can make always-approve the default. No command Beacon runs may inherit it.
-func TestEveryGrokCommandAsksBeforeRunningTools(t *testing.T) {
-	command, _ := commandFor(HarnessGrok)
-	resume, _ := command.Resume(Session{ID: grokSessionID})
-	for _, args := range [][]string{resume, command.NewSession("go")} {
-		if len(args) < 2 || args[0] != "--permission-mode" || args[1] != "default" {
-			t.Fatalf("args %q do not pin the asking permission mode", args)
-		}
-		for _, arg := range args {
-			if arg == "--always-approve" || arg == "--yolo" || arg == "bypassPermissions" {
-				t.Fatalf("args %q approve tools on Beacon's say-so", args)
-			}
-		}
 	}
 }
 

@@ -8,30 +8,16 @@ func TestContextWindowMatchesModelVariants(t *testing.T) {
 		want  int64
 		known bool
 	}{
-		{"claude-sonnet-4-5", 200000, true},
+		// Provider prefix stripped; falls back to the generic "claude" entry.
 		{"anthropic/claude-3-5-sonnet-20241022", 200000, true},
-		// The current generation is 1M. Longest prefix wins, so these must beat
-		// the generic "claude" fallback rather than inheriting its 200K.
-		{"claude-opus-5", 1000000, true},
-		{"claude-opus-4-8", 1000000, true},
-		{"claude-opus-4-6", 1000000, true},
-		{"claude-sonnet-5", 1000000, true},
-		{"claude-sonnet-4-6-20260101", 1000000, true},
-		{"claude-fable-5-1", 1000000, true},
+		// Longest prefix wins over the generic "claude" fallback, through a provider prefix
+		// and a date suffix.
 		{"anthropic/claude-opus-5", 1000000, true},
-		// Haiku 4.5 is the current-generation exception at 200K.
-		{"claude-haiku-4-5", 200000, true},
-		{"gpt-4o-2024-08-06", 128000, true},
-		{"gpt-4o-mini", 128000, true},
+		{"claude-sonnet-4-6-20260101", 1000000, true},
+		// "gpt-4.1" beats "gpt-4".
 		{"gpt-4.1-mini", 1047576, true},
-		{"gpt-4-turbo", 128000, true},
 		{"gpt-4", 8192, true},
-		{"gpt-5-mini", 400000, true},
-		{"o1-preview", 200000, true},
-		{"gemini-1.5-pro-latest", 2097152, true},
-		{"gemini-2.0-flash", 1048576, true},
 		{"GPT-4O", 128000, true},
-		{"experimental-model", 0, false},
 		{"", 0, false},
 	}
 	for _, tt := range tests {

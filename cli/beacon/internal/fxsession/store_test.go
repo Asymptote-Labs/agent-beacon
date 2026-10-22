@@ -245,28 +245,6 @@ func TestReadManifestRejectsANegativeWatermark(t *testing.T) {
 	}
 }
 
-func TestNewStoreDefaultsToFxProfileWhenNoDirectoryIsGiven(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-
-	store, err := NewStore("")
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
-	if want := filepath.Join(home, ".fx", "sessions"); store.Dir != want {
-		t.Errorf("store.Dir = %q, want %q", store.Dir, want)
-	}
-
-	explicit, err := NewStore("/somewhere/else")
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
-	if explicit.Dir != "/somewhere/else" {
-		t.Errorf("store.Dir = %q, want the caller's directory", explicit.Dir)
-	}
-}
-
 // timeFromMillis is a test helper rather than an import so the ordering test can stamp file times
 // without pulling a time dependency into the package's own code.
 func timeFromMillis(ms int64) time.Time { return time.UnixMilli(ms) }

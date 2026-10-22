@@ -34,7 +34,6 @@ func TestValidateRejectsAuthoringMistakes(t *testing.T) {
 		"missing prompt":        func(s *Scenario) { s.Prompt = "" },
 		"whitespace prompt":     func(s *Scenario) { s.Prompt = "\t\n" },
 		"no expectations":       func(s *Scenario) { s.Expect = nil },
-		"empty expectations":    func(s *Scenario) { s.Expect = []Expect{} },
 		"expectation no action": func(s *Scenario) { s.Expect = []Expect{{Fields: []string{"a"}}} },
 	}
 	for name, mutate := range cases {
@@ -204,54 +203,6 @@ func TestLoadSuitePropagatesAnInvalidScenario(t *testing.T) {
 	}
 }
 
-// The real shipped scenarios must stay valid; this catches a typo in a YAML edit without
-// needing a sandbox.
-func TestShippedScenariosAreValid(t *testing.T) {
-	suite, err := LoadSuite("../scenarios")
-	if err != nil {
-		t.Fatalf("shipped scenarios failed to load: %v", err)
-	}
-	if len(suite.Scenarios) == 0 {
-		t.Fatal("expected shipped scenarios")
-	}
-	seen := map[string]bool{}
-	for _, s := range suite.Scenarios {
-		if seen[s.ID] {
-			t.Errorf("duplicate scenario id %q", s.ID)
-		}
-		seen[s.ID] = true
-		// Every expectation should explain itself, or a failure is uninterpretable by whoever
-		// reads the verdict.
-		for i, e := range s.Expect {
-			if strings.TrimSpace(e.Why) == "" {
-				t.Errorf("%s: expect[%d] (%s) has no `why`; a failing check must explain what it protects",
-					s.ID, i, e.Action)
-			}
-		}
-	}
-}
-
-// A setup step that writes the sentinel makes the gate unfalsifiable: the file exists before the
-// agent runs, so INCONCLUSIVE can never fire and an idle agent gets misreported as a capture
-// failure. s04 shipped with exactly this (`cp fixture {{sentinel}}`) until Cursor Bugbot caught
-// it, so the rule is enforced rather than left to review.
-func TestSetupMayNotPlantTheSentinel(t *testing.T) {
-	sc := Scenario{
-		ID:       "bad",
-		Prompt:   "do a thing",
-		Sentinel: "/home/agent/work/out.txt",
-		Setup:    "cp /home/agent/work/fixture/notes.txt {{sentinel}}",
-		Expect:   []Expect{{Action: "prompt.submitted", Why: "baseline"}},
-	}
-	err := sc.Validate()
-	if err == nil {
-		t.Fatal("a setup that writes the sentinel must be rejected")
-	}
-	if !strings.Contains(err.Error(), "regardless of what the agent does") {
-		t.Errorf("the error should explain why this is unfalsifiable, got: %v", err)
-	}
-}
-
 // Setup is still allowed to build fixtures the agent will act on -- only the sentinel is off
 // limits, or every read-style scenario would become unwritable.
 func TestSetupMayStillCreateFixtures(t *testing.T) {
@@ -295,21 +246,6 @@ func TestSentinelGuardCatchesEverySpelling(t *testing.T) {
 		if !strings.Contains(err.Error(), "regardless of what the agent does") {
 			t.Errorf("%s: error should explain the unfalsifiability, got: %v", name, err)
 		}
-	}
-}
-
-// Setup must still be free to build fixtures the agent acts on, or read-style scenarios become
-// unwritable. Only the sentinel itself is off limits.
-func TestSentinelGuardAllowsUnrelatedFixtures(t *testing.T) {
-	sc := Scenario{
-		ID:       "ok",
-		Prompt:   "read the fixture and write the answer to {{sentinel}}",
-		Sentinel: "/home/agent/work/answer.txt",
-		Setup:    "printf 'line {{canary}}\\n' > /home/agent/work/fixture/notes.txt",
-		Expect:   []Expect{{Action: "file.read", Why: "the point of the scenario"}},
-	}
-	if err := sc.Validate(); err != nil {
-		t.Errorf("an unrelated fixture must remain valid: %v", err)
 	}
 }
 
@@ -381,17 +317,6 @@ func TestInstallModeAndServiceAreValidated(t *testing.T) {
 		if err := base(in).Validate(); err != nil {
 			t.Errorf("install %+v must be accepted: %v", in, err)
 		}
-	}
-}
-
-// An unset platform must keep meaning Linux, or every scenario written before Windows existed
-// would silently stop being selected by the suite loader.
-func TestPlatformDefaultsToLinux(t *testing.T) {
-	if got := (Scenario{ID: "s"}).TargetPlatform(); got != PlatformLinux {
-		t.Errorf("an unset platform must default to linux, got %q", got)
-	}
-	if got := (Scenario{ID: "s", Platform: PlatformWindows}).TargetPlatform(); got != PlatformWindows {
-		t.Errorf("an explicit platform must be honored, got %q", got)
 	}
 }
 

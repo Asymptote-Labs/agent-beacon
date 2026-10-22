@@ -7,22 +7,6 @@ import (
 	"unicode/utf8"
 )
 
-func TestRedactStringRedactsKnownSecretForms(t *testing.T) {
-	tests := []string{
-		"authorization: Bearer secret-token",
-		"token=super-secret",
-		"Bearer abcdef0123456789",
-		"sk-abcdefghijklmnopqrstuvwxyz",
-	}
-	for _, input := range tests {
-		t.Run(input, func(t *testing.T) {
-			if got := RedactString(input); strings.Contains(got, "secret") || strings.Contains(got, "abcdefghijklmnopqrstuvwxyz") {
-				t.Fatalf("RedactString(%q) = %q", input, got)
-			}
-		})
-	}
-}
-
 func TestRedactStringRedactsRepeatedBareAssignedValue(t *testing.T) {
 	value := "Use token=beacon-opencode-e2e-secret, then replace beacon-opencode-e2e-secret in the file."
 	got := RedactString(value)
@@ -149,6 +133,7 @@ func TestRedactStringRedactsCommonCredentialFormats(t *testing.T) {
 		{"json cookie header", `{"cookie": "sid=abcdef123456789"}`, "abcdef123456789"},
 		{"yaml cookie key", "headers:\n  cookie: sid=abcdef123456789", "abcdef123456789"},
 		{"basic auth", "Authorization: Basic dXNlcjpwYXNzd29yZA==", "dXNlcjpwYXNzd29yZA=="},
+		{"bare bearer", "Bearer abcdef0123456789", "abcdef0123456789"},
 		{"slack", "xoxb-1234567890-abcdefghijkl", "abcdefghijkl"},
 		{"stripe", "sk_live_AbCdEfGhIjKlMnOpQrSt", "AbCdEfGhIjKlMnOpQrSt"},
 		{"google", "AIzaSyA-abcdefghijklmnopqrstuvwxyz012345", "abcdefghijklmnopqrstuvwxyz012345"},

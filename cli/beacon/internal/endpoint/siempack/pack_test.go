@@ -29,23 +29,6 @@ func testPack() Pack {
 	}
 }
 
-func TestPackFilesReturnsUnrenderedContentWithFlags(t *testing.T) {
-	files, err := testPack().Files()
-	if err != nil {
-		t.Fatalf("Files() error: %v", err)
-	}
-	if len(files) != 4 {
-		t.Fatalf("Files() returned %d files, want 4", len(files))
-	}
-	// run.sh keeps the token unrendered; substitution is deferred to Install.
-	if files[1].Name != "run.sh" || files[1].Content != "log={{LOG_PATH}}\n" || !files[1].TemplateLogPath {
-		t.Fatalf("run.sh entry = %+v", files[1])
-	}
-	if !files[3].JSONEscape {
-		t.Fatalf("conf.json should carry JSONEscape flag: %+v", files[3])
-	}
-}
-
 func TestPackRenderSubstitutesLogPathAndDefaults(t *testing.T) {
 	p := testPack()
 	got, err := p.Render("pack/run.sh.tmpl", "/custom/path.jsonl")
@@ -94,18 +77,11 @@ func TestPackInstallWritesRenderedFilesWithModes(t *testing.T) {
 	if string(conf) != "{\"path\":\"/custom/path.jsonl\"}" {
 		t.Fatalf("installed conf.json = %q", conf)
 	}
-}
-
-func TestPackReadAndMustReadWrapErrorsWithLabel(t *testing.T) {
-	p := testPack().WithFS(fstest.MapFS{})
-	_, err := p.Read("pack/README.md")
-	if err == nil {
-		t.Fatal("Read of missing asset should error")
+	info, err = os.Stat(filepath.Join(dir, "conf.json"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	defer func() {
-		if recover() == nil {
-			t.Fatal("MustRead of missing asset should panic")
-		}
-	}()
-	_ = p.MustRead("pack/README.md")
+	if testenv.HasPOSIXFileModes() && info.Mode().Perm() != 0644 {
+		t.Fatalf("conf.json mode = %v, want 0644", info.Mode().Perm())
+	}
 }

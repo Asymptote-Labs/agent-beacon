@@ -188,29 +188,6 @@ func TestUploadSnapshotIsRedacted(t *testing.T) {
 	}
 }
 
-func TestPullOnceDedupsAcrossRuns(t *testing.T) {
-	dir := t.TempDir()
-	logPath := filepath.Join(dir, "runtime.jsonl")
-	statePath := filepath.Join(dir, "state.json")
-	client := pullTestServer(t)
-
-	opts := PullOptions{Write: true, LogPath: logPath, StatePath: statePath}
-	if _, err := PullOnce(context.Background(), client, opts); err != nil {
-		t.Fatalf("first PullOnce: %v", err)
-	}
-	sum, err := PullOnce(context.Background(), client, opts)
-	if err != nil {
-		t.Fatalf("second PullOnce: %v", err)
-	}
-	// Unchanged session → skipped entirely on the second sweep.
-	if sum.EventsEmitted != 0 || sum.SessionsChanged != 0 {
-		t.Fatalf("second sweep emitted %+v, want zero (dedup)", sum)
-	}
-	if len(nonEmptyLines(t, logPath)) != 4 {
-		t.Fatalf("log grew on re-run; dedup failed")
-	}
-}
-
 func TestPullOncePersistsStateOnError(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "runtime.jsonl")

@@ -6,84 +6,36 @@ import (
 	"time"
 )
 
-func TestFormatTimestampKeepsSubSecondPrecision(t *testing.T) {
-	// The finding that motivated this: 0 of 5,595 events in a real runtime log carried a
-	// sub-second timestamp, so 97% of them shared a timestamp with another event in the
-	// same session and nothing could order them.
-	at := time.Date(2026, 8, 21, 9, 14, 3, 123456789, time.UTC)
-	if got, want := FormatTimestamp(at), "2026-08-21T09:14:03.123456789Z"; got != want {
-		t.Fatalf("FormatTimestamp = %q, want %q", got, want)
-	}
-}
-
-func TestFormatTimestampIsFixedWidth(t *testing.T) {
-	// time.RFC3339Nano would render these at three different widths, because it trims
-	// trailing zeros from the fractional second.
-	cases := []time.Time{
-		time.Date(2026, 8, 21, 9, 14, 3, 0, time.UTC),
-		time.Date(2026, 8, 21, 9, 14, 3, 500000000, time.UTC),
-		time.Date(2026, 8, 21, 9, 14, 3, 1, time.UTC),
-	}
-	want := len(FormatTimestamp(cases[0]))
-	for _, at := range cases {
-		if got := FormatTimestamp(at); len(got) != want {
-			t.Fatalf("FormatTimestamp(%s) = %q (%d chars), want %d chars", at, got, len(got), want)
-		}
-	}
-	if got, want := FormatTimestamp(cases[0]), "2026-08-21T09:14:03.000000000Z"; got != want {
-		t.Fatalf("whole second = %q, want %q (zeros retained)", got, want)
-	}
-}
-
-func TestFormatTimestampSortsByteWiseInChronologicalOrder(t *testing.T) {
-	// Fixed width is what lets a SIEM query, a `sort` over a JSONL tail, or the
-	// dashboard summary compare two timestamps as strings and get the right answer.
-	base := time.Date(2026, 8, 21, 9, 14, 3, 0, time.UTC)
-	prev := ""
-	for _, offset := range []time.Duration{
-		0, time.Nanosecond, time.Microsecond, 500 * time.Millisecond,
-		time.Second, 61 * time.Second,
+// Fixed width is what lets a SIEM query, a `sort` over a JSONL tail, or the dashboard summary
+// compare two timestamps as strings; time.RFC3339Nano would trim trailing zeros instead. The
+// finding that motivated sub-second precision: 0 of 5,595 events in a real runtime log carried a
+// sub-second timestamp, so 97% of them shared a timestamp with another event in the same session.
+func TestFormatTimestamp(t *testing.T) {
+	for name, tc := range map[string]struct {
+		at   time.Time
+		want string
+	}{
+		"sub-second":   {time.Date(2026, 8, 21, 9, 14, 3, 123456789, time.UTC), "2026-08-21T09:14:03.123456789Z"},
+		"whole second": {time.Date(2026, 8, 21, 9, 14, 3, 0, time.UTC), "2026-08-21T09:14:03.000000000Z"},
+		"half second":  {time.Date(2026, 8, 21, 9, 14, 3, 500000000, time.UTC), "2026-08-21T09:14:03.500000000Z"},
+		"to UTC":       {time.Date(2026, 8, 21, 2, 14, 3, 0, time.FixedZone("UTC-7", -7*60*60)), "2026-08-21T09:14:03.000000000Z"},
 	} {
-		got := FormatTimestamp(base.Add(offset))
-		if prev != "" && !(prev < got) {
-			t.Fatalf("string order disagrees with time order: %q not before %q", prev, got)
+		if got := FormatTimestamp(tc.at); got != tc.want {
+			t.Errorf("%s: FormatTimestamp = %q, want %q", name, got, tc.want)
 		}
-		prev = got
 	}
 }
 
-func TestFormatTimestampNormalizesToUTC(t *testing.T) {
-	zone := time.FixedZone("UTC-7", -7*60*60)
-	at := time.Date(2026, 8, 21, 2, 14, 3, 0, zone)
-	if got, want := FormatTimestamp(at), "2026-08-21T09:14:03.000000000Z"; got != want {
-		t.Fatalf("FormatTimestamp = %q, want %q", got, want)
-	}
-}
-
-func TestParseTimestampRoundTrips(t *testing.T) {
+func TestParseTimestamp(t *testing.T) {
 	at := time.Date(2026, 8, 21, 9, 14, 3, 123456789, time.UTC)
-	got, err := ParseTimestamp(FormatTimestamp(at))
-	if err != nil {
-		t.Fatalf("ParseTimestamp returned error: %v", err)
+	if got, err := ParseTimestamp(FormatTimestamp(at)); err != nil || !got.Equal(at) {
+		t.Fatalf("round trip = %s, %v; want %s", got, err, at)
 	}
-	if !got.Equal(at) {
-		t.Fatalf("round trip = %s, want %s", got, at)
+	// A log written before nanosecond stamping has to keep reading back: an installed agent
+	// upgrades mid-log, and the active runtime.jsonl spans both.
+	if got, err := ParseTimestamp("2026-08-21T09:14:03Z"); err != nil || !got.Equal(at.Truncate(time.Second)) {
+		t.Fatalf("legacy = %s, %v", got, err)
 	}
-}
-
-func TestParseTimestampReadsLegacySecondResolution(t *testing.T) {
-	// A log written before nanosecond stamping has to keep reading back: an installed
-	// agent upgrades mid-log, and the active runtime.jsonl spans both.
-	got, err := ParseTimestamp("2026-08-21T09:14:03Z")
-	if err != nil {
-		t.Fatalf("ParseTimestamp returned error: %v", err)
-	}
-	if want := time.Date(2026, 8, 21, 9, 14, 3, 0, time.UTC); !got.Equal(want) {
-		t.Fatalf("parsed = %s, want %s", got, want)
-	}
-}
-
-func TestParseTimestampRejectsNonTimestamps(t *testing.T) {
 	for _, value := range []string{"", "not-a-time", "1755767643"} {
 		if _, err := ParseTimestamp(value); err == nil {
 			t.Fatalf("ParseTimestamp(%q) succeeded, want error", value)

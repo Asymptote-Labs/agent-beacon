@@ -282,18 +282,6 @@ func TestRulesPullRejectsUnsupportedPath(t *testing.T) {
 	}
 }
 
-func TestLoadRuleFilesSingleFile(t *testing.T) {
-	dir := t.TempDir()
-	p := writeRuleFile(t, dir, "ok.rule.yaml", validRuleYAML)
-	rules, skipped, err := loadRuleFiles(p)
-	if err != nil || len(skipped) != 0 {
-		t.Fatalf("loadRuleFiles single: %v (skipped %v)", err, skipped)
-	}
-	if len(rules) != 1 || rules[0].ID != "cli-test-rule" {
-		t.Fatalf("unexpected: %+v", rules)
-	}
-}
-
 // pullTestSetup isolates the store and resets the pull options and limits for a test.
 func pullTestSetup(t *testing.T) {
 	t.Helper()

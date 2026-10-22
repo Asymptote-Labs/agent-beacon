@@ -33,19 +33,6 @@ func writeLensLog(t *testing.T) string {
 	return path
 }
 
-func TestLensesSpecPrintsTheSpecAndAnExample(t *testing.T) {
-	useLensToolsDefaults(t)
-	cmd, buf := newCmd()
-	if err := lensesSpecCmd.RunE(cmd, nil); err != nil || !strings.HasPrefix(buf.String(), "# Lenses — Specification") {
-		t.Fatalf("spec = %v, %.60q", err, buf.String())
-	}
-	lensToolsOpts.example = true
-	cmd, buf = newCmd()
-	if err := lensesSpecCmd.RunE(cmd, nil); err != nil || !strings.Contains(buf.String(), `<script type="application/beacon-lens+json">`) {
-		t.Fatalf("spec --example = %v", err)
-	}
-}
-
 func TestLensesLint(t *testing.T) {
 	useLensToolsDefaults(t)
 	dir := t.TempDir()

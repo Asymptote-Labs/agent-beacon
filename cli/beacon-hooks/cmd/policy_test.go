@@ -4,25 +4,42 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/policy"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/activesession"
 )
 
-// writeProvider writes an executable shell script that ignores stdin and prints a
-// fixed JSON response, then points BEACON_POLICY_PROVIDER at it. Skips on Windows,
-// which has no /bin/sh.
+// The provider script is written once per test binary and reused: on macOS the first exec of a
+// freshly written executable costs ~55ms in system policy checks, which a per-test script paid on
+// every policy test. It lives in TestMain's temp directory, which TestMain removes.
+var policyProviderScript struct {
+	once sync.Once
+	path string
+	err  error
+}
+
+// policyTestResponseEnv carries the response the shared provider script prints.
+const policyTestResponseEnv = "BEACON_TEST_POLICY_RESPONSE"
+
+// writeProvider points BEACON_POLICY_PROVIDER at a shell script that ignores stdin and prints
+// responseJSON. Skips on Windows, which has no /bin/sh.
 func writeProvider(t *testing.T, responseJSON string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("provider script requires a POSIX shell")
 	}
-	path := filepath.Join(t.TempDir(), "provider.sh")
-	script := "#!/bin/sh\ncat >/dev/null\nprintf '%s' '" + responseJSON + "'\n"
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("write provider: %v", err)
+	policyProviderScript.once.Do(func() {
+		path := filepath.Join(filepath.Dir(os.Getenv(activesession.PathEnv)), "policy-provider.sh")
+		script := "#!/bin/sh\ncat >/dev/null\nprintf '%s' \"$" + policyTestResponseEnv + "\"\n"
+		policyProviderScript.path, policyProviderScript.err = path, os.WriteFile(path, []byte(script), 0o755)
+	})
+	if policyProviderScript.err != nil {
+		t.Fatalf("write provider: %v", policyProviderScript.err)
 	}
-	t.Setenv(policy.ProviderEnv, path)
+	t.Setenv(policyTestResponseEnv, responseJSON)
+	t.Setenv(policy.ProviderEnv, policyProviderScript.path)
 }
 
 func setupPolicyTest(t *testing.T, platform, responseJSON string) string {
@@ -71,6 +88,8 @@ func TestPreToolPolicyDenyCursor(t *testing.T) {
 	assertDenialEvent(t, logPath)
 }
 
+// Claude Code's PreToolUse reads permissionDecision and ignores a decision object, so the
+// permission-phase shape must not leak into pre-tool.
 func TestPreToolPolicyDenyClaude(t *testing.T) {
 	logPath := setupPolicyTest(t, "claude", denyResponse)
 	out := runHookWithInput(t, runPreTool, map[string]interface{}{
@@ -84,6 +103,12 @@ func TestPreToolPolicyDenyClaude(t *testing.T) {
 	}
 	if hso["permissionDecision"] != "deny" || hso["permissionDecisionReason"] != "blocked by test" {
 		t.Fatalf("hookSpecificOutput = %#v, want deny + reason", hso)
+	}
+	if hso["hookEventName"] != "PreToolUse" {
+		t.Fatalf("hookEventName = %v, want PreToolUse", hso["hookEventName"])
+	}
+	if _, ok := hso["decision"]; ok {
+		t.Fatalf("hookSpecificOutput = %#v carries the PermissionRequest decision object", hso)
 	}
 	assertDenialEvent(t, logPath)
 }
@@ -146,27 +171,6 @@ func TestPermissionRequestPolicyDenyClaude(t *testing.T) {
 		t.Fatalf("decision = %#v, want behavior=deny message=blocked by test", decision)
 	}
 	assertDenialEvent(t, logPath)
-}
-
-func TestPreToolPolicyDenyClaudeKeepsPreToolUseShape(t *testing.T) {
-	// The permission-phase object must not leak into pre-tool, where Claude Code
-	// reads permissionDecision and ignores a decision object.
-	setupPolicyTest(t, "claude", denyResponse)
-	out := runHookWithInput(t, runPreTool, map[string]interface{}{
-		"session_id": "s-claude-pre",
-		"tool_name":  "Bash",
-		"tool_input": map[string]interface{}{"command": "codex --full-auto"},
-	})
-	hso, ok := out["hookSpecificOutput"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("claude pre-tool deny = %#v, want hookSpecificOutput", out)
-	}
-	if hso["hookEventName"] != "PreToolUse" {
-		t.Fatalf("hookEventName = %v, want PreToolUse", hso["hookEventName"])
-	}
-	if _, ok := hso["decision"]; ok {
-		t.Fatalf("hookSpecificOutput = %#v carries the PermissionRequest decision object", hso)
-	}
 }
 
 func TestPermissionRequestPolicyDenyDevin(t *testing.T) {

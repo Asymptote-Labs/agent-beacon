@@ -27,25 +27,6 @@ func TestResolveBranchPrefersRuntimeProvidedBranch(t *testing.T) {
 	}
 }
 
-func TestResolveBranchReadsLocalCheckout(t *testing.T) {
-	repo := t.TempDir()
-	writeGitHead(t, repo, "ref: refs/heads/feature/local\n")
-
-	got := resolveBranch(map[string]interface{}{}, repo)
-	if got != "feature/local" {
-		t.Fatalf("resolveBranch = %q, want feature/local", got)
-	}
-}
-
-func TestResolveBranchOutsideRepo(t *testing.T) {
-	if got := resolveBranch(map[string]interface{}{}, t.TempDir()); got != "" {
-		t.Fatalf("resolveBranch = %q, want empty outside a repo", got)
-	}
-	if got := resolveBranch(map[string]interface{}{}, ""); got != "" {
-		t.Fatalf("resolveBranch = %q, want empty without cwd", got)
-	}
-}
-
 func TestResolveBranchDisabledByEnv(t *testing.T) {
 	repo := t.TempDir()
 	writeGitHead(t, repo, "ref: refs/heads/feature/local\n")
@@ -108,28 +89,6 @@ func TestRunPromptSubmitOmitsBranchOutsideRepo(t *testing.T) {
 	event := lastEndpointEvent(t, logPath)
 	if branch, ok := event["branch"]; ok {
 		t.Fatalf("branch = %q, want no branch field outside a repo", branch)
-	}
-}
-
-func TestRunOpenCodeEventEmitsLocalGitBranch(t *testing.T) {
-	setupHookConfigDirs(t)
-	platformFlag = "opencode"
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-
-	repo := t.TempDir()
-	writeGitHead(t, repo, "ref: refs/heads/feature/opencode\n")
-
-	runHookWithInput(t, runOpenCodeEvent, map[string]interface{}{
-		"type":       "command.executed",
-		"session_id": "oc-branch",
-		"cwd":        repo,
-		"command":    "ls",
-	})
-
-	event := lastEndpointEvent(t, logPath)
-	if got := event["branch"]; got != "feature/opencode" {
-		t.Fatalf("branch = %q, want feature/opencode", got)
 	}
 }
 

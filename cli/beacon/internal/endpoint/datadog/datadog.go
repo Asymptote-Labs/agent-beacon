@@ -2,7 +2,6 @@ package datadog
 
 import (
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
-	"io/fs"
 
 	"embed"
 
@@ -39,16 +38,6 @@ var pack = siempack.Pack{
 
 // mustRead returns the embedded asset at path or panics. Retained for test use.
 func mustRead(path string) string { return pack.MustRead(path) }
-
-// filesFromFS builds the file list from the supplied FS; tests use it to inject
-// read-error conditions. Log-path substitution is deferred to InstallPack, so the
-// logPath argument is accepted for signature compatibility but unused here.
-func filesFromFS(fsys fs.FS, logPath string) ([]File, error) { return pack.WithFS(fsys).Files() }
-
-// configSnippetFromFS renders the Datadog Agent conf.yaml snippet using the supplied FS.
-func configSnippetFromFS(fsys fs.FS, logPath string) (string, error) {
-	return pack.WithFS(fsys).Render(configAsset, logPath)
-}
 
 // ConfigSnippet returns the Datadog Agent conf.yaml snippet with logPath substituted.
 func ConfigSnippet(logPath string) (string, error) { return pack.Render(configAsset, logPath) }

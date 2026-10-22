@@ -45,25 +45,18 @@ func TestAppendEventCreatesSharedRuntimeFilesDespiteUmask(t *testing.T) {
 			t.Fatalf("%s mode = %o, want %o", target, got, runtimeFileMode)
 		}
 	}
-}
 
-func TestEnsureRuntimeFileCreatesSharedRuntimeLogDespiteUmask(t *testing.T) {
-	oldUmask := syscall.Umask(0022)
-	t.Cleanup(func() {
-		syscall.Umask(oldUmask)
-	})
-
-	path := filepath.Join(t.TempDir(), "runtime.jsonl")
-	if err := EnsureRuntimeFile(path); err != nil {
+	// EnsureRuntimeFile (doctor --fix, Elastic setup) creates the same shared mode.
+	ensured := filepath.Join(t.TempDir(), "runtime.jsonl")
+	if err := EnsureRuntimeFile(ensured); err != nil {
 		t.Fatalf("EnsureRuntimeFile returned error: %v", err)
 	}
-
-	info, err := os.Stat(path)
+	info, err := os.Stat(ensured)
 	if err != nil {
-		t.Fatalf("stat %s: %v", path, err)
+		t.Fatalf("stat %s: %v", ensured, err)
 	}
 	if got := info.Mode().Perm(); got != runtimeFileMode {
-		t.Fatalf("%s mode = %o, want %o", path, got, runtimeFileMode)
+		t.Fatalf("%s mode = %o, want %o", ensured, got, runtimeFileMode)
 	}
 }
 

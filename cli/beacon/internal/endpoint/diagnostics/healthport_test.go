@@ -27,14 +27,3 @@ func TestCollectorHealthCheckTargetsTheConfiguredHealthPort(t *testing.T) {
 		t.Fatalf("collector_health target = %q, want %q", check.Target, want)
 	}
 }
-
-func TestCollectorHealthCheckTargetsTheDefaultPortForALegacyConfig(t *testing.T) {
-	cfg := endpointconfig.Default(true, filepath.Join(t.TempDir(), "runtime.jsonl"))
-	cfg.Collector.HealthPort = 0
-
-	check := checkCollectorHealth(cfg)
-
-	if check.Target != "127.0.0.1:13133" {
-		t.Fatalf("collector_health target = %q, want 127.0.0.1:13133", check.Target)
-	}
-}

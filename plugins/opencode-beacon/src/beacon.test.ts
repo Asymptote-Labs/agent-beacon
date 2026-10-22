@@ -214,7 +214,7 @@ describe("BeaconEndpointPlugin", () => {
         },
       },
     } as any)
-    await Bun.sleep(20)
+    await nextTurn()
 
     expect(payloads.map((item) => item.type)).toEqual([
       "message.updated",
@@ -256,7 +256,7 @@ describe("BeaconEndpointPlugin", () => {
         },
       },
     } as any)
-    await Bun.sleep(20)
+    await nextTurn()
 
     expect(payloads.map((item) => item.type)).toEqual(["tool.execute.before", "tool.execute.after"])
   })
@@ -285,7 +285,7 @@ describe("BeaconEndpointPlugin", () => {
       } as any)
     }
     await hooks.event!({ event: { type: "session.idle", properties: { sessionID: "ses_1" } } } as any)
-    await Bun.sleep(20)
+    await nextTurn()
 
     expect(payloads.map((item) => item.type)).toEqual(["chat.message", "session.status", "session.status"])
     expect(payloads.some((item) => item.type === "message.part.updated")).toBe(false)
@@ -305,7 +305,7 @@ describe("BeaconEndpointPlugin", () => {
       { tool: "bash", sessionID: "ses_1", callID: "call_rm", args: { command: `rm "${path}"` } },
       { title: "rm", output: "", metadata: { exit: 0 } },
     )
-    await Bun.sleep(20)
+    await nextTurn()
 
     expect(payloads.map((item) => item.type)).toEqual(["tool.execute.before", "tool.execute.after"])
     expect(payloads[1]).toMatchObject({
@@ -350,7 +350,7 @@ describe("BeaconEndpointPlugin", () => {
         },
       },
     } as any)
-    await Bun.sleep(20)
+    await nextTurn()
 
     expect(payloads.map((item) => item.type)).toEqual(["message.part.updated", "message.updated"])
     expect(payloads[0].part.text).toBe("late role")
@@ -394,7 +394,7 @@ describe("BeaconEndpointPlugin", () => {
         },
       },
     } as any)
-    await Bun.sleep(20)
+    await nextTurn()
 
     expect(payloads).toHaveLength(1)
     expect(payloads[0].part.text).toBe("streamed text")
@@ -420,7 +420,7 @@ describe("BeaconEndpointPlugin", () => {
     await hooks.event!({
       event: { type: "session.status", properties: { sessionID: "ses_1", status: { type: "idle" } } },
     } as any)
-    await Bun.sleep(20)
+    await nextTurn()
 
     expect(payloads.map((item) => item.type)).toEqual(["session.status"])
   })
@@ -445,9 +445,9 @@ describe("BeaconEndpointPlugin", () => {
     })
     await hooks.event!(completed("ses_1") as any)
     await hooks.event!({ event: { type: "session.deleted", properties: { sessionID: "ses_1" } } } as any)
-    await Bun.sleep(20)
+    await nextTurn()
     await hooks.event!(completed("ses_2") as any)
-    await Bun.sleep(20)
+    await nextTurn()
 
     expect(payloads.map((item) => item.type)).toEqual(["message.updated", "session.deleted", "message.updated"])
   })
@@ -472,7 +472,7 @@ describe("BeaconEndpointPlugin", () => {
         },
       },
     } as any)
-    await Bun.sleep(20)
+    await nextTurn()
 
     expect(payloads[1].file_mutations).toEqual([])
     expect(payloads[2].model).toBe("moonshotai/kimi-k3")
@@ -498,7 +498,7 @@ describe("BeaconEndpointPlugin", () => {
         },
       },
     } as any)
-    await Bun.sleep(20)
+    await nextTurn()
 
     expect(payloads[1].file_mutations).toEqual([])
     expect(payloads[2].type).toBe("session.diff")
@@ -520,7 +520,7 @@ describe("BeaconEndpointPlugin", () => {
         },
       },
     } as any)
-    await Bun.sleep(20)
+    await nextTurn()
 
     expect(payloads.map((item) => item.type)).toEqual(["tool.execute.before", "session.diff"])
   })
@@ -589,7 +589,7 @@ describe("OpenCode 2.x plugin definition", () => {
       version: "2.0.15",
       model: { id: "kimi-k3", providerID: "moonshotai" },
     })
-    await Bun.sleep(10)
+    await nextTurn()
     await v2.fire("session.prompt", {
       sessionID: "ses_1",
       messageID: "msg_user",
@@ -642,7 +642,7 @@ describe("OpenCode 2.x plugin definition", () => {
     v2.emit("permission.replied", { sessionID: "ses_1", requestID: "per_1", reply: "reject" })
     v2.emit("session.execution.succeeded", { sessionID: "ses_1" })
     v2.emit("session.idle", { sessionID: "ses_1" })
-    await Bun.sleep(30)
+    await nextTurn()
     await (cleanup as any)()
 
     expect(payloads.map((item) => item.type)).toEqual([

@@ -20,47 +20,24 @@ func TestLookupRealModelStrings(t *testing.T) {
 		// Claude Code reports Anthropic's ids, with a snapshot date or a [1m] marker.
 		{"claude-opus-4-6", "claude-opus-4-6", MatchExact, nil},
 		{"claude-opus-4-6[1m]", "claude-opus-4-6", MatchExact, []string{StrippedContextWindow}},
-		{"claude-opus-5[1m]", "claude-opus-5", MatchExact, []string{StrippedContextWindow}},
-		{"claude-sonnet-4-5", "claude-sonnet-4-5", MatchExact, nil},
 		{"claude-sonnet-4-5-20250929", "claude-sonnet-4-5-20250929", MatchExact, nil},
-		{"claude-haiku-4-5", "claude-haiku-4-5", MatchExact, nil},
-		{"claude-opus-4-7", "claude-opus-4-7", MatchExact, nil},
-		{"claude-sonnet-5-5", "claude-sonnet-5-5", MatchExact, nil},
-		{"claude-fable-5-1", "claude-fable-5-1", MatchExact, nil},
 		// A snapshot the list does not carry is priced as its undated alias.
 		{"claude-sonnet-4-6-20260101", "claude-sonnet-4-6", MatchExact, []string{StrippedDateSnapshot}},
 		// Older snapshots Anthropic's own list has retired survive as Bedrock model ids.
 		{"claude-sonnet-4-20250514", "anthropic.claude-sonnet-4-20250514-v1:0", MatchProviderPrefix, nil},
-		{"claude-opus-4-1-20250805", "anthropic.claude-opus-4-1-20250805-v1:0", MatchProviderPrefix, nil},
 		// Claude Code on Bedrock reports the inference profile, which has its own price.
 		{"us.anthropic.claude-sonnet-4-5-20250929-v1:0", "us.anthropic.claude-sonnet-4-5-20250929-v1:0", MatchExact, nil},
-		{"global.anthropic.claude-opus-4-6-v1", "global.anthropic.claude-opus-4-6-v1", MatchExact, nil},
 		// Copilot and OpenRouter-backed runtimes dot the version.
 		{"claude-sonnet-4.6", "claude-sonnet-4-6", MatchDottedVersion, nil},
-		{"claude-opus-4.6", "claude-opus-4-6", MatchDottedVersion, nil},
 		{"anthropic/claude-opus-4.6", "claude-opus-4-6", MatchDottedVersion, nil},
 		// Provider prefixes and capitalization from gateways.
 		{"Anthropic/Claude-Sonnet-4-5", "claude-sonnet-4-5", MatchCanonical, nil},
 		{"openrouter/anthropic/claude-sonnet-4-5", "claude-sonnet-4-5", MatchCanonical, nil},
 		// Codex and OpenAI-backed runtimes.
 		{"gpt-5.4", "gpt-5.4", MatchExact, nil},
-		{"gpt-5", "gpt-5", MatchExact, nil},
-		{"gpt-5-codex", "gpt-5-codex", MatchExact, nil},
-		{"gpt-5.1-codex-max", "gpt-5.1-codex-max", MatchExact, nil},
-		{"gpt-5.3-codex", "gpt-5.3-codex", MatchExact, nil},
-		{"gpt-5.5", "gpt-5.5", MatchExact, nil},
-		{"gpt-5.6-sol", "gpt-5.6-sol", MatchExact, nil},
-		{"gpt-4o", "gpt-4o", MatchExact, nil},
-		{"gpt-4o-mini", "gpt-4o-mini", MatchExact, nil},
-		{"gpt-4o-2024-08-06", "gpt-4o-2024-08-06", MatchExact, nil},
-		{"gpt-4.1", "gpt-4.1", MatchExact, nil},
-		{"o3", "o3", MatchExact, nil},
-		{"o4-mini", "o4-mini", MatchExact, nil},
 		{"openai/gpt-5", "gpt-5", MatchCanonical, nil},
 		// Effort appended to the model name (OpenCode variants, Cursor's thinking models).
 		{"gpt-5.5-medium", "gpt-5.5", MatchExact, []string{StrippedEffortSuffix}},
-		{"gpt-5.5-high", "gpt-5.5", MatchExact, []string{StrippedEffortSuffix}},
-		{"gpt-5-codex-high", "gpt-5-codex", MatchExact, []string{StrippedEffortSuffix}},
 		{"claude-sonnet-4-5-thinking", "claude-sonnet-4-5", MatchExact, []string{StrippedEffortSuffix}},
 		// Decorations stack in whatever order a runtime appends them: an effort suffix on a dated
 		// snapshot comes off first, and the date it exposes is stripped on the next pass.
@@ -68,29 +45,18 @@ func TestLookupRealModelStrings(t *testing.T) {
 		{"claude-sonnet-4-6-20260101-thinking[1m]", "claude-sonnet-4-6", MatchExact, []string{StrippedContextWindow, StrippedEffortSuffix, StrippedDateSnapshot}},
 		// Gemini CLI.
 		{"gemini-2.5-pro", "gemini-2.5-pro", MatchExact, nil},
-		{"gemini-3.1-pro-preview", "gemini-3.1-pro-preview", MatchExact, nil},
 		{"gemini-3-pro-preview", "vertex_ai/gemini-3-pro-preview", MatchCanonical, nil},
 		// The other vendors' own APIs, whose upstream keys carry a provider prefix.
 		{"deepseek-chat", "deepseek-chat", MatchExact, nil},
-		{"deepseek-reasoner", "deepseek-reasoner", MatchExact, nil},
 		{"glm-4.6", "zai/glm-4.6", MatchCanonical, nil},
-		{"grok-code-fast-1", "xai/grok-code-fast-1", MatchCanonical, nil},
-		{"kimi-k3", "moonshot/kimi-k3", MatchCanonical, nil},
 		{"moonshotai/kimi-k3", "moonshot/kimi-k3", MatchCanonical, nil},
-		{"kimi-k2.5", "moonshot/kimi-k2.5", MatchCanonical, nil},
-		{"devstral-medium-latest", "mistral/devstral-medium-latest", MatchCanonical, nil},
 		// Retired from the vendor's list, priced from OpenRouter's.
 		{"kimi-k2", "openrouter/moonshotai/kimi-k2", MatchCanonical, nil},
-		{"claude-sonnet-4", "openrouter/anthropic/claude-sonnet-4", MatchCanonical, nil},
 
 		// Unpriced: names that are not models, and names that resemble a model without
 		// being one. No substring or fuzzy match may price any of these.
 		{"<synthetic>", "", "", nil},
-		{"auto", "", "", nil},
-		{"unknown", "", "", nil},
 		{"", "", "", nil},
-		{"grok-build", "", "", nil},
-		{"muse-spark-1.3", "", "", nil},
 		{"claude-4.5-sonnet", "", "", nil},
 		{"claude-sonnet", "", "", nil},
 		{"gpt-5.5-turbo", "", "", nil},

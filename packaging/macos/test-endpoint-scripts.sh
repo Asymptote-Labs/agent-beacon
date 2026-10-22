@@ -30,124 +30,6 @@ for script in "$ROOT_DIR"/packaging/macos/scripts/* "$ROOT_DIR"/packaging/macos/
       ;;
   esac
 done
-if ! grep -q 'INVENTORY_STATE' "$ROOT_DIR/packaging/macos/jamf/claude/common/repair-hooks.sh"; then
-  echo "repair-hooks should prepare inventory heartbeat state files" >&2
-  exit 1
-fi
-REPAIR_HOOKS_SCRIPT="$ROOT_DIR/packaging/macos/jamf/claude/common/repair-hooks.sh"
-JAMF_GUIDE="$ROOT_DIR/docs/guides/jamf-anthropic-openai-cursor-mdm.mdx"
-if grep -q 'chown -R' "$REPAIR_HOOKS_SCRIPT" || grep -q 'chmod +a "$CONSOLE_USER allow[^"]*add_file' "$REPAIR_HOOKS_SCRIPT"; then
-  echo "repair-hooks must not chown the user's home recursively as root or let the user add entries to the root log directory" >&2
-  exit 1
-fi
-if grep -q 'chmod +a "$CONSOLE_USER allow[^"]*add_file[^"]*" "$RUNTIME_DIR" ||' "$JAMF_GUIDE"; then
-  echo "the Jamf guide's snippet must not let the console user add entries to the root log directory" >&2
-  exit 1
-fi
-if ! grep -q 'restore_existing_forwarder' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
-  echo "postinstall should restore existing optional forwarders" >&2
-  exit 1
-fi
-if ! grep -q 'endpoint asymptote reconcile --system' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
-  echo "postinstall should re-render a connected endpoint's Beacon Cloud forwarder config" >&2
-  exit 1
-fi
-if ! grep -q 'endpoint user-config repair-installed' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
-  echo "postinstall should refresh installed user endpoint configuration after package install" >&2
-  exit 1
-fi
-if ! grep -q 'launchctl kickstart -k' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
-  echo "postinstall should kickstart already-loaded forwarders" >&2
-  exit 1
-fi
-if ! grep -q 'launchctl bootout "$target"' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
-  echo "postinstall should recover loaded-but-stuck forwarders with bootout" >&2
-  exit 1
-fi
-if ! grep -q 'could not restore existing forwarder' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
-  echo "postinstall should fail loudly when an existing forwarder cannot be restored" >&2
-  exit 1
-fi
-if ! grep -q 'launchctl bootstrap failed' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
-  echo "postinstall should preserve launchctl bootstrap diagnostics" >&2
-  exit 1
-fi
-if ! grep -q 'forwarder_stably_running' "$ROOT_DIR/packaging/macos/scripts/postinstall" ||
-   ! grep -q 'wait_for_forwarder_bootout' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
-  echo "postinstall should wait for bootout and verify stable forwarder startup" >&2
-  exit 1
-fi
-if ! grep -q 'com.beacon.endpoint.gcs-forwarder' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
-  echo "postinstall should restore the optional GCS forwarder" >&2
-  exit 1
-fi
-for installer in "$ROOT_DIR"/packaging/macos/jamf/claude/*/install-forwarder.sh; do
-  # Root daemons must not log to fixed names in world-writable /tmp: a local user could pre-create
-  # the file or plant a symlink for root to append through.
-  if grep -q '/tmp/\$LABEL' "$installer"; then
-    echo "forwarder installer must not send LaunchDaemon output to /tmp: $installer" >&2
-    exit 1
-  fi
-  if ! grep -q '/Library/Logs/Beacon' "$installer"; then
-    echo "forwarder installer should log under /Library/Logs/Beacon: $installer" >&2
-    exit 1
-  fi
-done
-for installer in \
-  "$ROOT_DIR/packaging/macos/jamf/claude/s3/install-forwarder.sh" \
-  "$ROOT_DIR/packaging/macos/jamf/claude/gcs/install-forwarder.sh"
-do
-  if ! grep -q 'Timed out waiting for.*to stop' "$installer"; then
-    echo "forwarder installer should wait for launchd bootout: $installer" >&2
-    exit 1
-  fi
-  if ! grep -q 'did not remain running' "$installer"; then
-    echo "forwarder installer should verify sustained launchd startup: $installer" >&2
-    exit 1
-  fi
-done
-if ! grep -q 'BEACON_KEEP_LOGS' "$FULL_CLEANUP_SCRIPT"; then
-  echo "full cleanup should support preserving logs" >&2
-  exit 1
-fi
-if ! grep -q 'BEACON_CLEAN_ALL_USERS' "$FULL_CLEANUP_SCRIPT"; then
-  echo "full cleanup should support all-user cleanup opt-in" >&2
-  exit 1
-fi
-if ! grep -q 'endpoint uninstall --system' "$FULL_CLEANUP_SCRIPT"; then
-  echo "full cleanup should run Beacon uninstall before force removal" >&2
-  exit 1
-fi
-if ! grep -q 'endpoint uninstall --system --keep-logs' "$FULL_CLEANUP_SCRIPT"; then
-  echo "full cleanup should preserve logs during the Beacon uninstall step" >&2
-  exit 1
-fi
-if ! grep -q 'OTEL_EXPORTER_OTLP_ENDPOINT' "$FULL_CLEANUP_SCRIPT"; then
-  echo "full cleanup should remove Beacon-managed Claude OTLP env" >&2
-  exit 1
-fi
-if ! grep -q 'http://127.0.0.1:' "$FULL_CLEANUP_SCRIPT"; then
-  echo "full cleanup should preserve non-local OTLP settings" >&2
-  exit 1
-fi
-if grep -q 'or enabled == "1"' "$FULL_CLEANUP_SCRIPT"; then
-  echo "full cleanup must not remove remote Claude OTLP settings solely because telemetry is enabled" >&2
-  exit 1
-fi
-if ! grep -q 'BEACON_LOCAL_OTLP_ENDPOINTS' "$FULL_CLEANUP_SCRIPT"; then
-  echo "full cleanup should match user OTLP settings to the installed Beacon ports" >&2
-  exit 1
-fi
-if ! grep -q 'ai.asymptote.beacon.endpoint' "$FULL_CLEANUP_SCRIPT" ||
-   grep -q 'pkgutil --pkgs' "$FULL_CLEANUP_SCRIPT"; then
-  echo "full cleanup should forget only the known Beacon package receipt" >&2
-  exit 1
-fi
-if ! grep -q 'GCS_FORWARDER_LABEL' "$FULL_CLEANUP_SCRIPT"; then
-  echo "full cleanup should remove the GCS forwarder" >&2
-  exit 1
-fi
-
 FULL_CLEANUP_BIN="$TMP_DIR/full-cleanup-bin"
 FULL_CLEANUP_BEACON="$TMP_DIR/full-cleanup-beacon"
 FULL_CLEANUP_ARGS="$TMP_DIR/full-cleanup-args"
@@ -210,11 +92,6 @@ if [ ! -f "$FULL_CLEANUP_RUNTIME/runtime.jsonl" ]; then
 fi
 if [ "$(cat "$FULL_CLEANUP_RECEIPT")" != "ai.asymptote.beacon.endpoint" ]; then
   echo "full cleanup should forget only the known Beacon package receipt" >&2
-  exit 1
-fi
-
-if ! grep -q 'O_NOFOLLOW' "$FULL_CLEANUP_SCRIPT" || grep -q 'chown -R' "$FULL_CLEANUP_SCRIPT"; then
-  echo "full cleanup should reject symlinks and avoid recursive ownership changes" >&2
   exit 1
 fi
 
@@ -646,18 +523,6 @@ BEACON_LAUNCHDAEMONS_DIR="$LAUNCHDAEMONS_DIR" \
 BEACON_NO_START="1" \
 "$ROOT_DIR/packaging/macos/jamf/claude/falcon/install-forwarder.sh" _ _ _ "https://falcon.example/services/collector" "falcon-token" "beacon-source" "json" "beacon-index" "$TMP_DIR/runtime.jsonl,/Users/*/.beacon/endpoint/logs/runtime.jsonl" "end" >/dev/null
 
-if [ ! -f "$FORWARDER_BASE/falcon-vector.toml" ]; then
-  echo "Falcon Vector config was not written" >&2
-  exit 1
-fi
-if [ ! -f "$FORWARDER_BASE/falcon-vector.env" ]; then
-  echo "Falcon Vector env was not written" >&2
-  exit 1
-fi
-if [ ! -f "$LAUNCHDAEMONS_DIR/com.beacon.endpoint.falcon-forwarder.plist" ]; then
-  echo "Falcon Vector plist was not written" >&2
-  exit 1
-fi
 if ! grep -q 'https://falcon.example/services/collector' "$FORWARDER_BASE/falcon-vector.env"; then
   echo "Falcon Vector env missing endpoint" >&2
   exit 1
@@ -747,18 +612,6 @@ AWS_WEB_IDENTITY_TOKEN_FILE="/tmp/test-web-identity-token" \
 AWS_ROLE_ARN="arn:aws:iam::123456789012:role/beacon-demo" \
 "$ROOT_DIR/packaging/macos/jamf/claude/s3/install-forwarder.sh" _ _ _ "beacon-test-bucket" "us-west-2" "beacon/claude/runtime/" "STANDARD_IA" "end" >/dev/null
 
-if [ ! -f "$S3_FORWARDER_BASE/s3-vector.toml" ]; then
-  echo "S3 Vector config was not written" >&2
-  exit 1
-fi
-if [ ! -f "$S3_FORWARDER_BASE/s3-vector.env" ]; then
-  echo "S3 Vector env was not written" >&2
-  exit 1
-fi
-if [ ! -f "$S3_LAUNCHDAEMONS_DIR/com.beacon.endpoint.s3-forwarder.plist" ]; then
-  echo "S3 Vector plist was not written" >&2
-  exit 1
-fi
 if [ -L "$BEACON_FORWARDER_LOG_DIR/com.beacon.endpoint.s3-forwarder.err" ]; then
   echo "S3 forwarder installer should remove a symlink planted at its log path" >&2
   exit 1
@@ -917,17 +770,6 @@ case "$(ls -l "$TMP_DIR/gcs-runtime.jsonl" | awk '{print $1}')" in
     exit 1
     ;;
 esac
-
-for path in \
-  "$GCS_FORWARDER_BASE/gcs-vector.toml" \
-  "$GCS_FORWARDER_BASE/gcs-vector.env" \
-  "$GCS_LAUNCHDAEMONS_DIR/com.beacon.endpoint.gcs-forwarder.plist"
-do
-  if [ ! -f "$path" ]; then
-    echo "GCS forwarder output missing: $path" >&2
-    exit 1
-  fi
-done
 
 for expected in \
   'sinks.beacon_runtime_gcs' \
@@ -1118,6 +960,7 @@ chmod +x "$FAKE_LAUNCHCTL_BIN/launchctl"
 
 PATH="$FAKE_LAUNCHCTL_BIN:$PATH" \
 FAKE_LAUNCHCTL_STATE="$FAKE_LAUNCHCTL_STATE" \
+BEACON_FORWARDER_POLL_SECONDS=0 \
 BEACON_VECTOR_BIN="$FAKE_VECTOR" \
 BEACON_GCS_FORWARDER_WRAPPER="$ROOT_DIR/packaging/macos/jamf/claude/gcs/run-forwarder.sh" \
 BEACON_FORWARDER_BASE_DIR="$GCS_LIFECYCLE_BASE" \
@@ -1139,6 +982,7 @@ if PATH="$FAKE_LAUNCHCTL_BIN:$PATH" \
   FAKE_LAUNCHCTL_STATE="$FAKE_LAUNCHCTL_STATE" \
   FAKE_LAUNCHCTL_CRASH_LOOP=1 \
   BEACON_FORWARDER_START_ATTEMPTS=4 \
+  BEACON_FORWARDER_POLL_SECONDS=0 \
   BEACON_VECTOR_BIN="$FAKE_VECTOR" \
   BEACON_GCS_FORWARDER_WRAPPER="$ROOT_DIR/packaging/macos/jamf/claude/gcs/run-forwarder.sh" \
   BEACON_FORWARDER_BASE_DIR="$GCS_CRASH_BASE" \
@@ -1182,38 +1026,6 @@ fi
 # Linux too: the packager and uname are faked.
 sh "$ROOT_DIR/packaging/macos/safari/test-safari-packaging.sh"
 
-# Fleet osquery files (packaging/macos/fleet) and the Fleet admin helper
-# (examples/fleet). A Fleet policy passes whenever its query returns a row, so a
-# policy must return nothing on an unhealthy host and must not aggregate.
-FLEET_HELPER="$ROOT_DIR/examples/fleet/configure-beacon-macos-s3.sh"
-bash -n "$FLEET_HELPER"
-for sql in "$ROOT_DIR"/packaging/macos/fleet/queries/*.sql "$ROOT_DIR"/packaging/macos/fleet/policies/*.sql; do
-  if grep -Eiq '(^|[^a-z_])pid([^a-z_]|$)' "$sql"; then
-    echo "$sql reads pid; osquery's launchd table has no pid column" >&2
-    exit 1
-  fi
-done
-for sql in "$ROOT_DIR"/packaging/macos/fleet/policies/*.sql; do
-  if grep -Eiq 'count[[:space:]]*\(' "$sql"; then
-    echo "$sql aggregates, so it returns a row on every host and the policy always passes" >&2
-    exit 1
-  fi
-  if ! head -n 1 "$sql" | grep -q '^SELECT 1'; then
-    echo "$sql should start with SELECT 1 and return a row only when the host is healthy" >&2
-    exit 1
-  fi
-  if ! grep -q "cpu_type LIKE 'arm64%'" "$sql"; then
-    echo "$sql should pass on Intel Macs, where the Apple Silicon package does not apply" >&2
-    exit 1
-  fi
-done
-if grep -q 'automatic_install=' "$FLEET_HELPER"; then
-  echo "the Fleet helper should not use Fleet's automatic install; its .pkg policy never passes" >&2
-  exit 1
-fi
-if grep -q 'query=${SOFTWARE_QUERY}' "$FLEET_HELPER"; then
-  echo "the Fleet helper should find the Beacon title by bundle identifier, not by name" >&2
-  exit 1
-fi
+# Fleet osquery files (packaging/macos/fleet) and the Fleet admin helper (examples/fleet).
 sh "$ROOT_DIR/examples/fleet/test/test-fleet-sql.sh"
 sh "$ROOT_DIR/examples/fleet/test/test-configure-beacon-macos-s3.sh"

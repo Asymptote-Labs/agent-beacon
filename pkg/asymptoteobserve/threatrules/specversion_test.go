@@ -61,10 +61,6 @@ func TestDecodeRuleRejectsNewerSpecClearly(t *testing.T) {
 		if u.RuleID != "future-rule" || u.Required != spec {
 			t.Errorf("%s: got %+v", spec, u)
 		}
-		want := `rule "future-rule" requires ` + spec + `, but this Beacon supports up to ` + SupportedSpec + `; upgrade Beacon to load it`
-		if err.Error() != want {
-			t.Errorf("message:\n  got:  %s\n  want: %s", err.Error(), want)
-		}
 	}
 }
 

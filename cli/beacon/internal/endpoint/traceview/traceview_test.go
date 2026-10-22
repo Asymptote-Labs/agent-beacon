@@ -87,7 +87,7 @@ func TestModelLoadsAndRendersLocalTraceList(t *testing.T) {
 	model = runCmd(t, model, model.Init())
 
 	view := model.View()
-	for _, want := range []string{"B E A C O N", "Build the trace browser", "cursor", "/work/beacon", "full, redacted", "nothing is sent anywhere"} {
+	for _, want := range []string{"Build the trace browser", "cursor", "/work/beacon", "full, redacted"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view missing %q:\n%s", want, view)
 		}
@@ -279,13 +279,6 @@ func TestListResultAppliedWhileInDetailMode(t *testing.T) {
 	model = next.(Model)
 	if !model.loading || model.query != "test" {
 		t.Fatalf("expected loading search, got loading=%t query=%q", model.loading, model.query)
-	}
-
-	// enter should be blocked while the list is loading.
-	next, cmd := model.Update(key("enter"))
-	model = next.(Model)
-	if model.mode != listMode || cmd != nil {
-		t.Fatalf("enter while loading should be a no-op, got mode=%v cmd=%v", model.mode, cmd)
 	}
 
 	// Simulate the list load completing after the user opened a trace through

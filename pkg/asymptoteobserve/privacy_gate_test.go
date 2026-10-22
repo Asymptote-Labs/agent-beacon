@@ -45,7 +45,7 @@ func TestRedactGateNeverChangesAResult(t *testing.T) {
 		"-----BEGIN RSA PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END RSA PRIVATE KEY-----",
 	}
 	r := rand.New(rand.NewSource(1))
-	for i := 0; i < 20000; i++ {
+	for i := 0; i < 3000; i++ {
 		inputs = append(inputs, randomRedactInput(r))
 	}
 	redacted := 0

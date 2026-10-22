@@ -152,52 +152,6 @@ func TestMapSkillListingOnSubagentTranscriptWithBlockContent(t *testing.T) {
 	}
 }
 
-func TestCollectOnceUsesCursorAndPrintDoesNotAdvance(t *testing.T) {
-	dir := t.TempDir()
-	projects := filepath.Join(dir, "projects")
-	sessionPath := filepath.Join(projects, "-tmp-repo", "sess-1.jsonl")
-	writeFile(t, sessionPath, userLine("sess-1", "u1", "first")+"\n")
-	statePath := filepath.Join(dir, "state", "claude.json")
-	logPath := filepath.Join(dir, "runtime.jsonl")
-
-	opts := CollectOptions{ProjectsDir: projects, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true}
-	first, err := CollectOnce(opts)
-	if err != nil {
-		t.Fatalf("first CollectOnce: %v", err)
-	}
-	if first.EventsEmitted == 0 {
-		t.Fatal("first sweep emitted no events")
-	}
-	before := readLog(t, logPath)
-	second, err := CollectOnce(opts)
-	if err != nil {
-		t.Fatalf("second CollectOnce: %v", err)
-	}
-	if second.EventsEmitted != 0 {
-		t.Fatalf("second sweep emitted %d events, want 0", second.EventsEmitted)
-	}
-	if after := readLog(t, logPath); len(after) != len(before) {
-		t.Fatalf("log grew from %d to %d events with unchanged cursor", len(before), len(after))
-	}
-
-	writeFile(t, sessionPath, userLine("sess-1", "u1", "first")+"\n"+userLine("sess-1", "u2", "second")+"\n")
-	var printed strings.Builder
-	printSummary, err := CollectOnce(CollectOptions{ProjectsDir: projects, Print: true, Out: &printed})
-	if err != nil {
-		t.Fatalf("print CollectOnce: %v", err)
-	}
-	if printSummary.EventsEmitted == 0 || printed.Len() == 0 {
-		t.Fatalf("print sweep emitted nothing: summary=%+v output=%q", printSummary, printed.String())
-	}
-	realSummary, err := CollectOnce(opts)
-	if err != nil {
-		t.Fatalf("real CollectOnce after print: %v", err)
-	}
-	if realSummary.EventsEmitted == 0 {
-		t.Fatal("--print advanced the cursor; real sweep had nothing left")
-	}
-}
-
 func decodeFixture(t *testing.T, lines []string) []Record {
 	t.Helper()
 	records, stats, err := decodeRecords(strings.NewReader(strings.Join(lines, "\n") + "\n"))

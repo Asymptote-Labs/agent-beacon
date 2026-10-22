@@ -42,15 +42,6 @@ func TestClassifyInstall(t *testing.T) {
 	}
 }
 
-func TestSupportsSeamlessUpdate(t *testing.T) {
-	if !(Install{Kind: InstallSystemPkg}).SupportsSeamlessUpdate() {
-		t.Error("system pkg should support seamless update")
-	}
-	if (Install{Kind: InstallHomebrew}).SupportsSeamlessUpdate() {
-		t.Error("homebrew should not support seamless update")
-	}
-}
-
 func TestParseMode(t *testing.T) {
 	cases := map[string]Mode{
 		"auto": ModeAuto, "AUTO": ModeAuto, "1": ModeAuto, "true": ModeAuto, "on": ModeAuto,

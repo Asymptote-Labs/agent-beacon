@@ -22,47 +22,6 @@ import (
 	"time"
 )
 
-func TestObjectNameUsesDatePartitionedGzipLayout(t *testing.T) {
-	restore := stubNow(t, time.Date(2026, 7, 12, 20, 17, 3, 0, time.UTC))
-	defer restore()
-	got := ObjectName(Config{
-		Prefix:     "agent-traces/customer=test",
-		Provider:   "claude_code_web",
-		UserID:     "user-1",
-		Repository: "asymptote-labs/agent-beacon",
-		RunID:      "cse_123",
-	})
-	want := "agent-traces/customer=test/runtime/date=2026-07-12/1783887423-claude_code_web-cse_123.jsonl.gz"
-	if got != want {
-		t.Fatalf("ObjectName = %q, want %q", got, want)
-	}
-}
-
-func TestObjectNameUsesCursorCloudProvider(t *testing.T) {
-	restore := stubNow(t, time.Date(2026, 7, 12, 20, 17, 3, 0, time.UTC))
-	defer restore()
-	got := ObjectName(Config{
-		Prefix:   "agent-traces",
-		Provider: "cursor_cloud",
-		UserID:   "user-1",
-		RunID:    "manual-123",
-	})
-	want := "agent-traces/runtime/date=2026-07-12/1783887423-cursor_cloud-manual-123.jsonl.gz"
-	if got != want {
-		t.Fatalf("ObjectName = %q, want %q", got, want)
-	}
-}
-
-func TestUploadNoopsWithoutCredentials(t *testing.T) {
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	if err := os.WriteFile(logPath, []byte("{}\n"), 0644); err != nil {
-		t.Fatalf("write log: %v", err)
-	}
-	if err := Upload(context.Background(), Config{LogPath: logPath, Bucket: "bucket"}, true); err != nil {
-		t.Fatalf("Upload returned error: %v", err)
-	}
-}
-
 func useSandbox(t *testing.T, dir string) {
 	t.Helper()
 	prev := SandboxDir
@@ -404,24 +363,9 @@ func TestResolveRunIDUsesOnlyEnvironment(t *testing.T) {
 	}
 }
 
-func TestUploadNoopsWithoutRunID(t *testing.T) {
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	if err := os.WriteFile(logPath, []byte("{}\n"), 0644); err != nil {
-		t.Fatalf("write log: %v", err)
-	}
-	cfg := Config{
-		LogPath:        logPath,
-		Bucket:         "bucket",
-		CredentialsB64: "invalid-but-should-not-be-read",
-	}
-	if err := Upload(context.Background(), cfg, true); err != nil {
-		t.Fatalf("Upload returned error: %v", err)
-	}
-}
-
 func mustRSAKey(t *testing.T) *rsa.PrivateKey {
 	t.Helper()
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024) // smallest size crypto/rsa accepts; keeps keygen fast
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}

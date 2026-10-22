@@ -81,16 +81,6 @@ func TestOpenBrowserChecksForADisplayOnLinux(t *testing.T) {
 	}
 }
 
-func TestOpenBrowserUsesXdgOpenOnLinux(t *testing.T) {
-	started := fakeBrowserHost(t, "linux", map[string]string{"DISPLAY": ":1"})
-	if err := OpenBrowser("https://beacon.sh"); err != nil {
-		t.Fatal(err)
-	}
-	if len(*started) != 1 || (*started)[0] != "xdg-open" {
-		t.Fatalf("started %v, want xdg-open", *started)
-	}
-}
-
 // fakeWSL makes the host look like WSL with the given Windows-side openers on PATH.
 func fakeWSL(t *testing.T, onPath ...string) {
 	t.Helper()

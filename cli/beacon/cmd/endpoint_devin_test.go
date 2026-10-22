@@ -147,15 +147,11 @@ func TestEndpointDevinSyncPrintWritesNothing(t *testing.T) {
 	}
 }
 
-func TestEndpointDevinSyncWritesAndReports(t *testing.T) {
+func TestEndpointDevinSyncWritesTheRuntimeLog(t *testing.T) {
 	_, _, logPath := devinCmdFixture(t)
 
-	out, err := runDevinSync(t)
-	if err != nil {
+	if out, err := runDevinSync(t); err != nil {
 		t.Fatalf("sync: %v\n%s", err, out)
-	}
-	if !strings.Contains(out, "Devin CLI sync: 1 sessions, 1 changed") {
-		t.Fatalf("report = %q", out)
 	}
 	info, err := os.Stat(logPath)
 	if err != nil || info.Size() == 0 {

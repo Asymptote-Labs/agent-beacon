@@ -11,7 +11,8 @@ import (
 )
 
 func TestHistoryRebuildsVersion15LegacyBrowserMessages(t *testing.T) {
-	for _, harness := range []string{"claude_web", "chatgpt_web"} {
+	// One browser harness: claude_web and chatgpt_web share this projection path.
+	for _, harness := range []string{"claude_web"} {
 		for _, removeLog := range []bool{false, true} {
 			name := harness + "/raw-present"
 			if removeLog {

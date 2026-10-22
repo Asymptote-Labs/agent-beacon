@@ -24,6 +24,7 @@ CREDENTIALS_PATH="${GOOGLE_APPLICATION_CREDENTIALS:-}"
 NO_START="${BEACON_NO_START:-0}"
 STOP_ATTEMPTS="${BEACON_FORWARDER_STOP_ATTEMPTS:-65}"
 START_ATTEMPTS="${BEACON_FORWARDER_START_ATTEMPTS:-15}"
+POLL_SECONDS="${BEACON_FORWARDER_POLL_SECONDS:-1}"
 
 GCS_PREFIX="${GCS_PREFIX%/}"
 case "$GCS_PREFIX" in
@@ -361,7 +362,7 @@ if command -v launchctl >/dev/null 2>&1; then
       echo "Timed out waiting for $LABEL to stop" >&2
       exit 1
     fi
-    sleep 1
+    sleep "$POLL_SECONDS"
   done
   launchctl bootstrap system "$PLIST_PATH" >/dev/null 2>&1 || {
     echo "Could not bootstrap $LABEL" >&2
@@ -377,7 +378,7 @@ if command -v launchctl >/dev/null 2>&1; then
       consecutive_running=0
     fi
     if [ "$consecutive_running" -lt 3 ]; then
-      sleep 1
+      sleep "$POLL_SECONDS"
     fi
   done
   if [ "$consecutive_running" -lt 3 ]; then

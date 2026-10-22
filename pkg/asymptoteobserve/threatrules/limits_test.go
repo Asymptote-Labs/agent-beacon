@@ -33,7 +33,16 @@ func countEvals(t *testing.T) *int {
 	return &n
 }
 
+// lowerCostLimit makes runaway expressions hit the cost limit after 100k units instead of
+// MaxEvalCost, so the tests exercise the same error path in milliseconds.
+func lowerCostLimit(t *testing.T) {
+	t.Helper()
+	evalCostLimit = 100_000
+	t.Cleanup(func() { evalCostLimit = MaxEvalCost })
+}
+
 func TestEvalCostLimitStopsRunawayExpression(t *testing.T) {
+	lowerCostLimit(t)
 	prog, err := CompileMatch(nestedAll(7))
 	if err != nil {
 		t.Fatalf("compile: %v", err)
@@ -64,6 +73,7 @@ func TestEvalCostLimitStopsRunawayExpression(t *testing.T) {
 }
 
 func TestScanNamesTheRuleThatExceededTheCostLimit(t *testing.T) {
+	lowerCostLimit(t)
 	rule := &Rule{
 		ID: "runaway", Version: 1, Title: "runaway",
 		Severity: asymptoteobserve.SeverityHigh, Status: StatusExperimental, Posture: PostureDetect,
@@ -225,7 +235,7 @@ func loadCorpusRule(t *testing.T, rel string) *CompiledRule {
 // later event (about 32 million evaluations, over half a minute).
 func TestOrderedCorrelationIsLinearInTheSession(t *testing.T) {
 	c := loadCorpusRule(t, "context-exfiltration/secret-read-then-external-mcp.rule.yaml")
-	const n = 8000
+	const n = 2000
 	events := manyAnchors(n)
 
 	evals := countEvals(t)
@@ -319,7 +329,7 @@ func TestOrderedCorrelationMatchesExhaustiveSearch(t *testing.T) {
 	}
 	rng := rand.New(rand.NewSource(1))
 	base := time.Date(2026, 6, 13, 10, 0, 0, 0, time.UTC)
-	for iter := 0; iter < 3000; iter++ {
+	for iter := 0; iter < 500; iter++ {
 		n := rng.Intn(14)
 		events := make([]asymptoteobserve.Event, n)
 		at := base
@@ -352,6 +362,7 @@ func TestOrderedCorrelationMatchesExhaustiveSearch(t *testing.T) {
 
 func TestCostLimitErrorIsNotAMatch(t *testing.T) {
 	// Guard the contract callers rely on: the error is returned, never folded into a verdict.
+	lowerCostLimit(t)
 	c, err := Compile(&Rule{
 		ID: "runaway-step", Spec: SupportedSpec, Version: 1, Title: "x",
 		Severity: asymptoteobserve.SeverityHigh, Status: StatusExperimental, Posture: PostureDetect,

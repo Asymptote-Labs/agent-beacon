@@ -93,6 +93,10 @@ func celFieldName(f reflect.StructField) string {
 // two seconds instead of running to completion.
 const MaxEvalCost uint64 = 5_000_000
 
+// evalCostLimit is the limit CompileMatch applies; tests lower it so runaway expressions
+// stop quickly.
+var evalCostLimit = MaxEvalCost
+
 // CompileMatch compiles a single match expression and verifies it types to bool. The
 // returned program is safe for concurrent reuse across events, and each evaluation is
 // bounded by MaxEvalCost: one that exceeds it fails with an error rather than matching. A
@@ -114,7 +118,7 @@ func CompileMatch(expr string) (cel.Program, error) {
 	if ast.OutputType() != cel.BoolType {
 		return nil, fmt.Errorf("match expression must evaluate to bool, got %s", ast.OutputType())
 	}
-	prog, err := env.Program(ast, cel.CostLimit(MaxEvalCost))
+	prog, err := env.Program(ast, cel.CostLimit(evalCostLimit))
 	if err != nil {
 		return nil, fmt.Errorf("build CEL program: %w", err)
 	}

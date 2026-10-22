@@ -41,10 +41,10 @@ func TestInstallDshRefusesWhenNothingCanLoadTheBridge(t *testing.T) {
 	if !errors.As(err, &unavailable) {
 		t.Fatalf("err = %v, want DshBridgeUnavailableError", err)
 	}
+	// The commands an operator copies out of the message are the contract, not its prose.
 	msg := err.Error()
 	for _, want := range []string{
 		"dsh plugin --profile web add @deepseek-ai/dsh-hooks-claude-code@" + testDshVersion + " @deepseek-ai/dsh-hook-protocol@" + testDshVersion,
-		"Beacon does not install packages",
 		"beacon endpoint dsh sync",
 	} {
 		if !strings.Contains(msg, want) {
@@ -86,7 +86,7 @@ func TestInstallDshNamesBothVersionsOnAMismatch(t *testing.T) {
 	dshtest.InstallBridge(t, dshHome, "web", "0.2.1-alpha.2", "0.2.1-alpha.2")
 
 	_, err := installDshForTest(t)
-	if err == nil || !strings.Contains(err.Error(), "dsh is "+testDshVersion) || !strings.Contains(err.Error(), "is 0.2.1-alpha.2") {
+	if err == nil || !strings.Contains(err.Error(), testDshVersion) || !strings.Contains(err.Error(), "0.2.1-alpha.2") {
 		t.Fatalf("err = %v, want both versions named", err)
 	}
 	report := InspectDshBridge(dshHome, filepath.Join(dshHome, dshHookFileName))

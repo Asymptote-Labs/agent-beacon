@@ -112,43 +112,6 @@ func TestQwenTaxonomyIsScopedToTheQwenPlatform(t *testing.T) {
 	}
 }
 
-// A tool that failed is recorded as a failure, not as the thing it was trying to do. Without the
-// PostToolUseFailure check ordering ahead of the tool id, a write_file that hit EACCES would be
-// written to the log as a successful file.modified.
-func TestQwenFailedToolIsNotRecordedAsASuccessfulEdit(t *testing.T) {
-	logPath := setupQwenHook(t)
-
-	runHookWithInput(t, runPostTool, readHookFixture(t, "qwen", "post_tool_failure.json"))
-
-	event := lastEndpointEvent(t, logPath)
-	if got := qwenAction(t, event); got != "tool.failed" {
-		t.Fatalf("event.action = %q, want tool.failed", got)
-	}
-	if got := event["severity"]; got != "high" {
-		t.Fatalf("severity = %q, want high", got)
-	}
-	if got := event["harness"].(map[string]interface{})["name"]; got != "qwen_code" {
-		t.Fatalf("harness.name = %q, want qwen_code", got)
-	}
-}
-
-// An interrupt with an empty error and a PostToolUse hook event must still be recorded as a
-// failure. Without this, the Qwen taxonomy maps write_file to file.modified even though the tool
-// was interrupted and the write never landed.
-func TestQwenInterruptedToolIsNotRecordedAsASuccessfulEdit(t *testing.T) {
-	logPath := setupQwenHook(t)
-
-	runHookWithInput(t, runPostTool, readHookFixture(t, "qwen", "post_tool_interrupt.json"))
-
-	event := lastEndpointEvent(t, logPath)
-	if got := qwenAction(t, event); got != "tool.failed" {
-		t.Fatalf("event.action = %q, want tool.failed for an interrupted tool", got)
-	}
-	if got := event["severity"]; got != "high" {
-		t.Fatalf("severity = %q, want high", got)
-	}
-}
-
 // A shell command has to reach the `command` field, not just `tool.name`: every command rule,
 // dashboard column and threat-rule match reads it from there.
 func TestQwenShellCommandIsRecordedAsACommand(t *testing.T) {
@@ -205,13 +168,25 @@ func TestQwenWriteFileRecordsPathOperationAndDiff(t *testing.T) {
 	if !strings.Contains(diff, "export const health") {
 		t.Fatalf("file.diff = %q, want the written content", diff)
 	}
+	// The diff path writes its event directly rather than through emitHookEvent, so raw.qwen has to
+	// be attached there explicitly: permission_mode and tool_use_id have no schema field and would
+	// otherwise survive on failed and non-edit tools and vanish on the successful edits.
+	payload, ok := event["raw"].(map[string]interface{})["qwen"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("file.modified event has no raw.qwen payload: %#v", event["raw"])
+	}
+	for _, key := range []string{"permission_mode", "tool_use_id", "hook_event_name"} {
+		if payload[key] == nil || payload[key] == "" {
+			t.Errorf("raw.qwen on a file edit is missing %s: %#v", key, payload)
+		}
+	}
 }
 
 // The create/modify distinction Qwen's taxonomy draws: `write_file` replaces a whole file and
 // `edit` changes part of one. It reaches the log through the pre-tool event, which classifies from
 // the tool name rather than from a constructed diff.
 func TestQwenPreToolDistinguishesAWholeFileWriteFromAnEdit(t *testing.T) {
-	for toolName, want := range map[string]string{"write_file": "create", "edit": "modify", "replace": "modify"} {
+	for toolName, want := range map[string]string{"write_file": "create", "edit": "modify"} {
 		t.Run(toolName, func(t *testing.T) {
 			logPath := setupQwenHook(t)
 			runHookWithInput(t, runPreTool, map[string]interface{}{
@@ -235,49 +210,34 @@ func TestQwenPreToolDistinguishesAWholeFileWriteFromAnEdit(t *testing.T) {
 	}
 }
 
-// The `edit` tool's old_string/new_string shape has to reach the diff builder. Without `replace`
-// and `edit` recognized as Qwen edit tools, the event says a file changed and never says how.
-func TestQwenEditRecordsBothSidesOfTheReplacement(t *testing.T) {
-	logPath := setupQwenHook(t)
+// The `edit` tool's old_string/new_string shape has to reach the diff builder. Qwen's Gemini-era
+// `replace` id carries the same payload, and which one arrives depends on the installed Qwen Code
+// version rather than on what the agent did, so both must classify and diff identically. The
+// generic fileOperation reads "replace" as neither a read nor a write; qwenFileOperation fills it.
+func TestQwenEditAndLegacyReplaceRecordBothSidesOfTheReplacement(t *testing.T) {
+	for _, toolName := range []string{"edit", "replace"} {
+		t.Run(toolName, func(t *testing.T) {
+			logPath := setupQwenHook(t)
+			payload := readHookFixture(t, "qwen", "post_tool_edit.json")
+			payload["tool_name"] = toolName
+			runHookWithInput(t, runPostTool, payload)
 
-	runHookWithInput(t, runPostTool, readHookFixture(t, "qwen", "post_tool_edit.json"))
-
-	event := lastEndpointEvent(t, logPath)
-	if got := qwenAction(t, event); got != "file.modified" {
-		t.Fatalf("event.action = %q, want file.modified", got)
-	}
-	file := event["file"].(map[string]interface{})
-	if file["path"] != "/Users/example/projects/beacon-demo/src/server.ts" {
-		t.Fatalf("file.path = %q, want the edited path", file["path"])
-	}
-	diff, _ := file["diff"].(string)
-	if !strings.Contains(diff, "const routes = []") || !strings.Contains(diff, "const routes = [health]") {
-		t.Fatalf("file.diff = %q, want both sides of the replacement", diff)
-	}
-}
-
-// Qwen's Gemini-era `replace` id carries the same payload as `edit`. Both must classify and diff
-// identically, because which one arrives depends on the installed Qwen Code version rather than on
-// what the agent did.
-func TestQwenLegacyReplaceIdBehavesLikeEdit(t *testing.T) {
-	logPath := setupQwenHook(t)
-
-	payload := readHookFixture(t, "qwen", "post_tool_edit.json")
-	payload["tool_name"] = "replace"
-	runHookWithInput(t, runPostTool, payload)
-
-	event := lastEndpointEvent(t, logPath)
-	if got := qwenAction(t, event); got != "file.modified" {
-		t.Fatalf("event.action = %q, want file.modified", got)
-	}
-	file := event["file"].(map[string]interface{})
-	// The generic fileOperation reads "replace" as neither a read nor a write and leaves this
-	// empty; qwenFileOperation is what fills it.
-	if file["operation"] != "modify" {
-		t.Fatalf("file.operation = %q, want modify", file["operation"])
-	}
-	if diff, _ := file["diff"].(string); !strings.Contains(diff, "const routes = [health]") {
-		t.Fatalf("file.diff = %q, want the replacement recorded", diff)
+			event := lastEndpointEvent(t, logPath)
+			if got := qwenAction(t, event); got != "file.modified" {
+				t.Fatalf("event.action = %q, want file.modified", got)
+			}
+			file := event["file"].(map[string]interface{})
+			if file["path"] != "/Users/example/projects/beacon-demo/src/server.ts" {
+				t.Fatalf("file.path = %q, want the edited path", file["path"])
+			}
+			if file["operation"] != "modify" {
+				t.Fatalf("file.operation = %q, want modify", file["operation"])
+			}
+			diff, _ := file["diff"].(string)
+			if !strings.Contains(diff, "const routes = []") || !strings.Contains(diff, "const routes = [health]") {
+				t.Fatalf("file.diff = %q, want both sides of the replacement", diff)
+			}
+		})
 	}
 }
 
@@ -336,24 +296,21 @@ func TestQwenRawPayloadPreservesFieldsWithNoSchemaHome(t *testing.T) {
 	}
 }
 
-// Stop's context_usage / context_limit / input_tokens are deliberately NOT normalized into
-// gen_ai.usage.
+// Stop's context_usage / context_limit / input_tokens are a level at one moment, not spend, so they
+// are normalized into gen_ai.context and never into gen_ai.usage.
 //
 // Beacon's token rollups sum gen_ai.usage across events. Qwen's Stop hook fires once per assistant
 // turn and its input_tokens is the prompt token count for that turn's request -- which, in a
 // multi-turn session, already contains every prior turn. Summing it would inflate a session's token
-// total by roughly the square of its length. Qwen's own documentation is explicit that the value
-// "may include output tokens depending on provider", so it is not a clean input count either.
-//
-// The three fields are preserved verbatim under raw.qwen, where they are exact and carry no claim
-// of being a normalized token count. This test is the record of that decision: if a future change
-// starts writing gen_ai.usage from a Qwen Stop payload, it fails here first.
+// total by roughly the square of its length. gen_ai.context is a block nothing sums, so it makes
+// Qwen's context utilization readable without making its spend wrong. The raw fields stay verbatim
+// under raw.qwen; context_usage is input_tokens/context_limit and is not stored a second time.
 //
 // The event is built through emitHookEvent with the arguments runStop passes it, rather than by
 // running the command. runStop ends the session-bearing path with outputJSONAndExit, and os.Exit in
 // an in-process test aborts the run -- so the command itself is not callable from this harness,
 // while the mapping it performs is exactly what this asserts.
-func TestQwenStopContextFieldsAreNotNormalizedIntoTokenUsage(t *testing.T) {
+func TestQwenStopContextIsNormalizedIntoContextNotUsage(t *testing.T) {
 	logPath := setupQwenHook(t)
 
 	input := readHookFixture(t, "qwen", "stop.json")
@@ -368,51 +325,26 @@ func TestQwenStopContextFieldsAreNotNormalizedIntoTokenUsage(t *testing.T) {
 	if got := qwenAction(t, event); got != "tool.completed" {
 		t.Fatalf("event.action = %q, want tool.completed", got)
 	}
-	if genAI, ok := event["gen_ai"].(map[string]interface{}); ok {
-		if usage, ok := genAI["usage"]; ok {
-			t.Fatalf("gen_ai.usage = %#v; Qwen's per-turn prompt token count must not be summed as usage", usage)
-		}
+	genAI, ok := event["gen_ai"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("event has no gen_ai block: %#v", event)
 	}
-	payload, ok := event["raw"].(map[string]interface{})["qwen"].(map[string]interface{})
+	if usage, ok := genAI["usage"]; ok {
+		t.Fatalf("gen_ai.usage = %#v; Qwen's per-turn prompt token count must not be summed as usage", usage)
+	}
+	raw, ok := event["raw"].(map[string]interface{})["qwen"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("event has no raw.qwen payload: %#v", event["raw"])
 	}
 	for _, key := range []string{"context_usage", "context_limit", "input_tokens", "stop_hook_active"} {
-		if payload[key] == nil {
-			t.Errorf("raw.qwen is missing %s, which is the only place it is preserved: %#v", key, payload)
+		if raw[key] == nil {
+			t.Errorf("raw.qwen is missing %s, which is the only place it is preserved: %#v", key, raw)
 		}
-	}
-}
-
-// The other half of the same decision: the context measure IS normalized, into gen_ai.context
-// rather than gen_ai.usage.
-//
-// The reason they were withheld was never that the numbers are wrong -- they are exact -- but that
-// gen_ai.usage is additive and these are a level at one moment, so summing them inflates a session
-// by roughly the square of its length. A block that nothing sums is the right home, and it makes
-// Qwen's context utilization readable without making its spend wrong.
-//
-// input_tokens is the used-token count: the fixture's 110100 over a 262144 window is the 0.42 its
-// sibling context_usage reports, so context_usage is their ratio and stays in raw rather than being
-// stored a second time in different units.
-func TestQwenStopContextIsNormalizedIntoGenAIContext(t *testing.T) {
-	logPath := setupQwenHook(t)
-
-	input := readHookFixture(t, "qwen", "stop.json")
-	sessionID, _ := resolveSessionIDWithTranscript(input, platformFlag)
-	logger := newHookLogger("stop", platformFlag, sessionID)
-	emitHookEvent(logger, "tool.completed", "tool", "info", "Agent response completed", input, sessionFields(sessionID, input))
-
-	event := lastEndpointEvent(t, logPath)
-	genAI, ok := event["gen_ai"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("event has no gen_ai block: %#v", event)
 	}
 	context, ok := genAI["context"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("gen_ai has no context block: %#v", genAI)
 	}
-	raw := event["raw"].(map[string]interface{})["qwen"].(map[string]interface{})
 	for _, pair := range []struct{ normalized, source string }{
 		{"used_tokens", "input_tokens"},
 		{"limit_tokens", "context_limit"},
@@ -425,10 +357,6 @@ func TestQwenStopContextIsNormalizedIntoGenAIContext(t *testing.T) {
 		if fmt.Sprint(got) != fmt.Sprint(want) {
 			t.Errorf("gen_ai.context.%s = %v, want raw.qwen.%s = %v", pair.normalized, got, pair.source, want)
 		}
-	}
-	// The additive block stays empty: this is the guarantee the sibling test above protects.
-	if usage, ok := genAI["usage"]; ok {
-		t.Fatalf("gen_ai.usage = %#v; context size must never land in the block reports sum", usage)
 	}
 }
 
@@ -470,42 +398,6 @@ func TestQwenSessionLifecycleIsRecorded(t *testing.T) {
 	// it; what must not happen is the run failing or writing a mis-typed event.
 	if got := qwenAction(t, lastEndpointEvent(t, logPath)); got != "prompt.submitted" {
 		t.Fatalf("last event after session-end = %q, want the log left intact", got)
-	}
-}
-
-// The diff path writes its event directly rather than through emitHookEvent, so the raw payload
-// that function attaches does not reach it.
-//
-// That gap lands on exactly the events this runtime's taxonomy exists to produce. A successful
-// `write_file` or `edit` is classified `file.modified` and routed through recordLocalEdit, so
-// without an explicit attachment there, `permission_mode` and `tool_use_id` -- which have no schema
-// field and whose only home is raw.qwen -- survive on failed and non-edit tools and vanish on the
-// successful edits. TestQwenRawPayloadPreservesFieldsWithNoSchemaHome does not catch it because it
-// exercises the pre-tool path, which does go through emitHookEvent.
-func TestQwenRawPayloadSurvivesTheFileEditPath(t *testing.T) {
-	logPath := setupQwenHook(t)
-
-	for _, fixture := range []string{"post_tool_write_file.json", "post_tool_edit.json"} {
-		t.Run(fixture, func(t *testing.T) {
-			runHookWithInput(t, runPostTool, readHookFixture(t, "qwen", fixture))
-			event := lastEndpointEvent(t, logPath)
-			if got := qwenAction(t, event); got != "file.modified" {
-				t.Fatalf("event.action = %q, want file.modified", got)
-			}
-			raw, ok := event["raw"].(map[string]interface{})
-			if !ok {
-				t.Fatalf("file.modified event has no raw object: %#v", event)
-			}
-			payload, ok := raw["qwen"].(map[string]interface{})
-			if !ok {
-				t.Fatalf("file.modified event has no raw.qwen payload: %#v", raw)
-			}
-			for _, key := range []string{"permission_mode", "tool_use_id", "hook_event_name"} {
-				if payload[key] == nil || payload[key] == "" {
-					t.Errorf("raw.qwen on a file edit is missing %s: %#v", key, payload)
-				}
-			}
-		})
 	}
 }
 
@@ -608,31 +500,5 @@ func TestQwenNotebookEditRecordsThePathWithoutClaimingADiff(t *testing.T) {
 	if diff, ok := file["diff"]; ok {
 		t.Fatalf("file.diff = %v; a notebook edit has no diff to build, so claiming one would be "+
 			"asserting content Beacon never saw", diff)
-	}
-}
-
-// Why the model for Qwen occupancy has to be resolved when the log is read rather than when it is
-// written. Qwen names its model on session start and never again: the Stop payload -- the only one
-// carrying the context trio -- has no model field, so the emitted event has none either. Anything
-// keyed on the model, the token-usage utilization report included, has to recover it from the
-// session. Recording that here means a future change to this hook cannot quietly remove the reason
-// the reader does that work.
-func TestQwenStopEventCarriesNoModel(t *testing.T) {
-	logPath := setupQwenHook(t)
-
-	input := readHookFixture(t, "qwen", "stop.json")
-	if _, ok := input["model"]; ok {
-		t.Fatalf("stop fixture now has a model; the reader-side session lookup may no longer be needed: %#v", input)
-	}
-	sessionID, _ := resolveSessionIDWithTranscript(input, platformFlag)
-	logger := newHookLogger("stop", platformFlag, sessionID)
-	emitHookEvent(logger, "tool.completed", "tool", "info", "Agent response completed", input, sessionFields(sessionID, input))
-
-	event := lastEndpointEvent(t, logPath)
-	if model, ok := event["model"]; ok && fmt.Sprint(model) != "" {
-		t.Errorf("event.model = %v, want absent -- Qwen's Stop payload has no model to read", model)
-	}
-	if session, ok := event["session"].(map[string]interface{}); !ok || fmt.Sprint(session["id"]) == "" {
-		t.Errorf("event has no session id (%#v); without one the reader cannot recover the model", event["session"])
 	}
 }

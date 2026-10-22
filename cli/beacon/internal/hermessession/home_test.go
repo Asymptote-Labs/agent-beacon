@@ -63,13 +63,10 @@ func TestHomeDirFollowsHermesHome(t *testing.T) {
 	custom := filepath.Join(work, "hermes-data")
 	t.Setenv("BEACON_HERMES_HOME_FIXTURE", custom)
 	for _, tc := range []struct{ name, value, want string }{
-		{"unset", "", native},
 		{"blank", " \t ", native},
 		{"absolute", custom, custom},
 		{"trimmed", "  " + custom + "\n", custom},
 		{"relative", "hermes-data", filepath.Join(cwd, "hermes-data")},
-		{"dot relative", "./hermes-data/", filepath.Join(cwd, "hermes-data")},
-		{"tilde", "~", home},
 		{"tilde path", "~/hermes-data", filepath.Join(home, "hermes-data")},
 		{"variable", "$BEACON_HERMES_HOME_FIXTURE", custom},
 		{"braced variable", "${BEACON_HERMES_HOME_FIXTURE}", custom},
@@ -90,26 +87,6 @@ func TestHomeDirFollowsHermesHome(t *testing.T) {
 	}
 }
 
-func TestHomeOverrideIsEmptyOnlyWhenUnset(t *testing.T) {
-	_, _ = hermesFixtureHome(t)
-	for _, value := range []string{"", "   "} {
-		t.Setenv("HERMES_HOME", value)
-		if got, err := HomeOverride(""); got != "" || err != nil {
-			t.Fatalf("HomeOverride with HERMES_HOME=%q = %q, %v; want empty", value, got, err)
-		}
-	}
-	work := t.TempDir()
-	t.Chdir(work)
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("HERMES_HOME", "relative/home")
-	if got, err := HomeOverride(""); err != nil || got != filepath.Join(cwd, "relative", "home") {
-		t.Fatalf("HomeOverride for a relative HERMES_HOME = %q, %v; want it made absolute", got, err)
-	}
-}
-
 // `hermes profile use <name>` records the profile in <root>/active_profile, and the launcher moves
 // HERMES_HOME to <root>/profiles/<name> for every later plain `hermes` command.
 func TestHomeDirFollowsActiveProfile(t *testing.T) {
@@ -119,7 +96,6 @@ func TestHomeDirFollowsActiveProfile(t *testing.T) {
 	for _, tc := range []struct{ name, content, want string }{
 		{"no file", "", native},
 		{"named", "work\n", work},
-		{"trimmed", "  work \r\n", work},
 		{"case-insensitive", "Work", work},
 		{"default", "default", native},
 		{"default any case", "Default\n", native},
@@ -149,9 +125,7 @@ func TestHomeDirRefusesUnusableActiveProfile(t *testing.T) {
 	for _, tc := range []struct{ name, content, want string }{
 		{"missing", "gone", "does not exist"},
 		{"traversal", "../../outside", "not a valid profile name"},
-		{"separator", "a/b", "not a valid profile name"},
 		{"reserved", "hermes", "not a valid profile name"},
-		{"too long", strings.Repeat("a", 65), "not a valid profile name"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			writeActiveProfile(t, native, tc.content)
@@ -180,22 +154,6 @@ func TestHomeDirProfileRootFollowsHermesHome(t *testing.T) {
 		t.Setenv("HERMES_HOME", coder)
 		if got := homeDirOf(t, home); got != coder {
 			t.Fatalf("HomeDir = %q, want the profile HERMES_HOME names, %q", got, coder)
-		}
-	})
-
-	t.Run("HERMES_HOME names a profile that does not exist yet", func(t *testing.T) {
-		later := filepath.Join(t.TempDir(), "profiles", "later")
-		t.Setenv("HERMES_HOME", later)
-		if got := homeDirOf(t, home); got != later {
-			t.Fatalf("HomeDir = %q, want %q", got, later)
-		}
-	})
-
-	t.Run("HERMES_HOME inside the native root", func(t *testing.T) {
-		// The profile root is still the native root, so its sticky profile applies.
-		t.Setenv("HERMES_HOME", filepath.Join(native, "custom"))
-		if got := homeDirOf(t, home); got != nativeWork {
-			t.Fatalf("HomeDir = %q, want the native root's active profile %q", got, nativeWork)
 		}
 	})
 

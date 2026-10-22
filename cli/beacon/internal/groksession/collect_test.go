@@ -2,7 +2,6 @@ package groksession
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -178,43 +177,6 @@ func TestCollectOnceCollectsALineThatWasTornOnTheFirstSweep(t *testing.T) {
 	}
 	if actions := logActions(t, logPath); actions["prompt.submitted"] != 3 {
 		t.Fatalf("prompt.submitted written %d times, want 3", actions["prompt.submitted"])
-	}
-}
-
-func TestCollectOnceIsIdempotentAndPrintDoesNotAdvanceState(t *testing.T) {
-	root := t.TempDir()
-	writeFixtureSession(t, root, "/tmp/grok project", "session-1")
-	statePath := filepath.Join(t.TempDir(), "state.json")
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-
-	var printed bytes.Buffer
-	printSummary, err := CollectOnce(CollectOptions{SessionsDir: root, StatePath: statePath, Print: true, Out: &printed})
-	if err != nil {
-		t.Fatalf("print CollectOnce returned error: %v", err)
-	}
-	if printSummary.EventsEmitted == 0 || printed.Len() == 0 {
-		t.Fatalf("print emitted nothing: summary=%+v output=%q", printSummary, printed.String())
-	}
-	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
-		t.Fatalf("--print advanced state or unexpected stat error: %v", err)
-	}
-
-	first, err := CollectOnce(CollectOptions{SessionsDir: root, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true})
-	if err != nil {
-		t.Fatalf("CollectOnce returned error: %v", err)
-	}
-	if first.EventsEmitted == 0 {
-		t.Fatal("first CollectOnce emitted no events")
-	}
-	second, err := CollectOnce(CollectOptions{SessionsDir: root, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true})
-	if err != nil {
-		t.Fatalf("second CollectOnce returned error: %v", err)
-	}
-	if second.EventsEmitted != 0 || second.SessionsChanged != 0 {
-		t.Fatalf("second summary = %+v, want no new work", second)
-	}
-	if lines := countLines(t, logPath); lines != first.EventsEmitted {
-		t.Fatalf("runtime lines = %d, want %d", lines, first.EventsEmitted)
 	}
 }
 

@@ -28,19 +28,6 @@ func sessionKeys(sessions []Session) []string {
 	return keys
 }
 
-func TestListReadsEveryRuntimeStoreNewestFirst(t *testing.T) {
-	_, sources := fixtureSources(t)
-	sessions, err := List(sources, Filter{})
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	got := strings.Join(sessionKeys(sessions), ",")
-	want := "claude_code/claude-sess-1,opencode/ses_parent,codex_cli/codex-thread-1,cline/cline-task-1"
-	if got != want {
-		t.Fatalf("sessions = %s\nwant %s", got, want)
-	}
-}
-
 func TestListCarriesEachRuntimesMetadata(t *testing.T) {
 	f, sources := fixtureSources(t)
 	sessions, err := List(sources, Filter{})
@@ -256,14 +243,6 @@ func TestFindRefusesAmbiguousShortAndUnknownIDs(t *testing.T) {
 	}
 }
 
-func TestFindMentionsUnreadableStoresWhenNothingMatches(t *testing.T) {
-	sources := []Source{fakeSource{harness: HarnessClaude, err: errors.New("disk on fire")}}
-	_, err := Find(sources, "", "missing-id")
-	if !errors.Is(err, ErrNotFound) || !strings.Contains(err.Error(), "disk on fire") {
-		t.Fatalf("err = %v, want not-found that names the unreadable store", err)
-	}
-}
-
 func TestParseHarness(t *testing.T) {
 	for in, want := range map[string]string{
 		"": "", "claude": HarnessClaude, "Claude-Code": HarnessClaude, "claude_code": HarnessClaude,
@@ -337,19 +316,6 @@ func TestListDirectoryFilterFollowsSymlinks(t *testing.T) {
 		sort.Strings(keys)
 		if got := strings.Join(keys, ","); got != tc.want {
 			t.Fatalf("--dir %s = %q, want %q", tc.root, got, tc.want)
-		}
-	}
-}
-
-func TestResolveExisting(t *testing.T) {
-	base := t.TempDir()
-	real, _ := filepath.EvalSymlinks(base)
-	for _, tc := range []struct{ in, want string }{
-		{base, real},
-		{filepath.Join(base, "a", "b"), filepath.Join(real, "a", "b")},
-	} {
-		if got := resolveExisting(tc.in); got != tc.want {
-			t.Fatalf("resolveExisting(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }

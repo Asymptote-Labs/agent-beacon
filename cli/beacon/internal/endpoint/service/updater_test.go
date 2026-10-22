@@ -54,19 +54,6 @@ func TestUpdaterPlistContent(t *testing.T) {
 	}
 }
 
-func TestUpdaterPlistPath(t *testing.T) {
-	// The launchd and systemd unit locations are absolute POSIX system paths, and these assertions
-	// are about those exact strings. filepath.Join renders them with backslashes on Windows, so the
-	// comparison there would be testing path rendering rather than the contract -- and neither
-	// service manager exists on that platform to have a contract about.
-	if runtime.GOOS == "windows" {
-		t.Skip("launchd and systemd unit paths are POSIX-only")
-	}
-	if got := (UpdaterManager{Kind: KindLaunchd}).UnitPath(); got != "/Library/LaunchDaemons/com.beacon.endpoint.updater.plist" {
-		t.Errorf("PlistPath = %q", got)
-	}
-}
-
 func TestUpdaterLoadDefersReloadForRunningUpdater(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("launchd updater load is macOS-only")

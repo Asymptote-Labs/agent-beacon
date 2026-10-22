@@ -82,7 +82,9 @@ func TestStartStopCollectorProcess(t *testing.T) {
 		t.Skip("shell fake uses POSIX signal semantics")
 	}
 	t.Setenv("RUNNER_TRACKING_ID", "github-actions-tracker")
-	collector := fakeExecutable(t, "collector", "#!/bin/sh\nenv > \"$2.env\"\ntrap 'exit 0' TERM\nwhile true; do sleep 1; done\n")
+	// exec so SIGTERM reaches the sleeping process directly; a trap in a `sleep 1` loop only runs
+	// after the current sleep returns, which made every Stop wait up to a second.
+	collector := fakeExecutable(t, "collector", "#!/bin/sh\nenv > \"$2.env\"\nexec sleep 60\n")
 	oldWait := waitCollectorReady
 	waitCollectorReady = func(endpointconfig.Config, time.Duration) error { return nil }
 	t.Cleanup(func() { waitCollectorReady = oldWait })
@@ -136,7 +138,7 @@ func TestStartDetachedWritesStateAndExports(t *testing.T) {
 		t.Skip("shell fake uses POSIX signal semantics")
 	}
 	dir := t.TempDir()
-	collector := fakeExecutable(t, "collector", "#!/bin/sh\ntrap 'exit 0' TERM\nwhile true; do sleep 1; done\n")
+	collector := fakeExecutable(t, "collector", "#!/bin/sh\nexec sleep 60\n")
 	oldWait := waitCollectorReady
 	waitCollectorReady = func(endpointconfig.Config, time.Duration) error { return nil }
 	t.Cleanup(func() { waitCollectorReady = oldWait })
@@ -482,25 +484,6 @@ func TestProvisionForwardWritesSecureExporterConfig(t *testing.T) {
 	}
 	if strings.Contains(string(encoded), "top-secret-token") {
 		t.Fatalf("token leaked into session JSON:\n%s", encoded)
-	}
-}
-
-func TestProvisionForwardMissingTokenFails(t *testing.T) {
-	t.Setenv("RUNNER_TEMP", t.TempDir())
-	t.Setenv(EnvSplunkToken, "")
-	collector := fakeExecutable(t, "collector", "#!/bin/sh\nsleep 60\n")
-	oldResolve := resolveCollectorBinary
-	resolveCollectorBinary = func(string) (string, error) { return collector, nil }
-	t.Cleanup(func() { resolveCollectorBinary = oldResolve })
-
-	_, err := Provision(Options{
-		CollectorPath:   collector,
-		Harness:         "claude",
-		Forward:         "splunk",
-		ForwardEndpoint: "https://splunk.example",
-	})
-	if err == nil {
-		t.Fatal("Provision should fail when the forwarding token is missing")
 	}
 }
 

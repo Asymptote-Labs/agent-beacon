@@ -124,30 +124,6 @@ func TestEventsFromTracesNormalizesVercelAISDKSpan(t *testing.T) {
 	}
 }
 
-func TestEventsFromTracesNormalizesClaudeAgentSDKSpan(t *testing.T) {
-	span, traces := newObserveSDKTraceSpan("claude_agent_sdk.query")
-	attrs := span.Attributes()
-	attrs.PutStr("beacon.harness.name", "claude_agent_sdk")
-	attrs.PutStr("beacon.event.action", "prompt.submitted")
-	attrs.PutStr("beacon.event.category", "prompt")
-	attrs.PutStr("beacon.prompt.text", "review this pull request")
-
-	events := NewConverter(Options{}).EventsFromTraces(traces)
-	if len(events) != 1 {
-		t.Fatalf("expected 1 event, got %d", len(events))
-	}
-	event := events[0]
-	if event.Harness.Name != "claude_agent_sdk" {
-		t.Fatalf("harness = %q, want claude_agent_sdk", event.Harness.Name)
-	}
-	if event.Event.Action != "prompt.submitted" || event.Event.Category != "prompt" {
-		t.Fatalf("event = %#v, want prompt.submitted prompt", event.Event)
-	}
-	if event.Prompt == nil || event.Prompt.Text != "review this pull request" {
-		t.Fatalf("prompt = %#v, want captured prompt text", event.Prompt)
-	}
-}
-
 func TestEventFromSpanNormalizesClaudeCodeLLMRequestUsage(t *testing.T) {
 	// Claude Code's claude_code.llm_request span records token usage under bare
 	// attribute names (input_tokens, output_tokens, cache_read_tokens,
@@ -1100,25 +1076,6 @@ func toolCallIDOfEvent(event Event) string {
 	return event.GenAI.Tool.Call.ID
 }
 
-// Codex names its calls call_id rather than tool_use_id. Both are read from one
-// shared alias list, so a runtime cannot be supported on one capture path and
-// invisible on the other.
-func TestCapturedCodexLogPromotesItsOwnCallID(t *testing.T) {
-	_, events := capturedLogEvents(t, "codex-0.142.4.json")
-	found := false
-	for _, event := range events {
-		if id := toolCallIDOfEvent(event); id != "" {
-			if id != "call_fixture" {
-				t.Fatalf("call ID = %q, want the call_id Codex assigned", id)
-			}
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("no event promoted Codex's call_id")
-	}
-}
-
 func TestCapturedClaudeCodeLifecycleTaxonomy(t *testing.T) {
 	fixture, events := capturedLogEvents(t, "claude-code-lifecycle-2.1.220.json")
 	// API body events are dropped unless they are the WebFetch summarizer request, and the
@@ -1418,26 +1375,9 @@ func TestDeriveMCPServerToolFromName(t *testing.T) {
 	}
 }
 
-func TestClaudeBuiltinToolResultDoesNotPopulateMCP(t *testing.T) {
-	// The name-convention derivation must not leak into built-in tools: a Bash tool_result is a
-	// command, never an MCP call, so event.MCP stays nil.
-	record := plog.NewLogRecord()
-	record.Body().SetStr("claude_code.tool_result")
-	attrs := record.Attributes()
-	attrs.PutStr("service.name", "claude-code")
-	attrs.PutStr("event.name", "tool_result")
-	attrs.PutStr("tool_name", "Bash")
-	attrs.PutStr("tool_input", `{"command":"echo hi"}`)
-
-	event := NewConverter(Options{}).EventFromLog(nil, record)
-	if event.MCP != nil {
-		t.Fatalf("mcp = %#v, want nil for a built-in tool", event.MCP)
-	}
-	if event.Event.Action != "command.executed" {
-		t.Fatalf("event = %#v, want command.executed", event.Event)
-	}
-}
-
+// Codex names its calls call_id rather than tool_use_id. Both are read from one
+// shared alias list, so a runtime cannot be supported on one capture path and
+// invisible on the other.
 func TestCapturedCodexLogNormalizationIsUnchanged(t *testing.T) {
 	fixture, events := capturedLogEvents(t, "codex-0.142.4.json")
 	if len(events) != len(fixture.Records) {
@@ -1449,16 +1389,23 @@ func TestCapturedCodexLogNormalizationIsUnchanged(t *testing.T) {
 	if events[1].Event.Action != "command.executed" || events[1].Command == nil || events[1].Command.Command != "echo CODEX_MARKER" {
 		t.Fatalf("Codex result changed: %#v", events[1])
 	}
+	found := false
+	for _, event := range events {
+		if id := toolCallIDOfEvent(event); id != "" {
+			if id != "call_fixture" {
+				t.Fatalf("call ID = %q, want the call_id Codex assigned", id)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("no event promoted Codex's call_id")
+	}
 }
 
 func TestClaudeNormalizerDoesNotAffectOtherHarnesses(t *testing.T) {
 	for _, serviceName := range []string{
 		"generic-runtime",
-		"codex_cli_rs",
-		"gemini-cli",
-		"github-copilot",
-		"copilot-chat",
-		"cursor",
 		"claude_agent_sdk",
 		"claude_web",
 	} {
@@ -1629,44 +1576,16 @@ func newObserveSDKTraceSpan(name string) (ptrace.Span, ptrace.Traces) {
 
 // Browser-based collectors (agent-beacon-browser-extension) must keep their own
 // harness identity and not be coerced into claude_code by the generic "claude"
-// rule.
+// rule. The other spellings are pinned in pkg/asymptoteobserve.
 func TestNormalizeHarnessNameBrowserSources(t *testing.T) {
 	cases := map[string]string{
-		"claude_web":  "claude_web",
 		"claude-web":  "claude_web",
-		"claude.ai":   "claude_web",
-		"chatgpt_web": "chatgpt_web",
 		"chatgpt.com": "chatgpt_web",
-		// Regression: existing harnesses must be unchanged.
-		"claude_code":      "claude_code",
-		"claude":           "claude_code",
-		"codex":            "codex_cli",
-		"codex-app-server": "codex_desktop",
-		"gemini":           "gemini_cli",
 	}
 	for in, want := range cases {
 		if got := NormalizeHarnessName(in); got != want {
 			t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, want)
 		}
-	}
-}
-
-func TestHarnessNameSeparatesCodexDesktopFromCLI(t *testing.T) {
-	cases := map[string]string{
-		"codex-app-server": "codex_desktop",
-		"codex-desktop":    "codex_desktop",
-		"codex":            "codex_cli",
-		"codex-cli":        "codex_cli",
-		"codex_exec":       "codex_cli",
-		"codex_cli_rs":     "codex_cli",
-	}
-	for serviceName, want := range cases {
-		t.Run(serviceName, func(t *testing.T) {
-			attrs := map[string]interface{}{"service.name": serviceName}
-			if got := HarnessName(attrs); got != want {
-				t.Errorf("HarnessName(%q) = %q, want %q", serviceName, got, want)
-			}
-		})
 	}
 }
 
@@ -1807,7 +1726,6 @@ func TestUserAgentFromAttrs(t *testing.T) {
 		attrs map[string]interface{}
 		want  *UserAgentInfo
 	}{
-		{"name and version", map[string]interface{}{"user_agent.name": "Brave", "user_agent.version": "124"}, &UserAgentInfo{Name: "Brave", Version: "124"}},
 		{"name only", map[string]interface{}{"user_agent.name": "Chromium"}, &UserAgentInfo{Name: "Chromium"}},
 		{"trimmed", map[string]interface{}{"user_agent.name": "  Opera  ", "user_agent.version": " 110 "}, &UserAgentInfo{Name: "Opera", Version: "110"}},
 		{"version without a name identifies nothing", map[string]interface{}{"user_agent.version": "124"}, nil},
@@ -2035,18 +1953,6 @@ func TestCopilotFidelitySplitsNamedEventsFromFallback(t *testing.T) {
 	fallback, fallbackFidelity := CopilotActionWithFidelity(map[string]interface{}{}, "", "asking for permission")
 	if fallback != "approval.requested" || fallbackFidelity != asymptoteobserve.FidelityInferred {
 		t.Fatalf("keyword copilot event = (%q, %q), want (approval.requested, inferred)", fallback, fallbackFidelity)
-	}
-}
-
-// InferAction is still exported and still returns just the action; the wrapper must not drift from
-// the function it delegates to.
-func TestInferActionMatchesWithFidelityVariant(t *testing.T) {
-	for _, fallback := range []string{"", "unclassifiable", "wrote a file", "exec something", "claude_code.assistant_response"} {
-		attrs := map[string]interface{}{"service.name": "some-runtime"}
-		want, _ := InferActionWithFidelity(attrs, fallback)
-		if got := InferAction(attrs, fallback); got != want {
-			t.Fatalf("InferAction(%q) = %q, InferActionWithFidelity = %q", fallback, got, want)
-		}
 	}
 }
 

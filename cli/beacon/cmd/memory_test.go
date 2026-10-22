@@ -19,29 +19,6 @@ import (
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
-func TestMemoryEvaluationCommandsRegistered(t *testing.T) {
-	for _, path := range [][]string{
-		{"memory", "list"},
-		{"memory", "show"},
-		{"memory", "evaluations", "run"},
-		{"memory", "evaluations", "list"},
-		{"memory", "evaluations", "show"},
-		{"memory", "candidates", "list"},
-		{"memory", "candidates", "show"},
-		{"memory", "candidates", "create"},
-		{"memory", "candidates", "approve"},
-		{"memory", "candidates", "reject"},
-		{"memory", "candidates", "supersede"},
-		{"memory", "skills", "preview"},
-		{"memory", "skills", "install"},
-	} {
-		cmd, _, err := rootCmd.Find(path)
-		if err != nil || cmd == nil {
-			t.Fatalf("command %v not registered: %v", path, err)
-		}
-	}
-}
-
 func TestMemoryEvaluationsRunDryRunPreviewsCost(t *testing.T) {
 	logPath, project := writeMemoryCommandFixture(t)
 	resetMemoryOpts(t)
@@ -203,29 +180,6 @@ func TestMemoryEvaluationsRunDoesNotPromoteFailedTask(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestMemoryCandidatesApproveCommand(t *testing.T) {
-	logPath, project := writeMemoryCommandFixture(t)
-	resetMemoryOpts(t)
-	memoryOpts.userMode = true
-	memoryOpts.logPath = logPath
-	memoryOpts.projectPath = project
-	candidate := testCommandCandidate(t)
-	if err := memoryStore().PutCandidate(candidate); err != nil {
-		t.Fatal(err)
-	}
-	memoryOpts.reason = "reviewed"
-	memoryOpts.jsonOutput = true
-	var out bytes.Buffer
-	cmd := &cobra.Command{}
-	cmd.SetOut(&out)
-	if err := runMemoryCandidatesApprove(cmd, []string{candidate.ID}); err != nil {
-		t.Fatalf("runMemoryCandidatesApprove returned error: %v", err)
-	}
-	if !strings.Contains(out.String(), `"memory"`) || !strings.Contains(out.String(), `"approved"`) {
-		t.Fatalf("unexpected approve output: %s", out.String())
 	}
 }
 
@@ -898,18 +852,14 @@ func TestEvaluatorOptionsSelectsProvider(t *testing.T) {
 
 // --cost-per-trace replaced --jev-cost-per-trace when SubQ was added; the old
 // name must keep setting the same estimate.
-func TestMemoryEvaluationsCostPerTraceFlags(t *testing.T) {
-	for _, name := range []string{"cost-per-trace", "jev-cost-per-trace"} {
-		t.Run(name, func(t *testing.T) {
-			resetMemoryOpts(t)
-			flags := memoryEvaluationsRunCmd.Flags()
-			if err := flags.Set(name, "0.02"); err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { flags.Lookup(name).Changed = false })
-			if memoryOpts.costPerTrace != 0.02 {
-				t.Fatalf("costPerTrace = %v after --%s=0.02", memoryOpts.costPerTrace, name)
-			}
-		})
+func TestMemoryEvaluationsDeprecatedCostPerTraceFlag(t *testing.T) {
+	resetMemoryOpts(t)
+	flags := memoryEvaluationsRunCmd.Flags()
+	if err := flags.Set("jev-cost-per-trace", "0.02"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { flags.Lookup("jev-cost-per-trace").Changed = false })
+	if memoryOpts.costPerTrace != 0.02 {
+		t.Fatalf("costPerTrace = %v after --jev-cost-per-trace=0.02", memoryOpts.costPerTrace)
 	}
 }

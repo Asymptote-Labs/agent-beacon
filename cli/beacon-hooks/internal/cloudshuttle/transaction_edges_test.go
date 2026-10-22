@@ -28,7 +28,7 @@ func TestUploadCancellationWhileWaitingForWriterLock(t *testing.T) {
 	defer held.Release()
 	var calls atomic.Int32
 	transactionClient(t, func(r *http.Request) (*http.Response, error) { calls.Add(1); return transactionOK(), nil })
-	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- Upload(ctx, cfg, true) }()

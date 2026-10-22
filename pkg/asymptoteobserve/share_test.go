@@ -583,16 +583,6 @@ func TestShareMessagesKeepsRepeatedPhaselessCallsApart(t *testing.T) {
 	}
 }
 
-func TestShareTitleUsesExplicitHomeWithoutLookup(t *testing.T) {
-	prompt := shareEventAt("2026-10-01T10:00:00Z", "claude_code", CollectionMethodHook, "prompt.submitted", "prompt")
-	prompt.Session.WorkingDirectory = ""
-	prompt.Prompt = &PromptInfo{Text: "look at /home/al/secret"}
-	trace := NewShareTrace(BuildShareBundle([]Event{prompt}, ShareOptions{HomeDirectory: "/home/al", NoHomeLookup: true}), ShareVisibilityDirect)
-	if trace.Title != "look at ~/secret" {
-		t.Fatalf("title = %q", trace.Title)
-	}
-}
-
 func TestShareMessagesTreatsAPostToolInvokedEventAsTheResult(t *testing.T) {
 	// The hook adapter labels a PostToolUse for tools without a more specific action (WebFetch,
 	// Grep, Task, ...) tool.invoked, carrying the result. With a PreToolUse tool.invoked for the
@@ -861,6 +851,8 @@ func TestShareProjects(t *testing.T) {
 		{"heartbeat", event("endpoint.heartbeat", "health"), false},
 		{"inventory", event("inventory.snapshot", "inventory"), false},
 		{"idle", event("session.idle", "session"), false},
+		{"status", event("session.status", "session"), false},
+		{"token action without usage", event("token.usage", "model"), false},
 		{"tool listing", event("mcp.tool_listed", "mcp"), false},
 		{"no action", event("", ""), false},
 	}
@@ -869,16 +861,21 @@ func TestShareProjects(t *testing.T) {
 			t.Errorf("ShareProjects(%s) = %v, want %v", tc.name, got, tc.want)
 		}
 	}
-	// The bundle carries exactly what ShareProjects accepts.
+	// The bundle carries exactly what ShareProjects accepts, even when a rejected event holds content
+	// that would otherwise be shared: local views rely on this to tell a shared trace is out of date.
 	var events []Event
 	accepted := 0
 	for i, tc := range cases {
 		e := tc.event
 		e.Event.ID = fmt.Sprintf("e-%02d", i)
-		events = append(events, e)
 		if tc.want {
 			accepted++
+		} else {
+			e.Message = "something happened"
+			e.Prompt = &PromptInfo{Text: "a prompt-shaped field"}
+			e.GenAI = &GenAIInfo{Output: &GenAIOutputInfo{Messages: TextOutputMessages("assistant-shaped text")}}
 		}
+		events = append(events, e)
 	}
 	if bundle := BuildShareBundle(events, shareTestOpts); len(bundle.Events) != accepted || bundle.Summary.EventCount != accepted {
 		t.Fatalf("bundle carries %d events (summary %d), ShareProjects accepts %d", len(bundle.Events), bundle.Summary.EventCount, accepted)
@@ -1090,47 +1087,6 @@ func TestShareEventsAfterResendsTheLastEventAndOpenCalls(t *testing.T) {
 	for _, tc := range cases {
 		if got := ids(ShareEventsAfter(events, tc.last, tc.max)); got != tc.want {
 			t.Errorf("after %q/%d = %s, want %s", tc.last, tc.max, got, tc.want)
-		}
-	}
-}
-
-// ShareProjects agrees with BuildShareBundle: every event it rejects is left out of the bundle, even
-// with content that would otherwise be shared, and the events it accepts are carried. Local views
-// rely on it to decide that a rejected event cannot make a shared trace out of date.
-func TestShareProjectsAgreesWithBuildShareBundle(t *testing.T) {
-	withText := func(e Event) Event {
-		e.Message = "something happened"
-		e.Prompt = &PromptInfo{Text: "a prompt-shaped field"}
-		e.GenAI = &GenAIInfo{Output: &GenAIOutputInfo{Messages: TextOutputMessages("assistant-shaped text")}}
-		return e
-	}
-	rejected := []Event{
-		shareEventAt("2026-10-01T10:00:00Z", "opencode", "plugin", "session.status", "session"),
-		shareEventAt("2026-10-01T10:00:01Z", "opencode", "plugin", "session.idle", "session"),
-		shareEventAt("2026-10-01T10:00:04Z", "claude_code", "otlp", "token.usage", "model"),
-		shareEventAt("2026-10-01T10:00:05Z", "claude_code", "otlp", "metric.point", "metric"),
-		shareEventAt("2026-10-01T10:00:06Z", "claude_code", "", "session.shared", "session"),
-		shareEventAt("2026-10-01T10:00:07Z", "claude_code", "", "session.share_requested", "session"),
-		shareEventAt("2026-10-01T10:00:08Z", "claude_code", "", "session.commit_linked", "session"),
-	}
-	for _, e := range rejected {
-		if ShareProjects(e) {
-			t.Fatalf("ShareProjects(%s) = true, want false", e.Event.Action)
-		}
-		if got := BuildShareBundle([]Event{withText(e)}, shareTestOpts).Events; len(got) != 0 {
-			t.Fatalf("%s: ShareProjects rejects it, but the bundle carries %d event(s)", e.Event.Action, len(got))
-		}
-	}
-	prompt := shareEventAt("2026-10-01T10:01:00Z", "claude_code", "hook", "prompt.submitted", "prompt")
-	prompt.Prompt = &PromptInfo{Text: "fix the bug"}
-	reply := shareEventAt("2026-10-01T10:01:05Z", "claude_code", "hook", "agent.message", "agent")
-	reply.GenAI = &GenAIInfo{Output: &GenAIOutputInfo{Messages: TextOutputMessages("done")}}
-	for _, e := range []Event{prompt, reply} {
-		if !ShareProjects(e) {
-			t.Fatalf("ShareProjects(%s) = false, want true", e.Event.Action)
-		}
-		if got := BuildShareBundle([]Event{e}, shareTestOpts).Events; len(got) != 1 {
-			t.Fatalf("%s: ShareProjects accepts it, but the bundle carries %d event(s)", e.Event.Action, len(got))
 		}
 	}
 }

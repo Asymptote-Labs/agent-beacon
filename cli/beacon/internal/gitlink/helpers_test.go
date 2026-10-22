@@ -15,6 +15,10 @@ import (
 
 // testRepo is a real repository in a temp dir, driven with an environment that ignores the
 // developer's git configuration.
+//
+// Every repository is private to its test, so newTestRepo marks the test parallel: the package's
+// cost is git process startup, and serializing it made this the slowest package in the repo.
+// A test that needs t.Setenv or another process-wide change cannot use it.
 type testRepo struct {
 	t    *testing.T
 	root string
@@ -23,6 +27,7 @@ type testRepo struct {
 
 func newTestRepo(t *testing.T) *testRepo {
 	t.Helper()
+	t.Parallel()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}

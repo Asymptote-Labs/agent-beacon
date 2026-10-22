@@ -3,7 +3,6 @@ package cloudwatch
 import (
 	"embed"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
-	"io/fs"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/siempack"
 )
@@ -38,15 +37,6 @@ var pack = siempack.Pack{
 
 // mustRead returns the embedded asset at path or panics. Retained for test use.
 func mustRead(path string) string { return pack.MustRead(path) }
-
-// filesFromFS builds the file list from the supplied FS; tests use it to inject
-// read-error conditions.
-func filesFromFS(fsys fs.FS) ([]File, error) { return pack.WithFS(fsys).Files() }
-
-// configSnippetFromFS renders the Vector config using the supplied FS.
-func configSnippetFromFS(fsys fs.FS, logPath string) (string, error) {
-	return pack.WithFS(fsys).Render(configAsset, logPath)
-}
 
 // ConfigSnippet returns a rendered Vector configuration for AWS CloudWatch Logs.
 func ConfigSnippet(logPath string) (string, error) { return pack.Render(configAsset, logPath) }

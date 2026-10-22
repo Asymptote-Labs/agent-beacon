@@ -73,46 +73,40 @@ func TestEndpointHooksInstallAndUninstallMuse(t *testing.T) {
 	}
 }
 
-// `endpoint hooks repair` walks a hard-coded list rather than the registry, so a runtime absent
-// from it is never repaired -- and repair is what fixes a hook whose binary path went stale after
-// an upgrade. It fails silently: repair reports success having skipped the runtime entirely.
-func TestMuseIsInTheRepairTargetList(t *testing.T) {
-	for _, name := range repairTargetOrder() {
-		if name == "muse" {
-			return
+// Every alias the hook registry advertises resolves to its own target, in both namespaces, and the
+// names of models and vendors that share a runtime's name resolve to nothing. Runtimes that share
+// a prefix (pi, omp, prime; opencode, openhands) never resolve to one another: an operator asking
+// to instrument one would get another's hooks written where the runtime they meant does not look.
+// Canonical log names (muse_code, pi_cli) are accepted so a row read from the runtime log can be
+// passed back to --harness.
+func TestHookTargetSpellings(t *testing.T) {
+	for spelling, want := range map[string]string{
+		" KIRO_IDE ": "kiro", "kiro": "kiro", "kiro-cli": "kiro", "kiro-code": "kiro",
+		"kimi": "kimi", "kimi-code": "kimi", "kimi-code-cli": "kimi",
+		"dsh": "dsh", "deepseek-harness": "dsh", "deepseekharness": "dsh",
+		"muse": "muse", "muse_code": "muse",
+		"openhands": "openhands", "open-hands": "openhands", "opencode": "opencode",
+		"pi": "pi", "pi_cli": "pi",
+		"omp": "omp", "oh-my-pi": "omp", "ohmypi": "omp",
+		"prime": "prime", "prime-agent": "prime", "primeagent": "prime",
+		// Models and vendors, not runtimes.
+		"moonshot": "", "kimi-k2": "", "deepseek": "", "deepseek-r1": "",
+		"spark": "", "muse-spark": "", "openhands-lm": "",
+	} {
+		target, ok := normalizeEndpointTarget(spelling)
+		hook, hookOK := normalizeHookTarget(spelling)
+		if want == "" {
+			if ok || hookOK {
+				t.Errorf("%q resolved to %+v / %q; it names a model or vendor, not a runtime", spelling, target, hook)
+			}
+			continue
 		}
-	}
-	t.Fatal("muse is missing from the repair target list; `endpoint repair` would silently skip it")
-}
-
-// Both spellings a person plausibly types resolve to the hook target, in both namespaces.
-func TestMuseHarnessSpellingsResolveToTheHookTarget(t *testing.T) {
-	for _, spelling := range []string{"muse", "Muse", " muse ", "muse-code", "muse_code", "MUSE-CODE"} {
-		t.Run(spelling, func(t *testing.T) {
-			target, ok := normalizeEndpointTarget(spelling)
-			if !ok {
-				t.Fatalf("normalizeEndpointTarget(%q) = not found", spelling)
-			}
-			if target.Name != "muse" || target.Kind != endpointTargetHook {
-				t.Fatalf("normalizeEndpointTarget(%q) = %+v, want the muse hook target", spelling, target)
-			}
-			if got, ok := normalizeHookTarget(spelling); !ok || got != "muse" {
-				t.Fatalf("normalizeHookTarget(%q) = %q, %t; want muse, true", spelling, got, ok)
-			}
-		})
-	}
-}
-
-// Muse Spark is the model, not the runtime. Accepting it as a harness alias would let someone ask
-// Beacon to install hooks for a model and get an install for the agent instead -- a silent
-// substitution, since the install would then report success under a different name.
-func TestMuseSparkIsNotAHarnessAlias(t *testing.T) {
-	for _, spelling := range []string{"spark", "muse-spark", "muse_spark"} {
-		t.Run(spelling, func(t *testing.T) {
-			if target, ok := normalizeEndpointTarget(spelling); ok {
-				t.Fatalf("normalizeEndpointTarget(%q) = %+v; Muse Spark is a model, not a harness", spelling, target)
-			}
-		})
+		if !ok || target.Name != want || target.Kind != endpointTargetHook {
+			t.Errorf("normalizeEndpointTarget(%q) = %+v, %t; want the %s hook target", spelling, target, ok, want)
+		}
+		if !hookOK || hook != want {
+			t.Errorf("normalizeHookTarget(%q) = %q, %t; want %s", spelling, hook, hookOK, want)
+		}
 	}
 }
 

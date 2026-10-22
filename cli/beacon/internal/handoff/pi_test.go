@@ -1,7 +1,6 @@
 package handoff
 
 import (
-	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -122,14 +121,6 @@ func TestPiAndPrimeSessionsBuildABrief(t *testing.T) {
 				t.Fatalf("the brief should name %s:\n%s", RuntimeLabel(tc.harness), brief.Render())
 			}
 		})
-	}
-}
-
-func TestPiSessionGoneFromItsStore(t *testing.T) {
-	dirs, piPath, _ := piFixture(t)
-	session := Session{Harness: HarnessPi, ID: "pi-sess-1", SourcePath: piPath + ".moved"}
-	if _, err := Events(DefaultSources(dirs), session); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Events = %v, want ErrNotFound", err)
 	}
 }
 

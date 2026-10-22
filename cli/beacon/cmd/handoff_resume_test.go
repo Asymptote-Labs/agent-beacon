@@ -70,18 +70,6 @@ func runResume(t *testing.T, f *resumeFixture, args ...string) (string, string, 
 	return runHandoff(t, append([]string{"resume", "--output-dir", f.briefDir}, args...)...)
 }
 
-func TestHandoffResumeCommandRegistered(t *testing.T) {
-	cmd, _, err := rootCmd.Find([]string{"handoff", "resume"})
-	if err != nil || cmd == nil || cmd.Name() != "resume" {
-		t.Fatalf("handoff resume not registered: %v", err)
-	}
-	for _, flag := range []string{"agent", "new", "cwd", "print", "yes", "json", "output-dir", "log-path", "harness", "claude-projects-dir", "codex-dir", "opencode-dir", "cline-dir"} {
-		if cmd.Flags().Lookup(flag) == nil {
-			t.Fatalf("handoff resume missing --%s", flag)
-		}
-	}
-}
-
 func TestHandoffResumeReopensNativelyAfterConfirmation(t *testing.T) {
 	f := newResumeFixture(t)
 	_, stderr, err := runResume(t, f, "claude-1")

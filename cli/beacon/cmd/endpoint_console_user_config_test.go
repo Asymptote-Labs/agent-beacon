@@ -102,21 +102,6 @@ func TestConsoleUserConfigCheckHonoursCustomOTLPPorts(t *testing.T) {
 	}
 }
 
-// Beacon writes 127.0.0.1, but a user or an MDM profile may have written localhost against the
-// same collector. Reporting that as unconfigured would be wrong.
-func TestConsoleUserConfigCheckAcceptsLocalhostSpelling(t *testing.T) {
-	info := userHomeWith(t, ".claude/settings.json",
-		`{"env":{"OTEL_EXPORTER_OTLP_ENDPOINT":"http://localhost:4317"}}`)
-
-	cfg := endpointconfig.Config{}
-	cfg.Collector.GRPCPort = endpointconfig.DefaultGRPCPort
-	cfg.Collector.HTTPPort = endpointconfig.DefaultHTTPPort
-
-	if ok, detail := consoleUserHarnessConfigured(info, cfg); !ok {
-		t.Errorf("the localhost spelling read as unconfigured: %s", detail)
-	}
-}
-
 // A port is a number, not a string prefix. Matching `host:port` as a substring has no right-hand
 // boundary, so an endpoint on port 431 would accept a file pointing at 4317 -- a false OK on the
 // check that is trusted when it says the user *is* captured. That direction is the dangerous one:

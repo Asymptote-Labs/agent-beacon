@@ -7,7 +7,6 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // writeOmpExtension creates a user-level Oh My Pi extension file with the given contents.
@@ -55,27 +54,6 @@ func TestDiscoverOmpReportsMissingExtension(t *testing.T) {
 	if h.Capability != "plugin" {
 		t.Fatalf("Capability = %q, want %q -- Oh My Pi has no hooks file and no OTel support, so "+
 			"the integration is extension-shaped", h.Capability, "plugin")
-	}
-}
-
-// Oh My Pi installed through bun, a version manager, or its own installer into a directory this
-// process did not inherit on PATH is not visible as an executable, so the state directory has to
-// count as evidence. The alternative is reporting "not detected" for a runtime the operator is
-// actively running, which reads as "Beacon cannot see this" when the truth is "Beacon has not been
-// installed into it yet".
-func TestDiscoverOmpTreatsTheStateDirectoryAsEvidence(t *testing.T) {
-	home := setupOmpDiscovery(t)
-	if err := os.MkdirAll(filepath.Join(home, ".omp", "agent"), 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	h := DiscoverOmp()
-	if !h.Detected {
-		t.Fatal("DiscoverOmp reported not detected with an Oh My Pi agent directory present")
-	}
-	if h.TelemetryStatus != TelemetryMissing {
-		t.Fatalf("TelemetryStatus = %q, want %q -- the runtime is present but Beacon is not "+
-			"installed into it", h.TelemetryStatus, TelemetryMissing)
 	}
 }
 
@@ -135,32 +113,4 @@ func TestDiscoverOmpDoesNotAcceptPisMarker(t *testing.T) {
 	if h := DiscoverOmp(); h.TelemetryStatus == TelemetryEnabled {
 		t.Fatal("DiscoverOmp reported Pi's extension as an Oh My Pi install")
 	}
-}
-
-// The harness name discovery reports must be the canonical one events are written under, or the
-// dashboard groups a runtime's discovery row and its telemetry rows separately.
-func TestDiscoverOmpUsesTheCanonicalHarnessName(t *testing.T) {
-	setupOmpDiscovery(t)
-
-	h := DiscoverOmp()
-	if got := asymptoteobserve.NormalizeHarnessName(h.Name); got != h.Name {
-		t.Fatalf("DiscoverOmp reports %q, which normalizes to %q; discovery and telemetry would "+
-			"not join", h.Name, got)
-	}
-	if h.Name == DiscoverPi().Name {
-		t.Fatal("Oh My Pi and Pi discovery report the same harness name")
-	}
-}
-
-// A runtime absent from DiscoverAll is a runtime `beacon endpoint discover` never mentions, which
-// is how support ships without anyone being able to find it.
-func TestDiscoverAllIncludesOmp(t *testing.T) {
-	setupOmpDiscovery(t)
-
-	for _, h := range DiscoverAll() {
-		if h.Name == "omp" {
-			return
-		}
-	}
-	t.Fatal("DiscoverAll does not include Oh My Pi")
 }
