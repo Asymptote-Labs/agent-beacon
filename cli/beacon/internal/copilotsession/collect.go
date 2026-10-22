@@ -1,7 +1,6 @@
 package copilotsession
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionwindow"
 )
 
@@ -64,47 +63,16 @@ func DefaultStatePath() string {
 	return filepath.Join(base, "endpoint", "state", "copilot.json")
 }
 
-func LoadState(path string) (*State, error) {
-	state := &State{Version: StateVersion, Files: map[string]*Cursor{}}
-	if path == "" {
-		return state, nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return state, nil
-		}
-		return nil, err
-	}
-	var stored State
-	if err := json.Unmarshal(data, &stored); err != nil {
-		return nil, fmt.Errorf("read GitHub Copilot CLI collector state %s: %w", path, err)
-	}
-	if stored.Version != StateVersion || stored.Files == nil {
-		return state, nil
-	}
-	state.Files = stored.Files
-	return state, nil
+var stateFile = sessionsync.StateFile[State]{
+	Name:  "GitHub Copilot CLI",
+	New:   func() *State { return &State{Version: StateVersion, Files: map[string]*Cursor{}} },
+	Valid: func(s *State) bool { return s.Version == StateVersion && s.Files != nil },
+	Stamp: func(s *State) { s.Version = StateVersion },
 }
 
-func (s *State) Save(path string) error {
-	if path == "" {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	s.Version = StateVersion
-	data, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
+func LoadState(path string) (*State, error) { return stateFile.Load(path) }
+
+func (s *State) Save(path string) error { return stateFile.Save(path, s) }
 
 func (s *State) cursor(path string) *Cursor {
 	if s.Files == nil {
@@ -197,7 +165,7 @@ func collectSession(store *Store, ref SessionRef, state *State, opts CollectOpti
 		return false, nil
 	}
 	for i, item := range mapped {
-		if err := emit(item.Event, opts); err != nil {
+		if err := opts.sink().Emit(item.Event); err != nil {
 			advanceCursorPartial(cursor, mapped, i)
 			return true, err
 		}
@@ -241,22 +209,8 @@ func advanceCursorPartial(cursor *Cursor, mapped []MappedEvent, failedIdx int) {
 	}
 }
 
-func emit(event schema.Event, opts CollectOptions) error {
-	if opts.Print && opts.Out != nil {
-		data, err := json.Marshal(event)
-		if err != nil {
-			return err
-		}
-		if _, err := opts.Out.Write(append(data, '\n')); err != nil {
-			return err
-		}
-	}
-	if opts.Write {
-		if _, err := writer.AppendEvent(event, writer.Options{Path: opts.LogPath, UserMode: opts.UserMode, Budget: opts.Budget}); err != nil {
-			return err
-		}
-	}
-	return nil
+func (o CollectOptions) sink() sessionsync.Sink {
+	return sessionsync.Sink{Print: o.Print, Out: o.Out, Write: o.Write, Log: writer.Options{Path: o.LogPath, UserMode: o.UserMode, Budget: o.Budget}}
 }
 
 func FilterRefs(refs []SessionRef, opts CollectOptions) []SessionRef {
