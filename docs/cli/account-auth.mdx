@@ -50,12 +50,10 @@ Or forward the port over SSH before opening the URL: ssh -L 43121:127.0.0.1:4312
 Waiting for Beacon sign-in...
 ```
 
-Under WSL, `beacon login` opens the sign-in page in your Windows browser: with
-`wslview` when [wslu](https://github.com/wslutilities/wslu) is installed, otherwise
-through `rundll32.exe`. WSL2 forwards `127.0.0.1` to Windows, so the redirect back to
-the CLI works without extra setup. If Windows interop is turned off, `beacon login`
-falls back to the Linux behavior above; use `--no-browser` and open the printed URL in
-Windows yourself.
+Under WSL, `beacon login` opens the sign-in page in your Windows browser. WSL2
+forwards `127.0.0.1` to Windows, so the redirect back to the CLI works without extra
+setup. If Windows interop is turned off, `beacon login` falls back to the Linux
+behavior above; use `--no-browser` and open the printed URL in Windows yourself.
 
 ### Signing in to a remote machine
 

@@ -26,7 +26,7 @@ var (
 // WSL_DISTRO_NAME in every shell; the kernel release is the fallback for environments that
 // scrub it (sudo, systemd units).
 func isWSL() bool {
-	if os.Getenv("WSL_DISTRO_NAME") != "" || os.Getenv("WSL_INTEROP") != "" {
+	if browserEnv("WSL_DISTRO_NAME") != "" || browserEnv("WSL_INTEROP") != "" {
 		return true
 	}
 	release, err := os.ReadFile("/proc/sys/kernel/osrelease")
@@ -36,17 +36,8 @@ func isWSL() bool {
 	return strings.Contains(strings.ToLower(string(release)), "microsoft")
 }
 
-// wslOpener returns the command that opens url in the Windows browser when running under WSL,
-// or nil when not under WSL or no Windows opener is reachable.
-//
-// Under WSL, xdg-open is the wrong tool. WSLg sets DISPLAY and WAYLAND_DISPLAY, so CheckDisplay
-// passes, but a stock Ubuntu has no Linux browser and no handler for https: xdg-open starts,
-// fails after Start has returned nil, and sign-in waits for a redirect that cannot come. The
-// person's browser is on Windows, and WSL2 forwards 127.0.0.1 to it, so the loopback redirect
-// works once the URL is opened there.
-//
-// wslview (from wslu) is preferred because it handles quoting. rundll32.exe is reached through
-// WSL interop and, unlike `cmd.exe /c start`, does not reinterpret the & in a query string.
+// wslOpener returns the command that opens url in the Windows browser under WSL, or nil when not
+// under WSL or no Windows opener is reachable. rundll32.exe, unlike cmd.exe, keeps the & in a URL.
 func wslOpener(url string) []string {
 	if !browserIsWSL() {
 		return nil
