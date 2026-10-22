@@ -98,31 +98,32 @@ func (f StateFile[S]) Save(path string, s *S) error {
 	return os.Rename(tmp, path)
 }
 
-// Sink is where a sweep's events go: one JSON object per line to Out for --print, appended to the
-// runtime log with Log, or both.
+// Sink is where a sweep's events go: one JSON object per line to Out for --print, or appended to
+// the runtime log with Log.
 type Sink struct {
 	Print bool
 	// Out receives printed events; nil drops them.
 	Out   io.Writer
 	Write bool
-	// PrintOnly stops a printing sweep from also writing.
-	PrintOnly bool
-	Log       writer.Options
+	Log   writer.Options
 }
 
-// Emit prints or appends one event. An append refused by Log.Budget or Log.Guard returns
-// writer.ErrBudgetSpent or writer.ErrRetentionWindowFull, which the sweep stops on.
+// Emit prints or appends one event. A printing sweep never writes. An append refused by
+// Log.Budget or Log.Guard returns writer.ErrBudgetSpent or writer.ErrRetentionWindowFull, which
+// the sweep stops on.
 func (s Sink) Emit(event schema.Event) error {
-	if s.Print && s.Out != nil {
+	if s.Print {
+		if s.Out == nil {
+			return nil
+		}
 		data, err := json.Marshal(event)
 		if err != nil {
 			return err
 		}
-		if _, err := s.Out.Write(append(data, '\n')); err != nil {
-			return err
-		}
+		_, err = s.Out.Write(append(data, '\n'))
+		return err
 	}
-	if !s.Write || (s.Print && s.PrintOnly) {
+	if !s.Write {
 		return nil
 	}
 	_, err := writer.AppendEvent(event, s.Log)

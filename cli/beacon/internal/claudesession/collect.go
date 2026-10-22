@@ -260,5 +260,5 @@ func advanceCursorPartial(cursor *Cursor, mapped []MappedEvent, failedIdx int) {
 }
 
 func (o CollectOptions) sink() sessionsync.Sink {
-	return sessionsync.Sink{Print: o.Print, Out: o.Out, Write: o.Write, PrintOnly: true, Log: writer.Options{Path: o.LogPath, UserMode: o.UserMode, RotateSize: o.RotateBytes, Budget: o.Budget}}
+	return sessionsync.Sink{Print: o.Print, Out: o.Out, Write: o.Write, Log: writer.Options{Path: o.LogPath, UserMode: o.UserMode, RotateSize: o.RotateBytes, Budget: o.Budget}}
 }

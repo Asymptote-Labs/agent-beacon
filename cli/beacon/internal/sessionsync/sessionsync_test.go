@@ -122,13 +122,13 @@ func TestOpenSQLiteIsReadOnly(t *testing.T) {
 	}
 }
 
-func TestSinkPrintAndWrite(t *testing.T) {
+func TestSinkPrintOnly(t *testing.T) {
 	event := testEvent("printed")
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	var out bytes.Buffer
 	for _, sink := range []Sink{
-		{Print: true, Out: &out, Write: true, PrintOnly: true, Log: writer.Options{Path: logPath, UserMode: true}},
-		{Print: true, Write: true, PrintOnly: true, Log: writer.Options{Path: logPath, UserMode: true}},
+		{Print: true, Out: &out, Write: true, Log: writer.Options{Path: logPath, UserMode: true}},
+		{Print: true, Write: true, Log: writer.Options{Path: logPath, UserMode: true}},
 	} {
 		if err := sink.Emit(event); err != nil {
 			t.Fatal(err)
@@ -138,14 +138,7 @@ func TestSinkPrintAndWrite(t *testing.T) {
 		t.Fatalf("printed %q", out.String())
 	}
 	if _, err := os.Stat(logPath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("a print-only sink wrote the log: %v", err)
-	}
-	both := Sink{Print: true, Write: true, Log: writer.Options{Path: logPath, UserMode: true}}
-	if err := both.Emit(event); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(logPath); err != nil {
-		t.Fatalf("a printing sink without PrintOnly did not write: %v", err)
+		t.Fatalf("a printing sink wrote the log: %v", err)
 	}
 }
 

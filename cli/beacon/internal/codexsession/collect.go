@@ -183,7 +183,7 @@ func advanceCursor(cursor *Cursor, ref SessionRef, lines int) {
 var emitEvent = func(event schema.Event, opts CollectOptions) error { return opts.sink().Emit(event) }
 
 func (o CollectOptions) sink() sessionsync.Sink {
-	return sessionsync.Sink{Print: o.Print, Out: o.Out, Write: o.Write, PrintOnly: true, Log: writer.Options{Path: o.LogPath, UserMode: o.UserMode, Budget: o.Budget}}
+	return sessionsync.Sink{Print: o.Print, Out: o.Out, Write: o.Write, Log: writer.Options{Path: o.LogPath, UserMode: o.UserMode, Budget: o.Budget}}
 }
 
 // advanceCursorPartial moves the cursor past source lines whose mapped events were all emitted, so

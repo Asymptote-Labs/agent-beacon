@@ -30,7 +30,6 @@ var directReads = map[string]bool{
 // allowedDirectReads are the exceptions, by package, function and call.
 var allowedDirectReads = map[string]bool{
 	// The collector's own cursor file, under Beacon's base directory rather than the user's store.
-	"*.LoadState.os.ReadFile":      true,
 	"sessionsync.Load.os.ReadFile": true,
 	// The driver open itself, after SQLitePath has turned the path into a confined snapshot.
 	"sessionsync.OpenSQLite.sql.Open": true,
