@@ -142,10 +142,30 @@ func (s *Store) listSQLite() ([]TraceRef, error) {
 		return nil, fmt.Errorf("open OpenCode sqlite: %w", err)
 	}
 	defer db.Close()
-	if !sqliteTableExists(db, "session") {
-		return nil, nil
+	// OpenCode 2.x keeps sessions in session_v2 and migrates 1.x sessions into it under the same
+	// ids. session is the 1.x table, still read for a session that has not been migrated.
+	var refs []TraceRef
+	seen := map[string]bool{}
+	for _, table := range []string{"session_v2", "session"} {
+		if !sqliteTableExists(db, table) {
+			continue
+		}
+		tableRefs, err := s.listSQLiteTable(db, table)
+		for _, ref := range tableRefs {
+			if !seen[ref.ID] {
+				seen[ref.ID] = true
+				refs = append(refs, ref)
+			}
+		}
+		if err != nil {
+			return refs, err
+		}
 	}
-	cols := sqliteColumns(db, "session")
+	return refs, nil
+}
+
+func (s *Store) listSQLiteTable(db *sql.DB, table string) ([]TraceRef, error) {
+	cols := sqliteColumns(db, table)
 	selects := []string{
 		sqliteSelectColumn(cols, "id"),
 		sqliteSelectColumn(cols, "title"),
@@ -155,7 +175,7 @@ func (s *Store) listSQLite() ([]TraceRef, error) {
 		sqliteSelectColumn(cols, "time_updated"),
 		sqliteSelectColumn(cols, "parent_id"),
 	}
-	rows, err := db.Query("SELECT "+strings.Join(selects, ", ")+" FROM session ORDER BY COALESCE(time_updated, time_created, 0) DESC LIMIT ?", defaultListLimit)
+	rows, err := db.Query("SELECT "+strings.Join(selects, ", ")+" FROM "+table+" ORDER BY COALESCE(time_updated, time_created, 0) DESC LIMIT ?", defaultListLimit)
 	if err != nil {
 		return nil, fmt.Errorf("read OpenCode sessions: %w", err)
 	}
@@ -199,18 +219,35 @@ func (s *Store) readSQLite(ref TraceRef) ([]Record, error) {
 		return nil, fmt.Errorf("open OpenCode sqlite: %w", err)
 	}
 	defer db.Close()
-	if !sqliteTableExists(db, "message") || !sqliteTableExists(db, "part") {
-		return nil, nil
+	var records []Record
+	// through is the latest 1.x message or part. OpenCode's migration copies a 1.x session into
+	// session_message with the same timestamps, so only what 2.x wrote after it is read from there.
+	var through int64
+	if sqliteTableExists(db, "message") && sqliteTableExists(db, "part") {
+		messages, err := readSQLiteMessages(db, ref.ID)
+		if err != nil {
+			return nil, err
+		}
+		parts, err := readSQLiteParts(db, ref.ID)
+		if err != nil {
+			return nil, err
+		}
+		records = recordsFromMessages(messages, parts)
+		for _, msg := range messages {
+			through = max(through, msg.Time.Created, msg.Time.Completed)
+			for _, part := range parts[msg.ID] {
+				through = max(through, part.TimeCreated)
+			}
+		}
 	}
-	messages, err := readSQLiteMessages(db, ref.ID)
-	if err != nil {
-		return nil, err
+	if sqliteTableExists(db, "session_message") {
+		v2, err := readSessionMessages(db, ref.ID, through, len(records)+1)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, v2...)
 	}
-	parts, err := readSQLiteParts(db, ref.ID)
-	if err != nil {
-		return nil, err
-	}
-	return recordsFromMessages(messages, parts), nil
+	return records, nil
 }
 
 func readSQLiteMessages(db *sql.DB, sessionID string) ([]opencodeMessage, error) {
@@ -271,6 +308,150 @@ func readSQLiteParts(db *sql.DB, sessionID string) (map[string][]opencodePart, e
 		out[part.MessageID] = append(out[part.MessageID], part)
 	}
 	return out, rows.Err()
+}
+
+// readSessionMessages reads the session_message rows OpenCode 2.x wrote after through. Each row is
+// one typed entry, and an assistant step carries its text, reasoning and tool calls in content.
+func readSessionMessages(db *sql.DB, sessionID string, through int64, order int) ([]Record, error) {
+	rows, err := db.Query("SELECT id, type, time_created, data FROM session_message WHERE session_id = ? AND time_created > ? ORDER BY seq", sessionID, through)
+	if err != nil {
+		return nil, fmt.Errorf("read OpenCode session messages: %w", err)
+	}
+	defer rows.Close()
+	var out []Record
+	for rows.Next() {
+		var id, typ, data sql.NullString
+		var created sql.NullInt64
+		if err := rows.Scan(&id, &typ, &created, &data); err != nil {
+			continue
+		}
+		var raw map[string]interface{}
+		_ = json.Unmarshal([]byte(nullString(data)), &raw)
+		for _, rec := range sessionMessageRecords(nullString(id), nullString(typ), normalizeMillis(nullInt(created)), raw) {
+			rec.Order = order
+			order++
+			out = append(out, rec)
+		}
+	}
+	return out, rows.Err()
+}
+
+func sessionMessageRecords(id, typ string, created int64, raw map[string]interface{}) []Record {
+	model := opencodeModel(raw)
+	switch typ {
+	case "user":
+		text := stringFromMap(raw, "text")
+		if strings.TrimSpace(text) == "" {
+			return nil
+		}
+		return []Record{{NativeID: id, TimestampMS: created, Type: "user_message", Role: "user", Content: text, ModelID: model}}
+	case "shell":
+		// A command the user ran with !, recorded as the bash tool call 1.x stored it as.
+		status := "completed"
+		if stringFromMap(raw, "status") == "running" {
+			status = "running"
+		}
+		output := map[string]interface{}{"output": stringFromMap(mapFromAny(raw["output"]), "output")}
+		if exit, ok := raw["exit"]; ok {
+			output["metadata"] = map[string]interface{}{"exit": exit}
+		}
+		recType := "tool_result"
+		if status == "running" {
+			recType = "tool_call"
+		}
+		return []Record{{NativeID: id, TimestampMS: firstNonZero(normalizeMillis(intFromAny(mapFromAny(raw["time"])["completed"])), created), Type: recType,
+			ToolName: "bash", CallID: firstNonEmpty(stringFromMap(raw, "shellID"), id), Args: map[string]interface{}{"command": stringFromMap(raw, "command")},
+			Output: output, Status: status, Raw: map[string]interface{}{"message": raw}}}
+	case "compaction":
+		// A completed compaction carries the usage of the model call that summarized the history.
+		out := []Record{{NativeID: id, TimestampMS: created, Type: "compaction", ModelID: model, Raw: map[string]interface{}{"message": raw}}}
+		if usage, ok := sessionMessageUsage(id, raw, created, model); ok {
+			out = append(out, usage)
+		}
+		return out
+	case "assistant":
+	default:
+		return nil
+	}
+	var out []Record
+	content, _ := raw["content"].([]interface{})
+	for i, value := range content {
+		item := mapFromAny(value)
+		nativeID := id + ":" + strconv.Itoa(i)
+		switch stringFromMap(item, "type") {
+		case "text", "reasoning":
+			text := stringFromMap(item, "text")
+			if strings.TrimSpace(text) == "" {
+				continue
+			}
+			recType := "assistant_text"
+			if stringFromMap(item, "type") == "reasoning" {
+				recType = "agent_reasoning"
+			}
+			out = append(out, Record{NativeID: nativeID, TimestampMS: created, Type: recType, Role: "assistant", Content: text, ModelID: model, Raw: map[string]interface{}{"part": item}})
+		case "tool":
+			out = append(out, sessionToolRecord(id, item, created, model))
+		}
+	}
+	if usage, ok := sessionMessageUsage(id, raw, created, model); ok {
+		out = append(out, usage)
+	}
+	completed := firstNonZero(normalizeMillis(intFromAny(mapFromAny(raw["time"])["completed"])), created)
+	if errMap := mapFromAny(raw["error"]); len(content) == 0 && len(errMap) > 0 {
+		out = append(out, Record{NativeID: id + ":error", TimestampMS: completed, Type: "error", Content: stringFromMap(errMap, "message", "type"), ModelID: model, Raw: map[string]interface{}{"message": raw}})
+	}
+	return out
+}
+
+// sessionMessageUsage is the token_usage record for a session_message row's tokens and cost.
+func sessionMessageUsage(id string, raw map[string]interface{}, created int64, model string) (Record, bool) {
+	completed := firstNonZero(normalizeMillis(intFromAny(mapFromAny(raw["time"])["completed"])), created)
+	tokens := tokenUsageFromAny(raw["tokens"])
+	// 2.x stores output without reasoning; a total that covers both tells outputTokens to add it back.
+	tokens.Total = tokens.Input + tokens.CacheRead + tokens.CacheWrite + tokens.Output + tokens.Reasoning
+	tokens.CostUSD = floatFromAny(raw["cost"])
+	if !hasUsage(tokens) {
+		return Record{}, false
+	}
+	return Record{NativeID: id + ":usage", TimestampMS: completed, Type: "token_usage", ModelID: model, Tokens: &tokens}, true
+}
+
+func sessionToolRecord(messageID string, item map[string]interface{}, created int64, model string) Record {
+	state := mapFromAny(item["state"])
+	timeMap := mapFromAny(item["time"])
+	status := stringFromMap(state, "status")
+	rec := Record{
+		NativeID:    messageID + ":" + stringFromMap(item, "id"),
+		TimestampMS: firstNonZero(normalizeMillis(intFromAny(timeMap["created"])), created),
+		Type:        "tool_call",
+		ModelID:     model,
+		ToolName:    stringFromMap(item, "name"),
+		CallID:      stringFromMap(item, "id"),
+		Args:        mapFromAny(state["input"]),
+		Status:      firstNonEmpty(status, "invoked"),
+		Raw:         map[string]interface{}{"part": item},
+	}
+	if status != "completed" && status != "error" {
+		return rec
+	}
+	rec.Type = "tool_result"
+	rec.TimestampMS = firstNonZero(normalizeMillis(intFromAny(timeMap["completed"])), rec.TimestampMS)
+	var texts []string
+	contentItems, _ := state["content"].([]interface{})
+	for _, value := range contentItems {
+		if text := stringFromMap(mapFromAny(value), "text"); text != "" {
+			texts = append(texts, text)
+		}
+	}
+	var output interface{} = strings.Join(texts, "\n")
+	if metadata := mapFromAny(state["metadata"]); len(metadata) > 0 {
+		output = map[string]interface{}{"output": output, "metadata": metadata}
+	}
+	rec.Output = output
+	if errText := stringFromMap(mapFromAny(state["error"]), "message"); errText != "" {
+		rec.Raw["error"] = errText
+	}
+	return rec
 }
 
 func (s *Store) listLegacy() ([]TraceRef, error) {

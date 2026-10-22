@@ -367,6 +367,9 @@ func emit(event schema.Event, opts CollectOptions) error {
 type Store struct {
 	path string
 	db   *sql.DB
+	// Hermes adds columns to an existing state.db as it upgrades, so an older database lacks some
+	// the collector reads, such as cwd and archived. Those read as NULL or their default instead.
+	sessionCols, messageCols map[string]bool
 }
 
 func OpenStore(path string) (*Store, error) {
@@ -378,7 +381,52 @@ func OpenStore(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &Store{path: path, db: db}, nil
+	store := &Store{path: path, db: db}
+	if store.sessionCols, err = tableColumns(db, "sessions"); err == nil {
+		store.messageCols, err = tableColumns(db, "messages")
+	}
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return store, nil
+}
+
+func tableColumns(db *sql.DB, table string) (map[string]bool, error) {
+	rows, err := db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cols := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		cols[name] = true
+	}
+	return cols, rows.Err()
+}
+
+// column is alias.name when the table has the column, and fallback when it does not.
+func column(cols map[string]bool, alias, name, fallback string) string {
+	if !cols[name] {
+		return fallback
+	}
+	if alias != "" {
+		return alias + "." + name
+	}
+	return name
+}
+
+// columns selects each name, or NULL for one the table does not have.
+func columns(cols map[string]bool, names ...string) string {
+	out := make([]string, len(names))
+	for i, name := range names {
+		out[i] = column(cols, "", name, "NULL")
+	}
+	return strings.Join(out, ", ")
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -387,13 +435,13 @@ func (s *Store) Path() string { return s.path }
 
 func (s *Store) ListSessions() ([]Session, error) {
 	rows, err := s.db.Query(`
-SELECT id, source, model, cwd, title, parent_session_id, started_at, ended_at, end_reason,
-       message_count, tool_call_count, input_tokens, output_tokens, cache_read_tokens,
-       cache_write_tokens, reasoning_tokens, estimated_cost_usd, actual_cost_usd,
-       cost_status, cost_source,
-       (SELECT max(m.timestamp) FROM messages m WHERE m.session_id = sessions.id AND m.active = 1) AS last_message_at
+SELECT id, source, ` + columns(s.sessionCols, "model", "cwd", "title", "parent_session_id") + `, started_at,
+       ` + columns(s.sessionCols, "ended_at", "end_reason", "message_count", "tool_call_count", "input_tokens",
+		"output_tokens", "cache_read_tokens", "cache_write_tokens", "reasoning_tokens", "estimated_cost_usd",
+		"actual_cost_usd", "cost_status", "cost_source") + `,
+       (SELECT max(m.timestamp) FROM messages m WHERE m.session_id = sessions.id AND ` + column(s.messageCols, "m", "active", "1") + ` = 1) AS last_message_at
 FROM sessions
-WHERE archived = 0
+WHERE ` + column(s.sessionCols, "", "archived", "0") + ` = 0
 ORDER BY started_at, id`)
 	if err != nil {
 		return nil, err
@@ -437,11 +485,11 @@ ORDER BY started_at, id`)
 
 func (s *Store) ReadMessages(sessionID string, afterID int64) ([]Message, error) {
 	rows, err := s.db.Query(`
-SELECT id, session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp,
-       token_count, finish_reason, reasoning, reasoning_content, reasoning_details,
-       platform_message_id, observed, active
+SELECT id, session_id, role, `+columns(s.messageCols, "content", "tool_call_id", "tool_calls", "tool_name")+`, timestamp,
+       `+columns(s.messageCols, "token_count", "finish_reason", "reasoning", "reasoning_content", "reasoning_details",
+		"platform_message_id", "observed")+`, `+column(s.messageCols, "", "active", "1")+`
 FROM messages
-WHERE session_id = ? AND active = 1 AND id > ?
+WHERE session_id = ? AND `+column(s.messageCols, "", "active", "1")+` = 1 AND id > ?
 ORDER BY id`, sessionID, afterID)
 	if err != nil {
 		return nil, err
@@ -495,28 +543,8 @@ type SessionDetail struct {
 
 // SessionDetails returns a SessionDetail for every session ListSessions lists, keyed by id.
 func (s *Store) SessionDetails() (map[string]SessionDetail, error) {
-	columns := map[string]bool{}
-	rows, err := s.db.Query(`SELECT name FROM pragma_table_info('sessions')`)
-	if err != nil {
-		return nil, err
-	}
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		columns[name] = true
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	branch := "NULL"
-	if columns["git_branch"] {
-		branch = "git_branch"
-	}
 	out := map[string]SessionDetail{}
-	rows, err = s.db.Query(`SELECT id, model_config, ` + branch + ` FROM sessions WHERE archived = 0`)
+	rows, err := s.db.Query(`SELECT id, ` + columns(s.sessionCols, "model_config", "git_branch") + ` FROM sessions WHERE ` + column(s.sessionCols, "", "archived", "0") + ` = 0`)
 	if err != nil {
 		return nil, err
 	}
@@ -539,10 +567,10 @@ func (s *Store) SessionDetails() (map[string]SessionDetail, error) {
 	rows, err = s.db.Query(`
 SELECT session_id, max(timestamp),
        (SELECT f.content FROM messages f
-        WHERE f.session_id = m.session_id AND f.active = 1 AND f.role = 'user' AND trim(COALESCE(f.content, '')) != ''
+        WHERE f.session_id = m.session_id AND ` + column(s.messageCols, "f", "active", "1") + ` = 1 AND f.role = 'user' AND trim(COALESCE(f.content, '')) != ''
         ORDER BY f.id LIMIT 1)
 FROM messages m
-WHERE active = 1
+WHERE ` + column(s.messageCols, "m", "active", "1") + ` = 1
 GROUP BY session_id`)
 	if err != nil {
 		return nil, err
@@ -568,7 +596,7 @@ GROUP BY session_id`)
 
 func (s *Store) LastMessageID(sessionID string) (int64, error) {
 	var last sql.NullInt64
-	if err := s.db.QueryRow(`SELECT max(id) FROM messages WHERE session_id = ? AND active = 1`, sessionID).Scan(&last); err != nil {
+	if err := s.db.QueryRow(`SELECT max(id) FROM messages WHERE session_id = ? AND `+column(s.messageCols, "", "active", "1")+` = 1`, sessionID).Scan(&last); err != nil {
 		return 0, err
 	}
 	return last.Int64, nil

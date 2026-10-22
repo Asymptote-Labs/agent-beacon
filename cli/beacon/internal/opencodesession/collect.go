@@ -17,6 +17,10 @@ import (
 
 const StateVersion = 1
 
+// stateCheckpointInterval is how often a sweep saves its cursors while it runs. A first sync over a
+// long history can take minutes, and a sweep stopped before it returns otherwise keeps nothing.
+const stateCheckpointInterval = 5 * time.Second
+
 type Cursor struct {
 	LastOrder   int             `json:"last_order"`
 	UpdatedAtMS int64           `json:"updated_at_ms,omitempty"`
@@ -144,7 +148,13 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 		summary.Errors++
 		errs = append(errs, listErr)
 	}
+	saved := time.Now()
 	for _, ref := range refs {
+		if time.Since(saved) >= stateCheckpointInterval {
+			if err := state.Save(opts.StatePath); err == nil {
+				saved = time.Now()
+			}
+		}
 		changed, collectErr := collectTrace(store, ref, state, opts, &summary)
 		if errors.Is(collectErr, writer.ErrBudgetSpent) {
 			// Not a failed session: this one and the rest are left for a later sync, with cursors
