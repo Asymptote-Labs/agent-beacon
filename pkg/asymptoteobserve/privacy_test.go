@@ -134,6 +134,20 @@ func TestRedactStringRedactsCommonCredentialFormats(t *testing.T) {
 		{"bare database url", "connect to postgres://app:pa55w0rd@db.internal:5432/app", "pa55w0rd"},
 		{"password flag", "mysql --user root --password hunter2hunter2", "hunter2hunter2"},
 		{"token flag", "tool login --token=opaque-flag-value", "opaque-flag-value"},
+		{"curl basic auth", "curl -u admin:hunter2hunter2 https://api.example.com/v1", "hunter2hunter2"},
+		{"curl basic auth in a flag cluster", "curl -fsSu admin:hunter2hunter2 https://api.example.com", "hunter2hunter2"},
+		{"curl long user flag", "curl --user admin:hunter2hunter2 https://api.example.com", "hunter2hunter2"},
+		{"curl quoted user flag", `curl --user="admin:hunter2hunter2" https://api.example.com`, "hunter2hunter2"},
+		{"curl proxy user", "curl --proxy-user proxy:hunter2hunter2 -x http://p:3128 https://x", "hunter2hunter2"},
+		{"curl attached user flag", "curl -uadmin:hunter2hunter2 https://api.example.com", "hunter2hunter2"},
+		{"curl cookie flag", "curl -b 'sessionid=abcdef123456789; csrftoken=zzz' https://x", "abcdef123456789"},
+		{"curl long cookie flag", "curl --cookie sessionid=abcdef123456789 https://x", "abcdef123456789"},
+		{"curl cookie flag in a cluster", `curl -sSb "sessionid=abcdef123456789" https://x`, "abcdef123456789"},
+		{"curl second cookie flag on a line", "curl -b 'a=1' --cookie sessionid=abcdef123456789 https://x", "abcdef123456789"},
+		{"cookie header", "curl -H 'Cookie: sessionid=abcdef123456789; csrftoken=zzz' https://x", "abcdef123456789"},
+		{"set-cookie header", "Set-Cookie: sid=abcdef123456789; HttpOnly", "abcdef123456789"},
+		{"json cookie header", `{"cookie": "sid=abcdef123456789"}`, "abcdef123456789"},
+		{"yaml cookie key", "headers:\n  cookie: sid=abcdef123456789", "abcdef123456789"},
 		{"basic auth", "Authorization: Basic dXNlcjpwYXNzd29yZA==", "dXNlcjpwYXNzd29yZA=="},
 		{"slack", "xoxb-1234567890-abcdefghijkl", "abcdefghijkl"},
 		{"stripe", "sk_live_AbCdEfGhIjKlMnOpQrSt", "AbCdEfGhIjKlMnOpQrSt"},
@@ -186,6 +200,13 @@ func TestRedactStringKeepsLabelsAndOrdinaryText(t *testing.T) {
 		"see https://github.com/org/repo/pull/12 and git@github.com:org/repo.git",
 		"PWD=/home/ada/project",
 		"task-0123456789abcdefghijklmnop",
+		"docker run -u 1000:1000 alpine id",
+		"curl -u admin https://api.example.com",
+		"curl -L -o out.txt https://example.com/u:v",
+		"we set a cookie banner: accept all",
+		"The cookie: chocolate chip recipe is great",
+		"curl -b cookies.txt https://example.com",
+		`curl --user-agent "Mozilla/5.0 (X11: Linux)" https://example.com`,
 	}
 	for _, input := range kept {
 		if got := RedactString(input); got != input {
@@ -222,6 +243,8 @@ func TestRedactStringIsIdempotent(t *testing.T) {
 		`{"token": "opaque-session-value-9", "password": "hunter2hunter2"}`,
 		"Authorization: Bearer abc.def.ghi and --password hunter2hunter2",
 		"postgres://app:pa55w0rd@db/app",
+		"curl -u admin:hunter2hunter2 -H 'Cookie: sid=abcdef123456789' https://x",
+		"curl -b 'sessionid=abcdef123456789' --cookie sid=abcdef123456789 https://x",
 	}
 	for _, input := range inputs {
 		once := RedactString(input)
