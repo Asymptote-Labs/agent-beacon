@@ -1,4 +1,5 @@
 import {
+  ProxyTracerProvider,
   SpanKind,
   SpanStatusCode,
   context,
@@ -228,10 +229,17 @@ export function initialize(options: InitializeOptions = {}): void {
     } catch (error) {
       instrumentations.forEach(i => i.disable());
       provider.shutdown().catch(() => {});
+      releaseGlobalTracer(provider);
       state = undefined;
       throw error;
     }
   }
+}
+
+// trace.disable() lets the next provider register globally; a host's provider is left alone.
+function releaseGlobalTracer(provider: NodeTracerProvider): void {
+  const global = trace.getTracerProvider();
+  if (global instanceof ProxyTracerProvider && global.getDelegate() === provider) trace.disable();
 }
 
 // changedOptions names the options in next, other than instrumentModules, that differ from the
@@ -393,6 +401,7 @@ export async function shutdown(): Promise<void> {
   try {
     await current.provider.shutdown();
   } finally {
+    releaseGlobalTracer(current.provider);
     // A stopped provider cannot resume exporting, even when its exporter rejects.
     if (state === current) state = undefined;
   }
