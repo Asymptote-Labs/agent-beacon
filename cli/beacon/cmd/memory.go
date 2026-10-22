@@ -471,7 +471,7 @@ func runMemoryCandidatesCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	show, ok, err := dashboard.ShowTrace(memoryLogPath(), memoryOpts.traceID, dashboard.TraceQuery{Limit: 2000})
+	show, ok, err := dashboard.ShowTrace(memoryLogPath(), memoryOpts.traceID, dashboard.TraceQuery{EventQuery: dashboard.EventQuery{NoLimit: true}})
 	if err != nil {
 		return err
 	}
@@ -608,8 +608,9 @@ func runMemorySkillsInstall(cmd *cobra.Command, args []string) error {
 // because each fresh sample sorts to the top.
 func selectedEvaluationInputs() ([]learning.EvaluationInput, error) {
 	logPath := memoryLogPath()
+	// The evaluator bounds its projection after sampling the actual head and tail.
 	if memoryOpts.traceID != "" {
-		show, ok, err := dashboard.ShowTrace(logPath, memoryOpts.traceID, dashboard.TraceQuery{Limit: 2000})
+		show, ok, err := dashboard.ShowTrace(logPath, memoryOpts.traceID, dashboard.TraceQuery{EventQuery: dashboard.EventQuery{NoLimit: true}})
 		if err != nil {
 			return nil, err
 		}
@@ -646,7 +647,7 @@ func selectedEvaluationInputs() ([]learning.EvaluationInput, error) {
 		if strings.HasPrefix(summary.ID, "event:") {
 			continue
 		}
-		show, ok, err := dashboard.ShowTrace(logPath, summary.ID, dashboard.TraceQuery{Limit: 2000})
+		show, ok, err := dashboard.ShowTrace(logPath, summary.ID, dashboard.TraceQuery{EventQuery: dashboard.EventQuery{NoLimit: true}})
 		if err != nil {
 			return nil, err
 		}
