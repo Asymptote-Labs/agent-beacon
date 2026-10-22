@@ -107,14 +107,21 @@ func TestValidateCollectorPortsRejectsAHealthPortTheCollectorCannotBind(t *testi
 	if err := ValidateCollectorPorts(Collector{GRPCPort: 4317, HTTPPort: 4318}); err != nil {
 		t.Fatalf("legacy config (no health port) rejected: %v", err)
 	}
-	for name, c := range map[string]Collector{
-		"same as gRPC": {GRPCPort: 4327, HTTPPort: 4328, HealthPort: 4327},
-		"same as HTTP": {GRPCPort: 4327, HTTPPort: 4328, HealthPort: 4328},
-		"out of range": {GRPCPort: 4327, HTTPPort: 4328, HealthPort: 70000},
+	for name, tc := range map[string]struct {
+		c    Collector
+		flag string
+	}{
+		"health same as gRPC": {Collector{GRPCPort: 4327, HTTPPort: 4328, HealthPort: 4327}, "--health-port"},
+		"health same as HTTP": {Collector{GRPCPort: 4327, HTTPPort: 4328, HealthPort: 4328}, "--health-port"},
+		"health out of range": {Collector{GRPCPort: 4327, HTTPPort: 4328, HealthPort: 70000}, "--health-port"},
+		"negative health":     {Collector{GRPCPort: 4327, HTTPPort: 4328, HealthPort: -1}, "--health-port"},
+		"negative gRPC":       {Collector{GRPCPort: -1, HTTPPort: 4318}, "--otlp-grpc-port"},
+		"oversized HTTP":      {Collector{GRPCPort: 4317, HTTPPort: 65536}, "--otlp-http-port"},
+		"same receiver ports": {Collector{GRPCPort: 4317, HTTPPort: 4317}, "--otlp-http-port"},
 	} {
-		err := ValidateCollectorPorts(c)
-		if err == nil || !strings.Contains(err.Error(), "--health-port") {
-			t.Errorf("%s: ValidateCollectorPorts error = %v, want one naming --health-port", name, err)
+		err := ValidateCollectorPorts(tc.c)
+		if err == nil || !strings.Contains(err.Error(), tc.flag) {
+			t.Errorf("%s: ValidateCollectorPorts error = %v, want one naming %s", name, err, tc.flag)
 		}
 	}
 }

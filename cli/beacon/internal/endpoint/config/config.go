@@ -252,13 +252,21 @@ func DeriveHealthCheckPort(grpcPort, httpPort int) int {
 	return DefaultHealthCheckPort
 }
 
-// ValidateCollectorPorts rejects a health-check port the collector could not bind: outside the TCP
-// range, or shared with an OTLP receiver, which would make the collector fail at start with a bind
-// error rather than at install with an explanation.
+// ValidateCollectorPorts rejects out-of-range or shared collector endpoints before install writes
+// a configuration the collector cannot bind. A zero health port keeps the legacy default.
 func ValidateCollectorPorts(collector Collector) error {
+	if !validPort(collector.GRPCPort) {
+		return fmt.Errorf("collector OTLP gRPC port %d is out of range; choose a port between 1 and 65535 with --otlp-grpc-port", collector.GRPCPort)
+	}
+	if !validPort(collector.HTTPPort) {
+		return fmt.Errorf("collector OTLP HTTP port %d is out of range; choose a port between 1 and 65535 with --otlp-http-port", collector.HTTPPort)
+	}
+	if collector.GRPCPort == collector.HTTPPort {
+		return fmt.Errorf("collector OTLP gRPC and HTTP ports are both %d; choose different --otlp-grpc-port and --otlp-http-port values", collector.GRPCPort)
+	}
 	health := HealthCheckPort(collector)
-	if !validPort(health) {
-		return fmt.Errorf("collector health-check port %d is out of range; choose a port between 1 and 65535 with --health-port", health)
+	if collector.HealthPort < 0 || !validPort(health) {
+		return fmt.Errorf("collector health-check port %d is out of range; choose a port between 1 and 65535 with --health-port", collector.HealthPort)
 	}
 	if health == collector.GRPCPort || health == collector.HTTPPort {
 		return fmt.Errorf("collector health-check port %d is also an OTLP receiver port; choose a different --health-port", health)
