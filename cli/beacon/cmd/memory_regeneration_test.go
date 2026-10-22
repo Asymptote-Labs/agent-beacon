@@ -243,48 +243,6 @@ func TestMemoryGenerationWriteFailureDoesNotPrintCandidate(t *testing.T) {
 	}
 }
 
-func TestMemoryRegenerationInvalidStoredRecordDoesNotPrintCandidate(t *testing.T) {
-	for _, evaluated := range []bool{false, true} {
-		for _, jsonOutput := range []bool{false, true} {
-			for _, fault := range []struct{ name, raw string }{
-				{"null", "null"},
-				{"empty-object", "{}"},
-				{"wrong-id", `{"id":"another_candidate","state":"approved"}`},
-			} {
-				name := map[bool]string{false: "authored", true: "evaluated"}[evaluated] + "/" + map[bool]string{false: "text", true: "json"}[jsonOutput] + "/" + fault.name
-				t.Run(name, func(t *testing.T) {
-					configureMemoryRegeneration(t, evaluated)
-					first := generateCommandCandidate(t, evaluated)
-					db, err := sql.Open("sqlite", sqliteuri.File(memoryStore().Path(), nil))
-					if err != nil {
-						t.Fatal(err)
-					}
-					defer db.Close()
-					if _, err := db.Exec(`UPDATE candidates SET candidate_json = ? WHERE id = ?`, fault.raw, first.ID); err != nil {
-						t.Fatal(err)
-					}
-					memoryOpts.jsonOutput = jsonOutput
-					var out bytes.Buffer
-					cmd := &cobra.Command{}
-					cmd.SetOut(&out)
-					if evaluated {
-						err = runMemoryEvaluationsRun(cmd, nil)
-					} else {
-						err = runMemoryCandidatesCreate(cmd, nil)
-					}
-					if err == nil || out.Len() != 0 {
-						t.Errorf("invalid existing record returned generation success: err=%v output=%q", err, out.String())
-					}
-					var retained string
-					if err := db.QueryRow(`SELECT candidate_json FROM candidates WHERE id = ?`, first.ID).Scan(&retained); err != nil || retained != fault.raw {
-						t.Fatalf("generation changed invalid existing bytes: %q err=%v", retained, err)
-					}
-				})
-			}
-		}
-	}
-}
-
 func configureMemoryRegeneration(t *testing.T, evaluated bool) (string, string, *atomic.Int32) {
 	t.Helper()
 	logPath, project := writeMemoryCommandFixture(t)

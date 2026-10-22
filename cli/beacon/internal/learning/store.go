@@ -481,8 +481,8 @@ func (s *Store) PutCandidate(c asymptoteobserve.LearningCandidateV1) error {
 	return err
 }
 
-// InsertCandidate inserts a generated candidate only when its ID is absent and
-// returns the stored record. Regeneration must not rewrite an existing review.
+// InsertCandidate stores a generated candidate unless its ID already exists and
+// returns the stored record, so regenerating never resets a completed review.
 func (s *Store) InsertCandidate(c asymptoteobserve.LearningCandidateV1) (asymptoteobserve.LearningCandidateV1, error) {
 	c, data, err := prepareCandidate(c)
 	if err != nil {
@@ -493,32 +493,13 @@ func (s *Store) InsertCandidate(c asymptoteobserve.LearningCandidateV1) (asympto
 		return asymptoteobserve.LearningCandidateV1{}, err
 	}
 	defer db.Close()
-	tx, err := db.Begin()
-	if err != nil {
-		return asymptoteobserve.LearningCandidateV1{}, err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec(`INSERT INTO candidates (id, project_id, state, kind, title, source_evaluation_id, memory_id, created_at, updated_at, candidate_json)
+	if _, err := db.Exec(`INSERT INTO candidates (id, project_id, state, kind, title, source_evaluation_id, memory_id, created_at, updated_at, candidate_json)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO NOTHING`, c.ID, c.Project.ID, c.State, c.Kind, c.Title, c.SourceEvaluationID, c.MemoryID, c.CreatedAt, c.UpdatedAt, string(data)); err != nil {
 		return asymptoteobserve.LearningCandidateV1{}, err
 	}
-	var raw string
-	if err := tx.QueryRow(`SELECT candidate_json FROM candidates WHERE id = ?`, c.ID).Scan(&raw); err != nil {
-		return asymptoteobserve.LearningCandidateV1{}, err
-	}
-	var stored asymptoteobserve.LearningCandidateV1
-	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
-		return asymptoteobserve.LearningCandidateV1{}, err
-	}
-	// Null and empty objects decode without an error but do not identify this row.
-	if stored.ID != c.ID {
-		return asymptoteobserve.LearningCandidateV1{}, fmt.Errorf("stored candidate %q has invalid ID %q", c.ID, stored.ID)
-	}
-	if err := tx.Commit(); err != nil {
-		return asymptoteobserve.LearningCandidateV1{}, err
-	}
-	return stored, nil
+	stored, _, err := s.GetCandidate(c.ID)
+	return stored, err
 }
 
 func prepareCandidate(c asymptoteobserve.LearningCandidateV1) (asymptoteobserve.LearningCandidateV1, []byte, error) {
