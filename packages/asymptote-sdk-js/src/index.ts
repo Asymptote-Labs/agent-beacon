@@ -579,7 +579,11 @@ function finishResult<T>(result: T, span: Span, options?: ObserveOptions): unkno
         outcome = await settled;
       } catch (error) {
         // The consumer's error takes precedence over a cleanup failure.
-        await Promise.resolve(typeof close === "function" ? close.call(result) : undefined).catch(() => {});
+        try {
+          if (typeof close === "function") await close.call(result);
+        } catch {
+          // Cleanup can throw before returning its promise, or reject afterward.
+        }
         endSpanWithError(span, error);
         throw error;
       }
