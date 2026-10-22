@@ -69,6 +69,12 @@ func (s *Store) Path() string {
 	return s.dbPath
 }
 
+// dsn opens the store with a busy timeout, and with review transactions taking the write lock at
+// BEGIN, so a competing review waits instead of failing with SQLITE_BUSY when it upgrades.
+func (s *Store) dsn() string {
+	return sqliteuri.File(s.dbPath, url.Values{"_pragma": {"busy_timeout(5000)"}, "_txlock": {"immediate"}})
+}
+
 func (s *Store) db() (*sql.DB, error) {
 	if s.dbPath == "" {
 		s.dbPath = storeFile
@@ -76,7 +82,7 @@ func (s *Store) db() (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(s.dbPath), 0700); err != nil && filepath.Dir(s.dbPath) != "." {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", sqliteuri.File(s.dbPath, url.Values{"_pragma": {"busy_timeout(5000)"}, "_txlock": {"immediate"}}))
+	db, err := sql.Open("sqlite", s.dsn())
 	if err != nil {
 		return nil, err
 	}

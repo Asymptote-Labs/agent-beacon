@@ -1,7 +1,6 @@
 package learning
 
 import (
-	"net/url"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -12,7 +11,6 @@ import (
 
 	"modernc.org/sqlite"
 
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sqliteuri"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
@@ -124,7 +122,7 @@ func TestInsertCandidateDoesNotOverwriteConcurrentReview(t *testing.T) {
 		t.Fatal(err)
 	}
 	gate := &candidateGenerationGate{paused: make(chan struct{}), resume: make(chan struct{})}
-	dsn := sqliteuri.File(store.Path(), url.Values{"_pragma": {"busy_timeout(5000)"}})
+	dsn := store.dsn()
 	candidateGenerationGates.Store(dsn, gate)
 	var release sync.Once
 	finished := make(chan struct{})
