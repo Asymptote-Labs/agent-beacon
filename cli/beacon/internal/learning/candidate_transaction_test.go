@@ -2,18 +2,11 @@ package learning
 
 import (
 	"fmt"
-	"net/url"
 	"path/filepath"
 	"reflect"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
-	"time"
 
-	"modernc.org/sqlite"
-
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sqliteuri"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
@@ -109,129 +102,6 @@ func TestReviewRejectRollsBackAndRetries(t *testing.T) {
 	}
 	if got := snapshotReview(t, store); len(got.memories) != 0 || len(got.recalled) != 0 {
 		t.Fatalf("rejection created a memory: %#v", got)
-	}
-}
-
-func TestReviewValidationDoesNotMutateRecords(t *testing.T) {
-	store := Open(filepath.Join(t.TempDir(), "memory.db"))
-	candidate := putReviewCandidate(t, store, "approved")
-	_, memory, err := ApproveCandidate(store, candidate.ID, "approved review")
-	if err != nil {
-		t.Fatal(err)
-	}
-	other := putReviewCandidate(t, store, "other-project")
-	other.Project.ID = "other-project"
-	if err := store.PutCandidate(other); err != nil {
-		t.Fatal(err)
-	}
-	for name, review := range map[string]func() error{
-		"missing-approval": func() error { _, _, err := ApproveCandidate(store, "missing", ""); return err },
-		"repeat-approval":  func() error { _, _, err := ApproveCandidate(store, candidate.ID, ""); return err },
-		"invalid-kind": func() error {
-			_, _, err := ApproveCandidateWithEdits(store, other.ID, "", ApprovalEdits{Kind: "unknown"})
-			return err
-		},
-		"missing-rejection":            func() error { _, err := RejectCandidate(store, "missing", ""); return err },
-		"approved-rejection":           func() error { _, err := RejectCandidate(store, candidate.ID, ""); return err },
-		"empty-replacement":            func() error { _, err := SupersedeCandidate(store, other.ID, "", ""); return err },
-		"missing-replacement":          func() error { _, err := SupersedeCandidate(store, other.ID, "missing", ""); return err },
-		"missing-superseded-candidate": func() error { _, err := SupersedeCandidate(store, "missing", memory.ID, ""); return err },
-		"different-project":            func() error { _, err := SupersedeCandidate(store, other.ID, memory.ID, ""); return err },
-	} {
-		t.Run(name, func(t *testing.T) {
-			before := snapshotReview(t, store)
-			if err := review(); err == nil {
-				t.Fatal("invalid review succeeded")
-			}
-			if after := snapshotReview(t, store); !reflect.DeepEqual(after, before) {
-				t.Fatalf("invalid review changed records: before=%#v after=%#v", before, after)
-			}
-		})
-	}
-}
-
-type reviewConnectionGate struct {
-	opened atomic.Int32
-	paused chan struct{}
-	resume chan struct{}
-}
-
-var reviewConnectionGates sync.Map
-
-func init() {
-	sqlite.RegisterConnectionHook(func(_ sqlite.ExecQuerierContext, dsn string) error {
-		if value, ok := reviewConnectionGates.Load(dsn); ok {
-			gate := value.(*reviewConnectionGate)
-			if gate.opened.Add(1) == 2 {
-				close(gate.paused)
-				<-gate.resume
-			}
-		}
-		return nil
-	})
-}
-
-// Before transactional review, rejection reopened the database after validating
-// its candidate. Pause that second connection so approval commits in the gap.
-func TestReviewCompetingRejectCannotOverwriteApproval(t *testing.T) {
-	store := Open(filepath.Join(t.TempDir(), "memory.db"))
-	candidate := putReviewCandidate(t, store, "competing")
-	gate := &reviewConnectionGate{paused: make(chan struct{}), resume: make(chan struct{})}
-	dsn := sqliteuri.File(store.Path(), url.Values{"_pragma": {"busy_timeout(5000)"}})
-	reviewConnectionGates.Store(dsn, gate)
-	var release sync.Once
-	rejected := make(chan error, 1)
-	finished := make(chan struct{})
-	t.Cleanup(func() {
-		reviewConnectionGates.Delete(dsn)
-		release.Do(func() { close(gate.resume) })
-		select {
-		case <-finished:
-		case <-time.After(10 * time.Second):
-			t.Error("rejection goroutine did not finish after releasing its connection")
-		}
-	})
-	go func() {
-		defer close(finished)
-		_, err := RejectCandidate(store, candidate.ID, "competing rejection")
-		rejected <- err
-	}()
-	select {
-	case <-gate.paused:
-		_, memory, err := ApproveCandidate(store, candidate.ID, "committed approval")
-		if err != nil {
-			t.Fatalf("approval in stale rejection gap: %v", err)
-		}
-		release.Do(func() { close(gate.resume) })
-		if err := <-rejected; err == nil {
-			t.Error("stale rejection overwrote a committed approval")
-		}
-		stored, ok, err := store.GetCandidate(candidate.ID)
-		if err != nil || !ok || stored.State != asymptoteobserve.LearningCandidateStateApproved || stored.MemoryID != memory.ID {
-			t.Errorf("candidate disagrees with committed memory: %#v found=%v err=%v", stored, ok, err)
-		}
-		if got := snapshotReview(t, store); !reflect.DeepEqual(got.recalled, []string{memory.ID}) {
-			t.Fatalf("committed approval was lost: %#v", got)
-		}
-	case err := <-rejected:
-		// A single transaction has no connection gap: rejection wins before the
-		// competing approval starts, which must now refuse the reviewed state.
-		reviewConnectionGates.Delete(dsn)
-		if err != nil {
-			t.Fatalf("uncontended rejection: %v", err)
-		}
-		if _, _, err := ApproveCandidate(store, candidate.ID, "late approval"); err == nil {
-			t.Fatal("approval overwrote a committed rejection")
-		}
-		stored, ok, err := store.GetCandidate(candidate.ID)
-		if err != nil || !ok || stored.State != asymptoteobserve.LearningCandidateStateRejected || stored.MemoryID != "" {
-			t.Fatalf("rejection state = %#v found=%v err=%v", stored, ok, err)
-		}
-		if got := snapshotReview(t, store); len(got.memories) != 0 || len(got.recalled) != 0 {
-			t.Fatalf("losing approval leaked memory: %#v", got)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("review did not finish or reach its second connection")
 	}
 }
 

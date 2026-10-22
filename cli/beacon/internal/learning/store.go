@@ -76,7 +76,7 @@ func (s *Store) db() (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(s.dbPath), 0700); err != nil && filepath.Dir(s.dbPath) != "." {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", sqliteuri.File(s.dbPath, url.Values{"_pragma": {"busy_timeout(5000)"}}))
+	db, err := sql.Open("sqlite", sqliteuri.File(s.dbPath, url.Values{"_pragma": {"busy_timeout(5000)"}, "_txlock": {"immediate"}}))
 	if err != nil {
 		return nil, err
 	}
