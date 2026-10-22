@@ -557,6 +557,7 @@ func TestInventoryJobEnvRecordsTheOtherInventoryRootVariables(t *testing.T) {
 		"PI_CONFIG_DIR":                ".omp-alt",
 		"OMP_PROFILE":                  "",
 		"PI_PROFILE":                   "work",
+		"QWEN_HOME":                    "qwen-alt",
 	}
 	for name, value := range set {
 		t.Setenv(name, value)
@@ -570,6 +571,7 @@ func TestInventoryJobEnvRecordsTheOtherInventoryRootVariables(t *testing.T) {
 		"PI_CONFIG_DIR":                ".omp-alt",
 		"OMP_PROFILE":                  "",
 		"PI_PROFILE":                   "work",
+		"QWEN_HOME":                    filepath.Join(cwd, "qwen-alt"),
 	}
 	if runtime.GOOS == "windows" {
 		// Not absolute without a drive letter, so it is resolved like any relative path.

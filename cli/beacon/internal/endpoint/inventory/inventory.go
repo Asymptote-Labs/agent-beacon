@@ -525,11 +525,14 @@ func devinCandidates(home, wd string) []candidate {
 // native config file that Beacon merges into rather than a file Beacon owns. That is why it is
 // classified KindHookConfig and detected by the hook command it contains rather than by a
 // Beacon-managed marker: there is no marker to write into a file the user also edits.
+//
+// The user file follows QWEN_HOME, as Qwen Code does, through the same resolver the installer uses.
 func qwenCandidates(home, wd string) []candidate {
-	return []candidate{
-		{runtime: "qwen_code", path: filepath.Join(home, ".qwen", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
-		{runtime: "qwen_code", path: filepath.Join(wd, ".qwen", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+	items := []candidate{}
+	if path, err := hooks.QwenSettingsPathForHome(hooks.LevelUser, home); err == nil {
+		items = append(items, candidate{runtime: "qwen_code", path: path, scope: ScopeUser, format: formatJSON, kind: KindHookConfig})
 	}
+	return append(items, candidate{runtime: "qwen_code", path: filepath.Join(wd, ".qwen", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig})
 }
 
 // Muse Code is two files: the managed hooks file Beacon owns outright, and Muse's own settings.json,

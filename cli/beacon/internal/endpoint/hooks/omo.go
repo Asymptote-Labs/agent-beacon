@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	omoextension "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks/assets/omo"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/homepath"
 )
 
 // Senpi is the standalone edition of oh-my-openagent (OMO): an in-flight fork of pi-mono
@@ -198,7 +198,7 @@ func omoExtensionDir(home string, level Level) (string, error) {
 	switch level {
 	case "", LevelUser:
 		if agentDir := omoAgentDirOverride(); agentDir != "" {
-			expanded, err := omoExpandTilde(agentDir, home)
+			expanded, err := homepath.ExpandTilde(agentDir, home)
 			if err != nil {
 				return "", err
 			}
@@ -217,23 +217,4 @@ func omoExtensionDir(home string, level Level) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown hook level %q", level)
 	}
-}
-
-// omoExpandTilde resolves a leading `~` in the agent-directory override.
-//
-// Senpi expands it itself before using the value, so a Beacon install that did not would create a
-// literal `~` directory beside the working directory and report success while the runtime kept
-// reading the real home. Only a bare `~` or a `~/`-rooted path is expanded, which is the runtime's
-// own rule -- `~user/...` is left alone by both.
-func omoExpandTilde(path, home string) (string, error) {
-	if path != "~" && !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, `~\`) {
-		return path, nil
-	}
-	if home == "" {
-		return "", fmt.Errorf("home directory is required to resolve %q", path)
-	}
-	if path == "~" {
-		return home, nil
-	}
-	return filepath.Join(home, filepath.FromSlash(path[2:])), nil
 }

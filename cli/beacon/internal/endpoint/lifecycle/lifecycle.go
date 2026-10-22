@@ -215,6 +215,7 @@ var inventoryJobPathEnv = []string{
 	"OMO_CODING_AGENT_DIR",         // OMO
 	"SENPI_CODING_AGENT_DIR",       // OMO's legacy name
 	"PRIME_AGENT_CODING_AGENT_DIR", // Prime Agent
+	"QWEN_HOME",                    // Qwen Code
 }
 
 // inventoryJobNameEnv are the variables the inventory scan reads as names rather than paths, so
