@@ -48,6 +48,9 @@ test('captures a simple ChatGPT turn end-to-end into normalized OTLP', async ({
   const promptAttrs = flatAttrs(promptRec!.attributes);
   expect(promptAttrs['beacon.prompt.text']).toBe('good evening');
   expect(promptAttrs['beacon.session.id']).toBe(CONV);
+  expect(JSON.parse(String(promptAttrs['gen_ai.input.messages']))).toEqual([
+    { role: 'user', parts: [{ type: 'text', content: 'good evening' }] },
+  ]);
 
   // Response lands on the agent.response.completed record.
   const rec = recordByAction(mockCollector.received, 'agent.response.completed');
@@ -55,5 +58,7 @@ test('captures a simple ChatGPT turn end-to-end into normalized OTLP', async ({
   const attrs = flatAttrs(rec!.attributes);
   expect(attrs['gen_ai.conversation.id']).toBe(CONV);
   expect(attrs['gen_ai.response.model']).toBe('gpt-5-6-thinking');
-  expect(String(attrs['gen_ai.output.messages'])).toContain('Good evening');
+  expect(JSON.parse(String(attrs['gen_ai.output.messages']))).toEqual([
+    { role: 'assistant', parts: [{ type: 'text', content: 'Good evening! Hello to you as well. Hope your day is going well.' }] },
+  ]);
 });

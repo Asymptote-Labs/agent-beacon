@@ -50,6 +50,9 @@ test('captures a simple Claude turn end-to-end into normalized OTLP', async ({
   expect(promptAttrs['beacon.event.category']).toBe('prompt');
   expect(promptAttrs['beacon.prompt.text']).toBe('What is the capital of France?');
   expect(promptAttrs['beacon.session.id']).toBe(CONV);
+  expect(JSON.parse(String(promptAttrs['gen_ai.input.messages']))).toEqual([
+    { role: 'user', parts: [{ type: 'text', content: 'What is the capital of France?' }] },
+  ]);
 
   // The response lands on the agent.response.completed record.
   const rec = recordByAction(mockCollector.received, 'agent.response.completed');
@@ -57,7 +60,9 @@ test('captures a simple Claude turn end-to-end into normalized OTLP', async ({
   const attrs = flatAttrs(rec!.attributes);
   expect(attrs['gen_ai.conversation.id']).toBe(CONV);
   expect(attrs['gen_ai.response.model']).toBe('claude-opus-4-8');
-  expect(String(attrs['gen_ai.output.messages'])).toContain('Paris');
+  expect(JSON.parse(String(attrs['gen_ai.output.messages']))).toEqual([
+    { role: 'assistant', parts: [{ type: 'text', content: 'Paris.' }] },
+  ]);
 });
 
 test('captures the prompt when the page uses fetch(new Request(...))', async ({
