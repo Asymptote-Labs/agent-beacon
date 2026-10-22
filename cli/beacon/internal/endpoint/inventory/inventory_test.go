@@ -547,6 +547,9 @@ func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
 	home := t.TempDir()
 	work := t.TempDir()
 	t.Setenv("SHELL", "/bin/bash")
+	// The Harness home is pinned under home: its profiles' patch layers are candidates too, so a
+	// developer whose DSH_HOME points at a real one would otherwise see their profiles counted.
+	t.Setenv("DSH_HOME", "")
 	// Oh My Pi's user extension path is the one candidate an environment variable can move, so the
 	// variables it reads are cleared: a developer who happens to run Oh My Pi under a profile would
 	// otherwise see this test fail on a path that is correct for their machine.

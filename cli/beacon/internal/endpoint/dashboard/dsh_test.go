@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	endpointhooks "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks/dshtest"
 )
 
 // The dashboard's harness list is a hand-written sequence of calls, one per runtime, so a runtime
@@ -15,6 +16,7 @@ func TestHookStatusesIncludesDsh(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("DSH_HOME", "")
+	dshtest.Ready(t, filepath.Join(home, ".dsh"), "0.2.1-rc.2")
 
 	logPath := filepath.Join(home, "runtime.jsonl")
 	find := func() *HookStatus {

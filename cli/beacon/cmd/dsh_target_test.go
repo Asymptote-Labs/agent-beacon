@@ -8,6 +8,7 @@ import (
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	endpointhooks "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks/dshtest"
 )
 
 // The install -> status -> uninstall round trip for DeepSeek Harness, through the CLI entry points
@@ -23,6 +24,7 @@ func TestEndpointHooksInstallAndUninstallDsh(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("DSH_HOME", "")
+	dshtest.Ready(t, filepath.Join(home, ".dsh"), "0.2.1-rc.2")
 	cfg := endpointconfig.Config{LogPath: filepath.Join(home, "runtime.jsonl"), UserMode: true}
 
 	origLevel := endpointOpts.hookLevel
@@ -174,6 +176,7 @@ func TestEndpointHooksDshLeavesTheUsersPatchRowsAlone(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("DSH_HOME", "")
+	dshtest.Ready(t, filepath.Join(home, ".dsh"), "0.2.1-rc.2")
 	cfg := endpointconfig.Config{LogPath: filepath.Join(home, "runtime.jsonl"), UserMode: true}
 
 	origLevel := endpointOpts.hookLevel

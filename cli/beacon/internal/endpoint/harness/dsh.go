@@ -28,6 +28,13 @@ func DiscoverDsh() Harness {
 		h.ConfigPath = store.SessionsDir
 	}
 	h.TelemetryStatus, h.Message = dshCollectionStatus(hookStatus.Installed, store.SessionsDir)
+	// Hooks dsh cannot load are files, not telemetry: the mount is skipped at boot with a warning.
+	// Reported as misconfigured, with the reason, rather than as enabled.
+	if hookStatus.Installed && !hookStatus.Active && hookStatus.Bridge != nil {
+		h.TelemetryStatus = TelemetryMisconfigured
+		h.Message = "Beacon DeepSeek Harness hooks are configured but dsh cannot load them: " + hookStatus.Bridge.Summary() +
+			"; `beacon endpoint doctor` says how to fix it, and `beacon endpoint dsh sync` collects sessions meanwhile"
+	}
 	return h
 }
 

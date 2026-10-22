@@ -172,8 +172,17 @@ func buildDoctorResult(status lifecycle.Status, generatedAt time.Time) doctorRes
 		checks = append(checks, codexTokenAttributionCheck(status.LogPath, status.RuntimeLog.EffectiveUserMode))
 	}
 	if dshDetected {
-		if check, ok := doctorDshHookCaptureCheck(status.LogPath); ok {
+		bridgeUnavailable := false
+		if check, ok := doctorDshHookBridgeCheck(); ok {
 			checks = append(checks, check)
+			bridgeUnavailable = check.Evidence == "dsh_hook_bridge_unavailable"
+		}
+		// When dsh cannot load the bridge at all, every session runs without hook events and the
+		// capture check would blame the sandbox for it. The bridge check has already said why.
+		if !bridgeUnavailable {
+			if check, ok := doctorDshHookCaptureCheck(status.LogPath); ok {
+				checks = append(checks, check)
+			}
 		}
 	}
 	if check, ok := gitHookBudgetCheck(status.LogPath, generatedAt); ok {
@@ -1462,6 +1471,14 @@ func harnessAction(h harness.Harness, effectiveUserMode bool) string {
 	// sweep can only read what Grok has already committed. The check's message names the sweep for
 	// the cases where that is what is behind.
 	case "hooks+session_log":
+		// DeepSeek Harness hooks that are installed but cannot be loaded are not fixed by
+		// installing again, which would refuse: the bridge has to be installed into dsh first,
+		// and the dsh_hook_bridge check names the command.
+		// Discovery points ConfigPath at the hooks file only when the hooks are installed.
+		if h.Name == dshsession.Harness && h.TelemetryStatus == harness.TelemetryMisconfigured &&
+			filepath.Base(h.ConfigPath) == "beacon-endpoint-hooks.json" {
+			return "see the dsh_hook_bridge check; until then run beacon endpoint dsh sync"
+		}
 		return "beacon endpoint hooks install --harness " + h.Name
 	}
 	return ""
