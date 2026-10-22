@@ -36,6 +36,9 @@ func (f *fakeForwarder) Supported() bool           { return f.supported }
 func (f *fakeForwarder) UnsupportedReason() string { return "fake forwarder unsupported" }
 func (f *fakeForwarder) Label() string             { return "fake.forwarder" }
 func (f *fakeForwarder) UnitPath() (string, error) { return f.unitPath, nil }
+func (f *fakeForwarder) UnitCurrent(string, string) (bool, error) {
+	return true, nil
+}
 func (f *fakeForwarder) WriteUnit(vectorBin, configPath string) (string, error) {
 	f.written = append(f.written, vectorBin+" --config "+configPath)
 	if f.writeErr != nil {

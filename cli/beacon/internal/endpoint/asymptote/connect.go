@@ -25,6 +25,7 @@ type Forwarder interface {
 	Label() string
 	UnitPath() (string, error)
 	WriteUnit(vectorBin, configPath string) (string, error)
+	UnitCurrent(vectorBin, configPath string) (bool, error)
 	Load() error
 	Unload() error
 	RemoveUnits()
