@@ -244,11 +244,16 @@ function toolRecord(
     str('gen_ai.tool.call.name', tool.name),
   ];
   const args = shapeText(stringify(tool.arguments), retention);
+  let truncated = args?.truncated ?? false;
   if (args) attrs.push(str('gen_ai.tool.call.arguments', args.text));
   if (tool.result !== undefined) {
     const res = shapeText(stringify(tool.result), retention);
-    if (res) attrs.push(str('gen_ai.tool.call.result', res.text));
+    if (res) {
+      attrs.push(str('gen_ai.tool.call.result', res.text));
+      truncated ||= res.truncated;
+    }
   }
+  if (truncated) attrs.push(bool('beacon.field_truncated', true));
   return {
     timeUnixNano: when,
     severityNumber: severityNumber('info'),

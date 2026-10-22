@@ -1192,6 +1192,11 @@ func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 	event.Repository = FirstString(attrs, "vcs.repository.url", "repository", "repo.path", "workspace.repository")
 	event.Branch = FirstString(attrs, "vcs.branch.name", "git.branch", "branch")
 	event.UserAgent = UserAgentFromAttrs(attrs)
+	// A sender that cut a field to fit (the browser extension) says so on the record; promoted, so
+	// the flag survives metadata-only forwarding, which drops raw attributes.
+	if truncated, _ := BoolAttr(attrs, "beacon.field_truncated"); truncated {
+		event.Truncated = true
+	}
 	if id := FirstString(attrs, "gen_ai.conversation.id", "beacon.session.id", "copilot_chat.session_id", "copilot_chat.chat_session_id", "conversation.id", "conversation_id", "session.id"); id != "" || FirstString(attrs, "cwd", "working_directory", "workspace") != "" {
 		event.Session = &SessionInfo{
 			ID:               id,
