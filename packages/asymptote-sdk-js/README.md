@@ -146,21 +146,8 @@ const plan = Observe.observe(
 Call `Observe.flush()` before short-lived scripts exit, or
 `Observe.shutdown()` when the process owns the provider lifecycle.
 
-After shutdown, call `initialize()` and obtain new tracers for the next provider
-generation. Fresh global OpenTelemetry tracers use that generation when the SDK
-owns the global tracer registration; tracers cached before shutdown keep their
-original provider. A host's existing or replacement tracer provider remains in
-control of global tracing, while SDK helpers and instrumentations use the SDK's
-local provider.
-
-The SDK attempts OpenTelemetry's default context-manager and propagator setup
-once when no host tracer provider is registered, then reuses those process-wide
-globals across provider restarts. Shutdown does not disable them or interrupt
-active contexts. Pre-existing host defaults
-are preserved, though the first setup attempt can emit OpenTelemetry's rejected
-registration diagnostics. A host that replaces or disables those globals is
-responsible for their subsequent setup; SDK reinitialization does not restore
-them.
+After shutdown and reinitialization, get new tracers: tracers obtained before
+shutdown stay bound to the stopped provider.
 
 ## Token Usage Attribution
 
