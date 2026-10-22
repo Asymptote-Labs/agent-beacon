@@ -3195,7 +3195,6 @@ const lensHost = {
   added: [],
   active: "",
   mount: null,
-  dataPromise: null,
 };
 
 function readAddedLenses() {
@@ -3371,15 +3370,16 @@ function selectLens(id, { history = true } = {}) {
   else unmountLens();
 }
 
-function lensData() {
-  if (!lensHost.dataPromise) {
-    lensHost.dataPromise = getJSON(`/api/lens-data?session=${encodeURIComponent(lensHost.session)}`);
-    // A failed load is not cached, so reopening the lens tries again.
-    lensHost.dataPromise.catch(() => {
-      lensHost.dataPromise = null;
+function lensData(mount) {
+  if (!mount.dataPromise) {
+    // A frame receives one snapshot. Reopening creates a new mount and fetches
+    // current data without changing the snapshot of a frame already on screen.
+    mount.dataPromise = getJSON(`/api/lens-data?session=${encodeURIComponent(lensHost.session)}`);
+    mount.dataPromise.catch(() => {
+      mount.dataPromise = null;
     });
   }
-  return lensHost.dataPromise;
+  return mount.dataPromise;
 }
 
 function unmountLens() {
@@ -3405,7 +3405,7 @@ function mountLens(lens) {
   frame.title = `${lens.title} lens`;
   frame.src = `/lenses/frame/${encodeURIComponent(lens.id)}`;
 
-  const mount = { lens, frame, port: null, loads: 0, delivered: false, rendered: false, timer: 0, settleTimer: 0 };
+  const mount = { lens, frame, dataPromise: null, port: null, loads: 0, delivered: false, rendered: false, timer: 0, settleTimer: 0 };
   lensHost.mount = mount;
   const fail = (reason) => {
     if (lensHost.mount !== mount) return;
@@ -3450,7 +3450,7 @@ function mountLens(lens) {
           mount.port.postMessage(payload);
           return true;
         };
-        lensData().then(
+        lensData(mount).then(
           (data) => reply({ type: "trace", data }),
           (err) => reply({ type: "traceError", message: String(err.message || err) }),
         ).then((sent) => {
