@@ -169,3 +169,58 @@ func TestIsDuplicateEndpointEventKeepsEditsToDifferentFiles(t *testing.T) {
 		t.Fatal("two files edited by one MultiEdit are two edits and must both survive")
 	}
 }
+
+// "__" is ordinary text in a command or a path, not an MCP separator, so two
+// different commands or files must not collapse because one spells ":" where
+// the other has "__".
+func TestIsDuplicateEndpointEventKeepsUnderscoresInCommandsAndPaths(t *testing.T) {
+	for _, tc := range []struct{ action, hook, collector string }{
+		{"command.executed", `"command":{"command":"echo a__b"}`, `"command":{"command":"echo a:b"}`},
+		{"file.modified", `"file":{"path":"/repo/x__y.py"}`, `"file":{"path":"/repo/x:y.py"}`},
+	} {
+		path := filepath.Join(t.TempDir(), "runtime.jsonl")
+		hook := `{"timestamp":"2026-08-21T18:00:01Z","event":{"action":"` + tc.action + `"},"harness":{"name":"claude_code"},"session":{"id":"s1","working_directory":"/repo"},` + tc.hook + `}`
+		collector := []byte(`{"timestamp":"2026-08-21T18:00:01Z","event":{"action":"` + tc.action + `"},"harness":{"name":"cursor"},"session":{"id":"s1","working_directory":"/repo"},` + tc.collector + `}`)
+		if err := os.WriteFile(path, []byte(hook+"\n"), 0644); err != nil {
+			t.Fatalf("write existing event: %v", err)
+		}
+		if IsDuplicateEndpointEvent(path, collector, EndpointDuplicateWindow) {
+			t.Errorf("%s: %s and %s are different and must both survive", tc.action, tc.hook, tc.collector)
+		}
+	}
+}
+
+// The alias rules still have to apply where they came from, or an MCP call
+// reported as "mcp__server__tool" by the hook stops matching the collector's
+// separate server and tool fields.
+func TestDedupeTargetStillAliasesMCPNames(t *testing.T) {
+	hook := map[string]interface{}{
+		"mcp":  map[string]interface{}{"server": "clickhouse"},
+		"tool": map[string]interface{}{"name": "mcp__clickhouse__execute_sql"},
+	}
+	collector := map[string]interface{}{
+		"mcp": map[string]interface{}{"server": "clickhouse", "tool": "clickhouse:execute_sql"},
+	}
+
+	hookTarget := dedupeTarget("mcp.tool_invoked", hook)
+	collectorTarget := dedupeTarget("mcp.tool_invoked", collector)
+	if hookTarget != collectorTarget {
+		t.Fatalf("MCP targets diverged: hook %q, collector %q", hookTarget, collectorTarget)
+	}
+}
+
+// Case folding is deliberately kept: the two capture paths of one call can
+// spell the same directory with different case, and folding is what lets them
+// match. Only the alias rewriting is scoped out.
+func TestIsDuplicateEndpointEventStillFoldsCommandCase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	hook := `{"timestamp":"2026-08-21T18:00:01Z","event":{"action":"command.executed"},"harness":{"name":"claude_code"},"session":{"id":"s1","working_directory":"/repo"},"command":{"command":"Printf A"}}`
+	collector := []byte(`{"timestamp":"2026-08-21T18:00:01Z","event":{"action":"command.executed"},"harness":{"name":"cursor"},"session":{"id":"s1","working_directory":"/repo"},"command":{"command":"printf a"}}`)
+	if err := os.WriteFile(path, []byte(hook+"\n"), 0644); err != nil {
+		t.Fatalf("write existing event: %v", err)
+	}
+
+	if !IsDuplicateEndpointEvent(path, collector, EndpointDuplicateWindow) {
+		t.Fatal("one command reported by both paths should still collapse across case")
+	}
+}
