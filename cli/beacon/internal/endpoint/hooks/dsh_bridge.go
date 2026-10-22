@@ -246,6 +246,11 @@ var dshLauncherBinJS = regexp.MustCompile(`(/[^\s"'$]*/node_modules/@deepseek-ai
 // dshLauncherNext matches another absolute dsh launcher a wrapper script execs.
 var dshLauncherNext = regexp.MustCompile(`(/[^\s"'$]*/bin/dsh)\b`)
 
+// dshLauncherShimBinJS matches the CLI entry point in the shims npm writes on Windows (dsh.cmd,
+// dsh.ps1 and the sh shim beside them), which name it relative to the shim's own directory: %dp0%
+// in dsh.cmd, $basedir in dsh.ps1, and $basedir_win (older npm: $basedir) in the sh shim.
+var dshLauncherShimBinJS = regexp.MustCompile(`(?:%~?dp0%?|\$basedir(?:_win)?)[\\/]+(node_modules[\\/]+@deepseek-ai[\\/]+dsh)[\\/]+lib[\\/]+bin\.js`)
+
 func defaultProbeDshInstallation() dshInstallation {
 	launcher, err := exec.LookPath("dsh")
 	if err != nil {
@@ -272,8 +277,9 @@ func defaultProbeDshInstallation() dshInstallation {
 }
 
 // dshPackageFromLauncher follows a dsh launcher to the CLI package directory: a symlink straight to
-// lib/bin.js (an npm global install), or a script that runs that file or execs another launcher (a
-// wrapper, as Nix and similar package managers write). Empty when it cannot tell.
+// lib/bin.js (an npm global install), an npm Windows shim naming it relative to the shim, or a
+// script that runs that file or execs another launcher (a wrapper, as Nix and similar package
+// managers write). Empty when it cannot tell.
 func dshPackageFromLauncher(path string, depth int) string {
 	if depth > 4 {
 		return ""
@@ -293,6 +299,9 @@ func dshPackageFromLauncher(path string, depth int) string {
 		return ""
 	}
 	text := string(data)
+	if m := dshLauncherShimBinJS.FindStringSubmatch(text); m != nil {
+		return filepath.Join(filepath.Dir(path), filepath.FromSlash(strings.ReplaceAll(m[1], `\`, "/")))
+	}
 	if m := dshLauncherBinJS.FindStringSubmatch(text); m != nil {
 		return m[1]
 	}

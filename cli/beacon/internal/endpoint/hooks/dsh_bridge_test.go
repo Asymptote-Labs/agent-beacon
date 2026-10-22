@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -181,6 +182,9 @@ func TestInspectDshBridgeFindsABridgeShippedWithDsh(t *testing.T) {
 // Package managers such as Nix install dsh behind wrapper scripts that exec another launcher,
 // which execs node on the CLI's lib/bin.js. The version is read from that package, not by running dsh.
 func TestDshInstallationIsFoundThroughWrapperLaunchers(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("wrapper scripts are a Unix install shape; PATH lookup on Windows needs an extension")
+	}
 	_, _ = dshBridgeHome(t)
 	root := t.TempDir()
 	pkg := filepath.Join(root, "store", "lib", "node_modules", "@deepseek-ai", "dsh")
@@ -198,6 +202,23 @@ func TestDshInstallationIsFoundThroughWrapperLaunchers(t *testing.T) {
 	inst := defaultProbeDshInstallation()
 	if inst.version != testDshVersion || inst.modules != filepath.Join(pkg, "node_modules") {
 		t.Fatalf("installation = %+v", inst)
+	}
+}
+
+// On Windows npm writes dsh.cmd, dsh.ps1 and an sh shim into its prefix, each naming the CLI
+// relative to the shim's own directory rather than linking to it.
+func TestDshPackageIsFoundFromNpmWindowsShims(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir()) // the launcher is resolved before it is read
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg := filepath.Join(root, "node_modules", "@deepseek-ai", "dsh")
+	for name, shim := range map[string]string{"dsh.cmd": dshtest.NpmCmdShim, "dsh": dshtest.NpmShShim} {
+		launcher := filepath.Join(root, name)
+		writeFile(t, launcher, shim)
+		if got := dshPackageFromLauncher(launcher, 0); got != pkg {
+			t.Errorf("%s: package = %q, want %q", name, got, pkg)
+		}
 	}
 }
 
