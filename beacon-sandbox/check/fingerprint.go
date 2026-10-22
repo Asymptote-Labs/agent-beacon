@@ -134,7 +134,7 @@ func CompareFingerprints(before, after Fingerprint) FingerprintDiff {
 	// both runs are inconclusive. Decide this before classifying any presence or count changes.
 	if before.Outcome == Inconclusive || after.Outcome == Inconclusive {
 		d.NotComparable = true
-		d.Neutral = append(d.Neutral, fmt.Sprintf("outcome %s -> %s (not comparable: one run was inconclusive)", before.Outcome, after.Outcome))
+		d.Neutral = append(d.Neutral, fmt.Sprintf("outcome %s -> %s (not comparable: an inconclusive run measured nothing)", before.Outcome, after.Outcome))
 		return d
 	}
 
