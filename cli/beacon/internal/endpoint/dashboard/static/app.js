@@ -3345,7 +3345,7 @@ function lensData(mount) {
   if (!mount.dataPromise) {
     // A frame receives one snapshot. Reopening creates a new mount and fetches
     // current data without changing the snapshot of a frame already on screen.
-    mount.dataPromise = getJSON(`/api/lens-data?session=${encodeURIComponent(mount.session)}`);
+    mount.dataPromise = getJSON(`/api/lens-data?session=${encodeURIComponent(lensHost.session)}`);
     mount.dataPromise.catch(() => {
       mount.dataPromise = null;
     });
@@ -3376,7 +3376,7 @@ function mountLens(lens) {
   frame.title = `${lens.title} lens`;
   frame.src = `/lenses/frame/${encodeURIComponent(lens.id)}`;
 
-  const mount = { lens, frame, session: lensHost.session, dataPromise: null, port: null, loads: 0, delivered: false, rendered: false, timer: 0, settleTimer: 0 };
+  const mount = { lens, frame, dataPromise: null, port: null, loads: 0, delivered: false, rendered: false, timer: 0, settleTimer: 0 };
   lensHost.mount = mount;
   const fail = (reason) => {
     if (lensHost.mount !== mount) return;

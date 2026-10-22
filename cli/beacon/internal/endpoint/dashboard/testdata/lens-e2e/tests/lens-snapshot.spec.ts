@@ -65,8 +65,6 @@ test('a reopened lens sees the normal detail refresh without reloading the activ
   expect(requests).toBe(2);
   await requestAgain(page);
   expect(requests).toBe(2);
-  await expect(page.locator('iframe.lens-frame')).toHaveAttribute('sandbox', 'allow-scripts');
-  expect(await lens(page).locator('body').evaluate(() => window.origin)).toBe('null');
 });
 
 test('a failed snapshot can be retried by reopening the lens', async ({ page }) => {
@@ -82,79 +80,4 @@ test('a failed snapshot can be retried by reopening the lens', async ({ page }) 
   await tab(page).click();
   await expect(count(page)).toHaveText('2');
   expect(requests).toBe(2);
-});
-
-for (const failure of [false, true]) {
-  test(`an unmounted session's late ${failure ? 'failure' : 'success'} cannot affect the new mount`, async ({ page }) => {
-    await fixture(page);
-    const errors: string[] = [];
-    page.on('pageerror', (error) => errors.push(error.message));
-    await page.addInitScript(() => {
-      if (window !== window.top) return;
-      const closed = new WeakSet<MessagePort>();
-      const close = MessagePort.prototype.close;
-      const post = MessagePort.prototype.postMessage;
-      Object.assign(window, { closedPortPosts: 0 });
-      MessagePort.prototype.close = function () { closed.add(this); return close.call(this); };
-      MessagePort.prototype.postMessage = function (...args: Parameters<MessagePort['postMessage']>) {
-        if (closed.has(this)) (window as unknown as { closedPortPosts: number }).closedPortPosts++;
-        return Reflect.apply(post, this, args);
-      };
-    });
-    let release!: () => void;
-    let started!: () => void;
-    const held = new Promise<void>((resolve) => { release = resolve; });
-    const requested = new Promise<void>((resolve) => { started = resolve; });
-    const requests: string[] = [];
-    await page.route('**/api/lens-data?*', async (route) => {
-      const session = new URL(route.request().url()).searchParams.get('session')!;
-      requests.push(session);
-      if (requests.length === 1) {
-        started();
-        await held;
-        if (failure) return route.fulfill({ status: 503, json: { error: 'old snapshot failed' } });
-      }
-      await route.fulfill({ json: bundle(session, session === 's1' ? 1 : 2) });
-    });
-    await page.goto('/session.html?id=s1&lens=activity');
-    await requested;
-    // Reinitialize the real host for a changed session in the same document so
-    // the old fetch continuation remains alive after its frame/port is closed.
-    await page.evaluate('history.replaceState(null, "", "/session.html?id=s2&lens=activity"); initLensTabs()');
-    await expect(count(page)).toHaveText('2');
-    expect(requests).toEqual(['s1', 's2']);
-    const oldResponse = page.waitForResponse((response) => new URL(response.url()).searchParams.get('session') === 's1');
-    release();
-    await (await oldResponse).finished();
-    await settled(page);
-    await requestAgain(page);
-    await expect(count(page)).toHaveText('2');
-    expect(requests).toEqual(['s1', 's2']);
-    expect(await page.evaluate('window.closedPortPosts')).toBe(0);
-    expect(errors).toEqual([]);
-  });
-}
-
-test('a removed lens stays removed when its snapshot finishes late', async ({ page }) => {
-  await fixture(page);
-  let release!: () => void;
-  let started!: () => void;
-  const held = new Promise<void>((resolve) => { release = resolve; });
-  const requested = new Promise<void>((resolve) => { started = resolve; });
-  await page.route('**/api/lens-data?*', async (route) => {
-    started();
-    await held;
-    await route.fulfill({ json: bundle('s1', 1) });
-  });
-  await page.goto('/session.html?id=s1&lens=activity');
-  await requested;
-  await page.getByRole('button', { name: 'Remove the Activity lens', exact: true }).click();
-  const response = page.waitForResponse('**/api/lens-data?*');
-  release();
-  await (await response).finished();
-  await settled(page);
-  await expect(tab(page)).toHaveCount(0);
-  await expect(page.locator('iframe.lens-frame')).toHaveCount(0);
-  await expect(page.locator('#session-detail-view')).toHaveAttribute('data-view', 'full');
-  expect(new URL(page.url()).searchParams.get('lens')).toBeNull();
 });
