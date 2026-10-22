@@ -1331,7 +1331,7 @@ func (f piFamily) messageEndEvents(input map[string]interface{}, fields map[stri
 
 	var events []normalizedEvent
 
-	if reasoning := piReasoningText(message); reasoning != "" {
+	if reasoning := piPartsText(message, "thinking", "thinking", "text", "content"); reasoning != "" {
 		reasoningFields := cloneFields(fields)
 		reasoningFields["gen_ai"] = mergeNested(reasoningFields["gen_ai"], map[string]interface{}{
 			"output": map[string]interface{}{
@@ -1345,7 +1345,7 @@ func (f piFamily) messageEndEvents(input map[string]interface{}, fields map[stri
 		events = append(events, f.one("agent.reasoning", "reasoning", "info", "agent reasoning", reasoningFields)...)
 	}
 
-	if reply := assistantMessageEvent(cloneFields(fields), piAssistantText(message)); reply.action != "" {
+	if reply := assistantMessageEvent(cloneFields(fields), piPartsText(message, "text", "text")); reply.action != "" {
 		events = append(events, reply)
 	}
 
@@ -1358,43 +1358,21 @@ func (f piFamily) messageEndEvents(input map[string]interface{}, fields map[stri
 	return events
 }
 
-// piAssistantText collects only the native text parts, keeping thinking and tool calls separate.
-func piAssistantText(message map[string]interface{}) string {
+// piPartsText concatenates the parts of an assistant message that have the given type.
+//
+// Assistant content is a list of parts, and a reasoning model emits thinking alongside text in the
+// same message. Thinking parts are reasoning and text parts are the visible answer; keeping them
+// apart keeps the model's output out of where a reader looking for its private deliberation expects
+// to find it.
+func piPartsText(message map[string]interface{}, partType string, keys ...string) string {
 	content, _ := message["content"].([]interface{})
 	var parts []string
 	for _, item := range content {
 		part, ok := item.(map[string]interface{})
-		if !ok || getFirstStr(part, "type") != "text" {
+		if !ok || getFirstStr(part, "type") != partType {
 			continue
 		}
-		if text := getFirstStr(part, "text"); text != "" {
-			parts = append(parts, text)
-		}
-	}
-	return strings.Join(parts, "\n")
-}
-
-// piReasoningText concatenates the thinking parts of an assistant message.
-//
-// Assistant content is a list of parts, and a reasoning model emits thinking alongside text in the
-// same message. Only the thinking parts are collected here: the assistant's visible answer is not
-// reasoning, and recording it as such would put the model's output where a reader looking for its
-// private deliberation expects to find it.
-func piReasoningText(message map[string]interface{}) string {
-	content, ok := message["content"].([]interface{})
-	if !ok {
-		return ""
-	}
-	var parts []string
-	for _, item := range content {
-		part, ok := item.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if getFirstStr(part, "type") != "thinking" {
-			continue
-		}
-		if text := getFirstStr(part, "thinking", "text", "content"); text != "" {
+		if text := getFirstStr(part, keys...); text != "" {
 			parts = append(parts, text)
 		}
 	}
