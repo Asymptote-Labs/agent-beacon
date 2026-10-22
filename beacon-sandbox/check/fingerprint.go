@@ -108,6 +108,8 @@ func LoadFingerprint(path string) (Fingerprint, error) {
 // FingerprintDiff is the comparison between two runs of the same scenario.
 type FingerprintDiff struct {
 	Scenario string
+	// NotComparable distinguishes an unmeasured run from observed capability equivalence.
+	NotComparable bool
 	// Regressions are strictly-worse changes: a field or action that used to be captured
 	// and now is not. These are the reason this exists.
 	Regressions []string
@@ -128,6 +130,13 @@ func (d FingerprintDiff) HasRegression() bool { return len(d.Regressions) > 0 }
 // explained by model nondeterminism.
 func CompareFingerprints(before, after Fingerprint) FingerprintDiff {
 	d := FingerprintDiff{Scenario: after.Scenario}
+	// Partial artifacts from an inconclusive run are not a capability measurement, even when
+	// both runs are inconclusive. Decide this before classifying any presence or count changes.
+	if before.Outcome == Inconclusive || after.Outcome == Inconclusive {
+		d.NotComparable = true
+		d.Neutral = append(d.Neutral, fmt.Sprintf("outcome %s -> %s (not comparable: one run was inconclusive)", before.Outcome, after.Outcome))
+		return d
+	}
 
 	for _, f := range TrackedFields {
 		b, a := before.PopulatedFields[f], after.PopulatedFields[f]
@@ -174,12 +183,7 @@ func CompareFingerprints(before, after Fingerprint) FingerprintDiff {
 		case before.Outcome == Fail && after.Outcome == Pass:
 			d.Improvements = append(d.Improvements, msg)
 		default:
-			// One side is INCONCLUSIVE, which means the agent never did the work, so that
-			// run measured nothing. A measurement cannot be compared against a
-			// non-measurement in either direction: treating the transition as an
-			// improvement previously made INCONCLUSIVE -> FAIL read as progress, and
-			// PASS -> INCONCLUSIVE hide a lost signal.
-			d.Neutral = append(d.Neutral, msg+" (not comparable: one run was inconclusive)")
+			d.Neutral = append(d.Neutral, msg)
 		}
 	}
 
@@ -193,7 +197,9 @@ func CompareFingerprints(before, after Fingerprint) FingerprintDiff {
 func (d FingerprintDiff) Describe() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n", d.Scenario)
-	if len(d.Regressions) == 0 && len(d.Improvements) == 0 {
+	if d.NotComparable {
+		fmt.Fprintf(&b, "  capabilities not compared\n")
+	} else if len(d.Regressions) == 0 && len(d.Improvements) == 0 {
 		fmt.Fprintf(&b, "  no capability change\n")
 	}
 	for _, r := range d.Regressions {
