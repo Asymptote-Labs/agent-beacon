@@ -12,10 +12,16 @@ import (
 func fakeBrowserHost(t *testing.T, goos string, env map[string]string) *[]string {
 	t.Helper()
 	prevGOOS, prevEnv, prevStart := browserGOOS, browserEnv, startBrowser
-	t.Cleanup(func() { browserGOOS, browserEnv, startBrowser = prevGOOS, prevEnv, prevStart })
+	prevLookPath, prevIsWSL := browserLookPath, browserIsWSL
+	t.Cleanup(func() {
+		browserGOOS, browserEnv, startBrowser = prevGOOS, prevEnv, prevStart
+		browserLookPath, browserIsWSL = prevLookPath, prevIsWSL
+	})
 	var started []string
 	browserGOOS = goos
 	browserEnv = func(key string) string { return env[key] }
+	browserIsWSL = func() bool { return false }
+	browserLookPath = func(string) (string, error) { return "", exec.ErrNotFound }
 	startBrowser = func(cmd *exec.Cmd) error {
 		started = append(started, filepath.Base(cmd.Path))
 		return nil
@@ -82,5 +88,74 @@ func TestOpenBrowserUsesXdgOpenOnLinux(t *testing.T) {
 	}
 	if len(*started) != 1 || (*started)[0] != "xdg-open" {
 		t.Fatalf("started %v, want xdg-open", *started)
+	}
+}
+
+// fakeWSL makes the host look like WSL with the given Windows-side openers on PATH.
+func fakeWSL(t *testing.T, onPath ...string) {
+	t.Helper()
+	browserIsWSL = func() bool { return true }
+	browserLookPath = func(name string) (string, error) {
+		for _, p := range onPath {
+			if p == name {
+				return "/usr/bin/" + name, nil
+			}
+		}
+		return "", exec.ErrNotFound
+	}
+}
+
+// WSLg sets DISPLAY, so the display check used to pass and xdg-open was started. With no Linux
+// browser it failed after Start returned nil, and sign-in printed "Opening ... in your browser",
+// showed no URL, and waited out the timeout.
+func TestOpenBrowserUsesTheWindowsBrowserUnderWSL(t *testing.T) {
+	cases := []struct {
+		name   string
+		env    map[string]string
+		onPath []string
+		want   string
+	}{
+		{name: "wslview installed", env: map[string]string{"DISPLAY": ":0"}, onPath: []string{"wslview", "rundll32.exe"}, want: "wslview"},
+		{name: "interop only", env: map[string]string{"DISPLAY": ":0"}, onPath: []string{"rundll32.exe"}, want: "rundll32.exe"},
+		// WSL without WSLg has no display at all; the Windows browser is still reachable.
+		{name: "no WSLg display", env: map[string]string{}, onPath: []string{"rundll32.exe"}, want: "rundll32.exe"},
+		// Interop disabled: fall back to the Linux behaviour.
+		{name: "no Windows opener", env: map[string]string{"DISPLAY": ":0"}, want: "xdg-open"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			started := fakeBrowserHost(t, "linux", tc.env)
+			fakeWSL(t, tc.onPath...)
+			if err := OpenBrowser("https://beacon.sh/cli/auth?state=a&port=54123"); err != nil {
+				t.Fatalf("OpenBrowser = %v, want nil", err)
+			}
+			if len(*started) != 1 || (*started)[0] != tc.want {
+				t.Fatalf("started %v, want %s", *started, tc.want)
+			}
+		})
+	}
+}
+
+func TestOpenBrowserUnderWSLWithoutAnyOpenerOrDisplayReportsNoDisplay(t *testing.T) {
+	started := fakeBrowserHost(t, "linux", map[string]string{})
+	fakeWSL(t)
+	if err := OpenBrowser("https://beacon.sh"); !errors.Is(err, ErrNoDisplay) {
+		t.Fatalf("OpenBrowser = %v, want ErrNoDisplay", err)
+	}
+	if len(*started) != 0 {
+		t.Fatalf("started %v", *started)
+	}
+}
+
+// A browser opened on the Windows desktop of the machine someone is SSH'd into is just as
+// invisible to them as one opened on its X display.
+func TestOpenBrowserUnderWSLOverSSHReportsNoDisplay(t *testing.T) {
+	started := fakeBrowserHost(t, "linux", map[string]string{"SSH_CONNECTION": "10.0.0.5 51000 10.0.0.9 22"})
+	fakeWSL(t, "wslview")
+	if err := OpenBrowser("https://beacon.sh"); !errors.Is(err, ErrNoDisplay) {
+		t.Fatalf("OpenBrowser = %v, want ErrNoDisplay", err)
+	}
+	if len(*started) != 0 {
+		t.Fatalf("started %v", *started)
 	}
 }
