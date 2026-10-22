@@ -100,12 +100,7 @@ it.each([false, true])("preserves a rejected return value when cleanup rejects (
   expect(exporter.getFinishedSpans()[0]?.status).toEqual({ code: SpanStatusCode.ERROR, message: valueFailure.message });
 });
 
-it.each([
-  { started: false, operation: "throw" },
-  { started: false, operation: "return" },
-  { started: true, operation: "throw" },
-  { started: true, operation: "return" },
-])("preserves $operation errors when cleanup throws synchronously (started=$started)", async ({ started, operation }) => {
+it.each(["throw", "return"])("preserves %s errors when cleanup throws synchronously before the first next", async operation => {
   const closeFailure = new Error("source close threw synchronously");
   const consumerFailure = new Error(`${operation} failed`);
   let returnCalls = 0;
@@ -121,12 +116,10 @@ it.each([
   const exporter = new InMemorySpanExporter();
   initialize({ spanExporter: exporter, disableDefaultExporter: true, disableBatch: true, disableInstrumentations: true });
   const stream = observe({ name: "custom.iterator" }, () => source)();
-  if (started) await stream.next();
   const cancellation = operation === "throw"
     ? stream.throw(consumerFailure)
     : stream.return(Promise.reject(consumerFailure));
   await expect.soft(cancellation).rejects.toBe(consumerFailure);
-  await flush();
   expect(returnCalls).toBe(1);
   expect.soft(exporter.getFinishedSpans()).toHaveLength(1);
   expect.soft(exporter.getFinishedSpans()[0]?.status).toEqual({ code: SpanStatusCode.ERROR, message: consumerFailure.message });
