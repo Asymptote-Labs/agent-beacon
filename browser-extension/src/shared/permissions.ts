@@ -88,6 +88,16 @@ export function mountPermissionBanner(api: PermissionsApi, doc: Document): void 
     list.textContent = [...new Set(missing.map(describeOrigin))].join(', ');
   };
 
+  let checkVersion = 0;
+  const recheck = (): void => {
+    const version = ++checkVersion;
+    void missingOrigins(api).then(missing => {
+      // A permission change may start another check before this one resolves.
+      // Only that newest observation may update the banner and grant target.
+      if (version === checkVersion) render(missing);
+    });
+  };
+
   grant.addEventListener('click', () => {
     let pending: Promise<unknown>;
     try {
@@ -98,13 +108,11 @@ export function mountPermissionBanner(api: PermissionsApi, doc: Document): void 
     }
     void pending
       .catch(() => undefined)
-      .then(() => missingOrigins(api))
-      .then(render);
+      .then(recheck);
   });
 
   // Access can also change outside this page (about:addons, Chrome's Site
   // access menu) while it stays open, notably the options tab.
-  const recheck = (): void => void missingOrigins(api).then(render);
   api.permissions.onAdded?.addListener(recheck);
   api.permissions.onRemoved?.addListener(recheck);
 
