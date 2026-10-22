@@ -23,7 +23,8 @@ import { turnId } from '../shared/ids.js';
 class ClaudeParser implements TurnParser {
   private sse = new SSEParser();
   private sessionId = '';
-  private model?: string;
+  private requestModel?: string;
+  private responseModel?: string;
   private promptText = '';
   private inputMessages: Msg[] = [];
   private responseText = '';
@@ -53,7 +54,7 @@ class ClaudeParser implements TurnParser {
       const { text, messages } = extractPrompt(parsed);
       this.promptText = text;
       this.inputMessages = messages;
-      if (typeof parsed?.model === 'string') this.model = parsed.model;
+      if (typeof parsed?.model === 'string') this.requestModel = parsed.model;
       if (typeof parsed?.conversation_id === 'string' && !this.sessionId)
         this.sessionId = parsed.conversation_id;
     } catch {
@@ -89,7 +90,7 @@ class ClaudeParser implements TurnParser {
     switch (obj.type) {
       case 'message_start': {
         const m = obj.message ?? {};
-        if (typeof m.model === 'string') this.model = m.model;
+        if (typeof m.model === 'string') this.responseModel = m.model;
         // The completion/message id is a per-turn id — capture it for turnId,
         // but never use it as the conversation/session id (that comes only from
         // the URL/request body; using message.id would mis-correlate turns).
@@ -189,8 +190,8 @@ class ClaudeParser implements TurnParser {
       site: 'claude_web',
       sessionId,
       turnId: turnId(sessionId, turnKey),
-      requestModel: this.model,
-      responseModel: this.model,
+      requestModel: this.requestModel,
+      responseModel: this.responseModel ?? this.requestModel,
       promptText: this.promptText,
       inputMessages: this.inputMessages,
       outputMessages: [{ role: 'assistant', text: this.responseText }],

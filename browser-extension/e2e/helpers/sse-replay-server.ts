@@ -28,6 +28,8 @@ export interface ReplayCase {
   conversationId: string;
   /** prompt the page will submit */
   prompt: string;
+  /** Optional Claude request model; the recorded response remains unchanged. */
+  requestModel?: string;
   /** completion path (must match the adapter's request matcher) */
   completionPath: string;
   /** optional CSP header to prove injection survives it */
@@ -137,7 +139,7 @@ function pageHtml(c: ReplayCase): string {
             { author: { role: 'user' }, content: { content_type: 'text', parts: [c.prompt] } },
           ],
         })
-      : JSON.stringify({ prompt: c.prompt, conversation_id: c.conversationId });
+      : JSON.stringify({ prompt: c.prompt, conversation_id: c.conversationId, model: c.requestModel });
   return `<!doctype html>
 <html>
   <head><meta charset="utf-8" /><title>${c.site} (replay)</title></head>
