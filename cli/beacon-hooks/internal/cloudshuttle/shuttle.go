@@ -579,25 +579,7 @@ func writeState(path string, st state) error {
 	if err != nil {
 		return err
 	}
-	temp, err := os.CreateTemp(filepath.Dir(path), ".shuttle-state-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(temp.Name())
-	defer temp.Close()
-	if err := temp.Chmod(0644); err != nil {
-		return err
-	}
-	if _, err := temp.Write(data); err != nil {
-		return err
-	}
-	if err := temp.Sync(); err != nil {
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temp.Name(), path)
+	return os.WriteFile(path, data, 0644)
 }
 
 func preserveExistingLog(cfg Config) error {
@@ -640,7 +622,14 @@ func preserveExistingLogLocked(ctx context.Context, cfg Config) error {
 		}
 		uploaded = uploadErr == nil
 	}
-	return finishPreservation(ctx, cfg, snapshot, uploaded)
+	if uploaded {
+		return os.Remove(cfg.LogPath)
+	}
+	preservedPath := fmt.Sprintf("%s.previous-%d", cfg.LogPath, time.Now().UTC().UnixNano())
+	if err := os.Rename(cfg.LogPath, preservedPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 func resolveRunID() string {

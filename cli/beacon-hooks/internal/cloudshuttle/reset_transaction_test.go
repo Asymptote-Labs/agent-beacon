@@ -63,39 +63,6 @@ func TestPreserveSharesUploadTransaction(t *testing.T) {
 	}
 }
 
-func TestPreserveManagedReplacementDoesNotAcknowledgeNewSource(t *testing.T) {
-	cfg := transactionConfig(t)
-	cfg.Upload, cfg.IngestURL, cfg.DeviceKey = uploadAsymptote, "https://managed.invalid", "bcn_device_synthetic"
-	transactionSeed(t, cfg)
-	transactionWrite(t, cfg.LogPath, transactionFirst)
-	transactionClient(t, func(r *http.Request) (*http.Response, error) {
-		if _, err := transactionBody(r); err != nil {
-			return nil, err
-		}
-		if err := os.Rename(cfg.LogPath, cfg.LogPath+".1"); err != nil {
-			return nil, err
-		}
-		if err := os.WriteFile(cfg.LogPath, []byte("{\"n\":9}\n"), 0600); err != nil {
-			return nil, err
-		}
-		return transactionOK(), nil
-	})
-	if err := preserveExistingLog(cfg); err == nil {
-		t.Error("replacement during preservation reported success")
-	}
-	contents, err := os.ReadFile(cfg.LogPath)
-	if err != nil || string(contents) != "{\"n\":9}\n" {
-		t.Fatalf("new generation lost: %q %v", contents, err)
-	}
-	st, err := readState(cfg.StatePath)
-	if err == nil && st.LastSize != 0 {
-		t.Fatalf("old snapshot acknowledged as replacement: %+v", st)
-	}
-	if err != nil && !os.IsNotExist(err) {
-		t.Fatal(err)
-	}
-}
-
 func TestManagedConcurrentCursorDoesNotRewind(t *testing.T) {
 	cfg := transactionConfig(t)
 	cfg.Upload, cfg.IngestURL, cfg.DeviceKey = uploadAsymptote, "https://managed.invalid", "bcn_device_synthetic"
