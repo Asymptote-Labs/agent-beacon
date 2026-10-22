@@ -501,6 +501,35 @@ func TestSeenIsPrunedToTheLookbackWindow(t *testing.T) {
 	}
 }
 
+// A state file written under another StateVersion is discarded, not read under the wrong meaning:
+// re-collecting the window is harmless, while trusting a cursor whose fields meant something else
+// can skip spend for good. The shared loader only resets what this collector's Valid rejects.
+func TestStateFromAnotherVersionIsDiscardedNotMisread(t *testing.T) {
+	h := newHarness(t, usageAt(baseNow.Add(-time.Hour), 1))
+	if s := h.sync(); s.Emitted != 1 {
+		t.Fatalf("first sync emitted %d", s.Emitted)
+	}
+	state, err := LoadState(h.state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Version = StateVersion + 1
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(h.state, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(h.log); err != nil {
+		t.Fatal(err)
+	}
+	h.now = h.now.Add(time.Minute)
+	if s := h.sync(); s.Emitted != 1 || len(h.logged()) != 1 {
+		t.Fatalf("sync over a cursor from another version emitted %d; it trusted the cursor", s.Emitted)
+	}
+}
+
 func TestWindow(t *testing.T) {
 	now := baseNow.Add(123456 * time.Nanosecond)
 	start, end := Window(nil, time.Time{}, now, 0)

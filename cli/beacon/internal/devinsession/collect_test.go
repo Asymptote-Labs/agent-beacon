@@ -1,7 +1,9 @@
 package devinsession
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -542,6 +544,43 @@ func TestReInsertOnALaterSweepIsSkippedByThePersistedRing(t *testing.T) {
 	}
 }
 
+// The ring persists message ids as the first 16 hex characters of sha256(message_id). A cursor
+// file written by an earlier release has to keep catching re-inserts after an upgrade, so the
+// digest is a file format: changing it silently turns every ring on disk into noise, and the next
+// resume copy Devin writes is appended to the log a second time.
+func TestCursorRingWrittenByAnEarlierReleaseStillSkipsReInserts(t *testing.T) {
+	p := newFixturePaths(t)
+	db := openFixtureDB(t, p.db)
+	addSession(t, db, "s1", nil)
+	addNode(t, db, "s1", 1, assistantMsg("a1", assistantFixture{Content: "first", Model: "swe-1-7", CreatedAt: "2023-11-14T22:13:40.000000Z"}), 1700000100, nil)
+	addNode(t, db, "s1", 2, assistantMsg("a1", assistantFixture{Content: "first", Model: "swe-1-7", CreatedAt: "2023-11-14T22:13:40.000000Z"}), 1700000200, nil)
+	addNode(t, db, "s1", 3, assistantMsg("a2", assistantFixture{Content: "second", Model: "swe-1-7", CreatedAt: "2023-11-14T22:14:40.000000Z"}), 1700000300, nil)
+
+	// The cursor as a previous sweep left it: row 1 collected, its message id in the ring.
+	sum := sha256.Sum256([]byte("a1"))
+	cursor := fmt.Sprintf(`{"version":%d,"sessions":{"s1":{"last_row_id":1,"started":true,"last_model":"swe-1-7","recent_message_ids":[%q]}}}`, StateVersion, hex.EncodeToString(sum[:])[:16])
+	if err := os.MkdirAll(filepath.Dir(p.state), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p.state, []byte(cursor), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := CollectOnce(collectOptions(p)); err != nil {
+		t.Fatalf("CollectOnce: %v", err)
+	}
+	var messages []string
+	for _, ev := range readEvents(t, p.log) {
+		if ev.Event.Action == "agent.message" {
+			data, _ := json.Marshal(ev)
+			messages = append(messages, string(data))
+		}
+	}
+	if len(messages) != 1 || !strings.Contains(messages[0], "second") {
+		t.Fatalf("agent.message events = %q, want only the new row; the re-insert of a1 was not recognized", messages)
+	}
+}
+
 func TestPriorNodeRowWithADifferentMessageIDIsNewContent(t *testing.T) {
 	p := newFixturePaths(t)
 	db := openFixtureDB(t, p.db)
@@ -779,6 +818,48 @@ func TestCompactorAssistantRowEmitsUsageWithoutAPersonaOrModel(t *testing.T) {
 	prompt := findAction(t, readEvents(t, p.log), "prompt.submitted")
 	if prompt.Model != "swe-1-7" {
 		t.Fatalf("prompt model = %q, want the last real model, not the compactor label", prompt.Model)
+	}
+}
+
+// The install backfill runs this collector with a Since window (#972). A session outside it must
+// be left completely alone -- no events and no cursor -- or the next ordinary sync would start
+// past rows nobody collected.
+func TestSinceLeavesOldSessionsForALaterSync(t *testing.T) {
+	p := newFixturePaths(t)
+	db := openFixtureDB(t, p.db)
+	addSession(t, db, "old", map[string]interface{}{"created_at": 1600000000, "last_activity_at": 1600000000})
+	addNode(t, db, "old", 1, userMsg("u-old", "old prompt", "2020-09-13T12:26:40.000000Z"), 1600000000, nil)
+	addSession(t, db, "new", nil)
+	addNode(t, db, "new", 1, userMsg("u-new", "new prompt", "2023-11-14T22:13:20.000000Z"), 1700000100, nil)
+
+	opts := collectOptions(p)
+	opts.Since = time.Unix(1650000000, 0)
+	summary, err := CollectOnce(opts)
+	if err != nil {
+		t.Fatalf("windowed CollectOnce: %v", err)
+	}
+	if summary.Sessions != 1 {
+		t.Fatalf("sessions = %d, want only the recent one", summary.Sessions)
+	}
+	prompts := func() []string {
+		var out []string
+		for _, ev := range readEvents(t, p.log) {
+			if ev.Event.Action == "prompt.submitted" {
+				out = append(out, ev.Session.ID)
+			}
+		}
+		return out
+	}
+	if got := prompts(); len(got) != 1 || got[0] != "new" {
+		t.Fatalf("windowed sweep wrote prompts for %v, want only new", got)
+	}
+
+	// An ordinary sync afterwards still reads the old session from its first row, once.
+	if _, err := CollectOnce(collectOptions(p)); err != nil {
+		t.Fatalf("ordinary CollectOnce: %v", err)
+	}
+	if got := prompts(); len(got) != 2 || got[1] != "old" {
+		t.Fatalf("ordinary sync after the window wrote prompts for %v, want new then old", got)
 	}
 }
 

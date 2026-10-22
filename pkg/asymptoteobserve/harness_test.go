@@ -94,11 +94,13 @@ func TestUnrecognizedNamesArePreserved(t *testing.T) {
 func TestLookalikeNamesAreNotAttributedToTheHarness(t *testing.T) {
 	for harness, names := range map[string][]string{
 		"prime_agent": {"prime-numbers", "amazon_prime", "primer", "claude_code_primed"},
-		// Upstream Senpi and the wider oh-my-openagent project name more than this edition.
-		"omo_senpi": {"senpi", "oh-my-openagent", "oh_my_openagent", "ammo", "promotion", "homology"},
+		// Upstream Senpi and the wider oh-my-openagent project name more than this edition. omoplate
+		// guards a prefix rule, the others a substring rule.
+		"omo_senpi": {"senpi", "oh-my-openagent", "oh_my_openagent", "ammo", "promotion", "homology", "omoplate"},
 		"muse_code": {"muse-spark", "muse_spark", "muse-spark-1.2-contributor", "Muse Spark 1.2", "amuse", "museum"},
+		// Bare "hands" guards a suffix rule, the others a substring or prefix rule.
 		"openhands": {"openhands-lm", "openhands-lm-32b-v0.1", "all-hands/openhands-lm-32b-v0.1", "OpenHands LM 32B",
-			"openai", "opencode", "open-interpreter", "handsfree", "openhands-runtime-sandbox"},
+			"openai", "opencode", "open-interpreter", "handsfree", "openhands-runtime-sandbox", "hands"},
 		// Grok Build (the local CLI) and Grok models must never be filed under the cloud Grok Bot.
 		"grok_bot": {"Grok", "grok_build", "grok-build", "Grok Build", "grok-cli", "grok-4", "grok-code-fast-1", "Grok 4.6", "x.ai"},
 		"kiro":     {".kiro/hooks", ".kiroignore", "kiro_powers", "kiro-runtime-sandbox", "kiro-lm-7b", "amazonq", "kiro-coder-32b", "aws/kiro-lm-32b-v0.1"},

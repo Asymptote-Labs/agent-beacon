@@ -53,6 +53,8 @@ func TestTokenUsageTextReport(t *testing.T) {
 		"claude_code",
 		"github_actions/777",
 		"0.5000",
+		// EST COST USD: 100 input + 40 output tokens of claude-sonnet-4-5 at $3/$15 per MTok.
+		"0.0009",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("text report missing %q:\n%s", want, output)

@@ -1,6 +1,8 @@
 package onboarding
 
 import (
+	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -117,6 +119,37 @@ func TestSavePreservesExistingInstallID(t *testing.T) {
 	}
 	if got := Load().InstallID; got != first {
 		t.Fatalf("InstallID = %q after resave, want stable %q", got, first)
+	}
+}
+
+// install_id is the signup endpoint's dedupe key and the handle quoted to request
+// deletion, so two machines must never mint the same one: a fixed or zeroed ID would
+// merge every install into one server row.
+func TestSaveMintsADistinctInstallIDPerMachine(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 2; i++ {
+		home := t.TempDir()
+		testenv.SetHome(t, home)
+		if err := Save(Profile{}); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(home, ProfilePath))
+		if err != nil {
+			t.Fatalf("ReadFile: %v", err)
+		}
+		var onDisk struct {
+			InstallID string `json:"install_id"`
+		}
+		if err := json.Unmarshal(data, &onDisk); err != nil {
+			t.Fatalf("profile is not valid JSON: %v\n%s", err, data)
+		}
+		if raw, err := hex.DecodeString(onDisk.InstallID); err != nil || len(raw) != 16 {
+			t.Fatalf("install_id = %q, want 32 hex characters", onDisk.InstallID)
+		}
+		if seen[onDisk.InstallID] {
+			t.Fatalf("two machines minted the same install_id %q", onDisk.InstallID)
+		}
+		seen[onDisk.InstallID] = true
 	}
 }
 

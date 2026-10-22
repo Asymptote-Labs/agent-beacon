@@ -21,6 +21,8 @@ func TestNormalizeModelName(t *testing.T) {
 		// not a model under any name. A split row is visible; an invented id is not.
 		{"dotted id kept", "gpt-4.1", "gpt-4.1"},
 		{"dotted claude id kept", "claude-sonnet-4.6", "claude-sonnet-4.6"},
+		// A dated snapshot is its own model and its own price; stripping the date would merge rows.
+		{"dated snapshot id kept", "gpt-4o-2024-08-06", "gpt-4o-2024-08-06"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := NormalizeModelName(tc.input); got != tc.want {

@@ -5,7 +5,9 @@ import (
 	"testing"
 )
 
-// One edit and one non-edit name per branch of isFileEditTool.
+// One edit and one non-edit name per branch of isFileEditTool, plus every name in the branches
+// that list exact names or substrings: each one is its own condition, and dropping it loses that
+// tool's diffs with nothing else failing.
 func TestIsFileEditTool(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -14,14 +16,21 @@ func TestIsFileEditTool(t *testing.T) {
 		want     bool
 	}{
 		{"claude Write", "claude", "Write", true},
+		{"claude MultiEdit", "claude", "MultiEdit", true},
 		{"claude Read (not edit)", "claude", "Read", false},
 		{"copilot edit tool", "copilot", "copilot_insertEdit", true},
+		{"copilot write tool", "copilot", "copilot_createFile", true},
+		{"copilot patch tool", "copilot", "apply_patch", true},
 		{"copilot read (not edit)", "copilot", "readFile", false},
 		{"factory Create", "factory", "Create", true},
+		{"factory Write", "factory", "Write", true},
+		{"factory MultiEdit", "factory", "MultiEdit", true},
 		{"factory Read (not edit)", "factory", "Read", false},
 		{"devin edit", "devin", "edit", true},
+		{"devin write", "devin", "write", true},
 		{"devin exec (not edit)", "devin", "exec", false},
 		{"antigravity write", "antigravity", "write_file", true},
+		{"antigravity patch", "antigravity", "apply_patch", true},
 		{"antigravity command (not edit)", "antigravity", "run_command", false},
 	}
 
@@ -376,6 +385,46 @@ func TestRunPostToolEmitsAntigravityFileReadPathFields(t *testing.T) {
 	tool := event["tool"].(map[string]interface{})
 	if tool["path"] != "/repo/docs" {
 		t.Fatalf("tool = %#v, want path /repo/docs", tool)
+	}
+}
+
+// Devin's PostToolUse can arrive with no session id, and its file edits are still recorded: the
+// edit path drops session-less payloads for every other runtime, and doing so here would lose
+// every Devin edit from such a session. The event carries no empty session id either.
+func TestRunPostToolRecordsDevinEditWithoutASession(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "devin"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	out := runHookWithInput(t, runPostTool, map[string]interface{}{
+		"cwd":       "/repo",
+		"tool_name": "edit",
+		"tool_input": map[string]interface{}{
+			"file_path": "/repo/main.go",
+			"old_str":   "old",
+			"new_str":   "new",
+		},
+		"tool_response": map[string]interface{}{"success": true},
+	})
+	if len(out) != 0 {
+		t.Fatalf("post-tool response = %#v, want empty response", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "file.modified" {
+		t.Fatalf("event.action = %q, want file.modified", action)
+	}
+	if got := leaf(event, "file", "path"); got != "/repo/main.go" {
+		t.Fatalf("file.path = %q, want /repo/main.go", got)
+	}
+	if _, ok := event["file"].(map[string]interface{})["diff_hash"]; !ok {
+		t.Fatalf("file diff_hash missing: %#v", event["file"])
+	}
+	if session, ok := event["session"].(map[string]interface{}); ok {
+		if _, hasID := session["id"]; hasID {
+			t.Fatalf("devin file event should not include an empty session id: %#v", session)
+		}
 	}
 }
 

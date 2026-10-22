@@ -200,6 +200,43 @@ func TestDashboardAPIsSurfaceVSCodeEvents(t *testing.T) {
 	}
 }
 
+// The activity page's action and model filters reach ReadEvents only through /api/events' query
+// string; a parameter the handler stops reading silently turns the filter into "show everything".
+func TestEventsEndpointAppliesTheActionAndModelFilters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	prompt := testSchemaEvent("2026-05-13T01:00:00Z", "cursor", "prompt.submitted", "prompt", "repo-a")
+	prompt.Event.ID = "prompt"
+	prompt.Model = "gpt-5.5"
+	command := testSchemaEvent("2026-05-13T01:01:00Z", "cursor", "command.executed", "command", "repo-a")
+	command.Event.ID = "command"
+	command.Model = "claude-4-sonnet"
+	writeTestLog(t, path, marshalEvents(t, prompt, command)...)
+
+	handler, err := Handler(Options{LogPath: path, UserMode: true})
+	if err != nil {
+		t.Fatalf("Handler returned error: %v", err)
+	}
+	for query, wantID := range map[string]string{
+		"action=prompt.submitted": "prompt",
+		"action=command.executed": "command",
+		"model=gpt-5.5":           "prompt",
+		"model=claude-4-sonnet":   "command",
+	} {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/events?"+query, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d, body=%s", query, rec.Code, rec.Body.String())
+		}
+		var result EventResult
+		if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+			t.Fatalf("%s: decode response: %v", query, err)
+		}
+		if result.TotalMatched != 1 || len(result.Events) != 1 || result.Events[0].Event.Event.ID != wantID {
+			t.Errorf("%s: matched %d events %+v, want only %q", query, result.TotalMatched, result.Events, wantID)
+		}
+	}
+}
+
 func TestReadEventsFreeTextSearchMatchesStructuredFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	events := []schema.Event{

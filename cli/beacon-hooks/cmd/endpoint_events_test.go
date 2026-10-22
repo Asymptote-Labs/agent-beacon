@@ -92,6 +92,37 @@ func TestRunPromptSubmitOmitsBranchOutsideRepo(t *testing.T) {
 	}
 }
 
+// opencode events are written by their own mapper rather than through emitHookEvent, so the
+// workspace enrichment has to be applied there explicitly. Regression for f46a0295 ("Fill branch on
+// hook emitters that bypass emitHookEvent").
+func TestRunOpenCodeEventEmitsWorkspaceAndLocalGitBranch(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "opencode"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	repo := t.TempDir()
+	writeGitHead(t, repo, "ref: refs/heads/feature/opencode\n")
+
+	runHookWithInput(t, runOpenCodeEvent, map[string]interface{}{
+		"type":       "command.executed",
+		"session_id": "oc-branch",
+		"cwd":        repo,
+		"command":    "ls",
+	})
+
+	event := lastEndpointEvent(t, logPath)
+	if got := event["branch"]; got != "feature/opencode" {
+		t.Fatalf("branch = %q, want feature/opencode", got)
+	}
+	if got := event["repository"]; got != repo {
+		t.Fatalf("repository = %q, want %q", got, repo)
+	}
+	if got := leaf(event, "session", "working_directory"); got != repo {
+		t.Fatalf("session.working_directory = %q, want %q", got, repo)
+	}
+}
+
 func TestRunPostToolFileEditEmitsLocalGitBranch(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "cursor"

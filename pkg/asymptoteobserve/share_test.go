@@ -583,6 +583,40 @@ func TestShareMessagesKeepsRepeatedPhaselessCallsApart(t *testing.T) {
 	}
 }
 
+// A session with no working directory (an OTLP-only or browser session) still has its home
+// directory scrubbed from everything that leaves the machine: the PUT body's title and the event
+// batch. The home path names the local account. Replaces TestShareTitleUsesExplicitHomeWithoutLookup
+// (d816303f), whose only coverage of this case went with it.
+func TestSharedTraceScrubsHomeWithoutAWorkingDirectory(t *testing.T) {
+	prompt := shareEventAt("2026-10-01T10:00:00Z", "claude_code", CollectionMethodOTLP, "prompt.submitted", "prompt")
+	prompt.Session.WorkingDirectory = ""
+	prompt.Prompt = &PromptInfo{Text: "look at /home/al/secret"}
+	command := shareEventAt("2026-10-01T10:00:01Z", "claude_code", CollectionMethodOTLP, "command.executed", "command")
+	command.Session.WorkingDirectory = ""
+	command.Command = &CommandInfo{Command: "cat /home/al/secret/notes.txt", Output: "see /home/al/.aws"}
+
+	bundle := BuildShareBundle([]Event{prompt, command}, ShareOptions{HomeDirectory: "/home/al", NoHomeLookup: true})
+	if len(bundle.Events) != 2 {
+		t.Fatalf("bundle carries %d events, want 2", len(bundle.Events))
+	}
+	trace := NewShareTrace(bundle, ShareVisibilityDirect)
+	if trace.Title != "look at ~/secret" {
+		t.Fatalf("title = %q, want the home directory scrubbed", trace.Title)
+	}
+	for name, body := range map[string]interface{}{
+		"PUT /v1/traces":               trace,
+		"POST /v1/traces/events/batch": ShareEventsBatchV1{Events: bundle.Events},
+	} {
+		data, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("%s: marshal: %v", name, err)
+		}
+		if strings.Contains(string(data), "/home/al") {
+			t.Errorf("%s body leaks the home directory: %s", name, data)
+		}
+	}
+}
+
 func TestShareMessagesTreatsAPostToolInvokedEventAsTheResult(t *testing.T) {
 	// The hook adapter labels a PostToolUse for tools without a more specific action (WebFetch,
 	// Grep, Task, ...) tool.invoked, carrying the result. With a PreToolUse tool.invoked for the

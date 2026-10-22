@@ -229,8 +229,10 @@ func TestInventoryEnabledFromConfigFileDefaultsToTrue(t *testing.T) {
 	}
 	for body, want := range map[string]bool{
 		`{}`: true,
-		`{"inventory_heartbeat":{"enabled":true}}`:  true,
-		`{"inventory_heartbeat":{"enabled":false}}`: false,
+		// A heartbeat block without "enabled" (e.g. only runtimes) is enabled, not a nil dereference.
+		`{"inventory_heartbeat":{"runtimes":["cursor"]}}`: true,
+		`{"inventory_heartbeat":{"enabled":true}}`:        true,
+		`{"inventory_heartbeat":{"enabled":false}}`:       false,
 		`not json`: true,
 	} {
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {

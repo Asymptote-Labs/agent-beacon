@@ -134,10 +134,14 @@ func TestSubmitOutcomeByStatus(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
+		// 2xx and 5xx are ranges: one row inside each beyond 200/500 keeps either from
+		// narrowing to a single code, which would drop a good signup or never retry it.
 		{"ok", http.StatusOK, OutcomeSubmitted, false},
+		{"no content", http.StatusNoContent, OutcomeSubmitted, false},
 		{"bad request is terminal", http.StatusBadRequest, OutcomeRejected, true},
 		{"rate limited is terminal", http.StatusTooManyRequests, OutcomeRejected, true},
 		{"server error is retryable", http.StatusInternalServerError, OutcomePending, true},
+		{"bad gateway is retryable", http.StatusBadGateway, OutcomePending, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

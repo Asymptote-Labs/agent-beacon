@@ -95,6 +95,7 @@ func TestCurrentBranchRejectsMalformedHead(t *testing.T) {
 		{"non-branch ref", "ref: refs/remotes/origin/main\n"},
 		{"missing name", "ref: refs/heads/\n"},
 		{"control character", "ref: refs/heads/bad\x01name\n"},
+		{"embedded space", "ref: refs/heads/bad name\n"},
 		{"overlong name", "ref: refs/heads/" + strings.Repeat("a", 300) + "\n"},
 	}
 	for _, tt := range tests {

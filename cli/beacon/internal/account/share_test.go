@@ -346,6 +346,32 @@ func TestShareAPIBaseURL(t *testing.T) {
 	}
 }
 
+type shareRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f shareRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// Regression (02b19892): beacon.sh's web host answers /v1 with an HTML 404, so a beacon.sh sign-in
+// must send its share requests, and the credential, to api.beacon.sh.
+func TestShareClientSendsABeaconShSignInToTheAPIHost(t *testing.T) {
+	t.Setenv(APIURLEnv, "")
+	var requested []string
+	httpClient := &http.Client{Transport: shareRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requested = append(requested, r.Method+" "+r.URL.String()+" "+r.Header.Get("Authorization"))
+		body := `{"id":"k3x","url":"https://beacon.sh/s/k3x","visibility":"direct","event_count":0,"last_event_id":"","max_number":0}`
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	})}
+	client, err := NewShareClient(shareCred("https://beacon.sh"), httpClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := client.GetTrace(context.Background(), "claude_code:abc"); err != nil || !found {
+		t.Fatalf("GetTrace: found=%v err=%v", found, err)
+	}
+	if want := "GET https://api.beacon.sh/v1/traces/claude_code:abc Bearer " + shareTestToken; len(requested) != 1 || requested[0] != want {
+		t.Fatalf("requests = %q, want [%q]", requested, want)
+	}
+}
+
 func TestShareClientTakesTheAPIFromTheEnvironment(t *testing.T) {
 	s := newShareServer(t)
 	t.Setenv(APIURLEnv, s.server.URL+"/")

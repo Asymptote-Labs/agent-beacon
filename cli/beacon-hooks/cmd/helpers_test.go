@@ -80,6 +80,11 @@ func TestResolveSessionID_Cline(t *testing.T) {
 		want  string
 	}{
 		{
+			name:  "accepts snake_case task_id",
+			input: map[string]interface{}{"task_id": "task_abc123"},
+			want:  "task_abc123",
+		},
+		{
 			name:  "taskId wins over session spellings",
 			input: map[string]interface{}{"taskId": "task_abc123", "sessionId": "ignored"},
 			want:  "task_abc123",
@@ -94,6 +99,34 @@ func TestResolveSessionID_Cline(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := resolveSessionID(tt.input, "cline"); got != tt.want {
 				t.Errorf("resolveSessionID(%v, \"cline\") = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// Kiro, Kimi Code, DeepSeek Harness, Muse Code and Qwen Code spell the envelope exactly as Claude
+// Code does -- `session_id` and `cwd` -- and have no envelope readers of their own: every event's
+// session.id and session.working_directory come from the shared default cases. Driven through the
+// hook process per runtime, because a branch added for one of them in those readers would take that
+// runtime's session identity with it silently. Muse's transcript_path is documented as nullable,
+// and a null must not take the session or the workspace down with it.
+func TestClaudeShapedRuntimesTakeSessionAndWorkspaceFromTheEnvelope(t *testing.T) {
+	for _, platform := range []string{kiroPlatform, kimiPlatform, dshPlatform, "muse", "qwen"} {
+		t.Run(platform, func(t *testing.T) {
+			logPath, _ := runHookProcess(t, map[string]interface{}{
+				"hook_event_name": "PreToolUse",
+				"session_id":      "envelope-" + platform,
+				"cwd":             "/repo/" + platform,
+				"transcript_path": nil,
+				"tool_name":       "read",
+				"tool_input":      map[string]interface{}{"path": "/repo/main.go"},
+			}, "--platform", platform, "pre-tool")
+			event := lastEndpointEvent(t, logPath)
+			if got := leaf(event, "session", "id"); got != "envelope-"+platform {
+				t.Errorf("session.id = %q, want envelope-%s", got, platform)
+			}
+			if got := leaf(event, "session", "working_directory"); got != "/repo/"+platform {
+				t.Errorf("session.working_directory = %q, want /repo/%s", got, platform)
 			}
 		})
 	}
@@ -197,6 +230,22 @@ func TestResolveCwd(t *testing.T) {
 			},
 			platform: "cline",
 			want:     "/workspace/root",
+		},
+		{
+			name: "cline accepts snake_case workspace_roots",
+			input: map[string]interface{}{
+				"workspace_roots": []interface{}{"/workspace/root"},
+			},
+			platform: "cline",
+			want:     "/workspace/root",
+		},
+		{
+			name: "cline takes the first of several roots",
+			input: map[string]interface{}{
+				"workspaceRoots": []interface{}{"/workspace/first", "/workspace/second"},
+			},
+			platform: "cline",
+			want:     "/workspace/first",
 		},
 		{
 			name: "cline reads a workspace root object",

@@ -10,6 +10,9 @@ func TestUninstallStatusRequiresStructuralEvidence(t *testing.T) {
 		{"pretty running", "{\n  \"service\": {\n    \"running\": true\n  }\n}", SevFail},
 		{"stopped despite other running fields", `{"collector":{"running":true},"service":{"running":false},"script_forwarders":[{"running":true}]}`, ""},
 		{"missing status", "", SevWarn},
+		// Absent is not stopped: a status that never mentions the service proves nothing.
+		{"missing service", `{}`, SevWarn},
+		{"missing running", `{"service":{}}`, SevWarn},
 		{"null running", `{"service":{"running":null}}`, SevWarn},
 		{"wrong type", `{"service":{"running":"false"}}`, SevWarn},
 		{"clipped legacy", `{"version":"1.3.91","service":{"running":...`, SevWarn},

@@ -451,6 +451,36 @@ func TestRunPreToolEmitsClaudeTelemetryWithoutDecision(t *testing.T) {
 	}
 }
 
+// Devin has a real PermissionRequest hook that Beacon also subscribes to, so its PreToolUse is
+// observed as tool.invoked rather than turned into a synthesized approval.allowed: one approval per
+// call, and only the one an operator gave. The response carries no decision.
+func TestDevinPreToolObservesWithoutSynthesizingAnApproval(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "devin"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	out := runHookWithInput(t, runPreTool, map[string]interface{}{
+		"hook_event_name": "PreToolUse",
+		"tool_name":       "exec",
+		"tool_input":      map[string]interface{}{"command": "git status"},
+	})
+	if len(out) != 0 {
+		t.Fatalf("devin pre-tool response = %#v, want an empty object carrying no decision", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "tool.invoked" {
+		t.Fatalf("event.action = %q, want tool.invoked", action)
+	}
+	if _, ok := event["approval"]; ok {
+		t.Fatalf("PreToolUse should not emit approval telemetry: %#v", event["approval"])
+	}
+	if command := event["command"].(map[string]interface{})["command"]; command != "git status" {
+		t.Fatalf("command = %q, want git status", command)
+	}
+}
+
 func TestRunPreToolEmitsAntigravityCommandTelemetry(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "antigravity"

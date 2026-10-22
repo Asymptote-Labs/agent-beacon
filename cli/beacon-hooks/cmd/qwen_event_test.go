@@ -186,7 +186,7 @@ func TestQwenWriteFileRecordsPathOperationAndDiff(t *testing.T) {
 // `edit` changes part of one. It reaches the log through the pre-tool event, which classifies from
 // the tool name rather than from a constructed diff.
 func TestQwenPreToolDistinguishesAWholeFileWriteFromAnEdit(t *testing.T) {
-	for toolName, want := range map[string]string{"write_file": "create", "edit": "modify"} {
+	for toolName, want := range map[string]string{"write_file": "create", "edit": "modify", "replace": "modify"} {
 		t.Run(toolName, func(t *testing.T) {
 			logPath := setupQwenHook(t)
 			runHookWithInput(t, runPreTool, map[string]interface{}{

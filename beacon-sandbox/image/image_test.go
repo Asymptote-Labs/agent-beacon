@@ -147,6 +147,39 @@ func TestFilesMatchPostPushLayers(t *testing.T) {
 	}
 }
 
+// Each staged binary must be the right local artifact, and the session PATH must reach where it
+// lands and where the Claude installer puts claude. A swapped or empty source, or a PATH that
+// misses either directory, still builds an image -- and every paid session then fails on
+// "command not found" or runs the wrong binary.
+func TestBuildStagesBothArtifactsWhereTheSessionPathFindsThem(t *testing.T) {
+	root := stubRepo(t)
+	spec, err := Build(Spec{RepoRoot: root}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		BeaconDir + "/beacon":         BeaconPath(root),
+		BeaconDir + "/beacon-otelcol": CollectorPath(root),
+	}
+	for remote, local := range want {
+		if got := spec.Files[remote]; got != local {
+			t.Errorf("Files[%q] = %q, want the local artifact %q", remote, got, local)
+		}
+	}
+	onPath := map[string]bool{}
+	for _, dir := range LinuxLayout().PathPrepend {
+		onPath[dir] = true
+	}
+	for remote := range spec.Files {
+		if dir := remote[:strings.LastIndex(remote, "/")]; !onPath[dir] {
+			t.Errorf("%s is staged in %s, which the session PATH %v does not reach", remote, dir, LinuxLayout().PathPrepend)
+		}
+	}
+	if claudeBin := AgentHome + "/.local/bin"; !onPath[claudeBin] {
+		t.Errorf("the session PATH %v misses %s, where the Claude installer puts claude", LinuxLayout().PathPrepend, claudeBin)
+	}
+}
+
 // The error a first-time user is most likely to see must name the fix.
 func TestArtifactsErrorNamesTheBuildCommand(t *testing.T) {
 	root := t.TempDir()

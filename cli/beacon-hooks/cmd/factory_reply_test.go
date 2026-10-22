@@ -89,6 +89,7 @@ func TestFactoryTranscriptReplyRefusesAnUnfinishedTurn(t *testing.T) {
 	cases := map[string][]string{
 		"ends on a tool call":            turn[:2],
 		"ends on a tool result":          turn[:3],
+		"ends on the prompt":             turn[:1],
 		"text-only block list is blank":  {turn[0], factoryRecord("x", "assistant", []interface{}{factoryText("  ")})},
 		"assistant message with no body": {turn[0], `{"type":"message","id":"x","message":{"role":"assistant"}}`},
 	}

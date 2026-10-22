@@ -134,6 +134,7 @@ func TestPiFinalizedAssistantReplyOnlyRecordsVisibleText(t *testing.T) {
 		{"blank-text", "assistant", []interface{}{map[string]interface{}{"type": "text", "text": " \n\t"}}, ""},
 		{"no-text", "assistant", nil, ""},
 		{"non-text-parts", "assistant", []interface{}{map[string]interface{}{"type": "toolCall", "name": "read"}}, ""},
+		{"tool-result", "toolResult", []interface{}{map[string]interface{}{"type": "text", "text": "Tool text"}}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logPath, stdout := runHookProcess(t, map[string]interface{}{

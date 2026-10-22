@@ -59,15 +59,18 @@ func newCmd() (*cobra.Command, *bytes.Buffer) {
 	return c, buf
 }
 
+// `rules lint` takes a pack directory or a single rule file, the one a rule author is editing.
 func TestRulesLintSuccess(t *testing.T) {
 	dir := t.TempDir()
-	writeRuleFile(t, dir, "ok.rule.yaml", validRuleYAML)
-	cmd, buf := newCmd()
-	if err := lintRulesPath(cmd, dir); err != nil {
-		t.Fatalf("lint returned error: %v\n%s", err, buf.String())
-	}
-	if !strings.Contains(buf.String(), "ok   cli-test-rule") {
-		t.Fatalf("expected ok line, got: %s", buf.String())
+	file := writeRuleFile(t, dir, "ok.rule.yaml", validRuleYAML)
+	for _, path := range []string{dir, file} {
+		cmd, buf := newCmd()
+		if err := lintRulesPath(cmd, path); err != nil {
+			t.Fatalf("lint %s returned error: %v\n%s", path, err, buf.String())
+		}
+		if !strings.Contains(buf.String(), "ok   cli-test-rule") {
+			t.Fatalf("lint %s: expected ok line, got: %s", path, buf.String())
+		}
 	}
 }
 

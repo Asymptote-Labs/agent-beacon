@@ -20,6 +20,8 @@ func TestNormalizeEmailAccepts(t *testing.T) {
 		{"subdomain", "ops@mail.corp.asymptotelabs.ai", "ops@mail.corp.asymptotelabs.ai"},
 		{"hyphenated domain", "dev@some-company.io", "dev@some-company.io"},
 		{"digits in domain", "dev@cloud123.com", "dev@cloud123.com"},
+		{"long tld", "dev@company.engineering", "dev@company.engineering"},
+		{"free provider is still valid", "someone@gmail.com", "someone@gmail.com"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -598,25 +598,38 @@ func TestDshMCPToolNamesDoNotCollideWithBuiltins(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // The bridge sends `agent_id` and a constant `agent_type` of general-purpose, which are the
-// spellings the shared subagent commands already read.
-func TestDshSubagentStartResolvesThroughTheSharedReaders(t *testing.T) {
-	logPath := dshTestSetup(t)
-	runHookWithInput(t, subagentStartCmd.Run, dshEvent("SubagentStart", "d-sub", map[string]interface{}{
-		"agent_id":   "child-9",
-		"agent_type": "general-purpose",
-	}))
+// spellings the shared subagent commands already read. Both commands are driven, because the stop
+// half is the only test of what the subagent-stop command records.
+func TestDshSubagentLifecycleResolvesThroughTheSharedReaders(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		event string
+		run   func(*cobra.Command, []string)
+		want  string
+	}{
+		{name: "start", event: "SubagentStart", run: subagentStartCmd.Run, want: "subagent.started"},
+		{name: "stop", event: "SubagentStop", run: subagentStopCmd.Run, want: "subagent.stopped"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logPath := dshTestSetup(t)
+			runHookWithInput(t, tc.run, dshEvent(tc.event, "d-sub", map[string]interface{}{
+				"agent_id":   "child-9",
+				"agent_type": "general-purpose",
+			}))
 
-	event := lastEndpointEvent(t, logPath)
-	if got := leaf(event, "event", "action"); got != "subagent.started" {
-		t.Fatalf("event.action = %q, want subagent.started", got)
-	}
-	// Under raw, which is where the shared subagent command puts a child's identity on
-	// every runtime that does not decorate it further.
-	if got := leaf(event, "raw", "subagent", "id"); got != "child-9" {
-		t.Fatalf("raw.subagent.id = %q, want child-9", got)
-	}
-	if got := leaf(event, "raw", "subagent", "type"); got != "general-purpose" {
-		t.Fatalf("raw.subagent.type = %q, want general-purpose", got)
+			event := lastEndpointEvent(t, logPath)
+			if got := leaf(event, "event", "action"); got != tc.want {
+				t.Fatalf("event.action = %q, want %q", got, tc.want)
+			}
+			// Under raw, which is where the shared subagent command puts a child's identity on
+			// every runtime that does not decorate it further.
+			if got := leaf(event, "raw", "subagent", "id"); got != "child-9" {
+				t.Fatalf("raw.subagent.id = %q, want child-9", got)
+			}
+			if got := leaf(event, "raw", "subagent", "type"); got != "general-purpose" {
+				t.Fatalf("raw.subagent.type = %q, want general-purpose", got)
+			}
+		})
 	}
 }
 

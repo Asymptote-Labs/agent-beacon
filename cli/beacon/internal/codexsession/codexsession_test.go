@@ -113,6 +113,46 @@ func TestCollectOnceUsesCursor(t *testing.T) {
 	}
 }
 
+// `beacon endpoint codex sync --print` runs the collector with Print, an Out writer and nothing
+// to write or save. The collector has to hand Print to its sink: without it the sweep maps every
+// event and prints none, and the dry run a user runs to see what sync would ship shows nothing.
+func TestPrintSweepShowsEveryEventAndLeavesTheSessionForSync(t *testing.T) {
+	dir := t.TempDir()
+	codexDir := filepath.Join(dir, ".codex")
+	sessionPath := filepath.Join(codexDir, "sessions", "2026", "09", "19", "rollout-2026-09-19T20-00-00-sess-1.jsonl")
+	writeFile(t, sessionPath, sessionMetaLine("sess-1", "/tmp/repo")+"\n"+messageLine("user", "u1", "first")+"\n")
+
+	var printed strings.Builder
+	summary, err := CollectOnce(CollectOptions{CodexDir: codexDir, Print: true, Out: &printed})
+	if err != nil {
+		t.Fatalf("print CollectOnce: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(printed.String()), "\n")
+	if summary.EventsEmitted == 0 || printed.Len() == 0 || len(lines) != summary.EventsEmitted {
+		t.Fatalf("printed %d lines for %d events:\n%s", len(lines), summary.EventsEmitted, printed.String())
+	}
+	var sawPrompt bool
+	for _, line := range lines {
+		var ev schema.Event
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("print output is not one event per line: %v\n%s", err, line)
+		}
+		sawPrompt = sawPrompt || (ev.Event.Action == "prompt.submitted" && ev.Prompt != nil && ev.Prompt.Text == "first")
+	}
+	if !sawPrompt {
+		t.Fatalf("print output has no prompt.submitted for the session's prompt:\n%s", printed.String())
+	}
+
+	logPath := filepath.Join(dir, "runtime.jsonl")
+	real, err := CollectOnce(CollectOptions{CodexDir: codexDir, StatePath: filepath.Join(dir, "state.json"), LogPath: logPath, Write: true, UserMode: true})
+	if err != nil {
+		t.Fatalf("sync after print: %v", err)
+	}
+	if real.EventsEmitted != summary.EventsEmitted || len(readLog(t, logPath)) != summary.EventsEmitted {
+		t.Fatalf("sync after --print wrote %d events, want the %d the dry run showed", real.EventsEmitted, summary.EventsEmitted)
+	}
+}
+
 func decodeFixture(t *testing.T, lines []string) []Record {
 	t.Helper()
 	records, stats, err := decodeRecords(strings.NewReader(strings.Join(lines, "\n") + "\n"))

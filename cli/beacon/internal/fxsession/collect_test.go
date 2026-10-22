@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -138,6 +139,30 @@ func TestSweepEmitsOnlyWhatIsNewSinceTheCursor(t *testing.T) {
 	// re-derives by reading the log from the start rather than by storing it in the cursor.
 	if last.GenAI == nil || last.GenAI.Usage == nil || last.GenAI.Usage.CostUSD == nil {
 		t.Fatalf("usage event carries no cost: %+v", last.GenAI)
+	}
+}
+
+// A cursor file written under another StateVersion is discarded rather than misread: re-collecting
+// is harmless, and reading a cursor under the wrong meaning would skip events permanently. The
+// shared state loader only resets what the collector's Valid rejects, so this is the collector's
+// own wiring.
+func TestCursorFileFromAnotherVersionIsDiscardedNotMisread(t *testing.T) {
+	f := newSweepFixture(t)
+	if err := os.MkdirAll(filepath.Dir(f.statePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stale := `{"version":` + strconv.Itoa(StateVersion+1) + `,"sessions":{"` + testSessionID + `":{"generation":"` + testGeneration + `","last_seq":9999,"started":true}}}`
+	if err := os.WriteFile(f.statePath, []byte(stale), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.writeSessionLog(t, testSessionID, []string{sessionStartedLine(1, "/repo"), assistantTurnLine(2)})
+
+	summary, err := CollectOnce(f.options())
+	if err != nil {
+		t.Fatalf("CollectOnce: %v", err)
+	}
+	if summary.EventsEmitted == 0 || len(f.logLines(t)) != summary.EventsEmitted {
+		t.Fatalf("the sweep trusted a cursor from another version: emitted %d, log has %d", summary.EventsEmitted, len(f.logLines(t)))
 	}
 }
 

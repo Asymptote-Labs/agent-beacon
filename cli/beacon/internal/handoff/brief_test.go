@@ -296,6 +296,43 @@ func TestEventsForASessionThatIsGone(t *testing.T) {
 	}
 }
 
+// A session its runtime deletes after `beacon handoff` listed it must read back as ErrNotFound,
+// whichever runtime's store held it: that error is what sends export and share to the runtime
+// log instead of failing on a session the log still has.
+func TestEventsForASessionItsRuntimeDeletedIsNotFound(t *testing.T) {
+	removeFile := func(s Session) string { return s.SourcePath }
+	for _, tc := range []struct {
+		harness, id string
+		fixture     func(*testing.T) StoreDirs
+		// removed is what the runtime deletes with the session.
+		removed func(Session) string
+	}{
+		{HarnessCopilot, "0cb916db-26aa-40f2-86b5-1ba81b225fd2", func(t *testing.T) StoreDirs { d, _, _ := copilotFixture(t); return d },
+			func(s Session) string { return filepath.Dir(s.SourcePath) }},
+		{HarnessDSH, "dsh-sess-1", func(t *testing.T) StoreDirs { d, _ := dshFixture(t); return d }, removeFile},
+		{HarnessFactory, "factory-sess-1", func(t *testing.T) StoreDirs { d, _ := factoryFixture(t); return d }, removeFile},
+		{HarnessFx, fxSessionA, func(t *testing.T) StoreDirs { d, _, _ := fxFixture(t); return d }, removeFile},
+		{HarnessGrok, grokSessionID, func(t *testing.T) StoreDirs { d, _ := grokFixture(t); return d }, removeFile},
+		{HarnessOpenClaw, "oc-sess-1", func(t *testing.T) StoreDirs { d, _ := openClawFixture(t); return d }, removeFile},
+		{HarnessPi, "pi-sess-1", func(t *testing.T) StoreDirs { d, _, _ := piFixture(t); return d }, removeFile},
+		{HarnessPrime, "prime-sess-1", func(t *testing.T) StoreDirs { d, _, _ := piFixture(t); return d }, removeFile},
+	} {
+		t.Run(tc.harness, func(t *testing.T) {
+			sources := DefaultSources(tc.fixture(t))
+			session, err := Find(sources, tc.harness, tc.id)
+			if err != nil {
+				t.Fatalf("Find: %v", err)
+			}
+			if err := os.RemoveAll(tc.removed(session)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Events(sources, session); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("Events after the runtime deleted the session = %v, want ErrNotFound", err)
+			}
+		})
+	}
+}
+
 func actionList(events []schema.Event) string {
 	var actions []string
 	for _, e := range events {

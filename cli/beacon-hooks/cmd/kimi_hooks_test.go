@@ -508,6 +508,7 @@ func TestKimiPermissionResultRecordsTheOperatorDecision(t *testing.T) {
 		"approved":  {"approved", "approval.allowed", "approve"},
 		"rejected":  {"rejected", "approval.denied", "deny"},
 		"cancelled": {"cancelled", "approval.denied", "cancelled"},
+		"error":     {"error", "approval.denied", "error"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			logPath := kimiTestSetup(t)

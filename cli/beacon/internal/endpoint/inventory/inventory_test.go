@@ -1086,6 +1086,11 @@ func assertServer(t *testing.T, servers []MCPServer, runtime, name, transport st
 			if server.DefinitionHash == "" || server.ServerNameHash == "" || server.SourcePathHash == "" {
 				t.Fatalf("%s/%s missing hashes: %#v", runtime, name, server)
 			}
+			// command_name_hash ships in the inventory event beside the other hashes; it is present
+			// exactly when the definition names a command.
+			if (server.CommandNameHash != "") != commandPresent {
+				t.Fatalf("%s/%s command_name_hash = %q with commandPresent %t", runtime, name, server.CommandNameHash, commandPresent)
+			}
 			return
 		}
 	}

@@ -2,6 +2,7 @@ package devincloud
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -148,6 +149,27 @@ func TestPullOnceWritesAndUploads(t *testing.T) {
 	if len(lines) != 4 {
 		t.Fatalf("log has %d lines, want 4", len(lines))
 	}
+	// The messages API's own field names reach the log: source decides prompt vs reply, and the
+	// text lands on each. A drifted field tag still yields four lines, all of them agent.message.
+	got := map[string]string{}
+	for _, line := range lines {
+		var ev struct {
+			Event   struct{ Action string } `json:"event"`
+			Message string                  `json:"message"`
+			Prompt  *struct{ Text string }  `json:"prompt"`
+		}
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("log line is not an event: %v", err)
+		}
+		text := ev.Message
+		if ev.Prompt != nil {
+			text = ev.Prompt.Text
+		}
+		got[ev.Event.Action] = text
+	}
+	if got["prompt.submitted"] != "prompt one" || got["agent.message"] != "reply one" {
+		t.Fatalf("log actions = %q, want the user message as a prompt and Devin's as a reply", got)
+	}
 
 	wantObj := "agent-traces/provider=devin_cloud/user_id=user-1/run_id=s1/runtime.jsonl"
 	body, ok := up.objects[wantObj]
@@ -185,6 +207,25 @@ func TestUploadSnapshotIsRedacted(t *testing.T) {
 		if strings.Contains(string(body), "supersecretvalue123456") {
 			t.Fatalf("uploaded object %q leaked an unredacted secret:\n%s", obj, body)
 		}
+	}
+}
+
+// A key the API refuses must fail the pull. The 403 body is JSON, so a client that decoded it as
+// a page of sessions would report an org with no sessions and exit 0 on a bad credential.
+func TestPullOnceWithARejectedKeyFailsAndWritesNothing(t *testing.T) {
+	srv := fakeDevinAPI(t, `{"items":[{"session_id":"s1","status":"finished","created_at":1,"updated_at":2}],"has_next_page":false}`, nil)
+	defer srv.Close()
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "runtime.jsonl")
+	statePath := filepath.Join(dir, "state.json")
+
+	client := New(testOrg, "cog_wrong", WithBaseURL(srv.URL), WithRetry(0, 0))
+	_, err := PullOnce(context.Background(), client, PullOptions{Write: true, LogPath: logPath, StatePath: statePath})
+	if err == nil || !strings.Contains(err.Error(), "403") {
+		t.Fatalf("PullOnce with a rejected key = %v, want the 403", err)
+	}
+	if _, statErr := os.Stat(logPath); !os.IsNotExist(statErr) {
+		t.Fatalf("a refused pull wrote the runtime log: %v", statErr)
 	}
 }
 

@@ -180,6 +180,44 @@ func TestCollectOnceCollectsALineThatWasTornOnTheFirstSweep(t *testing.T) {
 	}
 }
 
+// `beacon endpoint grok sync --print` runs the collector with Print, an Out writer and nothing
+// to write or save. The collector has to hand Print to its sink: without it the sweep maps every
+// event and prints none, and the dry run a user runs to see what sync would ship shows nothing.
+func TestPrintSweepShowsEveryEventAndLeavesTheSessionForSync(t *testing.T) {
+	root := t.TempDir()
+	writeFixtureSession(t, root, "/tmp/grok project", "session-1")
+
+	var printed strings.Builder
+	summary, err := CollectOnce(CollectOptions{SessionsDir: root, Print: true, Out: &printed})
+	if err != nil {
+		t.Fatalf("print CollectOnce: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(printed.String()), "\n")
+	if summary.EventsEmitted == 0 || printed.Len() == 0 || len(lines) != summary.EventsEmitted {
+		t.Fatalf("printed %d lines for %d events:\n%s", len(lines), summary.EventsEmitted, printed.String())
+	}
+	var sawPrompt bool
+	for _, line := range lines {
+		var ev jsonEvent
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("print output is not one event per line: %v\n%s", err, line)
+		}
+		sawPrompt = sawPrompt || ev.Prompt.Text == "run ls token=secret"
+	}
+	if !sawPrompt {
+		t.Fatalf("print output has no event for the session's prompt:\n%s", printed.String())
+	}
+
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	real, err := CollectOnce(CollectOptions{SessionsDir: root, StatePath: filepath.Join(t.TempDir(), "state.json"), LogPath: logPath, Write: true, UserMode: true})
+	if err != nil {
+		t.Fatalf("sync after print: %v", err)
+	}
+	if real.EventsEmitted != summary.EventsEmitted || countLines(t, logPath) != summary.EventsEmitted {
+		t.Fatalf("sync after --print wrote %d events, want the %d the dry run showed", real.EventsEmitted, summary.EventsEmitted)
+	}
+}
+
 func writeFixtureSession(t *testing.T, root, workspace, sessionID string) string {
 	t.Helper()
 	sessionDir := filepath.Join(root, urlPathEscape(workspace), sessionID)

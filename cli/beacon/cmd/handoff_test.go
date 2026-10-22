@@ -244,6 +244,14 @@ func TestHandoffStoreDirFlag(t *testing.T) {
 	if !reflect.DeepEqual(*seen, want) {
 		t.Fatalf("store dirs = %+v, want %+v", *seen, want)
 	}
+	// Each per-runtime flag reaches its own runtime's store.
+	if _, _, err := runHandoff(t, "list", "--codex-dir", "/x", "--opencode-dir", "/o", "--cline-dir", "/l"); err != nil {
+		t.Fatal(err)
+	}
+	want = handoff.StoreDirs{handoff.HarnessCodex: absPath(t, "/x"), handoff.HarnessOpenCode: absPath(t, "/o"), handoff.HarnessCline: absPath(t, "/l")}
+	if !reflect.DeepEqual(*seen, want) {
+		t.Fatalf("store dirs = %+v, want %+v", *seen, want)
+	}
 	// A relative store directory is resolved here, not in the session's directory the runtime
 	// starts in.
 	if _, _, err := runHandoff(t, "list", "--store-dir", "codex=rel/codex"); err != nil {

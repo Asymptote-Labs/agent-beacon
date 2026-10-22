@@ -178,6 +178,41 @@ func TestSanitizeEventRedactsToolPolicyAndRawValues(t *testing.T) {
 	}
 }
 
+// Redaction has to happen on the way to disk, not only in SanitizeEvent: session sync, git linking
+// and share records all write through AppendEvent, and the runtime log is what gets exported. The
+// secrets are read back from the file itself, nested slice included.
+func TestAppendEventWritesNoSecretToTheLog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	event := schema.NewEvent(schema.NewEventOptions{
+		Action:  "tool.invoked",
+		Harness: schema.HarnessInfo{Name: "test"},
+		Message: "token=message-secret",
+	})
+	event.Prompt = &schema.PromptInfo{Text: "api_key=prompt-secret"}
+	event.Raw = map[string]interface{}{
+		"items": []interface{}{
+			map[string]interface{}{"value": "authorization: Bearer slice-secret"},
+		},
+	}
+
+	if _, err := AppendEvent(event, Options{Path: path}); err != nil {
+		t.Fatalf("AppendEvent returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	for _, secret := range []string{"message-secret", "prompt-secret", "slice-secret"} {
+		if strings.Contains(string(data), secret) {
+			t.Fatalf("secret %q reached the log: %s", secret, data)
+		}
+	}
+	var decoded schema.Event
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &decoded); err != nil {
+		t.Fatalf("the log line is not one JSON event: %v", err)
+	}
+}
+
 var uuidV5Pattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
 // The stamped ID and the derived trace are both read back from the line on disk.

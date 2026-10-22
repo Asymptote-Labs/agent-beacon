@@ -491,7 +491,10 @@ func TestRunChildStripsForwardToken(t *testing.T) {
 	testenv.RequirePOSIXExecutableFixtures(t)
 	dir := t.TempDir()
 	output := filepath.Join(dir, "env.txt")
+	// Every forwarding provider's token is kept from the agent; the rest of the environment is not.
 	t.Setenv(EnvSplunkToken, "leak-me-not")
+	t.Setenv(EnvFalconToken, "falcon-leak-me-not")
+	t.Setenv("BEACON_TEST_KEEP", "kept")
 	child := fakeExecutable(t, "child", "#!/bin/sh\nenv > \"$1\"\n")
 	session := &Session{
 		BaseDir:      dir,
@@ -508,8 +511,13 @@ func TestRunChildStripsForwardToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := string(data)
-	if strings.Contains(env, "leak-me-not") || strings.Contains(env, EnvSplunkToken+"=") {
-		t.Fatalf("child env exposed the SIEM token:\n%s", env)
+	for _, leaked := range []string{"leak-me-not", EnvSplunkToken + "=", EnvFalconToken + "="} {
+		if strings.Contains(env, leaked) {
+			t.Fatalf("child env exposed a SIEM token (%q):\n%s", leaked, env)
+		}
+	}
+	if !strings.Contains(env, "BEACON_TEST_KEEP=kept") {
+		t.Fatalf("child env dropped a variable that is no token:\n%s", env)
 	}
 	if !strings.Contains(env, "CLAUDE_CODE_ENABLE_TELEMETRY=1") {
 		t.Fatalf("child env missing Claude telemetry vars:\n%s", env)

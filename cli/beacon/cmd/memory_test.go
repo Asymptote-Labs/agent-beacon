@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/learning"
@@ -850,16 +851,38 @@ func TestEvaluatorOptionsSelectsProvider(t *testing.T) {
 	}
 }
 
-// --cost-per-trace replaced --jev-cost-per-trace when SubQ was added; the old
-// name must keep setting the same estimate.
-func TestMemoryEvaluationsDeprecatedCostPerTraceFlag(t *testing.T) {
-	resetMemoryOpts(t)
-	flags := memoryEvaluationsRunCmd.Flags()
-	if err := flags.Set("jev-cost-per-trace", "0.02"); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { flags.Lookup("jev-cost-per-trace").Changed = false })
-	if memoryOpts.costPerTrace != 0.02 {
-		t.Fatalf("costPerTrace = %v after --jev-cost-per-trace=0.02", memoryOpts.costPerTrace)
+// --cost-per-trace replaced --jev-cost-per-trace when SubQ was added. Both spellings must set the
+// estimate `memory evaluations run --dry-run` previews, driven through the real command line.
+func TestMemoryEvaluationsRunCostPerTraceFlagsSetTheEstimate(t *testing.T) {
+	for _, name := range []string{"cost-per-trace", "jev-cost-per-trace"} {
+		t.Run(name, func(t *testing.T) {
+			logPath, project := writeMemoryCommandFixture(t)
+			resetMemoryOpts(t)
+			flags := memoryEvaluationsRunCmd.Flags()
+			t.Cleanup(func() {
+				flags.VisitAll(func(f *pflag.Flag) { f.Changed = false })
+				rootCmd.SetOut(nil)
+				rootCmd.SetErr(nil)
+				rootCmd.SetArgs(nil)
+			})
+			var out, stderr bytes.Buffer
+			rootCmd.SetOut(&out)
+			rootCmd.SetErr(&stderr)
+			rootCmd.SetArgs([]string{"memory", "evaluations", "run", "--dry-run", "--json",
+				"--log-path", logPath, "--project", project, "--trace", "session:cursor:s1", "--" + name, "0.03"})
+			if err := rootCmd.Execute(); err != nil {
+				t.Fatalf("memory evaluations run --%s: %v\n%s", name, err, stderr.String())
+			}
+			// Cobra prints the deprecation notice with OutOrStderr: stderr in a real run, but out here
+			// because the test sets it. The JSON document follows it.
+			doc := out.Bytes()[max(bytes.IndexByte(out.Bytes(), '{'), 0):]
+			var result evaluationRunResult
+			if err := json.Unmarshal(doc, &result); err != nil {
+				t.Fatalf("decode result: %v\n%s", err, out.String())
+			}
+			if result.TraceCount != 1 || result.EstimatedCostUSD != 0.03 {
+				t.Fatalf("--%s=0.03: trace count %d, estimate %v; want 1 trace at 0.03", name, result.TraceCount, result.EstimatedCostUSD)
+			}
+		})
 	}
 }

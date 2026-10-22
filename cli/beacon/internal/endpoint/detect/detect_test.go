@@ -43,6 +43,32 @@ func TestLoadActiveFallsBackToBaseline(t *testing.T) {
 	}
 }
 
+// Users and earlier releases put rules in the documented store (~/.beacon/endpoint/rules, see
+// docs/cli/endpoint-paths.mdx). If the adapter resolved the store anywhere else, `beacon scan`
+// would silently drop every rule already there and run the baseline alone.
+func TestLoadActiveReadsRulesFromTheDocumentedUserStore(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	store := filepath.Join(home, ".beacon", "endpoint", "rules")
+	if err := os.MkdirAll(store, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(store, "kept-rule.rule.yaml"), []byte(ruleWithID("kept-rule")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadActive(true, "")
+	if err != nil {
+		t.Fatalf("load active: %v", err)
+	}
+	for _, r := range loaded {
+		if r.Rule.ID == "kept-rule" && r.Source == SourceStore {
+			return
+		}
+	}
+	t.Fatalf("rule placed in %s was not loaded from the store: %+v", store, loaded)
+}
+
 func TestInstallRemoveRoundTripViaUserMode(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 

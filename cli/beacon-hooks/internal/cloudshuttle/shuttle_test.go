@@ -86,6 +86,53 @@ func TestMaybeUploadRefusesALogOutsideTheSandbox(t *testing.T) {
 	}
 }
 
+// A run with a bucket and a run id but no credentials is the shuttle half-configured, which every
+// Stop and SessionEnd reaches. It must do nothing: no request carrying the runtime log to the
+// storage endpoint unsigned, no error for the hook to log, and no state claiming an upload.
+func TestMaybeUploadWithoutCredentialsSendsNothing(t *testing.T) {
+	for name, env := range map[string]map[string]string{
+		"s3 without keys": {
+			"BEACON_CLOUD_UPLOAD":    "s3",
+			"BEACON_CLOUD_S3_BUCKET": "bucket",
+			"AWS_ACCESS_KEY_ID":      "",
+			"AWS_SECRET_ACCESS_KEY":  "",
+		},
+		"gcs without credentials": {
+			"BEACON_CLOUD_UPLOAD":              "gcs",
+			"BEACON_CLOUD_GCS_BUCKET":          "bucket",
+			"BEACON_CLOUD_GCS_CREDENTIALS_B64": "",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Errorf("unexpected request without credentials: %s %s", r.Method, r.URL)
+			}))
+			defer server.Close()
+			dir := t.TempDir()
+			useSandbox(t, dir)
+			logPath := filepath.Join(dir, "runtime.jsonl")
+			if err := os.WriteFile(logPath, []byte("{\"event\":\"session\"}\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			statePath := filepath.Join(dir, "state.json")
+			t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+			t.Setenv("BEACON_CLOUD_SHUTTLE_STATE", statePath)
+			t.Setenv("BEACON_RUN_ID", "run")
+			t.Setenv("BEACON_CLOUD_S3_ENDPOINT", server.URL)
+			t.Setenv("BEACON_CLOUD_GCS_ENDPOINT", server.URL)
+			for key, value := range env {
+				t.Setenv(key, value)
+			}
+			if err := MaybeUpload(context.Background(), true); err != nil {
+				t.Fatalf("MaybeUpload returned error: %v", err)
+			}
+			if _, err := os.Stat(statePath); !os.IsNotExist(err) {
+				t.Fatalf("state written without an upload, stat err=%v", err)
+			}
+		})
+	}
+}
+
 // Local installs set BEACON_ENDPOINT_LOG outside the sandbox, and every local SessionStart, Stop
 // and SessionEnd reads the shuttle config, so the refusal notice is for cloud runs only.
 func TestConfigFromEnvIsSilentOutsideCloud(t *testing.T) {

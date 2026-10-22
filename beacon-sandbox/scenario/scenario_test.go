@@ -29,11 +29,13 @@ func TestValidScenarioPasses(t *testing.T) {
 
 func TestValidateRejectsAuthoringMistakes(t *testing.T) {
 	cases := map[string]func(*Scenario){
-		"missing id":            func(s *Scenario) { s.ID = "" },
-		"whitespace id":         func(s *Scenario) { s.ID = "   " },
-		"missing prompt":        func(s *Scenario) { s.Prompt = "" },
-		"whitespace prompt":     func(s *Scenario) { s.Prompt = "\t\n" },
-		"no expectations":       func(s *Scenario) { s.Expect = nil },
+		"missing id":        func(s *Scenario) { s.ID = "" },
+		"whitespace id":     func(s *Scenario) { s.ID = "   " },
+		"missing prompt":    func(s *Scenario) { s.Prompt = "" },
+		"whitespace prompt": func(s *Scenario) { s.Prompt = "\t\n" },
+		"no expectations":   func(s *Scenario) { s.Expect = nil },
+		// `expect: []` in YAML decodes to an empty, non-nil slice: a scenario that asserts nothing.
+		"empty expectations":    func(s *Scenario) { s.Expect = []Expect{} },
 		"expectation no action": func(s *Scenario) { s.Expect = []Expect{{Fields: []string{"a"}}} },
 	}
 	for name, mutate := range cases {

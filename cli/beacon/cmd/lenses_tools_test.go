@@ -1,11 +1,15 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
 )
@@ -81,6 +85,40 @@ func TestLensesLint(t *testing.T) {
 	}
 	if err := json.Unmarshal(buf.Bytes(), &report); err != nil || len(report.Files) != 2 || report.Warnings == 0 || len(report.Files[1].Findings) != 0 {
 		t.Fatalf("lint --json = %v, %s", err, buf.String())
+	}
+}
+
+// `lenses spec --example` is where a lens author starts, so what it prints must be a complete lens
+// that `lenses lint --strict` accepts -- not the spec text, and not a lens with warnings.
+func TestLensesSpecExampleIsALensThatLintsClean(t *testing.T) {
+	useLensToolsDefaults(t)
+	run := func(args ...string) (string, error) {
+		var out bytes.Buffer
+		rootCmd.SetOut(&out)
+		rootCmd.SetErr(&out)
+		rootCmd.SetArgs(append([]string{"lenses"}, args...))
+		t.Cleanup(func() {
+			for _, c := range []*cobra.Command{lensesSpecCmd, lensesLintCmd} {
+				c.Flags().VisitAll(func(f *pflag.Flag) { f.Changed = false })
+			}
+			rootCmd.SetOut(nil)
+			rootCmd.SetErr(nil)
+			rootCmd.SetArgs(nil)
+		})
+		err := rootCmd.Execute()
+		return out.String(), err
+	}
+
+	example, err := run("spec", "--example")
+	if err != nil {
+		t.Fatalf("lenses spec --example: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "example.lens.html")
+	if err := os.WriteFile(path, []byte(example), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run("lint", "--strict", path); err != nil || !strings.Contains(out, "0 error(s), 0 warning(s) in 1 file(s).") {
+		t.Fatalf("the printed example does not lint clean: %v\n%s", err, out)
 	}
 }
 

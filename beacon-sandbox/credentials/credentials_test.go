@@ -113,6 +113,8 @@ func TestKeyCommandFailuresAreDiagnosable(t *testing.T) {
 		"nonzero exit": "exit 3",
 		"no output":    "true",
 		"multiline":    "printf 'line1\\nline2\\n'",
+		// Whitespace trims to an empty key; accepting it would send a blank credential to a paid run.
+		"only whitespace": "printf '   '",
 	}
 	for name, cmd := range cases {
 		if _, err := Resolve(Options{KeyCommand: cmd}); err == nil {

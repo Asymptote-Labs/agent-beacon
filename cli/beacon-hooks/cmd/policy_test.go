@@ -126,6 +126,33 @@ func TestPreToolPolicyDenyDevin(t *testing.T) {
 	assertDenialEvent(t, logPath)
 }
 
+// Qwen Code, Muse Code and OpenHands read a provider deny from the hook's stdout object, so the
+// deny has to reach stdout end to end, not just be shaped right. Kiro and Kimi Code suppress
+// stdout because they read it as model context; extending that suppression to one of these
+// runtimes would drop the deny and the tool would run while the log recorded it as enforced.
+func TestPreToolPolicyDenyReachesStdoutOnObjectShapedRuntimes(t *testing.T) {
+	for _, tc := range []struct{ platform, wantKey string }{
+		{"qwen", "hookSpecificOutput"},
+		{"muse", "hookSpecificOutput"},
+		{openHandsPlatform, "decision"},
+	} {
+		t.Run(tc.platform, func(t *testing.T) {
+			logPath := setupPolicyTest(t, tc.platform, denyResponse)
+			out := runHookWithInput(t, runPreTool, map[string]interface{}{
+				"hook_event_name": "PreToolUse",
+				"session_id":      "s-deny-" + tc.platform,
+				"cwd":             "/repo",
+				"tool_name":       "bash",
+				"tool_input":      map[string]interface{}{"command": "codex --full-auto"},
+			})
+			if _, ok := out[tc.wantKey]; !ok {
+				t.Fatalf("%s deny response = %#v, want a %q object on stdout", tc.platform, out, tc.wantKey)
+			}
+			assertDenialEvent(t, logPath)
+		})
+	}
+}
+
 func TestPreToolPolicyAllowProceedsNormally(t *testing.T) {
 	logPath := setupPolicyTest(t, "cursor", `{"decision":"allow"}`)
 	out := runHookWithInput(t, runPreTool, map[string]interface{}{
