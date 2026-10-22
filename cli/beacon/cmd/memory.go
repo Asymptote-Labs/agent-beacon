@@ -470,7 +470,7 @@ func runMemoryCandidatesCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	show, ok, err := dashboard.ShowTrace(memoryLogPath(), memoryOpts.traceID, dashboard.TraceQuery{Limit: 2000})
+	show, ok, err := dashboard.ShowTrace(memoryLogPath(), memoryOpts.traceID, dashboard.TraceQuery{EventQuery: dashboard.EventQuery{NoLimit: true}})
 	if err != nil {
 		return err
 	}
