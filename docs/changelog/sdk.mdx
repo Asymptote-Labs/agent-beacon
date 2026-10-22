@@ -9,7 +9,9 @@ Stay up to date with the latest changes to the Beacon Observe SDK.
 
 ---
 
-## Unreleased
+## October 2026
+
+### v0.2.0 · October 22, 2026
 
 - **Early-cancelled streams keep the consumer's error** · Cancelling an observed stream before reading it kept the consumer's error and exported its span only if the source's `return()` rejected; a `return()` that throws synchronously now behaves the same.
 - **Global tracers export after reinitialization** · After `Observe.shutdown()` and `Observe.initialize()`, spans from `trace.getTracer()` were dropped because the stopped provider stayed registered globally. New global tracers now use the new provider; a host's own tracer provider is left untouched.
