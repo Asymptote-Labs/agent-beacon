@@ -411,18 +411,21 @@ func TestShareBundleSummary(t *testing.T) {
 
 func TestShareRemoteURL(t *testing.T) {
 	cases := map[string]string{
-		"https://user:pw@github.com/acme/repo.git": "https://github.com/acme/repo.git",
-		"git@github.com:acme/repo.git":             "github.com:acme/repo.git",
-		"ssh://git@host:22/acme/repo":              "ssh://host:22/acme/repo",
-		"https://github.com/acme/repo?token=abc":   "https://github.com/acme/repo",
-		"":                                         "",
-		"github.com:acme/repo.git":                 "github.com:acme/repo.git",
-		"/home/alice/src/foo":                      "",
-		"../foo.git":                               "",
-		"~/src/foo":                                "",
-		"file:///Users/alice/repos/foo":            "",
-		`C:\Users\alice\repo`:                      "",
-		"./a:b":                                    "",
+		"https://user:pw@github.com/acme/repo.git":        "https://github.com/acme/repo.git",
+		"git@github.com:acme/repo.git":                    "github.com:acme/repo.git",
+		"ssh://git@host:22/acme/repo":                     "ssh://host:22/acme/repo",
+		"https://github.com/acme/repo?token=abc":          "https://github.com/acme/repo",
+		"https://user:pw@git.example.test?token=abc":      "https://git.example.test",
+		"https://git.example.test#frag":                   "https://git.example.test",
+		"https://git.example.test?redirect=/x@other.test": "https://git.example.test",
+		"":                              "",
+		"github.com:acme/repo.git":      "github.com:acme/repo.git",
+		"/home/alice/src/foo":           "",
+		"../foo.git":                    "",
+		"~/src/foo":                     "",
+		"file:///Users/alice/repos/foo": "",
+		`C:\Users\alice\repo`:           "",
+		"./a:b":                         "",
 	}
 	for in, want := range cases {
 		if got := ShareRemoteURL(in); got != want {
