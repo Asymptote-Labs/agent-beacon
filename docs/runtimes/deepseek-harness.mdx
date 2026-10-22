@@ -62,6 +62,20 @@ beacon endpoint dsh status
 
 The poll path is local and offline. It complements hooks by backfilling persisted assistant text, reasoning, structured tool failures, and token usage that the hook bridge does not expose. Poll events are marked `harness.collection_method=poll`, so they are historical observation only: they cannot approve, deny, hold, or delay a tool call.
 
+### Reading the session store
+
+DeepSeek Harness writes each session as `session.v4.jsonl.zstd` (session format v4, unchanged through 0.2.1-rc.2). Beacon reads it as follows:
+
+- **Tool calls.** A `tool/call` record stores `arguments` as the raw JSON string the model produced. Beacon decodes it, so commands, paths, patterns and edit text reach their fields.
+- **Tool results.** A `tool/result` carries the model-facing result message: the call id as `message.toolCallId`, the output as content blocks, and the failure flag as `message.isError`, with the failure's name and code beside it under `error`. Beacon joins each result to its call and records `command.executed`, `file.read`, `file.modified`, `mcp.tool_invoked`, `tool.completed` or `tool.failed`.
+- **`run_code` dispatches.** Tools a `run_code` program calls are logged as `tool/ptc-dispatch-start` and `tool/ptc-dispatch`, keyed by `subCallId`. Each becomes its own invocation and result, so a nested `bash` call is a `command.executed` with its command line.
+- **Prompts.** Every user-role message the model sees is a `user/message`, and only the ones with `source.kind: user` are something a person sent. Agent instructions, time and runtime snapshots, skill catalogs, messages relayed from other agents, job and subagent notices, goal continuations and compaction checkpoints are context DSH injected, and are not recorded as `prompt.submitted`.
+- **Compaction.** History compaction rewrites earlier messages in place (a `replace` surface operation). A pruned tool result is the same call's result again, so Beacon records each call's result once. The tokens of the summarizing model call (`compaction/summary`) are recorded as `token.usage` with `raw.dsh.token_source=compaction_summary`.
+- **Forks.** A forked session begins with a copy of its parent's history, closed by a `session/end-seed` record with `inherited: true`. That history was already collected under the parent, so Beacon reads it for context only and records the fork's own activity from the marker on.
+- **Session header.** The working directory, parent session and subagent origin come from the header line, which keeps its fields at the top level rather than under `data`. Every event carries the working directory, and `--workspace` filters on it.
+
+Records Beacon does not map are left out deliberately: retried or failed model attempts that committed no message (`assistant/attempt`, `llm/retry`), slash commands (`command/run`), team, goal, plan-mode and title bookkeeping, and subagent descriptors. They remain in DSH's own store.
+
 ### Live hooks and the DeepSeek Harness sandbox
 
 <Warning>
@@ -151,15 +165,15 @@ Uninstall removes Beacon's hooks file, its one patch element, and the Beacon-own
 | Harness attribution | Supported. `dsh`, `dsh_cli`, `dsh-cli`, `dshcli`, `deepseek_harness`, `deepseek-harness`, `deepseekharness`, `deepseek-ai/dsh`, and `@deepseek-ai/dsh` normalize to `deepseek_harness` |
 | Hook install, status, uninstall, and repair | Supported at user scope |
 | Session lifecycle | Supported. Hooks record `session.started` from `SessionStart`, and poll backfill records persisted session starts |
-| Prompts | Supported. Hooks record `prompt.submitted` from `UserPromptSubmit`; poll backfill reads persisted user messages |
+| Prompts | Supported. Hooks record `prompt.submitted` from `UserPromptSubmit`; poll backfill reads the persisted messages a person sent, not the context DSH injects |
 | Assistant text and reasoning | Supported through native session poll |
-| Tool use | Supported for hook pre-tool/post-tool activity and persisted poll tool calls/results, with native call ids promoted to `gen_ai.tool.call.id` |
+| Tool use | Supported for hook pre-tool/post-tool activity and persisted poll tool calls/results, including the tools a `run_code` program dispatches, with native call ids promoted to `gen_ai.tool.call.id` |
 | Commands | Supported. Hooks and poll both record `command.executed` with the command, output, and exit code when exposed |
 | File activity | Supported. Hooks and poll record `file.read` and `file.modified` with paths, operations, and diffs where available |
 | MCP activity | Supported. Recognized from `mcp__<server>__<tool>`, with the server and tool split out |
 | Subagents | Supported. `subagent.started` and `subagent.stopped` |
 | Approval decisions | Not collected. See [Known gaps](#known-gaps) |
-| Token usage and cost | Token usage is collected from native session poll when persisted. Runtime-reported cost is not currently exposed |
+| Token usage and cost | Token usage is collected from native session poll when persisted, including the model calls that compact history. Runtime-reported cost is not currently exposed |
 | Failed tools | Collected from native session poll. Not exposed on the hook bridge |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported for the endpoint agent. Hooks are installed in the logged-in user's Harness home |
