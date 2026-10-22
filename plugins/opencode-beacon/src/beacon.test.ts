@@ -4,6 +4,43 @@ import BeaconDefinition, { BeaconEndpointPlugin } from "./beacon"
 const payloads: any[] = []
 const senderKey = Symbol.for("beacon.opencode.testSender")
 
+const nextTurn = () => new Promise<void>((resolve) => setImmediate(resolve))
+function deferred() {
+  let resolve!: () => void
+  const promise = new Promise<void>((done) => { resolve = done })
+  return { promise, resolve }
+}
+
+function controlledDeadlines() {
+  const originalSet = globalThis.setTimeout
+  const originalClear = globalThis.clearTimeout
+  const pending = new Map<any, { callback: () => void, at: number }>()
+  const handles = new Set<any>()
+  let now = 0
+  globalThis.setTimeout = ((callback: () => void, delay: number) => {
+    const handle = {}
+    handles.add(handle)
+    pending.set(handle, { callback, at: now + delay })
+    return handle
+  }) as any
+  globalThis.clearTimeout = ((handle: any) => {
+    if (handles.has(handle)) pending.delete(handle)
+    else originalClear(handle)
+  }) as any
+  return {
+    advance(ms: number) {
+      now += ms
+      for (const [handle, item] of [...pending]) {
+        if (item.at > now) continue
+        pending.delete(handle)
+        item.callback()
+      }
+    },
+    pending: () => pending.size,
+    restore() { globalThis.setTimeout = originalSet; globalThis.clearTimeout = originalClear },
+  }
+}
+
 beforeEach(() => {
   payloads.length = 0
   ;(globalThis as any)[senderKey] = async (payload: any) => payloads.push(structuredClone(payload))
@@ -639,5 +676,110 @@ describe("OpenCode 2.x plugin definition", () => {
     expect(payloads[9].properties).toMatchObject({ requestID: "per_1", reply: "reject", permission: "bash" })
     expect(payloads[10].properties.status.type).toBe("idle")
     expect(v2.disposed.sort()).toEqual(["session.prompt", "tool.execute.after", "tool.execute.before"])
+  })
+})
+
+describe("direct-hook queue deadlines", () => {
+  test.each(["chat.message", "command.execute.before", "tool.execute.before", "tool.execute.after"])(
+    "bounds %s from enqueue while retaining ordered delivery",
+    async (type) => {
+      const clock = controlledDeadlines()
+      const release = deferred()
+      const started = deferred()
+      const delivered = deferred()
+      const sends: string[] = []
+      const completions: string[] = []
+      let direct: Promise<void> | undefined
+      let active = 0
+      let peak = 0
+      ;(globalThis as any)[senderKey] = async (value: any) => {
+        active++
+        peak = Math.max(peak, active)
+        sends.push(value.type)
+        if (sends.length === 1) { started.resolve(); await release.promise }
+        completions.push(value.type)
+        active--
+        if (value.type === type) delivered.resolve()
+      }
+      try {
+        const hooks: any = await plugin()
+        await hooks.event({ event: { type: "session.created", properties: { sessionID: "ses_first" } } })
+        await started.promise
+        await hooks.event({ event: { type: "session.created", properties: { sessionID: "ses_second" } } })
+        const invoke = () => hooks[type]({ sessionID: "ses_direct", callID: "call_direct", tool: "read", command: "fixture", args: {} }, { args: {}, parts: [] })
+        let returned = false
+        direct = invoke().then(() => { returned = true })
+        await nextTurn()
+        clock.advance(1999)
+        await nextTurn()
+        expect(returned).toBe(false)
+        clock.advance(1)
+        await nextTurn()
+        expect(returned).toBe(true)
+        expect(sends).toEqual(["session.created"])
+        expect(completions).toEqual([])
+        release.resolve()
+        await delivered.promise
+        await nextTurn()
+        expect(completions).toEqual(["session.created", "session.created", type])
+        expect(peak).toBe(1)
+        expect(clock.pending()).toBe(0)
+      } finally {
+        release.resolve()
+        if (direct) { await direct; await delivered.promise }
+        clock.restore()
+      }
+    },
+  )
+
+  test("cleans a deleted session only after actual ordered send completion", async () => {
+    const clock = controlledDeadlines()
+    const first = deferred()
+    const firstStarted = deferred()
+    const deletion = deferred()
+    const deletionStarted = deferred()
+    const deletionFinished = deferred()
+    const sent: any[] = []
+    ;(globalThis as any)[senderKey] = async (value: any) => {
+      if (sent.length === 0) { firstStarted.resolve(); await first.promise }
+      if (value.type === "session.deleted") { deletionStarted.resolve(); await deletion.promise }
+      sent.push(value)
+      if (value.type === "session.deleted") deletionFinished.resolve()
+    }
+    const hooks: any = await plugin()
+    const completed = { event: { type: "message.updated", properties: { sessionID: "ses_reused", info: { id: "msg_reused", role: "assistant", finish: "stop", time: { completed: 1 } } } } }
+    let direct: Promise<void> | undefined
+    try {
+      await hooks.event(completed)
+      await firstStarted.promise
+      let returned = false
+      direct = hooks["tool.execute.before"]({ sessionID: "ses_reused", callID: "call_1", tool: "read" }, { args: {} }).then(() => { returned = true })
+      clock.advance(2000)
+      await nextTurn()
+      expect(returned).toBe(true)
+      await hooks.event({ event: { type: "session.deleted", properties: { sessionID: "ses_reused" } } })
+      clock.advance(2000)
+      await nextTurn()
+      await hooks.event(completed)
+      first.resolve()
+      await deletionStarted.promise
+      clock.advance(2000)
+      await nextTurn()
+      await hooks.event(completed)
+      deletion.resolve()
+      await deletionFinished.promise
+      await nextTurn()
+      expect(sent.map(item => item.type)).toEqual(["message.updated", "tool.execute.before", "session.deleted"])
+      await hooks.event(completed)
+      await hooks["command.execute.before"]({ sessionID: "ses_reused", command: "drain" }, {})
+      expect(sent.map(item => item.type)).toEqual(["message.updated", "tool.execute.before", "session.deleted", "message.updated", "command.execute.before"])
+      expect(clock.pending()).toBe(0)
+    } finally {
+      first.resolve()
+      deletion.resolve()
+      if (direct) await direct
+      await nextTurn()
+      clock.restore()
+    }
   })
 })
