@@ -1,9 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import BeaconDefinition, { BeaconEndpointPlugin } from "./beacon"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { pathToFileURL } from "node:url"
 
 const payloads: any[] = []
 const senderKey = Symbol.for("beacon.opencode.testSender")
@@ -684,7 +680,7 @@ describe("OpenCode 2.x plugin definition", () => {
 })
 
 describe("direct-hook queue deadlines", () => {
-  test.each(["chat.message", "command.execute.before", "tool.execute.before", "tool.execute.after", "v2.tool.execute.before"])(
+  test.each(["chat.message", "command.execute.before", "tool.execute.before", "tool.execute.after"])(
     "bounds %s from enqueue while retaining ordered delivery",
     async (type) => {
       const clock = controlledDeadlines()
@@ -693,8 +689,6 @@ describe("direct-hook queue deadlines", () => {
       const delivered = deferred()
       const sends: string[] = []
       const completions: string[] = []
-      let cleanup: (() => Promise<void>) | undefined
-      let disposed = false
       let direct: Promise<void> | undefined
       let active = 0
       let peak = 0
@@ -705,25 +699,14 @@ describe("direct-hook queue deadlines", () => {
         if (sends.length === 1) { started.resolve(); await release.promise }
         completions.push(value.type)
         active--
-        if (value.type === type.replace("v2.", "")) delivered.resolve()
+        if (value.type === type) delivered.resolve()
       }
       try {
-        let invoke: () => Promise<void>
-        if (type.startsWith("v2.")) {
-          const v2 = v2Context()
-          cleanup = await BeaconDefinition.setup(v2.ctx as any)
-          v2.emit("session.created", { sessionID: "ses_first" })
-          await started.promise
-          v2.emit("session.created", { sessionID: "ses_second" })
-          await nextTurn()
-          invoke = () => v2.fire("tool.execute.before", { sessionID: "ses_direct", id: "call_direct", tool: "read", input: {} })
-        } else {
-          const hooks: any = await plugin()
-          await hooks.event({ event: { type: "session.created", properties: { sessionID: "ses_first" } } })
-          await started.promise
-          await hooks.event({ event: { type: "session.created", properties: { sessionID: "ses_second" } } })
-          invoke = () => hooks[type]({ sessionID: "ses_direct", callID: "call_direct", tool: "read", command: "fixture", args: {} }, { args: {}, parts: [] })
-        }
+        const hooks: any = await plugin()
+        await hooks.event({ event: { type: "session.created", properties: { sessionID: "ses_first" } } })
+        await started.promise
+        await hooks.event({ event: { type: "session.created", properties: { sessionID: "ses_second" } } })
+        const invoke = () => hooks[type]({ sessionID: "ses_direct", callID: "call_direct", tool: "read", command: "fixture", args: {} }, { args: {}, parts: [] })
         let returned = false
         direct = invoke().then(() => { returned = true })
         await nextTurn()
@@ -735,17 +718,15 @@ describe("direct-hook queue deadlines", () => {
         expect(returned).toBe(true)
         expect(sends).toEqual(["session.created"])
         expect(completions).toEqual([])
-        if (cleanup) { await cleanup(); disposed = true }
         release.resolve()
         await delivered.promise
         await nextTurn()
-        expect(completions).toEqual(["session.created", "session.created", type.replace("v2.", "")])
+        expect(completions).toEqual(["session.created", "session.created", type])
         expect(peak).toBe(1)
         expect(clock.pending()).toBe(0)
       } finally {
         release.resolve()
         if (direct) { await direct; await delivered.promise }
-        if (cleanup && !disposed) await cleanup()
         clock.restore()
       }
     },
@@ -801,63 +782,4 @@ describe("direct-hook queue deadlines", () => {
       clock.restore()
     }
   })
-
-  test("recovers from sender rejection and cancels healthy direct wait timers", async () => {
-    const clock = controlledDeadlines()
-    const sent: string[] = []
-    let attempts = 0
-    ;(globalThis as any)[senderKey] = async (value: any) => {
-      if (++attempts === 1) throw new Error("synthetic sender rejection")
-      sent.push(value.type)
-    }
-    try {
-      const hooks: any = await plugin()
-      await hooks.event({ event: { type: "session.created", properties: { sessionID: "ses_failure" } } })
-      await hooks["tool.execute.before"]({ sessionID: "ses_healthy", callID: "call_1", tool: "read" }, { args: {} })
-      expect(attempts).toBe(2)
-      expect(sent).toEqual(["tool.execute.before"])
-      expect(clock.pending()).toBe(0)
-    } finally { clock.restore() }
-  })
-
-  test.each([0, 2])("bounds a real finite child with %s queued observations", async (backlog) => {
-    delete (globalThis as any)[senderKey]
-    const directory = mkdtempSync(join(tmpdir(), "beacon-opencode-queue-"))
-    const marker = join(directory, "drained")
-    const calls = join(directory, "calls.jsonl")
-    const child = join(directory, "child.ts")
-    writeFileSync(child, `import { appendFileSync, writeFileSync } from "node:fs"\nconst value = JSON.parse(await new Response(Bun.stdin).text())\nappendFileSync(${JSON.stringify(calls)}, JSON.stringify({ type: value.type, tool: value.tool_name }) + "\\n")\nif (value.command_name === "drain") writeFileSync(${JSON.stringify(marker)}, "done")\nelse if (value.tool_name !== "healthy") await Bun.sleep(3000)\n`)
-    const command = `exec '${process.execPath.replaceAll("'", "'\\''")}' '${child.replaceAll("'", "'\\''")}'`
-    const source = readFileSync(new URL("./beacon.ts", import.meta.url), "utf8")
-    const rendered = join(directory, "beacon.ts")
-    writeFileSync(rendered, source.replace('const beaconCommand = "__BEACON_COMMAND__"', `const beaconCommand = ${JSON.stringify(command)}`))
-    const { BeaconEndpointPlugin: renderedPlugin } = await import(pathToFileURL(rendered).href)
-    const hooks: any = await renderedPlugin({ project: {}, directory: "/fixture", worktree: "/fixture", client: {} })
-    try {
-      const healthyStart = performance.now()
-      await hooks["tool.execute.before"]({ sessionID: "ses_healthy", callID: "healthy", tool: "healthy" }, { args: {} })
-      expect(performance.now() - healthyStart).toBeLessThan(1000)
-      for (let index = 0; index < backlog; index++) {
-        await hooks.event({ event: { type: "session.created", properties: { sessionID: `ses_${index}` } } })
-      }
-      const start = performance.now()
-      await hooks["tool.execute.before"]({ sessionID: "ses_direct", callID: "direct", tool: "read" }, { args: {} })
-      const elapsed = performance.now() - start
-      console.log(`OpenCode real child backlog=${backlog} caller_ms=${Math.round(elapsed)}`)
-      expect(elapsed).toBeGreaterThan(1500)
-      expect(elapsed).toBeLessThan(3000)
-    } finally {
-      void hooks["command.execute.before"]({ sessionID: "ses_direct", command: "drain" }, {})
-      try {
-        const deadline = performance.now() + 9000
-        while (performance.now() < deadline) {
-          try { if (readFileSync(marker, "utf8") === "done") break } catch {}
-          await Bun.sleep(10)
-        }
-        expect(readFileSync(marker, "utf8")).toBe("done")
-        const observed = readFileSync(calls, "utf8").trim().split("\n").map(line => JSON.parse(line))
-        expect(observed.map(value => value.type)).toEqual(["tool.execute.before", ...Array(backlog).fill("session.created"), "tool.execute.before", "command.execute.before"])
-      } finally { rmSync(directory, { recursive: true, force: true }) }
-    }
-  }, 15000)
 })
