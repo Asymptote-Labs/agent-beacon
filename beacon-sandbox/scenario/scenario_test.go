@@ -1,6 +1,7 @@
 package scenario
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -129,6 +130,41 @@ func TestLoadValidatesOnRead(t *testing.T) {
 	}
 	if _, err := Load(filepath.Join(dir, "absent.yaml")); err == nil {
 		t.Fatal("a missing file must error")
+	}
+}
+
+func TestLoadRejectsUnknownFields(t *testing.T) {
+	const body = `id: strict
+prompt: run echo {{canary}}
+install:
+  mode: user
+  verify_uninstall: true
+expect:
+  - action: command.executed
+    fields: [command.command]
+    min_count: 2
+`
+	for _, tc := range []struct {
+		name, old, replacement, key string
+		line                        int
+	}{
+		{"scenario", "id: strict\n", "id: strict\npromtp: ignored\n", "promtp", 2},
+		{"expectation fields", "fields:", "feilds:", "feilds", 8},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			const name = "misspelled.yaml"
+			writeScenario(t, dir, name, strings.Replace(body, tc.old, tc.replacement, 1))
+			_, err := Load(filepath.Join(dir, name))
+			if err == nil {
+				t.Fatalf("Load accepted unknown key %q; the intended check may be omitted", tc.key)
+			}
+			for _, detail := range []string{name, tc.key, fmt.Sprintf("line %d", tc.line)} {
+				if !strings.Contains(err.Error(), detail) {
+					t.Errorf("Load error %q must identify %q", err, detail)
+				}
+			}
+		})
 	}
 }
 
