@@ -35,22 +35,24 @@ export interface NormalizedTurn {
 
 const encoder = new TextEncoder();
 
-/** Truncate a string to a UTF-8 byte budget; returns [text, wasTruncated]. */
-function capBytes(text: string, max = MAX_FIELD_BYTES): [string, boolean] {
-  if (encoder.encode(text).length <= max) return [text, false];
+const utf8Bytes = (text: string) => encoder.encode(text).length;
+const jsonBytes = (value: unknown) => encoder.encode(JSON.stringify(value)).length;
+
+/** Truncate a string to a byte budget, as UTF-8 or as measured by `size`,
+ *  never splitting a surrogate pair; returns [text, wasTruncated]. */
+function capBytes(text: string, max = MAX_FIELD_BYTES, size = utf8Bytes): [string, boolean] {
+  if (size(text) <= max) return [text, false];
+  const prefix = (end: number) =>
+    text.slice(0, /[\uD800-\uDBFF]/.test(text[end - 1] ?? '') ? end - 1 : end);
   // Binary-search the largest prefix that fits (chars ≠ bytes for multibyte).
   let lo = 0;
   let hi = text.length;
   while (lo < hi) {
     const mid = (lo + hi + 1) >> 1;
-    if (encoder.encode(text.slice(0, mid)).length <= max) lo = mid;
+    if (size(prefix(mid)) <= max) lo = mid;
     else hi = mid - 1;
   }
-  // UTF-16 indices may land between the two halves of an astral character.
-  if (lo > 0 && lo < text.length &&
-      text.charCodeAt(lo - 1) >= 0xd800 && text.charCodeAt(lo - 1) <= 0xdbff &&
-      text.charCodeAt(lo) >= 0xdc00 && text.charCodeAt(lo) <= 0xdfff) lo--;
-  return [text.slice(0, lo), true];
+  return [prefix(lo), true];
 }
 
 /** Light client-side scrubber for retention=redacted (defense in depth; the
@@ -75,50 +77,27 @@ function shapeText(text: string, retention: Retention): Shaped | null {
   return { text: capped, truncated };
 }
 
-/** Message fields must remain valid semconv JSON, including when capped. Keep
- *  complete messages in order, then the largest text prefix of the last one.
- *  Budget the serialized form: quotes, escapes and message wrappers count too. */
+/** Retention and cap for gen_ai.*.messages, as semconv JSON. The budget is the
+ *  serialized value, so a capped field still parses: messages are kept in order
+ *  and the first that does not fit is cut to the longest text that does. */
 function shapeMessages(messages: Msg[], retention: Retention): Shaped | null {
   if (retention === 'metadata') return null;
-  const encoded: string[] = [];
+  const out: { role: Msg['role']; parts: { type: 'text'; content: string }[] }[] = [];
   let bytes = 2; // array brackets
-  let truncated = false;
-  for (const message of messages) {
-    const wrap = (content: string) =>
-      JSON.stringify({ role: message.role, parts: [{ type: 'text', content }] });
-    const comma = encoded.length ? 1 : 0;
-    const budget = MAX_FIELD_BYTES - bytes - comma - encoder.encode(wrap('')).length;
-    if (budget < 0) {
-      truncated = true;
-      break;
+  for (const { role, text } of messages) {
+    const content = retention === 'redacted' ? scrub(text) : text;
+    const message = { role, parts: [{ type: 'text' as const, content }] };
+    const size = jsonBytes(message) + (out.length ? 1 : 0);
+    if (bytes + size <= MAX_FIELD_BYTES) {
+      out.push(message);
+      bytes += size;
+      continue;
     }
-    const shown = retention === 'redacted' ? scrub(message.text) : message.text;
-    // Search only complete UTF-16 code points. JSON escapes can cost more than
-    // UTF-8 text, so capBytes (a plain-text budget) cannot be used here.
-    const prefix = (end: number): string => {
-      if (end > 0 && end < shown.length &&
-          shown.charCodeAt(end - 1) >= 0xd800 && shown.charCodeAt(end - 1) <= 0xdbff &&
-          shown.charCodeAt(end) >= 0xdc00 && shown.charCodeAt(end) <= 0xdfff) end--;
-      return shown.slice(0, end);
-    };
-    let lo = 0;
-    let hi = Math.min(shown.length, budget);
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >> 1;
-      // The empty wrapper already accounts for the string's two quotes.
-      if (encoder.encode(JSON.stringify(prefix(mid))).length - 2 <= budget) lo = mid;
-      else hi = mid - 1;
-    }
-    const kept = prefix(lo);
-    const serialized = wrap(kept);
-    encoded.push(serialized);
-    bytes += comma + encoder.encode(serialized).length;
-    if (kept.length < shown.length) {
-      truncated = true;
-      break;
-    }
+    const room = jsonBytes(content) - (bytes + size - MAX_FIELD_BYTES);
+    if (room >= 2) out.push({ role, parts: [{ type: 'text', content: capBytes(content, room, jsonBytes)[0] }] });
+    return { text: JSON.stringify(out), truncated: true };
   }
-  return { text: `[${encoded.join(',')}]`, truncated };
+  return { text: JSON.stringify(out), truncated: false };
 }
 
 /**

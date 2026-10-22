@@ -116,7 +116,7 @@ func collectGenAIText(v interface{}, role, partType string, out *[]string) {
 		if !hasParts {
 			var hasContent bool
 			body, hasContent = typed["content"]
-			if !hasContent && hasRole && (kind == "" || kind == "message") && partType == GenAIPartTypeText {
+			if !hasContent && hasRole && (kind == "" || kind == "message") {
 				// Older browser captures wrote their internal role/text message
 				// directly. Never override an explicit (even empty) typed body.
 				body, _ = typed["text"].(string)
