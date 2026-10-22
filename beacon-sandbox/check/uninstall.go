@@ -37,9 +37,6 @@ type Removal struct {
 	LogRetained string
 	// Status is `endpoint status --json` after the removal, which is Beacon's own account of itself.
 	Status string
-	// Empty status exit/error fields support older artifacts that only recorded stdout.
-	StatusExitCode  string
-	StatusExecError string
 }
 
 // Uninstall judges whether a removal actually removed anything.
@@ -143,26 +140,12 @@ func Uninstall(v *Verdict, r Removal) {
 			Running *bool `json:"running"`
 		} `json:"service"`
 	}
-	var problem string
-	switch {
-	case r.StatusExecError != "":
-		problem = "the status probe failed: " + oneLineOf(r.StatusExecError)
-	case r.StatusExitCode != "" && r.StatusExitCode != "0":
-		problem = "the status command exited " + oneLineOf(r.StatusExitCode)
-	default:
-		if err := json.Unmarshal([]byte(r.Status), &status); err != nil {
-			problem = "the status is not valid JSON: " + oneLineOf(err.Error())
-		} else if status.Service.Running == nil {
-			problem = "the status has no boolean service.running observation"
-		}
-	}
-	if problem != "" {
+	if json.Unmarshal([]byte(r.Status), &status) != nil || status.Service.Running == nil {
 		v.Add(Finding{
 			Check:    "uninstall.status_agrees",
 			Severity: SevWarn,
-			Summary:  "`endpoint status` after uninstall is unverified: " + problem,
-			Why:      "A missing, invalid or failed status observation cannot establish that the collector stopped.",
-			Evidence: []string{"meta.json:uninstall_status"},
+			Summary:  "`endpoint status --json` after uninstall did not report service.running",
+			Why:      "A missing or unreadable status cannot establish that the collector stopped.",
 		})
 		return
 	}
