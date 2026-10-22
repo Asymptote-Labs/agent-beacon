@@ -456,6 +456,22 @@ func TestScanReadsClinePluginFromClineDir(t *testing.T) {
 	}
 }
 
+// With XDG_CONFIG_HOME set, the OpenCode plugin inventory reports is the one OpenCode loads.
+func TestScanReadsOpenCodePluginFromXDGConfigHome(t *testing.T) {
+	home := t.TempDir()
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	writeFile(t, filepath.Join(xdg, "opencode", "plugins", "beacon.ts"), `// beacon-managed-opencode-plugin:v1`)
+
+	result := Scan(Options{HomeDir: home, WorkingDir: t.TempDir(), Now: fixedNow})
+	if got := findConfig(result.Configs, "opencode", filepath.Join(xdg, "opencode", "plugins", "beacon.ts")); got == nil || !got.BeaconManaged {
+		t.Fatalf("opencode plugin under XDG_CONFIG_HOME not reported as managed: %#v", got)
+	}
+	if got := findConfig(result.Configs, "opencode", filepath.Join(home, ".config", "opencode", "plugins", "beacon.ts")); got != nil {
+		t.Fatalf("inventory still scanned ~/.config/opencode with XDG_CONFIG_HOME set: %#v", got)
+	}
+}
+
 // With GEMINI_CLI_HOME set, the Gemini CLI settings inventory reads are the ones Gemini reads.
 func TestScanReadsGeminiSettingsFromGeminiCLIHome(t *testing.T) {
 	home := t.TempDir()
@@ -509,6 +525,7 @@ func TestScanReadsClaudeUserFilesFromClaudeConfigDir(t *testing.T) {
 }
 
 func TestScanIncludesAllSupportedCurrentUserAndProjectConfigs(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
 	home := t.TempDir()
 	work := t.TempDir()
 	t.Setenv("SHELL", "/bin/bash")
@@ -657,6 +674,7 @@ func TestScanYAMLAndMetadataOnlyConfigs(t *testing.T) {
 	work := t.TempDir()
 	t.Setenv("SHELL", "/bin/zsh")
 	t.Setenv("CLINE_DIR", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
 	writeFile(t, filepath.Join(hermesDefaultRoot(t, home), "config.yaml"), `
 mcpServers:
   memory:

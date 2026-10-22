@@ -342,11 +342,13 @@ func copilotCandidates(home string) []candidate {
 	return []candidate{{runtime: "copilot_cli", path: shellProfilePath(home), scope: ScopeUser, format: formatMetadataOnly, kind: KindProfile}}
 }
 
+// opencodeCandidates resolves the user plugin through XDG_CONFIG_HOME, as OpenCode does.
 func opencodeCandidates(home, wd string) []candidate {
-	return []candidate{
-		{runtime: "opencode", path: filepath.Join(home, ".config", "opencode", "plugins", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
-		{runtime: "opencode", path: filepath.Join(wd, ".opencode", "plugins", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
+	items := []candidate{}
+	if dir, err := hooks.OpenCodeConfigDir(home); err == nil {
+		items = append(items, candidate{runtime: "opencode", path: filepath.Join(dir, "plugins", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin})
 	}
+	return append(items, candidate{runtime: "opencode", path: filepath.Join(wd, ".opencode", "plugins", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin})
 }
 
 // clineCandidates resolves the user plugin through CLINE_DIR, as Cline does. Project scope is
