@@ -2,7 +2,7 @@ import { SpanStatusCode } from "@opentelemetry/api";
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
 import { afterEach, expect, it } from "vitest";
 
-import { flush, initialize, shutdown, wrapClaudeAgentQuery } from "./index.js";
+import { flush, initialize, observe, shutdown, wrapClaudeAgentQuery } from "./index.js";
 
 afterEach(async () => { await shutdown(); });
 
@@ -98,6 +98,32 @@ it.each([false, true])("preserves a rejected return value when cleanup rejects (
   expect(counts()).toEqual({ nextCalls: started ? 1 : 0, returnCalls: 1 });
   expect(exporter.getFinishedSpans()).toHaveLength(1);
   expect(exporter.getFinishedSpans()[0]?.status).toEqual({ code: SpanStatusCode.ERROR, message: valueFailure.message });
+});
+
+it.each(["throw", "return"])("preserves %s errors when cleanup throws synchronously before the first next", async operation => {
+  const closeFailure = new Error("source close threw synchronously");
+  const consumerFailure = new Error(`${operation} failed`);
+  let returnCalls = 0;
+  const source = {
+    [Symbol.asyncIterator]() { return this; },
+    async next(): Promise<IteratorResult<string>> { return { value: "message", done: false }; },
+    return(_value?: unknown): Promise<IteratorResult<string>> {
+      returnCalls++;
+      throw closeFailure;
+    },
+    async throw(error?: unknown): Promise<IteratorResult<string>> { throw error; },
+  };
+  const exporter = new InMemorySpanExporter();
+  initialize({ spanExporter: exporter, disableDefaultExporter: true, disableBatch: true, disableInstrumentations: true });
+  const stream = observe({ name: "custom.iterator" }, () => source)();
+  const cancellation = operation === "throw"
+    ? stream.throw(consumerFailure)
+    : stream.return(Promise.reject(consumerFailure));
+  await expect.soft(cancellation).rejects.toBe(consumerFailure);
+  expect(returnCalls).toBe(1);
+  expect.soft(exporter.getFinishedSpans()).toHaveLength(1);
+  expect.soft(exporter.getFinishedSpans()[0]?.status).toEqual({ code: SpanStatusCode.ERROR, message: consumerFailure.message });
+  expect(await stream.next()).toEqual({ value: undefined, done: true });
 });
 
 it.each([false, true])("uses existing close semantics when source return yields (started=%s)", async started => {
