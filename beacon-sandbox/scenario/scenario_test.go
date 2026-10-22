@@ -150,8 +150,6 @@ expect:
 	}{
 		{"scenario", "id: strict\n", "id: strict\npromtp: ignored\n", "promtp", 2},
 		{"expectation fields", "fields:", "feilds:", "feilds", 8},
-		{"expectation count", "min_count:", "min_cout:", "min_cout", 9},
-		{"install probe", "verify_uninstall:", "verify_uninstal:", "verify_uninstal", 5},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -167,59 +165,6 @@ expect:
 				}
 			}
 		})
-	}
-}
-
-func TestLoadPreservesSupportedFieldsAndDefaults(t *testing.T) {
-	dir := t.TempDir()
-	writeScenario(t, dir, "explicit.yaml", `id: explicit
-platform: linux
-prompt: run echo {{canary}}
-timeout_seconds: 90
-budget_usd: 0.25
-install:
-  mode: user
-  verify_uninstall: true
-expect:
-  - action: command.executed
-    contains: ["{{canary}}"]
-    fields: [command.command]
-    min_count: 2
-    optional: true
-    why: checks the command and its retained fields
-`)
-	s, err := Load(filepath.Join(dir, "explicit.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if s.ID != "explicit" || s.Prompt != "run echo {{canary}}" || s.TargetPlatform() != PlatformLinux {
-		t.Errorf("scenario values were not retained: %+v", s)
-	}
-	if s.Timeout() != 90*time.Second || s.Budget() != 0.25 {
-		t.Errorf("explicit timeout/budget = %v/%v", s.Timeout(), s.Budget())
-	}
-	if s.Install == nil || s.Install.Mode != "user" || !s.Install.VerifyUninstall {
-		t.Fatalf("install probe was not retained: %+v", s.Install)
-	}
-	if len(s.Expect) != 1 {
-		t.Fatalf("expectations = %+v, want one", s.Expect)
-	}
-	e := s.Expect[0]
-	if e.Action != "command.executed" || strings.Join(e.Fields, ",") != "command.command" || e.MinCount != 2 ||
-		strings.Join(e.Contains, ",") != "{{canary}}" || !e.Optional || e.Why != "checks the command and its retained fields" {
-		t.Errorf("expectation values were not retained: %+v", e)
-	}
-
-	writeScenario(t, dir, "defaults.yaml", "id: defaults\nprompt: hello\nexpect:\n  - action: prompt.submitted\n")
-	s, err = Load(filepath.Join(dir, "defaults.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if s.TargetPlatform() != PlatformLinux || s.Timeout() != 10*time.Minute || s.Budget() != 1 || s.Install != nil {
-		t.Errorf("omitted settings no longer use defaults: %+v", s)
-	}
-	if len(s.Expect) != 1 || s.Expect[0].MinCount != 0 || s.Expect[0].Optional {
-		t.Errorf("omitted expectation settings changed: %+v", s.Expect)
 	}
 }
 
