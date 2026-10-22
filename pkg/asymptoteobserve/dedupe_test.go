@@ -170,31 +170,23 @@ func TestIsDuplicateEndpointEventKeepsEditsToDifferentFiles(t *testing.T) {
 	}
 }
 
-// The dedupe target for a command is the command text. "__" is an ordinary
-// character sequence there -- Python dunder names reach the log inside real
-// command lines -- so the MCP alias rules must not rewrite it.
-func TestDedupeTargetKeepsLiteralCommandText(t *testing.T) {
-	event := map[string]interface{}{
-		"command": map[string]interface{}{"command": "python -m pytest tests/__init__.py"},
-	}
-
-	got := dedupeTarget("command.executed", event)
-	want := "command:python -m pytest tests/__init__.py"
-	if got != want {
-		t.Fatalf("command target = %q, want %q", got, want)
-	}
-}
-
-// Same for a path: "__pycache__" is a directory name, not an MCP separator.
-func TestDedupeTargetKeepsLiteralFilePath(t *testing.T) {
-	event := map[string]interface{}{
-		"file": map[string]interface{}{"path": "/repo/src/__pycache__/mod.pyc"},
-	}
-
-	got := dedupeTarget("file.modified", event)
-	want := "file:/repo/src/__pycache__/mod.pyc"
-	if got != want {
-		t.Fatalf("file target = %q, want %q", got, want)
+// "__" is ordinary text in a command or a path, not an MCP separator, so two
+// different commands or files must not collapse because one spells ":" where
+// the other has "__".
+func TestIsDuplicateEndpointEventKeepsUnderscoresInCommandsAndPaths(t *testing.T) {
+	for _, tc := range []struct{ action, hook, collector string }{
+		{"command.executed", `"command":{"command":"echo a__b"}`, `"command":{"command":"echo a:b"}`},
+		{"file.modified", `"file":{"path":"/repo/x__y.py"}`, `"file":{"path":"/repo/x:y.py"}`},
+	} {
+		path := filepath.Join(t.TempDir(), "runtime.jsonl")
+		hook := `{"timestamp":"2026-08-21T18:00:01Z","event":{"action":"` + tc.action + `"},"harness":{"name":"claude_code"},"session":{"id":"s1","working_directory":"/repo"},` + tc.hook + `}`
+		collector := []byte(`{"timestamp":"2026-08-21T18:00:01Z","event":{"action":"` + tc.action + `"},"harness":{"name":"cursor"},"session":{"id":"s1","working_directory":"/repo"},` + tc.collector + `}`)
+		if err := os.WriteFile(path, []byte(hook+"\n"), 0644); err != nil {
+			t.Fatalf("write existing event: %v", err)
+		}
+		if IsDuplicateEndpointEvent(path, collector, EndpointDuplicateWindow) {
+			t.Errorf("%s: %s and %s are different and must both survive", tc.action, tc.hook, tc.collector)
+		}
 	}
 }
 
