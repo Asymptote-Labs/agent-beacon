@@ -204,6 +204,15 @@ describe('normalizeTurn — retention modes', () => {
     expect(p['beacon.prompt.text']).toBe('email me at [email] please');
     expect(p['beacon.content.retention']).toBe('redacted');
   });
+
+  // A long run of word characters with no '@', such as a base64 blob, made the email pattern
+  // rescan from every position: about 2s for 64 KB, growing with the square of the length.
+  it('redacted retention scrubs a long token-like run in linear time', () => {
+    const turn = baseTurn({ promptText: 'x'.repeat(1 << 20) });
+    const started = performance.now();
+    normalize(turn, 'redacted');
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
 });
 
 describe('normalizeTurn — tool calls', () => {

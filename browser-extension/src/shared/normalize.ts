@@ -59,7 +59,9 @@ function capBytes(text: string, max = MAX_FIELD_BYTES, size = utf8Bytes): [strin
  *  collector also redacts). Masks emails and long token-like strings. */
 function scrub(text: string): string {
   return text
-    .replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, '[email]')
+    // The lookbehind starts a match only where a run of these characters begins; without it, a
+    // long run with no '@' (a base64 blob, say) is rescanned from every position, quadratically.
+    .replace(/(?<![\w.+-])[\w.+-]+@[\w-]+\.[\w.-]+/g, '[email]')
     .replace(/\b(sk|pk|ghp|xox[baprs]|AKIA)[A-Za-z0-9_-]{12,}\b/g, '[token]');
 }
 
