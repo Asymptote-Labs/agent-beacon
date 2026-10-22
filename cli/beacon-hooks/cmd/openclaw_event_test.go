@@ -375,15 +375,12 @@ func TestOpenClawMCPToolAttribution(t *testing.T) {
 }
 
 // OpenClaw's own Codex and Claude harness bridges mint Claude-style `mcp__server__tool` names.
-// Splitting those on the first separator would report the server as "mcp".
-func TestOpenClawClaudeStyleMCPName(t *testing.T) {
-	server, tool := openClawMCPServerTool("mcp__openclaw__automations")
-	if server != "openclaw" || tool != "automations" {
+// Splitting those on the first separator would report the server as "mcp". Built-in names are
+// never MCP.
+func TestOpenClawMCPServerToolSplit(t *testing.T) {
+	if server, tool := openClawMCPServerTool("mcp__openclaw__automations"); server != "openclaw" || tool != "automations" {
 		t.Fatalf("server/tool = %q/%q", server, tool)
 	}
-}
-
-func TestOpenClawBuiltinToolIsNotMCP(t *testing.T) {
 	for _, name := range []string{"exec", "read", "apply_patch", "ls", "process", "", "trailing__"} {
 		if server, tool := openClawMCPServerTool(name); server != "" || tool != "" {
 			t.Fatalf("%q read as MCP server %q tool %q", name, server, tool)
@@ -553,15 +550,8 @@ func TestOpenClawToolParamsCannotOverwriteIdentity(t *testing.T) {
 	if got := nested(t, event.fields, "session")["working_directory"]; got != "/workspace/repo" {
 		t.Fatalf("working_directory = %v, want the envelope's", got)
 	}
-}
-
-func TestOpenClawWorkspaceFields(t *testing.T) {
-	event := openClawSingle(t, "session_start", map[string]interface{}{"sessionId": "sess-1"}, nil)
 	if event.fields["repository"] != "/workspace/repo" {
-		t.Fatalf("repository = %v", event.fields["repository"])
-	}
-	if got := nested(t, event.fields, "session")["working_directory"]; got != "/workspace/repo" {
-		t.Fatalf("working_directory = %v", got)
+		t.Fatalf("repository = %v, want the envelope's", event.fields["repository"])
 	}
 }
 

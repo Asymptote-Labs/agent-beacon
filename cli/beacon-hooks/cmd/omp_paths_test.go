@@ -110,7 +110,7 @@ func TestOmpResourceReadIsNotAFileWhateverItsSpelling(t *testing.T) {
 	for _, payload := range []map[string]interface{}{
 		{"type": "tool_result", "toolName": "read", "input": map[string]interface{}{"path": "local:/plan.md"},
 			"details": map[string]interface{}{
-				"resolvedPath": "/home/u/.omp/agent/sessions/s/local/plan.md",
+				"resolvedPath": "/repo/.omp/agent/sessions/s/local/plan.md",
 				"meta":         map[string]interface{}{"source": map[string]interface{}{"type": "internal", "value": "local://plan.md"}},
 			}},
 		{"type": "tool_call", "toolName": "read", "input": map[string]interface{}{"path": "@skill://self-verify-beacon-in-sandbox"}},

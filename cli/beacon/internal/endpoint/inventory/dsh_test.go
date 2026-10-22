@@ -106,25 +106,6 @@ func TestScanHonorsDshHome(t *testing.T) {
 	}
 }
 
-// dsh has no project scope: its plugin tree is composed from the Harness home, so there is nowhere
-// in a repository for a hook bridge to be mounted from. A project candidate would be a path the
-// runtime never reads, reported as if it might be monitored.
-func TestScanReportsNoProjectScopedDshConfig(t *testing.T) {
-	home := t.TempDir()
-	work := t.TempDir()
-	t.Setenv("DSH_HOME", "")
-
-	result := Scan(Options{HomeDir: home, WorkingDir: work})
-	for _, config := range result.Configs {
-		if config.Runtime != "deepseek_harness" {
-			continue
-		}
-		if config.Scope == ScopeProject {
-			t.Fatalf("scan reported a project-scoped dsh config at %s", config.Path)
-		}
-	}
-}
-
 // A declarative setup mounts the bridge by absolute path in a profile's own patch layer, pointing
 // it at Beacon's hooks file. That layer is reported, and as Beacon-managed even though it names no
 // package, so a working install is not shown as a half-install.

@@ -29,23 +29,15 @@ func TestPromptIDFromNormalizesEveryRuntimeSpelling(t *testing.T) {
 		"bool is not an id":             {map[string]interface{}{"turn_id": true}, ""},
 		"blank is not an id":            {map[string]interface{}{"prompt.id": "  ", "turn_id": "next"}, "next"},
 		"session id is not a prompt id": {map[string]interface{}{"session_id": "s", "conversation_id": "c"}, ""},
+		// GitHub Copilot opens a turn per model call inside one prompt, so its turn id would split
+		// one prompt's work into several. Its spellings stay out of the list.
+		"copilot turn id is not a prompt id": {map[string]interface{}{"turnId": "t", "github.copilot.turn_id": "t"}, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got := PromptIDFrom(tc.payload); got != tc.want {
 				t.Fatalf("PromptIDFrom = %q, want %q", got, tc.want)
 			}
 		})
-	}
-}
-
-// GitHub Copilot opens a turn per model call inside one prompt, so its turn id would split one
-// prompt's work into several. Its spellings stay out of the list.
-func TestPromptIDKeysExcludeCopilotTurnIDs(t *testing.T) {
-	for _, key := range PromptIDKeys {
-		switch key {
-		case "turnId", "github.copilot.turn_id":
-			t.Fatalf("PromptIDKeys includes %q, a per-model-call turn id", key)
-		}
 	}
 }
 

@@ -30,124 +30,6 @@ for script in "$ROOT_DIR"/packaging/macos/scripts/* "$ROOT_DIR"/packaging/macos/
       ;;
   esac
 done
-if ! grep -q 'INVENTORY_STATE' "$ROOT_DIR/packaging/macos/jamf/claude/common/repair-hooks.sh"; then
-  echo "repair-hooks should prepare inventory heartbeat state files" >&2
-  exit 1
-fi
-REPAIR_HOOKS_SCRIPT="$ROOT_DIR/packaging/macos/jamf/claude/common/repair-hooks.sh"
-JAMF_GUIDE="$ROOT_DIR/docs/guides/jamf-anthropic-openai-cursor-mdm.mdx"
-if grep -q 'chown -R' "$REPAIR_HOOKS_SCRIPT" || grep -q 'chmod +a "$CONSOLE_USER allow[^"]*add_file' "$REPAIR_HOOKS_SCRIPT"; then
-  echo "repair-hooks must not chown the user's home recursively as root or let the user add entries to the root log directory" >&2
-  exit 1
-fi
-if grep -q 'chmod +a "$CONSOLE_USER allow[^"]*add_file[^"]*" "$RUNTIME_DIR" ||' "$JAMF_GUIDE"; then
-  echo "the Jamf guide's snippet must not let the console user add entries to the root log directory" >&2
-  exit 1
-fi
-if ! grep -q 'restore_existing_forwarder' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
-  echo "postinstall should restore existing optional forwarders" >&2
-  exit 1
-fi
-if ! grep -q 'endpoint asymptote reconcile --system' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
-  echo "postinstall should re-render a connected endpoint's Beacon Cloud forwarder config" >&2
-  exit 1
-fi
-if ! grep -q 'endpoint user-config repair-installed' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
-  echo "postinstall should refresh installed user endpoint configuration after package install" >&2
-  exit 1
-fi
-if ! grep -q 'launchctl kickstart -k' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
-  echo "postinstall should kickstart already-loaded forwarders" >&2
-  exit 1
-fi
-if ! grep -q 'launchctl bootout "$target"' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
-  echo "postinstall should recover loaded-but-stuck forwarders with bootout" >&2
-  exit 1
-fi
-if ! grep -q 'could not restore existing forwarder' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
-  echo "postinstall should fail loudly when an existing forwarder cannot be restored" >&2
-  exit 1
-fi
-if ! grep -q 'launchctl bootstrap failed' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
-  echo "postinstall should preserve launchctl bootstrap diagnostics" >&2
-  exit 1
-fi
-if ! grep -q 'forwarder_stably_running' "$ROOT_DIR/packaging/macos/scripts/postinstall" ||
-   ! grep -q 'wait_for_forwarder_bootout' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
-  echo "postinstall should wait for bootout and verify stable forwarder startup" >&2
-  exit 1
-fi
-if ! grep -q 'com.beacon.endpoint.gcs-forwarder' "$ROOT_DIR/packaging/macos/scripts/postinstall"; then
-  echo "postinstall should restore the optional GCS forwarder" >&2
-  exit 1
-fi
-for installer in "$ROOT_DIR"/packaging/macos/jamf/claude/*/install-forwarder.sh; do
-  # Root daemons must not log to fixed names in world-writable /tmp: a local user could pre-create
-  # the file or plant a symlink for root to append through.
-  if grep -q '/tmp/\$LABEL' "$installer"; then
-    echo "forwarder installer must not send LaunchDaemon output to /tmp: $installer" >&2
-    exit 1
-  fi
-  if ! grep -q '/Library/Logs/Beacon' "$installer"; then
-    echo "forwarder installer should log under /Library/Logs/Beacon: $installer" >&2
-    exit 1
-  fi
-done
-for installer in \
-  "$ROOT_DIR/packaging/macos/jamf/claude/s3/install-forwarder.sh" \
-  "$ROOT_DIR/packaging/macos/jamf/claude/gcs/install-forwarder.sh"
-do
-  if ! grep -q 'Timed out waiting for.*to stop' "$installer"; then
-    echo "forwarder installer should wait for launchd bootout: $installer" >&2
-    exit 1
-  fi
-  if ! grep -q 'did not remain running' "$installer"; then
-    echo "forwarder installer should verify sustained launchd startup: $installer" >&2
-    exit 1
-  fi
-done
-if ! grep -q 'BEACON_KEEP_LOGS' "$FULL_CLEANUP_SCRIPT"; then
-  echo "full cleanup should support preserving logs" >&2
-  exit 1
-fi
-if ! grep -q 'BEACON_CLEAN_ALL_USERS' "$FULL_CLEANUP_SCRIPT"; then
-  echo "full cleanup should support all-user cleanup opt-in" >&2
-  exit 1
-fi
-if ! grep -q 'endpoint uninstall --system' "$FULL_CLEANUP_SCRIPT"; then
-  echo "full cleanup should run Beacon uninstall before force removal" >&2
-  exit 1
-fi
-if ! grep -q 'endpoint uninstall --system --keep-logs' "$FULL_CLEANUP_SCRIPT"; then
-  echo "full cleanup should preserve logs during the Beacon uninstall step" >&2
-  exit 1
-fi
-if ! grep -q 'OTEL_EXPORTER_OTLP_ENDPOINT' "$FULL_CLEANUP_SCRIPT"; then
-  echo "full cleanup should remove Beacon-managed Claude OTLP env" >&2
-  exit 1
-fi
-if ! grep -q 'http://127.0.0.1:' "$FULL_CLEANUP_SCRIPT"; then
-  echo "full cleanup should preserve non-local OTLP settings" >&2
-  exit 1
-fi
-if grep -q 'or enabled == "1"' "$FULL_CLEANUP_SCRIPT"; then
-  echo "full cleanup must not remove remote Claude OTLP settings solely because telemetry is enabled" >&2
-  exit 1
-fi
-if ! grep -q 'BEACON_LOCAL_OTLP_ENDPOINTS' "$FULL_CLEANUP_SCRIPT"; then
-  echo "full cleanup should match user OTLP settings to the installed Beacon ports" >&2
-  exit 1
-fi
-if ! grep -q 'ai.asymptote.beacon.endpoint' "$FULL_CLEANUP_SCRIPT" ||
-   grep -q 'pkgutil --pkgs' "$FULL_CLEANUP_SCRIPT"; then
-  echo "full cleanup should forget only the known Beacon package receipt" >&2
-  exit 1
-fi
-if ! grep -q 'GCS_FORWARDER_LABEL' "$FULL_CLEANUP_SCRIPT"; then
-  echo "full cleanup should remove the GCS forwarder" >&2
-  exit 1
-fi
-
 FULL_CLEANUP_BIN="$TMP_DIR/full-cleanup-bin"
 FULL_CLEANUP_BEACON="$TMP_DIR/full-cleanup-beacon"
 FULL_CLEANUP_ARGS="$TMP_DIR/full-cleanup-args"
@@ -165,8 +47,10 @@ case "$1" in
   *) exit 1 ;;
 esac
 STUB
+FULL_CLEANUP_LAUNCHCTL_LOG="$TMP_DIR/full-cleanup-launchctl"
 cat >"$FULL_CLEANUP_BIN/launchctl" <<'STUB'
 #!/bin/sh
+[ -z "${FULL_CLEANUP_LAUNCHCTL_LOG:-}" ] || printf '%s\n' "$*" >>"$FULL_CLEANUP_LAUNCHCTL_LOG"
 exit 1
 STUB
 cat >"$FULL_CLEANUP_BIN/stat" <<'STUB'
@@ -188,6 +72,7 @@ chmod +x "$FULL_CLEANUP_BEACON" "$FULL_CLEANUP_BIN/launchctl" "$FULL_CLEANUP_BIN
 
 PATH="$FULL_CLEANUP_BIN:$PATH" \
 FULL_CLEANUP_ARGS="$FULL_CLEANUP_ARGS" \
+FULL_CLEANUP_LAUNCHCTL_LOG="$FULL_CLEANUP_LAUNCHCTL_LOG" \
 FULL_CLEANUP_RECEIPT="$FULL_CLEANUP_RECEIPT" \
 BEACON_BIN="$FULL_CLEANUP_BEACON" \
 BEACON_KEEP_LOGS=1 \
@@ -212,11 +97,12 @@ if [ "$(cat "$FULL_CLEANUP_RECEIPT")" != "ai.asymptote.beacon.endpoint" ]; then
   echo "full cleanup should forget only the known Beacon package receipt" >&2
   exit 1
 fi
-
-if ! grep -q 'O_NOFOLLOW' "$FULL_CLEANUP_SCRIPT" || grep -q 'chown -R' "$FULL_CLEANUP_SCRIPT"; then
-  echo "full cleanup should reject symlinks and avoid recursive ownership changes" >&2
-  exit 1
-fi
+for label in com.test.beacon.collector com.test.beacon.updater com.test.beacon.s3 com.test.beacon.gcs com.test.beacon.falcon; do
+  if ! grep -qx "bootout system/$label" "$FULL_CLEANUP_LAUNCHCTL_LOG"; then
+    echo "full cleanup should boot out $label" >&2
+    exit 1
+  fi
+done
 
 FULL_CLEANUP_USER_BIN="$TMP_DIR/full-cleanup-user-bin"
 FULL_CLEANUP_HOME="$TMP_DIR/full-cleanup-home"
@@ -288,6 +174,45 @@ fi
 if grep -q '54317' "$FULL_CLEANUP_HOME/.codex/config.toml" ||
    ! grep -q '59999' "$FULL_CLEANUP_HOME/.codex/config.toml"; then
   echo "full cleanup should remove only Codex OTLP blocks matching installed Beacon ports" >&2
+  exit 1
+fi
+
+# Without BEACON_KEEP_LOGS the runtime logs go too, and Claude settings that point at the
+# installed Beacon collector are removed rather than left aimed at a port nothing listens on.
+FULL_CLEANUP_LOCAL_HOME="$TMP_DIR/full-cleanup-local-home"
+FULL_CLEANUP_LOCAL_CONFIG="$TMP_DIR/full-cleanup-local-config"
+FULL_CLEANUP_LOCAL_RUNTIME="$TMP_DIR/full-cleanup-local-runtime"
+mkdir -p "$FULL_CLEANUP_LOCAL_HOME/.claude" "$FULL_CLEANUP_LOCAL_CONFIG/Endpoint" "$FULL_CLEANUP_LOCAL_RUNTIME"
+printf '%s\n' '{"collector":{"grpc_port":54317,"http_port":54318}}' \
+  >"$FULL_CLEANUP_LOCAL_CONFIG/Endpoint/config.json"
+printf '%s\n' '{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:54318/","OTEL_LOGS_EXPORTER":"otlp","UNRELATED":"kept"}}' \
+  >"$FULL_CLEANUP_LOCAL_HOME/.claude/settings.json"
+printf '%s\n' secret-prompt >"$FULL_CLEANUP_LOCAL_RUNTIME/runtime.jsonl"
+PATH="$FULL_CLEANUP_USER_BIN:$FULL_CLEANUP_BIN:$PATH" \
+FULL_CLEANUP_HOME="$FULL_CLEANUP_LOCAL_HOME" \
+FULL_CLEANUP_ARGS="$FULL_CLEANUP_ARGS" \
+FULL_CLEANUP_RECEIPT="$FULL_CLEANUP_RECEIPT" \
+BEACON_BIN="$FULL_CLEANUP_BEACON" \
+COLLECTOR_LABEL=com.test.local.beacon.collector \
+UPDATER_LABEL=com.test.local.beacon.updater \
+S3_FORWARDER_LABEL=com.test.local.beacon.s3 \
+GCS_FORWARDER_LABEL=com.test.local.beacon.gcs \
+FALCON_FORWARDER_LABEL=com.test.local.beacon.falcon \
+RUNTIME_DIR="$FULL_CLEANUP_LOCAL_RUNTIME" \
+SYSTEM_CONFIG_DIR="$FULL_CLEANUP_LOCAL_CONFIG" \
+OPT_BEACON_DIR="$TMP_DIR/full-cleanup-local-opt" \
+"$FULL_CLEANUP_SCRIPT" >/dev/null 2>&1
+if grep -q -e OTEL_EXPORTER_OTLP_ENDPOINT -e CLAUDE_CODE_ENABLE_TELEMETRY -e OTEL_LOGS_EXPORTER "$FULL_CLEANUP_LOCAL_HOME/.claude/settings.json" ||
+   ! grep -q '"UNRELATED": "kept"' "$FULL_CLEANUP_LOCAL_HOME/.claude/settings.json"; then
+  echo "full cleanup should remove only the Claude OTLP settings that point at the installed Beacon collector" >&2
+  exit 1
+fi
+if [ "$(cat "$FULL_CLEANUP_ARGS")" != "endpoint uninstall --system" ]; then
+  echo "full cleanup without BEACON_KEEP_LOGS should run a plain endpoint uninstall, got: $(cat "$FULL_CLEANUP_ARGS")" >&2
+  exit 1
+fi
+if [ -e "$FULL_CLEANUP_LOCAL_RUNTIME" ]; then
+  echo "full cleanup without BEACON_KEEP_LOGS should remove the runtime logs" >&2
   exit 1
 fi
 
@@ -646,18 +571,6 @@ BEACON_LAUNCHDAEMONS_DIR="$LAUNCHDAEMONS_DIR" \
 BEACON_NO_START="1" \
 "$ROOT_DIR/packaging/macos/jamf/claude/falcon/install-forwarder.sh" _ _ _ "https://falcon.example/services/collector" "falcon-token" "beacon-source" "json" "beacon-index" "$TMP_DIR/runtime.jsonl,/Users/*/.beacon/endpoint/logs/runtime.jsonl" "end" >/dev/null
 
-if [ ! -f "$FORWARDER_BASE/falcon-vector.toml" ]; then
-  echo "Falcon Vector config was not written" >&2
-  exit 1
-fi
-if [ ! -f "$FORWARDER_BASE/falcon-vector.env" ]; then
-  echo "Falcon Vector env was not written" >&2
-  exit 1
-fi
-if [ ! -f "$LAUNCHDAEMONS_DIR/com.beacon.endpoint.falcon-forwarder.plist" ]; then
-  echo "Falcon Vector plist was not written" >&2
-  exit 1
-fi
 if ! grep -q 'https://falcon.example/services/collector' "$FORWARDER_BASE/falcon-vector.env"; then
   echo "Falcon Vector env missing endpoint" >&2
   exit 1
@@ -747,18 +660,6 @@ AWS_WEB_IDENTITY_TOKEN_FILE="/tmp/test-web-identity-token" \
 AWS_ROLE_ARN="arn:aws:iam::123456789012:role/beacon-demo" \
 "$ROOT_DIR/packaging/macos/jamf/claude/s3/install-forwarder.sh" _ _ _ "beacon-test-bucket" "us-west-2" "beacon/claude/runtime/" "STANDARD_IA" "end" >/dev/null
 
-if [ ! -f "$S3_FORWARDER_BASE/s3-vector.toml" ]; then
-  echo "S3 Vector config was not written" >&2
-  exit 1
-fi
-if [ ! -f "$S3_FORWARDER_BASE/s3-vector.env" ]; then
-  echo "S3 Vector env was not written" >&2
-  exit 1
-fi
-if [ ! -f "$S3_LAUNCHDAEMONS_DIR/com.beacon.endpoint.s3-forwarder.plist" ]; then
-  echo "S3 Vector plist was not written" >&2
-  exit 1
-fi
 if [ -L "$BEACON_FORWARDER_LOG_DIR/com.beacon.endpoint.s3-forwarder.err" ]; then
   echo "S3 forwarder installer should remove a symlink planted at its log path" >&2
   exit 1
@@ -918,17 +819,6 @@ case "$(ls -l "$TMP_DIR/gcs-runtime.jsonl" | awk '{print $1}')" in
     ;;
 esac
 
-for path in \
-  "$GCS_FORWARDER_BASE/gcs-vector.toml" \
-  "$GCS_FORWARDER_BASE/gcs-vector.env" \
-  "$GCS_LAUNCHDAEMONS_DIR/com.beacon.endpoint.gcs-forwarder.plist"
-do
-  if [ ! -f "$path" ]; then
-    echo "GCS forwarder output missing: $path" >&2
-    exit 1
-  fi
-done
-
 for expected in \
   'sinks.beacon_runtime_gcs' \
   'sinks.beacon_inventory_gcs' \
@@ -1084,6 +974,11 @@ case "$1" in
     printf '%s\n' stopping >"$FAKE_LAUNCHCTL_STATE"
     ;;
   bootstrap)
+    # launchd refuses to load a job whose previous instance has not finished stopping.
+    if [ "$(cat "$FAKE_LAUNCHCTL_STATE" 2>/dev/null)" = stopping ]; then
+      echo "Bootstrap failed: 5: Input/output error" >&2
+      exit 5
+    fi
     printf '%s\n' running >"$FAKE_LAUNCHCTL_STATE"
     ;;
   print)
@@ -1118,6 +1013,7 @@ chmod +x "$FAKE_LAUNCHCTL_BIN/launchctl"
 
 PATH="$FAKE_LAUNCHCTL_BIN:$PATH" \
 FAKE_LAUNCHCTL_STATE="$FAKE_LAUNCHCTL_STATE" \
+BEACON_FORWARDER_POLL_SECONDS=0 \
 BEACON_VECTOR_BIN="$FAKE_VECTOR" \
 BEACON_GCS_FORWARDER_WRAPPER="$ROOT_DIR/packaging/macos/jamf/claude/gcs/run-forwarder.sh" \
 BEACON_FORWARDER_BASE_DIR="$GCS_LIFECYCLE_BASE" \
@@ -1139,6 +1035,7 @@ if PATH="$FAKE_LAUNCHCTL_BIN:$PATH" \
   FAKE_LAUNCHCTL_STATE="$FAKE_LAUNCHCTL_STATE" \
   FAKE_LAUNCHCTL_CRASH_LOOP=1 \
   BEACON_FORWARDER_START_ATTEMPTS=4 \
+  BEACON_FORWARDER_POLL_SECONDS=0 \
   BEACON_VECTOR_BIN="$FAKE_VECTOR" \
   BEACON_GCS_FORWARDER_WRAPPER="$ROOT_DIR/packaging/macos/jamf/claude/gcs/run-forwarder.sh" \
   BEACON_FORWARDER_BASE_DIR="$GCS_CRASH_BASE" \
@@ -1150,6 +1047,46 @@ then
   echo "GCS installer should reject a crash-looping launchd job" >&2
   exit 1
 fi
+
+# The S3 installer has its own copy of the bootout wait and sustained-start check. It has no poll
+# override, so `sleep` is stubbed out.
+FAKE_SLEEP_BIN="$TMP_DIR/fake-sleep-bin"
+mkdir -p "$FAKE_SLEEP_BIN"
+printf '#!/bin/sh\nexit 0\n' >"$FAKE_SLEEP_BIN/sleep"
+chmod +x "$FAKE_SLEEP_BIN/sleep"
+for case_name in lifecycle crash; do
+  mkdir -p "$TMP_DIR/s3-$case_name-launchdaemons"
+  printf '%s\n' old >"$FAKE_LAUNCHCTL_STATE"
+  rm -f "$FAKE_LAUNCHCTL_STATE.count"
+  crash_loop=0
+  [ "$case_name" = lifecycle ] || crash_loop=1
+  if PATH="$FAKE_SLEEP_BIN:$FAKE_LAUNCHCTL_BIN:$PATH" \
+    FAKE_LAUNCHCTL_STATE="$FAKE_LAUNCHCTL_STATE" \
+    FAKE_LAUNCHCTL_CRASH_LOOP="$crash_loop" \
+    BEACON_FORWARDER_START_ATTEMPTS=4 \
+    BEACON_VECTOR_BIN="$FAKE_VECTOR" \
+    BEACON_S3_FORWARDER_WRAPPER="$ROOT_DIR/packaging/macos/jamf/claude/s3/run-forwarder.sh" \
+    BEACON_FORWARDER_BASE_DIR="$TMP_DIR/s3-$case_name-forwarders" \
+    BEACON_LAUNCHDAEMONS_DIR="$TMP_DIR/s3-$case_name-launchdaemons" \
+    BEACON_RUNTIME_LOG_PATHS="$TMP_DIR/s3-$case_name-runtime.jsonl" \
+    AWS_ACCESS_KEY_ID="test-access-key" \
+    AWS_SECRET_ACCESS_KEY="test-secret-key" \
+    "$ROOT_DIR/packaging/macos/jamf/claude/s3/install-forwarder.sh" _ _ _ "beacon-test-bucket" "us-west-2" "beacon" "STANDARD" "end" >/dev/null 2>&1
+  then
+    s3_status=0
+  else
+    s3_status=$?
+  fi
+  if [ "$case_name" = lifecycle ]; then
+    if [ "$s3_status" -ne 0 ] || [ "$(cat "$FAKE_LAUNCHCTL_STATE")" != "running" ]; then
+      echo "S3 installer should wait for bootout and bootstrap a running service" >&2
+      exit 1
+    fi
+  elif [ "$s3_status" -eq 0 ]; then
+    echo "S3 installer should reject a crash-looping launchd job" >&2
+    exit 1
+  fi
+done
 
 GCS_FAKE_REPAIR="$TMP_DIR/fake-gcs-repair-fails.sh"
 GCS_FAKE_FORWARDER="$TMP_DIR/fake-gcs-forwarder-runs.sh"
@@ -1178,42 +1115,242 @@ if [ ! -f "$GCS_FORWARDER_MARKER" ]; then
   exit 1
 fi
 
+# repair-hooks.sh runs as root against a home the console user controls. Run it with root-only
+# tools stubbed and check what it did. Regression for 96b42be4 (#809): no recursive chown of
+# ~/.beacon, no grant letting the user add entries to the root log directory, stale grants revoked.
+REPAIR_HOOKS_BIN="$TMP_DIR/repair-hooks-bin"
+REPAIR_HOOKS_HOME="$TMP_DIR/repair-hooks-home"
+REPAIR_HOOKS_LOGS="$TMP_DIR/repair-hooks-logs"
+REPAIR_HOOKS_CALLS="$TMP_DIR/repair-hooks-calls"
+mkdir -p "$REPAIR_HOOKS_BIN" "$REPAIR_HOOKS_HOME"
+cat >"$REPAIR_HOOKS_BIN/beacon" <<'STUB'
+#!/bin/sh
+printf 'beacon %s\n' "$*" >>"$REPAIR_HOOKS_CALLS"
+case "$*" in
+  "endpoint hooks install"*)
+    mkdir -p "$HOME/.beacon/endpoint/hooks"
+    printf '#!/bin/sh\nexit 0\n' >"$HOME/.beacon/endpoint/hooks/beacon-hooks"
+    /bin/chmod +x "$HOME/.beacon/endpoint/hooks/beacon-hooks"
+    ;;
+esac
+STUB
+printf '#!/bin/sh\nexit 0\n' >"$REPAIR_HOOKS_BIN/beacon-otelcol"
+cat >"$REPAIR_HOOKS_BIN/chown" <<'STUB'
+#!/bin/sh
+printf 'chown %s\n' "$*" >>"$REPAIR_HOOKS_CALLS"
+STUB
+cat >"$REPAIR_HOOKS_BIN/chmod" <<'STUB'
+#!/bin/sh
+case "$1" in
+  +a|-a#) printf 'acl %s\n' "$*" >>"$REPAIR_HOOKS_CALLS" ;;
+  *) exec /bin/chmod "$@" ;;
+esac
+STUB
+# The log directory carries grants an earlier version of the script (and the Jamf guide) left.
+cat >"$REPAIR_HOOKS_BIN/ls" <<'STUB'
+#!/bin/sh
+if [ "$1" = "-led" ]; then
+  printf 'drwxr-xr-x+ 2 root wheel 64 Jan  1 00:00 %s\n' "$2"
+  printf ' 0: user:olduser allow add_file,add_subdirectory\n'
+  printf ' 1: user:hookuser allow list,search,readattr\n'
+  printf ' 2: group:staff allow add_file,delete_child\n'
+  exit 0
+fi
+exec /bin/ls "$@"
+STUB
+cat >"$REPAIR_HOOKS_BIN/stat" <<'STUB'
+#!/bin/sh
+echo hookuser
+STUB
+cat >"$REPAIR_HOOKS_BIN/dscl" <<'STUB'
+#!/bin/sh
+printf 'NFSHomeDirectory: %s\n' "$REPAIR_HOOKS_HOME"
+STUB
+cat >"$REPAIR_HOOKS_BIN/sudo" <<'STUB'
+#!/bin/sh
+printf 'sudo %s\n' "$*" >>"$REPAIR_HOOKS_CALLS"
+[ "$1" = "-u" ] || exit 64
+shift 2
+exec env "$@"
+STUB
+printf '#!/bin/sh\nexit 0\n' >"$REPAIR_HOOKS_BIN/launchctl"
+chmod +x "$REPAIR_HOOKS_BIN"/*
+run_repair_hooks() {
+  PATH="$REPAIR_HOOKS_BIN:$PATH" \
+  REPAIR_HOOKS_CALLS="$REPAIR_HOOKS_CALLS" \
+  REPAIR_HOOKS_HOME="$REPAIR_HOOKS_HOME" \
+  BEACON_BIN="$REPAIR_HOOKS_BIN/beacon" \
+  BEACON_COLLECTOR="$REPAIR_HOOKS_BIN/beacon-otelcol" \
+  BEACON_RUNTIME_LOG="$REPAIR_HOOKS_LOGS/runtime.jsonl" \
+  bash "$ROOT_DIR/packaging/macos/jamf/claude/common/repair-hooks.sh" >/dev/null 2>&1
+}
+run_repair_hooks || {
+  echo "repair-hooks should succeed with a console user" >&2
+  exit 1
+}
+for entry in runtime.jsonl:666 runtime.jsonl.lock:666 inventory_state.jsonl:644 inventory_state.jsonl.lock:644 inventory-state.json:644 inventory-state.json.lock:644; do
+  file="$REPAIR_HOOKS_LOGS/${entry%%:*}"
+  if [ ! -f "$file" ] || [ "$(stat -f %Lp "$file" 2>/dev/null || stat -c %a "$file")" != "${entry##*:}" ]; then
+    echo "repair-hooks should prepare $file with mode ${entry##*:}" >&2
+    exit 1
+  fi
+done
+if grep -q -e '^chown -R' -e "^chown .*$REPAIR_HOOKS_HOME" "$REPAIR_HOOKS_CALLS"; then
+  echo "repair-hooks must not chown anything in the user's home as root" >&2
+  exit 1
+fi
+if [ "$(grep '^acl -a#' "$REPAIR_HOOKS_CALLS")" != "$(printf 'acl -a# 2 %s\nacl -a# 0 %s' "$REPAIR_HOOKS_LOGS" "$REPAIR_HOOKS_LOGS")" ]; then
+  echo "repair-hooks should revoke every entry-adding grant on the log directory, highest index first" >&2
+  exit 1
+fi
+if grep '^acl +a' "$REPAIR_HOOKS_CALLS" | grep -q -e "$REPAIR_HOOKS_LOGS\$" -e add_file -e delete_child -e add_subdirectory; then
+  echo "repair-hooks must not let the console user add entries to the root log directory" >&2
+  exit 1
+fi
+if ! grep -qx "sudo -u hookuser mkdir -p $REPAIR_HOOKS_HOME/.beacon/endpoint/hooks" "$REPAIR_HOOKS_CALLS" ||
+   [ ! -x "$REPAIR_HOOKS_HOME/.beacon/endpoint/hooks/beacon-hooks" ]; then
+  echo "repair-hooks should create the hook directory as the console user and install hooks there" >&2
+  exit 1
+fi
+# A ~/.beacon the user turned into a symlink is refused, not followed as root.
+REPAIR_HOOKS_VICTIM="$TMP_DIR/repair-hooks-victim"
+mkdir -p "$REPAIR_HOOKS_VICTIM"
+rm -rf "$REPAIR_HOOKS_HOME/.beacon"
+ln -s "$REPAIR_HOOKS_VICTIM" "$REPAIR_HOOKS_HOME/.beacon"
+if run_repair_hooks; then
+  echo "repair-hooks should refuse a symlinked ~/.beacon" >&2
+  exit 1
+fi
+if [ -n "$(/bin/ls -A "$REPAIR_HOOKS_VICTIM")" ]; then
+  echo "repair-hooks wrote through a symlinked ~/.beacon" >&2
+  exit 1
+fi
+
+# postinstall restores the optional forwarders a customer already runs (74c24bb5). It names fixed
+# system paths, so a copy with those paths redirected into the temp dir runs against a fake launchd.
+POSTINSTALL_ROOT="$TMP_DIR/postinstall"
+POSTINSTALL_BIN="$POSTINSTALL_ROOT/bin"
+POSTINSTALL_DAEMONS="$POSTINSTALL_ROOT/LaunchDaemons"
+POSTINSTALL_STATE="$POSTINSTALL_ROOT/state"
+POSTINSTALL_LAUNCHCTL_LOG="$POSTINSTALL_ROOT/launchctl.log"
+POSTINSTALL_BEACON_LOG="$POSTINSTALL_ROOT/beacon.log"
+mkdir -p "$POSTINSTALL_BIN" "$POSTINSTALL_DAEMONS"
+sed -e "s#/opt/beacon/scripts/install-endpoint.sh#$POSTINSTALL_BIN/install-endpoint.sh#g" \
+  -e "s#/Library/LaunchDaemons/#$POSTINSTALL_DAEMONS/#g" \
+  "$ROOT_DIR/packaging/macos/scripts/postinstall" >"$POSTINSTALL_ROOT/postinstall"
+if grep -q -e '/opt/beacon/scripts/' -e '/Library/LaunchDaemons/' "$POSTINSTALL_ROOT/postinstall"; then
+  echo "the postinstall test no longer redirects every system path postinstall uses" >&2
+  exit 1
+fi
+cat >"$POSTINSTALL_BIN/install-endpoint.sh" <<'STUB'
+#!/bin/sh
+printf 'install-endpoint no_start=%s\n' "$BEACON_NO_START" >>"$POSTINSTALL_BEACON_LOG"
+STUB
+cat >"$POSTINSTALL_BIN/beacon" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" >>"$POSTINSTALL_BEACON_LOG"
+STUB
+# State per label: running, or waiting (loaded but not running). No file means not loaded.
+cat >"$POSTINSTALL_BIN/launchctl" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" >>"$POSTINSTALL_LAUNCHCTL_LOG"
+label_of() { basename "${1#system/}" .plist; }
+case "$1" in
+  print)
+    state="$POSTINSTALL_STATE/$(label_of "$2")"
+    [ -f "$state" ] || exit 113
+    if [ "$(cat "$state")" = running ]; then
+      echo "state = running"
+      echo "pid = 4242"
+    else
+      echo "state = waiting"
+    fi
+    ;;
+  kickstart) ;;
+  bootout) rm -f "$POSTINSTALL_STATE/$(label_of "$2")" ;;
+  bootstrap)
+    label="$(label_of "$3")"
+    if [ -f "$POSTINSTALL_STATE/$label" ]; then
+      echo "Bootstrap failed: 5: Input/output error" >&2
+      exit 5
+    fi
+    case " ${POSTINSTALL_NEVER_RUNS:-} " in
+      *" $label "*) echo waiting >"$POSTINSTALL_STATE/$label" ;;
+      *) echo running >"$POSTINSTALL_STATE/$label" ;;
+    esac
+    ;;
+  *) exit 1 ;;
+esac
+STUB
+printf '#!/bin/sh\nexit 0\n' >"$POSTINSTALL_BIN/sleep"
+chmod +x "$POSTINSTALL_BIN"/* "$POSTINSTALL_ROOT/postinstall"
+run_postinstall() {
+  PATH="$POSTINSTALL_BIN:$PATH" \
+  POSTINSTALL_STATE="$POSTINSTALL_STATE" \
+  POSTINSTALL_NEVER_RUNS="${1:-}" \
+  POSTINSTALL_LAUNCHCTL_LOG="$POSTINSTALL_LAUNCHCTL_LOG" \
+  POSTINSTALL_BEACON_LOG="$POSTINSTALL_BEACON_LOG" \
+  BEACON_BIN="$POSTINSTALL_BIN/beacon" \
+  "$POSTINSTALL_ROOT/postinstall" >/dev/null 2>"$POSTINSTALL_ROOT/stderr"
+}
+
+# An S3 forwarder that is running gets restarted in place; a GCS forwarder launchd still has loaded
+# but not running is booted out and bootstrapped again; Falcon, never installed, is left alone.
+mkdir -p "$POSTINSTALL_STATE"
+touch "$POSTINSTALL_DAEMONS/com.beacon.endpoint.s3-forwarder.plist" "$POSTINSTALL_DAEMONS/com.beacon.endpoint.gcs-forwarder.plist"
+echo running >"$POSTINSTALL_STATE/com.beacon.endpoint.s3-forwarder"
+echo waiting >"$POSTINSTALL_STATE/com.beacon.endpoint.gcs-forwarder"
+run_postinstall || {
+  echo "postinstall should succeed when every installed forwarder comes back: $(cat "$POSTINSTALL_ROOT/stderr")" >&2
+  exit 1
+}
+if ! grep -qx 'kickstart -k system/com.beacon.endpoint.s3-forwarder' "$POSTINSTALL_LAUNCHCTL_LOG"; then
+  echo "postinstall should kickstart a running forwarder" >&2
+  exit 1
+fi
+if ! grep -qx 'bootout system/com.beacon.endpoint.gcs-forwarder' "$POSTINSTALL_LAUNCHCTL_LOG" ||
+   [ "$(cat "$POSTINSTALL_STATE/com.beacon.endpoint.gcs-forwarder")" != running ]; then
+  echo "postinstall should boot out and restart a loaded-but-stuck forwarder" >&2
+  exit 1
+fi
+if ! grep -q 'launchctl bootstrap failed for com.beacon.endpoint.gcs-forwarder: Bootstrap failed: 5' "$POSTINSTALL_ROOT/stderr"; then
+  echo "postinstall should report launchctl's bootstrap error" >&2
+  exit 1
+fi
+if grep -q falcon-forwarder "$POSTINSTALL_LAUNCHCTL_LOG"; then
+  echo "postinstall should not touch a forwarder that was never installed" >&2
+  exit 1
+fi
+for expected in \
+  'install-endpoint no_start=1' \
+  'endpoint user-config repair-installed --system --harness claude,codex' \
+  'endpoint update install-daemon' \
+  'endpoint inventory install-daemon --system' \
+  'endpoint asymptote reconcile --system'
+do
+  if ! grep -qxF "$expected" "$POSTINSTALL_BEACON_LOG"; then
+    echo "postinstall should run: $expected" >&2
+    exit 1
+  fi
+done
+
+# A forwarder that never comes back fails the install loudly instead of leaving it stopped.
+rm -rf "$POSTINSTALL_STATE" "$POSTINSTALL_DAEMONS"/*.plist
+mkdir -p "$POSTINSTALL_STATE"
+touch "$POSTINSTALL_DAEMONS/com.beacon.endpoint.falcon-forwarder.plist"
+if run_postinstall com.beacon.endpoint.falcon-forwarder; then
+  echo "postinstall should fail when an installed forwarder cannot be restored" >&2
+  exit 1
+fi
+if ! grep -q 'could not restore existing forwarder com.beacon.endpoint.falcon-forwarder' "$POSTINSTALL_ROOT/stderr"; then
+  echo "postinstall should name the forwarder it could not restore" >&2
+  exit 1
+fi
+
 # Safari app-wrapper helper and MDM declaration (packaging/macos/safari). Runs on
 # Linux too: the packager and uname are faked.
 sh "$ROOT_DIR/packaging/macos/safari/test-safari-packaging.sh"
 
-# Fleet osquery files (packaging/macos/fleet) and the Fleet admin helper
-# (examples/fleet). A Fleet policy passes whenever its query returns a row, so a
-# policy must return nothing on an unhealthy host and must not aggregate.
-FLEET_HELPER="$ROOT_DIR/examples/fleet/configure-beacon-macos-s3.sh"
-bash -n "$FLEET_HELPER"
-for sql in "$ROOT_DIR"/packaging/macos/fleet/queries/*.sql "$ROOT_DIR"/packaging/macos/fleet/policies/*.sql; do
-  if grep -Eiq '(^|[^a-z_])pid([^a-z_]|$)' "$sql"; then
-    echo "$sql reads pid; osquery's launchd table has no pid column" >&2
-    exit 1
-  fi
-done
-for sql in "$ROOT_DIR"/packaging/macos/fleet/policies/*.sql; do
-  if grep -Eiq 'count[[:space:]]*\(' "$sql"; then
-    echo "$sql aggregates, so it returns a row on every host and the policy always passes" >&2
-    exit 1
-  fi
-  if ! head -n 1 "$sql" | grep -q '^SELECT 1'; then
-    echo "$sql should start with SELECT 1 and return a row only when the host is healthy" >&2
-    exit 1
-  fi
-  if ! grep -q "cpu_type LIKE 'arm64%'" "$sql"; then
-    echo "$sql should pass on Intel Macs, where the Apple Silicon package does not apply" >&2
-    exit 1
-  fi
-done
-if grep -q 'automatic_install=' "$FLEET_HELPER"; then
-  echo "the Fleet helper should not use Fleet's automatic install; its .pkg policy never passes" >&2
-  exit 1
-fi
-if grep -q 'query=${SOFTWARE_QUERY}' "$FLEET_HELPER"; then
-  echo "the Fleet helper should find the Beacon title by bundle identifier, not by name" >&2
-  exit 1
-fi
+# Fleet osquery files (packaging/macos/fleet) and the Fleet admin helper (examples/fleet).
 sh "$ROOT_DIR/examples/fleet/test/test-fleet-sql.sh"
 sh "$ROOT_DIR/examples/fleet/test/test-configure-beacon-macos-s3.sh"

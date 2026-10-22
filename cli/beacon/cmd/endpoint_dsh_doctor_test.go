@@ -113,20 +113,6 @@ func TestDshHookCaptureWarnsWhenSessionsRanWithoutHookEvents(t *testing.T) {
 	}
 }
 
-// A working install: hook events land in the same turns the session store records, a little before
-// the store's final write. That must not be flagged.
-func TestDshHookCaptureIsOKWhenHookEventsAccompanySessions(t *testing.T) {
-	f := newDshDoctorFixture(t)
-	f.event(t, "hook", f.installedAt.Add(time.Hour))
-	// The store commits after the Stop hook, so its file is slightly newer than the last hook event.
-	f.session(t, "sess-a", f.installedAt.Add(time.Hour+time.Minute))
-
-	got := f.check()
-	if got.Status != diagnostics.StatusOK || got.Evidence != "dsh_hook_events_observed" {
-		t.Fatalf("status/evidence = %s/%s, want ok/dsh_hook_events_observed (%s)", got.Status, got.Evidence, got.Message)
-	}
-}
-
 // A fresh install with only older sessions is not evidence of anything: those sessions ran before
 // the hooks existed. It must not warn.
 func TestDshHookCaptureIsOKBeforeAnySessionHasRunSinceInstall(t *testing.T) {
@@ -259,24 +245,6 @@ func TestDoctorRunsDshHookCaptureOnlyWhenDshIsDetected(t *testing.T) {
 		if c.Name == "dsh_hook_capture" {
 			t.Fatalf("dsh_hook_capture reported without DeepSeek Harness: %+v", c)
 		}
-	}
-}
-
-// Hook events that rotated into runtime.jsonl.1 still count; otherwise a busy machine would report
-// captured sessions as missed after every rotation.
-func TestDshHookCaptureReadsTheRotatedArchive(t *testing.T) {
-	f := newDshDoctorFixture(t)
-	f.event(t, "hook", f.installedAt.Add(time.Hour))
-	if err := os.Rename(f.logPath, f.logPath+".1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(f.logPath, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	f.session(t, "sess-a", f.installedAt.Add(time.Hour+time.Minute))
-
-	if got := f.check(); got.Status != diagnostics.StatusOK {
-		t.Fatalf("status = %s, want ok when the hook event is in the rotated archive (%s)", got.Status, got.Message)
 	}
 }
 

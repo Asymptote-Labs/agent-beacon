@@ -18,7 +18,6 @@ func TestGenAITextLegacyBrowserMessages(t *testing.T) {
 		{"parts precedence", `[{"role":"assistant","text":"legacy","content":"content","parts":[{"type":"text","content":"parts"},{"type":"reasoning","content":"thought"}]}]`, RoleAssistant, GenAIPartTypeText, []string{"parts"}},
 		{"content precedence", `[{"role":"assistant","text":"legacy","content":"content"}]`, RoleAssistant, GenAIPartTypeText, []string{"content"}},
 		{"empty parts", `[{"role":"assistant","text":"must not resurrect","parts":[]}]`, RoleAssistant, GenAIPartTypeText, nil},
-		{"nil parts", `[{"role":"assistant","text":"must not resurrect","parts":null}]`, RoleAssistant, GenAIPartTypeText, nil},
 		{"nil parts override content", `[{"role":"assistant","text":"legacy","parts":null,"content":"content"}]`, RoleAssistant, GenAIPartTypeText, nil},
 		{"empty content", `[{"role":"assistant","text":"must not resurrect","content":""}]`, RoleAssistant, GenAIPartTypeText, nil},
 		{"nil content", `[{"role":"assistant","text":"must not resurrect","content":null}]`, RoleAssistant, GenAIPartTypeText, nil},

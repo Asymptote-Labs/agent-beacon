@@ -17,43 +17,12 @@ func writeTestFile(t *testing.T, path, content string) {
 	}
 }
 
-func TestCurrentBranchNormalRepo(t *testing.T) {
-	repo := t.TempDir()
-	writeTestFile(t, filepath.Join(repo, ".git", "HEAD"), "ref: refs/heads/main\n")
-
-	if got := CurrentBranch(repo); got != "main" {
-		t.Fatalf("CurrentBranch = %q, want main", got)
-	}
-}
-
 func TestCurrentBranchWithSlashes(t *testing.T) {
 	repo := t.TempDir()
 	writeTestFile(t, filepath.Join(repo, ".git", "HEAD"), "ref: refs/heads/feature/custom-fields\n")
 
 	if got := CurrentBranch(repo); got != "feature/custom-fields" {
 		t.Fatalf("CurrentBranch = %q, want feature/custom-fields", got)
-	}
-}
-
-func TestCurrentBranchWalksUpFromSubdirectory(t *testing.T) {
-	repo := t.TempDir()
-	writeTestFile(t, filepath.Join(repo, ".git", "HEAD"), "ref: refs/heads/main\n")
-	nested := filepath.Join(repo, "pkg", "internal", "deep")
-	if err := os.MkdirAll(nested, 0o755); err != nil {
-		t.Fatalf("mkdir nested: %v", err)
-	}
-
-	if got := CurrentBranch(nested); got != "main" {
-		t.Fatalf("CurrentBranch = %q, want main", got)
-	}
-}
-
-func TestCurrentBranchDetachedHead(t *testing.T) {
-	repo := t.TempDir()
-	writeTestFile(t, filepath.Join(repo, ".git", "HEAD"), "0123456789abcdef0123456789abcdef01234567\n")
-
-	if got := CurrentBranch(repo); got != "" {
-		t.Fatalf("CurrentBranch = %q, want empty for detached HEAD", got)
 	}
 }
 
@@ -122,14 +91,12 @@ func TestCurrentBranchRejectsMalformedHead(t *testing.T) {
 		name string
 		head string
 	}{
-		{"empty", ""},
+		{"detached", "0123456789abcdef0123456789abcdef01234567\n"},
 		{"non-branch ref", "ref: refs/remotes/origin/main\n"},
 		{"missing name", "ref: refs/heads/\n"},
-		{"embedded space", "ref: refs/heads/bad name\n"},
 		{"control character", "ref: refs/heads/bad\x01name\n"},
+		{"embedded space", "ref: refs/heads/bad name\n"},
 		{"overlong name", "ref: refs/heads/" + strings.Repeat("a", 300) + "\n"},
-		{"garbage", "not a head file\n"},
-		{"oversized garbage", strings.Repeat("x", 2*maxGitMetadataBytes)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

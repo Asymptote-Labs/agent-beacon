@@ -209,100 +209,6 @@ func TestInventoryJobEnvRecordsHermesHomeForUserInstalls(t *testing.T) {
 	}
 }
 
-// Cline uses a trimmed, non-empty CLINE_DIR as is, so the job gets its absolute form whenever it is
-// set. It is recorded beside CODEX_HOME, not instead of it.
-func TestInventoryJobEnvRecordsClineDirForUserInstalls(t *testing.T) {
-	work := t.TempDir()
-	t.Chdir(work)
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	codexHome := filepath.Join(work, "codex-home")
-	if err := os.Mkdir(codexHome, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("CODEX_HOME", codexHome)
-	t.Setenv("CLINE_DIR", " cline-state ")
-	t.Setenv("GEMINI_CLI_HOME", "")
-	t.Setenv("HERMES_HOME", "")
-	t.Setenv("HERMES_DATA_DIR_SUFFIX", "")
-
-	env := inventoryJobEnv(true)
-	if want := filepath.Join(cwd, "cline-state"); env["CLINE_DIR"] != want {
-		t.Fatalf("CLINE_DIR = %q, want %q", env["CLINE_DIR"], want)
-	}
-	if env["CODEX_HOME"] == "" || len(env) != 2 {
-		t.Fatalf("env = %v, want both CODEX_HOME and CLINE_DIR", env)
-	}
-	if got := inventoryJobEnv(false); got != nil {
-		t.Fatalf("system mode env = %v, want none", got)
-	}
-}
-
-// Gemini CLI uses a non-empty GEMINI_CLI_HOME as is, without requiring it to exist, so the job gets
-// its absolute form whenever it is set. It is recorded beside CODEX_HOME, not instead of it.
-func TestInventoryJobEnvRecordsGeminiCLIHomeForUserInstalls(t *testing.T) {
-	work := t.TempDir()
-	t.Chdir(work)
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	codexHome := filepath.Join(work, "codex-home")
-	if err := os.Mkdir(codexHome, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("CODEX_HOME", codexHome)
-	t.Setenv("CLINE_DIR", "")
-	t.Setenv("GEMINI_CLI_HOME", "gemini-home")
-	t.Setenv("HERMES_HOME", "")
-	t.Setenv("HERMES_DATA_DIR_SUFFIX", "")
-
-	env := inventoryJobEnv(true)
-	if want := filepath.Join(cwd, "gemini-home"); env["GEMINI_CLI_HOME"] != want {
-		t.Fatalf("GEMINI_CLI_HOME = %q, want %q", env["GEMINI_CLI_HOME"], want)
-	}
-	if env["CODEX_HOME"] == "" || len(env) != 2 {
-		t.Fatalf("env = %v, want both CODEX_HOME and GEMINI_CLI_HOME", env)
-	}
-	if got := inventoryJobEnv(false); got != nil {
-		t.Fatalf("system mode env = %v, want none", got)
-	}
-}
-
-// Claude Code uses a trimmed, non-empty CLAUDE_CONFIG_DIR as is, so the job gets its absolute form
-// whenever it is set. It is recorded beside CODEX_HOME, not instead of it.
-func TestInventoryJobEnvRecordsClaudeConfigDirForUserInstalls(t *testing.T) {
-	work := t.TempDir()
-	t.Chdir(work)
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	codexHome := filepath.Join(work, "codex-home")
-	if err := os.Mkdir(codexHome, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("CODEX_HOME", codexHome)
-	t.Setenv("CLINE_DIR", "")
-	t.Setenv("GEMINI_CLI_HOME", "")
-	t.Setenv("HERMES_HOME", "")
-	t.Setenv("HERMES_DATA_DIR_SUFFIX", "")
-	t.Setenv("CLAUDE_CONFIG_DIR", " claude-alt ")
-
-	env := inventoryJobEnv(true)
-	if want := filepath.Join(cwd, "claude-alt"); env["CLAUDE_CONFIG_DIR"] != want {
-		t.Fatalf("CLAUDE_CONFIG_DIR = %q, want %q", env["CLAUDE_CONFIG_DIR"], want)
-	}
-	if env["CODEX_HOME"] == "" || len(env) != 2 {
-		t.Fatalf("env = %v, want both CODEX_HOME and CLAUDE_CONFIG_DIR", env)
-	}
-	if got := inventoryJobEnv(false); got != nil {
-		t.Fatalf("system mode env = %v, want none", got)
-	}
-}
-
 func TestReconcileInventoryJobWritesWithoutLoadingWhenAsked(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	calls := installFakeInventoryJob(t, true)
@@ -322,11 +228,11 @@ func TestInventoryEnabledFromConfigFileDefaultsToTrue(t *testing.T) {
 		t.Fatal("missing config must mean enabled")
 	}
 	for body, want := range map[string]bool{
-		`{}`:                         true,
-		`{"inventory_heartbeat":{}}`: true,
-		`{"inventory_heartbeat":{"enabled":true}}`:                      true,
-		`{"inventory_heartbeat":{"enabled":false}}`:                     false,
-		`{"inventory_heartbeat":{"enabled":false,"ttl_seconds":86400}}`: false,
+		`{}`: true,
+		// A heartbeat block without "enabled" (e.g. only runtimes) is enabled, not a nil dereference.
+		`{"inventory_heartbeat":{"runtimes":["cursor"]}}`: true,
+		`{"inventory_heartbeat":{"enabled":true}}`:        true,
+		`{"inventory_heartbeat":{"enabled":false}}`:       false,
 		`not json`: true,
 	} {
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
@@ -532,8 +438,9 @@ func TestRepairTeardownKeepsScriptForwarders(t *testing.T) {
 	}
 }
 
-// The scheduled job starts without the installing shell's environment, so every other variable the
-// inventory scan follows to a runtime's user directory is recorded too. A relative path is made
+// The scheduled job starts without the installing shell's environment, so every variable the
+// inventory scan follows to a runtime's user directory is recorded too: CLINE_DIR, GEMINI_CLI_HOME
+// and CLAUDE_CONFIG_DIR (Cline and Claude Code trim theirs), and the rest. A relative path is made
 // absolute against the install's working directory; an absolute or `~` path, and a name (Oh My
 // Pi's config directory and profile), are recorded exactly as set, since the job resolves them
 // against the same HOME. A variable set to an empty value is recorded, because OMP_PROFILE and
@@ -545,7 +452,7 @@ func TestInventoryJobEnvRecordsTheOtherInventoryRootVariables(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"CODEX_HOME", "HERMES_HOME", "HERMES_DATA_DIR_SUFFIX", "CLINE_DIR", "GEMINI_CLI_HOME", "CLAUDE_CONFIG_DIR"} {
+	for _, name := range []string{"CODEX_HOME", "HERMES_HOME", "HERMES_DATA_DIR_SUFFIX"} {
 		t.Setenv(name, "")
 	}
 	set := map[string]string{
@@ -558,6 +465,9 @@ func TestInventoryJobEnvRecordsTheOtherInventoryRootVariables(t *testing.T) {
 		"OMP_PROFILE":                  "",
 		"PI_PROFILE":                   "work",
 		"QWEN_HOME":                    "qwen-alt",
+		"CLINE_DIR":                    " cline-state ",
+		"GEMINI_CLI_HOME":              "gemini-home",
+		"CLAUDE_CONFIG_DIR":            " claude-alt ",
 	}
 	for name, value := range set {
 		t.Setenv(name, value)
@@ -572,6 +482,9 @@ func TestInventoryJobEnvRecordsTheOtherInventoryRootVariables(t *testing.T) {
 		"OMP_PROFILE":                  "",
 		"PI_PROFILE":                   "work",
 		"QWEN_HOME":                    filepath.Join(cwd, "qwen-alt"),
+		"CLINE_DIR":                    filepath.Join(cwd, "cline-state"),
+		"GEMINI_CLI_HOME":              filepath.Join(cwd, "gemini-home"),
+		"CLAUDE_CONFIG_DIR":            filepath.Join(cwd, "claude-alt"),
 	}
 	if runtime.GOOS == "windows" {
 		// Not absolute without a drive letter, so it is resolved like any relative path.

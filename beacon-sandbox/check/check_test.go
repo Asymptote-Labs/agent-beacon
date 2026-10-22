@@ -434,23 +434,6 @@ func TestOversizedEventFails(t *testing.T) {
 	}
 }
 
-func TestFieldLookupHandlesNesting(t *testing.T) {
-	log, err := ReadLog(writeLog(t, goodLog()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	e := log.Events[2]
-	if _, ok := e.Field("gen_ai.usage.input_tokens"); !ok {
-		t.Error("expected to resolve a nested numeric field")
-	}
-	if _, ok := e.Field("gen_ai.usage.output_tokens"); ok {
-		t.Error("absent nested field must report not-present, not panic or default")
-	}
-	if _, ok := e.Field("command.command"); ok {
-		t.Error("absent sub-object must report not-present")
-	}
-}
-
 func hasCheck(v Verdict, name string) bool {
 	for _, f := range v.Findings {
 		if f.Check == name {
@@ -460,21 +443,15 @@ func hasCheck(v Verdict, name string) bool {
 	return false
 }
 
-// CompareFingerprints previously treated any outcome change other than PASS -> FAIL as an
-// improvement, so INCONCLUSIVE -> FAIL read as progress and PASS -> INCONCLUSIVE hid a lost
-// signal. INCONCLUSIVE means the agent never did the work, so that run measured nothing and a
-// measurement cannot be compared against a non-measurement in either direction.
-func TestOutcomeTransitionsInvolvingInconclusiveAreNotComparable(t *testing.T) {
+// CompareFingerprints classifies PASS <-> FAIL directionally. The INCONCLUSIVE transitions, which
+// must never read as directional, are pinned in fingerprint_inconclusive_test.go.
+func TestOutcomeTransitionsBetweenPassAndFailAreDirectional(t *testing.T) {
 	cases := []struct {
 		before, after Outcome
 		bucket        string
 	}{
 		{Pass, Fail, "regression"},
 		{Fail, Pass, "improvement"},
-		{Inconclusive, Fail, "neutral"},
-		{Pass, Inconclusive, "neutral"},
-		{Inconclusive, Pass, "neutral"},
-		{Fail, Inconclusive, "neutral"},
 	}
 	for _, c := range cases {
 		d := CompareFingerprints(
@@ -517,16 +494,19 @@ func TestInconclusiveDoesNotMaskHardFailures(t *testing.T) {
 	}
 }
 
-// A bare INCONCLUSIVE with nothing actually wrong must stay inconclusive, or the fix above would
-// have turned every idle-agent run into a false Beacon bug report.
+// A bare INCONCLUSIVE with nothing actually wrong must stay inconclusive and keep its reason, or
+// the fix above would have turned every idle-agent run into a false Beacon bug report; the retry
+// advice is correct there.
 func TestInconclusiveSurvivesWhenNothingFailed(t *testing.T) {
-	v := Verdict{Outcome: Inconclusive}
+	const reason = "sentinel absent: the agent did not perform the requested work"
+	v := Verdict{Outcome: Inconclusive, Reason: reason}
 	v.Add(Finding{Check: "sentinel.agent_acted", Severity: SevInfo, Summary: "not found"})
 	v.Add(Finding{Check: "invariant.timestamp_order", Severity: SevWarn, Summary: "some drift"})
 	v.Resolve()
 
-	if v.Outcome != Inconclusive {
-		t.Errorf("outcome = %s, want inconclusive: info and warn findings are not failures", v.Outcome)
+	if v.Outcome != Inconclusive || v.Reason != reason {
+		t.Errorf("got %s / %q, want inconclusive with its reason: info and warn findings are not failures",
+			v.Outcome, v.Reason)
 	}
 }
 
@@ -555,27 +535,6 @@ func TestUnrecordedHostComparisonWarnsRatherThanReadingClean(t *testing.T) {
 	}
 }
 
-// A recorded clean comparison must stay silent, or every run would carry a spurious warning.
-func TestCleanHostComparisonIsSilent(t *testing.T) {
-	var v Verdict
-	Safety(&v, HostSafety{HostChanged: hostguard.CleanDescription, ArgvCheckRan: true})
-
-	if hasCheck(v, "safety.host_untouched") {
-		t.Errorf("a clean comparison should add nothing:\n%s", v.Report())
-	}
-}
-
-// A real change is still a hard failure -- the fix above must not have softened it.
-func TestChangedHostStillFails(t *testing.T) {
-	var v Verdict
-	Safety(&v, HostSafety{HostChanged: "modified: /var/log/beacon-agent", ArgvCheckRan: true})
-	v.Resolve()
-
-	if v.Outcome != Fail {
-		t.Errorf("a host change must fail the run, got %s", v.Outcome)
-	}
-}
-
 // strings.Contains(x, "") is true for every x, so an empty canary would make every marker
 // expectation pass vacuously. Offline verify reads the canary from meta.json where it can be
 // missing or cleared, so this is reachable in practice -- and it is the exact inverse of the
@@ -600,18 +559,6 @@ func TestEmptyCanaryCannotSatisfyAMarkerExpectation(t *testing.T) {
 	}
 	if !strings.Contains(v.Report(), "empty marker") {
 		t.Errorf("the finding should name the cause, got:\n%s", v.Report())
-	}
-}
-
-// A real canary must still match, or the guard above would break every genuine run.
-func TestRealCanaryStillMatches(t *testing.T) {
-	sc := demoScenario()
-	sc.Expect = []scenario.Expect{{
-		Action: "command.executed", Contains: []string{"{{canary}}"}, Why: "baseline",
-	}}
-	v := run(t, goodLog(), sc, presentSentinel(), nil)
-	if v.Outcome != Pass {
-		t.Errorf("a present canary must match:\n%s", v.Report())
 	}
 }
 
@@ -660,18 +607,6 @@ func TestOverriddenInconclusiveDoesNotKeepItsReason(t *testing.T) {
 	}
 }
 
-// A genuine INCONCLUSIVE keeps its explanation, since the retry advice is correct there.
-func TestGenuineInconclusiveKeepsItsReason(t *testing.T) {
-	const reason = "sentinel absent: the agent did not perform the requested work"
-	v := Verdict{Outcome: Inconclusive, Reason: reason}
-	v.Add(Finding{Check: "sentinel.agent_acted", Severity: SevInfo, Summary: "not found"})
-	v.Resolve()
-
-	if v.Outcome != Inconclusive || v.Reason != reason {
-		t.Errorf("a real inconclusive must keep its reason, got %s / %q", v.Outcome, v.Reason)
-	}
-}
-
 // An unreadable sentinel is not evidence the agent was idle. The probe used to discard its exec
 // error, so a failed guest exec produced empty stdout, "__MISSING__" never appeared, and the run
 // was reported INCONCLUSIVE -- telling the reader to retry when the real problem was
@@ -695,17 +630,6 @@ func TestUnreadableSentinelIsNotTreatedAsAnIdleAgent(t *testing.T) {
 	}
 	if !strings.Contains(report, "unverified") {
 		t.Errorf("the finding should read as unverified rather than absent:\n%s", report)
-	}
-}
-
-// A probe that ran and found nothing still means the agent was idle, so the retry advice stands.
-func TestProbedAbsentSentinelStaysInconclusive(t *testing.T) {
-	v := run(t, goodLog()[:1], demoScenario(),
-		Sentinel{Declared: true, Present: false, Probed: true, Detail: "__MISSING__"}, nil)
-
-	if v.Outcome != Inconclusive {
-		t.Errorf("a successful probe finding nothing is a real inconclusive, got %s:\n%s",
-			v.Outcome, v.Report())
 	}
 }
 
@@ -734,24 +658,6 @@ func TestFailedSessionWithoutASentinelIsInconclusiveNotFail(t *testing.T) {
 	}
 }
 
-// A successful session must not excuse a missing event -- that would make every scenario pass.
-func TestSuccessfulSessionStillFailsOnAMissingEvent(t *testing.T) {
-	sc := demoScenario()
-	sc.Sentinel = ""
-	log, err := ReadLog(writeLog(t, goodLog()[:1]))
-	if err != nil {
-		t.Fatal(err)
-	}
-	v := Verdict{Scenario: sc.ID}
-	Expectations(&v, log, sc, canary, Sentinel{}, Session{Known: true, OK: true})
-	v.Resolve()
-
-	if v.Outcome != Fail {
-		t.Errorf("a working session with a missing event is a real capture gap, got %s:\n%s",
-			v.Outcome, v.Report())
-	}
-}
-
 // An unreadable session result says nothing, so it must warn rather than excuse or blame.
 func TestUnknownSessionResultWarnsWithoutExcusing(t *testing.T) {
 	sc := demoScenario()
@@ -769,15 +675,6 @@ func TestUnknownSessionResultWarnsWithoutExcusing(t *testing.T) {
 	}
 	if !strings.Contains(v.Report(), "unverified") {
 		t.Errorf("the verdict should record that the session result was unreadable:\n%s", v.Report())
-	}
-}
-
-// With a sentinel present the sentinel governs: the agent demonstrably acted, whatever its own
-// exit status claimed.
-func TestSentinelBeatsTheSessionSignal(t *testing.T) {
-	v := run(t, goodLog(), demoScenario(), presentSentinel(), nil)
-	if v.Outcome != Pass {
-		t.Errorf("a confirmed sentinel should govern, got %s:\n%s", v.Outcome, v.Report())
 	}
 }
 

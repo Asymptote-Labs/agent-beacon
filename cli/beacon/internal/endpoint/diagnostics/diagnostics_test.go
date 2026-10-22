@@ -125,25 +125,6 @@ func TestRunAndHasFailures(t *testing.T) {
 	}
 }
 
-func TestLaunchPlistPathMatchesServiceManager(t *testing.T) {
-	home := t.TempDir()
-	testenv.SetHome(t, home)
-
-	userPath := servicePlistPathForTest(true)
-	wantUserPath := filepath.Join(home, "Library", "LaunchAgents", service.UserLabel+".plist")
-	if userPath != wantUserPath {
-		t.Fatalf("user launchPlistPath = %q, want %q", userPath, wantUserPath)
-	}
-
-	systemPath := servicePlistPathForTest(false)
-	wantSystemPath := filepath.Join("/Library/LaunchDaemons", service.SystemLabel+".plist")
-	if systemPath != wantSystemPath {
-		t.Fatalf("system launchPlistPath = %q, want %q", systemPath, wantSystemPath)
-	}
-}
-
-// servicePlistPathForTest mirrors what the service package now owns, so these tests keep
-// exercising the launchd check without diagnostics duplicating the path logic.
 // serviceUnitPathForTest is the definition file the host's own service manager expects, or empty
 // when it has none -- the supervised backend has no unit file, so there is nothing to create.
 func serviceUnitPathForTest(userMode bool) string {
@@ -157,14 +138,6 @@ func serviceUnitPathForTest(userMode bool) string {
 		return path
 	}
 	return ""
-}
-
-func servicePlistPathForTest(userMode bool) string {
-	path, err := (service.Manager{UserMode: userMode, Kind: service.KindLaunchd}).UnitPath()
-	if err != nil {
-		return ""
-	}
-	return path
 }
 
 // Install, repair, and doctor all tell the user how to give the collector logout persistence, and

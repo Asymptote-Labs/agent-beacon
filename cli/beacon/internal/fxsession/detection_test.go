@@ -2,10 +2,12 @@ package fxsession
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
@@ -72,6 +74,38 @@ func riskyTurnLine(seq int) string {
 	return frame(seq, 1770000003000, KindHistoryTurnCommitted, payload)
 }
 
+// shippedRules loads and compiles the repository's rule pack once per test binary; compiled rules
+// are read-only, so every scan can share them.
+var shippedRules = func() func(t *testing.T) []*threatrules.CompiledRule {
+	var (
+		once     sync.Once
+		compiled []*threatrules.CompiledRule
+		loadErr  error
+	)
+	return func(t *testing.T) []*threatrules.CompiledRule {
+		t.Helper()
+		once.Do(func() {
+			rules, err := threatrules.LoadDir(filepath.Join(repoRoot(t), "rules"))
+			if err != nil {
+				loadErr = fmt.Errorf("load rule pack: %w", err)
+				return
+			}
+			for _, rule := range rules {
+				c, err := threatrules.Compile(rule)
+				if err != nil {
+					loadErr = fmt.Errorf("compile rule %q: %w", rule.ID, err)
+					return
+				}
+				compiled = append(compiled, c)
+			}
+		})
+		if loadErr != nil {
+			t.Fatal(loadErr)
+		}
+		return compiled
+	}
+}()
+
 // sweepAndScan runs a real sweep over a written fx session and evaluates the repository's rule pack
 // against the runtime log it produced.
 func sweepAndScan(t *testing.T, lines []string) ([]threatrules.Finding, []schema.Event) {
@@ -96,18 +130,7 @@ func sweepAndScan(t *testing.T, lines []string) ([]threatrules.Finding, []schema
 		t.Fatal("the sweep collected nothing, so the scan below would prove nothing")
 	}
 
-	rules, err := threatrules.LoadDir(filepath.Join(repoRoot(t), "rules"))
-	if err != nil {
-		t.Fatalf("load rule pack: %v", err)
-	}
-	compiled := make([]*threatrules.CompiledRule, 0, len(rules))
-	for _, rule := range rules {
-		c, err := threatrules.Compile(rule)
-		if err != nil {
-			t.Fatalf("compile rule %q: %v", rule.ID, err)
-		}
-		compiled = append(compiled, c)
-	}
+	compiled := shippedRules(t)
 
 	// The runtime log is read here rather than through the dashboard's stream reader, which would
 	// import this package back through the harness discovery it owns. One JSON object per line is
@@ -156,12 +179,23 @@ func findingIDs(findings []threatrules.Finding) []string {
 // hook-collected session would. Nothing in the pack was changed for fx; the mapper writes
 // command.command where the rules already look.
 func TestRiskyFxCommandIsDetectedByTheShippedRules(t *testing.T) {
-	findings, _ := sweepAndScan(t, []string{sessionStartedLine(1, "/home/dev/api"), riskyTurnLine(2)})
+	findings, events := sweepAndScan(t, []string{sessionStartedLine(1, "/home/dev/api"), riskyTurnLine(2)})
 
 	if !containsFinding(findings, "curl-pipe-to-shell") {
 		t.Fatalf("an fx `curl | bash` was not detected; findings: %v", findingIDs(findings))
 	}
 	for _, finding := range findings {
+		// Provenance has to survive into the evidence a finding carries, not just into the log. An
+		// analyst reading a detection needs to know Beacon read this after the fact and could not
+		// have blocked it.
+		for _, event := range finding.Events {
+			if event.Harness.CollectionMethod != schema.CollectionMethodPoll {
+				t.Errorf("%s evidence collection method = %q, want poll", finding.RuleID, event.Harness.CollectionMethod)
+			}
+			if event.Event.Fidelity != schema.FidelityObserved {
+				t.Errorf("%s evidence fidelity = %q, want observed", finding.RuleID, event.Event.Fidelity)
+			}
+		}
 		if finding.RuleID != "curl-pipe-to-shell" {
 			continue
 		}
@@ -177,18 +211,11 @@ func TestRiskyFxCommandIsDetectedByTheShippedRules(t *testing.T) {
 		if finding.SessionID != testSessionID {
 			t.Errorf("finding session = %q, want %q", finding.SessionID, testSessionID)
 		}
-		if evidence.Harness.CollectionMethod != schema.CollectionMethodPoll {
-			t.Errorf("evidence collection method = %q, want poll", evidence.Harness.CollectionMethod)
-		}
 	}
-}
 
-// The same claim for a file read. This one is worth its own test because the action and the path
-// come from different places in fx's record -- the action from fx's per-call file evidence, the
-// path from the same -- and a rule matching e.file.path sees nothing if either is dropped.
-func TestFxCredentialFileReadIsDetectedByTheShippedRules(t *testing.T) {
-	findings, events := sweepAndScan(t, []string{sessionStartedLine(1, "/home/dev/api"), riskyTurnLine(2)})
-
+	// The credential read: the action and the path come from different places in fx's record --
+	// the action from fx's per-call file evidence, the path from the same -- and a rule matching
+	// e.file.path sees nothing if either is dropped.
 	var sawRead bool
 	for _, event := range events {
 		if event.Event.Action == "file.read" && event.File != nil && strings.HasSuffix(event.File.Path, ".env") {
@@ -197,28 +224,6 @@ func TestFxCredentialFileReadIsDetectedByTheShippedRules(t *testing.T) {
 	}
 	if !sawRead {
 		t.Fatal("the .env read never reached the runtime log as a file.read with a path")
-	}
-	if len(findings) == 0 {
-		t.Fatal("no rule matched anything in a session that read a credentials file and piped a script to a shell")
-	}
-}
-
-// Provenance has to survive into the evidence a finding carries, not just into the log. An analyst
-// reading a detection needs to know Beacon read this after the fact and could not have blocked it.
-func TestFindingsFromFxCarryPollProvenance(t *testing.T) {
-	findings, _ := sweepAndScan(t, []string{sessionStartedLine(1, "/home/dev/api"), riskyTurnLine(2)})
-	if len(findings) == 0 {
-		t.Fatal("no findings to check")
-	}
-	for _, finding := range findings {
-		for _, event := range finding.Events {
-			if event.Harness.CollectionMethod != schema.CollectionMethodPoll {
-				t.Errorf("%s evidence collection method = %q, want poll", finding.RuleID, event.Harness.CollectionMethod)
-			}
-			if event.Event.Fidelity != schema.FidelityObserved {
-				t.Errorf("%s evidence fidelity = %q, want observed", finding.RuleID, event.Event.Fidelity)
-			}
-		}
 	}
 }
 

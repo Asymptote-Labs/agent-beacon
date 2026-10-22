@@ -130,13 +130,6 @@ type Pack struct {
 	Assets           []Asset
 }
 
-// WithFS returns a copy of the pack reading from fsys instead of p.FS. It lets
-// callers inject a test FS to exercise read-error paths.
-func (p Pack) WithFS(fsys fs.FS) Pack {
-	p.FS = fsys
-	return p
-}
-
 // Read returns the embedded asset at path, wrapping read errors with the label.
 func (p Pack) Read(path string) (string, error) {
 	content, err := ReadFile(p.FS, path)

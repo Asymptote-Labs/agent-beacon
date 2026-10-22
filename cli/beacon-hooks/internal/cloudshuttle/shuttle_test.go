@@ -22,47 +22,6 @@ import (
 	"time"
 )
 
-func TestObjectNameUsesDatePartitionedGzipLayout(t *testing.T) {
-	restore := stubNow(t, time.Date(2026, 7, 12, 20, 17, 3, 0, time.UTC))
-	defer restore()
-	got := ObjectName(Config{
-		Prefix:     "agent-traces/customer=test",
-		Provider:   "claude_code_web",
-		UserID:     "user-1",
-		Repository: "asymptote-labs/agent-beacon",
-		RunID:      "cse_123",
-	})
-	want := "agent-traces/customer=test/runtime/date=2026-07-12/1783887423-claude_code_web-cse_123.jsonl.gz"
-	if got != want {
-		t.Fatalf("ObjectName = %q, want %q", got, want)
-	}
-}
-
-func TestObjectNameUsesCursorCloudProvider(t *testing.T) {
-	restore := stubNow(t, time.Date(2026, 7, 12, 20, 17, 3, 0, time.UTC))
-	defer restore()
-	got := ObjectName(Config{
-		Prefix:   "agent-traces",
-		Provider: "cursor_cloud",
-		UserID:   "user-1",
-		RunID:    "manual-123",
-	})
-	want := "agent-traces/runtime/date=2026-07-12/1783887423-cursor_cloud-manual-123.jsonl.gz"
-	if got != want {
-		t.Fatalf("ObjectName = %q, want %q", got, want)
-	}
-}
-
-func TestUploadNoopsWithoutCredentials(t *testing.T) {
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	if err := os.WriteFile(logPath, []byte("{}\n"), 0644); err != nil {
-		t.Fatalf("write log: %v", err)
-	}
-	if err := Upload(context.Background(), Config{LogPath: logPath, Bucket: "bucket"}, true); err != nil {
-		t.Fatalf("Upload returned error: %v", err)
-	}
-}
-
 func useSandbox(t *testing.T, dir string) {
 	t.Helper()
 	prev := SandboxDir
@@ -124,6 +83,53 @@ func TestMaybeUploadRefusesALogOutsideTheSandbox(t *testing.T) {
 			t.Fatalf("%s: MaybeUpload returned error: %v", key, err)
 		}
 		t.Setenv(key, "")
+	}
+}
+
+// A run with a bucket and a run id but no credentials is the shuttle half-configured, which every
+// Stop and SessionEnd reaches. It must do nothing: no request carrying the runtime log to the
+// storage endpoint unsigned, no error for the hook to log, and no state claiming an upload.
+func TestMaybeUploadWithoutCredentialsSendsNothing(t *testing.T) {
+	for name, env := range map[string]map[string]string{
+		"s3 without keys": {
+			"BEACON_CLOUD_UPLOAD":    "s3",
+			"BEACON_CLOUD_S3_BUCKET": "bucket",
+			"AWS_ACCESS_KEY_ID":      "",
+			"AWS_SECRET_ACCESS_KEY":  "",
+		},
+		"gcs without credentials": {
+			"BEACON_CLOUD_UPLOAD":              "gcs",
+			"BEACON_CLOUD_GCS_BUCKET":          "bucket",
+			"BEACON_CLOUD_GCS_CREDENTIALS_B64": "",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Errorf("unexpected request without credentials: %s %s", r.Method, r.URL)
+			}))
+			defer server.Close()
+			dir := t.TempDir()
+			useSandbox(t, dir)
+			logPath := filepath.Join(dir, "runtime.jsonl")
+			if err := os.WriteFile(logPath, []byte("{\"event\":\"session\"}\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			statePath := filepath.Join(dir, "state.json")
+			t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+			t.Setenv("BEACON_CLOUD_SHUTTLE_STATE", statePath)
+			t.Setenv("BEACON_RUN_ID", "run")
+			t.Setenv("BEACON_CLOUD_S3_ENDPOINT", server.URL)
+			t.Setenv("BEACON_CLOUD_GCS_ENDPOINT", server.URL)
+			for key, value := range env {
+				t.Setenv(key, value)
+			}
+			if err := MaybeUpload(context.Background(), true); err != nil {
+				t.Fatalf("MaybeUpload returned error: %v", err)
+			}
+			if _, err := os.Stat(statePath); !os.IsNotExist(err) {
+				t.Fatalf("state written without an upload, stat err=%v", err)
+			}
+		})
 	}
 }
 
@@ -404,24 +410,9 @@ func TestResolveRunIDUsesOnlyEnvironment(t *testing.T) {
 	}
 }
 
-func TestUploadNoopsWithoutRunID(t *testing.T) {
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	if err := os.WriteFile(logPath, []byte("{}\n"), 0644); err != nil {
-		t.Fatalf("write log: %v", err)
-	}
-	cfg := Config{
-		LogPath:        logPath,
-		Bucket:         "bucket",
-		CredentialsB64: "invalid-but-should-not-be-read",
-	}
-	if err := Upload(context.Background(), cfg, true); err != nil {
-		t.Fatalf("Upload returned error: %v", err)
-	}
-}
-
 func mustRSAKey(t *testing.T) *rsa.PrivateKey {
 	t.Helper()
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024) // smallest size crypto/rsa accepts; keeps keygen fast
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}

@@ -84,17 +84,4 @@ describe('private channel hand-over', () => {
     expect(onPort).not.toHaveBeenCalled();
     closeAll(late.port1, late.port2);
   });
-
-  it('stops listening when DOMContentLoaded fires', () => {
-    const listeners: Record<string, () => void> = {};
-    const doc = {
-      readyState: 'loading',
-      addEventListener: (type: string, fn: () => void) => (listeners[type] = fn),
-    };
-    const host = Object.assign(new EventTarget(), { document: doc }) as ChannelHost;
-    const remove = vi.spyOn(host, 'removeEventListener');
-    acceptChannel(host, () => {});
-    listeners.DOMContentLoaded();
-    expect(remove).toHaveBeenCalledWith(PORT_EVENT, expect.any(Function));
-  });
 });

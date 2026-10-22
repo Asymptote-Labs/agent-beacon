@@ -347,7 +347,8 @@ func (s *historyStore) catchUp(logPath string, progress func(done, total int64),
 // that arrives after later ones -- an OpenTelemetry batch lands seconds after the hook events it
 // precedes -- belongs earlier in its trace, and the summary is refolded from the last checkpoint
 // before it rather than from the start of a trace that may hold tens of thousands of events.
-const historyCheckpointEvery = 256
+// A var only so tests can reach the checkpoint paths with a short trace.
+var historyCheckpointEvery = 256
 
 // historyOrder is where an event sits in its trace. It is the order SortRecordsAppendOrder gives
 // the JSONL path: timestamp, then unsequenced before sequenced, then sequence, then position in the

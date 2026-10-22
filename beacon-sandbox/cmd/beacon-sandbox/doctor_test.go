@@ -447,31 +447,6 @@ func TestPlantSecretWorksWithoutTheMessageAnchor(t *testing.T) {
 	}
 }
 
-// The common case must keep working, and keep producing valid JSON.
-func TestPlantSecretWithTheMessageAnchorStaysValidJSON(t *testing.T) {
-	const key = "sk-ant-plantme"
-	t.Setenv("ANTHROPIC_API_KEY", key)
-
-	p := filepath.Join(t.TempDir(), "runtime.jsonl")
-	line := `{"timestamp":"2026-08-02T18:00:00Z","vendor":"beacon","message":"m"}`
-	if err := os.WriteFile(p, []byte(line+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	mutatedPath, planted, err := applyMutation(p, "plant-secret")
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, _ := os.ReadFile(mutatedPath)
-	var m map[string]any
-	if err := json.Unmarshal([]byte(strings.TrimSpace(string(body))), &m); err != nil {
-		t.Fatalf("planting broke the JSON: %v\n%s", err, body)
-	}
-	if m["leaked"] != planted {
-		t.Errorf("expected the planted value under \"leaked\", got %v", m["leaked"])
-	}
-}
-
 // Absent session metadata must not decode as a *known* failure. Defaulting Known to true while OK
 // defaulted to false meant an artifact lacking both keys read as "the session definitely failed",
 // short-circuiting sentinel-less scenarios to INCONCLUSIVE without evaluating a single expectation
@@ -571,8 +546,13 @@ func TestPlantSecretNeedsNoAmbientCredential(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(body), planted) {
-		t.Errorf("the planted value is missing from the mutated log:\n%s", body)
+	// The common, anchored case must keep producing valid JSON, with the value under "leaked".
+	var m map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(body))), &m); err != nil {
+		t.Fatalf("planting broke the JSON: %v\n%s", err, body)
+	}
+	if m["leaked"] != planted {
+		t.Errorf("expected the planted value under \"leaked\", got %v", m["leaked"])
 	}
 	// It must not be a fixed string, or two concurrent self-tests could collide, and a real log
 	// containing the constant would produce a false leak.

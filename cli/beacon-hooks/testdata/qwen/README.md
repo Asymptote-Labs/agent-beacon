@@ -21,7 +21,6 @@ Covered payloads:
 - `post_tool_shell.json` — `PostToolUse` for `run_shell_command`, with its response
 - `post_tool_write_file.json` — `PostToolUse` for `write_file`, a whole-file write
 - `post_tool_edit.json` — `PostToolUse` for `edit`, an `old_string`/`new_string` replacement
-- `post_tool_failure.json` — `PostToolUseFailure` for `write_file`, carrying `error`
 - `stop.json` — `Stop` with `context_usage`, `context_limit` and `input_tokens`
 
 Keep secrets and real prompt content out of fixtures. Use sanitized payloads that preserve the field

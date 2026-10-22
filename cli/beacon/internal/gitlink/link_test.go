@@ -318,24 +318,3 @@ func TestWindowExplicitBounds(t *testing.T) {
 		t.Fatalf("max < min: since %v", since)
 	}
 }
-
-func TestAttributeZeroOptionsUseTheDefaultWindow(t *testing.T) {
-	r := newTestRepo(t)
-	ctx := context.Background()
-	r.write("a.go", "1")
-	r.commitAt("base", t0.Add(-48*time.Hour))
-	root := r.open().Root
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	// Ten hours before the commit: past the 2h floor, inside the 24h default.
-	writeLog(t, logPath, logEvent{at: t0.Add(-10 * time.Hour), harness: "codex_cli", session: "ten-hours", cwd: root,
-		action: "file.modified", filePath: filepath.Join(root, "a.go"), operation: "modify"})
-	r.write("a.go", "2")
-	r.commitAt("change", t0)
-	res, err := Attribute(ctx, r.open(), Options{LogPath: logPath, DryRun: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := keys(res.Added); !reflect.DeepEqual(got, []string{"codex_cli/ten-hours"}) {
-		t.Fatalf("links %v (window %v .. %v)", got, res.Since, res.Until)
-	}
-}

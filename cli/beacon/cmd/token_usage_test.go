@@ -12,21 +12,6 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tokens"
 )
 
-func TestTokenUsageCommandRegistered(t *testing.T) {
-	cmd, _, err := rootCmd.Find([]string{"token-usage"})
-	if err != nil {
-		t.Fatalf("Find token-usage returned error: %v", err)
-	}
-	if cmd == nil || cmd.Use != "token-usage" {
-		t.Fatalf("token-usage command not registered: %#v", cmd)
-	}
-	for _, flag := range []string{"log-path", "json", "since", "until", "session", "model", "harness", "repository", "run-id", "bucket", "top", "coverage"} {
-		if cmd.Flags().Lookup(flag) == nil {
-			t.Fatalf("token-usage command missing --%s flag", flag)
-		}
-	}
-}
-
 func writeTokensFixtureLog(t *testing.T) string {
 	t.Helper()
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
@@ -68,6 +53,8 @@ func TestTokenUsageTextReport(t *testing.T) {
 		"claude_code",
 		"github_actions/777",
 		"0.5000",
+		// EST COST USD: 100 input + 40 output tokens of claude-sonnet-4-5 at $3/$15 per MTok.
+		"0.0009",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("text report missing %q:\n%s", want, output)

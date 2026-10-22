@@ -55,19 +55,8 @@ func TestNewEventSetsRequiredInvariants(t *testing.T) {
 	}
 }
 
-func TestValidateContentEmptyRetentionAccepted(t *testing.T) {
-	event := NewEvent(NewEventOptions{
-		Action:  "tool.invoked",
-		Harness: HarnessInfo{Name: "cursor"},
-	})
-	event.Content = &ContentInfo{Retention: "", Included: false}
-	if err := event.Validate(); err != nil {
-		t.Fatalf("Validate rejected empty content.retention: %v", err)
-	}
-}
-
 func TestValidateContentRetentionValuesForCompatibility(t *testing.T) {
-	for _, retention := range []string{ContentRetentionMetadata, ContentRetentionRedacted, ContentRetentionFull} {
+	for _, retention := range []string{"", ContentRetentionMetadata, ContentRetentionRedacted, ContentRetentionFull} {
 		t.Run(retention, func(t *testing.T) {
 			event := NewEvent(NewEventOptions{
 				Action:  "tool.invoked",
@@ -189,7 +178,7 @@ func TestMCPStandardContextSerializesWithSemconvNames(t *testing.T) {
 	}
 }
 
-func TestTraceAndUsageCostOmittedWhenUnset(t *testing.T) {
+func TestAdditiveFieldsOmittedWhenUnset(t *testing.T) {
 	event := NewEvent(NewEventOptions{Action: "tool.invoked", Harness: HarnessInfo{Name: "cursor"}})
 	event.GenAI = &GenAIInfo{Usage: &GenAIUsageInfo{InputTokens: int64Ptr(1)}}
 	data, err := json.Marshal(event)
@@ -197,21 +186,7 @@ func TestTraceAndUsageCostOmittedWhenUnset(t *testing.T) {
 		t.Fatalf("marshal event: %v", err)
 	}
 	text := string(data)
-	for _, field := range []string{`"trace"`, `"cost_usd"`} {
-		if strings.Contains(text, field) {
-			t.Fatalf("unset additive field %s leaked into JSON: %s", field, text)
-		}
-	}
-}
-
-func TestRunAndOriginAreOmittedWhenUnset(t *testing.T) {
-	event := NewEvent(NewEventOptions{Action: "tool.invoked", Harness: HarnessInfo{Name: "cursor"}})
-	data, err := json.Marshal(event)
-	if err != nil {
-		t.Fatalf("marshal event: %v", err)
-	}
-	text := string(data)
-	for _, field := range []string{`"origin"`, `"run"`} {
+	for _, field := range []string{`"trace"`, `"cost_usd"`, `"origin"`, `"run"`} {
 		if strings.Contains(text, field) {
 			t.Fatalf("unset additive field %s leaked into JSON: %s", field, text)
 		}

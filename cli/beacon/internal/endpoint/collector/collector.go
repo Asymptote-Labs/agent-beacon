@@ -23,6 +23,8 @@ var (
 	lookPath                        = exec.LookPath
 	currentExecutable               = os.Executable
 	discoverDefaultBinaryCandidates = defaultBinaryCandidates
+	// pollInterval is how often the readiness and port waits re-check; tests shorten it.
+	pollInterval = 250 * time.Millisecond
 )
 
 type Status struct {
@@ -319,7 +321,7 @@ func WaitUntilReady(cfg endpointconfig.Config, timeout time.Duration) error {
 			}
 			return fmt.Errorf("collector did not become ready before timeout")
 		}
-		time.Sleep(250 * time.Millisecond)
+		time.Sleep(pollInterval)
 	}
 }
 
@@ -353,7 +355,7 @@ func WaitForPortsAvailable(grpcPort, httpPort, healthPort int, timeout time.Dura
 			}
 			return fmt.Errorf("%s", strings.Join(busy, "; "))
 		}
-		time.Sleep(250 * time.Millisecond)
+		time.Sleep(pollInterval)
 	}
 }
 

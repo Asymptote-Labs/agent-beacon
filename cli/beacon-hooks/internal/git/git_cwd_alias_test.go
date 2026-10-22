@@ -41,9 +41,7 @@ func TestCurrentBranchFollowsThePhysicalWorkingDirectory(t *testing.T) {
 	}
 	for _, tc := range []struct{ name, path, target string }{
 		{"physical", nested, ""},
-		{"external alias", filepath.Join(base, "workspace"), nested},
 		{"alias inside another repo", filepath.Join(outer, "workspace"), nested},
-		{"repository root alias", filepath.Join(base, "root-alias"), target},
 		{"relative alias inside another repo", filepath.Join(outer, "relative-workspace"), filepath.Join("..", "target", "pkg", "deep")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

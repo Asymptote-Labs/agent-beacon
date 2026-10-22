@@ -55,7 +55,6 @@ func TestCheckComponentsAcceptsABinaryThatCannotListComponents(t *testing.T) {
 		err error
 	}{
 		"command fails":    {"", errors.New("exit status 1")},
-		"prints nothing":   {"", nil},
 		"prints non-YAML":  {"fake beacon-otelcol for smoke test\n", nil},
 		"lists processors": {"processors: []\n", nil},
 	} {

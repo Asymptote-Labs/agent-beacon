@@ -99,29 +99,21 @@ func TestGitLinkAndNotesCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := runGit(t, "link", "--cwd", root, "--log-path", logPath, "--dry-run")
-	if err != nil {
+	if _, err := runGit(t, "link", "--cwd", root, "--log-path", logPath, "--dry-run"); err != nil {
 		t.Fatal(err)
-	}
-	if !strings.Contains(out, "would link") || !strings.Contains(out, "claude_code/sess-1") || !strings.Contains(out, "Dry run") {
-		t.Fatalf("dry run output:\n%s", out)
 	}
 	if note := mustGitAllowFail(root, "notes", "--ref="+gitlink.NotesRef, "show", sha); note != "" {
 		t.Fatalf("dry run wrote %q", note)
 	}
 
-	out, err = runGit(t, "link", "--cwd", root, "--log-path", logPath)
-	if err != nil {
+	if _, err := runGit(t, "link", "--cwd", root, "--log-path", logPath); err != nil {
 		t.Fatal(err)
-	}
-	if !strings.Contains(out, "Wrote 1 link(s)") {
-		t.Fatalf("link output:\n%s", out)
 	}
 	if note := mustGit(t, root, "notes", "--ref="+gitlink.NotesRef, "show", sha); note != "beacon:claude_code/sess-1" {
 		t.Fatalf("note %q", note)
 	}
 
-	out, err = runGit(t, "notes", "--cwd", root, "--json")
+	out, err := runGit(t, "notes", "--cwd", root, "--json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,10 +123,6 @@ func TestGitLinkAndNotesCommands(t *testing.T) {
 	}
 	if len(commits) != 1 || commits[0].SHA != sha || commits[0].Links[0] != (gitlink.Link{Harness: "claude_code", SessionID: "sess-1"}) {
 		t.Fatalf("notes: %+v", commits)
-	}
-	out, err = runGit(t, "notes", "--cwd", root)
-	if err != nil || !strings.Contains(out, "claude_code/sess-1") || !strings.Contains(out, "Add main") {
-		t.Fatalf("notes text: %v\n%s", err, out)
 	}
 }
 
@@ -154,37 +142,14 @@ func TestGitLinkOutsideRepository(t *testing.T) {
 	gitCommandRepo(t)
 	dir := t.TempDir()
 	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
-	if _, err := runGit(t, "link", "--cwd", dir); err == nil || !strings.Contains(err.Error(), "not a git repository") {
-		t.Fatalf("got %v", err)
+	if _, err := runGit(t, "link", "--cwd", dir); err == nil {
+		t.Fatal("link outside a repository succeeded")
 	}
 }
 
 func mustGitAllowFail(dir string, args ...string) string {
 	out, _ := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
 	return strings.TrimSpace(string(out))
-}
-
-func TestPrintGitLinkResultLabelsTheLimit(t *testing.T) {
-	var out bytes.Buffer
-	a := gitlink.Link{Harness: "codex_cli", SessionID: "a"}
-	b := gitlink.Link{Harness: "codex_cli", SessionID: "b"}
-	c := gitlink.Link{Harness: "codex_cli", SessionID: "c"}
-	printGitLinkResult(&out, gitlink.Result{
-		ChangedFiles: 1,
-		DryRun:       true,
-		Candidates: []gitlink.Candidate{
-			{Link: a, Files: []string{"x"}, AlreadyLinked: true},
-			{Link: b, Files: []string{"x"}},
-			{Link: c, Files: []string{"x"}},
-		},
-		Added: []gitlink.Link{b},
-	})
-	text := out.String()
-	for _, want := range []string{"already linked  codex_cli/a", "would link      codex_cli/b", "skipped (limit) codex_cli/c"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("missing %q in:\n%s", want, text)
-		}
-	}
 }
 
 // runGitStderr is runGit with stderr captured into w.

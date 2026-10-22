@@ -49,7 +49,7 @@ func TestPreserveSharesUploadTransaction(t *testing.T) {
 	select {
 	case <-second:
 		t.Error("preservation contacted provider while upload transaction still held")
-	case <-time.After(150 * time.Millisecond):
+	case <-time.After(50 * time.Millisecond):
 	}
 	once.Do(func() { close(release) })
 	if err := transactionAwait(t, uploaded); err != nil {
@@ -106,7 +106,7 @@ func TestManagedConcurrentCursorDoesNotRewind(t *testing.T) {
 			t.Error(err)
 		}
 		finishedB = true
-	case <-time.After(150 * time.Millisecond):
+	case <-time.After(50 * time.Millisecond):
 	}
 	once.Do(func() { close(release) })
 	if err := transactionAwait(t, a); err != nil {

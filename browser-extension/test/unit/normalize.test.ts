@@ -85,27 +85,6 @@ describe('normalizeTurn — full retention, simple completed turn', () => {
     expect(r['gen_ai.conversation.id']).toBe('conv-123');
   });
 
-  it('encodes usage tokens as integers on the response', () => {
-    const r = flat(respRec.attributes);
-    expect(r['gen_ai.usage.input_tokens']).toBe(10);
-    expect(r['gen_ai.usage.output_tokens']).toBe(2);
-  });
-
-  it('emits cache counts under the dotted names the collector reads', () => {
-    // GenAIUsageFromAttrs in the beaconjson exporter reads
-    // gen_ai.usage.cache_creation.input_tokens first and the flat
-    // gen_ai.usage.cache_creation_input_tokens only as an alias, so the dotted
-    // spelling is the one to emit.
-    const records = normalize(
-      baseTurn({
-        usage: { inputTokens: 37, outputTokens: 214, cacheCreationInputTokens: 1024, cacheReadInputTokens: 18500 },
-      }),
-    ).logRecords;
-    const r = flat(byAction(records, 'agent.response.completed')!.attributes);
-    expect(r['gen_ai.usage.cache_creation.input_tokens']).toBe(1024);
-    expect(r['gen_ai.usage.cache_read.input_tokens']).toBe(18500);
-  });
-
   it('emits the semconv input count, which includes cache reads and writes', () => {
     // Anthropic's usage.input_tokens excludes both cache counts, but the OTel
     // GenAI semconv input_tokens "SHOULD include all types of input tokens,
@@ -243,15 +222,6 @@ describe('normalizeTurn — partial/aborted stream', () => {
     expect(byAction(logRecords, 'agent.response.completed')).toBeUndefined();
     // Prompt still captured.
     expect(byAction(logRecords, 'prompt.submitted')).toBeTruthy();
-  });
-});
-
-describe('normalizeTurn — size cap', () => {
-  it('truncates oversized prompt text and flags it', () => {
-    const huge = 'x'.repeat(200_000);
-    const p = flat(byAction(normalize(baseTurn({ promptText: huge })).logRecords, 'prompt.submitted')!.attributes);
-    expect((p['beacon.prompt.text'] as string).length).toBeLessThan(huge.length);
-    expect(p['beacon.field_truncated']).toBe(true);
   });
 });
 

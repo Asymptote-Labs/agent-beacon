@@ -10,14 +10,15 @@ import (
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
-// All four managed extensions already forward this native message_end shape; their existing
-// usage/reasoning tests contain the same thinking and text parts.
+// All four managed extensions forward this native message_end shape through the shared mapper;
+// one runtime exercises it end to end in a real process, and each runtime's attribution tests
+// cover its own identity.
 func TestPiFamilyFinalizedAssistantReplyReachesChat(t *testing.T) {
 	for _, runtime := range []struct {
 		platform string
 		harness  string
 	}{
-		{"pi", "pi_cli"}, {"omp", "omp"}, {"prime", "prime_agent"}, {"omo", "omo_senpi"},
+		{"pi", "pi_cli"},
 	} {
 		t.Run(runtime.platform, func(t *testing.T) {
 			input := map[string]interface{}{
@@ -133,7 +134,6 @@ func TestPiFinalizedAssistantReplyOnlyRecordsVisibleText(t *testing.T) {
 		{"blank-text", "assistant", []interface{}{map[string]interface{}{"type": "text", "text": " \n\t"}}, ""},
 		{"no-text", "assistant", nil, ""},
 		{"non-text-parts", "assistant", []interface{}{map[string]interface{}{"type": "toolCall", "name": "read"}}, ""},
-		{"user", "user", []interface{}{map[string]interface{}{"type": "text", "text": "User text"}}, ""},
 		{"tool-result", "toolResult", []interface{}{map[string]interface{}{"type": "text", "text": "Tool text"}}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

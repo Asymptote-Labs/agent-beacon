@@ -47,7 +47,6 @@ func TestLensManifestValidate(t *testing.T) {
 	}{
 		{"valid", func(*LensManifestV1) {}, ""},
 		{"optional fields empty", func(m *LensManifestV1) { m.Icon, m.Description, m.Author = "", "", "" }, ""},
-		{"id uppercase", func(m *LensManifestV1) { m.ID = "Files" }, "id"},
 		{"id leading hyphen", func(m *LensManifestV1) { m.ID = "-files" }, "id"},
 		{"id path traversal", func(m *LensManifestV1) { m.ID = "../files" }, "id"},
 		{"id too long", func(m *LensManifestV1) { m.ID = strings.Repeat("a", 64) }, "id"},

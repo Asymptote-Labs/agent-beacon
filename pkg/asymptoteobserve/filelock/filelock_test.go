@@ -48,11 +48,16 @@ func TestExclusiveLocksSerializeWriters(t *testing.T) {
 		_ = l.Release()
 	}()
 
+	// Exclusion is proven without a timed wait: a non-blocking probe from a third handle must
+	// be refused while the first lock is held, and the blocked Exclusive must not have returned.
+	if probe, err := TryExclusive(openLockFile(t, path)); err == nil {
+		_ = probe.Release()
+		t.Fatal("an exclusive lock was granted while the first was held")
+	}
 	select {
 	case <-acquired:
 		t.Fatal("a second exclusive lock was granted while the first was held")
-	case <-time.After(150 * time.Millisecond):
-		// Still blocked, which is correct.
+	default:
 	}
 
 	if err := lock.Release(); err != nil {

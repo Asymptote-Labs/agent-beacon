@@ -2,924 +2,120 @@ package asymptoteobserve
 
 import "testing"
 
-// The property this function exists for: two independent writers must produce the same name for
-// the same session. The hook path installs with --platform <runtime> and the OTLP path derives a
-// name from resource attributes; before these were normalized through one function, a single
-// Claude Code session was recorded as both "claude" and "claude_code", which splits it for any
-// query, dashboard, or SIEM detection that groups by harness.name.
-func TestHookPlatformsConvergeOnCanonicalNames(t *testing.T) {
-	// Keys are the --platform values the hook installers use (see
-	// cli/beacon/internal/endpoint/hooks/*.go); values are what the OTLP path reports.
-	for platform, want := range map[string]string{
-		"claude":      "claude_code",
-		"codex":       "codex_cli",
-		"gemini":      "gemini_cli",
-		"antigravity": "antigravity_cli",
-		"vscode":      "vscode_copilot",
-		"pi":          "pi_cli",
-		"omp":         "omp",
-		"cline":       "cline",
-		"qwen":        "qwen_code",
-		"prime":       "prime_agent",
-		"omo":         "omo_senpi",
-		"muse":        "muse_code",
-		"goose":       "goose",
-		"dsh":         "deepseek_harness",
-		"kimi":        "kimi_code",
+// Two independent writers must produce the same name for the same session. The hook path installs
+// with --platform <runtime> (cli/beacon/internal/endpoint/hooks/*.go) and the OTLP path derives a
+// name from resource attributes; before both went through one function, a single Claude Code
+// session was recorded as both "claude" and "claude_code", which splits it for any query,
+// dashboard, or SIEM detection that groups by harness.name. Every spelling here is one a writer
+// produces; the closed-set cases list each member.
+func TestHarnessSpellingsConvergeOnCanonicalNames(t *testing.T) {
+	for want, spellings := range map[string][]string{
+		"claude_code":     {"claude", "claude-code"},
+		"claude_web":      {"claude.ai", "claude_web"}, // ordered before the generic claude rule
+		"codex_cli":       {"codex", "codex-cli", "codex_exec", "codex_cli_rs"},
+		"codex_desktop":   {"codex-app-server", "codex_app_server", "Codex App Server", "codex-desktop", "Codex Desktop"},
+		"gemini_cli":      {"gemini"},
+		"antigravity_cli": {"antigravity"},
+		// VS Code resolves before the generic copilot rule; "copilot" contains "pi", so Pi must not
+		// be a substring rule either.
+		"vscode_copilot": {"vscode", "copilot-chat"},
+		"copilot_cli":    {"copilot", "github-copilot"},
+		"pi_cli":         {"pi", " PI ", "pi.dev", "pi_cli", "pi-cli", "pi_agent", "pi-agent", "pi agent"},
+		// Oh My Pi and Pi are separate products; every Oh My Pi spelling ends in "pi".
+		"omp":         {"omp", "omp_cli", "omp-cli", "omp cli", "oh-my-pi", "oh_my_pi", "ohmypi", "Oh My Pi", "omp.sh"},
+		"cline":       {"cline", "cline_cli", "cline-cli", "cline cli", "cline.bot"},
+		"qwen_code":   {"qwen", "qwen_code", "qwen-code", "Qwen Code", "qwencode", "qwen_cli", "qwen-cli", "qwen cli", "qwen-coder", "Qwen Coder"},
+		"prime_agent": {"prime", "prime_agent", "prime-agent", "Prime Agent", "primeagent", "prime_cli", "prime-cli", "prime cli", "prime-intellect", "Prime Intellect"},
+		"omo_senpi":   {"omo", "omo_senpi", "omo-senpi", "Omo Senpi", "omo senpi"},
+		"vercel_fx":   {"fx", "fx_cli", "fx-cli", "fx cli", "fx.sh", "vercel_fx", "vercel-fx", "Vercel FX", "vercel fx cli", "fx_agent", "fx-agent"},
+		"muse_code":   {"muse", "muse_code", "muse-code", "Muse Code", "musecode", "muse_cli", "muse-cli", "Muse CLI"},
+		"openhands": {"openhands", "open_hands", "open-hands", "Open Hands", "openhands_cli", "openhands-cli", "OpenHands CLI",
+			"openhands_agent", "openhands-agent", "OpenHands Agent", "openhands.dev"},
+		"grok_bot": {"grok_bot", "grok-bot", "Grok Bot", "grokbot", "grok_bot_desktop", "grok-bot-desktop", "cursor.grok_bot",
+			"cursor/grok_bot", "xai_grok_bot", "xai-grok-bot"},
+		// Kiro's IDE and CLI share one .kiro/hooks directory, so they are one harness deliberately.
+		"kiro": {"kiro", "kiro_ide", "kiro-ide", "Kiro IDE", "kiro_cli", "kiro-cli", "Kiro CLI", "kirocli", "kiro_code", "kiro-code",
+			"Kiro Code", "kirocode", "kiro_agent", "kiro-agent", "Kiro Agent", "kiro.dev"},
+		"goose": {"goose", "goose_cli", "goose-cli", "Goose CLI", "goosecli", "goose_agent", "goose-agent", "Goose Agent",
+			"codename_goose", "codename-goose", "Codename Goose", "block_goose", "block-goose", "Block Goose"},
+		"deepseek_harness": {"dsh", "dsh_cli", "dsh-cli", "DSH CLI", "dshcli", "deepseek_harness", "deepseek-harness", "DeepSeek Harness",
+			"deepseekharness", "deepseek_ai/dsh", "deepseek-ai/dsh", "@deepseek-ai/dsh", "deepseek_dsh", "deepseek-dsh"},
+		// kimi_code_cli is the client_type on every Kimi hook payload; it must agree with --platform kimi.
+		"kimi_code": {"kimi", "kimi_code", "kimi-code", "Kimi Code", "kimicode", "kimi_cli", "kimi-cli", "Kimi CLI", "kimi_code_cli",
+			"kimi-code-cli", "Kimi Code CLI", "kimi_code_acp", "kimi-code-acp", "moonshot_kimi_code", "moonshot-kimi-code"},
+		"": {"", "   ", "\t"},
 	} {
-		t.Run(platform, func(t *testing.T) {
-			if got := NormalizeHarnessName(platform); got != want {
-				t.Errorf("NormalizeHarnessName(%q) = %q, want %q -- the hook and OTLP paths would "+
-					"record one session under two names", platform, got, want)
+		for _, in := range spellings {
+			if got := NormalizeHarnessName(in); got != want {
+				t.Errorf("NormalizeHarnessName(%q) = %q, want %q -- one session would be recorded under two names", in, got, want)
 			}
-		})
+		}
 	}
 }
 
-// Normalizing an already-canonical name must return it unchanged. Without this, a value that has
-// been through the function once changes meaning when it goes through again -- and vscode_copilot
-// did exactly that, collapsing into copilot_cli, which is a different product. Anything that
-// re-reads and re-writes an event would have silently reassigned VS Code activity to the CLI.
+// Normalizing an already-canonical name must return it unchanged. vscode_copilot once collapsed
+// into copilot_cli, a different product, so anything that re-read and re-wrote an event silently
+// reassigned VS Code activity to the CLI.
 func TestCanonicalNamesAreStableUnderRenormalization(t *testing.T) {
 	for _, canonical := range []string{
 		"claude_code", "codex_cli", "codex_desktop", "gemini_cli", "antigravity_cli", "vscode_copilot",
 		"copilot_cli", "claude_web", "chatgpt_web", "claude_cowork", "claude_agent_sdk",
 		"openclaw_gateway", "pi_cli", "omp", "cline", "qwen_code", "prime_agent", "omo_senpi", "vercel_fx",
-		"muse_code", "grok_bot", "goose", "deepseek_harness", "kimi_code",
+		"muse_code", "openhands", "grok_bot", "kiro", "goose", "deepseek_harness", "kimi_code",
 	} {
-		t.Run(canonical, func(t *testing.T) {
-			if got := NormalizeHarnessName(canonical); got != canonical {
-				t.Errorf("NormalizeHarnessName(%q) = %q; a canonical name must survive being "+
-					"normalized again", canonical, got)
-			}
-		})
+		if got := NormalizeHarnessName(canonical); got != canonical {
+			t.Errorf("NormalizeHarnessName(%q) = %q; a canonical name must survive being normalized again", canonical, got)
+		}
 	}
 }
 
-func TestCodexDesktopDoesNotCollapseIntoCodexCLI(t *testing.T) {
-	for _, in := range []string{
-		"codex-app-server", "codex_app_server", "Codex App Server", "codex-desktop", "Codex Desktop",
+// An unrecognized runtime keeps its own name: coercing it would erase the one clue available when
+// a new harness starts reporting. Short closed-set names (pi, omp, cline, qwen, fx) sit inside
+// ordinary words and model ids, so these must fall through rather than be claimed by a substring
+// rule. `grok` is Grok Build's own hook name; fx's model providers are not fx.
+func TestUnrecognizedNamesArePreserved(t *testing.T) {
+	for _, name := range []string{
+		"cursor", "hermes", "opencode", "factory", "grok", "gateway", "xai",
+		"pipeline", "pied-piper", "pixel-cli",
+		"prompt-runner", "compass", "ompa-cli",
+		".clinerules", "clinerules-sync", "decline-bot",
+		"qwen3-coder-plus", "qwen-max", "qwen2.5-coder-32b-instruct",
+		"fxagent", "sfx", "myfx-cli", "fx-runner",
 	} {
-		t.Run(in, func(t *testing.T) {
-			if got := NormalizeHarnessName(in); got != "codex_desktop" {
-				t.Errorf("NormalizeHarnessName(%q) = %q, want codex_desktop", in, got)
-			}
-		})
-	}
-	for _, in := range []string{"codex", "codex-cli", "codex_exec", "codex_cli_rs"} {
-		t.Run(in, func(t *testing.T) {
-			if got := NormalizeHarnessName(in); got != "codex_cli" {
-				t.Errorf("NormalizeHarnessName(%q) = %q, want codex_cli", in, got)
-			}
-		})
-	}
-}
-
-// Ordering is load-bearing: the browser and VS Code cases sit before broader rules that would
-// otherwise swallow them. These are the pairs where one name is a substring of another's rule.
-func TestNarrowerRuntimesWinOverBroaderRules(t *testing.T) {
-	for input, want := range map[string]string{
-		"claude.ai":        "claude_web",     // not claude_code
-		"claude_web":       "claude_web",     // not claude_code
-		"claude-code":      "claude_code",    // not claude_web
-		"copilot-chat":     "vscode_copilot", // not copilot_cli
-		"github-copilot":   "copilot_cli",    // not vscode_copilot
-		"claude_agent_sdk": "claude_agent_sdk",
-		"claude_cowork":    "claude_cowork",
-	} {
-		t.Run(input, func(t *testing.T) {
-			if got := NormalizeHarnessName(input); got != want {
-				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", input, got, want)
-			}
-		})
-	}
-}
-
-// Pi's canonical name is reachable from the spellings the two write paths actually produce: the
-// hook path installs with --platform pi, and the OTLP path would read a service.name.
-func TestPiSpellingsConvergeOnPiCLI(t *testing.T) {
-	for _, in := range []string{
-		"pi", "PI", " pi ", "pi.dev", "pi_cli", "pi-cli", "pi_agent", "pi-agent", "pi agent",
-	} {
-		t.Run(in, func(t *testing.T) {
-			if got := NormalizeHarnessName(in); got != "pi_cli" {
-				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "pi_cli")
-			}
-		})
-	}
-}
-
-// "pi" is a two-character name that appears inside other runtimes' names, so matching it by
-// substring would attribute their sessions to Pi. "copilot" contains "pi" -- every Copilot and VS
-// Code Copilot session is the concrete blast radius of getting this wrong, and both are runtimes
-// Beacon already supports. This test is what keeps the Pi case an equality match.
-func TestPiDoesNotSwallowNamesContainingPi(t *testing.T) {
-	for input, want := range map[string]string{
-		"copilot":        "copilot_cli",
-		"github-copilot": "copilot_cli",
-		"copilot_cli":    "copilot_cli",
-		"copilot-chat":   "vscode_copilot",
-		"vscode_copilot": "vscode_copilot",
-	} {
-		t.Run(input, func(t *testing.T) {
-			if got := NormalizeHarnessName(input); got != want {
-				t.Errorf("NormalizeHarnessName(%q) = %q, want %q -- a substring rule for Pi would "+
-					"reassign this runtime's sessions to pi_cli", input, got, want)
-			}
-		})
-	}
-}
-
-// The Pi spelling set is closed, not a prefix rule. A future runtime whose name merely starts with
-// "pi" must keep its own name rather than being recorded as Pi activity.
-func TestNamesMerelyStartingWithPiAreNotPi(t *testing.T) {
-	for _, name := range []string{"pip-agent", "pipeline", "pixel-cli", "pied-piper"} {
 		if got := NormalizeHarnessName(name); got != name {
 			t.Errorf("NormalizeHarnessName(%q) = %q, want it preserved", name, got)
 		}
 	}
 }
 
-// Oh My Pi's canonical name is reachable from the spellings the two write paths produce: the hook
-// path installs with --platform omp, and the OTLP path would read a service.name that could just
-// as easily be the repository name.
-func TestOmpSpellingsConvergeOnOmp(t *testing.T) {
-	for _, in := range []string{
-		"omp", "OMP", " omp ", "omp_cli", "omp-cli", "omp cli",
-		"oh-my-pi", "oh_my_pi", "ohmypi", "Oh My Pi", "omp.sh",
+// Closed-set cases whose name is shared with the vendor's model family, an ordinary word, a config
+// path, or a sibling product. A substring rule would file these under the runtime, and a reader
+// could not tell the misattribution from the real thing.
+func TestLookalikeNamesAreNotAttributedToTheHarness(t *testing.T) {
+	for harness, names := range map[string][]string{
+		"prime_agent": {"prime-numbers", "amazon_prime", "primer", "claude_code_primed"},
+		// Upstream Senpi and the wider oh-my-openagent project name more than this edition. omoplate
+		// guards a prefix rule, the others a substring rule.
+		"omo_senpi": {"senpi", "oh-my-openagent", "oh_my_openagent", "ammo", "promotion", "homology", "omoplate"},
+		"muse_code": {"muse-spark", "muse_spark", "muse-spark-1.2-contributor", "Muse Spark 1.2", "amuse", "museum"},
+		// Bare "hands" guards a suffix rule, the others a substring or prefix rule.
+		"openhands": {"openhands-lm", "openhands-lm-32b-v0.1", "all-hands/openhands-lm-32b-v0.1", "OpenHands LM 32B",
+			"openai", "opencode", "open-interpreter", "handsfree", "openhands-runtime-sandbox", "hands"},
+		// Grok Build (the local CLI) and Grok models must never be filed under the cloud Grok Bot.
+		"grok_bot": {"Grok", "grok_build", "grok-build", "Grok Build", "grok-cli", "grok-4", "grok-code-fast-1", "Grok 4.6", "x.ai"},
+		"kiro":     {".kiro/hooks", ".kiroignore", "kiro_powers", "kiro-runtime-sandbox", "kiro-lm-7b", "amazonq", "kiro-coder-32b", "aws/kiro-lm-32b-v0.1"},
+		// GooseAI is a different company's inference provider.
+		"goose": {"gooseai", "goose-ai", "goose.ai", "gooseai/gpt-neo-20b", ".goosehints", "GOOSE_MODE", "mongoose", "goose-island"},
+		// Bare "deepseek" is the vendor and model family, not the harness.
+		"deepseek_harness": {"deepseek-chat", "deepseek-reasoner", "deepseek-ai/DeepSeek-V3", "DeepSeek-R1-0528", "deepseek",
+			"deepseek.com", "deepseek_api", "DSH_HOME", "~/.dsh", ".dsh/skills", "dsh-runtime-sandbox", "dshield"},
+		"kimi_code": {"kimi-k2", "kimi-k2.7-code", "kimi-for-coding", "moonshotai/kimi-k2.5", "moonshot-kimi-k2-instruct",
+			"kimi.com", "KIMI_API_KEY", "providers.kimi", "~/.kimi-code", "KIMI_CODE_HOME", "akimi"},
 	} {
-		t.Run(in, func(t *testing.T) {
-			if got := NormalizeHarnessName(in); got != "omp" {
-				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "omp")
+		for _, name := range names {
+			if got := NormalizeHarnessName(name); got == harness {
+				t.Errorf("NormalizeHarnessName(%q) = %q; a lookalike must not be reported as that harness", name, got)
 			}
-		})
-	}
-}
-
-// "omp" is three characters and sits inside ordinary words that reach this field, so matching it by
-// substring would attribute unrelated runtimes to Oh My Pi. "prompt" is the concrete case: it
-// appears in harness and service names across this codebase. This test is what keeps the Oh My Pi
-// case an equality match.
-func TestOmpDoesNotSwallowNamesContainingOmp(t *testing.T) {
-	for _, name := range []string{"prompt-runner", "compass", "comp-agent", "ompa-cli"} {
-		if got := NormalizeHarnessName(name); got != name {
-			t.Errorf("NormalizeHarnessName(%q) = %q, want it preserved -- a substring rule for "+
-				"Oh My Pi would reassign this runtime's sessions to omp", name, got)
 		}
-	}
-}
-
-// Oh My Pi and Pi are separate products that a fleet can have installed side by side, and every Oh
-// My Pi spelling ends in "pi". Neither may resolve to the other: merging them would attribute one
-// runtime's commands, edits and approvals to the other in every harness-grouped query.
-func TestOmpAndPiStaySeparateRuntimes(t *testing.T) {
-	for name, want := range map[string]string{
-		"oh-my-pi": "omp",
-		"oh_my_pi": "omp",
-		"omp":      "omp",
-		"pi":       "pi_cli",
-		"pi.dev":   "pi_cli",
-		"pi_cli":   "pi_cli",
-	} {
-		t.Run(name, func(t *testing.T) {
-			if got := NormalizeHarnessName(name); got != want {
-				t.Errorf("NormalizeHarnessName(%q) = %q, want %q -- Oh My Pi and Pi must not be "+
-					"recorded under one name", name, got, want)
-			}
-		})
-	}
-}
-
-// Cline's canonical name has to be reachable from every spelling its hosts produce. It runs as a
-// VS Code extension, a JetBrains plugin and a CLI over one agent core, so the hook path
-// (--platform cline) and an OTLP service.name can each report a different capitalization or
-// suffix for the same session.
-func TestClineSpellingsConvergeOnCline(t *testing.T) {
-	for _, in := range []string{
-		"cline", "Cline", "CLINE", " cline ", "cline_cli", "cline-cli", "cline cli", "cline.bot",
-	} {
-		t.Run(in, func(t *testing.T) {
-			if got := NormalizeHarnessName(in); got != "cline" {
-				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "cline")
-			}
-		})
-	}
-}
-
-// "cline" appears inside names Cline itself puts on disk: every Cline user has a `.clinerules`
-// directory, and a harness reporting a name derived from one of those paths must keep it rather
-// than being recorded as Cline activity. This is what keeps the Cline case an equality match
-// rather than a Contains rule.
-func TestClineDoesNotSwallowNamesMentioningCline(t *testing.T) {
-	for _, name := range []string{".clinerules", "clinerules", "clinerules-sync", "decline-bot"} {
-		if got := NormalizeHarnessName(name); got != name {
-			t.Errorf("NormalizeHarnessName(%q) = %q, want it preserved", name, got)
-		}
-	}
-}
-
-// Cline is not a Claude surface. The generic `Contains(lower, "claude")` rule above returns
-// claude_code for anything it can see the word "claude" in, and the two product names are close
-// enough in writing that a future edit could plausibly route one through the other -- which would
-// file Cline sessions as Claude Code sessions in every dashboard and detection that groups by
-// harness.name.
-func TestClineIsNotAttributedToClaudeCode(t *testing.T) {
-	for _, in := range []string{"cline", "Cline", "cline_cli", "cline.bot"} {
-		if got := NormalizeHarnessName(in); got == "claude_code" {
-			t.Errorf("NormalizeHarnessName(%q) = %q, want Cline to keep its own harness", in, got)
-		}
-	}
-}
-
-// Qwen Code reaches Beacon under more than one spelling: the hook path installs with
-// --platform qwen, while the OTLP path reports whatever the runtime puts in its resource
-// attributes. Both must land on the same canonical name or one session is recorded as two.
-func TestQwenSpellingsConvergeOnQwenCode(t *testing.T) {
-	for _, in := range []string{
-		"qwen", "Qwen", "QWEN", " qwen ", "qwen_code", "qwen-code", "Qwen Code", "qwencode",
-		"qwen_cli", "qwen-cli", "qwen cli", "qwen-coder", "Qwen Coder",
-	} {
-		t.Run(in, func(t *testing.T) {
-			if got := NormalizeHarnessName(in); got != "qwen_code" {
-				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "qwen_code")
-			}
-		})
-	}
-}
-
-// The reason the Qwen case is an equality match rather than a Contains rule. Every Qwen model id
-// starts with the same four letters as the harness, so a substring rule would relabel any name
-// carrying a model string as a Qwen Code session -- turning a model into a runtime in every
-// dashboard grouped by harness.name.
-func TestQwenModelNamesAreNotTreatedAsTheHarness(t *testing.T) {
-	for _, name := range []string{
-		"qwen3-coder-plus", "qwen3-coder", "qwen-max", "qwen-turbo", "qwen2.5-coder-32b-instruct",
-	} {
-		if got := NormalizeHarnessName(name); got != name {
-			t.Errorf("NormalizeHarnessName(%q) = %q, want the model name preserved rather than "+
-				"reported as the Qwen Code harness", name, got)
-		}
-	}
-}
-
-// Qwen Code is a Gemini CLI fork, which is exactly why this needs a test: the generic
-// Contains(lower, "gemini") rule sits above the Qwen case, and Qwen Code keeps some Gemini-derived
-// paths on disk. A Qwen session attributed to gemini_cli would be filed under a runtime the user
-// does not have installed.
-func TestQwenIsNotAttributedToGeminiCLI(t *testing.T) {
-	for _, in := range []string{"qwen", "qwen-code", "qwen_code", "Qwen Code"} {
-		if got := NormalizeHarnessName(in); got != "qwen_code" {
-			t.Errorf("NormalizeHarnessName(%q) = %q, want qwen_code", in, got)
-		}
-	}
-}
-
-// An unrecognized runtime keeps its own name. Coercing it to "unknown" would erase the one clue
-// available when a new harness starts reporting, and these names reach customer dashboards.
-func TestUnknownRuntimesKeepTheirName(t *testing.T) {
-	for _, name := range []string{"cursor", "hermes", "opencode", "factory", "grok"} {
-		if got := NormalizeHarnessName(name); got != name {
-			t.Errorf("NormalizeHarnessName(%q) = %q, want it preserved", name, got)
-		}
-	}
-}
-
-func TestEmptyNameStaysEmpty(t *testing.T) {
-	for _, in := range []string{"", "   ", "\t"} {
-		if got := NormalizeHarnessName(in); got != "" {
-			t.Errorf("NormalizeHarnessName(%q) = %q, want empty", in, got)
-		}
-	}
-}
-
-// Prime Agent reaches Beacon under more than one spelling for the same reason Qwen Code does: the
-// hook path installs with --platform prime, while an OTLP resource attribute carries whatever the
-// runtime calls itself, which is prime-agent.
-func TestPrimeAgentSpellingsConvergeOnPrimeAgent(t *testing.T) {
-	for _, in := range []string{
-		"prime", "Prime", "PRIME", " prime ", "prime_agent", "prime-agent", "Prime Agent",
-		"primeagent", "prime_cli", "prime-cli", "prime cli", "prime-intellect", "Prime Intellect",
-	} {
-		t.Run(in, func(t *testing.T) {
-			if got := NormalizeHarnessName(in); got != "prime_agent" {
-				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "prime_agent")
-			}
-		})
-	}
-}
-
-// Prime Agent is a Pi distribution -- it ships Pi's extension API under a rebranded config
-// directory -- which is exactly why this needs a test. The two runtimes are observed through the
-// same mechanism, so the temptation is to file them under one name; doing that would merge two
-// products' sessions in every query that groups by harness.name, and would make "which runtime is
-// running here" unanswerable from the log.
-func TestPrimeAgentIsNotAttributedToPi(t *testing.T) {
-	for _, in := range []string{"prime", "prime-agent", "prime_agent", "Prime Agent"} {
-		if got := NormalizeHarnessName(in); got == "pi_cli" {
-			t.Errorf("NormalizeHarnessName(%q) = %q; Prime Agent must not be recorded as Pi", in, got)
-		}
-	}
-	for _, in := range []string{"pi", "pi.dev", "pi-agent"} {
-		if got := NormalizeHarnessName(in); got != "pi_cli" {
-			t.Errorf("NormalizeHarnessName(%q) = %q; adding Prime Agent must not move Pi", in, got)
-		}
-	}
-}
-
-// The reason the Prime case is an equality match rather than a Contains rule. "prime" is an
-// ordinary word: it turns up in model ids, vendor names, and directory paths that have nothing to
-// do with this runtime, and a substring rule would file every one of them under prime_agent.
-func TestPrimeSubstringsAreNotTreatedAsTheHarness(t *testing.T) {
-	for _, name := range []string{
-		"prime-numbers", "amazon_prime", "primer", "optimus-prime-cli", "claude_code_primed",
-	} {
-		if got := NormalizeHarnessName(name); got == "prime_agent" {
-			t.Errorf("NormalizeHarnessName(%q) = %q; a name that merely contains \"prime\" must not be "+
-				"reported as the Prime Agent harness", name, got)
-		}
-	}
-}
-
-// Senpi (the standalone edition of oh-my-openagent) reaches Beacon under more than one spelling for
-// the same reason Prime Agent does: the hook path installs with --platform omo, while the harness
-// name events are written under is the fuller omo_senpi.
-func TestOmoSenpiSpellingsConvergeOnOmoSenpi(t *testing.T) {
-	for _, in := range []string{
-		"omo", "Omo", "OMO", " omo ", "omo_senpi", "omo-senpi", "Omo Senpi", "omo senpi",
-	} {
-		t.Run(in, func(t *testing.T) {
-			if got := NormalizeHarnessName(in); got != "omo_senpi" {
-				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "omo_senpi")
-			}
-		})
-	}
-}
-
-// Senpi is a Pi distribution -- it ships Pi's extension API under a rebranded config directory --
-// which is exactly why this needs a test. The two runtimes are observed through the same
-// mechanism, so the temptation is to file them under one name; doing that would merge two products'
-// sessions in every query that groups by harness.name, and would make "which runtime is running
-// here" unanswerable from the log.
-func TestOmoSenpiIsNotAttributedToPi(t *testing.T) {
-	for _, in := range []string{"omo", "omo-senpi", "omo_senpi", "Omo Senpi"} {
-		if got := NormalizeHarnessName(in); got == "pi_cli" {
-			t.Errorf("NormalizeHarnessName(%q) = %q; Senpi must not be recorded as Pi", in, got)
-		}
-	}
-	for _, in := range []string{"pi", "pi.dev", "pi-agent"} {
-		if got := NormalizeHarnessName(in); got != "pi_cli" {
-			t.Errorf("NormalizeHarnessName(%q) = %q; adding Senpi must not move Pi", in, got)
-		}
-	}
-}
-
-// Neither upstream Senpi nor the wider oh-my-openagent project name should collapse onto this one
-// edition's harness name. Both name something bigger than the omo-branded standalone CLI: plain
-// "senpi" is a real, separately installable engine a user can run without OMO at all, and
-// "oh-my-openagent" also covers the OpenCode and Codex CLI editions Beacon does not observe through
-// this extension. Accepting either spelling here would claim a name a future integration for one of
-// those needs for itself.
-func TestBareSenpiAndOhMyOpenagentAreNotTreatedAsOmoSenpi(t *testing.T) {
-	for _, name := range []string{"senpi", "Senpi", "oh-my-openagent", "oh-my-opencode", "oh_my_openagent"} {
-		if got := NormalizeHarnessName(name); got == "omo_senpi" {
-			t.Errorf("NormalizeHarnessName(%q) = %q; only the omo-branded spelling should resolve to "+
-				"the Senpi standalone edition", name, got)
-		}
-	}
-}
-
-// The reason the omo case is an equality match rather than a Contains rule. "omo" is an ordinary
-// three-letter string that turns up in names that have nothing to do with this runtime, and a
-// substring rule would file every one of them under omo_senpi.
-func TestOmoSubstringsAreNotTreatedAsTheHarness(t *testing.T) {
-	for _, name := range []string{"ammo", "promotion", "omoplate", "homology"} {
-		if got := NormalizeHarnessName(name); got == "omo_senpi" {
-			t.Errorf("NormalizeHarnessName(%q) = %q; a name that merely contains \"omo\" must not be "+
-				"reported as the Senpi harness", name, got)
-		}
-	}
-}
-
-// fx (vercel-labs/fx) reaches Beacon under the spellings a reader is likely to type and the ones
-// the session collector records, and all of them must land on one canonical name. fx has no hook
-// or OTLP surface, so the collector is currently the only writer -- but harness names also arrive
-// from `--harness` flags and hand-written queries, and one session recorded as both "fx" and
-// "vercel_fx" splits it for anything grouping by harness.name.
-func TestFxSpellingsConvergeOnVercelFx(t *testing.T) {
-	for _, in := range []string{
-		"fx", "FX", " fx ", "fx_cli", "fx-cli", "fx cli", "fx.sh", "vercel_fx", "vercel-fx",
-		"Vercel FX", "vercel fx cli", "fx_agent", "fx-agent",
-	} {
-		t.Run(in, func(t *testing.T) {
-			if got := NormalizeHarnessName(in); got != "vercel_fx" {
-				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "vercel_fx")
-			}
-		})
-	}
-}
-
-// The reason the fx case is an equality match rather than a Contains rule. "fx" is two characters
-// and sits inside ordinary words, so a substring rule would relabel unrelated runtimes -- and
-// unlike a wrong name on a known runtime, this failure invents fx activity on a machine that has
-// never run fx.
-func TestFxDoesNotSwallowNamesContainingFx(t *testing.T) {
-	for _, name := range []string{"fxagent", "sfx", "soundfx", "fxr", "myfx-cli", "fx-runner"} {
-		if got := NormalizeHarnessName(name); got != name {
-			t.Errorf("NormalizeHarnessName(%q) = %q, want it preserved -- a substring rule for fx "+
-				"would report this runtime's sessions as fx activity", name, got)
-		}
-	}
-}
-
-// fx runs on Vercel AI Gateway and can authenticate against ChatGPT and Grok subscriptions, so its
-// events carry provider and model strings from three vendors. None of those makes the harness
-// something other than fx, and none of the harness rules above may claim an fx session because a
-// provider name happens to appear beside it.
-func TestFxIsNotAttributedToItsModelProviders(t *testing.T) {
-	if got := NormalizeHarnessName("fx"); got != "vercel_fx" {
-		t.Errorf("NormalizeHarnessName(%q) = %q, want vercel_fx", "fx", got)
-	}
-	for _, provider := range []string{"gateway", "grok", "xai"} {
-		if got := NormalizeHarnessName(provider); got != provider {
-			t.Errorf("NormalizeHarnessName(%q) = %q, want it preserved", provider, got)
-		}
-	}
-	// "codex" is the one provider spelling fx uses that an existing rule already claims for the
-	// Codex CLI. That rule stays as it is: an event whose harness is literally "codex" is the
-	// Codex CLI, and fx's own events say "fx".
-	if got := NormalizeHarnessName("codex"); got != "codex_cli" {
-		t.Errorf("NormalizeHarnessName(%q) = %q, want codex_cli", "codex", got)
-	}
-}
-
-// Muse Code reaches Beacon under more than one spelling for the same reason every other runtime
-// does: the hook path installs with --platform muse, while anything deriving a name from the
-// runtime's own strings reports what Meta calls the product. Pinning them here is what keeps one
-// Muse Code session from being recorded under two names.
-func TestMuseSpellingsConvergeOnMuseCode(t *testing.T) {
-	for _, in := range []string{
-		"muse", "Muse", "MUSE", " muse ", "muse_code", "muse-code", "Muse Code", "musecode",
-		"muse_cli", "muse-cli", "Muse CLI",
-	} {
-		t.Run(in, func(t *testing.T) {
-			if got := NormalizeHarnessName(in); got != "muse_code" {
-				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "muse_code")
-			}
-		})
-	}
-}
-
-// The reason the Muse case is an equality match rather than a Contains rule, and the sharpest
-// version of it in the whole function: Meta ships the agent (Muse Code) and the model it runs
-// (Muse Spark) under one brand, so every Muse Spark model id begins with the same four letters
-// the harness does. A Contains(lower, "muse") rule would report any event whose harness attribute
-// carried a model string as a Muse Code session -- and unlike the Qwen case, a reader seeing a
-// Muse-prefixed value in harness.name could not tell the misattribution from the real thing.
-//
-// Falling through to the passthrough case is the wanted behavior, not a gap: a model id that has
-// somehow reached harness.name shows up as itself, which is visible as an anomaly, rather than
-// being silently filed under the agent.
-func TestMuseSparkModelNamesAreNotTreatedAsTheHarness(t *testing.T) {
-	for _, name := range []string{
-		"muse-spark", "muse_spark", "muse-spark-1.2", "muse-spark-1.3",
-		"muse-spark-1.2-contributor", "Muse Spark 1.2",
-	} {
-		t.Run(name, func(t *testing.T) {
-			if got := NormalizeHarnessName(name); got == "muse_code" {
-				t.Errorf("NormalizeHarnessName(%q) = %q; a Muse Spark model id must not be "+
-					"reported as the Muse Code harness", name, got)
-			}
-		})
-	}
-}
-
-// "muse" is an ordinary English word and a substring of several others. The closed set is what
-// keeps a harness attribute that merely contains it from being claimed by this case.
-func TestOrdinaryWordsContainingMuseAreNotMuseCode(t *testing.T) {
-	for _, name := range []string{"amuse", "museum", "amusement", "musement", "bemuse"} {
-		t.Run(name, func(t *testing.T) {
-			if got := NormalizeHarnessName(name); got == "muse_code" {
-				t.Errorf("NormalizeHarnessName(%q) = %q; a word merely containing \"muse\" must "+
-					"not be reported as the Muse Code harness", name, got)
-			}
-		})
-	}
-}
-
-func TestOpenHandsSpellingsConvergeOnOpenHands(t *testing.T) {
-	for _, in := range []string{
-		"openhands", "OpenHands", "OPENHANDS", " openhands ", "open_hands", "open-hands",
-		"Open Hands", "openhands_cli", "openhands-cli", "OpenHands CLI", "openhands_agent",
-		"openhands-agent", "OpenHands Agent", "openhands.dev",
-	} {
-		t.Run(in, func(t *testing.T) {
-			if got := NormalizeHarnessName(in); got != "openhands" {
-				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "openhands")
-			}
-		})
-	}
-}
-
-// The reason the OpenHands case is an equality match rather than a Contains rule. The same
-// organization publishes the agent and the OpenHands LM model family, so every one of those model
-// ids begins with the word the harness does; a substring rule would report an event whose harness
-// attribute carried a model string as an OpenHands session, and the value would look plausible
-// either way. Falling through to the passthrough case is the wanted behavior: the model id shows
-// up as itself, which reads as an anomaly rather than as the agent.
-func TestOpenHandsModelNamesAreNotTreatedAsTheHarness(t *testing.T) {
-	for _, name := range []string{
-		"openhands-lm", "openhands-lm-32b", "openhands-lm-32b-v0.1", "openhands-lm-7b-v0.1",
-		"all-hands/openhands-lm-32b-v0.1", "OpenHands LM 32B",
-	} {
-		t.Run(name, func(t *testing.T) {
-			if got := NormalizeHarnessName(name); got == "openhands" {
-				t.Errorf("NormalizeHarnessName(%q) = %q; an OpenHands LM model id must not be "+
-					"reported as the OpenHands harness", name, got)
-			}
-		})
-	}
-}
-
-// "hands" is an ordinary English word and "open" prefixes several unrelated product names, so the
-// closed set is what keeps a harness attribute that merely contains either from being claimed.
-func TestOrdinaryNamesContainingOpenOrHandsAreNotOpenHands(t *testing.T) {
-	for _, name := range []string{
-		"openai", "opencode", "openclaw", "open-interpreter", "handsfree", "hands",
-		"openhands-runtime-sandbox",
-	} {
-		t.Run(name, func(t *testing.T) {
-			if got := NormalizeHarnessName(name); got == "openhands" {
-				t.Errorf("NormalizeHarnessName(%q) = %q; a name merely containing \"open\" or "+
-					"\"hands\" must not be reported as the OpenHands harness", name, got)
-			}
-		})
-	}
-}
-
-// opencode resolves before anything OpenHands-shaped could claim it. Both start with "open", both
-// are hook-installable runtimes Beacon supports, and recording one under the other's name would
-// merge two separately installed products in every query that groups by harness.name.
-func TestOpenHandsAndOpenCodeStaySeparateRuntimes(t *testing.T) {
-	if got := NormalizeHarnessName("openhands"); got != "openhands" {
-		t.Fatalf("NormalizeHarnessName(openhands) = %q, want openhands", got)
-	}
-	if got := NormalizeHarnessName("opencode"); got == "openhands" {
-		t.Fatalf("NormalizeHarnessName(opencode) = %q; opencode must not resolve to openhands", got)
-	}
-}
-
-// The normalized name is itself a spelling this function accepts, so a row read out of the runtime
-// log and fed back in resolves to the same harness rather than drifting to a second name.
-func TestOpenHandsCanonicalNameIsStableUnderRenormalization(t *testing.T) {
-	once := NormalizeHarnessName("openhands-cli")
-	if got := NormalizeHarnessName(once); got != once {
-		t.Fatalf("NormalizeHarnessName(%q) = %q, want %q", once, got, once)
-	}
-}
-
-// Grok Bot reaches Beacon under the spelling Cursor's server-side OpenTelemetry export writes for
-// its surface (grok_bot) and under whatever a reader types for the product's name. Pinning them
-// here is what keeps one Bot's actions from being recorded under two names.
-func TestGrokBotSpellingsConvergeOnGrokBot(t *testing.T) {
-	for _, in := range []string{
-		"grok_bot", "Grok_Bot", "GROK_BOT", " grok_bot ", "grok-bot", "Grok Bot", "grokbot",
-		"grok_bot_desktop", "grok-bot-desktop", "cursor.grok_bot", "cursor/grok_bot",
-		"xai_grok_bot", "xai-grok-bot",
-	} {
-		t.Run(in, func(t *testing.T) {
-			if got := NormalizeHarnessName(in); got != "grok_bot" {
-				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "grok_bot")
-			}
-		})
-	}
-}
-
-// Grok Build is the sibling product: xAI's terminal coding agent, hooked by Beacon under the
-// `grok` harness, running on the endpoint under the operator's account. Grok Bot runs on a
-// Cursor-hosted cloud computer. The two must never normalize into each other -- in either
-// direction -- because a query grouping by harness.name would then file cloud-computer shell
-// commands under a local CLI, or the reverse. `grok` stays on the passthrough path as itself,
-// which is the name Grok Build's hook installer already uses.
-func TestGrokBuildIsNotGrokBot(t *testing.T) {
-	for _, name := range []string{"grok", "Grok", "grok_build", "grok-build", "Grok Build", "grok_cli", "grok-cli"} {
-		t.Run(name, func(t *testing.T) {
-			if got := NormalizeHarnessName(name); got == "grok_bot" {
-				t.Errorf("NormalizeHarnessName(%q) = %q; Grok Build must not be reported as the "+
-					"Grok Bot harness", name, got)
-			}
-		})
-	}
-	if got := NormalizeHarnessName("grok"); got != "grok" {
-		t.Errorf("NormalizeHarnessName(%q) = %q, want the passthrough value the Grok Build hook "+
-			"installer already records", "grok", got)
-	}
-}
-
-// Every Grok model id begins with the same four letters as both products, which is the reason
-// the case is a closed set rather than Contains(lower, "grok"). A model string that somehow
-// reaches harness.name shows up as itself rather than being filed under the cloud agent.
-func TestGrokModelNamesAreNotTreatedAsGrokBot(t *testing.T) {
-	for _, name := range []string{
-		"grok-4", "grok-4.6", "grok-4-fast", "grok-code-fast-1", "grok_4", "Grok 4.6", "xai", "x.ai",
-	} {
-		t.Run(name, func(t *testing.T) {
-			if got := NormalizeHarnessName(name); got == "grok_bot" {
-				t.Errorf("NormalizeHarnessName(%q) = %q; a Grok model id must not be reported as "+
-					"the Grok Bot harness", name, got)
-			}
-		})
-	}
-}
-
-func TestKiroSpellingsConvergeOnKiro(t *testing.T) {
-	for _, in := range []string{
-		"kiro", "Kiro", "KIRO", " kiro ", "kiro_ide", "kiro-ide", "Kiro IDE",
-		"kiro_cli", "kiro-cli", "Kiro CLI", "kirocli", "kiro_code", "kiro-code",
-		"Kiro Code", "kirocode", "kiro_agent", "kiro-agent", "Kiro Agent", "kiro.dev",
-	} {
-		t.Run(in, func(t *testing.T) {
-			if got := NormalizeHarnessName(in); got != "kiro" {
-				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "kiro")
-			}
-		})
-	}
-}
-
-// The reason the Kiro case is an equality match rather than a Contains rule. Kiro stamps its own
-// name on paths and configuration keys that legitimately turn up in other fields -- .kiro/hooks,
-// .kiroignore, KIRO_HOME, kiro_powers -- so a substring rule would report a harness attribute that
-// merely mentioned one of them as a Kiro session. Falling through to the passthrough case is the
-// wanted behavior: the value shows up as itself, which reads as an anomaly.
-func TestNamesMerelyContainingKiroAreNotTheKiroHarness(t *testing.T) {
-	for _, name := range []string{
-		".kiro/hooks", ".kiroignore", "kiro_powers", "kiro-runtime-sandbox", "kirosaki",
-		"kiro-lm-7b", "amazonq",
-	} {
-		t.Run(name, func(t *testing.T) {
-			if got := NormalizeHarnessName(name); got == "kiro" {
-				t.Errorf("NormalizeHarnessName(%q) = %q; a name merely containing \"kiro\" must "+
-					"not be reported as the Kiro harness", name, got)
-			}
-		})
-	}
-}
-
-// Kiro runs third-party models rather than a family of its own, so the risk Qwen Code, Muse Code
-// and OpenHands guard against -- a model id beginning with the same letters as the harness -- has
-// no instance here today. This pins the guard anyway: a model whose id merely starts with "kiro"
-// must not be filed as the runtime if one ever ships.
-func TestKiroModelSpellingsAreNotTheHarness(t *testing.T) {
-	for _, name := range []string{"kiro-spark-1", "kiro-coder-32b", "aws/kiro-lm-32b-v0.1"} {
-		t.Run(name, func(t *testing.T) {
-			if got := NormalizeHarnessName(name); got == "kiro" {
-				t.Errorf("NormalizeHarnessName(%q) = %q; a model id must not be reported as the "+
-					"Kiro harness", name, got)
-			}
-		})
-	}
-}
-
-// Kiro's IDE and CLI are one harness deliberately: both load the same .kiro/hooks/*.json, so one
-// Beacon install covers both and a suffix would name only one of the places the events come from.
-// Splitting them later would break every query grouping by harness.name, so the merge is pinned.
-func TestKiroIDEAndCLIResolveToOneHarness(t *testing.T) {
-	ide := NormalizeHarnessName("kiro-ide")
-	cli := NormalizeHarnessName("kiro-cli")
-	if ide != cli {
-		t.Fatalf("NormalizeHarnessName(kiro-ide) = %q and NormalizeHarnessName(kiro-cli) = %q; "+
-			"Kiro's surfaces share one hooks directory and must share one harness name", ide, cli)
-	}
-}
-
-// The normalized name is itself a spelling this function accepts, so a row read out of the runtime
-// log and fed back in resolves to the same harness rather than drifting to a second name.
-func TestKiroCanonicalNameIsStableUnderRenormalization(t *testing.T) {
-	once := NormalizeHarnessName("kiro-cli")
-	if got := NormalizeHarnessName(once); got != once {
-		t.Fatalf("NormalizeHarnessName(%q) = %q, want %q", once, got, once)
-	}
-}
-
-// goose (Block) is the case where the two writers demonstrably agree before normalization: the
-// hook path installs with --platform goose and goose's OTLP resource sets service.name to the
-// literal "goose". This pins that agreement rather than assuming it, because the canonical value
-// is what every other goose spelling is folded onto.
-func TestGooseSpellingsConvergeOnGoose(t *testing.T) {
-	for _, in := range []string{
-		"goose", "Goose", "GOOSE", " goose ", "goose_cli", "goose-cli", "Goose CLI", "goosecli",
-		"goose_agent", "goose-agent", "Goose Agent", "codename_goose", "codename-goose",
-		"Codename Goose", "block_goose", "block-goose", "Block Goose",
-	} {
-		t.Run(in, func(t *testing.T) {
-			if got := NormalizeHarnessName(in); got != "goose" {
-				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "goose")
-			}
-		})
-	}
-}
-
-// The sharpest reason the goose case is an equality match. GooseAI is a different company's LLM
-// inference service, so a Contains(lower, "goose") rule would report a third party's model
-// provider as Block's agent -- the Muse Spark and OpenHands LM hazard, except that those are at
-// least the same vendor's own model. These must fall through and show up as themselves.
-func TestGooseAIProviderSpellingsAreNotTheGooseHarness(t *testing.T) {
-	for _, name := range []string{
-		"gooseai", "goose-ai", "goose_ai", "goose.ai", "gooseai/gpt-neo-20b", "GooseAI",
-	} {
-		t.Run(name, func(t *testing.T) {
-			if got := NormalizeHarnessName(name); got == "goose" {
-				t.Errorf("NormalizeHarnessName(%q) = %q; GooseAI is an inference provider and "+
-					"must not be reported as the goose harness", name, got)
-			}
-		})
-	}
-}
-
-// "goose" is an ordinary English word and goose stamps it across its own paths and configuration,
-// so the closed set has to exclude both. Falling through to the passthrough case is the wanted
-// behavior: the value shows up as itself, which reads as an anomaly rather than a goose session.
-func TestNamesMerelyContainingGooseAreNotTheGooseHarness(t *testing.T) {
-	for _, name := range []string{
-		".goosehints", "GOOSE_MODE", "goose-docs", "mongoose", "gooseberry", "wild-goose-chase",
-		"goose-island", "goosebumps",
-	} {
-		t.Run(name, func(t *testing.T) {
-			if got := NormalizeHarnessName(name); got == "goose" {
-				t.Errorf("NormalizeHarnessName(%q) = %q; a name merely containing \"goose\" must "+
-					"not be reported as the goose harness", name, got)
-			}
-		})
-	}
-}
-
-// The normalized name is itself a spelling this function accepts, so a row read out of the runtime
-// log and fed back in resolves to the same harness rather than drifting to a second name.
-func TestGooseCanonicalNameIsStableUnderRenormalization(t *testing.T) {
-	once := NormalizeHarnessName("codename goose")
-	if got := NormalizeHarnessName(once); got != once {
-		t.Fatalf("NormalizeHarnessName(%q) = %q, want %q", once, got, once)
-	}
-}
-
-func TestDeepSeekHarnessSpellingsConvergeOnDeepSeekHarness(t *testing.T) {
-	for _, in := range []string{
-		"dsh", "DSH", " dsh ", "Dsh", "dsh_cli", "dsh-cli", "DSH CLI", "dshcli",
-		"deepseek_harness", "deepseek-harness", "DeepSeek Harness", "deepseekharness",
-		"deepseek_ai/dsh", "deepseek-ai/dsh", "@deepseek-ai/dsh", "deepseek_dsh", "deepseek-dsh",
-	} {
-		t.Run(in, func(t *testing.T) {
-			if got := NormalizeHarnessName(in); got != "deepseek_harness" {
-				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "deepseek_harness")
-			}
-		})
-	}
-}
-
-// The reason the DeepSeek Harness case is an equality match rather than a Contains rule, in its
-// model half. DeepSeek ships the agent and a model family under one name, so every DeepSeek model
-// id begins with the letters the harness does. A substring rule would file an event whose harness
-// attribute carried one of those model strings as a DeepSeek Harness session, and a reader could
-// not tell the misattribution from the real thing.
-func TestDeepSeekModelSpellingsAreNotTheDeepSeekHarness(t *testing.T) {
-	for _, name := range []string{
-		"deepseek-chat", "deepseek-reasoner", "deepseek-v3", "deepseek-v3.2", "deepseek-r1",
-		"deepseek-coder", "deepseek-coder-v2", "deepseek-ai/DeepSeek-V3", "DeepSeek-R1-0528",
-	} {
-		t.Run(name, func(t *testing.T) {
-			if got := NormalizeHarnessName(name); got == "deepseek_harness" {
-				t.Errorf("NormalizeHarnessName(%q) = %q; a DeepSeek model id must not be reported "+
-					"as the DeepSeek Harness runtime", name, got)
-			}
-		})
-	}
-}
-
-// Bare "deepseek" is the vendor and the model family, not the harness. It is the entry a reader is
-// most likely to want to add to the set, and adding it would attribute provider traffic to an
-// endpoint install that may not exist. Pinned as a decision rather than left to be re-litigated.
-func TestBareDeepSeekIsNotTheDeepSeekHarness(t *testing.T) {
-	for _, name := range []string{"deepseek", "DeepSeek", " deepseek ", "deepseek.com", "deepseek_api"} {
-		t.Run(name, func(t *testing.T) {
-			if got := NormalizeHarnessName(name); got == "deepseek_harness" {
-				t.Errorf("NormalizeHarnessName(%q) = %q; bare \"deepseek\" names the vendor and "+
-					"the model family, not the harness", name, got)
-			}
-		})
-	}
-}
-
-// The other half of the equality rule. `dsh` is three letters the runtime stamps on environment
-// variables and paths that legitimately turn up in other fields, and a Contains rule would claim
-// any of them.
-func TestNamesMerelyContainingDshAreNotTheDeepSeekHarness(t *testing.T) {
-	for _, name := range []string{
-		"DSH_HOME", "~/.dsh", ".dsh/skills", "dsh-runtime-sandbox", "dshield", "sdsh", "dshell",
-	} {
-		t.Run(name, func(t *testing.T) {
-			if got := NormalizeHarnessName(name); got == "deepseek_harness" {
-				t.Errorf("NormalizeHarnessName(%q) = %q; a name merely containing \"dsh\" must not "+
-					"be reported as the DeepSeek Harness runtime", name, got)
-			}
-		})
-	}
-}
-
-// A name that has been through the function once must not change meaning going through again.
-func TestDeepSeekHarnessIsStableUnderRenormalization(t *testing.T) {
-	once := NormalizeHarnessName("dsh")
-	if twice := NormalizeHarnessName(once); twice != once {
-		t.Fatalf("NormalizeHarnessName(%q) = %q; the canonical name must be stable", once, twice)
-	}
-}
-
-func TestKimiCodeSpellingsConvergeOnKimiCode(t *testing.T) {
-	for _, in := range []string{
-		"kimi", "Kimi", " kimi ", "KIMI",
-		"kimi_code", "kimi-code", "Kimi Code", "kimicode",
-		"kimi_cli", "kimi-cli", "Kimi CLI",
-		"kimi_code_cli", "kimi-code-cli", "Kimi Code CLI",
-		"kimi_code_acp", "kimi-code-acp",
-		"moonshot_kimi_code", "moonshot-kimi-code",
-	} {
-		t.Run(in, func(t *testing.T) {
-			if got := NormalizeHarnessName(in); got != "kimi_code" {
-				t.Errorf("NormalizeHarnessName(%q) = %q, want %q", in, got, "kimi_code")
-			}
-		})
-	}
-}
-
-// `kimi_code_cli` is the literal `client_type` Kimi Code stamps on every hook payload, from the
-// terminal CLI, the desktop app, the VS Code extension and the ACP server alike. It has to land on
-// the same harness as the `--platform kimi` flag Beacon's installer writes, or one session is
-// recorded under two names depending on which field a future reader picks up.
-func TestKimiClientTypeAndInstallerFlagAgree(t *testing.T) {
-	fromFlag := NormalizeHarnessName("kimi")
-	fromClientType := NormalizeHarnessName("kimi_code_cli")
-	if fromFlag != fromClientType {
-		t.Fatalf("NormalizeHarnessName(\"kimi\") = %q but NormalizeHarnessName(\"kimi_code_cli\") = %q; "+
-			"the installer flag and the runtime's own client identity must resolve to one harness",
-			fromFlag, fromClientType)
-	}
-}
-
-// The first reason the Kimi Code case is an equality match rather than a Contains rule. Moonshot
-// ships the agent and a large, growing model family under one name, so every Kimi model id begins
-// with the letters the harness does. A substring rule would report any event whose harness
-// attribute happened to carry one of those model strings as a Kimi Code session, and a reader
-// could not tell the misattribution from the real thing because both start with the same word.
-func TestKimiModelSpellingsAreNotTheKimiCodeHarness(t *testing.T) {
-	for _, name := range []string{
-		"kimi-k2", "kimi-k3", "kimi-k2.5", "kimi-k2.6", "kimi-k2.7-code",
-		"kimi-k2-thinking", "kimi-k2-0905-preview", "kimi-k3-fast", "kimi-latest",
-		"kimi-thinking", "kimi-for-coding", "moonshotai/kimi-k2.5", "moonshot-kimi-k2-instruct",
-	} {
-		t.Run(name, func(t *testing.T) {
-			if got := NormalizeHarnessName(name); got == "kimi_code" {
-				t.Errorf("NormalizeHarnessName(%q) = %q; a Kimi model id must not be reported as "+
-					"the Kimi Code runtime", name, got)
-			}
-		})
-	}
-}
-
-// The second and third reasons. `kimi` is also a provider type inside Kimi Code's own config.toml
-// -- one that Claude Code, Codex and other runtimes point at too -- and `kimi.com` is the consumer
-// chat product Beacon does not observe at all. A name that merely mentions either must not be
-// filed as an endpoint install of the coding agent.
-func TestNamesMerelyMentioningKimiAreNotTheKimiCodeHarness(t *testing.T) {
-	for _, name := range []string{
-		"kimi.com", "KIMI_API_KEY", "providers.kimi", "kimi_provider", "kimi-webbridge",
-		"~/.kimi-code", "KIMI_CODE_HOME", "kimikaze", "akimi",
-	} {
-		t.Run(name, func(t *testing.T) {
-			if got := NormalizeHarnessName(name); got == "kimi_code" {
-				t.Errorf("NormalizeHarnessName(%q) = %q; a name merely mentioning \"kimi\" must not "+
-					"be reported as the Kimi Code runtime", name, got)
-			}
-		})
-	}
-}
-
-// Kimi Code is not Claude Code, and the generic `strings.Contains(lower, "claude")` rule sits well
-// above this case. Kimi Code can be configured with an `anthropic` provider and can be driven
-// through Anthropic-shaped endpoints, so a name that mentions both vendors is a real possibility;
-// what must never happen is a bare Kimi spelling resolving to claude_code.
-func TestKimiCodeIsNotAttributedToClaudeCode(t *testing.T) {
-	for _, name := range []string{"kimi", "kimi_code", "kimi-code-cli"} {
-		t.Run(name, func(t *testing.T) {
-			if got := NormalizeHarnessName(name); got == "claude_code" {
-				t.Errorf("NormalizeHarnessName(%q) = %q; Kimi Code is a separate runtime from "+
-					"Claude Code", name, got)
-			}
-		})
-	}
-}
-
-// A name that has been through the function once must not change meaning going through again.
-func TestKimiCodeIsStableUnderRenormalization(t *testing.T) {
-	once := NormalizeHarnessName("kimi")
-	if twice := NormalizeHarnessName(once); twice != once {
-		t.Fatalf("NormalizeHarnessName(%q) = %q; the canonical name must be stable", once, twice)
 	}
 }

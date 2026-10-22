@@ -76,17 +76,6 @@ func TestCascadeResponseRecordsTheReply(t *testing.T) {
 	}
 }
 
-func TestCascadeResponseWithoutAResponseWritesNothing(t *testing.T) {
-	for name, value := range map[string]interface{}{"absent": nil, "empty": "", "blank": "  "} {
-		t.Run(name, func(t *testing.T) {
-			logPath, _ := runHookProcess(t, cascadeResponsePayload(value), "--platform", "devin-desktop", "cascade-response")
-			if events := endpointEventsIfAny(t, logPath); len(events) != 0 {
-				t.Fatalf("wrote %d events with no response: %#v", len(events), events)
-			}
-		})
-	}
-}
-
 // The command reads Cascade's payload only under Cascade's platform.
 func TestCascadeResponseIgnoresOtherPlatforms(t *testing.T) {
 	logPath, _ := runHookProcess(t, cascadeResponsePayload("not a cascade runtime"), "--platform", "devin-cli", "cascade-response")

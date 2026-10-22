@@ -27,7 +27,8 @@ func TestContextLocksCancelContentionAndRelease(t *testing.T) {
 			if shared {
 				acquire = SharedContext
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
+			// Two retry intervals (10ms each) is enough to prove contention is retried, then cancelled.
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 			held, err := acquire(ctx, second)
 			cancel()
 			if !errors.Is(err, context.DeadlineExceeded) || held != nil {

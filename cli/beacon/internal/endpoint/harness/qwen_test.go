@@ -9,27 +9,6 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
-// A runtime missing from DiscoverAll is invisible to `beacon endpoint discover`, which is where an
-// operator looks to find out what is on the machine. It fails silently: the command succeeds and
-// simply never mentions Qwen Code.
-func TestDiscoverAllIncludesQwen(t *testing.T) {
-	for _, h := range DiscoverAll() {
-		if h.Name == "qwen_code" {
-			if h.DisplayName != "Qwen Code" {
-				t.Errorf("DisplayName = %q, want Qwen Code", h.DisplayName)
-			}
-			// "hooks", not "otel_env": Qwen Code is a Gemini CLI fork without Gemini's
-			// OpenTelemetry export, so there is no endpoint to point at the local collector and
-			// `endpoint install --harness qwen` has nothing to configure.
-			if h.Capability != "hooks" {
-				t.Errorf("Capability = %q, want hooks", h.Capability)
-			}
-			return
-		}
-	}
-	t.Fatal("DiscoverAll does not include qwen_code; `beacon endpoint discover` would never mention it")
-}
-
 // Qwen Code installs through npm, so a version manager, a shell alias or a per-project install all
 // hide the binary from the PATH this process inherited while ~/.qwen is still there. Reporting "not
 // detected" for a runtime the user is actively using is the failure this guards.

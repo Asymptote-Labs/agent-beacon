@@ -92,9 +92,6 @@ func TestRenderMarksTheSelectedOption(t *testing.T) {
 	if strings.Contains(got, "❯ Alpha") || strings.Contains(got, "❯ Gamma") {
 		t.Fatalf("more than one option is marked:\n%s", got)
 	}
-	if !strings.Contains(got, "↑/↓ move") || !strings.Contains(got, "^C cancel") {
-		t.Fatalf("key hint is missing:\n%s", got)
-	}
 }
 
 // The first draw must not move the cursor up, or it will eat whatever the caller

@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 // settingsHooksRuntimes are the runtimes whose hook config goes through the shared settings.json
@@ -238,6 +240,76 @@ func TestRemoveSettingsHooksPreservesForeignHookEntriesVerbatim(t *testing.T) {
 			assertForeignSettingsHooksPreserved(t, runtime.platform, data)
 			if strings.Contains(string(data), "--platform "+runtime.platform) {
 				t.Fatalf("Beacon hook was not removed:\n%s", data)
+			}
+		})
+	}
+}
+
+// Status and uninstall answer for their own platform only. A settings file can carry another
+// runtime's Beacon hook -- a settings.json copied or imported from Claude Code brings its hooks
+// along -- and claiming it would report a runtime as collecting while every event went out under
+// the other platform, then have uninstall take the other runtime's telemetry with it. Driven
+// through the install, status and uninstall paths the endpoint commands call, against each
+// runtime's real project-scope file.
+func TestSettingsRuntimesClaimOnlyTheirOwnPlatformsHooks(t *testing.T) {
+	for _, tc := range []struct {
+		platform, other string
+		runtime         hookRuntime
+	}{
+		{"claude", "factory", claudeRuntime},
+		{"codex", "claude", codexRuntime},
+		{"factory", "claude", factoryRuntime},
+		{"qwen", "claude", qwenRuntime},
+	} {
+		t.Run(tc.platform, func(t *testing.T) {
+			home := t.TempDir()
+			testenv.SetHome(t, home)
+			t.Chdir(t.TempDir())
+			opts := RuntimeOptions{Level: LevelProject, LogPath: filepath.Join(home, "runtime.jsonl"), UserMode: true}
+			path, err := tc.runtime.configPath(LevelProject)
+			if err != nil {
+				t.Fatal(err)
+			}
+			theirs := `'/opt/beacon/hooks/beacon-hooks' --platform ` + tc.other + ` --log '/tmp/runtime.jsonl' pre-tool`
+			seed := `{"hooks":{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"` + theirs + `"}]}]}}`
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			if runtimeHookStatus(tc.runtime, opts).Installed {
+				t.Fatalf("status claimed a --platform %s hook as a %s install", tc.other, tc.platform)
+			}
+			status, err := uninstallRuntimeHooks(tc.runtime, opts)
+			if err != nil {
+				t.Fatalf("uninstall over another platform's hook: %v", err)
+			}
+			if status.Installed || !strings.Contains(readFile(t, path), theirs) {
+				t.Fatalf("uninstall with nothing of %s's present reported installed=%t or removed the --platform %s hook:\n%s",
+					tc.platform, status.Installed, tc.other, readFile(t, path))
+			}
+
+			if _, err := installRuntimeHooks(tc.runtime, opts); err != nil {
+				t.Fatalf("install: %v", err)
+			}
+			if !runtimeHookStatus(tc.runtime, opts).Installed {
+				t.Fatal("status does not recognize the install it just made")
+			}
+			if !strings.Contains(readFile(t, path), theirs) {
+				t.Fatalf("install replaced the --platform %s hook:\n%s", tc.other, readFile(t, path))
+			}
+
+			if _, err := uninstallRuntimeHooks(tc.runtime, opts); err != nil {
+				t.Fatalf("uninstall: %v", err)
+			}
+			after := readFile(t, path)
+			if strings.Contains(after, "--platform "+tc.platform+" ") || runtimeHookStatus(tc.runtime, opts).Installed {
+				t.Fatalf("uninstall left %s's hooks behind:\n%s", tc.platform, after)
+			}
+			if !strings.Contains(after, theirs) {
+				t.Fatalf("uninstall removed the --platform %s hook:\n%s", tc.other, after)
 			}
 		})
 	}

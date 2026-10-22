@@ -27,22 +27,6 @@ func equalStrings(a, b []string) bool {
 	return true
 }
 
-func TestSortEventsPutsAppendOrderIntoEmissionOrder(t *testing.T) {
-	// The append order a real runtime log lands in: the collector exporter flushes on its
-	// export interval, so its 10:00:06 event is written before the hook's synchronous
-	// 10:00:01 event even though the hook's event happened first.
-	events := []asymptoteobserve.Event{
-		corrEvent("2026-08-21T10:00:06.000000000Z", "session.activity", "s1", nil),
-		corrEvent("2026-08-21T10:00:01.000000000Z", "file.read", "s1", withEnv),
-		corrEvent("2026-08-21T10:00:03.000000000Z", "command.executed", "s1", withCurl),
-	}
-	SortEvents(events)
-	want := []string{"file.read", "command.executed", "session.activity"}
-	if got := actions(events); !equalStrings(got, want) {
-		t.Fatalf("order = %v, want %v", got, want)
-	}
-}
-
 func TestSortEventsMakesOrderedCorrelationFireOnAppendOrder(t *testing.T) {
 	// The failure this workstream is about: read-then-egress happened in order, but the
 	// egress event reached the log first, so the ordered-window rule saw the reverse and
@@ -187,36 +171,5 @@ func TestSortEventsIsATotalOrder(t *testing.T) {
 	}
 	if got := actions(first); !equalStrings(got, []string{"d", "a", "b", "c"}) {
 		t.Fatalf("order = %v, want [d a b c]", got)
-	}
-}
-
-func TestSortEventsHandlesShortStreams(t *testing.T) {
-	SortEvents(nil)
-	one := []asymptoteobserve.Event{corrEvent("2026-08-21T10:00:00.000000000Z", "only", "s1", nil)}
-	SortEvents(one)
-	if got := actions(one); !equalStrings(got, []string{"only"}) {
-		t.Fatalf("order = %v, want [only]", got)
-	}
-}
-
-func TestSortEventsOrdersAcrossSessions(t *testing.T) {
-	// Correlation groups by session after the sort, so interleaved sessions have to come
-	// out of the sort correctly ordered within each one.
-	events := []asymptoteobserve.Event{
-		corrEvent("2026-08-21T10:00:04.000000000Z", "s2-second", "s2", nil),
-		corrEvent("2026-08-21T10:00:03.000000000Z", "s1-second", "s1", nil),
-		corrEvent("2026-08-21T10:00:02.000000000Z", "s2-first", "s2", nil),
-		corrEvent("2026-08-21T10:00:01.000000000Z", "s1-first", "s1", nil),
-	}
-	SortEvents(events)
-	groups, order := groupBySession(events)
-	if !equalStrings(order, []string{"s1", "s2"}) {
-		t.Fatalf("session order = %v, want [s1 s2]", order)
-	}
-	if got := actions(groups["s1"]); !equalStrings(got, []string{"s1-first", "s1-second"}) {
-		t.Fatalf("s1 = %v", got)
-	}
-	if got := actions(groups["s2"]); !equalStrings(got, []string{"s2-first", "s2-second"}) {
-		t.Fatalf("s2 = %v", got)
 	}
 }

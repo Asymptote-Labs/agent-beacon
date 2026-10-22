@@ -474,15 +474,6 @@ func kiroAssistantResponse(input map[string]interface{}) string {
 	return getFirstStr(input, "assistant_response")
 }
 
-// emitKiroAssistantResponse records the agent's final reply as its own event.
-//
-// Kiro puts the reply on the Stop payload and nowhere else, so dropping it would throw away the one
-// piece of model output this runtime puts on a hook. The event's shape is emitAssistantMessage's,
-// shared with every other hook-side reply capture.
-func emitKiroAssistantResponse(logger *logging.Logger, input map[string]interface{}, sessionID string) {
-	emitAssistantMessage(logger, input, sessionFields(sessionID, input), kiroAssistantResponse(input))
-}
-
 // applyKiroToolResult attaches what the shared toolFieldsWithResponse cannot reach: the operation a
 // write call performed, and a shell command's output.
 //

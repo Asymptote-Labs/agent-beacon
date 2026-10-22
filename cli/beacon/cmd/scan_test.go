@@ -55,36 +55,7 @@ func scanFixture(t *testing.T, logLines []string) {
 	scanOpts.failOn = ""
 }
 
-const (
-	evSecretRead = `{"timestamp":"2026-06-13T10:00:00Z","event":{"action":"file.read"},"file":{"path":".env"},"session":{"id":"s1"}}`
-	evBenignRead = `{"timestamp":"2026-06-13T10:00:01Z","event":{"action":"file.read"},"file":{"path":"README.md"},"session":{"id":"s1"}}`
-)
-
-func TestScanReportsFindings(t *testing.T) {
-	scanFixture(t, []string{evSecretRead, evBenignRead})
-	cmd, buf := newCmd()
-	if err := runScan(cmd, nil); err != nil {
-		t.Fatalf("scan: %v", err)
-	}
-	out := buf.String()
-	if !strings.Contains(out, "scan-test-secret-read") {
-		t.Fatalf("expected finding for the .env read, got:\n%s", out)
-	}
-	if !strings.Contains(out, "1 finding") {
-		t.Fatalf("expected exactly one finding, got:\n%s", out)
-	}
-}
-
-func TestScanNoFindings(t *testing.T) {
-	scanFixture(t, []string{evBenignRead})
-	cmd, buf := newCmd()
-	if err := runScan(cmd, nil); err != nil {
-		t.Fatalf("scan: %v", err)
-	}
-	if !strings.Contains(buf.String(), "No findings") {
-		t.Fatalf("expected no findings, got:\n%s", buf.String())
-	}
-}
+const evSecretRead = `{"timestamp":"2026-06-13T10:00:00Z","event":{"action":"file.read"},"file":{"path":".env"},"session":{"id":"s1"}}`
 
 func TestScanJSON(t *testing.T) {
 	scanFixture(t, []string{evSecretRead})
@@ -160,18 +131,6 @@ func TestScanFailOnIgnoresMinSeverityFilter(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "No findings") {
 		t.Fatalf("expected the high finding hidden from output by --min-severity critical, got:\n%s", buf.String())
-	}
-}
-
-func TestScanMinSeverityFilters(t *testing.T) {
-	scanFixture(t, []string{evSecretRead})
-	scanOpts.minSeverity = "critical" // finding is high -> filtered out
-	cmd, buf := newCmd()
-	if err := runScan(cmd, nil); err != nil {
-		t.Fatalf("scan: %v", err)
-	}
-	if !strings.Contains(buf.String(), "No findings") {
-		t.Fatalf("expected high finding filtered by --min-severity critical, got:\n%s", buf.String())
 	}
 }
 

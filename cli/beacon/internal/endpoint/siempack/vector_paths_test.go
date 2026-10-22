@@ -48,9 +48,17 @@ func TestVectorPackLogPathsRoundTrip(t *testing.T) {
 		{name: "sentinel", install: sentinel.InstallPack},
 		{name: "sumo", install: sumo.InstallPack},
 	}
+	// Escaping is shared siempack code, so every path shape runs through the asymptote pack (which
+	// renders all three sources). The other packs only need the hardest shapes to prove their
+	// templates place paths in TOML basic strings.
+	hardest := []struct{ name, path string }{paths[1], paths[6]}
 	for _, pack := range packs {
 		t.Run(pack.name, func(t *testing.T) {
-			for _, path := range paths {
+			cases := hardest
+			if pack.name == "asymptote" {
+				cases = paths
+			}
+			for _, path := range cases {
 				t.Run(path.name, func(t *testing.T) {
 					want := map[string][]string{"beacon_runtime": {path.path}}
 					if pack.inventory {

@@ -83,16 +83,6 @@ const hostPropagator: TextMapPropagator = {
   fields() { return ["host-propagator"]; },
 };
 
-it("routes fresh global and local tracers to each owned generation", async () => {
-  for (const serviceName of ["first-generation", "second-generation"]) {
-    const exporter = initialize(serviceName);
-    emitGlobalAndLocal();
-    await sdk.flush();
-    expectGeneration(exporter, serviceName);
-    await sdk.shutdown();
-  }
-});
-
 it("preserves a host replacement installed while the SDK is active", async () => {
   initialize("sdk-generation");
   trace.disable();

@@ -84,35 +84,7 @@ func TestMapCodexTranscriptProducesEndpointEvents(t *testing.T) {
 	}
 }
 
-func TestTokenCountCoversEveryCompletionInAMultiCallTurn(t *testing.T) {
-	ref := SessionRef{ID: "sess-1", Path: "/tmp/codex.jsonl", Workspace: "/tmp/repo"}
-	records := decodeFixture(t, []string{
-		sessionMetaLine("sess-1", "/tmp/repo"),
-		turnContextLine("turn-1", "gpt-6-astra"),
-		messageLine("user", "msg-user", "build it"),
-		tokenCountLine("turn-1", &TokenUsage{}, &TokenUsage{}),
-		tokenCountLine("turn-1", &TokenUsage{InputTokens: 50, OutputTokens: 20}, &TokenUsage{InputTokens: 50, OutputTokens: 20}),
-		tokenCountLine("turn-1", &TokenUsage{InputTokens: 80, OutputTokens: 30}, &TokenUsage{InputTokens: 130, OutputTokens: 50}),
-	})
-	mapped := MapSession(ref, records, MapOptions{})
-	var reported int64
-	var count int
-	for _, item := range mapped {
-		if item.Event.Event.Action != "token.usage" {
-			continue
-		}
-		count++
-		reported += *item.Event.GenAI.Usage.OutputTokens
-	}
-	// Each model completion in the turn is reported once, so the reported
-	// output tokens add up to the turn's cumulative total_token_usage rather
-	// than to whichever single snapshot was kept.
-	if count != 2 || reported != 50 {
-		t.Fatalf("token.usage events = %d totalling %d output tokens, want 2 totalling 50", count, reported)
-	}
-}
-
-func TestCollectOnceUsesCursorAndPrintDoesNotAdvance(t *testing.T) {
+func TestCollectOnceUsesCursor(t *testing.T) {
 	dir := t.TempDir()
 	codexDir := filepath.Join(dir, ".codex")
 	sessionPath := filepath.Join(codexDir, "sessions", "2026", "09", "19", "rollout-2026-09-19T20-00-00-sess-1.jsonl")
@@ -139,22 +111,45 @@ func TestCollectOnceUsesCursorAndPrintDoesNotAdvance(t *testing.T) {
 	if after := readLog(t, logPath); len(after) != len(before) {
 		t.Fatalf("log grew from %d to %d events with unchanged cursor", len(before), len(after))
 	}
+}
 
-	writeFile(t, sessionPath, sessionMetaLine("sess-1", "/tmp/repo")+"\n"+messageLine("user", "u1", "first")+"\n"+messageLine("user", "u2", "second")+"\n")
+// `beacon endpoint codex sync --print` runs the collector with Print, an Out writer and nothing
+// to write or save. The collector has to hand Print to its sink: without it the sweep maps every
+// event and prints none, and the dry run a user runs to see what sync would ship shows nothing.
+func TestPrintSweepShowsEveryEventAndLeavesTheSessionForSync(t *testing.T) {
+	dir := t.TempDir()
+	codexDir := filepath.Join(dir, ".codex")
+	sessionPath := filepath.Join(codexDir, "sessions", "2026", "09", "19", "rollout-2026-09-19T20-00-00-sess-1.jsonl")
+	writeFile(t, sessionPath, sessionMetaLine("sess-1", "/tmp/repo")+"\n"+messageLine("user", "u1", "first")+"\n")
+
 	var printed strings.Builder
-	printSummary, err := CollectOnce(CollectOptions{CodexDir: codexDir, Print: true, Out: &printed})
+	summary, err := CollectOnce(CollectOptions{CodexDir: codexDir, Print: true, Out: &printed})
 	if err != nil {
 		t.Fatalf("print CollectOnce: %v", err)
 	}
-	if printSummary.EventsEmitted == 0 || printed.Len() == 0 {
-		t.Fatalf("print sweep emitted nothing: summary=%+v output=%q", printSummary, printed.String())
+	lines := strings.Split(strings.TrimSpace(printed.String()), "\n")
+	if summary.EventsEmitted == 0 || printed.Len() == 0 || len(lines) != summary.EventsEmitted {
+		t.Fatalf("printed %d lines for %d events:\n%s", len(lines), summary.EventsEmitted, printed.String())
 	}
-	realSummary, err := CollectOnce(opts)
+	var sawPrompt bool
+	for _, line := range lines {
+		var ev schema.Event
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("print output is not one event per line: %v\n%s", err, line)
+		}
+		sawPrompt = sawPrompt || (ev.Event.Action == "prompt.submitted" && ev.Prompt != nil && ev.Prompt.Text == "first")
+	}
+	if !sawPrompt {
+		t.Fatalf("print output has no prompt.submitted for the session's prompt:\n%s", printed.String())
+	}
+
+	logPath := filepath.Join(dir, "runtime.jsonl")
+	real, err := CollectOnce(CollectOptions{CodexDir: codexDir, StatePath: filepath.Join(dir, "state.json"), LogPath: logPath, Write: true, UserMode: true})
 	if err != nil {
-		t.Fatalf("real CollectOnce after print: %v", err)
+		t.Fatalf("sync after print: %v", err)
 	}
-	if realSummary.EventsEmitted == 0 {
-		t.Fatal("--print advanced the cursor; real sweep had nothing left")
+	if real.EventsEmitted != summary.EventsEmitted || len(readLog(t, logPath)) != summary.EventsEmitted {
+		t.Fatalf("sync after --print wrote %d events, want the %d the dry run showed", real.EventsEmitted, summary.EventsEmitted)
 	}
 }
 

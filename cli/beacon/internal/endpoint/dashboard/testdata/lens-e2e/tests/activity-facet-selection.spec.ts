@@ -49,6 +49,7 @@ for (const [facet, value] of [['harness', 'codex_cli'], ['model', 'model-alpha']
 }
 for (const [facet, value] of [['harness', 'codex_cli'], ['model', 'model-alpha'], ['repository', '/workspace/alpha']]) {
   test(`empty results preserve ${facet} across the real poll and explicit clear`, async ({ page }) => {
+    await page.clock.install();
     const requests = await fixture(page);
     await page.goto('/?range=all&session_state=');
     await settled(page);
@@ -57,8 +58,9 @@ for (const [facet, value] of [['harness', 'codex_cli'], ['model', 'model-alpha']
     await submit(page);
     const afterEmpty = await page.locator(`[name="${facet}"]`).inputValue();
     const count = requests.filter((url) => url.pathname === '/api/sessions').length;
-    // Use the production ten-second setInterval without replacing timers.
-    await expect.poll(() => requests.filter((url) => url.pathname === '/api/sessions').length, { timeout: 13000 }).toBeGreaterThan(count);
+    // Fire the production ten-second setInterval by advancing the page clock.
+    await page.clock.runFor(10_000);
+    await expect.poll(() => requests.filter((url) => url.pathname === '/api/sessions').length).toBeGreaterThan(count);
     await settled(page);
     expect.soft(afterEmpty).toBe(value);
     expect.soft(requests.filter((url) => url.pathname === '/api/sessions').at(-1)?.searchParams.get(facet)).toBe(value);

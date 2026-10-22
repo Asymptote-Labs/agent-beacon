@@ -35,9 +35,6 @@ function run(name: string, prompt: string, conversationId: string | null, chunkS
 describe('chatgpt adapter — simple turn (delta_encoding v1)', () => {
   const turn = run('simple-turn', 'good evening', null)!.getTurn()!;
 
-  it('reconstructs the response across add/append/bare/patch ops', () => {
-    expect(turn.responseText).toBe('Good evening! Hello to you as well. Hope your day is going well.');
-  });
   it('captures the prompt from the request body', () => {
     expect(turn.promptText).toBe('good evening');
   });

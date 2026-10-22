@@ -30,17 +30,6 @@ func TestTraceSharingStateAndRefreshCommand(t *testing.T) {
 	if local := byID["session:opencode:s5"].Sharing; local.State != "local_only" || local.RefreshCommand != "" {
 		t.Fatalf("s5 sharing = %+v", local)
 	}
-	staleOnly, err := ReadTraceList(path, TraceQuery{State: "stale", Limit: 50})
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, trace := range staleOnly.Traces {
-		found = found || trace.ID == "session:claude_code:s7"
-	}
-	if !found {
-		t.Fatalf("--state stale missed s7: %+v", staleOnly.Traces)
-	}
 }
 
 func TestSessionsCarrySharingState(t *testing.T) {

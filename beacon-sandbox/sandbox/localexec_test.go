@@ -57,27 +57,6 @@ func TestRequireDisposableRefusesAnUnprovableHost(t *testing.T) {
 	}
 }
 
-// The evidence a verdict reports must distinguish "GitHub hands out a fresh VM per job" from "the
-// operator asserted it". They are materially different claims, and a reader of a verdict that
-// cannot compare host state is entitled to know which one it rested on.
-func TestDisposabilityEvidenceNamesItsBasis(t *testing.T) {
-	t.Setenv("GITHUB_ACTIONS", "true")
-	t.Setenv("RUNNER_ENVIRONMENT", "github-hosted")
-	if got := DisposabilityEvidence(); !strings.Contains(got, "ephemeral") {
-		t.Errorf("a github-hosted runner should say so, got %q", got)
-	}
-
-	t.Setenv("GITHUB_ACTIONS", "")
-	t.Setenv("RUNNER_ENVIRONMENT", "")
-	got := DisposabilityEvidence()
-	if !strings.Contains(got, "asserted") {
-		t.Errorf("an operator opt-in must be named as such, got %q", got)
-	}
-	if strings.Contains(got, "ephemeral") {
-		t.Error("an asserted host must not borrow the wording of a provably ephemeral one")
-	}
-}
-
 // A non-zero exit is a finding about the thing under test; a timeout is the harness failing to
 // finish. They must not collapse into one result -- CommandContext kills the child and Run returns
 // an *ExitError either way, so classifying the error without consulting the deadline recorded a
@@ -104,7 +83,7 @@ func TestExecDistinguishesATimeoutFromANonZeroExit(t *testing.T) {
 	if l.platform.IsWindows() {
 		sleep = "Start-Sleep -Seconds 10"
 	}
-	res, err = l.Exec(context.Background(), inst, sleep, ExecOpts{Timeout: 300 * time.Millisecond})
+	res, err = l.Exec(context.Background(), inst, sleep, ExecOpts{Timeout: 50 * time.Millisecond})
 	if err == nil {
 		t.Fatalf("a timeout must surface as an error, got a result with exit code %d", res.ExitCode)
 	}

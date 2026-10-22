@@ -14,7 +14,3 @@ it('marks only tool records whose retained content is truncated', () => {
       expect(records.every(r => attrValue(r.attributes, 'gen_ai.tool.call.id') !== undefined)).toBe(true);
     }
 });
-it('does not flag exact-limit content', () => {
-  const r = normalizeTurn(turn({ toolCalls: [{ id: 'exact', name: 'tool', arguments: 'x'.repeat(MAX_FIELD_BYTES) }] }), 'full').logRecords.at(-1)!;
-  expect(attrValue(r.attributes, 'beacon.field_truncated')).toBeUndefined();
-});

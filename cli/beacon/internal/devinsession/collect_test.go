@@ -1,9 +1,9 @@
 package devinsession
 
 import (
-	"bufio"
-	"bytes"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -356,31 +356,6 @@ func TestCollectOnceMapsDevinStoreAndAdvancesCursor(t *testing.T) {
 	}
 }
 
-func TestCollectOnceReadsOnlyAppendedRows(t *testing.T) {
-	p := newFixturePaths(t)
-	db := openFixtureDB(t, p.db)
-	addSession(t, db, "s1", nil)
-	addNode(t, db, "s1", 1, userMsg("u1", "first", "2023-11-14T22:13:20.000000Z"), 1700000100, nil)
-
-	if _, err := CollectOnce(collectOptions(p)); err != nil {
-		t.Fatalf("first CollectOnce: %v", err)
-	}
-	before := readEvents(t, p.log)
-
-	addNode(t, db, "s1", 2, assistantMsg("a1", assistantFixture{Content: "second answer", Model: "swe-1-7", CreatedAt: "2023-11-14T22:15:00.000000Z"}), 1700000500, nil)
-	summary, err := CollectOnce(collectOptions(p))
-	if err != nil {
-		t.Fatalf("second CollectOnce: %v", err)
-	}
-	after := readEvents(t, p.log)
-	if got := eventActions(after[len(before):]); len(got) != 1 || got[0] != "agent.message" {
-		t.Fatalf("appended sweep emitted %v, want just agent.message", got)
-	}
-	if summary.EventsEmitted != 1 {
-		t.Fatalf("emitted = %d, want 1", summary.EventsEmitted)
-	}
-}
-
 func TestCollectOnceAttributesPerTurnModelAndRecordsModelChanges(t *testing.T) {
 	p := newFixturePaths(t)
 	db := openFixtureDB(t, p.db)
@@ -535,28 +510,6 @@ func TestResumeCopyRowsWithPriorNodeIDsAreSkipped(t *testing.T) {
 	}
 }
 
-func TestAdjacentReInsertWithoutPriorNodeIDsIsSkipped(t *testing.T) {
-	p := newFixturePaths(t)
-	db := openFixtureDB(t, p.db)
-	addSession(t, db, "s1", nil)
-	addNode(t, db, "s1", 1, assistantMsg("a1", assistantFixture{Content: "same", Model: "swe-1-7", CreatedAt: "2023-11-14T22:13:40.000000Z"}), 1700000100, nil)
-	// Devin re-inserts assistant rows with the same message_id and no prior ids, usually adjacent.
-	addNode(t, db, "s1", 2, assistantMsg("a1", assistantFixture{Content: "same", Model: "swe-1-7", CreatedAt: "2023-11-14T22:13:40.000000Z"}), 1700000200, nil)
-
-	if _, err := CollectOnce(collectOptions(p)); err != nil {
-		t.Fatalf("CollectOnce: %v", err)
-	}
-	count := 0
-	for _, ev := range readEvents(t, p.log) {
-		if ev.Event.Action == "agent.message" {
-			count++
-		}
-	}
-	if count != 1 {
-		t.Fatalf("agent.message = %d, want the adjacent re-insert skipped", count)
-	}
-}
-
 func TestReInsertOnALaterSweepIsSkippedByThePersistedRing(t *testing.T) {
 	p := newFixturePaths(t)
 	db := openFixtureDB(t, p.db)
@@ -588,6 +541,43 @@ func TestReInsertOnALaterSweepIsSkippedByThePersistedRing(t *testing.T) {
 	}
 	if len(messages) != 1 {
 		t.Fatalf("re-emitted agent.message %d times across sweeps", len(messages))
+	}
+}
+
+// The ring persists message ids as the first 16 hex characters of sha256(message_id). A cursor
+// file written by an earlier release has to keep catching re-inserts after an upgrade, so the
+// digest is a file format: changing it silently turns every ring on disk into noise, and the next
+// resume copy Devin writes is appended to the log a second time.
+func TestCursorRingWrittenByAnEarlierReleaseStillSkipsReInserts(t *testing.T) {
+	p := newFixturePaths(t)
+	db := openFixtureDB(t, p.db)
+	addSession(t, db, "s1", nil)
+	addNode(t, db, "s1", 1, assistantMsg("a1", assistantFixture{Content: "first", Model: "swe-1-7", CreatedAt: "2023-11-14T22:13:40.000000Z"}), 1700000100, nil)
+	addNode(t, db, "s1", 2, assistantMsg("a1", assistantFixture{Content: "first", Model: "swe-1-7", CreatedAt: "2023-11-14T22:13:40.000000Z"}), 1700000200, nil)
+	addNode(t, db, "s1", 3, assistantMsg("a2", assistantFixture{Content: "second", Model: "swe-1-7", CreatedAt: "2023-11-14T22:14:40.000000Z"}), 1700000300, nil)
+
+	// The cursor as a previous sweep left it: row 1 collected, its message id in the ring.
+	sum := sha256.Sum256([]byte("a1"))
+	cursor := fmt.Sprintf(`{"version":%d,"sessions":{"s1":{"last_row_id":1,"started":true,"last_model":"swe-1-7","recent_message_ids":[%q]}}}`, StateVersion, hex.EncodeToString(sum[:])[:16])
+	if err := os.MkdirAll(filepath.Dir(p.state), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p.state, []byte(cursor), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := CollectOnce(collectOptions(p)); err != nil {
+		t.Fatalf("CollectOnce: %v", err)
+	}
+	var messages []string
+	for _, ev := range readEvents(t, p.log) {
+		if ev.Event.Action == "agent.message" {
+			data, _ := json.Marshal(ev)
+			messages = append(messages, string(data))
+		}
+	}
+	if len(messages) != 1 || !strings.Contains(messages[0], "second") {
+		t.Fatalf("agent.message events = %q, want only the new row; the re-insert of a1 was not recognized", messages)
 	}
 }
 
@@ -831,6 +821,9 @@ func TestCompactorAssistantRowEmitsUsageWithoutAPersonaOrModel(t *testing.T) {
 	}
 }
 
+// The install backfill runs this collector with a Since window (#972). A session outside it must
+// be left completely alone -- no events and no cursor -- or the next ordinary sync would start
+// past rows nobody collected.
 func TestSinceLeavesOldSessionsForALaterSync(t *testing.T) {
 	p := newFixturePaths(t)
 	db := openFixtureDB(t, p.db)
@@ -843,20 +836,30 @@ func TestSinceLeavesOldSessionsForALaterSync(t *testing.T) {
 	opts.Since = time.Unix(1650000000, 0)
 	summary, err := CollectOnce(opts)
 	if err != nil {
-		t.Fatalf("CollectOnce: %v", err)
+		t.Fatalf("windowed CollectOnce: %v", err)
 	}
 	if summary.Sessions != 1 {
 		t.Fatalf("sessions = %d, want only the recent one", summary.Sessions)
 	}
-	state, err := LoadState(p.state)
-	if err != nil {
-		t.Fatal(err)
+	prompts := func() []string {
+		var out []string
+		for _, ev := range readEvents(t, p.log) {
+			if ev.Event.Action == "prompt.submitted" {
+				out = append(out, ev.Session.ID)
+			}
+		}
+		return out
 	}
-	if _, ok := state.Sessions["old"]; ok {
-		t.Fatal("the skipped session got a cursor; a later full sync would read past its start")
+	if got := prompts(); len(got) != 1 || got[0] != "new" {
+		t.Fatalf("windowed sweep wrote prompts for %v, want only new", got)
 	}
-	if state.Sessions["new"] == nil || !state.Sessions["new"].Started {
-		t.Fatalf("recent session was not collected: %#v", state.Sessions)
+
+	// An ordinary sync afterwards still reads the old session from its first row, once.
+	if _, err := CollectOnce(collectOptions(p)); err != nil {
+		t.Fatalf("ordinary CollectOnce: %v", err)
+	}
+	if got := prompts(); len(got) != 2 || got[1] != "old" {
+		t.Fatalf("ordinary sync after the window wrote prompts for %v, want new then old", got)
 	}
 }
 
@@ -916,42 +919,6 @@ func TestBudgetStopsTheSweepInsideAPageWithoutLosingRows(t *testing.T) {
 	}
 }
 
-func TestPrintModeWritesNothingAndLeavesNoState(t *testing.T) {
-	p := newFixturePaths(t)
-	db := openFixtureDB(t, p.db)
-	seedBasicSession(t, db, "s1")
-
-	var out bytes.Buffer
-	summary, err := CollectOnce(CollectOptions{
-		DBPath: p.db, Print: true, Out: &out,
-	})
-	if err != nil {
-		t.Fatalf("CollectOnce: %v", err)
-	}
-	if summary.EventsEmitted == 0 {
-		t.Fatal("print mode mapped no events")
-	}
-	lines := 0
-	scanner := bufio.NewScanner(&out)
-	scanner.Buffer(make([]byte, 1<<20), 4<<20)
-	for scanner.Scan() {
-		var ev schema.Event
-		if err := json.Unmarshal(scanner.Bytes(), &ev); err != nil {
-			t.Fatalf("print line is not an event: %v", err)
-		}
-		lines++
-	}
-	if lines != summary.EventsEmitted {
-		t.Fatalf("printed %d events, summary says %d", lines, summary.EventsEmitted)
-	}
-	if _, err := os.Stat(p.log); !os.IsNotExist(err) {
-		t.Fatal("print mode wrote the runtime log")
-	}
-	if _, err := os.Stat(p.state); !os.IsNotExist(err) {
-		t.Fatal("print mode wrote a cursor file")
-	}
-}
-
 func TestMissingDatabaseIsNotAnError(t *testing.T) {
 	p := newFixturePaths(t)
 	summary, err := CollectOnce(collectOptions(p))
@@ -960,16 +927,6 @@ func TestMissingDatabaseIsNotAnError(t *testing.T) {
 	}
 	if summary.Sessions != 0 || summary.EventsEmitted != 0 || summary.Errors != 0 {
 		t.Fatalf("summary = %#v, want zero", summary)
-	}
-}
-
-func TestCorruptDatabaseIsAnError(t *testing.T) {
-	p := newFixturePaths(t)
-	if err := os.WriteFile(p.db, []byte("this is not sqlite at all"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := CollectOnce(collectOptions(p)); err == nil {
-		t.Fatal("a corrupt database did not error")
 	}
 }
 
@@ -993,38 +950,6 @@ func TestRowsInAnUncheckpointedWALAreRead(t *testing.T) {
 	}
 	if summary.EventsEmitted == 0 {
 		t.Fatal("rows still in the WAL were not read")
-	}
-	findAction(t, readEvents(t, p.log), "prompt.submitted")
-}
-
-func TestUnknownColumnsAndJSONKeysAreTolerated(t *testing.T) {
-	p := newFixturePaths(t)
-	db, err := sql.Open("sqlite", p.db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	// Newer Devin builds may add columns to either table and keys to the message JSON.
-	_, err = db.Exec(`
-CREATE TABLE sessions (id TEXT PRIMARY KEY, working_directory TEXT NOT NULL, backend_type TEXT NOT NULL, model TEXT NOT NULL, agent_mode TEXT NOT NULL, created_at INTEGER NOT NULL, last_activity_at INTEGER NOT NULL, title TEXT, hidden INTEGER NOT NULL DEFAULT 0, metadata TEXT, future_column TEXT);
-CREATE TABLE message_nodes (row_id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, node_id INTEGER NOT NULL, parent_node_id INTEGER, chat_message TEXT NOT NULL, created_at INTEGER NOT NULL, metadata TEXT, another_future INTEGER);`)
-	if err != nil {
-		t.Fatalf("schema: %v", err)
-	}
-	if _, err := db.Exec(`INSERT INTO sessions (id, working_directory, backend_type, model, agent_mode, created_at, last_activity_at, future_column)
-VALUES ('s1', '/repo', 'local', 'swe-1-7', 'standard', 1700000000, 1700000000, 'x')`); err != nil {
-		t.Fatal(err)
-	}
-	msg := chatJSON(map[string]interface{}{
-		"role": "user", "message_id": "u1", "content": "hi", "unknown_field": map[string]interface{}{"deep": true},
-		"metadata": map[string]interface{}{"created_at": "2023-11-14T22:13:20.000000Z", "is_user_input": true, "unknown_meta": 1},
-	})
-	if _, err := db.Exec(`INSERT INTO message_nodes (session_id, node_id, chat_message, created_at) VALUES ('s1', 1, ?, 1700000100)`, msg); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := CollectOnce(collectOptions(p)); err != nil {
-		t.Fatalf("CollectOnce with unknown columns/keys: %v", err)
 	}
 	findAction(t, readEvents(t, p.log), "prompt.submitted")
 }

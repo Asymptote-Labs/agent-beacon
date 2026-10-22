@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -198,6 +197,43 @@ func TestDashboardAPIsSurfaceVSCodeEvents(t *testing.T) {
 	}
 	if result.TotalMatched != 3 {
 		t.Fatalf("vscode filtered events = %d, want 3", result.TotalMatched)
+	}
+}
+
+// The activity page's action and model filters reach ReadEvents only through /api/events' query
+// string; a parameter the handler stops reading silently turns the filter into "show everything".
+func TestEventsEndpointAppliesTheActionAndModelFilters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	prompt := testSchemaEvent("2026-05-13T01:00:00Z", "cursor", "prompt.submitted", "prompt", "repo-a")
+	prompt.Event.ID = "prompt"
+	prompt.Model = "gpt-5.5"
+	command := testSchemaEvent("2026-05-13T01:01:00Z", "cursor", "command.executed", "command", "repo-a")
+	command.Event.ID = "command"
+	command.Model = "claude-4-sonnet"
+	writeTestLog(t, path, marshalEvents(t, prompt, command)...)
+
+	handler, err := Handler(Options{LogPath: path, UserMode: true})
+	if err != nil {
+		t.Fatalf("Handler returned error: %v", err)
+	}
+	for query, wantID := range map[string]string{
+		"action=prompt.submitted": "prompt",
+		"action=command.executed": "command",
+		"model=gpt-5.5":           "prompt",
+		"model=claude-4-sonnet":   "command",
+	} {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/events?"+query, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d, body=%s", query, rec.Code, rec.Body.String())
+		}
+		var result EventResult
+		if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+			t.Fatalf("%s: decode response: %v", query, err)
+		}
+		if result.TotalMatched != 1 || len(result.Events) != 1 || result.Events[0].Event.Event.ID != wantID {
+			t.Errorf("%s: matched %d events %+v, want only %q", query, result.TotalMatched, result.Events, wantID)
+		}
 	}
 }
 
@@ -474,51 +510,6 @@ func TestRecurringSessionsExcludeMissingAndBlankPrompts(t *testing.T) {
 	}
 }
 
-func TestRecurringSessionsCompareMissingHarnessAndRepositoryConsistently(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "runtime.jsonl")
-	events := []schema.Event{
-		recurringTestEvent("2026-05-13T01:00:00Z", "session-a", "same prompt", "", "", "alice"),
-		recurringTestEvent("2026-05-13T01:01:00Z", "session-b", "same prompt", "  ", "  ", "alice"),
-	}
-	writeTestLog(t, path, marshalEvents(t, events...)...)
-
-	result, err := ReadSessions(path, EventQuery{Limit: 10})
-	if err != nil {
-		t.Fatalf("ReadSessions returned error: %v", err)
-	}
-	for _, session := range result.Sessions {
-		if !session.IsRecurring || session.RecurrenceCount != 2 {
-			t.Fatalf("session %#v, want missing harness/repository recurring count 2", session)
-		}
-	}
-}
-
-func TestRecurringSessionsCountsTwoAndMoreOccurrences(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "runtime.jsonl")
-	events := []schema.Event{
-		recurringTestEvent("2026-05-13T01:00:00Z", "pair-a", "pair", "cursor", "repo-a", "alice"),
-		recurringTestEvent("2026-05-13T01:01:00Z", "pair-b", "pair", "cursor", "repo-a", "alice"),
-		recurringTestEvent("2026-05-13T02:00:00Z", "triple-a", "triple", "cursor", "repo-a", "alice"),
-		recurringTestEvent("2026-05-13T02:01:00Z", "triple-b", "triple", "cursor", "repo-a", "alice"),
-		recurringTestEvent("2026-05-13T02:02:00Z", "triple-c", "triple", "cursor", "repo-a", "alice"),
-	}
-	writeTestLog(t, path, marshalEvents(t, events...)...)
-
-	result, err := ReadSessions(path, EventQuery{Limit: 10})
-	if err != nil {
-		t.Fatalf("ReadSessions returned error: %v", err)
-	}
-	for _, session := range result.Sessions {
-		want := 2
-		if strings.HasPrefix(session.ID, "triple-") {
-			want = 3
-		}
-		if !session.IsRecurring || session.RecurrenceCount != want {
-			t.Fatalf("session %q recurrence = %t/%d, want true/%d", session.ID, session.IsRecurring, session.RecurrenceCount, want)
-		}
-	}
-}
-
 func TestRecurringSessionsRespectInclusiveDateRange(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	events := []schema.Event{
@@ -756,56 +747,6 @@ func TestHandlerEventEndpointOmitsRawAndSetsSecurityHeaders(t *testing.T) {
 	}
 	if _, ok := response["raw"]; ok {
 		t.Fatal("event response unexpectedly included raw JSONL bytes")
-	}
-}
-
-func TestHandlerEventsEndpoint(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "runtime.jsonl")
-	writeTestLog(t, path, testEvent("2026-05-13T01:00:00Z", "cursor", "prompt.submitted", "prompt", "repo-a"))
-
-	handler, err := Handler(Options{LogPath: path, UserMode: true})
-	if err != nil {
-		t.Fatalf("Handler returned error: %v", err)
-	}
-	req := httptest.NewRequest(http.MethodGet, "/api/events?action=prompt.submitted", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	var result EventResult
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(result.Events) != 1 {
-		t.Fatalf("events len = %d, want 1", len(result.Events))
-	}
-}
-
-func TestHandlerEventsEndpointParsesModelFilter(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "runtime.jsonl")
-	event := testSchemaEvent("2026-05-13T01:00:00Z", "cursor", "prompt.submitted", "prompt", "repo-a")
-	event.Model = "gpt-5.5"
-	writeTestLog(t, path, marshalEvents(t, event)...)
-
-	handler, err := Handler(Options{LogPath: path, UserMode: true})
-	if err != nil {
-		t.Fatalf("Handler returned error: %v", err)
-	}
-	req := httptest.NewRequest(http.MethodGet, "/api/events?model=gpt-5.5", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	var result EventResult
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(result.Events) != 1 || result.Events[0].Event.Model != "gpt-5.5" {
-		t.Fatalf("events len/model = %d/%q, want 1/gpt-5.5", len(result.Events), result.Events[0].Event.Model)
 	}
 }
 

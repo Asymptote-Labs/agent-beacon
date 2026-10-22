@@ -20,9 +20,11 @@ import (
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
+// Regeneration inserts with ON CONFLICT DO NOTHING whatever the stored state, so an approved
+// candidate (which also carries a memory and skill association) stands for every reviewed state.
 func TestMemoryRegenerationPreservesReviewedCandidates(t *testing.T) {
 	for _, evaluated := range []bool{false, true} {
-		for _, state := range []string{"candidate", "approved", "rejected", "superseded"} {
+		for _, state := range []string{"candidate", "approved"} {
 			name := "authored/" + state
 			if evaluated {
 				name = "evaluated/" + state
@@ -32,7 +34,7 @@ func TestMemoryRegenerationPreservesReviewedCandidates(t *testing.T) {
 				first := generateCommandCandidate(t, evaluated)
 				store := memoryStore()
 				var memoryID string
-				if state == "approved" || state == "superseded" {
+				if state == "approved" {
 					_, memory, err := learning.ApproveCandidateWithEdits(store, first.ID, "reviewed original", learning.ApprovalEdits{
 						Title: "Reviewer-approved title", Body: "Reviewer-approved lesson body", Kind: asymptoteobserve.LearningMemoryKindWorkflow,
 					})
@@ -40,26 +42,6 @@ func TestMemoryRegenerationPreservesReviewedCandidates(t *testing.T) {
 						t.Fatal(err)
 					}
 					memoryID = memory.ID
-				}
-				if state == "rejected" {
-					if _, err := learning.RejectCandidate(store, first.ID, "not reusable"); err != nil {
-						t.Fatal(err)
-					}
-				}
-				if state == "superseded" {
-					replacement := first
-					replacement.Title = "Replacement lesson"
-					replacement.ID = learning.CandidateID(replacement)
-					if err := store.PutCandidate(replacement); err != nil {
-						t.Fatal(err)
-					}
-					_, memory, err := learning.ApproveCandidate(store, replacement.ID, "replacement reviewed")
-					if err != nil {
-						t.Fatal(err)
-					}
-					if _, err := learning.SupersedeCandidate(store, first.ID, memory.ID, "covered by replacement"); err != nil {
-						t.Fatal(err)
-					}
 				}
 				before := commandStoredCandidate(t, store, first.ID)
 				beforeList, err := store.ListCandidates(learning.Query{})

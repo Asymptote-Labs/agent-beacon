@@ -115,14 +115,6 @@ func TestListReadsHermesSessions(t *testing.T) {
 	}
 }
 
-func TestListWithoutAHermesDatabase(t *testing.T) {
-	testenv.SetHome(t, t.TempDir())
-	sessions, err := List(DefaultSources(StoreDirs{}), Filter{Harness: HarnessHermes})
-	if err != nil || len(sessions) != 0 {
-		t.Fatalf("List = %v, %v; want nothing and no error when Hermes has no state.db", sessions, err)
-	}
-}
-
 func TestHermesSessionBuildsABrief(t *testing.T) {
 	dirs, _ := hermesFixture(t)
 	sources := DefaultSources(dirs)

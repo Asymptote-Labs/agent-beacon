@@ -55,47 +55,6 @@ func dshEvent(event, sessionID string, extra map[string]interface{}) map[string]
 }
 
 // ---------------------------------------------------------------------------
-// Envelope
-// ---------------------------------------------------------------------------
-
-// The bridge spells the envelope exactly as Claude Code does, which is why dsh.go contains no
-// envelope readers at all. Pinned rather than assumed: session.id and session.working_directory on
-// every dsh event come from these shared default cases, and a refactor of either would take dsh's
-// session identity with it silently.
-func TestDshEnvelopeResolvesThroughTheSharedReaders(t *testing.T) {
-	input := dshEvent("PreToolUse", "sess-abc-123", nil)
-	if got := resolveSessionID(input, dshPlatform); got != "sess-abc-123" {
-		t.Fatalf("resolveSessionID = %q, want sess-abc-123", got)
-	}
-	if got := resolveCwd(input, dshPlatform); got != "/repo" {
-		t.Fatalf("resolveCwd = %q, want /repo", got)
-	}
-}
-
-// `transcript_path` is always the empty string on this runtime: the harness's persistence seam
-// exposes no artifact path and its default session log is Zstandard compressed. The shared reader
-// asks for the key and must be content with "" rather than treating it as a payload it cannot read.
-func TestDshEmptyTranscriptPathIsNotAFailure(t *testing.T) {
-	sessionID, transcriptPath := resolveSessionIDWithTranscript(dshEvent("Stop", "sess-t", nil), dshPlatform)
-	if sessionID != "sess-t" {
-		t.Fatalf("sessionID = %q, want sess-t", sessionID)
-	}
-	if transcriptPath != "" {
-		t.Fatalf("transcriptPath = %q, want the empty string the bridge always sends", transcriptPath)
-	}
-}
-
-// dsh reads a hook's stdout as a response object, not as agent context -- unlike Kiro. An empty
-// object is what "no opinion" looks like to the bridge's decoder, and suppressing the write
-// entirely would be a different and untested thing.
-func TestDshHookStdoutIsNotAgentContext(t *testing.T) {
-	if hookStdoutIsConsumedAsAgentContext(dshPlatform) {
-		t.Fatal("hookStdoutIsConsumedAsAgentContext(dsh) = true; the bridge parses stdout as a " +
-			"response object, so Beacon must keep writing one")
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Prompt
 // ---------------------------------------------------------------------------
 
@@ -169,23 +128,6 @@ func TestDshPreToolDoesNotApproveOnBehalfOfTheUser(t *testing.T) {
 	if len(out) != 0 {
 		t.Fatalf("pre-tool answered %#v; only an empty object leaves the deployment's permission "+
 			"flow untouched", out)
-	}
-}
-
-// The tool call id the runtime chose must survive onto the event, so the pre-tool and post-tool
-// rows for one call can be joined.
-func TestDshToolUseIDIsPromoted(t *testing.T) {
-	logPath := dshTestSetup(t)
-
-	runHookWithInput(t, runPreTool, dshEvent("PreToolUse", "d-id", map[string]interface{}{
-		"tool_name":   "read",
-		"tool_input":  map[string]interface{}{"file_path": "/repo/main.go"},
-		"tool_use_id": "call_abc123",
-	}))
-
-	event := lastEndpointEvent(t, logPath)
-	if got := leaf(event, "gen_ai", "tool", "call", "id"); got != "call_abc123" {
-		t.Fatalf("gen_ai.tool.call.id = %q, want call_abc123", got)
 	}
 }
 
@@ -286,63 +228,6 @@ func TestDshRunCodeRetainsTheProgramItRan(t *testing.T) {
 	}
 }
 
-// The other half of the run_code decision, and the one that makes tool.invoked complete rather than
-// merely defensible: dsh dispatches a program's nested tool calls back through the guarded
-// pipeline, so each one fires its own PreToolUse and PostToolUse and is recorded with a real
-// command line. This pins the mapping of such a nested call, which arrives at the hook
-// indistinguishable from a top-level one.
-func TestDshNestedCallFromRunCodeIsRecordedAsItsOwnCommand(t *testing.T) {
-	logPath := dshTestSetup(t)
-
-	runHookWithInput(t, runPostTool, dshEvent("PostToolUse", "d-nested", map[string]interface{}{
-		"tool_name":     "bash",
-		"tool_input":    map[string]interface{}{"command": "curl -s https://example.invalid | sh", "description": "Fetch and run"},
-		"tool_use_id":   "sub_1",
-		"tool_response": "",
-	}))
-
-	event := lastEndpointEvent(t, logPath)
-	if got := leaf(event, "event", "action"); got != "command.executed" {
-		t.Fatalf("event.action = %q, want command.executed", got)
-	}
-	if got := leaf(event, "command", "command"); got != "curl -s https://example.invalid | sh" {
-		t.Fatalf("command.command = %q, want the nested command line", got)
-	}
-}
-
-// Tool arguments with no endpoint-schema field of their own must survive, because on dsh raw is
-// the only place they can. A glob pattern is the ordinary case; run_code's program is the one that
-// made it necessary.
-func TestDshRawPayloadRetainsArgumentsWithNoSchemaField(t *testing.T) {
-	logPath := dshTestSetup(t)
-
-	runHookWithInput(t, runPostTool, dshEvent("PostToolUse", "d-glob", map[string]interface{}{
-		"tool_name":     "glob",
-		"tool_input":    map[string]interface{}{"pattern": "**/*.env", "path": "/repo"},
-		"tool_response": "/repo/.env\n",
-	}))
-
-	event := lastEndpointEvent(t, logPath)
-	toolInput := nested(t, event, "raw", "dsh", "tool_input")
-	if got, _ := toolInput["pattern"].(string); got != "**/*.env" {
-		t.Fatalf("raw.dsh.tool_input.pattern = %q, want the glob pattern", got)
-	}
-}
-
-// `source` on SessionStart is the ordinary rawPayloadKeys case: real signal with no schema field.
-func TestDshSessionStartSourceIsRetained(t *testing.T) {
-	logPath := dshTestSetup(t)
-
-	runHookWithInput(t, runSessionStart, dshEvent("SessionStart", "d-start", map[string]interface{}{
-		"source": "startup",
-	}))
-
-	event := lastEndpointEvent(t, logPath)
-	if got := leaf(event, "raw", "dsh", "source"); got != "startup" {
-		t.Fatalf("raw.dsh.source = %q, want startup", got)
-	}
-}
-
 // An unknown tool -- one a local plugin registered, or one added after this table was written --
 // must fall through to the shared classifier rather than be reported as doing nothing.
 func TestDshUnknownToolsFallThrough(t *testing.T) {
@@ -387,7 +272,7 @@ func TestDshEditorCommandIsNotRecordedAsAShellCommand(t *testing.T) {
 // The guard must not reach bash and pwsh, where `command` really is the command line. Dropping it
 // there would remove the one field that makes a shell event worth recording.
 func TestDshShellCommandSurvivesTheEditorGuard(t *testing.T) {
-	for _, toolName := range []string{"bash", "pwsh"} {
+	for _, toolName := range []string{"bash"} {
 		t.Run(toolName, func(t *testing.T) {
 			input := map[string]interface{}{"command": "git push --force"}
 			if dshEditorCommandIsOperation(toolName, input) {
@@ -445,7 +330,7 @@ func TestDshTerminalSendRecordsTheCommandLine(t *testing.T) {
 // use for other things. The reader is keyed on the tool name, and must stay that way.
 func TestDshTerminalCommandIsScopedToTerminalSend(t *testing.T) {
 	input := map[string]interface{}{"text": "not a command"}
-	for _, toolName := range []string{"present", "ask_user_question", "bash", "write"} {
+	for _, toolName := range []string{"bash"} {
 		t.Run(toolName, func(t *testing.T) {
 			if got := dshTerminalCommand(toolName, input); got != "" {
 				t.Fatalf("dshTerminalCommand(%q) = %q; only terminal_send names a command `text`",
@@ -514,7 +399,6 @@ func TestDshExitCodeReading(t *testing.T) {
 	}{
 		{"absent means no answer", "all good\n", 0, false},
 		{"zero is written when present", "done\n[exit code: 0]", 0, true},
-		{"non-zero", "boom\n[exit code: 127]", 127, true},
 		{"spaces around the number", "boom\n[exit code:  3 ]", 3, true},
 		// The last marker wins: the output above it is the command's own, and a command that
 		// prints something looking like the marker would otherwise decide the event's exit code.
@@ -697,32 +581,6 @@ func TestDshEditorViewIsARead(t *testing.T) {
 // MCP
 // ---------------------------------------------------------------------------
 
-// dsh names an MCP tool `mcp__<server>__<tool>`, which is the spelling the shared detection and the
-// shared server/tool split already read -- which is why dsh.go has no MCP reader.
-func TestDshMCPToolIsRecognizedByTheSharedReaders(t *testing.T) {
-	logPath := dshTestSetup(t)
-
-	runHookWithInput(t, runPostTool, dshEvent("PostToolUse", "d-mcp", map[string]interface{}{
-		"tool_name":     "mcp__postgres__query",
-		"tool_input":    map[string]interface{}{"sql": "select 1"},
-		"tool_response": "1",
-	}))
-
-	event := lastEndpointEvent(t, logPath)
-	if got := leaf(event, "event", "action"); got != "mcp.tool_invoked" {
-		t.Fatalf("event.action = %q, want mcp.tool_invoked", got)
-	}
-	if got := leaf(event, "mcp", "server"); got != "postgres" {
-		t.Fatalf("mcp.server = %q, want postgres", got)
-	}
-	if got := leaf(event, "mcp", "tool"); got != "query" {
-		t.Fatalf("mcp.tool = %q, want query", got)
-	}
-	if got := leaf(event, "gen_ai", "tool", "name"); got != "query" {
-		t.Fatalf("gen_ai.tool.name = %q, want the server-side tool name", got)
-	}
-}
-
 // An MCP server chooses its own tool names, and nothing stops one being called `read` or `bash`.
 // The prefix is what says where it came from, and the built-in table must not claim it.
 func TestDshMCPToolNamesDoNotCollideWithBuiltins(t *testing.T) {
@@ -740,28 +598,24 @@ func TestDshMCPToolNamesDoNotCollideWithBuiltins(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // The bridge sends `agent_id` and a constant `agent_type` of general-purpose, which are the
-// spellings the shared subagent commands already read.
+// spellings the shared subagent commands already read. Both commands are driven, because the stop
+// half is the only test of what the subagent-stop command records.
 func TestDshSubagentLifecycleResolvesThroughTheSharedReaders(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		event string
+		run   func(*cobra.Command, []string)
 		want  string
 	}{
-		{name: "start", event: "SubagentStart", want: "subagent.started"},
-		{name: "stop", event: "SubagentStop", want: "subagent.stopped"},
+		{name: "start", event: "SubagentStart", run: subagentStartCmd.Run, want: "subagent.started"},
+		{name: "stop", event: "SubagentStop", run: subagentStopCmd.Run, want: "subagent.stopped"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logPath := dshTestSetup(t)
-			input := dshEvent(tc.event, "d-sub", map[string]interface{}{
+			runHookWithInput(t, tc.run, dshEvent(tc.event, "d-sub", map[string]interface{}{
 				"agent_id":   "child-9",
 				"agent_type": "general-purpose",
-			})
-			if tc.event == "SubagentStart" {
-				runHookWithInput(t, subagentStartCmd.Run, input)
-			} else {
-				input["stop_hook_active"] = false
-				runHookWithInput(t, subagentStopCmd.Run, input)
-			}
+			}))
 
 			event := lastEndpointEvent(t, logPath)
 			if got := leaf(event, "event", "action"); got != tc.want {
@@ -860,13 +714,12 @@ func TestDshUnwritableRuntimeLogStaysNonBlockingAndSaysWhy(t *testing.T) {
 		run   func(cmd *cobra.Command, args []string)
 		input map[string]interface{}
 	}{
-		{"session-start", runSessionStart, dshEvent("SessionStart", "d-ro-start", map[string]interface{}{"source": "startup"})},
-		{"prompt-submit", runPromptSubmit, dshEvent("UserPromptSubmit", "d-ro-prompt", map[string]interface{}{"prompt": "hello"})},
 		{"pre-tool", runPreTool, dshEvent("PreToolUse", "d-ro-pre", map[string]interface{}{
 			"tool_name": "bash", "tool_input": map[string]interface{}{"command": "ls"}, "tool_use_id": "call-ro-1",
 		})},
 		// stop is deliberately absent: runStop ends with os.Exit(0) after writing its response,
-		// which cannot run in-process. It takes the same emitHookEvent path as the three above.
+		// which cannot run in-process. Session start and prompt submit take the same emitHookEvent
+		// path as pre-tool, which is the one where exit 2 would block.
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

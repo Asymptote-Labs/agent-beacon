@@ -628,10 +628,6 @@ func endpointLogPath() string {
 	return filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl")
 }
 
-func redactEndpointString(value string) string {
-	return asymptoteobserve.RedactString(value)
-}
-
 func sanitizeEndpointMap(input map[string]interface{}) map[string]interface{} {
 	return asymptoteobserve.SanitizeMap(input, asymptoteobserve.PrivacyOptions{
 		RedactSecrets: true,
