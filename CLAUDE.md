@@ -510,7 +510,11 @@ Use these npm trusted publisher values:
 - Organization or owner: `asymptote-labs`
 - Repository: `agent-beacon`
 - Workflow filename: `npm-publish-sdk.yml`
-- Environment: leave unset unless the workflow is updated to declare one
+- Environment: `npm-publish`
+
+The workflow runs in the `npm-publish` GitHub environment, which must allow deployments only from
+`sdk-js-v*` tags. npm accepts a publish only from that environment, so the tag restriction is what
+keeps a branch from publishing.
 
 ### Browser Extension Release
 
