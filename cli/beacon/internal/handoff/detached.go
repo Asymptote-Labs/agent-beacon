@@ -67,14 +67,22 @@ type launchSpec struct {
 // hold paths, never credentials, so they may be written to the launch specification.
 var carriedEnvNames = []string{
 	"CLAUDE_CONFIG_DIR",
+	"CLINE_DIR",
 	"CODEX_HOME",
 	"COPILOT_HOME",
 	"CURSOR_CONFIG_DIR",
 	"DSH_HOME",
 	"GEMINI_CLI_HOME",
 	"HERMES_HOME",
+	"KIMI_CODE_HOME",
 	"KIRO_HOME",
+	"OH_PERSISTENCE_DIR",
+	"OMO_CODING_AGENT_DIR",
+	"OPENCLAW_STATE_DIR",
 	"PI_CODING_AGENT_DIR",
+	"PI_CONFIG_DIR",
+	"PRIME_AGENT_CODING_AGENT_DIR",
+	"SENPI_CODING_AGENT_DIR",
 	"XDG_CONFIG_HOME",
 	"XDG_DATA_HOME",
 	"XDG_STATE_HOME",
@@ -170,8 +178,15 @@ func LaunchDetached(plan Plan, opts DetachedOptions) (DetachedResult, error) {
 	status, err := waitLaunchStatus(files.statusPath, opts)
 	if err != nil {
 		// Remove the specification so a terminal that opens late finds nothing to run: the caller
-		// is told the launch failed and may retry, which must not start the runtime twice.
-		cleanup()
+		// is told the launch failed and may retry, which must not start the runtime twice. The
+		// trampoline claims the specification by renaming it, so exactly one of the two wins: when
+		// it is already gone, the terminal took it and the runtime may be starting.
+		removeErr := os.Remove(files.specPath)
+		_ = os.Remove(files.statusPath)
+		_ = os.Remove(files.scriptPath)
+		if os.IsNotExist(removeErr) {
+			return DetachedResult{}, fmt.Errorf("%s opened and took the launch but the target runtime did not confirm startup: %w; it may still start there, so check %s before retrying", command.name, err, command.name)
+		}
 		return DetachedResult{}, fmt.Errorf("%s opened but the target runtime did not confirm startup: %w; the launch was cancelled", command.name, err)
 	}
 	_ = os.Remove(files.statusPath)
@@ -531,30 +546,39 @@ func quoteWindowsArg(arg string) string {
 
 func waitLaunchStatus(path string, opts DetachedOptions) (launchStatus, error) {
 	deadline := opts.Now().Add(opts.StartupTimeout)
+	var decodeErr error
 	for opts.Now().Before(deadline) {
 		data, err := os.ReadFile(path)
 		if err == nil {
 			var status launchStatus
-			if err := json.Unmarshal(data, &status); err != nil {
-				return launchStatus{}, fmt.Errorf("decode launch status: %w", err)
+			decodeErr = json.Unmarshal(data, &status)
+			if decodeErr == nil {
+				return status, nil
 			}
-			return status, nil
-		}
-		if !os.IsNotExist(err) {
+			// The status is renamed into place whole, so this is not a partial write; keep
+			// waiting rather than report a runtime that may be running as failed.
+		} else if !os.IsNotExist(err) {
 			return launchStatus{}, fmt.Errorf("read launch status: %w", err)
 		}
 		opts.Sleep(50 * time.Millisecond)
+	}
+	if decodeErr != nil {
+		return launchStatus{}, fmt.Errorf("timed out waiting for startup confirmation: decode launch status: %w", decodeErr)
 	}
 	return launchStatus{}, errors.New("timed out waiting for startup confirmation")
 }
 
 // RunLaunchSpec consumes a one-time launch specification and runs its target in the new terminal.
 func RunLaunchSpec(path string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
-	spec, err := readLaunchSpec(path)
+	claimed, err := claimLaunchSpec(path)
 	if err != nil {
 		return -1, err
 	}
-	_ = os.Remove(path)
+	spec, err := readLaunchSpecAt(claimed, path)
+	_ = os.Remove(claimed)
+	if err != nil {
+		return -1, err
+	}
 	for _, cleanup := range spec.CleanupPaths {
 		_ = os.Remove(cleanup)
 	}
@@ -580,8 +604,31 @@ func RunLaunchSpec(path string, stdin io.Reader, stdout, stderr io.Writer) (int,
 	return code, err
 }
 
-func readLaunchSpec(path string) (launchSpec, error) {
+// claimLaunchSpec renames the specification out of the path the caller would remove to cancel it.
+// The rename is atomic, so either the caller cancels and the terminal finds nothing, or the terminal
+// claims it and the caller's removal fails.
+func claimLaunchSpec(path string) (string, error) {
 	if !filepath.IsAbs(path) {
+		return "", errors.New("handoff launch spec path must be absolute")
+	}
+	claimed := path + ".claimed"
+	if err := os.Rename(path, claimed); err != nil {
+		if os.IsNotExist(err) {
+			return "", errors.New("handoff launch spec is gone: the launch was cancelled or has already run")
+		}
+		return "", fmt.Errorf("claim handoff launch spec: %w", err)
+	}
+	return claimed, nil
+}
+
+func readLaunchSpec(path string) (launchSpec, error) {
+	return readLaunchSpecAt(path, path)
+}
+
+// readLaunchSpecAt reads the specification stored at path, which was published as published; the
+// paths it names must stay in the published file's directory.
+func readLaunchSpecAt(path, published string) (launchSpec, error) {
+	if !filepath.IsAbs(path) || !filepath.IsAbs(published) {
 		return launchSpec{}, errors.New("handoff launch spec path must be absolute")
 	}
 	info, err := os.Lstat(path)
@@ -608,7 +655,7 @@ func readLaunchSpec(path string) (launchSpec, error) {
 	if !filepath.IsAbs(spec.Plan.Executable) || !filepath.IsAbs(spec.Plan.Dir) || !filepath.IsAbs(spec.StatusPath) {
 		return launchSpec{}, errors.New("handoff launch spec paths must be absolute")
 	}
-	specDir := filepath.Clean(filepath.Dir(path))
+	specDir := filepath.Clean(filepath.Dir(published))
 	if filepath.Clean(filepath.Dir(spec.StatusPath)) != specDir {
 		return launchSpec{}, errors.New("handoff launch status must stay in the spec directory")
 	}
@@ -626,8 +673,20 @@ func writeLaunchStatus(path string, status launchStatus) error {
 		return err
 	}
 	data = append(data, '\n')
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	// Written beside the status and renamed into place, so the waiting caller never reads a
+	// partly written file.
+	temp := path + ".tmp"
+	if err := os.WriteFile(temp, data, 0o600); err != nil {
+		_ = os.Remove(temp)
 		return fmt.Errorf("write handoff launch status: %w", err)
 	}
-	return os.Chmod(path, 0o600)
+	if err := os.Chmod(temp, 0o600); err != nil {
+		_ = os.Remove(temp)
+		return fmt.Errorf("write handoff launch status: %w", err)
+	}
+	if err := os.Rename(temp, path); err != nil {
+		_ = os.Remove(temp)
+		return fmt.Errorf("write handoff launch status: %w", err)
+	}
+	return nil
 }
