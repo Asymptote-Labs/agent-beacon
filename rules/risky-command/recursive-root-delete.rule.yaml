@@ -1,5 +1,5 @@
 id: recursive-root-delete
-version: 1
+version: 2
 title: Recursive delete targeting a sensitive root path
 description: >
   A recursive `rm` whose target is a filesystem root, home, or a bare wildcard —
@@ -13,7 +13,7 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" &&
-  e.command.command.matches("(?i)\\brm\\s+-[a-z]*[rf][a-z]*\\s+(/|~|\\$HOME|\\*)(\\s|$|/)")
+  e.command.command.matches("(?i)\\brm(\\s+-{1,2}[a-z-]+)*\\s+-[a-z]*[rf][a-z]*(\\s+-{1,2}[a-z-]+)*\\s+(/|~|\\$HOME|\\*)(\\s|$|/|\\*)")
 
 emit:
   reason: "Recursive rm targeting a root, home, or wildcard path"
@@ -30,6 +30,30 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "rm -fr ~/ " }
+        session: { id: s1 }
+  - name: rm_rf_root_glob
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "rm -rf /*" }
+        session: { id: s1 }
+  - name: rm_rf_no_preserve_root
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "rm -rf --no-preserve-root /" }
+        session: { id: s1 }
+  - name: rm_separate_flags_root
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo rm -r -f /" }
+        session: { id: s1 }
+  - name: rm_rf_root_subdir_glob
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "rm -rf /var/log/*" }
         session: { id: s1 }
   - name: rm_rf_local_build
     verdict: no_match
