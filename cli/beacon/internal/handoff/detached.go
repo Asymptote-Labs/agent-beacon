@@ -57,6 +57,27 @@ type launchSpec struct {
 	StatusPath   string    `json:"status_path"`
 	CleanupPaths []string  `json:"cleanup_paths,omitempty"`
 	ExpiresAt    time.Time `json:"expires_at"`
+	// CarriedEnv holds the caller's values of carriedEnvNames. A new terminal starts from its own
+	// environment, not the caller's, so without them a runtime could look for its session store in
+	// a different place. The plan's own Env still wins over them.
+	CarriedEnv map[string]string `json:"carried_env,omitempty"`
+}
+
+// carriedEnvNames are the variables that locate a runtime's configuration and session store. They
+// hold paths, never credentials, so they may be written to the launch specification.
+var carriedEnvNames = []string{
+	"CLAUDE_CONFIG_DIR",
+	"CODEX_HOME",
+	"COPILOT_HOME",
+	"CURSOR_CONFIG_DIR",
+	"DSH_HOME",
+	"GEMINI_CLI_HOME",
+	"HERMES_HOME",
+	"KIRO_HOME",
+	"PI_CODING_AGENT_DIR",
+	"XDG_CONFIG_HOME",
+	"XDG_DATA_HOME",
+	"XDG_STATE_HOME",
 }
 
 type launchStatus struct {
@@ -121,6 +142,7 @@ func LaunchDetached(plan Plan, opts DetachedOptions) (DetachedResult, error) {
 		Plan:       plan,
 		StatusPath: files.statusPath,
 		ExpiresAt:  opts.Now().Add(5 * time.Minute).UTC(),
+		CarriedEnv: carriedEnv(opts.Getenv),
 	}
 	if command.needsScript {
 		spec.CleanupPaths = append(spec.CleanupPaths, files.scriptPath)
@@ -147,7 +169,10 @@ func LaunchDetached(plan Plan, opts DetachedOptions) (DetachedResult, error) {
 	}
 	status, err := waitLaunchStatus(files.statusPath, opts)
 	if err != nil {
-		return DetachedResult{}, fmt.Errorf("%s opened but the target runtime did not confirm startup: %w (launch spec: %s)", command.name, err, files.specPath)
+		// Remove the specification so a terminal that opens late finds nothing to run: the caller
+		// is told the launch failed and may retry, which must not start the runtime twice.
+		cleanup()
+		return DetachedResult{}, fmt.Errorf("%s opened but the target runtime did not confirm startup: %w; the launch was cancelled", command.name, err)
 	}
 	_ = os.Remove(files.statusPath)
 	if status.State != "started" {
@@ -160,6 +185,19 @@ func LaunchDetached(plan Plan, opts DetachedOptions) (DetachedResult, error) {
 		SessionName:   command.sessionName,
 		AttachCommand: command.attachCommand,
 	}, nil
+}
+
+func carriedEnv(getenv func(string) string) map[string]string {
+	var env map[string]string
+	for _, name := range carriedEnvNames {
+		if value := getenv(name); value != "" {
+			if env == nil {
+				env = map[string]string{}
+			}
+			env[name] = value
+		}
+	}
+	return env
 }
 
 func normalizeDetachedOptions(opts DetachedOptions) DetachedOptions {
@@ -304,13 +342,16 @@ func terminalLauncher(plan Plan, files detachedFiles, opts DetachedOptions) (lau
 			mode:        LaunchModeNewTerminal,
 			name:        "Terminal.app",
 			executable:  open,
-			args:        []string{"-n", "-a", "Terminal.app", files.scriptPath},
+			args:        []string{"-a", "Terminal.app", files.scriptPath},
 			needsScript: true,
 		}, nil
 	case "windows":
 		if wt, err := opts.LookPath("wt.exe"); err == nil {
-			args := []string{"-w", "new", "new-tab", "--startingDirectory", plan.Dir, opts.BeaconExecutable}
-			args = append(args, runnerArgs...)
+			// wt splits its command line into subcommands at every ";", so a literal one is escaped.
+			args := []string{"-w", "new", "new-tab", "--startingDirectory", escapeWindowsTerminal(plan.Dir), escapeWindowsTerminal(opts.BeaconExecutable)}
+			for _, arg := range runnerArgs {
+				args = append(args, escapeWindowsTerminal(arg))
+			}
 			return launcherCommand{mode: LaunchModeNewTerminal, name: "Windows Terminal", executable: wt, args: args}, nil
 		}
 		for _, name := range []string{"powershell.exe", "pwsh.exe", "pwsh"} {
@@ -341,6 +382,10 @@ func terminalLauncher(plan Plan, files detachedFiles, opts DetachedOptions) (lau
 	default:
 		return launcherCommand{}, fmt.Errorf("open a new terminal: unsupported platform %s", opts.GOOS)
 	}
+}
+
+func escapeWindowsTerminal(arg string) string {
+	return strings.ReplaceAll(arg, ";", `\;`)
 }
 
 func cmuxLauncher(files detachedFiles, opts DetachedOptions) (launcherCommand, bool) {
@@ -421,7 +466,7 @@ func linuxTerminalArgs(kind, dir, beaconExecutable string, runnerArgs []string) 
 	case "alacritty":
 		return append([]string{"--working-directory", dir, "-e"}, command...), nil
 	case "foot":
-		return append([]string{"--cwd=" + dir}, command...), nil
+		return append([]string{"--working-directory=" + dir}, command...), nil
 	case "x-terminal-emulator", "xterm":
 		return append([]string{"-e"}, command...), nil
 	default:
@@ -512,6 +557,18 @@ func RunLaunchSpec(path string, stdin io.Reader, stdout, stderr io.Writer) (int,
 	_ = os.Remove(path)
 	for _, cleanup := range spec.CleanupPaths {
 		_ = os.Remove(cleanup)
+	}
+	if len(spec.CarriedEnv) > 0 {
+		env := make(map[string]string, len(spec.CarriedEnv)+len(spec.Plan.Env))
+		for name, value := range spec.CarriedEnv {
+			if !overridden(name, spec.Plan.Env) {
+				env[name] = value
+			}
+		}
+		for name, value := range spec.Plan.Env {
+			env[name] = value
+		}
+		spec.Plan.Env = env
 	}
 	started := func() error {
 		return writeLaunchStatus(spec.StatusPath, launchStatus{State: "started"})

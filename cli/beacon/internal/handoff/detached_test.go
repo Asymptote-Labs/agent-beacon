@@ -259,8 +259,57 @@ func TestLaunchDetachedReportsAnUnconfirmedTerminal(t *testing.T) {
 		Sleep:          func(time.Duration) {},
 		StartupTimeout: 2 * time.Second,
 	})
-	if err == nil || !strings.Contains(err.Error(), "did not confirm startup") || !strings.Contains(err.Error(), "launch spec:") {
+	if err == nil || !strings.Contains(err.Error(), "did not confirm startup") || !strings.Contains(err.Error(), "cancelled") {
 		t.Fatalf("err = %v", err)
+	}
+	// A terminal that opens after the caller gave up must find nothing to run.
+	if leftover, _ := filepath.Glob(filepath.Join(dir, "launch-*")); len(leftover) != 0 {
+		t.Fatalf("launch files left behind: %v", leftover)
+	}
+}
+
+func TestLaunchDetachedCarriesStoreLocatingEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	env := map[string]string{"CODEX_HOME": "/home/me/.codex-work", "ANTHROPIC_API_KEY": "secret"}
+	var carried map[string]string
+	_, err := LaunchDetached(Plan{Executable: "/bin/codex", Dir: dir}, DetachedOptions{
+		Mode:             LaunchModeTmux,
+		BeaconExecutable: "/opt/beacon/bin/beacon",
+		SpecDir:          dir,
+		GOOS:             "linux",
+		Getenv:           func(name string) string { return env[name] },
+		LookPath:         func(string) (string, error) { return "/usr/bin/tmux", nil },
+		Start: func(*exec.Cmd) error {
+			specs, _ := filepath.Glob(filepath.Join(dir, "launch-*[0-9a-f].json"))
+			if len(specs) != 1 {
+				return fmt.Errorf("specs = %v", specs)
+			}
+			spec, err := readLaunchSpec(specs[0])
+			if err != nil {
+				return err
+			}
+			carried = spec.CarriedEnv
+			return writeLaunchStatus(spec.StatusPath, launchStatus{State: "started"})
+		},
+		Sleep: func(time.Duration) {},
+	})
+	if err != nil {
+		t.Fatalf("LaunchDetached: %v", err)
+	}
+	if !reflect.DeepEqual(carried, map[string]string{"CODEX_HOME": "/home/me/.codex-work"}) {
+		t.Fatalf("carried env = %v", carried)
+	}
+}
+
+func TestWindowsTerminalEscapesSemicolons(t *testing.T) {
+	files := detachedFiles{id: "0123456789abcdef01234567", specPath: `C:\Users\a;b\handoffs\launch.json`}
+	command, err := terminalLauncher(Plan{Dir: `C:\work;x`}, files, normalizeDetachedOptions(detachedTestOptions("windows", "wt.exe")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(command.args, " ")
+	if !strings.Contains(joined, `C:\work\;x`) || !strings.Contains(joined, `a\;b`) {
+		t.Fatalf("args = %q", command.args)
 	}
 }
 
@@ -268,7 +317,7 @@ func TestRunLaunchSpecStartsTheExactPlanAndConsumesPrivateFiles(t *testing.T) {
 	testenv.RequirePOSIXExecutableFixtures(t)
 	dir := t.TempDir()
 	script := filepath.Join(dir, "agent")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s|%s' \"$1\" \"$HANDOFF_MODE\"\n"), 0o700); err != nil {
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s|%s|%s' \"$1\" \"$HANDOFF_MODE\" \"$CODEX_HOME\"\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	specPath := filepath.Join(dir, "launch.json")
@@ -288,6 +337,8 @@ func TestRunLaunchSpecStartsTheExactPlanAndConsumesPrivateFiles(t *testing.T) {
 		StatusPath:   statusPath,
 		CleanupPaths: []string{cleanupPath},
 		ExpiresAt:    time.Now().Add(time.Minute),
+		// The plan's own Env wins over a carried value.
+		CarriedEnv: map[string]string{"CODEX_HOME": "/carried/codex", "HANDOFF_MODE": "carried"},
 	}
 	if err := writeLaunchSpec(specPath, spec); err != nil {
 		t.Fatal(err)
@@ -297,7 +348,7 @@ func TestRunLaunchSpecStartsTheExactPlanAndConsumesPrivateFiles(t *testing.T) {
 	if err != nil || code != 0 {
 		t.Fatalf("RunLaunchSpec = %d, %v", code, err)
 	}
-	if stdout.String() != "argument with spaces|safe" {
+	if stdout.String() != "argument with spaces|safe|/carried/codex" {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 	for _, path := range []string{specPath, cleanupPath} {
