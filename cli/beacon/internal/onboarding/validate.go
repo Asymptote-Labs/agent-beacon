@@ -57,6 +57,7 @@ var (
 	ErrEmailDomainTooLong = errors.New("the domain is too long")
 	ErrEmailNoDot         = errors.New("the domain needs a dot (for example: company.com)")
 	ErrEmailEmptyLabel    = errors.New("the domain has an empty part, like a doubled or trailing dot")
+	ErrEmailLabelHyphen   = errors.New("a domain part can't start or end with a hyphen")
 	ErrEmailBadTLD        = errors.New("the domain doesn't end in a valid extension")
 	ErrEmailPlaceholder   = errors.New("that looks like a placeholder address")
 )
@@ -190,6 +191,11 @@ func NormalizeEmail(input string) (string, error) {
 			if !isLower && !isDigit && r != '-' {
 				return "", ErrEmailBadTLD
 			}
+		}
+		// DNS labels cannot start or end with a hyphen (RFC 1035). A hyphen in
+		// the middle, including the punycode "--", is a real name.
+		if strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+			return "", ErrEmailLabelHyphen
 		}
 	}
 	tld := labels[len(labels)-1]
