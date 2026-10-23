@@ -123,6 +123,65 @@ test('captures the prompt when the page uses fetch(new Request(...))', async ({
   expect(p['beacon.prompt.text']).toBe('What is the capital of France?');
 });
 
+// claude.ai as of October 2026: the completion body is a gzip-compressed
+// Uint8Array, and web_search runs server side with its results streamed back
+// as tool_result blocks.
+test('captures a gzip-compressed prompt and server-side tool results', async ({
+  context,
+  serviceWorker,
+  replay,
+  mockCollector,
+}) => {
+  replay.setCase({
+    site: 'claude',
+    name: 'web-search',
+    conversationId: CONV,
+    prompt: 'Search the web for the latest NASA news.',
+    completionPath: COMPLETION_PATH,
+    requestStyle: 'gzip',
+  });
+  await seedSettings(serviceWorker, {
+    enabled: true,
+    retention: 'full',
+    endpoint: mockCollector.url,
+    sites: { claude_web: true, chatgpt_web: true },
+  });
+
+  const page = await context.newPage();
+  await page.goto('https://claude.ai/chat');
+  await expect(page.locator('[data-testid="assistant-message"]')).toHaveAttribute(
+    'data-complete',
+    '1',
+  );
+
+  await expect
+    .poll(() => allRecords(mockCollector.received).filter((r) => flatAttrs(r.attributes)['beacon.event.action'] === 'tool.invoked').length, { timeout: 10_000 })
+    .toBe(2);
+  const p = flatAttrs(recordByAction(mockCollector.received, 'prompt.submitted')!.attributes);
+  expect(p['beacon.prompt.text']).toBe('Search the web for the latest NASA news.');
+
+  const tools = allRecords(mockCollector.received)
+    .map((r) => flatAttrs(r.attributes))
+    .filter((a) => a['beacon.event.action'] === 'tool.invoked');
+  expect(tools.map((a) => JSON.parse(String(a['gen_ai.tool.call.arguments'])).query)).toEqual([
+    'NASA news today',
+    'NASA October 2026',
+  ]);
+  const results = tools.map((a) => JSON.parse(String(a['gen_ai.tool.call.result'])) as { url: string }[]);
+  expect(results.map((r) => r.map((x) => x.url))).toEqual([
+    ['https://news.example.com/nasa-today', 'https://space.example.org/updates'],
+    ['https://space.example.org/artemis'],
+  ]);
+
+  const resp = flatAttrs(recordByAction(mockCollector.received, 'agent.response.completed')!.attributes);
+  expect(JSON.parse(String(resp['gen_ai.output.messages']))).toEqual([
+    {
+      role: 'assistant',
+      parts: [{ type: 'text', content: 'One recent NASA headline: a new country signed the Artemis Accords.' }],
+    },
+  ]);
+});
+
 test('respects the disabled toggle (no delivery)', async ({
   context,
   serviceWorker,

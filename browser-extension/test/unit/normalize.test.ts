@@ -163,6 +163,15 @@ describe('normalizeTurn — full retention, simple completed turn', () => {
   });
 });
 
+describe('normalizeTurn — a turn with no prompt', () => {
+  // A regenerated answer: claude.ai's retry_completion sends an empty prompt.
+  it('emits no prompt.submitted record, only the response', () => {
+    const { logRecords } = normalize(baseTurn({ promptText: '', inputMessages: [] }));
+    expect(byAction(logRecords, 'prompt.submitted')).toBeUndefined();
+    expect(byAction(logRecords, 'agent.response.completed')).toBeTruthy();
+  });
+});
+
 describe('normalizeTurn — retention modes', () => {
   it('metadata retention drops the prompt.submitted record and all text', () => {
     const { logRecords } = normalize(baseTurn(), 'metadata');
