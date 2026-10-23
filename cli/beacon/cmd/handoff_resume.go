@@ -21,6 +21,7 @@ type handoffResumeOptions struct {
 	agent    string
 	newOnly  bool
 	cwd      string
+	launch   string
 	print    bool
 	yes      bool
 	jsonPlan bool
@@ -43,10 +44,12 @@ never inlined into the command line. Beacon cannot start DeepSeek Harness, and H
 only reopen their own sessions, so a session of theirs continues in another runtime named with
 --agent.
 
-The runtime runs in the session's directory, in this terminal. Beacon asks before launching unless
---yes is given; --print shows what would run without writing or launching anything. Beacon never
-passes a flag that turns a runtime's approvals off, and names the mode that asks where a CLI takes
-one: Cline, for example, is always started with --auto-approve false.`,
+The runtime starts in the session's directory. By default it owns this terminal while it runs.
+--launch auto opens a new terminal on a desktop and uses tmux in a headless or SSH environment;
+new-terminal and tmux select those modes explicitly. Beacon asks before launching unless --yes is
+given; --print shows what would run without writing or launching anything. Beacon never passes a
+flag that turns a runtime's approvals off, and names the mode that asks where a CLI takes one:
+Cline, for example, is always started with --auto-approve false.`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE:         runHandoffResume,
@@ -54,15 +57,20 @@ one: Cline, for example, is always started with --auto-approve false.`,
 
 // Swapped by tests.
 var (
-	handoffLookPath             = exec.LookPath
-	handoffLaunch               = handoff.Launch
-	handoffIsTerminal           = func() bool { return isTerminal(os.Stdin) && isTerminal(os.Stdout) }
-	handoffStdin      io.Reader = os.Stdin
-	handoffExit                 = os.Exit
+	handoffLookPath                 = exec.LookPath
+	handoffLaunch                   = handoff.Launch
+	handoffLaunchDetached           = handoff.LaunchDetached
+	handoffIsTerminal               = func() bool { return isTerminal(os.Stdin) && isTerminal(os.Stdout) }
+	handoffStdin          io.Reader = os.Stdin
+	handoffExit                     = os.Exit
+	handoffExecutable               = os.Executable
 )
 
 func runHandoffResume(cmd *cobra.Command, args []string) error {
 	opts := handoffResumeOpts
+	if err := handoff.ValidateLaunchMode(opts.launch); err != nil {
+		return fmt.Errorf("--launch: %w", err)
+	}
 	if opts.jsonPlan && !opts.print {
 		return errors.New("--json describes the plan and needs --print")
 	}
@@ -130,6 +138,26 @@ func runHandoffResume(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
+	if opts.launch != "" && opts.launch != handoff.LaunchModeCurrent {
+		beaconExecutable, err := handoffExecutable()
+		if err != nil {
+			return fmt.Errorf("resolve beacon executable: %w", err)
+		}
+		result, err := handoffLaunchDetached(plan, handoff.DetachedOptions{
+			Mode:             opts.launch,
+			BeaconExecutable: beaconExecutable,
+			SpecDir:          briefDir,
+		})
+		if err != nil {
+			return fmt.Errorf("launch %s: %w", handoff.RuntimeLabel(plan.Target), err)
+		}
+		fmt.Fprintf(out, "Launched %s with %s.\n", handoff.RuntimeLabel(plan.Target), result.Launcher)
+		if result.AttachCommand != "" {
+			fmt.Fprintf(out, "Attach with: %s\n", result.AttachCommand)
+		}
+		return nil
+	}
+
 	code, err := handoffLaunch(plan, handoffStdin, out, errOut)
 	if err != nil {
 		return fmt.Errorf("start %s: %w", plan.Executable, err)
@@ -200,6 +228,7 @@ func init() {
 	f.StringVar(&handoffResumeOpts.agent, "agent", "", "Runtime to continue in: "+strings.Join(handoff.StartableNames(), ", ")+" (default the session's own)")
 	f.BoolVar(&handoffResumeOpts.newOnly, "new", false, "Start a new session from a brief even when the session could be reopened")
 	f.StringVar(&handoffResumeOpts.cwd, "cwd", "", "Directory to start the runtime in (default the session's directory)")
+	f.StringVar(&handoffResumeOpts.launch, "launch", handoff.LaunchModeCurrent, "Where to launch: current, auto, new-terminal or tmux")
 	f.BoolVar(&handoffResumeOpts.print, "print", false, "Show what would run without writing a brief or launching anything")
 	f.BoolVar(&handoffResumeOpts.yes, "yes", false, "Launch without asking")
 	f.BoolVar(&handoffResumeOpts.jsonPlan, "json", false, "With --print, describe the plan as JSON")

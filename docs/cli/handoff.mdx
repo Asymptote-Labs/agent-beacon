@@ -122,10 +122,11 @@ Briefs are written to `~/.beacon/endpoint/handoffs`. The directory is `0700` and
 Picks a session up again, in its own runtime or another one.
 
 ```bash
-beacon handoff resume 7f3c2a91                 # reopen it where it ran
-beacon handoff resume 7f3c2a91 --agent codex   # continue a Claude Code session in Codex
-beacon handoff resume 7f3c2a91 --new           # a fresh session in the same runtime, from a brief
-beacon handoff resume 7f3c2a91 --print         # show what would run; writes and launches nothing
+beacon handoff resume 7f3c2a91                                    # reopen it where it ran
+beacon handoff resume 7f3c2a91 --agent codex                      # continue a Claude Code session in Codex
+beacon handoff resume 7f3c2a91 --new                              # a fresh session in the same runtime, from a brief
+beacon handoff resume 7f3c2a91 --agent codex --launch auto --yes  # detached handoff from an agent harness
+beacon handoff resume 7f3c2a91 --print                            # show what would run; writes and launches nothing
 ```
 
 There are two ways to resume:
@@ -197,13 +198,40 @@ Hermes Agent asks before dangerous commands by default. Beacon never passes `--y
 
 Grok Build's configured permission mode can be always-approve. Beacon always passes `--permission-mode default`, the mode that asks before running tools, so a session Beacon starts or reopens never inherits always-approve from that config. You can still change the mode inside the Grok TUI. Grok looks a session id up under the directory it runs in, which is why the resume runs in the session's recorded directory. With `--cwd` naming another directory, a Grok session continues from a brief instead.
 
-The runtime runs in this terminal, in the session's recorded directory. If that directory no longer exists, Beacon stops rather than starting somewhere else; pass `--cwd` to choose a directory. Beacon prints the plan and asks `Continue? [Y/n]` before launching. Without a terminal, it launches only with `--yes`. `beacon handoff resume` exits with the runtime's own exit code.
+By default, the runtime runs in this terminal. `--launch auto` instead opens a new terminal surface
+on a desktop and creates a detached tmux session on SSH or headless Linux. When Beacon runs inside
+cmux on macOS, it opens another terminal in the calling workspace; otherwise it uses Terminal.app.
+This is useful from an agent harness, whose command subprocess generally does not own a TTY that
+another interactive runtime can use.
+
+The launch modes are:
+
+| Mode | Behavior |
+|------|----------|
+| `current` | Run in the calling terminal and wait for the runtime. This is the default. |
+| `auto` | Use another terminal in the calling cmux workspace or Terminal.app on macOS, Windows Terminal or PowerShell on Windows, a supported Linux terminal emulator on a desktop, or tmux on headless Linux/SSH. |
+| `new-terminal` | Require a graphical terminal and fail explicitly when none can be opened. |
+| `tmux` | Create a detached `beacon-handoff-<id>` session and print its `tmux attach` command. |
+
+Linux desktop detection supports `xdg-terminal-exec`, GNOME Terminal, Konsole, Kitty, WezTerm,
+Alacritty, foot, `x-terminal-emulator`, xterm, and a simple executable named by `$TERMINAL`.
+
+Detached launches use a private, expiring `0600` specification under
+`~/.beacon/endpoint/handoffs`. The new terminal runs a hidden Beacon trampoline that consumes the
+specification, starts the exact approval-safe argument vector, and confirms startup to the calling
+process. Prompt or brief content is never interpolated into a terminal-launch shell command.
+
+The runtime starts in the session's recorded directory. If that directory no longer exists, Beacon
+stops rather than starting somewhere else; pass `--cwd` to choose a directory. Beacon prints the
+plan and asks `Continue? [Y/n]` before launching. From a non-TTY tool, pass `--yes` with a detached
+launch mode. A `current` launch exits with the runtime's own exit code.
 
 | Flag | Description |
 |------|-------------|
 | `--agent` | Runtime to continue in, by the names in the tables above. Defaults to the session's own runtime. |
 | `--new` | Start a new session from a brief even when the session could be reopened. |
 | `--cwd` | Directory to start the runtime in. |
+| `--launch` | `current`, `auto`, `new-terminal`, or `tmux`. Defaults to `current`. |
 | `--print` | Show the plan and command without writing a brief or launching anything. |
 | `--json` | With `--print`, describe the plan as JSON (`mode`, `reason`, `target`, `executable`, `args`, `env`, `dir`, `brief_path`). |
 | `--yes` | Launch without asking. |

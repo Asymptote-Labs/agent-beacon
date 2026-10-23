@@ -14,6 +14,17 @@ import (
 // code. The runtime owns the terminal while it runs: an interrupt reaches it through the terminal's
 // process group, so Beacon ignores the interrupt itself instead of exiting underneath it.
 func Launch(plan Plan, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+	return launch(plan, stdin, stdout, stderr, nil)
+}
+
+// LaunchWithStarted runs the plan like Launch and calls started after the runtime process has
+// started successfully. It is used by the detached-launch trampoline to tell the parent Beacon
+// process that the new terminal is ready.
+func LaunchWithStarted(plan Plan, stdin io.Reader, stdout, stderr io.Writer, started func() error) (int, error) {
+	return launch(plan, stdin, stdout, stderr, started)
+}
+
+func launch(plan Plan, stdin io.Reader, stdout, stderr io.Writer, started func() error) (int, error) {
 	cmd := exec.Command(plan.Executable, plan.Args...)
 	cmd.Dir = plan.Dir
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
@@ -23,7 +34,17 @@ func Launch(plan Plan, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 	signal.Notify(interrupts, os.Interrupt)
 	defer signal.Stop(interrupts)
 
-	err := cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return -1, err
+	}
+	if started != nil {
+		if err := started(); err != nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			return -1, err
+		}
+	}
+	err := cmd.Wait()
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		return exitErr.ExitCode(), nil
