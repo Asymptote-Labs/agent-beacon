@@ -62,3 +62,47 @@ test('captures a simple ChatGPT turn end-to-end into normalized OTLP', async ({
     { role: 'assistant', parts: [{ type: 'text', content: 'Good evening! Hello to you as well. Hope your day is going well.' }] },
   ]);
 });
+
+test('captures an answer split around a web search once, with the search as a tool call', async ({
+  context,
+  serviceWorker,
+  replay,
+  mockCollector,
+}) => {
+  const SPLIT_CONV = '6adb0000-0000-8000-8000-000000000001';
+  replay.setCase({
+    site: 'chatgpt',
+    name: 'web-search-split',
+    conversationId: SPLIT_CONV,
+    prompt: 'Boston Marathon',
+    completionPath: COMPLETION_PATH,
+  });
+  await seedSettings(serviceWorker, {
+    enabled: true,
+    retention: 'full',
+    endpoint: mockCollector.url,
+    sites: { claude_web: true, chatgpt_web: true },
+  });
+
+  const page = await context.newPage();
+  await page.goto('https://chatgpt.com/');
+  await expect(page.locator('[data-testid="assistant-message"]')).toHaveAttribute(
+    'data-complete',
+    '1',
+  );
+  await expect
+    .poll(() => recordByAction(mockCollector.received, 'tool.invoked'), { timeout: 10_000 })
+    .toBeTruthy();
+
+  const resp = flatAttrs(recordByAction(mockCollector.received, 'agent.response.completed')!.attributes);
+  expect(JSON.parse(String(resp['gen_ai.output.messages']))).toEqual([
+    {
+      role: 'assistant',
+      parts: [{ type: 'text', content: "The Boston Marathon is the world's oldest annual marathon.\n\n**Next race:** Monday, April 19, 2027." }],
+    },
+  ]);
+  const tool = flatAttrs(recordByAction(mockCollector.received, 'tool.invoked')!.attributes);
+  expect(tool['gen_ai.tool.call.name']).toBe('web_search');
+  expect(JSON.parse(String(tool['gen_ai.tool.call.arguments']))).toEqual({ queries: ['2027 Boston Marathon date'] });
+  expect(JSON.parse(String(tool['gen_ai.tool.call.result'])).search_result_groups).toHaveLength(1);
+});

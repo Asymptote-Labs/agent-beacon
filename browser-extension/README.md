@@ -346,13 +346,19 @@ dashboard), including interleaved sessions with no cross-contamination.
 
 > **Fixtures.** The committed `*.sse` files are **real, sanitized** captures (via
 > `npm run record:fixtures`): `fixtures/claude/simple-turn.sse` (claude.ai) and
-> `fixtures/chatgpt/simple-turn.sse` (ChatGPT). `claude/with-tool-call.sse` is synthetic (documented
-> Anthropic tool-use shape) pending a real tool-call capture. Raw recorder output (`*.page.html`,
+> `fixtures/chatgpt/simple-turn.sse` (ChatGPT). `claude/web-search.sse` and
+> `chatgpt/web-search-split.sse` are sanitized and shortened from October 2026 captures and keep
+> their event and op order. `claude/with-tool-call.sse` is synthetic (documented Anthropic
+> tool-use shape). Raw recorder output (`*.page.html`,
 > `*.meta.json`, `real-*.sse`, `diag-*.sse`) is git-ignored — it can contain personal chat/account
 > data, so only hand-sanitized `*.sse` fixtures are committed.
 >
-> Real-format notes: **claude.ai** emits a leading `conversation_ready` event and nests the model in
-> `message_start.message.model` (typed Anthropic events). **ChatGPT** posts to
-> `/backend-api/f/conversation` and streams OpenAI `delta_encoding: v1` JSON-patch ops (add/append/patch
-> with bare-value path inheritance), model in `metadata.model_slug`. Neither site streams token usage,
-> so `gen_ai.usage.*` is absent for both.
+> Real-format notes: **claude.ai** sends the completion request body gzip-compressed (a `Uint8Array`
+> with `Content-Encoding: gzip`), which the interceptor decompresses (`src/interceptor/request-body.ts`).
+> Its stream nests the model in `message_start.message.model` (typed Anthropic events) and adds
+> `tool_result`, `thinking` and citation blocks plus `ping` and `message_limit` events. **ChatGPT**
+> posts to `/backend-api/f/conversation` and streams OpenAI `delta_encoding: v1` JSON-patch ops
+> (add/append/replace/remove/patch with bare-value path inheritance). Each op's `c` names the message
+> it applies to, and ops for different messages interleave; an answer interrupted by a search
+> streams per-segment messages plus a merged one (`metadata.is_merged_message`). Model in
+> `metadata.model_slug`. Neither site streams token usage, so `gen_ai.usage.*` is absent for both.

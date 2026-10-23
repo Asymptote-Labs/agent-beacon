@@ -146,9 +146,11 @@ export function normalizeTurn(
   // converter lifts the text into the top-level Event.prompt.text field (it
   // only does so for prompt-category events). Without this, the prompt stays
   // buried in raw.attributes and never reaches the queryable prompt.text column.
+  // A turn with no prompt (a regenerated answer) gets no prompt record.
+  const hasPrompt = turn.promptText !== '' || turn.inputMessages.length > 0;
   const prompt = shapeText(turn.promptText, retention);
   const inputMsgs = shapeMessages(turn.inputMessages, retention);
-  if (prompt || inputMsgs) {
+  if (hasPrompt && (prompt || inputMsgs)) {
     const attrs = base('prompt.submitted');
     if (turn.requestModel) attrs.push(str('gen_ai.request.model', turn.requestModel));
     let truncated = false;
@@ -270,7 +272,8 @@ function toolRecord(
     str('gen_ai.tool.call.id', tool.id),
     str('gen_ai.tool.call.name', tool.name),
   ];
-  const args = shapeText(stringify(tool.arguments), retention);
+  // A call whose input the site does not expose has no arguments, not "null".
+  const args = tool.arguments === undefined ? null : shapeText(stringify(tool.arguments), retention);
   let truncated = args?.truncated ?? false;
   if (args) attrs.push(str('gen_ai.tool.call.arguments', args.text));
   if (tool.result !== undefined) {

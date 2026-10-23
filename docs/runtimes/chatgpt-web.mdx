@@ -24,11 +24,12 @@ The extension's main-world interceptor tees the streamed response from the messa
 |---------------|------------------------------|
 | The outbound request body | Prompt text, the input messages, and the requested model |
 | `conversation_id` in the request body or the resume token | `session.id` and `gen_ai.conversation.id` |
-| `add`, `append`, `replace`, and `patch` delta frames | Assistant response text, assembled as it streams |
+| `add`, `append`, `replace`, `remove`, and `patch` delta frames | Assistant response text, assembled as it streams |
+| Messages addressed to `web.run`, and the tool's replies | Web searches: the queries the site reports and the results it returned |
 | The assistant message metadata | The model that actually answered, which can differ from the requested one |
 | `message_stream_complete` or `[DONE]` | Turn completion |
 
-Only the visible assistant message is tracked. Tool and aside messages addressed to another recipient are skipped, so the recorded response is what the user saw.
+One turn streams several messages, and each delta frame names the message it applies to. The response is built from the visible answer only: tool calls, tool replies, and reasoning messages are left out of it. When a web search interrupts the answer, the site streams each part of the answer as its own message and also a merged copy of the whole answer. Beacon records the merged copy, or the parts joined in order when there is none, so the response appears once and in full.
 
 The service worker then posts the turn to the local collector as OTLP GenAI logs. Events carry `harness.collection_method` of `otlp`.
 
@@ -40,10 +41,10 @@ One ChatGPT turn produces:
 
 | Event | When |
 |-------|------|
-| `prompt.submitted` | The request body carried prompt text or input messages |
+| `prompt.submitted` | The request body carried prompt text or input messages. A regenerated answer carries none and gets no prompt event |
 | `agent.response.completed` | The stream finished normally |
 | `agent.response` | The stream ended early, so the response is partial |
-| `tool.invoked` | The turn included web search results, recorded as a `web_search` call |
+| `tool.invoked` | Once per web search, recorded as a `web_search` call with the queries as arguments, when the site reports them, and the search results as the result |
 
 Turns from one conversation share a session id, so a conversation reads as a session in the dashboard even though the site sends no session start or stop signal.
 
@@ -53,7 +54,7 @@ Turns from one conversation share a session id, so a conversation reads as a ses
 |------|---------|
 | Prompt telemetry | Supported, with full prompt text under `full` and `redacted` retention |
 | Assistant response telemetry | Supported, including the response text, the requested model, and the model that answered |
-| Tool telemetry | Partial. Web search activity is captured from the assistant message metadata; other built-in tools are not exposed in a form the adapter can read |
+| Tool telemetry | Partial. Web searches are captured with their results, and with their queries when the site reports them, which it does not do for every search. Other built-in tools are recorded by name, with any result text they stream |
 | Token usage | Not available. ChatGPT web does not report token counts in its stream |
 | Cost | Not available. ChatGPT web does not report per-turn cost to the page |
 | Command and file telemetry | Not applicable. Browser chat performs no local commands or file edits |
@@ -62,7 +63,7 @@ Turns from one conversation share a session id, so a conversation reads as a ses
 | Local JSONL and dashboard | Supported after events reach the collector |
 | MDM deployment | Not covered by Beacon's MDM assets. Distribute through browser policy instead |
 
-Token usage is the main difference from [Claude.ai](/runtimes/claude-web), which does report counts. Reports that roll up token usage will show ChatGPT web turns with no token attribution.
+[Claude.ai](/runtimes/claude-web) has the same gap in practice: its adapter reads counts when they are present, but claude.ai does not send them. Reports that roll up token usage will show browser chat turns with no token attribution.
 
 ## Confirm it is working
 
