@@ -270,7 +270,7 @@ func TestLaunchDetachedReportsAnUnconfirmedTerminal(t *testing.T) {
 
 func TestLaunchDetachedCarriesStoreLocatingEnvironment(t *testing.T) {
 	dir := t.TempDir()
-	env := map[string]string{"CODEX_HOME": "/home/me/.codex-work", "ANTHROPIC_API_KEY": "secret"}
+	env := map[string]string{"CODEX_HOME": "/home/me/.codex-work", "KIMI_CODE_HOME": "/home/me/.kimi", "ANTHROPIC_API_KEY": "secret"}
 	var carried map[string]string
 	_, err := LaunchDetached(Plan{Executable: "/bin/codex", Dir: dir}, DetachedOptions{
 		Mode:             LaunchModeTmux,
@@ -296,7 +296,7 @@ func TestLaunchDetachedCarriesStoreLocatingEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LaunchDetached: %v", err)
 	}
-	if !reflect.DeepEqual(carried, map[string]string{"CODEX_HOME": "/home/me/.codex-work"}) {
+	if !reflect.DeepEqual(carried, map[string]string{"CODEX_HOME": "/home/me/.codex-work", "KIMI_CODE_HOME": "/home/me/.kimi"}) {
 		t.Fatalf("carried env = %v", carried)
 	}
 }
@@ -351,7 +351,7 @@ func TestRunLaunchSpecStartsTheExactPlanAndConsumesPrivateFiles(t *testing.T) {
 	if stdout.String() != "argument with spaces|safe|/carried/codex" {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
-	for _, path := range []string{specPath, cleanupPath} {
+	for _, path := range []string{specPath, specPath + ".claimed", statusPath + ".tmp", cleanupPath} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("%s was not consumed: %v", path, err)
 		}
@@ -474,5 +474,71 @@ func TestLaunchDetachedReportsLauncherStartFailure(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "denied") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestLaunchDetachedReportsALaunchTheTerminalAlreadyTook(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	_, err := LaunchDetached(Plan{Executable: "/bin/codex", Dir: dir}, DetachedOptions{
+		Mode:             LaunchModeTmux,
+		BeaconExecutable: "/opt/beacon/bin/beacon",
+		SpecDir:          dir,
+		GOOS:             "linux",
+		LookPath:         func(string) (string, error) { return "/usr/bin/tmux", nil },
+		// The terminal claims the specification but never confirms startup.
+		Start: func(*exec.Cmd) error {
+			specs, _ := filepath.Glob(filepath.Join(dir, "launch-*[0-9a-f].json"))
+			if len(specs) != 1 {
+				return fmt.Errorf("specs = %v", specs)
+			}
+			_, err := claimLaunchSpec(specs[0])
+			return err
+		},
+		Now: func() time.Time {
+			now = now.Add(time.Second)
+			return now
+		},
+		Sleep:          func(time.Duration) {},
+		StartupTimeout: 2 * time.Second,
+	})
+	if err == nil || !strings.Contains(err.Error(), "may still start") || strings.Contains(err.Error(), "cancelled") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRunLaunchSpecStartsNothingAfterACancel(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "launch-cancelled.json")
+	_, err := RunLaunchSpec(specPath, nil, &strings.Builder{}, &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "cancelled") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestWaitLaunchStatusKeepsWaitingPastAnUnreadableStatus(t *testing.T) {
+	dir := t.TempDir()
+	statusPath := filepath.Join(dir, "status.json")
+	if err := os.WriteFile(statusPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	sleeps := 0
+	status, err := waitLaunchStatus(statusPath, normalizeDetachedOptions(DetachedOptions{
+		Now: func() time.Time { return now },
+		Sleep: func(time.Duration) {
+			sleeps++
+			if sleeps == 2 {
+				if err := writeLaunchStatus(statusPath, launchStatus{State: "started"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+		},
+	}))
+	if err != nil || status.State != "started" {
+		t.Fatalf("status = %+v, %v", status, err)
+	}
+	if _, err := os.Stat(statusPath + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("temporary status left behind: %v", err)
 	}
 }
