@@ -53,7 +53,16 @@ export function parseInterceptEvent(raw: unknown): InterceptEvent | null {
 /** A plausible host name (with optional port), or null. */
 export function parseHost(raw: unknown): string | null {
   if (!str(raw, LIMITS.host) || raw === '') return null;
-  return /^[A-Za-z0-9.-]+(:\d{1,5})?$/.test(raw) ? raw : null;
+  const match = /^([A-Za-z0-9.-]+)(?::(\d{1,5}))?$/.exec(raw);
+  if (!match) return null;
+  if (match[2] !== undefined) {
+    const port = Number(match[2]);
+    // Five digits includes 65536–99999, which are not TCP ports. A chat host
+    // carrying one of those never matches claude.ai or chatgpt.com, so the
+    // intercept is silently dropped.
+    if (!Number.isInteger(port) || port > 65535) return null;
+  }
+  return raw;
 }
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);

@@ -51,8 +51,9 @@ describe('parseHost', () => {
   it('accepts chat hosts', () => {
     expect(parseHost('claude.ai')).toBe('claude.ai');
     expect(parseHost('chatgpt.com:443')).toBe('chatgpt.com:443');
+    expect(parseHost('chatgpt.com:65535')).toBe('chatgpt.com:65535');
   });
-  it.each(['', 'claude.ai/x', 'a b', 42, null])('rejects %o', (h) => {
+  it.each(['', 'claude.ai/x', 'a b', 'chatgpt.com:65536', 'chatgpt.com:99999', 42, null])('rejects %o', (h) => {
     expect(parseHost(h)).toBeNull();
   });
 });
