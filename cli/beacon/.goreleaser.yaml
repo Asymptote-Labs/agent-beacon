@@ -67,6 +67,15 @@ builds:
         # CLI, with a glibc version floor that only shows up on an older or stripped host.
         - cmd: bash -c 'cd ../beacon-hooks && CGO_ENABLED=0 GOOS={{ .Os }} GOARCH={{ .Arch }} go build -ldflags "-s -w -X github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/version.Version={{ .Version }}" -o ../beacon/internal/embedded/hooks.bin .'
           output: true
+        # The CLI writes this embedded copy out as the hooks binary that runtimes run, so it is signed
+        # like the beacon-hooks.exe beside it.
+        - cmd: bash -c 'if [ "{{ .Os }}" = windows ] && [ -n "${AZURE_TRUSTED_SIGNING_ACCOUNT:-}" ]; then pwsh -NoProfile -File ../../packaging/windows/sign-authenticode.ps1 -Path internal/embedded/hooks.bin; fi'
+          output: true
+      post:
+        # Authenticode, before archiving, so the zip and the MSI built from it carry signed binaries.
+        # A no-op unless the release job configured signing.
+        - cmd: bash -c 'if [ "{{ .Os }}" = windows ] && [ -n "${AZURE_TRUSTED_SIGNING_ACCOUNT:-}" ]; then pwsh -NoProfile -File ../../packaging/windows/sign-authenticode.ps1 -Path "{{ .Path }}"; fi'
+          output: true
   - id: beacon-hooks
     dir: ../beacon-hooks
     main: .
@@ -90,6 +99,10 @@ builds:
       # has both or neither.
       - goos: windows
         goarch: arm64
+    hooks:
+      post:
+        - cmd: bash -c 'if [ "{{ .Os }}" = windows ] && [ -n "${AZURE_TRUSTED_SIGNING_ACCOUNT:-}" ]; then pwsh -NoProfile -File ../../packaging/windows/sign-authenticode.ps1 -Path "{{ .Path }}"; fi'
+          output: true
 
 archives:
   - formats:
