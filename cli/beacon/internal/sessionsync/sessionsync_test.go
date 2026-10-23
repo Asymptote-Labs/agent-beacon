@@ -165,3 +165,45 @@ func TestSinkStopsOnBudgetAndRetention(t *testing.T) {
 		t.Fatalf("Retention() without a guard = %d, %d, %v", retained, rotatedOut, err)
 	}
 }
+
+func TestStoppedAndRetentionFinish(t *testing.T) {
+	if !Stopped(writer.ErrBudgetSpent) || !Stopped(errors.Join(errors.New("other"), writer.ErrRetentionWindowFull)) {
+		t.Fatal("a spent budget or a full window does not stop the sweep")
+	}
+	if Stopped(nil) || Stopped(errors.New("read failed")) {
+		t.Fatal("an ordinary error stops the sweep")
+	}
+	if NewRetentionGuard(true, true) != nil || NewRetentionGuard(false, false) != nil || NewRetentionGuard(false, true) == nil {
+		t.Fatal("only a sweep that writes without printing is guarded")
+	}
+
+	// A guard shared by sinks built per event, as collectors do, stops before rotating out the
+	// sweep's first event and reports everything it wrote as retained.
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	guard := NewRetentionGuard(false, true)
+	sink := func() Sink {
+		return Sink{Write: true, Log: writer.Options{Path: logPath, UserMode: true, RotateSize: 512, RotateArchives: 1, Guard: guard}}
+	}
+	var stopErr error
+	written := 0
+	for i := 0; i < 100 && stopErr == nil; i++ {
+		if stopErr = sink().Emit(testEvent(strings.Repeat("x", 100))); stopErr == nil {
+			written++
+		}
+	}
+	if !errors.Is(stopErr, writer.ErrRetentionWindowFull) {
+		t.Fatalf("sweep ended with %v, want ErrRetentionWindowFull", stopErr)
+	}
+	var r Retention
+	if err := r.Finish(sink(), stopErr); err != nil {
+		t.Fatal(err)
+	}
+	if !r.RetentionLimited || r.EventsRetained != written || r.EventsRotatedOut != 0 || written == 0 {
+		t.Fatalf("Retention = %+v after writing %d", r, written)
+	}
+
+	var budget Retention
+	if err := budget.Finish(Sink{}, writer.ErrBudgetSpent); err != nil || budget.RetentionLimited {
+		t.Fatalf("a spent budget finished as %+v, %v", budget, err)
+	}
+}

@@ -80,6 +80,12 @@ type CollectOptions struct {
 	// Budget, when set, caps the bytes this sweep may append. The sweep stops at the first event
 	// that does not fit and returns writer.ErrBudgetSpent, with cursors past only what was written.
 	Budget *writer.Budget
+	// RotateBytes is the size the runtime log rotates at while this sweep writes it; zero is
+	// writer.DefaultRotateBytes.
+	RotateBytes int64
+
+	// guard keeps the sweep from rotating its own output out of the log; CollectOnce sets it.
+	guard *writer.RetentionGuard
 }
 
 type Summary struct {
@@ -89,6 +95,7 @@ type Summary struct {
 	Errors          int `json:"errors"`
 	MalformedLines  int `json:"malformed_lines"`
 	PartialSessions int `json:"partial_sessions"`
+	sessionsync.Retention
 }
 
 func CollectOnce(opts CollectOptions) (summary Summary, err error) {
@@ -116,14 +123,17 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	}()
 
 	var errs []error
+	opts.guard = sessionsync.NewRetentionGuard(opts.Print, opts.Write)
+	var stopErr error
 	for _, ref := range refs {
 		changed, collectErr := collectSession(store, ref, state, opts, &summary)
-		if errors.Is(collectErr, writer.ErrBudgetSpent) {
+		if sessionsync.Stopped(collectErr) {
 			// Not a failed session: this one and the rest are left for a later sync, with cursors
 			// that have not moved past anything that was not written.
 			if changed {
 				summary.SessionsChanged++
 			}
+			stopErr = collectErr
 			errs = append(errs, collectErr)
 			break
 		}
@@ -135,6 +145,9 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 		if changed {
 			summary.SessionsChanged++
 		}
+	}
+	if rotatedOut := summary.Finish(opts.sink(), stopErr); rotatedOut != nil {
+		errs = append(errs, rotatedOut)
 	}
 	if len(errs) > 0 {
 		return summary, errors.Join(errs...)
@@ -241,5 +254,5 @@ func advanceCursorPartial(cursor *Cursor, ref SessionRef, mapped []MappedEvent, 
 var emitEvent = func(event schema.Event, opts CollectOptions) error { return opts.sink().Emit(event) }
 
 func (o CollectOptions) sink() sessionsync.Sink {
-	return sessionsync.Sink{Print: o.Print, Out: o.Out, Write: o.Write, Log: writer.Options{Path: o.LogPath, UserMode: o.UserMode, Budget: o.Budget}}
+	return sessionsync.Sink{Print: o.Print, Out: o.Out, Write: o.Write, Log: writer.Options{Path: o.LogPath, UserMode: o.UserMode, RotateSize: o.RotateBytes, Budget: o.Budget, Guard: o.guard}}
 }

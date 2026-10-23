@@ -207,6 +207,8 @@ claude sync: 3496 sessions, 168 changed, 33689 events (33689 retained), 0 errors
   stopped before log rotation would discard this sweep's own events; 3329 session(s) left pending for the next sweep.
 ```
 
+Every `beacon endpoint <runtime> sync` that reads a session store (Codex, Copilot, Cursor, Cline, OpenCode, Pi, Prime Agent, Factory Droid, Grok Build, Hermes Agent, OpenClaw, DeepSeek Harness and fx as well as Claude Code and Devin CLI) stops the same way and takes the same `--rotate-bytes`. Their summaries carry `events_retained`, `events_rotated_out` and `retention_limited`; only Claude Code and Devin CLI also count `sessions_pending`.
+
 With `--json`, the summary carries `events_retained` (events this sweep wrote that are still in the log or its archives when it finishes), `events_rotated_out` (events another writer's rotations discarded during the sweep, which also makes the sweep exit non-zero), `retention_limited`, and `sessions_pending`.
 
 The next sweep continues where this one stopped. The guard covers one sweep at a time, so the next sweep's rotations can discard the previous sweep's output. That includes `--watch`, which sweeps again on every interval. If you need every event, ship or copy the log files between sweeps. To backfill in one sweep, raise the file size for this sync only:

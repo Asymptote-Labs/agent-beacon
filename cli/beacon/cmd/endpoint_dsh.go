@@ -41,14 +41,15 @@ var endpointDshStatusCmd = &cobra.Command{
 }
 
 var endpointDshOpts struct {
-	dshHome   string
-	statePath string
-	logPath   string
-	print     bool
-	watch     bool
-	interval  time.Duration
-	workspace string
-	sessionID string
+	dshHome     string
+	statePath   string
+	logPath     string
+	print       bool
+	watch       bool
+	interval    time.Duration
+	workspace   string
+	sessionID   string
+	rotateBytes int64
 }
 
 func init() {
@@ -72,18 +73,23 @@ func init() {
 	sync.BoolVar(&endpointDshOpts.print, "print", false, "Print mapped events as JSON without writing them or advancing the cursor")
 	sync.BoolVar(&endpointDshOpts.watch, "watch", false, "Sweep continuously on --interval")
 	sync.DurationVar(&endpointDshOpts.interval, "interval", time.Minute, "Sweep interval for --watch")
+	addSyncRotateBytesFlag(sync, &endpointDshOpts.rotateBytes)
 }
 
 func runEndpointDshSync(cmd *cobra.Command, args []string) error {
+	if err := checkSyncRotateBytes(endpointDshOpts.rotateBytes); err != nil {
+		return err
+	}
 	userMode := endpointUserMode()
 	opts := dshsession.CollectOptions{
-		DSHHome:   endpointDshOpts.dshHome,
-		Print:     endpointDshOpts.print,
-		Out:       cmd.OutOrStdout(),
-		Write:     !endpointDshOpts.print,
-		UserMode:  userMode,
-		Workspace: endpointDshOpts.workspace,
-		SessionID: endpointDshOpts.sessionID,
+		RotateBytes: endpointDshOpts.rotateBytes,
+		DSHHome:     endpointDshOpts.dshHome,
+		Print:       endpointDshOpts.print,
+		Out:         cmd.OutOrStdout(),
+		Write:       !endpointDshOpts.print,
+		UserMode:    userMode,
+		Workspace:   endpointDshOpts.workspace,
+		SessionID:   endpointDshOpts.sessionID,
 	}
 	if !endpointDshOpts.print {
 		opts.StatePath = resolveDshStatePath(endpointDshOpts.statePath, userMode)
@@ -130,6 +136,7 @@ func reportDshSweep(cmd *cobra.Command, summary dshsession.Summary) {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "dsh sync: %d sessions, %d changed, %d events, %d errors\n",
 		summary.Sessions, summary.SessionsChanged, summary.EventsEmitted, summary.Errors)
+	reportSyncRetention(cmd.OutOrStdout(), summary.Retention)
 	if summary.MalformedLines > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "  %d unreadable line(s) in DeepSeek session logs\n", summary.MalformedLines)
 	}
