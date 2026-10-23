@@ -176,6 +176,9 @@ func ConfigYAML(cfg endpointconfig.Config) string {
         endpoint: 127.0.0.1:%d
 %s      http:
         endpoint: 127.0.0.1:%d
+        include_metadata: true
+        auth:
+          authenticator: loopback_host
 
 processors:
   memory_limiter:
@@ -197,12 +200,13 @@ processors:
 extensions:
   health_check:
     endpoint: 127.0.0.1:%d
+  loopback_host:
 
 service:
   telemetry:
     metrics:
       level: none
-  extensions: [health_check]
+  extensions: [health_check, loopback_host]
   pipelines:
     logs:
       receivers: [otlp]
