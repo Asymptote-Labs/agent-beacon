@@ -315,6 +315,49 @@ func TestSettingsRuntimesClaimOnlyTheirOwnPlatformsHooks(t *testing.T) {
 	}
 }
 
+// A hook naming its platform as `--platform=claude` is the same hook as `--platform claude`; the
+// command parser accepts both, so status must see it and uninstall must take it out.
+func TestSettingsRuntimesRecognizeEqualsPlatformFlag(t *testing.T) {
+	for _, tc := range []struct {
+		platform string
+		runtime  hookRuntime
+	}{
+		{"claude", claudeRuntime},
+		{"codex", codexRuntime},
+		{"factory", factoryRuntime},
+		{"qwen", qwenRuntime},
+	} {
+		t.Run(tc.platform, func(t *testing.T) {
+			home := t.TempDir()
+			testenv.SetHome(t, home)
+			t.Chdir(t.TempDir())
+			opts := RuntimeOptions{Level: LevelProject, LogPath: filepath.Join(home, "runtime.jsonl"), UserMode: true}
+			path, err := tc.runtime.configPath(LevelProject)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ours := `'/opt/beacon/hooks/beacon-hooks' --platform=` + tc.platform + ` --log '/tmp/runtime.jsonl' pre-tool`
+			seed := `{"hooks":{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"` + ours + `"}]}]}}`
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			if !runtimeHookStatus(tc.runtime, opts).Installed {
+				t.Fatalf("status does not see a --platform=%s hook", tc.platform)
+			}
+			if _, err := uninstallRuntimeHooks(tc.runtime, opts); err != nil {
+				t.Fatalf("uninstall: %v", err)
+			}
+			if after := readFile(t, path); strings.Contains(after, ours) {
+				t.Fatalf("uninstall left the --platform=%s hook behind:\n%s", tc.platform, after)
+			}
+		})
+	}
+}
+
 // Beacon's own entries are built in code, not read from disk, and must serialize exactly as they
 // did before foreign entries were kept verbatim: hook commands are compared by string elsewhere.
 func TestSettingsHookRefBuiltInCodeMarshalsKnownFieldsOnly(t *testing.T) {
