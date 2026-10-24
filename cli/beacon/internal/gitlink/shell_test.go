@@ -28,6 +28,10 @@ func TestShellWrittenPaths(t *testing.T) {
 		{"sed -i.bak -e 's/a/b/' x.go", []string{"x.go"}},
 		{"sed 's/a/b/' x.go", nil}, // not in place: prints, writes nothing
 		{"perl -pi -e 's/a/b/' z.pl", []string{"z.pl"}},
+		{"perl -Mwarnings -ne 'print if /x/' z.pl", nil}, // -M's module name is not -i
+		{"perl -Ilib -ne 'print' z.pl", nil},
+		{"perl -Mstrict -pi -e 's/a/b/' z.pl", []string{"z.pl"}},
+		{"sed -n -es/i/j/p x.go y.go", nil}, // -e's script is not -i
 		{"FOO=1 sudo rm build/out", []string{"build/out"}},
 		{`rm "file with spaces.txt"`, []string{"file with spaces.txt"}},
 		{`rm file\ two.txt`, []string{"file two.txt"}},
