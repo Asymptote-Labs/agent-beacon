@@ -1,5 +1,5 @@
 id: git-hook-installed
-version: 2
+version: 3
 title: Git hook script installed or modified
 description: >
   The agent modified a script under .git/hooks/ (pre-commit, post-checkout,
@@ -17,7 +17,7 @@ taxonomy:
 
 match: >
   e.event.action in ["file.modified", "file.created", "file.edited"] &&
-  e.file.path.matches("(?i)(^|/)\\.git/hooks/(applypatch-msg|pre-applypatch|post-applypatch|pre-commit|pre-merge-commit|prepare-commit-msg|commit-msg|post-commit|pre-rebase|post-checkout|post-merge|pre-push|pre-receive|update|post-receive|post-update|push-to-checkout|pre-auto-gc|post-rewrite|fsmonitor-watchman)$")
+  e.file.path.matches("(?i)(^|/)\\.git/hooks/(applypatch-msg|pre-applypatch|post-applypatch|pre-commit|pre-merge-commit|prepare-commit-msg|commit-msg|post-commit|pre-rebase|post-checkout|post-merge|pre-push|pre-receive|update|post-receive|post-update|push-to-checkout|pre-auto-gc|post-rewrite|fsmonitor-watchman|reference-transaction|post-index-change|sendemail-validate|proc-receive|p4-changelist|p4-prepare-changelist|p4-post-changelist|p4-pre-submit)$")
 
 emit:
   reason: "Git hook script installed or modified — runs on the next matching git operation, durable code-execution persistence"
@@ -34,6 +34,18 @@ tests:
     events:
       - event: { action: file.modified }
         file: { path: "/home/dev/repo/.git/hooks/post-checkout" }
+        session: { id: s1 }
+  - name: reference_transaction_hook
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: ".git/hooks/reference-transaction" }
+        session: { id: s1 }
+  - name: post_index_change_hook
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/dev/repo/.git/hooks/post-index-change" }
         session: { id: s1 }
   - name: sample_hook_not_active
     verdict: no_match
