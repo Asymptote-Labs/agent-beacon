@@ -73,7 +73,9 @@ runtime log's rotation window:
 
 Nothing past a limit is lost. The collector cursors move only past what was written, and sessions
 left out are not touched, so the runtime's sync command reads the rest; install names the command
-for each runtime that hit the limit. A runtime whose store cannot be read is reported as a warning
+for each runtime that hit the limit. A runtime also stops early, and is reported the same way,
+if writing more would rotate its own backfill out of the log, which takes heavy live activity
+during the backfill. A runtime whose store cannot be read is reported as a warning
 and never fails the install. Re-running install reads only what changed since the last sweep.
 
 A system, package or MDM install runs as root, whose home holds no agent sessions, so it reads the

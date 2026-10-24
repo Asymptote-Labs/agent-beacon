@@ -3,6 +3,7 @@ package groksession
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -620,4 +621,58 @@ func TestAnEmptyLogDoesNotResetTheCursor(t *testing.T) {
 func urlPathEscape(path string) string {
 	replacer := strings.NewReplacer("/", "%2F", " ", "%20")
 	return replacer.Replace(path)
+}
+
+// A chat_history.jsonl line carries no time, so its events are stamped with the time of the sync.
+// Their ids must come from where they were read rather than from their bytes, or every resend
+// after a sync that stopped partway through a session is a second event instead of the same one.
+func TestChatEventsKeepTheirIDsAcrossSyncs(t *testing.T) {
+	root := t.TempDir()
+	writeFixtureSession(t, root, "/tmp/grok project", "session-ids")
+	store, err := NewStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs, err := store.List()
+	if err != nil || len(refs) != 1 {
+		t.Fatalf("List() = %d refs, %v", len(refs), err)
+	}
+	data, _, err := store.Read(refs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	chatIDs := func(events []MappedEvent) map[int][]string {
+		ids := map[int][]string{}
+		for _, ev := range events {
+			if ev.SourceKind == SourceChat {
+				ids[ev.SourceLine] = append(ids[ev.SourceLine], ev.Event.Event.ID)
+			}
+		}
+		return ids
+	}
+	first := chatIDs(MapSession(data, MapOptions{}))
+	if len(first) == 0 {
+		t.Fatal("the fixture maps no chat events")
+	}
+	seen := map[string]bool{}
+	for line, ids := range first {
+		for _, id := range ids {
+			if id == "" || seen[id] {
+				t.Fatalf("line %d: id %q is empty or repeated: %v", line, id, first)
+			}
+			seen[id] = true
+		}
+	}
+	time.Sleep(2 * time.Millisecond)
+	again := chatIDs(MapSession(data, MapOptions{}))
+	if fmt.Sprint(again) != fmt.Sprint(first) {
+		t.Fatalf("a second sync named the same chat events differently:\n%v\n%v", first, again)
+	}
+	// A sweep that resumes after the first chat line names the rest exactly as a full one does.
+	resumed := chatIDs(MapSession(data, MapOptions{MinChatLine: 1}))
+	for line, ids := range resumed {
+		if fmt.Sprint(ids) != fmt.Sprint(first[line]) {
+			t.Fatalf("line %d: resumed sweep ids %v, full sweep %v", line, ids, first[line])
+		}
+	}
 }

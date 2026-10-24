@@ -78,6 +78,8 @@ Session sync keeps its cursor in Beacon endpoint state rather than in `~/.grok`,
 
 The cursor is a line position in each of a session's two append-only logs, so a session that is still being written is collected incrementally: a later sweep, including each `--watch` tick, emits only the records added since the last one. `--user` and `--system` keep separate cursors beside the runtime log each one writes to, so the two modes never claim each other's progress.
 
+`chat_history.jsonl` records carry no time of their own, so the events Beacon maps from them (prompts, assistant messages and reasoning, tool calls and results) are stamped with the time of the sync that read them. Their `event.id` is derived from where each was read (the session, the line, and its place among that line's events) rather than from the event's bytes, so reading the same record again, such as after a sync that stopped at the rotation window, writes it under the same id and forwarding deduplicates it.
+
 Restart Grok after installing or removing hooks so new sessions pick up the updated hook configuration.
 
 ## Related
