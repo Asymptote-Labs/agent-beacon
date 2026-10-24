@@ -1,5 +1,5 @@
 id: shell-escape-via-interactive-tool
-version: 1
+version: 2
 title: Shell escape via an interactive tool (GTFObins-style)
 description: >
   A command uses a known shell-escape idiom — spawning a shell through awk
@@ -23,7 +23,7 @@ match: >
     e.command.command.matches("(?i)\\b(vim|vi|view|nvim)\\b\\s+-c\\s+[\"']?:\\s*(!|shell|py\\b)") ||
     e.command.command.matches("(?i)\\bfind\\b.*-exec\\s+(/bin/|/usr/bin/)?(ba|z)?sh\\b") ||
     e.command.command.matches("(?i)\\btar\\b.*--checkpoint-action=exec") ||
-    e.command.command.matches("(?i)\\bssh\\b.*-o\\s+ProxyCommand=")
+    e.command.command.matches("(?i)\\bssh\\b.*-o\\s*[\"']?ProxyCommand\\s*=")
   )
 
 emit:
@@ -53,6 +53,24 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "ssh -o ProxyCommand=';sh 0<&2 1>&2' host" }
+        session: { id: s1 }
+  - name: ssh_attached_o_proxycommand
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh -oProxyCommand=';sh 0<&2 1>&2' x" }
+        session: { id: s1 }
+  - name: ssh_quoted_o_proxycommand
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh -o 'ProxyCommand=sh -c \"id >&2\"' host" }
+        session: { id: s1 }
+  - name: ssh_other_option
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh -oStrictHostKeyChecking=no host uptime" }
         session: { id: s1 }
   - name: ordinary_python
     verdict: no_match
