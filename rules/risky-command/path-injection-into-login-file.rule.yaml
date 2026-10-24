@@ -1,9 +1,9 @@
 id: path-injection-into-login-file
-version: 1
+version: 2
 title: PATH modification appended to a shell startup file
 description: >
   A command writes a PATH-altering line into a shell startup or login file by
-  redirecting into it (e.g. `echo 'export PATH=/tmp/bin:$PATH' >> ~/.bashrc`, or
+  redirecting or tee-ing into it (e.g. `echo 'export PATH=/tmp/bin:$PATH' >> ~/.bashrc`, or
   appending `set -gx PATH ...` to fish config, or a drop-in under /etc/profile.d).
   Prepending an attacker-controlled directory to PATH in a file that is sourced on
   every new shell or login is durable persistence and a binary-shadowing primitive
@@ -19,7 +19,7 @@ taxonomy:
 match: >
   e.event.action == "command.executed" &&
   e.command.command.matches("(?i)(export\\s+PATH\\s*=|\\bPATH\\s*=|set\\s+-[gx]+\\s+PATH\\b)") &&
-  e.command.command.matches("(?i)>>?\\s*[^|;&]*(\\.bashrc|\\.bash_profile|\\.bash_login|\\.profile|\\.zshrc|\\.zprofile|\\.zshenv|\\.zlogin|\\.kshrc|\\.cshrc|\\.tcshrc|config\\.fish|/etc/profile|profile\\.d/)")
+  e.command.command.matches("(?i)(>>?|\\btee\\b)\\s*[^|;&]*(\\.bashrc|\\.bash_profile|\\.bash_login|\\.profile|\\.zshrc|\\.zprofile|\\.zshenv|\\.zlogin|\\.kshrc|\\.cshrc|\\.tcshrc|config\\.fish|/etc/profile|profile\\.d/)")
 
 emit:
   reason: "PATH modification appended to a shell startup/login file — prepends a directory to PATH on every shell/login, durable persistence and binary-shadowing primitive"
@@ -48,6 +48,24 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "echo 'export PATH=/srv/bin:$PATH' >> /etc/profile.d/custom.sh" }
+        session: { id: s1 }
+  - name: export_path_tee_into_bashrc
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'export PATH=/tmp/bin:$PATH' | tee -a ~/.bashrc" }
+        session: { id: s1 }
+  - name: path_tee_into_profile_d
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'export PATH=/srv/bin:$PATH' | sudo tee /etc/profile.d/custom.sh" }
+        session: { id: s1 }
+  - name: bashrc_read_then_tee_elsewhere
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "grep PATH ~/.bashrc | tee path-notes.txt" }
         session: { id: s1 }
   - name: ephemeral_path_export_no_redirect
     verdict: no_match
