@@ -2317,10 +2317,10 @@ function clearFields(loadAfter = true) {
 }
 
 function truncateMiddle(value, maxLength) {
-  value = String(value || "");
-  if (value.length <= maxLength) return value;
+  const chars = Array.from(String(value || ""));
+  if (chars.length <= maxLength) return chars.join("");
   const keep = Math.floor((maxLength - 3) / 2);
-  return `${value.slice(0, keep)}...${value.slice(value.length - keep)}`;
+  return `${chars.slice(0, keep).join("")}...${chars.slice(chars.length - keep).join("")}`;
 }
 
 function escapeHTML(value) {
