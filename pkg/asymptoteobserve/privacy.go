@@ -384,6 +384,7 @@ var redactionRules = concatRules([]redactionRule{
 	rule(`\b(xox[abposr]-)[A-Za-z0-9-]{10,}`, "${1}"+redactedValue, nil, "xox"),                               // Slack
 	rule(`\b([rs]k_(?:live|test)_)[A-Za-z0-9]{16,}`, "${1}"+redactedValue, nil, "k_live_", "k_test_"),         // Stripe
 	rule(`\b(AIza)[0-9A-Za-z_-]{35}`, "${1}"+redactedValue, nil, "AIza"),                                      // Google API key
+	rule(`\b(ya29\.)[0-9A-Za-z_-]{20,}`, "${1}"+redactedValue, nil, "ya29."),                                  // Google OAuth access token
 	rule(`\b(npm_)[A-Za-z0-9]{36}`, "${1}"+redactedValue, nil, "npm_"),                                        // npm
 	rule(`\b(hf_)[A-Za-z0-9]{30,}`, "${1}"+redactedValue, nil, "hf_"),                                         // Hugging Face
 	// Beacon's own keys and tokens: API keys, device and enforcement keys, MCP tokens and their refresh
