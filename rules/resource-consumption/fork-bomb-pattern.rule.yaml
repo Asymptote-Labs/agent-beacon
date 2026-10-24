@@ -1,5 +1,5 @@
 id: fork-bomb-pattern
-version: 1
+version: 2
 title: Fork-bomb pattern executed in a command
 description: >
   A command.executed event invokes a known fork-bomb shape — the canonical
@@ -21,10 +21,10 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i):\\(\\)\\s*\\{?\\s*:\\|:&\\s*\\}?\\s*;\\s*:") ||
+    e.command.command.matches("(?i):\\s*\\(\\s*\\)\\s*\\{?\\s*:\\s*\\|\\s*:\\s*&\\s*\\}?\\s*;\\s*:") ||
     e.command.command.matches("(?i)\\bwhile\\s+true\\s*;?\\s*do\\b[^;&|]*&\\s*\\S") ||
     e.command.command.matches("(?i)\\bfor\\s*\\(\\s*;\\s*;\\s*\\)\\s*[;{]") ||
-    e.command.command.matches("(?i)\\bbomb\\(\\)\\b") ||
+    e.command.command.matches("(?i)\\bbomb\\s*\\(\\s*\\)") ||
     e.command.command.matches("(?i)\\b(perl|python|ruby)\\s+-[ec]\\s+['\"][^'\"]*(\\.fork\\(\\)|for\\s+_\\s+in\\s+iter\\(\\s*int\\s*,\\s*1\\s*\\)|\\bwhile\\s+(1|True)\\b)")
   )
 
@@ -66,6 +66,18 @@ tests:
       - timestamp: "2026-06-23T10:04:00Z"
         event: { action: command.executed }
         command: { command: "python -c 'import os; [os.fork() for _ in iter(int,1)]'" }
+        session: { id: s1 }
+  - name: spaced_bash_fork_bomb
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: ":(){ :|: & };:" }
+        session: { id: s1 }
+  - name: named_bomb_function
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bomb(){ bomb|bomb& };bomb" }
         session: { id: s1 }
   - name: bounded_while_loop_benign
     verdict: no_match
