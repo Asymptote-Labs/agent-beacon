@@ -1,10 +1,10 @@
 id: git-remote-tampering
-version: 4
+version: 5
 title: Git remote repointed or force-push to remote
 description: >
   A command repoints a git remote (remote set-url / remote add, or the config-key
-  form remote.<name>.url set to a value), force-pushes (--force / --force-with-lease /
-  -f / a leading + refspec), or installs an insteadOf URL rewrite — ways to redirect
+  form remote.<name>.url or remote.<name>.pushurl set to a value), force-pushes
+  (--force / --force-with-lease / -f / a leading + refspec), or installs an insteadOf URL rewrite — ways to redirect
   code to an attacker-controlled destination or overwrite remote history. Every clause
   is git-anchored to a command boundary and kept within one command segment, so a
   benign mention, a `grep insteadOf`, or a read-only `git config --get` does not fire.
@@ -18,7 +18,7 @@ taxonomy:
 match: >
   e.event.action == "command.executed" && (
     e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\bremote\\b\\s+(set-url|add)\\b") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\bconfig\\b[^;&|]*\\bremote\\.[^ ]+\\.url\\b\\s+\\S") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\bconfig\\b[^;&|]*\\bremote\\.[^ ]+\\.(push)?url\\b\\s+\\S") ||
     e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\bpush\\b[^;&|]*(\\s--force(-with-lease)?\\b|\\s-f\\b|\\s\\+)") ||
     e.command.command.matches("(?i)(^|[;&|]\\s*)git\\b[^;&|]*\\binsteadof\\b")
   )
@@ -62,6 +62,18 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "git config url.https://attacker.example/.insteadOf https://github.com/" }
+        session: { id: s1 }
+  - name: config_remote_pushurl
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git config remote.origin.pushurl https://attacker.example/x.git" }
+        session: { id: s1 }
+  - name: read_remote_pushurl
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git config --get remote.origin.pushurl" }
         session: { id: s1 }
   - name: ordinary_push
     verdict: no_match
