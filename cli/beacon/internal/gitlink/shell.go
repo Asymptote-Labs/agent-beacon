@@ -63,6 +63,19 @@ func commandTargets(words []string) []string {
 		// Every operand: the sources stop existing and the destination starts to.
 		return operands
 	case "cp", "install", "ln":
+		if dir, sources, ok := targetDirectory(args); ok {
+			// -t DIR makes every operand a source, written as DIR/<base name>.
+			if dir == "" {
+				return nil
+			}
+			var written []string
+			for _, src := range sources {
+				if src != "" {
+					written = append(written, filepath.Join(dir, filepath.Base(src)))
+				}
+			}
+			return written
+		}
 		if len(operands) >= 2 {
 			return operands[len(operands)-1:]
 		}
@@ -75,6 +88,39 @@ func commandTargets(words []string) []string {
 		}
 	}
 	return nil
+}
+
+// targetDirectory finds the -t DIR / --target-directory=DIR of cp, install and ln and returns the
+// operands, which are all sources once it is given. A short -t may close a cluster (-Dt DIR) or
+// carry its value (-tDIR).
+func targetDirectory(args []string) (dir string, sources []string, ok bool) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--":
+			return dir, append(sources, args[i+1:]...), ok
+		case a == "--target-directory":
+			if i+1 < len(args) {
+				dir, ok = args[i+1], true
+				i++
+			}
+		case strings.HasPrefix(a, "--target-directory="):
+			dir, ok = strings.TrimPrefix(a, "--target-directory="), true
+		case strings.HasPrefix(a, "--"):
+		case strings.HasPrefix(a, "-") && a != "-":
+			if t := strings.IndexByte(a, 't'); t > 0 {
+				if t+1 < len(a) {
+					dir, ok = a[t+1:], true
+				} else if i+1 < len(args) {
+					dir, ok = args[i+1], true
+					i++
+				}
+			}
+		default:
+			sources = append(sources, a)
+		}
+	}
+	return dir, sources, ok
 }
 
 func hasInPlaceFlag(flags []string) bool {
