@@ -1283,6 +1283,25 @@ func TestStateDigestFallsBackToTheLegacyFieldThenTracksPerHome(t *testing.T) {
 	}
 }
 
+// Claude Code keeps per-project servers in ~/.claude.json, and the same server name in several
+// projects with different arguments is ordinary. Those entries share runtime, file and name, so
+// their order must not come from map iteration or the digest moves between identical scans.
+func TestSnapshotDigestStableForSameServerNameAcrossProjects(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".claude.json"), `{"projects":{
+  "/w/a":{"mcpServers":{"fs":{"command":"npx","args":["/w/a"]}}},
+  "/w/b":{"mcpServers":{"fs":{"command":"npx","args":["/w/b"]}}},
+  "/w/c":{"mcpServers":{"fs":{"command":"npx","args":["/w/c"]}}},
+  "/w/d":{"mcpServers":{"fs":{"command":"npx","args":["/w/d"]}}}}}`)
+	seen := map[string]bool{}
+	for i := 0; i < 40; i++ {
+		seen[SnapshotDigest(Scan(Options{HomeDir: home, SkipProjectScope: true, Runtimes: []string{"claude_code"}, Now: fixedNow}))] = true
+	}
+	if len(seen) != 1 {
+		t.Fatalf("%d distinct digests over 40 scans of an unchanged home", len(seen))
+	}
+}
+
 // ~/.claude.json is Claude Code's state file and changes on every session. Its raw hash must not
 // move the digest; the MCP servers parsed from it must.
 func TestSnapshotDigestIgnoresVolatileStateFileChurn(t *testing.T) {
