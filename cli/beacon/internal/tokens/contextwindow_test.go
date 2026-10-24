@@ -51,6 +51,25 @@ func TestContextWindowDoesNotConfuseAdjacentClaudeVersions(t *testing.T) {
 	}
 }
 
+// Copilot reports Claude models with a dotted version. They have the window of the dashed id,
+// not the 200K "claude" fallback.
+func TestContextWindowMatchesDottedClaudeVersions(t *testing.T) {
+	for _, tc := range []struct {
+		model string
+		want  int64
+	}{
+		{"claude-sonnet-4.6", 1000000},
+		{"claude-opus-4.7", 1000000},
+		{"claude-haiku-4.5", 200000},
+		{"gpt-4.1", 1047576},
+	} {
+		got, known := ContextWindow(tc.model)
+		if !known || got != tc.want {
+			t.Errorf("ContextWindow(%q) = %d/%v, want %d/true", tc.model, got, known, tc.want)
+		}
+	}
+}
+
 // An unknown model must stay unknown rather than being given a plausible-looking window.
 // A wrong window does not read as missing data; it reads as a confident ratio, and the
 // near-limit counter fires on it.

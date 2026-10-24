@@ -62,13 +62,28 @@ func ContextWindow(model string) (int64, bool) {
 	}
 	best := int64(0)
 	bestLen := -1
-	for _, entry := range contextWindows {
-		if strings.HasPrefix(normalized, entry.prefix) && len(entry.prefix) > bestLen {
-			best = entry.tokens
-			bestLen = len(entry.prefix)
+	// Copilot writes claude-sonnet-4.6 for Anthropic's claude-sonnet-4-6. The dotted spelling is
+	// tried as well rather than instead, because the table keeps dotted ids of its own (gpt-4.1).
+	for _, spelling := range []string{normalized, foldVersionDots(normalized)} {
+		for _, entry := range contextWindows {
+			if strings.HasPrefix(spelling, entry.prefix) && len(entry.prefix) > bestLen {
+				best = entry.tokens
+				bestLen = len(entry.prefix)
+			}
 		}
 	}
 	return best, bestLen >= 0
+}
+
+// foldVersionDots rewrites a dot between two digits as a dash.
+func foldVersionDots(s string) string {
+	b := []byte(s)
+	for i := 1; i+1 < len(b); i++ {
+		if b[i] == '.' && b[i-1] >= '0' && b[i-1] <= '9' && b[i+1] >= '0' && b[i+1] <= '9' {
+			b[i] = '-'
+		}
+	}
+	return string(b)
 }
 
 func normalizeModel(model string) string {
