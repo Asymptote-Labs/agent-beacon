@@ -57,6 +57,18 @@ describe("resolveExporterConfig", () => {
     expect(config.headers.authorization).toBe("Bearer env-key");
   });
 
+  it("treats empty env variables as unset", () => {
+    process.env.ASYMPTOTE_API_KEY = "env-key";
+    process.env.ASYMPTOTE_BASE_URL = "";
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "";
+
+    const config = resolveExporterConfig();
+
+    expect(config.mode).toBe("hosted");
+    expect(config.observeUrl).toBe("https://api.asymptotelabs.ai/v1/observe");
+    expect(config.headers.authorization).toBe("Bearer env-key");
+  });
+
   it("prefers explicit api key and base URL over env", () => {
     process.env.ASYMPTOTE_API_KEY = "env-key";
     process.env.ASYMPTOTE_BASE_URL = "https://observe.example";
