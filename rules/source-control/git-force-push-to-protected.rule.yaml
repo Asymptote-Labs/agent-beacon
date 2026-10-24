@@ -1,10 +1,11 @@
 id: git-force-push-to-protected
-version: 1
+version: 2
 title: Force-push directed at a protected branch
 description: >
   A git push with --force, --force-with-lease, -f, or a leading +
   refspec targets a protected branch (main, master, develop,
-  release/*, production). Force-pushing a protected branch can
+  release/*, production), either by name or as the destination of
+  a src:dst refspec such as HEAD:main or x:refs/heads/main. Force-pushing a protected branch can
   rewrite the canonical project history, drop commits, or land
   unreviewed code into the production line. From an agent session
   this is almost always unauthorized and indicates either an
@@ -23,9 +24,9 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*(\\s--force(-with-lease)?\\b|\\s-f\\b)[^;&|]*(?:^|\\s)(main|master|develop|production|release/[^\\s;&|]+)(?:\\s|$)") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*(?:^|\\s)(main|master|develop|production|release/[^\\s;&|]+)\\b[^;&|]*(\\s--force(-with-lease)?\\b|\\s-f\\b)") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*\\+\\s*(main|master|develop|production|release/[^\\s;&|]+)(?:\\s|$)")
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*(\\s--force(-with-lease)?\\b|\\s-f\\b)[^;&|]*(?:^|\\s|:)(?:refs/heads/)?(main|master|develop|production|release/[^\\s;&|]+)(?:\\s|$)") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*(?:^|\\s|:)(?:refs/heads/)?(main|master|develop|production|release/[^\\s;&|]+)\\b[^;&|]*(\\s--force(-with-lease)?\\b|\\s-f\\b)") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*\\+\\s*([^\\s;&|:]*:)?(?:refs/heads/)?(main|master|develop|production|release/[^\\s;&|]+)(?:\\s|$)")
   )
 
 emit:
@@ -67,6 +68,30 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "git push origin main --force" }
+        session: { id: s1 }
+  - name: force_push_head_refspec_to_main
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git push --force origin HEAD:main" }
+        session: { id: s1 }
+  - name: force_push_full_ref_to_master
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git push -f origin my-fix:refs/heads/master" }
+        session: { id: s1 }
+  - name: plus_refspec_head_to_main
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git push origin +HEAD:main" }
+        session: { id: s1 }
+  - name: force_push_main_to_feature
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git push --force origin main:feature/x" }
         session: { id: s1 }
   - name: force_push_to_feature_branch
     verdict: no_match
