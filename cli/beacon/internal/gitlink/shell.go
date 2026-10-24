@@ -69,7 +69,7 @@ func commandTargets(words []string) []string {
 	case "tee":
 		return operands
 	case "sed", "perl", "gsed":
-		if hasInPlaceFlag(flags) && len(operands) >= 2 {
+		if hasInPlaceFlag(name, flags) && len(operands) >= 2 {
 			// The first operand is the script, unless it came in with -e.
 			return operands[1:]
 		}
@@ -77,13 +77,26 @@ func commandTargets(words []string) []string {
 	return nil
 }
 
-func hasInPlaceFlag(flags []string) bool {
+func hasInPlaceFlag(name string, flags []string) bool {
+	// Switches that take the rest of the cluster as their value: an i after one (perl -Mwarnings,
+	// -Ilib, sed -es/i/j/) is part of that value.
+	valued := "efl"
+	if name == "perl" {
+		valued = "CDEFIMdemx0"
+	}
 	for _, f := range flags {
 		if f == "--in-place" || strings.HasPrefix(f, "--in-place=") {
 			return true
 		}
-		if strings.HasPrefix(f, "-") && !strings.HasPrefix(f, "--") && strings.Contains(f[1:], "i") {
-			return true
+		if strings.HasPrefix(f, "-") && !strings.HasPrefix(f, "--") {
+			for _, c := range f[1:] {
+				if c == 'i' {
+					return true
+				}
+				if strings.ContainsRune(valued, c) {
+					break
+				}
+			}
 		}
 	}
 	return false
