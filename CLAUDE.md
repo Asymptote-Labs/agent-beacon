@@ -527,6 +527,12 @@ target family, and the same archive loads in Edge, Brave, Opera, Vivaldi and Arc
 `ext-v*` and the CLI's `v*` trigger cannot collide: GitHub tag patterns anchor at
 the start, so `v*` does not match `ext-v0.1.0`.
 
+The extension release is created with `--latest=false`, so GitHub's "Latest" release
+stays the CLI's. The self-updater's `update-manifest.json`, the Linux `install.sh`
+one-liner, the update notice and the README's download links all resolve
+`releases/latest`; when `ext-v0.1.0` took the label they returned 404 until
+`gh release edit <cli-tag> --latest` gave it back.
+
 Bump the version in **both** `browser-extension/package.json` and
 `browser-extension/src/manifest.json` before tagging. The workflow requires the
 tag and both files to agree and fails otherwise.
