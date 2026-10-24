@@ -28,6 +28,11 @@ func TestShellWrittenPaths(t *testing.T) {
 		{"sed -i.bak -e 's/a/b/' x.go", []string{"x.go"}},
 		{"sed 's/a/b/' x.go", nil}, // not in place: prints, writes nothing
 		{"perl -pi -e 's/a/b/' z.pl", []string{"z.pl"}},
+		{"perl -pi -e's/a/b/' z.pl", []string{"z.pl"}},
+		{"sed -i -e's/a/b/' x.go", []string{"x.go"}},
+		{"sed -i --expression=s/a/b/ x.go", []string{"x.go"}},
+		{"sed -i -e 's/a/b/' -e 's/c/d/' x.go", []string{"x.go"}},
+		{"sed -i -f fix.sed x.go", []string{"x.go"}},
 		{"FOO=1 sudo rm build/out", []string{"build/out"}},
 		{`rm "file with spaces.txt"`, []string{"file with spaces.txt"}},
 		{`rm file\ two.txt`, []string{"file two.txt"}},
