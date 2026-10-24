@@ -50,6 +50,7 @@ var endpointOpenClawSessionsOpts struct {
 	print       bool
 	watch       bool
 	interval    time.Duration
+	rotateBytes int64
 }
 
 func init() {
@@ -71,11 +72,16 @@ func init() {
 	sync.BoolVar(&endpointOpenClawSessionsOpts.print, "print", false, "Print mapped events as JSON without writing them or advancing the cursor (dry run)")
 	sync.BoolVar(&endpointOpenClawSessionsOpts.watch, "watch", false, "Sweep continuously on --interval (default: one sweep then exit)")
 	sync.DurationVar(&endpointOpenClawSessionsOpts.interval, "interval", time.Minute, "Sweep interval for --watch")
+	addSyncRotateBytesFlag(sync, &endpointOpenClawSessionsOpts.rotateBytes)
 }
 
 func runEndpointOpenClawSessionsSync(cmd *cobra.Command, args []string) error {
+	if err := checkSyncRotateBytes(endpointOpenClawSessionsOpts.rotateBytes); err != nil {
+		return err
+	}
 	userMode := endpointUserMode()
 	opts := openclawsession.CollectOptions{
+		RotateBytes: endpointOpenClawSessionsOpts.rotateBytes,
 		OpenClawDir: endpointOpenClawSessionsOpts.openClawDir,
 		Print:       endpointOpenClawSessionsOpts.print,
 		Out:         cmd.OutOrStdout(),
@@ -127,6 +133,7 @@ func reportOpenClawSessionsSweep(cmd *cobra.Command, summary openclawsession.Sum
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "openclaw sessions sync: %d traces, %d changed, %d events, %d errors\n",
 		summary.Traces, summary.TracesChanged, summary.EventsEmitted, summary.Errors)
+	reportSyncRetention(cmd.OutOrStdout(), summary.Retention)
 }
 
 type openClawSessionStatusRef struct {

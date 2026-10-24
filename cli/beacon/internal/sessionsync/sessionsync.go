@@ -133,9 +133,52 @@ func (s Sink) Emit(event schema.Event) error {
 // GuardRetention gives a sweep that writes without printing a retention guard, so it stops with
 // writer.ErrRetentionWindowFull rather than rotate its own output out of the log.
 func (s *Sink) GuardRetention() {
-	if s.Write && !s.Print {
-		s.Log.Guard = &writer.RetentionGuard{}
+	if g := NewRetentionGuard(s.Print, s.Write); g != nil {
+		s.Log.Guard = g
 	}
+}
+
+// NewRetentionGuard is the guard for one sweep that writes without printing, or nil for one that
+// prints or does not write. A collector whose sink is built per event keeps it in its options for
+// the whole sweep, since the guard tracks every file the sweep's appends landed in.
+func NewRetentionGuard(print, write bool) *writer.RetentionGuard {
+	if write && !print {
+		return &writer.RetentionGuard{}
+	}
+	return nil
+}
+
+// Stopped reports whether err ends a sweep early without failing it: the budget ran out, or the
+// retention guard refused an append that would have rotated the sweep's own output away. Either
+// way nothing was written for the refused event, so a collector whose cursors move only past what
+// was emitted leaves the rest for the next sweep.
+func Stopped(err error) bool {
+	return errors.Is(err, writer.ErrBudgetSpent) || errors.Is(err, writer.ErrRetentionWindowFull)
+}
+
+// Retention is the part of a sweep's summary that says how much of what it wrote the runtime log
+// still holds. Collectors embed it, so the fields sit beside their own in --json output.
+type Retention struct {
+	// EventsRetained is how many of the events this sweep wrote are still in the runtime log or
+	// its archives when it finishes. Events the writer suppressed as duplicates are in neither.
+	EventsRetained int `json:"events_retained"`
+	// EventsRotatedOut is how many events this sweep wrote that another writer's rotations
+	// discarded before it finished. The sweep never rotates out its own output.
+	EventsRotatedOut int `json:"events_rotated_out"`
+	// RetentionLimited is set when the sweep stopped because writing more would have rotated its
+	// own output out of the log. The sessions it had not finished keep their cursors.
+	RetentionLimited bool `json:"retention_limited"`
+}
+
+// Finish records how the guarded sweep through s ended. stopErr is the error that stopped it
+// early, if any. It returns an error when another writer rotated out some of what it wrote.
+func (r *Retention) Finish(s Sink, stopErr error) error {
+	if errors.Is(stopErr, writer.ErrRetentionWindowFull) {
+		r.RetentionLimited = true
+	}
+	var err error
+	r.EventsRetained, r.EventsRotatedOut, err = s.Retention()
+	return err
 }
 
 // Retention reports how many of the events the guarded sweep wrote are still in the runtime log or

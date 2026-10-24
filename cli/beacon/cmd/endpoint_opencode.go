@@ -41,12 +41,13 @@ var endpointOpenCodeStatusCmd = &cobra.Command{
 }
 
 var endpointOpenCodeOpts struct {
-	dataDir   string
-	statePath string
-	logPath   string
-	print     bool
-	watch     bool
-	interval  time.Duration
+	dataDir     string
+	statePath   string
+	logPath     string
+	print       bool
+	watch       bool
+	interval    time.Duration
+	rotateBytes int64
 }
 
 func init() {
@@ -68,16 +69,21 @@ func init() {
 	sync.BoolVar(&endpointOpenCodeOpts.print, "print", false, "Print mapped events as JSON without writing them or advancing the cursor (dry run)")
 	sync.BoolVar(&endpointOpenCodeOpts.watch, "watch", false, "Sweep continuously on --interval (default: one sweep then exit)")
 	sync.DurationVar(&endpointOpenCodeOpts.interval, "interval", time.Minute, "Sweep interval for --watch")
+	addSyncRotateBytesFlag(sync, &endpointOpenCodeOpts.rotateBytes)
 }
 
 func runEndpointOpenCodeSync(cmd *cobra.Command, args []string) error {
+	if err := checkSyncRotateBytes(endpointOpenCodeOpts.rotateBytes); err != nil {
+		return err
+	}
 	userMode := endpointUserMode()
 	opts := opencodesession.CollectOptions{
-		DataDir:  endpointOpenCodeOpts.dataDir,
-		Print:    endpointOpenCodeOpts.print,
-		Out:      cmd.OutOrStdout(),
-		Write:    !endpointOpenCodeOpts.print,
-		UserMode: userMode,
+		RotateBytes: endpointOpenCodeOpts.rotateBytes,
+		DataDir:     endpointOpenCodeOpts.dataDir,
+		Print:       endpointOpenCodeOpts.print,
+		Out:         cmd.OutOrStdout(),
+		Write:       !endpointOpenCodeOpts.print,
+		UserMode:    userMode,
 	}
 	if !endpointOpenCodeOpts.print {
 		opts.StatePath = resolveOpenCodeStatePath(endpointOpenCodeOpts.statePath, userMode)
@@ -124,6 +130,7 @@ func reportOpenCodeSweep(cmd *cobra.Command, summary opencodesession.Summary) {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "opencode sync: %d traces, %d changed, %d events, %d errors\n",
 		summary.Traces, summary.TracesChanged, summary.EventsEmitted, summary.Errors)
+	reportSyncRetention(cmd.OutOrStdout(), summary.Retention)
 }
 
 type openCodeStatusRef struct {

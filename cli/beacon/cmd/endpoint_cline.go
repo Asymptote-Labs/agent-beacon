@@ -42,12 +42,13 @@ var endpointClineStatusCmd = &cobra.Command{
 }
 
 var endpointClineOpts struct {
-	clineDir  string
-	statePath string
-	logPath   string
-	print     bool
-	watch     bool
-	interval  time.Duration
+	clineDir    string
+	statePath   string
+	logPath     string
+	print       bool
+	watch       bool
+	interval    time.Duration
+	rotateBytes int64
 }
 
 func init() {
@@ -69,16 +70,21 @@ func init() {
 	sync.BoolVar(&endpointClineOpts.print, "print", false, "Print mapped events as JSON without writing them or advancing the cursor (dry run)")
 	sync.BoolVar(&endpointClineOpts.watch, "watch", false, "Sweep continuously on --interval (default: one sweep then exit)")
 	sync.DurationVar(&endpointClineOpts.interval, "interval", time.Minute, "Sweep interval for --watch")
+	addSyncRotateBytesFlag(sync, &endpointClineOpts.rotateBytes)
 }
 
 func runEndpointClineSync(cmd *cobra.Command, args []string) error {
+	if err := checkSyncRotateBytes(endpointClineOpts.rotateBytes); err != nil {
+		return err
+	}
 	userMode := endpointUserMode()
 	opts := clinesession.CollectOptions{
-		ClineDir: endpointClineOpts.clineDir,
-		Print:    endpointClineOpts.print,
-		Out:      cmd.OutOrStdout(),
-		Write:    !endpointClineOpts.print,
-		UserMode: userMode,
+		RotateBytes: endpointClineOpts.rotateBytes,
+		ClineDir:    endpointClineOpts.clineDir,
+		Print:       endpointClineOpts.print,
+		Out:         cmd.OutOrStdout(),
+		Write:       !endpointClineOpts.print,
+		UserMode:    userMode,
 	}
 	if !endpointClineOpts.print {
 		opts.StatePath = resolveClineStatePath(endpointClineOpts.statePath, userMode)
@@ -125,6 +131,7 @@ func reportClineSweep(cmd *cobra.Command, summary clinesession.Summary) {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "cline sync: %d traces, %d changed, %d events, %d errors\n",
 		summary.Traces, summary.TracesChanged, summary.EventsEmitted, summary.Errors)
+	reportSyncRetention(cmd.OutOrStdout(), summary.Retention)
 }
 
 type clineStatusRef struct {

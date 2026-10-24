@@ -58,6 +58,7 @@ var endpointFxOpts struct {
 	print       bool
 	watch       bool
 	interval    time.Duration
+	rotateBytes int64
 }
 
 func init() {
@@ -79,11 +80,16 @@ func init() {
 	sync.BoolVar(&endpointFxOpts.print, "print", false, "Print mapped events as JSON without writing them or advancing the cursor (dry run)")
 	sync.BoolVar(&endpointFxOpts.watch, "watch", false, "Sweep continuously on --interval (default: one sweep then exit)")
 	sync.DurationVar(&endpointFxOpts.interval, "interval", time.Minute, "Sweep interval for --watch")
+	addSyncRotateBytesFlag(sync, &endpointFxOpts.rotateBytes)
 }
 
 func runEndpointFxSync(cmd *cobra.Command, args []string) error {
+	if err := checkSyncRotateBytes(endpointFxOpts.rotateBytes); err != nil {
+		return err
+	}
 	userMode := endpointUserMode()
 	opts := fxsession.CollectOptions{
+		RotateBytes: endpointFxOpts.rotateBytes,
 		SessionsDir: endpointFxOpts.sessionsDir,
 		Print:       endpointFxOpts.print,
 		Out:         cmd.OutOrStdout(),
@@ -144,6 +150,7 @@ func reportFxSweep(cmd *cobra.Command, summary fxsession.Summary) {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "fx sync: %d sessions, %d changed, %d events, %d errors\n",
 		summary.Sessions, summary.SessionsChanged, summary.EventsEmitted, summary.Errors)
+	reportSyncRetention(cmd.OutOrStdout(), summary.Retention)
 	// Said out loud rather than left in a counter: a damaged session log and an empty one produce
 	// the same event count, and only one of them is a reason to look at the machine.
 	if summary.MalformedLines > 0 {
