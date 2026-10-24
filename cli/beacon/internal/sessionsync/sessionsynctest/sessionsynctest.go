@@ -93,28 +93,6 @@ func shipAway(t *testing.T, logPath string, batch int) []schema.Event {
 //     different id, fails.
 func CheckSweepKeepsItsOutput(t *testing.T, sweep Sweep) {
 	t.Helper()
-	CheckSweepKeepsItsOutputBy(t, EventID, sweep)
-}
-
-// EventID identifies an event by its deterministic event.id.
-func EventID(ev schema.Event) string { return ev.Event.ID }
-
-// IgnoringTimestamp identifies an event by everything but its timestamp and the id derived from
-// it, for a collector whose records carry no time of their own, so each sweep stamps its events
-// with the time it read them.
-func IgnoringTimestamp(ev schema.Event) string {
-	ev.Timestamp = ""
-	ev.Event.ID = ""
-	data, err := json.Marshal(ev)
-	if err != nil {
-		return ""
-	}
-	return string(data)
-}
-
-// CheckSweepKeepsItsOutputBy is CheckSweepKeepsItsOutput comparing events by key.
-func CheckSweepKeepsItsOutputBy(t *testing.T, key func(schema.Event) string, sweep Sweep) {
-	t.Helper()
 	dir := t.TempDir()
 
 	refLog := filepath.Join(dir, "reference", "runtime.jsonl")
@@ -124,7 +102,7 @@ func CheckSweepKeepsItsOutputBy(t *testing.T, key func(schema.Event) string, swe
 	}
 	want := map[string]bool{}
 	for _, ev := range RetainedEvents(t, refLog) {
-		want[key(ev)] = true
+		want[ev.Event.ID] = true
 	}
 	if ref.RetentionLimited || len(want) == 0 || len(want) != ref.EventsEmitted {
 		t.Fatalf("reference sweep: emitted=%d distinct events=%d limited=%v", ref.EventsEmitted, len(want), ref.RetentionLimited)
@@ -154,7 +132,7 @@ func CheckSweepKeepsItsOutputBy(t *testing.T, key func(schema.Event) string, swe
 				batch, result.EventsEmitted, result.EventsRetained, len(shipped))
 		}
 		for _, ev := range shipped {
-			got[key(ev)] = true
+			got[ev.Event.ID] = true
 		}
 		if batch == 0 && !result.RetentionLimited {
 			t.Fatal("the first sweep did not fill the window; the fixture proves nothing")
