@@ -1,5 +1,5 @@
 id: high-risk-approval-allowed-without-reason
-version: 1
+version: 2
 title: High-risk action approved with an empty approval reason
 description: >
   An approval was granted (event.action approval.allowed) for a high-risk operation —
@@ -23,7 +23,7 @@ match: >
   e.approval.required &&
   e.approval.reason == "" &&
   (
-    e.command.command.matches("(?i)(\\brm\\s+-[a-z]*r[a-z]*f\\b|\\bmkfs\\b|\\bdd\\s+if=|\\bsudo\\b|\\b(curl|wget)\\b.*\\|\\s*(ba)?sh\\b|\\bchmod\\s+-R\\s+777\\b)") ||
+    e.command.command.matches("(?i)(\\brm\\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\\b|\\bmkfs\\b|\\bdd\\s+if=|\\bsudo\\b|\\b(curl|wget)\\b.*\\|\\s*(ba)?sh\\b|\\bchmod\\s+-R\\s+777\\b)") ||
     e.file.path.matches("(?i)(\\.env$|\\.env\\.|/credentials$|id_rsa$|\\.aws/|\\.github/workflows/|\\.gitlab-ci\\.yml$|/auth\\.|/security\\.)")
   )
 
@@ -36,6 +36,13 @@ tests:
     events:
       - event: { action: approval.allowed }
         command: { command: "sudo rm -rf /etc" }
+        approval: { decision: "allow", required: true, reason: "" }
+        session: { id: s1 }
+  - name: rm_fr_flag_order_allowed_empty_reason
+    verdict: match
+    events:
+      - event: { action: approval.allowed }
+        command: { command: "rm -fr /var/lib/app" }
         approval: { decision: "allow", required: true, reason: "" }
         session: { id: s1 }
   - name: workflow_edit_allowed_empty_reason
