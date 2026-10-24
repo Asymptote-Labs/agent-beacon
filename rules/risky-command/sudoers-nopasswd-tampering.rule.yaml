@@ -1,5 +1,5 @@
 id: sudoers-nopasswd-tampering
-version: 1
+version: 2
 title: Sudoers / NOPASSWD privilege rule tampered or probed
 description: >
   A command writes to the sudoers configuration (/etc/sudoers or /etc/sudoers.d/),
@@ -18,7 +18,7 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(>>?\\s*|tee\\s+(-a\\s+)?)/etc/sudoers(\\.d)?\\b") ||
+    e.command.command.matches("(?i)(>>?\\s*|tee\\s+(-[a-z-]+\\s+)*)/etc/sudoers(\\.d)?\\b") ||
     e.command.command.matches("(?i)/etc/sudoers\\.d/[^\\s]+") ||
     e.command.command.matches("(?i)\\bvisudo\\b") ||
     e.command.command.matches("(?i)\\bNOPASSWD\\s*:") ||
@@ -40,6 +40,24 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "echo 'user ALL=(ALL) NOPASSWD:ALL' | tee -a /etc/sudoers" }
+        session: { id: s1 }
+  - name: tee_long_append_into_sudoers
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'agent ALL=(ALL) ALL' | sudo tee --append /etc/sudoers" }
+        session: { id: s1 }
+  - name: tee_clustered_flags_into_sudoers
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'agent ALL=(ALL) ALL' | sudo tee -ai /etc/sudoers" }
+        session: { id: s1 }
+  - name: tee_into_other_etc_file
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'nameserver 1.1.1.1' | sudo tee --append /etc/resolv.conf" }
         session: { id: s1 }
   - name: visudo_edit
     verdict: match
