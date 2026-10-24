@@ -397,7 +397,9 @@ func ConfigureClaude(opts ConfigureOptions) (string, error) {
 	path := filepath.Join(claudesession.ConfigDir(home), "settings.json")
 	settings := map[string]interface{}{}
 	if data, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(data, &settings)
+		if err := json.Unmarshal(data, &settings); err != nil {
+			return "", fmt.Errorf("Claude settings JSON is invalid: %w", err)
+		}
 		if err := backup(path, data); err != nil {
 			return "", err
 		}
