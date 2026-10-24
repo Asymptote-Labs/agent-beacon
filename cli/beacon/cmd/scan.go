@@ -200,10 +200,11 @@ func summarizeEvent(e asymptoteobserve.Event) string {
 
 func truncate(s string, n int) string {
 	s = strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\r", " ")
-	if len(s) <= n {
+	runes := []rune(s)
+	if len(runes) <= n {
 		return s
 	}
-	return s[:n-1] + "…"
+	return string(runes[:n-1]) + "…"
 }
 
 func init() {

@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/threatrules"
 )
@@ -200,5 +203,22 @@ func TestScanEmptyRulesDirKeepsMessage(t *testing.T) {
 	err := runScan(cmd, nil)
 	if err == nil || err.Error() != "no rules to run (store is empty and baseline missing)" {
 		t.Fatalf("want the unchanged empty-store message, got %v", err)
+	}
+}
+
+// A finding's prompt or command is cut to fit one line. The cut must land between characters:
+// a prompt in Japanese or with accents is mostly multibyte, and a byte cut prints a broken rune.
+func TestSummarizeEventTruncatesWholeCharacters(t *testing.T) {
+	prompt := strings.Repeat("é", 150)
+	got := summarizeEvent(asymptoteobserve.Event{
+		Event:  asymptoteobserve.EventInfo{Action: "prompt.submitted"},
+		Prompt: &asymptoteobserve.PromptInfo{Text: prompt},
+	})
+	if !utf8.ValidString(got) {
+		t.Fatalf("summary is not valid UTF-8: %q", got)
+	}
+	want := "prompt.submitted: " + strings.Repeat("é", 99) + "…"
+	if got != want {
+		t.Fatalf("summary = %q, want %q", got, want)
 	}
 }
