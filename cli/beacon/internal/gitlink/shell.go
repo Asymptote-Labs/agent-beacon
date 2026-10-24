@@ -69,10 +69,56 @@ func commandTargets(words []string) []string {
 	case "tee":
 		return operands
 	case "sed", "perl", "gsed":
-		if hasInPlaceFlag(flags) && len(operands) >= 2 {
-			// The first operand is the script, unless it came in with -e.
-			return operands[1:]
+		if hasInPlaceFlag(flags) {
+			return scriptFiles(name, args)
 		}
+	}
+	return nil
+}
+
+// scriptFiles returns the files sed or perl edits: every operand when the script came in with
+// -e/-f (attached, separate, or --expression/--file), otherwise every operand after the first.
+func scriptFiles(name string, args []string) []string {
+	scripted := false
+	var operands []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--":
+			operands = append(operands, args[i+1:]...)
+			i = len(args)
+		case a == "--expression" || a == "--file":
+			scripted = true
+			i++
+		case strings.HasPrefix(a, "--expression=") || strings.HasPrefix(a, "--file="):
+			scripted = true
+		case strings.HasPrefix(a, "--"):
+		case strings.HasPrefix(a, "-") && a != "-":
+			script, valued := "ef", "il"
+			if name == "perl" {
+				script, valued = "eE", "iCDFIMdlmx0"
+			}
+			for j, c := range a[1:] {
+				if strings.ContainsRune(script, c) {
+					scripted = true
+					if j+2 == len(a) {
+						i++ // the script is the next word
+					}
+					break
+				}
+				if strings.ContainsRune(valued, c) {
+					break
+				}
+			}
+		default:
+			operands = append(operands, a)
+		}
+	}
+	if scripted {
+		return operands
+	}
+	if len(operands) >= 2 {
+		return operands[1:]
 	}
 	return nil
 }
