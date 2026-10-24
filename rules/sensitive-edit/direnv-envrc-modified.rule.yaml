@@ -1,5 +1,5 @@
 id: direnv-envrc-modified
-version: 1
+version: 2
 title: direnv .envrc modified (auto-exec on directory entry)
 description: >
   The agent modified a direnv .envrc file. When direnv is installed and the
@@ -16,7 +16,7 @@ taxonomy:
   mitre_atlas: AML.T0011
 
 match: >
-  e.event.action == "file.modified" &&
+  e.event.action in ["file.modified", "file.created"] &&
   e.file.path.matches("(?i)(^|/)\\.envrc$")
 
 emit:
@@ -27,6 +27,12 @@ tests:
     verdict: match
     events:
       - event: { action: file.modified }
+        file: { path: ".envrc" }
+        session: { id: s1 }
+  - name: envrc_repo_root_via_create
+    verdict: match
+    events:
+      - event: { action: file.created }
         file: { path: ".envrc" }
         session: { id: s1 }
   - name: envrc_nested

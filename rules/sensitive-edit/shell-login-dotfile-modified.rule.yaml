@@ -1,5 +1,5 @@
 id: shell-login-dotfile-modified
-version: 1
+version: 2
 title: Shell rc / login dotfile modified
 description: >
   The agent modified a shell startup or login dotfile (.bashrc, .bash_profile,
@@ -16,7 +16,7 @@ taxonomy:
   mitre_atlas: AML.T0011
 
 match: >
-  e.event.action == "file.modified" &&
+  e.event.action in ["file.modified", "file.created"] &&
   e.file.path.matches("(?i)(^|/)(\\.bashrc|\\.bash_profile|\\.bash_login|\\.profile|\\.zshrc|\\.zprofile|\\.zshenv|\\.zlogin|\\.kshrc|\\.login|\\.cshrc|\\.tcshrc)$|(?i)(^|/)\\.config/fish/config\\.fish$")
 
 emit:
@@ -27,6 +27,12 @@ tests:
     verdict: match
     events:
       - event: { action: file.modified }
+        file: { path: "/home/dev/.bashrc" }
+        session: { id: s1 }
+  - name: bashrc_edit_via_create
+    verdict: match
+    events:
+      - event: { action: file.created }
         file: { path: "/home/dev/.bashrc" }
         session: { id: s1 }
   - name: zprofile_edit

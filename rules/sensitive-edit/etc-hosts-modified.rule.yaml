@@ -1,5 +1,5 @@
 id: etc-hosts-modified
-version: 1
+version: 2
 title: /etc/hosts or hosts.allow/deny modified
 description: >
   The agent modified a system name resolution file: /etc/hosts (the
@@ -21,7 +21,7 @@ taxonomy:
   mitre_atlas: AML.T0011
 
 match: >
-  e.event.action == "file.modified" && (
+  e.event.action in ["file.modified", "file.created"] && (
     e.file.path.matches("(?i)(^|/)etc/hosts$") ||
     e.file.path.matches("(?i)(^|/)etc/hosts\\.(allow|deny)$")
   )
@@ -34,6 +34,12 @@ tests:
     verdict: match
     events:
       - event: { action: file.modified }
+        file: { path: "/etc/hosts" }
+        session: { id: s1 }
+  - name: modify_etc_hosts_via_create
+    verdict: match
+    events:
+      - event: { action: file.created }
         file: { path: "/etc/hosts" }
         session: { id: s1 }
   - name: modify_etc_hosts_allow

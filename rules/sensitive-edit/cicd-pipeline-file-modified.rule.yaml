@@ -1,5 +1,5 @@
 id: cicd-pipeline-file-modified
-version: 2
+version: 3
 title: CI/CD or deployment manifest modified
 description: >
   The agent modified a CI/CD or deployment manifest (GitHub Actions workflow,
@@ -15,7 +15,7 @@ taxonomy:
   owasp_llm: LLM03
 
 match: >
-  e.event.action == "file.modified" && (
+  e.event.action in ["file.modified", "file.created"] && (
     e.file.path.matches("(?i)\\.github/workflows/.*\\.ya?ml$") ||
     e.file.path.matches("(?i)(^|/)(\\.gitlab-ci\\.yml|fly\\.toml|vercel\\.json|render\\.yaml|deployment\\.ya?ml|deploy\\.ya?ml|kustomization\\.ya?ml)$") ||
     e.file.path.matches("(?i)(^|/)(k8s|kubernetes|\\.circleci)/")
@@ -29,6 +29,12 @@ tests:
     verdict: match
     events:
       - event: { action: file.modified }
+        file: { path: ".github/workflows/deploy.yml" }
+        session: { id: s1 }
+  - name: github_workflow_edit_via_create
+    verdict: match
+    events:
+      - event: { action: file.created }
         file: { path: ".github/workflows/deploy.yml" }
         session: { id: s1 }
   - name: k8s_manifest_edit
