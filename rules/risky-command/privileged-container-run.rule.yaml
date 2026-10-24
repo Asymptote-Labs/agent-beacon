@@ -1,14 +1,14 @@
 id: privileged-container-run
-version: 4
+version: 5
 title: Container started with host-escaping privileges
 description: >
   A docker/podman run or exec — including Compose v2 (`docker compose run`) and the
   legacy `docker-compose` binary — grants container-escape primitives: --privileged,
   host namespace sharing (--pid/--net/--network/--ipc/--uts host), a root-filesystem
-  bind mount (-v /:...), a kernel capability add (--cap-add), or a mount of the docker
-  socket. The docker/podman token is anchored to command/segment start (allowing a
-  flagged sudo, env, or VAR=value prefix) so it is not matched inside an unrelated
-  commit message.
+  bind mount (-v /:..., --volume=/:..., or --mount with source=/), a kernel capability
+  add (--cap-add), or a mount of the docker socket. The docker/podman token is
+  anchored to command/segment start (allowing a flagged sudo, env, or VAR=value
+  prefix) so it is not matched inside an unrelated commit message.
 severity: high
 status: stable
 posture: detect
@@ -20,7 +20,7 @@ taxonomy:
 match: >
   e.event.action == "command.executed" &&
   e.command.command.matches("(?i)(^|;|&&|\\|\\|)\\s*(sudo(\\s+-\\S+)*\\s+|env\\s+|([A-Za-z_][A-Za-z0-9_]*=\\S*\\s+)+)*(docker|podman)(-compose)?\\s+(container\\s+|compose\\s+)?(run|exec)\\b") &&
-  e.command.command.matches("(?i)(--privileged|--(pid|net|network|ipc|uts)[= ]host|-v\\s+/:|--volume\\s+/:|--cap-add[= ]|/var/run/docker\\.sock\\b)")
+  e.command.command.matches("(?i)(--privileged|--(pid|net|network|ipc|uts)[= ]host|(-v|--volume)(=|\\s+)/:|--mount[= ]\\S*\\b(source|src)=/(,|\\s|$)|--cap-add[= ]|/var/run/docker\\.sock\\b)")
 
 emit:
   reason: "Container started with host-escaping privileges"
@@ -73,6 +73,24 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "sudo -E docker run --cap-add=SYS_ADMIN ubuntu" }
+        session: { id: s1 }
+  - name: volume_equals_root_bind
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "docker run --volume=/:/host ubuntu chroot /host" }
+        session: { id: s1 }
+  - name: mount_flag_root_bind
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "docker run --mount type=bind,source=/,target=/host ubuntu" }
+        session: { id: s1 }
+  - name: mount_flag_project_bind
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "docker run --mount type=bind,source=/src/app,target=/app node:20 npm test" }
         session: { id: s1 }
   - name: docker_run_normal
     verdict: no_match
