@@ -530,7 +530,7 @@ function patchOpenLLMetryModules(modules: InstrumentModules): void {
 
 function manuallyInstrumentModules(instrumentations: Instrumentation[], modules: InstrumentModules): void {
   const openAIModule = modules.OpenAI ?? modules.openAI ?? modules.openai;
-  const anthropicModule = modules.Anthropic ?? modules.anthropic;
+  const anthropicModule = anthropicModuleShape(modules.Anthropic ?? modules.anthropic);
   for (const instrumentation of instrumentations) {
     const maybeManual = instrumentation as Instrumentation & {
       manuallyInstrument?: (moduleValue: unknown) => void;
@@ -543,6 +543,17 @@ function manuallyInstrumentModules(instrumentations: Instrumentation[], modules:
       maybeManual.manuallyInstrument?.(anthropicModule);
     }
   }
+}
+
+// The Anthropic instrumentation patches `module.Anthropic.Messages`, so it needs the module
+// namespace. `import Anthropic from "@anthropic-ai/sdk"` yields the client class itself, whose own
+// `Anthropic` property is a base class without the resources.
+function anthropicModuleShape(moduleValue: unknown): unknown {
+  if (typeof moduleValue !== "function") {
+    return moduleValue;
+  }
+  const candidate = moduleValue as unknown as { Messages?: unknown; Anthropic?: { Messages?: unknown } };
+  return candidate.Messages && !candidate.Anthropic?.Messages ? { Anthropic: moduleValue } : moduleValue;
 }
 
 function patchClaudeAgentSDK(moduleValue: unknown): void {
