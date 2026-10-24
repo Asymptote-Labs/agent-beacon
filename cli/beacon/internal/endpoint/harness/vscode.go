@@ -151,7 +151,7 @@ func VSCodeOTelStatus(path, expectedEndpoint string) (TelemetryStatus, string) {
 		return TelemetryMissing, err.Error()
 	}
 	var settings map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
+	if err := json.Unmarshal(standardizeJSONC(data), &settings); err != nil {
 		return TelemetryMisconfigured, "VS Code settings JSON is invalid"
 	}
 	if vscodeSettingString(settings, "github.copilot.chat.otel.exporterType") == "file" ||

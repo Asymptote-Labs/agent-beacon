@@ -101,6 +101,34 @@ func TestVSCodeOTelStatus(t *testing.T) {
 	}
 }
 
+// VS Code's settings.json is JSONC: comments and trailing commas are legal there, and a
+// hand-edited one usually has some.
+func TestVSCodeOTelStatusReadsJSONC(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	body := `{
+  // Copilot telemetry goes to Beacon.
+  "github.copilot.chat.otel.enabled": true,
+  /* local receiver, see "beacon endpoint status" */
+  "github.copilot.chat.otel.otlpEndpoint": "http://127.0.0.1:4318",
+  "editor.rulers": [80, 120,],
+  "files.exclude": {"**/*.min.js": true,},
+  "url.note": "http://example.com/a//b, not a comment",
+}
+`
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if status, msg := VSCodeOTelStatus(path, "http://127.0.0.1:4318"); status != TelemetryEnabled {
+		t.Fatalf("status = %s msg=%s, want enabled", status, msg)
+	}
+	if err := os.WriteFile(path, []byte("{\n  // nothing yet\n  \"github.copilot.chat.otel.enabled\": true,\n  \"github.copilot.chat.otel.otlpEndpoint\": \"https://example.com\",\n}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := VSCodeOTelStatus(path, "http://127.0.0.1:4318"); status != TelemetryMisconfigured {
+		t.Fatalf("remote endpoint status = %s, want misconfigured", status)
+	}
+}
+
 // vscodeSettingsPathForTest mirrors vscodeUserDataDirsForOS so these tests exercise the real
 // per-platform layout.
 // isolateUserConfig points every user-config lookup at a temporary home.
