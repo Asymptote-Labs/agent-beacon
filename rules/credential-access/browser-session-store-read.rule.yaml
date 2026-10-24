@@ -1,5 +1,5 @@
 id: browser-session-store-read
-version: 2
+version: 3
 title: Agent read a browser session/cookie store
 description: >
   The agent read a browser cookie jar or saved-login store (cookies.sqlite /
@@ -19,7 +19,7 @@ taxonomy:
 match: >
   e.event.action == "file.read" && (
     e.file.path.matches("(?i)(^|/)(cookies\\.sqlite|logins\\.json)$") ||
-    e.file.path.matches("(?i)/(google-chrome|chromium|chrome|brave[ -]?browser|bravesoftware|microsoft-?edge|edge|firefox|mozilla|safari)/.*(cookies|login data)$")
+    e.file.path.matches("(?i)/(google-chrome|chromium|chrome|brave[ -]?browser|bravesoftware|microsoft[ -]?edge|edge|firefox|mozilla|safari)/.*(cookies|login data)$")
   )
 
 emit:
@@ -49,6 +49,12 @@ tests:
     events:
       - event: { action: file.read }
         file: { path: "/home/u/.config/BraveSoftware/Brave-Browser/Default/Cookies" }
+        session: { id: s1 }
+  - name: read_edge_macos_cookies
+    verdict: match
+    events:
+      - event: { action: file.read }
+        file: { path: "/Users/u/Library/Application Support/Microsoft Edge/Default/Cookies" }
         session: { id: s1 }
   - name: source_file_named_cookies
     verdict: no_match
