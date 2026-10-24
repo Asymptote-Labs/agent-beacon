@@ -28,6 +28,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pisession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/primesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
 )
 
 // The install-time session backfill reads recent history from every agent's own session store,
@@ -157,7 +158,10 @@ type endpointBackfillRuntimeResult struct {
 	Sync    string
 	Events  int
 	Limited bool
-	Err     error
+	// RetentionLimited says the runtime stopped before log rotation would discard what it had
+	// written, rather than at its share of the size budget.
+	RetentionLimited bool
+	Err              error
 	// Oversized names the databases a system backfill would not copy because they are too large;
 	// Sync, run as the user, reads them in place.
 	Oversized []string
@@ -245,11 +249,12 @@ func sweepEndpointBackfill(logPath string, userMode bool) endpointBackfillResult
 		// runtime's before the next one runs. A no-op otherwise.
 		sessionfs.DropSnapshots()
 		runtime := endpointBackfillRuntimeResult{Name: runner.Name, Sync: runner.Sync, Events: events, Oversized: sessionfs.TakeOversized()}
-		if errors.Is(err, writer.ErrBudgetSpent) || share.Refused() {
+		if sessionsync.Stopped(err) || share.Refused() {
 			runtime.Limited = true
 			result.Limited = true
 		}
-		if err != nil && !onlyBudgetSpent(err) {
+		runtime.RetentionLimited = errors.Is(err, writer.ErrRetentionWindowFull)
+		if err != nil && !onlyStopped(err) {
 			runtime.Err = err
 		}
 		result.Events += events
@@ -261,17 +266,19 @@ func sweepEndpointBackfill(logPath string, userMode bool) endpointBackfillResult
 	return result
 }
 
-// onlyBudgetSpent reports whether err says nothing but that the budget ran out.
-func onlyBudgetSpent(err error) bool {
+// onlyStopped reports whether err says nothing but that the sweep stopped early: the budget ran
+// out, or writing more would have rotated the sweep's own output out of the log. Either way the
+// collector's cursors stop at what was written and the runtime's sync reads the rest.
+func onlyStopped(err error) bool {
 	if joined, ok := err.(interface{ Unwrap() []error }); ok {
 		for _, e := range joined.Unwrap() {
-			if !onlyBudgetSpent(e) {
+			if !onlyStopped(e) {
 				return false
 			}
 		}
 		return true
 	}
-	return errors.Is(err, writer.ErrBudgetSpent)
+	return sessionsync.Stopped(err)
 }
 
 // reportEndpointBackfill prints what a backfill wrote: one line when it went cleanly, plus a line
@@ -307,6 +314,8 @@ func reportEndpointBackfill(out io.Writer, result endpointBackfillResult) {
 			// The error is the collector failing to open the store named just above.
 		case r.Err != nil:
 			fmt.Fprintf(out, "  %s: %v; retry with `%s`.\n", r.Name, r.Err, r.Sync)
+		case r.RetentionLimited:
+			fmt.Fprintf(out, "  %s: stopped before log rotation would discard what it wrote; `%s` reads the rest.\n", r.Name, r.Sync)
 		case r.Limited:
 			fmt.Fprintf(out, "  %s: stopped at the backfill size limit; `%s` reads the rest.\n", r.Name, r.Sync)
 		}

@@ -44,8 +44,7 @@ func TestMapSessionRecordsAHandoffLink(t *testing.T) {
 	if link.Event.Prompt != nil || link.Event.Content != nil || link.Event.GenAI != nil {
 		t.Fatalf("the link must not repeat the prompt: %+v", link.Event)
 	}
-	// Every other Grok event is named by the writer from its bytes; the link names itself, from
-	// where it was read, because its bytes carry the time of the sync.
+	// The link names itself from where it was read, because its bytes carry the time of the sync.
 	if link.Event.Event.ID == "" {
 		t.Fatal("the link has no id")
 	}
