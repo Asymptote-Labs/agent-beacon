@@ -126,11 +126,22 @@ function shellMutationPaths(tool, args) {
   if (name !== "bash" && !name.includes("shell")) return []
   const command = String(args?.command || args?.cmd || "")
   const paths = []
-  const pattern =
-    /(?:(?:^|&&|\|\||;|\n)[ \t]*)(?:sudo\s+)?(?:command\s+)?(?:\/bin\/)?(?:rm|unlink)\s+(?:-[^\s]+\s+)*(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/g
+  // Operands end at a separator or a redirection; `2>/dev/null` is not a path.
+  const operand = /[ \t]+(?:"([^"]+)"|'([^']+)'|([^\s;&|<>"']+))(?=[\s;&|]|$)/y
+  const pattern = /(?:(?:^|&&|\|\||;|\n)[ \t]*)(?:sudo\s+)?(?:command\s+)?(?:\/bin\/)?(?:rm|unlink)(?=[ \t])/g
   for (const match of command.matchAll(pattern)) {
-    const path = match[1] || match[2] || match[3]
-    if (path) paths.push(path)
+    operand.lastIndex = match.index + match[0].length
+    let options = true
+    for (let arg = operand.exec(command); arg; arg = operand.exec(command)) {
+      const bare = arg[3]
+      if (options && bare === "--") {
+        options = false
+        continue
+      }
+      if (options && bare?.startsWith("-")) continue
+      const path = arg[1] || arg[2] || bare
+      if (path) paths.push(path)
+    }
   }
   return paths
 }
