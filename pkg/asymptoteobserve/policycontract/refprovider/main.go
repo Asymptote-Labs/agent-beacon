@@ -22,7 +22,7 @@ import (
 var agentRuntime = regexp.MustCompile(`(?i)(^|[;&|]|&&|\|\||\bsudo\s+|\benv\s+|\bnpx\s+)\s*(claude|codex|cursor-agent|aider|goose|opencode|gemini)\b`)
 
 // bypassFlag matches a flag that disables the runtime's permission/approval gate.
-var bypassFlag = regexp.MustCompile(`(?i)(--dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--permission-mode[ =]+bypasspermissions|--sandbox[ =]+danger-full-access|--ask-for-approval[ =]+never|--full-auto|--yolo|(^|\s)-a[ =]+never\b|--force\b)`)
+var bypassFlag = regexp.MustCompile(`(?i)(--dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--permission-mode[ =]+bypasspermissions|(--sandbox|(^|\s)-s)[ =]+danger-full-access|--ask-for-approval[ =]+never|--full-auto|--yolo|(^|\s)-a[ =]+never\b|--force\b)`)
 
 func main() {
 	resp := decide(os.Stdin)
