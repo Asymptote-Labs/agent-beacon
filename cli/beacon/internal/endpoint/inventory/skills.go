@@ -191,9 +191,11 @@ func inspectSkillManifest(root skillRoot, name, manifestPath, redaction string, 
 	return skill
 }
 
+// skipSkillDir names directories that are never a skill. build, dist, vendor and the like are not
+// here: a skill root's direct children are skill names, and a runtime loads a skill called build.
 func skipSkillDir(name string) bool {
 	switch name {
-	case ".git", "node_modules", "vendor", "dist", "build", "tmp", "temp":
+	case ".git", "node_modules":
 		return true
 	default:
 		return false
