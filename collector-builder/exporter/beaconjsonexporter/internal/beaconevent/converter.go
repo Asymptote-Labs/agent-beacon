@@ -2244,6 +2244,10 @@ func FilePathFromURI(value string) string {
 	if parsed.Host != "" && parsed.Host != "localhost" {
 		return "//" + parsed.Host + parsed.Path
 	}
+	// file:///C:/Users/x names C:/Users/x; the slash before a drive letter is URI syntax.
+	if p := parsed.Path; len(p) >= 3 && p[0] == '/' && p[2] == ':' && (p[1]|0x20 >= 'a' && p[1]|0x20 <= 'z') {
+		return p[1:]
+	}
 	return parsed.Path
 }
 
