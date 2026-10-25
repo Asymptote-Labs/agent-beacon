@@ -157,6 +157,7 @@ func redirection(word string) (op, target string) {
 func splitShellSegments(command string) []string {
 	var segments []string
 	var cur strings.Builder
+	var heredocs []heredoc
 	quote := byte(0)
 	flush := func() {
 		if s := strings.TrimSpace(cur.String()); s != "" {
@@ -186,6 +187,23 @@ func splitShellSegments(command string) []string {
 		case c == '|' && i > 0 && command[i-1] == '>':
 			// `>|` is a clobbering redirection, not a pipe.
 			cur.WriteByte(c)
+		case c == '<' && i+1 < len(command) && command[i+1] == '<' && (i+2 >= len(command) || command[i+2] != '<'):
+			// A here-document: its body is input text, not commands.
+			end := i + 2
+			strip := end < len(command) && command[end] == '-'
+			if strip {
+				end++
+			}
+			delimiter, next := heredocDelimiter(command, end)
+			cur.WriteString(command[i:next])
+			i = next - 1
+			if delimiter != "" {
+				heredocs = append(heredocs, heredoc{delimiter, strip})
+			}
+		case c == '\n' && len(heredocs) > 0:
+			flush()
+			i = skipHeredocBodies(command, i+1, heredocs) - 1
+			heredocs = nil
 		case c == ';' || c == '\n' || c == '|':
 			flush()
 		case c == '&':
@@ -205,6 +223,63 @@ func splitShellSegments(command string) []string {
 	}
 	flush()
 	return segments
+}
+
+type heredoc struct {
+	delimiter string
+	stripTabs bool // <<- removes leading tabs, so the closing line may be indented with them
+}
+
+// heredocDelimiter reads the delimiter word that starts at command[i], after optional blanks,
+// with its quotes removed. It returns the index just past the word.
+func heredocDelimiter(command string, i int) (string, int) {
+	for i < len(command) && (command[i] == ' ' || command[i] == '\t') {
+		i++
+	}
+	var word strings.Builder
+	quote := byte(0)
+	for ; i < len(command); i++ {
+		c := command[i]
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			} else {
+				word.WriteByte(c)
+			}
+		case c == '\'' || c == '"':
+			quote = c
+		case c == '\\' && i+1 < len(command):
+			i++
+			word.WriteByte(command[i])
+		case strings.IndexByte(" \t\n;&|<>()", c) >= 0:
+			return word.String(), i
+		default:
+			word.WriteByte(c)
+		}
+	}
+	return word.String(), i
+}
+
+// skipHeredocBodies returns the index just past the bodies of heredocs, which begin at command[i].
+func skipHeredocBodies(command string, i int, heredocs []heredoc) int {
+	for _, h := range heredocs {
+		for i < len(command) {
+			end := strings.IndexByte(command[i:], '\n')
+			line, next := command[i:], len(command)
+			if end >= 0 {
+				line, next = command[i:i+end], i+end+1
+			}
+			i = next
+			if h.stripTabs {
+				line = strings.TrimLeft(line, "\t")
+			}
+			if line == h.delimiter {
+				break
+			}
+		}
+	}
+	return i
 }
 
 // shellWord is one word of a simple command. quoted records that some of it was quoted, which

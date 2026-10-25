@@ -59,6 +59,10 @@ func TestShellWrittenPaths(t *testing.T) {
 		{"command popd; rm after.txt", nil},
 		{"ls -la; go test ./...", nil},
 		{"cat <<EOF > gen.txt\nhello\nEOF", []string{"gen.txt"}},
+		{"cat > deploy.sh <<'EOF'\nrm -rf dist\necho done > status.txt\nEOF\nchmod +x deploy.sh", []string{"deploy.sh"}},
+		{"cat <<-END > a.txt\n\trm b.txt\n\tEND\nrm c.txt", []string{"a.txt", "c.txt"}},
+		{"cat <<A <<\"B\" > out.txt\ntouch x.txt\nA\ntouch y.txt\nB\ntouch z.txt", []string{"out.txt", "z.txt"}},
+		{"grep -c x <<< 'rm here.txt'", nil},
 	} {
 		got := ShellWrittenPaths(tc.command)
 		if len(got) == 0 && len(tc.want) == 0 {
