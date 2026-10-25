@@ -52,6 +52,12 @@ func TestCommandFieldsKeepsQuotedPathsWhole(t *testing.T) {
 			want:    []string{`C:\beacon\beacon-hooks.exe`, "--log", `C:\logs\runtime.jsonl`},
 		},
 		{
+			// hookCommandQuote writes a single quote inside a value as \' between two quoted runs.
+			name:    "a single quote escaped the way hookCommandQuote writes it",
+			command: `'C:\Users\O'\''Brien\hooks\beacon-hooks.exe' --platform claude`,
+			want:    []string{`C:\Users\O'Brien\hooks\beacon-hooks.exe`, "--platform", "claude"},
+		},
+		{
 			name:    "empty",
 			command: "   ",
 			want:    nil,
@@ -112,6 +118,22 @@ func TestAPlatformNamedWithAnEqualsSignCountsAsNamingOne(t *testing.T) {
 	}
 	if isEndpointHookCommand(own, "vscode") {
 		t.Fatal("--platform=cursor matched when asked about vscode")
+	}
+}
+
+// A profile directory with an apostrophe (C:\Users\O'Brien) puts \' between two quoted runs in every
+// path of the command. Read as an unterminated quote, it swallowed --platform, and the hook matched
+// every runtime.
+func TestAHookUnderAnApostrophePathKeepsItsPlatform(t *testing.T) {
+	for _, home := range []string{`C:\Users\O'Brien`, `/home/o'brien`} {
+		command := endpointCommandPrefix("claude", home+`/.beacon/endpoint/hooks/beacon-hooks`,
+			home+`/.beacon/endpoint/logs/runtime.jsonl`, home+`/.beacon/endpoint/config.json`)
+		if !isEndpointHookCommand(command, "claude") {
+			t.Errorf("%s: not matched for claude", command)
+		}
+		if isEndpointHookCommand(command, "cursor") {
+			t.Errorf("%s: a claude hook matched when asked about cursor", command)
+		}
 	}
 }
 

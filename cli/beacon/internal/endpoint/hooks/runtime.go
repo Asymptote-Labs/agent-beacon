@@ -309,7 +309,8 @@ func commandHasPlatform(command, platform string) bool {
 // are single-quoted and Windows ones double-quoted -- and this function only has to recover tokens,
 // not to reproduce a particular shell's semantics. It deliberately does not handle backslash escapes:
 // on Windows a backslash is a path separator, and treating it as an escape would corrupt every path
-// this parses.
+// this parses. The one exception is \' outside quotes: hookCommandQuote writes a single quote in a
+// value by closing the quoted run, writing \' and reopening it.
 func commandFields(command string) []string {
 	var (
 		fields  []string
@@ -324,7 +325,9 @@ func commandFields(command string) []string {
 			started = false
 		}
 	}
-	for _, r := range command {
+	runes := []rune(command)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
 		switch {
 		case quote != 0:
 			if r == quote {
@@ -332,6 +335,10 @@ func commandFields(command string) []string {
 				break
 			}
 			current.WriteRune(r)
+		case r == '\\' && i+1 < len(runes) && runes[i+1] == '\'':
+			current.WriteRune('\'')
+			started = true
+			i++
 		case r == '"' || r == '\'':
 			// Marks the token as started even if the quotes turn out to be empty, so `--platform ""`
 			// yields an empty value rather than dropping the argument and shifting every token after
