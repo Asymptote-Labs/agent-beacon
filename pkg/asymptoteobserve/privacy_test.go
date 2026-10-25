@@ -116,6 +116,8 @@ func TestRedactStringRedactsCommonCredentialFormats(t *testing.T) {
 		{"clone url", "git clone https://x-access-token:opaqueValue123@github.com/org/repo", "opaqueValue123"},
 		{"database url", "DATABASE_URL=postgres://app:pa55w0rd@db.internal:5432/app", "pa55w0rd"},
 		{"bare database url", "connect to postgres://app:pa55w0rd@db.internal:5432/app", "pa55w0rd"},
+		{"url password without a user", "REDIS_URL=redis://:pa55w0rd@cache.internal:6379/0", "pa55w0rd"},
+		{"bare url password without a user", "redis-cli -u redis://:pa55w0rd@localhost:6379 ping", "pa55w0rd"},
 		{"password flag", "mysql --user root --password hunter2hunter2", "hunter2hunter2"},
 		{"token flag", "tool login --token=opaque-flag-value", "opaque-flag-value"},
 		{"curl basic auth", "curl -u admin:hunter2hunter2 https://api.example.com/v1", "hunter2hunter2"},
