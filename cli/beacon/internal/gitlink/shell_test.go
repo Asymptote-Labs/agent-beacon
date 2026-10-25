@@ -58,6 +58,12 @@ func TestShellWrittenPaths(t *testing.T) {
 		{"touch before.txt; command pushd sub; rm after.txt", []string{"before.txt"}},
 		{"command popd; rm after.txt", nil},
 		{"ls -la; go test ./...", nil},
+		{"tee -a log.txt < output.txt", []string{"log.txt"}},
+		{"tee log.txt <output.txt", []string{"log.txt"}},
+		{"sudo tee /etc/app.conf <<'EOF'", []string{"/etc/app.conf"}},
+		{"tee copy.txt <<< hello", []string{"copy.txt"}},
+		{"echo '<' > lt.txt", []string{"lt.txt"}},
+		{"tee '<' out.txt", []string{"<", "out.txt"}},
 		{"cat <<EOF > gen.txt\nhello\nEOF", []string{"gen.txt"}},
 	} {
 		got := ShellWrittenPaths(tc.command)

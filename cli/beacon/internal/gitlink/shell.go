@@ -110,6 +110,13 @@ func stripRedirections(words []shellWord) (rest, targets []string) {
 	for i := 0; i < len(words); i++ {
 		w := words[i]
 		op, target := "", ""
+		if in, source := inputRedirection(w.text[:w.plain]); in != "" {
+			// Input is read, not written; drop the operator and its source from the words.
+			if source == "" && w.plain == len(w.text) {
+				i++
+			}
+			continue
+		}
 		if !w.quoted {
 			op, target = redirection(w.text)
 		}
@@ -146,6 +153,16 @@ func stripRedirections(words []shellWord) (rest, targets []string) {
 func redirection(word string) (op, target string) {
 	for _, prefix := range []string{"&>>", "&>", "1>>", "2>>", "1>", "2>", ">>", ">|", ">"} {
 		if strings.HasPrefix(word, prefix) {
+			return prefix, word[len(prefix):]
+		}
+	}
+	return "", ""
+}
+
+// inputRedirection recognizes `<`, `0<`, `<<`, `<<-` and `<<<`, with the source attached or not.
+func inputRedirection(word string) (op, source string) {
+	for _, prefix := range []string{"<<<", "<<-", "<<", "0<", "<"} {
+		if strings.HasPrefix(word, prefix) && !strings.HasPrefix(word, "<>") {
 			return prefix, word[len(prefix):]
 		}
 	}
@@ -214,6 +231,7 @@ func splitShellSegments(command string) []string {
 type shellWord struct {
 	text       string
 	quoted     bool
+	plain      int // length of the leading text that came before any quoting
 	expands    bool
 	assignment bool
 }
@@ -223,10 +241,14 @@ func shellWords(segment string) []shellWord {
 	var words []shellWord
 	var cur strings.Builder
 	inWord, expands, quoted, assignment := false, false, false, false
+	plain := 0
 	quote := byte(0)
 	flush := func() {
 		if inWord {
-			words = append(words, shellWord{text: cur.String(), quoted: quoted, expands: expands, assignment: assignment})
+			if !quoted {
+				plain = cur.Len()
+			}
+			words = append(words, shellWord{text: cur.String(), quoted: quoted, plain: plain, expands: expands, assignment: assignment})
 		}
 		cur.Reset()
 		inWord, expands, quoted, assignment = false, false, false, false
@@ -254,8 +276,14 @@ func shellWords(segment string) []shellWord {
 				cur.WriteByte(c)
 			}
 		case c == '\'' || c == '"':
+			if !quoted {
+				plain = cur.Len()
+			}
 			quote, inWord, quoted = c, true, true
 		case c == '\\' && i+1 < len(segment):
+			if !quoted {
+				plain = cur.Len()
+			}
 			i++
 			cur.WriteByte(segment[i])
 			inWord, quoted = true, true
