@@ -108,3 +108,34 @@ func TestCurrentBranchRejectsMalformedHead(t *testing.T) {
 		})
 	}
 }
+
+func TestGetRemoteInfoSubmoduleUsesItsOwnRemote(t *testing.T) {
+	super := t.TempDir()
+	writeTestFile(t, filepath.Join(super, ".git", "HEAD"), "ref: refs/heads/main\n")
+	writeTestFile(t, filepath.Join(super, ".git", "config"), "[remote \"origin\"]\n\turl = git@github.com:acme/superproject.git\n")
+	moduleGitDir := filepath.Join(super, ".git", "modules", "vendor", "lib")
+	writeTestFile(t, filepath.Join(moduleGitDir, "HEAD"), "ref: refs/heads/main\n")
+	writeTestFile(t, filepath.Join(moduleGitDir, "config"), "[core]\n\tworktree = ../../../../vendor/lib\n[remote \"origin\"]\n\turl = https://github.com/upstream/lib.git\n")
+	submodule := filepath.Join(super, "vendor", "lib")
+	writeTestFile(t, filepath.Join(submodule, ".git"), "gitdir: ../../.git/modules/vendor/lib\n")
+
+	if owner, name := GetRemoteInfo(submodule); owner != "upstream" || name != "lib" {
+		t.Fatalf("GetRemoteInfo(submodule) = %q/%q, want upstream/lib", owner, name)
+	}
+	if owner, name := GetRemoteInfo(super); owner != "acme" || name != "superproject" {
+		t.Fatalf("GetRemoteInfo(superproject) = %q/%q, want acme/superproject", owner, name)
+	}
+}
+
+func TestGetRemoteInfoSeparateGitDir(t *testing.T) {
+	base := t.TempDir()
+	gitDir := filepath.Join(base, "store", "app.git")
+	writeTestFile(t, filepath.Join(gitDir, "HEAD"), "ref: refs/heads/main\n")
+	writeTestFile(t, filepath.Join(gitDir, "config"), "[remote \"origin\"]\n\turl = git@github.com:acme/app.git\n")
+	checkout := filepath.Join(base, "app")
+	writeTestFile(t, filepath.Join(checkout, ".git"), "gitdir: "+gitDir+"\n")
+
+	if owner, name := GetRemoteInfo(checkout); owner != "acme" || name != "app" {
+		t.Fatalf("GetRemoteInfo = %q/%q, want acme/app", owner, name)
+	}
+}

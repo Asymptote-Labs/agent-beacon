@@ -222,8 +222,12 @@ func resolveWorktreeGitDir(dotGitFile string) string {
 		}
 	}
 
-	// No commondir means this is not a worktree (likely a submodule).
-	// Return "" so findGitDir continues walking up to the parent repo.
+	// No commondir: a submodule (gitdir is .git/modules/<name> of the superproject) or a
+	// --separate-git-dir clone. Either way the gitdir is a whole repository with its own
+	// remotes, as `git remote` run there reports; the enclosing repository's are not this one's.
+	if _, err := os.Stat(filepath.Join(gitdir, "config")); err == nil {
+		return gitdir
+	}
 	return ""
 }
 
