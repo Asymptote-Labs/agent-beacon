@@ -2,7 +2,7 @@ module github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconj
 
 go 1.27.0
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve v0.0.0

@@ -58,7 +58,7 @@ install_go() {
     fi
   fi
 
-  local go_version="${BEACON_GO_VERSION:-1.27.2}"
+  local go_version="${BEACON_GO_VERSION:-1.27.3}"
   local arch
 
   case "$(uname -m)" in
