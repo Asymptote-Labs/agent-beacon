@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -889,18 +888,16 @@ func firstNestedString(input map[string]interface{}, key string) string {
 	return normalizeToolString(value)
 }
 
-// normalizeToolString returns a tool argument as text. A value that arrives as a whole JSON string
-// literal ("\"npm test\"") is unwrapped; quotes that belong to the value, as in echo "hi", stay.
+// normalizeToolString returns a tool argument as text. A value wrapped whole in one pair of double
+// quotes ("npm test", "C:\tools\run.exe") loses that pair; quotes that belong to the value, as in
+// echo "hi", stay. Nothing is unescaped: backslashes are what the shell or the path holds.
 func normalizeToolString(value interface{}) string {
 	str := strings.TrimSpace(fmt.Sprint(value))
 	if str == "" || str == "<nil>" {
 		return ""
 	}
-	if len(str) >= 2 && str[0] == '"' && str[len(str)-1] == '"' {
-		var unquoted string
-		if json.Unmarshal([]byte(str), &unquoted) == nil {
-			return strings.TrimSpace(unquoted)
-		}
+	if len(str) >= 2 && str[0] == '"' && str[len(str)-1] == '"' && !strings.Contains(str[1:len(str)-1], `"`) {
+		return strings.TrimSpace(str[1 : len(str)-1])
 	}
 	return str
 }
