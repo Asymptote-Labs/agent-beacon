@@ -1,13 +1,14 @@
 id: path-injection-into-login-file
 version: 2
-title: PATH modification appended to a shell startup file
+title: PATH shadowing entry written to a shell startup file
 description: >
-  A command writes a PATH-altering line into a shell startup or login file by
-  redirecting or tee-ing into it (e.g. `echo 'export PATH=/tmp/bin:$PATH' >> ~/.bashrc`, or
-  appending `set -gx PATH ...` to fish config, or a drop-in under /etc/profile.d).
-  Prepending an attacker-controlled directory to PATH in a file that is sourced on
-  every new shell or login is durable persistence and a binary-shadowing primitive
-  that runs outside any agent sandbox with no further prompt.
+  A command writes a PATH line into a shell startup or login file, by redirecting or
+  tee-ing into it, and that line adds a directory anyone can plant binaries in: /tmp,
+  /var/tmp or /dev/shm, the current directory (`.` or an empty entry such as
+  `PATH=:$PATH`), or a relative path. Such an entry shadows system binaries on every
+  new shell or login, outside any agent sandbox and with no further prompt. Ordinary
+  tool directories (`$HOME/.local/bin`, `.cargo/bin`, `/usr/local/go/bin`) do not fire:
+  a command alone cannot tell them from an attacker's absolute directory.
 severity: high
 status: stable
 posture: detect
@@ -18,11 +19,15 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" &&
-  e.command.command.matches("(?i)(export\\s+PATH\\s*=|\\bPATH\\s*=|set\\s+-[gx]+\\s+PATH\\b)") &&
-  e.command.command.matches("(?i)(>>?|\\btee\\b)\\s*[^|;&]*(\\.bashrc|\\.bash_profile|\\.bash_login|\\.profile|\\.zshrc|\\.zprofile|\\.zshenv|\\.zlogin|\\.kshrc|\\.cshrc|\\.tcshrc|config\\.fish|/etc/profile|profile\\.d/)")
+  e.command.command.matches("(?i)(>>?|\\btee\\b)\\s*([^|;&]*[\\s/])?(\\.bashrc|\\.bash_profile|\\.bash_login|\\.profile|\\.zshrc|\\.zprofile|\\.zshenv|\\.zlogin|\\.kshrc|\\.cshrc|\\.tcshrc|config\\.fish|etc/profile|profile\\.d/[^\\s;&|\"']+)([\"'\\s]|$)") && (
+    e.command.command.matches("(?i)\\bPATH\\s*\\+?=\\s*[\"']?([^\\s;&|\"']*:)?(/tmp|/var/tmp|/dev/shm)(/[^\\s:;&|\"']*)?(:|[\"'\\s]|$)") ||
+    e.command.command.matches("(?i)\\bPATH\\s*\\+?=\\s*[\"']?(\\.?:|[^\\s;&|\"']*:\\.?(:|[\"'\\s]|$))") ||
+    e.command.command.matches("(?i)\\bPATH\\s*\\+?=\\s*[\"']?([^\\s;&|\"']*:)?([A-Za-z0-9_]|\\.\\.?/|\\.[A-Za-z0-9_])[^\\s:;&|\"']*(:|[\"'\\s]|$)") ||
+    e.command.command.matches("(?i)\\bset\\s+-[gxU]+\\s+PATH\\b[^;&|]*\\s((/tmp|/var/tmp|/dev/shm)(/[^\\s;&|\"']*)?|\\.)([\"'\\s]|$)")
+  )
 
 emit:
-  reason: "PATH modification appended to a shell startup/login file — prepends a directory to PATH on every shell/login, durable persistence and binary-shadowing primitive"
+  reason: "PATH entry that shadows system binaries (world-writable, relative or current directory) written to a shell startup/login file"
 
 tests:
   - name: export_path_into_bashrc
@@ -35,7 +40,7 @@ tests:
     verdict: match
     events:
       - event: { action: command.executed }
-        command: { command: "printf 'PATH=/opt/evil:$PATH\\n' >> /home/dev/.zshrc" }
+        command: { command: "printf 'PATH=.:$PATH\\n' >> /home/dev/.zshrc" }
         session: { id: s1 }
   - name: fish_set_path_into_config
     verdict: match
@@ -47,7 +52,7 @@ tests:
     verdict: match
     events:
       - event: { action: command.executed }
-        command: { command: "echo 'export PATH=/srv/bin:$PATH' >> /etc/profile.d/custom.sh" }
+        command: { command: "echo 'export PATH=/dev/shm/.x:$PATH' >> /etc/profile.d/custom.sh" }
         session: { id: s1 }
   - name: export_path_tee_into_bashrc
     verdict: match
@@ -59,7 +64,49 @@ tests:
     verdict: match
     events:
       - event: { action: command.executed }
-        command: { command: "echo 'export PATH=/srv/bin:$PATH' | sudo tee /etc/profile.d/custom.sh" }
+        command: { command: "echo 'export PATH=bin:$PATH' | sudo tee /etc/profile.d/custom.sh" }
+        session: { id: s1 }
+  - name: empty_entry_appended_to_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'export PATH=$PATH:' >> ~/.bash_profile" }
+        session: { id: s1 }
+  - name: current_directory_appended_to_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'export PATH=\"$PATH:.\"' >> ~/.zshrc" }
+        session: { id: s1 }
+  - name: local_bin_tool_install
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'export PATH=\"$HOME/.local/bin:$PATH\"' | tee -a ~/.zshrc" }
+        session: { id: s1 }
+  - name: cargo_bin_tool_install
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'export PATH=\"$HOME/.cargo/bin:$PATH\"' >> ~/.bashrc" }
+        session: { id: s1 }
+  - name: go_bin_appended_system_wide
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'export PATH=$PATH:/usr/local/go/bin' | sudo tee -a /etc/profile" }
+        session: { id: s1 }
+  - name: build_log_named_like_profile
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "PATH=bin:$PATH ./build.sh | tee ~/.profile-build.log" }
+        session: { id: s1 }
+  - name: tmp_mentioned_outside_path_value
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc && cd /tmp" }
         session: { id: s1 }
   - name: bashrc_read_then_tee_elsewhere
     verdict: no_match
