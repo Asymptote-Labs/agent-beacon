@@ -87,9 +87,13 @@ var usageExpectation = map[string]struct {
 	// `beacon endpoint hooks status --harness openclaw` is where that gap is surfaced. The
 	// session-file sync reads the usage OpenClaw commits on each assistant message
 	// (openclawsession/records.go), and needs no grant.
-	"openclaw_gateway":  {ExpectReported, "plugin reports usage per model response when conversation access is granted; beacon endpoint integrations openclaw sessions sync reads it from session files"},
-	"vercel_fx":         {ExpectReported, "session store carries cumulative usage and cost"},
-	"deepseek_harness":  {ExpectReported, "native session backfill reports usage when DeepSeek persists it"},
+	"openclaw_gateway": {ExpectReported, "plugin reports usage per model response when conversation access is granted; beacon endpoint integrations openclaw sessions sync reads it from session files"},
+	"vercel_fx":        {ExpectReported, "session store carries cumulative usage and cost"},
+	"deepseek_harness": {ExpectReported, "native session backfill reports usage when DeepSeek persists it"},
+	// Read from the executor's own stream: OpenCode's per-step usage and cost, and Codex's per-turn
+	// thread totals, differenced. Neither stream names the model, so these tokens are unpriced
+	// unless OpenCode reported a cost.
+	"harness2":          {ExpectReported, "rollout streams carry per-step (OpenCode) or per-turn (Codex) usage; OpenCode reports cost"},
 	"copilot_cli":       {ExpectReported, "session store carries output tokens, cumulative model usage, and AI-credit cost"},
 	"asymptote_observe": {ExpectReported, "SDK spans carry semconv usage"},
 	// Read from Gemini CLI's own gemini_cli.api_response log, which it emits for every model

@@ -32,6 +32,7 @@ func TestEverySessionSyncRefusesARotateBytesBelowTheDefault(t *testing.T) {
 		{"factory", endpointFactorySyncCmd, runEndpointFactorySync, &endpointFactoryOpts.rotateBytes},
 		{"fx", endpointFxSyncCmd, runEndpointFxSync, &endpointFxOpts.rotateBytes},
 		{"grok", endpointGrokSyncCmd, runEndpointGrokSync, &endpointGrokOpts.rotateBytes},
+		{"harness2", endpointHarness2SyncCmd, runEndpointHarness2Sync, &endpointHarness2Opts.rotateBytes},
 		{"hermes", endpointHermesSyncCmd, runEndpointHermesSync, &endpointHermesOpts.rotateBytes},
 		{"openclaw sessions", endpointOpenClawSessionsSyncCmd, runEndpointOpenClawSessionsSync, &endpointOpenClawSessionsOpts.rotateBytes},
 		{"opencode", endpointOpenCodeSyncCmd, runEndpointOpenCodeSync, &endpointOpenCodeOpts.rotateBytes},
