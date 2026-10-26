@@ -57,3 +57,51 @@ func assertFixtureEventIDs(t *testing.T, got map[string]string) {
 		}
 	}
 }
+
+// Keying by home renames every event, and two homes never share a keyed id, while the unkeyed ids
+// are the ones MapSession has always derived.
+func TestMapSessionKeysEventIDsByHome(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "state.db")
+	createHermesFixtureDB(t, dbPath)
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	sessions, err := store.ListSessions()
+	if err != nil || len(sessions) != 1 {
+		t.Fatalf("sessions = %v, %v", sessions, err)
+	}
+	messages, err := store.ReadMessages(sessions[0].ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unkeyed, _ := mapSession(sessions[0], messages, &Cursor{}, "")
+	assertFixtureEventIDs(t, mappedEventIDs(unkeyed))
+
+	seen := map[string]string{}
+	for _, item := range unkeyed {
+		seen[item.Event.Event.ID] = "unkeyed"
+	}
+	for _, home := range []string{"/home/a/.hermes", "/home/a/.hermes/profiles/work"} {
+		keyed, _ := mapSession(sessions[0], messages, &Cursor{}, home)
+		if len(keyed) != len(unkeyed) {
+			t.Fatalf("keyed by %s mapped %d events, want %d", home, len(keyed), len(unkeyed))
+		}
+		for i, item := range keyed {
+			if item.Event.Event.Action != unkeyed[i].Event.Event.Action {
+				t.Fatalf("keyed by %s event %d is %s, want %s", home, i, item.Event.Event.Action, unkeyed[i].Event.Event.Action)
+			}
+			if other, dup := seen[item.Event.Event.ID]; dup {
+				t.Fatalf("%s id %s keyed by %s repeats one keyed by %s", item.Event.Event.Action, item.Event.Event.ID, home, other)
+			}
+			seen[item.Event.Event.ID] = home
+		}
+		again, _ := mapSession(sessions[0], messages, &Cursor{}, home)
+		for i := range again {
+			if again[i].Event.Event.ID != keyed[i].Event.Event.ID {
+				t.Fatalf("keyed ids for %s are not deterministic", home)
+			}
+		}
+	}
+}

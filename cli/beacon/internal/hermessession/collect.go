@@ -581,7 +581,14 @@ func (s *Store) LastMessageID(sessionID string) (int64, error) {
 // cursor is what earlier sweeps collected; a zero Cursor maps the whole session, session-total
 // usage included, as a first sync does.
 func MapSession(session Session, messages []Message, cursor *Cursor) ([]MappedEvent, map[string]json.RawMessage) {
-	m := &mapper{session: session, cursor: cursor, calls: map[string]toolCall{}}
+	return mapSession(session, messages, cursor, "")
+}
+
+// mapSession is MapSession with the event ids keyed by idHome, the canonical path of the Hermes
+// home the session was read from. An empty idHome derives the ids from the session alone, as every
+// sync did before homes could collide.
+func mapSession(session Session, messages []Message, cursor *Cursor, idHome string) ([]MappedEvent, map[string]json.RawMessage) {
+	m := &mapper{session: session, cursor: cursor, calls: map[string]toolCall{}, idHome: idHome}
 	for id, raw := range cursor.PendingCalls {
 		var call toolCall
 		if json.Unmarshal(raw, &call) == nil && call.ID != "" {
@@ -618,6 +625,7 @@ func encodePendingCalls(calls map[string]toolCall) map[string]json.RawMessage {
 type mapper struct {
 	session         Session
 	cursor          *Cursor
+	idHome          string
 	out             []MappedEvent
 	calls           map[string]toolCall
 	lastTimestampMS int64
@@ -850,7 +858,13 @@ func (m *mapper) toolEvent(timestampMS int64, call toolCall, action, category st
 }
 
 func (m *mapper) append(sourceMessageID int64, suffix string, ev schema.Event) {
-	ev.Event.ID = hermesEventID(fmt.Sprintf("%s:%d:%s", m.session.ID, sourceMessageID, suffix))
+	dedupID := fmt.Sprintf("%s:%d:%s", m.session.ID, sourceMessageID, suffix)
+	if m.idHome != "" {
+		// The home ends at a newline, which Hermes session ids do not contain, so a keyed id never
+		// equals an unkeyed one.
+		dedupID = m.idHome + "\n" + dedupID
+	}
+	ev.Event.ID = hermesEventID(dedupID)
 	m.out = append(m.out, MappedEvent{SourceMessageID: sourceMessageID, Event: ev})
 }
 
