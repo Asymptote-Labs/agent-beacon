@@ -1,5 +1,5 @@
 id: browser-session-read-then-egress
-version: 4
+version: 5
 title: Browser session store read followed by network egress
 description: >
   Within one session, the agent read a browser cookie/login store and then issued an
@@ -25,7 +25,7 @@ correlation:
       match: >
         e.event.action == "file.read" && (
           e.file.path.matches("(?i)(^|/)(cookies\\.sqlite|logins\\.json)$") ||
-          e.file.path.matches("(?i)/(google-chrome|chromium|chrome|brave[ -]?browser|bravesoftware|microsoft[ -]?edge|edge|firefox|mozilla|safari)/.*(cookies|login data)$")
+          e.file.path.matches("(?i)/(google-chrome|chromium|chrome|brave[ -]?browser|bravesoftware|microsoft[ -]?edge|edge|firefox|mozilla|safari)([ -](beta|dev|canary|unstable|sxs))?/.*(cookies|login data)$")
         )
     - id: egress
       match: >

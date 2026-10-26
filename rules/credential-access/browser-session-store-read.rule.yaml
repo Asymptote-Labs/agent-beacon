@@ -4,7 +4,8 @@ title: Agent read a browser session/cookie store
 description: >
   The agent read a browser cookie jar or saved-login store (cookies.sqlite /
   logins.json by name, or the ambiguous basenames Cookies / "Login Data" only inside a
-  known browser profile directory — Chrome/Chromium/Brave/Edge/Firefox/Safari). These
+  known browser profile directory — Chrome/Chromium/Brave/Edge/Firefox/Safari, including
+  Beta, Dev and Canary channels). These
   carry live session material that can hijack a SaaS session past password + MFA. The
   browser-dir requirement keeps a non-browser file named "cookies" from firing, and
   matches the read step of the browser-session-read-then-egress correlation.
@@ -19,7 +20,7 @@ taxonomy:
 match: >
   e.event.action == "file.read" && (
     e.file.path.matches("(?i)(^|/)(cookies\\.sqlite|logins\\.json)$") ||
-    e.file.path.matches("(?i)/(google-chrome|chromium|chrome|brave[ -]?browser|bravesoftware|microsoft[ -]?edge|edge|firefox|mozilla|safari)/.*(cookies|login data)$")
+    e.file.path.matches("(?i)/(google-chrome|chromium|chrome|brave[ -]?browser|bravesoftware|microsoft[ -]?edge|edge|firefox|mozilla|safari)([ -](beta|dev|canary|unstable|sxs))?/.*(cookies|login data)$")
   )
 
 emit:
@@ -55,6 +56,36 @@ tests:
     events:
       - event: { action: file.read }
         file: { path: "/Users/u/Library/Application Support/Microsoft Edge/Default/Cookies" }
+        session: { id: s1 }
+  - name: read_edge_canary_macos_cookies
+    verdict: match
+    events:
+      - event: { action: file.read }
+        file: { path: "/Users/u/Library/Application Support/Microsoft Edge Canary/Default/Cookies" }
+        session: { id: s1 }
+  - name: read_edge_beta_linux_login_data
+    verdict: match
+    events:
+      - event: { action: file.read }
+        file: { path: "/home/u/.config/microsoft-edge-beta/Default/Login Data" }
+        session: { id: s1 }
+  - name: read_chrome_dev_linux_cookies
+    verdict: match
+    events:
+      - event: { action: file.read }
+        file: { path: "/home/u/.config/google-chrome-unstable/Default/Cookies" }
+        session: { id: s1 }
+  - name: read_chrome_canary_windows_cookies
+    verdict: match
+    events:
+      - event: { action: file.read }
+        file: { path: "C:/Users/u/AppData/Local/Google/Chrome SxS/User Data/Default/Network/Cookies" }
+        session: { id: s1 }
+  - name: chrome_dev_extension_source_not_a_store
+    verdict: no_match
+    events:
+      - event: { action: file.read }
+        file: { path: "extensions/chrome-devtools/fixtures/cookies" }
         session: { id: s1 }
   - name: source_file_named_cookies
     verdict: no_match
