@@ -28,7 +28,7 @@ match: >
     e.file.path.matches("(?i)(^|/)((claude(\\.local)?\\.md|agents(\\.override)?\\.md|gemini\\.md|qwen\\.md|copilot-instructions\\.md|\\.cursorrules|\\.windsurfrules|\\.clinerules)$|(\\.claude/(skills|commands|agents)|\\.agents/skills|\\.codex/(prompts|skills)|\\.cursor/(rules|commands)|\\.gemini/commands|\\.github/(instructions|prompts|agents|chatmodes)|\\.kiro/steering|\\.opencode/(agents?|commands?)|\\.config/opencode/(agents?|commands?)|\\.windsurf/(rules|workflows)|\\.clinerules|documents/cline/(rules|workflows))/)")
   ) || (
     e.event.action == "command.executed" && (
-      e.command.command.matches("(?i)((^|[^-=>])>{1,2}\\s*|\\btee(\\s+-[^\\s;&|<>]+)*\\s+|\\bsed\\s+(('[^'\\n]*'|\"[^\"\\n]*\"|[^;&|\\n'\"])*\\s)?-i\\S*\\s+(('[^'\\n]*'|\"[^\"\\n]*\"|[^;&|\\n'\"])*\\s)?|\\bgit\\s+clone\\b[^;&|\\n]*\\s|\\b(curl|wget)\\b[^;&|\\n]*\\s(-o|-O|--output|--output-document)(\\s+|=)|\\b(set-content|add-content|out-file)\\s+(-(literal|file)?path\\s+)?)(['\"][^'\"\\n]*[/\\\\]|['\"]?(([^\\s;&|'\"<>\\\\]|\\\\.)*[/\\\\])?)((claude(\\.local)?\\.md|agents(\\.override)?\\.md|gemini\\.md|qwen\\.md|copilot-instructions\\.md|\\.cursorrules|\\.windsurfrules|\\.clinerules)|(\\.claude[/\\\\](skills|commands|agents)|\\.agents[/\\\\]skills|\\.codex[/\\\\](prompts|skills)|\\.cursor[/\\\\](rules|commands)|\\.gemini[/\\\\]commands|\\.github[/\\\\](instructions|prompts|agents|chatmodes)|\\.kiro[/\\\\]steering|\\.opencode[/\\\\](agents?|commands?)|\\.config[/\\\\]opencode[/\\\\](agents?|commands?)|\\.windsurf[/\\\\](rules|workflows)|\\.clinerules|documents[/\\\\]cline[/\\\\](rules|workflows))([/\\\\][^\\s;&|'\"<>]*)?)['\"]?($|[\\s;&|)<>])") ||
+      e.command.command.matches("(?i)((^|[^-=>\\n])>{1,2}\\s*|\\btee(\\s+-[^\\s;&|<>]+)*\\s+|\\bsed\\s+(('[^'\\n]*'|\"[^\"\\n]*\"|[^;&|\\n'\"])*\\s)?-i\\S*\\s+(('[^'\\n]*'|\"[^\"\\n]*\"|[^;&|\\n'\"])*\\s)?|\\bgit\\s+clone\\b[^;&|\\n]*\\s|\\b(curl|wget)\\b[^;&|\\n]*\\s(-o|-O|--output|--output-document)(\\s+|=)|\\b(set-content|add-content|out-file)\\s+(-(literal|file)?path\\s+)?)(['\"][^'\"\\n]*[/\\\\]|['\"]?(([^\\s;&|'\"<>\\\\]|\\\\.)*[/\\\\])?)((claude(\\.local)?\\.md|agents(\\.override)?\\.md|gemini\\.md|qwen\\.md|copilot-instructions\\.md|\\.cursorrules|\\.windsurfrules|\\.clinerules)|(\\.claude[/\\\\](skills|commands|agents)|\\.agents[/\\\\]skills|\\.codex[/\\\\](prompts|skills)|\\.cursor[/\\\\](rules|commands)|\\.gemini[/\\\\]commands|\\.github[/\\\\](instructions|prompts|agents|chatmodes)|\\.kiro[/\\\\]steering|\\.opencode[/\\\\](agents?|commands?)|\\.config[/\\\\]opencode[/\\\\](agents?|commands?)|\\.windsurf[/\\\\](rules|workflows)|\\.clinerules|documents[/\\\\]cline[/\\\\](rules|workflows))([/\\\\][^\\s;&|'\"<>]*)?)['\"]?($|[\\s;&|)<>])") ||
       e.command.command.matches("(?i)(^|[;&|(`\\n]|\\$\\(|\\b(then|do|else)\\s)\\s*(sudo\\s+)?(cp|mv|install|ln|rsync)\\s[^;&|<>\\n]*\\s(['\"][^'\"\\n]*[/\\\\]|['\"]?(([^\\s;&|'\"<>\\\\]|\\\\.)*[/\\\\])?)((claude(\\.local)?\\.md|agents(\\.override)?\\.md|gemini\\.md|qwen\\.md|copilot-instructions\\.md|\\.cursorrules|\\.windsurfrules|\\.clinerules)|(\\.claude[/\\\\](skills|commands|agents)|\\.agents[/\\\\]skills|\\.codex[/\\\\](prompts|skills)|\\.cursor[/\\\\](rules|commands)|\\.gemini[/\\\\]commands|\\.github[/\\\\](instructions|prompts|agents|chatmodes)|\\.kiro[/\\\\]steering|\\.opencode[/\\\\](agents?|commands?)|\\.config[/\\\\]opencode[/\\\\](agents?|commands?)|\\.windsurf[/\\\\](rules|workflows)|\\.clinerules|documents[/\\\\]cline[/\\\\](rules|workflows))([/\\\\][^\\s;&|'\"<>]*)?)['\"]?(\\s+([0-9]*|&)>{1,2}&?\\s*[^\\s;&|]*|\\s+#[^\\n]*)*\\s*($|[;&|)\\n])")
     )
   )
@@ -378,6 +378,12 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "sed -n 's|a|b|p' CLAUDE.md" }
+        session: { id: s1 }
+  - name: blockquote_in_heredoc_commit_body
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -F - <<'EOF'\nrules: cover more runtimes\n\n> AGENTS.md is read by Codex\nEOF" }
         session: { id: s1 }
   - name: shell_read_claude_md
     verdict: no_match
