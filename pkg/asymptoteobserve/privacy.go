@@ -366,8 +366,9 @@ var redactionRules = concatRules([]redactionRule{
 	// in SanitizeMap already treats a structured `cookie` field. Only where a header or key can
 	// start (a line, a quote, curl's -H), so prose that says "cookie:" keeps its sentence.
 	foldedRule(`(?im)((?:^\s*|["']\s*|(?:-H|--header)(?:=|\s+)["']?)(?:set-)?cookie["']?\s*:\s*["']?)([^\n"'\\]+)`, "${1}"+redactedValue, isRedactedValue, "cookie"),
-	// The password in a URL's userinfo: `postgres://user:pw@host`, `https://x-access-token:t@github.com`.
-	foldedRule(`(?i)(\b[a-z][a-z0-9+.-]*://[^/\s:@"'<>]+:)([^@/\s"'<>]+)(@)`, "${1}"+redactedValue+"${3}", nil, "://"),
+	// The password in a URL's userinfo: `postgres://user:pw@host`, `https://x-access-token:t@github.com`,
+	// and with no user name, the way Redis URLs carry a password: `redis://:pw@host`.
+	foldedRule(`(?i)(\b[a-z][a-z0-9+.-]*://[^/\s:@"'<>]*:)([^@/\s"'<>]+)(@)`, "${1}"+redactedValue+"${3}", nil, "://"),
 	// Credentials recognizable by their own shape, wherever they appear. The type prefix is public
 	// and stays (`ghp_[REDACTED]`, `AKIA[REDACTED]`), the way secret scanners report a finding: the
 	// line still says a GitHub token or an AWS key was there, which is what detection rules match on
