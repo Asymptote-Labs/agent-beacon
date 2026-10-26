@@ -23,7 +23,7 @@ match: >
     e.command.command.matches("(?i)\\b(vim|vi|view|nvim)\\b\\s+-c\\s+[\"']?:\\s*(!|shell|py\\b)") ||
     e.command.command.matches("(?i)\\bfind\\b.*-exec\\s+(/bin/|/usr/bin/)?(ba|z)?sh\\b") ||
     e.command.command.matches("(?i)\\btar\\b.*--checkpoint-action=exec") ||
-    e.command.command.matches("(?i)\\bssh\\b.*-o\\s*[\"']?ProxyCommand\\s*=")
+    e.command.command.matches("(?i)\\b(ssh|scp|sftp)\\b.*-o\\s*[\"']?ProxyCommand(\\s*=|\\s+)")
   )
 
 emit:
@@ -65,6 +65,18 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "ssh -o 'ProxyCommand=sh -c \"id >&2\"' host" }
+        session: { id: s1 }
+  - name: ssh_proxycommand_space_separated
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh -o 'ProxyCommand ;sh 0<&2 1>&2' x" }
+        session: { id: s1 }
+  - name: scp_proxycommand
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "scp -o ProxyCommand=';sh 0<&2 1>&2' x:/etc/hosts ." }
         session: { id: s1 }
   - name: ssh_other_option
     verdict: no_match
