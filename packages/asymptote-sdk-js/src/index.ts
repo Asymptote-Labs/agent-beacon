@@ -545,15 +545,13 @@ function manuallyInstrumentModules(instrumentations: Instrumentation[], modules:
   }
 }
 
-// The Anthropic instrumentation patches `module.Anthropic.Messages`, so it needs the module
-// namespace. `import Anthropic from "@anthropic-ai/sdk"` yields the client class itself, whose own
-// `Anthropic` property is a base class without the resources.
+// The Anthropic instrumentation needs the module namespace (`module.Anthropic.Messages`, and
+// `module.APIPromise` for streams); the default-export client class carries neither.
 function anthropicModuleShape(moduleValue: unknown): unknown {
-  if (typeof moduleValue !== "function") {
-    return moduleValue;
+  if (typeof moduleValue === "function" && "Messages" in moduleValue) {
+    throw new TypeError('instrumentModules.Anthropic must be the module namespace: import * as Anthropic from "@anthropic-ai/sdk"');
   }
-  const candidate = moduleValue as unknown as { Messages?: unknown; Anthropic?: { Messages?: unknown } };
-  return candidate.Messages && !candidate.Anthropic?.Messages ? { Anthropic: moduleValue } : moduleValue;
+  return moduleValue;
 }
 
 function patchClaudeAgentSDK(moduleValue: unknown): void {

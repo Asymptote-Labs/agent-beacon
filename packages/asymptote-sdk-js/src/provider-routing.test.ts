@@ -36,14 +36,10 @@ it("routes real provider instrumentation to the new exporter after reinitializat
   expect(fetches).toBe(2);
 });
 
-it("instruments the default-export Anthropic class the docs pass to instrumentModules", async () => {
-  const client = new AnthropicClient({
-    apiKey: "synthetic-fixture-only", baseURL: "http://127.0.0.1:1",
-    fetch: async () => new Response(JSON.stringify({ id: "msg_fixture", type: "message", role: "assistant", model: "synthetic-model", content: [{ type: "text", text: "fixture" }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 1, output_tokens: 2 } }), { status: 200, headers: { "content-type": "application/json" } }),
-  });
-  const exporter = new InMemorySpanExporter();
-  initialize({ spanExporter: exporter, disableDefaultExporter: true, disableBatch: true, instrumentationOptions: { openAI: false }, instrumentModules: { Anthropic: AnthropicClient } });
-  await client.messages.create({ model: "synthetic-model", max_tokens: 8, messages: [{ role: "user", content: "offline fixture" }] });
-  await flush();
-  expect(exporter.getFinishedSpans()).toHaveLength(1);
+// The default export is the client class, which has neither the module's resources for the
+// instrumentation to patch nor the APIPromise its streaming wrapper needs.
+it("rejects the default-export Anthropic class with an error naming the namespace import", () => {
+  expect(() =>
+    initialize({ spanExporter: new InMemorySpanExporter(), disableDefaultExporter: true, instrumentationOptions: { openAI: false }, instrumentModules: { Anthropic: AnthropicClient } }),
+  ).toThrow(/import \* as Anthropic from "@anthropic-ai\/sdk"/);
 });
