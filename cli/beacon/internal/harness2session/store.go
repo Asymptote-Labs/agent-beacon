@@ -104,14 +104,23 @@ func (s *Store) Exists() bool {
 }
 
 // List returns every trajectory under the store's roots, oldest first. A root that does not exist
-// contributes nothing; one that cannot be walked is an error.
+// contributes nothing. One that cannot be read -- unreadable, or not a directory -- contributes
+// nothing either, and is reported in the returned error while the other roots are still listed: a
+// remembered --runs-dir that later broke must not stop every scheduled sync from reading the rest.
 func (s *Store) List() ([]TrajectoryRef, error) {
+	refs, errs := s.list()
+	return refs, errors.Join(errs...)
+}
+
+// list is List with one error per root that could not be read.
+func (s *Store) list() ([]TrajectoryRef, []error) {
 	var refs []TrajectoryRef
+	var errs []error
 	seen := map[string]bool{}
 	for _, root := range s.Roots {
 		found, err := listRoot(root)
 		if err != nil {
-			return refs, err
+			errs = append(errs, err)
 		}
 		for _, ref := range found {
 			// Nested roots (a runs directory and one of its benchmark directories) would otherwise
@@ -129,7 +138,7 @@ func (s *Store) List() ([]TrajectoryRef, error) {
 		}
 		return refs[i].Path < refs[j].Path
 	})
-	return refs, nil
+	return refs, errs
 }
 
 func listRoot(root string) ([]TrajectoryRef, error) {
@@ -138,10 +147,19 @@ func listRoot(root string) ([]TrajectoryRef, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("Harness² runs directory %s: %w", root, err)
 	}
 	if !info.IsDir() {
 		return nil, fmt.Errorf("Harness² runs directory %s is not a directory", root)
+	}
+	// A runs directory is often a symlink to a larger disk. Walking the link itself would visit only
+	// the link -- filepath.WalkDir does not descend into a symlinked root -- and find nothing, so the
+	// walk starts from the directory it names. A confined read walks through the home's os.Root,
+	// which descends on its own and must not be handed a path the link resolves to outside the home.
+	if !sessionfs.Confined(root) {
+		if resolved, err := filepath.EvalSymlinks(root); err == nil {
+			root = resolved
+		}
 	}
 	var refs []TrajectoryRef
 	err = sessionfs.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
@@ -192,7 +210,10 @@ func listRoot(root string) ([]TrajectoryRef, error) {
 		})
 		return nil
 	})
-	return refs, err
+	if err != nil {
+		return refs, fmt.Errorf("Harness² runs directory %s: %w", root, err)
+	}
+	return refs, nil
 }
 
 // candidateName is the cheap filter ahead of reading a file: JSONL, plus the one name WorkBuddy

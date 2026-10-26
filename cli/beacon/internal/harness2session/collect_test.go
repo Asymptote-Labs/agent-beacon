@@ -311,3 +311,23 @@ func TestCollectOnceKeepsWhatItWritesAcrossTheRotationWindow(t *testing.T) {
 		return sessionsynctest.Result{EventsEmitted: s.EventsEmitted, Errors: s.Errors, Retention: s.Retention}, err
 	})
 }
+
+// A remembered --runs-dir that later broke must not stop every scheduled sync: the sweep reports it
+// and still collects the other roots.
+func TestCollectOnceKeepsCollectingPastABrokenRoot(t *testing.T) {
+	env := newSweepEnv(t)
+	bad := filepath.Join(t.TempDir(), "gone")
+	if err := os.WriteFile(bad, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := CollectOnce(CollectOptions{RunsDirs: []string{bad, env.root}, StatePath: env.statePath, LogPath: env.logPath, Write: true, UserMode: true})
+	if err == nil || !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("err = %v, want the broken root reported", err)
+	}
+	if summary.Errors != 1 || summary.EventsEmitted != 21 {
+		t.Fatalf("summary = %+v, want one error and the good root's 21 events", summary)
+	}
+	if len(env.logged(t)) != 21 {
+		t.Fatal("the good root was not collected")
+	}
+}

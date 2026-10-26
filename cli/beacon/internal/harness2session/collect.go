@@ -170,10 +170,10 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	}
 	summary.Roots = roots
 	store := &Store{Roots: roots}
-	refs, err := store.List()
-	if err != nil {
-		return summary, err
-	}
+	// A root that cannot be read is an error for the sweep, not the end of it: the other roots,
+	// the default among them, are still collected.
+	refs, listErrs := store.list()
+	summary.Errors += len(listErrs)
 	if len(opts.RunsDirs) > 0 {
 		state.remember(roots)
 	}
@@ -185,7 +185,7 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	refs = sessionwindow.Recent(refs, opts.Since, func(r TrajectoryRef) int64 { return r.ModTimeUnixMS })
 	summary.Trajectories = len(refs)
 
-	var errs []error
+	errs := listErrs
 	opts.guard = sessionsync.NewRetentionGuard(opts.Print, opts.Write)
 	var stopErr error
 	for _, ref := range refs {
