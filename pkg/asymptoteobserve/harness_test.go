@@ -43,6 +43,9 @@ func TestHarnessSpellingsConvergeOnCanonicalNames(t *testing.T) {
 		// kimi_code_cli is the client_type on every Kimi hook payload; it must agree with --platform kimi.
 		"kimi_code": {"kimi", "kimi_code", "kimi-code", "Kimi Code", "kimicode", "kimi_cli", "kimi-cli", "Kimi CLI", "kimi_code_cli",
 			"kimi-code-cli", "Kimi Code CLI", "kimi_code_acp", "kimi-code-acp", "moonshot_kimi_code", "moonshot-kimi-code"},
+		// Harness² writes its own name with a superscript; the session collector writes harness2.
+		"harness2": {"harness2", "Harness2", "Harness²", "harness^2", "harness_2", "harness-2", "Harness 2", "harness2_cli",
+			"harness2-cli", "google-research/harness2", "google_research/harness2", "google_harness2", "google-harness2"},
 		"": {"", "   ", "\t"},
 	} {
 		for _, in := range spellings {
@@ -61,7 +64,7 @@ func TestCanonicalNamesAreStableUnderRenormalization(t *testing.T) {
 		"claude_code", "codex_cli", "codex_desktop", "gemini_cli", "antigravity_cli", "vscode_copilot",
 		"copilot_cli", "claude_web", "chatgpt_web", "claude_cowork", "claude_agent_sdk",
 		"openclaw_gateway", "pi_cli", "omp", "cline", "qwen_code", "prime_agent", "omo_senpi", "vercel_fx",
-		"muse_code", "openhands", "grok_bot", "kiro", "goose", "deepseek_harness", "kimi_code",
+		"muse_code", "openhands", "grok_bot", "kiro", "goose", "deepseek_harness", "kimi_code", "harness2",
 	} {
 		if got := NormalizeHarnessName(canonical); got != canonical {
 			t.Errorf("NormalizeHarnessName(%q) = %q; a canonical name must survive being normalized again", canonical, got)
@@ -111,6 +114,10 @@ func TestLookalikeNamesAreNotAttributedToTheHarness(t *testing.T) {
 			"deepseek.com", "deepseek_api", "DSH_HOME", "~/.dsh", ".dsh/skills", "dsh-runtime-sandbox", "dshield"},
 		"kimi_code": {"kimi-k2", "kimi-k2.7-code", "kimi-for-coding", "moonshotai/kimi-k2.5", "moonshot-kimi-k2-instruct",
 			"kimi.com", "KIMI_API_KEY", "providers.kimi", "~/.kimi-code", "KIMI_CODE_HOME", "akimi"},
+		// Harness (harness.io) is a CI/CD product with its own CLI, and "harness" is the generic word
+		// for the code around a model. Harness² drives OpenCode and Codex, which keep their own names.
+		"harness2": {"harness", "Harness", "harness.io", "harness-cli", "harness_cli", "harness-delegate", "harness_ci",
+			"agent-harness", "harness3", "harness22", "harness2-runner", "HARNESS2_RUNS_DIR"},
 	} {
 		for _, name := range names {
 			if got := NormalizeHarnessName(name); got == harness {
