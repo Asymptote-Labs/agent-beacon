@@ -136,7 +136,9 @@ var endpointBackfillRunners = func() []endpointBackfillRunner {
 			return s.EventsEmitted, err
 		}},
 		{Name: "Harness²", Sync: "beacon endpoint harness2 sync", Run: func(r endpointBackfillRun) (int, error) {
-			s, err := harness2session.CollectOnce(harness2session.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveHarness2StatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
+			opts := harness2session.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveHarness2StatePath("", r.UserMode), Since: r.Since, Budget: r.Budget}
+			opts.ExtraRoots = harness2BackfillExtraRoots(r.UserMode)
+			s, err := harness2session.CollectOnce(opts)
 			return s.EventsEmitted, err
 		}},
 		{Name: "OpenClaw Gateway", Sync: "beacon endpoint integrations openclaw sessions sync", Run: func(r endpointBackfillRun) (int, error) {
@@ -144,6 +146,17 @@ var endpointBackfillRunners = func() []endpointBackfillRunner {
 			return s.EventsEmitted, err
 		}},
 	}
+}
+
+// harness2BackfillExtraRoots is the runs directories a backfill reads beyond its own cursor's. A
+// system backfill keeps its cursor beside the system log, but a --runs-dir the console user named
+// was remembered in their own cursor file, which the home the backfill runs under names; without it
+// a checkout outside ~/harness2 would be read by the user's syncs and never by the system install.
+func harness2BackfillExtraRoots(userMode bool) []string {
+	if userMode {
+		return nil
+	}
+	return harness2session.UserRememberedRoots(harness2session.DefaultStatePath())
 }
 
 // endpointBackfillScratchDir is where a system backfill copies SQLite stores it reads as root: under

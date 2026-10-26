@@ -229,3 +229,18 @@ func TestEndpointHarness2StatusReportsABrokenRootBesideTheRest(t *testing.T) {
 		t.Fatalf("report = %+v", report)
 	}
 }
+
+// A system install's backfill keeps its own cursor beside the system log, yet must still read the
+// runs directory the console user named with --runs-dir, which their own cursor file remembers.
+func TestHarness2SystemBackfillReadsTheUsersRememberedRoots(t *testing.T) {
+	f := newHarness2CommandFixture(t)
+	// A user-mode sync with the default cursor path remembers the directory.
+	endpointHarness2Opts.statePath = ""
+	runHarness2(t, endpointHarness2SyncCmd, runEndpointHarness2Sync)
+	if got := harness2BackfillExtraRoots(false); len(got) != 1 || got[0] != f.runsDir {
+		t.Fatalf("system backfill extra roots = %v, want [%s]", got, f.runsDir)
+	}
+	if got := harness2BackfillExtraRoots(true); got != nil {
+		t.Fatalf("user backfill extra roots = %v; its own cursor already remembers them", got)
+	}
+}

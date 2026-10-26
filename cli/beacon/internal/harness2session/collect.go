@@ -1,6 +1,7 @@
 package harness2session
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionwindow"
 )
@@ -99,13 +101,17 @@ func (s *State) remember(roots []string) {
 type CollectOptions struct {
 	// RunsDirs are the runs directories to read. Empty reads DefaultRunsDirs and every directory an
 	// earlier sweep was given; given, they are read and remembered for later sweeps.
-	RunsDirs  []string
-	StatePath string
-	LogPath   string
-	Write     bool
-	UserMode  bool
-	Print     bool
-	Out       io.Writer
+	RunsDirs []string
+	// ExtraRoots are read beside the defaults and the remembered roots when RunsDirs is empty, and
+	// are not remembered. A system-mode backfill passes the roots the console user's own syncs
+	// remembered (UserRememberedRoots), which live in that user's cursor file, not the system one.
+	ExtraRoots []string
+	StatePath  string
+	LogPath    string
+	Write      bool
+	UserMode   bool
+	Print      bool
+	Out        io.Writer
 	// Since, when set, limits the sweep to trajectories modified at or after it, newest first. Older
 	// ones are not read and their cursors do not move, so a later sync still collects them. The
 	// install-time backfill sets it; an ordinary sync leaves it zero.
@@ -156,6 +162,21 @@ func Roots(runsDirs []string, state *State) ([]string, error) {
 	return store.Roots, nil
 }
 
+// UserRememberedRoots is the runs directories a user's own syncs remembered in the cursor file at
+// statePath. It reads through sessionfs, because a system-mode backfill reads it as root from a
+// home the user controls, and a file it cannot read or parse remembers nothing.
+func UserRememberedRoots(statePath string) []string {
+	data, err := sessionfs.ReadFile(statePath)
+	if err != nil {
+		return nil
+	}
+	var state State
+	if err := json.Unmarshal(data, &state); err != nil || state.Version != StateVersion {
+		return nil
+	}
+	return state.Roots
+}
+
 func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	if opts.Print && !opts.Write {
 		opts.StatePath = ""
@@ -167,6 +188,13 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	roots, err := Roots(opts.RunsDirs, state)
 	if err != nil {
 		return summary, err
+	}
+	if len(opts.RunsDirs) == 0 && len(opts.ExtraRoots) > 0 {
+		merged, err := NewStore(append(append([]string{}, roots...), opts.ExtraRoots...))
+		if err != nil {
+			return summary, err
+		}
+		roots = merged.Roots
 	}
 	summary.Roots = roots
 	store := &Store{Roots: roots}
