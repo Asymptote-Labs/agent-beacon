@@ -19,7 +19,7 @@ taxonomy:
 match: >
   e.event.action == "command.executed" && (
     e.command.command.matches("(?i)\\bcrontab\\b\\s+(-($|[\\s|])|-e\\b|[^-\\s])") ||
-    e.command.command.matches("(?i)\\bsystemctl\\b(\\s+--?[a-z][a-z-]*)*\\s+enable\\b") ||
+    e.command.command.matches("(?i)\\bsystemctl\\b(\\s+--?[a-z][a-z-]*(=\\S+)?)*\\s+enable\\b") ||
     e.command.command.matches("(?i)\\blaunchctl\\b\\s+(load|bootstrap|enable)\\b")
   )
 
@@ -56,6 +56,12 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "systemctl --user --now enable beacon-evil.timer" }
+        session: { id: s1 }
+  - name: systemctl_root_option_before_enable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "systemctl --root=/mnt enable evil.service" }
         session: { id: s1 }
   - name: systemctl_quiet_enable
     verdict: match
