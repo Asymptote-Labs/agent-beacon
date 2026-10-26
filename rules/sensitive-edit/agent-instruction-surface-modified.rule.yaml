@@ -28,8 +28,8 @@ match: >
     e.file.path.matches("(?i)(^|/)((claude(\\.local)?\\.md|agents(\\.override)?\\.md|gemini\\.md|qwen\\.md|copilot-instructions\\.md|\\.cursorrules|\\.windsurfrules|\\.clinerules)$|(\\.claude/(skills|commands|agents)|\\.agents/skills|\\.codex/(prompts|skills)|\\.cursor/(rules|commands)|\\.gemini/commands|\\.github/(instructions|prompts|agents|chatmodes)|\\.kiro/steering|\\.opencode/(agents?|commands?)|\\.config/opencode/(agents?|commands?)|\\.windsurf/(rules|workflows)|\\.clinerules|documents/cline/(rules|workflows))/)")
   ) || (
     e.event.action == "command.executed" && (
-      e.command.command.matches("(?i)(>{1,2}\\s*|\\btee(\\s+-[^\\s;&|<>]+)*\\s+|\\bsed\\s+([^;&|\\n]*\\s)?-i\\S*\\s+([^;&|\\n]*\\s)?|\\bgit\\s+clone\\b[^;&|\\n]*\\s|\\b(curl|wget)\\b[^;&|\\n]*\\s(-o|-O|--output|--output-document)(\\s+|=)|\\b(set-content|add-content|out-file)\\s+(-(literal|file)?path\\s+)?)['\"]?([^\\s;&|'\"<>]*[/\\\\])?((claude(\\.local)?\\.md|agents(\\.override)?\\.md|gemini\\.md|qwen\\.md|copilot-instructions\\.md|\\.cursorrules|\\.windsurfrules|\\.clinerules)|(\\.claude[/\\\\](skills|commands|agents)|\\.agents[/\\\\]skills|\\.codex[/\\\\](prompts|skills)|\\.cursor[/\\\\](rules|commands)|\\.gemini[/\\\\]commands|\\.github[/\\\\](instructions|prompts|agents|chatmodes)|\\.kiro[/\\\\]steering|\\.opencode[/\\\\](agents?|commands?)|\\.config[/\\\\]opencode[/\\\\](agents?|commands?)|\\.windsurf[/\\\\](rules|workflows)|\\.clinerules|documents[/\\\\]cline[/\\\\](rules|workflows))([/\\\\][^\\s;&|'\"<>]*)?)['\"]?($|[\\s;&|)<>])") ||
-      e.command.command.matches("(?i)(^|[;&|(`\\n]|\\$\\(|\\b(then|do|else)\\s)\\s*(sudo\\s+)?(cp|mv|install|ln|rsync)\\s[^;&|<>\\n]*\\s['\"]?([^\\s;&|'\"<>]*[/\\\\])?((claude(\\.local)?\\.md|agents(\\.override)?\\.md|gemini\\.md|qwen\\.md|copilot-instructions\\.md|\\.cursorrules|\\.windsurfrules|\\.clinerules)|(\\.claude[/\\\\](skills|commands|agents)|\\.agents[/\\\\]skills|\\.codex[/\\\\](prompts|skills)|\\.cursor[/\\\\](rules|commands)|\\.gemini[/\\\\]commands|\\.github[/\\\\](instructions|prompts|agents|chatmodes)|\\.kiro[/\\\\]steering|\\.opencode[/\\\\](agents?|commands?)|\\.config[/\\\\]opencode[/\\\\](agents?|commands?)|\\.windsurf[/\\\\](rules|workflows)|\\.clinerules|documents[/\\\\]cline[/\\\\](rules|workflows))([/\\\\][^\\s;&|'\"<>]*)?)['\"]?(\\s+([0-9]*|&)>{1,2}&?\\s*[^\\s;&|]*|\\s+#[^\\n]*)*\\s*($|[;&|)\\n])")
+      e.command.command.matches("(?i)((^|[^-=>])>{1,2}\\s*|\\btee(\\s+-[^\\s;&|<>]+)*\\s+|\\bsed\\s+([^;&|\\n]*\\s)?-i\\S*\\s+([^;&|\\n]*\\s)?|\\bgit\\s+clone\\b[^;&|\\n]*\\s|\\b(curl|wget)\\b[^;&|\\n]*\\s(-o|-O|--output|--output-document)(\\s+|=)|\\b(set-content|add-content|out-file)\\s+(-(literal|file)?path\\s+)?)(['\"][^'\"\\n]*[/\\\\]|['\"]?(([^\\s;&|'\"<>\\\\]|\\\\.)*[/\\\\])?)((claude(\\.local)?\\.md|agents(\\.override)?\\.md|gemini\\.md|qwen\\.md|copilot-instructions\\.md|\\.cursorrules|\\.windsurfrules|\\.clinerules)|(\\.claude[/\\\\](skills|commands|agents)|\\.agents[/\\\\]skills|\\.codex[/\\\\](prompts|skills)|\\.cursor[/\\\\](rules|commands)|\\.gemini[/\\\\]commands|\\.github[/\\\\](instructions|prompts|agents|chatmodes)|\\.kiro[/\\\\]steering|\\.opencode[/\\\\](agents?|commands?)|\\.config[/\\\\]opencode[/\\\\](agents?|commands?)|\\.windsurf[/\\\\](rules|workflows)|\\.clinerules|documents[/\\\\]cline[/\\\\](rules|workflows))([/\\\\][^\\s;&|'\"<>]*)?)['\"]?($|[\\s;&|)<>])") ||
+      e.command.command.matches("(?i)(^|[;&|(`\\n]|\\$\\(|\\b(then|do|else)\\s)\\s*(sudo\\s+)?(cp|mv|install|ln|rsync)\\s[^;&|<>\\n]*\\s(['\"][^'\"\\n]*[/\\\\]|['\"]?(([^\\s;&|'\"<>\\\\]|\\\\.)*[/\\\\])?)((claude(\\.local)?\\.md|agents(\\.override)?\\.md|gemini\\.md|qwen\\.md|copilot-instructions\\.md|\\.cursorrules|\\.windsurfrules|\\.clinerules)|(\\.claude[/\\\\](skills|commands|agents)|\\.agents[/\\\\]skills|\\.codex[/\\\\](prompts|skills)|\\.cursor[/\\\\](rules|commands)|\\.gemini[/\\\\]commands|\\.github[/\\\\](instructions|prompts|agents|chatmodes)|\\.kiro[/\\\\]steering|\\.opencode[/\\\\](agents?|commands?)|\\.config[/\\\\]opencode[/\\\\](agents?|commands?)|\\.windsurf[/\\\\](rules|workflows)|\\.clinerules|documents[/\\\\]cline[/\\\\](rules|workflows))([/\\\\][^\\s;&|'\"<>]*)?)['\"]?(\\s+([0-9]*|&)>{1,2}&?\\s*[^\\s;&|]*|\\s+#[^\\n]*)*\\s*($|[;&|)\\n])")
     )
   )
 
@@ -342,6 +342,24 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "cp CLAUDE.md CLAUDE.md.bak 2>/dev/null" }
+        session: { id: s1 }
+  - name: arrow_in_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"docs: rename CLAUDE.md -> AGENTS.md\"" }
+        session: { id: s1 }
+  - name: fat_arrow_in_pr_title
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gh pr create --title \"README => AGENTS.md\" --body x" }
+        session: { id: s1 }
+  - name: shell_tee_quoted_path_with_space
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "tee \"/Users/dev/My Projects/app/CLAUDE.md\" < /tmp/x" }
         session: { id: s1 }
   - name: shell_read_claude_md
     verdict: no_match
