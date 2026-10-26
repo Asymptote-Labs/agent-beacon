@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pelletier/go-toml/v2"
+
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/fxsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/groksession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
@@ -51,6 +53,64 @@ func TestConfigureClaudeRefusesSettingsItCannotParse(t *testing.T) {
 	}
 	if backups, _ := filepath.Glob(path + ".beacon.*.bak"); len(backups) != 0 {
 		t.Fatalf("a refused configure left backups: %v", backups)
+	}
+}
+
+func TestMergeCodexOTELReadsHeadersWithComments(t *testing.T) {
+	input := "model = \"gpt-5\"\n\n[otel] # telemetry\nenvironment = \"prod\"\n\n[otel.exporter.\"otlp-grpc\"]\nendpoint = \"http://old.example.com\"\n\n[profiles.fast] # my profile\nmodel = \"o3\"\n"
+	got := mergeCodexOTEL(input, "http://127.0.0.1:4317")
+	var parsed map[string]interface{}
+	if err := toml.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("merged config is not valid TOML: %v\n%s", err, got)
+	}
+	if strings.Contains(got, "old.example.com") || strings.Contains(got, "\"prod\"") {
+		t.Fatalf("old otel config was not replaced: %s", got)
+	}
+	if !strings.Contains(got, "[profiles.fast] # my profile\nmodel = \"o3\"") {
+		t.Fatalf("following section was not preserved: %s", got)
+	}
+}
+
+// parseCodexConfig fails the test unless text is a config Codex can load.
+func parseCodexConfig(t *testing.T, text string) map[string]interface{} {
+	t.Helper()
+	var parsed map[string]interface{}
+	if err := toml.Unmarshal([]byte(text), &parsed); err != nil {
+		t.Fatalf("merged config is not valid TOML: %v\n%s", err, text)
+	}
+	return parsed
+}
+
+func TestMergeCodexOTELReplacesACommentedOTELHeader(t *testing.T) {
+	got := mergeCodexOTEL("model = \"gpt-5\"\n\n[otel] # telemetry\nenvironment = \"prod\"\n\n[mcp_servers.x]\ncommand = \"npx\"\n", "http://127.0.0.1:4317")
+	parsed := parseCodexConfig(t, got)
+	if otel, _ := parsed["otel"].(map[string]interface{}); otel["environment"] != "dev" {
+		t.Fatalf("otel = %v, want Beacon's block:\n%s", parsed["otel"], got)
+	}
+	if servers, _ := parsed["mcp_servers"].(map[string]interface{}); servers["x"] == nil {
+		t.Fatalf("mcp_servers.x was dropped:\n%s", got)
+	}
+}
+
+// Beacon's [otel] block sits at the end of the file, so a server the person adds afterwards follows
+// it; a reinstall must not take that server for part of the block.
+func TestMergeCodexOTELKeepsCommentedTablesAfterTheBlock(t *testing.T) {
+	for name, header := range map[string]string{
+		"bare":      "[mcp_servers.x] # mine",
+		"quoted #":  "[mcp_servers.\"x#1\"] # mine",
+		"literal #": "[mcp_servers.'x#1']",
+	} {
+		first := mergeCodexOTEL("model = \"gpt-5\"\n", "http://127.0.0.1:4317")
+		input := first + "\n" + header + "\ncommand = \"npx\"\n"
+		got := mergeCodexOTEL(input, "http://127.0.0.1:4318")
+		parsed := parseCodexConfig(t, got)
+		servers, _ := parsed["mcp_servers"].(map[string]interface{})
+		if len(servers) != 1 || !strings.Contains(got, header+"\ncommand = \"npx\"") {
+			t.Errorf("%s: server was dropped:\n%s", name, got)
+		}
+		if strings.Contains(got, "4317") {
+			t.Errorf("%s: old endpoint kept:\n%s", name, got)
+		}
 	}
 }
 

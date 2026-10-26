@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/jsonc"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tomledit"
 )
 
 // Action is what connect will do, or did, for one target.
@@ -382,17 +383,17 @@ func applyOne(ctx context.Context, opts Options, m *manifest, it Item) (Record, 
 func editForConnect(t Target, text string, st state, opts Options) (updated string, created int, createdInputs bool, err error) {
 	entry := t.desiredEntry(opts, st.entry)
 	if t.format == formatTOML {
-		eol := tomlLineEnding(text)
+		eol := tomledit.LineEnding(text, "\n")
 		stripped := text
 		if st.exists {
 			var found bool
-			stripped, found = stripTOMLTable(text, t.container[0], ServerName)
+			stripped, found = tomledit.RemoveTable(text, t.container[0], ServerName)
 			if !found {
 				return "", 0, false, errors.New("the existing " + ServerName + " entry is not a [" + t.container[0] + "." + ServerName + "] table, so Beacon cannot replace it; remove it by hand")
 			}
-			stripped = endTOMLWithNewline(stripped, eol)
+			stripped = tomledit.EndWithNewline(stripped, eol)
 		}
-		return appendTOMLBlock(stripped, tomlBlock(t.container[0], ServerName, entry, eol), eol), 0, false, nil
+		return tomledit.Append(stripped, tomlBlock(t.container[0], ServerName, entry, eol), eol), 0, false, nil
 	}
 	updated = text
 	if strings.TrimSpace(updated) == "" && len(t.skeleton) > 0 {
@@ -772,11 +773,11 @@ func disconnectOne(ctx context.Context, opts Options, t Target, rec Record) (Act
 
 func editForDisconnect(t Target, text string, rec Record) (string, error) {
 	if t.format == formatTOML {
-		stripped, found := stripTOMLTable(text, t.container[0], ServerName)
+		stripped, found := tomledit.RemoveTable(text, t.container[0], ServerName)
 		if !found {
 			return "", errors.New("the " + ServerName + " entry is not a [" + t.container[0] + "." + ServerName + "] table; remove it by hand")
 		}
-		return endTOMLWithNewline(stripped, tomlLineEnding(text)), nil
+		return tomledit.EndWithNewline(stripped, tomledit.LineEnding(text, "\n")), nil
 	}
 	updated, err := jsonc.RemoveMember(text, t.container, ServerName, rec.CreatedParents)
 	if err != nil {
