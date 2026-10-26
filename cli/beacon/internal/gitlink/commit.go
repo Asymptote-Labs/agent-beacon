@@ -23,7 +23,7 @@ func ResolveCommit(ctx context.Context, g Git, rev string) (Commit, error) {
 	if rev == "" {
 		rev = "HEAD"
 	}
-	out, err := g.Run(ctx, nil, "show", "-s", "--no-notes", "--no-show-signature", "--format=%H%x00%P%x00%ct%x00%s", rev+"^{commit}", "--")
+	out, err := g.Run(ctx, nil, "show", "-s", "--no-notes", "--format=%H%x00%P%x00%ct%x00%s", rev+"^{commit}", "--")
 	if err != nil {
 		return Commit{}, fmt.Errorf("resolve commit %s: %w", rev, err)
 	}
@@ -42,7 +42,7 @@ func ResolveCommit(ctx context.Context, g Git, rev string) (Commit, error) {
 		Subject:    fields[3],
 	}
 	if len(commit.Parents) > 0 {
-		parent, err := g.Run(ctx, nil, "show", "-s", "--no-notes", "--no-show-signature", "--format=%ct", commit.Parents[0], "--")
+		parent, err := g.Run(ctx, nil, "show", "-s", "--no-notes", "--format=%ct", commit.Parents[0], "--")
 		if err == nil {
 			if seconds, err := strconv.ParseInt(strings.TrimSpace(parent), 10, 64); err == nil {
 				commit.ParentTime = time.Unix(seconds, 0).UTC()

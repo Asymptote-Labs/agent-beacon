@@ -209,7 +209,7 @@ func ListLinked(ctx context.Context, g Git, rev string, limit int) ([]LinkedComm
 	if limit <= 0 {
 		limit = 20
 	}
-	args := []string{"log", "--no-notes", "--no-show-signature"}
+	args := []string{"log", "--no-notes"}
 	if exists, err := refExists(ctx, g, NotesRef); err != nil {
 		return nil, err
 	} else if exists {
@@ -222,7 +222,7 @@ func ListLinked(ctx context.Context, g Git, rev string, limit int) ([]LinkedComm
 	if len(tracking) > 0 {
 		args = append(args, "--notes="+RemoteNotesPrefix+"*")
 	}
-	if len(args) == 3 {
+	if len(args) == 2 {
 		return nil, nil
 	}
 	// Records end in RS and fields are split by NUL, so a note or subject containing newlines

@@ -662,7 +662,7 @@ func ReplayInProgress(ctx context.Context, repo Repo) bool {
 			return true
 		}
 	}
-	if body, err := repo.Git.Run(ctx, nil, "show", "-s", "--no-notes", "--no-show-signature", "--format=%B", "HEAD", "--"); err == nil {
+	if body, err := repo.Git.Run(ctx, nil, "show", "-s", "--no-notes", "--format=%B", "HEAD", "--"); err == nil {
 		if strings.HasPrefix(body, "Revert ") && revertMessage.MatchString(body) {
 			return true
 		}

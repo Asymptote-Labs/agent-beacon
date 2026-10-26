@@ -52,7 +52,8 @@ func (g Git) RunRaw(ctx context.Context, args ...string) ([]byte, error) {
 }
 
 func (g Git) run(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
-	full := append([]string{"-C", g.dir()}, args...)
+	// log.showSignature would print each signed commit's verification ahead of --format output.
+	full := append([]string{"-C", g.dir(), "-c", "log.showSignature=false"}, args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
 	if g.Env != nil {
 		cmd.Env = g.Env
