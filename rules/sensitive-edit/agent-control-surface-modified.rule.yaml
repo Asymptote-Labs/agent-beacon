@@ -1,12 +1,20 @@
 id: agent-control-surface-modified
-version: 2
-title: Agent control surface (settings / MCP config) modified
+version: 3
+title: Agent control surface (settings / hooks / MCP config / plugins) modified
 description: >
-  The agent modified a file that constrains or wires its own runtime: a Claude
-  Code settings file (.claude/settings.json, .claude/settings.local.json,
-  .claude.json) or an MCP server registration (.mcp.json). Writing these can
-  disable the sandbox, add an excludedCommands entry, register a hook, or wire in
-  a new MCP server that runs on every future session.
+  The agent wrote a file that constrains or wires its own runtime or another agent's:
+  settings and permissions (.claude/settings.json, .claude.json, managed-settings.json,
+  .codex/config.toml, .gemini/settings.json, .copilot/config.json,
+  .cursor/cli-config.json, opencode.json), hook registrations (.cursor/hooks.json,
+  .github/hooks, .kiro/hooks, .windsurf/hooks.json), MCP server registrations
+  (.mcp.json, .cursor/mcp.json, .vscode/mcp.json, .copilot/mcp-config.json,
+  .kiro/settings/mcp.json, Windsurf mcp_config.json, cline_mcp_settings.json), or
+  plugin and extension code (.claude/plugins, .gemini/extensions, .opencode/plugin,
+  .cline/plugins, .kiro/agents). It fires on a file write event and on a shell command
+  that writes one of these paths (a redirect, tee, sed -i, cp/mv/install/ln/rsync to
+  it, git clone into it, or a download saved there). Writing these can disable the
+  sandbox, widen auto-approval, register a hook, or wire in a new MCP server or plugin
+  that runs on every future session.
 severity: high
 status: stable
 posture: detect
@@ -16,11 +24,18 @@ taxonomy:
   mitre_atlas: AML.T0011
 
 match: >
-  e.event.action in ["file.modified", "file.created", "file.edited"] &&
-  e.file.path.matches("(?i)(^|/)(\\.claude/settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json)$")
+  (
+    e.event.action in ["file.modified", "file.created", "file.edited"] &&
+    e.file.path.matches("(?i)(^|/)((\\.claude/settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor/(mcp|hooks|cli|cli-config)\\.json|\\.codex/(config\\.toml|hooks\\.json)|\\.gemini/settings\\.json|\\.copilot/(config|mcp-config)\\.json|\\.vscode/mcp\\.json|\\.kiro/settings/mcp\\.json|opencode\\.jsonc?|\\.codeium/windsurf/mcp_config\\.json|\\.windsurf/hooks\\.json|cline_mcp_settings\\.json)$|(\\.claude/plugins|\\.github/hooks|\\.kiro/(hooks|agents)|\\.gemini/extensions|\\.opencode/plugins?|\\.config/opencode/plugins?|\\.cline/plugins)/)")
+  ) || (
+    e.event.action == "command.executed" && (
+      e.command.command.matches("(?i)((^|[^-=>\\n])>{1,2}\\s*|\\btee(\\s+-[^\\s;&|<>]+)*\\s+|\\bsed\\s+(('[^'\\n]*'|\"[^\"\\n]*\"|[^;&|\\n'\"])*\\s)?-i\\S*\\s+(('[^'\\n]*'|\"[^\"\\n]*\"|[^;&|\\n'\"])*\\s)?|\\bgit\\s+clone\\b[^;&|\\n]*\\s|\\b(curl|wget)\\b[^;&|\\n]*\\s(-o|-O|--output|--output-document)(\\s+|=)|\\b(set-content|add-content|out-file)\\s+(-(literal|file)?path\\s+)?)(['\"]([^'\"\\n;|]*[/\\\\])?((\\.claude[/\\\\]settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor[/\\\\](mcp|hooks|cli|cli-config)\\.json|\\.codex[/\\\\](config\\.toml|hooks\\.json)|\\.gemini[/\\\\]settings\\.json|\\.copilot[/\\\\](config|mcp-config)\\.json|\\.vscode[/\\\\]mcp\\.json|\\.kiro[/\\\\]settings[/\\\\]mcp\\.json|opencode\\.jsonc?|\\.codeium[/\\\\]windsurf[/\\\\]mcp_config\\.json|\\.windsurf[/\\\\]hooks\\.json|cline_mcp_settings\\.json)|(\\.claude[/\\\\]plugins|\\.github[/\\\\]hooks|\\.kiro[/\\\\](hooks|agents)|\\.gemini[/\\\\]extensions|\\.opencode[/\\\\]plugins?|\\.config[/\\\\]opencode[/\\\\]plugins?|\\.cline[/\\\\]plugins)([/\\\\][^'\"\\n;|]*)?)['\"]|(([^\\s;&|'\"<>\\\\]|\\\\.)*[/\\\\])?((\\.claude[/\\\\]settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor[/\\\\](mcp|hooks|cli|cli-config)\\.json|\\.codex[/\\\\](config\\.toml|hooks\\.json)|\\.gemini[/\\\\]settings\\.json|\\.copilot[/\\\\](config|mcp-config)\\.json|\\.vscode[/\\\\]mcp\\.json|\\.kiro[/\\\\]settings[/\\\\]mcp\\.json|opencode\\.jsonc?|\\.codeium[/\\\\]windsurf[/\\\\]mcp_config\\.json|\\.windsurf[/\\\\]hooks\\.json|cline_mcp_settings\\.json)|(\\.claude[/\\\\]plugins|\\.github[/\\\\]hooks|\\.kiro[/\\\\](hooks|agents)|\\.gemini[/\\\\]extensions|\\.opencode[/\\\\]plugins?|\\.config[/\\\\]opencode[/\\\\]plugins?|\\.cline[/\\\\]plugins)([/\\\\]([^\\s;&|'\"<>\\\\]|\\\\.)*)?))($|[\\s;&|)<>])") ||
+      e.command.command.matches("(?i)(^|[;&|(`\\n]|\\$\\(|\\b(then|do|else)\\s)\\s*(sudo\\s+)?(cp|mv|install|ln|rsync)\\s[^;&|<>\\n]*\\s(['\"]([^'\"\\n;|]*[/\\\\])?((\\.claude[/\\\\]settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor[/\\\\](mcp|hooks|cli|cli-config)\\.json|\\.codex[/\\\\](config\\.toml|hooks\\.json)|\\.gemini[/\\\\]settings\\.json|\\.copilot[/\\\\](config|mcp-config)\\.json|\\.vscode[/\\\\]mcp\\.json|\\.kiro[/\\\\]settings[/\\\\]mcp\\.json|opencode\\.jsonc?|\\.codeium[/\\\\]windsurf[/\\\\]mcp_config\\.json|\\.windsurf[/\\\\]hooks\\.json|cline_mcp_settings\\.json)|(\\.claude[/\\\\]plugins|\\.github[/\\\\]hooks|\\.kiro[/\\\\](hooks|agents)|\\.gemini[/\\\\]extensions|\\.opencode[/\\\\]plugins?|\\.config[/\\\\]opencode[/\\\\]plugins?|\\.cline[/\\\\]plugins)([/\\\\][^'\"\\n;|]*)?)['\"]|(([^\\s;&|'\"<>\\\\]|\\\\.)*[/\\\\])?((\\.claude[/\\\\]settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor[/\\\\](mcp|hooks|cli|cli-config)\\.json|\\.codex[/\\\\](config\\.toml|hooks\\.json)|\\.gemini[/\\\\]settings\\.json|\\.copilot[/\\\\](config|mcp-config)\\.json|\\.vscode[/\\\\]mcp\\.json|\\.kiro[/\\\\]settings[/\\\\]mcp\\.json|opencode\\.jsonc?|\\.codeium[/\\\\]windsurf[/\\\\]mcp_config\\.json|\\.windsurf[/\\\\]hooks\\.json|cline_mcp_settings\\.json)|(\\.claude[/\\\\]plugins|\\.github[/\\\\]hooks|\\.kiro[/\\\\](hooks|agents)|\\.gemini[/\\\\]extensions|\\.opencode[/\\\\]plugins?|\\.config[/\\\\]opencode[/\\\\]plugins?|\\.cline[/\\\\]plugins)([/\\\\]([^\\s;&|'\"<>\\\\]|\\\\.)*)?))(\\s+([0-9]*|&)>{1,2}&?\\s*[^\\s;&|]*|\\s+#[^\\n]*)*\\s*($|[;&|)\\n])")
+    )
+  )
 
 emit:
-  reason: "Agent control surface modified (Claude settings or MCP server config) — can weaken sandbox or register persistent hooks/servers"
+  reason: "Agent control surface modified (runtime settings, hooks, MCP server config or plugins) — can weaken the sandbox or register persistent hooks/servers"
 
 tests:
   - name: claude_settings_edit
@@ -53,9 +68,357 @@ tests:
       - event: { action: file.read }
         file: { path: ".claude/settings.json" }
         session: { id: s1 }
-  - name: claude_settings_edit_created
+  - name: claude_settings_created
     verdict: match
     events:
       - event: { action: file.created }
         file: { path: ".claude/settings.json" }
+        session: { id: s1 }
+  - name: claude_managed_settings
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/Library/Application Support/ClaudeCode/managed-settings.json" }
+        session: { id: s1 }
+  - name: claude_plugin_dir
+    verdict: match
+    events:
+      - event: { action: file.created }
+        file: { path: "/home/dev/.claude/plugins/marketplaces/x/plugin.json" }
+        session: { id: s1 }
+  - name: cursor_mcp
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: ".cursor/mcp.json" }
+        session: { id: s1 }
+  - name: cursor_hooks
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/dev/.cursor/hooks.json" }
+        session: { id: s1 }
+  - name: cursor_cli_permissions
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/dev/.cursor/cli-config.json" }
+        session: { id: s1 }
+  - name: codex_config
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/dev/.codex/config.toml" }
+        session: { id: s1 }
+  - name: gemini_settings
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: ".gemini/settings.json" }
+        session: { id: s1 }
+  - name: gemini_extension
+    verdict: match
+    events:
+      - event: { action: file.created }
+        file: { path: "/home/dev/.gemini/extensions/helper/gemini-extension.json" }
+        session: { id: s1 }
+  - name: copilot_cli_config
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/dev/.copilot/config.json" }
+        session: { id: s1 }
+  - name: copilot_cli_mcp
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/dev/.copilot/mcp-config.json" }
+        session: { id: s1 }
+  - name: copilot_repo_hooks
+    verdict: match
+    events:
+      - event: { action: file.created }
+        file: { path: ".github/hooks/session.json" }
+        session: { id: s1 }
+  - name: vscode_mcp
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: ".vscode/mcp.json" }
+        session: { id: s1 }
+  - name: kiro_mcp
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: ".kiro/settings/mcp.json" }
+        session: { id: s1 }
+  - name: kiro_hook
+    verdict: match
+    events:
+      - event: { action: file.created }
+        file: { path: ".kiro/hooks/on-save.kiro.hook" }
+        session: { id: s1 }
+  - name: kiro_custom_agent
+    verdict: match
+    events:
+      - event: { action: file.created }
+        file: { path: "/home/dev/.kiro/agents/ops.json" }
+        session: { id: s1 }
+  - name: opencode_config
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "opencode.json" }
+        session: { id: s1 }
+  - name: opencode_global_jsonc
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/dev/.config/opencode/opencode.jsonc" }
+        session: { id: s1 }
+  - name: opencode_plugin
+    verdict: match
+    events:
+      - event: { action: file.created }
+        file: { path: ".opencode/plugin/hook.ts" }
+        session: { id: s1 }
+  - name: windsurf_mcp
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/dev/.codeium/windsurf/mcp_config.json" }
+        session: { id: s1 }
+  - name: windsurf_hooks
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: ".windsurf/hooks.json" }
+        session: { id: s1 }
+  - name: cline_mcp
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/dev/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json" }
+        session: { id: s1 }
+  - name: cline_plugin
+    verdict: match
+    events:
+      - event: { action: file.created }
+        file: { path: "/home/dev/.cline/plugins/extra.ts" }
+        session: { id: s1 }
+  - name: vscode_settings_not_control
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: ".vscode/settings.json" }
+        session: { id: s1 }
+  - name: package_json_not_control
+    verdict: no_match
+    events:
+      - event: { action: file.modified }
+        file: { path: "package.json" }
+        session: { id: s1 }
+  - name: shell_heredoc_mcp_json
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > .mcp.json <<'EOF'\n{\"mcpServers\":{\"x\":{\"command\":\"npx\",\"args\":[\"-y\",\"x-mcp\"]}}}\nEOF" }
+        session: { id: s1 }
+  - name: shell_tee_mcp_json
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo '{\"mcpServers\":{}}' | tee .mcp.json" }
+        session: { id: s1 }
+  - name: shell_append_codex_config
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "printf '[mcp_servers.x]\\ncommand = \"npx\"\\n' >> ~/.codex/config.toml" }
+        session: { id: s1 }
+  - name: shell_cp_claude_settings
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cp /tmp/s.json ~/.claude/settings.json" }
+        session: { id: s1 }
+  - name: shell_sed_gemini_settings
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sed -i 's/\"sandbox\": true/\"sandbox\": false/' ~/.gemini/settings.json" }
+        session: { id: s1 }
+  - name: shell_jq_then_mv_cursor_mcp
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "jq '.mcpServers.x={\"url\":\"https://x.test\"}' .cursor/mcp.json > /tmp/m && mv /tmp/m .cursor/mcp.json" }
+        session: { id: s1 }
+  - name: shell_git_clone_gemini_extension
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clone https://github.com/someone/ext ~/.gemini/extensions/ext" }
+        session: { id: s1 }
+  - name: shell_cp_on_second_line
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "mkdir -p ~/.claude\ncp /tmp/evil.json ~/.claude/settings.json" }
+        session: { id: s1 }
+  - name: shell_cp_mid_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cd /tmp\ncp mcp.json ~/project/.mcp.json\necho done" }
+        session: { id: s1 }
+  - name: shell_cp_in_then
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "if [ -d ~/.cursor ]; then cp /tmp/h.json ~/.cursor/hooks.json; fi" }
+        session: { id: s1 }
+  - name: shell_mv_in_for_do
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "for p in /tmp/p/*.ts; do mv \"$p\" ~/.cline/plugins/; done" }
+        session: { id: s1 }
+  - name: shell_backup_settings_multiline
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cd ~\ncp .claude/settings.json /tmp/settings.bak\nls" }
+        session: { id: s1 }
+  - name: shell_cp_with_stderr_redirect
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cp /tmp/evil.json ~/.claude/settings.json 2>/dev/null" }
+        session: { id: s1 }
+  - name: shell_mv_with_stdout_redirect
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "mv /tmp/m .cursor/mcp.json >/dev/null 2>&1" }
+        session: { id: s1 }
+  - name: shell_cp_with_trailing_comment
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cp x ~/.codex/config.toml # done" }
+        session: { id: s1 }
+  - name: powershell_backslash_settings
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "Set-Content -Path C:\\Users\\dev\\.claude\\settings.json -Value x" }
+        session: { id: s1 }
+  - name: powershell_out_file_relative_backslash
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "$cfg | Out-File -FilePath .\\.cursor\\mcp.json" }
+        session: { id: s1 }
+  - name: shell_cp_with_spaced_redirects
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cp /tmp/evil.json ~/.claude/settings.json > /dev/null 2>&1" }
+        session: { id: s1 }
+  - name: shell_mv_with_spaced_stderr_redirect
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "mv /tmp/m .cursor/mcp.json 2> /dev/null && echo ok" }
+        session: { id: s1 }
+  - name: shell_backup_settings_spaced_redirect
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cp .claude/settings.json /tmp/settings.bak > /dev/null 2>&1" }
+        session: { id: s1 }
+  - name: shell_backup_settings_with_redirect
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cp .claude/settings.json /tmp/settings.bak 2>/dev/null" }
+        session: { id: s1 }
+  - name: shell_tee_managed_settings_quoted
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo tee \"/Library/Application Support/ClaudeCode/managed-settings.json\" <<'EOF'\n{}\nEOF" }
+        session: { id: s1 }
+  - name: shell_redirect_cline_mcp_quoted
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > \"$HOME/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json\" <<'EOF'\n{}\nEOF" }
+        session: { id: s1 }
+  - name: shell_append_managed_settings_escaped_space
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo x >> /Library/Application\\ Support/ClaudeCode/managed-settings.json" }
+        session: { id: s1 }
+  - name: arrow_in_commit_message
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"chore: move config -> .mcp.json\"" }
+        session: { id: s1 }
+  - name: shell_sed_pipe_delimiter
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sed -i 's|\"sandbox\": true|\"sandbox\": false|' ~/.gemini/settings.json" }
+        session: { id: s1 }
+  - name: shell_sed_multiple_expressions
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sed -i 's/a/b/;s/c/d/' ~/.claude/settings.json" }
+        session: { id: s1 }
+  - name: shell_sed_ampersand_replacement
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sed -i 's/x/& y/' .mcp.json" }
+        session: { id: s1 }
+  - name: shell_sed_double_quoted_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sed -i \"s|old|new|g\" .cursor/mcp.json" }
+        session: { id: s1 }
+  - name: blockquote_in_heredoc_pr_body
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gh pr create --title x --body \"$(cat <<'EOF'\nSummary\n> .mcp.json registers the server\nEOF\n)\"" }
+        session: { id: s1 }
+  - name: sed_settings_mention_in_other_file
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sed -i \"s|~/.claude/settings.json|~/.config/x.json|\" README.md" }
+        session: { id: s1 }
+  - name: shell_read_settings
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat ~/.claude/settings.json" }
+        session: { id: s1 }
+  - name: shell_jq_read_to_tmp
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "jq . .mcp.json > /tmp/mcp.pretty" }
+        session: { id: s1 }
+  - name: shell_backup_settings
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cp .claude/settings.json /tmp/settings.bak" }
         session: { id: s1 }
