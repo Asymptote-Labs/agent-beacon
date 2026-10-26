@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -223,5 +224,29 @@ func TestCollectOnceClaimsASessionForOneHomeWhenHomesSyncAtOnce(t *testing.T) {
 			t.Fatalf("root keyed = %v and clone keyed = %v, want exactly one keyed", loadCursor(t, root).KeyedByHome, loadCursor(t, profile).KeyedByHome)
 		}
 		assertNoSharedEventIDs(t, root, profile)
+	}
+}
+
+// A session home file that cannot be read stops the sweep before anything is written or any cursor
+// moves, the same as an unreadable cursor file: guessing the claims could write a session under ids
+// another home already used.
+func TestCollectOnceStopsOnAnUnreadableSessionHomeFile(t *testing.T) {
+	root, _ := clonedHermesHomes(t)
+	homesPath := SessionHomesPath(DefaultStatePath(root))
+	if err := os.MkdirAll(filepath.Dir(homesPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(homesPath, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := CollectOnce(CollectOptions{DBPath: filepath.Join(root, "state.db"), StatePath: DefaultStatePath(root), LogPath: homeLog(root), Write: true, UserMode: true})
+	if err == nil || !strings.Contains(err.Error(), homesPath) {
+		t.Fatalf("err = %v, want one naming %s", err, homesPath)
+	}
+	if _, statErr := os.Stat(homeLog(root)); !os.IsNotExist(statErr) {
+		t.Fatalf("the sweep wrote events: %v", statErr)
+	}
+	if _, statErr := os.Stat(DefaultStatePath(root)); !os.IsNotExist(statErr) {
+		t.Fatalf("the sweep saved a cursor: %v", statErr)
 	}
 }
