@@ -46,7 +46,7 @@ By default, the SDK creates OpenAI and Anthropic OpenLLMetry instrumentations wh
 Pass modules to `instrumentModules` when they may be loaded before auto-instrumentation runs.
 
 ```typescript title="Patch already-loaded modules during initialization" lines
-import Anthropic from "@anthropic-ai/sdk";
+import * as Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { Observe } from "@asymptote/sdk";
 

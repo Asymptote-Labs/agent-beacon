@@ -530,7 +530,7 @@ function patchOpenLLMetryModules(modules: InstrumentModules): void {
 
 function manuallyInstrumentModules(instrumentations: Instrumentation[], modules: InstrumentModules): void {
   const openAIModule = modules.OpenAI ?? modules.openAI ?? modules.openai;
-  const anthropicModule = modules.Anthropic ?? modules.anthropic;
+  const anthropicModule = anthropicModuleShape(modules.Anthropic ?? modules.anthropic);
   for (const instrumentation of instrumentations) {
     const maybeManual = instrumentation as Instrumentation & {
       manuallyInstrument?: (moduleValue: unknown) => void;
@@ -543,6 +543,15 @@ function manuallyInstrumentModules(instrumentations: Instrumentation[], modules:
       maybeManual.manuallyInstrument?.(anthropicModule);
     }
   }
+}
+
+// The Anthropic instrumentation needs the module namespace (`module.Anthropic.Messages`, and
+// `module.APIPromise` for streams); the default-export client class carries neither.
+function anthropicModuleShape(moduleValue: unknown): unknown {
+  if (typeof moduleValue === "function" && "Messages" in moduleValue) {
+    throw new TypeError('instrumentModules.Anthropic must be the module namespace: import * as Anthropic from "@anthropic-ai/sdk"');
+  }
+  return moduleValue;
 }
 
 function patchClaudeAgentSDK(moduleValue: unknown): void {

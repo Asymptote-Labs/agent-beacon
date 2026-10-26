@@ -1,4 +1,4 @@
-import * as Anthropic from "@anthropic-ai/sdk";
+import AnthropicClient, * as Anthropic from "@anthropic-ai/sdk";
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
 import { afterEach, expect, it } from "vitest";
 import { initialize, observe, flush, shutdown } from "./index.js";
@@ -34,4 +34,12 @@ it("routes real provider instrumentation to the new exporter after reinitializat
     await shutdown();
   }
   expect(fetches).toBe(2);
+});
+
+// The default export is the client class, which has neither the module's resources for the
+// instrumentation to patch nor the APIPromise its streaming wrapper needs.
+it("rejects the default-export Anthropic class with an error naming the namespace import", () => {
+  expect(() =>
+    initialize({ spanExporter: new InMemorySpanExporter(), disableDefaultExporter: true, instrumentationOptions: { openAI: false }, instrumentModules: { Anthropic: AnthropicClient } }),
+  ).toThrow(/import \* as Anthropic from "@anthropic-ai\/sdk"/);
 });
