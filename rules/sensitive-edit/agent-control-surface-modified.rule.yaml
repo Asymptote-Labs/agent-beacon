@@ -30,7 +30,7 @@ match: >
   ) || (
     e.event.action == "command.executed" && (
       e.command.command.matches("(?i)(>{1,2}\\s*|\\btee(\\s+-[^\\s;&|<>]+)*\\s+|\\bsed\\s+([^;&|\\n]*\\s)?-i\\S*\\s+([^;&|\\n]*\\s)?|\\bgit\\s+clone\\b[^;&|\\n]*\\s|\\b(curl|wget)\\b[^;&|\\n]*\\s(-o|-O|--output|--output-document)(\\s+|=)|\\b(set-content|add-content|out-file)\\s+(-(literal|file)?path\\s+)?)['\"]?([^\\s;&|'\"<>]*[/\\\\])?((\\.claude/settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor/(mcp|hooks|cli|cli-config)\\.json|\\.codex/(config\\.toml|hooks\\.json)|\\.gemini/settings\\.json|\\.copilot/(config|mcp-config)\\.json|\\.vscode/mcp\\.json|\\.kiro/settings/mcp\\.json|opencode\\.jsonc?|\\.codeium/windsurf/mcp_config\\.json|\\.windsurf/hooks\\.json|cline_mcp_settings\\.json)|(\\.claude/plugins|\\.github/hooks|\\.kiro/(hooks|agents)|\\.gemini/extensions|\\.opencode/plugins?|\\.config/opencode/plugins?|\\.cline/plugins)(/[^\\s;&|'\"<>]*)?)['\"]?($|[\\s;&|)<>])") ||
-      e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(cp|mv|install|ln|rsync)\\s[^;&|<>\\n]*\\s['\"]?([^\\s;&|'\"<>]*[/\\\\])?((\\.claude/settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor/(mcp|hooks|cli|cli-config)\\.json|\\.codex/(config\\.toml|hooks\\.json)|\\.gemini/settings\\.json|\\.copilot/(config|mcp-config)\\.json|\\.vscode/mcp\\.json|\\.kiro/settings/mcp\\.json|opencode\\.jsonc?|\\.codeium/windsurf/mcp_config\\.json|\\.windsurf/hooks\\.json|cline_mcp_settings\\.json)|(\\.claude/plugins|\\.github/hooks|\\.kiro/(hooks|agents)|\\.gemini/extensions|\\.opencode/plugins?|\\.config/opencode/plugins?|\\.cline/plugins)(/[^\\s;&|'\"<>]*)?)['\"]?\\s*($|[;&|)])")
+      e.command.command.matches("(?i)(^|[;&|(`\\n]|\\$\\(|\\b(then|do|else)\\s)\\s*(sudo\\s+)?(cp|mv|install|ln|rsync)\\s[^;&|<>\\n]*\\s['\"]?([^\\s;&|'\"<>]*[/\\\\])?((\\.claude/settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor/(mcp|hooks|cli|cli-config)\\.json|\\.codex/(config\\.toml|hooks\\.json)|\\.gemini/settings\\.json|\\.copilot/(config|mcp-config)\\.json|\\.vscode/mcp\\.json|\\.kiro/settings/mcp\\.json|opencode\\.jsonc?|\\.codeium/windsurf/mcp_config\\.json|\\.windsurf/hooks\\.json|cline_mcp_settings\\.json)|(\\.claude/plugins|\\.github/hooks|\\.kiro/(hooks|agents)|\\.gemini/extensions|\\.opencode/plugins?|\\.config/opencode/plugins?|\\.cline/plugins)(/[^\\s;&|'\"<>]*)?)['\"]?\\s*($|[;&|)\\n])")
     )
   )
 
@@ -259,6 +259,36 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "git clone https://github.com/someone/ext ~/.gemini/extensions/ext" }
+        session: { id: s1 }
+  - name: shell_cp_on_second_line
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "mkdir -p ~/.claude\ncp /tmp/evil.json ~/.claude/settings.json" }
+        session: { id: s1 }
+  - name: shell_cp_mid_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cd /tmp\ncp mcp.json ~/project/.mcp.json\necho done" }
+        session: { id: s1 }
+  - name: shell_cp_in_then
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "if [ -d ~/.cursor ]; then cp /tmp/h.json ~/.cursor/hooks.json; fi" }
+        session: { id: s1 }
+  - name: shell_mv_in_for_do
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "for p in /tmp/p/*.ts; do mv \"$p\" ~/.cline/plugins/; done" }
+        session: { id: s1 }
+  - name: shell_backup_settings_multiline
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cd ~\ncp .claude/settings.json /tmp/settings.bak\nls" }
         session: { id: s1 }
   - name: shell_read_settings
     verdict: no_match

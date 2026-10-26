@@ -29,7 +29,7 @@ match: >
   ) || (
     e.event.action == "command.executed" && (
       e.command.command.matches("(?i)(>{1,2}\\s*|\\btee(\\s+-[^\\s;&|<>]+)*\\s+|\\bsed\\s+([^;&|\\n]*\\s)?-i\\S*\\s+([^;&|\\n]*\\s)?|\\bgit\\s+clone\\b[^;&|\\n]*\\s|\\b(curl|wget)\\b[^;&|\\n]*\\s(-o|-O|--output|--output-document)(\\s+|=)|\\b(set-content|add-content|out-file)\\s+(-(literal|file)?path\\s+)?)['\"]?([^\\s;&|'\"<>]*[/\\\\])?((claude(\\.local)?\\.md|agents(\\.override)?\\.md|gemini\\.md|qwen\\.md|copilot-instructions\\.md|\\.cursorrules|\\.windsurfrules|\\.clinerules)|(\\.claude/(skills|commands|agents)|\\.agents/skills|\\.codex/(prompts|skills)|\\.cursor/(rules|commands)|\\.gemini/commands|\\.github/(instructions|prompts|agents|chatmodes)|\\.kiro/steering|\\.opencode/(agents?|commands?)|\\.config/opencode/(agents?|commands?)|\\.windsurf/(rules|workflows)|\\.clinerules|documents/cline/(rules|workflows))(/[^\\s;&|'\"<>]*)?)['\"]?($|[\\s;&|)<>])") ||
-      e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(cp|mv|install|ln|rsync)\\s[^;&|<>\\n]*\\s['\"]?([^\\s;&|'\"<>]*[/\\\\])?((claude(\\.local)?\\.md|agents(\\.override)?\\.md|gemini\\.md|qwen\\.md|copilot-instructions\\.md|\\.cursorrules|\\.windsurfrules|\\.clinerules)|(\\.claude/(skills|commands|agents)|\\.agents/skills|\\.codex/(prompts|skills)|\\.cursor/(rules|commands)|\\.gemini/commands|\\.github/(instructions|prompts|agents|chatmodes)|\\.kiro/steering|\\.opencode/(agents?|commands?)|\\.config/opencode/(agents?|commands?)|\\.windsurf/(rules|workflows)|\\.clinerules|documents/cline/(rules|workflows))(/[^\\s;&|'\"<>]*)?)['\"]?\\s*($|[;&|)])")
+      e.command.command.matches("(?i)(^|[;&|(`\\n]|\\$\\(|\\b(then|do|else)\\s)\\s*(sudo\\s+)?(cp|mv|install|ln|rsync)\\s[^;&|<>\\n]*\\s['\"]?([^\\s;&|'\"<>]*[/\\\\])?((claude(\\.local)?\\.md|agents(\\.override)?\\.md|gemini\\.md|qwen\\.md|copilot-instructions\\.md|\\.cursorrules|\\.windsurfrules|\\.clinerules)|(\\.claude/(skills|commands|agents)|\\.agents/skills|\\.codex/(prompts|skills)|\\.cursor/(rules|commands)|\\.gemini/commands|\\.github/(instructions|prompts|agents|chatmodes)|\\.kiro/steering|\\.opencode/(agents?|commands?)|\\.config/opencode/(agents?|commands?)|\\.windsurf/(rules|workflows)|\\.clinerules|documents/cline/(rules|workflows))(/[^\\s;&|'\"<>]*)?)['\"]?\\s*($|[;&|)\\n])")
     )
   )
 
@@ -270,6 +270,42 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "Set-Content -Path .\\AGENTS.md -Value 'x'" }
+        session: { id: s1 }
+  - name: shell_mv_on_second_line
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cd app\nmv /tmp/g.md AGENTS.md" }
+        session: { id: s1 }
+  - name: shell_cp_after_clone_line
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clone https://x.test/repo /tmp/r\ncp /tmp/r/evil.md ~/.claude/skills/x/SKILL.md" }
+        session: { id: s1 }
+  - name: shell_cp_mid_script
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "mkdir -p .cursor/rules\ncp /tmp/r.mdc .cursor/rules/r.mdc\necho done" }
+        session: { id: s1 }
+  - name: shell_cp_in_then
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "if [ -f /tmp/g.md ]; then cp /tmp/g.md GEMINI.md; fi" }
+        session: { id: s1 }
+  - name: shell_mv_in_for_do
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "for f in /tmp/s/*; do mv \"$f\" ~/.agents/skills/; done" }
+        session: { id: s1 }
+  - name: shell_backup_copy_multiline
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cd app\ncp CLAUDE.md CLAUDE.md.bak\nls" }
         session: { id: s1 }
   - name: shell_read_claude_md
     verdict: no_match
