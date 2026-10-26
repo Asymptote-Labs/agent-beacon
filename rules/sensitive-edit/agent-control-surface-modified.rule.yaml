@@ -1,5 +1,5 @@
 id: agent-control-surface-modified
-version: 1
+version: 2
 title: Agent control surface (settings / MCP config) modified
 description: >
   The agent modified a file that constrains or wires its own runtime: a Claude
@@ -16,7 +16,7 @@ taxonomy:
   mitre_atlas: AML.T0011
 
 match: >
-  e.event.action == "file.modified" &&
+  e.event.action in ["file.modified", "file.created", "file.edited"] &&
   e.file.path.matches("(?i)(^|/)(\\.claude/settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json)$")
 
 emit:
@@ -53,4 +53,9 @@ tests:
       - event: { action: file.read }
         file: { path: ".claude/settings.json" }
         session: { id: s1 }
-
+  - name: claude_settings_edit_created
+    verdict: match
+    events:
+      - event: { action: file.created }
+        file: { path: ".claude/settings.json" }
+        session: { id: s1 }

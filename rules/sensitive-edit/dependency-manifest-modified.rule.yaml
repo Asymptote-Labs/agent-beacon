@@ -1,5 +1,5 @@
 id: dependency-manifest-modified
-version: 2
+version: 3
 title: Dependency manifest or lockfile modified
 description: >
   The agent modified a dependency manifest or lockfile (package.json, lockfiles,
@@ -14,7 +14,7 @@ taxonomy:
   owasp_llm: LLM03
 
 match: >
-  e.event.action == "file.modified" &&
+  e.event.action in ["file.modified", "file.created", "file.edited"] &&
   e.file.path.matches("(?i)(^|/)(package\\.json|package-lock\\.json|yarn\\.lock|pnpm-lock\\.yaml|cargo\\.toml|cargo\\.lock|requirements\\.txt|pipfile|pipfile\\.lock|poetry\\.lock|pyproject\\.toml|go\\.mod|go\\.sum|gemfile|gemfile\\.lock|composer\\.json|composer\\.lock)$")
 
 emit:
@@ -56,4 +56,10 @@ tests:
     events:
       - event: { action: file.read }
         file: { path: "package.json" }
+        session: { id: s1 }
+  - name: package_json_edit_created
+    verdict: match
+    events:
+      - event: { action: file.created }
+        file: { path: "frontend/package.json" }
         session: { id: s1 }
