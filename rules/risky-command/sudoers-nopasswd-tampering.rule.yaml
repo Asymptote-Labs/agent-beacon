@@ -18,7 +18,7 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(>>?\\s*|tee\\s+(-[a-z-]+\\s+)*)/etc/sudoers(\\.d)?\\b") ||
+    e.command.command.matches("(?i)(>>?\\s*|\\btee\\b[^;&|<]*\\s)/etc/sudoers(\\.d)?\\b") ||
     e.command.command.matches("(?i)/etc/sudoers\\.d/[^\\s]+") ||
     e.command.command.matches("(?i)\\bvisudo\\b") ||
     e.command.command.matches("(?i)\\bNOPASSWD\\s*:") ||
@@ -52,6 +52,18 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "echo 'agent ALL=(ALL) ALL' | sudo tee -ai /etc/sudoers" }
+        session: { id: s1 }
+  - name: tee_sudoers_as_second_target
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'agent ALL=(ALL) ALL' | sudo tee -a /etc/hosts /etc/sudoers" }
+        session: { id: s1 }
+  - name: tee_reading_sudoers_from_stdin
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "tee copy.txt < /etc/sudoers" }
         session: { id: s1 }
   - name: tee_into_other_etc_file
     verdict: no_match
