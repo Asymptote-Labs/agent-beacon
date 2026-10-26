@@ -26,6 +26,34 @@ func TestMergeCodexOTELReplacesExistingBlock(t *testing.T) {
 	}
 }
 
+// A settings.json Beacon cannot parse still holds the user's permissions and hooks; rewriting it
+// from an empty map would leave Claude Code running with only Beacon's env.
+func TestConfigureClaudeRefusesSettingsItCannotParse(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	path := filepath.Join(home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	original := `{"permissions":{"allow":["Bash(npm test)"]},"hooks":{},}`
+	if err := os.WriteFile(path, []byte(original), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ConfigureClaude(ConfigureOptions{Endpoint: "http://127.0.0.1:4317", UserMode: true}); err == nil {
+		t.Fatal("ConfigureClaude rewrote a settings.json it could not parse")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != original {
+		t.Fatalf("settings.json was changed:\n%s", data)
+	}
+	if backups, _ := filepath.Glob(path + ".beacon.*.bak"); len(backups) != 0 {
+		t.Fatalf("a refused configure left backups: %v", backups)
+	}
+}
+
 func TestConfigureClaudeWritesTelemetryEnvAndBackup(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)

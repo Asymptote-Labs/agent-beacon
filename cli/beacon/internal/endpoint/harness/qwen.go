@@ -1,7 +1,6 @@
 package harness
 
 import (
-	"encoding/json"
 	"os"
 	"strings"
 
@@ -60,9 +59,9 @@ func qwenStatus(path string) (TelemetryStatus, string) {
 		}
 		return TelemetryMissing, err.Error()
 	}
-	var settings map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return TelemetryMisconfigured, "Qwen Code settings JSON is invalid"
+	settings, err := decodeSettings("Qwen Code", path, data)
+	if err != nil {
+		return TelemetryMisconfigured, err.Error()
 	}
 	// Qwen's own kill switch. Beacon's hooks can be present in the file and still never run, and
 	// "installed but disabled" is a different problem from "not installed" -- it is fixed in Qwen's
