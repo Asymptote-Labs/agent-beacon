@@ -22,6 +22,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/factorysession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/fxsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/groksession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/harness2session"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/hermessession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/openclawsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/opencodesession"
@@ -134,11 +135,28 @@ var endpointBackfillRunners = func() []endpointBackfillRunner {
 			s, err := groksession.CollectOnce(groksession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveGrokStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
 		}},
+		{Name: "Harness²", Sync: "beacon endpoint harness2 sync", Run: func(r endpointBackfillRun) (int, error) {
+			opts := harness2session.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveHarness2StatePath("", r.UserMode), Since: r.Since, Budget: r.Budget}
+			opts.ExtraRoots = harness2BackfillExtraRoots(r.UserMode)
+			s, err := harness2session.CollectOnce(opts)
+			return s.EventsEmitted, err
+		}},
 		{Name: "OpenClaw Gateway", Sync: "beacon endpoint integrations openclaw sessions sync", Run: func(r endpointBackfillRun) (int, error) {
 			s, err := openclawsession.CollectOnce(openclawsession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveOpenClawSessionsStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
 		}},
 	}
+}
+
+// harness2BackfillExtraRoots is the runs directories a backfill reads beyond its own cursor's. A
+// system backfill keeps its cursor beside the system log, but a --runs-dir the console user named
+// was remembered in their own cursor file, which the home the backfill runs under names; without it
+// a checkout outside ~/harness2 would be read by the user's syncs and never by the system install.
+func harness2BackfillExtraRoots(userMode bool) []string {
+	if userMode {
+		return nil
+	}
+	return harness2session.UserRememberedRoots(harness2session.DefaultStatePath())
 }
 
 // endpointBackfillScratchDir is where a system backfill copies SQLite stores it reads as root: under
