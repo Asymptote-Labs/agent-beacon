@@ -25,7 +25,7 @@ taxonomy:
 match: >
   e.event.action == "command.executed" && (
     e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*(\\s--force(-with-lease)?\\b|\\s-f\\b)[^;&|]*(?:^|\\s|:)(?:refs/heads/)?(main|master|develop|production|release/[^\\s;&|]+)(?:\\s|$)") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*(?:^|\\s|:)(?:refs/heads/)?(main|master|develop|production|release/[^\\s;&|]+)\\b[^;&|]*(\\s--force(-with-lease)?\\b|\\s-f\\b)") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*(?:^|\\s|:)(?:refs/heads/)?(main|master|develop|production|release/[^\\s;&|]+)(\\s[^;&|]*)?(\\s--force(-with-lease)?\\b|\\s-f\\b)") ||
     e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*git\\b[^;&|]*\\bpush\\b[^;&|]*\\+\\s*([^\\s;&|:]*:)?(?:refs/heads/)?(main|master|develop|production|release/[^\\s;&|]+)(?:\\s|$)")
   )
 
@@ -92,6 +92,18 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "git push --force origin main:feature/x" }
+        session: { id: s1 }
+  - name: force_push_main_to_feature_trailing_flag
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git push origin main:feature/x --force" }
+        session: { id: s1 }
+  - name: force_push_to_main_prefixed_branch_trailing_flag
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git push origin HEAD:main-backup --force" }
         session: { id: s1 }
   - name: force_push_to_feature_branch
     verdict: no_match
