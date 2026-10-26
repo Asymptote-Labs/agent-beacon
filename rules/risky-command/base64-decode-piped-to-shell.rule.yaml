@@ -5,7 +5,7 @@ description: >
   A command base64-decodes content and pipes it straight into a shell — the classic
   obfuscated remote-code-execution shape that hides the payload from a casual review.
   The pipe-to-shell match is case-insensitive so an uppercase shell name cannot evade,
-  and accepts the shell by its /bin or /usr/bin path.
+  and accepts the shell by any path, through `env`, or under `sudo` with flags.
 severity: high
 status: stable
 posture: detect
@@ -17,7 +17,7 @@ taxonomy:
 match: >
   e.event.action == "command.executed" &&
   e.command.command.matches("(?i)\\bbase64\\b\\s+(-d|-D|--decode)\\b") &&
-  e.command.command.matches("(?i)\\|\\s*(sudo\\s+)?((/usr)?/bin/)?(ba|z)?sh\\b")
+  e.command.command.matches("(?i)\\|\\s*(sudo(\\s+-\\S+)*\\s+)?(\\S*/)?(env\\s+)?(ba|z|da|k)?sh\\b")
 
 emit:
   reason: "Base64-decoded payload piped directly into a shell"
@@ -58,6 +58,30 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "echo aGk= | base64 --decode | sudo /usr/bin/sh" }
+        session: { id: s1 }
+  - name: shell_by_homebrew_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo aGk= | base64 -d | /opt/homebrew/bin/bash" }
+        session: { id: s1 }
+  - name: shell_through_env
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo aGk= | base64 -d | /usr/bin/env bash" }
+        session: { id: s1 }
+  - name: shell_under_sudo_with_flags
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo aGk= | base64 -d | sudo -E bash" }
+        session: { id: s1 }
+  - name: decode_piped_to_shasum
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo aGk= | base64 -d | /usr/bin/shasum -a 256" }
         session: { id: s1 }
   - name: base64_decode_to_file
     verdict: no_match
