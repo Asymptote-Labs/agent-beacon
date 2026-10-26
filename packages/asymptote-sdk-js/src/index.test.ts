@@ -27,6 +27,7 @@ const envKeys = [
   "ASYMPTOTE_API_KEY",
   "ASYMPTOTE_BASE_URL",
   "OTEL_EXPORTER_OTLP_ENDPOINT",
+  "OTEL_SERVICE_NAME",
 ];
 
 describe("resolveExporterConfig", () => {
@@ -57,10 +58,9 @@ describe("resolveExporterConfig", () => {
     expect(config.headers.authorization).toBe("Bearer env-key");
   });
 
-  it("treats empty env variables as unset", () => {
+  it("treats an empty ASYMPTOTE_BASE_URL as unset", () => {
     process.env.ASYMPTOTE_API_KEY = "env-key";
     process.env.ASYMPTOTE_BASE_URL = "";
-    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "";
 
     const config = resolveExporterConfig();
 
@@ -258,6 +258,17 @@ describe("Asymptote Observe SDK", () => {
     expect(spans[0].attributes["asymptote.observe.input.count"]).toBe(1);
     expect(spans[0].attributes["asymptote.observe.output.type"]).toBe("string");
     expect(spans[0].resource.attributes["telemetry.sdk.version"]).toBe(packageVersion());
+  });
+
+  it("falls back to the default service name when OTEL_SERVICE_NAME is empty", async () => {
+    process.env.OTEL_SERVICE_NAME = "";
+    const exporter = new InMemorySpanExporter();
+    initialize({ spanExporter: exporter, disableDefaultExporter: true, disableBatch: true });
+
+    observe({ name: "agent.step" }, () => "ok")();
+    await flush();
+
+    expect(exporter.getFinishedSpans()[0].resource.attributes["service.name"]).toBe("asymptote-app");
   });
 
   it("respects observe input/output suppression", async () => {
