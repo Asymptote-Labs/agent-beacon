@@ -20,7 +20,7 @@ taxonomy:
 match: >
   e.event.action == "command.executed" &&
   e.command.command.matches("(?i)(^|;|&&|\\|\\|)\\s*(sudo(\\s+-\\S+)*\\s+|env\\s+|([A-Za-z_][A-Za-z0-9_]*=\\S*\\s+)+)*(docker|podman)(-compose)?\\s+(container\\s+|compose\\s+)?(run|exec)\\b") &&
-  e.command.command.matches("(?i)(--privileged|--(pid|net|network|ipc|uts)[= ]host|(-v|--volume)(=|\\s+)/:|--mount[= ]\\S*\\b(source|src)=/(,|\\s|$)|--cap-add[= ]|/var/run/docker\\.sock\\b)")
+  e.command.command.matches("(?i)(--privileged|--(pid|net|network|ipc|uts)[= ]host|(-v|--volume)(=|\\s+)['\"]?/:|--mount[= ]\\S*\\b(source|src)=/(,|['\"]|\\s|$)|--cap-add[= ]|/var/run/docker\\.sock\\b)")
 
 emit:
   reason: "Container started with host-escaping privileges"
@@ -85,6 +85,24 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "docker run --mount type=bind,source=/,target=/host ubuntu" }
+        session: { id: s1 }
+  - name: quoted_mount_root_bind_source_last
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "docker run --mount \"type=bind,target=/host,source=/\" ubuntu" }
+        session: { id: s1 }
+  - name: quoted_volume_root_bind
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "docker run -v '/:/host' ubuntu chroot /host" }
+        session: { id: s1 }
+  - name: quoted_mount_project_bind
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "docker run --mount \"type=bind,source=/src/app,target=/app\" node:20 npm test" }
         session: { id: s1 }
   - name: mount_flag_project_bind
     verdict: no_match
