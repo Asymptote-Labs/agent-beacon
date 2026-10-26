@@ -22,7 +22,7 @@ taxonomy:
 match: >
   e.event.action == "command.executed" && (
     e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?((npx|bunx|pnpm\\s+dlx)\\s+(-y\\s+)?)?([^\\s;&|]*/)?(claude(-code)?|codex|gemini(-cli)?|qwen(-code)?|opencode(-ai)?|kiro-cli|amp|cursor-agent|copilot)\\s+(mcp\\s+(add|add-json|add-from-claude-desktop|install)\\b|plugins?\\s+(install|add|i)\\b|plugins?\\s+marketplace\\s+add\\b|extensions?\\s+(install|link)\\b)") ||
-    e.command.command.matches("(?i)\\bcode(-insiders)?\\s+([^;&|\\n]*\\s)?--(add-mcp|install-extension)\\b")
+    e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?([^\\s;&|]*/)?code(-insiders)?(\\.exe|\\.cmd)?\\s+([^;&|\\n]*\\s)?--(add-mcp|install-extension)\\b")
   )
 
 emit:
@@ -118,6 +118,24 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "echo 'run claude mcp add to register it'" }
+        session: { id: s1 }
+  - name: vscode_install_extension_absolute_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/usr/local/bin/code --install-extension someone.helper" }
+        session: { id: s1 }
+  - name: vscode_flag_echoed_into_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo \"code --install-extension ms-python.python\" >> setup.sh" }
+        session: { id: s1 }
+  - name: vscode_flag_grepped
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "grep -rn 'code --install-extension' docs/" }
         session: { id: s1 }
   - name: vscode_open_file
     verdict: no_match

