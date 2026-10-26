@@ -36,7 +36,7 @@ correlation:
           e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(nc|ncat|netcat|socat)\\s+\\S") ||
           e.command.command.matches("/dev/(tcp|udp)/") ||
           e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(scp|sftp|rsync)\\s[^;&|\\n]*\\s[\\w.@-]+:") ||
-          e.command.command.matches("(?i)\\b(python[0-9.]*|node|deno|bun|ruby|perl|php)\\s+(-c|-e|-r)\\s[^\\n]*(requests\\.(post|put|get)|urllib|urlopen|http\\.client|socket\\.|fetch\\(|https?\\.request|net/http|net::http|lwp|fsockopen)") ||
+          e.command.command.matches("(?i)\\b(python[0-9.]*|node|deno|bun|ruby|perl|php)\\s+(-c|-e|-r)\\s[^\\n]*(requests\\.(post|put|get|patch|request)\\(|urllib\\.request|urlopen\\(|http\\.client\\.|socket\\.create_connection\\(|\\.connect\\(\\(|fetch\\(|https?\\.(request|get)\\(|net::http\\.(get|post|start)|lwp::|fsockopen\\()") ||
           e.command.command.matches("(?i)\\bgh\\s+gist\\s+create\\b") ||
           e.command.command.matches("(?i)\\b(aws\\s+s3\\s+(cp|sync|mv)|gsutil\\s+(-m\\s+)?(cp|rsync|mv)|gcloud\\s+storage\\s+(cp|rsync|mv)|az\\s+storage\\s+blob\\s+upload)\\b") ||
           e.command.command.matches("(?i)\\b(invoke-webrequest|invoke-restmethod|iwr|irm)\\b[^\\n]*https?://")
