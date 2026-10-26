@@ -13,17 +13,20 @@ taxonomy:
   beacon_category: risky-command
   owasp_llm: LLM06
 
+# Command prefixes accept environment assignments, relative executable paths, and
+# sudo execution options. Value-taking sudo options consume their argument;
+# inspection modes such as sudo -l/-v are not execution prefixes.
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?(?:terraform|tofu)(?:[ \\t]+-chdir=[^\\s;&|]+)?[ \\t]+destroy(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?(?:pulumi|cdk)[ \\t]+destroy(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?kubectl(?:[ \\t]+(?:-n|--namespace|--context|--kubeconfig)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+delete[ \\t]+(?:namespace|namespaces|ns)(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?aws(?:[ \\t]+--(?:profile|region|endpoint-url)[ \\t]+[^\\s;&|]+)*[ \\t]+(?:s3[ \\t]+rb|(?:cloudformation[ \\t]+delete-stack|eks[ \\t]+delete-cluster)|s3api[ \\t]+delete-bucket)(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?aws(?:[ \\t]+--(?:profile|region|endpoint-url)[ \\t]+[^\\s;&|]+)*[ \\t]+s3[ \\t]+rm\\b[^;&|\\n#]*[ \\t]--recursive(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?gcloud(?:[ \\t]+--(?:project|account|configuration)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+(?:projects[ \\t]+delete|container[ \\t]+clusters[ \\t]+delete|storage[ \\t]+buckets[ \\t]+delete)(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?gcloud(?:[ \\t]+--(?:project|account|configuration)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+storage[ \\t]+rm\\b[^;&|\\n#]*[ \\t](?:--recursive|-r)(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?gsutil[ \\t]+(?:-m[ \\t]+)?(?:rb(?:[ \\t]|$|[;&|\\n<>#])|rm\\b[^;&|\\n#]*[ \\t]-[a-zA-Z]*[rR][a-zA-Z]*(?:[ \\t]|$|[;&|\\n<>#]))") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?az[ \\t]+(?:group[ \\t]+delete|aks[ \\t]+delete|storage[ \\t]+container[ \\t]+delete)(?:[ \\t]|$|[;&|\\n<>#])")
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:terraform|tofu)(?:[ \\t]+-chdir=[^\\s;&|]+)?[ \\t]+(?:destroy|apply(?:[ \\t]+(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)*?[ \\t]+-destroy(?:=true)?)(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:pulumi|cdk)[ \\t]+destroy(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?kubectl(?:[ \\t]+(?:-n|--namespace|--context|--kubeconfig)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+delete[ \\t]+(?:namespace|namespaces|ns)(?:/[^\\s;&|<>#\\x27\"]+)?(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?aws(?:[ \\t]+--(?:profile|region|endpoint-url)[ \\t]+[^\\s;&|]+)*[ \\t]+(?:s3[ \\t]+rb|(?:cloudformation[ \\t]+delete-stack|eks[ \\t]+delete-cluster)|s3api[ \\t]+delete-bucket)(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?aws(?:[ \\t]+--(?:profile|region|endpoint-url)[ \\t]+[^\\s;&|]+)*[ \\t]+s3[ \\t]+rm\\b[^;&|\\n#]*[ \\t]--recursive(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?gcloud(?:[ \\t]+--(?:project|account|configuration)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+(?:projects[ \\t]+delete|container[ \\t]+clusters[ \\t]+delete|storage[ \\t]+buckets[ \\t]+delete)(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?gcloud(?:[ \\t]+--(?:project|account|configuration)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+storage[ \\t]+rm\\b[^;&|\\n#]*[ \\t](?:--recursive|-r)(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?gsutil[ \\t]+(?:-m[ \\t]+)?(?:rb(?:[ \\t]|$|[;&|\\n<>#])|rm\\b[^;&|\\n#]*[ \\t]-[a-zA-Z]*[rR][a-zA-Z]*(?:[ \\t]|$|[;&|\\n<>#]))") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?az[ \\t]+(?:group[ \\t]+delete|aks[ \\t]+delete|storage[ \\t]+container[ \\t]+delete)(?:[ \\t]|$|[;&|\\n<>#])")
   )
 
 emit:
@@ -323,4 +326,118 @@ tests:
     events:
       - event: { action: tool.invoked }
         command: { command: "terraform destroy -auto-approve" }
+        session: { id: s1 }
+  - name: terraform_apply_destroy
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "terraform apply -destroy -auto-approve" }
+        session: { id: s1 }
+  - name: tofu_apply_destroy
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "tofu apply -destroy" }
+        session: { id: s1 }
+  - name: terraform_apply_flags
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "terraform -chdir=infra apply -auto-approve -destroy" }
+        session: { id: s1 }
+  - name: terraform_destroy_true
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "terraform apply -destroy=true" }
+        session: { id: s1 }
+  - name: namespace_slash
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "kubectl delete namespace/prod" }
+        session: { id: s1 }
+  - name: ns_slash
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "kubectl delete ns/prod" }
+        session: { id: s1 }
+  - name: kubectl_env
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "KUBECONFIG=/tmp/prod kubectl delete ns/prod" }
+        session: { id: s1 }
+  - name: sudo_kubectl
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -u deploy kubectl delete namespace/prod" }
+        session: { id: s1 }
+  - name: relative_terraform
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "TF_WORKSPACE=prod ./bin/terraform apply -destroy" }
+        session: { id: s1 }
+  - name: plan_destroy
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "terraform plan -destroy" }
+        session: { id: s1 }
+  - name: tofu_plan_destroy
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "tofu plan -destroy" }
+        session: { id: s1 }
+  - name: apply_not_destroy
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "terraform apply -auto-approve" }
+        session: { id: s1 }
+  - name: apply_destroy_false
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "terraform apply -destroy=false" }
+        session: { id: s1 }
+  - name: apply_quoted_flag
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "terraform apply -var \"note=use -destroy later\"" }
+        session: { id: s1 }
+  - name: separate_destroy_flag
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "terraform apply; echo -destroy" }
+        session: { id: s1 }
+  - name: pod_slash
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "kubectl delete pod/app" }
+        session: { id: s1 }
+  - name: kubectl_env_get
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "KUBECONFIG=/tmp/prod kubectl get ns/prod" }
+        session: { id: s1 }
+  - name: namespace_prefix
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "kubectl delete ns-example" }
+        session: { id: s1 }
+  - name: sudo_terraform_echo
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -u deploy echo \"terraform apply -destroy\"" }
         session: { id: s1 }

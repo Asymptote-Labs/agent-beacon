@@ -14,22 +14,25 @@ taxonomy:
   beacon_category: risky-command
   owasp_llm: LLM06
 
+# Command prefixes accept environment assignments, relative executable paths, and
+# sudo execution options. Value-taking sudo options consume their argument;
+# inspection modes such as sudo -l/-v are not execution prefixes.
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?(?:rm|unlink|shred)\\b[^;&|\\n#]*[ \\t][\\\"\\x27]?(?:(?:[^\\s;&|\\\"\\x27<>]*/)?(?:\\.beacon(?:/[^\\s;&|\\\"\\x27<>]*)?|runtime\\.jsonl(?:\\.[^\\s;&|\\\"\\x27<>]*)?|var/log/beacon-agent(?:/[^\\s;&|\\\"\\x27<>]*)?)|[^\\s;&|\\\"\\x27<>]*/(?:plugins?|extensions)/beacon(?:-endpoint)?(?:\\.[jt]s|/[^\\s;&|\\\"\\x27<>]*)?|[^\\s;&|\\\"\\x27<>]*/\\.(?:bash_history|zsh_history|sh_history))[\\\"\\x27]?(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?truncate\\b[^;&|\\n#]*[ \\t][\\\"\\x27]?(?:(?:[^\\s;&|\\\"\\x27<>]*/)?(?:\\.beacon(?:/[^\\s;&|\\\"\\x27<>]*)?|runtime\\.jsonl(?:\\.[^\\s;&|\\\"\\x27<>]*)?|var/log/beacon-agent(?:/[^\\s;&|\\\"\\x27<>]*)?)|[^\\s;&|\\\"\\x27<>]*/(?:plugins?|extensions)/beacon(?:-endpoint)?(?:\\.[jt]s|/[^\\s;&|\\\"\\x27<>]*)?|[^\\s;&|\\\"\\x27<>]*/\\.(?:bash_history|zsh_history|sh_history))[\\\"\\x27]?(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?(?:cat[ \\t]+/dev/null|:|true|(?:echo|printf)(?:[ \\t]+[\\\"\\x27][\\\"\\x27])?)[ \\t]*>[ \\t]*[\\\"\\x27]?(?:(?:[^\\s;&|\\\"\\x27<>]*/)?(?:\\.beacon(?:/[^\\s;&|\\\"\\x27<>]*)?|runtime\\.jsonl(?:\\.[^\\s;&|\\\"\\x27<>]*)?|var/log/beacon-agent(?:/[^\\s;&|\\\"\\x27<>]*)?)|[^\\s;&|\\\"\\x27<>]*/(?:plugins?|extensions)/beacon(?:-endpoint)?(?:\\.[jt]s|/[^\\s;&|\\\"\\x27<>]*)?|[^\\s;&|\\\"\\x27<>]*/\\.(?:bash_history|zsh_history|sh_history))[\\\"\\x27]?(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?>[ \\t]*[\\\"\\x27]?(?:(?:[^\\s;&|\\\"\\x27<>]*/)?(?:\\.beacon(?:/[^\\s;&|\\\"\\x27<>]*)?|runtime\\.jsonl(?:\\.[^\\s;&|\\\"\\x27<>]*)?|var/log/beacon-agent(?:/[^\\s;&|\\\"\\x27<>]*)?)|[^\\s;&|\\\"\\x27<>]*/(?:plugins?|extensions)/beacon(?:-endpoint)?(?:\\.[jt]s|/[^\\s;&|\\\"\\x27<>]*)?|[^\\s;&|\\\"\\x27<>]*/\\.(?:bash_history|zsh_history|sh_history))[\\\"\\x27]?(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?systemctl[ \\t]+(?:--user[ \\t]+)?(?:stop|disable|mask|kill)\\b[^;&|\\n#]*[ \\t][\\\"\\x27]?(?:[^\\s;&|\\\"\\x27]*/)?(?:com\\.beacon\\.endpoint\\.[\\w.*-]+|beacon-collector(?:\\.service)?|beacon-otelcol)[\\\"\\x27]?(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?service[ \\t]+beacon-collector[ \\t]+stop(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?launchctl[ \\t]+(?:unload|bootout|remove|stop|kill)\\b[^;&|\\n#]*[ \\t][\\\"\\x27]?(?:[^\\s;&|\\\"\\x27]*/)?(?:com\\.beacon\\.endpoint\\.[\\w.*-]+|beacon-collector(?:\\.service)?|beacon-otelcol)[\\\"\\x27]?(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?(?:pkill|killall)\\b[^;&|\\n#]*[ \\t][\\\"\\x27]?(?:[^\\s;&|\\\"\\x27]*/)?(?:com\\.beacon\\.endpoint\\.[\\w.*-]+|beacon-collector(?:\\.service)?|beacon-otelcol)[\\\"\\x27]?(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?beacon[ \\t]+endpoint[ \\t]+(?:uninstall|disconnect|hooks[ \\t]+uninstall)(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?history[ \\t]+(?:-c|-w[ \\t]+/dev/null)(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?(?:unset[ \\t]+HISTFILE|(?:export[ \\t]+)?(?:HISTFILE[ \\t]*=[ \\t]*(?:/dev/null|[\\\"\\x27][\\\"\\x27])|(?:HISTSIZE|HISTFILESIZE)[ \\t]*=[ \\t]*0))(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?(?:export[ \\t]+)?HISTFILE=[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?set[ \\t]+\\+o[ \\t]+history(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?(?:rm|unlink|shred|truncate)\\b[^;&|\\n#]*[ \\t][\\\"\\x27]?[^\\s;&|\\\"\\x27]*/\\.(?:bash_history|zsh_history|sh_history)[\\\"\\x27]?(?:[ \\t]|$|[;&|\\n<>#])")
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:rm|unlink|shred)\\b[^;&|\\n#]*[ \\t][\\\"\\x27]?(?:(?:[^\\s;&|\\\"\\x27<>]*/)?(?:\\.beacon(?:/[^\\s;&|\\\"\\x27<>]*)?|runtime\\.jsonl(?:\\.[^\\s;&|\\\"\\x27<>]*)?|var/log/beacon-agent(?:/[^\\s;&|\\\"\\x27<>]*)?)|[^\\s;&|\\\"\\x27<>]*/(?:plugins?|extensions)/beacon(?:-endpoint)?(?:\\.[jt]s|/[^\\s;&|\\\"\\x27<>]*)?|[^\\s;&|\\\"\\x27<>]*/\\.(?:bash_history|zsh_history|sh_history))[\\\"\\x27]?(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?truncate\\b[^;&|\\n#]*[ \\t][\\\"\\x27]?(?:(?:[^\\s;&|\\\"\\x27<>]*/)?(?:\\.beacon(?:/[^\\s;&|\\\"\\x27<>]*)?|runtime\\.jsonl(?:\\.[^\\s;&|\\\"\\x27<>]*)?|var/log/beacon-agent(?:/[^\\s;&|\\\"\\x27<>]*)?)|[^\\s;&|\\\"\\x27<>]*/(?:plugins?|extensions)/beacon(?:-endpoint)?(?:\\.[jt]s|/[^\\s;&|\\\"\\x27<>]*)?|[^\\s;&|\\\"\\x27<>]*/\\.(?:bash_history|zsh_history|sh_history))[\\\"\\x27]?(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:cat[ \\t]+/dev/null|:|true|(?:echo|printf)(?:[ \\t]+[\\\"\\x27][\\\"\\x27])?)[ \\t]*>[ \\t]*[\\\"\\x27]?(?:(?:[^\\s;&|\\\"\\x27<>]*/)?(?:\\.beacon(?:/[^\\s;&|\\\"\\x27<>]*)?|runtime\\.jsonl(?:\\.[^\\s;&|\\\"\\x27<>]*)?|var/log/beacon-agent(?:/[^\\s;&|\\\"\\x27<>]*)?)|[^\\s;&|\\\"\\x27<>]*/(?:plugins?|extensions)/beacon(?:-endpoint)?(?:\\.[jt]s|/[^\\s;&|\\\"\\x27<>]*)?|[^\\s;&|\\\"\\x27<>]*/\\.(?:bash_history|zsh_history|sh_history))[\\\"\\x27]?(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?>[ \\t]*[\\\"\\x27]?(?:(?:[^\\s;&|\\\"\\x27<>]*/)?(?:\\.beacon(?:/[^\\s;&|\\\"\\x27<>]*)?|runtime\\.jsonl(?:\\.[^\\s;&|\\\"\\x27<>]*)?|var/log/beacon-agent(?:/[^\\s;&|\\\"\\x27<>]*)?)|[^\\s;&|\\\"\\x27<>]*/(?:plugins?|extensions)/beacon(?:-endpoint)?(?:\\.[jt]s|/[^\\s;&|\\\"\\x27<>]*)?|[^\\s;&|\\\"\\x27<>]*/\\.(?:bash_history|zsh_history|sh_history))[\\\"\\x27]?(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?systemctl[ \\t]+(?:--user[ \\t]+)?(?:stop|disable|mask|kill)\\b[^;&|\\n#]*[ \\t][\\\"\\x27]?(?:[^\\s;&|\\\"\\x27]*/)?(?:com\\.beacon\\.endpoint\\.[\\w.*-]+|beacon-(?:collector|otelcol|asymptote-forwarder|inventory|updater)(?:\\.(?:service|timer))?)[\\\"\\x27]?(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?service[ \\t]+beacon-collector[ \\t]+stop(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?launchctl[ \\t]+(?:unload|bootout|remove|stop|kill)\\b[^;&|\\n#]*[ \\t][\\\"\\x27]?(?:[^\\s;&|\\\"\\x27]*/)?(?:com\\.beacon\\.endpoint\\.[\\w.*-]+|beacon-(?:collector|otelcol|asymptote-forwarder|inventory|updater)(?:\\.(?:service|timer))?)[\\\"\\x27]?(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:pkill|killall)\\b[^;&|\\n#]*[ \\t][\\\"\\x27]?(?:[^\\s;&|\\\"\\x27]*/)?(?:com\\.beacon\\.endpoint\\.[\\w.*-]+|beacon-(?:collector|otelcol|asymptote-forwarder|inventory|updater)(?:\\.(?:service|timer))?)[\\\"\\x27]?(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?beacon[ \\t]+endpoint[ \\t]+(?:uninstall|disconnect|hooks[ \\t]+uninstall)(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?history[ \\t]+(?:-c|-w[ \\t]+/dev/null)(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:unset[ \\t]+HISTFILE|(?:export[ \\t]+)?(?:HISTFILE[ \\t]*=[ \\t]*(?:/dev/null|[\\\"\\x27][\\\"\\x27])|(?:HISTSIZE|HISTFILESIZE)[ \\t]*=[ \\t]*0))(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:export[ \\t]+)?HISTFILE=[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?set[ \\t]+\\+o[ \\t]+history(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:rm|unlink|shred|truncate)\\b[^;&|\\n#]*[ \\t][\\\"\\x27]?[^\\s;&|\\\"\\x27]*/\\.(?:bash_history|zsh_history|sh_history)[\\\"\\x27]?(?:[ \\t]|$|[;&|\\n<>#])")
   )
 
 emit:
@@ -437,4 +440,118 @@ tests:
     events:
       - event: { action: tool.invoked }
         command: { command: "rm -rf ~/.beacon/" }
+        session: { id: s1 }
+  - name: stop_cloud_forwarder
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo systemctl stop beacon-asymptote-forwarder" }
+        session: { id: s1 }
+  - name: disable_cloud_forwarder
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "systemctl disable --now beacon-asymptote-forwarder.service" }
+        session: { id: s1 }
+  - name: mask_inventory_timer
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "systemctl mask beacon-inventory.timer" }
+        session: { id: s1 }
+  - name: stop_inventory_service
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "systemctl stop beacon-inventory.service" }
+        session: { id: s1 }
+  - name: stop_updater_service
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "systemctl stop beacon-updater.service" }
+        session: { id: s1 }
+  - name: disable_updater_timer
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "systemctl disable beacon-updater.timer" }
+        session: { id: s1 }
+  - name: pkill_cloud_forwarder
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pkill -f beacon-asymptote-forwarder" }
+        session: { id: s1 }
+  - name: killall_inventory
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "killall beacon-inventory" }
+        session: { id: s1 }
+  - name: pkill_updater
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pkill -f beacon-updater" }
+        session: { id: s1 }
+  - name: sudo_systemctl_options
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -n -u root systemctl stop beacon-asymptote-forwarder" }
+        session: { id: s1 }
+  - name: systemctl_env
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus systemctl --user stop beacon-collector" }
+        session: { id: s1 }
+  - name: relative_systemctl
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bin/systemctl stop beacon-inventory.timer" }
+        session: { id: s1 }
+  - name: forwarder_status
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "systemctl status beacon-asymptote-forwarder.service" }
+        session: { id: s1 }
+  - name: inventory_status
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "systemctl status beacon-inventory.timer" }
+        session: { id: s1 }
+  - name: updater_start
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "systemctl start beacon-updater.timer" }
+        session: { id: s1 }
+  - name: unrelated_unit
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "systemctl stop beacon-unrelated.service" }
+        session: { id: s1 }
+  - name: sudo_service_echo
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -u root echo \"systemctl stop beacon-inventory.timer\"" }
+        session: { id: s1 }
+  - name: unit_suffix
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "systemctl stop beacon-inventory.timer-backup" }
+        session: { id: s1 }
+  - name: env_status
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus systemctl --user status beacon-collector" }
         session: { id: s1 }

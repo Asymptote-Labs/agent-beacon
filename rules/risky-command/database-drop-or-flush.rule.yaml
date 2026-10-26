@@ -12,16 +12,19 @@ taxonomy:
   beacon_category: risky-command
   owasp_llm: LLM06
 
+# Command prefixes accept environment assignments, relative executable paths, and
+# sudo execution options. Value-taking sudo options consume their argument;
+# inspection modes such as sudo -l/-v are not execution prefixes.
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?(?:psql|mysql|mariadb)\\b[^;&|\\n#]*[ \\t](?:-c|-e|--command|--execute)(?:[ \\t]+|=)[\\\"\\x27]?[ \\t]*(?:(?i:DROP)[ \\t]+(?i:TABLE|DATABASE|SCHEMA|INDEX|VIEW|MATERIALIZED|SEQUENCE|TYPE|FUNCTION|PROCEDURE|TRIGGER|EXTENSION|ROLE|USER)\\b|(?i:TRUNCATE)[ \\t]+[a-zA-Z_\\\"\\x27])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?sqlite3(?:[ \\t]+-[\\w-]+)*[ \\t]+[^\\s;&|]+[ \\t][\\\"\\x27][ \\t]*(?i:DROP|TRUNCATE)[ \\t]+(?i:TABLE|INDEX|VIEW|TRIGGER)\\b") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?dropdb(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?mysqladmin(?:[ \\t]+(?:-[upPhS]|--(?:user|password|port|host|socket))(?:=|[ \\t]+)?[^\\s;&|]+|[ \\t]+(?:--force|-f))*[ \\t]+drop(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?redis-cli(?:[ \\t]+(?:-[hpansu]|--(?:host|port|pass|user|uri))(?:=|[ \\t]+)[^\\s;&|]+|[ \\t]+--(?:tls|raw|no-auth-warning))*[ \\t]+(?i:FLUSHALL|FLUSHDB)(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?(?:bundle[ \\t]+exec[ \\t]+)?(?:rails|rake)[ \\t]+db:(?:drop|reset|migrate:reset)(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?(?:(?:npx|pnpm[ \\t]+exec|bunx)[ \\t]+)?prisma[ \\t]+migrate[ \\t]+reset(?:[ \\t]|$|[;&|\\n<>#])") ||
-    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?(?:python[0-9.]*[ \\t]+(?:[^\\s;&|]*/)?manage\\.py|django-admin)[ \\t]+flush(?:[ \\t]|$|[;&|\\n<>#])")
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:psql|mysql|mariadb)\\b[^;&|\\n#]*[ \\t](?:-c|-e|--command|--execute)(?:[ \\t]+|=)[\\\"\\x27]?[ \\t]*(?:(?i:DROP)[ \\t]+(?i:TABLE|DATABASE|SCHEMA|INDEX|VIEW|MATERIALIZED|SEQUENCE|TYPE|FUNCTION|PROCEDURE|TRIGGER|EXTENSION|ROLE|USER)\\b|(?i:TRUNCATE)[ \\t]+[a-zA-Z_\\\"\\x27])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?sqlite3(?:[ \\t]+-[\\w-]+)*[ \\t]+[^\\s;&|]+[ \\t][\\\"\\x27][ \\t]*(?i:DROP|TRUNCATE)[ \\t]+(?i:TABLE|INDEX|VIEW|TRIGGER)\\b") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?dropdb(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?mysqladmin(?:[ \\t]+(?:-[upPhS]|--(?:user|password|port|host|socket))(?:=|[ \\t]+)?[^\\s;&|]+|[ \\t]+(?:--force|-f))*[ \\t]+drop(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?redis-cli(?:[ \\t]+(?:-[hpansu]|--(?:host|port|pass|user|uri))(?:=|[ \\t]+)[^\\s;&|]+|[ \\t]+--(?:tls|raw|no-auth-warning))*[ \\t]+(?i:FLUSHALL|FLUSHDB)(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:bundle[ \\t]+exec[ \\t]+)?(?:rails|rake)[ \\t]+db:(?:drop|reset|migrate:reset)(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:(?:npx|pnpm[ \\t]+exec|bunx)[ \\t]+)?prisma[ \\t]+migrate[ \\t]+reset(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:python[0-9.]*[ \\t]+(?:[^\\s;&|]*/)?manage\\.py|django-admin)[ \\t]+flush(?:[ \\t]|$|[;&|\\n<>#])")
   )
 
 emit:
@@ -285,4 +288,106 @@ tests:
     events:
       - event: { action: tool.invoked }
         command: { command: "psql app -c \"DROP TABLE users;\"" }
+        session: { id: s1 }
+  - name: sudo_postgres_dropdb
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -u postgres dropdb app" }
+        session: { id: s1 }
+  - name: sudo_postgres_psql
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -u postgres psql -c \"DROP DATABASE app\"" }
+        session: { id: s1 }
+  - name: postgres_env
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "PGPASSWORD=secret psql -h db -c \"DROP TABLE users\"" }
+        session: { id: s1 }
+  - name: mysql_env
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "MYSQL_PWD=x mysql -e \"DROP DATABASE app\"" }
+        session: { id: s1 }
+  - name: relative_rails
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "RAILS_ENV=production bin/rails db:drop" }
+        session: { id: s1 }
+  - name: sudo_attached_user
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -n -upostgres dropdb app" }
+        session: { id: s1 }
+  - name: sudo_long_user
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo --user=postgres --group postgres -- dropdb app" }
+        session: { id: s1 }
+  - name: env_before_and_after_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "PGHOST=db sudo -u postgres PGPASSWORD=secret psql -c \"DROP TABLE users\"" }
+        session: { id: s1 }
+  - name: quoted_assignment
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "PGPASSWORD=\"has spaces\" PGHOST=db psql -c \"DROP TABLE users\"" }
+        session: { id: s1 }
+  - name: empty_assignment
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "PGHOST= psql -c \"DROP TABLE users\"" }
+        session: { id: s1 }
+  - name: sudo_user_not_command
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -u dropdb echo app" }
+        session: { id: s1 }
+  - name: sudo_list_only
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -l -u postgres dropdb app" }
+        session: { id: s1 }
+  - name: sudo_validate_only
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -v dropdb app" }
+        session: { id: s1 }
+  - name: env_mentions_tool
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "NOTE=\"dropdb app\" echo ok" }
+        session: { id: s1 }
+  - name: env_read_only
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "PGPASSWORD=secret psql -c \"SELECT 1\"" }
+        session: { id: s1 }
+  - name: relative_rails_read_only
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "RAILS_ENV=production bin/rails db:version" }
+        session: { id: s1 }
+  - name: sudo_echo
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -u postgres echo \"dropdb app\"" }
         session: { id: s1 }
