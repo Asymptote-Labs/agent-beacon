@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1280,6 +1281,49 @@ func TestStateDigestFallsBackToTheLegacyFieldThenTracksPerHome(t *testing.T) {
 	}
 	if legacy.LastSnapshotDigests != nil {
 		t.Fatal("WithDigest must not mutate its receiver")
+	}
+}
+
+// Claude Code keeps per-project servers in ~/.claude.json, and the same server name in several
+// projects with different arguments is ordinary. Those entries share runtime, file and name, so
+// their order must not come from map iteration or the digest moves between identical scans.
+func TestSnapshotDigestStableForSameServerNameAcrossProjects(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".claude.json"), `{"projects":{
+  "/w/a":{"mcpServers":{"fs":{"command":"npx","args":["/w/a"]}}},
+  "/w/b":{"mcpServers":{"fs":{"command":"npx","args":["/w/b"]}}},
+  "/w/c":{"mcpServers":{"fs":{"command":"npx","args":["/w/c"]}}},
+  "/w/d":{"mcpServers":{"fs":{"command":"npx","args":["/w/d"]}}}}}`)
+	seen := map[string]bool{}
+	for i := 0; i < 40; i++ {
+		seen[SnapshotDigest(Scan(Options{HomeDir: home, SkipProjectScope: true, Runtimes: []string{"claude_code"}, Now: fixedNow}))] = true
+	}
+	if len(seen) != 1 {
+		t.Fatalf("%d distinct digests over 40 scans of an unchanged home", len(seen))
+	}
+}
+
+// The digest names what is installed, so listing the same entries in another order is the same
+// snapshot, and changing one entry is a different one.
+func TestSnapshotDigestIgnoresListOrder(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"a":{"command":"npx"},"b":{"command":"uvx"},"c":{"url":"https://c"}}}`)
+	result := Scan(Options{HomeDir: home, SkipProjectScope: true, Runtimes: []string{"claude_code"}, Now: fixedNow})
+	if len(result.MCPServers) < 3 {
+		t.Fatalf("scan found %d servers, want 3", len(result.MCPServers))
+	}
+	want := SnapshotDigest(result)
+	reordered := result
+	reordered.MCPServers = slices.Clone(result.MCPServers)
+	reordered.Configs = slices.Clone(result.Configs)
+	slices.Reverse(reordered.MCPServers)
+	slices.Reverse(reordered.Configs)
+	if got := SnapshotDigest(reordered); got != want {
+		t.Fatalf("reordered lists changed the digest: %s, want %s", got, want)
+	}
+	reordered.MCPServers[0].DefinitionHash += "x"
+	if SnapshotDigest(reordered) == want {
+		t.Fatal("a changed server definition kept the digest")
 	}
 }
 

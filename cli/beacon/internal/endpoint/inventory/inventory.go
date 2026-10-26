@@ -991,6 +991,9 @@ func dedupeServers(servers []MCPServer) []MCPServer {
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Runtime == out[j].Runtime {
 			if out[i].SourcePathHash == out[j].SourcePathHash {
+				if out[i].ServerNameHash == out[j].ServerNameHash {
+					return out[i].DefinitionHash < out[j].DefinitionHash
+				}
 				return out[i].ServerNameHash < out[j].ServerNameHash
 			}
 			return out[i].SourcePathHash < out[j].SourcePathHash
