@@ -51,8 +51,8 @@ func TestContextWindowDoesNotConfuseAdjacentClaudeVersions(t *testing.T) {
 	}
 }
 
-// Copilot reports Claude models with a dotted version. They have the window of the dashed id,
-// not the 200K "claude" fallback.
+// Copilot and OpenRouter report Claude models with a dotted version, and Bedrock with a route
+// around the id. They have the window of the dashed id, not the 200K "claude" fallback or none.
 func TestContextWindowMatchesDottedClaudeVersions(t *testing.T) {
 	for _, tc := range []struct {
 		model string
@@ -62,6 +62,10 @@ func TestContextWindowMatchesDottedClaudeVersions(t *testing.T) {
 		{"claude-opus-4.7", 1000000},
 		{"claude-haiku-4.5", 200000},
 		{"gpt-4.1", 1047576},
+		{"openrouter/anthropic/claude-opus-4.6", 1000000},
+		{"us.anthropic.claude-sonnet-4-6-v1:0", 1000000},
+		{"global.anthropic.claude-haiku-4-5-20251001-v1:0", 200000},
+		{"gpt-4-1106-preview", 8192},
 	} {
 		got, known := ContextWindow(tc.model)
 		if !known || got != tc.want {

@@ -1,6 +1,10 @@
 package tokens
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pricing"
+)
 
 // contextWindows maps normalized model-name prefixes to context window sizes
 // in tokens. Longest prefix wins. The table is a best-effort static snapshot;
@@ -52,19 +56,15 @@ var contextWindows = []struct {
 	{"gemini-3", 1048576},
 }
 
-// ContextWindow returns the context window size for a model name, matching
-// provider-prefixed and date-suffixed variants such as
-// "anthropic/claude-sonnet-4-5" or "gpt-4o-2024-08-06".
+// ContextWindow returns the context window size for a model name, matching provider-prefixed,
+// dotted, Bedrock-routed and date-suffixed variants such as "anthropic/claude-sonnet-4-5",
+// "claude-sonnet-4.6", "us.anthropic.claude-sonnet-4-6-v1:0" or "gpt-4o-2024-08-06".
 func ContextWindow(model string) (int64, bool) {
-	normalized := normalizeModel(model)
-	if normalized == "" {
-		return 0, false
-	}
 	best := int64(0)
 	bestLen := -1
-	// Copilot writes claude-sonnet-4.6 for Anthropic's claude-sonnet-4-6. The dotted spelling is
-	// tried as well rather than instead, because the table keeps dotted ids of its own (gpt-4.1).
-	for _, spelling := range []string{normalized, foldVersionDots(normalized)} {
+	// Every spelling is tried, not only the most reduced, because the table keeps dotted ids of
+	// its own (gpt-4.1) that folding would turn into ids no vendor uses.
+	for _, spelling := range pricing.Spellings(model) {
 		for _, entry := range contextWindows {
 			if strings.HasPrefix(spelling, entry.prefix) && len(entry.prefix) > bestLen {
 				best = entry.tokens
@@ -73,23 +73,4 @@ func ContextWindow(model string) (int64, bool) {
 		}
 	}
 	return best, bestLen >= 0
-}
-
-// foldVersionDots rewrites a dot between two digits as a dash.
-func foldVersionDots(s string) string {
-	b := []byte(s)
-	for i := 1; i+1 < len(b); i++ {
-		if b[i] == '.' && b[i-1] >= '0' && b[i-1] <= '9' && b[i+1] >= '0' && b[i+1] <= '9' {
-			b[i] = '-'
-		}
-	}
-	return string(b)
-}
-
-func normalizeModel(model string) string {
-	normalized := strings.ToLower(strings.TrimSpace(model))
-	if idx := strings.LastIndex(normalized, "/"); idx >= 0 {
-		normalized = normalized[idx+1:]
-	}
-	return normalized
 }
