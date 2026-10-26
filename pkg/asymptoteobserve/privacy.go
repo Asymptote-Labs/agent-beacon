@@ -101,9 +101,11 @@ const redactUnquoted = `(?:[^"'` + "`" + `,\s\\]|\\[^"'` + "`" + `])[^"'` + "`" 
 // structure around it.
 const redactBare = `[^"'` + "`" + `\\\s,{}\[\]][^"'` + "`" + `\\\s,{}\[\]]*`
 
-// redactFlag is a command-line flag named for a secret and its separator: `--password `,
-// `--token=`, `-api-key `.
-const redactFlag = `(?:^|\s)--?[a-z0-9-]*(?:password|passwd|passphrase|token|secret|api-?key|access-?key)(?:=|\s+)`
+// redactFlagName is a command-line flag named for a secret: `--password`, `--token`, `-api-key`.
+const redactFlagName = `--?[a-z0-9-]*(?:password|passwd|passphrase|token|secret|api-?key|access-?key)`
+
+// redactFlag is a redactFlagName and its separator: `--password `, `--token=`, `-api-key `.
+const redactFlag = `(?:^|\s)` + redactFlagName + `(?:=|\s+)`
 
 // redactionRule is one redaction. ${1} and ${3}, when the pattern has them, are kept around the
 // value.
@@ -231,10 +233,41 @@ var redactFlagNeedles = func() *redactNeedles {
 	return set
 }()
 
+// redactListedFlagNeedles gate the rule for a flag and its value written as two quoted items of a
+// list: the flag's name is opened by a quote and a dash, and closed by a quote, a comma and the
+// quote opening the value.
+var redactListedFlagNeedles = func() *redactNeedles {
+	set := newRedactNeedles(true, redactFlagWords...)
+	set.followedBy = func(rest string) bool {
+		if rest == "" || (rest[0] != '"' && rest[0] != '\'') {
+			return false
+		}
+		rest = strings.TrimLeft(rest[1:], regexpSpace)
+		if !strings.HasPrefix(rest, ",") {
+			return false
+		}
+		rest = strings.TrimLeft(rest[1:], regexpSpace)
+		return rest != "" && (rest[0] == '"' || rest[0] == '\'')
+	}
+	set.precededBy = func(before string) bool {
+		start, ok := flagStart(before)
+		return ok && start > 0 && (before[start-1] == '"' || before[start-1] == '\'')
+	}
+	return set
+}()
+
 // startsFlag reports whether the text before a flag word ends in what redactFlag puts ahead of it:
-// `(?:^|\s)--?[a-z0-9-]*`. That run of letters, digits and dashes can only begin where the
-// maximal one does, because the character before it must be whitespace, which the run excludes.
+// `(?:^|\s)--?[a-z0-9-]*`.
 func startsFlag(before string) bool {
+	start, ok := flagStart(before)
+	return ok && (start == 0 || strings.ContainsRune(regexpSpace, rune(before[start-1])))
+}
+
+// flagStart finds the dash that opens the flag the text before a flag word ends in: the start of
+// the run of letters, digits and dashes at its end. A pattern's `--?[a-z0-9-]*` can only begin
+// where that maximal run does, because what it requires before the dash (whitespace, a quote) is
+// not part of the run.
+func flagStart(before string) (int, bool) {
 	start := len(before)
 	for start > 0 {
 		c := before[start-1]
@@ -244,9 +277,9 @@ func startsFlag(before string) bool {
 		start--
 	}
 	if start == len(before) || before[start] != '-' {
-		return false
+		return 0, false
 	}
-	return start == 0 || strings.ContainsRune(regexpSpace, rune(before[start-1]))
+	return start, true
 }
 
 // redactQuotes are the quote characters redactSeparator and quotedValues know.
@@ -331,8 +364,8 @@ var redactionRules = concatRules([]redactionRule{
 	// keeps its public `eyJ` prefix, as the shape rules below keep theirs, so `Bearer eyJ[REDACTED]`
 	// still says a token was there where `Bearer [REDACTED]` may only have been the word "token" or
 	// a `$VARIABLE`.
-	foldedRule(`(?i)(authorization["']?\s*[:=]\s*["']?(?:bearer|basic|token|digest)\s+(?-i:eyJ)?)([^"'\s,]+)()`, "${1}"+redactedValue, nil, "authorization"),
-	foldedRule(`(?i)(\bbearer\s+(?-i:eyJ)?)(?P<value>[a-z0-9._~+/=-]+)`, "${1}"+redactedValue, isRedactedJWTPrefix, "bearer"),
+	foldedRule(`(?i)(authorization["']?\s*[:=]\s*["']?(?:bearer|basic|token|digest)[ \t]+(?-i:eyJ)?)([^"'\s,]+)()`, "${1}"+redactedValue, nil, "authorization"),
+	foldedRule(`(?i)(\bbearer[ \t]+(?-i:eyJ)?)(?P<value>[a-z0-9._~+/=-]+)`, "${1}"+redactedValue, isRedactedJWTPrefix, "bearer"),
 	// A labeled assignment in prose, shell, env files, YAML, TOML or JSON: `token=x`,
 	// `export GITHUB_TOKEN="x"`, `{"api_key": "x"}`. The closing quote of a quoted label is allowed
 	// between the label and the separator. A quoted value runs to its closing quote; the unquoted
@@ -354,6 +387,12 @@ var redactionRules = concatRules([]redactionRule{
 	// usually write arguments: `--password "x y"`, `--token='x'`.
 }, quotedRules(quotedFlag, nil), []redactionRule{
 	{pattern: lazyPattern(`(?i)(` + redactFlag + `)([^\s"'-][^\s"']*)`), replacement: "${1}" + redactedValue, needles: redactFlagNeedles},
+	// A flag and its value as two quoted items of an argument list, the way an MCP server's args
+	// are written in JSON, TOML and YAML: `"args": ["--api-key", "x"]`.
+	{
+		pattern:     lazyPattern(`(?i)(["']` + redactFlagName + `["']\s*,\s*["'])(?P<value>(?:[^"'\n\\]|\\[^\n])+)`),
+		replacement: "${1}" + redactedValue, keep: isRedactedValue, needles: redactListedFlagNeedles,
+	},
 	// curl's basic-auth credentials: `-u user:pass`, `-uuser:pass`, `--user user:pass` and
 	// `--proxy-user user:pass`. The user name and the colon stay. A bare `-u user` (curl prompts for
 	// the password) has nothing to redact, and the rule is limited to curl lines so `docker run -u
@@ -519,11 +558,58 @@ func replaceAssigned(value string, assigned map[string]struct{}) string {
 	return strings.NewReplacer(pairs...).Replace(value)
 }
 
-// IsSecretKeyName reports whether a structured field's name says its value is a credential, the
-// rule SanitizeMap applies, for callers that walk structured values of their own.
+// IsSecretKeyName reports whether a structured field's name has a word naming a credential, for
+// callers that judge a field by its name alone. IsSecretField judges a value held under it.
 func IsSecretKeyName(key string) bool {
-	return isSecretKeyName(key)
+	secret, _ := secretKeyName(key)
+	return secret
 }
+
+// IsSecretField reports whether a value is a credential by the name of the field holding it, the
+// rule SanitizeMap applies, for callers that walk structured values of their own. A value that
+// only names an auth scheme (`token_type: bearer`) is none, and nor is a number under a name whose
+// only credential word is "tokens", which is how a count of model tokens is named
+// (`max_tokens: 4096`, `input_tokens: "1200"`), where `GITHUB_TOKENS: abc` is a credential.
+func IsSecretField(key string, value interface{}) bool {
+	secret, onlyTokens := secretKeyName(key)
+	if !secret || onlyTokens && isNumber(value) {
+		return false
+	}
+	text, ok := value.(string)
+	return !ok || !isAuthScheme(text)
+}
+
+// isNumber reports whether a value is a number, or a string that only spells one.
+func isNumber(value interface{}) bool {
+	switch typed := value.(type) {
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, json.Number:
+		return true
+	case string:
+		digits, point := 0, false
+		for i := range len(typed) {
+			switch c := typed[i]; {
+			case c >= '0' && c <= '9':
+				digits++
+			case c == '.' && !point:
+				point = true
+			case c == '-' && i == 0:
+			default:
+				return false
+			}
+		}
+		return digits > 0
+	}
+	return false
+}
+
+// IsSecretFlag reports whether an argument is a flag named for a secret written on its own, so the
+// next argument is its value: `--api-key`, `--token`, `-password`. SanitizeSlice redacts that next
+// argument, for callers that walk argument lists of their own.
+func IsSecretFlag(arg string) bool {
+	return strings.HasPrefix(arg, "-") && redactSecretFlagPattern().MatchString(arg)
+}
+
+var redactSecretFlagPattern = lazyPattern(`(?i)^` + redactFlagName + `$`)
 
 // redactGate answers whether text holds any of a set of needles, lower-casing it and searching for
 // each set at most once per version of the text.
@@ -589,26 +675,69 @@ func (g *redactGate) holds(set *redactNeedles) bool {
 	return false
 }
 
-// isSecretKeyName reports whether a structured field's name says its value is a credential:
-// `password`, `api_key`, `apiKey`, `X-Api-Key`, `GITHUB_TOKEN`, `AWS_SECRET_ACCESS_KEY`,
-// `client_secret`, `Cookie`. The name must end in the marker, so `input_tokens`, `token_type`,
-// `author` and `PWD` are not secrets.
-func isSecretKeyName(key string) bool {
-	var normalized strings.Builder
-	for _, r := range strings.ToLower(key) {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			normalized.WriteRune(r)
+// secretKeyName reports whether a structured field's name says its value is a credential, and
+// whether the only word that says so is "tokens". The name is split into words at punctuation and
+// at camelCase, and a word naming a credential marks it wherever it stands: `GITHUB_TOKEN`,
+// `apiKey`, `X-Api-Key`, `X_AUTH`, `SECRET_KEY_BASE`, `DB_PASS`, `client_secret`, `Cookie`. A
+// name that runs one into the words before it (`PGPASSWORD`, `githubtoken`) is marked by how it
+// ends. `author`, `keyboard` and `PWD` are not secrets.
+func secretKeyName(key string) (secret, onlyTokens bool) {
+	var name strings.Builder
+	name.Grow(len(key))
+	start := 0
+	// endWord reports whether the word that ends here names a credential other than "tokens", and
+	// starts the next one.
+	endWord := func() bool {
+		word := name.String()[start:]
+		start = name.Len()
+		if word == "tokens" {
+			onlyTokens = true
+			return false
+		}
+		return slices.Contains(redactKeyWords, word)
+	}
+	for i := range len(key) {
+		c := key[i]
+		switch {
+		case c >= 'a' && c <= 'z' || c >= '0' && c <= '9':
+			name.WriteByte(c)
+		case c >= 'A' && c <= 'Z':
+			// A capital starts a word after a lower-case letter or a digit (`apiKey`), and after
+			// other capitals when a lower-case letter follows it (`APIKey`).
+			if i > 0 && (isLowerOrDigit(key[i-1]) || isUpper(key[i-1]) && i+1 < len(key) && key[i+1] >= 'a' && key[i+1] <= 'z') && endWord() {
+				return true, false
+			}
+			name.WriteByte(c + 'a' - 'A')
+		default:
+			if endWord() {
+				return true, false
+			}
 		}
 	}
-	name := normalized.String()
+	if endWord() {
+		return true, false
+	}
+	whole := name.String()
 	for _, suffix := range redactKeySuffixes {
-		if strings.HasSuffix(name, suffix) {
-			return true
+		if strings.HasSuffix(whole, suffix) {
+			return true, false
 		}
 	}
-	return false
+	return onlyTokens, onlyTokens
 }
 
+func isLowerOrDigit(c byte) bool { return c >= 'a' && c <= 'z' || c >= '0' && c <= '9' }
+
+func isUpper(c byte) bool { return c >= 'A' && c <= 'Z' }
+
+// redactKeyWords are the words of a field name that make it a credential's, with "tokens", which
+// secretKeyName reports apart. "pwd" is not one: PWD is the working directory.
+var redactKeyWords = []string{
+	"password", "passwords", "passwd", "pass", "passphrase", "secret", "secrets", "token", "key", "keys", "apikey",
+	"accesskey", "secretkey", "privatekey", "auth", "authorization", "credential", "credentials", "cookie",
+}
+
+// redactKeySuffixes mark a field name that runs a credential's word into the words before it.
 var redactKeySuffixes = []string{
 	"password", "passwd", "passphrase", "secret", "token", "apikey", "accesskey", "secretkey",
 	"privatekey", "authorization", "credential", "credentials", "cookie",
@@ -675,7 +804,7 @@ func SanitizeMap(input map[string]interface{}, opts PrivacyOptions) map[string]i
 		case string:
 			// A value whose field is named for a credential is one, whatever it looks like:
 			// `{"password": "hunter2"}` has no shape a pattern could recognize.
-			if opts.RedactSecrets && typed != "" && isSecretKeyName(key) {
+			if opts.RedactSecrets && typed != "" && IsSecretField(key, typed) {
 				out[key] = redactedValue
 				continue
 			}
@@ -685,7 +814,7 @@ func SanitizeMap(input map[string]interface{}, opts PrivacyOptions) map[string]i
 		case []interface{}:
 			// A multi-valued header (`{"Cookie": ["sid=1"]}`, OTel's http.request.header.*) is as
 			// much a credential as a single value.
-			if opts.RedactSecrets && isSecretKeyName(key) {
+			if opts.RedactSecrets && IsSecretKeyName(key) {
 				out[key] = redactAllStrings(typed, opts)
 				continue
 			}
@@ -729,6 +858,11 @@ func SanitizeSlice(input []interface{}, opts PrivacyOptions) []interface{} {
 	for index, value := range input {
 		switch typed := value.(type) {
 		case string:
+			// A flag named for a secret has its value in the next item: `["--api-key", "x"]`.
+			if opts.RedactSecrets && typed != "" && index > 0 && followsSecretFlag(input[index-1]) {
+				out[index] = redactedValue
+				continue
+			}
 			out[index] = CleanString(typed, limit, opts.RedactSecrets)
 		case map[string]interface{}:
 			out[index] = SanitizeMap(typed, opts)
@@ -739,6 +873,11 @@ func SanitizeSlice(input []interface{}, opts PrivacyOptions) []interface{} {
 		}
 	}
 	return out
+}
+
+func followsSecretFlag(previous interface{}) bool {
+	flag, ok := previous.(string)
+	return ok && IsSecretFlag(flag)
 }
 
 func SanitizeEvent(event Event, maxBytes int) Event {

@@ -21,6 +21,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/hermessession"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 const (
@@ -1022,7 +1023,7 @@ func valuesForEnvKeys(keys []string, redaction string) []string {
 }
 
 func safeEnvKey(key string) bool {
-	return !containsSecretMarker(key)
+	return !asymptoteobserve.IsSecretKeyName(key)
 }
 
 func mapKeys(raw interface{}) []string {
@@ -1222,7 +1223,7 @@ func localEndpointText(text string) bool {
 // command name, a timestamp, or a whole config file's bytes. A secret value must not be hashed
 // here -- a digest over one short, low-entropy secret is a lookup table away from the secret
 // itself -- so route anything that may hold a secret through redactStructured first, the way
-// serverFromDefinition does. Secret-looking keys are stripped by containsSecretMarker.
+// serverFromDefinition does. Secret-looking keys are stripped by asymptoteobserve.IsSecretKeyName.
 
 func hashString(value string) string {
 	if value == "" {

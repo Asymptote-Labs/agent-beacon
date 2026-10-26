@@ -41,7 +41,7 @@ func TestRedactGateNeverChangesAResult(t *testing.T) {
 		"export GITHUB_TOKEN=ghp_0123456789abcdefghijklmnopqrstuvwxyz",
 		"curl -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijk'",
 		"mysql --password hunter2 -u root", "postgres://user:pw@host/db", "input_tokens: 812",
-		"ſecret=abcdefgh12345678", "KEY=abcdefgh12345678", "toKen\\\"=\"abc\"",
+		"ſecret=abcdefgh12345678", "KEY=abcdefgh12345678", "toKen\\\"=\"abc\"", `["--api-key", "abcdefgh12345678"]`,
 		"-----BEGIN RSA PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END RSA PRIVATE KEY-----",
 	}
 	r := rand.New(rand.NewSource(1))

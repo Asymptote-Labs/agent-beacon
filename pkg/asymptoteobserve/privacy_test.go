@@ -120,6 +120,8 @@ func TestRedactStringRedactsCommonCredentialFormats(t *testing.T) {
 		{"bare url password without a user", "redis-cli -u redis://:pa55w0rd@localhost:6379 ping", "pa55w0rd"},
 		{"password flag", "mysql --user root --password hunter2hunter2", "hunter2hunter2"},
 		{"token flag", "tool login --token=opaque-flag-value", "opaque-flag-value"},
+		{"api key flag as a list item", `"args": ["-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-abcdef0123456789"]`, "ctx7sk-abcdef0123456789"},
+		{"token flag as a toml list item", `args = ['--token', 'opaque-flag-value']`, "opaque-flag-value"},
 		{"curl basic auth", "curl -u admin:hunter2hunter2 https://api.example.com/v1", "hunter2hunter2"},
 		{"curl basic auth in a flag cluster", "curl -fsSu admin:hunter2hunter2 https://api.example.com", "hunter2hunter2"},
 		{"curl long user flag", "curl --user admin:hunter2hunter2 https://api.example.com", "hunter2hunter2"},
@@ -196,6 +198,8 @@ func TestRedactStringKeepsLabelsAndOrdinaryText(t *testing.T) {
 		"The cookie: chocolate chip recipe is great",
 		"curl -b cookies.txt https://example.com",
 		`curl --user-agent "Mozilla/5.0 (X11: Linux)" https://example.com`,
+		`"args": ["--max-tokens", "4096", "--author", "Ada"]`,
+		"token_type: bearer\nexpires_in: 3600",
 	}
 	for _, input := range kept {
 		if got := RedactString(input); got != input {
@@ -250,7 +254,11 @@ func TestSanitizeMapRedactsValuesUnderSecretKeys(t *testing.T) {
 			"password": "hunter2",
 			"apiKey":   "plain",
 			"headers":  map[string]interface{}{"X-Api-Key": "abc", "Cookie": "sid=1", "Accept": "application/json"},
-			"env":      map[string]interface{}{"GITHUB_TOKEN": "v1", "AWS_SECRET_ACCESS_KEY": "v2", "PWD": "/home/ada"},
+			"env": map[string]interface{}{
+				"GITHUB_TOKEN": "v1", "AWS_SECRET_ACCESS_KEY": "v2", "SECRET_KEY_BASE": "v3", "OPENAI_KEY": "v4",
+				"X_AUTH": "v5", "PGPASSWORD": "v6", "SSH_KEYS": "v7", "GITHUB_TOKENS": "v8", "DB_PASS": "v9",
+				"PWD": "/home/ada", "AUTHOR_NAME": "Ada Lovelace", "KEYBOARD": "dvorak", "MAX_TOKENS": "1200",
+			},
 		},
 		"usage":      map[string]interface{}{"input_tokens": float64(12)},
 		"token_type": "Bearer",
@@ -262,15 +270,21 @@ func TestSanitizeMapRedactsValuesUnderSecretKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, secret := range []string{"hunter2", `"plain"`, `"abc"`, "sid=1", `"v1"`, `"v2"`} {
+	for _, secret := range []string{"hunter2", `"plain"`, `"abc"`, "sid=1", `"v1"`, `"v2"`, `"v3"`, `"v4"`, `"v5"`, `"v6"`, `"v7"`, `"v8"`, `"v9"`} {
 		if strings.Contains(text, secret) {
 			t.Fatalf("SanitizeMap leaked %s: %s", secret, text)
 		}
 	}
-	for _, keep := range []string{"application/json", "/home/ada", `"input_tokens":12`, `"token_type":"Bearer"`, `"author":"Ada"`} {
+	for _, keep := range []string{"application/json", "/home/ada", `"input_tokens":12`, `"token_type":"Bearer"`, `"author":"Ada"`, "Ada Lovelace", "dvorak", `"MAX_TOKENS":"1200"`} {
 		if !strings.Contains(text, keep) {
 			t.Fatalf("SanitizeMap dropped %s: %s", keep, text)
 		}
+	}
+	args := SanitizeMap(map[string]interface{}{
+		"args": []interface{}{"-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-abcdef0123456789", "--max-tokens", "4096"},
+	}, PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
+	if data, _ := json.Marshal(args); string(data) != `{"args":["-y","@upstash/context7-mcp","--api-key","[REDACTED]","--max-tokens","4096"]}` {
+		t.Fatalf("argument list = %s, want only the value after --api-key redacted", data)
 	}
 	headers := SanitizeMap(map[string]interface{}{
 		"Authorization": []interface{}{"Basic dXNlcjpwYXNz"},
