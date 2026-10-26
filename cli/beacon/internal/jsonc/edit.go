@@ -1,4 +1,4 @@
-package mcpconnect
+package jsonc
 
 import (
 	"bytes"
@@ -7,17 +7,17 @@ import (
 	"strings"
 )
 
-// ordered is a JSON object whose keys are written in the order given, so the entry Beacon adds
+// Ordered is a JSON object whose keys are written in the order given, so the entry Beacon adds
 // reads the way the harness's own `mcp add` writes it.
-type ordered []field
+type Ordered []Field
 
-type field struct {
+type Field struct {
 	Key   string
 	Value any
 }
 
-// rawJSON is a value inserted exactly as written, such as an entry's original text.
-type rawJSON string
+// Raw is a value inserted exactly as written, such as an entry's original text.
+type Raw string
 
 // jsonStyle is the formatting an edit copies from the document it goes into.
 type jsonStyle struct {
@@ -56,7 +56,8 @@ func (s jsonStyle) indent(depth int) string {
 	return strings.Repeat(s.unit, depth)
 }
 
-func jsonString(value string) string {
+// Quote renders value as a JSON string, leaving <, > and & unescaped.
+func Quote(value string) string {
 	var buf bytes.Buffer
 	encoder := json.NewEncoder(&buf)
 	encoder.SetEscapeHTML(false)
@@ -68,15 +69,15 @@ func jsonString(value string) string {
 // indentation, or on one line when the surrounding object is written on one line.
 func renderJSON(value any, style jsonStyle, depth int, compact bool, sep string) string {
 	switch v := value.(type) {
-	case rawJSON:
+	case Raw:
 		return string(v)
-	case ordered:
+	case Ordered:
 		if len(v) == 0 {
 			return "{}"
 		}
 		parts := make([]string, len(v))
 		for i, f := range v {
-			parts[i] = jsonString(f.Key) + sep + renderJSON(f.Value, style, depth+1, compact, sep)
+			parts[i] = Quote(f.Key) + sep + renderJSON(f.Value, style, depth+1, compact, sep)
 		}
 		if compact {
 			return "{" + strings.Join(parts, ",") + "}"
@@ -97,7 +98,7 @@ func renderJSON(value any, style jsonStyle, depth int, compact bool, sep string)
 		inner := style.eol + style.indent(depth+1)
 		return "[" + inner + strings.Join(parts, ","+inner) + style.eol + style.indent(depth) + "]"
 	case string:
-		return jsonString(v)
+		return Quote(v)
 	case bool:
 		if v {
 			return "true"
@@ -110,14 +111,30 @@ func renderJSON(value any, style jsonStyle, depth int, compact bool, sep string)
 }
 
 // renderJSONDocument writes a new document holding only value.
-func renderJSONDocument(value ordered, style jsonStyle) string {
+func renderJSONDocument(value Ordered, style jsonStyle) string {
 	return renderJSON(value, style, 0, false, ": ") + style.eol
+}
+
+// NewDocument writes a new document holding only value, indented and line-ended like the text it
+// replaces.
+func NewDocument(value Ordered, like string) string {
+	return renderJSONDocument(value, detectJSONStyle(like))
+}
+
+// Normalize turns a value into what Decode produces for it.
+func Normalize(v any) any {
+	text := renderJSON(v, jsonStyle{unit: "  ", eol: "\n"}, 0, true, ":")
+	decoder := json.NewDecoder(strings.NewReader(text))
+	decoder.UseNumber()
+	var out any
+	_ = decoder.Decode(&out)
+	return out
 }
 
 // nest wraps value in one object per path segment: nest([a b], v) is {"a": {"b": v}}.
 func nest(path []string, value any) any {
 	for i := len(path) - 1; i >= 0; i-- {
-		value = ordered{{Key: path[i], Value: value}}
+		value = Ordered{{Key: path[i], Value: value}}
 	}
 	return value
 }
@@ -150,7 +167,7 @@ func isCompact(text string, n *jsonNode, items []span) bool {
 // keySeparator is the text a document puts between a key and its value (": " or ":").
 func keySeparator(text string, n *jsonNode) string {
 	for _, m := range n.members {
-		between := text[m.keyStart+len(jsonString(m.key)) : m.value.start]
+		between := text[m.keyStart+len(Quote(m.key)) : m.value.start]
 		if strings.TrimSpace(between) == ":" {
 			if strings.HasPrefix(strings.TrimLeft(between, " \t"), ":") && strings.HasSuffix(between, ":") {
 				return ":"
@@ -247,17 +264,34 @@ func lookupObject(root *jsonNode, path []string) (chain []*jsonNode, err error) 
 	return chain, nil
 }
 
-// insertJSONMember returns text with path.key set to value. key must not already exist. Objects
+// CheckPath reports a shape the editors refuse to work around: a segment of path that is not an
+// object or appears more than once, or key appearing more than once in the object at path.
+func CheckPath(text string, path []string, key string) error {
+	root, err := parseJSONC(text)
+	if err != nil || root == nil {
+		return err
+	}
+	chain, err := lookupObject(root, path)
+	if err != nil {
+		return err
+	}
+	if len(chain) == len(path)+1 && chain[len(chain)-1].memberCount(key) > 1 {
+		return &jsonPathError{fmt.Sprintf("%q appears more than once", key)}
+	}
+	return nil
+}
+
+// InsertMember returns text with path.key set to value. key must not already exist. Objects
 // missing from path are created; created reports how many were, so a later removal can take them
 // out again once they are empty.
-func insertJSONMember(text string, path []string, key string, value any) (updated string, created int, err error) {
+func InsertMember(text string, path []string, key string, value any) (updated string, created int, err error) {
 	root, err := parseJSONC(text)
 	if err != nil {
 		return "", 0, err
 	}
 	style := detectJSONStyle(text)
 	if root == nil {
-		doc := nest(path, ordered{{Key: key, Value: value}}).(ordered)
+		doc := nest(path, Ordered{{Key: key, Value: value}}).(Ordered)
 		// Keep a blank file's surrounding whitespace out of it; a blank file becomes the document.
 		return renderJSONDocument(doc, style), len(path), nil
 	}
@@ -273,19 +307,46 @@ func insertJSONMember(text string, path []string, key string, value any) (update
 	insertKey, insertValue := key, value
 	if len(missing) > 0 {
 		insertKey = missing[0]
-		insertValue = nest(missing[1:], ordered{{Key: key, Value: value}})
+		insertValue = nest(missing[1:], Ordered{{Key: key, Value: value}})
 	} else if parent.memberCount(key) > 0 {
 		return "", 0, &jsonPathError{fmt.Sprintf("%q already exists", key)}
 	}
 	items := memberSpans(parent)
 	compact := isCompact(text, parent, items)
 	sep := keySeparator(text, parent)
-	rendered := jsonString(insertKey) + sep + renderJSON(insertValue, style, parent.depth+1, compact, sep)
+	rendered := Quote(insertKey) + sep + renderJSON(insertValue, style, parent.depth+1, compact, sep)
 	return insertItem(text, parent, items, rendered, style), len(missing), nil
 }
 
-// rawMember returns the original text of path.key's value, as JSON with comments stripped.
-func rawMember(text string, path []string, key string) (string, bool) {
+// SetMember returns text with path.key set to value. An existing value is replaced where it
+// stands, keeping the member's position and everything around it; a missing one is added as
+// InsertMember adds it.
+func SetMember(text string, path []string, key string, value any) (string, error) {
+	root, err := parseJSONC(text)
+	if err != nil {
+		return "", err
+	}
+	if root != nil && root.kind == jsonObject {
+		chain, err := lookupObject(root, path)
+		if err != nil {
+			return "", err
+		}
+		if parent := chain[len(chain)-1]; len(chain) == len(path)+1 && parent.memberCount(key) > 0 {
+			if parent.memberCount(key) > 1 {
+				return "", &jsonPathError{fmt.Sprintf("%q appears more than once", key)}
+			}
+			_, old := parent.member(key)
+			compact := isCompact(text, parent, memberSpans(parent))
+			rendered := renderJSON(value, detectJSONStyle(text), old.depth, compact, keySeparator(text, parent))
+			return text[:old.start] + rendered + text[old.end:], nil
+		}
+	}
+	updated, _, err := InsertMember(text, path, key, value)
+	return updated, err
+}
+
+// RawMember returns the original text of path.key's value, as JSON with comments stripped.
+func RawMember(text string, path []string, key string) (string, bool) {
 	root, err := parseJSONC(text)
 	if err != nil || root == nil || root.kind != jsonObject {
 		return "", false
@@ -303,9 +364,9 @@ func rawMember(text string, path []string, key string) (string, bool) {
 	return buf.String(), true
 }
 
-// removeJSONMember returns text without path.key. prune is how many of the innermost path objects
+// RemoveMember returns text without path.key. prune is how many of the innermost path objects
 // Beacon created; each of those is removed too when the removal leaves it empty.
-func removeJSONMember(text string, path []string, key string, prune int) (string, error) {
+func RemoveMember(text string, path []string, key string, prune int) (string, error) {
 	root, err := parseJSONC(text)
 	if err != nil {
 		return "", err
@@ -338,15 +399,15 @@ func removeJSONMember(text string, path []string, key string, prune int) (string
 	return removeItem(text, target, memberSpans(target), index), nil
 }
 
-// appendJSONElement returns text with value appended to the array at path.key, creating the
+// AppendElement returns text with value appended to the array at path.key, creating the
 // array when it is missing. created reports whether it was.
-func appendJSONElement(text string, path []string, key string, value any) (string, bool, error) {
+func AppendElement(text string, path []string, key string, value any) (string, bool, error) {
 	root, err := parseJSONC(text)
 	if err != nil {
 		return "", false, err
 	}
 	if root == nil {
-		updated, _, err := insertJSONMember(text, path, key, []any{value})
+		updated, _, err := InsertMember(text, path, key, []any{value})
 		return updated, true, err
 	}
 	chain, err := lookupObject(root, path)
@@ -354,7 +415,7 @@ func appendJSONElement(text string, path []string, key string, value any) (strin
 		return "", false, err
 	}
 	if len(chain) != len(path)+1 || chain[len(chain)-1].memberCount(key) == 0 {
-		updated, _, err := insertJSONMember(text, path, key, []any{value})
+		updated, _, err := InsertMember(text, path, key, []any{value})
 		return updated, true, err
 	}
 	parent := chain[len(chain)-1]
@@ -372,9 +433,9 @@ func appendJSONElement(text string, path []string, key string, value any) (strin
 	return insertItem(text, arr, items, rendered, style), false, nil
 }
 
-// removeJSONElements returns text without the elements of the array at path.key that match. With
+// RemoveElements returns text without the elements of the array at path.key that match. With
 // prune set, an array left empty is removed as well.
-func removeJSONElements(text string, path []string, key string, match func(any) bool, prune bool) (string, error) {
+func RemoveElements(text string, path []string, key string, match func(any) bool, prune bool) (string, error) {
 	for {
 		root, err := parseJSONC(text)
 		if err != nil {

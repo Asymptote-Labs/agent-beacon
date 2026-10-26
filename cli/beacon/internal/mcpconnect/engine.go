@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"strings"
 	"time"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/jsonc"
 )
 
 // Action is what connect will do, or did, for one target.
@@ -134,19 +136,12 @@ func inspect(t Target, path string) (state, error) {
 		if t.strictJSON && strings.TrimSpace(cf.text) != "" && !json.Valid([]byte(cf.text)) {
 			return st, fmt.Errorf("%s is not plain JSON; %s ignores a config with comments or trailing commas, so Beacon leaves it alone", path, t.DisplayName)
 		}
-		parsed, err := decodeJSONC(cf.text)
+		parsed, err := jsonc.Decode(cf.text)
 		if err != nil {
 			return st, fmt.Errorf("%s is not valid JSON (%v)", path, err)
 		}
-		root, _ := parseJSONC(cf.text)
-		if root != nil {
-			chain, err := lookupObject(root, t.container)
-			if err != nil {
-				return st, fmt.Errorf("%s: %v", path, err)
-			}
-			if len(chain) == len(t.container)+1 && chain[len(chain)-1].memberCount(ServerName) > 1 {
-				return st, fmt.Errorf("%s: %q appears more than once", path, ServerName)
-			}
+		if err := jsonc.CheckPath(cf.text, t.container, ServerName); err != nil {
+			return st, fmt.Errorf("%s: %v", path, err)
 		}
 		container := dig(parsed, t.container)
 		if raw, ok := container[ServerName]; ok {
@@ -160,7 +155,7 @@ func inspect(t Target, path string) (state, error) {
 			for _, input := range inputList(parsed) {
 				if id, _ := input["id"].(string); id == vscodeInputID {
 					st.inputHas = true
-					st.inputOK = reflect.DeepEqual(input, normalizeJSON(vscodeInput()))
+					st.inputOK = reflect.DeepEqual(input, jsonc.Normalize(vscodeInput()))
 				}
 			}
 		}
@@ -194,23 +189,13 @@ func inputList(doc map[string]any) []map[string]any {
 	return out
 }
 
-func vscodeInput() ordered {
-	return ordered{
-		{"type", "promptString"},
-		{"id", vscodeInputID},
-		{"description", "Beacon Cloud MCP token (" + TokenPage + ")"},
-		{"password", true},
+func vscodeInput() jsonc.Ordered {
+	return jsonc.Ordered{
+		{Key: "type", Value: "promptString"},
+		{Key: "id", Value: vscodeInputID},
+		{Key: "description", Value: "Beacon Cloud MCP token (" + TokenPage + ")"},
+		{Key: "password", Value: true},
 	}
-}
-
-// normalizeJSON turns an ordered value into what decodeJSONC produces for it.
-func normalizeJSON(v any) any {
-	text := renderJSON(v, jsonStyle{unit: "  ", eol: "\n"}, 0, true, ":")
-	decoder := json.NewDecoder(strings.NewReader(text))
-	decoder.UseNumber()
-	var out any
-	_ = decoder.Decode(&out)
-	return out
 }
 
 func sameURL(a, b string) bool {
@@ -221,7 +206,7 @@ func sameURL(a, b string) bool {
 // value from the existing entry where the harness switches a server off that way. Turning
 // beacon-managed off in the harness is the person's decision, and re-running connect must not undo
 // it.
-func (t Target) desiredEntry(opts Options, existing map[string]any) ordered {
+func (t Target) desiredEntry(opts Options, existing map[string]any) jsonc.Ordered {
 	entry := t.entry(opts.URL, opts.TokenEnv)
 	enabled, ok := existing["enabled"].(bool)
 	if !t.switchable || !ok {
@@ -233,7 +218,7 @@ func (t Target) desiredEntry(opts Options, existing map[string]any) ordered {
 			return entry
 		}
 	}
-	return append(entry, field{"enabled", enabled})
+	return append(entry, jsonc.Field{Key: "enabled", Value: enabled})
 }
 
 // Plan works out what connect would do for each target without writing anything.
@@ -275,8 +260,8 @@ func planOne(opts Options, m *manifest, t Target) Item {
 	it.ExistingURL = st.url
 	rec, recorded := m.find(t.Name, path)
 	ours := recorded && st.exists && sameURL(st.url, rec.URL)
-	want := normalizeJSON(t.desiredEntry(opts, st.entry))
-	same := st.exists && reflect.DeepEqual(normalizeJSON(st.entry), want)
+	want := jsonc.Normalize(t.desiredEntry(opts, st.entry))
+	same := st.exists && reflect.DeepEqual(jsonc.Normalize(st.entry), want)
 	if opts.TokenEnv != "" && t.vscodeInputs && !st.inputOK && !(recorded && rec.Auth == AuthTokenEnv) {
 		if opts.Force {
 			it.Action, it.Detail = ActionReplace, "an input named "+vscodeInputID+" exists; --force replaces it"
@@ -411,24 +396,24 @@ func editForConnect(t Target, text string, st state, opts Options) (updated stri
 	}
 	updated = text
 	if strings.TrimSpace(updated) == "" && len(t.skeleton) > 0 {
-		updated = renderJSONDocument(t.skeleton, detectJSONStyle(text))
+		updated = jsonc.NewDocument(t.skeleton, text)
 	}
 	if st.exists {
-		if updated, err = removeJSONMember(updated, t.container, ServerName, 0); err != nil {
+		if updated, err = jsonc.RemoveMember(updated, t.container, ServerName, 0); err != nil {
 			return "", 0, false, err
 		}
 	}
-	if updated, created, err = insertJSONMember(updated, t.container, ServerName, entry); err != nil {
+	if updated, created, err = jsonc.InsertMember(updated, t.container, ServerName, entry); err != nil {
 		return "", 0, false, err
 	}
 	if t.vscodeInputs {
 		if st.inputHas {
-			if updated, err = removeJSONElements(updated, nil, "inputs", isBeaconInput, false); err != nil {
+			if updated, err = jsonc.RemoveElements(updated, nil, "inputs", isBeaconInput, false); err != nil {
 				return "", 0, false, err
 			}
 		}
 		if opts.TokenEnv != "" {
-			if updated, createdInputs, err = appendJSONElement(updated, nil, "inputs", vscodeInput()); err != nil {
+			if updated, createdInputs, err = jsonc.AppendElement(updated, nil, "inputs", vscodeInput()); err != nil {
 				return "", 0, false, err
 			}
 		}
@@ -459,15 +444,15 @@ func verifyConnect(t Target, before, after string, opts Options) error {
 	existing, _ := dig(b, t.container)[ServerName].(map[string]any)
 	if strings.TrimSpace(before) == "" && len(t.skeleton) > 0 {
 		for _, f := range t.skeleton {
-			b[f.Key] = normalizeJSON(f.Value)
+			b[f.Key] = jsonc.Normalize(f.Value)
 		}
 	}
-	setPath(b, t.container, ServerName, normalizeJSON(t.desiredEntry(opts, existing)))
+	setPath(b, t.container, ServerName, jsonc.Normalize(t.desiredEntry(opts, existing)))
 	if t.vscodeInputs {
 		dropBeaconInputs(b)
 		if opts.TokenEnv != "" {
 			list, _ := b["inputs"].([]any)
-			b["inputs"] = append(list, normalizeJSON(vscodeInput()))
+			b["inputs"] = append(list, jsonc.Normalize(vscodeInput()))
 		}
 	}
 	if !reflect.DeepEqual(normalizeValue(b), normalizeValue(a)) {
@@ -511,7 +496,7 @@ func dropEmptyTable(doc map[string]any, key string) {
 }
 
 func parseBoth(t Target, before, after string) (map[string]any, map[string]any, error) {
-	parse := decodeJSONC
+	parse := jsonc.Decode
 	if t.format == formatTOML {
 		parse = parseTOML
 	}
@@ -599,7 +584,7 @@ func applyCLI(ctx context.Context, opts Options, it Item, st state, rec Record) 
 	// failed add can put it back rather than leave the harness with no server at all.
 	var removed string
 	if st.exists {
-		removed, _ = rawMember(st.file.text, it.Target.container, ServerName)
+		removed, _ = jsonc.RawMember(st.file.text, it.Target.container, ServerName)
 		if out, err := opts.run(ctx, it.cliPath, "mcp", "remove", ServerName, "--scope", "user"); err != nil {
 			return Record{}, fmt.Errorf("`%s mcp remove` failed: %v: %s", it.Target.cli, err, strings.TrimSpace(string(out)))
 		}
@@ -624,8 +609,8 @@ func applyCLI(ctx context.Context, opts Options, it Item, st state, rec Record) 
 	if err != nil {
 		return fail(err)
 	}
-	want := normalizeJSON(it.Target.entry(opts.URL, opts.TokenEnv))
-	if !after.exists || !reflect.DeepEqual(normalizeJSON(after.entry), want) {
+	want := jsonc.Normalize(it.Target.entry(opts.URL, opts.TokenEnv))
+	if !after.exists || !reflect.DeepEqual(jsonc.Normalize(after.entry), want) {
 		return fail(fmt.Errorf("`%s mcp add` ran, but %s does not hold the expected %s entry", it.Target.cli, it.Path, ServerName))
 	}
 	return rec, nil
@@ -641,7 +626,7 @@ func restoreMember(t Target, path, raw string) error {
 	if st.exists {
 		return fmt.Errorf("%s already holds a %s entry", path, ServerName)
 	}
-	updated, _, err := insertJSONMember(st.file.text, t.container, ServerName, rawJSON(raw))
+	updated, _, err := jsonc.InsertMember(st.file.text, t.container, ServerName, jsonc.Raw(raw))
 	if err != nil {
 		return err
 	}
@@ -793,12 +778,12 @@ func editForDisconnect(t Target, text string, rec Record) (string, error) {
 		}
 		return endTOMLWithNewline(stripped, tomlLineEnding(text)), nil
 	}
-	updated, err := removeJSONMember(text, t.container, ServerName, rec.CreatedParents)
+	updated, err := jsonc.RemoveMember(text, t.container, ServerName, rec.CreatedParents)
 	if err != nil {
 		return "", err
 	}
 	if t.vscodeInputs && rec.Auth == AuthTokenEnv {
-		if updated, err = removeJSONElements(updated, nil, "inputs", isBeaconInput, rec.CreatedInputs); err != nil {
+		if updated, err = jsonc.RemoveElements(updated, nil, "inputs", isBeaconInput, rec.CreatedInputs); err != nil {
 			return "", err
 		}
 	}
@@ -807,7 +792,7 @@ func editForDisconnect(t Target, text string, rec Record) (string, error) {
 
 // onlySkeleton reports whether a config Beacon created holds nothing but what Beacon put there.
 func onlySkeleton(t Target, text string) bool {
-	parse := decodeJSONC
+	parse := jsonc.Decode
 	if t.format == formatTOML {
 		parse = parseTOML
 	}
@@ -816,7 +801,7 @@ func onlySkeleton(t Target, text string) bool {
 		return false
 	}
 	for _, f := range t.skeleton {
-		if reflect.DeepEqual(doc[f.Key], normalizeJSON(f.Value)) {
+		if reflect.DeepEqual(doc[f.Key], jsonc.Normalize(f.Value)) {
 			delete(doc, f.Key)
 		}
 	}

@@ -1,13 +1,14 @@
 package harness
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/jsonc"
 )
 
 const (
@@ -113,9 +114,12 @@ func ConfigureVSCode(opts VSCodeConfigOptions) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	settings := map[string]interface{}{}
+	// settings.json is JSONC that people edit by hand. Each key is set in place so the rest of the
+	// file, comments included, stays exactly as it was.
+	text := ""
 	if data, err := os.ReadFile(path); err == nil {
-		if err := json.Unmarshal(data, &settings); err != nil {
+		text = string(data)
+		if _, err := jsonc.Decode(text); err != nil {
 			return "", fmt.Errorf("VS Code settings JSON is invalid: %w", err)
 		}
 		if err := backup(path, data); err != nil {
@@ -124,19 +128,22 @@ func ConfigureVSCode(opts VSCodeConfigOptions) (string, error) {
 	} else if !os.IsNotExist(err) {
 		return "", err
 	}
-	settings["github.copilot.chat.otel.enabled"] = true
-	settings["github.copilot.chat.otel.exporterType"] = "otlp-http"
-	settings["github.copilot.chat.otel.otlpEndpoint"] = opts.Endpoint
-	settings["github.copilot.chat.otel.captureContent"] = opts.CaptureContent
-	settings["github.copilot.chat.otel.maxAttributeSizeChars"] = 8192
+	beaconSettings := jsonc.Ordered{
+		{Key: "github.copilot.chat.otel.enabled", Value: true},
+		{Key: "github.copilot.chat.otel.exporterType", Value: "otlp-http"},
+		{Key: "github.copilot.chat.otel.otlpEndpoint", Value: opts.Endpoint},
+		{Key: "github.copilot.chat.otel.captureContent", Value: opts.CaptureContent},
+		{Key: "github.copilot.chat.otel.maxAttributeSizeChars", Value: 8192},
+	}
+	for _, f := range beaconSettings {
+		if text, err = jsonc.SetMember(text, nil, f.Key, f.Value); err != nil {
+			return "", fmt.Errorf("cannot update VS Code settings %s: %w", path, err)
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return "", err
 	}
-	data, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	return path, os.WriteFile(path, data, 0600)
+	return path, os.WriteFile(path, []byte(text), 0600)
 }
 
 func VSCodeOTelStatus(path, expectedEndpoint string) (TelemetryStatus, string) {
@@ -150,8 +157,8 @@ func VSCodeOTelStatus(path, expectedEndpoint string) (TelemetryStatus, string) {
 		}
 		return TelemetryMissing, err.Error()
 	}
-	var settings map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
+	settings, err := jsonc.Decode(string(data))
+	if err != nil {
 		return TelemetryMisconfigured, "VS Code settings JSON is invalid"
 	}
 	if vscodeSettingString(settings, "github.copilot.chat.otel.exporterType") == "file" ||
