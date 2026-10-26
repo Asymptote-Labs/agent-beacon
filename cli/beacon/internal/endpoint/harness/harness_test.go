@@ -49,6 +49,9 @@ func TestConfigureClaudeRefusesSettingsItCannotParse(t *testing.T) {
 	if string(data) != original {
 		t.Fatalf("settings.json was changed:\n%s", data)
 	}
+	if backups, _ := filepath.Glob(path + ".beacon.*.bak"); len(backups) != 0 {
+		t.Fatalf("a refused configure left backups: %v", backups)
+	}
 }
 
 func TestConfigureClaudeWritesTelemetryEnvAndBackup(t *testing.T) {

@@ -395,14 +395,9 @@ func ConfigureClaude(opts ConfigureOptions) (string, error) {
 		return "", err
 	}
 	path := filepath.Join(claudesession.ConfigDir(home), "settings.json")
-	settings := map[string]interface{}{}
-	if data, err := os.ReadFile(path); err == nil {
-		if err := json.Unmarshal(data, &settings); err != nil {
-			return "", fmt.Errorf("Claude settings JSON is invalid: %w", err)
-		}
-		if err := backup(path, data); err != nil {
-			return "", err
-		}
+	settings, err := readSettingsForUpdate("Claude", path)
+	if err != nil {
+		return "", err
 	}
 	env, _ := settings["env"].(map[string]interface{})
 	if env == nil {
@@ -584,9 +579,9 @@ func claudeStatus(path string) (TelemetryStatus, string) {
 	if err != nil {
 		return TelemetryMissing, err.Error()
 	}
-	var settings map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return TelemetryMisconfigured, "Claude settings JSON is invalid"
+	settings, err := decodeSettings("Claude", path, data)
+	if err != nil {
+		return TelemetryMisconfigured, err.Error()
 	}
 	env, _ := settings["env"].(map[string]interface{})
 	if env == nil {
@@ -841,6 +836,40 @@ func claudeInlineRawBodies(value interface{}) bool {
 		return true
 	}
 	return false
+}
+
+// decodeSettings parses a harness's JSON settings file. The error names the file so the user
+// knows which one to fix.
+func decodeSettings(product, path string, data []byte) (map[string]interface{}, error) {
+	var settings map[string]interface{}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return nil, fmt.Errorf("%s settings file %s is not valid JSON: %w", product, path, err)
+	}
+	if settings == nil {
+		settings = map[string]interface{}{}
+	}
+	return settings, nil
+}
+
+// readSettingsForUpdate reads a harness's JSON settings file before Beacon rewrites it. A missing
+// file is an empty object. A file that does not parse is refused rather than replaced, because it
+// still holds the user's own settings; a file that does is backed up first.
+func readSettingsForUpdate(product, path string) (map[string]interface{}, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return map[string]interface{}{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	settings, err := decodeSettings(product, path, data)
+	if err != nil {
+		return nil, err
+	}
+	if err := backup(path, data); err != nil {
+		return nil, err
+	}
+	return settings, nil
 }
 
 func backup(path string, data []byte) error {
