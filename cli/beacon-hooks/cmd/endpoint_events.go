@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -888,12 +889,20 @@ func firstNestedString(input map[string]interface{}, key string) string {
 	return normalizeToolString(value)
 }
 
+// normalizeToolString returns a tool argument as text. A value that arrives as a whole JSON string
+// literal ("\"npm test\"") is unwrapped; quotes that belong to the value, as in echo "hi", stay.
 func normalizeToolString(value interface{}) string {
 	str := strings.TrimSpace(fmt.Sprint(value))
 	if str == "" || str == "<nil>" {
 		return ""
 	}
-	return strings.Trim(strings.TrimSpace(str), `"`)
+	if len(str) >= 2 && str[0] == '"' && str[len(str)-1] == '"' {
+		var unquoted string
+		if json.Unmarshal([]byte(str), &unquoted) == nil {
+			return strings.TrimSpace(unquoted)
+		}
+	}
+	return str
 }
 
 // fileOperation classifies what a tool did to the file it named.
