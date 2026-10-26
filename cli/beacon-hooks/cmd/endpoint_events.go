@@ -301,16 +301,8 @@ func toolFieldsWithResponse(toolName string, toolInput, toolResponse map[string]
 	if toolName != "" {
 		fields["tool"] = map[string]interface{}{"name": toolName}
 	}
-	command := firstToolString(toolInput, "command", "cmd", "shell_command", "CommandLine", "commandLine")
-	// DeepSeek Harness runs commands through a persistent terminal as well as through `bash`, and
-	// that tool names its command line `text` rather than `command`, so every key above misses it.
-	// Without this a terminal_send would be classified command.executed -- the dsh taxonomy says so
-	// -- and carry no command, which is invisible to every rule that matches on command.command.
-	// Asked after the shared list for the Kiro reason below: a payload carrying a `command` of its
-	// own has said something more direct.
-	if command == "" && platformFlag == dshPlatform {
-		command = dshTerminalCommand(toolName, toolInput)
-	}
+	// normalizeToolString keeps the quote trimming every hook string field gets.
+	command := normalizeToolString(asymptoteobserve.ToolCommandLine(toolName, toolInput))
 	if command != "" {
 		// OpenHands file editors multiplex operations onto one tool name via a `command` argument
 		// that names the editor operation (view, str_replace, create), not a shell command.

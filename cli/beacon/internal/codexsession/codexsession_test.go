@@ -84,6 +84,20 @@ func TestMapCodexTranscriptProducesEndpointEvents(t *testing.T) {
 	}
 }
 
+// Codex 0.135-0.149 ran commands through shell_command, which names the command line `command`.
+func TestMapCodexShellCommandIsACommand(t *testing.T) {
+	ref := SessionRef{ID: "sess-1", Path: "/tmp/codex.jsonl", Workspace: "/tmp/repo"}
+	mapped := MapSession(ref, decodeFixture(t, []string{
+		sessionMetaLine("sess-1", "/tmp/repo"),
+		`{"timestamp":"2026-09-19T22:00:03.000Z","type":"response_item","payload":{"type":"function_call","name":"shell_command","arguments":"{\"command\":\"git status\",\"workdir\":\"/tmp/repo\"}","call_id":"call_1"}}`,
+		`{"timestamp":"2026-09-19T22:00:04.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"clean"}}`,
+	}), MapOptions{})
+	command := findAction(t, mapped, "command.executed")
+	if command.Command == nil || command.Command.Command != "git status" {
+		t.Fatalf("command = %+v, want git status", command.Command)
+	}
+}
+
 func TestCollectOnceUsesCursor(t *testing.T) {
 	dir := t.TempDir()
 	codexDir := filepath.Join(dir, ".codex")
