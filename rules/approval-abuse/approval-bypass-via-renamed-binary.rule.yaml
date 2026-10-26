@@ -1,5 +1,5 @@
 id: approval-bypass-via-renamed-binary
-version: 1
+version: 2
 title: Denied dangerous command re-invoked via a renamed copy of the binary
 description: >
   An approval for a destructive or high-impact shell command was explicitly denied
@@ -32,7 +32,7 @@ correlation:
     - id: denied
       match: >
         e.event.action == "approval.denied" &&
-        e.command.command.matches("(?i)(\\brm\\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\\b|\\bmkfs\\b|\\bdd\\s+if=|:\\(\\)\\s*\\{\\s*:\\|:|>\\s*/dev/sd|\\b(curl|wget)\\b.*\\|\\s*(ba)?sh\\b|\\bsudo\\s+-s\\b|\\bchmod\\s+-R\\s+777\\b)")
+        e.command.command.matches("(?i)(\\brm\\s+-[a-z]*(r[a-z]*f|f[a-z]*r)[a-z]*\\b|\\bmkfs\\b|\\bdd\\s+if=|:\\(\\)\\s*\\{\\s*:\\|:|>\\s*/dev/sd|\\b(curl|wget)\\b.*\\|\\s*(ba)?sh\\b|\\bsudo\\s+-s\\b|\\bchmod\\s+-R\\s+777\\b)")
     - id: renamed_dangerous
       match: >
         e.event.action == "command.executed" &&
