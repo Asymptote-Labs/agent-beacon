@@ -9,11 +9,6 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ---
 
-## Unreleased
-
-- **Session syncs no longer lose their own events to log rotation** · Every `beacon endpoint <runtime> sync` except Claude Code's and Devin CLI's kept writing past the runtime log's rotation window, so rotation deleted the sync's first events while their cursors moved past them, and the sync still reported success. Every sync now stops before that, exits non-zero, says so, and leaves the rest for the next sync. Each takes `--rotate-bytes`, and `--json` reports `events_retained`, `events_rotated_out` and `retention_limited`. The install backfill reports a runtime that stops this way as limited rather than failed, and names its sync command.
-- **Grok session sync writes the same event under the same id** · Grok's `chat_history.jsonl` records carry no time, so `beacon endpoint grok sync` stamped their events with the time of the sync, and their `event.id`, derived from the event's bytes, changed on every read. A record read again, such as after a sync that stopped at the rotation window, was forwarded as a second event rather than deduplicated. These events are now named by where they were read, so the same record always gets the same id. Their timestamps are still the time of the sync. Events from Grok's `events.jsonl`, which carry real timestamps, are unchanged.
-
 ## October 2026
 
 ### v1.3.46 · October 22, 2026

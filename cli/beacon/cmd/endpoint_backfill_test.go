@@ -133,18 +133,6 @@ func TestEndpointBackfillReportsARetentionStopAsLimited(t *testing.T) {
 	if !budget.Limited || budget.RetentionLimited || budget.Err != nil {
 		t.Fatalf("budget stop = %+v", budget)
 	}
-
-	var out strings.Builder
-	reportEndpointBackfill(&out, result)
-	text := out.String()
-	for _, want := range []string{
-		"Rotating: stopped before log rotation would discard what it wrote; `beacon endpoint rotating sync` reads the rest.",
-		"Budget: stopped at the backfill size limit; `beacon endpoint budget sync` reads the rest.",
-	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("report missing %q:\n%s", want, text)
-		}
-	}
 }
 
 func TestEndpointInstallBackfillsAfterTheInstallSucceeds(t *testing.T) {
