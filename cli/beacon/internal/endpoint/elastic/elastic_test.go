@@ -160,7 +160,11 @@ func TestInputSnippet_DefaultLogPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InputSnippet with empty path returned error: %v", err)
 	}
-	if !strings.Contains(got, DefaultLogPath) {
+	want, err := InputSnippet(DefaultLogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
 		t.Fatalf("InputSnippet with empty logPath should use DefaultLogPath %q, got: %s", DefaultLogPath, got)
 	}
 }

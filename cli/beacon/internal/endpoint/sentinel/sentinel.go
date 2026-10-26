@@ -25,7 +25,7 @@ func Files() []siempack.File {
 		{Name: "README.md", Content: mustRead("pack/README.md")},
 		{Name: "dcr-transform.kql", Content: DCRTransform()},
 		{Name: "table-schema.json", Content: mustRead("pack/table-schema.json")},
-		{Name: "dcr-template.json", Content: renderDCRTemplate("pack/dcr-template.json"), TemplateLogPath: true, JSONEscape: true},
+		{Name: "dcr-template.json", Content: renderDCRTemplate("pack/dcr-template.json"), TemplateLogPath: true},
 		// The Logs Ingestion API path, for hosts without Azure Monitor Agent: Vector sends each line
 		// as RawData to a DCR that runs the same transform, so both paths fill the same table.
 		{Name: "vector.toml", Content: mustRead("pack/vector.toml.tmpl"), TemplateLogPath: true},

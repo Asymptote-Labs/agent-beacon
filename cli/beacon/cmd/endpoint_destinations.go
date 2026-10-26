@@ -104,10 +104,8 @@ var siemDestinations = []siemDestination{
 		name:  "wazuh",
 		short: "Manage Wazuh integration content",
 		printConfig: &destPrintConfig{
-			short: "Print a Wazuh localfile snippet",
-			render: func(cfg endpointconfig.Config) (string, error) {
-				return wazuh.LocalfileSnippet(cfg.LogPath), nil
-			},
+			short:  "Print a Wazuh localfile snippet",
+			render: func(cfg endpointconfig.Config) (string, error) { return wazuh.LocalfileSnippet(cfg.LogPath) },
 		},
 		installPack: &destInstallPack{
 			short:          "Write Wazuh rules and config snippets to a directory",
@@ -121,8 +119,12 @@ var siemDestinations = []siemDestination{
 			message: "Beacon endpoint Wazuh validation event",
 			print: func(cfg endpointconfig.Config) {
 				fmt.Println("Expected Wazuh fields: vendor=beacon product=endpoint-agent event.kind=agent_runtime")
-				fmt.Println("Wazuh localfile snippet:")
-				fmt.Print(wazuh.LocalfileSnippet(cfg.LogPath))
+				if snippet, err := wazuh.LocalfileSnippet(cfg.LogPath); err != nil {
+					fmt.Println(err)
+				} else {
+					fmt.Println("Wazuh localfile snippet:")
+					fmt.Print(snippet)
+				}
 				fmt.Println("Expected base rule: 100500")
 			},
 		},
