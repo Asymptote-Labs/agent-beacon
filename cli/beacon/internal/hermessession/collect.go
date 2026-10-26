@@ -54,7 +54,10 @@ type State struct {
 }
 
 type CollectOptions struct {
-	DBPath    string
+	DBPath string
+	// StatePath is this home's cursor file. The session home file beside it (SessionHomesPath) is
+	// shared by every home whose cursor sits in the same directory, and decides which of them keys a
+	// session's event ids by home. Without a StatePath no ids are keyed.
 	StatePath string
 	Write     bool
 	LogPath   string
@@ -219,6 +222,9 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	state, err := LoadStateSeeded(opts.StatePath, opts.LegacyStatePath)
 	if err != nil {
 		return summary, err
+	}
+	if err := assignEventIDHomes(SessionHomesPath(opts.StatePath), canonicalHome(filepath.Dir(store.Path())), sessions, state); err != nil {
+		return summary, fmt.Errorf("assign Hermes event id homes: %w", err)
 	}
 	defer func() {
 		if saveErr := state.Save(opts.StatePath); saveErr != nil && err == nil {

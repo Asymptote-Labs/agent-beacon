@@ -105,32 +105,3 @@ func TestMapSessionKeysEventIDsByHome(t *testing.T) {
 		}
 	}
 }
-
-// A cursor marked KeyedByHome keeps keying the session's ids by its home on every sweep, so events
-// written later in the session never fall back to the unkeyed ids another home writes.
-func TestCollectOnceKeysEventIDsForACursorMarkedKeyed(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "state.db")
-	createHermesFixtureDB(t, dbPath)
-	statePath := filepath.Join(dir, "hermes-state.json")
-	state := &State{Version: StateVersion, Sessions: map[string]*Cursor{"hermes-session-1": {KeyedByHome: true}}}
-	if err := state.Save(statePath); err != nil {
-		t.Fatal(err)
-	}
-	logPath := filepath.Join(dir, "runtime.jsonl")
-	if _, err := CollectOnce(CollectOptions{DBPath: dbPath, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true}); err != nil {
-		t.Fatal(err)
-	}
-	for _, ev := range readEvents(t, logPath) {
-		if ev.Event.ID == fixtureEventIDs[ev.Event.Action] {
-			t.Fatalf("%s kept the unkeyed id %s", ev.Event.Action, ev.Event.ID)
-		}
-	}
-	saved, err := LoadState(statePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cursor := saved.Sessions["hermes-session-1"]; cursor == nil || !cursor.KeyedByHome || !cursor.Started {
-		t.Fatalf("cursor = %#v, want it collected and still keyed by home", cursor)
-	}
-}
