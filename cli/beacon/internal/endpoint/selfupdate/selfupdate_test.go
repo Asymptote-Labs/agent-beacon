@@ -115,29 +115,8 @@ func TestResolveManifestURLPrecedence(t *testing.T) {
 	}
 }
 
+// Linux manifests publish linux_<arch>_deb and linux_<arch>_rpm, never a bare linux_<arch>.
 func TestCheck(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"schema":1,"version":"9.9.9","artifacts":{` +
-			`"` + updatecheck.RuntimeArchKey() + `":{"url":"https://x/p` + packageExt("") + `","sha256":"deadbeef"}}}`))
-	}))
-	defer srv.Close()
-	t.Setenv(updatecheck.ManifestURLEnv, srv.URL)
-
-	res, err := Check(context.Background(), "0.0.1")
-	if err != nil {
-		t.Fatalf("Check: %v", err)
-	}
-	if !res.UpdateAvailable {
-		t.Fatalf("expected update available: %+v", res)
-	}
-	if !res.HasArtifact || res.Artifact.URL != "https://x/p"+packageExt("") {
-		t.Fatalf("artifact not resolved for running arch: %+v", res)
-	}
-}
-
-// Linux manifests publish linux_<arch>_deb and linux_<arch>_rpm, never a bare linux_<arch>. The
-// check has to find the same artifact apply installs, or it reports no package for the host.
-func TestCheckFindsFormatQualifiedLinuxArtifact(t *testing.T) {
 	key := updatecheck.RuntimeArchKey()
 	if runtime.GOOS == "linux" {
 		key += "_" + strings.TrimPrefix(linuxPackageExt(), ".")
@@ -152,6 +131,9 @@ func TestCheckFindsFormatQualifiedLinuxArtifact(t *testing.T) {
 	res, err := Check(context.Background(), "0.0.1")
 	if err != nil {
 		t.Fatalf("Check: %v", err)
+	}
+	if !res.UpdateAvailable {
+		t.Fatalf("expected update available: %+v", res)
 	}
 	if !res.HasArtifact || res.Artifact.URL != url || res.ArchKey != key {
 		t.Fatalf("manifest artifact %s not resolved: %+v", key, res)
