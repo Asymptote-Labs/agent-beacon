@@ -1,0 +1,180 @@
+id: package-install-from-untrusted-source
+version: 1
+title: Package installed from a URL, git ref or non-default index
+description: >
+  A package manager installs code from somewhere other than its default public
+  registry: pip/pipx/uv/poetry from a git+ or https URL, a non-default --index-url,
+  or with --extra-index-url or --trusted-host (the dependency-confusion shape);
+  npm/pnpm/yarn/bun from a tarball URL, git URL or github: shorthand, or with a
+  non-default --registry; cargo install --git; gem install --source. Install scripts
+  run with the agent's permissions, and these sources skip the registry's name
+  ownership, so an injected instruction that names one is a direct supply-chain path
+  onto the machine. A private index the organization runs will also fire; that is
+  reviewable, not noise.
+severity: medium
+status: stable
+posture: detect
+taxonomy:
+  beacon_category: risky-command
+  owasp_llm: LLM03
+  mitre_atlas: AML.T0011
+
+match: >
+  e.event.action == "command.executed" && (
+    (
+      e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(([^\\s;&|]*/)?(pip[0-9.]*|pipx|uv\\s+pip|uv\\s+tool|python[0-9.]*\\s+-m\\s+pip)\\s+install|uv\\s+add|poetry\\s+add)\\b") && (
+        e.command.command.matches("(?i)\\s['\\\"]?(git\\+|[\\w.\\[\\],-]+\\s*@\\s*(git\\+)?(https?|ssh|git|file)://|(https?|ssh|git)://[^\\s'\\\"]*\\.(whl|tar\\.gz|tgz|tar\\.bz2|zip|git)(#[^\\s'\\\"]*)?['\\\"]?(\\s|$))") ||
+        e.command.command.matches("(?i)\\s(--extra-index-url|--trusted-host)(\\s|=)") ||
+        (e.command.command.matches("(?i)\\s(-i|--index-url|--index)(\\s+|=)['\\\"]?https?://") && !e.command.command.matches("(?i)\\s(-i|--index-url|--index)(\\s+|=)['\\\"]?https://pypi\\.org/simple/?['\\\"]?(\\s|$)"))
+      )
+    ) || (
+      e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(npm\\s+(install|i|add|ci)|pnpm\\s+(add|install|i)|yarn\\s+(global\\s+)?add|bun\\s+(add|install|i))\\b") && (
+        e.command.command.matches("(?i)\\s['\\\"]?(@?[\\w./-]+@)?(git\\+|github:|gitlab:|bitbucket:|gist:|git://|ssh://|https?://[^\\s'\\\"]*\\.(tgz|tar\\.gz|git)(#[^\\s'\\\"]*)?['\\\"]?(\\s|$))") ||
+        (e.command.command.matches("(?i)\\s--registry(\\s+|=)['\\\"]?https?://") && !e.command.command.matches("(?i)\\s--registry(\\s+|=)['\\\"]?https://registry\\.(npmjs\\.org|yarnpkg\\.com)/?['\\\"]?(\\s|$)"))
+      )
+    ) ||
+    e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(cargo\\s+install\\s+([^;&|\\n]*\\s)?--git\\b|gem\\s+install\\s+([^;&|\\n]*\\s)?(--source|--clear-sources)\\b)")
+  )
+
+emit:
+  reason: "Package installed from a URL, git ref or non-default index/registry \u2014 install-time code from outside the default registry"
+
+tests:
+  - name: pip_git_url
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pip install git+https://github.com/someone/helper.git" }
+        session: { id: s1 }
+  - name: pip_name_at_url
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pip install 'helper @ https://files.example.test/helper-1.0.tar.gz'" }
+        session: { id: s1 }
+  - name: pip_custom_index
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pip3 install --index-url https://pypi.example.test/simple requests" }
+        session: { id: s1 }
+  - name: pip_extra_index_dependency_confusion
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python3 -m pip install --extra-index-url https://pkgs.example.test/simple internal-utils" }
+        session: { id: s1 }
+  - name: pip_trusted_host
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pip install --trusted-host pkgs.example.test -i http://pkgs.example.test/simple x" }
+        session: { id: s1 }
+  - name: uv_pip_url
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "uv pip install https://example.test/wheels/x-1.0-py3-none-any.whl" }
+        session: { id: s1 }
+  - name: npm_tarball_url
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "npm i https://example.test/pkg/helper-1.0.0.tgz" }
+        session: { id: s1 }
+  - name: npm_github_shorthand
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "npm install github:someone/helper" }
+        session: { id: s1 }
+  - name: pnpm_git_url
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pnpm add git+ssh://git@github.com/someone/helper.git" }
+        session: { id: s1 }
+  - name: yarn_custom_registry
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "yarn add helper --registry https://npm.example.test" }
+        session: { id: s1 }
+  - name: cargo_git
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cargo install --git https://github.com/someone/tool" }
+        session: { id: s1 }
+  - name: gem_source
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gem install helper --source https://gems.example.test" }
+        session: { id: s1 }
+  - name: pip_from_pypi
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pip install requests==2.32.3" }
+        session: { id: s1 }
+  - name: pip_requirements
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pip install -r requirements.txt" }
+        session: { id: s1 }
+  - name: pip_editable_local
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pip install -e ." }
+        session: { id: s1 }
+  - name: pip_default_index_explicit
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pip install -i https://pypi.org/simple requests" }
+        session: { id: s1 }
+  - name: npm_registry_package
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "npm install express@4" }
+        session: { id: s1 }
+  - name: npm_scoped_package
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "npm i @types/node --save-dev" }
+        session: { id: s1 }
+  - name: npm_default_registry_explicit
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "npm install lodash --registry=https://registry.npmjs.org/" }
+        session: { id: s1 }
+  - name: npm_default_registry_space
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "npm install lodash --registry https://registry.npmjs.org" }
+        session: { id: s1 }
+  - name: pip_find_links_local_wheelhouse
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pip install --no-index -f ./wheels app" }
+        session: { id: s1 }
+  - name: cargo_crates_io
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cargo install ripgrep" }
+        session: { id: s1 }
+  - name: git_clone_not_install
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clone https://github.com/someone/helper.git" }
+        session: { id: s1 }
