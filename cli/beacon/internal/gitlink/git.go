@@ -18,6 +18,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // Git runs git against one repository. Dir is any directory inside the work tree.
@@ -188,7 +190,12 @@ func (r Repo) RelPath(path, base string) (string, bool) {
 	if path == "" {
 		return "", false
 	}
-	path = strings.TrimPrefix(path, "file://")
+	if strings.HasPrefix(path, "file:") {
+		if path = asymptoteobserve.FilePathFromURI(path); path == "" {
+			return "", false
+		}
+		path = filepath.FromSlash(path)
+	}
 	if !filepath.IsAbs(path) {
 		if base == "" || !filepath.IsAbs(base) {
 			return "", false

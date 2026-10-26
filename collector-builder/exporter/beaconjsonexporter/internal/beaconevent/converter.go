@@ -1213,7 +1213,7 @@ func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 	path := FirstString(attrs, "file.path", "file_path", "code.filepath")
 	operation := FirstString(attrs, "file.operation", "operation")
 	if path == "" {
-		path = FilePathFromURI(FirstString(attrs, "mcp.resource.uri"))
+		path = asymptoteobserve.FilePathFromURI(FirstString(attrs, "mcp.resource.uri"))
 		if path != "" && operation == "" && event.Event.Action == "file.read" {
 			operation = "read"
 		}
@@ -2233,18 +2233,7 @@ func IsMeaningfulValue(value interface{}) bool {
 }
 
 func IsFileURI(value string) bool {
-	return FilePathFromURI(value) != ""
-}
-
-func FilePathFromURI(value string) string {
-	parsed, err := url.Parse(value)
-	if err != nil || parsed.Scheme != "file" {
-		return ""
-	}
-	if parsed.Host != "" && parsed.Host != "localhost" {
-		return "//" + parsed.Host + parsed.Path
-	}
-	return parsed.Path
+	return asymptoteobserve.FilePathFromURI(value) != ""
 }
 
 func HasPromptLikeContent(attrs map[string]interface{}) bool {
