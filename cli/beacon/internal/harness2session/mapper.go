@@ -265,6 +265,18 @@ func num(m map[string]interface{}, key string) (int64, bool) {
 	}
 }
 
+// exitCode reads a process exit status. Both executors report it as a 32-bit integer (Codex's
+// Option<i32>, OpenCode's process exit code); anything outside that range is not one, and is left
+// out rather than wrapped into a plausible-looking value.
+func exitCode(m map[string]interface{}, key string) *int {
+	code, ok := num(m, key)
+	if !ok || code < math.MinInt32 || code > math.MaxInt32 {
+		return nil
+	}
+	exit := int(code)
+	return &exit
+}
+
 func positive(m map[string]interface{}, key string) int64 {
 	if value, ok := num(m, key); ok && value > 0 {
 		return value

@@ -84,10 +84,7 @@ func (m *mapper) emitCodexCommand(line Line, id string, item map[string]interfac
 	ev.Tool = &schema.ToolInfo{Name: "shell", Command: command}
 	output := str(item, "aggregated_output")
 	info := &schema.CommandInfo{Command: command, Output: output}
-	if code, ok := num(item, "exit_code"); ok {
-		exit := int(code)
-		info.ExitCode = &exit
-	}
+	info.ExitCode = exitCode(item, "exit_code")
 	ev.Command = info
 	var result interface{}
 	if output != "" {

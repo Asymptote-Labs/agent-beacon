@@ -73,10 +73,7 @@ func (m *mapper) emitOpenCodeTool(line Line, ts int64, part map[string]interface
 	switch category {
 	case "command":
 		info := &schema.CommandInfo{Command: ev.Tool.Command, Output: output}
-		if code, ok := num(object(state, "metadata"), "exit"); ok {
-			exit := int(code)
-			info.ExitCode = &exit
-		}
+		info.ExitCode = exitCode(object(state, "metadata"), "exit")
 		if output != "" {
 			ev.Content = asymptoteobserve.RetainedContent(output, asymptoteobserve.DefaultStringLimit)
 		}

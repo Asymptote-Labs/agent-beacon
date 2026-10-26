@@ -300,3 +300,17 @@ func mustJSON(t *testing.T, v interface{}) string {
 func timeMS(ms int64) time.Time { return time.UnixMilli(ms) }
 
 func itoa64(n int64) string { return strconv.FormatInt(n, 10) }
+
+// An exit status out of 32-bit range is not one, and must not be wrapped into a plausible value.
+func TestExitCodeRefusesOutOfRangeValues(t *testing.T) {
+	for raw, want := range map[string]string{`{"c":0}`: "0", `{"c":-1}`: "-1", `{"c":137}`: "137", `{"c":2147483647}`: "2147483647",
+		`{"c":4294967297}`: "nil", `{"c":-2147483649}`: "nil", `{"c":1.5}`: "nil", `{"c":null}`: "nil", `{"c":"12"}`: "12", `{}`: "nil"} {
+		got := "nil"
+		if code := exitCode(obj(t, raw), "c"); code != nil {
+			got = strconv.Itoa(*code)
+		}
+		if got != want {
+			t.Errorf("exitCode(%s) = %s, want %s", raw, got, want)
+		}
+	}
+}
