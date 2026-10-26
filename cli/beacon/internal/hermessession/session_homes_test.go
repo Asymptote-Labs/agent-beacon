@@ -141,3 +141,46 @@ func TestCollectOnceKeysTheSecondHomeToSyncASession(t *testing.T) {
 		t.Fatal("want only the home synced second keyed")
 	}
 }
+
+// Homes that both collected a session before the session home file existed have already written
+// it under the unkeyed ids, and share refresh matches on them. They keep those ids for the rest of
+// the session rather than rename what is already uploaded.
+func TestCollectOnceKeepsUnkeyedIDsOfSessionsCollectedBeforeHomesWereRecorded(t *testing.T) {
+	root, profile := clonedHermesHomes(t)
+	syncHermesHome(t, root)
+	syncHermesHome(t, profile)
+	// Undo what this change recorded, leaving both cursors as a sync before it would have.
+	if err := os.Remove(SessionHomesPath(DefaultStatePath(root))); err != nil {
+		t.Fatal(err)
+	}
+	state, err := LoadState(DefaultStatePath(profile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Sessions["hermes-session-1"].KeyedByHome = false
+	if err := state.Save(DefaultStatePath(profile)); err != nil {
+		t.Fatal(err)
+	}
+
+	addHermesPrompt(t, profile, "rewrite the readme")
+	addHermesPrompt(t, root, "deploy to staging")
+	syncHermesHome(t, profile)
+	syncHermesHome(t, root)
+
+	rootEvents, profileEvents := readEvents(t, homeLog(root)), readEvents(t, homeLog(profile))
+	rootPrompt, profilePrompt := rootEvents[len(rootEvents)-1], profileEvents[len(profileEvents)-1]
+	if rootPrompt.Event.Action != "prompt.submitted" || rootPrompt.Event.ID != profilePrompt.Event.ID {
+		t.Fatalf("new prompts = %s %s / %s %s, want both under the unkeyed id they always had",
+			rootPrompt.Event.Action, rootPrompt.Event.ID, profilePrompt.Event.Action, profilePrompt.Event.ID)
+	}
+	if loadCursor(t, profile).KeyedByHome || loadCursor(t, root).KeyedByHome {
+		t.Fatal("a cursor that already wrote unkeyed ids became keyed")
+	}
+	homes, err := sessionHomesFile.Load(SessionHomesPath(DefaultStatePath(root)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner := homes.Sessions["hermes-session-1"]; owner != canonicalHome(profile) {
+		t.Fatalf("session claimed by %q, want the first home to sync it after the upgrade, %q", owner, canonicalHome(profile))
+	}
+}
