@@ -60,7 +60,7 @@ func init() {
 	for _, c := range []*cobra.Command{endpointHermesSyncCmd, endpointHermesStatusCmd} {
 		f := c.Flags()
 		f.StringVar(&endpointHermesOpts.dbPath, "db", "", "Hermes state database (default $HERMES_HOME/state.db when set, otherwise the native Hermes data root)")
-		f.StringVar(&endpointHermesOpts.statePath, "state", "", "Collector cursor file (default ~/.beacon/endpoint/state/hermes.json for the native Hermes root, hermes-<profile>-<id>.json for any other home)")
+		f.StringVar(&endpointHermesOpts.statePath, "state", "", "Collector cursor file (default ~/.beacon/endpoint/state/hermes.json for the native Hermes root, hermes-<profile>-<id>.json for any other home); hermes-session-homes.json beside it records which home keeps each session's original event ids")
 		f.BoolVar(&endpointOpts.jsonOutput, "json", false, "Print the result as JSON")
 		f.BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		f.BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths")
