@@ -2316,11 +2316,31 @@ function clearFields(loadAfter = true) {
   if (loadAfter) load({ updateLocation: true }).catch(console.error);
 }
 
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+// truncateMiddle shortens value to maxLength visible characters, keeping both ends. It cuts between
+// graphemes, so an emoji, flag or accented letter at the cut stays whole. It reads only the
+// characters it keeps, so a long prompt costs no more than a short one.
 function truncateMiddle(value, maxLength) {
   value = String(value || "");
+  // Every grapheme is at least one UTF-16 unit, so a string this short has nothing to cut.
   if (value.length <= maxLength) return value;
-  const keep = Math.floor((maxLength - 3) / 2);
-  return `${value.slice(0, keep)}...${value.slice(value.length - keep)}`;
+  const segments = graphemes.segment(value);
+  const head = [];
+  for (const { segment } of segments) {
+    if (head.length === maxLength) {
+      const keep = Math.floor((maxLength - 3) / 2);
+      const tail = [];
+      for (let end = value.length; tail.length < keep; ) {
+        const last = segments.containing(end - 1);
+        tail.push(last.segment);
+        end = last.index;
+      }
+      return `${head.slice(0, keep).join("")}...${tail.reverse().join("")}`;
+    }
+    head.push(segment);
+  }
+  return value;
 }
 
 function escapeHTML(value) {
