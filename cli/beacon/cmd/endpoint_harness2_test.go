@@ -44,9 +44,9 @@ func newHarness2CommandFixture(t *testing.T) harness2CommandFixture {
 		logPath:   filepath.Join(root, "logs", "runtime.jsonl"),
 	}
 	for rel, body := range map[string]string{
-		"lab/results/cx/run-1/codex_session.jsonl":                          harness2CodexStream,
+		"lab/results/cx/run-1/codex_session.jsonl":                         harness2CodexStream,
 		"jb/dataset/p/task1/model_traj/base/p_task1_base_attempt1_x.jsonl": harness2OpenCodeStream,
-		"jb/judged/scores.jsonl":                                            `{"task":"p/task1","score":1}` + "\n",
+		"jb/judged/scores.jsonl":                                           `{"task":"p/task1","score":1}` + "\n",
 	} {
 		path := filepath.Join(f.runsDir, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -208,5 +208,24 @@ func TestHarness2StatePathAlwaysResolvesSomewhereDurable(t *testing.T) {
 	}
 	if got := resolveHarness2StatePath("", false); filepath.Base(got) != "harness2-state.json" {
 		t.Fatalf("system default = %q", got)
+	}
+}
+
+// A broken runs directory is reported beside the rollouts the others hold, not instead of them.
+func TestEndpointHarness2StatusReportsABrokenRootBesideTheRest(t *testing.T) {
+	f := newHarness2CommandFixture(t)
+	bad := filepath.Join(t.TempDir(), "gone")
+	if err := os.WriteFile(bad, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	endpointHarness2Opts.runsDirs = []string{bad, f.runsDir}
+	endpointOpts.jsonOutput = true
+	out := runHarness2(t, endpointHarness2StatusCmd, runEndpointHarness2Status)
+	var report harness2StatusReport
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("status JSON %q: %v", out, err)
+	}
+	if len(report.Rollouts) != 2 || len(report.Errors) != 1 || !strings.Contains(report.Errors[0], "not a directory") {
+		t.Fatalf("report = %+v", report)
 	}
 }

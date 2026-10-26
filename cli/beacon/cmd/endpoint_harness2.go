@@ -206,6 +206,8 @@ type harness2StatusReport struct {
 	Present   bool                    `json:"present"`
 	StatePath string                  `json:"state_path,omitempty"`
 	Rollouts  []harness2RolloutStatus `json:"rollouts"`
+	// Errors names each runs directory that could not be read.
+	Errors []string `json:"errors,omitempty"`
 }
 
 func runEndpointHarness2Status(cmd *cobra.Command, args []string) error {
@@ -219,10 +221,9 @@ func runEndpointHarness2Status(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	store := &harness2session.Store{Roots: roots}
-	refs, err := store.List()
-	if err != nil {
-		return err
-	}
+	// A root that cannot be read is reported beside the rollouts the others hold, as a sync reports
+	// it, rather than hiding them.
+	refs, listErr := store.List()
 	report := harness2StatusReport{
 		Roots:     roots,
 		Present:   store.Exists(),
@@ -252,10 +253,16 @@ func runEndpointHarness2Status(cmd *cobra.Command, args []string) error {
 		report.Rollouts = append(report.Rollouts, status)
 	}
 
+	if listErr != nil {
+		report.Errors = strings.Split(listErr.Error(), "\n")
+	}
 	if endpointOpts.jsonOutput {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(report)
 	}
 	out := cmd.OutOrStdout()
+	for _, msg := range report.Errors {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", msg)
+	}
 	if !report.Present {
 		fmt.Fprintf(out, "Harness² rollouts: none (no runs directory at %s); name one with --runs-dir\n", strings.Join(report.Roots, ", "))
 		return nil
