@@ -324,7 +324,7 @@ func opencodeToolFields(input map[string]interface{}, completed bool) map[string
 			}
 		}
 		if action, _ := opencodeToolAction(input); action == "command.executed" {
-			command := firstToolString(toolInput, "command", "cmd")
+			command := normalizeToolString(asymptoteobserve.ToolCommandLine(toolName, toolInput))
 			commandFields := map[string]interface{}{"command": command}
 			if output, ok := toolResponse["output"]; ok {
 				commandFields["output"] = output

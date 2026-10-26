@@ -884,6 +884,24 @@ func TestCodexToolResultExtractsShellCommand(t *testing.T) {
 	}
 }
 
+func TestCodexToolResultExtractsShellCommandArgument(t *testing.T) {
+	for _, tc := range []struct{ tool, args, want string }{
+		{"shell", `{"command":["bash","-lc","git status"],"workdir":"/tmp"}`, "bash -lc git status"},
+		{"shell_command", `{"command":"git status","workdir":"/tmp"}`, "git status"},
+	} {
+		event := newBeaconEvent("tool.invoked", "tool", "info", "codex_cli", time.Now())
+		normalizeCodexToolResult(&event, map[string]interface{}{"tool": tc.tool, "arguments": tc.args})
+		if event.Event.Action != "command.executed" || event.Command == nil || event.Command.Command != tc.want {
+			t.Errorf("%s: action %q command %#v, want command.executed %q", tc.tool, event.Event.Action, event.Command, tc.want)
+		}
+	}
+	event := newBeaconEvent("tool.invoked", "tool", "info", "codex_cli", time.Now())
+	normalizeCodexToolResult(&event, map[string]interface{}{"tool": "deploy__run", "arguments": `{"command":"status"}`})
+	if event.Event.Action != "tool.invoked" || event.Command != nil {
+		t.Fatalf("non-shell tool with a command argument = %q %#v, want tool.invoked", event.Event.Action, event.Command)
+	}
+}
+
 func TestConsumeLogsMapsGeminiPrompt(t *testing.T) {
 	exp, path := newTestExporter(t)
 

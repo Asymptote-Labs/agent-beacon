@@ -246,7 +246,7 @@ func (m *mapper) emitToolInvoked(record Record, block int, call toolCall) {
 	ev := m.base(record, action, category, schema.SeverityInfo, schema.FidelityObserved, "Claude Code tool invocation observed")
 	ev.Tool = &schema.ToolInfo{Name: call.Name}
 	ev.GenAI = mergeGenAI(ev.GenAI, &schema.GenAIInfo{Tool: &schema.GenAIToolInfo{Name: call.Name, Call: &schema.GenAIToolCallInfo{ID: call.ID, Arguments: call.Input}}})
-	if command := commandFromTool(call); command != "" {
+	if command := asymptoteobserve.ToolCommandLine(call.Name, call.Input); command != "" {
 		ev.Tool.Command = command
 	}
 	if path := pathFromTool(call); path != "" {
@@ -269,10 +269,11 @@ func (m *mapper) emitToolResult(record Record, block int, result map[string]inte
 	content := toolResultText(result["content"])
 	isError, _ := result["is_error"].(bool)
 	switch {
-	case isCommandTool(call):
+	case asymptoteobserve.IsShellCommandTool(call.Name):
+		command := asymptoteobserve.ToolCommandLine(call.Name, call.Input)
 		ev := m.base(record, "command.executed", "command", severityForError(isError), schema.FidelityObserved, "Claude Code command completed")
-		ev.Command = &schema.CommandInfo{Command: commandFromTool(call), Output: content}
-		ev.Tool = &schema.ToolInfo{Name: call.Name, Command: commandFromTool(call)}
+		ev.Command = &schema.CommandInfo{Command: command, Output: content}
+		ev.Tool = &schema.ToolInfo{Name: call.Name, Command: command}
 		ev.GenAI = toolResultGenAI(call, content)
 		m.append(record, "tool.result."+itoa(block), ev)
 	case isFileTool(call):
@@ -549,15 +550,6 @@ func toolResultText(value interface{}) string {
 	}
 }
 
-func isCommandTool(call toolCall) bool {
-	switch strings.ToLower(call.Name) {
-	case "bash", "shell", "terminal":
-		return true
-	default:
-		return false
-	}
-}
-
 func isFileTool(call toolCall) bool {
 	switch strings.ToLower(call.Name) {
 	case "read", "write", "edit", "multiedit", "notebookread", "notebookedit":
@@ -565,10 +557,6 @@ func isFileTool(call toolCall) bool {
 	default:
 		return false
 	}
-}
-
-func commandFromTool(call toolCall) string {
-	return firstString(call.Input, "command", "cmd", "shell_command")
 }
 
 func pathFromTool(call toolCall) string {

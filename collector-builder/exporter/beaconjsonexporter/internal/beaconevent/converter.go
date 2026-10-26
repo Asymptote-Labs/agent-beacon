@@ -596,24 +596,19 @@ func NormalizeCodexToolResult(event *Event, attrs map[string]interface{}) {
 	event.Message = FirstNonEmpty(toolName, "Codex tool result")
 }
 
+// codexShellCommand is the command line of a Codex shell tool call, or "" for any other tool, so an
+// MCP tool that takes a `command` argument stays a tool call.
 func codexShellCommand(toolName, args string) string {
-	if strings.EqualFold(toolName, "shell") {
-		if cmd := codexArgumentCommand(args); cmd != "" {
-			return cmd
-		}
-		return args
-	}
-	return codexArgumentCommand(args)
-}
-
-func codexArgumentCommand(args string) string {
-	var payload struct {
-		Cmd string `json:"cmd"`
-	}
-	if err := json.Unmarshal([]byte(args), &payload); err != nil {
+	if !asymptoteobserve.IsShellCommandTool(toolName) {
 		return ""
 	}
-	return strings.TrimSpace(payload.Cmd)
+	if cmd := asymptoteobserve.ToolCommandLine(toolName, args); cmd != "" {
+		return cmd
+	}
+	if strings.EqualFold(toolName, "shell") {
+		return args
+	}
+	return ""
 }
 
 func isClaudeOTelLogHarness(name string) bool {

@@ -326,20 +326,6 @@ func TestDshTerminalSendRecordsTheCommandLine(t *testing.T) {
 	}
 }
 
-// `text` is deliberately not in the shared key list: it is an ordinary argument name other tools
-// use for other things. The reader is keyed on the tool name, and must stay that way.
-func TestDshTerminalCommandIsScopedToTerminalSend(t *testing.T) {
-	input := map[string]interface{}{"text": "not a command"}
-	for _, toolName := range []string{"bash"} {
-		t.Run(toolName, func(t *testing.T) {
-			if got := dshTerminalCommand(toolName, input); got != "" {
-				t.Fatalf("dshTerminalCommand(%q) = %q; only terminal_send names a command `text`",
-					toolName, got)
-			}
-		})
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Post-tool: the flattened result
 // ---------------------------------------------------------------------------

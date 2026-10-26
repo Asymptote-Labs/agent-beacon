@@ -385,7 +385,7 @@ func (m *mapper) emitToolResult(record Record, item *ResponseItem) {
 		call.ID = item.CallID
 	}
 	output := toolOutputText(item.Output)
-	if isCommandTool(call) {
+	if asymptoteobserve.IsShellCommandTool(call.Name) {
 		ev := m.base(record, "command.executed", "command", severityForStatus(item.Status), schema.FidelityObserved, "Codex command completed")
 		ev.Command = &schema.CommandInfo{Command: commandFromTool(call), Output: output}
 		ev.Tool = &schema.ToolInfo{Name: call.Name, Command: commandFromTool(call)}
@@ -545,52 +545,13 @@ func commandFromTool(call codexToolCall) string {
 	case string:
 		return strings.TrimSpace(v)
 	case map[string]interface{}:
-		return firstStringOrJoinedArray(v, "command", "cmd", "shell_command")
+		return asymptoteobserve.ToolCommandLine(call.Name, v)
 	default:
 		if call.Input == nil {
 			return ""
 		}
 		data, _ := json.Marshal(call.Input)
 		return string(data)
-	}
-}
-
-func firstStringOrJoinedArray(m map[string]interface{}, keys ...string) string {
-	for _, key := range keys {
-		val, ok := m[key]
-		if !ok {
-			continue
-		}
-		switch v := val.(type) {
-		case string:
-			if v != "" {
-				return v
-			}
-		case []interface{}:
-			if s := joinStringSlice(v); s != "" {
-				return s
-			}
-		}
-	}
-	return ""
-}
-
-func joinStringSlice(arr []interface{}) string {
-	parts := make([]string, 0, len(arr))
-	for _, v := range arr {
-		if s, ok := v.(string); ok {
-			parts = append(parts, s)
-		}
-	}
-	return strings.TrimSpace(strings.Join(parts, " "))
-}
-
-func isCommandTool(call codexToolCall) bool {
-	switch strings.ToLower(call.Name) {
-	case "exec", "exec_command", "shell", "bash":
-		return true
-	default:
-		return false
 	}
 }
 
