@@ -316,6 +316,34 @@ describe("BeaconEndpointPlugin", () => {
     })
   })
 
+  test("records every path a shell rm deletes", async () => {
+    const hooks = await plugin()
+    const command = `rm -f /repo/a.txt "/repo/b c.txt" -- -d.txt 2>/dev/null && echo done`
+    await hooks["tool.execute.after"]!(
+      { tool: "bash", sessionID: "ses_1", callID: "call_rm_many", args: { command } },
+      { title: "rm", output: "done", metadata: { exit: 0 } },
+    )
+    await nextTurn()
+
+    expect(payloads[0].file_mutations).toEqual([
+      { path: "/repo/a.txt", operation: "delete" },
+      { path: "/repo/b c.txt", operation: "delete" },
+      { path: "-d.txt", operation: "delete" },
+    ])
+  })
+
+  test("records no comment, variable or substitution as an rm path", async () => {
+    const hooks = await plugin()
+    const command = `rm /repo/a.txt "$OUT" /repo/*.log ~/x # cleanup b.txt\nrm -rf $(cat list.txt)`
+    await hooks["tool.execute.after"]!(
+      { tool: "bash", sessionID: "ses_1", callID: "call_rm_noise", args: { command } },
+      { title: "rm", output: "", metadata: { exit: 0 } },
+    )
+    await nextTurn()
+
+    expect(payloads[0].file_mutations).toEqual([{ path: "/repo/a.txt", operation: "delete" }])
+  })
+
   test("drains completed assistant parts when the message role arrives later", async () => {
     const hooks = await plugin()
     await hooks.event!({
