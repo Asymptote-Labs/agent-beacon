@@ -6,7 +6,7 @@ test('security review: findings grouped by risk, the combination flagged, eviden
   // The host stays hidden until /api/status finishes local runtime discovery.
   await expect(frame.locator('#root')).toBeVisible({ timeout: 15_000 });
 
-  await expect(frame.locator('#root > p').first()).toHaveText('6 findings across 82 rules evaluated.');
+  await expect(frame.locator('#root > p').first()).toHaveText('6 findings across 87 rules evaluated.');
   await expect(frame.locator('.alert')).toContainText('combines untrusted input, sensitive access and a consequential action');
 
   const rows = frame.locator('tbody tr');
