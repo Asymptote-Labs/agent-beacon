@@ -331,3 +331,32 @@ func TestCollectOnceKeepsCollectingPastABrokenRoot(t *testing.T) {
 		t.Fatal("the good root was not collected")
 	}
 }
+
+// Extra roots are read beside the defaults but never remembered: they belong to another cursor file.
+func TestCollectOnceReadsExtraRootsWithoutRememberingThem(t *testing.T) {
+	env := newSweepEnv(t)
+	userState := filepath.Join(t.TempDir(), "user-harness2.json")
+	if err := (&State{Version: StateVersion, Roots: []string{env.root}, Files: map[string]*Cursor{}}).Save(userState); err != nil {
+		t.Fatal(err)
+	}
+	extra := UserRememberedRoots(userState)
+	if len(extra) != 1 || extra[0] != env.root {
+		t.Fatalf("UserRememberedRoots = %v", extra)
+	}
+	summary := env.sweep(t, func(o *CollectOptions) { o.RunsDirs, o.ExtraRoots = nil, extra })
+	if summary.EventsEmitted != 21 {
+		t.Fatalf("sweep with extra roots = %+v", summary)
+	}
+	state, err := LoadState(env.statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Roots) != 0 {
+		t.Fatalf("extra roots were remembered in this cursor: %v", state.Roots)
+	}
+	for _, bad := range []string{filepath.Join(t.TempDir(), "missing.json"), env.logPath} {
+		if got := UserRememberedRoots(bad); got != nil {
+			t.Fatalf("UserRememberedRoots(%s) = %v, want nothing", bad, got)
+		}
+	}
+}
