@@ -207,7 +207,7 @@ export function initialize(options: InitializeOptions = {}): void {
 
   const provider = new NodeTracerProvider({
     resource: resourceFromAttributes({
-      [ATTR_SERVICE_NAME]: options.serviceName ?? process.env.OTEL_SERVICE_NAME ?? DEFAULT_SERVICE_NAME,
+      [ATTR_SERVICE_NAME]: options.serviceName ?? envValue("OTEL_SERVICE_NAME") ?? DEFAULT_SERVICE_NAME,
       "telemetry.sdk.name": "asymptote-sdk-js",
       "telemetry.sdk.version": SDK_VERSION,
       [ATTR_BEACON_ORIGIN]: "cloud",
@@ -412,9 +412,9 @@ export function isInitialized(): boolean {
 }
 
 export function resolveExporterConfig(options: InitializeOptions = {}): ResolvedExporterConfig {
-  const explicitEndpoint = options.otlpEndpoint ?? process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
-  const apiKey = options.apiKey ?? process.env.ASYMPTOTE_API_KEY;
-  const baseUrl = options.baseUrl ?? process.env.ASYMPTOTE_BASE_URL ?? DEFAULT_HOSTED_BASE_URL;
+  const explicitEndpoint = options.otlpEndpoint ?? envValue("OTEL_EXPORTER_OTLP_ENDPOINT");
+  const apiKey = options.apiKey ?? envValue("ASYMPTOTE_API_KEY");
+  const baseUrl = options.baseUrl ?? envValue("ASYMPTOTE_BASE_URL") ?? DEFAULT_HOSTED_BASE_URL;
   const skipDefault = !!(options.disableDefaultExporter || options.spanExporter);
   const mode: ExportMode = skipDefault ? "custom" : explicitEndpoint ? "otlp" : apiKey ? "hosted" : "custom";
 
@@ -430,6 +430,13 @@ export function resolveExporterConfig(options: InitializeOptions = {}): Resolved
     headers.authorization = `Bearer ${apiKey}`;
   }
   return { observeUrl, headers, mode };
+}
+
+// An empty variable is unset, as the OpenTelemetry environment spec has it: compose files and CI
+// templates often declare a variable with no value.
+function envValue(name: string): string | undefined {
+  const value = process.env[name];
+  return value === undefined || value.trim() === "" ? undefined : value;
 }
 
 // The Asymptote API key is a credential for Asymptote's own ingest, so it is
