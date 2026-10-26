@@ -20,7 +20,7 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(^|[;&|]\\s*)chmod\\s+([^;&|]*\\s)?([ugoa]*\\+[rwxXt]*s|0?[2-7][0-7]{3})\\b") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*)chmod\\s+([^;&|]*\\s)?([ugoa]*\\+[rwxXt]*s\\b|0?[2-7][0-7]{3}(\\s|$))") ||
     e.command.command.matches("(?i)(^|[;&|]\\s*)su\\s+(-l?\\s+|-\\s+)?root\\b") ||
     e.command.command.matches("(?i)(^|[;&|]\\s*)su\\s+-\\s*$") ||
     e.command.command.matches("(?i)(^|[;&|]\\s*)pkexec\\b")
@@ -83,6 +83,12 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "chmod 755 deploy.sh" }
+        session: { id: s1 }
+  - name: chmod_normal_mode_on_numbered_file
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "chmod 644 2024.csv" }
         session: { id: s1 }
   - name: su_to_regular_user
     verdict: no_match
