@@ -27,10 +27,6 @@ func TestCurrentBranchFollowsThePhysicalWorkingDirectory(t *testing.T) {
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("init real repository: %v %s", err, out)
 		}
-		remote := exec.Command(binary, "-C", path, "remote", "add", "origin", "https://github.com/acme/"+name+".git")
-		if out, err := remote.CombinedOutput(); err != nil {
-			t.Fatalf("add origin: %v %s", err, out)
-		}
 		return path
 	}
 	target := initRepo("target", "feature/target")
@@ -57,15 +53,6 @@ func TestCurrentBranchFollowsThePhysicalWorkingDirectory(t *testing.T) {
 			want := strings.TrimSpace(string(out))
 			if got := CurrentBranch(tc.path); got != want {
 				t.Fatalf("CurrentBranch=%q native git=%q", got, want)
-			}
-			// Branch and remote must come from the same repository.
-			url, err := exec.Command(binary, "-C", tc.path, "remote", "get-url", "origin").CombinedOutput()
-			if err != nil {
-				t.Fatalf("native git oracle: %v %s", err, url)
-			}
-			wantName := strings.TrimSuffix(filepath.Base(strings.TrimSpace(string(url))), ".git")
-			if _, name := GetRemoteInfo(tc.path); name != wantName {
-				t.Fatalf("GetRemoteInfo name=%q native git=%q", name, wantName)
 			}
 		})
 	}

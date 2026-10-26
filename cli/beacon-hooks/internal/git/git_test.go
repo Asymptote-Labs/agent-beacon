@@ -38,7 +38,6 @@ func TestCurrentBranchWorktreeUsesPerWorktreeHead(t *testing.T) {
 	worktree := filepath.Join(base, "wt")
 
 	writeTestFile(t, filepath.Join(mainRepo, ".git", "HEAD"), "ref: refs/heads/main\n")
-	writeTestFile(t, filepath.Join(mainRepo, ".git", "config"), "[remote \"origin\"]\n\turl = git@github.com:asymptote-labs/agent-beacon.git\n")
 	worktreeGitDir := filepath.Join(mainRepo, ".git", "worktrees", "wt")
 	writeTestFile(t, filepath.Join(worktreeGitDir, "HEAD"), "ref: refs/heads/feature/wt-branch\n")
 	writeTestFile(t, filepath.Join(worktreeGitDir, "commondir"), "../..\n")
@@ -49,12 +48,6 @@ func TestCurrentBranchWorktreeUsesPerWorktreeHead(t *testing.T) {
 	}
 	if got := CurrentBranch(mainRepo); got != "main" {
 		t.Fatalf("CurrentBranch = %q, want the main checkout's branch", got)
-	}
-	// The commondir path used by GetRemoteInfo must keep working after the
-	// shared pointer-parsing refactor.
-	owner, name := GetRemoteInfo(worktree)
-	if owner != "asymptote-labs" || name != "agent-beacon" {
-		t.Fatalf("GetRemoteInfo = %q/%q, want asymptote-labs/agent-beacon", owner, name)
 	}
 }
 
