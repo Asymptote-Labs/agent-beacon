@@ -110,6 +110,31 @@ func TestEndpointBackfillGivesEachRuntimeAShareAndNamesWhereToContinue(t *testin
 	}
 }
 
+// A collector that stops before rotation would discard its own output has left the rest for its
+// sync, exactly as one that spent its share has: limited, not failed, and named as such.
+func TestEndpointBackfillReportsARetentionStopAsLimited(t *testing.T) {
+	stubBackfill(t, 1<<20, 1<<20,
+		endpointBackfillRunner{Name: "Rotating", Sync: "beacon endpoint rotating sync", Run: func(endpointBackfillRun) (int, error) {
+			return 7, errors.Join(writer.ErrRetentionWindowFull)
+		}},
+		endpointBackfillRunner{Name: "Budget", Sync: "beacon endpoint budget sync", Run: func(endpointBackfillRun) (int, error) {
+			return 3, writer.ErrBudgetSpent
+		}},
+	)
+	result := runEndpointBackfill(filepath.Join(t.TempDir(), "runtime.jsonl"), true)
+	byName := map[string]endpointBackfillRuntimeResult{}
+	for _, r := range result.Runtimes {
+		byName[r.Name] = r
+	}
+	rotating, budget := byName["Rotating"], byName["Budget"]
+	if !result.Limited || !rotating.Limited || !rotating.RetentionLimited || rotating.Err != nil || rotating.Events != 7 {
+		t.Fatalf("retention stop = %+v, result limited %v", rotating, result.Limited)
+	}
+	if !budget.Limited || budget.RetentionLimited || budget.Err != nil {
+		t.Fatalf("budget stop = %+v", budget)
+	}
+}
+
 func TestEndpointInstallBackfillsAfterTheInstallSucceeds(t *testing.T) {
 	recordEndpointLifecycle(t)
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")

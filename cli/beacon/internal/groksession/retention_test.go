@@ -18,9 +18,7 @@ func TestCollectOnceKeepsWhatItWritesAcrossTheRotationWindow(t *testing.T) {
 		writeFixtureSession(t, root, "/tmp/grok project", fmt.Sprintf("session-%03d", i))
 	}
 	opts := CollectOptions{SessionsDir: root, Write: true, UserMode: true}
-	// chat_history.jsonl records carry no time, so their events are stamped when read and their
-	// ids differ between sweeps; compare them without it.
-	sessionsynctest.CheckSweepKeepsItsOutputBy(t, sessionsynctest.IgnoringTimestamp, func(statePath, logPath string, rotateBytes int64) (sessionsynctest.Result, error) {
+	sessionsynctest.CheckSweepKeepsItsOutput(t, func(statePath, logPath string, rotateBytes int64) (sessionsynctest.Result, error) {
 		opts.StatePath, opts.LogPath, opts.RotateBytes = statePath, logPath, rotateBytes
 		s, err := CollectOnce(opts)
 		return sessionsynctest.Result{EventsEmitted: s.EventsEmitted, Errors: s.Errors, Retention: s.Retention}, err
