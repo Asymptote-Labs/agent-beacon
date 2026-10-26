@@ -60,15 +60,3 @@ func TestVerifierRejectsEditsBeyondBeaconsEntry(t *testing.T) {
 		t.Error("a disconnect that dropped an unrelated key was accepted")
 	}
 }
-
-func TestStripTOMLTableHandlesQuotingAndSubtables(t *testing.T) {
-	doc := "a = 1\n\n[mcp_servers.\"beacon-managed\"]\nurl = \"x\"\n\n[mcp_servers.beacon-managed.env]\nK = \"v\"\n\n[mcp_servers.beacon-managed-other]\nurl = \"y\"\n"
-	got, found := stripTOMLTable(doc, "mcp_servers", ServerName)
-	if !found {
-		t.Fatal("not found")
-	}
-	want := "a = 1\n\n[mcp_servers.beacon-managed-other]\nurl = \"y\"\n"
-	if got != want {
-		t.Fatalf("got %q want %q", got, want)
-	}
-}

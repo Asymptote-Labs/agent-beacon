@@ -17,6 +17,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/cowork"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/hermessession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tomledit"
 	"gopkg.in/yaml.v3"
 )
 
@@ -515,45 +516,13 @@ func mergeCodexOTEL(existing, endpoint string) string {
 	return mergeCodexOTELWithPrompt(existing, endpoint, true)
 }
 
+// mergeCodexOTELWithPrompt replaces every [otel] and [otel.*] table with Beacon's, appended at
+// the end of the document.
 func mergeCodexOTELWithPrompt(existing, endpoint string, logUserPrompt bool) string {
-	lines := strings.Split(existing, "\n")
-	var out []string
-	inOTEL := false
-	wroteOTEL := false
-	for _, line := range lines {
-		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "[") && strings.HasSuffix(trim, "]") {
-			isOTELHeader := codexOTELHeader(trim)
-			if inOTEL && !isOTELHeader && !wroteOTEL {
-				out = append(out, codexOTELBlock(endpoint, logUserPrompt)...)
-				wroteOTEL = true
-			}
-			inOTEL = isOTELHeader
-			if !inOTEL {
-				out = append(out, line)
-			}
-			continue
-		}
-		if inOTEL {
-			continue
-		}
-		out = append(out, line)
-	}
-	if inOTEL && !wroteOTEL {
-		out = append(out, codexOTELBlock(endpoint, logUserPrompt)...)
-		wroteOTEL = true
-	}
-	if !wroteOTEL {
-		if strings.TrimSpace(existing) != "" {
-			out = append(out, "")
-		}
-		out = append(out, codexOTELBlock(endpoint, logUserPrompt)...)
-	}
-	return strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
-}
-
-func codexOTELHeader(header string) bool {
-	return header == "[otel]" || strings.HasPrefix(header, "[otel.")
+	eol := tomledit.LineEnding(existing, "\n")
+	stripped, _ := tomledit.RemoveTable(existing, "otel")
+	block := strings.Join(codexOTELBlock(endpoint, logUserPrompt), eol) + eol
+	return tomledit.Append(stripped, block, eol)
 }
 
 func codexOTELBlock(endpoint string, logUserPrompt bool) []string {
