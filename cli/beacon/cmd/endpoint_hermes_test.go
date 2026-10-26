@@ -180,3 +180,26 @@ func TestHermesStatusReportsSessionsKeyedByHome(t *testing.T) {
 		t.Fatalf("status text = %q, want only the cloned session marked keyed", text)
 	}
 }
+
+// Which home keeps a session's unkeyed event ids is decided by the session home file beside the
+// cursor files. Every home a default sweep can read must therefore resolve to one such file per
+// mode, or a cloned profile would never see the claim of the home it came from.
+func TestHermesHomesShareOneSessionHomeFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HERMES_HOME", "")
+	others := []string{
+		filepath.Join(home, ".hermes", "profiles", "work", "state.db"),
+		filepath.Join(home, "custom-hermes", "state.db"),
+		filepath.Join(home, "custom-hermes", "profiles", "work", "state.db"),
+	}
+	for _, userMode := range []bool{true, false} {
+		want := hermessession.SessionHomesPath(resolveHermesStatePath("", "", userMode))
+		for _, db := range others {
+			if got := hermessession.SessionHomesPath(resolveHermesStatePath("", db, userMode)); got != want {
+				t.Errorf("user mode %v: %s uses session home file %q, want %q", userMode, db, got, want)
+			}
+		}
+	}
+}
