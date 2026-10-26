@@ -184,3 +184,14 @@ func TestCollectOnceKeepsUnkeyedIDsOfSessionsCollectedBeforeHomesWereRecorded(t 
 		t.Fatalf("session claimed by %q, want the first home to sync it after the upgrade, %q", owner, canonicalHome(profile))
 	}
 }
+
+// A dry run reads no cursor and claims nothing, so it neither keys ids nor leaves a file behind.
+func TestCollectOncePrintClaimsNothing(t *testing.T) {
+	root, _ := clonedHermesHomes(t)
+	if _, err := CollectOnce(CollectOptions{DBPath: filepath.Join(root, "state.db"), Print: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(SessionHomesPath(DefaultStatePath(root))); !os.IsNotExist(err) {
+		t.Fatalf("a dry run wrote the session home file: %v", err)
+	}
+}
