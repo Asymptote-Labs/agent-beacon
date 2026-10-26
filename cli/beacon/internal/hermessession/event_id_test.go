@@ -105,3 +105,28 @@ func TestMapSessionKeysEventIDsByHome(t *testing.T) {
 		}
 	}
 }
+
+// A session only one home holds is the common case: syncing it writes the ids MapSession has
+// always derived and claims the session for that home.
+func TestCollectOnceKeepsEventIDsOfASessionOnlyOneHomeHolds(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "state.db")
+	createHermesFixtureDB(t, dbPath)
+	statePath := filepath.Join(dir, "state", "hermes.json")
+	logPath := filepath.Join(dir, "runtime.jsonl")
+	if _, err := CollectOnce(CollectOptions{DBPath: dbPath, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true}); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, ev := range readEvents(t, logPath) {
+		got[ev.Event.Action] = ev.Event.ID
+	}
+	assertFixtureEventIDs(t, got)
+	homes, err := sessionHomesFile.Load(SessionHomesPath(statePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner := homes.Sessions["hermes-session-1"]; owner != canonicalHome(dir) {
+		t.Fatalf("session claimed by %q, want %q", owner, canonicalHome(dir))
+	}
+}
