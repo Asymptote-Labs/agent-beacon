@@ -228,11 +228,11 @@ still start there instead of reporting it cancelled. Check that terminal before 
 
 A new terminal starts from its own environment rather than the calling process's. Beacon carries
 the variables that locate a runtime's configuration and sessions (`CLAUDE_CONFIG_DIR`,
-`CLINE_DIR`, `CODEX_HOME`, `COPILOT_HOME`, `CURSOR_CONFIG_DIR`, `DSH_HOME`, `GEMINI_CLI_HOME`,
-`HERMES_HOME`, `KIMI_CODE_HOME`, `KIRO_HOME`, `OH_PERSISTENCE_DIR`, `OMO_CODING_AGENT_DIR`,
-`OPENCLAW_STATE_DIR`, `PI_CODING_AGENT_DIR`, `PI_CONFIG_DIR`, `PRIME_AGENT_CODING_AGENT_DIR`,
-`SENPI_CODING_AGENT_DIR` and `XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`XDG_STATE_HOME`) into the
-specification. It never writes other variables there, so credentials such as API keys must be
+`CLINE_DIR`, `CODEX_HOME`, `COPILOT_HOME`, `CURSOR_CONFIG_DIR`, `GEMINI_CLI_HOME`,
+`HERMES_DATA_DIR_SUFFIX`, `HERMES_HOME`, `KIRO_HOME`, `OH_PERSISTENCE_DIR`, `OMP_PROFILE`,
+`OPENCLAW_STATE_DIR`, `OPENCODE_DB`, `PI_CODING_AGENT_DIR`, `PI_CONFIG_DIR`, `PI_PROFILE`,
+`PRIME_AGENT_CODING_AGENT_DIR`, `QWEN_HOME` and `XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`XDG_STATE_HOME`)
+into the specification. It never writes other variables there, so credentials such as API keys must be
 available in the new terminal's own environment, for example from your shell profile.
 
 The runtime starts in the session's recorded directory. If that directory no longer exists, Beacon

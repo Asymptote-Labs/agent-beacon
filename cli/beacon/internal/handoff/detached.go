@@ -24,6 +24,9 @@ const (
 	LaunchModeTmux        = "tmux"
 
 	launchSpecVersion = 1
+	// launchSpecLifetime is how long a launch specification stays valid. A caller waits seconds for
+	// its status, so a status file older than this has no caller left to read it.
+	launchSpecLifetime = 5 * time.Minute
 )
 
 // DetachedOptions controls how LaunchDetached opens the terminal surface. The exported hooks keep
@@ -63,26 +66,28 @@ type launchSpec struct {
 	CarriedEnv map[string]string `json:"carried_env,omitempty"`
 }
 
-// carriedEnvNames are the variables that locate a runtime's configuration and session store. They
-// hold paths, never credentials, so they may be written to the launch specification.
+// carriedEnvNames are the variables that locate the configuration and session store of a runtime
+// handoff launches. They hold paths or profile names, never credentials, so they may be written
+// to the launch specification.
 var carriedEnvNames = []string{
 	"CLAUDE_CONFIG_DIR",
 	"CLINE_DIR",
 	"CODEX_HOME",
 	"COPILOT_HOME",
 	"CURSOR_CONFIG_DIR",
-	"DSH_HOME",
 	"GEMINI_CLI_HOME",
+	"HERMES_DATA_DIR_SUFFIX",
 	"HERMES_HOME",
-	"KIMI_CODE_HOME",
 	"KIRO_HOME",
 	"OH_PERSISTENCE_DIR",
-	"OMO_CODING_AGENT_DIR",
+	"OMP_PROFILE",
 	"OPENCLAW_STATE_DIR",
+	"OPENCODE_DB",
 	"PI_CODING_AGENT_DIR",
 	"PI_CONFIG_DIR",
+	"PI_PROFILE",
 	"PRIME_AGENT_CODING_AGENT_DIR",
-	"SENPI_CODING_AGENT_DIR",
+	"QWEN_HOME",
 	"XDG_CONFIG_HOME",
 	"XDG_DATA_HOME",
 	"XDG_STATE_HOME",
@@ -149,7 +154,7 @@ func LaunchDetached(plan Plan, opts DetachedOptions) (DetachedResult, error) {
 		Version:    launchSpecVersion,
 		Plan:       plan,
 		StatusPath: files.statusPath,
-		ExpiresAt:  opts.Now().Add(5 * time.Minute).UTC(),
+		ExpiresAt:  opts.Now().Add(launchSpecLifetime).UTC(),
 		CarriedEnv: carriedEnv(opts.Getenv),
 	}
 	if command.needsScript {
@@ -177,14 +182,13 @@ func LaunchDetached(plan Plan, opts DetachedOptions) (DetachedResult, error) {
 	}
 	status, err := waitLaunchStatus(files.statusPath, opts)
 	if err != nil {
-		// Remove the specification so a terminal that opens late finds nothing to run: the caller
-		// is told the launch failed and may retry, which must not start the runtime twice. The
-		// trampoline claims the specification by renaming it, so exactly one of the two wins: when
-		// it is already gone, the terminal took it and the runtime may be starting.
-		removeErr := os.Remove(files.specPath)
+		// Withdraw the specification so a terminal that opens late finds nothing to run: the caller
+		// is told the launch failed and may retry, which must not start the runtime twice. When the
+		// terminal claimed it first, the runtime may be starting.
+		cancelled := cancelLaunchSpec(files.specPath)
 		_ = os.Remove(files.statusPath)
 		_ = os.Remove(files.scriptPath)
-		if os.IsNotExist(removeErr) {
+		if !cancelled {
 			return DetachedResult{}, fmt.Errorf("%s opened and took the launch but the target runtime did not confirm startup: %w; it may still start there, so check %s before retrying", command.name, err, command.name)
 		}
 		return DetachedResult{}, fmt.Errorf("%s opened but the target runtime did not confirm startup: %w; the launch was cancelled", command.name, err)
@@ -247,6 +251,7 @@ func newDetachedFiles(dir string) (detachedFiles, error) {
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return detachedFiles{}, fmt.Errorf("restrict handoff directory: %w", err)
 	}
+	pruneStaleLaunchStatus(dir, time.Now())
 	var random [12]byte
 	if _, err := rand.Read(random[:]); err != nil {
 		return detachedFiles{}, fmt.Errorf("generate handoff launch id: %w", err)
@@ -259,6 +264,24 @@ func newDetachedFiles(dir string) (detachedFiles, error) {
 		statusPath: base + ".status.json",
 		scriptPath: base + ".command",
 	}, nil
+}
+
+// pruneStaleLaunchStatus removes status files no caller is waiting for: a terminal that confirms
+// after its caller gave up writes one that nobody reads.
+func pruneStaleLaunchStatus(dir string, now time.Time) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, "launch-") || !strings.HasSuffix(name, ".status.json") {
+			continue
+		}
+		if info, err := entry.Info(); err == nil && now.Sub(info.ModTime()) > launchSpecLifetime {
+			_ = os.Remove(filepath.Join(dir, name))
+		}
+	}
 }
 
 func writeLaunchSpec(path string, spec launchSpec) error {
@@ -546,24 +569,19 @@ func quoteWindowsArg(arg string) string {
 
 func waitLaunchStatus(path string, opts DetachedOptions) (launchStatus, error) {
 	deadline := opts.Now().Add(opts.StartupTimeout)
-	var decodeErr error
 	for opts.Now().Before(deadline) {
 		data, err := os.ReadFile(path)
 		if err == nil {
 			var status launchStatus
-			decodeErr = json.Unmarshal(data, &status)
-			if decodeErr == nil {
-				return status, nil
+			if err := json.Unmarshal(data, &status); err != nil {
+				return launchStatus{}, fmt.Errorf("decode launch status: %w", err)
 			}
-			// The status is renamed into place whole, so this is not a partial write; keep
-			// waiting rather than report a runtime that may be running as failed.
-		} else if !os.IsNotExist(err) {
+			return status, nil
+		}
+		if !os.IsNotExist(err) {
 			return launchStatus{}, fmt.Errorf("read launch status: %w", err)
 		}
 		opts.Sleep(50 * time.Millisecond)
-	}
-	if decodeErr != nil {
-		return launchStatus{}, fmt.Errorf("timed out waiting for startup confirmation: decode launch status: %w", decodeErr)
 	}
 	return launchStatus{}, errors.New("timed out waiting for startup confirmation")
 }
@@ -604,9 +622,9 @@ func RunLaunchSpec(path string, stdin io.Reader, stdout, stderr io.Writer) (int,
 	return code, err
 }
 
-// claimLaunchSpec renames the specification out of the path the caller would remove to cancel it.
-// The rename is atomic, so either the caller cancels and the terminal finds nothing, or the terminal
-// claims it and the caller's removal fails.
+// claimLaunchSpec renames the specification out of the path the caller would withdraw it from to
+// cancel it, so either the caller cancels and the terminal finds nothing, or the terminal claims it
+// and the caller's cancel fails.
 func claimLaunchSpec(path string) (string, error) {
 	if !filepath.IsAbs(path) {
 		return "", errors.New("handoff launch spec path must be absolute")
@@ -619,6 +637,23 @@ func claimLaunchSpec(path string) (string, error) {
 		return "", fmt.Errorf("claim handoff launch spec: %w", err)
 	}
 	return claimed, nil
+}
+
+// cancelLaunchSpec withdraws a specification no terminal has claimed and reports whether it did.
+// Exactly one of it and claimLaunchSpec wins because both rename the published file. A plain
+// remove is not enough: on macOS, an unlink racing the claim can succeed although the claim did.
+func cancelLaunchSpec(path string) bool {
+	withdrawn := path + ".cancelled"
+	err := os.Rename(path, withdrawn)
+	if os.IsNotExist(err) {
+		return false
+	}
+	if err != nil {
+		_ = os.Remove(path)
+		return true
+	}
+	_ = os.Remove(withdrawn)
+	return true
 }
 
 func readLaunchSpec(path string) (launchSpec, error) {
