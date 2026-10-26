@@ -1,0 +1,7 @@
+{"type":"thread.started","thread_id":"01a1769f-fbe7-72b3-a4d2-a9b94a6e6dc4"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata for `gpt-5.1-codex` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/bash -lc 'echo harness2-real-run'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/bash -lc 'echo harness2-real-run'","aggregated_output":"harness2-real-run\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"Ran the command."}}
+{"type":"turn.completed","usage":{"input_tokens":2001,"cached_input_tokens":800,"output_tokens":100,"reasoning_output_tokens":20}}
