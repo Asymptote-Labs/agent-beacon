@@ -28,7 +28,7 @@ taxonomy:
 match: >
   e.event.action == "command.executed" && (
     e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*insmod\\b") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*modprobe\\b[^;&|]*(\\s-r\\b|\\s--remove\\b|\\s-[a-z]*f[a-z]*\\b|\\s+[a-zA-Z][a-zA-Z0-9_-]+\\.(ko|ko\\.xz|ko\\.gz)(\\s|$)|\\s+[a-zA-Z][a-zA-Z0-9_-]+(\\s|$))") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*modprobe\\b[^;&|]*(\\s-r\\b|\\s--remove\\b|\\s-[a-z]*f[a-z]*\\b|\\s+[a-zA-Z][a-zA-Z0-9_-]+\\.(ko|ko\\.xz|ko\\.gz)(\\s|$|[;&|])|\\s+[a-zA-Z][a-zA-Z0-9_-]+(\\s|$|[;&|]))") ||
     e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*rmmod\\b")
   )
 
@@ -113,6 +113,12 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "modprobe -f br_netfilter" }
+        session: { id: s1 }
+  - name: modprobe_module_then_semicolon_command
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo modprobe br_netfilter;sudo sysctl --system" }
         session: { id: s1 }
   - name: modprobe_module_then_command
     verdict: match
