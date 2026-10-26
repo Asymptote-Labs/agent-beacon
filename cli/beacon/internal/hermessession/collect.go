@@ -40,6 +40,12 @@ type Cursor struct {
 	ReasoningTokens  int64                      `json:"reasoning_tokens,omitempty"`
 	CostUSD          float64                    `json:"cost_usd,omitempty"`
 	PendingCalls     map[string]json.RawMessage `json:"pending_calls,omitempty"`
+	// KeyedByHome keys the session's event ids by the Hermes home this cursor belongs to. It is set
+	// when another home already holds the session id, as a cloned profile does: both start from a
+	// copy of one state.db, and once the copies diverge their message ids count up independently, so
+	// unkeyed ids would name different events the same. It is decided before the session's first
+	// event is written and never changes after, so a session's ids stay stable.
+	KeyedByHome bool `json:"keyed_by_home,omitempty"`
 }
 
 type State struct {
@@ -258,8 +264,12 @@ func collectSession(store *Store, session Session, state *State, opts CollectOpt
 	if err != nil {
 		return false, err
 	}
-	mapped, pending := MapSession(session, messages, cursor)
 	home := filepath.Dir(store.Path())
+	idHome := ""
+	if cursor.KeyedByHome {
+		idHome = canonicalHome(home)
+	}
+	mapped, pending := mapSession(session, messages, cursor, idHome)
 	for i := range mapped {
 		mapped[i].Event.Harness.ConfigPath = home
 		mapped[i].Event.Harness.Profile = Profile(home)
