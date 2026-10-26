@@ -1,0 +1,86 @@
+---
+title: "Harness²"
+description: "Beacon support details for Harness² (google-research/harness2) rollout telemetry"
+---
+
+## Runtime overview
+
+Beacon supports [Harness²](https://github.com/google-research/harness2), Google Research's framework for recursive agent harnessing, by reading the event stream of every executor rollout it records.
+
+Harness² is not an agent itself. It refines an agent's *harness* (system prompt, guardrails, memory, tool guidance, subagents, skills, scripts and plugins) by running an executor, [OpenCode](/runtimes/opencode) or [Codex](/runtimes/codex-cli), over benchmark tasks (JobBench, LAB, WorkBuddy-Bench) with candidate harnesses, then composing a better harness from how those runs differed. One task at budget `k` is `4k` executor rollouts plus `3k` improvement sessions, so an experiment produces many agent sessions quickly, with unrestricted network access and, for Codex, its sandbox disabled.
+
+```bash
+beacon endpoint harness2 sync --runs-dir ~/src/harness2/runs
+```
+
+<Note>
+Beacon's OpenCode and Codex integrations do not see these rollouts. Harness² runs Codex with its own `CODEX_HOME` and `--ephemeral`, so neither Beacon's user-level Codex settings nor `~/.codex/sessions` are involved, and it runs OpenCode from a source checkout with its event stream captured to a file. Reading those files is what records them.
+</Note>
+
+## Prerequisites
+
+Before collecting Harness² telemetry, make sure:
+
+- Harness² has run at least one rollout, so its runs directory exists (`runs/` in the checkout, or `$HARNESS2_RUNS_DIR`).
+- `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
+- Something runs [`beacon endpoint harness2 sync`](/cli/endpoint-harness2) after or during experiments. Nothing sweeps on its own.
+
+## Collection path
+
+Beacon walks the runs directory and recognizes a trajectory by its first event, not its name, so graded results, judge output and task inputs are left alone:
+
+| Benchmark | Trajectory |
+|-----------|------------|
+| JobBench | `jb/dataset/<profession>/<task>/model_traj/<label>/<task>_<label>_attempt<N>_<stamp>.jsonl` |
+| LAB | `lab/results/<oc\|cx>/<run-id>/opencode_session.jsonl` or `codex_session.jsonl` |
+| WorkBuddy-Bench | `wb/<subset>/.../<trial>/agent/oc-output.txt` or `codex-output.jsonl` |
+
+Two stream formats occur, one per executor: OpenCode's `opencode run --format json` events and Codex's `codex exec --json` thread events. Every event carries `harness.name=harness2` and `harness.collection_method=poll`; the session id is the executor's own (OpenCode's `sessionID`, Codex's thread id).
+
+Each event also carries the rollout's place in the experiment under `raw.harness2`:
+
+| Field | Meaning |
+|-------|---------|
+| `executor` | `opencode` or `codex` |
+| `benchmark`, `subset` | Harness²'s benchmark code (`jb`, `lab`, `wb`) and WorkBuddy subset |
+| `task_id`, `label`, `attempt` | JobBench task, harness label and retry |
+| `run_id`, `trial` | LAB run id or the run's completion marker; WorkBuddy trial |
+| `harness_fingerprint` | The digest Harness² records of the harness tree that produced the rollout, or `base` |
+| `trajectory`, `line` | Where in the runs directory the event was read |
+
+`raw` is removed by [Metadata-only](/log-forwarding/asymptote) forwarding, so a Metadata-only endpoint forwards the events without this context.
+
+## Telemetry coverage
+
+| Signal | OpenCode executor | Codex executor |
+|--------|-------------------|----------------|
+| Session start | Inferred from the stream's first event | `thread.started` |
+| Agent messages and reasoning | Yes | Yes |
+| Commands | `bash` with output and exit code | `command_execution` with output and exit code |
+| File activity | Reads, writes and edits, with the diff OpenCode reports | Each path an `apply_patch` created, changed or deleted, without the diff |
+| MCP tool calls | Tools whose name carries `mcp` | `mcp_tool_call` with server, tool, arguments and result |
+| Other tools | Yes, with arguments and result | Web search and agent-collaboration calls |
+| Errors | `session.error` | `turn.failed` and stream errors (high), item warnings (medium) |
+| Token usage | Per step, with cost when OpenCode reports one | Per turn, differenced from Codex's running thread total |
+| Prompts | Not recorded | Not recorded |
+| Approvals | Not recorded | Not recorded |
+
+## Known gaps
+
+- **No prompts.** Harness² passes the task prompt to the executor as an argument, and neither stream repeats it.
+- **No approvals.** Harness² runs Codex with approvals bypassed and OpenCode with a permission fence that rejects outside paths without asking, and neither stream reports a decision. Beacon does not synthesize one.
+- **No per-step times for Codex.** `codex exec --json` carries no timestamps, so a Codex rollout's events take the file's modification time and keep their order.
+- **No model name.** Neither stream names the model, so token reports cannot estimate a list price for these rollouts; OpenCode's reported cost is kept when it has one.
+- **Improvement sessions.** The proposer and composer sessions Harness² runs between rollouts keep only their final answer on disk, not an event stream, so they are not collected.
+- **Overlap with the OpenCode integration.** A JobBench OpenCode rollout uses OpenCode's default data directory, so with Beacon's OpenCode plugin or `beacon endpoint opencode sync` also active, the same session can appear under `opencode` as well.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="beacon endpoint harness2" icon="terminal" href="/cli/endpoint-harness2">
+    Sync and status commands, flags, and cursor behavior.
+  </Card>
+  <Card title="Runtimes overview" icon="list" href="/runtimes">
+    Every runtime Beacon supports and how each is collected.
+  </Card>
+</Columns>

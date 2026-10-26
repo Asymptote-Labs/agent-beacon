@@ -5,7 +5,7 @@ test('security review: findings grouped by risk, the combination flagged, eviden
   const frame = page.frameLocator('iframe.lens-frame');
   await expect(frame.locator('#root')).toBeVisible();
 
-  await expect(frame.locator('#root > p').first()).toHaveText('5 findings across 77 rules evaluated.');
+  await expect(frame.locator('#root > p').first()).toHaveText('5 findings across 81 rules evaluated.');
   await expect(frame.locator('.alert')).toContainText('combines untrusted input, sensitive access and a consequential action');
 
   const rows = frame.locator('tbody tr');

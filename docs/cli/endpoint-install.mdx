@@ -62,7 +62,7 @@ runtime's own session store into the runtime log, so the [local dashboard](/cli/
 your recent sessions before any agent runs again. It is the same sweep each runtime's sync command
 runs (`beacon endpoint claude sync`, `codex sync`, `cursor sync`, `opencode sync`, `copilot sync`,
 `cline sync`, `factory sync`, `pi sync`, `prime sync`, `hermes sync`, `devin sync`, `dsh sync`,
-`fx sync`, `grok sync`, and `integrations openclaw sessions sync`), and its events carry
+`fx sync`, `grok sync`, `harness2 sync`, and `integrations openclaw sessions sync`), and its events carry
 `harness.collection_method=poll` like theirs. It is local only and never touches the network.
 
 The backfill is bounded so a machine with a lot of history cannot crowd live telemetry out of the
