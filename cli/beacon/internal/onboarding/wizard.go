@@ -298,6 +298,12 @@ func (m wizardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case signInDoneMsg:
 		return m.signInFinished(msg)
 	case tea.KeyMsg:
+		if step := menuStep(msg); step != 0 {
+			if n := m.choiceCount(); m.isPicker() && n > 0 {
+				m.selected = (m.selected + step + n) % n
+			}
+			return m, nil
+		}
 		switch msg.String() {
 		// esc and ctrl+c cancel; "q" deliberately does not. It used to, on every
 		// screen, so a user typing q at the destination list killed the install --
@@ -313,14 +319,6 @@ func (m wizardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m.cancelAndQuit()
-		case "up", "k":
-			if n := m.choiceCount(); m.isPicker() && n > 0 {
-				m.selected = (m.selected - 1 + n) % n
-			}
-		case "down", "j":
-			if n := m.choiceCount(); m.isPicker() && n > 0 {
-				m.selected = (m.selected + 1) % n
-			}
 		case " ", "space", "x":
 			if m.screen == agentToolsScreen {
 				m.toggleAgentTool()
