@@ -1,5 +1,5 @@
 id: ssh-agent-key-enumeration
-version: 1
+version: 2
 title: SSH agent key enumeration
 description: >
   A command lists the private keys loaded in the running ssh-agent (`ssh-add -l`
@@ -16,7 +16,7 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" &&
-  e.command.command.matches("(?i)\\bssh-add\\s+(-[A-Za-z]*[lL])") ||
+  e.command.command.matches("(?i)\\bssh-add\\b[^;&|\\n]*\\s-[A-Za-z]*[lL]") ||
   e.event.action == "command.executed" &&
   e.command.command.matches("(?i)SSH_AUTH_SOCK=\\S+\\s+ssh-add\\b")
 
@@ -41,6 +41,24 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "SSH_AUTH_SOCK=/tmp/agent.sock ssh-add -l" }
+        session: { id: s1 }
+  - name: ssh_add_list_with_hash_option
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh-add -E md5 -l" }
+        session: { id: s1 }
+  - name: ssh_add_add_key_with_hyphen_not_list
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh-add ~/.ssh/deploy-lab" }
+        session: { id: s1 }
+  - name: ssh_add_key_then_ls_on_next_line
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh-add ~/.ssh/id_ed25519\nls -la ~/.ssh" }
         session: { id: s1 }
   - name: ssh_add_add_key_not_list
     verdict: no_match
