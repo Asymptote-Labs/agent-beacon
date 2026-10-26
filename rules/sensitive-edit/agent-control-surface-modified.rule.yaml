@@ -29,8 +29,8 @@ match: >
     e.file.path.matches("(?i)(^|/)((\\.claude/settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor/(mcp|hooks|cli|cli-config)\\.json|\\.codex/(config\\.toml|hooks\\.json)|\\.gemini/settings\\.json|\\.copilot/(config|mcp-config)\\.json|\\.vscode/mcp\\.json|\\.kiro/settings/mcp\\.json|opencode\\.jsonc?|\\.codeium/windsurf/mcp_config\\.json|\\.windsurf/hooks\\.json|cline_mcp_settings\\.json)$|(\\.claude/plugins|\\.github/hooks|\\.kiro/(hooks|agents)|\\.gemini/extensions|\\.opencode/plugins?|\\.config/opencode/plugins?|\\.cline/plugins)/)")
   ) || (
     e.event.action == "command.executed" && (
-      e.command.command.matches("(?i)(>{1,2}\\s*|\\btee(\\s+-[^\\s;&|<>]+)*\\s+|\\bsed\\s+([^;&|\\n]*\\s)?-i\\S*\\s+([^;&|\\n]*\\s)?|\\bgit\\s+clone\\b[^;&|\\n]*\\s|\\b(curl|wget)\\b[^;&|\\n]*\\s(-o|-O|--output|--output-document)(\\s+|=)|\\b(set-content|add-content|out-file)\\s+(-(literal|file)?path\\s+)?)['\"]?([^\\s;&|'\"<>]*[/\\\\])?((\\.claude/settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor/(mcp|hooks|cli|cli-config)\\.json|\\.codex/(config\\.toml|hooks\\.json)|\\.gemini/settings\\.json|\\.copilot/(config|mcp-config)\\.json|\\.vscode/mcp\\.json|\\.kiro/settings/mcp\\.json|opencode\\.jsonc?|\\.codeium/windsurf/mcp_config\\.json|\\.windsurf/hooks\\.json|cline_mcp_settings\\.json)|(\\.claude/plugins|\\.github/hooks|\\.kiro/(hooks|agents)|\\.gemini/extensions|\\.opencode/plugins?|\\.config/opencode/plugins?|\\.cline/plugins)(/[^\\s;&|'\"<>]*)?)['\"]?($|[\\s;&|)<>])") ||
-      e.command.command.matches("(?i)(^|[;&|(`\\n]|\\$\\(|\\b(then|do|else)\\s)\\s*(sudo\\s+)?(cp|mv|install|ln|rsync)\\s[^;&|<>\\n]*\\s['\"]?([^\\s;&|'\"<>]*[/\\\\])?((\\.claude/settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor/(mcp|hooks|cli|cli-config)\\.json|\\.codex/(config\\.toml|hooks\\.json)|\\.gemini/settings\\.json|\\.copilot/(config|mcp-config)\\.json|\\.vscode/mcp\\.json|\\.kiro/settings/mcp\\.json|opencode\\.jsonc?|\\.codeium/windsurf/mcp_config\\.json|\\.windsurf/hooks\\.json|cline_mcp_settings\\.json)|(\\.claude/plugins|\\.github/hooks|\\.kiro/(hooks|agents)|\\.gemini/extensions|\\.opencode/plugins?|\\.config/opencode/plugins?|\\.cline/plugins)(/[^\\s;&|'\"<>]*)?)['\"]?\\s*($|[;&|)\\n])")
+      e.command.command.matches("(?i)(>{1,2}\\s*|\\btee(\\s+-[^\\s;&|<>]+)*\\s+|\\bsed\\s+([^;&|\\n]*\\s)?-i\\S*\\s+([^;&|\\n]*\\s)?|\\bgit\\s+clone\\b[^;&|\\n]*\\s|\\b(curl|wget)\\b[^;&|\\n]*\\s(-o|-O|--output|--output-document)(\\s+|=)|\\b(set-content|add-content|out-file)\\s+(-(literal|file)?path\\s+)?)['\"]?([^\\s;&|'\"<>]*[/\\\\])?((\\.claude[/\\\\]settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor[/\\\\](mcp|hooks|cli|cli-config)\\.json|\\.codex[/\\\\](config\\.toml|hooks\\.json)|\\.gemini[/\\\\]settings\\.json|\\.copilot[/\\\\](config|mcp-config)\\.json|\\.vscode[/\\\\]mcp\\.json|\\.kiro[/\\\\]settings[/\\\\]mcp\\.json|opencode\\.jsonc?|\\.codeium[/\\\\]windsurf[/\\\\]mcp_config\\.json|\\.windsurf[/\\\\]hooks\\.json|cline_mcp_settings\\.json)|(\\.claude[/\\\\]plugins|\\.github[/\\\\]hooks|\\.kiro[/\\\\](hooks|agents)|\\.gemini[/\\\\]extensions|\\.opencode[/\\\\]plugins?|\\.config[/\\\\]opencode[/\\\\]plugins?|\\.cline[/\\\\]plugins)([/\\\\][^\\s;&|'\"<>]*)?)['\"]?($|[\\s;&|)<>])") ||
+      e.command.command.matches("(?i)(^|[;&|(`\\n]|\\$\\(|\\b(then|do|else)\\s)\\s*(sudo\\s+)?(cp|mv|install|ln|rsync)\\s[^;&|<>\\n]*\\s['\"]?([^\\s;&|'\"<>]*[/\\\\])?((\\.claude[/\\\\]settings(\\.local)?\\.json|\\.claude\\.json|\\.mcp\\.json|managed-settings\\.json|\\.cursor[/\\\\](mcp|hooks|cli|cli-config)\\.json|\\.codex[/\\\\](config\\.toml|hooks\\.json)|\\.gemini[/\\\\]settings\\.json|\\.copilot[/\\\\](config|mcp-config)\\.json|\\.vscode[/\\\\]mcp\\.json|\\.kiro[/\\\\]settings[/\\\\]mcp\\.json|opencode\\.jsonc?|\\.codeium[/\\\\]windsurf[/\\\\]mcp_config\\.json|\\.windsurf[/\\\\]hooks\\.json|cline_mcp_settings\\.json)|(\\.claude[/\\\\]plugins|\\.github[/\\\\]hooks|\\.kiro[/\\\\](hooks|agents)|\\.gemini[/\\\\]extensions|\\.opencode[/\\\\]plugins?|\\.config[/\\\\]opencode[/\\\\]plugins?|\\.cline[/\\\\]plugins)([/\\\\][^\\s;&|'\"<>]*)?)['\"]?(\\s+[0-9]*>{1,2}&?[^\\s;&|]*|\\s+#[^\\n]*)*\\s*($|[;&|)\\n])")
     )
   )
 
@@ -289,6 +289,42 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "cd ~\ncp .claude/settings.json /tmp/settings.bak\nls" }
+        session: { id: s1 }
+  - name: shell_cp_with_stderr_redirect
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cp /tmp/evil.json ~/.claude/settings.json 2>/dev/null" }
+        session: { id: s1 }
+  - name: shell_mv_with_stdout_redirect
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "mv /tmp/m .cursor/mcp.json >/dev/null 2>&1" }
+        session: { id: s1 }
+  - name: shell_cp_with_trailing_comment
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cp x ~/.codex/config.toml # done" }
+        session: { id: s1 }
+  - name: powershell_backslash_settings
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "Set-Content -Path C:\\Users\\dev\\.claude\\settings.json -Value x" }
+        session: { id: s1 }
+  - name: powershell_out_file_relative_backslash
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "$cfg | Out-File -FilePath .\\.cursor\\mcp.json" }
+        session: { id: s1 }
+  - name: shell_backup_settings_with_redirect
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cp .claude/settings.json /tmp/settings.bak 2>/dev/null" }
         session: { id: s1 }
   - name: shell_read_settings
     verdict: no_match
