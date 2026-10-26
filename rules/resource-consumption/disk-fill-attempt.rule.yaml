@@ -4,9 +4,9 @@ title: Disk-fill primitive executed in a command
 description: >
   A command.executed event invokes a disk-fill primitive: writing an unbounded
   stream of /dev/zero or /dev/urandom to a real file via dd (if= and of= in either
-  order), fallocate/truncate
-  with a large or unbounded size, yes piped to a file, or a write to a top-level
-  mount point (/tmp, /var). A disk-fill attack is a resource-DoS primitive
+  order), fallocate/truncate with a large or unbounded size, yes piped to a file, or
+  a write to a top-level mount point (/tmp, /var). A disk-fill attack is a
+  resource-DoS primitive
   (OWASP LLM10) that exhausts filesystem capacity and is rarely a legitimate
   agent action. The rule is anchored to a command boundary and only matches
   the dangerous shapes (dd to a real target file, large fallocate, yes to a
