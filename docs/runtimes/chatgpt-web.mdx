@@ -54,6 +54,7 @@ Turns from one conversation share a session id, so a conversation reads as a ses
 |------|---------|
 | Prompt telemetry | Supported, with full prompt text under `full` and `redacted` retention |
 | Assistant response telemetry | Supported, including the response text, the requested model, and the model that answered |
+| Reasoning telemetry | Not available. ChatGPT sends the page only a short summary of its reasoning, and Beacon does not record it |
 | Tool telemetry | Partial. Web searches are captured with their results, and with their queries when the site reports them, which it does not do for every search. Other built-in tools are recorded by name, with any result text they stream |
 | Token usage | Not available. ChatGPT web does not report token counts in its stream |
 | Cost | Not available. ChatGPT web does not report per-turn cost to the page |

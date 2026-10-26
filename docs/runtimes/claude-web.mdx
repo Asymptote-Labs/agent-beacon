@@ -54,7 +54,7 @@ Turns from one conversation share a session id, so a conversation reads as a ses
 | Assistant response telemetry | Supported, including the response text and the model reported by the stream |
 | Tool telemetry | Supported. Tool call id, name, and arguments are captured from `tool_use` blocks |
 | Tool results | Supported for tools claude.ai runs on its side, such as web search and weather. The stream sends each result as a `tool_result` block, recorded in `gen_ai.tool.call.result` |
-| Reasoning | Not captured. claude.ai streams short thinking summaries, which the adapter skips |
+| Reasoning telemetry | Not available. claude.ai sends the page only a one-line summary of each thinking block, and Beacon does not record it |
 | Token usage | Parsed when the stream carries it, which recorded traffic so far does not. See [Limits](#limits) |
 | Cost | Not available. claude.ai does not report per-turn cost to the page |
 | Command and file telemetry | Not applicable. Browser chat performs no local commands or file edits |
