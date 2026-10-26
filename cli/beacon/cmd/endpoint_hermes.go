@@ -147,6 +147,9 @@ type hermesSessionStatus struct {
 	LastMessageID      int64  `json:"last_message_id"`
 	CollectedMessageID int64  `json:"collected_message_id"`
 	Collected          bool   `json:"collected"`
+	// IDsKeyedByHome is set when this home keys the session's event ids by its own path, because
+	// another home, such as the profile it was cloned from, had already collected the same session id.
+	IDsKeyedByHome bool `json:"ids_keyed_by_home,omitempty"`
 }
 
 type hermesStatusReport struct {
@@ -202,6 +205,7 @@ func runEndpointHermesStatus(cmd *cobra.Command, args []string) error {
 		if cursor := state.Sessions[session.ID]; cursor != nil {
 			status.CollectedMessageID = cursor.LastMessageID
 			status.Collected = cursor.Started && cursor.LastMessageID >= lastID && (session.EndedAtMS == 0 || cursor.EndedAtMS == session.EndedAtMS)
+			status.IDsKeyedByHome = cursor.KeyedByHome
 		}
 		report.Sessions = append(report.Sessions, status)
 	}
@@ -218,6 +222,9 @@ func runEndpointHermesStatus(cmd *cobra.Command, args []string) error {
 		mark := "pending"
 		if session.Collected {
 			mark = "collected"
+		}
+		if session.IDsKeyedByHome {
+			mark += ", ids keyed by home"
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "- %s [%s] messages %d/%d %s\n",
 			session.SessionID, mark, session.CollectedMessageID, session.LastMessageID, session.Title)

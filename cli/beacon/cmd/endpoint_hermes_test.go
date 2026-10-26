@@ -1,12 +1,16 @@
 package cmd
 
 import (
+	"bytes"
+	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/hermessession"
+	"github.com/spf13/cobra"
 )
 
 // The cursor is what keeps a scheduled sweep from re-appending every Hermes session's whole
@@ -110,5 +114,69 @@ func TestHermesKeyedCursorSeedsFromTheLegacyCursor(t *testing.T) {
 	}
 	if other := legacyHermesStatePath("", filepath.Join(home, "elsewhere", "state.db"), true); other != "" {
 		t.Errorf("a non-default home would inherit the legacy cursor %q", other)
+	}
+}
+
+// Status names the sessions whose event ids a home keys by its own path, so a cloned profile's
+// events can be told apart from the ones the home it came from wrote under the same session id.
+func TestHermesStatusReportsSessionsKeyedByHome(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "state.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT NOT NULL, started_at REAL NOT NULL)`,
+		`CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT, timestamp REAL NOT NULL)`,
+		`INSERT INTO sessions (id, source, started_at) VALUES ('cloned', 'cli', 1780632830), ('own', 'cli', 1780632831)`,
+		`INSERT INTO messages (session_id, role, content, timestamp) VALUES ('cloned', 'user', 'hi', 1780632832), ('own', 'user', 'hi', 1780632833)`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			db.Close()
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+	statePath := filepath.Join(dir, "hermes.json")
+	state := &hermessession.State{Version: hermessession.StateVersion, Sessions: map[string]*hermessession.Cursor{
+		"cloned": {Started: true, LastMessageID: 1, KeyedByHome: true},
+		"own":    {Started: true, LastMessageID: 2},
+	}}
+	if err := state.Save(statePath); err != nil {
+		t.Fatal(err)
+	}
+
+	savedHermes, savedEndpoint := endpointHermesOpts, endpointOpts
+	t.Cleanup(func() { endpointHermesOpts, endpointOpts = savedHermes, savedEndpoint })
+	endpointHermesOpts.dbPath, endpointHermesOpts.statePath = dbPath, statePath
+	endpointOpts.userMode, endpointOpts.systemMode = true, false
+
+	run := func(jsonOutput bool) string {
+		t.Helper()
+		endpointOpts.jsonOutput = jsonOutput
+		var out bytes.Buffer
+		cmd := &cobra.Command{}
+		cmd.SetOut(&out)
+		if err := runEndpointHermesStatus(cmd, nil); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+
+	var report hermesStatusReport
+	if err := json.Unmarshal([]byte(run(true)), &report); err != nil {
+		t.Fatal(err)
+	}
+	keyed := map[string]bool{}
+	for _, session := range report.Sessions {
+		keyed[session.SessionID] = session.IDsKeyedByHome
+	}
+	if len(keyed) != 2 || !keyed["cloned"] || keyed["own"] {
+		t.Fatalf("ids_keyed_by_home = %v, want only the cloned session", keyed)
+	}
+	text := run(false)
+	if !strings.Contains(text, "- cloned [collected, ids keyed by home]") || strings.Contains(text, "- own [collected, ids keyed by home]") {
+		t.Fatalf("status text = %q, want only the cloned session marked keyed", text)
 	}
 }
