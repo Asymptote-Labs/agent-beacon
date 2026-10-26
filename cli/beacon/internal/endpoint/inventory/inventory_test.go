@@ -1042,7 +1042,17 @@ func TestRedactSecretsAcrossFormats(t *testing.T) {
 		{"toml", "GITHUB_TOKEN = \"tk_x\"\nname = \"ok\"", "tk_x", 1},
 		{"yaml", "password: hunter2\nuser: bob", "hunter2", 1},
 		{"shell", "export AWS_SECRET_ACCESS_KEY=abc123\nexport PATH=/bin", "abc123", 1},
+		{"env key named only for a key", `{"env": {"OPENAI_KEY": "plainvalue99"}}`, "plainvalue99", 1},
+		{"secret word inside a key", "SECRET_KEY_BASE: plainvalue99\n", "plainvalue99", 1},
+		{"tokens key that holds no count", "GITHUB_TOKENS: plainvalue99\nmax_tokens: 4096\n", "plainvalue99", 1},
+		{"pass key", "export DB_PASS=plainvalue99\n", "plainvalue99", 1},
+		{"yaml bearer header", "headers:\n  Authorization: Bearer ghp_headertoken\n  Accept: json", "ghp_headertoken", 1},
+		{"yaml basic header", "Authorization: Basic dXNlcjpodW50ZXIy\n", "dXNlcjpodW50ZXIy", 1},
+		{"curl line in a skill", "curl -H 'Authorization: Bearer sk-live-curltoken' https://api.example.com", "sk-live-curltoken", 1},
+		{"api key flag in args", `{"args": ["-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-abcdef0123456789"]}`, "ctx7sk-abcdef0123456789", 1},
+		{"bare github token", "export it first: ghp_0123456789abcdefghijABCDEFGHIJ0123", "0123456789abcdefghijABCDEFGHIJ0123", 1},
 		{"none", `{"host": "example.com", "port": 8080}`, "", 0},
+		{"flags and keys that name no secret", "max_tokens: 4096\nauthor: alice\nAUTH_MODE=token npm start\n" + `{"args": ["--max-tokens=4096", "--author=alice"], "env": {"AUTH_MODE": "token"}}`, "", 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1054,6 +1064,25 @@ func TestRedactSecretsAcrossFormats(t *testing.T) {
 				t.Fatalf("redacted output leaked %q: %s", tc.forbidden, out)
 			}
 		})
+	}
+}
+
+func TestRedactStructuredCoversSecretsInsideStringValues(t *testing.T) {
+	def := map[string]interface{}{
+		"command": "npx",
+		"args":    []interface{}{"-y", "@example/mcp", "--token=ghp_argsecret", "--api-key", "ctx7sk-abcdef0123456789", "--max-tokens=4096"},
+		"url":     "https://mcp.example.com/sse?api_key=ghp_urlsecret",
+		"env":     map[string]interface{}{"GH_HOST": "github.com", "AUTH_MODE": "token", "OPENAI_KEY": "plainkey", "SECRET_KEY_BASE": "plainbase", "MAX_TOKENS": float64(4096), "GITHUB_TOKENS": "plaintokens"},
+	}
+	raw, err := json.Marshal(redactStructuredMap(def))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"args":["-y","@example/mcp","--token=[REDACTED]","--api-key","[REDACTED]","--max-tokens=4096"],"command":"npx",` +
+		`"env":{"AUTH_MODE":"token","GH_HOST":"github.com","GITHUB_TOKENS":"[REDACTED]","MAX_TOKENS":4096,"OPENAI_KEY":"[REDACTED]","SECRET_KEY_BASE":"[REDACTED]"},` +
+		`"url":"https://mcp.example.com/sse?api_key=[REDACTED]"}`
+	if string(raw) != want {
+		t.Fatalf("redacted definition = %s\nwant %s", raw, want)
 	}
 }
 

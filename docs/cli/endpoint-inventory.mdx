@@ -49,7 +49,7 @@ Add `--contents` when you need to see the **full definitions** of config, hook, 
 
 Captured contents are always passed through local redaction and a size limit:
 
-- Values held under secret-looking keys (matching `TOKEN`, `SECRET`, `PASSWORD`, `KEY`, `AUTH`, or `CREDENTIAL`) are replaced with `***REDACTED***`. The `content.redacted_count` field reports how many values were redacted.
+- Secrets are replaced with `[REDACTED]` by the same redaction Beacon applies to session telemetry: recognizable credentials (GitHub, AWS, Slack, OpenAI and Anthropic keys, JWTs), `Authorization` header credentials, values of secret flags such as `--token=…` or `"--api-key", "…"`, and URL passwords. Values held under a key with a word naming a secret (`token`, `key`, `auth`, `secret`, `password`, `credential`, as in `GITHUB_TOKEN`, `OPENAI_KEY` or `SECRET_KEY_BASE`) are replaced whatever they look like. The `content.redacted_count` field reports how many values were redacted.
 - Bodies are truncated to a per-file byte cap (64 KiB by default) and flagged with `content.truncated`. The `content.bytes` field always reports the original file size.
 
 ```bash title="Show full, redacted MCP definitions"
