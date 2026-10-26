@@ -130,9 +130,6 @@ func inspectSkillRoot(root skillRoot, redaction string, co contentOptions) []Ski
 		if len(skills) >= maxSkillsPerRoot {
 			break
 		}
-		if skipSkillDir(entry.Name()) {
-			continue
-		}
 		if !entry.IsDir() && entry.Type()&os.ModeSymlink == 0 {
 			continue
 		}
@@ -189,17 +186,6 @@ func inspectSkillManifest(root skillRoot, name, manifestPath, redaction string, 
 	}
 	skill.ParserStatus = StatusOK
 	return skill
-}
-
-// skipSkillDir names directories that are never a skill. build, dist, vendor and the like are not
-// here: a skill root's direct children are skill names, and a runtime loads a skill called build.
-func skipSkillDir(name string) bool {
-	switch name {
-	case ".git", "node_modules":
-		return true
-	default:
-		return false
-	}
 }
 
 func dedupeSkills(skills []Skill) []Skill {
