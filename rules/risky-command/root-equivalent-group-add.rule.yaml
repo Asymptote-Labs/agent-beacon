@@ -19,8 +19,7 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" &&
-  e.command.command.matches("(?i)(^|[;&|]\\s*)(sudo\\s+)?(usermod\\s+(--?[a-z]+\\s+)*(-a?G|--groups)\\b|gpasswd\\s+(--?[a-z]+\\s+)*(-a|--add)\\b|adduser\\b|addgroup\\b)") &&
-  e.command.command.matches("(?i)(^|[\\s,=])(docker|lxd|libvirt|kvm|incus|podman|sudo|wheel|admin|adm|root)(\\s|,|$)")
+  e.command.command.matches("(?i)(^|[;&|]\\s*)(sudo\\s+)?(usermod\\s+(--?[a-z]+\\s+)*(-a?G|--groups)(\\s+|=)([a-z0-9_.-]+,)*(docker|lxd|libvirt|kvm|incus|podman|sudo|wheel|admin|adm|root)(,|\\s|$)|gpasswd\\s+(--?[a-z]+\\s+)*(-a|--add)\\s+\\S+\\s+(docker|lxd|libvirt|kvm|incus|podman|sudo|wheel|admin|adm|root)(\\s|$)|(adduser|addgroup)\\s+(--?[a-z-]+\\s+)*[^\\s-]\\S*\\s+(docker|lxd|libvirt|kvm|incus|podman|sudo|wheel|admin|adm|root)(\\s|$))")
 
 emit:
   reason: "Account added to a root-equivalent or admin group (standing escalation to root)"
@@ -73,6 +72,18 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "usermod -aG www-data deploy" }
+        session: { id: s1 }
+  - name: sudo_usermod_nonprivileged_group
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo usermod -aG video agent" }
+        session: { id: s1 }
+  - name: sudo_adduser_new_account
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo adduser alice" }
         session: { id: s1 }
   - name: usermod_change_shell
     verdict: no_match
