@@ -29,7 +29,7 @@ match: >
   ) || (
     e.event.action == "command.executed" && (
       e.command.command.matches("(?i)(>{1,2}\\s*|\\btee(\\s+-[^\\s;&|<>]+)*\\s+|\\bsed\\s+([^;&|\\n]*\\s)?-i\\S*\\s+([^;&|\\n]*\\s)?|\\bgit\\s+clone\\b[^;&|\\n]*\\s|\\b(curl|wget)\\b[^;&|\\n]*\\s(-o|-O|--output|--output-document)(\\s+|=)|\\b(set-content|add-content|out-file)\\s+(-(literal|file)?path\\s+)?)['\"]?([^\\s;&|'\"<>]*[/\\\\])?((claude(\\.local)?\\.md|agents(\\.override)?\\.md|gemini\\.md|qwen\\.md|copilot-instructions\\.md|\\.cursorrules|\\.windsurfrules|\\.clinerules)|(\\.claude[/\\\\](skills|commands|agents)|\\.agents[/\\\\]skills|\\.codex[/\\\\](prompts|skills)|\\.cursor[/\\\\](rules|commands)|\\.gemini[/\\\\]commands|\\.github[/\\\\](instructions|prompts|agents|chatmodes)|\\.kiro[/\\\\]steering|\\.opencode[/\\\\](agents?|commands?)|\\.config[/\\\\]opencode[/\\\\](agents?|commands?)|\\.windsurf[/\\\\](rules|workflows)|\\.clinerules|documents[/\\\\]cline[/\\\\](rules|workflows))([/\\\\][^\\s;&|'\"<>]*)?)['\"]?($|[\\s;&|)<>])") ||
-      e.command.command.matches("(?i)(^|[;&|(`\\n]|\\$\\(|\\b(then|do|else)\\s)\\s*(sudo\\s+)?(cp|mv|install|ln|rsync)\\s[^;&|<>\\n]*\\s['\"]?([^\\s;&|'\"<>]*[/\\\\])?((claude(\\.local)?\\.md|agents(\\.override)?\\.md|gemini\\.md|qwen\\.md|copilot-instructions\\.md|\\.cursorrules|\\.windsurfrules|\\.clinerules)|(\\.claude[/\\\\](skills|commands|agents)|\\.agents[/\\\\]skills|\\.codex[/\\\\](prompts|skills)|\\.cursor[/\\\\](rules|commands)|\\.gemini[/\\\\]commands|\\.github[/\\\\](instructions|prompts|agents|chatmodes)|\\.kiro[/\\\\]steering|\\.opencode[/\\\\](agents?|commands?)|\\.config[/\\\\]opencode[/\\\\](agents?|commands?)|\\.windsurf[/\\\\](rules|workflows)|\\.clinerules|documents[/\\\\]cline[/\\\\](rules|workflows))([/\\\\][^\\s;&|'\"<>]*)?)['\"]?(\\s+[0-9]*>{1,2}&?[^\\s;&|]*|\\s+#[^\\n]*)*\\s*($|[;&|)\\n])")
+      e.command.command.matches("(?i)(^|[;&|(`\\n]|\\$\\(|\\b(then|do|else)\\s)\\s*(sudo\\s+)?(cp|mv|install|ln|rsync)\\s[^;&|<>\\n]*\\s['\"]?([^\\s;&|'\"<>]*[/\\\\])?((claude(\\.local)?\\.md|agents(\\.override)?\\.md|gemini\\.md|qwen\\.md|copilot-instructions\\.md|\\.cursorrules|\\.windsurfrules|\\.clinerules)|(\\.claude[/\\\\](skills|commands|agents)|\\.agents[/\\\\]skills|\\.codex[/\\\\](prompts|skills)|\\.cursor[/\\\\](rules|commands)|\\.gemini[/\\\\]commands|\\.github[/\\\\](instructions|prompts|agents|chatmodes)|\\.kiro[/\\\\]steering|\\.opencode[/\\\\](agents?|commands?)|\\.config[/\\\\]opencode[/\\\\](agents?|commands?)|\\.windsurf[/\\\\](rules|workflows)|\\.clinerules|documents[/\\\\]cline[/\\\\](rules|workflows))([/\\\\][^\\s;&|'\"<>]*)?)['\"]?(\\s+([0-9]*|&)>{1,2}&?\\s*[^\\s;&|]*|\\s+#[^\\n]*)*\\s*($|[;&|)\\n])")
     )
   )
 
@@ -324,6 +324,18 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "Set-Content -Path C:\\Users\\dev\\.claude\\skills\\x\\SKILL.md -Value x" }
+        session: { id: s1 }
+  - name: shell_mv_with_spaced_redirect
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "mv /tmp/g.md AGENTS.md 2> /dev/null" }
+        session: { id: s1 }
+  - name: shell_cp_with_amp_redirect
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cp /tmp/s.md ~/.claude/skills/x/SKILL.md &> /dev/null" }
         session: { id: s1 }
   - name: shell_backup_copy_with_redirect
     verdict: no_match
