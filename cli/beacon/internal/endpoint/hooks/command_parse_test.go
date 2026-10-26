@@ -52,6 +52,12 @@ func TestCommandFieldsKeepsQuotedPathsWhole(t *testing.T) {
 			want:    []string{`C:\beacon\beacon-hooks.exe`, "--log", `C:\logs\runtime.jsonl`},
 		},
 		{
+			// hookCommandQuote writes a single quote inside a value as \' between two quoted runs.
+			name:    "a single quote escaped the way hookCommandQuote writes it",
+			command: `'C:\Users\O'\''Brien\hooks\beacon-hooks.exe' --platform claude`,
+			want:    []string{`C:\Users\O'Brien\hooks\beacon-hooks.exe`, "--platform", "claude"},
+		},
+		{
 			name:    "empty",
 			command: "   ",
 			want:    nil,
@@ -112,6 +118,22 @@ func TestAPlatformNamedWithAnEqualsSignCountsAsNamingOne(t *testing.T) {
 	}
 	if isEndpointHookCommand(own, "vscode") {
 		t.Fatal("--platform=cursor matched when asked about vscode")
+	}
+}
+
+// A profile directory with an apostrophe (C:\Users\O'Brien) puts \' between two quoted runs in every
+// path of the command. Read as an unterminated quote, it swallowed --platform, and the hook matched
+// every runtime.
+func TestAHookUnderAnApostrophePathKeepsItsPlatform(t *testing.T) {
+	for _, home := range []string{`C:\Users\O'Brien`, `/home/o'brien`} {
+		command := endpointCommandPrefix("claude", home+`/.beacon/endpoint/hooks/beacon-hooks`,
+			home+`/.beacon/endpoint/logs/runtime.jsonl`, home+`/.beacon/endpoint/config.json`)
+		if !isEndpointHookCommand(command, "claude") {
+			t.Errorf("%s: not matched for claude", command)
+		}
+		if isEndpointHookCommand(command, "cursor") {
+			t.Errorf("%s: a claude hook matched when asked about cursor", command)
+		}
 	}
 }
 
@@ -192,6 +214,9 @@ func TestEndpointCommandArgsMatchPrefix(t *testing.T) {
 		{name: "no log", binaryPath: "/opt/beacon/hooks/beacon-hooks", configPath: "/etc/beacon/config.json"},
 		{name: "no config", binaryPath: "/opt/beacon/hooks/beacon-hooks", logPath: "/var/log/beacon/runtime.jsonl"},
 		{name: "windows paths with spaces", binaryPath: `C:\Program Files\Beacon\beacon-hooks.exe`, logPath: `C:\ProgramData\Beacon\runtime.jsonl`, configPath: `C:\ProgramData\Beacon\config.json`},
+		{name: "apostrophes", binaryPath: `C:\Users\O'Brien\.beacon\beacon-hooks.exe`, logPath: `/home/o'brien/it's/runtime.jsonl`, configPath: `/home/o'brien/'quoted'/config.json'`},
+		{name: "shell metacharacters", binaryPath: "/opt/$HOME/`id`/beacon-hooks", logPath: `/var/log/a b;c|d&e/runtime.jsonl`, configPath: `/etc/"dq"/config.json`},
+		{name: "unc and non-ascii", binaryPath: `\\server\share\Beacon\beacon-hooks.exe`, logPath: `/Users/zoë/日誌/runtime.jsonl`, configPath: `C:\ProgramData\Beacon\config.json`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
