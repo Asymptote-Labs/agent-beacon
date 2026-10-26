@@ -3,21 +3,26 @@ import { expect, test } from '@playwright/test';
 test('security review: findings grouped by risk, the combination flagged, evidence resolved', async ({ page }) => {
   await page.goto('/session.html?id=risky&lens=security-review');
   const frame = page.frameLocator('iframe.lens-frame');
-  await expect(frame.locator('#root')).toBeVisible();
+  // The host stays hidden until /api/status finishes local runtime discovery.
+  await expect(frame.locator('#root')).toBeVisible({ timeout: 15_000 });
 
-  await expect(frame.locator('#root > p').first()).toHaveText('5 findings across 86 rules evaluated.');
+  await expect(frame.locator('#root > p').first()).toHaveText('6 findings across 87 rules evaluated.');
   await expect(frame.locator('.alert')).toContainText('combines untrusted input, sensitive access and a consequential action');
 
   const rows = frame.locator('tbody tr');
   await expect(rows.nth(0)).toContainText('Untrusted input');
   await expect(rows.nth(0).locator('td').nth(2)).toHaveText('2');
   await expect(rows.nth(1).locator('td').nth(2)).toHaveText('1');
-  await expect(rows.nth(2).locator('td').nth(2)).toHaveText('2');
+  await expect(rows.nth(2).locator('td').nth(2)).toHaveText('3');
   await expect(rows.nth(2).locator('td').nth(3)).toHaveText('high');
 
   const sensitive = frame.locator('section[data-group="sensitive"]');
   await expect(sensitive).toContainText('credential-file-read');
   await expect(sensitive).toContainText('read /home/dev/.aws/credentials');
+
+  const singleCommand = frame.locator('section[data-group="consequential"] .finding', { hasText: 'secret-read-and-egress' });
+  await expect(singleCommand.locator('.evidence li')).toHaveCount(1);
+  await expect(singleCommand).toContainText('curl -d @/home/dev/.aws/credentials');
 
   // A correlation finding cites both steps, in order.
   const exfil = frame.locator('section[data-group="consequential"] .finding', { hasText: 'secret-read-then-egress' });
@@ -28,7 +33,8 @@ test('security review: findings grouped by risk, the combination flagged, eviden
 test('security review: a trace with no findings in a group still shows the summary', async ({ page }) => {
   await page.goto('/session.html?id=rich&lens=security-review');
   const frame = page.frameLocator('iframe.lens-frame');
-  await expect(frame.locator('#root')).toBeVisible();
+  // The host stays hidden until /api/status finishes local runtime discovery.
+  await expect(frame.locator('#root')).toBeVisible({ timeout: 15_000 });
   await expect(frame.locator('.alert')).toHaveCount(0);
   await expect(frame.locator('tbody tr')).toHaveCount(3);
 });
