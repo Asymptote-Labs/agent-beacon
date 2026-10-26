@@ -222,13 +222,17 @@ specification, starts the exact approval-safe argument vector, and confirms star
 process. Prompt or brief content is never interpolated into a terminal-launch shell command.
 If the runtime does not confirm startup within 15 seconds, Beacon removes the specification and
 reports the launch as cancelled, so a terminal that opens late starts nothing and a retry cannot
-start the runtime twice.
+start the runtime twice. The trampoline claims the specification by renaming it before it reads
+it, so only one side wins: if the terminal had already claimed it, Beacon says the runtime may
+still start there instead of reporting it cancelled. Check that terminal before retrying.
 
 A new terminal starts from its own environment rather than the calling process's. Beacon carries
 the variables that locate a runtime's configuration and sessions (`CLAUDE_CONFIG_DIR`,
-`CODEX_HOME`, `COPILOT_HOME`, `CURSOR_CONFIG_DIR`, `DSH_HOME`, `GEMINI_CLI_HOME`, `HERMES_HOME`,
-`KIRO_HOME`, `PI_CODING_AGENT_DIR` and `XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`XDG_STATE_HOME`) into
-the specification. It never writes other variables there, so credentials such as API keys must be
+`CLINE_DIR`, `CODEX_HOME`, `COPILOT_HOME`, `CURSOR_CONFIG_DIR`, `GEMINI_CLI_HOME`,
+`HERMES_DATA_DIR_SUFFIX`, `HERMES_HOME`, `KIRO_HOME`, `OH_PERSISTENCE_DIR`, `OMP_PROFILE`,
+`OPENCLAW_STATE_DIR`, `OPENCODE_DB`, `PI_CODING_AGENT_DIR`, `PI_CONFIG_DIR`, `PI_PROFILE`,
+`PRIME_AGENT_CODING_AGENT_DIR`, `QWEN_HOME` and `XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`XDG_STATE_HOME`)
+into the specification. It never writes other variables there, so credentials such as API keys must be
 available in the new terminal's own environment, for example from your shell profile.
 
 The runtime starts in the session's recorded directory. If that directory no longer exists, Beacon

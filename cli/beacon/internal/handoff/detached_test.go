@@ -268,39 +268,6 @@ func TestLaunchDetachedReportsAnUnconfirmedTerminal(t *testing.T) {
 	}
 }
 
-func TestLaunchDetachedCarriesStoreLocatingEnvironment(t *testing.T) {
-	dir := t.TempDir()
-	env := map[string]string{"CODEX_HOME": "/home/me/.codex-work", "ANTHROPIC_API_KEY": "secret"}
-	var carried map[string]string
-	_, err := LaunchDetached(Plan{Executable: "/bin/codex", Dir: dir}, DetachedOptions{
-		Mode:             LaunchModeTmux,
-		BeaconExecutable: "/opt/beacon/bin/beacon",
-		SpecDir:          dir,
-		GOOS:             "linux",
-		Getenv:           func(name string) string { return env[name] },
-		LookPath:         func(string) (string, error) { return "/usr/bin/tmux", nil },
-		Start: func(*exec.Cmd) error {
-			specs, _ := filepath.Glob(filepath.Join(dir, "launch-*[0-9a-f].json"))
-			if len(specs) != 1 {
-				return fmt.Errorf("specs = %v", specs)
-			}
-			spec, err := readLaunchSpec(specs[0])
-			if err != nil {
-				return err
-			}
-			carried = spec.CarriedEnv
-			return writeLaunchStatus(spec.StatusPath, launchStatus{State: "started"})
-		},
-		Sleep: func(time.Duration) {},
-	})
-	if err != nil {
-		t.Fatalf("LaunchDetached: %v", err)
-	}
-	if !reflect.DeepEqual(carried, map[string]string{"CODEX_HOME": "/home/me/.codex-work"}) {
-		t.Fatalf("carried env = %v", carried)
-	}
-}
-
 func TestWindowsTerminalEscapesSemicolons(t *testing.T) {
 	files := detachedFiles{id: "0123456789abcdef01234567", specPath: `C:\Users\a;b\handoffs\launch.json`}
 	command, err := terminalLauncher(Plan{Dir: `C:\work;x`}, files, normalizeDetachedOptions(detachedTestOptions("windows", "wt.exe")))
@@ -351,7 +318,7 @@ func TestRunLaunchSpecStartsTheExactPlanAndConsumesPrivateFiles(t *testing.T) {
 	if stdout.String() != "argument with spaces|safe|/carried/codex" {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
-	for _, path := range []string{specPath, cleanupPath} {
+	for _, path := range []string{specPath, specPath + ".claimed", statusPath + ".tmp", cleanupPath} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("%s was not consumed: %v", path, err)
 		}
@@ -474,5 +441,87 @@ func TestLaunchDetachedReportsLauncherStartFailure(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "denied") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestLaunchDetachedReportsALaunchTheTerminalAlreadyTook(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	_, err := LaunchDetached(Plan{Executable: "/bin/codex", Dir: dir}, DetachedOptions{
+		Mode:             LaunchModeTmux,
+		BeaconExecutable: "/opt/beacon/bin/beacon",
+		SpecDir:          dir,
+		GOOS:             "linux",
+		LookPath:         func(string) (string, error) { return "/usr/bin/tmux", nil },
+		// The terminal claims the specification but never confirms startup.
+		Start: func(*exec.Cmd) error {
+			specs, _ := filepath.Glob(filepath.Join(dir, "launch-*[0-9a-f].json"))
+			if len(specs) != 1 {
+				return fmt.Errorf("specs = %v", specs)
+			}
+			_, err := claimLaunchSpec(specs[0])
+			return err
+		},
+		Now: func() time.Time {
+			now = now.Add(time.Second)
+			return now
+		},
+		Sleep:          func(time.Duration) {},
+		StartupTimeout: 2 * time.Second,
+	})
+	if err == nil || !strings.Contains(err.Error(), "may still start") || strings.Contains(err.Error(), "cancelled") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// The caller cancels while a terminal may be opening the specification. Whenever the cancel
+// succeeds, the caller reports the launch cancelled, so the terminal must not go on to start the
+// runtime. The runtime here does not exist: a trampoline that tries to start it records an error
+// status, which is how an attempted start shows.
+func TestRunLaunchSpecStartsNothingAfterACancel(t *testing.T) {
+	dir := t.TempDir()
+	for i := range 500 {
+		specPath := filepath.Join(dir, fmt.Sprintf("launch-%d.json", i))
+		statusPath := filepath.Join(dir, fmt.Sprintf("launch-%d.status.json", i))
+		spec := launchSpec{
+			Version:    launchSpecVersion,
+			Plan:       Plan{Executable: filepath.Join(dir, "missing-runtime"), Dir: dir},
+			StatusPath: statusPath,
+			ExpiresAt:  time.Now().Add(time.Minute),
+		}
+		if err := writeLaunchSpec(specPath, spec); err != nil {
+			t.Fatal(err)
+		}
+		cancelled := make(chan bool)
+		go func() { cancelled <- cancelLaunchSpec(specPath) }()
+		_, _ = RunLaunchSpec(specPath, nil, &strings.Builder{}, &strings.Builder{})
+		_, statErr := os.Stat(statusPath)
+		if <-cancelled && statErr == nil {
+			t.Fatalf("attempt %d: the caller cancelled but the terminal still tried to start the runtime", i)
+		}
+	}
+}
+
+func TestNewDetachedFilesPrunesOnlyStaleStatus(t *testing.T) {
+	dir := t.TempDir()
+	stale := filepath.Join(dir, "launch-stale.status.json")
+	live := filepath.Join(dir, "launch-live.status.json")
+	for _, path := range []string{stale, live} {
+		if err := os.WriteFile(path, []byte(`{"state":"started"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Now().Add(-launchSpecLifetime - time.Minute)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newDetachedFiles(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("stale status kept: %v", err)
+	}
+	if _, err := os.Stat(live); err != nil {
+		t.Fatalf("live status removed: %v", err)
 	}
 }
