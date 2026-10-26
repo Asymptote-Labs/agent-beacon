@@ -213,3 +213,37 @@ func TestReadLeavesAPartialTailForLater(t *testing.T) {
 			got.LineCount, len(got.Lines), got.Lines[len(got.Lines)-1].Number)
 	}
 }
+
+// A runs directory is often a symlink to a bigger disk. The walk must follow it: filepath.WalkDir
+// alone visits only the link and finds nothing, while the store still reports itself present.
+func TestListFollowsASymlinkedRunsDirectory(t *testing.T) {
+	target := copyRuns(t)
+	link := filepath.Join(t.TempDir(), "runs")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	refs := listFixtures(t, link)
+	if len(refs) != 3 {
+		t.Fatalf("listed %d trajectories through the symlink, want 3", len(refs))
+	}
+	if ref := refs[labRel]; ref.Context.RunID == "" || ref.Format != FormatCodexExec {
+		t.Fatalf("lab ref through the symlink = %+v", ref)
+	}
+}
+
+// One root that cannot be read is reported, and the others are still listed.
+func TestListReportsABrokenRootAndKeepsTheRest(t *testing.T) {
+	good := copyRuns(t)
+	bad := filepath.Join(t.TempDir(), "runs")
+	if err := os.WriteFile(bad, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store, _ := NewStore([]string{bad, good})
+	refs, err := store.List()
+	if err == nil || !strings.Contains(err.Error(), bad) {
+		t.Fatalf("err = %v, want the broken root named", err)
+	}
+	if len(refs) != 3 {
+		t.Fatalf("listed %d trajectories, want the good root's 3", len(refs))
+	}
+}
