@@ -27,7 +27,7 @@ match: >
     e.file.path.matches("(?i)(^|/)\\.gnupg/[^/]+\\.key$")
   )) || (
     e.event.action == "command.executed" && (
-      e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*gpg2?\\b[^;&|]*--export-secret-(keys?|subkeys?)\\b") ||
+      e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*gpg2?\\b[^;&|]*--export-secret-(k|sub)\\w*\\b") ||
       e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*gpg2?\\b[^;&|]*--gen-key\\b") ||
       e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*gpg2?\\b[^;&|]*--card-status\\b[^;&|]*--with-keygrip\\b")
     )
@@ -78,6 +78,18 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "gpg2 --export-secret-keys --armor > all.asc" }
+        session: { id: s1 }
+  - name: gpg_export_secret_abbreviated
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gpg --armor --export-secret-k ABCDEF12" }
+        session: { id: s1 }
+  - name: gpg_export_secret_sub_abbreviated
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gpg --export-secret-sub ABCDEF12! > sub.asc" }
         session: { id: s1 }
   - name: gpg_export_public_key
     verdict: no_match
