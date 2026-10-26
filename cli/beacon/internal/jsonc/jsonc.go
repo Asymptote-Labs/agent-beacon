@@ -1,4 +1,11 @@
-package mcpconnect
+// Package jsonc reads and edits the JSON configs that harnesses share with the people who use them.
+//
+// Several of those configs (OpenCode's opencode.jsonc, VS Code's settings.json and mcp.json) are
+// JSONC: comments and trailing commas are legal. Decoding one into a map and encoding it back would
+// drop every comment, reorder keys and reindent the file, so Beacon never does that. This package is
+// a small parser that keeps the byte span of every value, so an edit can splice text in or out at an
+// exact offset and leave every other byte where it was.
+package jsonc
 
 import (
 	"bytes"
@@ -6,14 +13,6 @@ import (
 	"fmt"
 	"strings"
 )
-
-// The harness configs Beacon edits are JSON files the user also edits by hand, and two of them
-// (OpenCode's opencode.jsonc, VS Code's mcp.json) are JSONC: comments and trailing commas are
-// legal. Decoding one into a map and encoding it back would drop every comment, reorder keys and
-// reindent the file, so Beacon never does that. This file is a small parser that keeps the byte
-// span of every value, so an edit can splice text in or out at an exact offset and leave every
-// other byte where it was. verifyJSONEdit then parses the result and checks that the edit changed
-// only the one entry Beacon owns.
 
 type jsonKind byte
 
@@ -272,10 +271,10 @@ func (p *jsonParser) array(depth int) (*jsonNode, error) {
 	}
 }
 
-// decodeJSONC parses a JSON or JSONC document into plain Go values, the way the harness reads it.
+// Decode parses a JSON or JSONC document into plain Go values, the way the harness reads it.
 // Numbers stay json.Number so a comparison never loses precision. An empty document is an empty
 // object, which is how every harness Beacon edits treats a blank config file.
-func decodeJSONC(text string) (map[string]any, error) {
+func Decode(text string) (map[string]any, error) {
 	root, err := parseJSONC(text)
 	if err != nil {
 		return nil, err

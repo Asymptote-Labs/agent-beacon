@@ -45,7 +45,7 @@ func TestConfigureVSCodePreservesSettingsAndDisablesContentCaptureByDefault(t *t
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
 	}
-	existing := `{"editor.formatOnSave":true}`
+	existing := "{\n    \"editor.formatOnSave\": true\n}\n"
 	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -79,6 +79,57 @@ func TestConfigureVSCodePreservesSettingsAndDisablesContentCaptureByDefault(t *t
 	}
 	if len(backups) != 1 {
 		t.Fatalf("backups = %#v, want one timestamped backup", backups)
+	}
+}
+
+// Setup sets Beacon's keys in place: a hand-edited settings.json keeps its comments, trailing
+// commas, order and indentation, and a value already there is replaced where it stands.
+func TestConfigureVSCodeKeepsACommentedSettingsFile(t *testing.T) {
+	home := t.TempDir()
+	isolateUserConfig(t, home)
+	path := vscodeSettingsPathForTest(home)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	existing := `{
+    // Editor
+    "editor.fontSize": 13,
+    /* Copilot: telemetry off until Beacon is set up */
+    "github.copilot.chat.otel.enabled": false,
+    "files.exclude": {
+        "**/.git": true, // keep
+    },
+}
+`
+	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ConfigureVSCode(VSCodeConfigOptions{Endpoint: "http://127.0.0.1:54318"}); err != nil {
+		t.Fatalf("ConfigureVSCode returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{
+    // Editor
+    "editor.fontSize": 13,
+    /* Copilot: telemetry off until Beacon is set up */
+    "github.copilot.chat.otel.enabled": true,
+    "files.exclude": {
+        "**/.git": true, // keep
+    },
+    "github.copilot.chat.otel.exporterType": "otlp-http",
+    "github.copilot.chat.otel.otlpEndpoint": "http://127.0.0.1:54318",
+    "github.copilot.chat.otel.captureContent": false,
+    "github.copilot.chat.otel.maxAttributeSizeChars": 8192,
+}
+`
+	if string(data) != want {
+		t.Fatalf("settings.json =\n%s\nwant\n%s", data, want)
+	}
+	if status, msg := VSCodeOTelStatus(path, "http://127.0.0.1:54318"); status != TelemetryEnabled {
+		t.Fatalf("status after setup = %s msg=%s, want enabled", status, msg)
 	}
 }
 
@@ -121,11 +172,14 @@ func TestVSCodeOTelStatusReadsJSONC(t *testing.T) {
 	if status, msg := VSCodeOTelStatus(path, "http://127.0.0.1:4318"); status != TelemetryEnabled {
 		t.Fatalf("status = %s msg=%s, want enabled", status, msg)
 	}
-	if err := os.WriteFile(path, []byte("{\n  // nothing yet\n  \"github.copilot.chat.otel.enabled\": true,\n  \"github.copilot.chat.otel.otlpEndpoint\": \"https://example.com\",\n}"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if status, _ := VSCodeOTelStatus(path, "http://127.0.0.1:4318"); status != TelemetryMisconfigured {
-		t.Fatalf("remote endpoint status = %s, want misconfigured", status)
+	// A commented-out key is not a setting, and an empty file is VS Code's empty settings.
+	for _, doc := range []string{"{\n  // \"github.copilot.chat.otel.enabled\": true,\n}\n", ""} {
+		if err := os.WriteFile(path, []byte(doc), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if status, msg := VSCodeOTelStatus(path, "http://127.0.0.1:4318"); status != TelemetryDisabled {
+			t.Fatalf("%q: status = %s msg=%s, want disabled", doc, status, msg)
+		}
 	}
 }
 

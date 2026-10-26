@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/jsonc"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -29,7 +30,7 @@ func parseTOML(text string) (map[string]any, error) {
 // JSON's string escapes (\" \\ \n \t \uXXXX, and nothing else) are all valid in a TOML basic
 // string, and the parse-back check in verifyConnect confirms the result.
 func tomlString(value string) string {
-	return jsonString(value)
+	return jsonc.Quote(value)
 }
 
 // tomlLineEnding is the line ending the document already uses. A new document gets "\n" on every
@@ -43,7 +44,7 @@ func tomlLineEnding(text string) string {
 
 // tomlBlock renders [mcp_servers.<name>] with fields in the order given. Values are strings, or
 // the person's own `enabled` boolean that connect carries over.
-func tomlBlock(table string, name string, fields []field, eol string) string {
+func tomlBlock(table string, name string, fields []jsonc.Field, eol string) string {
 	var b strings.Builder
 	b.WriteString("[" + table + "." + tomlKey(name) + "]" + eol)
 	for _, f := range fields {

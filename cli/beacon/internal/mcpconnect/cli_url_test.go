@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/jsonc"
 )
 
 // fakeClaude stands in for `claude mcp add/remove --scope user`, editing ~/.claude.json the way
@@ -129,7 +131,7 @@ func TestDisconnectFallsBackToTheFileWhenTheCLIIsGone(t *testing.T) {
 	writeFile(t, fake.path, `{"numStartups": 3}`)
 	connect(t, opts, mustTarget(t, "claude"))
 	disconnect(t, fileOptions(home), mustTarget(t, "claude"))
-	got, _ := decodeJSONC(readFile(t, fake.path))
+	got, _ := jsonc.Decode(readFile(t, fake.path))
 	if servers, _ := got["mcpServers"].(map[string]any); servers[ServerName] != nil {
 		t.Fatal("the entry survived disconnect without the CLI")
 	}
@@ -254,7 +256,7 @@ func TestClaudeCLIFailedAddRestoresTheEntryItRemoved(t *testing.T) {
 	if headers, _ := st.entry["headers"].(map[string]any); headers["X-Team"] != "a" {
 		t.Fatalf("the restored entry lost fields: %+v", st.entry)
 	}
-	got, _ := decodeJSONC(readFile(t, fake.path))
+	got, _ := jsonc.Decode(readFile(t, fake.path))
 	if got["numStartups"] == nil {
 		t.Fatal("restoring the entry dropped other state")
 	}

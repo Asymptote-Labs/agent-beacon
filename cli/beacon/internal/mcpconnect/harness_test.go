@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/jsonc"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
@@ -986,13 +987,13 @@ func TestCreatedFileIsKeptWhenTheUserAddedToIt(t *testing.T) {
 	target := mustTarget(t, "opencode")
 	path := targetPath(t, target, home)
 	connect(t, fileOptions(home), target)
-	withTheirs, _, err := insertJSONMember(readFile(t, path), []string{"mcp"}, "theirs", ordered{{"type", "remote"}, {"url", "https://t"}})
+	withTheirs, _, err := jsonc.InsertMember(readFile(t, path), []string{"mcp"}, "theirs", jsonc.Ordered{{Key: "type", Value: "remote"}, {Key: "url", Value: "https://t"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	writeFile(t, path, withTheirs)
 	disconnect(t, fileOptions(home), target)
-	got, err := decodeJSONC(readFile(t, path))
+	got, err := jsonc.Decode(readFile(t, path))
 	if err != nil {
 		t.Fatal(err)
 	}
