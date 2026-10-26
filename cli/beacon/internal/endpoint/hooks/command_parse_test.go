@@ -214,6 +214,9 @@ func TestEndpointCommandArgsMatchPrefix(t *testing.T) {
 		{name: "no log", binaryPath: "/opt/beacon/hooks/beacon-hooks", configPath: "/etc/beacon/config.json"},
 		{name: "no config", binaryPath: "/opt/beacon/hooks/beacon-hooks", logPath: "/var/log/beacon/runtime.jsonl"},
 		{name: "windows paths with spaces", binaryPath: `C:\Program Files\Beacon\beacon-hooks.exe`, logPath: `C:\ProgramData\Beacon\runtime.jsonl`, configPath: `C:\ProgramData\Beacon\config.json`},
+		{name: "apostrophes", binaryPath: `C:\Users\O'Brien\.beacon\beacon-hooks.exe`, logPath: `/home/o'brien/it's/runtime.jsonl`, configPath: `/home/o'brien/'quoted'/config.json'`},
+		{name: "shell metacharacters", binaryPath: "/opt/$HOME/`id`/beacon-hooks", logPath: `/var/log/a b;c|d&e/runtime.jsonl`, configPath: `/etc/"dq"/config.json`},
+		{name: "unc and non-ascii", binaryPath: `\\server\share\Beacon\beacon-hooks.exe`, logPath: `/Users/zoë/日誌/runtime.jsonl`, configPath: `C:\ProgramData\Beacon\config.json`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
