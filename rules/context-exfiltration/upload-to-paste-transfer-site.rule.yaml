@@ -1,6 +1,6 @@
 id: upload-to-paste-transfer-site
-version: 1
-title: Upload to an anonymous paste/transfer/tunnel host
+version: 2
+title: Upload to an anonymous paste/transfer/tunnel host or a gist
 description: >
   A command POSTs or uploads file content to a well-known anonymous file-drop,
   paste, or ad-hoc tunnel service (transfer.sh, 0x0.st, file.io, pastebin.com,
@@ -18,10 +18,14 @@ taxonomy:
   mitre_atlas: AML.T0024
 
 match: >
-  e.event.action == "command.executed" &&
-  e.command.command.matches("(?i)\\b(curl|wget|http|httpie)\\b") &&
-  e.command.command.matches("(?i)\\b(transfer\\.sh|0x0\\.st|file\\.io|pastebin\\.com|paste\\.rs|bashupload\\.com|termbin\\.com|gofile\\.io|catbox\\.moe|oshi\\.at|ngrok\\.(io|app|dev)|trycloudflare\\.com)\\b")
-
+  (
+    e.event.action == "command.executed" &&
+    e.command.command.matches("(?i)\\b(curl|wget|http|httpie)\\b") &&
+    e.command.command.matches("(?i)\\b(transfer\\.sh|0x0\\.st|file\\.io|pastebin\\.com|paste\\.rs|bashupload\\.com|termbin\\.com|gofile\\.io|catbox\\.moe|oshi\\.at|ngrok\\.(io|app|dev)|trycloudflare\\.com)\\b")
+  ) || (
+    e.event.action == "command.executed" &&
+    e.command.command.matches("(?i)\\bgh\\s+gist\\s+create\\b")
+  )
 emit:
   reason: "Outbound upload to an anonymous paste/transfer/tunnel host"
 
@@ -56,4 +60,15 @@ tests:
       - event: { action: command.executed }
         command: { command: "pip install requests" }
         session: { id: s1 }
-
+  - name: gist_create_file
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gh gist create --public dump.txt" }
+        session: { id: s1 }
+  - name: gist_list_only
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gh gist list" }
+        session: { id: s1 }

