@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
@@ -193,5 +194,34 @@ func TestCollectOncePrintClaimsNothing(t *testing.T) {
 	}
 	if _, err := os.Stat(SessionHomesPath(DefaultStatePath(root))); !os.IsNotExist(err) {
 		t.Fatalf("a dry run wrote the session home file: %v", err)
+	}
+}
+
+// Two homes syncing the same session id at once agree on which of them keeps the unkeyed ids,
+// because the claim is read and written under one lock.
+func TestCollectOnceClaimsASessionForOneHomeWhenHomesSyncAtOnce(t *testing.T) {
+	for range 5 {
+		root, profile := clonedHermesHomes(t)
+		var wg sync.WaitGroup
+		errs := make(chan error, 2)
+		for _, dir := range []string{root, profile} {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, err := CollectOnce(CollectOptions{DBPath: filepath.Join(dir, "state.db"), StatePath: DefaultStatePath(dir), LogPath: homeLog(dir), Write: true, UserMode: true})
+				errs <- err
+			}()
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if loadCursor(t, root).KeyedByHome == loadCursor(t, profile).KeyedByHome {
+			t.Fatalf("root keyed = %v and clone keyed = %v, want exactly one keyed", loadCursor(t, root).KeyedByHome, loadCursor(t, profile).KeyedByHome)
+		}
+		assertNoSharedEventIDs(t, root, profile)
 	}
 }
