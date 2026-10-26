@@ -1,0 +1,115 @@
+---
+title: "beacon endpoint harness2"
+description: "Collect endpoint telemetry from Harness² (google-research/harness2) rollouts"
+---
+
+## Command overview
+
+`beacon endpoint harness2` collects telemetry from [Harness²](/runtimes/harness2), Google Research's framework for recursive agent harnessing, by reading the executor event streams Harness² records under its runs directory and converting them into Beacon [endpoint events](/concepts/core-concepts#endpoint-event).
+
+```bash title="Command syntax"
+beacon endpoint harness2 [command]
+```
+
+It is a command rather than an install step because Harness² has nothing to install into. It runs OpenCode and Codex in environments it builds itself, so what records each rollout is the stream Harness² writes beside it, and collecting from that is an action rather than a configuration.
+
+Every event is marked `harness.collection_method=poll` and `harness.name=harness2`. Beacon sees a rollout once Harness² recorded it, so nothing here can hold or deny a tool call.
+
+Reading is local and offline. Nothing this command does reaches the network.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `beacon endpoint harness2 sync` | Read new rollout events into the runtime log |
+| `beacon endpoint harness2 status` | Show rollouts on this machine and how much of each has been collected |
+
+## Flags
+
+Both subcommands accept:
+
+| Flag | Description |
+|------|-------------|
+| `--runs-dir <path>` | Harness² runs directory. Repeatable. Defaults to `$HARNESS2_RUNS_DIR`, or `~/harness2/runs`, plus every directory an earlier `sync` was given |
+| `--state <path>` | Collector cursor file. Defaults to `~/.beacon/endpoint/state/harness2.json` |
+| `--json` | Print the result as JSON |
+| `--user` | Use per-user endpoint paths. Enabled by default |
+| `--system` | Use system endpoint paths. The cursor moves beside the system runtime log |
+
+`sync` also accepts:
+
+| Flag | Description |
+|------|-------------|
+| `--log-path <path>` | Runtime JSONL log path. Defaults to the resolved endpoint log |
+| `--print` | Print mapped events as JSON without writing them, advancing the cursor, or remembering a `--runs-dir` |
+| `--watch` | Sweep continuously on `--interval` instead of sweeping once and exiting |
+| `--interval <duration>` | Sweep interval for `--watch`. Defaults to `1m`, with a 5-second floor |
+| `--rotate-bytes <bytes>` | Rotate the runtime log at this many bytes while this sync writes it. Defaults to 10485760, the size every Beacon writer uses; must not be smaller. See [large backfills and log rotation](/runtimes/claude-code#large-backfills-and-log-rotation) |
+
+## Runs directories
+
+Harness² writes to `runs/` inside its own checkout unless `HARNESS2_RUNS_DIR` says otherwise, and a checkout can be anywhere. Name it once:
+
+```bash title="Read a checkout's runs directory"
+beacon endpoint harness2 sync --runs-dir ~/src/harness2/runs
+```
+
+The directory is remembered in the cursor file, so later syncs with no `--runs-dir`, and the [install-time backfill](/cli/endpoint-install#session-backfill), keep reading it alongside the default. Each new value of `HARNESS2_RUNS_DIR`, which Harness² recommends when changing models or task selection, is a new directory to name.
+
+## Sweeping
+
+```bash title="Sweep once"
+beacon endpoint harness2 sync
+```
+
+```bash title="Preview without writing anything"
+beacon endpoint harness2 sync --print
+```
+
+```bash title="Sweep continuously while an experiment runs"
+beacon endpoint harness2 sync --watch --interval 1m
+```
+
+Nothing sweeps on its own. Run `sync` after an experiment, under whatever scheduler the platform already uses, or leave `--watch` running during one.
+
+```text
+Harness² sync: 48 rollouts, 12 changed, 1934 events, 0 errors
+  2 rollout(s) still being written; the rest is read on the next sweep
+```
+
+## Status
+
+```bash title="Show rollouts and collection progress"
+beacon endpoint harness2 status
+```
+
+```text
+Harness² rollouts: 3 in /Users/you/src/harness2/runs
+  collected opencode   52 events  jb accountant/task3 h2-final-1  /Users/you/src/harness2/runs/jb/dataset/...
+  collected codex      38 events  lab antitrust-competition__t07__h2-cand-dom-1  /Users/you/src/harness2/runs/lab/results/cx/...
+  pending   opencode    0 events  wb office xlsx-budget__Ab3dE  /Users/you/src/harness2/runs/wb/office/...
+```
+
+`collected` means the file is unchanged since a sweep last read all of it.
+
+## Cursor behavior
+
+The cursor keeps one entry per trajectory file: the last line whose events were all written, the file's size and modification time, and the session it held. A stream still being written is read up to its last complete line, and the rest on a later sweep. When Harness² re-rolls a run into the same path, the file names a new session and is read from its start.
+
+| Mode | Default cursor path |
+|------|--------------------|
+| User | `~/.beacon/endpoint/state/harness2.json` |
+| System | `harness2-state.json` beside the system runtime log |
+
+Re-reading is safe: each event's id comes from its executor, session, line and kind, so the same line maps to the same event every time.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Harness²" icon="flask" href="/runtimes/harness2">
+    What Beacon records from Harness² rollouts, and the known gaps.
+  </Card>
+  <Card title="beacon endpoint install" icon="download" href="/cli/endpoint-install#session-backfill">
+    The install-time backfill that runs every session collector once.
+  </Card>
+</Columns>
