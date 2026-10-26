@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
@@ -162,16 +163,19 @@ func CountsFor(result Result) Counts {
 	}
 }
 
+// SnapshotDigest identifies what is on the machine, not how the scan listed it: each list is
+// digested as the sorted hashes of its entries, so no ordering upstream (map iteration, directory
+// walks, a sort with ties) can make an unchanged machine look changed.
 func SnapshotDigest(result Result) string {
 	payload := struct {
-		Configs    []Config    `json:"configs"`
-		MCPServers []MCPServer `json:"mcp_servers"`
-		Skills     []Skill     `json:"skills"`
-		UserScope  UserScope   `json:"user_scope"`
+		Configs    []string  `json:"configs"`
+		MCPServers []string  `json:"mcp_servers"`
+		Skills     []string  `json:"skills"`
+		UserScope  UserScope `json:"user_scope"`
 	}{
-		Configs:    digestConfigs(existingConfigs(result.Configs)),
-		MCPServers: result.MCPServers,
-		Skills:     existingSkills(result.Skills),
+		Configs:    entryHashes(digestConfigs(existingConfigs(result.Configs))),
+		MCPServers: entryHashes(result.MCPServers),
+		Skills:     entryHashes(existingSkills(result.Skills)),
 		UserScope:  result.UserScope,
 	}
 	data, err := json.Marshal(payload)
@@ -180,6 +184,22 @@ func SnapshotDigest(result Result) string {
 	}
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// entryHashes returns the sorted SHA-256 of each entry's JSON. An entry that cannot be encoded
+// cannot be one of the inventory types, so it is hashed by its position rather than dropped.
+func entryHashes[T any](entries []T) []string {
+	hashes := make([]string, len(entries))
+	for i, entry := range entries {
+		data, err := json.Marshal(entry)
+		if err != nil {
+			data = []byte(err.Error())
+		}
+		sum := sha256.Sum256(data)
+		hashes[i] = hex.EncodeToString(sum[:])
+	}
+	slices.Sort(hashes)
+	return hashes
 }
 
 // digestConfigs strips the raw-file fingerprint from volatile runtime state files so the digest
