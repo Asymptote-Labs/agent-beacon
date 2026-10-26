@@ -22,10 +22,10 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+|(^|[;&|])\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)+)\\s*git\\b[^;&|]*\\bfilter-(branch|repo)\\b") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+|(^|[;&|])\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)+)\\s*git\\b[^;&|]*\\brebase\\b[^;&|]*(\\s-i\\b|\\s--interactive\\b)") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+|(^|[;&|])\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)+)\\s*git\\b[^;&|]*\\bcommit\\b[^;&|]*\\s--amend\\b") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+|(^|[;&|])\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)+)\\s*git\\b[^;&|]*\\breplace\\b\\s+(--edit|--graft|--convert-forkpoint)")
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\bfilter-(branch|repo)\\b") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\brebase\\b[^;&|]*(\\s-i\\b|\\s--interactive\\b)") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\bcommit\\b[^;&|]*\\s--amend\\b") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\breplace\\b\\s+(--edit|--graft|--convert-forkpoint)")
   )
 
 emit:
