@@ -130,9 +130,6 @@ func inspectSkillRoot(root skillRoot, redaction string, co contentOptions) []Ski
 		if len(skills) >= maxSkillsPerRoot {
 			break
 		}
-		if skipSkillDir(entry.Name()) {
-			continue
-		}
 		if !entry.IsDir() && entry.Type()&os.ModeSymlink == 0 {
 			continue
 		}
@@ -189,15 +186,6 @@ func inspectSkillManifest(root skillRoot, name, manifestPath, redaction string, 
 	}
 	skill.ParserStatus = StatusOK
 	return skill
-}
-
-func skipSkillDir(name string) bool {
-	switch name {
-	case ".git", "node_modules", "vendor", "dist", "build", "tmp", "temp":
-		return true
-	default:
-		return false
-	}
 }
 
 func dedupeSkills(skills []Skill) []Skill {
