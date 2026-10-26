@@ -1,0 +1,287 @@
+id: cloud-permission-grant
+version: 1
+title: Cloud credentials created or permissions granted
+description: >
+  An agent creates cloud access keys, attaches or adds IAM policies or bindings,
+  assigns an Azure role, resets service-principal credentials, or creates a
+  Kubernetes role binding. This records a privileged action for review, not
+  proof that the resulting permissions were broader or malicious.
+severity: high
+status: experimental
+posture: detect
+taxonomy:
+  beacon_category: risky-command
+  owasp_llm: LLM06
+
+match: >
+  e.event.action == "command.executed" && (
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?aws(?:[ \\t]+--(?:profile|region|endpoint-url)[ \\t]+[^\\s;&|]+)*[ \\t]+iam[ \\t]+(?:create-access-key|attach-(?:user|group|role)-policy|put-(?:user|group|role)-policy|create-policy|create-policy-version|add-user-to-group)(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?gcloud(?:[ \\t]+--(?:project|account|configuration)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+iam[ \\t]+service-accounts[ \\t]+keys[ \\t]+create(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?gcloud(?:[ \\t]+--(?:project|account|configuration)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+(?:projects|organizations|folders|iam[ \\t]+service-accounts)[ \\t]+(?:add-iam-policy-binding|set-iam-policy)(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?gcloud(?:[ \\t]+--(?:project|account|configuration)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+(?:storage[ \\t]+buckets|run[ \\t]+services|secrets)[ \\t]+add-iam-policy-binding(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?az[ \\t]+(?:role[ \\t]+assignment[ \\t]+create|ad[ \\t]+sp[ \\t]+credential[ \\t]+reset)(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?kubectl(?:[ \\t]+(?:-n|--namespace|--context|--kubeconfig)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+create[ \\t]+(?:rolebinding|clusterrolebinding)(?:[ \\t]|$|[;&|\\n<>#])")
+  )
+
+emit:
+  reason: "Cloud credentials created or permissions granted"
+
+tests:
+  - name: match_1_aws_iam_create_access_key_user_name_agent
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws iam create-access-key --user-name agent" }
+        session: { id: s1 }
+  - name: match_2_aws_profile_prod_iam_attach_user_policy_user_name_agent_policy_arn_arn_aws_
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws --profile prod iam attach-user-policy --user-name agent --policy-arn arn:aws:iam::aws:policy/AdministratorAccess" }
+        session: { id: s1 }
+  - name: match_3_aws_iam_attach_role_policy_role_name_agent
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws iam attach-role-policy --role-name agent" }
+        session: { id: s1 }
+  - name: match_4_aws_iam_put_group_policy_group_name_dev
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws iam put-group-policy --group-name dev" }
+        session: { id: s1 }
+  - name: match_5_aws_iam_create_policy_policy_name_admin
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws iam create-policy --policy-name admin" }
+        session: { id: s1 }
+  - name: match_6_aws_iam_create_policy_version_policy_arn_arn_example
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws iam create-policy-version --policy-arn arn:example" }
+        session: { id: s1 }
+  - name: match_7_aws_iam_add_user_to_group_group_name_admins_user_name_agent
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws iam add-user-to-group --group-name admins --user-name agent" }
+        session: { id: s1 }
+  - name: match_8_gcloud_iam_service_accounts_keys_create_key_json_iam_account_agent_example_
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gcloud iam service-accounts keys create key.json --iam-account agent@example.test" }
+        session: { id: s1 }
+  - name: match_9_gcloud_projects_add_iam_policy_binding_prod_member_serviceaccount_agent_exa
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gcloud projects add-iam-policy-binding prod --member serviceAccount:agent@example.test --role roles/owner" }
+        session: { id: s1 }
+  - name: match_10_gcloud_iam_service_accounts_add_iam_policy_binding_agent_example_test_role_
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gcloud iam service-accounts add-iam-policy-binding agent@example.test --role roles/iam.serviceAccountUser" }
+        session: { id: s1 }
+  - name: match_11_gcloud_organizations_set_iam_policy_123_policy_json
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gcloud organizations set-iam-policy 123 policy.json" }
+        session: { id: s1 }
+  - name: match_12_gcloud_storage_buckets_add_iam_policy_binding_gs_data_role_roles_storage_ad
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gcloud storage buckets add-iam-policy-binding gs://data --role roles/storage.admin" }
+        session: { id: s1 }
+  - name: match_13_az_role_assignment_create_assignee_agent_role_owner
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "az role assignment create --assignee agent --role Owner" }
+        session: { id: s1 }
+  - name: match_14_az_ad_sp_credential_reset_id_app
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "az ad sp credential reset --id app" }
+        session: { id: s1 }
+  - name: match_15_kubectl_create_rolebinding_admin_clusterrole_admin_user_agent
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "kubectl create rolebinding admin --clusterrole=admin --user=agent" }
+        session: { id: s1 }
+  - name: match_16_kubectl_n_prod_create_clusterrolebinding_admin_clusterrole_cluster_admin_us
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "kubectl -n prod create clusterrolebinding admin --clusterrole=cluster-admin --user=agent" }
+        session: { id: s1 }
+  - name: no_match_1_aws_iam_list_access_keys
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws iam list-access-keys" }
+        session: { id: s1 }
+  - name: no_match_2_aws_iam_get_user_policy_user_name_agent_policy_name_admin
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws iam get-user-policy --user-name agent --policy-name admin" }
+        session: { id: s1 }
+  - name: no_match_3_aws_iam_list_attached_role_policies_role_name_agent
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws iam list-attached-role-policies --role-name agent" }
+        session: { id: s1 }
+  - name: no_match_4_gcloud_iam_service_accounts_keys_list
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gcloud iam service-accounts keys list" }
+        session: { id: s1 }
+  - name: no_match_5_gcloud_projects_get_iam_policy_prod
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gcloud projects get-iam-policy prod" }
+        session: { id: s1 }
+  - name: no_match_6_az_role_assignment_list
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "az role assignment list" }
+        session: { id: s1 }
+  - name: no_match_7_az_ad_sp_credential_list_id_app
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "az ad sp credential list --id app" }
+        session: { id: s1 }
+  - name: no_match_8_kubectl_get_rolebindings
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "kubectl get rolebindings" }
+        session: { id: s1 }
+  - name: no_match_9_kubectl_describe_clusterrolebinding_admin
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "kubectl describe clusterrolebinding admin" }
+        session: { id: s1 }
+  - name: no_match_10_aws_iam_list_users_echo_create_access_key
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws iam list-users; echo create-access-key" }
+        session: { id: s1 }
+  - name: no_match_11_gcloud_projects_list_echo_add_iam_policy_binding
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gcloud projects list\necho add-iam-policy-binding" }
+        session: { id: s1 }
+  - name: no_match_12_kubectl_get_pods_echo_create_rolebinding
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "kubectl get pods; echo create rolebinding" }
+        session: { id: s1 }
+  - name: no_match_13_aws_iam_get_user_create_access_key
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws iam get-user # create-access-key" }
+        session: { id: s1 }
+  - name: no_match_14_kubectl_create_role_admin
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "kubectl create role admin" }
+        session: { id: s1 }
+  - name: no_match_15_az_ad_sp_show_id_app
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "az ad sp show --id app" }
+        session: { id: s1 }
+  - name: newline
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "true\naws iam create-access-key --user-name agent" }
+        session: { id: s1 }
+  - name: then
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "if true; then aws iam create-access-key --user-name agent" }
+        session: { id: s1 }
+  - name: do
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "for x in a; do aws iam create-access-key --user-name agent" }
+        session: { id: s1 }
+  - name: else
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "if false; then true; else aws iam create-access-key --user-name agent" }
+        session: { id: s1 }
+  - name: redirect_or_comment_1
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws iam create-access-key --user-name agent 2>/dev/null" }
+        session: { id: s1 }
+  - name: redirect_or_comment_2
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws iam create-access-key --user-name agent >/dev/null 2>&1" }
+        session: { id: s1 }
+  - name: redirect_or_comment_3
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws iam create-access-key --user-name agent&>/dev/null" }
+        session: { id: s1 }
+  - name: redirect_or_comment_4
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws iam create-access-key --user-name agent # maintenance" }
+        session: { id: s1 }
+  - name: mention_1
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo \"aws iam create-access-key --user-name agent\"" }
+        session: { id: s1 }
+  - name: mention_2
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "grep -F \"aws iam create-access-key --user-name agent\"" }
+        session: { id: s1 }
+  - name: mention_3
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"aws iam create-access-key --user-name agent\"" }
+        session: { id: s1 }
+  - name: wrong_event_action
+    verdict: no_match
+    events:
+      - event: { action: tool.invoked }
+        command: { command: "aws iam create-access-key --user-name agent" }
+        session: { id: s1 }

@@ -1,0 +1,326 @@
+id: infrastructure-teardown
+version: 1
+title: Infrastructure destroyed or removed
+description: >
+  An agent tears down infrastructure, a namespace, a whole cloud bucket, or a
+  cloud project, resource group, cluster or stack. Plans and individual pod or
+  object deletions are excluded. These commands may be legitimate maintenance
+  but warrant review; the rule does not assert that deletion succeeded.
+severity: high
+status: experimental
+posture: detect
+taxonomy:
+  beacon_category: risky-command
+  owasp_llm: LLM06
+
+match: >
+  e.event.action == "command.executed" && (
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?(?:terraform|tofu)(?:[ \\t]+-chdir=[^\\s;&|]+)?[ \\t]+destroy(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?(?:pulumi|cdk)[ \\t]+destroy(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?kubectl(?:[ \\t]+(?:-n|--namespace|--context|--kubeconfig)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+delete[ \\t]+(?:namespace|namespaces|ns)(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?aws(?:[ \\t]+--(?:profile|region|endpoint-url)[ \\t]+[^\\s;&|]+)*[ \\t]+(?:s3[ \\t]+rb|(?:cloudformation[ \\t]+delete-stack|eks[ \\t]+delete-cluster)|s3api[ \\t]+delete-bucket)(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?aws(?:[ \\t]+--(?:profile|region|endpoint-url)[ \\t]+[^\\s;&|]+)*[ \\t]+s3[ \\t]+rm\\b[^;&|\\n#]*[ \\t]--recursive(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?gcloud(?:[ \\t]+--(?:project|account|configuration)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+(?:projects[ \\t]+delete|container[ \\t]+clusters[ \\t]+delete|storage[ \\t]+buckets[ \\t]+delete)(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?gcloud(?:[ \\t]+--(?:project|account|configuration)(?:=|[ \\t]+)[^\\s;&|]+)*[ \\t]+storage[ \\t]+rm\\b[^;&|\\n#]*[ \\t](?:--recursive|-r)(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?gsutil[ \\t]+(?:-m[ \\t]+)?(?:rb(?:[ \\t]|$|[;&|\\n<>#])|rm\\b[^;&|\\n#]*[ \\t]-[a-zA-Z]*[rR][a-zA-Z]*(?:[ \\t]|$|[;&|\\n<>#]))") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:sudo[ \\t]+)?(?:/[^\\s;&|]*/)?az[ \\t]+(?:group[ \\t]+delete|aks[ \\t]+delete|storage[ \\t]+container[ \\t]+delete)(?:[ \\t]|$|[;&|\\n<>#])")
+  )
+
+emit:
+  reason: "Infrastructure destroyed or removed"
+
+tests:
+  - name: match_1_terraform_destroy_auto_approve
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "terraform destroy -auto-approve" }
+        session: { id: s1 }
+  - name: match_2_tofu_chdir_infra_destroy
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "tofu -chdir=infra destroy" }
+        session: { id: s1 }
+  - name: match_3_pulumi_destroy_yes
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pulumi destroy --yes" }
+        session: { id: s1 }
+  - name: match_4_cdk_destroy_force
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cdk destroy --force" }
+        session: { id: s1 }
+  - name: match_5_kubectl_context_prod_delete_namespace_app
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "kubectl --context prod delete namespace app" }
+        session: { id: s1 }
+  - name: match_6_kubectl_delete_ns_app
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "kubectl delete ns app" }
+        session: { id: s1 }
+  - name: match_7_aws_s3_rb_s3_company_force
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws s3 rb s3://company --force" }
+        session: { id: s1 }
+  - name: match_8_aws_s3_rm_s3_company_recursive
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws s3 rm s3://company --recursive" }
+        session: { id: s1 }
+  - name: match_9_aws_s3api_delete_bucket_bucket_company
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws s3api delete-bucket --bucket company" }
+        session: { id: s1 }
+  - name: match_10_aws_region_us_east_1_cloudformation_delete_stack_stack_name_app
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws --region us-east-1 cloudformation delete-stack --stack-name app" }
+        session: { id: s1 }
+  - name: match_11_aws_eks_delete_cluster_name_prod
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws eks delete-cluster --name prod" }
+        session: { id: s1 }
+  - name: match_12_gcloud_projects_delete_prod
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gcloud projects delete prod" }
+        session: { id: s1 }
+  - name: match_13_gcloud_container_clusters_delete_prod
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gcloud container clusters delete prod" }
+        session: { id: s1 }
+  - name: match_14_gcloud_storage_buckets_delete_gs_company
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gcloud storage buckets delete gs://company" }
+        session: { id: s1 }
+  - name: match_15_gcloud_storage_rm_recursive_gs_company
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gcloud storage rm --recursive gs://company" }
+        session: { id: s1 }
+  - name: match_16_gsutil_m_rm_r_gs_company
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gsutil -m rm -r gs://company" }
+        session: { id: s1 }
+  - name: match_17_gsutil_rb_gs_company
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gsutil rb gs://company" }
+        session: { id: s1 }
+  - name: match_18_az_group_delete_name_prod_yes
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "az group delete --name prod --yes" }
+        session: { id: s1 }
+  - name: match_19_az_aks_delete_name_prod_resource_group_prod
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "az aks delete --name prod --resource-group prod" }
+        session: { id: s1 }
+  - name: match_20_az_storage_container_delete_name_data
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "az storage container delete --name data" }
+        session: { id: s1 }
+  - name: no_match_1_terraform_plan
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "terraform plan" }
+        session: { id: s1 }
+  - name: no_match_2_terraform_plan_destroy
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "terraform plan -destroy" }
+        session: { id: s1 }
+  - name: no_match_3_tofu_plan_destroy
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "tofu plan -destroy" }
+        session: { id: s1 }
+  - name: no_match_4_terraform_state_list
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "terraform state list" }
+        session: { id: s1 }
+  - name: no_match_5_kubectl_delete_pod_old_pod
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "kubectl delete pod old-pod" }
+        session: { id: s1 }
+  - name: no_match_6_kubectl_get_namespace
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "kubectl get namespace" }
+        session: { id: s1 }
+  - name: no_match_7_aws_s3_rm_s3_company_one_txt
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws s3 rm s3://company/one.txt" }
+        session: { id: s1 }
+  - name: no_match_8_gcloud_storage_rm_gs_company_one_txt
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gcloud storage rm gs://company/one.txt" }
+        session: { id: s1 }
+  - name: no_match_9_aws_cloudformation_list_stacks
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws cloudformation list-stacks" }
+        session: { id: s1 }
+  - name: no_match_10_az_group_list
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "az group list" }
+        session: { id: s1 }
+  - name: no_match_11_terraform_plan_echo_destroy
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "terraform plan; echo destroy" }
+        session: { id: s1 }
+  - name: no_match_12_terraform_plan_echo_destroy
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "terraform plan\necho destroy" }
+        session: { id: s1 }
+  - name: no_match_13_aws_s3_ls_echo_recursive
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "aws s3 ls; echo --recursive" }
+        session: { id: s1 }
+  - name: no_match_14_terraform_plan_destroy
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "terraform plan # destroy" }
+        session: { id: s1 }
+  - name: no_match_15_terraform_destroyer
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "terraform destroyer" }
+        session: { id: s1 }
+  - name: no_match_16_kubectl_delete_configmap_app
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "kubectl delete configmap app" }
+        session: { id: s1 }
+  - name: no_match_17_kubectl_get_pods_echo_delete_namespace_prod
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "kubectl get pods; echo delete namespace prod" }
+        session: { id: s1 }
+  - name: newline
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "true\nterraform destroy -auto-approve" }
+        session: { id: s1 }
+  - name: then
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "if true; then terraform destroy -auto-approve" }
+        session: { id: s1 }
+  - name: do
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "for x in a; do terraform destroy -auto-approve" }
+        session: { id: s1 }
+  - name: else
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "if false; then true; else terraform destroy -auto-approve" }
+        session: { id: s1 }
+  - name: redirect_or_comment_1
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "terraform destroy -auto-approve 2>/dev/null" }
+        session: { id: s1 }
+  - name: redirect_or_comment_2
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "terraform destroy -auto-approve >/dev/null 2>&1" }
+        session: { id: s1 }
+  - name: redirect_or_comment_3
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "terraform destroy -auto-approve&>/dev/null" }
+        session: { id: s1 }
+  - name: redirect_or_comment_4
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "terraform destroy -auto-approve # maintenance" }
+        session: { id: s1 }
+  - name: mention_1
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo \"terraform destroy -auto-approve\"" }
+        session: { id: s1 }
+  - name: mention_2
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "grep -F \"terraform destroy -auto-approve\"" }
+        session: { id: s1 }
+  - name: mention_3
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"terraform destroy -auto-approve\"" }
+        session: { id: s1 }
+  - name: wrong_event_action
+    verdict: no_match
+    events:
+      - event: { action: tool.invoked }
+        command: { command: "terraform destroy -auto-approve" }
+        session: { id: s1 }
