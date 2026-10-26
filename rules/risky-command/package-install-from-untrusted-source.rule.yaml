@@ -22,16 +22,12 @@ taxonomy:
 match: >
   e.event.action == "command.executed" && (
     (
-      e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(([^\\s;&|]*/)?(pip[0-9.]*|pipx|uv\\s+pip|uv\\s+tool|python[0-9.]*\\s+-m\\s+pip)\\s+install|uv\\s+add|poetry\\s+add)\\b") && (
-        e.command.command.matches("(?i)\\s['\\\"]?(git\\+|[\\w.\\[\\],-]+\\s*@\\s*(git\\+)?(https?|ssh|git|file)://|(https?|ssh|git)://[^\\s'\\\"]*\\.(whl|tar\\.gz|tgz|tar\\.bz2|zip|git)(#[^\\s'\\\"]*)?['\\\"]?(\\s|$))") ||
-        e.command.command.matches("(?i)\\s(--extra-index-url|--trusted-host)(\\s|=)") ||
-        (e.command.command.matches("(?i)\\s(-i|--index-url|--index)(\\s+|=)['\\\"]?https?://") && !e.command.command.matches("(?i)\\s(-i|--index-url|--index)(\\s+|=)['\\\"]?https://pypi\\.org/simple/?['\\\"]?(\\s|$)"))
-      )
+      e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(([^\\s;&|]*/)?(pip[0-9.]*|pipx|uv\\s+pip|uv\\s+tool|python[0-9.]*\\s+-m\\s+pip)\\s+install|uv\\s+add|poetry\\s+add)\\b[^;&|\\n]*?\\s['\\\"]?(git\\+|[\\w.\\[\\],-]+\\s*@\\s*(git\\+)?(https?|ssh|git|file)://|(https?|ssh|git)://[^\\s'\\\"]*\\.(whl|tar\\.gz|tgz|tar\\.bz2|zip|git)(#[^\\s'\\\"]*)?['\\\"]?(\\s|$))") ||
+      e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(([^\\s;&|]*/)?(pip[0-9.]*|pipx|uv\\s+pip|uv\\s+tool|python[0-9.]*\\s+-m\\s+pip)\\s+install|uv\\s+add|poetry\\s+add)\\b[^;&|\\n]*?\\s(--extra-index-url|--trusted-host)(\\s|=)") ||
+      (e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(([^\\s;&|]*/)?(pip[0-9.]*|pipx|uv\\s+pip|uv\\s+tool|python[0-9.]*\\s+-m\\s+pip)\\s+install|uv\\s+add|poetry\\s+add)\\b[^;&|\\n]*?\\s(-i|--index-url|--index)(\\s+|=)['\\\"]?https?://") && !e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(([^\\s;&|]*/)?(pip[0-9.]*|pipx|uv\\s+pip|uv\\s+tool|python[0-9.]*\\s+-m\\s+pip)\\s+install|uv\\s+add|poetry\\s+add)\\b[^;&|\\n]*?\\s(-i|--index-url|--index)(\\s+|=)['\\\"]?https://pypi\\.org/simple/?['\\\"]?(\\s|$)"))
     ) || (
-      e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(npm\\s+(install|i|add|ci)|pnpm\\s+(add|install|i)|yarn\\s+(global\\s+)?add|bun\\s+(add|install|i))\\b") && (
-        e.command.command.matches("(?i)\\s['\\\"]?(@?[\\w./-]+@)?(git\\+|github:|gitlab:|bitbucket:|gist:|git://|ssh://|https?://[^\\s'\\\"]*\\.(tgz|tar\\.gz|git)(#[^\\s'\\\"]*)?['\\\"]?(\\s|$))") ||
-        (e.command.command.matches("(?i)\\s--registry(\\s+|=)['\\\"]?https?://") && !e.command.command.matches("(?i)\\s--registry(\\s+|=)['\\\"]?https://registry\\.(npmjs\\.org|yarnpkg\\.com)/?['\\\"]?(\\s|$)"))
-      )
+      e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(npm\\s+(install|i|add|ci)|pnpm\\s+(add|install|i)|yarn\\s+(global\\s+)?add|bun\\s+(add|install|i))\\b[^;&|\\n]*?\\s['\\\"]?(@?[\\w./-]+@)?(git\\+|github:|gitlab:|bitbucket:|gist:|git://|ssh://|https?://[^\\s'\\\"]*\\.(tgz|tar\\.gz|git)(#[^\\s'\\\"]*)?['\\\"]?(\\s|$))") ||
+      (e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(npm\\s+(install|i|add|ci)|pnpm\\s+(add|install|i)|yarn\\s+(global\\s+)?add|bun\\s+(add|install|i))\\b[^;&|\\n]*?\\s--registry(\\s+|=)['\\\"]?https?://") && !e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(npm\\s+(install|i|add|ci)|pnpm\\s+(add|install|i)|yarn\\s+(global\\s+)?add|bun\\s+(add|install|i))\\b[^;&|\\n]*?\\s--registry(\\s+|=)['\\\"]?https://registry\\.(npmjs\\.org|yarnpkg\\.com)/?['\\\"]?(\\s|$)"))
     ) ||
     e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?(cargo\\s+install\\s+([^;&|\\n]*\\s)?--git\\b|gem\\s+install\\s+([^;&|\\n]*\\s)?(--source|--clear-sources)\\b)")
   )
@@ -171,6 +167,36 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "cargo install ripgrep" }
+        session: { id: s1 }
+  - name: pip_then_git_clone
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pip install -r requirements.txt && git clone https://github.com/org/repo.git" }
+        session: { id: s1 }
+  - name: npm_ci_then_git_clone
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "npm ci && git clone https://github.com/org/repo.git" }
+        session: { id: s1 }
+  - name: pip_editable_then_download
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pip install -e . && curl -O https://example.com/data.zip" }
+        session: { id: s1 }
+  - name: pip_default_then_custom_index_elsewhere
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "pip install requests; echo --index-url https://pkgs.example.test/simple" }
+        session: { id: s1 }
+  - name: cd_then_pip_git_url
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cd /tmp && pip install git+https://github.com/someone/helper.git" }
         session: { id: s1 }
   - name: git_clone_not_install
     verdict: no_match
