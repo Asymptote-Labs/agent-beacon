@@ -304,7 +304,7 @@ func isEndpointHookEntry(entry json.RawMessage) bool {
 
 // mergeEndpointHooks keeps an event's entries that are not Beacon's, in order, and appends refs.
 func mergeEndpointHooks(existing []json.RawMessage, refs []json.RawMessage) []json.RawMessage {
-	out := make([]json.RawMessage, 0, len(existing)+len(refs))
+	out := make([]json.RawMessage, 0, len(existing))
 	for _, item := range existing {
 		if !isEndpointHookEntry(item) {
 			out = append(out, item)
