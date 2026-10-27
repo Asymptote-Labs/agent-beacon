@@ -393,6 +393,7 @@
                   "cli/scan-ci-gates"
                 ]
               },
+              "cli/intel",
               "cli/handoff",
               "cli/share",
               "cli/lenses",
