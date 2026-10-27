@@ -92,6 +92,9 @@ type Options struct {
 	// CaptureModelContext keeps what Beacon records from Claude Code's API bodies. Off, every body
 	// event is dropped; see takeClaudeAPIBody.
 	CaptureModelContext bool
+	// CodexSurfaces remembers which Codex surface (CLI or desktop app) each conversation runs in,
+	// for records that don't say (see codex_surface.go). Nil places each record on its own.
+	CodexSurfaces *CodexSurfaces
 }
 
 type Converter struct {
@@ -368,6 +371,7 @@ func (c Converter) eventFromLog(resourceAttrs map[string]interface{}, record plo
 	// Last, so it sees the action and category the normalizers settled on rather
 	// than the ones InferAction guessed.
 	c.PromoteRetainedContent(&event, attrs, body)
+	c.opts.CodexSurfaces.settle(&event, attrs)
 	return event, !isAPIBody || kept.webFetch.text != "", c.claudeMCPToolListings(attrs, record, kept.mcpTools)
 }
 
@@ -413,6 +417,7 @@ func (c Converter) EventFromSpan(resourceAttrs map[string]interface{}, span ptra
 	}
 	event.Raw = c.RawPayload(attrs, rawExtra)
 	c.PromoteRetainedContent(&event, attrs, span.Name())
+	c.opts.CodexSurfaces.settle(&event, attrs)
 	return event
 }
 
@@ -899,6 +904,7 @@ func (c Converter) EventFromMetric(resourceAttrs map[string]interface{}, metric 
 		"metric_description": metric.Description(),
 		"metric_unit":        metric.Unit(),
 	})
+	c.opts.CodexSurfaces.settle(&event, attrs)
 	return event
 }
 
@@ -1132,6 +1138,7 @@ func (c Converter) usageEventFromDataPoint(resourceAttrs map[string]interface{},
 		rawExtra[k] = v
 	}
 	event.Raw = c.RawPayload(attrs, rawExtra)
+	c.opts.CodexSurfaces.settle(&event, attrs)
 	return event
 }
 

@@ -5,14 +5,14 @@ description: "Beacon support details for Codex CLI and Codex Desktop endpoint te
 
 ## Runtime overview
 
-Beacon supports Codex CLI runtime telemetry through local OTLP logs and one selective usage-bearing turn trace. Codex Desktop uses the same Codex OTLP configuration path through its app-server process, and Beacon records it as `codex_desktop` instead of merging it with `codex_cli`. A lightweight SessionStart hook records the local OS user for CLI token attribution, and a Stop hook records each turn's final assistant reply, which Codex's OTLP export does not carry.
+Beacon supports Codex CLI runtime telemetry through local OTLP logs and one selective usage-bearing turn trace. Codex Desktop uses the same Codex OTLP configuration, and Beacon records its sessions as `codex_desktop` and keeps them apart from `codex_cli`. A lightweight SessionStart hook records the local OS user for CLI token attribution, and a Stop hook records each turn's final assistant reply, which Codex's OTLP export does not carry.
 
 ## Prerequisites
 
 Before enabling Codex telemetry, make sure:
 
 - Codex CLI is installed and available as the `codex` executable for the user or managed endpoint.
-- Codex Desktop is installed if you want Desktop app-server telemetry.
+- Codex Desktop is installed if you want Desktop telemetry.
 - Codex CLI 0.149.1 or newer is used for verified turn-trace token attribution.
 - `beacon endpoint install` has run so the local collector, endpoint config, and runtime log path exist.
 - The install includes the `codex` harness, either through the default harness list or an explicit `--harness codex` value.
@@ -20,9 +20,13 @@ Before enabling Codex telemetry, make sure:
 
 ## Collection path
 
-Codex CLI exports local OpenTelemetry logs and traces to Beacon's localhost collector. Codex Desktop exports the same Codex semantic telemetry from `codex-app-server` when user-level `~/.codex/config.toml` enables OTLP. Beacon uses Codex semantic logs for session, prompt, approval, and tool-result events. For tokens it keeps only the completed `session_task.turn` span carrying `thread.id`, `turn.id`, model, and usage; hundreds of transport and internal spans remain suppressed. The CLI SessionStart hook writes a metadata-only `session.context` event. The CLI Stop hook writes the turn's final reply from the payload's `last_assistant_message` as an `agent.message` event, and nothing for a turn that ended without one. Neither hook reads the transcript. Inventory is written by the scheduled inventory job, not by this hook.
+Codex CLI exports local OpenTelemetry logs and traces to Beacon's localhost collector. Codex Desktop exports the same Codex semantic telemetry when user-level `~/.codex/config.toml` enables OTLP. Beacon uses Codex semantic logs for session, prompt, approval, and tool-result events. For tokens it keeps only the completed `session_task.turn` span carrying `thread.id`, `turn.id`, model, and usage; hundreds of transport and internal spans remain suppressed. The CLI SessionStart hook writes a metadata-only `session.context` event. The CLI Stop hook writes the turn's final reply from the payload's `last_assistant_message` as an `agent.message` event, and nothing for a turn that ended without one. Neither hook reads the transcript. Inventory is written by the scheduled inventory job, not by this hook.
 
 Use `--include-codex-spans` during install or repair only when you need every raw Codex span for troubleshooting. It is not required for token attribution.
+
+### Codex CLI or Desktop
+
+Codex CLI 0.163 and newer run on the same app-server as the desktop app, so both report the service name `codex-app-server`, and that name alone does not say which one a session ran in. Beacon goes by the `originator` attribute on Codex's log events instead: `Codex_Desktop` is recorded as `codex_desktop`, and `codex-tui` (the terminal), `codex_exec` (`codex exec`) and any other value as `codex_cli`. The usage span and token metrics carry no originator, so they take the surface their conversation's logs named. A record with neither, such as a usage span from a conversation whose logs never reached the collector, is recorded as `codex_cli`. Events already in the log keep the name they were written with, so CLI 0.163+ sessions recorded before Beacon v1.3.48 still show as `codex_desktop`.
 
 ### Session-file recovery
 
@@ -85,7 +89,7 @@ Beacon can also capture Codex telemetry in CI with `beacon ci start` and `beacon
 
 ## Discovery and status
 
-Beacon detects Codex CLI through the `codex` executable and `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`). Codex Desktop shares the same user-level configuration file, so Desktop app-server events appear once the app emits OTLP to Beacon's local collector. Use `beacon endpoint discover` or `beacon endpoint status` to confirm that Codex configuration is present.
+Beacon detects Codex CLI through the `codex` executable and `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`). Codex Desktop shares the same user-level configuration file, so Desktop events appear once the app emits OTLP to Beacon's local collector. Use `beacon endpoint discover` or `beacon endpoint status` to confirm that Codex configuration is present.
 
 ## Install or configuration support
 

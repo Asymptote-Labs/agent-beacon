@@ -64,6 +64,7 @@ func newExporter(raw component.Config, set exporter.Settings) (*falconExporter, 
 			IncludeRuntimeMetrics: cfg.IncludeRuntimeMetrics,
 			IncludeCodexSpans:     cfg.IncludeCodexSpans,
 			CaptureModelContext:   cfg.CaptureModelContext,
+			CodexSurfaces:         &beaconevent.CodexSurfaces{},
 		}),
 		listings: &beaconevent.MCPListings{},
 	}, nil

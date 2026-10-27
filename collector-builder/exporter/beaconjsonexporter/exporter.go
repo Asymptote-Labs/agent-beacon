@@ -31,6 +31,9 @@ type beaconExporter struct {
 	// listings keeps one mcp.tool_listed per tool per session out of the copy Claude Code sends
 	// with every model request.
 	listings *beaconevent.MCPListings
+	// codexSurfaces remembers which Codex surface each conversation runs in, across all three
+	// signals, so a record that doesn't name its surface gets the one its conversation did.
+	codexSurfaces *beaconevent.CodexSurfaces
 }
 
 func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, error) {
@@ -50,6 +53,7 @@ func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
+	codexSurfaces := &beaconevent.CodexSurfaces{}
 	return &beaconExporter{
 		cfg: cfg,
 		writer: jsonlWriter{
@@ -59,13 +63,15 @@ func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, 
 			rotateArchives: cfg.RotateArchives,
 			redactSecrets:  cfg.RedactSecrets,
 		},
-		logger:   set.Logger,
-		sequence: &asymptoteobserve.Sequencer{},
-		listings: &beaconevent.MCPListings{},
+		logger:        set.Logger,
+		sequence:      &asymptoteobserve.Sequencer{},
+		listings:      &beaconevent.MCPListings{},
+		codexSurfaces: codexSurfaces,
 		converter: beaconevent.NewConverter(beaconevent.Options{
 			IncludeRuntimeMetrics: cfg.IncludeRuntimeMetrics,
 			IncludeCodexSpans:     cfg.IncludeCodexSpans,
 			CaptureModelContext:   cfg.CaptureModelContext,
+			CodexSurfaces:         codexSurfaces,
 		}),
 	}, nil
 }
@@ -167,6 +173,7 @@ func (e *beaconExporter) eventConverter() beaconevent.Converter {
 		IncludeRuntimeMetrics: e.cfg.IncludeRuntimeMetrics,
 		IncludeCodexSpans:     e.cfg.IncludeCodexSpans,
 		CaptureModelContext:   e.cfg.CaptureModelContext,
+		CodexSurfaces:         e.codexSurfaces,
 	})
 }
 
