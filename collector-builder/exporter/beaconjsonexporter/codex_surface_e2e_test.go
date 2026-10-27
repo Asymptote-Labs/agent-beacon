@@ -81,7 +81,36 @@ func TestCollectorNamesCodexAppServerSessionsByOriginator(t *testing.T) {
 		t.Fatalf("ConsumeTraces: %v", err)
 	}
 
-	want := map[string]string{"cli-conv": "codex_cli", "desktop-conv": "codex_desktop"}
+	// A short turn's span can beat its prompt log across the two pipelines: the traces exporter
+	// holds it, and the logs exporter writes it once the log names the conversation.
+	early := ptrace.NewTraces()
+	ers := early.ResourceSpans().AppendEmpty()
+	ers.Resource().Attributes().PutStr("service.name", "codex-app-server")
+	earlySpan := ers.ScopeSpans().AppendEmpty().Spans().AppendEmpty()
+	earlySpan.SetName("session_task.turn")
+	earlySpan.Attributes().PutStr("thread.id", "quick-desktop-conv")
+	earlySpan.Attributes().PutInt("codex.turn.token_usage.input_tokens", 300)
+	if err := tracesExporter.ConsumeTraces(ctx, early); err != nil {
+		t.Fatalf("ConsumeTraces: %v", err)
+	}
+	for _, event := range readEvents(t, cfg.Path) {
+		if event.Session != nil && event.Session.ID == "quick-desktop-conv" {
+			t.Fatalf("span written before its conversation was named: %+v", event)
+		}
+	}
+	quick := plog.NewLogs()
+	qrl := quick.ResourceLogs().AppendEmpty()
+	qrl.Resource().Attributes().PutStr("service.name", "codex-app-server")
+	qrec := qrl.ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+	qrec.Attributes().PutStr("event.name", "codex.user_prompt")
+	qrec.Attributes().PutStr("conversation.id", "quick-desktop-conv")
+	qrec.Attributes().PutStr("originator", "Codex_Desktop")
+	qrec.Attributes().PutStr("prompt", "hi")
+	if err := logsExporter.ConsumeLogs(ctx, quick); err != nil {
+		t.Fatalf("ConsumeLogs: %v", err)
+	}
+
+	want := map[string]string{"cli-conv": "codex_cli", "desktop-conv": "codex_desktop", "quick-desktop-conv": "codex_desktop"}
 	usage := 0
 	for _, event := range readEvents(t, cfg.Path) {
 		if event.Session == nil {
@@ -94,7 +123,7 @@ func TestCollectorNamesCodexAppServerSessionsByOriginator(t *testing.T) {
 			usage++
 		}
 	}
-	if usage != 2 {
-		t.Fatalf("wrote %d token.usage events, want 2", usage)
+	if usage != 3 {
+		t.Fatalf("wrote %d token.usage events, want 3", usage)
 	}
 }

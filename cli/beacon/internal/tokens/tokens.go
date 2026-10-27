@@ -191,10 +191,14 @@ type usageEvent struct {
 	contextLimit int64
 	cumulative   bool
 	metricName   string
-	rawSource    string
-	sourceStart  time.Time
-	seriesField  string
-	seriesValue  float64
+	// codexAppServer marks usage exported by Codex's app-server, which the CLI and the desktop app
+	// share. A legacy turn metric from it names no conversation, so its harness is the exporter's
+	// default rather than its surface.
+	codexAppServer bool
+	rawSource      string
+	sourceStart    time.Time
+	seriesField    string
+	seriesValue    float64
 
 	// collectionMethod is harness.collection_method, lowercased: whether this usage came from
 	// live capture or from a poll of the runtime's own session store. requestScoped (cost.go)
@@ -609,6 +613,10 @@ func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []
 				ue.cumulative = true
 			}
 			ue.metricName, _ = event.Raw["metric_name"].(string)
+			if attrs, ok := event.Raw["attributes"].(map[string]interface{}); ok {
+				service, _ := attrs["service.name"].(string)
+				ue.codexAppServer = strings.EqualFold(strings.TrimSpace(service), "codex-app-server")
+			}
 			ue.rawSource, _ = event.Raw["source"].(string)
 			ue.tokenSource, _ = event.Raw["token_source"].(string)
 			if codex, ok := event.Raw["codex_session"].(map[string]interface{}); ok {
@@ -627,6 +635,11 @@ func collectUsageEvents(events []schema.Event, sessionUsers sessionUserIndex) []
 // the first time it appears for an endpoint/model. Legacy aggregate metrics
 // before that cutover remain reportable, while a manually configured
 // trace+metric overlap after it cannot double-count the same turns.
+//
+// A legacy metric from Codex's app-server names no conversation, so the exporter can't tell
+// whether the CLI or the desktop app sent it and records it as codex_cli. Both surfaces read one
+// ~/.codex/config.toml and so export the same signals; a turn span from either covers it. Metrics
+// from an older CLI (codex_cli_rs) keep to their own harness.
 func preferCodexTurnSpans(events []*usageEvent) []*usageEvent {
 	type sourceKey struct {
 		endpoint string
@@ -636,7 +649,7 @@ func preferCodexTurnSpans(events []*usageEvent) []*usageEvent {
 	keyFor := func(event *usageEvent) sourceKey {
 		return sourceKey{
 			endpoint: strings.ToLower(strings.TrimSpace(event.endpoint)),
-			harness:  usageHarnessKey(event.harness),
+			harness:  strings.ToLower(strings.TrimSpace(event.harness)),
 			model:    strings.ToLower(strings.TrimSpace(event.model)),
 		}
 	}
@@ -659,7 +672,16 @@ func preferCodexTurnSpans(events []*usageEvent) []*usageEvent {
 	}
 	out := events[:0]
 	for _, event := range events {
-		cutover, ok := cutovers[keyFor(event)]
+		key := keyFor(event)
+		cutover, ok := cutovers[key]
+		if event.codexAppServer && usageHarnessKey(key.harness) == "codex_cli" {
+			for _, surface := range []string{"codex_cli", "codex_desktop"} {
+				key.harness = surface
+				if other, found := cutovers[key]; found && (!ok || other.Before(cutover)) {
+					cutover, ok = other, true
+				}
+			}
+		}
 		if ok &&
 			strings.EqualFold(event.metricName, "codex.turn.token_usage") &&
 			!event.ts.IsZero() &&
@@ -695,11 +717,10 @@ func liveScopeFor(endpoint, harness, session string) (liveScope, bool) {
 	}, true
 }
 
-// usageHarnessKey is the harness the double-count checks group by. Codex's CLI and desktop app are
-// one runtime with one session store and one set of conversation ids. The exporter names the
-// surface from the originator Codex reports, and a record that can't say which -- the legacy turn
-// metric has no thread id, and `codex sync` reads both surfaces' rollouts -- is codex_cli. So the two
-// names are one key here, or a Desktop turn reported both ways would be counted under each.
+// usageHarnessKey is the harness a session's live/poll check groups by. Codex's CLI and desktop app
+// are one runtime with one session store and one set of conversation ids, and `codex sync` reads
+// both surfaces' rollouts and names them codex_cli. So within one session the two names are one
+// key, or a Desktop session's backfill would be counted again beside its live capture.
 func usageHarnessKey(harness string) string {
 	normalized := asymptoteobserve.NormalizeHarnessName(harness)
 	if normalized == "codex_desktop" {

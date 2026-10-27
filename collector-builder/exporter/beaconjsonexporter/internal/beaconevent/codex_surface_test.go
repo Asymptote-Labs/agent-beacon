@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -106,7 +107,8 @@ func TestCodexCLIOnTheAppServerIsNotRecordedAsDesktop(t *testing.T) {
 func TestCodexConversationKeepsItsSurfaceOnRecordsWithoutOriginator(t *testing.T) {
 	converter := NewConverter(Options{CodexSurfaces: &CodexSurfaces{}})
 
-	// Nothing has named this conversation yet: the usage span takes the default.
+	// Nothing has named this conversation yet: the usage span takes the default (and the exporter
+	// holds it for the conversation's logs; see TestCodexSurfacesHoldAConversationUntilItIsNamed).
 	if got := converter.EventFromSpan(appServer(), codexTurnSpan("early")).Harness.Name; got != "codex_cli" {
 		t.Fatalf("span before any log = %q, want codex_cli", got)
 	}
@@ -224,5 +226,104 @@ func TestAcquireCodexSurfacesSharesOnePerConfig(t *testing.T) {
 	defer release()
 	if fresh == traces {
 		t.Fatal("memory kept after every exporter released it")
+	}
+}
+
+// The logs and traces pipelines flush on their own timers, so a short Desktop turn's usage span can
+// arrive before the prompt log that names its conversation.
+func TestCodexSurfacesHoldAConversationUntilItIsNamed(t *testing.T) {
+	surfaces := &CodexSurfaces{}
+	converter := NewConverter(Options{CodexSurfaces: surfaces})
+	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+
+	early := converter.EventFromSpan(appServer(), codexTurnSpan("desktop-conv"))
+	if ready := surfaces.Sort([]Event{early}, now); len(ready) != 0 {
+		t.Fatalf("span for an unnamed conversation written at once: %+v", ready)
+	}
+
+	prompt := converter.EventFromLog(appServer(), codexLog("codex.user_prompt", "desktop-conv", "Codex_Desktop"))
+	ready := surfaces.Sort([]Event{prompt}, now.Add(2*time.Second))
+	if len(ready) != 2 || ready[0].Event.Action != "prompt.submitted" || ready[1].Event.Action != "token.usage" {
+		t.Fatalf("ready = %+v, want the prompt then the held span", ready)
+	}
+	for _, event := range ready {
+		if event.Harness.Name != "codex_desktop" || event.codexConversation != "" {
+			t.Fatalf("%s = %q (held for %q), want codex_desktop", event.Event.Action, event.Harness.Name, event.codexConversation)
+		}
+	}
+
+	// Once named, a conversation's later spans go straight out.
+	later := converter.EventFromSpan(appServer(), codexTurnSpan("desktop-conv"))
+	if ready := surfaces.Sort([]Event{later}, now.Add(3*time.Second)); len(ready) != 1 || ready[0].Harness.Name != "codex_desktop" {
+		t.Fatalf("span for a named conversation = %+v, want it written as codex_desktop", ready)
+	}
+}
+
+func TestCodexSurfacesReleaseAnUnnamedConversationAfterTheWait(t *testing.T) {
+	surfaces := &CodexSurfaces{}
+	converter := NewConverter(Options{CodexSurfaces: surfaces})
+	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+
+	surfaces.Sort([]Event{converter.EventFromSpan(appServer(), codexTurnSpan("logs-never-came"))}, now)
+	if ready := surfaces.Sort(nil, now.Add(codexHoldWindow-time.Millisecond)); len(ready) != 0 {
+		t.Fatalf("released before the wait ran out: %+v", ready)
+	}
+	ready := surfaces.Sort(nil, now.Add(codexHoldWindow))
+	if len(ready) != 1 || ready[0].Harness.Name != "codex_cli" {
+		t.Fatalf("after the wait = %+v, want the span as codex_cli", ready)
+	}
+
+	// A record with no conversation can never be named, so it is not held.
+	debug := converter.EventFromLog(appServer(), codexLog("codex.startup", "", ""))
+	if ready := surfaces.Sort([]Event{debug}, now); len(ready) != 1 {
+		t.Fatalf("record without a conversation held: %+v", ready)
+	}
+}
+
+func TestCodexSurfacesDrainOnShutdown(t *testing.T) {
+	surfaces := &CodexSurfaces{}
+	converter := NewConverter(Options{CodexSurfaces: surfaces})
+	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	surfaces.Sort([]Event{
+		converter.EventFromSpan(appServer(), codexTurnSpan("unnamed")),
+		converter.EventFromSpan(appServer(), codexTurnSpan("named-late")),
+	}, now)
+	surfaces.remember("named-late", codexDesktopHarness)
+
+	drained := surfaces.Drain()
+	if len(drained) != 2 || drained[0].Harness.Name != "codex_cli" || drained[1].Harness.Name != "codex_desktop" {
+		t.Fatalf("drained = %+v, want unnamed as codex_cli and named-late as codex_desktop", drained)
+	}
+	if again := surfaces.Drain(); len(again) != 0 {
+		t.Fatalf("second drain = %+v, want nothing", again)
+	}
+}
+
+func TestCodexSurfacesBoundWhatTheyHold(t *testing.T) {
+	surfaces := &CodexSurfaces{}
+	converter := NewConverter(Options{CodexSurfaces: surfaces})
+	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	var released []Event
+	for i := 0; i <= maxHeldCodexEvents; i++ {
+		released = append(released, surfaces.Sort([]Event{converter.EventFromSpan(appServer(), codexTurnSpan(fmt.Sprintf("conv-%d", i)))}, now)...)
+	}
+	if len(released) != 1 || released[0].Session.ID != "conv-0" {
+		t.Fatalf("released = %+v, want only the oldest", released)
+	}
+	surfaces.mu.Lock()
+	defer surfaces.mu.Unlock()
+	if len(surfaces.held) != maxHeldCodexEvents {
+		t.Fatalf("holding %d, want %d", len(surfaces.held), maxHeldCodexEvents)
+	}
+}
+
+func TestCodexSortWithoutMemoryPassesEverythingThrough(t *testing.T) {
+	var surfaces *CodexSurfaces
+	events := []Event{Converter{}.EventFromSpan(appServer(), codexTurnSpan("c"))}
+	if ready := surfaces.Sort(events, time.Now()); len(ready) != 1 {
+		t.Fatalf("nil memory held a record: %+v", ready)
+	}
+	if drained := surfaces.Drain(); drained != nil {
+		t.Fatalf("nil memory drained %+v", drained)
 	}
 }

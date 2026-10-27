@@ -847,13 +847,14 @@ func TestAggregatePrefersLiveCaptureOverPollBackfill(t *testing.T) {
 			suppressed: 1,
 		},
 		{
-			// The legacy metric names no conversation, so the exporter can't place it and it is
-			// codex_cli; the Desktop turn span over the same turns must still drop it.
-			name: "codex desktop turn span and a legacy metric",
+			// The app-server's legacy metric names no conversation, so the exporter can't place it
+			// and it is codex_cli; the Desktop turn span over the same turns must still drop it.
+			name: "codex desktop turn span and an app-server legacy metric",
 			events: []schema.Event{
 				event("2026-06-11T10:00:30Z", "codex_cli", otlp, "", "token.usage", &tokens{input: 20}, func(e *schema.Event) {
 					e.Model = "gpt-5.6-sol"
-					e.Raw = map[string]interface{}{"metric_name": "codex.turn.token_usage", "metric_temporality": "Delta"}
+					e.Raw = map[string]interface{}{"metric_name": "codex.turn.token_usage", "metric_temporality": "Delta",
+						"attributes": map[string]interface{}{"service.name": "codex-app-server"}}
 				}),
 				event("2026-06-11T10:00:30Z", "codex_desktop", otlp, "019a-desktop", "token.usage", &tokens{input: 20}, func(e *schema.Event) {
 					e.Model = "gpt-5.6-sol"
@@ -862,6 +863,25 @@ func TestAggregatePrefersLiveCaptureOverPollBackfill(t *testing.T) {
 			},
 			want:       tokens{input: 20},
 			wantEvents: 1,
+			suppressed: 0,
+		},
+		{
+			// An older CLI exports only the legacy metric, under its own service name; Desktop's
+			// turn spans on the same machine and model cover none of its turns.
+			name: "codex desktop turn span and an older CLI's legacy metric",
+			events: []schema.Event{
+				event("2026-06-11T10:00:00Z", "codex_desktop", otlp, "019a-desktop", "token.usage", &tokens{input: 20}, func(e *schema.Event) {
+					e.Model = "gpt-5.6-sol"
+					e.Raw = map[string]interface{}{"source": "codex_turn_span", "turn_start_timestamp": "2026-06-11T09:59:50Z"}
+				}),
+				event("2026-06-11T10:05:00Z", "codex_cli", otlp, "", "token.usage", &tokens{input: 7}, func(e *schema.Event) {
+					e.Model = "gpt-5.6-sol"
+					e.Raw = map[string]interface{}{"metric_name": "codex.turn.token_usage", "metric_temporality": "Delta",
+						"attributes": map[string]interface{}{"service.name": "codex_cli_rs"}}
+				}),
+			},
+			want:       tokens{input: 27},
+			wantEvents: 2,
 			suppressed: 0,
 		},
 		{

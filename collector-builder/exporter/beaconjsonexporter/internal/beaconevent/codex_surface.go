@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Codex runs on one set of app-server internals in the desktop app and, since CLI 0.163, in the
@@ -16,6 +17,10 @@ import (
 // the legacy token metric not even that. So the surface an originator names is remembered per
 // conversation, and a conversation's records without one get the same name. A record with neither
 // stays codex_cli, the name Codex's hooks use on every surface.
+//
+// The logs and traces pipelines flush on their own timers, so a short turn's usage span can reach
+// the exporter before the prompt log that names its conversation. Sort holds such a record until
+// its conversation is named or codexHoldWindow runs out.
 
 const (
 	codexCLIHarness     = "codex_cli"
@@ -27,6 +32,13 @@ const (
 // conversations cover any real machine.
 const maxCodexConversations = 4096
 
+// codexHoldWindow is how long Sort holds a record for its conversation's logs. Codex batches its
+// logs for up to a second and the collector's batch processor waits up to five more.
+const codexHoldWindow = 10 * time.Second
+
+// maxHeldCodexEvents bounds the records held at once; past it the oldest goes out as it is.
+const maxHeldCodexEvents = 1024
+
 // CodexSurfaces remembers which Codex surface each conversation runs in. It is shared across every
 // signal the exporter receives (logs, traces, metrics arrive on separate pipelines), so it is safe
 // for concurrent use. The zero value is ready to use; a nil *CodexSurfaces remembers nothing.
@@ -36,6 +48,13 @@ type CodexSurfaces struct {
 	// recent orders the conversations most recently used first; each element holds a
 	// codexConversation.
 	recent list.List
+	// held are the records Sort is waiting to name, oldest first.
+	held []heldCodexEvent
+}
+
+type heldCodexEvent struct {
+	event Event
+	until time.Time
 }
 
 type codexConversation struct {
@@ -130,8 +149,81 @@ func (s *CodexSurfaces) settle(event *Event, attrs map[string]interface{}) {
 	}
 	if surface == "" {
 		surface = codexCLIHarness
+		if s != nil {
+			event.codexConversation = conversation
+		}
 	}
 	event.Harness.Name = surface
+}
+
+// Sort returns the events to write now, in order: the given ones whose surface is settled, then
+// any held earlier whose conversation has since been named or whose wait has run out. A Codex
+// app-server record whose conversation is unnamed is held back instead. Every exporter sharing the
+// memory calls it with each batch, so a log that names a conversation releases that conversation's
+// held records through whichever exporter received the log.
+func (s *CodexSurfaces) Sort(events []Event, now time.Time) []Event {
+	if s == nil {
+		return events
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ready := make([]Event, 0, len(events))
+	for _, event := range events {
+		if event.codexConversation == "" || s.nameLocked(&event) {
+			ready = append(ready, event)
+			continue
+		}
+		s.held = append(s.held, heldCodexEvent{event: event, until: now.Add(codexHoldWindow)})
+	}
+	for len(s.held) > maxHeldCodexEvents {
+		ready = append(ready, s.release(0))
+	}
+	for i := 0; i < len(s.held); {
+		held := &s.held[i]
+		if s.nameLocked(&held.event) || !now.Before(held.until) {
+			ready = append(ready, s.release(i))
+			continue
+		}
+		i++
+	}
+	return ready
+}
+
+// Drain returns every held record, named where its conversation now is, for an exporter shutting
+// down.
+func (s *CodexSurfaces) Drain() []Event {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []Event
+	for len(s.held) > 0 {
+		s.nameLocked(&s.held[0].event)
+		out = append(out, s.release(0))
+	}
+	return out
+}
+
+// nameLocked gives a held record its conversation's surface once one is known, and reports
+// whether it did. s.mu is held.
+func (s *CodexSurfaces) nameLocked(event *Event) bool {
+	element, known := s.byID[event.codexConversation]
+	if !known {
+		return false
+	}
+	s.recent.MoveToFront(element)
+	event.Harness.Name = element.Value.(*codexConversation).surface
+	event.codexConversation = ""
+	return true
+}
+
+// release removes held record i and returns it as it stands, without the hold marker. s.mu is held.
+func (s *CodexSurfaces) release(i int) Event {
+	event := s.held[i].event
+	event.codexConversation = ""
+	s.held = append(s.held[:i], s.held[i+1:]...)
+	return event
 }
 
 func (s *CodexSurfaces) remember(conversation, surface string) {

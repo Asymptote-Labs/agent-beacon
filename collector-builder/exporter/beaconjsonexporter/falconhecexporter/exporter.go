@@ -33,7 +33,10 @@ type falconExporter struct {
 	converter beaconevent.Converter
 	listings  *beaconevent.MCPListings
 	// releaseCodexSurfaces gives up this exporter's share of the Codex surface memory it holds
-	// with the other signals' exporters built from the same config.
+	// with the other signals' exporters built from the same config. Unlike the JSONL exporter it
+	// doesn't hold records back for a conversation's logs (CodexSurfaces.Sort): exporterhelper
+	// retries a failed send by running the batch again, which would lose held records released
+	// into it.
 	releaseCodexSurfaces func()
 }
 

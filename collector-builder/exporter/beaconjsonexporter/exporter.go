@@ -79,17 +79,38 @@ func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, 
 	}, nil
 }
 
+// shutdown writes the Codex records still waiting for their conversation's surface, as they
+// stand, and gives up this exporter's share of the memory.
 func (e *beaconExporter) shutdown(context.Context) error {
+	firstErr := e.writeEvents(e.codexSurfaces.Drain())
 	if e.releaseCodexSurfaces != nil {
 		e.releaseCodexSurfaces()
 	}
-	return nil
+	return firstErr
+}
+
+// sortCodex returns the events to write now. A Codex record whose surface isn't known yet waits
+// in the shared memory, and goes out with whichever exporter's batch names it or comes after its
+// wait runs out (see beaconevent.CodexSurfaces.Sort).
+func (e *beaconExporter) sortCodex(events []beaconEvent) []beaconEvent {
+	return e.codexSurfaces.Sort(events, time.Now())
+}
+
+func (e *beaconExporter) writeEvents(events []beaconEvent) error {
+	var firstErr error
+	for _, event := range events {
+		e.stampSequence(&event)
+		if err := e.writer.append(event); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func (e *beaconExporter) consumeLogs(ctx context.Context, logs plog.Logs) error {
 	_ = ctx
 	var firstErr error
-	for _, event := range e.listings.Filter(e.eventConverter().EventsFromLogs(logs)) {
+	for _, event := range e.sortCodex(e.listings.Filter(e.eventConverter().EventsFromLogs(logs))) {
 		e.stampSequence(&event)
 		if err := e.writer.append(event); err != nil {
 			if firstErr == nil {
@@ -104,26 +125,12 @@ func (e *beaconExporter) consumeLogs(ctx context.Context, logs plog.Logs) error 
 
 func (e *beaconExporter) consumeTraces(ctx context.Context, traces ptrace.Traces) error {
 	_ = ctx
-	var firstErr error
-	for _, event := range e.eventConverter().EventsFromTraces(traces) {
-		e.stampSequence(&event)
-		if err := e.writer.append(event); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	return firstErr
+	return e.writeEvents(e.sortCodex(e.eventConverter().EventsFromTraces(traces)))
 }
 
 func (e *beaconExporter) consumeMetrics(ctx context.Context, metrics pmetric.Metrics) error {
 	_ = ctx
-	var firstErr error
-	for _, event := range e.eventConverter().EventsFromMetrics(metrics) {
-		e.stampSequence(&event)
-		if err := e.writer.append(event); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	return firstErr
+	return e.writeEvents(e.sortCodex(e.eventConverter().EventsFromMetrics(metrics)))
 }
 
 // stampSequence gives the event this exporter's next emission number, unless the runtime
