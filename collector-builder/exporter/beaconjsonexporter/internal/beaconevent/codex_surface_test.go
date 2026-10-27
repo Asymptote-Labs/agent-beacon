@@ -87,7 +87,7 @@ func TestCodexLogHarnessFollowsOriginator(t *testing.T) {
 	}
 }
 
-// The bug this fixes: Codex CLI 0.163+ runs on the app-server, and every one of its sessions was
+// The bug this fixes: Codex CLI 0.158+ runs on the app-server, and every one of its sessions was
 // recorded as codex_desktop, the usage span included, on machines that never ran the desktop app.
 func TestCodexCLIOnTheAppServerIsNotRecordedAsDesktop(t *testing.T) {
 	converter := NewConverter(Options{CodexSurfaces: &CodexSurfaces{}})

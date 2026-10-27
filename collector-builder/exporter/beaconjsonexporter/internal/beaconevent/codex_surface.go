@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Codex runs on one set of app-server internals in the desktop app and, since CLI 0.163, in the
+// Codex runs on one set of app-server internals in the desktop app and, since about CLI 0.158, in the
 // terminal too, and both export OTLP as service.name=codex-app-server. The service name alone
 // therefore can't tell the Codex desktop app from the CLI. What does is the `originator` attribute
 // Codex puts on its semantic log events: "Codex_Desktop" for the desktop app, "codex-tui" for the

@@ -46,7 +46,7 @@ func NormalizeHarnessName(name string) string {
 		return "openclaw_gateway"
 	case strings.Contains(lower, "antigravity") || strings.Contains(lower, "anti-gravity"):
 		return "antigravity_cli"
-	// codex-app-server is not a Desktop name. The desktop app and, since CLI 0.163, the terminal
+	// codex-app-server is not a Desktop name. The desktop app and, since about CLI 0.158, the terminal
 	// CLI both run Codex's app-server and export OTLP under that one service name, so it falls
 	// through to codex_cli here. The collector exporter tells the two apart by the `originator`
 	// Codex reports on each conversation (beaconevent.CodexSurfaces) and names Desktop sessions
