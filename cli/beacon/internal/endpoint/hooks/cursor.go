@@ -48,9 +48,27 @@ var cursorRuntime = hookRuntime{
 	displayName: "Cursor",
 	configPath:  cursorHooksJSONPath,
 	install:     installCursorHooksJSON,
-	uninstall:   removeEndpointHooks,
+	uninstall:   removeCursorEndpointHooks,
 	isInstalled: isCursorInstalledAt,
 }
+
+// Extension points for a build of Beacon that compiles in hook subcommands of its own (see
+// version.Edition). Both are nil in this build, which installs exactly the hooks listed in
+// installCursorHooksJSON.
+var (
+	// cursorExtraHooks returns further hook entries to install for Cursor, keyed by event, given
+	// the command prefix Beacon's own hooks use. Their commands carry that prefix, so repair,
+	// status and uninstall treat them as Beacon's hooks. Every event the map names is stripped of
+	// Beacon's entries like the events Beacon installs, then gets Beacon's own entry, if it has
+	// one, followed by these. An event named with no entries is stripped and left with only the
+	// user's, so a build stops installing a hook by naming its event with none: an event left out
+	// of the map keeps whatever Beacon wrote there until an uninstall.
+	cursorExtraHooks func(prefix string) map[string][]HookRef
+
+	// cursorHooksChanged runs after Beacon has written its hooks into a Cursor hooks.json
+	// (installed true) or taken them out (installed false), as whoever ran the install.
+	cursorHooksChanged func(hooksPath string, installed bool) error
+)
 
 func InstallCursor(opts CursorOptions) (CursorStatus, error) {
 	status, err := installRuntimeHooks(cursorRuntime, RuntimeOptions(opts))
@@ -103,18 +121,51 @@ func installCursorHooksJSON(path, binaryPath, logPath, configPath string) error 
 		"stop":               {Command: commandPrefix + " stop"},
 		"sessionEnd":         {Command: commandPrefix + " session-end"},
 	}
+	entries := make(map[string][]json.RawMessage, len(endpointHooks))
 	for hookName, ref := range endpointHooks {
 		entry, err := json.Marshal(ref)
 		if err != nil {
 			return err
 		}
-		hooksFile.hooks[hookName] = mergeEndpointHook(hooksFile.hooks[hookName], entry)
+		entries[hookName] = []json.RawMessage{entry}
+	}
+	if cursorExtraHooks != nil {
+		for hookName, refs := range cursorExtraHooks(commandPrefix) {
+			list := entries[hookName]
+			for _, ref := range refs {
+				entry, err := json.Marshal(ref)
+				if err != nil {
+					return err
+				}
+				list = append(list, entry)
+			}
+			entries[hookName] = list
+		}
+	}
+	for hookName, list := range entries {
+		existing := hooksFile.hooks[hookName]
+		merged := mergeEndpointHooks(existing, list)
+		if len(merged) == 0 {
+			// Only an extension's event can end up empty. Drop it when Beacon's entries were
+			// all it held; an event that was already empty is the user's and stays as it was.
+			if len(existing) > 0 {
+				delete(hooksFile.hooks, hookName)
+			}
+			continue
+		}
+		hooksFile.hooks[hookName] = merged
 	}
 	data, err := hooksFile.marshal()
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return err
+	}
+	if cursorHooksChanged != nil {
+		return cursorHooksChanged(path, true)
+	}
+	return nil
 }
 
 func RenderCursorCloudHooks(opts CursorCloudOptions) (string, error) {
@@ -251,14 +302,28 @@ func isEndpointHookEntry(entry json.RawMessage) bool {
 	return isEndpointHook(cursorHookCommand(entry))
 }
 
-func mergeEndpointHook(existing []json.RawMessage, ref json.RawMessage) []json.RawMessage {
-	out := make([]json.RawMessage, 0, len(existing))
+// mergeEndpointHooks keeps an event's entries that are not Beacon's, in order, and appends refs.
+func mergeEndpointHooks(existing []json.RawMessage, refs []json.RawMessage) []json.RawMessage {
+	out := make([]json.RawMessage, 0, len(existing)+len(refs))
 	for _, item := range existing {
 		if !isEndpointHookEntry(item) {
 			out = append(out, item)
 		}
 	}
-	return append(out, ref)
+	return append(out, refs...)
+}
+
+func removeCursorEndpointHooks(path string) (bool, error) {
+	removed, err := removeEndpointHooks(path)
+	if err != nil {
+		return removed, err
+	}
+	if cursorHooksChanged != nil {
+		if err := cursorHooksChanged(path, false); err != nil {
+			return removed, err
+		}
+	}
+	return removed, nil
 }
 
 func removeEndpointHooks(path string) (bool, error) {
