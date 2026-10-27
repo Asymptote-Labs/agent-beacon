@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "afterFileEdit": [
+      {
+        "command": "echo edited"
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "type": "prompt",
+        "prompt": "Is this command safe to run?",
+        "model": "fast"
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "command": "/usr/local/bin/prompt-guard",
+        "timeout": 5,
+        "failClosed": true
+      }
+    ]
+  },
+  "note": {
+    "owner": "user"
+  },
+  "version": 1
+}
