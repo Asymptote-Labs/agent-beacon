@@ -42,14 +42,13 @@ func codexTurnSpan(thread string) ptrace.Span {
 	return span
 }
 
-// codexUsageMetric is the older token metric, one datapoint naming its conversation.
-func codexUsageMetric(conversation string) pmetric.Metric {
+// codexUsageMetric is the legacy token metric. Codex exports it with no conversation id.
+func codexUsageMetric() pmetric.Metric {
 	metric := pmetric.NewMetric()
 	metric.SetName("codex.turn.token_usage")
 	dp := metric.SetEmptySum().DataPoints().AppendEmpty()
 	dp.SetDoubleValue(80)
 	dp.Attributes().PutStr("token_type", "output")
-	dp.Attributes().PutStr("conversation.id", conversation)
 	return metric
 }
 
@@ -125,9 +124,11 @@ func TestCodexConversationKeepsItsSurfaceOnRecordsWithoutOriginator(t *testing.T
 	if got := converter.EventFromLog(appServer(), codexLog("codex.tool_result", "desktop-conv", "")).Harness.Name; got != "codex_desktop" {
 		t.Fatalf("desktop log without originator = %q, want codex_desktop", got)
 	}
-	for _, event := range converter.EventsFromMetric(appServer(), codexUsageMetric("desktop-conv")) {
-		if event.Harness.Name != "codex_desktop" {
-			t.Fatalf("desktop usage metric = %q, want codex_desktop", event.Harness.Name)
+	// The legacy metric names no conversation, so nothing places it; the token report folds the
+	// two Codex names together where it matters (cli/beacon/internal/tokens usageHarnessKey).
+	for _, event := range converter.EventsFromMetric(appServer(), codexUsageMetric()) {
+		if event.Harness.Name != "codex_cli" {
+			t.Fatalf("usage metric without a conversation = %q, want codex_cli", event.Harness.Name)
 		}
 	}
 	if got := converter.EventFromSpan(appServer(), codexTurnSpan("unknown-conv")).Harness.Name; got != "codex_cli" {
@@ -189,4 +190,39 @@ func TestCodexSurfacesAreSafeForConcurrentSignals(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+// The collector builds the logs, traces and metrics exporters from one config separately; they
+// must hold one memory between them, and it goes when the last of them shuts down.
+func TestAcquireCodexSurfacesSharesOnePerConfig(t *testing.T) {
+	type config struct{ path string }
+	a, b := &config{"a"}, &config{"a"}
+	logs, releaseLogs := AcquireCodexSurfaces(a)
+	traces, releaseTraces := AcquireCodexSurfaces(a)
+	other, releaseOther := AcquireCodexSurfaces(b)
+	defer releaseOther()
+	if logs != traces {
+		t.Fatal("two exporters built from one config got separate memories")
+	}
+	if logs == other {
+		t.Fatal("exporters built from different configs share a memory")
+	}
+	logs.remember("desktop-conv", codexDesktopHarness)
+	if got := traces.recall("desktop-conv"); got != codexDesktopHarness {
+		t.Fatalf("traces exporter recalls %q, want codex_desktop", got)
+	}
+
+	releaseLogs()
+	releaseLogs() // a second release is a no-op
+	again, release := AcquireCodexSurfaces(a)
+	if again != traces {
+		t.Fatal("memory freed while an exporter still held it")
+	}
+	release()
+	releaseTraces()
+	fresh, release := AcquireCodexSurfaces(a)
+	defer release()
+	if fresh == traces {
+		t.Fatal("memory kept after every exporter released it")
+	}
 }

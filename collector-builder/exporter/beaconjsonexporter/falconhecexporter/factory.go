@@ -29,14 +29,14 @@ func exporterOptions(cfg *Config) []exporterhelper.Option {
 	}
 }
 
-func exporterhelperNewLogs(ctx context.Context, set exporter.Settings, cfg component.Config, pusher consumer.ConsumeLogsFunc, fcfg *Config) (exporter.Logs, error) {
-	return exporterhelper.NewLogs(ctx, set, cfg, pusher, exporterOptions(fcfg)...)
+func exporterhelperNewLogs(ctx context.Context, set exporter.Settings, cfg component.Config, pusher consumer.ConsumeLogsFunc, fcfg *Config, extra ...exporterhelper.Option) (exporter.Logs, error) {
+	return exporterhelper.NewLogs(ctx, set, cfg, pusher, append(exporterOptions(fcfg), extra...)...)
 }
 
-func exporterhelperNewTraces(ctx context.Context, set exporter.Settings, cfg component.Config, pusher consumer.ConsumeTracesFunc, fcfg *Config) (exporter.Traces, error) {
-	return exporterhelper.NewTraces(ctx, set, cfg, pusher, exporterOptions(fcfg)...)
+func exporterhelperNewTraces(ctx context.Context, set exporter.Settings, cfg component.Config, pusher consumer.ConsumeTracesFunc, fcfg *Config, extra ...exporterhelper.Option) (exporter.Traces, error) {
+	return exporterhelper.NewTraces(ctx, set, cfg, pusher, append(exporterOptions(fcfg), extra...)...)
 }
 
-func exporterhelperNewMetrics(ctx context.Context, set exporter.Settings, cfg component.Config, pusher consumer.ConsumeMetricsFunc, fcfg *Config) (exporter.Metrics, error) {
-	return exporterhelper.NewMetrics(ctx, set, cfg, pusher, exporterOptions(fcfg)...)
+func exporterhelperNewMetrics(ctx context.Context, set exporter.Settings, cfg component.Config, pusher consumer.ConsumeMetricsFunc, fcfg *Config, extra ...exporterhelper.Option) (exporter.Metrics, error) {
+	return exporterhelper.NewMetrics(ctx, set, cfg, pusher, append(exporterOptions(fcfg), extra...)...)
 }

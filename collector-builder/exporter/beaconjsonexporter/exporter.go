@@ -31,9 +31,11 @@ type beaconExporter struct {
 	// listings keeps one mcp.tool_listed per tool per session out of the copy Claude Code sends
 	// with every model request.
 	listings *beaconevent.MCPListings
-	// codexSurfaces remembers which Codex surface each conversation runs in, across all three
-	// signals, so a record that doesn't name its surface gets the one its conversation did.
-	codexSurfaces *beaconevent.CodexSurfaces
+	// codexSurfaces remembers which Codex surface each conversation runs in. It is shared with
+	// the other signals' exporters built from this config, so a usage span that doesn't name its
+	// surface gets the one its conversation's logs did.
+	codexSurfaces        *beaconevent.CodexSurfaces
+	releaseCodexSurfaces func()
 }
 
 func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, error) {
@@ -53,7 +55,7 @@ func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	codexSurfaces := &beaconevent.CodexSurfaces{}
+	codexSurfaces, release := beaconevent.AcquireCodexSurfaces(cfg)
 	return &beaconExporter{
 		cfg: cfg,
 		writer: jsonlWriter{
@@ -63,10 +65,11 @@ func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, 
 			rotateArchives: cfg.RotateArchives,
 			redactSecrets:  cfg.RedactSecrets,
 		},
-		logger:        set.Logger,
-		sequence:      &asymptoteobserve.Sequencer{},
-		listings:      &beaconevent.MCPListings{},
-		codexSurfaces: codexSurfaces,
+		logger:               set.Logger,
+		sequence:             &asymptoteobserve.Sequencer{},
+		listings:             &beaconevent.MCPListings{},
+		codexSurfaces:        codexSurfaces,
+		releaseCodexSurfaces: release,
 		converter: beaconevent.NewConverter(beaconevent.Options{
 			IncludeRuntimeMetrics: cfg.IncludeRuntimeMetrics,
 			IncludeCodexSpans:     cfg.IncludeCodexSpans,
@@ -74,6 +77,13 @@ func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, 
 			CodexSurfaces:         codexSurfaces,
 		}),
 	}, nil
+}
+
+func (e *beaconExporter) shutdown(context.Context) error {
+	if e.releaseCodexSurfaces != nil {
+		e.releaseCodexSurfaces()
+	}
+	return nil
 }
 
 func (e *beaconExporter) consumeLogs(ctx context.Context, logs plog.Logs) error {

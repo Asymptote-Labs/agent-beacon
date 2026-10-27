@@ -12,10 +12,10 @@ import (
 // Codex puts on its semantic log events: "Codex_Desktop" for the desktop app, "codex-tui" for the
 // terminal, "codex_exec" for `codex exec`.
 //
-// Not every record carries it: the per-turn usage span and the token metrics have only the
-// conversation (thread) id. So the surface an originator names is remembered per conversation, and
-// a conversation's records without one get the same name. A record with neither stays codex_cli,
-// the name Codex's hooks use on every surface.
+// Not every record carries it: the per-turn usage span has only the conversation (thread) id, and
+// the legacy token metric not even that. So the surface an originator names is remembered per
+// conversation, and a conversation's records without one get the same name. A record with neither
+// stays codex_cli, the name Codex's hooks use on every surface.
 
 const (
 	codexCLIHarness     = "codex_cli"
@@ -41,6 +41,44 @@ type CodexSurfaces struct {
 type codexConversation struct {
 	id      string
 	surface string
+}
+
+// The collector builds a separate exporter for each pipeline (logs, traces, metrics) from one
+// exporter config, and the originator arrives only on logs. So the exporters built from one config
+// share one CodexSurfaces, or the traces and metrics exporters would never learn what the logs
+// exporter did.
+var sharedCodexSurfaces = struct {
+	sync.Mutex
+	byConfig map[any]*codexSurfacesUse
+}{byConfig: map[any]*codexSurfacesUse{}}
+
+type codexSurfacesUse struct {
+	surfaces *CodexSurfaces
+	users    int
+}
+
+// AcquireCodexSurfaces returns the CodexSurfaces shared by every exporter built from config, and
+// a release for the exporter to call when it shuts down; the last release frees it. config is the
+// exporter's config pointer, which the collector passes to each signal's create function.
+func AcquireCodexSurfaces(config any) (*CodexSurfaces, func()) {
+	sharedCodexSurfaces.Lock()
+	defer sharedCodexSurfaces.Unlock()
+	use := sharedCodexSurfaces.byConfig[config]
+	if use == nil {
+		use = &codexSurfacesUse{surfaces: &CodexSurfaces{}}
+		sharedCodexSurfaces.byConfig[config] = use
+	}
+	use.users++
+	var once sync.Once
+	return use.surfaces, func() {
+		once.Do(func() {
+			sharedCodexSurfaces.Lock()
+			defer sharedCodexSurfaces.Unlock()
+			if use.users--; use.users == 0 && sharedCodexSurfaces.byConfig[config] == use {
+				delete(sharedCodexSurfaces.byConfig, config)
+			}
+		})
+	}
 }
 
 // codexSurfaceFromOriginator is the harness an originator names, or "" when there is none.

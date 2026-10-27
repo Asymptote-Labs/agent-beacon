@@ -847,6 +847,40 @@ func TestAggregatePrefersLiveCaptureOverPollBackfill(t *testing.T) {
 			suppressed: 1,
 		},
 		{
+			// The legacy metric names no conversation, so the exporter can't place it and it is
+			// codex_cli; the Desktop turn span over the same turns must still drop it.
+			name: "codex desktop turn span and a legacy metric",
+			events: []schema.Event{
+				event("2026-06-11T10:00:30Z", "codex_cli", otlp, "", "token.usage", &tokens{input: 20}, func(e *schema.Event) {
+					e.Model = "gpt-5.6-sol"
+					e.Raw = map[string]interface{}{"metric_name": "codex.turn.token_usage", "metric_temporality": "Delta"}
+				}),
+				event("2026-06-11T10:00:30Z", "codex_desktop", otlp, "019a-desktop", "token.usage", &tokens{input: 20}, func(e *schema.Event) {
+					e.Model = "gpt-5.6-sol"
+					e.Raw = map[string]interface{}{"source": "codex_turn_span", "turn_start_timestamp": "2026-06-11T10:00:01Z"}
+				}),
+			},
+			want:       tokens{input: 20},
+			wantEvents: 1,
+			suppressed: 0,
+		},
+		{
+			// `codex sync` reads Desktop rollouts too and names them codex_cli; live capture of
+			// the same conversation is codex_desktop. One session, so the backfill goes.
+			name: "codex desktop live capture and codex sync",
+			events: []schema.Event{
+				event("2026-06-11T10:00:00Z", "codex_desktop", otlp, "019a-desktop", "session.started", nil, nil),
+				event("2026-06-11T10:00:20Z", "codex_cli", poll, "019a-desktop", "token.usage", &tokens{input: 500, output: 40}, model("gpt-5.6-sol")),
+				event("2026-06-11T10:00:30Z", "codex_desktop", otlp, "019a-desktop", "token.usage", &tokens{input: 500, output: 40}, func(e *schema.Event) {
+					e.Model = "gpt-5.6-sol"
+					e.Raw = map[string]interface{}{"source": "codex_turn_span", "turn_start_timestamp": "2026-06-11T10:00:01Z"}
+				}),
+			},
+			want:       tokens{input: 500, output: 40},
+			wantEvents: 1,
+			suppressed: 1,
+		},
+		{
 			// Cline's plugin reports usage once, on the run result at task end; `cline sync`
 			// reports it per API request from the task's ui_messages. The task-end total covers
 			// every request after the plugin's first event, so all of those poll rows go.

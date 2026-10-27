@@ -636,7 +636,7 @@ func preferCodexTurnSpans(events []*usageEvent) []*usageEvent {
 	keyFor := func(event *usageEvent) sourceKey {
 		return sourceKey{
 			endpoint: strings.ToLower(strings.TrimSpace(event.endpoint)),
-			harness:  strings.ToLower(strings.TrimSpace(event.harness)),
+			harness:  usageHarnessKey(event.harness),
 			model:    strings.ToLower(strings.TrimSpace(event.model)),
 		}
 	}
@@ -690,9 +690,22 @@ func liveScopeFor(endpoint, harness, session string) (liveScope, bool) {
 	}
 	return liveScope{
 		endpoint: strings.ToLower(strings.TrimSpace(endpoint)),
-		harness:  asymptoteobserve.NormalizeHarnessName(harness),
+		harness:  usageHarnessKey(harness),
 		session:  session,
 	}, true
+}
+
+// usageHarnessKey is the harness the double-count checks group by. Codex's CLI and desktop app are
+// one runtime with one session store and one set of conversation ids. The exporter names the
+// surface from the originator Codex reports, and a record that can't say which -- the legacy turn
+// metric has no thread id, and `codex sync` reads both surfaces' rollouts -- is codex_cli. So the two
+// names are one key here, or a Desktop turn reported both ways would be counted under each.
+func usageHarnessKey(harness string) string {
+	normalized := asymptoteobserve.NormalizeHarnessName(harness)
+	if normalized == "codex_desktop" {
+		return "codex_cli"
+	}
+	return normalized
 }
 
 // isLiveCollectionMethod reports whether a collection method observed the runtime as it worked.
