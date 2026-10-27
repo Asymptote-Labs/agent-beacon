@@ -115,6 +115,10 @@ tools, so an agent can check an MCP server or skill before it installs or runs i
 | `intel_check` | `beacon intel check` |
 | `intel_check_installed` | Checks every MCP server and skill configured on this machine |
 
+[Beacon Cloud MCP](/deployment/managed-mcp) has the first three as `beacon_intel_lookup`,
+`beacon_intel_get_artifact` and `beacon_intel_check`, free on every plan. Checking what is
+installed needs the machine's own config, so `intel_check_installed` is local only.
+
 `intel_check_installed` works like a dependency audit over a lockfile. Beacon reads each
 runtime's own MCP and skill configuration (the same files `beacon endpoint inventory` reads)
 and sends only public identifiers:
