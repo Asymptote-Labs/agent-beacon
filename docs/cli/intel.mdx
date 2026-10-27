@@ -103,12 +103,41 @@ fail it, because they claim no risk.
 It also shows when the newest verdict and registry update arrived. The index is refreshed
 hourly.
 
+## For agents
+
+The local `beacon` MCP server ([`beacon mcp serve`](/cli/mcp)) gives agents the same checks as
+tools, so an agent can check an MCP server or skill before it installs or runs it:
+
+| Tool | Does |
+|------|------|
+| `intel_lookup` | `beacon intel lookup` |
+| `intel_get_artifact` | `beacon intel show` |
+| `intel_check` | `beacon intel check` |
+| `intel_check_installed` | Checks every MCP server and skill configured on this machine |
+
+`intel_check_installed` works like a dependency audit over a lockfile. Beacon reads each
+runtime's own MCP and skill configuration (the same files `beacon endpoint inventory` reads)
+and sends only public identifiers:
+
+- the npm or PyPI package in a server's launch command, without its version. For example,
+  `npx -y @playwright/mcp@latest` is sent as `npm:@playwright/mcp`, and `uvx mcp-server-fetch`
+  as `pypi:mcp-server-fetch`.
+- each skill's name.
+
+Paths, URLs, environment variables and other arguments are never sent. A server with no
+package in its command, such as a local script, a binary, a container or a remote URL, is
+listed as skipped. Its configured name is sent only when the agent passes
+`include_server_names`, since the name someone gave a private server is theirs. Beacon's own
+server and skills are skipped. A result matched only by a name is marked `name_only`: it may
+be a different artifact with the same name, so confirm the repository before relying on it. `dry_run` returns exactly what would be sent and sends
+nothing. Results map back to every runtime and config where each artifact was found.
+
 ## Network and privacy
 
 Every `beacon intel` command makes one HTTPS request to `https://intel.beacon.sh`. The request
 carries only what you named, plus Beacon's version in the `User-Agent`. No account token,
 device key or telemetry is sent, and redirects are refused. Hooks, plugins and background jobs
-never make this request.
+never make this request; the MCP tools above make it only when an agent calls one.
 
 | Variable | Effect |
 |----------|--------|

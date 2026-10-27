@@ -1,0 +1,304 @@
+package intel
+
+import (
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
+)
+
+// What a machine has installed, as Beacon Intel lookups. Like cve.now's check_stack reads a
+// lockfile, this reads the MCP servers and skills Beacon's inventory finds in each runtime's
+// own config, and names each the way the index does.
+//
+// Only a public identifier derived here ever leaves the machine: an npm or PyPI package named
+// in a server's launch command, a skill's name, and a server's configured name only when the
+// caller opts in. Paths, URLs, environment, other arguments and the rest of a definition are
+// never sent.
+
+// Installed is one lookup and every place it was found.
+type Installed struct {
+	Kind    string            `json:"kind"`
+	Q       string            `json:"q"`
+	Basis   string            `json:"basis"`
+	Sources []InstalledSource `json:"found_in"`
+}
+
+// InstalledSource is one configured MCP server or skill.
+type InstalledSource struct {
+	Runtime string `json:"runtime"`
+	Name    string `json:"name"`
+	Scope   string `json:"scope"`
+}
+
+// Skipped is a configured server or skill nothing was sent for, and why.
+type Skipped struct {
+	Kind    string `json:"kind"`
+	Runtime string `json:"runtime"`
+	Name    string `json:"name"`
+	Reason  string `json:"reason"`
+}
+
+const (
+	BasisNPM        = "npm package in its launch command"
+	BasisPyPI       = "PyPI package in its launch command"
+	BasisServerName = "configured server name"
+	BasisSkillName  = "skill name"
+
+	ReasonBeacon    = "Beacon's own"
+	ReasonNoPackage = "no npm or PyPI package in its launch command; pass include_server_names to look it up by its configured name"
+	ReasonRemote    = "a remote URL; pass include_server_names to look it up by its configured name"
+	ReasonNoName    = "no name to look up"
+)
+
+// FromInventoryOptions tunes FromInventory.
+type FromInventoryOptions struct {
+	// IncludeServerNames looks up a server with no package in its command by its configured
+	// name. Off by default: a name someone gave a private server is theirs.
+	IncludeServerNames bool
+	// BeaconSkills are skill names Beacon installs itself (agentskills.Names), never checked.
+	BeaconSkills []string
+}
+
+var beaconServers = map[string]bool{"beacon": true, "beacon-managed": true}
+
+// FromInventory turns an inventory scan into deduplicated lookups, servers first, each list in
+// a stable order.
+func FromInventory(res inventory.Result, opts FromInventoryOptions) ([]Installed, []Skipped) {
+	beaconSkills := map[string]bool{}
+	for _, name := range opts.BeaconSkills {
+		beaconSkills[name] = true
+	}
+	byKey := map[string]*Installed{}
+	var order []string
+	var skipped []Skipped
+	add := func(kind, q, basis string, src InstalledSource) {
+		key := kind + "\x00" + q
+		item, ok := byKey[key]
+		if !ok {
+			item = &Installed{Kind: kind, Q: q, Basis: basis}
+			byKey[key] = item
+			order = append(order, key)
+		}
+		for _, s := range item.Sources {
+			if s == src {
+				return
+			}
+		}
+		item.Sources = append(item.Sources, src)
+	}
+
+	for _, s := range res.MCPServers {
+		name := strings.TrimSpace(s.ServerName)
+		src := InstalledSource{Runtime: s.Runtime, Name: name, Scope: s.SourceScope}
+		if beaconServers[strings.ToLower(name)] {
+			skipped = append(skipped, Skipped{Kind: "mcp", Runtime: s.Runtime, Name: name, Reason: ReasonBeacon})
+			continue
+		}
+		command, args := commandOf(s.Definition)
+		if q, basis, ok := PackageFromCommand(command, args); ok {
+			add("mcp", q, basis, src)
+			continue
+		}
+		switch {
+		case opts.IncludeServerNames && validName(name):
+			add("mcp", name, BasisServerName, src)
+		case name == "" || !validName(name):
+			skipped = append(skipped, Skipped{Kind: "mcp", Runtime: s.Runtime, Name: name, Reason: ReasonNoName})
+		case s.URLPresent && !s.CommandPresent:
+			skipped = append(skipped, Skipped{Kind: "mcp", Runtime: s.Runtime, Name: name, Reason: ReasonRemote})
+		default:
+			skipped = append(skipped, Skipped{Kind: "mcp", Runtime: s.Runtime, Name: name, Reason: ReasonNoPackage})
+		}
+	}
+	for _, s := range res.Skills {
+		name := strings.TrimSpace(s.SkillName)
+		if !s.Exists {
+			continue
+		}
+		if beaconSkills[name] {
+			skipped = append(skipped, Skipped{Kind: "skill", Runtime: s.Runtime, Name: name, Reason: ReasonBeacon})
+			continue
+		}
+		if !validName(name) {
+			skipped = append(skipped, Skipped{Kind: "skill", Runtime: s.Runtime, Name: name, Reason: ReasonNoName})
+			continue
+		}
+		add("skill", name, BasisSkillName, InstalledSource{Runtime: s.Runtime, Name: name, Scope: s.SourceScope})
+	}
+
+	out := make([]Installed, 0, len(order))
+	for _, key := range order {
+		item := byKey[key]
+		sort.Slice(item.Sources, func(i, j int) bool {
+			a, b := item.Sources[i], item.Sources[j]
+			if a.Runtime != b.Runtime {
+				return a.Runtime < b.Runtime
+			}
+			if a.Name != b.Name {
+				return a.Name < b.Name
+			}
+			return a.Scope < b.Scope
+		})
+		out = append(out, *item)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Kind != out[j].Kind {
+			return out[i].Kind == "mcp"
+		}
+		return out[i].Q < out[j].Q
+	})
+	sort.SliceStable(skipped, func(i, j int) bool {
+		if skipped[i].Kind != skipped[j].Kind {
+			return skipped[i].Kind == "mcp"
+		}
+		if skipped[i].Runtime != skipped[j].Runtime {
+			return skipped[i].Runtime < skipped[j].Runtime
+		}
+		return skipped[i].Name < skipped[j].Name
+	})
+	return out, skipped
+}
+
+func commandOf(def map[string]interface{}) (string, []string) {
+	if def == nil {
+		return "", nil
+	}
+	command, _ := def["command"].(string)
+	var args []string
+	if raw, ok := def["args"].([]interface{}); ok {
+		for _, a := range raw {
+			if s, ok := a.(string); ok {
+				args = append(args, s)
+			}
+		}
+	}
+	return command, args
+}
+
+var (
+	npmName  = regexp.MustCompile(`^(@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*$`)
+	pypiName = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$`)
+	// A name a person might give a server or skill: no paths, URLs, or whitespace runs.
+	plainName = regexp.MustCompile(`^[A-Za-z0-9@][A-Za-z0-9 ._@/+-]{0,99}$`)
+)
+
+func validName(name string) bool {
+	return plainName.MatchString(name) && !strings.Contains(name, "//") && !strings.Contains(name, "..")
+}
+
+// PackageFromCommand names the npm or PyPI package a launch command runs, as a lookup
+// (npm:<name> or pypi:<name>) without its version. ok is false for anything else: a local
+// script, a binary, a container, or a command it cannot read with confidence.
+func PackageFromCommand(command string, args []string) (q, basis string, ok bool) {
+	// Some configs put the whole launch line in command.
+	if len(args) == 0 && strings.ContainsAny(strings.TrimSpace(command), " \t") {
+		fields := strings.Fields(command)
+		command, args = fields[0], fields[1:]
+	}
+	base := strings.ToLower(filepath.Base(strings.TrimSpace(command)))
+	base = strings.TrimSuffix(strings.TrimSuffix(base, ".exe"), ".cmd")
+	rest := args
+	switch base {
+	case "npx", "bunx", "pnpx":
+	case "pnpm", "yarn", "bun":
+		if len(rest) == 0 || (rest[0] != "dlx" && rest[0] != "x") {
+			return "", "", false
+		}
+		rest = rest[1:]
+	case "npm":
+		if len(rest) == 0 || (rest[0] != "exec" && rest[0] != "x") {
+			return "", "", false
+		}
+		rest = rest[1:]
+	case "uvx":
+		return pypiFrom(rest)
+	case "pipx":
+		if len(rest) == 0 || rest[0] != "run" {
+			return "", "", false
+		}
+		return pypiFrom(rest[1:])
+	case "uv":
+		if len(rest) < 2 || rest[0] != "tool" || rest[1] != "run" {
+			return "", "", false
+		}
+		return pypiFrom(rest[2:])
+	default:
+		return "", "", false
+	}
+	return npmFrom(rest)
+}
+
+func npmFrom(args []string) (string, string, bool) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--":
+			continue
+		case a == "-p" || a == "--package":
+			if i+1 < len(args) {
+				return npmPackage(args[i+1])
+			}
+			return "", "", false
+		case strings.HasPrefix(a, "--package="):
+			return npmPackage(strings.TrimPrefix(a, "--package="))
+		case strings.HasPrefix(a, "-"):
+			continue
+		default:
+			return npmPackage(a)
+		}
+	}
+	return "", "", false
+}
+
+func npmPackage(spec string) (string, string, bool) {
+	spec = strings.ToLower(strings.TrimSpace(spec))
+	name := spec
+	if strings.HasPrefix(spec, "@") {
+		if at := strings.Index(spec[1:], "@"); at >= 0 {
+			name = spec[:at+1]
+		}
+	} else if at := strings.Index(spec, "@"); at >= 0 {
+		name = spec[:at]
+	}
+	if !npmName.MatchString(name) || len(name) > 214 {
+		return "", "", false
+	}
+	return "npm:" + name, BasisNPM, true
+}
+
+func pypiFrom(args []string) (string, string, bool) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--from":
+			if i+1 < len(args) {
+				return pypiPackage(args[i+1])
+			}
+			return "", "", false
+		case strings.HasPrefix(a, "--from="):
+			return pypiPackage(strings.TrimPrefix(a, "--from="))
+		case a == "--python" || a == "-p" || a == "--with" || a == "--index-url" || a == "--index":
+			i++ // these take a value
+		case strings.HasPrefix(a, "-"):
+			continue
+		default:
+			return pypiPackage(a)
+		}
+	}
+	return "", "", false
+}
+
+func pypiPackage(spec string) (string, string, bool) {
+	spec = strings.ToLower(strings.TrimSpace(spec))
+	if cut := strings.IndexAny(spec, "[=<>!~;@ "); cut >= 0 {
+		spec = spec[:cut]
+	}
+	// Lowercased only, as the index keys packages: registries list a name as it was published.
+	if !pypiName.MatchString(spec) || len(spec) > 100 {
+		return "", "", false
+	}
+	return "pypi:" + spec, BasisPyPI, true
+}
