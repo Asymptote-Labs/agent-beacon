@@ -25,11 +25,11 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 )
 
-// `beacon endpoint enforcement enable` turns on policy enforcement for Claude Code. Enforcement is
-// part of Beacon's enterprise edition, not this one, so here enable installs that edition on a Mac
-// connected to its organization in system mode, then runs the installed binary's own enable. A
-// build that carries enforcement sets activateEnforcement, which enable runs instead, and adds its
-// other subcommands to endpointEnforcementCmd.
+// `beacon endpoint enforcement enable` turns on policy enforcement for the agents on this machine.
+// Enforcement is part of Beacon's enterprise edition, not this one, so here enable installs that
+// edition on a Mac connected to its organization in system mode, then runs the installed binary's
+// own enable. A build that carries enforcement sets activateEnforcement, which enable runs instead,
+// and adds its other subcommands to endpointEnforcementCmd.
 
 // activateEnforcement turns enforcement on in a build that carries it. Nil in this repository.
 var activateEnforcement func(cmd *cobra.Command, dashboardURL string) error
@@ -49,8 +49,8 @@ var endpointEnforcementOpts struct {
 
 var endpointEnforcementCmd = &cobra.Command{
 	Use:   "enforcement",
-	Short: "Policy enforcement for Claude Code (enterprise edition)",
-	Long: `Policy enforcement for Claude Code, part of Beacon's enterprise edition.
+	Short: "Policy enforcement for AI coding agents (enterprise edition)",
+	Long: `Policy enforcement for AI coding agents, part of Beacon's enterprise edition.
 
 enable installs the enterprise edition on a Mac that is connected to its organization in system
 mode (beacon endpoint connect --system), if the organization has enforcement, and turns it on.`,

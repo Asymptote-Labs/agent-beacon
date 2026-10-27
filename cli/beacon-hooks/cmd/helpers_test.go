@@ -1,8 +1,43 @@
 package cmd
 
 import (
+	"os"
 	"testing"
 )
+
+// Cursor runs Claude Code's user-level hooks with Cursor payloads. readStdinJSON switches
+// platformFlag to the runtime the payload came from and keeps the one the hook was invoked with.
+func TestReadStdinJSONKeepsTheDeclaredPlatform(t *testing.T) {
+	for _, tc := range []struct {
+		name, payload, detected string
+	}{
+		{"cursor payload on a claude hook", `{"hook_event_name":"beforeSubmitPrompt","conversation_id":"c1","prompt":"hi"}`, "cursor"},
+		{"claude payload on a claude hook", `{"hook_event_name":"UserPromptSubmit","session_id":"s1","prompt":"hi"}`, "claude"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			origPlatform, origDeclared, origStdin := platformFlag, declaredPlatform, os.Stdin
+			t.Cleanup(func() { platformFlag, declaredPlatform, os.Stdin = origPlatform, origDeclared, origStdin })
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := w.WriteString(tc.payload); err != nil {
+				t.Fatal(err)
+			}
+			_ = w.Close()
+			os.Stdin = r
+			platformFlag = "claude"
+
+			if _, err := readStdinJSON(); err != nil {
+				t.Fatal(err)
+			}
+			_ = r.Close()
+			if platformFlag != tc.detected || declaredPlatform != "claude" {
+				t.Fatalf("platformFlag = %q, declaredPlatform = %q; want %q and %q", platformFlag, declaredPlatform, tc.detected, "claude")
+			}
+		})
+	}
+}
 
 func TestResolveSessionID_Cursor(t *testing.T) {
 	tests := []struct {

@@ -14,9 +14,15 @@ import (
 func withoutHookExtensions(t *testing.T) {
 	t.Helper()
 	claudeGroups, claudeChanged := claudeExtraHookGroups, claudeSettingsChanged
+	cursorExtra, cursorChanged := cursorExtraHooks, cursorHooksChanged
+	codexGroups, codexChanged := codexExtraHookGroups, codexHooksChanged
 	claudeExtraHookGroups, claudeSettingsChanged = nil, nil
+	cursorExtraHooks, cursorHooksChanged = nil, nil
+	codexExtraHookGroups, codexHooksChanged = nil, nil
 	t.Cleanup(func() {
 		claudeExtraHookGroups, claudeSettingsChanged = claudeGroups, claudeChanged
+		cursorExtraHooks, cursorHooksChanged = cursorExtra, cursorChanged
+		codexExtraHookGroups, codexHooksChanged = codexGroups, codexChanged
 	})
 }
 
