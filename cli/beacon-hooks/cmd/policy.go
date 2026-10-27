@@ -74,7 +74,9 @@ func (d policyDenial) emit() {
 // the caller proceeds with the normal allow flow. It is a no-op (nil) when no
 // provider is configured.
 func enforcePolicy(logger *logging.Logger, input map[string]interface{}, sessionID string, phase policycontract.Phase) *policyDenial {
-	if !policy.Enabled() {
+	// A duplicate Cursor run records nothing, so it must not decide anything either: a deny here
+	// would block a call with no record of why. Beacon's own Cursor hook asks the provider.
+	if !policy.Enabled() || duplicateCursorRun {
 		return nil
 	}
 	candidate := newPolicyCandidate(input, sessionID)

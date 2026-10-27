@@ -35,6 +35,17 @@ const (
 	endpointRuntimeFileMode = asymptoteobserve.SharedRuntimeLogFileMode
 )
 
+// endpointEventsSuppressed stops this process writing endpoint events. A hook sets it when another
+// hook of Beacon's records the same event, as when Cursor runs Beacon's Claude Code hooks next to
+// its own.
+var endpointEventsSuppressed bool
+
+// SuppressEndpointEvents turns endpoint event writes off (true) or back on (false) for the rest of
+// this process.
+func SuppressEndpointEvents(suppress bool) {
+	endpointEventsSuppressed = suppress
+}
+
 // Logger provides structured JSON logging for hook events
 type Logger struct {
 	hookName  string
@@ -122,6 +133,9 @@ func (l *Logger) EndpointEvent(action, category, severity, message string, field
 // approval from a pre-tool notification, for instance -- so those events are distinguishable from
 // the ones a runtime actually reported.
 func (l *Logger) EndpointEventWithFidelity(action, category, severity, message, fidelity string, fields map[string]interface{}) error {
+	if endpointEventsSuppressed {
+		return nil
+	}
 	path := endpointLogPath()
 	if path == "" {
 		return nil
