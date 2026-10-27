@@ -3,7 +3,9 @@ package beaconjsonexporter
 import (
 	"context"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/exporter"
@@ -126,4 +128,49 @@ func TestCollectorNamesCodexAppServerSessionsByOriginator(t *testing.T) {
 	if usage != 3 {
 		t.Fatalf("wrote %d token.usage events, want 3", usage)
 	}
+}
+
+// A span whose conversation is never named goes out when its wait runs out, without waiting for
+// another batch to carry it.
+func TestExporterWritesAnUnnamedCodexSpanWhenItsWaitRunsOut(t *testing.T) {
+	var ahead atomic.Int64
+	clock, every := codexClock, codexReleaseEvery
+	codexClock = func() time.Time { return time.Now().Add(time.Duration(ahead.Load())) }
+	codexReleaseEvery = 10 * time.Millisecond
+	t.Cleanup(func() { codexClock, codexReleaseEvery = clock, every })
+
+	ctx := context.Background()
+	exp, path := newTestExporter(t)
+	if err := exp.start(ctx, nopHost{}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer func() { _ = exp.shutdown(ctx) }()
+
+	traces := ptrace.NewTraces()
+	rs := traces.ResourceSpans().AppendEmpty()
+	rs.Resource().Attributes().PutStr("service.name", "codex-app-server")
+	span := rs.ScopeSpans().AppendEmpty().Spans().AppendEmpty()
+	span.SetName("session_task.turn")
+	span.Attributes().PutStr("thread.id", "logs-never-came")
+	span.Attributes().PutInt("codex.turn.token_usage.input_tokens", 300)
+	if err := exp.consumeTraces(ctx, traces); err != nil {
+		t.Fatalf("consumeTraces: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if events := readEvents(t, path); len(events) != 0 {
+		t.Fatalf("written before the wait ran out: %+v", events)
+	}
+
+	ahead.Store(int64(time.Minute))
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if events := readEvents(t, path); len(events) == 1 {
+			if events[0].Harness.Name != "codex_cli" || events[0].Event.Action != "token.usage" {
+				t.Fatalf("released %s as %q, want token.usage as codex_cli", events[0].Event.Action, events[0].Harness.Name)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("the held span was never written")
 }

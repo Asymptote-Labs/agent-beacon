@@ -7,6 +7,7 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/exporter"
+	"go.opentelemetry.io/collector/exporter/exporterhelper"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -36,7 +37,18 @@ type beaconExporter struct {
 	// surface gets the one its conversation's logs did.
 	codexSurfaces        *beaconevent.CodexSurfaces
 	releaseCodexSurfaces func()
+	// stopCodexRelease ends the loop start runs; codexReleaseDone closes once it has.
+	stopCodexRelease chan struct{}
+	codexReleaseDone chan struct{}
 }
+
+// codexReleaseEvery is how often the exporter writes the Codex records whose wait for their
+// conversation's logs has run out, so they reach the log on time when no batch arrives to carry
+// them.
+var codexReleaseEvery = time.Second
+
+// codexClock is the time the Codex hold runs on; tests move it.
+var codexClock = time.Now
 
 func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, error) {
 	cfg, ok := raw.(*Config)
@@ -79,9 +91,41 @@ func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, 
 	}, nil
 }
 
+// lifecycle is the start and shutdown every signal's exporter runs.
+func (e *beaconExporter) lifecycle() []exporterhelper.Option {
+	return []exporterhelper.Option{exporterhelper.WithStart(e.start), exporterhelper.WithShutdown(e.shutdown)}
+}
+
+// start runs the loop that writes Codex records once their wait runs out.
+func (e *beaconExporter) start(context.Context, component.Host) error {
+	e.stopCodexRelease = make(chan struct{})
+	e.codexReleaseDone = make(chan struct{})
+	go func() {
+		defer close(e.codexReleaseDone)
+		ticker := time.NewTicker(codexReleaseEvery)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-e.stopCodexRelease:
+				return
+			case <-ticker.C:
+				if err := e.writeEvents(e.sortCodex(nil)); err != nil && e.logger != nil {
+					e.logger.Warn("writing held Codex records failed", zap.Error(err))
+				}
+			}
+		}
+	}()
+	return nil
+}
+
 // shutdown writes the Codex records still waiting for their conversation's surface, as they
 // stand, and gives up this exporter's share of the memory.
 func (e *beaconExporter) shutdown(context.Context) error {
+	if e.stopCodexRelease != nil {
+		close(e.stopCodexRelease)
+		<-e.codexReleaseDone
+		e.stopCodexRelease = nil
+	}
 	firstErr := e.writeEvents(e.codexSurfaces.Drain())
 	if e.releaseCodexSurfaces != nil {
 		e.releaseCodexSurfaces()
@@ -93,7 +137,7 @@ func (e *beaconExporter) shutdown(context.Context) error {
 // in the shared memory, and goes out with whichever exporter's batch names it or comes after its
 // wait runs out (see beaconevent.CodexSurfaces.Sort).
 func (e *beaconExporter) sortCodex(events []beaconEvent) []beaconEvent {
-	return e.codexSurfaces.Sort(events, time.Now())
+	return e.codexSurfaces.Sort(events, codexClock())
 }
 
 func (e *beaconExporter) writeEvents(events []beaconEvent) error {

@@ -160,7 +160,8 @@ func (s *CodexSurfaces) settle(event *Event, attrs map[string]interface{}) {
 // any held earlier whose conversation has since been named or whose wait has run out. A Codex
 // app-server record whose conversation is unnamed is held back instead. Every exporter sharing the
 // memory calls it with each batch, so a log that names a conversation releases that conversation's
-// held records through whichever exporter received the log.
+// held records through whichever exporter received the log, and with no events on a timer, so a
+// record whose wait ran out is written without waiting for the next batch.
 func (s *CodexSurfaces) Sort(events []Event, now time.Time) []Event {
 	if s == nil {
 		return events
