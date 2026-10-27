@@ -17,18 +17,25 @@ func beaconCursorHook(command string) string {
 	return "'/Users/dev/.beacon/endpoint/hooks/beacon-hooks' --platform cursor --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' " + command
 }
 
-// writeCursorHooks installs a user-level Cursor hooks file holding these entries, by event.
+// cursorPreToolMatcher is the matcher `beacon endpoint install` gives Beacon's Cursor pre-tool hook.
+const cursorPreToolMatcher = "Write|Edit|MultiEdit|Shell|MCP"
+
+// writeCursorHooks installs a user-level Cursor hooks file holding these commands, by event.
 func writeCursorHooks(t *testing.T, hooks map[string][]string) {
 	t.Helper()
-	file := map[string]interface{}{"version": 1}
 	entries := map[string][]map[string]string{}
 	for event, commands := range hooks {
 		for _, command := range commands {
 			entries[event] = append(entries[event], map[string]string{"command": command})
 		}
 	}
-	file["hooks"] = entries
-	data, err := json.Marshal(file)
+	writeCursorHookEntries(t, entries)
+}
+
+// writeCursorHookEntries installs a user-level Cursor hooks file holding these entries, by event.
+func writeCursorHookEntries(t *testing.T, entries map[string][]map[string]string) {
+	t.Helper()
+	data, err := json.Marshal(map[string]interface{}{"version": 1, "hooks": entries})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,15 +179,77 @@ func TestSuppressionDoesNotOutliveTheRun(t *testing.T) {
 	}
 }
 
-func TestDuplicateCursorRunDoesNotAskThePolicyProvider(t *testing.T) {
-	writeCursorHooks(t, map[string][]string{"preToolUse": {beaconCursorHook("pre-tool")}})
-	payload := func() map[string]interface{} {
-		return map[string]interface{}{
-			"conversation_id": "conv-compat",
-			"hook_event_name": "preToolUse",
-			"tool_name":       "Shell",
-			"tool_input":      map[string]interface{}{"command": "claude --dangerously-skip-permissions -p go"},
+func installBeaconCursorPreTool(t *testing.T) {
+	t.Helper()
+	writeCursorHookEntries(t, map[string][]map[string]string{
+		"preToolUse": {{"command": beaconCursorHook("pre-tool"), "matcher": cursorPreToolMatcher}},
+	})
+}
+
+func cursorToolPayload(tool string, toolInput map[string]interface{}) map[string]interface{} {
+	return map[string]interface{}{
+		"conversation_id": "conv-compat",
+		"hook_event_name": "preToolUse",
+		"tool_name":       tool,
+		"tool_input":      toolInput,
+	}
+}
+
+func TestClaudeHookSkipsToolCallsCursorsMatcherSelects(t *testing.T) {
+	installBeaconCursorPreTool(t)
+	for _, tool := range []string{"Write", "MCP:slack_send_message"} {
+		logPath := setupCursorCompatRun(t, "claude", "pre-tool")
+		runHookWithInput(t, runPreTool, cursorToolPayload(tool, map[string]interface{}{"file_path": "/repo/notes.md"}))
+		if n := countEndpointEvents(t, logPath); n != 0 {
+			t.Fatalf("%s: Claude Code hook run by Cursor wrote %d events, want 0", tool, n)
 		}
+	}
+}
+
+func TestClaudeHookStillCoversToolsOnlyItsMatcherSelects(t *testing.T) {
+	// Beacon's Cursor pre-tool hook doesn't select Read, so the Claude Code run is the only one
+	// that sees the call: it records it and asks the policy provider, as before.
+	installBeaconCursorPreTool(t)
+	logPath := setupPolicyTest(t, "claude", denyResponse)
+	hookCommand = "pre-tool"
+	t.Cleanup(func() {
+		hookCommand = ""
+		duplicateCursorRun = false
+		logging.SuppressEndpointEvents(false)
+	})
+	out := runHookWithInput(t, runPreTool, cursorToolPayload("Read", map[string]interface{}{"file_path": "/repo/.env"}))
+	if out["permission"] != "deny" {
+		t.Fatalf("Read reply = %#v, want the provider's deny", out)
+	}
+	assertDenialEvent(t, logPath)
+}
+
+func TestCursorMatcherSelects(t *testing.T) {
+	cases := []struct {
+		matcher, tool string
+		want          bool
+	}{
+		{"", "Read", true},
+		{"", "", true},
+		{cursorPreToolMatcher, "Write", true},
+		{cursorPreToolMatcher, "Shell", true},
+		{cursorPreToolMatcher, "MCP:slack_send_message", true},
+		{cursorPreToolMatcher, "Read", false},
+		{cursorPreToolMatcher, "Grep", false},
+		{cursorPreToolMatcher, "", false},
+		{"(", "Write", false},
+	}
+	for _, tc := range cases {
+		if got := cursorMatcherSelects(tc.matcher, tc.tool); got != tc.want {
+			t.Errorf("cursorMatcherSelects(%q, %q) = %v, want %v", tc.matcher, tc.tool, got, tc.want)
+		}
+	}
+}
+
+func TestDuplicateCursorRunDoesNotAskThePolicyProvider(t *testing.T) {
+	installBeaconCursorPreTool(t)
+	payload := func() map[string]interface{} {
+		return cursorToolPayload("Shell", map[string]interface{}{"command": "claude --dangerously-skip-permissions -p go"})
 	}
 	t.Cleanup(func() {
 		hookCommand = ""
@@ -238,16 +307,16 @@ func TestCursorRecordsThisHookToleratesBadFiles(t *testing.T) {
 	cursorUserHooksPath = func() string { return path }
 	t.Cleanup(func() { cursorUserHooksPath = original })
 
-	if cursorRecordsThisHook("prompt-submit") {
+	if cursorRecordsThisHook("prompt-submit", nil) {
 		t.Fatal("a missing file reported Beacon's Cursor hooks as installed")
 	}
 	if err := os.WriteFile(path, []byte("{not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if cursorRecordsThisHook("prompt-submit") {
+	if cursorRecordsThisHook("prompt-submit", nil) {
 		t.Fatal("an unreadable file reported Beacon's Cursor hooks as installed")
 	}
-	if cursorRecordsThisHook("") {
+	if cursorRecordsThisHook("", nil) {
 		t.Fatal("an unknown command matched")
 	}
 }

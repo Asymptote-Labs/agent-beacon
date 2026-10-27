@@ -29,7 +29,7 @@ func readStdinJSON() (map[string]interface{}, error) {
 	err := json.NewDecoder(os.Stdin).Decode(&input)
 	if err == nil {
 		applyPayloadPlatformOverride(input)
-		duplicateCursorRun = declaredPlatform == "claude" && platformFlag == "cursor" && cursorRecordsThisHook(hookCommand)
+		duplicateCursorRun = declaredPlatform == "claude" && platformFlag == "cursor" && cursorRecordsThisHook(hookCommand, input)
 	}
 	logging.SuppressEndpointEvents(duplicateCursorRun)
 	return input, err
