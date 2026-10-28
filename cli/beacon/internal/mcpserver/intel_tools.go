@@ -112,20 +112,49 @@ func (s *Server) registerIntelTools() {
 			"Names that may be private (a server's configured name, a package from a private registry or index, skill names) are listed as skipped unless the user agrees to include_private_names. " +
 			"Paths, URLs, environment and other arguments never leave the machine. " +
 			fmt.Sprintf("Use dry_run to see exactly what would be sent without sending it. Read a concerning result in full with %s.", intelToolNames.GetArtifact),
-		InputSchema: objectSchema(map[string]interface{}{
-			"include_private_names": map[string]interface{}{"type": "boolean", "description": "Also send names that may be private: servers' configured names, packages from a private registry or index, and skill names. Off by default; set it only when the user agrees."},
-			"include_project":       map[string]interface{}{"type": "boolean", "description": "Also read project-scoped config in the server's working directory (default true)."},
-			"dry_run":               map[string]interface{}{"type": "boolean", "description": "List what would be sent, and send nothing."},
-		}, nil),
-		handler: s.checkInstalled,
+		InputSchema: checkInstalledSchema(),
+		handler:     s.checkInstalled,
 	})
 }
 
-func boolArg(args map[string]interface{}, key string, fallback bool) bool {
-	if value, ok := args[key].(bool); ok {
-		return value
+func checkInstalledSchema() map[string]interface{} {
+	schema := objectSchema(map[string]interface{}{
+		"include_private_names": map[string]interface{}{"type": "boolean", "description": "Also send names that may be private: servers' configured names, packages from a private registry or index, and skill names. Off by default; set it only when the user agrees."},
+		"include_project":       map[string]interface{}{"type": "boolean", "description": "Also read project-scoped config in the server's working directory (default true)."},
+		"dry_run":               map[string]interface{}{"type": "boolean", "description": "List what would be sent, and send nothing."},
+	}, nil)
+	schema["additionalProperties"] = false
+	return schema
+}
+
+type checkInstalledArgs struct {
+	includePrivateNames, includeProject, dryRun bool
+}
+
+// parseCheckInstalledArgs refuses an argument the tool does not take and a value that is not a
+// JSON bool, rather than falling back to a default: {"dry_run": "true"} must never become a
+// live send.
+func parseCheckInstalledArgs(args map[string]interface{}) (checkInstalledArgs, error) {
+	out := checkInstalledArgs{includeProject: true}
+	for key, raw := range args {
+		var dst *bool
+		switch key {
+		case "include_private_names":
+			dst = &out.includePrivateNames
+		case "include_project":
+			dst = &out.includeProject
+		case "dry_run":
+			dst = &out.dryRun
+		default:
+			return out, fmt.Errorf("intel_check_installed does not take %q", key)
+		}
+		value, ok := raw.(bool)
+		if !ok {
+			return out, fmt.Errorf("%s must be true or false", key)
+		}
+		*dst = value
 	}
-	return fallback
+	return out, nil
 }
 
 type installedResult struct {
@@ -154,15 +183,18 @@ type installedReport struct {
 }
 
 func (s *Server) checkInstalled(ctx context.Context, args map[string]interface{}) (interface{}, error) {
-	includeProject := boolArg(args, "include_project", true)
+	a, err := parseCheckInstalledArgs(args)
+	if err != nil {
+		return nil, err
+	}
 	var inv inventory.Result
 	if s.inventory != nil {
-		inv = s.inventory(includeProject)
+		inv = s.inventory(a.includeProject)
 	} else {
-		inv = defaultInventory(includeProject)
+		inv = defaultInventory(a.includeProject)
 	}
 	items, skipped := intel.FromInventory(inv, intel.FromInventoryOptions{
-		IncludePrivateNames: boolArg(args, "include_private_names", false),
+		IncludePrivateNames: a.includePrivateNames,
 		BeaconSkills:        agentskills.Names(),
 	})
 	report := installedReport{Sent: make([]intelapi.CheckItem, len(items)), Skipped: skipped}
@@ -172,7 +204,7 @@ func (s *Server) checkInstalled(ctx context.Context, args map[string]interface{}
 	for i, item := range items {
 		report.Sent[i] = intelapi.CheckItem{Q: item.Q, Kind: item.Kind}
 	}
-	if boolArg(args, "dry_run", false) {
+	if a.dryRun {
 		report.DryRun = true
 		report.Note = "Nothing was sent. These lookups would go to Beacon Intel; skipped entries would not."
 		return report, nil

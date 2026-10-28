@@ -362,14 +362,36 @@ func TestIntelToolArgumentErrorsComeFirst(t *testing.T) {
 	t.Setenv(intel.EnvDisabled, "0")
 	s := New(Options{LogPath: filepath.Join(t.TempDir(), "runtime.jsonl")})
 	for name, args := range map[string]map[string]interface{}{
-		"intel_lookup":       {"q": "x", "user": "someone"},
-		"intel_get_artifact": {"key": "evil/server"},
-		"intel_check":        {"artifacts": []interface{}{}},
+		"intel_lookup":          {"q": "x", "user": "someone"},
+		"intel_get_artifact":    {"key": "evil/server"},
+		"intel_check":           {"artifacts": []interface{}{}},
+		"intel_check_installed": {"dry_run": "true"},
 	} {
 		text, isErr := call(t, s, name, args)
 		if !isErr || strings.Contains(text, "BEACON_INTEL=0") {
 			t.Errorf("%s = %q; want the argument error, not the off switch", name, text)
 		}
+	}
+}
+
+func TestIntelCheckInstalledRefusesMalformedArguments(t *testing.T) {
+	s, f := newIntelServer(t, func(string, string) (int, string) { return 500, "" })
+	s.inventory = func(bool) inventory.Result { return fakeInventory(2) }
+	for _, args := range []map[string]interface{}{
+		{"dry_run": "true"},
+		{"dry_run": 1},
+		{"dry_run": nil},
+		{"include_private_names": "yes", "dry_run": true},
+		{"include_project": "false"},
+		{"dryrun": true},
+	} {
+		text, isErr := call(t, s, "intel_check_installed", args)
+		if !isErr {
+			t.Errorf("%v was accepted: %s", args, text)
+		}
+	}
+	if f.count() != 0 {
+		t.Fatalf("malformed arguments sent %d requests", f.count())
 	}
 }
 
