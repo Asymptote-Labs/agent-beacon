@@ -126,7 +126,8 @@ in a server's launch command, without its version. For example, `npx -y @playwri
 is sent as `npm:@playwright/mcp`, `uvx mcp-server-fetch` as `pypi:mcp-server-fetch`, and the
 Windows form `cmd /c npx -y @playwright/mcp` the same way. A launch command with an option
 Beacon does not recognize is skipped rather than guessed at, so an option's value is never sent
-as a package.
+as a package. So is a package that does not come from a registry: a git or tarball URL, a direct
+reference such as `name @ git+https://…`, an `npm:` alias, a path or a local wheel or tarball.
 
 Names that may be private are held back and listed as skipped unless the agent passes
 `include_private_names`, which it should do only when you agree:

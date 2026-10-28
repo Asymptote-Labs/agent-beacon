@@ -209,6 +209,45 @@ func TestPrivateRegistriesAndWindowsShells(t *testing.T) {
 	}
 }
 
+func TestPackageFromCommandRefusesSpecsOffTheRegistry(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		args    []string
+	}{
+		{"uvx", []string{"--from", "acme-internal-tool @ git+https://git.acme.internal/x.git", "acme"}},
+		{"uvx", []string{"--from", "acme-internal-tool@git+https://git.acme.internal/x.git", "acme"}},
+		{"uvx", []string{"--from", "acme_tool-1.0-py3-none-any.whl", "acme"}},
+		{"uvx", []string{"--from", "acme-tool-1.0.tar.gz", "acme"}},
+		{"uvx", []string{"--from", "git+https://git.acme.internal/x.git", "acme"}},
+		{"uvx", []string{"--from", "./tools/acme", "acme"}},
+		{"pipx", []string{"run", "--spec", "https://files.acme.internal/acme-1.0.zip", "acme"}},
+		{"npx", []string{"-y", "acme-tool@git+https://git.acme.internal/x.git"}},
+		{"npx", []string{"-y", "acme-tool@github:acme/tool"}},
+		{"npx", []string{"-y", "@acme/tool@https://files.acme.internal/tool.tgz"}},
+		{"npx", []string{"-y", "acme-tool@npm:@acme/real-tool"}},
+		{"npx", []string{"-y", "acme-tool@file:../tool"}},
+		{"npx", []string{"-y", "acme-tool.tgz"}},
+	} {
+		if q, basis, ok := PackageFromCommand(tc.command, tc.args); ok {
+			t.Errorf("PackageFromCommand(%q, %q) = %q, %q; want no package", tc.command, tc.args, q, basis)
+		}
+	}
+	for _, tc := range []struct {
+		command string
+		args    []string
+		want    string
+	}{
+		{"uvx", []string{"--from", "mcp-server-fetch==0.6.2", "mcp-server-fetch"}, "pypi:mcp-server-fetch"},
+		{"uvx", []string{"--from", "mcp-server-fetch[cli]>=0.6 ; python_version >= '3.10'", "x"}, "pypi:mcp-server-fetch"},
+		{"npx", []string{"-y", "@playwright/mcp@latest"}, "npm:@playwright/mcp"},
+		{"npx", []string{"-y", "pkg@^1.2.3"}, "npm:pkg"},
+	} {
+		if q, _, ok := PackageFromCommand(tc.command, tc.args); !ok || q != tc.want {
+			t.Errorf("PackageFromCommand(%q, %q) = %q, %v; want %q", tc.command, tc.args, q, ok, tc.want)
+		}
+	}
+}
+
 func TestFromInventoryHoldsBackRegistriesFromEnv(t *testing.T) {
 	for _, tc := range []struct {
 		key  string

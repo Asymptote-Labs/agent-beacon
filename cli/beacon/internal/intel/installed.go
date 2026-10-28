@@ -385,15 +385,33 @@ func npmFrom(args []string) (string, string, bool) {
 	return q, basis, ok
 }
 
+// archiveSuffixes name a local package file rather than a registry package.
+var archiveSuffixes = []string{".tgz", ".tar.gz", ".tar.bz2", ".tar.xz", ".zip", ".whl", ".egg"}
+
+func isArchive(spec string) bool {
+	for _, suffix := range archiveSuffixes {
+		if strings.HasSuffix(spec, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// npmPackage reads a registry spec, <name> or <name>@<version, range or tag>. A spec that
+// fetches from anywhere else (a git or tarball URL, a file, an npm: alias) is not a public
+// registry package, and its name may be private, so ok is false.
 func npmPackage(spec string) (string, string, bool) {
 	spec = strings.ToLower(strings.TrimSpace(spec))
-	name := spec
+	name, version := spec, ""
 	if strings.HasPrefix(spec, "@") {
 		if at := strings.Index(spec[1:], "@"); at >= 0 {
-			name = spec[:at+1]
+			name, version = spec[:at+1], spec[at+2:]
 		}
 	} else if at := strings.Index(spec, "@"); at >= 0 {
-		name = spec[:at]
+		name, version = spec[:at], spec[at+1:]
+	}
+	if strings.ContainsAny(version, ":/\\") || isArchive(name) || isArchive(version) {
+		return "", "", false
 	}
 	if !npmName.MatchString(name) || len(name) > 214 {
 		return "", "", false
@@ -413,9 +431,15 @@ func pypiFrom(args []string) (string, string, bool) {
 	return q, basis, ok
 }
 
+// pypiPackage reads a PEP 508 requirement for a registry package. A direct reference
+// (name @ url), a URL, a path or a local wheel or sdist is not a public PyPI package, and its
+// name may be private, so ok is false.
 func pypiPackage(spec string) (string, string, bool) {
 	spec = strings.ToLower(strings.TrimSpace(spec))
-	if cut := strings.IndexAny(spec, "[=<>!~;@ "); cut >= 0 {
+	if strings.ContainsAny(spec, "@/\\") || strings.Contains(spec, "://") || strings.HasPrefix(spec, "git+") || isArchive(spec) {
+		return "", "", false
+	}
+	if cut := strings.IndexAny(spec, "[=<>!~; "); cut >= 0 {
 		spec = spec[:cut]
 	}
 	// Lowercased only, as the index keys packages: registries list a name as it was published.
