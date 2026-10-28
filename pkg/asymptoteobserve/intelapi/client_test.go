@@ -1,9 +1,8 @@
-package intel
+package intelapi
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -37,31 +36,17 @@ func TestNormalizeBaseURL(t *testing.T) {
 	}
 }
 
-func TestNewReadsTheEnvironment(t *testing.T) {
-	t.Setenv(EnvDisabled, "")
-	t.Setenv(EnvURL, "")
-	c, err := New("beacon/test")
-	if err != nil || c.BaseURL != DefaultBaseURL || c.UserAgent != "beacon/test" {
+func TestNewNormalizesAndKeepsTheClient(t *testing.T) {
+	c, err := New("https://intel.beacon.sh/", "agent/1", nil)
+	if err != nil || c.BaseURL != DefaultBaseURL || c.UserAgent != "agent/1" || c.HTTPClient == nil || c.HTTPClient.Timeout != requestTimeout {
 		t.Fatalf("New() = %+v, %v", c, err)
 	}
-	t.Setenv(EnvURL, "http://127.0.0.1:9")
-	if c, err = New(""); err != nil || c.BaseURL != "http://127.0.0.1:9" {
-		t.Fatalf("New() with %s = %+v, %v", EnvURL, c, err)
+	own := &http.Client{}
+	if c, err = New("http://127.0.0.1:9", "", own); err != nil || c.HTTPClient != own {
+		t.Fatalf("New() with a client = %+v, %v", c, err)
 	}
-	t.Setenv(EnvURL, "http://intel.example.test")
-	if _, err = New(""); err == nil || !strings.Contains(err.Error(), EnvURL) {
-		t.Fatalf("New() with a plain-http remote host = %v, want an error naming %s", err, EnvURL)
-	}
-	for _, off := range []string{"0", "false", "OFF", " no "} {
-		t.Setenv(EnvDisabled, off)
-		if _, err := New(""); !errors.Is(err, ErrDisabled) {
-			t.Fatalf("New() with %s=%q = %v, want ErrDisabled", EnvDisabled, off, err)
-		}
-	}
-	t.Setenv(EnvDisabled, "1")
-	t.Setenv(EnvURL, "")
-	if _, err := New(""); err != nil {
-		t.Fatalf("New() with %s=1 = %v", EnvDisabled, err)
+	if _, err := New("http://intel.example.test", "", nil); err == nil {
+		t.Fatal("New() accepted a plain-http remote host")
 	}
 }
 

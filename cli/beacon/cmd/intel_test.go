@@ -17,6 +17,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/intel"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/intelapi"
 )
 
 // fakeIntelAPI serves canned v1 answers and records each request.
@@ -287,7 +288,7 @@ func TestIntelCheckFailOn(t *testing.T) {
 func TestIntelCheckRefusesBadInputWithoutARequest(t *testing.T) {
 	f := startFakeIntel(t)
 	f.answer("/api/v1/check", 200, intelCheckJSON)
-	many := make([]string, intel.MaxCheck+1)
+	many := make([]string, intelapi.MaxCheck+1)
 	for i := range many {
 		many[i] = "x"
 	}

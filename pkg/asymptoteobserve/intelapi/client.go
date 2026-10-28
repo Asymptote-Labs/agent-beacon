@@ -1,18 +1,19 @@
-// Package intel reads Beacon Intel (https://intel.beacon.sh), the free public index of the MCP
-// servers and agent skills that public registries list, with a security verdict for each one
-// that has been analyzed. It is how `beacon intel` and the local `beacon` MCP server let an
-// agent check an MCP server or skill before installing or running it.
+// Package intelapi is the client for Beacon Intel (https://intel.beacon.sh), the free public
+// index of the MCP servers and agent skills that public registries list, with a security
+// verdict for each one that has been analyzed. It is shared by everything that gives agents
+// that index: `beacon intel` and the local `beacon` MCP server in agent-beacon, and Beacon Cloud
+// MCP, so the API contract, its limits, the request hardening and the tools' wording live in one
+// place (tools.go).
 //
 // The API needs no account and no key, and this client sends none: a request carries only what
-// the caller asks about (a name, a repository, a package, an entity key) and Beacon's version
-// in the User-Agent. It is never called from a hook, a plugin or a scheduled job; only an
-// explicit `beacon intel` command or an agent's MCP tool call reaches it. BEACON_INTEL=0 turns
-// it off, and BEACON_INTEL_URL points it at another host (https, or http on loopback only).
-// Redirects are refused, so a request never leaves the configured host.
+// the caller asks about (a name, a repository, a package, an entity key) and the caller's
+// User-Agent. Redirects are refused, so a request never leaves the configured host; answers are
+// capped and must be marked as the intel.v1 API. Where a caller gets its host from and whether
+// it may call at all (BEACON_INTEL, BEACON_INTEL_URL, INTEL_API_URL) is the caller's business.
 //
 // Text in a response comes from registries, repositories and model analysis. The API clips it
 // to bounded single lines; callers still treat it as data, never as instructions.
-package intel
+package intelapi
 
 import (
 	"bytes"
@@ -24,7 +25,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -37,22 +37,18 @@ const (
 	// APIVersion is the "api" value every answer of the v1 API carries.
 	APIVersion = "intel.v1"
 
-	EnvURL      = "BEACON_INTEL_URL"
-	EnvDisabled = "BEACON_INTEL"
-
 	// MaxCheck is the most artifacts one check may name; the API refuses more.
 	MaxCheck = 50
 	// MaxQuery is the longest lookup string the API accepts.
 	MaxQuery = 300
-	// MaxLimit is the most results one lookup returns.
-	MaxLimit = 25
+	// MaxLimit is the most results one lookup returns; DefaultLimit what a lookup asks for when
+	// the caller names no limit.
+	MaxLimit     = 25
+	DefaultLimit = 10
 
 	maxResponseBytes = 4 << 20
 	requestTimeout   = 15 * time.Second
 )
-
-// ErrDisabled is returned by New when BEACON_INTEL=0.
-var ErrDisabled = errors.New("Beacon Intel is turned off (BEACON_INTEL=0)")
 
 // Client calls the Beacon Intel API.
 type Client struct {
@@ -61,33 +57,17 @@ type Client struct {
 	UserAgent  string
 }
 
-// New returns a client for the configured host, or ErrDisabled.
-func New(userAgent string) (*Client, error) {
-	if Disabled() {
-		return nil, ErrDisabled
-	}
-	base := DefaultBaseURL
-	if v := strings.TrimSpace(os.Getenv(EnvURL)); v != "" {
-		base = v
-	}
-	normalized, err := NormalizeBaseURL(base)
+// New returns a client for baseURL (see NormalizeBaseURL). A nil httpClient gets one with a
+// 15-second timeout; either way, redirects are never followed.
+func New(baseURL, userAgent string, httpClient *http.Client) (*Client, error) {
+	normalized, err := NormalizeBaseURL(baseURL)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", EnvURL, err)
+		return nil, err
 	}
-	return &Client{
-		BaseURL:    normalized,
-		HTTPClient: &http.Client{Timeout: requestTimeout},
-		UserAgent:  userAgent,
-	}, nil
-}
-
-// Disabled reports whether BEACON_INTEL turns the client off.
-func Disabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(EnvDisabled))) {
-	case "0", "false", "off", "no":
-		return true
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: requestTimeout}
 	}
-	return false
+	return &Client{BaseURL: normalized, HTTPClient: httpClient, UserAgent: userAgent}, nil
 }
 
 // NormalizeBaseURL accepts an https origin, or an http one on a loopback host, with no path,
@@ -279,16 +259,16 @@ func ValidateKind(kind string) error {
 	case "", "mcp", "skill":
 		return nil
 	}
-	return fmt.Errorf("kind must be mcp or skill, not %q", kind)
+	return inputErrorf("kind must be mcp or skill, not %q", clipLine(kind, 40))
 }
 
 func validateQuery(name, q string) (string, error) {
 	q = strings.TrimSpace(q)
 	if q == "" {
-		return "", fmt.Errorf("%s is required", name)
+		return "", inputErrorf("%s is required", name)
 	}
 	if utf8.RuneCountInString(q) > MaxQuery {
-		return "", fmt.Errorf("%s is at most %d characters", name, MaxQuery)
+		return "", inputErrorf("%s is at most %d characters", name, MaxQuery)
 	}
 	return q, nil
 }
@@ -325,8 +305,8 @@ func (c *Client) Artifact(ctx context.Context, key string) (*Artifact, []byte, e
 	if err != nil {
 		return nil, nil, err
 	}
-	if !strings.HasPrefix(key, "mcp:") && !strings.HasPrefix(key, "skill:") {
-		return nil, nil, fmt.Errorf("key must be an entity key such as mcp:<owner>/<repo>, as lookup returns it")
+	if err := validateKey(key); err != nil {
+		return nil, nil, err
 	}
 	var out artifactEnvelope
 	raw, err := c.do(ctx, http.MethodGet, "/api/v1/artifact", url.Values{"key": {key}}, nil, &out)
@@ -339,10 +319,10 @@ func (c *Client) Artifact(ctx context.Context, key string) (*Artifact, []byte, e
 // Check checks up to MaxCheck artifacts in one request. Nothing in it is stored.
 func (c *Client) Check(ctx context.Context, items []CheckItem) (*CheckResult, []byte, error) {
 	if len(items) == 0 {
-		return nil, nil, errors.New("name at least one artifact to check")
+		return nil, nil, inputErrorf("name at least one artifact to check")
 	}
 	if len(items) > MaxCheck {
-		return nil, nil, fmt.Errorf("at most %d artifacts per check, got %d", MaxCheck, len(items))
+		return nil, nil, inputErrorf("at most %d artifacts per check, got %d", MaxCheck, len(items))
 	}
 	clean := make([]CheckItem, len(items))
 	for i, item := range items {
