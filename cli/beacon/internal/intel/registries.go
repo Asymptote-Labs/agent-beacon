@@ -33,15 +33,31 @@ type RegistryEnv struct {
 	System     bool
 }
 
-// CurrentRegistryEnv is this process's home, environment and, when includeProject is set,
-// working directory. A launcher an agent starts inherits the same environment.
-func CurrentRegistryEnv(includeProject bool) RegistryEnv {
+// CurrentRegistryEnv is this process's home, environment and working directory. An agent
+// starts every launcher, user-scoped servers' included, with the same environment and in the
+// same project, so the project's config applies whether or not project servers are listed.
+func CurrentRegistryEnv() RegistryEnv {
 	env := RegistryEnv{Environ: os.Environ(), System: true}
 	env.Home, _ = os.UserHomeDir()
-	if includeProject {
-		env.WorkingDir, _ = os.Getwd()
-	}
+	env.WorkingDir, _ = os.Getwd()
 	return env
+}
+
+// projectDirs are the working directory and every directory above it: npm, yarn, bun and uv
+// each find a project's config by walking up from where they run.
+func projectDirs(wd string) []string {
+	if wd == "" {
+		return nil
+	}
+	var dirs []string
+	for dir := filepath.Clean(wd); ; {
+		dirs = append(dirs, dir)
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return dirs
+		}
+		dir = parent
+	}
 }
 
 const maxRegistryConfigBytes = 1 << 20
@@ -89,7 +105,17 @@ func LocalRegistries(env RegistryEnv) Registries {
 	if userNpmrc == "" {
 		userNpmrc = join(home, ".npmrc")
 	}
-	npmrcs := []string{userNpmrc, join(env.WorkingDir, ".npmrc"), getenv("npm_config_globalconfig")}
+	projects := projectDirs(env.WorkingDir)
+	inProjects := func(names ...string) []string {
+		var paths []string
+		for _, dir := range projects {
+			for _, name := range names {
+				paths = append(paths, filepath.Join(dir, name))
+			}
+		}
+		return paths
+	}
+	npmrcs := append([]string{userNpmrc, getenv("npm_config_globalconfig")}, inProjects(".npmrc")...)
 	// The global npmrc and npm's builtin one live under npm's prefix, which npm derives from the
 	// node it runs on (nvm, fnm, Volta and system installs each have their own).
 	for _, prefix := range npmPrefixes(getenv) {
@@ -108,8 +134,8 @@ func LocalRegistries(env RegistryEnv) Registries {
 	if name := getenv("YARN_RC_FILENAME"); name != "" && !strings.ContainsAny(name, `/\`) {
 		yarnrc = name
 	}
-	for _, path := range []string{join(home, yarnrc), join(env.WorkingDir, yarnrc),
-		join(home, ".bunfig.toml"), join(xdg, ".bunfig.toml"), join(env.WorkingDir, "bunfig.toml")} {
+	for _, path := range append([]string{join(home, yarnrc), join(home, ".bunfig.toml"), join(xdg, ".bunfig.toml")},
+		inProjects(yarnrc, "bunfig.toml")...) {
 		if registryLine(path, isNPMRegistryLine) {
 			reg.NPM = true
 		}
@@ -124,9 +150,9 @@ func LocalRegistries(env RegistryEnv) Registries {
 		}
 	}
 	// uv: user, system and project configuration.
-	for _, path := range []string{getenv("UV_CONFIG_FILE"), join(xdg, "uv", "uv.toml"), join(appData, "uv", "uv.toml"), system("/etc/uv/uv.toml"),
-		system("/etc/xdg/uv/uv.toml"), join(getenv("ProgramData"), "uv", "uv.toml"), join(env.WorkingDir, "uv.toml"),
-		join(env.WorkingDir, "pyproject.toml")} {
+	for _, path := range append([]string{getenv("UV_CONFIG_FILE"), join(xdg, "uv", "uv.toml"), join(appData, "uv", "uv.toml"),
+		system("/etc/uv/uv.toml"), system("/etc/xdg/uv/uv.toml"), join(getenv("ProgramData"), "uv", "uv.toml")},
+		inProjects("uv.toml", "pyproject.toml")...) {
 		if registryLine(path, isPyPIIndexLine) {
 			reg.PyPI = true
 		}

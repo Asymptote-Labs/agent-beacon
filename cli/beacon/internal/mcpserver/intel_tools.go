@@ -199,7 +199,7 @@ func (s *Server) checkInstalled(ctx context.Context, args map[string]interface{}
 	}
 	items, skipped := intel.FromInventory(inv, intel.FromInventoryOptions{
 		IncludePrivateNames: a.includePrivateNames,
-		Registries:          intel.LocalRegistries(registryEnv(a.includeProject)),
+		Registries:          intel.LocalRegistries(registryEnv()),
 		BeaconSkills:        agentskills.Names(),
 	})
 	report := installedReport{Sent: make([]intelapi.CheckItem, len(items)), Skipped: skipped}

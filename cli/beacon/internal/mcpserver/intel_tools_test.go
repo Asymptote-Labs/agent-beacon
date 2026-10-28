@@ -56,7 +56,7 @@ func newIntelServer(t *testing.T, answer func(path, body string) (int, string)) 
 }
 
 // noRegistryEnv keeps a test from reading the machine's own npm, pip and uv configuration.
-func noRegistryEnv(bool) intel.RegistryEnv { return intel.RegistryEnv{} }
+func noRegistryEnv() intel.RegistryEnv { return intel.RegistryEnv{} }
 
 func call(t *testing.T, s *Server, name string, args map[string]interface{}) (string, bool) {
 	t.Helper()
@@ -407,7 +407,7 @@ func TestIntelCheckInstalledHoldsBackAScopeFromTheUsersNpmrc(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, ".npmrc"), []byte("@acme:registry=https://npm.acme.internal/\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s.registryEnv = func(bool) intel.RegistryEnv { return intel.RegistryEnv{Home: home} }
+	s.registryEnv = func() intel.RegistryEnv { return intel.RegistryEnv{Home: home} }
 	s.inventory = func(bool) inventory.Result {
 		return inventory.Result{MCPServers: []inventory.MCPServer{
 			{Runtime: "cursor", ServerName: "billing", SourceScope: "user", CommandPresent: true,
@@ -416,7 +416,8 @@ func TestIntelCheckInstalledHoldsBackAScopeFromTheUsersNpmrc(t *testing.T) {
 				Definition: map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "@playwright/mcp"}}},
 		}}
 	}
-	text, isErr := call(t, s, "intel_check_installed", map[string]interface{}{"dry_run": true})
+	// include_project only picks which servers are listed: the scope still applies.
+	text, isErr := call(t, s, "intel_check_installed", map[string]interface{}{"dry_run": true, "include_project": false})
 	if isErr {
 		t.Fatal(text)
 	}

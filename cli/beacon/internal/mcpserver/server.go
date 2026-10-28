@@ -41,7 +41,7 @@ type Server struct {
 	// and where launcher registry settings are read in tests.
 	newIntel    func() (*intelapi.Client, error)
 	inventory   func(includeProject bool) inventory.Result
-	registryEnv func(includeProject bool) intel.RegistryEnv
+	registryEnv func() intel.RegistryEnv
 }
 
 type Tool struct {

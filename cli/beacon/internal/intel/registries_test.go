@@ -122,9 +122,23 @@ func TestLocalRegistriesFollowsAConfigFileNamedInTheEnvironment(t *testing.T) {
 	}
 }
 
-func TestCurrentRegistryEnvReadsSystemFiles(t *testing.T) {
-	if env := CurrentRegistryEnv(false); !env.System || env.WorkingDir != "" {
-		t.Fatalf("CurrentRegistryEnv(false) = %+v", env)
+func TestCurrentRegistryEnvReadsSystemAndProjectFiles(t *testing.T) {
+	if env := CurrentRegistryEnv(); !env.System || env.WorkingDir == "" {
+		t.Fatalf("CurrentRegistryEnv() = %+v", env)
+	}
+}
+
+func TestLocalRegistriesReadsProjectConfigAboveTheWorkingDirectory(t *testing.T) {
+	root := t.TempDir()
+	wd := filepath.Join(root, "repo", "packages", "app")
+	writeConfig(t, filepath.Join(root, "repo", ".npmrc"), "@acme:registry=https://npm.acme.internal\n")
+	writeConfig(t, filepath.Join(root, "repo", "pyproject.toml"), "[[tool.uv.index]]\nurl = \"https://pypi.acme.internal/simple\"\n")
+	if err := os.MkdirAll(wd, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	reg := LocalRegistries(RegistryEnv{Home: t.TempDir(), WorkingDir: wd})
+	if !reg.private("npm:@acme/x") || !reg.private("pypi:x") || reg.private("npm:plain") {
+		t.Fatalf("project config above the working directory was not read: %+v", reg)
 	}
 }
 
