@@ -31,6 +31,12 @@ func TestPackageFromCommand(t *testing.T) {
 		{"pipx", []string{"run", "mcp-git"}, "pypi:mcp-git"},
 		{"uv", []string{"tool", "run", "--from=serena", "serena"}, "pypi:serena"},
 		{"npx -y @playwright/mcp", nil, "npm:@playwright/mcp"},
+		{"npx", []string{"--registry", "https://r.example", "-y", "pkg-a"}, "npm:pkg-a"},
+		{"npx", []string{"--workspace=api", "pkg-b@2"}, "npm:pkg-b"},
+		{"npx", []string{"-w", "api", "pkg-c"}, "npm:pkg-c"},
+		{"uvx", []string{"--with-requirements", "requirements.txt", "real-server"}, "pypi:real-server"},
+		{"uvx", []string{"-q", "--index-url=https://i.example/simple", "--with", "extra", "srv"}, "pypi:srv"},
+		{"pipx", []string{"run", "--spec", "mcp-thing==1", "thing"}, "pypi:mcp-thing"},
 	}
 	for _, tc := range cases {
 		q, basis, ok := PackageFromCommand(tc.command, tc.args)
@@ -58,6 +64,11 @@ func TestPackageFromCommand(t *testing.T) {
 		{"pipx", []string{"install", "x"}},
 		{"uv", []string{"run", "server.py"}},
 		{"uvx", []string{"--from", "git+https://github.com/a/b", "b"}},
+		// An option Beacon does not know may take a value, so nothing is guessed.
+		{"uvx", []string{"--some-new-flag", "requirements.txt", "srv"}},
+		{"npx", []string{"--mystery", "value", "pkg"}},
+		{"npx", []string{"--mystery=value", "pkg"}},
+		{"npx", []string{"-c", "echo hi"}},
 		{"", nil},
 	} {
 		if q, _, ok := PackageFromCommand(tc.command, tc.args); ok {

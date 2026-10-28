@@ -48,7 +48,7 @@ const (
 	BasisSkillName  = "skill name"
 
 	ReasonBeacon    = "Beacon's own"
-	ReasonNoPackage = "no npm or PyPI package in its launch command; pass include_server_names to look it up by its configured name"
+	ReasonNoPackage = "no npm or PyPI package Beacon can read with confidence in its launch command; pass include_server_names to look it up by its configured name"
 	ReasonRemote    = "a remote URL; pass include_server_names to look it up by its configured name"
 	ReasonNoName    = "no name to look up"
 )
@@ -231,26 +231,71 @@ func PackageFromCommand(command string, args []string) (q, basis string, ok bool
 	return npmFrom(rest)
 }
 
-func npmFrom(args []string) (string, string, bool) {
+// The options a launcher takes before the package it runs. A flag in neither list stops the
+// parse: whether it takes a value decides which word is the package, and guessing wrong sends
+// a file name or a workspace for a package and leaves the real one unchecked.
+var (
+	npmPackageFlags = flagSet("-p", "--package")
+	npmValueFlags   = flagSet("--registry", "--cache", "--userconfig", "-w", "--workspace", "--node-options", "--loglevel", "--allow-build")
+	npmBoolFlags    = flagSet("-y", "--yes", "--no", "--no-install", "-q", "--quiet", "-s", "--silent", "--prefer-offline", "--prefer-online", "--offline", "--ignore-existing", "--bun")
+
+	pypiPackageFlags = flagSet("--from", "--spec")
+	pypiValueFlags   = flagSet("-p", "--python", "--with", "--with-editable", "--with-requirements", "--index", "--index-url",
+		"--extra-index-url", "--default-index", "-f", "--find-links", "--refresh-package", "-P", "--upgrade-package",
+		"--reinstall-package", "--prerelease", "--resolution", "-c", "--constraints", "--overrides", "--env-file",
+		"--directory", "--project", "--cache-dir", "--color", "--python-preference", "--exclude-newer", "--link-mode",
+		"--keyring-provider", "--index-strategy", "--config-file", "--pip-args")
+	pypiBoolFlags = flagSet("-q", "--quiet", "-v", "--verbose", "--offline", "-n", "--no-cache", "--isolated", "--refresh",
+		"--system", "--native-tls", "--no-progress", "-U", "--upgrade", "--reinstall", "--no-build", "--system-site-packages")
+)
+
+func flagSet(flags ...string) map[string]bool {
+	set := make(map[string]bool, len(flags))
+	for _, f := range flags {
+		set[f] = true
+	}
+	return set
+}
+
+// packageArg finds the package a launcher runs: the value of a package flag, or else the first
+// argument that is not an option. ok is false when an unknown option makes that uncertain.
+func packageArg(args []string, packageFlags, valueFlags, boolFlags map[string]bool) (string, bool) {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
 		case a == "--":
 			continue
-		case a == "-p" || a == "--package":
+		case packageFlags[a]:
 			if i+1 < len(args) {
-				return npmPackage(args[i+1])
+				return args[i+1], true
 			}
-			return "", "", false
-		case strings.HasPrefix(a, "--package="):
-			return npmPackage(strings.TrimPrefix(a, "--package="))
+			return "", false
+		case strings.HasPrefix(a, "-") && strings.Contains(a, "="):
+			name, value, _ := strings.Cut(a, "=")
+			if packageFlags[name] {
+				return value, true
+			}
+			if !valueFlags[name] && !boolFlags[name] {
+				return "", false
+			}
+		case valueFlags[a]:
+			i++
+		case boolFlags[a]:
 		case strings.HasPrefix(a, "-"):
-			continue
+			return "", false
 		default:
-			return npmPackage(a)
+			return a, true
 		}
 	}
-	return "", "", false
+	return "", false
+}
+
+func npmFrom(args []string) (string, string, bool) {
+	spec, ok := packageArg(args, npmPackageFlags, npmValueFlags, npmBoolFlags)
+	if !ok {
+		return "", "", false
+	}
+	return npmPackage(spec)
 }
 
 func npmPackage(spec string) (string, string, bool) {
@@ -270,25 +315,11 @@ func npmPackage(spec string) (string, string, bool) {
 }
 
 func pypiFrom(args []string) (string, string, bool) {
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		switch {
-		case a == "--from":
-			if i+1 < len(args) {
-				return pypiPackage(args[i+1])
-			}
-			return "", "", false
-		case strings.HasPrefix(a, "--from="):
-			return pypiPackage(strings.TrimPrefix(a, "--from="))
-		case a == "--python" || a == "-p" || a == "--with" || a == "--index-url" || a == "--index":
-			i++ // these take a value
-		case strings.HasPrefix(a, "-"):
-			continue
-		default:
-			return pypiPackage(a)
-		}
+	spec, ok := packageArg(args, pypiPackageFlags, pypiValueFlags, pypiBoolFlags)
+	if !ok {
+		return "", "", false
 	}
-	return "", "", false
+	return pypiPackage(spec)
 }
 
 func pypiPackage(spec string) (string, string, bool) {
