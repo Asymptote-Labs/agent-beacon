@@ -65,7 +65,8 @@ type Command struct {
 	// Pipeline identifies the pipeline the statement is a stage of: the stages of one pipeline
 	// share it, and a statement outside a pipeline has one of its own. Stage is its 0-based
 	// position in that pipeline (curl ... | sh: sh is stage 1). A command inside a compound stage
-	// ({ a; b; } | c) is not itself a stage of the outer pipeline.
+	// ({ a; b; } | c, (a) | c, if ...; fi | c) carries that stage, since its output is the
+	// stage's, unless it is itself a stage of an inner pipeline or inside a substitution.
 	Pipeline int
 	Stage    int
 	// Nested is true inside a command substitution ($(...), `...`) or a process substitution.
@@ -118,11 +119,18 @@ func walk(source string, file *syntax.File) []Command {
 
 type stage struct{ pipeline, index int }
 
+// compound is the byte range of a compound statement that is a pipeline stage, and that stage.
+type compound struct {
+	start, end uint
+	stage      stage
+}
+
 type parser struct {
 	source     string
 	commands   []Command
 	stages     map[*syntax.Stmt]stage
 	containers map[*syntax.Stmt]bool // statements that only join pipeline stages
+	compounds  []compound            // compound statements that are pipeline stages
 	pipelines  int
 	nested     [][2]uint // byte ranges of command and process substitutions
 	moved      bool
@@ -152,13 +160,18 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 		return
 	}
 	call, _ := stmt.Cmd.(*syntax.CallExpr)
+	st, ok := p.stages[stmt]
+	if ok && call == nil && stmt.Cmd != nil {
+		p.compounds = append(p.compounds, compound{start: stmt.Pos().Offset(), end: stmt.End().Offset(), stage: st})
+	}
 	if call == nil && len(stmt.Redirs) == 0 {
 		return
 	}
-	st, ok := p.stages[stmt]
 	if !ok {
-		p.pipelines++
-		st = stage{pipeline: p.pipelines}
+		if st, ok = p.enclosingStage(stmt.Pos().Offset()); !ok {
+			p.pipelines++
+			st = stage{pipeline: p.pipelines}
+		}
 	}
 	offset := stmt.Pos().Offset()
 	c := Command{
@@ -190,6 +203,27 @@ func (p *parser) stmt(stmt *syntax.Stmt) {
 			p.moved = true
 		}
 	}
+}
+
+// enclosingStage returns the stage of the innermost compound stage around offset, unless a
+// substitution inside it is closer: a substitution's output is not the stage's.
+func (p *parser) enclosingStage(offset uint) (stage, bool) {
+	var best compound
+	found := false
+	for _, c := range p.compounds {
+		if offset > c.start && offset < c.end && (!found || c.start > best.start) {
+			best, found = c, true
+		}
+	}
+	if !found {
+		return stage{}, false
+	}
+	for _, r := range p.nested {
+		if offset > r[0] && offset < r[1] && r[0] > best.start {
+			return stage{}, false
+		}
+	}
+	return best.stage, true
 }
 
 func isPipe(stmt *syntax.Stmt) bool {

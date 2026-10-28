@@ -8,12 +8,13 @@ import (
 
 // Unwrapped returns the command's words after the wrappers that run the real command in the same
 // directory: command, builtin, exec, nohup and time, and sudo and env with their options and
-// NAME=value words. ok is false, with no words, when a wrapper option moves or replaces the
-// command (sudo -i/-D/-R, env -C/-S and their long forms). It stops at the first unknown word.
+// NAME=value words. A wrapper is recognized by its base name, so /usr/bin/env and /usr/bin/sudo
+// unwrap like env and sudo. ok is false, with no words, when a wrapper option moves or replaces
+// the command (sudo -i/-D/-R, env -C/-S and their long forms). It stops at the first unknown word.
 func (c Command) Unwrapped() (words []Word, ok bool) {
 	words = c.Argv
 	for len(words) > 0 && words[0].Known {
-		switch words[0].Text {
+		switch filepath.Base(words[0].Text) {
 		case "command", "builtin", "exec", "nohup", "time":
 			words = words[1:]
 		case "sudo":

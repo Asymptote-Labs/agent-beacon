@@ -91,7 +91,7 @@ func TestRulesLintFailsOnFixtureMismatch(t *testing.T) {
 var newerSpecRuleYAML = strings.Replace(strings.Replace(validRuleYAML, "id: cli-test-rule\n", "id: cli-future-rule\nspec: threat-rules/v1.9\n", 1),
 	"emit:", "future_field: true\nemit:", 1)
 
-const upgradeMessage = `rule "cli-future-rule" requires threat-rules/v1.9, but this Beacon supports up to threat-rules/v1.1; upgrade Beacon to load it`
+const upgradeMessage = `rule "cli-future-rule" requires threat-rules/v1.9, but this Beacon supports up to threat-rules/v1.2; upgrade Beacon to load it`
 
 func TestRulesLintReportsNewerSpecAsSkip(t *testing.T) {
 	dir := t.TempDir()

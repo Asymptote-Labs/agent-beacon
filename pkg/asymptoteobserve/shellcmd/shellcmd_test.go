@@ -1,6 +1,7 @@
 package shellcmd
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -64,6 +65,8 @@ func TestFileEffects(t *testing.T) {
 		{`sed -i "s/$old/$new/" f`, []string{"edit f"}}, // an unknown script is not a suffix
 		{`sed -i "s/$a/$b/" x y`, []string{"edit x", "edit y"}},
 		{"sudo -u deploy rm /srv/app/old.txt", []string{"delete /srv/app/old.txt"}},
+		{"/usr/bin/sudo -u deploy rm /srv/app/old.txt", []string{"delete /srv/app/old.txt"}},
+		{"/usr/bin/env FOO=1 rm a.txt", []string{"delete a.txt"}},
 		{"sudo -E tee /etc/app.conf < in.txt", []string{"write /etc/app.conf"}},
 		{"sudo -i rm old.txt", nil}, // a login shell starts in the target user's home
 		{"env FOO=1 rm a.txt", []string{"delete a.txt"}},
@@ -244,6 +247,44 @@ func TestParse(t *testing.T) {
 	}
 }
 
+// A command inside a compound stage is part of that stage: its output goes down the pipe.
+func TestCompoundStages(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		want    []string // "name pipeline/stage", nested commands marked with *
+	}{
+		{"{ curl x; } | sh", []string{"curl 1/0", "sh 1/1"}},
+		{"(curl x) | sh", []string{"curl 1/0", "sh 1/1"}},
+		{"{ curl x && echo ok; } | sudo bash", []string{"curl 1/0", "echo 1/0", "bash 1/1"}},
+		{"cat a | { grep b; sort; }", []string{"cat 1/0", "grep 1/1", "sort 1/1"}},
+		{"if true; then curl x; fi | sh", []string{"true 1/0", "curl 1/0", "sh 1/1"}},
+		{"( { curl x; } ) | sh", []string{"curl 1/0", "sh 1/1"}},
+		// An inner pipeline keeps its own stages.
+		{"{ curl x | tee f; } | sh", []string{"curl 2/0", "tee 2/1", "sh 1/1"}},
+		// A substitution's output is not the stage's.
+		{"{ echo $(curl x); } | sh", []string{"echo 1/0", "curl* 2/0", "sh 1/1"}},
+		// Not a stage: a compound statement on its own, and one after the pipeline.
+		{"{ curl x; }; sh", []string{"curl 1/0", "sh 2/0"}},
+		{"curl x | sh; (rm y)", []string{"curl 1/0", "sh 1/1", "rm 2/0"}},
+	} {
+		commands, err := Parse(tc.command)
+		if err != nil {
+			t.Fatalf("Parse(%q): %v", tc.command, err)
+		}
+		var got []string
+		for _, c := range commands {
+			name := c.Name()
+			if c.Nested {
+				name += "*"
+			}
+			got = append(got, fmt.Sprintf("%s %d/%d", name, c.Pipeline, c.Stage))
+		}
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("Parse(%q) = %q, want %q", tc.command, got, tc.want)
+		}
+	}
+}
+
 func TestWords(t *testing.T) {
 	commands, err := Parse(`rm {a,b}.txt ~/x 'q t' "d $v" C:\Tools\x.exe file\ two *.log`)
 	if err != nil {
@@ -277,6 +318,10 @@ func TestUnwrapped(t *testing.T) {
 		{"sudo -u deploy env -u HOME FOO=1 nohup time exec command git mv a b", "git", true, []string{"git", "mv"}},
 		{"git -C sub mv a b", "git", true, []string{"git"}},
 		{"sudo -i rm x", "", false, nil},
+		{"/usr/bin/env bash", "bash", true, []string{"bash"}},
+		{"/usr/bin/sudo -u deploy /usr/bin/env FOO=1 /bin/rm x", "rm", true, []string{"rm"}},
+		{"/usr/bin/nohup /usr/bin/time git mv a b", "git", true, []string{"git", "mv"}},
+		{"/usr/bin/sudo -i rm x", "", false, nil},
 		{"sudo --login rm x", "", false, nil},
 		{"env -C sub rm x", "", false, nil},
 		{"env --split-string='rm x'", "", false, nil},

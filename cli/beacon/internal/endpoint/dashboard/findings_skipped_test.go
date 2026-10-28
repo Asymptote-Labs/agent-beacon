@@ -69,7 +69,7 @@ func findingsFixture(t *testing.T, rules map[string]string) *httptest.ResponseRe
 // the baseline and names the skipped rules instead of failing.
 func TestFindingsAllStoreRulesSkippedStillRunsBaseline(t *testing.T) {
 	rec := findingsFixture(t, map[string]string{
-		"future-a": storeRule("future-a", "threat-rules/v1.2"),
+		"future-a": storeRule("future-a", "threat-rules/v1.3"),
 		"future-b": storeRule("future-b", "threat-rules/v2"),
 	})
 	if rec.Code != http.StatusOK {
@@ -89,7 +89,7 @@ func TestFindingsAllStoreRulesSkippedStillRunsBaseline(t *testing.T) {
 func TestRunScanAllRulesSkippedNamesThem(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	dir := t.TempDir()
-	for id, spec := range map[string]string{"future-a": "threat-rules/v1.2", "future-b": "threat-rules/v2"} {
+	for id, spec := range map[string]string{"future-a": "threat-rules/v1.3", "future-b": "threat-rules/v2"} {
 		if err := os.WriteFile(filepath.Join(dir, id+".rule.yaml"), []byte(storeRule(id, spec)), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -108,7 +108,7 @@ func TestRunScanAllRulesSkippedNamesThem(t *testing.T) {
 func TestFindingsSomeRulesSkippedRunsTheRest(t *testing.T) {
 	rec := findingsFixture(t, map[string]string{
 		"current-rule": storeRule("current-rule", ""),
-		"future-rule":  storeRule("future-rule", "threat-rules/v1.2"),
+		"future-rule":  storeRule("future-rule", "threat-rules/v1.3"),
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
@@ -120,7 +120,7 @@ func TestFindingsSomeRulesSkippedRunsTheRest(t *testing.T) {
 	if resp.Count != 1 || resp.Findings[0].RuleID != "current-rule" {
 		t.Fatalf("want the current rule's finding, got %+v", resp.Findings)
 	}
-	if len(resp.Skipped) != 1 || !strings.Contains(resp.Skipped[0], `rule "future-rule" requires threat-rules/v1.2`) {
+	if len(resp.Skipped) != 1 || !strings.Contains(resp.Skipped[0], `rule "future-rule" requires threat-rules/v1.3`) {
 		t.Fatalf("want future-rule in skipped, got %v", resp.Skipped)
 	}
 }

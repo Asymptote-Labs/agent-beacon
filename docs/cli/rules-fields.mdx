@@ -21,6 +21,7 @@ Threat-rule expressions bind each Beacon event as `e`. Field paths mirror the ev
 |------------|-------------|
 | `e.event.action` | Match event type, such as `command.executed` or `file.read` |
 | `e.command.command` | Match executed command text |
+| `e.command.parsed_commands` | Match the commands a command line runs (name, argv, pipeline stage, file effects) rather than its text (derived by the engine; needs `spec: threat-rules/v1.2`) |
 | `e.file.path` | Match a file path |
 | `e.prompt.text` | Match prompt text when retained |
 | `e.prompt.id` | Group the events of one turn: the prompt and everything the agent did for it |

@@ -1,9 +1,13 @@
 id: recursive-root-delete
-version: 2
+spec: threat-rules/v1.2  # needed for e.command.parsed_commands
+version: 3
 title: Recursive delete targeting a sensitive root path
 description: >
-  A recursive `rm` whose target is a filesystem root, home, or a bare wildcard —
-  a destructive command an autonomous agent should not run unprompted.
+  A recursive or forced `rm` with an operand that is a filesystem root, home, or a
+  bare wildcard — a destructive command an autonomous agent should not run
+  unprompted. The command line is read as bash, so a path under home (`~/project`)
+  or the same text inside a quoted string or a here-document does not fire; a
+  command line that does not parse falls back to matching its text.
 severity: critical
 status: stable
 posture: detect
@@ -11,9 +15,19 @@ taxonomy:
   beacon_category: risky-command
   owasp_llm: LLM08
 
+# rm is any word of a command (sudo, timeout and xargs wrappers still count). The operands
+# are read as written (argv_raw), since ~, $HOME and /* are words whose value the parse
+# leaves unknown.
 match: >
-  e.event.action == "command.executed" &&
-  e.command.command.matches("(?i)\\brm(\\s+-{1,2}[a-z-]+)*\\s+-[a-z]*[rf][a-z]*(\\s+-{1,2}[a-z-]+)*\\s+(/|~|\\$HOME|\\*)(\\s|$|/|\\*)")
+  e.event.action == "command.executed" && (
+    e.command.parsed_commands.exists(c,
+      c.argv.exists(a, a.matches("(^|/)rm$")) &&
+      c.argv.exists(a, a.matches("^-[a-zA-Z]*[rRfF][a-zA-Z]*$") || a in ["--recursive", "--force"]) &&
+      c.argv_raw.exists(a, a == "*" ||
+        a.matches("^([\"']?(~|\\$HOME|\\$\\{HOME\\})[\"']?/*|[\"']?/+[\"']?)\\*?$"))) ||
+    (size(e.command.parsed_commands) == 0 &&
+      e.command.command.matches("(?i)\\brm(\\s+-{1,2}[a-z-]+)*\\s+-[a-z]*[rf][a-z]*(\\s+-{1,2}[a-z-]+)*\\s+(/|~|\\$HOME|\\*)(\\s|$|/|\\*)"))
+  )
 
 emit:
   reason: "Recursive rm targeting a root, home, or wildcard path"
@@ -60,4 +74,52 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "rm -rf ./build/cache" }
+        session: { id: s1 }
+  - name: rm_rf_quoted_home
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "rm -rf \"$HOME\"" }
+        session: { id: s1 }
+  - name: rm_rf_root_not_first_operand
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "rm -rf ./build /" }
+        session: { id: s1 }
+  - name: rm_long_options_root
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "rm --recursive --force /" }
+        session: { id: s1 }
+  - name: unparseable_capture_falls_back_to_text
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "rm -rf / )" }
+        session: { id: s1 }
+  - name: rm_rf_under_home
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "rm -rf ~/project/build" }
+        session: { id: s1 }
+  - name: rm_rf_under_home_variable
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "rm -rf $HOME/.cache/pip" }
+        session: { id: s1 }
+  - name: pattern_in_quoted_string
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo \"never run rm -rf / on a host\"" }
+        session: { id: s1 }
+  - name: pattern_in_heredoc_body
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\nrm -rf /\nEOF" }
         session: { id: s1 }
