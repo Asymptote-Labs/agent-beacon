@@ -172,6 +172,16 @@ func TestPrivateRegistriesAndWindowsShells(t *testing.T) {
 		{"npx", []string{"--registry=https://npm.acme.internal", "@acme/billing-mcp"}, "npm:@acme/billing-mcp", BasisPrivateNPM},
 		{"uvx", []string{"--index-url", "https://pypi.acme.internal/simple", "acme-billing-mcp"}, "pypi:acme-billing-mcp", BasisPrivatePyPI},
 		{"uvx", []string{"--extra-index-url=https://x.example/simple", "srv"}, "pypi:srv", BasisPrivatePyPI},
+		// A private index or registry named after the package flag still applies to that package.
+		{"uvx", []string{"--from", "acme-billing-mcp", "--index-url", "https://pypi.acme.internal/simple", "acme-billing"}, "pypi:acme-billing-mcp", BasisPrivatePyPI},
+		{"uvx", []string{"--from=acme-billing-mcp", "--index=https://pypi.acme.internal/simple", "acme-billing"}, "pypi:acme-billing-mcp", BasisPrivatePyPI},
+		{"npx", []string{"-p", "@acme/mcp", "--registry", "https://npm.acme.internal", "acme-mcp"}, "npm:@acme/mcp", BasisPrivateNPM},
+		{"npx", []string{"--package=@acme/mcp", "--registry=https://npm.acme.internal", "acme-mcp"}, "npm:@acme/mcp", BasisPrivateNPM},
+		{"uvx", []string{"--from", "mcp-server-fetch", "mcp-server-fetch"}, "pypi:mcp-server-fetch", BasisPyPI},
+		// A config file or pip's own arguments can name an index or registry.
+		{"npx", []string{"--userconfig", "/x/.npmrc", "@acme/mcp"}, "npm:@acme/mcp", BasisPrivateNPM},
+		{"uvx", []string{"--config-file", "/x/uv.toml", "acme-mcp"}, "pypi:acme-mcp", BasisPrivatePyPI},
+		{"pipx", []string{"run", "--pip-args=--index-url=https://pypi.acme.internal/simple", "acme-mcp"}, "pypi:acme-mcp", BasisPrivatePyPI},
 		{"cmd", []string{"/c", "npx", "-y", "@playwright/mcp"}, "npm:@playwright/mcp", BasisNPM},
 		{"C:\\Windows\\System32\\cmd.exe", []string{"/C", "uvx", "mcp-server-fetch"}, "pypi:mcp-server-fetch", BasisPyPI},
 		{"cmd /c npx -y @playwright/mcp", nil, "npm:@playwright/mcp", BasisNPM},
@@ -196,6 +206,48 @@ func TestPrivateRegistriesAndWindowsShells(t *testing.T) {
 	items, _ = FromInventory(res, FromInventoryOptions{IncludePrivateNames: true})
 	if len(items) != 1 || items[0].Q != "pypi:acme-billing-mcp" || items[0].Basis != BasisPrivatePyPI {
 		t.Fatalf("with consent = %+v", items)
+	}
+}
+
+func TestFromInventoryHoldsBackRegistriesFromEnv(t *testing.T) {
+	for _, tc := range []struct {
+		key  string
+		def  map[string]interface{}
+		want string
+	}{
+		{"npm_config_registry", map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "@acme/internal-mcp"}}, "npm:@acme/internal-mcp"},
+		{"NPM_CONFIG_REGISTRY", map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "@acme/internal-mcp"}}, "npm:@acme/internal-mcp"},
+		{"npm_config_@acme:registry", map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "@acme/internal-mcp"}}, "npm:@acme/internal-mcp"},
+		{"NPM_CONFIG_USERCONFIG", map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "@acme/internal-mcp"}}, "npm:@acme/internal-mcp"},
+		{"UV_INDEX_URL", map[string]interface{}{"command": "uvx", "args": []interface{}{"acme-billing-mcp"}}, "pypi:acme-billing-mcp"},
+		{"UV_DEFAULT_INDEX", map[string]interface{}{"command": "uvx", "args": []interface{}{"acme-billing-mcp"}}, "pypi:acme-billing-mcp"},
+		{"UV_EXTRA_INDEX_URL", map[string]interface{}{"command": "uvx", "args": []interface{}{"acme-billing-mcp"}}, "pypi:acme-billing-mcp"},
+		{"PIP_INDEX_URL", map[string]interface{}{"command": "pipx", "args": []interface{}{"run", "acme-billing-mcp"}}, "pypi:acme-billing-mcp"},
+		{"PIP_EXTRA_INDEX_URL", map[string]interface{}{"command": "pipx", "args": []interface{}{"run", "acme-billing-mcp"}}, "pypi:acme-billing-mcp"},
+	} {
+		def := map[string]interface{}{"env": map[string]interface{}{tc.key: "https://registry.acme.internal"}}
+		for k, v := range tc.def {
+			def[k] = v
+		}
+		res := inventory.Result{MCPServers: []inventory.MCPServer{server("cursor", "internal-tool", "user", def)}}
+		items, skipped := FromInventory(res, FromInventoryOptions{})
+		if len(items) != 0 || len(skipped) != 1 || skipped[0].Reason != ReasonPrivatePackage {
+			t.Errorf("%s: a package from a registry set in env was not held back: %+v %+v", tc.key, items, skipped)
+		}
+		items, _ = FromInventory(res, FromInventoryOptions{IncludePrivateNames: true})
+		if len(items) != 1 || items[0].Q != tc.want || (items[0].Basis != BasisPrivateNPM && items[0].Basis != BasisPrivatePyPI) {
+			t.Errorf("%s: with consent = %+v", tc.key, items)
+		}
+	}
+
+	// Unrelated env keys, secrets included, leave a public package public.
+	res := inventory.Result{MCPServers: []inventory.MCPServer{server("cursor", "gh", "user", map[string]interface{}{
+		"command": "npx", "args": []interface{}{"-y", "@modelcontextprotocol/server-github"},
+		"env": map[string]interface{}{"GITHUB_TOKEN": "[REDACTED]", "NODE_ENV": "production"},
+	})}}
+	items, skipped := FromInventory(res, FromInventoryOptions{})
+	if len(items) != 1 || items[0].Basis != BasisNPM || len(skipped) != 0 {
+		t.Fatalf("a public package was held back: %+v %+v", items, skipped)
 	}
 }
 

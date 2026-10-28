@@ -15,8 +15,8 @@ import (
 //
 // By default only a public identifier derived here leaves the machine: an npm or PyPI package
 // named in a server's launch command and fetched from the public registry. Names that may be
-// private (a server's configured name, a package from a private registry or index, a skill's
-// name) are sent only when the caller opts in. Paths, URLs, environment, other arguments and
+// private (a server's configured name, a package from a registry or index the command or the
+// server's env names, a skill's name) are sent only when the caller opts in. Paths, URLs, environment, other arguments and
 // the rest of a definition are never sent.
 
 // Installed is one lookup and every place it was found.
@@ -105,6 +105,9 @@ func FromInventory(res inventory.Result, opts FromInventoryOptions) ([]Installed
 		}
 		command, args := commandOf(s.Definition)
 		if q, basis, ok := PackageFromCommand(command, args); ok {
+			if registryFromEnv(s.Definition) {
+				basis = privateBasis(basis)
+			}
 			if (basis == BasisPrivateNPM || basis == BasisPrivatePyPI) && !opts.IncludePrivateNames {
 				skipped = append(skipped, Skipped{Kind: "mcp", Runtime: s.Runtime, Name: name, Reason: ReasonPrivatePackage})
 				continue
@@ -192,6 +195,43 @@ func commandOf(def map[string]interface{}) (string, []string) {
 	return command, args
 }
 
+// privateBasis is the basis of a package fetched from a registry or index other than the
+// public one.
+func privateBasis(basis string) string {
+	switch basis {
+	case BasisNPM:
+		return BasisPrivateNPM
+	case BasisPyPI:
+		return BasisPrivatePyPI
+	}
+	return basis
+}
+
+// registryFromEnv reports whether a server's env block can point its launcher at a registry,
+// index or config file of its own. Only the keys are read; their values never leave here.
+func registryFromEnv(def map[string]interface{}) bool {
+	env, _ := def["env"].(map[string]interface{})
+	for key := range env {
+		k := strings.ToLower(strings.TrimSpace(key))
+		switch {
+		// npm_config_registry, npm_config_@scope:registry, npm_config_userconfig.
+		case strings.HasPrefix(k, "npm_config_") && (strings.HasSuffix(k, "registry") || k == "npm_config_userconfig" || k == "npm_config_globalconfig"):
+			return true
+		case k == "yarn_npm_registry_server" || k == "yarn_rc_filename" || k == "bun_config_registry":
+			return true
+		// UV_INDEX, UV_INDEX_URL, UV_DEFAULT_INDEX, UV_EXTRA_INDEX_URL, UV_FIND_LINKS, UV_CONFIG_FILE.
+		case k == "uv_index" || k == "uv_index_url" || k == "uv_default_index" || k == "uv_extra_index_url" ||
+			k == "uv_find_links" || k == "uv_config_file":
+			return true
+		// PIP_INDEX_URL, PIP_EXTRA_INDEX_URL, PIP_FIND_LINKS, PIP_CONFIG_FILE, PIPX_DEFAULT_INDEX_URL.
+		case k == "pip_index_url" || k == "pip_extra_index_url" || k == "pip_find_links" || k == "pip_config_file" ||
+			k == "pipx_default_index_url":
+			return true
+		}
+	}
+	return false
+}
+
 var (
 	npmName  = regexp.MustCompile(`^(@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*$`)
 	pypiName = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$`)
@@ -255,8 +295,10 @@ func PackageFromCommand(command string, args []string) (q, basis string, ok bool
 // fetched from a registry or index the command names is not a public package, and its name
 // may be private.
 var (
-	npmPrivateFlags  = flagSet("--registry")
-	pypiPrivateFlags = flagSet("--index", "--index-url", "--extra-index-url", "--default-index", "-f", "--find-links")
+	// A config file or pip's own arguments can name a registry or index too, so they count.
+	npmPrivateFlags  = flagSet("--registry", "--userconfig")
+	pypiPrivateFlags = flagSet("--index", "--index-url", "--extra-index-url", "--default-index", "-f", "--find-links",
+		"--config-file", "--pip-args")
 
 	npmPackageFlags = flagSet("-p", "--package")
 	npmValueFlags   = flagSet("--registry", "--cache", "--userconfig", "-w", "--workspace", "--node-options", "--loglevel", "--allow-build")
@@ -282,8 +324,11 @@ func flagSet(flags ...string) map[string]bool {
 
 // packageArg finds the package a launcher runs: the value of a package flag, or else the first
 // argument that is not an option. ok is false when an unknown option makes that uncertain.
-// private reports whether a flag in privateFlags appeared before the package.
+// private reports whether a flag in privateFlags appeared anywhere among the launcher's own
+// options, including after a package flag: `uvx --from pkg --index-url <url> cmd` fetches pkg
+// from that index too.
 func packageArg(args []string, packageFlags, valueFlags, boolFlags, privateFlags map[string]bool) (spec string, private, ok bool) {
+	found := false
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		name, value, hasValue := strings.Cut(a, "=")
@@ -297,13 +342,19 @@ func packageArg(args []string, packageFlags, valueFlags, boolFlags, privateFlags
 		case a == "--":
 			continue
 		case packageFlags[a]:
-			if i+1 < len(args) {
-				return args[i+1], private, true
+			if i+1 >= len(args) {
+				return "", private, false
 			}
-			return "", private, false
+			i++
+			if !found {
+				spec, found = args[i], true
+			}
 		case hasValue:
 			if packageFlags[name] {
-				return value, private, true
+				if !found {
+					spec, found = value, true
+				}
+				continue
 			}
 			if !valueFlags[name] && !boolFlags[name] {
 				return "", private, false
@@ -314,10 +365,15 @@ func packageArg(args []string, packageFlags, valueFlags, boolFlags, privateFlags
 		case strings.HasPrefix(a, "-"):
 			return "", private, false
 		default:
-			return a, private, true
+			// The first plain word is the package, or the command a package flag's package
+			// provides; either way the launcher's options end here.
+			if !found {
+				spec = a
+			}
+			return spec, private, true
 		}
 	}
-	return "", private, false
+	return spec, private, found
 }
 
 func npmFrom(args []string) (string, string, bool) {
