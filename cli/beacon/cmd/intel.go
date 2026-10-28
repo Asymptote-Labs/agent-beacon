@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -338,6 +339,9 @@ func intelCountsLine(counts map[string]int) string {
 	return strings.Join(parts, ", ") + "."
 }
 
+// intelCheckFileMax bounds what --file reads.
+const intelCheckFileMax = 1 << 20
+
 func readIntelCheckFile(stdin io.Reader, path string) ([]string, error) {
 	var r io.Reader
 	if path == "-" {
@@ -350,8 +354,17 @@ func readIntelCheckFile(stdin io.Reader, path string) ([]string, error) {
 		defer f.Close()
 		r = f
 	}
+	// Read one byte past the limit so a longer file is refused rather than cut short: an
+	// artifact past the cut would go unchecked, and --fail-on would pass without it.
+	data, err := io.ReadAll(io.LimitReader(r, intelCheckFileMax+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > intelCheckFileMax {
+		return nil, fmt.Errorf("--file is larger than %d bytes; a check names at most %d artifacts, so split the list", intelCheckFileMax, intelapi.MaxCheck)
+	}
 	var names []string
-	scanner := bufio.NewScanner(io.LimitReader(r, 1<<20))
+	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -391,23 +404,39 @@ func runIntelStatus(cmd *cobra.Command, args []string) error {
 }
 
 // writeIntelJSON re-indents the API's answer. It was decoded already, so it is valid JSON.
+// encoding/json escapes C0 controls but writes C1 controls and bidirectional formatting
+// characters as they are, so those are escaped here: the JSON decodes the same, and the
+// terminal never sees them raw. They can only occur inside strings.
 func writeIntelJSON(out io.Writer, raw []byte) error {
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return err
 	}
-	enc := json.NewEncoder(out)
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
 	enc.SetIndent("", "  ")
-	return enc.Encode(v)
+	if err := enc.Encode(v); err != nil {
+		return err
+	}
+	var b strings.Builder
+	for _, r := range buf.String() {
+		if r >= 0x80 && intelapi.IsUnsafeRune(r) {
+			fmt.Fprintf(&b, "\\u%04x", r)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	_, err := io.WriteString(out, b.String())
+	return err
 }
 
-// termLine makes untrusted text safe to print on a terminal: one line, no control or escape
-// characters, bounded.
+// termLine makes untrusted text safe to print on a terminal: one line, bounded, with no
+// control, escape or bidirectional formatting characters (intelapi.IsUnsafeRune).
 func termLine(s string, max int) string {
 	var b strings.Builder
 	space := false
 	for _, r := range s {
-		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) || r == 0x2028 || r == 0x2029 || r == ' ' {
+		if r == ' ' || intelapi.IsUnsafeRune(r) {
 			space = b.Len() > 0
 			continue
 		}

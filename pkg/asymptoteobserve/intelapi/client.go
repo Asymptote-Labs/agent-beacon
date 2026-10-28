@@ -422,11 +422,26 @@ func (c *Client) httpClient() *http.Client {
 }
 
 // clipLine keeps an error message from the server to one bounded printable line.
+// IsUnsafeRune reports whether r must not reach a terminal or a page from untrusted text: C0
+// and C1 controls (C1 carries 8-bit CSI and OSC) and DEL, the line and paragraph separators,
+// and the bidirectional formatting characters that can make one name display as another.
+func IsUnsafeRune(r rune) bool {
+	switch {
+	case r < 0x20, r >= 0x7f && r < 0xa0:
+		return true
+	case r == 0x2028, r == 0x2029:
+		return true
+	case r == 0x061c, r == 0x200e, r == 0x200f, r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069:
+		return true
+	}
+	return false
+}
+
 func clipLine(s string, max int) string {
 	var b strings.Builder
 	space := false
 	for _, r := range s {
-		if r < 0x20 || r == 0x7f || r == 0x2028 || r == 0x2029 || r == ' ' {
+		if r == ' ' || IsUnsafeRune(r) {
 			space = b.Len() > 0
 			continue
 		}

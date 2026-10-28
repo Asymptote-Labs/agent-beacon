@@ -148,6 +148,26 @@ func TestIntelLookupJSONIsTheAPIAnswer(t *testing.T) {
 	}
 }
 
+func TestIntelJSONEscapesC1AndBidiControls(t *testing.T) {
+	f := startFakeIntel(t)
+	f.answer("/api/v1/lookup", 200, `{"api":"intel.v1","query":{"q":"x"},"results":[{"entity_key":"mcp:a/b","name":"a\u009b2Jb\u202ec"}]}`)
+	out, err := runIntel(t, "", "lookup", "x", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range out {
+		if r >= 0x80 && r < 0xa0 || r == 0x202e {
+			t.Fatalf("--json printed %U raw: %q", r, out)
+		}
+	}
+	var got struct {
+		Results []struct{ Name string } `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil || got.Results[0].Name != "a\u009b2Jb\u202ec" {
+		t.Fatalf("escaped JSON does not decode to the answer: %v %q", err, out)
+	}
+}
+
 func TestIntelLookupWithNoResultsSaysUnchecked(t *testing.T) {
 	f := startFakeIntel(t)
 	f.answer("/api/v1/lookup", 200, `{"api":"intel.v1","query":{"q":"zzz","matched_by":"text"},"results":[],"more":false}`)
@@ -305,6 +325,18 @@ func TestIntelCheckRefusesBadInputWithoutARequest(t *testing.T) {
 	if f.requests() != 0 {
 		t.Fatalf("%d requests were sent", f.requests())
 	}
+
+	// A file past the limit is refused, not cut short with its tail unchecked.
+	big := filepath.Join(t.TempDir(), "big.txt")
+	if err := os.WriteFile(big, []byte(strings.Repeat("#\n", intelCheckFileMax/2)+"evil/server\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runIntel(t, "", "check", "--file", big, "--fail-on", "malicious"); err == nil || !strings.Contains(err.Error(), "larger than") {
+		t.Fatalf("oversized --file: %v", err)
+	}
+	if f.requests() != 0 {
+		t.Fatalf("an oversized --file still sent %d requests", f.requests())
+	}
 }
 
 func TestIntelStatus(t *testing.T) {
@@ -343,6 +375,7 @@ func TestTermLine(t *testing.T) {
 		"osc\x1b]8;;http://x\x07x": "osc ]8;;http://x x",
 		"c1\u009bcsi":              "c1 csi",
 		"ls\u2028ps\u2029":         "ls ps",
+		"evil\u202eredis\u2066":    "evil redis",
 		"  lead and trail  ":       "lead and trail",
 	} {
 		if got := termLine(in, 100); got != want {
