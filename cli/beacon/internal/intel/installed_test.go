@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/intelapi"
 )
 
 func TestPackageFromCommand(t *testing.T) {
@@ -132,9 +133,9 @@ func TestFromInventorySendsOnlyPublicIdentifiers(t *testing.T) {
 	}
 
 	// The lookups that would be sent carry none of the definition.
-	var sent []CheckItem
+	var sent []intelapi.CheckItem
 	for _, item := range items {
-		sent = append(sent, CheckItem{Q: item.Q, Kind: item.Kind})
+		sent = append(sent, intelapi.CheckItem{Q: item.Q, Kind: item.Kind})
 	}
 	body, _ := json.Marshal(sent)
 	for _, leak := range []string{secret, "/home/me", "company", "internal", "mcp.internal.example", "--token", "TOKEN", "latest"} {

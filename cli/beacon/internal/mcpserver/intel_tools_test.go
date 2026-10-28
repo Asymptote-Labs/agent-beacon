@@ -14,6 +14,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/intel"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/intelapi"
 )
 
 type intelFake struct {
@@ -46,8 +47,8 @@ func newIntelServer(t *testing.T, answer func(path, body string) (int, string)) 
 	}))
 	t.Cleanup(srv.Close)
 	s := New(Options{LogPath: filepath.Join(t.TempDir(), "runtime.jsonl")})
-	s.newIntel = func() (*intel.Client, error) {
-		return &intel.Client{BaseURL: srv.URL, HTTPClient: srv.Client(), UserAgent: "beacon-mcp/test"}, nil
+	s.newIntel = func() (*intelapi.Client, error) {
+		return &intelapi.Client{BaseURL: srv.URL, HTTPClient: srv.Client(), UserAgent: "beacon-mcp/test"}, nil
 	}
 	return s, f
 }
@@ -73,7 +74,7 @@ func TestIntelToolsAreListedWithSchemas(t *testing.T) {
 	for _, tool := range s.listTools() {
 		listed[tool.Name] = tool
 	}
-	for _, name := range intelToolNames() {
+	for _, name := range intelTools() {
 		tool, ok := listed[name]
 		if !ok {
 			t.Fatalf("%s not listed", name)
@@ -239,7 +240,7 @@ func TestIntelCheckInstalledDryRunSendsNothing(t *testing.T) {
 func TestIntelCheckInstalledChecksInBatchesAndMapsResultsBack(t *testing.T) {
 	s, f := newIntelServer(t, func(path, body string) (int, string) {
 		var req struct {
-			Artifacts []intel.CheckItem `json:"artifacts"`
+			Artifacts []intelapi.CheckItem `json:"artifacts"`
 		}
 		_ = json.Unmarshal([]byte(body), &req)
 		var results []string
@@ -264,11 +265,11 @@ func TestIntelCheckInstalledChecksInBatchesAndMapsResultsBack(t *testing.T) {
 		t.Fatalf("%d requests, want 2 batches for 61 artifacts", f.count())
 	}
 	var first, second struct {
-		Artifacts []intel.CheckItem `json:"artifacts"`
+		Artifacts []intelapi.CheckItem `json:"artifacts"`
 	}
 	_ = json.Unmarshal([]byte(f.bodies[0]), &first)
 	_ = json.Unmarshal([]byte(f.bodies[1]), &second)
-	if len(first.Artifacts) != intel.MaxCheck || len(second.Artifacts) != 11 {
+	if len(first.Artifacts) != intelapi.MaxCheck || len(second.Artifacts) != 11 {
 		t.Fatalf("batches = %d + %d", len(first.Artifacts), len(second.Artifacts))
 	}
 	for _, body := range f.bodies {
@@ -345,5 +346,34 @@ func TestIntelToolsOverStdio(t *testing.T) {
 	if err := json.Unmarshal([]byte(out.String()), &resp); err != nil || resp.ID != 7 || resp.Result.IsError ||
 		!strings.Contains(resp.Result.Content[0].Text, `"mcp:a/b"`) {
 		t.Fatalf("response = %s (%v)", out.String(), err)
+	}
+}
+
+func TestIntelToolsShareTheCloudContract(t *testing.T) {
+	s := New(Options{LogPath: filepath.Join(t.TempDir(), "runtime.jsonl")})
+	listed := map[string]Tool{}
+	for _, tool := range s.listTools() {
+		listed[tool.Name] = tool
+	}
+	for _, spec := range intelapi.Tools(intelToolNames) {
+		tool := listed[spec.Name]
+		if tool.Description != spec.Description || tool.InputSchema["additionalProperties"] != false {
+			t.Errorf("%s does not carry the shared spec: %+v", spec.Name, tool.InputSchema)
+		}
+	}
+}
+
+func TestIntelToolArgumentErrorsComeFirst(t *testing.T) {
+	t.Setenv(intel.EnvDisabled, "0")
+	s := New(Options{LogPath: filepath.Join(t.TempDir(), "runtime.jsonl")})
+	for name, args := range map[string]map[string]interface{}{
+		"intel_lookup":       {"q": "x", "user": "someone"},
+		"intel_get_artifact": {"key": "evil/server"},
+		"intel_check":        {"artifacts": []interface{}{}},
+	} {
+		text, isErr := call(t, s, name, args)
+		if !isErr || strings.Contains(text, "BEACON_INTEL=0") {
+			t.Errorf("%s = %q; want the argument error, not the off switch", name, text)
+		}
 	}
 }

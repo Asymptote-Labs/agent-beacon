@@ -17,10 +17,10 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/activity"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/intel"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/learning"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/intelapi"
 )
 
 const (
@@ -37,7 +37,7 @@ type Server struct {
 	tools   map[string]Tool
 	order   []string
 	// newIntel and inventory replace the Beacon Intel client and the inventory scan in tests.
-	newIntel  func() (*intel.Client, error)
+	newIntel  func() (*intelapi.Client, error)
 	inventory func(includeProject bool) inventory.Result
 }
 
@@ -128,7 +128,7 @@ func (s *Server) ToolNames() []string {
 }
 
 func (s *Server) HasExpectedTools() error {
-	expected := append([]string{"search_activity", "summarize_activity", "get_activity_event", "list_activity_filters", "search_memory", "get_memory", "get_memory_context"}, intelToolNames()...)
+	expected := append([]string{"search_activity", "summarize_activity", "get_activity_event", "list_activity_filters", "search_memory", "get_memory", "get_memory_context"}, intelTools()...)
 	for _, name := range expected {
 		if _, ok := s.tools[name]; !ok {
 			return fmt.Errorf("missing MCP tool %q", name)
