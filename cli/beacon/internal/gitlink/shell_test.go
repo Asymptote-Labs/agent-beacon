@@ -61,6 +61,8 @@ func TestShellWrittenPaths(t *testing.T) {
 		{`sed -i "s/$old/$new/" f`, []string{"f"}}, // an unknown script is not a suffix
 		{`sed -i "s/$a/$b/" x y`, []string{"x", "y"}},
 		{"sudo -u deploy rm /srv/app/old.txt", []string{"/srv/app/old.txt"}},
+		{"/usr/bin/sudo rm x", []string{"x"}},
+		{"/usr/bin/env FOO=1 /bin/rm a.txt", []string{"a.txt"}},
 		{"sudo -E tee /etc/app.conf < in.txt", []string{"/etc/app.conf"}},
 		{"sudo -i rm old.txt", nil}, // a login shell starts in the target user's home
 		{"env FOO=1 rm a.txt", []string{"a.txt"}},

@@ -185,6 +185,44 @@ type CommandInfo struct {
 	// reports it. Same history as FileInfo.Diff: Cursor's afterShellExecution hook
 	// has always written `command.output`, and this struct has always dropped it.
 	Output string `json:"output,omitempty"`
+	// ParsedCommands is Command read as a bash command line, for the threat-rules engine only:
+	// the commands it runs, so a rule can tell `curl ... | sudo bash` from the same text inside
+	// a quoted string or a here-document. It is never written or read; the engine fills it on
+	// its own copy of each event, as it does GenAIToolCallInfo.ResultText. See
+	// threatrules.ParsedCommands.
+	ParsedCommands []ParsedCommand `json:"-" cel:"parsed_commands"`
+}
+
+// ParsedCommand is one command of a command line, as the threat-rules engine presents it to
+// rules (e.command.parsed_commands). It is never serialized; the cel tags are the names a rule
+// uses. threatrules.ParsedCommands says how each field is derived.
+type ParsedCommand struct {
+	// Name is the base name of the command after its wrappers (sudo, env, exec, ...): rm for
+	// `sudo /bin/rm -rf x`. Empty when it is unknown.
+	Name string `cel:"name"`
+	// Argv are the command's words as the shell passes them, wrappers included; a word whose
+	// value the parse cannot know (a parameter, substitution, glob or leading tilde) is "".
+	Argv []string `cel:"argv"`
+	// ArgvRaw are the same words as written, quotes and expansions included ($HOME, /*).
+	ArgvRaw []string `cel:"argv_raw"`
+	// Env are the NAME=value assignments before the command; an unknown value is "".
+	Env map[string]string `cel:"env"`
+	// FileEffects are the files the command evidently writes, and how.
+	FileEffects []ParsedFileEffect `cel:"file_effects"`
+	// Pipeline identifies the command's pipeline: the stages of one pipeline share it. Stage
+	// is the 0-based position in it (curl ... | sh: sh is stage 1).
+	Pipeline int `cel:"pipeline"`
+	Stage    int `cel:"stage"`
+	// Nested is true for a command inside a command or process substitution, or inside the
+	// script a shell runs with -c.
+	Nested bool `cel:"nested"`
+}
+
+// ParsedFileEffect is a file a parsed command evidently writes. Op is one of write, append,
+// touch, truncate, edit, delete, move_from, move_to, link.
+type ParsedFileEffect struct {
+	Path string `cel:"path"`
+	Op   string `cel:"op"`
 }
 
 type MCPMethodInfo struct {

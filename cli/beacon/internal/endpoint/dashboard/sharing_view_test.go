@@ -366,6 +366,7 @@ func TestIsBeaconShareCommand(t *testing.T) {
 		`./beacon share --json`:                              true,
 		`C:\Tools\beacon.exe share`:                          true,
 		`sudo beacon share --session abc`:                    true,
+		`/usr/bin/sudo /usr/bin/env FOO=1 beacon share`:      true,
 		"go test ./...\nbeacon share":                        true,
 		// Captures cut short: the share call before the cut still counts.
 		"beacon share --current --json 'unterminated":             true,

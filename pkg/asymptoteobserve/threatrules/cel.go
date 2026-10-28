@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/google/cel-go/cel"
+	celast "github.com/google/cel-go/common/ast"
 	"github.com/google/cel-go/ext"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
@@ -84,12 +85,11 @@ func celFieldName(f reflect.StructField) string {
 // .map() can exhaust memory. A rule arrives as data (`beacon rules pull`), so the engine
 // cannot trust it to be cheap.
 //
-// The value is generous. Across the open corpus and the embedded baseline the most
-// expensive expression spends 3,506 on its own fixtures, and 537,433 on a pessimistic
-// event whose every string field is 64 KiB at once (the writer caps the whole event line
-// at 64 KiB, so no real event gets close): the limit leaves over 1,400 times headroom on
-// the first and about 9 times on the second. TestCorpusStaysUnderEvalCostLimit pins that
-// headroom. At this limit the seven-deep .all() above stops with an error after roughly
+// The value is generous. TestCorpusStaysUnderEvalCostLimit requires every expression in the
+// open corpus and the embedded baseline to spend under a hundredth of it (50,000) on its own
+// fixtures, and under a fifth of it (1,000,000) on a pessimistic event whose every string
+// field is 64 KiB at once (the writer caps the whole event line at 64 KiB, so no real event
+// gets close). At this limit the seven-deep .all() above stops with an error after roughly
 // two seconds instead of running to completion.
 const MaxEvalCost uint64 = 5_000_000
 
@@ -104,34 +104,52 @@ var evalCostLimit = MaxEvalCost
 // returned to the caller; this is what makes "every shipped rule provably compiles
 // against the schema" a load-time guarantee.
 func CompileMatch(expr string) (cel.Program, error) {
+	prog, _, err := compileMatch(expr)
+	return prog, err
+}
+
+// compileMatch is CompileMatch, also returning the checked expression.
+func compileMatch(expr string) (cel.Program, *cel.Ast, error) {
 	if strings.TrimSpace(expr) == "" {
-		return nil, fmt.Errorf("empty match expression")
+		return nil, nil, fmt.Errorf("empty match expression")
 	}
 	env, err := Env()
 	if err != nil {
-		return nil, fmt.Errorf("build CEL env: %w", err)
+		return nil, nil, fmt.Errorf("build CEL env: %w", err)
 	}
 	ast, iss := env.Compile(expr)
 	if iss != nil && iss.Err() != nil {
-		return nil, fmt.Errorf("compile match: %w", iss.Err())
+		return nil, nil, fmt.Errorf("compile match: %w", iss.Err())
 	}
 	if ast.OutputType() != cel.BoolType {
-		return nil, fmt.Errorf("match expression must evaluate to bool, got %s", ast.OutputType())
+		return nil, nil, fmt.Errorf("match expression must evaluate to bool, got %s", ast.OutputType())
 	}
 	prog, err := env.Program(ast, cel.CostLimit(evalCostLimit))
 	if err != nil {
-		return nil, fmt.Errorf("build CEL program: %w", err)
+		return nil, nil, fmt.Errorf("build CEL program: %w", err)
 	}
-	return prog, nil
+	return prog, ast, nil
+}
+
+// selectsField reports whether the checked expression selects a field named name anywhere,
+// as e.command.parsed_commands does. A name inside a string literal is not a selection.
+func selectsField(ast *cel.Ast, name string) bool {
+	found := false
+	celast.PreOrderVisit(ast.NativeRep().Expr(), celast.NewExprVisitor(func(e celast.Expr) {
+		if e.Kind() == celast.SelectKind && e.AsSelect().FieldName() == name {
+			found = true
+		}
+	}))
+	return found
 }
 
 // EvalMatch runs a compiled match program against one event and reports whether it
 // matched. A non-bool result is treated as an evaluation error.
 //
-// Derived fields (gen_ai.tool.call.result_text, gen_ai.system_instructions_text) are filled
-// on a copy of the event first, so a caller holding only a program sees the same values a
-// CompiledRule does. CompiledRule skips that step for rules that never reference a derived
-// field.
+// Derived fields (see DerivedFields) are filled on a copy of the event first, so a caller
+// holding only a program sees the same values a CompiledRule does. CompiledRule skips that
+// step for rules that never reference a derived field, and ScanEvents does it once per event
+// for all the rules that do.
 func EvalMatch(prog cel.Program, event asymptoteobserve.Event) (bool, error) {
 	return evalMatch(prog, withDerivedFields(event))
 }
