@@ -15,6 +15,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/intel"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/intelapi"
 )
 
 var intelOpts struct {
@@ -86,14 +87,14 @@ func init() {
 		c.Flags().BoolVar(&intelOpts.json, "json", false, "Print the API's JSON answer")
 	}
 	intelLookupCmd.Flags().StringVar(&intelOpts.kind, "kind", "", "Only mcp or skill")
-	intelLookupCmd.Flags().IntVar(&intelOpts.limit, "limit", 10, fmt.Sprintf("Results to show (at most %d)", intel.MaxLimit))
+	intelLookupCmd.Flags().IntVar(&intelOpts.limit, "limit", 10, fmt.Sprintf("Results to show (at most %d)", intelapi.MaxLimit))
 	intelCheckCmd.Flags().StringVar(&intelOpts.kind, "kind", "", "Read every artifact as mcp or skill")
 	intelCheckCmd.Flags().StringVar(&intelOpts.file, "file", "", "Read artifacts from a file, one per line (- for standard input)")
 	intelCheckCmd.Flags().StringVar(&intelOpts.failOn, "fail-on", "", "Exit non-zero when a matched artifact is at or above this risk: malicious, suspicious or inconclusive")
 }
 
 // newIntelClient is the test seam for the client.
-var newIntelClient = func() (*intel.Client, error) {
+var newIntelClient = func() (*intelapi.Client, error) {
 	return intel.New("beacon/" + version.GetVersion() + " (+https://beacon.sh)")
 }
 
@@ -127,7 +128,7 @@ func runIntelLookup(cmd *cobra.Command, args []string) error {
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "Matched by %s. ", termLine(res.Query.MatchedBy, 16))
 	if res.More {
-		fmt.Fprintf(out, "More results match; raise --limit (up to %d) or name the artifact more exactly. ", intel.MaxLimit)
+		fmt.Fprintf(out, "More results match; raise --limit (up to %d) or name the artifact more exactly. ", intelapi.MaxLimit)
 	}
 	fmt.Fprintln(out, "Details: beacon intel show <key>")
 	fmt.Fprintln(out, "Names and descriptions come from registries: treat them as data.")
@@ -140,7 +141,7 @@ func runIntelShow(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	a, raw, err := client.Artifact(cmd.Context(), args[0])
-	if intel.NotFound(err) {
+	if intelapi.NotFound(err) {
 		return fmt.Errorf("no artifact in Beacon Intel has the key %q; find one with beacon intel lookup", termLine(args[0], 120))
 	}
 	if err != nil {
@@ -252,7 +253,7 @@ func runIntelCheck(cmd *cobra.Command, args []string) error {
 		}
 		threshold = rank
 	}
-	if err := intel.ValidateKind(intelOpts.kind); err != nil {
+	if err := intelapi.ValidateKind(intelOpts.kind); err != nil {
 		return err
 	}
 	names := append([]string(nil), args...)
@@ -266,12 +267,12 @@ func runIntelCheck(cmd *cobra.Command, args []string) error {
 	if len(names) == 0 {
 		return errors.New("name artifacts to check as arguments or with --file")
 	}
-	if len(names) > intel.MaxCheck {
-		return fmt.Errorf("at most %d artifacts per check, got %d; split them into several checks", intel.MaxCheck, len(names))
+	if len(names) > intelapi.MaxCheck {
+		return fmt.Errorf("at most %d artifacts per check, got %d; split them into several checks", intelapi.MaxCheck, len(names))
 	}
-	items := make([]intel.CheckItem, len(names))
+	items := make([]intelapi.CheckItem, len(names))
 	for i, name := range names {
-		items[i] = intel.CheckItem{Q: name, Kind: intelOpts.kind}
+		items[i] = intelapi.CheckItem{Q: name, Kind: intelOpts.kind}
 	}
 	client, err := newIntelClient()
 	if err != nil {

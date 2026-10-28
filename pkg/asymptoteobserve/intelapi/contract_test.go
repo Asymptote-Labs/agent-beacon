@@ -1,4 +1,4 @@
-package intel
+package intelapi
 
 import (
 	"context"
