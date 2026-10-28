@@ -77,7 +77,7 @@ func LocalRegistries(env RegistryEnv) Registries {
 		return path
 	}
 
-	// npm: user, project and global npmrc.
+	// npm and pnpm: user, project and global npmrc.
 	userNpmrc := getenv("NPM_CONFIG_USERCONFIG")
 	if userNpmrc == "" {
 		userNpmrc = getenv("npm_config_userconfig")
@@ -86,7 +86,10 @@ func LocalRegistries(env RegistryEnv) Registries {
 		userNpmrc = join(home, ".npmrc")
 	}
 	for _, path := range []string{userNpmrc, join(env.WorkingDir, ".npmrc"), getenv("NPM_CONFIG_GLOBALCONFIG"), getenv("npm_config_globalconfig"),
-		join(getenv("NPM_CONFIG_PREFIX"), "etc", "npmrc"), system("/etc/npmrc"), system("/usr/local/etc/npmrc"), system("/opt/homebrew/etc/npmrc"), join(appData, "npm", "etc", "npmrc")} {
+		join(getenv("NPM_CONFIG_PREFIX"), "etc", "npmrc"), system("/etc/npmrc"),
+		// pnpm's global config (pnpm config set --location=global), npmrc format.
+		join(xdg, "pnpm", "rc"), join(home, "Library", "Preferences", "pnpm", "rc"), join(getenv("LOCALAPPDATA"), "pnpm", "config", "rc"),
+		system("/usr/local/etc/npmrc"), system("/opt/homebrew/etc/npmrc"), join(appData, "npm", "etc", "npmrc")} {
 		reg.readNpmrc(path)
 	}
 	// yarn and bun keep their registries in their own files.
