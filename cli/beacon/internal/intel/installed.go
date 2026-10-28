@@ -431,12 +431,18 @@ func pypiFrom(args []string) (string, string, bool) {
 	return q, basis, ok
 }
 
-// pypiPackage reads a PEP 508 requirement for a registry package. A direct reference
-// (name @ url), a URL, a path or a local wheel or sdist is not a public PyPI package, and its
-// name may be private, so ok is false.
+// pypiPackage reads a PEP 508 requirement for a registry package, or uv's <name>@<version>
+// (and @latest). A direct reference (name @ url), a URL, a path or a local wheel or sdist is
+// not a public PyPI package, and its name may be private, so ok is false.
 func pypiPackage(spec string) (string, string, bool) {
 	spec = strings.ToLower(strings.TrimSpace(spec))
-	if strings.ContainsAny(spec, "@/\\") || strings.Contains(spec, "://") || strings.HasPrefix(spec, "git+") || isArchive(spec) {
+	if name, version, ok := strings.Cut(spec, "@"); ok {
+		if version == "" || strings.ContainsAny(name, " \t") || strings.ContainsAny(version, ":/\\ \t@") {
+			return "", "", false
+		}
+		spec = name
+	}
+	if strings.ContainsAny(spec, "/\\") || strings.Contains(spec, "://") || strings.HasPrefix(spec, "git+") || isArchive(spec) {
 		return "", "", false
 	}
 	if cut := strings.IndexAny(spec, "[=<>!~; "); cut >= 0 {

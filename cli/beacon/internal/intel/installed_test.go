@@ -217,6 +217,8 @@ func TestPackageFromCommandRefusesSpecsOffTheRegistry(t *testing.T) {
 		{"uvx", []string{"--from", "acme-internal-tool @ git+https://git.acme.internal/x.git", "acme"}},
 		{"uvx", []string{"--from", "acme-internal-tool@git+https://git.acme.internal/x.git", "acme"}},
 		{"uvx", []string{"--from", "acme_tool-1.0-py3-none-any.whl", "acme"}},
+		{"uvx", []string{"--from", "acme-tool@", "acme"}},
+		{"uvx", []string{"acme-tool@file:///src/acme"}},
 		{"uvx", []string{"--from", "acme-tool-1.0.tar.gz", "acme"}},
 		{"uvx", []string{"--from", "git+https://git.acme.internal/x.git", "acme"}},
 		{"uvx", []string{"--from", "./tools/acme", "acme"}},
@@ -238,6 +240,9 @@ func TestPackageFromCommandRefusesSpecsOffTheRegistry(t *testing.T) {
 		want    string
 	}{
 		{"uvx", []string{"--from", "mcp-server-fetch==0.6.2", "mcp-server-fetch"}, "pypi:mcp-server-fetch"},
+		{"uvx", []string{"mcp-server-fetch@latest"}, "pypi:mcp-server-fetch"},
+		{"uvx", []string{"ruff@0.6.0"}, "pypi:ruff"},
+		{"uvx", []string{"--from", "mcp-server-fetch@0.6.2", "mcp-server-fetch"}, "pypi:mcp-server-fetch"},
 		{"uvx", []string{"--from", "mcp-server-fetch[cli]>=0.6 ; python_version >= '3.10'", "x"}, "pypi:mcp-server-fetch"},
 		{"npx", []string{"-y", "@playwright/mcp@latest"}, "npm:@playwright/mcp"},
 		{"npx", []string{"-y", "pkg@^1.2.3"}, "npm:pkg"},
