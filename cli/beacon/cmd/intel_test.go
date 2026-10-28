@@ -305,6 +305,18 @@ func TestIntelCheckRefusesBadInputWithoutARequest(t *testing.T) {
 	if f.requests() != 0 {
 		t.Fatalf("%d requests were sent", f.requests())
 	}
+
+	// A file past the limit is refused, not cut short with its tail unchecked.
+	big := filepath.Join(t.TempDir(), "big.txt")
+	if err := os.WriteFile(big, []byte(strings.Repeat("#\n", intelCheckFileMax/2)+"evil/server\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runIntel(t, "", "check", "--file", big, "--fail-on", "malicious"); err == nil || !strings.Contains(err.Error(), "larger than") {
+		t.Fatalf("oversized --file: %v", err)
+	}
+	if f.requests() != 0 {
+		t.Fatalf("an oversized --file still sent %d requests", f.requests())
+	}
 }
 
 func TestIntelStatus(t *testing.T) {

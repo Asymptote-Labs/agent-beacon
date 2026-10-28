@@ -426,7 +426,8 @@ func clipLine(s string, max int) string {
 	var b strings.Builder
 	space := false
 	for _, r := range s {
-		if r < 0x20 || r == 0x7f || r == 0x2028 || r == 0x2029 || r == ' ' {
+		// C0 and C1 controls (C1 carries 8-bit CSI and OSC), DEL, and line separators.
+		if r < 0x20 || (r >= 0x7f && r < 0xa0) || r == 0x2028 || r == 0x2029 || r == ' ' {
 			space = b.Len() > 0
 			continue
 		}

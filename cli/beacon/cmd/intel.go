@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -338,6 +339,9 @@ func intelCountsLine(counts map[string]int) string {
 	return strings.Join(parts, ", ") + "."
 }
 
+// intelCheckFileMax bounds what --file reads.
+const intelCheckFileMax = 1 << 20
+
 func readIntelCheckFile(stdin io.Reader, path string) ([]string, error) {
 	var r io.Reader
 	if path == "-" {
@@ -350,8 +354,17 @@ func readIntelCheckFile(stdin io.Reader, path string) ([]string, error) {
 		defer f.Close()
 		r = f
 	}
+	// Read one byte past the limit so a longer file is refused rather than cut short: an
+	// artifact past the cut would go unchecked, and --fail-on would pass without it.
+	data, err := io.ReadAll(io.LimitReader(r, intelCheckFileMax+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > intelCheckFileMax {
+		return nil, fmt.Errorf("--file is larger than %d bytes; a check names at most %d artifacts, so split the list", intelCheckFileMax, intelapi.MaxCheck)
+	}
 	var names []string
-	scanner := bufio.NewScanner(io.LimitReader(r, 1<<20))
+	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
