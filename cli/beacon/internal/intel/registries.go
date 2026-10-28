@@ -21,6 +21,9 @@ type Registries struct {
 	NPMScopes map[string]bool
 	// PyPI is set when a PyPI package may come from another index.
 	PyPI bool
+
+	home string          // for ~ in an npmrc's userconfig, globalconfig or prefix
+	read map[string]bool // npmrc files already read, so a cycle of them ends
 }
 
 // RegistryEnv is where LocalRegistries looks: the user's home, the working directory a launcher
@@ -65,7 +68,7 @@ const maxRegistryConfigBytes = 1 << 20
 // LocalRegistries reads the registry and index settings npm, yarn, bun, pip and uv would read.
 // A file it cannot read counts as absent. Settings that name the public registry do not count.
 func LocalRegistries(env RegistryEnv) Registries {
-	reg := Registries{NPMScopes: map[string]bool{}}
+	reg := Registries{NPMScopes: map[string]bool{}, home: env.Home, read: map[string]bool{}}
 	vars, lower := map[string]string{}, map[string]string{}
 	for _, kv := range env.Environ {
 		if k, v, ok := strings.Cut(kv, "="); ok {
@@ -116,12 +119,11 @@ func LocalRegistries(env RegistryEnv) Registries {
 		return paths
 	}
 	npmrcs := append([]string{userNpmrc, getenv("npm_config_globalconfig")}, inProjects(".npmrc")...)
-	// The global npmrc and npm's builtin one live under npm's prefix, which npm derives from the
-	// node it runs on (nvm, fnm, Volta and system installs each have their own).
-	for _, prefix := range npmPrefixes(getenv) {
-		npmrcs = append(npmrcs, join(prefix, "etc", "npmrc"), join(prefix, "lib", "node_modules", "npm", "npmrc"),
-			join(prefix, "node_modules", "npm", "npmrc"))
-	}
+	// The global npmrc lives under npm's prefix, and npm's builtin npmrc beside the npm the node
+	// ships; npm derives both from the node it runs on (nvm, fnm, Volta and system installs each
+	// have their own).
+	npmrcs = append(npmrcs, join(getenv("npm_config_prefix"), "etc", "npmrc"))
+	npmrcs = append(npmrcs, nodeNpmrcs(filepath.SplitList(getenv("PATH")))...)
 	for _, path := range append(npmrcs, system("/etc/npmrc"),
 		// pnpm's global config (pnpm config set --location=global), npmrc format.
 		join(xdg, "pnpm", "rc"), join(home, "Library", "Preferences", "pnpm", "rc"), join(getenv("LOCALAPPDATA"), "pnpm", "config", "rc"),
@@ -166,14 +168,11 @@ func LocalRegistries(env RegistryEnv) Registries {
 	return reg
 }
 
-// npmPrefixes are the places npm's global prefix may be: npm_config_prefix, or the
-// installation of the first node on PATH (its parent directory's parent on Unix, its own
-// directory on Windows), both as found and with symlinks resolved.
-func npmPrefixes(getenv func(string) string) []string {
-	if prefix := getenv("npm_config_prefix"); prefix != "" {
-		return []string{prefix}
-	}
-	for _, dir := range filepath.SplitList(getenv("PATH")) {
+// nodeNpmrcs are the global and builtin npmrc files of the first node in dirs: its install
+// prefix is its directory's parent on Unix and its own directory on Windows, both as found and
+// with symlinks resolved.
+func nodeNpmrcs(dirs []string) []string {
+	for _, dir := range dirs {
 		if dir == "" {
 			continue
 		}
@@ -186,10 +185,47 @@ func npmPrefixes(getenv func(string) string) []string {
 			if real, err := filepath.EvalSymlinks(node); err == nil && real != node {
 				prefixes = append(prefixes, filepath.Dir(filepath.Dir(real)), filepath.Dir(real))
 			}
-			return prefixes
+			var paths []string
+			for _, prefix := range prefixes {
+				paths = append(paths, filepath.Join(prefix, "etc", "npmrc"), filepath.Join(prefix, "lib", "node_modules", "npm", "npmrc"),
+					filepath.Join(prefix, "node_modules", "npm", "npmrc"))
+			}
+			return paths
 		}
 	}
 	return nil
+}
+
+// forServer adds what npm reads when a server runs on a node of its own: one beside an
+// absolute launcher, or first on a PATH set in the server's env. A runtime with a short PATH
+// (a desktop app, say) is often pointed at an nvm, fnm or Volta node this way.
+func (r Registries) forServer(command string, def map[string]interface{}) Registries {
+	var dirs []string
+	if command = strings.TrimSpace(command); command != "" && strings.ContainsAny(command, `/\`) {
+		dirs = append(dirs, filepath.Dir(command))
+	}
+	if env, ok := def["env"].(map[string]interface{}); ok {
+		for key, value := range env {
+			if path, ok := value.(string); ok && strings.EqualFold(key, "PATH") {
+				dirs = append(dirs, filepath.SplitList(path)...)
+			}
+		}
+	}
+	npmrcs := nodeNpmrcs(dirs)
+	if len(npmrcs) == 0 {
+		return r
+	}
+	out := Registries{NPM: r.NPM, PyPI: r.PyPI, NPMScopes: map[string]bool{}, home: r.home, read: map[string]bool{}}
+	for scope := range r.NPMScopes {
+		out.NPMScopes[scope] = true
+	}
+	for path := range r.read {
+		out.read[path] = true
+	}
+	for _, path := range npmrcs {
+		out.readNpmrc(path)
+	}
+	return out
 }
 
 // private reports whether a package lookup (npm:<name> or pypi:<name>) may come from another
@@ -232,6 +268,16 @@ func (r *Registries) addEnv(key, value string) {
 }
 
 func (r *Registries) readNpmrc(path string) {
+	if path == "" || r.read[path] {
+		return
+	}
+	if r.read == nil {
+		r.read = map[string]bool{}
+	}
+	if r.NPMScopes == nil {
+		r.NPMScopes = map[string]bool{}
+	}
+	r.read[path] = true
 	lines, ok := readConfigLines(path)
 	if !ok {
 		return
@@ -252,12 +298,39 @@ func (r *Registries) readNpmrc(path string) {
 			if !publicRegistry(value) {
 				r.NPMScopes[strings.TrimSuffix(key, ":registry")] = true
 			}
-		case key == "userconfig" || key == "globalconfig":
-			// A file that points npm at another config file: Beacon does not follow it, so
-			// it cannot tell where packages come from.
-			r.NPM = true
+		case key == "userconfig" || key == "globalconfig" || key == "prefix":
+			// Another config file npm reads (a distro's builtin npmrc names /etc/npmrc this
+			// way), or the prefix whose global npmrc it reads: follow it. A value Beacon cannot
+			// resolve leaves it unable to tell where packages come from.
+			target, ok := r.expandPath(value)
+			switch {
+			case !ok:
+				r.NPM = true
+			case key == "prefix":
+				r.readNpmrc(filepath.Join(target, "etc", "npmrc"))
+			default:
+				r.readNpmrc(target)
+			}
 		}
 	}
+}
+
+// expandPath resolves an npmrc path value: absolute, or under ~ when the home is known.
+// Anything else (a ${VAR}, a relative path) is not resolved.
+func (r *Registries) expandPath(value string) (string, bool) {
+	if strings.Contains(value, "$") || value == "" {
+		return "", false
+	}
+	if rest, ok := strings.CutPrefix(value, "~"); ok && (rest == "" || rest[0] == '/' || rest[0] == '\\') {
+		if r.home == "" {
+			return "", false
+		}
+		return filepath.Join(r.home, rest), true
+	}
+	if !filepath.IsAbs(value) {
+		return "", false
+	}
+	return value, true
 }
 
 // registryEnvKey reports whether an environment variable can point npm-family launchers (npm)

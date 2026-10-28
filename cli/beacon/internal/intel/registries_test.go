@@ -35,7 +35,8 @@ func TestLocalRegistries(t *testing.T) {
 			private: []string{"npm:@playwright/mcp", "npm:plain"}, public: []string{"pypi:x"}},
 		{name: "public registry in npmrc", file: ".npmrc", content: "registry=https://registry.npmjs.org/\n@x:registry=https://registry.npmjs.org\n",
 			public: []string{"npm:@x/y", "npm:plain"}},
-		{name: "npmrc pointing at another config", file: ".npmrc", content: "userconfig=/elsewhere/.npmrc\n", private: []string{"npm:plain"}},
+		{name: "npmrc naming a config Beacon cannot resolve", file: ".npmrc", content: "globalconfig=${NPM_HOME}/npmrc\n", private: []string{"npm:plain"}},
+		{name: "npmrc naming a missing config", file: ".npmrc", content: "globalconfig=/nonexistent/beacon-test/npmrc\n", public: []string{"npm:plain"}},
 		{name: "scope in pnpm global rc", file: ".config/pnpm/rc", content: "@acme:registry=https://npm.acme.internal/\n",
 			private: []string{"npm:@acme/internal-mcp"}, public: []string{"npm:@playwright/mcp"}},
 		{name: "registry in macOS pnpm rc", file: "Library/Preferences/pnpm/rc", content: "registry=https://npm.acme.internal/\n", private: []string{"npm:plain"}},
@@ -110,6 +111,72 @@ func TestLocalRegistriesReadsTheGlobalNpmrcOfTheNodeOnPath(t *testing.T) {
 	writeConfig(t, filepath.Join(install, "lib", "node_modules", "npm", "npmrc"), "registry=https://npm.acme.internal\n")
 	if reg := LocalRegistries(RegistryEnv{Home: home, Environ: []string{"PATH=" + filepath.Join(install, "bin")}}); !reg.private("npm:plain") {
 		t.Fatalf("npm's builtin npmrc was not read: %+v", reg)
+	}
+}
+
+func TestNpmrcFollowsTheConfigFilesAndPrefixItNames(t *testing.T) {
+	home := t.TempDir()
+	// A distro's builtin npmrc names /etc/npmrc; one naming only the public registry leaves
+	// packages public.
+	writeConfig(t, filepath.Join(home, "etc-npmrc"), "registry=https://registry.npmjs.org/\n")
+	writeConfig(t, filepath.Join(home, ".npmrc"), "globalconfig="+filepath.Join(home, "etc-npmrc")+"\n")
+	if reg := LocalRegistries(RegistryEnv{Home: home}); reg.private("npm:plain") || reg.private("npm:@x/y") {
+		t.Fatalf("a globalconfig naming the public registry held packages back: %+v", reg)
+	}
+	// One naming a private scope holds that scope back, by ~ too.
+	writeConfig(t, filepath.Join(home, "etc-npmrc"), "@acme:registry=https://npm.acme.internal\n")
+	writeConfig(t, filepath.Join(home, ".npmrc"), "globalconfig=~/etc-npmrc\n")
+	if reg := LocalRegistries(RegistryEnv{Home: home}); !reg.private("npm:@acme/x") || reg.private("npm:plain") {
+		t.Fatalf("the named globalconfig was not followed: %+v", reg)
+	}
+	// prefix= in ~/.npmrc moves the global npmrc.
+	writeConfig(t, filepath.Join(home, "npm-global", "etc", "npmrc"), "registry=https://npm.acme.internal\n")
+	writeConfig(t, filepath.Join(home, ".npmrc"), "prefix=~/npm-global\n")
+	if reg := LocalRegistries(RegistryEnv{Home: home}); !reg.private("npm:plain") {
+		t.Fatalf("the prefix's global npmrc was not read: %+v", reg)
+	}
+	// A cycle of config files ends.
+	writeConfig(t, filepath.Join(home, ".npmrc"), "userconfig=~/.npmrc\n")
+	LocalRegistries(RegistryEnv{Home: home})
+}
+
+func TestLocalRegistriesReadsTheBuiltinNpmrcAlongsideAnExportedPrefix(t *testing.T) {
+	home := t.TempDir()
+	install := filepath.Join(home, "node")
+	writeConfig(t, filepath.Join(install, "bin", "node"), "")
+	writeConfig(t, filepath.Join(install, "lib", "node_modules", "npm", "npmrc"), "registry=https://npm.acme.internal\n")
+	reg := LocalRegistries(RegistryEnv{Home: home, Environ: []string{"npm_config_prefix=" + filepath.Join(home, "global"), "PATH=" + filepath.Join(install, "bin")}})
+	if !reg.private("npm:plain") {
+		t.Fatalf("the builtin npmrc was skipped once a prefix was exported: %+v", reg)
+	}
+}
+
+func TestRegistriesForAServerOnItsOwnNode(t *testing.T) {
+	home := t.TempDir()
+	nvm := filepath.Join(home, ".nvm", "versions", "node", "v20.11.0")
+	writeConfig(t, filepath.Join(nvm, "bin", "node"), "")
+	writeConfig(t, filepath.Join(nvm, "bin", "npx"), "")
+	writeConfig(t, filepath.Join(nvm, "etc", "npmrc"), "@acme:registry=https://npm.acme.internal\n")
+	base := LocalRegistries(RegistryEnv{Home: home})
+	if base.private("npm:@acme/x") {
+		t.Fatal("the nvm node is not on Beacon's PATH in this test")
+	}
+	byCommand := base.forServer(filepath.Join(nvm, "bin", "npx"), map[string]interface{}{})
+	byPath := base.forServer("npx", map[string]interface{}{"env": map[string]interface{}{"PATH": filepath.Join(nvm, "bin") + string(filepath.ListSeparator) + "/usr/bin"}})
+	for name, reg := range map[string]Registries{"absolute command": byCommand, "env PATH": byPath} {
+		if !reg.private("npm:@acme/x") || reg.private("npm:@playwright/mcp") {
+			t.Errorf("%s: %+v", name, reg)
+		}
+	}
+	if base.private("npm:@acme/x") {
+		t.Fatal("forServer changed the machine-wide registries")
+	}
+
+	res := inventory.Result{MCPServers: []inventory.MCPServer{
+		server("claude_desktop", "billing", "user", map[string]interface{}{"command": filepath.Join(nvm, "bin", "npx"), "args": []interface{}{"-y", "@acme/billing-mcp"}}),
+	}}
+	if items, skipped := FromInventory(res, FromInventoryOptions{Registries: base}); len(items) != 0 || len(skipped) != 1 || skipped[0].Reason != ReasonPrivatePackage {
+		t.Fatalf("a server on its own nvm node was not held back: %+v %+v", items, skipped)
 	}
 }
 
