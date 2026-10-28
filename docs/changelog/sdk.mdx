@@ -9,6 +9,11 @@ Stay up to date with the latest changes to the Beacon Observe SDK.
 
 ---
 
+## Unreleased
+
+- **Anthropic `instrumentModules` example fixed** · The documented `import Anthropic from` example crashed `Observe.initialize()`; pass the module namespace (`import * as Anthropic`) instead, and a clear error now says so.
+- **Empty environment variables are ignored** · A declared but empty `ASYMPTOTE_BASE_URL` made `Observe.initialize()` throw `Invalid URL`, and an empty `OTEL_SERVICE_NAME` exported spans with a blank service name. Empty values now fall back to the defaults.
+
 ## October 2026
 
 ### v0.2.0 · October 22, 2026
