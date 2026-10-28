@@ -270,6 +270,7 @@ func TestFromInventoryHoldsBackRegistriesFromEnv(t *testing.T) {
 		{"UV_EXTRA_INDEX_URL", map[string]interface{}{"command": "uvx", "args": []interface{}{"acme-billing-mcp"}}, "pypi:acme-billing-mcp"},
 		{"PIP_INDEX_URL", map[string]interface{}{"command": "pipx", "args": []interface{}{"run", "acme-billing-mcp"}}, "pypi:acme-billing-mcp"},
 		{"PIP_EXTRA_INDEX_URL", map[string]interface{}{"command": "pipx", "args": []interface{}{"run", "acme-billing-mcp"}}, "pypi:acme-billing-mcp"},
+		{"NPM_CONFIG_PREFIX", map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "@acme/internal-mcp"}}, "npm:@acme/internal-mcp"},
 	} {
 		def := map[string]interface{}{"env": map[string]interface{}{tc.key: "https://registry.acme.internal"}}
 		for k, v := range tc.def {

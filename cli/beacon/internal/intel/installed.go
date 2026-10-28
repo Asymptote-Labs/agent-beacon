@@ -108,7 +108,8 @@ func FromInventory(res inventory.Result, opts FromInventoryOptions) ([]Installed
 		}
 		command, args := commandOf(s.Definition)
 		if q, basis, ok := PackageFromCommand(command, args); ok {
-			if registryFromEnv(s.Definition) || opts.Registries.forServer(command, s.Definition).private(q) {
+			program, _ := launcher(command, args)
+			if registryFromEnv(s.Definition) || opts.Registries.forServer(program, s.Definition).private(q) {
 				basis = privateBasis(basis)
 			}
 			if (basis == BasisPrivateNPM || basis == BasisPrivatePyPI) && !opts.IncludePrivateNames {
@@ -240,21 +241,33 @@ func validName(name string) bool {
 	return plainName.MatchString(name) && !strings.Contains(name, "//") && !strings.Contains(name, "..")
 }
 
+// launcher is the program a launch command runs and its arguments: a whole launch line in
+// command is split, and Windows' cmd /c or /k wrapper (cmd /c npx -y <package>) is unwrapped.
+func launcher(command string, args []string) (string, []string) {
+	for {
+		if len(args) == 0 && strings.ContainsAny(strings.TrimSpace(command), " \t") {
+			fields := strings.Fields(command)
+			command, args = fields[0], fields[1:]
+		}
+		if launcherBase(command) == "cmd" && len(args) >= 2 && (strings.EqualFold(args[0], "/c") || strings.EqualFold(args[0], "/k")) {
+			command, args = args[1], args[2:]
+			continue
+		}
+		return command, args
+	}
+}
+
+func launcherBase(command string) string {
+	base := strings.ToLower(filepath.Base(strings.ReplaceAll(strings.TrimSpace(command), `\`, "/")))
+	return strings.TrimSuffix(strings.TrimSuffix(base, ".exe"), ".cmd")
+}
+
 // PackageFromCommand names the npm or PyPI package a launch command runs, as a lookup
 // (npm:<name> or pypi:<name>) without its version. ok is false for anything else: a local
 // script, a binary, a container, or a command it cannot read with confidence.
 func PackageFromCommand(command string, args []string) (q, basis string, ok bool) {
-	// Some configs put the whole launch line in command.
-	if len(args) == 0 && strings.ContainsAny(strings.TrimSpace(command), " \t") {
-		fields := strings.Fields(command)
-		command, args = fields[0], fields[1:]
-	}
-	base := strings.ToLower(filepath.Base(strings.ReplaceAll(strings.TrimSpace(command), `\`, "/")))
-	base = strings.TrimSuffix(strings.TrimSuffix(base, ".exe"), ".cmd")
-	// Windows configs run launchers through the shell: cmd /c npx -y <package>.
-	if base == "cmd" && len(args) >= 2 && (strings.EqualFold(args[0], "/c") || strings.EqualFold(args[0], "/k")) {
-		return PackageFromCommand(args[1], args[2:])
-	}
+	command, args = launcher(command, args)
+	base := launcherBase(command)
 	rest := args
 	switch base {
 	case "npx", "bunx", "pnpx":

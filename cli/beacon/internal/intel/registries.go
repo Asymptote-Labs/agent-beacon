@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -22,8 +23,9 @@ type Registries struct {
 	// PyPI is set when a PyPI package may come from another index.
 	PyPI bool
 
-	home string          // for ~ in an npmrc's userconfig, globalconfig or prefix
-	read map[string]bool // npmrc files already read, so a cycle of them ends
+	home string            // for ~ in an npmrc's userconfig, globalconfig or prefix
+	vars map[string]string // the environment, by lowercased name, for ${VAR} in an npmrc
+	read map[string]bool   // npmrc files already read, so a cycle of them ends
 }
 
 // RegistryEnv is where LocalRegistries looks: the user's home, the working directory a launcher
@@ -68,8 +70,8 @@ const maxRegistryConfigBytes = 1 << 20
 // LocalRegistries reads the registry and index settings npm, yarn, bun, pip and uv would read.
 // A file it cannot read counts as absent. Settings that name the public registry do not count.
 func LocalRegistries(env RegistryEnv) Registries {
-	reg := Registries{NPMScopes: map[string]bool{}, home: env.Home, read: map[string]bool{}}
 	vars, lower := map[string]string{}, map[string]string{}
+	reg := Registries{NPMScopes: map[string]bool{}, home: env.Home, vars: lower, read: map[string]bool{}}
 	for _, kv := range env.Environ {
 		if k, v, ok := strings.Cut(kv, "="); ok {
 			vars[k] = v
@@ -215,7 +217,7 @@ func (r Registries) forServer(command string, def map[string]interface{}) Regist
 	if len(npmrcs) == 0 {
 		return r
 	}
-	out := Registries{NPM: r.NPM, PyPI: r.PyPI, NPMScopes: map[string]bool{}, home: r.home, read: map[string]bool{}}
+	out := Registries{NPM: r.NPM, PyPI: r.PyPI, NPMScopes: map[string]bool{}, home: r.home, vars: r.vars, read: map[string]bool{}}
 	for scope := range r.NPMScopes {
 		out.NPMScopes[scope] = true
 	}
@@ -249,7 +251,7 @@ func (r Registries) private(q string) bool {
 // addEnv records an inherited environment variable that sets a registry or index.
 func (r *Registries) addEnv(key, value string) {
 	switch strings.ToLower(key) {
-	case "npm_config_userconfig", "npm_config_globalconfig", "yarn_rc_filename", "uv_config_file", "pip_config_file":
+	case "npm_config_userconfig", "npm_config_globalconfig", "npm_config_prefix", "yarn_rc_filename", "uv_config_file", "pip_config_file":
 		// Names a config file, which LocalRegistries reads like the default one.
 		return
 	}
@@ -315,10 +317,22 @@ func (r *Registries) readNpmrc(path string) {
 	}
 }
 
-// expandPath resolves an npmrc path value: absolute, or under ~ when the home is known.
-// Anything else (a ${VAR}, a relative path) is not resolved.
+// npmrcVar is npm's ${NAME} reference to an environment variable in an npmrc value.
+var npmrcVar = regexp.MustCompile(`\$\{([^${}]+)\}`)
+
+// expandPath resolves an npmrc path value as npm does: ${VAR} from the environment (Windows'
+// own installer writes prefix=${APPDATA}\npm), then an absolute path or one under ~. A value
+// naming an unset variable, or a relative path, is not resolved.
 func (r *Registries) expandPath(value string) (string, bool) {
-	if strings.Contains(value, "$") || value == "" {
+	resolved := true
+	value = npmrcVar.ReplaceAllStringFunc(value, func(ref string) string {
+		v, ok := r.vars[strings.ToLower(ref[2:len(ref)-1])]
+		if !ok || v == "" {
+			resolved = false
+		}
+		return v
+	})
+	if !resolved || strings.Contains(value, "$") || value == "" {
 		return "", false
 	}
 	if rest, ok := strings.CutPrefix(value, "~"); ok && (rest == "" || rest[0] == '/' || rest[0] == '\\') {
@@ -338,8 +352,10 @@ func (r *Registries) expandPath(value string) (string, bool) {
 func registryEnvKey(key string) (npm, pypi bool) {
 	k := strings.ToLower(strings.TrimSpace(key))
 	switch {
-	// npm_config_registry, npm_config_@scope:registry, npm_config_userconfig.
-	case strings.HasPrefix(k, "npm_config_") && (strings.HasSuffix(k, "registry") || k == "npm_config_userconfig" || k == "npm_config_globalconfig"):
+	// npm_config_registry, npm_config_@scope:registry, and the variables that change which
+	// npmrc files npm reads.
+	case strings.HasPrefix(k, "npm_config_") && (strings.HasSuffix(k, "registry") || k == "npm_config_userconfig" ||
+		k == "npm_config_globalconfig" || k == "npm_config_prefix"):
 		return true, false
 	case k == "yarn_npm_registry_server" || k == "yarn_rc_filename" || k == "bun_config_registry":
 		return true, false

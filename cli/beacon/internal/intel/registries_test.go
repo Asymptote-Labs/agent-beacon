@@ -140,6 +140,28 @@ func TestNpmrcFollowsTheConfigFilesAndPrefixItNames(t *testing.T) {
 	LocalRegistries(RegistryEnv{Home: home})
 }
 
+func TestNpmrcExpandsEnvironmentVariablesAsNpmDoes(t *testing.T) {
+	home := t.TempDir()
+	appData := filepath.Join(home, "AppData", "Roaming")
+	install := filepath.Join(home, "nodejs")
+	writeConfig(t, filepath.Join(install, "bin", "node"), "")
+	// The official Windows installer's builtin npmrc.
+	writeConfig(t, filepath.Join(install, "lib", "node_modules", "npm", "npmrc"), "prefix=${APPDATA}/npm\n")
+	env := RegistryEnv{Home: home, Environ: []string{"APPDATA=" + appData, "PATH=" + filepath.Join(install, "bin")}}
+	if reg := LocalRegistries(env); reg.private("npm:plain") || reg.private("npm:@x/y") {
+		t.Fatalf("prefix=${APPDATA}/npm held every npm package back: %+v", reg)
+	}
+	writeConfig(t, filepath.Join(appData, "npm", "etc", "npmrc"), "@acme:registry=https://npm.acme.internal\n")
+	if reg := LocalRegistries(env); !reg.private("npm:@acme/x") || reg.private("npm:plain") {
+		t.Fatalf("the expanded prefix's global npmrc was not read: %+v", reg)
+	}
+	// An unset variable leaves Beacon unable to tell, so npm is held back.
+	env.Environ = []string{"PATH=" + filepath.Join(install, "bin")}
+	if reg := LocalRegistries(env); !reg.private("npm:plain") {
+		t.Fatalf("an unset ${APPDATA} did not hold npm back: %+v", reg)
+	}
+}
+
 func TestLocalRegistriesReadsTheBuiltinNpmrcAlongsideAnExportedPrefix(t *testing.T) {
 	home := t.TempDir()
 	install := filepath.Join(home, "node")
@@ -172,11 +194,16 @@ func TestRegistriesForAServerOnItsOwnNode(t *testing.T) {
 		t.Fatal("forServer changed the machine-wide registries")
 	}
 
-	res := inventory.Result{MCPServers: []inventory.MCPServer{
-		server("claude_desktop", "billing", "user", map[string]interface{}{"command": filepath.Join(nvm, "bin", "npx"), "args": []interface{}{"-y", "@acme/billing-mcp"}}),
-	}}
-	if items, skipped := FromInventory(res, FromInventoryOptions{Registries: base}); len(items) != 0 || len(skipped) != 1 || skipped[0].Reason != ReasonPrivatePackage {
-		t.Fatalf("a server on its own nvm node was not held back: %+v %+v", items, skipped)
+	npx := filepath.Join(nvm, "bin", "npx")
+	for name, def := range map[string]map[string]interface{}{
+		"absolute command":  {"command": npx, "args": []interface{}{"-y", "@acme/billing-mcp"}},
+		"whole launch line": {"command": npx + " -y @acme/billing-mcp"},
+		"cmd /c wrapper":    {"command": "cmd", "args": []interface{}{"/c", npx, "-y", "@acme/billing-mcp"}},
+	} {
+		res := inventory.Result{MCPServers: []inventory.MCPServer{server("claude_desktop", "billing", "user", def)}}
+		if items, skipped := FromInventory(res, FromInventoryOptions{Registries: base}); len(items) != 0 || len(skipped) != 1 || skipped[0].Reason != ReasonPrivatePackage {
+			t.Errorf("%s: a server on its own nvm node was not held back: %+v %+v", name, items, skipped)
+		}
 	}
 }
 
