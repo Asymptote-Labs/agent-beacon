@@ -11,6 +11,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/gcs"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/rapid7"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/s3"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/siempack"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sumo"
 )
 
@@ -51,8 +52,9 @@ func TestInstalledSmokeScriptIsThePacksSmokeTest(t *testing.T) {
 			if string(installed) != want {
 				t.Fatalf("installed %s is not the pack's smoke test for %q:\n%s", pack.script, logPath, installed)
 			}
-			if !strings.HasPrefix(want, "#!") || !strings.Contains(want, logPath) {
-				t.Fatalf("%s smoke test is not a script tailing %q:\n%s", pack.name, logPath, want)
+			// The script holds the path escaped for its double-quoted default (Windows backslashes double).
+			if escaped := siempack.RenderLogPath(pack.script, "{{LOG_PATH}}", logPath); !strings.HasPrefix(want, "#!") || !strings.Contains(want, escaped) {
+				t.Fatalf("%s smoke test is not a script tailing %q:\n%s", pack.name, escaped, want)
 			}
 		})
 	}

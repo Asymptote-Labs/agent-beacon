@@ -8,8 +8,6 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
-
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/siempack"
 )
 
 // These tests drive every forwarding-destination command (print-config /
@@ -52,8 +50,8 @@ func TestDestinationCommandsCharacterization(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%s print-config returned error: %v", tc.group, err)
 				}
-				// TOML configs write the path escaped; on Windows that doubles its backslashes.
-				if !strings.Contains(out, logPath) && !strings.Contains(out, siempack.TOMLEscape(logPath)) {
+				// Quoted configs write the path escaped; on Windows that doubles its backslashes.
+				if !strings.Contains(out, logPath) && !strings.Contains(out, strings.ReplaceAll(logPath, `\`, `\\`)) {
 					t.Fatalf("%s print-config did not wire --log-path %q through to output:\n%s", tc.group, logPath, out)
 				}
 			})
