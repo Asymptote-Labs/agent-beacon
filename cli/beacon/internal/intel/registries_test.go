@@ -183,8 +183,8 @@ func TestRegistriesForAServerOnItsOwnNode(t *testing.T) {
 	if base.private("npm:@acme/x") {
 		t.Fatal("the nvm node is not on Beacon's PATH in this test")
 	}
-	byCommand := base.forServer(filepath.Join(nvm, "bin", "npx"), map[string]interface{}{})
-	byPath := base.forServer("npx", map[string]interface{}{"env": map[string]interface{}{"PATH": filepath.Join(nvm, "bin") + string(filepath.ListSeparator) + "/usr/bin"}})
+	byCommand := base.forServer(filepath.Join(nvm, "bin", "npx"), nil, map[string]interface{}{})
+	byPath := base.forServer("npx", nil, map[string]interface{}{"env": map[string]interface{}{"PATH": filepath.Join(nvm, "bin") + string(filepath.ListSeparator) + "/usr/bin"}})
 	for name, reg := range map[string]Registries{"absolute command": byCommand, "env PATH": byPath} {
 		if !reg.private("npm:@acme/x") || reg.private("npm:@playwright/mcp") {
 			t.Errorf("%s: %+v", name, reg)
@@ -204,6 +204,37 @@ func TestRegistriesForAServerOnItsOwnNode(t *testing.T) {
 		if items, skipped := FromInventory(res, FromInventoryOptions{Registries: base}); len(items) != 0 || len(skipped) != 1 || skipped[0].Reason != ReasonPrivatePackage {
 			t.Errorf("%s: a server on its own nvm node was not held back: %+v %+v", name, items, skipped)
 		}
+	}
+}
+
+func TestRegistriesForAServerRunInAnotherDirectory(t *testing.T) {
+	home, work := t.TempDir(), t.TempDir()
+	acme := filepath.Join(work, "acme")
+	writeConfig(t, filepath.Join(acme, "uv.toml"), "index-url = \"https://pypi.acme.internal/simple\"\n")
+	writeConfig(t, filepath.Join(acme, ".npmrc"), "@acme:registry=https://npm.acme.internal\n")
+	base := LocalRegistries(RegistryEnv{Home: home})
+	for _, tc := range []struct {
+		name string
+		def  map[string]interface{}
+		q    string
+	}{
+		{"uvx --directory", map[string]interface{}{"command": "uvx", "args": []interface{}{"--directory", acme, "acme-internal-mcp"}}, "pypi:acme-internal-mcp"},
+		{"uv tool run --project=", map[string]interface{}{"command": "uv", "args": []interface{}{"tool", "run", "--project=" + acme, "acme-internal-mcp"}}, "pypi:acme-internal-mcp"},
+		{"cwd", map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "@acme/tools"}, "cwd": acme}, "npm:@acme/tools"},
+		{"cwd below the project", map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "@acme/tools"}, "cwd": filepath.Join(acme, "sub")}, "npm:@acme/tools"},
+		{"unresolvable cwd", map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "@playwright/mcp"}, "cwd": "${workspaceFolder}"}, "npm:@playwright/mcp"},
+	} {
+		res := inventory.Result{MCPServers: []inventory.MCPServer{server("vscode", "srv", "user", tc.def)}}
+		items, skipped := FromInventory(res, FromInventoryOptions{Registries: base})
+		if len(items) != 0 || len(skipped) != 1 || skipped[0].Reason != ReasonPrivatePackage {
+			t.Errorf("%s: %s was not held back: %+v %+v", tc.name, tc.q, items, skipped)
+		}
+	}
+	// A cwd with nothing private in it leaves a public package public.
+	res := inventory.Result{MCPServers: []inventory.MCPServer{server("vscode", "srv", "user",
+		map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "@playwright/mcp"}, "cwd": work})}}
+	if items, _ := FromInventory(res, FromInventoryOptions{Registries: base}); len(items) != 1 || items[0].Basis != BasisNPM {
+		t.Fatalf("a plain cwd held a public package back: %+v", items)
 	}
 }
 

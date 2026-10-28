@@ -23,9 +23,10 @@ type Registries struct {
 	// PyPI is set when a PyPI package may come from another index.
 	PyPI bool
 
-	home string            // for ~ in an npmrc's userconfig, globalconfig or prefix
-	vars map[string]string // the environment, by lowercased name, for ${VAR} in an npmrc
-	read map[string]bool   // npmrc files already read, so a cycle of them ends
+	home   string            // for ~ in an npmrc's userconfig, globalconfig or prefix
+	yarnrc string            // the rc file name yarn looks for in a project
+	vars   map[string]string // the environment, by lowercased name, for ${VAR} in an npmrc
+	read   map[string]bool   // npmrc files already read, so a cycle of them ends
 }
 
 // RegistryEnv is where LocalRegistries looks: the user's home, the working directory a launcher
@@ -110,17 +111,7 @@ func LocalRegistries(env RegistryEnv) Registries {
 	if userNpmrc == "" {
 		userNpmrc = join(home, ".npmrc")
 	}
-	projects := projectDirs(env.WorkingDir)
-	inProjects := func(names ...string) []string {
-		var paths []string
-		for _, dir := range projects {
-			for _, name := range names {
-				paths = append(paths, filepath.Join(dir, name))
-			}
-		}
-		return paths
-	}
-	npmrcs := append([]string{userNpmrc, getenv("npm_config_globalconfig")}, inProjects(".npmrc")...)
+	npmrcs := []string{userNpmrc, getenv("npm_config_globalconfig")}
 	// The global npmrc lives under npm's prefix, and npm's builtin npmrc beside the npm the node
 	// ships; npm derives both from the node it runs on (nvm, fnm, Volta and system installs each
 	// have their own).
@@ -134,12 +125,11 @@ func LocalRegistries(env RegistryEnv) Registries {
 	}
 	// yarn and bun keep their registries in their own files.
 	// YARN_RC_FILENAME renames the rc file yarn looks for in the project and home directories.
-	yarnrc := ".yarnrc.yml"
+	reg.yarnrc = ".yarnrc.yml"
 	if name := getenv("YARN_RC_FILENAME"); name != "" && !strings.ContainsAny(name, `/\`) {
-		yarnrc = name
+		reg.yarnrc = name
 	}
-	for _, path := range append([]string{join(home, yarnrc), join(home, ".bunfig.toml"), join(xdg, ".bunfig.toml")},
-		inProjects(yarnrc, "bunfig.toml")...) {
+	for _, path := range []string{join(home, reg.yarnrc), join(home, ".bunfig.toml"), join(xdg, ".bunfig.toml")} {
 		if registryLine(path, isNPMRegistryLine) {
 			reg.NPM = true
 		}
@@ -154,13 +144,14 @@ func LocalRegistries(env RegistryEnv) Registries {
 		}
 	}
 	// uv: user, system and project configuration.
-	for _, path := range append([]string{getenv("UV_CONFIG_FILE"), join(xdg, "uv", "uv.toml"), join(appData, "uv", "uv.toml"),
-		system("/etc/uv/uv.toml"), system("/etc/xdg/uv/uv.toml"), join(getenv("ProgramData"), "uv", "uv.toml")},
-		inProjects("uv.toml", "pyproject.toml")...) {
+	for _, path := range []string{getenv("UV_CONFIG_FILE"), join(xdg, "uv", "uv.toml"), join(appData, "uv", "uv.toml"),
+		system("/etc/uv/uv.toml"), system("/etc/xdg/uv/uv.toml"), join(getenv("ProgramData"), "uv", "uv.toml")} {
 		if registryLine(path, isPyPIIndexLine) {
 			reg.PyPI = true
 		}
 	}
+	// Project config: npm, yarn, bun and uv walk up from where they run.
+	reg.readProject(env.WorkingDir)
 	// Site-wide pip and uv files in each $XDG_CONFIG_DIRS directory.
 	for _, dir := range filepath.SplitList(getenv("XDG_CONFIG_DIRS")) {
 		if registryLine(join(dir, "pip", "pip.conf"), isPyPIIndexLine) || registryLine(join(dir, "uv", "uv.toml"), isPyPIIndexLine) {
@@ -198,26 +189,76 @@ func nodeNpmrcs(dirs []string) []string {
 	return nil
 }
 
-// forServer adds what npm reads when a server runs on a node of its own: one beside an
-// absolute launcher, or first on a PATH set in the server's env. A runtime with a short PATH
-// (a desktop app, say) is often pointed at an nvm, fnm or Volta node this way.
-func (r Registries) forServer(command string, def map[string]interface{}) Registries {
-	var dirs []string
+// readProject reads the project config npm, yarn, bun and uv find by walking up from dir.
+func (r *Registries) readProject(dir string) {
+	yarnrc := r.yarnrc
+	if yarnrc == "" {
+		yarnrc = ".yarnrc.yml"
+	}
+	for _, d := range projectDirs(dir) {
+		r.readNpmrc(filepath.Join(d, ".npmrc"))
+		if registryLine(filepath.Join(d, yarnrc), isNPMRegistryLine) || registryLine(filepath.Join(d, "bunfig.toml"), isNPMRegistryLine) {
+			r.NPM = true
+		}
+		if registryLine(filepath.Join(d, "uv.toml"), isPyPIIndexLine) || registryLine(filepath.Join(d, "pyproject.toml"), isPyPIIndexLine) {
+			r.PyPI = true
+		}
+	}
+}
+
+// forServer adds what a server's launcher reads beyond the machine-wide config:
+//   - the npm config of a node of its own, beside an absolute launcher or first on a PATH set in
+//     the server's env (a runtime with a short PATH, a desktop app say, is often pointed at an
+//     nvm, fnm or Volta node this way);
+//   - the project config of the directory it runs in, when its definition names one (cwd) or
+//     uv is told to use one (--directory, --project). A directory Beacon cannot resolve (a
+//     relative path, ${workspaceFolder}) leaves it unable to tell, so both ecosystems are held
+//     back for that server.
+func (r Registries) forServer(command string, args []string, def map[string]interface{}) Registries {
+	var nodeDirs, projects []string
+	unresolved := false
 	if command = strings.TrimSpace(command); command != "" && strings.ContainsAny(command, `/\`) {
-		dirs = append(dirs, filepath.Dir(command))
+		nodeDirs = append(nodeDirs, filepath.Dir(command))
 	}
 	if env, ok := def["env"].(map[string]interface{}); ok {
 		for key, value := range env {
 			if path, ok := value.(string); ok && strings.EqualFold(key, "PATH") {
-				dirs = append(dirs, filepath.SplitList(path)...)
+				nodeDirs = append(nodeDirs, filepath.SplitList(path)...)
 			}
 		}
 	}
-	npmrcs := nodeNpmrcs(dirs)
-	if len(npmrcs) == 0 {
+	var dirValues []string
+	for _, key := range []string{"cwd", "workingDirectory", "working_directory"} {
+		if v, ok := def[key].(string); ok && strings.TrimSpace(v) != "" {
+			dirValues = append(dirValues, strings.TrimSpace(v))
+		}
+	}
+	if base := launcherBase(command); base == "uvx" || base == "uv" {
+		for i := 0; i < len(args); i++ {
+			name, value, hasValue := strings.Cut(args[i], "=")
+			if name != "--directory" && name != "--project" {
+				continue
+			}
+			if !hasValue && i+1 < len(args) {
+				i++
+				value = args[i]
+			}
+			dirValues = append(dirValues, value)
+		}
+	}
+	for _, v := range dirValues {
+		if dir, ok := r.expandPath(v); ok {
+			projects = append(projects, dir)
+		} else {
+			unresolved = true
+		}
+	}
+	npmrcs := nodeNpmrcs(nodeDirs)
+	if len(npmrcs) == 0 && len(projects) == 0 && !unresolved {
 		return r
 	}
-	out := Registries{NPM: r.NPM, PyPI: r.PyPI, NPMScopes: map[string]bool{}, home: r.home, vars: r.vars, read: map[string]bool{}}
+	out := Registries{NPM: r.NPM || unresolved, PyPI: r.PyPI || unresolved, NPMScopes: map[string]bool{}, home: r.home,
+		yarnrc: r.yarnrc, vars: r.vars, read: map[string]bool{}}
 	for scope := range r.NPMScopes {
 		out.NPMScopes[scope] = true
 	}
@@ -226,6 +267,9 @@ func (r Registries) forServer(command string, def map[string]interface{}) Regist
 	}
 	for _, path := range npmrcs {
 		out.readNpmrc(path)
+	}
+	for _, dir := range projects {
+		out.readProject(dir)
 	}
 	return out
 }
