@@ -1,7 +1,7 @@
 package shellcmd
 
 import (
-	"path/filepath"
+	"path"
 	"slices"
 	"strings"
 )
@@ -220,9 +220,11 @@ func (c Command) commandTargets() []FileEffect {
 			if !dir.Known {
 				return written
 			}
+			// The command line is shell syntax, so its paths join with "/" on every host; gitlink's
+			// RelPath converts them for the local filesystem.
 			for _, src := range opts.operands {
 				if src.Known {
-					written = append(written, FileEffect{Path: filepath.Join(dir.Text, filepath.Base(src.Text)), Op: dest})
+					written = append(written, FileEffect{Path: path.Join(dir.Text, path.Base(src.Text)), Op: dest})
 				}
 			}
 			return written
