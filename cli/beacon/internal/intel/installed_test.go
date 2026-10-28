@@ -242,6 +242,8 @@ func TestPackageFromCommandRefusesSpecsOffTheRegistry(t *testing.T) {
 		{"uvx", []string{"--from", "mcp-server-fetch==0.6.2", "mcp-server-fetch"}, "pypi:mcp-server-fetch"},
 		{"uvx", []string{"mcp-server-fetch@latest"}, "pypi:mcp-server-fetch"},
 		{"uvx", []string{"ruff@0.6.0"}, "pypi:ruff"},
+		{"uvx", []string{"awslabs.aws-documentation-mcp-server@latest"}, "pypi:awslabs.aws-documentation-mcp-server"},
+		{"pipx", []string{"run", "--spec", "pkg@1.0", "pkg"}, "pypi:pkg"},
 		{"uvx", []string{"--from", "mcp-server-fetch@0.6.2", "mcp-server-fetch"}, "pypi:mcp-server-fetch"},
 		{"uvx", []string{"--from", "mcp-server-fetch[cli]>=0.6 ; python_version >= '3.10'", "x"}, "pypi:mcp-server-fetch"},
 		{"npx", []string{"-y", "@playwright/mcp@latest"}, "npm:@playwright/mcp"},

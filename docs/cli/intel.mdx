@@ -139,7 +139,7 @@ Names that may be private are held back and listed as skipped unless the agent p
   file and the like), the server's `env` or `envFile`, the environment it inherits
   (`npm_config_registry`, `npm_config_@scope:registry`, `UV_INDEX_URL`, `PIP_INDEX_URL` and the
   like), and the npm, yarn, bun, pip and uv configuration files in your home directory, the system
-  locations and the working directory (`.npmrc`, pnpm's global `rc`, `.yarnrc.yml`, `bunfig.toml`, `pip.conf`,
+  locations and the working directory (`.npmrc`, including the global and builtin ones under npm's prefix, pnpm's global `rc`, `.yarnrc.yml`, `bunfig.toml`, `pip.conf`,
   `uv.toml`, `pyproject.toml`). A private npm scope holds back only that scope's packages.
   Settings that name the public registry don't count. A registry configured anywhere else (a
   shell profile the agent did not inherit, say) is not seen, so check with `dry_run` first;

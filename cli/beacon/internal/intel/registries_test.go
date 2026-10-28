@@ -39,6 +39,14 @@ func TestLocalRegistries(t *testing.T) {
 		{name: "scope in pnpm global rc", file: ".config/pnpm/rc", content: "@acme:registry=https://npm.acme.internal/\n",
 			private: []string{"npm:@acme/internal-mcp"}, public: []string{"npm:@playwright/mcp"}},
 		{name: "registry in macOS pnpm rc", file: "Library/Preferences/pnpm/rc", content: "registry=https://npm.acme.internal/\n", private: []string{"npm:plain"}},
+		{name: "global npmrc under a lowercase npm_config_prefix", file: "npm-global/etc/npmrc", content: "registry=https://npm.acme.internal\n",
+			environ: []string{"npm_config_prefix=HOME/npm-global"}, private: []string{"npm:plain"}},
+		{name: "renamed yarn rc", file: ".acmerc.yml", content: "npmRegistryServer: https://npm.acme.internal\n",
+			environ: []string{"YARN_RC_FILENAME=.acmerc.yml"}, private: []string{"npm:plain"}},
+		{name: "site-wide pip in XDG_CONFIG_DIRS", file: "xdg-site/pip/pip.conf", content: "[global]\nindex-url = https://pypi.acme.internal/simple\n",
+			environ: []string{"XDG_CONFIG_DIRS=HOME/xdg-site"}, private: []string{"pypi:x"}},
+		{name: "Windows ProgramData uv", file: "ProgramData/uv/uv.toml", content: "index-url = \"https://pypi.acme.internal/simple\"\n",
+			environ: []string{"ProgramData=HOME/ProgramData"}, private: []string{"pypi:x"}},
 		{name: "yarn registry", file: ".yarnrc.yml", content: "npmRegistryServer: \"https://npm.acme.internal\"\n", private: []string{"npm:plain"}},
 		{name: "yarn public registry", file: ".yarnrc.yml", content: "npmRegistryServer: \"https://registry.yarnpkg.com\"\n", public: []string{"npm:plain"}},
 		{name: "yarn scopes", file: ".yarnrc.yml", content: "npmScopes:\n  acme:\n    npmRegistryServer: https://npm.acme.internal\n", private: []string{"npm:plain"}},
@@ -84,6 +92,24 @@ func TestLocalRegistries(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLocalRegistriesReadsTheGlobalNpmrcOfTheNodeOnPath(t *testing.T) {
+	home := t.TempDir()
+	install := filepath.Join(home, ".nvm", "versions", "node", "v20.1.0")
+	writeConfig(t, filepath.Join(install, "bin", "node"), "")
+	writeConfig(t, filepath.Join(install, "etc", "npmrc"), "@acme:registry=https://npm.acme.internal\n")
+	reg := LocalRegistries(RegistryEnv{Home: home, Environ: []string{"PATH=" + filepath.Join(home, "empty") + string(filepath.ListSeparator) + filepath.Join(install, "bin")}})
+	if !reg.private("npm:@acme/x") || reg.private("npm:plain") {
+		t.Fatalf("the nvm global npmrc was not read: %+v", reg)
+	}
+
+	// npm's builtin npmrc, beside the npm the node ships.
+	writeConfig(t, filepath.Join(install, "etc", "npmrc"), "")
+	writeConfig(t, filepath.Join(install, "lib", "node_modules", "npm", "npmrc"), "registry=https://npm.acme.internal\n")
+	if reg := LocalRegistries(RegistryEnv{Home: home, Environ: []string{"PATH=" + filepath.Join(install, "bin")}}); !reg.private("npm:plain") {
+		t.Fatalf("npm's builtin npmrc was not read: %+v", reg)
 	}
 }
 
