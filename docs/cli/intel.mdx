@@ -120,21 +120,27 @@ tools, so an agent can check an MCP server or skill before it installs or runs i
 installed needs the machine's own config, so `intel_check_installed` is local only.
 
 `intel_check_installed` works like a dependency audit over a lockfile. Beacon reads each
-runtime's own MCP and skill configuration (the same files `beacon endpoint inventory` reads)
-and sends only public identifiers:
+runtime's own MCP and skill configuration (the same files `beacon endpoint inventory` reads).
+By default it sends only public identifiers: the npm or PyPI package, from the public registry,
+in a server's launch command, without its version. For example, `npx -y @playwright/mcp@latest`
+is sent as `npm:@playwright/mcp`, `uvx mcp-server-fetch` as `pypi:mcp-server-fetch`, and the
+Windows form `cmd /c npx -y @playwright/mcp` the same way. A launch command with an option
+Beacon does not recognize is skipped rather than guessed at, so an option's value is never sent
+as a package.
 
-- the npm or PyPI package in a server's launch command, without its version. For example,
-  `npx -y @playwright/mcp@latest` is sent as `npm:@playwright/mcp`, and `uvx mcp-server-fetch`
-  as `pypi:mcp-server-fetch`.
-- each skill's name.
+Names that may be private are held back and listed as skipped unless the agent passes
+`include_private_names`, which it should do only when you agree:
 
-Paths, URLs, environment variables and other arguments are never sent. A server with no
-package in its command, such as a local script, a binary, a container or a remote URL, is
-listed as skipped. Its configured name is sent only when the agent passes
-`include_server_names`, since the name someone gave a private server is theirs. Beacon's own
-server and skills are skipped. A result matched only by a name is marked `name_only`: it may
-be a different artifact with the same name, so confirm the repository before relying on it. `dry_run` returns exactly what would be sent and sends
-nothing. Results map back to every runtime and config where each artifact was found.
+- the configured name of a server with no package in its command, such as a local script, a
+  binary, a container or a remote URL;
+- a package fetched from a private registry or index (`--registry`, `--index-url` and the like);
+- skill names, since a skill may be one you wrote.
+
+Paths, URLs, environment variables and other arguments are never sent. Beacon's own server and
+skills are skipped. A result matched only by a name, including a package the index could only
+match by name, is marked `name_only`: it may be a different artifact with the same name, so
+confirm the repository before relying on it. `dry_run` returns exactly what would be sent and
+sends nothing. Results map back to every runtime and config where each artifact was found.
 
 ## Network and privacy
 

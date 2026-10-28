@@ -13,10 +13,11 @@ import (
 // lockfile, this reads the MCP servers and skills Beacon's inventory finds in each runtime's
 // own config, and names each the way the index does.
 //
-// Only a public identifier derived here ever leaves the machine: an npm or PyPI package named
-// in a server's launch command, a skill's name, and a server's configured name only when the
-// caller opts in. Paths, URLs, environment, other arguments and the rest of a definition are
-// never sent.
+// By default only a public identifier derived here leaves the machine: an npm or PyPI package
+// named in a server's launch command and fetched from the public registry. Names that may be
+// private (a server's configured name, a package from a private registry or index, a skill's
+// name) are sent only when the caller opts in. Paths, URLs, environment, other arguments and
+// the rest of a definition are never sent.
 
 // Installed is one lookup and every place it was found.
 type Installed struct {
@@ -42,22 +43,27 @@ type Skipped struct {
 }
 
 const (
-	BasisNPM        = "npm package in its launch command"
-	BasisPyPI       = "PyPI package in its launch command"
-	BasisServerName = "configured server name"
-	BasisSkillName  = "skill name"
+	BasisNPM         = "npm package in its launch command"
+	BasisPyPI        = "PyPI package in its launch command"
+	BasisPrivateNPM  = "npm package from a private registry in its launch command"
+	BasisPrivatePyPI = "PyPI package from a private index in its launch command"
+	BasisServerName  = "configured server name"
+	BasisSkillName   = "skill name"
 
-	ReasonBeacon    = "Beacon's own"
-	ReasonNoPackage = "no npm or PyPI package Beacon can read with confidence in its launch command; pass include_server_names to look it up by its configured name"
-	ReasonRemote    = "a remote URL; pass include_server_names to look it up by its configured name"
-	ReasonNoName    = "no name to look up"
+	ReasonBeacon         = "Beacon's own"
+	ReasonNoPackage      = "no npm or PyPI package Beacon can read with confidence in its launch command; pass include_private_names to look it up by its configured name"
+	ReasonRemote         = "a remote URL; pass include_private_names to look it up by its configured name"
+	ReasonPrivatePackage = "its package comes from a private registry or index, so its name may be private; pass include_private_names to send it"
+	ReasonPrivateSkill   = "a skill's name may be one a person gave a private skill; pass include_private_names to check skills by name"
+	ReasonNoName         = "no name to look up"
 )
 
 // FromInventoryOptions tunes FromInventory.
 type FromInventoryOptions struct {
-	// IncludeServerNames looks up a server with no package in its command by its configured
-	// name. Off by default: a name someone gave a private server is theirs.
-	IncludeServerNames bool
+	// IncludePrivateNames also sends names that may be private: a server's configured name when
+	// its command names no package, a package from a private registry or index, and skill
+	// names. Off by default, so only packages from the public npm and PyPI registries leave.
+	IncludePrivateNames bool
 	// BeaconSkills are skill names Beacon installs itself (agentskills.Names), never checked.
 	BeaconSkills []string
 }
@@ -99,11 +105,15 @@ func FromInventory(res inventory.Result, opts FromInventoryOptions) ([]Installed
 		}
 		command, args := commandOf(s.Definition)
 		if q, basis, ok := PackageFromCommand(command, args); ok {
+			if (basis == BasisPrivateNPM || basis == BasisPrivatePyPI) && !opts.IncludePrivateNames {
+				skipped = append(skipped, Skipped{Kind: "mcp", Runtime: s.Runtime, Name: name, Reason: ReasonPrivatePackage})
+				continue
+			}
 			add("mcp", q, basis, src)
 			continue
 		}
 		switch {
-		case opts.IncludeServerNames && validName(name):
+		case opts.IncludePrivateNames && validName(name):
 			add("mcp", name, BasisServerName, src)
 		case name == "" || !validName(name):
 			skipped = append(skipped, Skipped{Kind: "mcp", Runtime: s.Runtime, Name: name, Reason: ReasonNoName})
@@ -124,6 +134,10 @@ func FromInventory(res inventory.Result, opts FromInventoryOptions) ([]Installed
 		}
 		if !validName(name) {
 			skipped = append(skipped, Skipped{Kind: "skill", Runtime: s.Runtime, Name: name, Reason: ReasonNoName})
+			continue
+		}
+		if !opts.IncludePrivateNames {
+			skipped = append(skipped, Skipped{Kind: "skill", Runtime: s.Runtime, Name: name, Reason: ReasonPrivateSkill})
 			continue
 		}
 		add("skill", name, BasisSkillName, InstalledSource{Runtime: s.Runtime, Name: name, Scope: s.SourceScope})
@@ -198,8 +212,12 @@ func PackageFromCommand(command string, args []string) (q, basis string, ok bool
 		fields := strings.Fields(command)
 		command, args = fields[0], fields[1:]
 	}
-	base := strings.ToLower(filepath.Base(strings.TrimSpace(command)))
+	base := strings.ToLower(filepath.Base(strings.ReplaceAll(strings.TrimSpace(command), `\`, "/")))
 	base = strings.TrimSuffix(strings.TrimSuffix(base, ".exe"), ".cmd")
+	// Windows configs run launchers through the shell: cmd /c npx -y <package>.
+	if base == "cmd" && len(args) >= 2 && (strings.EqualFold(args[0], "/c") || strings.EqualFold(args[0], "/k")) {
+		return PackageFromCommand(args[1], args[2:])
+	}
 	rest := args
 	switch base {
 	case "npx", "bunx", "pnpx":
@@ -233,8 +251,13 @@ func PackageFromCommand(command string, args []string) (q, basis string, ok bool
 
 // The options a launcher takes before the package it runs. A flag in neither list stops the
 // parse: whether it takes a value decides which word is the package, and guessing wrong sends
-// a file name or a workspace for a package and leaves the real one unchecked.
+// a file name or a workspace for a package and leaves the real one unchecked. A package
+// fetched from a registry or index the command names is not a public package, and its name
+// may be private.
 var (
+	npmPrivateFlags  = flagSet("--registry")
+	pypiPrivateFlags = flagSet("--index", "--index-url", "--extra-index-url", "--default-index", "-f", "--find-links")
+
 	npmPackageFlags = flagSet("-p", "--package")
 	npmValueFlags   = flagSet("--registry", "--cache", "--userconfig", "-w", "--workspace", "--node-options", "--loglevel", "--allow-build")
 	npmBoolFlags    = flagSet("-y", "--yes", "--no", "--no-install", "-q", "--quiet", "-s", "--silent", "--prefer-offline", "--prefer-online", "--offline", "--ignore-existing", "--bun")
@@ -259,43 +282,54 @@ func flagSet(flags ...string) map[string]bool {
 
 // packageArg finds the package a launcher runs: the value of a package flag, or else the first
 // argument that is not an option. ok is false when an unknown option makes that uncertain.
-func packageArg(args []string, packageFlags, valueFlags, boolFlags map[string]bool) (string, bool) {
+// private reports whether a flag in privateFlags appeared before the package.
+func packageArg(args []string, packageFlags, valueFlags, boolFlags, privateFlags map[string]bool) (spec string, private, ok bool) {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
+		name, value, hasValue := strings.Cut(a, "=")
+		if !strings.HasPrefix(a, "-") {
+			hasValue = false
+		}
+		if privateFlags[name] {
+			private = true
+		}
 		switch {
 		case a == "--":
 			continue
 		case packageFlags[a]:
 			if i+1 < len(args) {
-				return args[i+1], true
+				return args[i+1], private, true
 			}
-			return "", false
-		case strings.HasPrefix(a, "-") && strings.Contains(a, "="):
-			name, value, _ := strings.Cut(a, "=")
+			return "", private, false
+		case hasValue:
 			if packageFlags[name] {
-				return value, true
+				return value, private, true
 			}
 			if !valueFlags[name] && !boolFlags[name] {
-				return "", false
+				return "", private, false
 			}
 		case valueFlags[a]:
 			i++
 		case boolFlags[a]:
 		case strings.HasPrefix(a, "-"):
-			return "", false
+			return "", private, false
 		default:
-			return a, true
+			return a, private, true
 		}
 	}
-	return "", false
+	return "", private, false
 }
 
 func npmFrom(args []string) (string, string, bool) {
-	spec, ok := packageArg(args, npmPackageFlags, npmValueFlags, npmBoolFlags)
+	spec, private, ok := packageArg(args, npmPackageFlags, npmValueFlags, npmBoolFlags, npmPrivateFlags)
 	if !ok {
 		return "", "", false
 	}
-	return npmPackage(spec)
+	q, basis, ok := npmPackage(spec)
+	if ok && private {
+		basis = BasisPrivateNPM
+	}
+	return q, basis, ok
 }
 
 func npmPackage(spec string) (string, string, bool) {
@@ -315,11 +349,15 @@ func npmPackage(spec string) (string, string, bool) {
 }
 
 func pypiFrom(args []string) (string, string, bool) {
-	spec, ok := packageArg(args, pypiPackageFlags, pypiValueFlags, pypiBoolFlags)
+	spec, private, ok := packageArg(args, pypiPackageFlags, pypiValueFlags, pypiBoolFlags, pypiPrivateFlags)
 	if !ok {
 		return "", "", false
 	}
-	return pypiPackage(spec)
+	q, basis, ok := pypiPackage(spec)
+	if ok && private {
+		basis = BasisPrivatePyPI
+	}
+	return q, basis, ok
 }
 
 func pypiPackage(spec string) (string, string, bool) {

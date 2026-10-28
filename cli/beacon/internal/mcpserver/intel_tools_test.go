@@ -167,7 +167,7 @@ func TestIntelToolsAreOffWithBeaconIntel0(t *testing.T) {
 		{"intel_lookup", map[string]interface{}{"q": "x"}},
 		{"intel_get_artifact", map[string]interface{}{"key": "mcp:a/b"}},
 		{"intel_check", map[string]interface{}{"artifacts": []interface{}{"x"}}},
-		{"intel_check_installed", map[string]interface{}{}},
+		{"intel_check_installed", map[string]interface{}{"include_private_names": true}},
 	} {
 		text, isErr := call(t, s, tc.name, tc.args)
 		if !isErr || !strings.Contains(text, "BEACON_INTEL=0") {
@@ -225,14 +225,15 @@ func TestIntelCheckInstalledDryRunSendsNothing(t *testing.T) {
 	for _, item := range report.Sent {
 		sent = append(sent, item.Kind+":"+item.Q)
 	}
-	if strings.Join(sent, " ") != "mcp:npm:pkg-00 mcp:npm:pkg-01 skill:pdf" || !report.DryRun {
+	if strings.Join(sent, " ") != "mcp:npm:pkg-00 mcp:npm:pkg-01" || !report.DryRun {
 		t.Fatalf("sent = %v", sent)
 	}
 	reasons := map[string]string{}
 	for _, sk := range report.Skipped {
 		reasons[sk.Name] = sk.Reason
 	}
-	if reasons["private-db"] != intel.ReasonNoPackage || reasons["beacon"] != intel.ReasonBeacon || reasons["beacon-memory-recall"] != intel.ReasonBeacon {
+	if reasons["private-db"] != intel.ReasonNoPackage || reasons["beacon"] != intel.ReasonBeacon || reasons["beacon-memory-recall"] != intel.ReasonBeacon ||
+		reasons["pdf"] != intel.ReasonPrivateSkill {
 		t.Fatalf("skipped = %+v", report.Skipped)
 	}
 }
@@ -248,8 +249,6 @@ func TestIntelCheckInstalledChecksInBatchesAndMapsResultsBack(t *testing.T) {
 			switch {
 			case a.Q == "npm:pkg-07":
 				results = append(results, fmt.Sprintf(`{"q":%q,"status":"matched","risk":"malicious","guidance":"Do not install or run it.","matches":[{"entity_key":"mcp:npm:pkg-07"},{"entity_key":"b"},{"entity_key":"c"},{"entity_key":"d"}]}`, a.Q))
-			case a.Q == "pdf":
-				results = append(results, `{"q":"pdf","status":"matched","risk":"benign","guidance":"No issues found.","matches":[{"entity_key":"skill:a/b#pdf"}]}`)
 			default:
 				results = append(results, fmt.Sprintf(`{"q":%q,"status":"not_found","risk":null,"matches":[]}`, a.Q))
 			}
@@ -262,18 +261,18 @@ func TestIntelCheckInstalledChecksInBatchesAndMapsResultsBack(t *testing.T) {
 		t.Fatal(text)
 	}
 	if f.count() != 2 {
-		t.Fatalf("%d requests, want 2 batches for 61 artifacts", f.count())
+		t.Fatalf("%d requests, want 2 batches for 60 artifacts", f.count())
 	}
 	var first, second struct {
 		Artifacts []intelapi.CheckItem `json:"artifacts"`
 	}
 	_ = json.Unmarshal([]byte(f.bodies[0]), &first)
 	_ = json.Unmarshal([]byte(f.bodies[1]), &second)
-	if len(first.Artifacts) != intelapi.MaxCheck || len(second.Artifacts) != 11 {
+	if len(first.Artifacts) != intelapi.MaxCheck || len(second.Artifacts) != 10 {
 		t.Fatalf("batches = %d + %d", len(first.Artifacts), len(second.Artifacts))
 	}
 	for _, body := range f.bodies {
-		for _, leak := range []string{"sk-live-secret", "--api-key", "hunter2", "DB_PASSWORD", "/Users/me", "acme", "private-db", "latest", "beacon-memory-recall", `"beacon"`} {
+		for _, leak := range []string{"sk-live-secret", "--api-key", "hunter2", "DB_PASSWORD", "/Users/me", "acme", "private-db", "latest", "beacon-memory-recall", `"beacon"`, "pdf"} {
 			if strings.Contains(body, leak) {
 				t.Fatalf("a request carried %q: %s", leak, body)
 			}
@@ -283,7 +282,7 @@ func TestIntelCheckInstalledChecksInBatchesAndMapsResultsBack(t *testing.T) {
 	if err := json.Unmarshal([]byte(text), &report); err != nil {
 		t.Fatal(err)
 	}
-	if len(report.Results) != 61 || report.Counts["malicious"] != 1 || report.Counts["benign"] != 1 || report.Counts["not_found"] != 59 {
+	if len(report.Results) != 60 || report.Counts["malicious"] != 1 || report.Counts["not_found"] != 59 {
 		t.Fatalf("results %d, counts %v", len(report.Results), report.Counts)
 	}
 	var evil installedResult
@@ -299,10 +298,6 @@ func TestIntelCheckInstalledChecksInBatchesAndMapsResultsBack(t *testing.T) {
 	if evil.NameOnly {
 		t.Fatal("a package match was marked name_only")
 	}
-	pdf := report.Results[len(report.Results)-1]
-	if pdf.Q != "pdf" || !pdf.NameOnly || !strings.HasPrefix(pdf.Guidance, "Matched by name only") || !strings.HasSuffix(pdf.Guidance, "No issues found.") {
-		t.Fatalf("pdf = %+v", pdf)
-	}
 	if !strings.Contains(report.Note, "not safe") {
 		t.Fatalf("note = %q", report.Note)
 	}
@@ -314,7 +309,7 @@ func TestIntelCheckInstalledRefusesAMismatchedAnswer(t *testing.T) {
 	})
 	s.inventory = func(bool) inventory.Result { return fakeInventory(1) }
 	text, isErr := call(t, s, "intel_check_installed", map[string]interface{}{})
-	if !isErr || !strings.Contains(text, "0 results for 2 artifacts") {
+	if !isErr || !strings.Contains(text, "0 results for 1 artifacts") {
 		t.Fatalf("= %q, %v", text, isErr)
 	}
 }
@@ -324,7 +319,7 @@ func TestIntelCheckInstalledWithNothingToSend(t *testing.T) {
 	s.inventory = func(bool) inventory.Result {
 		return inventory.Result{MCPServers: fakeInventory(0).MCPServers}
 	}
-	text, isErr := call(t, s, "intel_check_installed", map[string]interface{}{"include_skills": false})
+	text, isErr := call(t, s, "intel_check_installed", map[string]interface{}{})
 	if isErr || f.count() != 0 || !strings.Contains(text, "No MCP server or skill on this machine has a public identifier") {
 		t.Fatalf("= %q, %v, %d requests", text, isErr, f.count())
 	}
@@ -374,6 +369,37 @@ func TestIntelToolArgumentErrorsComeFirst(t *testing.T) {
 		text, isErr := call(t, s, name, args)
 		if !isErr || strings.Contains(text, "BEACON_INTEL=0") {
 			t.Errorf("%s = %q; want the argument error, not the off switch", name, text)
+		}
+	}
+}
+
+func TestIntelCheckInstalledMarksNameMatches(t *testing.T) {
+	s, f := newIntelServer(t, func(path, body string) (int, string) {
+		// The package matched nothing, so the index matched its text against names; the skill
+		// matched by name.
+		return 200, `{"api":"intel.v1","results":[
+			{"q":"npm:some-mcp","matched_by":"text","status":"matched","risk":"benign","guidance":"No issues found.","matches":[{"entity_key":"mcp:other/some-mcp"}]},
+			{"q":"pdf","matched_by":"text","status":"matched","risk":"benign","guidance":"No issues found.","matches":[{"entity_key":"skill:a/b#pdf"}]}
+		],"counts":{}}`
+	})
+	s.inventory = func(bool) inventory.Result {
+		return inventory.Result{
+			MCPServers: []inventory.MCPServer{{Runtime: "cursor", ServerName: "x", SourceScope: "user", CommandPresent: true,
+				Definition: map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "some-mcp"}}}},
+			Skills: []inventory.Skill{{Runtime: "claude_code", SkillName: "pdf", SourceScope: "user", Exists: true}},
+		}
+	}
+	text, isErr := call(t, s, "intel_check_installed", map[string]interface{}{"include_private_names": true})
+	if isErr || f.count() != 1 {
+		t.Fatalf("= %q, %v", text, isErr)
+	}
+	var report installedReport
+	if err := json.Unmarshal([]byte(text), &report); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range report.Results {
+		if !r.NameOnly || !strings.HasPrefix(r.Guidance, "Matched by name only") || !strings.HasSuffix(r.Guidance, "No issues found.") {
+			t.Errorf("%s = %+v, want name_only", r.Q, r)
 		}
 	}
 }

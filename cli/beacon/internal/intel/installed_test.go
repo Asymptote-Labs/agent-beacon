@@ -43,7 +43,7 @@ func TestPackageFromCommand(t *testing.T) {
 		if !ok || q != tc.want {
 			t.Errorf("PackageFromCommand(%q, %q) = %q, %v; want %q", tc.command, tc.args, q, ok, tc.want)
 		}
-		if ok && basis != BasisNPM && basis != BasisPyPI {
+		if ok && basis != BasisNPM && basis != BasisPyPI && basis != BasisPrivateNPM && basis != BasisPrivatePyPI {
 			t.Errorf("basis = %q", basis)
 		}
 	}
@@ -111,14 +111,11 @@ func TestFromInventorySendsOnlyPublicIdentifiers(t *testing.T) {
 	for _, item := range items {
 		got = append(got, item.Kind+" "+item.Q)
 	}
-	if strings.Join(got, ", ") != "mcp npm:@playwright/mcp, mcp pypi:mcp-server-fetch, skill pdf" {
+	if strings.Join(got, ", ") != "mcp npm:@playwright/mcp, mcp pypi:mcp-server-fetch" {
 		t.Fatalf("items = %v", got)
 	}
 	if n := len(items[0].Sources); n != 3 || items[0].Sources[0].Runtime != "claude_code" || items[0].Basis != BasisNPM {
 		t.Fatalf("playwright sources = %+v", items[0])
-	}
-	if len(items[2].Sources) != 2 {
-		t.Fatalf("pdf sources = %+v", items[2].Sources)
 	}
 
 	reasons := map[string]string{}
@@ -131,6 +128,7 @@ func TestFromInventorySendsOnlyPublicIdentifiers(t *testing.T) {
 		"mcp beacon":                 ReasonBeacon,
 		"mcp Beacon-Managed":         ReasonBeacon,
 		"mcp ../../etc/passwd":       ReasonNoName,
+		"skill pdf":                  ReasonPrivateSkill,
 		"skill beacon-memory-recall": ReasonBeacon,
 		"skill /Users/me/skills/x":   ReasonNoName,
 	}
@@ -139,8 +137,15 @@ func TestFromInventorySendsOnlyPublicIdentifiers(t *testing.T) {
 			t.Errorf("skipped[%q] = %q, want %q", k, reasons[k], v)
 		}
 	}
-	if len(skipped) != len(want) {
+	if len(skipped) != len(want)+1 { // pdf is skipped once per runtime
 		t.Errorf("skipped = %+v", skipped)
+	}
+
+	// With consent, skills go by name, once for every runtime they are in.
+	withNames, _ := FromInventory(res, FromInventoryOptions{IncludePrivateNames: true, BeaconSkills: []string{"beacon-memory-recall"}})
+	last := withNames[len(withNames)-1]
+	if last.Kind != "skill" || last.Q != "pdf" || len(last.Sources) != 2 || last.Basis != BasisSkillName {
+		t.Fatalf("pdf with consent = %+v", last)
 	}
 
 	// The lookups that would be sent carry none of the definition.
@@ -156,6 +161,44 @@ func TestFromInventorySendsOnlyPublicIdentifiers(t *testing.T) {
 	}
 }
 
+func TestPrivateRegistriesAndWindowsShells(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		args    []string
+		want    string
+		basis   string
+	}{
+		{"npx", []string{"--registry", "https://npm.acme.internal", "-y", "@acme/billing-mcp"}, "npm:@acme/billing-mcp", BasisPrivateNPM},
+		{"npx", []string{"--registry=https://npm.acme.internal", "@acme/billing-mcp"}, "npm:@acme/billing-mcp", BasisPrivateNPM},
+		{"uvx", []string{"--index-url", "https://pypi.acme.internal/simple", "acme-billing-mcp"}, "pypi:acme-billing-mcp", BasisPrivatePyPI},
+		{"uvx", []string{"--extra-index-url=https://x.example/simple", "srv"}, "pypi:srv", BasisPrivatePyPI},
+		{"cmd", []string{"/c", "npx", "-y", "@playwright/mcp"}, "npm:@playwright/mcp", BasisNPM},
+		{"C:\\Windows\\System32\\cmd.exe", []string{"/C", "uvx", "mcp-server-fetch"}, "pypi:mcp-server-fetch", BasisPyPI},
+		{"cmd /c npx -y @playwright/mcp", nil, "npm:@playwright/mcp", BasisNPM},
+		{"C:\\Program Files\\nodejs\\npx.cmd", []string{"-y", "pkg"}, "npm:pkg", BasisNPM},
+	} {
+		q, basis, ok := PackageFromCommand(tc.command, tc.args)
+		if !ok || q != tc.want || basis != tc.basis {
+			t.Errorf("PackageFromCommand(%q, %q) = %q, %q, %v; want %q, %q", tc.command, tc.args, q, basis, ok, tc.want, tc.basis)
+		}
+	}
+	if _, _, ok := PackageFromCommand("cmd", []string{"/c", "node", "server.js"}); ok {
+		t.Error("cmd /c node was read as a package")
+	}
+
+	res := inventory.Result{MCPServers: []inventory.MCPServer{
+		server("cursor", "billing", "user", map[string]interface{}{"command": "uvx", "args": []interface{}{"--index-url", "https://pypi.acme.internal/simple", "acme-billing-mcp"}}),
+	}}
+	items, skipped := FromInventory(res, FromInventoryOptions{})
+	if len(items) != 0 || len(skipped) != 1 || skipped[0].Reason != ReasonPrivatePackage {
+		t.Fatalf("a private-index package was not held back: %+v %+v", items, skipped)
+	}
+	items, _ = FromInventory(res, FromInventoryOptions{IncludePrivateNames: true})
+	if len(items) != 1 || items[0].Q != "pypi:acme-billing-mcp" || items[0].Basis != BasisPrivatePyPI {
+		t.Fatalf("with consent = %+v", items)
+	}
+}
+
 func TestFromInventoryServerNamesAreOptIn(t *testing.T) {
 	res := inventory.Result{MCPServers: []inventory.MCPServer{
 		server("claude_code", "Desktop Commander", "user", map[string]interface{}{"command": "node", "args": []interface{}{"/x/dc.js"}}),
@@ -166,7 +209,7 @@ func TestFromInventoryServerNamesAreOptIn(t *testing.T) {
 	if len(items) != 0 || len(skipped) != 3 {
 		t.Fatalf("without opt-in: items %+v, skipped %+v", items, skipped)
 	}
-	items, skipped = FromInventory(res, FromInventoryOptions{IncludeServerNames: true})
+	items, skipped = FromInventory(res, FromInventoryOptions{IncludePrivateNames: true})
 	if len(items) != 2 || items[0].Q != "Desktop Commander" || items[1].Q != "linear" || items[0].Basis != BasisServerName {
 		t.Fatalf("with opt-in: %+v", items)
 	}
@@ -183,9 +226,9 @@ func TestFromInventoryIsStable(t *testing.T) {
 		},
 		Skills: []inventory.Skill{{Runtime: "a", SkillName: "s", Exists: true}},
 	}
-	first, _ := FromInventory(res, FromInventoryOptions{})
+	first, _ := FromInventory(res, FromInventoryOptions{IncludePrivateNames: true})
 	res.MCPServers[0], res.MCPServers[1] = res.MCPServers[1], res.MCPServers[0]
-	second, _ := FromInventory(res, FromInventoryOptions{})
+	second, _ := FromInventory(res, FromInventoryOptions{IncludePrivateNames: true})
 	a, _ := json.Marshal(first)
 	b, _ := json.Marshal(second)
 	if string(a) != string(b) {

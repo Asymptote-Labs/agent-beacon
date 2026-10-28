@@ -108,14 +108,14 @@ func (s *Server) registerIntelTools() {
 	s.register(Tool{
 		Name: "intel_check_installed",
 		Description: "Check the MCP servers and skills configured on this machine against Beacon Intel, the way a dependency audit checks a lockfile. " +
-			"Beacon reads each runtime's own config (Claude Code, Cursor, Codex, and the rest Beacon supports) and sends only public identifiers: npm or PyPI packages named in a server's launch command, and skill names. " +
-			"Paths, URLs, environment and other arguments never leave the machine; servers with no package are listed as skipped unless include_server_names is set. " +
+			"Beacon reads each runtime's own config (Claude Code, Cursor, Codex, and the rest Beacon supports) and by default sends only public identifiers: npm and PyPI packages, from the public registries, named in a server's launch command. " +
+			"Names that may be private (a server's configured name, a package from a private registry or index, skill names) are listed as skipped unless the user agrees to include_private_names. " +
+			"Paths, URLs, environment and other arguments never leave the machine. " +
 			fmt.Sprintf("Use dry_run to see exactly what would be sent without sending it. Read a concerning result in full with %s.", intelToolNames.GetArtifact),
 		InputSchema: objectSchema(map[string]interface{}{
-			"include_server_names": map[string]interface{}{"type": "boolean", "description": "Also look up servers with no package in their command by their configured name. Off by default: a private server's name is the user's."},
-			"include_skills":       map[string]interface{}{"type": "boolean", "description": "Check installed skills by name (default true)."},
-			"include_project":      map[string]interface{}{"type": "boolean", "description": "Also read project-scoped config in the server's working directory (default true)."},
-			"dry_run":              map[string]interface{}{"type": "boolean", "description": "List what would be sent, and send nothing."},
+			"include_private_names": map[string]interface{}{"type": "boolean", "description": "Also send names that may be private: servers' configured names, packages from a private registry or index, and skill names. Off by default; set it only when the user agrees."},
+			"include_project":       map[string]interface{}{"type": "boolean", "description": "Also read project-scoped config in the server's working directory (default true)."},
+			"dry_run":               map[string]interface{}{"type": "boolean", "description": "List what would be sent, and send nothing."},
 		}, nil),
 		handler: s.checkInstalled,
 	})
@@ -161,12 +161,9 @@ func (s *Server) checkInstalled(ctx context.Context, args map[string]interface{}
 	} else {
 		inv = defaultInventory(includeProject)
 	}
-	if !boolArg(args, "include_skills", true) {
-		inv.Skills = nil
-	}
 	items, skipped := intel.FromInventory(inv, intel.FromInventoryOptions{
-		IncludeServerNames: boolArg(args, "include_server_names", false),
-		BeaconSkills:       agentskills.Names(),
+		IncludePrivateNames: boolArg(args, "include_private_names", false),
+		BeaconSkills:        agentskills.Names(),
 	})
 	report := installedReport{Sent: make([]intelapi.CheckItem, len(items)), Skipped: skipped}
 	if report.Skipped == nil {
@@ -208,7 +205,10 @@ func (s *Server) checkInstalled(ctx context.Context, args map[string]interface{}
 				Kind: item.Kind, Q: item.Q, Basis: item.Basis, FoundIn: item.Sources,
 				Status: outcome.Status, Risk: outcome.Risk, Guidance: outcome.Guidance, Matches: matches,
 			}
-			if outcome.Status == "matched" && (item.Basis == intel.BasisSkillName || item.Basis == intel.BasisServerName) {
+			// A name, or a package or repository the index fell back to matching as a name, may
+			// be a different artifact that shares it.
+			byName := item.Basis == intel.BasisSkillName || item.Basis == intel.BasisServerName || outcome.MatchedBy == "text"
+			if outcome.Status == "matched" && byName {
 				result.NameOnly = true
 				result.Guidance = nameOnlyGuidance + result.Guidance
 			}

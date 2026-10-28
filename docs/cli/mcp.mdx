@@ -86,7 +86,8 @@ The `intel_*` tools let an agent check an MCP server or skill before installing 
 it. They are free and need no Beacon account. They are the only local tools that reach the
 network, and only when an agent calls one: each sends what it names to `intel.beacon.sh`.
 `intel_check_installed` sends only public identifiers it derives from each runtime's own
-config: npm and PyPI packages in a server's launch command, and skill names. Paths, URLs,
+config: npm and PyPI packages, from the public registries, in a server's launch command. Server
+names, private-registry packages and skill names go only with `include_private_names`. Paths, URLs,
 environment and other arguments stay on the machine, and `dry_run` shows what would be sent.
 `BEACON_INTEL=0` turns these tools off. See [`beacon intel`](/cli/intel) for risks and what
 each answer means.
