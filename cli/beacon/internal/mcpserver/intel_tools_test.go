@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -50,8 +51,12 @@ func newIntelServer(t *testing.T, answer func(path, body string) (int, string)) 
 	s.newIntel = func() (*intelapi.Client, error) {
 		return &intelapi.Client{BaseURL: srv.URL, HTTPClient: srv.Client(), UserAgent: "beacon-mcp/test"}, nil
 	}
+	s.registryEnv = noRegistryEnv
 	return s, f
 }
+
+// noRegistryEnv keeps a test from reading the machine's own npm, pip and uv configuration.
+func noRegistryEnv(bool) intel.RegistryEnv { return intel.RegistryEnv{} }
 
 func call(t *testing.T, s *Server, name string, args map[string]interface{}) (string, bool) {
 	t.Helper()
@@ -157,6 +162,7 @@ func TestIntelCheckSendsStringsAndObjects(t *testing.T) {
 func TestIntelToolsAreOffWithBeaconIntel0(t *testing.T) {
 	t.Setenv(intel.EnvDisabled, "0")
 	s := New(Options{LogPath: filepath.Join(t.TempDir(), "runtime.jsonl")})
+	s.registryEnv = noRegistryEnv
 	s.inventory = func(bool) inventory.Result {
 		return inventory.Result{Skills: []inventory.Skill{{Runtime: "claude_code", SkillName: "pdf", Exists: true}}}
 	}
@@ -392,6 +398,37 @@ func TestIntelCheckInstalledRefusesMalformedArguments(t *testing.T) {
 	}
 	if f.count() != 0 {
 		t.Fatalf("malformed arguments sent %d requests", f.count())
+	}
+}
+
+func TestIntelCheckInstalledHoldsBackAScopeFromTheUsersNpmrc(t *testing.T) {
+	s, f := newIntelServer(t, func(string, string) (int, string) { return 500, "" })
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, ".npmrc"), []byte("@acme:registry=https://npm.acme.internal/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.registryEnv = func(bool) intel.RegistryEnv { return intel.RegistryEnv{Home: home} }
+	s.inventory = func(bool) inventory.Result {
+		return inventory.Result{MCPServers: []inventory.MCPServer{
+			{Runtime: "cursor", ServerName: "billing", SourceScope: "user", CommandPresent: true,
+				Definition: map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "@acme/billing-mcp"}}},
+			{Runtime: "cursor", ServerName: "playwright", SourceScope: "user", CommandPresent: true,
+				Definition: map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "@playwright/mcp"}}},
+		}}
+	}
+	text, isErr := call(t, s, "intel_check_installed", map[string]interface{}{"dry_run": true})
+	if isErr {
+		t.Fatal(text)
+	}
+	var report installedReport
+	if err := json.Unmarshal([]byte(text), &report); err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Sent) != 1 || report.Sent[0].Q != "npm:@playwright/mcp" || len(report.Skipped) != 1 || report.Skipped[0].Reason != intel.ReasonPrivatePackage {
+		t.Fatalf("report = %+v", report)
+	}
+	if strings.Contains(text, "acme.internal") || f.count() != 0 {
+		t.Fatalf("the registry leaked or a request was sent: %s", text)
 	}
 }
 

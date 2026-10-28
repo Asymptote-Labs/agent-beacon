@@ -15,8 +15,8 @@ import (
 //
 // By default only a public identifier derived here leaves the machine: an npm or PyPI package
 // named in a server's launch command and fetched from the public registry. Names that may be
-// private (a server's configured name, a package from a registry or index the command or the
-// server's env names, a skill's name) are sent only when the caller opts in. Paths, URLs, environment, other arguments and
+// private (a server's configured name, a package from a registry or index named by the command,
+// the server's env, or the launcher's own config and environment, a skill's name) are sent only when the caller opts in. Paths, URLs, environment, other arguments and
 // the rest of a definition are never sent.
 
 // Installed is one lookup and every place it was found.
@@ -64,6 +64,9 @@ type FromInventoryOptions struct {
 	// its command names no package, a package from a private registry or index, and skill
 	// names. Off by default, so only packages from the public npm and PyPI registries leave.
 	IncludePrivateNames bool
+	// Registries is what the machine's launcher configuration says about registries and
+	// indexes (LocalRegistries); a package it may route elsewhere is held back as private.
+	Registries Registries
 	// BeaconSkills are skill names Beacon installs itself (agentskills.Names), never checked.
 	BeaconSkills []string
 }
@@ -105,7 +108,7 @@ func FromInventory(res inventory.Result, opts FromInventoryOptions) ([]Installed
 		}
 		command, args := commandOf(s.Definition)
 		if q, basis, ok := PackageFromCommand(command, args); ok {
-			if registryFromEnv(s.Definition) {
+			if registryFromEnv(s.Definition) || opts.Registries.private(q) {
 				basis = privateBasis(basis)
 			}
 			if (basis == BasisPrivateNPM || basis == BasisPrivatePyPI) && !opts.IncludePrivateNames {
@@ -207,25 +210,19 @@ func privateBasis(basis string) string {
 	return basis
 }
 
-// registryFromEnv reports whether a server's env block can point its launcher at a registry,
-// index or config file of its own. Only the keys are read; their values never leave here.
+// registryFromEnv reports whether a server's own definition can point its launcher at a
+// registry, index or config file: a registry variable in its env block, or an env file Beacon
+// does not read. Only the keys are read; their values never leave here.
 func registryFromEnv(def map[string]interface{}) bool {
+	if _, ok := def["envFile"]; ok {
+		return true
+	}
+	if _, ok := def["env_file"]; ok {
+		return true
+	}
 	env, _ := def["env"].(map[string]interface{})
 	for key := range env {
-		k := strings.ToLower(strings.TrimSpace(key))
-		switch {
-		// npm_config_registry, npm_config_@scope:registry, npm_config_userconfig.
-		case strings.HasPrefix(k, "npm_config_") && (strings.HasSuffix(k, "registry") || k == "npm_config_userconfig" || k == "npm_config_globalconfig"):
-			return true
-		case k == "yarn_npm_registry_server" || k == "yarn_rc_filename" || k == "bun_config_registry":
-			return true
-		// UV_INDEX, UV_INDEX_URL, UV_DEFAULT_INDEX, UV_EXTRA_INDEX_URL, UV_FIND_LINKS, UV_CONFIG_FILE.
-		case k == "uv_index" || k == "uv_index_url" || k == "uv_default_index" || k == "uv_extra_index_url" ||
-			k == "uv_find_links" || k == "uv_config_file":
-			return true
-		// PIP_INDEX_URL, PIP_EXTRA_INDEX_URL, PIP_FIND_LINKS, PIP_CONFIG_FILE, PIPX_DEFAULT_INDEX_URL.
-		case k == "pip_index_url" || k == "pip_extra_index_url" || k == "pip_find_links" || k == "pip_config_file" ||
-			k == "pipx_default_index_url":
+		if npm, pypi := registryEnvKey(key); npm || pypi {
 			return true
 		}
 	}

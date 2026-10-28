@@ -133,10 +133,15 @@ Names that may be private are held back and listed as skipped unless the agent p
 
 - the configured name of a server with no package in its command, such as a local script, a
   binary, a container or a remote URL;
-- a package fetched from a registry or index other than the public one, whether the launch command
-  names it (`--registry`, `--index-url`, a config file and the like) or the server's `env` does
-  (`npm_config_registry`, `UV_INDEX_URL`, `PIP_INDEX_URL` and the like; only the variable's name
-  is read);
+- a package that may come from a registry or index other than the public one. Beacon checks
+  where launchers usually find one: the launch command (`--registry`, `--index-url`, a config
+  file and the like), the server's `env` or `envFile`, the environment it inherits
+  (`npm_config_registry`, `npm_config_@scope:registry`, `UV_INDEX_URL`, `PIP_INDEX_URL` and the
+  like), and the npm, yarn, bun, pip and uv configuration files in your home directory, the system
+  locations and the working directory (`.npmrc`, `.yarnrc.yml`, `bunfig.toml`, `pip.conf`,
+  `uv.toml`, `pyproject.toml`). A private npm scope holds back only that scope's packages.
+  Settings that name the public registry don't count. A registry configured anywhere else (a
+  shell profile the agent did not inherit, say) is not seen, so check with `dry_run` first;
 - skill names, since a skill may be one you wrote.
 
 Paths, URLs, environment variables and other arguments are never sent. Beacon's own server and

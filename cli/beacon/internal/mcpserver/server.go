@@ -17,6 +17,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/activity"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/intel"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/learning"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
@@ -36,9 +37,11 @@ type Server struct {
 	logPath string
 	tools   map[string]Tool
 	order   []string
-	// newIntel and inventory replace the Beacon Intel client and the inventory scan in tests.
-	newIntel  func() (*intelapi.Client, error)
-	inventory func(includeProject bool) inventory.Result
+	// newIntel, inventory and registryEnv replace the Beacon Intel client, the inventory scan
+	// and where launcher registry settings are read in tests.
+	newIntel    func() (*intelapi.Client, error)
+	inventory   func(includeProject bool) inventory.Result
+	registryEnv func(includeProject bool) intel.RegistryEnv
 }
 
 type Tool struct {
