@@ -269,6 +269,8 @@ jobs:
           ./beacon lenses --help > /tmp/beacon-lenses-help.txt
           ./beacon pricing --help > /tmp/beacon-pricing-help.txt
           ./beacon pricing info > /tmp/beacon-pricing-info.txt
+          ./beacon intel --help > /tmp/beacon-intel-help.txt
+          ./beacon intel check --help > /tmp/beacon-intel-check-help.txt
           for forbidden in init update claude cursor dep-scan config; do
             if grep -E "^[[:space:]]+$forbidden([[:space:]]|$)" /tmp/beacon-help.txt; then
               echo "forbidden command exposed: $forbidden"
@@ -563,6 +565,7 @@ jobs:
             ./internal/fxsession/... `
             ./internal/groksession/... `
             ./internal/hermessession/... `
+            ./internal/intel/... `
             ./internal/learning/... `
             ./internal/managedprivacy/... `
             ./internal/mcpconnect/... `
