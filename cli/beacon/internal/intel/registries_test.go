@@ -36,7 +36,7 @@ func TestLocalRegistries(t *testing.T) {
 		{name: "public registry in npmrc", file: ".npmrc", content: "registry=https://registry.npmjs.org/\n@x:registry=https://registry.npmjs.org\n",
 			public: []string{"npm:@x/y", "npm:plain"}},
 		{name: "npmrc naming a config Beacon cannot resolve", file: ".npmrc", content: "globalconfig=${NPM_HOME}/npmrc\n", private: []string{"npm:plain"}},
-		{name: "npmrc naming a missing config", file: ".npmrc", content: "globalconfig=/nonexistent/beacon-test/npmrc\n", public: []string{"npm:plain"}},
+		{name: "npmrc naming a missing config", file: ".npmrc", content: "globalconfig=~/nonexistent/npmrc\n", public: []string{"npm:plain"}},
 		{name: "scope in pnpm global rc", file: ".config/pnpm/rc", content: "@acme:registry=https://npm.acme.internal/\n",
 			private: []string{"npm:@acme/internal-mcp"}, public: []string{"npm:@playwright/mcp"}},
 		{name: "registry in macOS pnpm rc", file: "Library/Preferences/pnpm/rc", content: "registry=https://npm.acme.internal/\n", private: []string{"npm:plain"}},
