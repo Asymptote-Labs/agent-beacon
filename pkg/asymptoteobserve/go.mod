@@ -6,8 +6,9 @@ toolchain go1.27.3
 
 require (
 	github.com/google/cel-go v0.30.0
-	golang.org/x/sys v0.44.0
+	golang.org/x/sys v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
+	mvdan.cc/sh/v3 v3.14.1
 )
 
 require (
