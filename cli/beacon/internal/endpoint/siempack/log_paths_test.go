@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -125,6 +126,11 @@ func TestJSONLogPathsRoundTrip(t *testing.T) {
 // The smoke-test scripts take the log path as the default of "${BEACON_LOG:-...}". Each script must
 // parse, and its defaults must evaluate to the paths without running anything inside them.
 func TestShellLogPathsRoundTrip(t *testing.T) {
+	// The smoke-test scripts run on macOS and Linux hosts. Git for Windows' sh drops carriage
+	// returns from its input, so it cannot read these values back exactly.
+	if runtime.GOOS == "windows" {
+		t.Skip("the smoke-test scripts are POSIX shell scripts for macOS and Linux")
+	}
 	sh, err := exec.LookPath("sh")
 	if err != nil {
 		t.Skip("no POSIX shell to run the smoke-test scripts")
