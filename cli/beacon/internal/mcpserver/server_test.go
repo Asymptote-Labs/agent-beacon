@@ -73,7 +73,7 @@ func TestExpectedToolsRegistered(t *testing.T) {
 	if err := server.HasExpectedTools(); err != nil {
 		t.Fatalf("HasExpectedTools returned error: %v", err)
 	}
-	if got := strings.Join(server.ToolNames(), ","); got != "search_activity,summarize_activity,get_activity_event,list_activity_filters,search_memory,get_memory,get_memory_context" {
+	if got := strings.Join(server.ToolNames(), ","); got != "search_activity,summarize_activity,get_activity_event,list_activity_filters,search_memory,get_memory,get_memory_context,intel_lookup,intel_get_artifact,intel_check,intel_check_installed" {
 		t.Fatalf("ToolNames = %s", got)
 	}
 }

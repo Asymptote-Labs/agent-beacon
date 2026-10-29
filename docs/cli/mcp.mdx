@@ -67,6 +67,10 @@ The local `beacon` server exposes these MCP tools:
 | `search_memory` | Search approved Beacon project memory and return compact summaries. |
 | `get_memory` | Fetch one approved memory item by ID. |
 | `get_memory_context` | Return a small approved-memory context set for the current task. |
+| `intel_lookup` | Look up an MCP server or skill in [Beacon Intel](/cli/intel) and get its risk. |
+| `intel_get_artifact` | Get one Beacon Intel artifact in full: verdict, findings, lineage, advisories. |
+| `intel_check` | Check up to 50 MCP servers and skills in one call. |
+| `intel_check_installed` | Check the MCP servers and skills configured on this machine. |
 
 Search and summary tools accept filters such as `since`, `until`, `limit`, `q`, `harness`, `model`, `action`, `severity`, `category`, `repository`, `session`, `file`, `command`, `mcp`, `approval`, `decision`, `policy`, `review`, and `wazuh_level`.
 
@@ -77,6 +81,16 @@ specific repository. A `project` path sent by a client is matched against the
 projects the memory store already holds records for; Beacon does not read git
 metadata from a path a client supplies, so an unrecognized path returns nothing
 rather than widening the search.
+
+The `intel_*` tools let an agent check an MCP server or skill before installing or running
+it. They are free and need no Beacon account. They are the only local tools that reach the
+network, and only when an agent calls one: each sends what it names to `intel.beacon.sh`.
+`intel_check_installed` sends only public identifiers it derives from each runtime's own
+config: npm and PyPI packages, from the public registries, in a server's launch command. Server
+names, private-registry packages and skill names go only with `include_private_names`. Paths, URLs,
+environment and other arguments stay on the machine, and `dry_run` shows what would be sent.
+`BEACON_INTEL=0` turns these tools off. See [`beacon intel`](/cli/intel) for risks and what
+each answer means.
 
 ## Flags
 
