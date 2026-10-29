@@ -126,7 +126,8 @@ in a server's launch command, without its version. For example, `npx -y @playwri
 is sent as `npm:@playwright/mcp`, `uvx mcp-server-fetch` as `pypi:mcp-server-fetch`, and the
 Windows form `cmd /c npx -y @playwright/mcp` the same way. A launch command with an option
 Beacon does not recognize is skipped rather than guessed at, so an option's value is never sent
-as a package. So is a package that does not come from a registry: a git or tarball URL, a direct
+as a package. `npm exec` and `npm x` read npm's options after the package too (up to `--`), so
+Beacon reads them there as well. So is a package that does not come from a registry: a git or tarball URL, a direct
 reference such as `name @ git+https://…`, an `npm:` alias, a path or a local wheel or tarball.
 
 Names that may be private are held back and listed as skipped unless the agent passes
@@ -147,8 +148,11 @@ Names that may be private are held back and listed as skipped unless the agent p
 - skill names, since a skill may be one you wrote.
 
 Paths, URLs, environment variables and other arguments are never sent. Beacon's own server and
-skills are skipped. A result matched only by a name, including a package the index could only
-match by name, is marked `name_only`: it may be a different artifact with the same name, so
+skills are skipped: the `beacon` server that runs the `beacon` binary, the `beacon-managed`
+Beacon Cloud MCP entry, and skills Beacon installed. A server or skill that only shares one of
+those names is checked like any other. A result matched only by a name, including a package the
+index could only match by name and a package from a private registry or index (the index knows
+only the public package that shares its name), is marked `name_only`: it may be a different artifact with the same name, so
 confirm the repository before relying on it. `dry_run` returns exactly what would be sent and
 sends nothing. Results map back to every runtime and config where each artifact was found.
 

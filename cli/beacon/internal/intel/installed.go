@@ -67,19 +67,29 @@ type FromInventoryOptions struct {
 	// Registries is what the machine's launcher configuration says about registries and
 	// indexes (LocalRegistries); a package it may route elsewhere is held back as private.
 	Registries Registries
-	// BeaconSkills are skill names Beacon installs itself (agentskills.Names), never checked.
-	BeaconSkills []string
+	// BeaconSkill reports whether a skill is one Beacon installed itself (an agentskills name
+	// in a directory carrying Beacon's marker), never checked. A skill that only shares the
+	// name is checked like any other.
+	BeaconSkill func(inventory.Skill) bool
 }
 
-var beaconServers = map[string]bool{"beacon": true, "beacon-managed": true}
+// beaconServer reports whether a configured server is Beacon's own: the local `beacon` server
+// (the beacon binary) or Beacon Cloud MCP (`beacon-managed`, a URL with no command). A server
+// that only takes one of the names is checked like any other.
+func beaconServer(name, command string, args []string, s inventory.MCPServer) bool {
+	switch strings.ToLower(name) {
+	case "beacon":
+		program, _ := launcher(command, args)
+		return launcherBase(program) == "beacon"
+	case "beacon-managed":
+		return s.URLPresent && !s.CommandPresent && command == ""
+	}
+	return false
+}
 
 // FromInventory turns an inventory scan into deduplicated lookups, servers first, each list in
 // a stable order.
 func FromInventory(res inventory.Result, opts FromInventoryOptions) ([]Installed, []Skipped) {
-	beaconSkills := map[string]bool{}
-	for _, name := range opts.BeaconSkills {
-		beaconSkills[name] = true
-	}
 	byKey := map[string]*Installed{}
 	var order []string
 	var skipped []Skipped
@@ -102,11 +112,11 @@ func FromInventory(res inventory.Result, opts FromInventoryOptions) ([]Installed
 	for _, s := range res.MCPServers {
 		name := strings.TrimSpace(s.ServerName)
 		src := InstalledSource{Runtime: s.Runtime, Name: name, Scope: s.SourceScope}
-		if beaconServers[strings.ToLower(name)] {
+		command, args := commandOf(s.Definition)
+		if beaconServer(name, command, args, s) {
 			skipped = append(skipped, Skipped{Kind: "mcp", Runtime: s.Runtime, Name: name, Reason: ReasonBeacon})
 			continue
 		}
-		command, args := commandOf(s.Definition)
 		if q, basis, ok := PackageFromCommand(command, args); ok {
 			program, programArgs := launcher(command, args)
 			if registryFromEnv(s.Definition) || opts.Registries.forServer(program, programArgs, s.Definition).private(q) {
@@ -135,7 +145,7 @@ func FromInventory(res inventory.Result, opts FromInventoryOptions) ([]Installed
 		if !s.Exists {
 			continue
 		}
-		if beaconSkills[name] {
+		if opts.BeaconSkill != nil && opts.BeaconSkill(s) {
 			skipped = append(skipped, Skipped{Kind: "skill", Runtime: s.Runtime, Name: name, Reason: ReasonBeacon})
 			continue
 		}
@@ -280,7 +290,8 @@ func PackageFromCommand(command string, args []string) (q, basis string, ok bool
 		if len(rest) == 0 || (rest[0] != "exec" && rest[0] != "x") {
 			return "", "", false
 		}
-		rest = rest[1:]
+		// npm exec and npm x read npm's options after the package too, up to --.
+		return npmFrom(rest[1:], true)
 	case "uvx":
 		return pypiFrom(rest)
 	case "pipx":
@@ -296,7 +307,7 @@ func PackageFromCommand(command string, args []string) (q, basis string, ok bool
 	default:
 		return "", "", false
 	}
-	return npmFrom(rest)
+	return npmFrom(rest, false)
 }
 
 // The options a launcher takes before the package it runs. A flag in neither list stops the
@@ -336,11 +347,19 @@ func flagSet(flags ...string) map[string]bool {
 // argument that is not an option. ok is false when an unknown option makes that uncertain.
 // private reports whether a flag in privateFlags appeared anywhere among the launcher's own
 // options, including after a package flag: `uvx --from pkg --index-url <url> cmd` fetches pkg
-// from that index too.
-func packageArg(args []string, packageFlags, valueFlags, boolFlags, privateFlags map[string]bool) (spec string, private, ok bool) {
-	found := false
+// from that index too. With optionsAnywhere (npm exec and npm x), the launcher's options run
+// past the first plain word up to --, so they are read there too: a registry or package flag
+// after the package still counts, and an unknown option still stops the parse.
+func packageArg(args []string, packageFlags, valueFlags, boolFlags, privateFlags map[string]bool, optionsAnywhere bool) (spec string, private, ok bool) {
+	found, positional := false, false
 	for i := 0; i < len(args); i++ {
 		a := args[i]
+		if a == "--" && optionsAnywhere {
+			if !found && !positional && i+1 < len(args) {
+				spec, positional = args[i+1], true
+			}
+			break
+		}
 		name, value, hasValue := strings.Cut(a, "=")
 		if !strings.HasPrefix(a, "-") {
 			hasValue = false
@@ -374,20 +393,25 @@ func packageArg(args []string, packageFlags, valueFlags, boolFlags, privateFlags
 		case boolFlags[a]:
 		case strings.HasPrefix(a, "-"):
 			return "", private, false
+		case positional:
+			// A later plain word is an argument to the command.
 		default:
 			// The first plain word is the package, or the command a package flag's package
-			// provides; either way the launcher's options end here.
+			// provides; for every launcher but npm exec, the launcher's options end here.
 			if !found {
 				spec = a
 			}
-			return spec, private, true
+			if !optionsAnywhere {
+				return spec, private, true
+			}
+			positional = true
 		}
 	}
-	return spec, private, found
+	return spec, private, found || positional
 }
 
-func npmFrom(args []string) (string, string, bool) {
-	spec, private, ok := packageArg(args, npmPackageFlags, npmValueFlags, npmBoolFlags, npmPrivateFlags)
+func npmFrom(args []string, optionsAnywhere bool) (string, string, bool) {
+	spec, private, ok := packageArg(args, npmPackageFlags, npmValueFlags, npmBoolFlags, npmPrivateFlags, optionsAnywhere)
 	if !ok {
 		return "", "", false
 	}
@@ -433,7 +457,7 @@ func npmPackage(spec string) (string, string, bool) {
 }
 
 func pypiFrom(args []string) (string, string, bool) {
-	spec, private, ok := packageArg(args, pypiPackageFlags, pypiValueFlags, pypiBoolFlags, pypiPrivateFlags)
+	spec, private, ok := packageArg(args, pypiPackageFlags, pypiValueFlags, pypiBoolFlags, pypiPrivateFlags, false)
 	if !ok {
 		return "", "", false
 	}

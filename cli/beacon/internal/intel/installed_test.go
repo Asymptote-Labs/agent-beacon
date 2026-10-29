@@ -25,6 +25,13 @@ func TestPackageFromCommand(t *testing.T) {
 		{"pnpm", []string{"dlx", "@x/y@2"}, "npm:@x/y"},
 		{"yarn", []string{"dlx", "z"}, "npm:z"},
 		{"npm", []string{"exec", "--", "w@1.0.0"}, "npm:w"},
+		{"npm", []string{"exec", "w@1.0.0", "--yes"}, "npm:w"},
+		{"npm", []string{"exec", "w", "--", "--port", "3000"}, "npm:w"},
+		{"npm", []string{"x", "w", "positional-arg"}, "npm:w"},
+		// npm exec reads its options after the package word, so --package there names the
+		// package npm installs and the plain word is the command it provides.
+		{"npm", []string{"exec", "bar", "--package=@scope/foo"}, "npm:@scope/foo"},
+		{"npm", []string{"exec", "bar", "-p", "@scope/foo"}, "npm:@scope/foo"},
 		{"uvx", []string{"mcp-server-fetch"}, "pypi:mcp-server-fetch"},
 		{"uvx", []string{"--python", "3.12", "Mcp_Server.Time==1.2"}, "pypi:mcp_server.time"},
 		{"uvx", []string{"--from", "awslabs.aws-docs-mcp-server[cli]>=1", "aws-docs"}, "pypi:awslabs.aws-docs-mcp-server"},
@@ -69,6 +76,10 @@ func TestPackageFromCommand(t *testing.T) {
 		{"npx", []string{"--mystery", "value", "pkg"}},
 		{"npx", []string{"--mystery=value", "pkg"}},
 		{"npx", []string{"-c", "echo hi"}},
+		// npm exec would read an option after the package as its own, so one Beacon does not
+		// know still stops the parse there.
+		{"npm", []string{"exec", "pkg", "--mystery", "value"}},
+		{"npm", []string{"exec", "pkg", "--@acme:registry=https://npm.acme.internal"}},
 		{"", nil},
 	} {
 		if q, _, ok := PackageFromCommand(tc.command, tc.args); ok {
@@ -105,7 +116,8 @@ func TestFromInventorySendsOnlyPublicIdentifiers(t *testing.T) {
 			{Runtime: "claude_code", SkillName: "/Users/me/skills/x", SourceScope: "user", Exists: true},
 		},
 	}
-	items, skipped := FromInventory(res, FromInventoryOptions{BeaconSkills: []string{"beacon-memory-recall"}})
+	beaconSkill := func(s inventory.Skill) bool { return s.SkillName == "beacon-memory-recall" }
+	items, skipped := FromInventory(res, FromInventoryOptions{BeaconSkill: beaconSkill})
 
 	var got []string
 	for _, item := range items {
@@ -142,7 +154,7 @@ func TestFromInventorySendsOnlyPublicIdentifiers(t *testing.T) {
 	}
 
 	// With consent, skills go by name, once for every runtime they are in.
-	withNames, _ := FromInventory(res, FromInventoryOptions{IncludePrivateNames: true, BeaconSkills: []string{"beacon-memory-recall"}})
+	withNames, _ := FromInventory(res, FromInventoryOptions{IncludePrivateNames: true, BeaconSkill: beaconSkill})
 	last := withNames[len(withNames)-1]
 	if last.Kind != "skill" || last.Q != "pdf" || len(last.Sources) != 2 || last.Basis != BasisSkillName {
 		t.Fatalf("pdf with consent = %+v", last)
@@ -177,6 +189,15 @@ func TestPrivateRegistriesAndWindowsShells(t *testing.T) {
 		{"uvx", []string{"--from=acme-billing-mcp", "--index=https://pypi.acme.internal/simple", "acme-billing"}, "pypi:acme-billing-mcp", BasisPrivatePyPI},
 		{"npx", []string{"-p", "@acme/mcp", "--registry", "https://npm.acme.internal", "acme-mcp"}, "npm:@acme/mcp", BasisPrivateNPM},
 		{"npx", []string{"--package=@acme/mcp", "--registry=https://npm.acme.internal", "acme-mcp"}, "npm:@acme/mcp", BasisPrivateNPM},
+		// npm exec reads a registry or config file named after the package too, up to --.
+		{"npm", []string{"exec", "@acme/internal-mcp", "--registry=https://npm.acme.internal"}, "npm:@acme/internal-mcp", BasisPrivateNPM},
+		{"npm", []string{"x", "@acme/internal-mcp", "--registry", "https://npm.acme.internal"}, "npm:@acme/internal-mcp", BasisPrivateNPM},
+		{"npm", []string{"exec", "@acme/internal-mcp", "--userconfig", "/x/.npmrc"}, "npm:@acme/internal-mcp", BasisPrivateNPM},
+		{"npm", []string{"exec", "bar", "--package=@acme/foo", "--registry=https://npm.acme.internal"}, "npm:@acme/foo", BasisPrivateNPM},
+		// After -- the words are the command's, not npm's.
+		{"npm", []string{"exec", "w", "--", "--registry=https://npm.acme.internal"}, "npm:w", BasisNPM},
+		// npx stops at the package word: what follows is the command's.
+		{"npx", []string{"-y", "pkg", "--registry=https://elsewhere.example"}, "npm:pkg", BasisNPM},
 		{"uvx", []string{"--from", "mcp-server-fetch", "mcp-server-fetch"}, "pypi:mcp-server-fetch", BasisPyPI},
 		// A config file or pip's own arguments can name an index or registry.
 		{"npx", []string{"--userconfig", "/x/.npmrc", "@acme/mcp"}, "npm:@acme/mcp", BasisPrivateNPM},
@@ -206,6 +227,42 @@ func TestPrivateRegistriesAndWindowsShells(t *testing.T) {
 	items, _ = FromInventory(res, FromInventoryOptions{IncludePrivateNames: true})
 	if len(items) != 1 || items[0].Q != "pypi:acme-billing-mcp" || items[0].Basis != BasisPrivatePyPI {
 		t.Fatalf("with consent = %+v", items)
+	}
+}
+
+func TestFromInventoryKnowsBeaconByDefinitionNotName(t *testing.T) {
+	res := inventory.Result{
+		MCPServers: []inventory.MCPServer{
+			server("claude_code", "beacon", "user", map[string]interface{}{"command": "/opt/beacon/bin/beacon", "args": []interface{}{"mcp", "serve"}}),
+			server("codex", "beacon-managed", "user", map[string]interface{}{"url": "https://beacon.sh/mcp"}),
+			// Servers that only take Beacon's names are checked like any other.
+			server("cursor", "beacon", "user", map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "some-pkg"}}),
+			server("cursor", "BEACON-MANAGED", "project", map[string]interface{}{"command": "uvx", "args": []interface{}{"other-pkg"}}),
+		},
+		Skills: []inventory.Skill{
+			{Runtime: "claude_code", SkillName: "beacon-memory-recall", ManifestPath: "/home/me/.claude/skills/beacon-memory-recall/SKILL.md", SourceScope: "user", Exists: true},
+			{Runtime: "codex", SkillName: "beacon-memory-recall", ManifestPath: "/home/me/project/.agents/skills/beacon-memory-recall/SKILL.md", SourceScope: "project", Exists: true},
+		},
+	}
+	beaconSkill := func(s inventory.Skill) bool {
+		return s.ManifestPath == "/home/me/.claude/skills/beacon-memory-recall/SKILL.md"
+	}
+	items, skipped := FromInventory(res, FromInventoryOptions{IncludePrivateNames: true, BeaconSkill: beaconSkill})
+	var got []string
+	for _, item := range items {
+		got = append(got, item.Kind+" "+item.Q+" "+item.Sources[0].Runtime)
+	}
+	if strings.Join(got, ", ") != "mcp npm:some-pkg cursor, mcp pypi:other-pkg cursor, skill beacon-memory-recall codex" {
+		t.Fatalf("items = %v", got)
+	}
+	var beacon []string
+	for _, s := range skipped {
+		if s.Reason == ReasonBeacon {
+			beacon = append(beacon, s.Kind+" "+s.Runtime+" "+s.Name)
+		}
+	}
+	if strings.Join(beacon, ", ") != "mcp claude_code beacon, mcp codex beacon-managed, skill claude_code beacon-memory-recall" {
+		t.Fatalf("Beacon's own = %v (skipped %+v)", beacon, skipped)
 	}
 }
 

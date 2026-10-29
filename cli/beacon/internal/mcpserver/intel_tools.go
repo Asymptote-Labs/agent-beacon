@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/agentskills"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
@@ -200,7 +202,7 @@ func (s *Server) checkInstalled(ctx context.Context, args map[string]interface{}
 	items, skipped := intel.FromInventory(inv, intel.FromInventoryOptions{
 		IncludePrivateNames: a.includePrivateNames,
 		Registries:          intel.LocalRegistries(registryEnv()),
-		BeaconSkills:        agentskills.Names(),
+		BeaconSkill:         beaconSkill(agentskills.Names()),
 	})
 	report := installedReport{Sent: make([]intelapi.CheckItem, len(items)), Skipped: skipped}
 	if report.Skipped == nil {
@@ -244,7 +246,10 @@ func (s *Server) checkInstalled(ctx context.Context, args map[string]interface{}
 			}
 			// A name, or a package or repository the index fell back to matching as a name, may
 			// be a different artifact that shares it.
-			byName := item.Basis == intel.BasisSkillName || item.Basis == intel.BasisServerName || outcome.MatchedBy == "text"
+			// A package from a private registry or index is matched against the public package
+			// that shares its name, which may be a different artifact too.
+			byName := item.Basis == intel.BasisSkillName || item.Basis == intel.BasisServerName ||
+				item.Basis == intel.BasisPrivateNPM || item.Basis == intel.BasisPrivatePyPI || outcome.MatchedBy == "text"
 			if outcome.Status == "matched" && byName {
 				result.NameOnly = true
 				result.Guidance = nameOnlyGuidance + result.Guidance
@@ -259,6 +264,18 @@ func (s *Server) checkInstalled(ctx context.Context, args map[string]interface{}
 	}
 	report.Note = "not_found means never checked, not safe. ambiguous claims no risk: check a candidate with intel_get_artifact. " + intelapi.UntrustedNote
 	return report, nil
+}
+
+// beaconSkill reports whether an inventoried skill is one Beacon installed: one of its skill
+// names, in a directory carrying Beacon's marker.
+func beaconSkill(names []string) func(inventory.Skill) bool {
+	known := map[string]bool{}
+	for _, name := range names {
+		known[name] = true
+	}
+	return func(s inventory.Skill) bool {
+		return known[strings.TrimSpace(s.SkillName)] && s.ManifestPath != "" && agentskills.Managed(filepath.Dir(s.ManifestPath))
+	}
 }
 
 // intelTools lists the Beacon Intel tools, for doctor and tests.

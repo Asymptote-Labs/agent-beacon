@@ -141,6 +141,13 @@ func Uninstall(roots []string) []Result {
 	return out
 }
 
+// Managed reports whether dir is a skill directory Beacon wrote: a real directory carrying
+// Beacon's marker.
+func Managed(dir string) bool {
+	managed, _, err := inspect(dir)
+	return err == nil && managed
+}
+
 func inspect(dir string) (managed, exists bool, err error) {
 	info, err := os.Lstat(dir)
 	if errors.Is(err, os.ErrNotExist) {

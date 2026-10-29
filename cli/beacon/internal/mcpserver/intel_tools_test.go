@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/agentskills"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/intel"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/intelapi"
@@ -210,11 +211,16 @@ func fakeInventory(nServers int) inventory.Result {
 
 func TestIntelCheckInstalledDryRunSendsNothing(t *testing.T) {
 	s, f := newIntelServer(t, func(string, string) (int, string) { return 500, "" })
+	// Beacon's own skill is the one it installed, marker and all.
+	skills := t.TempDir()
+	agentskills.Install([]string{skills})
 	s.inventory = func(includeProject bool) inventory.Result {
 		if includeProject {
 			t.Error("include_project false was not passed through")
 		}
-		return fakeInventory(2)
+		inv := fakeInventory(2)
+		inv.Skills[1].ManifestPath = filepath.Join(skills, "beacon-memory-recall", "SKILL.md")
+		return inv
 	}
 	text, isErr := call(t, s, "intel_check_installed", map[string]interface{}{"dry_run": true, "include_project": false})
 	if isErr {
@@ -435,9 +441,11 @@ func TestIntelCheckInstalledHoldsBackAScopeFromTheUsersNpmrc(t *testing.T) {
 
 func TestIntelCheckInstalledMarksNameMatches(t *testing.T) {
 	s, f := newIntelServer(t, func(path, body string) (int, string) {
-		// The package matched nothing, so the index matched its text against names; the skill
+		// The private-registry package matched the public package that shares its name; the
+		// public package matched nothing, so the index matched its text against names; the skill
 		// matched by name.
 		return 200, `{"api":"intel.v1","results":[
+			{"q":"npm:internal-tool","matched_by":"package","status":"matched","risk":"benign","guidance":"No issues found.","matches":[{"entity_key":"mcp:public/internal-tool"}]},
 			{"q":"npm:some-mcp","matched_by":"text","status":"matched","risk":"benign","guidance":"No issues found.","matches":[{"entity_key":"mcp:other/some-mcp"}]},
 			{"q":"pdf","matched_by":"text","status":"matched","risk":"benign","guidance":"No issues found.","matches":[{"entity_key":"skill:a/b#pdf"}]}
 		],"counts":{}}`
@@ -445,7 +453,10 @@ func TestIntelCheckInstalledMarksNameMatches(t *testing.T) {
 	s.inventory = func(bool) inventory.Result {
 		return inventory.Result{
 			MCPServers: []inventory.MCPServer{{Runtime: "cursor", ServerName: "x", SourceScope: "user", CommandPresent: true,
-				Definition: map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "some-mcp"}}}},
+				Definition: map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "some-mcp"}}},
+				// A package from a private registry matched the public package of the same name.
+				{Runtime: "cursor", ServerName: "y", SourceScope: "user", CommandPresent: true,
+					Definition: map[string]interface{}{"command": "npx", "args": []interface{}{"--registry", "https://npm.corp.example", "-y", "internal-tool"}}}},
 			Skills: []inventory.Skill{{Runtime: "claude_code", SkillName: "pdf", SourceScope: "user", Exists: true}},
 		}
 	}
@@ -457,9 +468,40 @@ func TestIntelCheckInstalledMarksNameMatches(t *testing.T) {
 	if err := json.Unmarshal([]byte(text), &report); err != nil {
 		t.Fatal(err)
 	}
+	if len(report.Results) != 3 {
+		t.Fatalf("results = %+v", report.Results)
+	}
 	for _, r := range report.Results {
 		if !r.NameOnly || !strings.HasPrefix(r.Guidance, "Matched by name only") || !strings.HasSuffix(r.Guidance, "No issues found.") {
 			t.Errorf("%s = %+v, want name_only", r.Q, r)
 		}
+	}
+}
+
+func TestBeaconSkillNeedsBeaconsMarker(t *testing.T) {
+	root := t.TempDir()
+	for _, r := range agentskills.Install([]string{root}) {
+		if r.Err != nil {
+			t.Fatal(r.Err)
+		}
+	}
+	names := agentskills.Names()
+	if len(names) == 0 {
+		t.Fatal("no embedded skills")
+	}
+	// A skill a person wrote under one of Beacon's names has no marker.
+	other := filepath.Join(t.TempDir(), names[0])
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	isBeacon := beaconSkill(names)
+	if !isBeacon(inventory.Skill{SkillName: names[0], ManifestPath: filepath.Join(root, names[0], "SKILL.md")}) {
+		t.Error("Beacon's installed skill was not recognized")
+	}
+	if isBeacon(inventory.Skill{SkillName: names[0], ManifestPath: filepath.Join(other, "SKILL.md")}) {
+		t.Error("a skill that only shares Beacon's name was taken for Beacon's")
+	}
+	if isBeacon(inventory.Skill{SkillName: "pdf", ManifestPath: filepath.Join(root, names[0], "SKILL.md")}) {
+		t.Error("a skill with another name was taken for Beacon's")
 	}
 }
