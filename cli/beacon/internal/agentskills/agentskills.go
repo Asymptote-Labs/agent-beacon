@@ -13,6 +13,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -160,7 +161,7 @@ func inspect(dir string) (managed, exists bool, err error) {
 		// A symlink or a file: something the person set up. Never followed or replaced.
 		return false, true, nil
 	}
-	data, err := os.ReadFile(filepath.Join(dir, MarkerFile))
+	data, err := readMarker(filepath.Join(dir, MarkerFile))
 	if errors.Is(err, os.ErrNotExist) {
 		return false, true, nil
 	}
@@ -168,6 +169,28 @@ func inspect(dir string) (managed, exists bool, err error) {
 		return false, true, err
 	}
 	return string(data) == markerContent, true, nil
+}
+
+// readMarker reads a marker Beacon could have written: a regular file, never followed through
+// a symlink, and read no further than the marker's own length. Anything else (a symlink, a
+// FIFO, a device, an oversized file) is not Beacon's marker.
+func readMarker(name string) ([]byte, error) {
+	info, err := os.Lstat(name)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > int64(len(markerContent)) {
+		return nil, nil
+	}
+	f, err := os.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if opened, err := f.Stat(); err != nil || !os.SameFile(info, opened) {
+		return nil, err
+	}
+	return io.ReadAll(io.LimitReader(f, int64(len(markerContent))+1))
 }
 
 // files lists one embedded skill's files, as slash paths relative to the skill directory.

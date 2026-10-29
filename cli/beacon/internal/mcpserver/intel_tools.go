@@ -267,14 +267,15 @@ func (s *Server) checkInstalled(ctx context.Context, args map[string]interface{}
 }
 
 // beaconSkill reports whether an inventoried skill is one Beacon installed: one of its skill
-// names, in a directory carrying Beacon's marker.
+// names, in a user-level directory carrying Beacon's marker. Beacon never installs project
+// skills, so a repository's own skill directories are never taken for Beacon's or read for it.
 func beaconSkill(names []string) func(inventory.Skill) bool {
 	known := map[string]bool{}
 	for _, name := range names {
 		known[name] = true
 	}
 	return func(s inventory.Skill) bool {
-		return known[strings.TrimSpace(s.SkillName)] && s.ManifestPath != "" && agentskills.Managed(filepath.Dir(s.ManifestPath))
+		return known[strings.TrimSpace(s.SkillName)] && s.SourceScope == inventory.ScopeUser && s.ManifestPath != "" && agentskills.Managed(filepath.Dir(s.ManifestPath))
 	}
 }
 

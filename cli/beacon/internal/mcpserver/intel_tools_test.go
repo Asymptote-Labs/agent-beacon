@@ -495,13 +495,19 @@ func TestBeaconSkillNeedsBeaconsMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 	isBeacon := beaconSkill(names)
-	if !isBeacon(inventory.Skill{SkillName: names[0], ManifestPath: filepath.Join(root, names[0], "SKILL.md")}) {
+	user := inventory.ScopeUser
+	if !isBeacon(inventory.Skill{SkillName: names[0], SourceScope: user, ManifestPath: filepath.Join(root, names[0], "SKILL.md")}) {
 		t.Error("Beacon's installed skill was not recognized")
 	}
-	if isBeacon(inventory.Skill{SkillName: names[0], ManifestPath: filepath.Join(other, "SKILL.md")}) {
+	if isBeacon(inventory.Skill{SkillName: names[0], SourceScope: user, ManifestPath: filepath.Join(other, "SKILL.md")}) {
 		t.Error("a skill that only shares Beacon's name was taken for Beacon's")
 	}
-	if isBeacon(inventory.Skill{SkillName: "pdf", ManifestPath: filepath.Join(root, names[0], "SKILL.md")}) {
+	if isBeacon(inventory.Skill{SkillName: "pdf", SourceScope: user, ManifestPath: filepath.Join(root, names[0], "SKILL.md")}) {
 		t.Error("a skill with another name was taken for Beacon's")
+	}
+	// Beacon never installs project skills, so a repository's skill directory is never read for
+	// a marker, even one that carries a genuine copy.
+	if isBeacon(inventory.Skill{SkillName: names[0], SourceScope: inventory.ScopeProject, ManifestPath: filepath.Join(root, names[0], "SKILL.md")}) {
+		t.Error("a project skill was taken for Beacon's")
 	}
 }
