@@ -70,12 +70,17 @@ func (s Spool) Append(lines [][]byte) (dropped int, err error) {
 	if len(lines) == 0 {
 		return 0, nil
 	}
-	err = s.withLock(func() error {
+	err = s.withLock(func() (err error) {
 		f, err := os.OpenFile(s.filePath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, SpoolFileMode)
 		if err != nil {
 			return err
 		}
-		defer f.Close()
+		// A close can report a write the kernel deferred; losing it would lose the line silently.
+		defer func() {
+			if cerr := f.Close(); cerr != nil && err == nil {
+				err = cerr
+			}
+		}()
 		info, err := f.Stat()
 		if err != nil {
 			return err
@@ -117,7 +122,7 @@ func (s Spool) Append(lines [][]byte) (dropped int, err error) {
 // batch and to remove what was sent, not while sending, so a hook spooling an event meanwhile is
 // not held up by a slow collector: appends only ever add to the end, and only the drainer removes
 // from the start.
-func (s Spool) Drain(maxLines int, send func(lines [][]byte) (int, error)) (int, error) {
+func (s Spool) Drain(maxLines int, send func(lines [][]byte) (int, error)) (n int, err error) {
 	if maxLines <= 0 {
 		return 0, nil
 	}
@@ -128,7 +133,7 @@ func (s Spool) Drain(maxLines int, send func(lines [][]byte) (int, error)) (int,
 	if err != nil {
 		return 0, err
 	}
-	defer drainFile.Close()
+	defer closeLock(drainFile, &err)
 	draining, err := filelock.TryExclusive(drainFile)
 	if err != nil {
 		return 0, nil
@@ -181,12 +186,12 @@ func (s Spool) Drain(maxLines int, send func(lines [][]byte) (int, error)) (int,
 	return processed, sendErr
 }
 
-func (s Spool) withLock(fn func() error) error {
+func (s Spool) withLock(fn func() error) (err error) {
 	lockFile, err := s.openLock()
 	if err != nil {
 		return err
 	}
-	defer lockFile.Close()
+	defer closeLock(lockFile, &err)
 	wait := s.LockWait
 	if wait <= 0 {
 		wait = defaultSpoolLockWait
@@ -253,4 +258,12 @@ func splitLines(data []byte) [][]byte {
 		out = append(out, line)
 	}
 	return out
+}
+
+// closeLock closes a lock file and reports a failure to close it when nothing else failed first.
+// Lock files are never written, so a close error loses no data, but it is still not dropped.
+func closeLock(f *os.File, err *error) {
+	if cerr := f.Close(); cerr != nil && *err == nil {
+		*err = cerr
+	}
 }
