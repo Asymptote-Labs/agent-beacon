@@ -58,7 +58,7 @@ func TestSystemLogIsNeverPrivate(t *testing.T) {
 	}
 }
 
-func TestTightenPrivateRuntimeLogArchives(t *testing.T) {
+func TestTightenRuntimeLogArchives(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix permission bits do not exist on Windows")
 	}
@@ -76,7 +76,7 @@ func TestTightenPrivateRuntimeLogArchives(t *testing.T) {
 	}
 	writeWorldWritable(path + ".1")
 	writeWorldWritable(path + ".2")
-	TightenPrivateRuntimeLogArchives(path, 5)
+	TightenRuntimeLogArchives(path, 5)
 	for _, archive := range []string{path + ".1", path + ".2"} {
 		info, err := os.Stat(archive)
 		if err != nil {
@@ -90,7 +90,7 @@ func TestTightenPrivateRuntimeLogArchives(t *testing.T) {
 	// A shared log's archives are left alone.
 	shared := filepath.Join(t.TempDir(), "runtime.jsonl")
 	writeWorldWritable(shared + ".1")
-	TightenPrivateRuntimeLogArchives(shared, 5)
+	TightenRuntimeLogArchives(shared, 5)
 	info, err := os.Stat(shared + ".1")
 	if err != nil {
 		t.Fatal(err)
