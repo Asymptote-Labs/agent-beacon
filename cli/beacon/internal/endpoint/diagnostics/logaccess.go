@@ -100,14 +100,26 @@ func checkLogAccess(cfg endpointconfig.Config, ingest localingest.Deliverer) Che
 			Message:  "the endpoint config says restricted but the log is not marked, so the collector will make it world-writable again at its next write",
 			Evidence: "log_access_marker_missing", Action: repairSystemAction}
 	}
-	switch err := ingest.Client.Available(); {
+	// A probe, not a look at the socket file: a collector that was killed leaves its socket behind,
+	// and only a connection tells a live collector from that.
+	probe := ingest.Client
+	probe.LogPath = path
+	switch err := probe.Probe(); {
 	case errors.Is(err, localingest.ErrNoSocket):
 		return Check{Name: name, Target: ingestSocketPath(ingest), Status: StatusFail, Severity: SeverityHigh,
 			Message:  "the collector is not serving the ingest socket, so hooks cannot record events and are spooling them; start the collector",
 			Evidence: "ingest_socket_missing", Action: repairSystemAction}
-	case err != nil:
+	case errors.Is(err, localingest.ErrUntrustedSocket):
 		return Check{Name: name, Target: ingestSocketPath(ingest), Status: StatusFail, Severity: SeverityHigh,
 			Message: "hooks will not send to the ingest socket: " + err.Error(), Evidence: "ingest_socket_untrusted", Action: repairSystemAction}
+	case errors.Is(err, localingest.ErrLogMismatch):
+		return Check{Name: name, Target: ingestSocketPath(ingest), Status: StatusFail, Severity: SeverityHigh,
+			Message:  "the collector behind the ingest socket writes a different runtime log, so hooks writing " + path + " are spooling their events",
+			Evidence: "ingest_log_mismatch", Action: repairSystemAction}
+	case err != nil:
+		return Check{Name: name, Target: ingestSocketPath(ingest), Status: StatusFail, Severity: SeverityHigh,
+			Message:  "the ingest socket is there but the collector does not answer (" + err.Error() + "), so hooks are spooling their events; restart the collector",
+			Evidence: "ingest_socket_unresponsive", Action: repairSystemAction}
 	}
 	if pending, err := ingest.Pending(path); err == nil && pending > 0 {
 		return Check{Name: name, Target: localingest.DefaultSpoolDir(), Status: StatusWarn, Severity: SeverityLow,

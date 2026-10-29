@@ -104,6 +104,39 @@ func TestLogAccessRestrictedWithAnUntrustedSocket(t *testing.T) {
 	}
 }
 
+// A collector that was killed leaves its socket behind. Only a connection tells that from a live
+// one, so doctor must not report the endpoint healthy.
+func TestLogAccessRestrictedWithADeadSocket(t *testing.T) {
+	markRestricted(t, true)
+	env := newIngestEnv(t, false)
+	l, err := localingest.Listen(env.sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.SetUnlinkOnClose(false)
+	_ = l.Close()
+	c := checkLogAccess(systemConfig(t, "restricted"), env.deliverer)
+	if c.Status != StatusFail || c.Evidence != "ingest_socket_unresponsive" {
+		t.Fatalf("check = %+v", c)
+	}
+}
+
+func TestLogAccessRestrictedWithACollectorForAnotherLog(t *testing.T) {
+	markRestricted(t, true)
+	env := newIngestEnv(t, false)
+	l, err := localingest.Listen(env.sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &localingest.Server{LogPath: "/elsewhere/runtime.jsonl", Append: func([]byte) error { return nil }}
+	go func() { _ = s.Serve(l) }()
+	t.Cleanup(func() { _ = s.Close() })
+	c := checkLogAccess(systemConfig(t, "restricted"), env.deliverer)
+	if c.Status != StatusFail || c.Evidence != "ingest_log_mismatch" {
+		t.Fatalf("check = %+v", c)
+	}
+}
+
 func TestLogAccessRestrictedAndHealthy(t *testing.T) {
 	markRestricted(t, true)
 	c := checkLogAccess(systemConfig(t, "restricted"), newIngestEnv(t, true).deliverer)

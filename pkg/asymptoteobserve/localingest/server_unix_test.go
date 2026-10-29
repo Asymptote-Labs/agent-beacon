@@ -345,7 +345,9 @@ func TestServerTakesAFinalLineWithoutANewline(t *testing.T) {
 	}
 }
 
-func TestServerDropsAConnectionThatStalls(t *testing.T) {
+// A client that stalls mid-batch gets a reply naming how far the server got, so it resends only the
+// rest; the line it cut short is not handled.
+func TestServerAnswersAConnectionThatStalls(t *testing.T) {
 	h := startServer(t, func(s *Server) { s.ConnTimeout = 150 * time.Millisecond })
 	conn, err := net.Dial("unix", h.path)
 	if err != nil {
@@ -359,11 +361,58 @@ func TestServerDropsAConnectionThatStalls(t *testing.T) {
 	}
 	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
 	reply, err := bufio.NewReader(conn).ReadBytes('\n')
-	if err == nil {
-		t.Fatalf("got reply %q from a stalled connection; want it closed without one", reply)
+	if err != nil {
+		t.Fatalf("no reply from a server whose client stalled: %v", err)
+	}
+	var resp Response
+	if err := json.Unmarshal(reply, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Processed != 1 || resp.Error != "busy" {
+		t.Fatalf("resp = %+v, want the one complete line reported and the rest left", resp)
 	}
 	if h.rec.count() != 1 {
 		t.Fatalf("wrote %d lines, want only the complete one", h.rec.count())
+	}
+}
+
+// The last line's write running past the budget must not cost the reply: the client would resend
+// a line already written.
+func TestASlowLastWriteStillGetsAReply(t *testing.T) {
+	h := startServer(t, func(s *Server) { s.ConnTimeout = 100 * time.Millisecond })
+	h.rec.setFail(func(int, []byte) error {
+		time.Sleep(250 * time.Millisecond)
+		return nil
+	})
+	resp, err := h.client.Send(lines(t, 1))
+	if err != nil || resp.Accepted != 1 {
+		t.Fatalf("Send = %+v, %v; want the written line acknowledged", resp, err)
+	}
+}
+
+// A batch bigger than the server's read buffer, whose budget runs out after the buffer is used,
+// gets a reply that matches what was written.
+func TestABusyServerReportsHowFarItGotPastItsReadBuffer(t *testing.T) {
+	h := startServer(t, func(s *Server) {
+		s.ConnTimeout = 150 * time.Millisecond
+		s.RateBytesPerSecond = -1
+	})
+	h.rec.setFail(func(int, []byte) error {
+		time.Sleep(40 * time.Millisecond)
+		return nil
+	})
+	big := make([][]byte, 12)
+	for i := range big {
+		big[i] = validLine(t, func(e map[string]interface{}) {
+			e["message"] = fmt.Sprintf("m-%d-%s", i, strings.Repeat("x", 20*1024))
+		})
+	}
+	resp, err := h.client.Send(big)
+	if err == nil || resp.Error != "busy" {
+		t.Fatalf("Send = %+v, %v; want the server to stop and report", resp, err)
+	}
+	if resp.Processed == 0 || resp.Processed != h.rec.count() {
+		t.Fatalf("processed %d, wrote %d; the reply must match what was written", resp.Processed, h.rec.count())
 	}
 }
 
@@ -854,5 +903,137 @@ func TestRemoveStale(t *testing.T) {
 	}
 	if err := RemoveStale(filepath.Join(dir, "absent")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestProbe(t *testing.T) {
+	h := startServer(t, func(s *Server) { s.LogPath = "/var/log/beacon-agent/runtime.jsonl" })
+	c := h.client
+	c.LogPath = "/var/log/beacon-agent/runtime.jsonl"
+	if err := c.Probe(); err != nil {
+		t.Fatalf("Probe of a live collector = %v", err)
+	}
+	if h.rec.count() != 0 {
+		t.Fatal("a probe wrote something")
+	}
+	c.LogPath = "/tmp/other.jsonl"
+	if err := c.Probe(); !errors.Is(err, ErrLogMismatch) {
+		t.Fatalf("Probe for another log = %v", err)
+	}
+	stale := filepath.Join(shortTempDir(t), "run", "ingest.sock")
+	l, err := Listen(stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.SetUnlinkOnClose(false)
+	_ = l.Close()
+	dead := Client{SocketPath: stale, TrustedOwner: os.Geteuid(), Timeout: time.Second}
+	if err := dead.Available(); err != nil {
+		t.Fatalf("fixture: Available on a dead socket = %v", err)
+	}
+	if err := dead.Probe(); err == nil || errors.Is(err, ErrNoSocket) {
+		t.Fatalf("Probe of a dead socket = %v; want a connection failure", err)
+	}
+}
+
+// The client dials the path it checked, with links resolved, so a link it passed through cannot
+// be repointed between the check and the dial.
+func TestClientDialsTheResolvedSocket(t *testing.T) {
+	h := startServer(t, nil)
+	link := filepath.Join(shortTempDir(t), "linkdir")
+	if err := os.Symlink(filepath.Dir(h.path), link); err != nil {
+		t.Fatal(err)
+	}
+	c := h.client
+	c.SocketPath = filepath.Join(link, filepath.Base(h.path))
+	socket, err := checkSocket(c.SocketPath, os.Geteuid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := filepath.EvalSymlinks(h.path)
+	if socket != want {
+		t.Fatalf("checkSocket returned %q, want the resolved %q", socket, want)
+	}
+	if _, err := c.Send(lines(t, 1)); err != nil || h.rec.count() != 1 {
+		t.Fatalf("Send through a linked directory = %v", err)
+	}
+}
+
+func TestServeClosesItsListenerWhenAcceptFails(t *testing.T) {
+	dir := filepath.Join(shortTempDir(t), "run")
+	l, err := Listen(filepath.Join(dir, "ingest.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	failing := &failingListener{Listener: l, err: errors.New("accept: something permanent")}
+	s := &Server{Append: func([]byte) error { return nil }}
+	if err := s.Serve(failing); err == nil || errors.Is(err, ErrServerClosed) {
+		t.Fatalf("Serve = %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "ingest.sock")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("a server that stopped serving left its socket for clients to queue on")
+	}
+}
+
+func TestServeRetriesATemporaryAcceptError(t *testing.T) {
+	dir := filepath.Join(shortTempDir(t), "run")
+	sock := filepath.Join(dir, "ingest.sock")
+	l, err := Listen(sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failing := &failingListener{Listener: l, err: syscall.EMFILE, times: 3}
+	rec := &recorder{}
+	s := &Server{Append: rec.append}
+	go func() { _ = s.Serve(failing) }()
+	t.Cleanup(func() { _ = s.Close() })
+	c := Client{SocketPath: sock, TrustedOwner: os.Geteuid(), Timeout: 2 * time.Second}
+	if _, err := c.Send(lines(t, 1)); err != nil || rec.count() != 1 {
+		t.Fatalf("Send after temporary accept errors = %v", err)
+	}
+}
+
+type failingListener struct {
+	net.Listener
+	mu    sync.Mutex
+	err   error
+	times int // 0 means always
+}
+
+func (l *failingListener) Accept() (net.Conn, error) {
+	l.mu.Lock()
+	if l.times == 0 || l.times > 0 {
+		if l.times > 0 {
+			l.times--
+			if l.times == 0 {
+				l.times = -1
+			}
+		}
+		l.mu.Unlock()
+		return nil, &net.OpError{Op: "accept", Net: "unix", Err: l.err}
+	}
+	l.mu.Unlock()
+	return l.Listener.Accept()
+}
+
+func TestServerLogsAnAccountAtMostOncePerInterval(t *testing.T) {
+	var mu sync.Mutex
+	var logged []string
+	h := startServer(t, func(s *Server) {
+		s.Logf = func(format string, args ...interface{}) {
+			mu.Lock()
+			logged = append(logged, fmt.Sprintf(format, args...))
+			mu.Unlock()
+		}
+	})
+	for i := 0; i < 20; i++ {
+		if _, err := rawExchange(t, h.path, "no preamble\n"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(logged) != 1 {
+		t.Fatalf("logged %d lines for one account's flood, want 1: %q", len(logged), logged)
 	}
 }

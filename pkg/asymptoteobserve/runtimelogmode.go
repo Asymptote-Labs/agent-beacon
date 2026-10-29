@@ -211,15 +211,14 @@ func settleRuntimeLogFileMode(path, logPath string, created bool, stat func(stri
 	return nil
 }
 
-// TightenRuntimeLogArchives narrows the rotated archives of a private or restricted log (path.1 ..
-// path.archives) the way SettleRuntimeLogFileMode narrows the live file. Archives rotated before
-// the log was private or restricted still carry the old shared mode, and they hold the same
-// content as the live file. Best effort, like SettleRuntimeLogFileMode on an existing file; a
-// shared log's archives are left alone.
-func TightenRuntimeLogArchives(path string, archives int) {
-	if !RuntimeLogIsPrivate(path) && !RuntimeLogAccessRestricted(path) {
-		return
-	}
+// SettleRuntimeLogArchives brings the rotated archives of a log (path.1 .. path.archives) to the
+// mode the log calls for, the way SettleRuntimeLogFileMode settles the live file, in both
+// directions: archives rotated before the log was private or restricted still carry the shared
+// mode and the same content as the live file, and archives rotated while a system log was
+// restricted must be readable again once it is shared, or every reader of the log's history stops
+// at them. Best effort, like SettleRuntimeLogFileMode on an existing file: only a file this process
+// owns is changed, and a link is never followed.
+func SettleRuntimeLogArchives(path string, archives int) {
 	for i := 1; i <= archives; i++ {
 		archive := fmt.Sprintf("%s.%d", path, i)
 		info, err := os.Lstat(archive)

@@ -1168,6 +1168,12 @@ STUB
 # The log directory carries grants an earlier version of the script (and the Jamf guide) left.
 cat >"$REPAIR_HOOKS_BIN/ls" <<'STUB'
 #!/bin/sh
+if [ "$1" = "-led" ] && [ -f "$2" ]; then
+  # A log an earlier shared-mode run granted the console user.
+  printf -- '-rw-r-----+ 1 root beacon-log 0 Jan  1 00:00 %s\n' "$2"
+  printf ' 0: user:hookuser allow read,write,append,readattr\n'
+  exit 0
+fi
 if [ "$1" = "-led" ]; then
   printf 'drwxr-xr-x+ 2 root wheel 64 Jan  1 00:00 %s\n' "$2"
   printf ' 0: user:olduser allow add_file,add_subdirectory\n'
@@ -1231,6 +1237,44 @@ if ! grep -qx "sudo -u hookuser mkdir -p $REPAIR_HOOKS_HOME/.beacon/endpoint/hoo
   echo "repair-hooks should create the hook directory as the console user and install hooks there" >&2
   exit 1
 fi
+# On a restricted endpoint (the marker beside the log) the script must leave the log's
+# root:beacon-log ownership and 0640 mode alone, grant nobody anything, and revoke the per-user
+# grants an earlier shared-mode run left on the log and its lock.
+REPAIR_HOOKS_RESTRICTED="$TMP_DIR/repair-hooks-restricted"
+mkdir -p "$REPAIR_HOOKS_RESTRICTED"
+printf 'restricted\n' >"$REPAIR_HOOKS_RESTRICTED/.beacon-log-access"
+: >"$REPAIR_HOOKS_RESTRICTED/runtime.jsonl"
+: >"$REPAIR_HOOKS_RESTRICTED/runtime.jsonl.lock"
+/bin/chmod 640 "$REPAIR_HOOKS_RESTRICTED/runtime.jsonl" "$REPAIR_HOOKS_RESTRICTED/runtime.jsonl.lock"
+: >"$REPAIR_HOOKS_CALLS"
+REPAIR_HOOKS_LOGS_SHARED="$REPAIR_HOOKS_LOGS"
+REPAIR_HOOKS_LOGS="$REPAIR_HOOKS_RESTRICTED"
+run_repair_hooks || {
+  echo "repair-hooks should succeed on a restricted endpoint" >&2
+  exit 1
+}
+REPAIR_HOOKS_LOGS="$REPAIR_HOOKS_LOGS_SHARED"
+for file in runtime.jsonl runtime.jsonl.lock; do
+  if [ "$(stat -f %Lp "$REPAIR_HOOKS_RESTRICTED/$file" 2>/dev/null || stat -c %a "$REPAIR_HOOKS_RESTRICTED/$file")" != 640 ]; then
+    echo "repair-hooks changed the mode of the restricted $file" >&2
+    exit 1
+  fi
+done
+if grep -q -e "^chown .*$REPAIR_HOOKS_RESTRICTED" -e '^acl +a' "$REPAIR_HOOKS_CALLS"; then
+  echo "repair-hooks must not chown or grant anything on a restricted log" >&2
+  exit 1
+fi
+if [ -e "$REPAIR_HOOKS_RESTRICTED/inventory_state.jsonl" ]; then
+  echo "repair-hooks must not create files in a restricted log directory" >&2
+  exit 1
+fi
+for file in runtime.jsonl runtime.jsonl.lock; do
+  if ! grep -qx "acl -a# 0 $REPAIR_HOOKS_RESTRICTED/$file" "$REPAIR_HOOKS_CALLS"; then
+    echo "repair-hooks should revoke the per-user grant on the restricted $file" >&2
+    exit 1
+  fi
+done
+
 # A ~/.beacon the user turned into a symlink is refused, not followed as root.
 REPAIR_HOOKS_VICTIM="$TMP_DIR/repair-hooks-victim"
 mkdir -p "$REPAIR_HOOKS_VICTIM"

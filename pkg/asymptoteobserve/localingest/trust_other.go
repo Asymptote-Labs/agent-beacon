@@ -9,7 +9,7 @@ import (
 
 // checkSocket always reports no socket off Unix: the restricted log access mode is not available
 // there, so writers keep appending to the log as before.
-func checkSocket(string, int) error { return ErrNoSocket }
+func checkSocket(string, int) (string, error) { return "", ErrNoSocket }
 
 // RemoveStale has nothing to remove off Unix.
 func RemoveStale(string) error { return nil }
