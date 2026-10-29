@@ -270,7 +270,7 @@ sudo dseditgroup -o edit -a <account> -t user beacon-log
 
 The log format and every event field stay the same, so a SIEM or forwarder that parses the log needs no change. Shippers that run as root, and the Beacon Cloud forwarder, keep working without one.
 
-The mode is recorded in `config.json` as `log_access`, and `beacon endpoint repair` and package upgrades keep it. To go back, run `sudo beacon endpoint repair --system --log-access shared`; the log is writable by every account again at once. For package installs, set `BEACON_LOG_ACCESS=restricted` in the environment of the package's install script.
+The mode is recorded in `config.json` as `log_access`, and in a root-owned `.beacon-log-access` marker beside the log. `beacon endpoint repair`, package upgrades, the Jamf `repair-hooks.sh` policy, and a reinstall after `uninstall --keep-logs` keep it. To go back, run `sudo beacon endpoint repair --system --log-access shared`; the log is writable by every account again at once. For package installs, set `BEACON_LOG_ACCESS=restricted` in the environment of the package's install script.
 
 What this does and does not change:
 
@@ -278,7 +278,7 @@ What this does and does not change:
 - Every event that arrives over the socket records the account that sent it, as the operating system reports it. A user still controls their own agent, so they can still send events of their own choosing, including ones that name another session's id, but always under their own account.
 - The collector's OTLP ports on `127.0.0.1` still accept telemetry from any local process, as they do in the shared mode. Agents that export over OTLP, such as Claude Code and Codex, use them. Events that arrive that way are not attributed by the operating system.
 
-While the endpoint is restricted, commands that read the system log as the person running them (`beacon endpoint dashboard`, `beacon scan`, `beacon traces`, and the session lookups in `beacon share`, `beacon handoff` and `beacon git` commit linking) see it only when run as root or by a `beacon-log` member. [`beacon endpoint doctor`](/cli/endpoint-doctor#runtime_log_access) reports a collector that is not serving the socket, and any events waiting in the caller's spool. Restricted log access is not available on Windows yet.
+While the endpoint is restricted, commands that read the system log as the person running them (`beacon endpoint dashboard`, `beacon scan`, `beacon traces`, and the session lookups in `beacon share`, `beacon handoff` and `beacon git` commit linking) see it only when run as root or by a `beacon-log` member. [`beacon endpoint doctor`](/cli/endpoint-doctor#runtime_log_access) connects to the socket and reports a collector that is not answering on it, including one that was killed and left its socket behind, and any events waiting in the caller's spool. Restricted log access is not available on Windows yet.
 
 ## Running user and system mode together
 

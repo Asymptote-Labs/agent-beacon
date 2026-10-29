@@ -43,6 +43,8 @@ System mode only. Reports whether the system log is shared or [restricted](/cli/
 | `log_access_shared` | ok | Hooks append to the log directly; any local account can modify or read it |
 | `log_access_restricted` | ok | Only the collector writes the log; root and the `beacon-log` group read it |
 | `ingest_socket_missing` | fail | The collector is not serving `/var/run/beacon-agent/ingest.sock`, so hooks are spooling their events instead of recording them. Start or repair the collector |
+| `ingest_socket_unresponsive` | fail | The socket is there but nothing answers on it, usually because the collector was killed and left it behind. Doctor sends an empty batch rather than only checking the file. Restart the collector |
+| `ingest_log_mismatch` | fail | The collector behind the socket writes a different runtime log from the one in `config.json`, so hooks are spooling their events |
 | `ingest_socket_untrusted` | fail | Something is at the socket path that root does not own, so hooks will not send to it |
 | `log_access_marker_missing` | fail | `config.json` says restricted but the log is not marked, so the collector would widen it again. Run `sudo beacon endpoint repair --system` |
 | `log_access_mismatch` | warn | The log is marked restricted but `config.json` says shared, so hooks cannot append |
