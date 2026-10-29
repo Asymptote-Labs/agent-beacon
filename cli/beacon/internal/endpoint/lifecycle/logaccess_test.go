@@ -2,6 +2,8 @@ package lifecycle
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -10,6 +12,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/loggroup"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // A repair or package upgrade re-runs install, which rebuilds config.json. A restricted log that
@@ -29,6 +32,28 @@ func TestBuildConfigWithoutAnExistingConfigIsShared(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	if cfg := buildConfig(InstallOptions{UserMode: true}); cfg.LogAccess != "" || cfg.RestrictedLogAccess() {
 		t.Fatalf("a fresh install has log access %q", cfg.LogAccess)
+	}
+}
+
+// uninstall --keep-logs removes config.json but keeps the log, its archives and the marker. A
+// reinstall without --log-access must keep them restricted rather than share them.
+func TestBuildConfigWithoutAConfigKeepsTheModeTheMarkerRecords(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	if _, err := endpointconfig.Load(false); err == nil {
+		t.Skip("this machine has a system endpoint config")
+	}
+	logPath := filepath.Join(t.TempDir(), "beacon-agent", "runtime.jsonl")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := asymptoteobserve.SetRuntimeLogAccess(logPath, asymptoteobserve.LogAccessRestricted); err != nil {
+		t.Fatal(err)
+	}
+	if cfg := buildConfig(InstallOptions{LogPath: logPath}); cfg.LogAccess != asymptoteobserve.LogAccessRestricted {
+		t.Fatalf("LogAccess = %q, want the marker's restricted mode kept", cfg.LogAccess)
+	}
+	if cfg := buildConfig(InstallOptions{LogPath: logPath, LogAccess: "shared"}); cfg.LogAccess != "shared" {
+		t.Fatalf("LogAccess = %q, want an explicit shared to win", cfg.LogAccess)
 	}
 }
 

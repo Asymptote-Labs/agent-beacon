@@ -1107,6 +1107,11 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 		// The log access mode is an operator's security choice; a repair or upgrade that dropped
 		// it would silently make a restricted log world-writable again.
 		cfg.LogAccess = existing.LogAccess
+	} else if !opts.UserMode && logIsRestricted(cfg.LogPath) {
+		// No config to carry the mode over from -- an uninstall with --keep-logs removed it, or it
+		// does not load -- but the root-owned marker beside the kept log still records restricted.
+		// Defaulting to shared here would make every kept event world-readable.
+		cfg.LogAccess = asymptoteobserve.LogAccessRestricted
 	}
 	if opts.LogAccess != "" {
 		cfg.LogAccess = opts.LogAccess
