@@ -36,9 +36,12 @@ package localingest
 
 import (
 	"bytes"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 
@@ -117,8 +120,10 @@ type Response struct {
 //
 // The returned line is re-encoded, so whatever bytes the peer sent, exactly one JSON object on one
 // line reaches the log: nothing the sender writes can break the log into extra lines or forge a
-// second event inside the first. Numbers are kept exactly as sent. event.id is always derived
-// from the stamped line, never taken from the sender.
+// second event inside the first. Numbers are kept exactly as sent.
+//
+// event.id follows the rules in stampEventID. A line that would only exceed MaxLineBytes because
+// of the id is written without one, as every writer does with an event at the size limit.
 //
 // lookupName resolves a uid to an account name and may be nil; a name it cannot resolve is left
 // out rather than taken from the event, which the sender wrote.
@@ -138,6 +143,15 @@ func StampLine(line []byte, peer Peer, lookupName func(uid uint32) string) ([]by
 		return nil, fmt.Errorf("%w: %v", ErrRejected, err)
 	}
 
+	info := event["event"].(map[string]interface{})
+	sentID, _ := info["id"].(string)
+	sentID = strings.TrimSpace(sentID)
+	delete(info, "id")
+	claimed, err := marshalLine(event)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrRejected, err)
+	}
+
 	user := map[string]interface{}{"uid": strconv.FormatUint(uint64(peer.UID), 10)}
 	if lookupName != nil {
 		if name := strings.TrimSpace(lookupName(peer.UID)); name != "" {
@@ -145,25 +159,71 @@ func StampLine(line []byte, peer Peer, lookupName func(uid uint32) string) ([]by
 		}
 	}
 	event["user"] = user
-
-	// The id is derived here, from the line as it will be written, never taken from the sender:
-	// otherwise one account could reuse another's event.id, and consumers that deduplicate by id
-	// would drop the real event as a repeat. Deterministic, so a resent line keeps its id.
-	info := event["event"].(map[string]interface{})
-	delete(info, "id")
-	unstamped, err := marshalLine(event)
+	withoutID, err := marshalLine(event)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRejected, err)
 	}
-	info["id"] = asymptoteobserve.EventIDForLine(unstamped)
+	if len(withoutID) > MaxLineBytes {
+		return nil, fmt.Errorf("%w: %d bytes after stamping is over the %d byte limit", ErrRejected, len(withoutID), MaxLineBytes)
+	}
+	info["id"] = stampEventID(sentID, claimed, withoutID, peer)
 	out, err := marshalLine(event)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRejected, err)
 	}
 	if len(out) > MaxLineBytes {
-		return nil, fmt.Errorf("%w: %d bytes after stamping is over the %d byte limit", ErrRejected, len(out), MaxLineBytes)
+		// Forty-odd bytes of identity are not worth an event: the line goes without an id, which
+		// is what the hook and CLI writers do with an event at the limit.
+		return withoutID, nil
 	}
 	return out, nil
+}
+
+// stampEventID decides the event.id of a stamped line. claimed is the line as the sender wrote it
+// and withoutID the stamped line, both without an id.
+//
+//   - No id, or the id derived from the stamped line: that derived id. This is every hook event
+//     whose sender claimed the account it is, and every call-keyed id (EventIDForLine names a tool
+//     call by its session, action, target and call id, not by account, so the hook and OTLP paths
+//     give one call one id).
+//   - The id derived from the sender's own claims but not from the stamped line: the line named an
+//     account it is not, so the id is derived again from what is written.
+//   - Any other id is one the sender chose, as session-store importers do from their source
+//     records. It is kept stable for that account, so a re-swept record keeps its id, but scoped to
+//     the verified uid, so one account cannot write under an id another account's events carry.
+//
+// A call-keyed id stays as strong as the session and call ids it is built from: an account that
+// knows another session's ids can name the same call, as it could over the loopback OTLP port.
+func stampEventID(sentID string, claimed, withoutID []byte, peer Peer) string {
+	derived := asymptoteobserve.EventIDForLine(withoutID)
+	switch {
+	case sentID == "" || sentID == derived:
+		return derived
+	case sentID == asymptoteobserve.EventIDForLine(claimed):
+		return derived
+	default:
+		return scopedEventID(peer.UID, sentID)
+	}
+}
+
+// scopedIDNamespace scopes a sender-chosen event.id to the account that sent it. Like the event id
+// namespace, it is a contract: changing it renames every scoped id written through the socket.
+var scopedIDNamespace = [16]byte{0x6b, 0x2d, 0x1f, 0x9a, 0x4c, 0x37, 0x4e, 0x0b, 0x9f, 0x51, 0x8e, 0x2a, 0x77, 0xc3, 0x05, 0xd4}
+
+// scopedEventID is a version 5 UUID of the uid and the id the sender chose.
+func scopedEventID(uid uint32, sentID string) string {
+	digest := sha1.New()
+	digest.Write(scopedIDNamespace[:])
+	io.WriteString(digest, strconv.FormatUint(uint64(uid), 10))
+	digest.Write([]byte{0})
+	io.WriteString(digest, sentID)
+	var id [16]byte
+	copy(id[:], digest.Sum(nil))
+	id[6] = (id[6] & 0x0f) | 0x50
+	id[8] = (id[8] & 0x3f) | 0x80
+	out := make([]byte, 32)
+	hex.Encode(out, id[:])
+	return fmt.Sprintf("%s-%s-%s-%s-%s", out[0:8], out[8:12], out[12:16], out[16:20], out[20:32])
 }
 
 func decodeObject(line []byte) (map[string]interface{}, error) {

@@ -72,6 +72,7 @@ type Server struct {
 	wg        sync.WaitGroup
 	buckets   map[uint32]*bucket
 	perUID    map[uint32]int
+	logStates map[uint32]*logState
 }
 
 // ErrServerClosed is returned by Serve after Close.
@@ -91,6 +92,7 @@ func (s *Server) Serve(l net.Listener) error {
 		return ErrServerClosed
 	}
 	defer s.untrack(l)
+	var retry time.Duration
 	for {
 		conn, err := l.Accept()
 		if err != nil {
@@ -101,12 +103,28 @@ func (s *Server) Serve(l net.Listener) error {
 			if errors.As(err, &ne) && ne.Timeout() {
 				continue
 			}
+			if temporaryAcceptError(err) {
+				// Out of descriptors or memory for a moment, as net/http treats it: wait and accept
+				// again rather than stop serving for good.
+				if retry == 0 {
+					retry = 5 * time.Millisecond
+				} else if retry *= 2; retry > time.Second {
+					retry = time.Second
+				}
+				s.logf(noUID, "accept failed, retrying in %v: %v", retry, err)
+				time.Sleep(retry)
+				continue
+			}
+			// Anything else ends serving. The listener is closed so the socket goes away and
+			// clients fall back at once, rather than queueing in a backlog nothing accepts.
+			_ = l.Close()
 			return err
 		}
+		retry = 0
 		select {
 		case s.slots <- struct{}{}:
 		default:
-			s.logf("refusing connection: %d already open", cap(s.slots))
+			s.logf(noUID, "refusing connection: %d already open", cap(s.slots))
 			_ = conn.Close()
 			continue
 		}
@@ -197,10 +215,46 @@ func (s *Server) isClosed() bool {
 	return s.closed
 }
 
-func (s *Server) logf(format string, args ...interface{}) {
-	if s.Logf != nil {
-		s.Logf(format, args...)
+// noUID keys log lines that belong to no one connection.
+const noUID = ^uint32(0)
+
+// logInterval is the least time between two log lines about one account. Any account can connect,
+// and each refused connection or rejected line is something to log, so without a bound one
+// account could fill the root collector's log as fast as it can send.
+const logInterval = 10 * time.Second
+
+type logState struct {
+	last       time.Time
+	suppressed int
+}
+
+func (s *Server) logf(uid uint32, format string, args ...interface{}) {
+	if s.Logf == nil {
+		return
 	}
+	now := time.Now()
+	s.mu.Lock()
+	if s.logStates == nil {
+		s.logStates = map[uint32]*logState{}
+	}
+	st := s.logStates[uid]
+	if st == nil {
+		st = &logState{}
+		s.logStates[uid] = st
+	}
+	if !st.last.IsZero() && now.Sub(st.last) < logInterval {
+		st.suppressed++
+		s.mu.Unlock()
+		return
+	}
+	suppressed := st.suppressed
+	st.last, st.suppressed = now, 0
+	s.mu.Unlock()
+	msg := fmt.Sprintf(format, args...)
+	if suppressed > 0 {
+		msg = fmt.Sprintf("%s (and %d more like it from this account since the last report)", msg, suppressed)
+	}
+	s.Logf("%s", msg)
 }
 
 func (s *Server) handle(conn net.Conn) {
@@ -208,21 +262,24 @@ func (s *Server) handle(conn net.Conn) {
 	if timeout <= 0 {
 		timeout = defaultConnTimeout
 	}
+	// Reads may run past the budget by replyGrace: a read that fails at the budget itself would
+	// end the connection with no reply after lines were already written, and the client would
+	// send them all again. Past the budget the loop below stops handling lines and replies.
 	budget := time.Now().Add(timeout)
-	_ = conn.SetDeadline(budget)
+	_ = conn.SetDeadline(budget.Add(replyGrace))
 
 	unixConn, ok := conn.(*net.UnixConn)
 	if !ok {
-		s.logf("refusing connection: not a Unix socket")
+		s.logf(noUID, "refusing connection: not a Unix socket")
 		return
 	}
 	peer, err := peerCredentials(unixConn)
 	if err != nil {
-		s.logf("refusing connection: %v", err)
+		s.logf(noUID, "refusing connection: %v", err)
 		return
 	}
 	if !s.acquireUID(peer.UID) {
-		s.logf("refusing connection from uid %d: it already has the most connections one account may hold", peer.UID)
+		s.logf(peer.UID, "refusing connection from uid %d: it already has the most connections one account may hold", peer.UID)
 		return
 	}
 	defer s.releaseUID(peer.UID)
@@ -237,7 +294,7 @@ func (s *Server) handle(conn net.Conn) {
 	r := bufio.NewReaderSize(conn, MaxLineBytes+2)
 	preamble, tooLong, err := readLine(r, len(Preamble)+1)
 	if err != nil && !errors.Is(err, io.EOF) || tooLong || string(preamble) != Preamble {
-		s.logf("refusing connection from uid %d: no %s preamble", peer.UID, Preamble)
+		s.logf(peer.UID, "refusing connection from uid %d: no %s preamble", peer.UID, Preamble)
 		writeResponse(conn, Response{Error: "expected " + Preamble})
 		return
 	}
@@ -248,7 +305,7 @@ func (s *Server) handle(conn net.Conn) {
 	var header Header
 	switch {
 	case err != nil && !errors.Is(err, io.EOF), tooLong, json.Unmarshal(headerLine, &header) != nil:
-		s.logf("refusing connection from uid %d: no valid header", peer.UID)
+		s.logf(peer.UID, "refusing connection from uid %d: no valid header", peer.UID)
 		writeResponse(conn, Response{Error: "expected a header"})
 		return
 	case s.LogPath != "" && !sameLog(header.Log, s.LogPath):
@@ -260,11 +317,18 @@ func (s *Server) handle(conn net.Conn) {
 	for {
 		line, tooLong, err := readLine(r, MaxLineBytes)
 		if err != nil && !errors.Is(err, io.EOF) {
-			// A read that failed part way (a timeout, a reset) may have cut the last line short, so
-			// it is not handled, and the client gets no reply: it keeps the whole batch and sends it
-			// again. A line written before the failure may then appear twice, under the same
-			// deterministic event.id, which is the trade the log already makes on any retried write.
-			s.logf("connection from uid %d ended early: %v", peer.UID, err)
+			var ne net.Error
+			if errors.As(err, &ne) && ne.Timeout() {
+				// Out of time with the rest of the batch unread, or a line cut short: whatever is
+				// unread is not handled, and the reply says how far this got so the client resends
+				// only the rest.
+				if resp.Error == "" {
+					resp.Error = "busy"
+				}
+				break
+			}
+			// The connection broke (a reset): there is nobody to reply to.
+			s.logf(peer.UID, "connection from uid %d ended early: %v", peer.UID, err)
 			return
 		}
 		if len(line) == 0 && !tooLong {
@@ -285,13 +349,12 @@ func (s *Server) handle(conn net.Conn) {
 			// Out of time: stop writing and say how far this got, while the client still waits.
 			resp.Error = "busy"
 			stopped = true
-			_ = conn.SetDeadline(time.Now().Add(replyGrace))
 		case lines > MaxLinesPerConn:
 			resp.Error = fmt.Sprintf("batch is over %d lines", MaxLinesPerConn)
 			stopped = true
 		case tooLong:
 			resp.Rejected++
-			s.logf("rejected an event from uid %d: over %d bytes", peer.UID, MaxLineBytes)
+			s.logf(peer.UID, "rejected an event from uid %d: over %d bytes", peer.UID, MaxLineBytes)
 		case !s.allow(peer.UID, len(line)):
 			resp.Error = "rate limited"
 			stopped = true
@@ -299,7 +362,7 @@ func (s *Server) handle(conn net.Conn) {
 			stamped, stampErr := StampLine(line, peer, lookup)
 			if stampErr != nil {
 				resp.Rejected++
-				s.logf("rejected an event from uid %d: %v", peer.UID, stampErr)
+				s.logf(peer.UID, "rejected an event from uid %d: %v", peer.UID, stampErr)
 				break
 			}
 			if appendErr := s.Append(stamped); appendErr != nil {
@@ -308,7 +371,7 @@ func (s *Server) handle(conn net.Conn) {
 					break
 				}
 				resp.Error = "write failed"
-				s.logf("could not write an event from uid %d: %v", peer.UID, appendErr)
+				s.logf(peer.UID, "could not write an event from uid %d: %v", peer.UID, appendErr)
 				stopped = true
 				break
 			}
@@ -319,9 +382,7 @@ func (s *Server) handle(conn net.Conn) {
 		}
 	}
 	resp.Processed = resp.Accepted + resp.Rejected
-	if time.Now().After(budget) {
-		_ = conn.SetWriteDeadline(time.Now().Add(replyGrace))
-	}
+	_ = conn.SetWriteDeadline(time.Now().Add(replyGrace))
 	writeResponse(conn, resp)
 }
 
