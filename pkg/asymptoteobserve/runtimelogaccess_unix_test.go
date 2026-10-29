@@ -300,7 +300,7 @@ func TestTightenRestrictedRuntimeLogArchives(t *testing.T) {
 		}
 	}
 	writeArchives()
-	TightenRuntimeLogArchives(log, 3)
+	SettleRuntimeLogArchives(log, 3)
 	for i := 1; i <= 3; i++ {
 		if info, _ := os.Stat(fmt.Sprintf("%s.%d", log, i)); info.Mode().Perm() != 0o666 {
 			t.Fatalf("a shared log's archive %d was changed to %o", i, info.Mode().Perm())
@@ -310,7 +310,7 @@ func TestTightenRestrictedRuntimeLogArchives(t *testing.T) {
 	if err := SetRuntimeLogAccess(log, LogAccessRestricted); err != nil {
 		t.Fatal(err)
 	}
-	TightenRuntimeLogArchives(log, 3)
+	SettleRuntimeLogArchives(log, 3)
 	for i := 1; i <= 3; i++ {
 		if info, _ := os.Stat(fmt.Sprintf("%s.%d", log, i)); info.Mode().Perm() != RestrictedRuntimeLogFileMode {
 			t.Fatalf("restricted archive %d mode = %o", i, info.Mode().Perm())
@@ -359,5 +359,31 @@ func TestARestrictedLogsLockIsRootsAlone(t *testing.T) {
 	// An archive is not a lock, whatever its name contains.
 	if got := fileModeFor(log+".1", log); got != RestrictedRuntimeLogFileMode {
 		t.Fatalf("archive mode = %o", got)
+	}
+}
+
+// Back to shared, archives rotated while the log was restricted are readable again.
+func TestSettleRuntimeLogArchivesWidensThemWhenTheLogIsSharedAgain(t *testing.T) {
+	trustMarkersFrom(t, os.Geteuid())
+	log := systemLog(t)
+	mkLogDir(t, log)
+	if err := SetRuntimeLogAccess(log, LogAccessRestricted); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 2; i++ {
+		path := fmt.Sprintf("%s.%d", log, i)
+		if err := os.WriteFile(path, nil, 0o640); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.Chmod(path, 0o640)
+	}
+	if err := SetRuntimeLogAccess(log, LogAccessShared); err != nil {
+		t.Fatal(err)
+	}
+	SettleRuntimeLogArchives(log, 2)
+	for i := 1; i <= 2; i++ {
+		if info, _ := os.Stat(fmt.Sprintf("%s.%d", log, i)); info.Mode().Perm() != SharedRuntimeLogFileMode {
+			t.Fatalf("archive %d mode = %o after the log went back to shared", i, info.Mode().Perm())
+		}
 	}
 }
