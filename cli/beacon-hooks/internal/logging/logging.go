@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/config"
@@ -528,7 +529,21 @@ func writeEndpointJSONFile(path string, event map[string]interface{}) error {
 // EndpointIngest delivers to the system log through the collector when the endpoint is in the
 // restricted log access mode. Tests point it at a socket and spool of their own; nothing else
 // changes it.
-var EndpointIngest = localingest.Deliverer{}
+var EndpointIngest = defaultEndpointIngest()
+
+// defaultEndpointIngest is the real socket and the account's spool, except in a test binary, where
+// a test writing a system log as an ordinary account must never reach the machine's collector or
+// leave lines in the developer's own spool.
+func defaultEndpointIngest() localingest.Deliverer {
+	if !testing.Testing() {
+		return localingest.Deliverer{}
+	}
+	dir := filepath.Join(os.TempDir(), fmt.Sprintf("beacon-hooks-test-%d", os.Getpid()))
+	return localingest.Deliverer{
+		Client: localingest.Client{SocketPath: filepath.Join(dir, "no-collector.sock")},
+		Spool:  localingest.Spool{Dir: filepath.Join(dir, "spool")},
+	}
+}
 
 // deliverEndpointLine writes one finished line to the runtime log at path.
 //
