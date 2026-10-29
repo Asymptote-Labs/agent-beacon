@@ -84,3 +84,30 @@ Noise controls:
 The production implementation should live here and be included by
 `collector-builder/builder.yaml`.
 
+
+## beacon_ingest extension
+
+`beaconingestextension` (component type `beacon_ingest`) is the collector side of the restricted
+log access mode for system-mode endpoints. With it, the collector is the only writer of
+`/var/log/beacon-agent/runtime.jsonl`, which can then be `0640 root:beacon-log` instead of
+world-writable:
+
+- It listens on a Unix socket (`/var/run/beacon-agent/ingest.sock` by default) that hooks send
+  their events to (`pkg/asymptoteobserve/localingest`).
+- Each event's `user` is replaced with the sender's kernel-verified uid and account name, so a
+  user can describe their own sessions but cannot write an event under someone else's account.
+- Events are appended through `internal/runtimelog`, the same lock, rotation and file-mode handling
+  the exporter uses, so both writers can share one log.
+- Shutdown removes the socket; hooks then spool their events privately until the collector is back.
+
+```yaml
+extensions:
+  beacon_ingest:
+    log_path: /var/log/beacon-agent/runtime.jsonl
+    rotate_bytes: 10485760
+    rotate_archives: 5
+service:
+  extensions: [health_check, beacon_ingest]
+```
+
+`beacon endpoint install --system --log-access restricted` renders this; nothing else enables it.
