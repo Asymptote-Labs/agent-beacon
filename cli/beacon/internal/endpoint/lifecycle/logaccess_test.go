@@ -2,7 +2,6 @@ package lifecycle
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -43,12 +42,10 @@ func TestBuildConfigWithoutAConfigKeepsTheModeTheMarkerRecords(t *testing.T) {
 		t.Skip("this machine has a system endpoint config")
 	}
 	logPath := filepath.Join(t.TempDir(), "beacon-agent", "runtime.jsonl")
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := asymptoteobserve.SetRuntimeLogAccess(logPath, asymptoteobserve.LogAccessRestricted); err != nil {
-		t.Fatal(err)
-	}
+	// The real check trusts only a root-owned marker; this stands in for one beside logPath.
+	prev := logIsRestricted
+	logIsRestricted = func(path string) bool { return path == logPath }
+	t.Cleanup(func() { logIsRestricted = prev })
 	if cfg := buildConfig(InstallOptions{LogPath: logPath}); cfg.LogAccess != asymptoteobserve.LogAccessRestricted {
 		t.Fatalf("LogAccess = %q, want the marker's restricted mode kept", cfg.LogAccess)
 	}
