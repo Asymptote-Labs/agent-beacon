@@ -2,6 +2,7 @@ package beaconingestextension
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/localingest"
 )
@@ -47,6 +48,12 @@ func (c *Config) Validate() error {
 	}
 	if c.RotateBytes < 0 || c.RotateArchives < 0 || c.MaxConnections < 0 || c.MaxConnectionsPerUID < 0 || c.RateBurstBytes < 0 {
 		return errors.New("rotate_bytes, rotate_archives, max_connections, max_connections_per_uid and rate_burst_bytes must not be negative")
+	}
+	// Each line costs its size plus one against the burst, which is also the most the bucket ever
+	// holds: a burst below that could never let a maximum-size event through, and a spool whose
+	// oldest line is one would never drain.
+	if c.RateBurstBytes > 0 && c.RateBurstBytes < localingest.MaxLineBytes+1 {
+		return fmt.Errorf("rate_burst_bytes must be 0 (the default) or at least %d, the cost of one maximum-size event", localingest.MaxLineBytes+1)
 	}
 	return nil
 }
