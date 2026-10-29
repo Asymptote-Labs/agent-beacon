@@ -42,7 +42,20 @@ func (c Client) path() string {
 // writer decides whether the endpoint is in the restricted mode at all; ErrNoSocket means it is
 // not.
 func (c Client) Available() error {
-	return checkSocket(c.path(), c.TrustedOwner)
+	_, err := checkSocket(c.path(), c.TrustedOwner)
+	return err
+}
+
+// Probe asks the collector to answer an empty batch for LogPath. It is what tells a live
+// collector from a socket a killed one left behind, which Available cannot: that only looks at the
+// file. ErrNoSocket and ErrLogMismatch keep their meaning.
+func (c Client) Probe() error {
+	socket, err := checkSocket(c.path(), c.TrustedOwner)
+	if err != nil {
+		return err
+	}
+	_, err = c.sendBatch(socket, nil)
+	return err
 }
 
 // Send delivers lines in batches of at most MaxLinesPerConn and returns how far it got: lines
@@ -60,7 +73,8 @@ func (c Client) Send(lines [][]byte) (Response, error) {
 		}
 		cleaned[i] = line
 	}
-	if err := checkSocket(c.path(), c.TrustedOwner); err != nil {
+	socket, err := checkSocket(c.path(), c.TrustedOwner)
+	if err != nil {
 		return Response{}, err
 	}
 	var total Response
@@ -69,7 +83,7 @@ func (c Client) Send(lines [][]byte) (Response, error) {
 		if end > len(cleaned) {
 			end = len(cleaned)
 		}
-		resp, err := c.sendBatch(cleaned[start:end])
+		resp, err := c.sendBatch(socket, cleaned[start:end])
 		total.Accepted += resp.Accepted
 		total.Rejected += resp.Rejected
 		total.Processed += resp.Processed
@@ -81,12 +95,12 @@ func (c Client) Send(lines [][]byte) (Response, error) {
 	return total, nil
 }
 
-func (c Client) sendBatch(lines [][]byte) (Response, error) {
+func (c Client) sendBatch(socket string, lines [][]byte) (Response, error) {
 	timeout := c.Timeout
 	if timeout <= 0 {
 		timeout = DefaultClientTimeout
 	}
-	conn, err := net.DialTimeout("unix", c.path(), timeout)
+	conn, err := net.DialTimeout("unix", socket, timeout)
 	if err != nil {
 		return Response{}, fmt.Errorf("connect to %s: %w", c.path(), err)
 	}

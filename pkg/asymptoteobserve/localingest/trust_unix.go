@@ -24,24 +24,41 @@ const SocketMode os.FileMode = 0o666
 // must its directory, which nobody else may write; every directory above it must belong to root or
 // owner and be writable by nobody else unless it is sticky (as /tmp is), so the directory holding
 // the socket cannot be swapped for another.
-func checkSocket(path string, owner int) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return ErrNoSocket
-		}
-		return fmt.Errorf("%w: %v", ErrUntrustedSocket, err)
-	}
-	if info.Mode()&os.ModeSocket == 0 {
-		return fmt.Errorf("%w: %s is not a socket", ErrUntrustedSocket, path)
-	}
-	if uid, ok := fileOwner(info); !ok || uid != owner {
-		return fmt.Errorf("%w: %s is not owned by uid %d", ErrUntrustedSocket, path, owner)
-	}
+//
+// It returns the socket's path with every link in its directories resolved, and the caller dials
+// that path, never the one it was given: a link anywhere in the given path could otherwise be
+// repointed between this check and the dial, at a socket of someone else's choosing. Resolving
+// keeps the default path working, whose /var/run is a root-owned link.
+func checkSocket(path string, owner int) (string, error) {
 	dir, err := filepath.EvalSymlinks(filepath.Dir(path))
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrUntrustedSocket, err)
+		if errors.Is(err, os.ErrNotExist) {
+			return "", ErrNoSocket
+		}
+		return "", fmt.Errorf("%w: %v", ErrUntrustedSocket, err)
 	}
+	resolved := filepath.Join(dir, filepath.Base(path))
+	info, err := os.Lstat(resolved)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", ErrNoSocket
+		}
+		return "", fmt.Errorf("%w: %v", ErrUntrustedSocket, err)
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		return "", fmt.Errorf("%w: %s is not a socket", ErrUntrustedSocket, path)
+	}
+	if uid, ok := fileOwner(info); !ok || uid != owner {
+		return "", fmt.Errorf("%w: %s is not owned by uid %d", ErrUntrustedSocket, path, owner)
+	}
+	if err := checkSocketDirs(dir, owner); err != nil {
+		return "", err
+	}
+	return resolved, nil
+}
+
+// checkSocketDirs checks dir, which holds the socket, and every directory above it.
+func checkSocketDirs(dir string, owner int) error {
 	for first := true; ; first = false {
 		info, err := os.Lstat(dir)
 		if err != nil {
