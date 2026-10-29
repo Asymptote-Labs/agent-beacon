@@ -327,11 +327,11 @@ Beacon supports more agents than these three. To add one, put its name in the `-
 
 ## Remove Beacon
 
-Run this as root on each Mac, for example from a Jamf policy script. It removes Beacon's LaunchDaemons, including the forwarder, `/opt/beacon`, Beacon's config and logs, and Beacon's entries in Claude Code, Codex, and Cursor settings. Then it removes the key:
+Run this as root on each Mac, for example from a Jamf policy script. It removes Beacon's LaunchDaemons, including the forwarder, `/opt/beacon`, Beacon's config and logs, and Beacon's entries in the Claude Code, Codex, and Cursor settings of every local user, whether or not anyone is logged in. Then it removes the key:
 
 ```bash
 install -m 0700 /opt/beacon/jamf/scripts/full-cleanup.sh /var/tmp/beacon-full-cleanup.sh
-/var/tmp/beacon-full-cleanup.sh
+BEACON_CLEAN_ALL_USERS=1 /var/tmp/beacon-full-cleanup.sh
 rm -f /var/tmp/beacon-full-cleanup.sh
 rm -f "/Library/Application Support/Your Organization/Secrets/beacon-gcs-writer.json"
 pkgutil --forget com.yourorg.beacon-gcs-writer-key
