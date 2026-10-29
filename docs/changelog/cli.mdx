@@ -67,6 +67,7 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 - **`curl … | sudo -E bash` is detected** · Piping a download into `sudo` with flags, such as NodeSource's `sudo -E bash -`, now raises curl-pipe-to-shell.
 - **Root-wipe commands are detected** · `rm -rf /*`, `rm -rf --no-preserve-root /` and `rm -r -f /` now raise recursive-root-delete.
 - **`beacon handoff resume --launch` no longer reports a started launch as cancelled** · When the new terminal picked up the launch just as the wait timed out, Beacon said the launch was cancelled while the runtime started anyway, so a retry could start a second one.
+- **`beacon endpoint gcs validate` prints a command that works** · Its follow-up told you to `gzip -dc` the uploaded object, but the GCS forwarder uploads plain `.jsonl`, so the command printed nothing.
 
 ## October 2026
 
