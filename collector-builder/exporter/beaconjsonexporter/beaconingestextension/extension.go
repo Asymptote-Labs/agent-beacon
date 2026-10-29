@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/component/componentstatus"
 	"go.uber.org/zap"
 
 	"github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/internal/runtimelog"
@@ -27,9 +28,10 @@ type ingest struct {
 	logger *zap.Logger
 	names  *nameCache
 
-	// listen and appendLine are the seams tests replace.
-	listen     func(path string) (*net.UnixListener, error)
-	appendLine func(path string, line []byte, rotateBytes int64, rotateArchives int) error
+	// listen, serveListener and appendLine are the seams tests replace.
+	listen        func(path string) (*net.UnixListener, error)
+	serveListener func(*net.UnixListener) net.Listener
+	appendLine    func(path string, line []byte, rotateBytes int64, rotateArchives int) error
 
 	mu     sync.Mutex
 	server *localingest.Server
@@ -52,7 +54,7 @@ func newIngest(cfg *Config, logger *zap.Logger) *ingest {
 // Start creates the socket and serves it in the background. A socket another running collector
 // still answers on, or a non-socket at the path, fails the start: two writers serving one log, or
 // a path someone put something else at, is a configuration problem to surface, not to work around.
-func (e *ingest) Start(context.Context, component.Host) error {
+func (e *ingest) Start(_ context.Context, host component.Host) error {
 	if !asymptoteobserve.RuntimeLogAccessRestricted(e.cfg.LogPath) {
 		// Harmless -- the log is simply also writable directly -- but not what install sets up,
 		// so it is worth a line in the collector's log.
@@ -71,12 +73,30 @@ func (e *ingest) Start(context.Context, component.Host) error {
 		MaxConnsPerUID:     e.cfg.MaxConnectionsPerUID,
 		RateBytesPerSecond: e.cfg.RateBytesPerSecond,
 		RateBurstBytes:     e.cfg.RateBurstBytes,
+		// One fixed message with the detail as a field, so the collector's log sampler groups
+		// these; the server already limits how often it reports any one account.
 		Logf: func(format string, args ...interface{}) {
-			e.logger.Warn(fmt.Sprintf(format, args...))
+			e.logger.Warn("beacon_ingest refused input", zap.String("detail", fmt.Sprintf(format, args...)))
 		},
 	}
 	done := make(chan error, 1)
-	go func() { done <- server.Serve(l) }()
+	go func() {
+		var served net.Listener = l
+		if e.serveListener != nil {
+			served = e.serveListener(l)
+		}
+		err := server.Serve(served)
+		if err != nil && !errors.Is(err, localingest.ErrServerClosed) {
+			// Serving stopped on its own. The server has closed its listener, so the socket is
+			// gone and hooks fall back to spooling at once; saying so loudly, and as a fatal
+			// status, gets the collector restarted instead of running on without its socket.
+			e.logger.Error("beacon_ingest stopped serving", zap.Error(err), zap.String("socket", e.socketPath()))
+			if host != nil {
+				componentstatus.ReportStatus(host, componentstatus.NewFatalErrorEvent(fmt.Errorf("beacon_ingest: %w", err)))
+			}
+		}
+		done <- err
+	}()
 	e.mu.Lock()
 	e.server, e.done = server, done
 	e.mu.Unlock()
@@ -95,9 +115,7 @@ func (e *ingest) Shutdown(context.Context) error {
 		return nil
 	}
 	err := server.Close()
-	if serveErr := <-done; serveErr != nil && !errors.Is(serveErr, localingest.ErrServerClosed) && err == nil {
-		err = serveErr
-	}
+	<-done // a serve error was reported when it happened
 	return err
 }
 

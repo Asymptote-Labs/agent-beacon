@@ -12,10 +12,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/component/componentstatus"
 	"go.opentelemetry.io/collector/extension"
 	"go.uber.org/zap"
 
@@ -322,5 +325,79 @@ func TestConfigValidate(t *testing.T) {
 	ok := Config{LogPath: "x", RateBytesPerSecond: -1}
 	if err := ok.Validate(); err != nil {
 		t.Errorf("a negative rate turns the bound off and must validate: %v", err)
+	}
+}
+
+type statusHost struct {
+	mu     sync.Mutex
+	events []*componentstatus.Event
+}
+
+func (h *statusHost) GetExtensions() map[component.ID]component.Component { return nil }
+
+func (h *statusHost) Report(e *componentstatus.Event) {
+	h.mu.Lock()
+	h.events = append(h.events, e)
+	h.mu.Unlock()
+}
+
+func (h *statusHost) fatal() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, e := range h.events {
+		if e.Status() == componentstatus.StatusFatalError {
+			return true
+		}
+	}
+	return false
+}
+
+type brokenListener struct{ *net.UnixListener }
+
+func (l brokenListener) Accept() (net.Conn, error) {
+	return nil, &net.OpError{Op: "accept", Net: "unix", Err: errors.New("permanently broken")}
+}
+
+// If serving stops on its own, the collector says so as a fatal status and the socket goes away,
+// so hooks fall back at once instead of queueing on a socket nothing accepts.
+func TestAServeFailureIsReportedAndTheSocketRemoved(t *testing.T) {
+	dir := shortDir(t)
+	cfg := createDefaultConfig()
+	cfg.SocketPath = filepath.Join(dir, "run", "ingest.sock")
+	cfg.LogPath = filepath.Join(dir, "log", "runtime.jsonl")
+	ext := newIngest(cfg, zap.NewNop())
+	ext.listen = func(path string) (*net.UnixListener, error) {
+		return localingest.Listen(path)
+	}
+	ext.serveListener = func(l *net.UnixListener) net.Listener { return brokenListener{l} }
+	host := &statusHost{}
+	if err := ext.Start(context.Background(), host); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ext.Shutdown(context.Background()) })
+	deadline := time.Now().Add(3 * time.Second)
+	for !host.fatal() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !host.fatal() {
+		t.Fatal("no fatal status was reported when serving stopped")
+	}
+	if _, err := os.Lstat(cfg.SocketPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the socket was left behind: %v", err)
+	}
+	if err := ext.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown after a serve failure = %v", err)
+	}
+}
+
+func TestRateBurstMustFitOneEvent(t *testing.T) {
+	for burst, ok := range map[float64]bool{
+		0: true, float64(localingest.MaxLineBytes + 1): true, 16 << 20: true,
+		65536: false, 1: false,
+	} {
+		err := (&Config{LogPath: "x", RateBurstBytes: burst}).Validate()
+		if (err == nil) != ok {
+			t.Errorf("rate_burst_bytes %v: Validate = %v", burst, err)
+		}
 	}
 }

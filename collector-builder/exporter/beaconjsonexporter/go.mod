@@ -7,6 +7,7 @@ toolchain go1.27.3
 require (
 	github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve v0.0.0
 	go.opentelemetry.io/collector/component v1.27.0
+	go.opentelemetry.io/collector/component/componentstatus v0.121.0
 	go.opentelemetry.io/collector/config/configretry v1.27.0
 	go.opentelemetry.io/collector/consumer v1.27.0
 	go.opentelemetry.io/collector/consumer/consumertest v0.121.0
@@ -41,7 +42,6 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/collector/component/componentstatus v0.121.0 // indirect
 	go.opentelemetry.io/collector/component/componenttest v0.121.0 // indirect
 	go.opentelemetry.io/collector/confmap v1.27.0 // indirect
 	go.opentelemetry.io/collector/consumer/consumererror v0.121.0 // indirect

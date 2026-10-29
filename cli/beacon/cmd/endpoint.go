@@ -711,7 +711,7 @@ func runEndpointVSCodeValidate() error {
 }
 
 func writeValidationEvent(cfg endpointconfig.Config, destination string) (string, error) {
-	return writer.AppendEvent(syntheticEvent(destination), writer.Options{Path: cfg.LogPath, UserMode: cfg.UserMode})
+	return writer.AppendEvent(syntheticEvent(destination), writer.Options{Path: cfg.LogPath, UserMode: cfg.UserMode, RequireWritten: true})
 }
 
 func loadOrDefaultConfig() endpointconfig.Config {

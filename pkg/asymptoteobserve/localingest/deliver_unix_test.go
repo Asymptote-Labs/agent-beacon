@@ -339,6 +339,104 @@ func TestWriteRetriesTheSocketOnceTheBackoffPasses(t *testing.T) {
 	}
 }
 
+// Hooks run as a new process per event, so a hung collector must cost the next process nothing
+// either: the failure is remembered in the account's spool directory, not only in memory.
+func TestASendFailureIsRememberedAcrossProcesses(t *testing.T) {
+	sock := filepath.Join(shortTempDir(t), "run", "ingest.sock")
+	l, err := Listen(sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	go func() { // accepts and never answers
+		var held []net.Conn
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				for _, h := range held {
+					_ = h.Close()
+				}
+				return
+			}
+			held = append(held, c)
+		}
+	}()
+	d := deliverer(t, sock)
+	d.Client.Timeout = 200 * time.Millisecond
+	d.FailureBackoff = 0
+	log := &directLog{refuse: true}
+	if err := d.Write(testLog, lines(t, 1)[0], log.append); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(d.Spool.Dir, sendFailureMarker)); err != nil {
+		t.Fatalf("the failure was not recorded: %v", err)
+	}
+	lastSendFailure.Store(0) // a new process
+	start := time.Now()
+	if err := d.Write(testLog, lines(t, 1)[0], log.append); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
+		t.Fatalf("the next process waited %v for the hung collector", elapsed)
+	}
+}
+
+func TestASuccessfulSendClearsTheRememberedFailure(t *testing.T) {
+	h := startServer(t, nil)
+	d := deliverer(t, h.path)
+	d.FailureBackoff = 0
+	marker := filepath.Join(d.Spool.Dir, sendFailureMarker)
+	if err := os.MkdirAll(d.Spool.Dir, SpoolDirMode); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-defaultFailureBackoff - time.Second)
+	if err := os.WriteFile(marker, nil, SpoolFileMode); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(marker, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Write(testLog, lines(t, 1)[0], (&directLog{}).append); err != nil {
+		t.Fatal(err)
+	}
+	if h.rec.count() != 1 {
+		t.Fatal("an expired failure kept the socket from being tried")
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the failure marker survived a successful send: %v", err)
+	}
+}
+
+// A collector that serves some other log will never take this line, so spooling it would only
+// strand it: the refusal is returned instead.
+func TestARefusedLineForALogTheCollectorDoesNotServeIsNotSpooled(t *testing.T) {
+	h := startServer(t, func(s *Server) { s.LogPath = testLog })
+	d := deliverer(t, h.path)
+	other := "/tmp/elsewhere/runtime.jsonl"
+	log := &directLog{refuse: true}
+	err := d.Write(other, lines(t, 1)[0], log.append)
+	if !errors.Is(err, fs.ErrPermission) {
+		t.Fatalf("Write = %v, want the refusal", err)
+	}
+	if n, _ := d.Pending(other); n != 0 {
+		t.Fatalf("Pending = %d; nothing will ever drain it", n)
+	}
+}
+
+func TestWriteOutcome(t *testing.T) {
+	h := startServer(t, nil)
+	if got, err := deliverer(t, h.path).WriteOutcome(testLog, lines(t, 1)[0], (&directLog{}).append); err != nil || got != Sent {
+		t.Fatalf("through the socket: %v, %v", got, err)
+	}
+	none := filepath.Join(shortTempDir(t), "none.sock")
+	if got, err := deliverer(t, none).WriteOutcome(testLog, lines(t, 1)[0], (&directLog{}).append); err != nil || got != Appended {
+		t.Fatalf("direct: %v, %v", got, err)
+	}
+	if got, err := deliverer(t, none).WriteOutcome(testLog, lines(t, 1)[0], (&directLog{refuse: true}).append); err != nil || got != Spooled {
+		t.Fatalf("refused: %v, %v", got, err)
+	}
+}
+
 func TestDefaultSpoolDir(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -145,6 +146,46 @@ func TestAppendEventSpoolsWhenARestrictedLogRefusesIt(t *testing.T) {
 	}
 	if n, _ := Ingest.Pending(logPath); n != 1 {
 		t.Fatalf("Pending = %d", n)
+	}
+}
+
+// A destination validation proves the log takes events, so an event that only reached the spool
+// must fail it rather than pass.
+func TestASpooledEventFailsAnAppendThatMustBeWritten(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root is never refused by a file mode")
+	}
+	logPath, _ := useIngest(t, false)
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(logPath, nil, 0o440); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AppendEvent(ingestEvent("validate"), Options{Path: logPath, RequireWritten: true}); !errors.Is(err, ErrSpooled) {
+		t.Fatalf("AppendEvent = %v, want ErrSpooled", err)
+	}
+}
+
+func TestAnAppendThatMustBeWrittenPassesThroughTheCollector(t *testing.T) {
+	logPath, stub := useIngest(t, true)
+	if _, err := AppendEvent(ingestEvent("validate"), Options{Path: logPath, RequireWritten: true}); err != nil {
+		t.Fatal(err)
+	}
+	if len(stub.lines()) != 1 {
+		t.Fatalf("collector received %d lines", len(stub.lines()))
+	}
+}
+
+// A test binary's default deliverer must never reach the machine's collector or the developer's
+// own spool.
+func TestTheDefaultIngestInATestStaysOffTheMachine(t *testing.T) {
+	d := defaultIngest()
+	if d.Client.SocketPath == "" || d.Client.SocketPath == localingest.DefaultSocketPath {
+		t.Fatalf("socket = %q", d.Client.SocketPath)
+	}
+	if !strings.HasPrefix(d.Spool.Dir, os.TempDir()) {
+		t.Fatalf("spool = %q", d.Spool.Dir)
 	}
 }
 

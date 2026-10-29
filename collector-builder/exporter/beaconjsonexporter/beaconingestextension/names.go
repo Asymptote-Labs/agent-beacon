@@ -2,6 +2,7 @@ package beaconingestextension
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"os/user"
 	"strconv"
@@ -62,21 +63,35 @@ func (c *nameCache) lookup(uid uint32) string {
 // consulted.
 var idCommands = []string{"/usr/bin/id", "/bin/id"}
 
+// firstExecutable is the first of paths that exists as an executable file.
+func firstExecutable(paths []string) string {
+	for _, path := range paths {
+		if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 {
+			return path
+		}
+	}
+	return ""
+}
+
 func resolveName(uid uint32) string {
 	id := strconv.FormatUint(uint64(uid), 10)
 	if u, err := user.LookupId(id); err == nil && validName(u.Username) {
 		return u.Username
 	}
-	for _, path := range idCommands {
-		ctx, cancel := context.WithTimeout(context.Background(), nameLookupTimeout)
-		out, err := exec.CommandContext(ctx, path, "-nu", id).Output()
-		cancel()
-		if err != nil {
-			continue
-		}
-		if name := strings.TrimSpace(string(out)); validName(name) {
-			return name
-		}
+	// id(1) is tried once: on merged-/usr systems both paths are the same binary, and running it
+	// again behind a directory service that did not answer would only double the wait.
+	path := firstExecutable(idCommands)
+	if path == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), nameLookupTimeout)
+	out, err := exec.CommandContext(ctx, path, "-nu", id).Output()
+	cancel()
+	if err != nil {
+		return ""
+	}
+	if name := strings.TrimSpace(string(out)); validName(name) {
+		return name
 	}
 	return ""
 }
