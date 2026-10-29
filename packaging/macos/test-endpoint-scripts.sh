@@ -763,6 +763,25 @@ case "$(ls -l "$TMP_DIR/s3-runtime.jsonl" | awk '{print $1}')" in
     exit 1
     ;;
 esac
+# A log in the restricted access mode is written only by the collector, so an installer that has
+# to create it creates it 0640 instead.
+mkdir -p "$TMP_DIR/restricted-logs"
+printf 'restricted\n' >"$TMP_DIR/restricted-logs/.beacon-log-access"
+BEACON_VECTOR_BIN="$FAKE_VECTOR" \
+BEACON_S3_FORWARDER_WRAPPER="$ROOT_DIR/packaging/macos/jamf/claude/s3/run-forwarder.sh" \
+BEACON_FORWARDER_BASE_DIR="$S3_FORWARDER_BASE" \
+BEACON_LAUNCHDAEMONS_DIR="$S3_LAUNCHDAEMONS_DIR" \
+BEACON_RUNTIME_LOG_PATHS="$TMP_DIR/restricted-logs/runtime.jsonl" \
+BEACON_NO_START="1" \
+AWS_REGION="us-west-2" \
+"$ROOT_DIR/packaging/macos/jamf/claude/s3/install-forwarder.sh" _ _ _ "beacon-test-bucket" "us-west-2" "beacon/claude/runtime/" "STANDARD_IA" "end" >/dev/null
+case "$(ls -l "$TMP_DIR/restricted-logs/runtime.jsonl" | awk '{print $1}')" in
+  -rw-r-----*) ;;
+  *)
+    echo "S3 forwarder installer should create a missing restricted runtime log as 0640" >&2
+    exit 1
+    ;;
+esac
 
 S3_FAKE_REPAIR="$TMP_DIR/fake-s3-repair-fails.sh"
 S3_FAKE_FORWARDER="$TMP_DIR/fake-s3-forwarder-runs.sh"
