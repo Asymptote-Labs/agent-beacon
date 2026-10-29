@@ -1,6 +1,9 @@
 package beaconjsonexporter
 
-import "fmt"
+import (
+	"fmt"
+	"path/filepath"
+)
 
 const (
 	defaultMaxEventBytes  = 64 * 1024
@@ -21,6 +24,10 @@ type Config struct {
 	// CaptureModelContext is the --claude-capture-model-context opt-in, the same setting the
 	// claude_api_body processor reads; see beaconevent.Options.
 	CaptureModelContext bool `mapstructure:"capture_model_context"`
+	// HookSocket, when set, is the Unix socket on which this exporter accepts finished lines from
+	// hooks and appends them to Path: restricted log mode, in which hooks cannot write the log
+	// themselves. See hooksocket.go.
+	HookSocket string `mapstructure:"hook_socket"`
 }
 
 func createDefaultConfig() *Config {
@@ -38,6 +45,9 @@ func (c *Config) Validate() error {
 	}
 	if c.MaxEventBytes <= 0 {
 		return fmt.Errorf("max_event_bytes must be positive")
+	}
+	if c.HookSocket != "" && !filepath.IsAbs(c.HookSocket) {
+		return fmt.Errorf("hook_socket must be an absolute path")
 	}
 	return nil
 }

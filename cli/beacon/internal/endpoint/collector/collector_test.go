@@ -16,6 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 func testConfig(t *testing.T) endpointconfig.Config {
@@ -425,4 +426,25 @@ func withCollectorDiscovery(t *testing.T, lookup func(string) (string, error), c
 
 func execLookPath(file string) (string, error) {
 	return exec.LookPath(file)
+}
+
+// Restricted log mode makes the beaconjson exporter the log's only writer, so it is the one that
+// listens for hook lines; the shared shape renders no socket at all.
+func TestConfigYAMLRendersTheHookSocketOnlyInRestrictedMode(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.UserMode = false
+	if got := ConfigYAML(cfg); strings.Contains(got, "hook_socket") {
+		t.Fatalf("shared-mode config renders a hook socket:\n%s", got)
+	}
+	cfg.LogAccess = asymptoteobserve.RestrictedLogAccess
+	cfg.Destinations = &endpointconfig.Destinations{SplunkHEC: &endpointconfig.SplunkHEC{Enabled: true, Endpoint: "https://splunk.example:8088/services/collector", Token: "t"}}
+	got := ConfigYAML(cfg)
+	beaconjson := got[strings.Index(got, "  beaconjson:"):strings.Index(got, "  splunk_hec:")]
+	if want := fmt.Sprintf("    hook_socket: %q\n", asymptoteobserve.DefaultRuntimeLogSocketPath); !strings.Contains(beaconjson, want) {
+		t.Fatalf("beaconjson block lacks %q:\n%s", want, beaconjson)
+	}
+	cfg.UserMode = true
+	if got := ConfigYAML(cfg); strings.Contains(got, "hook_socket") {
+		t.Fatal("a user-mode config renders a hook socket")
+	}
 }

@@ -34,6 +34,8 @@ beacon endpoint sentinel [command]
 | User mode | `~/.beacon/endpoint/logs/runtime.jsonl` |
 | System mode | `/var/log/beacon-agent/runtime.jsonl` |
 
+If the endpoint is in [restricted log mode](/cli/endpoint-install#restricted-log-mode), only root and the `beacon-log` group can read the system log. Add the account the Azure Monitor Agent runs as to `beacon-log` (on Linux, `sudo usermod -aG beacon-log <account>`) and restart the agent.
+
 ## beacon endpoint sentinel print-config
 
 `beacon endpoint sentinel print-config` prints the KQL transform used by the Microsoft Sentinel Data Collection Rule. The output starts with the Azure Monitor Agent file pattern selected from the active Beacon runtime log path.

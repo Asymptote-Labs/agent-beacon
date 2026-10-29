@@ -5,6 +5,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // The POSIX value must not move. /var/log/beacon-agent is where installed endpoints already write,
@@ -33,5 +35,19 @@ func TestSystemLogPathIsUnderTheSystemBaseDirOnWindows(t *testing.T) {
 	}
 	if got, want := SystemLogPath(), filepath.Join(SystemLogDir(), "runtime.jsonl"); got != want {
 		t.Errorf("SystemLogPath() = %q, want %q", got, want)
+	}
+}
+
+// The restricted-log marker every writer reads is defined in pkg/asymptoteobserve, which cannot
+// import this package, so the two spellings of the system config directory are held together here.
+func TestRestrictedLogMarkerIsInTheSystemBaseDir(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		if asymptoteobserve.RestrictedLogMarkerPath != "" {
+			t.Fatalf("restricted log mode has a marker on %s", runtime.GOOS)
+		}
+		return
+	}
+	if got := filepath.Dir(asymptoteobserve.RestrictedLogMarkerPath); got != SystemBaseDir() {
+		t.Fatalf("marker directory = %q, want SystemBaseDir() %q", got, SystemBaseDir())
 	}
 }

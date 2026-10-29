@@ -24,6 +24,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/hermessession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 var (
@@ -315,8 +316,11 @@ type InstallOptions struct {
 	IncludeRuntimeMetrics     bool
 	IncludeCodexSpans         bool
 	ClaudeCaptureModelContext bool
-	SplunkHEC                 *endpointconfig.SplunkHEC
-	FalconHEC                 *endpointconfig.FalconHEC
+	// RestrictedLog turns restricted log mode on (true) or off (false) for a system install; nil
+	// keeps what the existing config says, so a repair or package upgrade does not change it.
+	RestrictedLog *bool
+	SplunkHEC     *endpointconfig.SplunkHEC
+	FalconHEC     *endpointconfig.FalconHEC
 	// ServiceKind selects the service manager. Empty auto-detects: launchd on macOS,
 	// systemd when it is PID 1, otherwise a supervised child process.
 	ServiceKind service.Kind
@@ -569,8 +573,8 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		if err := sysacl.SecureSystemTree(root, filepath.Dir(cfg.LogPath)); err != nil {
 			return InstallResult{}, fmt.Errorf("secure %s: %w", root, err)
 		}
-		if err := writer.EnsureSystemLogWritable(cfg.LogPath); err != nil {
-			return InstallResult{}, fmt.Errorf("prepare the log directory: %w", err)
+		if err := prepareSystemLog(cfg); err != nil {
+			return InstallResult{}, err
 		}
 	}
 
@@ -794,6 +798,11 @@ func Uninstall(opts UninstallOptions) error {
 	manifest, _ := ReadManifest(cfg.UserMode)
 	if !opts.KeepConfig {
 		restoreBackups(manifest.Backups)
+	}
+	// Out of restricted log mode, except for repair, whose reinstall writes the marker again and
+	// would otherwise leave hooks a window in which they write a file they cannot open.
+	if !cfg.UserMode && !opts.KeepManagedIngest {
+		fail("leave restricted log mode", asymptoteobserve.RemoveRestrictedLogMarker())
 	}
 	// Repair (KeepManagedIngest) keeps config.json so the reinstall carries over what connect,
 	// disconnect and the operator own in it (managed_ingest, inventory, auto_update); without it
@@ -1066,6 +1075,18 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 		if existing.Inventory != nil {
 			cfg.Inventory = existing.Inventory
 		}
+		// Restricted log mode is the operator's choice, made once with --restricted-log; the
+		// re-install every repair and package upgrade runs must not quietly reopen the log.
+		cfg.LogAccess = existing.LogAccess
+	}
+	if opts.RestrictedLog != nil {
+		cfg.LogAccess = ""
+		if *opts.RestrictedLog {
+			cfg.LogAccess = asymptoteobserve.RestrictedLogAccess
+		}
+	}
+	if cfg.UserMode {
+		cfg.LogAccess = ""
 	}
 	if opts.Harnesses != nil {
 		cfg.Harnesses = opts.Harnesses
@@ -1225,6 +1246,9 @@ func preflight(cfg endpointconfig.Config, startService bool, kind service.Kind) 
 	if !cfg.UserMode && !HasSystemPrivileges() {
 		return fmt.Errorf("system install needs elevated privileges; %s, or omit --system for the default user install",
 			SystemPrivilegeHint())
+	}
+	if cfg.RestrictedLog() && !RestrictedLogSupported() {
+		return fmt.Errorf("--restricted-log is supported on Linux and macOS only")
 	}
 	if err := endpointconfig.ValidateCollectorPorts(cfg.Collector); err != nil {
 		return err

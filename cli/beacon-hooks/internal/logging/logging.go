@@ -264,6 +264,10 @@ func reportEndpointWriteFailure(w io.Writer, platform, path string, err error) {
 		fmt.Fprintln(w, "beacon-hooks: run `beacon endpoint dsh sync` outside the harness to backfill this session from DeepSeek's own session store, and `beacon endpoint doctor` to check hook capture.")
 		return
 	}
+	if _, restricted := asymptoteobserve.RestrictedLogFor(path); restricted {
+		fmt.Fprintln(w, "beacon-hooks: this machine's log is in restricted mode, so hooks send events to the Beacon collector instead of writing the file; check that the collector service is running with `sudo beacon endpoint status --system`, then `sudo beacon endpoint doctor --system`.")
+		return
+	}
 	fmt.Fprintln(w, "beacon-hooks: check that this user can write that path (the hook may be running in a sandbox that confines writes), then run `beacon endpoint doctor`.")
 }
 
@@ -481,9 +485,12 @@ func firstEnv(keys ...string) string {
 var writeEndpointJSON = writeEndpointJSONFile
 
 func writeEndpointJSONFile(path string, event map[string]interface{}) error {
-	_, dirMode, _ := asymptoteobserve.RuntimeLogModes(path)
-	if err := os.MkdirAll(filepath.Dir(path), dirMode); err != nil {
-		return err
+	restricted, isRestricted := asymptoteobserve.RestrictedLogFor(path)
+	if !isRestricted {
+		_, dirMode, _ := asymptoteobserve.RuntimeLogModes(path)
+		if err := os.MkdirAll(filepath.Dir(path), dirMode); err != nil {
+			return err
+		}
 	}
 	data, err := json.Marshal(sanitizeEndpointMap(event))
 	if err != nil {
@@ -521,7 +528,17 @@ func writeEndpointJSONFile(path string, event map[string]interface{}) error {
 	if data, err = withEndpointEventID(event, data); err != nil {
 		return err
 	}
+	if isRestricted {
+		// A restricted log is the root collector's alone: this user can neither read nor write it,
+		// so the line goes to the collector, which deduplicates, rotates and appends it.
+		return sendEndpointLine(restricted.Socket, append(data, '\n'))
+	}
 	return appendEndpointJSONL(path, append(data, '\n'), defaultEndpointRotateBytes, defaultEndpointRotateArchives)
+}
+
+// sendEndpointLine hands a line to the collector of a restricted log. A variable for tests.
+var sendEndpointLine = func(socket string, line []byte) error {
+	return asymptoteobserve.SendRuntimeLogLine(socket, line, asymptoteobserve.RuntimeLogSocketTimeout)
 }
 
 // withEndpointEventID fills event.id on an event assembled as a map and returns

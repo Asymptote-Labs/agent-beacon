@@ -12,6 +12,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/brewpath"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 const (
@@ -169,6 +170,12 @@ func ConfigYAML(cfg endpointconfig.Config) string {
 		modelContextYAML = "    capture_model_context: true\n"
 		grpcLimitYAML = "        max_recv_msg_size_mib: 32\n"
 	}
+	// Restricted log mode: hooks cannot write the log, so the exporter accepts their lines on the
+	// hook socket and is the log's only writer.
+	hookSocketYAML := ""
+	if cfg.RestrictedLog() {
+		hookSocketYAML = fmt.Sprintf("    hook_socket: %q\n", asymptoteobserve.DefaultRuntimeLogSocketPath)
+	}
 	return fmt.Sprintf(`receivers:
   otlp:
     protocols:
@@ -216,7 +223,7 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, %sbatch]
       exporters: %s
-`, cfg.Collector.GRPCPort, grpcLimitYAML, cfg.Collector.HTTPPort, modelContextYAML, privacyYAML, cfg.LogPath, runtimeMetricsYAML+codexSpansYAML+modelContextYAML+splunkExporter+falconExporter, endpointconfig.HealthCheckPort(cfg.Collector), privacyStep, exporters, privacyStep, exporters, privacyStep, exporters)
+`, cfg.Collector.GRPCPort, grpcLimitYAML, cfg.Collector.HTTPPort, modelContextYAML, privacyYAML, cfg.LogPath, runtimeMetricsYAML+codexSpansYAML+modelContextYAML+hookSocketYAML+splunkExporter+falconExporter, endpointconfig.HealthCheckPort(cfg.Collector), privacyStep, exporters, privacyStep, exporters, privacyStep, exporters)
 }
 
 func splunkHECYAML(cfg endpointconfig.Config) string {

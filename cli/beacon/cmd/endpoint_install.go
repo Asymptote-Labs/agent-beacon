@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/auth"
@@ -18,6 +19,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/onboarding"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/spf13/cobra"
 )
 
@@ -129,10 +131,30 @@ func endpointInstallOptions(selection endpointTargetSelection, serviceKind servi
 		IncludeRuntimeMetrics:     endpointOpts.includeRuntimeMetrics,
 		IncludeCodexSpans:         endpointOpts.includeCodexSpans,
 		ClaudeCaptureModelContext: endpointOpts.claudeCaptureModelContext,
+		RestrictedLog:             restrictedLogOption(),
 		SplunkHEC:                 splunkHECOptions(),
 		FalconHEC:                 falconHECOptions(),
 		ServiceKind:               serviceKind,
 	}
+}
+
+// logGroupAddHint is the command that adds an account to the reader group on this platform.
+func logGroupAddHint(group string) string {
+	if runtime.GOOS == "darwin" {
+		return "sudo dseditgroup -o edit -a <account> -t user " + group
+	}
+	return "sudo usermod -aG " + group + " <account>"
+}
+
+// restrictedLogOption is --restricted-log as the lifecycle takes it: nil when the flag was not
+// given, so a plain re-install keeps whatever mode the endpoint is in. Repair has no such flag
+// and always keeps it.
+func restrictedLogOption() *bool {
+	if !endpointOpts.restrictedLogSet {
+		return nil
+	}
+	value := endpointOpts.restrictedLog
+	return &value
 }
 
 // errSetupCancelled replaces the wizard's own "onboarding cancelled", which read as a failure
@@ -144,6 +166,10 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	selection, err := resolveEndpointTargets(endpointOpts.harnesses, harness.DiscoverAll())
 	if err != nil {
 		return err
+	}
+	endpointOpts.restrictedLogSet = cmd.Flags().Changed("restricted-log")
+	if endpointOpts.restrictedLogSet && endpointOpts.restrictedLog && endpointUserMode() {
+		return fmt.Errorf("--restricted-log applies to the machine-wide log of a system install; add --system and run with sudo")
 	}
 	reportEndpointTargetSelection(cmd, selection)
 	serviceKind, err := service.ParseKind(endpointOpts.serviceKind)
@@ -193,6 +219,10 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(details, "Service definition written to %s\n", result.PlistPath)
 	fmt.Fprintf(details, "Install manifest written to %s\n", result.ManifestPath)
 	fmt.Fprintf(details, "Runtime log: %s\n", result.LogPath)
+	if restricted, ok := asymptoteobserve.RestrictedLogFor(result.LogPath); ok {
+		fmt.Fprintf(details, "Runtime log access: restricted to root and the %s group; hooks send events through %s\n", restricted.Group, restricted.Socket)
+		fmt.Fprintf(details, "To let a log shipper read it, add its account to the group: %s\n", logGroupAddHint(restricted.Group))
+	}
 	switch {
 	case result.InventoryJobPath != "":
 		fmt.Fprintf(details, "Scheduled inventory job: %s\n", result.InventoryJobPath)

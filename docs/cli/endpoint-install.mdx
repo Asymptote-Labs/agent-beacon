@@ -31,6 +31,7 @@ The `claude` harness writes both Claude Code's OpenTelemetry settings and its us
 | `--otlp-http-port <port>` | Local OTLP HTTP port. Defaults to `4318` |
 | `--health-port <port>` | Local collector health-check port. Defaults to `13133`, moved by the same amount as `--otlp-http-port` when that is changed (HTTP port `4328` gives `13143`), so a second collector on alternate OTLP ports does not collide with the first |
 | `--collector <path>` | Path to a `beacon-otelcol` binary |
+| `--restricted-log` | System installs on Linux and macOS only. Put the endpoint in [restricted log mode](#restricted-log-mode): only root and the `beacon-log` group can read the runtime log, hooks send events to the root collector instead of writing the file, and every other `beacon` command needs `sudo`. Repair and package upgrades keep the mode; `--restricted-log=false` turns it off |
 | `--no-start` | Write files without starting the collector service |
 | `--no-browser` | During interactive setup, print the sign-in URL instead of opening a browser, and do not open the hosted dashboard when setup finishes. Useful where no browser can be opened. Open the URL on this machine, or on another computer after forwarding the port it names over SSH |
 | `--service <kind>` | Service manager to use: `auto` (default), `launchd`, `systemd`, or `none` for a supervised collector process |
@@ -242,6 +243,38 @@ beacon endpoint hooks install --harness grok --level project
 <Note>
   System-mode install (`--system`) is supported on macOS and on Linux distributions that use systemd. Omit `--system` for the default non-root local install. GitHub Copilot CLI and Factory Droid OTLP use launch-environment settings rather tha Beacon-managed shell-profile edits.
 </Note>
+
+## Restricted log mode
+
+A system install's runtime log is world-writable by default (`0666`), because hooks run as each logged-in user and append to it themselves. That also means any local user can read every other user's prompts and command output in it, and append to it. Restricted log mode closes both:
+
+```bash title="Install with a restricted log"
+sudo beacon endpoint install --system --restricted-log
+```
+
+- Hooks no longer open the log. They send each event to the root collector over a local Unix socket, `/var/run/beacon-agent/hooks.sock`, and the collector is the only process that writes the log. The socket accepts only well-formed Beacon events, at most 64 KiB each.
+- The log directory becomes `0750 root:beacon-log` and every file in it (the log, its lock and archives) `0640 root:beacon-log`. Users outside the group cannot read, write, or list it. Install creates the `beacon-log` group if it does not exist.
+- Every `beacon` command except `version`, `help` and `completion` refuses to run without root, naming the `sudo` form to use. Ordinary users cannot change, stop, or read the endpoint through the CLI.
+
+To let a log shipper (Microsoft Sentinel's Azure Monitor Agent, Splunk Universal Forwarder, Filebeat) read the log, add the account it runs as to the group, then restart the shipper so it picks up the membership:
+
+```bash title="Linux"
+sudo usermod -aG beacon-log <shipper-account>
+```
+
+```bash title="macOS"
+sudo dseditgroup -o edit -a <shipper-account> -t user beacon-log
+```
+
+Beacon Cloud forwarding and the packaged S3, GCS, and Falcon forwarders run as root and need no change.
+
+`beacon endpoint doctor --system` checks the restricted shape: that the log is not readable by other users, that it belongs to `beacon-log`, and that the collector is accepting hook events on the socket. If the collector is stopped, hook events are lost until it is back, and each runtime's hook output says so.
+
+Restricted mode is recorded as `log_access: "restricted"` in the system `config.json` and declared to hooks by `log-access.json` beside it, a root-owned file. `beacon endpoint repair` and package upgrades keep it. Turn it off with `sudo beacon endpoint install --system --restricted-log=false`, which reopens the log to hooks; uninstalling also leaves restricted mode. The `beacon-log` group and its members are left in place either way.
+
+<Warning>
+  Restricted mode keeps users from reading and tampering with what other users' sessions recorded. It cannot keep users from sending events: a hook runs as the person whose agent it observes, so anyone who can run a hook can send the socket a well-formed event. It also does not stop a user from removing Beacon's hooks from runtime settings they own; use the runtimes' managed (system-level) settings for that. The `sudo` requirement is enforced by the `beacon` binary, so it is a guardrail rather than a boundary: the boundary is that the log, the system config and the service definitions belong to root.
+</Warning>
 
 ## Running user and system mode together
 

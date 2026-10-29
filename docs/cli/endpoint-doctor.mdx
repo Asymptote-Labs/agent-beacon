@@ -23,7 +23,7 @@ Doctor verifies:
 - Endpoint configuration validity
 - Collector configuration file
 - Runtime JSONL log path
-- Runtime log permissions
+- Runtime log permissions. In [restricted log mode](/cli/endpoint-install#restricted-log-mode), that the log is closed to users outside `beacon-log` and that the collector is accepting hook events on its socket
 - Service definition: launchd plist on macOS, systemd unit on Linux
 - Configured harness telemetry and recent observed events
 - Whether DeepSeek Harness can load the hook bridge its hooks depend on (`dsh_hook_bridge`)

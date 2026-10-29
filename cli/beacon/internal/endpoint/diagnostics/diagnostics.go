@@ -12,6 +12,7 @@ import (
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 type Check struct {
@@ -182,6 +183,9 @@ func checkLogPermissions(path string, userMode bool) Check {
 	// Both parts have to hold. The file needs a world-write bit, and the directory needs to be
 	// traversable, because a hook that cannot enter the directory never gets as far as the file.
 	if !userMode {
+		if restricted, ok := asymptoteobserve.RestrictedLogFor(path); ok {
+			return checkRestrictedLog(path, info, restricted)
+		}
 		if mode&0002 == 0 {
 			return Check{Name: "runtime_log_permissions", Target: path, Status: StatusFail, Severity: SeverityHigh,
 				Message:  fmt.Sprintf("runtime log is mode %o, so hooks running as the logged-in user cannot append to it and their events are lost", mode),
@@ -207,6 +211,37 @@ func checkLogPermissions(path string, userMode bool) Check {
 		return Check{Name: "runtime_log_permissions", Target: path, Status: StatusWarn, Severity: SeverityLow, Message: fmt.Sprintf("runtime log may not be readable by Wazuh: %o", mode), Evidence: "not_group_or_world_readable"}
 	}
 	return Check{Name: "runtime_log_permissions", Target: path, Status: StatusOK, Severity: SeverityInfo, Message: fmt.Sprintf("mode %o", mode), Evidence: fmt.Sprintf("mode_%o", mode)}
+}
+
+// checkRestrictedLog asks the restricted-mode questions in place of the shared-mode ones: hooks do
+// not write this log, so a missing world-write bit is the healthy state. What matters is that nobody
+// outside root and the reader group can read it, and that the collector is accepting hook lines,
+// since without it every hook event is lost.
+func checkRestrictedLog(path string, info os.FileInfo, restricted asymptoteobserve.RestrictedLog) Check {
+	mode := info.Mode().Perm()
+	if mode&0o007 != 0 {
+		return Check{Name: "runtime_log_permissions", Target: path, Status: StatusFail, Severity: SeverityHigh,
+			Message:  fmt.Sprintf("runtime log is mode %o in restricted mode, so users outside the %s group can open it", mode, restricted.Group),
+			Evidence: "restricted_log_open_to_others", Action: "sudo beacon endpoint repair --system"}
+	}
+	if gid, ok := fileGroup(info); ok && gid != restricted.GID {
+		return Check{Name: "runtime_log_permissions", Target: path, Status: StatusWarn, Severity: SeverityMedium,
+			Message:  fmt.Sprintf("runtime log belongs to group %d rather than %s (%d), so its log shipper cannot read it", gid, restricted.Group, restricted.GID),
+			Evidence: "restricted_log_wrong_group", Action: "sudo beacon endpoint repair --system"}
+	}
+	if dirInfo, err := os.Stat(filepath.Dir(path)); err == nil && dirInfo.Mode().Perm()&0o007 != 0 {
+		return Check{Name: "runtime_log_permissions", Target: filepath.Dir(path), Status: StatusWarn, Severity: SeverityMedium,
+			Message:  fmt.Sprintf("log directory is mode %o in restricted mode, so users outside the %s group can list it", dirInfo.Mode().Perm(), restricted.Group),
+			Evidence: "restricted_log_dir_open", Action: "sudo beacon endpoint repair --system"}
+	}
+	if socket, err := os.Lstat(restricted.Socket); err != nil || socket.Mode().Type() != os.ModeSocket {
+		return Check{Name: "runtime_log_permissions", Target: restricted.Socket, Status: StatusFail, Severity: SeverityHigh,
+			Message:  "the collector is not accepting hook events on " + restricted.Socket + ", so every hook event is lost until it is",
+			Evidence: "restricted_log_socket_missing", Action: "sudo beacon endpoint repair --system"}
+	}
+	return Check{Name: "runtime_log_permissions", Target: path, Status: StatusOK, Severity: SeverityInfo,
+		Message:  fmt.Sprintf("restricted: mode %o, readable by root and %s; hooks send through %s", mode, restricted.Group, restricted.Socket),
+		Evidence: "restricted_log"}
 }
 
 // checkLogWritableByThisUser is the user-mode Windows form of the question.

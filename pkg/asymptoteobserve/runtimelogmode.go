@@ -17,8 +17,8 @@ import (
 const (
 	// SharedRuntimeLogFileMode is the machine-wide (system-mode) log's mode. It is deliberately
 	// world-writable: the collector runs elevated and creates it, while hooks running as each
-	// logged-in user append to it. Narrowing it needs a design change (a group, or hooks sending
-	// through the collector) rather than a mode change.
+	// logged-in user append to it. Restricted log mode (RestrictedLog) is the narrow alternative,
+	// in which hooks send through the collector instead.
 	SharedRuntimeLogFileMode os.FileMode = 0o666
 	// SharedRuntimeLogDirMode keeps the shared log reachable by those hooks.
 	SharedRuntimeLogDirMode os.FileMode = 0o755
@@ -47,9 +47,15 @@ const unixSystemLogDir = "/var/log/beacon-agent"
 // One exception keeps root from breaking a user's log: when running as root on Unix inside a home
 // directory root does not own (sudo preserving HOME), the log keeps the shared mode, because a
 // private root-owned file there is one the user's own hooks could never append to again.
+//
+// A system log the machine has put in restricted mode (see RestrictedLog) is 0640 in a 0750
+// directory instead, owned by root and the reader group, because only the root collector writes it.
 func RuntimeLogModes(path string) (file, dir os.FileMode, private bool) {
 	if RuntimeLogIsPrivate(path) {
 		return PrivateRuntimeLogFileMode, PrivateRuntimeLogDirMode, true
+	}
+	if _, restricted := RestrictedLogFor(path); restricted {
+		return RestrictedRuntimeLogFileMode, RestrictedRuntimeLogDirMode, false
 	}
 	return SharedRuntimeLogFileMode, SharedRuntimeLogDirMode, false
 }
@@ -119,9 +125,17 @@ const PrivateACLRuntimeLogFileMode os.FileMode = 0o640
 // The path is never followed: a symlink is left alone, so root cannot be steered into chmodding
 // whatever a link in a directory someone else can write points at.
 func SettleRuntimeLogFileMode(path, logPath string, created bool) error {
-	return settleRuntimeLogFileMode(path, logPath, created, os.Lstat, func(mode os.FileMode) error {
+	if err := settleRuntimeLogFileMode(path, logPath, created, os.Lstat, func(mode os.FileMode) error {
 		return os.Chmod(path, mode)
-	})
+	}); err != nil {
+		return err
+	}
+	if restricted, ok := RestrictedLogFor(logPath); ok {
+		if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {
+			_ = settleRestrictedLogGroup(info, restricted.GID, func(uid, gid int) error { return os.Lchown(path, uid, gid) })
+		}
+	}
+	return nil
 }
 
 // OpenRuntimeLogFile opens path (the runtime log at logPath, or its lock) with the mode logPath
@@ -162,6 +176,14 @@ func OpenRuntimeLogFile(path, logPath string, flag int) (*os.File, error) {
 	if err := settleRuntimeLogFileMode(path, logPath, !existed, func(string) (os.FileInfo, error) { return info, nil }, f.Chmod); err != nil {
 		_ = f.Close()
 		return nil, err
+	}
+	// A restricted log's reader group is part of its mode: a file root creates there (a new log
+	// after rotation, a lock) would otherwise carry root's group and lock the log shipper out.
+	if restricted, ok := RestrictedLogFor(logPath); ok {
+		if err := settleRestrictedLogGroup(info, restricted.GID, f.Chown); err != nil && !existed {
+			_ = f.Close()
+			return nil, err
+		}
 	}
 	return f, nil
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/atomicfile"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 const (
@@ -114,6 +115,15 @@ type Config struct {
 	Destinations              *Destinations  `json:"destinations,omitempty"`
 	ManagedIngest             *ManagedIngest `json:"managed_ingest,omitempty"`
 	AutoUpdate                *AutoUpdate    `json:"auto_update,omitempty"`
+	// LogAccess is "restricted" for a system-mode endpoint in restricted log mode (install
+	// --restricted-log): hooks send events to the root collector over a Unix socket, the collector
+	// is the only writer, and the log is 0640 root:beacon-log. Empty is the shared 0666 log.
+	LogAccess string `json:"log_access,omitempty"`
+}
+
+// RestrictedLog reports whether cfg is a system-mode endpoint in restricted log mode.
+func (cfg Config) RestrictedLog() bool {
+	return !cfg.UserMode && cfg.LogAccess == asymptoteobserve.RestrictedLogAccess
 }
 
 // ManagedIngest records that this endpoint forwards to Asymptote managed ingest. It holds
