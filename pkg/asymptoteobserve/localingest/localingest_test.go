@@ -47,9 +47,9 @@ func decode(t *testing.T, line []byte) map[string]interface{} {
 
 func TestStampLineReplacesTheClaimedUserWithThePeer(t *testing.T) {
 	line := validLine(t, nil)
-	out, err := StampLine(line, Peer{UID: 1002, GID: 20, PID: 77}, func(uid uint32) string {
-		if uid != 1002 {
-			t.Fatalf("lookup asked for uid %d", uid)
+	out, err := StampLine(line, Peer{UID: "1002", GID: 20, PID: 77}, func(uid string) string {
+		if uid != "1002" {
+			t.Fatalf("lookup asked for uid %s", uid)
 		}
 		return "mallory"
 	})
@@ -64,12 +64,12 @@ func TestStampLineReplacesTheClaimedUserWithThePeer(t *testing.T) {
 }
 
 func TestStampLineLeavesOutANameItCannotResolve(t *testing.T) {
-	for name, lookup := range map[string]func(uint32) string{
+	for name, lookup := range map[string]func(string) string{
 		"nil lookup":   nil,
-		"empty result": func(uint32) string { return "  " },
+		"empty result": func(string) string { return "  " },
 	} {
 		t.Run(name, func(t *testing.T) {
-			out, err := StampLine(validLine(t, nil), Peer{UID: 42}, lookup)
+			out, err := StampLine(validLine(t, nil), Peer{UID: "42"}, lookup)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -86,7 +86,7 @@ func TestStampLineLeavesOutANameItCannotResolve(t *testing.T) {
 
 func TestStampLineAddsAUserToAnEventWithout(t *testing.T) {
 	line := validLine(t, func(e map[string]interface{}) { delete(e, "user") })
-	out, err := StampLine(line, Peer{UID: 0}, nil)
+	out, err := StampLine(line, Peer{UID: "0"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestStampLineAddsAUserToAnEventWithout(t *testing.T) {
 
 func TestStampLineKeepsEverythingElseExactly(t *testing.T) {
 	line := validLine(t, nil)
-	out, err := StampLine(line, Peer{UID: 501}, func(uint32) string { return "alice" })
+	out, err := StampLine(line, Peer{UID: "501"}, func(string) string { return "alice" })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,11 +126,11 @@ func TestStampLineNamesAnEventThatArrivesWithoutAnID(t *testing.T) {
 	line := validLine(t, func(e map[string]interface{}) {
 		delete(e["event"].(map[string]interface{}), "id")
 	})
-	first, err := StampLine(line, Peer{UID: 501}, nil)
+	first, err := StampLine(line, Peer{UID: "501"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := StampLine(line, Peer{UID: 501}, nil)
+	second, err := StampLine(line, Peer{UID: "501"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestStampLineNamesAnEventThatArrivesWithoutAnID(t *testing.T) {
 		t.Fatalf("event.id = %q, want %q", id, want)
 	}
 	// A different account sending the same bytes is a different event.
-	other, err := StampLine(line, Peer{UID: 502}, nil)
+	other, err := StampLine(line, Peer{UID: "502"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestStampLineRejects(t *testing.T) {
 	}
 	for name, line := range cases {
 		t.Run(name, func(t *testing.T) {
-			out, err := StampLine(line, Peer{UID: 1}, nil)
+			out, err := StampLine(line, Peer{UID: "1"}, nil)
 			if !errors.Is(err, ErrRejected) {
 				t.Fatalf("err = %v, out = %s; want ErrRejected", err, out)
 			}
@@ -196,7 +196,7 @@ func TestStampLineRejectsALineThatOutgrowsTheLimitWhenStamped(t *testing.T) {
 	if len(line) > MaxLineBytes {
 		t.Fatalf("fixture is %d bytes, want it under the limit before stamping", len(line))
 	}
-	_, err := StampLine(line, Peer{UID: 1}, func(uint32) string { return strings.Repeat("n", 64) })
+	_, err := StampLine(line, Peer{UID: "1"}, func(string) string { return strings.Repeat("n", 64) })
 	if !errors.Is(err, ErrRejected) {
 		t.Fatalf("err = %v, want ErrRejected for a line over the limit once stamped", err)
 	}
@@ -204,7 +204,7 @@ func TestStampLineRejectsALineThatOutgrowsTheLimitWhenStamped(t *testing.T) {
 
 func TestStampLineAcceptsATrailingCarriageReturn(t *testing.T) {
 	line := append(validLine(t, nil), '\r')
-	out, err := StampLine(line, Peer{UID: 501}, func(uint32) string { return "alice" })
+	out, err := StampLine(line, Peer{UID: "501"}, func(string) string { return "alice" })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestStampLineKeepsAnIDDerivedFromWhatIsWritten(t *testing.T) {
 		e["user"] = map[string]interface{}{"uid": "501", "name": "alice"}
 		e["event"].(map[string]interface{})["id"] = want
 	})
-	out, err := StampLine(withID, Peer{UID: 501}, func(uint32) string { return "alice" })
+	out, err := StampLine(withID, Peer{UID: "501"}, func(string) string { return "alice" })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestStampLineKeepsACallKeyedID(t *testing.T) {
 		call(e)
 		e["event"].(map[string]interface{})["id"] = sent
 	})
-	out, err := StampLine(line, Peer{UID: 501}, func(uint32) string { return "alice" })
+	out, err := StampLine(line, Peer{UID: "501"}, func(string) string { return "alice" })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestStampLineRederivesTheIDOfALineThatClaimedAnotherAccount(t *testing.T) {
 		e["user"] = map[string]interface{}{"uid": "0", "name": "root"}
 		e["event"].(map[string]interface{})["id"] = sent
 	})
-	out, err := StampLine(line, Peer{UID: 501}, func(uint32) string { return "alice" })
+	out, err := StampLine(line, Peer{UID: "501"}, func(string) string { return "alice" })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,12 +296,12 @@ func TestStampLineScopesASenderChosenIDToItsAccount(t *testing.T) {
 	line := validLine(t, func(e map[string]interface{}) {
 		e["event"].(map[string]interface{})["id"] = "claude:session-1:record-42"
 	})
-	first, err := StampLine(line, Peer{UID: 501}, nil)
+	first, err := StampLine(line, Peer{UID: "501"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, _ := StampLine(line, Peer{UID: 501}, nil)
-	other, _ := StampLine(line, Peer{UID: 502}, nil)
+	again, _ := StampLine(line, Peer{UID: "501"}, nil)
+	other, _ := StampLine(line, Peer{UID: "502"}, nil)
 	a, b, c := stampedID(t, first), stampedID(t, again), stampedID(t, other)
 	if a == "claude:session-1:record-42" || a == "" {
 		t.Fatalf("event.id = %q; a sender-chosen id must be scoped", a)
@@ -312,8 +312,13 @@ func TestStampLineScopesASenderChosenIDToItsAccount(t *testing.T) {
 	if a == c {
 		t.Fatal("two accounts sending the same chosen id got the same event.id")
 	}
-	if a != scopedEventID(501, "claude:session-1:record-42") {
+	if a != scopedEventID("501", "claude:session-1:record-42") {
 		t.Fatal("scoped id does not match its definition")
+	}
+	// Pinned: the derivation is a contract, and changing it would rename every scoped id already
+	// written through the socket. A Unix account is named by its decimal uid, as it always was.
+	if a != "1e67ad0d-6971-5cce-9a8a-565d5e4b8fa6" {
+		t.Fatalf("scoped id = %s; the derivation changed", a)
 	}
 }
 
@@ -334,7 +339,7 @@ func TestStampLineDropsTheIDRatherThanTheEvent(t *testing.T) {
 	if len(line) > MaxLineBytes {
 		t.Fatal("fixture over the limit")
 	}
-	out, err := StampLine(line, Peer{UID: 501}, func(uint32) string { return "alice" })
+	out, err := StampLine(line, Peer{UID: "501"}, func(string) string { return "alice" })
 	if err != nil {
 		t.Fatalf("an event the id alone would push over the limit was rejected: %v", err)
 	}

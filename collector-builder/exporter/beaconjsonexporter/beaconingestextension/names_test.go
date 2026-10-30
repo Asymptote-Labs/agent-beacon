@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/user"
 	"runtime"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -13,10 +14,10 @@ func TestNameCacheReusesAndExpires(t *testing.T) {
 	calls := 0
 	c := newNameCache()
 	c.now = func() time.Time { return now }
-	c.lookup1 = func(uid uint32) string { calls++; return "alice" }
+	c.lookup1 = func(uid string) string { calls++; return "alice" }
 
 	for i := 0; i < 5; i++ {
-		if got := c.lookup(501); got != "alice" {
+		if got := c.lookup("501"); got != "alice" {
 			t.Fatalf("lookup = %q", got)
 		}
 	}
@@ -24,7 +25,7 @@ func TestNameCacheReusesAndExpires(t *testing.T) {
 		t.Fatalf("resolved %d times within the TTL, want 1", calls)
 	}
 	now = now.Add(nameCacheTTL + time.Second)
-	_ = c.lookup(501)
+	_ = c.lookup("501")
 	if calls != 2 {
 		t.Fatalf("resolved %d times after the TTL, want 2", calls)
 	}
@@ -35,16 +36,16 @@ func TestNameCacheRetriesAMissAfterTheTTL(t *testing.T) {
 	answer := ""
 	c := newNameCache()
 	c.now = func() time.Time { return now }
-	c.lookup1 = func(uint32) string { return answer }
-	if got := c.lookup(7); got != "" {
+	c.lookup1 = func(string) string { return answer }
+	if got := c.lookup("7"); got != "" {
 		t.Fatalf("lookup = %q", got)
 	}
 	answer = "bob"
-	if got := c.lookup(7); got != "" {
+	if got := c.lookup("7"); got != "" {
 		t.Fatalf("a miss was retried within the TTL: %q", got)
 	}
 	now = now.Add(nameCacheTTL + time.Second)
-	if got := c.lookup(7); got != "bob" {
+	if got := c.lookup("7"); got != "bob" {
 		t.Fatalf("a miss was not retried after the TTL: %q", got)
 	}
 }
@@ -57,13 +58,13 @@ func TestResolveNameFindsTheCurrentAccount(t *testing.T) {
 	if err != nil {
 		t.Skip(err)
 	}
-	if got := resolveName(uint32(os.Geteuid())); got != me.Username {
+	if got := resolveName(strconv.Itoa(os.Geteuid())); got != me.Username {
 		t.Fatalf("resolveName = %q, want %q", got, me.Username)
 	}
 }
 
 func TestResolveNameOfAnUnknownUID(t *testing.T) {
-	if got := resolveName(4294967000); got != "" {
+	if got := resolveName("4294967000"); got != "" {
 		t.Fatalf("resolveName of an unused uid = %q, want empty", got)
 	}
 }

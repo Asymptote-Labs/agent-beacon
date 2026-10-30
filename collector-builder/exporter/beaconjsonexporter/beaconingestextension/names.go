@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,9 +29,9 @@ const (
 // fallback.
 type nameCache struct {
 	mu      sync.Mutex
-	entries map[uint32]nameEntry
+	entries map[string]nameEntry
 	now     func() time.Time
-	lookup1 func(uid uint32) string
+	lookup1 func(uid string) string
 }
 
 type nameEntry struct {
@@ -41,10 +40,10 @@ type nameEntry struct {
 }
 
 func newNameCache() *nameCache {
-	return &nameCache{entries: map[uint32]nameEntry{}, now: time.Now, lookup1: resolveName}
+	return &nameCache{entries: map[string]nameEntry{}, now: time.Now, lookup1: resolveName}
 }
 
-func (c *nameCache) lookup(uid uint32) string {
+func (c *nameCache) lookup(uid string) string {
 	now := c.now()
 	c.mu.Lock()
 	entry, ok := c.entries[uid]
@@ -73,8 +72,7 @@ func firstExecutable(paths []string) string {
 	return ""
 }
 
-func resolveName(uid uint32) string {
-	id := strconv.FormatUint(uint64(uid), 10)
+func resolveName(id string) string {
 	if u, err := user.LookupId(id); err == nil && validName(u.Username) {
 		return u.Username
 	}

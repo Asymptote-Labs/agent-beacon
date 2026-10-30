@@ -41,8 +41,8 @@ type Server struct {
 	// ErrRejected drops that line for good; any other error stops the batch, and the client keeps
 	// the rest to send again.
 	Append func(line []byte) error
-	// LookupName resolves a peer's uid to its account name for the stamped user. Optional.
-	LookupName func(uid uint32) string
+	// LookupName resolves a peer's account (Peer.UID) to its name for the stamped user. Optional.
+	LookupName func(uid string) string
 	// LogPath is the runtime log Append writes. A batch whose header names another log is refused
 	// without being read into the log. Empty accepts any header; only tests leave it empty.
 	LogPath string
@@ -70,16 +70,16 @@ type Server struct {
 	slots     chan struct{}
 	closed    bool
 	wg        sync.WaitGroup
-	buckets   map[uint32]*bucket
-	perUID    map[uint32]int
-	logStates map[uint32]*logState
+	buckets   map[string]*bucket
+	perUID    map[string]int
+	logStates map[string]*logState
 }
 
 // ErrServerClosed is returned by Serve after Close.
 var ErrServerClosed = errors.New("localingest: server closed")
 
 // Serve accepts connections on l until Close is called or l fails. It refuses to run where the
-// kernel cannot say who a peer is, because then nothing it wrote could be attributed.
+// operating system cannot say who a peer is, because then nothing it wrote could be attributed.
 func (s *Server) Serve(l net.Listener) error {
 	if s.Append == nil {
 		return errors.New("localingest: Server.Append is required")
@@ -165,8 +165,8 @@ func (s *Server) init() {
 	if s.listeners == nil {
 		s.listeners = map[net.Listener]struct{}{}
 		s.conns = map[net.Conn]struct{}{}
-		s.buckets = map[uint32]*bucket{}
-		s.perUID = map[uint32]int{}
+		s.buckets = map[string]*bucket{}
+		s.perUID = map[string]int{}
 		n := s.MaxConns
 		if n <= 0 {
 			n = defaultMaxConns
@@ -215,8 +215,8 @@ func (s *Server) isClosed() bool {
 	return s.closed
 }
 
-// noUID keys log lines that belong to no one connection.
-const noUID = ^uint32(0)
+// noUID keys log lines that belong to no one account.
+const noUID = ""
 
 // logInterval is the least time between two log lines about one account. Any account can connect,
 // and each refused connection or rejected line is something to log, so without a bound one
@@ -228,14 +228,14 @@ type logState struct {
 	suppressed int
 }
 
-func (s *Server) logf(uid uint32, format string, args ...interface{}) {
+func (s *Server) logf(uid string, format string, args ...interface{}) {
 	if s.Logf == nil {
 		return
 	}
 	now := time.Now()
 	s.mu.Lock()
 	if s.logStates == nil {
-		s.logStates = map[uint32]*logState{}
+		s.logStates = map[string]*logState{}
 	}
 	st := s.logStates[uid]
 	if st == nil {
@@ -268,35 +268,42 @@ func (s *Server) handle(conn net.Conn) {
 	budget := time.Now().Add(timeout)
 	_ = conn.SetDeadline(budget.Add(replyGrace))
 
-	unixConn, ok := conn.(*net.UnixConn)
-	if !ok {
-		s.logf(noUID, "refusing connection: not a Unix socket")
-		return
-	}
-	peer, err := peerCredentials(unixConn)
+	// The account is counted against its connection cap before anything is read, so a connection
+	// that sends nothing still holds one of its account's slots rather than only one of everyone's.
+	// The identity events are stamped with is read after the preamble: a named pipe server cannot
+	// take on its client's identity until it has read from the pipe. The two must agree.
+	account, err := connectingAccount(conn)
 	if err != nil {
 		s.logf(noUID, "refusing connection: %v", err)
 		return
 	}
-	if !s.acquireUID(peer.UID) {
-		s.logf(peer.UID, "refusing connection from uid %d: it already has the most connections one account may hold", peer.UID)
+	if !s.acquireUID(account) {
+		s.logf(account, "refusing connection from account %s: it already has the most connections one account may hold", account)
 		return
 	}
-	defer s.releaseUID(peer.UID)
-	// The name is resolved once per connection, before any line, so a slow directory service is
-	// paid for once and never between writes.
-	var lookup func(uint32) string
-	if s.LookupName != nil {
-		name := s.LookupName(peer.UID)
-		lookup = func(uint32) string { return name }
-	}
-
+	defer s.releaseUID(account)
 	r := bufio.NewReaderSize(conn, MaxLineBytes+2)
-	preamble, tooLong, err := readLine(r, len(Preamble)+1)
-	if err != nil && !errors.Is(err, io.EOF) || tooLong || string(preamble) != Preamble {
-		s.logf(peer.UID, "refusing connection from uid %d: no %s preamble", peer.UID, Preamble)
+	preamble, tooLong, preambleErr := readLine(r, len(Preamble)+1)
+	if preambleErr != nil && !errors.Is(preambleErr, io.EOF) || tooLong || string(preamble) != Preamble {
+		s.logf(account, "refusing connection from account %s: no %s preamble", account, Preamble)
 		writeResponse(conn, Response{Error: "expected " + Preamble})
 		return
+	}
+	peer, err := identify(conn)
+	if err != nil {
+		s.logf(account, "refusing connection from account %s: %v", account, err)
+		return
+	}
+	if peer.UID != account {
+		s.logf(account, "refusing connection from account %s: it identified as %s once connected", account, peer.UID)
+		return
+	}
+	// The name is resolved once per connection, before any line, so a slow directory service is
+	// paid for once and never between writes.
+	var lookup func(string) string
+	if s.LookupName != nil {
+		name := s.LookupName(peer.UID)
+		lookup = func(string) string { return name }
 	}
 
 	var resp Response
@@ -305,7 +312,7 @@ func (s *Server) handle(conn net.Conn) {
 	var header Header
 	switch {
 	case err != nil && !errors.Is(err, io.EOF), tooLong, json.Unmarshal(headerLine, &header) != nil:
-		s.logf(peer.UID, "refusing connection from uid %d: no valid header", peer.UID)
+		s.logf(peer.UID, "refusing connection from account %s: no valid header", peer.UID)
 		writeResponse(conn, Response{Error: "expected a header"})
 		return
 	case s.LogPath != "" && !sameLog(header.Log, s.LogPath):
@@ -328,7 +335,7 @@ func (s *Server) handle(conn net.Conn) {
 				break
 			}
 			// The connection broke (a reset): there is nobody to reply to.
-			s.logf(peer.UID, "connection from uid %d ended early: %v", peer.UID, err)
+			s.logf(peer.UID, "connection from account %s ended early: %v", peer.UID, err)
 			return
 		}
 		if len(line) == 0 && !tooLong {
@@ -354,7 +361,7 @@ func (s *Server) handle(conn net.Conn) {
 			stopped = true
 		case tooLong:
 			resp.Rejected++
-			s.logf(peer.UID, "rejected an event from uid %d: over %d bytes", peer.UID, MaxLineBytes)
+			s.logf(peer.UID, "rejected an event from account %s: over %d bytes", peer.UID, MaxLineBytes)
 		case !s.allow(peer.UID, len(line)):
 			resp.Error = "rate limited"
 			stopped = true
@@ -362,7 +369,7 @@ func (s *Server) handle(conn net.Conn) {
 			stamped, stampErr := StampLine(line, peer, lookup)
 			if stampErr != nil {
 				resp.Rejected++
-				s.logf(peer.UID, "rejected an event from uid %d: %v", peer.UID, stampErr)
+				s.logf(peer.UID, "rejected an event from account %s: %v", peer.UID, stampErr)
 				break
 			}
 			if appendErr := s.Append(stamped); appendErr != nil {
@@ -371,7 +378,7 @@ func (s *Server) handle(conn net.Conn) {
 					break
 				}
 				resp.Error = "write failed"
-				s.logf(peer.UID, "could not write an event from uid %d: %v", peer.UID, appendErr)
+				s.logf(peer.UID, "could not write an event from account %s: %v", peer.UID, appendErr)
 				stopped = true
 				break
 			}
@@ -386,7 +393,7 @@ func (s *Server) handle(conn net.Conn) {
 	writeResponse(conn, resp)
 }
 
-func (s *Server) acquireUID(uid uint32) bool {
+func (s *Server) acquireUID(uid string) bool {
 	limit := s.MaxConnsPerUID
 	if limit <= 0 {
 		limit = defaultMaxConnsPerUID
@@ -400,7 +407,7 @@ func (s *Server) acquireUID(uid uint32) bool {
 	return true
 }
 
-func (s *Server) releaseUID(uid uint32) {
+func (s *Server) releaseUID(uid string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.perUID[uid] <= 1 {
@@ -460,8 +467,8 @@ type bucket struct {
 	last   time.Time
 }
 
-// allow charges size bytes to uid's bucket.
-func (s *Server) allow(uid uint32, size int) bool {
+// allow charges size bytes to the account's bucket.
+func (s *Server) allow(uid string, size int) bool {
 	rate := s.RateBytesPerSecond
 	if rate < 0 {
 		return true
