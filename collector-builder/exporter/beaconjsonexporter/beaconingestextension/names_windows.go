@@ -4,32 +4,20 @@ package beaconingestextension
 
 import (
 	"strings"
-	"time"
 
 	"golang.org/x/sys/windows"
 )
 
 // resolveName names a SID: DOMAIN\user, the form Windows hooks write to user.name. It asks
 // LookupAccountSid, which consults a domain controller on a domain-joined machine and can wait on
-// one that does not answer, so the lookup is bounded by nameLookupTimeout like id(1) on Unix: past
-// it the event is named by SID only, and the cache retries later. Windows has no id(1) to fall
-// back to.
+// one that does not answer; nameCache bounds how long a connection waits for it. Windows has no
+// id(1) to fall back to.
 func resolveName(sid string) string {
-	done := make(chan string, 1)
-	go func() {
-		name, err := lookupAccount(sid)
-		if err != nil || !validWindowsName(name) {
-			done <- ""
-			return
-		}
-		done <- name
-	}()
-	select {
-	case name := <-done:
-		return name
-	case <-time.After(nameLookupTimeout):
+	name, err := lookupAccount(sid)
+	if err != nil || !validWindowsName(name) {
 		return ""
 	}
+	return name
 }
 
 // lookupAccount names a SID with LookupAccountSid alone; tests replace it. Not os/user.LookupId:
