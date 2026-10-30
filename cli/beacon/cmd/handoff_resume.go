@@ -90,11 +90,11 @@ func runHandoffResume(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve brief directory: %w", err)
 	}
-	cwd := strings.TrimSpace(opts.cwd)
-	if cwd != "" {
-		if cwd, err = filepath.Abs(cwd); err != nil {
-			return fmt.Errorf("resolve --cwd: %w", err)
-		}
+	cwd := opts.cwd
+	if strings.TrimSpace(cwd) == "" {
+		cwd = ""
+	} else if cwd, err = filepath.Abs(cwd); err != nil {
+		return fmt.Errorf("resolve --cwd: %w", err)
 	}
 	plan, err := handoff.PlanResume(session, handoff.PlanOptions{
 		Target:         target,

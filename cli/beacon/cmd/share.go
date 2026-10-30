@@ -441,8 +441,8 @@ func shareStoreDirs() (handoff.StoreDirs, error) {
 
 // shareDirectory is the directory --cwd names, absolute, or the current one.
 func shareDirectory() (string, error) {
-	dir := strings.TrimSpace(shareOpts.cwd)
-	if dir == "" {
+	dir := shareOpts.cwd
+	if strings.TrimSpace(dir) == "" {
 		dir = "."
 	}
 	abs, err := filepath.Abs(dir)
