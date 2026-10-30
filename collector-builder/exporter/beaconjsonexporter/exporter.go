@@ -7,6 +7,7 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/exporter"
+	"go.opentelemetry.io/collector/exporter/exporterhelper"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -31,7 +32,23 @@ type beaconExporter struct {
 	// listings keeps one mcp.tool_listed per tool per session out of the copy Claude Code sends
 	// with every model request.
 	listings *beaconevent.MCPListings
+	// codexSurfaces remembers which Codex surface each conversation runs in. It is shared with
+	// the other signals' exporters built from this config, so a usage span that doesn't name its
+	// surface gets the one its conversation's logs did.
+	codexSurfaces        *beaconevent.CodexSurfaces
+	releaseCodexSurfaces func()
+	// stopCodexRelease ends the loop start runs; codexReleaseDone closes once it has.
+	stopCodexRelease chan struct{}
+	codexReleaseDone chan struct{}
 }
+
+// codexReleaseEvery is how often the exporter writes the Codex records whose wait for their
+// conversation's logs has run out, so they reach the log on time when no batch arrives to carry
+// them.
+var codexReleaseEvery = time.Second
+
+// codexClock is the time the Codex hold runs on; tests move it.
+var codexClock = time.Now
 
 func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, error) {
 	cfg, ok := raw.(*Config)
@@ -50,6 +67,7 @@ func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
+	codexSurfaces, release := beaconevent.AcquireCodexSurfaces(cfg)
 	return &beaconExporter{
 		cfg: cfg,
 		writer: jsonlWriter{
@@ -59,21 +77,84 @@ func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, 
 			rotateArchives: cfg.RotateArchives,
 			redactSecrets:  cfg.RedactSecrets,
 		},
-		logger:   set.Logger,
-		sequence: &asymptoteobserve.Sequencer{},
-		listings: &beaconevent.MCPListings{},
+		logger:               set.Logger,
+		sequence:             &asymptoteobserve.Sequencer{},
+		listings:             &beaconevent.MCPListings{},
+		codexSurfaces:        codexSurfaces,
+		releaseCodexSurfaces: release,
 		converter: beaconevent.NewConverter(beaconevent.Options{
 			IncludeRuntimeMetrics: cfg.IncludeRuntimeMetrics,
 			IncludeCodexSpans:     cfg.IncludeCodexSpans,
 			CaptureModelContext:   cfg.CaptureModelContext,
+			CodexSurfaces:         codexSurfaces,
 		}),
 	}, nil
+}
+
+// lifecycle is the start and shutdown every signal's exporter runs.
+func (e *beaconExporter) lifecycle() []exporterhelper.Option {
+	return []exporterhelper.Option{exporterhelper.WithStart(e.start), exporterhelper.WithShutdown(e.shutdown)}
+}
+
+// start runs the loop that writes Codex records once their wait runs out.
+func (e *beaconExporter) start(context.Context, component.Host) error {
+	e.stopCodexRelease = make(chan struct{})
+	e.codexReleaseDone = make(chan struct{})
+	go func() {
+		defer close(e.codexReleaseDone)
+		ticker := time.NewTicker(codexReleaseEvery)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-e.stopCodexRelease:
+				return
+			case <-ticker.C:
+				if err := e.writeEvents(e.sortCodex(nil)); err != nil && e.logger != nil {
+					e.logger.Warn("writing held Codex records failed", zap.Error(err))
+				}
+			}
+		}
+	}()
+	return nil
+}
+
+// shutdown writes the Codex records still waiting for their conversation's surface, as they
+// stand, and gives up this exporter's share of the memory.
+func (e *beaconExporter) shutdown(context.Context) error {
+	if e.stopCodexRelease != nil {
+		close(e.stopCodexRelease)
+		<-e.codexReleaseDone
+		e.stopCodexRelease = nil
+	}
+	firstErr := e.writeEvents(e.codexSurfaces.Drain())
+	if e.releaseCodexSurfaces != nil {
+		e.releaseCodexSurfaces()
+	}
+	return firstErr
+}
+
+// sortCodex returns the events to write now. A Codex record whose surface isn't known yet waits
+// in the shared memory, and goes out with whichever exporter's batch names it or comes after its
+// wait runs out (see beaconevent.CodexSurfaces.Sort).
+func (e *beaconExporter) sortCodex(events []beaconEvent) []beaconEvent {
+	return e.codexSurfaces.Sort(events, codexClock())
+}
+
+func (e *beaconExporter) writeEvents(events []beaconEvent) error {
+	var firstErr error
+	for _, event := range events {
+		e.stampSequence(&event)
+		if err := e.writer.append(event); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func (e *beaconExporter) consumeLogs(ctx context.Context, logs plog.Logs) error {
 	_ = ctx
 	var firstErr error
-	for _, event := range e.listings.Filter(e.eventConverter().EventsFromLogs(logs)) {
+	for _, event := range e.sortCodex(e.listings.Filter(e.eventConverter().EventsFromLogs(logs))) {
 		e.stampSequence(&event)
 		if err := e.writer.append(event); err != nil {
 			if firstErr == nil {
@@ -88,26 +169,12 @@ func (e *beaconExporter) consumeLogs(ctx context.Context, logs plog.Logs) error 
 
 func (e *beaconExporter) consumeTraces(ctx context.Context, traces ptrace.Traces) error {
 	_ = ctx
-	var firstErr error
-	for _, event := range e.eventConverter().EventsFromTraces(traces) {
-		e.stampSequence(&event)
-		if err := e.writer.append(event); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	return firstErr
+	return e.writeEvents(e.sortCodex(e.eventConverter().EventsFromTraces(traces)))
 }
 
 func (e *beaconExporter) consumeMetrics(ctx context.Context, metrics pmetric.Metrics) error {
 	_ = ctx
-	var firstErr error
-	for _, event := range e.eventConverter().EventsFromMetrics(metrics) {
-		e.stampSequence(&event)
-		if err := e.writer.append(event); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	return firstErr
+	return e.writeEvents(e.sortCodex(e.eventConverter().EventsFromMetrics(metrics)))
 }
 
 // stampSequence gives the event this exporter's next emission number, unless the runtime
@@ -167,6 +234,7 @@ func (e *beaconExporter) eventConverter() beaconevent.Converter {
 		IncludeRuntimeMetrics: e.cfg.IncludeRuntimeMetrics,
 		IncludeCodexSpans:     e.cfg.IncludeCodexSpans,
 		CaptureModelContext:   e.cfg.CaptureModelContext,
+		CodexSurfaces:         e.codexSurfaces,
 	})
 }
 

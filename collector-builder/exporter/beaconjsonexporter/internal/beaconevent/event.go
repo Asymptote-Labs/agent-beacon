@@ -109,6 +109,10 @@ type Event struct {
 	Message       string                            `json:"message,omitempty"`
 	Raw           map[string]interface{}            `json:"raw,omitempty"`
 	Truncated     bool                              `json:"field_truncated,omitempty"`
+
+	// codexConversation is set on a Codex app-server record whose conversation no originator
+	// has named yet; CodexSurfaces.Sort holds it until one does. It is never written.
+	codexConversation string
 }
 
 func NewEvent(action, category, severity, harnessName string, ts time.Time) Event {

@@ -27,7 +27,7 @@ func createLogsExporter(ctx context.Context, set exporter.Settings, cfg componen
 	if err != nil {
 		return nil, err
 	}
-	return exporterhelper.NewLogs(ctx, set, cfg, consumer.ConsumeLogsFunc(exp.consumeLogs))
+	return exporterhelper.NewLogs(ctx, set, cfg, consumer.ConsumeLogsFunc(exp.consumeLogs), exp.lifecycle()...)
 }
 
 func createTracesExporter(ctx context.Context, set exporter.Settings, cfg component.Config) (exporter.Traces, error) {
@@ -35,7 +35,7 @@ func createTracesExporter(ctx context.Context, set exporter.Settings, cfg compon
 	if err != nil {
 		return nil, err
 	}
-	return exporterhelper.NewTraces(ctx, set, cfg, consumer.ConsumeTracesFunc(exp.consumeTraces))
+	return exporterhelper.NewTraces(ctx, set, cfg, consumer.ConsumeTracesFunc(exp.consumeTraces), exp.lifecycle()...)
 }
 
 func createMetricsExporter(ctx context.Context, set exporter.Settings, cfg component.Config) (exporter.Metrics, error) {
@@ -43,5 +43,5 @@ func createMetricsExporter(ctx context.Context, set exporter.Settings, cfg compo
 	if err != nil {
 		return nil, err
 	}
-	return exporterhelper.NewMetrics(ctx, set, cfg, consumer.ConsumeMetricsFunc(exp.consumeMetrics))
+	return exporterhelper.NewMetrics(ctx, set, cfg, consumer.ConsumeMetricsFunc(exp.consumeMetrics), exp.lifecycle()...)
 }
