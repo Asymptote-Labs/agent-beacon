@@ -45,17 +45,23 @@ var (
 // on Windows, where the readers group is a local group named by its SID.
 //
 // The directory gets the restricted ACL first (sysacl.SecureRestrictedLogDir): SYSTEM and
-// Administrators, and read for the readers group, with nothing for anyone else. Then the marker
-// that tells the collector and the CLI the mode is written there, inheriting that ACL.
+// Administrators, and read for the readers group, with nothing for anyone else, and everything in it
+// is reset to match.
 //
 // A log that was shared is not left with the ACL change alone. Any logged-on user could open it,
 // its archives or its lock while INTERACTIVE held read and write data on them, and a handle keeps
 // the access it was opened with: it could go on reading new events, overwriting old ones, or hold
-// the lock. So each file is copied into a new file, which inherits the restricted ACL, and renamed
-// over the old one under the log's lock, which leaves any such handle on a file nothing writes or
-// reads any more. A rename over a file another process holds open without sharing delete fails; it
-// is retried for a few seconds, and then the call fails and names the file, so install rolls back
-// rather than reporting a restriction it could not make.
+// the lock. So each file is copied into a new file and renamed over the old one under the log's
+// lock, which leaves any such handle on a file nothing writes or reads any more. Each copy is
+// created with its final owner and DACL (sysacl.CreateRestrictedFile), so not even the readers
+// group can open the new lock in between. A file another process holds open without sharing delete
+// cannot be replaced; that is retried for a few seconds, and then the call fails and names the file,
+// so install rolls back rather than reporting a restriction it could not make.
+//
+// The marker that records the mode is written last, once every file has been replaced. On Windows
+// it does not change how the root writers open the log -- the directory's ACL decides what a new
+// file grants -- so nothing needs it earlier, and writing it last means a run that failed or was
+// cut short is not mistaken for a finished one: the next run copies the files again.
 func RestrictSystemLog(path string, _ int) error {
 	readers, err := logReadersSID()
 	if err != nil {
@@ -67,29 +73,35 @@ func RestrictSystemLog(path string, _ int) error {
 	if err := sysacl.SecureRestrictedLogDir(dir, base, readers); err != nil {
 		return fmt.Errorf("secure the log directory %s: %w", dir, err)
 	}
-	if err := asymptoteobserve.SetRuntimeLogAccess(path, asymptoteobserve.LogAccessRestricted); err != nil {
-		return fmt.Errorf("record the restricted mode: %w", err)
-	}
-	lockPath := path + ".lock"
 	if !wasRestricted {
 		if err := replaceLogFamily(path); err != nil {
 			return err
 		}
 	}
-	// The lock and the log exist from here on, as a shared install leaves them: the lock narrowed
-	// to SYSTEM and Administrators, the log with what it inherits.
-	for _, name := range []string{lockPath, path} {
-		f, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
-		if err != nil {
+	// The lock and the log exist from here on, as a shared install leaves them.
+	for name, lock := range map[string]bool{path + ".lock": true, path: false} {
+		f, err := sysacl.CreateRestrictedFile(name, lock)
+		if err == nil {
+			_ = f.Close()
+		} else if !errors.Is(err, fs.ErrExist) {
 			return err
 		}
-		_ = f.Close()
 	}
-	return sysacl.SecureRestrictedLock(lockPath)
+	if err := asymptoteobserve.SetRuntimeLogAccess(path, asymptoteobserve.LogAccessRestricted); err != nil {
+		return fmt.Errorf("record the restricted mode: %w", err)
+	}
+	// The marker counts only when an administrator owns it, which the creator's default owner may
+	// not be.
+	if err := sysacl.ResetRestrictedFile(asymptoteobserve.LogAccessMarkerPath(path), readers); err != nil {
+		return fmt.Errorf("secure the restricted mode marker: %w", err)
+	}
+	return nil
 }
 
 // replaceLogFamily replaces the log and its archives with fresh copies while holding the log's lock
 // (bounded), so no line lands in an old file after its copy was taken, and then the lock itself.
+// The family is listed once the lock is held: the collector rotates under it, so a list taken
+// before could miss the archive a rotation made while this waited.
 //
 // The lock is replaced after it is released: a hook already waiting for it holds it open, which
 // blocks the rename until that hook has taken and released it. No hook can open it afresh by
@@ -97,16 +109,6 @@ func RestrictSystemLog(path string, _ int) error {
 func replaceLogFamily(path string) error {
 	dir := filepath.Dir(path)
 	base := filepath.Base(path)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-	var names []string
-	for _, entry := range entries {
-		if sysacl.IsLogFamily(entry.Name(), base) && !strings.EqualFold(entry.Name(), base+".lock") {
-			names = append(names, entry.Name())
-		}
-	}
 	var errs []error
 	func() {
 		if lock, err := os.OpenFile(path+".lock", os.O_RDWR, 0); err == nil {
@@ -118,22 +120,30 @@ func replaceLogFamily(path string) error {
 				defer held.Release()
 			}
 		}
-		for _, name := range names {
-			if err := replaceWithCopy(filepath.Join(dir, name)); err != nil {
-				errs = append(errs, err)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			errs = append(errs, err)
+			return
+		}
+		for _, entry := range entries {
+			if sysacl.IsLogFamily(entry.Name(), base) && !strings.EqualFold(entry.Name(), base+".lock") {
+				if err := replaceWithCopy(filepath.Join(dir, entry.Name()), false); err != nil {
+					errs = append(errs, err)
+				}
 			}
 		}
 	}()
-	if err := replaceWithCopy(path + ".lock"); err != nil {
+	if err := replaceWithCopy(path+".lock", true); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }
 
-// replaceWithCopy copies the file at path into a new file beside it and renames that over it. A
-// file that is missing, or is not a plain file, is left alone; SecureRestrictedLogDir has already
-// removed any link where a log file belongs.
-func replaceWithCopy(path string) error {
+// replaceWithCopy copies the file at path into a new file beside it, created with its final
+// security (the lock's when lock is set), and renames that over it. A file that is missing, or is
+// not a plain file, is left alone; SecureRestrictedLogDir has already removed any link where a log
+// file belongs.
+func replaceWithCopy(path string, lock bool) error {
 	info, err := os.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -144,11 +154,11 @@ func replaceWithCopy(path string) error {
 	if !info.Mode().IsRegular() {
 		return nil
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".restrict-*")
+	tmpName := filepath.Join(filepath.Dir(path), fmt.Sprintf(".%s.restrict-%d", filepath.Base(path), time.Now().UnixNano()))
+	tmp, err := sysacl.CreateRestrictedFile(tmpName, lock)
 	if err != nil {
 		return err
 	}
-	tmpName := tmp.Name()
 	copyErr := copyInto(tmp, path)
 	if err := tmp.Close(); copyErr == nil {
 		copyErr = err
