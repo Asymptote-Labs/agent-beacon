@@ -49,6 +49,8 @@ type CallbackServer struct {
 	exchange     ExchangeFunc
 	successTitle string
 	successBody  string
+	successLabel string
+	successHref  string
 }
 
 // NewCallbackServer binds the loopback listener. exchangeTimeout should match the
@@ -94,6 +96,13 @@ func (cs *CallbackServer) SetSuccessPage(title, body string) {
 	if body != "" {
 		cs.successBody = body
 	}
+}
+
+// SetSuccessLink adds a button to the success page, so the browser tab is not a
+// dead end. The caller supplies a trusted https URL.
+func (cs *CallbackServer) SetSuccessLink(label, href string) {
+	cs.successLabel = label
+	cs.successHref = href
 }
 
 // Port is the ephemeral loopback port the dashboard must redirect to.
@@ -266,10 +275,12 @@ func (cs *CallbackServer) sendResponse(w http.ResponseWriter, success bool, erro
 
 func (cs *CallbackServer) successHTML() string {
 	return renderCallbackPage(callbackPage{
-		Title:   cs.successTitle,
-		Heading: cs.successTitle,
-		Lead:    cs.successBody,
-		Note:    "You can close this tab.",
+		Title:     cs.successTitle,
+		Heading:   cs.successTitle,
+		Lead:      cs.successBody,
+		Note:      "You can close this tab.",
+		Link:      cs.successHref,
+		LinkLabel: cs.successLabel,
 	})
 }
 
@@ -279,6 +290,9 @@ type callbackPage struct {
 	Lead    string
 	Note    string
 	Failed  bool
+	// Link and LinkLabel render a button under the lead when both are set.
+	Link      string
+	LinkLabel string
 }
 
 // renderCallbackPage draws the one page a browser ever sees from the CLI.
@@ -290,6 +304,10 @@ func renderCallbackPage(p callbackPage) string {
 	accent := "#7c5cff"
 	if p.Failed {
 		accent = "#e5484d"
+	}
+	var button string
+	if p.Link != "" && p.LinkLabel != "" {
+		button = fmt.Sprintf(`<p><a class="button" href="%s">%s</a></p>`, html.EscapeString(p.Link), html.EscapeString(p.LinkLabel))
 	}
 	var footer strings.Builder
 	if p.Note != "" {
@@ -319,6 +337,10 @@ func renderCallbackPage(p callbackPage) string {
     .lead { margin: 0; color: #a8a8b3; }
     .note { margin: 28px 0 0; font-size: 13px; color: #74747f; }
     a { color: %s; }
+    .button {
+      display: inline-block; margin-top: 24px; padding: 10px 20px; border-radius: 8px;
+      background: %s; color: #fff; font-weight: 600; text-decoration: none;
+    }
     @media (prefers-color-scheme: light) {
       body { background: #fbfbfd; color: #16161a; }
       .brand { color: #16161a; }
@@ -338,8 +360,9 @@ func renderCallbackPage(p callbackPage) string {
     <h1>%s</h1>
     <p class="lead">%s</p>
     %s
+    %s
   </main>
 </body>
-</html>`, html.EscapeString(p.Title), accent,
-		html.EscapeString(p.Heading), html.EscapeString(p.Lead), footer.String())
+</html>`, html.EscapeString(p.Title), accent, accent,
+		html.EscapeString(p.Heading), html.EscapeString(p.Lead), button, footer.String())
 }
