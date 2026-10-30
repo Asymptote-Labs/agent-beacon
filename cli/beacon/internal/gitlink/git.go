@@ -154,9 +154,9 @@ func OpenRepo(ctx context.Context, g Git) (Repo, error) {
 		// A bare repository has no top level, and nothing in one was written by an agent.
 		return Repo{}, fmt.Errorf("%w (no work tree): %s", ErrNotRepository, g.dir())
 	}
-	root := filepath.Clean(strings.TrimSpace(lines[0]))
-	gitDir := filepath.Clean(strings.TrimSpace(lines[1]))
-	common := strings.TrimSpace(lines[2])
+	root := filepath.Clean(lines[0])
+	gitDir := filepath.Clean(lines[1])
+	common := lines[2]
 	if !filepath.IsAbs(common) {
 		// --git-common-dir is relative to the directory git ran in, not to the top level.
 		base, err := filepath.Abs(g.dir())
@@ -187,7 +187,6 @@ func (r Repo) roots() []string {
 // path is not inside the work tree. A relative path is taken relative to base, which is where the
 // session that recorded it was running.
 func (r Repo) RelPath(path, base string) (string, bool) {
-	path = strings.TrimSpace(path)
 	if path == "" {
 		return "", false
 	}

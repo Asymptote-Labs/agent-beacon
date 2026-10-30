@@ -232,7 +232,11 @@ func TestPlanResumeErrors(t *testing.T) {
 func TestPlanResumeDirectory(t *testing.T) {
 	session := resumableSession(t, HarnessCodex, "s-1")
 
-	other := t.TempDir()
+	// A directory name may end in a space; --cwd names that directory, not its trimmed sibling.
+	other := filepath.Join(t.TempDir(), "other ")
+	if err := os.Mkdir(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	plan, err := PlanResume(session, PlanOptions{Dir: other, LookPath: allRuntimes})
 	if err != nil || plan.Dir != other {
 		t.Fatalf("--cwd override = %q, %v", plan.Dir, err)
