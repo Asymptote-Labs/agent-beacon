@@ -133,3 +133,33 @@ func TestSettleArchivesNeverFollowsALinkSwappedIn(t *testing.T) {
 		t.Fatalf("settling archives chmodded a symlink's target to %o, want it left at 0600", got)
 	}
 }
+
+// A hard link to another file planted as an archive, whose planted name is removed once root has it
+// open, leaves the descriptor on that file with a single link. Settling must not widen it.
+func TestSettleArchivesNeverWidensAFileWhoseHardLinkWasRemovedAfterTheOpen(t *testing.T) {
+	asRoot(t)
+	dir := t.TempDir()
+	log := filepath.Join(dir, "runtime.jsonl")
+	writeMode(t, log, 0o666)
+	archive := log + ".1"
+	victim := filepath.Join(dir, "victim")
+	writeMode(t, victim, 0o600)
+	if err := os.Link(victim, archive); err != nil {
+		t.Fatal(err)
+	}
+	if RuntimeLogIsPrivate(log) {
+		t.Fatal("a log outside the home must be shared")
+	}
+	t.Cleanup(func() { archiveOpened = nil })
+	archiveOpened = func(path string) {
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	SettleRuntimeLogArchives(log, 1)
+
+	if got := modeOf(t, victim); got != 0o600 {
+		t.Fatalf("settling archives chmodded a hard link's other file to %o, want it left at 0600", got)
+	}
+}

@@ -228,9 +228,13 @@ func SettleRuntimeLogArchives(path string, archives int) {
 	}
 }
 
-// archiveChecked runs between checking an archive and changing its mode. Nil outside tests, which
-// use it to swap the archive for a link at exactly that moment.
-var archiveChecked func(archive string)
+// archiveOpened runs between opening an archive and checking it, and archiveChecked between
+// checking it and changing its mode. Nil outside tests, which use them to race the archive's name
+// at exactly those moments.
+var (
+	archiveOpened  func(archive string)
+	archiveChecked func(archive string)
+)
 
 func settleRuntimeLogArchive(archive, logPath string) {
 	f, err := os.OpenFile(archive, os.O_RDONLY|noFollowOpenFlags(), 0)
@@ -238,8 +242,19 @@ func settleRuntimeLogArchive(archive, logPath string) {
 		return
 	}
 	defer f.Close()
+	if archiveOpened != nil {
+		archiveOpened(archive)
+	}
 	info, err := f.Stat()
 	if err != nil || !info.Mode().IsRegular() || linkedElsewhere(info) {
+		return
+	}
+	// The link count on the descriptor alone is not enough: someone can plant the archive as a hard
+	// link to another file, wait for the open, then remove their name, leaving the descriptor on that
+	// file with a single link. Settle only while the archive's path still names this very file with
+	// one link, so the archive is the file's only name and it cannot be anyone else's.
+	named, err := os.Lstat(archive)
+	if err != nil || !os.SameFile(info, named) || linkedElsewhere(named) {
 		return
 	}
 	if archiveChecked != nil {
