@@ -30,6 +30,7 @@ On an endpoint connected to Beacon Cloud, repair leaves the forwarder service, t
 | `--health-port <port>` | Local collector health-check port. Defaults to `13133`, moved by the same amount as `--otlp-http-port` when that is changed (HTTP port `4328` gives `13143`), so a second collector on alternate OTLP ports does not collide with the first |
 | `--collector <path>` | Path to a `beacon-otelcol` binary |
 | `--no-start` | Write files without starting the collector service |
+| `--log-access <mode>` | Change the system log's access mode to `shared` or `restricted`. Omitted, repair keeps the current mode. See [Restricted log access](/cli/endpoint-install#restricted-log-access) |
 | `--service <kind>` | Service manager to use: `auto` (default), `launchd`, `systemd`, or `none` for a supervised collector process |
 | `--dry-run` | Print planned actions without changing endpoint files or services |
 | `--include-runtime-metrics` | Include generic process, runtime, and harness operational OTLP metrics in Beacon JSONL. By default, low-signal metrics such as process CPU, memory, Node.js event loop, V8 heap, GitHub Copilot CLI, and OpenClaw operational metrics are filtered out |

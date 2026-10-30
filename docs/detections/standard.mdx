@@ -1,6 +1,6 @@
 ---
 title: "Detection Standard"
-description: "The threat-rules/v1.1 standard for portable AI-agent security detections"
+description: "The threat-rules/v1.2 standard for portable AI-agent security detections"
 ---
 
 ## Standard overview
@@ -11,7 +11,7 @@ This makes the format portable. Any engine that loads the same rule pack and pro
 
 ## Version
 
-The current rule format is `threat-rules/v1.1`. It adds `correlation.order` to `threat-rules/v1`; every v1 rule is still a valid v1.1 rule.
+The current rule format is `threat-rules/v1.2`. `threat-rules/v1.1` added `correlation.order` to `threat-rules/v1`, and v1.2 adds the derived field `e.command.parsed_commands`; every v1 and v1.1 rule is still a valid v1.2 rule.
 
 The version covers the rule document shape, required metadata, CEL contract, correlation model, and fixture semantics. Rule files also include their own integer `version` field, which is the content revision for that individual rule.
 

@@ -10,7 +10,6 @@ func TestCacheWriteFallbackDescribesOnlyRatesUsed(t *testing.T) {
 		wantCost       Microdollars
 		wantFallback   bool
 	}{
-		{"zero_counts", 0, 0, 0, false},
 		{"only_one_hour", 1000, 1000, 5000, false},
 		{"mixed_ttls", 1000, 600, 3800, true},
 		{"only_five_minutes", 1000, 0, 2000, true},

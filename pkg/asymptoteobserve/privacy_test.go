@@ -7,22 +7,6 @@ import (
 	"unicode/utf8"
 )
 
-func TestRedactStringRedactsKnownSecretForms(t *testing.T) {
-	tests := []string{
-		"authorization: Bearer secret-token",
-		"token=super-secret",
-		"Bearer abcdef0123456789",
-		"sk-abcdefghijklmnopqrstuvwxyz",
-	}
-	for _, input := range tests {
-		t.Run(input, func(t *testing.T) {
-			if got := RedactString(input); strings.Contains(got, "secret") || strings.Contains(got, "abcdefghijklmnopqrstuvwxyz") {
-				t.Fatalf("RedactString(%q) = %q", input, got)
-			}
-		})
-	}
-}
-
 func TestRedactStringRedactsRepeatedBareAssignedValue(t *testing.T) {
 	value := "Use token=beacon-opencode-e2e-secret, then replace beacon-opencode-e2e-secret in the file."
 	got := RedactString(value)
@@ -132,12 +116,33 @@ func TestRedactStringRedactsCommonCredentialFormats(t *testing.T) {
 		{"clone url", "git clone https://x-access-token:opaqueValue123@github.com/org/repo", "opaqueValue123"},
 		{"database url", "DATABASE_URL=postgres://app:pa55w0rd@db.internal:5432/app", "pa55w0rd"},
 		{"bare database url", "connect to postgres://app:pa55w0rd@db.internal:5432/app", "pa55w0rd"},
+		{"url password without a user", "REDIS_URL=redis://:pa55w0rd@cache.internal:6379/0", "pa55w0rd"},
+		{"bare url password without a user", "redis-cli -u redis://:pa55w0rd@localhost:6379 ping", "pa55w0rd"},
 		{"password flag", "mysql --user root --password hunter2hunter2", "hunter2hunter2"},
 		{"token flag", "tool login --token=opaque-flag-value", "opaque-flag-value"},
+		{"api key flag as a list item", `"args": ["-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-abcdef0123456789"]`, "ctx7sk-abcdef0123456789"},
+		{"token flag as a toml list item", `args = ['--token', 'opaque-flag-value']`, "opaque-flag-value"},
+		{"curl basic auth", "curl -u admin:hunter2hunter2 https://api.example.com/v1", "hunter2hunter2"},
+		{"curl basic auth in a flag cluster", "curl -fsSu admin:hunter2hunter2 https://api.example.com", "hunter2hunter2"},
+		{"curl long user flag", "curl --user admin:hunter2hunter2 https://api.example.com", "hunter2hunter2"},
+		{"curl quoted user flag", `curl --user="admin:hunter2hunter2" https://api.example.com`, "hunter2hunter2"},
+		{"curl proxy user", "curl --proxy-user proxy:hunter2hunter2 -x http://p:3128 https://x", "hunter2hunter2"},
+		{"curl attached user flag", "curl -uadmin:hunter2hunter2 https://api.example.com", "hunter2hunter2"},
+		{"curl cookie flag", "curl -b 'sessionid=abcdef123456789; csrftoken=zzz' https://x", "abcdef123456789"},
+		{"curl long cookie flag", "curl --cookie sessionid=abcdef123456789 https://x", "abcdef123456789"},
+		{"curl cookie flag in a cluster", `curl -sSb "sessionid=abcdef123456789" https://x`, "abcdef123456789"},
+		{"curl second cookie flag on a line", "curl -b 'a=1' --cookie sessionid=abcdef123456789 https://x", "abcdef123456789"},
+		{"cookie header", "curl -H 'Cookie: sessionid=abcdef123456789; csrftoken=zzz' https://x", "abcdef123456789"},
+		{"set-cookie header", "Set-Cookie: sid=abcdef123456789; HttpOnly", "abcdef123456789"},
+		{"json cookie header", `{"cookie": "sid=abcdef123456789"}`, "abcdef123456789"},
+		{"yaml cookie key", "headers:\n  cookie: sid=abcdef123456789", "abcdef123456789"},
 		{"basic auth", "Authorization: Basic dXNlcjpwYXNzd29yZA==", "dXNlcjpwYXNzd29yZA=="},
+		{"bare bearer", "Bearer abcdef0123456789", "abcdef0123456789"},
 		{"slack", "xoxb-1234567890-abcdefghijkl", "abcdefghijkl"},
 		{"stripe", "sk_live_AbCdEfGhIjKlMnOpQrSt", "AbCdEfGhIjKlMnOpQrSt"},
 		{"google", "AIzaSyA-abcdefghijklmnopqrstuvwxyz012345", "abcdefghijklmnopqrstuvwxyz012345"},
+		{"google oauth access token", "$ gcloud auth print-access-token\nya29.a0AfB_byC1x2Y3z4-W5v6U7t8S9r0QpOnMlKjIhGfEdCbA\n", "a0AfB_byC1x2Y3z4-W5v6U7t8S9r0QpOnMlKjIhGfEdCbA"},
+		{"google metadata server token", `{"access_token":"x"} ya29.c.Elt0BxAbCdEfGhIjKlMnOpQrStUvWxYz0123456789`, "Elt0BxAbCdEfGhIjKlMnOpQrStUvWxYz0123456789"},
 		{"jwt", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U", "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"},
 		{"beacon device key", "bcn_device_abcdefgh_0123456789abcdef", "0123456789abcdef"},
 		{"beacon machine credential", "bcn_enfdev_abcdefgh_0123456789abcdef", "0123456789abcdef"},
@@ -186,6 +191,15 @@ func TestRedactStringKeepsLabelsAndOrdinaryText(t *testing.T) {
 		"see https://github.com/org/repo/pull/12 and git@github.com:org/repo.git",
 		"PWD=/home/ada/project",
 		"task-0123456789abcdefghijklmnop",
+		"docker run -u 1000:1000 alpine id",
+		"curl -u admin https://api.example.com",
+		"curl -L -o out.txt https://example.com/u:v",
+		"we set a cookie banner: accept all",
+		"The cookie: chocolate chip recipe is great",
+		"curl -b cookies.txt https://example.com",
+		`curl --user-agent "Mozilla/5.0 (X11: Linux)" https://example.com`,
+		`"args": ["--max-tokens", "4096", "--author", "Ada"]`,
+		"token_type: bearer\nexpires_in: 3600",
 	}
 	for _, input := range kept {
 		if got := RedactString(input); got != input {
@@ -222,6 +236,8 @@ func TestRedactStringIsIdempotent(t *testing.T) {
 		`{"token": "opaque-session-value-9", "password": "hunter2hunter2"}`,
 		"Authorization: Bearer abc.def.ghi and --password hunter2hunter2",
 		"postgres://app:pa55w0rd@db/app",
+		"curl -u admin:hunter2hunter2 -H 'Cookie: sid=abcdef123456789' https://x",
+		"curl -b 'sessionid=abcdef123456789' --cookie sid=abcdef123456789 https://x",
 	}
 	for _, input := range inputs {
 		once := RedactString(input)
@@ -238,7 +254,11 @@ func TestSanitizeMapRedactsValuesUnderSecretKeys(t *testing.T) {
 			"password": "hunter2",
 			"apiKey":   "plain",
 			"headers":  map[string]interface{}{"X-Api-Key": "abc", "Cookie": "sid=1", "Accept": "application/json"},
-			"env":      map[string]interface{}{"GITHUB_TOKEN": "v1", "AWS_SECRET_ACCESS_KEY": "v2", "PWD": "/home/ada"},
+			"env": map[string]interface{}{
+				"GITHUB_TOKEN": "v1", "AWS_SECRET_ACCESS_KEY": "v2", "SECRET_KEY_BASE": "v3", "OPENAI_KEY": "v4",
+				"X_AUTH": "v5", "PGPASSWORD": "v6", "SSH_KEYS": "v7", "GITHUB_TOKENS": "v8", "DB_PASS": "v9",
+				"PWD": "/home/ada", "AUTHOR_NAME": "Ada Lovelace", "KEYBOARD": "dvorak", "MAX_TOKENS": "1200",
+			},
 		},
 		"usage":      map[string]interface{}{"input_tokens": float64(12)},
 		"token_type": "Bearer",
@@ -250,15 +270,21 @@ func TestSanitizeMapRedactsValuesUnderSecretKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, secret := range []string{"hunter2", `"plain"`, `"abc"`, "sid=1", `"v1"`, `"v2"`} {
+	for _, secret := range []string{"hunter2", `"plain"`, `"abc"`, "sid=1", `"v1"`, `"v2"`, `"v3"`, `"v4"`, `"v5"`, `"v6"`, `"v7"`, `"v8"`, `"v9"`} {
 		if strings.Contains(text, secret) {
 			t.Fatalf("SanitizeMap leaked %s: %s", secret, text)
 		}
 	}
-	for _, keep := range []string{"application/json", "/home/ada", `"input_tokens":12`, `"token_type":"Bearer"`, `"author":"Ada"`} {
+	for _, keep := range []string{"application/json", "/home/ada", `"input_tokens":12`, `"token_type":"Bearer"`, `"author":"Ada"`, "Ada Lovelace", "dvorak", `"MAX_TOKENS":"1200"`} {
 		if !strings.Contains(text, keep) {
 			t.Fatalf("SanitizeMap dropped %s: %s", keep, text)
 		}
+	}
+	args := SanitizeMap(map[string]interface{}{
+		"args": []interface{}{"-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-abcdef0123456789", "--max-tokens", "4096"},
+	}, PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
+	if data, _ := json.Marshal(args); string(data) != `{"args":["-y","@upstash/context7-mcp","--api-key","[REDACTED]","--max-tokens","4096"]}` {
+		t.Fatalf("argument list = %s, want only the value after --api-key redacted", data)
 	}
 	headers := SanitizeMap(map[string]interface{}{
 		"Authorization": []interface{}{"Basic dXNlcjpwYXNz"},

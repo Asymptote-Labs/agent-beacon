@@ -12,12 +12,18 @@ import (
 // the runtime does not read a hooks file until something tells it to.
 //
 // `dsh` runs Claude Code hooks through `@deepseek-ai/dsh-hooks-claude-code`, a bridge DeepSeek
-// ships as a dependency of the CLI but does not mount. Nothing is loaded by convention: the
-// harness composes itself from a plugin tree, and a plugin that is not in the tree does not exist.
-// So Beacon writes
+// publishes for every dsh release but neither ships with the CLI nor mounts. Nothing is loaded by
+// convention: the harness composes itself from a plugin tree, and a plugin that is not in the tree
+// does not exist. So Beacon writes
 //
 //  1. `$DSH_HOME/beacon-endpoint-hooks.json` -- a Claude Code hooks file Beacon owns outright, and
-//  2. one row in `$DSH_HOME/cordis.patch.yml` mounting the bridge at that file.
+//  2. one row in `$DSH_HOME/cordis.patch.yml` mounting the bridge at that file,
+//
+// and only after checking that something can load a bridge matching the running dsh (see
+// dsh_bridge.go). A row nothing resolves does not fail boot; dsh skips it with a warning and runs
+// with no hooks, so writing one unchecked is an install that reports success and captures nothing.
+// When the bridge is already mounted by absolute path at Beacon's hooks file -- how a declarative
+// setup mounts it -- Beacon writes only the hooks file.
 //
 // The second file is the interesting one and it is not Beacon's. It is the user's own tweak layer,
 // applied over every profile, and it may already carry their rows, their comments and `!!js`
@@ -56,8 +62,10 @@ const (
 	dshPatchFileName = "cordis.patch.yml"
 
 	// dshBridgePackage is the plugin that runs Claude Code hooks against the harness's extension
-	// points. It ships as a dependency of the `dsh` CLI, so mounting it needs no install step --
-	// the row alone activates it, the same way the runtime's own webhook overlay works.
+	// points. It is published at every dsh version but is only a development dependency of the
+	// `dsh` CLI, so a row naming it resolves only where it has been installed, normally into a
+	// profile with `dsh plugin --profile <name> add`. InspectDshBridge checks that before a row is
+	// written.
 	dshBridgePackage = "@deepseek-ai/dsh-hooks-claude-code"
 
 	// dshPatchEntryID identifies Beacon's row.
@@ -136,11 +144,20 @@ type DshOptions struct {
 }
 
 type DshStatus struct {
-	Installed  bool   `json:"installed"`
+	// Installed is true when the hooks file registers Beacon's commands and something mounts the
+	// bridge at it: Beacon's row in the home patch layer, or a path mount in any layer.
+	Installed bool `json:"installed"`
+	// Active is Installed and a route that loads a bridge matching the running dsh. An install that
+	// is not active writes files dsh will not act on.
+	Active     bool   `json:"active"`
 	BinaryPath string `json:"binary_path,omitempty"`
 	HooksPath  string `json:"hooks_path,omitempty"`
 	PatchPath  string `json:"patch_path,omitempty"`
-	Message    string `json:"message,omitempty"`
+	// PathMounted is true when the bridge is mounted by absolute path at the hooks file rather
+	// than by Beacon's row.
+	PathMounted bool             `json:"path_mounted,omitempty"`
+	Bridge      *DshBridgeReport `json:"bridge,omitempty"`
+	Message     string           `json:"message,omitempty"`
 }
 
 // dshHooksFile is the Claude Code hooks document Beacon writes: a bare event map.
@@ -178,8 +195,26 @@ var dshRuntime = hookRuntime{
 	isInstalled: isDshInstalledAt,
 }
 
+// InstallDsh installs the hooks, or returns a *DshBridgeUnavailableError and writes nothing when no
+// route loads a bridge matching the running dsh.
 func InstallDsh(opts DshOptions) (DshStatus, error) {
-	status, err := installRuntimeHooks(dshRuntime, RuntimeOptions(opts))
+	hooksPath, err := dshHooksPath(opts.Level)
+	if err != nil {
+		return DshStatus{}, err
+	}
+	report := InspectDshBridge(filepath.Dir(hooksPath), hooksPath)
+	if !report.Ready {
+		return DshStatus{HooksPath: hooksPath, PatchPath: dshPatchPathFor(hooksPath), Bridge: &report, Message: report.Summary()},
+			&DshBridgeUnavailableError{Report: report}
+	}
+	runtime := dshRuntime
+	if report.PathMounted() {
+		// Something already mounts a matching bridge at this hooks file. A second mount would run
+		// every hook twice, so Beacon writes the hooks file only and drops a row of its own left by
+		// an earlier install.
+		runtime.install = installDshHooksFileOnly
+	}
+	status, err := installRuntimeHooks(runtime, RuntimeOptions(opts))
 	if err != nil {
 		return DshStatus{}, err
 	}
@@ -188,7 +223,12 @@ func InstallDsh(opts DshOptions) (DshStatus, error) {
 			return DshStatus{}, err
 		}
 	}
-	return dshStatusFromRuntime(status), nil
+	out := dshStatusFromRuntime(status)
+	out.PathMounted = report.PathMounted()
+	out.Bridge = &report
+	out.Active = true
+	out.Message = report.Summary()
+	return out, nil
 }
 
 func UninstallDsh(opts DshOptions) (DshStatus, error) {
@@ -205,8 +245,20 @@ func UninstallDsh(opts DshOptions) (DshStatus, error) {
 	return dshStatusFromRuntime(status), nil
 }
 
+// DshHookStatus reports both files and whether dsh can load a matching bridge.
 func DshHookStatus(opts DshOptions) DshStatus {
-	return dshStatusFromRuntime(runtimeHookStatus(dshRuntime, RuntimeOptions(opts)))
+	status := dshStatusFromRuntime(runtimeHookStatus(dshRuntime, RuntimeOptions(opts)))
+	if status.HooksPath == "" {
+		return status
+	}
+	report := InspectDshBridge(filepath.Dir(status.HooksPath), status.HooksPath)
+	status.Bridge = &report
+	status.PathMounted = report.PathMounted()
+	status.Active = status.Installed && report.Ready
+	if status.Installed {
+		status.Message = "DeepSeek Harness endpoint hooks are installed; " + report.Summary()
+	}
+	return status
 }
 
 func IsDshInstalled(opts DshOptions) bool {
@@ -252,6 +304,24 @@ func dshPatchPathFor(hooksPath string) string {
 // pointing at a file that does not exist, and the bridge's answer to that is to log a warning and
 // register nothing -- an install that looks complete and captures nothing.
 func installDshHooks(path, binaryPath, logPath, configPath string) error {
+	if err := writeDshHooksFile(path, binaryPath, logPath, configPath); err != nil {
+		return err
+	}
+	return addDshPatchEntry(dshPatchPathFor(path), path)
+}
+
+// installDshHooksFileOnly writes the hooks file for a bridge already mounted by path, and removes a
+// row of Beacon's own so the bridge is not mounted twice.
+func installDshHooksFileOnly(path, binaryPath, logPath, configPath string) error {
+	if err := writeDshHooksFile(path, binaryPath, logPath, configPath); err != nil {
+		return err
+	}
+	_, err := removeDshPatchEntry(dshPatchPathFor(path))
+	return err
+}
+
+// writeDshHooksFile writes Beacon's hooks file.
+func writeDshHooksFile(path, binaryPath, logPath, configPath string) error {
 	if err := dshHookFileIsBeacons(path); err != nil {
 		return err
 	}
@@ -275,10 +345,7 @@ func installDshHooks(path, binaryPath, logPath, configPath string) error {
 	// service or a desktop host running as a different account, and a file only its author can
 	// read would make the hooks stop working there with no diagnostic -- the bridge logs a warning
 	// and registers nothing. The file contains a command line and no secrets.
-	if err := os.WriteFile(path, data, 0644); err != nil {
-		return err
-	}
-	return addDshPatchEntry(dshPatchPathFor(path), path)
+	return os.WriteFile(path, data, 0644)
 }
 
 // removeDshHooks removes both halves, and reports whether anything was there.
@@ -317,7 +384,7 @@ func removeDshHooks(path string) (bool, error) {
 // the same failure the other installers guard against by checking the hook command rather than the
 // file's existence, applied to a runtime where the evidence is split across two files.
 func isDshInstalledAt(path string) bool {
-	return dshHasEndpointHooks(path) && dshPatchHasEntry(dshPatchPathFor(path))
+	return dshHasEndpointHooks(path) && (dshPatchHasEntry(dshPatchPathFor(path)) || dshHasPathMount(path))
 }
 
 // dshHasEndpointHooks reports whether the hooks file registers a Beacon command.

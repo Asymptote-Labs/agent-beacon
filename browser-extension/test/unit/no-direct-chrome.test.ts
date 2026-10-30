@@ -24,19 +24,15 @@ function stripComments(code: string): string {
 const DIRECT = /\b(chrome|browser)\s*\.\s*(runtime|storage|alarms|permissions|scripting|tabs)\b/;
 
 describe('extension API access', () => {
-  const files = tsFiles(srcDir).filter((f) => path.relative(srcDir, f) !== SHIM);
-
-  it('scans the extension sources', () => {
+  it('every extension source uses the shim, not chrome.* / browser.* directly', () => {
+    const files = tsFiles(srcDir).filter((f) => path.relative(srcDir, f) !== SHIM);
     expect(files.length).toBeGreaterThan(5);
-  });
-
-  it.each(files.map((f) => [path.relative(srcDir, f), f]))(
-    '%s uses the shim, not chrome.* / browser.* directly',
-    (_rel, file) => {
-      const offending = stripComments(readFileSync(file, 'utf8'))
+    const offending = files.flatMap((file) =>
+      stripComments(readFileSync(file, 'utf8'))
         .split('\n')
-        .filter((line) => DIRECT.test(line));
-      expect(offending).toEqual([]);
-    },
-  );
+        .filter((line) => DIRECT.test(line))
+        .map((line) => `${path.relative(srcDir, file)}: ${line.trim()}`),
+    );
+    expect(offending).toEqual([]);
+  });
 });

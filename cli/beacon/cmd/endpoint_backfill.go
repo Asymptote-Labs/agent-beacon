@@ -22,12 +22,14 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/factorysession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/fxsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/groksession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/harness2session"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/hermessession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/openclawsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/opencodesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pisession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/primesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
 )
 
 // The install-time session backfill reads recent history from every agent's own session store,
@@ -134,11 +136,28 @@ var endpointBackfillRunners = func() []endpointBackfillRunner {
 			s, err := groksession.CollectOnce(groksession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveGrokStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
 		}},
+		{Name: "Harness²", Sync: "beacon endpoint harness2 sync", Run: func(r endpointBackfillRun) (int, error) {
+			opts := harness2session.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveHarness2StatePath("", r.UserMode), Since: r.Since, Budget: r.Budget}
+			opts.ExtraRoots = harness2BackfillExtraRoots(r.UserMode)
+			s, err := harness2session.CollectOnce(opts)
+			return s.EventsEmitted, err
+		}},
 		{Name: "OpenClaw Gateway", Sync: "beacon endpoint integrations openclaw sessions sync", Run: func(r endpointBackfillRun) (int, error) {
 			s, err := openclawsession.CollectOnce(openclawsession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveOpenClawSessionsStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
 		}},
 	}
+}
+
+// harness2BackfillExtraRoots is the runs directories a backfill reads beyond its own cursor's. A
+// system backfill keeps its cursor beside the system log, but a --runs-dir the console user named
+// was remembered in their own cursor file, which the home the backfill runs under names; without it
+// a checkout outside ~/harness2 would be read by the user's syncs and never by the system install.
+func harness2BackfillExtraRoots(userMode bool) []string {
+	if userMode {
+		return nil
+	}
+	return harness2session.UserRememberedRoots(harness2session.DefaultStatePath())
 }
 
 // endpointBackfillScratchDir is where a system backfill copies SQLite stores it reads as root: under
@@ -157,7 +176,10 @@ type endpointBackfillRuntimeResult struct {
 	Sync    string
 	Events  int
 	Limited bool
-	Err     error
+	// RetentionLimited says the runtime stopped before log rotation would discard what it had
+	// written, rather than at its share of the size budget.
+	RetentionLimited bool
+	Err              error
 	// Oversized names the databases a system backfill would not copy because they are too large;
 	// Sync, run as the user, reads them in place.
 	Oversized []string
@@ -245,11 +267,12 @@ func sweepEndpointBackfill(logPath string, userMode bool) endpointBackfillResult
 		// runtime's before the next one runs. A no-op otherwise.
 		sessionfs.DropSnapshots()
 		runtime := endpointBackfillRuntimeResult{Name: runner.Name, Sync: runner.Sync, Events: events, Oversized: sessionfs.TakeOversized()}
-		if errors.Is(err, writer.ErrBudgetSpent) || share.Refused() {
+		if sessionsync.Stopped(err) || share.Refused() {
 			runtime.Limited = true
 			result.Limited = true
 		}
-		if err != nil && !onlyBudgetSpent(err) {
+		runtime.RetentionLimited = errors.Is(err, writer.ErrRetentionWindowFull)
+		if err != nil && !onlyStopped(err) {
 			runtime.Err = err
 		}
 		result.Events += events
@@ -261,17 +284,19 @@ func sweepEndpointBackfill(logPath string, userMode bool) endpointBackfillResult
 	return result
 }
 
-// onlyBudgetSpent reports whether err says nothing but that the budget ran out.
-func onlyBudgetSpent(err error) bool {
+// onlyStopped reports whether err says nothing but that the sweep stopped early: the budget ran
+// out, or writing more would have rotated the sweep's own output out of the log. Either way the
+// collector's cursors stop at what was written and the runtime's sync reads the rest.
+func onlyStopped(err error) bool {
 	if joined, ok := err.(interface{ Unwrap() []error }); ok {
 		for _, e := range joined.Unwrap() {
-			if !onlyBudgetSpent(e) {
+			if !onlyStopped(e) {
 				return false
 			}
 		}
 		return true
 	}
-	return errors.Is(err, writer.ErrBudgetSpent)
+	return sessionsync.Stopped(err)
 }
 
 // reportEndpointBackfill prints what a backfill wrote: one line when it went cleanly, plus a line
@@ -307,6 +332,8 @@ func reportEndpointBackfill(out io.Writer, result endpointBackfillResult) {
 			// The error is the collector failing to open the store named just above.
 		case r.Err != nil:
 			fmt.Fprintf(out, "  %s: %v; retry with `%s`.\n", r.Name, r.Err, r.Sync)
+		case r.RetentionLimited:
+			fmt.Fprintf(out, "  %s: stopped before log rotation would discard what it wrote; `%s` reads the rest.\n", r.Name, r.Sync)
 		case r.Limited:
 			fmt.Fprintf(out, "  %s: stopped at the backfill size limit; `%s` reads the rest.\n", r.Name, r.Sync)
 		}

@@ -33,13 +33,6 @@ type beaconExporter struct {
 	listings *beaconevent.MCPListings
 }
 
-const (
-	codexConversationStarts = beaconevent.CodexConversationStarts
-	codexUserPrompt         = beaconevent.CodexUserPrompt
-	codexToolDecision       = beaconevent.CodexToolDecision
-	codexToolResult         = beaconevent.CodexToolResult
-)
-
 func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, error) {
 	cfg, ok := raw.(*Config)
 	if !ok {
@@ -164,10 +157,6 @@ func (e *beaconExporter) eventFromMetric(resourceAttrs map[string]interface{}, m
 
 func (e *beaconExporter) populateCommon(event *beaconEvent, attrs map[string]interface{}) {
 	e.eventConverter().PopulateCommon(event, attrs)
-}
-
-func (e *beaconExporter) rawPayload(attrs map[string]interface{}, extra map[string]interface{}) map[string]interface{} {
-	return e.eventConverter().RawPayload(attrs, extra)
 }
 
 func (e *beaconExporter) eventConverter() beaconevent.Converter {

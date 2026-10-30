@@ -22,21 +22,18 @@ package devinsession
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionwindow"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sqliteuri"
 	_ "modernc.org/sqlite"
 )
 
@@ -176,47 +173,16 @@ type MappedEvent struct {
 	Event       schema.Event
 }
 
-func LoadState(path string) (*State, error) {
-	state := &State{Version: StateVersion, Sessions: map[string]*Cursor{}}
-	if path == "" {
-		return state, nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return state, nil
-		}
-		return nil, err
-	}
-	var stored State
-	if err := json.Unmarshal(data, &stored); err != nil {
-		return nil, fmt.Errorf("read Devin collector state %s: %w", path, err)
-	}
-	if stored.Version != StateVersion || stored.Sessions == nil {
-		return state, nil
-	}
-	state.Sessions = stored.Sessions
-	return state, nil
+var stateFile = sessionsync.StateFile[State]{
+	Name:  "Devin",
+	New:   func() *State { return &State{Version: StateVersion, Sessions: map[string]*Cursor{}} },
+	Valid: func(s *State) bool { return s.Version == StateVersion && s.Sessions != nil },
+	Stamp: func(s *State) { s.Version = StateVersion },
 }
 
-func (s *State) Save(path string) error {
-	if path == "" {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	s.Version = StateVersion
-	data, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
+func LoadState(path string) (*State, error) { return stateFile.Load(path) }
+
+func (s *State) Save(path string) error { return stateFile.Save(path, s) }
 
 func (s *State) cursor(sessionID string) *Cursor {
 	if s.Sessions == nil {
@@ -281,13 +247,11 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 		}
 	}()
 
-	var guard *writer.RetentionGuard
-	if opts.Write && !opts.Print {
-		guard = &writer.RetentionGuard{}
-	}
+	sink := opts.sink()
+	sink.GuardRetention()
 	var errs []error
 	for i, session := range sessions {
-		changed, collectErr := collectSession(store, session, state, opts, guard, &summary)
+		changed, collectErr := collectSession(store, session, state, opts, sink, &summary)
 		if errors.Is(collectErr, writer.ErrRetentionWindowFull) {
 			// Not a failed session: this one and the rest are left for the next sweep, with
 			// cursors that have not moved past anything that was not written.
@@ -317,13 +281,10 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 			summary.SessionsChanged++
 		}
 	}
-	if guard != nil {
-		summary.EventsRetained = guard.Retained()
-		summary.EventsRotatedOut = guard.Written() - summary.EventsRetained
-		if summary.EventsRotatedOut > 0 {
-			errs = append(errs, fmt.Errorf("%d of the %d events this sweep wrote were rotated out of the runtime log by another writer before it finished",
-				summary.EventsRotatedOut, guard.Written()))
-		}
+	var rotatedOut error
+	summary.EventsRetained, summary.EventsRotatedOut, rotatedOut = sink.Retention()
+	if rotatedOut != nil {
+		errs = append(errs, rotatedOut)
 	}
 	if len(errs) > 0 {
 		return summary, errors.Join(errs...)
@@ -348,7 +309,7 @@ func countPending(store *Store, sessions []Session, state *State) int {
 	return n
 }
 
-func collectSession(store *Store, session Session, state *State, opts CollectOptions, guard *writer.RetentionGuard, summary *Summary) (bool, error) {
+func collectSession(store *Store, session Session, state *State, opts CollectOptions, sink sessionsync.Sink, summary *Summary) (bool, error) {
 	cursor := state.cursor(session.ID)
 	m := newMapper(session, cursor)
 	changed := false
@@ -368,7 +329,7 @@ func collectSession(store *Store, session Session, state *State, opts CollectOpt
 		started := m.mapSessionStarted(startTS)
 		if suppressedLive(started.Event.Event.Action, started.TimestampMS, session, opts) {
 			summary.EventsSuppressedLive++
-		} else if err := emit(started.Event, opts, guard); err != nil {
+		} else if err := sink.Emit(started.Event); err != nil {
 			return true, err
 		} else {
 			summary.EventsEmitted++
@@ -401,7 +362,7 @@ func collectSession(store *Store, session Session, state *State, opts CollectOpt
 					summary.EventsSuppressedLive++
 					continue
 				}
-				if err := emit(item.Event, opts, guard); err != nil {
+				if err := sink.Emit(item.Event); err != nil {
 					m.rollbackRow(journal)
 					return true, err
 				}
@@ -436,19 +397,8 @@ func suppressedLive(action string, timestampMS int64, session Session, opts Coll
 	return false
 }
 
-func emit(event schema.Event, opts CollectOptions, guard *writer.RetentionGuard) error {
-	if opts.Print {
-		out := opts.Out
-		if out == nil {
-			out = io.Discard
-		}
-		return json.NewEncoder(out).Encode(event)
-	}
-	if !opts.Write {
-		return nil
-	}
-	_, err := writer.AppendEvent(event, writer.Options{Path: opts.LogPath, UserMode: opts.UserMode, RotateSize: opts.RotateBytes, Guard: guard, Budget: opts.Budget})
-	return err
+func (o CollectOptions) sink() sessionsync.Sink {
+	return sessionsync.Sink{Print: o.Print, Out: o.Out, Write: o.Write, Log: writer.Options{Path: o.LogPath, UserMode: o.UserMode, RotateSize: o.RotateBytes, Budget: o.Budget}}
 }
 
 // Store is a read-only handle on sessions.db.
@@ -460,7 +410,7 @@ type Store struct {
 }
 
 func OpenStore(path string) (*Store, error) {
-	db, err := openSQLiteReadOnly(path)
+	db, err := sessionsync.OpenSQLite(path, "busy_timeout(1000)")
 	if err != nil {
 		return nil, err
 	}
@@ -671,12 +621,4 @@ func unixSecondsMS(value sql.NullInt64) int64 {
 		return 0
 	}
 	return value.Int64 * 1000
-}
-
-func openSQLiteReadOnly(path string) (*sql.DB, error) {
-	path, err := sessionfs.SQLitePath(path)
-	if err != nil {
-		return nil, err
-	}
-	return sql.Open("sqlite", sqliteuri.File(path, url.Values{"mode": {"ro"}, "_pragma": {"busy_timeout(1000)"}}))
 }

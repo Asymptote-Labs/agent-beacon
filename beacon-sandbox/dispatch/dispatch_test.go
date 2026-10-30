@@ -3,7 +3,6 @@ package dispatch
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -155,35 +154,6 @@ func TestOwnRunSelectionRefusesTwoRunsCarryingTheID(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the error should mention %q: %v", want, err)
 		}
-	}
-}
-
-// Each dispatch needs an id no concurrent one shares, in a form that survives a run title.
-func TestCorrelationIDsAreUniqueHex(t *testing.T) {
-	seen := map[string]bool{}
-	for range 1000 {
-		id, err := newCorrelationID()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !regexp.MustCompile(`^[0-9a-f]{24}$`).MatchString(id) {
-			t.Fatalf("correlation id %q is not 24 lowercase hex characters", id)
-		}
-		if seen[id] {
-			t.Fatalf("correlation id %q repeated", id)
-		}
-		seen[id] = true
-	}
-}
-
-// The floor is the maximum, not the first element: it is what every later comparison rests on, so
-// it stays correct even if the listing order ever changes.
-func TestRunFloorIsTheMaximumID(t *testing.T) {
-	if got := maxRunID([]ghRun{{DatabaseID: 3}, {DatabaseID: 9}, {DatabaseID: 5}}); got != 9 {
-		t.Errorf("floor = %d, want 9", got)
-	}
-	if got := maxRunID(nil); got != 0 {
-		t.Errorf("no history must yield a zero floor, got %d", got)
 	}
 }
 

@@ -21,22 +21,6 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
-func TestRestoreTargetTimestampedBackup(t *testing.T) {
-	got := restoreTarget("/tmp/settings.json.beacon.20260511T230000Z.bak")
-	want := "/tmp/settings.json"
-	if got != want {
-		t.Fatalf("restoreTarget() = %q, want %q", got, want)
-	}
-}
-
-func TestRestoreTargetLegacyBackup(t *testing.T) {
-	got := restoreTarget("/tmp/settings.json.beacon.bak")
-	want := "/tmp/settings.json"
-	if got != want {
-		t.Fatalf("restoreTarget() = %q, want %q", got, want)
-	}
-}
-
 func TestBuildConfigAppliesInstallOptions(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
@@ -173,117 +157,67 @@ func TestSelectRuntimeLogKeepsUserLogWhenUserCollectorIsRunning(t *testing.T) {
 	}
 }
 
-func TestConfigureHarnessesRejectsUnsupportedHarness(t *testing.T) {
-	cfg := endpointconfig.Config{Harnesses: []string{"unknown"}}
-	if _, err := configureHarnesses(cfg); err == nil || !strings.Contains(err.Error(), "unsupported harness") {
-		t.Fatalf("configureHarnesses error = %v, want unsupported harness", err)
+// Each refusal names what does work instead: the launch environment, with this install's HTTP
+// port, for the MDM-managed runtimes, and the hooks command for the hook-managed ones. The generic
+// "unsupported harness" is only for names Beacon does not know, since it reads as "not supported
+// at all".
+func TestConfigureHarnessesRejectsRuntimesItCannotConfigure(t *testing.T) {
+	for name, want := range map[string][]string{
+		"unknown":   {"unsupported harness"},
+		"factory":   {"Factory Droid telemetry is MDM-managed", "54318"},
+		"copilot":   {"Copilot CLI telemetry is MDM-managed", "54318"},
+		"opencode":  {"endpoint hooks install --harness opencode"},
+		"cline":     {"endpoint hooks install --harness cline"},
+		"qwen":      {"endpoint hooks install --harness qwen"},
+		"qwen_code": {"endpoint hooks install --harness qwen"},
+	} {
+		cfg := endpointconfig.Config{Harnesses: []string{name}, Collector: endpointconfig.Collector{GRPCPort: 54317, HTTPPort: 54318}}
+		_, err := configureHarnesses(cfg)
+		if err == nil {
+			t.Fatalf("configureHarnesses(%q) succeeded, want a refusal", name)
+		}
+		for _, w := range want {
+			if !strings.Contains(err.Error(), w) {
+				t.Fatalf("configureHarnesses(%q) error = %v, want it to contain %q", name, err, w)
+			}
+		}
 	}
 }
 
-func TestConfigureHarnessesRejectsFactoryAsMDMManaged(t *testing.T) {
-	cfg := endpointconfig.Config{
-		Harnesses: []string{"factory"},
-		Collector: endpointconfig.Collector{
-			GRPCPort: 54317,
-			HTTPPort: 54318,
-		},
-	}
-
-	_, err := configureHarnesses(cfg)
-	if err == nil || !strings.Contains(err.Error(), "Factory Droid telemetry is MDM-managed") || !strings.Contains(err.Error(), "54318") {
-		t.Fatalf("configureHarnesses error = %v, want MDM-managed Factory error with HTTP port", err)
-	}
-}
-
-func TestConfigureHarnessesRejectsCopilotCLIAsMDMManaged(t *testing.T) {
-	cfg := endpointconfig.Config{
-		Harnesses: []string{"copilot"},
-		Collector: endpointconfig.Collector{
-			GRPCPort: 54317,
-			HTTPPort: 54318,
-		},
-	}
-
-	_, err := configureHarnesses(cfg)
-	if err == nil || !strings.Contains(err.Error(), "Copilot CLI telemetry is MDM-managed") || !strings.Contains(err.Error(), "54318") {
-		t.Fatalf("configureHarnesses error = %v, want MDM-managed Copilot CLI error with HTTP port", err)
-	}
-}
-
-func TestConfigureHarnessesRejectsOpenCodeAsHookManaged(t *testing.T) {
-	cfg := endpointconfig.Config{Harnesses: []string{"opencode"}}
-	_, err := configureHarnesses(cfg)
-	if err == nil || !strings.Contains(err.Error(), "endpoint hooks install --harness opencode") {
-		t.Fatalf("configureHarnesses error = %v, want opencode hook-managed error", err)
-	}
-}
-
-// Cline telemetry is a plugin, not an OTLP endpoint setting, so `endpoint install --harness cline`
-// has nothing to configure. Saying so names the command that does work; falling through to
-// "unsupported harness" would suggest Cline is not supported at all.
-func TestConfigureHarnessesRejectsClineAsHookManaged(t *testing.T) {
-	cfg := endpointconfig.Config{Harnesses: []string{"cline"}}
-	_, err := configureHarnesses(cfg)
-	if err == nil || !strings.Contains(err.Error(), "endpoint hooks install --harness cline") {
-		t.Fatalf("configureHarnesses error = %v, want the Cline hook-managed error", err)
-	}
-}
-
-func TestConfigureHarnessesAcceptsGemini(t *testing.T) {
+// Claude Code and Gemini CLI export over gRPC, VS Code Copilot over HTTP: each runtime's settings
+// must point at the collector port it speaks.
+func TestConfigureHarnessesPointsEachRuntimeAtItsOTLPPort(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
-	cfg := endpointconfig.Config{
-		UserMode:  true,
-		Harnesses: []string{"gemini"},
-		Collector: endpointconfig.Collector{
-			GRPCPort: 54317,
-		},
-	}
-
-	paths, err := configureHarnesses(cfg)
+	vscodeSettings, err := harness.VSCodeUserSettingsPath()
 	if err != nil {
-		t.Fatalf("configureHarnesses returned error: %v", err)
+		t.Fatalf("VSCodeUserSettingsPath returned error: %v", err)
 	}
-	wantPath := filepath.Join(home, ".gemini", "settings.json")
-	if len(paths) != 1 || paths[0] != wantPath {
-		t.Fatalf("paths = %#v, want %q", paths, wantPath)
-	}
-	data, err := os.ReadFile(wantPath)
-	if err != nil {
-		t.Fatalf("read Gemini settings: %v", err)
-	}
-	text := string(data)
-	if !strings.Contains(text, `"otlpEndpoint": "http://127.0.0.1:54317"`) || !strings.Contains(text, `"logPrompts": true`) {
-		t.Fatalf("Gemini settings were not configured for local OTLP with prompt logging:\n%s", text)
-	}
-}
-
-func TestWriteReadManifestRoundTrip(t *testing.T) {
-	home := t.TempDir()
-	testenv.SetHome(t, home)
-	manifest := Manifest{
-		CreatedAt:      "2026-05-12T00:00:00Z",
-		UserMode:       true,
-		Files:          []string{filepath.Join(home, "config.json")},
-		Backups:        []string{filepath.Join(home, "settings.json.beacon.bak")},
-		HarnessConfigs: []string{filepath.Join(home, ".claude", "settings.json")},
-		ServiceLabel:   "com.beacon.endpoint.collector.user",
-		LogPath:        filepath.Join(home, "runtime.jsonl"),
-	}
-
-	path, err := writeManifest(true, manifest)
-	if err != nil {
-		t.Fatalf("writeManifest returned error: %v", err)
-	}
-	if got, want := path, filepath.Join(home, ".beacon", "endpoint", "install-manifest.json"); got != want {
-		t.Fatalf("manifest path = %q, want %q", got, want)
-	}
-	loaded, err := ReadManifest(true)
-	if err != nil {
-		t.Fatalf("ReadManifest returned error: %v", err)
-	}
-	if loaded.ServiceLabel != manifest.ServiceLabel || loaded.Files[0] != manifest.Files[0] || loaded.Backups[0] != manifest.Backups[0] {
-		t.Fatalf("manifest did not round-trip: %#v", loaded)
+	for _, tc := range []struct {
+		harness, path string
+		want          []string
+	}{
+		{"claude", filepath.Join(home, ".claude", "settings.json"), []string{`"CLAUDE_CODE_ENABLE_TELEMETRY": "1"`, `"OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:54317"`}},
+		{"gemini", filepath.Join(home, ".gemini", "settings.json"), []string{`"otlpEndpoint": "http://127.0.0.1:54317"`, `"logPrompts": true`}},
+		{"vscode", vscodeSettings, []string{`"github.copilot.chat.otel.otlpEndpoint": "http://127.0.0.1:54318"`, `"github.copilot.chat.otel.captureContent": false`}},
+	} {
+		cfg := endpointconfig.Config{UserMode: true, Harnesses: []string{tc.harness}, Collector: endpointconfig.Collector{GRPCPort: 54317, HTTPPort: 54318}}
+		paths, err := configureHarnesses(cfg)
+		if err != nil {
+			t.Fatalf("configureHarnesses(%q) returned error: %v", tc.harness, err)
+		}
+		if len(paths) != 1 || paths[0] != tc.path {
+			t.Fatalf("configureHarnesses(%q) paths = %#v, want %q", tc.harness, paths, tc.path)
+		}
+		data, err := os.ReadFile(tc.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range tc.want {
+			if !strings.Contains(string(data), want) {
+				t.Fatalf("%s settings missing %s:\n%s", tc.harness, want, data)
+			}
+		}
 	}
 }
 
@@ -397,6 +331,7 @@ func TestPreflightRejectsPortInUse(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("preflight is macOS-only")
 	}
+	shortTimeouts(t)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -458,40 +393,6 @@ func TestUninstallFallbackRemovesKnownFiles(t *testing.T) {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("%s still exists or unexpected error: %v", path, err)
 		}
-	}
-}
-
-func TestConfigureHarnessesAcceptsVSCode(t *testing.T) {
-	home := t.TempDir()
-	testenv.SetHome(t, home)
-	cfg := endpointconfig.Config{
-		UserMode:  true,
-		Harnesses: []string{"vscode"},
-		Collector: endpointconfig.Collector{
-			GRPCPort: 54317,
-			HTTPPort: 54318,
-		},
-	}
-
-	paths, err := configureHarnesses(cfg)
-	if err != nil {
-		t.Fatalf("configureHarnesses returned error: %v", err)
-	}
-	settingsPath, err := harness.VSCodeUserSettingsPath()
-	if err != nil {
-		t.Fatalf("VSCodeUserSettingsPath returned error: %v", err)
-	}
-	if len(paths) != 1 || paths[0] != settingsPath {
-		t.Fatalf("paths = %#v, want VS Code settings path %q", paths, settingsPath)
-	}
-	data, err := os.ReadFile(settingsPath)
-	if err != nil {
-		t.Fatalf("read VS Code settings: %v", err)
-	}
-	text := string(data)
-	if !strings.Contains(text, `"github.copilot.chat.otel.otlpEndpoint": "http://127.0.0.1:54318"`) ||
-		!strings.Contains(text, `"github.copilot.chat.otel.captureContent": false`) {
-		t.Fatalf("VS Code settings did not configure low-noise local OTLP: %s", text)
 	}
 }
 
@@ -740,50 +641,6 @@ func freePort(t *testing.T) int {
 	return 0
 }
 
-func TestConfigureHarnessesAcceptsClaude(t *testing.T) {
-	home := t.TempDir()
-	testenv.SetHome(t, home)
-	cfg := endpointconfig.Config{
-		UserMode:  true,
-		Harnesses: []string{"claude"},
-		Collector: endpointconfig.Collector{GRPCPort: 54317},
-	}
-
-	paths, err := configureHarnesses(cfg)
-	if err != nil {
-		t.Fatalf("configureHarnesses returned error: %v", err)
-	}
-	wantPath := filepath.Join(home, ".claude", "settings.json")
-	if len(paths) != 1 || paths[0] != wantPath {
-		t.Fatalf("paths = %#v, want %q", paths, wantPath)
-	}
-	data, err := os.ReadFile(wantPath)
-	if err != nil {
-		t.Fatalf("read Claude settings: %v", err)
-	}
-	text := string(data)
-	if !strings.Contains(text, `"CLAUDE_CODE_ENABLE_TELEMETRY": "1"`) ||
-		!strings.Contains(text, `"OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:54317"`) {
-		t.Fatalf("Claude settings were not configured for local OTLP:\n%s", text)
-	}
-}
-
-func TestSameCollectorPorts(t *testing.T) {
-	base := endpointconfig.Config{Collector: endpointconfig.Collector{GRPCPort: 4317, HTTPPort: 4318}}
-	same := endpointconfig.Config{Collector: endpointconfig.Collector{GRPCPort: 4317, HTTPPort: 4318}}
-	if !sameCollectorPorts(base, same) {
-		t.Fatal("sameCollectorPorts returned false for equal ports")
-	}
-	differentGRPC := endpointconfig.Config{Collector: endpointconfig.Collector{GRPCPort: 14317, HTTPPort: 4318}}
-	if sameCollectorPorts(base, differentGRPC) {
-		t.Fatal("sameCollectorPorts returned true for differing gRPC port")
-	}
-	differentHTTP := endpointconfig.Config{Collector: endpointconfig.Collector{GRPCPort: 4317, HTTPPort: 14318}}
-	if sameCollectorPorts(base, differentHTTP) {
-		t.Fatal("sameCollectorPorts returned true for differing HTTP port")
-	}
-}
-
 func TestLoadOrDefaultFallsBackToDefaultThenLoadsSavedConfig(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
@@ -811,41 +668,6 @@ func TestLoadOrDefaultFallsBackToDefaultThenLoadsSavedConfig(t *testing.T) {
 	overridden := loadOrDefault(true, logPath)
 	if overridden.LogPath != logPath {
 		t.Fatalf("override LogPath = %q, want %q", overridden.LogPath, logPath)
-	}
-}
-
-func TestSnapshotAndRestoreFileRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "settings.json")
-	if err := os.WriteFile(path, []byte("original"), 0640); err != nil {
-		t.Fatalf("write fixture: %v", err)
-	}
-
-	snap := snapshotFile(path)
-	if !snap.Existed || string(snap.Data) != "original" {
-		t.Fatalf("snapshot did not capture existing file: %#v", snap)
-	}
-
-	if err := os.WriteFile(path, []byte("mutated"), 0640); err != nil {
-		t.Fatalf("mutate file: %v", err)
-	}
-	restoreFile(path, snap)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read restored file: %v", err)
-	}
-	if string(data) != "original" {
-		t.Fatalf("restoreFile did not restore content: %q", string(data))
-	}
-
-	// A snapshot of a missing file restores by removing the file.
-	missing := snapshotFile(filepath.Join(dir, "absent.json"))
-	if missing.Existed {
-		t.Fatal("snapshot of missing file should not report Existed")
-	}
-	restoreFile(path, missing)
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("restoreFile of missing snapshot should remove file, stat err = %v", err)
 	}
 }
 
@@ -971,19 +793,5 @@ func TestGetStatusAndResolveRuntimeLogReportRequestedConfig(t *testing.T) {
 	}
 	if status.Version == "" {
 		t.Fatal("GetStatus should populate Version")
-	}
-}
-
-// Qwen Code is a Gemini CLI fork without Gemini's OpenTelemetry export, so `endpoint install
-// --harness qwen` has nothing to point at the local collector. Naming the command that does work
-// matters more here than for most runtimes: the generic "unsupported harness" would read as "Beacon
-// does not support Qwen Code" when the support exists one command over.
-func TestConfigureHarnessesRejectsQwenAsHookManaged(t *testing.T) {
-	for _, name := range []string{"qwen", "qwen_code"} {
-		cfg := endpointconfig.Config{Harnesses: []string{name}}
-		_, err := configureHarnesses(cfg)
-		if err == nil || !strings.Contains(err.Error(), "endpoint hooks install --harness qwen") {
-			t.Fatalf("configureHarnesses(%q) error = %v, want the Qwen hook-managed error", name, err)
-		}
 	}
 }

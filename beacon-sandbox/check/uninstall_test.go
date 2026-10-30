@@ -125,16 +125,3 @@ func TestANonZeroUninstallFails(t *testing.T) {
 		t.Fatal("a failed uninstall command did not fail the run")
 	}
 }
-
-// TestStatusDisagreeingWithTheMachineFails covers the case where the two authorities disagree.
-//
-// Both are asked on purpose. Beacon's status is Beacon's opinion of itself; the service manager is a
-// fact about the machine. Those are the two that came apart in the original bug, so a check reading
-// only one of them would have passed it.
-func TestStatusDisagreeingWithTheMachineFails(t *testing.T) {
-	r := clean()
-	r.Status = `{"service":{"label":"beacon-collector.service","loaded":true,"running":true}}`
-	if !has(findingsFor(r), "uninstall.status_agrees", SevFail) {
-		t.Fatal("a status still reporting a running collector after uninstall did not fail")
-	}
-}

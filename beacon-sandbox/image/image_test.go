@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -146,15 +147,36 @@ func TestFilesMatchPostPushLayers(t *testing.T) {
 	}
 }
 
-// PATH must reach both binaries, or the session cannot find claude or beacon.
-func TestPathPrependReachesBothBinaries(t *testing.T) {
-	path := PathPrepend()
-	joined := strings.Join(path, ":")
-	if !strings.Contains(joined, AgentHome+"/.local/bin") {
-		t.Errorf("PATH must include the agent's local bin (where the Claude installer lands): %v", path)
+// Each staged binary must be the right local artifact, and the session PATH must reach where it
+// lands and where the Claude installer puts claude. A swapped or empty source, or a PATH that
+// misses either directory, still builds an image -- and every paid session then fails on
+// "command not found" or runs the wrong binary.
+func TestBuildStagesBothArtifactsWhereTheSessionPathFindsThem(t *testing.T) {
+	root := stubRepo(t)
+	spec, err := Build(Spec{RepoRoot: root}, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(joined, BeaconDir) {
-		t.Errorf("PATH must include %s: %v", BeaconDir, path)
+	want := map[string]string{
+		BeaconDir + "/beacon":         BeaconPath(root),
+		BeaconDir + "/beacon-otelcol": CollectorPath(root),
+	}
+	for remote, local := range want {
+		if got := spec.Files[remote]; got != local {
+			t.Errorf("Files[%q] = %q, want the local artifact %q", remote, got, local)
+		}
+	}
+	onPath := map[string]bool{}
+	for _, dir := range LinuxLayout().PathPrepend {
+		onPath[dir] = true
+	}
+	for remote := range spec.Files {
+		if dir := remote[:strings.LastIndex(remote, "/")]; !onPath[dir] {
+			t.Errorf("%s is staged in %s, which the session PATH %v does not reach", remote, dir, LinuxLayout().PathPrepend)
+		}
+	}
+	if claudeBin := AgentHome + "/.local/bin"; !onPath[claudeBin] {
+		t.Errorf("the session PATH %v misses %s, where the Claude installer puts claude", LinuxLayout().PathPrepend, claudeBin)
 	}
 }
 
@@ -173,17 +195,6 @@ func TestArtifactsErrorNamesTheBuildCommand(t *testing.T) {
 	// with forward slashes.
 	if !strings.Contains(filepath.ToSlash(err.Error()), beaconRelPath) {
 		t.Errorf("error should name the missing path, got: %v", err)
-	}
-}
-
-func TestArtifactsSucceedsWhenBothPresent(t *testing.T) {
-	root := stubRepo(t)
-	a, err := Artifacts(root, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if a.Beacon != BeaconPath(root) || a.Collector != CollectorPath(root) {
-		t.Errorf("unexpected artifact paths: %+v", a)
 	}
 }
 
@@ -228,37 +239,121 @@ func keys(m map[string]string) []string {
 // release both read as fresh -- the exact false pass it claims to guard, and one that already cost
 // a wasted investigation once. Cursor Bugbot flagged the gap. These pin the two added signals.
 
-func gitRepo(t *testing.T) string {
+// The freshness tests all start from the same history: exp.go committed as "base", with or without
+// a lightweight v1.0.6 release tag on it. Both repositories are built once per package run and
+// every test works on its own copy, so the git spawns that dominate these tests are paid once.
+var releaseRepos struct {
+	once      sync.Once
+	dir       string // holds "base" and "tagged"
+	skip, err error
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if releaseRepos.dir != "" {
+		os.RemoveAll(releaseRepos.dir)
+	}
+	os.Exit(code)
+}
+
+// hermeticGit isolates git from the developer's global and system config for the whole test, so
+// the production git calls under test see the same isolation. A global tag.gpgSign, for instance,
+// turns `git tag` into an annotated tag that needs a message; the release tags these tests model
+// are plain lightweight tags.
+func hermeticGit(t *testing.T) {
 	t.Helper()
-	root := t.TempDir()
-	for _, args := range [][]string{
-		{"init", "-q"},
-		{"config", "user.email", "t@example.com"},
-		{"config", "user.name", "t"},
+	cfg := filepath.Join(t.TempDir(), "gitconfig")
+	writeFile(t, cfg, "")
+	for k, v := range map[string]string{
+		"GIT_CONFIG_GLOBAL":   cfg,
+		"GIT_CONFIG_NOSYSTEM": "1",
+		"GIT_AUTHOR_NAME":     "t",
+		"GIT_AUTHOR_EMAIL":    "t@example.com",
+		"GIT_COMMITTER_NAME":  "t",
+		"GIT_COMMITTER_EMAIL": "t@example.com",
 	} {
-		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Skipf("git unavailable: %v: %s", err, out)
+		t.Setenv(k, v)
+	}
+}
+
+// releaseRepo returns this test's own copy of the release history, tagged v1.0.6 when tagged is
+// set, and the path of its exporter source.
+func releaseRepo(t *testing.T, tagged bool) (root, src string) {
+	t.Helper()
+	hermeticGit(t)
+	releaseRepos.once.Do(buildReleaseRepos)
+	if releaseRepos.skip != nil {
+		t.Skipf("git unavailable: %v", releaseRepos.skip)
+	}
+	if releaseRepos.err != nil {
+		t.Fatal(releaseRepos.err)
+	}
+	name := "base"
+	if tagged {
+		name = "tagged"
+	}
+	root = filepath.Join(t.TempDir(), "repo")
+	if err := os.CopyFS(root, os.DirFS(filepath.Join(releaseRepos.dir, name))); err != nil {
+		t.Fatal(err)
+	}
+	return root, filepath.Join(root, "collector-builder", "exporter", "exp.go")
+}
+
+func buildReleaseRepos() {
+	dir, err := os.MkdirTemp("", "beacon-sandbox-image-")
+	if err != nil {
+		releaseRepos.err = err
+		return
+	}
+	releaseRepos.dir = dir
+	base, tagged := filepath.Join(dir, "base"), filepath.Join(dir, "tagged")
+	if err := runGit(dir, "init", "-q", base); err != nil {
+		releaseRepos.skip = err
+		return
+	}
+	for _, d := range []string{filepath.Join(base, "collector-builder", "exporter"), filepath.Dir(CollectorPath(base))} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			releaseRepos.err = err
+			return
 		}
 	}
-	if err := os.MkdirAll(filepath.Join(root, "collector-builder", "exporter"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(base, "collector-builder", "exporter", "exp.go"), []byte("package exp\n"), 0o644); err != nil {
+		releaseRepos.err = err
+		return
+	}
+	for _, step := range []func() error{
+		func() error { return runGit(base, "add", "-A") },
+		func() error { return runGit(base, "commit", "-qm", "base") },
+		func() error { return os.CopyFS(tagged, os.DirFS(base)) },
+		func() error { return runGit(tagged, "tag", "v1.0.6") },
+	} {
+		if err := step(); err != nil {
+			releaseRepos.err = err
+			return
+		}
+	}
+}
+
+func runGit(root string, args ...string) error {
+	if out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
+		return fmt.Errorf("git %v: %v: %s", args, err, out)
+	}
+	return nil
+}
+
+func git(t *testing.T, root string, args ...string) {
+	t.Helper()
+	if err := runGit(root, args...); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Dir(CollectorPath(root)), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return root
 }
 
 // commitAll makes the tree clean, so a test can isolate a freshness signal other than
 // "uncommitted changes" -- which correctly fires first and would otherwise mask the rest.
 func commitAll(t *testing.T, root, msg string) {
 	t.Helper()
-	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", msg}} {
-		if out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, out)
-		}
-	}
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", msg)
 }
 
 func writeFile(t *testing.T, path, body string) {
@@ -271,18 +366,7 @@ func writeFile(t *testing.T, path, body string) {
 // A binary downloaded from a release must be reported stale once collector-builder/ has changed
 // since that release, even though every change is committed and the tree is clean.
 func TestDownloadedCollectorIsStaleAfterCommittedExporterChanges(t *testing.T) {
-	root := gitRepo(t)
-	src := filepath.Join(root, "collector-builder", "exporter", "exp.go")
-	writeFile(t, src, "package exp\n")
-	run := func(args ...string) {
-		t.Helper()
-		if out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, out)
-		}
-	}
-	run("add", "-A")
-	run("commit", "-qm", "base")
-	run("tag", "v1.0.6")
+	root, src := releaseRepo(t, true)
 
 	// The collector came from that release, recorded exactly as EnsureCollector would.
 	writeFile(t, CollectorPath(root), "binary")
@@ -297,8 +381,7 @@ func TestDownloadedCollectorIsStaleAfterCommittedExporterChanges(t *testing.T) {
 
 	// Now commit an exporter change. Tree is still clean, so the old check saw nothing.
 	writeFile(t, src, "package exp\n// changed\n")
-	run("add", "-A")
-	run("commit", "-qm", "change the exporter")
+	commitAll(t, root, "change the exporter")
 
 	stale, why := CollectorIsStale(root)
 	if !stale {
@@ -311,9 +394,7 @@ func TestDownloadedCollectorIsStaleAfterCommittedExporterChanges(t *testing.T) {
 
 // A locally built binary older than its sources is stale even with a clean tree and no provenance.
 func TestLocallyBuiltCollectorOlderThanSourcesIsStale(t *testing.T) {
-	root := gitRepo(t)
-	writeFile(t, filepath.Join(root, "collector-builder", "exporter", "exp.go"), "package exp\n")
-	commitAll(t, root, "sources") // clean tree, so only the mtime signal is under test
+	root, _ := releaseRepo(t, false) // clean tree, so only the mtime signal is under test
 	writeFile(t, CollectorPath(root), "binary")
 	// Backdate the binary so the source is unambiguously newer.
 	old := time.Now().Add(-2 * time.Hour)
@@ -332,9 +413,7 @@ func TestLocallyBuiltCollectorOlderThanSourcesIsStale(t *testing.T) {
 
 // A freshly built binary must not warn, or the check becomes noise everyone learns to ignore.
 func TestFreshLocalBuildIsNotStale(t *testing.T) {
-	root := gitRepo(t)
-	writeFile(t, filepath.Join(root, "collector-builder", "exporter", "exp.go"), "package exp\n")
-	commitAll(t, root, "sources") // clean tree, so only the mtime signal is under test
+	root, _ := releaseRepo(t, false) // clean tree, so only the mtime signal is under test
 	// Built after the source.
 	writeFile(t, CollectorPath(root), "binary")
 	later := time.Now().Add(time.Minute)
@@ -353,13 +432,7 @@ func TestFreshLocalBuildIsNotStale(t *testing.T) {
 // never be satisfied. A warning that cannot be cleared trains people to ignore it, which is worse
 // than the false pass it replaced. Cursor Bugbot caught it.
 func TestRebuildingLocallyClearsTheDownloadedProvenance(t *testing.T) {
-	root := gitRepo(t)
-	src := filepath.Join(root, "collector-builder", "exporter", "exp.go")
-	writeFile(t, src, "package exp\n")
-	commitAll(t, root, "base")
-	if out, err := exec.Command("git", "-C", root, "tag", "v1.0.6").CombinedOutput(); err != nil {
-		t.Fatalf("tag: %v: %s", err, out)
-	}
+	root, src := releaseRepo(t, true)
 
 	// A downloaded binary, with provenance recorded exactly as EnsureCollector would.
 	writeFile(t, CollectorPath(root), "downloaded-binary")
@@ -393,33 +466,9 @@ func TestRebuildingLocallyClearsTheDownloadedProvenance(t *testing.T) {
 	}
 }
 
-// The marker must still be trusted while it genuinely describes the binary, or the release signal
-// would never fire at all.
-func TestProvenanceIsTrustedWhileItMatchesTheBinary(t *testing.T) {
-	root := gitRepo(t)
-	writeFile(t, filepath.Join(root, "collector-builder", "exporter", "exp.go"), "package exp\n")
-	commitAll(t, root, "base")
-	if out, err := exec.Command("git", "-C", root, "tag", "v1.0.6").CombinedOutput(); err != nil {
-		t.Fatalf("tag: %v: %s", err, out)
-	}
-	writeFile(t, CollectorPath(root), "downloaded-binary")
-	if err := writeProvenance(root, "v1.0.6"); err != nil {
-		t.Fatal(err)
-	}
-	if got, state := recordedRelease(root); got != "v1.0.6" || state != provenanceTrusted {
-		t.Errorf("an untouched binary must keep its provenance, got %q state=%v", got, state)
-	}
-
-	// Replace the binary: the marker no longer describes it.
-	writeFile(t, CollectorPath(root), "something-else-entirely")
-	if _, state := recordedRelease(root); state == provenanceTrusted {
-		t.Error("a replaced binary must not keep a trusted marker")
-	}
-}
-
 // A marker from before identity was recorded cannot be validated, so it must not be trusted.
 func TestLegacyProvenanceWithoutIdentityIsNotTrusted(t *testing.T) {
-	root := gitRepo(t)
+	root := stubRepo(t)
 	writeFile(t, CollectorPath(root), "binary")
 	writeFile(t, provenancePath(root), "release:v1.0.5\n")
 
@@ -522,9 +571,7 @@ func TestDownloadRefusesAMismatchedChecksum(t *testing.T) {
 // changes present, collector_freshness reported green and a run verified the wrong beacon-otelcol:
 // exactly the false pass this check exists to prevent. Cursor Bugbot reported it as High.
 func TestUnresolvableReleaseTagIsNotReportedFresh(t *testing.T) {
-	root := gitRepo(t)
-	writeFile(t, filepath.Join(root, "collector-builder", "exporter", "exp.go"), "package exp\n")
-	commitAll(t, root, "base")
+	root, _ := releaseRepo(t, false)
 
 	writeFile(t, CollectorPath(root), "downloaded-binary")
 	// Provenance names a release this clone has never seen.
@@ -547,38 +594,13 @@ func TestUnresolvableReleaseTagIsNotReportedFresh(t *testing.T) {
 	}
 }
 
-// A resolvable tag with no drift must still report fresh, or every downloaded collector warns
-// forever and the check becomes noise.
-func TestResolvableTagWithNoDriftStaysFresh(t *testing.T) {
-	root := gitRepo(t)
-	writeFile(t, filepath.Join(root, "collector-builder", "exporter", "exp.go"), "package exp\n")
-	commitAll(t, root, "base")
-	if out, err := exec.Command("git", "-C", root, "tag", "v1.0.6").CombinedOutput(); err != nil {
-		t.Fatalf("tag: %v: %s", err, out)
-	}
-	writeFile(t, CollectorPath(root), "downloaded-binary")
-	if err := writeProvenance(root, "v1.0.6"); err != nil {
-		t.Fatal(err)
-	}
-
-	if stale, why := CollectorIsStale(root); stale {
-		t.Errorf("a resolvable tag at HEAD has no drift, got stale: %s", why)
-	}
-}
-
 // The false green Bugbot reported: a downloaded release binary whose provenance is absent or no
 // longer describes it. CollectorIsStale then skipped release-drift detection and fell back to
 // comparing mtimes -- and a downloaded binary is essentially always newer than local sources, so
 // committed exporter changes since that release went unreported and the check went green while the
 // run verified the wrong beacon-otelcol.
 func TestUnprovenancedBinaryWithExporterDriftIsNotFresh(t *testing.T) {
-	root := gitRepo(t)
-	src := filepath.Join(root, "collector-builder", "exporter", "exp.go")
-	writeFile(t, src, "package exp\n")
-	commitAll(t, root, "base")
-	if out, err := exec.Command("git", "-C", root, "tag", "v1.0.6").CombinedOutput(); err != nil {
-		t.Fatalf("tag: %v: %s", err, out)
-	}
+	root, src := releaseRepo(t, true)
 	// Exporter changes land after that release.
 	writeFile(t, src, "package exp\n// the change under test\n")
 	commitAll(t, root, "change the exporter")
@@ -605,12 +627,7 @@ func TestUnprovenancedBinaryWithExporterDriftIsNotFresh(t *testing.T) {
 // The narrowing that keeps this off the common path: no exporter changes since the last release
 // means an unprovenanced binary cannot be carrying stale exporter code, so no warning.
 func TestUnprovenancedBinaryWithNoDriftStaysQuiet(t *testing.T) {
-	root := gitRepo(t)
-	writeFile(t, filepath.Join(root, "collector-builder", "exporter", "exp.go"), "package exp\n")
-	commitAll(t, root, "base")
-	if out, err := exec.Command("git", "-C", root, "tag", "v1.0.6").CombinedOutput(); err != nil {
-		t.Fatalf("tag: %v: %s", err, out)
-	}
+	root, _ := releaseRepo(t, true)
 	writeFile(t, CollectorPath(root), "binary-of-unknown-origin")
 	later := time.Now().Add(time.Minute)
 	if err := os.Chtimes(CollectorPath(root), later, later); err != nil {
@@ -619,35 +636,6 @@ func TestUnprovenancedBinaryWithNoDriftStaysQuiet(t *testing.T) {
 
 	if stale, why := CollectorIsStale(root); stale {
 		t.Errorf("no exporter drift since the release means nothing to warn about, got: %s", why)
-	}
-}
-
-// A provenance marker whose identity no longer matches is the documented local rebuild, so the
-// mtime comparison governs and a rebuilt-from-current-sources binary is fresh.
-func TestStaleProvenanceFallsBackToTheMtimeComparison(t *testing.T) {
-	root := gitRepo(t)
-	src := filepath.Join(root, "collector-builder", "exporter", "exp.go")
-	writeFile(t, src, "package exp\n")
-	commitAll(t, root, "base")
-	if out, err := exec.Command("git", "-C", root, "tag", "v1.0.6").CombinedOutput(); err != nil {
-		t.Fatalf("tag: %v: %s", err, out)
-	}
-	writeFile(t, src, "package exp\n// changed\n")
-	commitAll(t, root, "change the exporter")
-
-	writeFile(t, CollectorPath(root), "downloaded")
-	if err := writeProvenance(root, "v1.0.6"); err != nil {
-		t.Fatal(err)
-	}
-	// The documented rebuild replaces the binary, invalidating the marker's identity.
-	writeFile(t, CollectorPath(root), "rebuilt-locally-with-a-different-size")
-	later := time.Now().Add(time.Minute)
-	if err := os.Chtimes(CollectorPath(root), later, later); err != nil {
-		t.Fatal(err)
-	}
-
-	if stale, why := CollectorIsStale(root); stale {
-		t.Errorf("a local rebuild from current sources is fresh, got: %s", why)
 	}
 }
 

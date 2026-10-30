@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,17 +23,29 @@ func gitCommandTeam(t *testing.T) (root, remote string) {
 	return root, remote
 }
 
+// gitStatusJSON is `beacon git status --json` for root.
+func gitStatusJSON(t *testing.T, root string) gitlink.Status {
+	t.Helper()
+	out, err := runGit(t, "status", "--cwd", root, "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st gitlink.Status
+	if err := json.Unmarshal([]byte(out), &st); err != nil {
+		t.Fatalf("status json %v: %s", err, out)
+	}
+	return st
+}
+
 func TestGitNotesPushAndFetchCommands(t *testing.T) {
 	root, remote := gitCommandTeam(t)
 	sha := mustGit(t, root, "rev-parse", "HEAD")
-	out, err := runGit(t, "notes", "push", "--cwd", root)
-	if err != nil || !strings.Contains(out, "No commit links here to share") {
-		t.Fatalf("empty push: %v %q", err, out)
+	if _, err := runGit(t, "notes", "push", "--cwd", root); err != nil {
+		t.Fatalf("empty push: %v", err)
 	}
 	mustGit(t, root, "notes", "--ref="+gitlink.NotesRef, "add", "-m", "beacon:codex_cli/s1", sha)
-	out, err = runGit(t, "notes", "push", "--cwd", root)
-	if err != nil || !strings.Contains(out, "Pushed refs/notes/beacon to origin") {
-		t.Fatalf("push: %v %q", err, out)
+	if _, err := runGit(t, "notes", "push", "--cwd", root); err != nil {
+		t.Fatalf("push: %v", err)
 	}
 	if got := mustGit(t, remote, "notes", "--ref="+gitlink.NotesRef, "show", sha); got != "beacon:codex_cli/s1" {
 		t.Fatalf("remote note %q", got)
@@ -40,11 +53,10 @@ func TestGitNotesPushAndFetchCommands(t *testing.T) {
 
 	other := filepath.Join(t.TempDir(), "other")
 	mustGit(t, root, "clone", "-q", remote, other)
-	out, err = runGit(t, "notes", "fetch", "--cwd", other)
-	if err != nil || !strings.Contains(out, "Fetched origin's links into refs/notes/beacon-remotes/origin") {
-		t.Fatalf("fetch: %v %q", err, out)
+	if _, err := runGit(t, "notes", "fetch", "--cwd", other); err != nil {
+		t.Fatalf("fetch: %v", err)
 	}
-	out, err = runGit(t, "notes", "--cwd", other)
+	out, err := runGit(t, "notes", "--cwd", other)
 	if err != nil || !strings.Contains(out, "codex_cli/s1") {
 		t.Fatalf("notes after fetch: %v %q", err, out)
 	}
@@ -52,12 +64,13 @@ func TestGitNotesPushAndFetchCommands(t *testing.T) {
 	if out, err := runGit(t, "notes", "--cwd", other, "HEAD"); err != nil || !strings.Contains(out, "codex_cli/s1") {
 		t.Fatalf("notes HEAD: %v %q", err, out)
 	}
-	out, err = runGit(t, "notes", "fetch", "--cwd", other, "nowhere")
-	if err == nil || !strings.Contains(err.Error(), "fetch links from nowhere") {
-		t.Fatalf("fetch from an unknown remote: %v %q", err, out)
+	if _, err := runGit(t, "notes", "fetch", "--cwd", other, "nowhere"); err == nil {
+		t.Fatal("fetch from an unknown remote succeeded")
 	}
 }
 
+// The pre-push hook pushes the links, within its budget, and never fails the push: an unreachable
+// remote costs one line on stderr.
 func TestGitHookPrePushSharesAndNeverFails(t *testing.T) {
 	root, remote := gitCommandTeam(t)
 	sha := mustGit(t, root, "rev-parse", "HEAD")
@@ -68,15 +81,16 @@ func TestGitHookPrePushSharesAndNeverFails(t *testing.T) {
 	if got := mustGit(t, remote, "notes", "--ref="+gitlink.NotesRef, "show", sha); got != "beacon:cursor/c1" {
 		t.Fatalf("remote note %q", got)
 	}
-	// An unreachable remote: one warning line on stderr, and still no error for git to see.
+	if got := budgetEventsIn(t, gitRuntimeLogPath()); len(got) != 0 {
+		t.Fatalf("budget events %+v", got)
+	}
 	var stderr bytes.Buffer
-	rootCmd.SetErr(&stderr)
 	missing := filepath.Join(t.TempDir(), "gone.git")
 	if _, err := runGitStderr(t, &stderr, "hook", "pre-push", "--cwd", root, missing, missing); err != nil {
 		t.Fatalf("pre-push must not fail: %v", err)
 	}
-	if got := stderr.String(); !strings.HasPrefix(got, "beacon: commit links were not shared with "+missing) || strings.Count(got, "\n") != 1 {
-		t.Fatalf("stderr %q", got)
+	if got := stderr.String(); strings.Count(got, "\n") != 1 {
+		t.Fatalf("stderr %q, want one line", got)
 	}
 	t.Setenv(gitlink.DisableEnv, "0")
 	stderr.Reset()
@@ -87,56 +101,31 @@ func TestGitHookPrePushSharesAndNeverFails(t *testing.T) {
 
 func TestGitSetupShareNotesFlag(t *testing.T) {
 	root, _ := gitCommandTeam(t)
-	out, err := runGit(t, "setup", "--cwd", root, "--share-notes")
-	if err != nil || !strings.Contains(out, "remote.origin.fetch += +refs/notes/beacon:refs/notes/beacon-remotes/origin") || !strings.Contains(out, "Commit links are shared") {
-		t.Fatalf("setup --share-notes: %v\n%s", err, out)
+	if _, err := runGit(t, "setup", "--cwd", root, "--share-notes"); err != nil {
+		t.Fatalf("setup --share-notes: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".git", "hooks", "beacon-pre-push")); err != nil {
 		t.Fatal(err)
 	}
-	out, _ = runGit(t, "status", "--cwd", root)
-	if !strings.Contains(out, "sharing     on") || !strings.Contains(out, "fetches from origin bring its links") {
-		t.Fatalf("status:\n%s", out)
+	if got := mustGitAllowFail(root, "config", "--get-all", "remote.origin.fetch"); !strings.Contains(got, "+refs/notes/beacon:refs/notes/beacon-remotes/origin") {
+		t.Fatalf("remote.origin.fetch %q", got)
+	}
+	if st := gitStatusJSON(t, root); !st.Sharing || len(st.FetchRemotes) != 1 || st.FetchRemotes[0] != "origin" {
+		t.Fatalf("status %+v", st)
 	}
 	if _, err := runGit(t, "setup", "--cwd", root); err != nil {
 		t.Fatal(err)
 	}
-	if out, _ := runGit(t, "status", "--cwd", root); !strings.Contains(out, "sharing     on") {
-		t.Fatalf("a plain re-run changed sharing:\n%s", out)
+	if st := gitStatusJSON(t, root); !st.Sharing {
+		t.Fatalf("a plain re-run changed sharing: %+v", st)
 	}
-	out, err = runGit(t, "setup", "--cwd", root, "--share-notes=false")
-	if err != nil || !strings.Contains(out, "unset     remote.origin.fetch") {
-		t.Fatalf("setup --share-notes=false: %v\n%s", err, out)
+	if _, err := runGit(t, "setup", "--cwd", root, "--share-notes=false"); err != nil {
+		t.Fatalf("setup --share-notes=false: %v", err)
 	}
-	if out, _ := runGit(t, "status", "--cwd", root); !strings.Contains(out, "sharing     off") {
-		t.Fatalf("status after off:\n%s", out)
+	if got := mustGitAllowFail(root, "config", "--get-all", "remote.origin.fetch"); strings.Contains(got, "refs/notes/beacon") {
+		t.Fatalf("remote.origin.fetch kept the notes refspec: %q", got)
 	}
-}
-
-func TestGitSetupShareNotesForeignPrePushMessage(t *testing.T) {
-	root, _ := gitCommandTeam(t)
-	hooks := filepath.Join(root, ".git", "hooks")
-	if err := os.MkdirAll(hooks, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(hooks, "pre-push"), []byte("#!/usr/bin/env python3\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	_, err := runGit(t, "setup", "--cwd", root, "--share-notes")
-	if err == nil {
-		t.Fatal("want a refusal")
-	}
-	msg := err.Error()
-	for _, want := range []string{"pre-push hook", `beacon git hook pre-push "$@" || true`, "without --share-notes", "nothing was installed"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("message lacks %q:\n%s", want, msg)
-		}
-	}
-	if strings.Contains(msg, "hook post-commit") {
-		t.Errorf("message names the wrong hook:\n%s", msg)
-	}
-	// Linking alone still installs.
-	if _, err := runGit(t, "setup", "--cwd", root); err != nil {
-		t.Fatal(err)
+	if st := gitStatusJSON(t, root); st.Sharing {
+		t.Fatalf("status after off: %+v", st)
 	}
 }

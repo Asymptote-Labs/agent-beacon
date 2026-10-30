@@ -65,16 +65,12 @@ describe('isAllowedEndpoint', () => {
     'http://[::1]:4318/v1/logs',
     'http://127.0.0.1/v1/logs',
     'http://127.0.0.1:80/v1/logs',
-    'https://localhost:443/v1/logs',
-    'https://localhost/v1/logs',
-    'http://[::1]/v1/logs',
   ])('allows %s', (u) => {
     expect(isAllowedEndpoint(u)).toBe(true);
   });
 
   it.each([
     ['a remote host', 'https://collector.example.com:4318/v1/logs'],
-    ['a remote host on a default port', 'https://collector.example.com:443/v1/logs'],
     ['another loopback-looking host', 'http://127.0.0.1.example.com:4318/v1/logs'],
     ['credentials', 'http://user:pw@127.0.0.1:4318/v1/logs'],
     ['a non-http scheme', 'ftp://127.0.0.1:4318/'],

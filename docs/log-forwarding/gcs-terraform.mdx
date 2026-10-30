@@ -16,8 +16,8 @@ The gcloud steps in the rollout guides create the same resources. Follow either 
 Every Mac's forwarder writes both of Beacon's logs to the bucket:
 
 ```text
-gs://<bucket>/<prefix>/runtime/date=YYYY-MM-DD/<time>-<id>.jsonl
-gs://<bucket>/<prefix>/inventory/date=YYYY-MM-DD/<time>-<id>.jsonl
+gs://<bucket>/<prefix>/runtime/date=YYYY-MM-DD/<unix-time>-<uuid>.jsonl
+gs://<bucket>/<prefix>/inventory/date=YYYY-MM-DD/<unix-time>-<uuid>.jsonl
 ```
 
 The module is in the Beacon repository at [`terraform/gcs`](https://github.com/asymptote-labs/agent-beacon/tree/main/terraform/gcs).
@@ -30,7 +30,7 @@ The module is in the Beacon repository at [`terraform/gcs`](https://github.com/a
 | Google provider 5.0 or later | Terraform installs it during `terraform init`. |
 | A Google Cloud project, and an identity that can enable APIs, create buckets and service accounts, and set bucket IAM | Used by `terraform apply`. Terraform reads Application Default Credentials (`gcloud auth application-default login`). |
 | gcloud, signed in as that identity | Creates the writer's key in step 3. |
-| Permission to create service-account keys | The packaged forwarder authenticates with a JSON key. If your organization policy blocks keys (`iam.disableServiceAccountKeyCreation`), Beacon's GCS forwarder can't run on your Macs. |
+| Permission to create service-account keys | The packaged forwarder authenticates with a JSON key. New Google Cloud organizations block keys by default; [Allow service-account keys](#allow-service-account-keys) shows how to allow them in this project only. |
 | A bucket name nobody else uses | Bucket names are global across Google Cloud. |
 
 ## 1. Add the module
@@ -113,12 +113,36 @@ The module doesn't create keys by default, because Terraform would store the pri
 
 ```bash
 umask 077
-gcloud iam service-accounts keys create "./${BEACON_GCS_WRITER}.json" \
+gcloud iam service-accounts keys create ./beacon-gcs-writer.json \
   --project "$GCP_PROJECT" \
   --iam-account "$BEACON_GCS_WRITER_EMAIL"
 ```
 
-Deliver the JSON file to each Mac with your MDM's secret or file delivery, to a root-owned path outside Beacon's directories, with mode `0600`. Your rollout guide covers this step for your MDM. Then delete the local copy.
+It's working when gcloud prints `created key [...]`. Your rollout guide puts the file on each Mac, root-owned with mode `0600`, outside Beacon's directories. Google rejects a brand-new key for up to a minute, so give it a minute before a Mac first uses it.
+
+### Allow service-account keys
+
+If gcloud says `Key creation is not allowed on this service account`, your Google Cloud organization blocks service-account keys, which new organizations do by default. Allow them in this project only. It needs the Organization Policy Administrator role on the organization. Add this to `main.tf` and run `terraform apply`:
+
+```hcl
+resource "google_project_organization_policy" "allow_beacon_writer_key" {
+  project    = "acme-security"
+  constraint = "iam.disableServiceAccountKeyCreation"
+
+  boolean_policy {
+    enforced = false
+  }
+}
+```
+
+Or with gcloud:
+
+```bash
+gcloud resource-manager org-policies disable-enforce iam.disableServiceAccountKeyCreation \
+  --project "$GCP_PROJECT"
+```
+
+The rest of your organization still blocks keys. The change takes a minute or two to apply. Then create the key again.
 
 ## 4. Give the values to your rollout
 
@@ -126,14 +150,13 @@ Deliver the JSON file to each Mac with your MDM's secret or file delivery, to a 
 | --- | --- | --- |
 | `bucket_name` | 4 | `BEACON_GCS_BUCKET` |
 | `prefix` | 5 | `BEACON_GCS_PREFIX` |
-| Storage class (`STANDARD`) | 6 | `BEACON_GCS_STORAGE_CLASS` |
-| Path of the key file on the Mac | 8 | `GOOGLE_APPLICATION_CREDENTIALS` |
+| Path of the key file on the Mac | 6 | `GOOGLE_APPLICATION_CREDENTIALS` |
 
 Then continue with your rollout:
 
 | Rollout | Continue at |
 | --- | --- |
-| Jamf Pro | [Claude with Jamf and GCS, step 2](/guides/jamf-gcs-mdm#2-deliver-the-writer-credential) |
+| Jamf Pro | [Claude Code, Codex, and Cursor with Jamf and GCS, step 3](/guides/jamf-gcs-mdm#3-build-the-packages) |
 | Rippling | [Claude with Rippling and GCS, step 2](/guides/rippling-gcs-mdm#2-create-and-deliver-the-writer-credential), from "Use this endpoint path" |
 | One Mac without MDM | [macOS object storage forwarding](/guides/macos-object-storage-system), from "Install the JSON outside Beacon-managed directories" under Google Cloud Storage |
 | Linux | [`beacon endpoint gcs install-pack`](/cli/gcs) |
@@ -146,12 +169,13 @@ After the forwarder is running on a Mac, write a test event there:
 sudo /opt/beacon/bin/beacon endpoint gcs validate --system
 ```
 
-The forwarder uploads in batches, so allow up to five minutes. Then list the objects as the reader, because the writer can't list the bucket. Impersonating the reader needs `roles/iam.serviceAccountTokenCreator` on it; you can also list with your own identity if it can read the bucket.
+The forwarder uploads in batches, so allow up to five minutes. Then list the objects with your own identity, which needs read access to the bucket, such as Storage Object Viewer. The writer can't list the bucket.
 
 ```bash
-gcloud storage ls "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/**" \
-  --impersonate-service-account "$BEACON_GCS_READER_EMAIL"
+gcloud storage ls "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/**"
 ```
+
+To list as the read-only service account instead, give yourself `roles/iam.serviceAccountTokenCreator` on it and add `--impersonate-service-account "$BEACON_GCS_READER_EMAIL"`. A new grant can take a few minutes to work.
 
 ## Options
 
@@ -177,7 +201,16 @@ Set any of these in the `module "beacon_gcs"` block and run `terraform apply` ag
     create_writer_key = true
     ```
 
-    Read it with `terraform output -raw writer_private_key | base64 --decode > beacon-gcs-writer.json` after adding a matching `output` block. The private key is stored in Terraform state, so use this only when your state is encrypted and access is restricted.
+    Add an output for it. Terraform refuses to output the key unless it's marked `sensitive`:
+
+    ```hcl
+    output "writer_private_key" {
+      value     = module.beacon_gcs.writer_private_key
+      sensitive = true
+    }
+    ```
+
+    After `terraform apply`, write it to a file with `(umask 077; terraform output -raw writer_private_key | base64 --decode > beacon-gcs-writer.json)`. The private key is stored in Terraform state, so use this only when your state is encrypted and access is restricted.
   </Accordion>
   <Accordion title="Match your organization's naming">
     - `writer_account_id` and `reader_account_id` rename the service accounts.
@@ -203,7 +236,8 @@ Rotation happens outside Terraform. Create a new key, deliver it to every Mac, r
 ## Remove
 
 1. Remove the forwarder from your Macs. Uninstalling Beacon removes it.
-2. Run `terraform destroy`. Deleting the writer service account also deletes its keys. Destroy stops at a bucket that still holds objects. To delete the telemetry too, set `force_destroy = true`, run `terraform apply`, and then destroy.
+2. To delete the bucket along with the telemetry in it, set `force_destroy = true` in the module and run `terraform apply` first. Without it, destroy removes the service accounts and stops at the bucket while it holds objects.
+3. Run `terraform destroy`. Deleting the writer service account also deletes its keys.
 
 ## Troubleshooting
 
@@ -219,8 +253,8 @@ Rotation happens outside Terraform. Create a new key, deliver it to every Mac, r
 ## Related
 
 <Columns cols={2}>
-  <Card title="Claude with Jamf and GCS" icon="bucket" href="/guides/jamf-gcs-mdm">
-    Roll out Beacon with Jamf Pro and forward to Cloud Storage.
+  <Card title="Jamf and GCS" icon="bucket" href="/guides/jamf-gcs-mdm">
+    Roll out Beacon to Claude Code, Codex, and Cursor users with Jamf Pro and forward to Cloud Storage.
   </Card>
   <Card title="Claude with Rippling and GCS" icon="bucket" href="/guides/rippling-gcs-mdm">
     Roll out Beacon with Rippling and forward to Cloud Storage.

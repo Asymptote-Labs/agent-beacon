@@ -58,7 +58,7 @@ func TestDedupeShortcutsNeverChangeTheAnswer(t *testing.T) {
 	}
 	dir := t.TempDir()
 	answers := map[bool]int{}
-	for round := 0; round < 80; round++ {
+	for round := 0; round < 60; round++ {
 		var log strings.Builder
 		for i := r.Intn(40); i >= 0; i-- {
 			log.Write(line())

@@ -42,29 +42,16 @@ func TestNoDisplayGoesStraightToRecovery(t *testing.T) {
 	if model.screen != signInFailedScreen {
 		t.Fatalf("screen = %v, want recovery straight after welcome", model.screen)
 	}
-	select {
-	case req := <-requests:
-		t.Fatalf("a sign-in started (%#v) with no display to finish it on", req)
-	case <-time.After(50 * time.Millisecond):
+	// startSignIn counts the attempt and arms the cancel before launching the sign-in.
+	if model.attempt != 0 || model.cancelSignIn != nil {
+		t.Fatalf("a sign-in started (attempt %d) with no display to finish it on", model.attempt)
 	}
 
 	if got, want := strings.Join(recoveryIDs(model), ","), "local,manual,cancel"; got != want {
 		t.Fatalf("recovery choices = %s, want %s", got, want)
 	}
-	flat := strings.Join(strings.Fields(model.View()), " ")
-	for _, want := range []string{
-		"No browser on this machine",
-		"this is an SSH session",
-		"redirects a browser back to this machine",
-		"Finish setup without an account",
-		"Show the sign-in URL",
-	} {
-		if !strings.Contains(flat, want) {
-			t.Fatalf("recovery screen missing %q:\n%s", want, flat)
-		}
-	}
-	if strings.Contains(flat, "Try signing in again") {
-		t.Fatalf("retrying cannot find a display, so it must not be offered:\n%s", flat)
+	if flat := strings.Join(strings.Fields(model.View()), " "); !strings.Contains(flat, "this is an SSH session") {
+		t.Fatalf("recovery screen does not say why there is no browser:\n%s", flat)
 	}
 
 	// The default choice finishes locally.

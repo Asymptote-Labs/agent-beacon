@@ -43,3 +43,11 @@ func stubCollectorPath(t *testing.T) string {
 	}
 	return exe
 }
+
+// fastSupervisedStop shortens unload's re-check of a collector it asked to stop.
+func fastSupervisedStop(t *testing.T) {
+	t.Helper()
+	old := supervisedStopPoll
+	supervisedStopPoll = 2 * time.Millisecond
+	t.Cleanup(func() { supervisedStopPoll = old })
+}

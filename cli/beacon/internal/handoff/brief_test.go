@@ -229,25 +229,6 @@ func TestBriefStaysUnderTheByteBudget(t *testing.T) {
 	}
 }
 
-func TestBriefForAnEmptySession(t *testing.T) {
-	out := BuildBrief(Session{Harness: HarnessCline, ID: "c1"}, nil, FromSessionStore, briefNow).Render()
-	for _, want := range []string{"- Directory: unknown", "- Branch: unknown", "_None recorded._", "_No activity was recorded._"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("empty brief missing %q:\n%s", want, out)
-		}
-	}
-	if strings.Contains(out, "Last activity") || strings.Contains(out, "Session file") {
-		t.Fatalf("unknown optional fields should be left out:\n%s", out)
-	}
-}
-
-func TestBriefFromTheRuntimeLogSaysSo(t *testing.T) {
-	out := BuildBrief(briefSession, nil, FromRuntimeLog, briefNow).Render()
-	if !strings.Contains(out, "comes from Beacon's runtime log") {
-		t.Fatalf("a log-built brief must say it keeps less:\n%s", out)
-	}
-}
-
 func TestTruncateBytesKeepsValidUTF8(t *testing.T) {
 	s := strings.Repeat("日本", 10)
 	for max := 0; max <= len(s); max++ {
@@ -293,34 +274,6 @@ func TestEventsReadEachRuntimeStore(t *testing.T) {
 	}
 }
 
-func TestCodexEventsSpanEveryRolloutFileOfTheThread(t *testing.T) {
-	testenv.SetHome(t, t.TempDir())
-	f := newStoreFixture(t)
-	f.writeTranscripts(t)
-	sources := DefaultSources(f.dirs)
-	session, err := Find(sources, HarnessCodex, "codex-thread-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	events, err := Events(sources, session)
-	if err != nil {
-		t.Fatal(err)
-	}
-	brief := BuildBrief(session, events, FromSessionStore, briefNow)
-	if brief.Prompts != 2 || brief.LatestRequest != "also check the signup form" {
-		t.Fatalf("prompts = %d, latest = %q; both rollout files should be read, oldest first", brief.Prompts, brief.LatestRequest)
-	}
-	started := 0
-	for _, e := range events {
-		if e.Event.Action == "session.started" {
-			started++
-		}
-	}
-	if started != 1 {
-		t.Fatalf("session.started events = %d, want 1 for one thread", started)
-	}
-}
-
 func TestEventsForASessionThatIsGone(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	f := newStoreFixture(t)
@@ -340,6 +293,43 @@ func TestEventsForASessionThatIsGone(t *testing.T) {
 	}
 	if _, err := Events([]Source{fakeSource{harness: HarnessClaude}}, Session{Harness: HarnessClaude}); err == nil {
 		t.Fatal("a source that cannot read events back must be an error")
+	}
+}
+
+// A session its runtime deletes after `beacon handoff` listed it must read back as ErrNotFound,
+// whichever runtime's store held it: that error is what sends export and share to the runtime
+// log instead of failing on a session the log still has.
+func TestEventsForASessionItsRuntimeDeletedIsNotFound(t *testing.T) {
+	removeFile := func(s Session) string { return s.SourcePath }
+	for _, tc := range []struct {
+		harness, id string
+		fixture     func(*testing.T) StoreDirs
+		// removed is what the runtime deletes with the session.
+		removed func(Session) string
+	}{
+		{HarnessCopilot, "0cb916db-26aa-40f2-86b5-1ba81b225fd2", func(t *testing.T) StoreDirs { d, _, _ := copilotFixture(t); return d },
+			func(s Session) string { return filepath.Dir(s.SourcePath) }},
+		{HarnessDSH, "dsh-sess-1", func(t *testing.T) StoreDirs { d, _ := dshFixture(t); return d }, removeFile},
+		{HarnessFactory, "factory-sess-1", func(t *testing.T) StoreDirs { d, _ := factoryFixture(t); return d }, removeFile},
+		{HarnessFx, fxSessionA, func(t *testing.T) StoreDirs { d, _, _ := fxFixture(t); return d }, removeFile},
+		{HarnessGrok, grokSessionID, func(t *testing.T) StoreDirs { d, _ := grokFixture(t); return d }, removeFile},
+		{HarnessOpenClaw, "oc-sess-1", func(t *testing.T) StoreDirs { d, _ := openClawFixture(t); return d }, removeFile},
+		{HarnessPi, "pi-sess-1", func(t *testing.T) StoreDirs { d, _, _ := piFixture(t); return d }, removeFile},
+		{HarnessPrime, "prime-sess-1", func(t *testing.T) StoreDirs { d, _, _ := piFixture(t); return d }, removeFile},
+	} {
+		t.Run(tc.harness, func(t *testing.T) {
+			sources := DefaultSources(tc.fixture(t))
+			session, err := Find(sources, tc.harness, tc.id)
+			if err != nil {
+				t.Fatalf("Find: %v", err)
+			}
+			if err := os.RemoveAll(tc.removed(session)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Events(sources, session); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("Events after the runtime deleted the session = %v, want ErrNotFound", err)
+			}
+		})
 	}
 }
 
@@ -469,29 +459,6 @@ func TestLogSessionAcceptsAUniquePrefix(t *testing.T) {
 	session, _, found, err = LogSession(logPath, "conv-xyz", HarnessClaude)
 	if err != nil || !found || session.ID != "conv-xyz789-two" || session.Harness != HarnessClaude {
 		t.Fatalf("--harness must narrow the prefix (raw \"claude\" rows included): %+v, %v, %v", session, found, err)
-	}
-}
-
-// A log row names a runtime by whatever spelling its hooks wrote; the session takes the registry's
-// harness, so it continues in its own runtime and --harness finds it.
-func TestLogSessionCanonicalizesAnAliasedHarness(t *testing.T) {
-	line := func(harness, id string) string {
-		return `{"timestamp":"2026-09-25T09:00:00Z","vendor":"beacon","product":"endpoint-agent","schema_version":"1.0","event":{"kind":"agent_runtime","action":"prompt.submitted","category":"prompt"},"severity":"info","endpoint":{"hostname":"h","os":"linux"},"harness":{"name":"` + harness + `"},"session":{"id":"` + id + `"},"prompt":{"text":"p ` + id + `"}}`
-	}
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	writeFixture(t, logPath, strings.Join([]string{
-		line("devin-cli", "devin-new-123"),
-		line("devin", "devin-old-456"),
-	}, "\n")+"\n")
-	for _, id := range []string{"devin-new-123", "devin-old-456"} {
-		session, _, found, err := LogSession(logPath, id, "")
-		if err != nil || !found || session.Harness != HarnessDevin {
-			t.Fatalf("%s: harness = %q, %v, %v; want %s", id, session.Harness, found, err, HarnessDevin)
-		}
-	}
-	session, _, found, err := LogSession(logPath, "devin-old", HarnessDevin)
-	if err != nil || !found || session.ID != "devin-old-456" {
-		t.Fatalf("--harness must find rows written under the alias: %+v, %v, %v", session, found, err)
 	}
 }
 

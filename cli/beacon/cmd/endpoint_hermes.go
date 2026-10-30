@@ -43,12 +43,13 @@ var endpointHermesStatusCmd = &cobra.Command{
 }
 
 var endpointHermesOpts struct {
-	dbPath    string
-	statePath string
-	logPath   string
-	print     bool
-	watch     bool
-	interval  time.Duration
+	dbPath      string
+	statePath   string
+	logPath     string
+	print       bool
+	watch       bool
+	interval    time.Duration
+	rotateBytes int64
 }
 
 func init() {
@@ -70,17 +71,22 @@ func init() {
 	sync.BoolVar(&endpointHermesOpts.print, "print", false, "Print mapped events as JSON without writing them or advancing the cursor (dry run)")
 	sync.BoolVar(&endpointHermesOpts.watch, "watch", false, "Sweep continuously on --interval (default: one sweep then exit)")
 	sync.DurationVar(&endpointHermesOpts.interval, "interval", time.Minute, "Sweep interval for --watch")
+	addSyncRotateBytesFlag(sync, &endpointHermesOpts.rotateBytes)
 }
 
 func runEndpointHermesSync(cmd *cobra.Command, args []string) error {
+	if err := checkSyncRotateBytes(endpointHermesOpts.rotateBytes); err != nil {
+		return err
+	}
 	userMode := endpointUserMode()
 	dbPath := resolveHermesDBPath(endpointHermesOpts.dbPath)
 	opts := hermessession.CollectOptions{
-		DBPath:   dbPath,
-		Print:    endpointHermesOpts.print,
-		Out:      cmd.OutOrStdout(),
-		Write:    !endpointHermesOpts.print,
-		UserMode: userMode,
+		RotateBytes: endpointHermesOpts.rotateBytes,
+		DBPath:      dbPath,
+		Print:       endpointHermesOpts.print,
+		Out:         cmd.OutOrStdout(),
+		Write:       !endpointHermesOpts.print,
+		UserMode:    userMode,
 	}
 	if !endpointHermesOpts.print {
 		opts.StatePath = resolveHermesStatePath(endpointHermesOpts.statePath, dbPath, userMode)
@@ -129,6 +135,7 @@ func reportHermesSweep(cmd *cobra.Command, summary hermessession.Summary) {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Hermes sync: %d sessions, %d changed, %d events, %d errors\n",
 		summary.Sessions, summary.SessionsChanged, summary.EventsEmitted, summary.Errors)
+	reportSyncRetention(cmd.OutOrStdout(), summary.Retention)
 }
 
 type hermesSessionStatus struct {

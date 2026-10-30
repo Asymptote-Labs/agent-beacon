@@ -37,7 +37,7 @@ func TestLoginWithoutADisplayShowsTheURLAtOnce(t *testing.T) {
 	_, err := Login(context.Background(), LoginOptions{
 		BaseURL: service.server.URL,
 		Out:     &out,
-		Timeout: 200 * time.Millisecond,
+		Timeout: 20 * time.Millisecond,
 	})
 	if err == nil {
 		t.Fatal("nothing approved the sign-in, so Login should have timed out")

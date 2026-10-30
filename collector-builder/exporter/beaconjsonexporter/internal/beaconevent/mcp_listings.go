@@ -59,7 +59,11 @@ func (l *MCPListings) Filter(events []Event) []Event {
 	inBatch := map[string][sha256.Size]byte{}
 	for _, event := range events {
 		if key, digest, ok := eventListingKey(event); ok {
-			if previous, repeat := inBatch[key]; (repeat && previous == digest) || l.listedLocked(key, digest) {
+			previous, listed := inBatch[key]
+			if !listed {
+				previous, listed = l.seen[key]
+			}
+			if listed && previous == digest {
 				continue
 			}
 			inBatch[key] = digest

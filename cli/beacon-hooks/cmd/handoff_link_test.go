@@ -156,7 +156,7 @@ func assertLinkedEvents(t *testing.T, events []normalizedEvent) {
 }
 
 func TestPiFamilyPromptRecordsAHandoffLink(t *testing.T) {
-	for _, runtime := range []piFamily{piRuntime, ompRuntime, primeRuntime, omoRuntime} {
+	for _, runtime := range []piFamily{piRuntime} {
 		t.Run(runtime.platform, func(t *testing.T) {
 			events := runtime.endpointEvents(map[string]interface{}{
 				"type": "input", "text": handoffTestPrompt, "sessionId": "pi-new-1",

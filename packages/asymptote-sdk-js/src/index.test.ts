@@ -12,9 +12,7 @@ import {
   ATTR_BEACON_HARNESS_NAME,
   ATTR_BEACON_ORIGIN,
   ATTR_BEACON_PROMPT_TEXT,
-  Observe,
   flush,
-  getTracer,
   initialize,
   initializeAsymptoteInstrumentations,
   isInitialized,
@@ -29,6 +27,7 @@ const envKeys = [
   "ASYMPTOTE_API_KEY",
   "ASYMPTOTE_BASE_URL",
   "OTEL_EXPORTER_OTLP_ENDPOINT",
+  "OTEL_SERVICE_NAME",
 ];
 
 describe("resolveExporterConfig", () => {
@@ -56,6 +55,17 @@ describe("resolveExporterConfig", () => {
 
     expect(config.mode).toBe("hosted");
     expect(config.observeUrl).toBe("https://observe.example/v1/observe");
+    expect(config.headers.authorization).toBe("Bearer env-key");
+  });
+
+  it("treats an empty ASYMPTOTE_BASE_URL as unset", () => {
+    process.env.ASYMPTOTE_API_KEY = "env-key";
+    process.env.ASYMPTOTE_BASE_URL = "";
+
+    const config = resolveExporterConfig();
+
+    expect(config.mode).toBe("hosted");
+    expect(config.observeUrl).toBe("https://api.asymptotelabs.ai/v1/observe");
     expect(config.headers.authorization).toBe("Bearer env-key");
   });
 
@@ -106,13 +116,6 @@ describe("resolveExporterConfig", () => {
     expect(config.observeUrl).toBe("http://collector.example:4318/v1/observe");
     expect(config.headers.authorization).toBeUndefined();
     expect(JSON.stringify(config.headers)).not.toContain("secret-key");
-  });
-
-  it("does not send the api key to a foreign OTLP endpoint option", () => {
-    const config = resolveExporterConfig({ apiKey: "secret-key", otlpEndpoint: "https://otel.vendor.example" });
-
-    expect(config.mode).toBe("otlp");
-    expect(config.headers.authorization).toBeUndefined();
   });
 
   it("does not treat a different port or scheme as the Asymptote origin", () => {
@@ -217,10 +220,6 @@ describe("sessionAttributes", () => {
       "beacon.session.working_directory": "/srv/agent",
     });
   });
-
-  it("is exposed on the Observe facade", () => {
-    expect(Observe.sessionAttributes("session-42")).toEqual(sessionAttributes("session-42"));
-  });
 });
 
 describe("Asymptote Observe SDK", () => {
@@ -259,6 +258,17 @@ describe("Asymptote Observe SDK", () => {
     expect(spans[0].attributes["asymptote.observe.input.count"]).toBe(1);
     expect(spans[0].attributes["asymptote.observe.output.type"]).toBe("string");
     expect(spans[0].resource.attributes["telemetry.sdk.version"]).toBe(packageVersion());
+  });
+
+  it("falls back to the default service name when OTEL_SERVICE_NAME is empty", async () => {
+    process.env.OTEL_SERVICE_NAME = "";
+    const exporter = new InMemorySpanExporter();
+    initialize({ spanExporter: exporter, disableDefaultExporter: true, disableBatch: true });
+
+    observe({ name: "agent.step" }, () => "ok")();
+    await flush();
+
+    expect(exporter.getFinishedSpans()[0].resource.attributes["service.name"]).toBe("asymptote-app");
   });
 
   it("respects observe input/output suppression", async () => {
@@ -356,24 +366,6 @@ describe("Asymptote Observe SDK", () => {
     expect(span.attributes[ATTR_BEACON_PROMPT_TEXT]).toBe("explain memoization");
   });
 
-  it("keeps Claude async iterable spans open until consumed", async () => {
-    const exporter = new InMemorySpanExporter();
-    initialize({ spanExporter: exporter, disableDefaultExporter: true, disableBatch: true });
-    const query = wrapClaudeAgentQuery(async function* (_prompt: string) {
-      yield { type: "message", text: "one" };
-      yield { type: "message", text: "two" };
-    });
-
-    const messages = [];
-    for await (const message of query("stream please")) {
-      messages.push(message);
-    }
-    await flush();
-
-    expect(messages).toHaveLength(2);
-    expect(exporter.getFinishedSpans()).toHaveLength(1);
-  });
-
   it("preserves stream control methods and their original receiver", async () => {
     const exporter = new InMemorySpanExporter();
     initialize({ spanExporter: exporter, disableDefaultExporter: true, disableBatch: true });
@@ -440,20 +432,6 @@ describe("Asymptote Observe SDK", () => {
     expect(exporter.getFinishedSpans()[0]?.status.code).toBe(SpanStatusCode.ERROR);
   });
 
-  it("ends async iterable spans when the caller stops consumption early", async () => {
-    const exporter = new InMemorySpanExporter();
-    initialize({ spanExporter: exporter, disableDefaultExporter: true, disableBatch: true });
-    let cleaned = false;
-    const query = wrapClaudeAgentQuery(async function* () {
-      try { yield { type: "first" }; yield { type: "second" }; }
-      finally { cleaned = true; }
-    });
-    for await (const _message of query()) { break; }
-    await flush();
-    expect(cleaned).toBe(true);
-    expect(exporter.getFinishedSpans()).toHaveLength(1);
-  });
-
   // An iterable with its own reading API is returned untouched: a wrapper would see only for-await,
   // so reading it any other way would leave the span open and never export it.
   it.each([
@@ -477,24 +455,6 @@ describe("Asymptote Observe SDK", () => {
     await flush();
     expect(exporter.getFinishedSpans().map(span => span.name).sort()).toEqual(["promised", "sync"]);
   });
-  it("provides a tracer compatible with Vercel-style telemetry hooks", async () => {
-    const exporter = new InMemorySpanExporter();
-    initialize({ spanExporter: exporter, disableDefaultExporter: true, disableBatch: true });
-
-    await fakeGenerateText({
-      experimental_telemetry: {
-        isEnabled: true,
-        tracer: Observe.getTracer(),
-      },
-    });
-    await flush();
-
-    const [span] = exporter.getFinishedSpans();
-    expect(span.name).toBe("ai.generateText");
-    expect(span.attributes[ATTR_BEACON_HARNESS_NAME]).toBe("vercel_ai_sdk");
-    expect(span.attributes[ATTR_BEACON_EVENT_ACTION]).toBe("prompt.submitted");
-  });
-
   it("exports OTLP over HTTP with hosted auth headers", async () => {
     const requests: CapturedRequest[] = [];
     const server = createServer(async (req, res) => {
@@ -550,24 +510,6 @@ function clearEnv(): void {
 function packageVersion(): string {
   const packageJSON = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
   return packageJSON.version;
-}
-
-async function fakeGenerateText(options: { experimental_telemetry?: { isEnabled?: boolean; tracer?: ReturnType<typeof getTracer> } }): Promise<void> {
-  if (!options.experimental_telemetry?.isEnabled || !options.experimental_telemetry.tracer) {
-    return;
-  }
-  options.experimental_telemetry.tracer.startActiveSpan(
-    "ai.generateText",
-    {
-      attributes: {
-        [ATTR_BEACON_HARNESS_NAME]: "vercel_ai_sdk",
-        [ATTR_BEACON_EVENT_ACTION]: "prompt.submitted",
-      },
-    },
-    span => {
-      span.end();
-    },
-  );
 }
 
 function readRequestBody(req: IncomingMessage): Promise<Buffer> {

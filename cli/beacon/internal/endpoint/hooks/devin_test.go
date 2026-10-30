@@ -160,29 +160,6 @@ func TestInstallDevinDesktopCascadeResponseHookIsIdempotentAndRemovable(t *testi
 	}
 }
 
-func TestInstallDevinHooksReplacesOldBeaconHooks(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "hooks.v1.json")
-	existing := `{"PostToolUse":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 old-beacon-hooks --platform devin post-tool"}]},{"hooks":[{"type":"command","command":"echo keep"}]}]}`
-	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := installDevinHooks(path, "/tmp/new-beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
-		t.Fatalf("installDevinHooks returned error: %v", err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read hooks: %v", err)
-	}
-	text := string(data)
-	if strings.Contains(text, "old-beacon-hooks") {
-		t.Fatalf("old endpoint hook was not replaced:\n%s", text)
-	}
-	if !strings.Contains(text, "echo keep") || !strings.Contains(text, "/tmp/new-beacon-hooks") {
-		t.Fatalf("expected preserved hook and new hook:\n%s", text)
-	}
-}
-
 func TestInstallDevinCLIHooksReplacesLegacyHooksWithExplicitPlatform(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hooks.v1.json")
 	existing := `{"PostToolUse":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 old-beacon-hooks --platform devin post-tool"}]},{"hooks":[{"type":"command","command":"echo keep"}]}]}`

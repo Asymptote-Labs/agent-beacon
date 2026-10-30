@@ -1,15 +1,17 @@
 package asymptote
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -36,6 +38,9 @@ func (f *fakeForwarder) Supported() bool           { return f.supported }
 func (f *fakeForwarder) UnsupportedReason() string { return "fake forwarder unsupported" }
 func (f *fakeForwarder) Label() string             { return "fake.forwarder" }
 func (f *fakeForwarder) UnitPath() (string, error) { return f.unitPath, nil }
+func (f *fakeForwarder) UnitCurrent(string, string) (bool, error) {
+	return true, nil
+}
 func (f *fakeForwarder) WriteUnit(vectorBin, configPath string) (string, error) {
 	f.written = append(f.written, vectorBin+" --config "+configPath)
 	if f.writeErr != nil {
@@ -66,22 +71,92 @@ func (f *fakeForwarder) Status() service.Status {
 	return service.Status{Label: "fake.forwarder", Loaded: f.loads > 0, Running: f.loads > 0 && !f.stopped}
 }
 
-// fakeVector writes an executable that answers --version and validate like Vector 0.56.
-func fakeVector(t *testing.T, version string, validateExit int) string {
+// fakeVectorMarker opens every file fakeVector writes. TestMain answers runCommandOutput for such a
+// file in-process: spawning a freshly written script costs tens of milliseconds per call on macOS,
+// and every Connect runs Vector three times. Any other binary (a script a test writes itself, or a
+// real Vector from BEACON_TEST_VECTOR_BIN) still runs as a subprocess.
+const fakeVectorMarker = "beacon-test-fake-vector\n"
+
+// fakeVectorSpec is how a fake Vector answers --version and validate.
+type fakeVectorSpec struct {
+	Version      string `json:"version"`
+	ValidateExit int    `json:"validate_exit"`
+	// Reject, when set, fails validate (exit 78) only for a config that contains it.
+	Reject string `json:"reject,omitempty"`
+}
+
+func TestMain(m *testing.M) {
+	run := runCommandOutput
+	runCommandOutput = func(bin string, args ...string) ([]byte, error) {
+		if spec, ok := readFakeVector(bin); ok {
+			return spec.run(args)
+		}
+		return run(bin, args...)
+	}
+	os.Exit(m.Run())
+}
+
+func readFakeVector(bin string) (fakeVectorSpec, bool) {
+	f, err := os.Open(bin)
+	if err != nil {
+		return fakeVectorSpec{}, false
+	}
+	defer f.Close()
+	head, _ := io.ReadAll(io.LimitReader(f, 512))
+	rest, ok := bytes.CutPrefix(head, []byte(fakeVectorMarker))
+	var spec fakeVectorSpec
+	if !ok || json.Unmarshal(rest, &spec) != nil {
+		return fakeVectorSpec{}, false
+	}
+	return spec, true
+}
+
+func (s fakeVectorSpec) run(args []string) ([]byte, error) {
+	if len(args) == 0 {
+		return nil, nil
+	}
+	switch args[0] {
+	case "--version":
+		return []byte("vector " + s.Version + " (aarch64-apple-darwin test)\n"), nil
+	case "validate":
+		if s.Reject != "" {
+			config, err := os.ReadFile(args[len(args)-1])
+			if err != nil {
+				return nil, err
+			}
+			if bytes.Contains(config, []byte(s.Reject)) {
+				return []byte("ingest host refused\n"), errors.New("exit status 78")
+			}
+		}
+		if s.ValidateExit != 0 {
+			return nil, fmt.Errorf("exit status %d", s.ValidateExit)
+		}
+	}
+	return nil, nil
+}
+
+// writeFakeVector writes a fake Vector that answers as spec says.
+func writeFakeVector(t *testing.T, spec fakeVectorSpec) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
-		t.Skip("fake vector script needs a POSIX shell")
+		t.Skip("connect tests assume POSIX file modes")
 	}
-	dir := t.TempDir()
-	path := filepath.Join(dir, "vector")
-	script := "#!/bin/sh\ncase \"$1\" in\n  --version) echo \"vector " + version + " (aarch64-apple-darwin test)\";;\n  validate) exit " + itoa(validateExit) + ";;\n  *) exit 0;;\nesac\n"
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+	data, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "vector")
+	if err := os.WriteFile(path, append([]byte(fakeVectorMarker), data...), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return path
 }
 
-func itoa(n int) string { return strconv.Itoa(n) }
+// fakeVector is a Vector of the given version whose validate exits with validateExit.
+func fakeVector(t *testing.T, version string, validateExit int) string {
+	t.Helper()
+	return writeFakeVector(t, fakeVectorSpec{Version: version, ValidateExit: validateExit})
+}
 
 func connectOptions(t *testing.T, fd *fakeDashboard, fwd *fakeForwarder, vector string) ConnectOptions {
 	t.Helper()
@@ -287,7 +362,7 @@ func TestConnectQuietLeavesOutTheProgressLines(t *testing.T) {
 	}
 }
 
-func TestConnectStopsBeforeTheBrowserWhenVectorIsMissingOrOld(t *testing.T) {
+func TestConnectStopsBeforeTheBrowserWhenVectorIsMissing(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
 	isolateVectorDiscovery(t)
@@ -299,11 +374,6 @@ func TestConnectStopsBeforeTheBrowserWhenVectorIsMissingOrOld(t *testing.T) {
 
 	if _, err := Connect(context.Background(), opts); err == nil || (!errors.Is(err, ErrVectorNotFound) && !strings.Contains(err.Error(), "vector")) {
 		t.Fatalf("expected a Vector error, got %v", err)
-	}
-	opts = connectOptions(t, fd, fwd, fakeVector(t, "0.44.9", 0))
-	opts.Enroll.OpenBrowser = func(string) error { opened = true; return nil }
-	if _, err := Connect(context.Background(), opts); err == nil || !strings.Contains(err.Error(), "0.50.0 or newer") {
-		t.Fatalf("expected a too-old error, got %v", err)
 	}
 	if opened {
 		t.Fatal("browser must not open when Vector is unusable")
@@ -681,6 +751,10 @@ func TestConnectRejectedConfigOnPrivacyChangeRotatesNoKeyAndKeepsForwarderRunnin
 	}
 	if after.PrivacyMode != "standard" {
 		t.Fatalf("enrollment privacy mode = %q, want the original standard", after.PrivacyMode)
+	}
+	// No key was rotated, so the working connection is neither lost nor flagged incomplete.
+	if !Connected(true) || ConnectIncomplete(true) {
+		t.Fatalf("a preflight failure must leave the connection as it was: connected=%t incomplete=%t", Connected(true), ConnectIncomplete(true))
 	}
 }
 

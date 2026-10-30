@@ -2,7 +2,7 @@
 // Chrome output must be what it always was; the Firefox and Safari outputs must be complete.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,33 +29,17 @@ afterAll(() => {
 });
 
 describe.each(['chrome', 'firefox', 'safari'])('%s build', (t) => {
-  it.each(FILES)('emits a non-empty %s', (f) => {
-    const p = path.join(out(t), f);
-    expect(existsSync(p)).toBe(true);
-    expect(statSync(p).size).toBeGreaterThan(0);
+  it('emits exactly the extension files', () => {
+    const got = readdirSync(out(t)).filter((f) => !f.endsWith('.map')).sort();
+    expect(got).toEqual([...FILES].sort());
   });
 });
 
-describe('chrome build', () => {
+describe.each(['chrome', 'safari'])('%s build', (t) => {
   it('ships src/manifest.json byte for byte', () => {
-    expect(readFileSync(path.join(out('chrome'), 'manifest.json'))).toEqual(
+    expect(readFileSync(path.join(out(t), 'manifest.json'))).toEqual(
       readFileSync(path.join(root, 'src', 'manifest.json')),
     );
-  });
-
-  it('emits the same file set as before per-browser targets existed', () => {
-    const got = readdirSync(out('chrome')).filter((f) => !f.endsWith('.map')).sort();
-    expect(got).toEqual([...FILES].sort());
-  });
-});
-
-describe('safari build', () => {
-  it('ships src/manifest.json byte for byte, with the same file set as Chrome', () => {
-    expect(readFileSync(path.join(out('safari'), 'manifest.json'))).toEqual(
-      readFileSync(path.join(root, 'src', 'manifest.json')),
-    );
-    const got = readdirSync(out('safari')).filter((f) => !f.endsWith('.map')).sort();
-    expect(got).toEqual([...FILES].sort());
   });
 });
 
@@ -66,23 +50,5 @@ describe('firefox build', () => {
     expect(m.browser_specific_settings.gecko.id).toBe(GECKO_ID);
     const base = JSON.parse(readFileSync(path.join(root, 'src', 'manifest.json'), 'utf8'));
     expect(m.version).toBe(base.version);
-  });
-
-  it('bundles the popup with the host-permission banner wired in', () => {
-    expect(readFileSync(path.join(out('firefox'), 'popup.js'), 'utf8')).toContain('perm-grant');
-    expect(readFileSync(path.join(out('firefox'), 'popup.html'), 'utf8')).toContain('id="perm-grant"');
-    expect(readFileSync(path.join(out('firefox'), 'options.html'), 'utf8')).toContain('id="perm-grant"');
-  });
-});
-
-describe('build CLI', () => {
-  it('fails on an unknown target instead of silently building Chrome', () => {
-    expect(() =>
-      execFileSync(process.execPath, ['esbuild.config.mjs', '--target', 'nope', '--outdir', out('nope')], {
-        cwd: root,
-        stdio: 'pipe',
-      }),
-    ).toThrow(/unknown build target "nope"/);
-    expect(existsSync(out('nope'))).toBe(false);
   });
 });

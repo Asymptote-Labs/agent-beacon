@@ -1,6 +1,6 @@
 ---
 title: "Beacon Skills"
-description: "Install Agent Skills that turn Beacon traces into reviewed project memory in any harness"
+description: "Install Agent Skills for Beacon memory, lenses, sharing and session handoff"
 ---
 
 ## Overview
@@ -10,7 +10,8 @@ harness run Beacon's [cross-harness memory](/concepts/cross-harness-memory) loop
 agent working in Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot, or another
 supported harness can use them to recall what earlier sessions learned about a
 repository. It can also turn a recent session into a reviewed lesson, and promote that
-lesson into a skill the whole team loads.
+lesson into a skill the whole team loads. Other Beacon Skills build local dashboard
+lenses, share traces and continue a local session in another runtime.
 
 The skills do not replace Beacon's capture or review model. They tell the agent which
 `beacon` commands to run and when to stop and ask. They keep the person reviewing in
@@ -23,6 +24,7 @@ control of every write to memory.
 | `beacon-memory-promote` | Installs an approved memory as a project Agent Skill | None locally; Beacon Cloud MCP for memory approved there |
 | `beacon-lens-create` | Builds a [lens](/concepts/lenses) for the local dashboard: reads the spec, inspects real trace data, writes, lints and previews the file with the user, then installs it | None |
 | `beacon-trace-share` | Shares the current session as a trace on beacon.sh with [`beacon share --current`](/cli/share#sharing-this-session) and posts the link. Direct (link-only) by default, asks before public | Uploads the session to beacon.sh, only when you ask |
+| `beacon-session-handoff` | Finds a local session and continues it in another supported runtime through [`beacon handoff`](/cli/handoff), using a detached terminal when the calling agent has no TTY | None |
 
 ## Requirements
 
@@ -86,8 +88,8 @@ installs add the skills only, and recall falls back to `beacon memory list`.
 
 In Claude Code the skills appear as `/beacon:beacon-memory-recall`,
 `/beacon:beacon-memory-distill`, `/beacon:beacon-memory-promote`, `/beacon:beacon-lens-create`,
-and `/beacon:beacon-trace-share`. Every harness also
-loads them on its own when a request matches.
+`/beacon:beacon-trace-share` and `/beacon:beacon-session-handoff`. Every harness also loads them
+on its own when a request matches.
 
 ## Using the skills
 
@@ -129,6 +131,12 @@ when your request matches.
     you ask for private; the agent asks you before making a trace public. When no session is
     found it lists candidates with `beacon share --list`, and when you are not signed in it asks
     you to run `beacon login` yourself.
+  </Step>
+  <Step title="Continue a session in another runtime">
+    Ask to "handoff this session to Codex" or name another supported runtime.
+    `beacon-session-handoff` lists local sessions when needed, resolves the requested destination
+    and runs `beacon handoff resume` with detached launch so the interactive runtime receives a
+    real terminal instead of inheriting the calling agent's non-TTY command subprocess.
   </Step>
 </Steps>
 

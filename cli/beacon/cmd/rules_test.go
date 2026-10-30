@@ -59,15 +59,18 @@ func newCmd() (*cobra.Command, *bytes.Buffer) {
 	return c, buf
 }
 
+// `rules lint` takes a pack directory or a single rule file, the one a rule author is editing.
 func TestRulesLintSuccess(t *testing.T) {
 	dir := t.TempDir()
-	writeRuleFile(t, dir, "ok.rule.yaml", validRuleYAML)
-	cmd, buf := newCmd()
-	if err := lintRulesPath(cmd, dir); err != nil {
-		t.Fatalf("lint returned error: %v\n%s", err, buf.String())
-	}
-	if !strings.Contains(buf.String(), "ok   cli-test-rule") {
-		t.Fatalf("expected ok line, got: %s", buf.String())
+	file := writeRuleFile(t, dir, "ok.rule.yaml", validRuleYAML)
+	for _, path := range []string{dir, file} {
+		cmd, buf := newCmd()
+		if err := lintRulesPath(cmd, path); err != nil {
+			t.Fatalf("lint %s returned error: %v\n%s", path, err, buf.String())
+		}
+		if !strings.Contains(buf.String(), "ok   cli-test-rule") {
+			t.Fatalf("lint %s: expected ok line, got: %s", path, buf.String())
+		}
 	}
 }
 
@@ -88,7 +91,7 @@ func TestRulesLintFailsOnFixtureMismatch(t *testing.T) {
 var newerSpecRuleYAML = strings.Replace(strings.Replace(validRuleYAML, "id: cli-test-rule\n", "id: cli-future-rule\nspec: threat-rules/v1.9\n", 1),
 	"emit:", "future_field: true\nemit:", 1)
 
-const upgradeMessage = `rule "cli-future-rule" requires threat-rules/v1.9, but this Beacon supports up to threat-rules/v1.1; upgrade Beacon to load it`
+const upgradeMessage = `rule "cli-future-rule" requires threat-rules/v1.9, but this Beacon supports up to threat-rules/v1.2; upgrade Beacon to load it`
 
 func TestRulesLintReportsNewerSpecAsSkip(t *testing.T) {
 	dir := t.TempDir()
@@ -279,18 +282,6 @@ func TestRulesPullRejectsUnsupportedPath(t *testing.T) {
 	// A non-pack path must still be rejected even with a pack-like query string.
 	if err := runRulesPull(cmd, []string{srv.URL + "/index.html?file=pack.tar.gz"}); err == nil {
 		t.Fatal("expected unsupported-url rejection for a non-pack path")
-	}
-}
-
-func TestLoadRuleFilesSingleFile(t *testing.T) {
-	dir := t.TempDir()
-	p := writeRuleFile(t, dir, "ok.rule.yaml", validRuleYAML)
-	rules, skipped, err := loadRuleFiles(p)
-	if err != nil || len(skipped) != 0 {
-		t.Fatalf("loadRuleFiles single: %v (skipped %v)", err, skipped)
-	}
-	if len(rules) != 1 || rules[0].ID != "cli-test-rule" {
-		t.Fatalf("unexpected: %+v", rules)
 	}
 }
 

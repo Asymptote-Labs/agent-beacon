@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/homepath"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 )
 
@@ -45,11 +46,11 @@ func HomeOverride(home string) (string, error) {
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
-	if home != "" {
-		if path == "~" {
-			path = home
-		} else if strings.HasPrefix(path, "~/") || (runtime.GOOS == "windows" && strings.HasPrefix(path, `~\`)) {
-			path = filepath.Join(home, path[2:])
+	// Hermes expands as Python's os.path.expanduser does: `~\` is a separator only on Windows, and
+	// with no home the path is left as written.
+	if home != "" && (runtime.GOOS == "windows" || !strings.HasPrefix(path, `~\`)) {
+		if expanded, err := homepath.ExpandTilde(path, home); err == nil {
+			path = expanded
 		}
 	}
 	absolute, err := filepath.Abs(path)

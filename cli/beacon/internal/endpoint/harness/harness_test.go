@@ -3,27 +3,19 @@ package harness
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
-)
 
-func TestMergeCodexOTELAddsBlock(t *testing.T) {
-	got := mergeCodexOTEL("model = \"gpt-5\"\n", "http://127.0.0.1:4317")
-	if !strings.Contains(got, "[otel]") {
-		t.Fatalf("expected otel block: %s", got)
-	}
-	if !strings.Contains(got, `[otel.exporter."otlp-grpc"]`) ||
-		!strings.Contains(got, `endpoint = "http://127.0.0.1:4317"`) {
-		t.Fatalf("expected endpoint: %s", got)
-	}
-	if !strings.Contains(got, "model = \"gpt-5\"") {
-		t.Fatalf("expected existing config to be preserved: %s", got)
-	}
-}
+	"github.com/pelletier/go-toml/v2"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/fxsession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/groksession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
+)
 
 func TestMergeCodexOTELReplacesExistingBlock(t *testing.T) {
 	input := "[otel]\nenabled = false\nendpoint = \"https://example.com\"\n\n[otel.exporter.\"otlp-http\"]\nendpoint = \"https://old.example.com/v1/logs\"\n\n[profile]\nname = \"default\"\n"
@@ -33,6 +25,92 @@ func TestMergeCodexOTELReplacesExistingBlock(t *testing.T) {
 	}
 	if !strings.Contains(got, "[profile]\nname = \"default\"") {
 		t.Fatalf("following section was not preserved: %s", got)
+	}
+}
+
+// A settings.json Beacon cannot parse still holds the user's permissions and hooks; rewriting it
+// from an empty map would leave Claude Code running with only Beacon's env.
+func TestConfigureClaudeRefusesSettingsItCannotParse(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	path := filepath.Join(home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	original := `{"permissions":{"allow":["Bash(npm test)"]},"hooks":{},}`
+	if err := os.WriteFile(path, []byte(original), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ConfigureClaude(ConfigureOptions{Endpoint: "http://127.0.0.1:4317", UserMode: true}); err == nil {
+		t.Fatal("ConfigureClaude rewrote a settings.json it could not parse")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != original {
+		t.Fatalf("settings.json was changed:\n%s", data)
+	}
+	if backups, _ := filepath.Glob(path + ".beacon.*.bak"); len(backups) != 0 {
+		t.Fatalf("a refused configure left backups: %v", backups)
+	}
+}
+
+func TestMergeCodexOTELReadsHeadersWithComments(t *testing.T) {
+	input := "model = \"gpt-5\"\n\n[otel] # telemetry\nenvironment = \"prod\"\n\n[otel.exporter.\"otlp-grpc\"]\nendpoint = \"http://old.example.com\"\n\n[profiles.fast] # my profile\nmodel = \"o3\"\n"
+	got := mergeCodexOTEL(input, "http://127.0.0.1:4317")
+	var parsed map[string]interface{}
+	if err := toml.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("merged config is not valid TOML: %v\n%s", err, got)
+	}
+	if strings.Contains(got, "old.example.com") || strings.Contains(got, "\"prod\"") {
+		t.Fatalf("old otel config was not replaced: %s", got)
+	}
+	if !strings.Contains(got, "[profiles.fast] # my profile\nmodel = \"o3\"") {
+		t.Fatalf("following section was not preserved: %s", got)
+	}
+}
+
+// parseCodexConfig fails the test unless text is a config Codex can load.
+func parseCodexConfig(t *testing.T, text string) map[string]interface{} {
+	t.Helper()
+	var parsed map[string]interface{}
+	if err := toml.Unmarshal([]byte(text), &parsed); err != nil {
+		t.Fatalf("merged config is not valid TOML: %v\n%s", err, text)
+	}
+	return parsed
+}
+
+func TestMergeCodexOTELReplacesACommentedOTELHeader(t *testing.T) {
+	got := mergeCodexOTEL("model = \"gpt-5\"\n\n[otel] # telemetry\nenvironment = \"prod\"\n\n[mcp_servers.x]\ncommand = \"npx\"\n", "http://127.0.0.1:4317")
+	parsed := parseCodexConfig(t, got)
+	if otel, _ := parsed["otel"].(map[string]interface{}); otel["environment"] != "dev" {
+		t.Fatalf("otel = %v, want Beacon's block:\n%s", parsed["otel"], got)
+	}
+	if servers, _ := parsed["mcp_servers"].(map[string]interface{}); servers["x"] == nil {
+		t.Fatalf("mcp_servers.x was dropped:\n%s", got)
+	}
+}
+
+// Beacon's [otel] block sits at the end of the file, so a server the person adds afterwards follows
+// it; a reinstall must not take that server for part of the block.
+func TestMergeCodexOTELKeepsCommentedTablesAfterTheBlock(t *testing.T) {
+	for name, header := range map[string]string{
+		"bare":      "[mcp_servers.x] # mine",
+		"quoted #":  "[mcp_servers.\"x#1\"] # mine",
+		"literal #": "[mcp_servers.'x#1']",
+	} {
+		first := mergeCodexOTEL("model = \"gpt-5\"\n", "http://127.0.0.1:4317")
+		input := first + "\n" + header + "\ncommand = \"npx\"\n"
+		got := mergeCodexOTEL(input, "http://127.0.0.1:4318")
+		parsed := parseCodexConfig(t, got)
+		servers, _ := parsed["mcp_servers"].(map[string]interface{})
+		if len(servers) != 1 || !strings.Contains(got, header+"\ncommand = \"npx\"") {
+			t.Errorf("%s: server was dropped:\n%s", name, got)
+		}
+		if strings.Contains(got, "4317") {
+			t.Errorf("%s: old endpoint kept:\n%s", name, got)
+		}
 	}
 }
 
@@ -88,40 +166,6 @@ func TestConfigureClaudeWritesTelemetryEnvAndBackup(t *testing.T) {
 	}
 	if len(backups) != 1 {
 		t.Fatalf("expected one backup, got %#v", backups)
-	}
-}
-
-func TestConfigureClaudeEnablesPromptLogging(t *testing.T) {
-	home := t.TempDir()
-	testenv.SetHome(t, home)
-	path := filepath.Join(home, ".claude", "settings.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		t.Fatalf("mkdir claude config dir: %v", err)
-	}
-	if err := os.WriteFile(path, []byte(`{"env":{"OTEL_LOG_USER_PROMPTS":"1"}}`), 0600); err != nil {
-		t.Fatalf("write existing claude config: %v", err)
-	}
-
-	written, err := ConfigureClaude(ConfigureOptions{
-		Endpoint: "http://127.0.0.1:4317",
-		UserMode: true,
-	})
-	if err != nil {
-		t.Fatalf("ConfigureClaude returned error: %v", err)
-	}
-	if written != path {
-		t.Fatalf("ConfigureClaude path = %q, want %q", written, path)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read claude config: %v", err)
-	}
-	var settings map[string]map[string]string
-	if err := json.Unmarshal(data, &settings); err != nil {
-		t.Fatalf("unmarshal claude config: %v", err)
-	}
-	if got := settings["env"]["OTEL_LOG_USER_PROMPTS"]; got != "1" {
-		t.Fatalf("OTEL_LOG_USER_PROMPTS = %q, want 1; env=%#v", got, settings["env"])
 	}
 }
 
@@ -336,26 +380,6 @@ func TestConfigureCodexWritesTelemetryBlockAndBackup(t *testing.T) {
 	}
 }
 
-func TestConfigureCodexEnablesPromptLogging(t *testing.T) {
-	home := t.TempDir()
-	testenv.SetHome(t, home)
-
-	path, err := ConfigureCodex(ConfigureOptions{
-		Endpoint: "http://127.0.0.1:4317",
-		UserMode: true,
-	})
-	if err != nil {
-		t.Fatalf("ConfigureCodex returned error: %v", err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read codex config: %v", err)
-	}
-	if !strings.Contains(string(data), "log_user_prompt = true") {
-		t.Fatalf("ConfigureCodex should enable prompt logging:\n%s", string(data))
-	}
-}
-
 // Codex reads config.toml from CODEX_HOME when it is set, so an install that wrote ~/.codex would
 // leave Codex without the exporter and discovery reporting a file Codex never reads.
 func TestCodexConfigFollowsCodexHome(t *testing.T) {
@@ -450,24 +474,6 @@ func TestDiscoverCodexDetectsExecutableOnPath(t *testing.T) {
 	}
 	if h.Version != "codex 1.2.3" {
 		t.Fatalf("Version = %q, want fake executable version", h.Version)
-	}
-}
-
-func TestHermesStatusDetectsBeaconHooks(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte(`hooks:
-  pre_tool_call:
-    - matcher: .*
-      command: env BEACON_ENDPOINT_MODE=1 beacon-hooks --platform hermes pre-tool
-  post_tool_call:
-    - command: echo keep
-`), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	status, message := hermesStatus(path)
-	if status != TelemetryEnabled {
-		t.Fatalf("hermesStatus = %q (%s), want enabled", status, message)
 	}
 }
 
@@ -570,78 +576,6 @@ func TestConfigureGeminiWritesTelemetryAndBackup(t *testing.T) {
 	}
 }
 
-func TestConfigureGeminiEnablesPromptLoggingAndTraces(t *testing.T) {
-	home := t.TempDir()
-	testenv.SetHome(t, home)
-
-	path, err := ConfigureGemini(ConfigureOptions{
-		Endpoint: "http://127.0.0.1:4317",
-		UserMode: true,
-	})
-	if err != nil {
-		t.Fatalf("ConfigureGemini returned error: %v", err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read gemini config: %v", err)
-	}
-	var settings map[string]map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		t.Fatalf("unmarshal gemini config: %v", err)
-	}
-	telemetry := settings["telemetry"]
-	if telemetry["logPrompts"] != true {
-		t.Fatalf("ConfigureGemini should enable prompt logging: %#v", telemetry)
-	}
-	if telemetry["traces"] != true {
-		t.Fatalf("ConfigureGemini should enable detailed traces: %#v", telemetry)
-	}
-}
-
-func TestDiscoverGeminiDoesNotDetectConfigDirectoryOnly(t *testing.T) {
-	home := t.TempDir()
-	testenv.SetHome(t, home)
-	binDir := t.TempDir()
-	t.Setenv("PATH", binDir)
-	if err := os.MkdirAll(filepath.Join(home, ".gemini"), 0755); err != nil {
-		t.Fatalf("mkdir gemini config dir: %v", err)
-	}
-
-	h := DiscoverGemini()
-	if h.Detected {
-		t.Fatalf("DiscoverGemini detected Gemini from config directory only: %#v", h)
-	}
-	if h.ConfigPath != filepath.Join(home, ".gemini", "settings.json") {
-		t.Fatalf("ConfigPath = %q, want home config path", h.ConfigPath)
-	}
-	if h.TelemetryStatus != TelemetryMissing {
-		t.Fatalf("TelemetryStatus = %q, want %q", h.TelemetryStatus, TelemetryMissing)
-	}
-}
-
-func TestDiscoverGeminiDetectsExecutableOnPath(t *testing.T) {
-	testenv.RequirePOSIXExecutableFixtures(t)
-	home := t.TempDir()
-	testenv.SetHome(t, home)
-	binDir := t.TempDir()
-	t.Setenv("PATH", binDir)
-	geminiPath := filepath.Join(binDir, "gemini")
-	if err := os.WriteFile(geminiPath, []byte("#!/bin/sh\necho gemini 0.34.0\n"), 0755); err != nil {
-		t.Fatalf("write fake gemini executable: %v", err)
-	}
-
-	h := DiscoverGemini()
-	if !h.Detected {
-		t.Fatalf("DiscoverGemini did not detect executable on PATH: %#v", h)
-	}
-	if h.ExecutablePath != geminiPath {
-		t.Fatalf("ExecutablePath = %q, want %q", h.ExecutablePath, geminiPath)
-	}
-	if h.Version != "gemini 0.34.0" {
-		t.Fatalf("Version = %q, want fake executable version", h.Version)
-	}
-}
-
 func TestGeminiStatusVariants(t *testing.T) {
 	dir := t.TempDir()
 	tests := []struct {
@@ -674,56 +608,15 @@ func TestGeminiStatusVariants(t *testing.T) {
 	}
 }
 
-func TestDiscoverFactoryDetectsExecutableOnPath(t *testing.T) {
-	testenv.RequirePOSIXExecutableFixtures(t)
+// Factory Droid reads its OTel endpoint from the login shell's environment, so discovery reports the
+// profile the user's shell actually sources.
+func TestDiscoverFactoryReportsTheLoginShellProfile(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
 	t.Setenv("SHELL", "/bin/bash")
-	binDir := t.TempDir()
-	t.Setenv("PATH", binDir)
-	droidPath := filepath.Join(binDir, "droid")
-	if err := os.WriteFile(droidPath, []byte("#!/bin/sh\necho 0.127.0\n"), 0755); err != nil {
-		t.Fatalf("write fake droid executable: %v", err)
-	}
+	t.Setenv("PATH", t.TempDir())
 
-	h := DiscoverFactory()
-	if !h.Detected {
-		t.Fatalf("DiscoverFactory did not detect executable on PATH: %#v", h)
-	}
-	if h.ExecutablePath != droidPath {
-		t.Fatalf("ExecutablePath = %q, want %q", h.ExecutablePath, droidPath)
-	}
-	if h.Version != "0.127.0" {
-		t.Fatalf("Version = %q, want fake executable version", h.Version)
-	}
-	if h.ConfigPath != filepath.Join(home, ".bash_profile") {
-		t.Fatalf("ConfigPath = %q, want bash profile", h.ConfigPath)
-	}
-}
-
-func TestDiscoverCopilotCLIDetectsExecutableOnPath(t *testing.T) {
-	testenv.RequirePOSIXExecutableFixtures(t)
-	home := t.TempDir()
-	testenv.SetHome(t, home)
-	t.Setenv("SHELL", "/bin/bash")
-	binDir := t.TempDir()
-	t.Setenv("PATH", binDir)
-	copilotPath := filepath.Join(binDir, "copilot")
-	if err := os.WriteFile(copilotPath, []byte("#!/bin/sh\necho copilot 1.0.4\n"), 0755); err != nil {
-		t.Fatalf("write fake copilot executable: %v", err)
-	}
-
-	h := DiscoverCopilotCLI()
-	if !h.Detected {
-		t.Fatalf("DiscoverCopilotCLI did not detect executable on PATH: %#v", h)
-	}
-	if h.ExecutablePath != copilotPath {
-		t.Fatalf("ExecutablePath = %q, want %q", h.ExecutablePath, copilotPath)
-	}
-	if h.Version != "copilot 1.0.4" {
-		t.Fatalf("Version = %q, want fake executable version", h.Version)
-	}
-	if h.ConfigPath != filepath.Join(home, ".bash_profile") {
+	if h := DiscoverFactory(); h.ConfigPath != filepath.Join(home, ".bash_profile") {
 		t.Fatalf("ConfigPath = %q, want bash profile", h.ConfigPath)
 	}
 }
@@ -771,35 +664,6 @@ func TestDiscoverCopilotCLIDetectsConfigFileUnderCopilotHome(t *testing.T) {
 	}
 	if h := DiscoverCopilotCLI(); h.Detected {
 		t.Fatalf("DiscoverCopilotCLI detected ~/.copilot/config.json with COPILOT_HOME pointing elsewhere: %#v", h)
-	}
-}
-
-func TestDiscoverDevinDetectsExecutableOnPath(t *testing.T) {
-	testenv.RequirePOSIXExecutableFixtures(t)
-	home := t.TempDir()
-	testenv.SetHome(t, home)
-	binDir := t.TempDir()
-	t.Setenv("PATH", binDir)
-	devinPath := filepath.Join(binDir, "devin")
-	if err := os.WriteFile(devinPath, []byte("#!/bin/sh\necho devin 1.2.3\n"), 0755); err != nil {
-		t.Fatalf("write fake devin executable: %v", err)
-	}
-
-	h := DiscoverDevin()
-	if !h.Detected {
-		t.Fatalf("DiscoverDevin did not detect executable on PATH: %#v", h)
-	}
-	if h.Name != "devin-cli" || h.DisplayName != "Devin CLI" {
-		t.Fatalf("Devin harness identity = %s/%s, want devin-cli/Devin CLI", h.Name, h.DisplayName)
-	}
-	if h.ExecutablePath != devinPath {
-		t.Fatalf("ExecutablePath = %q, want %q", h.ExecutablePath, devinPath)
-	}
-	if h.Version != "devin 1.2.3" {
-		t.Fatalf("Version = %q, want fake executable version", h.Version)
-	}
-	if h.ConfigPath != filepath.Join(home, ".config", "devin", "config.json") {
-		t.Fatalf("ConfigPath = %q, want user config path", h.ConfigPath)
 	}
 }
 
@@ -853,18 +717,6 @@ func TestDevinStatusVariants(t *testing.T) {
 				t.Fatalf("devinStatus = %q, want %q", status, tt.status)
 			}
 		})
-	}
-}
-
-func TestDevinDesktopStatusVariants(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "desktop.json")
-	body := `{"hooks":{"post_write_code":[{"command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform devin-desktop post-tool"}]}}`
-	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
-		t.Fatalf("write fixture: %v", err)
-	}
-	status, _ := windsurfCascadeStatus(path, "devin-desktop")
-	if status != TelemetryEnabled {
-		t.Fatalf("windsurfCascadeStatus desktop = %q, want enabled", status)
 	}
 }
 
@@ -1045,18 +897,45 @@ func TestDiscoverClineTelemetryStatusVariants(t *testing.T) {
 	}
 }
 
-// A runtime missing from DiscoverAll is invisible to `beacon endpoint discover`, which is where an
-// operator looks to find out whether Beacon can see their agent at all.
-func TestDiscoverAllIncludesCline(t *testing.T) {
+// A runtime missing from DiscoverAll is invisible to `beacon endpoint discover` -- the command
+// succeeds and simply never mentions it. And the name discovery reports must be the canonical one
+// events are written under, or the dashboard groups a runtime's discovery row and its telemetry rows
+// separately.
+func TestDiscoverAllRegistersRuntimesUnderCanonicalNames(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	// The session collectors write these names; discovery has to report the same ones.
+	if FxName != fxsession.Harness || GrokName != groksession.Harness {
+		t.Fatalf("discovery reports %q/%q while the collectors write %q/%q", FxName, GrokName, fxsession.Harness, groksession.Harness)
+	}
+	want := map[string]string{
+		"cline":       "plugin",
+		"pi_cli":      "plugin",
+		"omp":         "plugin",
+		"omo_senpi":   "plugin",
+		"prime_agent": "plugin",
+		FxName:        "session_log",
+		GrokName:      "hooks+session_log",
+		// "hooks", not "otel_env": Qwen Code is a Gemini CLI fork without Gemini's OpenTelemetry
+		// export, so `endpoint install --harness qwen` has nothing to configure.
+		"qwen_code": "hooks",
+	}
 	for _, h := range DiscoverAll() {
-		if h.Name == "cline" {
-			if h.DisplayName != "Cline" || h.Capability != "plugin" {
-				t.Fatalf("cline harness = %#v, want display name Cline and capability plugin", h)
-			}
-			return
+		capability, ok := want[h.Name]
+		if !ok {
+			continue
+		}
+		delete(want, h.Name)
+		if h.Capability != capability {
+			t.Errorf("%s capability = %q, want %q", h.Name, h.Capability, capability)
+		}
+		if got := asymptoteobserve.NormalizeHarnessName(h.Name); got != h.Name {
+			t.Errorf("discovery reports %q, which normalizes to %q; discovery and telemetry would not join", h.Name, got)
 		}
 	}
-	t.Fatal("DiscoverAll does not include cline")
+	if len(want) != 0 {
+		t.Fatalf("DiscoverAll does not include %v", want)
+	}
 }
 
 // An unresolvable home directory must stop Cline discovery rather than produce a relative path.

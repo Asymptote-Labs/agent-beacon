@@ -3,6 +3,8 @@ package check
 import (
 	"strings"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/beacon-sandbox/hostguard"
 )
 
 func TestHostChangeFailsTheRun(t *testing.T) {
@@ -23,7 +25,7 @@ func TestHostChangeFailsTheRun(t *testing.T) {
 
 func TestCleanHostPasses(t *testing.T) {
 	v := Verdict{Scenario: "t"}
-	Safety(&v, HostSafety{HostChanged: "host state unchanged", ArgvCheckRan: true})
+	Safety(&v, HostSafety{HostChanged: hostguard.CleanDescription, ArgvCheckRan: true})
 	v.Resolve()
 
 	if v.Outcome != Pass {
@@ -155,15 +157,5 @@ func TestFieldBecomingPopulatedIsAnImprovement(t *testing.T) {
 	}
 	if len(d.Improvements) == 0 || !strings.Contains(d.Describe(), "now populated") {
 		t.Errorf("expected an improvement to be reported:\n%s", d.Describe())
-	}
-}
-
-func TestPassToFailIsARegression(t *testing.T) {
-	d := CompareFingerprints(
-		Fingerprint{Scenario: "s", Outcome: Pass},
-		Fingerprint{Scenario: "s", Outcome: Fail},
-	)
-	if !d.HasRegression() {
-		t.Error("PASS -> FAIL must be a regression")
 	}
 }

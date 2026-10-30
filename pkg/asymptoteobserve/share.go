@@ -788,6 +788,9 @@ func ShareRemoteURL(raw string) string {
 			return ""
 		}
 		rest := raw[scheme+3:]
+		if cut := strings.IndexAny(rest, "?#"); cut >= 0 {
+			rest = rest[:cut]
+		}
 		host, path := rest, ""
 		if slash := strings.Index(rest, "/"); slash >= 0 {
 			host, path = rest[:slash], rest[slash:]
@@ -797,9 +800,6 @@ func ShareRemoteURL(raw string) string {
 		}
 		if host == "" {
 			return ""
-		}
-		if cut := strings.IndexAny(path, "?#"); cut >= 0 {
-			path = path[:cut]
 		}
 		return raw[:scheme+3] + host + path
 	}

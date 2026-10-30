@@ -152,49 +152,42 @@ func TestMapSkillListingOnSubagentTranscriptWithBlockContent(t *testing.T) {
 	}
 }
 
-func TestCollectOnceUsesCursorAndPrintDoesNotAdvance(t *testing.T) {
+// `beacon endpoint claude sync --print` runs the collector with Print, an Out writer and nothing
+// to write or save. The collector has to hand Print to its sink: without it the sweep maps every
+// event and prints none, and the dry run a user runs to see what sync would ship shows nothing.
+func TestPrintSweepShowsEveryEventAndLeavesTheSessionForSync(t *testing.T) {
 	dir := t.TempDir()
 	projects := filepath.Join(dir, "projects")
-	sessionPath := filepath.Join(projects, "-tmp-repo", "sess-1.jsonl")
-	writeFile(t, sessionPath, userLine("sess-1", "u1", "first")+"\n")
-	statePath := filepath.Join(dir, "state", "claude.json")
-	logPath := filepath.Join(dir, "runtime.jsonl")
+	writeFile(t, filepath.Join(projects, "-tmp-repo", "sess-1.jsonl"), userLine("sess-1", "u1", "first")+"\n")
 
-	opts := CollectOptions{ProjectsDir: projects, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true}
-	first, err := CollectOnce(opts)
-	if err != nil {
-		t.Fatalf("first CollectOnce: %v", err)
-	}
-	if first.EventsEmitted == 0 {
-		t.Fatal("first sweep emitted no events")
-	}
-	before := readLog(t, logPath)
-	second, err := CollectOnce(opts)
-	if err != nil {
-		t.Fatalf("second CollectOnce: %v", err)
-	}
-	if second.EventsEmitted != 0 {
-		t.Fatalf("second sweep emitted %d events, want 0", second.EventsEmitted)
-	}
-	if after := readLog(t, logPath); len(after) != len(before) {
-		t.Fatalf("log grew from %d to %d events with unchanged cursor", len(before), len(after))
-	}
-
-	writeFile(t, sessionPath, userLine("sess-1", "u1", "first")+"\n"+userLine("sess-1", "u2", "second")+"\n")
 	var printed strings.Builder
-	printSummary, err := CollectOnce(CollectOptions{ProjectsDir: projects, Print: true, Out: &printed})
+	summary, err := CollectOnce(CollectOptions{ProjectsDir: projects, Print: true, Out: &printed})
 	if err != nil {
 		t.Fatalf("print CollectOnce: %v", err)
 	}
-	if printSummary.EventsEmitted == 0 || printed.Len() == 0 {
-		t.Fatalf("print sweep emitted nothing: summary=%+v output=%q", printSummary, printed.String())
+	lines := strings.Split(strings.TrimSpace(printed.String()), "\n")
+	if summary.EventsEmitted == 0 || printed.Len() == 0 || len(lines) != summary.EventsEmitted {
+		t.Fatalf("printed %d lines for %d events:\n%s", len(lines), summary.EventsEmitted, printed.String())
 	}
-	realSummary, err := CollectOnce(opts)
+	var sawPrompt bool
+	for _, line := range lines {
+		var ev schema.Event
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("print output is not one event per line: %v\n%s", err, line)
+		}
+		sawPrompt = sawPrompt || (ev.Event.Action == "prompt.submitted" && ev.Prompt != nil && ev.Prompt.Text == "first")
+	}
+	if !sawPrompt {
+		t.Fatalf("print output has no prompt.submitted for the session's prompt:\n%s", printed.String())
+	}
+
+	logPath := filepath.Join(dir, "runtime.jsonl")
+	real, err := CollectOnce(CollectOptions{ProjectsDir: projects, StatePath: filepath.Join(dir, "state", "claude.json"), LogPath: logPath, Write: true, UserMode: true})
 	if err != nil {
-		t.Fatalf("real CollectOnce after print: %v", err)
+		t.Fatalf("sync after print: %v", err)
 	}
-	if realSummary.EventsEmitted == 0 {
-		t.Fatal("--print advanced the cursor; real sweep had nothing left")
+	if real.EventsEmitted != summary.EventsEmitted || len(readLog(t, logPath)) != summary.EventsEmitted {
+		t.Fatalf("sync after --print wrote %d events, want the %d the dry run showed", real.EventsEmitted, summary.EventsEmitted)
 	}
 }
 

@@ -22,7 +22,6 @@ type File struct {
 	Name            string
 	Content         string
 	TemplateLogPath bool
-	JSONEscape      bool
 }
 
 func ReadFile(fsys fs.FS, path string) (string, error) {
@@ -33,26 +32,71 @@ func ReadFile(fsys fs.FS, path string) (string, error) {
 	return string(data), nil
 }
 
-func RenderLogPath(content, logPath string) string {
-	content = strings.ReplaceAll(content, logPathToken, logPath)
-	content = strings.ReplaceAll(content, inventoryLogPathToken, InventoryLogPath(logPath))
-	return strings.ReplaceAll(content, backfillLogPathToken, BackfillLogPath(logPath))
-}
-
-func renderTOMLLogPath(content, logPath string) string {
+// RenderLogPath substitutes the log path tokens in content, escaped for the format of the file
+// name (a trailing .tmpl is ignored). Sibling paths are derived before escaping, so escapes never
+// reach filepath.Dir.
+func RenderLogPath(name, content, logPath string) string {
+	escape := logPathEscaper(name)
 	return strings.NewReplacer(
-		logPathToken, TOMLEscape(logPath),
-		inventoryLogPathToken, TOMLEscape(InventoryLogPath(logPath)),
-		backfillLogPathToken, TOMLEscape(BackfillLogPath(logPath)),
+		logPathToken, escape(logPath),
+		inventoryLogPathToken, escape(InventoryLogPath(logPath)),
+		backfillLogPathToken, escape(BackfillLogPath(logPath)),
 	).Replace(content)
 }
 
-// TOMLEscape is value as it is written inside a TOML basic string. JSON string escapes are also
-// valid there, but TOML additionally forbids a literal DEL. Sibling paths are derived before
-// encoding, so escapes never reach filepath.Dir.
-func TOMLEscape(value string) string {
+// logPathEscaper returns how a path is written where the templates of that format place their
+// tokens: TOML basic strings, YAML double-quoted scalars, JSON strings, and the default of a
+// double-quoted "${VAR:-...}" shell expansion. Any other file gets the path verbatim.
+func logPathEscaper(name string) func(string) string {
+	switch filepath.Ext(strings.TrimSuffix(name, ".tmpl")) {
+	case ".toml":
+		return tomlEscape
+	case ".yaml", ".yml":
+		return yamlEscape
+	case ".json":
+		return JSONEscapeForString
+	case ".sh":
+		return shellDefaultEscaper.Replace
+	case ".xml":
+		// Wazuh's os_xml keeps element text verbatim and decodes no entities, so escaping would change the path.
+		return verbatim
+	}
+	return verbatim
+}
+
+func verbatim(value string) string { return value }
+
+// tomlEscape takes JSON string escapes, which TOML basic strings share, plus DEL, which TOML forbids.
+func tomlEscape(value string) string {
 	return strings.ReplaceAll(JSONEscapeForString(value), "\x7f", `\u007f`)
 }
+
+// yamlEscape takes JSON string escapes, which YAML double-quoted scalars share, plus the characters
+// YAML forbids or folds: DEL, the C1 controls (NEL reads as a line break), the BOM, U+FFFE and U+FFFF.
+func yamlEscape(value string) string {
+	escaped := JSONEscapeForString(value)
+	if strings.IndexFunc(escaped, yamlNeedsEscape) < 0 {
+		return escaped
+	}
+	var b strings.Builder
+	for _, r := range escaped {
+		if yamlNeedsEscape(r) {
+			fmt.Fprintf(&b, `\u%04x`, r)
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func yamlNeedsEscape(r rune) bool {
+	return (r >= 0x7f && r <= 0x9f) || r == 0xfeff || r == 0xfffe || r == 0xffff
+}
+
+// shellDefaultEscaper writes a path inside "${VAR:-...}": a backslash before \ $ ` and ", which keeps
+// them literal, and } quoted rather than backslashed, because bash 3.2 (macOS /bin/sh) keeps the
+// backslash of \} there.
+var shellDefaultEscaper = strings.NewReplacer(`\`, `\\`, `$`, `\$`, "`", "\\`", `"`, `\"`, `}`, `"}"`)
 
 // BackfillLogPath is BackfillLogName beside logPath.
 func BackfillLogPath(logPath string) string {
@@ -83,14 +127,7 @@ func Install(outputDir string, files []File, logPath string) error {
 	for _, file := range files {
 		content := file.Content
 		if file.TemplateLogPath {
-			switch {
-			case file.JSONEscape:
-				content = RenderLogPath(content, JSONEscapeForString(logPath))
-			case isTOMLAsset(file.Name):
-				content = renderTOMLLogPath(content, logPath)
-			default:
-				content = RenderLogPath(content, logPath)
-			}
+			content = RenderLogPath(file.Name, content, logPath)
 		}
 		if err := os.WriteFile(filepath.Join(outputDir, file.Name), []byte(content), Mode(file.Name)); err != nil {
 			return err
@@ -114,8 +151,6 @@ type Asset struct {
 	Name string
 	// TemplateLogPath substitutes the runtime log path into the content on install.
 	TemplateLogPath bool
-	// JSONEscape escapes the substituted log path for embedding in a JSON string.
-	JSONEscape bool
 }
 
 // Pack is an embedded content pack for a single forwarding destination. It
@@ -128,13 +163,6 @@ type Pack struct {
 	DefaultLogPath   string
 	DefaultOutputDir string
 	Assets           []Asset
-}
-
-// WithFS returns a copy of the pack reading from fsys instead of p.FS. It lets
-// callers inject a test FS to exercise read-error paths.
-func (p Pack) WithFS(fsys fs.FS) Pack {
-	p.FS = fsys
-	return p
 }
 
 // Read returns the embedded asset at path, wrapping read errors with the label.
@@ -169,7 +197,6 @@ func (p Pack) Files() ([]File, error) {
 			Name:            a.Name,
 			Content:         content,
 			TemplateLogPath: a.TemplateLogPath,
-			JSONEscape:      a.JSONEscape,
 		})
 	}
 	return files, nil
@@ -185,16 +212,7 @@ func (p Pack) Render(assetPath, logPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if isTOMLAsset(assetPath) {
-		return renderTOMLLogPath(content, logPath), nil
-	}
-	return RenderLogPath(content, logPath), nil
-}
-
-// isTOMLAsset reports whether name, with or without its .tmpl suffix, is a TOML file, whose log
-// paths must be escaped for a basic string.
-func isTOMLAsset(name string) bool {
-	return filepath.Ext(strings.TrimSuffix(name, ".tmpl")) == ".toml"
+	return RenderLogPath(assetPath, content, logPath), nil
 }
 
 // Install writes the pack files to outputDir (defaulting to DefaultOutputDir),

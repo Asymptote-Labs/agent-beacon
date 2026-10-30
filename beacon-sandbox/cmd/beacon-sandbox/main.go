@@ -404,6 +404,7 @@ func judge(sc scenario.Scenario, art runner.Artifacts, creds credentials.Resolve
 	check.Uninstall(&v, check.Removal{
 		Ran:          art.Meta["uninstall_ran"],
 		ExitCode:     art.Meta["uninstall_rc"],
+		ExecError:    art.Meta["uninstall_exec_error"],
 		Output:       art.Meta["uninstall_output"],
 		ServiceKind:  art.Meta["service_kind"],
 		ServiceLabel: art.Meta["service_label"],

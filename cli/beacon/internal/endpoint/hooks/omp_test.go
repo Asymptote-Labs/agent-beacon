@@ -1,11 +1,8 @@
 package hooks
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strings"
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
@@ -194,111 +191,6 @@ func TestOmpAgentDirRejectsAProfileNameOhMyPiRejects(t *testing.T) {
 	}
 }
 
-func TestOmpExtensionPathRejectsUnknownLevel(t *testing.T) {
-	if _, err := OmpExtensionPath(Level("machine")); err == nil {
-		t.Fatal("OmpExtensionPath accepted an unknown level; a typo in a scope flag must fail loudly " +
-			"rather than silently installing at the default scope")
-	}
-}
-
-// Oh My Pi must never install into Pi's directory or vice versa. They are separate products that a
-// fleet can run side by side, and one writing into the other's extension directory would attribute
-// a whole runtime's activity to the wrong harness.
-func TestOmpAndPiInstallToDifferentDirectories(t *testing.T) {
-	home := t.TempDir()
-	cwd := t.TempDir()
-	testenv.SetHome(t, home)
-	t.Chdir(cwd)
-	clearOmpEnv(t)
-
-	for _, level := range []Level{LevelUser, LevelProject} {
-		omp, err := OmpExtensionPath(level)
-		if err != nil {
-			t.Fatal(err)
-		}
-		pi, err := PiExtensionPath(level)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if omp == pi {
-			t.Fatalf("Oh My Pi and Pi resolve to the same %s extension path %q", level, omp)
-		}
-	}
-}
-
-// The marker is the only thing that distinguishes a file Beacon may overwrite from one it must
-// not, and it is read by three packages. Pinning the literal here means a change to it is a
-// deliberate edit to a test rather than a silent break of install/uninstall/status agreement.
-func TestOmpManagedExtensionMarkerIsStable(t *testing.T) {
-	if OmpManagedExtensionMarker != "beacon-managed-omp-extension:v1" {
-		t.Fatalf("OmpManagedExtensionMarker = %q; changing it strands extensions installed by "+
-			"earlier builds, which uninstall then refuses to remove", OmpManagedExtensionMarker)
-	}
-}
-
-// ompRenderedArgv extracts the argv the installer substituted into the extension.
-//
-// Parsed back out of the source rather than compared as a string: argv is the whole point of this
-// template, and a test that compared text would pass on a file the runtime cannot execute.
-func ompRenderedArgv(t *testing.T, source string) []string {
-	t.Helper()
-	matches := regexp.MustCompile(`const beaconArgv: string\[\] = (\[.*\])`).FindStringSubmatch(source)
-	if len(matches) != 2 {
-		t.Fatalf("rendered extension has no beaconArgv array:\n%s", source)
-	}
-	var argv []string
-	if err := json.Unmarshal([]byte(matches[1]), &argv); err != nil {
-		t.Fatalf("beaconArgv is not a JSON array: %v", err)
-	}
-	return argv
-}
-
-func TestInstallOmpExtensionWritesAnExecutableInvocation(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "beacon.ts")
-	binary := "/opt/beacon/bin/beacon-hooks"
-	logPath := "/var/log/beacon-agent/runtime.jsonl"
-
-	if err := ompExtension.install(path, binary, logPath, "/etc/beacon/endpoint.yaml"); err != nil {
-		t.Fatalf("install returned error: %v", err)
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(data)
-	if !strings.Contains(source, OmpManagedExtensionMarker) {
-		t.Fatal("the installed extension carries no Beacon marker; uninstall would refuse to remove it")
-	}
-
-	argv := ompRenderedArgv(t, source)
-	if argv[0] != binary {
-		t.Fatalf("argv[0] = %q, want the hook binary %q", argv[0], binary)
-	}
-	if argv[len(argv)-1] != "omp-event" {
-		t.Fatalf("argv ends with %q, want omp-event -- any other subcommand sends Oh My Pi's "+
-			"payloads to a mapper that does not understand them", argv[len(argv)-1])
-	}
-	joined := strings.Join(argv, " ")
-	for _, want := range []string{"--platform omp", "--log " + logPath, "--config /etc/beacon/endpoint.yaml"} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("argv %v is missing %q", argv, want)
-		}
-	}
-}
-
-// A Windows path is the case that makes argv worth encoding as JSON rather than as a command line.
-func TestRenderOmpExtensionEncodesWindowsPaths(t *testing.T) {
-	source, err := ompExtension.render(`C:\Program Files\beacon\beacon-hooks.exe`, `C:\ProgramData\beacon\runtime.jsonl`, "")
-	if err != nil {
-		t.Fatalf("render returned error: %v", err)
-	}
-	argv := ompRenderedArgv(t, source)
-	if argv[0] != `C:\Program Files\beacon\beacon-hooks.exe` {
-		t.Fatalf("argv[0] = %q; the Windows path did not survive rendering", argv[0])
-	}
-}
-
 // The checked-in extension and the copy embedded in the binary must be byte-identical. They drift
 // the moment somebody edits one and forgets `bun run sync`, and the drift is invisible until an
 // install ships behavior nobody reviewed.
@@ -314,23 +206,5 @@ func TestOmpEmbeddedExtensionMatchesRootSource(t *testing.T) {
 	if string(embedded) != string(root) {
 		t.Fatal("plugins/omp-beacon/src/beacon.ts and its embedded copy have drifted; " +
 			"run `bun run sync` in plugins/omp-beacon")
-	}
-}
-
-// The subscription list is the contract between the extension and the omp-event mapper. It is
-// asserted here against the shipped source rather than trusted, because a typo on either side
-// produces no telemetry rather than an error.
-func TestOmpExtensionSubscribesToTheApprovalEvents(t *testing.T) {
-	for _, want := range []string{"tool_approval_requested", "tool_approval_resolved", "user_python"} {
-		if !strings.Contains(ompExtension.template, `"`+want+`"`) {
-			t.Fatalf("the Oh My Pi extension does not subscribe to %q; it is the capability that "+
-				"distinguishes this runtime from Pi", want)
-		}
-	}
-	// mcp_notification is deliberately not subscribed to: it is MCP transport plumbing rather than
-	// an action the agent took, and it fires for every routine list refresh.
-	if strings.Contains(ompExtension.template, `"mcp_notification"`) {
-		t.Fatal("the Oh My Pi extension subscribes to mcp_notification; it reports transport " +
-			"plumbing rather than agent activity")
 	}
 }

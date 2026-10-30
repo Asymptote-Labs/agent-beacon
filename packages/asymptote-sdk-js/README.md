@@ -146,6 +146,9 @@ const plan = Observe.observe(
 Call `Observe.flush()` before short-lived scripts exit, or
 `Observe.shutdown()` when the process owns the provider lifecycle.
 
+After shutdown and reinitialization, get new tracers: tracers obtained before
+shutdown stay bound to the stopped provider.
+
 ## Token Usage Attribution
 
 The OpenLLMetry instrumentations record `gen_ai.usage.*` token counts on every

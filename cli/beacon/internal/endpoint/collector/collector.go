@@ -23,6 +23,8 @@ var (
 	lookPath                        = exec.LookPath
 	currentExecutable               = os.Executable
 	discoverDefaultBinaryCandidates = defaultBinaryCandidates
+	// pollInterval is how often the readiness and port waits re-check; tests shorten it.
+	pollInterval = 250 * time.Millisecond
 )
 
 type Status struct {
@@ -128,6 +130,10 @@ func WriteConfig(cfg endpointconfig.Config) error {
 	return nil
 }
 
+// IngestExtension is the collector extension that serves the local ingest socket in the restricted
+// log access mode.
+const IngestExtension = "beacon_ingest"
+
 func ConfigYAML(cfg endpointconfig.Config) string {
 	endpointconfig.NormalizeDestinations(&cfg)
 	exporterNames := []string{"beaconjson"}
@@ -167,6 +173,14 @@ func ConfigYAML(cfg endpointconfig.Config) string {
 		modelContextYAML = "    capture_model_context: true\n"
 		grpcLimitYAML = "        max_recv_msg_size_mib: 32\n"
 	}
+	// The restricted log access mode makes the collector the only writer of the system log: hooks
+	// send their events to beacon_ingest over a local socket instead of appending, so the log can
+	// be 0640 root:beacon-log. Its rotation matches beaconjson's, since both append to one log.
+	ingestYAML, extensions := "", "[health_check, loopback_host]"
+	if cfg.RestrictedLogAccess() {
+		ingestYAML = fmt.Sprintf("  %s:\n    log_path: %q\n    rotate_bytes: 10485760\n    rotate_archives: 5\n", IngestExtension, cfg.LogPath)
+		extensions = "[health_check, loopback_host, " + IngestExtension + "]"
+	}
 	return fmt.Sprintf(`receivers:
   otlp:
     protocols:
@@ -199,12 +213,12 @@ extensions:
   health_check:
     endpoint: 127.0.0.1:%d
   loopback_host:
-
+%s
 service:
   telemetry:
     metrics:
       level: none
-  extensions: [health_check, loopback_host]
+  extensions: %s
   pipelines:
     logs:
       receivers: [otlp]
@@ -218,7 +232,7 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, %sbatch]
       exporters: %s
-`, cfg.Collector.GRPCPort, grpcLimitYAML, cfg.Collector.HTTPPort, modelContextYAML, privacyYAML, cfg.LogPath, runtimeMetricsYAML+codexSpansYAML+modelContextYAML+splunkExporter+falconExporter, endpointconfig.HealthCheckPort(cfg.Collector), privacyStep, exporters, privacyStep, exporters, privacyStep, exporters)
+`, cfg.Collector.GRPCPort, grpcLimitYAML, cfg.Collector.HTTPPort, modelContextYAML, privacyYAML, cfg.LogPath, runtimeMetricsYAML+codexSpansYAML+modelContextYAML+splunkExporter+falconExporter, endpointconfig.HealthCheckPort(cfg.Collector), ingestYAML, extensions, privacyStep, exporters, privacyStep, exporters, privacyStep, exporters)
 }
 
 func splunkHECYAML(cfg endpointconfig.Config) string {
@@ -323,7 +337,7 @@ func WaitUntilReady(cfg endpointconfig.Config, timeout time.Duration) error {
 			}
 			return fmt.Errorf("collector did not become ready before timeout")
 		}
-		time.Sleep(250 * time.Millisecond)
+		time.Sleep(pollInterval)
 	}
 }
 
@@ -357,7 +371,7 @@ func WaitForPortsAvailable(grpcPort, httpPort, healthPort int, timeout time.Dura
 			}
 			return fmt.Errorf("%s", strings.Join(busy, "; "))
 		}
-		time.Sleep(250 * time.Millisecond)
+		time.Sleep(pollInterval)
 	}
 }
 

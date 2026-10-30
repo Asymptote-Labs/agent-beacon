@@ -99,15 +99,6 @@ func TestListReadsOpenClawSessions(t *testing.T) {
 	}
 }
 
-func TestListWithoutAnOpenClawStore(t *testing.T) {
-	testenv.SetHome(t, t.TempDir())
-	isolateRuntimeEnv(t)
-	sessions, err := (&openClawSource{dir: filepath.Join(t.TempDir(), "missing")}).List()
-	if err != nil || sessions != nil {
-		t.Fatalf("List = %v, %v; want nothing", sessions, err)
-	}
-}
-
 func TestOpenClawSessionsBuildABrief(t *testing.T) {
 	dirs, _ := openClawFixture(t)
 	sources := DefaultSources(dirs)
@@ -145,14 +136,6 @@ func TestOpenClawIDsAreUniqueOnlyWithinAProfile(t *testing.T) {
 		if brief.FirstRequest != prompt {
 			t.Fatalf("%s first request = %q, want %q", path, brief.FirstRequest, prompt)
 		}
-	}
-}
-
-func TestOpenClawSessionGoneFromItsStore(t *testing.T) {
-	dirs, paths := openClawFixture(t)
-	session := Session{Harness: HarnessOpenClaw, ID: "oc-sess-1", SourcePath: paths.main + ".moved"}
-	if _, err := Events(DefaultSources(dirs), session); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Events = %v, want ErrNotFound", err)
 	}
 }
 

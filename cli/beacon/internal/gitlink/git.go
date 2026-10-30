@@ -18,6 +18,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // Git runs git against one repository. Dir is any directory inside the work tree.
@@ -52,7 +54,8 @@ func (g Git) RunRaw(ctx context.Context, args ...string) ([]byte, error) {
 }
 
 func (g Git) run(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
-	full := append([]string{"-C", g.dir()}, args...)
+	// log.showSignature would print each signed commit's verification ahead of --format output.
+	full := append([]string{"-C", g.dir(), "-c", "log.showSignature=false"}, args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
 	if g.Env != nil {
 		cmd.Env = g.Env
@@ -188,7 +191,12 @@ func (r Repo) RelPath(path, base string) (string, bool) {
 	if path == "" {
 		return "", false
 	}
-	path = strings.TrimPrefix(path, "file://")
+	if strings.HasPrefix(path, "file:") {
+		if path = asymptoteobserve.FilePathFromURI(path); path == "" {
+			return "", false
+		}
+		path = filepath.FromSlash(path)
+	}
 	if !filepath.IsAbs(path) {
 		if base == "" || !filepath.IsAbs(base) {
 			return "", false

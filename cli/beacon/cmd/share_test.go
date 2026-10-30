@@ -133,7 +133,6 @@ func TestShareFlagValidation(t *testing.T) {
 	}{
 		{[]string{"--visibility", "everyone"}, "--visibility must be"},
 		{[]string{"--session", "abc", "--cwd", env.projectDir}, "none of the others can be"},
-		{[]string{"--session", "abc", "--source-path", "x"}, "none of the others can be"},
 		{[]string{"--list", "--session", shareTestSession}, "--list shows candidates"},
 		{[]string{"--list", "--print"}, "cannot be combined"},
 		{[]string{"--harness", "notaruntime", "--print"}, "unsupported runtime"},

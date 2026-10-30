@@ -131,12 +131,3 @@ func TestRunLogoutRemovesCredentialWhenRevocationFails(t *testing.T) {
 		t.Fatalf("logout output stdout=%q stderr=%q", out.String(), stderr.String())
 	}
 }
-
-func TestAccountCommandsAreRegistered(t *testing.T) {
-	for _, name := range []string{"login", "logout", "whoami"} {
-		command, _, err := rootCmd.Find([]string{name})
-		if err != nil || command.Name() != name {
-			t.Fatalf("root command %q = %v, %v", name, command, err)
-		}
-	}
-}

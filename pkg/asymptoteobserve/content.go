@@ -59,6 +59,8 @@ func SystemInstructionParts(text string) []interface{} {
 //   - a message whose body is "content" rather than "parts", as a string or a
 //     block list, and a part whose text is under "text" rather than "content",
 //     the shapes several session mappers and providers write;
+//   - a legacy browser message {"role", "text"}, only when both "parts" and
+//     "content" are absent; this body is text, never reasoning;
 //   - a {"messages": [...]} wrapper;
 //   - a bare string, as the whole value, a message body or a list element,
 //     which is text and never reasoning;
@@ -112,7 +114,13 @@ func collectGenAIText(v interface{}, role, partType string, out *[]string) {
 			return
 		}
 		if !hasParts {
-			body = typed["content"]
+			var hasContent bool
+			body, hasContent = typed["content"]
+			if !hasContent && hasRole && (kind == "" || kind == "message") {
+				// Older browser captures wrote their internal role/text message
+				// directly. Never override an explicit (even empty) typed body.
+				body, _ = typed["text"].(string)
+			}
 		}
 		collectGenAIText(body, role, partType, out)
 	case nil, bool, float64, float32, int, int64, int32, json.Number:

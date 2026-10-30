@@ -82,29 +82,31 @@ func assertNoOTLPHarnesses(t *testing.T, label string, got []string) {
 }
 
 // #640: an explicit hook-only selection names only that hook integration. It must not also
-// configure Claude Code's and Codex's OpenTelemetry settings behind the operator's back.
+// configure Claude Code's and Codex's OpenTelemetry settings behind the operator's back -- and
+// the same selection re-run through `endpoint repair` (and the MDM repair scripts built on it)
+// must not reintroduce the writes on every run.
 func TestEndpointInstallHookOnlyHarnessConfiguresNoOTLPRuntime(t *testing.T) {
 	for _, flag := range []string{"omp", "cursor", "omp,cursor", "claude-hooks"} {
 		opts := runRecordedEndpointCommand(t, false, flag)
 		assertNoOTLPHarnesses(t, "install --harness "+flag, opts.Harnesses)
 	}
-}
-
-// The same selection re-run through `endpoint repair` (and the MDM repair scripts built on it)
-// must not reintroduce the writes on every run.
-func TestEndpointRepairHookOnlyHarnessConfiguresNoOTLPRuntime(t *testing.T) {
 	opts := runRecordedEndpointCommand(t, true, "omp")
 	assertNoOTLPHarnesses(t, "repair --harness omp", opts.Harnesses)
 }
 
 // Model-context capture has Claude Code export every API body, so it stays off unless the flag asks for
-// it, and repair takes it from its own flags like install, so a repair without it turns it off.
+// it, and repair takes it from its own flags like install, so a repair without it turns it off. The
+// commands themselves, not only the helper, pass an explicit OTLP selection through unchanged.
 func TestEndpointInstallAndRepairCaptureClaudeWebFetchOnlyWhenAsked(t *testing.T) {
 	for _, repair := range []bool{false, true} {
 		// The first recorded run restores every endpoint option when the test ends.
 		endpointOpts.claudeCaptureModelContext = false
-		if opts := runRecordedEndpointCommand(t, repair, "claude"); opts.ClaudeCaptureModelContext {
+		opts := runRecordedEndpointCommand(t, repair, "claude")
+		if opts.ClaudeCaptureModelContext {
 			t.Fatalf("repair=%t: Model-context capture is on without --claude-capture-model-context", repair)
+		}
+		if got := strings.Join(opts.Harnesses, ","); got != "claude" {
+			t.Fatalf("repair=%t --harness claude: Harnesses = %q, want claude", repair, got)
 		}
 		endpointOpts.claudeCaptureModelContext = true
 		if opts := runRecordedEndpointCommand(t, repair, "claude"); !opts.ClaudeCaptureModelContext {
@@ -155,7 +157,6 @@ func TestEndpointInstallOptionsKeepSelectedOTLPRuntimes(t *testing.T) {
 			{Name: "codex_cli", DisplayName: "Codex CLI", Detected: true},
 			{Name: "omp", DisplayName: "Oh My Pi", Detected: true},
 		}, want: "claude,codex"},
-		{flag: "claude,codex", want: "claude,codex"},
 		{flag: "omp,claude", want: "claude"},
 		{flag: "cursor,gemini", want: "gemini"},
 	}
@@ -177,15 +178,5 @@ func TestEndpointInstallOptionsKeepSelectedOTLPRuntimes(t *testing.T) {
 	got := strings.Join(endpointInstallOptions(all, service.KindAuto).Harnesses, ",")
 	if !strings.Contains(got, "claude") || !strings.Contains(got, "codex") {
 		t.Fatalf("--harness all: Harnesses = %q, want claude and codex among them", got)
-	}
-}
-
-// The commands themselves, not only the helper, pass an OTLP selection through unchanged.
-func TestEndpointInstallAndRepairPassExplicitOTLPSelection(t *testing.T) {
-	for _, repair := range []bool{false, true} {
-		opts := runRecordedEndpointCommand(t, repair, "codex")
-		if got := strings.Join(opts.Harnesses, ","); got != "codex" {
-			t.Fatalf("repair=%t --harness codex: Harnesses = %q, want codex", repair, got)
-		}
 	}
 }

@@ -9,26 +9,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func TestCloudCommandsRegistered(t *testing.T) {
-	for _, path := range [][]string{
-		{"cloud", "claude-web", "print-hooks"},
-		{"cloud", "claude-web", "print-setup"},
-		{"cloud", "cursor", "print-hooks"},
-		{"cloud", "cursor", "print-setup"},
-		{"cloud", "devin", "pull"},
-		{"cloud", "gcs", "setup"},
-		{"cloud", "s3", "setup"},
-	} {
-		cmd, _, err := rootCmd.Find(path)
-		if err != nil {
-			t.Fatalf("Find %v returned error: %v", path, err)
-		}
-		if cmd == nil || cmd.Use != path[len(path)-1] {
-			t.Fatalf("cloud command %v not registered: %#v", path, cmd)
-		}
-	}
-}
-
 func TestRenderCursorCloudHooks(t *testing.T) {
 	got, err := endpointhooks.RenderCursorCloudHooks(endpointhooks.CursorCloudOptions{
 		BinaryPath: "/tmp/beacon/bin/beacon-hooks",

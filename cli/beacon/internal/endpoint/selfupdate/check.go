@@ -72,7 +72,9 @@ func CheckWithMode(ctx context.Context, currentVersion, localMode string) (Check
 		return res, err
 	}
 	res.ManifestResult = eval
-	if a, ok := manifest.ArtifactFor(res.ArchKey); ok {
+	a, key, ok := selectArtifact(manifest, false)
+	res.ArchKey = key
+	if ok {
 		res.Artifact = a
 		res.HasArtifact = true
 	}

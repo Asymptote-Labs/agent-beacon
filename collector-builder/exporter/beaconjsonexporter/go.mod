@@ -2,12 +2,13 @@ module github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconj
 
 go 1.27.0
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve v0.0.0
 	go.opentelemetry.io/collector/client v1.27.0
 	go.opentelemetry.io/collector/component v1.27.0
+	go.opentelemetry.io/collector/component/componentstatus v0.121.0
 	go.opentelemetry.io/collector/component/componenttest v0.121.0
 	go.opentelemetry.io/collector/config/configauth v0.121.0
 	go.opentelemetry.io/collector/config/confighttp v0.121.0
@@ -53,7 +54,6 @@ require (
 	github.com/rs/cors v1.11.1 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/collector/component/componentstatus v0.121.0 // indirect
 	go.opentelemetry.io/collector/config/configcompression v1.27.0 // indirect
 	go.opentelemetry.io/collector/config/configopaque v1.27.0 // indirect
 	go.opentelemetry.io/collector/config/configtls v1.27.0 // indirect

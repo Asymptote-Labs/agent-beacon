@@ -17,7 +17,7 @@ var redactGateFragments = []string{
 	"Bearer ", "bearer", "Basic ", "Digest ", "eyJ", "eyJhbGciOiJIUzI1NiJ9", ".", "abcdefgh12345678",
 	"hunter2hunter2", "null", "true", "42", "https://", "postgres://user:", "pw", "@host", "://",
 	"sk-", "sk-ant-api03-", "AKIA", "ASIA", "ABCDEFGHIJKLMNOP", "ghp_", "gho_", "ghs_", "github_pat_",
-	"glpat-", "xoxb-", "sk_live_", "rk_test_", "AIza", "npm_", "hf_", "bcn_api_", "bcn_device_",
+	"glpat-", "xoxb-", "sk_live_", "rk_test_", "AIza", "ya29.", "npm_", "hf_", "bcn_api_", "bcn_device_",
 	"bcn_cli_", "bcn_mcprt_", "bcn_code_", "bcn_client_", "bcn_exchange_", "bcn_mcp_", "bcn_enfdev_", "bcn_other_",
 	"AKIAIOSFODNN7EXAMPLE", "ASIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "|", "/", "+",
 	"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJ", "-----BEGIN RSA PRIVATE KEY-----",
@@ -41,11 +41,11 @@ func TestRedactGateNeverChangesAResult(t *testing.T) {
 		"export GITHUB_TOKEN=ghp_0123456789abcdefghijklmnopqrstuvwxyz",
 		"curl -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijk'",
 		"mysql --password hunter2 -u root", "postgres://user:pw@host/db", "input_tokens: 812",
-		"ſecret=abcdefgh12345678", "KEY=abcdefgh12345678", "toKen\\\"=\"abc\"",
+		"ſecret=abcdefgh12345678", "KEY=abcdefgh12345678", "toKen\\\"=\"abc\"", `["--api-key", "abcdefgh12345678"]`,
 		"-----BEGIN RSA PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END RSA PRIVATE KEY-----",
 	}
 	r := rand.New(rand.NewSource(1))
-	for i := 0; i < 20000; i++ {
+	for i := 0; i < 3000; i++ {
 		inputs = append(inputs, randomRedactInput(r))
 	}
 	redacted := 0

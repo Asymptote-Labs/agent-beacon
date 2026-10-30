@@ -1,5 +1,5 @@
 id: autostart-unit-file-installed
-version: 1
+version: 2
 title: Autostart unit / service / login-item file installed
 description: >
   The agent wrote an autostart definition that re-executes outside any sandbox at
@@ -19,7 +19,7 @@ taxonomy:
   mitre_atlas: AML.T0011
 
 match: >
-  e.event.action == "file.modified" &&
+  e.event.action in ["file.modified", "file.created", "file.edited"] &&
   e.file.path.matches("(?i)(^|/)(\\.config/systemd/(user|system)|etc/systemd/(system|user))/[^/]+\\.(service|timer|socket|path)$|(?i)(^|/)(library/)?launch(agents|daemons)/[^/]+\\.plist$|(?i)(^|/)\\.config/autostart/[^/]+\\.desktop$|(?i)(^|/)\\.config/environment\\.d/[^/]+\\.conf$")
 
 emit:
@@ -68,4 +68,9 @@ tests:
       - event: { action: file.modified }
         file: { path: "/usr/share/applications/firefox.desktop" }
         session: { id: s1 }
-
+  - name: systemd_user_service_created
+    verdict: match
+    events:
+      - event: { action: file.created }
+        file: { path: "/home/dev/.config/systemd/user/evil.service" }
+        session: { id: s1 }

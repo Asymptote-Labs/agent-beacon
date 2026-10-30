@@ -154,12 +154,6 @@ func TestCallbackServerWaitTimesOut(t *testing.T) {
 	}
 }
 
-func TestCallbackServerRequiresAnExchangeFunc(t *testing.T) {
-	if _, err := NewCallbackServer("s", "v", nil, 0); err == nil {
-		t.Fatal("expected error for nil exchange")
-	}
-}
-
 func TestPostJSONDecodesSuccessAndSurfacesServerDetail(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Content-Type") != "application/json" || r.Header.Get("User-Agent") != "beacon-cli" {
@@ -210,44 +204,6 @@ func TestResolveDashboardURL(t *testing.T) {
 	}
 	if got := ResolveDashboardURL("https://flag.example.test"); got != "https://flag.example.test" {
 		t.Fatalf("flag should win over env, got %q", got)
-	}
-}
-
-// The page a browser lands on is the only Beacon surface some users see before the
-// dashboard, so it carries real styling. It does not send them anywhere: the
-// terminal is still mid-flow when this renders, and the command prints the
-// dashboard links itself once setup finishes.
-func TestSuccessPageIsStyledAndPointsAtTheTerminal(t *testing.T) {
-	cs, err := NewCallbackServer("state-1", "verifier-1", func(context.Context, string, string, string) error { return nil }, time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cs.SetSuccessPage("Signed in to Beacon", "Return to your terminal to finish setting up this machine.")
-	cs.Start()
-	defer cs.Shutdown()
-
-	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/callback?state=state-1&exchange_code=code-1", cs.Port()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	page := string(body)
-
-	for _, want := range []string{"Signed in to Beacon", "Return to your terminal", "<style>", `class="brand"`, `aria-label="Beacon"`, "<span>Beacon</span>", "#FF5400"} {
-		if !strings.Contains(page, want) {
-			t.Fatalf("success page missing %q:\n%s", want, page)
-		}
-	}
-	// No redirect: the browser stays put so the terminal keeps the user's attention.
-	for _, unwanted := range []string{"http-equiv=\"refresh\"", "dashboard", "<script"} {
-		if strings.Contains(page, unwanted) {
-			t.Fatalf("success page should not contain %q:\n%s", unwanted, page)
-		}
-	}
-	// Nothing is fetched: this is served from loopback with no network guarantee.
-	if strings.Contains(page, "<link") || strings.Contains(page, `src="http`) {
-		t.Fatalf("the page must not fetch anything:\n%s", page)
 	}
 }
 

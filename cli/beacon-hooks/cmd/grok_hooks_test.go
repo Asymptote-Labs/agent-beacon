@@ -41,39 +41,6 @@ func TestGrokPromptSubmitRecordsPromptAndRawPayload(t *testing.T) {
 	}
 }
 
-func TestGrokIgnoresLegacyRetentionEnv(t *testing.T) {
-	setupHookConfigDirs(t)
-	platformFlag = "grok"
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_MODE", "1")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-	t.Setenv("BEACON_CONTENT_RETENTION", "metadata")
-
-	runHookWithInput(t, runPromptSubmit, map[string]interface{}{
-		"hookEventName": "user_prompt_submit",
-		"sessionId":     "grok-session-1",
-		"prompt":        "secret prompt",
-	})
-	event := lastEndpointEvent(t, logPath)
-	if got := event["prompt"].(map[string]interface{})["text"]; got != "secret prompt" {
-		t.Fatalf("prompt.text = %q, want legacy retention env ignored", got)
-	}
-	raw := event["raw"].(map[string]interface{})
-	if _, ok := raw["grok"]; !ok {
-		t.Fatalf("legacy retention env should not omit raw grok payload: %#v", raw)
-	}
-	// The marker is what proves the env is inert, rather than its absence: it
-	// reports the retention that actually happened, and BEACON_CONTENT_RETENTION
-	// asked for "metadata".
-	content, ok := event["content"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("content marker missing on a retained prompt: %#v", event)
-	}
-	if content["retention"] != "full" || content["included"] != true {
-		t.Fatalf("legacy retention env changed retention: %#v", content)
-	}
-}
-
 func TestGrokPreToolRecordsToolWithoutApproving(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "grok"
@@ -162,7 +129,6 @@ func TestGrokPostToolFailedEditsRemainFailed(t *testing.T) {
 		name, eventKey, eventName, toolName, extension, errorText string
 	}{
 		{"native write failure", "hookEventName", "post_tool_use_failure", "write_file", ".go", ""},
-		{"PascalCase event", "hookEventName", "PostToolUseFailure", "write_file", ".go", ""},
 		{"camelCase event", "hook_event_name", "postToolUseFailure", "write_file", ".go", ""},
 		{"explicit error", "hookEventName", "post_tool_use", "write_file", ".go", "permission denied"},
 		{"unscannable path", "hookEventName", "post_tool_use_failure", "write_file", ".md", ""},

@@ -47,9 +47,16 @@ const unixSystemLogDir = "/var/log/beacon-agent"
 // One exception keeps root from breaking a user's log: when running as root on Unix inside a home
 // directory root does not own (sudo preserving HOME), the log keeps the shared mode, because a
 // private root-owned file there is one the user's own hooks could never append to again.
+//
+// A system log in the restricted access mode (see RuntimeLogAccessRestricted) takes the restricted
+// modes instead of the shared ones. Its writers are root, so the narrowing an owner applies to an
+// existing file brings a log that was shared down to the restricted mode at its next write.
 func RuntimeLogModes(path string) (file, dir os.FileMode, private bool) {
 	if RuntimeLogIsPrivate(path) {
 		return PrivateRuntimeLogFileMode, PrivateRuntimeLogDirMode, true
+	}
+	if RuntimeLogAccessRestricted(path) {
+		return RestrictedRuntimeLogFileMode, RestrictedRuntimeLogDirMode, false
 	}
 	return SharedRuntimeLogFileMode, SharedRuntimeLogDirMode, false
 }
@@ -134,7 +141,7 @@ func SettleRuntimeLogFileMode(path, logPath string, created bool) error {
 // must still not be steerable -- by a link or FIFO someone planted where it appends -- into
 // appending to, chmodding or hanging on a file of the planter's choosing.
 func OpenRuntimeLogFile(path, logPath string, flag int) (*os.File, error) {
-	fileMode, _, _ := RuntimeLogModes(logPath)
+	fileMode := fileModeFor(path, logPath)
 	existed := true
 	if _, err := os.Lstat(path); err != nil {
 		if !os.IsNotExist(err) {
@@ -166,8 +173,20 @@ func OpenRuntimeLogFile(path, logPath string, flag int) (*os.File, error) {
 	return f, nil
 }
 
+// fileModeFor is the mode for path, a member of logPath's family. A restricted log's lock is
+// root's alone: the readers group needs to read the log, never to lock it, and a reader that could
+// open the lock could hold it and stall every write the collector makes.
+func fileModeFor(path, logPath string) os.FileMode {
+	fileMode, _, _ := RuntimeLogModes(logPath)
+	if fileMode == RestrictedRuntimeLogFileMode && filepath.Clean(path) == filepath.Clean(logPath)+".lock" {
+		return RestrictedRuntimeLogLockMode
+	}
+	return fileMode
+}
+
 func settleRuntimeLogFileMode(path, logPath string, created bool, stat func(string) (os.FileInfo, error), chmod func(os.FileMode) error) error {
-	fileMode, _, private := RuntimeLogModes(logPath)
+	_, _, private := RuntimeLogModes(logPath)
+	fileMode := fileModeFor(path, logPath)
 	if created {
 		if private && hasPOSIXACL(path) {
 			fileMode = PrivateACLRuntimeLogFileMode
@@ -192,22 +211,56 @@ func settleRuntimeLogFileMode(path, logPath string, created bool, stat func(stri
 	return nil
 }
 
-// TightenPrivateRuntimeLogArchives narrows the rotated archives of a private log (path.1 ..
-// path.archives) the way SettleRuntimeLogFileMode narrows the live file. Archives rotated before
-// logs were private still carry the old shared mode, and they hold the same content as the live
-// file. Best effort, like SettleRuntimeLogFileMode on an existing file.
-func TightenPrivateRuntimeLogArchives(path string, archives int) {
-	if !RuntimeLogIsPrivate(path) {
+// SettleRuntimeLogArchives brings the rotated archives of a log (path.1 .. path.archives) to the
+// mode the log calls for, the way SettleRuntimeLogFileMode settles the live file, in both
+// directions: archives rotated before the log was private or restricted still carry the shared
+// mode and the same content as the live file, and archives rotated while a system log was
+// restricted must be readable again once it is shared, or every reader of the log's history stops
+// at them. Best effort, like SettleRuntimeLogFileMode on an existing file: only a file this process
+// owns is changed, and a link is never followed.
+//
+// Each archive is settled through a descriptor, never by path: a log can sit in a directory another
+// account can write (a custom path, or root keeping a user's HOME), and a chmod by path would follow
+// a symlink swapped in after the check, letting that account steer root into widening any file.
+func SettleRuntimeLogArchives(path string, archives int) {
+	for i := 1; i <= archives; i++ {
+		settleRuntimeLogArchive(fmt.Sprintf("%s.%d", path, i), path)
+	}
+}
+
+// archiveOpened runs between opening an archive and checking it, and archiveChecked between
+// checking it and changing its mode. Nil outside tests, which use them to race the archive's name
+// at exactly those moments.
+var (
+	archiveOpened  func(archive string)
+	archiveChecked func(archive string)
+)
+
+func settleRuntimeLogArchive(archive, logPath string) {
+	f, err := os.OpenFile(archive, os.O_RDONLY|noFollowOpenFlags(), 0)
+	if err != nil {
 		return
 	}
-	for i := 1; i <= archives; i++ {
-		archive := fmt.Sprintf("%s.%d", path, i)
-		info, err := os.Lstat(archive)
-		if err != nil || !info.Mode().IsRegular() {
-			continue
-		}
-		_ = SettleRuntimeLogFileMode(archive, path, false)
+	defer f.Close()
+	if archiveOpened != nil {
+		archiveOpened(archive)
 	}
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || linkedElsewhere(info) {
+		return
+	}
+	// The link count on the descriptor alone is not enough: someone can plant the archive as a hard
+	// link to another file, wait for the open, then remove their name, leaving the descriptor on that
+	// file with a single link. Settle only while the archive's path still names this very file with
+	// one link, so the archive is the file's only name and it cannot be anyone else's.
+	named, err := os.Lstat(archive)
+	if err != nil || !os.SameFile(info, named) || linkedElsewhere(named) {
+		return
+	}
+	if archiveChecked != nil {
+		archiveChecked(archive)
+	}
+	_ = settleRuntimeLogFileMode(archive, logPath, false, func(string) (os.FileInfo, error) { return info, nil }, f.Chmod)
 }
 
 func pathWithin(path, dir string) bool {

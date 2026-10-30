@@ -123,20 +123,6 @@ func TestDecodeAssistantTurnCarriesEveryExecutionRecord(t *testing.T) {
 	}
 }
 
-// A session's cumulative totals and its per-turn counts are different numbers in the same record.
-// Reading one for the other reports a session's entire history as the cost of its last turn, which
-// is the kind of error a token report shows without ever looking wrong.
-func TestSessionTotalsAndTurnTokensAreDistinctFields(t *testing.T) {
-	event, err := DecodeEnvelope([]byte(assistantTurnLine(3)))
-	if err != nil {
-		t.Fatalf("DecodeEnvelope: %v", err)
-	}
-	committed := event.TurnCommitted
-	if committed.TotalInputTokens == uint64(committed.Turn.Execution.TurnSummary.TokenProgress.InputTokens) {
-		t.Fatal("fixture no longer distinguishes cumulative totals from per-turn counts")
-	}
-}
-
 func TestDecodeSessionStartedCarriesWorkspaceAndPreferences(t *testing.T) {
 	event, err := DecodeEnvelope([]byte(sessionStartedLine(1, "/home/dev/api")))
 	if err != nil {

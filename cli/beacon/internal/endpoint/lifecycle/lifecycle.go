@@ -24,6 +24,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/hermessession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 var (
@@ -215,6 +216,7 @@ var inventoryJobPathEnv = []string{
 	"OMO_CODING_AGENT_DIR",         // OMO
 	"SENPI_CODING_AGENT_DIR",       // OMO's legacy name
 	"PRIME_AGENT_CODING_AGENT_DIR", // Prime Agent
+	"QWEN_HOME",                    // Qwen Code
 }
 
 // inventoryJobNameEnv are the variables the inventory scan reads as names rather than paths, so
@@ -319,6 +321,9 @@ type InstallOptions struct {
 	// ServiceKind selects the service manager. Empty auto-detects: launchd on macOS,
 	// systemd when it is PID 1, otherwise a supervised child process.
 	ServiceKind service.Kind
+	// LogAccess sets the system log's access mode, "shared" or "restricted". Empty keeps what the
+	// existing config records, so repair and a package upgrade never change it.
+	LogAccess string
 }
 
 type UninstallOptions struct {
@@ -353,8 +358,13 @@ type InstallResult struct {
 	LingerRemediation string `json:"linger_remediation,omitempty"`
 	// The scheduled inventory job is reconciled on every install; a host without a scheduler
 	// reports why in InventoryJobDetail and the install still succeeds.
-	InventoryJobPath   string `json:"inventory_job_path,omitempty"`
-	InventoryJobDetail string `json:"inventory_job_detail,omitempty"`
+	InventoryJobPath string `json:"inventory_job_path,omitempty"`
+	// LogAccess is the system log's access mode after the install; empty in user mode.
+	LogAccess string `json:"log_access,omitempty"`
+	// LogReadersGroupCreated is true when this install created the readers group a restricted log
+	// is readable by, which then has no members yet.
+	LogReadersGroupCreated bool   `json:"log_readers_group_created,omitempty"`
+	InventoryJobDetail     string `json:"inventory_job_detail,omitempty"`
 	// ManagedForwarder reports the Beacon Cloud forwarder reconcile. It never fails the install:
 	// a config Vector rejects leaves the running forwarder on its old one and is reported here.
 	ManagedForwarder *asymptote.ReconcileResult `json:"managed_forwarder,omitempty"`
@@ -379,6 +389,8 @@ type Status struct {
 	// ScriptForwarders are the S3, GCS and Falcon forwarders the package helpers install, one entry
 	// per forwarder that is set up on this machine.
 	ScriptForwarders []service.Status `json:"script_forwarders,omitempty"`
+	// LogAccess is the system log's access mode, "shared" or "restricted"; empty in user mode.
+	LogAccess string `json:"log_access,omitempty"`
 }
 
 type DestinationStatus struct {
@@ -452,8 +464,12 @@ type installRollback struct {
 	// it, and on systemd the disable survives reboot, so a machine that was collecting fine before
 	// the attempt is left collecting nothing afterwards.
 	ServiceWasRunning bool
-	files             []string
-	snapshots         map[string]fileSnapshot
+	// RestoreLogAccess puts the system log back in the access mode it had before this install, so
+	// a rollback cannot leave a restricted log world-writable while the restored config and
+	// collector still say restricted, or the reverse. Nil in user mode.
+	RestoreLogAccess func()
+	files            []string
+	snapshots        map[string]fileSnapshot
 }
 
 func newInstallRollback(manager service.Manager) *installRollback {
@@ -500,6 +516,9 @@ func (r *installRollback) Rollback(manifest Manifest) {
 		path := r.files[i]
 		restoreFile(path, r.snapshots[path])
 	}
+	if r.RestoreLogAccess != nil {
+		r.RestoreLogAccess()
+	}
 
 	// Bring back a service that was running before this install, now that the configuration it was
 	// running is back on disk. A collector reads its config at startup, so this has to come after
@@ -533,10 +552,16 @@ func Install(opts InstallOptions) (InstallResult, error) {
 	if err != nil {
 		return InstallResult{}, err
 	}
-	if err := endpointcollector.CheckComponents(collectorBinary); err != nil {
+	var extensions []string
+	if cfg.RestrictedLogAccess() {
+		extensions = append(extensions, endpointcollector.IngestExtension)
+	}
+	if err := endpointcollector.CheckComponents(collectorBinary, extensions...); err != nil {
 		return InstallResult{}, err
 	}
 
+	logReadersGroupCreated := false
+	var restoreLogAccess func()
 	manifest := Manifest{
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
 		UserMode:     cfg.UserMode,
@@ -568,12 +593,18 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		if err := sysacl.SecureSystemTree(root, filepath.Dir(cfg.LogPath)); err != nil {
 			return InstallResult{}, fmt.Errorf("secure %s: %w", root, err)
 		}
-		if err := writer.EnsureSystemLogWritable(cfg.LogPath); err != nil {
+		restore := logAccessRestorer(cfg)
+		created, err := prepareSystemLog(cfg)
+		if err != nil {
+			restore()
 			return InstallResult{}, fmt.Errorf("prepare the log directory: %w", err)
 		}
+		logReadersGroupCreated = created
+		restoreLogAccess = restore
 	}
 
 	tx := newInstallRollback(manager)
+	tx.RestoreLogAccess = restoreLogAccess
 	tx.Track(cfg.Collector.ConfigPath)
 	manifest.Files = append(manifest.Files, cfg.Collector.ConfigPath)
 	if err := writeCollectorConfig(cfg); err != nil {
@@ -721,19 +752,21 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		managedForwarder = &reconciled
 	}
 	return InstallResult{
-		ManagedForwarder:    managedForwarder,
-		ConfigPath:          configPath,
-		CollectorConfigPath: cfg.Collector.ConfigPath,
-		PlistPath:           plistPath,
-		LogPath:             cfg.LogPath,
-		ManifestPath:        manifestPath,
-		HarnessConfigPaths:  harnessPaths,
-		LingerApplicable:    lingerOutcome.Applicable,
-		LingerEnabled:       lingerOutcome.Enabled,
-		LingerDetail:        lingerOutcome.Detail,
-		LingerRemediation:   lingerOutcome.Remediation,
-		InventoryJobPath:    inventoryResult.UnitPath,
-		InventoryJobDetail:  inventoryDetail,
+		ManagedForwarder:       managedForwarder,
+		ConfigPath:             configPath,
+		CollectorConfigPath:    cfg.Collector.ConfigPath,
+		PlistPath:              plistPath,
+		LogPath:                cfg.LogPath,
+		ManifestPath:           manifestPath,
+		HarnessConfigPaths:     harnessPaths,
+		LingerApplicable:       lingerOutcome.Applicable,
+		LingerEnabled:          lingerOutcome.Enabled,
+		LingerDetail:           lingerOutcome.Detail,
+		LingerRemediation:      lingerOutcome.Remediation,
+		InventoryJobPath:       inventoryResult.UnitPath,
+		InventoryJobDetail:     inventoryDetail,
+		LogAccess:              logAccessOf(cfg),
+		LogReadersGroupCreated: logReadersGroupCreated,
 	}, nil
 }
 
@@ -817,6 +850,11 @@ func Uninstall(opts UninstallOptions) error {
 	if !opts.KeepLogs {
 		for _, path := range runtimeLogFiles(cfg.LogPath) {
 			fail("remove "+path, os.Remove(path))
+		}
+		// With the logs gone there is nothing left for the restricted mode to protect, and a
+		// marker left behind would narrow the log a later shared install starts.
+		if !cfg.UserMode {
+			fail("remove the log access marker", os.Remove(asymptoteobserve.LogAccessMarkerPath(cfg.LogPath)))
 		}
 		// The local history holds what the log held, and more, so it goes with the logs. It lives
 		// in the user's own endpoint directory, which a system uninstall does not own.
@@ -1005,6 +1043,7 @@ func buildStatus(requestedUserMode bool, effectiveCfg endpointconfig.Config, run
 		ManagedIngest:      asymptote.Status(requestedUserMode, managedOpts),
 		InventoryHeartbeat: inventoryHeartbeatStatus(requestedUserMode, runtimeLog.RequestedLogPath),
 		ScriptForwarders:   scriptForwarderStatuses(),
+		LogAccess:          logAccessOf(effectiveCfg),
 	}
 }
 
@@ -1065,6 +1104,17 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 		if existing.Inventory != nil {
 			cfg.Inventory = existing.Inventory
 		}
+		// The log access mode is an operator's security choice; a repair or upgrade that dropped
+		// it would silently make a restricted log world-writable again.
+		cfg.LogAccess = existing.LogAccess
+	} else if !opts.UserMode && logIsRestricted(cfg.LogPath) {
+		// No config to carry the mode over from -- an uninstall with --keep-logs removed it, or it
+		// does not load -- but the root-owned marker beside the kept log still records restricted.
+		// Defaulting to shared here would make every kept event world-readable.
+		cfg.LogAccess = asymptoteobserve.LogAccessRestricted
+	}
+	if opts.LogAccess != "" {
+		cfg.LogAccess = opts.LogAccess
 	}
 	if opts.Harnesses != nil {
 		cfg.Harnesses = opts.Harnesses
@@ -1205,6 +1255,9 @@ func restoreFile(path string, snapshot fileSnapshot) {
 
 func preflight(cfg endpointconfig.Config, startService bool, kind service.Kind) error {
 	if err := endpointconfig.ValidateDestinations(cfg.Destinations); err != nil {
+		return err
+	}
+	if err := validateLogAccess(cfg); err != nil {
 		return err
 	}
 	// Replaces a blanket "macOS only" refusal. What actually matters is whether a service

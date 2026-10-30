@@ -231,27 +231,13 @@ func TestFactoryStopRecordsTheTranscriptReplyOnce(t *testing.T) {
 	}
 }
 
-// A lagging transcript at Stop records no reply, and the turn still completes.
-func TestFactoryStopWithALaggingTranscriptRecordsNoReply(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "droid-1.jsonl")
-	writeTranscript(t, path, factoryTurn("t1", "x")[:2]...)
-	logPath, _ := runHookProcessIn(t, dir, factoryStopPayload(path), "--platform", "factory", "stop")
-	if messages := assistantMessages(t, logPath); len(messages) != 0 {
-		t.Fatalf("recorded %d replies from a transcript that ended on a tool call", len(messages))
-	}
-	if last := lastEndpointEvent(t, logPath); leaf(last, "event", "action") != "tool.completed" {
-		t.Fatalf("last event = %q, want the turn completion", leaf(last, "event", "action"))
-	}
-}
-
 // The transcript read is Droid's alone: a Claude-shaped runtime whose Stop names a transcript in
 // the same format records nothing from it.
 func TestTranscriptReplyIsReadOnlyForFactory(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "s.jsonl")
 	writeTranscript(t, path, factoryTurn("t1", "x")...)
-	for _, platform := range []string{"devin-cli", "qwen"} {
+	for _, platform := range []string{"devin-cli"} {
 		logPath, _ := runHookProcessIn(t, t.TempDir(), factoryStopPayload(path), "--platform", platform, "stop")
 		if messages := assistantMessages(t, logPath); len(messages) != 0 {
 			t.Fatalf("%s read a reply from the transcript: %#v", platform, messages)

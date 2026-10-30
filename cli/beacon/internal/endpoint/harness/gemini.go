@@ -40,14 +40,9 @@ func ConfigureGemini(opts ConfigureOptions) (string, error) {
 		return "", err
 	}
 	path := GeminiSettingsPath(home)
-	settings := map[string]interface{}{}
-	if data, err := os.ReadFile(path); err == nil {
-		if err := json.Unmarshal(data, &settings); err != nil {
-			return "", fmt.Errorf("Gemini settings JSON is invalid: %w", err)
-		}
-		if err := backup(path, data); err != nil {
-			return "", err
-		}
+	settings, err := readSettingsForUpdate("Gemini", path)
+	if err != nil {
+		return "", err
 	}
 
 	telemetry, _ := settings["telemetry"].(map[string]interface{})
@@ -79,9 +74,9 @@ func geminiStatus(path string) (TelemetryStatus, string) {
 	if err != nil {
 		return TelemetryMissing, err.Error()
 	}
-	var settings map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return TelemetryMisconfigured, "Gemini settings JSON is invalid"
+	settings, err := decodeSettings("Gemini", path, data)
+	if err != nil {
+		return TelemetryMisconfigured, err.Error()
 	}
 	telemetry, _ := settings["telemetry"].(map[string]interface{})
 	if telemetry == nil {

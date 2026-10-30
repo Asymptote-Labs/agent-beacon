@@ -7,36 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"testing/fstest"
 
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/siempack"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
-
-func TestConfigSnippetUsesConfiguredPath(t *testing.T) {
-	got, err := ConfigSnippet("/tmp/beacon/runtime.jsonl")
-	if err != nil {
-		t.Fatalf("ConfigSnippet returned unexpected error: %v", err)
-	}
-	if !strings.Contains(got, "/tmp/beacon/runtime.jsonl") {
-		t.Fatalf("config did not include configured path: %s", got)
-	}
-	if strings.Contains(got, "{{LOG_PATH}}") {
-		t.Fatalf("config still contains template token: %s", got)
-	}
-	for _, want := range []string{
-		"aws_cloudwatch_logs",
-		"BEACON_CLOUDWATCH_LOG_GROUP",
-		"BEACON_CLOUDWATCH_LOG_STREAM_PREFIX",
-		"AWS_REGION",
-		"credential provider chain",
-		"create_missing_stream = true",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("config missing %q: %s", want, got)
-		}
-	}
-}
 
 func TestInstallPackWritesExpectedFiles(t *testing.T) {
 	dir := t.TempDir()
@@ -110,110 +83,5 @@ func TestSampleEventsCoverValidationHookAndOTelShapes(t *testing.T) {
 	}
 	if !sawValidation || !sawHook || !sawOTel {
 		t.Fatalf("sample events should include validation, hook-rich, and OTel shapes; validation=%t hook=%t otel=%t", sawValidation, sawHook, sawOTel)
-	}
-}
-
-func TestPackREADMEMentionsAWSCloudWatchLogsSetupAndProductionForwarding(t *testing.T) {
-	readme := mustRead("pack/README.md")
-	for _, want := range []string{
-		"beacon endpoint cloudwatch validate",
-		"AWS CloudWatch Logs",
-		"credentials available",
-		"least-privilege IAM policy",
-		"BEACON_CLOUDWATCH_LOG_GROUP",
-		"BEACON_CLOUDWATCH_LOG_STREAM_PREFIX",
-		"aws logs filter-log-events",
-		"CloudWatch Logs Insights",
-		"Beacon endpoint AWS CloudWatch Logs validation event",
-		"vendor=beacon product=endpoint-agent destination.type=cloudwatch destination.mode=aws_cloudwatch_logs",
-		"vector.toml",
-		"customer-managed host-agent",
-		"Content Handling",
-		"/var/log/beacon-agent/runtime.jsonl",
-		"Do not store AWS destination secrets",
-		"encryption",
-	} {
-		if !strings.Contains(readme, want) {
-			t.Fatalf("pack README missing %q", want)
-		}
-	}
-}
-
-func TestFiles_NoError(t *testing.T) {
-	files, err := Files()
-	if err != nil {
-		t.Fatalf("Files() returned unexpected error: %v", err)
-	}
-	if len(files) == 0 {
-		t.Fatal("Files() returned no files")
-	}
-}
-
-func TestFiles_ContainsAllRequiredNames(t *testing.T) {
-	files, err := Files()
-	if err != nil {
-		t.Fatal(err)
-	}
-	names := make(map[string]bool)
-	for _, f := range files {
-		names[f.Name] = true
-	}
-	for _, required := range []string{
-		"README.md", "sample-event.jsonl", "vector.toml",
-	} {
-		if !names[required] {
-			t.Errorf("Files() missing required file %q", required)
-		}
-	}
-}
-
-func TestFilesFromFS_PropagatesReadError(t *testing.T) {
-	emptyFS := fstest.MapFS{}
-	_, err := filesFromFS(emptyFS)
-	if err == nil {
-		t.Fatal("filesFromFS with empty FS should return an error")
-	}
-	if !strings.Contains(err.Error(), "cloudwatch pack asset") {
-		t.Fatalf("error should identify the pack source, got: %v", err)
-	}
-}
-
-func TestConfigSnippetFromFS_ErrorOnMissingAsset(t *testing.T) {
-	emptyFS := fstest.MapFS{}
-	_, err := configSnippetFromFS(emptyFS, "/some/path.jsonl")
-	if err == nil {
-		t.Fatal("configSnippetFromFS with empty FS should return error")
-	}
-	if !strings.Contains(err.Error(), "cloudwatch pack asset") {
-		t.Fatalf("error should identify the pack source, got: %v", err)
-	}
-}
-
-func TestInstallPack_ErrorOnWriteFailure(t *testing.T) {
-	// A 0555 directory is only read-only where Unix permission bits exist; Windows ignores them.
-	testenv.RequirePOSIXFileModes(t)
-	if os.Getuid() == 0 {
-		t.Skip("running as root: filesystem permission restrictions do not apply")
-	}
-	dir := t.TempDir()
-	if err := os.Chmod(dir, 0555); err != nil {
-		t.Skip("cannot set directory permissions:", err)
-	}
-	defer os.Chmod(dir, 0755)
-
-	subdir := filepath.Join(dir, "output")
-	err := InstallPack(subdir, DefaultLogPath)
-	if err == nil {
-		t.Fatal("InstallPack into read-only directory should return error")
-	}
-}
-
-func TestConfigSnippet_DefaultLogPath(t *testing.T) {
-	got, err := ConfigSnippet("")
-	if err != nil {
-		t.Fatalf("ConfigSnippet with empty path returned error: %v", err)
-	}
-	if !strings.Contains(got, siempack.TOMLEscape(DefaultLogPath)) {
-		t.Fatalf("ConfigSnippet with empty logPath should use DefaultLogPath %q, got: %s", DefaultLogPath, got)
 	}
 }

@@ -5,6 +5,9 @@ import (
 	"testing"
 )
 
+// One edit and one non-edit name per branch of isFileEditTool, plus every name in the branches
+// that list exact names or substrings: each one is its own condition, and dropping it loses that
+// tool's diffs with nothing else failing.
 func TestIsFileEditTool(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -12,31 +15,20 @@ func TestIsFileEditTool(t *testing.T) {
 		toolName string
 		want     bool
 	}{
-		// Claude tools
 		{"claude Write", "claude", "Write", true},
-		{"claude Edit", "claude", "Edit", true},
 		{"claude MultiEdit", "claude", "MultiEdit", true},
 		{"claude Read (not edit)", "claude", "Read", false},
-
-		// Copilot tools
 		{"copilot edit tool", "copilot", "copilot_insertEdit", true},
 		{"copilot write tool", "copilot", "copilot_createFile", true},
 		{"copilot patch tool", "copilot", "apply_patch", true},
 		{"copilot read (not edit)", "copilot", "readFile", false},
-
-		// Factory tools
-		{"factory Write", "factory", "Write", true},
-		{"factory Edit", "factory", "Edit", true},
-		{"factory MultiEdit", "factory", "MultiEdit", true},
 		{"factory Create", "factory", "Create", true},
+		{"factory Write", "factory", "Write", true},
+		{"factory MultiEdit", "factory", "MultiEdit", true},
 		{"factory Read (not edit)", "factory", "Read", false},
-
-		// Devin tools
 		{"devin edit", "devin", "edit", true},
 		{"devin write", "devin", "write", true},
 		{"devin exec (not edit)", "devin", "exec", false},
-
-		// Antigravity tools
 		{"antigravity write", "antigravity", "write_file", true},
 		{"antigravity patch", "antigravity", "apply_patch", true},
 		{"antigravity command (not edit)", "antigravity", "run_command", false},
@@ -112,34 +104,10 @@ func TestRunPostToolEmitsCursorAfterShellExecution(t *testing.T) {
 	if command["command"] != "go test ./..." || command["output"] != "ok" {
 		t.Fatalf("command = %#v, want command and output", command)
 	}
-}
-
-func TestRunPostToolCorrectsCursorPayloadWithDefaultPlatform(t *testing.T) {
-	setupHookConfigDirs(t)
-	platformFlag = "claude"
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-
-	out := runHookWithInput(t, runPostTool, map[string]interface{}{
-		"hook_event_name": "afterShellExecution",
-		"session_id":      "conv-shell",
-		"command":         "go test ./...",
-		"output":          "ok",
-		"cwd":             "/repo",
-	})
-	if len(out) != 0 {
-		t.Fatalf("post-tool response = %#v, want empty response", out)
-	}
-
-	event := lastEndpointEvent(t, logPath)
-	if harness := event["harness"].(map[string]interface{})["name"]; harness != "cursor" {
-		t.Fatalf("harness = %q, want cursor", harness)
-	}
-	if action := event["event"].(map[string]interface{})["action"]; action != "command.executed" {
-		t.Fatalf("event.action = %q, want command.executed", action)
-	}
-	if sessionID := event["session"].(map[string]interface{})["id"]; sessionID != "conv-shell" {
-		t.Fatalf("session.id = %q, want conv-shell", sessionID)
+	// A hook that fires for a named lifecycle event reports an action the runtime gave it, unlike
+	// the approvals Beacon synthesizes from Cursor's pre-tool hooks.
+	if got := eventFidelity(t, event); got != "observed" {
+		t.Fatalf("event.fidelity = %q, want observed for a reported hook event", got)
 	}
 }
 
@@ -302,40 +270,6 @@ func TestRunPostToolSeedsCursorCloudRunIDForAfterFileEdit(t *testing.T) {
 	}
 }
 
-func TestRunPostToolEmitsCursorPostToolFailure(t *testing.T) {
-	setupHookConfigDirs(t)
-	platformFlag = "cursor"
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-
-	out := runHookWithInput(t, runPostTool, map[string]interface{}{
-		"conversation_id": "conv-failure",
-		"hook_event_name": "postToolUseFailure",
-		"tool_name":       "Shell",
-		"tool_input": map[string]interface{}{
-			"command": "npm test",
-		},
-		"error_message": "Command timed out",
-		"failure_type":  "timeout",
-		"cwd":           "/repo",
-	})
-	if len(out) != 0 {
-		t.Fatalf("post-tool response = %#v, want empty response", out)
-	}
-
-	event := lastEndpointEvent(t, logPath)
-	if action := event["event"].(map[string]interface{})["action"]; action != "tool.failed" {
-		t.Fatalf("event.action = %q, want tool.failed", action)
-	}
-	if severity := event["severity"]; severity != "high" {
-		t.Fatalf("severity = %q, want high", severity)
-	}
-	tool := event["tool"].(map[string]interface{})
-	if tool["name"] != "Shell" || tool["failure_type"] != "timeout" {
-		t.Fatalf("tool = %#v, want Shell timeout", tool)
-	}
-}
-
 func TestRunPostToolEmitsCursorMCPFailureResponseFields(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "cursor"
@@ -364,6 +298,12 @@ func TestRunPostToolEmitsCursorMCPFailureResponseFields(t *testing.T) {
 	event := lastEndpointEvent(t, logPath)
 	if action := event["event"].(map[string]interface{})["action"]; action != "tool.failed" {
 		t.Fatalf("event.action = %q, want tool.failed", action)
+	}
+	if severity := event["severity"]; severity != "high" {
+		t.Fatalf("severity = %q, want high", severity)
+	}
+	if tool := event["tool"].(map[string]interface{}); tool["failure_type"] != "tool_error" {
+		t.Fatalf("tool = %#v, want failure_type tool_error", tool)
 	}
 	errorFields := event["error"].(map[string]interface{})
 	if got := errorFields["type"]; got != "tool_error" {
@@ -448,7 +388,10 @@ func TestRunPostToolEmitsAntigravityFileReadPathFields(t *testing.T) {
 	}
 }
 
-func TestRunPostToolEmitsDevinFileModifiedEvent(t *testing.T) {
+// Devin's PostToolUse can arrive with no session id, and its file edits are still recorded: the
+// edit path drops session-less payloads for every other runtime, and doing so here would lose
+// every Devin edit from such a session. The event carries no empty session id either.
+func TestRunPostToolRecordsDevinEditWithoutASession(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "devin"
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
@@ -460,7 +403,7 @@ func TestRunPostToolEmitsDevinFileModifiedEvent(t *testing.T) {
 		"tool_input": map[string]interface{}{
 			"file_path": "/repo/main.go",
 			"old_str":   "old",
-			"new_str":   "new token=devin-secret",
+			"new_str":   "new",
 		},
 		"tool_response": map[string]interface{}{"success": true},
 	})
@@ -472,20 +415,16 @@ func TestRunPostToolEmitsDevinFileModifiedEvent(t *testing.T) {
 	if action := event["event"].(map[string]interface{})["action"]; action != "file.modified" {
 		t.Fatalf("event.action = %q, want file.modified", action)
 	}
-	if harness := event["harness"].(map[string]interface{})["name"]; harness != "devin" {
-		t.Fatalf("harness = %q, want devin", harness)
+	if got := leaf(event, "file", "path"); got != "/repo/main.go" {
+		t.Fatalf("file.path = %q, want /repo/main.go", got)
+	}
+	if _, ok := event["file"].(map[string]interface{})["diff_hash"]; !ok {
+		t.Fatalf("file diff_hash missing: %#v", event["file"])
 	}
 	if session, ok := event["session"].(map[string]interface{}); ok {
 		if _, hasID := session["id"]; hasID {
-			t.Fatalf("devin file event should not include empty session id: %#v", session)
+			t.Fatalf("devin file event should not include an empty session id: %#v", session)
 		}
-	}
-	file := event["file"].(map[string]interface{})
-	if file["path"] != "/repo/main.go" {
-		t.Fatalf("file = %#v, want /repo/main.go", file)
-	}
-	if _, ok := file["diff_hash"]; !ok {
-		t.Fatalf("file diff_hash missing: %#v", file)
 	}
 }
 

@@ -29,6 +29,9 @@ extensions:
   - gomod: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter v0.0.0
     import: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/loopbackhostextension
     path: ./exporter/beaconjsonexporter
+  - gomod: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter v0.0.0
+    import: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/beaconingestextension
+    path: ./exporter/beaconjsonexporter
 
 replaces:
   - github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve => ../../../pkg/asymptoteobserve

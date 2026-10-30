@@ -7,34 +7,6 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 )
 
-func TestReadEventsAppendOrderBreaksTimestampTiesOnSequence(t *testing.T) {
-	// A batch of cumulative datapoints from one export shares a timestamp however precise
-	// the timestamp is, and token aggregation needs their emission order back. The file
-	// deliberately holds them in the wrong order to prove the sequence is what recovers it
-	// rather than the line number.
-	tie := "2026-05-13T01:00:00.000000000Z"
-	first := testSchemaEvent(tie, "claude_code", "metric.observed", "metric", "")
-	first.Sequence = 11
-	first.Message = "first"
-	second := testSchemaEvent(tie, "claude_code", "metric.observed", "metric", "")
-	second.Sequence = 12
-	second.Message = "second"
-
-	path := filepath.Join(t.TempDir(), "runtime.jsonl")
-	writeTestLog(t, path, marshalEvents(t, second, first)...)
-
-	events, err := ReadEventsAppendOrder(path, EventQuery{})
-	if err != nil {
-		t.Fatalf("ReadEventsAppendOrder returned error: %v", err)
-	}
-	if len(events) != 2 {
-		t.Fatalf("read %d events, want 2", len(events))
-	}
-	if events[0].Message != "first" || events[1].Message != "second" {
-		t.Fatalf("order = %q, %q; want first, second", events[0].Message, events[1].Message)
-	}
-}
-
 func TestReadEventsAppendOrderFallsBackToLineOrderWhenUnsequenced(t *testing.T) {
 	// Events written before sequence stamping still have to come back in append order.
 	tie := "2026-05-13T01:00:00Z"

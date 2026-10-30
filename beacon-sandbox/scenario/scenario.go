@@ -8,7 +8,10 @@
 package scenario
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -334,7 +337,9 @@ func Load(path string) (Scenario, error) {
 	if err != nil {
 		return s, err
 	}
-	if err := yaml.Unmarshal(b, &s); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(b))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&s); err != nil && !errors.Is(err, io.EOF) {
 		return s, fmt.Errorf("%s: %w", filepath.Base(path), err)
 	}
 	if err := s.Validate(); err != nil {

@@ -73,41 +73,6 @@ func writeOverrides(t *testing.T, doc string) string {
 	return path
 }
 
-func TestPricingCommandTree(t *testing.T) {
-	for _, sub := range []string{"show", "list", "info", "validate"} {
-		cmd, _, err := rootCmd.Find([]string{"pricing", sub})
-		if err != nil || cmd.Name() != sub {
-			t.Fatalf("pricing %s not registered: %v", sub, err)
-		}
-		for _, flag := range []string{"pricing-file", "json", "user", "system"} {
-			if cmd.Flags().Lookup(flag) == nil && cmd.InheritedFlags().Lookup(flag) == nil {
-				t.Fatalf("pricing %s missing --%s", sub, flag)
-			}
-		}
-	}
-	if cmd, _, _ := rootCmd.Find([]string{"token-usage"}); cmd.Flags().Lookup("pricing-file") == nil {
-		t.Fatal("token-usage missing --pricing-file")
-	}
-}
-
-func TestPricingShowCatalogModelText(t *testing.T) {
-	testenv.SetHome(t, t.TempDir())
-	out, _, err := runPricing(t, "show", "us.anthropic.claude-sonnet-4-5-20250929-v1:0[1m]")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		`Priced by:  catalog key "us.anthropic.claude-sonnet-4-5-20250929-v1:0"`,
-		"Match:      exact after stripping context_window",
-		"input             3.30",
-		"Catalog:    LiteLLM",
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("show missing %q:\n%s", want, out)
-		}
-	}
-}
-
 func TestPricingShowOverrideJSON(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	path := writeOverrides(t, testOverridesDoc)

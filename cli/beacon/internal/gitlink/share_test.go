@@ -301,9 +301,9 @@ func TestPlainSetupRepairsAHalfInstalledShareHook(t *testing.T) {
 }
 
 func TestShareNotesRefusesAForeignPrePushAndNamesIt(t *testing.T) {
-	tm := newTeam(t)
+	r := newTestRepo(t)
 	ctx := context.Background()
-	bob := tm.bob.open()
+	bob := r.open()
 	loc, _ := ResolveHooks(ctx, bob)
 	_ = os.MkdirAll(loc.Dir, 0o755)
 	if err := os.WriteFile(filepath.Join(loc.Dir, "pre-push"), []byte("#!/usr/bin/env node\n"), 0o755); err != nil {

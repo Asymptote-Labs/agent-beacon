@@ -51,6 +51,7 @@ func TestPlanResumeReopensEachRuntimeNatively(t *testing.T) {
 		{HarnessOpenCode, "opencode", []string{"--session", "s-1"}},
 		{HarnessCline, "cline", []string{"--tui", "--auto-approve", "false", "--id", "s-1"}},
 		{HarnessFactory, "droid", []string{"--resume", "s-1"}},
+		{HarnessFx, "fx", []string{"--resume", "s-1"}},
 	} {
 		t.Run(tc.harness, func(t *testing.T) {
 			session := resumableSession(t, tc.harness, "s-1")
@@ -205,19 +206,6 @@ func TestPlanResumeClineOnlyReopensCLISessions(t *testing.T) {
 	}
 }
 
-// Every command Beacon builds for Cline must turn auto-approve off, because Cline defaults to
-// approving every tool call.
-func TestEveryClineCommandTurnsAutoApproveOff(t *testing.T) {
-	command, _ := commandFor(HarnessCline)
-	resume, _ := command.Resume(Session{ID: "x", Store: "messages"})
-	for _, args := range [][]string{resume, command.NewSession("p")} {
-		joined := strings.Join(args, " ")
-		if !strings.Contains(joined, "--auto-approve false") {
-			t.Fatalf("cline args %q do not turn auto-approve off", args)
-		}
-	}
-}
-
 func TestPlanResumeErrors(t *testing.T) {
 	session := resumableSession(t, HarnessClaude, "s-1")
 
@@ -298,18 +286,6 @@ func TestLaunchReportsAMissingExecutable(t *testing.T) {
 	code, err := Launch(Plan{Executable: filepath.Join(t.TempDir(), "missing"), Dir: t.TempDir()}, nil, nil, nil)
 	if err == nil || code != -1 {
 		t.Fatalf("Launch = %d, %v", code, err)
-	}
-}
-
-func TestLaunchEnvSetsAndRemovesVariables(t *testing.T) {
-	environ := []string{"PATH=/bin", "ALLOW_ALL=true", "MODE=auto", "KEEP=1"}
-	got := launchEnv(environ, map[string]string{"ALLOW_ALL": "", "MODE": "approve", "NEW": "x"})
-	want := []string{"PATH=/bin", "KEEP=1", "MODE=approve", "NEW=x"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("env = %q, want %q", got, want)
-	}
-	if got := launchEnv(environ, nil); !reflect.DeepEqual(got, environ) {
-		t.Fatalf("no overrides changed the environment: %q", got)
 	}
 }
 

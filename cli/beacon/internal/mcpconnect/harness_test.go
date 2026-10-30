@@ -10,10 +10,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/jsonc"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 const testURL = "https://mcp.example.test"
+
+func TestMain(m *testing.M) {
+	// Durability is not observable here, and a real fsync per write dominated the package's time.
+	syncFile = func(*os.File) error { return nil }
+	os.Exit(m.Run())
+}
 
 // harnessFixture is one automatic target's test data: an existing config full of things Beacon
 // must not touch, and the exact bytes connect must produce from it.
@@ -729,8 +736,9 @@ func userEdit(target Target) string {
 	return "\n  \"userEdit\": true,"
 }
 
+// One target per parser: JSONC, TOML, and Oh My Pi's strict JSON.
 func TestUnparseableConfigsAreSkippedAndLeftAlone(t *testing.T) {
-	for _, name := range []string{"claude_code", "codex_cli", "cursor", "vscode", "gemini_cli", "opencode", "omp"} {
+	for _, name := range []string{"cursor", "codex_cli", "omp"} {
 		t.Run(name, func(t *testing.T) {
 			home := isolate(t)
 			target := mustTarget(t, name)
@@ -979,13 +987,13 @@ func TestCreatedFileIsKeptWhenTheUserAddedToIt(t *testing.T) {
 	target := mustTarget(t, "opencode")
 	path := targetPath(t, target, home)
 	connect(t, fileOptions(home), target)
-	withTheirs, _, err := insertJSONMember(readFile(t, path), []string{"mcp"}, "theirs", ordered{{"type", "remote"}, {"url", "https://t"}})
+	withTheirs, _, err := jsonc.InsertMember(readFile(t, path), []string{"mcp"}, "theirs", jsonc.Ordered{{Key: "type", Value: "remote"}, {Key: "url", Value: "https://t"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	writeFile(t, path, withTheirs)
 	disconnect(t, fileOptions(home), target)
-	got, err := decodeJSONC(readFile(t, path))
+	got, err := jsonc.Decode(readFile(t, path))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1027,20 +1035,6 @@ func TestInspectReportsModeAndOwnershipWithoutValues(t *testing.T) {
 		}
 		if strings.Contains(s.Detail+s.URL, "bcn_mcp_") {
 			t.Errorf("%s: status exposes a header value", s.Target.Name)
-		}
-	}
-}
-
-func TestNextStepsNameTheServerOrTheVariable(t *testing.T) {
-	for _, target := range Targets() {
-		if !target.Automatic {
-			continue
-		}
-		if step := target.NextStep(AuthOAuth, ""); step == "" {
-			t.Errorf("%s has no OAuth next step", target.Name)
-		}
-		if step := target.NextStep(AuthTokenEnv, "MY_TOKEN_VAR"); !strings.Contains(step, "MY_TOKEN_VAR") && !strings.Contains(step, "secret storage") {
-			t.Errorf("%s token step does not name the variable: %q", target.Name, step)
 		}
 	}
 }

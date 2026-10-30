@@ -1,5 +1,5 @@
 id: kernel-module-load
-version: 1
+version: 2
 title: Kernel module loaded, probed, or removed
 description: >
   A kernel module was loaded (insmod), probed (modprobe), or removed
@@ -28,7 +28,7 @@ taxonomy:
 match: >
   e.event.action == "command.executed" && (
     e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*insmod\\b") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*modprobe\\b[^;&|]*(\\s-r\\b|\\s--remove\\b|\\s-[a-z]*f[a-z]*\\b|\\s+[a-zA-Z][a-zA-Z0-9_-]+\\.(ko|ko\\.xz|ko\\.gz)$|\\s+[a-zA-Z][a-zA-Z0-9_-]+$)") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*modprobe\\b[^;&|]*(\\s-r\\b|\\s--remove\\b|\\s-[a-z]*f[a-z]*\\b|\\s+[a-zA-Z][a-zA-Z0-9_-]+\\.(ko|ko\\.xz|ko\\.gz)(\\s|$|[;&|])|\\s+[a-zA-Z][a-zA-Z0-9_-]+(\\s|$|[;&|]))") ||
     e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*rmmod\\b")
   )
 
@@ -113,4 +113,28 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "modprobe -f br_netfilter" }
+        session: { id: s1 }
+  - name: modprobe_module_then_semicolon_command
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo modprobe br_netfilter;sudo sysctl --system" }
+        session: { id: s1 }
+  - name: modprobe_module_then_command
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo modprobe br_netfilter && echo loaded" }
+        session: { id: s1 }
+  - name: modprobe_module_with_parameter
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "modprobe nf_conntrack hashsize=1024" }
+        session: { id: s1 }
+  - name: modprobe_version_then_command
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "modprobe --version && echo ok" }
         session: { id: s1 }

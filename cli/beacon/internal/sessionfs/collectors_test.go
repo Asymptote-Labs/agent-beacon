@@ -17,6 +17,7 @@ var backfillCollectors = []string{
 	"claudesession", "codexsession", "cursorsession", "opencodesession", "copilotsession",
 	"clinesession", "factorysession", "pisession", "primesession", "hermessession",
 	"dshsession", "fxsession", "groksession", "openclawsession", "devinsession",
+	"harness2session",
 }
 
 // directReads are the calls that would read a session store around the confinement.
@@ -30,12 +31,9 @@ var directReads = map[string]bool{
 // allowedDirectReads are the exceptions, by package, function and call.
 var allowedDirectReads = map[string]bool{
 	// The collector's own cursor file, under Beacon's base directory rather than the user's store.
-	"*.LoadState.os.ReadFile": true,
+	"sessionsync.Load.os.ReadFile": true,
 	// The driver open itself, after SQLitePath has turned the path into a confined snapshot.
-	"cursorsession.openSQLiteReadOnly.sql.Open":   true,
-	"hermessession.openSQLiteReadOnly.sql.Open":   true,
-	"opencodesession.openSQLiteReadOnly.sql.Open": true,
-	"devinsession.openSQLiteReadOnly.sql.Open":    true,
+	"sessionsync.OpenSQLite.sql.Open": true,
 	// Existence checks on project paths named inside a transcript, to infer the workspace. They
 	// read no content and the paths are usually outside the home.
 	"cursorsession.normalizeDirectoryCandidate.os.Stat":        true,
@@ -43,7 +41,8 @@ var allowedDirectReads = map[string]bool{
 }
 
 func TestBackfillCollectorsReadTheirStoresThroughSessionfs(t *testing.T) {
-	for _, pkg := range backfillCollectors {
+	// sessionsync is the sync machinery every collector shares.
+	for _, pkg := range append(backfillCollectors, "sessionsync") {
 		files, err := filepath.Glob(filepath.Join("..", pkg, "*.go"))
 		if err != nil || len(files) == 0 {
 			t.Fatalf("%s: no sources (%v)", pkg, err)

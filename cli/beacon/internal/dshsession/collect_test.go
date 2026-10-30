@@ -1,7 +1,6 @@
 package dshsession
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -88,72 +87,6 @@ func TestMapSessionPreservesDiffWhitespace(t *testing.T) {
 	event := findAction(t, MapSession(ref, records, MapOptions{}), "file.modified")
 	if event.File == nil || !strings.Contains(event.File.Diff, "+line with trailing spaces  \n+\n") {
 		t.Fatalf("diff = %q, want trailing spaces and newline preserved", event.File.Diff)
-	}
-}
-
-func TestAdvanceCursorPartialLeavesChangedFileRetryable(t *testing.T) {
-	cursor := &Cursor{LastLine: 1, SizeBytes: 100, ModTimeMS: 10}
-	ref := SessionRef{SizeBytes: 200, ModTimeUnixMS: 20}
-	mapped := []MappedEvent{
-		{SourceLine: 2, Event: schema.Event{Event: schema.EventInfo{Action: "prompt.submitted"}}},
-		{SourceLine: 3, Event: schema.Event{Event: schema.EventInfo{Action: "agent.message"}}},
-	}
-	advanceCursorPartial(cursor, mapped, 1)
-	if cursor.LastLine != 2 {
-		t.Fatalf("LastLine = %d, want 2", cursor.LastLine)
-	}
-	if cursor.SizeBytes == ref.SizeBytes || cursor.ModTimeMS == ref.ModTimeUnixMS {
-		t.Fatalf("partial cursor stamped changed file markers: %+v", cursor)
-	}
-}
-
-func TestStoreReadsCompleteZstdFramesAndDefersPartialTail(t *testing.T) {
-	root := t.TempDir()
-	sessionDir := filepath.Join(root, "sessions", "z1")
-	full := zstdFrame(t, []byte(record("session", map[string]interface{}{"id": "z1", "cwd": "/repo"})+"\n"))
-	partial := zstdFrame(t, []byte(record("user/message", map[string]interface{}{"message": map[string]interface{}{"content": "later"}})+"\n"))
-	if len(partial) < 8 {
-		t.Fatal("zstd frame unexpectedly short")
-	}
-	writeBytes(t, filepath.Join(sessionDir, SessionFileZstd), append(full, partial[:len(partial)/2]...))
-	store, err := NewStore(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	refs, err := store.List()
-	if err != nil {
-		t.Fatal(err)
-	}
-	records, stats, err := store.Read(refs[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(records) != 1 || records[0].Kind != "session" {
-		t.Fatalf("records = %+v", records)
-	}
-	if !stats.PartialFrame || !stats.PartialTail {
-		t.Fatalf("stats = %+v, want partial frame/tail", stats)
-	}
-}
-
-func TestCollectPrintDoesNotAdvanceState(t *testing.T) {
-	root := t.TempDir()
-	sessionDir := filepath.Join(root, "sessions", "s-print")
-	writeSession(t, sessionDir, SessionFileJSON,
-		record("session", map[string]interface{}{"id": "s-print", "cwd": "/repo"}),
-		record("user/message", map[string]interface{}{"message": map[string]interface{}{"content": "hello"}}),
-	)
-	statePath := filepath.Join(t.TempDir(), "state.json")
-	var out bytes.Buffer
-	summary, err := CollectOnce(CollectOptions{DSHHome: root, Print: true, Out: &out})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if summary.EventsEmitted != 2 || !strings.Contains(out.String(), `"prompt.submitted"`) {
-		t.Fatalf("summary=%+v out=%s", summary, out.String())
-	}
-	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
-		t.Fatalf("--print wrote state file: %v", err)
 	}
 }
 

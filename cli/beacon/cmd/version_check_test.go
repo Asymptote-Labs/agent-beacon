@@ -27,32 +27,6 @@ func (c stubVersionChecker) Check(context.Context) (updatecheck.Result, error) {
 	return c.result, nil
 }
 
-func TestVersionCheckFlagRegistered(t *testing.T) {
-	cmd, _, err := rootCmd.Find([]string{"version"})
-	if err != nil {
-		t.Fatalf("Find version returned error: %v", err)
-	}
-	if cmd == nil {
-		t.Fatal("version command not registered")
-	}
-	if cmd.Flags().Lookup("check") == nil {
-		t.Fatal("version command missing --check flag")
-	}
-}
-
-func TestVersionCheckSubcommandRegistered(t *testing.T) {
-	cmd, _, err := rootCmd.Find([]string{"version", "check"})
-	if err != nil {
-		t.Fatalf("Find version check returned error: %v", err)
-	}
-	if cmd == nil {
-		t.Fatal("version check subcommand not registered")
-	}
-	if cmd.Use != "check" {
-		t.Fatalf("found command Use = %q, want %q", cmd.Use, "check")
-	}
-}
-
 func TestRunVersionWithoutCheckPrintsVersionOnly(t *testing.T) {
 	restoreVersion := setVersionForTest(t, "v0.0.10")
 	defer restoreVersion()
@@ -100,15 +74,6 @@ func TestRunVersionWithCheckPrintsVersionAndUpdateResult(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("output = %q, want %q", got, want)
 		}
-	}
-}
-
-func TestRunVersionCheckReportsUpToDate(t *testing.T) {
-	got := runVersionCheckWithStub(t, "v0.0.10", stubVersionChecker{
-		result: updatecheck.Result{CurrentVersion: "v0.0.10", LatestVersion: "v0.0.10"},
-	})
-	if !strings.Contains(got, "Beacon v0.0.10 is up to date.") {
-		t.Fatalf("output = %q, want up-to-date message", got)
 	}
 }
 

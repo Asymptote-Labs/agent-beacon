@@ -1,0 +1,81 @@
+event: message_start
+data: {"type":"message_start","message":{"id":"chatcompl_REDACTED","type":"message","role":"assistant","model":"claude-opus-5-5","parent_uuid":"00000000-0000-7000-8000-000000000001","uuid":"00000000-0000-7000-8000-000000000002","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"trace_id":"REDACTED","request_id":"req_REDACTED"},"discarded_parent_message_uuid":null}
+
+event: ping
+data: {"type":"ping"          }
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_search_1","name":"web_search","input":{},"message":"Searching the web","integration_name":null,"icon_name":"globe","start_timestamp":"2026-10-23T16:49:11.284862563Z","tool_origin":"first_party"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"mode\": \"standard\", "}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"query\": \"NASA news today\"}"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0,"stop_timestamp":"2026-10-23T16:49:12.100000000Z"}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_result","tool_use_id":"toolu_search_1","name":"web_search","content":[{"type":"knowledge","title":"NASA News Today","url":"https://news.example.com/nasa-today","metadata":{"type":"webpage_metadata","site_domain":"news.example.com","favicon_url":"https://news.example.com/favicon.ico","site_name":"Example News"},"is_missing":false},{"type":"knowledge","title":"Latest NASA Updates","url":"https://space.example.org/updates","metadata":{"type":"webpage_metadata","site_domain":"space.example.org","favicon_url":"https://space.example.org/favicon.ico","site_name":"Example Space"},"is_missing":false}],"is_error":false,"icon_name":"globe","start_timestamp":"2026-10-23T16:49:12.690740565Z","tool_origin":"first_party"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1,"stop_timestamp":"2026-10-23T16:49:12.700000000Z"}
+
+event: content_block_start
+data: {"type":"content_block_start","index":2,"content_block":{"type":"thinking","thinking":"","summaries":[],"cut_off":false,"truncated":false,"start_timestamp":"2026-10-23T16:49:13.240249935Z"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":2,"stop_timestamp":"2026-10-23T16:49:13.500000000Z"}
+
+event: content_block_start
+data: {"type":"content_block_start","index":3,"content_block":{"type":"tool_use","id":"toolu_search_2","name":"web_search","input":{},"message":"Searching the web","integration_name":null,"icon_name":"globe","start_timestamp":"2026-10-23T16:49:13.600000000Z","tool_origin":"first_party"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":3,"delta":{"type":"input_json_delta","partial_json":"{\"mode\": \"standard\", \"query\": \"NASA October 2026\"}"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":3,"stop_timestamp":"2026-10-23T16:49:14.400000000Z"}
+
+event: content_block_start
+data: {"type":"content_block_start","index":4,"content_block":{"type":"tool_result","tool_use_id":"toolu_search_2","name":"web_search","content":[{"type":"knowledge","title":"Artemis Accords Signatories","url":"https://space.example.org/artemis","metadata":{"type":"webpage_metadata","site_domain":"space.example.org","favicon_url":"https://space.example.org/favicon.ico","site_name":"Example Space"},"is_missing":false}],"is_error":false,"icon_name":"globe","start_timestamp":"2026-10-23T16:49:14.549390158Z","tool_origin":"first_party"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":4,"stop_timestamp":"2026-10-23T16:49:14.600000000Z"}
+
+event: content_block_start
+data: {"type":"content_block_start","index":5,"content_block":{"type":"thinking","thinking":"","summaries":[],"cut_off":false,"truncated":false,"start_timestamp":"2026-10-23T16:49:15.080121582Z"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":5,"delta":{"type":"thinking_summary_delta","summary":{"summary":"Finding the latest dated news item in the archive."}}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":5,"stop_timestamp":"2026-10-23T16:49:16.200000000Z","summary_pending":false}
+
+event: content_block_start
+data: {"type":"content_block_start","index":6,"content_block":{"type":"text","text":"","citations":[],"start_timestamp":"2026-10-23T16:49:16.246654873Z"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":6,"delta":{"type":"text_delta","text":"One recent NASA headline: "}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":6,"delta":{"type":"citation_start_delta","citation":{"uuid":"00000000-0000-4000-8000-000000000003","title":"Artemis Accords Signatories","url":"https://space.example.org/artemis","metadata":{"type":"webpage_metadata","site_domain":"space.example.org","favicon_url":"https://space.example.org/favicon.ico","site_name":"Example Space"},"origin_tool_name":"web_search","sources":[{"uuid":"00000000-0000-4000-8000-000000000004","title":"Artemis Accords Signatories","url":"https://space.example.org/artemis","icon_url":"https://space.example.org/favicon.ico","source":"Example Space"}]}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":6,"delta":{"type":"text_delta","text":"a new country signed the Artemis Accords."}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":6,"delta":{"type":"citation_end_delta","citation_uuid":"00000000-0000-4000-8000-000000000003"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":6,"stop_timestamp":"2026-10-23T16:49:17.000000000Z"}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}
+
+event: message_limit
+data: {"type":"message_limit","message_limit":{"type":"within_limit","resolved":true}}
+
+event: message_stop
+data: {"type":"message_stop"}
+

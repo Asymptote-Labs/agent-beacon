@@ -205,7 +205,7 @@ jobs:
       TAG: ${{ github.ref_name }}
       NAME: ${{ needs.build.outputs.name }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: chrome-release
 
@@ -235,11 +235,14 @@ jobs:
             '```' \
             > /tmp/ext-release-notes.md
 
+          # --latest=false: GitHub's "Latest" release must stay the CLI's. The self-updater's
+          # manifest, the Linux install.sh one-liner and the update notice all resolve
+          # releases/latest, and an extension release has none of their assets.
           if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
             gh release create "$TAG" --repo "$REPO" \
               --title "Browser extension $TAG" \
               --notes-file /tmp/ext-release-notes.md \
-              --verify-tag
+              --verify-tag --latest=false
           fi
 
           gh release upload "$TAG" "$NAME" "$NAME.sha256" \
@@ -402,7 +405,7 @@ jobs:
       NAME: ${{ needs.firefox.outputs.name }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: firefox-release
 

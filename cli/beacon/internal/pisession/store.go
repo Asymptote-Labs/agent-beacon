@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/homepath"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 	"io"
 	"io/fs"
@@ -82,25 +83,16 @@ func defaultAgentDir() (string, error) {
 // inventory all resolve it here.
 func AgentDir(home string) (string, error) {
 	if override := strings.TrimSpace(os.Getenv(piAgentDirEnv)); override != "" {
-		if strings.TrimSpace(home) == "" && (override == "~" || strings.HasPrefix(override, "~/") || strings.HasPrefix(override, `~\`)) {
-			return "", fmt.Errorf("home directory is required to resolve %s=%q", piAgentDirEnv, override)
+		dir, err := homepath.ExpandTilde(override, home)
+		if err != nil {
+			return "", fmt.Errorf("resolve %s: %w", piAgentDirEnv, err)
 		}
-		return expandTilde(override, home), nil
+		return dir, nil
 	}
 	if strings.TrimSpace(home) == "" {
 		return "", errors.New("home directory is empty")
 	}
 	return filepath.Join(home, ".pi", "agent"), nil
-}
-
-func expandTilde(path, home string) string {
-	if path == "~" {
-		return home
-	}
-	if strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) {
-		return filepath.Join(home, filepath.FromSlash(path[2:]))
-	}
-	return path
 }
 
 func (s *Store) Exists() bool {

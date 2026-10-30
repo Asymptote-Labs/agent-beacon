@@ -1,5 +1,5 @@
 id: crontab-modification
-version: 1
+version: 2
 title: Crontab modified (user, system, or spool)
 description: >
   A persistent-scheduling primitive was modified: the user crontab
@@ -21,9 +21,10 @@ taxonomy:
 
 match: >
   (e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*crontab\\b[^;&|]*(\\s-e\\b|\\s-[a-z]*r\\b|\\s-\\s+[a-zA-Z0-9_./-]+|\\s-\\s*$|\\s+[a-zA-Z0-9_./]+\\s*$|\\b[^;&|]*\\|\\s*crontab\\b)")
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*crontab\\b[^;&|]*(\\s-e\\b|\\s-[a-z]*r\\b|\\s-\\s+[a-zA-Z0-9_./-]+|\\s-\\s*$|\\b[^;&|]*\\|\\s*crontab\\b)") ||
+    e.command.command.matches("(?i)(^|[;&|(]\\s*|\\bsudo\\s+)\\s*crontab(\\s+-u\\s*[^\\s;&|]+)?\\s+[a-zA-Z0-9_./~][a-zA-Z0-9_./~-]*\\s*($|[;&|)])")
   )) || (
-    e.event.action == "file.modified" && (
+    e.event.action in ["file.modified", "file.created", "file.edited"] && (
       e.file.path.matches("(?i)(^|/)etc/crontab$") ||
       e.file.path.matches("(?i)(^|/)etc/cron\\.d/[^/]+$") ||
       e.file.path.matches("(?i)(^|/)etc/cron\\.(hourly|daily|weekly|monthly)/[^/]+$") ||
@@ -46,6 +47,30 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "crontab /tmp/payload.cron" }
+        session: { id: s1 }
+  - name: crontab_load_then_cleanup
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "crontab /tmp/payload.cron && rm /tmp/payload.cron" }
+        session: { id: s1 }
+  - name: crontab_load_from_home
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "crontab ~/jobs.cron" }
+        session: { id: s1 }
+  - name: crontab_list_then_command
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "crontab -l && echo done" }
+        session: { id: s1 }
+  - name: crontab_backup_then_command
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "crontab -l > ~/crontab.bak && echo saved" }
         session: { id: s1 }
   - name: pipe_into_crontab
     verdict: match
@@ -94,4 +119,10 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "echo hello world" }
+        session: { id: s1 }
+  - name: write_etc_cron_d_created
+    verdict: match
+    events:
+      - event: { action: file.created }
+        file: { path: "/etc/cron.d/agent-persist" }
         session: { id: s1 }

@@ -38,21 +38,34 @@ test('a session is reachable through sequential Tab and native Enter', async ({ 
   await detail(page, alpha.id);
 });
 
+// For both gestures the browser's default is to open the link in another tab; the dashboard must
+// leave that default alone and not also navigate this page. The probe records both, then cancels
+// them: actually opening a background tab makes Playwright stall on a loaded runner.
 for (const gesture of ['modifier', 'middle'] as const) {
-  test(`${gesture} click opens the session in a real separate tab`, async ({ page, context }) => {
+  test(`${gesture} click leaves opening the session in another tab to the browser`, async ({ page, context }) => {
     await fixture(context);
     await list(page);
-    const original = page.url();
     const link = page.locator('#events tr[data-session-id] a');
-    await expect(link).toHaveCount(1);
-    const opened = context.waitForEvent('page');
+    await expect(link).toHaveAttribute('href', `/session.html?id=${alpha.id}`);
+    await page.evaluate(() => {
+      const probe: { prevented?: boolean; navigated?: string } = {};
+      (window as unknown as { probe: typeof probe }).probe = probe;
+      // navigate fires synchronously when a script sets location.href, so nothing slips past.
+      (window as unknown as { navigation: EventTarget }).navigation.addEventListener('navigate', (event) => {
+        probe.navigated = (event as unknown as { destination: { url: string } }).destination.url;
+        event.preventDefault();
+      });
+      for (const type of ['click', 'auxclick']) {
+        window.addEventListener(type, (event) => {
+          if (!(event.target as Element).closest('#events a')) return;
+          probe.prevented = event.defaultPrevented;
+          event.preventDefault();
+        });
+      }
+    });
     if (gesture === 'middle') await link.click({ button: 'middle' });
     else await link.click({ modifiers: [process.platform === 'darwin' ? 'Meta' : 'Control'] });
-    const tab = await opened;
-    await detail(tab, alpha.id);
-    await expect(page).toHaveURL(original);
-    await expect(page.locator('#events tr[data-session-id]')).toHaveCount(1);
-    await tab.close();
+    expect(await page.evaluate(() => (window as unknown as { probe: object }).probe)).toEqual({ prevented: false });
   });
 }
 

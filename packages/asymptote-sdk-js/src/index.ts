@@ -1,4 +1,5 @@
 import {
+  ProxyTracerProvider,
   SpanKind,
   SpanStatusCode,
   context,
@@ -206,7 +207,7 @@ export function initialize(options: InitializeOptions = {}): void {
 
   const provider = new NodeTracerProvider({
     resource: resourceFromAttributes({
-      [ATTR_SERVICE_NAME]: options.serviceName ?? process.env.OTEL_SERVICE_NAME ?? DEFAULT_SERVICE_NAME,
+      [ATTR_SERVICE_NAME]: options.serviceName ?? envValue("OTEL_SERVICE_NAME") ?? DEFAULT_SERVICE_NAME,
       "telemetry.sdk.name": "asymptote-sdk-js",
       "telemetry.sdk.version": SDK_VERSION,
       [ATTR_BEACON_ORIGIN]: "cloud",
@@ -228,10 +229,17 @@ export function initialize(options: InitializeOptions = {}): void {
     } catch (error) {
       instrumentations.forEach(i => i.disable());
       provider.shutdown().catch(() => {});
+      releaseGlobalTracer(provider);
       state = undefined;
       throw error;
     }
   }
+}
+
+// trace.disable() lets the next provider register globally; a host's provider is left alone.
+function releaseGlobalTracer(provider: NodeTracerProvider): void {
+  const global = trace.getTracerProvider();
+  if (global instanceof ProxyTracerProvider && global.getDelegate() === provider) trace.disable();
 }
 
 // changedOptions names the options in next, other than instrumentModules, that differ from the
@@ -393,6 +401,7 @@ export async function shutdown(): Promise<void> {
   try {
     await current.provider.shutdown();
   } finally {
+    releaseGlobalTracer(current.provider);
     // A stopped provider cannot resume exporting, even when its exporter rejects.
     if (state === current) state = undefined;
   }
@@ -403,9 +412,9 @@ export function isInitialized(): boolean {
 }
 
 export function resolveExporterConfig(options: InitializeOptions = {}): ResolvedExporterConfig {
-  const explicitEndpoint = options.otlpEndpoint ?? process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
-  const apiKey = options.apiKey ?? process.env.ASYMPTOTE_API_KEY;
-  const baseUrl = options.baseUrl ?? process.env.ASYMPTOTE_BASE_URL ?? DEFAULT_HOSTED_BASE_URL;
+  const explicitEndpoint = options.otlpEndpoint ?? envValue("OTEL_EXPORTER_OTLP_ENDPOINT");
+  const apiKey = options.apiKey ?? envValue("ASYMPTOTE_API_KEY");
+  const baseUrl = options.baseUrl ?? envValue("ASYMPTOTE_BASE_URL") ?? DEFAULT_HOSTED_BASE_URL;
   const skipDefault = !!(options.disableDefaultExporter || options.spanExporter);
   const mode: ExportMode = skipDefault ? "custom" : explicitEndpoint ? "otlp" : apiKey ? "hosted" : "custom";
 
@@ -421,6 +430,13 @@ export function resolveExporterConfig(options: InitializeOptions = {}): Resolved
     headers.authorization = `Bearer ${apiKey}`;
   }
   return { observeUrl, headers, mode };
+}
+
+// An empty variable is unset, as the OpenTelemetry environment spec has it: compose files and CI
+// templates often declare a variable with no value.
+function envValue(name: string): string | undefined {
+  const value = process.env[name];
+  return value === undefined || value.trim() === "" ? undefined : value;
 }
 
 // The Asymptote API key is a credential for Asymptote's own ingest, so it is
@@ -514,7 +530,7 @@ function patchOpenLLMetryModules(modules: InstrumentModules): void {
 
 function manuallyInstrumentModules(instrumentations: Instrumentation[], modules: InstrumentModules): void {
   const openAIModule = modules.OpenAI ?? modules.openAI ?? modules.openai;
-  const anthropicModule = modules.Anthropic ?? modules.anthropic;
+  const anthropicModule = anthropicModuleShape(modules.Anthropic ?? modules.anthropic);
   for (const instrumentation of instrumentations) {
     const maybeManual = instrumentation as Instrumentation & {
       manuallyInstrument?: (moduleValue: unknown) => void;
@@ -527,6 +543,15 @@ function manuallyInstrumentModules(instrumentations: Instrumentation[], modules:
       maybeManual.manuallyInstrument?.(anthropicModule);
     }
   }
+}
+
+// The Anthropic instrumentation needs the module namespace (`module.Anthropic.Messages`, and
+// `module.APIPromise` for streams); the default-export client class carries neither.
+function anthropicModuleShape(moduleValue: unknown): unknown {
+  if (typeof moduleValue === "function" && "Messages" in moduleValue) {
+    throw new TypeError('instrumentModules.Anthropic must be the module namespace: import * as Anthropic from "@anthropic-ai/sdk"');
+  }
+  return moduleValue;
 }
 
 function patchClaudeAgentSDK(moduleValue: unknown): void {
@@ -579,7 +604,11 @@ function finishResult<T>(result: T, span: Span, options?: ObserveOptions): unkno
         outcome = await settled;
       } catch (error) {
         // The consumer's error takes precedence over a cleanup failure.
-        await Promise.resolve(typeof close === "function" ? close.call(result) : undefined).catch(() => {});
+        try {
+          if (typeof close === "function") await close.call(result);
+        } catch {
+          // Cleanup can throw before returning its promise, or reject afterward.
+        }
         endSpanWithError(span, error);
         throw error;
       }

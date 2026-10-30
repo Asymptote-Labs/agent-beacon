@@ -88,16 +88,13 @@ func init() {
 	sync.BoolVar(&endpointDevinOpts.print, "print", false, "Print mapped events as JSON without writing them or advancing the cursor (dry run)")
 	sync.BoolVar(&endpointDevinOpts.watch, "watch", false, "Sweep continuously on --interval (default: one sweep then exit)")
 	sync.DurationVar(&endpointDevinOpts.interval, "interval", time.Minute, "Sweep interval for --watch")
-	sync.Int64Var(&endpointDevinOpts.rotateBytes, "rotate-bytes", 0,
-		"Rotate the runtime log at this many bytes while this sync writes it (default 10485760, the size every Beacon writer uses; must not be smaller)")
+	addSyncRotateBytesFlag(sync, &endpointDevinOpts.rotateBytes)
 }
 
 // devinSyncOptions turns the sync flags into collector options.
 func devinSyncOptions(cmd *cobra.Command) (devinsession.CollectOptions, error) {
-	// Smaller than the shared size would only make this sync rotate more often than every other
-	// writer, shrinking what the log keeps for everyone.
-	if endpointDevinOpts.rotateBytes != 0 && endpointDevinOpts.rotateBytes < writer.DefaultRotateBytes {
-		return devinsession.CollectOptions{}, fmt.Errorf("--rotate-bytes must be at least %d, the size every Beacon writer rotates the runtime log at", writer.DefaultRotateBytes)
+	if err := checkSyncRotateBytes(endpointDevinOpts.rotateBytes); err != nil {
+		return devinsession.CollectOptions{}, err
 	}
 	userMode := endpointUserMode()
 	logPath := lifecycle.ResolveRuntimeLog(userMode, endpointDevinOpts.logPath).EffectiveLogPath

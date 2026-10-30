@@ -17,6 +17,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/cowork"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/hermessession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tomledit"
 	"gopkg.in/yaml.v3"
 )
 
@@ -186,9 +187,13 @@ func DiscoverOpenCode() Harness {
 	h := Harness{Name: "opencode", DisplayName: "opencode", Capability: "plugin"}
 	detectExecutable(&h, "opencode")
 	home, _ := os.UserHomeDir()
-	pluginPath := filepath.Join(home, ".config", "opencode", "plugins", "beacon.ts")
+	configDir, dirErr := hooks.OpenCodeConfigDir(home)
+	pluginPath := filepath.Join(configDir, "plugins", "beacon.ts")
+	if dirErr != nil {
+		pluginPath = filepath.Join(".config", "opencode", "plugins", "beacon.ts")
+	}
 	h.ConfigPath = pluginPath
-	if !h.Detected && dirExists(filepath.Join(home, ".config", "opencode")) {
+	if !h.Detected && dirErr == nil && dirExists(configDir) {
 		h.Detected = true
 	}
 	if fileExists(pluginPath) {
@@ -391,12 +396,9 @@ func ConfigureClaude(opts ConfigureOptions) (string, error) {
 		return "", err
 	}
 	path := filepath.Join(claudesession.ConfigDir(home), "settings.json")
-	settings := map[string]interface{}{}
-	if data, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(data, &settings)
-		if err := backup(path, data); err != nil {
-			return "", err
-		}
+	settings, err := readSettingsForUpdate("Claude", path)
+	if err != nil {
+		return "", err
 	}
 	env, _ := settings["env"].(map[string]interface{})
 	if env == nil {
@@ -514,45 +516,13 @@ func mergeCodexOTEL(existing, endpoint string) string {
 	return mergeCodexOTELWithPrompt(existing, endpoint, true)
 }
 
+// mergeCodexOTELWithPrompt replaces every [otel] and [otel.*] table with Beacon's, appended at
+// the end of the document.
 func mergeCodexOTELWithPrompt(existing, endpoint string, logUserPrompt bool) string {
-	lines := strings.Split(existing, "\n")
-	var out []string
-	inOTEL := false
-	wroteOTEL := false
-	for _, line := range lines {
-		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "[") && strings.HasSuffix(trim, "]") {
-			isOTELHeader := codexOTELHeader(trim)
-			if inOTEL && !isOTELHeader && !wroteOTEL {
-				out = append(out, codexOTELBlock(endpoint, logUserPrompt)...)
-				wroteOTEL = true
-			}
-			inOTEL = isOTELHeader
-			if !inOTEL {
-				out = append(out, line)
-			}
-			continue
-		}
-		if inOTEL {
-			continue
-		}
-		out = append(out, line)
-	}
-	if inOTEL && !wroteOTEL {
-		out = append(out, codexOTELBlock(endpoint, logUserPrompt)...)
-		wroteOTEL = true
-	}
-	if !wroteOTEL {
-		if strings.TrimSpace(existing) != "" {
-			out = append(out, "")
-		}
-		out = append(out, codexOTELBlock(endpoint, logUserPrompt)...)
-	}
-	return strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
-}
-
-func codexOTELHeader(header string) bool {
-	return header == "[otel]" || strings.HasPrefix(header, "[otel.")
+	eol := tomledit.LineEnding(existing, "\n")
+	stripped, _ := tomledit.RemoveTable(existing, "otel")
+	block := strings.Join(codexOTELBlock(endpoint, logUserPrompt), eol) + eol
+	return tomledit.Append(stripped, block, eol)
 }
 
 func codexOTELBlock(endpoint string, logUserPrompt bool) []string {
@@ -578,9 +548,9 @@ func claudeStatus(path string) (TelemetryStatus, string) {
 	if err != nil {
 		return TelemetryMissing, err.Error()
 	}
-	var settings map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return TelemetryMisconfigured, "Claude settings JSON is invalid"
+	settings, err := decodeSettings("Claude", path, data)
+	if err != nil {
+		return TelemetryMisconfigured, err.Error()
 	}
 	env, _ := settings["env"].(map[string]interface{})
 	if env == nil {
@@ -835,6 +805,40 @@ func claudeInlineRawBodies(value interface{}) bool {
 		return true
 	}
 	return false
+}
+
+// decodeSettings parses a harness's JSON settings file. The error names the file so the user
+// knows which one to fix.
+func decodeSettings(product, path string, data []byte) (map[string]interface{}, error) {
+	var settings map[string]interface{}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return nil, fmt.Errorf("%s settings file %s is not valid JSON: %w", product, path, err)
+	}
+	if settings == nil {
+		settings = map[string]interface{}{}
+	}
+	return settings, nil
+}
+
+// readSettingsForUpdate reads a harness's JSON settings file before Beacon rewrites it. A missing
+// file is an empty object. A file that does not parse is refused rather than replaced, because it
+// still holds the user's own settings; a file that does is backed up first.
+func readSettingsForUpdate(product, path string) (map[string]interface{}, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return map[string]interface{}{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	settings, err := decodeSettings(product, path, data)
+	if err != nil {
+		return nil, err
+	}
+	if err := backup(path, data); err != nil {
+		return nil, err
+	}
+	return settings, nil
 }
 
 func backup(path string, data []byte) error {

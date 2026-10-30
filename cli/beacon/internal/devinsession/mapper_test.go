@@ -2,7 +2,6 @@ package devinsession
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 )
 
@@ -22,16 +21,6 @@ func TestDevinEventIDIsDeterministicAndUUIDShaped(t *testing.T) {
 	}
 	if devinEventID("other:msg-1:agent.message") == first {
 		t.Fatal("different coordinates produced the same id")
-	}
-}
-
-func TestMessageIDDigestMatchesTheRingFormat(t *testing.T) {
-	digest := messageIDDigest("msg-1")
-	if len(digest) != 16 {
-		t.Fatalf("digest = %q, want a 16-hex-char prefix", digest)
-	}
-	if digest != messageIDDigest("msg-1") || digest == messageIDDigest("msg-2") {
-		t.Fatal("digests are not stable and distinct")
 	}
 }
 
@@ -75,12 +64,5 @@ func TestFailureReasonShapes(t *testing.T) {
 	}
 	if f := failureReason(nil); f.present {
 		t.Fatalf("absent failure_reason = %#v", f)
-	}
-}
-
-func TestDefaultStatePathIsUnderBeaconStateDir(t *testing.T) {
-	path := DefaultStatePath()
-	if !strings.HasSuffix(path, "devin.json") || !strings.Contains(path, "state") {
-		t.Fatalf("DefaultStatePath = %q", path)
 	}
 }

@@ -113,8 +113,20 @@ function hydrateFiltersFromURL() {
     if (!params.has(field)) continue;
     const value = params.get(field);
     if (field === "limit") ensureLimitOption(input, value);
+    ensureFacetOption(input, value);
     input.value = value;
   }
+}
+
+// Dynamic facet options may not have loaded yet, or may be absent from a
+// filtered summary. Preserve explicit query values until the user clears them.
+function ensureFacetOption(select, value) {
+  if (!(select instanceof HTMLSelectElement) || !["harness", "model", "repository"].includes(select.name) || !value) return;
+  if (Array.from(select.options).some((option) => option.value === value)) return;
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = select.name === "harness" ? harnessLabel(value) : select.name === "repository" ? repositoryOptionLabel(value) : value;
+  select.append(option);
 }
 
 // The limit control is a fixed <select>; a URL like ?limit=5 would otherwise
@@ -2082,7 +2094,8 @@ function renderHarnessSelect(values) {
     ...values.map((item) => `<option value="${escapeHTML(item.name)}">${escapeHTML(harnessLabel(item.name))} (${escapeHTML(item.count)})</option>`),
   ];
   select.innerHTML = options.join("");
-  select.value = values.some((item) => item.name === current) ? current : "";
+  ensureFacetOption(select, current);
+  select.value = current;
 }
 
 function renderModelSelect(values) {
@@ -2094,7 +2107,8 @@ function renderModelSelect(values) {
     ...values.map((item) => `<option value="${escapeHTML(item.name)}">${escapeHTML(item.name)} (${escapeHTML(item.count)})</option>`),
   ];
   select.innerHTML = options.join("");
-  select.value = values.some((item) => item.name === current) ? current : "";
+  ensureFacetOption(select, current);
+  select.value = current;
 }
 
 function renderRepositorySelect(values) {
@@ -2105,10 +2119,8 @@ function renderRepositorySelect(values) {
     `<option value="">All repositories</option>`,
     ...values.map((item) => `<option value="${escapeHTML(item.name)}">${escapeHTML(repositoryOptionLabel(item.name))} (${escapeHTML(item.count)})</option>`),
   ];
-  if (current && !values.some((item) => item.name === current)) {
-    options.push(`<option value="${escapeHTML(current)}">${escapeHTML(repositoryOptionLabel(current))}</option>`);
-  }
   select.innerHTML = options.join("");
+  ensureFacetOption(select, current);
   select.value = current;
 }
 
@@ -2304,11 +2316,31 @@ function clearFields(loadAfter = true) {
   if (loadAfter) load({ updateLocation: true }).catch(console.error);
 }
 
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+// truncateMiddle shortens value to maxLength visible characters, keeping both ends. It cuts between
+// graphemes, so an emoji, flag or accented letter at the cut stays whole. It reads only the
+// characters it keeps, so a long prompt costs no more than a short one.
 function truncateMiddle(value, maxLength) {
   value = String(value || "");
+  // Every grapheme is at least one UTF-16 unit, so a string this short has nothing to cut.
   if (value.length <= maxLength) return value;
-  const keep = Math.floor((maxLength - 3) / 2);
-  return `${value.slice(0, keep)}...${value.slice(value.length - keep)}`;
+  const segments = graphemes.segment(value);
+  const head = [];
+  for (const { segment } of segments) {
+    if (head.length === maxLength) {
+      const keep = Math.floor((maxLength - 3) / 2);
+      const tail = [];
+      for (let end = value.length; tail.length < keep; ) {
+        const last = segments.containing(end - 1);
+        tail.push(last.segment);
+        end = last.index;
+      }
+      return `${head.slice(0, keep).join("")}...${tail.reverse().join("")}`;
+    }
+    head.push(segment);
+  }
+  return value;
 }
 
 function escapeHTML(value) {
@@ -2789,8 +2821,37 @@ async function loadFindings() {
   }
 }
 
+// A finding is the rule's match over its ordered supporting events, not its
+// current row number. Legacy events without IDs use their complete JSON value.
+function findingExpansionKey(finding) {
+  if (!finding.events?.length) return null;
+  const evidence = finding.events.map((event) => event.event?.id
+    ? ["id", event.event.id]
+    : ["event", JSON.stringify(event, (_key, value) => {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        return Object.fromEntries(Object.keys(value).sort().map((key) => [key, value[key]]));
+      }
+      return value;
+    })]);
+  return JSON.stringify([finding.rule_id, finding.session_id || "", evidence]);
+}
+
+function remapFindingExpansions(previous, findings, expanded) {
+  const previousKeys = previous.map(findingExpansionKey);
+  const nextKeys = findings.map(findingExpansionKey);
+  const counts = (keys) => keys.reduce((map, key) => map.set(key, (map.get(key) || 0) + 1), new Map());
+  const previousCounts = counts(previousKeys);
+  const nextCounts = counts(nextKeys);
+  const selected = new Set(previousKeys.filter((key, i) => key !== null
+    && expanded.has(i) && previousCounts.get(key) === 1));
+  // Identical duplicate findings have no unambiguous identity. Collapse them
+  // rather than selecting both or moving the user's choice to another row.
+  return new Set(nextKeys.flatMap((key, i) => selected.has(key) && nextCounts.get(key) === 1 ? [i] : []));
+}
+
 function renderFindings(resp) {
   const findings = resp?.findings || [];
+  state.findingsExpanded = remapFindingExpansions(state.findings, findings, state.findingsExpanded);
   state.findings = findings;
   setText("#findings-meta", `${findings.length} finding${findings.length === 1 ? "" : "s"} across ${resp?.scanned || 0} events`);
   const tbody = $("#findings-rows");
@@ -3154,7 +3215,6 @@ const lensHost = {
   added: [],
   active: "",
   mount: null,
-  dataPromise: null,
 };
 
 function readAddedLenses() {
@@ -3330,15 +3390,16 @@ function selectLens(id, { history = true } = {}) {
   else unmountLens();
 }
 
-function lensData() {
-  if (!lensHost.dataPromise) {
-    lensHost.dataPromise = getJSON(`/api/lens-data?session=${encodeURIComponent(lensHost.session)}`);
-    // A failed load is not cached, so reopening the lens tries again.
-    lensHost.dataPromise.catch(() => {
-      lensHost.dataPromise = null;
+function lensData(mount) {
+  if (!mount.dataPromise) {
+    // A frame receives one snapshot. Reopening creates a new mount and fetches
+    // current data without changing the snapshot of a frame already on screen.
+    mount.dataPromise = getJSON(`/api/lens-data?session=${encodeURIComponent(lensHost.session)}`);
+    mount.dataPromise.catch(() => {
+      mount.dataPromise = null;
     });
   }
-  return lensHost.dataPromise;
+  return mount.dataPromise;
 }
 
 function unmountLens() {
@@ -3364,7 +3425,7 @@ function mountLens(lens) {
   frame.title = `${lens.title} lens`;
   frame.src = `/lenses/frame/${encodeURIComponent(lens.id)}`;
 
-  const mount = { lens, frame, port: null, loads: 0, delivered: false, rendered: false, timer: 0, settleTimer: 0 };
+  const mount = { lens, frame, dataPromise: null, port: null, loads: 0, delivered: false, rendered: false, timer: 0, settleTimer: 0 };
   lensHost.mount = mount;
   const fail = (reason) => {
     if (lensHost.mount !== mount) return;
@@ -3409,7 +3470,7 @@ function mountLens(lens) {
           mount.port.postMessage(payload);
           return true;
         };
-        lensData().then(
+        lensData(mount).then(
           (data) => reply({ type: "trace", data }),
           (err) => reply({ type: "traceError", message: String(err.message || err) }),
         ).then((sent) => {

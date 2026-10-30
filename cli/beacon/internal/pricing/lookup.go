@@ -3,6 +3,7 @@ package pricing
 import (
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -132,6 +133,19 @@ func spell(r rung, s string) string {
 		s = foldVersionDots(s)
 	}
 	return s
+}
+
+// Spellings returns the ways the catalog compares model, from closest to the original to most
+// reduced: canonical (lowercased, provider prefix dropped), with version dots folded, and with a
+// Bedrock route removed. Repeats are dropped, and an empty model has none.
+func Spellings(model string) []string {
+	var out []string
+	for r := rungCanonical; r < numRungs; r++ {
+		if s := spell(r, model); s != "" && !slices.Contains(out, s) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // bedrockRegions are the inference-profile prefixes Bedrock puts in front of a model id.

@@ -10,8 +10,16 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 )
 
+// declaredPlatform is the --platform value this hook was invoked with, which names the runtime
+// whose configuration holds the hook entry. readStdinJSON may then switch platformFlag to the
+// runtime the payload came from: Cursor runs Claude Code's user-level hooks with Cursor payloads,
+// so a hook installed for Claude Code can be handling a Cursor event. Nothing in this build reads
+// it; it is there for a build that needs to know where the entry it is running from lives.
+var declaredPlatform string
+
 // readStdinJSON decodes JSON from stdin into a map.
 func readStdinJSON() (map[string]interface{}, error) {
+	declaredPlatform = platformFlag
 	var input map[string]interface{}
 	err := json.NewDecoder(os.Stdin).Decode(&input)
 	if err == nil {

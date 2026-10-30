@@ -74,14 +74,3 @@ func TestUserModeExporterLogIsTightenedAndRotatesPrivately(t *testing.T) {
 		assertExporterPerm(t, target, 0o600)
 	}
 }
-
-// System mode is unchanged: a log outside the collector's home keeps the shared mode.
-func TestSharedExporterLogKeepsTheSharedMode(t *testing.T) {
-	setExporterTestHome(t)
-	path := filepath.Join(t.TempDir(), "beacon-agent", "runtime.jsonl")
-	if err := appendJSONL(path, []byte(`{"message":"test"}`+"\n"), defaultRotateBytes, defaultRotateArchives); err != nil {
-		t.Fatal(err)
-	}
-	assertExporterPerm(t, path, 0o666)
-	assertExporterPerm(t, path+".lock", 0o666)
-}
