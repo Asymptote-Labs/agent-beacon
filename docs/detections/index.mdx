@@ -87,6 +87,14 @@ Beacon ships with a small built-in baseline so `beacon scan` works before any ru
   inline credential fields; overlapping curl/wget file uploads can fire both.
   These are direct command patterns, not general dataflow analysis through
   variables or intermediate files.
+- The egress rules (`secret-read-then-egress`, `browser-session-read-then-egress`,
+  `git-bundle-then-egress`, `secret-read-and-egress`, `env-dump-piped-to-network`,
+  `archive-then-upload`, `credentials-in-curl-data`, `upload-to-paste-transfer-site`)
+  share one definition of a network sender: curl, wget, httpie (`http`, `https`),
+  xh, nc, ncat, netcat and socat, by any path, under `sudo`, `env`, `timeout`,
+  `nice`, `doas` or `torsocks`, or inside `bash -c`, plus bash `/dev/tcp` and
+  `/dev/udp` redirects. They read the command line as bash, so a sender named in a
+  commit message, an `echo` or a here-document does not fire.
 
 Telemetry-tampering detections cover commands that remove Beacon logs or plugins, stop its services, uninstall or disconnect it, or clear or disable shell history. They can only fire if the command was captured before collection stopped.
 
