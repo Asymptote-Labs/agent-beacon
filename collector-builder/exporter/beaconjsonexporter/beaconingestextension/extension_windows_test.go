@@ -154,3 +154,22 @@ func TestValidWindowsName(t *testing.T) {
 		}
 	}
 }
+
+// A directory service that does not answer costs one connection the lookup timeout, not the
+// client's whole budget: the event is named by SID only.
+func TestResolveNameGivesUpOnASlowLookup(t *testing.T) {
+	prev := lookupAccount
+	release := make(chan struct{})
+	lookupAccount = func(string) (*user.User, error) {
+		<-release
+		return &user.User{Username: `CONTOSO\late`}, nil
+	}
+	t.Cleanup(func() { close(release); lookupAccount = prev })
+	start := time.Now()
+	if got := resolveName("S-1-5-21-1-2-3-1001"); got != "" {
+		t.Fatalf("resolveName = %q, want nothing past the timeout", got)
+	}
+	if elapsed := time.Since(start); elapsed > nameLookupTimeout+time.Second {
+		t.Fatalf("resolveName took %v", elapsed)
+	}
+}

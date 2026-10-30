@@ -8,7 +8,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -159,4 +161,49 @@ func InspectRestrictedLogDir(dir, base, readersSID string) ([]string, error) {
 		}
 	}
 	return problems, nil
+}
+
+// CreateRestrictedFile creates a new file at path in the restricted log directory, failing if
+// anything is there. Its security is set by the creation itself, so there is no moment in which it
+// carries anything else: owned by Administrators whoever the creator is (a policy can make an
+// administrator's files their own), with RestrictedLockDACL when lock is set and otherwise exactly
+// what the directory passes on.
+func CreateRestrictedFile(path string, lock bool) (*os.File, error) {
+	sddl := "O:" + sidAdministrators
+	if lock {
+		sddl = SDDL(sidAdministrators, true, RestrictedLockDACL())
+	}
+	sd, err := windows.SecurityDescriptorFromString(sddl)
+	if err != nil {
+		return nil, fmt.Errorf("build the security descriptor: %w", err)
+	}
+	sa := &windows.SecurityAttributes{SecurityDescriptor: sd}
+	sa.Length = uint32(unsafe.Sizeof(*sa))
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return nil, err
+	}
+	h, err := windows.CreateFile(p, windows.GENERIC_READ|windows.GENERIC_WRITE,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, sa, windows.CREATE_NEW, windows.FILE_ATTRIBUTE_NORMAL, 0)
+	runtime.KeepAlive(sd)
+	if err != nil {
+		return nil, &os.PathError{Op: "create", Path: path, Err: err}
+	}
+	return os.NewFile(uintptr(h), path), nil
+}
+
+// ResetRestrictedFile gives the plain file at path Administrators ownership and exactly what a new
+// file in the restricted log directory inherits, without following a link.
+func ResetRestrictedFile(path, readersSID string) error {
+	return withPrivileges(func() error {
+		h, info, err := openNoFollow(path)
+		if err != nil {
+			return err
+		}
+		defer windows.CloseHandle(h)
+		if info.FileAttributes&(windows.FILE_ATTRIBUTE_REPARSE_POINT|windows.FILE_ATTRIBUTE_DIRECTORY) != 0 || info.NumberOfLinks > 1 {
+			return fmt.Errorf("%s is not a plain file", path)
+		}
+		return setSecurity(h, false, InheritedDACL(RestrictedLogDirDACL(readersSID), false))
+	})
 }
