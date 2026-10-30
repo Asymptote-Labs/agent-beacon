@@ -571,6 +571,31 @@ func TestAnUnconfirmedLineIsNotDrainedByADirectAppend(t *testing.T) {
 	}
 }
 
+// Once no collector has taken them within the grace period -- the endpoint went back to shared, or
+// the collector never came back -- a direct append takes unconfirmed lines, so none is stranded.
+func TestUnconfirmedLinesAreAppendedDirectlyAfterTheGrace(t *testing.T) {
+	sock, _ := silentCollector(t)
+	d := deliverer(t, sock)
+	log := &directLog{}
+	if got, err := d.WriteOutcome(testLog, lines(t, 1)[0], log.append); err != nil || got != Spooled {
+		t.Fatalf("WriteOutcome = %v, %v", got, err)
+	}
+	d.Client.SocketPath = filepath.Join(shortTempDir(t), "none.sock")
+	old := time.Now().Add(-defaultUnconfirmedGrace - time.Second)
+	if err := os.Chtimes(d.unconfirmedFor(testLog).filePath(), old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Write(testLog, lines(t, 1)[0], log.append); err != nil {
+		t.Fatal(err)
+	}
+	if log.count() != 2 {
+		t.Fatalf("direct log has %d lines, want the new one and the unconfirmed one", log.count())
+	}
+	if n, _ := d.Pending(testLog); n != 0 {
+		t.Fatalf("Pending = %d; the unconfirmed line was stranded", n)
+	}
+}
+
 // A spooled batch that a drain sends without a usable reply moves to the unconfirmed spool, so a
 // later direct append cannot write it a second time.
 func TestASpoolBatchSentWithNoReplyBecomesUnconfirmed(t *testing.T) {

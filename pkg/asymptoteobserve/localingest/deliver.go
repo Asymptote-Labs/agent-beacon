@@ -49,6 +49,9 @@ type Deliverer struct {
 	// FailureBackoff is how long, after a failed send, this account goes straight to the direct
 	// append without trying the socket. Zero means 10s; negative turns it off.
 	FailureBackoff time.Duration
+	// UnconfirmedGrace is how long lines the collector may already have written wait for it before
+	// a direct append may take them. Zero means 2m; negative means no wait.
+	UnconfirmedGrace time.Duration
 }
 
 // Applies reports whether a write to logPath goes through Write's socket path at all. Root writes
@@ -91,9 +94,11 @@ const (
 //     crashed collector left behind, a collector that refused the connection or said it was busy
 //     -- the line is appended directly. On a shared log that simply works.
 //   - If the line reached a collector that never gave a usable reply -- killed or restarted
-//     mid-write, or hung -- it may already be in the log. It is spooled apart and resent only
-//     through the collector, which stamps the resend as it stamped the first copy, so the worst
-//     case is one event written twice under one event.id rather than two different events.
+//     mid-write, or hung -- it may already be in the log. It is spooled apart and resent through
+//     the collector, which stamps the resend as it stamped the first copy, so the worst case is
+//     one event written twice under one event.id rather than two different events. If no
+//     collector has taken it within UnconfirmedGrace, a direct append that works takes it, so it
+//     is never stranded.
 //   - Only when the direct append is refused for permission, as a restricted log refuses it while
 //     its collector is down, is the line spooled. A collector that answered for some other log
 //     will never take it, so then the refusal is returned instead.
@@ -148,14 +153,16 @@ func (d Deliverer) WriteOutcome(logPath string, line []byte, appendLine func([]b
 	}
 	err := appendLine(line)
 	if err == nil {
-		d.drain(logPath, func(lines [][]byte) (int, error) {
+		appendAll := func(lines [][]byte) (int, error) {
 			for i, line := range lines {
 				if err := appendLine(line); err != nil {
 					return i, err
 				}
 			}
 			return len(lines), nil
-		})
+		}
+		d.drain(logPath, appendAll)
+		d.drainUnconfirmedDirectly(logPath, appendAll)
 		return Appended, nil
 	}
 	if !errors.Is(err, fs.ErrPermission) || collectorElsewhere {
@@ -291,13 +298,41 @@ func (d Deliverer) spoolUnconfirmed(logPath string, lines [][]byte) error {
 }
 
 // drain sends one batch of logPath's spool through send. Best effort: whatever is left goes with a
-// later line. Lines whose delivery is unconfirmed stay put: only drainThroughCollector sends them.
+// later line. Lines whose delivery is unconfirmed are not in it: see drainThroughCollector and
+// drainUnconfirmedDirectly.
 func (d Deliverer) drain(logPath string, send func([][]byte) (int, error)) {
 	s := d.spoolFor(logPath)
 	if s.Dir == "" {
 		return
 	}
 	_, _ = s.Drain(MaxLinesPerConn, send)
+}
+
+// defaultUnconfirmedGrace outlasts a collector restart (a repair or package upgrade), so a
+// collector that comes back gets the first chance at lines it may already have written.
+const defaultUnconfirmedGrace = 2 * time.Minute
+
+// drainUnconfirmedDirectly lets a direct append take unconfirmed lines once nothing has been added
+// to them for UnconfirmedGrace. By then a collector that was only restarting has answered; one that
+// has not is gone (the endpoint went back to shared, or its collector writes another log), and
+// waiting longer would lose the lines rather than risk one of them twice.
+func (d Deliverer) drainUnconfirmedDirectly(logPath string, send func([][]byte) (int, error)) {
+	u := d.unconfirmedFor(logPath)
+	if u.Dir == "" {
+		return
+	}
+	info, err := os.Stat(u.filePath())
+	if err != nil {
+		return
+	}
+	grace := d.UnconfirmedGrace
+	if grace == 0 {
+		grace = defaultUnconfirmedGrace
+	}
+	if time.Since(info.ModTime()) < grace {
+		return
+	}
+	_, _ = u.Drain(MaxLinesPerConn, send)
 }
 
 // drainThroughCollector sends a batch of logPath's unconfirmed lines and a batch of its spool to
