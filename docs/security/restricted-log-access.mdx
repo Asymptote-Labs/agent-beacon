@@ -86,9 +86,9 @@ Run the commands from an elevated shell:
 beacon endpoint repair --system --log-access restricted
 ```
 
-For the MSI and `install-endpoint.ps1`, set `BEACON_LOG_ACCESS=restricted` in the machine environment before installing. An upgrade with the variable unset keeps whatever mode the endpoint has.
+For the MSI and `install-endpoint.ps1`, set `BEACON_LOG_ACCESS=restricted` in the machine environment before installing. An upgrade with the variable unset keeps whatever mode the endpoint has. The MSI's install step runs inside the Windows Installer service, which sees a machine variable set after the service started only once it restarts, so after installing check that `beacon endpoint status --system --json` reports `"log_access": "restricted"`, and if it does not, switch with `beacon endpoint repair --system --log-access restricted`.
 
-Switching replaces every file of the log with a fresh copy and resets the security of everything in the log directory, so a handle another account opened while the log was shared stops reaching it. Windows cannot replace a file that another process holds open without allowing deletes. If one does, the switch waits a few seconds, then fails and names the file. Close that process (or sign the account out) and run the command again; until then the endpoint keeps the shared mode.
+Switching replaces every file in the log directory with a fresh copy and resets the security of everything in it, so a handle another account opened while the log was shared stops reaching it. Windows cannot replace a file that another process holds open without allowing deletes. If one does, the switch waits a few seconds, then fails and names the file. The log is put back to shared, so hooks keep writing. Close that process (or sign the account out) and run the command again.
 
 Add a shipper's account to the readers group from an elevated shell, then restart the shipper:
 
@@ -96,7 +96,12 @@ Add a shipper's account to the readers group from an elevated shell, then restar
 net localgroup beacon-log <account> /add
 ```
 
-Shippers that run as SYSTEM, which is how Azure Monitor Agent, the Splunk Universal Forwarder and Elastic Agent run by default, keep working with no change.
+Shippers that run as SYSTEM, which is how Azure Monitor Agent and Elastic Agent run by default, keep working with no change. The Splunk Universal Forwarder runs as SYSTEM only in releases before 9.1; from 9.1 it installs by default as the virtual account `NT SERVICE\SplunkForwarder`, which must be added and the forwarder restarted:
+
+```powershell title="Splunk Universal Forwarder 9.1 and later"
+net localgroup beacon-log "NT SERVICE\SplunkForwarder" /add
+Restart-Service SplunkForwarder
+```
 
 To verify, run `beacon endpoint doctor --system` from an elevated shell and expect `runtime_log_access: ok` and `runtime_log_permissions: ok` (`restricted_acl`), then check the directory:
 
