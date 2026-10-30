@@ -14,6 +14,9 @@ func ownedByProcess(os.FileInfo) bool { return true }
 // elevatedOpenFlags adds nothing off Unix.
 func elevatedOpenFlags() int { return 0 }
 
+// noFollowOpenFlags adds nothing off Unix.
+func noFollowOpenFlags() int { return 0 }
+
 // linkedElsewhere is never true off Unix, where no root writer opens the log through a directory
 // another user can plant links in.
 func linkedElsewhere(os.FileInfo) bool { return false }

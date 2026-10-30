@@ -7,6 +7,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/activesession"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/localingest"
 )
 
 // TestMain keeps the active-session record every endpoint event updates out of the real home
@@ -20,6 +21,12 @@ func TestMain(m *testing.M) {
 	// Auto-share is off unless a test turns it on in a settings file of its own.
 	settingsPath := filepath.Join(dir, "share-settings.json")
 	logging.ShareSettingsPath = func() string { return settingsPath }
+	// Never send to a real collector's ingest socket, which a developer's restricted-mode machine
+	// has.
+	logging.EndpointIngest = localingest.Deliverer{
+		Client: localingest.Client{SocketPath: filepath.Join(dir, "no-ingest.sock")},
+		Spool:  localingest.Spool{Dir: filepath.Join(dir, "spool")},
+	}
 	// A suite run from inside a Claude Code session must not append to that session's env file.
 	os.Unsetenv("CLAUDE_ENV_FILE")
 	code := m.Run()

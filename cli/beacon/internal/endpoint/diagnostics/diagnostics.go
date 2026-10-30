@@ -12,6 +12,7 @@ import (
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/localingest"
 )
 
 type Check struct {
@@ -40,8 +41,11 @@ func Run(cfg endpointconfig.Config) []Check {
 		checkFile("config", endpointconfig.ConfigPath(cfg.UserMode), true),
 		checkFile("collector_config", cfg.Collector.ConfigPath, true),
 		checkFile("runtime_log", cfg.LogPath, false),
-		checkLogPermissions(cfg.LogPath, cfg.UserMode),
+		checkLogPermissionsFor(cfg),
 		checkCollectorHealth(cfg),
+	}
+	if !cfg.UserMode {
+		checks = append(checks, checkLogAccess(cfg, localingest.Deliverer{}))
 	}
 	// The service definition check is named after whichever manager is actually in use, so
 	// the output is interpretable on a mixed fleet and a Linux host is not told to look for a

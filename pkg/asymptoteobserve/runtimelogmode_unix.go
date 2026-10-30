@@ -49,6 +49,13 @@ func elevatedOpenFlags() int {
 	return syscall.O_NOFOLLOW | syscall.O_NONBLOCK
 }
 
+// noFollowOpenFlags open a file without following a symlink in the last component and without
+// blocking on a FIFO, whoever is running. Settling an archive's mode uses them always: it only
+// reads, and a file reached through a link is never one of the log's.
+func noFollowOpenFlags() int {
+	return syscall.O_NOFOLLOW | syscall.O_NONBLOCK
+}
+
 // linkedElsewhere reports whether root opened a log that has another hard link. A runtime log has
 // exactly one, rotation included (it renames), so a second is one someone planted: a hard link to
 // a root-owned file passes O_NOFOLLOW and the regular-file check, and root would append to it.

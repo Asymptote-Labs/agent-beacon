@@ -27,6 +27,9 @@ BEACON_SPLUNK_SOURCE="${BEACON_SPLUNK_SOURCE:-}"
 BEACON_SPLUNK_SOURCETYPE="${BEACON_SPLUNK_SOURCETYPE:-}"
 BEACON_SPLUNK_INSECURE_SKIP_VERIFY="${BEACON_SPLUNK_INSECURE_SKIP_VERIFY:-0}"
 BEACON_SPLUNK_CA_FILE="${BEACON_SPLUNK_CA_FILE:-}"
+# shared or restricted; empty keeps the mode the endpoint already has, so a package upgrade never
+# changes it.
+BEACON_LOG_ACCESS="${BEACON_LOG_ACCESS:-}"
 
 # The packaged collector sits beside the CLI. Auto-detected rather than required, so a manual
 # invocation without BEACON_COLLECTOR still works.
@@ -43,6 +46,7 @@ set -- endpoint install --system \
 # Empty means auto-detect: systemd when it is PID 1, otherwise a supervised collector.
 [ -n "$BEACON_SERVICE" ] && set -- "$@" --service "$BEACON_SERVICE"
 [ "$BEACON_NO_START" = "1" ] && set -- "$@" --no-start
+[ -n "$BEACON_LOG_ACCESS" ] && set -- "$@" --log-access "$BEACON_LOG_ACCESS"
 
 [ -n "$BEACON_SPLUNK_HEC_ENDPOINT" ] && set -- "$@" --splunk-hec-endpoint "$BEACON_SPLUNK_HEC_ENDPOINT"
 [ -n "$BEACON_SPLUNK_HEC_TOKEN" ] && set -- "$@" --splunk-hec-token "$BEACON_SPLUNK_HEC_TOKEN"

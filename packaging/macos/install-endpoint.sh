@@ -28,6 +28,9 @@ BEACON_FALCON_SOURCE="${BEACON_FALCON_SOURCE:-}"
 BEACON_FALCON_SOURCETYPE="${BEACON_FALCON_SOURCETYPE:-}"
 BEACON_FALCON_INSECURE_SKIP_VERIFY="${BEACON_FALCON_INSECURE_SKIP_VERIFY:-0}"
 BEACON_FALCON_CA_FILE="${BEACON_FALCON_CA_FILE:-}"
+# shared or restricted; empty keeps the mode the endpoint already has, so a package upgrade never
+# changes it.
+BEACON_LOG_ACCESS="${BEACON_LOG_ACCESS:-}"
 
 if [ -z "$BEACON_COLLECTOR" ] && [ -x "/opt/beacon/bin/beacon-otelcol" ]; then
   BEACON_COLLECTOR="/opt/beacon/bin/beacon-otelcol"
@@ -41,6 +44,10 @@ set -- endpoint install \
 
 if [ -n "$BEACON_COLLECTOR" ]; then
   set -- "$@" --collector "$BEACON_COLLECTOR"
+fi
+
+if [ -n "$BEACON_LOG_ACCESS" ]; then
+  set -- "$@" --log-access "$BEACON_LOG_ACCESS"
 fi
 
 if [ -n "$BEACON_SPLUNK_HEC_ENDPOINT" ]; then
