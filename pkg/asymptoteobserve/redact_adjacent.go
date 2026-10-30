@@ -861,7 +861,15 @@ func (e *redactEngine) redactLinesAfterMarkers(t string) string {
 		if p < last || !adj.startsLine(t, p) {
 			continue
 		}
+		// A segment whose last line holds another curl command runs on to that command's value.
 		end := commandLineEnd(t, p)
+		for end < len(t) {
+			ls := strings.LastIndexByte(t[:end], '\n') + 1
+			if ls <= p || !strings.Contains(strings.ToLower(t[ls:end]), "curl") {
+				break
+			}
+			end = commandLineEnd(t, ls)
+		}
 		line := t[p:end]
 		for _, f := range adj.followers {
 			if f.kind != followLine {
@@ -912,7 +920,9 @@ func (c *redactChain) followerCrossing(m []int) (int, int) {
 	if e >= len(t) || e-1 <= start || c.followerStarts(e) {
 		return -1, 0
 	}
-	if isASCIILetter(t[e-1]) && strings.HasPrefix(t[c.schemeEnd(e):], "://") {
+	// The whole scheme: where the match stopped inside it, at `.`, `-` or `+`, the URL rule found a
+	// scheme of its own after that byte.
+	if isASCIILetter(t[e-1]) && strings.HasPrefix(t[e:], "://") {
 		if fm, _ := c.followerAt(e - 1); fm != nil && fm[1] > e {
 			return e - 1, fm[1]
 		}
