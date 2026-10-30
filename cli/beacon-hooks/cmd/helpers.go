@@ -13,18 +13,25 @@ import (
 // declaredPlatform is the --platform value this hook was invoked with, which names the runtime
 // whose configuration holds the hook entry. readStdinJSON may then switch platformFlag to the
 // runtime the payload came from: Cursor runs Claude Code's user-level hooks with Cursor payloads,
-// so a hook installed for Claude Code can be handling a Cursor event. Nothing in this build reads
-// it; it is there for a build that needs to know where the entry it is running from lives.
+// so a hook installed for Claude Code can be handling a Cursor event.
 var declaredPlatform string
+
+// duplicateCursorRun is set when this run is Cursor running Beacon's Claude Code hook for an event
+// Beacon's own Cursor hook records too. Such a run writes no events and consults no policy
+// provider; see cursorRecordsThisHook.
+var duplicateCursorRun bool
 
 // readStdinJSON decodes JSON from stdin into a map.
 func readStdinJSON() (map[string]interface{}, error) {
 	declaredPlatform = platformFlag
+	duplicateCursorRun = false
 	var input map[string]interface{}
 	err := json.NewDecoder(os.Stdin).Decode(&input)
 	if err == nil {
 		applyPayloadPlatformOverride(input)
+		duplicateCursorRun = declaredPlatform == "claude" && platformFlag == "cursor" && cursorRecordsThisHook(hookCommand, input)
 	}
+	logging.SuppressEndpointEvents(duplicateCursorRun)
 	return input, err
 }
 

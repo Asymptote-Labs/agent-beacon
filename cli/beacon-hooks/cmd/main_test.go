@@ -27,6 +27,10 @@ func TestMain(m *testing.M) {
 		Client: localingest.Client{SocketPath: filepath.Join(dir, "no-ingest.sock")},
 		Spool:  localingest.Spool{Dir: filepath.Join(dir, "spool")},
 	}
+	// Beacon's Cursor hooks are not installed unless a test writes a hooks file of its own; the
+	// developer's real ~/.cursor/hooks.json must not decide what a test records.
+	cursorHooksPath := filepath.Join(dir, "cursor-hooks.json")
+	cursorUserHooksPath = func() string { return cursorHooksPath }
 	// A suite run from inside a Claude Code session must not append to that session's env file.
 	os.Unsetenv("CLAUDE_ENV_FILE")
 	code := m.Run()
