@@ -22,6 +22,7 @@ func TestConstantRegexChangesNothing(t *testing.T) {
 	big := strings.Repeat("a", asymptoteobserve.DefaultMaxEventBytes)
 	compared := 0
 	for _, r := range corpusRules(t) {
+		var checks []func(what string, e asymptoteobserve.Event)
 		for _, expr := range ruleExpressions(r) {
 			ast, iss := env.Compile(expr)
 			if iss != nil && iss.Err() != nil {
@@ -35,7 +36,7 @@ func TestConstantRegexChangesNothing(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s: %v", r.ID, err)
 			}
-			check := func(what string, e asymptoteobserve.Event) {
+			checks = append(checks, func(what string, e asymptoteobserve.Event) {
 				in := map[string]any{eventVar: e}
 				wantVal, wantDet, wantErr := plain.Eval(in)
 				gotVal, gotDet, gotErr := optimized.Eval(in)
@@ -49,13 +50,22 @@ func TestConstantRegexChangesNothing(t *testing.T) {
 					t.Fatalf("%s %s: cost %d, default %d", r.ID, what, *gotDet.ActualCost(), *wantDet.ActualCost())
 				}
 				compared++
-			}
+			})
+		}
+		// Every step on the fixtures as written first: fillStrings writes through the pointers
+		// EventList's shallow copies share with r.Tests, so the 64 KiB pass comes after.
+		for _, pessimistic := range []bool{false, true} {
 			for _, f := range r.Tests {
 				for _, ev := range f.EventList() {
 					ev = withDerivedFields(ev)
-					check(f.Name, ev)
-					fillStrings(reflect.ValueOf(&ev).Elem(), big, 0)
-					check(f.Name+" (64 KiB strings)", ev)
+					what := f.Name
+					if pessimistic {
+						fillStrings(reflect.ValueOf(&ev).Elem(), big, 0)
+						what += " (64 KiB strings)"
+					}
+					for _, check := range checks {
+						check(what, ev)
+					}
 				}
 			}
 		}
