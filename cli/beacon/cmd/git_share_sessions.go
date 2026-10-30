@@ -46,9 +46,6 @@ const (
 )
 
 var (
-	// gitShareUploadBudget bounds finding and uploading the sessions to share during a push: the
-	// pre-push budget less what writing their URLs into the notes and pushing the notes ref need.
-	gitShareUploadBudget = gitShareBudget - gitShareNotesReserve - gitShareNoteWriteBudget
 	// gitShareUpload is shareUpload; tests replace it.
 	gitShareUpload = shareUpload
 	// gitShareLogSessions lists the sessions in the runtime log; tests replace it to count reads.
@@ -223,25 +220,25 @@ func (c *gitShareCollector) close() gitShareCollector {
 //
 // The budget is enforced by the clock, not by cooperation: reading the stores and the runtime log,
 // building a payload and recording the share do not all watch a context. The share phase runs in a
-// goroutine that delivers each URL as its upload finishes; the hook waits for it at most
-// gitShareUploadBudget, takes the URLs collected by then and moves on, abandoning the goroutine
-// (the hook process exits soon after). Only this function writes notes, and only from what was
-// collected, so an abandoned upload never touches them; it may still append its session.shared
-// record to the runtime log, which is harmless: that upload did happen. The note writes then get a
-// fresh gitShareNoteWriteBudget, and the caller pushes the notes ref on a fresh
-// gitShareNotesReserve, so neither is starved by the uploads.
+// goroutine that delivers each URL as its upload finishes; the hook waits for it until the hook's
+// own deadline less what the note writes and the notes push need, takes the URLs collected by then
+// and moves on, abandoning the goroutine (the hook process exits soon after). Only this function
+// writes notes, and only from what was collected, so an abandoned upload never touches them; it may
+// still append its session.shared record to the runtime log, which is harmless: that upload did
+// happen. The note writes then get a fresh gitShareNoteWriteBudget, and the caller pushes the notes
+// ref on a fresh gitShareNotesReserve, so neither is starved by the uploads.
 func gitShareSessionsOnPush(parent context.Context, repo gitlink.Repo, remote, stdin, visibility string) (gitPushShareReport, error) {
 	var report gitPushShareReport
 	gitAllowShareHosts()
-	// The uploads end gitShareUploadBudget from now, or earlier when the hook's own deadline leaves
-	// less than the note writes and the notes push need after them.
-	uploadDeadline := time.Now().Add(gitShareUploadBudget)
+	// The uploads end when the hook's deadline leaves only what the note writes and the notes push
+	// need after them; that deadline is the only clock they run on.
+	var ctx context.Context
+	var cancelUploads context.CancelFunc
 	if d, ok := parent.Deadline(); ok {
-		if latest := d.Add(-gitShareNoteWriteBudget - gitShareNotesReserve); latest.Before(uploadDeadline) {
-			uploadDeadline = latest
-		}
+		ctx, cancelUploads = context.WithDeadline(parent, d.Add(-gitShareNoteWriteBudget-gitShareNotesReserve))
+	} else {
+		ctx, cancelUploads = context.WithCancel(parent)
 	}
-	ctx, cancelUploads := context.WithDeadline(parent, uploadDeadline)
 	defer cancelUploads()
 	collector := &gitShareCollector{urls: map[string]string{}}
 	done := make(chan struct{})
