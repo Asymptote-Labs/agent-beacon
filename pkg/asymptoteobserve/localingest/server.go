@@ -144,19 +144,32 @@ func (s *Server) Serve(l net.Listener) error {
 }
 
 // Close stops every Serve call, closes open connections, and waits for their handlers.
+//
+// The listeners and connections are closed after the lock is released. Closing a go-winio pipe
+// listener waits for its accept loop, which may be handing a connection to Serve, and Serve takes
+// the lock to see that the server is closed: holding it here deadlocked the two. A connection
+// accepted after the snapshot is refused by trackConn, which sees closed.
 func (s *Server) Close() error {
 	s.mu.Lock()
 	s.closed = true
-	var err error
+	listeners := make([]net.Listener, 0, len(s.listeners))
 	for l := range s.listeners {
+		listeners = append(listeners, l)
+	}
+	conns := make([]net.Conn, 0, len(s.conns))
+	for c := range s.conns {
+		conns = append(conns, c)
+	}
+	s.mu.Unlock()
+	var err error
+	for _, l := range listeners {
 		if cerr := l.Close(); cerr != nil && err == nil {
 			err = cerr
 		}
 	}
-	for c := range s.conns {
+	for _, c := range conns {
 		_ = c.Close()
 	}
-	s.mu.Unlock()
 	s.wg.Wait()
 	return err
 }
