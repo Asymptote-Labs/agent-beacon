@@ -47,6 +47,32 @@ func SecureRestrictedLogDir(dir, base, readersSID string) error {
 	})
 }
 
+// ResetLogDirToShared gives everything below the log directory what it inherits from the shared
+// LogDirDACL, which SecureLogDir sets on the directory itself. SecureLogDir resets only the log
+// family and leaves other files as it finds them, so after the restricted mode, which reset every
+// entry, this is what puts inventory_state.jsonl, system.jsonl and anything else in the directory
+// back to the shared grants. Run it only on a directory that was restricted: on a shared one it
+// would reset files an operator may have set up on purpose.
+func ResetLogDirToShared(dir string) error {
+	return withPrivileges(func() error { return resetRestricted(dir, LogDirDACL(), "") })
+}
+
+// LooksRestricted reports whether the log directory carries the restricted mode's ACL rather than
+// the shared one: no entry for interactive users, which the shared ACL always has. It reads only
+// the directory, so it answers for a restriction cut short before its marker was written.
+func LooksRestricted(dir string) bool {
+	obj, isLink, err := readObject(dir)
+	if err != nil || isLink {
+		return false
+	}
+	for _, ace := range obj.DACL {
+		if ace.SID == sidInteractive {
+			return false
+		}
+	}
+	return true
+}
+
 // resetRestricted gives everything below dir, which carries dacl, what it would inherit. base names
 // the log family in the top directory and is empty below it.
 func resetRestricted(dir string, dacl []ACE, base string) error {
