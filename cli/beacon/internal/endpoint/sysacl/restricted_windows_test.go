@@ -13,7 +13,7 @@ import (
 const backupOperators = "S-1-5-32-551"
 
 // A shared log directory, restricted, then shared again: each step reads back exactly as that
-// mode sets it, and a file outside the log family is left alone throughout.
+// mode sets it.
 func TestRestrictingAndSharingTheLogDirectory(t *testing.T) {
 	requireElevated(t)
 	dir := filepath.Join(t.TempDir(), "logs")
@@ -25,7 +25,12 @@ func TestRestrictingAndSharingTheLogDirectory(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	notesBefore := mustRead(t, filepath.Join(dir, "operator-notes.txt"))
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", "inside.txt"), []byte("x"), 0o666); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := SecureRestrictedLogDir(dir, "runtime.jsonl", backupOperators); err != nil {
 		t.Fatalf("SecureRestrictedLogDir: %v", err)
@@ -53,8 +58,15 @@ func TestRestrictingAndSharingTheLogDirectory(t *testing.T) {
 	if lock := mustRead(t, filepath.Join(dir, "runtime.jsonl.lock")); !lock.Protected || !reflect.DeepEqual(lock.DACL, RestrictedLockDACL()) {
 		t.Errorf("the lock carries %+v (protected %v), want only SYSTEM and Administrators", lock.DACL, lock.Protected)
 	}
-	if notesAfter := mustRead(t, filepath.Join(dir, "operator-notes.txt")); !reflect.DeepEqual(notesBefore, notesAfter) {
-		t.Errorf("a file outside the log family was changed: %+v -> %+v", notesBefore, notesAfter)
+	// Every other file and directory there is reset too: everyone may bypass traverse checking, so
+	// a file that kept the shared mode's grant could still be opened by its full path.
+	for _, name := range []string{"operator-notes.txt", filepath.Join("sub", "inside.txt")} {
+		if problems := RestrictedProblems(mustRead(t, filepath.Join(dir, name)), backupOperators, false); len(problems) > 0 {
+			t.Errorf("%s kept a grant from the shared mode: %v", name, problems)
+		}
+	}
+	if problems := RestrictedProblems(mustRead(t, filepath.Join(dir, "sub")), backupOperators, false); len(problems) > 0 {
+		t.Errorf("a subdirectory kept a grant from the shared mode: %v", problems)
 	}
 
 	// The collector re-creates the log on rotation: the new file inherits the restricted entries.
