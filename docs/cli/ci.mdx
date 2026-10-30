@@ -86,6 +86,10 @@ See the [Claude Code Security Review session workflow](https://github.com/asympt
   </Card>
 </Columns>
 
+## Collector routing
+
+When Claude telemetry is selected, `ci exec` and `ci start` send every Claude Code signal to the session’s local collector. If the job’s environment sets a per-signal endpoint, protocol, or headers variable (such as `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`), `OTEL_EXPORTER_OTLP_HEADERS`, or `BETA_TRACING_ENDPOINT`, Beacon cancels it for Claude Code and for the steps that follow `ci start`. Variables the job did not set are left unset.
+
 ## Artifact paths
 
 By default, Beacon writes CI artifacts under `$RUNNER_TEMP/beacon` when `RUNNER_TEMP` is set. Otherwise it uses the system temp directory.

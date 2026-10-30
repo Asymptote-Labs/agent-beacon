@@ -70,6 +70,8 @@ Beacon detects Claude Code through the `claude` executable and Claude settings p
 
 `beacon endpoint install` configures Claude telemetry settings so Claude Code sends OTLP data to the local collector. It enables detailed tool logging so tool-result events include inputs such as Bash commands, file paths, URLs, search patterns, and MCP server/tool arguments. Claude bounds or truncates some input values.
 
+If `~/.claude/settings.json` or the environment install runs in sets a per-signal endpoint, protocol, or headers variable (such as `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`), `OTEL_EXPORTER_OTLP_HEADERS`, or `BETA_TRACING_ENDPOINT`, install cancels it in `settings.json`, since Claude Code would otherwise send that signal to another collector. A variable exported only in a shell that install did not run in is not seen. `beacon endpoint status` reports Claude Code as misconfigured while `settings.json` sends a signal away from localhost.
+
 `beacon endpoint hooks install --harness claude` adds Beacon-managed Claude Code hooks while preserving existing Claude settings and non-Beacon hooks. `beacon endpoint hooks uninstall --harness claude` removes only Beacon-managed Claude hook entries. Install, repair, and uninstall write every non-Beacon hook back exactly as they found it, including `http`, `prompt`, and `agent` hooks and any fields Beacon does not use itself, such as an http hook's `url` and `headers`.
 
 ### Model context from API bodies
