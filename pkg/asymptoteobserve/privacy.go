@@ -532,7 +532,7 @@ func (rule redactionRule) applyOnce(text *redactGate, slot *redactSlot) string {
 		last = end
 		// An AWS secret may hold a `/`, where the URL rule, which runs before the shape rules,
 		// stopped a password; once the secret is replaced, the password can run on to its `@`.
-		slashed = slashed || use.rule.expr == redactAWSPair && strings.IndexByte(value[match[5]:match[6]], '/') >= 0
+		slashed = slashed || slashedAWSSecret(use.rule.expr, value, match)
 	}
 	if slashed && strings.Contains(value, "://") {
 		text.hidden = true
@@ -769,27 +769,31 @@ func redactPass(value string, gated bool) (string, bool) {
 	}
 	// Each copy is searched for and removed; none of it survives into the result. A secret right
 	// after a replaced copy, or right after a replaced key, starts a word only now.
-	replaced := replaceAssigned(text.value, assigned)
-	hidden := text.hidden || replaced != text.value && copyHidesMatch(text.value, replaced, assigned)
-	return engine.redactAfterMarkers(replaced), hidden
+	replaced, glued := replaceAssigned(text.value, assigned)
+	hidden := text.hidden || replaced != text.value && copyHidesMatch(assigned, glued)
+	out, slashed := engine.redactAfterMarkers(replaced)
+	return out, hidden || slashed && strings.Contains(out, "://")
 }
 
 // copyHidesMatch reports whether replacing copies of assigned values, which happens after every
 // rule has run, may have made a match where the rules found none: where a copy that starts with a
 // byte no word starts with was, which some rules' values cannot start with and their marker can;
 // where a copy held a byte a rule's value stops at (`/`, `@`, a quote, a comma, a blank), which
-// its marker does not; or where a word byte comes right before one, which ends a word, or a
-// redacted secret, only now. Of `-pAsswd --token -token:"--token ` the flag finds no value in
+// its marker does not; or where a word byte comes right before one (glued), which ends a word, or
+// a redacted secret, only now. Of `-pAsswd --token -token:"--token ` the flag finds no value in
 // `--token`, which starts with a dash, until the copy of the value `--token ` is replaced; of
 // `AKIAIOSFODNN7EXAMPLEAuthorization: Authorization: ` the key id rule finds no end before the
 // copy of `Authorization:` that the label holds. The next pass redacts them.
-func copyHidesMatch(before, replaced string, assigned map[string]struct{}) bool {
+func copyHidesMatch(assigned map[string]struct{}, glued bool) bool {
+	if glued {
+		return true
+	}
 	for s := range assigned {
 		if !isWordByte(s[0]) || strings.IndexFunc(s, stopsAValue) >= 0 {
 			return true
 		}
 	}
-	return markersAfterWords(replaced) > markersAfterWords(before)
+	return false
 }
 
 // stopsAValue reports whether some rule's value may stop at r: any byte but a word byte, `.` and
@@ -854,9 +858,13 @@ func captureAssigned(text *redactGate, engine *redactEngine, assigned map[string
 // grow with the text, so the cost was quadratic: Beacon Cloud redacts uploaded shared traces with
 // this function, where that let a small gzip body hold a core for minutes. The values are a set,
 // longest first, so where two start at the same byte the longer is removed whole.
-func replaceAssigned(value string, assigned map[string]struct{}) string {
+//
+// It also reports whether a word byte comes right before a copy it replaced (copyHidesMatch). The
+// copies are first replaced with a NUL, where the text holds none, so their places can be read;
+// where it holds one, the markers that follow a word byte are counted before and after instead.
+func replaceAssigned(value string, assigned map[string]struct{}) (string, bool) {
 	if len(assigned) == 0 {
-		return value
+		return value, false
 	}
 	values := slices.SortedFunc(maps.Keys(assigned), func(a, b string) int {
 		if len(a) != len(b) {
@@ -864,27 +872,49 @@ func replaceAssigned(value string, assigned map[string]struct{}) string {
 		}
 		return strings.Compare(a, b)
 	})
+	place := "\x00"
+	if strings.IndexByte(value, 0) >= 0 {
+		place = redactedValue
+	}
 	pairs := make([]string, 0, 2*len(values))
 	for _, copied := range values {
-		pairs = append(pairs, copied, redactedValue)
+		pairs = append(pairs, copied, place)
 	}
-	return strings.NewReplacer(pairs...).Replace(value)
+	replaced := strings.NewReplacer(pairs...).Replace(value)
+	if place == redactedValue {
+		return replaced, markersAfterWords(replaced) > markersAfterWords(value)
+	}
+	glued := false
+	for i := strings.IndexByte(replaced, 0); i >= 0 && !glued; {
+		glued = i > 0 && isWordByte(replaced[i-1])
+		j := strings.IndexByte(replaced[i+1:], 0)
+		if j < 0 {
+			break
+		}
+		i += 1 + j
+	}
+	return strings.ReplaceAll(replaced, place, redactedValue), glued
 }
 
 // redactCopyMin is the least length of an assigned value whose copies are removed.
 const redactCopyMin = 8
 
 // redactCopies are the assigned values by their first redactCopyMin bytes, so a place in the text
-// is looked up once to tell whether a copy may start there (redactChain.overCopy).
-type redactCopies map[string][]string
+// is looked up once to tell whether a copy may start there, and the length of the longest
+// (redactChain.overCopy).
+type redactCopies struct {
+	byFirst map[string][]string
+	longest int
+}
 
-func byFirstBytes(assigned map[string]struct{}) redactCopies {
+func byFirstBytes(assigned map[string]struct{}) *redactCopies {
 	if len(assigned) == 0 {
 		return nil
 	}
-	copies := redactCopies{}
+	copies := &redactCopies{byFirst: map[string][]string{}}
 	for s := range assigned {
-		copies[s[:redactCopyMin]] = append(copies[s[:redactCopyMin]], s)
+		copies.byFirst[s[:redactCopyMin]] = append(copies.byFirst[s[:redactCopyMin]], s)
+		copies.longest = max(copies.longest, len(s))
 	}
 	return copies
 }

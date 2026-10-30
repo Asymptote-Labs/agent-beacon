@@ -48,6 +48,10 @@ var adjacentCases = []struct{ name, input, want string }{
 	// When the key id rule asks whether a curl command follows the key id, the rule for a key id
 	// and its secret has already asked about the line from its later `curl`, which has none.
 	{"a curl password after a Google key and an AWS key id", adjacentGoogle + "AKIAIOSFODNN7EXAMPLEcurl -u a:curl -u a:", "AIza[REDACTED]AKIA[REDACTED]curl -u a:[REDACTED] -u a:"},
+	// A `curl` a word byte follows (`curl_x`) is no command, and says nothing of a later one.
+	{"a curl password after a token, past a glued curl_", adjacentGitHub + "curl_x " + adjacentGitHub + "curl -u admin:hunter2", "ghp_[REDACTED]_x ghp_[REDACTED]curl -u admin:[REDACTED]"},
+	// The flag starts the line after the command, and its value is on the line after that.
+	{"a curl flag alone on the line after a key", adjacentNPM + "curl x\n-u\na:hunter2", "npm_[REDACTED]curl x\n-u\na:[REDACTED]"},
 	{"a Google key, then a GitHub token", adjacentGoogle + adjacentGitHub, "AIza[REDACTED]ghp_[REDACTED]"},
 	{"npm tokens and Google keys in turn", adjacentNPM + adjacentGoogle + adjacentNPM + adjacentGoogle, "npm_[REDACTED]AIza[REDACTED]npm_[REDACTED]AIza[REDACTED]"},
 	// The key id's pattern ends in \b, which a token right after it takes away.

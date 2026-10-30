@@ -87,6 +87,10 @@ type redactFollower struct {
 	kind    redactFollowerKind
 	// charset is every byte the pattern can match, for followRun.
 	charset [256]bool
+	// lead, for followLine, is the pattern anchored at its needle with the lazy run after the
+	// command word captured as `lead`: from any later place on the line up to that run's end, the
+	// pattern ends where it ended from this one (lineFollowerAt).
+	lead *regexp.Regexp
 }
 
 type redactFollowerKind uint8
@@ -136,14 +140,16 @@ func (e *redactEngine) adjacency() *redactAdjacency {
 				f.kind = followScheme
 			case rule.repeat:
 				f.kind = followLine
+				f.lead = leadPattern(rule)
 			default:
 				f.kind = followRun
 				addCharset(&f.charset, parsed)
 				for c := utf8.RuneSelf; c < 256; c++ {
 					f.charset[c] = true
 				}
-				if f.charset['['] || f.charset['\n'] || len(rule.needles.needles) != 1 {
-					panic("asymptoteobserve: a run follower has one needle and cannot match '[' or a newline: " + rule.expr)
+				if f.charset['['] || f.charset['\n'] || len(rule.needles.needles) != 1 ||
+					!strings.Contains(rule.expr, `\b`+rule.needles.needles[0]+`[ \t]+`) {
+					panic("asymptoteobserve: a run follower has one needle, a blank after it, and cannot match '[' or a newline: " + rule.expr)
 				}
 			}
 			a.followers = append(a.followers, f)
@@ -156,6 +162,16 @@ func (e *redactEngine) adjacency() *redactAdjacency {
 // opensWithBoundary reports whether a pattern opens with \b, as redactSlot.prepare reads it.
 func opensWithBoundary(expr string) bool {
 	return slices.ContainsFunc(boundaryPrefixes, func(prefix string) bool { return strings.HasPrefix(expr, prefix) })
+}
+
+// leadPattern is a followLine rule's pattern anchored at its one needle, without the \b it opens
+// with, and with the lazy run after the needle captured as `lead`.
+func leadPattern(rule redactionRule) *regexp.Regexp {
+	const run = `\bcurl\b[^\n]*?`
+	if len(rule.needles.needles) != 1 || !strings.Contains(rule.expr, "("+run) {
+		panic("asymptoteobserve: a line follower opens with `curl` and the lazy run of its line: " + rule.expr)
+	}
+	return regexp.MustCompile("^" + strings.Replace(rule.expr, "("+run, `(curl\b(?P<lead>[^\n]*?)`, 1))
 }
 
 // shapeOf reads a shape rule's pattern: a concatenation that ends, before any trailing assertion,
@@ -315,24 +331,51 @@ type redactChain struct {
 	restAt, restEnd int
 	// What secretAt found where it was asked.
 	secrets map[int]redactSecret
-	// The end of the run of URL scheme bytes from schemeFrom; the end of the line holding
-	// lineFrom; and, per follower, the places on a line where a followLine rule finds nothing: from
-	// the earliest place where it found nothing to the end of that place's line.
+	// The end of the run of URL scheme bytes from schemeFrom, and the URL follower's match from
+	// the run's first place asked (schemeAt; nil: none), which any letter of the run shares.
 	schemeFrom, schemeTo int
-	lineFrom, lineTo     int
-	lineFirst            int // the end of lineFrom's own line, at or before lineTo
-	lineFailed           [][2]int
-	// The assigned values whose copies are removed after every rule has run (overCopy), and
-	// whether running on over one may hide a match from this pass, as replacing it may
-	// (copyHidesMatch); matches reports it to the gate.
-	copies redactCopies
-	hid    bool
+	schemeAt             int
+	schemeMatch          []int
+	// The end of the line holding lineFrom; and, per followLine follower, the places on a line
+	// where it finds nothing (from the earliest place where it found nothing to the end of that
+	// place's line) and where it finds the match it found from an earlier place (from that place
+	// to the end of its lead, and where the match ends).
+	lineFrom, lineTo int
+	lineFirst        int // the end of lineFrom's own line, at or before lineTo
+	lineFailed       [][2]int
+	lineFound        [][3]int
+	// The end of the run of a followRun follower's charset from runFrom, and per follower the
+	// last place followerAt was asked about and its answer.
+	runFrom, runTo int
+	asked          []redactAsked
+	// The assigned values whose copies are removed after every rule has run (overCopy), what
+	// running on over them may still read (copyBudget), and whether running on over one, or
+	// over an AWS secret that holds a `/`, may hide a match from this pass, as replacing a copy
+	// may (copyHidesMatch); matches reports it to the gate.
+	copies     *redactCopies
+	copyBudget int
+	hid        bool
+	slashed    bool
+}
+
+// redactAsked is followerAt's answer for one follower at a place.
+type redactAsked struct {
+	at int
+	m  []int
 }
 
 func newRedactChain(engine *redactEngine, t string, hits []redactHit) *redactChain {
 	return &redactChain{engine: engine, adj: engine.adjacency(), t: t, hits: hits, segFrom: -1, restAt: -1,
-		schemeFrom: -1, schemeTo: -1, lineFrom: -1, lineTo: -1, lineFirst: -1}
+		schemeFrom: -1, schemeTo: -1, schemeAt: -1, lineFrom: -1, lineTo: -1, lineFirst: -1, runFrom: -1, runTo: -1,
+		copyBudget: redactCopyWorkPerByte*len(t) + redactCopyWorkBase}
 }
+
+// overCopy may read redactCopyWorkPerByte bytes and copies per byte of the text, and
+// redactCopyWorkBase more; past that it leaves items as they are, as main does.
+const (
+	redactCopyWorkPerByte = 8
+	redactCopyWorkBase    = 1 << 16
+)
 
 func redactWorked(n int) {
 	if redactWork != nil {
@@ -577,6 +620,9 @@ func (c *redactChain) run(si int, m []int, use redactUse, yield func([]int, reda
 			if g := c.adj.shapes[sj].trailing; g > 0 && sm[2*g] >= 0 {
 				item[1] = sm[2*g]
 			}
+			// The item is yielded with the first secret's rule: an AWS secret it takes is not seen
+			// as one where the replacements are made (redactionRule.applyOnce).
+			c.slashed = c.slashed || slashedAWSSecret(redactionRules[c.adj.shapes[sj].rule].expr, c.t, sm)
 			si, m = sj, sm
 			continue
 		}
@@ -624,23 +670,40 @@ func (c *redactChain) run(si int, m []int, use redactUse, yield func([]int, reda
 // overCopy returns item run on to the end of a copy of an assigned value that starts inside it and
 // ends past it, the item having taken the copy's first bytes; or item. The copy is removed after
 // every rule has run, which finds it only whole: of `hf_…opaque-flag-value` with `opaque-flag-value`
-// assigned, the token's pattern takes `opaque`, and `-flag-value` was left.
+// assigned, the token's pattern takes `opaque`, and `-flag-value` was left. Such a copy starts
+// less than the longest copy's length before the item's end. What it reads, places, copies looked
+// at and bytes compared, comes out of the chain's copyBudget, linear in the text; once that is
+// spent, items are left as they are.
 func (c *redactChain) overCopy(item []int) []int {
-	if c.copies == nil {
+	if c.copies == nil || c.copyBudget <= 0 {
 		return item
 	}
-	t := c.t
-	for x := item[0] + 1; x < item[1] && x+redactCopyMin <= len(t); x++ {
-		for _, v := range c.copies[t[x:x+redactCopyMin]] {
-			if x+len(v) > item[1] && strings.HasPrefix(t[x:], v) {
+	t, work := c.t, 0
+	for x := max(item[0]+1, item[1]-c.copies.longest+1); x < item[1] && x+redactCopyMin <= len(t) && work < c.copyBudget; x++ {
+		work++
+		for _, v := range c.copies.byFirst[t[x:x+redactCopyMin]] {
+			work++
+			if x+len(v) <= item[1] {
+				continue
+			}
+			work += len(v)
+			if strings.HasPrefix(t[x:], v) {
 				item = slices.Clone(item)
 				item[1] = x + len(v)
 				c.hid = true
 			}
 		}
 	}
-	redactWorked(item[1] - item[0])
+	c.copyBudget -= work
+	redactWorked(work)
 	return item
+}
+
+// slashedAWSSecret reports whether m, a match of the pattern expr, is one of the rule for an AWS
+// key id and its secret whose secret holds a `/`, where the URL rule, which runs before the shape
+// rules, stopped a password: once the secret is replaced, the password can run on to its `@`.
+func slashedAWSSecret(expr, t string, m []int) bool {
+	return expr == redactAWSPair && strings.IndexByte(t[m[5]:m[6]], '/') >= 0
 }
 
 // least returns the first place m, a match of shape si, can be cut and still be a whole match: as
@@ -803,10 +866,12 @@ func markerBeforeWord(t string, from int) int {
 // to right, so a chain that alternates between them is redacted in one pass. The curl rules,
 // which read a whole command line and are applied to it until it stops changing, are then
 // applied to the line from the first such place where a curl command starts.
-func (e *redactEngine) redactAfterMarkers(t string) string {
+//
+// It also reports whether it replaced an AWS secret that holds a `/` (slashedAWSSecret).
+func (e *redactEngine) redactAfterMarkers(t string) (string, bool) {
 	p := markerBeforeWord(t, 0)
 	if p < 0 {
-		return t
+		return t, false
 	}
 	hits, _ := e.scanner.scan(t, nil)
 	c := newRedactChain(e, t, hits)
@@ -816,6 +881,7 @@ func (e *redactEngine) redactAfterMarkers(t string) string {
 		out = append(out, t[last:m[0]]...)
 		out = use.pattern.ExpandString(out, use.rule.replacement, t, m)
 		last = m[1]
+		c.slashed = c.slashed || slashedAWSSecret(use.rule.expr, t, m)
 		return true
 	}
 	for ; p >= 0; p = markerBeforeWord(t, max(p, last)) {
@@ -862,22 +928,28 @@ func (e *redactEngine) redactAfterMarkers(t string) string {
 	if out != nil {
 		t = string(append(out, t[last:]...))
 	}
-	return e.redactLinesAfterMarkers(t)
+	return e.redactLinesAfterMarkers(t), c.slashed
 }
 
-// commandLineEnd returns the end of what a curl rule can match from p: its line, and, since the
-// blanks after a flag (`\s*`) can run over newlines, the next line that is not blank.
+// commandLineEnd returns the end of what a curl rule can match from p: its line; the next one,
+// since the blank before a flag (`\s`) can be the newline, so the flag can start that line; and,
+// since the blanks after a flag (`\s*`) can run over newlines, the next line that is not blank.
 func commandLineEnd(t string, p int) int {
 	i := strings.IndexByte(t[p:], '\n')
 	if i < 0 {
 		return len(t)
 	}
-	next := p + i
+	next := p + i + 1
+	j := strings.IndexByte(t[next:], '\n')
+	if j < 0 {
+		return len(t)
+	}
+	next += j
 	for next < len(t) && isRegexpSpace(t[next]) {
 		next++
 	}
-	if j := strings.IndexByte(t[next:], '\n'); j >= 0 {
-		return next + j
+	if k := strings.IndexByte(t[next:], '\n'); k >= 0 {
+		return next + k
 	}
 	return len(t)
 }
@@ -993,35 +1065,58 @@ func (c *redactChain) schemeEnd(p int) int {
 	return end
 }
 
-// lineFollowerAt returns the match of the first followLine rule that matches at q, or nil. It
-// hands the pattern slices that double until the match ends inside one or one reaches the line's
-// end; a place on a line that finds nothing means no later place on the line does (from the
-// earlier `curl`, the pattern's lazy run takes the bytes up to the later one).
+// lineFollowerAt returns the match of the first followLine rule that matches at q, or nil (only
+// its start and end: the callers read no group). It hands the pattern slices that double until
+// the match ends inside one or one reaches the line's end. A place on a line where the needle
+// ends a word and the rule finds nothing means no later place on the line finds anything (from
+// the earlier `curl`, the pattern's lazy run takes the bytes up to the later one); and where it
+// finds a match, a later place up to the end of that lazy run finds one that ends at the same
+// byte, the flags between having failed from the earlier place too. So each line is read a
+// bounded number of times however many places on it are asked about.
 func (c *redactChain) lineFollowerAt(q int) []int {
+	t := c.t
 	if c.lineFailed == nil {
 		c.lineFailed = make([][2]int, len(c.adj.followers))
+		c.lineFound = make([][3]int, len(c.adj.followers))
 		for k := range c.lineFailed {
 			c.lineFailed[k] = [2]int{-1, -1}
+			c.lineFound[k] = [3]int{-1, -1, -1}
 		}
 	}
 	for k, f := range c.adj.followers {
-		failed := &c.lineFailed[k]
-		if f.kind != followLine || failed[0] <= q && q <= failed[1] || !c.hasNeedleAt(f.needles, q) {
+		if f.kind != followLine || !c.hasNeedleAt(f.needles, q) {
 			continue
 		}
+		// The pattern opens with the needle and \b: where a word byte follows the needle it finds
+		// nothing, which says nothing of later places.
+		word := len(redactionRules[f.rule].needles.needles[0])
+		if q+word < len(t) && isWordByte(t[q+word]) {
+			continue
+		}
+		failed, found := &c.lineFailed[k], &c.lineFound[k]
+		if failed[0] <= q && q <= failed[1] {
+			continue
+		}
+		if found[0] <= q && q <= found[1] {
+			return []int{q, found[2]}
+		}
 		if q < c.lineFrom || q > c.lineFirst {
-			c.lineFrom, c.lineTo = q, commandLineEnd(c.t, q)
+			c.lineFrom, c.lineTo = q, commandLineEnd(t, q)
 			c.lineFirst = c.lineTo
-			if i := strings.IndexByte(c.t[q:c.lineTo], '\n'); i >= 0 {
+			if i := strings.IndexByte(t[q:c.lineTo], '\n'); i >= 0 {
 				c.lineFirst = q + i
 			}
 			redactWorked(c.lineTo - q)
 		}
 		for n := 256; ; n *= 2 {
 			end := min(c.lineTo, q+n)
-			if m := c.find(f.rule, q, end); m != nil && m[1] < end || end == c.lineTo {
+			redactWorked(end - q)
+			m := f.lead.FindStringSubmatchIndex(t[q:end])
+			if m != nil && q+m[1] < end || end == c.lineTo {
 				if m != nil {
-					return m
+					lead := q + m[2*f.lead.SubexpIndex("lead")+1]
+					*found = [3]int{q, lead - word, q + m[1]}
+					return []int{q, q + m[1]}
 				}
 				break
 			}
@@ -1037,41 +1132,46 @@ func (c *redactChain) lineFollowerAt(q int) []int {
 }
 
 // followerAt returns the match of the first followRun or followScheme rule, in rule order, that
-// matches at p and keeps no value of it, and how to expand it.
+// matches at p and keeps no value of it, and how to expand it. Each answer is kept for the place
+// asked last, and a URL's for every letter of its scheme's run: the places of a run share it.
 func (c *redactChain) followerAt(p int) ([]int, redactUse) {
 	t := c.t
+	if c.asked == nil {
+		c.asked = make([]redactAsked, len(c.adj.followers))
+		for k := range c.asked {
+			c.asked[k].at = -1
+		}
+	}
 	for k := range c.adj.followers {
 		f := &c.adj.followers[k]
 		var m []int
-		switch f.kind {
-		case followLine:
+		switch {
+		case f.kind == followLine:
 			continue
-		case followScheme:
+		case c.asked[k].at == p:
+			m = c.asked[k].m
+		case f.kind == followScheme:
 			if p >= len(t) || !isASCIILetter(t[p]) {
 				continue
 			}
-			r := c.schemeEnd(p)
-			if !strings.HasPrefix(t[r:], "://") {
-				continue
-			}
-			end := r + 3
-			for end < len(t) && t[end] != '/' && !isRegexpSpace(t[end]) {
-				end++
-			}
-			m = c.find(f.rule, p, end)
+			m = c.schemeFollowerAt(f, p)
+			c.asked[k] = redactAsked{p, m}
 		default:
 			if !c.hasNeedleAt(f.needles, p) {
 				continue
 			}
-			// The word, the blanks after it, and a run of the charset without blanks.
+			// The word, the blanks after it, and a run of the charset without blanks. A run
+			// follower's pattern needs a blank after its word (adjacency checks it).
 			end := p + len(redactionRules[f.rule].needles.needles[0])
+			if end >= len(t) || t[end] != ' ' && t[end] != '\t' {
+				c.asked[k] = redactAsked{p, nil}
+				continue
+			}
 			for end < len(t) && (t[end] == ' ' || t[end] == '\t') {
 				end++
 			}
-			for end < len(t) && f.charset[t[end]] && t[end] != ' ' && t[end] != '\t' {
-				end++
-			}
-			m = c.find(f.rule, p, min(len(t), end+1))
+			m = c.find(f.rule, p, min(len(t), c.runEnd(f, end)+1))
+			c.asked[k] = redactAsked{p, m}
 		}
 		if m == nil {
 			continue
@@ -1089,4 +1189,44 @@ func (c *redactChain) followerAt(p int) ([]int, redactUse) {
 		return m, redactUse{re, rule}
 	}
 	return nil, redactUse{}
+}
+
+// schemeFollowerAt returns the URL follower's match at p, a letter, or nil. From any letter of a
+// run of scheme bytes the pattern reads the run to its `://` and the same text after it, so the
+// match from the first letter asked serves every other: only its start moves.
+func (c *redactChain) schemeFollowerAt(f *redactFollower, p int) []int {
+	t := c.t
+	r := c.schemeEnd(p)
+	if !strings.HasPrefix(t[r:], "://") {
+		return nil
+	}
+	if c.schemeFrom <= c.schemeAt && c.schemeAt <= r {
+		if c.schemeMatch == nil {
+			return nil
+		}
+		m := slices.Clone(c.schemeMatch)
+		m[0], m[2] = p, p
+		return m
+	}
+	end := r + 3
+	for end < len(t) && t[end] != '/' && !isRegexpSpace(t[end]) {
+		end++
+	}
+	redactWorked(end - r)
+	c.schemeAt, c.schemeMatch = p, c.find(f.rule, p, end)
+	return c.schemeMatch
+}
+
+// runEnd returns the end of the run of follower f's charset, without blanks, from s.
+func (c *redactChain) runEnd(f *redactFollower, s int) int {
+	if c.runFrom <= s && s <= c.runTo {
+		return c.runTo
+	}
+	end := s
+	for end < len(c.t) && f.charset[c.t[end]] && c.t[end] != ' ' && c.t[end] != '\t' {
+		end++
+	}
+	redactWorked(end - s)
+	c.runFrom, c.runTo = s, end
+	return end
 }

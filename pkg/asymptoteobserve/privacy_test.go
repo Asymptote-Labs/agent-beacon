@@ -304,6 +304,13 @@ var redactIdempotenceInputs = []string{
 	"A://token:https://,ghp_0000000000000000000000000https://@",
 	// A URL's password stops at the `/` of an AWS secret until the secret is replaced.
 	"https://u:a,AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY@host",
+	// The same where a token's item takes the key id and secret, and where they come after a
+	// replaced copy (redactAfterMarkers).
+	"https://u:pw,sk-abcAKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY@ host",
+	"token=abcdefgh12345678 https://u:pw,abcdefgh12345678AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY@ host",
+	// The copy the key id ends before is followed by a marker already: what follows a word byte
+	// is told by place, not by count.
+	"token=abcdefgh12345678 AKIAIOSFODNN7EXAMPLEabcdefgh12345678[REDACTED]",
 	"https://x-access-token:a@b,AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY@host",
 }
 

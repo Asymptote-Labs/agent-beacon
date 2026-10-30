@@ -1,6 +1,7 @@
 package asymptoteobserve
 
 import (
+	"fmt"
 	mrand "math/rand"
 	"math/rand/v2"
 	"slices"
@@ -221,17 +222,48 @@ func TestRedactionWorkIsLinear(t *testing.T) {
 		// A URL password's run on (urlRunsOn) over AWS key ids and their secrets.
 		"URL runs over AWS keys":      "A://token:,@AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY@",
 		"URL passwords over AWS keys": "A://token:,@0,AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY ",
+		// Tokens glued to `Bearer` with no blank after it, which run on to the end of the text.
+		"tokens glued to Bearer": "hf_abcdefghijklmnopqrstuvwxyz01234567Bearer.",
+		// Every other scan the chains make: open tails run on to the end, curl lines over blank
+		// lines, curl lines chained after keys, and URL schemes after tokens.
+		"API keys back to back":               "sk-abcdefghijklmnopqrstuvwxyz0123",
+		"keys glued to curl over blank lines": "sk-abcdefghijklmnopqrstuvwxyz0123curl x\n   \n\n",
+		"curl lines chained after keys":       "npm_abcdefghijklmnopqrstuvwxyz0123456789curl x\n",
+		"tokens glued to URL scheme runs":     "ghp_0123456789abcdefghijklmnopqrstuvwxyza.b",
 	}
+	texts := map[string]func(n int) string{}
 	for name, unit := range families {
+		texts[name] = func(n int) string { return repeatTo(unit, n) }
+	}
+	texts["one long flag"] = func(n int) string { return "-" + repeatTo("token", n) + " x" }
+	// Texts that are not one unit repeated: many places on one long line or run that all reach the
+	// same far end (a curl flag, a URL's `://`), and copies of assigned values that a token runs
+	// into.
+	texts["key ids glued to curl, one flag at the end"] = func(n int) string {
+		return repeatTo("AKIAIOSFODNN7EXAMPLEcurl ", n) + " -u a:b"
+	}
+	texts["keys glued to curl, one flag at the end"] = func(n int) string {
+		return repeatTo("sk-abcdefghijklmnopqrstuvwxyz0123curl ", n) + " -u a:b"
+	}
+	texts["key ids in a URL scheme run"] = func(n int) string { return repeatTo("AKIA.", n) + "b://" }
+	texts["key ids glued into a URL scheme"] = func(n int) string { return repeatTo("AKIAIOSFODNN7EXAMPLE", n) + "b://x:y@h" }
+	texts["a long value repeating a token's tail"] = func(n int) string {
+		a := strings.Repeat("a", n/3)
+		return "token=" + a + " hf_" + a + " " + strings.Repeat("x ", n/6)
+	}
+	texts["many values sharing their first bytes"] = func(n int) string {
+		var b strings.Builder
+		for i := 0; b.Len() < n/2; i++ {
+			fmt.Fprintf(&b, "token=aaaaaaaa%06d\n", i)
+		}
+		return b.String() + repeatTo("ghp_"+strings.Repeat("a", 40)+" ", n/2)
+	}
+	for name, text := range texts {
 		work := func(n int) int {
-			text := strings.Repeat(unit, n/len(unit)+1)[:n]
-			if name == "one long flag" {
-				text = "-" + text + " x"
-			}
 			total := 0
 			redactWork = func(bytes int) { total += bytes }
 			defer func() { redactWork = nil }()
-			redactString(text, true)
+			redactString(text(n), true)
 			return total
 		}
 		previous := work(16 << 10)
@@ -244,4 +276,9 @@ func TestRedactionWorkIsLinear(t *testing.T) {
 			previous = w
 		}
 	}
+}
+
+// repeatTo is unit repeated to n bytes.
+func repeatTo(unit string, n int) string {
+	return strings.Repeat(unit, n/len(unit)+1)[:n]
 }

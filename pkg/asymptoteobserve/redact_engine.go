@@ -240,7 +240,7 @@ type redactGate struct {
 	// replaced AWS secret's `/`, where a URL's password stopped.
 	hidden bool
 	// copies are the assigned values whose copies are removed after every rule has run.
-	copies redactCopies
+	copies *redactCopies
 }
 
 func (g *redactGate) set(value string) {
@@ -360,7 +360,9 @@ func (rule redactionRule) matches(text *redactGate, slot *redactSlot) iter.Seq2[
 			slot.prepare(rule)
 			chain = newRedactChain(text.e(), t, text.hits)
 			chain.copies = text.copies
-			defer func() { text.hidden = text.hidden || chain.hid }()
+			defer func() {
+				text.hidden = text.hidden || chain.hid || chain.slashed && strings.Contains(t, "://")
+			}()
 		}
 		whole := func(from int) {
 			re := rule.pattern()
