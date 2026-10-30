@@ -134,9 +134,11 @@ try {
     }
     Write-Output "ok: the hook's event reached the log through the pipe as $($events[0].user.name)"
 
-    if ((Invoke-AsAccount 'read' @("type `"$log`" > nul 2>&1")) -eq 0) { throw "an ordinary account can read the restricted log" }
+    # `|| exit /b 1` rather than the exit code alone: cmd leaves ERRORLEVEL at 0 when a redirection
+    # (the append's `>>`) cannot open its file, and only `||` sees that failure.
+    if ((Invoke-AsAccount 'read' @("type `"$log`" > nul 2>&1 || exit /b 1", 'exit /b 0')) -eq 0) { throw "an ordinary account can read the restricted log" }
     $forged = 'forged-' + [Guid]::NewGuid().ToString('N')
-    if ((Invoke-AsAccount 'append' @("echo $forged>> `"$log`" 2>nul")) -eq 0 -or (Get-LogEvents $forged).Count -gt 0) {
+    if ((Invoke-AsAccount 'append' @("(echo $forged>> `"$log`") 2>nul || exit /b 1", 'exit /b 0')) -eq 0 -or (Get-LogEvents $forged).Count -gt 0) {
         throw "an ordinary account can append to the restricted log"
     }
     Write-Output "ok: the ordinary account can neither read nor append to the log"
