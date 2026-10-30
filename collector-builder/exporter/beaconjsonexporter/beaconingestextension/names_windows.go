@@ -3,12 +3,13 @@
 package beaconingestextension
 
 import (
-	"os/user"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
 
-// resolveName names a SID: DOMAIN\user, the form Windows hooks write to user.name. os/user asks
+// resolveName names a SID: DOMAIN\user, the form Windows hooks write to user.name. It asks
 // LookupAccountSid, which consults a domain controller on a domain-joined machine and can wait on
 // one that does not answer, so the lookup is bounded by nameLookupTimeout like id(1) on Unix: past
 // it the event is named by SID only, and the cache retries later. Windows has no id(1) to fall
@@ -16,12 +17,12 @@ import (
 func resolveName(sid string) string {
 	done := make(chan string, 1)
 	go func() {
-		u, err := lookupAccount(sid)
-		if err != nil || !validWindowsName(u.Username) {
+		name, err := lookupAccount(sid)
+		if err != nil || !validWindowsName(name) {
 			done <- ""
 			return
 		}
-		done <- u.Username
+		done <- name
 	}()
 	select {
 	case name := <-done:
@@ -31,8 +32,24 @@ func resolveName(sid string) string {
 	}
 }
 
-// lookupAccount is os/user.LookupId; tests replace it.
-var lookupAccount = user.LookupId
+// lookupAccount names a SID with LookupAccountSid alone; tests replace it. Not os/user.LookupId:
+// that also reads the account's full name (NetUserGetInfo) and profile directory and refuses
+// anything that is not SidTypeUser, so a Microsoft Entra ID account, a virtual service account
+// or SYSTEM, which LookupAccountSid names perfectly well, would come out unnamed.
+var lookupAccount = func(sid string) (string, error) {
+	s, err := windows.StringToSid(sid)
+	if err != nil {
+		return "", err
+	}
+	account, domain, _, err := s.LookupAccount("")
+	if err != nil {
+		return "", err
+	}
+	if domain == "" {
+		return account, nil
+	}
+	return domain + `\` + account, nil
+}
 
 // validWindowsName is validName with spaces allowed inside the name, as Windows account names
 // allow them ("CONTOSO\Jane Doe"); still no control characters, nothing at either end, bounded.
