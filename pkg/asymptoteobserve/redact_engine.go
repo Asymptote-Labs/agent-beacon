@@ -236,7 +236,8 @@ type redactGate struct {
 	known, present uint64
 	// hidden is set when a match may hide another from this pass: a value a rule keeps, or the
 	// capture takes, that is itself a label and its separator (keptLabel), inside a match that
-	// neither looks into; or a replaced AWS secret's `/`, where a URL's password stopped.
+	// neither looks into; a copy a token ran on over, as replacing a copy may (copyHidesMatch); or a
+	// replaced AWS secret's `/`, where a URL's password stopped.
 	hidden bool
 	// copies are the assigned values whose copies are removed after every rule has run.
 	copies redactCopies
@@ -358,7 +359,7 @@ func (rule redactionRule) matches(text *redactGate, slot *redactSlot) iter.Seq2[
 			text.scan()
 			slot.prepare(rule)
 			chain = newRedactChain(text.e(), t, text.hits)
-			chain.copies = text.copies
+			chain.copies, chain.hidden = text.copies, &text.hidden
 		}
 		whole := func(from int) {
 			re := rule.pattern()

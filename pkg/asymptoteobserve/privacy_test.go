@@ -300,6 +300,8 @@ var redactIdempotenceInputs = []string{
 	"ABIA0000000000000000ABIAAuthorizAtion:Authoriz",
 	// The copy of `https://` holds the slash a URL's password stops at, and its marker does not.
 	"A://token:https://,ghp_0123456789abcdefghijklmnopqrst==https://@h\n=",
+	// A token runs on over that copy (overCopy), which takes its slash as replacing it would.
+	"A://token:https://,ghp_0000000000000000000000000https://@",
 	// A URL's password stops at the `/` of an AWS secret until the secret is replaced.
 	"https://u:a,AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY@host",
 	"https://x-access-token:a@b,AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY@host",
