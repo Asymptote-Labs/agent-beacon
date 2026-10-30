@@ -32,12 +32,15 @@ type Listener = net.Listener
 //     clients (go-winio creates it with FILE_PIPE_REJECT_REMOTE_CLIENTS), so the deny is a second
 //     lock on the same door: a pipe is otherwise reachable over SMB, and this channel must never be
 //     a network one.
-//   - SYSTEM and Administrators have full control.
+//   - SYSTEM and Administrators have full control, and so does the pipe's owner (OW). For the
+//     collector that is SYSTEM again; it matters only to a process that is neither, such as a test
+//     run from a shell that is not elevated, which needs FILE_CREATE_PIPE_INSTANCE on its own pipe
+//     to keep serving it. Clients accept only a pipe owned by SYSTEM or Administrators regardless.
 //   - Authenticated users may connect, read and write: 0x12019b is FILE_GENERIC_READ and
 //     FILE_GENERIC_WRITE without FILE_APPEND_DATA, which on a pipe is FILE_CREATE_PIPE_INSTANCE.
 //     Without it no other account can add an instance of its own to this pipe and answer the
 //     clients that connect to it.
-const pipeSecurity = "D:P(D;;GA;;;NU)(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x12019b;;;AU)"
+const pipeSecurity = "D:P(D;;GA;;;NU)(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;OW)(A;;0x12019b;;;AU)"
 
 // clientPipeAccess is what a client asks for: read and write data, read attributes (go-winio reads
 // the pipe's mode), READ_CONTROL to read the pipe's owner, and SYNCHRONIZE. GENERIC_WRITE would
