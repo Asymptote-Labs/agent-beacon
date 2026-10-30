@@ -371,7 +371,7 @@ func rotateIfNeeded(path string, maxSize int64, archives int, nextWriteBytes int
 	if err := os.Rename(path, rotated); err != nil {
 		return err
 	}
-	asymptoteobserve.TightenPrivateRuntimeLogArchives(path, archives)
+	asymptoteobserve.SettleRuntimeLogArchives(path, archives)
 	return nil
 }
 
