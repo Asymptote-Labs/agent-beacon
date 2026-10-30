@@ -4,6 +4,7 @@ package localingest
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"net"
 	"os"
@@ -284,41 +285,79 @@ func TestWriteForAnotherLogIsLeftToTheDirectAppend(t *testing.T) {
 	}
 }
 
-func TestWriteWaitsOutAHungCollectorOnce(t *testing.T) {
-	sock := filepath.Join(shortTempDir(t), "run", "ingest.sock")
+// hungCollector listens on a fresh ingest socket, accepts connections and never answers them. The
+// returned func reports how many connections writers have made so far without relying on timing:
+// it connects a probe from a named address and collects accepted connections until the probe's
+// arrives. A listening Unix socket accepts in arrival order, so every earlier connection is counted.
+func hungCollector(t *testing.T) (string, func() int) {
+	t.Helper()
+	dir := shortTempDir(t)
+	sock := filepath.Join(dir, "run", "ingest.sock")
 	l, err := Listen(sock)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Close()
-	go func() { // accepts and never answers
-		var held []net.Conn
+	accepted := make(chan net.Conn)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
 		for {
 			c, err := l.Accept()
 			if err != nil {
-				for _, h := range held {
-					_ = h.Close()
-				}
 				return
 			}
-			held = append(held, c)
+			accepted <- c
 		}
 	}()
+	var held []net.Conn
+	t.Cleanup(func() {
+		_ = l.Close()
+		for {
+			select {
+			case c := <-accepted:
+				held = append(held, c)
+				continue
+			case <-done:
+			}
+			break
+		}
+		for _, c := range held {
+			_ = c.Close()
+		}
+	})
+	writers, probes := 0, 0
+	return sock, func() int {
+		t.Helper()
+		probes++
+		probeAddr := filepath.Join(dir, fmt.Sprintf("probe%d", probes))
+		probe, err := net.DialUnix("unix", &net.UnixAddr{Name: probeAddr, Net: "unix"}, &net.UnixAddr{Name: sock, Net: "unix"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer probe.Close()
+		for {
+			c := <-accepted
+			held = append(held, c)
+			if c.RemoteAddr() != nil && c.RemoteAddr().String() == probeAddr {
+				return writers
+			}
+			writers++
+		}
+	}
+}
+
+func TestWriteWaitsOutAHungCollectorOnce(t *testing.T) {
+	sock, connections := hungCollector(t)
 	d := deliverer(t, sock)
 	d.Client.Timeout = 200 * time.Millisecond
 	d.FailureBackoff = 0 // the default: one process, several events
 	log := &directLog{refuse: true}
 	for i := 0; i < 3; i++ {
-		start := time.Now()
 		if err := d.Write(testLog, lines(t, 1)[0], log.append); err != nil {
 			t.Fatal(err)
 		}
-		limit := 2 * time.Second
-		if i > 0 {
-			limit = 100 * time.Millisecond
-		}
-		if elapsed := time.Since(start); elapsed > limit {
-			t.Fatalf("write %d took %v; only the first may wait for the hung collector", i, elapsed)
+		if got := connections(); got != 1 {
+			t.Fatalf("after write %d the collector saw %d connections; only the first write may try it", i, got)
 		}
 	}
 	if n, _ := d.Pending(testLog); n != 3 {
@@ -342,25 +381,7 @@ func TestWriteRetriesTheSocketOnceTheBackoffPasses(t *testing.T) {
 // Hooks run as a new process per event, so a hung collector must cost the next process nothing
 // either: the failure is remembered in the account's spool directory, not only in memory.
 func TestASendFailureIsRememberedAcrossProcesses(t *testing.T) {
-	sock := filepath.Join(shortTempDir(t), "run", "ingest.sock")
-	l, err := Listen(sock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
-	go func() { // accepts and never answers
-		var held []net.Conn
-		for {
-			c, err := l.Accept()
-			if err != nil {
-				for _, h := range held {
-					_ = h.Close()
-				}
-				return
-			}
-			held = append(held, c)
-		}
-	}()
+	sock, connections := hungCollector(t)
 	d := deliverer(t, sock)
 	d.Client.Timeout = 200 * time.Millisecond
 	d.FailureBackoff = 0
@@ -371,13 +392,18 @@ func TestASendFailureIsRememberedAcrossProcesses(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(d.Spool.Dir, sendFailureMarker)); err != nil {
 		t.Fatalf("the failure was not recorded: %v", err)
 	}
+	if got := connections(); got != 1 {
+		t.Fatalf("the first write made %d connections, want 1", got)
+	}
 	lastSendFailure.Store(0) // a new process
-	start := time.Now()
 	if err := d.Write(testLog, lines(t, 1)[0], log.append); err != nil {
 		t.Fatal(err)
 	}
-	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
-		t.Fatalf("the next process waited %v for the hung collector", elapsed)
+	if got := connections(); got != 1 {
+		t.Fatalf("the next process tried the hung collector again (%d connections in all)", got)
+	}
+	if n, _ := d.Pending(testLog); n != 2 {
+		t.Fatalf("Pending = %d, want both lines spooled", n)
 	}
 }
 
