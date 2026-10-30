@@ -19,6 +19,11 @@
 # "beacon.exe failed" from "beacon.exe never finished".
 $script:BeaconTimeoutExitCode = 1460
 
+# Returned by Invoke-BeaconBounded when beacon.exe could not be started at all (missing, locked,
+# blocked by application control, access denied). No process ran, so there is no exit code of its
+# own to report, and this is not a timeout.
+$script:BeaconLaunchFailedExitCode = -1
+
 $script:BeaconPackageLog = $null
 $script:BeaconPackageLogPath = $null
 
@@ -90,9 +95,9 @@ function Write-BeaconStream {
     }
 }
 
-# Runs beacon.exe with Arguments, waits at most TimeoutSeconds, and returns its exit code, or
-# $BeaconTimeoutExitCode once it had to be stopped. Output is recorded line by line in the package
-# log.
+# Runs beacon.exe with Arguments, waits at most TimeoutSeconds, and returns its exit code,
+# $BeaconTimeoutExitCode once it had to be stopped, or $BeaconLaunchFailedExitCode when it could not
+# be started. Output is recorded line by line in the package log.
 #
 # A beacon.exe still running fifteen seconds before the bound writes every goroutine's stack to
 # stderr (BEACON_DEBUG_STACKS_AFTER), so a call that hangs names the code it is stuck in, not just
@@ -119,7 +124,14 @@ function Invoke-BeaconBounded {
     $info.StandardErrorEncoding = [System.Text.Encoding]::UTF8
     $info.EnvironmentVariables['BEACON_DEBUG_STACKS_AFTER'] = "$([Math]::Max(1, $TimeoutSeconds - 15))s"
 
-    $process = [System.Diagnostics.Process]::Start($info)
+    # Caught here because the 'Continue' preference above would otherwise let a failed start carry on
+    # with no process, and be reported as a timeout.
+    try {
+        $process = [System.Diagnostics.Process]::Start($info)
+    } catch {
+        Write-BeaconPackageLog "could not start ${display}: $($_.Exception.Message)"
+        return $script:BeaconLaunchFailedExitCode
+    }
     # Both streams are drained concurrently. Reading one to the end before the other deadlocks as
     # soon as beacon fills the pipe nobody is reading.
     $stdout = $process.StandardOutput.ReadToEndAsync()

@@ -752,8 +752,9 @@ jobs:
   windows-package-smoke:
     runs-on: windows-2025
     # Bounded for the same reason windows-test is: a wedged msiexec would otherwise hold a runner for
-    # the GitHub default of six hours.
-    timeout-minutes: 25
+    # the GitHub default of six hours. A healthy run takes about five minutes; the bound leaves room
+    # for one MSI step to run to its own limit (below) and for the diagnostics after it.
+    timeout-minutes: 40
     defaults:
       run:
         shell: pwsh
@@ -827,12 +828,20 @@ jobs:
             }
           }
 
-      # Each MSI step has its own bound, well inside the job's. A wedged msiexec then fails its step
-      # instead of holding the job until GitHub cancels it, and a cancelled job keeps no log at all --
-      # which is how intermittent upgrade and uninstall hangs went undiagnosed. With the step bound, the
+      # Each MSI step has its own bound, inside the job's. A wedged msiexec then fails its step instead
+      # of holding the job until GitHub cancels it, and a cancelled job keeps no log at all -- which is
+      # how intermittent upgrade and uninstall hangs went undiagnosed. With the step bound, the
       # diagnostics and the package logs below still run and upload.
+      #
+      # Each step bound is longer than the package scripts' own limits for the actions it runs
+      # (packaging/windows/install-endpoint.ps1 and uninstall-endpoint.ps1), so a hung beacon.exe call
+      # is stopped by the script -- which writes the TIMEOUT line and the goroutine stacks -- before
+      # GitHub stops the step. A step stopped first would leave the custom action running inside the
+      # Windows Installer service, outside the step's process tree, and record nothing. Install runs
+      # install (10 min) and user config (5 min): 17. An upgrade runs the old package's uninstall
+      # (3 min) before both: 20. Uninstall runs uninstall and its service fallback: 5.
       - name: Install it
-        timeout-minutes: 8
+        timeout-minutes: 17
         run: |
           # /qn is silent, and the verbose log is what makes a custom-action failure diagnosable --
           # without it msiexec reports only an exit code.
@@ -873,7 +882,7 @@ jobs:
           exit 0
 
       - name: Upgrading must replace the payload and leave it running
-        timeout-minutes: 8
+        timeout-minutes: 20
         run: |
           $configPath = Join-Path $env:ProgramData 'Beacon\Endpoint\config.json'
           if (-not (Test-Path -LiteralPath $configPath)) { throw "no configuration before the upgrade" }
@@ -952,7 +961,7 @@ jobs:
         run: pwsh -NoProfile -File packaging/windows/smoke-restricted-log.ps1
 
       - name: Uninstall must remove the service and keep the data
-        timeout-minutes: 8
+        timeout-minutes: 5
         run: |
           $logDir = Join-Path $env:ProgramData 'Beacon\Endpoint\logs'
           $configPath = Join-Path $env:ProgramData 'Beacon\Endpoint\config.json'

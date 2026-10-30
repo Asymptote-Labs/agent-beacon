@@ -115,6 +115,8 @@ if ($IsWindows -or $env:OS -eq 'Windows_NT') {
     if (Get-CimInstance Win32_Process -Filter "Name = 'PING.EXE'" | Where-Object { $_.CommandLine -match '-n 60 127\.0\.0\.1' }) {
         Fail "Invoke-BeaconBounded left the timed-out call's child process running"
     }
+    $code = Invoke-BeaconBounded -Beacon (Join-Path $env:SystemRoot 'System32\no-such-beacon.exe') -Arguments @('version') -TimeoutSeconds 30
+    if ($code -ne $BeaconLaunchFailedExitCode) { Fail "Invoke-BeaconBounded returned $code for a program that could not start, not $BeaconLaunchFailedExitCode" }
     $logPath = $BeaconPackageLogPath
     Close-BeaconPackageLog
     if (-not $logPath -or -not (Test-Path -LiteralPath $logPath)) {
@@ -123,8 +125,10 @@ if ($IsWindows -or $env:OS -eq 'Windows_NT') {
         $logText = Get-Content -Raw -LiteralPath $logPath
         if ($logText -notmatch 'TIMEOUT:') { Fail "the package log does not record the timeout" }
         if ($logText -notmatch 'exit 7:') { Fail "the package log does not record the exit code" }
+        if ($logText -notmatch 'could not start') { Fail "the package log does not record a failed start" }
+        if (([regex]::Matches($logText, 'TIMEOUT:')).Count -ne 1) { Fail "the package log records a timeout that did not happen" }
         Remove-Item -LiteralPath $logPath -Force
-        Write-Output 'ok: Invoke-BeaconBounded returns exit codes, stops a call past its bound, and logs both'
+        Write-Output 'ok: Invoke-BeaconBounded returns exit codes, stops a call past its bound, reports a failed start, and logs all three'
     }
 }
 
