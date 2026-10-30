@@ -3,7 +3,6 @@ package lifecycle
 import (
 	"errors"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -70,12 +69,7 @@ func TestValidateLogAccess(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "system install") {
 		t.Errorf("restricted in user mode = %v, want a refusal naming the system install", err)
 	}
-	err = validateLogAccess(system("restricted"))
-	if runtime.GOOS == "windows" {
-		if err == nil {
-			t.Error("restricted was accepted on Windows")
-		}
-	} else if err != nil {
+	if err := validateLogAccess(system("restricted")); err != nil {
 		t.Errorf("restricted on a system install = %v", err)
 	}
 }
@@ -111,9 +105,6 @@ func fakeLogAccess(t *testing.T, gid int, created bool, ensureErr, restrictErr e
 }
 
 func TestPrepareSystemLogRestricts(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("no restricted mode on Windows")
-	}
 	calls := fakeLogAccess(t, 4242, true, nil, nil)
 	created, err := prepareSystemLog(endpointconfig.Config{LogPath: "/var/log/beacon-agent/runtime.jsonl", LogAccess: "restricted"})
 	if err != nil || !created {
@@ -138,9 +129,6 @@ func TestPrepareSystemLogShares(t *testing.T) {
 }
 
 func TestPrepareSystemLogStopsWhenTheGroupCannotBeMade(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("no restricted mode on Windows")
-	}
 	calls := fakeLogAccess(t, 0, false, errors.New("groupadd: permission denied"), nil)
 	_, err := prepareSystemLog(endpointconfig.Config{LogPath: "/var/log/beacon-agent/runtime.jsonl", LogAccess: "restricted"})
 	if err == nil || !strings.Contains(err.Error(), loggroup.Name) {
@@ -158,17 +146,12 @@ func TestLogAccessOf(t *testing.T) {
 	if got := logAccessOf(endpointconfig.Config{}); got != "shared" {
 		t.Fatalf("system default = %q", got)
 	}
-	if runtime.GOOS != "windows" {
-		if got := logAccessOf(endpointconfig.Config{LogAccess: "restricted"}); got != "restricted" {
-			t.Fatalf("restricted = %q", got)
-		}
+	if got := logAccessOf(endpointconfig.Config{LogAccess: "restricted"}); got != "restricted" {
+		t.Fatalf("restricted = %q", got)
 	}
 }
 
 func TestLogAccessRestorerPutsBackWhatAFailedInstallChanged(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("no restricted mode on Windows")
-	}
 	restricted := false
 	prev := logIsRestricted
 	logIsRestricted = func(string) bool { return restricted }

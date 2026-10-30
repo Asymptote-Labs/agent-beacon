@@ -35,6 +35,11 @@ $httpPort = Get-EnvOrDefault 'BEACON_OTLP_HTTP_PORT' '4318'
 $collector = Get-EnvOrDefault 'BEACON_COLLECTOR' ''
 $service = Get-EnvOrDefault 'BEACON_SERVICE' ''
 $noStart = Get-EnvOrDefault 'BEACON_NO_START' '0'
+# shared or restricted; empty keeps whatever the endpoint already has, so an upgrade never changes
+# the mode. Restricted makes the SYSTEM collector the only writer of the runtime log: hooks send their
+# events to it over a local named pipe, and only SYSTEM, Administrators and the beacon-log group can
+# read the log. The same variable the Linux and macOS install scripts read.
+$logAccess = Get-EnvOrDefault 'BEACON_LOG_ACCESS' ''
 
 # Auto-detected rather than required, so a manual invocation without BEACON_COLLECTOR still works.
 # DiscoverBinary would find this on its own -- it is passed explicitly so that a failure says which
@@ -55,6 +60,7 @@ if (-not [string]::IsNullOrWhiteSpace($collector)) { $installArgs += @('--collec
 # install. Passing it explicitly is for a fleet that wants the supervised fallback instead.
 if (-not [string]::IsNullOrWhiteSpace($service)) { $installArgs += @('--service', $service) }
 if ($noStart -eq '1') { $installArgs += '--no-start' }
+if (-not [string]::IsNullOrWhiteSpace($logAccess)) { $installArgs += @('--log-access', $logAccess) }
 
 # The access control on %ProgramData%\Beacon is applied by the install itself, not here, so a fleet
 # that runs `beacon endpoint install --system` directly gets the same result as the MSI. It resets the
@@ -62,7 +68,8 @@ if ($noStart -eq '1') { $installArgs += '--no-start' }
 # found there may belong to someone else -- to Administrators ownership with inheritance disabled:
 # SYSTEM and Administrators full control, Users read and execute. The log directory adds only an
 # inherit-only grant letting INTERACTIVE append to the runtime log files; ordinary users cannot add,
-# delete or rename anything in it. Do not add an icacls grant here: a second, broader grant is how
+# delete or rename anything in it. In the restricted log access mode the log directory grants
+# ordinary users nothing at all. Do not add an icacls grant here: a second, broader grant is how
 # the log directory once became writable enough to redirect the collector's writes.
 Write-Output "beacon: installing the system endpoint"
 & $beaconBin @installArgs

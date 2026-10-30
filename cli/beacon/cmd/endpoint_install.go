@@ -364,7 +364,7 @@ func runEndpointStatus(cmd *cobra.Command, args []string) error {
 	case status.LogAccess == asymptoteobserve.LogAccessRestricted && !readable(status.LogPath):
 		// A restricted log is unreadable to an account outside its readers group, which is not the
 		// same as empty.
-		fmt.Println("Last event: unknown (this account cannot read the restricted log; run with sudo)")
+		fmt.Printf("Last event: unknown (this account cannot read the restricted log; run %s)\n", elevatedRunHint())
 	default:
 		fmt.Println("Last event: none")
 	}

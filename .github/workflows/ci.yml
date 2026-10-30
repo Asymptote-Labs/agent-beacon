@@ -938,6 +938,12 @@ jobs:
           }
           exit 0
 
+      # The restricted log access mode against a real ordinary account on the installed endpoint: its
+      # hook reaches the log only through the collector's pipe, stamped as itself; it can neither read
+      # nor append to the log; it spools while the collector is stopped; and shared puts it all back.
+      - name: Restricted log access must hold against an ordinary account
+        run: pwsh -NoProfile -File packaging/windows/smoke-restricted-log.ps1
+
       - name: Uninstall must remove the service and keep the data
         run: |
           $logDir = Join-Path $env:ProgramData 'Beacon\Endpoint\logs'

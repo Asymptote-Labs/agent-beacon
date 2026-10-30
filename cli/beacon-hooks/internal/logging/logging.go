@@ -539,8 +539,12 @@ func defaultEndpointIngest() localingest.Deliverer {
 		return localingest.Deliverer{}
 	}
 	dir := filepath.Join(os.TempDir(), fmt.Sprintf("beacon-hooks-test-%d", os.Getpid()))
+	socket := filepath.Join(dir, "no-collector.sock")
+	if runtime.GOOS == "windows" {
+		socket = fmt.Sprintf(`\\.\pipe\beacon-hooks-test-%d-none`, os.Getpid())
+	}
 	return localingest.Deliverer{
-		Client: localingest.Client{SocketPath: filepath.Join(dir, "no-collector.sock")},
+		Client: localingest.Client{SocketPath: socket},
 		Spool:  localingest.Spool{Dir: filepath.Join(dir, "spool")},
 	}
 }

@@ -2,7 +2,6 @@ package collector
 
 import (
 	"context"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -27,9 +26,6 @@ func parsedYAML(t *testing.T, text string) map[string]interface{} {
 }
 
 func TestConfigYAMLServesTheIngestSocketInTheRestrictedMode(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("no restricted mode on Windows")
-	}
 	doc := parsedYAML(t, ConfigYAML(restrictedConfig(false)))
 	extensions := doc["extensions"].(map[string]interface{})
 	ingest, ok := extensions[IngestExtension].(map[string]interface{})
@@ -82,5 +78,17 @@ func TestCheckComponentsRequiresTheIngestExtensionWhenAsked(t *testing.T) {
 	listed += "  - name: beacon_ingest\n"
 	if err := CheckComponents("/opt/beacon/bin/beacon-otelcol", IngestExtension); err != nil {
 		t.Fatalf("a collector with %s: %v", IngestExtension, err)
+	}
+}
+
+// A Windows log path reaches the extension intact: its backslashes are escaped in the YAML, not
+// read as escape sequences.
+func TestConfigYAMLCarriesAWindowsLogPath(t *testing.T) {
+	cfg := restrictedConfig(false)
+	cfg.LogPath = `C:\ProgramData\Beacon\Endpoint\logs\runtime.jsonl`
+	doc := parsedYAML(t, ConfigYAML(cfg))
+	ingest := doc["extensions"].(map[string]interface{})[IngestExtension].(map[string]interface{})
+	if ingest["log_path"] != cfg.LogPath {
+		t.Fatalf("log_path = %q, want %q", ingest["log_path"], cfg.LogPath)
 	}
 }
