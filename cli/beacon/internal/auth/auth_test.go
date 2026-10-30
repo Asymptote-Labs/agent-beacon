@@ -292,3 +292,16 @@ func TestCallbackServerSuccessPageLinksToTheDashboard(t *testing.T) {
 		t.Fatalf("success page should contain %s, got %s", want, page)
 	}
 }
+
+func TestDashboardHomeURL(t *testing.T) {
+	for base, want := range map[string]string{
+		"https://beacon.sh":           "https://beacon.sh/dashboard",
+		"https://beacon.sh/":          "https://beacon.sh/dashboard",
+		"https://beacon.sh/dashboard": "https://beacon.sh/dashboard",
+		"":                            "https://beacon.sh/dashboard",
+	} {
+		if got := DashboardHomeURL(base); got != want {
+			t.Fatalf("DashboardHomeURL(%q) = %q, want %q", base, got, want)
+		}
+	}
+}

@@ -176,7 +176,7 @@ func Login(ctx context.Context, opts LoginOptions) (*Session, error) {
 		return nil, err
 	}
 	callback.SetSuccessPage("Signed in to Beacon", "Return to your terminal to finish setting up this machine.")
-	callback.SetSuccessLink("Go to dashboard", baseURL)
+	callback.SetSuccessLink("Go to dashboard", auth.DashboardHomeURL(baseURL))
 	defer callback.Shutdown()
 	callback.Start()
 

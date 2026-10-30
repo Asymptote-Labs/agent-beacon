@@ -352,14 +352,7 @@ func scriptForwarderStatusLine(status service.Status) string {
 // /dashboard/telemetry have no route behind them, so anything printed here has to
 // stop at the dashboard itself.
 func dashboardHomeURL(base string) string {
-	base = strings.TrimRight(strings.TrimSpace(base), "/")
-	if base == "" {
-		return auth.DefaultDashboardURL + "/dashboard"
-	}
-	if strings.HasSuffix(base, "/dashboard") {
-		return base
-	}
-	return base + "/dashboard"
+	return auth.DashboardHomeURL(base)
 }
 
 func managedIngestStatusLine(status asymptote.ManagedIngestStatus) string {
