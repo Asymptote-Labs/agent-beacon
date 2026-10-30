@@ -322,6 +322,8 @@ type redactChain struct {
 	lineFrom, lineTo     int
 	lineFirst            int // the end of lineFrom's own line, at or before lineTo
 	lineFailed           [][2]int
+	// The assigned values whose copies are removed after every rule has run (overCopy).
+	copies redactCopies
 }
 
 func newRedactChain(engine *redactEngine, t string, hits []redactHit) *redactChain {
@@ -596,6 +598,9 @@ func (c *redactChain) run(si int, m []int, use redactUse, yield func([]int, reda
 				return cut[1], yield(cut, use)
 			}
 		}
+		if c.adj.shapes[shape].trailing == 0 {
+			item = c.overCopy(item)
+		}
 		if !yield(item, use) {
 			return 0, false
 		}
@@ -611,6 +616,27 @@ func (c *redactChain) run(si int, m []int, use redactUse, yield func([]int, reda
 		}
 		si, m, item, shape, merged, use, least = sj, sm, sm, sj, false, c.use(sj), c.least(sj, sm)
 	}
+}
+
+// overCopy returns item run on to the end of a copy of an assigned value that starts inside it and
+// ends past it, the item having taken the copy's first bytes; or item. The copy is removed after
+// every rule has run, which finds it only whole: of `hf_…opaque-flag-value` with `opaque-flag-value`
+// assigned, the token's pattern takes `opaque`, and `-flag-value` was left.
+func (c *redactChain) overCopy(item []int) []int {
+	if c.copies == nil {
+		return item
+	}
+	t := c.t
+	for x := item[0] + 1; x < item[1] && x+redactCopyMin <= len(t); x++ {
+		for _, v := range c.copies[t[x:x+redactCopyMin]] {
+			if x+len(v) > item[1] && strings.HasPrefix(t[x:], v) {
+				item = slices.Clone(item)
+				item[1] = x + len(v)
+			}
+		}
+	}
+	redactWorked(item[1] - item[0])
+	return item
 }
 
 // least returns the first place m, a match of shape si, can be cut and still be a whole match: as

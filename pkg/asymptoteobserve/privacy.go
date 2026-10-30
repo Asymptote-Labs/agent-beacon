@@ -743,6 +743,7 @@ func redactPass(value string, gated bool) (string, bool) {
 	var kept bool
 	if text.holds(redactLabelNeedles) {
 		assigned, kept = captureAssigned(&text, engine, assigned)
+		text.copies = byFirstBytes(assigned)
 	}
 	original := text.value
 	for i, rule := range redactionRules {
@@ -762,7 +763,7 @@ func redactPass(value string, gated bool) (string, bool) {
 	// Each copy is searched for and removed; none of it survives into the result. A secret right
 	// after a replaced copy, or right after a replaced key, starts a word only now.
 	replaced := replaceAssigned(text.value, assigned)
-	hidden := text.hidden || replaced != text.value && copyHidesMatch(replaced, assigned)
+	hidden := text.hidden || replaced != text.value && copyHidesMatch(text.value, replaced, assigned)
 	return engine.redactAfterMarkers(replaced), hidden
 }
 
@@ -770,28 +771,18 @@ func redactPass(value string, gated bool) (string, bool) {
 // rule has run, may have made a match where the rules found none: where a copy that starts with a
 // byte no word starts with was, which some rules' values cannot start with and their marker can;
 // where a copy held a byte a rule's value stops at (`/`, `@`, a quote, a comma, a blank), which
-// its marker does not; or where an AWS key id ends right before one, which ends a word only now.
-// Of `-pAsswd --token -token:"--token ` the flag finds no value in `--token`, which starts with a
-// dash, until the copy of the value `--token ` is replaced; of
+// its marker does not; or where a word byte comes right before one, which ends a word, or a
+// redacted secret, only now. Of `-pAsswd --token -token:"--token ` the flag finds no value in
+// `--token`, which starts with a dash, until the copy of the value `--token ` is replaced; of
 // `AKIAIOSFODNN7EXAMPLEAuthorization: Authorization: ` the key id rule finds no end before the
 // copy of `Authorization:` that the label holds. The next pass redacts them.
-func copyHidesMatch(replaced string, assigned map[string]struct{}) bool {
+func copyHidesMatch(before, replaced string, assigned map[string]struct{}) bool {
 	for s := range assigned {
 		if !isWordByte(s[0]) || strings.IndexFunc(s, stopsAValue) >= 0 {
 			return true
 		}
 	}
-	for from := 0; ; {
-		i := strings.Index(replaced[from:], redactedValue)
-		if i < 0 {
-			return false
-		}
-		p := from + i
-		if p >= awsKeyIDLen && endsAWSKeyID(replaced[p-awsKeyIDLen:p]) {
-			return true
-		}
-		from = p + len(redactedValue)
-	}
+	return markersAfterWords(replaced) > markersAfterWords(before)
 }
 
 // stopsAValue reports whether some rule's value may stop at r: any byte but a word byte, `.` and
@@ -800,20 +791,19 @@ func stopsAValue(r rune) bool {
 	return r >= utf8.RuneSelf || !isWordByte(byte(r)) && r != '.' && r != '-'
 }
 
-// endsAWSKeyID reports whether s is shaped as an AWS access key id, which the shape rules redact
-// where it ends a word, alone or right after another secret.
-func endsAWSKeyID(s string) bool {
-	switch s[:4] {
-	case "AKIA", "ASIA", "ABIA", "ACCA":
-	default:
-		return false
-	}
-	for _, c := range []byte(s[4:]) {
-		if (c < 'A' || c > 'Z') && (c < '0' || c > '9') {
-			return false
+// markersAfterWords counts the markers in t that a word byte comes right before.
+func markersAfterWords(t string) int {
+	n := 0
+	for from := 0; ; {
+		i := strings.Index(t[from:], redactedValue)
+		if i < 0 {
+			return n
 		}
+		if p := from + i; p > 0 && isWordByte(t[p-1]) {
+			n++
+		}
+		from += i + len(redactedValue)
 	}
-	return true
 }
 
 // keptLabel reports whether a value that ends at end in t, one a rule keeps or the capture takes,
@@ -842,7 +832,7 @@ func captureAssigned(text *redactGate, engine *redactEngine, assigned map[string
 		// A value that is itself a label hides the assignment it begins from the capture, as a kept
 		// one does from the label rules.
 		text.hidden = text.hidden || keptLabel(value, match[g+1])
-		if s := value[match[g]:match[g+1]]; len(s) >= 8 && s != redactedValue && !isAuthScheme(s) {
+		if s := value[match[g]:match[g+1]]; len(s) >= redactCopyMin && s != redactedValue && !isAuthScheme(s) {
 			if assigned == nil {
 				assigned = map[string]struct{}{}
 			}
@@ -872,6 +862,24 @@ func replaceAssigned(value string, assigned map[string]struct{}) string {
 		pairs = append(pairs, copied, redactedValue)
 	}
 	return strings.NewReplacer(pairs...).Replace(value)
+}
+
+// redactCopyMin is the least length of an assigned value whose copies are removed.
+const redactCopyMin = 8
+
+// redactCopies are the assigned values by their first redactCopyMin bytes, so a place in the text
+// is looked up once to tell whether a copy may start there (redactChain.overCopy).
+type redactCopies map[string][]string
+
+func byFirstBytes(assigned map[string]struct{}) redactCopies {
+	if len(assigned) == 0 {
+		return nil
+	}
+	copies := redactCopies{}
+	for s := range assigned {
+		copies[s[:redactCopyMin]] = append(copies[s[:redactCopyMin]], s)
+	}
+	return copies
 }
 
 // IsSecretKeyName reports whether a structured field's name has a word naming a credential, for

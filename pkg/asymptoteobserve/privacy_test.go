@@ -296,6 +296,8 @@ var redactIdempotenceInputs = []string{
 	"AKIAIOSFODNN7EXAMPLEAuthorization: Authorization: ",
 	"@AKIAIOSFODNN7EXAMPLEx-access-token:x-access-token:",
 	"AKIAIOSFODNN7EXAMPLEAKIAIOSFODNN7EXAMPLEAuthorization: Authorization: ",
+	// The copy of `Authoriz` makes `ABIA[REDACTED]` of a label, which ends the key id before it.
+	"ABIA0000000000000000ABIAAuthorizAtion:Authoriz",
 	// The copy of `https://` holds the slash a URL's password stops at, and its marker does not.
 	"A://token:https://,ghp_0123456789abcdefghijklmnopqrst==https://@h\n=",
 }

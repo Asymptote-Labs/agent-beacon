@@ -216,6 +216,7 @@ func TestRedactionWorkIsLinear(t *testing.T) {
 		"labels captured values hid": "token:abctoken\":`secret`:`token`:}token:--token \"token\" ",
 		"copies after flags":         "-pAsswd --token -token:\"--token\" ",
 		"key ids before copies":      "AKIAIOSFODNN7EXAMPLEAuthorization: Authorization: ",
+		"tokens into copies":         "token=opaque-flag-value hf_abcdefghijklmnopqrstuvwxyz01234567opaque-flag-value ",
 		// A URL password's run on (urlRunsOn) over AWS key ids and their secrets.
 		"URL runs over AWS keys":      "A://token:,@AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY@",
 		"URL passwords over AWS keys": "A://token:,@0,AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY ",

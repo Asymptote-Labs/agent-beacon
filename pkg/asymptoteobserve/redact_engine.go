@@ -237,6 +237,8 @@ type redactGate struct {
 	// hidden is set when a value a rule keeps, or the capture takes, is itself a label and its
 	// separator (keptLabel): the match that label begins lies inside one that neither looks into.
 	hidden bool
+	// copies are the assigned values whose copies are removed after every rule has run.
+	copies redactCopies
 }
 
 func (g *redactGate) set(value string) {
@@ -355,6 +357,7 @@ func (rule redactionRule) matches(text *redactGate, slot *redactSlot) iter.Seq2[
 			text.scan()
 			slot.prepare(rule)
 			chain = newRedactChain(text.e(), t, text.hits)
+			chain.copies = text.copies
 		}
 		whole := func(from int) {
 			re := rule.pattern()

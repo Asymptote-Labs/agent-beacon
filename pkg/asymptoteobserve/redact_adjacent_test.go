@@ -68,6 +68,9 @@ var adjacentCases = []struct{ name, input, want string }{
 	// The quoted-label rule keeps `null`, the capture of the value runs on past it, and the rule
 	// for `x-access-token:` then replaces the token inside what was captured.
 	{"a value changed after it was captured", `"secret": null}bcn_code_--https://x-access-token:ghs_abcdefghijklmnopqrstuvwxyz0123@github.com/o/r`, `"secret": [REDACTED]`},
+	// A token's pattern takes the first bytes of a copy of an assigned value written right after
+	// it, and the copy, removed only whole, was left from there on: the item runs on to its end.
+	{"a copy of an assigned value after a token", "hf_abcdefghijklmnopqrstuvwxyz01234567opaque-flag-value tool login --token=opaque-flag-value", "hf_[REDACTED] tool login --token=[REDACTED]"},
 }
 
 func TestRedactStringRedactsSecretsWrittenRightAfterAnother(t *testing.T) {
