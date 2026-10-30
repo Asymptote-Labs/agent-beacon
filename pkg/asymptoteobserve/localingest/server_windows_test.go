@@ -236,7 +236,8 @@ func TestPipeSecurity(t *testing.T) {
 				sawNetworkDeny = true
 			}
 		case windows.ACCESS_ALLOWED_ACE_TYPE:
-			if sid != sidLocalSystem && sid != sidAdministrators && ace.Mask&windows.FILE_APPEND_DATA != 0 {
+			// S-1-3-4 is OWNER RIGHTS: the pipe's owner, which is SYSTEM for the collector.
+			if sid != sidLocalSystem && sid != sidAdministrators && sid != "S-1-3-4" && ace.Mask&windows.FILE_APPEND_DATA != 0 {
 				t.Errorf("%s may create pipe instances (mask %#x)", sid, ace.Mask)
 			}
 		}
