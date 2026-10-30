@@ -1,6 +1,7 @@
 package asymptoteobserve_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -128,6 +129,28 @@ func BenchmarkSanitizeEvent(b *testing.B) {
 				obs.SanitizeEvent(bc.event, 65536)
 			}
 		})
+	}
+}
+
+// benchHookPayload is a decoded PostToolUse hook payload: the shapes SanitizeMap sees on the hook
+// path, mostly short strings, with numbers, booleans and nulls among them.
+const benchHookPayload = `{"session_id":"abc-123","transcript_path":"/home/user/.claude/projects/p/abc-123.jsonl",
+"cwd":"/home/user/project","permission_mode":"default","hook_event_name":"PostToolUse","tool_name":"Bash",
+"tool_input":{"command":"go test ./internal/cache/ -run TestLRUEviction -count=20","description":"Run the test","timeout":120000,"run_in_background":false},
+"tool_response":{"stdout":"ok  \tgithub.com/example/project/internal/cache\t0.412s","stderr":"","interrupted":false,"isImage":false,"exit_code":0,"duration_ms":412.5,"sandbox":null},
+"usage":{"input_tokens":812,"output_tokens":95,"cache_read_input_tokens":40211,"service_tier":"standard"},
+"args":["-y","@upstash/context7-mcp","--max-tokens","4096",1,2.5,true,null],
+"headers":{"Accept":["application/json"],"X-Request-Id":["req_01"]}}`
+
+// BenchmarkSanitizeMap sanitizes a decoded hook payload.
+func BenchmarkSanitizeMap(b *testing.B) {
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(benchHookPayload), &payload); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		obs.SanitizeMap(payload, obs.PrivacyOptions{RedactSecrets: true, StringLimit: obs.DefaultRawStringLimit})
 	}
 }
 

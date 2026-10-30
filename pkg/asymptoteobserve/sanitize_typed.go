@@ -295,6 +295,172 @@ func roundTrip(v any) any {
 	return out
 }
 
+// jsonValue is a value of a type JSON decoding does not produce, as encoding/json marshals it and
+// decodes it back: a string, a []interface{}, a map[string]interface{}, a float64, a bool, or nil.
+// SanitizeMap, SanitizeSlice and CleanValue convert such values with it.
+//
+// A value encoding/json cannot write whole (a NaN somewhere in it, a channel, a map whose keys are
+// not strings, a cycle) is converted part by part instead: the items of a slice or an array, the
+// values of a map, the fields of a struct, what a pointer or an interface holds. Only the parts it
+// cannot represent become nil, so one bad value does not take the rest of a list with it. Fields
+// are named as encoding/json names them (a tag's name, `-`, omitempty and omitzero, the fields of
+// an embedded struct promoted); a `,string` option is not applied on this path. A part that has
+// its own marshaler and fails is nil.
+func jsonValue(value any) any {
+	w := jsonWalk{seen: map[uintptr]bool{}}
+	return w.value(value, 0)
+}
+
+type jsonWalk struct {
+	// seen holds the pointers, maps and slices on the path being converted, so a cycle ends in nil.
+	seen map[uintptr]bool
+}
+
+func (w jsonWalk) value(value any, depth int) any {
+	switch value.(type) {
+	case []string, map[string]string:
+		return decoded(value, 0)
+	}
+	data, err := json.Marshal(value)
+	if err == nil {
+		var out any
+		if json.Unmarshal(data, &out) == nil {
+			return out
+		}
+	}
+	if depth >= maxGenericDepth {
+		return nil
+	}
+	return w.parts(reflect.ValueOf(value), depth+1)
+}
+
+func (w jsonWalk) parts(v reflect.Value, depth int) any {
+	if !v.IsValid() {
+		return nil
+	}
+	if t := v.Type(); t.Implements(jsonMarshalerType) || t.Implements(textMarshalerType) ||
+		reflect.PointerTo(t).Implements(jsonMarshalerType) || reflect.PointerTo(t).Implements(textMarshalerType) {
+		return nil
+	}
+	switch v.Kind() {
+	case reflect.Pointer, reflect.Map, reflect.Slice:
+		if v.IsNil() {
+			return nil
+		}
+		if w.seen[v.Pointer()] {
+			return nil
+		}
+		w.seen[v.Pointer()] = true
+		defer delete(w.seen, v.Pointer())
+	}
+	switch v.Kind() {
+	case reflect.Pointer, reflect.Interface:
+		if v.IsNil() {
+			return nil
+		}
+		return w.value(v.Elem().Interface(), depth)
+	case reflect.Slice, reflect.Array:
+		out := make([]any, v.Len())
+		for i := range out {
+			out[i] = w.value(v.Index(i).Interface(), depth)
+		}
+		return out
+	case reflect.Map:
+		out := make(map[string]any, v.Len())
+		for iter := v.MapRange(); iter.Next(); {
+			key, ok := jsonKey(iter.Key())
+			if !ok {
+				return nil
+			}
+			out[key] = w.value(iter.Value().Interface(), depth)
+		}
+		return out
+	case reflect.Struct:
+		out := map[string]any{}
+		w.fields(out, v, depth)
+		return out
+	}
+	return nil
+}
+
+// jsonKey is a map key as encoding/json writes it, and false for a key it cannot write.
+func jsonKey(k reflect.Value) (string, bool) {
+	switch k.Kind() {
+	case reflect.String:
+		return k.String(), true
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(k.Int(), 10), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return strconv.FormatUint(k.Uint(), 10), true
+	}
+	if m, ok := k.Interface().(encoding.TextMarshaler); ok {
+		text, err := m.MarshalText()
+		return string(text), err == nil
+	}
+	return "", false
+}
+
+// fields adds the fields of struct v to out, under the names encoding/json gives them.
+func (w jsonWalk) fields(out map[string]any, v reflect.Value, depth int) {
+	t := v.Type()
+	for i := range t.NumField() {
+		f, fv := t.Field(i), v.Field(i)
+		tag := f.Tag.Get("json")
+		if tag == "-" {
+			continue
+		}
+		name, opts, _ := strings.Cut(tag, ",")
+		if f.Anonymous && name == "" {
+			if fv.Kind() == reflect.Pointer {
+				if fv.IsNil() {
+					continue
+				}
+				fv = fv.Elem()
+			}
+			if fv.Kind() == reflect.Struct {
+				w.fields(out, fv, depth)
+				continue
+			}
+		}
+		if !f.IsExported() || !fv.CanInterface() {
+			continue
+		}
+		if name == "" {
+			name = f.Name
+		}
+		if hasJSONOption(opts, "omitempty") && isEmptyJSONValue(fv) || hasJSONOption(opts, "omitzero") && fv.IsZero() {
+			continue
+		}
+		if _, taken := out[name]; !taken {
+			out[name] = w.value(fv.Interface(), depth)
+		}
+	}
+}
+
+func hasJSONOption(opts, option string) bool {
+	for opts != "" {
+		var next string
+		next, opts, _ = strings.Cut(opts, ",")
+		if next == option {
+			return true
+		}
+	}
+	return false
+}
+
+// isEmptyJSONValue is encoding/json's test for omitempty.
+func isEmptyJSONValue(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.Array, reflect.Map, reflect.Slice, reflect.String:
+		return v.Len() == 0
+	case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+		reflect.Float32, reflect.Float64, reflect.Interface, reflect.Pointer:
+		return v.IsZero()
+	}
+	return false
+}
+
 // SanitizeMCP returns a sanitized copy of an MCP block: every string converted as the JSON encoder
 // writes it and cleaned with opts, as SanitizeEvent cleans it.
 func SanitizeMCP(in *MCPInfo, opts PrivacyOptions) *MCPInfo {

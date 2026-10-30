@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1177,6 +1178,160 @@ func TestRunEndpointInventoryWriteEventHonorsConfigContentOptIn(t *testing.T) {
 	}
 	if strings.Contains(text, "secret") {
 		t.Fatalf("manual inventory snapshot log leaked secret content: %s", text)
+	}
+}
+
+// inventorySnapshot runs `beacon endpoint inventory --json` with event writing and content capture
+// on, and returns the JSON it printed and the inventory.snapshot line it wrote.
+func inventorySnapshot(t *testing.T, runtimes []string, maxContentBytes int) (inventoryResult, string) {
+	t.Helper()
+	old := endpointOpts
+	t.Cleanup(func() { endpointOpts = old })
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	include := true
+	cfg := endpointconfig.Default(true, logPath)
+	cfg.Inventory = &endpointconfig.Inventory{Runtimes: runtimes, IncludeContents: &include, MaxContentBytes: maxContentBytes}
+	if _, err := endpointconfig.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	endpointOpts.userMode = true
+	endpointOpts.logPath = logPath
+	endpointOpts.jsonOutput = true
+	endpointOpts.writeInventoryEvent = true
+	endpointOpts.inventoryContents = false
+	output, err := captureStdout(t, func() error { return runEndpointInventory(endpointInventoryCmd, nil) })
+	if err != nil {
+		t.Fatalf("runEndpointInventory returned error: %v", err)
+	}
+	var result inventoryResult
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("inventory JSON did not decode: %v output=%s", err, output)
+	}
+	data, err := os.ReadFile(endpointinventory.LogPath(logPath, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(line, `"inventory.snapshot"`) {
+			return result, line
+		}
+	}
+	t.Fatalf("no inventory.snapshot in %s", data)
+	return result, ""
+}
+
+// The snapshot keeps opted-in content to max_content_bytes rather than the raw-field limit the event
+// writer applies to other raw strings, and keeps env_keys, a list of variable names, as names. A
+// definition's values held under keys named for a credential are redacted even when nothing about
+// the value itself looks like one.
+func TestInventorySnapshotKeepsContentToItsLimit(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	description := strings.Repeat("a long server description ", 200)
+	writeTestFile(t, filepath.Join(home, ".cursor", "mcp.json"), `{"mcpServers":{"one":{"command":"npx","description":"`+description+
+		`","env":{"NODE_ENV":"production","API_KEY":"hunter2"},"headers":{"Authorization":"plain"}}}}`)
+	_, snapshot := inventorySnapshot(t, []string{"cursor"}, 16384)
+	for _, secret := range []string{"hunter2", `plain"`, `plain\"`} {
+		if strings.Contains(snapshot, secret) {
+			t.Fatalf("snapshot leaked %s: %s", secret, snapshot)
+		}
+	}
+	for _, want := range []string{`"API_KEY":"[REDACTED]"`, `"Authorization":"[REDACTED]"`} {
+		if !strings.Contains(snapshot, want) {
+			t.Fatalf("snapshot definition missing %s: %.400s", want, snapshot)
+		}
+	}
+	if !strings.Contains(snapshot, description) {
+		t.Fatalf("snapshot cut the captured content short of max_content_bytes: %.400s", snapshot)
+	}
+	if !strings.Contains(snapshot, `"env_keys":["NODE_ENV"]`) {
+		t.Fatalf("snapshot did not keep env_keys as names: %.400s", snapshot)
+	}
+}
+
+// A small max_content_bytes limits captured contents only: paths, server names and hashes in the
+// snapshot stay whole.
+func TestInventorySnapshotKeepsMetadataWholeUnderASmallContentLimit(t *testing.T) {
+	home := filepath.Join(t.TempDir(), strings.Repeat("deep-directory-name-", 4))
+	testenv.SetHome(t, home)
+	name := strings.Repeat("server-with-a-long-name-", 4)
+	writeTestFile(t, filepath.Join(home, ".cursor", "mcp.json"), `{"mcpServers":{"`+name+`":{"command":"npx"}}}`)
+	result, snapshot := inventorySnapshot(t, []string{"cursor"}, 64)
+	var kept []string
+	for _, config := range result.Configs {
+		if config.Exists {
+			kept = append(kept, config.Path, config.PathHash)
+		}
+	}
+	for _, server := range result.MCPServers {
+		kept = append(kept, server.ServerName, server.ServerNameHash, server.DefinitionHash)
+	}
+	long := 0
+	for _, value := range kept {
+		if len(value) <= 64 {
+			continue
+		}
+		long++
+		quoted, _ := json.Marshal(value)
+		if !strings.Contains(snapshot, string(quoted)) {
+			t.Errorf("snapshot cut %s: %.600s", quoted, snapshot)
+		}
+	}
+	if long == 0 {
+		t.Fatalf("no path, name or hash over 64 bytes to check: %q", kept)
+	}
+}
+
+// max_content_bytes set to the largest int, as a configuration may for "unlimited", keeps captured
+// contents whole and redacted rather than panicking where the redaction window is worked out.
+func TestInventorySnapshotTakesAnUnlimitedContentLimit(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	description := strings.Repeat("a long server description ", 400)
+	writeTestFile(t, filepath.Join(home, ".cursor", "mcp.json"), `{"mcpServers":{"one":{"command":"npx","description":"`+description+
+		`","args":["--token","ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"],"env":{"API_KEY":"hunter2"}}}}`)
+	_, snapshot := inventorySnapshot(t, []string{"cursor"}, math.MaxInt)
+	for _, secret := range []string{"hunter2", "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"} {
+		if strings.Contains(snapshot, secret) {
+			t.Fatalf("snapshot leaked %s: %.400s", secret, snapshot)
+		}
+	}
+	if strings.Count(snapshot, description) < 2 {
+		t.Fatalf("snapshot did not keep the content and the definition whole: %.400s", snapshot)
+	}
+}
+
+// One MCP server whose definition JSON cannot represent (a TOML nan) leaves the other servers, and
+// the rest of its own definition, in the scheduled snapshot; only the value itself is null.
+func TestInventorySnapshotKeepsServersBesideAnUnrepresentableValue(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
+	writeTestFile(t, filepath.Join(home, ".codex", "config.toml"), "[mcp_servers.first]\ncommand = \"npx\"\n\n"+
+		"[mcp_servers.broken]\ncommand = \"uvx\"\nstartup_timeout_sec = nan\n\n[mcp_servers.last]\ncommand = \"node\"\n")
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	cfg := endpointconfig.Default(true, logPath)
+	settings := endpointconfig.InventoryConfig(cfg)
+	settings.Runtimes = []string{"codex_cli"}
+	settings.IncludeContents = true
+	result, err := writeInventoryHeartbeat(cfg, settings, false, inventoryTriggerScheduled, heartbeatScope{})
+	if err != nil || !result.SnapshotWritten {
+		t.Fatalf("heartbeat = %#v, %v; want a snapshot written", result, err)
+	}
+	data, err := os.ReadFile(endpointinventory.LogPath(logPath, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot string
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(line, `"inventory.snapshot"`) {
+			snapshot = line
+		}
+	}
+	for _, want := range []string{`"server_name":"first"`, `"server_name":"broken"`, `"server_name":"last"`, `"command":"uvx"`, `"startup_timeout_sec":null`} {
+		if !strings.Contains(snapshot, want) {
+			t.Errorf("snapshot missing %s: %.3000s", want, snapshot)
+		}
 	}
 }
 

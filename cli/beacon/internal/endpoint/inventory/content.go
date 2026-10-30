@@ -61,6 +61,11 @@ func (c contentOptions) limit() int {
 	return DefaultMaxContentBytes
 }
 
+// ContentLimit is how many bytes of a captured file a scan given MaxContentBytes maxBytes keeps.
+func ContentLimit(maxBytes int) int {
+	return contentOptions{maxBytes: maxBytes}.limit()
+}
+
 // captureContent redacts secrets in the raw file body and truncates the result
 // to maxBytes on a UTF-8 rune boundary. Redaction runs before truncation so a
 // secret can never be partially exposed by the cut.
