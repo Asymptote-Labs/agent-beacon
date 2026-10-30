@@ -670,11 +670,11 @@ func writeInventorySnapshotEvents(cfg endpointconfig.Config, settings endpointco
 		Harness:      schema.HarnessInfo{Name: "endpoint"},
 		Message:      "Agent configuration inventory snapshot observed",
 	})
-	// The scanner has already redacted what it captures (opted-in file contents, MCP server
-	// definitions) and cut file contents to max_content_bytes. CleanValue redacts every string in
-	// them again and keeps them at that limit, where the event writer would otherwise cut each to
-	// the raw-field limit, and leaves field names such as env_keys, a list of variable names, as
-	// they are.
+	// The scanner has already redacted what it captures and cut file contents to max_content_bytes;
+	// an MCP server definition, whose keys come from the user's config, had the field-name and flag
+	// rules applied (inventory.redactStructured). CleanValue redacts every string in them again and
+	// keeps them at that limit, where the event writer would otherwise cut each to the raw-field
+	// limit, and leaves our own field names such as env_keys, a list of variable names, as they are.
 	contentLimit := endpointinventory.ContentLimit(settings.MaxContentBytes)
 	snapshot.Raw = map[string]interface{}{
 		"inventory": map[string]interface{}{

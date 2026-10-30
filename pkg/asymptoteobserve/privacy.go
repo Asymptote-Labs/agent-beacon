@@ -858,12 +858,13 @@ type CleanedValue struct {
 	value interface{}
 }
 
-// CleanValue returns v sanitized for a producer that sets its own string limit and has already
-// redacted what its field names mark as secret, as the endpoint inventory does for the file
-// contents and MCP server definitions it captures: v is converted as SanitizeMap converts a value,
-// and every string in it is redacted as RedactString redacts it and cut to limit as CleanString
-// cuts it. Field names are not judged, so a list of environment variable names under `env_keys`
-// keeps them. limit <= 0 uses DefaultStringLimit.
+// CleanValue returns v sanitized for a producer that sets its own string limit: v is converted as
+// SanitizeMap converts a value, and every string in it is redacted as RedactString redacts it and
+// cut to limit as CleanString cuts it. Field names are not judged, so a list of environment
+// variable names under `env_keys` keeps them; the producer must already have applied IsSecretField
+// and IsSecretFlag to every key and argument list that comes from data rather than from its own
+// types, as the endpoint inventory does for the MCP server definitions it captures. limit <= 0
+// uses DefaultStringLimit.
 func CleanValue(v interface{}, limit int) CleanedValue {
 	if limit <= 0 {
 		limit = DefaultStringLimit

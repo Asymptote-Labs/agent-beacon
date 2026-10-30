@@ -1181,7 +1181,9 @@ func TestRunEndpointInventoryWriteEventHonorsConfigContentOptIn(t *testing.T) {
 }
 
 // The snapshot keeps opted-in content to max_content_bytes rather than the raw-field limit the event
-// writer applies to other raw strings, and keeps env_keys, a list of variable names, as names.
+// writer applies to other raw strings, and keeps env_keys, a list of variable names, as names. A
+// definition's values held under keys named for a credential are redacted even when nothing about
+// the value itself looks like one.
 func TestInventorySnapshotKeepsContentToItsLimit(t *testing.T) {
 	old := endpointOpts
 	t.Cleanup(func() { endpointOpts = old })
@@ -1190,7 +1192,7 @@ func TestInventorySnapshotKeepsContentToItsLimit(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	description := strings.Repeat("a long server description ", 200)
 	writeTestFile(t, filepath.Join(home, ".cursor", "mcp.json"), `{"mcpServers":{"one":{"command":"npx","description":"`+description+
-		`","env":{"NODE_ENV":"production","API_TOKEN":"tok-0123456789abcdef"}}}}`)
+		`","env":{"NODE_ENV":"production","API_KEY":"hunter2"},"headers":{"Authorization":"plain"}}}}`)
 	include := true
 	cfg := endpointconfig.Default(true, logPath)
 	cfg.Inventory = &endpointconfig.Inventory{Runtimes: []string{"cursor"}, IncludeContents: &include, MaxContentBytes: 16384}
@@ -1218,8 +1220,15 @@ func TestInventorySnapshotKeepsContentToItsLimit(t *testing.T) {
 	if snapshot == "" {
 		t.Fatalf("no inventory.snapshot in %s", data)
 	}
-	if strings.Contains(snapshot, "tok-0123456789abcdef") {
-		t.Fatalf("snapshot leaked the API token: %s", snapshot)
+	for _, secret := range []string{"hunter2", `plain"`, `plain\"`} {
+		if strings.Contains(snapshot, secret) {
+			t.Fatalf("snapshot leaked %s: %s", secret, snapshot)
+		}
+	}
+	for _, want := range []string{`"API_KEY":"[REDACTED]"`, `"Authorization":"[REDACTED]"`} {
+		if !strings.Contains(snapshot, want) {
+			t.Fatalf("snapshot definition missing %s: %.400s", want, snapshot)
+		}
 	}
 	if !strings.Contains(snapshot, description) {
 		t.Fatalf("snapshot cut the captured content short of max_content_bytes: %.400s", snapshot)
