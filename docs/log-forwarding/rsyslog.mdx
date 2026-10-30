@@ -142,25 +142,30 @@ rsyslog:
 
 ### With restricted log access
 
-If the endpoint uses [restricted log access](/security/restricted-log-access), only root and members of the `beacon-log` group can read `runtime.jsonl`. rsyslog reads the log as the account it runs under, so that account has to be able to read it:
+If the endpoint uses [restricted log access](/security/restricted-log-access), only root and members of the `beacon-log` group can read `runtime.jsonl`. rsyslog reads the log as the account it runs under, so that account has to be able to read it. To see which account that is, run:
 
-- **RHEL, Rocky Linux, AlmaLinux:** rsyslog runs as root. Nothing to change.
-- **Ubuntu, Debian:** rsyslog runs as the `syslog` user (the `$PrivDropToUser syslog` line in `/etc/rsyslog.conf`). Add it to `beacon-log`, then restart rsyslog so it picks up the new group:
+```bash
+ps -o user= -C rsyslogd
+```
+
+- **`root`** (RHEL, Rocky Linux, AlmaLinux, Debian and most other distributions): nothing to change.
+- **`syslog`** (Ubuntu, whose rsyslog package sets `$PrivDropToUser syslog` in `/etc/rsyslog.conf`): add `syslog` to `beacon-log`, then restart rsyslog so it picks up the new group:
 
 ```bash
 sudo usermod -aG beacon-log syslog
 sudo systemctl restart rsyslog
 ```
 
-Without this, rsyslog cannot open the log and no Beacon events reach your collector. To check, run:
+Without this, rsyslog on Ubuntu cannot open the log and no Beacon events reach your collector. To check, run:
 
 ```bash
 sudo -u syslog test -r /var/log/beacon-agent/runtime.jsonl && echo readable
 ```
 
-With Salt, add the membership to the same state. The `beacon-log` group exists once Beacon is installed with restricted log access, so apply this state after that:
+With Salt, add the membership to the same state, limited to Ubuntu endpoints that use restricted log access. Other systems have no `syslog` account, so the membership would fail there. The `beacon-log` group exists once Beacon is installed with restricted log access, so apply this state after that:
 
 ```yaml title="beacon/rsyslog.sls"
+{% if grains['os'] == 'Ubuntu' and salt['file.file_exists']('/var/log/beacon-agent/.beacon-log-access') %}
 rsyslog-reads-beacon-log:
   group.present:
     - name: beacon-log
@@ -168,7 +173,10 @@ rsyslog-reads-beacon-log:
       - syslog
     - watch_in:
       - service: rsyslog
+{% endif %}
 ```
+
+The `.beacon-log-access` file is the marker Beacon writes beside the log when restricted log access is on.
 
 ## 4. Confirm events arrive
 
