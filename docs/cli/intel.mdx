@@ -103,12 +103,65 @@ fail it, because they claim no risk.
 It also shows when the newest verdict and registry update arrived. The index is refreshed
 hourly.
 
+## For agents
+
+The local `beacon` MCP server ([`beacon mcp serve`](/cli/mcp)) gives agents the same checks as
+tools, so an agent can check an MCP server or skill before it installs or runs it:
+
+| Tool | Does |
+|------|------|
+| `intel_lookup` | `beacon intel lookup` |
+| `intel_get_artifact` | `beacon intel show` |
+| `intel_check` | `beacon intel check` |
+| `intel_check_installed` | Checks every MCP server and skill configured on this machine |
+
+[Beacon Cloud MCP](/deployment/managed-mcp) has the first three as `beacon_intel_lookup`,
+`beacon_intel_get_artifact` and `beacon_intel_check`, free on every plan. Checking what is
+installed needs the machine's own config, so `intel_check_installed` is local only.
+
+`intel_check_installed` works like a dependency audit over a lockfile. Beacon reads each
+runtime's own MCP and skill configuration (the same files `beacon endpoint inventory` reads).
+By default it sends only public identifiers: the npm or PyPI package, from the public registry,
+in a server's launch command, without its version. For example, `npx -y @playwright/mcp@latest`
+is sent as `npm:@playwright/mcp`, `uvx mcp-server-fetch` as `pypi:mcp-server-fetch`, and the
+Windows form `cmd /c npx -y @playwright/mcp` the same way. A launch command with an option
+Beacon does not recognize is skipped rather than guessed at, so an option's value is never sent
+as a package. `npm exec` and `npm x` read npm's options after the package too (up to `--`), so
+Beacon reads them there as well. So is a package that does not come from a registry: a git or tarball URL, a direct
+reference such as `name @ git+https://…`, an `npm:` alias, a path or a local wheel or tarball.
+
+Names that may be private are held back and listed as skipped unless the agent passes
+`include_private_names`, which it should do only when you agree:
+
+- the configured name of a server with no package in its command, such as a local script, a
+  binary, a container or a remote URL;
+- a package that may come from a registry or index other than the public one. Beacon checks
+  where launchers usually find one: the launch command (`--registry`, `--index-url`, a config
+  file and the like), the server's `env` or `envFile`, the environment it inherits
+  (`npm_config_registry`, `npm_config_@scope:registry`, `UV_INDEX_URL`, `PIP_INDEX_URL` and the
+  like), and the npm, yarn, bun, pip and uv configuration files in your home directory, the system
+  locations, and the working directory and those above it, whether or not `include_project` is set
+  (`.npmrc`, including the global and builtin ones under npm's prefix, pnpm's global `rc`,
+  `.yarnrc.yml`, `bunfig.toml`, `pip.conf`, `uv.toml`, `pyproject.toml`). A private npm scope holds back only that scope's packages.
+  Settings that name the public registry don't count. A registry configured anywhere else (a
+  shell profile the agent did not inherit, say) is not seen, so check with `dry_run` first;
+- skill names, since a skill may be one you wrote.
+
+Paths, URLs, environment variables and other arguments are never sent. Beacon's own server and
+skills are skipped: the `beacon` server that runs the `beacon` binary, the `beacon-managed`
+Beacon Cloud MCP entry, and skills Beacon installed. A server or skill that only shares one of
+those names is checked like any other. A result matched only by a name, including a package the
+index could only match by name and a package from a private registry or index (the index knows
+only the public package that shares its name), is marked `name_only`: it may be a different artifact with the same name, so
+confirm the repository before relying on it. `dry_run` returns exactly what would be sent and
+sends nothing. Results map back to every runtime and config where each artifact was found.
+
 ## Network and privacy
 
 Every `beacon intel` command makes one HTTPS request to `https://intel.beacon.sh`. The request
 carries only what you named, plus Beacon's version in the `User-Agent`. No account token,
 device key or telemetry is sent, and redirects are refused. Hooks, plugins and background jobs
-never make this request.
+never make this request; the MCP tools above make it only when an agent calls one.
 
 | Variable | Effect |
 |----------|--------|
