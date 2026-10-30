@@ -238,6 +238,7 @@
               "security/data-inventory",
               "security/retention-redaction",
               "security/endpoint-operations",
+              "security/restricted-log-access",
               "security/policy"
             ]
           },
