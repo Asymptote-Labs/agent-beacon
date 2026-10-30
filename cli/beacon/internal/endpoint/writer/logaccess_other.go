@@ -12,3 +12,6 @@ func RestrictSystemLog(string, int) error {
 
 // ShareSystemLog is EnsureSystemLogWritable here, where the log is always shared.
 func ShareSystemLog(path string) error { return EnsureSystemLogWritable(path) }
+
+// CheckRestrictedSystemLogACL has nothing to read here.
+func CheckRestrictedSystemLogACL(string) ([]string, error) { return nil, nil }

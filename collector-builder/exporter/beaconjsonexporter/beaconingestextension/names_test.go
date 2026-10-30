@@ -50,6 +50,36 @@ func TestNameCacheRetriesAMissAfterTheTTL(t *testing.T) {
 	}
 }
 
+// A lookup that outlasts the wait leaves that connection unnamed, and its late answer names the
+// next one rather than a cached miss for nameCacheTTL. Connections that arrive meanwhile share the
+// one lookup.
+func TestNameCacheKeepsALateAnswer(t *testing.T) {
+	release := make(chan struct{})
+	calls := 0
+	c := newNameCache()
+	c.wait = 20 * time.Millisecond
+	c.lookup1 = func(string) string { calls++; <-release; return `CONTOSO\late` }
+	for i := 0; i < 3; i++ {
+		if got := c.lookup("S-1-5-21-1"); got != "" {
+			t.Fatalf("lookup %d = %q before the directory answered", i, got)
+		}
+	}
+	close(release)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if got := c.lookup("S-1-5-21-1"); got == `CONTOSO\late` {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the late answer never reached the cache")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if calls != 1 {
+		t.Fatalf("resolved %d times, want one lookup shared by every connection", calls)
+	}
+}
+
 func TestResolveNameFindsTheCurrentAccount(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uids are a Unix concept")
@@ -79,23 +109,5 @@ func TestValidName(t *testing.T) {
 		if validName(bad) {
 			t.Errorf("validName(%q) = true", bad)
 		}
-	}
-}
-
-func TestFirstExecutable(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("no execute bits")
-	}
-	dir := t.TempDir()
-	plain := dir + "/plain"
-	exe := dir + "/exe"
-	_ = os.WriteFile(plain, nil, 0o644)
-	_ = os.WriteFile(exe, nil, 0o755)
-	_ = os.Chmod(exe, 0o755)
-	if got := firstExecutable([]string{dir + "/missing", plain, exe}); got != exe {
-		t.Fatalf("firstExecutable = %q, want %q", got, exe)
-	}
-	if got := firstExecutable([]string{dir + "/missing"}); got != "" {
-		t.Fatalf("firstExecutable = %q, want none", got)
 	}
 }

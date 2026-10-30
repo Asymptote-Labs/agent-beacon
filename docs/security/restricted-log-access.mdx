@@ -3,7 +3,7 @@ title: "Restricted Log Access"
 description: "Make the collector the only writer of the system runtime log, so local accounts cannot rewrite it or read other users' sessions, and let a log shipper keep reading it"
 ---
 
-A system-mode endpoint keeps one runtime log for every user on the machine, `/var/log/beacon-agent/runtime.jsonl`. Your SIEM shipper reads that file. Restricted log access is the mode to use when no ordinary account on the machine should be able to change that file or read it.
+A system-mode endpoint keeps one runtime log for every user on the machine: `/var/log/beacon-agent/runtime.jsonl` on macOS and Linux, `%ProgramData%\Beacon\Endpoint\logs\runtime.jsonl` on Windows. Your SIEM shipper reads that file. Restricted log access is the mode to use when no ordinary account on the machine should be able to change that file or read it.
 
 ## Why the default log is shared
 
@@ -44,7 +44,7 @@ If the collector is stopped or restarting, a hook writes its events to a spool i
 ## Turn it on
 
 <Note>
-  Restricted log access applies to system-mode installs on macOS and Linux. It is not available on Windows yet, and a per-user log in `~/.beacon` is already private to its owner.
+  Restricted log access applies to system-mode installs on macOS, Linux and Windows. A per-user log in `~/.beacon` is already private to its owner. On Windows, hooks use a named pipe instead of a socket and the log is closed off by its ACL instead of file modes; see [On Windows](#on-windows).
 </Note>
 
 On a new system install:
@@ -64,6 +64,52 @@ For package installs you can instead set `BEACON_LOG_ACCESS=restricted` in the e
 Switching replaces the log and its archives with fresh copies, so a file handle another account opened while the log was shared stops reaching it. Existing events are kept.
 
 The mode is recorded in `config.json` as `log_access` and in a root-owned `.beacon-log-access` marker beside the log. `beacon endpoint repair`, package upgrades, the Jamf `repair-hooks.sh` policy, and a reinstall after `uninstall --keep-logs` all keep it, so you set it once per endpoint.
+
+## On Windows
+
+Restricted mode works the same way on a Windows system install, with Windows mechanisms in place of the Unix ones.
+
+| | Shared (default) | Restricted |
+|---|---|---|
+| Who writes `runtime.jsonl` | The collector (`BeaconCollector`, running as SYSTEM) and every user's hooks | The collector only |
+| How hooks deliver events | Append to the file | Send to the named pipe `\\.\pipe\beacon-agent-ingest` |
+| Log directory and everything in it | Users read; interactive users read and write the log files | SYSTEM and Administrators full control, read for the `beacon-log` local group, nothing for anyone else |
+| Lock (`runtime.jsonl.lock`) | As the log | SYSTEM and Administrators only |
+| User recorded on hook events | What the hook reports | The account Windows says sent the event: its SID in `user.uid` and `DOMAIN\name` in `user.name` |
+| Collector down or restarting | Hooks keep appending | Hooks hold events in a private spool in their profile and send them later |
+
+The pipe is created by the SYSTEM collector, refuses connections from other machines and denies network logons, and does not let ordinary accounts add an instance of their own. Hooks send only to a pipe that SYSTEM or Administrators created, so an account that takes the name first gets nothing: hooks keep their events in their spool, and the collector keeps running and serves the pipe as soon as the name is free. Hooks run by SYSTEM or by an administrator from an elevated shell write the log directly, as root does on Unix.
+
+Run the commands from an elevated shell:
+
+```powershell title="Switch a Windows endpoint to restricted"
+beacon endpoint repair --system --log-access restricted
+```
+
+For the MSI and `install-endpoint.ps1`, set `BEACON_LOG_ACCESS=restricted` in the machine environment before installing. An upgrade with the variable unset keeps whatever mode the endpoint has. The MSI's install step runs inside the Windows Installer service, which sees a machine variable set after the service started only once it restarts, so after installing check that `beacon endpoint status --system --json` reports `"log_access": "restricted"`, and if it does not, switch with `beacon endpoint repair --system --log-access restricted`.
+
+Switching replaces every file in the log directory with a fresh copy and resets the security of everything in it, so a handle another account opened while the log was shared stops reaching it. Windows cannot replace a file that another process holds open without allowing deletes. If one does, the switch waits a few seconds, then fails and names the file. The log is put back to shared, so hooks keep writing. Close that process (or sign the account out) and run the command again.
+
+Add a shipper's account to the readers group from an elevated shell, then restart the shipper:
+
+```powershell title="Add a shipper's account to beacon-log"
+net localgroup beacon-log <account> /add
+```
+
+Shippers that run as SYSTEM, which is how Azure Monitor Agent and Elastic Agent run by default, keep working with no change. The Splunk Universal Forwarder runs as SYSTEM only in releases before 9.1; from 9.1 it installs by default as the virtual account `NT SERVICE\SplunkForwarder`, which must be added and the forwarder restarted:
+
+```powershell title="Splunk Universal Forwarder 9.1 and later"
+net localgroup beacon-log "NT SERVICE\SplunkForwarder" /add
+Restart-Service SplunkForwarder
+```
+
+To verify, run `beacon endpoint doctor --system` from an elevated shell and expect `runtime_log_access: ok` and `runtime_log_permissions: ok` (`restricted_acl`), then check the directory:
+
+```powershell title="Check the log directory's access"
+icacls "$env:ProgramData\Beacon\Endpoint\logs"
+```
+
+It lists `NT AUTHORITY\SYSTEM`, `BUILTIN\Administrators` and `beacon-log` and nothing else.
 
 ## Let your log shipper read the log
 
@@ -115,7 +161,7 @@ The same rule applies to Splunk Universal Forwarder, Filebeat or Elastic Agent, 
 
 | Action | Who can do it |
 |---|---|
-| Install, repair, uninstall, connect or disconnect the system endpoint, or change its log access mode | Root only. These commands change root-owned files and services, and refuse or fail without `sudo` |
+| Install, repair, uninstall, connect or disconnect the system endpoint, or change its log access mode | Root only (an elevated administrator on Windows). These commands change root-owned files and services, and refuse or fail without `sudo` or elevation |
 | Append events to the log | Only the collector. Users' hooks deliver through the socket, stamped with the sending account |
 | Rewrite, truncate or delete events already in the log | Root only |
 | Read the log, including with `beacon endpoint dashboard`, `beacon scan`, `beacon traces`, and the session lookups in `beacon share`, `beacon handoff` and `beacon git` | Root and members of `beacon-log` |
@@ -130,7 +176,7 @@ Restricted mode protects the **log**: what has been recorded cannot be altered o
 - **A user still controls their own agent.** They can still send events of their own choosing through the socket, including ones that name another session's id, but every event is recorded under their own account, as the operating system reports it. They cannot write an event that claims to be someone else's.
 - **A user can still change their own agent settings.** The hooks and OpenTelemetry settings that send an agent's activity to Beacon live in each user's home (for example `~/.claude/settings.json`), and that user can edit them, which stops capture of their future sessions. Restricted mode does not change this. Run [`beacon endpoint doctor --system`](/cli/endpoint-doctor#console_user_configured) from your MDM to catch it: `console_user_configured` fails when the logged-in user's agents no longer point at the collector, and `sudo beacon endpoint user-config repair-installed --system` puts the settings back.
 - **The OTLP ports are not attributed.** The collector's OTLP receivers on `127.0.0.1:4317` and `4318` still accept telemetry from any local process, as in the shared mode. Agents that export over OTLP, such as Claude Code and Codex, use them, and events that arrive that way carry the user the agent reports rather than one the operating system confirmed.
-- **Root is trusted.** An administrator can read and change the log in either mode.
+- **Root is trusted.** An administrator can read and change the log in either mode. On Windows that is SYSTEM and any elevated administrator.
 
 ## Verify
 
