@@ -33,13 +33,9 @@ func RestrictedLogDirDACL(readersSID string) []ACE {
 	return dacl
 }
 
-// RestrictedLockDACL is the protected DACL on a restricted log's lock: SYSTEM and Administrators.
-func RestrictedLockDACL() []ACE {
-	return []ACE{
-		{Type: aceTypeAllowed, Mask: fileAllAccess, SID: sidSystem},
-		{Type: aceTypeAllowed, Mask: fileAllAccess, SID: sidAdministrators},
-	}
-}
+// RestrictedLockDACL is the protected DACL on a restricted log's lock: SYSTEM and Administrators,
+// which is a private file's.
+func RestrictedLockDACL() []ACE { return PrivateDACL(false) }
 
 // readerForbidden is everything a reader of the restricted log must not hold: any right to write,
 // append, remove, rename or re-secure.

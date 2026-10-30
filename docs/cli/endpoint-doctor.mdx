@@ -52,6 +52,10 @@ System mode only. Reports whether the system log is shared or [restricted](/cli/
 
 In the restricted mode, `runtime_log_permissions` checks that the log and its directory are closed to other accounts instead of checking that hooks can append. On Windows it reads the ACL of the log directory and of everything directly in it, and reports `restricted_acl` when only SYSTEM, Administrators and the `beacon-log` group (read only) can reach them, or `restricted_log_too_open` naming each grant to anyone else. Run without `sudo` (or, on Windows, unelevated), doctor cannot open a restricted log, and says so rather than reporting a failure. On Windows the suggested repair is `beacon endpoint repair --system` from an elevated shell.
 
+### `secret_files_private`
+
+Windows system endpoints with a Splunk HEC or Falcon LogScale HEC destination only. The token is in `config.json` and the collector config, and on Windows those files must carry their own ACL to keep it from every local user, because a file mode does nothing there. Doctor reports `secret_private` when only SYSTEM and Administrators can read both files, and `secret_readable_by_users`, naming each grant to anyone else, when they can. An endpoint installed by an older version reports the failure. `beacon endpoint doctor --system --fix`, run from an elevated shell, rewrites both files with the private ACL; so does a repair or a package upgrade.
+
 ### `console_user_configured`
 
 System-mode only, and worth understanding because it is the one failure that a completely healthy endpoint can still report.

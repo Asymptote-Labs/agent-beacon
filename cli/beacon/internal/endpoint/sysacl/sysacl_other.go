@@ -24,3 +24,13 @@ func ResetLogDirToShared(string) error { return nil }
 
 // LooksRestricted is false off Windows.
 func LooksRestricted(string, string) bool { return false }
+
+// SecurePrivateDir is a no-op off Windows, where a root-owned 0700 directory is already private.
+func SecurePrivateDir(string) error { return nil }
+
+// InspectPrivateFile is a no-op off Windows, where file modes say who may read a file.
+func InspectPrivateFile(string) ([]string, error) { return nil, nil }
+
+// IsPrivateFile is false off Windows: file modes carry the answer there, and callers keep the mode
+// they read.
+func IsPrivateFile(string) bool { return false }

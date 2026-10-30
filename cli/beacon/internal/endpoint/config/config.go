@@ -386,11 +386,17 @@ func Save(cfg Config) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	perm := os.FileMode(0644)
-	if HasSecretDestinations(cfg) {
-		perm = 0600
+	switch {
+	case !HasSecretDestinations(cfg):
+		err = atomicfile.Write(path, data, 0644)
+	case cfg.UserMode:
+		err = atomicfile.Write(path, data, 0600)
+	default:
+		// A HEC token in the system config. 0600 does nothing on Windows, where every user may
+		// read the machine-wide tree, so it is kept to SYSTEM and Administrators there.
+		err = atomicfile.WriteSystemPrivate(path, data)
 	}
-	if err := atomicfile.Write(path, data, perm); err != nil {
+	if err != nil {
 		return "", err
 	}
 	return path, nil

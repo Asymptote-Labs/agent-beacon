@@ -136,12 +136,16 @@ So the install sets these ACLs, by well-known SID, with inheritance from `%Progr
 |---|---|---|
 | `%ProgramData%\Beacon` and everything below it | Administrators | SYSTEM and Administrators: full control. Users: read and execute |
 | `%ProgramData%\Beacon\Endpoint\logs` | Administrators | The same, plus `INTERACTIVE`: read and write data on files directly in the directory (inherit-only). No right to create, delete or rename entries, and no right to change a file's permissions or owner |
+| `config.json` and `otelcol.yaml` in `%ProgramData%\Beacon\Endpoint`, while they hold a Splunk or Falcon HEC token | Administrators | SYSTEM and Administrators only. Ordinary users cannot read them |
+| `%ProgramData%\Beacon\Endpoint\state\backfill-snapshots` | Administrators | SYSTEM and Administrators only, passed on to the copies of the signed-in user's session databases that the install-time backfill reads there |
+
+The private files are what a root-owned `0600` file is on macOS and Linux. A file mode does nothing on Windows, so without its own ACL a file holding a token would inherit the read grant every user has on `%ProgramData%\Beacon`. Install, repair and package upgrades write the token files this way, and when the token is removed `config.json` is readable again. While it holds a token, a `beacon` command run without elevation cannot read `config.json`, the same as on macOS and Linux.
 
 Because users cannot create files in the log directory, the install creates `runtime.jsonl` and `runtime.jsonl.lock` itself; files the collector creates later, such as the log it starts after a rotation, inherit the same append grant. Rotation is done by the collector and by `beacon` commands run as an administrator. A hook that finds the log over its size limit appends anyway and leaves the rename to them.
 
 `%ProgramData%\Beacon` is reset even when it already exists. `%ProgramData%` lets any user create a subdirectory, so one found there before the package was installed may belong to someone else: the install takes ownership, replaces its ACL, removes any junction, symbolic link or hard link inside it (Beacon creates none), and resets anything below it that grants an ordinary user write, delete or ownership rights. Anything already locked down further than this is left as it is.
 
-`doctor --system` checks both halves: that interactive users can append, and that nothing grants them more. An endpoint installed by an older version carries a broader grant (Modify for `INTERACTIVE` on the log directory) and is reported as `acl_too_broad`. Upgrading the package fixes it, as does running this from an elevated shell:
+`doctor --system` checks both halves: that interactive users can append, and that nothing grants them more. An endpoint installed by an older version carries a broader grant (Modify for `INTERACTIVE` on the log directory) and is reported as `acl_too_broad`. With a HEC destination, doctor also reports `secret_files_private` when a file holding the token is readable by ordinary users, which is how an older version left it. Upgrading the package fixes both, as does running this from an elevated shell:
 
 ```powershell title="Reset the log directory ACL"
 beacon endpoint doctor --system --fix

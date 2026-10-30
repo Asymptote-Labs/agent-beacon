@@ -434,6 +434,10 @@ type fileSnapshot struct {
 	Existed bool
 	Data    []byte
 	Mode    os.FileMode
+	// Private records a Windows file only SYSTEM and Administrators could read, such as a config
+	// holding a HEC token. Mode cannot say so there, and restoring the content with it alone would
+	// hand the token to every user.
+	Private bool
 }
 
 // serviceController is the part of service.Manager that rollback uses.
@@ -992,6 +996,10 @@ func setAutoUpdateModeInConfigFile(path, mode string) error {
 	if err != nil {
 		return err
 	}
+	if sysacl.IsPrivateFile(path) {
+		// A system config holding a HEC token on Windows, which the mode below cannot keep private.
+		return atomicfile.WriteSystemPrivate(path, out)
+	}
 	perm := os.FileMode(0644)
 	if info, err := os.Stat(path); err == nil {
 		perm = info.Mode().Perm()
@@ -1237,6 +1245,7 @@ func snapshotFile(path string) fileSnapshot {
 		if info, statErr := os.Stat(path); statErr == nil {
 			snapshot.Mode = info.Mode().Perm()
 		}
+		snapshot.Private = sysacl.IsPrivateFile(path)
 	}
 	return snapshot
 }
@@ -1244,6 +1253,10 @@ func snapshotFile(path string) fileSnapshot {
 func restoreFile(path string, snapshot fileSnapshot) {
 	if !snapshot.Existed {
 		_ = os.Remove(path)
+		return
+	}
+	if snapshot.Private {
+		_ = atomicfile.WriteSystemPrivate(path, snapshot.Data)
 		return
 	}
 	mode := snapshot.Mode

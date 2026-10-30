@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/atomicfile"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/brewpath"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 )
@@ -117,17 +118,20 @@ func WriteConfig(cfg endpointconfig.Config) error {
 	if err := os.MkdirAll(filepath.Dir(cfg.Collector.SpoolPath), 0755); err != nil {
 		return err
 	}
-	perm := os.FileMode(0644)
-	if endpointconfig.HasSecretDestinations(cfg) {
-		perm = 0600
+	data := []byte(ConfigYAML(cfg))
+	if !endpointconfig.HasSecretDestinations(cfg) {
+		return os.WriteFile(cfg.Collector.ConfigPath, data, 0644)
 	}
-	if err := os.WriteFile(cfg.Collector.ConfigPath, []byte(ConfigYAML(cfg)), perm); err != nil {
+	// The config now carries a HEC token. A system collector's config sits in the machine-wide
+	// tree, which every user may read on Windows, where 0600 changes nothing but the read-only
+	// attribute; it is replaced by a file only SYSTEM and Administrators can open.
+	if !cfg.UserMode {
+		return atomicfile.WriteSystemPrivate(cfg.Collector.ConfigPath, data)
+	}
+	if err := os.WriteFile(cfg.Collector.ConfigPath, data, 0600); err != nil {
 		return err
 	}
-	if endpointconfig.HasSecretDestinations(cfg) {
-		return os.Chmod(cfg.Collector.ConfigPath, perm)
-	}
-	return nil
+	return os.Chmod(cfg.Collector.ConfigPath, 0600)
 }
 
 // IngestExtension is the collector extension that serves the local ingest socket in the restricted

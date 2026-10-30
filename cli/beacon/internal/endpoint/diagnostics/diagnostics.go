@@ -11,6 +11,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/collector"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sysacl"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/localingest"
 )
@@ -46,6 +47,9 @@ func Run(cfg endpointconfig.Config) []Check {
 	}
 	if !cfg.UserMode {
 		checks = append(checks, checkLogAccess(cfg, localingest.Deliverer{}))
+		if runtime.GOOS == "windows" && endpointconfig.HasSecretDestinations(cfg) {
+			checks = append(checks, checkSecretFilesPrivate(cfg, sysacl.InspectPrivateFile))
+		}
 	}
 	// The service definition check is named after whichever manager is actually in use, so
 	// the output is interpretable on a mixed fleet and a Linux host is not told to look for a
@@ -284,4 +288,41 @@ func checkLogACL(path string) Check {
 				"only SYSTEM and Administrators may change the log directory",
 			Evidence: "acl_interactive_write"}
 	}
+}
+
+// SecretFiles lists the system files that hold a HEC token when the endpoint has a Splunk or Falcon
+// destination: config.json and the collector config.
+func SecretFiles(cfg endpointconfig.Config) []string {
+	return []string{endpointconfig.ConfigPath(false), cfg.Collector.ConfigPath}
+}
+
+// checkSecretFilesPrivate asks of a Windows system endpoint with a HEC destination whether its
+// token is readable only by SYSTEM and Administrators. An endpoint installed before those files
+// were written private lets every local user read them, because the machine-wide tree grants Users
+// read and a 0600 mode changes nothing there; nothing else would notice, since the endpoint works.
+// inspect is sysacl.InspectPrivateFile, a seam for tests.
+func checkSecretFilesPrivate(cfg endpointconfig.Config, inspect func(string) ([]string, error)) Check {
+	var problems []string
+	for _, path := range SecretFiles(cfg) {
+		found, err := inspect(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return Check{Name: "secret_files_private", Target: path, Status: StatusWarn, Severity: SeverityLow,
+				Message: "could not read the access control list: " + err.Error(), Evidence: "acl_unreadable"}
+		}
+		for _, p := range found {
+			problems = append(problems, path+": "+p)
+		}
+	}
+	if len(problems) > 0 {
+		return Check{Name: "secret_files_private", Target: filepath.Dir(endpointconfig.ConfigPath(false)), Status: StatusFail,
+			Severity: SeverityHigh,
+			Message:  "a file holding the HEC token is readable by accounts other than SYSTEM and Administrators: " + strings.Join(problems, "; "),
+			Evidence: "secret_readable_by_users"}
+	}
+	return Check{Name: "secret_files_private", Target: filepath.Dir(endpointconfig.ConfigPath(false)), Status: StatusOK,
+		Severity: SeverityInfo, Message: "the files holding the HEC token are readable only by SYSTEM and Administrators",
+		Evidence: "secret_private"}
 }

@@ -205,6 +205,12 @@ func CreateRestrictedFile(path string, lock bool) (*os.File, error) {
 	if lock {
 		sddl = SDDL(sidAdministrators, true, RestrictedLockDACL())
 	}
+	return createNew(path, sddl)
+}
+
+// createNew creates a new file at path with the security descriptor sddl, failing if anything is
+// there, and opens it for reading and writing.
+func createNew(path, sddl string) (*os.File, error) {
 	sd, err := windows.SecurityDescriptorFromString(sddl)
 	if err != nil {
 		return nil, fmt.Errorf("build the security descriptor: %w", err)
