@@ -322,11 +322,11 @@ type redactChain struct {
 	lineFrom, lineTo     int
 	lineFirst            int // the end of lineFrom's own line, at or before lineTo
 	lineFailed           [][2]int
-	// The assigned values whose copies are removed after every rule has run (overCopy), and the
-	// gate's report that a match may hide another from this pass, which running on over a copy
-	// makes as replacing it does (copyHidesMatch).
+	// The assigned values whose copies are removed after every rule has run (overCopy), and
+	// whether running on over one may hide a match from this pass, as replacing it may
+	// (copyHidesMatch); matches reports it to the gate.
 	copies redactCopies
-	hidden *bool
+	hid    bool
 }
 
 func newRedactChain(engine *redactEngine, t string, hits []redactHit) *redactChain {
@@ -635,9 +635,7 @@ func (c *redactChain) overCopy(item []int) []int {
 			if x+len(v) > item[1] && strings.HasPrefix(t[x:], v) {
 				item = slices.Clone(item)
 				item[1] = x + len(v)
-				if c.hidden != nil {
-					*c.hidden = true
-				}
+				c.hid = true
 			}
 		}
 	}

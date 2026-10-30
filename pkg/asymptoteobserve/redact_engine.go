@@ -359,7 +359,8 @@ func (rule redactionRule) matches(text *redactGate, slot *redactSlot) iter.Seq2[
 			text.scan()
 			slot.prepare(rule)
 			chain = newRedactChain(text.e(), t, text.hits)
-			chain.copies, chain.hidden = text.copies, &text.hidden
+			chain.copies = text.copies
+			defer func() { text.hidden = text.hidden || chain.hid }()
 		}
 		whole := func(from int) {
 			re := rule.pattern()
