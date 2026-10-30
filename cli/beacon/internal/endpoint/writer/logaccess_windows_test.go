@@ -142,4 +142,45 @@ func TestRestrictSystemLogFailsWhileAHandleBlocksTheReplacement(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "holds it open") {
 		t.Fatalf("RestrictSystemLog = %v, want it to name the held file", err)
 	}
+	// The marker is written only once every file was replaced, so a failed run is not taken for a
+	// finished one: the next run copies again, and once nothing holds the file it succeeds.
+	if asymptoteobserve.RuntimeLogAccessRestricted(path) {
+		t.Fatal("a restriction that failed left the marker, so a rerun would skip the copies")
+	}
+	before, _ := os.Stat(archive)
+	if err := RestrictSystemLog(path, 0); err != nil {
+		t.Fatalf("the rerun: %v", err)
+	}
+	after, _ := os.Stat(archive)
+	if os.SameFile(before, after) {
+		t.Fatal("the rerun did not replace the archive the first run could not")
+	}
+	if !asymptoteobserve.RuntimeLogAccessRestricted(path) {
+		t.Fatal("no marker after the rerun succeeded")
+	}
+}
+
+// Every file the restriction creates is owned by Administrators from the start, and the new lock
+// carries only SYSTEM and Administrators: a reader who could open it for a moment could hold it.
+func TestRestrictedCopiesHaveTheirFinalSecurityFromCreation(t *testing.T) {
+	path := restrictFixture(t)
+	if err := RestrictSystemLog(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{path, path + ".1", path + ".lock", asymptoteobserve.LogAccessMarkerPath(path)} {
+		obj, err := sysacl.ReadObject(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if obj.Owner != "S-1-5-32-544" {
+			t.Errorf("%s is owned by %s, want Administrators", name, obj.Owner)
+		}
+	}
+	lock, err := sysacl.ReadObject(path + ".lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if problems := sysacl.RestrictedProblems(lock, backupOperators, true); len(problems) > 0 || !lock.Protected {
+		t.Fatalf("the new lock: protected %v, problems %v", lock.Protected, problems)
+	}
 }
