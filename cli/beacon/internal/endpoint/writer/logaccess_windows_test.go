@@ -197,6 +197,25 @@ func TestRestrictSystemLogReplacesTheOtherFilesBesideTheLog(t *testing.T) {
 	if fileIndex(t, linked) != linkedBefore {
 		t.Fatal("a hard-linked file outside the log family was copied")
 	}
+
+	// Back to shared, the files beside the log get the shared grants back with the log, not only
+	// the log family.
+	if err := ShareSystemLog(path); err != nil {
+		t.Fatalf("ShareSystemLog: %v", err)
+	}
+	obj, err := sysacl.ReadObject(inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	interactive := false
+	for _, ace := range obj.DACL {
+		if ace.SID == "S-1-5-4" {
+			interactive = true
+		}
+	}
+	if !interactive {
+		t.Fatalf("inventory_state.jsonl kept the restricted ACL after the log was shared again: %+v", obj.DACL)
+	}
 }
 
 // Every file the restriction creates is owned by Administrators from the start, and the new lock
