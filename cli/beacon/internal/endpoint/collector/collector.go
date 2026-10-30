@@ -176,10 +176,10 @@ func ConfigYAML(cfg endpointconfig.Config) string {
 	// The restricted log access mode makes the collector the only writer of the system log: hooks
 	// send their events to beacon_ingest over a local socket instead of appending, so the log can
 	// be 0640 root:beacon-log. Its rotation matches beaconjson's, since both append to one log.
-	ingestYAML, extensions := "", "[health_check]"
+	ingestYAML, extensions := "", "[health_check, loopback_host]"
 	if cfg.RestrictedLogAccess() {
 		ingestYAML = fmt.Sprintf("  %s:\n    log_path: %q\n    rotate_bytes: 10485760\n    rotate_archives: 5\n", IngestExtension, cfg.LogPath)
-		extensions = "[health_check, " + IngestExtension + "]"
+		extensions = "[health_check, loopback_host, " + IngestExtension + "]"
 	}
 	return fmt.Sprintf(`receivers:
   otlp:
@@ -188,6 +188,9 @@ func ConfigYAML(cfg endpointconfig.Config) string {
         endpoint: 127.0.0.1:%d
 %s      http:
         endpoint: 127.0.0.1:%d
+        include_metadata: true
+        auth:
+          authenticator: loopback_host
 
 processors:
   memory_limiter:
@@ -209,6 +212,7 @@ processors:
 extensions:
   health_check:
     endpoint: 127.0.0.1:%d
+  loopback_host:
 %s
 service:
   telemetry:

@@ -98,6 +98,7 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 - **Root-wipe commands are detected** · `rm -rf /*`, `rm -rf --no-preserve-root /` and `rm -r -f /` now raise recursive-root-delete.
 - **`beacon handoff resume --launch` no longer reports a started launch as cancelled** · When the new terminal picked up the launch just as the wait timed out, Beacon said the launch was cancelled while the runtime started anyway, so a retry could start a second one.
 - **`beacon endpoint gcs validate` prints a command that works** · Its follow-up told you to `gzip -dc` the uploaded object, but the GCS forwarder uploads plain `.jsonl`, so the command printed nothing.
+- **The collector's OTLP HTTP receiver rejects non-loopback Host headers** · A web page that DNS-rebinds its own hostname to `127.0.0.1` could post forged logs and spans to `127.0.0.1:4318`, which landed in the runtime log and every destination. The receiver now answers 401 unless the Host header names localhost or a loopback IP, as the dashboard and MCP server already do. Runtimes, the SDK and the browser extension send a loopback Host and are unaffected; gRPC on 4317 is unchanged. Use the `beacon-otelcol` from the same release, since an older one refuses the new config.
 
 ### v1.3.46 · October 22, 2026
 

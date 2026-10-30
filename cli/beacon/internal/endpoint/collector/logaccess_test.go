@@ -42,7 +42,7 @@ func TestConfigYAMLServesTheIngestSocketInTheRestrictedMode(t *testing.T) {
 	}
 	service := doc["service"].(map[string]interface{})
 	enabled := service["extensions"].([]interface{})
-	if len(enabled) != 2 || enabled[0] != "health_check" || enabled[1] != IngestExtension {
+	if len(enabled) != 3 || enabled[0] != "health_check" || enabled[1] != "loopback_host" || enabled[2] != IngestExtension {
 		t.Fatalf("service extensions = %v", enabled)
 	}
 }
@@ -57,7 +57,7 @@ func TestConfigYAMLLeavesTheIngestSocketOutOtherwise(t *testing.T) {
 			t.Errorf("%s: config names %s:\n%s", name, IngestExtension, text)
 		}
 		service := parsedYAML(t, text)["service"].(map[string]interface{})
-		if enabled := service["extensions"].([]interface{}); len(enabled) != 1 || enabled[0] != "health_check" {
+		if enabled := service["extensions"].([]interface{}); len(enabled) != 2 || enabled[0] != "health_check" || enabled[1] != "loopback_host" {
 			t.Errorf("%s: service extensions = %v", name, enabled)
 		}
 	}
@@ -66,7 +66,7 @@ func TestConfigYAMLLeavesTheIngestSocketOutOtherwise(t *testing.T) {
 func TestCheckComponentsRequiresTheIngestExtensionWhenAsked(t *testing.T) {
 	prev := listComponents
 	t.Cleanup(func() { listComponents = prev })
-	listed := "processors:\n  - name: claude_api_body\n  - name: beacon_privacy\nextensions:\n  - name: health_check\n"
+	listed := "processors:\n  - name: claude_api_body\n  - name: beacon_privacy\nextensions:\n  - name: health_check\n  - name: loopback_host\n"
 	listComponents = func(context.Context, string) ([]byte, error) { return []byte(listed), nil }
 	if err := CheckComponents("/opt/beacon/bin/beacon-otelcol"); err != nil {
 		t.Fatalf("shared mode: %v", err)
