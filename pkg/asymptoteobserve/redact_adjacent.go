@@ -92,8 +92,8 @@ type redactFollower struct {
 type redactFollowerKind uint8
 
 const (
-	// followRun: the match lies in the run of bytes of its charset from where it starts, which
-	// never holds the `[` of a marker.
+	// followRun: a word (its one needle), blanks, and a value: the match lies in the needle, the
+	// blanks after it and the run of its charset without blanks after them (Bearer).
 	followRun redactFollowerKind = iota
 	// followScheme: a URL, which holds no `/` and no whitespace after its `://`.
 	followScheme
@@ -142,8 +142,8 @@ func (e *redactEngine) adjacency() *redactAdjacency {
 				for c := utf8.RuneSelf; c < 256; c++ {
 					f.charset[c] = true
 				}
-				if f.charset['['] || f.charset['\n'] {
-					panic("asymptoteobserve: a run follower cannot match '[' or a newline: " + rule.expr)
+				if f.charset['['] || f.charset['\n'] || len(rule.needles.needles) != 1 {
+					panic("asymptoteobserve: a run follower has one needle and cannot match '[' or a newline: " + rule.expr)
 				}
 			}
 			a.followers = append(a.followers, f)
@@ -315,10 +315,16 @@ type redactChain struct {
 	restAt, restEnd int
 	// What secretAt found where it was asked.
 	secrets map[int]redactSecret
+	// The end of the run of URL scheme bytes from schemeFrom; the end of the line holding
+	// lineFrom; and, per follower, the end of a line where a followLine rule found nothing.
+	schemeFrom, schemeTo int
+	lineFrom, lineTo     int
+	lineFailed           []int
 }
 
 func newRedactChain(engine *redactEngine, t string, hits []redactHit) *redactChain {
-	return &redactChain{engine: engine, adj: engine.adjacency(), t: t, hits: hits, segFrom: -1, restAt: -1}
+	return &redactChain{engine: engine, adj: engine.adjacency(), t: t, hits: hits, segFrom: -1, restAt: -1,
+		schemeFrom: -1, schemeTo: -1, lineFrom: -1, lineTo: -1}
 }
 
 func redactWorked(n int) {
@@ -426,9 +432,17 @@ func (c *redactChain) rescue(si, q int) []int {
 				continue
 			}
 			if m := c.find(s.rule, q, x); m != nil && m[1] == x {
-				if _, next := c.secretAt(x); next != nil || c.redactedAt(x) {
+				if _, next := c.secretAt(x); next != nil || c.redactedAt(x) || c.followerStarts(x) {
 					return m
 				}
+			}
+		}
+	}
+	// A URL, Bearer token or curl command right after it.
+	for x := q + 1; x < min(len(c.t), q+s.bound); x++ {
+		if isASCIILetter(c.t[x]) && c.followerStarts(x) {
+			if m := c.find(s.rule, q, x); m != nil && m[1] == x {
+				return m
 			}
 		}
 	}
@@ -558,6 +572,27 @@ func (c *redactChain) run(si int, m []int, use redactUse, yield func([]int, reda
 			}
 			si, m = sj, sm
 			continue
+		}
+		// A URL, Bearer token or curl command whose first word the match took: cut the match
+		// before it, and the follower is redacted where the marker ends (redactAfterMarkers); too
+		// short to be cut there, the item runs on over the follower's match.
+		if c.adj.shapes[shape].trailing == 0 {
+			if q, fend := c.followerCrossing(m); q >= 0 {
+				var cut []int
+				if q >= least && merged {
+					cut = slices.Clone(item)
+					cut[1] = q
+				} else if q >= least {
+					if cut = c.find(c.adj.shapes[shape].rule, item[0], q); cut != nil && cut[1] != q {
+						cut = nil
+					}
+				}
+				if cut == nil {
+					cut = slices.Clone(item)
+					cut[1] = fend
+				}
+				return cut[1], yield(cut, use)
+			}
 		}
 		if !yield(item, use) {
 			return 0, false
@@ -846,6 +881,95 @@ func (a *redactAdjacency) startsLine(t string, p int) bool {
 	return false
 }
 
+// followerStarts reports whether a follower matches at x: a URL, a Bearer token or a curl command.
+func (c *redactChain) followerStarts(x int) bool {
+	if m, _ := c.followerAt(x); m != nil {
+		return true
+	}
+	return c.lineFollowerAt(x) != nil
+}
+
+// followerCrossing returns where a follower starts whose first word m took, the match running on
+// over a URL's scheme, `Bearer` or `curl` and stopping at the byte after it, and where the
+// follower's match ends; or -1.
+func (c *redactChain) followerCrossing(m []int) (int, int) {
+	t, start, e := c.t, m[0], m[1]
+	if e >= len(t) || e-1 <= start || c.followerStarts(e) {
+		return -1, 0
+	}
+	if isASCIILetter(t[e-1]) && strings.HasPrefix(t[c.schemeEnd(e):], "://") {
+		if fm, _ := c.followerAt(e - 1); fm != nil && fm[1] > e {
+			return e - 1, fm[1]
+		}
+	}
+	for _, f := range c.adj.followers {
+		if f.kind == followScheme {
+			continue
+		}
+		for _, needle := range redactionRules[f.rule].needles.needles {
+			q := e - len(needle)
+			if q <= start || !c.hasNeedleAt(f.needles, q) {
+				continue
+			}
+			if f.kind == followLine {
+				if fm := c.lineFollowerAt(q); fm != nil {
+					return q, fm[1]
+				}
+			} else if fm, _ := c.followerAt(q); fm != nil && fm[1] > e {
+				return q, fm[1]
+			}
+		}
+	}
+	return -1, 0
+}
+
+// schemeEnd returns the end of the run of URL scheme bytes from p.
+func (c *redactChain) schemeEnd(p int) int {
+	if c.schemeFrom <= p && p <= c.schemeTo {
+		return c.schemeTo
+	}
+	end := p
+	for end < len(c.t) && (schemeClass[c.t[end]] || c.t[end] >= utf8.RuneSelf) {
+		end++
+	}
+	redactWorked(end - p)
+	c.schemeFrom, c.schemeTo = p, end
+	return end
+}
+
+// lineFollowerAt returns the match of the first followLine rule that matches at q, or nil. It
+// hands the pattern slices that double until the match ends inside one or one reaches the line's
+// end; a place on a line that finds nothing means no later place on the line does (from the
+// earlier `curl`, the pattern's lazy run takes the bytes up to the later one).
+func (c *redactChain) lineFollowerAt(q int) []int {
+	if c.lineFailed == nil {
+		c.lineFailed = make([]int, len(c.adj.followers))
+	}
+	for k, f := range c.adj.followers {
+		if f.kind != followLine || q < c.lineFailed[k] || !c.hasNeedleAt(f.needles, q) {
+			continue
+		}
+		if q < c.lineFrom || q > c.lineTo {
+			c.lineFrom, c.lineTo = q, len(c.t)
+			if i := strings.IndexByte(c.t[q:], '\n'); i >= 0 {
+				c.lineTo = q + i
+			}
+			redactWorked(c.lineTo - q)
+		}
+		for n := 256; ; n *= 2 {
+			end := min(c.lineTo, q+n)
+			if m := c.find(f.rule, q, end); m != nil && m[1] < end || end == c.lineTo {
+				if m != nil {
+					return m
+				}
+				break
+			}
+		}
+		c.lineFailed[k] = c.lineTo
+	}
+	return nil
+}
+
 // followerAt returns the match of the first followRun or followScheme rule, in rule order, that
 // matches at p and keeps no value of it, and how to expand it.
 func (c *redactChain) followerAt(p int) ([]int, redactUse) {
@@ -857,12 +981,11 @@ func (c *redactChain) followerAt(p int) ([]int, redactUse) {
 		case followLine:
 			continue
 		case followScheme:
-			r := p
-			for r < len(t) && (schemeClass[t[r]] || t[r] >= utf8.RuneSelf) {
-				r++
+			if p >= len(t) || !isASCIILetter(t[p]) {
+				continue
 			}
+			r := c.schemeEnd(p)
 			if !strings.HasPrefix(t[r:], "://") {
-				redactWorked(r - p)
 				continue
 			}
 			end := r + 3
@@ -874,8 +997,12 @@ func (c *redactChain) followerAt(p int) ([]int, redactUse) {
 			if !c.hasNeedleAt(f.needles, p) {
 				continue
 			}
-			end := p
-			for end < len(t) && f.charset[t[end]] {
+			// The word, the blanks after it, and a run of the charset without blanks.
+			end := p + len(redactionRules[f.rule].needles.needles[0])
+			for end < len(t) && (t[end] == ' ' || t[end] == '\t') {
+				end++
+			}
+			for end < len(t) && f.charset[t[end]] && t[end] != ' ' && t[end] != '\t' {
 				end++
 			}
 			m = c.find(f.rule, p, min(len(t), end+1))

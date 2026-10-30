@@ -580,7 +580,8 @@ func urlRunsOn(t string, m []int) int {
 }
 
 // labelEndsAt reports whether s ends with a secret-named label and its separator, as the label
-// rules read them: a label word, an optional closing quote, and `:` or `=` with whitespace around.
+// rules read them: one of redactLabel's markers, an optional closing quote, and `:` or `=` with
+// whitespace around. `deploykey:` is no label; `api_key:` is.
 func labelEndsAt(s string) bool {
 	i := len(s)
 	for i > 0 && isRegexpSpace(s[i-1]) {
@@ -596,13 +597,11 @@ func labelEndsAt(s string) bool {
 			i--
 		}
 	}
-	for _, word := range redactLabelWords {
-		if i >= len(word) && strings.EqualFold(s[i-len(word):i], word) {
-			return true
-		}
-	}
-	return false
+	return redactLabelEnd().MatchString(s[max(0, i-32):i])
 }
+
+// redactLabelEnd matches text that ends in one of redactLabel's markers.
+var redactLabelEnd = lazyPattern(`(?i)(?:` + strings.TrimPrefix(redactLabel, `[A-Za-z0-9_.-]*?`) + `)$`)
 
 // redactAssignedRule captures the value of a labeled assignment, quoted with ", ' or a backtick
 // (${1} to ${3}) or not (${4}), so a bare copy of it elsewhere in the same text is

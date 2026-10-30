@@ -34,6 +34,17 @@ var adjacentCases = []struct{ name, input, want string }{
 	// without it: the two are redacted as one.
 	{"an API key into a JWT it cannot be cut before", "sk-" + adjacentJWT, "sk-[REDACTED]"},
 	{"curl cookies after an npm token", adjacentNPM + "curl -b 'a=1' -b 'b=2'", "npm_[REDACTED]curl -b '[REDACTED]' -b '[REDACTED]'"},
+	// A token's pattern runs on over a URL's scheme, `Bearer` or `curl`: the token is cut before
+	// it, and the follower is redacted.
+	{"a URL password after a GitHub token", adjacentGitHub + "postgres://user:pw@host/db", "ghp_[REDACTED]s://user:[REDACTED]@host/db"},
+	{"a URL password after a JWT", adjacentJWT + "postgres://user:pw@host/db", "eyJ[REDACTED]s://user:[REDACTED]@host/db"},
+	{"a Bearer token after a Hugging Face token", "hf_abcdefghijklmnopqrstuvwxyz01234567Bearer abcdefghijk", "hf_[REDACTED]Bearer [REDACTED]"},
+	{"a Bearer token after a Slack token", "xoxb-1234567890-abcBearer abcdefghijk", "xoxb-[REDACTED]Bearer [REDACTED]"},
+	{"a curl password after an API key", "sk-abcdefghijklmnopqrstuvwxyz0123curl -u admin:hunter2 https://x", "sk-[REDACTED]curl -u admin:[REDACTED] https://x"},
+	{"a curl password after a GitLab token", "glpat-abcdefghijklmnopqrstuvcurl -u admin:hunter2", "glpat-[REDACTED]curl -u admin:[REDACTED]"},
+	{"a URL password after an AWS key id", "AKIAIOSFODNN7EXAMPLEpostgres://user:pw@host/db", "AKIA[REDACTED]postgres://user:[REDACTED]@host/db"},
+	{"a Bearer token after an AWS key id", "AKIAIOSFODNN7EXAMPLEBearer abcdefghijk", "AKIA[REDACTED]Bearer [REDACTED]"},
+	{"a curl password after an AWS key id", "AKIAIOSFODNN7EXAMPLEcurl -u admin:hunter2", "AKIA[REDACTED]curl -u admin:[REDACTED]"},
 	{"a Google key, then a GitHub token", adjacentGoogle + adjacentGitHub, "AIza[REDACTED]ghp_[REDACTED]"},
 	{"npm tokens and Google keys in turn", adjacentNPM + adjacentGoogle + adjacentNPM + adjacentGoogle, "npm_[REDACTED]AIza[REDACTED]npm_[REDACTED]AIza[REDACTED]"},
 	// The key id's pattern ends in \b, which a token right after it takes away.
@@ -85,6 +96,11 @@ func TestRedactStringKeepsWhatFollowsASecretWhenItIsNone(t *testing.T) {
 		"x" + adjacentGitHub:                         "x" + adjacentGitHub,
 		"token=abcdefgh12345678 abcdefgh12345678xyz": "token=[REDACTED] [REDACTED]xyz",
 		"[REDACTED]Bearer":                           "[REDACTED]Bearer",
+		// A URL whose user name only ends in a word a label holds keeps its host and path; one
+		// that is a label (api_key) is redacted as far as the label rules take it.
+		"https://deploykey:pw@host/repo": "https://deploykey:[REDACTED]@host/repo",
+		"https://key:pw@host/repo":       "https://key:[REDACTED]@host/repo",
+		"https://keys:pw@host/repo":      "https://keys:[REDACTED]@host/repo",
 	} {
 		if got := RedactString(input); got != want {
 			t.Errorf("RedactString(%q) = %q, want %q", input, got, want)

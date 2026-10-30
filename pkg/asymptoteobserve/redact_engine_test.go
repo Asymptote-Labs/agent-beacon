@@ -203,6 +203,12 @@ func TestRedactionWorkIsLinear(t *testing.T) {
 		"curl commands after keys":     "npm_abcdefghijklmnopqrstuvwxyz0123456789curl -b x ",
 		"keys after replaced copies":   "token=abcdefgh12345678 abcdefgh12345678ghp_0123456789abcdefghijklmnopqrstuvwxyz ",
 		"key ids into unfinished keys": "AKIAIOSFODNN7EXAMPLEAIza",
+		"tokens into URL schemes":      "ghp_0123456789abcdefghijklmnopqrstuvwxyzpostgres://u:p@h/",
+		"tokens into Bearer tokens":    "hf_abcdefghijklmnopqrstuvwxyz01234567Bearer x ",
+		"keys into curl commands":      "sk-abcdefghijklmnopqrstuvwxyz0123curl -u a:b ",
+		"keys into curl lines":         "sk-abcdefghijklmnopqrstuvwxyz0123curl x ",
+		"key ids into URL schemes":     "AKIAIOSFODNN7EXAMPLEa://x:y@",
+		"key ids into unfinished URLs": "AKIAIOSFODNN7EXAMPLEa:/",
 	}
 	for name, unit := range families {
 		work := func(n int) int {
