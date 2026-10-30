@@ -94,7 +94,6 @@ function Invoke-Hook {
         "set `"BEACON_ENDPOINT_LOG=$log`"",
         "set `"BEACON_ENDPOINT_CONFIG=$config`"",
         'set "USER=Administrator"',
-        "echo %USERPROFILE%> `"$work\$Session.home`"",
         "`"$hooks`" --platform claude session-start < `"$payload`" > `"$work\$Session.out`" 2> `"$work\$Session.err`""
     )
     if ($code -ne 0) {
@@ -150,9 +149,10 @@ try {
     $sessionB = 'smoke-b-' + [Guid]::NewGuid().ToString('N')
     Invoke-Hook $sessionB
     if ((Get-LogEvents $sessionB).Count -gt 0) { throw "an event reached the restricted log with the collector stopped" }
-    # The profile the hook ran under, as it saw it: Windows names a profile directory after the
-    # account only when that name is free.
-    $profileDir = (Get-Content -LiteralPath "$work\$sessionB.home" -ErrorAction SilentlyContinue | Select-Object -First 1)
+    # The account's own profile, looked up by its SID: Windows names a profile directory after the
+    # account only when that name is free, and the hook inherits this script's USERPROFILE (which
+    # is why the spool is placed by the token's profile, not by that variable).
+    $profileDir = (Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $sid } | Select-Object -First 1).LocalPath
     if (-not $profileDir) { $profileDir = Join-Path $env:SystemDrive "Users\$account" }
     $spool = Join-Path $profileDir.Trim() '.beacon\endpoint\spool'
     if (-not (Get-ChildItem -LiteralPath $spool -Recurse -File -ErrorAction SilentlyContinue | Select-String -SimpleMatch $sessionB -Quiet)) {
