@@ -288,8 +288,16 @@ var redactIdempotenceInputs = []string{
 	// `token`:}token:--token` as an assignment; the label that hid it is replaced.
 	"token:abctoken\":`secret`:`token`:}token:--token \"token\"",
 	// A flag finds no value where a copy of an assigned value that starts with a dash follows it;
-	// once the copy is replaced, a second pass merged the markers it found there.
+	// once the copy is replaced, a second pass redacted the marker and what follows it.
+	`-pAsswd --token -token:"--token `,
 	"--password --token ghp_0123456789abcdefghijklmnopqrsta=@h:token:'--token ",
+	// An AWS key id that a copy of an assigned value follows ends a word only once the copy is
+	// replaced, after every rule has run.
+	"AKIAIOSFODNN7EXAMPLEAuthorization: Authorization: ",
+	"@AKIAIOSFODNN7EXAMPLEx-access-token:x-access-token:",
+	"AKIAIOSFODNN7EXAMPLEAKIAIOSFODNN7EXAMPLEAuthorization: Authorization: ",
+	// The copy of `https://` holds the slash a URL's password stops at, and its marker does not.
+	"A://token:https://,ghp_0123456789abcdefghijklmnopqrst==https://@h\n=",
 }
 
 // A field named for a credential is one, whatever its value looks like.

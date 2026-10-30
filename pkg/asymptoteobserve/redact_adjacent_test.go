@@ -45,6 +45,9 @@ var adjacentCases = []struct{ name, input, want string }{
 	{"a URL password after an AWS key id", "AKIAIOSFODNN7EXAMPLEpostgres://user:pw@host/db", "AKIA[REDACTED]postgres://user:[REDACTED]@host/db"},
 	{"a Bearer token after an AWS key id", "AKIAIOSFODNN7EXAMPLEBearer abcdefghijk", "AKIA[REDACTED]Bearer [REDACTED]"},
 	{"a curl password after an AWS key id", "AKIAIOSFODNN7EXAMPLEcurl -u admin:hunter2", "AKIA[REDACTED]curl -u admin:[REDACTED]"},
+	// When the key id rule asks whether a curl command follows the key id, the rule for a key id
+	// and its secret has already asked about the line from its later `curl`, which has none.
+	{"a curl password after a Google key and an AWS key id", adjacentGoogle + "AKIAIOSFODNN7EXAMPLEcurl -u a:curl -u a:", "AIza[REDACTED]AKIA[REDACTED]curl -u a:[REDACTED] -u a:"},
 	{"a Google key, then a GitHub token", adjacentGoogle + adjacentGitHub, "AIza[REDACTED]ghp_[REDACTED]"},
 	{"npm tokens and Google keys in turn", adjacentNPM + adjacentGoogle + adjacentNPM + adjacentGoogle, "npm_[REDACTED]AIza[REDACTED]npm_[REDACTED]AIza[REDACTED]"},
 	// The key id's pattern ends in \b, which a token right after it takes away.
@@ -104,6 +107,27 @@ func TestRedactStringKeepsWhatFollowsASecretWhenItIsNone(t *testing.T) {
 	} {
 		if got := RedactString(input); got != want {
 			t.Errorf("RedactString(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+// A URL's password that runs on as the label rules read it (urlRunsOn) reads an AWS key id and
+// its secret as the shape rule for the pair leaves them: the run that takes the key id takes the
+// secret too, and the pair does not stop the password where the secret's `/` would.
+func TestRedactStringRunsAURLPasswordOnOverAnAWSKeyAndSecret(t *testing.T) {
+	const pair = "AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+	for input, want := range map[string]string{
+		"A://token:,@0,@0,@" + pair + "*S-1":                                            "A://token:[REDACTED]",
+		"A://token:,@AKIAIOSFODNN7EXAMPLE:,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY x":  "A://token:[REDACTED] x",
+		"A://token:,@0," + pair + "@h":                                                  "A://token:[REDACTED]",
+		"A://token:,@0,AKIAIOSFODNN7EXAMPLE wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY@h": "A://token:[REDACTED],AKIA[REDACTED] [REDACTED]@h",
+	} {
+		got := RedactString(input)
+		if got != want {
+			t.Errorf("RedactString(%q) = %q, want %q", input, got, want)
+		}
+		if again := RedactString(got); again != got {
+			t.Errorf("RedactString(%q) = %q, and again %q", input, got, again)
 		}
 	}
 }

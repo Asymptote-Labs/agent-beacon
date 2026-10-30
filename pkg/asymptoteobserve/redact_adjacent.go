@@ -316,11 +316,12 @@ type redactChain struct {
 	// What secretAt found where it was asked.
 	secrets map[int]redactSecret
 	// The end of the run of URL scheme bytes from schemeFrom; the end of the line holding
-	// lineFrom; and, per follower, the end of a line where a followLine rule found nothing.
+	// lineFrom; and, per follower, the places on a line where a followLine rule finds nothing: from
+	// the earliest place where it found nothing to the end of that place's line.
 	schemeFrom, schemeTo int
 	lineFrom, lineTo     int
 	lineFirst            int // the end of lineFrom's own line, at or before lineTo
-	lineFailed           []int
+	lineFailed           [][2]int
 }
 
 func newRedactChain(engine *redactEngine, t string, hits []redactHit) *redactChain {
@@ -968,10 +969,14 @@ func (c *redactChain) schemeEnd(p int) int {
 // earlier `curl`, the pattern's lazy run takes the bytes up to the later one).
 func (c *redactChain) lineFollowerAt(q int) []int {
 	if c.lineFailed == nil {
-		c.lineFailed = make([]int, len(c.adj.followers))
+		c.lineFailed = make([][2]int, len(c.adj.followers))
+		for k := range c.lineFailed {
+			c.lineFailed[k] = [2]int{-1, -1}
+		}
 	}
 	for k, f := range c.adj.followers {
-		if f.kind != followLine || q < c.lineFailed[k] || !c.hasNeedleAt(f.needles, q) {
+		failed := &c.lineFailed[k]
+		if f.kind != followLine || failed[0] <= q && q <= failed[1] || !c.hasNeedleAt(f.needles, q) {
 			continue
 		}
 		if q < c.lineFrom || q > c.lineFirst {
@@ -991,7 +996,12 @@ func (c *redactChain) lineFollowerAt(q int) []int {
 				break
 			}
 		}
-		c.lineFailed[k] = c.lineFirst
+		// The places are not asked in order: each shape's rescue asks from its own start.
+		if failed[1] == c.lineFirst && failed[0] >= 0 {
+			failed[0] = min(failed[0], q)
+		} else {
+			*failed = [2]int{q, c.lineFirst}
+		}
 	}
 	return nil
 }

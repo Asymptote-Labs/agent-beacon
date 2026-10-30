@@ -209,10 +209,16 @@ func TestRedactionWorkIsLinear(t *testing.T) {
 		"keys into curl lines":         "sk-abcdefghijklmnopqrstuvwxyz0123curl x ",
 		"key ids into URL schemes":     "AKIAIOSFODNN7EXAMPLEa://x:y@",
 		"key ids into unfinished URLs": "AKIAIOSFODNN7EXAMPLEa:/",
-		// Values that are themselves labels, which make redaction pass over the text again.
+		// Values that are themselves labels, and copies that start a flag's value, which make
+		// redaction pass over the text again.
 		"labels kept values hid":     `token:seCret":token":0 `,
 		"labels hid three passes":    `0secret=token :ghp_0123456789abcdefghijklmnopqrstsecret=token :seCret':token':@h' `,
 		"labels captured values hid": "token:abctoken\":`secret`:`token`:}token:--token \"token\" ",
+		"copies after flags":         "-pAsswd --token -token:\"--token\" ",
+		"key ids before copies":      "AKIAIOSFODNN7EXAMPLEAuthorization: Authorization: ",
+		// A URL password's run on (urlRunsOn) over AWS key ids and their secrets.
+		"URL runs over AWS keys":      "A://token:,@AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY@",
+		"URL passwords over AWS keys": "A://token:,@0,AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY ",
 	}
 	for name, unit := range families {
 		work := func(n int) int {
