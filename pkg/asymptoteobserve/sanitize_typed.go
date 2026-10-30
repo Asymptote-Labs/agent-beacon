@@ -101,7 +101,12 @@ func (g *genericSanitizer) intp(p *int) *int {
 	if p == nil {
 		return nil
 	}
-	v := int(g.integer(int64(*p)))
+	n := g.integer(int64(*p))
+	if n < math.MinInt || n > math.MaxInt { // cannot happen for an int; out of range, the round trip fails too
+		g.failed = true
+		return nil
+	}
+	v := int(n)
 	return &v
 }
 
