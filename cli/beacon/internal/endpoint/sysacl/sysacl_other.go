@@ -18,3 +18,9 @@ func SecureRestrictedLogDir(dir, base, readersSID string) error { return nil }
 func SecureRestrictedLock(path string) error { return nil }
 
 func InspectRestrictedLogDir(dir, base, readersSID string) ([]string, error) { return nil, nil }
+
+// ResetLogDirToShared is a no-op off Windows.
+func ResetLogDirToShared(string) error { return nil }
+
+// LooksRestricted is false off Windows.
+func LooksRestricted(string) bool { return false }

@@ -301,8 +301,21 @@ func copyInto(dst *os.File, path string) error {
 // EnsureSystemLogWritable gives the directory and the log family the shared ACL again, the lock's
 // narrower one included.
 func ShareSystemLog(path string) error {
+	// Read before the marker goes: whether the directory was restricted, by the marker or, for a
+	// restriction cut short before writing it, by the directory's own ACL.
+	wasRestricted := asymptoteobserve.RuntimeLogAccessRestricted(path) || sysacl.LooksRestricted(filepath.Dir(path))
 	if err := asymptoteobserve.SetRuntimeLogAccess(path, asymptoteobserve.LogAccessShared); err != nil {
 		return fmt.Errorf("remove the restricted mode marker: %w", err)
 	}
-	return EnsureSystemLogWritable(path)
+	if err := EnsureSystemLogWritable(path); err != nil {
+		return err
+	}
+	if wasRestricted {
+		// EnsureSystemLogWritable resets only the log family; the restricted mode reset every file
+		// in the directory, and they go back too.
+		if err := sysacl.ResetLogDirToShared(filepath.Dir(path)); err != nil {
+			return fmt.Errorf("give the log directory back its shared grants: %w", err)
+		}
+	}
+	return nil
 }
