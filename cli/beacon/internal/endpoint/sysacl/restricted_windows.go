@@ -144,8 +144,15 @@ func InspectRestrictedLogDir(dir, base, readersSID string) ([]string, error) {
 	// Every entry, not only the log family, for the reason SecureRestrictedLogDir resets them all.
 	for _, entry := range entries {
 		child := filepath.Join(dir, entry.Name())
+		lock := strings.EqualFold(entry.Name(), base+".lock")
 		fobj, link, err := readObject(child)
 		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		// The lock is closed to the readers group, so a reader who runs doctor is refused it while
+		// the rest of the directory is open to them. That refusal is the lock's ACL being right,
+		// not a reason to stop checking what this account can see.
+		if lock && errors.Is(err, fs.ErrPermission) {
 			continue
 		}
 		if err != nil {
@@ -155,7 +162,6 @@ func InspectRestrictedLogDir(dir, base, readersSID string) ([]string, error) {
 			problems = append(problems, child+" is a link, so writes to it land wherever it points")
 			continue
 		}
-		lock := strings.EqualFold(entry.Name(), base+".lock")
 		for _, p := range RestrictedProblems(fobj, readersSID, lock) {
 			problems = append(problems, child+": "+p)
 		}
