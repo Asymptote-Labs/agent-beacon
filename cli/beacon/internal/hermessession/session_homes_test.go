@@ -144,6 +144,78 @@ func TestCollectOnceKeysTheSecondHomeToSyncASession(t *testing.T) {
 	}
 }
 
+// `hermes profile rename` moves the profile's directory, so the renamed home finds its own sessions
+// claimed by a path with no store left. It takes the claims and writes the ids it wrote before, which
+// ingest collapses, rather than the whole history again under new ids. A later copy of the renamed
+// home is still keyed.
+func TestCollectOnceKeepsEventIDsOfARenamedProfile(t *testing.T) {
+	_, work := clonedHermesHomes(t)
+	syncHermesHome(t, work)
+
+	job := filepath.Join(filepath.Dir(work), "job")
+	if err := os.Rename(work, job); err != nil {
+		t.Fatal(err)
+	}
+	// The test's log lives in the home, so it moved too; start a fresh one for the renamed home.
+	if err := os.Remove(homeLog(job)); err != nil {
+		t.Fatal(err)
+	}
+	syncHermesHome(t, job)
+	assertFixtureEventIDs(t, eventIDsByAction(t, job))
+	if loadCursor(t, job).KeyedByHome {
+		t.Fatal("renamed profile keyed its ids")
+	}
+	if s := syncHermesHome(t, job); s.EventsEmitted != 0 {
+		t.Fatalf("renamed profile's second sync wrote %d events, want none", s.EventsEmitted)
+	}
+
+	copied := filepath.Join(filepath.Dir(job), "copy")
+	if err := os.MkdirAll(copied, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	createHermesFixtureDB(t, filepath.Join(copied, "state.db"))
+	syncHermesHome(t, copied)
+	if !loadCursor(t, copied).KeyedByHome {
+		t.Fatal("a copy of the renamed profile kept its unkeyed ids")
+	}
+	assertNoSharedEventIDs(t, job, copied)
+}
+
+// A profile imported from another's export holds the same sessions. Once the original is deleted,
+// the copy takes the claim on sessions it had not synced yet and writes them under the unkeyed ids.
+func TestCollectOnceTakesTheClaimOfADeletedHome(t *testing.T) {
+	root, profile := clonedHermesHomes(t)
+	syncHermesHome(t, root)
+	if err := os.Remove(filepath.Join(root, "state.db")); err != nil {
+		t.Fatal(err)
+	}
+
+	syncHermesHome(t, profile)
+	assertFixtureEventIDs(t, eventIDsByAction(t, profile))
+	if loadCursor(t, profile).KeyedByHome {
+		t.Fatal("the copy of a deleted home keyed its ids")
+	}
+}
+
+// A copy that already synced a session under keyed ids keeps them after the original is deleted, so
+// its ids do not change part way through the session.
+func TestCollectOnceKeepsKeyedIDsAfterTheOwnerIsDeleted(t *testing.T) {
+	root, profile := clonedHermesHomes(t)
+	syncHermesHome(t, root)
+	syncHermesHome(t, profile)
+	if err := os.Remove(filepath.Join(root, "state.db")); err != nil {
+		t.Fatal(err)
+	}
+
+	addHermesPrompt(t, profile, "rewrite the readme")
+	if s := syncHermesHome(t, profile); s.EventsEmitted != 1 {
+		t.Fatalf("copy's second sync wrote %d events, want the new prompt", s.EventsEmitted)
+	}
+	if !loadCursor(t, profile).KeyedByHome {
+		t.Fatal("the copy dropped its keyed ids when the owner was deleted")
+	}
+}
+
 // Homes that both collected a session before the session home file existed have already written
 // it under the unkeyed ids, and share refresh matches on them. They keep those ids for the rest of
 // the session rather than rename what is already uploaded.
