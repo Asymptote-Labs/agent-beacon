@@ -39,7 +39,7 @@ type ingest struct {
 	mu     sync.Mutex
 	server *localingest.Server
 	done   chan error
-	// stopRetry and retried are set while Start is still waiting to listen (see listenRetries).
+	// stopRetry and retried are set while Start is still waiting to listen (see retryableListenError).
 	stopRetry chan struct{}
 	retried   chan struct{}
 }
@@ -65,8 +65,9 @@ func newIngest(cfg *Config, logger *zap.Logger) *ingest {
 //
 // On Windows the pipe's name is in a namespace every account can create in, so an account that
 // takes it first must not be able to keep the whole collector down (the beaconjson exporter and the
-// OTLP receivers with it). There a failed listen is reported as a recoverable error and retried
-// every listenRetryInterval until it succeeds or the collector stops; meanwhile hooks refuse the
+// OTLP receivers with it). There a listen that failed because the name is taken is reported as a
+// recoverable error and retried every listenRetryInterval until it succeeds or the collector stops
+// (any other listen error still fails the start); meanwhile hooks refuse the
 // impostor's pipe, which is not owned by SYSTEM or Administrators, and spool their events.
 func (e *ingest) Start(_ context.Context, host component.Host) error {
 	if !asymptoteobserve.RuntimeLogAccessRestricted(e.cfg.LogPath) {
@@ -80,8 +81,9 @@ func (e *ingest) Start(_ context.Context, host component.Host) error {
 		e.serve(host, l)
 		return nil
 	}
+	retryable := retryableListenError(err)
 	err = fmt.Errorf("beacon_ingest: listen on %s: %w", e.socketPath(), err)
-	if !listenRetries {
+	if !retryable {
 		return err
 	}
 	e.logger.Error("beacon_ingest cannot listen yet; hooks spool their events until it can", zap.Error(err))
@@ -96,11 +98,16 @@ func (e *ingest) Start(_ context.Context, host component.Host) error {
 	return nil
 }
 
+// listenRetryLogEvery is how many failed retries pass between warnings: about a minute at the
+// default interval.
+const listenRetryLogEvery = 12
+
 // retryListen listens again every listenRetryInterval until it succeeds or stop is closed.
 func (e *ingest) retryListen(host component.Host, stop <-chan struct{}, retried chan<- struct{}) {
 	defer close(retried)
 	ticker := time.NewTicker(listenRetryInterval)
 	defer ticker.Stop()
+	failures := 0
 	for {
 		select {
 		case <-stop:
@@ -109,6 +116,10 @@ func (e *ingest) retryListen(host component.Host, stop <-chan struct{}, retried 
 		}
 		l, err := e.listen(e.socketPath())
 		if err != nil {
+			// Once a minute or so, so a long wait stays visible without filling the log.
+			if failures++; failures%listenRetryLogEvery == 0 {
+				e.logger.Warn("beacon_ingest still cannot listen", zap.Error(err), zap.Int("attempts", failures))
+			}
 			continue
 		}
 		e.serve(host, l)
