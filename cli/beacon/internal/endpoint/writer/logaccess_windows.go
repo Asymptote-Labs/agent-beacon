@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 
@@ -158,7 +159,7 @@ func replaceWithCopy(path string) error {
 	}
 	deadline := time.Now().Add(replaceWait)
 	for {
-		err := os.Rename(tmpName, path)
+		err := renameReplacing(tmpName, path)
 		if err == nil {
 			return nil
 		}
@@ -168,6 +169,59 @@ func replaceWithCopy(path string) error {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+// fileRenameInfo is FILE_RENAME_INFO with its Flags member (FileRenameInfoEx).
+type fileRenameInfo struct {
+	Flags          uint32
+	RootDirectory  windows.Handle
+	FileNameLength uint32
+	FileName       [1]uint16
+}
+
+// renameReplacing renames from over to with POSIX semantics. MoveFileEx, which os.Rename uses,
+// refuses to replace a file that is open at all, even by a process that allowed others to delete
+// it; with POSIX semantics such a file is replaced and its handles stay on the old file, which is
+// exactly what cuts off a handle opened while the log was shared. A file open without sharing
+// delete still cannot be replaced, and that error is returned. File systems without POSIX renames
+// fall back to os.Rename.
+func renameReplacing(from, to string) error {
+	p, err := windows.UTF16PtrFromString(from)
+	if err != nil {
+		return err
+	}
+	h, err := windows.CreateFile(p, windows.DELETE|windows.SYNCHRONIZE,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil,
+		windows.OPEN_EXISTING, windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	if err != nil {
+		return &os.LinkError{Op: "rename", Old: from, New: to, Err: err}
+	}
+	closed := false
+	defer func() {
+		if !closed {
+			windows.CloseHandle(h)
+		}
+	}()
+	name, err := windows.UTF16FromString(to)
+	if err != nil {
+		return err
+	}
+	size := int(unsafe.Offsetof(fileRenameInfo{}.FileName)) + len(name)*2
+	buf := make([]uint64, (size+7)/8) // FILE_RENAME_INFO needs the alignment of its handle
+	info := (*fileRenameInfo)(unsafe.Pointer(&buf[0]))
+	info.Flags = windows.FILE_RENAME_REPLACE_IF_EXISTS | windows.FILE_RENAME_POSIX_SEMANTICS
+	info.FileNameLength = uint32((len(name) - 1) * 2)
+	copy(unsafe.Slice(&info.FileName[0], len(name)), name)
+	err = windows.SetFileInformationByHandle(h, windows.FileRenameInfoEx, (*byte)(unsafe.Pointer(&buf[0])), uint32(size))
+	if errors.Is(err, windows.ERROR_INVALID_PARAMETER) || errors.Is(err, windows.ERROR_NOT_SUPPORTED) || errors.Is(err, windows.ERROR_INVALID_FUNCTION) {
+		windows.CloseHandle(h)
+		closed = true
+		return os.Rename(from, to)
+	}
+	if err != nil {
+		return &os.LinkError{Op: "rename", Old: from, New: to, Err: err}
+	}
+	return nil
 }
 
 // copyInto copies the file at path into dst, closing its own handle before returning: Go opens
