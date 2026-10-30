@@ -48,6 +48,7 @@ func useIngest(t *testing.T, serve bool) (string, *collectorStub) {
 		Spool:          localingest.Spool{Dir: filepath.Join(t.TempDir(), "spool")},
 		Euid:           func() int { return 1000 },
 		FailureBackoff: -1,
+		CollectorLog:   logPath,
 	}
 	t.Cleanup(func() { Ingest = prev })
 

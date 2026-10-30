@@ -211,19 +211,37 @@ func TestASpoolDrainsByDirectAppendOnceTheLogIsWritable(t *testing.T) {
 
 func TestEachLogHasItsOwnSpool(t *testing.T) {
 	d := deliverer(t, filepath.Join(shortTempDir(t), "none.sock"))
-	refused := &directLog{refuse: true}
+	_ = d.Write(testLog, lines(t, 1)[0], (&directLog{refuse: true}).append)
+	if n, _ := d.Pending(testLog); n != 1 {
+		t.Fatalf("Pending = %d", n)
+	}
 	other := "/tmp/elsewhere/runtime.jsonl"
-	_ = d.Write(other, lines(t, 1)[0], refused.append)
-	if n, _ := d.Pending(other); n != 1 {
-		t.Fatalf("Pending(other) = %d", n)
+	otherLog := &directLog{}
+	_ = d.Write(other, lines(t, 1)[0], otherLog.append)
+	if otherLog.count() != 1 {
+		t.Fatalf("other log got %d lines; the system log's spool must not drain into it", otherLog.count())
 	}
-	if n, _ := d.Pending(testLog); n != 0 {
-		t.Fatalf("a line meant for another log is waiting for the system log: %d", n)
+	if n, _ := d.Pending(testLog); n != 1 {
+		t.Fatalf("Pending = %d; the system log's spool drained into another log", n)
 	}
-	system := &directLog{}
-	_ = d.Write(testLog, lines(t, 1)[0], system.append)
-	if system.count() != 1 {
-		t.Fatalf("system log got %d lines; another log's spool must not drain into it", system.count())
+}
+
+// A refused line for a log no collector writes -- the inventory log, or any path an account simply
+// cannot write -- would sit in the spool forever, so the refusal is returned as it always was.
+func TestARefusedLineForALogNoCollectorWritesIsNotSpooled(t *testing.T) {
+	d := deliverer(t, filepath.Join(shortTempDir(t), "none.sock"))
+	for _, path := range []string{"/var/log/beacon-agent/inventory_state.jsonl", "/tmp/elsewhere/runtime.jsonl"} {
+		got, err := d.WriteOutcome(path, lines(t, 1)[0], (&directLog{refuse: true}).append)
+		if !errors.Is(err, fs.ErrPermission) || got != Appended {
+			t.Fatalf("%s: WriteOutcome = %v, %v; want the refusal", path, got, err)
+		}
+		if n, _ := d.Pending(path); n != 0 {
+			t.Fatalf("%s: Pending = %d", path, n)
+		}
+	}
+	d.CollectorLog = "/tmp/elsewhere/runtime.jsonl"
+	if got, err := d.WriteOutcome(d.CollectorLog, lines(t, 1)[0], (&directLog{refuse: true}).append); err != nil || got != Spooled {
+		t.Fatalf("a configured CollectorLog: WriteOutcome = %v, %v; want it spooled", got, err)
 	}
 }
 

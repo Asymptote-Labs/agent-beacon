@@ -61,6 +61,7 @@ func useIngest(t *testing.T) *ingestFixture {
 		// Each emit stands in for a separate hook process, which never remembers an earlier
 		// process's failed send.
 		FailureBackoff: -1,
+		CollectorLog:   f.logPath,
 	}
 	t.Cleanup(func() { EndpointIngest = prev })
 	t.Setenv("BEACON_ENDPOINT_LOG", f.logPath)

@@ -52,6 +52,9 @@ type Deliverer struct {
 	// UnconfirmedGrace is how long lines the collector may already have written wait for it before
 	// a direct append may take them. Zero means 2m; negative means no wait.
 	UnconfirmedGrace time.Duration
+	// CollectorLog is the log a restricted collector writes; empty means DefaultLogPath. Only a
+	// refused line meant for it is spooled: no collector will ever take a line for any other log.
+	CollectorLog string
 }
 
 // Applies reports whether a write to logPath goes through Write's socket path at all. Root writes
@@ -100,8 +103,9 @@ const (
 //     collector has taken it within UnconfirmedGrace, a direct append that works takes it, so it
 //     is never stranded.
 //   - Only when the direct append is refused for permission, as a restricted log refuses it while
-//     its collector is down, is the line spooled. A collector that answered for some other log
-//     will never take it, so then the refusal is returned instead.
+//     its collector is down, is the line spooled, and only for the log a collector writes
+//     (CollectorLog). A line for any other log, or for a log a live collector said it does not
+//     write, would never drain, so then the refusal is returned instead.
 //
 // Every line that gets through takes up to a batch of this account's spool for logPath with it, by
 // the same route. After a failed send the account skips the socket for FailureBackoff, in this
@@ -165,13 +169,22 @@ func (d Deliverer) WriteOutcome(logPath string, line []byte, appendLine func([]b
 		d.drainUnconfirmedDirectly(logPath, appendAll)
 		return Appended, nil
 	}
-	if !errors.Is(err, fs.ErrPermission) || collectorElsewhere {
+	if !errors.Is(err, fs.ErrPermission) || collectorElsewhere || !d.servedByCollector(logPath) {
 		return Appended, err
 	}
 	if spoolErr := d.spoolLine(logPath, line); spoolErr != nil {
 		return Spooled, fmt.Errorf("%w; spool: %v", err, spoolErr)
 	}
 	return Spooled, nil
+}
+
+// servedByCollector reports whether logPath is the log a restricted collector writes.
+func (d Deliverer) servedByCollector(logPath string) bool {
+	collectorLog := d.CollectorLog
+	if collectorLog == "" {
+		collectorLog = DefaultLogPath
+	}
+	return sameLog(logPath, collectorLog)
 }
 
 // sendFailureMarker, in the account's spool directory, is touched when a send fails. Hooks run as

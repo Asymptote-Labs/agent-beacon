@@ -54,6 +54,9 @@ const (
 	// only root can create the directory the socket lives in.
 	DefaultSocketPath = "/var/run/beacon-agent/ingest.sock"
 
+	// DefaultLogPath is the system runtime log, the one log a restricted collector writes.
+	DefaultLogPath = "/var/log/beacon-agent/runtime.jsonl"
+
 	// Preamble opens every connection. It names the protocol version, so a later version can be
 	// told apart, and keeps a stray client that happened to connect from having its bytes taken
 	// for events.
