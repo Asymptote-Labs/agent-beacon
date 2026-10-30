@@ -2,6 +2,9 @@ package ci
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +14,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/objectkey"
 )
 
 const (
@@ -40,6 +44,8 @@ var (
 	runUploadCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		return exec.CommandContext(ctx, name, args...).CombinedOutput()
 	}
+	sessionClock  = time.Now
+	sessionRandom = rand.Read
 )
 
 type UploadDestination struct {
@@ -56,7 +62,20 @@ type UploadResult struct {
 	Message  string `json:"message,omitempty"`
 }
 
-func resolveUploadDestinations(providers []string, run *schema.RunInfo, logPath string, startedAt time.Time) ([]UploadDestination, error) {
+// newUploadSession names the object-store folder of one CI session (Session.UploadSession): its
+// start time in Unix nanoseconds and 8 random hex characters. It is chosen once by Provision and
+// saved in the state file, so beacon ci finish uploads under the key beacon ci start chose.
+// Matrix legs and repeated sessions in one job share every GitHub run field, and runners started
+// together can read the same clock, so the random half keeps one upload from replacing another.
+func newUploadSession(startedAt time.Time) (string, error) {
+	var suffix [4]byte
+	if _, err := sessionRandom(suffix[:]); err != nil {
+		return "", fmt.Errorf("ci upload session: %w", err)
+	}
+	return fmt.Sprintf("%d-%s", startedAt.UnixNano(), hex.EncodeToString(suffix[:])), nil
+}
+
+func resolveUploadDestinations(providers []string, run *schema.RunInfo, logPath, session string) ([]UploadDestination, error) {
 	normalized, err := normalizeUploads(providers)
 	if err != nil {
 		return nil, err
@@ -68,13 +87,13 @@ func resolveUploadDestinations(providers []string, run *schema.RunInfo, logPath 
 	for _, provider := range normalized {
 		switch provider {
 		case UploadS3:
-			dest, err := uploadDestination(provider, os.Getenv(EnvS3Bucket), os.Getenv(EnvS3Prefix), run, logPath, startedAt)
+			dest, err := uploadDestination(provider, os.Getenv(EnvS3Bucket), os.Getenv(EnvS3Prefix), run, logPath, session)
 			if err != nil {
 				return nil, err
 			}
 			destinations = append(destinations, dest)
 		case UploadGCS:
-			dest, err := uploadDestination(provider, os.Getenv(EnvGCSBucket), os.Getenv(EnvGCSPrefix), run, logPath, startedAt)
+			dest, err := uploadDestination(provider, os.Getenv(EnvGCSBucket), os.Getenv(EnvGCSPrefix), run, logPath, session)
 			if err != nil {
 				return nil, err
 			}
@@ -88,7 +107,7 @@ func ResolveUploadDestinationsForSession(providers []string, session *Session) (
 	if session == nil {
 		return nil, fmt.Errorf("ci session is nil")
 	}
-	return resolveUploadDestinations(providers, session.Run, session.LogPath, session.StartedAtTime())
+	return resolveUploadDestinations(providers, session.Run, session.LogPath, session.UploadSession)
 }
 
 func normalizeUploads(values []string) ([]string, error) {
@@ -115,56 +134,34 @@ func normalizeUploads(values []string) ([]string, error) {
 	return providers, nil
 }
 
-func uploadDestination(provider, bucket, prefix string, run *schema.RunInfo, logPath string, startedAt time.Time) (UploadDestination, error) {
+func uploadDestination(provider, bucket, prefix string, run *schema.RunInfo, logPath, session string) (UploadDestination, error) {
 	bucket = strings.TrimSpace(bucket)
 	if bucket == "" {
 		return UploadDestination{}, fmt.Errorf("--upload %s requires a bucket; set %s", provider, uploadBucketEnv(provider))
 	}
-	key := uploadObjectKey(prefix, run, logPath, startedAt)
+	session = objectkey.CleanPart(session)
+	if session == "" {
+		return UploadDestination{}, errors.New("ci session state has no upload_session; run beacon ci start and beacon ci finish with the same Beacon version")
+	}
+	key := uploadObjectKey(prefix, run, logPath, session)
 	uri := fmt.Sprintf("%s://%s/%s", uploadScheme(provider), bucket, key)
 	return UploadDestination{Provider: provider, Bucket: bucket, Key: key, URI: uri}, nil
 }
 
-func uploadObjectKey(prefix string, run *schema.RunInfo, logPath string, startedAt time.Time) string {
+func uploadObjectKey(prefix string, run *schema.RunInfo, logPath, session string) string {
 	name := filepath.Base(logPath)
 	if strings.TrimSpace(name) == "" || name == "." || name == string(filepath.Separator) {
 		name = "runtime.jsonl"
 	}
-	parts := cleanKeyParts(prefix)
+	parts := objectkey.CleanParts(prefix)
 	if run != nil && strings.TrimSpace(run.Repository) != "" && strings.TrimSpace(run.RunID) != "" {
-		parts = append(parts, cleanKeyParts(run.Repository)...)
-		parts = append(parts, cleanKeyPart(run.RunID))
-		if strings.TrimSpace(run.RunAttempt) != "" {
-			parts = append(parts, cleanKeyPart(run.RunAttempt))
-		}
+		parts = append(parts, objectkey.CleanParts(run.Repository)...)
+		parts = append(parts, objectkey.CleanPart(run.RunID), objectkey.CleanPart(run.RunAttempt), objectkey.CleanPart(run.Job))
 	} else {
-		if startedAt.IsZero() {
-			startedAt = time.Now().UTC()
-		}
-		parts = append(parts, "ci", fmt.Sprintf("%d", startedAt.UTC().UnixNano()))
+		parts = append(parts, "ci")
 	}
-	parts = append(parts, cleanKeyPart(name))
+	parts = append(parts, session, objectkey.CleanPart(name))
 	return path.Join(parts...)
-}
-
-func cleanKeyParts(value string) []string {
-	var parts []string
-	for _, part := range strings.Split(strings.Trim(value, "/"), "/") {
-		if cleaned := cleanKeyPart(part); cleaned != "" {
-			parts = append(parts, cleaned)
-		}
-	}
-	return parts
-}
-
-func cleanKeyPart(value string) string {
-	cleaned := strings.TrimSpace(value)
-	cleaned = strings.ReplaceAll(cleaned, "\\", "-")
-	cleaned = strings.Trim(cleaned, "/")
-	if cleaned == "." || cleaned == ".." {
-		return ""
-	}
-	return cleaned
 }
 
 func uploadBucketEnv(provider string) string {

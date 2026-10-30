@@ -61,6 +61,7 @@ type Session struct {
 	Harnesses       []string        `json:"harnesses,omitempty"`
 	WorkDir         string          `json:"work_dir,omitempty"`
 	StartedAt       string          `json:"started_at"`
+	UploadSession   string          `json:"upload_session"` // see newUploadSession
 	StatePath       string          `json:"state_path,omitempty"`
 	CollectorPID    int             `json:"collector_pid,omitempty"`
 	Run             *schema.RunInfo `json:"run,omitempty"`
@@ -156,9 +157,13 @@ func Provision(opts Options) (*Session, error) {
 		// environment and can resolve them; the child has these vars stripped.
 		replaceTokensWithEnvRefs(&cfg)
 	}
-	startedAt := time.Now().UTC()
+	startedAt := sessionClock().UTC()
+	uploadSession, err := newUploadSession(startedAt)
+	if err != nil {
+		return nil, err
+	}
 	run := detectRunInfo()
-	uploads, err := resolveUploadDestinations(opts.Uploads, run, logPath, startedAt)
+	uploads, err := resolveUploadDestinations(opts.Uploads, run, logPath, uploadSession)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +198,8 @@ func Provision(opts Options) (*Session, error) {
 		Harness:         HarnessesString(harnesses),
 		Harnesses:       harnesses,
 		WorkDir:         opts.WorkDir,
-		StartedAt:       startedAt.Format(time.RFC3339),
+		StartedAt:       startedAt.Format(time.RFC3339Nano),
+		UploadSession:   uploadSession,
 		Run:             run,
 		Forward:         forward,
 		ForwardEndpoint: forwardEndpoint,
