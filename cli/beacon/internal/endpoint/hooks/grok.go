@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/hookcmd"
 )
 
 const (
@@ -142,7 +144,7 @@ func isGrokManagedHookFile(data []byte) bool {
 	for _, groups := range hooks.Hooks {
 		for _, group := range groups {
 			for _, hook := range group.Hooks {
-				if isEndpointHookCommand(hook.Command, "grok") {
+				if hookcmd.IsEndpointHook(hook.Command, "grok") {
 					return true
 				}
 			}

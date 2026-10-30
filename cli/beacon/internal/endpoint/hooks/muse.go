@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/hookcmd"
 )
 
 const (
@@ -358,7 +360,7 @@ func isMuseManagedHookFile(data []byte) bool {
 	for _, groups := range hooks.Hooks {
 		for _, group := range groups {
 			for _, hook := range group.Hooks {
-				if isEndpointHookCommand(hook.Command, "muse") {
+				if hookcmd.IsEndpointHook(hook.Command, "muse") {
 					return true
 				}
 			}

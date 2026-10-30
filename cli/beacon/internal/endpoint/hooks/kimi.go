@@ -11,6 +11,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tomledit"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/hookcmd"
 )
 
 // Kimi Code is the one supported runtime whose hook registration lives inside a file that also
@@ -233,7 +234,7 @@ func kimiStatusFromRuntime(status runtimeStatus) KimiStatus {
 // There is no command-line escape for it, and the alternative -- leaving the path unquoted --
 // fails on the far more common space.
 //
-// The detection side needs no matching change: commandFields already accepts both quote
+// The detection side needs no matching change: hookcmd.Fields already accepts both quote
 // characters, precisely so a command written for either shell can be recognized.
 func kimiCommandPrefix(binaryPath, logPath, configPath string) string {
 	if runtime.GOOS != "windows" {
@@ -390,7 +391,7 @@ func isKimiInstalledAt(path string) bool {
 // comment.
 func kimiConfigHasEndpointHooks(parsed map[string]interface{}) bool {
 	for _, entry := range kimiHookEntries(parsed) {
-		if isEndpointHookCommand(entry.Command, "kimi") {
+		if hookcmd.IsEndpointHook(entry.Command, "kimi") {
 			return true
 		}
 	}
@@ -502,7 +503,7 @@ func stripKimiHooks(text string) (string, []kimiHookEntry) {
 		}
 		block := lines[index:end]
 		entry := kimiEntryFromBlock(block)
-		if !isEndpointHookCommand(entry.Command, "kimi") {
+		if !hookcmd.IsEndpointHook(entry.Command, "kimi") {
 			kept = append(kept, block...)
 			keptEntries = append(keptEntries, entry)
 			index = end - 1

@@ -2,13 +2,61 @@ package hooks
 
 import (
 	"encoding/json"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/hookcmd"
 )
+
+// The hooks binary decides which Cursor entries cover a subcommand from hookcmd.CursorEvents and
+// hookcmd.Runs. Read back from what the installer actually writes, every Beacon entry must be one
+// of those pairs and every pair must be written; otherwise the Claude Code copy of an event is
+// dropped with no Cursor hook recording it, or recorded twice.
+func TestInstalledCursorHooksRoundTripThroughCursorEvents(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hooks.json")
+	if err := installCursorHooksJSON(path, "/opt/beacon hooks/beacon-hooks", "/var/log/beacon/runtime.jsonl", "/etc/beacon/config.json"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file struct {
+		Hooks map[string][]struct {
+			Command string `json:"command"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &file); err != nil {
+		t.Fatal(err)
+	}
+	written := map[string][]string{}
+	for event, entries := range file.Hooks {
+		for _, entry := range entries {
+			fields := hookcmd.Fields(entry.Command)
+			subcommand := fields[len(fields)-1]
+			if !hookcmd.Runs(entry.Command, "cursor", subcommand) {
+				t.Fatalf("%s: installed command %q is not recognised as Beacon's", event, entry.Command)
+			}
+			written[subcommand] = append(written[subcommand], event)
+		}
+	}
+	want := map[string][]string{}
+	for subcommand, events := range hookcmd.CursorEvents {
+		want[subcommand] = append([]string(nil), events...)
+		slices.Sort(want[subcommand])
+	}
+	for subcommand := range written {
+		slices.Sort(written[subcommand])
+	}
+	if !reflect.DeepEqual(written, want) {
+		t.Fatalf("installed subcommand->events = %v, want hookcmd.CursorEvents %v", written, want)
+	}
+}
 
 func TestInstallCursorHooksJSONPreservesNonBeaconHooks(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hooks.json")

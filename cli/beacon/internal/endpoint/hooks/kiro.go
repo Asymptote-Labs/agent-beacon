@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/hookcmd"
 )
 
 // Kiro registers hooks as standalone JSON files in a directory it scans -- `.kiro/hooks/` in a
@@ -260,7 +262,7 @@ func kiroHookFileIsBeacons(path string) error {
 		return nil
 	}
 	for _, hook := range file.Hooks {
-		if !isEndpointHookCommand(hook.Action.Command, "kiro") {
+		if !hookcmd.IsEndpointHook(hook.Action.Command, "kiro") {
 			return fmt.Errorf(
 				"%s already defines a hook Beacon did not write (%q); Beacon owns that filename, "+
 					"so it will not overwrite it. Move that hook to another file in the same "+
@@ -322,7 +324,7 @@ func isKiroInstalledAt(path string) bool {
 		return false
 	}
 	for _, hook := range file.Hooks {
-		if isEndpointHookCommand(hook.Action.Command, "kiro") {
+		if hookcmd.IsEndpointHook(hook.Action.Command, "kiro") {
 			return true
 		}
 	}
