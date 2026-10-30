@@ -34,6 +34,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 type doctorResult struct {
@@ -669,6 +670,12 @@ func writeInventorySnapshotEvents(cfg endpointconfig.Config, settings endpointco
 		Harness:      schema.HarnessInfo{Name: "endpoint"},
 		Message:      "Agent configuration inventory snapshot observed",
 	})
+	// The scanner has already redacted what it captures (opted-in file contents, MCP server
+	// definitions) and cut file contents to max_content_bytes. CleanValue redacts every string in
+	// them again and keeps them at that limit, where the event writer would otherwise cut each to
+	// the raw-field limit, and leaves field names such as env_keys, a list of variable names, as
+	// they are.
+	contentLimit := endpointinventory.ContentLimit(settings.MaxContentBytes)
 	snapshot.Raw = map[string]interface{}{
 		"inventory": map[string]interface{}{
 			"generated_at":             result.GeneratedAt,
@@ -678,9 +685,9 @@ func writeInventorySnapshotEvents(cfg endpointconfig.Config, settings endpointco
 			"previous_snapshot_digest": previousDigest,
 			"counts":                   counts,
 			"user_scope":               result.UserScope,
-			"configs":                  existingInventoryConfigs(result.Configs),
-			"mcp_servers":              result.MCPServers,
-			"skills":                   existingInventorySkills(result.Skills),
+			"configs":                  asymptoteobserve.CleanValue(existingInventoryConfigs(result.Configs), contentLimit),
+			"mcp_servers":              asymptoteobserve.CleanValue(result.MCPServers, contentLimit),
+			"skills":                   asymptoteobserve.CleanValue(existingInventorySkills(result.Skills), contentLimit),
 		},
 	}
 	if _, err := writer.AppendEvent(snapshot, writer.Options{Path: inventoryLogPath, UserMode: cfg.UserMode}); err != nil {

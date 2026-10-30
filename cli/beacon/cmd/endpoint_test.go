@@ -1180,6 +1180,55 @@ func TestRunEndpointInventoryWriteEventHonorsConfigContentOptIn(t *testing.T) {
 	}
 }
 
+// The snapshot keeps opted-in content to max_content_bytes rather than the raw-field limit the event
+// writer applies to other raw strings, and keeps env_keys, a list of variable names, as names.
+func TestInventorySnapshotKeepsContentToItsLimit(t *testing.T) {
+	old := endpointOpts
+	t.Cleanup(func() { endpointOpts = old })
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	description := strings.Repeat("a long server description ", 200)
+	writeTestFile(t, filepath.Join(home, ".cursor", "mcp.json"), `{"mcpServers":{"one":{"command":"npx","description":"`+description+
+		`","env":{"NODE_ENV":"production","API_TOKEN":"tok-0123456789abcdef"}}}}`)
+	include := true
+	cfg := endpointconfig.Default(true, logPath)
+	cfg.Inventory = &endpointconfig.Inventory{Runtimes: []string{"cursor"}, IncludeContents: &include, MaxContentBytes: 16384}
+	if _, err := endpointconfig.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	endpointOpts.userMode = true
+	endpointOpts.logPath = logPath
+	endpointOpts.jsonOutput = true
+	endpointOpts.writeInventoryEvent = true
+	endpointOpts.inventoryContents = false
+	if _, err := captureStdout(t, func() error { return runEndpointInventory(endpointInventoryCmd, nil) }); err != nil {
+		t.Fatalf("runEndpointInventory returned error: %v", err)
+	}
+	data, err := os.ReadFile(endpointinventory.LogPath(logPath, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot string
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(line, `"inventory.snapshot"`) {
+			snapshot = line
+		}
+	}
+	if snapshot == "" {
+		t.Fatalf("no inventory.snapshot in %s", data)
+	}
+	if strings.Contains(snapshot, "tok-0123456789abcdef") {
+		t.Fatalf("snapshot leaked the API token: %s", snapshot)
+	}
+	if !strings.Contains(snapshot, description) {
+		t.Fatalf("snapshot cut the captured content short of max_content_bytes: %.400s", snapshot)
+	}
+	if !strings.Contains(snapshot, `"env_keys":["NODE_ENV"]`) {
+		t.Fatalf("snapshot did not keep env_keys as names: %.400s", snapshot)
+	}
+}
+
 func TestConfigAutoUpdateModeDoesNotFallBackOnSystemLoadError(t *testing.T) {
 	systemErr := fmt.Errorf("invalid system config")
 	got := configAutoUpdateModeFrom(

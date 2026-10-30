@@ -1,8 +1,10 @@
 package asymptoteobserve
 
 import (
+	"bytes"
 	"encoding/json"
 	"maps"
+	"math"
 	"regexp"
 	"slices"
 	"strings"
@@ -777,6 +779,17 @@ func CleanString(value string, limit int, redactSecrets bool) string {
 	}
 }
 
+// SanitizeMap returns a sanitized copy of input: every string redacted (when opts.RedactSecrets is
+// set) and cut to opts.StringLimit, a value under a field named for a credential redacted whole,
+// at any depth.
+//
+// A value of a type JSON decoding does not produce ([]string, map[string]string, a struct, a
+// pointer, a named string type, json.RawMessage) is first converted into what encoding/json
+// writes for it, decoded back into an interface{}, then sanitized the same way; a value JSON
+// cannot represent (a NaN, a channel, a function, a cycle) becomes nil. Booleans and Go's number
+// types are kept as they are, so an integer stays an integer. A []byte stays a []byte (an OTLP
+// bytes attribute keeps its type): valid UTF-8 is sanitized as a string is, anything else is only
+// cut to the limit. A CleanedValue is kept as CleanValue left it. The result always marshals.
 func SanitizeMap(input map[string]interface{}, opts PrivacyOptions) map[string]interface{} {
 	limit := opts.StringLimit
 	if limit <= 0 {
@@ -784,30 +797,188 @@ func SanitizeMap(input map[string]interface{}, opts PrivacyOptions) map[string]i
 	}
 	out := make(map[string]interface{}, len(input))
 	for key, value := range input {
-		switch typed := value.(type) {
-		case string:
-			// A value whose field is named for a credential is one, whatever it looks like:
-			// `{"password": "hunter2"}` has no shape a pattern could recognize.
-			if opts.RedactSecrets && typed != "" && IsSecretField(key, typed) {
-				out[key] = redactedValue
-				continue
-			}
-			out[key] = CleanString(typed, limit, opts.RedactSecrets)
-		case map[string]interface{}:
-			out[key] = SanitizeMap(typed, opts)
-		case []interface{}:
-			// A multi-valued header (`{"Cookie": ["sid=1"]}`, OTel's http.request.header.*) is as
-			// much a credential as a single value.
-			if opts.RedactSecrets && IsSecretKeyName(key) {
-				out[key] = redactAllStrings(typed, opts)
-				continue
-			}
-			out[key] = SanitizeSlice(typed, opts)
-		default:
-			out[key] = typed
-		}
+		out[key] = sanitizeField(key, value, opts, limit)
 	}
 	return out
+}
+
+// sanitizeField is SanitizeMap's result for a value held under key.
+func sanitizeField(key string, value interface{}, opts PrivacyOptions, limit int) interface{} {
+	switch typed := value.(type) {
+	case string:
+		// A value whose field is named for a credential is one, whatever it looks like:
+		// `{"password": "hunter2"}` has no shape a pattern could recognize.
+		if opts.RedactSecrets && typed != "" && IsSecretField(key, typed) {
+			return redactedValue
+		}
+		return CleanString(typed, limit, opts.RedactSecrets)
+	case map[string]interface{}:
+		return SanitizeMap(typed, opts)
+	case []interface{}:
+		// A multi-valued header (`{"Cookie": ["sid=1"]}`, OTel's http.request.header.*) is as
+		// much a credential as a single value.
+		if opts.RedactSecrets && IsSecretKeyName(key) {
+			return redactAllStrings(typed, opts)
+		}
+		return SanitizeSlice(typed, opts)
+	case []byte:
+		if opts.RedactSecrets && len(typed) > 0 && IsSecretField(key, string(typed)) {
+			return []byte(redactedValue)
+		}
+		return cleanBytes(typed, limit, opts.RedactSecrets)
+	case CleanedValue:
+		// The field's name still redacts it.
+		if opts.RedactSecrets && IsSecretKeyName(key) {
+			return sanitizeField(key, typed.value, opts, limit)
+		}
+		return typed
+	}
+	if scalar, ok := jsonScalar(value); ok {
+		return scalar
+	}
+	return sanitizeField(key, jsonValue(value), opts, limit)
+}
+
+// cleanBytes is a []byte sanitized as a string when it is valid UTF-8, and otherwise only cut to
+// limit bytes: binary data holds no text a pattern could reliably recognize.
+func cleanBytes(value []byte, limit int, redactSecrets bool) []byte {
+	if value == nil {
+		return nil
+	}
+	if utf8.Valid(value) {
+		return []byte(CleanString(string(value), limit, redactSecrets))
+	}
+	return bytes.Clone(value[:min(len(value), limit)])
+}
+
+// CleanedValue is a value CleanValue sanitized. SanitizeMap and SanitizeSlice keep it as it is,
+// unless it is held under a field named for a credential, so its strings keep the limit CleanValue
+// was given rather than the caller's. Only CleanValue makes one.
+type CleanedValue struct {
+	value interface{}
+}
+
+// CleanValue returns v sanitized for a producer that sets its own string limit and has already
+// redacted what its field names mark as secret, as the endpoint inventory does for the file
+// contents and MCP server definitions it captures: v is converted as SanitizeMap converts a value,
+// and every string in it is redacted as RedactString redacts it and cut to limit as CleanString
+// cuts it. Field names are not judged, so a list of environment variable names under `env_keys`
+// keeps them. limit <= 0 uses DefaultStringLimit.
+func CleanValue(v interface{}, limit int) CleanedValue {
+	if limit <= 0 {
+		limit = DefaultStringLimit
+	}
+	return CleanedValue{value: cleanAll(v, limit)}
+}
+
+func cleanAll(value interface{}, limit int) interface{} {
+	switch typed := value.(type) {
+	case string:
+		return CleanString(typed, limit, true)
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(typed))
+		for key, item := range typed {
+			out[key] = cleanAll(item, limit)
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, len(typed))
+		for index, item := range typed {
+			out[index] = cleanAll(item, limit)
+		}
+		return out
+	case []byte:
+		return cleanBytes(typed, limit, true)
+	case CleanedValue:
+		return cleanAll(typed.value, limit)
+	}
+	if scalar, ok := jsonScalar(value); ok {
+		return scalar
+	}
+	return cleanAll(jsonValue(value), limit)
+}
+
+// MarshalJSON writes the sanitized value.
+func (c CleanedValue) MarshalJSON() ([]byte, error) {
+	return json.Marshal(c.value)
+}
+
+// jsonScalar returns a value that holds no text, and true: nil, a boolean, or a number of one of
+// Go's number types, or a json.Number, kept as it is. A number JSON cannot write (a NaN, an
+// infinity, a json.Number that does not spell one) is nil.
+func jsonScalar(value interface{}) (interface{}, bool) {
+	switch typed := value.(type) {
+	case nil, bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return value, true
+	case float64:
+		if math.IsNaN(typed) || math.IsInf(typed, 0) {
+			return nil, true
+		}
+		return value, true
+	case float32:
+		if math.IsNaN(float64(typed)) || math.IsInf(float64(typed), 0) {
+			return nil, true
+		}
+		return value, true
+	case json.Number:
+		// The encoder writes an empty json.Number as 0.
+		if typed != "" && !isJSONNumber(string(typed)) {
+			return nil, true
+		}
+		return value, true
+	}
+	return nil, false
+}
+
+// jsonValue is a value of any other type as encoding/json marshals it and decodes it back: a
+// string, a []interface{}, a map[string]interface{}, or a scalar jsonScalar keeps; nil when JSON
+// cannot represent it.
+func jsonValue(value interface{}) interface{} {
+	d := decoded(value, 0)
+	if _, deep := d.(tooDeep); deep {
+		return roundTrip(value)
+	}
+	return d
+}
+
+// isJSONNumber reports whether s is a number as JSON spells it, which is what encoding/json
+// requires of a json.Number it writes.
+func isJSONNumber(s string) bool {
+	if s != "" && s[0] == '-' {
+		s = s[1:]
+	}
+	digits := func() bool {
+		n := 0
+		for n < len(s) && s[n] >= '0' && s[n] <= '9' {
+			n++
+		}
+		s = s[n:]
+		return n > 0
+	}
+	switch {
+	case s == "":
+		return false
+	case s[0] == '0':
+		s = s[1:]
+	case !digits():
+		return false
+	}
+	if s != "" && s[0] == '.' {
+		s = s[1:]
+		if !digits() {
+			return false
+		}
+	}
+	if s != "" && (s[0] == 'e' || s[0] == 'E') {
+		s = s[1:]
+		if s != "" && (s[0] == '+' || s[0] == '-') {
+			s = s[1:]
+		}
+		if !digits() {
+			return false
+		}
+	}
+	return s == ""
 }
 
 // redactAllStrings replaces every non-empty string in a slice held under a secret-named field,
@@ -815,24 +986,39 @@ func SanitizeMap(input map[string]interface{}, opts PrivacyOptions) map[string]i
 func redactAllStrings(input []interface{}, opts PrivacyOptions) []interface{} {
 	out := make([]interface{}, len(input))
 	for index, value := range input {
-		switch typed := value.(type) {
-		case string:
-			if typed == "" {
-				out[index] = typed
-			} else {
-				out[index] = redactedValue
-			}
-		case []interface{}:
-			out[index] = redactAllStrings(typed, opts)
-		case map[string]interface{}:
-			out[index] = SanitizeMap(typed, opts)
-		default:
-			out[index] = typed
-		}
+		out[index] = redactedItem(value, opts)
 	}
 	return out
 }
 
+// redactedItem is redactAllStrings' result for one item.
+func redactedItem(value interface{}, opts PrivacyOptions) interface{} {
+	switch typed := value.(type) {
+	case string:
+		if typed == "" {
+			return typed
+		}
+		return redactedValue
+	case []interface{}:
+		return redactAllStrings(typed, opts)
+	case map[string]interface{}:
+		return SanitizeMap(typed, opts)
+	case []byte:
+		if len(typed) == 0 {
+			return typed
+		}
+		return []byte(redactedValue)
+	case CleanedValue:
+		return redactedItem(typed.value, opts)
+	}
+	if scalar, ok := jsonScalar(value); ok {
+		return scalar
+	}
+	return redactedItem(jsonValue(value), opts)
+}
+
+// SanitizeSlice returns a sanitized copy of input, each item sanitized as SanitizeMap sanitizes a
+// value, and a string after a flag named for a secret (`["--api-key", "x"]`) redacted.
 func SanitizeSlice(input []interface{}, opts PrivacyOptions) []interface{} {
 	limit := opts.StringLimit
 	if limit <= 0 {
@@ -840,28 +1026,67 @@ func SanitizeSlice(input []interface{}, opts PrivacyOptions) []interface{} {
 	}
 	out := make([]interface{}, len(input))
 	for index, value := range input {
-		switch typed := value.(type) {
-		case string:
-			// A flag named for a secret has its value in the next item: `["--api-key", "x"]`.
-			if opts.RedactSecrets && typed != "" && index > 0 && followsSecretFlag(input[index-1]) {
-				out[index] = redactedValue
-				continue
-			}
-			out[index] = CleanString(typed, limit, opts.RedactSecrets)
-		case map[string]interface{}:
-			out[index] = SanitizeMap(typed, opts)
-		case []interface{}:
-			out[index] = SanitizeSlice(typed, opts)
-		default:
-			out[index] = typed
-		}
+		out[index] = sanitizeItem(input, index, value, opts, limit)
 	}
 	return out
 }
 
+// sanitizeItem is SanitizeSlice's result for value, the item of input at index.
+func sanitizeItem(input []interface{}, index int, value interface{}, opts PrivacyOptions, limit int) interface{} {
+	switch typed := value.(type) {
+	case string:
+		// A flag named for a secret has its value in the next item: `["--api-key", "x"]`.
+		if opts.RedactSecrets && typed != "" && index > 0 && followsSecretFlag(input[index-1]) {
+			return redactedValue
+		}
+		return CleanString(typed, limit, opts.RedactSecrets)
+	case map[string]interface{}:
+		return SanitizeMap(typed, opts)
+	case []interface{}:
+		return SanitizeSlice(typed, opts)
+	case []byte:
+		if opts.RedactSecrets && len(typed) > 0 && index > 0 && followsSecretFlag(input[index-1]) {
+			return []byte(redactedValue)
+		}
+		return cleanBytes(typed, limit, opts.RedactSecrets)
+	case CleanedValue:
+		if opts.RedactSecrets && index > 0 && followsSecretFlag(input[index-1]) {
+			switch text := typed.value.(type) {
+			case string:
+				if text != "" {
+					return redactedValue
+				}
+			case []byte:
+				if len(text) > 0 {
+					return []byte(redactedValue)
+				}
+			}
+		}
+		return typed
+	}
+	if scalar, ok := jsonScalar(value); ok {
+		return scalar
+	}
+	return sanitizeItem(input, index, jsonValue(value), opts, limit)
+}
+
+// followsSecretFlag reports whether the item before a string is a flag named for a secret, read
+// as JSON writes it, so a named string type holding `--api-key` is one.
 func followsSecretFlag(previous interface{}) bool {
-	flag, ok := previous.(string)
-	return ok && IsSecretFlag(flag)
+	switch typed := previous.(type) {
+	case string:
+		return IsSecretFlag(typed)
+	case map[string]interface{}, []interface{}:
+		return false
+	case []byte:
+		return IsSecretFlag(string(typed))
+	case CleanedValue:
+		return followsSecretFlag(typed.value)
+	}
+	if _, scalar := jsonScalar(previous); scalar {
+		return false
+	}
+	return followsSecretFlag(jsonValue(previous))
 }
 
 func SanitizeEvent(event Event, maxBytes int) Event {
