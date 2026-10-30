@@ -5,6 +5,7 @@ package writer
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -258,4 +259,39 @@ func fileIndex(t *testing.T, path string) uint64 {
 		t.Fatal(err)
 	}
 	return uint64(info.FileIndexHigh)<<32 | uint64(info.FileIndexLow)
+}
+
+// A shared install on a log directory Beacon never secured -- one still inheriting from its
+// parent, or made by hand -- is not taken for a restricted one, so nothing else in it is reset.
+func TestShareSystemLogLeavesAnUnsecuredDirectoryAlone(t *testing.T) {
+	requireSystemACLRights(t)
+	testenv.SetHome(t, t.TempDir())
+	prev := logReadersSID
+	logReadersSID = func() (string, error) { return backupOperators, nil }
+	t.Cleanup(func() { logReadersSID = prev })
+	path := filepath.Join(t.TempDir(), "logs", "runtime.jsonl")
+	operator := filepath.Join(filepath.Dir(path), "operator.txt")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(operator, []byte("mine\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if sysacl.LooksRestricted(filepath.Dir(path), backupOperators) {
+		t.Fatal("a directory that inherits from its parent reads as restricted")
+	}
+	before, err := sysacl.ReadObject(operator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ShareSystemLog(path); err != nil {
+		t.Fatalf("ShareSystemLog: %v", err)
+	}
+	after, err := sysacl.ReadObject(operator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before.DACL, after.DACL) {
+		t.Fatalf("a shared install reset a file it never restricted: %+v -> %+v", before.DACL, after.DACL)
+	}
 }

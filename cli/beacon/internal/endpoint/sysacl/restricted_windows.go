@@ -57,20 +57,20 @@ func ResetLogDirToShared(dir string) error {
 	return withPrivileges(func() error { return resetRestricted(dir, LogDirDACL(), "") })
 }
 
-// LooksRestricted reports whether the log directory carries the restricted mode's ACL rather than
-// the shared one: no entry for interactive users, which the shared ACL always has. It reads only
-// the directory, so it answers for a restriction cut short before its marker was written.
-func LooksRestricted(dir string) bool {
-	obj, isLink, err := readObject(dir)
-	if err != nil || isLink {
+// LooksRestricted reports whether the log directory carries exactly the restricted mode's ACL for
+// readersSID: protected, and granting nothing RestrictedProblems would object to. It reads only the
+// directory, so it answers for a restriction cut short before its marker was written, and a
+// directory Beacon never secured (still inheriting from %ProgramData%, or made by hand) is not
+// mistaken for one.
+func LooksRestricted(dir, readersSID string) bool {
+	if readersSID == "" {
 		return false
 	}
-	for _, ace := range obj.DACL {
-		if ace.SID == sidInteractive {
-			return false
-		}
+	obj, isLink, err := readObject(dir)
+	if err != nil || isLink || !obj.Protected || len(obj.DACL) == 0 {
+		return false
 	}
-	return true
+	return len(RestrictedProblems(obj, readersSID, false)) == 0
 }
 
 // resetRestricted gives everything below dir, which carries dacl, what it would inherit. base names
