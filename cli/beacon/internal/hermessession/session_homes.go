@@ -1,8 +1,11 @@
 package hermessession
 
 import (
+	"errors"
+	"io/fs"
 	"path/filepath"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
 )
 
@@ -47,6 +50,11 @@ func SessionHomesPath(statePath string) string {
 // before this file existed stays unkeyed, and is claimed for that home when no other home was first.
 // Only a session's first sweep can be keyed, so ids never change part way through a session.
 //
+// A claim held by a home that no longer has a state.db was left by a home that was renamed or moved,
+// as `hermes profile rename` does, or deleted after it was copied. The home that finds the session
+// next takes the claim and keeps the unkeyed ids, rather than upload the same history again under
+// new ids.
+//
 // path is the shared session home file; an empty path decides nothing, leaving every id unkeyed.
 func assignEventIDHomes(path, home string, sessions []Session, state *State) error {
 	if path == "" || len(sessions) == 0 {
@@ -63,7 +71,7 @@ func assignEventIDHomes(path, home string, sessions []Session, state *State) err
 					homes.Sessions[session.ID] = home
 					changed = true
 				}
-			case !claimed:
+			case !claimed || (owner != home && homeStoreGone(owner)):
 				homes.Sessions[session.ID] = home
 				changed = true
 				cursor.KeyedByHome = false
@@ -73,4 +81,11 @@ func assignEventIDHomes(path, home string, sessions []Session, state *State) err
 		}
 		return changed
 	})
+}
+
+// homeStoreGone reports whether the Hermes home dir no longer has a state.db. A store that cannot be
+// checked for another reason counts as present, so the claim stays with it.
+func homeStoreGone(dir string) bool {
+	_, err := sessionfs.Stat(filepath.Join(dir, "state.db"))
+	return errors.Is(err, fs.ErrNotExist)
 }
