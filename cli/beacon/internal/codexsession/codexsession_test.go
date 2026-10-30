@@ -98,6 +98,32 @@ func TestMapCodexShellCommandIsACommand(t *testing.T) {
 	}
 }
 
+// The desktop app writes its rollouts to the same store, with its client name verbatim in
+// session_meta. Its events are codex_desktop, as the live collector names the same conversation,
+// including on a later sweep that starts past the session_meta line.
+func TestMapCodexDesktopRolloutIsCodexDesktop(t *testing.T) {
+	ref := SessionRef{ID: "sess-d", Path: "/tmp/codex.jsonl", Workspace: "/tmp/repo"}
+	meta := strings.Replace(strings.Replace(sessionMetaLine("sess-d", "/tmp/repo"),
+		`"originator":"codex-tui"`, `"originator":"Codex Desktop"`, 1), `"source":"cli"`, `"source":"vscode"`, 1)
+	records := decodeFixture(t, []string{
+		meta,
+		turnContextLine("turn-1", "gpt-6-astra"),
+		messageLine("user", "msg-user", "add a health endpoint"),
+		tokenUsageLine("sess-d", "turn-1", 120, 90, 10, 8, 2),
+	})
+	for _, opts := range []MapOptions{{}, {MinLine: 1, SkipSessionStarted: true}} {
+		mapped := MapSession(ref, records, opts)
+		if len(mapped) == 0 {
+			t.Fatalf("MinLine %d: nothing mapped", opts.MinLine)
+		}
+		for _, item := range mapped {
+			if item.Event.Harness.Name != "codex_desktop" {
+				t.Fatalf("MinLine %d: %s harness = %q, want codex_desktop", opts.MinLine, item.Event.Event.Action, item.Event.Harness.Name)
+			}
+		}
+	}
+}
+
 func TestCollectOnceUsesCursor(t *testing.T) {
 	dir := t.TempDir()
 	codexDir := filepath.Join(dir, ".codex")

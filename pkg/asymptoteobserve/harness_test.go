@@ -58,6 +58,30 @@ func TestHarnessSpellingsConvergeOnCanonicalNames(t *testing.T) {
 	}
 }
 
+// Each originator Codex's clients report (openai/codex otel/src/metrics/tags.rs), in the spelling
+// OTLP carries and, for the desktop app, the raw one a rollout's session_meta carries.
+func TestCodexSurfaceNamesOnlyTheDesktopAppDesktop(t *testing.T) {
+	for want, originators := range map[string][]string{
+		"codex_desktop": {"Codex_Desktop", "Codex Desktop", "codex_desktop", "codex-desktop"},
+		"codex_cli": {"codex-tui", "codex_exec", "codex_cli_rs", "codex-cli", "codex_vscode", "codex_sdk_ts",
+			"codex_mcp_server", "codex-app-server-sdk", "other", ""},
+	} {
+		for _, originator := range originators {
+			if got := CodexSurface(originator); got != want {
+				t.Errorf("CodexSurface(%q) = %q, want %q", originator, got, want)
+			}
+		}
+	}
+	for name, want := range map[string]bool{
+		"codex-app-server": true, "codex_app_server": true, "Codex App Server": true,
+		"codex_cli_rs": false, "codex_exec": false, "codex-app-server-sdk": false, "": false,
+	} {
+		if got := IsCodexAppServer(name); got != want {
+			t.Errorf("IsCodexAppServer(%q) = %t, want %t", name, got, want)
+		}
+	}
+}
+
 // Normalizing an already-canonical name must return it unchanged. vscode_copilot once collapsed
 // into copilot_cli, a different product, so anything that re-read and re-wrote an event silently
 // reassigned VS Code activity to the CLI.

@@ -37,6 +37,8 @@ type mapper struct {
 	out       []MappedEvent
 	tools     map[string]codexToolCall
 	sessionID string
+	// harness is the Codex surface the rollout's session_meta names, codex_cli until it does.
+	harness   string
 	workspace string
 	model     string
 	turnID    string
@@ -62,6 +64,7 @@ func MapSession(ref SessionRef, records []Record, opts MapOptions) []MappedEvent
 		opts:             opts,
 		tools:            map[string]codexToolCall{},
 		sessionID:        ref.ID,
+		harness:          asymptoteobserve.CodexSurface(""),
 		workspace:        ref.Workspace,
 		tokenRecordTurns: tokenRecordTurns,
 	}
@@ -96,6 +99,9 @@ func (m *mapper) consumeSessionMeta(record Record, emit bool) {
 	}
 	if meta.CWD != "" {
 		m.workspace = meta.CWD
+	}
+	if meta.Originator != "" {
+		m.harness = asymptoteobserve.CodexSurface(meta.Originator)
 	}
 	if emit && !m.opts.SkipSessionStarted && !m.started {
 		ev := m.base(record, "session.started", "session", schema.SeverityInfo, schema.FidelityObserved, "Codex session started")
@@ -411,7 +417,7 @@ func (m *mapper) base(record Record, action, category string, severity schema.Se
 		Fidelity: fidelity,
 		Message:  message,
 		Origin:   schema.OriginLocal,
-		Harness:  schema.HarnessInfo{Name: Harness, CollectionMethod: schema.CollectionMethodPoll},
+		Harness:  schema.HarnessInfo{Name: m.harness, CollectionMethod: schema.CollectionMethodPoll},
 	})
 	if ts := eventTimestamp(record.Entry); ts != "" {
 		ev.Timestamp = ts

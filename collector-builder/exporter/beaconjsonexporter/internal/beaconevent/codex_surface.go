@@ -5,27 +5,26 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // Codex runs on one set of app-server internals in the desktop app and, since about CLI 0.158, in the
 // terminal too, and both export OTLP as service.name=codex-app-server. The service name alone
 // therefore can't tell the Codex desktop app from the CLI. What does is the `originator` attribute
-// Codex puts on its semantic log events: "Codex_Desktop" for the desktop app, "codex-tui" for the
-// terminal, "codex_exec" for `codex exec`.
+// Codex puts on its semantic log events and its metrics: "Codex_Desktop" for the desktop app,
+// "codex-tui" for the terminal, "codex_exec" for `codex exec` (asymptoteobserve.CodexSurface).
 //
-// Not every record carries it: the per-turn usage span has only the conversation (thread) id, and
-// the legacy token metric not even that. So the surface an originator names is remembered per
-// conversation, and a conversation's records without one get the same name. A record with neither
-// stays codex_cli, the name Codex's hooks use on every surface.
+// Not every record carries it: the per-turn usage span has only the conversation (thread) id. So
+// the surface an originator names is remembered per conversation, and a conversation's records
+// without one get the same name. A record with neither stays codex_cli, the name Codex's hooks use
+// on every surface.
 //
 // The logs and traces pipelines flush on their own timers, so a short turn's usage span can reach
 // the exporter before the prompt log that names its conversation. Sort holds such a record until
 // its conversation is named or codexHoldWindow runs out.
 
-const (
-	codexCLIHarness     = "codex_cli"
-	codexDesktopHarness = "codex_desktop"
-)
+const codexCLIHarness = "codex_cli"
 
 // maxCodexConversations bounds the conversations remembered, least recently used first out. A
 // Codex conversation's records arrive within its own lifetime, so a few thousand recent
@@ -100,26 +99,6 @@ func AcquireCodexSurfaces(config any) (*CodexSurfaces, func()) {
 	}
 }
 
-// codexSurfaceFromOriginator is the harness an originator names, or "" when there is none.
-func codexSurfaceFromOriginator(originator string) string {
-	normalized := strings.ToLower(strings.TrimSpace(originator))
-	switch {
-	case normalized == "":
-		return ""
-	case strings.Contains(normalized, "desktop"):
-		return codexDesktopHarness
-	default:
-		return codexCLIHarness
-	}
-}
-
-// isCodexAppServerName is true for the service name both the desktop app and the CLI's app-server
-// report, the one name that needs an originator to place.
-func isCodexAppServerName(name string) bool {
-	normalized := strings.NewReplacer("-", "", "_", "", " ", "").Replace(strings.ToLower(strings.TrimSpace(name)))
-	return normalized == "codexappserver"
-}
-
 // settle sets a Codex event's harness to the surface it ran in. It only touches events whose name
 // came from the shared app-server service name; a name stated outright (beacon.harness.name,
 // harness.name) or a CLI-only service (codex_cli_rs, codex_exec) is already exact.
@@ -130,7 +109,7 @@ func (s *CodexSurfaces) settle(event *Event, attrs map[string]interface{}) {
 	if FirstString(attrs, "beacon.harness.name", "harness.name") != "" {
 		return
 	}
-	if !isCodexAppServerName(FirstString(attrs, "service.name")) {
+	if !asymptoteobserve.IsCodexAppServer(FirstString(attrs, "service.name")) {
 		return
 	}
 	conversation := ""
@@ -140,11 +119,11 @@ func (s *CodexSurfaces) settle(event *Event, attrs map[string]interface{}) {
 	if conversation == "" {
 		conversation = FirstString(attrs, "conversation.id", "thread.id", "conversation_id", "thread_id")
 	}
-	surface := codexSurfaceFromOriginator(FirstString(attrs, "originator"))
-	switch {
-	case surface != "":
+	surface := ""
+	if originator := strings.TrimSpace(FirstString(attrs, "originator")); originator != "" {
+		surface = asymptoteobserve.CodexSurface(originator)
 		s.remember(conversation, surface)
-	default:
+	} else {
 		surface = s.recall(conversation)
 	}
 	if surface == "" {
