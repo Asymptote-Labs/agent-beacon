@@ -7,6 +7,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/activesession"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/localingest"
 )
 
 // TestMain keeps the active-session record every endpoint event updates out of the real home
@@ -20,6 +21,12 @@ func TestMain(m *testing.M) {
 	// Auto-share is off unless a test turns it on in a settings file of its own.
 	settingsPath := filepath.Join(dir, "share-settings.json")
 	logging.ShareSettingsPath = func() string { return settingsPath }
+	// Never send to a real collector's ingest socket, which a developer's restricted-mode machine
+	// has.
+	logging.EndpointIngest = localingest.Deliverer{
+		Client: localingest.Client{SocketPath: filepath.Join(dir, "no-ingest.sock")},
+		Spool:  localingest.Spool{Dir: filepath.Join(dir, "spool")},
+	}
 	// Beacon's Cursor hooks are not installed unless a test writes a hooks file of its own; the
 	// developer's real ~/.cursor/hooks.json must not decide what a test records.
 	cursorHooksPath := filepath.Join(dir, "cursor-hooks.json")

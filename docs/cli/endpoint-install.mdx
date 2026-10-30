@@ -52,6 +52,7 @@ The `claude` harness writes both Claude Code's OpenTelemetry settings and its us
 | `--falcon-sourcetype <type>` | Optional Falcon LogScale parser or sourcetype |
 | `--falcon-insecure-skip-verify` | Skip Falcon LogScale HEC TLS certificate verification |
 | `--falcon-ca-file <path>` | Optional CA certificate path for Falcon LogScale HEC TLS verification |
+| `--log-access <mode>` | System log access: `shared` (the default) or `restricted`. See [Restricted log access](#restricted-log-access). Omitted, an install keeps the mode the endpoint already has. System installs on macOS and Linux only |
 | `--no-backfill` | Skip the [session backfill](#session-backfill). `BEACON_BACKFILL=0` does the same |
 | `--connect` | After a successful install, attempt to connect this endpoint to Beacon Cloud ingest. User mode uses the signed-in CLI account; system mode opens browser approval. A connection failure does not roll back or fail the completed local install; verify with `beacon endpoint status --json` and retry with [`beacon endpoint connect`](/cli/endpoint-connect) |
 
@@ -242,6 +243,42 @@ beacon endpoint hooks install --harness grok --level project
 <Note>
   System-mode install (`--system`) is supported on macOS and on Linux distributions that use systemd. Omit `--system` for the default non-root local install. GitHub Copilot CLI and Factory Droid OTLP use launch-environment settings rather tha Beacon-managed shell-profile edits.
 </Note>
+
+## Restricted log access
+
+A system-mode endpoint keeps one runtime log, `/var/log/beacon-agent/runtime.jsonl`, for every user on the machine. By default the log is shared: hooks run as each logged-in user and append to it directly, so the file is `0666`. That also means any local account can truncate or rewrite the log, and read every other user's prompts, command output and diffs.
+
+`--log-access restricted` makes the collector the only writer:
+
+```bash title="Install with restricted log access"
+sudo beacon endpoint install --system --log-access restricted
+```
+
+- Hooks send their events to the collector over a local Unix socket, `/var/run/beacon-agent/ingest.sock`, instead of writing the file. Nothing leaves the machine.
+- The collector records each event under the account the operating system says sent it, not the account the event claims.
+- The log directory becomes `root:beacon-log` mode `2750`, the log and its archives `0640`, and its lock `0600`. Only the collector writes the log; only root and members of the `beacon-log` group read it. Switching an existing log to restricted replaces its files with fresh copies, so a handle another account opened while the log was shared stops reaching it.
+- If the collector is stopped or restarting, hooks keep their events in a private spool in each user's home (`~/.beacon/endpoint/spool`, `0600`) and send them with the next event once the collector is back. The agent is never held up.
+
+Install creates the `beacon-log` group when it is missing and adds nobody to it. Add each account that should read the log, such as a log shipper's service account, then restart that shipper:
+
+```bash title="Let a log shipper read a restricted log"
+# Linux
+sudo usermod -aG beacon-log <account>
+# macOS
+sudo dseditgroup -o edit -a <account> -t user beacon-log
+```
+
+The log format and every event field stay the same, so a SIEM or forwarder that parses the log needs no change. Shippers that run as root, and the Beacon Cloud forwarder, keep working without one.
+
+The mode is recorded in `config.json` as `log_access`, and in a root-owned `.beacon-log-access` marker beside the log. `beacon endpoint repair`, package upgrades, the Jamf `repair-hooks.sh` policy, and a reinstall after `uninstall --keep-logs` keep it. To go back, run `sudo beacon endpoint repair --system --log-access shared`; the log is writable by every account again at once. For package installs, set `BEACON_LOG_ACCESS=restricted` in the environment of the package's install script.
+
+What this does and does not change:
+
+- Local accounts can no longer alter or delete events already in the log, or read other users' sessions.
+- Every event that arrives over the socket records the account that sent it, as the operating system reports it. A user still controls their own agent, so they can still send events of their own choosing, including ones that name another session's id, but always under their own account.
+- The collector's OTLP ports on `127.0.0.1` still accept telemetry from any local process, as they do in the shared mode. Agents that export over OTLP, such as Claude Code and Codex, use them. Events that arrive that way are not attributed by the operating system.
+
+While the endpoint is restricted, commands that read the system log as the person running them (`beacon endpoint dashboard`, `beacon scan`, `beacon traces`, and the session lookups in `beacon share`, `beacon handoff` and `beacon git` commit linking) see it only when run as root or by a `beacon-log` member. [`beacon endpoint doctor`](/cli/endpoint-doctor#runtime_log_access) connects to the socket and reports a collector that is not answering on it, including one that was killed and left its socket behind, and any events waiting in the caller's spool. On Windows the mode works the same way with Windows mechanisms: hooks send to the named pipe `\\.\pipe\beacon-agent-ingest`, the log directory's ACL gives SYSTEM and Administrators full control, the `beacon-log` local group read and nobody else anything, events record the sender's SID and account name, and the commands run from an elevated shell (see [On Windows](/security/restricted-log-access#on-windows)). For how the mode fits with log shippers such as Microsoft Sentinel, and what it does and does not protect, see [Restricted log access](/security/restricted-log-access).
 
 ## Running user and system mode together
 

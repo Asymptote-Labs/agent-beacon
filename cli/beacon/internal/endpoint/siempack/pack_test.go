@@ -24,7 +24,7 @@ func testPack() Pack {
 			{Source: "pack/README.md", Name: "README.md"},
 			{Source: "pack/run.sh.tmpl", Name: "run.sh", TemplateLogPath: true},
 			{Source: "pack/sample.jsonl", Name: "sample.jsonl"},
-			{Source: "pack/conf.json.tmpl", Name: "conf.json", TemplateLogPath: true, JSONEscape: true},
+			{Source: "pack/conf.json.tmpl", Name: "conf.json", TemplateLogPath: true},
 		},
 	}
 }

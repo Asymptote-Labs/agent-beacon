@@ -168,7 +168,7 @@ func TestScanSkipsNewerSpecRuleWithWarning(t *testing.T) {
 func TestScanAllRulesSkippedNamesThem(t *testing.T) {
 	scanFixture(t, []string{evSecretRead})
 	// Replace the fixture's only rule with one that needs a newer spec.
-	future := strings.Replace(scanTestRule, "id: scan-test-secret-read\n", "id: scan-future-rule\nspec: threat-rules/v1.2\n", 1)
+	future := strings.Replace(scanTestRule, "id: scan-test-secret-read\n", "id: scan-future-rule\nspec: threat-rules/v1.3\n", 1)
 	if err := os.WriteFile(filepath.Join(scanOpts.rulesDir, "secret.rule.yaml"), []byte(future), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestScanAllRulesSkippedNamesThem(t *testing.T) {
 	if strings.Contains(msg, "store is empty") {
 		t.Fatalf("error must not claim the store is empty: %s", msg)
 	}
-	for _, want := range []string{`rule "scan-future-rule" requires threat-rules/v1.2`, "secret.rule.yaml", "supports up to " + threatrules.SupportedSpec, "upgrade Beacon"} {
+	for _, want := range []string{`rule "scan-future-rule" requires threat-rules/v1.3`, "secret.rule.yaml", "supports up to " + threatrules.SupportedSpec, "upgrade Beacon"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error %q missing %q", msg, want)
 		}

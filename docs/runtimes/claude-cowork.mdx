@@ -40,7 +40,7 @@ Use `beacon endpoint integrations claude-cowork status` to report whether Claude
 
 Claude Cowork is configured in Claude organization settings, not by `beacon endpoint install`.
 
-Use `beacon endpoint integrations claude-cowork print-config` to print the OTLP settings needed for the Claude admin console, then use `beacon endpoint integrations claude-cowork validate` to confirm events are arriving.
+Use `beacon endpoint integrations claude-cowork print-config` to print the OTLP settings needed for the Claude admin console, then use `beacon endpoint integrations claude-cowork validate` to confirm events are arriving. `beacon endpoint integrations validate --all` checks Claude Cowork and OpenClaw Gateway together and exits non-zero if either has no observed event; add `--json` for the per-integration result.
 
 Claude Cowork is not hook-based.
 

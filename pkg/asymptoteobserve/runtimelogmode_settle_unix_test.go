@@ -100,3 +100,66 @@ func TestSettleLeavesAFileItDoesNotOwn(t *testing.T) {
 		t.Fatalf("root settled the user's private log to %o, want it left at 0600", got)
 	}
 }
+
+// Settling archives never follows a link swapped in after the archive was checked: an account that
+// can write the log's directory (a custom log path, or root keeping a user's HOME) replaces the
+// archive with a symlink to a file of its choosing between the check and the chmod, and that
+// file must keep its mode. A chmod by path would follow the link and widen it.
+func TestSettleArchivesNeverFollowsALinkSwappedIn(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "runtime.jsonl")
+	writeMode(t, log, 0o666)
+	archive := log + ".1"
+	writeMode(t, archive, 0o600)
+	victim := filepath.Join(t.TempDir(), "victim")
+	writeMode(t, victim, 0o600)
+	if RuntimeLogIsPrivate(log) {
+		t.Fatal("a log outside the home must be shared")
+	}
+	t.Cleanup(func() { archiveChecked = nil })
+	archiveChecked = func(path string) {
+		link := filepath.Join(dir, "swap")
+		if err := os.Symlink(victim, link); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(link, path); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	SettleRuntimeLogArchives(log, 1)
+
+	if got := modeOf(t, victim); got != 0o600 {
+		t.Fatalf("settling archives chmodded a symlink's target to %o, want it left at 0600", got)
+	}
+}
+
+// A hard link to another file planted as an archive, whose planted name is removed once root has it
+// open, leaves the descriptor on that file with a single link. Settling must not widen it.
+func TestSettleArchivesNeverWidensAFileWhoseHardLinkWasRemovedAfterTheOpen(t *testing.T) {
+	asRoot(t)
+	dir := t.TempDir()
+	log := filepath.Join(dir, "runtime.jsonl")
+	writeMode(t, log, 0o666)
+	archive := log + ".1"
+	victim := filepath.Join(dir, "victim")
+	writeMode(t, victim, 0o600)
+	if err := os.Link(victim, archive); err != nil {
+		t.Fatal(err)
+	}
+	if RuntimeLogIsPrivate(log) {
+		t.Fatal("a log outside the home must be shared")
+	}
+	t.Cleanup(func() { archiveOpened = nil })
+	archiveOpened = func(path string) {
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	SettleRuntimeLogArchives(log, 1)
+
+	if got := modeOf(t, victim); got != 0o600 {
+		t.Fatalf("settling archives chmodded a hard link's other file to %o, want it left at 0600", got)
+	}
+}

@@ -61,6 +61,8 @@ func TestShellWrittenPaths(t *testing.T) {
 		{`sed -i "s/$old/$new/" f`, []string{"f"}}, // an unknown script is not a suffix
 		{`sed -i "s/$a/$b/" x y`, []string{"x", "y"}},
 		{"sudo -u deploy rm /srv/app/old.txt", []string{"/srv/app/old.txt"}},
+		{"/usr/bin/sudo rm x", []string{"x"}},
+		{"/usr/bin/env FOO=1 /bin/rm a.txt", []string{"a.txt"}},
 		{"sudo -E tee /etc/app.conf < in.txt", []string{"/etc/app.conf"}},
 		{"sudo -i rm old.txt", nil}, // a login shell starts in the target user's home
 		{"env FOO=1 rm a.txt", []string{"a.txt"}},
@@ -72,7 +74,8 @@ func TestShellWrittenPaths(t *testing.T) {
 		{"echo $((1<<3)) > n.txt\nrm old.txt", []string{"n.txt", "old.txt"}},
 		{"grep x <<< \"$v\"\nrm a.txt", []string{"a.txt"}},
 		{"git commit -m \"$(cat <<'EOF'\nrm -rf dist\nEOF\n)\"", nil},
-		{"rm a.txt 'unterminated", nil}, // a command that does not parse was captured incomplete
+		{"rm a.txt 'unterminated", nil},           // a command that does not parse was captured incomplete
+		{"rm a.txt && cat <<EOF\ncut short", nil}, // nor does one that ends inside a here-document
 		{"FOO=1 sudo rm build/out", []string{"build/out"}},
 		{`rm "file with spaces.txt"`, []string{"file with spaces.txt"}},
 		{`rm file\ two.txt`, []string{"file two.txt"}},

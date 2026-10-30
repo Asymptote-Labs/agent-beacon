@@ -46,12 +46,12 @@ func NormalizeHarnessName(name string) string {
 		return "openclaw_gateway"
 	case strings.Contains(lower, "antigravity") || strings.Contains(lower, "anti-gravity"):
 		return "antigravity_cli"
-	// Codex Desktop runs the Codex app-server, which exports OTLP with
-	// service.name=codex-app-server. Keep it separate from the terminal Codex CLI so dashboards
-	// and SIEM queries do not merge two local surfaces under one harness.name.
-	case lower == "codex_desktop" || lower == "codex-desktop" || lower == "codex desktop" ||
-		lower == "codex_app_server" || lower == "codex-app-server" || lower == "codex app server" ||
-		lower == "codex_appserver" || lower == "codex-appserver" || lower == "codex appserver":
+	// codex-app-server is not a Desktop name. The desktop app and, since about CLI 0.158, the terminal
+	// CLI both run Codex's app-server and export OTLP under that one service name, so it falls
+	// through to codex_cli here. The collector exporter tells the two apart by the `originator`
+	// Codex reports on each conversation (beaconevent.CodexSurfaces) and names Desktop sessions
+	// codex_desktop there.
+	case lower == "codex_desktop" || lower == "codex-desktop" || lower == "codex desktop":
 		return "codex_desktop"
 	case strings.Contains(lower, "codex"):
 		return "codex_cli"

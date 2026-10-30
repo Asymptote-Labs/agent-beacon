@@ -238,6 +238,7 @@
               "security/data-inventory",
               "security/retention-redaction",
               "security/endpoint-operations",
+              "security/restricted-log-access",
               "security/policy"
             ]
           },
@@ -334,6 +335,7 @@
                   "cli/endpoint-onboarding",
                   "cli/endpoint-opencode",
                   "cli/endpoint-pi",
+                  "cli/endpoint-cursor",
                   "cli/endpoint-copilot",
                   "cli/endpoint-devin",
                   "cli/endpoint-dsh",
@@ -393,6 +395,7 @@
                   "cli/scan-ci-gates"
                 ]
               },
+              "cli/intel",
               "cli/handoff",
               "cli/share",
               "cli/lenses",
@@ -503,7 +506,8 @@
                   "log-forwarding/cloudwatch",
                   "log-forwarding/customer-managed",
                   "log-forwarding/datadog",
-                  "log-forwarding/elastic"
+                  "log-forwarding/elastic",
+                  "log-forwarding/rsyslog"
                 ]
               },
               {

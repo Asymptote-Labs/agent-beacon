@@ -9,13 +9,16 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
+	"testing"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/localingest"
 )
 
 const (
@@ -41,7 +44,16 @@ type Options struct {
 	// Budget, when set, caps what this append may add to the log; an event that does not fit
 	// is refused with ErrBudgetSpent. See Budget.
 	Budget *Budget
+	// RequireWritten makes a line that could only be spooled an error (ErrSpooled) rather than a
+	// success. A caller whose job is to prove the log takes events, such as a destination
+	// validation, sets it; telemetry writers leave it unset, because a spooled line is late, not
+	// lost.
+	RequireWritten bool
 }
+
+// ErrSpooled reports that a restricted log refused a line while its collector was unreachable, so
+// the line waits in this account's spool for a later one to carry it in.
+var ErrSpooled = errors.New("the event was spooled: the restricted runtime log refused it and the Beacon collector is unreachable")
 
 // SystemLogPath is the system-mode runtime log, resolved per platform.
 //
@@ -121,10 +133,55 @@ func AppendEvent(event schema.Event, opts Options) (string, error) {
 		}
 	}
 	line := append(data, '\n')
+	if opts.Guard == nil && opts.Budget == nil && Ingest.Applies(opts.Path) {
+		if err := deliver(opts, data); err != nil {
+			return "", err
+		}
+		return opts.Path, nil
+	}
 	if err := appendJSONL(opts.Path, line, opts.RotateSize, opts.RotateArchives, opts.Guard, opts.Budget); err != nil {
 		return "", err
 	}
 	return opts.Path, nil
+}
+
+// Ingest delivers to the system log through the collector when the endpoint is in the restricted
+// log access mode. Tests point it at a socket and spool of their own; nothing else changes it.
+var Ingest = defaultIngest()
+
+// defaultIngest is the real socket and the account's spool, except in a test binary, where a
+// test that writes a system log as an ordinary account must never reach the machine's collector
+// or leave lines in the developer's own spool: there it is a socket that does not exist and a
+// spool in a private temporary directory.
+func defaultIngest() localingest.Deliverer {
+	if !testing.Testing() {
+		return localingest.Deliverer{}
+	}
+	dir := filepath.Join(os.TempDir(), fmt.Sprintf("beacon-writer-test-%d", os.Getpid()))
+	socket := filepath.Join(dir, "no-collector.sock")
+	if runtime.GOOS == "windows" {
+		socket = fmt.Sprintf(`\\.\pipe\beacon-writer-test-%d-none`, os.Getpid())
+	}
+	return localingest.Deliverer{
+		Client: localingest.Client{SocketPath: socket},
+		Spool:  localingest.Spool{Dir: filepath.Join(dir, "spool")},
+	}
+}
+
+// deliver writes one line to the system log as an account that is not root, the way the hook
+// adapter does: through the collector's ingest socket when there is one, directly otherwise, and
+// into this account's private spool only when the restricted log refuses the direct append (see
+// localingest.Deliverer.Write). A guarded or budgeted append (a session backfill) never comes
+// here: those limits are decided under the log's lock, which only a direct writer holds, and the
+// backfill that sets them runs as root on a system log.
+func deliver(opts Options, data []byte) error {
+	outcome, err := Ingest.WriteOutcome(opts.Path, data, func(line []byte) error {
+		return appendJSONL(opts.Path, append(line[:len(line):len(line)], '\n'), opts.RotateSize, opts.RotateArchives, nil, nil)
+	})
+	if err == nil && outcome == localingest.Spooled && opts.RequireWritten {
+		return ErrSpooled
+	}
+	return err
 }
 
 // compactRetainedContent drops an event's retained text and records that it did, so a reader can
@@ -371,7 +428,7 @@ func rotateIfNeeded(path string, maxSize int64, archives int, nextWriteBytes int
 	if err := os.Rename(path, rotated); err != nil {
 		return err
 	}
-	asymptoteobserve.TightenPrivateRuntimeLogArchives(path, archives)
+	asymptoteobserve.SettleRuntimeLogArchives(path, archives)
 	return nil
 }
 

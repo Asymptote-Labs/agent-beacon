@@ -2,10 +2,13 @@ package wazuh
 
 import (
 	"embed"
-	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/siempack"
 )
 
 //go:embed pack/*
@@ -20,38 +23,38 @@ type File struct {
 	Content string
 }
 
-func Files() []File {
-	localfile := LocalfileSnippet(DefaultLogPath)
-	rules := mustRead("pack/beacon-rules.xml")
-	sample := mustRead("pack/sample-event.jsonl")
-	readme := mustRead("pack/README.md")
-	dashboardColumns := mustRead("pack/apply-dashboard-default-columns.sh")
+func files(localfile string) []File {
 	return []File{
 		{Name: "ossec-localfile.xml", Content: localfile},
-		{Name: "beacon-rules.xml", Content: rules},
-		{Name: "sample-event.jsonl", Content: sample},
-		{Name: "apply-dashboard-default-columns.sh", Content: dashboardColumns},
-		{Name: "README.md", Content: readme},
+		{Name: "beacon-rules.xml", Content: mustRead("pack/beacon-rules.xml")},
+		{Name: "sample-event.jsonl", Content: mustRead("pack/sample-event.jsonl")},
+		{Name: "apply-dashboard-default-columns.sh", Content: mustRead("pack/apply-dashboard-default-columns.sh")},
+		{Name: "README.md", Content: mustRead("pack/README.md")},
 	}
 }
 
-func LocalfileSnippet(logPath string) string {
+// LocalfileSnippet returns the ossec.conf <localfile> block for logPath. Wazuh reads the path as
+// written and has no way to escape a '<' in it, so such a path is refused.
+func LocalfileSnippet(logPath string) (string, error) {
 	if logPath == "" {
 		logPath = DefaultLogPath
 	}
-	return strings.ReplaceAll(mustRead("pack/ossec-localfile.xml"), "{{LOG_PATH}}", logPath)
+	if strings.Contains(logPath, "<") {
+		return "", fmt.Errorf("wazuh cannot read a log path containing '<': %s", logPath)
+	}
+	return siempack.RenderLogPath("ossec-localfile.xml", mustRead("pack/ossec-localfile.xml"), logPath), nil
 }
 
 func InstallPack(outputDir, logPath string) error {
+	localfile, err := LocalfileSnippet(logPath)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return err
 	}
-	for _, file := range Files() {
-		content := file.Content
-		if file.Name == "ossec-localfile.xml" {
-			content = LocalfileSnippet(logPath)
-		}
-		if err := os.WriteFile(filepath.Join(outputDir, file.Name), []byte(content), 0644); err != nil {
+	for _, file := range files(localfile) {
+		if err := os.WriteFile(filepath.Join(outputDir, file.Name), []byte(file.Content), 0644); err != nil {
 			return err
 		}
 	}

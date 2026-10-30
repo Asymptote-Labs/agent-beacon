@@ -114,6 +114,17 @@ type Config struct {
 	Destinations              *Destinations  `json:"destinations,omitempty"`
 	ManagedIngest             *ManagedIngest `json:"managed_ingest,omitempty"`
 	AutoUpdate                *AutoUpdate    `json:"auto_update,omitempty"`
+	// LogAccess is the system log's access mode: "shared" (empty, the default) or "restricted".
+	// Read it through RestrictedLogAccess, which also accounts for user mode.
+	LogAccess string `json:"log_access,omitempty"`
+}
+
+// RestrictedLogAccess reports whether this endpoint's system log is in the restricted access mode:
+// written only by the privileged collector, readable by root (SYSTEM and Administrators on
+// Windows) and the beacon-log group, with hooks sending their events over the local ingest socket
+// or pipe. It is never true in user mode, whose log is already private.
+func (c Config) RestrictedLogAccess() bool {
+	return !c.UserMode && strings.EqualFold(strings.TrimSpace(c.LogAccess), "restricted")
 }
 
 // ManagedIngest records that this endpoint forwards to Asymptote managed ingest. It holds

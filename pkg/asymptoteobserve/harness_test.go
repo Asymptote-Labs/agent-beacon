@@ -10,10 +10,12 @@ import "testing"
 // produces; the closed-set cases list each member.
 func TestHarnessSpellingsConvergeOnCanonicalNames(t *testing.T) {
 	for want, spellings := range map[string][]string{
-		"claude_code":     {"claude", "claude-code"},
-		"claude_web":      {"claude.ai", "claude_web"}, // ordered before the generic claude rule
-		"codex_cli":       {"codex", "codex-cli", "codex_exec", "codex_cli_rs"},
-		"codex_desktop":   {"codex-app-server", "codex_app_server", "Codex App Server", "codex-desktop", "Codex Desktop"},
+		"claude_code": {"claude", "claude-code"},
+		"claude_web":  {"claude.ai", "claude_web"}, // ordered before the generic claude rule
+		// The app-server service name is shared by the CLI and the desktop app, so on its own it
+		// says codex_cli; the exporter names Desktop conversations by their originator.
+		"codex_cli":       {"codex", "codex-cli", "codex_exec", "codex_cli_rs", "codex-app-server", "codex_app_server", "Codex App Server"},
+		"codex_desktop":   {"codex-desktop", "Codex Desktop", "codex_desktop"},
 		"gemini_cli":      {"gemini"},
 		"antigravity_cli": {"antigravity"},
 		// VS Code resolves before the generic copilot rule; "copilot" contains "pi", so Pi must not

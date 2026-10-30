@@ -359,14 +359,20 @@ func TestOpenCodeShareFromInsideTheSessionIsNotStale(t *testing.T) {
 
 func TestIsBeaconShareCommand(t *testing.T) {
 	for command, want := range map[string]bool{
-		`beacon share --current`:                                  true,
-		`cd x && beacon share refresh --harness claude_code`:      true,
-		`/opt/beacon/bin/beacon share`:                            true,
-		`BEACON_X=1 beacon share`:                                 true,
-		`./beacon share --json`:                                   true,
-		`C:\Tools\beacon.exe share`:                               true,
-		`sudo beacon share --session abc`:                         true,
-		"go test ./...\nbeacon share":                             true,
+		`beacon share --current`:                             true,
+		`cd x && beacon share refresh --harness claude_code`: true,
+		`/opt/beacon/bin/beacon share`:                       true,
+		`BEACON_X=1 beacon share`:                            true,
+		`./beacon share --json`:                              true,
+		`C:\Tools\beacon.exe share`:                          true,
+		`sudo beacon share --session abc`:                    true,
+		`/usr/bin/sudo /usr/bin/env FOO=1 beacon share`:      true,
+		"go test ./...\nbeacon share":                        true,
+		// Captures cut short: the share call before the cut still counts.
+		"beacon share --current --json 'unterminated":             true,
+		"beacon share --current && cat <<EOF\nlong text":          true,
+		"git commit -m 'beacon share":                             false,
+		`& "C:\Tools\beacon.exe" share`:                           false, // PowerShell, not bash
 		`rg "beacon share"`:                                       false,
 		`git commit -m 'beacon share now records shared_through'`: false,
 		`git commit -m 'fix; beacon share'`:                       false,

@@ -38,16 +38,30 @@ ARGS=(
 echo "Repairing Beacon system endpoint..."
 "$BEACON_BIN" "${ARGS[@]}"
 
-echo "Preparing runtime log path for user-run hooks..."
-mkdir -p "$RUNTIME_DIR"
-touch "$RUNTIME_LOG" "$RUNTIME_LOCK" "$INVENTORY_LOG" "$INVENTORY_LOCK" "$INVENTORY_STATE" "$INVENTORY_STATE_LOCK"
-chown root:wheel "$RUNTIME_DIR" "$RUNTIME_LOG" "$RUNTIME_LOCK" "$INVENTORY_LOG" "$INVENTORY_LOCK" "$INVENTORY_STATE" "$INVENTORY_STATE_LOCK"
-chmod 755 "$RUNTIME_DIR"
-# Runtime log and lock stay 666 so user-run hooks can append even when a
-# root-owned rotation or collector recreates them; Beacon's writers use the
-# same shared mode.
-chmod 666 "$RUNTIME_LOG" "$RUNTIME_LOCK"
-chmod 644 "$INVENTORY_LOG" "$INVENTORY_LOCK" "$INVENTORY_STATE" "$INVENTORY_STATE_LOCK"
+# In the restricted log access mode (`--log-access restricted`) only the collector writes the
+# runtime log: hooks hand their events to it over the ingest socket, and the directory and log
+# belong to root:beacon-log with no access for anyone else. The repair above kept that mode, so
+# none of the shared-mode preparation, grants or write checks below apply; running them would
+# make the log world-writable again.
+LOG_ACCESS=shared
+if grep -qx restricted "$RUNTIME_DIR/.beacon-log-access" 2>/dev/null; then
+  LOG_ACCESS=restricted
+fi
+
+if [ "$LOG_ACCESS" = shared ]; then
+  echo "Preparing runtime log path for user-run hooks..."
+  mkdir -p "$RUNTIME_DIR"
+  touch "$RUNTIME_LOG" "$RUNTIME_LOCK" "$INVENTORY_LOG" "$INVENTORY_LOCK" "$INVENTORY_STATE" "$INVENTORY_STATE_LOCK"
+  chown root:wheel "$RUNTIME_DIR" "$RUNTIME_LOG" "$RUNTIME_LOCK" "$INVENTORY_LOG" "$INVENTORY_LOCK" "$INVENTORY_STATE" "$INVENTORY_STATE_LOCK"
+  chmod 755 "$RUNTIME_DIR"
+  # Runtime log and lock stay 666 so user-run hooks can append even when a
+  # root-owned rotation or collector recreates them; Beacon's writers use the
+  # same shared mode.
+  chmod 666 "$RUNTIME_LOG" "$RUNTIME_LOCK"
+  chmod 644 "$INVENTORY_LOG" "$INVENTORY_LOCK" "$INVENTORY_STATE" "$INVENTORY_STATE_LOCK"
+else
+  echo "Runtime log is in the restricted access mode; hooks deliver through the collector."
+fi
 
 CONSOLE_USER="$(stat -f %Su /dev/console 2>/dev/null || true)"
 
@@ -95,7 +109,6 @@ sudo -u "$CONSOLE_USER" mkdir -p "$HOOK_DIR"
 sudo -u "$CONSOLE_USER" chmod 755 "$HOME_DIR/.beacon" "$HOME_DIR/.beacon/endpoint" "$HOOK_DIR"
 sudo -u "$CONSOLE_USER" rm -f "$HOOK_BIN"
 
-echo "Granting $CONSOLE_USER append access to Beacon runtime and inventory logs..."
 # The directory stays root-owned 0755 with no grant to add or remove entries: hooks only append
 # to the files below. Such a grant would let a user swap a log for a link that the root collector
 # and inventory job then open. Earlier versions of this script, and the Jamf guide's snippet,
@@ -110,13 +123,33 @@ revoke_entry_grants() {
       chmod -a# "$index" "$1"
     done
 }
-revoke_entry_grants "$RUNTIME_DIR"
-chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$RUNTIME_LOG" || true
-chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$RUNTIME_LOCK" || true
-chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$INVENTORY_LOG" || true
-chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$INVENTORY_LOCK" || true
-chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$INVENTORY_STATE" || true
-chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$INVENTORY_STATE_LOCK" || true
+# A restricted log keeps no per-user grant at all: one an earlier shared-mode run of this script
+# left would still let that user read and rewrite every account's events.
+revoke_file_grants() {
+  [ -e "$1" ] || return 0
+  ls -led "$1" |
+    awk '$1 ~ /^[0-9]+:$/ && / allow / && /read|write|append/ { sub(":", "", $1); print $1 }' |
+    sort -rn |
+    while read -r index; do
+      chmod -a# "$index" "$1"
+    done
+}
+if [ -d "$RUNTIME_DIR" ]; then
+  revoke_entry_grants "$RUNTIME_DIR"
+fi
+if [ "$LOG_ACCESS" = shared ]; then
+  echo "Granting $CONSOLE_USER append access to Beacon runtime and inventory logs..."
+  chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$RUNTIME_LOG" || true
+  chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$RUNTIME_LOCK" || true
+  chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$INVENTORY_LOG" || true
+  chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$INVENTORY_LOCK" || true
+  chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$INVENTORY_STATE" || true
+  chmod +a "$CONSOLE_USER allow read,write,append,readattr,writeattr,readextattr,writeextattr" "$INVENTORY_STATE_LOCK" || true
+else
+  echo "Revoking per-user grants on the restricted runtime log..."
+  revoke_file_grants "$RUNTIME_LOG"
+  revoke_file_grants "$RUNTIME_LOCK"
+fi
 
 echo "Installing Claude Code hooks as $CONSOLE_USER..."
 sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" "$BEACON_BIN" endpoint hooks install \
@@ -131,13 +164,15 @@ if [ ! -x "$HOOK_BIN" ]; then
   exit 1
 fi
 
-echo "Validating hook write permissions..."
-sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" test -w "$RUNTIME_LOG"
-sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" sh -c ": >> '$RUNTIME_LOCK'"
-sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" test -w "$INVENTORY_LOG"
-sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" sh -c ": >> '$INVENTORY_LOCK'"
-sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" test -w "$INVENTORY_STATE"
-sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" sh -c ": >> '$INVENTORY_STATE_LOCK'"
+if [ "$LOG_ACCESS" = shared ]; then
+  echo "Validating hook write permissions..."
+  sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" test -w "$RUNTIME_LOG"
+  sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" sh -c ": >> '$RUNTIME_LOCK'"
+  sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" test -w "$INVENTORY_LOG"
+  sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" sh -c ": >> '$INVENTORY_LOCK'"
+  sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" test -w "$INVENTORY_STATE"
+  sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" sh -c ": >> '$INVENTORY_STATE_LOCK'"
+fi
 
 echo "Running manual Claude hook smoke test..."
 sudo -u "$CONSOLE_USER" HOME="$HOME_DIR" BEACON_SMOKE_RUNTIME_LOG="$RUNTIME_LOG" sh -lc '
