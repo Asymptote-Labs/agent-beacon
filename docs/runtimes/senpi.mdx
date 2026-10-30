@@ -76,7 +76,7 @@ An unmarked extension file reports `disabled` rather than `enabled`, because rep
 
 ## Install or configuration support
 
-`beacon endpoint install` prepares shared endpoint config and runtime log paths. The extension is installed separately, because Senpi loads it from the user's own profile rather than from a machine-wide location:
+`beacon endpoint install` prepares shared endpoint config and runtime log paths, and installs the extension at user level when it detects Senpi (or when you pass `--harness omo`). Senpi loads it from the user's own profile rather than from a machine-wide location. To install, refresh, or manage the extension on its own, including at project level:
 
 ```bash
 beacon endpoint hooks install --harness omo            # user level (default)
