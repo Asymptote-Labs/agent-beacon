@@ -352,6 +352,11 @@ func TestGitPrePushAbandonsAnUploadThatNeverReturns(t *testing.T) {
 	t.Cleanup(func() { close(release) })
 	prevUpload := gitShareUpload
 	gitShareUpload = func(ctx context.Context, _ *account.ShareClient, subject shareSubject, _ shareUploadOptions) (shareResult, shareSubject, error) {
+		// The hook's time is the manual deadline alone; a deadline here is a real timer that a
+		// slow runner can run out before either upload starts.
+		if d, ok := ctx.Deadline(); ok {
+			t.Errorf("upload of %s has a wall-clock deadline %s the hook did not set", subject.session.ID, d)
+		}
 		if subject.session.ID == "sess-fast" {
 			return shareResult{SharedURL: "https://beacon.sh/s/fast01"}, subject, nil
 		}

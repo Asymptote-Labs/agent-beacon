@@ -21,11 +21,10 @@ import (
 // than when the hook is wrong. Tests of the budgets themselves do not call it.
 func relaxGitBudgets(t *testing.T) {
 	t.Helper()
-	prevHook, prevShare, prevUpload := gitHookBudget, gitShareBudget, gitShareUploadBudget
+	prevHook, prevShare := gitHookBudget, gitShareBudget
 	gitHookBudget = time.Minute
 	gitShareBudget = time.Minute
-	gitShareUploadBudget = gitShareBudget - gitShareNotesReserve - gitShareNoteWriteBudget
-	t.Cleanup(func() { gitHookBudget, gitShareBudget, gitShareUploadBudget = prevHook, prevShare, prevUpload })
+	t.Cleanup(func() { gitHookBudget, gitShareBudget = prevHook, prevShare })
 }
 
 func writeRuntimeEvent(t *testing.T, logPath, top, session, file string) {
