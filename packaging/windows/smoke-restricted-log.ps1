@@ -64,7 +64,9 @@ function Get-LogEvents {
     return @(Get-Content -LiteralPath $log | Where-Object { $_.Contains($Marker) } | ForEach-Object { $_ | ConvertFrom-Json })
 }
 
-$password = 'Bs1!' + [Guid]::NewGuid().ToString('N')
+# Fourteen characters at most: net.exe stops to ask "continue?" for a longer password, and with
+# no answer on stdin it fails without creating the account.
+$password = 'Bs1!' + [Guid]::NewGuid().ToString('N').Substring(0, 10)
 $credential = [System.Management.Automation.PSCredential]::new(
     $account, (ConvertTo-SecureString $password -AsPlainText -Force))
 
