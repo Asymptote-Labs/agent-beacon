@@ -1,7 +1,6 @@
 package asymptoteobserve
 
 import (
-	"bytes"
 	"encoding/json"
 	"maps"
 	"math"
@@ -763,18 +762,25 @@ func CleanString(value string, limit int, redactSecrets bool) string {
 	if !redactSecrets {
 		return TruncateString(value, limit)
 	}
+	return TruncateString(redactBeforeCut(value, limit), limit)
+}
+
+// redactBeforeCut redacts value as far as a cut at limit needs: the whole of it, or a window past
+// the limit that still holds redactWindow bytes there once redacted. Everything up to the cut is
+// then redacted text.
+func redactBeforeCut(value string, limit int) string {
 	if limit <= 0 {
-		return TruncateString(RedactString(value), limit)
+		return RedactString(value)
 	}
 	// Redaction shortens what it matches, so a window that shrank pulls text from near its own cut
 	// inside the limit, where an unrecognizable fragment of a secret would survive. Widen the window
 	// until a full redactWindow of redacted text is left past the limit, or the whole string fits.
 	for window := limit + redactWindow; ; window *= 2 {
 		if len(value) <= window {
-			return TruncateString(RedactString(value), limit)
+			return RedactString(value)
 		}
 		if redacted := RedactString(value[:window]); len(redacted) >= limit+redactWindow {
-			return TruncateString(redacted, limit)
+			return redacted
 		}
 	}
 }
@@ -785,11 +791,11 @@ func CleanString(value string, limit int, redactSecrets bool) string {
 //
 // A value of a type JSON decoding does not produce ([]string, map[string]string, a struct, a
 // pointer, a named string type, json.RawMessage) is first converted into what encoding/json
-// writes for it, decoded back into an interface{}, then sanitized the same way; a value JSON
-// cannot represent (a NaN, a channel, a function, a cycle) becomes nil. Booleans and Go's number
-// types are kept as they are, so an integer stays an integer. A []byte stays a []byte (an OTLP
-// bytes attribute keeps its type): valid UTF-8 is sanitized as a string is, anything else is only
-// cut to the limit. A CleanedValue is kept as CleanValue left it. The result always marshals.
+// writes for it, decoded back into an interface{}, then sanitized the same way (jsonValue); the
+// parts of it JSON cannot represent (a NaN, a channel, a function, a cycle) become nil. Booleans
+// and Go's number types are kept as they are, so an integer stays an integer. A []byte stays a
+// []byte (an OTLP bytes attribute keeps its type) and is redacted and cut (cleanBytes). A
+// CleanedValue is kept as CleanValue left it. The result always marshals.
 func SanitizeMap(input map[string]interface{}, opts PrivacyOptions) map[string]interface{} {
 	limit := opts.StringLimit
 	if limit <= 0 {
@@ -839,8 +845,10 @@ func sanitizeField(key string, value interface{}, opts PrivacyOptions, limit int
 	return sanitizeField(key, jsonValue(value), opts, limit)
 }
 
-// cleanBytes is a []byte sanitized as a string when it is valid UTF-8, and otherwise only cut to
-// limit bytes: binary data holds no text a pattern could reliably recognize.
+// cleanBytes is a []byte sanitized as a string when it is valid UTF-8. Otherwise it is still
+// redacted, since bytes that are not valid UTF-8 as a whole can hold readable text (Latin-1, a
+// multi-byte character cut in two), and then cut to limit bytes. Redaction replaces only what its
+// rules match and leaves every other byte exactly as it was.
 func cleanBytes(value []byte, limit int, redactSecrets bool) []byte {
 	if value == nil {
 		return nil
@@ -848,7 +856,11 @@ func cleanBytes(value []byte, limit int, redactSecrets bool) []byte {
 	if utf8.Valid(value) {
 		return []byte(CleanString(string(value), limit, redactSecrets))
 	}
-	return bytes.Clone(value[:min(len(value), limit)])
+	text := string(value)
+	if redactSecrets {
+		text = redactBeforeCut(text, limit)
+	}
+	return []byte(text[:min(len(text), max(limit, 0))])
 }
 
 // CleanedValue is a value CleanValue sanitized. SanitizeMap and SanitizeSlice keep it as it is,
@@ -929,17 +941,6 @@ func jsonScalar(value interface{}) (interface{}, bool) {
 		return value, true
 	}
 	return nil, false
-}
-
-// jsonValue is a value of any other type as encoding/json marshals it and decodes it back: a
-// string, a []interface{}, a map[string]interface{}, or a scalar jsonScalar keeps; nil when JSON
-// cannot represent it.
-func jsonValue(value interface{}) interface{} {
-	d := decoded(value, 0)
-	if _, deep := d.(tooDeep); deep {
-		return roundTrip(value)
-	}
-	return d
 }
 
 // isJSONNumber reports whether s is a number as JSON spells it, which is what encoding/json

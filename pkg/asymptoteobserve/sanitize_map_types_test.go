@@ -73,11 +73,7 @@ func checkSanitized(t *testing.T, path string, v interface{}, limit int) {
 	case string:
 		checkText(x)
 	case []byte:
-		if utf8.Valid(x) {
-			checkText(string(x))
-		} else if len(x) > limit {
-			t.Errorf("%s: %d bytes, limit %d", path, len(x), limit)
-		}
+		checkText(string(x))
 	case map[string]interface{}:
 		for k, item := range x {
 			checkSanitized(t, path+"."+k, item, limit)
@@ -144,6 +140,71 @@ func TestSanitizeMapKeepsScalarAndBytesTypes(t *testing.T) {
 		if got := SanitizeMap(map[string]interface{}{"v": value}, PrivacyOptions{RedactSecrets: true})["v"]; got != nil {
 			t.Errorf("%s = %#v, want nil", name, got)
 		}
+	}
+}
+
+// Bytes that are not valid UTF-8 as a whole can still hold readable text, Latin-1 here: a
+// credential in them is redacted, and every other byte is kept exactly as it was.
+func TestSanitizeMapRedactsBytesThatAreNotUTF8(t *testing.T) {
+	latin1 := []byte("caf\xe9 clone with " + typesTestToken + " na\xefve")
+	opts := PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit}
+	want := []byte("caf\xe9 clone with ghp_[REDACTED] na\xefve")
+	if got := SanitizeMap(map[string]interface{}{"payload": latin1}, opts)["payload"]; !reflect.DeepEqual(got, want) {
+		t.Errorf("payload = %q, want %q", got, want)
+	}
+	if got := SanitizeSlice([]interface{}{latin1}, opts)[0]; !reflect.DeepEqual(got, want) {
+		t.Errorf("item = %q, want %q", got, want)
+	}
+	// A long one is cut to the limit, every byte before the cut kept.
+	long := append(bytes.Repeat([]byte("\xe9t\xe9 "), 600), latin1...)
+	got, ok := SanitizeMap(map[string]interface{}{"payload": long}, opts)["payload"].([]byte)
+	if !ok || !bytes.Equal(got, long[:DefaultRawStringLimit]) {
+		t.Errorf("long payload = %d bytes, want the first %d", len(got), DefaultRawStringLimit)
+	}
+	// A credential straddling the cut is redacted before it is cut, so no part of it is left (its
+	// body would start 8 bytes before the cut).
+	cut := append(bytes.Repeat([]byte{'\xe9'}, DefaultRawStringLimit-28), latin1...)
+	if got := SanitizeMap(map[string]interface{}{"payload": cut}, opts)["payload"].([]byte); bytes.Contains(got, []byte(typesTestToken[4:8])) {
+		t.Errorf("credential straddling the cut left a prefix: %q", got[len(got)-40:])
+	}
+}
+
+type typesTestMeta struct {
+	Runtime string `json:"runtime"`
+}
+
+type typesTestServer struct {
+	typesTestMeta
+	Name       string                 `json:"name"`
+	Definition map[string]interface{} `json:"definition,omitempty"`
+	Note       string                 `json:"note,omitempty"`
+	Internal   string                 `json:"-"`
+}
+
+// A value JSON cannot represent turns only itself into nil, not the list or the struct holding it.
+func TestSanitizeMapKeepsPartsBesideAnUnrepresentableValue(t *testing.T) {
+	servers := []typesTestServer{
+		{typesTestMeta{"cursor"}, "first", map[string]interface{}{"command": "npx"}, "", "hidden"},
+		{typesTestMeta{"codex"}, "broken", map[string]interface{}{"command": "uvx", "timeout": math.NaN(), "note": typesTestText}, "n", ""},
+		{typesTestMeta{"cursor"}, "last", nil, "", ""},
+	}
+	opts := PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit}
+	want := []interface{}{
+		map[string]interface{}{"runtime": "cursor", "name": "first", "definition": map[string]interface{}{"command": "npx"}},
+		map[string]interface{}{"runtime": "codex", "name": "broken", "note": "n", "definition": map[string]interface{}{
+			"command": "uvx", "timeout": nil, "note": CleanString(typesTestText, DefaultRawStringLimit, true),
+		}},
+		map[string]interface{}{"runtime": "cursor", "name": "last"},
+	}
+	if got := SanitizeMap(map[string]interface{}{"servers": servers}, opts)["servers"]; !reflect.DeepEqual(got, want) {
+		t.Errorf("servers = %#v\nwant %#v", got, want)
+	}
+	if got := SanitizeSlice([]interface{}{servers}, opts)[0]; !reflect.DeepEqual(got, want) {
+		t.Errorf("servers in a slice = %#v", got)
+	}
+	data, err := json.Marshal(CleanValue(servers, DefaultRawStringLimit))
+	if wantData, _ := json.Marshal(want); err != nil || !bytes.Equal(data, wantData) {
+		t.Errorf("CleanValue = %s, %v\nwant %s", data, err, wantData)
 	}
 }
 

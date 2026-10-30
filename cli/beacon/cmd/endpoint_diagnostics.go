@@ -673,9 +673,11 @@ func writeInventorySnapshotEvents(cfg endpointconfig.Config, settings endpointco
 	// The scanner has already redacted what it captures and cut file contents to max_content_bytes;
 	// an MCP server definition, whose keys come from the user's config, had the field-name and flag
 	// rules applied (inventory.redactStructured). CleanValue redacts every string in them again and
-	// keeps them at that limit, where the event writer would otherwise cut each to the raw-field
-	// limit, and leaves our own field names such as env_keys, a list of variable names, as they are.
-	contentLimit := endpointinventory.ContentLimit(settings.MaxContentBytes)
+	// leaves our own field names such as env_keys, a list of variable names, as they are. Its limit
+	// is max_content_bytes, so captured contents are not cut again, but never below the raw-field
+	// limit the event writer applies to other raw strings, so a small max_content_bytes does not cut
+	// paths, names and hashes.
+	contentLimit := max(endpointinventory.ContentLimit(settings.MaxContentBytes), asymptoteobserve.DefaultRawStringLimit)
 	snapshot.Raw = map[string]interface{}{
 		"inventory": map[string]interface{}{
 			"generated_at":             result.GeneratedAt,
