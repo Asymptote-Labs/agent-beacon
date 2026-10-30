@@ -13,7 +13,7 @@ Before enabling Gemini CLI telemetry, make sure:
 
 - Gemini CLI is installed and available as the `gemini` executable for the user or managed endpoint.
 - `beacon endpoint install` has run so the local collector, endpoint config, and runtime log path exist.
-- Gemini is detectable through its executable or user configuration. If automatic discovery is unavailable in an unattended environment, explicitly include it with `beacon endpoint install --harness claude,codex,gemini`.
+- Gemini is detected only through the `gemini` executable on `PATH`; its user configuration alone does not make it detectable. If the executable is not on `PATH`, or automatic discovery is unavailable in an unattended environment, explicitly include it with `beacon endpoint install --harness claude,codex,gemini`.
 - No project settings or `GEMINI_TELEMETRY_*` environment variables override the user-level Beacon settings you expect to use.
 - Your team has reviewed content handling and destination access for prompt telemetry.
 
