@@ -38,14 +38,15 @@ const (
 	gitShareMaxSessions = 10
 	// gitShareMaxCommits bounds how many pushed commits are read for links.
 	gitShareMaxCommits = 100
-	// gitShareNotesReserve is the part of the pre-push budget kept for pushing the notes ref.
-	gitShareNotesReserve = 3 * time.Second
-	// gitShareNoteWriteBudget is the part kept, after the uploads, for writing the URLs they
-	// returned into the local notes. It is local work, so a second is plenty.
-	gitShareNoteWriteBudget = time.Second
 )
 
 var (
+	// gitShareNotesReserve is the part of the pre-push budget kept for pushing the notes ref.
+	gitShareNotesReserve = 3 * time.Second
+	// gitShareNoteWriteBudget is the part kept, after the uploads, for writing the URLs they
+	// returned into the local notes. It is local work, so a second is plenty. Tests that stub the
+	// hook's clock replace both (stubGitHookTime).
+	gitShareNoteWriteBudget = time.Second
 	// gitShareUpload is shareUpload; tests replace it.
 	gitShareUpload = shareUpload
 	// gitShareLogSessions lists the sessions in the runtime log; tests replace it to count reads.
