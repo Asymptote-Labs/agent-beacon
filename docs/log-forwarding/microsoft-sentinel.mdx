@@ -143,7 +143,7 @@ The DCR uses Custom Text Logs because Beacon writes newline-delimited JSON. The 
 
 Azure Monitor Agent does not run on macOS, so Macs use the [Vector path](#vector-and-the-logs-ingestion-api). The signed macOS package installs Vector at `/opt/beacon/bin/vector`, just like the Linux packages.
 
-For Azure Monitor Agent on Windows or Linux, install AMA on the machine, add a custom text log source pointing at the Beacon runtime log (usually `/var/log/beacon-agent/runtime.jsonl`), apply the Beacon DCR transform, route output to `BeaconRuntime_CL`, and associate the DCR with the machine. On an endpoint with [restricted log access](/security/restricted-log-access), AMA can read the log only if it runs as root or its account is in the `beacon-log` group.
+For Azure Monitor Agent on Windows or Linux, install AMA on the machine, add a custom text log source pointing at the Beacon runtime log (usually `/var/log/beacon-agent/runtime.jsonl`), apply the Beacon DCR transform, route output to `BeaconRuntime_CL`, and associate the DCR with the machine. On an endpoint with [restricted log access](/security/restricted-log-access), AMA can read the log only if it runs as root (SYSTEM on Windows, its default) or its account is in the `beacon-log` group.
 
 ### Azure Monitor Agent outside Azure
 
