@@ -114,6 +114,9 @@ func FuzzRedactIsIdempotent(f *testing.F) {
 	for _, tc := range adjacentCases {
 		f.Add(tc.input)
 	}
+	for _, input := range redactIdempotenceInputs {
+		f.Add(input)
+	}
 	r := rand.New(rand.NewPCG(5, 5))
 	for range 64 {
 		f.Add(randomAdjacentInput(r))

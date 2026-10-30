@@ -367,9 +367,22 @@ func isRedactedJWTPrefix(value string) bool {
 	return value == "eyJ"
 }
 
-// isRedactedValue keeps a value an earlier pass already replaced, so redaction stays idempotent.
+// isRedactedValue keeps a value an earlier pass already replaced, so redaction stays idempotent:
+// one marker, or several back to back. A flag finds them where it found no value before a copy of
+// an assigned value that starts with a dash was replaced (`--password --token …`), and replacing
+// them would only merge the markers.
 func isRedactedValue(value string) bool {
-	return value == redactedValue
+	if value == "" {
+		return false
+	}
+	for value != "" {
+		rest, ok := strings.CutPrefix(value, redactedValue)
+		if !ok {
+			return false
+		}
+		value = rest
+	}
+	return true
 }
 
 // isLiteralOrAuthScheme is isAuthScheme, plus the JSON literals that carry no secret.
@@ -412,8 +425,8 @@ var redactionRules = concatRules([]redactionRule{
 	},
 	// A command-line flag: `--password x`, `--token=x`, `--api-key x`, and quoted, the way agents
 	// usually write arguments: `--password "x y"`, `--token='x'`.
-}, quotedRules(quotedFlag, nil), []redactionRule{
-	{expr: `(?i)(` + redactFlag + `)([^\s"'-][^\s"']*)`, replacement: "${1}" + redactedValue, needles: redactFlagNeedles, start: startFlag},
+}, quotedRules(quotedFlag, isRedactedValue), []redactionRule{
+	{expr: `(?i)(` + redactFlag + `)([^\s"'-][^\s"']*)`, replacement: "${1}" + redactedValue, keep: isRedactedValue, needles: redactFlagNeedles, start: startFlag},
 	// A flag and its value as two quoted items of an argument list, the way an MCP server's args
 	// are written in JSON, TOML and YAML: `"args": ["--api-key", "x"]`.
 	{
@@ -522,6 +535,7 @@ func (rule redactionRule) applyOnce(text *redactGate, slot *redactSlot) string {
 				index = 2
 			}
 			if group := 2 * index; match[group] >= 0 && keep(value[match[group]:match[group+1]]) {
+				text.hidden = text.hidden || keptLabel(value, match[group+1])
 				continue
 			}
 		}
@@ -645,12 +659,35 @@ func RedactString(value string) string {
 // label rules cost microseconds on a short string and tens of milliseconds on a tool output of a
 // few kilobytes. Almost no text holds a needle of most rules, and one pass over the text finds
 // every needle of every rule at once.
+//
+// One pass is enough except where a value that a rule keeps, or the capture of assigned values
+// takes, is itself a label with its separator (keptLabel). Neither looks for a match inside one it
+// has, so of `token:seCret":token":0` the rule for a quoted label with a bare value keeps
+// `seCret":token` (`token` names an auth scheme) and never sees `token":0`; the rule for unquoted
+// labels then replaces `seCret`, the label that hid it, and only the next pass redacts `0`. Such
+// text is redacted again until it stops changing, as every later call would redact it. A pass can
+// only show what the one before hid; texts the tests and fuzzing have tried took at most three
+// passes that change them, and redactMaxPasses keeps the cost linear whatever the text.
 func redactString(value string, gated bool) string {
+	for pass := 1; ; pass++ {
+		out, hidden := redactPass(value, gated)
+		if !hidden || out == value || pass == redactMaxPasses {
+			return out
+		}
+		value = out
+	}
+}
+
+// redactMaxPasses bounds the passes redactString makes over text where a value hid a label.
+const redactMaxPasses = 8
+
+// redactPass is one pass of every rule over value, and whether a value hid a label (keptLabel).
+func redactPass(value string, gated bool) (string, bool) {
 	engine := redactEngineFor()
 	text := redactGate{value: value, enabled: gated, engine: engine}
 	if text.holdsNothing() {
 		// Most text: no rule's needle, so no set holds and no rule can match.
-		return value
+		return value, false
 	}
 	// Remember assignment values before replacing their labeled occurrence so
 	// repeated bare copies in the same retained prompt/output are also removed.
@@ -678,7 +715,14 @@ func redactString(value string, gated bool) string {
 	}
 	// Each copy is searched for and removed; none of it survives into the result. A secret right
 	// after a replaced copy, or right after a replaced key, starts a word only now.
-	return engine.redactAfterMarkers(replaceAssigned(text.value, assigned))
+	return engine.redactAfterMarkers(replaceAssigned(text.value, assigned)), text.hidden
+}
+
+// keptLabel reports whether a value that ends at end in t, one a rule keeps or the capture takes,
+// is itself a secret-named label followed by its separator, as `token` is in `"secret":token":0`.
+func keptLabel(t string, end int) bool {
+	rest, ok := skipSeparator(t[end:])
+	return ok && labelEndsAt(t[:len(t)-len(rest)])
 }
 
 // captureAssigned adds the value of every labeled assignment in the gate's text to assigned. kept
@@ -697,6 +741,9 @@ func captureAssigned(text *redactGate, engine *redactEngine, assigned map[string
 			continue
 		}
 		kept = kept || g+2 == len(match) && strings.ContainsAny(value[match[0]:match[g]], redactQuotes)
+		// A value that is itself a label hides the assignment it begins from the capture, as a kept
+		// one does from the label rules.
+		text.hidden = text.hidden || keptLabel(value, match[g+1])
 		if s := value[match[g]:match[g+1]]; len(s) >= 8 && s != redactedValue && !isAuthScheme(s) {
 			if assigned == nil {
 				assigned = map[string]struct{}{}

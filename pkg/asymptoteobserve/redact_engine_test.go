@@ -209,6 +209,10 @@ func TestRedactionWorkIsLinear(t *testing.T) {
 		"keys into curl lines":         "sk-abcdefghijklmnopqrstuvwxyz0123curl x ",
 		"key ids into URL schemes":     "AKIAIOSFODNN7EXAMPLEa://x:y@",
 		"key ids into unfinished URLs": "AKIAIOSFODNN7EXAMPLEa:/",
+		// Values that are themselves labels, which make redaction pass over the text again.
+		"labels kept values hid":     `token:seCret":token":0 `,
+		"labels hid three passes":    `0secret=token :ghp_0123456789abcdefghijklmnopqrstsecret=token :seCret':token':@h' `,
+		"labels captured values hid": "token:abctoken\":`secret`:`token`:}token:--token \"token\" ",
 	}
 	for name, unit := range families {
 		work := func(n int) int {
