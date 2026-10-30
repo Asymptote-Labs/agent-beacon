@@ -186,6 +186,32 @@ func TestStampLineRejects(t *testing.T) {
 	}
 }
 
+// A line must be exactly one JSON value. In particular, Decoder.More is not a
+// top-level EOF check: unmatched closing delimiters must not be silently dropped.
+func TestStampLineRejectsTrailingClosingDelimiters(t *testing.T) {
+	for _, suffix := range []string{"}", "]", " }", "\t]", "} {", "] null"} {
+		t.Run(suffix, func(t *testing.T) {
+			line := append(validLine(t, nil), suffix...)
+			if json.Valid(line) {
+				t.Fatal("fixture unexpectedly contains valid JSON")
+			}
+			if out, err := StampLine(line, Peer{UID: "501"}, nil); !errors.Is(err, ErrRejected) {
+				t.Fatalf("err = %v, out = %s; want ErrRejected for invalid JSON", err, out)
+			}
+		})
+	}
+}
+
+func TestStampLineAcceptsTrailingJSONWhitespace(t *testing.T) {
+	line := append(validLine(t, nil), " \t\r"...)
+	if !json.Valid(line) {
+		t.Fatal("fixture is not valid JSON")
+	}
+	if _, err := StampLine(line, Peer{UID: "501"}, nil); err != nil {
+		t.Fatalf("valid trailing whitespace rejected: %v", err)
+	}
+}
+
 func TestStampLineRejectsALineThatOutgrowsTheLimitWhenStamped(t *testing.T) {
 	base := validLine(t, func(e map[string]interface{}) { delete(e, "user") })
 	pad := MaxLineBytes - len(base) - 10
