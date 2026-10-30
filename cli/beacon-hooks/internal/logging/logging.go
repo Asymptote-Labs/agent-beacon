@@ -2,10 +2,8 @@ package logging
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	osuser "os/user"
 	"path/filepath"
@@ -30,7 +28,7 @@ var endpointSequence asymptoteobserve.Sequencer
 
 const (
 	defaultEndpointRotateBytes    = 10 * 1024 * 1024
-	defaultEndpointRotateArchives = 5
+	defaultEndpointRotateArchives = asymptoteobserve.DefaultRuntimeLogRotateArchives
 	// endpointRuntimeFileMode is the shared (system-mode) log's mode. A log inside the current
 	// user's home is private instead; asymptoteobserve.RuntimeLogModes decides, identically in all
 	// three writers.
@@ -700,7 +698,8 @@ func truncateEndpoint(value string, limit int) string {
 	return asymptoteobserve.TruncateString(value, limit)
 }
 
-// Keep this rotation and file-mode contract mirrored with the endpoint CLI and beaconjson exporter.
+// Keep this file-mode contract mirrored with the endpoint CLI and beaconjson exporter; the rotation
+// itself is asymptoteobserve.RotateRuntimeLog for all three.
 func appendEndpointJSONL(path string, line []byte, rotateBytes int64, rotateArchives int) error {
 	_, dirMode, _ := asymptoteobserve.RuntimeLogModes(path)
 	if err := os.MkdirAll(filepath.Dir(path), dirMode); err != nil {
@@ -721,15 +720,15 @@ func appendEndpointJSONL(path string, line []byte, rotateBytes int64, rotateArch
 	if asymptoteobserve.IsDuplicateEndpointEvent(path, line, asymptoteobserve.EndpointDuplicateWindow) {
 		return nil
 	}
-	// A hook usually runs as the person at the keyboard, and on a system-mode log it may not rename
-	// or delete anything in the directory: the directory is root-owned 0755 on POSIX, and on Windows
-	// its ACL gives ordinary users no right to add, rename or delete entries -- the rights that would
-	// let one redirect a SYSTEM write. Rotation is the privileged writers' job there. The refusal
-	// comes at the first step, so nothing has moved, and the event is appended past the size limit
-	// rather than lost; the collector rotates at its next write.
-	if err := rotateEndpointLogIfNeeded(path, rotateBytes, rotateArchives, int64(len(line))); err != nil && !errors.Is(err, fs.ErrPermission) {
-		return err
-	}
+	// A rotation that cannot happen now is deferred, never fatal, and the event is appended past the
+	// size limit for a later write to rotate. A hook usually runs as the person at the keyboard, and
+	// on a system-mode log it may not rename or delete anything in the directory: the directory is
+	// root-owned 0755 on POSIX, and on Windows its ACL gives ordinary users no right to add, rename or
+	// delete entries -- the rights that would let one redirect a SYSTEM write. Rotation is the
+	// privileged writers' job there. And on Windows a reader holding the log open without delete
+	// sharing blocks the rename for every writer until it lets go. asymptoteobserve.RotateRuntimeLog
+	// moves nothing in either case.
+	_ = asymptoteobserve.RotateRuntimeLog(path, rotateBytes, rotateArchives, int64(len(line)))
 	f, err := openEndpointRuntimeFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY)
 	if err != nil {
 		return err
@@ -749,65 +748,6 @@ func openEndpointRuntimeFile(path string, flag int) (*os.File, error) {
 // follows a symlink or opens anything but a regular file there.
 func openEndpointRuntimeFileAs(path, logPath string, flag int) (*os.File, error) {
 	return asymptoteobserve.OpenRuntimeLogFile(path, logPath, flag)
-}
-
-func rotateEndpointLogIfNeeded(path string, maxSize int64, archives int, nextWriteBytes int64) error {
-	if maxSize <= 0 {
-		return nil
-	}
-	if archives < 1 {
-		archives = defaultEndpointRotateArchives
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	if info.Size() == 0 || info.Size()+nextWriteBytes <= maxSize {
-		return nil
-	}
-	if err := removeOverflowEndpointArchives(path, archives); err != nil {
-		return err
-	}
-	for i := archives - 1; i >= 1; i-- {
-		from := path + fmt.Sprintf(".%d", i)
-		to := path + fmt.Sprintf(".%d", i+1)
-		if err := os.Rename(from, to); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-	}
-	if err := os.Rename(path, path+".1"); err != nil {
-		return err
-	}
-	asymptoteobserve.SettleRuntimeLogArchives(path, archives)
-	return nil
-}
-
-func removeOverflowEndpointArchives(path string, archives int) error {
-	dir := filepath.Dir(path)
-	base := filepath.Base(path)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-	prefix := base + "."
-	for _, entry := range entries {
-		name := entry.Name()
-		suffix, ok := strings.CutPrefix(name, prefix)
-		if !ok {
-			continue
-		}
-		index, err := strconv.Atoi(suffix)
-		if err != nil || index < archives {
-			continue
-		}
-		if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-	}
-	return nil
 }
 
 // Debug logs a debug message
