@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -225,6 +226,38 @@ func TestJSONLWriterKeepsToolDescriptionsToThePromptTextLimit(t *testing.T) {
 	}
 	if got := sanitized.GenAI.Agent.Description; len(got) > asymptoteobserve.DefaultRawStringLimit {
 		t.Fatalf("agent description = %d bytes, want the raw-attribute limit to still apply elsewhere", len(got))
+	}
+}
+
+// A gen_ai block holding a value JSON cannot represent (NaN, an out-of-range integer) is sanitized
+// like any other: its text redacted and cut, the value that cannot be represented left out.
+func TestJSONLWriterSanitizesGenAIHoldingUnrepresentableValues(t *testing.T) {
+	nan, maxInt64 := math.NaN(), int64(math.MaxInt64)
+	long := strings.Repeat("x", 5000)
+	for _, redact := range []bool{true, false} {
+		writer := jsonlWriter{maxEventBytes: defaultMaxEventBytes, redactSecrets: redact}
+		event := newBeaconEvent("file.read", "file", "info", "claude_code", time.Now())
+		event.GenAI = &beaconevent.GenAIInfo{
+			Request: &beaconevent.GenAIRequestInfo{Temperature: &nan},
+			Usage:   &beaconevent.GenAIUsageInfo{InputTokens: &maxInt64},
+			Tool: &beaconevent.GenAIToolInfo{Call: &beaconevent.GenAIToolCallInfo{
+				Result: "token=abcdefgh12345678 " + long,
+			}},
+		}
+		sanitized := writer.sanitize(event)
+		if _, err := json.Marshal(sanitized); err != nil {
+			t.Fatalf("redact %v: sanitized event does not marshal: %v", redact, err)
+		}
+		result := sanitized.GenAI.Tool.Call.Result.(string)
+		if len(result) > asymptoteobserve.DefaultRawStringLimit {
+			t.Errorf("redact %v: result = %d bytes, want at most %d", redact, len(result), asymptoteobserve.DefaultRawStringLimit)
+		}
+		if redact && strings.Contains(result, "abcdefgh12345678") {
+			t.Errorf("credential left in %.80q", result)
+		}
+		if sanitized.GenAI.Request.Temperature != nil || sanitized.GenAI.Usage.InputTokens != nil {
+			t.Errorf("redact %v: unrepresentable values kept: %+v %+v", redact, sanitized.GenAI.Request, sanitized.GenAI.Usage)
+		}
 	}
 }
 
