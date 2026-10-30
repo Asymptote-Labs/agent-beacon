@@ -77,6 +77,131 @@ func TestSanitizeEventTypedFields(t *testing.T) {
 	}
 }
 
+// A gen_ai block holding a value JSON cannot represent is sanitized like any other: every string
+// cleaned and cut, and the value that cannot be represented replaced by nil. Each case puts one
+// such value next to credentials and over-long text in the block's text fields.
+func TestSanitizeGenAIUnrepresentable(t *testing.T) {
+	nan, inf, negInf := math.NaN(), math.Inf(1), math.Inf(-1)
+	maxInt64, minInt := int64(math.MaxInt64), int(math.MinInt64)
+	cyclic := map[string]any{}
+	cyclic["self"] = cyclic
+	cases := map[string]struct {
+		set   func(g *GenAIInfo)
+		check func(t *testing.T, g *GenAIInfo)
+	}{
+		"NaN float field": {
+			func(g *GenAIInfo) { g.Request = &GenAIRequestInfo{Temperature: &nan, Model: "m"} },
+			func(t *testing.T, g *GenAIInfo) {
+				if g.Request.Temperature != nil || g.Request.Model != "m" {
+					t.Errorf("request = %+v", g.Request)
+				}
+			},
+		},
+		"infinite float fields": {
+			func(g *GenAIInfo) {
+				g.Request = &GenAIRequestInfo{TopP: &inf}
+				g.Usage = &GenAIUsageInfo{CostUSD: &negInf}
+			},
+			func(t *testing.T, g *GenAIInfo) {
+				if g.Request.TopP != nil || g.Usage.CostUSD != nil {
+					t.Errorf("request %+v, usage %+v", g.Request, g.Usage)
+				}
+			},
+		},
+		"integer fields out of range": {
+			func(g *GenAIInfo) {
+				g.Usage = &GenAIUsageInfo{InputTokens: &maxInt64}
+				g.Request = &GenAIRequestInfo{Seed: &minInt}
+			},
+			func(t *testing.T, g *GenAIInfo) {
+				if g.Usage.InputTokens != nil || g.Request.Seed != nil {
+					t.Errorf("usage %+v, request %+v", g.Usage, g.Request)
+				}
+			},
+		},
+		"NaN in a semconv value": {
+			func(g *GenAIInfo) {
+				g.Output = &GenAIOutputInfo{Messages: []any{map[string]any{"score": nan, "text": "ok"}}}
+			},
+			func(t *testing.T, g *GenAIInfo) {
+				want := []any{map[string]any{"score": nil, "text": "ok"}}
+				if !reflect.DeepEqual(g.Output.Messages, want) {
+					t.Errorf("messages = %#v", g.Output.Messages)
+				}
+			},
+		},
+		"values json cannot marshal": {
+			func(g *GenAIInfo) {
+				g.Retrieval = &GenAIRetrievalInfo{Documents: []any{
+					make(chan int), func() {}, struct{ F float64 }{nan}, json.Number("1e400"), "kept",
+				}}
+			},
+			func(t *testing.T, g *GenAIInfo) {
+				if want := []any{nil, nil, nil, nil, "kept"}; !reflect.DeepEqual(g.Retrieval.Documents, want) {
+					t.Errorf("documents = %#v", g.Retrieval.Documents)
+				}
+			},
+		},
+		"a cycle": {
+			func(g *GenAIInfo) { g.Retrieval = &GenAIRetrievalInfo{Documents: cyclic, QueryText: "q"} },
+			func(t *testing.T, g *GenAIInfo) {
+				if g.Retrieval.Documents != nil || g.Retrieval.QueryText != "q" {
+					t.Errorf("retrieval = %#v", g.Retrieval)
+				}
+			},
+		},
+	}
+	secret := "ghp_0123456789abcdefghijklmnopqrstuvwxyz"
+	long := strings.Repeat("x", 5000)
+	for name, tc := range cases {
+		build := func() *GenAIInfo {
+			g := &GenAIInfo{
+				SystemInstructions: SystemInstructionParts("export GITHUB_TOKEN=" + secret),
+				Tool: &GenAIToolInfo{
+					Description: long + " api_key=" + secret,
+					Call: &GenAIToolCallInfo{
+						Arguments: map[string]any{"api_key": "plain-secret", "path": long},
+						Result:    "token=abcdefgh12345678 " + long,
+					},
+				},
+			}
+			tc.set(g)
+			return g
+		}
+		t.Run(name, func(t *testing.T) {
+			for _, got := range []*GenAIInfo{
+				SanitizeEvent(Event{GenAI: build()}, 65536).GenAI,
+				SanitizeGenAI(build(), PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit}),
+			} {
+				data, err := json.Marshal(got)
+				if err != nil {
+					t.Fatalf("sanitized gen_ai does not marshal: %v", err)
+				}
+				if text := string(data); strings.Contains(text, secret[4:]) || strings.Contains(text, "abcdefgh12345678") || strings.Contains(text, "plain-secret") {
+					t.Errorf("credential left in %.300s", text)
+				}
+				result := got.Tool.Call.Result.(string)
+				if len(result) > DefaultRawStringLimit || !strings.HasSuffix(result, "...[truncated]") {
+					t.Errorf("result not cut to %d bytes: %d", DefaultRawStringLimit, len(result))
+				}
+				if path := got.Tool.Call.Arguments.(map[string]any)["path"].(string); len(path) > DefaultRawStringLimit {
+					t.Errorf("argument not cut: %d bytes", len(path))
+				}
+				if d := got.Tool.Description; len(d) > DefaultStringLimit || !strings.HasSuffix(d, "...[truncated]") {
+					t.Errorf("description not cut to %d bytes: %d", DefaultStringLimit, len(d))
+				}
+				tc.check(t, got)
+			}
+			// With redaction off, as the collector can be configured, text is still cut.
+			got := SanitizeGenAI(build(), PrivacyOptions{StringLimit: DefaultRawStringLimit})
+			if result := got.Tool.Call.Result.(string); len(result) > DefaultRawStringLimit {
+				t.Errorf("result not cut with redaction off: %d bytes", len(result))
+			}
+			tc.check(t, got)
+		})
+	}
+}
+
 // Truncated is set exactly when the sanitized event's JSON is longer than maxBytes, whether the
 // size bound decides it or the event is marshaled: on events right around the size, with values the
 // bound gives up on, and on random events.
@@ -172,9 +297,8 @@ func TestTypedFieldNamesAreNotSecret(t *testing.T) {
 }
 
 // The typed conversion copies every field of the types it converts: with values sanitizing leaves
-// alone, the result is the input, but for the fields that never survive the round trip (json:"-")
-// and the tool description, which SanitizeEvent fills. A field added to these types and not to
-// sanitize_typed.go fails here.
+// alone, the result is the input, but for the fields that never survive the round trip (json:"-").
+// A field added to these types and not to sanitize_typed.go fails here.
 func TestTypedConversionKeepsEveryField(t *testing.T) {
 	var fill func(v reflect.Value)
 	fill = func(v reflect.Value) {
@@ -209,7 +333,8 @@ func TestTypedConversionKeepsEveryField(t *testing.T) {
 	for _, v := range []any{&mcp, &context, &genAI} {
 		fill(reflect.ValueOf(v).Elem())
 	}
-	if got := sanitizeMCP(&mcp); !reflect.DeepEqual(*got, mcp) {
+	opts := PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit}
+	if got := SanitizeMCP(&mcp, opts); !reflect.DeepEqual(*got, mcp) {
 		t.Errorf("mcp = %+v, want %+v", *got, mcp)
 	}
 	if got := sanitizeSystemContext(&context); !reflect.DeepEqual(*got, context) {
@@ -218,11 +343,10 @@ func TestTypedConversionKeepsEveryField(t *testing.T) {
 	want := genAI
 	want.SystemInstructionsText = ""
 	tool := *want.Tool
-	tool.Description = ""
 	call := *tool.Call
 	call.ResultText = ""
 	tool.Call, want.Tool = &call, &tool
-	if got := sanitizeGenAI(&genAI); !reflect.DeepEqual(*got, want) {
+	if got := SanitizeGenAI(&genAI, opts); !reflect.DeepEqual(*got, want) {
 		t.Errorf("gen_ai = %s\nwant %s", mustJSON(t, got), mustJSON(t, want))
 	}
 }

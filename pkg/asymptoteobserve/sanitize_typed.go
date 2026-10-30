@@ -12,57 +12,65 @@ import (
 )
 
 // This file is how SanitizeEvent (privacy.go) sanitizes the typed parts of an event and decides
-// whether it is too large, without the JSON round trips it used:
+// whether it is too large:
 //
-//   - MCP, SystemContext and GenAI were sanitized by sanitizeTyped: marshal the value, decode it
-//     into a map, run SanitizeMap over the map, marshal the map, and decode it back into the type.
-//     Each field is now converted directly into what that round trip leaves of it
-//     (genericSanitizer), and the round trip itself runs only for a value the conversion does not
-//     know, or one the round trip fails on, so its fallback is kept too.
-//   - Truncated was set by marshaling the whole event and comparing the length with maxBytes. An
-//     upper bound on that length is now added up first (jsonSizeBound), and the event is marshaled
-//     only when the bound exceeds maxBytes.
+//   - MCP, SystemContext and GenAI are converted field by field into what a JSON round trip
+//     (marshal, decode into a map, SanitizeMap, marshal, decode back into the type) leaves of
+//     them (genericSanitizer). A value JSON cannot represent, which made that round trip fail, is
+//     replaced by nil, and everything else is sanitized as it is when the round trip succeeds.
+//   - Truncated is set when the event's JSON is longer than maxBytes. An upper bound on that length
+//     is added up first (jsonSizeBound), and the event is marshaled only when the bound exceeds
+//     maxBytes.
 //
 // sanitize_typed_test.go checks the conversion's effects one by one (TestSanitizeEventTypedFields),
+// that values JSON cannot represent never leave text unsanitized (TestSanitizeGenAIUnrepresentable),
 // that it copies every field of the types it converts (TestTypedConversionKeepsEveryField), that
 // the bound never undercounts (TestJSONSizeBoundIsABound), and that Truncated is set exactly when
 // the marshaled event exceeds maxBytes (TestSanitizeEventTruncatesAtItsMarshaledSize).
 
-// genericSanitizer converts typed fields and the values interface{} fields hold into what
-// sanitizeTyped's round trip leaves of them, sanitized the way SanitizeMap and SanitizeSlice
-// sanitize the decoded value:
+// genericSanitizer converts typed fields and the values interface{} fields hold into what a JSON
+// round trip leaves of them, sanitized with opts the way SanitizeMap and SanitizeSlice sanitize
+// the decoded value:
 //
 //   - A string passes through JSON with each byte of invalid UTF-8 replaced by U+FFFD, as the
 //     encoder writes it, and is then sanitized.
 //   - A number in an interface{} decodes as float64, and a float32 as the float64 nearest its
 //     shortest decimal form. An integer field reads back the float64 as the encoder writes it, its
 //     shortest decimal form, so beyond 2^53 it changes value (2^63-1024 comes back as
-//     9223372036854775000), and where that form is out of range (from about 2^63-512 up, and at
-//     -2^63) the decode fails, which fails the round trip.
-//   - NaN and infinities fail the marshal, which fails the round trip.
+//     9223372036854775000).
 //   - A nil map, slice or pointer, in an interface{} or a field, and an omitempty field that is
 //     empty, decode as nil; an empty map or slice in an interface{} stays empty, not nil. A non-nil
 //     pointer to an empty struct decodes as an empty struct.
 //   - `json:"-"` fields (ResultText, SystemInstructionsText) are not written, so they come back
 //     empty.
 //
-// failed is set for anything it does not convert (a value of another type, a map key that is not
-// valid UTF-8, which the encoder can merge with another, nesting deeper than maxGenericDepth) and
-// for what fails the round trip; the caller then runs sanitizeTyped, which handles each of these
-// as it always did.
+// A value JSON cannot represent is replaced by nil: a NaN or infinite float, in a field or an
+// interface{} value; an integer field whose float64 reads back out of range (from about 2^63-512
+// up, and at -2^63); and a value the conversion does not handle itself (another type, a map whose
+// keys are not valid UTF-8, which the encoder can merge) when encoding/json fails to marshal it or
+// to decode it back (a channel, a function, a struct holding NaN, json.Number("1e400")). An
+// interface{} field nested deeper than maxGenericDepth, or holding a cycle, is marshaled and
+// decoded whole, and is nil when that fails. The result is what the round trip gives for the same
+// value with those parts nil, so every string in it is cleaned as on the round trip.
 type genericSanitizer struct {
-	limit  int
-	failed bool
+	opts PrivacyOptions
 }
 
-// maxGenericDepth bounds the nesting genericSanitizer converts and jsonSizeBound adds up. The
-// decoder fails beyond 10000 levels and the encoder detects cycles after 1000.
+func newGenericSanitizer(opts PrivacyOptions) genericSanitizer {
+	if opts.StringLimit <= 0 {
+		opts.StringLimit = DefaultStringLimit
+	}
+	return genericSanitizer{opts: opts}
+}
+
+// maxGenericDepth bounds the nesting genericSanitizer converts itself and jsonSizeBound adds up.
+// The decoder fails beyond 10000 levels and the encoder detects cycles after 1000.
 const maxGenericDepth = 100
 
 // text is a typed string field, none of which is named for a credential
 // (TestTypedFieldNamesAreNotSecret).
-func (g *genericSanitizer) text(s string) string {
-	return CleanString(jsonString(s), g.limit, true)
+func (g genericSanitizer) text(s string) string {
+	return CleanString(jsonString(s), g.opts.StringLimit, g.opts.RedactSecrets)
 }
 
 // jsonString is s as the encoder writes it and the decoder reads it back: each byte that is not
@@ -85,45 +93,42 @@ func jsonString(s string) string {
 	return b.String()
 }
 
-// integer is an integer field's value after the round trip.
-func (g *genericSanitizer) integer(v int64) int64 {
+// integer is an integer field's value after the round trip, and false where it reads back out of
+// range.
+func integer(v int64) (int64, bool) {
 	if -1<<53 <= v && v <= 1<<53 {
-		return v
+		return v, true
 	}
 	n, err := strconv.ParseInt(strconv.FormatFloat(float64(v), 'f', -1, 64), 10, 64)
-	if err != nil {
-		g.failed = true
-	}
-	return n
+	return n, err == nil
 }
 
-func (g *genericSanitizer) intp(p *int) *int {
+func intp(p *int) *int {
 	if p == nil {
 		return nil
 	}
-	n := g.integer(int64(*p))
-	if n < math.MinInt || n > math.MaxInt { // cannot happen for an int; out of range, the round trip fails too
-		g.failed = true
+	// An int is never out of int's range, but the bound keeps the conversion below checked.
+	n, ok := integer(int64(*p))
+	if !ok || n < math.MinInt || n > math.MaxInt {
 		return nil
 	}
 	v := int(n)
 	return &v
 }
 
-func (g *genericSanitizer) int64p(p *int64) *int64 {
+func int64p(p *int64) *int64 {
 	if p == nil {
 		return nil
 	}
-	v := g.integer(*p)
+	v, ok := integer(*p)
+	if !ok {
+		return nil
+	}
 	return &v
 }
 
-func (g *genericSanitizer) float64p(p *float64) *float64 {
-	if p == nil {
-		return nil
-	}
-	if math.IsNaN(*p) || math.IsInf(*p, 0) {
-		g.failed = true
+func float64p(p *float64) *float64 {
+	if p == nil || math.IsNaN(*p) || math.IsInf(*p, 0) {
 		return nil
 	}
 	v := *p
@@ -139,96 +144,69 @@ func boolp(p *bool) *bool {
 }
 
 // strings is a []string field, which SanitizeSlice sanitizes: none is named for a credential.
-func (g *genericSanitizer) strings(in []string) []string {
+func (g genericSanitizer) strings(in []string) []string {
 	if len(in) == 0 {
 		return nil
 	}
 	out := make([]string, len(in))
 	for i, s := range in {
 		s = jsonString(s)
-		if s != "" && i > 0 && IsSecretFlag(jsonString(in[i-1])) {
+		if g.opts.RedactSecrets && s != "" && i > 0 && IsSecretFlag(jsonString(in[i-1])) {
 			out[i] = redactedValue
 			continue
 		}
-		out[i] = CleanString(s, g.limit, true)
+		out[i] = CleanString(s, g.opts.StringLimit, g.opts.RedactSecrets)
 	}
 	return out
 }
 
-// field is the value of an interface{} field, none of which is named for a credential.
-func (g *genericSanitizer) field(v any) any {
-	return g.value(v, "", 1)
-}
-
-// value converts v, held under key in a map, and sanitizes it as SanitizeMap does.
-func (g *genericSanitizer) value(v any, key string, depth int) any {
-	if depth > maxGenericDepth {
-		g.failed = true
-		return nil
+// field is the value of an interface{} field, none of which is named for a credential: decoded as
+// the round trip decodes it, then sanitized as SanitizeMap sanitizes a value under such a name. A
+// value nested deeper than maxGenericDepth (or holding a cycle) is marshaled and decoded whole.
+func (g genericSanitizer) field(v any) any {
+	d := decoded(v, 0)
+	if _, deep := d.(tooDeep); deep {
+		d = roundTrip(v)
 	}
-	switch x := v.(type) {
+	switch x := d.(type) {
 	case string:
-		x = jsonString(x)
-		if x != "" && IsSecretField(key, x) {
-			return redactedValue
-		}
-		return CleanString(x, g.limit, true)
-	case []any, []string:
-		items, ok := g.items(x, depth)
-		if !ok || items == nil {
-			return nil
-		}
-		if IsSecretKeyName(key) {
-			return g.redactAll(items, depth)
-		}
-		return g.slice(items, depth)
+		return CleanString(x, g.opts.StringLimit, g.opts.RedactSecrets)
+	case map[string]any:
+		return SanitizeMap(x, g.opts)
+	case []any:
+		return SanitizeSlice(x, g.opts)
+	default:
+		return x
 	}
-	return g.scalarOrObject(v, depth)
 }
 
-// scalarOrObject converts v when it is neither a string nor a list, which SanitizeMap,
-// SanitizeSlice and redactAllStrings all treat the same.
-func (g *genericSanitizer) scalarOrObject(v any, depth int) any {
+// tooDeep is what decoded returns for a value nested deeper than maxGenericDepth, and for any
+// value holding one.
+type tooDeep struct{}
+
+// decoded returns v as encoding/json marshals it and decodes it back into an interface{} (nil,
+// bool, float64, string, []any or map[string]any), and nil for a value JSON cannot represent. The
+// shapes JSON decodes to, and the Go values in-process callers usually hold, are converted directly;
+// anything else is marshaled and decoded on its own, which is what the encoder does with it as part
+// of the whole.
+func decoded(v any, depth int) any {
+	if depth > maxGenericDepth {
+		return tooDeep{}
+	}
 	switch x := v.(type) {
 	case nil:
 		return nil
-	case map[string]any:
-		if x == nil {
-			return nil
-		}
-		out := make(map[string]any, len(x))
-		for k, item := range x {
-			if !utf8.ValidString(k) {
-				g.failed = true
-				return nil
-			}
-			out[k] = g.value(item, k, depth+1)
-		}
-		return out
-	case map[string]string:
-		if x == nil {
-			return nil
-		}
-		out := make(map[string]any, len(x))
-		for k, item := range x {
-			if !utf8.ValidString(k) {
-				g.failed = true
-				return nil
-			}
-			out[k] = g.value(item, k, depth+1)
-		}
-		return out
+	case string:
+		return jsonString(x)
 	case bool:
 		return x
 	case float64:
 		if math.IsNaN(x) || math.IsInf(x, 0) {
-			g.failed = true
 			return nil
 		}
 		return x
 	case float32:
 		if math.IsNaN(float64(x)) || math.IsInf(float64(x), 0) {
-			g.failed = true
 			return nil
 		}
 		f, _ := strconv.ParseFloat(strconv.FormatFloat(float64(x), 'g', -1, 32), 64)
@@ -253,96 +231,77 @@ func (g *genericSanitizer) scalarOrObject(v any, depth int) any {
 		return float64(x)
 	case uint64:
 		return float64(x)
-	}
-	g.failed = true
-	return nil
-}
-
-// items returns a list as it decodes: nil for a nil list, its items otherwise, with strings as
-// the encoder writes them.
-func (g *genericSanitizer) items(v any, depth int) ([]any, bool) {
-	if depth > maxGenericDepth {
-		g.failed = true
-		return nil, false
-	}
-	switch x := v.(type) {
 	case []any:
 		if x == nil {
-			return nil, true
+			return nil
 		}
 		out := make([]any, len(x))
 		for i, item := range x {
-			if s, ok := item.(string); ok {
-				item = jsonString(s)
+			if out[i] = decoded(item, depth+1); out[i] == (tooDeep{}) {
+				return tooDeep{}
 			}
-			out[i] = item
 		}
-		return out, true
+		return out
 	case []string:
 		if x == nil {
-			return nil, true
+			return nil
 		}
 		out := make([]any, len(x))
 		for i, item := range x {
 			out[i] = jsonString(item)
 		}
-		return out, true
-	}
-	return nil, false
-}
-
-// slice is SanitizeSlice over decoded items. A flag named for a secret is read from the item as
-// decoded, before it is sanitized in place.
-func (g *genericSanitizer) slice(items []any, depth int) []any {
-	var prev any
-	for i, item := range items {
-		previous := prev
-		prev = item
-		switch x := item.(type) {
-		case string:
-			if x != "" && i > 0 && followsSecretFlag(previous) {
-				items[i] = redactedValue
-				continue
-			}
-			items[i] = CleanString(x, g.limit, true)
-		case []any, []string:
-			nested, ok := g.items(x, depth+1)
-			if !ok || nested == nil {
-				items[i] = nil
-				continue
-			}
-			items[i] = g.slice(nested, depth+1)
-		default:
-			items[i] = g.scalarOrObject(item, depth+1)
+		return out
+	case map[string]any:
+		if x == nil {
+			return nil
 		}
-	}
-	return items
-}
-
-// redactAll is redactAllStrings over decoded items.
-func (g *genericSanitizer) redactAll(items []any, depth int) []any {
-	for i, item := range items {
-		switch x := item.(type) {
-		case string:
-			if x != "" {
-				items[i] = redactedValue
+		out := make(map[string]any, len(x))
+		for k, item := range x {
+			if !utf8.ValidString(k) {
+				// Keys that differ only in invalid bytes are one key once encoded.
+				return roundTrip(x)
 			}
-		case []any, []string:
-			nested, ok := g.items(x, depth+1)
-			if !ok || nested == nil {
-				items[i] = nil
-				continue
+			if out[k] = decoded(item, depth+1); out[k] == (tooDeep{}) {
+				return tooDeep{}
 			}
-			items[i] = g.redactAll(nested, depth+1)
-		default:
-			items[i] = g.scalarOrObject(item, depth+1)
 		}
+		return out
+	case map[string]string:
+		if x == nil {
+			return nil
+		}
+		out := make(map[string]any, len(x))
+		for k, item := range x {
+			if !utf8.ValidString(k) {
+				return roundTrip(x)
+			}
+			out[k] = jsonString(item)
+		}
+		return out
 	}
-	return items
+	return roundTrip(v)
 }
 
-func sanitizeMCP(in *MCPInfo) *MCPInfo {
-	g := genericSanitizer{limit: DefaultRawStringLimit}
+// roundTrip marshals v and decodes it into an interface{}, and is nil when either fails.
+func roundTrip(v any) any {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	var out any
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+// SanitizeMCP returns a sanitized copy of an MCP block: every string converted as the JSON encoder
+// writes it and cleaned with opts, as SanitizeEvent cleans it.
+func SanitizeMCP(in *MCPInfo, opts PrivacyOptions) *MCPInfo {
+	if in == nil {
+		return nil
+	}
+	g := newGenericSanitizer(opts)
 	out := &MCPInfo{Server: g.text(in.Server), Tool: g.text(in.Tool)}
 	if in.Method != nil {
 		out.Method = &MCPMethodInfo{Name: g.text(in.Method.Name)}
@@ -360,7 +319,7 @@ func sanitizeMCP(in *MCPInfo) *MCPInfo {
 }
 
 func sanitizeSystemContext(in *SystemContextInfo) *SystemContextInfo {
-	g := genericSanitizer{limit: DefaultRawStringLimit}
+	g := newGenericSanitizer(PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
 	out := &SystemContextInfo{Kind: g.text(in.Kind), Source: g.text(in.Source)}
 	if len(in.Skills) > 0 {
 		out.Skills = make([]SkillRefInfo, len(in.Skills))
@@ -371,16 +330,23 @@ func sanitizeSystemContext(in *SystemContextInfo) *SystemContextInfo {
 	return out
 }
 
-// sanitizeGenAI is sanitizeTyped for GenAI, except that a converted tool's Description is left for
-// SanitizeEvent to fill.
-func sanitizeGenAI(in *GenAIInfo) *GenAIInfo {
-	g := genericSanitizer{limit: DefaultRawStringLimit}
+// SanitizeGenAI returns a sanitized copy of a gen_ai block, as SanitizeEvent sanitizes it: every
+// field converted as genericSanitizer describes and cleaned with opts, the semconv values
+// (messages, tool arguments and results, system instructions, definitions, documents) as
+// SanitizeMap cleans a decoded object. A tool's description is text the model reads, so it gets the
+// prompt-text limit (DefaultStringLimit) rather than opts.StringLimit: under 2 KB a padded
+// description would hide its instructions past the point the poisoning rule sees.
+func SanitizeGenAI(in *GenAIInfo, opts PrivacyOptions) *GenAIInfo {
+	if in == nil {
+		return nil
+	}
+	g := newGenericSanitizer(opts)
 	out := &GenAIInfo{}
 	if a := in.Agent; a != nil {
 		out.Agent = &GenAIAgentInfo{Description: g.text(a.Description), ID: g.text(a.ID), Name: g.text(a.Name), Version: g.text(a.Version)}
 	}
 	if c := in.Context; c != nil {
-		out.Context = &GenAIContextInfo{UsedTokens: g.int64p(c.UsedTokens), LimitTokens: g.int64p(c.LimitTokens)}
+		out.Context = &GenAIContextInfo{UsedTokens: int64p(c.UsedTokens), LimitTokens: int64p(c.LimitTokens)}
 	}
 	if c := in.Conversation; c != nil {
 		out.Conversation = &GenAIConversationInfo{ID: g.text(c.ID)}
@@ -389,12 +355,12 @@ func sanitizeGenAI(in *GenAIInfo) *GenAIInfo {
 		out.DataSource = &GenAIDataSourceInfo{ID: g.text(d.ID)}
 	}
 	if e := in.Embeddings; e != nil {
-		out.Embeddings = &GenAIEmbeddingsInfo{DimensionCount: g.intp(e.DimensionCount)}
+		out.Embeddings = &GenAIEmbeddingsInfo{DimensionCount: intp(e.DimensionCount)}
 	}
 	if e := in.Evaluation; e != nil {
 		out.Evaluation = &GenAIEvaluationInfo{Explanation: g.text(e.Explanation), Name: g.text(e.Name)}
 		if s := e.Score; s != nil {
-			out.Evaluation.Score = &GenAIEvaluationScoreInfo{Label: g.text(s.Label), Value: g.float64p(s.Value)}
+			out.Evaluation.Score = &GenAIEvaluationScoreInfo{Label: g.text(s.Label), Value: float64p(s.Value)}
 		}
 	}
 	if i := in.Input; i != nil {
@@ -414,18 +380,18 @@ func sanitizeGenAI(in *GenAIInfo) *GenAIInfo {
 	}
 	if r := in.Request; r != nil {
 		out.Request = &GenAIRequestInfo{
-			ChoiceCount:      g.intp(r.ChoiceCount),
+			ChoiceCount:      intp(r.ChoiceCount),
 			EncodingFormats:  g.strings(r.EncodingFormats),
-			FrequencyPenalty: g.float64p(r.FrequencyPenalty),
-			MaxTokens:        g.intp(r.MaxTokens),
+			FrequencyPenalty: float64p(r.FrequencyPenalty),
+			MaxTokens:        intp(r.MaxTokens),
 			Model:            g.text(r.Model),
-			PresencePenalty:  g.float64p(r.PresencePenalty),
-			Seed:             g.intp(r.Seed),
+			PresencePenalty:  float64p(r.PresencePenalty),
+			Seed:             intp(r.Seed),
 			StopSequences:    g.strings(r.StopSequences),
 			Stream:           boolp(r.Stream),
-			Temperature:      g.float64p(r.Temperature),
-			TopK:             g.float64p(r.TopK),
-			TopP:             g.float64p(r.TopP),
+			Temperature:      float64p(r.Temperature),
+			TopK:             float64p(r.TopK),
+			TopP:             float64p(r.TopP),
 		}
 	}
 	if r := in.Response; r != nil {
@@ -433,7 +399,7 @@ func sanitizeGenAI(in *GenAIInfo) *GenAIInfo {
 			FinishReasons:    g.strings(r.FinishReasons),
 			ID:               g.text(r.ID),
 			Model:            g.text(r.Model),
-			TimeToFirstChunk: g.float64p(r.TimeToFirstChunk),
+			TimeToFirstChunk: float64p(r.TimeToFirstChunk),
 		}
 	}
 	if r := in.Retrieval; r != nil {
@@ -444,34 +410,32 @@ func sanitizeGenAI(in *GenAIInfo) *GenAIInfo {
 		out.Token = &GenAITokenInfo{Type: g.text(t.Type)}
 	}
 	if t := in.Tool; t != nil {
-		// Description is left empty: SanitizeEvent replaces a non-empty one, from the description as
-		// given, and an empty one is empty either way.
 		out.Tool = &GenAIToolInfo{Definitions: g.field(t.Definitions), Name: g.text(t.Name), Type: g.text(t.Type)}
+		if t.Description != "" {
+			out.Tool.Description = CleanString(t.Description, DefaultStringLimit, opts.RedactSecrets)
+		}
 		if c := t.Call; c != nil {
 			out.Tool.Call = &GenAIToolCallInfo{Arguments: g.field(c.Arguments), ID: g.text(c.ID), Result: g.field(c.Result)}
 		}
 	}
 	if u := in.Usage; u != nil {
 		out.Usage = &GenAIUsageInfo{
-			CostUSD:      g.float64p(u.CostUSD),
-			InputTokens:  g.int64p(u.InputTokens),
-			OutputTokens: g.int64p(u.OutputTokens),
+			CostUSD:      float64p(u.CostUSD),
+			InputTokens:  int64p(u.InputTokens),
+			OutputTokens: int64p(u.OutputTokens),
 		}
 		if c := u.CacheCreation; c != nil {
-			out.Usage.CacheCreation = &GenAIUsageCacheCreationInfo{InputTokens: g.int64p(c.InputTokens), Ephemeral1hInputTokens: g.int64p(c.Ephemeral1hInputTokens)}
+			out.Usage.CacheCreation = &GenAIUsageCacheCreationInfo{InputTokens: int64p(c.InputTokens), Ephemeral1hInputTokens: int64p(c.Ephemeral1hInputTokens)}
 		}
 		if c := u.CacheRead; c != nil {
-			out.Usage.CacheRead = &GenAIUsageCacheReadInfo{InputTokens: g.int64p(c.InputTokens)}
+			out.Usage.CacheRead = &GenAIUsageCacheReadInfo{InputTokens: int64p(c.InputTokens)}
 		}
 		if r := u.Reasoning; r != nil {
-			out.Usage.Reasoning = &GenAIUsageReasoningInfo{OutputTokens: g.int64p(r.OutputTokens)}
+			out.Usage.Reasoning = &GenAIUsageReasoningInfo{OutputTokens: int64p(r.OutputTokens)}
 		}
 	}
 	if w := in.Workflow; w != nil {
 		out.Workflow = &GenAIWorkflowInfo{Name: g.text(w.Name)}
-	}
-	if g.failed {
-		return sanitizeTyped(in, PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
 	}
 	return out
 }

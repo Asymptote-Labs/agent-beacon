@@ -128,20 +128,10 @@ func (w jsonlWriter) sanitize(event beaconEvent) beaconEvent {
 		event.Prompt.Text = w.cleanString(event.Prompt.Text, asymptoteobserve.DefaultStringLimit)
 	}
 	if event.MCP != nil {
-		event.MCP = sanitizeTyped(event.MCP, w.sanitizeMap)
+		event.MCP = asymptoteobserve.SanitizeMCP(event.MCP, w.privacyOptions())
 	}
 	if event.GenAI != nil {
-		description := ""
-		if event.GenAI.Tool != nil {
-			description = event.GenAI.Tool.Description
-		}
-		event.GenAI = sanitizeTyped(event.GenAI, w.sanitizeMap)
-		// A tool description is text the model reads, so it gets the prompt-text limit rather than
-		// the raw-attribute one: under 2 KB a padded description would hide its instructions past
-		// the point the poisoning rule sees.
-		if description != "" && event.GenAI.Tool != nil {
-			event.GenAI.Tool.Description = w.cleanString(description, asymptoteobserve.DefaultStringLimit)
-		}
+		event.GenAI = asymptoteobserve.SanitizeGenAI(event.GenAI, w.privacyOptions())
 	}
 	if event.Raw != nil {
 		event.Raw = w.sanitizeMap(event.Raw)
@@ -153,49 +143,22 @@ func (w jsonlWriter) sanitize(event beaconEvent) beaconEvent {
 }
 
 func (w jsonlWriter) sanitizeMap(input map[string]interface{}) map[string]interface{} {
-	return asymptoteobserve.SanitizeMap(input, asymptoteobserve.PrivacyOptions{
+	return asymptoteobserve.SanitizeMap(input, w.privacyOptions())
+}
+
+func (w jsonlWriter) privacyOptions() asymptoteobserve.PrivacyOptions {
+	return asymptoteobserve.PrivacyOptions{
 		RedactSecrets: w.redactSecrets,
 		StringLimit:   asymptoteobserve.DefaultRawStringLimit,
-	})
+	}
 }
 
 func (w jsonlWriter) sanitizeSlice(input []interface{}) []interface{} {
-	return asymptoteobserve.SanitizeSlice(input, asymptoteobserve.PrivacyOptions{
-		RedactSecrets: w.redactSecrets,
-		StringLimit:   asymptoteobserve.DefaultRawStringLimit,
-	})
+	return asymptoteobserve.SanitizeSlice(input, w.privacyOptions())
 }
 
 func (w jsonlWriter) cleanString(value string, limit int) string {
 	return asymptoteobserve.CleanString(value, limit, w.redactSecrets)
-}
-
-func sanitizeTyped[T any](input *T, sanitize func(map[string]interface{}) map[string]interface{}) *T {
-	if input == nil {
-		return nil
-	}
-	data, err := json.Marshal(input)
-	if err != nil {
-		out := *input
-		return &out
-	}
-	var raw map[string]interface{}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		out := *input
-		return &out
-	}
-	raw = sanitize(raw)
-	data, err = json.Marshal(raw)
-	if err != nil {
-		out := *input
-		return &out
-	}
-	var out T
-	if err := json.Unmarshal(data, &out); err != nil {
-		fallback := *input
-		return &fallback
-	}
-	return &out
 }
 
 // In system mode the collector runs as root, while agent hooks append to the

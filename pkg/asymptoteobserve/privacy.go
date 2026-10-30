@@ -892,23 +892,13 @@ func SanitizeEvent(event Event, maxBytes int) Event {
 		event.Prompt.Text = CleanString(event.Prompt.Text, DefaultStringLimit, true)
 	}
 	if event.MCP != nil {
-		event.MCP = sanitizeMCP(event.MCP)
+		event.MCP = SanitizeMCP(event.MCP, PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
 	}
 	if event.SystemContext != nil {
 		event.SystemContext = sanitizeSystemContext(event.SystemContext)
 	}
 	if event.GenAI != nil {
-		description := ""
-		if event.GenAI.Tool != nil {
-			description = event.GenAI.Tool.Description
-		}
-		event.GenAI = sanitizeGenAI(event.GenAI)
-		// A tool description is text the model reads, so it gets the prompt-text limit rather than
-		// the raw-attribute one: under 2 KB a padded description would hide its instructions past
-		// the point the poisoning rule sees.
-		if description != "" && event.GenAI.Tool != nil {
-			event.GenAI.Tool.Description = CleanString(description, DefaultStringLimit, true)
-		}
+		event.GenAI = SanitizeGenAI(event.GenAI, PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
 	}
 	if event.Raw != nil {
 		event.Raw = SanitizeMap(event.Raw, PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
@@ -921,32 +911,4 @@ func SanitizeEvent(event Event, maxBytes int) Event {
 		}
 	}
 	return event
-}
-
-func sanitizeTyped[T any](input *T, opts PrivacyOptions) *T {
-	if input == nil {
-		return nil
-	}
-	data, err := json.Marshal(input)
-	if err != nil {
-		out := *input
-		return &out
-	}
-	var raw map[string]interface{}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		out := *input
-		return &out
-	}
-	raw = SanitizeMap(raw, opts)
-	data, err = json.Marshal(raw)
-	if err != nil {
-		out := *input
-		return &out
-	}
-	var out T
-	if err := json.Unmarshal(data, &out); err != nil {
-		fallback := *input
-		return &fallback
-	}
-	return &out
 }
