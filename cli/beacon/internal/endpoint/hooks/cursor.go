@@ -109,6 +109,11 @@ func installCursorHooksJSON(path, binaryPath, logPath, configPath string) error 
 		return err
 	}
 	commandPrefix := endpointCommandPrefix("cursor", binaryPath, logPath, configPath)
+	// Keep this event-to-subcommand wiring in step with cursorEventsForCommand in
+	// cli/beacon-hooks/cmd/cursor_compat.go: it decides, from the subcommand alone, which Cursor
+	// event a Claude Code hook running the same subcommand may trust Beacon's own Cursor entry to
+	// also be covering, and a mismatch either suppresses an event this map no longer records or
+	// keeps recording one it does.
 	endpointHooks := map[string]HookRef{
 		"sessionStart":       {Command: commandPrefix + " session-start"},
 		"beforeSubmitPrompt": {Command: commandPrefix + " prompt-submit", Timeout: 30},

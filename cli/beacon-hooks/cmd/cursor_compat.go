@@ -18,6 +18,27 @@ var cursorUserHooksPath = func() string {
 	return filepath.Join(home, ".cursor", "hooks.json")
 }
 
+// cursorEventsForCommand names the Cursor hooks.json event(s) Beacon's own installer
+// (installCursorHooksJSON, cli/beacon/internal/endpoint/hooks/cursor.go) wires each telemetry
+// subcommand to. It mirrors that function's base endpointHooks map and nothing else: an
+// enterprise build's cursorExtraHooks can add more events, but never for these subcommands.
+//
+// cursorRecordsThisHook only trusts an entry under one of these events. An entry elsewhere in the
+// file -- a stale one from a hand edit, or one the matcher check below would otherwise take at face
+// value -- cannot claim a subcommand it was never wired to run for.
+//
+// TestCursorEventsForCommandMatchesTheInstaller pins this against the installer's own map.
+var cursorEventsForCommand = map[string][]string{
+	"session-start":  {"sessionStart"},
+	"prompt-submit":  {"beforeSubmitPrompt"},
+	"pre-tool":       {"preToolUse"},
+	"agent-thought":  {"afterAgentThought"},
+	"agent-response": {"afterAgentResponse"},
+	"post-tool":      {"afterFileEdit", "postToolUse", "postToolUseFailure"},
+	"stop":           {"stop"},
+	"session-end":    {"sessionEnd"},
+}
+
 // cursorRecordsThisHook reports whether Beacon's own Cursor hooks run command for this payload, so
 // that a run of Beacon's Claude Code hook carrying a Cursor payload is a second recording of the
 // same event.
@@ -25,16 +46,17 @@ var cursorUserHooksPath = func() string {
 // The Cursor IDE runs the hooks in the user-level ~/.claude/settings.json alongside its own
 // hooks.json, giving them Cursor payloads. With Beacon installed for both, every session start,
 // prompt and stop was written twice, and every tool call that both pre-tool matchers name. The
-// Claude copy steps aside only where a Beacon Cursor entry runs the same command and its matcher
-// selects the payload's tool. The two installers' pre-tool matchers differ (Claude's names Read,
-// Grep and Glob; Cursor's names Shell and MCP), so a call only Claude's matcher selects still has
-// the Claude copy as its one recorder and policy check. So does any command Beacon's Cursor hooks
-// don't run (subagent events, permission requests), and everything when they aren't installed at
-// the user level.
+// Claude copy steps aside only where, under an event Beacon's installer actually wires that
+// subcommand to, a Beacon Cursor entry's matcher selects the payload's tool. The two installers'
+// pre-tool matchers differ (Claude's names Read, Grep and Glob; Cursor's names Shell and MCP), so
+// a call only Claude's matcher selects still has the Claude copy as its one recorder and policy
+// check. So does any command Beacon's Cursor hooks don't run (subagent events, permission
+// requests), and everything when they aren't installed at the user level.
 //
 // It is one read of a small file, made only when a Claude Code hook receives a Cursor payload.
 func cursorRecordsThisHook(command string, input map[string]interface{}) bool {
-	if command == "" {
+	events := cursorEventsForCommand[command]
+	if len(events) == 0 {
 		return false
 	}
 	path := cursorUserHooksPath()
@@ -55,8 +77,8 @@ func cursorRecordsThisHook(command string, input map[string]interface{}) bool {
 		return false
 	}
 	tool := getFirstStr(input, "tool_name", "toolName")
-	for _, entries := range file.Hooks {
-		for _, entry := range entries {
+	for _, event := range events {
+		for _, entry := range file.Hooks[event] {
 			if isBeaconCursorHookCommand(entry.Command, command) && cursorMatcherSelects(entry.Matcher, tool) {
 				return true
 			}

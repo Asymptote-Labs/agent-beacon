@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -224,6 +225,31 @@ func TestClaudeHookStillCoversToolsOnlyItsMatcherSelects(t *testing.T) {
 	assertDenialEvent(t, logPath)
 }
 
+// TestClaudeHookIgnoresAStaleEntryUnderTheWrongEvent reproduces cli/beacon's own
+// testdata/cursor_hooks_golden.json: an older Beacon version's env-prefix `pre-tool` command,
+// left behind under beforeShellExecution, has no matcher -- so it would select every tool if the
+// duplicate check scanned every event for the subcommand rather than only the event (preToolUse)
+// Beacon's current installer wires pre-tool to. A Read call, which only Claude's matcher selects,
+// must still be recorded and still reach the policy provider.
+func TestClaudeHookIgnoresAStaleEntryUnderTheWrongEvent(t *testing.T) {
+	writeCursorHookEntries(t, map[string][]map[string]string{
+		"beforeShellExecution": {{"command": "BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG=/tmp/old.jsonl /old/beacon-hooks --platform cursor pre-tool"}},
+		"preToolUse":           {{"command": beaconCursorHook("pre-tool"), "matcher": cursorPreToolMatcher}},
+	})
+	logPath := setupPolicyTest(t, "claude", denyResponse)
+	hookCommand = "pre-tool"
+	t.Cleanup(func() {
+		hookCommand = ""
+		duplicateCursorRun = false
+		logging.SuppressEndpointEvents(false)
+	})
+	out := runHookWithInput(t, runPreTool, cursorToolPayload("Read", map[string]interface{}{"file_path": "/repo/.env"}))
+	if out["permission"] != "deny" {
+		t.Fatalf("Read reply = %#v, want the provider's deny (the stale beforeShellExecution entry must not suppress it)", out)
+	}
+	assertDenialEvent(t, logPath)
+}
+
 func TestCursorMatcherSelects(t *testing.T) {
 	cases := []struct {
 		matcher, tool string
@@ -318,5 +344,36 @@ func TestCursorRecordsThisHookToleratesBadFiles(t *testing.T) {
 	}
 	if cursorRecordsThisHook("", nil) {
 		t.Fatal("an unknown command matched")
+	}
+}
+
+// TestCursorEventsForCommandMatchesTheInstaller pins cursorEventsForCommand against
+// installCursorHooksJSON's own endpointHooks map (cli/beacon/internal/endpoint/hooks/cursor.go,
+// read here as cli/beacon/internal/endpoint/hooks/testdata/cursor_hooks_golden.json, which that
+// package's own golden test keeps matching the installer). The two files are different Go
+// modules, so this cannot import the installer directly; cursor.go carries a matching comment
+// pointing back here.
+func TestCursorEventsForCommandMatchesTheInstaller(t *testing.T) {
+	want := map[string][]string{
+		"session-start":  {"sessionStart"},
+		"prompt-submit":  {"beforeSubmitPrompt"},
+		"pre-tool":       {"preToolUse"},
+		"agent-thought":  {"afterAgentThought"},
+		"agent-response": {"afterAgentResponse"},
+		"post-tool":      {"afterFileEdit", "postToolUse", "postToolUseFailure"},
+		"stop":           {"stop"},
+		"session-end":    {"sessionEnd"},
+	}
+	if len(cursorEventsForCommand) != len(want) {
+		t.Fatalf("cursorEventsForCommand has %d commands, want %d", len(cursorEventsForCommand), len(want))
+	}
+	for command, wantEvents := range want {
+		gotEvents := append([]string(nil), cursorEventsForCommand[command]...)
+		sort.Strings(gotEvents)
+		sortedWant := append([]string(nil), wantEvents...)
+		sort.Strings(sortedWant)
+		if !reflect.DeepEqual(gotEvents, sortedWant) {
+			t.Errorf("cursorEventsForCommand[%q] = %v, want %v", command, cursorEventsForCommand[command], wantEvents)
+		}
 	}
 }
