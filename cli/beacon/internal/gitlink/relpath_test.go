@@ -81,3 +81,92 @@ func TestReadEvidencePreservesWhitespaceWorkingDirectory(t *testing.T) {
 		t.Fatalf("recorded files = %v", evidence.Files)
 	}
 }
+
+// symlinkTree is a repository whose session is logged through a symlinked parent directory, the
+// way macOS logs /tmp for /private/tmp, while git reports the real root.
+type symlinkTree struct {
+	repo Repo
+	cwd  string // the repository root as the session spelled it
+	sub  string // a symlink to the repository's sub directory, from outside it
+}
+
+func newSymlinkTree(t *testing.T) symlinkTree {
+	t.Helper()
+	r := newTestRepo(t)
+	repo := r.open()
+	outside := filepath.Dir(r.root)
+	if err := os.MkdirAll(filepath.Join(outside, "shared"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "shared", "config.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r.write("a.txt", "a")
+	r.write("sub/b.txt", "b")
+	symlink(t, filepath.Join("..", "shared", "config.json"), filepath.Join(r.root, "cfg.json"))
+	symlink(t, "a.txt", filepath.Join(r.root, "alias.txt"))
+	links := t.TempDir()
+	via := filepath.Join(links, "via")
+	symlink(t, outside, via)
+	sub := filepath.Join(links, "sub")
+	symlink(t, filepath.Join(r.root, "sub"), sub)
+	return symlinkTree{repo: repo, cwd: filepath.Join(via, filepath.Base(r.root)), sub: sub}
+}
+
+func symlink(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		t.Fatal(err)
+	}
+}
+
+// Git tracks a symlink as itself. A link the session created is the change, wherever it points,
+// and a path spelled through a symlinked directory still names a file in the repository.
+func TestRelPathKeepsSymlinksTheSessionCreated(t *testing.T) {
+	tree := newSymlinkTree(t)
+	for _, tc := range []struct {
+		name, path, base, want string
+	}{
+		{"link to a file outside", "cfg.json", tree.cwd, "cfg.json"},
+		{"absolute link to a file outside", filepath.Join(tree.cwd, "cfg.json"), "", "cfg.json"},
+		{"link to a file inside", "alias.txt", tree.cwd, "alias.txt"},
+		{"plain file", "a.txt", tree.cwd, "a.txt"},
+		{"file not yet written", filepath.Join("new", "c.txt"), tree.cwd, "new/c.txt"},
+		{"working directory is a symlink into the repository", "b.txt", tree.sub, "sub/b.txt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if rel, ok := tree.repo.RelPath(tc.path, tc.base); !ok || rel != tc.want {
+				t.Errorf("RelPath(%q, %q) = %q, %v; want %q", tc.path, tc.base, rel, ok, tc.want)
+			}
+		})
+	}
+}
+
+func TestReadEvidenceKeepsSymlinksTheSessionCreated(t *testing.T) {
+	tree := newSymlinkTree(t)
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	var events []logEvent
+	for _, name := range []string{"cfg.json", "alias.txt", "a.txt"} {
+		events = append(events, logEvent{at: t0, harness: "codex", session: "s", cwd: tree.cwd, action: "file.modified", filePath: name, operation: "modify"})
+	}
+	writeLog(t, logPath, events...)
+	got, err := ReadEvidence(context.Background(), tree.repo, logPath, t0.Add(-time.Minute), t0.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := got["codex_cli/s"]
+	if evidence == nil {
+		t.Fatal("missing session evidence")
+	}
+	if len(evidence.Files) != 3 {
+		t.Fatalf("recorded files = %v, want cfg.json, alias.txt, a.txt", evidence.Files)
+	}
+	for _, name := range []string{"cfg.json", "alias.txt", "a.txt"} {
+		if _, ok := evidence.Files[name]; !ok {
+			t.Errorf("recorded files = %v, missing %s", evidence.Files, name)
+		}
+	}
+}

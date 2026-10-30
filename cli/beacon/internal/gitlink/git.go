@@ -204,7 +204,7 @@ func (r Repo) RelPath(path, base string) (string, bool) {
 	}
 	path = filepath.Clean(path)
 	candidates := []string{path}
-	if resolved, ok := resolveExisting(path); ok && resolved != path {
+	if resolved, ok := resolveParent(path); ok && resolved != path {
 		candidates = append(candidates, resolved)
 	}
 	for _, root := range r.roots() {
@@ -223,28 +223,27 @@ func (r Repo) RelPath(path, base string) (string, bool) {
 	return "", false
 }
 
-// resolveExisting resolves symlinks in the longest prefix of path that exists, so a deleted file
-// under a symlinked directory still resolves.
-func resolveExisting(path string) (string, bool) {
-	suffix := ""
-	current := path
+// resolveParent resolves symlinks in the directory part of path and keeps the final element as
+// written. Git tracks a symlink itself, so a link the session created stays that link rather than
+// becoming its target, while a path spelled through a symlinked directory (macOS /tmp) still maps
+// into the work tree. Only the longest prefix that exists is resolved, so a file under a deleted
+// directory still maps.
+func resolveParent(path string) (string, bool) {
+	dir := filepath.Dir(path)
+	if dir == path {
+		return "", false
+	}
+	suffix := filepath.Base(path)
 	for {
-		if resolved, err := filepath.EvalSymlinks(current); err == nil {
-			if suffix == "" {
-				return resolved, true
-			}
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
 			return filepath.Join(resolved, suffix), true
 		}
-		parent := filepath.Dir(current)
-		if parent == current {
+		parent := filepath.Dir(dir)
+		if parent == dir {
 			return "", false
 		}
-		if suffix == "" {
-			suffix = filepath.Base(current)
-		} else {
-			suffix = filepath.Join(filepath.Base(current), suffix)
-		}
-		current = parent
+		suffix = filepath.Join(filepath.Base(dir), suffix)
+		dir = parent
 	}
 }
 
