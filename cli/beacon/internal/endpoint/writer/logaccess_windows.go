@@ -71,8 +71,29 @@ func RestrictSystemLog(path string, _ int) error {
 	base := filepath.Base(path)
 	wasRestricted := asymptoteobserve.RuntimeLogAccessRestricted(path)
 	if err := sysacl.SecureRestrictedLogDir(dir, base, readers); err != nil {
-		return fmt.Errorf("secure the log directory %s: %w", dir, err)
+		return rollBack(path, wasRestricted, fmt.Errorf("secure the log directory %s: %w", dir, err))
 	}
+	if err := finishRestriction(path, readers, wasRestricted); err != nil {
+		return rollBack(path, wasRestricted, err)
+	}
+	return nil
+}
+
+// rollBack puts a log that was shared before a restriction that failed back to shared, so the
+// failure leaves hooks a directory they can still append to. The restricted marker is written
+// last, so nothing that reads it (install's own rollback included) would know the directory had
+// already been narrowed.
+func rollBack(path string, wasRestricted bool, err error) error {
+	if wasRestricted {
+		return err
+	}
+	if shareErr := ShareSystemLog(path); shareErr != nil {
+		return errors.Join(err, fmt.Errorf("restore the shared log after the failure: %w", shareErr))
+	}
+	return err
+}
+
+func finishRestriction(path, readers string, wasRestricted bool) error {
 	if !wasRestricted {
 		if err := replaceLogFamily(path); err != nil {
 			return err
@@ -98,7 +119,7 @@ func RestrictSystemLog(path string, _ int) error {
 	return nil
 }
 
-// replaceLogFamily replaces the log and its archives with fresh copies while holding the log's lock
+// replaceLogFamily replaces the log, its archives and the other files beside it with fresh copies while holding the log's lock
 // (bounded), so no line lands in an old file after its copy was taken, and then the lock itself.
 // The family is listed once the lock is held: the collector rotates under it, so a list taken
 // before could miss the archive a rotation made while this waited.
@@ -125,11 +146,24 @@ func replaceLogFamily(path string) error {
 			errs = append(errs, err)
 			return
 		}
+		// Every file directly in the directory, not only the log family: the shared ACL reached
+		// all of them (inventory_state.jsonl, the self-updater's system.jsonl), so any could be
+		// held open by an account the restriction shuts out. Their own writers do not take this
+		// lock, so a line one of them appends between the copy and the rename is lost; that is
+		// rare, and the price of not leaving such a handle in place. A file outside the family
+		// with another hard link is left alone, as SecureRestrictedLogDir leaves it: the other
+		// link could be any file, and a copy would hand its content to the readers group.
 		for _, entry := range entries {
-			if sysacl.IsLogFamily(entry.Name(), base) && !strings.EqualFold(entry.Name(), base+".lock") {
-				if err := replaceWithCopy(filepath.Join(dir, entry.Name()), false); err != nil {
-					errs = append(errs, err)
-				}
+			name := entry.Name()
+			if strings.EqualFold(name, base+".lock") || strings.Contains(name, ".restrict-") {
+				continue
+			}
+			child := filepath.Join(dir, name)
+			if !sysacl.IsLogFamily(name, base) && hardLinked(child) {
+				continue
+			}
+			if err := replaceWithCopy(child, false); err != nil {
+				errs = append(errs, err)
 			}
 		}
 	}()
@@ -137,6 +171,21 @@ func replaceLogFamily(path string) error {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
+}
+
+// hardLinked reports whether the file at path has more than one name. A file it cannot open counts
+// as linked, so nothing unknown is copied.
+func hardLinked(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return !errors.Is(err, fs.ErrNotExist)
+	}
+	defer f.Close()
+	var info windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(windows.Handle(f.Fd()), &info); err != nil {
+		return true
+	}
+	return info.NumberOfLinks > 1
 }
 
 // replaceWithCopy copies the file at path into a new file beside it, created with its final
