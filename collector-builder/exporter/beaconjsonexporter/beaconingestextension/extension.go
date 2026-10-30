@@ -1,6 +1,8 @@
 // Package beaconingestextension is the collector side of the restricted log access mode: it
-// listens on the local ingest socket and appends the events hooks send there to the runtime log,
-// so a system-mode endpoint can keep that log 0640 root:beacon-log instead of world-writable.
+// listens on the local ingest socket (a named pipe on Windows) and appends the events hooks send
+// there to the runtime log, so a system-mode endpoint can keep that log 0640 root:beacon-log, or on
+// Windows closed to everyone but SYSTEM, Administrators and the readers group, instead of writable
+// by every user.
 //
 // Each event is stamped with the sender's kernel-verified account (localingest.StampLine) and
 // written through the same lock, rotation and file-mode handling as the beaconjson exporter
@@ -51,9 +53,10 @@ func newIngest(cfg *Config, logger *zap.Logger) *ingest {
 	}
 }
 
-// Start creates the socket and serves it in the background. A socket another running collector
-// still answers on, or a non-socket at the path, fails the start: two writers serving one log, or
-// a path someone put something else at, is a configuration problem to surface, not to work around.
+// Start creates the socket or pipe and serves it in the background. A socket another running
+// collector still answers on, a non-socket at the path, or a pipe that already exists (another
+// collector, or an account that took the name first) fails the start: two writers serving one log,
+// or a name someone else holds, is a problem to surface, not to work around.
 func (e *ingest) Start(_ context.Context, host component.Host) error {
 	if !asymptoteobserve.RuntimeLogAccessRestricted(e.cfg.LogPath) {
 		// Harmless -- the log is simply also writable directly -- but not what install sets up,
