@@ -550,6 +550,7 @@ jobs:
             ./internal/endpoint/integrations/... `
             ./internal/endpoint/inventory/... `
             ./internal/endpoint/lifecycle/... `
+            ./internal/endpoint/loggroup/... `
             ./internal/endpoint/rapid7/... `
             ./internal/endpoint/schema/... `
             ./internal/endpoint/selfupdate/... `
