@@ -827,7 +827,12 @@ jobs:
             }
           }
 
+      # Each MSI step has its own bound, well inside the job's. A wedged msiexec then fails its step
+      # instead of holding the job until GitHub cancels it, and a cancelled job keeps no log at all --
+      # which is how intermittent upgrade and uninstall hangs went undiagnosed. With the step bound, the
+      # diagnostics and the package logs below still run and upload.
       - name: Install it
+        timeout-minutes: 8
         run: |
           # /qn is silent, and the verbose log is what makes a custom-action failure diagnosable --
           # without it msiexec reports only an exit code.
@@ -868,6 +873,7 @@ jobs:
           exit 0
 
       - name: Upgrading must replace the payload and leave it running
+        timeout-minutes: 8
         run: |
           $configPath = Join-Path $env:ProgramData 'Beacon\Endpoint\config.json'
           if (-not (Test-Path -LiteralPath $configPath)) { throw "no configuration before the upgrade" }
@@ -942,9 +948,11 @@ jobs:
       # hook reaches the log only through the collector's pipe, stamped as itself; it can neither read
       # nor append to the log; it spools while the collector is stopped; and shared puts it all back.
       - name: Restricted log access must hold against an ordinary account
+        timeout-minutes: 8
         run: pwsh -NoProfile -File packaging/windows/smoke-restricted-log.ps1
 
       - name: Uninstall must remove the service and keep the data
+        timeout-minutes: 8
         run: |
           $logDir = Join-Path $env:ProgramData 'Beacon\Endpoint\logs'
           $configPath = Join-Path $env:ProgramData 'Beacon\Endpoint\config.json'
@@ -1008,3 +1016,74 @@ jobs:
           Write-Output "marker survived: the operator's own configuration came back"
           Write-Output "config retained: $(Test-Path -LiteralPath $configPath), logs retained: $(Test-Path -LiteralPath $logDir)"
           exit 0
+
+      # The install and uninstall scripts bound every beacon.exe call and stop one that outlives its
+      # bound (packaging/windows/package-common.ps1), so a hang no longer wedges the MSI -- which also
+      # means it no longer fails a step on its own. Each script leaves a package log in SYSTEM's
+      # temporary directory, and a TIMEOUT line there is a hang this job must not pass over.
+      - name: Every package action must finish within its bound
+        if: always()
+        run: |
+          $logs = @(
+            foreach ($dir in @((Join-Path $env:SystemRoot 'Temp'), (Join-Path $env:SystemRoot 'SystemTemp'), $env:TEMP)) {
+              if ($dir -and (Test-Path -LiteralPath $dir)) {
+                Get-ChildItem -LiteralPath $dir -Filter 'beacon-package-*.log' -File -ErrorAction SilentlyContinue
+              }
+            }
+          ) | Sort-Object FullName -Unique | Sort-Object LastWriteTime
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\package-logs" | Out-Null
+          $timedOut = @()
+          foreach ($log in $logs) {
+            Write-Output "=== $($log.FullName) ==="
+            Get-Content -LiteralPath $log.FullName | Write-Output
+            Copy-Item -LiteralPath $log.FullName -Destination "$env:GITHUB_WORKSPACE\package-logs\" -Force
+            if (Select-String -LiteralPath $log.FullName -Pattern 'TIMEOUT:' -SimpleMatch -Quiet) { $timedOut += $log.Name }
+          }
+          Write-Output "package logs: $($logs.Count)"
+          if ($timedOut.Count -gt 0) {
+            throw "a package action outlived its bound and was stopped: $($timedOut -join ', ')"
+          }
+
+      - name: Diagnose a failed package step
+        if: failure()
+        run: |
+          Write-Output '--- processes ---'
+          Get-CimInstance Win32_Process |
+            Where-Object { $_.Name -match '^(beacon|msiexec|powershell|pwsh|cmd|sc|taskkill|net)' } |
+            Sort-Object ProcessId |
+            Format-Table -AutoSize ProcessId, ParentProcessId, Name, CreationDate, CommandLine |
+            Out-String -Width 500 | Write-Output
+          Write-Output '--- BeaconCollector ---'
+          & sc.exe queryex BeaconCollector 2>&1 | Write-Output
+          & sc.exe qc BeaconCollector 2>&1 | Write-Output
+          Write-Output '--- Windows Installer, collector and service control events ---'
+          foreach ($filter in @(
+            @{ LogName = 'Application'; ProviderName = 'MsiInstaller' },
+            @{ LogName = 'Application'; ProviderName = 'BeaconCollector' },
+            @{ LogName = 'System'; ProviderName = 'Service Control Manager' }
+          )) {
+            Get-WinEvent -FilterHashtable $filter -MaxEvents 25 -ErrorAction SilentlyContinue |
+              Sort-Object TimeCreated |
+              Format-List TimeCreated, ProviderName, Id, Message |
+              Out-String -Width 300 | Write-Output
+          }
+          foreach ($name in @('install.log', 'upgrade.log', 'uninstall.log')) {
+            $path = Join-Path $env:GITHUB_WORKSPACE $name
+            if (Test-Path -LiteralPath $path) {
+              Write-Output "--- $name (tail) ---"
+              Get-Content -LiteralPath $path -Tail 80 | Write-Output
+            }
+          }
+          $global:LASTEXITCODE = 0
+
+      - name: Upload the package logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-package-logs
+          path: |
+            ${{ github.workspace }}/install.log
+            ${{ github.workspace }}/upgrade.log
+            ${{ github.workspace }}/uninstall.log
+            ${{ github.workspace }}/package-logs/
+          if-no-files-found: ignore
