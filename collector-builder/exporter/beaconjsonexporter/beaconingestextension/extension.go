@@ -29,8 +29,8 @@ type ingest struct {
 	names  *nameCache
 
 	// listen, serveListener and appendLine are the seams tests replace.
-	listen        func(path string) (*net.UnixListener, error)
-	serveListener func(*net.UnixListener) net.Listener
+	listen        func(path string) (localingest.Listener, error)
+	serveListener func(localingest.Listener) net.Listener
 	appendLine    func(path string, line []byte, rotateBytes int64, rotateArchives int) error
 
 	mu     sync.Mutex

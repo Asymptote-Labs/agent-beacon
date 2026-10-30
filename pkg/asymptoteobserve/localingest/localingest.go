@@ -11,10 +11,14 @@
 // the collector becomes the only writer, the log becomes 0640 root:beacon-log, and hooks send their
 // events here instead.
 //
+// On Windows the same mode makes the SYSTEM collector the only writer of the log under
+// %ProgramData%, whose ACL then grants ordinary users nothing, and hooks send to it here the same
+// way.
+//
 // # The channel
 //
-// The collector listens on a Unix domain socket (DefaultSocketPath) in a root-owned directory. A
-// connection carries one batch:
+// The collector listens on a Unix domain socket in a root-owned directory, or on Windows on a named
+// pipe (DefaultSocketPath for both). A connection carries one batch:
 //
 //	client: "BEACON-INGEST/1\n", a Header line, one event per line, then half-closes its write side
 //	server: one JSON Response line, after it has handled every line it read
@@ -24,14 +28,17 @@
 // directly rather than landing in the system log.
 //
 // The server learns who is on the other end from the kernel (SO_PEERCRED on Linux, LOCAL_PEERCRED
-// on macOS), never from the event, and StampLine overwrites the event's user with that identity.
+// on macOS, the client's token through ImpersonateNamedPipeClient on Windows), never from the
+// event, and StampLine overwrites the event's user with that identity.
 // So a user can still describe their own sessions however they like -- their agent runs under their
 // control -- but cannot erase, rewrite or read anything already in the log, and cannot write an
 // event that claims to be someone else's.
 //
-// Nothing here touches the network: a Unix socket is a local file, and the client refuses to
+// Nothing here touches the network. A Unix socket is a local file, and the client refuses to
 // connect to one that is not in a directory only root could have created it in, because a socket a
-// user planted there would receive every other user's events.
+// user planted there would receive every other user's events. A named pipe could be reached over
+// SMB, so the pipe rejects remote clients and its ACL denies network logons; the client refuses a
+// pipe that SYSTEM or Administrators did not create, for the same reason as the socket.
 package localingest
 
 import (
@@ -42,18 +49,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 const (
-	// DefaultSocketPath is where a system-mode collector in the restricted log access mode listens.
-	// /var/run is root-owned on Linux (a link to /run) and macOS (a link to /private/var/run), so
-	// only root can create the directory the socket lives in.
-	DefaultSocketPath = "/var/run/beacon-agent/ingest.sock"
-
 	// Preamble opens every connection. It names the protocol version, so a later version can be
 	// told apart, and keeps a stray client that happened to connect from having its bytes taken
 	// for events.
@@ -95,7 +96,10 @@ var ErrNoSocket = errors.New("no ingest socket")
 
 // Peer is who the kernel says is on the other end of a connection.
 type Peer struct {
-	UID uint32
+	// UID names the account: its decimal uid on Unix, its SID on Windows. It is what the stamped
+	// event's user.uid carries, the same value the account's own hooks write there.
+	UID string
+	// GID is the primary group where the kernel reports one, and 0 on Windows.
 	GID uint32
 	// PID is the sending process, or 0 where the platform does not report one.
 	PID int32
@@ -125,9 +129,9 @@ type Response struct {
 // event.id follows the rules in stampEventID. A line that would only exceed MaxLineBytes because
 // of the id is written without one, as every writer does with an event at the size limit.
 //
-// lookupName resolves a uid to an account name and may be nil; a name it cannot resolve is left
-// out rather than taken from the event, which the sender wrote.
-func StampLine(line []byte, peer Peer, lookupName func(uid uint32) string) ([]byte, error) {
+// lookupName resolves the peer's account (see Peer.UID) to a name and may be nil; a name it cannot
+// resolve is left out rather than taken from the event, which the sender wrote.
+func StampLine(line []byte, peer Peer, lookupName func(uid string) string) ([]byte, error) {
 	line = bytes.TrimSuffix(line, []byte{'\r'})
 	if len(line) == 0 {
 		return nil, fmt.Errorf("%w: empty line", ErrRejected)
@@ -152,7 +156,10 @@ func StampLine(line []byte, peer Peer, lookupName func(uid uint32) string) ([]by
 		return nil, fmt.Errorf("%w: %v", ErrRejected, err)
 	}
 
-	user := map[string]interface{}{"uid": strconv.FormatUint(uint64(peer.UID), 10)}
+	if strings.TrimSpace(peer.UID) == "" {
+		return nil, errors.New("the peer has no account")
+	}
+	user := map[string]interface{}{"uid": peer.UID}
 	if lookupName != nil {
 		if name := strings.TrimSpace(lookupName(peer.UID)); name != "" {
 			user["name"] = name
@@ -190,7 +197,7 @@ func StampLine(line []byte, peer Peer, lookupName func(uid uint32) string) ([]by
 //     account it is not, so the id is derived again from what is written.
 //   - Any other id is one the sender chose, as session-store importers do from their source
 //     records. It is kept stable for that account, so a re-swept record keeps its id, but scoped to
-//     the verified uid, so one account cannot write under an id another account's events carry.
+//     the verified account, so one account cannot write under an id another account's events carry.
 //
 // A call-keyed id stays as strong as the session and call ids it is built from: an account that
 // knows another session's ids can name the same call, as it could over the loopback OTLP port.
@@ -210,11 +217,12 @@ func stampEventID(sentID string, claimed, withoutID []byte, peer Peer) string {
 // namespace, it is a contract: changing it renames every scoped id written through the socket.
 var scopedIDNamespace = [16]byte{0x6b, 0x2d, 0x1f, 0x9a, 0x4c, 0x37, 0x4e, 0x0b, 0x9f, 0x51, 0x8e, 0x2a, 0x77, 0xc3, 0x05, 0xd4}
 
-// scopedEventID is a version 5 UUID of the uid and the id the sender chose.
-func scopedEventID(uid uint32, sentID string) string {
+// scopedEventID is a version 5 UUID of the account (Peer.UID: a decimal uid or a SID) and the id
+// the sender chose.
+func scopedEventID(uid string, sentID string) string {
 	digest := sha1.New()
 	digest.Write(scopedIDNamespace[:])
-	io.WriteString(digest, strconv.FormatUint(uint64(uid), 10))
+	io.WriteString(digest, uid)
 	digest.Write([]byte{0})
 	io.WriteString(digest, sentID)
 	var id [16]byte

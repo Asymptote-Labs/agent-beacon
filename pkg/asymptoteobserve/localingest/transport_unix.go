@@ -12,6 +12,14 @@ import (
 	"time"
 )
 
+// DefaultSocketPath is where a system-mode collector in the restricted log access mode listens.
+// /var/run is root-owned on Linux (a link to /run) and macOS (a link to /private/var/run), so only
+// root can create the directory the socket lives in.
+const DefaultSocketPath = "/var/run/beacon-agent/ingest.sock"
+
+// Listener is what Listen returns: a Unix socket listener, which removes its socket when closed.
+type Listener = *net.UnixListener
+
 // SocketDirMode is the mode of the directory the socket lives in: root may create entries, nobody
 // else may.
 const SocketDirMode os.FileMode = 0o755
@@ -19,6 +27,20 @@ const SocketDirMode os.FileMode = 0o755
 // SocketMode lets every account connect. Connecting to a Unix socket needs write permission on it;
 // what a connection may do is decided by the server, from the peer's kernel credentials.
 const SocketMode os.FileMode = 0o666
+
+// connect dials the socket at the client's path once checkSocket has accepted it, by its resolved
+// path.
+func (c Client) connect(timeout time.Duration) (net.Conn, error) {
+	socket, err := checkSocket(c.path(), c.TrustedOwner)
+	if err != nil {
+		return nil, err
+	}
+	conn, err := net.DialTimeout("unix", socket, timeout)
+	if err != nil {
+		return nil, fmt.Errorf("connect to %s: %w", c.path(), err)
+	}
+	return conn, nil
+}
 
 // checkSocket decides whether a writer may send to path. The socket must be owned by owner, and so
 // must its directory, which nobody else may write; every directory above it must belong to root or

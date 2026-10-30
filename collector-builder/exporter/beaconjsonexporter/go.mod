@@ -22,6 +22,7 @@ require (
 replace github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve => ../../../pkg/asymptoteobserve
 
 require (
+	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
