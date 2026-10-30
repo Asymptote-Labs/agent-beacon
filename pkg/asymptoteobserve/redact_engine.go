@@ -35,6 +35,9 @@ import (
 // case-insensitive rules run their whole patterns, as they always did. redactString(value, false)
 // runs every rule's whole pattern on any text, and TestRedactGateNeverChangesAResult and
 // FuzzRedactGate hold the two to the same result.
+//
+// A shape rule's matches also take in the secrets written right after them (redact_adjacent.go),
+// the same way whichever way the matches are found.
 
 // redactStart says where, around an occurrence of one of a rule's needles that passes the needle
 // set's precededBy and followedBy (and those of the sets it is within), a match of the rule's
@@ -70,7 +73,12 @@ type redactSlot struct {
 	// The assertions the whole pattern makes, which decide where it can be run on a suffix of the
 	// text with the same result (safeStart): \b or \B, (?m)^, and ^ or \A.
 	wordAssert, lineStart, textStart bool
+	// index is the rule's index in redactionRules, or -1.
+	index int
 }
+
+// boundaryPrefixes are the ways a pattern opens with \b.
+var boundaryPrefixes = []string{`(?i)(\b`, `(?i)\b`, `(\b`, `\b`}
 
 // prepare compiles the rule's pattern anchored at the start of the text, without the \b it opens
 // with, if any: the anchored pattern cannot see the byte before its start, so the boundary is
@@ -78,7 +86,7 @@ type redactSlot struct {
 func (s *redactSlot) prepare(rule redactionRule) {
 	s.once.Do(func() {
 		expr := rule.expr
-		for _, prefix := range []string{`(?i)(\b`, `(?i)\b`, `(\b`, `\b`} {
+		for _, prefix := range boundaryPrefixes {
 			if strings.HasPrefix(expr, prefix) {
 				s.boundary = true
 				expr = prefix[:len(prefix)-2] + expr[len(prefix):]
@@ -157,10 +165,17 @@ type redactEngine struct {
 	setMasks [64]uint64 // redactNeedles id -> the needles of the set, as scanner needle bits
 	rules    []redactSlot
 	assigned redactSlot
+	// adjacent is what redact_adjacent.go knows of the rules, built the first time it is needed.
+	adjacentOnce sync.Once
+	adjacent     *redactAdjacency
 }
 
 var redactEngineFor = sync.OnceValue(func() *redactEngine {
 	e := &redactEngine{rules: make([]redactSlot, len(redactionRules))}
+	for i := range e.rules {
+		e.rules[i].index = i
+	}
+	e.assigned.index = -1
 	ids := map[redactNeedle]int{}
 	var needles []redactNeedle
 	var register func(set *redactNeedles)
@@ -325,23 +340,65 @@ func (set *redactNeedles) passes(engine *redactEngine, t string, h redactHit, wi
 // When the places would hand the pattern more text than the budget allows (redactAnchoredPerByte),
 // the whole pattern runs once from a safe start before the first of them instead. No match starts
 // before the first place, and from a safe start the pattern finds what it finds in the whole text.
-func (rule redactionRule) matches(text *redactGate, slot *redactSlot) iter.Seq2[[]int, *regexp.Regexp] {
-	return func(yield func([]int, *regexp.Regexp) bool) {
+//
+// A shape rule's match is followed by the secrets written right after it (redactChain.run), each
+// yielded with the rule it is a match of, and the next match is looked for from where they end,
+// in both ways of finding it. Text with none gets exactly FindAll's matches.
+func (rule redactionRule) matches(text *redactGate, slot *redactSlot) iter.Seq2[[]int, redactUse] {
+	return func(yield func([]int, redactUse) bool) {
 		t := text.value
+		var chain *redactChain
+		if rule.shape != shapeNone {
+			text.scan()
+			slot.prepare(rule)
+			chain = newRedactChain(text.e(), t, text.hits)
+		}
 		whole := func(from int) {
-			if redactWork != nil {
-				redactWork(len(t) - from)
-			}
 			re := rule.pattern()
-			for _, m := range re.FindAllStringSubmatchIndex(t[from:], -1) {
-				for i := range m {
-					if m[i] >= 0 {
-						m[i] += from
+			use := redactUse{re, &rule}
+			if chain == nil {
+				redactWorked(len(t) - from)
+				for _, m := range re.FindAllStringSubmatchIndex(t[from:], -1) {
+					for i := range m {
+						if m[i] >= 0 {
+							m[i] += from
+						}
+					}
+					if !yield(m, use) {
+						return
 					}
 				}
-				if !yield(m, re) {
+				return
+			}
+			// FindAll's loop, from where each chain ends. The pattern run on t[pos:] takes pos for
+			// the start of a word; where t does not, the search goes on from the next byte. The
+			// first match from aheadFrom on (nil: none) stays the first from any later pos up to
+			// its start, so a rescued match before it does not make the search read on to it again.
+			si := chain.adj.byRule[slot.index]
+			var ahead []int
+			aheadFrom := -1
+			for pos := from; pos < len(t); {
+				if aheadFrom < 0 || ahead != nil && ahead[0] < pos {
+					ahead, aheadFrom = chain.search(re, pos), pos
+					if ahead != nil && ahead[0] == pos && pos > from && slot.boundary && !wordBoundary(t, pos) {
+						ahead = chain.search(re, pos+1)
+					}
+				}
+				m, limit := ahead, len(t)
+				if m != nil {
+					limit = m[0]
+				}
+				if rescued := chain.rescueBefore(si, pos, limit); rescued != nil {
+					m = rescued
+				}
+				if m == nil {
 					return
 				}
+				end, ok := chain.run(si, m, use, yield)
+				if !ok {
+					return
+				}
+				pos = end
 			}
 		}
 		if !text.enabled || rule.needles.folded && text.unfoldable() {
@@ -400,21 +457,40 @@ func (rule redactionRule) matches(text *redactGate, slot *redactSlot) iter.Seq2[
 				redactWork(len(t) - q)
 			}
 			m := slot.anchored.FindStringSubmatchIndex(t[q:])
-			if m == nil {
-				failed = q
-				continue
-			}
 			for i := range m {
 				if m[i] >= 0 {
 					m[i] += q
 				}
 			}
+			if m == nil && chain != nil {
+				m = chain.rescue(chain.adj.byRule[slot.index], q)
+			}
+			if m == nil {
+				failed = q
+				continue
+			}
+			use := redactUse{slot.anchored, &rule}
+			if chain != nil {
+				end, ok := chain.run(chain.adj.byRule[slot.index], m, use, yield)
+				if !ok {
+					return
+				}
+				pos = end
+				continue
+			}
 			pos = m[1]
-			if !yield(m, slot.anchored) {
+			if !yield(m, use) {
 				return
 			}
 		}
 	}
+}
+
+// redactUse is what matches yields with a match: the pattern to expand it with and the rule it is
+// a match of, which for a secret written right after a shape rule's match is another shape rule.
+type redactUse struct {
+	pattern *regexp.Regexp
+	rule    *redactionRule
 }
 
 // startFor returns the leftmost place at or after pos where a match holding h can begin, or -1.

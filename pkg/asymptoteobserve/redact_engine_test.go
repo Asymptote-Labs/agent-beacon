@@ -188,6 +188,21 @@ func TestRedactionWorkIsLinear(t *testing.T) {
 		"authorization headers":        "authorization: bearer ,",
 		"cookie headers":               "\ncookie: ",
 		"assignments":                  "token=abcdefgh12345678 ",
+		// Secrets written right after another one (redact_adjacent.go): chains of keys of fixed
+		// length, of tokens that run on into the next, of key ids that end only where the next
+		// key starts, of JWT first segments that never complete, and URLs, Bearer tokens, curl
+		// commands and replaced copies right after a key.
+		"Google keys back to back":     "AIzaSyA-abcdefghijklmnopqrstuvwxyz01234",
+		"GitHub tokens back to back":   "ghp_0123456789abcdefghijklmnopqrstuvwxyz",
+		"AWS key ids back to back":     "AKIAIOSFODNN7EXAMPLE",
+		"npm tokens and Google keys":   "npm_abcdefghijklmnopqrstuvwxyz0123456789AIzaSyA-abcdefghijklmnopqrstuvwxyz01234",
+		"tokens into JWT prefixes":     "ghp_0123456789abcdefghijklmnopqrstuvwxyzeyJabc-",
+		"API keys into JWT prefixes":   "sk-eyJabcdefghij",
+		"URL schemes after keys":       "npm_abcdefghijklmnopqrstuvwxyz0123456789a://x:",
+		"Bearer tokens after keys":     "npm_abcdefghijklmnopqrstuvwxyz0123456789Bearer ",
+		"curl commands after keys":     "npm_abcdefghijklmnopqrstuvwxyz0123456789curl -b x ",
+		"keys after replaced copies":   "token=abcdefgh12345678 abcdefgh12345678ghp_0123456789abcdefghijklmnopqrstuvwxyz ",
+		"key ids into unfinished keys": "AKIAIOSFODNN7EXAMPLEAIza",
 	}
 	for name, unit := range families {
 		work := func(n int) int {

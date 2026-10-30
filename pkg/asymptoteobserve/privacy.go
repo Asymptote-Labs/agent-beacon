@@ -132,6 +132,12 @@ type redactionRule struct {
 	// how many bytes before the needle a startNeedle match does. See redact_engine.go.
 	start  redactStart
 	offset int
+	// shape marks a credential recognized by its own shape: a public type prefix, ${1}, and the
+	// secret after it. Such a rule also redacts a secret written right after its match
+	// (redact_adjacent.go).
+	shape redactShapeKind
+	// runsOn, when set, returns where the text a match replaces ends, at or past the match's end.
+	runsOn func(t string, match []int) int
 }
 
 // pattern is the rule's compiled pattern.
@@ -184,6 +190,13 @@ func foldedRule(expr, replacement string, keep func(string) bool, needles ...str
 func curlRule(expr, replacement string) redactionRule {
 	r := foldedRule(expr, replacement, nil, "curl")
 	r.repeat = true
+	return r
+}
+
+// shapeRule is a rule for a credential recognized by its own shape (redactionRule.shape).
+func shapeRule(expr, replacement string, needles ...string) redactionRule {
+	r := rule(expr, replacement, nil, needles...)
+	r.shape = shapeToken
 	return r
 }
 
@@ -421,30 +434,32 @@ var redactionRules = concatRules([]redactionRule{
 	foldedRule(`(?im)((?:^\s*|["']\s*|(?:-H|--header)(?:=|\s+)["']?)(?:set-)?cookie["']?\s*:\s*["']?)([^\n"'\\]+)`, "${1}"+redactedValue, isRedactedValue, "cookie").from(startLine),
 	// The password in a URL's userinfo: `postgres://user:pw@host`, `https://x-access-token:t@github.com`,
 	// and with no user name, the way Redis URLs carry a password: `redis://:pw@host`.
-	foldedRule(`(?i)(\b[a-z][a-z0-9+.-]*://[^/\s:@"'<>]*:)([^@/\s"'<>]+)(@)`, "${1}"+redactedValue+"${3}", nil, "://").from(startScheme),
+	foldedRule(`(?i)(\b[a-z][a-z0-9+.-]*://[^/\s:@"'<>]*:)([^@/\s"'<>]+)(@)`, "${1}"+redactedValue+"${3}", nil, "://").from(startScheme).runningOn(urlRunsOn),
 	// Credentials recognizable by their own shape, wherever they appear. The type prefix is public
 	// and stays (`ghp_[REDACTED]`, `AKIA[REDACTED]`), the way secret scanners report a finding: the
 	// line still says a GitHub token or an AWS key was there, which is what detection rules match on
-	// in the log, and none of the credential is left.
-	rule(`\b(sk-)[A-Za-z0-9_-]{20,}`, "${1}"+redactedValue, nil, "sk-"), // Anthropic sk-ant-, OpenAI sk-proj- and sk-
+	// in the log, and none of the credential is left. A secret written right after one of these is
+	// redacted with it, keeping its own prefix: `ghp_[REDACTED]ghp_[REDACTED]` (redact_adjacent.go).
+	shapeRule(`\b(sk-)[A-Za-z0-9_-]{20,}`, "${1}"+redactedValue, "sk-"), // Anthropic sk-ant-, OpenAI sk-proj- and sk-
 	// An AWS secret access key has no shape of its own, but where it follows its key id within a few
 	// separators (a credentials CSV, `aws configure` output, a table, a JSON array) it is the 40
-	// characters after them. This runs before the key id rule below replaces the id it keys on.
-	rule(`(\b(?:AKIA|ASIA)[A-Z0-9]{16}\b[\s,:|"']{1,8})[A-Za-z0-9/+]{40}([^A-Za-z0-9/+=]|$)`, "${1}"+redactedValue+"${2}", nil, "AKIA", "ASIA"),
-	rule(`\b(AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}\b`, "${1}"+redactedValue, nil, "AKIA", "ASIA", "ABIA", "ACCA"),    // AWS access key id
-	rule(`\b(gh[pousr]_)[A-Za-z0-9]{30,}`, "${1}"+redactedValue, nil, "ghp_", "gho_", "ghu_", "ghs_", "ghr_"),   // GitHub tokens
-	rule(`\b(github_pat_)[A-Za-z0-9_]{22,}`, "${1}"+redactedValue, nil, "github_pat_"),                          // GitHub fine-grained tokens
-	rule(`\b(glpat-)[A-Za-z0-9_-]{20,}`, "${1}"+redactedValue, nil, "glpat-"),                                   // GitLab
-	rule(`\b(xox[abposr]-)[A-Za-z0-9-]{10,}`, "${1}"+redactedValue, nil, "xox"),                                 // Slack
-	rule(`\b([rs]k_(?:live|test)_)[A-Za-z0-9]{16,}`, "${1}"+redactedValue, nil, "k_live_", "k_test_").before(1), // Stripe
-	rule(`\b(AIza)[0-9A-Za-z_-]{35}`, "${1}"+redactedValue, nil, "AIza"),                                        // Google API key
-	rule(`\b(ya29\.)(?:c\.)?[0-9A-Za-z_-]{20,}`, "${1}"+redactedValue, nil, "ya29."),                            // Google OAuth access token
-	rule(`\b(npm_)[A-Za-z0-9]{36}`, "${1}"+redactedValue, nil, "npm_"),                                          // npm
-	rule(`\b(hf_)[A-Za-z0-9]{30,}`, "${1}"+redactedValue, nil, "hf_"),                                           // Hugging Face
+	// characters after them. The key id is replaced with it, as the key id rule below would: where
+	// this rule redacts a secret right after another one, the key id rule has already run.
+	shapeRule(`(\b(?:AKIA|ASIA))[A-Z0-9]{16}(\b[\s,:|"']{1,8})[A-Za-z0-9/+]{40}([^A-Za-z0-9/+=]|$)`, "${1}"+redactedValue+"${2}"+redactedValue+"${3}", "AKIA", "ASIA"),
+	shapeRule(`\b(AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}\b`, "${1}"+redactedValue, "AKIA", "ASIA", "ABIA", "ACCA"),    // AWS access key id
+	shapeRule(`\b(gh[pousr]_)[A-Za-z0-9]{30,}`, "${1}"+redactedValue, "ghp_", "gho_", "ghu_", "ghs_", "ghr_"),   // GitHub tokens
+	shapeRule(`\b(github_pat_)[A-Za-z0-9_]{22,}`, "${1}"+redactedValue, "github_pat_"),                          // GitHub fine-grained tokens
+	shapeRule(`\b(glpat-)[A-Za-z0-9_-]{20,}`, "${1}"+redactedValue, "glpat-"),                                   // GitLab
+	shapeRule(`\b(xox[abposr]-)[A-Za-z0-9-]{10,}`, "${1}"+redactedValue, "xox"),                                 // Slack
+	shapeRule(`\b([rs]k_(?:live|test)_)[A-Za-z0-9]{16,}`, "${1}"+redactedValue, "k_live_", "k_test_").before(1), // Stripe
+	shapeRule(`\b(AIza)[0-9A-Za-z_-]{35}`, "${1}"+redactedValue, "AIza"),                                        // Google API key
+	shapeRule(`\b(ya29\.)(?:c\.)?[0-9A-Za-z_-]{20,}`, "${1}"+redactedValue, "ya29."),                            // Google OAuth access token
+	shapeRule(`\b(npm_)[A-Za-z0-9]{36}`, "${1}"+redactedValue, "npm_"),                                          // npm
+	shapeRule(`\b(hf_)[A-Za-z0-9]{30,}`, "${1}"+redactedValue, "hf_"),                                           // Hugging Face
 	// Beacon's own keys and tokens: API keys, device and enforcement keys, MCP tokens and their refresh
 	// tokens, and the CLI sign-in's access token, authorization code, client and exchange values.
-	rule(`\b(bcn_(?:api|device|mcprt|mcp|enfdev|cli|code|client|exchange)_)[A-Za-z0-9_-]{8,}`, "${1}"+redactedValue, nil, "bcn_"),
-	rule(`\b(eyJ)[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`, "${1}"+redactedValue, nil, "eyJ"), // JWT
+	shapeRule(`\b(bcn_(?:api|device|mcprt|mcp|enfdev|cli|code|client|exchange)_)[A-Za-z0-9_-]{8,}`, "${1}"+redactedValue, "bcn_"),
+	shapeRule(`\b(eyJ)[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`, "${1}"+redactedValue, "eyJ").segmented(), // JWT
 })
 
 func concatRules(groups ...[]redactionRule) []redactionRule {
@@ -467,6 +482,20 @@ func (rule redactionRule) before(offset int) redactionRule {
 	return rule
 }
 
+// segmented marks a shape rule whose secret is a JWT: three dot-separated segments, the first two
+// opening with `eyJ`, each of any length. redact_adjacent.go reads them itself to tell where one
+// ends without reading on to the end of the text each time it asks.
+func (rule redactionRule) segmented() redactionRule {
+	rule.shape = shapeJWT
+	return rule
+}
+
+// runningOn returns the rule with the text its matches replace running on where runsOn says.
+func (rule redactionRule) runningOn(runsOn func(t string, match []int) int) redactionRule {
+	rule.runsOn = runsOn
+	return rule
+}
+
 // apply replaces every match of the rule in the gate's text, except one whose value keep passes,
 // and a repeating rule until the text stops changing.
 func (rule redactionRule) apply(text *redactGate, slot *redactSlot) string {
@@ -483,24 +512,96 @@ func (rule redactionRule) applyOnce(text *redactGate, slot *redactSlot) string {
 	value := text.value
 	var out []byte
 	last := 0
-	for match, pattern := range rule.matches(text, slot) {
-		if rule.keep != nil {
-			index := pattern.SubexpIndex("value")
+	for match, use := range rule.matches(text, slot) {
+		if match[0] < last {
+			continue // inside a match that ran on (redactionRule.runsOn)
+		}
+		if keep := use.rule.keep; keep != nil {
+			index := use.pattern.SubexpIndex("value")
 			if index < 0 {
 				index = 2
 			}
-			if group := 2 * index; match[group] >= 0 && rule.keep(value[match[group]:match[group+1]]) {
+			if group := 2 * index; match[group] >= 0 && keep(value[match[group]:match[group+1]]) {
 				continue
 			}
 		}
 		out = append(out, value[last:match[0]]...)
-		out = pattern.ExpandString(out, rule.replacement, value, match)
-		last = match[1]
+		replacement, end := use.rule.replacing(value, match)
+		out = use.pattern.ExpandString(out, replacement, value, match)
+		last = end
 	}
 	if out == nil {
 		return value
 	}
 	return string(append(out, value[last:]...))
+}
+
+// replacing returns the replacement of match in t, and where the text it replaces ends: the
+// match's end, unless the rule's match runs on (runsOn), when what the rule keeps after its value
+// goes too.
+func (rule *redactionRule) replacing(t string, match []int) (string, int) {
+	if rule.runsOn != nil {
+		if end := rule.runsOn(t, match); end >= 0 {
+			return "${1}" + redactedValue, end
+		}
+	}
+	return rule.replacement, match[1]
+}
+
+// urlRunsOn returns where the password of a URL match runs on to when the URL's user name is a
+// secret-named label (`https://x-access-token:…@`), which the label rules redact too, or -1. The
+// two stop at different bytes, a label's value at a quote, a comma or whitespace and a URL's
+// password at an `@`, a slash, a quote or whitespace, and once one has replaced its part, the
+// other's runs on over the marker; so each pass of the rules took one more piece of what follows,
+// starting with the `@`. The value runs on as far as the two take it in turn, which is where
+// every later pass would leave it.
+func urlRunsOn(t string, m []int) int {
+	if !labelEndsAt(t[:m[3]]) {
+		return -1
+	}
+	end := m[1]
+	for {
+		from := end
+		// The label's value: the marker the URL rule wrote and what follows it.
+		for end < len(t) && !strings.ContainsRune("\"'`,", rune(t[end])) && !isRegexpSpace(t[end]) {
+			end++
+		}
+		// The URL's password: that value and what follows it up to an `@`.
+		at := end
+		for at < len(t) && t[at] != '@' && t[at] != '/' && !strings.ContainsRune("\"'<>", rune(t[at])) && !isRegexpSpace(t[at]) {
+			at++
+		}
+		redactWorked(at - from)
+		if at == len(t) || t[at] != '@' {
+			return end
+		}
+		end = at + 1
+	}
+}
+
+// labelEndsAt reports whether s ends with a secret-named label and its separator, as the label
+// rules read them: a label word, an optional closing quote, and `:` or `=` with whitespace around.
+func labelEndsAt(s string) bool {
+	i := len(s)
+	for i > 0 && isRegexpSpace(s[i-1]) {
+		i--
+	}
+	if i == 0 || s[i-1] != ':' && s[i-1] != '=' {
+		return false
+	}
+	for i--; i > 0 && isRegexpSpace(s[i-1]); i-- {
+	}
+	if i > 0 && strings.IndexByte(redactQuotes, s[i-1]) >= 0 {
+		if i--; i > 0 && s[i-1] == '\\' {
+			i--
+		}
+	}
+	for _, word := range redactLabelWords {
+		if i >= len(word) && strings.EqualFold(s[i-len(word):i], word) {
+			return true
+		}
+	}
+	return false
 }
 
 // redactAssignedRule captures the value of a labeled assignment, quoted with ", ' or a backtick
@@ -557,32 +658,54 @@ func redactString(value string, gated bool) string {
 	// This is common in model reasoning that quotes `token=value` and later
 	// refers to `value` by itself.
 	var assigned map[string]struct{}
+	var kept bool
 	if text.holds(redactLabelNeedles) {
-		assignedRule := redactAssignedRule()
-		for match := range assignedRule.matches(&text, &engine.assigned) {
-			var copied strings.Builder
-			for g := 2; g+1 < len(match); g += 2 {
-				if match[g] >= 0 {
-					copied.WriteString(value[match[g]:match[g+1]])
-				}
-			}
-			if s := copied.String(); len(s) >= 8 && s != redactedValue && !isAuthScheme(s) {
-				if assigned == nil {
-					assigned = map[string]struct{}{}
-				}
-				assigned[s] = struct{}{}
-			}
-		}
+		assigned, kept = captureAssigned(&text, engine, assigned)
 	}
+	original := text.value
 	for i, rule := range redactionRules {
 		if !text.holds(rule.needles) {
 			continue
 		}
 		text.set(rule.apply(&text, &engine.rules[i]))
 	}
-	value = text.value
-	// Each copy is searched for and removed; none of it survives into the result.
-	return replaceAssigned(value, assigned)
+	// A value the label rules keep part of can be captured whole and then changed by a later rule:
+	// of `"secret": null}…x-access-token:ghs_…`, the rule for quoted labels keeps `null`, the
+	// capture runs on to the end, and the rule for `x-access-token:` replaces the token inside it,
+	// so no copy of what was captured is left to remove. What the value became is captured too, so
+	// a second pass over the result finds nothing this one did not.
+	if kept && text.value != original {
+		assigned, _ = captureAssigned(&text, engine, assigned)
+	}
+	// Each copy is searched for and removed; none of it survives into the result. A secret right
+	// after a replaced copy, or right after a replaced key, starts a word only now.
+	return engine.redactAfterMarkers(replaceAssigned(text.value, assigned))
+}
+
+// captureAssigned adds the value of every labeled assignment in the gate's text to assigned. kept
+// reports whether one, of any length, was unquoted after a quoted label: the one way a value is
+// captured that the label rules may keep part of (redactBare stops where the capture runs on), so
+// that a later rule can change it, or make it long enough to remove.
+func captureAssigned(text *redactGate, engine *redactEngine, assigned map[string]struct{}) (_ map[string]struct{}, kept bool) {
+	value := text.value
+	for match := range redactAssignedRule().matches(text, &engine.assigned) {
+		// The value is in one group: each way of writing it is an alternative.
+		g := 2
+		for g+1 < len(match) && match[g] < 0 {
+			g += 2
+		}
+		if g+1 >= len(match) {
+			continue
+		}
+		kept = kept || g+2 == len(match) && strings.ContainsAny(value[match[0]:match[g]], redactQuotes)
+		if s := value[match[g]:match[g+1]]; len(s) >= 8 && s != redactedValue && !isAuthScheme(s) {
+			if assigned == nil {
+				assigned = map[string]struct{}{}
+			}
+			assigned[s] = struct{}{}
+		}
+	}
+	return assigned, kept
 }
 
 // replaceAssigned replaces every copy of each assigned value with redactedValue in one pass.

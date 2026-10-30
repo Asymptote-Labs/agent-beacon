@@ -238,6 +238,14 @@ func TestRedactStringIsIdempotent(t *testing.T) {
 		"postgres://app:pa55w0rd@db/app",
 		"curl -u admin:hunter2hunter2 -H 'Cookie: sid=abcdef123456789' https://x",
 		"curl -b 'sessionid=abcdef123456789' --cookie sid=abcdef123456789 https://x",
+		// A URL whose user name is a secret-named label: the label rules and the URL rule stop at
+		// different bytes, and each used to take one more piece per pass.
+		"https://x-access-token:abc@github.combcn_api_`@host",
+		"A0000000000://token:,@",
+		"A://token:,@0,@0,@",
+		// The value captured after the quoted label is too short to remove until the URL rule
+		// replaces the comma that ends it.
+		`seCret":}A://:0,@`,
 	}
 	for _, input := range inputs {
 		once := RedactString(input)
