@@ -8,10 +8,15 @@ name: Release
 #                    package update manifest to the same release.
 #   3. windows-package — (after goreleaser) builds the Windows MSI from the archive
 #                    goreleaser just published, installs it to prove it works, and
-#                    attaches it. Unsigned for now, so it needs no secrets.
+#                    attaches it.
 #   4. finalize    — (after all three) adds the .pkg, .msi and install.sh to checksums.txt and
 #                    records a GitHub build-provenance attestation for every file
 #                    checksums.txt lists.
+#
+# Windows binaries and the MSI are Authenticode-signed through Azure Trusted Signing when the
+# AZURE_TRUSTED_SIGNING_* variables are set, and ship unsigned otherwise. Signing always happens
+# before any hash is taken: the archives' checksums.txt entries, the MSI's .sha256, and the MSI
+# line finalize appends all name the signed bytes.
 #
 # Triggered only by pushed version tags, so outside contributors (whose fork PRs
 # never receive secrets) cannot run it. All release secrets live in the protected
@@ -29,6 +34,13 @@ jobs:
   goreleaser:
     runs-on: ubuntu-latest
     environment: release
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ vars.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+      AZURE_TRUSTED_SIGNING_ACCOUNT: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+      AZURE_TRUSTED_SIGNING_PROFILE: ${{ vars.AZURE_TRUSTED_SIGNING_PROFILE }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -71,6 +83,16 @@ jobs:
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: goreleaser check
+
+      - uses: ./.github/actions/trusted-signing-login
+        if: vars.AZURE_TRUSTED_SIGNING_ACCOUNT != ''
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+
+      # beacon.exe and beacon-hooks.exe are signed by goreleaser's build hooks.
+      - name: Authenticode-sign the Windows collector
+        run: pwsh -NoProfile -File packaging/windows/sign-authenticode.ps1 -Path collector-builder/dist/beacon-otelcol/windows_amd64/beacon-otelcol.exe
 
       # Run from cli/beacon because the release pre-hook writes target-specific
       # beacon-hooks binaries to a shared embedded path; --parallelism 1 avoids
@@ -307,12 +329,14 @@ jobs:
   # It also means this job needs no Go toolchain and no collector build: everything it packages has
   # already been built, tested and published by the job it depends on.
   #
-  # No `environment: release`, deliberately. That environment exists to gate signing secrets, and this
-  # job has none to gate -- the MSI is unsigned for now. Putting it behind the same approval would add
-  # friction to a release without protecting anything.
+  # In the release environment because it signs the MSI, which needs the Azure sign-in.
   windows-package:
     needs: goreleaser
     runs-on: windows-2025
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
     # Bounded because a wedged msiexec is a plausible failure mode rather than a hypothetical one --
     # the CI job that installs this same package documents it and bounds itself for the reason. This
     # job does less than that one (no Go toolchain, no collector build), so it needs less headroom;
@@ -322,6 +346,9 @@ jobs:
     env:
       REPO: ${{ github.repository }}
       TAG: ${{ github.ref_name }}
+      AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ vars.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+      AZURE_TRUSTED_SIGNING_ACCOUNT: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+      AZURE_TRUSTED_SIGNING_PROFILE: ${{ vars.AZURE_TRUSTED_SIGNING_PROFILE }}
     defaults:
       run:
         shell: pwsh
@@ -352,6 +379,12 @@ jobs:
             }
           }
 
+      - uses: ./.github/actions/trusted-signing-login
+        if: vars.AZURE_TRUSTED_SIGNING_ACCOUNT != ''
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+
       - name: Build the MSI
         run: |
           $ErrorActionPreference = 'Stop'
@@ -361,8 +394,17 @@ jobs:
             -BeaconExe dist\windows\extracted\beacon.exe `
             -HooksExe dist\windows\extracted\beacon-hooks.exe `
             -CollectorExe dist\windows\extracted\beacon-otelcol.exe `
-            -OutFile "dist\windows\BeaconEndpointAgent-$version-x64.msi"
+            -OutFile "dist\windows\BeaconEndpointAgent-$version-x64.msi" `
+            -Sign
           if ($LASTEXITCODE -ne 0) { throw "building the MSI failed" }
+
+      - name: Verify the Authenticode signatures
+        if: vars.AZURE_TRUSTED_SIGNING_ACCOUNT != ''
+        run: |
+          $files = @('beacon.exe', 'beacon-hooks.exe', 'beacon-otelcol.exe' | ForEach-Object { Join-Path dist\windows\extracted $_ })
+          $files += (Get-ChildItem dist\windows -Filter '*.msi').FullName
+          & .\packaging\windows\assert-authenticode.ps1 -Path $files
+          if ($LASTEXITCODE -ne 0) { throw "the release is not signed by Asymptote Labs" }
 
       - name: Install it, so a broken package cannot be published
         run: |
