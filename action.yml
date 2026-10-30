@@ -69,9 +69,12 @@ inputs:
     required: false
     default: "true"
   artifact-name:
-    description: "Name for the uploaded telemetry artifact."
+    description: >-
+      Name for the uploaded telemetry artifact. The default names it after the
+      job and its matrix index so every job and matrix leg in a run keeps its
+      own artifact. Set a distinct name for each use of this action in one job.
     required: false
-    default: "beacon-runtime-log"
+    default: beacon-runtime-log-${{ github.job }}-${{ strategy.job-index }}
 
 outputs:
   log-path:

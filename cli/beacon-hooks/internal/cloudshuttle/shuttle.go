@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/objectkey"
 )
 
 const (
@@ -224,19 +225,19 @@ func stateObjectMatchesConfig(st state, cfg Config) bool {
 	if st.Provider != "" || st.RunID != "" {
 		return st.Provider == cfg.Provider && st.RunID == cfg.RunID
 	}
-	provider := cleanKeyPart(defaultString(cfg.Provider, "unknown"))
-	runID := cleanKeyPart(defaultString(cfg.RunID, "unknown"))
+	provider := objectkey.CleanPart(defaultString(cfg.Provider, "unknown"))
+	runID := objectkey.CleanPart(defaultString(cfg.RunID, "unknown"))
 	return strings.HasSuffix(path.Base(objectName), "-"+provider+"-"+runID+".jsonl.gz")
 }
 
 func ObjectName(cfg Config) string {
 	now := nowUTC()
-	parts := cleanKeyParts(cfg.Prefix)
+	parts := objectkey.CleanParts(cfg.Prefix)
 	parts = append(parts, "runtime", "date="+now.Format("2006-01-02"))
 	filename := strings.Join([]string{
 		fmt.Sprintf("%d", now.Unix()),
-		cleanKeyPart(defaultString(cfg.Provider, "unknown")),
-		cleanKeyPart(defaultString(cfg.RunID, "unknown")),
+		objectkey.CleanPart(defaultString(cfg.Provider, "unknown")),
+		objectkey.CleanPart(defaultString(cfg.RunID, "unknown")),
 	}, "-") + ".jsonl.gz"
 	parts = append(parts, filename)
 	return path.Join(parts...)
@@ -448,7 +449,7 @@ func uploadGCSObject(ctx context.Context, endpoint, bucket, objectName, filePath
 		return err
 	}
 	defer file.Close()
-	uploadURL := strings.TrimRight(endpoint, "/") + "/" + escapePath(bucket) + "/" + escapeObjectName(objectName)
+	uploadURL := strings.TrimRight(endpoint, "/") + "/" + objectkey.EscapeName(bucket) + "/" + objectkey.EscapeName(objectName)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL, file)
 	if err != nil {
 		return err
@@ -488,7 +489,7 @@ func uploadS3Object(ctx context.Context, cfg Config, objectName, filePath string
 	if endpoint == "" {
 		endpoint = "https://s3." + cfg.S3Region + ".amazonaws.com"
 	}
-	uploadURL := endpoint + "/" + escapePath(cfg.Bucket) + "/" + escapeObjectName(objectName)
+	uploadURL := endpoint + "/" + objectkey.EscapeName(cfg.Bucket) + "/" + objectkey.EscapeName(objectName)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL, file)
 	if err != nil {
 		return err
@@ -713,38 +714,6 @@ func hmacSHA256(key []byte, value string) []byte {
 	mac := hmac.New(sha256.New, key)
 	mac.Write([]byte(value))
 	return mac.Sum(nil)
-}
-
-func cleanKeyParts(value string) []string {
-	var parts []string
-	for _, part := range strings.Split(strings.Trim(value, "/"), "/") {
-		if cleaned := cleanKeyPart(part); cleaned != "" {
-			parts = append(parts, cleaned)
-		}
-	}
-	return parts
-}
-
-func cleanKeyPart(value string) string {
-	cleaned := strings.TrimSpace(value)
-	cleaned = strings.ReplaceAll(cleaned, "\\", "-")
-	cleaned = strings.Trim(cleaned, "/")
-	if cleaned == "." || cleaned == ".." {
-		return ""
-	}
-	return cleaned
-}
-
-func escapeObjectName(objectName string) string {
-	parts := strings.Split(objectName, "/")
-	for i, part := range parts {
-		parts[i] = escapePath(part)
-	}
-	return strings.Join(parts, "/")
-}
-
-func escapePath(value string) string {
-	return (&url.URL{Path: value}).EscapedPath()
 }
 
 func awsCanonicalURI(pathValue string) string {

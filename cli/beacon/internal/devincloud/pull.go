@@ -11,6 +11,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/objectkey"
 )
 
 // Uploader uploads one session's full JSONL snapshot to a destination (GCS).
@@ -209,39 +210,12 @@ func marshalEvents(mapped []MappedEvent) ([]byte, error) {
 // ObjectName builds the GCS object path, matching the layout used by the
 // in-sandbox hook providers: {prefix}/provider=.../user_id=.../run_id=.../runtime.jsonl
 func ObjectName(prefix, provider, userID, sessionID string) string {
-	parts := []string{}
-	for _, p := range splitNonEmpty(prefix) {
-		parts = append(parts, p)
-	}
+	parts := objectkey.CleanParts(prefix)
 	parts = append(parts, "provider="+defaultIfEmpty(provider, "unknown"))
 	parts = append(parts, "user_id="+defaultIfEmpty(userID, "unknown"))
 	parts = append(parts, "run_id="+defaultIfEmpty(sessionID, "unknown"))
 	parts = append(parts, "runtime.jsonl")
 	return path.Join(parts...)
-}
-
-func splitNonEmpty(prefix string) []string {
-	var out []string
-	for _, p := range splitSlash(prefix) {
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-func splitSlash(s string) []string {
-	var out []string
-	cur := ""
-	for _, r := range s {
-		if r == '/' {
-			out = append(out, cur)
-			cur = ""
-			continue
-		}
-		cur += string(r)
-	}
-	return append(out, cur)
 }
 
 func defaultIfEmpty(v, d string) string {
