@@ -243,6 +243,8 @@ func TestRedactStringIsIdempotent(t *testing.T) {
 		"https://x-access-token:abc@github.combcn_api_`@host",
 		"A0000000000://token:,@",
 		"A://token:,@0,@0,@",
+		// A curl flag's blanks run over a newline to its value; the command follows a key.
+		"npm_000000000000000000000000000000000000Curl -B\n0=",
 		// The value captured after the quoted label is too short to remove until the URL rule
 		// replaces the comma that ends it.
 		`seCret":}A://:0,@`,

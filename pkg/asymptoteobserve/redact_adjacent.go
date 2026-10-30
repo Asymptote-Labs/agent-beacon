@@ -319,12 +319,13 @@ type redactChain struct {
 	// lineFrom; and, per follower, the end of a line where a followLine rule found nothing.
 	schemeFrom, schemeTo int
 	lineFrom, lineTo     int
+	lineFirst            int // the end of lineFrom's own line, at or before lineTo
 	lineFailed           []int
 }
 
 func newRedactChain(engine *redactEngine, t string, hits []redactHit) *redactChain {
 	return &redactChain{engine: engine, adj: engine.adjacency(), t: t, hits: hits, segFrom: -1, restAt: -1,
-		schemeFrom: -1, schemeTo: -1, lineFrom: -1, lineTo: -1}
+		schemeFrom: -1, schemeTo: -1, lineFrom: -1, lineTo: -1, lineFirst: -1}
 }
 
 func redactWorked(n int) {
@@ -833,6 +834,23 @@ func (e *redactEngine) redactAfterMarkers(t string) string {
 	return e.redactLinesAfterMarkers(t)
 }
 
+// commandLineEnd returns the end of what a curl rule can match from p: its line, and, since the
+// blanks after a flag (`\s*`) can run over newlines, the next line that is not blank.
+func commandLineEnd(t string, p int) int {
+	i := strings.IndexByte(t[p:], '\n')
+	if i < 0 {
+		return len(t)
+	}
+	next := p + i
+	for next < len(t) && isRegexpSpace(t[next]) {
+		next++
+	}
+	if j := strings.IndexByte(t[next:], '\n'); j >= 0 {
+		return next + j
+	}
+	return len(t)
+}
+
 // redactLinesAfterMarkers applies the followLine rules, each as redaction applies it, to every
 // line from the first place right after a marker where one of their needles starts.
 func (e *redactEngine) redactLinesAfterMarkers(t string) string {
@@ -843,10 +861,7 @@ func (e *redactEngine) redactLinesAfterMarkers(t string) string {
 		if p < last || !adj.startsLine(t, p) {
 			continue
 		}
-		end := len(t)
-		if i := strings.IndexByte(t[p:], '\n'); i >= 0 {
-			end = p + i
-		}
+		end := commandLineEnd(t, p)
 		line := t[p:end]
 		for _, f := range adj.followers {
 			if f.kind != followLine {
@@ -949,10 +964,11 @@ func (c *redactChain) lineFollowerAt(q int) []int {
 		if f.kind != followLine || q < c.lineFailed[k] || !c.hasNeedleAt(f.needles, q) {
 			continue
 		}
-		if q < c.lineFrom || q > c.lineTo {
-			c.lineFrom, c.lineTo = q, len(c.t)
-			if i := strings.IndexByte(c.t[q:], '\n'); i >= 0 {
-				c.lineTo = q + i
+		if q < c.lineFrom || q > c.lineFirst {
+			c.lineFrom, c.lineTo = q, commandLineEnd(c.t, q)
+			c.lineFirst = c.lineTo
+			if i := strings.IndexByte(c.t[q:c.lineTo], '\n'); i >= 0 {
+				c.lineFirst = q + i
 			}
 			redactWorked(c.lineTo - q)
 		}
@@ -965,7 +981,7 @@ func (c *redactChain) lineFollowerAt(q int) []int {
 				break
 			}
 		}
-		c.lineFailed[k] = c.lineTo
+		c.lineFailed[k] = c.lineFirst
 	}
 	return nil
 }
