@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
@@ -85,6 +86,76 @@ func TestStateFileEmptyPath(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Fatalf("an empty path wrote %v", entries)
+	}
+}
+
+func TestStateFileUpdate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state", "test.json")
+	if err := testFile.Update(path, func(s *testState) bool { return false }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("an update that changed nothing saved the file: %v", err)
+	}
+	n := int64(3)
+	if err := testFile.Update(path, func(s *testState) bool { s.Files["a"] = &n; return true }); err != nil {
+		t.Fatal(err)
+	}
+	var seen *int64
+	if err := testFile.Update(path, func(s *testState) bool { seen = s.Files["a"]; return false }); err != nil {
+		t.Fatal(err)
+	}
+	if seen == nil || *seen != 3 {
+		t.Fatalf("second update saw %v, want the first update's change", seen)
+	}
+
+	if err := os.WriteFile(path, []byte(`{`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	if err := testFile.Update(path, func(s *testState) bool { called = true; return true }); err == nil || called {
+		t.Fatalf("update of a corrupt file returned %v and ran mutate = %v, want an error before mutate", err, called)
+	}
+	if err := testFile.Update("", func(s *testState) bool { called = true; return true }); err != nil || !called {
+		t.Fatalf("update of an empty path returned %v and ran mutate = %v, want mutate run and nothing saved", err, called)
+	}
+}
+
+// Every update reads what the one before it saved, so concurrent sweeps that share a file never
+// lose each other's change.
+func TestStateFileUpdateSerializesWriters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.json")
+	const writers = 16
+	var wg sync.WaitGroup
+	errs := make(chan error, writers)
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- testFile.Update(path, func(s *testState) bool {
+				count := s.Files["count"]
+				if count == nil {
+					count = new(int64)
+					s.Files["count"] = count
+				}
+				*count++
+				return true
+			})
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	state, err := testFile.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Files["count"]; got == nil || *got != writers {
+		t.Fatalf("count = %v, want %d", got, writers)
 	}
 }
 

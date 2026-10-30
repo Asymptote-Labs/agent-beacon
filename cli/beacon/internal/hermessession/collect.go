@@ -40,6 +40,12 @@ type Cursor struct {
 	ReasoningTokens  int64                      `json:"reasoning_tokens,omitempty"`
 	CostUSD          float64                    `json:"cost_usd,omitempty"`
 	PendingCalls     map[string]json.RawMessage `json:"pending_calls,omitempty"`
+	// KeyedByHome keys the session's event ids by the Hermes home this cursor belongs to. It is set
+	// when another home already holds the session id, as a cloned profile does: both start from a
+	// copy of one state.db, and once the copies diverge their message ids count up independently, so
+	// unkeyed ids would name different events the same. It is decided before the session's first
+	// event is written and never changes after, so a session's ids stay stable.
+	KeyedByHome bool `json:"keyed_by_home,omitempty"`
 }
 
 type State struct {
@@ -48,7 +54,10 @@ type State struct {
 }
 
 type CollectOptions struct {
-	DBPath    string
+	DBPath string
+	// StatePath is this home's cursor file. The session home file beside it (SessionHomesPath) is
+	// shared by every home whose cursor sits in the same directory, and decides which of them keys a
+	// session's event ids by home. Without a StatePath no ids are keyed.
 	StatePath string
 	Write     bool
 	LogPath   string
@@ -214,6 +223,9 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	if err != nil {
 		return summary, err
 	}
+	if err := assignEventIDHomes(SessionHomesPath(opts.StatePath), canonicalHome(filepath.Dir(store.Path())), sessions, state); err != nil {
+		return summary, fmt.Errorf("assign Hermes event id homes: %w", err)
+	}
 	defer func() {
 		if saveErr := state.Save(opts.StatePath); saveErr != nil && err == nil {
 			err = fmt.Errorf("save Hermes collector state: %w", saveErr)
@@ -258,8 +270,12 @@ func collectSession(store *Store, session Session, state *State, opts CollectOpt
 	if err != nil {
 		return false, err
 	}
-	mapped, pending := MapSession(session, messages, cursor)
 	home := filepath.Dir(store.Path())
+	idHome := ""
+	if cursor.KeyedByHome {
+		idHome = canonicalHome(home)
+	}
+	mapped, pending := mapSession(session, messages, cursor, idHome)
 	for i := range mapped {
 		mapped[i].Event.Harness.ConfigPath = home
 		mapped[i].Event.Harness.Profile = Profile(home)
@@ -581,7 +597,14 @@ func (s *Store) LastMessageID(sessionID string) (int64, error) {
 // cursor is what earlier sweeps collected; a zero Cursor maps the whole session, session-total
 // usage included, as a first sync does.
 func MapSession(session Session, messages []Message, cursor *Cursor) ([]MappedEvent, map[string]json.RawMessage) {
-	m := &mapper{session: session, cursor: cursor, calls: map[string]toolCall{}}
+	return mapSession(session, messages, cursor, "")
+}
+
+// mapSession is MapSession with the event ids keyed by idHome, the canonical path of the Hermes
+// home the session was read from. An empty idHome derives the ids from the session alone, as every
+// sync did before homes could collide.
+func mapSession(session Session, messages []Message, cursor *Cursor, idHome string) ([]MappedEvent, map[string]json.RawMessage) {
+	m := &mapper{session: session, cursor: cursor, calls: map[string]toolCall{}, idHome: idHome}
 	for id, raw := range cursor.PendingCalls {
 		var call toolCall
 		if json.Unmarshal(raw, &call) == nil && call.ID != "" {
@@ -618,6 +641,7 @@ func encodePendingCalls(calls map[string]toolCall) map[string]json.RawMessage {
 type mapper struct {
 	session         Session
 	cursor          *Cursor
+	idHome          string
 	out             []MappedEvent
 	calls           map[string]toolCall
 	lastTimestampMS int64
@@ -850,7 +874,13 @@ func (m *mapper) toolEvent(timestampMS int64, call toolCall, action, category st
 }
 
 func (m *mapper) append(sourceMessageID int64, suffix string, ev schema.Event) {
-	ev.Event.ID = hermesEventID(fmt.Sprintf("%s:%d:%s", m.session.ID, sourceMessageID, suffix))
+	dedupID := fmt.Sprintf("%s:%d:%s", m.session.ID, sourceMessageID, suffix)
+	if m.idHome != "" {
+		// The home ends at a newline, which Hermes session ids do not contain, so a keyed id never
+		// equals an unkeyed one.
+		dedupID = m.idHome + "\n" + dedupID
+	}
+	ev.Event.ID = hermesEventID(dedupID)
 	m.out = append(m.out, MappedEvent{SourceMessageID: sourceMessageID, Event: ev})
 }
 

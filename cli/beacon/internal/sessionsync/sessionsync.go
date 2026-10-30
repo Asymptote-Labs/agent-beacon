@@ -18,6 +18,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sqliteuri"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
 
 	_ "modernc.org/sqlite"
 )
@@ -96,6 +97,48 @@ func (f StateFile[S]) Save(path string, s *S) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// Update loads the file at path, lets mutate change it, and saves it when mutate reports a change,
+// all under an exclusive lock on path+".lock". A file several sweeps share, such as one every home
+// of a runtime writes to, needs it: a plain Load and Save from two sweeps at once keeps only the
+// change of whichever saves last. An empty path runs mutate on a new state and saves nothing.
+func (f StateFile[S]) Update(path string, mutate func(*S) bool) (err error) {
+	if f.empty(path) {
+		mutate(f.New())
+		return nil
+	}
+	mode := f.DirMode
+	if mode == 0 {
+		mode = 0o755
+	}
+	if err := os.MkdirAll(filepath.Dir(path), mode); err != nil {
+		return err
+	}
+	lockFile, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	// The lock file is never written, so closing it loses nothing; its error is reported only
+	// when nothing else went wrong.
+	defer func() {
+		if cerr := lockFile.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+	lock, err := filelock.Exclusive(lockFile)
+	if err != nil {
+		return err
+	}
+	defer lock.Release()
+	s, err := f.Load(path)
+	if err != nil {
+		return err
+	}
+	if !mutate(s) {
+		return nil
+	}
+	return f.Save(path, s)
 }
 
 // Sink is where a sweep's events go: one JSON object per line to Out for --print, or appended to

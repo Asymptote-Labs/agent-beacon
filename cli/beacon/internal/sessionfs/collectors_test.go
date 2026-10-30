@@ -32,6 +32,8 @@ var directReads = map[string]bool{
 var allowedDirectReads = map[string]bool{
 	// The collector's own cursor file, under Beacon's base directory rather than the user's store.
 	"sessionsync.Load.os.ReadFile": true,
+	// The lock beside a cursor file several sweeps share, also under Beacon's base directory.
+	"sessionsync.Update.os.OpenFile": true,
 	// The driver open itself, after SQLitePath has turned the path into a confined snapshot.
 	"sessionsync.OpenSQLite.sql.Open": true,
 	// Existence checks on project paths named inside a transcript, to infer the workspace. They
