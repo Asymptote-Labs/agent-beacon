@@ -335,6 +335,7 @@
                   "cli/endpoint-onboarding",
                   "cli/endpoint-opencode",
                   "cli/endpoint-pi",
+                  "cli/endpoint-cursor",
                   "cli/endpoint-copilot",
                   "cli/endpoint-devin",
                   "cli/endpoint-dsh",

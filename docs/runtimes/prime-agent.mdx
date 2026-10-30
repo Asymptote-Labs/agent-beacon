@@ -19,7 +19,7 @@ Beacon can also read Prime Agent's committed JSONL session store after the fact:
 beacon endpoint prime sync
 ```
 
-That poll path is local and offline, checkpointed by file and line number, and marks every event `harness.collection_method=poll`. It complements the extension rather than replacing it: the extension sees live tool details as Prime runs, while the poll path can backfill sessions that happened before the extension was installed or sessions where the extension was not loaded.
+That poll path is local and offline, checkpointed by file and line number, and marks every event `harness.collection_method=poll`. `beacon endpoint prime status` lists the sessions in the store and how much of each Beacon has collected; both commands take `--sessions-dir`, `--artifacts-dir`, `--state` and `--json`. It complements the extension rather than replacing it: the extension sees live tool details as Prime runs, while the poll path can backfill sessions that happened before the extension was installed or sessions where the extension was not loaded.
 
 ```bash
 beacon endpoint hooks install --harness prime
