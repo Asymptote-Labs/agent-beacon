@@ -146,6 +146,14 @@ func TestRestrictSystemLogFailsWhileAHandleBlocksTheReplacement(t *testing.T) {
 	if asymptoteobserve.RuntimeLogAccessRestricted(path) {
 		t.Fatal("a restriction that failed left the marker, so a rerun would skip the copies")
 	}
+	// And the directory is shared again, so hooks can still append while the cause is fixed.
+	dirObj, err := sysacl.ReadObject(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sysacl.RestrictedProblems(dirObj, backupOperators, false)) == 0 {
+		t.Fatal("a restriction that failed left the directory restricted, with no marker to say so")
+	}
 	before := fileIndex(t, archive)
 	if err := RestrictSystemLog(path, 0); err != nil {
 		t.Fatalf("the rerun: %v", err)
@@ -155,6 +163,39 @@ func TestRestrictSystemLogFailsWhileAHandleBlocksTheReplacement(t *testing.T) {
 	}
 	if !asymptoteobserve.RuntimeLogAccessRestricted(path) {
 		t.Fatal("no marker after the rerun succeeded")
+	}
+}
+
+// The other files the shared ACL reached are replaced too, so a handle opened on one while the log
+// was shared reads nothing the collector writes afterwards; one with another hard link is left
+// alone, since its copy would hand whatever the other link names to the readers group.
+func TestRestrictSystemLogReplacesTheOtherFilesBesideTheLog(t *testing.T) {
+	path := restrictFixture(t)
+	dir := filepath.Dir(path)
+	inventory := filepath.Join(dir, "inventory_state.jsonl")
+	if err := os.WriteFile(inventory, []byte("{\"snapshot\":1}\n"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "elsewhere.txt")
+	if err := os.WriteFile(outside, []byte("not the log's\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(dir, "linked.txt")
+	if err := os.Link(outside, linked); err != nil {
+		t.Fatal(err)
+	}
+	inventoryBefore, linkedBefore := fileIndex(t, inventory), fileIndex(t, linked)
+	if err := RestrictSystemLog(path, 0); err != nil {
+		t.Fatalf("RestrictSystemLog: %v", err)
+	}
+	if fileIndex(t, inventory) == inventoryBefore {
+		t.Fatal("a file beside the log that the shared ACL reached was not replaced")
+	}
+	if got, _ := os.ReadFile(inventory); string(got) != "{\"snapshot\":1}\n" {
+		t.Fatalf("the copy lost content: %q", got)
+	}
+	if fileIndex(t, linked) != linkedBefore {
+		t.Fatal("a hard-linked file outside the log family was copied")
 	}
 }
 
