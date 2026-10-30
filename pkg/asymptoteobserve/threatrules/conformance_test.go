@@ -13,7 +13,7 @@ import (
 // repoRoot locates the repository root by walking up from this test file until it finds
 // the spec sentinel (spec/threat-rules/VERSION). This keeps tests hermetic without
 // hardcoded absolute paths.
-func repoRoot(t *testing.T) string {
+func repoRoot(t testing.TB) string {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -32,7 +32,7 @@ func repoRoot(t *testing.T) string {
 	}
 }
 
-func rulesDir(t *testing.T) string { return filepath.Join(repoRoot(t), "rules") }
+func rulesDir(t testing.TB) string { return filepath.Join(repoRoot(t), "rules") }
 
 func specDir(t *testing.T) string { return filepath.Join(repoRoot(t), "spec", "threat-rules") }
 

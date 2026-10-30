@@ -3,12 +3,14 @@ package threatrules
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 
 	"github.com/google/cel-go/cel"
 	celast "github.com/google/cel-go/common/ast"
 	"github.com/google/cel-go/ext"
+	"github.com/google/cel-go/interpreter"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
@@ -97,6 +99,24 @@ const MaxEvalCost uint64 = 5_000_000
 // stop quickly.
 var evalCostLimit = MaxEvalCost
 
+// constantRegex compiles the constant pattern of a matches() call once, when the program is
+// built. Without it cel-go compiles the pattern on every evaluation, for every rule and every
+// event, which dominated the time and allocation of a scan. A pattern that does not compile is
+// left to the call as written, so a rule with a broken pattern still loads and still fails when
+// it is evaluated, exactly as before (TestInvalidRegexErrorsAtEval): moving that failure to load
+// time would make rulestore skip the rule instead. Results and CEL costs are unchanged
+// (TestConstantRegexChangesNothing).
+var constantRegex = &interpreter.RegexOptimization{
+	Function:   interpreter.MatchesRegexOptimization.Function,
+	RegexIndex: interpreter.MatchesRegexOptimization.RegexIndex,
+	Factory: func(call interpreter.InterpretableCall, pattern string) (interpreter.InterpretableCall, error) {
+		if _, err := regexp.Compile(pattern); err != nil {
+			return call, nil
+		}
+		return interpreter.MatchesRegexOptimization.Factory(call, pattern)
+	},
+}
+
 // CompileMatch compiles a single match expression and verifies it types to bool. The
 // returned program is safe for concurrent reuse across events, and each evaluation is
 // bounded by MaxEvalCost: one that exceeds it fails with an error rather than matching. A
@@ -124,7 +144,7 @@ func compileMatch(expr string) (cel.Program, *cel.Ast, error) {
 	if ast.OutputType() != cel.BoolType {
 		return nil, nil, fmt.Errorf("match expression must evaluate to bool, got %s", ast.OutputType())
 	}
-	prog, err := env.Program(ast, cel.CostLimit(evalCostLimit))
+	prog, err := env.Program(ast, cel.CostLimit(evalCostLimit), cel.OptimizeRegex(constantRegex))
 	if err != nil {
 		return nil, nil, fmt.Errorf("build CEL program: %w", err)
 	}
