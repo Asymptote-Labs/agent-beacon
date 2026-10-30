@@ -252,6 +252,34 @@ func TestSanitizeMapOutputAlwaysMarshals(t *testing.T) {
 	}
 }
 
+// A limit up to math.MaxInt, which a configuration may use for "unlimited", keeps every string
+// whole and redacted: the window past the limit is worked out without adding to the limit.
+func TestCleanStringTakesAnyLimit(t *testing.T) {
+	text := "dump " + typesTestToken + " " + strings.Repeat("y", 10000)
+	want := RedactString(text)
+	for _, limit := range []int{math.MaxInt, math.MaxInt - 1, math.MaxInt - redactWindow, math.MaxInt - redactWindow + 1, math.MaxInt / 2} {
+		if got := CleanString(text, limit, true); got != want {
+			t.Errorf("CleanString at limit %d = %.80q, want the whole text redacted", limit, got)
+		}
+	}
+}
+
+func TestSanitizeMapAndCleanValueTakeAnyLimit(t *testing.T) {
+	text := "dump " + typesTestToken + " " + strings.Repeat("y", 10000)
+	want := RedactString(text)
+	for _, limit := range []int{math.MaxInt, math.MaxInt - 1} {
+		opts := PrivacyOptions{RedactSecrets: true, StringLimit: limit}
+		got := SanitizeMap(map[string]interface{}{"text": text, "bytes": []byte("\xe9" + text), "list": []string{text}}, opts)
+		if got["text"] != want || !bytes.Equal(got["bytes"].([]byte), []byte("\xe9"+want)) || !reflect.DeepEqual(got["list"], []interface{}{want}) {
+			t.Errorf("SanitizeMap at limit %d did not keep every string whole and redacted", limit)
+		}
+		data, err := json.Marshal(CleanValue(map[string]interface{}{"text": text}, limit))
+		if wantData, _ := json.Marshal(map[string]string{"text": want}); err != nil || !bytes.Equal(data, wantData) {
+			t.Errorf("CleanValue at limit %d = %.80s, %v", limit, data, err)
+		}
+	}
+}
+
 // A CleanedValue keeps the limit CleanValue was given, through SanitizeMap and SanitizeEvent,
 // with every string in it redacted and its field names left alone; under a field named for a
 // credential, or after a flag named for one, it is still redacted.

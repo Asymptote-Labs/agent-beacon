@@ -769,18 +769,22 @@ func CleanString(value string, limit int, redactSecrets bool) string {
 // the limit that still holds redactWindow bytes there once redacted. Everything up to the cut is
 // then redacted text.
 func redactBeforeCut(value string, limit int) string {
-	if limit <= 0 {
+	// Compared without adding to limit, which may be as large as math.MaxInt: a whole string within
+	// redactWindow of the limit, or shorter, is redacted whole.
+	if limit <= 0 || len(value)-limit <= redactWindow {
 		return RedactString(value)
 	}
 	// Redaction shortens what it matches, so a window that shrank pulls text from near its own cut
 	// inside the limit, where an unrecognizable fragment of a secret would survive. Widen the window
 	// until a full redactWindow of redacted text is left past the limit, or the whole string fits.
+	// Here limit+redactWindow < len(value), and the window doubles only while twice it is still
+	// shorter than value, so nothing overflows.
 	for window := limit + redactWindow; ; window *= 2 {
-		if len(value) <= window {
-			return RedactString(value)
-		}
 		if redacted := RedactString(value[:window]); len(redacted) >= limit+redactWindow {
 			return redacted
+		}
+		if len(value)-window <= window {
+			return RedactString(value)
 		}
 	}
 }

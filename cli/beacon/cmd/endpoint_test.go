@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1278,6 +1279,25 @@ func TestInventorySnapshotKeepsMetadataWholeUnderASmallContentLimit(t *testing.T
 	}
 	if long == 0 {
 		t.Fatalf("no path, name or hash over 64 bytes to check: %q", kept)
+	}
+}
+
+// max_content_bytes set to the largest int, as a configuration may for "unlimited", keeps captured
+// contents whole and redacted rather than panicking where the redaction window is worked out.
+func TestInventorySnapshotTakesAnUnlimitedContentLimit(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	description := strings.Repeat("a long server description ", 400)
+	writeTestFile(t, filepath.Join(home, ".cursor", "mcp.json"), `{"mcpServers":{"one":{"command":"npx","description":"`+description+
+		`","args":["--token","ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"],"env":{"API_KEY":"hunter2"}}}}`)
+	_, snapshot := inventorySnapshot(t, []string{"cursor"}, math.MaxInt)
+	for _, secret := range []string{"hunter2", "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"} {
+		if strings.Contains(snapshot, secret) {
+			t.Fatalf("snapshot leaked %s: %.400s", secret, snapshot)
+		}
+	}
+	if strings.Count(snapshot, description) < 2 {
+		t.Fatalf("snapshot did not keep the content and the definition whole: %.400s", snapshot)
 	}
 }
 
