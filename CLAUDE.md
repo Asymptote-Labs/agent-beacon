@@ -273,7 +273,8 @@ A pushed `v*` tag runs the full release end-to-end via
 
 1. `goreleaser` (ubuntu, `environment: release`) builds the collector dists,
    publishes the GitHub release + changelog and tarballs, and updates the
-   Homebrew tap.
+   Homebrew tap. When the `BEACON_LINUX_SIGNING_KEY` secret exists, nfpm
+   signs the `.deb`/`.rpm` with it; without it they ship unsigned.
 2. `package` (macOS, `needs: goreleaser`, `environment: release`) builds the
    Apple Silicon `beacon`/`beacon-hooks` package payload plus arch-matched
    collector and Vector binaries for `darwin_arm64`, then signs, notarizes,
@@ -289,7 +290,11 @@ A pushed `v*` tag runs the full release end-to-end via
    appends the `.pkg`, `.msi` and `install.sh` to `checksums.txt` from the released bytes and
    records a GitHub build-provenance attestation (Sigstore, keyless, through the
    workflow's OIDC token) for every file `checksums.txt` lists. It needs
-   `id-token: write` and `attestations: write` and no `release`-environment secrets.
+   `id-token: write` and `attestations: write`, and runs in the `release`
+   environment only so that, when `BEACON_LINUX_SIGNING_KEY` exists, it can sign
+   the final `checksums.txt` as `checksums.txt.sig` and attach the public key as
+   `beacon-release-key.{asc,gpg}`. Anything else that rewrites `checksums.txt`
+   must come before that step.
 
 Every third-party action in `release.yml` and `release-extension.yml` is pinned to
 a full commit SHA with the version in a trailing comment, because these jobs hold
@@ -300,6 +305,19 @@ Required `release`-environment secrets: `HOMEBREW_TAP_TOKEN`,
 `DEVELOPER_ID_INSTALLER_CERT_P12`, `DEVELOPER_ID_INSTALLER_CERT_PASSWORD`,
 `NOTARY_API_KEY_P8`, `NOTARY_API_KEY_ID`, `NOTARY_API_ISSUER`; plus Variables
 `DEVELOPER_ID_APP_IDENTITY`, `DEVELOPER_ID_INSTALLER_IDENTITY`, `APPLE_TEAM_ID`.
+Optional: `BEACON_LINUX_SIGNING_KEY` (ASCII-armored OpenPGP secret key) and
+`BEACON_LINUX_SIGNING_KEY_PASSPHRASE`, which turn on Linux signing.
+
+Linux signing is trusted only through the fingerprints, one per line, in
+`cli/beacon/internal/endpoint/selfupdate/release-key.fingerprint`. The
+self-updater embeds that file and the goreleaser before-hook stamps it into the
+released `install.sh`, so pinning is a change to that file alone. Empty means
+checksum-only, as before. Once set, `install.sh` and `beacon endpoint update
+--apply` on Linux refuse a package unless a `checksums.txt` signed by a pinned
+key lists it. Publish the fingerprint in `docs/platforms/linux.mdx#release-signing`.
+To rotate, add the new fingerprint in a release still signed by the old key,
+then switch the secret and drop the old fingerprint in the next release.
+
 Keep one-time Apple-side onboarding steps out of the repo and share them with
 the release maintainer directly. Never use `pull_request_target` or build
 untrusted PR code in the signing job.
@@ -396,7 +414,8 @@ The release should include the five GoReleaser CLI archives (four `.tar.gz` plus
 `BeaconEndpointAgent-<version>-arm64.pkg`, its `.sha256`, `update-manifest.json`,
 and `BeaconEndpointAgent-<version>-x64.msi` with its `.sha256`. `checksums.txt` lists
 the archives, the Linux packages, the `.pkg`, the `.msi` and `install.sh`, and each of those has a
-build-provenance attestation.
+build-provenance attestation. Once Linux signing is on, the release also carries
+`checksums.txt.sig` and `beacon-release-key.{asc,gpg}`.
 
 The MSI is unsigned, so `pkgutil`/`stapler`/`spctl` have no Windows counterpart to
 run. Its `.sha256` is therefore the only integrity check it has, and the release

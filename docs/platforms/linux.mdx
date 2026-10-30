@@ -259,7 +259,25 @@ sudo beacon endpoint update --check
 sudo beacon endpoint update --apply
 ```
 
-`--apply` downloads the release package for your platform, verifies its SHA-256, installs it with `dpkg` or `rpm`, restarts the collector, and rolls back if the new version fails its health check. Verification is checksum-over-HTTPS from GitHub Releases, the same trust root you used to download the package in the first place. macOS additionally verifies Apple notarization; Linux has no OS-level equivalent, and `beacon endpoint update` reports which verification it performed rather than implying both.
+`--apply` downloads the release package for your platform, verifies its SHA-256, installs it with `dpkg` or `rpm`, restarts the collector, and rolls back if the new version fails its health check. Verification is checksum-over-HTTPS from GitHub Releases, the same trust root you used to download the package in the first place. macOS additionally verifies Apple notarization. On Linux, once a build pins the release key (see [Release signing](#release-signing)), the package must also be listed in a `checksums.txt` signed by that key, which needs `gpgv`. `beacon endpoint update` reports which verification it performed (`sha256`, `sha256+gpg` or `sha256+notarization`) rather than implying more.
+
+## Release signing
+
+Signing is wired into the release but not yet active: Beacon has no Linux release key yet, so current `.deb`, `.rpm` and `checksums.txt` files are unsigned, and the installer and `beacon endpoint update` check checksums only. This section applies once a release publishes the key.
+
+A signed release carries `checksums.txt.sig` (a detached OpenPGP signature over `checksums.txt`) and the public key as `beacon-release-key.asc` and `beacon-release-key.gpg`. The `.rpm` carries an RPM signature and the `.deb` a `_gpgorigin` signature member, both from the same key. Release key fingerprint: _not yet published_.
+
+The installer and the self-updater pin that fingerprint. They take the key from the release but trust it only if its fingerprint matches, and they refuse a package whose `checksums.txt` is unsigned, signed by another key, or does not list the package. To check a download yourself:
+
+```bash title="Verify a signed release"
+FPR="<release key fingerprint>"
+curl -fsSLO "${BASE}/checksums.txt.sig" && curl -fsSLO "${BASE}/beacon-release-key.gpg" && curl -fsSLO "${BASE}/beacon-release-key.asc"
+test "$(gpg --show-keys --with-colons beacon-release-key.asc | awk -F: '$1 == "fpr" { print $10; exit }')" = "$FPR" && \
+  gpgv --keyring "$PWD/beacon-release-key.gpg" checksums.txt.sig checksums.txt
+sudo rpm --import beacon-release-key.asc && rpm -K "${PKG}"    # .rpm
+```
+
+Rotation: one release pins both the old and the new fingerprint and is still signed by the old key; the release after it is signed by the new key and drops the old pin. Installed agents therefore trust the new key before they need it. The new fingerprint is published here and in the release notes of the release that first pins it.
 
 Upgrading the package keeps your configuration and your collected log.
 
