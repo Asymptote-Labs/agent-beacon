@@ -3,6 +3,7 @@
 package writer
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -291,7 +292,19 @@ func TestShareSystemLogLeavesAnUnsecuredDirectoryAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(before.DACL, after.DACL) {
+	// What the file grants, not whether an entry is marked inherited: making the directory's own
+	// ACL protected, as every shared install does, turns a child's inherited entries into explicit
+	// copies of the same grants.
+	if !reflect.DeepEqual(grants(before.DACL), grants(after.DACL)) {
 		t.Fatalf("a shared install reset a file it never restricted: %+v -> %+v", before.DACL, after.DACL)
 	}
+}
+
+// grants is a DACL as who is allowed or denied what, without the inheritance flags.
+func grants(dacl []sysacl.ACE) []string {
+	out := make([]string, 0, len(dacl))
+	for _, ace := range dacl {
+		out = append(out, fmt.Sprintf("%d %s %#x", ace.Type, ace.SID, ace.Mask))
+	}
+	return out
 }
