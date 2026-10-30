@@ -43,13 +43,17 @@ func codexTurnSpan(thread string) ptrace.Span {
 	return span
 }
 
-// codexUsageMetric is the legacy token metric. Codex exports it with no conversation id.
-func codexUsageMetric() pmetric.Metric {
+// codexUsageMetric is the legacy token metric. Codex tags it with the session's originator but no
+// conversation id; an empty originator leaves the tag off.
+func codexUsageMetric(originator string) pmetric.Metric {
 	metric := pmetric.NewMetric()
 	metric.SetName("codex.turn.token_usage")
 	dp := metric.SetEmptySum().DataPoints().AppendEmpty()
 	dp.SetDoubleValue(80)
 	dp.Attributes().PutStr("token_type", "output")
+	if originator != "" {
+		dp.Attributes().PutStr("originator", originator)
+	}
 	return metric
 }
 
@@ -126,11 +130,13 @@ func TestCodexConversationKeepsItsSurfaceOnRecordsWithoutOriginator(t *testing.T
 	if got := converter.EventFromLog(appServer(), codexLog("codex.tool_result", "desktop-conv", "")).Harness.Name; got != "codex_desktop" {
 		t.Fatalf("desktop log without originator = %q, want codex_desktop", got)
 	}
-	// The legacy metric names no conversation, so nothing places it; the token report folds the
-	// two Codex names together where it matters (cli/beacon/internal/tokens usageHarnessKey).
-	for _, event := range converter.EventsFromMetric(appServer(), codexUsageMetric()) {
-		if event.Harness.Name != "codex_cli" {
-			t.Fatalf("usage metric without a conversation = %q, want codex_cli", event.Harness.Name)
+	// The legacy metric names no conversation; its own originator places it, and without one it
+	// takes the default.
+	for originator, want := range map[string]string{"Codex_Desktop": "codex_desktop", "codex-tui": "codex_cli", "": "codex_cli"} {
+		for _, event := range converter.EventsFromMetric(appServer(), codexUsageMetric(originator)) {
+			if event.Harness.Name != want {
+				t.Fatalf("usage metric with originator %q = %q, want %q", originator, event.Harness.Name, want)
+			}
 		}
 	}
 	if got := converter.EventFromSpan(appServer(), codexTurnSpan("unknown-conv")).Harness.Name; got != "codex_cli" {
@@ -209,8 +215,8 @@ func TestAcquireCodexSurfacesSharesOnePerConfig(t *testing.T) {
 	if logs == other {
 		t.Fatal("exporters built from different configs share a memory")
 	}
-	logs.remember("desktop-conv", codexDesktopHarness)
-	if got := traces.recall("desktop-conv"); got != codexDesktopHarness {
+	logs.remember("desktop-conv", "codex_desktop")
+	if got := traces.recall("desktop-conv"); got != "codex_desktop" {
 		t.Fatalf("traces exporter recalls %q, want codex_desktop", got)
 	}
 
@@ -288,7 +294,7 @@ func TestCodexSurfacesDrainOnShutdown(t *testing.T) {
 		converter.EventFromSpan(appServer(), codexTurnSpan("unnamed")),
 		converter.EventFromSpan(appServer(), codexTurnSpan("named-late")),
 	}, now)
-	surfaces.remember("named-late", codexDesktopHarness)
+	surfaces.remember("named-late", "codex_desktop")
 
 	drained := surfaces.Drain()
 	if len(drained) != 2 || drained[0].Harness.Name != "codex_cli" || drained[1].Harness.Name != "codex_desktop" {

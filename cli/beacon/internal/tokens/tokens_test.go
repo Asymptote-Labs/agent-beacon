@@ -847,14 +847,14 @@ func TestAggregatePrefersLiveCaptureOverPollBackfill(t *testing.T) {
 			suppressed: 1,
 		},
 		{
-			// The app-server's legacy metric names no conversation, so the exporter can't place it
-			// and it is codex_cli; the Desktop turn span over the same turns must still drop it.
-			name: "codex desktop turn span and an app-server legacy metric",
+			// Codex tags its legacy metric with the session's originator, so the exporter names it
+			// codex_desktop like the Desktop turn span over the same turns, which drops it.
+			name: "codex desktop turn span and the desktop's legacy metric",
 			events: []schema.Event{
-				event("2026-06-11T10:00:30Z", "codex_cli", otlp, "", "token.usage", &tokens{input: 20}, func(e *schema.Event) {
+				event("2026-06-11T10:00:30Z", "codex_desktop", otlp, "", "token.usage", &tokens{input: 20}, func(e *schema.Event) {
 					e.Model = "gpt-5.6-sol"
 					e.Raw = map[string]interface{}{"metric_name": "codex.turn.token_usage", "metric_temporality": "Delta",
-						"attributes": map[string]interface{}{"service.name": "codex-app-server"}}
+						"attributes": map[string]interface{}{"service.name": "codex-app-server", "originator": "Codex_Desktop", "session_source": "vscode"}}
 				}),
 				event("2026-06-11T10:00:30Z", "codex_desktop", otlp, "019a-desktop", "token.usage", &tokens{input: 20}, func(e *schema.Event) {
 					e.Model = "gpt-5.6-sol"
@@ -885,9 +885,26 @@ func TestAggregatePrefersLiveCaptureOverPollBackfill(t *testing.T) {
 			suppressed: 0,
 		},
 		{
-			// `codex sync` reads Desktop rollouts too and names them codex_cli; live capture of
-			// the same conversation is codex_desktop. One session, so the backfill goes.
+			// `codex sync` reads the same conversation from its rollout. Here both name it
+			// codex_desktop, from the originator; one session, so the backfill goes.
 			name: "codex desktop live capture and codex sync",
+			events: []schema.Event{
+				event("2026-06-11T10:00:00Z", "codex_desktop", otlp, "019a-desktop", "session.started", nil, nil),
+				event("2026-06-11T10:00:20Z", "codex_desktop", poll, "019a-desktop", "token.usage", &tokens{input: 500, output: 40}, model("gpt-5.6-sol")),
+				event("2026-06-11T10:00:30Z", "codex_desktop", otlp, "019a-desktop", "token.usage", &tokens{input: 500, output: 40}, func(e *schema.Event) {
+					e.Model = "gpt-5.6-sol"
+					e.Raw = map[string]interface{}{"source": "codex_turn_span", "turn_start_timestamp": "2026-06-11T10:00:01Z"}
+				}),
+			},
+			want:       tokens{input: 500, output: 40},
+			wantEvents: 1,
+			suppressed: 1,
+		},
+		{
+			// Logs written before the originator decided name one session twice: `codex sync`
+			// wrote Desktop rollouts as codex_cli, and the collector wrote every app-server
+			// session, CLI ones too, as codex_desktop.
+			name: "codex live capture and codex sync under the names logs already hold",
 			events: []schema.Event{
 				event("2026-06-11T10:00:00Z", "codex_desktop", otlp, "019a-desktop", "session.started", nil, nil),
 				event("2026-06-11T10:00:20Z", "codex_cli", poll, "019a-desktop", "token.usage", &tokens{input: 500, output: 40}, model("gpt-5.6-sol")),

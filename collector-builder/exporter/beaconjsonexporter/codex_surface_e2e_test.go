@@ -2,6 +2,8 @@ package beaconjsonexporter
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -10,6 +12,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.opentelemetry.io/collector/processor/processortest"
 )
@@ -18,10 +21,49 @@ type nopHost struct{}
 
 func (nopHost) GetExtensions() map[component.ID]component.Component { return nil }
 
+// codexAppServerExport is one Codex app-server process's OTLP export of one turn, as OTLP/JSON:
+// the conversation's start and prompt logs, the turn span and the legacy token metric. The
+// fixtures follow openai/codex's own emitters field for field (otel/src/events/shared.rs,
+// core/src/tasks/mod.rs, core/src/state/turn_token_usage.rs) and the tracing bridges' defaults,
+// which put the worker's OS thread id on the span under the same thread.id key Codex uses for the
+// conversation.
+type codexAppServerExport struct {
+	Originator   string          `json:"originator"`
+	Conversation string          `json:"conversation"`
+	Logs         json.RawMessage `json:"logs"`
+	Traces       json.RawMessage `json:"traces"`
+	Metrics      json.RawMessage `json:"metrics"`
+}
+
+func loadCodexAppServerExport(t *testing.T, name string) (codexAppServerExport, plog.Logs, ptrace.Traces, pmetric.Metrics) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("internal", "beaconevent", "testdata", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var export codexAppServerExport
+	if err := json.Unmarshal(data, &export); err != nil {
+		t.Fatal(err)
+	}
+	logs, err := (&plog.JSONUnmarshaler{}).UnmarshalLogs(export.Logs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	traces, err := (&ptrace.JSONUnmarshaler{}).UnmarshalTraces(export.Traces)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metrics, err := (&pmetric.JSONUnmarshaler{}).UnmarshalMetrics(export.Metrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return export, logs, traces, metrics
+}
+
 // The CLI and the desktop app both export as codex-app-server. The collector builds a separate
 // exporter per pipeline from one config, as here: each conversation's logs name its surface on the
-// logs exporter, and its usage span, which reaches the traces exporter later without an
-// originator, lands under the same harness.
+// logs exporter, its usage span, which reaches the traces exporter without an originator, lands
+// under the same harness, and the legacy token metric is named by the originator it carries.
 func TestCollectorNamesCodexAppServerSessionsByOriginator(t *testing.T) {
 	ctx := context.Background()
 	cfg := &Config{
@@ -41,92 +83,67 @@ func TestCollectorNamesCodexAppServerSessionsByOriginator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTraces: %v", err)
 	}
-	for _, exp := range []component.Component{logsExporter, tracesExporter} {
+	metricsExporter, err := factory.CreateMetrics(ctx, set, cfg)
+	if err != nil {
+		t.Fatalf("CreateMetrics: %v", err)
+	}
+	for _, exp := range []component.Component{logsExporter, tracesExporter, metricsExporter} {
 		if err := exp.Start(ctx, nopHost{}); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 		t.Cleanup(func() { _ = exp.Shutdown(ctx) })
 	}
 
-	logs := plog.NewLogs()
-	rl := logs.ResourceLogs().AppendEmpty()
-	rl.Resource().Attributes().PutStr("service.name", "codex-app-server")
-	sl := rl.ScopeLogs().AppendEmpty()
-	for _, conv := range []struct{ id, originator string }{{"cli-conv", "codex-tui"}, {"desktop-conv", "Codex_Desktop"}} {
-		for _, eventName := range []string{"codex.conversation_starts", "codex.user_prompt"} {
-			rec := sl.LogRecords().AppendEmpty()
-			rec.Attributes().PutStr("event.name", eventName)
-			rec.Attributes().PutStr("conversation.id", conv.id)
-			rec.Attributes().PutStr("originator", conv.originator)
-			rec.Attributes().PutStr("model", "gpt-5.5")
-			if eventName == "codex.user_prompt" {
-				rec.Attributes().PutStr("prompt", "list the files")
+	written := 0
+	for _, tc := range []struct {
+		fixture, want string
+		spanFirst     bool
+	}{
+		{"codex-app-server-cli-0.164.0.json", "codex_cli", false},
+		// A short turn's span can beat its prompt log across the two pipelines: the traces
+		// exporter holds it, and the logs exporter writes it once the log names the conversation.
+		{"codex-app-server-desktop-0.164.0.json", "codex_desktop", true},
+	} {
+		export, logs, traces, metrics := loadCodexAppServerExport(t, tc.fixture)
+		if tc.spanFirst {
+			if err := tracesExporter.ConsumeTraces(ctx, traces); err != nil {
+				t.Fatalf("ConsumeTraces: %v", err)
+			}
+			if events := readEvents(t, cfg.Path); len(events) != written {
+				t.Fatalf("%s: span written before its conversation was named: %+v", export.Originator, events[written:])
 			}
 		}
-	}
-	if err := logsExporter.ConsumeLogs(ctx, logs); err != nil {
-		t.Fatalf("ConsumeLogs: %v", err)
-	}
+		if err := logsExporter.ConsumeLogs(ctx, logs); err != nil {
+			t.Fatalf("ConsumeLogs: %v", err)
+		}
+		if !tc.spanFirst {
+			if err := tracesExporter.ConsumeTraces(ctx, traces); err != nil {
+				t.Fatalf("ConsumeTraces: %v", err)
+			}
+		}
+		if err := metricsExporter.ConsumeMetrics(ctx, metrics); err != nil {
+			t.Fatalf("ConsumeMetrics: %v", err)
+		}
 
-	traces := ptrace.NewTraces()
-	rs := traces.ResourceSpans().AppendEmpty()
-	rs.Resource().Attributes().PutStr("service.name", "codex-app-server")
-	ss := rs.ScopeSpans().AppendEmpty()
-	for _, thread := range []string{"cli-conv", "desktop-conv"} {
-		span := ss.Spans().AppendEmpty()
-		span.SetName("session_task.turn")
-		span.Attributes().PutStr("thread.id", thread)
-		span.Attributes().PutInt("codex.turn.token_usage.input_tokens", 1200)
-		span.Attributes().PutInt("codex.turn.token_usage.output_tokens", 80)
-	}
-	if err := tracesExporter.ConsumeTraces(ctx, traces); err != nil {
-		t.Fatalf("ConsumeTraces: %v", err)
-	}
-
-	// A short turn's span can beat its prompt log across the two pipelines: the traces exporter
-	// holds it, and the logs exporter writes it once the log names the conversation.
-	early := ptrace.NewTraces()
-	ers := early.ResourceSpans().AppendEmpty()
-	ers.Resource().Attributes().PutStr("service.name", "codex-app-server")
-	earlySpan := ers.ScopeSpans().AppendEmpty().Spans().AppendEmpty()
-	earlySpan.SetName("session_task.turn")
-	earlySpan.Attributes().PutStr("thread.id", "quick-desktop-conv")
-	earlySpan.Attributes().PutInt("codex.turn.token_usage.input_tokens", 300)
-	if err := tracesExporter.ConsumeTraces(ctx, early); err != nil {
-		t.Fatalf("ConsumeTraces: %v", err)
-	}
-	for _, event := range readEvents(t, cfg.Path) {
-		if event.Session != nil && event.Session.ID == "quick-desktop-conv" {
-			t.Fatalf("span written before its conversation was named: %+v", event)
+		events := readEvents(t, cfg.Path)[written:]
+		written += len(events)
+		var span, metric int
+		for _, event := range events {
+			if got := event.Harness.Name; got != tc.want {
+				t.Errorf("%s: %s recorded as %q, want %q", export.Originator, event.Event.Action, got, tc.want)
+			}
+			if event.Event.Action != "token.usage" {
+				continue
+			}
+			if event.Session != nil && event.Session.ID == export.Conversation {
+				span++
+			} else {
+				metric++
+			}
 		}
-	}
-	quick := plog.NewLogs()
-	qrl := quick.ResourceLogs().AppendEmpty()
-	qrl.Resource().Attributes().PutStr("service.name", "codex-app-server")
-	qrec := qrl.ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
-	qrec.Attributes().PutStr("event.name", "codex.user_prompt")
-	qrec.Attributes().PutStr("conversation.id", "quick-desktop-conv")
-	qrec.Attributes().PutStr("originator", "Codex_Desktop")
-	qrec.Attributes().PutStr("prompt", "hi")
-	if err := logsExporter.ConsumeLogs(ctx, quick); err != nil {
-		t.Fatalf("ConsumeLogs: %v", err)
-	}
-
-	want := map[string]string{"cli-conv": "codex_cli", "desktop-conv": "codex_desktop", "quick-desktop-conv": "codex_desktop"}
-	usage := 0
-	for _, event := range readEvents(t, cfg.Path) {
-		if event.Session == nil {
-			t.Fatalf("event without a session: %#v", event)
+		if span != 1 || metric == 0 {
+			t.Fatalf("%s: wrote %d usage span(s) in the conversation and %d metric usage event(s), want 1 and some", export.Originator, span, metric)
 		}
-		if got := event.Harness.Name; got != want[event.Session.ID] {
-			t.Errorf("%s in %s recorded as %q, want %q", event.Event.Action, event.Session.ID, got, want[event.Session.ID])
-		}
-		if event.Event.Action == "token.usage" {
-			usage++
-		}
-	}
-	if usage != 3 {
-		t.Fatalf("wrote %d token.usage events, want 3", usage)
 	}
 }
 

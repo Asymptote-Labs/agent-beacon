@@ -48,9 +48,8 @@ func NormalizeHarnessName(name string) string {
 		return "antigravity_cli"
 	// codex-app-server is not a Desktop name. The desktop app and, since about CLI 0.158, the terminal
 	// CLI both run Codex's app-server and export OTLP under that one service name, so it falls
-	// through to codex_cli here. The collector exporter tells the two apart by the `originator`
-	// Codex reports on each conversation (beaconevent.CodexSurfaces) and names Desktop sessions
-	// codex_desktop there.
+	// through to codex_cli here. What tells them apart is the `originator` Codex reports for each
+	// conversation; CodexSurface maps it.
 	case lower == "codex_desktop" || lower == "codex-desktop" || lower == "codex desktop":
 		return "codex_desktop"
 	case strings.Contains(lower, "codex"):
@@ -418,4 +417,30 @@ func NormalizeHarnessName(name string) string {
 	default:
 		return ""
 	}
+}
+
+// CodexSurface is the harness a Codex originator names. Every Codex client (the terminal CLI,
+// `codex exec`, the IDE extension, the desktop app) runs on Codex's app-server and reports its
+// client name as `originator`: on OTLP records sanitized to a metric tag ("codex-tui",
+// "codex_exec", "Codex_Desktop"), and verbatim in a rollout's session_meta ("Codex Desktop"). The
+// live collector and `codex sync` both name a conversation from it, so one conversation gets one
+// name on both paths. Only the desktop app is codex_desktop.
+func CodexSurface(originator string) string {
+	lower := strings.ToLower(strings.TrimSpace(originator))
+	switch {
+	case strings.Contains(lower, "desktop"):
+		return "codex_desktop"
+	// The IDE extension is the CLI's agent in an editor panel, with no harness of its own.
+	case lower == "codex_vscode":
+		return "codex_cli"
+	default:
+		return "codex_cli"
+	}
+}
+
+// IsCodexAppServer reports whether a service name is Codex's app-server, the one the CLI and the
+// desktop app share and that therefore needs an originator to place.
+func IsCodexAppServer(serviceName string) bool {
+	normalized := strings.NewReplacer("-", "", "_", "", " ", "").Replace(strings.ToLower(strings.TrimSpace(serviceName)))
+	return normalized == "codexappserver"
 }
