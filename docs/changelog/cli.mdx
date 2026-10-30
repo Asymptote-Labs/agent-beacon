@@ -9,14 +9,28 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 ---
 
-## Unreleased
+## October 2026
 
-- **Restricted log access for system installs** · `beacon endpoint install --system --log-access restricted` makes the collector the only writer of the system runtime log, on macOS, Linux and Windows. Hooks send their events to it over a local Unix socket (a named pipe on Windows), each event is recorded under the account the operating system says sent it, and the log becomes `0640 root:beacon-log` (on Windows, an ACL with SYSTEM, Administrators and read for the `beacon-log` local group only), so local accounts can no longer rewrite the log or read other users' sessions. Events are spooled privately and delivered later while the collector restarts. Opt in per endpoint, or with `BEACON_LOG_ACCESS=restricted` for package installs, the MSI included; repair and upgrades keep the mode, and `beacon endpoint doctor` reports a collector that is not serving the socket. Log shippers that do not run as root (or SYSTEM) need to join the `beacon-log` group. The default stays shared. See [Restricted log access](/security/restricted-log-access).
+### v1.3.50 · October 30, 2026
+
+- **Restricted log access on Windows** · `--log-access restricted` now works on Windows system installs. Hooks send their events to the SYSTEM collector over the named pipe `\\.\pipe\beacon-agent-ingest`, each event is recorded under the Windows account that sent it, and the log directory's ACL gives SYSTEM and Administrators full control and the `beacon-log` local group read, and nobody else anything. Set `BEACON_LOG_ACCESS=restricted` in the machine environment for the MSI, or switch an installed endpoint with `beacon endpoint repair --system --log-access restricted` from an elevated shell. Shippers that run as SYSTEM need no change; Splunk Universal Forwarder 9.1 and later runs as `NT SERVICE\SplunkForwarder` and must join `beacon-log`. See [Restricted log access on Windows](/security/restricted-log-access#on-windows).
+
+### v1.3.49 · October 30, 2026
+
+- **Restricted log access for system installs** · `beacon endpoint install --system --log-access restricted` makes the collector the only writer of `/var/log/beacon-agent/runtime.jsonl`. Hooks send their events to it over a local Unix socket, each event is recorded under the account the operating system says sent it, and the log becomes `0640 root:beacon-log`, so local accounts can no longer rewrite the log or read other users' sessions. Events are spooled privately and delivered later while the collector restarts. Opt in per endpoint, or with `BEACON_LOG_ACCESS=restricted` for package installs; repair and upgrades keep the mode, and `beacon endpoint doctor` reports a collector that is not serving the socket. Log shippers that do not run as root need to join the `beacon-log` group. The default stays shared. See [Restricted log access](/security/restricted-log-access).
+
+### v1.3.48 · October 29, 2026
+
+- **Check MCP servers and skills before installing them** · `beacon intel` looks an MCP server or skill up in [Beacon Intel](https://intel.beacon.sh), the free public index, before you install or run it. It needs no account and sends only what you name; hooks, plugins and background jobs never call it, and `BEACON_INTEL=0` turns it off. See [`beacon intel`](/cli/intel).
 - **Threat rules can match parsed shell commands** · Rules on spec `threat-rules/v1.2` can read `e.command.parsed_commands`: each command's name, arguments, environment prefixes, pipeline stage and the files it writes or deletes. `curl-pipe-to-shell`, `recursive-root-delete` and `base64-decode-piped-to-shell` use it, so they now catch `curl … | sudo -u root bash`, `| /usr/bin/env bash`, `{ curl …; } | sh`, `rm -rf "$HOME"` and `bash -lc '…'` scripts, and no longer fire on the same text inside a quoted string, a commit message or a here-document, or on `rm -rf ~/project/build`. An older Beacon skips v1.2 rules with a warning.
 - **Shared sessions stay current after more kinds of `beacon share` call** · The dashboard now recognises `beacon share` run under `sudo`, `nohup`, environment assignments or backticks, or cut off when a long command was captured, so a session that shared itself is no longer marked stale.
+- **Destination packs work with any log path** · Datadog and Elastic configs are valid YAML on Windows and with quotes or control characters in the path, the smoke-test scripts the packs install no longer break on, or run, `$`, backticks, quotes or `}` in the log path, and `beacon endpoint wazuh` refuses a log path containing `<`, which Wazuh cannot read, instead of writing a config Wazuh rejects.
+
+### v1.3.47 · October 27, 2026
+
+- **Harness² rollouts** · `beacon endpoint harness2 sync|status` reads the OpenCode and Codex executor streams Harness² records under its runs directory, which Beacon's Codex and OpenCode integrations do not see, and the install backfill includes them. See [Harness²](/runtimes/harness2).
 - **Hook events keep a command's closing quote** · A command ending in a quoted word, such as `git commit -m "fix: thing"`, was recorded without its final `"`.
 - **`beacon git` reads shell commands with a real shell parser** · Commit links no longer credit a session with words from a `# comment`, a here-document body, or an option value (`install -m 0755`, `perl -M…`), and now follow `if`/loops, brace expansion, `sudo -u`/`env` wrappers, `cp -t DIR`, `sed -i -e`, `perl -pi -e` and macOS `sed -i ''`. A command captured incomplete no longer contributes partial paths.
-- **Destination packs work with any log path** · Datadog and Elastic configs are valid YAML on Windows and with quotes or control characters in the path, the smoke-test scripts the packs install no longer break on, or run, `$`, backticks, quotes or `}` in the log path, and `beacon endpoint wazuh` refuses a log path containing `<`, which Wazuh cannot read, instead of writing a config Wazuh rejects.
 - **Setup menus no longer pick an option on a modified arrow or function key** · Shift or Option with an arrow key, or F2, in a setup menu chose an option without Enter; modified arrows now move the selection, and Esc cancels the menu as it does in the setup wizard.
 - **Inventory content capture uses Beacon's full redaction** · With `include_contents` on, tokens in MCP args, URLs, auth headers and skill files (`Bearer`/`Basic`, `--token=…`, `--api-key VALUE`, `?api_key=…`, `docker -e`, URL passwords, provider token formats such as `ghp_` and JWTs) were sent unredacted; inventory now applies the same redaction as session telemetry, with `[REDACTED]` as the placeholder. Secret-named keys are judged by whole words, so `DB_PASS` and `passphrase` are redacted while `author`, `max_tokens: 4096` and `token_type: bearer` are kept, in telemetry too, and a `Bearer` value no longer swallows the next line.
 - **Hooks under a home path with an apostrophe stay with their own runtime** · With a home directory such as `C:\Users\O'Brien`, status, repair and uninstall treated another runtime's Beacon hook as their own, and uninstall could delete it.
@@ -69,8 +83,6 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 - **Root-wipe commands are detected** · `rm -rf /*`, `rm -rf --no-preserve-root /` and `rm -r -f /` now raise recursive-root-delete.
 - **`beacon handoff resume --launch` no longer reports a started launch as cancelled** · When the new terminal picked up the launch just as the wait timed out, Beacon said the launch was cancelled while the runtime started anyway, so a retry could start a second one.
 - **`beacon endpoint gcs validate` prints a command that works** · Its follow-up told you to `gzip -dc` the uploaded object, but the GCS forwarder uploads plain `.jsonl`, so the command printed nothing.
-
-## October 2026
 
 ### v1.3.46 · October 22, 2026
 
