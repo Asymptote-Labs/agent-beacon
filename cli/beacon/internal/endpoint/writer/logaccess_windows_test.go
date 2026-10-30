@@ -70,12 +70,11 @@ func TestRestrictSystemLogOnWindows(t *testing.T) {
 	}
 
 	// Already restricted: the files are not copied again.
-	before, _ := os.Stat(path)
+	before := fileIndex(t, path)
 	if err := RestrictSystemLog(path, 0); err != nil {
 		t.Fatal(err)
 	}
-	after, _ := os.Stat(path)
-	if !os.SameFile(before, after) {
+	if fileIndex(t, path) != before {
 		t.Fatal("a log that was already restricted was replaced again")
 	}
 
@@ -147,12 +146,11 @@ func TestRestrictSystemLogFailsWhileAHandleBlocksTheReplacement(t *testing.T) {
 	if asymptoteobserve.RuntimeLogAccessRestricted(path) {
 		t.Fatal("a restriction that failed left the marker, so a rerun would skip the copies")
 	}
-	before, _ := os.Stat(archive)
+	before := fileIndex(t, archive)
 	if err := RestrictSystemLog(path, 0); err != nil {
 		t.Fatalf("the rerun: %v", err)
 	}
-	after, _ := os.Stat(archive)
-	if os.SameFile(before, after) {
+	if fileIndex(t, archive) == before {
 		t.Fatal("the rerun did not replace the archive the first run could not")
 	}
 	if !asymptoteobserve.RuntimeLogAccessRestricted(path) {
@@ -183,4 +181,21 @@ func TestRestrictedCopiesHaveTheirFinalSecurityFromCreation(t *testing.T) {
 	if problems := sysacl.RestrictedProblems(lock, backupOperators, true); len(problems) > 0 || !lock.Protected {
 		t.Fatalf("the new lock: protected %v, problems %v", lock.Protected, problems)
 	}
+}
+
+// fileIndex is the file system's id for the file at path now. Not os.SameFile on two os.Stat
+// results: on Windows a FileInfo from os.Stat reads its file id lazily, by opening its path again
+// when first compared, so both would name whatever file is at the path at comparison time.
+func fileIndex(t *testing.T, path string) uint64 {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	var info windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(windows.Handle(f.Fd()), &info); err != nil {
+		t.Fatal(err)
+	}
+	return uint64(info.FileIndexHigh)<<32 | uint64(info.FileIndexLow)
 }
