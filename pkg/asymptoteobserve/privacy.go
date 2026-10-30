@@ -892,17 +892,17 @@ func SanitizeEvent(event Event, maxBytes int) Event {
 		event.Prompt.Text = CleanString(event.Prompt.Text, DefaultStringLimit, true)
 	}
 	if event.MCP != nil {
-		event.MCP = sanitizeTyped(event.MCP, PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
+		event.MCP = sanitizeMCP(event.MCP)
 	}
 	if event.SystemContext != nil {
-		event.SystemContext = sanitizeTyped(event.SystemContext, PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
+		event.SystemContext = sanitizeSystemContext(event.SystemContext)
 	}
 	if event.GenAI != nil {
 		description := ""
 		if event.GenAI.Tool != nil {
 			description = event.GenAI.Tool.Description
 		}
-		event.GenAI = sanitizeTyped(event.GenAI, PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
+		event.GenAI = sanitizeGenAI(event.GenAI)
 		// A tool description is text the model reads, so it gets the prompt-text limit rather than
 		// the raw-attribute one: under 2 KB a padded description would hide its instructions past
 		// the point the poisoning rule sees.
@@ -913,8 +913,12 @@ func SanitizeEvent(event Event, maxBytes int) Event {
 	if event.Raw != nil {
 		event.Raw = SanitizeMap(event.Raw, PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
 	}
-	if data, err := json.Marshal(event); err == nil && len(data) > maxBytes {
-		event.Truncated = true
+	// Marshaling the event only to measure it was a third of SanitizeEvent's cost. A bound on its
+	// size decides most events without it; a marshal that fails leaves Truncated as it was.
+	if n, ok := jsonSizeBound(&event, maxBytes); !ok || n > maxBytes {
+		if data, err := json.Marshal(event); err == nil && len(data) > maxBytes {
+			event.Truncated = true
+		}
 	}
 	return event
 }

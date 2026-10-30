@@ -6,10 +6,11 @@ import (
 	"testing"
 
 	obs "github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/threatrules"
 )
 
-// The benchmarks in this file time redaction on the text a hook redacts most: a file read's result,
-// a system prompt, a shell command, and text whose every line holds a secret.
+// The benchmarks in this file time redaction and event sanitizing on what a hook handles most: a
+// file read's result, a system prompt, a shell command, and text whose every line holds a secret.
 
 var benchGoLines = []string{
 	"package cache", "", "import (", "\t\"container/list\"", "\t\"sync\"", "\t\"time\"", ")",
@@ -80,5 +81,64 @@ func BenchmarkRedactAdversarial(b *testing.B) {
 				obs.RedactString(bc.text)
 			}
 		})
+	}
+}
+
+// benchEvents are a file read carrying its 3 KB result, the session.context event of a 12 KB system
+// prompt, and a shell command, as a writer builds them before sanitizing.
+func benchEvents() []struct {
+	name  string
+	event obs.Event
+} {
+	base := func(action, category string) obs.Event {
+		e := obs.NewEvent(obs.NewEventOptions{Action: action, Category: category, Harness: obs.HarnessInfo{Name: "claude_code"}})
+		e.Session = &obs.SessionInfo{ID: "0b6f4c1e-1d5a-4c83-9a57-2c5b8e0f3d11", WorkingDirectory: "/home/user/project"}
+		e.Content = &obs.ContentInfo{Retention: obs.ContentRetentionFull, Included: true}
+		e.Raw = map[string]interface{}{"hook_event_name": "PostToolUse", "tool_use_id": "toolu_01ABCDEF"}
+		return e
+	}
+	read := base("file.read", "file")
+	read.Tool = &obs.ToolInfo{Name: "Read", Path: "/home/user/project/internal/cache/lru.go"}
+	read.File = &obs.FileInfo{Path: "/home/user/project/internal/cache/lru.go", Operation: "read"}
+	read.GenAI = &obs.GenAIInfo{Tool: &obs.GenAIToolInfo{Name: "Read", Call: &obs.GenAIToolCallInfo{
+		ID: "toolu_01ABCDEF", Arguments: map[string]interface{}{"file_path": "/home/user/project/internal/cache/lru.go"}, Result: benchFileRead(3000),
+	}}}
+	context := base("session.context", "session")
+	context.SystemContext = &obs.SystemContextInfo{Kind: "system_prompt", Source: obs.SystemContextSourceSystemPrompt}
+	context.GenAI = &obs.GenAIInfo{SystemInstructions: obs.SystemInstructionParts(benchSystemPrompt(12000))}
+	command := base("command.executed", "command")
+	command.Tool = &obs.ToolInfo{Name: "Bash", Command: "go test ./internal/cache/ -run TestLRUEviction -count=20"}
+	command.Command = &obs.CommandInfo{Command: "go test ./internal/cache/ -run TestLRUEviction -count=20"}
+	command.GenAI = &obs.GenAIInfo{Tool: &obs.GenAIToolInfo{Name: "Bash", Call: &obs.GenAIToolCallInfo{
+		ID: "toolu_01ABCDEF", Arguments: map[string]interface{}{"command": "go test ./internal/cache/ -run TestLRUEviction -count=20", "description": "Run the test"},
+	}}}
+	return []struct {
+		name  string
+		event obs.Event
+	}{{"file.read_3KB", read}, {"session.context_12KB", context}, {"command.executed", command}}
+}
+
+// BenchmarkSanitizeEvent sanitizes each event. Sanitizing writes cleaned text through the event's
+// pointers, which for these events leaves it as it was, so each iteration does the same work.
+func BenchmarkSanitizeEvent(b *testing.B) {
+	for _, bc := range benchEvents() {
+		b.Run(bc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				obs.SanitizeEvent(bc.event, 65536)
+			}
+		})
+	}
+}
+
+// BenchmarkToolResultText derives gen_ai.tool.call.result_text from the sanitized file read.
+func BenchmarkToolResultText(b *testing.B) {
+	e := obs.SanitizeEvent(benchEvents()[0].event, 65536)
+	if threatrules.ToolResultText(e) == "" {
+		b.Fatal("no result text")
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		threatrules.ToolResultText(e)
 	}
 }
