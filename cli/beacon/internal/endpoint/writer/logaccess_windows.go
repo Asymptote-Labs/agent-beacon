@@ -159,8 +159,15 @@ func replaceLogFamily(path string) error {
 				continue
 			}
 			child := filepath.Join(dir, name)
-			if !sysacl.IsLogFamily(name, base) && hardLinked(child) {
-				continue
+			if !sysacl.IsLogFamily(name, base) {
+				linked, err := hardLinked(child)
+				if err != nil {
+					errs = append(errs, err)
+					continue
+				}
+				if linked {
+					continue
+				}
 			}
 			if err := replaceWithCopy(child, false); err != nil {
 				errs = append(errs, err)
@@ -173,19 +180,29 @@ func replaceLogFamily(path string) error {
 	return errors.Join(errs...)
 }
 
-// hardLinked reports whether the file at path has more than one name. A file it cannot open counts
-// as linked, so nothing unknown is copied.
-func hardLinked(path string) bool {
-	f, err := os.Open(path)
+// hardLinked reports whether the file at path has more than one name. It opens the file for its
+// attributes only, which no share mode can refuse, so a handle another account holds cannot make a
+// file look linked and slip past the replacement; any other failure is an error that names it.
+func hardLinked(path string) (bool, error) {
+	p, err := windows.UTF16PtrFromString(path)
 	if err != nil {
-		return !errors.Is(err, fs.ErrNotExist)
+		return false, err
 	}
-	defer f.Close()
+	h, err := windows.CreateFile(p, windows.FILE_READ_ATTRIBUTES,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil,
+		windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	if errors.Is(err, windows.ERROR_FILE_NOT_FOUND) || errors.Is(err, windows.ERROR_PATH_NOT_FOUND) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the link count of %s: %w", path, err)
+	}
+	defer windows.CloseHandle(h)
 	var info windows.ByHandleFileInformation
-	if err := windows.GetFileInformationByHandle(windows.Handle(f.Fd()), &info); err != nil {
-		return true
+	if err := windows.GetFileInformationByHandle(h, &info); err != nil {
+		return false, fmt.Errorf("read the link count of %s: %w", path, err)
 	}
-	return info.NumberOfLinks > 1
+	return info.NumberOfLinks > 1, nil
 }
 
 // replaceWithCopy copies the file at path into a new file beside it, created with its final

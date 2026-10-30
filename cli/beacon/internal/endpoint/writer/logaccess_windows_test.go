@@ -308,3 +308,31 @@ func grants(dacl []sysacl.ACE) []string {
 	}
 	return out
 }
+
+// A file beside the log that another process holds without sharing reads is not taken for a
+// hard-linked one and skipped: the restriction fails and names it, rather than reporting success
+// while that handle keeps reading what the collector's neighbours write.
+func TestRestrictSystemLogFailsOnAFileBesideTheLogHeldWithoutSharingReads(t *testing.T) {
+	path := restrictFixture(t)
+	prev := replaceWait
+	replaceWait = 300 * time.Millisecond
+	t.Cleanup(func() { replaceWait = prev })
+	inventory := filepath.Join(filepath.Dir(path), "inventory_state.jsonl")
+	if err := os.WriteFile(inventory, []byte("{\"snapshot\":1}\n"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := windows.UTF16PtrFromString(inventory)
+	h, err := windows.CreateFile(p, windows.GENERIC_READ|windows.GENERIC_WRITE, windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held := os.NewFile(uintptr(h), inventory)
+	err = RestrictSystemLog(path, 0)
+	_ = held.Close()
+	if err == nil || !strings.Contains(err.Error(), "inventory_state.jsonl") {
+		t.Fatalf("RestrictSystemLog = %v, want it to fail naming the held file", err)
+	}
+	if asymptoteobserve.RuntimeLogAccessRestricted(path) {
+		t.Fatal("a restriction that could not replace a held file left the marker")
+	}
+}
