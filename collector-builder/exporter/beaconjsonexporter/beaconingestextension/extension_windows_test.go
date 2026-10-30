@@ -221,3 +221,16 @@ func TestValidWindowsName(t *testing.T) {
 		}
 	}
 }
+
+// Only a taken name is waited out. A socket_path that can never be a pipe fails the start loudly,
+// as it did before, instead of a collector that looks healthy and never serves.
+func TestAListenErrorThatCannotClearStillFailsTheStart(t *testing.T) {
+	cfg := createDefaultConfig()
+	cfg.SocketPath = `C:\ProgramData\Beacon\ingest.sock`
+	cfg.LogPath = filepath.Join(t.TempDir(), "logs", "runtime.jsonl")
+	ext := newIngest(cfg, zap.NewNop())
+	if err := ext.Start(context.Background(), nil); err == nil {
+		_ = ext.Shutdown(context.Background())
+		t.Fatal("Start succeeded on a socket_path that is not a named pipe")
+	}
+}
