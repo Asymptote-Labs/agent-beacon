@@ -5,6 +5,7 @@ package localingest
 import (
 	"errors"
 	"net"
+	"os"
 	"time"
 )
 
@@ -36,3 +37,6 @@ func temporaryAcceptError(error) bool { return false }
 
 // processPrivileged is never true here, where there is no ingest channel to bypass.
 func processPrivileged() bool { return false }
+
+// accountHome is the home directory the spool lives under.
+func accountHome() (string, error) { return os.UserHomeDir() }

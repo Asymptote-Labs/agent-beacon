@@ -19,7 +19,7 @@ const spoolDirInHome = ".beacon/endpoint/spool"
 
 // DefaultSpoolDir is the current account's spool directory, or "" when it has no home.
 func DefaultSpoolDir() string {
-	home, err := os.UserHomeDir()
+	home, err := accountHome()
 	if err != nil || home == "" {
 		return ""
 	}

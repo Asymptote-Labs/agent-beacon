@@ -159,3 +159,17 @@ func TestWindowsPrivilegeDecidesTheRoute(t *testing.T) {
 		t.Fatalf("Applies = %v while processPrivileged = %v", (Deliverer{}).Applies(systemLog), processPrivileged())
 	}
 }
+
+// The spool is under the profile of the account the process runs as, whatever USERPROFILE says: a
+// process started under other credentials can inherit its parent's environment, and a spool in
+// that profile is one this account cannot write.
+func TestTheSpoolIsInTheTokensProfileNotUSERPROFILE(t *testing.T) {
+	profile, err := windows.GetCurrentProcessToken().GetUserProfileDirectory()
+	if err != nil || profile == "" {
+		t.Skipf("this process has no profile loaded: %v", err)
+	}
+	t.Setenv("USERPROFILE", t.TempDir())
+	if got, want := DefaultSpoolDir(), filepath.Join(profile, spoolDirInHome); !strings.EqualFold(got, want) {
+		t.Fatalf("DefaultSpoolDir = %q, want %q under the token's profile", got, want)
+	}
+}
