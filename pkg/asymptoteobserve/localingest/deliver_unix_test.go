@@ -599,10 +599,7 @@ func TestUnconfirmedLinesAreAppendedDirectlyAfterTheGrace(t *testing.T) {
 		t.Fatalf("WriteOutcome = %v, %v", got, err)
 	}
 	d.Client.SocketPath = filepath.Join(shortTempDir(t), "none.sock")
-	old := time.Now().Add(-defaultUnconfirmedGrace - time.Second)
-	if err := os.Chtimes(d.unconfirmedFor(testLog).filePath(), old, old); err != nil {
-		t.Fatal(err)
-	}
+	ageUnconfirmed(t, d, testLog)
 	if err := d.Write(testLog, lines(t, 1)[0], log.append); err != nil {
 		t.Fatal(err)
 	}
@@ -628,5 +625,90 @@ func TestASpoolBatchSentWithNoReplyBecomesUnconfirmed(t *testing.T) {
 	}
 	if n, _, _ := d.unconfirmedFor(testLog).Pending(); n != 2 {
 		t.Fatalf("unconfirmed spool holds %d lines, want 2", n)
+	}
+}
+
+// ageUnconfirmed makes logPath's oldest unconfirmed line older than the grace.
+func ageUnconfirmed(t *testing.T, d Deliverer, logPath string) {
+	t.Helper()
+	old := time.Now().Add(-defaultUnconfirmedGrace - time.Second)
+	if err := os.Chtimes(filepath.Join(d.unconfirmedFor(logPath).Dir, unconfirmedSinceMarker), old, old); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The grace runs from the oldest unconfirmed line: a collector that keeps hanging adds a line now
+// and then, and that must not keep the older ones out of the log. Once it has passed, every line
+// goes, not one batch.
+func TestTheUnconfirmedGraceRunsFromTheOldestLine(t *testing.T) {
+	d := deliverer(t, filepath.Join(shortTempDir(t), "none.sock"))
+	batch := lines(t, MaxLinesPerConn+5)
+	if err := d.spoolUnconfirmed(testLog, batch[:1]); err != nil {
+		t.Fatal(err)
+	}
+	ageUnconfirmed(t, d, testLog)
+	if err := d.spoolUnconfirmed(testLog, batch[1:]); err != nil { // the hang goes on
+		t.Fatal(err)
+	}
+	log := &directLog{}
+	if err := d.Write(testLog, lines(t, 1)[0], log.append); err != nil {
+		t.Fatal(err)
+	}
+	if want := len(batch) + 1; log.count() != want {
+		t.Fatalf("direct log has %d lines, want %d", log.count(), want)
+	}
+	if n, _ := d.Pending(testLog); n != 0 {
+		t.Fatalf("Pending = %d", n)
+	}
+	if _, err := os.Stat(filepath.Join(d.unconfirmedFor(testLog).Dir, unconfirmedSinceMarker)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the marker outlived the lines it dated: %v", err)
+	}
+
+	// The next unconfirmed line starts a grace of its own.
+	if err := d.spoolUnconfirmed(testLog, lines(t, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Write(testLog, lines(t, 1)[0], log.append); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := d.Pending(testLog); n != 1 {
+		t.Fatalf("Pending = %d; a fresh unconfirmed line was taken before its grace", n)
+	}
+}
+
+// A collector out of connection slots turns the connection away before reading a line. It says
+// so, and the line is written directly at once: not held as possibly written, and not a reason to
+// skip the socket for the next events.
+func TestAConnectionTheCollectorRefusesIsNotAnUnknownOutcome(t *testing.T) {
+	for name, configure := range map[string]func(*Server){
+		"per account": func(s *Server) { s.MaxConnsPerUID = 1 },
+		"in total":    func(s *Server) { s.MaxConns = 1 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := startServer(t, configure)
+			held, err := net.Dial("unix", h.path) // takes the only slot and sends nothing
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer held.Close()
+			time.Sleep(50 * time.Millisecond)
+
+			if _, err := h.client.Send(lines(t, 1)); err == nil || errors.Is(err, ErrOutcomeUnknown) {
+				t.Fatalf("Send = %v; a refusal is not an unknown outcome", err)
+			}
+			d := deliverer(t, h.path)
+			d.FailureBackoff = 0
+			log := &directLog{}
+			got, err := d.WriteOutcome(testLog, lines(t, 1)[0], log.append)
+			if err != nil || got != Appended || log.count() != 1 {
+				t.Fatalf("WriteOutcome = %v, %v, direct %d; want it appended", got, err, log.count())
+			}
+			if n, _ := d.Pending(testLog); n != 0 {
+				t.Fatalf("Pending = %d", n)
+			}
+			if d.inBackoff() {
+				t.Fatal("a busy reply put the account in backoff")
+			}
+		})
 	}
 }

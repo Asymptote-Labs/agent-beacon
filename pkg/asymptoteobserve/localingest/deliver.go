@@ -142,6 +142,9 @@ func (d Deliverer) WriteOutcome(logPath string, line []byte, appendLine func([]b
 			collectorElsewhere = true
 		case errors.Is(err, ErrNoSocket), errors.Is(err, ErrUntrustedSocket):
 			// No collector this line can go through: the endpoint is shared.
+		case resp.Error != "":
+			// The collector answered, busy or out of rate, and wrote none of it: no hang to back
+			// off from.
 		case errors.Is(err, ErrOutcomeUnknown):
 			// The collector may have written it before the reply was lost. Appending it here too
 			// would log it twice, and the copies would not even share an id, so it waits for the
@@ -304,10 +307,30 @@ func (d Deliverer) spoolUnconfirmed(logPath string, lines [][]byte) error {
 	if err != nil {
 		return err
 	}
+	markUnconfirmedSince(s)
 	if dropped > 0 {
 		return fmt.Errorf("the spool in %s is full", s.Dir)
 	}
 	return nil
+}
+
+// unconfirmedSinceMarker, in the unconfirmed spool, is created when the spool's oldest line arrived
+// and left alone by later appends and by partial drains, which rewrite the spool file itself. Its
+// mtime is what the grace runs from, so a collector that keeps hanging cannot keep restarting it.
+const unconfirmedSinceMarker = ".since"
+
+// markUnconfirmedSince creates the marker unless it exists.
+func markUnconfirmedSince(u Spool) {
+	if f, err := os.OpenFile(filepath.Join(u.Dir, unconfirmedSinceMarker), os.O_CREATE|os.O_EXCL|os.O_WRONLY, SpoolFileMode); err == nil {
+		_ = f.Close()
+	}
+}
+
+// clearUnconfirmedSinceIfEmpty removes the marker once the spool holds nothing.
+func clearUnconfirmedSinceIfEmpty(u Spool) {
+	if n, _, err := u.Pending(); err == nil && n == 0 {
+		_ = os.Remove(filepath.Join(u.Dir, unconfirmedSinceMarker))
+	}
 }
 
 // drain sends one batch of logPath's spool through send. Best effort: whatever is left goes with a
@@ -325,17 +348,23 @@ func (d Deliverer) drain(logPath string, send func([][]byte) (int, error)) {
 // collector that comes back gets the first chance at lines it may already have written.
 const defaultUnconfirmedGrace = 2 * time.Minute
 
-// drainUnconfirmedDirectly lets a direct append take unconfirmed lines once nothing has been added
-// to them for UnconfirmedGrace. By then a collector that was only restarting has answered; one that
-// has not is gone (the endpoint went back to shared, or its collector writes another log), and
-// waiting longer would lose the lines rather than risk one of them twice.
+// drainUnconfirmedDirectly lets a direct append take every unconfirmed line once the oldest has
+// waited UnconfirmedGrace. By then a collector that was only restarting has answered; one that has
+// not is gone (the endpoint went back to shared, or its collector writes another log) or keeps
+// hanging, and waiting longer would hold the lines back, or lose them, rather than risk one of
+// them twice.
 func (d Deliverer) drainUnconfirmedDirectly(logPath string, send func([][]byte) (int, error)) {
 	u := d.unconfirmedFor(logPath)
 	if u.Dir == "" {
 		return
 	}
-	info, err := os.Stat(u.filePath())
+	info, err := os.Stat(filepath.Join(u.Dir, unconfirmedSinceMarker))
 	if err != nil {
+		// No marker but lines left behind (a spool from before the marker, or a crash between the
+		// append and the marker): the grace starts now.
+		if n, _, err := u.Pending(); err == nil && n > 0 {
+			markUnconfirmedSince(u)
+		}
 		return
 	}
 	grace := d.UnconfirmedGrace
@@ -345,7 +374,13 @@ func (d Deliverer) drainUnconfirmedDirectly(logPath string, send func([][]byte) 
 	if time.Since(info.ModTime()) < grace {
 		return
 	}
-	_, _ = u.Drain(MaxLinesPerConn, send)
+	for {
+		n, err := u.Drain(MaxLinesPerConn, send)
+		if err != nil || n == 0 {
+			break
+		}
+	}
+	clearUnconfirmedSinceIfEmpty(u)
 }
 
 // drainThroughCollector sends a batch of logPath's unconfirmed lines and a batch of its spool to
@@ -357,6 +392,7 @@ func (d Deliverer) drainThroughCollector(logPath string, c Client) {
 			resp, err := c.Send(lines)
 			return resp.Processed, err
 		})
+		clearUnconfirmedSinceIfEmpty(u)
 	}
 	d.drain(logPath, func(lines [][]byte) (int, error) {
 		resp, err := c.Send(lines)

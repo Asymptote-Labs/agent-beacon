@@ -49,8 +49,8 @@ type Server struct {
 	// Logf reports refused connections and rejected lines. Optional.
 	Logf func(format string, args ...interface{})
 
-	// MaxConns bounds concurrent connections; further ones are closed at once, and their clients
-	// spool. Zero means 64.
+	// MaxConns bounds concurrent connections; further ones get a busy reply and are closed at once,
+	// and their clients fall back. Zero means 64.
 	MaxConns int
 	// MaxConnsPerUID bounds one account's concurrent connections. Zero means 16.
 	MaxConnsPerUID int
@@ -125,7 +125,7 @@ func (s *Server) Serve(l net.Listener) error {
 		case s.slots <- struct{}{}:
 		default:
 			s.logf(noUID, "refusing connection: %d already open", cap(s.slots))
-			_ = conn.Close()
+			refuse(conn)
 			continue
 		}
 		if !s.trackConn(conn) {
@@ -276,10 +276,12 @@ func (s *Server) handle(conn net.Conn) {
 	peer, err := peerCredentials(unixConn)
 	if err != nil {
 		s.logf(noUID, "refusing connection: %v", err)
+		refuse(conn)
 		return
 	}
 	if !s.acquireUID(peer.UID) {
 		s.logf(peer.UID, "refusing connection from uid %d: it already has the most connections one account may hold", peer.UID)
+		refuse(conn)
 		return
 	}
 	defer s.releaseUID(peer.UID)
@@ -415,6 +417,18 @@ func sameLog(a, b string) bool {
 		return false
 	}
 	return filepath.Clean(a) == filepath.Clean(b)
+}
+
+// refuseWriteTimeout bounds the reply to a refused connection, which the accept loop may send.
+const refuseWriteTimeout = 100 * time.Millisecond
+
+// refuse answers a connection turned away before any line was read with a busy reply and closes
+// it. Without a reply the client could not tell it from a connection whose lines were written
+// before the reply was lost, and would hold its event back as possibly written.
+func refuse(conn net.Conn) {
+	_ = conn.SetWriteDeadline(time.Now().Add(refuseWriteTimeout))
+	writeResponse(conn, Response{Error: "busy"})
+	_ = conn.Close()
 }
 
 func writeResponse(w io.Writer, resp Response) {
