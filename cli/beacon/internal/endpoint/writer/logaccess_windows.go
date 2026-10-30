@@ -303,7 +303,13 @@ func copyInto(dst *os.File, path string) error {
 func ShareSystemLog(path string) error {
 	// Read before the marker goes: whether the directory was restricted, by the marker or, for a
 	// restriction cut short before writing it, by the directory's own ACL.
-	wasRestricted := asymptoteobserve.RuntimeLogAccessRestricted(path) || sysacl.LooksRestricted(filepath.Dir(path))
+	wasRestricted := asymptoteobserve.RuntimeLogAccessRestricted(path)
+	if !wasRestricted {
+		// No readers group, no restriction: the mode cannot be applied without one.
+		if readers, err := logReadersSID(); err == nil {
+			wasRestricted = sysacl.LooksRestricted(filepath.Dir(path), readers)
+		}
+	}
 	if err := asymptoteobserve.SetRuntimeLogAccess(path, asymptoteobserve.LogAccessShared); err != nil {
 		return fmt.Errorf("remove the restricted mode marker: %w", err)
 	}
