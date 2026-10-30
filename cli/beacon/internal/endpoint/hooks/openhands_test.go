@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/hookcmd"
 )
 
 // OpenHands is silent about a hooks.json it does not like: a file that fails validation is dropped
@@ -548,7 +549,7 @@ func openHandsHasCommand(commands []string, want string) bool {
 
 func openHandsHasBeaconCommand(commands []string) bool {
 	for _, command := range commands {
-		if isEndpointHookCommand(command, "openhands") {
+		if hookcmd.IsEndpointHook(command, "openhands") {
 			return true
 		}
 	}

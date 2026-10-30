@@ -193,7 +193,7 @@ func TestDshReinstallReplacesTheHooksFileWholesale(t *testing.T) {
 	// A stale Beacon event from an imagined earlier version.
 	file["PreCompact"] = []dshHookGroup{{Hooks: []dshHookRef{{
 		Type: "command",
-		// Spelled the way the installer spells one: isEndpointHookCommand recognizes a Beacon
+		// Spelled the way the installer spells one: hookcmd.IsEndpointHook recognizes a Beacon
 		// command by its binary AND its endpoint settings, so a fixture missing --log and --config
 		// is not one Beacon would be asked to replace.
 		Command: "'/opt/beacon/bin/beacon-hooks' --platform dsh --log '/var/log/beacon/runtime.jsonl' --config '/etc/beacon/config.json' pre-compact",

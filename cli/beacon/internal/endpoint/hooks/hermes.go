@@ -8,6 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/hermessession"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/hookcmd"
 )
 
 type HermesOptions struct {
@@ -163,7 +164,7 @@ func writeHermesConfig(path string, config hermesConfig) error {
 func mergeHermesEndpointHook(existing []hermesHookRef, ref hermesHookRef) []hermesHookRef {
 	out := make([]hermesHookRef, 0, len(existing)+1)
 	for _, item := range existing {
-		if !isEndpointHookCommand(item.Command, "hermes") {
+		if !hookcmd.IsEndpointHook(item.Command, "hermes") {
 			out = append(out, item)
 		}
 	}
@@ -182,7 +183,7 @@ func removeHermesEndpointHooks(path string) (bool, error) {
 	for eventName, refs := range config.hooks {
 		filtered := refs[:0]
 		for _, ref := range refs {
-			if isEndpointHookCommand(ref.Command, "hermes") {
+			if hookcmd.IsEndpointHook(ref.Command, "hermes") {
 				changed = true
 				continue
 			}
@@ -213,7 +214,7 @@ func isHermesInstalledAt(path string) bool {
 	}
 	for _, refs := range config.hooks {
 		for _, ref := range refs {
-			if isEndpointHookCommand(ref.Command, "hermes") {
+			if hookcmd.IsEndpointHook(ref.Command, "hermes") {
 				return true
 			}
 		}

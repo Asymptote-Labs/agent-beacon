@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/hookcmd"
 )
 
 const antigravityBeaconHookName = "beacon-endpoint"
@@ -197,7 +199,7 @@ func hasAntigravityEndpointHook(raw json.RawMessage) bool {
 	} {
 		for _, group := range groups {
 			for _, hook := range group.Hooks {
-				if isEndpointHookCommand(hook.Command, "antigravity") {
+				if hookcmd.IsEndpointHook(hook.Command, "antigravity") {
 					return true
 				}
 			}

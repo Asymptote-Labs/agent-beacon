@@ -18,6 +18,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/cowork"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/hermessession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tomledit"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/hookcmd"
 	"gopkg.in/yaml.v3"
 )
 
@@ -637,7 +638,7 @@ func hasBeaconDevinHooks(data []byte, platforms ...string) (bool, error) {
 		for _, group := range groups {
 			for _, hook := range group.Hooks {
 				for _, platform := range platforms {
-					if hooks.IsEndpointHookCommand(hook.Command, platform) {
+					if hookcmd.IsEndpointHook(hook.Command, platform) {
 						return true, nil
 					}
 				}
@@ -671,7 +672,7 @@ func hasBeaconWindsurfHooks(data []byte, platform string) (bool, error) {
 	}
 	for _, refs := range root.Hooks {
 		for _, hook := range refs {
-			if hooks.IsEndpointHookCommand(hook.Command, platform) {
+			if hookcmd.IsEndpointHook(hook.Command, platform) {
 				return true, nil
 			}
 		}
@@ -708,7 +709,7 @@ func hasBeaconHermesHooks(data []byte) (bool, error) {
 	}
 	for _, refs := range root.Hooks {
 		for _, ref := range refs {
-			if hooks.IsEndpointHookCommand(ref.Command, "hermes") {
+			if hookcmd.IsEndpointHook(ref.Command, "hermes") {
 				return true, nil
 			}
 		}

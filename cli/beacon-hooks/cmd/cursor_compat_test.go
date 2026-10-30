@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"strings"
 	"testing"
 
@@ -302,31 +301,6 @@ func TestDuplicateCursorRunDoesNotAskThePolicyProvider(t *testing.T) {
 	}
 }
 
-func TestIsBeaconCursorHookCommand(t *testing.T) {
-	cases := []struct {
-		name    string
-		line    string
-		command string
-		want    bool
-	}{
-		{"current form", beaconCursorHook("pre-tool"), "pre-tool", true},
-		{"older env-prefix form", "BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG='/tmp/r.jsonl' '/home/dev/.beacon/endpoint/hooks/beacon-hooks' --platform cursor stop", "stop", true},
-		{"windows binary", `'C:\Users\dev\.beacon\endpoint\hooks\beacon-hooks.exe' --platform cursor session-start`, "session-start", true},
-		{"equals flag", "/opt/beacon/bin/beacon-hooks --platform=cursor prompt-submit", "prompt-submit", true},
-		{"another command", beaconCursorHook("pre-tool"), "post-tool", false},
-		{"claude entry", "'/Users/dev/.beacon/endpoint/hooks/beacon-hooks' --platform claude prompt-submit", "prompt-submit", false},
-		{"someone else's binary", "/usr/local/bin/audit --platform cursor prompt-submit", "prompt-submit", false},
-		{"empty", "", "prompt-submit", false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := isBeaconCursorHookCommand(tc.line, tc.command); got != tc.want {
-				t.Fatalf("isBeaconCursorHookCommand(%q, %q) = %v, want %v", tc.line, tc.command, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestCursorRecordsThisHookToleratesBadFiles(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hooks.json")
 	original := cursorUserHooksPath
@@ -344,36 +318,5 @@ func TestCursorRecordsThisHookToleratesBadFiles(t *testing.T) {
 	}
 	if cursorRecordsThisHook("", nil) {
 		t.Fatal("an unknown command matched")
-	}
-}
-
-// TestCursorEventsForCommandMatchesTheInstaller pins cursorEventsForCommand against
-// installCursorHooksJSON's own endpointHooks map (cli/beacon/internal/endpoint/hooks/cursor.go,
-// read here as cli/beacon/internal/endpoint/hooks/testdata/cursor_hooks_golden.json, which that
-// package's own golden test keeps matching the installer). The two files are different Go
-// modules, so this cannot import the installer directly; cursor.go carries a matching comment
-// pointing back here.
-func TestCursorEventsForCommandMatchesTheInstaller(t *testing.T) {
-	want := map[string][]string{
-		"session-start":  {"sessionStart"},
-		"prompt-submit":  {"beforeSubmitPrompt"},
-		"pre-tool":       {"preToolUse"},
-		"agent-thought":  {"afterAgentThought"},
-		"agent-response": {"afterAgentResponse"},
-		"post-tool":      {"afterFileEdit", "postToolUse", "postToolUseFailure"},
-		"stop":           {"stop"},
-		"session-end":    {"sessionEnd"},
-	}
-	if len(cursorEventsForCommand) != len(want) {
-		t.Fatalf("cursorEventsForCommand has %d commands, want %d", len(cursorEventsForCommand), len(want))
-	}
-	for command, wantEvents := range want {
-		gotEvents := append([]string(nil), cursorEventsForCommand[command]...)
-		sort.Strings(gotEvents)
-		sortedWant := append([]string(nil), wantEvents...)
-		sort.Strings(sortedWant)
-		if !reflect.DeepEqual(gotEvents, sortedWant) {
-			t.Errorf("cursorEventsForCommand[%q] = %v, want %v", command, cursorEventsForCommand[command], wantEvents)
-		}
 	}
 }

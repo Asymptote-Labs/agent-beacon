@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/hookcmd"
 )
 
 type DevinOptions struct {
@@ -449,7 +451,7 @@ func isDevinEndpointHookCommand(command string, platforms ...string) bool {
 		platforms = []string{"devin"}
 	}
 	for _, platform := range platforms {
-		if isEndpointHookCommand(command, platform) {
+		if hookcmd.IsEndpointHook(command, platform) {
 			return true
 		}
 	}
@@ -457,7 +459,7 @@ func isDevinEndpointHookCommand(command string, platforms ...string) bool {
 }
 
 func isWindsurfEndpointHookCommand(command, platform string) bool {
-	return isEndpointHookCommand(command, platform)
+	return hookcmd.IsEndpointHook(command, platform)
 }
 
 func devinConfigPath(level Level) (string, error) {

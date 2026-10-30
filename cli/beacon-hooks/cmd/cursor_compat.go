@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/hookcmd"
 )
 
 // cursorUserHooksPath locates the user-level Cursor hooks file, where `beacon endpoint install`
@@ -18,27 +20,6 @@ var cursorUserHooksPath = func() string {
 	return filepath.Join(home, ".cursor", "hooks.json")
 }
 
-// cursorEventsForCommand names the Cursor hooks.json event(s) Beacon's own installer
-// (installCursorHooksJSON, cli/beacon/internal/endpoint/hooks/cursor.go) wires each telemetry
-// subcommand to. It mirrors that function's base endpointHooks map and nothing else: an
-// enterprise build's cursorExtraHooks can add more events, but never for these subcommands.
-//
-// cursorRecordsThisHook only trusts an entry under one of these events. An entry elsewhere in the
-// file -- a stale one from a hand edit, or one the matcher check below would otherwise take at face
-// value -- cannot claim a subcommand it was never wired to run for.
-//
-// TestCursorEventsForCommandMatchesTheInstaller pins this against the installer's own map.
-var cursorEventsForCommand = map[string][]string{
-	"session-start":  {"sessionStart"},
-	"prompt-submit":  {"beforeSubmitPrompt"},
-	"pre-tool":       {"preToolUse"},
-	"agent-thought":  {"afterAgentThought"},
-	"agent-response": {"afterAgentResponse"},
-	"post-tool":      {"afterFileEdit", "postToolUse", "postToolUseFailure"},
-	"stop":           {"stop"},
-	"session-end":    {"sessionEnd"},
-}
-
 // cursorRecordsThisHook reports whether Beacon's own Cursor hooks run command for this payload, so
 // that a run of Beacon's Claude Code hook carrying a Cursor payload is a second recording of the
 // same event.
@@ -46,8 +27,10 @@ var cursorEventsForCommand = map[string][]string{
 // The Cursor IDE runs the hooks in the user-level ~/.claude/settings.json alongside its own
 // hooks.json, giving them Cursor payloads. With Beacon installed for both, every session start,
 // prompt and stop was written twice, and every tool call that both pre-tool matchers name. The
-// Claude copy steps aside only where, under an event Beacon's installer actually wires that
-// subcommand to, a Beacon Cursor entry's matcher selects the payload's tool. The two installers'
+// Claude copy steps aside only where, under an event Beacon's installer wires that subcommand to
+// (hookcmd.CursorEvents), a Beacon Cursor entry's matcher selects the payload's tool. An entry
+// elsewhere in the file -- a stale one from a hand edit -- cannot claim a subcommand it was never
+// wired to run for. The two installers'
 // pre-tool matchers differ (Claude's names Read, Grep and Glob; Cursor's names Shell and MCP), so
 // a call only Claude's matcher selects still has the Claude copy as its one recorder and policy
 // check. So does any command Beacon's Cursor hooks don't run (subagent events, permission
@@ -55,7 +38,7 @@ var cursorEventsForCommand = map[string][]string{
 //
 // It is one read of a small file, made only when a Claude Code hook receives a Cursor payload.
 func cursorRecordsThisHook(command string, input map[string]interface{}) bool {
-	events := cursorEventsForCommand[command]
+	events := hookcmd.CursorEvents[command]
 	if len(events) == 0 {
 		return false
 	}
@@ -79,7 +62,7 @@ func cursorRecordsThisHook(command string, input map[string]interface{}) bool {
 	tool := getFirstStr(input, "tool_name", "toolName")
 	for _, event := range events {
 		for _, entry := range file.Hooks[event] {
-			if isBeaconCursorHookCommand(entry.Command, command) && cursorMatcherSelects(entry.Matcher, tool) {
+			if hookcmd.Runs(entry.Command, "cursor", command) && cursorMatcherSelects(entry.Matcher, tool) {
 				return true
 			}
 		}
@@ -104,26 +87,4 @@ func cursorMatcherSelects(matcher, tool string) bool {
 		return false
 	}
 	return pattern.MatchString(tool)
-}
-
-// isBeaconCursorHookCommand reports whether line is a beacon-hooks command for Cursor that runs
-// command. Beacon writes `'<dir>/beacon-hooks' --platform cursor [--log ... --config ...] <command>`,
-// and older versions put endpoint settings in front as `VAR=value` words; both end with the command.
-func isBeaconCursorHookCommand(line, command string) bool {
-	fields := strings.Fields(line)
-	if len(fields) == 0 || strings.Trim(fields[len(fields)-1], `'"`) != command {
-		return false
-	}
-	binary, cursor := false, false
-	for i, field := range fields {
-		word := strings.Trim(field, `'"`)
-		name := strings.TrimSuffix(filepath.Base(strings.ReplaceAll(word, `\`, "/")), ".exe")
-		if name == "beacon-hooks" {
-			binary = true
-		}
-		if word == "--platform=cursor" || (word == "--platform" && i+1 < len(fields) && strings.Trim(fields[i+1], `'"`) == "cursor") {
-			cursor = true
-		}
-	}
-	return binary && cursor
 }
