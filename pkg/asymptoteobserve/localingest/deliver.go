@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -44,27 +43,28 @@ type Deliverer struct {
 	// Spool holds lines that could not be written. An empty Dir means DefaultSpoolDir. Each log
 	// has its own spool beneath it, so a line is only ever written to the log it was meant for.
 	Spool Spool
-	// Euid reports the process's effective uid; nil means os.Geteuid. Tests replace it.
+	// Euid stands in for the process's privilege in tests: 0 is a privileged writer, anything else
+	// is not. Nil asks the operating system (processPrivileged).
 	Euid func() int
 	// FailureBackoff is how long, after a failed send, this account goes straight to the direct
 	// append without trying the socket. Zero means 10s; negative turns it off.
 	FailureBackoff time.Duration
 }
 
-// Applies reports whether a write to logPath goes through Write's socket path at all. Root writes
-// the log directly: it owns the file in every mode, and the events it writes -- a backfill of the
-// console user's sessions, the collector's own -- name their account themselves, which the ingest
-// server would replace with root. A per-user log is private to its account and always written
-// directly. Windows has no ingest socket.
+// Applies reports whether a write to logPath goes through Write's socket path at all. A privileged
+// writer -- root, or on Windows SYSTEM or an elevated administrator -- writes the log directly: it
+// may write the log in every mode, and the events it writes -- a backfill of the console user's
+// sessions, the collector's own -- name their account themselves, which the ingest server would
+// replace with its own. A per-user log is private to its account and always written directly.
 func (d Deliverer) Applies(logPath string) bool {
-	if runtime.GOOS == "windows" {
-		return false
-	}
-	euid := os.Geteuid()
+	return !d.privileged() && !asymptoteobserve.RuntimeLogIsPrivate(logPath)
+}
+
+func (d Deliverer) privileged() bool {
 	if d.Euid != nil {
-		euid = d.Euid()
+		return d.Euid() == 0
 	}
-	return euid != 0 && !asymptoteobserve.RuntimeLogIsPrivate(logPath)
+	return processPrivileged()
 }
 
 // Outcome is where Write put a line.

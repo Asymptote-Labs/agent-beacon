@@ -193,3 +193,15 @@ func ShareSystemLog(path string) error {
 	}
 	return EnsureSystemLogWritable(path)
 }
+
+// CheckRestrictedSystemLogACL lists every way the restricted log at path, its directory, its
+// archives or its lock let an account other than SYSTEM, Administrators and the readers group
+// reach it (sysacl.RestrictedProblems), for doctor. An ordinary user cannot open the directory, and
+// gets that error back.
+func CheckRestrictedSystemLogACL(path string) ([]string, error) {
+	readers, err := logReadersSID()
+	if err != nil {
+		return nil, err
+	}
+	return sysacl.InspectRestrictedLogDir(filepath.Dir(path), filepath.Base(path), readers)
+}

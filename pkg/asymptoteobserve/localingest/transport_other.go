@@ -33,3 +33,6 @@ func identify(net.Conn) (Peer, error) { return Peer{}, errors.ErrUnsupported }
 const peerCredentialsSupported = false
 
 func temporaryAcceptError(error) bool { return false }
+
+// processPrivileged is never true here, where there is no ingest channel to bypass.
+func processPrivileged() bool { return false }
