@@ -63,7 +63,9 @@ func (c Client) Probe() error {
 // the first batch that does not finish, and returns the reason.
 //
 // Each line must be one complete event with no newline inside it; a trailing newline is dropped.
-// ErrNoSocket means the endpoint has no ingest socket, so nothing was sent.
+// ErrNoSocket means the endpoint has no ingest socket, so nothing was sent. ErrOutcomeUnknown means
+// the batch that failed got no usable reply, so the lines from Processed on may or may not have
+// been written.
 func (c Client) Send(lines [][]byte) (Response, error) {
 	cleaned := make([][]byte, len(lines))
 	for i, line := range lines {
@@ -133,19 +135,27 @@ func (c Client) sendBatch(socket string, lines [][]byte) (Response, error) {
 	// Read the reply even after a failed write: a server that stopped reading early (a full batch,
 	// a refused preamble) still says how far it got before closing.
 	reply, readErr := bufio.NewReader(io.LimitReader(conn, maxResponseBytes)).ReadBytes('\n')
+	// Past this point the connection was made and lines may have reached the server, so without a
+	// reply it can be said how far it got, nothing is known about them.
+	unknown := func(err error) error {
+		if len(lines) == 0 {
+			return err
+		}
+		return fmt.Errorf("%w: %w", ErrOutcomeUnknown, err)
+	}
 	if readErr != nil && len(reply) == 0 {
 		if writeErr != nil {
-			return Response{}, fmt.Errorf("send to %s: %w", c.path(), writeErr)
+			return Response{}, unknown(fmt.Errorf("send to %s: %w", c.path(), writeErr))
 		}
-		return Response{}, fmt.Errorf("read reply from %s: %w", c.path(), readErr)
+		return Response{}, unknown(fmt.Errorf("read reply from %s: %w", c.path(), readErr))
 	}
 	var resp Response
 	if err := json.Unmarshal(bytes.TrimSpace(reply), &resp); err != nil {
-		return Response{}, fmt.Errorf("malformed reply from %s: %w", c.path(), err)
+		return Response{}, unknown(fmt.Errorf("malformed reply from %s: %w", c.path(), err))
 	}
 	if resp.Processed < 0 || resp.Processed > len(lines) || resp.Accepted < 0 || resp.Rejected < 0 ||
 		resp.Accepted+resp.Rejected != resp.Processed {
-		return Response{}, fmt.Errorf("inconsistent reply from %s: %+v for %d lines", c.path(), resp, len(lines))
+		return Response{}, unknown(fmt.Errorf("inconsistent reply from %s: %+v for %d lines", c.path(), resp, len(lines)))
 	}
 	if resp.Error == errLogMismatch {
 		return resp, fmt.Errorf("%w: sent for %s", ErrLogMismatch, c.LogPath)
