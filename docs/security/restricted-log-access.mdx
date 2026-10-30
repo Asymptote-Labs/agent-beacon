@@ -78,7 +78,7 @@ Restricted mode works the same way on a Windows system install, with Windows mec
 | User recorded on hook events | What the hook reports | The account Windows says sent the event: its SID in `user.uid` and `DOMAIN\name` in `user.name` |
 | Collector down or restarting | Hooks keep appending | Hooks hold events in a private spool in their profile and send them later |
 
-The pipe is created by the SYSTEM collector, refuses connections from other machines and denies network logons, and does not let ordinary accounts add an instance of their own. Hooks send only to a pipe that SYSTEM or Administrators created, so an account that takes the name first gets nothing. Hooks run by SYSTEM or from an elevated shell write the log directly, as root does on Unix.
+The pipe is created by the SYSTEM collector, refuses connections from other machines and denies network logons, and does not let ordinary accounts add an instance of their own. Hooks send only to a pipe that SYSTEM or Administrators created, so an account that takes the name first gets nothing: hooks keep their events in their spool, and the collector keeps running and serves the pipe as soon as the name is free. Hooks run by SYSTEM or by an administrator from an elevated shell write the log directly, as root does on Unix.
 
 Run the commands from an elevated shell:
 
