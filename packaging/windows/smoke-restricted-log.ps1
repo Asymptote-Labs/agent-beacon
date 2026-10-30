@@ -94,6 +94,7 @@ function Invoke-Hook {
         "set `"BEACON_ENDPOINT_LOG=$log`"",
         "set `"BEACON_ENDPOINT_CONFIG=$config`"",
         'set "USER=Administrator"',
+        "echo %USERPROFILE%> `"$work\$Session.home`"",
         "`"$hooks`" --platform claude session-start < `"$payload`" > `"$work\$Session.out`" 2> `"$work\$Session.err`""
     )
     if ($code -ne 0) {
@@ -149,8 +150,17 @@ try {
     $sessionB = 'smoke-b-' + [Guid]::NewGuid().ToString('N')
     Invoke-Hook $sessionB
     if ((Get-LogEvents $sessionB).Count -gt 0) { throw "an event reached the restricted log with the collector stopped" }
-    $spool = Join-Path $env:SystemDrive "Users\$account\.beacon\endpoint\spool"
+    # The profile the hook ran under, as it saw it: Windows names a profile directory after the
+    # account only when that name is free.
+    $profileDir = (Get-Content -LiteralPath "$work\$sessionB.home" -ErrorAction SilentlyContinue | Select-Object -First 1)
+    if (-not $profileDir) { $profileDir = Join-Path $env:SystemDrive "Users\$account" }
+    $spool = Join-Path $profileDir.Trim() '.beacon\endpoint\spool'
     if (-not (Get-ChildItem -LiteralPath $spool -Recurse -File -ErrorAction SilentlyContinue | Select-String -SimpleMatch $sessionB -Quiet)) {
+        Write-Output "--- hook output for $sessionB ---"
+        Get-Content -LiteralPath "$work\$sessionB.out", "$work\$sessionB.err" -ErrorAction SilentlyContinue | Write-Output
+        Write-Output "--- files under $profileDir\.beacon ---"
+        Get-ChildItem -LiteralPath (Join-Path $profileDir.Trim() '.beacon') -Recurse -Force -ErrorAction Continue 2>&1 |
+            ForEach-Object { "$($_.FullName) $($_.Length)" } | Write-Output
         throw "the event sent while the collector was stopped is not in the account's spool ($spool)"
     }
     Start-Service -Name BeaconCollector
