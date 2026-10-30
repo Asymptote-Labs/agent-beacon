@@ -23,4 +23,4 @@ func InspectRestrictedLogDir(dir, base, readersSID string) ([]string, error) { r
 func ResetLogDirToShared(string) error { return nil }
 
 // LooksRestricted is false off Windows.
-func LooksRestricted(string) bool { return false }
+func LooksRestricted(string, string) bool { return false }
