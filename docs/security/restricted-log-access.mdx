@@ -155,6 +155,8 @@ Vector keeps its read position in `/var/lib/vector/beacon-sentinel`, so it resum
 
 ### Other shippers
 
+**rsyslog.** When rsyslog [forwards the log to your collector](/log-forwarding/rsyslog), it reads the file as root on RHEL, Debian and most other distributions, so nothing changes there. On Ubuntu it runs as the `syslog` user: run `sudo usermod -aG beacon-log syslog` and restart rsyslog. See [With restricted log access](/log-forwarding/rsyslog#with-restricted-log-access).
+
 The same rule applies to Splunk Universal Forwarder, Filebeat or Elastic Agent, the Datadog Agent, Wazuh, Rapid7, Sumo Logic and any customer-managed shipper reading the [local JSONL log](/log-forwarding/local-jsonl): running as root, nothing changes; running as its own account, add that account to `beacon-log` and restart it. Splunk HEC and Falcon LogScale HEC are sent by the collector itself and are not affected.
 
 ## Who can do what on a restricted endpoint
