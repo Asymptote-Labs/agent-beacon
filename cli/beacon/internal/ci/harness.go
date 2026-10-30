@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudeotel"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 )
 
@@ -25,28 +26,12 @@ type HarnessConfig struct {
 	Paths     map[string]string `json:"paths,omitempty"`
 }
 
-func ClaudeEnv(base []string, endpoint string) []string {
-	env := envMap(base)
-	return flattenEnv(claudeEnv(env, env, endpoint))
-}
-
-// claudeEnv sets Claude Code's telemetry variables in env. caller is the environment the session
-// runs under, which is where a deliberately tuned export timing is read from; it is env itself
-// unless env holds only what is being added to that environment.
+// claudeEnv adds Claude Code's telemetry variables to env, the overlay laid over caller, which is
+// the environment the session runs under and where a deliberately tuned export timing is read from.
 func claudeEnv(env, caller map[string]string, endpoint string) map[string]string {
-	env["CLAUDE_CODE_ENABLE_TELEMETRY"] = "1"
-	env["OTEL_LOGS_EXPORTER"] = "otlp"
-	env["OTEL_METRICS_EXPORTER"] = "otlp"
-	// Delta temporality keeps token usage counters per-interval so downstream
-	// aggregation can sum datapoints without deduping cumulative series.
-	env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"] = "delta"
-	env["OTEL_EXPORTER_OTLP_PROTOCOL"] = "grpc"
-	env["OTEL_EXPORTER_OTLP_ENDPOINT"] = endpoint
-	delete(env, "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
-	delete(env, "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
-	delete(env, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
-	env["OTEL_LOG_TOOL_DETAILS"] = "1"
-	env["OTEL_LOG_USER_PROMPTS"] = "1"
+	for key, value := range claudeotel.OTLPEnv(endpoint, caller) {
+		env[key] = value
+	}
 	for key, value := range claudeEnvDefaults {
 		if strings.TrimSpace(caller[key]) != "" {
 			value = caller[key]
@@ -225,16 +210,6 @@ func percentEncodeResourceValue(value string) string {
 	// OTEL_RESOURCE_ATTRIBUTES uses W3C Baggage-style percent encoding. QueryEscape
 	// escapes delimiters such as comma and equals; spaces must remain percent-encoded.
 	return strings.ReplaceAll(url.QueryEscape(value), "+", "%20")
-}
-
-// inlineRawBodies reports whether an OTEL_LOG_RAW_API_BODIES value has Claude Code put API bodies
-// inline in its log events, rather than leave them off or write them to files Beacon never reads.
-func inlineRawBodies(value string) bool {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "1", "true":
-		return true
-	}
-	return false
 }
 
 func envMap(values []string) map[string]string {

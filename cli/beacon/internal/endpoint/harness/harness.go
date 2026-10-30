@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudeotel"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/devinsession"
@@ -404,18 +405,21 @@ func ConfigureClaude(opts ConfigureOptions) (string, error) {
 	if env == nil {
 		env = map[string]interface{}{}
 	}
-	env["CLAUDE_CODE_ENABLE_TELEMETRY"] = "1"
-	env["OTEL_LOGS_EXPORTER"] = "otlp"
-	env["OTEL_METRICS_EXPORTER"] = "otlp"
-	// Delta temporality keeps token usage counters per-interval so downstream
-	// aggregation can sum datapoints without deduping cumulative series.
-	env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"] = "delta"
-	env["OTEL_EXPORTER_OTLP_PROTOCOL"] = "grpc"
-	env["OTEL_EXPORTER_OTLP_ENDPOINT"] = opts.Endpoint
-	// Tool details expose the command, file path, URL, search pattern, and MCP
-	// identity/arguments needed to reconstruct agent activity from OTel events.
-	env["OTEL_LOG_TOOL_DETAILS"] = "1"
-	env["OTEL_LOG_USER_PROMPTS"] = "1"
+	// Claude Code runs with the user's shell environment, and a value in settings.json replaces the
+	// same variable from there. The routing a session would otherwise get is both, as far as Beacon
+	// can see the shell from here.
+	caller := map[string]string{}
+	for _, entry := range os.Environ() {
+		if key, value, ok := strings.Cut(entry, "="); ok {
+			caller[key] = value
+		}
+	}
+	for key, value := range env {
+		caller[key] = fmt.Sprint(value)
+	}
+	for key, value := range claudeotel.OTLPEnv(opts.Endpoint, caller) {
+		env[key] = value
+	}
 	// Inline API bodies carry the page WebFetch sends to its summarizer model and the
 	// MCP tool definitions the model is shown, the only place Claude Code reports
 	// either, and also the system prompt and the whole conversation. The collector's
@@ -426,12 +430,12 @@ func ConfigureClaude(opts ConfigureOptions) (string, error) {
 	switch {
 	case opts.CaptureModelContext && !configured:
 		env["OTEL_LOG_RAW_API_BODIES"] = "1"
-	case !opts.CaptureModelContext && claudeInlineRawBodies(rawBodies):
+	case !opts.CaptureModelContext && claudeotel.InlineRawBodies(fmt.Sprint(rawBodies)):
 		delete(env, "OTEL_LOG_RAW_API_BODIES")
 	}
 	contentLimit, limited := env["CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH"]
 	switch {
-	case opts.CaptureModelContext && !limited && claudeInlineRawBodies(env["OTEL_LOG_RAW_API_BODIES"]):
+	case opts.CaptureModelContext && !limited && claudeotel.InlineRawBodies(fmt.Sprint(env["OTEL_LOG_RAW_API_BODIES"])):
 		env["CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH"] = claudeModelContextContentLimit
 	case !opts.CaptureModelContext && fmt.Sprint(contentLimit) == claudeModelContextContentLimit:
 		delete(env, "CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH")
@@ -559,11 +563,20 @@ func claudeStatus(path string) (TelemetryStatus, string) {
 	if fmt.Sprint(env["CLAUDE_CODE_ENABLE_TELEMETRY"]) != "1" {
 		return TelemetryDisabled, "CLAUDE_CODE_ENABLE_TELEMETRY is not enabled"
 	}
-	if !strings.Contains(fmt.Sprint(env["OTEL_EXPORTER_OTLP_ENDPOINT"]), "127.0.0.1") &&
-		!strings.Contains(fmt.Sprint(env["OTEL_EXPORTER_OTLP_ENDPOINT"]), "localhost") {
+	if !localOTLPEndpoint(env["OTEL_EXPORTER_OTLP_ENDPOINT"]) {
 		return TelemetryMisconfigured, "OTLP endpoint does not point to localhost"
 	}
+	for _, key := range claudeotel.RedirectKeys() {
+		if value, set := env[key]; set && strings.TrimSpace(fmt.Sprint(value)) != "" && !localOTLPEndpoint(value) {
+			return TelemetryMisconfigured, key + " sends Claude telemetry away from localhost"
+		}
+	}
 	return TelemetryEnabled, "Claude telemetry is configured for local OTLP"
+}
+
+func localOTLPEndpoint(value interface{}) bool {
+	endpoint := fmt.Sprint(value)
+	return strings.Contains(endpoint, "127.0.0.1") || strings.Contains(endpoint, "localhost")
 }
 
 func codexStatus(path string) (TelemetryStatus, string) {
@@ -796,16 +809,6 @@ func commandVersion(path string) string {
 // the first request of a session is the one that matters, since the collector lists each tool once
 // per session.
 const claudeModelContextContentLimit = "262144"
-
-// claudeInlineRawBodies reports whether an OTEL_LOG_RAW_API_BODIES value has Claude Code put
-// API bodies inline in its log events, rather than leave them off or write them to files.
-func claudeInlineRawBodies(value interface{}) bool {
-	switch strings.ToLower(strings.TrimSpace(fmt.Sprint(value))) {
-	case "1", "true":
-		return true
-	}
-	return false
-}
 
 // decodeSettings parses a harness's JSON settings file. The error names the file so the user
 // knows which one to fix.

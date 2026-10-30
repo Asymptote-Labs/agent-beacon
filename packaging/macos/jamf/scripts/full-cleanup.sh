@@ -361,6 +361,17 @@ for key in [
 ]:
     env.pop(key, None)
 
+# Install cancels per-signal routing it found by writing these values. Remove only those, so a
+# value someone set after install stays.
+cancelled = {"OTEL_EXPORTER_OTLP_HEADERS": "", "BETA_TRACING_ENDPOINT": ""}
+for signal in ("LOGS", "METRICS", "TRACES"):
+    cancelled[f"OTEL_EXPORTER_OTLP_{signal}_ENDPOINT"] = ""
+    cancelled[f"OTEL_EXPORTER_OTLP_{signal}_PROTOCOL"] = "grpc"
+    cancelled[f"OTEL_EXPORTER_OTLP_{signal}_HEADERS"] = ""
+for key, value in cancelled.items():
+    if key in env and env[key] == value:
+        env.pop(key)
+
 data["env"] = env
 try:
     replace_verified_text(
