@@ -465,10 +465,11 @@ func silentCollector(t *testing.T) (sock string, received func() int) {
 				return
 			}
 			_, _ = io.Copy(io.Discard, c)
-			_ = c.Close()
+			// Counted before the close, which is what the client waits on.
 			mu.Lock()
 			n++
 			mu.Unlock()
+			_ = c.Close()
 		}
 	}()
 	return sock, func() int { mu.Lock(); defer mu.Unlock(); return n }
