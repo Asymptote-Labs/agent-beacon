@@ -106,13 +106,69 @@ func TestEventsSentToThePipeLandInTheLogUnderTheSendersAccount(t *testing.T) {
 	}
 }
 
-func TestASecondCollectorCannotServeTheSamePipe(t *testing.T) {
+// Anyone can create a pipe's name, so a collector that finds its pipe taken -- by another
+// collector, or an account that got there first -- starts anyway, so the rest of the collector
+// keeps running, and serves the pipe as soon as the name is free.
+func TestACollectorWhosePipeIsTakenServesItOnceItIsFree(t *testing.T) {
+	prev := listenRetryInterval
+	listenRetryInterval = 20 * time.Millisecond
+	t.Cleanup(func() { listenRetryInterval = prev })
+
 	f := startOnPipe(t)
 	cfg := *f.ext.cfg
 	second := newIngest(&cfg, zap.NewNop())
-	if err := second.Start(context.Background(), nil); err == nil {
-		_ = second.Shutdown(context.Background())
-		t.Fatal("a second collector started on a pipe another one serves")
+	if err := second.Start(context.Background(), nil); err != nil {
+		t.Fatalf("Start with the pipe taken = %v; the collector must keep running", err)
+	}
+	t.Cleanup(func() { _ = second.Shutdown(context.Background()) })
+	second.mu.Lock()
+	serving := second.server != nil
+	second.mu.Unlock()
+	if serving {
+		t.Fatal("the second collector claims a pipe the first one serves")
+	}
+
+	if err := f.ext.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := f.client.Send([][]byte{winEvent(t, 1)}); err == nil {
+			break
+		} else if time.Now().After(deadline) {
+			t.Fatalf("the second collector never took the freed pipe: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// Shutdown stops a collector still waiting for its pipe, and it never serves afterwards.
+func TestShutdownStopsWaitingForThePipe(t *testing.T) {
+	prev := listenRetryInterval
+	listenRetryInterval = 20 * time.Millisecond
+	t.Cleanup(func() { listenRetryInterval = prev })
+
+	f := startOnPipe(t)
+	cfg := *f.ext.cfg
+	second := newIngest(&cfg, zap.NewNop())
+	if err := second.Start(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.ext.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	second.mu.Lock()
+	serving := second.server != nil
+	second.mu.Unlock()
+	if serving {
+		t.Fatal("a collector that was shut down went on to serve the pipe")
+	}
+	if err := f.client.Probe(); !errors.Is(err, localingest.ErrNoSocket) {
+		t.Fatalf("Probe = %v, want ErrNoSocket", err)
 	}
 }
 

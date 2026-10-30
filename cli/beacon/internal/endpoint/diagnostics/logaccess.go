@@ -183,11 +183,17 @@ func ingestSocketPath(ingest localingest.Deliverer) string {
 // checkRestrictedLogACL is checkRestrictedLogPermissions on Windows, where file modes say nothing:
 // the directory and every file of the log family must grant nobody but SYSTEM, Administrators and
 // the readers group (who may only read) anything at all. Run unelevated it cannot open the
-// directory, which is the restricted mode working.
+// directory, which is the restricted mode working, unless it found a problem before it was refused.
 func checkRestrictedLogACL(path string) Check {
 	dir := filepath.Dir(path)
 	problems, err := restrictedLogProblems(path)
 	switch {
+	// Before the errors: an account that can read the directory's ACL but not open what is in it
+	// still found a directory too open, and that is the answer, not "as intended".
+	case len(problems) > 0:
+		return Check{Name: "runtime_log_permissions", Target: dir, Status: StatusFail, Severity: SeverityHigh,
+			Message:  "the restricted log lets accounts outside SYSTEM, Administrators and the " + loggroup.Name + " group reach it: " + strings.Join(problems, "; "),
+			Evidence: "restricted_log_too_open", Action: repairSystemAction}
 	case errors.Is(err, fs.ErrPermission):
 		return Check{Name: "runtime_log_permissions", Target: dir, Status: StatusOK, Severity: SeverityInfo,
 			Message:  "this account cannot open the restricted log, as intended; run doctor " + elevated() + " to inspect it",
@@ -198,10 +204,6 @@ func checkRestrictedLogACL(path string) Check {
 	case err != nil:
 		return Check{Name: "runtime_log_permissions", Target: dir, Status: StatusWarn, Severity: SeverityLow,
 			Message: "could not read the restricted log's ACL: " + err.Error(), Evidence: "acl_unreadable"}
-	case len(problems) > 0:
-		return Check{Name: "runtime_log_permissions", Target: dir, Status: StatusFail, Severity: SeverityHigh,
-			Message:  "the restricted log lets accounts outside SYSTEM, Administrators and the " + loggroup.Name + " group reach it: " + strings.Join(problems, "; "),
-			Evidence: "restricted_log_too_open", Action: repairSystemAction}
 	}
 	return Check{Name: "runtime_log_permissions", Target: dir, Status: StatusOK, Severity: SeverityInfo,
 		Message: "restricted: only SYSTEM, Administrators and the " + loggroup.Name + " group can reach the log", Evidence: "restricted_acl"}

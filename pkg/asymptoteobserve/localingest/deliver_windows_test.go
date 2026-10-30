@@ -134,17 +134,26 @@ func TestARealAccessDeniedIsAPermissionRefusal(t *testing.T) {
 	}
 }
 
-// SYSTEM and elevated administrators write the restricted log directly; everyone else goes through
-// the pipe.
+// SYSTEM and administrators with Administrators enabled write the restricted log directly;
+// everyone else, elevated for another group or not elevated at all, goes through the pipe.
 func TestWindowsPrivilegeDecidesTheRoute(t *testing.T) {
 	token, err := windows.OpenCurrentProcessToken()
 	if err != nil {
 		t.Fatal(err)
 	}
-	elevated := token.IsElevated()
-	token.Close()
-	if elevated && !processPrivileged() {
-		t.Fatal("an elevated process is not treated as privileged")
+	defer token.Close()
+	groups, err := token.GetTokenGroups()
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminEnabled := false
+	for _, g := range groups.AllGroups() {
+		if g.Sid.IsWellKnown(windows.WinBuiltinAdministratorsSid) && g.Attributes&windows.SE_GROUP_ENABLED != 0 {
+			adminEnabled = true
+		}
+	}
+	if processPrivileged() != adminEnabled {
+		t.Fatalf("processPrivileged = %v, but Administrators enabled in this token = %v", processPrivileged(), adminEnabled)
 	}
 	if (Deliverer{}).Applies(systemLog) == processPrivileged() {
 		t.Fatalf("Applies = %v while processPrivileged = %v", (Deliverer{}).Applies(systemLog), processPrivileged())

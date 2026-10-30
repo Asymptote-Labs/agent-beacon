@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componentstatus"
@@ -38,6 +39,9 @@ type ingest struct {
 	mu     sync.Mutex
 	server *localingest.Server
 	done   chan error
+	// stopRetry and retried are set while Start is still waiting to listen (see listenRetries).
+	stopRetry chan struct{}
+	retried   chan struct{}
 }
 
 func newIngest(cfg *Config, logger *zap.Logger) *ingest {
@@ -53,10 +57,17 @@ func newIngest(cfg *Config, logger *zap.Logger) *ingest {
 	}
 }
 
-// Start creates the socket or pipe and serves it in the background. A socket another running
-// collector still answers on, a non-socket at the path, or a pipe that already exists (another
-// collector, or an account that took the name first) fails the start: two writers serving one log,
-// or a name someone else holds, is a problem to surface, not to work around.
+// Start creates the socket or pipe and serves it in the background.
+//
+// On Unix a socket another running collector still answers on, or a non-socket at the path, fails
+// the start: two writers serving one log is a problem to surface, not to work around, and the
+// socket's directory is root's, so nobody else can hold the name.
+//
+// On Windows the pipe's name is in a namespace every account can create in, so an account that
+// takes it first must not be able to keep the whole collector down (the beaconjson exporter and the
+// OTLP receivers with it). There a failed listen is reported as a recoverable error and retried
+// every listenRetryInterval until it succeeds or the collector stops; meanwhile hooks refuse the
+// impostor's pipe, which is not owned by SYSTEM or Administrators, and spool their events.
 func (e *ingest) Start(_ context.Context, host component.Host) error {
 	if !asymptoteobserve.RuntimeLogAccessRestricted(e.cfg.LogPath) {
 		// Harmless -- the log is simply also writable directly -- but not what install sets up,
@@ -65,9 +76,51 @@ func (e *ingest) Start(_ context.Context, host component.Host) error {
 			zap.String("log_path", e.cfg.LogPath))
 	}
 	l, err := e.listen(e.socketPath())
-	if err != nil {
-		return fmt.Errorf("beacon_ingest: listen on %s: %w", e.socketPath(), err)
+	if err == nil {
+		e.serve(host, l)
+		return nil
 	}
+	err = fmt.Errorf("beacon_ingest: listen on %s: %w", e.socketPath(), err)
+	if !listenRetries {
+		return err
+	}
+	e.logger.Error("beacon_ingest cannot listen yet; hooks spool their events until it can", zap.Error(err))
+	if host != nil {
+		componentstatus.ReportStatus(host, componentstatus.NewRecoverableErrorEvent(err))
+	}
+	stop, retried := make(chan struct{}), make(chan struct{})
+	e.mu.Lock()
+	e.stopRetry, e.retried = stop, retried
+	e.mu.Unlock()
+	go e.retryListen(host, stop, retried)
+	return nil
+}
+
+// retryListen listens again every listenRetryInterval until it succeeds or stop is closed.
+func (e *ingest) retryListen(host component.Host, stop <-chan struct{}, retried chan<- struct{}) {
+	defer close(retried)
+	ticker := time.NewTicker(listenRetryInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+		}
+		l, err := e.listen(e.socketPath())
+		if err != nil {
+			continue
+		}
+		e.serve(host, l)
+		if host != nil {
+			componentstatus.ReportStatus(host, componentstatus.NewEvent(componentstatus.StatusOK))
+		}
+		return
+	}
+}
+
+// serve serves l in the background until Shutdown or a serve error.
+func (e *ingest) serve(host component.Host, l localingest.Listener) {
 	server := &localingest.Server{
 		Append:             e.append,
 		LogPath:            e.cfg.LogPath,
@@ -104,12 +157,19 @@ func (e *ingest) Start(_ context.Context, host component.Host) error {
 	e.server, e.done = server, done
 	e.mu.Unlock()
 	e.logger.Info("beacon_ingest listening", zap.String("socket", e.socketPath()), zap.String("log_path", e.cfg.LogPath))
-	return nil
 }
 
 // Shutdown stops serving, waits for connections in progress to finish their writes, and removes
 // the socket, so hooks find no socket and spool until the collector is back.
 func (e *ingest) Shutdown(context.Context) error {
+	e.mu.Lock()
+	stop, retried := e.stopRetry, e.retried
+	e.stopRetry, e.retried = nil, nil
+	e.mu.Unlock()
+	if stop != nil {
+		close(stop)
+		<-retried // after this nothing else starts serving
+	}
 	e.mu.Lock()
 	server, done := e.server, e.done
 	e.server, e.done = nil, nil
