@@ -511,7 +511,7 @@ func (rule redactionRule) apply(text *redactGate, slot *redactSlot) string {
 func (rule redactionRule) applyOnce(text *redactGate, slot *redactSlot) string {
 	value := text.value
 	var out []byte
-	last := 0
+	last, slashed := 0, false
 	for match, use := range rule.matches(text, slot) {
 		if match[0] < last {
 			continue // inside a match that ran on (redactionRule.runsOn)
@@ -530,6 +530,12 @@ func (rule redactionRule) applyOnce(text *redactGate, slot *redactSlot) string {
 		replacement, end := use.rule.replacing(value, match)
 		out = use.pattern.ExpandString(out, replacement, value, match)
 		last = end
+		// An AWS secret may hold a `/`, where the URL rule, which runs before the shape rules,
+		// stopped a password; once the secret is replaced, the password can run on to its `@`.
+		slashed = slashed || use.rule.expr == redactAWSPair && strings.IndexByte(value[match[5]:match[6]], '/') >= 0
+	}
+	if slashed && strings.Contains(value, "://") {
+		text.hidden = true
 	}
 	if out == nil {
 		return value
@@ -707,9 +713,10 @@ func RedactString(value string) string {
 // value it takes, and that value can itself be a label with its separator (keptLabel): of
 // `token:seCret":token":0` the rule for a quoted label with a bare value keeps `seCret":token`
 // (`token` names an auth scheme) and never sees `token":0`; the rule for unquoted labels then
-// replaces `seCret`, the label that hid it, and only the next pass redacted `0`. And copies of
+// replaces `seCret`, the label that hid it, and only the next pass redacted `0`. Copies of
 // assigned values, replaced after every rule has run, can be where a match starts or ends
-// (copyHidesMatch). Such text is redacted again until it stops changing, as every later call
+// (copyHidesMatch); and the URL rule stops a password at a `/` in an AWS secret, which the shape
+// rules replace after it. Such text is redacted again until it stops changing, as every later call
 // would redact it. A pass can only uncover what the one before hid; texts the tests and fuzzing
 // have tried took at most three passes that change them, and redactMaxPasses keeps the cost
 // linear whatever the text.

@@ -234,8 +234,9 @@ type redactGate struct {
 	// known and present are bit sets over redactNeedles ids: which sets were looked for in this
 	// version of the text, and which were found.
 	known, present uint64
-	// hidden is set when a value a rule keeps, or the capture takes, is itself a label and its
-	// separator (keptLabel): the match that label begins lies inside one that neither looks into.
+	// hidden is set when a match may hide another from this pass: a value a rule keeps, or the
+	// capture takes, that is itself a label and its separator (keptLabel), inside a match that
+	// neither looks into; or a replaced AWS secret's `/`, where a URL's password stopped.
 	hidden bool
 	// copies are the assigned values whose copies are removed after every rule has run.
 	copies redactCopies
