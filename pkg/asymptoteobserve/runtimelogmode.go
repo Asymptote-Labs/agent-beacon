@@ -218,15 +218,34 @@ func settleRuntimeLogFileMode(path, logPath string, created bool, stat func(stri
 // restricted must be readable again once it is shared, or every reader of the log's history stops
 // at them. Best effort, like SettleRuntimeLogFileMode on an existing file: only a file this process
 // owns is changed, and a link is never followed.
+//
+// Each archive is settled through a descriptor, never by path: a log can sit in a directory another
+// account can write (a custom path, or root keeping a user's HOME), and a chmod by path would follow
+// a symlink swapped in after the check, letting that account steer root into widening any file.
 func SettleRuntimeLogArchives(path string, archives int) {
 	for i := 1; i <= archives; i++ {
-		archive := fmt.Sprintf("%s.%d", path, i)
-		info, err := os.Lstat(archive)
-		if err != nil || !info.Mode().IsRegular() {
-			continue
-		}
-		_ = SettleRuntimeLogFileMode(archive, path, false)
+		settleRuntimeLogArchive(fmt.Sprintf("%s.%d", path, i), path)
 	}
+}
+
+// archiveChecked runs between checking an archive and changing its mode. Nil outside tests, which
+// use it to swap the archive for a link at exactly that moment.
+var archiveChecked func(archive string)
+
+func settleRuntimeLogArchive(archive, logPath string) {
+	f, err := os.OpenFile(archive, os.O_RDONLY|noFollowOpenFlags(), 0)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || linkedElsewhere(info) {
+		return
+	}
+	if archiveChecked != nil {
+		archiveChecked(archive)
+	}
+	_ = settleRuntimeLogFileMode(archive, logPath, false, func(string) (os.FileInfo, error) { return info, nil }, f.Chmod)
 }
 
 func pathWithin(path, dir string) bool {
