@@ -142,6 +142,17 @@ func TestResolveNameNamesTheCurrentAccount(t *testing.T) {
 	}
 }
 
+// Accounts that are not SidTypeUser are named too. os/user refused them, which would have left
+// events from SYSTEM, a service's virtual account or an Entra ID account without a name.
+func TestResolveNameNamesAccountsThatAreNotLocalUsers(t *testing.T) {
+	if got := resolveName("S-1-5-18"); got != `NT AUTHORITY\SYSTEM` {
+		t.Fatalf("resolveName(SYSTEM) = %q", got)
+	}
+	if got := resolveName("not a sid"); got != "" {
+		t.Fatalf("resolveName of a malformed SID = %q", got)
+	}
+}
+
 func TestValidWindowsName(t *testing.T) {
 	for _, ok := range []string{`CONTOSO\Jane Doe`, `DESKTOP-1\runneradmin`, `NT AUTHORITY\SYSTEM`} {
 		if !validWindowsName(ok) {
@@ -160,9 +171,9 @@ func TestValidWindowsName(t *testing.T) {
 func TestResolveNameGivesUpOnASlowLookup(t *testing.T) {
 	prev := lookupAccount
 	release := make(chan struct{})
-	lookupAccount = func(string) (*user.User, error) {
+	lookupAccount = func(string) (string, error) {
 		<-release
-		return &user.User{Username: `CONTOSO\late`}, nil
+		return `CONTOSO\late`, nil
 	}
 	t.Cleanup(func() { close(release); lookupAccount = prev })
 	start := time.Now()
