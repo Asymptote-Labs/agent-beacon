@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // OverridesSchema is the schema string an overrides file must declare. A layout change gets a
@@ -216,13 +217,8 @@ func LoadOverrides(data []byte, catalog *Catalog) (*Overrides, error) {
 	// unpublished and price its tokens by a fallback the author never asked for.
 	dec.DisallowUnknownFields()
 	var file overridesJSON
-	if err := dec.Decode(&file); err != nil {
+	if err := asymptoteobserve.DecodeOnly(dec, &file); err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
-	}
-	// More() reports false before a stray closing bracket or brace, so the end of input is
-	// required explicitly: anything after the document, even a lone "]", is refused.
-	if _, err := dec.Token(); err != io.EOF {
-		return nil, fmt.Errorf("parse: trailing data after the document")
 	}
 	if file.Schema != OverridesSchema {
 		return nil, fmt.Errorf("schema %q, want %q", file.Schema, OverridesSchema)
