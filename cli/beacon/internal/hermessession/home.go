@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/homepath"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 )
 
@@ -45,11 +46,11 @@ func HomeOverride(home string) (string, error) {
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
-	if home != "" {
-		if path == "~" {
-			path = home
-		} else if strings.HasPrefix(path, "~/") || (runtime.GOOS == "windows" && strings.HasPrefix(path, `~\`)) {
-			path = filepath.Join(home, path[2:])
+	// Hermes expands as Python's os.path.expanduser does: `~\` is a separator only on Windows, and
+	// with no home the path is left as written.
+	if home != "" && (runtime.GOOS == "windows" || !strings.HasPrefix(path, `~\`)) {
+		if expanded, err := homepath.ExpandTilde(path, home); err == nil {
+			path = expanded
 		}
 	}
 	absolute, err := filepath.Abs(path)
@@ -121,6 +122,18 @@ func nativeRoot(home string) string {
 	return filepath.Join(home, "."+name)
 }
 
+// DefaultProfile is the name Hermes gives the profile whose home is the root itself.
+const DefaultProfile = "default"
+
+// Profile names the Hermes profile whose home is dir: <root>/profiles/<name> is <name>, and any
+// other home is the default profile.
+func Profile(dir string) string {
+	if isProfileDir(dir) {
+		return filepath.Base(dir)
+	}
+	return DefaultProfile
+}
+
 // isProfileDir is the launcher's test for a HERMES_HOME that already selects a profile: its parent
 // directory is named "profiles".
 func isProfileDir(path string) bool {
@@ -147,6 +160,24 @@ func resolveExisting(path string) string {
 		}
 		rest = filepath.Join(filepath.Base(dir), rest)
 	}
+}
+
+// SameHome reports whether two Hermes home directories resolve to the same place.
+func SameHome(a, b string) bool {
+	return canonicalHome(a) == canonicalHome(b)
+}
+
+// canonicalHome is the form two spellings of one Hermes home share: absolute, with symlinks
+// resolved, and case-folded on Windows, whose paths are case-insensitive.
+func canonicalHome(dir string) string {
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	dir = resolveExisting(dir)
+	if runtime.GOOS == "windows" {
+		dir = strings.ToLower(dir)
+	}
+	return dir
 }
 
 // activeProfile reads the sticky profile name from <root>/active_profile. A missing, unreadable or

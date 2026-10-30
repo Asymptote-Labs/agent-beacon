@@ -24,6 +24,7 @@ CREDENTIALS_PATH="${GOOGLE_APPLICATION_CREDENTIALS:-}"
 NO_START="${BEACON_NO_START:-0}"
 STOP_ATTEMPTS="${BEACON_FORWARDER_STOP_ATTEMPTS:-65}"
 START_ATTEMPTS="${BEACON_FORWARDER_START_ATTEMPTS:-15}"
+POLL_SECONDS="${BEACON_FORWARDER_POLL_SECONDS:-1}"
 
 GCS_PREFIX="${GCS_PREFIX%/}"
 case "$GCS_PREFIX" in
@@ -125,10 +126,16 @@ include_array() {
       *)
         mkdir -p "$(dirname "$path")"
         # Hooks run as the console user and append to the runtime log, so a missing log is
-        # created 0666, the mode Beacon's own writer uses. An existing log keeps its mode.
+        # created 0666, the mode Beacon's own writer uses. A log in the restricted access mode,
+        # which only the collector writes, is created 0640 instead (its directory's setgid bit
+        # gives it the beacon-log group). An existing log keeps its mode.
         if [ ! -e "$path" ]; then
           touch "$path"
-          chmod 0666 "$path" || true
+          if grep -qx restricted "$(dirname "$path")/.beacon-log-access" 2>/dev/null; then
+            chmod 0640 "$path" || true
+          else
+            chmod 0666 "$path" || true
+          fi
         fi
         ;;
     esac
@@ -361,7 +368,7 @@ if command -v launchctl >/dev/null 2>&1; then
       echo "Timed out waiting for $LABEL to stop" >&2
       exit 1
     fi
-    sleep 1
+    sleep "$POLL_SECONDS"
   done
   launchctl bootstrap system "$PLIST_PATH" >/dev/null 2>&1 || {
     echo "Could not bootstrap $LABEL" >&2
@@ -377,7 +384,7 @@ if command -v launchctl >/dev/null 2>&1; then
       consecutive_running=0
     fi
     if [ "$consecutive_running" -lt 3 ]; then
-      sleep 1
+      sleep "$POLL_SECONDS"
     fi
   done
   if [ "$consecutive_running" -lt 3 ]; then

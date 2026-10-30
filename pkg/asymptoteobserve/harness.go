@@ -392,6 +392,25 @@ func NormalizeHarnessName(name string) string {
 		lower == "kimi_code_acp" || lower == "kimi-code-acp" ||
 		lower == "moonshot_kimi_code" || lower == "moonshot-kimi-code":
 		return "kimi_code"
+	// Harness² (google-research/harness2) is a framework that drives other agents rather than
+	// being one: it refines an OpenCode or Codex executor's harness by running that executor over
+	// benchmark tasks, many times per task. Beacon reads the trajectories it records under its runs
+	// directory and files them under this one name, with the executor that produced each one kept
+	// beside it, because the question a reader of these sessions asks first is "which of these
+	// came from an experiment" rather than "which agent binary ran".
+	//
+	// Equality against a closed set rather than Contains(lower, "harness"), and the reason is a
+	// different product. Harness (harness.io) is a CI/CD platform with its own `harness` CLI and
+	// delegate, and "harness" is also what half the field calls the code around a model -- this
+	// function's own name uses the word that way. A substring rule would file any of those under
+	// this framework. Bare "harness" is therefore deliberately NOT in the set and falls to the
+	// passthrough case, as a visible anomaly rather than a silent misattribution. The superscript
+	// spelling is the project's own name for itself; "harness^2" is how it is typed without one.
+	case lower == "harness2" || lower == "harness²" || lower == "harness^2" || lower == "harness_2" ||
+		lower == "harness-2" || lower == "harness 2" || lower == "harness2_cli" || lower == "harness2-cli" ||
+		lower == "google-research/harness2" || lower == "google_research/harness2" ||
+		lower == "google_harness2" || lower == "google-harness2":
+		return "harness2"
 	case name != "":
 		// An unrecognized runtime keeps its own name rather than being coerced or dropped. A new
 		// harness should show up in the log as itself, not as "unknown".

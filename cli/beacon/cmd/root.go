@@ -119,7 +119,7 @@ func printRootUpdateNotice(out io.Writer, result updatecheck.Result, color bool,
 	fmt.Fprintf(out, "Release notes: %s\n", beaconCLIChangelogURL)
 	switch install.Kind {
 	case selfupdate.InstallHomebrew:
-		fmt.Fprintln(out, "Update with: brew upgrade beacon")
+		fmt.Fprintln(out, "Update with: brew update && brew upgrade beacon")
 	case selfupdate.InstallSystemPkg:
 		fmt.Fprintln(out, "Update with: sudo beacon endpoint update --apply")
 	default:

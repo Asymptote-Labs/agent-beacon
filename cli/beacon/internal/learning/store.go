@@ -27,6 +27,11 @@ type Store struct {
 	dbPath string
 }
 
+type recordDB interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
 // Query selects stored learning records.
 //
 // ProjectPath is the trust boundary of this package. The CLI resolves an
@@ -64,6 +69,12 @@ func (s *Store) Path() string {
 	return s.dbPath
 }
 
+// dsn opens the store with a busy timeout, and with review transactions taking the write lock at
+// BEGIN, so a competing review waits instead of failing with SQLITE_BUSY when it upgrades.
+func (s *Store) dsn() string {
+	return sqliteuri.File(s.dbPath, url.Values{"_pragma": {"busy_timeout(5000)"}, "_txlock": {"immediate"}})
+}
+
 func (s *Store) db() (*sql.DB, error) {
 	if s.dbPath == "" {
 		s.dbPath = storeFile
@@ -71,7 +82,7 @@ func (s *Store) db() (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(s.dbPath), 0700); err != nil && filepath.Dir(s.dbPath) != "." {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", sqliteuri.File(s.dbPath, url.Values{"_pragma": {"busy_timeout(5000)"}}))
+	db, err := sql.Open("sqlite", s.dsn())
 	if err != nil {
 		return nil, err
 	}
@@ -448,32 +459,10 @@ func (s *Store) ListEvaluations(query Query) ([]asymptoteobserve.LearningEvaluat
 	if err != nil {
 		return nil, err
 	}
-	db, err := s.db()
-	if err != nil {
-		return nil, err
-	}
-	defer db.Close()
 	where, args := queryWhere(query, "project_id", "status", "")
-	rows, err := db.Query(`SELECT evaluation_json FROM evaluations`+where+` ORDER BY updated_at DESC LIMIT ? OFFSET ?`, append(args, normalizeLimit(query.Limit), offset(query))...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []asymptoteobserve.LearningEvaluationV1
-	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
-			return nil, err
-		}
-		var value asymptoteobserve.LearningEvaluationV1
-		if err := json.Unmarshal([]byte(raw), &value); err != nil {
-			return nil, err
-		}
-		if query.Q == "" || matchesText(query.Q, value.ID, value.Trace.ID, value.Trace.Title, value.Evaluator, value.Status) {
-			out = append(out, value)
-		}
-	}
-	return out, rows.Err()
+	return listJSON(s, query, `SELECT evaluation_json FROM evaluations`+where, args, func(e asymptoteobserve.LearningEvaluationV1) []string {
+		return []string{e.ID, e.Trace.ID, e.Trace.Title, e.Evaluator, e.Status}
+	})
 }
 
 func (s *Store) GetEvaluation(id string) (asymptoteobserve.LearningEvaluationV1, bool, error) {
@@ -487,6 +476,48 @@ func (s *Store) GetEvaluation(id string) (asymptoteobserve.LearningEvaluationV1,
 }
 
 func (s *Store) PutCandidate(c asymptoteobserve.LearningCandidateV1) error {
+	db, err := s.db()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	return putCandidate(db, c)
+}
+
+func putCandidate(db recordDB, c asymptoteobserve.LearningCandidateV1) error {
+	c, data, err := prepareCandidate(c)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`INSERT INTO candidates (id, project_id, state, kind, title, source_evaluation_id, memory_id, created_at, updated_at, candidate_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET state = excluded.state, kind = excluded.kind, title = excluded.title, memory_id = excluded.memory_id, updated_at = excluded.updated_at, candidate_json = excluded.candidate_json`,
+		c.ID, c.Project.ID, c.State, c.Kind, c.Title, c.SourceEvaluationID, c.MemoryID, c.CreatedAt, c.UpdatedAt, string(data))
+	return err
+}
+
+// InsertCandidate stores a generated candidate unless its ID already exists and
+// returns the stored record, so regenerating never resets a completed review.
+func (s *Store) InsertCandidate(c asymptoteobserve.LearningCandidateV1) (asymptoteobserve.LearningCandidateV1, error) {
+	c, data, err := prepareCandidate(c)
+	if err != nil {
+		return asymptoteobserve.LearningCandidateV1{}, err
+	}
+	db, err := s.db()
+	if err != nil {
+		return asymptoteobserve.LearningCandidateV1{}, err
+	}
+	defer db.Close()
+	if _, err := db.Exec(`INSERT INTO candidates (id, project_id, state, kind, title, source_evaluation_id, memory_id, created_at, updated_at, candidate_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO NOTHING`, c.ID, c.Project.ID, c.State, c.Kind, c.Title, c.SourceEvaluationID, c.MemoryID, c.CreatedAt, c.UpdatedAt, string(data)); err != nil {
+		return asymptoteobserve.LearningCandidateV1{}, err
+	}
+	stored, _, err := s.GetCandidate(c.ID)
+	return stored, err
+}
+
+func prepareCandidate(c asymptoteobserve.LearningCandidateV1) (asymptoteobserve.LearningCandidateV1, []byte, error) {
 	if c.SchemaVersion == "" {
 		c.SchemaVersion = asymptoteobserve.LearningSchemaVersion
 	}
@@ -502,19 +533,7 @@ func (s *Store) PutCandidate(c asymptoteobserve.LearningCandidateV1) error {
 		c.ID = CandidateID(c)
 	}
 	data, err := json.Marshal(c)
-	if err != nil {
-		return err
-	}
-	db, err := s.db()
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	_, err = db.Exec(`INSERT INTO candidates (id, project_id, state, kind, title, source_evaluation_id, memory_id, created_at, updated_at, candidate_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET state = excluded.state, kind = excluded.kind, title = excluded.title, memory_id = excluded.memory_id, updated_at = excluded.updated_at, candidate_json = excluded.candidate_json`,
-		c.ID, c.Project.ID, c.State, c.Kind, c.Title, c.SourceEvaluationID, c.MemoryID, c.CreatedAt, c.UpdatedAt, string(data))
-	return err
+	return c, data, err
 }
 
 func (s *Store) ListCandidates(query Query) ([]asymptoteobserve.LearningCandidateV1, error) {
@@ -522,37 +541,24 @@ func (s *Store) ListCandidates(query Query) ([]asymptoteobserve.LearningCandidat
 	if err != nil {
 		return nil, err
 	}
-	db, err := s.db()
-	if err != nil {
-		return nil, err
-	}
-	defer db.Close()
 	where, args := queryWhere(query, "project_id", "state", "kind")
-	rows, err := db.Query(`SELECT candidate_json FROM candidates`+where+` ORDER BY updated_at DESC LIMIT ? OFFSET ?`, append(args, normalizeLimit(query.Limit), offset(query))...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []asymptoteobserve.LearningCandidateV1
-	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
-			return nil, err
-		}
-		var value asymptoteobserve.LearningCandidateV1
-		if err := json.Unmarshal([]byte(raw), &value); err != nil {
-			return nil, err
-		}
-		if query.Q == "" || matchesText(query.Q, value.ID, value.Title, value.Body, value.Kind, value.State) {
-			out = append(out, value)
-		}
-	}
-	return out, rows.Err()
+	return listJSON(s, query, `SELECT candidate_json FROM candidates`+where, args, func(c asymptoteobserve.LearningCandidateV1) []string {
+		return []string{c.ID, c.Title, c.Body, c.Kind, c.State}
+	})
 }
 
 func (s *Store) GetCandidate(id string) (asymptoteobserve.LearningCandidateV1, bool, error) {
+	db, err := s.db()
+	if err != nil {
+		return asymptoteobserve.LearningCandidateV1{}, false, err
+	}
+	defer db.Close()
+	return getCandidate(db, id)
+}
+
+func getCandidate(db recordDB, id string) (asymptoteobserve.LearningCandidateV1, bool, error) {
 	var raw string
-	ok, err := s.getJSON(`SELECT candidate_json FROM candidates WHERE id = ?`, id, &raw)
+	ok, err := getJSON(db, `SELECT candidate_json FROM candidates WHERE id = ?`, id, &raw)
 	if err != nil || !ok {
 		return asymptoteobserve.LearningCandidateV1{}, ok, err
 	}
@@ -561,6 +567,15 @@ func (s *Store) GetCandidate(id string) (asymptoteobserve.LearningCandidateV1, b
 }
 
 func (s *Store) PutMemory(m asymptoteobserve.LearningMemoryV1) error {
+	db, err := s.db()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	return putMemory(db, m)
+}
+
+func putMemory(db recordDB, m asymptoteobserve.LearningMemoryV1) error {
 	if m.SchemaVersion == "" {
 		m.SchemaVersion = asymptoteobserve.LearningSchemaVersion
 	}
@@ -576,11 +591,6 @@ func (s *Store) PutMemory(m asymptoteobserve.LearningMemoryV1) error {
 	if err != nil {
 		return err
 	}
-	db, err := s.db()
-	if err != nil {
-		return err
-	}
-	defer db.Close()
 	_, err = db.Exec(`INSERT INTO memories (id, candidate_id, project_id, kind, title, created_at, updated_at, superseded_by, memory_json)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET title = excluded.title, updated_at = excluded.updated_at, superseded_by = excluded.superseded_by, memory_json = excluded.memory_json`,
@@ -593,55 +603,61 @@ func (s *Store) ListMemories(query Query) ([]asymptoteobserve.LearningMemoryV1, 
 	if err != nil {
 		return nil, err
 	}
-	db, err := s.db()
-	if err != nil {
-		return nil, err
-	}
-	defer db.Close()
 	where, args := queryWhere(query, "project_id", "", "kind")
 	if where == "" {
 		where = ` WHERE (superseded_by IS NULL OR superseded_by = '')`
 	} else {
 		where += ` AND (superseded_by IS NULL OR superseded_by = '')`
 	}
-	hasTextFilter := strings.TrimSpace(query.Q) != ""
-	sqlQuery := `SELECT memory_json FROM memories` + where + ` ORDER BY updated_at DESC`
-	if !hasTextFilter {
-		args = append(args, normalizeLimit(query.Limit), offset(query))
-		sqlQuery += ` LIMIT ? OFFSET ?`
+	return listJSON(s, query, `SELECT memory_json FROM memories`+where, args, func(m asymptoteobserve.LearningMemoryV1) []string {
+		return []string{m.ID, m.Title, m.Body, m.Kind}
+	})
+}
+
+// listJSON runs selectSQL, a SELECT of one JSON column, newest first, and returns the requested
+// page of decoded records. A text query is matched against text(record) after decoding, so the page
+// counts matching records: paging in SQL would count rows the query then drops, returning empty or
+// shifted pages whenever newer non-matching records fill the SQL page.
+func listJSON[T any](s *Store, query Query, selectSQL string, args []interface{}, text func(T) []string) ([]T, error) {
+	db, err := s.db()
+	if err != nil {
+		return nil, err
 	}
-	rows, err := db.Query(sqlQuery, args...)
+	defer db.Close()
+	limit, skip := normalizeLimit(query.Limit), offset(query)
+	filter := strings.TrimSpace(query.Q) != ""
+	selectSQL += ` ORDER BY updated_at DESC`
+	if !filter {
+		selectSQL += ` LIMIT ? OFFSET ?`
+		args = append(args, limit, skip)
+	}
+	rows, err := db.Query(selectSQL, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	limit := normalizeLimit(query.Limit)
-	skip := offset(query)
-	matches := 0
-	var out []asymptoteobserve.LearningMemoryV1
+	var out []T
+	matched := 0
 	for rows.Next() {
 		var raw string
 		if err := rows.Scan(&raw); err != nil {
 			return nil, err
 		}
-		var value asymptoteobserve.LearningMemoryV1
+		var value T
 		if err := json.Unmarshal([]byte(raw), &value); err != nil {
 			return nil, err
 		}
-		if hasTextFilter {
-			if !matchesText(query.Q, value.ID, value.Title, value.Body, value.Kind) {
+		if filter {
+			if !matchesText(query.Q, text(value)...) {
 				continue
 			}
-			matches++
-			if matches <= skip {
+			if matched++; matched <= skip {
 				continue
 			}
-			out = append(out, value)
-			if len(out) >= limit {
-				break
-			}
-		} else {
-			out = append(out, value)
+		}
+		out = append(out, value)
+		if filter && len(out) >= limit {
+			break
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -651,8 +667,17 @@ func (s *Store) ListMemories(query Query) ([]asymptoteobserve.LearningMemoryV1, 
 }
 
 func (s *Store) GetMemory(id string) (asymptoteobserve.LearningMemoryV1, bool, error) {
+	db, err := s.db()
+	if err != nil {
+		return asymptoteobserve.LearningMemoryV1{}, false, err
+	}
+	defer db.Close()
+	return getMemory(db, id)
+}
+
+func getMemory(db recordDB, id string) (asymptoteobserve.LearningMemoryV1, bool, error) {
 	var raw string
-	ok, err := s.getJSON(`SELECT memory_json FROM memories WHERE id = ?`, id, &raw)
+	ok, err := getJSON(db, `SELECT memory_json FROM memories WHERE id = ?`, id, &raw)
 	if err != nil || !ok {
 		return asymptoteobserve.LearningMemoryV1{}, ok, err
 	}
@@ -666,7 +691,11 @@ func (s *Store) getJSON(query, id string, dest *string) (bool, error) {
 		return false, err
 	}
 	defer db.Close()
-	err = db.QueryRow(query, id).Scan(dest)
+	return getJSON(db, query, id, dest)
+}
+
+func getJSON(db recordDB, query, id string, dest *string) (bool, error) {
+	err := db.QueryRow(query, id).Scan(dest)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}

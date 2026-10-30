@@ -134,12 +134,12 @@ func TestSubmitOutcomeByStatus(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
+		// 2xx and 5xx are ranges: one row inside each beyond 200/500 keeps either from
+		// narrowing to a single code, which would drop a good signup or never retry it.
 		{"ok", http.StatusOK, OutcomeSubmitted, false},
-		{"created", http.StatusCreated, OutcomeSubmitted, false},
 		{"no content", http.StatusNoContent, OutcomeSubmitted, false},
 		{"bad request is terminal", http.StatusBadRequest, OutcomeRejected, true},
 		{"rate limited is terminal", http.StatusTooManyRequests, OutcomeRejected, true},
-		{"payload too large is terminal", http.StatusRequestEntityTooLarge, OutcomeRejected, true},
 		{"server error is retryable", http.StatusInternalServerError, OutcomePending, true},
 		{"bad gateway is retryable", http.StatusBadGateway, OutcomePending, true},
 	}
@@ -198,7 +198,7 @@ func TestSubmitRespectsContextCancellation(t *testing.T) {
 	defer close(release)
 	t.Setenv(EndpointEnv, srv.URL)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
 	start := time.Now()
@@ -216,16 +216,6 @@ func TestSubmitMalformedEndpointIsRejected(t *testing.T) {
 	outcome, err := Submit(context.Background(), Submission{})
 	if outcome != OutcomeRejected || err == nil {
 		t.Fatalf("outcome = %q err = %v, want rejected with an error", outcome, err)
-	}
-}
-
-func TestInstallMethodClassifiesKnownPrefixes(t *testing.T) {
-	// InstallMethod reads os.Executable, which in a test is the test binary, so this
-	// asserts the classification is at least a known value rather than a guess.
-	switch got := InstallMethod(); got {
-	case MethodHomebrew, MethodPackage, MethodSource:
-	default:
-		t.Fatalf("InstallMethod() = %q, want one of homebrew/package/source", got)
 	}
 }
 

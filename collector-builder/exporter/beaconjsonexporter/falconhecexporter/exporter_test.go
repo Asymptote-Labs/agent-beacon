@@ -9,13 +9,59 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configretry"
+	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/collector/processor/processortest"
 
 	"github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/internal/beaconevent"
+	"github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/privacyprocessor"
 )
+
+func TestPrivacyPipelineRedactsBeforeFalconHTTP(t *testing.T) {
+	const secret = "synthetic-forwarding-secret"
+	var received string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload hecPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		data, _ := json.Marshal(payload.Event)
+		received = string(data)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	cfg := createDefaultConfig()
+	cfg.Endpoint, cfg.Token = server.URL, "test-ingest-token"
+	exp, err := newExporter(cfg, exporter.Settings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := consumer.NewLogs(exp.consumeLogs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proc, err := privacyprocessor.NewFactory().CreateLogs(context.Background(), processortest.NewNopSettings(component.MustNewType("beacon_privacy")), &privacyprocessor.Config{}, next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs := plog.NewLogs()
+	record := logs.ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+	record.Body().SetStr("prompt submitted")
+	record.Attributes().PutStr("beacon.event.action", "prompt.submitted")
+	record.Attributes().PutStr("service.name", "claude-code")
+	record.Attributes().PutStr("gen_ai.prompt", "keep ordinary text token="+secret)
+	record.Attributes().PutStr("password", secret)
+	if err := proc.ConsumeLogs(context.Background(), logs); err != nil {
+		t.Fatal(err)
+	}
+	if received == "" || strings.Contains(received, secret) || !strings.Contains(received, "[REDACTED]") || !strings.Contains(received, "keep ordinary text") {
+		t.Fatalf("HEC payload did not preserve redacted prompt: %s", received)
+	}
+}
 
 func TestConfigValidateRequiresEndpointAndToken(t *testing.T) {
 	cfg := createDefaultConfig()

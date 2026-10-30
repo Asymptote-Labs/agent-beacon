@@ -24,14 +24,34 @@ func MapSession(ref SessionRef, records []Record, opts MapOptions) []MappedEvent
 		calls:    map[string]toolCall{},
 		lastTime: ref.ModTimeUnixMS,
 	}
+	seedCut := inheritedSeedCut(records)
 	for _, record := range records {
 		m.consumeContext(record)
 		if record.Line <= opts.MinLine {
 			continue
 		}
+		if record.Line <= seedCut && record.Kind != "session" {
+			// Inherited history: the parent session's own records, already collected under the
+			// parent. Read for context only, so a fork does not re-emit them as its own activity.
+			continue
+		}
 		m.consume(record)
 	}
 	return m.out
+}
+
+// inheritedSeedCut returns the line of a fork's inherited-prefix marker, or zero for a session that
+// inherited nothing. A fork child copies its parent's history verbatim and closes it with one
+// `session/end-seed {inherited: true}` marker; untagged `session/end-seed` markers only separate
+// restored settings from live work and inherit no history. The last tagged marker is the cut.
+func inheritedSeedCut(records []Record) int {
+	cut := 0
+	for _, record := range records {
+		if record.Kind == "session/end-seed" && boolValue(record.Data["inherited"]) {
+			cut = record.Line
+		}
+	}
+	return cut
 }
 
 type mapper struct {
@@ -86,7 +106,7 @@ func (m *mapper) consumeContext(record Record) {
 		if model := assistantModel(record.Data); model != "" {
 			m.model = model
 		}
-	case "tool/call", "tool/code-dispatch-start":
+	case "tool/call", "tool/code-dispatch-start", "tool/ptc-dispatch-start":
 		call := parseToolCall(record)
 		if call.ID != "" {
 			m.calls[call.ID] = call
@@ -96,6 +116,10 @@ func (m *mapper) consumeContext(record Record) {
 
 func (m *mapper) consume(record Record) {
 	m.consumeContext(record)
+	if record.SurfaceReplace {
+		// A compaction rewrite of history already collected (see Record.SurfaceReplace).
+		return
+	}
 	switch record.Kind {
 	case "session":
 		if !m.opts.SkipSessionStarted {
@@ -105,9 +129,14 @@ func (m *mapper) consume(record Record) {
 		m.emitPrompt(record)
 	case "assistant/message":
 		m.emitAssistant(record)
-	case "tool/call", "tool/code-dispatch-start":
+	case "compaction/summary":
+		m.emitCompactionUsage(record)
+	// run_code (programmatic tool calling) dispatches nested tool calls through the same guarded
+	// pipeline; DSH logs them as tool/ptc-dispatch-start and tool/ptc-dispatch, keyed by subCallId.
+	// tool/code-dispatch* is the earlier spelling.
+	case "tool/call", "tool/code-dispatch-start", "tool/ptc-dispatch-start":
 		m.emitToolCall(record)
-	case "tool/result", "tool/code-dispatch":
+	case "tool/result", "tool/code-dispatch", "tool/ptc-dispatch":
 		m.emitToolResult(record)
 	case "turn/end":
 		m.emitTurnEnd(record)
@@ -121,6 +150,9 @@ func (m *mapper) emitSessionStarted(record Record) {
 }
 
 func (m *mapper) emitPrompt(record Record) {
+	if !userMessageFromPerson(record.Data) {
+		return
+	}
 	text := userMessageText(record.Data)
 	if text == "" {
 		return
@@ -240,6 +272,20 @@ func (m *mapper) emitUsage(record Record) {
 	m.append(record, "usage", ev)
 }
 
+// emitCompactionUsage records the tokens of the model call DSH makes to summarize history. That
+// call is not an assistant/message, so its usage would otherwise be missing from the session total.
+func (m *mapper) emitCompactionUsage(record Record) {
+	usage := usageFromAssistant(record.Data)
+	if usage == nil {
+		return
+	}
+	ev := m.base(record, "token.usage", "metric", schema.SeverityInfo, "DeepSeek compaction token usage")
+	ev.GenAI = withGenAI(ev.GenAI, func(genAI *schema.GenAIInfo) { genAI.Usage = usage })
+	ev.Model = firstNonEmpty(firstString(record.Data, "model"), m.model, m.session.Model)
+	ev.Raw = m.rawDsh(record, map[string]interface{}{"token_source": "compaction_summary"})
+	m.append(record, "usage", ev)
+}
+
 func (m *mapper) base(record Record, action, category string, severity schema.Severity, message string) schema.Event {
 	ts := m.lastTime
 	if record.TimeMS > 0 {
@@ -296,7 +342,8 @@ func parseToolCall(record Record) toolCall {
 	data := unwrap(record.Data, "call", "toolCall", "tool_call")
 	args := argumentsFrom(data)
 	return toolCall{
-		ID:        firstString(data, "callId", "callID", "id", "tool_call_id", "tool_use_id"),
+		// subCallId names a call run_code dispatched; its parentCallId is the run_code call.
+		ID:        firstString(data, "callId", "callID", "subCallId", "id", "tool_call_id", "tool_use_id"),
 		Name:      firstString(data, "name", "toolName", "tool_name"),
 		Arguments: args,
 		Line:      record.Line,
@@ -305,7 +352,16 @@ func parseToolCall(record Record) toolCall {
 
 func parseToolResult(record Record) toolResult {
 	data := unwrap(record.Data, "result", "toolResult", "tool_result")
-	callID := firstString(data, "callId", "callID", "id", "tool_call_id", "toolUseId", "tool_use_id")
+	// Since session format v4 a tool/result carries the model-facing ToolResultMessage under
+	// `message`: the call id as `toolCallId` (and `source.callId`), the output as content blocks,
+	// and the failure flag as `isError`. A failure's identity sits beside it as `error`
+	// ({name, code, reason}), which is an object, not a flag.
+	if msg := childMap(data, "message"); firstString(msg, "toolCallId") != "" || firstString(msg, "role") == "tool" {
+		callID := firstNonEmpty(firstString(msg, "toolCallId"), firstString(childMap(msg, "source"), "callId"))
+		isError := boolValue(msg["isError"]) || len(childMap(data, "error")) > 0
+		return toolResult{CallID: callID, Name: firstString(data, "name", "toolName"), Text: resultText(msg), IsError: isError, Raw: data}
+	}
+	callID := firstString(data, "callId", "callID", "subCallId", "id", "tool_call_id", "toolUseId", "tool_use_id")
 	name := firstString(data, "name", "toolName", "tool_name")
 	isError := boolValue(data["isError"]) || boolValue(data["is_error"]) || boolValue(data["error"])
 	text := resultText(data)
@@ -425,6 +481,18 @@ func mcpInfo(name string) *schema.MCPInfo {
 func userMessageText(data map[string]interface{}) string {
 	data = unwrap(data, "message")
 	return textValue(firstPresent(data, "text", "content", "message"))
+}
+
+// userMessageFromPerson reports whether a user/message is something a person sent. DSH records
+// every user-role message the model sees as user/message: the person's prompt has
+// `source.kind: "user"`, while agent instructions, time and runtime snapshots, skill catalogs,
+// messages relayed from other agents, job and subagent notices, goal continuations and compaction
+// checkpoints each name their own producer. A message with no source predates the field and is
+// read as a prompt, as before.
+func userMessageFromPerson(data map[string]interface{}) bool {
+	source := childMap(unwrap(data, "message"), "source")
+	kind := firstString(source, "kind")
+	return kind == "" || kind == "user"
 }
 
 func assistantParts(data map[string]interface{}) []assistantPart {
@@ -554,9 +622,11 @@ func argumentsFrom(data map[string]interface{}) map[string]interface{} {
 	if args := firstMap(data, "arguments", "args", "input", "tool_input"); len(args) > 0 {
 		return args
 	}
-	if text := firstString(data, "argumentsJson", "arguments_json"); text != "" {
+	// A tool/call stores `arguments` as the raw JSON string the model produced, unparsed; nested
+	// run_code dispatches and older records carry an object, handled above.
+	if text := firstStringRaw(data, "arguments", "argumentsJson", "arguments_json"); strings.TrimSpace(text) != "" {
 		var args map[string]interface{}
-		if json.Unmarshal([]byte(text), &args) == nil {
+		if json.Unmarshal([]byte(text), &args) == nil && args != nil {
 			return args
 		}
 		return map[string]interface{}{"value": text}

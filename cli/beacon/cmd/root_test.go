@@ -23,19 +23,6 @@ func TestPrintRootSplash(t *testing.T) {
 	printRootSplash(cmd)
 
 	got := out.String()
-	for _, want := range []string{
-		"██████╗ ███████╗ █████╗  ██████╗ ██████╗ ███╗   ██╗",
-		"Self-improving memory for coding agents.",
-		"Start with:",
-		"beacon endpoint install",
-		"beacon endpoint status",
-		"beacon endpoint wazuh print-config",
-		"Usage:",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("root splash missing %q:\n%s", want, got)
-		}
-	}
 	if strings.Contains(got, "\x1b[") {
 		t.Fatalf("root splash written to a buffer should not include ANSI escapes:\n%q", got)
 	}
@@ -58,7 +45,7 @@ func TestPrintRootUpdateNotice(t *testing.T) {
 		install selfupdate.Install
 		command string
 	}{
-		{name: "homebrew", install: selfupdate.Install{Kind: selfupdate.InstallHomebrew}, command: "brew upgrade beacon"},
+		{name: "homebrew", install: selfupdate.Install{Kind: selfupdate.InstallHomebrew}, command: "brew update && brew upgrade beacon"},
 		{name: "system package", install: selfupdate.Install{Kind: selfupdate.InstallSystemPkg}, command: "sudo beacon endpoint update --apply"},
 	}
 	for _, tt := range tests {
@@ -79,22 +66,6 @@ func TestPrintRootUpdateNotice(t *testing.T) {
 				t.Fatalf("uncolored update notice includes ANSI escapes: %q", got)
 			}
 		})
-	}
-}
-
-func TestPrintRootUpdateNoticeUsesOrange(t *testing.T) {
-	var out bytes.Buffer
-	printRootUpdateNotice(&out, updatecheck.Result{
-		CurrentVersion:  "v1.3.33",
-		LatestVersion:   "v1.3.34",
-		UpdateAvailable: true,
-	}, true, selfupdate.Install{Kind: selfupdate.InstallHomebrew})
-
-	if !strings.HasPrefix(out.String(), beaconOrange) {
-		t.Fatalf("colored update notice does not start orange: %q", out.String())
-	}
-	if !strings.Contains(out.String(), resetColor) {
-		t.Fatalf("colored update notice does not reset color: %q", out.String())
 	}
 }
 

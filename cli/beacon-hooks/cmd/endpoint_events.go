@@ -301,16 +301,8 @@ func toolFieldsWithResponse(toolName string, toolInput, toolResponse map[string]
 	if toolName != "" {
 		fields["tool"] = map[string]interface{}{"name": toolName}
 	}
-	command := firstToolString(toolInput, "command", "cmd", "shell_command", "CommandLine", "commandLine")
-	// DeepSeek Harness runs commands through a persistent terminal as well as through `bash`, and
-	// that tool names its command line `text` rather than `command`, so every key above misses it.
-	// Without this a terminal_send would be classified command.executed -- the dsh taxonomy says so
-	// -- and carry no command, which is invisible to every rule that matches on command.command.
-	// Asked after the shared list for the Kiro reason below: a payload carrying a `command` of its
-	// own has said something more direct.
-	if command == "" && platformFlag == dshPlatform {
-		command = dshTerminalCommand(toolName, toolInput)
-	}
+	// normalizeToolString keeps the quote trimming every hook string field gets.
+	command := normalizeToolString(asymptoteobserve.ToolCommandLine(toolName, toolInput))
 	if command != "" {
 		// OpenHands file editors multiplex operations onto one tool name via a `command` argument
 		// that names the editor operation (view, str_replace, create), not a shell command.
@@ -888,12 +880,18 @@ func firstNestedString(input map[string]interface{}, key string) string {
 	return normalizeToolString(value)
 }
 
+// normalizeToolString returns a tool argument as text. A value wrapped whole in one pair of double
+// quotes ("npm test", "C:\tools\run.exe") loses that pair; quotes that belong to the value, as in
+// echo "hi", stay. Nothing is unescaped: backslashes are what the shell or the path holds.
 func normalizeToolString(value interface{}) string {
 	str := strings.TrimSpace(fmt.Sprint(value))
 	if str == "" || str == "<nil>" {
 		return ""
 	}
-	return strings.Trim(strings.TrimSpace(str), `"`)
+	if len(str) >= 2 && str[0] == '"' && str[len(str)-1] == '"' && !strings.Contains(str[1:len(str)-1], `"`) {
+		return strings.TrimSpace(str[1 : len(str)-1])
+	}
+	return str
 }
 
 // fileOperation classifies what a tool did to the file it named.

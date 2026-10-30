@@ -23,10 +23,20 @@ func TestRedactStringRemovesBareCopiesLongestFirst(t *testing.T) {
 	}
 }
 
-func TestIsSecretKeyName(t *testing.T) {
-	for key, want := range map[string]bool{"password": true, "AWS_SECRET_ACCESS_KEY": true, "client_secret": true, "X-Api-Key": true, "input_tokens": false, "author": false} {
-		if got := IsSecretKeyName(key); got != want {
-			t.Errorf("IsSecretKeyName(%q) = %v, want %v", key, got, want)
+func TestIsSecretField(t *testing.T) {
+	for _, tc := range []struct {
+		key   string
+		value interface{}
+		want  bool
+	}{
+		{"password", "hunter2", true}, {"AWS_SECRET_ACCESS_KEY", "x", true}, {"client_secret", "x", true},
+		{"X-Api-Key", "x", true}, {"SECRET_KEY_BASE", "x", true}, {"DB_PASS", "x", true}, {"SMTP_PASS", "x", true},
+		{"GITHUB_TOKENS", "abc", true}, {"pin_token", 1234, true}, {"password", "12345678", true},
+		{"max_tokens", 4096, false}, {"input_tokens", float64(812), false}, {"input_tokens", "1200", false},
+		{"token_type", "Bearer", false}, {"author", "Ada", false}, {"PWD", "/home/ada", false}, {"keyboard", "dvorak", false},
+	} {
+		if got := IsSecretField(tc.key, tc.value); got != tc.want {
+			t.Errorf("IsSecretField(%q, %#v) = %v, want %v", tc.key, tc.value, got, tc.want)
 		}
 	}
 }

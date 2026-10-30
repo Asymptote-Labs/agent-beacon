@@ -1,5 +1,5 @@
-import { test, expect, seedSettings } from './fixtures.js';
-import { flatAttrs, recordByAction, resourceAttrs } from './helpers/otlp-assertions.js';
+import { test, expect, seedSettings, browserTarget } from './fixtures.js';
+import { allRecords, flatAttrs, recordByAction, resourceAttrs } from './helpers/otlp-assertions.js';
 
 const CONV = '11111111-2222-3333-4444-555555555555';
 const COMPLETION_PATH = '/api/organizations/org-test/chat_conversations/{conv}/completion';
@@ -50,6 +50,9 @@ test('captures a simple Claude turn end-to-end into normalized OTLP', async ({
   expect(promptAttrs['beacon.event.category']).toBe('prompt');
   expect(promptAttrs['beacon.prompt.text']).toBe('What is the capital of France?');
   expect(promptAttrs['beacon.session.id']).toBe(CONV);
+  expect(JSON.parse(String(promptAttrs['gen_ai.input.messages']))).toEqual([
+    { role: 'user', parts: [{ type: 'text', content: 'What is the capital of France?' }] },
+  ]);
 
   // The response lands on the agent.response.completed record.
   const rec = recordByAction(mockCollector.received, 'agent.response.completed');
@@ -57,7 +60,32 @@ test('captures a simple Claude turn end-to-end into normalized OTLP', async ({
   const attrs = flatAttrs(rec!.attributes);
   expect(attrs['gen_ai.conversation.id']).toBe(CONV);
   expect(attrs['gen_ai.response.model']).toBe('claude-opus-4-8');
-  expect(String(attrs['gen_ai.output.messages'])).toContain('Paris');
+  expect(JSON.parse(String(attrs['gen_ai.output.messages']))).toEqual([
+    { role: 'assistant', parts: [{ type: 'text', content: 'Paris.' }] },
+  ]);
+
+  // Every envelope says which browser produced it. This runs in whatever browser
+  // the fixture launched (BROWSER_CHANNEL / BROWSER_EXECUTABLE); the ground truth
+  // is what the same service worker that built the envelope reports.
+  const seen = await serviceWorker.evaluate(() => {
+    const uad = (navigator as Navigator & { userAgentData?: { brands: { brand: string; version: string }[] } })
+      .userAgentData;
+    return { brands: uad?.brands.map((b) => `${b.brand} ${b.version}`) ?? [], ua: navigator.userAgent };
+  });
+  for (const env of mockCollector.received) {
+    const identity = resourceAttrs(env);
+    const name = identity['user_agent.name'];
+    expect(typeof name, `user_agent.name missing in ${browserTarget.label}`).toBe('string');
+    expect(identity['user_agent.original']).toBe(seen.ua);
+    if (seen.brands.length > 0) expect(identity['browser.brands']).toEqual(seen.brands);
+    if (browserTarget.expectedUserAgentNames) {
+      expect(browserTarget.expectedUserAgentNames).toContain(name);
+    }
+  }
+  test.info().annotations.push({
+    type: 'browser',
+    description: `${browserTarget.label}: user_agent.name=${res['user_agent.name']}`,
+  });
 });
 
 test('captures the prompt when the page uses fetch(new Request(...))', async ({
@@ -95,7 +123,10 @@ test('captures the prompt when the page uses fetch(new Request(...))', async ({
   expect(p['beacon.prompt.text']).toBe('What is the capital of France?');
 });
 
-test('captures a Claude tool call as a tool.invoked record', async ({
+// claude.ai as of October 2026: the completion body is a gzip-compressed
+// Uint8Array, and web_search runs server side with its results streamed back
+// as tool_result blocks.
+test('captures a gzip-compressed prompt and server-side tool results', async ({
   context,
   serviceWorker,
   replay,
@@ -103,10 +134,11 @@ test('captures a Claude tool call as a tool.invoked record', async ({
 }) => {
   replay.setCase({
     site: 'claude',
-    name: 'with-tool-call',
+    name: 'web-search',
     conversationId: CONV,
-    prompt: 'What is the weather today?',
+    prompt: 'Search the web for the latest NASA news.',
     completionPath: COMPLETION_PATH,
+    requestStyle: 'gzip',
   });
   await seedSettings(serviceWorker, {
     enabled: true,
@@ -123,13 +155,31 @@ test('captures a Claude tool call as a tool.invoked record', async ({
   );
 
   await expect
-    .poll(() => recordByAction(mockCollector.received, 'tool.invoked'), { timeout: 10_000 })
-    .toBeTruthy();
+    .poll(() => allRecords(mockCollector.received).filter((r) => flatAttrs(r.attributes)['beacon.event.action'] === 'tool.invoked').length, { timeout: 10_000 })
+    .toBe(2);
+  const p = flatAttrs(recordByAction(mockCollector.received, 'prompt.submitted')!.attributes);
+  expect(p['beacon.prompt.text']).toBe('Search the web for the latest NASA news.');
 
-  const tool = flatAttrs(recordByAction(mockCollector.received, 'tool.invoked')!.attributes);
-  expect(tool['tool.name']).toBe('web_search');
-  expect(tool['gen_ai.tool.call.id']).toBe('toolu_abc');
-  expect(String(tool['gen_ai.tool.call.arguments'])).toContain('weather today');
+  const tools = allRecords(mockCollector.received)
+    .map((r) => flatAttrs(r.attributes))
+    .filter((a) => a['beacon.event.action'] === 'tool.invoked');
+  expect(tools.map((a) => JSON.parse(String(a['gen_ai.tool.call.arguments'])).query)).toEqual([
+    'NASA news today',
+    'NASA October 2026',
+  ]);
+  const results = tools.map((a) => JSON.parse(String(a['gen_ai.tool.call.result'])) as { url: string }[]);
+  expect(results.map((r) => r.map((x) => x.url))).toEqual([
+    ['https://news.example.com/nasa-today', 'https://space.example.org/updates'],
+    ['https://space.example.org/artemis'],
+  ]);
+
+  const resp = flatAttrs(recordByAction(mockCollector.received, 'agent.response.completed')!.attributes);
+  expect(JSON.parse(String(resp['gen_ai.output.messages']))).toEqual([
+    {
+      role: 'assistant',
+      parts: [{ type: 'text', content: 'One recent NASA headline: a new country signed the Artemis Accords.' }],
+    },
+  ]);
 });
 
 test('respects the disabled toggle (no delivery)', async ({
@@ -138,11 +188,19 @@ test('respects the disabled toggle (no delivery)', async ({
   replay,
   mockCollector,
 }) => {
+  const LATER = '22222222-3333-4444-5555-666666666666';
   replay.setCase({
     site: 'claude',
     name: 'simple-turn',
     conversationId: CONV,
     prompt: 'What is the capital of France?',
+    completionPath: COMPLETION_PATH,
+  });
+  replay.setCase({
+    site: 'claude',
+    name: 'simple-turn',
+    conversationId: LATER,
+    prompt: 'Captured once re-enabled',
     completionPath: COMPLETION_PATH,
   });
   await seedSettings(serviceWorker, {
@@ -153,12 +211,25 @@ test('respects the disabled toggle (no delivery)', async ({
   });
 
   const page = await context.newPage();
-  await page.goto('https://claude.ai/chat');
+  await page.goto(`https://claude.ai/chat?conv=${CONV}`);
   await expect(page.locator('[data-testid="assistant-message"]')).toHaveAttribute(
     'data-complete',
     '1',
   );
-  // Give any (erroneous) delivery a chance to arrive, then assert none did.
-  await page.waitForTimeout(1000);
-  expect(mockCollector.received).toHaveLength(0);
+
+  // Re-enable and capture a later turn. Delivery is ordered, so once the later
+  // turn has landed, anything the disabled turn wrongly produced would have too.
+  await seedSettings(serviceWorker, { enabled: true });
+  const later = await context.newPage();
+  await later.goto(`https://claude.ai/chat?conv=${LATER}`);
+  await expect(later.locator('[data-testid="assistant-message"]')).toHaveAttribute(
+    'data-complete',
+    '1',
+  );
+  await expect
+    .poll(() => recordByAction(mockCollector.received, 'agent.response.completed'), { timeout: 10_000 })
+    .toBeTruthy();
+
+  const sessions = allRecords(mockCollector.received).map((r) => flatAttrs(r.attributes)['beacon.session.id']);
+  expect(new Set(sessions)).toEqual(new Set([LATER]));
 });

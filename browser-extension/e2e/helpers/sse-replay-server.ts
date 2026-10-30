@@ -32,8 +32,10 @@ export interface ReplayCase {
   completionPath: string;
   /** optional CSP header to prove injection survives it */
   csp?: string;
-  /** how the page issues the completion fetch: 'init' (default) or a Request object */
-  requestStyle?: 'init' | 'request';
+  /** how the page issues the completion fetch: 'init' (default), a Request object, or
+   *  'gzip' (init.body a gzip-compressed Uint8Array with Content-Encoding: gzip, as
+   *  claude.ai sends it) */
+  requestStyle?: 'init' | 'request' | 'gzip';
 }
 
 export interface ReplayServer {
@@ -100,7 +102,8 @@ function streamFixture(res: import('node:http').ServerResponse, c: ReplayCase): 
   });
   const body = readFixture(c.site, c.name);
   // Chunk on a coarse boundary that does NOT respect SSE frame boundaries, to
-  // exercise the parser's buffering; write with small delays to simulate streaming.
+  // exercise the parser's buffering; write each piece on its own timer tick so
+  // they arrive as separate network reads.
   const pieces = chunkify(body);
   let i = 0;
   const tick = () => {
@@ -109,7 +112,7 @@ function streamFixture(res: import('node:http').ServerResponse, c: ReplayCase): 
       return;
     }
     res.write(pieces[i++]);
-    setTimeout(tick, 5);
+    setTimeout(tick, 1);
   };
   tick();
 }
@@ -156,6 +159,14 @@ function pageHtml(c: ReplayCase): string {
           headers: { 'content-type': 'application/json' },
           body: ${JSON.stringify(bodyStr)},
         };
+        ${
+          c.requestStyle === 'gzip'
+            ? `init.body = new Uint8Array(await new Response(
+            new Blob([init.body]).stream().pipeThrough(new CompressionStream('gzip')),
+          ).arrayBuffer());
+        init.headers['content-encoding'] = 'gzip';`
+            : ''
+        }
         const res = await ${
           c.requestStyle === 'request' ? 'fetch(new Request(url, init))' : 'fetch(url, init)'
         };

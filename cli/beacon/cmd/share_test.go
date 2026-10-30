@@ -24,6 +24,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/handoff"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/managedprivacy"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
@@ -132,7 +133,6 @@ func TestShareFlagValidation(t *testing.T) {
 	}{
 		{[]string{"--visibility", "everyone"}, "--visibility must be"},
 		{[]string{"--session", "abc", "--cwd", env.projectDir}, "none of the others can be"},
-		{[]string{"--session", "abc", "--source-path", "x"}, "none of the others can be"},
 		{[]string{"--list", "--session", shareTestSession}, "--list shows candidates"},
 		{[]string{"--list", "--print"}, "cannot be combined"},
 		{[]string{"--harness", "notaruntime", "--print"}, "unsupported runtime"},
@@ -316,7 +316,7 @@ func newFakeShareServer(t *testing.T) *fakeShareServer {
 			fmt.Fprintf(w, `{"upserted":%d,"event_count":%d}`, len(batch.Events), len(f.events))
 		case r.Method == http.MethodGet:
 			if f.trace == nil {
-				http.NotFound(w, r)
+				writeShareAPINotFound(w)
 				return
 			}
 			last, maxNumber := "", 0
@@ -327,11 +327,18 @@ func newFakeShareServer(t *testing.T) *fakeShareServer {
 			}
 			fmt.Fprintf(w, `{"id":"k3xabc","url":"https://beacon.sh/s/k3xabc","visibility":%q,"event_count":%d,"last_event_id":%q,"max_number":%d,"created_at":%q}`, f.trace.Visibility, len(f.events), last, maxNumber, f.created)
 		default:
-			http.NotFound(w, r)
+			writeShareAPINotFound(w)
 		}
 	}))
 	t.Cleanup(f.server.Close)
 	return f
+}
+
+// writeShareAPINotFound answers as beacon.sh's API does for a trace it does not have: a JSON 404.
+func writeShareAPINotFound(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotFound)
+	fmt.Fprintln(w, `{"error":"trace not found","detail":"trace not found"}`)
 }
 
 func (f *fakeShareServer) signIn(scopes ...string) {
@@ -820,5 +827,99 @@ func TestShareAgainKeepsTheShareDate(t *testing.T) {
 	}
 	if second.Raw["shared_at"] != first.Format(time.RFC3339) || !strings.Contains(second.Message, "refreshed") {
 		t.Fatalf("second record = %q %+v", second.Message, second.Raw)
+	}
+}
+
+// An endpoint that forwards to Beacon Cloud in Metadata-only mode shares no more than forwarding
+// sends: no prompt, answer, output or derived title, and the same event ids a full share uses.
+func TestShareFromAMetadataOnlyEndpointLeavesContentOut(t *testing.T) {
+	env := newShareEnv(t)
+	full, _, err := runShareCommand(t, "--cwd", env.projectDir, "--print", "--log-path", env.logPath)
+	if err != nil {
+		t.Fatalf("share --print: %v", err)
+	}
+	var fullPayload sharePayload
+	if err := json.Unmarshal([]byte(full), &fullPayload); err != nil {
+		t.Fatal(err)
+	}
+
+	prev := shareAutoCloud
+	shareAutoCloud = func() (bool, string) { return true, managedprivacy.MetadataOnly }
+	t.Cleanup(func() { shareAutoCloud = prev })
+	stdout, _, err := runShareCommand(t, "--cwd", env.projectDir, "--print", "--log-path", env.logPath)
+	if err != nil {
+		t.Fatalf("share --print: %v", err)
+	}
+	var payload sharePayload
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("payload is not JSON: %v\n%s", err, stdout)
+	}
+	if payload.Trace.Title != "" {
+		t.Fatalf("title = %q, want none: the session's title is its first prompt", payload.Trace.Title)
+	}
+	for _, content := range []string{"Fix the login test", "login_test.go", "Fixed.", `"output"`, `"arguments"`} {
+		if strings.Contains(stdout, content) {
+			t.Errorf("the metadata-only payload carries %q:\n%s", content, stdout)
+		}
+	}
+	if len(payload.Events) != len(fullPayload.Events) {
+		t.Fatalf("events = %d, a full share has %d", len(payload.Events), len(fullPayload.Events))
+	}
+	for i, event := range payload.Events {
+		if event.ID != fullPayload.Events[i].ID {
+			t.Errorf("event %d id = %s, a full share names it %s", i, event.ID, fullPayload.Events[i].ID)
+		}
+		if event.Content != nil && event.Content.Text != "" {
+			t.Errorf("event %d carries text %q", i, event.Content.Text)
+		}
+	}
+	if !strings.Contains(stdout, "go test ./...") {
+		t.Errorf("the command line, which Metadata-only keeps, is missing:\n%s", stdout)
+	}
+
+	// A title the person typed is theirs to send.
+	stdout, _, err = runShareCommand(t, "--cwd", env.projectDir, "--print", "--title", "Login fix", "--log-path", env.logPath)
+	if err != nil || json.Unmarshal([]byte(stdout), &payload) != nil || payload.Trace.Title != "Login fix" {
+		t.Fatalf("--title: err=%v title=%q", err, payload.Trace.Title)
+	}
+
+	// Standard forwarding shares the content, as before.
+	shareAutoCloud = func() (bool, string) { return true, managedprivacy.Standard }
+	stdout, _, err = runShareCommand(t, "--cwd", env.projectDir, "--print", "--log-path", env.logPath)
+	if err != nil || json.Unmarshal([]byte(stdout), &payload) != nil || payload.Trace.Title != "Fix the login test" || !strings.Contains(stdout, "Fixed.") {
+		t.Fatalf("standard: err=%v title=%q\n%s", err, payload.Trace.Title, stdout)
+	}
+}
+
+// A service with no trace API at the URL used answers with a web 404 page. The share stops there
+// with that error instead of reading it as "not shared yet" and going on to create the trace.
+func TestShareStopsWhenTheServiceHasNoTraceAPI(t *testing.T) {
+	env := newShareEnv(t)
+	var mu sync.Mutex
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, "<!DOCTYPE html><html><body>404: This page could not be found.</body></html>")
+	}))
+	t.Cleanup(server.Close)
+	session := &account.Session{BaseURL: server.URL, AccessToken: "bcn_cli_secret_token", TokenType: "Bearer", User: account.User{ID: "u1", Email: "dev@example.com"}, Scopes: []string{account.ScopeTracesWrite}}
+	shareAccountLoad = func() (*account.Session, error) { return session, nil }
+	shareHTTPClient = server.Client()
+
+	_, _, err := runShareCommand(t, "--cwd", env.projectDir, "--log-path", env.logPath)
+	if err == nil || !strings.Contains(err.Error(), server.URL+" has no trace API (HTTP 404: endpoint not found)") {
+		t.Fatalf("err = %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(requests) != 1 || requests[0] != "GET /v1/traces/claude_code:"+shareTestSession {
+		t.Fatalf("requests = %v, want only the read", requests)
+	}
+	if _, err := os.Stat(env.logPath); !os.IsNotExist(err) {
+		t.Fatalf("a failed share recorded itself in the runtime log: %v", err)
 	}
 }

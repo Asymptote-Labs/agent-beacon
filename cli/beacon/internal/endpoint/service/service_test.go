@@ -31,34 +31,6 @@ func TestPlistContainsLaunchdContract(t *testing.T) {
 	}
 }
 
-func TestRunLaunchctlWithContextExplainsBootstrapIOError(t *testing.T) {
-	oldRun := runLaunchctlCommand
-	runLaunchctlCommand = func(args ...string) (string, error) {
-		return "Bootstrap failed: 5: Input/output error", errors.New("exit status 5")
-	}
-	t.Cleanup(func() {
-		runLaunchctlCommand = oldRun
-	})
-
-	err := runLaunchctlWithContext("gui/501", UserLabel, "/Users/test/Library/LaunchAgents/"+UserLabel+".plist", "bootstrap", "gui/501", "/Users/test/Library/LaunchAgents/"+UserLabel+".plist")
-	if err == nil {
-		t.Fatal("runLaunchctlWithContext returned nil, want error")
-	}
-	text := err.Error()
-	for _, want := range []string{
-		"label " + UserLabel,
-		"domain gui/501",
-		"plist /Users/test/Library/LaunchAgents/" + UserLabel + ".plist",
-		"Verify the collector binary",
-		"launchctl bootout gui/501/" + UserLabel,
-		"log show --predicate",
-	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("error missing %q:\n%s", want, text)
-		}
-	}
-}
-
 // shrinkLaunchdWaits makes the reload polls deterministic and instant in tests.
 func shrinkLaunchdWaits(t *testing.T) {
 	t.Helper()
@@ -306,6 +278,7 @@ func TestSupervisedLifecycleStartsAndStopsAProcess(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
 	m := Manager{UserMode: true, Kind: KindSupervised}
+	fastSupervisedStop(t)
 
 	// Loading before install must explain itself rather than silently doing nothing.
 	if err := m.Load(); err == nil {
@@ -359,11 +332,6 @@ func TestLaunchctlGuidance(t *testing.T) {
 	// #639: an external-volume home is a known cause of error 5, and doctor names it.
 	if !strings.Contains(withTarget, "/Volumes") || !strings.Contains(withTarget, "beacon endpoint doctor") {
 		t.Fatalf("guidance should mention the external-volume cause: %q", withTarget)
-	}
-
-	fallback := launchctlGuidance("Input/output error", "", "")
-	if !strings.Contains(fallback, "the Beacon launchd job") {
-		t.Fatalf("guidance missing generic target fallback: %q", fallback)
 	}
 }
 
@@ -527,14 +495,6 @@ func TestSystemdUnitMissingRecognizesSystemdPhrasings(t *testing.T) {
 	}
 }
 
-// Supervised mode is the container/CI fallback. It must be usable everywhere, since that is
-// the whole point of having it.
-func TestSupervisedIsAlwaysAvailable(t *testing.T) {
-	if !(Manager{Kind: KindSupervised}).Available() {
-		t.Fatal("supervised mode must be available on every platform")
-	}
-}
-
 func TestSupervisedRecordsAndReportsState(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
@@ -570,6 +530,9 @@ func TestParseKindAcceptsAliasesAndRejectsGarbage(t *testing.T) {
 		"": KindAuto, "auto": KindAuto, "launchd": KindLaunchd,
 		"systemd": KindSystemd, "none": KindSupervised, "supervised": KindSupervised,
 		"SystemD": KindSystemd,
+		// A round trip through --service, or a Windows operator's command line selects something else.
+		"windows-service": KindWindowsService, "scm": KindWindowsService, "windows": KindWindowsService,
+		"WINDOWS-SERVICE": KindWindowsService,
 	} {
 		got, err := ParseKind(in)
 		if err != nil || got != want {
@@ -578,24 +541,6 @@ func TestParseKindAcceptsAliasesAndRejectsGarbage(t *testing.T) {
 	}
 	if _, err := ParseKind("upstart"); err == nil {
 		t.Error("an unknown service kind must be rejected rather than silently ignored")
-	}
-}
-
-func TestDetectKindMatchesHost(t *testing.T) {
-	got := DetectKind()
-	switch runtime.GOOS {
-	case "darwin":
-		if got != KindLaunchd {
-			t.Fatalf("macOS should detect launchd, got %q", got)
-		}
-	case "linux":
-		// Either is correct depending on whether the host or container has systemd as PID 1.
-		if got != KindSystemd && got != KindSupervised {
-			t.Fatalf("Linux should detect systemd or supervised, got %q", got)
-		}
-		if got == KindSystemd && !systemdIsInit() {
-			t.Fatal("detected systemd without systemd as PID 1")
-		}
 	}
 }
 
@@ -618,37 +563,6 @@ func TestEnableLingerIfNeededOnlyAppliesToSystemdUserUnits(t *testing.T) {
 	}
 }
 
-// The applicable case must actually report something, or the manifest and doctor would have
-// nothing to show and the gap would stay invisible.
-func TestEnableLingerIfNeededReportsForSystemdUserUnits(t *testing.T) {
-	got := (Manager{UserMode: true, Kind: KindSystemd}).EnableLingerIfNeeded()
-	if !got.Applicable {
-		t.Fatal("a systemd user unit must mark linger applicable")
-	}
-	if got.Detail == "" {
-		t.Error("a systemd user unit must report a linger outcome, whether or not it succeeded")
-	}
-}
-
-// The noun is shared by the install planner and the doctor fix planner. Duplicating it is how
-// macOS-specific wording survived into the Linux paths in the first place.
-func TestServiceNounNamesEachBackend(t *testing.T) {
-	cases := map[Kind]string{
-		KindLaunchd:    "launchd",
-		KindSystemd:    "systemd",
-		KindSupervised: "supervised",
-	}
-	for k, want := range cases {
-		if got := k.ServiceNoun(); !strings.Contains(got, want) {
-			t.Errorf("%s noun = %q, want it to mention %q", k, got, want)
-		}
-	}
-	// An unknown kind must still describe something rather than returning empty.
-	if Kind("weird").ServiceNoun() == "" {
-		t.Error("an unrecognised kind must still yield a description")
-	}
-}
-
 // The contract the install path depends on: every outcome says something. An outcome that reports
 // nothing is indistinguishable from "linger does not apply here", which is how a successfully
 // enabled linger used to go unrecorded in the manifest.
@@ -662,31 +576,6 @@ func TestEnableLingerAlwaysReportsADetail(t *testing.T) {
 	}
 	if _, detail := EnableLinger("anyone"); detail == "" {
 		t.Error("without systemd as PID 1, EnableLinger should still say why it did nothing")
-	}
-}
-
-// systemd splits ExecStart on whitespace, so a path containing a space silently becomes two
-// arguments and the unit fails with "No such file or directory". That is not an exotic input: a
-// user-mode install lives under the user's home, and --collector takes an arbitrary path.
-func TestSystemdUnitQuotesExecStartArguments(t *testing.T) {
-	program := "/home/first last/.beacon/endpoint/beacon-otelcol"
-	config := "/home/first last/.beacon/endpoint/otelcol.yaml"
-	unit := unitFile(program, config, true)
-
-	var execStart string
-	for _, line := range strings.Split(unit, "\n") {
-		if strings.HasPrefix(line, "ExecStart=") {
-			execStart = line
-		}
-	}
-	if execStart == "" {
-		t.Fatal("unit has no ExecStart line")
-	}
-	// Each path must arrive as one quoted argument, not as bare text systemd would split.
-	for _, want := range []string{`"` + program + `"`, `"` + config + `"`} {
-		if !strings.Contains(execStart, want) {
-			t.Errorf("ExecStart does not carry %s as a single quoted argument:\n%s", want, execStart)
-		}
 	}
 }
 

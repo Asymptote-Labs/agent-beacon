@@ -23,6 +23,8 @@ var (
 	lookPath                        = exec.LookPath
 	currentExecutable               = os.Executable
 	discoverDefaultBinaryCandidates = defaultBinaryCandidates
+	// pollInterval is how often the readiness and port waits re-check; tests shorten it.
+	pollInterval = 250 * time.Millisecond
 )
 
 type Status struct {
@@ -128,6 +130,10 @@ func WriteConfig(cfg endpointconfig.Config) error {
 	return nil
 }
 
+// IngestExtension is the collector extension that serves the local ingest socket in the restricted
+// log access mode.
+const IngestExtension = "beacon_ingest"
+
 func ConfigYAML(cfg endpointconfig.Config) string {
 	endpointconfig.NormalizeDestinations(&cfg)
 	exporterNames := []string{"beaconjson"}
@@ -140,6 +146,13 @@ func ConfigYAML(cfg endpointconfig.Config) string {
 		exporterNames = append(exporterNames, "falcon_hec")
 	}
 	exporters := "[" + strings.Join(exporterNames, ", ") + "]"
+	// The direct HEC exporters send what they receive, so beacon_privacy redacts before the
+	// fanout. beaconjson redacts in its own writer; with no HEC exporter the processor would only
+	// repeat that on every record.
+	privacyYAML, privacyStep := "", ""
+	if len(exporterNames) > 1 {
+		privacyYAML, privacyStep = "  beacon_privacy: {}\n", "beacon_privacy, "
+	}
 	runtimeMetricsYAML := ""
 	if cfg.Collector.IncludeRuntimeMetrics {
 		runtimeMetricsYAML = "    include_runtime_metrics: true\n"
@@ -160,6 +173,14 @@ func ConfigYAML(cfg endpointconfig.Config) string {
 		modelContextYAML = "    capture_model_context: true\n"
 		grpcLimitYAML = "        max_recv_msg_size_mib: 32\n"
 	}
+	// The restricted log access mode makes the collector the only writer of the system log: hooks
+	// send their events to beacon_ingest over a local socket instead of appending, so the log can
+	// be 0640 root:beacon-log. Its rotation matches beaconjson's, since both append to one log.
+	ingestYAML, extensions := "", "[health_check]"
+	if cfg.RestrictedLogAccess() {
+		ingestYAML = fmt.Sprintf("  %s:\n    log_path: %q\n    rotate_bytes: 10485760\n    rotate_archives: 5\n", IngestExtension, cfg.LogPath)
+		extensions = "[health_check, " + IngestExtension + "]"
+	}
 	return fmt.Sprintf(`receivers:
   otlp:
     protocols:
@@ -177,7 +198,7 @@ processors:
     send_batch_size: 128
   claude_api_body:
 %s
-exporters:
+%sexporters:
   beaconjson:
     path: %q
     max_event_bytes: 65536
@@ -188,26 +209,26 @@ exporters:
 extensions:
   health_check:
     endpoint: 127.0.0.1:%d
-
+%s
 service:
   telemetry:
     metrics:
       level: none
-  extensions: [health_check]
+  extensions: %s
   pipelines:
     logs:
       receivers: [otlp]
-      processors: [memory_limiter, claude_api_body, batch]
+      processors: [memory_limiter, claude_api_body, %sbatch]
       exporters: %s
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, %sbatch]
       exporters: %s
     metrics:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, %sbatch]
       exporters: %s
-`, cfg.Collector.GRPCPort, grpcLimitYAML, cfg.Collector.HTTPPort, modelContextYAML, cfg.LogPath, runtimeMetricsYAML+codexSpansYAML+modelContextYAML+splunkExporter+falconExporter, endpointconfig.HealthCheckPort(cfg.Collector), exporters, exporters, exporters)
+`, cfg.Collector.GRPCPort, grpcLimitYAML, cfg.Collector.HTTPPort, modelContextYAML, privacyYAML, cfg.LogPath, runtimeMetricsYAML+codexSpansYAML+modelContextYAML+splunkExporter+falconExporter, endpointconfig.HealthCheckPort(cfg.Collector), ingestYAML, extensions, privacyStep, exporters, privacyStep, exporters, privacyStep, exporters)
 }
 
 func splunkHECYAML(cfg endpointconfig.Config) string {
@@ -312,7 +333,7 @@ func WaitUntilReady(cfg endpointconfig.Config, timeout time.Duration) error {
 			}
 			return fmt.Errorf("collector did not become ready before timeout")
 		}
-		time.Sleep(250 * time.Millisecond)
+		time.Sleep(pollInterval)
 	}
 }
 
@@ -346,7 +367,7 @@ func WaitForPortsAvailable(grpcPort, httpPort, healthPort int, timeout time.Dura
 			}
 			return fmt.Errorf("%s", strings.Join(busy, "; "))
 		}
-		time.Sleep(250 * time.Millisecond)
+		time.Sleep(pollInterval)
 	}
 }
 

@@ -1,6 +1,10 @@
 package tokens
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/pricing"
+)
 
 // contextWindows maps normalized model-name prefixes to context window sizes
 // in tokens. Longest prefix wins. The table is a best-effort static snapshot;
@@ -52,29 +56,21 @@ var contextWindows = []struct {
 	{"gemini-3", 1048576},
 }
 
-// ContextWindow returns the context window size for a model name, matching
-// provider-prefixed and date-suffixed variants such as
-// "anthropic/claude-sonnet-4-5" or "gpt-4o-2024-08-06".
+// ContextWindow returns the context window size for a model name, matching provider-prefixed,
+// dotted, Bedrock-routed and date-suffixed variants such as "anthropic/claude-sonnet-4-5",
+// "claude-sonnet-4.6", "us.anthropic.claude-sonnet-4-6-v1:0" or "gpt-4o-2024-08-06".
 func ContextWindow(model string) (int64, bool) {
-	normalized := normalizeModel(model)
-	if normalized == "" {
-		return 0, false
-	}
 	best := int64(0)
 	bestLen := -1
-	for _, entry := range contextWindows {
-		if strings.HasPrefix(normalized, entry.prefix) && len(entry.prefix) > bestLen {
-			best = entry.tokens
-			bestLen = len(entry.prefix)
+	// Every spelling is tried, not only the most reduced, because the table keeps dotted ids of
+	// its own (gpt-4.1) that folding would turn into ids no vendor uses.
+	for _, spelling := range pricing.Spellings(model) {
+		for _, entry := range contextWindows {
+			if strings.HasPrefix(spelling, entry.prefix) && len(entry.prefix) > bestLen {
+				best = entry.tokens
+				bestLen = len(entry.prefix)
+			}
 		}
 	}
 	return best, bestLen >= 0
-}
-
-func normalizeModel(model string) string {
-	normalized := strings.ToLower(strings.TrimSpace(model))
-	if idx := strings.LastIndex(normalized, "/"); idx >= 0 {
-		normalized = normalized[idx+1:]
-	}
-	return normalized
 }

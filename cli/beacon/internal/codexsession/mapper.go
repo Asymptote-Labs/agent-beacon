@@ -155,16 +155,71 @@ func (m *mapper) consumeMessage(record Record, item *ResponseItem, emit bool) {
 	if !emit {
 		return
 	}
-	text := strings.TrimSpace(textFromContent(item.Content))
-	if text == "" {
-		return
-	}
 	switch strings.ToLower(item.Role) {
 	case "user":
-		m.emitPrompt(record, text)
+		if text := userPromptText(item); text != "" {
+			m.emitPrompt(record, text)
+		}
 	case "assistant":
-		m.emitAgentMessage(record, text, item.ID)
+		if text := strings.TrimSpace(textFromContent(item.Content)); text != "" {
+			m.emitAgentMessage(record, text, item.ID)
+		}
 	}
+}
+
+// injectedContextPrefixes open the user-role messages Codex writes itself at the start of a
+// session or turn: the environment it runs in, the repository's AGENTS.md, and the person's
+// configured instructions. None of them is something the person typed.
+var injectedContextPrefixes = []string{
+	"<environment_context>",
+	"<user_instructions>",
+	"# AGENTS.md instructions for",
+}
+
+func injectedContext(text string) bool {
+	text = strings.TrimSpace(text)
+	for _, prefix := range injectedContextPrefixes {
+		if strings.HasPrefix(text, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// userPromptText is what the person typed in a user-role message, or "" when the message is only
+// context Codex injected. Recording that context as a prompt titled every backfilled session after
+// its environment or AGENTS.md. Newer builds name each block's kind, and a message with kinds but
+// no "user.text" among them is injected context whatever its text says; blocks are otherwise
+// recognized by the prefixes Codex writes.
+func userPromptText(item *ResponseItem) string {
+	if kinds := item.contentItemKinds(); len(kinds) > 0 && !containsString(kinds, "user.text") {
+		return ""
+	}
+	blocks, ok := item.Content.([]interface{})
+	if !ok {
+		text := textFromContent(item.Content)
+		if injectedContext(text) {
+			return ""
+		}
+		return text
+	}
+	kept := make([]interface{}, 0, len(blocks))
+	for _, raw := range blocks {
+		if block, ok := raw.(map[string]interface{}); ok && injectedContext(firstString(block, "text", "content")) {
+			continue
+		}
+		kept = append(kept, raw)
+	}
+	return textFromContent(kept)
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *mapper) consumeEventMessage(record Record, emit bool) {
@@ -330,7 +385,7 @@ func (m *mapper) emitToolResult(record Record, item *ResponseItem) {
 		call.ID = item.CallID
 	}
 	output := toolOutputText(item.Output)
-	if isCommandTool(call) {
+	if asymptoteobserve.IsShellCommandTool(call.Name) {
 		ev := m.base(record, "command.executed", "command", severityForStatus(item.Status), schema.FidelityObserved, "Codex command completed")
 		ev.Command = &schema.CommandInfo{Command: commandFromTool(call), Output: output}
 		ev.Tool = &schema.ToolInfo{Name: call.Name, Command: commandFromTool(call)}
@@ -490,52 +545,13 @@ func commandFromTool(call codexToolCall) string {
 	case string:
 		return strings.TrimSpace(v)
 	case map[string]interface{}:
-		return firstStringOrJoinedArray(v, "command", "cmd", "shell_command")
+		return asymptoteobserve.ToolCommandLine(call.Name, v)
 	default:
 		if call.Input == nil {
 			return ""
 		}
 		data, _ := json.Marshal(call.Input)
 		return string(data)
-	}
-}
-
-func firstStringOrJoinedArray(m map[string]interface{}, keys ...string) string {
-	for _, key := range keys {
-		val, ok := m[key]
-		if !ok {
-			continue
-		}
-		switch v := val.(type) {
-		case string:
-			if v != "" {
-				return v
-			}
-		case []interface{}:
-			if s := joinStringSlice(v); s != "" {
-				return s
-			}
-		}
-	}
-	return ""
-}
-
-func joinStringSlice(arr []interface{}) string {
-	parts := make([]string, 0, len(arr))
-	for _, v := range arr {
-		if s, ok := v.(string); ok {
-			parts = append(parts, s)
-		}
-	}
-	return strings.TrimSpace(strings.Join(parts, " "))
-}
-
-func isCommandTool(call codexToolCall) bool {
-	switch strings.ToLower(call.Name) {
-	case "exec", "exec_command", "shell", "bash":
-		return true
-	default:
-		return false
 	}
 }
 

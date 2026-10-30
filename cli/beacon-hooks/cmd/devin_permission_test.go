@@ -13,10 +13,10 @@ import (
 // Devin reads `{"decision":"approve"}` from a PermissionRequest hook as the operator's yes, so a
 // telemetry hook that printed it would grant every permission Devin was about to ask a person
 // for -- including for the command below -- on a runtime where Beacon was installed only to watch.
-// The empty object carries no decision and leaves Devin's own prompt in charge. Both platform
-// spellings the installer writes are covered, because isDevinLikePlatform routes them together.
+// The empty object carries no decision and leaves Devin's own prompt in charge. isDevinLikePlatform
+// routes both installer spellings (devin, devin-cli) together, so one stands for both.
 func TestDevinPermissionRequestDoesNotApproveOnBehalfOfTheUser(t *testing.T) {
-	for _, platform := range []string{"devin", "devin-cli"} {
+	for _, platform := range []string{"devin-cli"} {
 		t.Run(platform, func(t *testing.T) {
 			setupHookConfigDirs(t)
 			platformFlag = platform
@@ -58,7 +58,7 @@ func TestDevinPermissionRequestDoesNotApproveOnBehalfOfTheUser(t *testing.T) {
 // A payload Beacon cannot parse is no grounds for answering on the operator's behalf either. Before
 // this was fixed, unreadable stdin was the one input on which Devin got an unconditional approve.
 func TestDevinPermissionRequestDoesNotApproveMalformedInput(t *testing.T) {
-	for _, platform := range []string{"devin", "devin-cli"} {
+	for _, platform := range []string{"devin-cli"} {
 		t.Run(platform, func(t *testing.T) {
 			setupHookConfigDirs(t)
 			platformFlag = platform

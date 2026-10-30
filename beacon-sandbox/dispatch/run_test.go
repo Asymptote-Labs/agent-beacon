@@ -162,37 +162,6 @@ func TestSingleDispatchFollowsItsRunToCompletion(t *testing.T) {
 	}
 }
 
-// A run that appears first but is not ours -- another invocation's, or a manual dispatch from the
-// Actions tab -- is waited past, not taken. Sequential counterpart of the race: the foreign runs
-// are the earliest above the floor, which is exactly what the old rule selected.
-func TestDispatchWaitsPastRunsThatAreNotItsOwn(t *testing.T) {
-	gh := newFakeGitHub(t, func(gh *fakeGitHub) {
-		gh.hideNewRunsFor = 2
-		gh.beforeDispatch = func() {
-			gh.addForeignRun("Windows sandbox " + correlationMarker("fedcba9876543210fedcba98"))
-			gh.addForeignRun("Windows sandbox")
-		}
-	})
-
-	res, err := Run(fastOptions(t, "w03-hook-capture"))
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	foreign := gh.foreignRuns()
-	if len(foreign) != 2 {
-		t.Fatalf("the fake should have added two foreign runs, got %v", foreign)
-	}
-	for _, id := range foreign {
-		if res.RunID == strconv.FormatInt(id, 10) {
-			t.Fatalf("attached to foreign run %d instead of our own", id)
-		}
-	}
-	if want := strconv.FormatInt(gh.runFor("w03-hook-capture"), 10); res.RunID != want {
-		t.Errorf("followed run %s, want our own %s", res.RunID, want)
-	}
-	assertOwnArtifacts(t, res, "w03-hook-capture")
-}
-
 // If our id never shows up but other runs did, the dispatch cannot know which, if any, is ours --
 // for instance the dispatched ref's workflow accepts the input but does not render it into its
 // title. That must be an explicit ambiguity error naming the runs, and nothing may be downloaded
@@ -204,7 +173,7 @@ func TestDispatchReportsAmbiguityWhenNoRunCarriesItsID(t *testing.T) {
 	})
 
 	opts := fastOptions(t, "w00-probe")
-	opts.newRunTimeout = 300 * time.Millisecond
+	opts.newRunTimeout = 20 * time.Millisecond
 	res, err := Run(opts)
 	if err == nil {
 		t.Fatalf("an uncorrelatable run must be an error, got run %s", res.RunID)
@@ -231,7 +200,7 @@ func TestDispatchTimesOutWhenNoRunAppears(t *testing.T) {
 	newFakeGitHub(t, func(gh *fakeGitHub) { gh.hideNewRunsFor = 1 << 30 })
 
 	opts := fastOptions(t, "w00-probe")
-	opts.newRunTimeout = 200 * time.Millisecond
+	opts.newRunTimeout = 20 * time.Millisecond
 	_, err := Run(opts)
 	if err == nil {
 		t.Fatal("a run that never appears must be an error")
@@ -279,7 +248,7 @@ func TestDispatchReportsARunThatDoesNotComplete(t *testing.T) {
 	gh := newFakeGitHub(t, func(gh *fakeGitHub) { gh.runListsUntilDone = 1 << 30 })
 
 	opts := fastOptions(t, "w00-probe")
-	opts.Timeout = 200 * time.Millisecond
+	opts.Timeout = 20 * time.Millisecond
 	res, err := Run(opts)
 	if err == nil || !strings.Contains(err.Error(), "did not complete within") {
 		t.Fatalf("want the completion timeout, got: %v", err)

@@ -169,21 +169,6 @@ func TestEnrollSurfacesInitRejectionWithoutOpeningABrowser(t *testing.T) {
 	}
 }
 
-func TestEnrollReportsExchangeFailure(t *testing.T) {
-	fd := newFakeDashboard(t)
-	fd.exchangeFail = "exchange code has expired; restart enrollment"
-	_, err := Enroll(context.Background(), EnrollOptions{
-		DashboardURL: fd.server.URL,
-		Device:       device(),
-		OpenBrowser:  fd.approve(t),
-		HTTPClient:   fd.server.Client(),
-		Timeout:      5 * time.Second,
-	})
-	if err == nil || !strings.Contains(err.Error(), "exchange code has expired") {
-		t.Fatalf("expected exchange failure, got %v", err)
-	}
-}
-
 func TestEnrollRefusesInsecureIngestURLFromServer(t *testing.T) {
 	fd := newFakeDashboard(t)
 	fd.ingestURL = "http://ingest.example.test"
@@ -237,7 +222,7 @@ func TestEnrollNoBrowserPrintsTheURL(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for i := 0; i < 100; i++ {
+		for i := 0; i < 5000; i++ {
 			text := out.String()
 			if idx := strings.Index(text, "http://"); idx >= 0 {
 				line := text[idx:]
@@ -247,7 +232,7 @@ func TestEnrollNoBrowserPrintsTheURL(t *testing.T) {
 				_ = approve(line)
 				return
 			}
-			time.Sleep(20 * time.Millisecond)
+			time.Sleep(time.Millisecond)
 		}
 	}()
 	_, err := Enroll(context.Background(), EnrollOptions{

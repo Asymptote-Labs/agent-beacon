@@ -94,6 +94,13 @@ func runEndpointConnect(cmd *cobra.Command, args []string) error {
 // call it after a successful install; `endpoint connect` calls it directly. backfilled
 // says the caller has just run the session backfill, so connect only ships it.
 func connectEndpoint(cmd *cobra.Command, userMode bool, logPath string, backfilled bool) error {
+	return connectEndpointFor(cmd, userMode, logPath, backfilled, nil)
+}
+
+// connectEndpointFor is connectEndpoint for an install that closes on the wizard's short summary
+// when summary is non-nil: it says one line for the connection, then the install's backfill report,
+// and leaves the dashboard and what comes next to finishCloudSetup.
+func connectEndpointFor(cmd *cobra.Command, userMode bool, logPath string, backfilled bool, summary *cloudSummary) error {
 	hostname, _ := os.Hostname()
 	out := cmd.OutOrStdout()
 	if endpointOpts.jsonOutput {
@@ -110,6 +117,7 @@ func connectEndpoint(cmd *cobra.Command, userMode bool, logPath string, backfill
 		PrivacyMode: privacyMode,
 		Backfill:    endpointConnectBackfill(out, userMode, logPath, backfilled),
 		Out:         out,
+		Quiet:       summary != nil,
 		Enroll: asymptote.EnrollOptions{
 			DashboardURL: connectOpts.dashboardURL,
 			NoBrowser:    connectOpts.noBrowser,
@@ -122,6 +130,7 @@ func connectEndpoint(cmd *cobra.Command, userMode bool, logPath string, backfill
 			},
 		},
 	}
+	signedInAs := ""
 	if userMode {
 		session, err := connectAccountLoad()
 		if err != nil {
@@ -145,6 +154,7 @@ func connectEndpoint(cmd *cobra.Command, userMode bool, logPath string, backfill
 			BaseURL:     session.BaseURL,
 			AccessToken: session.AccessToken,
 		}
+		signedInAs = session.User.Email
 	}
 	result, err := connectManagedEndpoint(context.Background(), options)
 	if err != nil {
@@ -152,6 +162,15 @@ func connectEndpoint(cmd *cobra.Command, userMode bool, logPath string, backfill
 	}
 	if endpointOpts.jsonOutput {
 		return json.NewEncoder(os.Stdout).Encode(result)
+	}
+	if summary != nil {
+		fmt.Fprintln(out, connectedSummaryLine(result.Enrollment, signedInAs))
+		_, _ = summary.backfill.WriteTo(out)
+		summary.dashboardURL = dashboardHomeURL(result.Enrollment.DashboardURL)
+		if result.Backfill != nil {
+			summary.uploading = result.Backfill.Events
+		}
+		return nil
 	}
 	fmt.Fprintf(out, "Connected to Beacon Cloud as device %s", result.Enrollment.DeviceID)
 	if result.Enrollment.OrganizationName != "" {
@@ -168,13 +187,31 @@ func connectEndpoint(cmd *cobra.Command, userMode bool, logPath string, backfill
 	// the staged session backfill the dashboard fills as agents run.
 	fmt.Fprintln(out)
 	if result.Backfill != nil && result.Backfill.Events > 0 {
-		fmt.Fprintf(out, "Uploading %d events of recent session history; they appear at %s within a few minutes.\n", result.Backfill.Events, dashboardHomeURL(result.Enrollment.DashboardURL))
-		fmt.Fprintln(out, "Next: keep using your agents as you normally would; new sessions appear within a minute of the activity.")
+		fmt.Fprintf(out, "Uploading %d events of recent session history; they appear at %s within about 15 seconds.\n", result.Backfill.Events, dashboardHomeURL(result.Enrollment.DashboardURL))
+		fmt.Fprintln(out, "Next: keep using your agents as you normally would; new sessions appear within about 15 seconds of the activity.")
 		return nil
 	}
 	fmt.Fprintln(out, "Next: run any supported agent as you normally would.")
-	fmt.Fprintf(out, "Its sessions appear at %s within a minute of the activity.\n", dashboardHomeURL(result.Enrollment.DashboardURL))
+	fmt.Fprintf(out, "Its sessions appear at %s within about 15 seconds of the activity.\n", dashboardHomeURL(result.Enrollment.DashboardURL))
 	return nil
+}
+
+// connectedSummaryLine is the first line of the wizard's short closing: Beacon works, and where its
+// telemetry goes. The account is the one that authorized the device, falling back to the signed-in
+// session and then the organization.
+func connectedSummaryLine(enrollment asymptote.Enrollment, signedInAs string) string {
+	account := enrollment.Email
+	if account == "" {
+		account = signedInAs
+	}
+	if account == "" {
+		account = enrollment.OrganizationName
+	}
+	line := "Beacon is installed and connected to Beacon Cloud"
+	if account != "" {
+		line += " as " + account
+	}
+	return fmt.Sprintf("%s (device %s, %s privacy).", line, enrollment.DeviceID, managedprivacy.Label(enrollment.PrivacyMode))
 }
 
 func selectedManagedPrivacyMode(userMode bool) (string, error) {

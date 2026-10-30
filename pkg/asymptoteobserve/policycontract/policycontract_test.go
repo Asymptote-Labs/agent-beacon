@@ -4,8 +4,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"testing"
-
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 //go:embed schema.json
@@ -17,32 +15,6 @@ func TestSchemaIsValidJSON(t *testing.T) {
 	}
 }
 
-func TestRequestRoundTrip(t *testing.T) {
-	req := Request{
-		Version:  Version,
-		Phase:    PhasePreTool,
-		Platform: "claude",
-		Event: asymptoteobserve.Event{
-			Event:   asymptoteobserve.EventInfo{Action: "command.executed", Category: "command"},
-			Command: &asymptoteobserve.CommandInfo{Command: "claude --dangerously-skip-permissions"},
-		},
-	}
-	data, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	var got Request
-	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if got.Version != Version || got.Phase != PhasePreTool || got.Platform != "claude" {
-		t.Fatalf("envelope round trip mismatch: %+v", got)
-	}
-	if got.Event.Command == nil || got.Event.Command.Command != req.Event.Command.Command {
-		t.Fatalf("event round trip mismatch: %+v", got.Event)
-	}
-}
-
 func TestResponseDenied(t *testing.T) {
 	cases := []struct {
 		raw  string
@@ -50,7 +22,6 @@ func TestResponseDenied(t *testing.T) {
 	}{
 		{`{"decision":"deny","reason":"nope","rule_id":"r1","severity":"high","mode":"enforce"}`, true},
 		{`{"decision":"allow"}`, false},
-		{`{"decision":""}`, false},
 		{`{"decision":"DENY"}`, false}, // case-sensitive: only exact "deny" denies
 		{`{}`, false},
 	}

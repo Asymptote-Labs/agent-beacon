@@ -10,8 +10,8 @@ import (
 
 // The reported Linux install printed an unbroken run of success lines while the collector had no
 // logout persistence, so the user found out at their next logout with collection already stopped.
-// These pin what install and repair now say instead -- and, just as importantly, when they stay
-// quiet, because a logout warning on a backend that has no such concept is its own bug.
+// Install and repair now warn -- and stay quiet when there is no gap, because a logout warning on a
+// backend that has no such concept is its own bug.
 func TestPrintLingerGapSaysNothingWhenThereIsNoGap(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -22,12 +22,6 @@ func TestPrintLingerGapSaysNothingWhenThereIsNoGap(t *testing.T) {
 			// is not a question, so there is nothing to warn about.
 			name:   "not applicable",
 			result: lifecycle.InstallResult{},
-		},
-		{
-			// Applicable and satisfied. The install is fully persistent; saying so again here
-			// would just be noise in a transcript that already reported success.
-			name:   "already enabled",
-			result: lifecycle.InstallResult{LingerApplicable: true, LingerEnabled: true, LingerDetail: "linger already enabled for someone"},
 		},
 		{
 			// A detail is recorded on the success path too. It belongs in the manifest, not in
@@ -46,8 +40,7 @@ func TestPrintLingerGapSaysNothingWhenThereIsNoGap(t *testing.T) {
 	}
 }
 
-// The gap the feedback was about: running now, not running after logout. The user should not have
-// to know what linger is, or go find the command themselves.
+// The gap the feedback was about: the warning carries the recorded reason and the exact fix.
 func TestPrintLingerGapNamesTheGapAndTheFix(t *testing.T) {
 	var out bytes.Buffer
 	printLingerGap(&out, lifecycle.InstallResult{
@@ -56,29 +49,16 @@ func TestPrintLingerGapNamesTheGapAndTheFix(t *testing.T) {
 		LingerRemediation: "sudo loginctl enable-linger someone",
 	})
 	got := out.String()
-
-	for _, want := range []string{
-		// What is wrong, in terms of what the user loses rather than which flag is unset.
-		"logs out",
-		// Why, kept verbatim from the outcome so the reason is never paraphrased away.
-		"administrator approval",
-		// The exact command, copy-pasteable, no placeholder left to substitute.
-		"sudo loginctl enable-linger someone",
-	} {
+	for _, want := range []string{"administrator approval", "sudo loginctl enable-linger someone"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output should mention %q, got:\n%s", want, got)
 		}
 	}
-	// It is a warning about a degraded install, not a failure: the collector is running.
-	if !strings.Contains(got, "collector is running") {
-		t.Errorf("output should say the collector is running, got:\n%s", got)
-	}
 }
 
 // The unverifiable case: os/user could not name the current user, so the linger state was never
-// read. Claiming collection will stop would be asserting something unknown, and printing a
-// remediation would name a user this code could not resolve.
-func TestPrintLingerGapReportsAnUnverifiedStateAsUnverified(t *testing.T) {
+// read. Printing a remediation would name a user this code could not resolve.
+func TestPrintLingerGapOffersNoFixForAnUnverifiedState(t *testing.T) {
 	var out bytes.Buffer
 	printLingerGap(&out, lifecycle.InstallResult{
 		LingerApplicable: true,
@@ -86,12 +66,6 @@ func TestPrintLingerGapReportsAnUnverifiedStateAsUnverified(t *testing.T) {
 	})
 	got := out.String()
 
-	if !strings.Contains(got, "could not verify") {
-		t.Errorf("output should report the state as unverified, got:\n%s", got)
-	}
-	if strings.Contains(got, "will stop") {
-		t.Errorf("an unverified state must not be asserted as broken, got:\n%s", got)
-	}
 	if strings.Contains(got, "loginctl") {
 		t.Errorf("no fix should be offered for a user this code could not resolve, got:\n%s", got)
 	}

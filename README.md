@@ -1,6 +1,9 @@
 <p align="center">
-  <img src="images/beacon-hero.png" alt="Beacon" width="860">
+  <img src="images/beacon-lockup-light-mode.svg#gh-light-mode-only" alt="Beacon" width="480">
+  <img src="images/beacon-lockup-dark-mode.svg#gh-dark-mode-only" alt="Beacon" width="480">
 </p>
+
+<h1 align="center">Self‑improving memory for coding agents</h1>
 
 <p align="center">
   <a href="https://github.com/asymptote-labs/agent-beacon/releases"><img src="https://img.shields.io/github/v/release/asymptote-labs/agent-beacon" alt="GitHub release"></a>
@@ -24,13 +27,13 @@
 </p>
 
 <p align="center">
-  <a href="https://www.star-history.com/asymptote-labs/agent-beacon">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=Asymptote-Labs/agent-beacon&type=trending&theme=dark">
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/badge?repo=Asymptote-Labs/agent-beacon&type=trending">
-      <img alt="GitHub Trending Repository of the Day" src="https://api.star-history.com/badge?repo=Asymptote-Labs/agent-beacon&type=trending">
-    </picture>
-  </a>
+ <a href="https://www.star-history.com/asymptote-labs/agent-beacon">
+  <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=Asymptote-Labs/agent-beacon&type=trending&theme=dark&v=2" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/badge?repo=Asymptote-Labs/agent-beacon&type=trending&v=2" />
+   <img alt="GitHub Trending Repository of the Day" src="https://api.star-history.com/badge?repo=Asymptote-Labs/agent-beacon&type=trending&v=2" />
+  </picture>
+ </a>
 </p>
 
 Beacon captures **agent session history** across Claude Code, Cursor, Codex, OpenCode, and 20+ other harnesses, then turns useful workflows, corrections, and debugging patterns into reusable knowledge for future agents.
@@ -53,20 +56,35 @@ Beacon is an open-source memory layer for AI coding agents that learns from your
 
 ---
 
+## 🎬 Demo
+
+https://github.com/user-attachments/assets/38995612-84e9-4989-a905-0099f77955f0
+
+---
+
 ## 🚀 Quick Start
 
 Beacon is open source and local-first. Interactive endpoint setup signs in through
 beacon.sh and preselects Beacon Cloud, with an explicit Local opt-out. Signing in
 forwards nothing; confirming Managed installs Beacon and connects this machine in
-the same command, and the confirm screen says so before you accept. System, package,
-MDM, and CI installation paths remain noninteractive and account-free.
+the same command, and the confirm screen says so before you accept. Setup then ends
+on a short summary and opens the hosted dashboard at
+[beacon.sh/dashboard](https://beacon.sh/dashboard). System, package, MDM, and CI
+installation paths remain noninteractive and account-free.
 
 ### 1. Install Beacon
+
+**Copy & paste setup prompt into your coding agent**
+
+```text
+Read https://beacon.sh/start.md then set me up on Beacon
+```
 
 <details open>
 <summary><strong>macOS</strong></summary>
 
 ```bash
+brew update
 brew trust asymptote-labs/tap
 brew tap asymptote-labs/tap
 brew install beacon
@@ -302,7 +320,7 @@ Beacon supports local agents, browser agents, cloud agents, CI workflows, and ag
 | Codex Desktop | OTLP | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ | ✅ Plugin |
 | Cursor | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ Plugin |
 | DeepSeek Harness | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ | ✅ `.agents/skills` |
-| Devin CLI | Hooks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ Plugin |
+| Devin CLI | Hooks + poll | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ Plugin |
 | Devin Desktop | Hooks | – | ✅ | ✅ | ✅ | ✅ | – | ✅ | – | ✅ via Devin CLI |
 | Factory Droid | OTLP + hooks + poll | ✅ | ✅ | ✅ | – | ✅ | ✅ | – | – | ✅ Plugin |
 | fx (Vercel Labs) | Poll | ✅ | ✅ | ✅ | ✅ | ✅ | – | ✅ | ✅ | ✅ `/skills install` |

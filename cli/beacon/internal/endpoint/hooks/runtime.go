@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/embedded"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"gopkg.in/yaml.v3"
 )
 
 type RuntimeOptions struct {
@@ -193,6 +195,52 @@ func isEndpointHookCommand(command, platform string) bool {
 	return hasLegacyBinary && hasPlatform
 }
 
+// IsEndpointHookCommand reports whether command is a hook an endpoint install wrote for platform
+// ("" for any platform). Status, doctor and inventory use it so they recognize exactly the hooks
+// install writes, repairs and removes, in both spellings described at
+// commandCarriesEndpointSettings.
+func IsEndpointHookCommand(command, platform string) bool {
+	return isEndpointHookCommand(command, platform)
+}
+
+// ConfigHasEndpointHook reports whether a runtime's JSON or YAML hooks config holds a command
+// IsEndpointHookCommand accepts for platform. Every string under a "command" key is checked,
+// wherever the runtime nests it. The error is the document's parse error.
+func ConfigHasEndpointHook(data []byte, platform string) (bool, error) {
+	var doc any
+	var err error
+	if json.Valid(data) {
+		err = json.Unmarshal(data, &doc)
+	} else {
+		err = yaml.Unmarshal(data, &doc)
+	}
+	if err != nil {
+		return false, err
+	}
+	return hasEndpointCommand(doc, platform), nil
+}
+
+func hasEndpointCommand(node any, platform string) bool {
+	switch typed := node.(type) {
+	case map[string]any:
+		for key, value := range typed {
+			if command, ok := value.(string); ok && key == "command" && isEndpointHookCommand(command, platform) {
+				return true
+			}
+			if hasEndpointCommand(value, platform) {
+				return true
+			}
+		}
+	case []any:
+		for _, value := range typed {
+			if hasEndpointCommand(value, platform) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // commandCarriesEndpointSettings reports whether a command was written by an endpoint install, as
 // opposed to being some other invocation of the same binary.
 //
@@ -261,7 +309,8 @@ func commandHasPlatform(command, platform string) bool {
 // are single-quoted and Windows ones double-quoted -- and this function only has to recover tokens,
 // not to reproduce a particular shell's semantics. It deliberately does not handle backslash escapes:
 // on Windows a backslash is a path separator, and treating it as an escape would corrupt every path
-// this parses.
+// this parses. The one exception is \' outside quotes: hookCommandQuote writes a single quote in a
+// value by closing the quoted run, writing \' and reopening it.
 func commandFields(command string) []string {
 	var (
 		fields  []string
@@ -276,7 +325,9 @@ func commandFields(command string) []string {
 			started = false
 		}
 	}
-	for _, r := range command {
+	runes := []rune(command)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
 		switch {
 		case quote != 0:
 			if r == quote {
@@ -284,6 +335,10 @@ func commandFields(command string) []string {
 				break
 			}
 			current.WriteRune(r)
+		case r == '\\' && i+1 < len(runes) && runes[i+1] == '\'':
+			current.WriteRune('\'')
+			started = true
+			i++
 		case r == '"' || r == '\'':
 			// Marks the token as started even if the quotes turn out to be empty, so `--platform ""`
 			// yields an empty value rather than dropping the argument and shifting every token after

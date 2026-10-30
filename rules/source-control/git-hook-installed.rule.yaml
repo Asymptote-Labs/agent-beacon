@@ -1,5 +1,5 @@
 id: git-hook-installed
-version: 1
+version: 3
 title: Git hook script installed or modified
 description: >
   The agent modified a script under .git/hooks/ (pre-commit, post-checkout,
@@ -16,8 +16,8 @@ taxonomy:
   mitre_atlas: AML.T0011
 
 match: >
-  e.event.action == "file.modified" &&
-  e.file.path.matches("(?i)(^|/)\\.git/hooks/(applypatch-msg|pre-applypatch|post-applypatch|pre-commit|pre-merge-commit|prepare-commit-msg|commit-msg|post-commit|pre-rebase|post-checkout|post-merge|pre-push|pre-receive|update|post-receive|post-update|push-to-checkout|pre-auto-gc|post-rewrite|fsmonitor-watchman)$")
+  e.event.action in ["file.modified", "file.created", "file.edited"] &&
+  e.file.path.matches("(?i)(^|/)\\.git/hooks/(applypatch-msg|pre-applypatch|post-applypatch|pre-commit|pre-merge-commit|prepare-commit-msg|commit-msg|post-commit|pre-rebase|post-checkout|post-merge|pre-push|pre-receive|update|post-receive|post-update|push-to-checkout|pre-auto-gc|post-rewrite|fsmonitor-watchman|reference-transaction|post-index-change|sendemail-validate|proc-receive|p4-changelist|p4-prepare-changelist|p4-post-changelist|p4-pre-submit)$")
 
 emit:
   reason: "Git hook script installed or modified — runs on the next matching git operation, durable code-execution persistence"
@@ -35,6 +35,18 @@ tests:
       - event: { action: file.modified }
         file: { path: "/home/dev/repo/.git/hooks/post-checkout" }
         session: { id: s1 }
+  - name: reference_transaction_hook
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: ".git/hooks/reference-transaction" }
+        session: { id: s1 }
+  - name: post_index_change_hook
+    verdict: match
+    events:
+      - event: { action: file.modified }
+        file: { path: "/home/dev/repo/.git/hooks/post-index-change" }
+        session: { id: s1 }
   - name: sample_hook_not_active
     verdict: no_match
     events:
@@ -47,4 +59,9 @@ tests:
       - event: { action: file.modified }
         file: { path: "scripts/pre-commit" }
         session: { id: s1 }
-
+  - name: pre_commit_hook_created
+    verdict: match
+    events:
+      - event: { action: file.created }
+        file: { path: ".git/hooks/pre-commit" }
+        session: { id: s1 }

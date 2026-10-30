@@ -124,17 +124,49 @@ func (c *CompiledRule) newFinding(evidence []asymptoteobserve.Event) Finding {
 
 // ScanEvents runs every compiled rule over the events and returns all findings, in rule
 // order. It is the aggregator backing the `beacon scan` command.
+//
+// Single-event rules run event by event, so an event's derived fields (a parsed command line,
+// a tool result's text) are computed once for every rule that references them, not once per
+// rule, and dropped before the next event. Correlation rules run after, each over the whole
+// sequence.
 func ScanEvents(rules []*CompiledRule, events []asymptoteobserve.Event) ([]Finding, error) {
-	var all []Finding
-	for _, rule := range rules {
-		found, err := rule.Findings(events)
-		if err != nil {
-			// Name the rule: an evaluation error (such as one that exceeded MaxEvalCost)
-			// belongs to the rule, not to the log, and the operator needs to know which to
-			// remove.
-			return nil, fmt.Errorf("rule %q: %w", rule.Rule().ID, err)
+	found := make([][]Finding, len(rules))
+	for i := range events {
+		var derived asymptoteobserve.Event
+		haveDerived := false
+		for r, rule := range rules {
+			if rule.steps != nil {
+				continue
+			}
+			event := &events[i]
+			if rule.derived {
+				if !haveDerived {
+					derived, haveDerived = withDerivedFields(events[i]), true
+				}
+				event = &derived
+			}
+			matched, err := evalDerived(rule.match, *event)
+			if err != nil {
+				// Name the rule: an evaluation error (such as one that exceeded MaxEvalCost)
+				// belongs to the rule, not to the log, and the operator needs to know which to
+				// remove.
+				return nil, fmt.Errorf("rule %q: %w", rule.Rule().ID, err)
+			}
+			if matched {
+				found[r] = append(found[r], rule.newFinding([]asymptoteobserve.Event{events[i]}))
+			}
 		}
-		all = append(all, found...)
+	}
+	var all []Finding
+	for r, rule := range rules {
+		if rule.steps != nil {
+			f, err := rule.correlationFindings(events)
+			if err != nil {
+				return nil, fmt.Errorf("rule %q: %w", rule.Rule().ID, err)
+			}
+			found[r] = f
+		}
+		all = append(all, found[r]...)
 	}
 	return all, nil
 }

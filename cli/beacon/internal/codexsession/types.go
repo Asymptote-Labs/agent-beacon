@@ -66,6 +66,26 @@ type ResponseItem struct {
 	Input     interface{} `json:"input,omitempty"`
 	Output    interface{} `json:"output,omitempty"`
 	Arguments string      `json:"arguments,omitempty"`
+	// Passthrough is the metadata newer Codex builds attach to a message. It is kept raw and
+	// read leniently (see contentItemKinds), so a shape Beacon does not expect never makes the
+	// whole record unreadable.
+	Passthrough json.RawMessage `json:"internal_chat_message_metadata_passthrough,omitempty"`
+}
+
+// contentItemKinds is what Codex says each content block of a message is, such as "user.text"
+// for what the person typed or "environments.environment_context" for context Codex injected.
+// It is nil when the message carries no such list.
+func (item *ResponseItem) contentItemKinds() []string {
+	if len(item.Passthrough) == 0 {
+		return nil
+	}
+	var passthrough struct {
+		ContentItemKinds []string `json:"content_item_kinds"`
+	}
+	if err := json.Unmarshal(item.Passthrough, &passthrough); err != nil {
+		return nil
+	}
+	return passthrough.ContentItemKinds
 }
 
 type EventMessage struct {

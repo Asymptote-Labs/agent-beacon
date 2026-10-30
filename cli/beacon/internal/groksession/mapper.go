@@ -53,6 +53,10 @@ type mapper struct {
 	out        []MappedEvent
 	toolByID   map[string]ToolCall
 	toolOutput map[string]string
+	// chatLine and chatOrdinal number the events mapped from one chat_history.jsonl line, so each
+	// is named by where it was read (see chatEventID).
+	chatLine    int
+	chatOrdinal int
 }
 
 type orderedItem struct {
@@ -288,10 +292,27 @@ func (m *mapper) base(ts, action, category string, severity schema.Severity, fid
 // The cursor is per source file and holds the last line written, so a line is skipped at or below
 // it. session.started has no line of its own and is gated by its own flag.
 func (m *mapper) append(ev schema.Event, kind SourceKind, line int) {
+	if kind == SourceChat && ev.Event.ID == "" {
+		ev.Event.ID = m.chatEventID(ev, line)
+	}
 	if m.collected(kind, line) {
 		return
 	}
 	m.out = append(m.out, MappedEvent{Event: ev, SourceKind: kind, SourceLine: line})
+}
+
+// chatEventID names an event mapped from a chat_history.jsonl line by where it was read: the
+// session, the line, and its place among that line's events. A chat line carries no time, so the
+// event is stamped with the time of the sync, and the id the writer would derive from its bytes
+// would differ on every sync; a resend after a sync stopped partway through a session would then
+// be a second event rather than the same one. The line is immutable and the whole session is
+// mapped on every sweep, so the same line always yields the same events in the same order.
+func (m *mapper) chatEventID(ev schema.Event, line int) string {
+	if line != m.chatLine {
+		m.chatLine, m.chatOrdinal = line, 0
+	}
+	m.chatOrdinal++
+	return grokEventID(fmt.Sprintf("%s:%s:%d:%d:%s", m.data.Ref.ID, m.data.Ref.SourcePath, line, m.chatOrdinal, ev.Event.Action))
 }
 
 func (m *mapper) collected(kind SourceKind, line int) bool {

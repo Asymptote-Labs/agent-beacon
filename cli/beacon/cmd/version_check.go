@@ -103,7 +103,7 @@ func runVersionCheck(cmd *cobra.Command, args []string) error {
 	}
 	if result.UpdateAvailable {
 		fmt.Fprintf(out, "Beacon %s is available. Current version: %s\n", result.LatestVersion, result.CurrentVersion)
-		fmt.Fprintln(out, "If installed with Homebrew: brew upgrade beacon")
+		fmt.Fprintln(out, "If installed with Homebrew: brew update && brew upgrade beacon")
 		fmt.Fprintf(out, "Download: %s\n", releaseDownloadURL(result))
 		return nil
 	}

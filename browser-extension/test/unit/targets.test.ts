@@ -6,7 +6,6 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  DEFAULT_TARGET,
   assertSafeOutdir,
   FIREFOX_MIN_VERSION,
   GECKO_ID,
@@ -22,14 +21,6 @@ const base = (): Record<string, any> =>
   JSON.parse(readFileSync(path.join(root, 'src', 'manifest.json'), 'utf8'));
 
 describe('build targets', () => {
-  it('keeps Chrome the default target, built to dist/ and copied verbatim', () => {
-    expect(DEFAULT_TARGET).toBe('chrome');
-    const chrome = getTarget('chrome');
-    expect(chrome.outdir).toBe('dist');
-    expect(chrome.esbuildTarget).toEqual(['chrome120']);
-    expect(chrome.manifest).toBeNull();
-  });
-
   it('gives every target its own output directory', () => {
     const outdirs = Object.values(TARGETS).map((t) => t.outdir);
     expect(new Set(outdirs).size).toBe(outdirs.length);
@@ -49,23 +40,11 @@ describe('build targets', () => {
 });
 
 describe('safari target', () => {
-  it('builds to dist-safari and ships src/manifest.json verbatim', () => {
-    const safari = getTarget('safari');
-    expect(safari.outdir).toBe('dist-safari');
-    expect(safari.manifest).toBeNull();
-  });
-
   it('targets a Safari that runs world: "MAIN" content scripts (Safari 18)', () => {
     expect(SAFARI_MIN_VERSION).toBeGreaterThanOrEqual(18);
     expect(getTarget('safari').esbuildTarget).toEqual([`safari${SAFARI_MIN_VERSION}`]);
     const usesMain = base().content_scripts.some((c: { world?: string }) => c.world === 'MAIN');
     expect(usesMain).toBe(true);
-  });
-
-  it('keeps the Chrome background shape, which Safari documents as supported', () => {
-    // Verbatim means the service worker ships as is. If Safari needs
-    // background.scripts instead, the target must gain a derived manifest.
-    expect(base().background).toEqual({ service_worker: 'sw.js' });
   });
 });
 

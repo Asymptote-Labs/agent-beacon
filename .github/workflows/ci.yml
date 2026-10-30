@@ -269,6 +269,8 @@ jobs:
           ./beacon lenses --help > /tmp/beacon-lenses-help.txt
           ./beacon pricing --help > /tmp/beacon-pricing-help.txt
           ./beacon pricing info > /tmp/beacon-pricing-info.txt
+          ./beacon intel --help > /tmp/beacon-intel-help.txt
+          ./beacon intel check --help > /tmp/beacon-intel-check-help.txt
           for forbidden in init update claude cursor dep-scan config; do
             if grep -E "^[[:space:]]+$forbidden([[:space:]]|$)" /tmp/beacon-help.txt; then
               echo "forbidden command exposed: $forbidden"
@@ -548,6 +550,7 @@ jobs:
             ./internal/endpoint/integrations/... `
             ./internal/endpoint/inventory/... `
             ./internal/endpoint/lifecycle/... `
+            ./internal/endpoint/loggroup/... `
             ./internal/endpoint/rapid7/... `
             ./internal/endpoint/schema/... `
             ./internal/endpoint/selfupdate/... `
@@ -563,6 +566,7 @@ jobs:
             ./internal/fxsession/... `
             ./internal/groksession/... `
             ./internal/hermessession/... `
+            ./internal/intel/... `
             ./internal/learning/... `
             ./internal/managedprivacy/... `
             ./internal/mcpconnect/... `
@@ -933,6 +937,12 @@ jobs:
             throw "the registered product reports version $($entries[0].DisplayVersion), not the 0.0.2 that was just installed"
           }
           exit 0
+
+      # The restricted log access mode against a real ordinary account on the installed endpoint: its
+      # hook reaches the log only through the collector's pipe, stamped as itself; it can neither read
+      # nor append to the log; it spools while the collector is stopped; and shared puts it all back.
+      - name: Restricted log access must hold against an ordinary account
+        run: pwsh -NoProfile -File packaging/windows/smoke-restricted-log.ps1
 
       - name: Uninstall must remove the service and keep the data
         run: |

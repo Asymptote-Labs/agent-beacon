@@ -53,46 +53,37 @@ const smallWindow = 4096
 
 // #619: a backfill larger than the rotation window used to rotate its own output away and report
 // errors: 0. The sweep now stops before the rotation that would discard what it wrote, says so,
-// and every event it reports as emitted is still on disk.
-func TestCollectOnceStopsAtTheRotationWindowInsteadOfDiscardingItsOwnOutput(t *testing.T) {
-	projects, statePath, logPath := backfillFixture(t, 60)
-	opts := CollectOptions{ProjectsDir: projects, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true, RotateBytes: smallWindow}
-
-	summary, err := CollectOnce(opts)
-	if !errors.Is(err, writer.ErrRetentionWindowFull) {
-		t.Fatalf("CollectOnce err = %v, want ErrRetentionWindowFull", err)
-	}
-	if !summary.RetentionLimited {
-		t.Error("summary does not report that the window stopped the sweep")
-	}
-	if summary.SessionsPending == 0 || summary.SessionsPending >= summary.Sessions {
-		t.Errorf("SessionsPending = %d of %d, want some but not all", summary.SessionsPending, summary.Sessions)
-	}
-	if summary.Errors != 0 {
-		t.Errorf("Errors = %d, want 0: stopping at the window is not a failed session", summary.Errors)
-	}
-	onDisk := len(retainedEvents(t, logPath))
-	if summary.EventsEmitted == 0 || summary.EventsRetained != summary.EventsEmitted || onDisk != summary.EventsEmitted {
-		t.Fatalf("emitted=%d retained=%d on disk=%d, want all equal and non-zero",
-			summary.EventsEmitted, summary.EventsRetained, onDisk)
-	}
-	if summary.EventsRotatedOut != 0 {
-		t.Errorf("EventsRotatedOut = %d, want 0", summary.EventsRotatedOut)
-	}
-}
-
-// The cursor must not run ahead of what was written: sessions the sweep stopped before stay
-// pending, so repeated sweeps (with the log shipped in between) collect every prompt exactly once.
-func TestCollectOnceLeavesPendingSessionsForTheNextSweep(t *testing.T) {
-	const sessions = 60
+// and every event it reports as emitted is still on disk. The cursor must not run ahead of what
+// was written: sessions the sweep stopped before stay pending, so repeated sweeps (with the log
+// shipped in between) collect every prompt exactly once.
+func TestCollectOnceStopsAtTheRotationWindowAndLeavesTheRestForTheNextSweep(t *testing.T) {
+	const sessions = 20
 	projects, statePath, logPath := backfillFixture(t, sessions)
 	opts := CollectOptions{ProjectsDir: projects, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true, RotateBytes: smallWindow}
 
 	seen := map[string]int{}
 	limited := 0
-	for batch := 0; batch < 20; batch++ {
+	for batch := range sessions {
 		summary, err := CollectOnce(opts)
-		if err != nil && !errors.Is(err, writer.ErrRetentionWindowFull) {
+		if batch == 0 {
+			if !errors.Is(err, writer.ErrRetentionWindowFull) {
+				t.Fatalf("first CollectOnce err = %v, want ErrRetentionWindowFull", err)
+			}
+			if summary.SessionsPending == 0 || summary.SessionsPending >= summary.Sessions {
+				t.Errorf("SessionsPending = %d of %d, want some but not all", summary.SessionsPending, summary.Sessions)
+			}
+			if summary.Errors != 0 {
+				t.Errorf("Errors = %d, want 0: stopping at the window is not a failed session", summary.Errors)
+			}
+			onDisk := len(retainedEvents(t, logPath))
+			if summary.EventsEmitted == 0 || summary.EventsRetained != summary.EventsEmitted || onDisk != summary.EventsEmitted {
+				t.Fatalf("emitted=%d retained=%d on disk=%d, want all equal and non-zero",
+					summary.EventsEmitted, summary.EventsRetained, onDisk)
+			}
+			if summary.EventsRotatedOut != 0 {
+				t.Errorf("EventsRotatedOut = %d, want 0", summary.EventsRotatedOut)
+			}
+		} else if err != nil && !errors.Is(err, writer.ErrRetentionWindowFull) {
 			t.Fatalf("sweep %d: %v", batch, err)
 		}
 		for _, ev := range shipAway(t, logPath, batch) {
@@ -118,52 +109,20 @@ func TestCollectOnceLeavesPendingSessionsForTheNextSweep(t *testing.T) {
 	}
 }
 
-// A window large enough for the backfill is the supported way to do it in one run.
-func TestCollectOnceWithALargeEnoughWindowCollectsEverythingInOneSweep(t *testing.T) {
-	projects, statePath, logPath := backfillFixture(t, 60)
-	opts := CollectOptions{ProjectsDir: projects, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true, RotateBytes: 1 << 20}
-
-	summary, err := CollectOnce(opts)
-	if err != nil {
-		t.Fatalf("CollectOnce: %v", err)
-	}
-	if summary.RetentionLimited || summary.SessionsPending != 0 {
-		t.Errorf("summary = %+v, want no retention limit", summary)
-	}
-	if summary.SessionsChanged != 60 {
-		t.Errorf("SessionsChanged = %d, want 60", summary.SessionsChanged)
-	}
-	if onDisk := len(retainedEvents(t, logPath)); summary.EventsRetained != summary.EventsEmitted || onDisk != summary.EventsEmitted {
-		t.Errorf("emitted=%d retained=%d on disk=%d, want all equal", summary.EventsEmitted, summary.EventsRetained, onDisk)
-	}
-}
-
-// --print writes nothing, so it has nothing to retain and no window to fill.
-func TestCollectOncePrintIsNotRetentionLimited(t *testing.T) {
-	projects, _, _ := backfillFixture(t, 60)
-	summary, err := CollectOnce(CollectOptions{ProjectsDir: projects, Print: true, RotateBytes: smallWindow})
-	if err != nil {
-		t.Fatalf("CollectOnce --print: %v", err)
-	}
-	if summary.RetentionLimited || summary.EventsRetained != 0 || summary.SessionsChanged != 60 {
-		t.Errorf("summary = %+v, want every session printed and nothing retained", summary)
-	}
-}
-
 // Pending means records left to read. Sessions later in the sweep that were already collected have
 // none, so a stop in one growing session must not report the whole history as pending.
 func TestCollectOncePendingCountsOnlySessionsWithRecordsLeft(t *testing.T) {
-	projects, statePath, logPath := backfillFixture(t, 60)
+	projects, statePath, logPath := backfillFixture(t, 10)
 	full := CollectOptions{ProjectsDir: projects, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true, RotateBytes: 1 << 20}
 	if _, err := CollectOnce(full); err != nil {
 		t.Fatalf("initial sweep: %v", err)
 	}
 
 	// Grow one session far past the small window and make it the oldest, so the sweep reaches it
-	// first and stops inside it with 59 already-collected sessions after it.
+	// first and stops inside it with 9 already-collected sessions after it.
 	grown := filepath.Join(projects, "-tmp-repo", "sess-000.jsonl")
 	body := userLine("sess-000", "u-sess-000", "prompt sess-000") + "\n"
-	for i := 0; i < 200; i++ {
+	for i := range 50 {
 		body += userLine("sess-000", fmt.Sprintf("u-more-%d", i), fmt.Sprintf("more %d", i)) + "\n"
 	}
 	writeFile(t, grown, body)

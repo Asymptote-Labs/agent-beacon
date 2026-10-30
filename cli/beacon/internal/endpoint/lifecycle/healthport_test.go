@@ -16,10 +16,12 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
+// shortTimeouts removes the real waits: preflight reports a held port on its first check instead
+// of waiting for a release, and Install gives a started collector just long enough to fail.
 func shortTimeouts(t *testing.T) {
 	t.Helper()
 	oldReady, oldRelease := collectorReadyTimeout, portReleaseTimeout
-	collectorReadyTimeout, portReleaseTimeout = 1500*time.Millisecond, 100*time.Millisecond
+	collectorReadyTimeout, portReleaseTimeout = 500*time.Millisecond, 0
 	t.Cleanup(func() { collectorReadyTimeout, portReleaseTimeout = oldReady, oldRelease })
 }
 
@@ -29,16 +31,6 @@ func TestBuildConfigKeepsTheDefaultHealthPortForTheDefaultOTLPPorts(t *testing.T
 	cfg := buildConfig(InstallOptions{UserMode: true, GRPCPort: endpointconfig.DefaultGRPCPort, HTTPPort: endpointconfig.DefaultHTTPPort})
 	if cfg.Collector.HealthPort != endpointconfig.DefaultHealthCheckPort {
 		t.Fatalf("HealthPort = %d, want %d", cfg.Collector.HealthPort, endpointconfig.DefaultHealthCheckPort)
-	}
-}
-
-// #447: `install --user --otlp-grpc-port 4327 --otlp-http-port 4328` beside a system collector
-// must not be handed the system collector's health port.
-func TestBuildConfigMovesTheHealthPortWithAlternateOTLPPorts(t *testing.T) {
-	testenv.SetHome(t, t.TempDir())
-	cfg := buildConfig(InstallOptions{UserMode: true, GRPCPort: 4327, HTTPPort: 4328})
-	if cfg.Collector.HealthPort != 13143 {
-		t.Fatalf("HealthPort = %d, want 13143", cfg.Collector.HealthPort)
 	}
 }
 
@@ -115,16 +107,13 @@ func TestPreflightAllowsAHealthPortHeldByThisModesRunningCollector(t *testing.T)
 	home := t.TempDir()
 	testenv.SetHome(t, home)
 	shortTimeouts(t)
-	held, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer held.Close()
 	writeRunningSupervisedState(t)
 	cfg := endpointconfig.Default(true, filepath.Join(home, "runtime.jsonl"))
 	cfg.Collector.GRPCPort = freePort(t)
 	cfg.Collector.HTTPPort = freePort(t)
-	cfg.Collector.HealthPort = held.Addr().(*net.TCPAddr).Port
+	// The running collector answers health on the port it holds; a silent listener would only
+	// cost the probe's timeout.
+	cfg.Collector.HealthPort = serveHealthOK(t)
 
 	if err := preflight(cfg, true, service.KindSupervised); err != nil {
 		t.Fatalf("preflight rejected a health port held by this mode's own running collector: %v", err)

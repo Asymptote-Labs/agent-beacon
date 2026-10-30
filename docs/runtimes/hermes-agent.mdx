@@ -76,7 +76,9 @@ The scheduled inventory job runs without your shell's environment, so a per-user
 
 `beacon endpoint hermes sync` reads committed rows from Hermes Agent's state database after Hermes has written them. Session status, sync, and handoff use the `state.db` in the [Hermes home directory](#hermes-home-and-profiles), following `HERMES_HOME` and a sticky profile. Pass `--db <path>` to status/sync or `--store-dir hermes=<path>` to handoff to select a database explicitly.
 
-The cursor is stored in Beacon endpoint state and advances by session message id. Use `--print` to preview mapped events without writing the runtime log or advancing the cursor.
+Synced events record the Hermes home they were read from in `harness.config_path` and its profile in `harness.profile`: the `<name>` of a `<root>/profiles/<name>` home, and `default` otherwise.
+
+The cursor is stored in Beacon endpoint state and advances by session message id. Each Hermes home has its own cursor file, so syncing one profile or store never advances another's cursor: the native root (`~/.hermes`) keeps `hermes.json`, and any other home, a profile or a custom `HERMES_HOME`, uses `hermes-<profile>-<id>.json`, where `<id>` is derived from the home's path. The home a default sync resolves to starts its keyed cursor from `hermes.json`, which every default sync advanced before cursors were keyed, so upgrading does not re-collect it. Any other home starts with a new cursor the first time it is synced this way, so its retained history is collected once more. Use `--print` to preview mapped events without writing the runtime log or advancing the cursor.
 
 For scheduled collection, run `beacon endpoint hermes sync --watch`, or run one-shot `sync` from your scheduler. Live hooks remain the real-time path.
 

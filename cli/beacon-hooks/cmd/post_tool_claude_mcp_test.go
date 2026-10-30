@@ -18,6 +18,8 @@ import (
 // and its result text is exactly the text blocks the model read.
 func TestClaudeMCPPostToolRecordsCapturedContentBlocks(t *testing.T) {
 	payload := readHookFixture(t, "claude", "post_tool_use_mcp_media.json")
+	// The captured cwd is under /home, an automount on macOS where every stat costs ~40ms.
+	payload["cwd"] = "/repo"
 	sent := payload["tool_response"].([]interface{})
 	var texts []string
 	var png []byte
@@ -65,7 +67,9 @@ func TestClaudeMCPPostToolRecordsCapturedContentBlocks(t *testing.T) {
 // A tool that returned no content blocks reaches the hook as an empty list, and is recorded with
 // no result rather than an empty one.
 func TestClaudeMCPPostToolWithNoContentRecordsNoResult(t *testing.T) {
-	_, events := runClaudePostTool(t, readHookFixture(t, "claude", "post_tool_use_mcp_empty.json"))
+	payload := readHookFixture(t, "claude", "post_tool_use_mcp_empty.json")
+	payload["cwd"] = "/repo"
+	_, events := runClaudePostTool(t, payload)
 	if len(events) != 1 {
 		t.Fatalf("events = %#v, want one", events)
 	}

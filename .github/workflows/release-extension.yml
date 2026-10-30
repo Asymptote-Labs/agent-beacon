@@ -15,9 +15,15 @@ name: Release Browser Extension
 # two never collide.
 #
 # No `environment: release`. That environment exists to gate the Apple signing
-# secrets; this job has none -- it uses github.token only -- so putting it behind
-# the same approval would add friction without protecting anything. Same
+# secrets; these jobs have none -- they use github.token only -- so putting them
+# behind the same approval would add friction without protecting anything. Same
 # reasoning as the windows-package job in release.yml.
+#
+# The jobs that run `npm ci` hold a read-only token: a dependency's lifecycle
+# script runs with whatever token the job has, and a write token would let it
+# overwrite release assets and their .sha256 files. They hand their archives
+# over as workflow artifacts, and only `release` and `attach-firefox`, which
+# never check out or install anything, get `contents: write` (#904).
 #
 # Chrome Web Store publication is deferred. Until then the artifact is a zip you
 # load unpacked, and its .sha256 is the only integrity check it has.
@@ -40,14 +46,15 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
       version: ${{ steps.version.outputs.value }}
+      name: ${{ steps.pack.outputs.name }}
     env:
       REPO: ${{ github.repository }}
       TAG: ${{ github.ref_name }}
@@ -178,15 +185,39 @@ jobs:
             console.log("archive ok: MV3 " + m.version);
           ' "$tmp" "$VERSION"
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chrome-release
+          path: |
+            browser-extension/${{ steps.pack.outputs.name }}
+            browser-extension/${{ steps.pack.outputs.name }}.sha256
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      NAME: ${{ needs.build.outputs.name }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: chrome-release
+
       - name: Publish the GitHub release
-        working-directory: browser-extension
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.value }}
+          VERSION: ${{ needs.build.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
           version="$VERSION"
+          shasum -a 256 -c "$NAME.sha256"
 
           printf '%s\n' \
             "Unpacked Chromium MV3 build of the Agent Beacon browser collector (\`browser-extension/\`). The same archive loads in Chrome, Edge, Brave, Opera, Vivaldi and Arc; CI tests it in Chromium and Edge." \
@@ -204,28 +235,32 @@ jobs:
             '```' \
             > /tmp/ext-release-notes.md
 
+          # --latest=false: GitHub's "Latest" release must stay the CLI's. The self-updater's
+          # manifest, the Linux install.sh one-liner and the update notice all resolve
+          # releases/latest, and an extension release has none of their assets.
           if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
             gh release create "$TAG" --repo "$REPO" \
               --title "Browser extension $TAG" \
               --notes-file /tmp/ext-release-notes.md \
-              --verify-tag
+              --verify-tag --latest=false
           fi
 
-          gh release upload "$TAG" \
-            "${{ steps.pack.outputs.name }}" \
-            "${{ steps.pack.outputs.name }}.sha256" \
+          gh release upload "$TAG" "$NAME" "$NAME.sha256" \
             --repo "$REPO" --clobber
 
   firefox:
-    needs: release
+    needs: [build, release]
     runs-on: ubuntu-latest
     # AMO's automated review of an unlisted submission is usually minutes, but
     # web-ext waits for it; bound the wait rather than holding a runner.
     timeout-minutes: 30
+    outputs:
+      sign: ${{ steps.gate.outputs.sign }}
+      name: ${{ steps.gate.outputs.name }}
     env:
       REPO: ${{ github.repository }}
       TAG: ${{ github.ref_name }}
-      VERSION: ${{ needs.release.outputs.version }}
+      VERSION: ${{ needs.build.outputs.version }}
       # web-ext reads these two names directly.
       WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
       WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
@@ -347,13 +382,37 @@ jobs:
             console.log("xpi ok: signed Gecko MV3 " + m.version);
           ' "$tmp" "$VERSION"
 
-      - name: Attach the signed .xpi to the release
+      - uses: actions/upload-artifact@v4
         if: steps.gate.outputs.sign == 'true'
-        working-directory: browser-extension
+        with:
+          name: firefox-release
+          path: |
+            browser-extension/${{ steps.gate.outputs.name }}
+            browser-extension/${{ steps.gate.outputs.name }}.sha256
+          if-no-files-found: error
+          retention-days: 1
+
+  attach-firefox:
+    needs: firefox
+    if: needs.firefox.outputs.sign == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      NAME: ${{ needs.firefox.outputs.name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: firefox-release
+
+      - name: Attach the signed .xpi to the release
         shell: bash
         run: |
           set -euo pipefail
-          gh release upload "$TAG" \
-            "${{ steps.gate.outputs.name }}" \
-            "${{ steps.gate.outputs.name }}.sha256" \
+          shasum -a 256 -c "$NAME.sha256"
+          gh release upload "$TAG" "$NAME" "$NAME.sha256" \
             --repo "$REPO" --clobber

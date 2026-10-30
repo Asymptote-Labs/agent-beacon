@@ -104,10 +104,8 @@ var siemDestinations = []siemDestination{
 		name:  "wazuh",
 		short: "Manage Wazuh integration content",
 		printConfig: &destPrintConfig{
-			short: "Print a Wazuh localfile snippet",
-			render: func(cfg endpointconfig.Config) (string, error) {
-				return wazuh.LocalfileSnippet(cfg.LogPath), nil
-			},
+			short:  "Print a Wazuh localfile snippet",
+			render: func(cfg endpointconfig.Config) (string, error) { return wazuh.LocalfileSnippet(cfg.LogPath) },
 		},
 		installPack: &destInstallPack{
 			short:          "Write Wazuh rules and config snippets to a directory",
@@ -121,8 +119,12 @@ var siemDestinations = []siemDestination{
 			message: "Beacon endpoint Wazuh validation event",
 			print: func(cfg endpointconfig.Config) {
 				fmt.Println("Expected Wazuh fields: vendor=beacon product=endpoint-agent event.kind=agent_runtime")
-				fmt.Println("Wazuh localfile snippet:")
-				fmt.Print(wazuh.LocalfileSnippet(cfg.LogPath))
+				if snippet, err := wazuh.LocalfileSnippet(cfg.LogPath); err != nil {
+					fmt.Println(err)
+				} else {
+					fmt.Println("Wazuh localfile snippet:")
+					fmt.Print(snippet)
+				}
 				fmt.Println("Expected base rule: 100500")
 			},
 		},
@@ -306,7 +308,7 @@ var siemDestinations = []siemDestination{
 			print: func(cfg endpointconfig.Config) {
 				fmt.Println("Expected GCS fields: vendor=beacon product=endpoint-agent destination.type=gcs destination.mode=google_cloud_storage_jsonl")
 				fmt.Println(`Confirm delivery with Google Cloud CLI: gcloud storage ls "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/**"`)
-				fmt.Println(`Inspect an object with Google Cloud CLI: gcloud storage cat "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/date=<date>/<object>.jsonl.gz" | gzip -dc | grep "Beacon endpoint GCS validation event"`)
+				fmt.Println(`Inspect an object with Google Cloud CLI: gcloud storage cat "gs://${BEACON_GCS_BUCKET}/${BEACON_GCS_PREFIX}/runtime/date=<date>/<object>.jsonl" | grep "Beacon endpoint GCS validation event"`)
 			},
 		},
 	},
@@ -333,7 +335,7 @@ var siemDestinations = []siemDestination{
 				fmt.Println(`Check the device key: curl -sS -o /dev/null -w '%{http_code}\n' "$BEACON_ASYMPTOTE_INGEST_URL/v1/ingest/health" -H "Authorization: Bearer $(sed -n 's/.*\"device_key\": *\"\([^\"]*\)\".*/\1/p' "$BEACON_ASYMPTOTE_SECRETS_FILE")"   # 200 valid, 401 revoked`)
 				// Points at the dashboard itself: its views are tabs, so there is no
 				// /dashboard/telemetry route to send anyone to.
-				fmt.Printf("Confirm delivery at %s by searching for \"Beacon endpoint Asymptote validation event\"; forwarded events appear within a minute or two.\n", dashboardHomeURL(""))
+				fmt.Printf("Confirm delivery at %s by searching for \"Beacon endpoint Asymptote validation event\"; forwarded events appear within about 15 seconds.\n", dashboardHomeURL(""))
 			},
 		},
 		extra: addAsymptoteReconcileCommand,

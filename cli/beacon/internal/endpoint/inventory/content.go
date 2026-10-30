@@ -12,24 +12,29 @@ import (
 // truncated to a UTF-8 rune boundary and flagged as truncated.
 const DefaultMaxContentBytes = 64 * 1024
 
-const redactedPlaceholder = "***REDACTED***"
+// redactedPlaceholder is what asymptoteobserve.RedactString puts in place of a secret, so a value
+// redacted for its key and one redacted for its shape read the same.
+const redactedPlaceholder = "[REDACTED]"
 
-// secretMarkers are the substring markers that identify sensitive config keys.
-// They are shared by the env-key filter and the content/definition redactors so
-// captured contents and summarized metadata stay consistent.
-var secretMarkers = []string{"TOKEN", "SECRET", "PASSWORD", "KEY", "AUTH", "CREDENTIAL"}
+// secretKeyCandidate is a key that may be named for a secret: every word
+// asymptoteobserve.IsSecretKeyName takes for a credential's holds one of these, and that predicate
+// decides.
+const secretKeyCandidate = `"?[A-Za-z0-9_.\-]*(?:token|secret|pass|key|auth|credential|cookie)[A-Za-z0-9_.\-]*"?`
 
-// secretAssignmentRE matches a `key: value` or `key = value` assignment where
-// the key contains a secret marker, across JSON, TOML, YAML, and shell-style
-// content. The value is captured separately so it can be replaced while
-// preserving the surrounding key, separator, and quote style.
+// secretAssignmentRE matches a `key: value` or `key = value` assignment to a
+// secretKeyCandidate, across JSON, TOML, YAML, and shell-style content. Config
+// files name secrets more loosely than the labels asymptoteobserve.RedactString
+// knows (`OPENAI_KEY`, `X_AUTH`, `SECRET_KEY_BASE`), so these values are
+// redacted for their key alone. The value is captured separately so it can be
+// replaced while preserving the surrounding key, separator, and quote style; an
+// unquoted one runs through a placeholder RedactString left in it.
 var secretAssignmentRE = regexp.MustCompile(
-	`(?i)("?[A-Za-z0-9_.\-]*(?:` + strings.ToLower(strings.Join(secretMarkers, "|")) + `)[A-Za-z0-9_.\-]*"?)(\s*[:=]\s*)` +
-		"(\"(?:[^\"\\\\]|\\\\.)*\"|'[^']*'|`[^`]*`|[^\\s,}\\]\\n#]+)",
+	`(?i)(` + secretKeyCandidate + `)(\s*[:=]\s*)` +
+		"(\"(?:[^\"\\\\]|\\\\.)*\"|'[^']*'|`[^`]*`|(?:" + regexp.QuoteMeta(redactedPlaceholder) + "|[^\\s,}\\]\\n#])+)",
 )
 
 var yamlSecretBlockScalarHeaderRE = regexp.MustCompile(
-	`(?i)^([ \t]*(?:-\s*)?"?[A-Za-z0-9_.\-]*(?:` + strings.ToLower(strings.Join(secretMarkers, "|")) + `)[A-Za-z0-9_.\-]*"?\s*:\s*)` +
+	`(?i)^([ \t]*(?:-\s*)?` + secretKeyCandidate + `\s*:\s*)` +
 		`([|>](?:[+-]?[0-9]|[0-9][+-]?)?[ \t]*(?:#.*)?)(\r?\n?)$`,
 )
 
@@ -74,34 +79,33 @@ func captureContent(data []byte, maxBytes int) *CapturedContent {
 	}
 }
 
-// redactSecrets replaces the values of secret-looking assignments with a
-// placeholder and returns the redacted text plus the number of redactions.
+// redactSecrets redacts captured text and returns it with the number of values replaced. Block
+// scalars under a secret-looking key go first, whole, since RedactString would take the `|` for
+// the value and keep the lines under it. RedactString then replaces what it recognizes anywhere
+// (credential formats, Authorization headers, secret flags, URL passwords, labeled assignments),
+// and what is left under a secret-looking key goes last.
 func redactSecrets(text string) (string, int) {
-	out, count := redactYAMLBlockScalarSecrets(text)
+	out := asymptoteobserve.RedactString(redactYAMLBlockScalarSecrets(text))
 	out = secretAssignmentRE.ReplaceAllStringFunc(out, func(match string) string {
 		sub := secretAssignmentRE.FindStringSubmatch(match)
-		if len(sub) != 4 {
+		// A value RedactString already handled (`"Bearer [REDACTED]"`) stays as it is.
+		if len(sub) != 4 || strings.Contains(sub[3], redactedPlaceholder) || !asymptoteobserve.IsSecretField(sub[1], strings.Trim(sub[3], "\"'`")) {
 			return match
 		}
-		if isRedactedValueLiteral(sub[3]) {
-			return match
-		}
-		count++
 		return sub[1] + sub[2] + redactValueLiteral(sub[3])
 	})
-	return out, count
+	return out, max(0, strings.Count(out, redactedPlaceholder)-strings.Count(text, redactedPlaceholder))
 }
 
-func redactYAMLBlockScalarSecrets(text string) (string, int) {
+func redactYAMLBlockScalarSecrets(text string) string {
 	lines := splitLinesKeepEnd(text)
 	if len(lines) == 0 {
-		return text, 0
+		return text
 	}
 	var out strings.Builder
-	count := 0
 	for i := 0; i < len(lines); i++ {
 		sub := yamlSecretBlockScalarHeaderRE.FindStringSubmatch(lines[i])
-		if len(sub) != 4 {
+		if len(sub) != 4 || !asymptoteobserve.IsSecretKeyName(sub[1]) {
 			out.WriteString(lines[i])
 			continue
 		}
@@ -138,10 +142,9 @@ func redactYAMLBlockScalarSecrets(text string) (string, int) {
 		out.WriteString(sub[1])
 		out.WriteString(redactedPlaceholder)
 		out.WriteString(sub[3])
-		count++
 		i = bodyEnd - 1
 	}
-	return out.String(), count
+	return out.String()
 }
 
 // redactValueLiteral replaces a captured value with the placeholder while
@@ -159,26 +162,16 @@ func redactValueLiteral(value string) string {
 	}
 }
 
-func isRedactedValueLiteral(value string) bool {
-	switch value {
-	case redactedPlaceholder,
-		`"` + redactedPlaceholder + `"`,
-		"'" + redactedPlaceholder + "'",
-		"`" + redactedPlaceholder + "`":
-		return true
-	default:
-		return false
-	}
-}
-
-// redactStructured walks a parsed config value and replaces string values held
-// under secret-looking keys with the placeholder, leaving structure intact.
+// redactStructured walks a parsed config value and replaces values held under
+// secret-looking keys with the placeholder, leaving structure intact. Strings
+// get the same redaction as captured file text, and an argument after a flag
+// named for a secret is one: `"args": ["--api-key", "x"]`.
 func redactStructured(value interface{}) interface{} {
 	switch typed := value.(type) {
 	case map[string]interface{}:
 		out := make(map[string]interface{}, len(typed))
 		for key, val := range typed {
-			if containsSecretMarker(key) {
+			if asymptoteobserve.IsSecretField(key, val) {
 				out[key] = redactedPlaceholder
 				continue
 			}
@@ -188,12 +181,24 @@ func redactStructured(value interface{}) interface{} {
 	case []interface{}:
 		out := make([]interface{}, len(typed))
 		for i, item := range typed {
+			if arg, ok := item.(string); ok && arg != "" && i > 0 && followsSecretFlag(typed[i-1]) {
+				out[i] = redactedPlaceholder
+				continue
+			}
 			out[i] = redactStructured(item)
 		}
 		return out
+	case string:
+		redacted, _ := redactSecrets(typed)
+		return redacted
 	default:
 		return value
 	}
+}
+
+func followsSecretFlag(previous interface{}) bool {
+	flag, ok := previous.(string)
+	return ok && asymptoteobserve.IsSecretFlag(flag)
 }
 
 // redactStructuredMap redacts a definition block and returns it as a map.
@@ -202,16 +207,6 @@ func redactStructuredMap(def map[string]interface{}) map[string]interface{} {
 		return m
 	}
 	return nil
-}
-
-func containsSecretMarker(key string) bool {
-	upper := strings.ToUpper(key)
-	for _, marker := range secretMarkers {
-		if strings.Contains(upper, marker) {
-			return true
-		}
-	}
-	return false
 }
 
 func splitLinesKeepEnd(s string) []string {

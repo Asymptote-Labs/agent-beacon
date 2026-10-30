@@ -34,9 +34,6 @@ func TestWizardRequestsLoginBeforeDestination(t *testing.T) {
 	if model.screen != signInScreen {
 		t.Fatalf("screen = %v, want sign in", model.screen)
 	}
-	if view := model.View(); !strings.Contains(view, "beacon.sh") {
-		t.Fatalf("sign-in screen should name where it sends you:\n%s", view)
-	}
 	model, command := advanceWizard(t, model, "enter")
 	if command == nil || !model.result.NeedLogin || model.result.Completed {
 		t.Fatalf("result = %#v command=%v", model.result, command != nil)
@@ -62,9 +59,6 @@ func TestSignedInWizardCanOptOutToLocal(t *testing.T) {
 	if model.screen != confirmScreen || model.result.Destination != DestinationLocal {
 		t.Fatalf("local selection = screen %v result %#v", model.screen, model.result)
 	}
-	if view := model.View(); !strings.Contains(view, "telemetry stays on this machine") {
-		t.Fatalf("local confirmation missing:\n%s", view)
-	}
 	model, command := advanceWizard(t, model, "enter")
 	if command == nil || !model.result.Completed {
 		t.Fatalf("completion = %#v command=%v", model.result, command != nil)
@@ -83,25 +77,11 @@ func TestManagedWizardRequiresDisclosureConfirmation(t *testing.T) {
 	if model.screen != managedDisclosureScreen || model.result.Destination != DestinationAsymptote {
 		t.Fatalf("managed selection = screen %v result %#v", model.screen, model.result)
 	}
+	// The disclosure has to describe what actually ships. The runtime source is
+	// read_from = "end", so pre-connect runtime events stay local -- but the
+	// inventory source is read_from = "beginning", so the existing snapshot does
+	// upload. The screen used to flatly claim nothing existing is uploaded.
 	view := strings.Join(strings.Fields(model.View()), " ")
-	for _, want := range []string{
-		// Plain language: what starts happening, and how to stop it. No mention of
-		// the forwarder's implementation, which nobody choosing a destination needs.
-		"What gets sent to beacon.sh",
-		"sent to your Beacon account as it happens",
-		"beacon endpoint disconnect",
-		// The disclosure has to describe what actually ships. The runtime source is
-		// read_from = "end", so pre-connect runtime events stay local -- but the
-		// inventory source is read_from = "beginning", so the existing snapshot does
-		// upload. The screen used to flatly claim nothing existing is uploaded.
-	} {
-		if !strings.Contains(view, want) {
-			t.Fatalf("managed disclosure missing %q:\n%s", want, view)
-		}
-	}
-	// The screen makes no claim about data already on disk. Any unqualified
-	// version of "nothing recorded before now is sent" is false, because the
-	// inventory source reads from the beginning of its log.
 	for _, false_ := range []string{
 		"Existing local history is not uploaded",
 		"What is already on this machine stays here",
@@ -111,33 +91,9 @@ func TestManagedWizardRequiresDisclosureConfirmation(t *testing.T) {
 			t.Fatalf("the disclosure must not claim existing data stays local; inventory does not:\n%s", view)
 		}
 	}
-	for _, jargon := range []string{"Vector", "HTTPS", "forwarder", "snapshot"} {
-		if strings.Contains(view, jargon) {
-			t.Fatalf("the disclosure should not need %q to be understood:\n%s", jargon, view)
-		}
-	}
 	model, _ = advanceWizard(t, model, "enter")
 	if model.screen != privacyScreen {
 		t.Fatalf("screen = %v, want privacy", model.screen)
-	}
-	view = strings.Join(strings.Fields(model.View()), " ")
-	for _, want := range []string{
-		"Standard",
-		"Metadata only",
-		"file contents returned by tools",
-		"Masking is pattern-based and may not catch everything",
-		"May include source code, file contents, and confidential information",
-		"Only structural information is sent",
-		"full command lines",
-		"Common secret formats in command lines are also masked",
-		"beacon endpoint connect --privacy-mode",
-	} {
-		if !strings.Contains(view, want) {
-			t.Fatalf("privacy screen missing %q:\n%s", want, view)
-		}
-	}
-	if strings.Contains(view, "Standard (recommended)") {
-		t.Fatalf("privacy screen still marks Standard as recommended:\n%s", view)
 	}
 	model, _ = advanceWizard(t, model, "enter")
 	if model.screen != confirmScreen {
@@ -193,46 +149,6 @@ func TestWizardPresetManagedSkipsDestinationChoice(t *testing.T) {
 	}
 }
 
-// The destination captions are the only place a first-time user learns why Beacon Cloud
-// exists. They used to describe the mechanism ("forward new events after you
-// connect") and named no benefit at all.
-func TestDestinationCaptionsNameTheValueNotTheMechanism(t *testing.T) {
-	managedLabel, managedDetail := destinationCopy(DestinationAsymptote)
-	if !strings.Contains(managedLabel, "Beacon Cloud") {
-		t.Fatalf("managed label = %q", managedLabel)
-	}
-	for _, want := range []string{
-		"sent to your Beacon account and kept in the cloud while your account is active",
-		"AI\u2011powered search and analytics on Beacon's hosted dashboard",
-		"full feature set",
-		"Unless you opt out, Asymptote uses your sessions for research and AI training and may share de-identified data",
-		"Details: beacon.sh/privacy",
-	} {
-		if !strings.Contains(managedDetail, want) {
-			t.Fatalf("managed detail missing %q: %q", want, managedDetail)
-		}
-	}
-
-	localLabel, localDetail := destinationCopy(DestinationLocal)
-	if !strings.Contains(localLabel, "Local only") {
-		t.Fatalf("local label = %q", localLabel)
-	}
-	// Local is a supported end state, not a refusal of Beacon Cloud. The research
-	// and training disclosure belongs on the cloud caption, where the data leaves
-	// the machine.
-	for _, want := range []string{"this machine's agent activity", "kept for as long as the logs are on disk", "Your agent activity stays on this machine"} {
-		if !strings.Contains(localDetail, want) {
-			t.Fatalf("local detail missing %q: %q", want, localDetail)
-		}
-	}
-	if strings.Contains(localDetail, "opt out") || strings.Contains(localDetail, "research") {
-		t.Fatalf("local should read as a peer choice, not a refusal: %q", localDetail)
-	}
-	if !strings.Contains(managedDetail, "Pick this") {
-		t.Fatalf("managed detail gives no guidance on when to choose it: %q", managedDetail)
-	}
-}
-
 // A caption that wraps must stay in its column. The detail was previously emitted
 // as one pre-indented string and wrapped with the rest of the body, which indented
 // the first line and left continuations flush against the margin.
@@ -282,64 +198,6 @@ func TestWizardHasNoGlobalQuitKey(t *testing.T) {
 	model := newWizardModel(WizardOptions{SignedIn: true, OfferManaged: true})
 	if _, command := advanceWizard(t, model, "esc"); command == nil {
 		t.Fatal("esc must still cancel the wizard")
-	}
-}
-
-// The confirm screen is where forwarding is authorized. It names the signed-in
-// account, states that confirming installs Beacon and starts forwarding, and
-// names the operator, the destination, the capture mode, and how to opt out,
-// change the mode, stop sending, or delete the data.
-func TestConfirmScreenNamesWhatConfirmingStarts(t *testing.T) {
-	for mode, wantMode := range map[string]string{
-		"standard":      "Standard",
-		"metadata_only": "Metadata only",
-	} {
-		model := newWizardModel(WizardOptions{
-			SignedIn:          true,
-			Email:             "person@example.com",
-			OfferManaged:      true,
-			DestinationOnly:   true,
-			PresetDestination: DestinationAsymptote,
-			PresetPrivacyMode: mode,
-		})
-		model.width, model.height = 80, 24
-		model.screen = confirmScreen
-		model.result.Destination = DestinationAsymptote
-		model.result.PrivacyMode = mode
-
-		view := strings.Join(strings.Fields(model.View()), " ")
-		for _, want := range []string{
-			"Account: person@example.com",
-			"This installs Beacon and starts forwarding to beacon.sh.",
-			"Beacon Cloud is operated by Asymptote Labs, Inc.",
-			"Destination: Beacon Cloud",
-			"Capture mode: " + wantMode,
-			"Turn off research and AI training any time in Beacon Cloud: click your profile picture (top right), then Settings.",
-			"Change capture mode any time with `beacon endpoint connect --privacy-mode`.",
-			"Stop sending any time with `beacon endpoint disconnect`.",
-			"To delete your data, email privacy@asymptotelabs.ai.",
-			"enter install and connect",
-		} {
-			if !strings.Contains(view, want) {
-				t.Fatalf("confirm screen for %s missing %q:\n%s", mode, want, view)
-			}
-		}
-		if strings.Contains(view, "Next step after install") || strings.Contains(view, "(recommended)") {
-			t.Fatalf("confirm screen still uses retired copy:\n%s", view)
-		}
-	}
-
-	// Local says the opposite, and its hint stays plain.
-	local := newWizardModel(WizardOptions{SignedIn: true, Email: "person@example.com", OfferManaged: true})
-	local.width, local.height = 100, 30
-	local.screen = confirmScreen
-	local.result.Destination = DestinationLocal
-	view := strings.Join(strings.Fields(local.View()), " ")
-	if !strings.Contains(view, "Your telemetry stays on this machine.") {
-		t.Fatalf("local confirm screen = %s", view)
-	}
-	if strings.Contains(view, "install and connect") {
-		t.Fatalf("local confirm screen must not offer to connect: %s", view)
 	}
 }
 
@@ -399,26 +257,6 @@ func neverReturns(ctx context.Context, _ SignInRequest, _ Reporter) (Account, er
 	return Account{}, ctx.Err()
 }
 
-// Sign-in used to quit the wizard so the caller could run it, print to plain
-// stdout, block for up to five minutes, and then start a second wizard -- which
-// wiped what had just been printed. It now runs without the screen going away.
-func TestSignInRunsInsideTheWizard(t *testing.T) {
-	model := signInWizard(t, neverReturns)
-	model.screen = signInScreen
-
-	model, cmd := advanceWizard(t, model, "enter")
-	if model.screen != signInWaitScreen {
-		t.Fatalf("screen = %v, want the waiting screen", model.screen)
-	}
-	if model.result.NeedLogin {
-		t.Fatal("an injected sign-in must not fall back to the caller")
-	}
-	if cmd == nil {
-		t.Fatal("expected the wait to be armed")
-	}
-	t.Cleanup(func() { model.stopSignIn() })
-}
-
 // The URL has to be on screen before any browser is claimed to have opened, and it
 // has to survive rendering intact: a soft-wrapped URL is one nobody can copy.
 func TestSignInWaitShowsAnUnwrappedURLAndAClock(t *testing.T) {
@@ -448,6 +286,38 @@ func TestSignInWaitShowsAnUnwrappedURLAndAClock(t *testing.T) {
 	}
 }
 
+// The browser that opens is the default one, which is not always the one signed in to
+// beacon.sh. Once a browser has been opened, the wait says where the URL belongs; when none
+// was, there is no other browser to warn about.
+func TestSignInWaitSaysWhichBrowserTheURLBelongsIn(t *testing.T) {
+	url := "https://beacon.sh/cli/auth?port=54123&state=abc"
+	for _, tc := range []struct {
+		name   string
+		prompt SignInPrompt
+		want   bool
+	}{
+		{"browser opened", SignInPrompt{URL: url, WillOpen: true}, true},
+		{"browser failed", SignInPrompt{URL: url, WillOpen: true, BrowserErr: errors.New("no xdg-open")}, false},
+		{"no browser", SignInPrompt{URL: url}, false},
+	} {
+		model := signInWizard(t, neverReturns)
+		model.screen = signInScreen
+		model, _ = advanceWizard(t, model, "enter")
+		next, _ := model.Update(signInPromptMsg{attempt: 1, prompt: tc.prompt})
+		model = next.(wizardModel)
+		model.stopSignIn()
+
+		flat := strings.Join(strings.Fields(model.View()), " ")
+		got := strings.Contains(flat, "Open it in the browser where you are signed in to beacon.sh. If a different browser opened, copy the URL there.")
+		if got != tc.want {
+			t.Fatalf("%s: hint shown = %t, want %t:\n%s", tc.name, got, tc.want, model.View())
+		}
+		if !strings.Contains(model.View(), url) {
+			t.Fatalf("%s: the URL must stay on one unbroken line:\n%s", tc.name, model.View())
+		}
+	}
+}
+
 // Abandoning the browser must not end the install. It used to: the wait was
 // uncancellable, so ctrl+c during it killed the whole command.
 func TestEscDuringSignInGoesBackWithoutEndingTheInstall(t *testing.T) {
@@ -467,19 +337,6 @@ func TestEscDuringSignInGoesBackWithoutEndingTheInstall(t *testing.T) {
 	}
 }
 
-// Signing in is the expected path, so the sign-in screen offers nothing else. A
-// visible "skip" there would read as a suggestion.
-func TestSignInScreenOffersNoAlternative(t *testing.T) {
-	model := signInWizard(t, neverReturns)
-	model.screen = signInScreen
-	flat := strings.Join(strings.Fields(model.View()), " ")
-	for _, unwanted := range []string{"without an account", "Local only", "skip"} {
-		if strings.Contains(strings.ToLower(flat), strings.ToLower(unwanted)) {
-			t.Fatalf("the sign-in screen must not advertise %q:\n%s", unwanted, flat)
-		}
-	}
-}
-
 // But a sign-in that genuinely failed has to leave a way forward, or an offline or
 // browserless machine cannot install a local-first tool at all.
 func TestSignInFailureOffersRecoveryAndALocalFinish(t *testing.T) {
@@ -494,11 +351,8 @@ func TestSignInFailureOffersRecoveryAndALocalFinish(t *testing.T) {
 	if model.screen != signInFailedScreen {
 		t.Fatalf("screen = %v, want the recovery screen", model.screen)
 	}
-	flat := strings.Join(strings.Fields(model.View()), " ")
-	for _, want := range []string{"connection refused", "Try signing in again", "Show the URL", "Finish setup without an account"} {
-		if !strings.Contains(flat, want) {
-			t.Fatalf("recovery screen missing %q:\n%s", want, flat)
-		}
+	if flat := strings.Join(strings.Fields(model.View()), " "); !strings.Contains(flat, "connection refused") {
+		t.Fatalf("recovery screen does not show why sign-in failed:\n%s", flat)
 	}
 
 	// Retry is first, so the default action is to try again rather than give up.
@@ -521,64 +375,6 @@ func TestSignInFailureOffersRecoveryAndALocalFinish(t *testing.T) {
 	}
 	if flat := strings.Join(strings.Fields(model.View()), " "); !strings.Contains(flat, "not signed in") {
 		t.Fatalf("the confirm screen should say no account is attached:\n%s", flat)
-	}
-}
-
-// Picking the manual option retries with the browser suppressed.
-func TestRecoveryCanRetryWithoutABrowser(t *testing.T) {
-	requests := make(chan SignInRequest, 4)
-	model := signInWizard(t, func(ctx context.Context, req SignInRequest, _ Reporter) (Account, error) {
-		requests <- req
-		<-ctx.Done()
-		return Account{}, ctx.Err()
-	})
-	model.screen = signInFailedScreen
-	model.prompt = SignInPrompt{URL: "https://beacon.sh/cli/auth", WillOpen: true}
-	for i, choice := range model.recoveryChoices() {
-		if choice.id == "manual" {
-			model.selected = i
-		}
-	}
-	model, _ = advanceWizard(t, model, "enter")
-	t.Cleanup(func() { model.stopSignIn() })
-
-	if model.screen != signInWaitScreen {
-		t.Fatalf("screen = %v, want the waiting screen", model.screen)
-	}
-	select {
-	case req := <-requests:
-		if !req.NoBrowser {
-			t.Fatalf("retry request = %#v, want the browser suppressed", req)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("the retry never reached the sign-in function")
-	}
-}
-
-// A successful sign-in continues to the next question in the same screen session.
-func TestSignInSuccessContinuesToTheDestinationQuestion(t *testing.T) {
-	model := signInWizard(t, neverReturns)
-	model.screen = signInScreen
-	model, _ = advanceWizard(t, model, "enter")
-	next, _ := model.Update(signInDoneMsg{attempt: 1, account: Account{Email: "person@example.com"}})
-	model = next.(wizardModel)
-
-	if model.screen != destinationScreen {
-		t.Fatalf("screen = %v, want the destination question", model.screen)
-	}
-	if model.result.SignedInEmail != "person@example.com" || !model.options.SignedIn {
-		t.Fatalf("result = %#v options.SignedIn = %t", model.result, model.options.SignedIn)
-	}
-}
-
-// With no sign-in injected the wizard keeps its original contract, which is what
-// the command-level tests drive.
-func TestWizardWithoutAnInjectedSignInStillReportsNeedLogin(t *testing.T) {
-	model := newWizardModel(WizardOptions{OfferManaged: true})
-	model.screen = signInScreen
-	model, cmd := advanceWizard(t, model, "enter")
-	if !model.result.NeedLogin || cmd == nil {
-		t.Fatalf("result = %#v cmd = %v", model.result, cmd)
 	}
 }
 

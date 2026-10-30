@@ -112,6 +112,7 @@ Install writes one file and refuses to touch a `beacon.ts` it did not write, so 
 | Tool use | Supported. `tool.invoked` before execution, then `tool.completed` or `tool.failed` |
 | Commands | Supported. `command.executed` for each `ipython` cell, for the optional `bash` tool, and for commands you run with the `!` prefix, which are marked as operator-initiated. A cell's result carries its captured output, the runtime's own duration, and its status, and a `bash` call's output is in `command.output` |
 | File activity | Supported. `file.modified` per file a kernel cell rewrote, with the unified patch; plus `file.modified` for the optional `edit` tool, carrying the unified diff it reports |
+| Agent responses | Supported. `agent.message` from a finished assistant message's text parts |
 | Agent reasoning | Supported. `agent.reasoning` from an assistant message's thinking parts, in the OTel GenAI reasoning-part shape |
 | Token usage and cost | Supported. `token.usage` normalized into `gen_ai.usage`, including cache and reasoning tokens and runtime-reported cost |
 | Approval decisions | Not available. Prime Agent exposes no operator approval decision to observe. See [Known gaps](#known-gaps) |

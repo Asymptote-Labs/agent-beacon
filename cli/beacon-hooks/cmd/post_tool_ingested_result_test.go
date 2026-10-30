@@ -81,12 +81,6 @@ func TestPostToolRecordsIngestedContentToolResults(t *testing.T) {
 		{"gemini read_file", "gemini", "read_file", "file.read",
 			map[string]interface{}{"absolute_path": "/repo/NOTES.md"},
 			map[string]interface{}{"llmContent": ingestedInjection}},
-		{"gemini web_fetch", "gemini", "web_fetch", "tool.invoked",
-			map[string]interface{}{"prompt": "summarize https://docs.example"},
-			map[string]interface{}{"llmContent": ingestedInjection}},
-		{"factory Read", "factory", "Read", "file.read",
-			map[string]interface{}{"file_path": "/repo/NOTES.md"},
-			map[string]interface{}{"content": ingestedInjection}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

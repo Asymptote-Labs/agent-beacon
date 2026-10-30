@@ -1,10 +1,11 @@
 id: persistence-install-command
-version: 1
+version: 2
 title: Command installs scheduled-job or service persistence
 description: >
   A command installs persistence that runs outside any agent sandbox at login,
   boot, or on a schedule: editing the user/root crontab (crontab -, crontab a
-  file), enabling a systemd service or timer (systemctl enable / --user enable),
+  file), enabling a systemd service or timer (systemctl enable, with or without
+  options such as --user, --now or -q before the verb),
   or loading a launchd agent/daemon (launchctl load / bootstrap / enable). These
   survive the session and re-execute later with no further prompt.
 severity: high
@@ -18,7 +19,7 @@ taxonomy:
 match: >
   e.event.action == "command.executed" && (
     e.command.command.matches("(?i)\\bcrontab\\b\\s+(-($|[\\s|])|-e\\b|[^-\\s])") ||
-    e.command.command.matches("(?i)\\bsystemctl\\b(\\s+--user)?\\s+enable\\b") ||
+    e.command.command.matches("(?i)\\bsystemctl\\b(\\s+--?[a-z][a-z-]*(=\\S+)?)*\\s+enable\\b") ||
     e.command.command.matches("(?i)\\blaunchctl\\b\\s+(load|bootstrap|enable)\\b")
   )
 
@@ -49,6 +50,30 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "launchctl load ~/Library/LaunchAgents/com.evil.plist" }
+        session: { id: s1 }
+  - name: systemctl_now_before_enable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "systemctl --user --now enable beacon-evil.timer" }
+        session: { id: s1 }
+  - name: systemctl_root_option_before_enable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "systemctl --root=/mnt enable evil.service" }
+        session: { id: s1 }
+  - name: systemctl_quiet_enable
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo systemctl -q enable evil.service" }
+        session: { id: s1 }
+  - name: systemctl_options_then_status
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "systemctl --user --no-pager status beacon.service" }
         session: { id: s1 }
   - name: crontab_list_only
     verdict: no_match

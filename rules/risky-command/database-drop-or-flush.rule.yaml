@@ -1,0 +1,393 @@
+id: database-drop-or-flush
+version: 1
+title: Database dropped, truncated or flushed
+description: >
+  An agent invokes a destructive database operation through a SQL client, Redis,
+  or a framework reset command. Inline SQL must begin with DROP or TRUNCATE;
+  migration-file contents and arbitrary SQL scripts are not inspected.
+severity: high
+status: experimental
+posture: detect
+taxonomy:
+  beacon_category: risky-command
+  owasp_llm: LLM06
+
+# Command prefixes accept environment assignments, relative executable paths, and
+# sudo execution options. Value-taking sudo options consume their argument;
+# inspection modes such as sudo -l/-v are not execution prefixes.
+match: >
+  e.event.action == "command.executed" && (
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:psql|mysql|mariadb)\\b[^;&|\\n#]*[ \\t](?:-c|-e|--command|--execute)(?:[ \\t]+|=)[\\\"\\x27]?[ \\t]*(?:(?i:DROP)[ \\t]+(?i:TABLE|DATABASE|SCHEMA|INDEX|VIEW|MATERIALIZED|SEQUENCE|TYPE|FUNCTION|PROCEDURE|TRIGGER|EXTENSION|ROLE|USER)\\b|(?i:TRUNCATE)[ \\t]+[a-zA-Z_\\\"\\x27])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?sqlite3(?:[ \\t]+-[\\w-]+)*[ \\t]+[^\\s;&|]+[ \\t][\\\"\\x27][ \\t]*(?i:DROP|TRUNCATE)[ \\t]+(?i:TABLE|INDEX|VIEW|TRIGGER)\\b") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?dropdb(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?mysqladmin(?:[ \\t]+(?:-[upPhS]|--(?:user|password|port|host|socket))(?:=|[ \\t]+)?[^\\s;&|]+|[ \\t]+(?:--force|-f))*[ \\t]+drop(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?redis-cli(?:[ \\t]+(?:-[hpansu]|--(?:host|port|pass|user|uri))(?:=|[ \\t]+)[^\\s;&|]+|[ \\t]+--(?:tls|raw|no-auth-warning))*[ \\t]+(?i:FLUSHALL|FLUSHDB)(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:bundle[ \\t]+exec[ \\t]+)?(?:rails|rake)[ \\t]+db:(?:drop|reset|migrate:reset)(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:(?:npx|pnpm[ \\t]+exec|bunx)[ \\t]+)?prisma[ \\t]+migrate[ \\t]+reset(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?(?:python[0-9.]*[ \\t]+(?:[^\\s;&|]*/)?manage\\.py|django-admin)[ \\t]+flush(?:[ \\t]|$|[;&|\\n<>#])")
+  )
+
+emit:
+  reason: "Database dropped, truncated or flushed"
+
+tests:
+  - name: match_1_psql_app_c_drop_table_users
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "psql app -c \"DROP TABLE users;\"" }
+        session: { id: s1 }
+  - name: match_2_psql_app_c_truncate_users
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "psql app -c \"TRUNCATE users;\"" }
+        session: { id: s1 }
+  - name: match_3_sudo_usr_bin_psql_app_command_drop_schema_public_cascade
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo /usr/bin/psql app --command=\"DROP SCHEMA public CASCADE\"" }
+        session: { id: s1 }
+  - name: match_4_mysql_e_truncate_table_sessions
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "mysql -e \"TRUNCATE TABLE sessions\"" }
+        session: { id: s1 }
+  - name: match_5_mariadb_execute_drop_database_app
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "mariadb --execute=\"DROP DATABASE app\"" }
+        session: { id: s1 }
+  - name: match_6_sqlite3_app_db_drop_table_users
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sqlite3 app.db \"DROP TABLE users;\"" }
+        session: { id: s1 }
+  - name: match_7_dropdb_production
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "dropdb production" }
+        session: { id: s1 }
+  - name: match_8_mysqladmin_u_root_drop_app
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "mysqladmin -u root drop app" }
+        session: { id: s1 }
+  - name: match_9_redis_cli_h_cache_flushall
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "redis-cli -h cache FLUSHALL" }
+        session: { id: s1 }
+  - name: match_10_redis_cli_flushdb_async
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "redis-cli FLUSHDB ASYNC" }
+        session: { id: s1 }
+  - name: match_11_redis_cli_flushdb
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "redis-cli  FLUSHDB" }
+        session: { id: s1 }
+  - name: match_12_mysqladmin_drop_app
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "mysqladmin  drop app" }
+        session: { id: s1 }
+  - name: match_13_bundle_exec_rails_db_drop
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "bundle exec rails db:drop" }
+        session: { id: s1 }
+  - name: match_14_rake_db_reset
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "rake db:reset" }
+        session: { id: s1 }
+  - name: match_15_npx_prisma_migrate_reset_force
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "npx prisma migrate reset --force" }
+        session: { id: s1 }
+  - name: match_16_python3_manage_py_flush_no_input
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "python3 manage.py flush --no-input" }
+        session: { id: s1 }
+  - name: match_17_django_admin_flush
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "django-admin flush" }
+        session: { id: s1 }
+  - name: no_match_1_psql_app_c_select_from_users
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "psql app -c \"SELECT * FROM users\"" }
+        session: { id: s1 }
+  - name: no_match_2_mysql_e_show_tables
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "mysql -e \"SHOW TABLES\"" }
+        session: { id: s1 }
+  - name: no_match_3_grep_drop_migrations_001_sql
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "grep DROP migrations/001.sql" }
+        session: { id: s1 }
+  - name: no_match_4_cat_migrations_drop_sql
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cat migrations/drop.sql" }
+        session: { id: s1 }
+  - name: no_match_5_echo_drop_table_users
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo DROP TABLE users" }
+        session: { id: s1 }
+  - name: no_match_6_redis_cli_get_key
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "redis-cli GET key" }
+        session: { id: s1 }
+  - name: no_match_7_redis_cli_get_flushall
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "redis-cli GET FLUSHALL" }
+        session: { id: s1 }
+  - name: no_match_8_redis_cli_set_note_flushdb
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "redis-cli SET note FLUSHDB" }
+        session: { id: s1 }
+  - name: no_match_9_sqlite3_app_db_select_drop_table_users
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sqlite3 app.db \"SELECT 'DROP TABLE users'\"" }
+        session: { id: s1 }
+  - name: no_match_10_rails_db_migrate
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "rails db:migrate" }
+        session: { id: s1 }
+  - name: no_match_11_prisma_migrate_status
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "prisma migrate status" }
+        session: { id: s1 }
+  - name: no_match_12_psql_app_c_select_1_echo_drop_table_users
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "psql app -c \"SELECT 1\"; echo DROP TABLE users" }
+        session: { id: s1 }
+  - name: no_match_13_mysqladmin_status_echo_drop_app
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "mysqladmin status\necho drop app" }
+        session: { id: s1 }
+  - name: no_match_14_psql_app_c_drop_table_users
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "psql app # -c DROP TABLE users" }
+        session: { id: s1 }
+  - name: newline
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "true\npsql app -c \"DROP TABLE users;\"" }
+        session: { id: s1 }
+  - name: then
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "if true; then psql app -c \"DROP TABLE users;\"" }
+        session: { id: s1 }
+  - name: do
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "for x in a; do psql app -c \"DROP TABLE users;\"" }
+        session: { id: s1 }
+  - name: else
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "if false; then true; else psql app -c \"DROP TABLE users;\"" }
+        session: { id: s1 }
+  - name: redirect_or_comment_1
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "psql app -c \"DROP TABLE users;\" 2>/dev/null" }
+        session: { id: s1 }
+  - name: redirect_or_comment_2
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "psql app -c \"DROP TABLE users;\" >/dev/null 2>&1" }
+        session: { id: s1 }
+  - name: redirect_or_comment_3
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "psql app -c \"DROP TABLE users;\"&>/dev/null" }
+        session: { id: s1 }
+  - name: redirect_or_comment_4
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "psql app -c \"DROP TABLE users;\" # maintenance" }
+        session: { id: s1 }
+  - name: mention_1
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo \"psql app -c \\\"DROP TABLE users;\\\"\"" }
+        session: { id: s1 }
+  - name: mention_2
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "grep -F \"psql app -c \\\"DROP TABLE users;\\\"\"" }
+        session: { id: s1 }
+  - name: mention_3
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"psql app -c \\\"DROP TABLE users;\\\"\"" }
+        session: { id: s1 }
+  - name: wrong_event_action
+    verdict: no_match
+    events:
+      - event: { action: tool.invoked }
+        command: { command: "psql app -c \"DROP TABLE users;\"" }
+        session: { id: s1 }
+  - name: sudo_postgres_dropdb
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -u postgres dropdb app" }
+        session: { id: s1 }
+  - name: sudo_postgres_psql
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -u postgres psql -c \"DROP DATABASE app\"" }
+        session: { id: s1 }
+  - name: postgres_env
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "PGPASSWORD=secret psql -h db -c \"DROP TABLE users\"" }
+        session: { id: s1 }
+  - name: mysql_env
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "MYSQL_PWD=x mysql -e \"DROP DATABASE app\"" }
+        session: { id: s1 }
+  - name: relative_rails
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "RAILS_ENV=production bin/rails db:drop" }
+        session: { id: s1 }
+  - name: sudo_attached_user
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -n -upostgres dropdb app" }
+        session: { id: s1 }
+  - name: sudo_long_user
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo --user=postgres --group postgres -- dropdb app" }
+        session: { id: s1 }
+  - name: env_before_and_after_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "PGHOST=db sudo -u postgres PGPASSWORD=secret psql -c \"DROP TABLE users\"" }
+        session: { id: s1 }
+  - name: quoted_assignment
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "PGPASSWORD=\"has spaces\" PGHOST=db psql -c \"DROP TABLE users\"" }
+        session: { id: s1 }
+  - name: empty_assignment
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "PGHOST= psql -c \"DROP TABLE users\"" }
+        session: { id: s1 }
+  - name: sudo_user_not_command
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -u dropdb echo app" }
+        session: { id: s1 }
+  - name: sudo_list_only
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -l -u postgres dropdb app" }
+        session: { id: s1 }
+  - name: sudo_validate_only
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -v dropdb app" }
+        session: { id: s1 }
+  - name: env_mentions_tool
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "NOTE=\"dropdb app\" echo ok" }
+        session: { id: s1 }
+  - name: env_read_only
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "PGPASSWORD=secret psql -c \"SELECT 1\"" }
+        session: { id: s1 }
+  - name: relative_rails_read_only
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "RAILS_ENV=production bin/rails db:version" }
+        session: { id: s1 }
+  - name: sudo_echo
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -u postgres echo \"dropdb app\"" }
+        session: { id: s1 }

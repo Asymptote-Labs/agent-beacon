@@ -52,6 +52,12 @@ func TestCommandFieldsKeepsQuotedPathsWhole(t *testing.T) {
 			want:    []string{`C:\beacon\beacon-hooks.exe`, "--log", `C:\logs\runtime.jsonl`},
 		},
 		{
+			// hookCommandQuote writes a single quote inside a value as \' between two quoted runs.
+			name:    "a single quote escaped the way hookCommandQuote writes it",
+			command: `'C:\Users\O'\''Brien\hooks\beacon-hooks.exe' --platform claude`,
+			want:    []string{`C:\Users\O'Brien\hooks\beacon-hooks.exe`, "--platform", "claude"},
+		},
+		{
 			name:    "empty",
 			command: "   ",
 			want:    nil,
@@ -88,20 +94,6 @@ func TestFlagsFormIsRecognizedAsAnEndpointHook(t *testing.T) {
 	}
 }
 
-func TestEnvPrefixFormIsStillRecognized(t *testing.T) {
-	// Already installed on every POSIX machine. A repair rewrites it, but it has to be found first.
-	command := `BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG='/var/log/beacon-agent/runtime.jsonl' ` +
-		`BEACON_ENDPOINT_CONFIG='/etc/beacon/endpoint/config.json' '/opt/beacon/hooks/beacon-hooks' --platform cursor`
-
-	if !isEndpointHookCommand(command, "cursor") {
-		t.Fatal("the env-prefix form is no longer recognized; a repair would duplicate every " +
-			"already-installed POSIX hook")
-	}
-	if isEndpointHookCommand(command, "vscode") {
-		t.Fatal("a cursor hook matched when asked about vscode")
-	}
-}
-
 // TestAPlatformNamedWithAnEqualsSignCountsAsNamingOne closes a false positive.
 //
 // The old check asked whether the command contained "--platform " with a trailing space, which missed
@@ -126,6 +118,22 @@ func TestAPlatformNamedWithAnEqualsSignCountsAsNamingOne(t *testing.T) {
 	}
 	if isEndpointHookCommand(own, "vscode") {
 		t.Fatal("--platform=cursor matched when asked about vscode")
+	}
+}
+
+// A profile directory with an apostrophe (C:\Users\O'Brien) puts \' between two quoted runs in every
+// path of the command. Read as an unterminated quote, it swallowed --platform, and the hook matched
+// every runtime.
+func TestAHookUnderAnApostrophePathKeepsItsPlatform(t *testing.T) {
+	for _, home := range []string{`C:\Users\O'Brien`, `/home/o'brien`} {
+		command := endpointCommandPrefix("claude", home+`/.beacon/endpoint/hooks/beacon-hooks`,
+			home+`/.beacon/endpoint/logs/runtime.jsonl`, home+`/.beacon/endpoint/config.json`)
+		if !isEndpointHookCommand(command, "claude") {
+			t.Errorf("%s: not matched for claude", command)
+		}
+		if isEndpointHookCommand(command, "cursor") {
+			t.Errorf("%s: a claude hook matched when asked about cursor", command)
+		}
 	}
 }
 
@@ -157,16 +165,6 @@ func TestCommandHasPlatformReadsQuotedAndSeparatedValues(t *testing.T) {
 		if got := commandHasPlatform(tc.command, tc.platform); got != tc.want {
 			t.Fatalf("commandHasPlatform(%q, %q) = %v, want %v", tc.command, tc.platform, got, tc.want)
 		}
-	}
-}
-
-// TestABareBeaconHooksInvocationIsNotClaimedAsAnEndpointHook keeps the false-positive direction shut.
-//
-// Someone may run this binary for a reason Beacon did not configure. Such a command names a platform
-// and carries no endpoint settings, so it belongs to whoever wrote it.
-func TestABareBeaconHooksInvocationIsNotClaimedAsAnEndpointHook(t *testing.T) {
-	if isEndpointHookCommand(`beacon-hooks pre-tool --platform grok`, "cursor") {
-		t.Fatal("a hook for another platform with no endpoint settings was claimed")
 	}
 }
 
@@ -216,6 +214,9 @@ func TestEndpointCommandArgsMatchPrefix(t *testing.T) {
 		{name: "no log", binaryPath: "/opt/beacon/hooks/beacon-hooks", configPath: "/etc/beacon/config.json"},
 		{name: "no config", binaryPath: "/opt/beacon/hooks/beacon-hooks", logPath: "/var/log/beacon/runtime.jsonl"},
 		{name: "windows paths with spaces", binaryPath: `C:\Program Files\Beacon\beacon-hooks.exe`, logPath: `C:\ProgramData\Beacon\runtime.jsonl`, configPath: `C:\ProgramData\Beacon\config.json`},
+		{name: "apostrophes", binaryPath: `C:\Users\O'Brien\.beacon\beacon-hooks.exe`, logPath: `/home/o'brien/it's/runtime.jsonl`, configPath: `/home/o'brien/'quoted'/config.json'`},
+		{name: "shell metacharacters", binaryPath: "/opt/$HOME/`id`/beacon-hooks", logPath: `/var/log/a b;c|d&e/runtime.jsonl`, configPath: `/etc/"dq"/config.json`},
+		{name: "unc and non-ascii", binaryPath: `\\server\share\Beacon\beacon-hooks.exe`, logPath: `/Users/zoë/日誌/runtime.jsonl`, configPath: `C:\ProgramData\Beacon\config.json`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

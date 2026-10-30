@@ -46,6 +46,7 @@ Both subcommands accept:
 | `--print` | Print mapped events as JSON without writing them or advancing the cursor |
 | `--watch` | Sweep continuously on `--interval` instead of sweeping once and exiting |
 | `--interval <duration>` | Sweep interval for `--watch`. Defaults to `1m`, with a 5-second floor |
+| `--rotate-bytes <bytes>` | Rotate the runtime log at this many bytes while this sync writes it. Defaults to 10485760, the size every Beacon writer uses; must not be smaller. See [large backfills and log rotation](/runtimes/claude-code#large-backfills-and-log-rotation) |
 
 ## Sweeping
 

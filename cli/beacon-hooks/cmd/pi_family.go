@@ -1306,12 +1306,12 @@ func (f piFamily) userMessagePromptEvents(input, fields map[string]interface{}) 
 	return events
 }
 
-// messageEndEvents records what a finished assistant message tells us: its token usage, and the
+// messageEndEvents records a finished assistant message's visible text, token usage, and the
 // model's reasoning when the provider returned any. A user message is a prompt; see
 // userMessagePromptEvents.
 //
 // A finalized message is the only place these runtimes report usage, and message_end fires for
-// toolResult messages too, so a message with neither usage nor reasoning produces nothing rather
+// toolResult messages too, so a message with no text, usage or reasoning produces nothing rather
 // than an empty row per turn.
 func (f piFamily) messageEndEvents(input map[string]interface{}, fields map[string]interface{}) []normalizedEvent {
 	message := firstMap(input, "message")
@@ -1331,7 +1331,7 @@ func (f piFamily) messageEndEvents(input map[string]interface{}, fields map[stri
 
 	var events []normalizedEvent
 
-	if reasoning := piReasoningText(message); reasoning != "" {
+	if reasoning := piPartsText(message, "thinking", "thinking", "text", "content"); reasoning != "" {
 		reasoningFields := cloneFields(fields)
 		reasoningFields["gen_ai"] = mergeNested(reasoningFields["gen_ai"], map[string]interface{}{
 			"output": map[string]interface{}{
@@ -1345,6 +1345,10 @@ func (f piFamily) messageEndEvents(input map[string]interface{}, fields map[stri
 		events = append(events, f.one("agent.reasoning", "reasoning", "info", "agent reasoning", reasoningFields)...)
 	}
 
+	if reply := assistantMessageEvent(cloneFields(fields), piPartsText(message, "text", "text")); reply.action != "" {
+		events = append(events, reply)
+	}
+
 	if usage := piUsage(firstMap(message, "usage")); len(usage) > 0 {
 		usageFields := cloneFields(fields)
 		usageFields["gen_ai"] = mergeNested(usageFields["gen_ai"], map[string]interface{}{"usage": usage})
@@ -1354,27 +1358,21 @@ func (f piFamily) messageEndEvents(input map[string]interface{}, fields map[stri
 	return events
 }
 
-// piReasoningText concatenates the thinking parts of an assistant message.
+// piPartsText concatenates the parts of an assistant message that have the given type.
 //
 // Assistant content is a list of parts, and a reasoning model emits thinking alongside text in the
-// same message. Only the thinking parts are collected here: the assistant's visible answer is not
-// reasoning, and recording it as such would put the model's output where a reader looking for its
-// private deliberation expects to find it.
-func piReasoningText(message map[string]interface{}) string {
-	content, ok := message["content"].([]interface{})
-	if !ok {
-		return ""
-	}
+// same message. Thinking parts are reasoning and text parts are the visible answer; keeping them
+// apart keeps the model's output out of where a reader looking for its private deliberation expects
+// to find it.
+func piPartsText(message map[string]interface{}, partType string, keys ...string) string {
+	content, _ := message["content"].([]interface{})
 	var parts []string
 	for _, item := range content {
 		part, ok := item.(map[string]interface{})
-		if !ok {
+		if !ok || getFirstStr(part, "type") != partType {
 			continue
 		}
-		if getFirstStr(part, "type") != "thinking" {
-			continue
-		}
-		if text := getFirstStr(part, "thinking", "text", "content"); text != "" {
+		if text := getFirstStr(part, keys...); text != "" {
 			parts = append(parts, text)
 		}
 	}

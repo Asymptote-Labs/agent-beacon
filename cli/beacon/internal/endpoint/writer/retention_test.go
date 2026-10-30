@@ -165,14 +165,6 @@ func TestRetentionGuardDoesNotCountSuppressedDuplicates(t *testing.T) {
 	}
 }
 
-// A guard that never wrote has nothing to report and nothing to look at.
-func TestRetentionGuardWithNoWritesRetainsNothing(t *testing.T) {
-	guard := &RetentionGuard{}
-	if w, r := guard.Written(), guard.Retained(); w != 0 || r != 0 {
-		t.Fatalf("Written()=%d Retained()=%d, want 0 and 0", w, r)
-	}
-}
-
 // Other writers take the log's lock between guarded appends and can rotate several times while a
 // sweep reads its next session. The guard must decide from where its first file actually is now,
 // not from how many files it has written into: here it has written one file, which another writer

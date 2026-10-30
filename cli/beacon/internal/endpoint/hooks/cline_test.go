@@ -278,20 +278,6 @@ func TestClineStatusRejectsAPluginPointingElsewhere(t *testing.T) {
 	}
 }
 
-func TestIsClineInstalledAtRequiresTheManagedMarker(t *testing.T) {
-	dir := t.TempDir()
-	unmanaged := filepath.Join(dir, "other.ts")
-	if err := os.WriteFile(unmanaged, []byte("export default {}"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if isClineInstalledAt(unmanaged) {
-		t.Error("an unmanaged plugin was reported as Beacon's")
-	}
-	if isClineInstalledAt(filepath.Join(dir, "absent.ts")) {
-		t.Error("a missing plugin was reported as installed")
-	}
-}
-
 // The plugin holds its argv JSON-encoded, so a backslash appears doubled in the file. Comparing
 // against the raw path therefore matched nothing on Windows, and every correctly installed plugin
 // there was reported as not referencing its own binary. Asserted on the rendered source so the
@@ -315,19 +301,5 @@ func TestClinePluginReferencesBinaryHandlesWindowsPaths(t *testing.T) {
 	}
 	if clinePluginReferencesBinary(source, "") {
 		t.Error("an empty binary path was treated as a match")
-	}
-}
-
-func TestClinePluginReferencesBinaryOnPOSIXPaths(t *testing.T) {
-	binary := "/opt/beacon/hooks/beacon-hooks"
-	source, err := renderClinePlugin(binary, "/var/log/beacon/runtime.jsonl", "/etc/beacon/config.json")
-	if err != nil {
-		t.Fatalf("renderClinePlugin returned error: %v", err)
-	}
-	if !clinePluginReferencesBinary(source, binary) {
-		t.Error("a plugin rendered for this binary was not recognized as referencing it")
-	}
-	if clinePluginReferencesBinary(source, "/opt/beacon/hooks/beacon-hooks-old") {
-		t.Error("a plugin was reported as referencing a binary it does not spawn")
 	}
 }

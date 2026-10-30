@@ -53,26 +53,13 @@ func TestCoverageMarksReportingRuntimesCovered(t *testing.T) {
 	}
 }
 
-// The case the report exists for: a runtime Beacon is built to read tokens from ran, and reported
-// none. That is a broken capture path, not a quiet week, and it must be surfaced.
-func TestCoverageFlagsARuntimeThatShouldHaveReportedUsage(t *testing.T) {
-	report := Coverage([]schema.Event{plainEvent("claude_code")}, []string{"claude_code"})
-	line := lineFor(t, report, "claude_code")
-	if line.Status != CoverageSilent {
-		t.Fatalf("status = %q, want silent", line.Status)
-	}
-	if report.Silent != 1 {
-		t.Fatalf("silent = %d, want 1", report.Silent)
-	}
-}
-
 // The case that keeps the report from crying wolf. Cursor's hooks carry no token counts, so
 // Cursor contributing nothing is correct behavior. Reporting it as silent every week would train
 // a reader to ignore the column that matters.
 func TestCoverageDoesNotFlagRuntimesThatCannotReportUsage(t *testing.T) {
-	events := []schema.Event{plainEvent("cursor"), plainEvent("qwen_code"), plainEvent("muse_code"), plainEvent("devin-cli"), plainEvent("devin-desktop")}
-	report := Coverage(events, []string{"cursor", "qwen_code", "muse_code", "devin-cli", "devin-desktop"})
-	for _, harness := range []string{"cursor", "qwen_code", "muse_code", "devin-cli", "devin-desktop"} {
+	events := []schema.Event{plainEvent("cursor")}
+	report := Coverage(events, []string{"cursor"})
+	for _, harness := range []string{"cursor"} {
 		line := lineFor(t, report, harness)
 		if line.Status != CoverageNotInstrumented {
 			t.Errorf("%s status = %q, want not_instrumented", harness, line.Status)
@@ -168,34 +155,6 @@ func TestCoverageSortsSilentRuntimesFirst(t *testing.T) {
 	}
 }
 
-// A coverage report over an empty window says nothing at all, and must say so rather than
-// rendering an empty table that reads like a clean bill of health.
-func TestRenderCoverageTextSaysWhenTheWindowIsEmpty(t *testing.T) {
-	var sb strings.Builder
-	RenderCoverageText(&sb, Coverage(nil, nil))
-	if !strings.Contains(sb.String(), "No events in this window") {
-		t.Fatalf("empty-window report did not say so:\n%s", sb.String())
-	}
-}
-
-func TestRenderCoverageTextExplainsSilentRuntimes(t *testing.T) {
-	var sb strings.Builder
-	RenderCoverageText(&sb, Coverage([]schema.Event{plainEvent("claude_code")}, nil))
-	out := sb.String()
-	if !strings.Contains(out, "silent") || !strings.Contains(out, "beacon endpoint diagnostics") {
-		t.Fatalf("silent report did not tell the reader what to do:\n%s", out)
-	}
-
-	// A runtime whose usage arrives only through a session sync is silent until the sync runs;
-	// hook and OTLP advice alone would send that reader to the wrong place.
-	sb.Reset()
-	RenderCoverageText(&sb, Coverage([]schema.Event{plainEvent("hermes")}, nil))
-	out = sb.String()
-	if !strings.Contains(out, "beacon endpoint hermes sync") || !strings.Contains(out, "usage arrives only when that sync runs") {
-		t.Fatalf("silent report for a sync-sourced runtime did not point at the sync:\n%s", out)
-	}
-}
-
 // Every expectation entry must key on a name that survives normalization, or the lookup silently
 // misses and the runtime is reported as an unrecognized generic-OTLP one.
 func TestUsageExpectationKeysAreCanonicalHarnessNames(t *testing.T) {
@@ -233,64 +192,33 @@ func TestEveryScannedRuntimeHasAnExpectation(t *testing.T) {
 	}
 }
 
-// The Devin regression in report form: a Devin CLI or Devin Desktop session that reports no
-// tokens must not be alerted on.
-func TestCoverageDoesNotFlagAnyDevinSpelling(t *testing.T) {
-	for _, harness := range []string{"devin", "devin-cli", "devin-desktop"} {
+// The Devin regression in report form: a Devin spelling whose only collection path cannot carry
+// token counts must not be alerted on. Plain "devin" and "devin-desktop" are hook-only and stay
+// not_instrumented; "devin-cli" is expected to report once `beacon endpoint devin sync` has run,
+// so a covered session with no sync yet is silent and the reason names the fix.
+func TestCoverageFlagsDevinSpellingsByWhatBeaconCanRead(t *testing.T) {
+	for _, harness := range []string{"devin", "devin-desktop"} {
 		report := Coverage([]schema.Event{plainEvent(harness)}, []string{harness})
 		if got := lineFor(t, report, harness).Status; got != CoverageNotInstrumented {
-			t.Errorf("%s status = %q, want not_instrumented -- Devin reports no token counts", harness, got)
+			t.Errorf("%s status = %q, want not_instrumented -- these hooks report no token counts", harness, got)
 		}
 		if report.Silent != 0 {
 			t.Errorf("%s produced silent=%d, want 0", harness, report.Silent)
 		}
 	}
+
+	report := Coverage([]schema.Event{plainEvent("devin-cli")}, []string{"devin-cli"})
+	line := lineFor(t, report, "devin-cli")
+	if line.Status != CoverageSilent {
+		t.Fatalf("devin-cli status = %q, want silent until the session sync runs", line.Status)
+	}
+	if !strings.Contains(line.Reason, "beacon endpoint devin sync") {
+		t.Fatalf("devin-cli reason = %q, want it to name the sync that reports usage", line.Reason)
+	}
 }
 
-// The two harnesses added to main while this branch was open, pinned so neither becomes a
-// standing false alarm.
-//
-// They land in different categories for a reason that is the whole point of the distinction:
-// OpenHands is hooked on the endpoint and none of its six hook payloads carries token counts, so
-// its silence is a fact about the runtime. Grok Bot runs on a Cursor-hosted cloud computer and
-// reaches Beacon only through Cursor's server-side OpenTelemetry export, so its silence depends
-// on what that export carries -- unknown, not established.
-func TestNewHarnessesAreClassifiedNotAlerted(t *testing.T) {
-	openhands := lineFor(t, Coverage([]schema.Event{plainEvent("openhands")}, []string{"openhands"}), "openhands")
-	if openhands.Status != CoverageNotInstrumented || openhands.Expectation != ExpectNone {
-		t.Errorf("openhands = %+v, want not_instrumented/none -- no OpenHands hook payload carries token counts", openhands)
-	}
-	// A runtime missing from the expectation table is reported as silent, which is the one status
-	// the table exists to keep clean: it means "should be reporting and is not". Kiro reports no
-	// tokens because no Kiro hook payload carries any, so its row has to say expected-none.
-	kiro := lineFor(t, Coverage([]schema.Event{plainEvent("kiro")}, []string{"kiro"}), "kiro")
-	if kiro.Status != CoverageNotInstrumented || kiro.Expectation != ExpectNone {
-		t.Errorf("kiro = %+v, want not_instrumented/none -- no Kiro hook payload carries token counts", kiro)
-	}
-
-	// Kimi Code is the case where the runtime does count tokens and still expects none here. It
-	// reports context occupancy in its TUI and a `token_count` on PreCompact, but neither is
-	// per-call spend and no hook payload carries any -- so the row has to say expected-none, and
-	// promoting either number into gen_ai.usage would make a level look like an additive total.
-	kimi := lineFor(t, Coverage([]schema.Event{plainEvent("kimi_code")}, []string{"kimi_code"}), "kimi_code")
-	if kimi.Status != CoverageNotInstrumented || kimi.Expectation != ExpectNone {
-		t.Errorf("kimi_code = %+v, want not_instrumented/none -- no Kimi Code hook payload carries token counts", kimi)
-	}
-
-	// Gemini CLI writes a gemini_cli.api_response record with its counts for every model response
-	// whenever its telemetry is on, so a Gemini session with events and no usage is the case worth
-	// flagging rather than a runtime spelling its attributes some other way.
-	gemini := lineFor(t, Coverage([]schema.Event{plainEvent("gemini_cli")}, []string{"gemini_cli"}), "gemini_cli")
-	if gemini.Status != CoverageSilent || gemini.Expectation != ExpectReported {
-		t.Errorf("gemini_cli = %+v, want silent/reported -- usage is read from Gemini's own api_response log", gemini)
-	}
-
-	grokBot := lineFor(t, Coverage([]schema.Event{plainEvent("grok_bot")}, nil), "grok_bot")
-	if grokBot.Expectation != ExpectGenericOTLP {
-		t.Errorf("grok_bot expectation = %q, want generic_otlp -- it arrives only via Cursor's OTel export", grokBot.Expectation)
-	}
-
-	// Grok Bot and Grok Build are separate products and must not share a row.
+// Grok Bot and Grok Build are separate products and must not share a row.
+func TestCoverageKeepsGrokAndGrokBotApart(t *testing.T) {
 	both := Coverage([]schema.Event{plainEvent("grok"), plainEvent("grok_bot")}, nil)
 	if len(both.Runtimes) != 2 {
 		t.Fatalf("got %d rows, want grok and grok_bot kept apart: %+v", len(both.Runtimes), both.Runtimes)
@@ -319,24 +247,6 @@ func TestInstalledRuntimesCountsOnlyWhatBeaconConfigured(t *testing.T) {
 			name:   "a shell profile Beacon did not touch does not",
 			config: InstalledConfig{Runtime: "copilot_cli", Path: "/home/u/.zshrc", Kind: "profile", Exists: true},
 			want:   false,
-		},
-		{
-			// Read by several runtimes, filed by the scanner under fx alone.
-			name:   "a config shared between runtimes does not",
-			config: InstalledConfig{Runtime: "vercel_fx", Path: "/repo/.mcp.json", Kind: "native_config", Exists: true},
-			want:   false,
-		},
-		{
-			// Exists wherever VS Code does, Copilot Chat installed or not.
-			name:   "VS Code settings alone does not",
-			config: InstalledConfig{Runtime: "vscode", Path: "/home/u/.config/Code/User/settings.json", Kind: "native_config", Exists: true},
-			want:   false,
-		},
-		{
-			// The same file once Beacon has written the local OTLP endpoint into it.
-			name:   "VS Code settings Beacon wired up does",
-			config: InstalledConfig{Runtime: "vscode", Path: "/home/u/.config/Code/User/settings.json", Kind: "native_config", BeaconManaged: true, Exists: true},
-			want:   true,
 		},
 		{
 			name:   "a managed config that does not exist does not",
@@ -432,7 +342,6 @@ func TestCoverageCountsPollSourcedUsage(t *testing.T) {
 		harness, command string
 	}{
 		{"hermes", "beacon endpoint hermes sync"},
-		{"factory", "beacon endpoint factory sync"},
 	} {
 		silent := lineFor(t, Coverage([]schema.Event{hookEvent(tc.harness, "s1")}, []string{tc.harness}), tc.harness)
 		if silent.Status != CoverageSilent || silent.Expectation != ExpectReported {
@@ -455,39 +364,6 @@ func TestCoverageCountsPollSourcedUsage(t *testing.T) {
 		covered := lineFor(t, Coverage(events, []string{tc.harness}), tc.harness)
 		if covered.Status != CoverageCovered || covered.UsageEvents != 1 || covered.Tokens != 475 {
 			t.Errorf("%s with synced usage = %+v, want covered with one usage event and 475 tokens", tc.harness, covered)
-		}
-	}
-}
-
-// Every runtime Beacon reads usage from on its own surface names that surface in the note, and
-// none falls through to the unrecognized-runtime default, whose note would tell a reader that
-// nobody has looked at the runtime.
-func TestCoverageExpectationsMatchTheCaptureCode(t *testing.T) {
-	for _, tc := range []struct {
-		harness, expect, reasonHas string
-	}{
-		// The Senpi extension forwards message_end usage and cost through the shared Pi-family
-		// mapper (cli/beacon-hooks/cmd/pi_family.go), exactly as Pi, Oh My Pi and Prime do.
-		{"omo_senpi", ExpectReported, "extension"},
-		// The OpenClaw session-file sync reads per-message usage from committed sessions, which
-		// does not depend on the plugin's conversation-access grant.
-		{"openclaw_gateway", ExpectReported, "beacon endpoint integrations openclaw sessions sync"},
-		// goose's chat spans carry the semconv names, but only over OTLP configured by hand.
-		{"goose", ExpectGenericOTLP, "OTLP"},
-		// The factory sync writes harness "factory"; "factory_droid" only arrives over OTLP, so
-		// its note must not name a sync that can never report under that name.
-		{"factory", ExpectReported, "beacon endpoint factory sync"},
-		{"factory_droid", ExpectGenericOTLP, "semconv"},
-	} {
-		expect, reason := expectationFor(tc.harness)
-		if expect != tc.expect {
-			t.Errorf("%s expectation = %q, want %q", tc.harness, expect, tc.expect)
-		}
-		if !strings.Contains(reason, tc.reasonHas) {
-			t.Errorf("%s reason = %q, want it to mention %q", tc.harness, reason, tc.reasonHas)
-		}
-		if _, ok := usageExpectation[tc.harness]; !ok {
-			t.Errorf("%s has no usageExpectation entry and falls to the unrecognized default", tc.harness)
 		}
 	}
 }

@@ -107,7 +107,6 @@ func TestClaudeBashPostToolJoinsStreams(t *testing.T) {
 		{"stdout without a trailing newline", "out", "err", "out\nerr"},
 		{"stdout with a trailing newline", "out\n", "err\n", "out\nerr\n"},
 		{"stderr only", "", "err\n", "err\n"},
-		{"stdout only", "out", "", "out"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

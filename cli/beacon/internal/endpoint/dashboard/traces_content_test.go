@@ -168,10 +168,11 @@ func assistantEvent(action, message string, messages interface{}) schema.Event {
 }
 
 // Through the JSONL log, so the messages arrive as a reader decodes them rather
-// than as the Go values a mapper built.
+// than as the Go values a mapper built. The scan and the history project alike
+// (TestHistoryAnswersExactlyLikeTheJSONLScan), so the scan is enough here.
 func projectedContent(t *testing.T, event schema.Event) *TraceContentV1 {
 	t.Helper()
-	path := traceStoreIndexedLog(t, marshalEvents(t, event))
+	path := traceStoreBlockedLog(t, marshalEvents(t, event))
 	show, ok, err := ShowTrace(path, "session:codex_cli:s1", TraceQuery{Limit: 10})
 	if err != nil || !ok || len(show.Events) != 1 {
 		t.Fatalf("ShowTrace ok=%v err=%v events=%d", ok, err, len(show.Events))
@@ -309,26 +310,5 @@ func TestTraceContentKeepsPromptText(t *testing.T) {
 	content := projectedContent(t, event)
 	if content == nil || content.Text != "the prompt" {
 		t.Fatalf("content = %#v, want the prompt text", content)
-	}
-}
-
-// The answer is event text, so it is searchable, and the index and the JSONL
-// fallback agree on it.
-func TestTraceSearchFindsRetainedAssistantText(t *testing.T) {
-	lines := marshalEvents(t, assistantEvent("agent.message", codexAnswerLabel, asymptoteobserve.TextOutputMessages("rotate the flaky fixture")))
-	for name, logFor := range map[string]func(*testing.T, [][]byte) string{
-		"index":    traceStoreIndexedLog,
-		"fallback": traceStoreBlockedLog,
-	} {
-		t.Run(name, func(t *testing.T) {
-			path := logFor(t, lines)
-			result, err := SearchTraces(path, TraceQuery{EventQuery: EventQuery{Q: "flaky fixture"}, ResultLevel: "event", Limit: 10})
-			if err != nil {
-				t.Fatalf("SearchTraces: %v", err)
-			}
-			if result.TotalMatched != 1 || len(result.Events) != 1 || result.Events[0].Event.Type != "agent_message" {
-				t.Fatalf("search results = %#v, want the assistant event", result)
-			}
-		})
 	}
 }

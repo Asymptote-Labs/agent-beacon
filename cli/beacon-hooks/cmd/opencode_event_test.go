@@ -52,22 +52,6 @@ func TestOpenCodeEventRecordsPrompt(t *testing.T) {
 	}
 }
 
-func TestOpenCodeEventFixtureRecordsPrompt(t *testing.T) {
-	setupHookConfigDirs(t)
-	platformFlag = "opencode"
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_MODE", "1")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-	t.Setenv("BEACON_CONTENT_RETENTION", "full")
-
-	input := readHookFixture(t, "opencode", "chat_message.json")
-	runHookWithInput(t, runOpenCodeEvent, input)
-	event := lastEndpointEvent(t, logPath)
-	if action := event["event"].(map[string]interface{})["action"]; action != "prompt.submitted" {
-		t.Fatalf("fixture event.action = %q, want prompt.submitted", action)
-	}
-}
-
 func TestOpenCodeFixtureContracts(t *testing.T) {
 	tests := []struct {
 		file     string
@@ -75,6 +59,7 @@ func TestOpenCodeFixtureContracts(t *testing.T) {
 		category string
 	}{
 		{file: "tool_execute_after_bash.json", action: "command.executed", category: "command"},
+		{file: "chat_message.json", action: "prompt.submitted", category: "prompt"},
 		{file: "tool_part_error.json", action: "tool.failed", category: "tool"},
 		{file: "assistant_completed.json", action: "agent.response.completed", category: "session"},
 		{file: "session_diff.json", action: "file.modified", category: "file"},
@@ -382,26 +367,6 @@ func TestOpenCodeIdleIsStatusUntilSessionDeletion(t *testing.T) {
 	}
 }
 
-func TestOpenCodeBashCapturesExitMetadata(t *testing.T) {
-	_, _, _, _, fields := opencodeEndpointEvent(map[string]interface{}{
-		"type":       "tool.execute.after",
-		"session_id": "ses_test",
-		"tool_name":  "bash",
-		"call_id":    "bash_1",
-		"tool_input": map[string]interface{}{"command": "test -f missing"},
-		"tool_response": map[string]interface{}{
-			"output": "missing",
-			"metadata": map[string]interface{}{
-				"exit": 1,
-			},
-		},
-	}, "ses_test")
-	command := fields["command"].(map[string]interface{})
-	if command["exit_code"] != 1 {
-		t.Fatalf("exit_code = %#v, want 1", command["exit_code"])
-	}
-}
-
 func TestOpenCodeSuccessfulRMEmitsCorrelatedFileDeletion(t *testing.T) {
 	input := map[string]interface{}{
 		"type":       "tool.execute.after",
@@ -434,8 +399,12 @@ func TestOpenCodeSuccessfulRMEmitsCorrelatedFileDeletion(t *testing.T) {
 		"output":   "failed",
 		"metadata": map[string]interface{}{"exit": 1},
 	}
-	if failed := opencodeEndpointEvents(input, "ses_test"); len(failed) != 1 {
+	failed := opencodeEndpointEvents(input, "ses_test")
+	if len(failed) != 1 {
 		t.Fatalf("failed rm emitted %d events, want command only", len(failed))
+	}
+	if got := failed[0].fields["command"].(map[string]interface{})["exit_code"]; got != 1 {
+		t.Fatalf("exit_code = %#v, want 1 from metadata.exit", got)
 	}
 	input["tool_response"] = map[string]interface{}{"output": "unknown", "metadata": map[string]interface{}{}}
 	if unknown := opencodeEndpointEvents(input, "ses_test"); len(unknown) != 1 {

@@ -1,10 +1,15 @@
 id: base64-decode-piped-to-shell
-version: 2
+spec: threat-rules/v1.2  # needed for e.command.parsed_commands
+version: 4
 title: Base64-decoded payload piped into a shell
 description: >
   A command base64-decodes content and pipes it straight into a shell — the classic
   obfuscated remote-code-execution shape that hides the payload from a casual review.
-  The pipe-to-shell match is case-insensitive so an uppercase shell name cannot evade.
+  The shell match is case-insensitive so an uppercase shell name cannot evade, and
+  accepts the shell by any path and under `env` or `sudo` with their options. The
+  command line is read as bash, so the decode and the shell must be stages of one
+  pipeline, and the same text inside a quoted string does not fire; a command line
+  that does not parse falls back to matching its text.
 severity: high
 status: stable
 posture: detect
@@ -13,10 +18,20 @@ taxonomy:
   owasp_llm: LLM05
   mitre_atlas: AML.T0011
 
+# The decoder is any command with a base64 word and a decode flag (openssl base64 -d counts);
+# the shell is the command a later stage of the same pipeline runs.
 match: >
-  e.event.action == "command.executed" &&
-  e.command.command.matches("(?i)\\bbase64\\b\\s+(-d|-D|--decode)\\b") &&
-  e.command.command.matches("(?i)\\|\\s*(sudo\\s+)?(ba|z)?sh\\b")
+  e.event.action == "command.executed" && (
+    e.command.parsed_commands.exists(d,
+      d.argv.exists(a, a.matches("(?i)(^|/)base64$")) &&
+      d.argv.exists(a, a.matches("(?i)^(-d|--decode)$")) &&
+      e.command.parsed_commands.exists(s,
+        s.pipeline == d.pipeline && s.stage > d.stage &&
+        s.name.matches("(?i)^(ba|z|da|k)?sh$"))) ||
+    (size(e.command.parsed_commands) == 0 &&
+      e.command.command.matches("(?i)\\bbase64\\b\\s+(-d|-D|--decode)\\b") &&
+      e.command.command.matches("(?i)\\|\\s*(sudo(\\s+-\\S+)*\\s+)?(\\S*/)?(env\\s+)?(ba|z|da|k)?sh\\b"))
+  )
 
 emit:
   reason: "Base64-decoded payload piped directly into a shell"
@@ -46,6 +61,42 @@ tests:
       - event: { action: command.executed }
         command: { command: "echo aGk= |base64 -d|zsh" }
         session: { id: s1 }
+  - name: shell_by_absolute_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo ZWNobyBoaQ== | base64 -d | /bin/bash" }
+        session: { id: s1 }
+  - name: shell_by_usr_bin_path_under_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo aGk= | base64 --decode | sudo /usr/bin/sh" }
+        session: { id: s1 }
+  - name: shell_by_homebrew_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo aGk= | base64 -d | /opt/homebrew/bin/bash" }
+        session: { id: s1 }
+  - name: shell_through_env
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo aGk= | base64 -d | /usr/bin/env bash" }
+        session: { id: s1 }
+  - name: shell_under_sudo_with_flags
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo aGk= | base64 -d | sudo -E bash" }
+        session: { id: s1 }
+  - name: decode_piped_to_shasum
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo aGk= | base64 -d | /usr/bin/shasum -a 256" }
+        session: { id: s1 }
   - name: base64_decode_to_file
     verdict: no_match
     events:
@@ -57,4 +108,34 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "base64 -d secrets.b64 > out.bin && bash setup.sh" }
+        session: { id: s1 }
+  - name: shell_under_sudo_with_user
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo aGk= | base64 -d | sudo -u root bash" }
+        session: { id: s1 }
+  - name: shell_through_env_with_assignment
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo aGk= | base64 -d | env FOO=1 bash" }
+        session: { id: s1 }
+  - name: unparseable_capture_falls_back_to_text
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo aGk= | base64 -d | bash )" }
+        session: { id: s1 }
+  - name: decode_and_shell_in_separate_pipelines
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "base64 -d payload.b64 > payload.bin; cat setup.sh | bash" }
+        session: { id: s1 }
+  - name: pattern_in_quoted_string
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo \"run: echo aGk= | base64 -d | bash\"" }
         session: { id: s1 }

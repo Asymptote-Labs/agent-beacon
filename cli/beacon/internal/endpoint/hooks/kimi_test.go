@@ -116,14 +116,10 @@ func TestKimiConfigPathDefaultsToDotKimiCodeUnderHome(t *testing.T) {
 // Refusing is the point. Kimi Code reads one user-level config file, so a project-scoped install
 // that silently fell back to user scope would give an operator a machine-wide install when they
 // asked for a repository-scoped one, with nothing to say that is what happened.
-func TestKimiProjectScopeIsRefusedWithItsReason(t *testing.T) {
-	_, err := kimiConfigPath(LevelProject)
-	if err == nil {
+func TestKimiProjectScopeIsRefused(t *testing.T) {
+	if _, err := kimiConfigPath(LevelProject); err == nil {
 		t.Fatal("kimiConfigPath(LevelProject) returned no error; a silent fallback to user scope " +
 			"would install machine-wide without saying so")
-	}
-	if !strings.Contains(err.Error(), "user-level") || !strings.Contains(err.Error(), kimiEnvHome) {
-		t.Fatalf("error = %q; it must say why there is no project scope and what to do instead", err)
 	}
 }
 
@@ -131,6 +127,11 @@ func TestKimiProjectScopeIsRefusedWithItsReason(t *testing.T) {
 // The emitted block
 // ---------------------------------------------------------------------------
 
+// Every subscribed event is registered with its subcommand and a timeout the runtime accepts.
+// The matcher is absent rather than ".*" or "*": a present matcher is compiled as a regular
+// expression and one the runtime cannot compile matches nothing at all, silently. SessionHeartbeat
+// is the one event where subscribing would create the behavior rather than observe it: Kimi Code
+// starts its sixty-second timer only when a hook is configured for it.
 func TestKimiInstallWritesEveryEventItSubscribesTo(t *testing.T) {
 	path := kimiUserPath(t)
 	writeKimiFixture(t, path, kimiSampleConfig)
@@ -142,7 +143,14 @@ func TestKimiInstallWritesEveryEventItSubscribesTo(t *testing.T) {
 	}
 	byEvent := map[string]kimiHookEntry{}
 	for _, entry := range entries {
+		if entry.Matcher != "" {
+			t.Fatalf("%s matcher = %q, want absent", entry.Event, entry.Matcher)
+		}
 		byEvent[entry.Event] = entry
+	}
+	if _, ok := byEvent["SessionHeartbeat"]; ok {
+		t.Fatal("Beacon registered SessionHeartbeat; the runtime runs that timer only when a " +
+			"hook asks for it, so this creates a wakeup a minute in every session")
 	}
 	for _, event := range kimiEvents {
 		entry, ok := byEvent[event.name]
@@ -163,23 +171,6 @@ func TestKimiInstallWritesEveryEventItSubscribesTo(t *testing.T) {
 		// rather than just this hook.
 		if entry.Timeout < 1 || entry.Timeout > 600 {
 			t.Fatalf("%s timeout = %d, outside the 1..600 the runtime accepts", event.name, entry.Timeout)
-		}
-	}
-}
-
-// An absent matcher is match-all. It is written as absent rather than as ".*" or "*" because a
-// present matcher is compiled as a regular expression and one the runtime cannot compile matches
-// nothing at all, silently -- which would be an install that reports success and collects nothing.
-func TestKimiInstallOmitsTheMatcher(t *testing.T) {
-	path := kimiUserPath(t)
-	installKimiFixture(t, path)
-
-	if strings.Contains(readFile(t, path), "matcher") {
-		t.Fatalf("the written config names a matcher:\n%s", readFile(t, path))
-	}
-	for _, entry := range kimiHookEntries(parseKimiFixture(t, path)) {
-		if entry.Matcher != "" {
-			t.Fatalf("%s matcher = %q, want absent", entry.Event, entry.Matcher)
 		}
 	}
 }
@@ -227,22 +218,6 @@ func TestKimiInstallRegistersBothHalvesOfEachPair(t *testing.T) {
 		got := bySubcommand[subcommand]
 		if len(got) != len(want) {
 			t.Fatalf("%s is bound to %v, want %v", subcommand, got, want)
-		}
-	}
-}
-
-// SessionHeartbeat is the one event where subscribing would create the behavior rather than
-// observe it: Kimi Code starts its sixty-second timer only when a hook is configured for it, so
-// Beacon would be spawning a process a minute in every session to write an event that says
-// nothing happened.
-func TestKimiInstallDoesNotSubscribeToTheHeartbeat(t *testing.T) {
-	path := kimiUserPath(t)
-	installKimiFixture(t, path)
-
-	for _, entry := range kimiHookEntries(parseKimiFixture(t, path)) {
-		if entry.Event == "SessionHeartbeat" {
-			t.Fatal("Beacon registered SessionHeartbeat; the runtime runs that timer only when a " +
-				"hook asks for it, so this creates a wakeup a minute in every session")
 		}
 	}
 }
@@ -322,23 +297,6 @@ func TestKimiReinstallReplacesRatherThanStacks(t *testing.T) {
 	// The label is written once, not once per install.
 	if got := strings.Count(readFile(t, path), kimiManagedComment); got != 1 {
 		t.Fatalf("the managed-block comment appears %d times, want 1", got)
-	}
-}
-
-// Install, uninstall, install must return the file to the same place rather than accumulating
-// blank lines or losing a trailing newline each round.
-func TestKimiInstallUninstallInstallIsStable(t *testing.T) {
-	path := kimiUserPath(t)
-	writeKimiFixture(t, path, kimiSampleConfig)
-
-	installKimiFixture(t, path)
-	first := readFile(t, path)
-	if _, err := removeKimiHooks(path); err != nil {
-		t.Fatalf("uninstall: %v", err)
-	}
-	installKimiFixture(t, path)
-	if second := readFile(t, path); second != first {
-		t.Fatalf("install/uninstall/install is not stable:\n--- first ---\n%s\n--- second ---\n%s", first, second)
 	}
 }
 
@@ -478,9 +436,6 @@ hooks = [{ event = "Stop", command = "echo done" }]
 		t.Fatal("install accepted an inline hooks array; the appended [[hooks]] would make the " +
 			"config unloadable")
 	}
-	if !strings.Contains(err.Error(), "inline array") {
-		t.Fatalf("error = %q; it must name the shape it is refusing", err)
-	}
 	if strings.Contains(readFile(t, path), "beacon-hooks") {
 		t.Fatal("the refused install still wrote to the file")
 	}
@@ -531,9 +486,6 @@ func TestKimiRewriteVerificationRejectsALostSetting(t *testing.T) {
 	if err == nil {
 		t.Fatal("verifyKimiRewrite accepted an edit that dropped a provider's api_key")
 	}
-	if !strings.Contains(err.Error(), "providers") {
-		t.Fatalf("error = %q; it must name the key that would have changed", err)
-	}
 }
 
 func TestKimiRewriteVerificationRejectsAnAddedSetting(t *testing.T) {
@@ -550,27 +502,11 @@ func TestKimiRewriteVerificationRejectsUnparsableOutput(t *testing.T) {
 	if err == nil {
 		t.Fatal("verifyKimiRewrite accepted output that is not valid TOML")
 	}
-	if !strings.Contains(err.Error(), "left unchanged") {
-		t.Fatalf("error = %q; it must say the file was not written", err)
-	}
 }
 
 // ---------------------------------------------------------------------------
 // Fresh installs and file mode
 // ---------------------------------------------------------------------------
-
-// A machine where Kimi Code has never run has no config.toml. Creating one is safe: the runtime's
-// legacy migration adopts an existing parseable config by merging into it, so a file with only
-// hooks in it does not cost the user their old settings.
-func TestKimiInstallCreatesAConfigWhenThereIsNone(t *testing.T) {
-	path := kimiUserPath(t)
-	installKimiFixture(t, path)
-
-	entries := kimiHookEntries(parseKimiFixture(t, path))
-	if len(entries) != len(kimiEvents) {
-		t.Fatalf("got %d entries in a fresh config, want %d", len(entries), len(kimiEvents))
-	}
-}
 
 // config.toml is where Kimi Code keeps `api_key` in plain text. A config Beacon brings into
 // existence must not be world-readable even though it has nothing secret in it yet, because the

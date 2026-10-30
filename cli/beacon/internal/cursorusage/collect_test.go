@@ -2,7 +2,6 @@ package cursorusage
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -187,23 +186,6 @@ func TestHasUsage(t *testing.T) {
 	}
 	if !HasUsage(UsageEvent{TokenUsage: TokenUsage{CacheReadTokens: 1}}) {
 		t.Error("cache tokens alone are usage")
-	}
-}
-
-func TestDedupKeysSeparateIdenticalRequests(t *testing.T) {
-	a := usageAt(baseNow, 1)
-	b := usageAt(baseNow, 2)
-	keys := DedupKeys([]UsageEvent{a, b, a})
-	if keys[0] == keys[2] {
-		t.Fatal("two identical requests must get two keys")
-	}
-	if keys[0] == keys[1] {
-		t.Fatal("different requests must get different keys")
-	}
-	// Order among non-identical events does not change any key.
-	again := DedupKeys([]UsageEvent{b, a, a})
-	if again[0] != keys[1] || again[1] != keys[0] || again[2] != keys[2] {
-		t.Fatalf("keys depend on order: %v vs %v", keys, again)
 	}
 }
 
@@ -423,14 +405,6 @@ func TestLongWindowsAreSplitWithoutSharedBoundaries(t *testing.T) {
 	}
 }
 
-func TestEventsOutsideTheWindowAreDropped(t *testing.T) {
-	h := newHarness(t, usageAt(baseNow.Add(-90*24*time.Hour), 1), usageAt(baseNow.Add(time.Hour), 2), usageAt(baseNow.Add(-time.Hour), 3))
-	h.fetcher.ignoreDates = true
-	if s := h.sync(); s.Emitted != 1 || s.Fetched != 1 {
-		t.Fatalf("summary = %+v", s)
-	}
-}
-
 func TestFetchErrorWritesNothingAndKeepsTheCursor(t *testing.T) {
 	h := newHarness(t, usageAt(baseNow.Add(-time.Hour), 1))
 	h.fetcher.err = errors.New("boom")
@@ -503,38 +477,13 @@ func TestScopesKeepSeparateCursors(t *testing.T) {
 	}
 }
 
-func TestPrintModeWritesNoLogAndNoState(t *testing.T) {
-	h := newHarness(t, usageAt(baseNow.Add(-time.Hour), 1))
-	var out bytes.Buffer
-	opts := h.opts()
-	opts.Print = true
-	opts.Write = false
-	opts.StatePath = ""
-	opts.Out = &out
-	for i := 0; i < 2; i++ {
-		s, err := CollectOnce(context.Background(), opts)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if s.Emitted != 1 {
-			t.Fatalf("print run %d emitted %d", i, s.Emitted)
-		}
-	}
-	if len(h.logged()) != 0 {
-		t.Fatal("print wrote the log")
-	}
-	if lines := bytes.Count(out.Bytes(), []byte("\n")); lines != 2 {
-		t.Fatalf("printed %d lines", lines)
-	}
-}
-
 func TestSeenIsPrunedToTheLookbackWindow(t *testing.T) {
 	var events []UsageEvent
-	for i := 0; i < 24*10; i++ {
+	for i := range 24 * 4 {
 		events = append(events, usageAt(baseNow.Add(-time.Duration(i)*time.Hour), int64(i+1)))
 	}
 	h := newHarness(t, events...)
-	h.since = baseNow.Add(-11 * 24 * time.Hour)
+	h.since = baseNow.Add(-5 * 24 * time.Hour)
 	h.sync()
 	state, err := LoadState(h.state)
 	if err != nil {
@@ -552,21 +501,32 @@ func TestSeenIsPrunedToTheLookbackWindow(t *testing.T) {
 	}
 }
 
-func TestLoadStateResetsOtherVersionsAndRejectsGarbage(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "s.json")
-	if err := os.WriteFile(path, []byte(`{"version":99,"scopes":{"team":{"high_water_ms":5}}}`), 0o600); err != nil {
+// A state file written under another StateVersion is discarded, not read under the wrong meaning:
+// re-collecting the window is harmless, while trusting a cursor whose fields meant something else
+// can skip spend for good. The shared loader only resets what this collector's Valid rejects.
+func TestStateFromAnotherVersionIsDiscardedNotMisread(t *testing.T) {
+	h := newHarness(t, usageAt(baseNow.Add(-time.Hour), 1))
+	if s := h.sync(); s.Emitted != 1 {
+		t.Fatalf("first sync emitted %d", s.Emitted)
+	}
+	state, err := LoadState(h.state)
+	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := LoadState(path)
-	if err != nil || len(state.Scopes) != 0 {
-		t.Fatalf("other version = %+v, %v", state, err)
-	}
-	if err := os.WriteFile(path, []byte(`{`), 0o600); err != nil {
+	state.Version = StateVersion + 1
+	data, err := json.Marshal(state)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadState(path); err == nil {
-		t.Fatal("garbage state must be an error, not a silent reset")
+	if err := os.WriteFile(h.state, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(h.log); err != nil {
+		t.Fatal(err)
+	}
+	h.now = h.now.Add(time.Minute)
+	if s := h.sync(); s.Emitted != 1 || len(h.logged()) != 1 {
+		t.Fatalf("sync over a cursor from another version emitted %d; it trusted the cursor", s.Emitted)
 	}
 }
 

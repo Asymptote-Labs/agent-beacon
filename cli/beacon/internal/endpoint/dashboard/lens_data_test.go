@@ -99,13 +99,6 @@ func TestBuildLensDataWithoutRulesLeavesFindingsUnscanned(t *testing.T) {
 	}
 }
 
-func TestBuildLensDataUnknownTrace(t *testing.T) {
-	path := lensFixture(t)
-	if _, ok, err := BuildLensData(path, "session:claude_code:nope", LensDataOptions{UserMode: true}); ok || err != nil {
-		t.Fatalf("BuildLensData = ok %v, err %v, want not found", ok, err)
-	}
-}
-
 // TestBuildLensDataReadsPastTheTraceViewPageLimit checks that a lens gets the whole trace, not the
 // first page the trace view would show.
 func TestBuildLensDataReadsPastTheTraceViewPageLimit(t *testing.T) {
@@ -122,7 +115,8 @@ func TestBuildLensDataReadsPastTheTraceViewPageLimit(t *testing.T) {
 	}
 	path := newTestLog(t, marshalEvents(t, events...))
 
-	data, ok, err := BuildLensData(path, "session:cursor:long", LensDataOptions{UserMode: true})
+	// An empty rules directory skips the scan, which is beside the point here.
+	data, ok, err := BuildLensData(path, "session:cursor:long", LensDataOptions{UserMode: true, RulesDir: t.TempDir()})
 	if err != nil || !ok {
 		t.Fatalf("BuildLensData = ok %v, err %v", ok, err)
 	}

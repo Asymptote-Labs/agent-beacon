@@ -39,11 +39,17 @@ var evalObserver func()
 // eval evaluates one compiled expression against one event, deriving fields first only for
 // rules that reference them.
 func (c *CompiledRule) eval(prog cel.Program, event asymptoteobserve.Event) (bool, error) {
-	if evalObserver != nil {
-		evalObserver()
-	}
 	if c.derived {
 		event = withDerivedFields(event)
+	}
+	return evalDerived(prog, event)
+}
+
+// evalDerived evaluates one compiled expression against an event whose derived fields the
+// caller has already filled, if the rule needs them.
+func evalDerived(prog cel.Program, event asymptoteobserve.Event) (bool, error) {
+	if evalObserver != nil {
+		evalObserver()
 	}
 	return evalMatch(prog, event)
 }

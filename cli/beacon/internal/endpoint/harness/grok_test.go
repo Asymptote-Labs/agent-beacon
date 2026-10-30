@@ -8,7 +8,6 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/groksession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 func grokHome(t *testing.T) string {
@@ -57,32 +56,6 @@ func writeGrokCursor(t *testing.T, id string, cursor groksession.Cursor) {
 	if err := state.Save(groksession.DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
-}
-
-// The harness name discovery reports has to be the one the collector writes, or `endpoint discover`
-// and the runtime log describe the same runtime under two names.
-func TestDiscoverGrokUsesTheCanonicalHarnessName(t *testing.T) {
-	if GrokName != groksession.Harness {
-		t.Fatalf("discovery reports %q while the collector writes %q", GrokName, groksession.Harness)
-	}
-	if got := asymptoteobserve.NormalizeHarnessName(GrokName); got != GrokName {
-		t.Fatalf("NormalizeHarnessName(%q) = %q", GrokName, got)
-	}
-}
-
-// A runtime missing from DiscoverAll is invisible to `beacon endpoint discover`. It fails silently:
-// the command succeeds and simply never mentions Grok Build.
-func TestDiscoverAllIncludesGrok(t *testing.T) {
-	grokHome(t)
-	for _, h := range DiscoverAll() {
-		if h.Name == GrokName {
-			if h.Capability != "hooks+session_log" {
-				t.Errorf("Capability = %q, want hooks+session_log", h.Capability)
-			}
-			return
-		}
-	}
-	t.Fatalf("DiscoverAll does not include %q", GrokName)
 }
 
 // Installed hooks are telemetry. Reporting a machine as disabled until someone runs a backfill

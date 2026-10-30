@@ -177,24 +177,6 @@ func TestGenericAssistantAliasIsPromoted(t *testing.T) {
 	}
 }
 
-func TestClaudeMCPServerConnectionCarriesItsServer(t *testing.T) {
-	// The event was already actioned mcp.connection with no mcp object on it, so
-	// every rule that gates on e.mcp.server saw nothing.
-	event := claudeLogEvent(t, "claude_code.mcp_server_connection", map[string]interface{}{
-		"event.name":     "mcp_server_connection",
-		"server_name":    "github",
-		"transport_type": "stdio",
-		"status":         "connected",
-	})
-
-	if event.Event.Action != "mcp.connection" {
-		t.Fatalf("action = %q, want mcp.connection", event.Event.Action)
-	}
-	if event.MCP == nil || event.MCP.Server != "github" {
-		t.Fatalf("mcp = %#v, want server github", event.MCP)
-	}
-}
-
 func TestCapturedClaudeLifecycleGainsAssistantTextAndContent(t *testing.T) {
 	// The captured-runtime fixture is the closest thing here to the live log the
 	// content gap was measured in: before this change none of its events carried

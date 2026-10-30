@@ -283,13 +283,13 @@ brews:
       bin.install "beacon-otelcol"
       bin.install "beacon-vector" if OS.linux?
     caveats: |
-      To configure local endpoint telemetry, run:
+      Set up Beacon (sign in, choose where telemetry goes, install):
         beacon endpoint install
-
-      To forward telemetry to the Asymptote dashboard (opt-in, revocable), run:
+      Already installed? Send this machine's sessions to Beacon Cloud
+      (opt-in, revocable), then open https://beacon.sh/dashboard:
         beacon endpoint connect
-      That needs no extra step: this formula installs its own Vector as
-      beacon-vector, so it never collides with a Vector you already have.
+      This formula installs its own Vector as beacon-vector, so it never
+      collides with a Vector you already have.
     test: |
       system "#{bin}/beacon", "version"
 
@@ -315,6 +315,8 @@ release:
 
     ### Homebrew (macOS/Linux)
     ```bash
+    brew update
+    brew trust asymptote-labs/tap
     brew tap asymptote-labs/tap
     brew install beacon
     ```

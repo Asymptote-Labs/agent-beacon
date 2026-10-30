@@ -143,7 +143,7 @@ The DCR uses Custom Text Logs because Beacon writes newline-delimited JSON. The 
 
 Azure Monitor Agent does not run on macOS, so Macs use the [Vector path](#vector-and-the-logs-ingestion-api). The signed macOS package installs Vector at `/opt/beacon/bin/vector`, just like the Linux packages.
 
-For Azure Monitor Agent on Windows or Linux, install AMA on the machine, add a custom text log source pointing at the Beacon runtime log (usually `/var/log/beacon-agent/runtime.jsonl`), apply the Beacon DCR transform, route output to `BeaconRuntime_CL`, and associate the DCR with the machine.
+For Azure Monitor Agent on Windows or Linux, install AMA on the machine, add a custom text log source pointing at the Beacon runtime log (usually `/var/log/beacon-agent/runtime.jsonl`), apply the Beacon DCR transform, route output to `BeaconRuntime_CL`, and associate the DCR with the machine. On an endpoint with [restricted log access](/security/restricted-log-access), AMA can read the log only if it runs as root (SYSTEM on Windows, its default) or its account is in the `beacon-log` group.
 
 ### Azure Monitor Agent outside Azure
 
@@ -203,7 +203,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now beacon-sentinel
 ```
 
-`DynamicUser` runs Vector as an unprivileged user. It can read the runtime log because Beacon writes it world-readable, and systemd reads `azure.env` as root before dropping privileges. `StateDirectory` creates `/var/lib/vector/beacon-sentinel`, where Vector keeps its read position.
+`DynamicUser` runs Vector as an unprivileged user. It can read the runtime log because the default shared log is world-readable, and systemd reads `azure.env` as root before dropping privileges. If the endpoint uses [restricted log access](/security/restricted-log-access), add `SupplementaryGroups=beacon-log` under `[Service]` so Vector can still read it. `StateDirectory` creates `/var/lib/vector/beacon-sentinel`, where Vector keeps its read position.
 
 The pack ships a client secret config. Vector also supports a certificate (`azure_credential_kind = "client_certificate_credential"` with `certificate_path`); see the [`azure_logs_ingestion` sink](https://vector.dev/docs/reference/configuration/sinks/azure_logs_ingestion/).
 

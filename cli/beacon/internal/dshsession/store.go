@@ -169,7 +169,7 @@ func (s *Store) readMeta(ref SessionRef) *SessionMeta {
 		case "session/title":
 			meta.Title = firstString(record.Data, "title")
 		case "user/message":
-			if meta.FirstPrompt == "" {
+			if meta.FirstPrompt == "" && userMessageFromPerson(record.Data) {
 				meta.FirstPrompt = strings.TrimSpace(userMessageText(record.Data))
 			}
 		case "request/header":

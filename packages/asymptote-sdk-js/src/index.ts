@@ -1,4 +1,5 @@
 import {
+  ProxyTracerProvider,
   SpanKind,
   SpanStatusCode,
   context,
@@ -206,7 +207,7 @@ export function initialize(options: InitializeOptions = {}): void {
 
   const provider = new NodeTracerProvider({
     resource: resourceFromAttributes({
-      [ATTR_SERVICE_NAME]: options.serviceName ?? process.env.OTEL_SERVICE_NAME ?? DEFAULT_SERVICE_NAME,
+      [ATTR_SERVICE_NAME]: options.serviceName ?? envValue("OTEL_SERVICE_NAME") ?? DEFAULT_SERVICE_NAME,
       "telemetry.sdk.name": "asymptote-sdk-js",
       "telemetry.sdk.version": SDK_VERSION,
       [ATTR_BEACON_ORIGIN]: "cloud",
@@ -228,10 +229,17 @@ export function initialize(options: InitializeOptions = {}): void {
     } catch (error) {
       instrumentations.forEach(i => i.disable());
       provider.shutdown().catch(() => {});
+      releaseGlobalTracer(provider);
       state = undefined;
       throw error;
     }
   }
+}
+
+// trace.disable() lets the next provider register globally; a host's provider is left alone.
+function releaseGlobalTracer(provider: NodeTracerProvider): void {
+  const global = trace.getTracerProvider();
+  if (global instanceof ProxyTracerProvider && global.getDelegate() === provider) trace.disable();
 }
 
 // changedOptions names the options in next, other than instrumentModules, that differ from the
@@ -393,6 +401,7 @@ export async function shutdown(): Promise<void> {
   try {
     await current.provider.shutdown();
   } finally {
+    releaseGlobalTracer(current.provider);
     // A stopped provider cannot resume exporting, even when its exporter rejects.
     if (state === current) state = undefined;
   }
@@ -403,9 +412,9 @@ export function isInitialized(): boolean {
 }
 
 export function resolveExporterConfig(options: InitializeOptions = {}): ResolvedExporterConfig {
-  const explicitEndpoint = options.otlpEndpoint ?? process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
-  const apiKey = options.apiKey ?? process.env.ASYMPTOTE_API_KEY;
-  const baseUrl = options.baseUrl ?? process.env.ASYMPTOTE_BASE_URL ?? DEFAULT_HOSTED_BASE_URL;
+  const explicitEndpoint = options.otlpEndpoint ?? envValue("OTEL_EXPORTER_OTLP_ENDPOINT");
+  const apiKey = options.apiKey ?? envValue("ASYMPTOTE_API_KEY");
+  const baseUrl = options.baseUrl ?? envValue("ASYMPTOTE_BASE_URL") ?? DEFAULT_HOSTED_BASE_URL;
   const skipDefault = !!(options.disableDefaultExporter || options.spanExporter);
   const mode: ExportMode = skipDefault ? "custom" : explicitEndpoint ? "otlp" : apiKey ? "hosted" : "custom";
 
@@ -421,6 +430,13 @@ export function resolveExporterConfig(options: InitializeOptions = {}): Resolved
     headers.authorization = `Bearer ${apiKey}`;
   }
   return { observeUrl, headers, mode };
+}
+
+// An empty variable is unset, as the OpenTelemetry environment spec has it: compose files and CI
+// templates often declare a variable with no value.
+function envValue(name: string): string | undefined {
+  const value = process.env[name];
+  return value === undefined || value.trim() === "" ? undefined : value;
 }
 
 // The Asymptote API key is a credential for Asymptote's own ingest, so it is
@@ -481,15 +497,14 @@ function makeSpanProcessor(exporter: SpanExporter, options: InitializeOptions): 
 }
 
 function observeURL(endpoint: string): string {
-  let end = endpoint.length;
-  while (end > 0 && endpoint.charCodeAt(end - 1) === 47) {
+  const url = new URL(endpoint);
+  let end = url.pathname.length;
+  while (end > 0 && url.pathname.charCodeAt(end - 1) === 47) {
     end -= 1;
   }
-  const trimmed = endpoint.slice(0, end);
-  if (trimmed.endsWith(DEFAULT_OBSERVE_PATH)) {
-    return trimmed;
-  }
-  return `${trimmed}${DEFAULT_OBSERVE_PATH}`;
+  const trimmed = url.pathname.slice(0, end);
+  url.pathname = trimmed.endsWith(DEFAULT_OBSERVE_PATH) ? trimmed : `${trimmed}${DEFAULT_OBSERVE_PATH}`;
+  return url.toString();
 }
 
 function readSDKVersion(): string {
@@ -515,7 +530,7 @@ function patchOpenLLMetryModules(modules: InstrumentModules): void {
 
 function manuallyInstrumentModules(instrumentations: Instrumentation[], modules: InstrumentModules): void {
   const openAIModule = modules.OpenAI ?? modules.openAI ?? modules.openai;
-  const anthropicModule = modules.Anthropic ?? modules.anthropic;
+  const anthropicModule = anthropicModuleShape(modules.Anthropic ?? modules.anthropic);
   for (const instrumentation of instrumentations) {
     const maybeManual = instrumentation as Instrumentation & {
       manuallyInstrument?: (moduleValue: unknown) => void;
@@ -528,6 +543,15 @@ function manuallyInstrumentModules(instrumentations: Instrumentation[], modules:
       maybeManual.manuallyInstrument?.(anthropicModule);
     }
   }
+}
+
+// The Anthropic instrumentation needs the module namespace (`module.Anthropic.Messages`, and
+// `module.APIPromise` for streams); the default-export client class carries neither.
+function anthropicModuleShape(moduleValue: unknown): unknown {
+  if (typeof moduleValue === "function" && "Messages" in moduleValue) {
+    throw new TypeError('instrumentModules.Anthropic must be the module namespace: import * as Anthropic from "@anthropic-ai/sdk"');
+  }
+  return moduleValue;
 }
 
 function patchClaudeAgentSDK(moduleValue: unknown): void {
@@ -562,23 +586,74 @@ function finishResult<T>(result: T, span: Span, options?: ObserveOptions): unkno
       },
     );
   }
-  if (isAsyncIterable(result)) {
+  if (isAsyncIterator(result)) {
     // A stream such as the Claude Agent SDK's Query carries controls (interrupt(), setModel(), ...)
     // beside its iterator. Iteration goes through the traced iterator; every other read goes to
     // the original stream, with functions bound to it so private-field methods keep working, and
     // cached so repeated reads return the same function. The proxy targets the wrapper rather
     // than the original, whose read-only properties would make a binding get trap invalid.
     const iterator = finishAsyncIterable(result, span);
+    // return() or throw() on an unstarted async generator settles it without running its finally
+    // block, so the span would never end and an already-created query (which owns the Claude CLI
+    // process) would never be closed. Do both here.
+    let started = false;
+    async function closeUnstarted(settled: Promise<IteratorResult<unknown>>) {
+      const close = (result as Partial<AsyncIterator<unknown>>).return;
+      let outcome: IteratorResult<unknown>;
+      try {
+        outcome = await settled;
+      } catch (error) {
+        // The consumer's error takes precedence over a cleanup failure.
+        try {
+          if (typeof close === "function") await close.call(result);
+        } catch {
+          // Cleanup can throw before returning its promise, or reject afterward.
+        }
+        endSpanWithError(span, error);
+        throw error;
+      }
+      try {
+        if (typeof close === "function") await close.call(result);
+      } catch (error) {
+        endSpanWithError(span, error);
+        throw error;
+      }
+      span.end();
+      return outcome;
+    }
     const methods = {
-      next: iterator.next.bind(iterator),
-      return: iterator.return.bind(iterator),
-      throw: iterator.throw.bind(iterator),
+      next(value?: unknown) {
+        started = true;
+        return iterator.next(value);
+      },
+      return(value?: unknown) {
+        if (started) return iterator.return(value);
+        started = true;
+        return closeUnstarted(iterator.return(value));
+      },
+      throw(error?: unknown) {
+        if (started) return iterator.throw(error);
+        started = true;
+        return closeUnstarted(iterator.throw(error));
+      },
+    };
+    const spanContext = trace.setSpan(context.active(), span);
+    const tracedMethods = {
+      next(...args: [] | [unknown]) {
+        return context.with(spanContext, () => methods.next(...args));
+      },
+      return(value?: unknown) {
+        return context.with(spanContext, () => methods.return(value));
+      },
+      throw(error?: unknown) {
+        return context.with(spanContext, () => methods.throw(error));
+      },
     };
     const controls = new Map<Function, Function>();
     const stream: AsyncGenerator<unknown> = new Proxy(iterator, {
       get(_target, key) {
         if (key === Symbol.asyncIterator) return iteratorForStream;
-        if (key === "next" || key === "return" || key === "throw") return methods[key];
+        if (key === "next" || key === "return" || key === "throw") return tracedMethods[key];
         const value = Reflect.get(result, key, result);
         if (typeof value !== "function" || key === "constructor") return value;
         let control = controls.get(value);
@@ -629,8 +704,17 @@ function isPromiseLike(value: unknown): value is Promise<unknown> {
   return Boolean(value && typeof (value as Promise<unknown>).then === "function");
 }
 
-function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
-  return Boolean(value && typeof (value as AsyncIterable<unknown>)[Symbol.asyncIterator] === "function");
+// Only an async iterator, such as an async generator or the Claude Agent SDK's Query, is traced
+// through consumption: its next() is the only way to read it. Other async iterables, such as the
+// Anthropic SDK's Stream, ReadableStream or a Node Readable, can also be read through their own
+// APIs (toReadableStream(), getReader(), pipe(), events), which a wrapper never sees, so wrapping
+// them would leave the span open forever and break instanceof. Those are returned as values.
+function isAsyncIterator(value: unknown): value is AsyncIterable<unknown> & AsyncIterator<unknown> {
+  return Boolean(
+    value &&
+      typeof (value as AsyncIterable<unknown>)[Symbol.asyncIterator] === "function" &&
+      typeof (value as AsyncIterator<unknown>).next === "function",
+  );
 }
 
 function firstStringArg(args: unknown[]): string {

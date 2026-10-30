@@ -12,6 +12,7 @@ Install Beacon on macOS, Windows, or Linux, configure the local endpoint telemet
     Install Beacon with Homebrew:
 
     ```bash
+    brew update
     brew trust asymptote-labs/tap
     brew tap asymptote-labs/tap
     brew install beacon
@@ -100,8 +101,8 @@ Use the standard Homebrew upgrade flow, then reapply endpoint configuration if n
 
 ```bash title="Upgrade Beacon"
 beacon version check
-brew trust asymptote-labs/tap
 brew update
+brew trust asymptote-labs/tap
 brew upgrade beacon
 beacon endpoint repair
 ```

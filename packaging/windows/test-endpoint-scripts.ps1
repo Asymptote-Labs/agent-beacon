@@ -20,7 +20,7 @@ function Fail {
     $script:failures++
 }
 
-$scripts = @('install-endpoint.ps1', 'uninstall-endpoint.ps1', 'build-msi.ps1', 'sign-authenticode.ps1', 'assert-authenticode.ps1')
+$scripts = @('install-endpoint.ps1', 'uninstall-endpoint.ps1', 'build-msi.ps1', 'smoke-restricted-log.ps1', 'sign-authenticode.ps1', 'assert-authenticode.ps1')
 foreach ($name in $scripts) {
     $path = Join-Path $scriptDir $name
     if (-not (Test-Path -LiteralPath $path)) {
@@ -46,6 +46,10 @@ foreach ($needle in @('endpoint', 'install', '--system', 'user-config', 'repair-
     if ($install -notmatch [regex]::Escape($needle)) {
         Fail "install-endpoint.ps1 no longer references '$needle'"
     }
+}
+# BEACON_LOG_ACCESS is the one contract for the log access mode across all three platforms' scripts.
+if ($install -notmatch "BEACON_LOG_ACCESS" -or $install -notmatch [regex]::Escape("'--log-access'")) {
+    Fail "install-endpoint.ps1 no longer passes BEACON_LOG_ACCESS on as --log-access"
 }
 # The step whose absence made the Linux package produce a healthy collector that captured nothing.
 if ($install -notmatch 'repair-installed') {

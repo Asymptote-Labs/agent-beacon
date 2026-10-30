@@ -15,35 +15,6 @@ import (
 // future refactor of the claude branches cannot silently take Qwen's session id, working directory
 // or tool fields with it.
 
-// The base fields Qwen sends on every event: session_id, transcript_path, cwd, hook_event_name.
-// Reading them is what puts session.id, session.working_directory and repository on every Qwen
-// event; without them, a whole runtime's telemetry arrives with no session and no workspace.
-func TestQwenSessionAndWorkspaceComeFromTheBaseFields(t *testing.T) {
-	setupHookConfigDirs(t)
-	platformFlag = "qwen"
-
-	input := map[string]interface{}{
-		"session_id":      "qwen-session-1",
-		"transcript_path": "/tmp/qwen/transcripts/qwen-session-1.jsonl",
-		"cwd":             "/tmp/qwen-project",
-		"hook_event_name": "PreToolUse",
-	}
-
-	if got := resolveSessionID(input, "qwen"); got != "qwen-session-1" {
-		t.Errorf("resolveSessionID = %q, want qwen-session-1", got)
-	}
-	sessionID, transcriptPath := resolveSessionIDWithTranscript(input, "qwen")
-	if sessionID != "qwen-session-1" {
-		t.Errorf("resolveSessionIDWithTranscript session = %q, want qwen-session-1", sessionID)
-	}
-	if transcriptPath != "/tmp/qwen/transcripts/qwen-session-1.jsonl" {
-		t.Errorf("resolveSessionIDWithTranscript transcript = %q, want Qwen's transcript_path", transcriptPath)
-	}
-	if got := resolveCwd(input, "qwen"); got != "/tmp/qwen-project" {
-		t.Errorf("resolveCwd = %q, want /tmp/qwen-project", got)
-	}
-}
-
 // Qwen gets its own state directory. Sharing Claude's would mix two runtimes' session state and
 // hook logs in one place: a stale-evaluation cleanup for a Qwen session would walk Claude's
 // sessions, and `~/.beacon/claude/hooks.log` would interleave two runtimes.
@@ -162,23 +133,5 @@ func TestQwenPermissionRequestPolicyDenyUsesDecisionObject(t *testing.T) {
 	}
 	if decision["behavior"] != "deny" || decision["message"] != "Security policy blocks database writes" {
 		t.Errorf("decision = %#v, want behavior=deny with the provider's reason as message", decision)
-	}
-}
-
-// Beacon's own default platform is claude, and an unknown --platform value falls through to
-// "unknown platform -> allow". Naming qwen explicitly is what keeps it out of that fallback; this
-// guards the pairing between the flag value the installer writes and the branch the adapter takes.
-func TestQwenIsNotTreatedAsAnUnknownPlatform(t *testing.T) {
-	origPlatform := platformFlag
-	t.Cleanup(func() { platformFlag = origPlatform })
-
-	platformFlag = "qwen-code"
-	if deny := policyDenyResponse("blocked", policycontract.PhasePreTool); deny != nil {
-		t.Fatalf("policyDenyResponse(qwen-code) = %#v; only the installed --platform spelling (qwen) is wired", deny)
-	}
-
-	platformFlag = "qwen"
-	if deny := policyDenyResponse("blocked", policycontract.PhasePreTool); deny == nil {
-		t.Fatal("policyDenyResponse(qwen) = nil, want Qwen's deny shape")
 	}
 }

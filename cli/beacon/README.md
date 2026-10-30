@@ -674,10 +674,14 @@ the model. The one exception is the optional policy seam, whose deny is exit cod
 The DeepSeek Harness integration is the one install that takes two files,
 because `dsh` reads no hooks file until something mounts a reader at it: the
 harness composes itself from a plugin tree, and `@deepseek-ai/dsh-hooks-claude-code`
--- the Claude Code hook bridge DeepSeek ships as a dependency of the CLI -- is not
+-- the Claude Code hook bridge DeepSeek publishes for every dsh release -- is not
 in the default tree. So Beacon writes `$DSH_HOME/beacon-endpoint-hooks.json`, a
 hooks file it owns outright, and adds one row to `$DSH_HOME/cordis.patch.yml`
-mounting the bridge at it. `$DSH_HOME` defaults to `~/.dsh`. The home-level patch
+mounting the bridge at it. `$DSH_HOME` defaults to `~/.dsh`. The bridge does not
+ship with the CLI, so it must be installed into each profile at exactly the dsh
+version (`dsh plugin --profile <name> add @deepseek-ai/dsh-hooks-claude-code@<v>
+@deepseek-ai/dsh-hook-protocol@<v>`), and install refuses when nothing can load
+it. The home-level patch
 layer applies over every profile, so one install covers the CLI, Web, ACP and SDK
 surfaces; there is no project scope, because the bridge's `configPath` is
 process-level and a repository has nowhere to mount from, so `--level project` is

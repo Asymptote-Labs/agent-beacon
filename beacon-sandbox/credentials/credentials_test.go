@@ -110,26 +110,16 @@ func TestDescribeNeverLeaksTheValue(t *testing.T) {
 
 func TestKeyCommandFailuresAreDiagnosable(t *testing.T) {
 	cases := map[string]string{
-		"nonzero exit":    "exit 3",
-		"no output":       "true",
-		"multiline":       "printf 'line1\\nline2\\n'",
+		"nonzero exit": "exit 3",
+		"no output":    "true",
+		"multiline":    "printf 'line1\\nline2\\n'",
+		// Whitespace trims to an empty key; accepting it would send a blank credential to a paid run.
 		"only whitespace": "printf '   '",
 	}
 	for name, cmd := range cases {
 		if _, err := Resolve(Options{KeyCommand: cmd}); err == nil {
 			t.Errorf("%s: expected an error from %q", name, cmd)
 		}
-	}
-}
-
-// A helper that prints the key with a trailing newline is the normal case, not an error.
-func TestKeyCommandTrimsTrailingNewline(t *testing.T) {
-	got, err := Resolve(Options{KeyCommand: "printf 'sk-ant-clean\\n'"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Value != "sk-ant-clean" {
-		t.Errorf("value = %q, want the trimmed key", got.Value)
 	}
 }
 

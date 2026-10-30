@@ -12,7 +12,7 @@ import (
 // requiredProcessors are the processors ConfigYAML puts in every pipeline that a collector older
 // than this CLI does not have. A collector refuses a whole config that names a component it does
 // not know, so one of these missing stops capture for every runtime, not just the one it serves.
-var requiredProcessors = []string{"claude_api_body"}
+var requiredProcessors = []string{"claude_api_body", "beacon_privacy"}
 
 // listComponents runs `beacon-otelcol components`, which prints what the binary was built with.
 var listComponents = func(ctx context.Context, binary string) ([]byte, error) {
@@ -29,7 +29,10 @@ var listComponents = func(ctx context.Context, binary string) ([]byte, error) {
 // A binary that cannot list its components -- a stand-in, or a build that does not support the
 // command -- is not refused: there is nothing to judge it on, and it fails at start as it would
 // have before.
-func CheckComponents(binary string) error {
+//
+// extensions names the extensions the config will use beyond health_check -- beacon_ingest, in the
+// restricted log access mode -- which are refused the same way.
+func CheckComponents(binary string, extensions ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	out, err := listComponents(ctx, binary)
@@ -40,6 +43,9 @@ func CheckComponents(binary string) error {
 		Processors []struct {
 			Name string `yaml:"name"`
 		} `yaml:"processors"`
+		Extensions []struct {
+			Name string `yaml:"name"`
+		} `yaml:"extensions"`
 	}
 	if yaml.Unmarshal(out, &listed) != nil || len(listed.Processors) == 0 {
 		return nil
@@ -51,6 +57,16 @@ func CheckComponents(binary string) error {
 	for _, name := range requiredProcessors {
 		if !have[name] {
 			return fmt.Errorf("collector %s is older than this beacon CLI: it has no %q processor, which the collector config needs; "+
+				"use the %s from the same Beacon release, or pass --collector with one", binary, name, BinaryName)
+		}
+	}
+	haveExtension := map[string]bool{}
+	for _, extension := range listed.Extensions {
+		haveExtension[extension.Name] = true
+	}
+	for _, name := range extensions {
+		if !haveExtension[name] {
+			return fmt.Errorf("collector %s is older than this beacon CLI: it has no %q extension, which the restricted log access mode needs; "+
 				"use the %s from the same Beacon release, or pass --collector with one", binary, name, BinaryName)
 		}
 	}

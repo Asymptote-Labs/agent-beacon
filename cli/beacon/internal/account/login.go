@@ -39,7 +39,8 @@ const (
 	// approves the sign-in only when the permissions it showed match these.
 	ScopeMCPTokenCreate = "mcp:token:create"
 	// ScopeTracesWrite lets the account token upload shared traces (`beacon share`) to
-	// /v1/traces on beacon.sh. A session from an older `beacon login` lacks it.
+	// /v1/traces on the sign-in's API (api.beacon.sh for a beacon.sh sign-in; see
+	// ShareAPIBaseURL). A session from an older `beacon login` lacks it.
 	ScopeTracesWrite = "traces:write"
 )
 

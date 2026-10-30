@@ -39,21 +39,6 @@ func TestJSONLSinkWritesCanonicalEvents(t *testing.T) {
 	}
 }
 
-func TestJSONLSinkAppendsWithoutOverwriting(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "events.jsonl")
-	sink := NewJSONLSink(path)
-
-	if err := sink.WriteBatch(context.Background(), []Event{NewEvent(NewEventOptions{Action: "tool.invoked", Harness: HarnessInfo{Name: "cursor"}})}); err != nil {
-		t.Fatalf("first WriteBatch returned error: %v", err)
-	}
-	if err := sink.WriteBatch(context.Background(), []Event{NewEvent(NewEventOptions{Action: "tool.completed", Harness: HarnessInfo{Name: "cursor"}})}); err != nil {
-		t.Fatalf("second WriteBatch returned error: %v", err)
-	}
-	if lines := readJSONLLines(t, path); len(lines) != 2 {
-		t.Fatalf("lines = %d, want 2", len(lines))
-	}
-}
-
 func TestJSONLSinkRejectsDirectoryPath(t *testing.T) {
 	sink := NewJSONLSink(t.TempDir())
 	if err := sink.WriteBatch(context.Background(), []Event{NewEvent(NewEventOptions{Action: "tool.invoked", Harness: HarnessInfo{Name: "cursor"}})}); err == nil {

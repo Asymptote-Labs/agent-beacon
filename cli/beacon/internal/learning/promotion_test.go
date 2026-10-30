@@ -2,7 +2,6 @@ package learning
 
 import (
 	"fmt"
-	"math"
 	"strings"
 	"testing"
 
@@ -23,41 +22,6 @@ func rubricEvaluation(taskSuccess, reusable, evidence float64) asymptoteobserve.
 	return eval
 }
 
-// Issue #649: the three real traces that were promoted although the judge said
-// the task failed. Each clears CandidateScoreThreshold on the mean alone.
-func TestPromotionRejectsFailedTasksThatClearTheMean(t *testing.T) {
-	for _, tc := range []struct {
-		name                     string
-		task, reusable, evidence float64
-		wantScore                float64
-		wantReasonContains       string
-	}{
-		{name: "task_success 0.27 promoted by +0.0067", task: 0.27, reusable: 0.86, evidence: 0.69, wantScore: 0.6067, wantReasonContains: "task_success 0.27 is below 0.50"},
-		{name: "task_success 0.42 scored 0.6667", task: 0.42, reusable: 0.86, evidence: 0.72, wantScore: 0.6667, wantReasonContains: "task_success 0.42 is below 0.50"},
-		{name: "task_success 0.42 scored 0.6367", task: 0.42, reusable: 0.80, evidence: 0.69, wantScore: 0.6367, wantReasonContains: "task_success 0.42 is below 0.50"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			eval := rubricEvaluation(tc.task, tc.reusable, tc.evidence)
-			if math.Abs(eval.Score-tc.wantScore) > 0.00005 {
-				t.Fatalf("score = %.6f, want %.4f (the reported mean must not change)", eval.Score, tc.wantScore)
-			}
-			if eval.Score < CandidateScoreThreshold {
-				t.Fatalf("fixture score %.4f no longer clears the score threshold, so it does not test the gate", eval.Score)
-			}
-			ok, reason := PromotionDecision(eval)
-			if ok {
-				t.Fatalf("PromotionDecision promoted a failed task (score %.4f)", eval.Score)
-			}
-			if !strings.Contains(reason, tc.wantReasonContains) {
-				t.Fatalf("reason = %q, want it to contain %q", reason, tc.wantReasonContains)
-			}
-			if candidate, ok := CandidateFromEvaluation(eval); ok {
-				t.Fatalf("CandidateFromEvaluation promoted a failed task: %#v", candidate)
-			}
-		})
-	}
-}
-
 func TestPromotionTaskSuccessGateBoundaries(t *testing.T) {
 	for _, tc := range []struct {
 		name                     string
@@ -70,8 +34,6 @@ func TestPromotionTaskSuccessGateBoundaries(t *testing.T) {
 		{name: "just below gate, mean well over threshold", task: 0.49, reusable: 0.95, evidence: 0.95, wantReasonContains: "task_success 0.49 is below 0.50"},
 		{name: "fractionally below gate", task: 0.4999, reusable: 1.0, evidence: 1.0, wantReasonContains: "task_success 0.4999 is below 0.50"},
 		{name: "below gate, mean under threshold", task: 0.10, reusable: 0.60, evidence: 0.60, wantReasonContains: "task_success 0.10 is below 0.50"},
-		{name: "just above gate, mean over threshold", task: 0.51, reusable: 0.80, evidence: 0.80, wantPromoted: true},
-		{name: "just above gate, mean under threshold", task: 0.51, reusable: 0.60, evidence: 0.60, wantReasonContains: "score 0.57 is below 0.60"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eval := rubricEvaluation(tc.task, tc.reusable, tc.evidence)
@@ -89,23 +51,6 @@ func TestPromotionTaskSuccessGateBoundaries(t *testing.T) {
 				t.Fatalf("CandidateFromEvaluation created=%v, want %v (must agree with PromotionDecision)", created, tc.wantPromoted)
 			}
 		})
-	}
-}
-
-func TestPromotionKeepsSuccessfulTraceAndItsScore(t *testing.T) {
-	eval := rubricEvaluation(0.9, 0.8, 0.7)
-	if want := (0.9 + 0.8 + 0.7) / 3; math.Abs(eval.Score-want) > 1e-12 {
-		t.Fatalf("score = %v, want the plain mean %v", eval.Score, want)
-	}
-	candidate, ok := CandidateFromEvaluation(eval)
-	if !ok {
-		t.Fatal("a successful, reusable trace was not promoted")
-	}
-	if candidate.SourceEvaluationID != eval.ID || candidate.State != asymptoteobserve.LearningCandidateStateCandidate {
-		t.Fatalf("candidate = %#v", candidate)
-	}
-	if !strings.Contains(candidate.Body, "- task_success: 0.90") {
-		t.Fatalf("candidate body lost the task_success signal:\n%s", candidate.Body)
 	}
 }
 

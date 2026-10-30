@@ -58,6 +58,7 @@ Every workflow publishes the same thing: a `beacon.trace.v1` trace built from th
 - Paths under the session's directory are written relative to it, and your home directory becomes `~`.
 - The working directory and repository path are left out. The project is named by the repository's or directory's name, and the remote is sent without credentials.
 - Cost is sent only when the runtime reported one, never a list-price estimate.
+- On a machine that forwards to Beacon Cloud in Metadata-only mode, prompts, answers, reasoning, tool arguments and output, diffs and the derived title are left out, as forwarding leaves them out. See [Metadata-only endpoints](/cli/share#metadata-only-endpoints).
 
 beacon.sh redacts every string again on its side. Redaction catches common credential shapes, not everything sensitive, so run `beacon share --print` to read exactly what would be uploaded before sharing a session that touched secrets. [`beacon share`](/cli/share#what-is-uploaded) has the full details.
 

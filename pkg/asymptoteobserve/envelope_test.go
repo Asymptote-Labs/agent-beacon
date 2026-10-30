@@ -5,47 +5,23 @@ import (
 	"testing"
 )
 
-func TestNewEnvelopeSetsWireIdentity(t *testing.T) {
-	envelope := NewEnvelope(OriginCI, HarnessInfo{Name: "claude"}, map[string]interface{}{"event": "raw"})
-	envelope.Session = &SessionInfo{ID: "session-1"}
-	envelope.Run = &RunInfo{Provider: "github_actions", RunID: "123"}
-
-	if envelope.Vendor != Vendor || envelope.SchemaVersion != SchemaVersion {
-		t.Fatalf("unexpected wire identity: %#v", envelope)
+func TestEnvelopeValidate(t *testing.T) {
+	valid := NewEnvelope(OriginCI, HarnessInfo{Name: "claude"}, map[string]interface{}{"event": "raw"})
+	valid.Session = &SessionInfo{ID: "session-1"}
+	valid.Run = &RunInfo{Provider: "github_actions", RunID: "123"}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("Validate returned error for a NewEnvelope: %v", err)
 	}
-	if err := envelope.Validate(); err != nil {
-		t.Fatalf("Validate returned error: %v", err)
-	}
-}
 
-func TestEnvelopeValidateRejectsInvalidOrigin(t *testing.T) {
-	envelope := NewEnvelope("lambda", HarnessInfo{Name: "claude"}, nil)
-	if err := envelope.Validate(); err == nil {
-		t.Fatal("expected invalid origin error")
-	}
-}
-
-func TestEnvelopeValidateRejectsMissingFieldsDirectly(t *testing.T) {
 	tests := []struct {
 		name     string
 		envelope Envelope
 		want     string
 	}{
-		{
-			name:     "vendor",
-			envelope: Envelope{Vendor: "other", SchemaVersion: SchemaVersion, Origin: OriginLocal, Harness: HarnessInfo{Name: "claude"}},
-			want:     "vendor must be beacon",
-		},
-		{
-			name:     "schema",
-			envelope: Envelope{Vendor: Vendor, Origin: OriginLocal, Harness: HarnessInfo{Name: "claude"}},
-			want:     "schema_version is required",
-		},
-		{
-			name:     "harness",
-			envelope: Envelope{Vendor: Vendor, SchemaVersion: SchemaVersion, Origin: OriginLocal},
-			want:     "harness.name is required",
-		},
+		{"origin", NewEnvelope("lambda", HarnessInfo{Name: "claude"}, nil), "origin"},
+		{"vendor", Envelope{Vendor: "other", SchemaVersion: SchemaVersion, Origin: OriginLocal, Harness: HarnessInfo{Name: "claude"}}, "vendor must be beacon"},
+		{"schema", Envelope{Vendor: Vendor, Origin: OriginLocal, Harness: HarnessInfo{Name: "claude"}}, "schema_version is required"},
+		{"harness", Envelope{Vendor: Vendor, SchemaVersion: SchemaVersion, Origin: OriginLocal}, "harness.name is required"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

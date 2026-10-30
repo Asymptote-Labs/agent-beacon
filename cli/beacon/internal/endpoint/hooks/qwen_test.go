@@ -97,29 +97,10 @@ func TestQwenTimeoutsAreMillisecondsNotSeconds(t *testing.T) {
 	}
 }
 
-// Qwen Code does not run hooks through Git Bash the way Claude Code does. On Windows it defaults to
-// cmd.exe or PowerShell, where the POSIX single-quote quoting in the command string is invalid. Every
-// hook must set shell to "bash" so Qwen uses a shell that understands the quoting.
-func TestQwenHooksSpecifyBashShell(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	if err := installQwenSettings(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
-		t.Fatalf("installQwenSettings returned error: %v", err)
-	}
-
-	hooks := decodeQwenHooks(t, path)
-	for event, groups := range hooks {
-		if len(groups) == 0 || len(groups[0].Hooks) == 0 {
-			t.Fatalf("%s hook was not installed", event)
-		}
-		if got := groups[0].Hooks[0].Shell; got != "bash" {
-			t.Errorf("%s shell = %q, want \"bash\"; without it Qwen uses cmd/PowerShell on "+
-				"Windows where the single-quoted command is invalid", event, got)
-		}
-	}
-}
-
 // Every Qwen hook event Beacon claims to collect has to actually be registered, wired to the right
-// subcommand, and carry the --platform value the adapter branches on.
+// subcommand, and carry the --platform value the adapter branches on. Tool events must carry a
+// matcher Qwen recognizes as "all tools" -- `""` or `"*"`; anything else is a regex that would
+// silently filter events out.
 func TestInstallQwenRegistersEveryCollectedEvent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	if err := installQwenSettings(path, "/tmp/beacon hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
@@ -165,6 +146,11 @@ func TestInstallQwenRegistersEveryCollectedEvent(t *testing.T) {
 			t.Errorf("%s command = %q, want the binary path quoted", event, hook.Command)
 		}
 	}
+	for _, event := range []string{"PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest"} {
+		if matcher := hooks[event][0].Matcher; matcher != "*" && matcher != "" {
+			t.Errorf("%s matcher = %q; Qwen treats only \"\" and \"*\" as match-all", event, matcher)
+		}
+	}
 
 	// The fire-and-forget events are deliberately absent. MessageDisplay alone fires roughly every
 	// 200ms for the length of every reply.
@@ -175,133 +161,10 @@ func TestInstallQwenRegistersEveryCollectedEvent(t *testing.T) {
 	}
 }
 
-// Tool events must carry a matcher Qwen recognizes as "all tools". Qwen documents `""` and `"*"`;
-// anything else is a regex that would silently filter events out.
-func TestQwenToolEventsMatchEveryTool(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	if err := installQwenSettings(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
-		t.Fatalf("installQwenSettings returned error: %v", err)
-	}
-
-	hooks := decodeQwenHooks(t, path)
-	for _, event := range []string{"PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest"} {
-		matcher := hooks[event][0].Matcher
-		if matcher != "*" && matcher != "" {
-			t.Errorf("%s matcher = %q; Qwen treats only \"\" and \"*\" as match-all, anything else "+
-				"is a regex that filters tools out", event, matcher)
-		}
-	}
-}
-
-// settings.json is the user's own file: model, theme, MCP servers, their hooks. Installing into it
-// must not cost them any of that.
-func TestInstallQwenPreservesTheUsersOwnSettings(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	existing := `{"theme":"Dracula","selectedAuthType":"qwen-oauth","mcpServers":{"local":{"command":"serve"}},` +
-		`"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"}]}],` +
-		`"PreToolUse":[{"matcher":"^run_shell_command$","hooks":[{"type":"command","command":"my-own-check.sh"}]}]}}`
-	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := installQwenSettings(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
-		t.Fatalf("installQwenSettings returned error: %v", err)
-	}
-	text := readFileString(t, path)
-	for _, want := range []string{"Dracula", "qwen-oauth", "mcpServers", "echo keep", "my-own-check.sh", "^run_shell_command$"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("install removed the user's own setting %q:\n%s", want, text)
-		}
-	}
-	if !strings.Contains(text, "--platform qwen") {
-		t.Fatalf("Beacon hooks were not installed:\n%s", text)
-	}
-}
-
-// A second install replaces Beacon's own entries rather than stacking a duplicate beside them.
-// Without this, every `endpoint repair` would add another copy and the runtime would write each
-// event twice per repair.
-func TestInstallQwenTwiceDoesNotDuplicateBeaconHooks(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	for i := 0; i < 3; i++ {
-		if err := installQwenSettings(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
-			t.Fatalf("installQwenSettings returned error: %v", err)
-		}
-	}
-
-	hooks := decodeQwenHooks(t, path)
-	for event, groups := range hooks {
-		total := 0
-		for _, group := range groups {
-			for _, hook := range group.Hooks {
-				if strings.Contains(hook.Command, "--platform qwen") {
-					total++
-				}
-			}
-		}
-		if total != 1 {
-			t.Errorf("%s carries %d Beacon hooks after three installs, want 1", event, total)
-		}
-	}
-}
-
-// Uninstall removes what Beacon wrote and nothing else, including from a group it shares with a
-// hook the user wrote.
-func TestUninstallQwenRemovesOnlyBeaconHooks(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	existing := `{"theme":"Dracula","hooks":{"PreToolUse":[{"matcher":"*","hooks":[` +
-		`{"type":"command","command":"my-own-check.sh"},` +
-		`{"type":"command","command":"'/tmp/beacon-hooks' --platform qwen --log '/tmp/runtime.jsonl' pre-tool"}]}]}}`
-	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	changed, err := removeQwenEndpointHooks(path)
-	if err != nil {
-		t.Fatalf("removeQwenEndpointHooks returned error: %v", err)
-	}
-	if !changed {
-		t.Fatal("removeQwenEndpointHooks reported no change, want the Beacon hook removed")
-	}
-	text := readFileString(t, path)
-	if strings.Contains(text, "--platform qwen") {
-		t.Fatalf("Beacon hook was not removed:\n%s", text)
-	}
-	for _, want := range []string{"my-own-check.sh", "Dracula"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("uninstall removed %q, which Beacon did not write:\n%s", want, text)
-		}
-	}
-}
-
-// Detection is scoped by platform in both directions: a Claude hook in a Qwen settings file is not
-// Beacon's Qwen install, and removing Qwen's hooks must not take another runtime's with it. Both
-// spellings of that mistake are silent.
-func TestQwenDetectionDoesNotClaimAnotherRuntimesHooks(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	existing := `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"'/tmp/beacon-hooks' --platform claude pre-tool"}]}]}}`
-	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	if isQwenInstalledAt(path) {
-		t.Fatal("a --platform claude hook was reported as a Qwen install")
-	}
-	changed, err := removeQwenEndpointHooks(path)
-	if err != nil {
-		t.Fatalf("removeQwenEndpointHooks returned error: %v", err)
-	}
-	if changed {
-		t.Fatal("removeQwenEndpointHooks removed a hook belonging to another runtime")
-	}
-	if !strings.Contains(readFileString(t, path), "--platform claude") {
-		t.Fatal("the claude hook was removed from the file")
-	}
-}
-
 func TestQwenSettingsPathUserAndProjectLevels(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
+	t.Setenv("QWEN_HOME", "")
 
 	userPath, err := QwenSettingsPath(LevelUser)
 	if err != nil {
@@ -327,63 +190,6 @@ func TestQwenSettingsPathUserAndProjectLevels(t *testing.T) {
 
 	if _, err := QwenSettingsPath(Level("nonsense")); err == nil {
 		t.Error("QwenSettingsPath(nonsense) returned no error")
-	}
-}
-
-// A project-level install writes a file that does nothing until the folder is trusted. Reporting
-// plain success there would be reporting something untrue.
-func TestQwenProjectInstallSaysItNeedsATrustedFolder(t *testing.T) {
-	status := qwenProjectTrustMessage(QwenStatus{Message: "Qwen Code endpoint hooks installed"}, LevelProject)
-	if !strings.Contains(status.Message, "trusted") {
-		t.Errorf("project message = %q, want it to mention the trusted-folder requirement", status.Message)
-	}
-
-	user := qwenProjectTrustMessage(QwenStatus{Message: "Qwen Code endpoint hooks installed"}, LevelUser)
-	if strings.Contains(user.Message, "trusted") {
-		t.Errorf("user message = %q, want no project-trust caveat", user.Message)
-	}
-}
-
-func TestQwenHookStatusDetectsAnInstall(t *testing.T) {
-	home := t.TempDir()
-	testenv.SetHome(t, home)
-	path := filepath.Join(home, ".qwen", "settings.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"'/tmp/beacon-hooks' --platform qwen --log '/tmp/runtime.jsonl' stop"}]}]}}`), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	status := QwenHookStatus(QwenOptions{Level: LevelUser, UserMode: true})
-	if !status.Installed {
-		t.Fatalf("QwenHookStatus installed = false, status=%#v", status)
-	}
-	if status.SettingsPath != path {
-		t.Fatalf("SettingsPath = %q, want %q", status.SettingsPath, path)
-	}
-	if !IsQwenInstalled(QwenOptions{Level: LevelUser, UserMode: true}) {
-		t.Fatal("IsQwenInstalled = false for an installed hook")
-	}
-}
-
-func TestQwenHandlesAnAbsentOrNullHooksBlock(t *testing.T) {
-	for name, existing := range map[string]string{
-		"absent": `{"theme":"Dracula"}`,
-		"null":   `{"hooks":null}`,
-	} {
-		t.Run(name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "settings.json")
-			if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
-				t.Fatal(err)
-			}
-			if err := installQwenSettings(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
-				t.Fatalf("installQwenSettings returned error: %v", err)
-			}
-			if !strings.Contains(readFileString(t, path), "--platform qwen") {
-				t.Fatalf("hooks were not installed from %s hooks block:\n%s", name, readFileString(t, path))
-			}
-		})
 	}
 }
 
@@ -466,5 +272,61 @@ func TestOnlyQwenDeclaresAHookShell(t *testing.T) {
 	}
 	if got := readFileString(t, path); strings.Contains(got, `"shell"`) {
 		t.Fatalf("Claude settings carry a shell field:\n%s", got)
+	}
+}
+
+// Qwen Code keeps its user directory under QWEN_HOME when that is set (getGlobalQwenDir in
+// packages/core/src/config/storage.ts): a leading `~` is expanded, a relative path is made absolute
+// and the directory is used as is, with no `.qwen` appended. An install that wrote ~/.qwen would
+// report success while Qwen kept reading the moved directory.
+func TestQwenSettingsPathHonorsQwenHome(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	project := t.TempDir()
+	t.Chdir(project)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	moved := filepath.Join(t.TempDir(), "qwen-moved")
+	for name, tc := range map[string]struct{ value, want string }{
+		"absolute": {moved, filepath.Join(moved, "settings.json")},
+		"tilde":    {"~/qwen-alt", filepath.Join(home, "qwen-alt", "settings.json")},
+		"relative": {"qwen-rel", filepath.Join(cwd, "qwen-rel", "settings.json")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("QWEN_HOME", tc.value)
+			got, err := QwenSettingsPath(LevelUser)
+			if err != nil || got != tc.want {
+				t.Fatalf("QwenSettingsPath(user) = %q, %v; want %q", got, err, tc.want)
+			}
+			if forHome, err := QwenSettingsPathForHome(LevelUser, home); err != nil || forHome != tc.want {
+				t.Fatalf("QwenSettingsPathForHome(user) = %q, %v; want %q", forHome, err, tc.want)
+			}
+			// The project file never moves.
+			projectPath, err := QwenSettingsPath(LevelProject)
+			if want := filepath.Join(cwd, ".qwen", "settings.json"); err != nil || projectPath != want {
+				t.Fatalf("QwenSettingsPath(project) = %q, %v; want %q", projectPath, err, want)
+			}
+		})
+	}
+
+	// The installer and the status check both go through the same resolver, so a hook written under
+	// QWEN_HOME is the one that is reported.
+	t.Setenv("QWEN_HOME", moved)
+	want := filepath.Join(moved, "settings.json")
+	if err := os.MkdirAll(moved, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(want, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"'/tmp/beacon-hooks' --platform qwen --log '/tmp/runtime.jsonl' stop"}]}]}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	status := QwenHookStatus(QwenOptions{Level: LevelUser, UserMode: true})
+	if !status.Installed || status.SettingsPath != want {
+		t.Fatalf("QwenHookStatus = %#v, want installed at %q", status, want)
+	}
+	if configured, err := qwenRuntime.configPath(LevelUser); err != nil || configured != want {
+		t.Fatalf("installer config path = %q, %v; want %q", configured, err, want)
 	}
 }

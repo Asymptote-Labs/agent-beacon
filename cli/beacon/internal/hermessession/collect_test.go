@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 func TestCollectOnceMapsHermesStateDBAndAdvancesCursor(t *testing.T) {
@@ -90,6 +91,32 @@ func TestCollectOnceMapsHermesStateDBAndAdvancesCursor(t *testing.T) {
 	}
 }
 
+// A state.db from an older Hermes lacks columns later releases added, such as cwd and archived.
+// The sweep reads them as empty rather than failing with "no such column".
+func TestCollectOnceReadsAStateDBWithoutLaterColumns(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "state.db")
+	createHermesFixtureDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{"ALTER TABLE sessions DROP COLUMN cwd", "ALTER TABLE sessions DROP COLUMN archived", "ALTER TABLE messages DROP COLUMN active"} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	db.Close()
+
+	summary, err := CollectOnce(CollectOptions{DBPath: dbPath, StatePath: filepath.Join(dir, "state.json"), LogPath: filepath.Join(dir, "runtime.jsonl"), Write: true, UserMode: true})
+	if err != nil {
+		t.Fatalf("CollectOnce returned error: %v", err)
+	}
+	if summary.Sessions != 1 || summary.EventsEmitted == 0 {
+		t.Fatalf("summary = %#v, want the session's events", summary)
+	}
+}
+
 func TestMapSessionClassifiesFileTool(t *testing.T) {
 	session := Session{ID: "s1", Model: "anthropic/claude-opus-4.6", CWD: "/repo", StartedAtMS: 1000}
 	messages := []Message{
@@ -118,6 +145,33 @@ func TestMapSessionClassifiesFileTool(t *testing.T) {
 	}
 	if fileEvent.Model != "claude-opus-4.6" {
 		t.Fatalf("model = %q, want normalized model", fileEvent.Model)
+	}
+}
+
+// Both profiles hold the same session id, so a shared cursor would leave the second sync with
+// nothing to write.
+func TestCollectOnceKeepsHermesProfilesApart(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	root := filepath.Join(home, ".hermes")
+	logPath := filepath.Join(home, "runtime.jsonl")
+	want := map[string]string{"default": root, "work": filepath.Join(root, "profiles", "work")}
+	for profile, dir := range want {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		dbPath := filepath.Join(dir, "state.db")
+		createHermesFixtureDB(t, dbPath)
+		if _, err := CollectOnce(CollectOptions{DBPath: dbPath, StatePath: DefaultStatePath(dir), LogPath: logPath, Write: true, UserMode: true}); err != nil {
+			t.Fatalf("sync %s: %v", profile, err)
+		}
+	}
+	got := map[string]string{}
+	for _, ev := range readEvents(t, logPath) {
+		got[ev.Harness.Profile] = ev.Harness.ConfigPath
+	}
+	if len(got) != len(want) || got["default"] != want["default"] || got["work"] != want["work"] {
+		t.Fatalf("profile -> config_path = %v, want %v", got, want)
 	}
 }
 

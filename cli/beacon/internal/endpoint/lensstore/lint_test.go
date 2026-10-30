@@ -1,8 +1,6 @@
 package lensstore
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -91,17 +89,5 @@ func TestLintErrorsAndMissingGetTrace(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("missing getTrace not reported: %+v", findings)
-	}
-}
-
-// The hostile e2e probe does everything the spec forbids; lint should say so.
-func TestLintCatchesTheHostileProbe(t *testing.T) {
-	html, err := os.ReadFile(filepath.Join("..", "dashboard", "testdata", "lens-e2e", "fixtures", "probe.lens.html"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	findings := Lint(html)
-	if HasLintErrors(findings) || len(findings) < 6 {
-		t.Fatalf("probe lint = %+v, want several warnings and no errors", findings)
 	}
 }

@@ -10,7 +10,6 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudesession"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/spf13/cobra"
 )
 
@@ -77,16 +76,13 @@ func init() {
 	sync.BoolVar(&endpointClaudeOpts.print, "print", false, "Print mapped events as JSON without writing them or advancing the cursor (dry run)")
 	sync.BoolVar(&endpointClaudeOpts.watch, "watch", false, "Sweep continuously on --interval (default: one sweep then exit)")
 	sync.DurationVar(&endpointClaudeOpts.interval, "interval", time.Minute, "Sweep interval for --watch")
-	sync.Int64Var(&endpointClaudeOpts.rotateBytes, "rotate-bytes", 0,
-		"Rotate the runtime log at this many bytes while this sync writes it (default 10485760, the size every Beacon writer uses; must not be smaller)")
+	addSyncRotateBytesFlag(sync, &endpointClaudeOpts.rotateBytes)
 }
 
 // claudeSyncOptions turns the sync flags into collector options.
 func claudeSyncOptions(cmd *cobra.Command) (claudesession.CollectOptions, error) {
-	// Smaller than the shared size would only make this sync rotate more often than every other
-	// writer, shrinking what the log keeps for everyone.
-	if endpointClaudeOpts.rotateBytes != 0 && endpointClaudeOpts.rotateBytes < writer.DefaultRotateBytes {
-		return claudesession.CollectOptions{}, fmt.Errorf("--rotate-bytes must be at least %d, the size every Beacon writer rotates the runtime log at", writer.DefaultRotateBytes)
+	if err := checkSyncRotateBytes(endpointClaudeOpts.rotateBytes); err != nil {
+		return claudesession.CollectOptions{}, err
 	}
 	userMode := endpointUserMode()
 	opts := claudesession.CollectOptions{

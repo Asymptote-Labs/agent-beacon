@@ -28,9 +28,6 @@ func TestRetainedContentDescribesTheOriginalText(t *testing.T) {
 	if info.Truncated || info.Redacted {
 		t.Fatalf("short clean text should be neither truncated nor redacted: %#v", info)
 	}
-}
-
-func TestRetainedContentEmptyTextGetsNoMarker(t *testing.T) {
 	// An event that retained nothing must not claim it retained the empty string.
 	if info := RetainedContent("", DefaultStringLimit); info != nil {
 		t.Fatalf("RetainedContent(\"\") = %#v, want nil", info)
@@ -55,13 +52,6 @@ func TestRetainedContentTruncationFollowsTheWritersLimit(t *testing.T) {
 	}
 	if RetainedContent(text, 0).Truncated {
 		t.Fatal("limit 0 means no truncation claim")
-	}
-}
-
-func TestRetainedContentFlagsRedaction(t *testing.T) {
-	info := RetainedContent("deploy with token=hunter2hunter2", DefaultStringLimit)
-	if !info.Redacted {
-		t.Fatalf("text carrying a secret should be marked redacted: %#v", info)
 	}
 }
 

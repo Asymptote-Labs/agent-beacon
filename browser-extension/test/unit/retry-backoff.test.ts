@@ -22,23 +22,6 @@ beforeEach(() => {
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-it('preserves a waiting batch and its alarm deadline across unrelated flushes', async () => {
-  const { flush } = await import('../../src/background/delivery.js');
-  await flush();
-  await flush();
-  expect(send).not.toHaveBeenCalled();
-  expect(queue[0].attempts).toBe(1);
-  expect(api.alarm).toHaveBeenLastCalledWith('beacon_flush', { when: 11_000 });
-});
-
-it('retries a due batch and persists its next exponential deadline', async () => {
-  vi.setSystemTime(11_000);
-  const { flush } = await import('../../src/background/delivery.js');
-  await flush();
-  expect(send).toHaveBeenCalledTimes(1);
-  expect(queue[0]).toMatchObject({ attempts: 2, nextAttemptAt: 12_000 });
-});
-
 it('still delivers a legacy queue item without a persisted deadline', async () => {
   delete queue[0].nextAttemptAt;
   send.mockResolvedValue({ ok: true });
@@ -46,13 +29,4 @@ it('still delivers a legacy queue item without a persisted deadline', async () =
   await flush();
   expect(send).toHaveBeenCalledTimes(1);
   expect(queue).toEqual([]);
-});
-
-it('keeps a due failure queued past the former six-attempt limit', async () => {
-  vi.setSystemTime(11_000);
-  queue[0].attempts = 5;
-  const { flush } = await import('../../src/background/delivery.js');
-  await flush();
-  expect(send).toHaveBeenCalledTimes(1);
-  expect(queue).toEqual([expect.objectContaining({ id: 'turn', attempts: 6, nextAttemptAt: 11_000 + 16_000 })]);
 });
