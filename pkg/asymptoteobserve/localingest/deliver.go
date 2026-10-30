@@ -87,8 +87,13 @@ const (
 //   - Where Applies is false, it is appendLine and nothing else.
 //   - Otherwise the line goes to the collector's ingest socket when there is one, the collector
 //     writes logPath, and it takes the line. A rejected line is reported, never retried.
-//   - If there is no socket, or the send fails -- a socket a crashed collector left behind, a
-//     collector that is hung -- the line is appended directly. On a shared log that simply works.
+//   - If there is no socket, or the send fails before the line reached a collector -- a socket a
+//     crashed collector left behind, a collector that refused the connection or said it was busy
+//     -- the line is appended directly. On a shared log that simply works.
+//   - If the line reached a collector that never gave a usable reply -- killed or restarted
+//     mid-write, or hung -- it may already be in the log. It is spooled apart and resent only
+//     through the collector, which stamps the resend as it stamped the first copy, so the worst
+//     case is one event written twice under one event.id rather than two different events.
 //   - Only when the direct append is refused for permission, as a restricted log refuses it while
 //     its collector is down, is the line spooled. A collector that answered for some other log
 //     will never take it, so then the refusal is returned instead.
@@ -113,19 +118,30 @@ func (d Deliverer) WriteOutcome(logPath string, line []byte, appendLine func([]b
 		c.LogPath = logPath
 		resp, err := c.Send([][]byte{line})
 		switch {
-		case err == nil && resp.Rejected > 0:
+		case resp.Rejected > 0:
 			return Sent, fmt.Errorf("the collector rejected the event: %w", ErrRejected)
-		case err == nil:
+		case resp.Accepted > 0:
+			// Written, whatever went wrong after.
+			if err != nil {
+				d.recordFailure()
+				return Sent, nil
+			}
 			d.clearFailure()
-			d.drain(logPath, func(lines [][]byte) (int, error) {
-				resp, err := c.Send(lines)
-				return resp.Processed, err
-			})
+			d.drainThroughCollector(logPath, c)
 			return Sent, nil
 		case errors.Is(err, ErrLogMismatch):
 			collectorElsewhere = true
 		case errors.Is(err, ErrNoSocket), errors.Is(err, ErrUntrustedSocket):
 			// No collector this line can go through: the endpoint is shared.
+		case errors.Is(err, ErrOutcomeUnknown):
+			// The collector may have written it before the reply was lost. Appending it here too
+			// would log it twice, and the copies would not even share an id, so it waits for the
+			// collector instead, which stamps a resent line exactly as it stamped the first.
+			d.recordFailure()
+			if spoolErr := d.spoolUnconfirmed(logPath, [][]byte{line}); spoolErr != nil {
+				return Spooled, fmt.Errorf("%w; spool: %v", err, spoolErr)
+			}
+			return Spooled, nil
 		default:
 			d.recordFailure()
 		}
@@ -247,8 +263,35 @@ func (d Deliverer) spoolLine(logPath string, line []byte) error {
 	return nil
 }
 
+// unconfirmedDir, inside a log's spool, holds lines the collector may already have written: sent
+// with no usable reply. They go back only through the collector, never by direct append.
+const unconfirmedDir = "unconfirmed"
+
+func (d Deliverer) unconfirmedFor(logPath string) Spool {
+	s := d.spoolFor(logPath)
+	if s.Dir != "" {
+		s.Dir = filepath.Join(s.Dir, unconfirmedDir)
+	}
+	return s
+}
+
+func (d Deliverer) spoolUnconfirmed(logPath string, lines [][]byte) error {
+	s := d.unconfirmedFor(logPath)
+	if s.Dir == "" {
+		return errors.New("no home directory to spool in")
+	}
+	dropped, err := s.Append(lines)
+	if err != nil {
+		return err
+	}
+	if dropped > 0 {
+		return fmt.Errorf("the spool in %s is full", s.Dir)
+	}
+	return nil
+}
+
 // drain sends one batch of logPath's spool through send. Best effort: whatever is left goes with a
-// later line.
+// later line. Lines whose delivery is unconfirmed stay put: only drainThroughCollector sends them.
 func (d Deliverer) drain(logPath string, send func([][]byte) (int, error)) {
 	s := d.spoolFor(logPath)
 	if s.Dir == "" {
@@ -257,12 +300,39 @@ func (d Deliverer) drain(logPath string, send func([][]byte) (int, error)) {
 	_, _ = s.Drain(MaxLinesPerConn, send)
 }
 
-// Pending reports how many events this account has spooled for logPath, for doctor.
+// drainThroughCollector sends a batch of logPath's unconfirmed lines and a batch of its spool to
+// the collector. A batch that itself ends without a usable reply moves to the unconfirmed spool
+// rather than staying where a direct append could take it.
+func (d Deliverer) drainThroughCollector(logPath string, c Client) {
+	if u := d.unconfirmedFor(logPath); u.Dir != "" {
+		_, _ = u.Drain(MaxLinesPerConn, func(lines [][]byte) (int, error) {
+			resp, err := c.Send(lines)
+			return resp.Processed, err
+		})
+	}
+	d.drain(logPath, func(lines [][]byte) (int, error) {
+		resp, err := c.Send(lines)
+		if err != nil && errors.Is(err, ErrOutcomeUnknown) {
+			if spoolErr := d.spoolUnconfirmed(logPath, lines[resp.Processed:]); spoolErr != nil {
+				return resp.Processed, err
+			}
+			return len(lines), nil
+		}
+		return resp.Processed, err
+	})
+}
+
+// Pending reports how many events this account has spooled for logPath, for doctor, including the
+// ones waiting for the collector to confirm them.
 func (d Deliverer) Pending(logPath string) (int, error) {
 	s := d.spoolFor(logPath)
 	if s.Dir == "" {
 		return 0, nil
 	}
 	n, _, err := s.Pending()
-	return n, err
+	if err != nil {
+		return n, err
+	}
+	u, _, err := d.unconfirmedFor(logPath).Pending()
+	return n + u, err
 }

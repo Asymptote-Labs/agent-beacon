@@ -4,6 +4,7 @@ package localingest
 
 import (
 	"errors"
+	"io"
 	"io/fs"
 	"net"
 	"os"
@@ -442,5 +443,146 @@ func TestDefaultSpoolDir(t *testing.T) {
 	t.Setenv("HOME", home)
 	if got, want := DefaultSpoolDir(), filepath.Join(home, ".beacon", "endpoint", "spool"); got != want {
 		t.Fatalf("DefaultSpoolDir = %q, want %q", got, want)
+	}
+}
+
+// silentCollector reads each batch to the end and closes without replying, as a collector killed
+// between writing the log and answering would.
+func silentCollector(t *testing.T) (sock string, received func() int) {
+	t.Helper()
+	sock = filepath.Join(shortTempDir(t), "run", "ingest.sock")
+	l, err := Listen(sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+	var mu sync.Mutex
+	n := 0
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			_, _ = io.Copy(io.Discard, c)
+			_ = c.Close()
+			mu.Lock()
+			n++
+			mu.Unlock()
+		}
+	}()
+	return sock, func() int { mu.Lock(); defer mu.Unlock(); return n }
+}
+
+func TestSendWithNoReplyHasAnUnknownOutcome(t *testing.T) {
+	sock, _ := silentCollector(t)
+	c := Client{SocketPath: sock, TrustedOwner: os.Geteuid(), Timeout: time.Second}
+	if _, err := c.Send(lines(t, 1)); !errors.Is(err, ErrOutcomeUnknown) {
+		t.Fatalf("Send = %v, want ErrOutcomeUnknown", err)
+	}
+	// A refused connection never reached a collector.
+	stale := Client{SocketPath: staleSocket(t), TrustedOwner: os.Geteuid(), Timeout: time.Second}
+	if _, err := stale.Send(lines(t, 1)); err == nil || errors.Is(err, ErrOutcomeUnknown) {
+		t.Fatalf("Send to a stale socket = %v; nothing was handed over", err)
+	}
+	// A busy reply says how far the collector got.
+	h := startServer(t, func(s *Server) { s.ConnTimeout = time.Nanosecond })
+	if _, err := h.client.Send(lines(t, 1)); err == nil || errors.Is(err, ErrOutcomeUnknown) {
+		t.Fatalf("Send to a busy collector = %v; its reply settles the outcome", err)
+	}
+}
+
+// The collector writes the line but the client gives up before the reply, here because the append
+// waits on the log longer than the client's timeout. Appending the line directly as well would log
+// it twice under two ids; it waits for the collector instead, and the resend is stamped exactly as
+// the first copy was.
+func TestALineTheCollectorMayHaveWrittenIsResentOnlyThroughIt(t *testing.T) {
+	h := startServer(t, nil)
+	slow := make(chan struct{})
+	h.rec.setFail(func(n int, _ []byte) error {
+		if n == 0 {
+			<-slow
+		}
+		return nil
+	})
+	d := deliverer(t, h.path)
+	d.Client.Timeout = 200 * time.Millisecond
+	log := &directLog{}
+	batch := lines(t, 2)
+	got, err := d.WriteOutcome(testLog, batch[0], log.append)
+	close(slow)
+	if err != nil || got != Spooled {
+		t.Fatalf("WriteOutcome = %v, %v; want the line spooled", got, err)
+	}
+	if log.count() != 0 {
+		t.Fatal("a line the collector may have written was appended directly too")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for h.rec.count() != 1 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if h.rec.count() != 1 {
+		t.Fatalf("collector wrote %d lines", h.rec.count())
+	}
+
+	d.Client.Timeout = 2 * time.Second
+	if err := d.Write(testLog, batch[1], log.append); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := d.Pending(testLog); n != 0 || log.count() != 0 {
+		t.Fatalf("Pending = %d, direct %d", n, log.count())
+	}
+	if h.rec.count() != 3 {
+		t.Fatalf("collector wrote %d lines, want the first, the second and the resend", h.rec.count())
+	}
+	copies := 0
+	for _, line := range h.rec.lines {
+		if string(line) == string(h.rec.lines[0]) {
+			copies++
+		}
+	}
+	if copies != 2 {
+		t.Fatalf("the resend differs from the copy the collector wrote first:\n%s", h.rec.lines)
+	}
+}
+
+// An unconfirmed line stays put when a later line is appended directly; only the collector may
+// take it.
+func TestAnUnconfirmedLineIsNotDrainedByADirectAppend(t *testing.T) {
+	sock, received := silentCollector(t)
+	d := deliverer(t, sock)
+	log := &directLog{}
+	if got, err := d.WriteOutcome(testLog, lines(t, 1)[0], log.append); err != nil || got != Spooled {
+		t.Fatalf("WriteOutcome = %v, %v", got, err)
+	}
+	if received() != 1 || log.count() != 0 {
+		t.Fatalf("collector got %d batches, direct %d", received(), log.count())
+	}
+	d.Client.SocketPath = filepath.Join(shortTempDir(t), "none.sock")
+	if err := d.Write(testLog, lines(t, 1)[0], log.append); err != nil {
+		t.Fatal(err)
+	}
+	if log.count() != 1 {
+		t.Fatalf("direct log has %d lines, want only the new one", log.count())
+	}
+	if n, _ := d.Pending(testLog); n != 1 {
+		t.Fatalf("Pending = %d, want the unconfirmed line kept", n)
+	}
+}
+
+// A spooled batch that a drain sends without a usable reply moves to the unconfirmed spool, so a
+// later direct append cannot write it a second time.
+func TestASpoolBatchSentWithNoReplyBecomesUnconfirmed(t *testing.T) {
+	sock, _ := silentCollector(t)
+	d := deliverer(t, sock)
+	if _, err := d.spoolFor(testLog).Append(lines(t, 2)); err != nil {
+		t.Fatal(err)
+	}
+	d.drainThroughCollector(testLog, d.Client)
+	if n, _, _ := d.spoolFor(testLog).Pending(); n != 0 {
+		t.Fatalf("spool still holds %d lines a direct append could take", n)
+	}
+	if n, _, _ := d.unconfirmedFor(testLog).Pending(); n != 2 {
+		t.Fatalf("unconfirmed spool holds %d lines, want 2", n)
 	}
 }

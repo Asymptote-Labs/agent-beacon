@@ -93,6 +93,12 @@ var ErrRejected = errors.New("event rejected")
 // exists there: the endpoint is not in the restricted mode, so the caller writes the log as before.
 var ErrNoSocket = errors.New("no ingest socket")
 
+// ErrOutcomeUnknown is returned by Send when lines were handed to a collector that never gave a
+// usable reply: it may have written some or all of them before it was killed, restarted or ran out
+// of time. Writing them again by another route could log them twice, so a caller resends them only
+// through the collector, which stamps a resent line exactly as it stamped the first copy.
+var ErrOutcomeUnknown = errors.New("the collector may have written the events")
+
 // Peer is who the kernel says is on the other end of a connection.
 type Peer struct {
 	UID uint32
