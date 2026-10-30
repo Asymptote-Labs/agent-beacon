@@ -19,6 +19,7 @@ func TestCheckRestrictedLogACL(t *testing.T) {
 		{"as install leaves it", nil, nil, StatusOK, "restricted_acl"},
 		{"a leftover grant", []string{`runtime.jsonl: grants S-1-5-32-545 access (0x1200a9)`}, nil, StatusFail, "restricted_log_too_open"},
 		{"run without elevation", nil, &fs.PathError{Op: "open", Path: "logs", Err: fs.ErrPermission}, StatusOK, "restricted_log_not_readable_by_caller"},
+		{"too open, then refused", []string{`logs: grants S-1-5-32-545 access (0x120089)`}, &fs.PathError{Op: "open", Path: "logs", Err: fs.ErrPermission}, StatusFail, "restricted_log_too_open"},
 		{"no directory", nil, &fs.PathError{Op: "open", Path: "logs", Err: fs.ErrNotExist}, StatusFail, "log_dir_missing"},
 		{"the readers group is gone", nil, errors.New("the beacon-log group does not exist"), StatusWarn, "acl_unreadable"},
 	}
