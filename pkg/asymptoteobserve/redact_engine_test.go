@@ -247,6 +247,12 @@ func TestRedactionWorkIsLinear(t *testing.T) {
 	}
 	texts["key ids in a URL scheme run"] = func(n int) string { return repeatTo("AKIA.", n) + "b://" }
 	texts["key ids glued into a URL scheme"] = func(n int) string { return repeatTo("AKIAIOSFODNN7EXAMPLE", n) + "b://x:y@h" }
+	texts["key ids in URL scheme runs broken by non-ASCII"] = func(n int) string {
+		return repeatTo("AKIAIOSFODNN7EXAMPLEa\u00e9", n) + "b://x:y@h"
+	}
+	texts["key ids in a URL scheme run over Kelvin signs"] = func(n int) string {
+		return repeatTo("AKIAIOSFODNN7EXAMPLEa\u212a", n) + "b://x:y@h"
+	}
 	texts["a long value repeating a token's tail"] = func(n int) string {
 		a := strings.Repeat("a", n/3)
 		return "token=" + a + " hf_" + a + " " + strings.Repeat("x ", n/6)

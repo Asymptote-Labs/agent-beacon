@@ -45,6 +45,10 @@ var adjacentCases = []struct{ name, input, want string }{
 	{"a URL password after an AWS key id", "AKIAIOSFODNN7EXAMPLEpostgres://user:pw@host/db", "AKIA[REDACTED]postgres://user:[REDACTED]@host/db"},
 	{"a Bearer token after an AWS key id", "AKIAIOSFODNN7EXAMPLEBearer abcdefghijk", "AKIA[REDACTED]Bearer [REDACTED]"},
 	{"a curl password after an AWS key id", "AKIAIOSFODNN7EXAMPLEcurl -u admin:hunter2", "AKIA[REDACTED]curl -u admin:[REDACTED]"},
+	// A URL's scheme run ends at a byte its pattern stops at (`é`), and goes on over one that
+	// folds into it (`K`, Kelvin): what is asked before the first is not the answer after it.
+	{"a URL password after an AWS key id, past a non-ASCII letter", "AKIAIOSFODNN7EXAMPLEa\u00e9AKIAIOSFODNN7EXAMPLEpostgres://u:hunter2@ h", "AKIAIOSFODNN7EXAMPLEa\u00e9AKIA[REDACTED]postgres://u:[REDACTED]@ h"},
+	{"a URL password after AWS key ids, over a Kelvin sign", "AKIAIOSFODNN7EXAMPLEa\u212aAKIAIOSFODNN7EXAMPLEpostgres://u:hunter2@ h", "AKIA[REDACTED]a\u212aAKIA[REDACTED]postgres://u:[REDACTED]@ h"},
 	// When the key id rule asks whether a curl command follows the key id, the rule for a key id
 	// and its secret has already asked about the line from its later `curl`, which has none.
 	{"a curl password after a Google key and an AWS key id", adjacentGoogle + "AKIAIOSFODNN7EXAMPLEcurl -u a:curl -u a:", "AIza[REDACTED]AKIA[REDACTED]curl -u a:[REDACTED] -u a:"},
@@ -135,6 +139,25 @@ func TestRedactStringRunsAURLPasswordOnOverAnAWSKeyAndSecret(t *testing.T) {
 		}
 		if again := RedactString(got); again != got {
 			t.Errorf("RedactString(%q) = %q, and again %q", input, got, again)
+		}
+	}
+}
+
+// The run schemeFollowerAt shares one answer across is exactly what the URL pattern's
+// case-insensitive scheme class takes, non-ASCII characters that fold into it among it.
+func TestSchemeEndIsTheURLPatternsRun(t *testing.T) {
+	run := regexp.MustCompile(`^(?i)[a-z0-9+.-]*`)
+	pieces := []string{"a", "Z", "0", "+", ".", "-", "k", "s", "\u212a", "\u017f", "\u00e9", "\u212b", ":", "/", " ", "\xff", "\xe2\x84"}
+	r := rand.New(rand.NewPCG(7, 7))
+	for range 20000 {
+		var b strings.Builder
+		for n := r.IntN(12); n >= 0; n-- {
+			b.WriteString(pieces[r.IntN(len(pieces))])
+		}
+		text := b.String()
+		c := newRedactChain(redactEngineFor(), text, nil)
+		if got, want := c.schemeEnd(0), len(run.FindString(text)); got != want {
+			t.Fatalf("schemeEnd(%q) = %d, the pattern's run ends at %d", text, got, want)
 		}
 	}
 }
