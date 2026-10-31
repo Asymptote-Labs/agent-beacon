@@ -29,6 +29,18 @@ Beacon uses the same JSONL source for:
 
 Beacon rotates the active log at 10 MiB and keeps five numbered archives such as `runtime.jsonl.1`. The active `runtime.jsonl` path remains the stable handoff point for the local dashboard and external shippers.
 
+### Reading the log on Windows
+
+Rotation renames the log. Windows refuses to rename a file that another process has open, unless that process allowed deletes when it opened the file. Vector allows it. PowerShell's `Get-Content` and `[IO.File]::OpenRead` do not, and if you use another agent, check how it opens files.
+
+If you write your own shipper, open the log with read, write and delete sharing:
+
+```powershell title="Open the log the way rotation needs"
+$stream = [System.IO.File]::Open($path, 'Open', 'Read', [System.IO.FileShare]'ReadWrite, Delete')
+```
+
+A reader that does not share deletes holds rotation up for as long as it keeps the file open. Beacon keeps appending to `runtime.jsonl` past 10 MiB and rotates once the file is closed, so no events are lost, but the log grows in the meantime. After a rotation, a handle you already hold reads the renamed `runtime.jsonl.1`, so reopen `runtime.jsonl` when you reach the end of the old file.
+
 ## Inspect locally
 
 Confirm the endpoint is healthy and writing events:
