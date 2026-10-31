@@ -23,6 +23,15 @@ msiexec /i BeaconEndpointAgent-<version>-x64.msi /qn /l*v install.log
 
 The install needs administrator rights, because it writes under `%ProgramData%` and registers a service. Elevation is requested for you when you double-click the package. A silent install must already be running elevated, which is the normal case for Intune, SCCM, or a management agent.
 
+The `/l*v` log records what Windows Installer did, but not what Beacon's own install and uninstall steps printed. Those go to a separate log for each run, in the temporary directory of the account that ran the package (`C:\Windows\Temp` when a management agent installs as SYSTEM):
+
+```powershell title="Find the logs of Beacon's install and uninstall steps"
+Get-ChildItem "$env:SystemRoot\Temp", "$env:SystemRoot\SystemTemp" -Filter 'beacon-package-*.log' -ErrorAction SilentlyContinue |
+  Sort-Object LastWriteTime
+```
+
+Each step has a time limit: 10 minutes for the install, 5 for configuring the signed-in user's agent, and 3 for the uninstall. A step that runs past its limit is stopped, so the package finishes instead of hanging your deployment tool, and the log records the step and where it was stuck. An install stopped this way fails, so your deployment tool reports it. An uninstall stopped this way stops and removes the `BeaconCollector` service itself, so the removal or upgrade can finish.
+
 <Warning>
   **The installer is not code-signed yet.** Windows SmartScreen warns that the publisher is unknown, and you need to choose "More info" then "Run anyway". Verify what you downloaded against the published `.sha256` first:
 

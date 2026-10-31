@@ -13,6 +13,16 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path $PSScriptRoot 'package-common.ps1')
+Open-BeaconPackageLog 'install'
+
+# Bounds for the two calls below, generous because a slow machine must not fail an install: the first
+# install starts the service, waits for the collector to answer, configures runtimes and reads up to
+# 30 days of local session history. They exist so that a call that never returns fails the install
+# with a record of where, instead of holding msiexec and the fleet tool behind it open indefinitely.
+$installTimeoutSeconds = 600
+$userConfigTimeoutSeconds = 300
+
 function Get-EnvOrDefault {
     param([string]$Name, [string]$Default)
     $value = [Environment]::GetEnvironmentVariable($Name)
@@ -26,6 +36,7 @@ $installRoot = Get-EnvOrDefault 'BEACON_INSTALL_ROOT' (Join-Path $env:ProgramFil
 $beaconBin = Get-EnvOrDefault 'BEACON_BIN' (Join-Path $installRoot 'bin\beacon.exe')
 
 if (-not (Test-Path -LiteralPath $beaconBin)) {
+    Write-BeaconPackageLog "beacon.exe was not found at $beaconBin"
     throw "beacon.exe was not found at $beaconBin"
 }
 
@@ -71,10 +82,12 @@ if (-not [string]::IsNullOrWhiteSpace($logAccess)) { $installArgs += @('--log-ac
 # delete or rename anything in it. In the restricted log access mode the log directory grants
 # ordinary users nothing at all. Do not add an icacls grant here: a second, broader grant is how
 # the log directory once became writable enough to redirect the collector's writes.
-Write-Output "beacon: installing the system endpoint"
-& $beaconBin @installArgs
-if ($LASTEXITCODE -ne 0) {
-    throw "beacon endpoint install failed with exit code $LASTEXITCODE"
+Write-BeaconPackageLog "beacon: installing the system endpoint"
+$code = Invoke-BeaconBounded -Beacon $beaconBin -Arguments $installArgs -TimeoutSeconds $installTimeoutSeconds
+if ($code -ne 0) {
+    Write-BeaconPackageLog "beacon endpoint install failed with exit code $code; log: $script:BeaconPackageLogPath"
+    Close-BeaconPackageLog
+    throw "beacon endpoint install failed with exit code $code"
 }
 
 # A system endpoint runs elevated, and the install above configured *this* account's Claude Code and
@@ -87,11 +100,12 @@ if ($LASTEXITCODE -ne 0) {
 #
 # Non-fatal, and it says why when it cannot. An unattended install may have no interactive user at
 # all, which is a legitimate outcome rather than a failure.
-Write-Output "beacon: configuring the interactive user's agent runtime"
-& $beaconBin endpoint user-config repair-installed --system --harness $harnesses
-if ($LASTEXITCODE -ne 0) {
-    Write-Warning ("beacon: could not configure the interactive user's agent runtime; " +
+Write-BeaconPackageLog "beacon: configuring the interactive user's agent runtime"
+$code = Invoke-BeaconBounded -Beacon $beaconBin -Arguments @('endpoint', 'user-config', 'repair-installed', '--system', '--harness', $harnesses) -TimeoutSeconds $userConfigTimeoutSeconds
+if ($code -ne 0) {
+    Write-BeaconPackageLog ("beacon: could not configure the interactive user's agent runtime (exit $code); " +
         "run 'beacon endpoint user-config repair-installed --system' once logged in")
 }
 
-Write-Output "beacon: endpoint installed. Check it with: beacon endpoint status --system"
+Write-BeaconPackageLog "beacon: endpoint installed. Check it with: beacon endpoint status --system"
+Close-BeaconPackageLog
