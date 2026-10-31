@@ -31,6 +31,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sysacl"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
@@ -95,6 +96,9 @@ type repairFileSnapshot struct {
 	existed bool
 	data    []byte
 	mode    os.FileMode
+	// private is a Windows file only SYSTEM and Administrators could read, which mode cannot
+	// express there (see sysacl.IsPrivateFile).
+	private bool
 	readErr error
 }
 
@@ -1174,6 +1178,12 @@ func actionForCheck(check diagnostics.Check, runtimeLog lifecycle.RuntimeLogSour
 		return doctorRepairCommand(runtimeLog.EffectiveUserMode)
 	case "runtime_log":
 		return "beacon endpoint doctor --fix"
+	case "secret_files_private":
+		// Windows only, so the advice names an elevated shell rather than sudo.
+		if check.Evidence == "secret_readable_by_users" {
+			return "beacon endpoint doctor --system --fix (from an elevated shell)"
+		}
+		return "inspect the access control list on " + check.Target
 	case "runtime_log_permissions":
 		// Branch on evidence rather than falling through to chmod. Windows reaches this check too
 		// now, and chmod neither exists there nor would restore an ACL if it did -- so the single
@@ -1607,6 +1617,10 @@ func planDoctorFixes(result doctorResult, status lifecycle.Status) doctorFixPlan
 			if check.Status == diagnostics.StatusFail {
 				addSkip(plannedAction{Action: "manual_fix", Target: check.Target, Message: "review endpoint config or run " + doctorInstallCommand(status.RuntimeLog.EffectiveUserMode)})
 			}
+		case "secret_files_private":
+			if check.Evidence == "secret_readable_by_users" {
+				addFix(plannedAction{Action: "restrict_secret_files", Target: check.Target, Message: "rewrite config.json and the collector config so only SYSTEM and Administrators can read the HEC token"})
+			}
 		case "harness":
 			message := "review harness configuration manually"
 			if check.Action != "" {
@@ -1654,6 +1668,34 @@ func applyDoctorFixes(plan doctorFixPlan, status lifecycle.Status) error {
 			if err := writer.EnsureSystemLogWritable(action.Target); err != nil {
 				errs = append(errs, fmt.Errorf("%s %s: %w", action.Action, action.Target, err))
 			}
+		case "restrict_secret_files":
+			if err := restrictSecretFiles(); err != nil {
+				errs = append(errs, fmt.Errorf("%s %s: %w", action.Action, action.Target, err))
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// restrictSecretFiles rewrites the system files holding a HEC token, byte for byte, as files only
+// SYSTEM and Administrators may read: what install and repair now write, applied to an endpoint
+// installed before they did.
+func restrictSecretFiles() error {
+	cfg, err := repairLoadEndpointConfig(false)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, path := range diagnostics.SecretFiles(cfg) {
+		data, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err == nil {
+			err = atomicfile.WriteSystemPrivate(path, data)
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", path, err))
 		}
 	}
 	return errors.Join(errs...)
@@ -1759,7 +1801,7 @@ func snapshotRepairFile(path string) repairFileSnapshot {
 		}
 		return repairFileSnapshot{existed: true, readErr: err}
 	}
-	snapshot := repairFileSnapshot{existed: true, data: data}
+	snapshot := repairFileSnapshot{existed: true, data: data, private: sysacl.IsPrivateFile(path)}
 	if info, statErr := os.Stat(path); statErr == nil {
 		snapshot.mode = info.Mode().Perm()
 	}
@@ -1778,6 +1820,9 @@ func restoreRepairFile(path string, snapshot repairFileSnapshot) error {
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
+	}
+	if snapshot.private {
+		return atomicfile.WriteSystemPrivate(path, snapshot.data)
 	}
 	mode := snapshot.mode
 	if mode == 0 {

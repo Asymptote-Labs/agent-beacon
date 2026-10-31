@@ -18,6 +18,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/dshsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sysacl"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/factorysession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/fxsession"
@@ -245,7 +246,14 @@ func runEndpointBackfill(logPath string, userMode bool) endpointBackfillResult {
 	if err != nil {
 		return endpointBackfillResult{Skipped: fmt.Sprintf("could not read the owner of the console user's home: %v", err)}
 	}
-	confined, err := sessionfs.Confine(info.HomeDir, uid, sessionfs.Options{ScratchDir: endpointBackfillScratchDir()})
+	// The snapshots are copies of that user's session stores, so their directory is made private
+	// before anything is copied into it: on Windows a 0700 directory in the machine-wide tree
+	// would still let every user read them. A no-op elsewhere, where root ownership and 0700 do.
+	scratch := endpointBackfillScratchDir()
+	if err := sysacl.SecurePrivateDir(scratch); err != nil {
+		return endpointBackfillResult{Skipped: fmt.Sprintf("could not make the snapshot directory %s private: %v", scratch, err)}
+	}
+	confined, err := sessionfs.Confine(info.HomeDir, uid, sessionfs.Options{ScratchDir: scratch})
 	if err != nil {
 		return endpointBackfillResult{Skipped: err.Error()}
 	}

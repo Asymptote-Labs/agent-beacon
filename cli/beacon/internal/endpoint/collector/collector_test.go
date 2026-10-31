@@ -261,20 +261,23 @@ func TestWriteConfigUsesPrivatePermissionsWithAHECToken(t *testing.T) {
 			Token:    "ingest-token",
 		}},
 	} {
-		t.Run(name, func(t *testing.T) {
-			cfg := testConfig(t)
-			cfg.Destinations = destinations
-			if err := WriteConfig(cfg); err != nil {
-				t.Fatalf("WriteConfig returned error: %v", err)
-			}
-			info, err := os.Stat(cfg.Collector.ConfigPath)
-			if err != nil {
-				t.Fatalf("stat collector config: %v", err)
-			}
-			if got, want := info.Mode().Perm(), os.FileMode(0600); got != want {
-				t.Fatalf("collector config permissions = %o, want %o", got, want)
-			}
-		})
+		for _, userMode := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/user=%t", name, userMode), func(t *testing.T) {
+				cfg := testConfig(t)
+				cfg.UserMode = userMode
+				cfg.Destinations = destinations
+				if err := WriteConfig(cfg); err != nil {
+					t.Fatalf("WriteConfig returned error: %v", err)
+				}
+				info, err := os.Stat(cfg.Collector.ConfigPath)
+				if err != nil {
+					t.Fatalf("stat collector config: %v", err)
+				}
+				if got, want := info.Mode().Perm(), os.FileMode(0600); got != want {
+					t.Fatalf("collector config permissions = %o, want %o", got, want)
+				}
+			})
+		}
 	}
 }
 

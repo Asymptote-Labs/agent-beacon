@@ -525,6 +525,7 @@ jobs:
             . `
             ./cmd/... `
             ./internal/account/... `
+            ./internal/atomicfile/... `
             ./internal/auth/... `
             ./internal/ci/... `
             ./internal/claudesession/... `

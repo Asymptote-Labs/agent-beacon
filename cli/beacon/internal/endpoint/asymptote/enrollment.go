@@ -11,6 +11,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/atomicfile"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sysacl"
 )
 
 // Files under <BaseDir>/asymptote/. The directory is 0700 and the two credential-adjacent
@@ -231,5 +232,14 @@ func ensureDir(userMode bool) error {
 	}
 	// MkdirAll leaves an existing directory's mode alone; tighten it in case it was created
 	// by an older tool or by hand.
-	return os.Chmod(dir, 0o700)
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	if userMode {
+		return nil
+	}
+	// The mode means nothing on Windows, where this directory would inherit the machine-wide
+	// tree's Users read grant. A private directory there passes SYSTEM and Administrators alone to
+	// everything written in it, the device key included. A no-op elsewhere.
+	return sysacl.SecurePrivateDir(dir)
 }
