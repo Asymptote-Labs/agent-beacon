@@ -4,6 +4,7 @@ package sysacl
 
 import (
 	"fmt"
+	"reflect"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -57,4 +58,11 @@ func WriteSecretFile(path string, data []byte) error {
 		return err
 	}
 	return nil
+}
+
+// IsSecretFile reports whether path carries SecretFileDACL, so a rollback that puts a snapshot back
+// can restore it the same way rather than with the tree's DACL.
+func IsSecretFile(path string) bool {
+	obj, err := ReadObject(path)
+	return err == nil && obj.Protected && reflect.DeepEqual(obj.DACL, SecretFileDACL())
 }

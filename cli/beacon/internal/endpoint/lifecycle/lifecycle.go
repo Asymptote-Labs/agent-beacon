@@ -451,6 +451,9 @@ type fileSnapshot struct {
 	Existed bool
 	Data    []byte
 	Mode    os.FileMode
+	// Secret is set for a file that carried sysacl.SecretFileDACL (on Windows, a system file holding
+	// a credential), so restoring it does not hand it the tree's DACL that every user can read.
+	Secret bool
 }
 
 // serviceController is the part of service.Manager that rollback uses.
@@ -1301,6 +1304,7 @@ func snapshotFile(path string) fileSnapshot {
 		if info, statErr := os.Stat(path); statErr == nil {
 			snapshot.Mode = info.Mode().Perm()
 		}
+		snapshot.Secret = sysacl.IsSecretFile(path)
 	}
 	return snapshot
 }
@@ -1308,6 +1312,10 @@ func snapshotFile(path string) fileSnapshot {
 func restoreFile(path string, snapshot fileSnapshot) {
 	if !snapshot.Existed {
 		_ = os.Remove(path)
+		return
+	}
+	if snapshot.Secret {
+		_ = sysacl.WriteSecretFile(path, snapshot.Data)
 		return
 	}
 	mode := snapshot.Mode

@@ -29,6 +29,9 @@ func TestWriteSecretFileIsSystemAndAdministratorsOnly(t *testing.T) {
 		if obj.Owner != sidAdministrators {
 			t.Fatalf("secret file owned by %s, want Administrators", obj.Owner)
 		}
+		if !IsSecretFile(path) {
+			t.Fatal("IsSecretFile = false for a file WriteSecretFile wrote")
+		}
 		if got, err := os.ReadFile(path); err != nil || string(got) != body {
 			t.Fatalf("content = %q, %v", got, err)
 		}
@@ -40,6 +43,15 @@ func TestWriteSecretFileIsSystemAndAdministratorsOnly(t *testing.T) {
 	if obj := mustRead(t, path); !reflect.DeepEqual(obj.DACL, SecretFileDACL()) {
 		t.Fatalf("SecureSystemTree reset the secret file to %+v", obj.DACL)
 	}
+	// A file the tree's DACL covers is not a secret one, so a rollback restores it as it was.
+	plain := filepath.Join(root, "plain.json")
+	if err := os.WriteFile(plain, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if IsSecretFile(plain) {
+		t.Fatal("IsSecretFile = true for a file with the tree's DACL")
+	}
+	os.Remove(plain)
 	entries, _ := os.ReadDir(root)
 	if len(entries) != 1 {
 		t.Fatalf("temp files left behind: %v", entries)

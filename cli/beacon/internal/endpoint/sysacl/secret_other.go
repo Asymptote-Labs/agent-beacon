@@ -8,3 +8,7 @@ import "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/atomicfile"
 func WriteSecretFile(path string, data []byte) error {
 	return atomicfile.Write(path, data, 0600)
 }
+
+// IsSecretFile is false off Windows: POSIX keeps the guarantee in the mode, which a snapshot
+// records and a restore puts back itself.
+func IsSecretFile(string) bool { return false }
