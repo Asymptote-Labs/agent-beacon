@@ -4,9 +4,9 @@ package sysacl
 
 import (
 	"fmt"
-	"reflect"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"unsafe"
 
