@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/atomicfile"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sysacl"
 )
 
 const (
@@ -266,7 +268,59 @@ func saveOTLPForwardSecrets(cfg Config) error {
 	if err != nil {
 		return err
 	}
-	return atomicfile.Write(path, data, 0600)
+	return writeSecretFile(cfg.UserMode, path, data)
+}
+
+// RewriteSystemConfig replaces the system config.json with data, for the callers that edit its raw
+// JSON in place (the auto-update mode) rather than going through Save. It is written the way Save
+// would write it: SYSTEM and Administrators only on Windows, 0600 on POSIX, when it holds a
+// credential or was already private, and otherwise readable like any config.json. Writing it with
+// atomicfile.Write alone gave a Windows file the tree's DACL, so every user could read a HEC token.
+func RewriteSystemConfig(path string, data []byte, wasPrivate bool) error {
+	secret := wasPrivate || rawConfigHoldsCredential(data)
+	if secret {
+		return writeSecretFile(false, path, data)
+	}
+	return atomicfile.Write(path, data, 0644)
+}
+
+// rawConfigHoldsCredential reports whether config.json text holds a HEC token. It reads only the
+// token fields, so a field elsewhere of an unexpected type (a hand-edited "grpc_port": "4317")
+// cannot hide one, and text it cannot parse at all counts as holding one: the private write is the
+// safe one to fall back to.
+func rawConfigHoldsCredential(data []byte) bool {
+	var partial struct {
+		Destinations struct {
+			SplunkHEC struct {
+				Token json.RawMessage `json:"token"`
+			} `json:"splunk_hec"`
+			FalconHEC struct {
+				Token json.RawMessage `json:"token"`
+			} `json:"falcon_hec"`
+		} `json:"destinations"`
+	}
+	if err := json.Unmarshal(data, &partial); err != nil {
+		var typeErr *json.UnmarshalTypeError
+		if !errors.As(err, &typeErr) {
+			return true
+		}
+	}
+	present := func(raw json.RawMessage) bool {
+		text := strings.TrimSpace(string(raw))
+		return text != "" && text != "null" && text != `""`
+	}
+	return present(partial.Destinations.SplunkHEC.Token) || present(partial.Destinations.FalconHEC.Token)
+}
+
+// writeSecretFile writes a file holding a credential. A system install's files sit in the
+// machine-wide tree, whose Windows DACL lets every user read what is below it and ignores the
+// mode, so they are created with SYSTEM and Administrators only (sysacl.WriteSecretFile); per-user
+// files are in the person's own profile and keep the mode.
+func writeSecretFile(userMode bool, path string, data []byte) error {
+	if userMode {
+		return atomicfile.Write(path, data, 0600)
+	}
+	return sysacl.WriteSecretFile(path, data)
 }
 
 type SplunkHEC struct {
@@ -480,11 +534,13 @@ func Save(cfg Config) (string, error) {
 	if err := saveOTLPForwardSecrets(cfg); err != nil {
 		return "", err
 	}
-	perm := os.FileMode(0644)
 	if hasSecretConfigFields(cfg) {
-		perm = 0600
+		if err := writeSecretFile(cfg.UserMode, path, data); err != nil {
+			return "", err
+		}
+		return path, nil
 	}
-	if err := atomicfile.Write(path, data, perm); err != nil {
+	if err := atomicfile.Write(path, data, 0644); err != nil {
 		return "", err
 	}
 	return path, nil

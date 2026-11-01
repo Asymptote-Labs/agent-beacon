@@ -341,6 +341,39 @@ func TestValidateDestinationsRejectsBadOTLPForward(t *testing.T) {
 	}
 }
 
+// Callers that edit config.json's raw JSON (the auto-update mode) write it as Save would: private
+// when it holds a credential or already was, readable otherwise. On Windows the private case is the
+// SYSTEM/Administrators-only DACL (sysacl.WriteSecretFile), which TestWriteSecretFile covers there.
+func TestRewriteSystemConfigKeepsCredentialsPrivate(t *testing.T) {
+	testenv.RequirePOSIXFileModes(t)
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		name, body string
+		wasPrivate bool
+		want       os.FileMode
+	}{
+		{"hec token", `{"destinations":{"splunk_hec":{"endpoint":"https://splunk.example","token":"t"}}}`, false, 0600},
+		{"already private", `{"auto_update":{"mode":"off"}}`, true, 0600},
+		{"nothing secret", `{"auto_update":{"mode":"off"}}`, false, 0644},
+		// A wrong-typed field elsewhere must not hide the token.
+		{"token beside a bad field", `{"collector":{"grpc_port":"4317"},"destinations":{"falcon_hec":{"token":"t"}}}`, false, 0600},
+		{"destinations of the wrong shape", `{"destinations":"oops"}`, false, 0644},
+		{"unparseable", `{"destinations":`, false, 0600},
+	} {
+		path := filepath.Join(dir, strings.ReplaceAll(tc.name, " ", "-")+".json")
+		if err := RewriteSystemConfig(path, []byte(tc.body), tc.wasPrivate); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != tc.want {
+			t.Errorf("%s: permissions = %o, want %o", tc.name, got, tc.want)
+		}
+	}
+}
+
 // A package removal or cleanup can take the headers file while config.json still names them. Load
 // says so instead of handing back a forward that silently sends without credentials.
 func TestLoadReportsMissingOTLPForwardHeaders(t *testing.T) {

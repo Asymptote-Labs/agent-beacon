@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -450,6 +451,9 @@ type fileSnapshot struct {
 	Existed bool
 	Data    []byte
 	Mode    os.FileMode
+	// Secret is set for a file that carried sysacl.SecretFileDACL (on Windows, a system file holding
+	// a credential), so restoring it does not hand it the tree's DACL that every user can read.
+	Secret bool
 }
 
 // serviceController is the part of service.Manager that rollback uses.
@@ -1029,11 +1033,14 @@ func setAutoUpdateModeInConfigFile(path, mode string) error {
 	if err != nil {
 		return err
 	}
-	perm := os.FileMode(0644)
-	if info, err := os.Stat(path); err == nil {
-		perm = info.Mode().Perm()
-	}
-	return atomicfile.Write(path, out, perm)
+	return endpointconfig.RewriteSystemConfig(path, out, configIsPrivate(path))
+}
+
+// configIsPrivate reports whether the file at path is readable by its owner only. Only POSIX modes
+// say so; on Windows RewriteSystemConfig decides from the content.
+func configIsPrivate(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && runtime.GOOS != "windows" && info.Mode().Perm()&0o077 == 0
 }
 
 func GetStatus(userMode bool, logPath string) Status {
@@ -1297,6 +1304,7 @@ func snapshotFile(path string) fileSnapshot {
 		if info, statErr := os.Stat(path); statErr == nil {
 			snapshot.Mode = info.Mode().Perm()
 		}
+		snapshot.Secret = sysacl.IsSecretFile(path)
 	}
 	return snapshot
 }
@@ -1304,6 +1312,10 @@ func snapshotFile(path string) fileSnapshot {
 func restoreFile(path string, snapshot fileSnapshot) {
 	if !snapshot.Existed {
 		_ = os.Remove(path)
+		return
+	}
+	if snapshot.Secret {
+		_ = sysacl.WriteSecretFile(path, snapshot.Data)
 		return
 	}
 	mode := snapshot.Mode
