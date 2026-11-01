@@ -1,6 +1,7 @@
 package privacyprocessor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"strings"
@@ -23,6 +24,8 @@ func secretAttrs(t *testing.T, attrs pcommon.Map) {
 		"nested":                    map[string]any{"Cookie": []any{credential}, "text": "token=" + credential},
 		"gen_ai.usage.input_tokens": int64(812),
 		"model":                     "ordinary-model",
+		"payload":                   []byte("token=" + credential),
+		"blob":                      []byte{0xff, 0x00, 0x01},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -42,6 +45,14 @@ func assertRedacted(t *testing.T, attrs pcommon.Map) {
 	}
 	if model, ok := attrs.Get("model"); !ok || model.Str() != "ordinary-model" {
 		t.Fatal("non-sensitive metadata changed")
+	}
+	// A bytes attribute stays bytes: text in it is redacted, binary data is kept.
+	if payload, ok := attrs.Get("payload"); !ok || payload.Type() != pcommon.ValueTypeBytes ||
+		strings.Contains(string(payload.Bytes().AsRaw()), credential) {
+		t.Fatalf("bytes attribute not kept as redacted bytes: %#v", attrs.AsRaw()["payload"])
+	}
+	if blob, ok := attrs.Get("blob"); !ok || blob.Type() != pcommon.ValueTypeBytes || !bytes.Equal(blob.Bytes().AsRaw(), []byte{0xff, 0x00, 0x01}) {
+		t.Fatalf("binary bytes attribute changed: %#v", attrs.AsRaw()["blob"])
 	}
 }
 

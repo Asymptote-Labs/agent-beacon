@@ -2,7 +2,6 @@ package lifecycle
 
 import (
 	"fmt"
-	"runtime"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/loggroup"
@@ -32,9 +31,6 @@ func validateLogAccess(cfg endpointconfig.Config) error {
 	}
 	if cfg.UserMode {
 		return fmt.Errorf("--log-access %s applies to a system install; a user-mode log is already private to its user", mode)
-	}
-	if runtime.GOOS == "windows" {
-		return fmt.Errorf("--log-access %s is not available on Windows yet; the system log keeps its shared access", mode)
 	}
 	return nil
 }

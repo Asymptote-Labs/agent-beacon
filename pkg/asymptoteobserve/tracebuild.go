@@ -521,9 +521,9 @@ func (b *TraceBuilder) Fold(event Event, traceEvent TraceEventV1) {
 		}
 	}
 	if a.summary.Project == nil {
-		dir := strings.TrimSpace(event.Repository)
+		dir := event.Repository
 		if dir == "" && event.Session != nil {
-			dir = strings.TrimSpace(event.Session.WorkingDirectory)
+			dir = event.Session.WorkingDirectory
 		}
 		if name := traceProjectName(dir); name != "" {
 			a.summary.Project = &TraceProjectV1{Name: name}

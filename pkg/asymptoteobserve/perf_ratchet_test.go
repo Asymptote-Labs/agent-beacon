@@ -17,9 +17,10 @@ import (
 // gain cannot be given back unnoticed.
 
 // initAllocCeiling bounds the allocations this package's initialization makes, test files
-// included (409 when it was set). Compiling the redaction patterns at init made it 11,508: a
-// package-level regexp.MustCompile belongs behind sync.OnceValue.
-const initAllocCeiling = 500
+// included (409 when it was set at 500; 337 when the redaction rules stopped building a
+// sync.OnceValue each at init, and it was lowered to 420). Compiling the redaction patterns at
+// init made it 11,508: a package-level regexp.MustCompile belongs behind sync.OnceValue.
+const initAllocCeiling = 420
 
 func TestPackageInitStaysCheap(t *testing.T) {
 	if os.Getenv("BEACON_INIT_TRACE_CHILD") != "" {

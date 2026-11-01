@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -33,36 +34,6 @@ func shortTempDir(t *testing.T) string {
 	return dir
 }
 
-type recorder struct {
-	mu    sync.Mutex
-	lines [][]byte
-	fail  func(n int, line []byte) error
-}
-
-func (r *recorder) append(line []byte) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.fail != nil {
-		if err := r.fail(len(r.lines), line); err != nil {
-			return err
-		}
-	}
-	r.lines = append(r.lines, append([]byte(nil), line...))
-	return nil
-}
-
-func (r *recorder) setFail(fail func(n int, line []byte) error) {
-	r.mu.Lock()
-	r.fail = fail
-	r.mu.Unlock()
-}
-
-func (r *recorder) count() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return len(r.lines)
-}
-
 type harness struct {
 	server *Server
 	rec    *recorder
@@ -82,7 +53,7 @@ func startServer(t *testing.T, configure func(*Server)) *harness {
 	rec := &recorder{}
 	s := &Server{
 		Append:     rec.append,
-		LookupName: func(uid uint32) string { return fmt.Sprintf("user%d", uid) },
+		LookupName: func(uid string) string { return "user" + uid },
 	}
 	if configure != nil {
 		configure(s)
@@ -94,23 +65,6 @@ func startServer(t *testing.T, configure func(*Server)) *harness {
 	t.Cleanup(func() { _ = s.Close() })
 	return h
 }
-
-func lines(t *testing.T, n int) [][]byte {
-	t.Helper()
-	out := make([][]byte, n)
-	for i := range out {
-		i := i
-		out[i] = validLine(t, func(e map[string]interface{}) {
-			e["event"].(map[string]interface{})["id"] = fmt.Sprintf("id-%d", i)
-			e["message"] = fmt.Sprintf("m-%d", i)
-			e["user"] = map[string]interface{}{"name": "root", "uid": "0"}
-		})
-	}
-	return out
-}
-
-// opening is the preamble and a header naming no log, which a server without a LogPath accepts.
-const opening = Preamble + "\n" + `{"log":""}` + "\n"
 
 // rawExchange speaks the protocol by hand, for what a well-behaved Client never sends.
 func rawExchange(t *testing.T, path string, payload string) (Response, error) {
@@ -188,7 +142,7 @@ func TestPeerCredentialsMatchTheConnectingProcess(t *testing.T) {
 	}
 	defer conn.Close()
 	peer := <-got
-	if int(peer.UID) != os.Geteuid() || int(peer.GID) != os.Getegid() {
+	if peer.UID != strconv.Itoa(os.Geteuid()) || int(peer.GID) != os.Getegid() {
 		t.Fatalf("peer = %+v, want uid %d gid %d", peer, os.Geteuid(), os.Getegid())
 	}
 	if peer.PID != int32(os.Getpid()) {
@@ -536,7 +490,7 @@ func TestClientRefusesALineWithAnEmbeddedNewline(t *testing.T) {
 
 func TestClientWithoutASocket(t *testing.T) {
 	c := Client{SocketPath: filepath.Join(shortTempDir(t), "missing.sock"), TrustedOwner: os.Geteuid()}
-	if err := c.Available(); !errors.Is(err, ErrNoSocket) {
+	if err := available(c); !errors.Is(err, ErrNoSocket) {
 		t.Fatalf("Available = %v, want ErrNoSocket", err)
 	}
 	if _, err := c.Send(lines(t, 1)); !errors.Is(err, ErrNoSocket) {
@@ -572,7 +526,7 @@ func TestClientRefusesUntrustedSockets(t *testing.T) {
 		if err := os.Chmod(filepath.Dir(h.path), 0o777); err != nil {
 			t.Fatal(err)
 		}
-		if err := h.client.Available(); !errors.Is(err, ErrUntrustedSocket) {
+		if err := available(h.client); !errors.Is(err, ErrUntrustedSocket) {
 			t.Fatalf("Available = %v", err)
 		}
 		if _, err := h.client.Send(lines(t, 1)); !errors.Is(err, ErrUntrustedSocket) {
@@ -585,13 +539,13 @@ func TestClientRefusesUntrustedSockets(t *testing.T) {
 		if err := os.Chmod(ancestor, 0o777); err != nil {
 			t.Fatal(err)
 		}
-		if err := h.client.Available(); !errors.Is(err, ErrUntrustedSocket) {
+		if err := available(h.client); !errors.Is(err, ErrUntrustedSocket) {
 			t.Fatalf("Available = %v", err)
 		}
 		if err := os.Chmod(ancestor, 0o777|os.ModeSticky); err != nil {
 			t.Fatal(err)
 		}
-		if err := h.client.Available(); err != nil {
+		if err := available(h.client); err != nil {
 			t.Fatalf("a sticky ancestor (like /tmp) should be trusted: %v", err)
 		}
 	})
@@ -608,7 +562,7 @@ func TestClientRefusesUntrustedSockets(t *testing.T) {
 			systemGroups = map[int]bool{}
 			t.Cleanup(func() { systemGroups = prev })
 		}
-		if err := h.client.Available(); !errors.Is(err, ErrUntrustedSocket) {
+		if err := available(h.client); !errors.Is(err, ErrUntrustedSocket) {
 			t.Fatalf("Available = %v, want a group-writable ancestor refused", err)
 		}
 	})
@@ -621,7 +575,7 @@ func TestClientRefusesUntrustedSockets(t *testing.T) {
 		prev := systemGroups
 		systemGroups = map[int]bool{os.Getegid(): true}
 		t.Cleanup(func() { systemGroups = prev })
-		if err := h.client.Available(); err != nil {
+		if err := available(h.client); err != nil {
 			t.Fatalf("Available = %v, want a system group's write trusted", err)
 		}
 	})
@@ -633,7 +587,7 @@ func TestClientRefusesUntrustedSockets(t *testing.T) {
 		}
 		c := h.client
 		c.SocketPath = link
-		if err := c.Available(); !errors.Is(err, ErrUntrustedSocket) {
+		if err := available(c); !errors.Is(err, ErrUntrustedSocket) {
 			t.Fatalf("Available = %v, want a link refused", err)
 		}
 	})
@@ -827,7 +781,7 @@ func TestOneAccountCannotHoldEveryConnection(t *testing.T) {
 	// Wait for both to be counted against the account.
 	for time.Now().Before(deadline) {
 		h.server.mu.Lock()
-		n := h.server.perUID[uint32(os.Geteuid())]
+		n := h.server.perUID[strconv.Itoa(os.Geteuid())]
 		h.server.mu.Unlock()
 		if n == 2 {
 			break
@@ -928,7 +882,7 @@ func TestProbe(t *testing.T) {
 	l.SetUnlinkOnClose(false)
 	_ = l.Close()
 	dead := Client{SocketPath: stale, TrustedOwner: os.Geteuid(), Timeout: time.Second}
-	if err := dead.Available(); err != nil {
+	if err := available(dead); err != nil {
 		t.Fatalf("fixture: Available on a dead socket = %v", err)
 	}
 	if err := dead.Probe(); err == nil || errors.Is(err, ErrNoSocket) {
@@ -1036,4 +990,11 @@ func TestServerLogsAnAccountAtMostOncePerInterval(t *testing.T) {
 	if len(logged) != 1 {
 		t.Fatalf("logged %d lines for one account's flood, want 1: %q", len(logged), logged)
 	}
+}
+
+// available is the socket trust check on its own, without connecting: what a client decides
+// before it dials.
+func available(c Client) error {
+	_, err := checkSocket(c.path(), c.TrustedOwner)
+	return err
 }

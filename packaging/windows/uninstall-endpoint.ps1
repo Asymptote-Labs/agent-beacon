@@ -37,7 +37,44 @@ if (-not (Test-Path -LiteralPath $beaconBin)) {
 }
 
 $configDir = Join-Path $env:ProgramData 'Beacon\Endpoint'
-$retained = @('config.json', 'otelcol.yaml')
+$retained = @('config.json', 'otelcol.yaml', 'otlp-forward-headers.json')
+
+# A file `beacon endpoint install --system` wrote with a protected DACL (SYSTEM and Administrators
+# only, because it holds a credential: a HEC token, the OTLP forward's headers) has to come back with
+# that DACL. Copy-Item would give the copy what the destination directory passes on, which every
+# user can read. So such a file is copied into a new file created with the original descriptor --
+# set by the creation itself, so there is no moment anyone else could open it -- and renamed into
+# place. Other files keep the plain copy.
+$protected = @{}
+function Copy-Retained([string]$source, [string]$destination, [string]$sddl) {
+    if (-not $sddl) {
+        Copy-Item -LiteralPath $source -Destination $destination -Force
+        return
+    }
+    $security = New-Object System.Security.AccessControl.FileSecurity
+    $security.SetSecurityDescriptorSddlForm($sddl)
+    $partial = "$destination.restoring"
+    Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue
+    $bytes = [System.IO.File]::ReadAllBytes($source)
+    if ($PSVersionTable.PSEdition -eq 'Core') {
+        # PowerShell 7 (.NET) has no File.Create overload that takes a FileSecurity; the extension
+        # method is its equivalent, still setting the descriptor as the file is created.
+        Add-Type -AssemblyName System.IO.FileSystem.AccessControl -ErrorAction SilentlyContinue
+        $stream = [System.IO.FileSystemAclExtensions]::Create(
+            [System.IO.FileInfo]::new($partial), [System.IO.FileMode]::CreateNew,
+            [System.Security.AccessControl.FileSystemRights]::Write, [System.IO.FileShare]::None,
+            4096, [System.IO.FileOptions]::None, $security)
+    } else {
+        # Windows PowerShell 5.1 (.NET Framework), which the MSI runs.
+        $stream = [System.IO.File]::Create($partial, 4096, [System.IO.FileOptions]::None, $security)
+    }
+    try {
+        $stream.Write($bytes, 0, $bytes.Length)
+    } finally {
+        $stream.Close()
+    }
+    Move-Item -LiteralPath $partial -Destination $destination -Force
+}
 
 $stash = $null
 if ($purge -ne '1') {
@@ -46,7 +83,11 @@ if ($purge -ne '1') {
     foreach ($name in $retained) {
         $source = Join-Path $configDir $name
         if (Test-Path -LiteralPath $source) {
-            Copy-Item -LiteralPath $source -Destination (Join-Path $stash $name) -Force
+            $acl = Get-Acl -LiteralPath $source
+            if ($acl.AreAccessRulesProtected) {
+                $protected[$name] = $acl.Sddl
+            }
+            Copy-Retained $source (Join-Path $stash $name) $protected[$name]
         }
     }
     Write-Output "beacon: removing the endpoint, keeping configuration and logs (set BEACON_PURGE=1 to remove them)"
@@ -76,7 +117,7 @@ if ($null -ne $stash) {
             $saved = Join-Path $stash $name
             if (Test-Path -LiteralPath $saved) {
                 New-Item -ItemType Directory -Force -Path $configDir | Out-Null
-                Copy-Item -LiteralPath $saved -Destination (Join-Path $configDir $name) -Force
+                Copy-Retained $saved (Join-Path $configDir $name) $protected[$name]
                 $restored++
             }
         }

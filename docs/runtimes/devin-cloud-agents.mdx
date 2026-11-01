@@ -144,7 +144,8 @@ When the `BEACON_CLOUD_GCS_*` variables from step 1 are exported, each changed
 session's snapshot is also uploaded to your bucket. Re-runs are idempotent:
 events are deduplicated by their Devin event id, and unchanged sessions are
 skipped. Use `--full-resync` to re-fetch and re-upload every session (for a
-backfill, or after enabling GCS on an existing runner).
+backfill, or after enabling GCS on an existing runner). `--org` overrides `DEVIN_ORG_ID`, `--no-upload` keeps
+the run local even when the `BEACON_CLOUD_GCS_*` variables are set, and `--base-url` points at another Devin API host.
 
 <Tip>
   For unattended capture, run the `--watch` command under a process supervisor

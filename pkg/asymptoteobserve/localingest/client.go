@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"time"
 )
 
@@ -17,15 +16,19 @@ import (
 // busy server reports how far it got rather than leaving the client to resend lines it wrote.
 const DefaultClientTimeout = 3 * time.Second
 
-// Client sends batches to a collector's ingest socket.
+// Client sends batches to a collector's ingest socket, or on Windows its named pipe.
 type Client struct {
-	// SocketPath is the socket to send to. Empty means DefaultSocketPath.
+	// SocketPath is the socket or pipe to send to. Empty means DefaultSocketPath.
 	SocketPath string
 	// Timeout bounds each connection, from dial to reply. Zero means DefaultClientTimeout.
 	Timeout time.Duration
-	// TrustedOwner is the uid the socket and its directory must belong to. Zero, the default, is
-	// root; tests set their own uid.
+	// TrustedOwner is the uid the socket and its directory must belong to on Unix. Zero, the
+	// default, is root; tests set their own uid.
 	TrustedOwner int
+	// TrustedSID is, on Windows, one more account the pipe may belong to besides SYSTEM and
+	// Administrators, the only creators trusted otherwise. Empty in production; tests that serve a
+	// pipe as their own account set their SID.
+	TrustedSID string
 	// LogPath is the runtime log the lines are meant for, sent in the header. The collector refuses
 	// them, with ErrLogMismatch, if it writes another log.
 	LogPath string
@@ -38,23 +41,11 @@ func (c Client) path() string {
 	return c.SocketPath
 }
 
-// Available reports whether a trusted ingest socket exists, without connecting to it. It is how a
-// writer decides whether the endpoint is in the restricted mode at all; ErrNoSocket means it is
-// not.
-func (c Client) Available() error {
-	_, err := checkSocket(c.path(), c.TrustedOwner)
-	return err
-}
-
 // Probe asks the collector to answer an empty batch for LogPath. It is what tells a live
-// collector from a socket a killed one left behind, which Available cannot: that only looks at the
-// file. ErrNoSocket and ErrLogMismatch keep their meaning.
+// collector from a socket a killed one left behind, which looking at the socket file cannot.
+// ErrNoSocket, ErrUntrustedSocket and ErrLogMismatch keep their meaning.
 func (c Client) Probe() error {
-	socket, err := checkSocket(c.path(), c.TrustedOwner)
-	if err != nil {
-		return err
-	}
-	_, err = c.sendBatch(socket, nil)
+	_, err := c.sendBatch(nil)
 	return err
 }
 
@@ -73,17 +64,13 @@ func (c Client) Send(lines [][]byte) (Response, error) {
 		}
 		cleaned[i] = line
 	}
-	socket, err := checkSocket(c.path(), c.TrustedOwner)
-	if err != nil {
-		return Response{}, err
-	}
 	var total Response
 	for start := 0; start < len(cleaned); start += MaxLinesPerConn {
 		end := start + MaxLinesPerConn
 		if end > len(cleaned) {
 			end = len(cleaned)
 		}
-		resp, err := c.sendBatch(socket, cleaned[start:end])
+		resp, err := c.sendBatch(cleaned[start:end])
 		total.Accepted += resp.Accepted
 		total.Rejected += resp.Rejected
 		total.Processed += resp.Processed
@@ -95,14 +82,20 @@ func (c Client) Send(lines [][]byte) (Response, error) {
 	return total, nil
 }
 
-func (c Client) sendBatch(socket string, lines [][]byte) (Response, error) {
+// halfCloser is a connection whose write side can be closed on its own: a Unix socket, or a
+// message-mode named pipe, which signals it with a zero-byte message.
+type halfCloser interface{ CloseWrite() error }
+
+func (c Client) sendBatch(lines [][]byte) (Response, error) {
 	timeout := c.Timeout
 	if timeout <= 0 {
 		timeout = DefaultClientTimeout
 	}
-	conn, err := net.DialTimeout("unix", socket, timeout)
+	// connect checks that the socket or pipe is the collector's before anything is sent to it, and
+	// returns ErrNoSocket or ErrUntrustedSocket when it is missing or someone else's.
+	conn, err := c.connect(timeout)
 	if err != nil {
-		return Response{}, fmt.Errorf("connect to %s: %w", c.path(), err)
+		return Response{}, err
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(timeout))
@@ -125,8 +118,8 @@ func (c Client) sendBatch(socket string, lines [][]byte) (Response, error) {
 		writeErr = w.Flush()
 	}
 	if writeErr == nil {
-		if uc, ok := conn.(*net.UnixConn); ok {
-			writeErr = uc.CloseWrite()
+		if hc, ok := conn.(halfCloser); ok {
+			writeErr = hc.CloseWrite()
 		}
 	}
 
@@ -163,6 +156,7 @@ func (c Client) sendBatch(socket string, lines [][]byte) (Response, error) {
 }
 
 // ErrUntrustedSocket is returned when something exists at the socket path but could have been put
-// there by someone other than root. A writer that sees it does not send there, because a socket a
-// user planted would receive every other user's events.
+// there by someone other than root, or on Windows a pipe of that name was created by someone other
+// than SYSTEM or Administrators. A writer that sees it does not send there, because a socket or
+// pipe a user planted would receive every other user's events.
 var ErrUntrustedSocket = errors.New("untrusted ingest socket")

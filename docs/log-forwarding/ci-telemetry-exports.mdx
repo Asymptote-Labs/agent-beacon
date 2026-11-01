@@ -27,7 +27,7 @@ Each line in `runtime.jsonl` is one complete Beacon event using the [Endpoint Ev
 
 ### Workflow artifact
 
-The **Agent Beacon CI Telemetry** GitHub Action uploads the CI runtime log as a workflow artifact by default:
+The **Agent Beacon CI Telemetry** GitHub Action uploads the CI runtime log as a workflow artifact by default. The artifact is named `beacon-runtime-log-<job>-<matrix index>`, so every job and matrix leg in a run keeps its own artifact:
 
 ```yaml
 - name: Run Claude with Beacon telemetry
@@ -35,10 +35,9 @@ The **Agent Beacon CI Telemetry** GitHub Action uploads the CI runtime log as a 
   with:
     command: claude --print "Review this pull request"
     upload-artifact: "true"
-    artifact-name: beacon-runtime-log
 ```
 
-Use the workflow artifact path when a security team or downstream job will retrieve the completed JSONL file after the run. Artifact access, retention, and download permissions stay under GitHub Actions controls.
+Use the workflow artifact path when a security team or downstream job will retrieve the completed JSONL file after the run. Artifact access, retention, and download permissions stay under GitHub Actions controls. Set `artifact-name` to choose another name. A job that uses the action more than once in `exec` or `finish` mode needs a distinct `artifact-name` for each use, because GitHub rejects a second artifact with the same name in a run.
 
 ### Object storage upload
 
@@ -170,17 +169,21 @@ See the sample workflow:
 
 ## Object layout
 
-In GitHub Actions, object keys use this shape:
+Every Beacon CI session uploads under its own folder, named when the session starts: its start time in Unix nanoseconds, a dash, and 8 random hex characters. `beacon ci finish` reads it from the session state written by `beacon ci start`. In GitHub Actions, object keys use this shape:
 
 ```text
-<prefix>/<owner>/<repo>/<run_id>/<run_attempt>/runtime.jsonl
+<prefix>/<owner>/<repo>/<run_id>/<run_attempt>/<job>/<session>/runtime.jsonl
 ```
 
-Outside GitHub Actions, Beacon falls back to:
+`<job>` is the `GITHUB_JOB` id and is left out when it is unset. Outside GitHub Actions, Beacon uses:
 
 ```text
-<prefix>/ci/<timestamp>/runtime.jsonl
+<prefix>/ci/<session>/runtime.jsonl
 ```
+
+Jobs, matrix legs, and repeated sessions in one workflow run therefore never share a key. The upload result and `--json` output report the full destination URI.
+
+Earlier Beacon versions wrote every session in a GitHub Actions run to `<prefix>/<owner>/<repo>/<run_id>/<run_attempt>/runtime.jsonl`, so each upload replaced the previous one. Update any reader that fetches that fixed path to list the run's prefix instead.
 
 Prefixes are optional. Beacon trims empty path parts and normalizes path separators before building the upload key.
 

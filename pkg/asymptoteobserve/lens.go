@@ -212,11 +212,8 @@ func ParseLensManifest(html []byte) (LensManifestV1, error) {
 	decoder := json.NewDecoder(bytes.NewReader(body[:end]))
 	decoder.DisallowUnknownFields()
 	var manifest LensManifestV1
-	if err := decoder.Decode(&manifest); err != nil {
+	if err := DecodeOnly(decoder, &manifest); err != nil {
 		return LensManifestV1{}, fmt.Errorf("lens manifest: %w", err)
-	}
-	if decoder.More() {
-		return LensManifestV1{}, errors.New("lens manifest holds more than one JSON value")
 	}
 	return manifest, nil
 }

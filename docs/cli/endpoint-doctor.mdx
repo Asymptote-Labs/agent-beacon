@@ -50,7 +50,7 @@ System mode only. Reports whether the system log is shared or [restricted](/cli/
 | `log_access_mismatch` | warn | The log is marked restricted but `config.json` says shared, so hooks cannot append |
 | `ingest_spool_pending` | warn | Events from the account running doctor are waiting in its spool; they go to the collector with its next event |
 
-In the restricted mode, `runtime_log_permissions` checks that the log and its directory are closed to other accounts instead of checking that hooks can append. Run without `sudo`, doctor cannot open a restricted log, and says so rather than reporting a failure.
+In the restricted mode, `runtime_log_permissions` checks that the log and its directory are closed to other accounts instead of checking that hooks can append. On Windows it reads the ACL of the log directory and of everything directly in it, and reports `restricted_acl` when only SYSTEM, Administrators and the `beacon-log` group (read only) can reach them, or `restricted_log_too_open` naming each grant to anyone else. Run without `sudo` (or, on Windows, unelevated), doctor cannot open a restricted log, and says so rather than reporting a failure. On Windows the suggested repair is `beacon endpoint repair --system` from an elevated shell.
 
 ### `console_user_configured`
 

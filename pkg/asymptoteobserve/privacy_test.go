@@ -231,20 +231,87 @@ func TestRedactStringKeepsLabelsAndOrdinaryText(t *testing.T) {
 // Events are sanitized again on every read path, so a second pass must not change the first one's
 // output.
 func TestRedactStringIsIdempotent(t *testing.T) {
-	inputs := []string{
-		"config dump\napi_key=sk-abcdefghijklmnopqrstuvwxyz0123\nOPENAI sk-abcdefghijklmnopqrstuvwxyz0123",
-		`{"token": "opaque-session-value-9", "password": "hunter2hunter2"}`,
-		"Authorization: Bearer abc.def.ghi and --password hunter2hunter2",
-		"postgres://app:pa55w0rd@db/app",
-		"curl -u admin:hunter2hunter2 -H 'Cookie: sid=abcdef123456789' https://x",
-		"curl -b 'sessionid=abcdef123456789' --cookie sid=abcdef123456789 https://x",
-	}
-	for _, input := range inputs {
+	for _, input := range redactIdempotenceInputs {
 		once := RedactString(input)
 		if twice := RedactString(once); twice != once {
 			t.Fatalf("RedactString is not idempotent:\nonce  %q\ntwice %q", once, twice)
 		}
 	}
+}
+
+// A label hidden inside a value a rule kept is redacted in the same call, as a second call would.
+func TestRedactStringRedactsALabelAKeptValueHid(t *testing.T) {
+	for input, want := range map[string]string{
+		`token:seCret":token":0`:            `token:[REDACTED]":token":"[REDACTED]"`,
+		`--token "secret": "token": "abc"`:  `--token "[REDACTED]": "token": "[REDACTED]"`,
+		`--password seCret":token":abcdefg`: `--password [REDACTED]":token":"[REDACTED]"`,
+	} {
+		if got := RedactString(input); got != want {
+			t.Errorf("RedactString(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+// redactIdempotenceInputs are texts one pass must leave nothing in for a second.
+// FuzzRedactIsIdempotent starts from them too.
+var redactIdempotenceInputs = []string{
+	"config dump\napi_key=sk-abcdefghijklmnopqrstuvwxyz0123\nOPENAI sk-abcdefghijklmnopqrstuvwxyz0123",
+	`{"token": "opaque-session-value-9", "password": "hunter2hunter2"}`,
+	"Authorization: Bearer abc.def.ghi and --password hunter2hunter2",
+	"postgres://app:pa55w0rd@db/app",
+	"curl -u admin:hunter2hunter2 -H 'Cookie: sid=abcdef123456789' https://x",
+	"curl -b 'sessionid=abcdef123456789' --cookie sid=abcdef123456789 https://x",
+	// A URL whose user name is a secret-named label: the label rules and the URL rule stop at
+	// different bytes, and each used to take one more piece per pass.
+	"https://x-access-token:abc@github.combcn_api_`@host",
+	"A0000000000://token:,@",
+	"A://token:,@0,@0,@",
+	// A curl flag's blanks run over a newline to its value; the command follows a key.
+	"npm_000000000000000000000000000000000000Curl -B\n0=",
+	// The value captured after the quoted label is too short to remove until the URL rule
+	// replaces the comma that ends it.
+	`seCret":}A://:0,@`,
+	// A kept value that is itself a label: `token`, an auth scheme, is kept as the value of
+	// `seCret":` and hides `token":0` from the rule, until a later rule replaces `seCret` (here
+	// the value of `token:`, a flag's value, a GitHub token's tail) and a second pass finds it.
+	`token:seCret":token":0`,
+	`token:seCret":token":abc`,
+	`token:seCret':token':0`,
+	`token:seCret":Token":0`,
+	`--password seCret":token":0`,
+	`--token "secret": "token": "abc"`,
+	`ghp_0123456789abcdefghijklmnopqrstsecret":token":0`,
+	// Two such labels in turn, and one that took three passes to settle.
+	`token:seCret":token":seCret2": "token": "abc"`,
+	`0secret=token :ghp_0123456789abcdefghijklmnopqrstsecret=token :seCret':token':@h'`,
+	// The capture of assigned values takes `token` as the value of `secret` and so never reads
+	// `token`:}token:--token` as an assignment; the label that hid it is replaced.
+	"token:abctoken\":`secret`:`token`:}token:--token \"token\"",
+	// A flag finds no value where a copy of an assigned value that starts with a dash follows it;
+	// once the copy is replaced, a second pass redacted the marker and what follows it.
+	`-pAsswd --token -token:"--token `,
+	"--password --token ghp_0123456789abcdefghijklmnopqrsta=@h:token:'--token ",
+	// An AWS key id that a copy of an assigned value follows ends a word only once the copy is
+	// replaced, after every rule has run.
+	"AKIAIOSFODNN7EXAMPLEAuthorization: Authorization: ",
+	"@AKIAIOSFODNN7EXAMPLEx-access-token:x-access-token:",
+	"AKIAIOSFODNN7EXAMPLEAKIAIOSFODNN7EXAMPLEAuthorization: Authorization: ",
+	// The copy of `Authoriz` makes `ABIA[REDACTED]` of a label, which ends the key id before it.
+	"ABIA0000000000000000ABIAAuthorizAtion:Authoriz",
+	// The copy of `https://` holds the slash a URL's password stops at, and its marker does not.
+	"A://token:https://,ghp_0123456789abcdefghijklmnopqrst==https://@h\n=",
+	// A token runs on over that copy (overCopy), which takes its slash as replacing it would.
+	"A://token:https://,ghp_0000000000000000000000000https://@",
+	// A URL's password stops at the `/` of an AWS secret until the secret is replaced.
+	"https://u:a,AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY@host",
+	// The same where a token's item takes the key id and secret, and where they come after a
+	// replaced copy (redactAfterMarkers).
+	"https://u:pw,sk-abcAKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY@ host",
+	"token=abcdefgh12345678 https://u:pw,abcdefgh12345678AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY@ host",
+	// The copy the key id ends before is followed by a marker already: what follows a word byte
+	// is told by place, not by count.
+	"token=abcdefgh12345678 AKIAIOSFODNN7EXAMPLEabcdefgh12345678[REDACTED]",
+	"https://x-access-token:a@b,AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY@host",
 }
 
 // A field named for a credential is one, whatever its value looks like.

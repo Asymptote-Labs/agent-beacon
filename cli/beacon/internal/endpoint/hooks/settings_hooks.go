@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/hookcmd"
 )
 
 // settingsHookGroup and settingsHookRef model the shape Beacon writes into a runtime's shared
@@ -308,10 +310,10 @@ func isSettingsEndpointHookGroup(group settingsHookGroup, platform string) bool 
 }
 
 func isSettingsEndpointHookCommand(command, platform string) bool {
-	if platform != "" && !commandHasPlatform(command, platform) {
+	if platform != "" && !hookcmd.HasPlatform(command, platform) {
 		return false
 	}
-	return isEndpointHookCommand(command, platform)
+	return hookcmd.IsEndpointHook(command, platform)
 }
 
 func isSettingsEndpointInstalledAt(path, platform string) bool {

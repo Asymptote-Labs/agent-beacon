@@ -19,6 +19,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/objectkey"
 )
 
 const (
@@ -104,7 +106,7 @@ func (u *GCSUploader) Upload(ctx context.Context, objectName string, data []byte
 	if err != nil {
 		return err
 	}
-	uploadURL := strings.TrimRight(u.endpoint, "/") + "/" + escapePath(u.bucket) + "/" + escapeObjectName(objectName)
+	uploadURL := strings.TrimRight(u.endpoint, "/") + "/" + objectkey.EscapeName(u.bucket) + "/" + objectkey.EscapeName(objectName)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL, bytes.NewReader(data))
 	if err != nil {
 		return err
@@ -215,16 +217,4 @@ func parseRSAPrivateKey(raw string) (*rsa.PrivateKey, error) {
 		return key, nil
 	}
 	return nil, errors.New("parse GCS private key")
-}
-
-func escapeObjectName(objectName string) string {
-	parts := strings.Split(objectName, "/")
-	for i, part := range parts {
-		parts[i] = escapePath(part)
-	}
-	return strings.Join(parts, "/")
-}
-
-func escapePath(value string) string {
-	return (&url.URL{Path: value}).EscapedPath()
 }

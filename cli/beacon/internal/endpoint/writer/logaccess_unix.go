@@ -250,3 +250,7 @@ func settleOne(path string, fn func(*os.File) error) error {
 	}
 	return fn(f)
 }
+
+// CheckRestrictedSystemLogACL has nothing to read on Unix, where a restricted log's access is its
+// file modes, which doctor reads itself.
+func CheckRestrictedSystemLogACL(string) ([]string, error) { return nil, nil }

@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -119,7 +120,7 @@ func TestEventsSentToTheSocketLandInTheLogUnderTheSendersAccount(t *testing.T) {
 		t.Fatalf("log has %d lines, want 2", len(lines))
 	}
 	uid := fmt.Sprint(os.Geteuid())
-	want := resolveName(uint32(os.Geteuid()))
+	want := resolveName(strconv.Itoa(os.Geteuid()))
 	for i, line := range lines {
 		user := line["user"].(map[string]interface{})
 		if user["uid"] != uid {
@@ -366,10 +367,10 @@ func TestAServeFailureIsReportedAndTheSocketRemoved(t *testing.T) {
 	cfg.SocketPath = filepath.Join(dir, "run", "ingest.sock")
 	cfg.LogPath = filepath.Join(dir, "log", "runtime.jsonl")
 	ext := newIngest(cfg, zap.NewNop())
-	ext.listen = func(path string) (*net.UnixListener, error) {
+	ext.listen = func(path string) (localingest.Listener, error) {
 		return localingest.Listen(path)
 	}
-	ext.serveListener = func(l *net.UnixListener) net.Listener { return brokenListener{l} }
+	ext.serveListener = func(l localingest.Listener) net.Listener { return brokenListener{l} }
 	host := &statusHost{}
 	if err := ext.Start(context.Background(), host); err != nil {
 		t.Fatal(err)

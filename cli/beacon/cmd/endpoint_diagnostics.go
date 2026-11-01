@@ -31,9 +31,11 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sysacl"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 type doctorResult struct {
@@ -94,6 +96,10 @@ type repairFileSnapshot struct {
 	existed bool
 	data    []byte
 	mode    os.FileMode
+	// secret is set for a file carrying sysacl.SecretFileDACL (on Windows, a system file holding a
+	// credential), so a rollback restores it SYSTEM/Administrators-only rather than with the tree's
+	// DACL that every user can read.
+	secret  bool
 	readErr error
 }
 
@@ -669,6 +675,14 @@ func writeInventorySnapshotEvents(cfg endpointconfig.Config, settings endpointco
 		Harness:      schema.HarnessInfo{Name: "endpoint"},
 		Message:      "Agent configuration inventory snapshot observed",
 	})
+	// The scanner has already redacted what it captures and cut file contents to max_content_bytes;
+	// an MCP server definition, whose keys come from the user's config, had the field-name and flag
+	// rules applied (inventory.redactStructured). CleanValue redacts every string in them again and
+	// leaves our own field names such as env_keys, a list of variable names, as they are. Its limit
+	// is max_content_bytes, so captured contents are not cut again, but never below the raw-field
+	// limit the event writer applies to other raw strings, so a small max_content_bytes does not cut
+	// paths, names and hashes.
+	contentLimit := max(endpointinventory.ContentLimit(settings.MaxContentBytes), asymptoteobserve.DefaultRawStringLimit)
 	snapshot.Raw = map[string]interface{}{
 		"inventory": map[string]interface{}{
 			"generated_at":             result.GeneratedAt,
@@ -678,9 +692,9 @@ func writeInventorySnapshotEvents(cfg endpointconfig.Config, settings endpointco
 			"previous_snapshot_digest": previousDigest,
 			"counts":                   counts,
 			"user_scope":               result.UserScope,
-			"configs":                  existingInventoryConfigs(result.Configs),
-			"mcp_servers":              result.MCPServers,
-			"skills":                   existingInventorySkills(result.Skills),
+			"configs":                  asymptoteobserve.CleanValue(existingInventoryConfigs(result.Configs), contentLimit),
+			"mcp_servers":              asymptoteobserve.CleanValue(result.MCPServers, contentLimit),
+			"skills":                   asymptoteobserve.CleanValue(existingInventorySkills(result.Skills), contentLimit),
 		},
 	}
 	if _, err := writer.AppendEvent(snapshot, writer.Options{Path: inventoryLogPath, UserMode: cfg.UserMode}); err != nil {
@@ -1754,6 +1768,7 @@ func snapshotRepairFile(path string) repairFileSnapshot {
 	if info, statErr := os.Stat(path); statErr == nil {
 		snapshot.mode = info.Mode().Perm()
 	}
+	snapshot.secret = sysacl.IsSecretFile(path)
 	return snapshot
 }
 
@@ -1769,6 +1784,9 @@ func restoreRepairFile(path string, snapshot repairFileSnapshot) error {
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
+	}
+	if snapshot.secret {
+		return sysacl.WriteSecretFile(path, snapshot.data)
 	}
 	mode := snapshot.mode
 	if mode == 0 {
@@ -1817,6 +1835,15 @@ func redactConfig(cfg endpointconfig.Config) endpointconfig.Config {
 		falcon := *cfg.Destinations.FalconHEC
 		falcon.Token = "[REDACTED]"
 		destinations.FalconHEC = &falcon
+		changed = true
+	}
+	if cfg.Destinations.OTLPForward != nil && len(cfg.Destinations.OTLPForward.Headers) > 0 {
+		forward := *cfg.Destinations.OTLPForward
+		forward.Headers = make(map[string]string, len(cfg.Destinations.OTLPForward.Headers))
+		for name := range cfg.Destinations.OTLPForward.Headers {
+			forward.Headers[name] = "[REDACTED]"
+		}
+		destinations.OTLPForward = &forward
 		changed = true
 	}
 	if changed {

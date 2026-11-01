@@ -108,7 +108,37 @@ var valueOptions = map[string]optionSpec{
 
 // flagOptions are the value-less options that change what a command does to its operands.
 var flagOptions = map[string]optionSpec{
-	"tee": {short: "a", long: []string{"--append"}},
+	"tee":     {short: "a", long: []string{"--append"}},
+	"cp":      {short: "T", long: []string{"--no-target-directory", "--parents"}},
+	"mv":      {short: "T", long: []string{"--no-target-directory"}},
+	"ln":      {short: "T", long: []string{"--no-target-directory"}},
+	"install": {short: "dT", long: []string{"--directory", "--no-target-directory"}},
+	"git-mv":  {short: "n", long: []string{"--dry-run"}},
+}
+
+// longOptions are every long option of the GNU commands and git mv, which parseOptions reads, so
+// that an abbreviation resolves to the one option it begins, as getopt_long and git do.
+var longOptions = map[string][]string{
+	"git-mv":   {"--dry-run", "--force", "--sparse", "--verbose"},
+	"rm":       {"--dir", "--force", "--help", "--interactive", "--no-preserve-root", "--one-file-system", "--preserve-root", "--recursive", "--verbose", "--version"},
+	"unlink":   {"--help", "--version"},
+	"touch":    {"--date", "--help", "--no-create", "--no-dereference", "--reference", "--time", "--version"},
+	"truncate": {"--help", "--io-blocks", "--no-create", "--reference", "--size", "--version"},
+	"tee":      {"--append", "--help", "--ignore-interrupts", "--output-error", "--version"},
+	"cp": {"--archive", "--attributes-only", "--backup", "--context", "--copy-contents", "--debug", "--dereference",
+		"--force", "--help", "--interactive", "--keep-directory-symlink", "--link", "--no-clobber", "--no-dereference",
+		"--no-preserve", "--no-target-directory", "--one-file-system", "--parents", "--preserve", "--recursive",
+		"--reflink", "--remove-destination", "--sparse", "--strip-trailing-slashes", "--suffix", "--symbolic-link",
+		"--target-directory", "--update", "--verbose", "--version"},
+	"mv": {"--backup", "--context", "--debug", "--exchange", "--force", "--help", "--interactive", "--no-clobber",
+		"--no-copy", "--no-target-directory", "--strip-trailing-slashes", "--suffix", "--target-directory", "--update",
+		"--verbose", "--version"},
+	"ln": {"--backup", "--directory", "--force", "--help", "--interactive", "--logical", "--no-dereference",
+		"--no-target-directory", "--physical", "--relative", "--suffix", "--symbolic", "--target-directory",
+		"--verbose", "--version"},
+	"install": {"--backup", "--compare", "--context", "--debug", "--directory", "--group", "--help", "--mode",
+		"--no-target-directory", "--owner", "--preserve-context", "--preserve-timestamps", "--strip",
+		"--strip-program", "--suffix", "--target-directory", "--verbose", "--version"},
 }
 
 // parsedOptions are a command's operands, the values of its value options keyed by the short
@@ -119,9 +149,12 @@ type parsedOptions struct {
 	flags    map[string]bool
 }
 
-// parseOptions splits words into operands, the values of spec's options and the flags of flags.
-// Everything after `--` is an operand, and so is an unknown word.
-func parseOptions(words []Word, spec, flags optionSpec) parsedOptions {
+// parseOptions splits a command's words into operands, the values of its valueOptions and its
+// flagOptions. Everything after `--` is an operand, and so is an unknown word. A long option may
+// be abbreviated to a prefix of one of its longOptions; an abbreviation of several fails the
+// command, which then has no operands.
+func parseOptions(command string, words []Word) parsedOptions {
+	spec, flags := valueOptions[command], flagOptions[command]
 	p := parsedOptions{values: map[string]Word{}, flags: map[string]bool{}}
 	for i := 0; i < len(words); i++ {
 		w := words[i]
@@ -133,6 +166,10 @@ func parseOptions(words []Word, spec, flags optionSpec) parsedOptions {
 			return p
 		case strings.HasPrefix(w.Text, "--"):
 			name, value, attached := strings.Cut(w.Text, "=")
+			name, ok := longOption(command, name)
+			if !ok {
+				return parsedOptions{}
+			}
 			if slices.Contains(flags.long, name) {
 				p.flags[name] = true
 			}
@@ -173,6 +210,42 @@ func parseOptions(words []Word, spec, flags optionSpec) parsedOptions {
 	return p
 }
 
+// longOption resolves a long option name the way getopt_long and git do: the name itself, or the
+// one long option of command it is a prefix of. A prefix of several is ambiguous (not ok); a name
+// command does not have stays as written.
+func longOption(command, name string) (string, bool) {
+	all := longOptions[command]
+	if slices.Contains(all, name) {
+		return name, true
+	}
+	match := ""
+	for _, option := range all {
+		if strings.HasPrefix(option, name) {
+			if match != "" {
+				return "", false
+			}
+			match = option
+		}
+	}
+	if match == "" {
+		return name, true
+	}
+	return match, true
+}
+
+// namesFile reports whether p can name a file a command creates: a last element of ., .. or /
+// names a directory that already exists.
+func namesFile(p string) bool {
+	base := path.Base(p)
+	return base != "." && base != ".." && base != "/"
+}
+
+// writtenAsDirectory reports whether w is written as a directory: with a trailing slash, or ending
+// in . or ..
+func writtenAsDirectory(w Word) bool {
+	return w.Known && w.Text != "" && (strings.HasSuffix(w.Text, "/") || !namesFile(w.Text))
+}
+
 func (c Command) commandTargets() []FileEffect {
 	name := c.Name()
 	if name == "" {
@@ -185,19 +258,23 @@ func (c Command) commandTargets() []FileEffect {
 	}
 	switch name {
 	case "rm", "unlink", "git-rm":
-		return effectsOf(parseOptions(args, valueOptions[name], optionSpec{}).operands, OpDelete)
+		return effectsOf(parseOptions(name, args).operands, OpDelete)
 	case "touch":
-		return effectsOf(parseOptions(args, valueOptions[name], optionSpec{}).operands, OpTouch)
+		return effectsOf(parseOptions(name, args).operands, OpTouch)
 	case "truncate":
-		return effectsOf(parseOptions(args, valueOptions[name], optionSpec{}).operands, OpTruncate)
+		return effectsOf(parseOptions(name, args).operands, OpTruncate)
 	case "tee":
-		opts := parseOptions(args, valueOptions[name], flagOptions[name])
+		opts := parseOptions(name, args)
 		if opts.flags["a"] || opts.flags["--append"] {
 			return effectsOf(opts.operands, OpAppend)
 		}
 		return effectsOf(opts.operands, OpWrite)
 	case "mv", "git-mv", "cp", "install", "ln":
-		opts := parseOptions(args, valueOptions[name], optionSpec{})
+		opts := parseOptions(name, args)
+		if opts.flags["d"] || opts.flags["--directory"] || opts.flags["n"] || opts.flags["--dry-run"] {
+			// install -d creates its operands as directories; git mv -n only says what it would do.
+			return nil
+		}
 		// mv's sources stop existing, so they are written too.
 		moves := name == "mv" || name == "git-mv"
 		dest := OpWrite
@@ -207,39 +284,62 @@ func (c Command) commandTargets() []FileEffect {
 		case name == "ln":
 			dest = OpLink
 		}
+		sources := opts.operands
 		dir, ok := opts.values["t"]
 		if !ok {
 			dir, ok = opts.values["--target-directory"]
 		}
+		parents := opts.flags["--parents"]
+		if opts.flags["T"] || opts.flags["--no-target-directory"] {
+			// -T makes the second of exactly two operands the destination itself; GNU refuses
+			// any other count, and -T with -t.
+			if ok || len(sources) != 2 {
+				return nil
+			}
+		} else if !ok {
+			switch n := len(sources); {
+			case n == 1 && name == "ln":
+				// ln TARGET links ./<base name of TARGET>.
+				dir, ok = Word{Text: ".", Known: true}, true
+			case n >= 3 || n == 2 && (parents || writtenAsDirectory(sources[1])):
+				// Several sources, or a destination written as a directory, go into the last operand.
+				dir, ok, sources = sources[n-1], true, sources[:n-1]
+			}
+		}
 		if ok {
-			// -t DIR makes every operand a source, written as DIR/<base name>.
+			// Every source is written as DIR/<base name>, or DIR/<source> with cp --parents.
 			var written []FileEffect
 			if moves {
-				written = effectsOf(opts.operands, OpMoveFrom)
+				written = effectsOf(sources, OpMoveFrom)
 			}
-			if !dir.Known {
+			if !dir.Known || dir.Text == "" {
 				return written
 			}
 			// The command line is shell syntax, so its paths join with "/" on every host; gitlink's
 			// RelPath converts them for the local filesystem.
-			for _, src := range opts.operands {
-				if src.Known {
-					written = append(written, FileEffect{Path: path.Join(dir.Text, path.Base(src.Text)), Op: dest})
+			for _, src := range sources {
+				if !src.Known || !namesFile(src.Text) {
+					continue
 				}
+				file := path.Base(src.Text)
+				if parents {
+					file = src.Text
+				}
+				written = append(written, FileEffect{Path: path.Join(dir.Text, file), Op: dest})
 			}
 			return written
 		}
 		if moves {
 			// Every operand but the last is a source. When the last is unknown, so is the
 			// destination, and every known operand is a source.
-			effects := effectsOf(opts.operands, OpMoveFrom)
-			if n := len(opts.operands); n >= 2 && opts.operands[n-1].Known {
+			effects := effectsOf(sources, OpMoveFrom)
+			if n := len(sources); n >= 2 && sources[n-1].Known {
 				effects[len(effects)-1].Op = OpMoveTo
 			}
 			return effects
 		}
-		if len(opts.operands) >= 2 {
-			return effectsOf(opts.operands[len(opts.operands)-1:], dest)
+		if len(sources) == 2 && namesFile(sources[1].Text) {
+			return effectsOf(sources[1:], dest)
 		}
 	case "sed", "perl", "gsed":
 		return effectsOf(inPlaceFiles(name, args), OpEdit)

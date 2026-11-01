@@ -566,6 +566,21 @@ func TestPathScrubberReplacesWholePathsOnly(t *testing.T) {
 	}
 }
 
+// A directory name may end in a space. The work directory is that directory, not its trimmed
+// sibling, so its files are shown relative to it and the project keeps its name.
+func TestShareKeepsWhitespaceInTheWorkingDirectory(t *testing.T) {
+	event := shareEventAt("2026-10-01T10:00:00Z", "claude_code", CollectionMethodHook, "file.modified", "file")
+	event.Session.WorkingDirectory = "/src/repo "
+	event.File = &FileInfo{Path: "/src/repo /x", Operation: "modify"}
+	bundle := BuildShareBundle([]Event{event}, shareTestOpts)
+	if len(bundle.Events) != 1 || bundle.Events[0].File == nil || bundle.Events[0].File.Path != "x" {
+		t.Fatalf("events = %+v", bundle.Events)
+	}
+	if bundle.Summary.Project == nil || bundle.Summary.Project.Name != "repo " {
+		t.Fatalf("project = %+v", bundle.Summary.Project)
+	}
+}
+
 func TestShareMessagesKeepsRepeatedPhaselessCallsApart(t *testing.T) {
 	// Cursor's beforeReadFile records file.read with a path and nothing else. Reading the same file
 	// twice is two calls, not a call and its result.

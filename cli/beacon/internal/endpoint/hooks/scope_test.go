@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/hookcmd"
 )
 
 // A hook writing to a machine-wide log is feeding a system-mode endpoint and must read the system
@@ -80,7 +81,7 @@ func TestHookDetectionRecognizesBothBinarySpellings(t *testing.T) {
 		`BEACON_ENDPOINT_MODE=1 '/home/u/.beacon/endpoint/hooks/beacon-hooks' --platform cursor`,
 		`BEACON_ENDPOINT_MODE=1 'C:\Users\u\.beacon\endpoint\hooks\beacon-hooks.exe' --platform cursor`,
 	} {
-		if !isEndpointHookCommand(command, "cursor") {
+		if !hookcmd.IsEndpointHook(command, "cursor") {
 			t.Errorf("command not recognized as a Beacon hook: %s", command)
 		}
 	}
@@ -90,7 +91,7 @@ func TestHookDetectionRecognizesBothBinarySpellings(t *testing.T) {
 		`echo keep`,
 		`/usr/local/bin/some-other-tool --platform cursor`,
 	} {
-		if isEndpointHookCommand(command, "cursor") {
+		if hookcmd.IsEndpointHook(command, "cursor") {
 			t.Errorf("unrelated command was claimed as a Beacon hook: %s", command)
 		}
 	}

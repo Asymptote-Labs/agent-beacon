@@ -6,14 +6,51 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/loggroup"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/localingest"
 )
 
-const repairSystemAction = "sudo beacon endpoint repair --system"
+// repairSystemAction repairs a system install with the privilege it needs on this platform.
+var repairSystemAction = func() string {
+	if runtime.GOOS == "windows" {
+		return "beacon endpoint repair --system (from an elevated shell)"
+	}
+	return "sudo beacon endpoint repair --system"
+}()
+
+// repairSystemWith is repairSystemAction with more flags.
+func repairSystemWith(flags string) string {
+	if runtime.GOOS == "windows" {
+		return "beacon endpoint repair --system " + flags + " (from an elevated shell)"
+	}
+	return "sudo beacon endpoint repair --system " + flags
+}
+
+// elevated says how to run doctor with the privilege a restricted log needs on this platform.
+func elevated() string {
+	if runtime.GOOS == "windows" {
+		return "from an elevated shell"
+	}
+	return "with sudo"
+}
+
+// privilegedWriters names who writes a restricted log: root, or SYSTEM and Administrators.
+func privilegedWriters() string {
+	if runtime.GOOS == "windows" {
+		return "SYSTEM and Administrators"
+	}
+	return "root"
+}
+
+// restrictedLogProblems reads a restricted log's ACL on Windows (writer.CheckRestrictedSystemLogACL);
+// a variable for tests.
+var restrictedLogProblems = writer.CheckRestrictedSystemLogACL
 
 // logMarkedRestricted reads the log's restricted marker. A variable because only a marker root owns
 // counts, and tests cannot be root.
@@ -32,6 +69,9 @@ func checkLogPermissionsFor(cfg endpointconfig.Config) Check {
 // can reach. Doctor usually runs with sudo; run without it, it cannot look inside the directory,
 // which is itself the restricted mode working, and says so instead of guessing.
 func checkRestrictedLogPermissions(path string) Check {
+	if runtime.GOOS == "windows" {
+		return checkRestrictedLogACL(path)
+	}
 	dir := filepath.Dir(path)
 	dirInfo, err := os.Stat(dir)
 	if err != nil {
@@ -47,7 +87,7 @@ func checkRestrictedLogPermissions(path string) Check {
 	switch {
 	case errors.Is(err, fs.ErrPermission):
 		return Check{Name: "runtime_log_permissions", Target: path, Status: StatusOK, Severity: SeverityInfo,
-			Message:  "this account cannot open the restricted log, as intended; run doctor with sudo to inspect it",
+			Message:  "this account cannot open the restricted log, as intended; run doctor " + elevated() + " to inspect it",
 			Evidence: "restricted_log_not_readable_by_caller"}
 	case err != nil:
 		return Check{Name: "runtime_log_permissions", Target: path, Status: StatusWarn, Severity: SeverityLow,
@@ -81,7 +121,7 @@ func checkLogAccess(cfg endpointconfig.Config, ingest localingest.Deliverer) Che
 		if marked {
 			return Check{Name: name, Target: path, Status: StatusWarn, Severity: SeverityMedium,
 				Message:  "the log is marked restricted but the endpoint config says shared, so hooks cannot append to it",
-				Evidence: "log_access_mismatch", Action: repairSystemAction + " --log-access shared"}
+				Evidence: "log_access_mismatch", Action: repairSystemWith("--log-access shared")}
 		}
 		if pending, err := ingest.Pending(path); err == nil && pending > 0 {
 			// Left from a time the log was restricted, or refused this account; the account's
@@ -97,7 +137,7 @@ func checkLogAccess(cfg endpointconfig.Config, ingest localingest.Deliverer) Che
 
 	if markerReadable && !marked {
 		return Check{Name: name, Target: path, Status: StatusFail, Severity: SeverityHigh,
-			Message:  "the endpoint config says restricted but the log is not marked, so the collector will make it world-writable again at its next write",
+			Message:  "the endpoint config says restricted but the log is not marked, so the collector will make it writable by every account again at its next write",
 			Evidence: "log_access_marker_missing", Action: repairSystemAction}
 	}
 	// A probe, not a look at the socket file: a collector that was killed leaves its socket behind,
@@ -126,9 +166,9 @@ func checkLogAccess(cfg endpointconfig.Config, ingest localingest.Deliverer) Che
 			Message:  fmt.Sprintf("restricted; %d events from this account are waiting in its spool and go to the collector with the next event", pending),
 			Evidence: "ingest_spool_pending"}
 	}
-	message := fmt.Sprintf("restricted: only the collector writes the log; root and the %s group read it", loggroup.Name)
+	message := fmt.Sprintf("restricted: only the collector writes the log; %s and the %s group read it", privilegedWriters(), loggroup.Name)
 	if !markerReadable {
-		message += " (run doctor with sudo to inspect the log itself)"
+		message += " (run doctor " + elevated() + " to inspect the log itself)"
 	}
 	return Check{Name: name, Target: path, Status: StatusOK, Severity: SeverityInfo, Message: message, Evidence: "log_access_restricted"}
 }
@@ -138,4 +178,33 @@ func ingestSocketPath(ingest localingest.Deliverer) string {
 		return ingest.Client.SocketPath
 	}
 	return localingest.DefaultSocketPath
+}
+
+// checkRestrictedLogACL is checkRestrictedLogPermissions on Windows, where file modes say nothing:
+// the directory and every file of the log family must grant nobody but SYSTEM, Administrators and
+// the readers group (who may only read) anything at all. Run unelevated it cannot open the
+// directory, which is the restricted mode working, unless it found a problem before it was refused.
+func checkRestrictedLogACL(path string) Check {
+	dir := filepath.Dir(path)
+	problems, err := restrictedLogProblems(path)
+	switch {
+	// Before the errors: an account that can read the directory's ACL but not open what is in it
+	// still found a directory too open, and that is the answer, not "as intended".
+	case len(problems) > 0:
+		return Check{Name: "runtime_log_permissions", Target: dir, Status: StatusFail, Severity: SeverityHigh,
+			Message:  "the restricted log lets accounts outside SYSTEM, Administrators and the " + loggroup.Name + " group reach it: " + strings.Join(problems, "; "),
+			Evidence: "restricted_log_too_open", Action: repairSystemAction}
+	case errors.Is(err, fs.ErrPermission):
+		return Check{Name: "runtime_log_permissions", Target: dir, Status: StatusOK, Severity: SeverityInfo,
+			Message:  "this account cannot open the restricted log, as intended; run doctor " + elevated() + " to inspect it",
+			Evidence: "restricted_log_not_readable_by_caller"}
+	case errors.Is(err, fs.ErrNotExist):
+		return Check{Name: "runtime_log_permissions", Target: dir, Status: StatusFail, Severity: SeverityMedium,
+			Message: "the log directory is missing: " + err.Error(), Evidence: "log_dir_missing", Action: repairSystemAction}
+	case err != nil:
+		return Check{Name: "runtime_log_permissions", Target: dir, Status: StatusWarn, Severity: SeverityLow,
+			Message: "could not read the restricted log's ACL: " + err.Error(), Evidence: "acl_unreadable"}
+	}
+	return Check{Name: "runtime_log_permissions", Target: dir, Status: StatusOK, Severity: SeverityInfo,
+		Message: "restricted: only SYSTEM, Administrators and the " + loggroup.Name + " group can reach the log", Evidence: "restricted_acl"}
 }

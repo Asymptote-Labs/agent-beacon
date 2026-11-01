@@ -160,8 +160,8 @@ func nativeBlocker(session Session, target string, opts PlanOptions) string {
 // resumeDir is the directory the runtime starts in. A runtime reopens and scopes a session by its
 // directory, so a session whose directory is gone does not start anywhere else by accident.
 func resumeDir(session Session, override string) (string, error) {
-	dir := strings.TrimSpace(override)
-	if dir == "" {
+	dir := override
+	if strings.TrimSpace(dir) == "" {
 		dir = session.Directory
 	}
 	if dir == "" {

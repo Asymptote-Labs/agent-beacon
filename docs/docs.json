@@ -238,6 +238,7 @@
               "security/data-inventory",
               "security/retention-redaction",
               "security/endpoint-operations",
+              "security/restricted-log-access",
               "security/policy"
             ]
           },
@@ -334,6 +335,7 @@
                   "cli/endpoint-onboarding",
                   "cli/endpoint-opencode",
                   "cli/endpoint-pi",
+                  "cli/endpoint-cursor",
                   "cli/endpoint-copilot",
                   "cli/endpoint-devin",
                   "cli/endpoint-dsh",
@@ -504,7 +506,8 @@
                   "log-forwarding/cloudwatch",
                   "log-forwarding/customer-managed",
                   "log-forwarding/datadog",
-                  "log-forwarding/elastic"
+                  "log-forwarding/elastic",
+                  "log-forwarding/rsyslog"
                 ]
               },
               {
@@ -557,6 +560,13 @@
                 "root": "mdm/fleet",
                 "pages": [
                   "guides/fleet-s3-mdm"
+                ]
+              },
+              {
+                "group": "Kandji",
+                "expanded": true,
+                "pages": [
+                  "guides/kandji-otlp-forward-mdm"
                 ]
               }
             ]

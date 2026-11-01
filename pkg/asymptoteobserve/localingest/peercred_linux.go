@@ -5,6 +5,7 @@ package localingest
 import (
 	"fmt"
 	"net"
+	"strconv"
 
 	"golang.org/x/sys/unix"
 )
@@ -27,7 +28,7 @@ func peerCredentials(conn *net.UnixConn) (Peer, error) {
 	if credErr != nil {
 		return Peer{}, fmt.Errorf("read peer credentials: %w", credErr)
 	}
-	return Peer{UID: cred.Uid, GID: cred.Gid, PID: cred.Pid}, nil
+	return Peer{UID: strconv.FormatUint(uint64(cred.Uid), 10), GID: cred.Gid, PID: cred.Pid}, nil
 }
 
 const peerCredentialsSupported = true

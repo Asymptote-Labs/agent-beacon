@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 )
@@ -32,9 +31,18 @@ func TestNormalizeUploadsRejectsUnsupportedProvider(t *testing.T) {
 
 func TestResolveUploadDestinationsRequiresBucket(t *testing.T) {
 	t.Setenv(EnvS3Bucket, "")
-	_, err := resolveUploadDestinations([]string{"s3"}, nil, "/tmp/runtime.jsonl", time.Unix(1700000000, 0).UTC())
+	_, err := resolveUploadDestinations([]string{"s3"}, nil, "/tmp/runtime.jsonl", "1700000000000000000-0a0b0c0d")
 	if err == nil || !strings.Contains(err.Error(), EnvS3Bucket) {
 		t.Fatalf("resolveUploadDestinations error = %v, want missing bucket", err)
+	}
+}
+
+func TestResolveUploadDestinationsRequiresUploadSession(t *testing.T) {
+	t.Setenv(EnvS3Bucket, "beacon-ci")
+	for _, session := range []string{"", " ", ".."} {
+		if _, err := resolveUploadDestinations([]string{"s3"}, nil, "/tmp/runtime.jsonl", session); err == nil {
+			t.Fatalf("resolveUploadDestinations(session %q) returned no error; an empty session folder would let sessions overwrite each other", session)
+		}
 	}
 }
 
@@ -45,8 +53,9 @@ func TestResolveUploadDestinationsBuildsGitHubObjectKeys(t *testing.T) {
 		Repository: "asymptote-labs/agent-beacon",
 		RunID:      "123",
 		RunAttempt: "2",
+		Job:        "telemetry",
 	}
-	destinations, err := resolveUploadDestinations([]string{"s3"}, run, "/tmp/runtime.jsonl", time.Unix(1700000000, 0).UTC())
+	destinations, err := resolveUploadDestinations([]string{"s3"}, run, "/tmp/runtime.jsonl", "1700000000000000000-0a0b0c0d")
 	if err != nil {
 		t.Fatalf("resolveUploadDestinations returned error: %v", err)
 	}
@@ -54,25 +63,28 @@ func TestResolveUploadDestinationsBuildsGitHubObjectKeys(t *testing.T) {
 		t.Fatalf("destinations = %d, want 1", len(destinations))
 	}
 	dest := destinations[0]
-	if dest.Key != "logs/asymptote-labs/agent-beacon/123/2/runtime.jsonl" {
+	if dest.Key != "logs/asymptote-labs/agent-beacon/123/2/telemetry/1700000000000000000-0a0b0c0d/runtime.jsonl" {
 		t.Fatalf("Key = %q", dest.Key)
 	}
-	if dest.URI != "s3://beacon-ci/logs/asymptote-labs/agent-beacon/123/2/runtime.jsonl" {
+	if dest.URI != "s3://beacon-ci/logs/asymptote-labs/agent-beacon/123/2/telemetry/1700000000000000000-0a0b0c0d/runtime.jsonl" {
 		t.Fatalf("URI = %q", dest.URI)
+	}
+	run.Job = ""
+	if got, want := uploadObjectKey("logs", run, "/tmp/runtime.jsonl", "s"), "logs/asymptote-labs/agent-beacon/123/2/s/runtime.jsonl"; got != want {
+		t.Fatalf("key without a job = %q, want %q", got, want)
 	}
 }
 
 func TestResolveUploadDestinationsBuildsFallbackObjectKeys(t *testing.T) {
 	t.Setenv(EnvGCSBucket, "beacon-ci")
-	startedAt := time.Unix(0, 42).UTC()
-	destinations, err := resolveUploadDestinations([]string{"gcs"}, nil, "/tmp/runtime.jsonl", startedAt)
+	destinations, err := resolveUploadDestinations([]string{"gcs"}, nil, "/tmp/runtime.jsonl", "42-0a0b0c0d")
 	if err != nil {
 		t.Fatalf("resolveUploadDestinations returned error: %v", err)
 	}
-	if got, want := destinations[0].Key, "ci/42/runtime.jsonl"; got != want {
+	if got, want := destinations[0].Key, "ci/42-0a0b0c0d/runtime.jsonl"; got != want {
 		t.Fatalf("Key = %q, want %q", got, want)
 	}
-	if got, want := destinations[0].URI, "gs://beacon-ci/ci/42/runtime.jsonl"; got != want {
+	if got, want := destinations[0].URI, "gs://beacon-ci/ci/42-0a0b0c0d/runtime.jsonl"; got != want {
 		t.Fatalf("URI = %q, want %q", got, want)
 	}
 }

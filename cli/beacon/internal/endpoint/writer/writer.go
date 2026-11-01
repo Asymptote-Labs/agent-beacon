@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -157,8 +158,12 @@ func defaultIngest() localingest.Deliverer {
 		return localingest.Deliverer{}
 	}
 	dir := filepath.Join(os.TempDir(), fmt.Sprintf("beacon-writer-test-%d", os.Getpid()))
+	socket := filepath.Join(dir, "no-collector.sock")
+	if runtime.GOOS == "windows" {
+		socket = fmt.Sprintf(`\\.\pipe\beacon-writer-test-%d-none`, os.Getpid())
+	}
 	return localingest.Deliverer{
-		Client: localingest.Client{SocketPath: filepath.Join(dir, "no-collector.sock")},
+		Client: localingest.Client{SocketPath: socket},
 		Spool:  localingest.Spool{Dir: filepath.Join(dir, "spool")},
 	}
 }

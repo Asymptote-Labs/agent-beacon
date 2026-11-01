@@ -97,7 +97,7 @@ func TestScanNamesTheRuleThatExceededTheCostLimit(t *testing.T) {
 }
 
 // corpusRules loads the open corpus and the embedded baseline.
-func corpusRules(t *testing.T) []*Rule {
+func corpusRules(t testing.TB) []*Rule {
 	t.Helper()
 	var all []*Rule
 	for _, dir := range []string{rulesDir(t), filepath.Join(repoRoot(t), "pkg", "asymptoteobserve", "rulestore", "baseline")} {

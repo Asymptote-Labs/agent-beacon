@@ -1,9 +1,6 @@
 package config
 
-import (
-	"runtime"
-	"testing"
-)
+import "testing"
 
 func TestRestrictedLogAccess(t *testing.T) {
 	cases := []struct {
@@ -12,8 +9,8 @@ func TestRestrictedLogAccess(t *testing.T) {
 	}{
 		{Config{}, false},
 		{Config{LogAccess: "shared"}, false},
-		{Config{LogAccess: "restricted"}, runtime.GOOS != "windows"},
-		{Config{LogAccess: " Restricted "}, runtime.GOOS != "windows"},
+		{Config{LogAccess: "restricted"}, true},
+		{Config{LogAccess: " Restricted "}, true},
 		{Config{UserMode: true, LogAccess: "restricted"}, false},
 		{Config{LogAccess: "restricted-ish"}, false},
 	}

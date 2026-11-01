@@ -185,7 +185,7 @@ FULL_CLEANUP_LOCAL_RUNTIME="$TMP_DIR/full-cleanup-local-runtime"
 mkdir -p "$FULL_CLEANUP_LOCAL_HOME/.claude" "$FULL_CLEANUP_LOCAL_CONFIG/Endpoint" "$FULL_CLEANUP_LOCAL_RUNTIME"
 printf '%s\n' '{"collector":{"grpc_port":54317,"http_port":54318}}' \
   >"$FULL_CLEANUP_LOCAL_CONFIG/Endpoint/config.json"
-printf '%s\n' '{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:54318/","OTEL_LOGS_EXPORTER":"otlp","UNRELATED":"kept"}}' \
+printf '%s\n' '{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:54318/","OTEL_LOGS_EXPORTER":"otlp","OTEL_EXPORTER_OTLP_LOGS_ENDPOINT":"","OTEL_EXPORTER_OTLP_LOGS_PROTOCOL":"grpc","OTEL_EXPORTER_OTLP_TRACES_ENDPOINT":"https://later.example.com","UNRELATED":"kept"}}' \
   >"$FULL_CLEANUP_LOCAL_HOME/.claude/settings.json"
 printf '%s\n' secret-prompt >"$FULL_CLEANUP_LOCAL_RUNTIME/runtime.jsonl"
 PATH="$FULL_CLEANUP_USER_BIN:$FULL_CLEANUP_BIN:$PATH" \
@@ -202,8 +202,9 @@ RUNTIME_DIR="$FULL_CLEANUP_LOCAL_RUNTIME" \
 SYSTEM_CONFIG_DIR="$FULL_CLEANUP_LOCAL_CONFIG" \
 OPT_BEACON_DIR="$TMP_DIR/full-cleanup-local-opt" \
 "$FULL_CLEANUP_SCRIPT" >/dev/null 2>&1
-if grep -q -e OTEL_EXPORTER_OTLP_ENDPOINT -e CLAUDE_CODE_ENABLE_TELEMETRY -e OTEL_LOGS_EXPORTER "$FULL_CLEANUP_LOCAL_HOME/.claude/settings.json" ||
-   ! grep -q '"UNRELATED": "kept"' "$FULL_CLEANUP_LOCAL_HOME/.claude/settings.json"; then
+if grep -q -e OTEL_EXPORTER_OTLP_ENDPOINT -e CLAUDE_CODE_ENABLE_TELEMETRY -e OTEL_LOGS_EXPORTER -e OTEL_EXPORTER_OTLP_LOGS_ "$FULL_CLEANUP_LOCAL_HOME/.claude/settings.json" ||
+   ! grep -q '"UNRELATED": "kept"' "$FULL_CLEANUP_LOCAL_HOME/.claude/settings.json" ||
+   ! grep -q '"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "https://later.example.com"' "$FULL_CLEANUP_LOCAL_HOME/.claude/settings.json"; then
   echo "full cleanup should remove only the Claude OTLP settings that point at the installed Beacon collector" >&2
   exit 1
 fi

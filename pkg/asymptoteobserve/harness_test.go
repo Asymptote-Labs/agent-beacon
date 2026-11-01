@@ -10,10 +10,12 @@ import "testing"
 // produces; the closed-set cases list each member.
 func TestHarnessSpellingsConvergeOnCanonicalNames(t *testing.T) {
 	for want, spellings := range map[string][]string{
-		"claude_code":     {"claude", "claude-code"},
-		"claude_web":      {"claude.ai", "claude_web"}, // ordered before the generic claude rule
-		"codex_cli":       {"codex", "codex-cli", "codex_exec", "codex_cli_rs"},
-		"codex_desktop":   {"codex-app-server", "codex_app_server", "Codex App Server", "codex-desktop", "Codex Desktop"},
+		"claude_code": {"claude", "claude-code"},
+		"claude_web":  {"claude.ai", "claude_web"}, // ordered before the generic claude rule
+		// The app-server service name is shared by the CLI and the desktop app, so on its own it
+		// says codex_cli; the exporter names Desktop conversations by their originator.
+		"codex_cli":       {"codex", "codex-cli", "codex_exec", "codex_cli_rs", "codex-app-server", "codex_app_server", "Codex App Server"},
+		"codex_desktop":   {"codex-desktop", "Codex Desktop", "codex_desktop"},
 		"gemini_cli":      {"gemini"},
 		"antigravity_cli": {"antigravity"},
 		// VS Code resolves before the generic copilot rule; "copilot" contains "pi", so Pi must not
@@ -52,6 +54,30 @@ func TestHarnessSpellingsConvergeOnCanonicalNames(t *testing.T) {
 			if got := NormalizeHarnessName(in); got != want {
 				t.Errorf("NormalizeHarnessName(%q) = %q, want %q -- one session would be recorded under two names", in, got, want)
 			}
+		}
+	}
+}
+
+// Each originator Codex's clients report (openai/codex otel/src/metrics/tags.rs), in the spelling
+// OTLP carries and, for the desktop app, the raw one a rollout's session_meta carries.
+func TestCodexSurfaceNamesOnlyTheDesktopAppDesktop(t *testing.T) {
+	for want, originators := range map[string][]string{
+		"codex_desktop": {"Codex_Desktop", "Codex Desktop", "codex_desktop", "codex-desktop"},
+		"codex_cli": {"codex-tui", "codex_exec", "codex_cli_rs", "codex-cli", "codex_vscode", "codex_sdk_ts",
+			"codex_mcp_server", "codex-app-server-sdk", "other", ""},
+	} {
+		for _, originator := range originators {
+			if got := CodexSurface(originator); got != want {
+				t.Errorf("CodexSurface(%q) = %q, want %q", originator, got, want)
+			}
+		}
+	}
+	for name, want := range map[string]bool{
+		"codex-app-server": true, "codex_app_server": true, "Codex App Server": true,
+		"codex_cli_rs": false, "codex_exec": false, "codex-app-server-sdk": false, "": false,
+	} {
+		if got := IsCodexAppServer(name); got != want {
+			t.Errorf("IsCodexAppServer(%q) = %t, want %t", name, got, want)
 		}
 	}
 }

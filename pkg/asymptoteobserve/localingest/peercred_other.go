@@ -1,4 +1,4 @@
-//go:build !linux && !darwin
+//go:build unix && !linux && !darwin
 
 package localingest
 

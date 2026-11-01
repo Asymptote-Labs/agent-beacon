@@ -169,6 +169,93 @@ func TestConfigureClaudeWritesTelemetryEnvAndBackup(t *testing.T) {
 	}
 }
 
+var claudeRoutingKeys = []string{
+	"OTEL_EXPORTER_OTLP_HEADERS",
+	"BETA_TRACING_ENDPOINT",
+	"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL", "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
+	"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL", "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
+	"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL", "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+}
+
+// configureClaudeOver writes settings.json with env, clears the routing variables from this
+// process's environment, and returns the settings path.
+func configureClaudeOver(t *testing.T, env string) string {
+	t.Helper()
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	for _, key := range claudeRoutingKeys {
+		t.Setenv(key, "")
+	}
+	path := filepath.Join(home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"env":`+env+`}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func readClaudeEnv(t *testing.T, path string) map[string]string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settings map[string]map[string]string
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatal(err)
+	}
+	return settings["env"]
+}
+
+// Claude Code lets a per-signal endpoint, protocol or headers variable replace or join the generic
+// one, so one left in settings.json or the shell sends that signal past the local collector.
+func TestConfigureClaudeOverridesPerSignalRouting(t *testing.T) {
+	path := configureClaudeOver(t, `{
+		"CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+		"OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:4317",
+		"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": "https://siem.example.com/v1/logs",
+		"OTEL_EXPORTER_OTLP_LOGS_PROTOCOL": "http/protobuf",
+		"OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer secret"
+	}`)
+	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "https://shell.example.com/v1/traces")
+	if status, msg := claudeStatus(path); status != TelemetryMisconfigured {
+		t.Fatalf("claudeStatus before configure = %q (%s), want %q while logs go to the SIEM", status, msg, TelemetryMisconfigured)
+	}
+
+	if _, err := ConfigureClaude(ConfigureOptions{Endpoint: "http://127.0.0.1:4317", UserMode: true}); err != nil {
+		t.Fatal(err)
+	}
+	env := readClaudeEnv(t, path)
+	for key, want := range map[string]string{
+		"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT":   "",
+		"OTEL_EXPORTER_OTLP_LOGS_PROTOCOL":   "grpc",
+		"OTEL_EXPORTER_OTLP_HEADERS":         "",
+		"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "",
+	} {
+		if got, set := env[key]; !set || got != want {
+			t.Errorf("env[%s] = %q (set=%v), want %q", key, got, set, want)
+		}
+	}
+	if status, msg := claudeStatus(path); status != TelemetryEnabled {
+		t.Fatalf("claudeStatus after configure = %q (%s), want %q", status, msg, TelemetryEnabled)
+	}
+}
+
+func TestConfigureClaudeAddsNoRoutingOverridesNobodySet(t *testing.T) {
+	path := configureClaudeOver(t, `{"EXISTING": "1"}`)
+	if _, err := ConfigureClaude(ConfigureOptions{Endpoint: "http://127.0.0.1:4317", UserMode: true}); err != nil {
+		t.Fatal(err)
+	}
+	env := readClaudeEnv(t, path)
+	for _, key := range claudeRoutingKeys {
+		if value, set := env[key]; set {
+			t.Errorf("settings.json env sets %s=%q though nothing routed that signal", key, value)
+		}
+	}
+}
+
 // Model-context capture is opt-in. The opt-in sets inline API bodies only where nothing is set, and
 // install without it removes an inline setting, so a repair without the flag turns capture off.
 // Neither overrides 0 or file:<dir>.
@@ -308,6 +395,9 @@ func TestClaudeStatusVariants(t *testing.T) {
 		{name: "disabled", body: `{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0"}}`, status: TelemetryDisabled},
 		{name: "remote endpoint", body: `{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"https://example.com"}}`, status: TelemetryMisconfigured},
 		{name: "enabled", body: `{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:4317"}}`, status: TelemetryEnabled},
+		{name: "per-signal remote endpoint", body: `{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:4317","OTEL_EXPORTER_OTLP_LOGS_ENDPOINT":"https://example.com/v1/logs"}}`, status: TelemetryMisconfigured},
+		{name: "beta tracing remote endpoint", body: `{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:4317","BETA_TRACING_ENDPOINT":"https://example.com"}}`, status: TelemetryMisconfigured},
+		{name: "per-signal endpoint cancelled", body: `{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:4317","OTEL_EXPORTER_OTLP_LOGS_ENDPOINT":""}}`, status: TelemetryEnabled},
 	}
 
 	for _, tt := range tests {

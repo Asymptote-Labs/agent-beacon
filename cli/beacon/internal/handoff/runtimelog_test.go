@@ -68,3 +68,24 @@ func TestLogSessionsIgnoresBeaconBookkeepingForRecency(t *testing.T) {
 		t.Fatalf("sessions = %+v", sessions)
 	}
 }
+
+// A directory name may end in a space; the session is listed under that directory, not its
+// trimmed sibling, so `beacon share` run there finds it.
+func TestLogSessionsKeepsWhitespaceInTheDirectory(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "runtime.jsonl")
+	project := filepath.Join(dir, "app ")
+	event := schema.NewEvent(schema.NewEventOptions{Action: "prompt.submitted", Category: "prompt", Harness: schema.HarnessInfo{Name: "kiro"}})
+	event.Timestamp = "2026-10-01T10:00:00.000000000Z"
+	event.Session = &schema.SessionInfo{ID: "k1", WorkingDirectory: project}
+	if _, err := writer.AppendEvent(event, writer.Options{Path: logPath, UserMode: true}); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := LogSessions(logPath, Filter{Directory: project})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].Directory != project {
+		t.Fatalf("sessions = %+v, want one in %q", sessions, project)
+	}
+}
