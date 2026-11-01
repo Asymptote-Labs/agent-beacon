@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/atomicfile"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sysacl"
 )
 
 const (
@@ -258,7 +259,18 @@ func saveOTLPForwardSecrets(cfg Config) error {
 	if err != nil {
 		return err
 	}
-	return atomicfile.Write(path, data, 0600)
+	return writeSecretFile(cfg.UserMode, path, data)
+}
+
+// writeSecretFile writes a file holding a credential. A system install's files sit in the
+// machine-wide tree, whose Windows DACL lets every user read what is below it and ignores the
+// mode, so they are created with SYSTEM and Administrators only (sysacl.WriteSecretFile); per-user
+// files are in the person's own profile and keep the mode.
+func writeSecretFile(userMode bool, path string, data []byte) error {
+	if userMode {
+		return atomicfile.Write(path, data, 0600)
+	}
+	return sysacl.WriteSecretFile(path, data)
 }
 
 type SplunkHEC struct {
@@ -472,11 +484,13 @@ func Save(cfg Config) (string, error) {
 	if err := saveOTLPForwardSecrets(cfg); err != nil {
 		return "", err
 	}
-	perm := os.FileMode(0644)
 	if hasSecretConfigFields(cfg) {
-		perm = 0600
+		if err := writeSecretFile(cfg.UserMode, path, data); err != nil {
+			return "", err
+		}
+		return path, nil
 	}
-	if err := atomicfile.Write(path, data, perm); err != nil {
+	if err := atomicfile.Write(path, data, 0644); err != nil {
 		return "", err
 	}
 	return path, nil

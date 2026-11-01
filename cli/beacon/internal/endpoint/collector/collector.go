@@ -13,6 +13,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/brewpath"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sysacl"
 )
 
 const (
@@ -118,17 +119,19 @@ func WriteConfig(cfg endpointconfig.Config) error {
 	if err := os.MkdirAll(filepath.Dir(cfg.Collector.SpoolPath), 0755); err != nil {
 		return err
 	}
-	perm := os.FileMode(0644)
 	if endpointconfig.HasSecretDestinations(cfg) {
-		perm = 0600
+		// The collector config renders the destinations' tokens and headers. On a system install
+		// it is created SYSTEM and Administrators only (the 0600 mode means nothing on Windows,
+		// and the tree's DACL lets every user read below it); per-user configs keep the mode.
+		if !cfg.UserMode {
+			return sysacl.WriteSecretFile(cfg.Collector.ConfigPath, []byte(ConfigYAML(cfg)))
+		}
+		if err := os.WriteFile(cfg.Collector.ConfigPath, []byte(ConfigYAML(cfg)), 0600); err != nil {
+			return err
+		}
+		return os.Chmod(cfg.Collector.ConfigPath, 0600)
 	}
-	if err := os.WriteFile(cfg.Collector.ConfigPath, []byte(ConfigYAML(cfg)), perm); err != nil {
-		return err
-	}
-	if endpointconfig.HasSecretDestinations(cfg) {
-		return os.Chmod(cfg.Collector.ConfigPath, perm)
-	}
-	return nil
+	return os.WriteFile(cfg.Collector.ConfigPath, []byte(ConfigYAML(cfg)), 0644)
 }
 
 // IngestExtension is the collector extension that serves the local ingest socket in the restricted
