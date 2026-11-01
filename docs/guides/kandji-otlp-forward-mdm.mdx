@@ -110,7 +110,7 @@ args=(endpoint repair --system
   --harness claude,codex
   --otlp-forward-endpoint "$OTLP_FORWARD_ENDPOINT"
   --otlp-forward-protocol "$OTLP_FORWARD_PROTOCOL")
-for header in "${OTLP_FORWARD_HEADERS[@]}"; do
+for header in ${OTLP_FORWARD_HEADERS[@]+"${OTLP_FORWARD_HEADERS[@]}"}; do
   args+=(--otlp-forward-header "$header")
 done
 
