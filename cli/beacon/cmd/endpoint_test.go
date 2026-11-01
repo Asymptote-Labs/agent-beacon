@@ -490,6 +490,26 @@ func TestOTLPForwardHarnesses(t *testing.T) {
 	}
 }
 
+// The missing-headers warning prints the whole forward: --otlp-forward-endpoint replaces it, so a
+// command that restated only the headers would drop the protocol and the rest.
+func TestOTLPForwardFlagsRestateTheWholeForward(t *testing.T) {
+	got := otlpForwardFlags(&endpointconfig.OTLPForward{
+		Endpoint:    "https://otel.backend.example",
+		Protocol:    endpointconfig.OTLPForwardProtocolHTTP,
+		Harnesses:   []string{"claude_code"},
+		CAFile:      "/etc/ssl/backend ca.pem",
+		HeaderNames: []string{"authorization", "x-org"},
+	})
+	want := "--otlp-forward-endpoint https://otel.backend.example --otlp-forward-protocol http/protobuf --otlp-forward-harness claude_code" +
+		" --otlp-forward-ca-file '/etc/ssl/backend ca.pem' --otlp-forward-header 'authorization=<value>' --otlp-forward-header 'x-org=<value>'"
+	if got != want {
+		t.Fatalf("otlpForwardFlags =\n  %s\nwant\n  %s", got, want)
+	}
+	if got := otlpForwardFlags(&endpointconfig.OTLPForward{Endpoint: "otel.example:4317", Protocol: "grpc", Harnesses: endpointconfig.DefaultOTLPForwardHarnesses, Insecure: true}); got != "--otlp-forward-endpoint otel.example:4317 --otlp-forward-insecure" {
+		t.Fatalf("defaults not left out: %s", got)
+	}
+}
+
 func TestRepairCollectorServiceRollsBackWhenReadinessFails(t *testing.T) {
 	oldOpts := endpointOpts
 	oldLoadConfig := repairLoadEndpointConfig
