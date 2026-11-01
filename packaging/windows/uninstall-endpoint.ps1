@@ -56,7 +56,18 @@ function Copy-Retained([string]$source, [string]$destination, [string]$sddl) {
     $partial = "$destination.restoring"
     Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue
     $bytes = [System.IO.File]::ReadAllBytes($source)
-    $stream = [System.IO.File]::Create($partial, 4096, [System.IO.FileOptions]::None, $security)
+    if ($PSVersionTable.PSEdition -eq 'Core') {
+        # PowerShell 7 (.NET) has no File.Create overload that takes a FileSecurity; the extension
+        # method is its equivalent, still setting the descriptor as the file is created.
+        Add-Type -AssemblyName System.IO.FileSystem.AccessControl -ErrorAction SilentlyContinue
+        $stream = [System.IO.FileSystemAclExtensions]::Create(
+            [System.IO.FileInfo]::new($partial), [System.IO.FileMode]::CreateNew,
+            [System.Security.AccessControl.FileSystemRights]::Write, [System.IO.FileShare]::None,
+            4096, [System.IO.FileOptions]::None, $security)
+    } else {
+        # Windows PowerShell 5.1 (.NET Framework), which the MSI runs.
+        $stream = [System.IO.File]::Create($partial, 4096, [System.IO.FileOptions]::None, $security)
+    }
     try {
         $stream.Write($bytes, 0, $bytes.Length)
     } finally {
