@@ -31,6 +31,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sysacl"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
@@ -95,6 +96,10 @@ type repairFileSnapshot struct {
 	existed bool
 	data    []byte
 	mode    os.FileMode
+	// secret is set for a file carrying sysacl.SecretFileDACL (on Windows, a system file holding a
+	// credential), so a rollback restores it SYSTEM/Administrators-only rather than with the tree's
+	// DACL that every user can read.
+	secret  bool
 	readErr error
 }
 
@@ -1763,6 +1768,7 @@ func snapshotRepairFile(path string) repairFileSnapshot {
 	if info, statErr := os.Stat(path); statErr == nil {
 		snapshot.mode = info.Mode().Perm()
 	}
+	snapshot.secret = sysacl.IsSecretFile(path)
 	return snapshot
 }
 
@@ -1778,6 +1784,9 @@ func restoreRepairFile(path string, snapshot repairFileSnapshot) error {
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
+	}
+	if snapshot.secret {
+		return sysacl.WriteSecretFile(path, snapshot.data)
 	}
 	mode := snapshot.mode
 	if mode == 0 {
