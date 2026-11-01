@@ -28,7 +28,12 @@ func runBeaconCLI(t *testing.T, args ...string) (string, error) {
 	}
 	reset := func(c *cobra.Command) {
 		c.Flags().VisitAll(func(f *pflag.Flag) {
-			_ = f.Value.Set(f.DefValue)
+			// Set appends to a slice flag, and its DefValue "[]" would become one element.
+			if slice, ok := f.Value.(pflag.SliceValue); ok {
+				_ = slice.Replace(nil)
+			} else {
+				_ = f.Value.Set(f.DefValue)
+			}
 			f.Changed = false
 		})
 	}

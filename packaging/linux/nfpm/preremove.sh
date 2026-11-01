@@ -40,7 +40,7 @@ esac
 CONFIG_DIR=/etc/beacon/endpoint
 STASH="$(mktemp -d)"
 saved=0
-for f in config.json otelcol.yaml; do
+for f in config.json otelcol.yaml otlp-forward-headers.json; do
   if [ -f "$CONFIG_DIR/$f" ]; then
     cp -p "$CONFIG_DIR/$f" "$STASH/$f" && saved=1
   fi
@@ -53,7 +53,7 @@ fi
 
 if [ "$saved" = 1 ]; then
   mkdir -p "$CONFIG_DIR"
-  for f in config.json otelcol.yaml; do
+  for f in config.json otelcol.yaml otlp-forward-headers.json; do
     [ -f "$STASH/$f" ] && cp -p "$STASH/$f" "$CONFIG_DIR/$f"
   done
 fi

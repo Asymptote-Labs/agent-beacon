@@ -15,6 +15,9 @@ processors:
   - gomod: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter v0.0.0
     import: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/privacyprocessor
     path: ./exporter/beaconjsonexporter
+  - gomod: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter v0.0.0
+    import: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/forwardfilterprocessor
+    path: ./exporter/beaconjsonexporter
 
 exporters:
   - gomod: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter v0.0.0
@@ -23,6 +26,9 @@ exporters:
     import: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/falconhecexporter
     path: ./exporter/beaconjsonexporter
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/splunkhecexporter v0.121.0
+  # OTLP forwarding (`beacon endpoint install --otlp-forward-endpoint`) to a second OTLP backend.
+  - gomod: go.opentelemetry.io/collector/exporter/otlpexporter v0.121.0
+  - gomod: go.opentelemetry.io/collector/exporter/otlphttpexporter v0.121.0
 
 extensions:
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckextension v0.121.0

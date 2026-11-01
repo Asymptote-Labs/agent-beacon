@@ -33,6 +33,12 @@ var listComponents = func(ctx context.Context, binary string) ([]byte, error) {
 // extensions names the extensions the config will use beyond health_check -- beacon_ingest, in the
 // restricted log access mode -- which are refused the same way.
 func CheckComponents(binary string, extensions ...string) error {
+	return CheckComponentsFor(binary, extensions, nil, nil)
+}
+
+// CheckComponentsFor is CheckComponents with the processors and exporters the config will use
+// beyond Beacon's own -- the OTLP forward's -- refused the same way.
+func CheckComponentsFor(binary string, extensions, processors, exporters []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	out, err := listComponents(ctx, binary)
@@ -46,6 +52,9 @@ func CheckComponents(binary string, extensions ...string) error {
 		Extensions []struct {
 			Name string `yaml:"name"`
 		} `yaml:"extensions"`
+		Exporters []struct {
+			Name string `yaml:"name"`
+		} `yaml:"exporters"`
 	}
 	if yaml.Unmarshal(out, &listed) != nil || len(listed.Processors) == 0 {
 		return nil
@@ -54,7 +63,7 @@ func CheckComponents(binary string, extensions ...string) error {
 	for _, processor := range listed.Processors {
 		have[processor.Name] = true
 	}
-	for _, name := range requiredProcessors {
+	for _, name := range append(append([]string{}, requiredProcessors...), processors...) {
 		if !have[name] {
 			return fmt.Errorf("collector %s is older than this beacon CLI: it has no %q processor, which the collector config needs; "+
 				"use the %s from the same Beacon release, or pass --collector with one", binary, name, BinaryName)
@@ -67,6 +76,16 @@ func CheckComponents(binary string, extensions ...string) error {
 	for _, name := range extensions {
 		if !haveExtension[name] {
 			return fmt.Errorf("collector %s is older than this beacon CLI: it has no %q extension, which the restricted log access mode needs; "+
+				"use the %s from the same Beacon release, or pass --collector with one", binary, name, BinaryName)
+		}
+	}
+	haveExporter := map[string]bool{}
+	for _, exporter := range listed.Exporters {
+		haveExporter[exporter.Name] = true
+	}
+	for _, name := range exporters {
+		if !haveExporter[name] {
+			return fmt.Errorf("collector %s is older than this beacon CLI: it has no %q exporter, which OTLP forwarding needs; "+
 				"use the %s from the same Beacon release, or pass --collector with one", binary, name, BinaryName)
 		}
 	}
