@@ -431,8 +431,8 @@ func TestConfigYAMLForwardsFilteredRedactedOTLPWhenConfigured(t *testing.T) {
 	for _, tc := range []struct {
 		protocol, endpoint, exporter string
 	}{
-		{endpointconfig.OTLPForwardProtocolGRPC, "otel.tokenize.example:4317", "otlp/forward"},
-		{endpointconfig.OTLPForwardProtocolHTTP, "https://otel.tokenize.example", "otlphttp/forward"},
+		{endpointconfig.OTLPForwardProtocolGRPC, "otel.backend.example:4317", "otlp/forward"},
+		{endpointconfig.OTLPForwardProtocolHTTP, "https://otel.backend.example", "otlphttp/forward"},
 	} {
 		t.Run(tc.protocol, func(t *testing.T) {
 			cfg := testConfig(t)

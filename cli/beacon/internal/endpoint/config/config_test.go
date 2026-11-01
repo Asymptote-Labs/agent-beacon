@@ -262,7 +262,7 @@ func TestSaveLoadOTLPForwardKeepsHeaderValuesOutOfConfigJSON(t *testing.T) {
 	testenv.SetHome(t, home)
 	cfg := Default(true, filepath.Join(home, "logs", "runtime.jsonl"))
 	cfg.Destinations = &Destinations{OTLPForward: &OTLPForward{
-		Endpoint: " https://otel.tokenize.example ",
+		Endpoint: " https://otel.backend.example ",
 		Protocol: "http",
 		Headers:  map[string]string{"authorization": "Bearer secret"},
 	}}
@@ -295,7 +295,7 @@ func TestSaveLoadOTLPForwardKeepsHeaderValuesOutOfConfigJSON(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 	forward := loaded.Destinations.OTLPForward
-	if !forward.Enabled || forward.Endpoint != "https://otel.tokenize.example" || forward.Protocol != OTLPForwardProtocolHTTP || forward.Headers["authorization"] != "Bearer secret" {
+	if !forward.Enabled || forward.Endpoint != "https://otel.backend.example" || forward.Protocol != OTLPForwardProtocolHTTP || forward.Headers["authorization"] != "Bearer secret" {
 		t.Fatalf("OTLP forward did not round-trip: %#v", forward)
 	}
 	if strings.Join(forward.Harnesses, ",") != "claude_code,codex_cli,codex_desktop" {
