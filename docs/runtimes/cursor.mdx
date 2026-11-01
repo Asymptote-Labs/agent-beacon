@@ -15,7 +15,7 @@ Before enabling Cursor hooks, make sure:
 
 - Cursor is installed for the user or the `~/.cursor` directory exists.
 - `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
-- Beacon hooks are installed with `beacon endpoint hooks install --harness cursor`.
+- Beacon hooks are installed, either by `beacon endpoint install` when it detects Cursor (or with `--harness cursor`) or with `beacon endpoint hooks install --harness cursor`.
 - For project-level collection, install hooks from the target project with `--level project`.
 - Cursor is restarted after hook install or removal so new sessions load the updated hook configuration.
 
@@ -40,7 +40,7 @@ Use `beacon endpoint hooks status --harness cursor` to inspect Cursor hook statu
 
 ## Install or configuration support
 
-`beacon endpoint install` prepares shared endpoint config and runtime log paths. Install Cursor hooks separately:
+`beacon endpoint install` prepares shared endpoint config and runtime log paths, and installs the user-level Cursor hooks when it detects Cursor (or when run with `--harness cursor`). To refresh or manage the hooks on their own, run:
 
 ```bash title="Install runtime hooks"
 beacon endpoint hooks install --harness cursor

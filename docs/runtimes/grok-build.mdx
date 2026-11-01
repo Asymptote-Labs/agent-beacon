@@ -13,7 +13,7 @@ Before enabling Grok Build hooks, make sure:
 
 - Grok Build is installed for the user or available in the project where hooks will run.
 - `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
-- Beacon hooks are installed with `beacon endpoint hooks install --harness grok`.
+- Beacon hooks are installed, either by `beacon endpoint install` (user-level, when Grok Build is detected or with `--harness grok`) or with `beacon endpoint hooks install --harness grok`.
 - Project-level hooks are trusted with `/hooks-trust` in Grok before you expect them to execute.
 - Grok is restarted after hook install or removal so new sessions load the updated hook file.
 
@@ -34,7 +34,7 @@ Use `beacon endpoint hooks status --harness grok` to inspect Grok Build hook sta
 
 ## Install or configuration support
 
-`beacon endpoint install` prepares shared endpoint config and runtime log paths. Install Grok Build hooks separately:
+`beacon endpoint install` prepares shared endpoint config and runtime log paths, and installs user-level Grok Build hooks when it detects Grok Build or when `--harness grok` is given. To install, refresh, or manage the hooks on their own:
 
 ```bash title="Install runtime hooks"
 beacon endpoint hooks install --harness grok
@@ -66,7 +66,7 @@ beacon endpoint grok sync --print
 | Command, tool, and file telemetry | Supported for live hook payloads and committed session records. Session sync reads `chat_history.jsonl`, `events.jsonl`, `summary.json`, `prompt_context.json`, and terminal logs where present |
 | Approval telemetry | Live hooks can observe and enforce at pre-tool time; session sync can report committed Grok permission request/resolution records after the fact |
 | Pre-tool answer | The `PreToolUse` hook answers with an empty object, which carries no decision, so Grok's own permission gate decides the call as it would without Beacon. A deny from a `BEACON_POLICY_PROVIDER` policy provider still returns `{"decision":"deny"}` |
-| Session lifecycle | `session.started` only. Grok's `turn_ended` record ends a turn, not a session — the next prompt appends to the same session — so session sync records it as `session.context` carrying the turn number and outcome. Grok exposes no session-end record, so Beacon writes no `session.ended` for this runtime rather than inventing one |
+| Session lifecycle | Live hooks record `session.started` and `session.ended` (from Grok's `SessionEnd` hook). Session sync records `session.started` only: Grok's `turn_ended` record ends a turn, not a session — the next prompt appends to the same session — so session sync records it as `session.context` carrying the turn number and outcome, and writes no `session.ended` rather than inventing one |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported for the endpoint agent. Grok hooks are installed separately in the logged-in user's context or project context |
 

@@ -17,12 +17,12 @@ Before enabling OpenCode telemetry, make sure:
 
 - OpenCode is installed and available as the `opencode` executable or has a local config directory.
 - `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
-- Beacon's OpenCode plugin is installed with `beacon endpoint hooks install --harness opencode`.
+- Beacon's OpenCode plugin is installed, either by `beacon endpoint install` when it detects OpenCode or with `beacon endpoint hooks install --harness opencode`.
 - OpenCode is restarted after plugin install or removal so new sessions load the updated plugin.
 
 ## Collection path
 
-Beacon installs an owned OpenCode plugin at `~/.config/opencode/plugins/beacon.ts` for user-level hooks or `./.opencode/plugins/beacon.ts` for project-level hooks. The plugin forwards supported OpenCode hook payloads to Beacon's hook adapter.
+Beacon installs an owned OpenCode plugin at `$XDG_CONFIG_HOME/opencode/plugins/beacon.ts` (default `~/.config/opencode/plugins/beacon.ts`) for user-level hooks or `./.opencode/plugins/beacon.ts` for project-level hooks. The plugin forwards supported OpenCode hook payloads to Beacon's hook adapter.
 
 The one plugin file loads in both OpenCode 1.x and OpenCode 2.x. Its default export carries the plugin `id`, the 1.x `server` entry, and the 2.x `setup` entry. On 2.x, `setup` registers the session `prompt` hook and the tool `execute.before`/`execute.after` hooks, and it subscribes to the event stream. It translates those into the same payloads the 1.x hooks produce, so events from either version look the same in the runtime log. After upgrading OpenCode from 1.x to 2.x, run `beacon endpoint hooks install --harness opencode` again, because a plugin written by an older Beacon exports only the 1.x factory, and OpenCode 2.x refuses to load it ("Plugin must export a default definition with an id and an effect or setup function").
 
@@ -32,14 +32,14 @@ For backfill, `beacon endpoint opencode sync` reads OpenCode's local `opencode.d
 
 ## Discovery and status
 
-Beacon detects OpenCode through the `opencode` executable or `~/.config/opencode`, then checks for Beacon plugin configuration.
+Beacon detects OpenCode through the `opencode` executable or `$XDG_CONFIG_HOME/opencode` (default `~/.config/opencode`), then checks for Beacon plugin configuration.
 
 Use `beacon endpoint hooks status --harness opencode` to inspect OpenCode plugin status.
 Use `beacon endpoint opencode status` to inspect persisted session-store collection progress.
 
 ## Install or configuration support
 
-`beacon endpoint install` prepares shared endpoint config and runtime log paths. Install OpenCode hooks separately:
+`beacon endpoint install` prepares shared endpoint config and runtime log paths, and installs the OpenCode plugin at user level when it detects OpenCode (or when you pass `--harness opencode`). To install, refresh, or manage the plugin on its own, including at project level:
 
 ```bash title="Install runtime hooks"
 beacon endpoint hooks install --harness opencode
