@@ -409,6 +409,9 @@ type OTLPForwardStatus struct {
 	Protocol   string   `json:"protocol,omitempty"`
 	Harnesses  []string `json:"harnesses,omitempty"`
 	Headers    []string `json:"headers,omitempty"`
+	// HeadersMissing means config.json names headers whose values file is gone, so the forward
+	// sends without them; re-run install or repair with --otlp-forward-header.
+	HeadersMissing bool `json:"headers_missing,omitempty"`
 }
 
 type ConfiguredStatus struct {
@@ -1268,7 +1271,7 @@ func destinationStatus(cfg endpointconfig.Config) DestinationStatus {
 		}
 	}
 	if forward := cfg.Destinations.OTLPForward; forward != nil && forward.Enabled {
-		status.OTLPForward = OTLPForwardStatus{Configured: true, Endpoint: forward.Endpoint, Protocol: forward.Protocol, Harnesses: forward.Harnesses, Headers: forward.HeaderNames}
+		status.OTLPForward = OTLPForwardStatus{Configured: true, Endpoint: forward.Endpoint, Protocol: forward.Protocol, Harnesses: forward.Harnesses, Headers: forward.HeaderNames, HeadersMissing: forward.HeadersMissing}
 	}
 	return status
 }

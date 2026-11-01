@@ -37,7 +37,7 @@ if (-not (Test-Path -LiteralPath $beaconBin)) {
 }
 
 $configDir = Join-Path $env:ProgramData 'Beacon\Endpoint'
-$retained = @('config.json', 'otelcol.yaml')
+$retained = @('config.json', 'otelcol.yaml', 'otlp-forward-headers.json')
 
 $stash = $null
 if ($purge -ne '1') {

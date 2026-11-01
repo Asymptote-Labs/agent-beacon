@@ -340,3 +340,28 @@ func TestValidateDestinationsRejectsBadOTLPForward(t *testing.T) {
 		})
 	}
 }
+
+// A package removal or cleanup can take the headers file while config.json still names them. Load
+// says so instead of handing back a forward that silently sends without credentials.
+func TestLoadReportsMissingOTLPForwardHeaders(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	cfg := Default(true, filepath.Join(home, "logs", "runtime.jsonl"))
+	cfg.Destinations = &Destinations{OTLPForward: &OTLPForward{Endpoint: "otel.example:4317", Headers: map[string]string{"authorization": "Bearer x"}}}
+	if _, err := Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if loaded, err := Load(true); err != nil || loaded.Destinations.OTLPForward.HeadersMissing {
+		t.Fatalf("HeadersMissing with the file present: %v", err)
+	}
+	if err := os.Remove(OTLPForwardSecretsPath(true)); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := loaded.Destinations.OTLPForward; !f.HeadersMissing || f.Headers != nil || strings.Join(f.HeaderNames, ",") != "authorization" {
+		t.Fatalf("forward without its headers file = %#v", f)
+	}
+}

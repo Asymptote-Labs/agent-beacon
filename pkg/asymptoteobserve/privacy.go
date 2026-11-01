@@ -982,13 +982,29 @@ func secretKeyName(key string) (secret, onlyTokens bool) {
 	var name strings.Builder
 	name.Grow(len(key))
 	start := 0
-	// endWord reports whether the word that ends here names a credential other than "tokens", and
-	// starts the next one.
+	// tokenPending is a "token" word not yet judged: followed by "count" or "usage" it names a
+	// count (Codex and Gemini log `input_token_count`, `total_token_count`), like "tokens", and a
+	// number under it is no secret; followed by anything else, or nothing, it names a credential.
+	tokenPending := false
+	// endWord reports whether the word that ends here names a credential other than a token count,
+	// and starts the next one.
 	endWord := func() bool {
 		word := name.String()[start:]
 		start = name.Len()
+		if tokenPending {
+			tokenPending = false
+			if slices.Contains(tokenCountWords, word) {
+				onlyTokens = true
+				return false
+			}
+			return true
+		}
 		if word == "tokens" {
 			onlyTokens = true
+			return false
+		}
+		if word == "token" {
+			tokenPending = true
 			return false
 		}
 		return slices.Contains(redactKeyWords, word)
@@ -1011,7 +1027,7 @@ func secretKeyName(key string) (secret, onlyTokens bool) {
 			}
 		}
 	}
-	if endWord() {
+	if endWord() || tokenPending {
 		return true, false
 	}
 	whole := name.String()
@@ -1033,6 +1049,9 @@ var redactKeyWords = []string{
 	"password", "passwords", "passwd", "pass", "passphrase", "secret", "secrets", "token", "key", "keys", "apikey",
 	"accesskey", "secretkey", "privatekey", "auth", "authorization", "credential", "credentials", "cookie",
 }
+
+// tokenCountWords, after "token", make a field name a count rather than a credential.
+var tokenCountWords = []string{"count", "counts", "usage"}
 
 // redactKeySuffixes mark a field name that runs a credential's word into the words before it.
 var redactKeySuffixes = []string{
