@@ -215,7 +215,8 @@ Beacon's runtime log should contain the marker from both runtimes. In the existi
    ```
 
    `Unauthenticated` or `401` means a wrong or missing header; `connection refused`, `deadline exceeded` or a TLS error means the endpoint, protocol, or `--otlp-forward-insecure`/`--otlp-forward-ca-file` is wrong. HTTP endpoints take the base URL; the exporter adds `/v1/logs`, `/v1/metrics` and `/v1/traces`.
-3. Check that the runtimes still point at the collector (validation step 2). A runtime update or an old Kandji item can rewrite the settings; the Step 4 audit repairs them on its next run.
+3. If status shows `"headers_missing": true`, the header values file (`otlp-forward-headers.json`) was removed, for example by a manual cleanup, and the forward is sending without credentials. Run the Step 3 script again.
+4. Check that the runtimes still point at the collector (validation step 2). A runtime update or an old Kandji item can rewrite the settings; the Step 4 audit repairs them on its next run.
 
 ### `repair` rejects the forward flags
 

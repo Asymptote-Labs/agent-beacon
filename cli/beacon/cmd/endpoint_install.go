@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/auth"
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
@@ -140,6 +141,24 @@ func endpointInstallOptions(selection endpointTargetSelection, serviceKind servi
 	}
 }
 
+// warnMissingOTLPForwardHeaders says when the configured OTLP forward names headers whose values
+// are gone -- a package removal or cleanup took otlp-forward-headers.json -- and this run does not
+// set them again. The forward keeps running, so without this the backend would just start
+// refusing it.
+func warnMissingOTLPForwardHeaders(out io.Writer) {
+	if forward, _ := otlpForwardOptions(); forward != nil {
+		return
+	}
+	cfg, err := endpointconfig.Load(endpointUserMode())
+	if err != nil || cfg.Destinations == nil || cfg.Destinations.OTLPForward == nil {
+		return
+	}
+	if forward := cfg.Destinations.OTLPForward; forward.Enabled && forward.HeadersMissing {
+		fmt.Fprintf(out, "Warning: the OTLP forward to %s names headers (%s) whose values are missing (%s was removed); it will send without them until you run this again with --otlp-forward-header\n",
+			forward.Endpoint, strings.Join(forward.HeaderNames, ", "), endpointconfig.OTLPForwardSecretsPath(endpointUserMode()))
+	}
+}
+
 // errSetupCancelled replaces the wizard's own "onboarding cancelled", which read as a failure
 // and left the person to guess what state the machine was in. The wizard runs before anything is
 // written, so the answer is always the same: nothing changed, and here is how to start again.
@@ -158,6 +177,7 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	if _, err := otlpForwardOptions(); err != nil {
 		return err
 	}
+	warnMissingOTLPForwardHeaders(cmd.ErrOrStderr())
 	if endpointOpts.dryRun {
 		return printPlannedActions(plannedInstallActions(false, serviceKind, selection.OTLP, selection.Hooks))
 	}
@@ -460,6 +480,7 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 	if _, err := otlpForwardOptions(); err != nil {
 		return err
 	}
+	warnMissingOTLPForwardHeaders(cmd.ErrOrStderr())
 	if endpointOpts.dryRun {
 		return printPlannedActions(plannedInstallActions(true, serviceKind, selection.OTLP, selection.Hooks))
 	}

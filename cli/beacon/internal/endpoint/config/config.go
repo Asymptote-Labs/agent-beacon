@@ -208,11 +208,15 @@ type OTLPForward struct {
 	// Their values are credentials, so they are kept out of config.json (which ordinary accounts
 	// read to find the system log) and stored in the root-only OTLPForwardSecretsPath; config.json
 	// carries only HeaderNames.
-	Headers            map[string]string `json:"-"`
-	HeaderNames        []string          `json:"header_names,omitempty"`
-	Insecure           bool              `json:"insecure,omitempty"`
-	InsecureSkipVerify bool              `json:"insecure_skip_verify,omitempty"`
-	CAFile             string            `json:"ca_file,omitempty"`
+	Headers     map[string]string `json:"-"`
+	HeaderNames []string          `json:"header_names,omitempty"`
+	// HeadersMissing is set by Load when config.json names headers but their file is gone (a
+	// package removal or a manual cleanup took it). The forward would then send no credentials,
+	// so status reports it and install and repair warn.
+	HeadersMissing     bool   `json:"-"`
+	Insecure           bool   `json:"insecure,omitempty"`
+	InsecureSkipVerify bool   `json:"insecure_skip_verify,omitempty"`
+	CAFile             string `json:"ca_file,omitempty"`
 }
 
 // DefaultOTLPForwardHarnesses are the runtimes a forward carries when none are named: the two
@@ -236,6 +240,10 @@ func loadOTLPForwardSecrets(cfg *Config) {
 		return
 	}
 	data, err := os.ReadFile(OTLPForwardSecretsPath(cfg.UserMode))
+	if os.IsNotExist(err) {
+		cfg.Destinations.OTLPForward.HeadersMissing = true
+		return
+	}
 	if err != nil {
 		return
 	}
