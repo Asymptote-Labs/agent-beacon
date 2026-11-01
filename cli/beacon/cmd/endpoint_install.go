@@ -154,9 +154,35 @@ func warnMissingOTLPForwardHeaders(out io.Writer) {
 		return
 	}
 	if forward := cfg.Destinations.OTLPForward; forward.Enabled && forward.HeadersMissing {
-		fmt.Fprintf(out, "Warning: the OTLP forward to %s names headers (%s) whose values are missing (%s was removed); it will send without them until you run this again with --otlp-forward-header\n",
-			forward.Endpoint, strings.Join(forward.HeaderNames, ", "), endpointconfig.OTLPForwardSecretsPath(endpointUserMode()))
+		fmt.Fprintf(out, "Warning: the OTLP forward to %s names headers (%s) whose values are missing (%s was removed), so it sends without them. Set the forward again with all its flags:\n  %s\n",
+			forward.Endpoint, strings.Join(forward.HeaderNames, ", "), endpointconfig.OTLPForwardSecretsPath(endpointUserMode()), otlpForwardFlags(forward))
 	}
+}
+
+// otlpForwardFlags spells the flags that set forward again as it is configured, with a placeholder
+// for each header value. Passing --otlp-forward-endpoint replaces the whole forward, so every
+// setting is restated, not only the headers.
+func otlpForwardFlags(forward *endpointconfig.OTLPForward) string {
+	flags := []string{"--otlp-forward-endpoint " + shellQuote(forward.Endpoint)}
+	if forward.Protocol != "" && forward.Protocol != endpointconfig.OTLPForwardProtocolGRPC {
+		flags = append(flags, "--otlp-forward-protocol "+forward.Protocol)
+	}
+	if len(forward.Harnesses) > 0 && strings.Join(forward.Harnesses, ",") != strings.Join(endpointconfig.DefaultOTLPForwardHarnesses, ",") {
+		flags = append(flags, "--otlp-forward-harness "+shellQuote(strings.Join(forward.Harnesses, ",")))
+	}
+	if forward.Insecure {
+		flags = append(flags, "--otlp-forward-insecure")
+	}
+	if forward.InsecureSkipVerify {
+		flags = append(flags, "--otlp-forward-insecure-skip-verify")
+	}
+	if forward.CAFile != "" {
+		flags = append(flags, "--otlp-forward-ca-file "+shellQuote(forward.CAFile))
+	}
+	for _, name := range forward.HeaderNames {
+		flags = append(flags, "--otlp-forward-header "+shellQuote(name+"=<value>"))
+	}
+	return strings.Join(flags, " ")
 }
 
 // errSetupCancelled replaces the wizard's own "onboarding cancelled", which read as a failure
