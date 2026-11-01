@@ -262,6 +262,23 @@ func saveOTLPForwardSecrets(cfg Config) error {
 	return writeSecretFile(cfg.UserMode, path, data)
 }
 
+// RewriteSystemConfig replaces the system config.json with data, for the callers that edit its raw
+// JSON in place (the auto-update mode) rather than going through Save. It is written the way Save
+// would write it: SYSTEM and Administrators only on Windows, 0600 on POSIX, when it holds a
+// credential or was already private, and otherwise readable like any config.json. Writing it with
+// atomicfile.Write alone gave a Windows file the tree's DACL, so every user could read a HEC token.
+func RewriteSystemConfig(path string, data []byte, wasPrivate bool) error {
+	var cfg Config
+	secret := wasPrivate
+	if json.Unmarshal(data, &cfg) == nil && hasSecretConfigFields(cfg) {
+		secret = true
+	}
+	if secret {
+		return writeSecretFile(false, path, data)
+	}
+	return atomicfile.Write(path, data, 0644)
+}
+
 // writeSecretFile writes a file holding a credential. A system install's files sit in the
 // machine-wide tree, whose Windows DACL lets every user read what is below it and ignores the
 // mode, so they are created with SYSTEM and Administrators only (sysacl.WriteSecretFile); per-user
