@@ -1,7 +1,11 @@
 package lifecycle
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
+	"regexp"
+	"strings"
 	"testing"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
@@ -78,5 +82,78 @@ func TestBuildConfigKeepsSessionSyncUntilChanged(t *testing.T) {
 	}
 	if cfg := buildConfig(InstallOptions{UserMode: true, SessionSync: &on}); !endpointconfig.SessionSyncEnabled(cfg) {
 		t.Fatal("--session-sync did not turn it on")
+	}
+}
+
+// A user-mode job carries the store-locating variables set at install, including the ones only a
+// session-store collector reads.
+func TestSessionSyncJobEnvCarriesCollectorVariables(t *testing.T) {
+	for _, name := range append(append([]string{}, sessionSyncJobPathEnv...), sessionSyncJobNameEnv...) {
+		t.Setenv(name, "")
+	}
+	abs := filepath.Join(t.TempDir(), "copilot")
+	t.Setenv("COPILOT_HOME", abs)
+	t.Setenv("HARNESS2_RUNS_DIR", "relative-runs")
+	t.Setenv("OPENCODE_DB", "custom.db")
+	env := sessionSyncJobEnv(true)
+	if env["COPILOT_HOME"] != abs || env["OPENCODE_DB"] != "custom.db" || !filepath.IsAbs(env["HARNESS2_RUNS_DIR"]) {
+		t.Fatalf("env = %v", env)
+	}
+	if sessionSyncJobEnv(false) != nil {
+		t.Fatal("system mode records root's environment")
+	}
+}
+
+// Every variable a session-store collector reads to find its store is one the job carries, so a
+// store moved by one is read on schedule as well as at install. APPDATA and LOCALAPPDATA are
+// Windows-only, where no job is installed.
+func TestSessionSyncJobEnvCoversEveryCollectorVariable(t *testing.T) {
+	carried := map[string]bool{
+		"CODEX_HOME": true, "HERMES_HOME": true, "HERMES_DATA_DIR_SUFFIX": true, "CLINE_DIR": true,
+		"GEMINI_CLI_HOME": true, "CLAUDE_CONFIG_DIR": true, "APPDATA": true, "LOCALAPPDATA": true,
+	}
+	for _, list := range [][]string{inventoryJobPathEnv, inventoryJobNameEnv, sessionSyncJobPathEnv, sessionSyncJobNameEnv} {
+		for _, name := range list {
+			carried[name] = true
+		}
+	}
+	files, err := filepath.Glob(filepath.Join("..", "..", "*session", "*.go"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no collector sources found: %v", err)
+	}
+	read := regexp.MustCompile(`os\.(?:Getenv|LookupEnv)\("([A-Z0-9_]+)"\)`)
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range read.FindAllStringSubmatch(string(data), -1) {
+			if !carried[m[1]] {
+				t.Errorf("%s reads %s, which the scheduled session sync job does not carry; add it to sessionSyncJobPathEnv or sessionSyncJobNameEnv", file, m[1])
+			}
+		}
+	}
+}
+
+// A repair that turned the setting off and then failed puts back the job that was scheduled
+// before; one that never touched a scheduled job leaves it alone.
+func TestRollbackRestoresSessionSyncJobTurnedOff(t *testing.T) {
+	calls := &[]string{}
+	tx := &installRollback{snapshots: map[string]fileSnapshot{},
+		SessionSyncJob: recordingInventoryJob{calls: calls, supported: true}, SessionSyncRemoved: true, SessionSyncWasLoaded: true}
+	tx.Rollback(Manifest{})
+	if !reflect.DeepEqual(*calls, []string{"load"}) {
+		t.Fatalf("calls = %v, want the previously scheduled job loaded again", *calls)
+	}
+
+	*calls = nil
+	tx = &installRollback{snapshots: map[string]fileSnapshot{},
+		SessionSyncJob: recordingInventoryJob{calls: calls, supported: true}, SessionSyncRemoved: true}
+	tx.Rollback(Manifest{})
+	if len(*calls) != 0 {
+		t.Fatalf("calls = %v, want nothing for a job that was not scheduled before", *calls)
 	}
 }

@@ -484,8 +484,12 @@ type installRollback struct {
 	InventoryLoaded    bool
 	InventoryWasLoaded bool
 	// SessionSyncJob and the two flags beside it do the same for the scheduled session sync.
+	// SessionSyncRemoved records that this install unloaded and removed the job (the setting
+	// turned off): unlike the inventory job, off is an ordinary choice here, so a rollback has to
+	// put back a job that was scheduled before as well as unload one it started.
 	SessionSyncJob       inventoryJobController
 	SessionSyncLoaded    bool
+	SessionSyncRemoved   bool
 	SessionSyncWasLoaded bool
 	Manager              serviceController
 	ServiceLoaded        bool
@@ -576,7 +580,7 @@ func (r *installRollback) Rollback(manifest Manifest) {
 	if r.InventoryLoaded && r.InventoryWasLoaded && r.InventoryJob != nil {
 		_ = r.InventoryJob.Load()
 	}
-	if r.SessionSyncLoaded && r.SessionSyncWasLoaded && r.SessionSyncJob != nil {
+	if (r.SessionSyncLoaded || r.SessionSyncRemoved) && r.SessionSyncWasLoaded && r.SessionSyncJob != nil {
 		_ = r.SessionSyncJob.Load()
 	}
 }
@@ -722,6 +726,7 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		Load:     opts.StartService,
 	})
 	tx.SessionSyncLoaded = sessionSyncResult.Loaded
+	tx.SessionSyncRemoved = sessionSyncResult.Removed
 	if sessionSyncErr != nil {
 		sessionSyncResult.UnitPath = ""
 		sessionSyncResult.Skipped = "scheduled session sync job: " + sessionSyncErr.Error()

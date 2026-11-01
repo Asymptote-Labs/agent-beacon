@@ -12,10 +12,7 @@ var (
 	// newSessionSyncJob and removeSessionSyncJob are the seams tests replace so Install,
 	// Uninstall and Repair can be exercised without touching launchd or systemd.
 	newSessionSyncJob = func(userMode bool, kind service.Kind) inventoryJobController {
-		// The session-store collectors resolve their stores from the same variables the
-		// inventory scan does (CLAUDE_CONFIG_DIR, CODEX_HOME and the rest), so the job carries
-		// the same environment.
-		return service.SessionSyncManager{UserMode: userMode, Kind: kind, Env: inventoryJobEnv(userMode)}
+		return service.SessionSyncManager{UserMode: userMode, Kind: kind, Env: sessionSyncJobEnv(userMode)}
 	}
 	removeSessionSyncJob = func(userMode bool) {
 		job := newSessionSyncJob(userMode, service.KindAuto)
@@ -23,6 +20,47 @@ var (
 		job.RemoveUnits()
 	}
 )
+
+// sessionSyncJobPathEnv are the directory variables a session-store collector reads beyond the
+// ones the inventory scan does. launchd and systemd do not pass a shell's exports to the job, so a
+// user-mode job records each one set at install, as the inventory job does, or a store moved with
+// it would be read at install and never again.
+var sessionSyncJobPathEnv = []string{
+	"COPILOT_HOME",      // GitHub Copilot CLI
+	"XDG_DATA_HOME",     // OpenCode and Devin on Linux
+	"HARNESS2_RUNS_DIR", // Harness²
+}
+
+// sessionSyncJobNameEnv are read as names, not paths, and recorded exactly as set: OPENCODE_DB is
+// resolved against OpenCode's data directory when relative.
+var sessionSyncJobNameEnv = []string{"OPENCODE_DB"}
+
+// sessionSyncJobEnv is the inventory job's environment plus the variables only a session-store
+// collector reads. System mode records nothing, like inventoryJobEnv: the process's environment is
+// root's, not the console user's.
+func sessionSyncJobEnv(userMode bool) map[string]string {
+	if !userMode {
+		return nil
+	}
+	env := inventoryJobEnv(true)
+	if env == nil {
+		env = map[string]string{}
+	}
+	for _, name := range sessionSyncJobPathEnv {
+		if value, ok := os.LookupEnv(name); ok {
+			env[name] = inventoryJobPathValue(value)
+		}
+	}
+	for _, name := range sessionSyncJobNameEnv {
+		if value, ok := os.LookupEnv(name); ok {
+			env[name] = value
+		}
+	}
+	if len(env) == 0 {
+		return nil
+	}
+	return env
+}
 
 // SessionSyncJobResult reports what ReconcileSessionSyncJob did.
 type SessionSyncJobResult struct {

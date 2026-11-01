@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 )
 
@@ -54,8 +55,10 @@ func init() {
 	_ = endpointSessionsSyncCmd.Flags().MarkHidden("scheduled")
 }
 
-// runSessionSweep is the seam tests replace.
-var runSessionSweep = runEndpointBackfill
+// runSessionSweep is the seam tests replace. wait is how long to wait for a sweep that is already
+// running: the scheduled job does not wait (the next run picks up what that one leaves), a manual
+// run waits like install does.
+var runSessionSweep = runEndpointBackfillLocked
 
 func runEndpointSessionsSync(cmd *cobra.Command, args []string) error {
 	userMode := endpointUserMode()
@@ -63,7 +66,18 @@ func runEndpointSessionsSync(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("syncing session stores into the system log needs elevated privileges; %s", lifecycle.SystemPrivilegeHint())
 	}
 	cfg := loadConfigForMode(userMode, endpointOpts.logPath)
-	result := runSessionSweep(cfg.LogPath, userMode)
+	wait := endpointSweepLockWait
+	if endpointSessionsOpts.scheduled {
+		// The setting governs the job and what it does: a job that outlived the setting (config
+		// edited to off without a repair, or an unload that failed) writes nothing. A manual run is
+		// not gated, as with any runtime's own sync command.
+		if !endpointconfig.SessionSyncEnabled(cfg) {
+			fmt.Fprintln(cmd.OutOrStdout(), "Session sync is off in the endpoint config; nothing read. `beacon endpoint repair` removes this job.")
+			return nil
+		}
+		wait = 0
+	}
+	result := runSessionSweep(cfg.LogPath, userMode, wait)
 	reportEndpointBackfill(cmd.OutOrStdout(), result)
 	// A runtime that failed is reported above and the rest still ran. The scheduled job exits
 	// cleanly so the scheduler keeps it on its interval; a manual run says it failed.

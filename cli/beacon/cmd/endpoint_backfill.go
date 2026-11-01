@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -30,6 +31,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/primesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
 )
 
 // The install-time session backfill reads recent history from every agent's own session store,
@@ -228,6 +230,66 @@ func endpointBackfillDays() int {
 // hook repair and inventory resolve, while its cursors stay under the system base directory. With
 // nobody to read for, it reads nothing and says so.
 func runEndpointBackfill(logPath string, userMode bool) endpointBackfillResult {
+	return runEndpointBackfillLocked(logPath, userMode, endpointSweepLockWait)
+}
+
+// runEndpointBackfillLocked is runEndpointBackfill with an explicit wait for the sweep lock. Every
+// sweep (install, connect, `beacon endpoint sessions sync` and its scheduled job) holds one
+// exclusive lock per mode for its whole run, because each collector loads its cursors at the start
+// and saves them at the end: two sweeps running together would both start from the same cursors
+// and append the same records twice. A sweep that waits for another starts from the cursors that
+// one saved and reads only what is new. wait <= 0 does not wait: the scheduled job skips a run
+// while another sweep holds the lock, since the next run picks up whatever it leaves.
+func runEndpointBackfillLocked(logPath string, userMode bool, wait time.Duration) endpointBackfillResult {
+	release, err := acquireEndpointSweepLock(userMode, wait)
+	if err != nil {
+		return endpointBackfillResult{Skipped: err.Error()}
+	}
+	defer release()
+	return runEndpointBackfillUnlocked(logPath, userMode)
+}
+
+// endpointSweepLockWait bounds how long an install, connect or manual sync waits for a sweep that
+// is already running (normally the scheduled job's run at load).
+var endpointSweepLockWait = 10 * time.Minute
+
+// errEndpointSweepBusy is the skip reason when another sweep holds the lock.
+var errEndpointSweepBusy = errors.New("another session sync is already running; its cursors carry over to the next run")
+
+// endpointSweepLockPath is the lock file every sweep for the mode takes, beside the cursors.
+func endpointSweepLockPath(userMode bool) string {
+	return filepath.Join(endpointconfig.BaseDir(userMode), "state", "session-sweep.lock")
+}
+
+// acquireEndpointSweepLock is the seam tests replace.
+var acquireEndpointSweepLock = func(userMode bool, wait time.Duration) (func(), error) {
+	path := endpointSweepLockPath(userMode)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, fmt.Errorf("could not create the session sync lock directory: %w", err)
+	}
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("could not open the session sync lock: %w", err)
+	}
+	var lock *filelock.Lock
+	if wait <= 0 {
+		lock, err = filelock.TryExclusive(f)
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), wait)
+		lock, err = filelock.ExclusiveContext(ctx, f)
+		cancel()
+	}
+	if err != nil {
+		_ = f.Close()
+		return nil, errEndpointSweepBusy
+	}
+	return func() {
+		_ = lock.Release()
+		_ = f.Close()
+	}, nil
+}
+
+func runEndpointBackfillUnlocked(logPath string, userMode bool) endpointBackfillResult {
 	if userMode {
 		return sweepEndpointBackfill(logPath, true)
 	}
