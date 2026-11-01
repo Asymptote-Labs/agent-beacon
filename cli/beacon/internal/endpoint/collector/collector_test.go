@@ -452,7 +452,7 @@ func TestConfigYAMLForwardsFilteredRedactedOTLPWhenConfigured(t *testing.T) {
 				"    sending_queue:\n      enabled: true\n      num_consumers: 2\n      queue_size: 20\n",
 				"    retry_on_failure:\n      enabled: true\n      max_elapsed_time: 120s\n",
 				"    tls:\n      ca_file: \"/tmp/ca.pem\"\n",
-				"  beacon_privacy: {}\n  beacon_forward_filter:\n    harnesses: [claude_code, codex_cli, codex_desktop]\n",
+				"  beacon_privacy: {}\n  beacon_forward_filter:\n    harnesses: [\"claude_code\", \"codex_cli\", \"codex_desktop\"]\n",
 				"    logs/forward:\n      receivers: [otlp]\n      processors: [memory_limiter, beacon_forward_filter, claude_api_body, beacon_privacy, batch]\n      exporters: [" + tc.exporter + "]\n",
 				"    traces/forward:\n      receivers: [otlp]\n      processors: [memory_limiter, beacon_forward_filter, beacon_privacy, batch]\n",
 				"    metrics/forward:\n      receivers: [otlp]\n      processors: [memory_limiter, beacon_forward_filter, beacon_privacy, batch]\n",
@@ -473,5 +473,28 @@ func TestConfigYAMLHasNoForwardWhenDisabled(t *testing.T) {
 	endpointconfig.NormalizeDestinations(&cfg)
 	if yaml := ConfigYAML(cfg); strings.Contains(yaml, "/forward") {
 		t.Fatalf("ConfigYAML has a forward with none configured:\n%s", yaml)
+	}
+}
+
+// Harness names are typed by the operator, so YAML syntax in one must not break the config the
+// collector shares with Beacon's own pipelines.
+func TestConfigYAMLQuotesForwardHarnessNames(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Destinations = &endpointconfig.Destinations{OTLPForward: &endpointconfig.OTLPForward{
+		Endpoint:  "otel.example:4317",
+		Harnesses: []string{"claude_code", "my agent #2", "foo: bar"},
+	}}
+	endpointconfig.NormalizeDestinations(&cfg)
+	var parsed struct {
+		Processors map[string]struct {
+			Harnesses []string `yaml:"harnesses"`
+		} `yaml:"processors"`
+	}
+	if err := yaml.Unmarshal([]byte(ConfigYAML(cfg)), &parsed); err != nil {
+		t.Fatalf("collector config does not parse: %v", err)
+	}
+	got := parsed.Processors["beacon_forward_filter"].Harnesses
+	if strings.Join(got, "|") != "claude_code|my agent #2|foo: bar" {
+		t.Fatalf("harnesses = %q", got)
 	}
 }
