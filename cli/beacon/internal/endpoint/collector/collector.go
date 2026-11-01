@@ -157,7 +157,14 @@ func ConfigYAML(cfg endpointconfig.Config) string {
 	//   - secrets redacted, as for the HEC exporters (beacon_privacy).
 	forwardPipelines, forwardFilterYAML := "", ""
 	if forwardName != "" {
-		forwardFilterYAML = "  " + ForwardFilterProcessor + ":\n    harnesses: [" + strings.Join(cfg.Destinations.OTLPForward.Harnesses, ", ") + "]\n"
+		// Quoted like every other value the forward renders: a harness name the operator typed can
+		// hold YAML syntax (`#`, `: `), and a config the collector cannot parse stops Beacon's own
+		// pipelines too.
+		quoted := make([]string, 0, len(cfg.Destinations.OTLPForward.Harnesses))
+		for _, name := range cfg.Destinations.OTLPForward.Harnesses {
+			quoted = append(quoted, fmt.Sprintf("%q", name))
+		}
+		forwardFilterYAML = "  " + ForwardFilterProcessor + ":\n    harnesses: [" + strings.Join(quoted, ", ") + "]\n"
 		for _, signal := range []string{"logs", "traces", "metrics"} {
 			apiBody := ""
 			if signal == "logs" {
