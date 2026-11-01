@@ -449,13 +449,13 @@ func TestOTLPForwardOptions(t *testing.T) {
 		t.Fatalf("otlpForwardOptions() with no flags = %#v, %v; want nil, nil so repair keeps the existing forward", got, err)
 	}
 
-	endpointOpts.otlpForwardEndpoint = "otel.tokenize.example:4317"
-	endpointOpts.otlpForwardHeaders = []string{"authorization=Bearer a=b", "x-org=rho"}
+	endpointOpts.otlpForwardEndpoint = "otel.backend.example:4317"
+	endpointOpts.otlpForwardHeaders = []string{"authorization=Bearer a=b", "x-org=example"}
 	got, err := otlpForwardOptions()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Endpoint != "otel.tokenize.example:4317" || got.Headers["authorization"] != "Bearer a=b" || got.Headers["x-org"] != "rho" {
+	if got.Endpoint != "otel.backend.example:4317" || got.Headers["authorization"] != "Bearer a=b" || got.Headers["x-org"] != "example" {
 		t.Fatalf("otlpForwardOptions() = %#v", got)
 	}
 
