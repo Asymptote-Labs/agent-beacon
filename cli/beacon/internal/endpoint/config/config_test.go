@@ -355,6 +355,10 @@ func TestRewriteSystemConfigKeepsCredentialsPrivate(t *testing.T) {
 		{"hec token", `{"destinations":{"splunk_hec":{"endpoint":"https://splunk.example","token":"t"}}}`, false, 0600},
 		{"already private", `{"auto_update":{"mode":"off"}}`, true, 0600},
 		{"nothing secret", `{"auto_update":{"mode":"off"}}`, false, 0644},
+		// A wrong-typed field elsewhere must not hide the token.
+		{"token beside a bad field", `{"collector":{"grpc_port":"4317"},"destinations":{"falcon_hec":{"token":"t"}}}`, false, 0600},
+		{"destinations of the wrong shape", `{"destinations":"oops"}`, false, 0644},
+		{"unparseable", `{"destinations":`, false, 0600},
 	} {
 		path := filepath.Join(dir, strings.ReplaceAll(tc.name, " ", "-")+".json")
 		if err := RewriteSystemConfig(path, []byte(tc.body), tc.wasPrivate); err != nil {
