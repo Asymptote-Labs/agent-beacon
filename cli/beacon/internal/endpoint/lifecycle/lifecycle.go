@@ -872,6 +872,12 @@ func Uninstall(opts UninstallOptions) error {
 			fail("remove endpoint config", os.Remove(endpointConfigPath))
 		}
 	}
+	// The forward's header values are a credential, so they go with config.json whether or not the
+	// manifest lists them: an install interrupted before writing it, or one whose manifest was lost,
+	// would otherwise leave the backend's token behind.
+	if !opts.KeepManagedIngest {
+		fail("remove the OTLP forward headers", os.Remove(forwardSecretsPath))
+	}
 	if !opts.KeepLogs {
 		for _, path := range runtimeLogFiles(cfg.LogPath) {
 			fail("remove "+path, os.Remove(path))

@@ -377,7 +377,7 @@ func TestUninstallFallbackRemovesKnownFiles(t *testing.T) {
 	testenv.SetHome(t, home)
 	logPath := filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl")
 	cfg := endpointconfig.Default(true, logPath)
-	for _, path := range []string{endpointconfig.ConfigPath(true), cfg.Collector.ConfigPath, logPath} {
+	for _, path := range []string{endpointconfig.ConfigPath(true), endpointconfig.OTLPForwardSecretsPath(true), cfg.Collector.ConfigPath, logPath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 			t.Fatalf("mkdir %s: %v", path, err)
 		}
@@ -389,7 +389,7 @@ func TestUninstallFallbackRemovesKnownFiles(t *testing.T) {
 	if err := Uninstall(UninstallOptions{UserMode: true, LogPath: logPath}); err != nil {
 		t.Fatalf("Uninstall returned error: %v", err)
 	}
-	for _, path := range []string{endpointconfig.ConfigPath(true), cfg.Collector.ConfigPath, logPath} {
+	for _, path := range []string{endpointconfig.ConfigPath(true), endpointconfig.OTLPForwardSecretsPath(true), cfg.Collector.ConfigPath, logPath} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("%s still exists or unexpected error: %v", path, err)
 		}
