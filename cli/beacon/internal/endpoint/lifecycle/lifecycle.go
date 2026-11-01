@@ -328,6 +328,9 @@ type InstallOptions struct {
 	// LogAccess sets the system log's access mode, "shared" or "restricted". Empty keeps what the
 	// existing config records, so repair and a package upgrade never change it.
 	LogAccess string
+	// SessionSync turns the scheduled session-store sync on or off; nil keeps what the existing
+	// config records (off for a new install), so repair and package upgrades never change it.
+	SessionSync *bool
 }
 
 type UninstallOptions struct {
@@ -369,6 +372,10 @@ type InstallResult struct {
 	// is readable by, which then has no members yet.
 	LogReadersGroupCreated bool   `json:"log_readers_group_created,omitempty"`
 	InventoryJobDetail     string `json:"inventory_job_detail,omitempty"`
+	// SessionSyncJobPath is the scheduled session sync unit when `session_sync.enabled` is on;
+	// SessionSyncJobDetail says why it is not installed on a host without a scheduler.
+	SessionSyncJobPath   string `json:"session_sync_job_path,omitempty"`
+	SessionSyncJobDetail string `json:"session_sync_job_detail,omitempty"`
 	// ManagedForwarder reports the Beacon Cloud forwarder reconcile. It never fails the install:
 	// a config Vector rejects leaves the running forwarder on its old one and is reported here.
 	ManagedForwarder *asymptote.ReconcileResult `json:"managed_forwarder,omitempty"`
@@ -390,6 +397,8 @@ type Status struct {
 	ManagedIngest asymptote.ManagedIngestStatus `json:"managed_ingest"`
 	// InventoryHeartbeat follows the requested mode, like ManagedIngest: each mode has its own job.
 	InventoryHeartbeat InventoryHeartbeatStatus `json:"inventory_heartbeat"`
+	// SessionSync follows the requested mode too.
+	SessionSync SessionSyncStatus `json:"session_sync"`
 	// ScriptForwarders are the S3, GCS and Falcon forwarders the package helpers install, one entry
 	// per forwarder that is set up on this machine.
 	ScriptForwarders []service.Status `json:"script_forwarders,omitempty"`
@@ -474,8 +483,12 @@ type installRollback struct {
 	InventoryJob       inventoryJobController
 	InventoryLoaded    bool
 	InventoryWasLoaded bool
-	Manager            serviceController
-	ServiceLoaded      bool
+	// SessionSyncJob and the two flags beside it do the same for the scheduled session sync.
+	SessionSyncJob       inventoryJobController
+	SessionSyncLoaded    bool
+	SessionSyncWasLoaded bool
+	Manager              serviceController
+	ServiceLoaded        bool
 	// ServiceWasRunning records whether a collector was already up when this install began.
 	//
 	// It decides what rollback owes the machine. Unloading is right for a service this transaction
@@ -530,6 +543,9 @@ func (r *installRollback) Rollback(manifest Manifest) {
 	if r.InventoryLoaded && r.InventoryJob != nil && !r.InventoryWasLoaded {
 		_ = r.InventoryJob.Unload()
 	}
+	if r.SessionSyncLoaded && r.SessionSyncJob != nil && !r.SessionSyncWasLoaded {
+		_ = r.SessionSyncJob.Unload()
+	}
 
 	restoreBackups(manifest.Backups)
 	for i := len(r.files) - 1; i >= 0; i-- {
@@ -559,6 +575,9 @@ func (r *installRollback) Rollback(manifest Manifest) {
 	// systemd, disabled across reboot.
 	if r.InventoryLoaded && r.InventoryWasLoaded && r.InventoryJob != nil {
 		_ = r.InventoryJob.Load()
+	}
+	if r.SessionSyncLoaded && r.SessionSyncWasLoaded && r.SessionSyncJob != nil {
+		_ = r.SessionSyncJob.Load()
 	}
 }
 
@@ -687,6 +706,27 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		inventoryDetail = "scheduled inventory job: " + inventoryErr.Error()
 	}
 
+	// The scheduled session sync is opt-in (`session_sync.enabled`) and reconciled the same way:
+	// installed and loaded when on, removed when off, never failing the install.
+	sessionSyncJob := newSessionSyncJob(cfg.UserMode, opts.ServiceKind)
+	for _, path := range sessionSyncJob.UnitPaths() {
+		tx.Track(path)
+	}
+	tx.SessionSyncJob = sessionSyncJob
+	tx.SessionSyncWasLoaded = sessionSyncJob.Status().Loaded
+	sessionSyncResult, sessionSyncErr := reconcileSessionSyncJobWith(sessionSyncJob, InventoryJobOptions{
+		UserMode: cfg.UserMode,
+		Kind:     opts.ServiceKind,
+		Program:  DefaultInventoryJobProgram(cfg.UserMode),
+		LogPath:  cfg.LogPath,
+		Load:     opts.StartService,
+	})
+	tx.SessionSyncLoaded = sessionSyncResult.Loaded
+	if sessionSyncErr != nil {
+		sessionSyncResult.UnitPath = ""
+		sessionSyncResult.Skipped = "scheduled session sync job: " + sessionSyncErr.Error()
+	}
+
 	harnessPaths, err := configureHarnesses(cfg)
 	manifest.HarnessConfigs = harnessPaths
 	manifest.Backups = discoverBackups(harnessPaths)
@@ -795,6 +835,8 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		LingerRemediation:      lingerOutcome.Remediation,
 		InventoryJobPath:       inventoryResult.UnitPath,
 		InventoryJobDetail:     inventoryDetail,
+		SessionSyncJobPath:     sessionSyncResult.UnitPath,
+		SessionSyncJobDetail:   sessionSyncResult.Skipped,
 		LogAccess:              logAccessOf(cfg),
 		LogReadersGroupCreated: logReadersGroupCreated,
 	}, nil
@@ -839,6 +881,7 @@ func Uninstall(opts UninstallOptions) error {
 		removeUpdaterJob()
 	}
 	removeInventoryJob(cfg.UserMode)
+	removeSessionSyncJob(cfg.UserMode)
 	// The S3, GCS and Falcon forwarders run from /opt/beacon and read the customer's credentials
 	// from their env files, so they go with the endpoint the same way the managed forwarder does.
 	if !cfg.UserMode && !opts.KeepForwarders {
@@ -1086,6 +1129,7 @@ func buildStatus(requestedUserMode bool, effectiveCfg endpointconfig.Config, run
 		Destinations:       destinationStatus(effectiveCfg),
 		ManagedIngest:      asymptote.Status(requestedUserMode, managedOpts),
 		InventoryHeartbeat: inventoryHeartbeatStatus(requestedUserMode, runtimeLog.RequestedLogPath),
+		SessionSync:        sessionSyncStatus(requestedUserMode, runtimeLog.RequestedLogPath),
 		ScriptForwarders:   scriptForwarderStatuses(),
 		LogAccess:          logAccessOf(effectiveCfg),
 	}
@@ -1148,6 +1192,9 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 		if existing.Inventory != nil {
 			cfg.Inventory = existing.Inventory
 		}
+		if existing.SessionSync != nil {
+			cfg.SessionSync = existing.SessionSync
+		}
 		// The OTLP forward replaces the export a runtime had to another backend before Beacon
 		// pointed it at the collector. An upgrade or repair that dropped it would silently cut that
 		// backend off, so it is kept until --no-otlp-forward removes it.
@@ -1165,6 +1212,9 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 	}
 	if opts.LogAccess != "" {
 		cfg.LogAccess = opts.LogAccess
+	}
+	if opts.SessionSync != nil {
+		cfg.SessionSync = &endpointconfig.SessionSync{Enabled: *opts.SessionSync}
 	}
 	if opts.Harnesses != nil {
 		cfg.Harnesses = opts.Harnesses

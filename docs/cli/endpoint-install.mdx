@@ -60,6 +60,8 @@ The `claude` harness writes both Claude Code's OpenTelemetry settings and its us
 | `--otlp-forward-insecure-skip-verify` | Skip TLS certificate verification for the forward |
 | `--otlp-forward-ca-file <path>` | Optional CA certificate path for the forward's TLS verification |
 | `--no-otlp-forward` | Remove a configured OTLP forward |
+| `--session-sync` | Turn on the [scheduled session sync](#scheduled-session-sync): every 15 minutes, read new records from the agent runtimes' local session stores into the runtime log. Kept by repair and package upgrades |
+| `--no-session-sync` | Turn the scheduled session sync off and remove its job |
 | `--log-access <mode>` | System log access: `shared` (the default) or `restricted`. See [Restricted log access](#restricted-log-access). Omitted, an install keeps the mode the endpoint already has. System installs on macOS and Linux only |
 | `--no-backfill` | Skip the [session backfill](#session-backfill). `BEACON_BACKFILL=0` does the same |
 | `--connect` | After a successful install, attempt to connect this endpoint to Beacon Cloud ingest. User mode uses the signed-in CLI account; system mode opens browser approval. A connection failure does not roll back or fail the completed local install; verify with `beacon endpoint status --json` and retry with [`beacon endpoint connect`](/cli/endpoint-connect) |
@@ -101,6 +103,20 @@ nobody is logged in, install says the backfill was skipped and the next connect 
 reads the sessions. `--dry-run` installs skip it, and `--no-backfill` or `BEACON_BACKFILL=0` turn it
 off. If this install also connects to Beacon Cloud, the same history is
 [uploaded by the connect](/cli/endpoint-connect#session-backfill).
+
+## Scheduled session sync
+
+The session backfill runs once, at install. To keep reading the runtimes' session stores after that, turn on the scheduled session sync:
+
+```bash
+sudo beacon endpoint install --system --session-sync   # or: sudo beacon endpoint repair --system --session-sync
+```
+
+It installs a job that runs `beacon endpoint sessions sync` every 15 minutes, and once when it is loaded: `com.beacon.endpoint.session-sync` (a LaunchDaemon in system mode, a LaunchAgent in user mode) or `beacon-session-sync.timer` on systemd. Each run is the same sweep as the backfill above, with the same 30-day window, size budget and, in system mode, the same confined read of the console user's stores. Each runtime's cursor makes a run read only what is new. With nobody logged in, a system run reads nothing.
+
+It is off by default. Hooks and OTLP already capture sessions live, and the session stores add what only they record, such as Claude Code's per-request token usage and complete assistant text from its transcripts. Turning it on writes those records as poll events (`harness.collection_method=poll`) alongside the live ones, which matters when the runtime log is forwarded elsewhere. Token reports keep live usage authoritative over poll usage for the same session.
+
+The setting is `session_sync.enabled` in `config.json`. Repair and package upgrades keep it, and `--no-session-sync` turns it off and removes the job. `beacon endpoint status` shows it, and `beacon endpoint sessions sync` runs the same sweep by hand. A host without launchd or systemd cannot run the job; run `beacon endpoint sessions sync` from your own scheduler there.
 
 ## Interactive onboarding wizard
 

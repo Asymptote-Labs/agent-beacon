@@ -121,6 +121,7 @@ func endpointInstallOptions(selection endpointTargetSelection, serviceKind servi
 	harnesses := append([]string{}, selection.OTLP...)
 	// Install and repair validate the forward flags before anything is written.
 	otlpForward, _ := otlpForwardOptions()
+	sessionSync, _ := sessionSyncOption()
 	return lifecycle.InstallOptions{
 		UserMode:                  endpointUserMode(),
 		LogPath:                   endpointOpts.logPath,
@@ -136,6 +137,7 @@ func endpointInstallOptions(selection endpointTargetSelection, serviceKind servi
 		SplunkHEC:                 splunkHECOptions(),
 		FalconHEC:                 falconHECOptions(),
 		OTLPForward:               otlpForward,
+		SessionSync:               sessionSync,
 		ServiceKind:               serviceKind,
 		LogAccess:                 strings.ToLower(strings.TrimSpace(endpointOpts.logAccess)),
 	}
@@ -203,6 +205,9 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	if _, err := otlpForwardOptions(); err != nil {
 		return err
 	}
+	if _, err := sessionSyncOption(); err != nil {
+		return err
+	}
 	warnMissingOTLPForwardHeaders(cmd.ErrOrStderr())
 	if endpointOpts.dryRun {
 		return printPlannedActions(plannedInstallActions(false, serviceKind, selection.OTLP, selection.Hooks))
@@ -252,6 +257,12 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(details, "Scheduled inventory job: %s\n", result.InventoryJobPath)
 	case result.InventoryJobDetail != "":
 		fmt.Fprintf(details, "Scheduled inventory job not installed: %s\n", result.InventoryJobDetail)
+	}
+	switch {
+	case result.SessionSyncJobPath != "":
+		fmt.Fprintf(details, "Scheduled session sync job: %s\n", result.SessionSyncJobPath)
+	case result.SessionSyncJobDetail != "":
+		fmt.Fprintf(details, "Scheduled session sync job not installed: %s\n", result.SessionSyncJobDetail)
 	}
 	reportLogAccess(details, result)
 	reportManagedForwarder(details, cmd.ErrOrStderr(), result.ManagedForwarder)
@@ -427,6 +438,7 @@ func runEndpointStatus(cmd *cobra.Command, args []string) error {
 		fmt.Println(line)
 	}
 	fmt.Println(inventoryHeartbeatStatusLine(status.InventoryHeartbeat))
+	fmt.Println(sessionSyncStatusLine(status.SessionSync))
 	return nil
 }
 
@@ -504,6 +516,9 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if _, err := otlpForwardOptions(); err != nil {
+		return err
+	}
+	if _, err := sessionSyncOption(); err != nil {
 		return err
 	}
 	warnMissingOTLPForwardHeaders(cmd.ErrOrStderr())

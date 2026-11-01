@@ -14,7 +14,7 @@ flowchart LR
   Claude[Claude Code] -->|OTLP| Collector["Beacon collector<br/>127.0.0.1:4317"]
   Codex[Codex CLI] -->|OTLP| Collector
   Hooks[Claude Code / Codex hooks] --> RuntimeLog["runtime.jsonl"]
-  Sync[Session-file backfill] --> RuntimeLog
+  Sync["Session sync<br/>(install backfill, then every 15 min)"] --> RuntimeLog
   Collector --> RuntimeLog
   InventoryJob[Inventory job] --> InventoryLog["inventory_state.jsonl"]
   RuntimeLog --> Vector[Vector GCS forwarder]
@@ -25,7 +25,7 @@ flowchart LR
 
 | Destination | What it receives | How |
 | --- | --- | --- |
-| GCS bucket | Everything Beacon records: Claude Code and Codex OTLP (normalized into Beacon events), hook events (prompts, tools, commands, files, sessions), session-file backfill, and endpoint inventory | The packaged Vector forwarder, `com.beacon.endpoint.gcs-forwarder`, tails the local JSONL logs and uploads them |
+| GCS bucket | Everything Beacon records: Claude Code and Codex OTLP (normalized into Beacon events), hook events (prompts, tools, commands, files, sessions), records read from the runtimes' local session files, and endpoint inventory | The packaged Vector forwarder, `com.beacon.endpoint.gcs-forwarder`, tails the local JSONL logs and uploads them |
 | Existing OTLP backend | The Claude Code and Codex OTLP it received before Beacon, with secrets redacted | The collector's OTLP forward |
 
 The two are independent: the GCS forwarder reads Beacon's local logs, and the forward runs inside the collector. Either keeps working when the other's destination is down, and repairs and package upgrades keep both.
@@ -195,6 +195,7 @@ BEACON=/opt/beacon/bin/beacon
 args=(endpoint repair --system
   --collector /opt/beacon/bin/beacon-otelcol
   --harness claude,codex
+  --session-sync
   --otlp-forward-endpoint "$OTLP_FORWARD_ENDPOINT"
   --otlp-forward-protocol "$OTLP_FORWARD_PROTOCOL")
 for header in ${OTLP_FORWARD_HEADERS[@]+"${OTLP_FORWARD_HEADERS[@]}"}; do
@@ -207,6 +208,8 @@ done
 # when nobody is logged in; the Custom Script in Step 6 catches that user later.
 "$BEACON" endpoint user-config repair-installed --system --harness claude,codex
 ```
+
+`--session-sync` turns on the [scheduled session sync](/cli/endpoint-install#scheduled-session-sync): every 15 minutes a root job reads new records from the logged-in user's Claude Code and Codex session files into the runtime log, so what only those files hold, such as per-request token usage and full assistant replies, reaches GCS too. It is off by default; repairs and upgrades keep it once set.
 
 `beacon endpoint repair` stores the forward in `/Library/Application Support/Beacon/Endpoint/config.json` and renders it into the collector config next to it. Header values are usually credentials, so they go to a root-only file beside it, `otlp-forward-headers.json` (`0600`), and into the collector config, which is also `0600`. `config.json` keeps only the header names and stays readable, because the logged-in user's `beacon` commands read it to find the system log. Package upgrades and later repairs, including the GCS helper's, keep the forward; you do not pass the flags again. To remove it, run `beacon endpoint repair --system --no-otlp-forward`.
 
@@ -269,7 +272,7 @@ OTLP_FORWARD_HEADERS=(
 export BEACON_GCS_BUCKET="<bucket>"
 export BEACON_GCS_PREFIX="beacon-prod"
 export BEACON_GCS_STORAGE_CLASS="STANDARD"
-export BEACON_VECTOR_READ_FROM="end"
+export BEACON_VECTOR_READ_FROM="beginning"
 export GOOGLE_APPLICATION_CREDENTIALS="/Library/Application Support/Your Organization/Secrets/beacon-gcs-writer.json"
 
 BEACON=/opt/beacon/bin/beacon
@@ -281,6 +284,7 @@ test -x "$BEACON" || { echo "Beacon is not installed yet" >&2; exit 1; }
 args=(endpoint repair --system
   --collector /opt/beacon/bin/beacon-otelcol
   --harness claude,codex
+  --session-sync
   --otlp-forward-endpoint "$OTLP_FORWARD_ENDPOINT"
   --otlp-forward-protocol "$OTLP_FORWARD_PROTOCOL")
 for header in ${OTLP_FORWARD_HEADERS[@]+"${OTLP_FORWARD_HEADERS[@]}"}; do
@@ -315,7 +319,7 @@ The GCS helper (`repair-hooks-and-forwarder.sh`, under `/opt/beacon/jamf` for co
 - writes and validates `/Library/Application Support/Beacon/Forwarders/gcs-vector.toml` and starts `com.beacon.endpoint.gcs-forwarder`, which uploads the runtime log under `<prefix>/runtime/` and the inventory log under `<prefix>/inventory/`;
 - repairs the endpoint and installs Claude Code hooks for the logged-in user, keeping the forward from step 1.
 
-Runtime upload starts at the end of the log (`BEACON_VECTOR_READ_FROM=end`), so history from before the forwarder started is not uploaded; inventory starts at the beginning so the first snapshot is not missed. When nobody is logged in, the forwarder is configured but the hook step fails, so the script reports a failure until a user logs in and the next run completes.
+Runtime upload starts at the beginning of the log (`BEACON_VECTOR_READ_FROM=beginning`), so the 30-day session backfill the package install wrote reaches GCS as well as everything after it. This applies only the first time the forwarder starts; after that Vector resumes from its checkpoint, so re-running the script uploads nothing twice. Set it to `end` to upload only what is written after the forwarder starts. Inventory always starts at the beginning so the first snapshot is not missed. When nobody is logged in, the forwarder is configured but the hook step fails, so the script reports a failure until a user logs in and the next run completes.
 
 ## Validate a pilot Mac
 

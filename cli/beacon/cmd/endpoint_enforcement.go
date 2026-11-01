@@ -216,7 +216,7 @@ func userModeActiveError(who string, found []string) error {
 		fmt.Fprintf(&b, "  - %s\n", f)
 	}
 	fmt.Fprintf(&b, "Stop user mode first. As %s:\n", who)
-	for _, label := range []string{service.UserLabel, service.ForwarderLabel, service.InventoryLabel} {
+	for _, label := range []string{service.UserLabel, service.ForwarderLabel, service.InventoryLabel, service.SessionSyncLabel} {
 		fmt.Fprintf(&b, "  launchctl bootout gui/$(id -u)/%s; launchctl disable gui/$(id -u)/%s\n", label, label)
 	}
 	fmt.Fprintf(&b, "then point the hooks at system mode and run this again:\n")

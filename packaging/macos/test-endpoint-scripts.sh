@@ -1390,6 +1390,7 @@ for expected in \
   'endpoint user-config repair-installed --system --harness claude,codex' \
   'endpoint update install-daemon' \
   'endpoint inventory install-daemon --system' \
+  'endpoint sessions install-daemon --system' \
   'endpoint asymptote reconcile --system'
 do
   if ! grep -qxF "$expected" "$POSTINSTALL_BEACON_LOG"; then

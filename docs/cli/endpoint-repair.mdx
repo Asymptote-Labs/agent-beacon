@@ -58,6 +58,8 @@ On an endpoint connected to Beacon Cloud, repair leaves the forwarder service, t
 | `--otlp-forward-insecure-skip-verify` | Skip TLS certificate verification for the forward |
 | `--otlp-forward-ca-file <path>` | Optional CA certificate path for the forward's TLS verification |
 | `--no-otlp-forward` | Remove a configured OTLP forward |
+| `--session-sync` | Turn on the [scheduled session sync](/cli/endpoint-install#scheduled-session-sync): every 15 minutes, read new records from the agent runtimes' local session stores into the runtime log. Kept by repair and package upgrades |
+| `--no-session-sync` | Turn the scheduled session sync off and remove its job |
 
 ## Examples
 
