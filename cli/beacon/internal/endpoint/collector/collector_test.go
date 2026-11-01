@@ -426,3 +426,50 @@ func withCollectorDiscovery(t *testing.T, lookup func(string) (string, error), c
 func execLookPath(file string) (string, error) {
 	return exec.LookPath(file)
 }
+
+func TestConfigYAMLForwardsOTLPUnchangedWhenConfigured(t *testing.T) {
+	for _, tc := range []struct {
+		protocol, endpoint, exporter string
+	}{
+		{endpointconfig.OTLPForwardProtocolGRPC, "otel.tokenize.example:4317", "otlp/forward"},
+		{endpointconfig.OTLPForwardProtocolHTTP, "https://otel.tokenize.example", "otlphttp/forward"},
+	} {
+		t.Run(tc.protocol, func(t *testing.T) {
+			cfg := testConfig(t)
+			cfg.Destinations = &endpointconfig.Destinations{OTLPForward: &endpointconfig.OTLPForward{
+				Endpoint: tc.endpoint,
+				Protocol: tc.protocol,
+				Headers:  map[string]string{"x-b": "2", "authorization": "Bearer secret"},
+				CAFile:   "/tmp/ca.pem",
+			}}
+			endpointconfig.NormalizeDestinations(&cfg)
+
+			yaml := ConfigYAML(cfg)
+
+			for _, want := range []string{
+				"  " + tc.exporter + ":\n    endpoint: \"" + tc.endpoint + "\"\n    headers:\n      \"authorization\": \"Bearer secret\"\n      \"x-b\": \"2\"\n    tls:\n      ca_file: \"/tmp/ca.pem\"\n",
+				"    logs/forward:\n      receivers: [otlp]\n      processors: [memory_limiter, batch]\n      exporters: [" + tc.exporter + "]\n",
+				"    traces/forward:\n",
+				"    metrics/forward:\n",
+				// Beacon's own pipelines are unchanged: the forward is not a fanout from them.
+				"      processors: [memory_limiter, claude_api_body, batch]\n      exporters: [beaconjson]\n",
+			} {
+				if !strings.Contains(yaml, want) {
+					t.Fatalf("ConfigYAML missing %q:\n%s", want, yaml)
+				}
+			}
+			if strings.Contains(yaml, "beacon_privacy") {
+				t.Fatalf("an OTLP forward alone should not add beacon_privacy:\n%s", yaml)
+			}
+		})
+	}
+}
+
+func TestConfigYAMLHasNoForwardWhenDisabled(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Destinations = &endpointconfig.Destinations{OTLPForward: &endpointconfig.OTLPForward{}}
+	endpointconfig.NormalizeDestinations(&cfg)
+	if yaml := ConfigYAML(cfg); strings.Contains(yaml, "/forward") {
+		t.Fatalf("ConfigYAML has a forward with none configured:\n%s", yaml)
+	}
+}

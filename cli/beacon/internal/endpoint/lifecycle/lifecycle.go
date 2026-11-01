@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -318,6 +319,9 @@ type InstallOptions struct {
 	ClaudeCaptureModelContext bool
 	SplunkHEC                 *endpointconfig.SplunkHEC
 	FalconHEC                 *endpointconfig.FalconHEC
+	// OTLPForward replaces the configured OTLP forward; nil keeps what the existing config has,
+	// so repair and package upgrades carry it.
+	OTLPForward *endpointconfig.OTLPForward
 	// ServiceKind selects the service manager. Empty auto-detects: launchd on macOS,
 	// systemd when it is PID 1, otherwise a supervised child process.
 	ServiceKind service.Kind
@@ -396,6 +400,15 @@ type Status struct {
 type DestinationStatus struct {
 	SplunkHEC ConfiguredStatus `json:"splunk_hec"`
 	FalconHEC ConfiguredStatus `json:"falcon_hec"`
+	// OTLPForward reports the endpoint and protocol only; header values can be credentials.
+	OTLPForward OTLPForwardStatus `json:"otlp_forward"`
+}
+
+type OTLPForwardStatus struct {
+	Configured bool     `json:"configured"`
+	Endpoint   string   `json:"endpoint,omitempty"`
+	Protocol   string   `json:"protocol,omitempty"`
+	Headers    []string `json:"headers,omitempty"`
 }
 
 type ConfiguredStatus struct {
@@ -556,7 +569,11 @@ func Install(opts InstallOptions) (InstallResult, error) {
 	if cfg.RestrictedLogAccess() {
 		extensions = append(extensions, endpointcollector.IngestExtension)
 	}
-	if err := endpointcollector.CheckComponents(collectorBinary, extensions...); err != nil {
+	var exporters []string
+	if cfg.Destinations != nil && cfg.Destinations.OTLPForward != nil && cfg.Destinations.OTLPForward.Enabled {
+		exporters = append(exporters, endpointcollector.OTLPForwardExporters[cfg.Destinations.OTLPForward.Protocol])
+	}
+	if err := endpointcollector.CheckComponentsFor(collectorBinary, extensions, exporters); err != nil {
 		return InstallResult{}, err
 	}
 
@@ -1104,6 +1121,12 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 		if existing.Inventory != nil {
 			cfg.Inventory = existing.Inventory
 		}
+		// The OTLP forward replaces the export a runtime had to another backend before Beacon
+		// pointed it at the collector. An upgrade or repair that dropped it would silently cut that
+		// backend off, so it is kept until --no-otlp-forward removes it.
+		if existing.Destinations != nil && existing.Destinations.OTLPForward != nil {
+			cfg.Destinations = &endpointconfig.Destinations{OTLPForward: existing.Destinations.OTLPForward}
+		}
 		// The log access mode is an operator's security choice; a repair or upgrade that dropped
 		// it would silently make a restricted log world-writable again.
 		cfg.LogAccess = existing.LogAccess
@@ -1149,6 +1172,16 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 		}
 		cfg.Destinations.FalconHEC = opts.FalconHEC
 	}
+	if opts.OTLPForward != nil {
+		if cfg.Destinations == nil {
+			cfg.Destinations = &endpointconfig.Destinations{}
+		}
+		if opts.OTLPForward.Endpoint == "" && !opts.OTLPForward.Enabled {
+			cfg.Destinations.OTLPForward = nil
+		} else {
+			cfg.Destinations.OTLPForward = opts.OTLPForward
+		}
+	}
 	if cfg.Destinations != nil {
 		endpointconfig.NormalizeDestinations(&cfg)
 	}
@@ -1185,6 +1218,10 @@ func installDestination(cfg endpointconfig.Config) *schema.DestinationInfo {
 		destination.Type += ",falcon_hec"
 		destination.Mode += ",hec"
 	}
+	if cfg.Destinations != nil && cfg.Destinations.OTLPForward != nil && cfg.Destinations.OTLPForward.Enabled {
+		destination.Type += ",otlp_forward"
+		destination.Mode += ",otlp"
+	}
 	return destination
 }
 
@@ -1212,6 +1249,14 @@ func destinationStatus(cfg endpointconfig.Config) DestinationStatus {
 			Source:     falcon.Source,
 			Sourcetype: falcon.Sourcetype,
 		}
+	}
+	if forward := cfg.Destinations.OTLPForward; forward != nil && forward.Enabled {
+		headers := make([]string, 0, len(forward.Headers))
+		for name := range forward.Headers {
+			headers = append(headers, name)
+		}
+		sort.Strings(headers)
+		status.OTLPForward = OTLPForwardStatus{Configured: true, Endpoint: forward.Endpoint, Protocol: forward.Protocol, Headers: headers}
 	}
 	return status
 }

@@ -1828,6 +1828,15 @@ func redactConfig(cfg endpointconfig.Config) endpointconfig.Config {
 		destinations.FalconHEC = &falcon
 		changed = true
 	}
+	if cfg.Destinations.OTLPForward != nil && len(cfg.Destinations.OTLPForward.Headers) > 0 {
+		forward := *cfg.Destinations.OTLPForward
+		forward.Headers = make(map[string]string, len(cfg.Destinations.OTLPForward.Headers))
+		for name := range cfg.Destinations.OTLPForward.Headers {
+			forward.Headers[name] = "[REDACTED]"
+		}
+		destinations.OTLPForward = &forward
+		changed = true
+	}
 	if changed {
 		cfg.Destinations = &destinations
 	}

@@ -252,3 +252,52 @@ func TestLoadRejectsCorruptJSON(t *testing.T) {
 		t.Fatal("expected corrupt JSON error")
 	}
 }
+
+func TestSaveLoadOTLPForwardRoundTripAndPrivatePermissions(t *testing.T) {
+	testenv.RequirePOSIXFileModes(t)
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	cfg := Default(true, filepath.Join(home, "logs", "runtime.jsonl"))
+	cfg.Destinations = &Destinations{OTLPForward: &OTLPForward{
+		Endpoint: " https://otel.tokenize.example ",
+		Protocol: "http",
+		Headers:  map[string]string{"authorization": "Bearer secret"},
+	}}
+
+	path, err := Save(cfg)
+	if err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat config: %v", err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0600); got != want {
+		t.Fatalf("config permissions = %o, want %o", got, want)
+	}
+	loaded, err := Load(true)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	forward := loaded.Destinations.OTLPForward
+	if !forward.Enabled || forward.Endpoint != "https://otel.tokenize.example" || forward.Protocol != OTLPForwardProtocolHTTP || forward.Headers["authorization"] != "Bearer secret" {
+		t.Fatalf("OTLP forward did not round-trip: %#v", forward)
+	}
+}
+
+func TestValidateDestinationsRejectsBadOTLPForward(t *testing.T) {
+	for name, forward := range map[string]OTLPForward{
+		"no endpoint":        {Headers: map[string]string{"a": "b"}},
+		"unknown protocol":   {Endpoint: "otel.example:4317", Protocol: "udp"},
+		"http without a URL": {Endpoint: "otel.example:4318", Protocol: OTLPForwardProtocolHTTP},
+		"header name colon":  {Endpoint: "otel.example:4317", Headers: map[string]string{"a:b": "c"}},
+		"header value break": {Endpoint: "otel.example:4317", Headers: map[string]string{"a": "b\r\nx: y"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			forward := forward
+			if err := ValidateDestinations(&Destinations{OTLPForward: &forward}); err == nil {
+				t.Fatal("expected an error")
+			}
+		})
+	}
+}

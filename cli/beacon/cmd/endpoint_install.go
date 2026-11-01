@@ -118,6 +118,8 @@ var (
 // install and repair (#640). So the list is always handed over non-nil.
 func endpointInstallOptions(selection endpointTargetSelection, serviceKind service.Kind) lifecycle.InstallOptions {
 	harnesses := append([]string{}, selection.OTLP...)
+	// Install and repair validate the forward flags before anything is written.
+	otlpForward, _ := otlpForwardOptions()
 	return lifecycle.InstallOptions{
 		UserMode:                  endpointUserMode(),
 		LogPath:                   endpointOpts.logPath,
@@ -132,6 +134,7 @@ func endpointInstallOptions(selection endpointTargetSelection, serviceKind servi
 		ClaudeCaptureModelContext: endpointOpts.claudeCaptureModelContext,
 		SplunkHEC:                 splunkHECOptions(),
 		FalconHEC:                 falconHECOptions(),
+		OTLPForward:               otlpForward,
 		ServiceKind:               serviceKind,
 		LogAccess:                 strings.ToLower(strings.TrimSpace(endpointOpts.logAccess)),
 	}
@@ -150,6 +153,9 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	reportEndpointTargetSelection(cmd, selection)
 	serviceKind, err := service.ParseKind(endpointOpts.serviceKind)
 	if err != nil {
+		return err
+	}
+	if _, err := otlpForwardOptions(); err != nil {
 		return err
 	}
 	if endpointOpts.dryRun {
@@ -449,6 +455,9 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 	reportEndpointTargetSelection(cmd, selection)
 	serviceKind, err := service.ParseKind(endpointOpts.serviceKind)
 	if err != nil {
+		return err
+	}
+	if _, err := otlpForwardOptions(); err != nil {
 		return err
 	}
 	if endpointOpts.dryRun {

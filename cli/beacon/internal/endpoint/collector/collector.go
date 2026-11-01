@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -146,6 +147,16 @@ func ConfigYAML(cfg endpointconfig.Config) string {
 		exporterNames = append(exporterNames, "falcon_hec")
 	}
 	exporters := "[" + strings.Join(exporterNames, ", ") + "]"
+	forwardExporter, forwardName := otlpForwardYAML(cfg)
+	// The OTLP forward has pipelines of its own, fed by the same receiver, so what it sends is what
+	// the runtimes sent: none of Beacon's processors (claude_api_body, beacon_privacy) touch it. It
+	// stands in for the runtime's own export to that backend, which Beacon's settings replaced.
+	forwardPipelines := ""
+	if forwardName != "" {
+		for _, signal := range []string{"logs", "traces", "metrics"} {
+			forwardPipelines += fmt.Sprintf("    %s/forward:\n      receivers: [otlp]\n      processors: [memory_limiter, batch]\n      exporters: [%s]\n", signal, forwardName)
+		}
+	}
 	// The direct HEC exporters send what they receive, so beacon_privacy redacts before the
 	// fanout. beaconjson redacts in its own writer; with no HEC exporter the processor would only
 	// repeat that on every record.
@@ -228,7 +239,54 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, %sbatch]
       exporters: %s
-`, cfg.Collector.GRPCPort, grpcLimitYAML, cfg.Collector.HTTPPort, modelContextYAML, privacyYAML, cfg.LogPath, runtimeMetricsYAML+codexSpansYAML+modelContextYAML+splunkExporter+falconExporter, endpointconfig.HealthCheckPort(cfg.Collector), ingestYAML, extensions, privacyStep, exporters, privacyStep, exporters, privacyStep, exporters)
+%s`, cfg.Collector.GRPCPort, grpcLimitYAML, cfg.Collector.HTTPPort, modelContextYAML, privacyYAML, cfg.LogPath, runtimeMetricsYAML+codexSpansYAML+modelContextYAML+splunkExporter+falconExporter+forwardExporter, endpointconfig.HealthCheckPort(cfg.Collector), ingestYAML, extensions, privacyStep, exporters, privacyStep, exporters, privacyStep, exporters, forwardPipelines)
+}
+
+// OTLPForwardExporters are the collector exporters an OTLP forward is rendered with, by protocol.
+var OTLPForwardExporters = map[string]string{
+	endpointconfig.OTLPForwardProtocolGRPC: "otlp",
+	endpointconfig.OTLPForwardProtocolHTTP: "otlphttp",
+}
+
+// otlpForwardYAML renders the exporter for the configured OTLP forward and returns its name, or
+// "" for both when forwarding is off.
+func otlpForwardYAML(cfg endpointconfig.Config) (string, string) {
+	if cfg.Destinations == nil || cfg.Destinations.OTLPForward == nil || !cfg.Destinations.OTLPForward.Enabled {
+		return "", ""
+	}
+	forward := cfg.Destinations.OTLPForward
+	kind := OTLPForwardExporters[forward.Protocol]
+	if kind == "" {
+		kind = OTLPForwardExporters[endpointconfig.OTLPForwardProtocolGRPC]
+	}
+	name := kind + "/forward"
+	var b strings.Builder
+	fmt.Fprintf(&b, "  %s:\n", name)
+	fmt.Fprintf(&b, "    endpoint: %q\n", forward.Endpoint)
+	if len(forward.Headers) > 0 {
+		keys := make([]string, 0, len(forward.Headers))
+		for key := range forward.Headers {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		fmt.Fprintf(&b, "    headers:\n")
+		for _, key := range keys {
+			fmt.Fprintf(&b, "      %q: %q\n", key, forward.Headers[key])
+		}
+	}
+	if forward.Insecure || forward.InsecureSkipVerify || forward.CAFile != "" {
+		fmt.Fprintf(&b, "    tls:\n")
+		if forward.Insecure {
+			fmt.Fprintf(&b, "      insecure: true\n")
+		}
+		if forward.InsecureSkipVerify {
+			fmt.Fprintf(&b, "      insecure_skip_verify: true\n")
+		}
+		if forward.CAFile != "" {
+			fmt.Fprintf(&b, "      ca_file: %q\n", forward.CAFile)
+		}
+	}
+	return b.String(), name
 }
 
 func splunkHECYAML(cfg endpointconfig.Config) string {

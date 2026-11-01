@@ -179,6 +179,30 @@ type InventorySettings struct {
 type Destinations struct {
 	SplunkHEC *SplunkHEC `json:"splunk_hec,omitempty"`
 	FalconHEC *FalconHEC `json:"falcon_hec,omitempty"`
+	// OTLPForward sends the OTLP the local collector receives on to a second OTLP endpoint,
+	// unchanged, alongside Beacon's own pipeline. It exists for machines whose runtimes already
+	// exported to another OTLP backend before Beacon took over their export settings.
+	OTLPForward *OTLPForward `json:"otlp_forward,omitempty"`
+}
+
+// OTLP forwarding protocols.
+const (
+	OTLPForwardProtocolGRPC = "grpc"
+	OTLPForwardProtocolHTTP = "http/protobuf"
+)
+
+type OTLPForward struct {
+	Enabled bool `json:"enabled,omitempty"`
+	// Endpoint is the receiving collector: host:port or a URL for gRPC, the base URL for HTTP
+	// (the exporter appends /v1/logs, /v1/traces and /v1/metrics).
+	Endpoint string `json:"endpoint,omitempty"`
+	// Protocol is "grpc" (the default) or "http/protobuf".
+	Protocol string `json:"protocol,omitempty"`
+	// Headers are sent with every export, typically an authorization header the backend issued.
+	Headers            map[string]string `json:"headers,omitempty"`
+	Insecure           bool              `json:"insecure,omitempty"`
+	InsecureSkipVerify bool              `json:"insecure_skip_verify,omitempty"`
+	CAFile             string            `json:"ca_file,omitempty"`
 }
 
 type SplunkHEC struct {
@@ -413,6 +437,20 @@ func NormalizeDestinations(cfg *Config) {
 			}
 		}
 	}
+	if forward := cfg.Destinations.OTLPForward; forward != nil {
+		forward.Endpoint = strings.TrimSpace(forward.Endpoint)
+		forward.Protocol = strings.ToLower(strings.TrimSpace(forward.Protocol))
+		switch forward.Protocol {
+		case "http", "http/protobuf", "otlphttp":
+			forward.Protocol = OTLPForwardProtocolHTTP
+		}
+		if forward.Endpoint != "" {
+			forward.Enabled = true
+		}
+		if forward.Enabled && forward.Protocol == "" {
+			forward.Protocol = OTLPForwardProtocolGRPC
+		}
+	}
 	if falcon := cfg.Destinations.FalconHEC; falcon != nil {
 		if falcon.Endpoint != "" || falcon.Token != "" {
 			falcon.Enabled = true
@@ -431,6 +469,35 @@ func NormalizeDestinations(cfg *Config) {
 func ValidateDestinations(destinations *Destinations) error {
 	if destinations == nil {
 		return nil
+	}
+	if forward := destinations.OTLPForward; forward != nil {
+		configured := forward.Enabled ||
+			forward.Endpoint != "" ||
+			len(forward.Headers) > 0 ||
+			forward.Insecure ||
+			forward.InsecureSkipVerify ||
+			forward.CAFile != ""
+		if configured {
+			if strings.TrimSpace(forward.Endpoint) == "" {
+				return fmt.Errorf("OTLP forward endpoint is required when OTLP forwarding is configured")
+			}
+			switch forward.Protocol {
+			case "", OTLPForwardProtocolGRPC, OTLPForwardProtocolHTTP:
+			default:
+				return fmt.Errorf("unsupported OTLP forward protocol %q: use %q or %q", forward.Protocol, OTLPForwardProtocolGRPC, OTLPForwardProtocolHTTP)
+			}
+			if forward.Protocol == OTLPForwardProtocolHTTP && !strings.HasPrefix(forward.Endpoint, "https://") && !strings.HasPrefix(forward.Endpoint, "http://") {
+				return fmt.Errorf("OTLP forward endpoint %q must be an http:// or https:// URL for the %s protocol", forward.Endpoint, OTLPForwardProtocolHTTP)
+			}
+			for name, value := range forward.Headers {
+				if strings.TrimSpace(name) == "" || strings.ContainsAny(name, ":\r\n") {
+					return fmt.Errorf("invalid OTLP forward header name %q", name)
+				}
+				if strings.ContainsAny(value, "\r\n") {
+					return fmt.Errorf("OTLP forward header %q has a line break in its value", name)
+				}
+			}
+		}
 	}
 	if destinations.SplunkHEC != nil {
 		splunk := destinations.SplunkHEC
@@ -476,5 +543,6 @@ func ValidateDestinations(destinations *Destinations) error {
 func HasSecretDestinations(cfg Config) bool {
 	return cfg.Destinations != nil &&
 		((cfg.Destinations.SplunkHEC != nil && cfg.Destinations.SplunkHEC.Token != "") ||
-			(cfg.Destinations.FalconHEC != nil && cfg.Destinations.FalconHEC.Token != ""))
+			(cfg.Destinations.FalconHEC != nil && cfg.Destinations.FalconHEC.Token != "") ||
+			(cfg.Destinations.OTLPForward != nil && len(cfg.Destinations.OTLPForward.Headers) > 0))
 }

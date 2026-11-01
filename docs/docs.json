@@ -561,6 +561,13 @@
                 "pages": [
                   "guides/fleet-s3-mdm"
                 ]
+              },
+              {
+                "group": "Kandji",
+                "expanded": true,
+                "pages": [
+                  "guides/kandji-otlp-forward-mdm"
+                ]
               }
             ]
           }

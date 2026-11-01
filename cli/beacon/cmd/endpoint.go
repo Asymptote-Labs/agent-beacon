@@ -74,6 +74,13 @@ var endpointOpts struct {
 	falconSourcetype          string
 	falconInsecureSkipVerify  bool
 	falconCAFile              string
+	otlpForwardEndpoint       string
+	otlpForwardProtocol       string
+	otlpForwardHeaders        []string
+	otlpForwardInsecure       bool
+	otlpForwardSkipVerify     bool
+	otlpForwardCAFile         string
+	noOTLPForward             bool
 	dashboardAddr             string
 	dashboardOpen             bool
 	includeEventSummaries     bool
@@ -449,6 +456,7 @@ func init() {
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.logAccess, "log-access", "", logAccessUsage)
 	registerSplunkFlags(endpointInstallCmd)
 	registerFalconFlags(endpointInstallCmd)
+	registerOTLPForwardFlags(endpointInstallCmd)
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.harnesses, "harness", endpointHarnessAuto, "Harnesses to configure: auto (detected runtimes), all, or a comma-separated list")
 	endpointRepairCmd.Flags().IntVar(&endpointOpts.grpcPort, "otlp-grpc-port", endpointconfig.DefaultGRPCPort, "Local OTLP gRPC port")
 	endpointRepairCmd.Flags().IntVar(&endpointOpts.httpPort, "otlp-http-port", endpointconfig.DefaultHTTPPort, "Local OTLP HTTP port")
@@ -466,6 +474,7 @@ func init() {
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.logAccess, "log-access", "", logAccessUsage)
 	registerSplunkFlags(endpointRepairCmd)
 	registerFalconFlags(endpointRepairCmd)
+	registerOTLPForwardFlags(endpointRepairCmd)
 	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and the system collector service")
 	endpointDashboardCmd.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
@@ -783,6 +792,58 @@ func registerFalconFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&endpointOpts.falconSourcetype, "falcon-sourcetype", endpointconfig.DefaultFalconSourcetype, "Optional Falcon LogScale parser or sourcetype")
 	cmd.Flags().BoolVar(&endpointOpts.falconInsecureSkipVerify, "falcon-insecure-skip-verify", false, "Skip Falcon LogScale HEC TLS certificate verification")
 	cmd.Flags().StringVar(&endpointOpts.falconCAFile, "falcon-ca-file", "", "Optional CA certificate path for Falcon LogScale HEC TLS verification")
+}
+
+func registerOTLPForwardFlags(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&endpointOpts.otlpForwardEndpoint, "otlp-forward-endpoint", "", "Also forward the OTLP the local collector receives, unchanged, to this OTLP endpoint (host:port or URL for grpc, base URL for http/protobuf)")
+	cmd.Flags().StringVar(&endpointOpts.otlpForwardProtocol, "otlp-forward-protocol", endpointconfig.OTLPForwardProtocolGRPC, "OTLP forward protocol: grpc or http/protobuf")
+	cmd.Flags().StringArrayVar(&endpointOpts.otlpForwardHeaders, "otlp-forward-header", nil, "Header sent with every OTLP forward export, as name=value (repeatable)")
+	cmd.Flags().BoolVar(&endpointOpts.otlpForwardInsecure, "otlp-forward-insecure", false, "Send the OTLP forward without TLS (gRPC plaintext)")
+	cmd.Flags().BoolVar(&endpointOpts.otlpForwardSkipVerify, "otlp-forward-insecure-skip-verify", false, "Skip TLS certificate verification for the OTLP forward")
+	cmd.Flags().StringVar(&endpointOpts.otlpForwardCAFile, "otlp-forward-ca-file", "", "Optional CA certificate path for OTLP forward TLS verification")
+	cmd.Flags().BoolVar(&endpointOpts.noOTLPForward, "no-otlp-forward", false, "Remove a configured OTLP forward")
+}
+
+// otlpForwardOptions returns nil when no OTLP forward flag was given, so install and repair keep
+// what the existing config has; --no-otlp-forward returns an empty forward, which removes it.
+func otlpForwardOptions() (*endpointconfig.OTLPForward, error) {
+	if endpointOpts.noOTLPForward {
+		if endpointOpts.otlpForwardEndpoint != "" {
+			return nil, fmt.Errorf("--no-otlp-forward cannot be combined with --otlp-forward-endpoint")
+		}
+		return &endpointconfig.OTLPForward{}, nil
+	}
+	if endpointOpts.otlpForwardEndpoint == "" &&
+		len(endpointOpts.otlpForwardHeaders) == 0 &&
+		(endpointOpts.otlpForwardProtocol == "" || endpointOpts.otlpForwardProtocol == endpointconfig.OTLPForwardProtocolGRPC) &&
+		!endpointOpts.otlpForwardInsecure &&
+		!endpointOpts.otlpForwardSkipVerify &&
+		endpointOpts.otlpForwardCAFile == "" {
+		return nil, nil
+	}
+	if strings.TrimSpace(endpointOpts.otlpForwardEndpoint) == "" {
+		return nil, fmt.Errorf("--otlp-forward-endpoint is required with the other --otlp-forward flags")
+	}
+	headers := map[string]string{}
+	for _, header := range endpointOpts.otlpForwardHeaders {
+		name, value, ok := strings.Cut(header, "=")
+		name = strings.TrimSpace(name)
+		if !ok || name == "" {
+			return nil, fmt.Errorf("--otlp-forward-header %q must be name=value", header)
+		}
+		headers[name] = value
+	}
+	if len(headers) == 0 {
+		headers = nil
+	}
+	return &endpointconfig.OTLPForward{
+		Endpoint:           endpointOpts.otlpForwardEndpoint,
+		Protocol:           endpointOpts.otlpForwardProtocol,
+		Headers:            headers,
+		Insecure:           endpointOpts.otlpForwardInsecure,
+		InsecureSkipVerify: endpointOpts.otlpForwardSkipVerify,
+		CAFile:             endpointOpts.otlpForwardCAFile,
+	}, nil
 }
 
 func splunkHECOptions() *endpointconfig.SplunkHEC {

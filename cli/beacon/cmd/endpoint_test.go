@@ -440,6 +440,42 @@ func TestFalconHECOptionsDefaultIsNil(t *testing.T) {
 	}
 }
 
+func TestOTLPForwardOptions(t *testing.T) {
+	old := endpointOpts
+	t.Cleanup(func() { endpointOpts = old })
+
+	endpointOpts.otlpForwardProtocol = endpointconfig.OTLPForwardProtocolGRPC
+	if got, err := otlpForwardOptions(); err != nil || got != nil {
+		t.Fatalf("otlpForwardOptions() with no flags = %#v, %v; want nil, nil so repair keeps the existing forward", got, err)
+	}
+
+	endpointOpts.otlpForwardEndpoint = "otel.tokenize.example:4317"
+	endpointOpts.otlpForwardHeaders = []string{"authorization=Bearer a=b", "x-org=rho"}
+	got, err := otlpForwardOptions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Endpoint != "otel.tokenize.example:4317" || got.Headers["authorization"] != "Bearer a=b" || got.Headers["x-org"] != "rho" {
+		t.Fatalf("otlpForwardOptions() = %#v", got)
+	}
+
+	endpointOpts.otlpForwardHeaders = []string{"no-equals"}
+	if _, err := otlpForwardOptions(); err == nil {
+		t.Fatal("expected an error for a header without =")
+	}
+
+	endpointOpts.otlpForwardHeaders = nil
+	endpointOpts.noOTLPForward = true
+	if _, err := otlpForwardOptions(); err == nil {
+		t.Fatal("expected --no-otlp-forward with an endpoint to be refused")
+	}
+	endpointOpts.otlpForwardEndpoint = ""
+	got, err = otlpForwardOptions()
+	if err != nil || got == nil || got.Enabled || got.Endpoint != "" {
+		t.Fatalf("--no-otlp-forward = %#v, %v; want an empty forward that removes it", got, err)
+	}
+}
+
 func TestRepairCollectorServiceRollsBackWhenReadinessFails(t *testing.T) {
 	oldOpts := endpointOpts
 	oldLoadConfig := repairLoadEndpointConfig

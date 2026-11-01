@@ -52,6 +52,13 @@ The `claude` harness writes both Claude Code's OpenTelemetry settings and its us
 | `--falcon-sourcetype <type>` | Optional Falcon LogScale parser or sourcetype |
 | `--falcon-insecure-skip-verify` | Skip Falcon LogScale HEC TLS certificate verification |
 | `--falcon-ca-file <path>` | Optional CA certificate path for Falcon LogScale HEC TLS verification |
+| `--otlp-forward-endpoint <endpoint>` | Also forward the OTLP the local collector receives, unchanged, to a second OTLP endpoint: `host:port` or a URL for gRPC, the base URL for HTTP. For runtimes that already exported to another backend before Beacon took over their OTLP settings. See [Kandji with an existing OTLP backend](/guides/kandji-otlp-forward-mdm). Omitted, install and repair keep the forward the endpoint already has |
+| `--otlp-forward-protocol <protocol>` | `grpc` (default) or `http/protobuf` |
+| `--otlp-forward-header <name=value>` | Header sent with every forwarded export, usually the backend's API key; repeatable. Makes the endpoint config root-only; status and doctor show header names only |
+| `--otlp-forward-insecure` | Send the forward without TLS (plaintext gRPC) |
+| `--otlp-forward-insecure-skip-verify` | Skip TLS certificate verification for the forward |
+| `--otlp-forward-ca-file <path>` | Optional CA certificate path for the forward's TLS verification |
+| `--no-otlp-forward` | Remove a configured OTLP forward |
 | `--log-access <mode>` | System log access: `shared` (the default) or `restricted`. See [Restricted log access](#restricted-log-access). Omitted, an install keeps the mode the endpoint already has. System installs on macOS and Linux only |
 | `--no-backfill` | Skip the [session backfill](#session-backfill). `BEACON_BACKFILL=0` does the same |
 | `--connect` | After a successful install, attempt to connect this endpoint to Beacon Cloud ingest. User mode uses the signed-in CLI account; system mode opens browser approval. A connection failure does not roll back or fail the completed local install; verify with `beacon endpoint status --json` and retry with [`beacon endpoint connect`](/cli/endpoint-connect) |
