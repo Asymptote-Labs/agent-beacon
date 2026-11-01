@@ -427,7 +427,7 @@ func execLookPath(file string) (string, error) {
 	return exec.LookPath(file)
 }
 
-func TestConfigYAMLForwardsOTLPUnchangedWhenConfigured(t *testing.T) {
+func TestConfigYAMLForwardsFilteredRedactedOTLPWhenConfigured(t *testing.T) {
 	for _, tc := range []struct {
 		protocol, endpoint, exporter string
 	}{
@@ -447,19 +447,21 @@ func TestConfigYAMLForwardsOTLPUnchangedWhenConfigured(t *testing.T) {
 			yaml := ConfigYAML(cfg)
 
 			for _, want := range []string{
-				"  " + tc.exporter + ":\n    endpoint: \"" + tc.endpoint + "\"\n    headers:\n      \"authorization\": \"Bearer secret\"\n      \"x-b\": \"2\"\n    tls:\n      ca_file: \"/tmp/ca.pem\"\n",
-				"    logs/forward:\n      receivers: [otlp]\n      processors: [memory_limiter, batch]\n      exporters: [" + tc.exporter + "]\n",
-				"    traces/forward:\n",
-				"    metrics/forward:\n",
-				// Beacon's own pipelines are unchanged: the forward is not a fanout from them.
-				"      processors: [memory_limiter, claude_api_body, batch]\n      exporters: [beaconjson]\n",
+				"  " + tc.exporter + ":\n    endpoint: \"" + tc.endpoint + "\"\n    headers:\n      \"authorization\": \"Bearer secret\"\n      \"x-b\": \"2\"\n",
+				// A down backend sheds forward data rather than filling memory_limiter.
+				"    sending_queue:\n      enabled: true\n      num_consumers: 2\n      queue_size: 20\n",
+				"    retry_on_failure:\n      enabled: true\n      max_elapsed_time: 120s\n",
+				"    tls:\n      ca_file: \"/tmp/ca.pem\"\n",
+				"  beacon_privacy: {}\n  beacon_forward_filter:\n    harnesses: [claude_code, codex_cli, codex_desktop]\n",
+				"    logs/forward:\n      receivers: [otlp]\n      processors: [memory_limiter, beacon_forward_filter, claude_api_body, beacon_privacy, batch]\n      exporters: [" + tc.exporter + "]\n",
+				"    traces/forward:\n      receivers: [otlp]\n      processors: [memory_limiter, beacon_forward_filter, beacon_privacy, batch]\n",
+				"    metrics/forward:\n      receivers: [otlp]\n      processors: [memory_limiter, beacon_forward_filter, beacon_privacy, batch]\n",
+				// Beacon's own pipelines are unchanged by a forward.
+				"    logs:\n      receivers: [otlp]\n      processors: [memory_limiter, claude_api_body, batch]\n      exporters: [beaconjson]\n",
 			} {
 				if !strings.Contains(yaml, want) {
 					t.Fatalf("ConfigYAML missing %q:\n%s", want, yaml)
 				}
-			}
-			if strings.Contains(yaml, "beacon_privacy") {
-				t.Fatalf("an OTLP forward alone should not add beacon_privacy:\n%s", yaml)
 			}
 		})
 	}

@@ -476,6 +476,20 @@ func TestOTLPForwardOptions(t *testing.T) {
 	}
 }
 
+func TestOTLPForwardHarnesses(t *testing.T) {
+	got, err := otlpForwardHarnesses("claude, codex")
+	if err != nil || strings.Join(got, ",") != "claude_code,codex_cli,codex_desktop" {
+		t.Fatalf("otlpForwardHarnesses(claude, codex) = %v, %v", got, err)
+	}
+	if got, err := otlpForwardHarnesses(""); err != nil || got != nil {
+		t.Fatalf("empty = %v, %v; want nil so the default applies", got, err)
+	}
+	// A name Beacon does not know is kept as given, matched against the resource's own name.
+	if got, err := otlpForwardHarnesses("my-agent"); err != nil || strings.Join(got, ",") != "my-agent" {
+		t.Fatalf("otlpForwardHarnesses(my-agent) = %v, %v", got, err)
+	}
+}
+
 func TestRepairCollectorServiceRollsBackWhenReadinessFails(t *testing.T) {
 	oldOpts := endpointOpts
 	oldLoadConfig := repairLoadEndpointConfig

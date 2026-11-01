@@ -33,12 +33,12 @@ var listComponents = func(ctx context.Context, binary string) ([]byte, error) {
 // extensions names the extensions the config will use beyond health_check -- beacon_ingest, in the
 // restricted log access mode -- which are refused the same way.
 func CheckComponents(binary string, extensions ...string) error {
-	return CheckComponentsFor(binary, extensions, nil)
+	return CheckComponentsFor(binary, extensions, nil, nil)
 }
 
-// CheckComponentsFor is CheckComponents with the exporters the config will use beyond Beacon's
-// own -- the OTLP forward's -- refused the same way.
-func CheckComponentsFor(binary string, extensions, exporters []string) error {
+// CheckComponentsFor is CheckComponents with the processors and exporters the config will use
+// beyond Beacon's own -- the OTLP forward's -- refused the same way.
+func CheckComponentsFor(binary string, extensions, processors, exporters []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	out, err := listComponents(ctx, binary)
@@ -63,7 +63,7 @@ func CheckComponentsFor(binary string, extensions, exporters []string) error {
 	for _, processor := range listed.Processors {
 		have[processor.Name] = true
 	}
-	for _, name := range requiredProcessors {
+	for _, name := range append(append([]string{}, requiredProcessors...), processors...) {
 		if !have[name] {
 			return fmt.Errorf("collector %s is older than this beacon CLI: it has no %q processor, which the collector config needs; "+
 				"use the %s from the same Beacon release, or pass --collector with one", binary, name, BinaryName)

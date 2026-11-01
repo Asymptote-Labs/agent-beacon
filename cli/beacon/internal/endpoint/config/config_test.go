@@ -253,7 +253,10 @@ func TestLoadRejectsCorruptJSON(t *testing.T) {
 	}
 }
 
-func TestSaveLoadOTLPForwardRoundTripAndPrivatePermissions(t *testing.T) {
+// The forward's header values are credentials, but config.json must stay readable: ordinary
+// accounts read the system config to find the system runtime log. So the values go to a 0600 file
+// of their own and config.json carries only their names.
+func TestSaveLoadOTLPForwardKeepsHeaderValuesOutOfConfigJSON(t *testing.T) {
 	testenv.RequirePOSIXFileModes(t)
 	home := t.TempDir()
 	testenv.SetHome(t, home)
@@ -270,11 +273,23 @@ func TestSaveLoadOTLPForwardRoundTripAndPrivatePermissions(t *testing.T) {
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		t.Fatalf("stat config: %v", err)
+		t.Fatal(err)
 	}
-	if got, want := info.Mode().Perm(), os.FileMode(0600); got != want {
-		t.Fatalf("config permissions = %o, want %o", got, want)
+	if got := info.Mode().Perm(); got != 0644 {
+		t.Fatalf("config.json permissions = %o, want 644", got)
 	}
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), "Bearer secret") || !strings.Contains(string(data), `"authorization"`) {
+		t.Fatalf("config.json should name the header and not hold its value:\n%s", data)
+	}
+	secrets, err := os.Stat(OTLPForwardSecretsPath(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := secrets.Mode().Perm(); got != 0600 {
+		t.Fatalf("secrets permissions = %o, want 600", got)
+	}
+
 	loaded, err := Load(true)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
@@ -282,6 +297,30 @@ func TestSaveLoadOTLPForwardRoundTripAndPrivatePermissions(t *testing.T) {
 	forward := loaded.Destinations.OTLPForward
 	if !forward.Enabled || forward.Endpoint != "https://otel.tokenize.example" || forward.Protocol != OTLPForwardProtocolHTTP || forward.Headers["authorization"] != "Bearer secret" {
 		t.Fatalf("OTLP forward did not round-trip: %#v", forward)
+	}
+	if strings.Join(forward.Harnesses, ",") != "claude_code,codex_cli,codex_desktop" {
+		t.Fatalf("default harnesses = %v", forward.Harnesses)
+	}
+
+	// An account that cannot read the secrets still loads the forward, without the values.
+	if err := os.Chmod(OTLPForwardSecretsPath(true), 0); err == nil && os.Geteuid() != 0 {
+		loaded, err := Load(true)
+		if err != nil {
+			t.Fatalf("Load without the secrets returned error: %v", err)
+		}
+		if f := loaded.Destinations.OTLPForward; !f.Enabled || f.Headers != nil || strings.Join(f.HeaderNames, ",") != "authorization" {
+			t.Fatalf("forward without secrets = %#v", f)
+		}
+	}
+
+	// Removing the headers removes the secrets file.
+	cfg.Destinations.OTLPForward.Headers = nil
+	cfg.Destinations.OTLPForward.HeaderNames = nil
+	if _, err := Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(OTLPForwardSecretsPath(true)); !os.IsNotExist(err) {
+		t.Fatalf("secrets file left behind: %v", err)
 	}
 }
 

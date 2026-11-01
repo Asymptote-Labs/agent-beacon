@@ -50,9 +50,10 @@ On an endpoint connected to Beacon Cloud, repair leaves the forwarder service, t
 | `--falcon-sourcetype <type>` | Optional Falcon LogScale parser or sourcetype |
 | `--falcon-insecure-skip-verify` | Skip Falcon LogScale HEC TLS certificate verification |
 | `--falcon-ca-file <path>` | Optional CA certificate path for Falcon LogScale HEC TLS verification |
-| `--otlp-forward-endpoint <endpoint>` | Also forward the OTLP the local collector receives, unchanged, to a second OTLP endpoint: `host:port` or a URL for gRPC, the base URL for HTTP. For runtimes that already exported to another backend before Beacon took over their OTLP settings. See [Kandji with an existing OTLP backend](/guides/kandji-otlp-forward-mdm). Omitted, install and repair keep the forward the endpoint already has |
+| `--otlp-forward-endpoint <endpoint>` | Also forward the Claude Code and Codex OTLP the local collector receives, with secrets redacted and raw API bodies dropped, to a second OTLP endpoint: `host:port` or a URL for gRPC, the base URL for HTTP. For runtimes that already exported to another backend before Beacon took over their OTLP settings. See [Kandji with an existing OTLP backend](/guides/kandji-otlp-forward-mdm). Omitted, install and repair keep the forward the endpoint already has |
 | `--otlp-forward-protocol <protocol>` | `grpc` (default) or `http/protobuf` |
-| `--otlp-forward-header <name=value>` | Header sent with every forwarded export, usually the backend's API key; repeatable. Makes the endpoint config root-only; status and doctor show header names only |
+| `--otlp-forward-harness <list>` | Runtimes whose OTLP the forward carries, comma-separated. Default `claude,codex`; any other source, such as the browser extension, stays local |
+| `--otlp-forward-header <name=value>` | Header sent with every forwarded export, usually the backend's API key; repeatable. Values are stored in a root-only `otlp-forward-headers.json` beside `config.json`, which keeps only the names; status and doctor show names only |
 | `--otlp-forward-insecure` | Send the forward without TLS (plaintext gRPC) |
 | `--otlp-forward-insecure-skip-verify` | Skip TLS certificate verification for the forward |
 | `--otlp-forward-ca-file <path>` | Optional CA certificate path for the forward's TLS verification |

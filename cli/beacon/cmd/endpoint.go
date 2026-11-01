@@ -15,6 +15,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/openclaw"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/vscode"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 var endpointOpts struct {
@@ -77,6 +78,7 @@ var endpointOpts struct {
 	otlpForwardEndpoint       string
 	otlpForwardProtocol       string
 	otlpForwardHeaders        []string
+	otlpForwardHarnesses      string
 	otlpForwardInsecure       bool
 	otlpForwardSkipVerify     bool
 	otlpForwardCAFile         string
@@ -795,8 +797,9 @@ func registerFalconFlags(cmd *cobra.Command) {
 }
 
 func registerOTLPForwardFlags(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&endpointOpts.otlpForwardEndpoint, "otlp-forward-endpoint", "", "Also forward the OTLP the local collector receives, unchanged, to this OTLP endpoint (host:port or URL for grpc, base URL for http/protobuf)")
+	cmd.Flags().StringVar(&endpointOpts.otlpForwardEndpoint, "otlp-forward-endpoint", "", "Also forward Claude Code and Codex OTLP the local collector receives, with secrets redacted, to this OTLP endpoint (host:port or URL for grpc, base URL for http/protobuf)")
 	cmd.Flags().StringVar(&endpointOpts.otlpForwardProtocol, "otlp-forward-protocol", endpointconfig.OTLPForwardProtocolGRPC, "OTLP forward protocol: grpc or http/protobuf")
+	cmd.Flags().StringVar(&endpointOpts.otlpForwardHarnesses, "otlp-forward-harness", "", "Runtimes whose OTLP the forward carries, comma-separated (default claude,codex); other sources, such as the browser extension, stay local")
 	cmd.Flags().StringArrayVar(&endpointOpts.otlpForwardHeaders, "otlp-forward-header", nil, "Header sent with every OTLP forward export, as name=value (repeatable)")
 	cmd.Flags().BoolVar(&endpointOpts.otlpForwardInsecure, "otlp-forward-insecure", false, "Send the OTLP forward without TLS (gRPC plaintext)")
 	cmd.Flags().BoolVar(&endpointOpts.otlpForwardSkipVerify, "otlp-forward-insecure-skip-verify", false, "Skip TLS certificate verification for the OTLP forward")
@@ -815,6 +818,7 @@ func otlpForwardOptions() (*endpointconfig.OTLPForward, error) {
 	}
 	if endpointOpts.otlpForwardEndpoint == "" &&
 		len(endpointOpts.otlpForwardHeaders) == 0 &&
+		endpointOpts.otlpForwardHarnesses == "" &&
 		(endpointOpts.otlpForwardProtocol == "" || endpointOpts.otlpForwardProtocol == endpointconfig.OTLPForwardProtocolGRPC) &&
 		!endpointOpts.otlpForwardInsecure &&
 		!endpointOpts.otlpForwardSkipVerify &&
@@ -836,7 +840,12 @@ func otlpForwardOptions() (*endpointconfig.OTLPForward, error) {
 	if len(headers) == 0 {
 		headers = nil
 	}
+	harnesses, err := otlpForwardHarnesses(endpointOpts.otlpForwardHarnesses)
+	if err != nil {
+		return nil, err
+	}
 	return &endpointconfig.OTLPForward{
+		Harnesses:          harnesses,
 		Endpoint:           endpointOpts.otlpForwardEndpoint,
 		Protocol:           endpointOpts.otlpForwardProtocol,
 		Headers:            headers,
@@ -844,6 +853,32 @@ func otlpForwardOptions() (*endpointconfig.OTLPForward, error) {
 		InsecureSkipVerify: endpointOpts.otlpForwardSkipVerify,
 		CAFile:             endpointOpts.otlpForwardCAFile,
 	}, nil
+}
+
+// otlpForwardHarnesses turns --otlp-forward-harness into canonical harness names; empty keeps the
+// default (Claude Code and Codex). Codex CLI and the desktop app export under one name, so
+// naming either forwards both.
+func otlpForwardHarnesses(value string) ([]string, error) {
+	var names []string
+	seen := map[string]bool{}
+	add := func(name string) {
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	for _, raw := range splitHarnessCSV(value) {
+		name := asymptoteobserve.NormalizeHarnessName(strings.TrimSpace(raw))
+		if name == "" {
+			return nil, fmt.Errorf("--otlp-forward-harness: unknown runtime %q", raw)
+		}
+		add(name)
+		if name == "codex_cli" || name == "codex_desktop" {
+			add("codex_cli")
+			add("codex_desktop")
+		}
+	}
+	return names, nil
 }
 
 func splunkHECOptions() *endpointconfig.SplunkHEC {

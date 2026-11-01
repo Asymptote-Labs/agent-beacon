@@ -148,13 +148,22 @@ func ConfigYAML(cfg endpointconfig.Config) string {
 	}
 	exporters := "[" + strings.Join(exporterNames, ", ") + "]"
 	forwardExporter, forwardName := otlpForwardYAML(cfg)
-	// The OTLP forward has pipelines of its own, fed by the same receiver, so what it sends is what
-	// the runtimes sent: none of Beacon's processors (claude_api_body, beacon_privacy) touch it. It
-	// stands in for the runtime's own export to that backend, which Beacon's settings replaced.
-	forwardPipelines := ""
+	// The OTLP forward stands in for the export a runtime had to another backend before Beacon's
+	// settings pointed it at this collector. It has pipelines of its own, fed by the same receiver,
+	// that keep Beacon's own pipelines independent of that backend and give it only:
+	//   - the runtimes it is meant to carry (beacon_forward_filter), never the browser extension's
+	//     chats or another runtime's OTLP;
+	//   - Claude Code API body events under the same policy as everywhere else (claude_api_body);
+	//   - secrets redacted, as for the HEC exporters (beacon_privacy).
+	forwardPipelines, forwardFilterYAML := "", ""
 	if forwardName != "" {
+		forwardFilterYAML = "  " + ForwardFilterProcessor + ":\n    harnesses: [" + strings.Join(cfg.Destinations.OTLPForward.Harnesses, ", ") + "]\n"
 		for _, signal := range []string{"logs", "traces", "metrics"} {
-			forwardPipelines += fmt.Sprintf("    %s/forward:\n      receivers: [otlp]\n      processors: [memory_limiter, batch]\n      exporters: [%s]\n", signal, forwardName)
+			apiBody := ""
+			if signal == "logs" {
+				apiBody = "claude_api_body, "
+			}
+			forwardPipelines += fmt.Sprintf("    %s/forward:\n      receivers: [otlp]\n      processors: [memory_limiter, %s, %sbeacon_privacy, batch]\n      exporters: [%s]\n", signal, ForwardFilterProcessor, apiBody, forwardName)
 		}
 	}
 	// The direct HEC exporters send what they receive, so beacon_privacy redacts before the
@@ -163,6 +172,9 @@ func ConfigYAML(cfg endpointconfig.Config) string {
 	privacyYAML, privacyStep := "", ""
 	if len(exporterNames) > 1 {
 		privacyYAML, privacyStep = "  beacon_privacy: {}\n", "beacon_privacy, "
+	}
+	if forwardName != "" {
+		privacyYAML = "  beacon_privacy: {}\n" + forwardFilterYAML
 	}
 	runtimeMetricsYAML := ""
 	if cfg.Collector.IncludeRuntimeMetrics {
@@ -242,6 +254,9 @@ service:
 %s`, cfg.Collector.GRPCPort, grpcLimitYAML, cfg.Collector.HTTPPort, modelContextYAML, privacyYAML, cfg.LogPath, runtimeMetricsYAML+codexSpansYAML+modelContextYAML+splunkExporter+falconExporter+forwardExporter, endpointconfig.HealthCheckPort(cfg.Collector), ingestYAML, extensions, privacyStep, exporters, privacyStep, exporters, privacyStep, exporters, forwardPipelines)
 }
 
+// ForwardFilterProcessor keeps an OTLP forward to the runtimes it is meant to carry.
+const ForwardFilterProcessor = "beacon_forward_filter"
+
 // OTLPForwardExporters are the collector exporters an OTLP forward is rendered with, by protocol.
 var OTLPForwardExporters = map[string]string{
 	endpointconfig.OTLPForwardProtocolGRPC: "otlp",
@@ -274,6 +289,12 @@ func otlpForwardYAML(cfg endpointconfig.Config) (string, string) {
 			fmt.Fprintf(&b, "      %q: %q\n", key, forward.Headers[key])
 		}
 	}
+	// Bounded well below memory_limiter's 128 MiB, so a backend that is down or slow sheds forward
+	// data after a couple of minutes instead of holding enough in memory to make the limiter
+	// refuse Beacon's own pipelines.
+	fmt.Fprintf(&b, "    timeout: 10s\n")
+	fmt.Fprintf(&b, "    sending_queue:\n      enabled: true\n      num_consumers: 2\n      queue_size: 20\n")
+	fmt.Fprintf(&b, "    retry_on_failure:\n      enabled: true\n      max_elapsed_time: 120s\n")
 	if forward.Insecure || forward.InsecureSkipVerify || forward.CAFile != "" {
 		fmt.Fprintf(&b, "    tls:\n")
 		if forward.Insecure {

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -408,6 +407,7 @@ type OTLPForwardStatus struct {
 	Configured bool     `json:"configured"`
 	Endpoint   string   `json:"endpoint,omitempty"`
 	Protocol   string   `json:"protocol,omitempty"`
+	Harnesses  []string `json:"harnesses,omitempty"`
 	Headers    []string `json:"headers,omitempty"`
 }
 
@@ -569,11 +569,12 @@ func Install(opts InstallOptions) (InstallResult, error) {
 	if cfg.RestrictedLogAccess() {
 		extensions = append(extensions, endpointcollector.IngestExtension)
 	}
-	var exporters []string
+	var processors, exporters []string
 	if cfg.Destinations != nil && cfg.Destinations.OTLPForward != nil && cfg.Destinations.OTLPForward.Enabled {
+		processors = append(processors, endpointcollector.ForwardFilterProcessor)
 		exporters = append(exporters, endpointcollector.OTLPForwardExporters[cfg.Destinations.OTLPForward.Protocol])
 	}
-	if err := endpointcollector.CheckComponentsFor(collectorBinary, extensions, exporters); err != nil {
+	if err := endpointcollector.CheckComponentsFor(collectorBinary, extensions, processors, exporters); err != nil {
 		return InstallResult{}, err
 	}
 
@@ -644,9 +645,14 @@ func Install(opts InstallOptions) (InstallResult, error) {
 	configPath := endpointconfig.ConfigPath(cfg.UserMode)
 	tx.Track(configPath)
 	manifest.Files = append(manifest.Files, configPath)
+	forwardSecretsPath := endpointconfig.OTLPForwardSecretsPath(cfg.UserMode)
+	tx.Track(forwardSecretsPath)
 	if _, err := saveEndpointConfig(cfg); err != nil {
 		tx.Rollback(manifest)
 		return InstallResult{}, err
+	}
+	if _, err := os.Stat(forwardSecretsPath); err == nil {
+		manifest.Files = append(manifest.Files, forwardSecretsPath)
 	}
 
 	// The scheduled inventory job is on by default and reconciled on every install, which is
@@ -849,8 +855,10 @@ func Uninstall(opts UninstallOptions) error {
 	// a repaired endpoint that kept forwarding read as unconnected on disk. `uninstall
 	// --keep-config` keeps harness settings only, so it still removes Beacon's own config.
 	endpointConfigPath := endpointconfig.ConfigPath(cfg.UserMode)
+	forwardSecretsPath := endpointconfig.OTLPForwardSecretsPath(cfg.UserMode)
 	for _, path := range manifest.Files {
-		if opts.KeepManagedIngest && path == endpointConfigPath {
+		// The forward's header values belong with config.json: repair keeps both.
+		if opts.KeepManagedIngest && (path == endpointConfigPath || path == forwardSecretsPath) {
 			continue
 		}
 		fail("remove "+path, os.Remove(path))
@@ -928,6 +936,8 @@ func repairUninstallOptions(opts InstallOptions) UninstallOptions {
 func Repair(opts InstallOptions) (InstallResult, error) {
 	configPath := endpointconfig.ConfigPath(opts.UserMode)
 	configSnapshot := snapshotFile(configPath)
+	forwardSecretsPath := endpointconfig.OTLPForwardSecretsPath(opts.UserMode)
+	forwardSecretsSnapshot := snapshotFile(forwardSecretsPath)
 	priorAutoUpdateMode := ""
 	if !opts.UserMode {
 		if mode, err := autoUpdateModeFromConfigFile(configPath); err == nil {
@@ -938,6 +948,7 @@ func Repair(opts InstallOptions) (InstallResult, error) {
 	result, err := Install(opts)
 	if err != nil {
 		restoreFile(configPath, configSnapshot)
+		restoreFile(forwardSecretsPath, forwardSecretsSnapshot)
 		return result, err
 	}
 	if !opts.UserMode {
@@ -1251,12 +1262,7 @@ func destinationStatus(cfg endpointconfig.Config) DestinationStatus {
 		}
 	}
 	if forward := cfg.Destinations.OTLPForward; forward != nil && forward.Enabled {
-		headers := make([]string, 0, len(forward.Headers))
-		for name := range forward.Headers {
-			headers = append(headers, name)
-		}
-		sort.Strings(headers)
-		status.OTLPForward = OTLPForwardStatus{Configured: true, Endpoint: forward.Endpoint, Protocol: forward.Protocol, Headers: headers}
+		status.OTLPForward = OTLPForwardStatus{Configured: true, Endpoint: forward.Endpoint, Protocol: forward.Protocol, Harnesses: forward.Harnesses, Headers: forward.HeaderNames}
 	}
 	return status
 }

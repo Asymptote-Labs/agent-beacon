@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -18,12 +19,13 @@ func TestDestinationStatusReportsOTLPForwardWithoutHeaderValues(t *testing.T) {
 		Protocol: endpointconfig.OTLPForwardProtocolGRPC,
 		Headers:  map[string]string{"authorization": "Bearer secret"},
 	}}}
+	endpointconfig.NormalizeDestinations(&cfg)
 	data, err := json.Marshal(destinationStatus(cfg))
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := string(data)
-	if !strings.Contains(got, `"otlp_forward":{"configured":true,"endpoint":"otel.backend.example:4317","protocol":"grpc","headers":["authorization"]}`) {
+	if !strings.Contains(got, `"otlp_forward":{"configured":true,"endpoint":"otel.backend.example:4317","protocol":"grpc","harnesses":["claude_code","codex_cli","codex_desktop"],"headers":["authorization"]}`) {
 		t.Fatalf("destination status = %s", got)
 	}
 	if strings.Contains(got, "secret") {
@@ -36,7 +38,10 @@ func TestDestinationStatusReportsOTLPForwardWithoutHeaderValues(t *testing.T) {
 // carried over, and only --no-otlp-forward (an empty forward) removes it.
 func TestBuildConfigKeepsOTLPForwardUntilRemoved(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
-	writeInventoryConfig(t, true, `{"user_mode":true,"log_path":"/tmp/runtime.jsonl","destinations":{"otlp_forward":{"enabled":true,"endpoint":"otel.backend.example:4317","protocol":"grpc","headers":{"authorization":"Bearer secret"}}}}`)
+	writeInventoryConfig(t, true, `{"user_mode":true,"log_path":"/tmp/runtime.jsonl","destinations":{"otlp_forward":{"enabled":true,"endpoint":"otel.backend.example:4317","protocol":"grpc","header_names":["authorization"]}}}`)
+	if err := os.WriteFile(endpointconfig.OTLPForwardSecretsPath(true), []byte(`{"headers":{"authorization":"Bearer secret"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	cfg := buildConfig(InstallOptions{UserMode: true})
 	if cfg.Destinations == nil || cfg.Destinations.OTLPForward == nil || cfg.Destinations.OTLPForward.Endpoint != "otel.backend.example:4317" || cfg.Destinations.OTLPForward.Headers["authorization"] != "Bearer secret" {

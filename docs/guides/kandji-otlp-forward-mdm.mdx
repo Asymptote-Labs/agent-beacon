@@ -7,7 +7,7 @@ description: "Deploy Beacon with Kandji on Macs that already export Claude Code 
 
 Use this runbook when your Macs already send Claude Code and Codex CLI OpenTelemetry (OTLP) to another backend, such as a token-usage or cost platform, and you are adding Beacon with Kandji.
 
-Claude Code and Codex each export OTLP to one endpoint. Beacon needs that export to arrive at its local collector, so installing Beacon points both runtimes at `127.0.0.1:4317`, and the runtimes stop sending to the backend you already had. To keep that backend fed, Beacon's collector **forwards everything it receives, unchanged, to a second OTLP endpoint** alongside writing its own runtime log:
+Claude Code and Codex each export OTLP to one endpoint. Beacon needs that export to arrive at its local collector, so installing Beacon points both runtimes at `127.0.0.1:4317`, and the runtimes stop sending to the backend you already had. To keep that backend fed, Beacon's collector **forwards the Claude Code and Codex OTLP it receives to a second OTLP endpoint**, with secrets redacted, alongside writing its own runtime log:
 
 ```mermaid
 flowchart LR
@@ -15,7 +15,7 @@ flowchart LR
   Codex[Codex CLI] -->|OTLP| Collector
   ClaudeHooks[Claude Code / Codex hooks] --> RuntimeLog["runtime.jsonl"]
   Collector -->|Beacon pipeline| RuntimeLog
-  Collector -->|"OTLP forward (unchanged)"| Backend["Your existing OTLP backend"]
+  Collector -->|"OTLP forward (Claude Code + Codex, redacted)"| Backend["Your existing OTLP backend"]
 ```
 
 Kandji provides the deployment layer:
@@ -32,7 +32,15 @@ Kandji provides the deployment layer:
 
 ## What the existing backend receives
 
-The forward has its own collector pipelines, fed by the same receiver as Beacon's. None of Beacon's processing (event normalization, API-body handling, secret redaction) is applied to it: the backend receives the OTLP logs, metrics and traces exactly as Claude Code and Codex sent them to Beacon. If the backend is unreachable, the forward retries and queues in memory on its own; Beacon's local capture is not held up.
+The forward has its own collector pipelines, fed by the same receiver as Beacon's. The backend receives the OTLP logs, metrics and traces Claude Code and Codex send, in OTLP form rather than Beacon's event schema, with three differences from the raw export:
+
+- **Only Claude Code and Codex.** Other OTLP the collector receives stays local: Gemini CLI, VS Code, SDK apps, and Beacon's browser extension, which carries full claude.ai and ChatGPT chats. `--otlp-forward-harness` names a different list.
+- **Secrets redacted.** Credentials found in prompts, commands and tool arguments are replaced with `[REDACTED]`, the same redaction Beacon applies before Splunk and Falcon. Token counts, cost, models and session ids are untouched.
+- **No raw API bodies.** Claude Code API body events get the same handling as in Beacon's own log.
+
+Hook events and session-file data (`beacon endpoint claude sync`, `codex sync`) never pass through the collector, so the forward does not carry them.
+
+If the backend is down or slow, the forward retries for up to two minutes and holds at most a small queue, then drops what it cannot send. Beacon's local capture never waits on it.
 
 What the runtimes send is set by Beacon's runtime settings, which can differ from the settings you rolled out for the backend. Check these with the backend's owner before rollout:
 
@@ -116,7 +124,7 @@ done
   || "$BEACON" endpoint status --system --json
 ```
 
-`beacon endpoint repair` stores the forward in `/Library/Application Support/Beacon/Endpoint/config.json` and renders it into the collector config next to it. Both files become root-only (`0600`) when the forward has headers, because header values are usually credentials. Package upgrades and later repairs keep the forward; you do not pass the flags again. To remove it, run `beacon endpoint repair --system --no-otlp-forward`.
+`beacon endpoint repair` stores the forward in `/Library/Application Support/Beacon/Endpoint/config.json` and renders it into the collector config next to it. Header values are usually credentials, so they go to a root-only file beside it, `otlp-forward-headers.json` (`0600`), and into the collector config, which is also `0600`. `config.json` keeps only the header names and stays readable, because the logged-in user's `beacon` commands read it to find the system log. Package upgrades and later repairs keep the forward; you do not pass the flags again. To remove it, run `beacon endpoint repair --system --no-otlp-forward`.
 
 Flags you may also need:
 
