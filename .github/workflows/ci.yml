@@ -788,8 +788,22 @@ jobs:
   # is sequenced correctly -- is inference from a manifest.
   #
   # The mirror of linux-package-smoke, which installs the .deb and checks the endpoint came up.
+  # TEMPORARY (uninstall-hang diagnosis, do not merge): eight copies, and every msiexec call runs under
+  # a watchdog that prints the Beacon/msiexec process tree, the collector service and the MSI log tail
+  # every 20 s. Each attempt also keeps one comment on the pull request updated with its latest state,
+  # written straight to the API, because a hung runner has never uploaded its log.
   windows-package-smoke:
     runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        attempt: [1, 2, 3, 4, 5, 6, 7, 8]
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      WATCHDOG_TITLE: windows-package-smoke attempt ${{ matrix.attempt }} (run ${{ github.run_id }})
     # Bounded for the same reason windows-test is: a wedged msiexec would otherwise hold a runner for
     # the GitHub default of six hours.
     timeout-minutes: 25
@@ -798,6 +812,54 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v7
+      - name: TEMPORARY msiexec watchdog
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          $id = gh api "repos/$env:GITHUB_REPOSITORY/issues/$env:PR_NUMBER/comments" -f "body=**$env:WATCHDOG_TITLE**: started $(Get-Date -Format o)" --jq .id
+          if ($LASTEXITCODE -ne 0 -or -not $id) { throw "could not create the watchdog comment" }
+          "WATCHDOG_COMMENT_ID=$id" >> $env:GITHUB_ENV
+          @'
+          # Replaces this attempt's pull-request comment with the latest state. Failures are ignored:
+          # the watchdog must never be what fails the step.
+          function Send-WatchdogState {
+              param([string[]]$Lines)
+              $text = $Lines -join "`n"
+              if ($text.Length -gt 60000) { $text = $text.Substring($text.Length - 60000) }
+              $body = "**$env:WATCHDOG_TITLE**`n``````text`n$text`n``````"
+              gh api -X PATCH "repos/$env:GITHUB_REPOSITORY/issues/comments/$env:WATCHDOG_COMMENT_ID" -f "body=$body" --silent 2>&1 | Out-Null
+          }
+
+          # Runs msiexec exactly as the steps did (Start-Process -Wait, which also waits for its
+          # descendants) on a thread, and reports what is running while it waits.
+          function Invoke-MsiexecWatched {
+              param([string]$Log, [string[]]$Arguments)
+              Send-WatchdogState @("msiexec $($Arguments -join ' ') started $(Get-Date -Format o)")
+              $job = Start-ThreadJob -ArgumentList (, $Arguments) -ScriptBlock {
+                  param($a)
+                  (Start-Process msiexec.exe -Wait -PassThru -ArgumentList $a).ExitCode
+              }
+              $sw = [Diagnostics.Stopwatch]::StartNew()
+              while (-not (Wait-Job $job -Timeout 20)) {
+                  # Collected rather than emitted: anything left in the pipeline would become part
+                  # of this function's return value instead of reaching the log.
+                  $lines = @("msiexec $($Arguments[0]) still running after $([int]$sw.Elapsed.TotalSeconds)s ($(Get-Date -Format o))")
+                  $lines += Get-CimInstance Win32_Process |
+                      Where-Object { $_.Name -match '^(msiexec|beacon|beacon-hooks|beacon-otelcol|powershell|pwsh|cmd|conhost)\.exe$' } |
+                      Sort-Object ProcessId | ForEach-Object {
+                          $cmd = ("$($_.CommandLine)" -replace '\s+', ' ')
+                          '{0,6} <- {1,6}  {2}' -f $_.ProcessId, $_.ParentProcessId, $cmd.Substring(0, [Math]::Min(220, $cmd.Length))
+                      }
+                  $lines += & sc.exe queryex BeaconCollector | Select-String 'STATE|PID' | ForEach-Object Line
+                  if (Test-Path -LiteralPath $Log) { $lines += "--- $Log (tail)"; $lines += Get-Content -LiteralPath $Log -Tail 12 }
+                  @('::group::' + $lines[0]) + $lines + @('::endgroup::') | Out-Host
+                  Send-WatchdogState $lines
+              }
+              $code = Receive-Job $job -Wait -AutoRemoveJob
+              Send-WatchdogState @("msiexec $($Arguments[0]) exited $code after $([int]$sw.Elapsed.TotalSeconds)s ($(Get-Date -Format o))")
+              [pscustomobject]@{ ExitCode = $code }
+          }
+          '@ | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'msiexec-watchdog.ps1')
       - uses: ./.github/actions/setup-go
         with:
           # The exporter is listed because builder.yaml compiles it into the
@@ -871,8 +933,9 @@ jobs:
           # /qn is silent, and the verbose log is what makes a custom-action failure diagnosable --
           # without it msiexec reports only an exit code.
           $log = "$env:GITHUB_WORKSPACE\install.log"
-          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
-            '/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.1.msi", '/qn', '/l*v', $log
+          . (Join-Path $env:RUNNER_TEMP 'msiexec-watchdog.ps1')
+          $p = Invoke-MsiexecWatched $log @(
+            '/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.1.msi", '/qn', '/l*v!', $log
           )
           if ($p.ExitCode -ne 0) {
             Write-Output "--- install log (tail) ---"
@@ -912,8 +975,9 @@ jobs:
           if (-not (Test-Path -LiteralPath $configPath)) { throw "no configuration before the upgrade" }
 
           $log = "$env:GITHUB_WORKSPACE\upgrade.log"
-          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
-            '/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.2.msi", '/qn', '/l*v', $log
+          . (Join-Path $env:RUNNER_TEMP 'msiexec-watchdog.ps1')
+          $p = Invoke-MsiexecWatched $log @(
+            '/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.2.msi", '/qn', '/l*v!', $log
           )
           if ($p.ExitCode -ne 0) {
             Write-Output "--- upgrade log (tail) ---"
@@ -1004,9 +1068,10 @@ jobs:
 
           # The upgraded product is what is installed, so that is what gets removed. Each build gets a
           # fresh ProductCode, so removing with the 0.0.1 package would not match anything.
-          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+          . (Join-Path $env:RUNNER_TEMP 'msiexec-watchdog.ps1')
+          $p = Invoke-MsiexecWatched "$env:GITHUB_WORKSPACE\uninstall.log" @(
             '/x', "$env:GITHUB_WORKSPACE\Beacon-0.0.2.msi", '/qn',
-            '/l*v', "$env:GITHUB_WORKSPACE\uninstall.log"
+            '/l*v!', "$env:GITHUB_WORKSPACE\uninstall.log"
           )
           if ($p.ExitCode -ne 0) {
             Get-Content -LiteralPath "$env:GITHUB_WORKSPACE\uninstall.log" -Tail 120 | Write-Output
@@ -1047,3 +1112,8 @@ jobs:
           Write-Output "marker survived: the operator's own configuration came back"
           Write-Output "config retained: $(Test-Path -LiteralPath $configPath), logs retained: $(Test-Path -LiteralPath $logDir)"
           exit 0
+      - name: TEMPORARY watchdog final status
+        if: always()
+        run: |
+          . (Join-Path $env:RUNNER_TEMP 'msiexec-watchdog.ps1')
+          Send-WatchdogState @("job finished: ${{ job.status }} at $(Get-Date -Format o)")
