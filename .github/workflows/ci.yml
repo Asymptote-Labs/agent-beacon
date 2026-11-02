@@ -497,11 +497,6 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v7
-      # Before setup-go, so the Go caches restore onto the Dev Drive. TEMP moves too: the test
-      # binaries and every t.TempDir() then live there, out of Defender's way.
-      - uses: ./.github/actions/dev-drive
-        with:
-          temp: "true"
       - uses: ./.github/actions/setup-go
         with:
           modules: |
@@ -787,9 +782,6 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v7
-      # Before setup-go, so the Go caches restore onto the Dev Drive. TEMP stays on C: here: the
-      # installer and the restricted-account checks below hand temporary paths to other accounts.
-      - uses: ./.github/actions/dev-drive
       - uses: ./.github/actions/setup-go
         with:
           # The exporter is listed because builder.yaml compiles it into the
