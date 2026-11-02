@@ -8,6 +8,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/account"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 // Every test in this package runs with the local history pointed at a path that does not exist, so
@@ -16,10 +17,16 @@ import (
 // that a runtime-specific environment variable points outside the test's home. The share commands
 // also see an endpoint that is not connected to Beacon Cloud, whatever the machine's own (user or
 // system) enrollment and privacy mode, and no BEACON_API_URL, so neither changes what a test sends
-// or where; a test that needs a connection sets shareAutoCloud itself.
+// or where; a test that needs a connection sets shareAutoCloud itself. PATH is an empty directory,
+// so harness discovery finds what a test puts there and nothing the machine has installed; a test
+// that runs a real command declares it with testenv.RequireCommands.
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "beacon-cmd-test")
 	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if err := testenv.IsolatePath(dir); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

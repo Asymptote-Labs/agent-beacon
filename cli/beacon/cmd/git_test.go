@@ -52,9 +52,7 @@ func runGit(t *testing.T, args ...string) (string, error) {
 // which is how a real invocation finds git's configuration.
 func gitCommandRepo(t *testing.T) string {
 	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not installed")
-	}
+	testenv.RequireCommands(t, "git")
 	home := t.TempDir()
 	testenv.SetHome(t, home)
 	for _, kv := range gitlink.IsolatedEnv(home) {

@@ -9,6 +9,13 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same pull request makes the running checks moot, so they are cancelled
+# rather than left to hold Windows and macOS runners for ten minutes. Pushes to main are keyed by
+# commit, so every main commit still gets a full run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   typescript-sdk:
     runs-on: ubuntu-latest
@@ -17,8 +24,8 @@ jobs:
       matrix:
         node-version: [20, 22, 24]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
@@ -65,8 +72,8 @@ jobs:
     env:
       BROWSER_CHANNEL: ${{ matrix.browser }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -137,7 +144,7 @@ jobs:
       - name: Cache Playwright browsers
         if: matrix.browser == 'chromium'
         id: pw-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
@@ -176,7 +183,7 @@ jobs:
       # retains on failure; the HTML report alone is not enough to debug from.
       - name: Upload Playwright report and traces
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: browser-extension-playwright-report-${{ matrix.browser }}
           path: |
@@ -188,7 +195,7 @@ jobs:
   go-test:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -281,7 +288,7 @@ jobs:
   beacon-sandbox:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
         with:
           go-version-file: beacon-sandbox/go.mod
@@ -303,15 +310,22 @@ jobs:
   terraform:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.14.3
           terraform_wrapper: false
       # Hermetic: the tests mock the AWS and Google providers, so no cloud account or
       # credentials are involved. Only the provider downloads reach the network.
       - name: Check Terraform modules
+        env:
+          # Eight inits download the same AWS and Google providers; one shared directory makes that
+          # two downloads. There are no committed lock files for the cache to conflict with: each
+          # init writes a fresh one, so the cache is allowed to satisfy it.
+          TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/terraform-plugin-cache
+          TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE: "true"
         run: |
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
           terraform fmt -check -recursive -diff terraform
           for module in terraform/*/; do
             terraform -chdir="$module" init -backend=false -input=false
@@ -345,9 +359,11 @@ jobs:
             goarch: amd64
             make_target: build-windows-amd64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
         with:
+          # Each target compiles a different package set, so each keeps its own build cache.
+          cache-key: ${{ matrix.goos }}-${{ matrix.goarch }}
           modules: |
             cli/beacon
             cli/beacon-hooks
@@ -401,14 +417,14 @@ jobs:
       run:
         working-directory: cli/beacon/internal/endpoint/dashboard/testdata/lens-e2e
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
         with:
           modules: |
             cli/beacon
             cli/beacon-hooks
             pkg/asymptoteobserve
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -424,7 +440,7 @@ jobs:
         run: npx playwright test
       - name: Upload Playwright report and traces
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: lens-e2e-playwright-report
           path: |
@@ -436,7 +452,7 @@ jobs:
   linux-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
         with:
           modules: |
@@ -480,7 +496,23 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      # Two settings, both measured on this runner (#1160):
+      #
+      # - TEMP, TMP, GOTMPDIR and GOCACHE go to RUNNER_TEMP on D:. TEMP and the Go cache default to
+      #   C:, the runner's OS disk, where a small-file create or rename costs 0.6 ms against about 0.1
+      #   ms on D: and a stat of a missing file 0.19 ms against 0.007 ms -- and every t.TempDir(),
+      #   every SQLite fixture and every test-cache fingerprint is made of those operations. Written
+      #   to GITHUB_ENV before setup-go, so the build cache it restores and saves follows to D: too.
+      # - Every go test here runs with -count=1. Go's test-result cache fingerprints each file and
+      #   directory a test touched, before the run to look the result up and after it to store it.
+      #   On this runner that bookkeeping cost about 60 s per session package against 14 s of tests,
+      #   and checking a fully cached result took as long as running the tests again -- so it never
+      #   pays here. The Linux and macOS jobs keep test caching, where it is cheap.
+      - name: Keep temporary files and the Go build cache on D
+        run: |
+          foreach ($name in 'TEMP', 'TMP', 'GOTMPDIR') { "$name=$env:RUNNER_TEMP" >> $env:GITHUB_ENV }
+          "GOCACHE=$(Join-Path $env:RUNNER_TEMP go-build)" >> $env:GITHUB_ENV
       - uses: ./.github/actions/setup-go
         with:
           modules: |
@@ -521,7 +553,7 @@ jobs:
       - name: Test the ported packages on Windows
         working-directory: cli/beacon
         run: |
-          go test `
+          go test -count=1 `
             . `
             ./cmd/... `
             ./internal/account/... `
@@ -584,23 +616,23 @@ jobs:
       - name: Test the ported packages with the race detector
         working-directory: cli/beacon
         run: |
-          go test -race `
+          go test -race -count=1 `
             ./internal/endpoint/writer/... `
             ./internal/endpoint/inventory/... `
             ./internal/endpoint/service/...
       - name: Test hook adapter on Windows
         working-directory: cli/beacon-hooks
-        run: go test ./...
+        run: go test -count=1 ./...
       - name: Test collector exporter on Windows
         working-directory: collector-builder/exporter/beaconjsonexporter
-        run: go test ./...
+        run: go test -count=1 ./...
       - name: Test observe SDK and threat rules on Windows
         working-directory: pkg/asymptoteobserve
-        run: go test ./...
+        run: go test -count=1 ./...
       # Runs the generated-PowerShell parse test, which skips on a machine without pwsh.
       - name: Test the sandbox harness on Windows
         working-directory: beacon-sandbox
-        run: go test ./...
+        run: go test -count=1 ./...
 
   # Exercises the real systemd install path: unit generation, systemctl enable/active,
   # Restart=always actually restarting, and uninstall leaving nothing behind. Needs systemd as
@@ -609,7 +641,7 @@ jobs:
   linux-systemd-smoke:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
         with:
           # The exporter is listed because builder.yaml compiles it into the
@@ -645,7 +677,7 @@ jobs:
   linux-package-smoke:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
         with:
           # The exporter is listed because builder.yaml compiles it into the
@@ -663,25 +695,23 @@ jobs:
           cd collector-builder
           # builder mkdirs its output path without -p, so the parent has to exist.
           mkdir -p dist
-          for arch in amd64 arm64; do
-            GOOS=linux GOARCH=$arch CGO_ENABLED=0 "$(go env GOPATH)/bin/builder" --config builder.yaml
-            mkdir -p dist/beacon-otelcol/linux_$arch
-            cp dist/beacon-otelcol/beacon-otelcol dist/beacon-otelcol/linux_$arch/beacon-otelcol
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 "$(go env GOPATH)/bin/builder" --config builder.yaml
+          mkdir -p dist/beacon-otelcol/linux_amd64
+          cp dist/beacon-otelcol/beacon-otelcol dist/beacon-otelcol/linux_amd64/beacon-otelcol
+          # The goreleaser before-hook stages every release target, so each one must exist here.
+          # Only linux/amd64 is built and packaged below; the rest are stand-ins that are copied
+          # and never used.
+          for target in linux_arm64 darwin_amd64 darwin_arm64; do
+            mkdir -p dist/beacon-otelcol/$target
+            cp dist/beacon-otelcol/linux_amd64/beacon-otelcol dist/beacon-otelcol/$target/beacon-otelcol
           done
-          # The goreleaser before-hook stages every target, so each one must exist here. These are
-          # stand-ins: this job checks that packaging works, not that the binaries run, so a Linux
-          # build stood in a darwin directory is enough to exercise the archive and package steps.
-          for arch in amd64 arm64; do
-            mkdir -p dist/beacon-otelcol/darwin_$arch
-            cp dist/beacon-otelcol/linux_$arch/beacon-otelcol dist/beacon-otelcol/darwin_$arch/beacon-otelcol
-          done
-          # Windows is amd64 only, and carries the .exe the release archive ships -- the same name
+          # Windows carries the .exe the release archive ships -- the same name
           # build-release-collectors.sh stages, so the before-hook finds it under either script.
           mkdir -p dist/beacon-otelcol/windows_amd64
           cp dist/beacon-otelcol/linux_amd64/beacon-otelcol dist/beacon-otelcol/windows_amd64/beacon-otelcol.exe
       # The real Vector build, not a stand-in: the smoke test runs it and checks it is static.
       # Cached by the script's hash, which is where the version is pinned.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         id: vector-cache
         with:
           path: cli/beacon/release-vector
@@ -689,13 +719,22 @@ jobs:
       - name: Download Vector for the Linux packages
         if: steps.vector-cache.outputs.cache-hit != 'true'
         run: sh packaging/linux/fetch-vector.sh
-      - uses: goreleaser/goreleaser-action@v6
+      # The version release.yml publishes with, so this smoke builds what a release would.
+      - uses: goreleaser/goreleaser-action@v7
         with:
-          version: latest
+          version: "v2.13.3"
           install-only: true
+      # linux/amd64 only: it is the one target the steps below install and run. Building all five
+      # here, serially and with -a, took about six of this job's ten minutes for archives and
+      # arm64 packages nothing looked at. release-check still builds every target, on every pull
+      # request that touches the release config or packaging.
       - name: Build packages
         working-directory: cli/beacon
-        run: goreleaser release --snapshot --clean --skip=publish,homebrew,announce --parallelism 1
+        run: |
+          yq '(.builds[].goos) = ["linux"] | (.builds[].goarch) = ["amd64"] | del(.builds[].ignore)' \
+            .goreleaser.yaml > "$RUNNER_TEMP/goreleaser-linux-amd64.yaml"
+          goreleaser release --config "$RUNNER_TEMP/goreleaser-linux-amd64.yaml" \
+            --snapshot --clean --skip=publish,homebrew,announce --parallelism 1
       # Every generated Vector pack has to load in the Vector the packages ship. Vector 0.57 and 0.58
       # changed how ${VAR} expands and broke most of them with no Beacon change at all. Uses the CLI
       # goreleaser just built, which carries the real embedded hooks binary.
@@ -718,7 +757,7 @@ jobs:
   package-smoke:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
         with:
           modules: |
@@ -758,7 +797,7 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
         with:
           # The exporter is listed because builder.yaml compiles it into the
