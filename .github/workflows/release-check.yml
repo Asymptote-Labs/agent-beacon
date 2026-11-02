@@ -18,11 +18,16 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same pull request supersedes the running snapshot build.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   release-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: ./.github/actions/setup-go
@@ -36,7 +41,7 @@ jobs:
             cli/beacon
             cli/beacon-hooks
             collector-builder/exporter/beaconjsonexporter
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@v7
         with:
           # Keep formulas working until we intentionally migrate the tap to casks.
           version: "v2.13.3"

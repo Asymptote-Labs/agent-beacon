@@ -1,0 +1,66 @@
+name: Windows Dev Drive for Go
+description: >
+  Creates a ReFS Dev Drive on the runner and points the Go caches (and,
+  optionally, the temporary directory) at it. Built from the stock Hyper-V and
+  Storage cmdlets, so no third-party action runs with this job's token.
+
+inputs:
+  size:
+    description: Maximum size of the dynamically allocated drive.
+    required: false
+    default: 10GB
+  temp:
+    description: >
+      Also move TEMP and TMP onto the drive, so test binaries and t.TempDir()
+      live there too. Leave off for jobs whose steps hand temporary paths to
+      other accounts or installers.
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    # Why: on the default C:/D: volumes, restoring a Go cache of ~600 MB took ~70 s of tar
+    # extraction after a 3 s download, and test binaries run ~10x slower than on Linux. Both are
+    # NTFS plus Defender scanning every file written and every executable launched. A Dev Drive is
+    # ReFS, and once trusted with AV filters disallowed, Defender stays out of it.
+    - shell: pwsh
+      env:
+        DEV_DRIVE_SIZE: ${{ inputs.size }}
+        DEV_DRIVE_TEMP: ${{ inputs.temp }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $root = [System.IO.Path]::GetPathRoot($env:GITHUB_WORKSPACE)
+        $vhd = Join-Path $root 'dev_drive.vhdx'
+        $size = Invoke-Expression $env:DEV_DRIVE_SIZE
+
+        # Must run before the volume is mounted: the filter policy is read at mount time.
+        fsutil devdrv enable /disallowAv
+        if ($LASTEXITCODE -ne 0) { throw "fsutil devdrv enable exited $LASTEXITCODE" }
+
+        $partition = New-VHD -Path $vhd -SizeBytes $size -Dynamic |
+          Mount-VHD -PassThru |
+          Initialize-Disk -PassThru |
+          New-Partition -AssignDriveLetter -UseMaximumSize
+        $partition | Format-Volume -DevDrive -Confirm:$false -Force | Out-Null
+        $drive = "$($partition.DriveLetter):"
+
+        fsutil devdrv trust $drive
+        if ($LASTEXITCODE -ne 0) { throw "fsutil devdrv trust exited $LASTEXITCODE" }
+        fsutil devdrv query $drive
+
+        $dirs = [ordered]@{
+          GOCACHE    = "$drive\go-build"
+          GOMODCACHE = "$drive\go-mod"
+          # Where `go test` links and runs test binaries.
+          GOTMPDIR   = "$drive\go-tmp"
+        }
+        if ($env:DEV_DRIVE_TEMP -eq 'true') {
+          $dirs.TEMP = "$drive\tmp"
+          $dirs.TMP = "$drive\tmp"
+        }
+        foreach ($name in $dirs.Keys) {
+          New-Item -ItemType Directory -Force -Path $dirs[$name] | Out-Null
+          "$name=$($dirs[$name])" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Output "$name=$($dirs[$name])"
+        }
