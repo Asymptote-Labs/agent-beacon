@@ -497,6 +497,22 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v7
+      # Two settings, both measured on this runner (#1160):
+      #
+      # - TEMP, TMP, GOTMPDIR and GOCACHE go to RUNNER_TEMP on D:. TEMP and the Go cache default to
+      #   C:, the runner's OS disk, where a small-file create or rename costs 0.6 ms against about 0.1
+      #   ms on D: and a stat of a missing file 0.19 ms against 0.007 ms -- and every t.TempDir(),
+      #   every SQLite fixture and every test-cache fingerprint is made of those operations. Written
+      #   to GITHUB_ENV before setup-go, so the build cache it restores and saves follows to D: too.
+      # - Every go test here runs with -count=1. Go's test-result cache fingerprints each file and
+      #   directory a test touched, before the run to look the result up and after it to store it.
+      #   On this runner that bookkeeping cost about 60 s per session package against 14 s of tests,
+      #   and checking a fully cached result took as long as running the tests again -- so it never
+      #   pays here. The Linux and macOS jobs keep test caching, where it is cheap.
+      - name: Keep temporary files and the Go build cache on D
+        run: |
+          foreach ($name in 'TEMP', 'TMP', 'GOTMPDIR') { "$name=$env:RUNNER_TEMP" >> $env:GITHUB_ENV }
+          "GOCACHE=$(Join-Path $env:RUNNER_TEMP go-build)" >> $env:GITHUB_ENV
       - uses: ./.github/actions/setup-go
         with:
           modules: |
@@ -537,7 +553,7 @@ jobs:
       - name: Test the ported packages on Windows
         working-directory: cli/beacon
         run: |
-          go test `
+          go test -count=1 `
             . `
             ./cmd/... `
             ./internal/account/... `
@@ -600,91 +616,23 @@ jobs:
       - name: Test the ported packages with the race detector
         working-directory: cli/beacon
         run: |
-          go test -race `
+          go test -race -count=1 `
             ./internal/endpoint/writer/... `
             ./internal/endpoint/inventory/... `
             ./internal/endpoint/service/...
       - name: Test hook adapter on Windows
         working-directory: cli/beacon-hooks
-        run: go test ./...
+        run: go test -count=1 ./...
       - name: Test collector exporter on Windows
         working-directory: collector-builder/exporter/beaconjsonexporter
-        run: go test ./...
+        run: go test -count=1 ./...
       - name: Test observe SDK and threat rules on Windows
         working-directory: pkg/asymptoteobserve
-        run: go test ./...
+        run: go test -count=1 ./...
       # Runs the generated-PowerShell parse test, which skips on a machine without pwsh.
       - name: Test the sandbox harness on Windows
         working-directory: beacon-sandbox
-        run: go test ./...
-
-  # TEMPORARY, remove before merging #1160: a one-off timing diagnostic for windows-test. It splits the
-  # job's main step into compiling, running the tests, and checking the test cache, and uploads the
-  # per-test JSON, so the runner's share of the time can be compared with a local Windows VM.
-  windows-test-diagnostic:
-    runs-on: windows-2025
-    timeout-minutes: 30
-    defaults:
-      run:
-        shell: pwsh
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-go
-        with:
-          modules: |
-            cli/beacon
-            cli/beacon-hooks
-      - name: Small-file operations on C (TEMP) and D (workspace drive)
-        run: |
-          foreach ($root in (Join-Path $env:TEMP 'filebench'), 'D:\filebench') {
-            New-Item -ItemType Directory -Force -Path $root | Out-Null
-            $n = 2000
-            $create = Measure-Command { for ($i = 0; $i -lt $n; $i++) { [IO.File]::WriteAllText("$root\f$i.jsonl", 'x') } }
-            $rename = Measure-Command { for ($i = 0; $i -lt $n; $i++) { [IO.File]::Move("$root\f$i.jsonl", "$root\f$i.shipped") } }
-            $stat = Measure-Command { for ($i = 0; $i -lt $n; $i++) { [void][IO.File]::Exists("$root\missing$i.exe") } }
-            $delete = Measure-Command { for ($i = 0; $i -lt $n; $i++) { [IO.File]::Delete("$root\f$i.shipped") } }
-            "{0,-60} per op: create {1,6:N3}ms  rename {2,6:N3}ms  stat-missing {3,6:N3}ms  delete {4,6:N3}ms" -f $root,
-              ($create.TotalMilliseconds / $n), ($rename.TotalMilliseconds / $n), ($stat.TotalMilliseconds / $n), ($delete.TotalMilliseconds / $n)
-          }
-      - name: Build platform-matched hooks binary
-        working-directory: cli/beacon-hooks
-        run: |
-          go build -ldflags "-s -w" -o beacon-hooks.exe .
-          Copy-Item beacon-hooks.exe ..\beacon\internal\embedded\hooks.bin -Force
-      # The four packages that dominate windows-test, with TEMP, TMP, GOTMPDIR and GOCACHE on C (as
-      # today) and then on D. For each drive: compile untimed, then the tests cacheable from an empty
-      # test cache (as CI runs them), the same again unchanged (pure cache check), and -count=1.
-      - name: TEMP and Go cache on C versus D, cacheable versus -count=1
-        working-directory: cli/beacon
-        run: |
-          $pkgs = './cmd', './internal/fxsession', './internal/groksession', './internal/hermessession'
-          $out = Join-Path $env:RUNNER_TEMP diagnostic
-          New-Item -ItemType Directory -Force -Path $out | Out-Null
-          $onC = @{ TEMP = $env:TEMP; TMP = $env:TMP; GOTMPDIR = ''; GOCACHE = (go env GOCACHE) }
-          $onD = @{ TEMP = 'D:\diag\tmp'; TMP = 'D:\diag\tmp'; GOTMPDIR = 'D:\diag\gotmp'; GOCACHE = 'D:\diag\gocache' }
-          $results = foreach ($drive in 'C', 'D') {
-            $vars = if ($drive -eq 'C') { $onC } else { $onD }
-            foreach ($name in $vars.Keys) {
-              $value = $vars[$name]
-              if ($value) { New-Item -ItemType Directory -Force -Path $value | Out-Null } else { $value = $null }
-              [Environment]::SetEnvironmentVariable($name, $value)
-            }
-            $compile = Measure-Command { go test -count=1 -run '^$' @pkgs *> (Join-Path $out "compile-$drive.txt") }
-            go clean -testcache
-            $cacheable = Measure-Command { go test -json @pkgs > (Join-Path $out "cacheable-$drive.json") }
-            $check = Measure-Command { go test -json @pkgs > (Join-Path $out "check-$drive.json") }
-            $count1 = Measure-Command { go test -count=1 -json @pkgs > (Join-Path $out "count1-$drive.json") }
-            [pscustomobject]@{ Drive = $drive; Compile = $compile.TotalSeconds; Cacheable = $cacheable.TotalSeconds; CacheCheck = $check.TotalSeconds; Count1 = $count1.TotalSeconds }
-          }
-          $results | Format-Table -AutoSize @{ n = 'drive'; e = { $_.Drive } },
-            @{ n = 'compile s'; e = { '{0:N1}' -f $_.Compile } }, @{ n = 'cacheable s'; e = { '{0:N1}' -f $_.Cacheable } },
-            @{ n = 'cache check s'; e = { '{0:N1}' -f $_.CacheCheck } }, @{ n = '-count=1 s'; e = { '{0:N1}' -f $_.Count1 } } | Out-String -Width 200
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: windows-test-diagnostic
-          path: ${{ runner.temp }}/diagnostic/
-          retention-days: 7
+        run: go test -count=1 ./...
 
   # Exercises the real systemd install path: unit generation, systemctl enable/active,
   # Restart=always actually restarting, and uninstall leaving nothing behind. Needs systemd as
