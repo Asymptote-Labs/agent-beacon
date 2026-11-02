@@ -618,6 +618,85 @@ jobs:
         working-directory: beacon-sandbox
         run: go test ./...
 
+  # TEMPORARY, remove before merging #1160: a one-off timing diagnostic for windows-test. It splits the
+  # job's main step into compiling, running the tests, and checking the test cache, and uploads the
+  # per-test JSON, so the runner's share of the time can be compared with a local Windows VM.
+  windows-test-diagnostic:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-go
+        with:
+          modules: |
+            cli/beacon
+            cli/beacon-hooks
+      - name: Runner facts
+        run: |
+          $cs = Get-CimInstance Win32_ComputerSystem
+          $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+          $mp = Get-MpComputerStatus
+          "cpu: $($cpu.Name) | logical processors: $($cs.NumberOfLogicalProcessors) | memory: $([math]::Round($cs.TotalPhysicalMemory/1GB))GB"
+          "PATH entries: $(($env:Path -split ';' | Where-Object { $_ }).Count) | PATHEXT: $env:PATHEXT"
+          "defender realtime: $($mp.RealTimeProtectionEnabled) | exclusions: $((Get-MpPreference).ExclusionPath -join ',')"
+          "workspace: $env:GITHUB_WORKSPACE | TEMP: $env:TEMP | GOCACHE: $(go env GOCACHE) | GOMODCACHE: $(go env GOMODCACHE)"
+          Get-Volume | Where-Object DriveLetter | ForEach-Object { "volume $($_.DriveLetter): $($_.FileSystem) $([math]::Round($_.SizeRemaining/1GB))GB free" }
+          Get-PhysicalDisk | ForEach-Object { "disk: $($_.FriendlyName) $($_.MediaType) $($_.BusType)" }
+      - name: Build platform-matched hooks binary
+        working-directory: cli/beacon-hooks
+        run: |
+          go build -ldflags "-s -w" -o beacon-hooks.exe .
+          Copy-Item beacon-hooks.exe ..\beacon\internal\embedded\hooks.bin -Force
+      - name: Time compiling, testing and cache checking separately
+        working-directory: cli/beacon
+        run: |
+          $pkgs = @(
+            '.', './cmd/...', './internal/account/...', './internal/auth/...', './internal/ci/...',
+            './internal/claudesession/...', './internal/clinesession/...', './internal/codexsession/...',
+            './internal/copilotsession/...', './internal/cursorsession/...', './internal/devincloud/...',
+            './internal/dshsession/...', './internal/embedded/...', './internal/endpoint/activity/...',
+            './internal/endpoint/cloudwatch/...', './internal/endpoint/collector/...',
+            './internal/endpoint/config/...', './internal/endpoint/dashboard/...',
+            './internal/endpoint/datadog/...', './internal/endpoint/detect/...',
+            './internal/endpoint/diagnostics/...', './internal/endpoint/elastic/...',
+            './internal/endpoint/falcon/...', './internal/endpoint/harness/...',
+            './internal/endpoint/hooks/...', './internal/endpoint/integrations/...',
+            './internal/endpoint/inventory/...', './internal/endpoint/lifecycle/...',
+            './internal/endpoint/loggroup/...', './internal/endpoint/rapid7/...',
+            './internal/endpoint/schema/...', './internal/endpoint/selfupdate/...',
+            './internal/endpoint/sentinel/...', './internal/endpoint/service/...',
+            './internal/endpoint/siempack/...', './internal/endpoint/sumo/...',
+            './internal/endpoint/sysacl/...', './internal/endpoint/traceview/...',
+            './internal/endpoint/wazuh/...', './internal/endpoint/writer/...',
+            './internal/factorysession/...', './internal/fxsession/...', './internal/groksession/...',
+            './internal/hermessession/...', './internal/intel/...', './internal/learning/...',
+            './internal/managedprivacy/...', './internal/mcpconnect/...', './internal/mcpserver/...',
+            './internal/onboarding/...', './internal/openclawsession/...',
+            './internal/opencodesession/...', './internal/osuser/...', './internal/pisession/...',
+            './internal/primesession/...', './internal/testenv/...', './internal/tokens/...',
+            './internal/updatecheck/...', './internal/version/...'
+          )
+          $out = Join-Path $env:RUNNER_TEMP diagnostic
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          # Compile and link every test binary without running a test: -run matches nothing.
+          $compile = Measure-Command { go test -count=1 -run '^$' @pkgs *> (Join-Path $out compile.txt) }
+          # The step as windows-test runs it, cacheable, with per-test JSON.
+          $tests = Measure-Command { go test -json @pkgs > (Join-Path $out tests.json) }
+          # Again, unchanged: every package should be a cache hit, so this is the cost of checking.
+          $cached = Measure-Command { go test -json @pkgs > (Join-Path $out cached.json) }
+          "compile and link: {0:N1}s" -f $compile.TotalSeconds
+          "tests:            {0:N1}s" -f $tests.TotalSeconds
+          "cache check:      {0:N1}s" -f $cached.TotalSeconds
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-test-diagnostic
+          path: ${{ runner.temp }}/diagnostic/
+          retention-days: 7
+
   # Exercises the real systemd install path: unit generation, systemctl enable/active,
   # Restart=always actually restarting, and uninstall leaving nothing behind. Needs systemd as
   # PID 1, which only a privileged container provides -- the GitHub runner's own systemd is not
