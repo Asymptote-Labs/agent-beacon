@@ -12,10 +12,64 @@
 package testenv
 
 import (
+	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strings"
 	"testing"
 )
+
+// hostPath is PATH as the test binary inherited it. Package initialization runs before any
+// TestMain, so this is the machine's PATH even after IsolatePath has replaced it.
+var hostPath = os.Getenv("PATH")
+
+// IsolatePath points PATH at an empty directory under dir for the rest of the test binary's life.
+// Call it from TestMain, after creating dir.
+//
+// PATH is the other half of what harness discovery reads, alongside the home directory SetHome
+// redirects. Inherited, it made results depend on the machine: a discovered agent CLI is run for
+// its --version, so the same test took different paths on a developer's laptop and in CI. It also
+// made every discovery a stat of each PATH directory for each of some thirty CLI names -- times
+// twelve PATHEXT extensions on Windows -- and go test fingerprints every path a test touched for
+// its test cache. On a Windows runner that fingerprinting cost about as much as the tests did.
+//
+// A test that needs a real command declares it with RequireCommands.
+func IsolatePath(dir string) error {
+	empty := filepath.Join(dir, "empty-path")
+	if err := os.MkdirAll(empty, 0o755); err != nil {
+		return err
+	}
+	return os.Setenv("PATH", empty)
+}
+
+// RequireCommands gives the test a PATH holding only the directories the machine's PATH resolves
+// the named commands to, and skips the test when one is not installed. It is the declared
+// exception to IsolatePath, for a test that runs a real git or shell.
+func RequireCommands(t *testing.T, names ...string) {
+	t.Helper()
+	t.Setenv("PATH", hostPath)
+	var dirs []string
+	for _, name := range names {
+		path, err := exec.LookPath(name)
+		if err != nil {
+			t.Skipf("%s is not installed", name)
+		}
+		if dir := filepath.Dir(path); !slices.Contains(dirs, dir) {
+			dirs = append(dirs, dir)
+		}
+	}
+	t.Setenv("PATH", strings.Join(dirs, string(os.PathListSeparator)))
+}
+
+// UseHostPath restores the machine's whole PATH for one test. It is for a test whose point is to
+// run software as the user installed it -- an agent CLI that is a script needs its interpreter,
+// wherever that lives -- and so cannot name everything it depends on.
+func UseHostPath(t *testing.T) {
+	t.Helper()
+	t.Setenv("PATH", hostPath)
+}
 
 // SetHome redirects the user's home directory for the duration of a test, on every platform.
 //
