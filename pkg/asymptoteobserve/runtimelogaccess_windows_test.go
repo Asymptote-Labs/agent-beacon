@@ -58,14 +58,22 @@ func TestTheRestrictedMarkerOnWindows(t *testing.T) {
 	}
 }
 
-// The marker counts only when no account but SYSTEM and Administrators could have written it. This
-// one sits in the test's temp directory, which gives the test's own account full control of its
-// files; once that account is no longer trusted the marker is ignored, whether or not the test runs
-// elevated (an elevated account's files are owned by Administrators, but the grant remains).
+// The marker counts only when no account but SYSTEM and Administrators could have written it. Here
+// the test's own account is granted write on the marker and then no longer trusted, so the marker
+// must be ignored, whether or not the test runs elevated (an elevated account's files are owned by
+// Administrators, but the grant remains). The grant is made explicitly rather than inherited: a temp
+// directory under the user's profile grants the account its own files, but one elsewhere -- a CI
+// runner's work drive -- may give only SYSTEM and Administrators, and there the marker really is
+// trusted.
 func TestAMarkerAnOrdinaryAccountCouldWriteIsIgnored(t *testing.T) {
 	log := systemLogFixture(t)
 	if err := SetRuntimeLogAccess(log, LogAccessRestricted); err != nil {
 		t.Fatal(err)
+	}
+	account := logAccessMarkerTrustedSID
+	marker := LogAccessMarkerPath(log)
+	if out, err := exec.Command("icacls", marker, "/grant", "*"+account+":(W)").CombinedOutput(); err != nil {
+		t.Fatalf("icacls: %v: %s", err, strings.TrimSpace(string(out)))
 	}
 	logAccessMarkerTrustedSID = ""
 	if RuntimeLogAccessRestricted(log) {
