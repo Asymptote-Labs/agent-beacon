@@ -788,10 +788,10 @@ jobs:
   # is sequenced correctly -- is inference from a manifest.
   #
   # The mirror of linux-package-smoke, which installs the .deb and checks the endpoint came up.
-  # TEMPORARY (uninstall-hang diagnosis, do not merge): eight copies, and every msiexec call runs under
-  # a watchdog that prints the Beacon/msiexec process tree, the collector service and the MSI log tail
-  # every 20 s. Each attempt also keeps one comment on the pull request updated with its latest state,
-  # written straight to the API, because a hung runner has never uploaded its log.
+  # TEMPORARY (uninstall-hang diagnosis, do not merge): sixteen copies. The msiexec steps are exactly as
+  # on main -- this is the A side of an A/B against the watchdog variant, which never hung in 40 runs.
+  # Each attempt posts a pull-request comment when it starts and a final status when it finishes, so
+  # an attempt whose runner hangs and never uploads a log still shows as one that never finished.
   windows-package-smoke:
     runs-on: windows-2025
     strategy:
@@ -933,9 +933,8 @@ jobs:
           # /qn is silent, and the verbose log is what makes a custom-action failure diagnosable --
           # without it msiexec reports only an exit code.
           $log = "$env:GITHUB_WORKSPACE\install.log"
-          . (Join-Path $env:RUNNER_TEMP 'msiexec-watchdog.ps1')
-          $p = Invoke-MsiexecWatched $log @(
-            '/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.1.msi", '/qn', '/l*v!', $log
+          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+            '/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.1.msi", '/qn', '/l*v', $log
           )
           if ($p.ExitCode -ne 0) {
             Write-Output "--- install log (tail) ---"
@@ -975,9 +974,8 @@ jobs:
           if (-not (Test-Path -LiteralPath $configPath)) { throw "no configuration before the upgrade" }
 
           $log = "$env:GITHUB_WORKSPACE\upgrade.log"
-          . (Join-Path $env:RUNNER_TEMP 'msiexec-watchdog.ps1')
-          $p = Invoke-MsiexecWatched $log @(
-            '/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.2.msi", '/qn', '/l*v!', $log
+          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+            '/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.2.msi", '/qn', '/l*v', $log
           )
           if ($p.ExitCode -ne 0) {
             Write-Output "--- upgrade log (tail) ---"
@@ -1068,10 +1066,9 @@ jobs:
 
           # The upgraded product is what is installed, so that is what gets removed. Each build gets a
           # fresh ProductCode, so removing with the 0.0.1 package would not match anything.
-          . (Join-Path $env:RUNNER_TEMP 'msiexec-watchdog.ps1')
-          $p = Invoke-MsiexecWatched "$env:GITHUB_WORKSPACE\uninstall.log" @(
+          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
             '/x', "$env:GITHUB_WORKSPACE\Beacon-0.0.2.msi", '/qn',
-            '/l*v!', "$env:GITHUB_WORKSPACE\uninstall.log"
+            '/l*v', "$env:GITHUB_WORKSPACE\uninstall.log"
           )
           if ($p.ExitCode -ne 0) {
             Get-Content -LiteralPath "$env:GITHUB_WORKSPACE\uninstall.log" -Tail 120 | Write-Output
