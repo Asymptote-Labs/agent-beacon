@@ -2,6 +2,8 @@ package beaconjsonexporter
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -962,6 +964,43 @@ func TestConsumeLogsMapsGeminiPrompt(t *testing.T) {
 	}
 	if event.Prompt == nil || event.Prompt.Text != "summarize token=[REDACTED]" {
 		t.Fatalf("prompt = %#v, want redacted Gemini prompt", event.Prompt)
+	}
+}
+
+// content.hash leaves the machine where the prompt does not (Metadata-only keeps it), so it is the
+// hash of the prompt the exporter stores after redaction, never of the text before it.
+func TestConsumeLogsHashesTheStoredRedactedPrompt(t *testing.T) {
+	hexHash := func(text string) string {
+		sum := sha256.Sum256([]byte(text))
+		return hex.EncodeToString(sum[:])
+	}
+	for _, tc := range []struct{ prompt, stored string }{
+		{"deploy with ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8 and password=hunter2", "deploy with ghp_[REDACTED] and password=[REDACTED]"},
+		// Nothing to redact: the hash is the one it always was.
+		{"the quick brown fox", "the quick brown fox"},
+	} {
+		exp, path := newTestExporter(t)
+		logs := plog.NewLogs()
+		rl := logs.ResourceLogs().AppendEmpty()
+		rl.Resource().Attributes().PutStr("service.name", "claude-code")
+		rec := rl.ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+		rec.Body().SetStr("claude_code.user_prompt")
+		rec.Attributes().PutStr("event.name", "user_prompt")
+		rec.Attributes().PutStr("session.id", "claude-session")
+		rec.Attributes().PutStr("prompt", tc.prompt)
+		if err := exp.consumeLogs(context.Background(), logs); err != nil {
+			t.Fatalf("consumeLogs returned error: %v", err)
+		}
+		event := readEvent(t, path)
+		if event.Prompt == nil || event.Prompt.Text != tc.stored {
+			t.Fatalf("prompt = %#v, want %q", event.Prompt, tc.stored)
+		}
+		if event.Content == nil || event.Content.Hash != hexHash(tc.stored) || event.Content.Bytes != len(tc.prompt) {
+			t.Fatalf("content = %#v, want hash %s and the original %d bytes", event.Content, hexHash(tc.stored), len(tc.prompt))
+		}
+		if event.Content.Redacted != (tc.prompt != tc.stored) {
+			t.Fatalf("content.redacted = %t for %q", event.Content.Redacted, tc.prompt)
+		}
 	}
 }
 

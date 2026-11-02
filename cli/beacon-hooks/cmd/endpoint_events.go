@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -791,14 +789,10 @@ func diffFields(filePath, diffStr string) map[string]interface{} {
 	}
 	fields := map[string]interface{}{"file": file}
 	if diffStr != "" {
-		sum := sha256.Sum256([]byte(diffStr))
-		file["diff_hash"] = hex.EncodeToString(sum[:])
-		file["diff_bytes"] = len(diffStr)
-		file["diff"] = diffStr
-		// diff_hash and diff_bytes already describe the original diff; the marker
+		// diff_hash (of the whole redacted diff) and diff_bytes (its original size) describe the diff; the marker
 		// adds what they cannot say -- whether the stored copy is the whole diff,
 		// and whether redaction rewrote part of it.
-		fields["content"] = retainedContentFields(diffStr)
+		fields["content"] = retainedDiffFields(file, diffStr)
 	}
 	return fields
 }

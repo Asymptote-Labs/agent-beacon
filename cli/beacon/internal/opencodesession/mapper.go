@@ -325,9 +325,7 @@ func applyFile(ev *schema.Event, name string, record Record) {
 	}
 	if diff := diffText(name, record); diff != "" {
 		file.Diff = diff
-		file.DiffBytes = len(diff)
-		file.DiffHash = sha256Hex(diff)
-		ev.Content = asymptoteobserve.RetainedContent(diff, asymptoteobserve.DefaultStringLimit)
+		ev.Content, file.DiffHash, file.DiffBytes = asymptoteobserve.RetainedDiff(diff, asymptoteobserve.DefaultStringLimit)
 	}
 	ev.File = file
 }

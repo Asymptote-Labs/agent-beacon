@@ -2,7 +2,6 @@ package fxsession
 
 import (
 	"crypto/sha1"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -553,9 +552,7 @@ func (m *mapper) applyFile(ev *schema.Event, result ToolResult, evidence *FileRe
 		}
 		if diff := unifiedDiff(result.CommittedFile); diff != "" {
 			info.Diff = diff
-			info.DiffBytes = len(diff)
-			info.DiffHash = sha256Hex(diff)
-			ev.Content = asymptoteobserve.RetainedContent(diff, asymptoteobserve.DefaultStringLimit)
+			ev.Content, info.DiffHash, info.DiffBytes = asymptoteobserve.RetainedDiff(diff, asymptoteobserve.DefaultStringLimit)
 		}
 	}
 	if info.Path == "" && ev.Tool != nil {
@@ -914,11 +911,6 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func sha256Hex(value string) string {
-	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:])
 }
 
 // fxIDNamespace is the fixed UUID namespace for fx dedup-coordinate event IDs.
