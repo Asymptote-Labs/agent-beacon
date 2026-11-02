@@ -164,9 +164,11 @@ type FileInfo struct {
 	Language  string `json:"language,omitempty"`
 	DiffHash  string `json:"diff_hash,omitempty"`
 	DiffBytes int    `json:"diff_bytes,omitempty"`
-	// Diff is the retained unified diff for the edit. DiffHash and DiffBytes
-	// describe the original diff, so they stay stable when the stored text is
-	// redacted or truncated; the accompanying Content marker says which happened.
+	// Diff is the retained unified diff for the edit. DiffHash is the hash of the
+	// whole diff after secret redaction and DiffBytes the original diff's size
+	// (RetainedDiff), so both stay stable when the stored copy is truncated and
+	// the hash never confirms a guess at a secret the stored diff no longer
+	// shows; the accompanying Content marker says whether either happened.
 	//
 	// Declared here because the hook adapter has always written it. It assembles
 	// events as maps, so `file.diff` reached the log while this struct -- what the
@@ -308,9 +310,11 @@ const (
 	SystemContextSourceTranscript   = "transcript"
 )
 
-// ContentInfo marks how an event's retained raw content was handled. Hash and
-// Bytes describe the original content before redaction/truncation, so events
-// keep a stable identifier and size even when the stored text was cut down.
+// ContentInfo marks how an event's retained raw content was handled. Hash is of
+// the whole content after secret redaction and Bytes the original content's
+// size, both before truncation, so events keep a stable identifier and size
+// even when the stored text was cut down, and the hash confirms nothing
+// redaction removed.
 type ContentInfo struct {
 	Retention string `json:"retention"`
 	Included  bool   `json:"included"`

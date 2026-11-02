@@ -320,8 +320,3 @@ func outputText(value interface{}) string {
 		return string(data)
 	}
 }
-
-func sha256Hex(value string) string {
-	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:])
-}
