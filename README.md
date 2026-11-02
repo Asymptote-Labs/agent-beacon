@@ -31,7 +31,7 @@
   <picture>
    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=Asymptote-Labs/agent-beacon&type=trending&theme=dark&v=2" />
    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/badge?repo=Asymptote-Labs/agent-beacon&type=trending&v=2" />
-   <img alt="GitHub Trending Repository of the Day" src="https://api.star-history.com/badge?repo=Asymptote-Labs/agent-beacon&type=trending&v=2" />
+   <img alt="GitHub Trending Repository of the Day" width="227" height="54" src="https://api.star-history.com/badge?repo=Asymptote-Labs/agent-beacon&type=trending&v=2" />
   </picture>
  </a>
  <a href="https://www.producthunt.com/products/asymptotelabs?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-beacon-sh" target="_blank" rel="noopener noreferrer">
