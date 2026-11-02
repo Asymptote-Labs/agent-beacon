@@ -34,6 +34,13 @@
    <img alt="GitHub Trending Repository of the Day" src="https://api.star-history.com/badge?repo=Asymptote-Labs/agent-beacon&type=trending&v=2" />
   </picture>
  </a>
+ <a href="https://www.producthunt.com/products/asymptotelabs?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-beacon-sh" target="_blank" rel="noopener noreferrer">
+  <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1292351&theme=dark&t=1793641146622" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1292351&theme=light&t=1793641146622" />
+   <img alt="beacon.sh - Open-source self-improving memory for AI coding agents | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1292351&theme=light&t=1793641146622" />
+  </picture>
+ </a>
 </p>
 
 Beacon captures **agent session history** across Claude Code, Cursor, Codex, OpenCode, and 20+ other harnesses, then turns useful workflows, corrections, and debugging patterns into reusable knowledge for future agents.
