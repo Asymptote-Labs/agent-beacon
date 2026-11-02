@@ -870,13 +870,21 @@ jobs:
         run: |
           # /qn is silent, and the verbose log is what makes a custom-action failure diagnosable --
           # without it msiexec reports only an exit code.
+          #
+          # /norestart on every msiexec here: a silent msiexec that finds a file it cannot remove or
+          # replace schedules the change for the next boot and restarts the machine itself. On a runner
+          # that looked like a hang -- the runner vanished mid-step, never uploaded its log, and the job
+          # ran out its timeout. With /norestart the same condition returns 3010, which fails the step
+          # at once, and the step prints the files the log says were in use.
           $log = "$env:GITHUB_WORKSPACE\install.log"
           $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
-            '/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.1.msi", '/qn', '/l*v', $log
+            '/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.1.msi", '/qn', '/norestart', '/l*v', $log
           )
           if ($p.ExitCode -ne 0) {
             Write-Output "--- install log (tail) ---"
             Get-Content -LiteralPath $log -Tail 120 | Write-Output
+            Write-Output "--- files in use (Info 1903 schedules a reboot to finish) ---"
+            Select-String -LiteralPath $log -Pattern 'Info 1903|Note: 1: 2329|in use' | Select-Object -Last 10 | ForEach-Object Line
             throw "msiexec /i exited $($p.ExitCode)"
           }
 
@@ -913,17 +921,18 @@ jobs:
 
           $log = "$env:GITHUB_WORKSPACE\upgrade.log"
           $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
-            '/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.2.msi", '/qn', '/l*v', $log
+            '/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.2.msi", '/qn', '/norestart', '/l*v', $log
           )
           if ($p.ExitCode -ne 0) {
             Write-Output "--- upgrade log (tail) ---"
             Get-Content -LiteralPath $log -Tail 150 | Write-Output
+            Write-Output "--- files in use (Info 1903 schedules a reboot to finish) ---"
+            Select-String -LiteralPath $log -Pattern 'Info 1903|Note: 1: 2329|in use' | Select-Object -Last 10 | ForEach-Object Line
             throw "msiexec upgrade exited $($p.ExitCode)"
           }
 
-          # 3010 is "reboot required", which msiexec returns when it could not replace a file in use
-          # and deferred it. It is not an error code, which is exactly why it has to be checked for:
-          # the install would report success while still running the old collector.
+          # A deferred replacement also leaves "Reboot" in the log. With /norestart it returns 3010 and
+          # fails the step above; these lines say which file it was if anything still slips through.
           if (Select-String -LiteralPath $log -Pattern 'Reboot' -Quiet) {
             Write-Output "--- reboot mentions in the upgrade log ---"
             Select-String -LiteralPath $log -Pattern 'Reboot' | Select-Object -First 10 | Write-Output
@@ -1005,11 +1014,13 @@ jobs:
           # The upgraded product is what is installed, so that is what gets removed. Each build gets a
           # fresh ProductCode, so removing with the 0.0.1 package would not match anything.
           $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
-            '/x', "$env:GITHUB_WORKSPACE\Beacon-0.0.2.msi", '/qn',
+            '/x', "$env:GITHUB_WORKSPACE\Beacon-0.0.2.msi", '/qn', '/norestart',
             '/l*v', "$env:GITHUB_WORKSPACE\uninstall.log"
           )
           if ($p.ExitCode -ne 0) {
             Get-Content -LiteralPath "$env:GITHUB_WORKSPACE\uninstall.log" -Tail 120 | Write-Output
+            Write-Output "--- files in use (Info 1903 schedules a reboot to finish) ---"
+            Select-String -LiteralPath "$env:GITHUB_WORKSPACE\uninstall.log" -Pattern 'Info 1903|Note: 1: 2329|in use' | Select-Object -Last 10 | ForEach-Object Line
             throw "msiexec /x exited $($p.ExitCode)"
           }
 
