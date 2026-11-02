@@ -634,62 +634,51 @@ jobs:
           modules: |
             cli/beacon
             cli/beacon-hooks
-      - name: Runner facts
+      - name: Small-file operations on C (TEMP) and D (workspace drive)
         run: |
-          $cs = Get-CimInstance Win32_ComputerSystem
-          $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
-          $mp = Get-MpComputerStatus
-          "cpu: $($cpu.Name) | logical processors: $($cs.NumberOfLogicalProcessors) | memory: $([math]::Round($cs.TotalPhysicalMemory/1GB))GB"
-          "PATH entries: $(($env:Path -split ';' | Where-Object { $_ }).Count) | PATHEXT: $env:PATHEXT"
-          "defender realtime: $($mp.RealTimeProtectionEnabled) | exclusions: $((Get-MpPreference).ExclusionPath -join ',')"
-          "workspace: $env:GITHUB_WORKSPACE | TEMP: $env:TEMP | GOCACHE: $(go env GOCACHE) | GOMODCACHE: $(go env GOMODCACHE)"
-          Get-Volume | Where-Object DriveLetter | ForEach-Object { "volume $($_.DriveLetter): $($_.FileSystem) $([math]::Round($_.SizeRemaining/1GB))GB free" }
-          Get-PhysicalDisk | ForEach-Object { "disk: $($_.FriendlyName) $($_.MediaType) $($_.BusType)" }
+          foreach ($root in (Join-Path $env:TEMP 'filebench'), 'D:\filebench') {
+            New-Item -ItemType Directory -Force -Path $root | Out-Null
+            $n = 2000
+            $create = Measure-Command { for ($i = 0; $i -lt $n; $i++) { [IO.File]::WriteAllText("$root\f$i.jsonl", 'x') } }
+            $rename = Measure-Command { for ($i = 0; $i -lt $n; $i++) { [IO.File]::Move("$root\f$i.jsonl", "$root\f$i.shipped") } }
+            $stat = Measure-Command { for ($i = 0; $i -lt $n; $i++) { [void][IO.File]::Exists("$root\missing$i.exe") } }
+            $delete = Measure-Command { for ($i = 0; $i -lt $n; $i++) { [IO.File]::Delete("$root\f$i.shipped") } }
+            "{0,-60} per op: create {1,6:N3}ms  rename {2,6:N3}ms  stat-missing {3,6:N3}ms  delete {4,6:N3}ms" -f $root,
+              ($create.TotalMilliseconds / $n), ($rename.TotalMilliseconds / $n), ($stat.TotalMilliseconds / $n), ($delete.TotalMilliseconds / $n)
+          }
       - name: Build platform-matched hooks binary
         working-directory: cli/beacon-hooks
         run: |
           go build -ldflags "-s -w" -o beacon-hooks.exe .
           Copy-Item beacon-hooks.exe ..\beacon\internal\embedded\hooks.bin -Force
-      - name: Time compiling, testing and cache checking separately
+      # The four packages that dominate windows-test, with TEMP, TMP, GOTMPDIR and GOCACHE on C (as
+      # today) and then on D. For each drive: compile untimed, then the tests cacheable from an empty
+      # test cache (as CI runs them), the same again unchanged (pure cache check), and -count=1.
+      - name: TEMP and Go cache on C versus D, cacheable versus -count=1
         working-directory: cli/beacon
         run: |
-          $pkgs = @(
-            '.', './cmd/...', './internal/account/...', './internal/auth/...', './internal/ci/...',
-            './internal/claudesession/...', './internal/clinesession/...', './internal/codexsession/...',
-            './internal/copilotsession/...', './internal/cursorsession/...', './internal/devincloud/...',
-            './internal/dshsession/...', './internal/embedded/...', './internal/endpoint/activity/...',
-            './internal/endpoint/cloudwatch/...', './internal/endpoint/collector/...',
-            './internal/endpoint/config/...', './internal/endpoint/dashboard/...',
-            './internal/endpoint/datadog/...', './internal/endpoint/detect/...',
-            './internal/endpoint/diagnostics/...', './internal/endpoint/elastic/...',
-            './internal/endpoint/falcon/...', './internal/endpoint/harness/...',
-            './internal/endpoint/hooks/...', './internal/endpoint/integrations/...',
-            './internal/endpoint/inventory/...', './internal/endpoint/lifecycle/...',
-            './internal/endpoint/loggroup/...', './internal/endpoint/rapid7/...',
-            './internal/endpoint/schema/...', './internal/endpoint/selfupdate/...',
-            './internal/endpoint/sentinel/...', './internal/endpoint/service/...',
-            './internal/endpoint/siempack/...', './internal/endpoint/sumo/...',
-            './internal/endpoint/sysacl/...', './internal/endpoint/traceview/...',
-            './internal/endpoint/wazuh/...', './internal/endpoint/writer/...',
-            './internal/factorysession/...', './internal/fxsession/...', './internal/groksession/...',
-            './internal/hermessession/...', './internal/intel/...', './internal/learning/...',
-            './internal/managedprivacy/...', './internal/mcpconnect/...', './internal/mcpserver/...',
-            './internal/onboarding/...', './internal/openclawsession/...',
-            './internal/opencodesession/...', './internal/osuser/...', './internal/pisession/...',
-            './internal/primesession/...', './internal/testenv/...', './internal/tokens/...',
-            './internal/updatecheck/...', './internal/version/...'
-          )
+          $pkgs = './cmd', './internal/fxsession', './internal/groksession', './internal/hermessession'
           $out = Join-Path $env:RUNNER_TEMP diagnostic
           New-Item -ItemType Directory -Force -Path $out | Out-Null
-          # Compile and link every test binary without running a test: -run matches nothing.
-          $compile = Measure-Command { go test -count=1 -run '^$' @pkgs *> (Join-Path $out compile.txt) }
-          # The step as windows-test runs it, cacheable, with per-test JSON.
-          $tests = Measure-Command { go test -json @pkgs > (Join-Path $out tests.json) }
-          # Again, unchanged: every package should be a cache hit, so this is the cost of checking.
-          $cached = Measure-Command { go test -json @pkgs > (Join-Path $out cached.json) }
-          "compile and link: {0:N1}s" -f $compile.TotalSeconds
-          "tests:            {0:N1}s" -f $tests.TotalSeconds
-          "cache check:      {0:N1}s" -f $cached.TotalSeconds
+          $onC = @{ TEMP = $env:TEMP; TMP = $env:TMP; GOTMPDIR = ''; GOCACHE = (go env GOCACHE) }
+          $onD = @{ TEMP = 'D:\diag\tmp'; TMP = 'D:\diag\tmp'; GOTMPDIR = 'D:\diag\gotmp'; GOCACHE = 'D:\diag\gocache' }
+          $results = foreach ($drive in 'C', 'D') {
+            $vars = if ($drive -eq 'C') { $onC } else { $onD }
+            foreach ($name in $vars.Keys) {
+              $value = $vars[$name]
+              if ($value) { New-Item -ItemType Directory -Force -Path $value | Out-Null } else { $value = $null }
+              [Environment]::SetEnvironmentVariable($name, $value)
+            }
+            $compile = Measure-Command { go test -count=1 -run '^$' @pkgs *> (Join-Path $out "compile-$drive.txt") }
+            go clean -testcache
+            $cacheable = Measure-Command { go test -json @pkgs > (Join-Path $out "cacheable-$drive.json") }
+            $check = Measure-Command { go test -json @pkgs > (Join-Path $out "check-$drive.json") }
+            $count1 = Measure-Command { go test -count=1 -json @pkgs > (Join-Path $out "count1-$drive.json") }
+            [pscustomobject]@{ Drive = $drive; Compile = $compile.TotalSeconds; Cacheable = $cacheable.TotalSeconds; CacheCheck = $check.TotalSeconds; Count1 = $count1.TotalSeconds }
+          }
+          $results | Format-Table -AutoSize @{ n = 'drive'; e = { $_.Drive } },
+            @{ n = 'compile s'; e = { '{0:N1}' -f $_.Compile } }, @{ n = 'cacheable s'; e = { '{0:N1}' -f $_.Cacheable } },
+            @{ n = 'cache check s'; e = { '{0:N1}' -f $_.CacheCheck } }, @{ n = '-count=1 s'; e = { '{0:N1}' -f $_.Count1 } } | Out-String -Width 200
       - uses: actions/upload-artifact@v7
         if: always()
         with:
