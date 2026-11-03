@@ -15,6 +15,10 @@
 </p>
 
 <p align="center">
+  ⭐ <em>Help us reach more developers and grow the Beacon community. Star this repo!</em>
+</p>
+
+<p align="center">
   <a href="https://beacon.sh">Website</a>
   ·
   <a href="https://docs.beacon.sh">Docs</a>
