@@ -585,15 +585,12 @@ func (r *installRollback) Rollback(manifest Manifest) {
 	}
 }
 
-func Install(opts InstallOptions) (InstallResult, error) {
-	cfg := buildConfig(opts)
-	if err := preflight(cfg, opts.StartService, opts.ServiceKind); err != nil {
-		return InstallResult{}, err
-	}
-	manager := service.Manager{UserMode: cfg.UserMode, Kind: opts.ServiceKind}
+// usableCollectorBinary resolves the collector an install of cfg runs and checks that it has every
+// component cfg's collector config needs.
+func usableCollectorBinary(cfg endpointconfig.Config) (string, error) {
 	collectorBinary, err := endpointcollector.ResolveBinary(cfg.Collector.BinaryPath)
 	if err != nil {
-		return InstallResult{}, err
+		return "", err
 	}
 	var extensions []string
 	if cfg.RestrictedLogAccess() {
@@ -605,6 +602,19 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		exporters = append(exporters, endpointcollector.OTLPForwardExporters[cfg.Destinations.OTLPForward.Protocol])
 	}
 	if err := endpointcollector.CheckComponentsFor(collectorBinary, extensions, processors, exporters); err != nil {
+		return "", err
+	}
+	return collectorBinary, nil
+}
+
+func Install(opts InstallOptions) (InstallResult, error) {
+	cfg := buildConfig(opts)
+	if err := preflight(cfg, opts.StartService, opts.ServiceKind); err != nil {
+		return InstallResult{}, err
+	}
+	manager := service.Manager{UserMode: cfg.UserMode, Kind: opts.ServiceKind}
+	collectorBinary, err := usableCollectorBinary(cfg)
+	if err != nil {
 		return InstallResult{}, err
 	}
 
@@ -1004,6 +1014,12 @@ func Repair(opts InstallOptions) (InstallResult, error) {
 		if mode, err := autoUpdateModeFromConfigFile(configPath); err == nil {
 			priorAutoUpdateMode = mode
 		}
+	}
+	// The teardown below removes the collector's unit and config, and a failed install restores
+	// only the endpoint config, so a collector the install would refuse is refused first, while
+	// the endpoint still runs.
+	if _, err := usableCollectorBinary(buildConfig(opts)); err != nil {
+		return InstallResult{}, err
 	}
 	_ = Uninstall(repairUninstallOptions(opts))
 	result, err := Install(opts)
