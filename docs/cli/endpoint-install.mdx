@@ -112,7 +112,7 @@ The session backfill runs once, at install. To keep reading the runtimes' sessio
 sudo beacon endpoint install --system --session-sync   # or: sudo beacon endpoint repair --system --session-sync
 ```
 
-For a package or MDM rollout, set `BEACON_SESSION_SYNC=1` in the environment of the package's install script (`/opt/beacon/scripts/install-endpoint.sh`) or of the Jamf and Fleet repair helpers. `BEACON_SESSION_SYNC=0` turns it off, and leaving it unset keeps what the endpoint already has, so a package upgrade never changes it.
+Without `--harness`, repair configures every runtime it detects, so on a package install name the harnesses it already has (`--harness claude,codex` by default). For a package or MDM rollout, set `BEACON_SESSION_SYNC=1` in the environment of the package's install script (`/opt/beacon/scripts/install-endpoint.sh`) or of the Jamf and Fleet repair helpers. `BEACON_SESSION_SYNC=0` turns it off, and leaving it unset keeps what the endpoint already has, so a package upgrade never changes it.
 
 It is off by default. Hooks and OTLP already capture sessions live, and the session stores add what only they record, such as Claude Code's per-request token usage and complete assistant text from its transcripts. Turning it on writes those records as poll events (`harness.collection_method=poll`) alongside the live ones, which matters when the runtime log is forwarded elsewhere. Token reports keep live usage authoritative over poll usage for the same session.
 
