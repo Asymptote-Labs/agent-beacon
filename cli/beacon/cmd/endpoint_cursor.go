@@ -107,7 +107,7 @@ func runEndpointCursorSync(cmd *cobra.Command, args []string) error {
 	if endpointCursorOpts.watch && !endpointCursorOpts.print {
 		return watchCursor(ctx, cmd, opts)
 	}
-	summary, err := cursorsession.CollectOnce(opts)
+	summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, endpointSweepLockWait, cursorsession.CollectOnce, opts)
 	reportCursorSweep(cmd, summary)
 	return err
 }
@@ -118,7 +118,7 @@ func watchCursor(ctx context.Context, cmd *cobra.Command, opts cursorsession.Col
 		interval = 5 * time.Second
 	}
 	for {
-		summary, err := cursorsession.CollectOnce(opts)
+		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, cursorsession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "cursor sync error: %v\n", err)
 		}

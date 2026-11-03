@@ -113,6 +113,40 @@ after="$(in_container 'systemctl show -p MainPID --value beacon-collector.servic
   || fail "Restart=always did not restart the collector (before=$before after=$after)"
 echo "ok: Restart=always restarted the collector ($before -> $after)"
 
+# The scheduled session sync: opt-in, kept by repair, a timer that does not fire at load (the
+# install backfill owns that moment), a unit that runs as root, and a confined sweep of the console
+# user's session store that writes each record once.
+in_container '/beacon/beacon endpoint repair --system --harness claude --collector /beacon/beacon-otelcol --session-sync' \
+  | grep -q 'Scheduled session sync job: /etc/systemd/system/beacon-session-sync.timer' \
+  || fail "repair --session-sync did not install the session sync job"
+[ "$(in_container 'systemctl is-enabled beacon-session-sync.timer' || true)" = "enabled" ] \
+  && [ "$(in_container 'systemctl is-active beacon-session-sync.timer' || true)" = "active" ] \
+  || fail "session sync timer is not enabled and active"
+in_container "grep -q '^OnActiveSec=900s' /etc/systemd/system/beacon-session-sync.timer && ! grep -q OnBootSec /etc/systemd/system/beacon-session-sync.timer" \
+  || fail "session sync timer would fire at load"
+[ -z "$(in_container 'systemctl show -p ExecMainStartTimestamp --value beacon-session-sync.service')" ] \
+  || fail "session sync ran at load"
+in_container "grep -q '\"--scheduled\" \"--system\"' /etc/systemd/system/beacon-session-sync.service && grep -q '^User=root' /etc/systemd/system/beacon-session-sync.service" \
+  || fail "session sync service does not run the scheduled system sweep as root"
+in_container '/beacon/beacon endpoint status --system' | grep -q 'Session sync: every 15m0s; job loaded=true' \
+  || fail "status does not report the session sync job"
+in_container 'systemctl start beacon-session-sync.service' || fail "session sync service failed"
+[ "$(in_container 'systemctl show -p Result --value beacon-session-sync.service')" = "success" ] \
+  || fail "session sync service did not succeed"
+echo "ok: session sync timer installed, not fired at load, and its unit runs"
+
+ts="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+in_container "useradd -m alice && mkdir -p /home/alice/.claude/projects/-tmp-repo && printf '%s\n' '{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hello from alice\"},\"uuid\":\"u1\",\"timestamp\":\"$ts\",\"cwd\":\"/tmp/repo\",\"sessionId\":\"sess-alice\",\"version\":\"2.1.154\"}' > /home/alice/.claude/projects/-tmp-repo/sess-alice.jsonl && chown -R alice:alice /home/alice/.claude" \
+  || fail "could not create the console user's session"
+in_container 'SUDO_USER=alice /beacon/beacon endpoint sessions sync --system' | grep -q 'Session sync: [1-9][0-9]* events' \
+  || fail "system session sync did not read the console user's session"
+first="$(in_container 'grep -c sess-alice /var/log/beacon-agent/runtime.jsonl' || true)"
+in_container 'SUDO_USER=alice /beacon/beacon endpoint sessions sync --system' >/dev/null || fail "second session sync failed"
+second="$(in_container 'grep -c sess-alice /var/log/beacon-agent/runtime.jsonl' || true)"
+[ "$first" -gt 0 ] && [ "$first" = "$second" ] \
+  || fail "session sync wrote the session $first then $second times; cursors should make the second run read nothing"
+echo "ok: session sync read the console user's session once ($first events)"
+
 in_container '/beacon/beacon endpoint doctor --system' >/dev/null 2>&1 \
   || echo "note: doctor reported warnings (expected: no agent session ran here)"
 
@@ -132,6 +166,8 @@ in_container 'test ! -f /etc/systemd/system/beacon-collector.service' || fail "u
 in_container 'test ! -f /etc/beacon/endpoint/config.json' || fail "config survived uninstall"
 [ "$(in_container 'systemctl is-enabled beacon-collector.service 2>&1' || true)" = "not-found" ] \
   || fail "unit still known to systemd after uninstall"
+in_container 'test ! -e /etc/systemd/system/beacon-session-sync.timer && test ! -e /etc/systemd/system/beacon-session-sync.service' \
+  || fail "session sync units survived uninstall"
 
 listed_after="$(in_container 'systemctl list-unit-files beacon-collector.service --no-legend 2>&1' || true)"
 [ -z "$(printf '%s' "$listed_after" | tr -d '[:space:]')" ] \

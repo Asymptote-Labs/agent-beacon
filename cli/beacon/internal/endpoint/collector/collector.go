@@ -24,6 +24,7 @@ const (
 var (
 	lookPath                        = exec.LookPath
 	currentExecutable               = os.Executable
+	discoverSiblingBinary           = siblingBinary
 	discoverDefaultBinaryCandidates = defaultBinaryCandidates
 	// pollInterval is how often the readiness and port waits re-check; tests shorten it.
 	pollInterval = 250 * time.Millisecond
@@ -60,6 +61,13 @@ func DiscoverBinary(configured string) string {
 			return configured
 		}
 	}
+	// The collector beside this CLI comes from the same release, so it comes before PATH. An older
+	// beacon-otelcol earlier on PATH (a Homebrew install on a Mac that also has the package, which
+	// sudo finds first) can lack components this CLI's collector config needs, and a repair that
+	// took it refused to install.
+	if sibling := discoverSiblingBinary(); sibling != "" && validateExecutable(sibling) == nil {
+		return sibling
+	}
 	if path, err := lookPath(BinaryName); err == nil && validateExecutable(path) == nil {
 		return path
 	}
@@ -71,7 +79,7 @@ func DiscoverBinary(configured string) string {
 	return ""
 }
 
-// defaultBinaryCandidates lists where to look for the collector when it is not on PATH.
+// defaultBinaryCandidates lists where to look for the collector besides PATH.
 //
 // A sibling of the running CLI comes first, because that is what an extracted release archive looks
 // like: beacon and beacon-otelcol next to each other in whatever directory the user unpacked them
@@ -83,15 +91,21 @@ func DiscoverBinary(configured string) string {
 // collector at all.
 func defaultBinaryCandidates() []string {
 	paths := packagedBinaryPaths()
-	// A Homebrew CLI runs from its versioned keg, and the collector path found here goes into
-	// the service unit, so it is mapped to the <prefix>/bin link that survives `brew upgrade`.
-	// PATH usually finds that link first, but not under sudo, whose secure_path leaves out the
-	// Linuxbrew prefix.
-	if executable, err := currentExecutable(); err == nil {
-		sibling := brewpath.Stable(filepath.Join(filepath.Dir(executable), binaryFileName()))
+	if sibling := siblingBinary(); sibling != "" {
 		paths = append([]string{sibling}, paths...)
 	}
 	return paths
+}
+
+// siblingBinary is the collector beside the running CLI, or "" when the executable is unknown.
+// A Homebrew CLI runs from its versioned keg, and the collector path found here goes into the
+// service unit, so it is mapped to the <prefix>/bin link that survives `brew upgrade`.
+func siblingBinary() string {
+	executable, err := currentExecutable()
+	if err != nil {
+		return ""
+	}
+	return brewpath.Stable(filepath.Join(filepath.Dir(executable), binaryFileName()))
 }
 
 func validateExecutable(path string) error {

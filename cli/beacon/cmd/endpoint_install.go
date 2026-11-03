@@ -121,6 +121,7 @@ func endpointInstallOptions(selection endpointTargetSelection, serviceKind servi
 	harnesses := append([]string{}, selection.OTLP...)
 	// Install and repair validate the forward flags before anything is written.
 	otlpForward, _ := otlpForwardOptions()
+	sessionSync, _ := sessionSyncOption()
 	return lifecycle.InstallOptions{
 		UserMode:                  endpointUserMode(),
 		LogPath:                   endpointOpts.logPath,
@@ -136,6 +137,7 @@ func endpointInstallOptions(selection endpointTargetSelection, serviceKind servi
 		SplunkHEC:                 splunkHECOptions(),
 		FalconHEC:                 falconHECOptions(),
 		OTLPForward:               otlpForward,
+		SessionSync:               sessionSync,
 		ServiceKind:               serviceKind,
 		LogAccess:                 strings.ToLower(strings.TrimSpace(endpointOpts.logAccess)),
 	}
@@ -203,6 +205,9 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	if _, err := otlpForwardOptions(); err != nil {
 		return err
 	}
+	if _, err := sessionSyncOption(); err != nil {
+		return err
+	}
 	warnMissingOTLPForwardHeaders(cmd.ErrOrStderr())
 	if endpointOpts.dryRun {
 		return printPlannedActions(plannedInstallActions(false, serviceKind, selection.OTLP, selection.Hooks))
@@ -253,6 +258,7 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	case result.InventoryJobDetail != "":
 		fmt.Fprintf(details, "Scheduled inventory job not installed: %s\n", result.InventoryJobDetail)
 	}
+	reportSessionSyncJob(details, result)
 	reportLogAccess(details, result)
 	reportManagedForwarder(details, cmd.ErrOrStderr(), result.ManagedForwarder)
 	printLingerGap(cmd.ErrOrStderr(), result)
@@ -270,6 +276,8 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 		}
 		reportEndpointBackfill(backfillOut, runEndpointBackfill(result.LogPath, endpointUserMode()))
 		backfilled = true
+	} else {
+		recordSkippedBackfill(cmd.ErrOrStderr(), endpointUserMode())
 	}
 	finishCloudSetup(cmd, onboarded, connectAfterInstall, summary, func() error {
 		return connectEndpointFor(cmd, endpointUserMode(), result.LogPath, backfilled, summary)
@@ -427,6 +435,7 @@ func runEndpointStatus(cmd *cobra.Command, args []string) error {
 		fmt.Println(line)
 	}
 	fmt.Println(inventoryHeartbeatStatusLine(status.InventoryHeartbeat))
+	fmt.Println(sessionSyncStatusLine(status.SessionSync))
 	return nil
 }
 
@@ -506,6 +515,9 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 	if _, err := otlpForwardOptions(); err != nil {
 		return err
 	}
+	if _, err := sessionSyncOption(); err != nil {
+		return err
+	}
 	warnMissingOTLPForwardHeaders(cmd.ErrOrStderr())
 	if endpointOpts.dryRun {
 		return printPlannedActions(plannedInstallActions(true, serviceKind, selection.OTLP, selection.Hooks))
@@ -518,12 +530,24 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Printf("Endpoint repaired. Manifest: %s\n", result.ManifestPath)
+	reportSessionSyncJob(os.Stdout, result)
 	reportLogAccess(os.Stdout, result)
 	reportManagedForwarder(os.Stdout, cmd.ErrOrStderr(), result.ManagedForwarder)
 	printLingerGap(cmd.ErrOrStderr(), result)
 	installHookTargetsFromEndpointInstall(os.Stdout, cmd.ErrOrStderr(), selection.Hooks)
 	refreshAgentSkills(cmd.ErrOrStderr())
 	return nil
+}
+
+// reportSessionSyncJob says where the scheduled session sync job was installed, or why it was not,
+// when the setting is on; with it off (the default) install and repair say nothing about it.
+func reportSessionSyncJob(out io.Writer, result lifecycle.InstallResult) {
+	switch {
+	case result.SessionSyncJobPath != "":
+		fmt.Fprintf(out, "Scheduled session sync job: %s\n", result.SessionSyncJobPath)
+	case result.SessionSyncJobDetail != "":
+		fmt.Fprintf(out, "Scheduled session sync job not installed: %s\n", result.SessionSyncJobDetail)
+	}
 }
 
 func reportEndpointTargetSelection(cmd *cobra.Command, selection endpointTargetSelection) {

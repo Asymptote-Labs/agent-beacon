@@ -114,7 +114,7 @@ func runEndpointClaudeSync(cmd *cobra.Command, args []string) error {
 		return watchClaude(ctx, cmd, opts)
 	}
 
-	summary, err := claudesession.CollectOnce(opts)
+	summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, endpointSweepLockWait, claudesession.CollectOnce, opts)
 	reportClaudeSweep(cmd, summary)
 	return err
 }
@@ -125,7 +125,7 @@ func watchClaude(ctx context.Context, cmd *cobra.Command, opts claudesession.Col
 		interval = 5 * time.Second
 	}
 	for {
-		summary, err := claudesession.CollectOnce(opts)
+		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, claudesession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "claude sync error: %v\n", err)
 		}

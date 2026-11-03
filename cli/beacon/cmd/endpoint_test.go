@@ -227,6 +227,42 @@ func TestPlannedInstallActionsSeparatesHookHarnesses(t *testing.T) {
 	}
 }
 
+// The plan names the session sync job only when the install will turn it on or remove it.
+func TestPlannedInstallActionsFollowSessionSync(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	old := endpointOpts
+	t.Cleanup(func() { endpointOpts = old })
+	endpointOpts.userMode, endpointOpts.systemMode = true, false
+	endpointOpts.logPath = filepath.Join(t.TempDir(), "runtime.jsonl")
+	endpointOpts.noStart = false
+
+	plan := func() (units, loads, removals int) {
+		for _, action := range plannedInstallActions(false, service.KindAuto, nil, nil) {
+			switch {
+			case action.Action == "write_unit" && action.Message == "scheduled session sync job":
+				units++
+			case action.Action == "load_service" && action.Message == "start scheduled session sync job":
+				loads++
+			case action.Action == "unload_service" && action.Message == "remove scheduled session sync job if present":
+				removals++
+			}
+		}
+		return units, loads, removals
+	}
+	endpointOpts.sessionSync, endpointOpts.noSessionSync = false, false
+	if u, l, r := plan(); u+l+r != 0 {
+		t.Fatalf("default plan names the session sync job: units=%d loads=%d removals=%d", u, l, r)
+	}
+	endpointOpts.sessionSync = true
+	if u, l, r := plan(); u != 1 || l != 1 || r != 0 {
+		t.Fatalf("--session-sync plan: units=%d loads=%d removals=%d", u, l, r)
+	}
+	endpointOpts.sessionSync, endpointOpts.noSessionSync = false, true
+	if u, l, r := plan(); u != 0 || l != 0 || r != 1 {
+		t.Fatalf("--no-session-sync plan: units=%d loads=%d removals=%d", u, l, r)
+	}
+}
+
 // writeNativeConfigInProcess runs native config repair in this process, the non-root path, so a
 // test that checks what the writers produce does not depend on whether the suite runs as root.
 func writeNativeConfigInProcess(t *testing.T) {

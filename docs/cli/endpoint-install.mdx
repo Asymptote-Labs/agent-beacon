@@ -30,7 +30,7 @@ The `claude` harness writes both Claude Code's OpenTelemetry settings and its us
 | `--otlp-grpc-port <port>` | Local OTLP gRPC port. Defaults to `4317` |
 | `--otlp-http-port <port>` | Local OTLP HTTP port. Defaults to `4318` |
 | `--health-port <port>` | Local collector health-check port. Defaults to `13133`, moved by the same amount as `--otlp-http-port` when that is changed (HTTP port `4328` gives `13143`), so a second collector on alternate OTLP ports does not collide with the first |
-| `--collector <path>` | Path to a `beacon-otelcol` binary |
+| `--collector <path>` | Path to a `beacon-otelcol` binary. Without it, Beacon uses the one beside the `beacon` CLI, then one on `PATH` |
 | `--no-start` | Write files without starting the collector service |
 | `--no-browser` | During interactive setup, print the sign-in URL instead of opening a browser, and do not open the hosted dashboard when setup finishes. Useful where no browser can be opened. Open the URL on this machine, or on another computer after forwarding the port it names over SSH |
 | `--service <kind>` | Service manager to use: `auto` (default), `launchd`, `systemd`, or `none` for a supervised collector process |
@@ -60,6 +60,8 @@ The `claude` harness writes both Claude Code's OpenTelemetry settings and its us
 | `--otlp-forward-insecure-skip-verify` | Skip TLS certificate verification for the forward |
 | `--otlp-forward-ca-file <path>` | Optional CA certificate path for the forward's TLS verification |
 | `--no-otlp-forward` | Remove a configured OTLP forward |
+| `--session-sync` | Turn on the [scheduled session sync](#scheduled-session-sync): every 15 minutes, read new records from the agent runtimes' local session stores into the runtime log. Kept by repair and package upgrades |
+| `--no-session-sync` | Turn the scheduled session sync off and remove its job |
 | `--log-access <mode>` | System log access: `shared` (the default) or `restricted`. See [Restricted log access](#restricted-log-access). Omitted, an install keeps the mode the endpoint already has. System installs on macOS and Linux only |
 | `--no-backfill` | Skip the [session backfill](#session-backfill). `BEACON_BACKFILL=0` does the same |
 | `--connect` | After a successful install, attempt to connect this endpoint to Beacon Cloud ingest. User mode uses the signed-in CLI account; system mode opens browser approval. A connection failure does not roll back or fail the completed local install; verify with `beacon endpoint status --json` and retry with [`beacon endpoint connect`](/cli/endpoint-connect) |
@@ -101,6 +103,20 @@ nobody is logged in, install says the backfill was skipped and the next connect 
 reads the sessions. `--dry-run` installs skip it, and `--no-backfill` or `BEACON_BACKFILL=0` turn it
 off. If this install also connects to Beacon Cloud, the same history is
 [uploaded by the connect](/cli/endpoint-connect#session-backfill).
+
+## Scheduled session sync
+
+The session backfill runs once, at install. To keep reading the runtimes' session stores after that, turn on the scheduled session sync:
+
+```bash
+sudo beacon endpoint install --system --session-sync   # or: sudo beacon endpoint repair --system --session-sync
+```
+
+It installs a job that runs `beacon endpoint sessions sync` every 15 minutes, the first time 15 minutes after the job is loaded (by the install, a repair, a reboot or a package upgrade): `com.beacon.endpoint.session-sync` (a LaunchDaemon in system mode, a LaunchAgent in user mode) or `beacon-session-sync.timer` on systemd. Each run is the same sweep as the backfill above, with the same 30-day window, size budget and, in system mode, the same confined read of the console user's stores. Each runtime's cursor makes a run read only what is new. In system mode a SQLite store (Cursor, OpenCode, Devin CLI, Hermes Agent) is read from a private copy, as the backfill does. A copy can approach 512 MiB and those runtimes are captured live by their hooks or plugins, so the scheduled job copies each one at most once an hour; a store over 512 MiB is skipped and named in the job's output. With nobody logged in, a system run reads nothing. When the install or a later connect skipped the backfill (`--no-backfill` or `BEACON_BACKFILL=0`), each runtime no sync had read yet is limited to sessions active since that skip, not the last 30 days; a session that continues past it is read from its start. A runtime that was already synced reads on from where it was. A later backfill lifts the limit. Only one sync runs at a time: an install, connect, `beacon endpoint sessions sync` or `beacon endpoint <runtime> sync` waits for a sync already in progress and then reads only what it left, a scheduled run or a `--watch` sweep skips its turn while another sync is running, and `--print` dry runs never wait. A user-mode job keeps the store locations the install saw (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME`, `XDG_DATA_HOME`, `OPENCODE_DB` and the rest), because the scheduler does not pass a shell's environment.
+
+It is off by default. Hooks and OTLP already capture sessions live, and the session stores add what only they record, such as Claude Code's per-request token usage and complete assistant text from its transcripts. Turning it on writes those records as poll events (`harness.collection_method=poll`) alongside the live ones, which matters when the runtime log is forwarded elsewhere. Token reports keep live usage authoritative over poll usage for the same session.
+
+The setting is `session_sync.enabled` in `config.json`. Repair and package upgrades keep it, and `--no-session-sync` turns it off and removes the job. A scheduled run also checks the setting, so a job left behind after the config was set to off reads nothing. `beacon endpoint status` shows it, and `beacon endpoint sessions sync` runs the same sweep by hand. A host without launchd or systemd cannot run the job; run `beacon endpoint sessions sync` from your own scheduler there.
 
 ## Interactive onboarding wizard
 

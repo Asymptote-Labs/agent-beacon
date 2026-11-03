@@ -112,11 +112,14 @@ type Config struct {
 	EventCategories []string  `json:"event_categories,omitempty"`
 	// ClaudeCaptureModelContext is the --claude-capture-model-context opt-in, recorded so the per-user
 	// config repair writes Claude Code's settings the way the install did.
-	ClaudeCaptureModelContext bool           `json:"claude_capture_model_context,omitempty"`
-	Inventory                 *Inventory     `json:"inventory_heartbeat,omitempty"`
-	Destinations              *Destinations  `json:"destinations,omitempty"`
-	ManagedIngest             *ManagedIngest `json:"managed_ingest,omitempty"`
-	AutoUpdate                *AutoUpdate    `json:"auto_update,omitempty"`
+	ClaudeCaptureModelContext bool       `json:"claude_capture_model_context,omitempty"`
+	Inventory                 *Inventory `json:"inventory_heartbeat,omitempty"`
+	// SessionSync turns on the scheduled job that reads the agent runtimes' own session stores
+	// into the runtime log. Off unless set: see SessionSync.
+	SessionSync   *SessionSync   `json:"session_sync,omitempty"`
+	Destinations  *Destinations  `json:"destinations,omitempty"`
+	ManagedIngest *ManagedIngest `json:"managed_ingest,omitempty"`
+	AutoUpdate    *AutoUpdate    `json:"auto_update,omitempty"`
 	// LogAccess is the system log's access mode: "shared" (empty, the default) or "restricted".
 	// Read it through RestrictedLogAccess, which also accounts for user mode.
 	LogAccess string `json:"log_access,omitempty"`
@@ -160,6 +163,19 @@ type Collector struct {
 	SpoolPath             string `json:"spool_path,omitempty"`
 	IncludeRuntimeMetrics bool   `json:"include_runtime_metrics,omitempty"`
 	IncludeCodexSpans     bool   `json:"include_codex_spans,omitempty"`
+}
+
+// SessionSync is the `session_sync` block. Unlike the inventory heartbeat it is opt-in: the job
+// re-reads session stores that hooks and OTLP already capture live, so turning it on adds poll
+// events (`harness.collection_method=poll`) alongside the live ones, which a deployment that
+// forwards the runtime log elsewhere chooses deliberately.
+type SessionSync struct {
+	Enabled bool `json:"enabled"`
+}
+
+// SessionSyncEnabled reports whether cfg turns the scheduled session sync on.
+func SessionSyncEnabled(cfg Config) bool {
+	return cfg.SessionSync != nil && cfg.SessionSync.Enabled
 }
 
 // Inventory is the `inventory_heartbeat` block. `enabled` nil means enabled; it governs both the

@@ -98,7 +98,7 @@ func runEndpointCodexSync(cmd *cobra.Command, args []string) error {
 		return watchCodex(ctx, cmd, opts)
 	}
 
-	summary, err := codexsession.CollectOnce(opts)
+	summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, endpointSweepLockWait, codexsession.CollectOnce, opts)
 	reportCodexSweep(cmd, summary)
 	return err
 }
@@ -109,7 +109,7 @@ func watchCodex(ctx context.Context, cmd *cobra.Command, opts codexsession.Colle
 		interval = 5 * time.Second
 	}
 	for {
-		summary, err := codexsession.CollectOnce(opts)
+		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, codexsession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "codex sync error: %v\n", err)
 		}

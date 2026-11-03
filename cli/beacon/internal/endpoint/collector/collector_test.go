@@ -405,9 +405,31 @@ func TestDiscoverBinaryFindsAdjacentBeaconOtelcol(t *testing.T) {
 	}
 }
 
+// A package CLI run under sudo on a Mac with a Homebrew Beacon finds Homebrew's older
+// beacon-otelcol first on PATH. The collector beside the CLI is the one from its own release, so
+// it wins; a repair that took the PATH one refused to install and left the endpoint without its
+// collector.
+func TestDiscoverBinaryPrefersTheCollectorBesideTheCLIOverPath(t *testing.T) {
+	onPath := filepath.Join(t.TempDir(), stubCollectorName())
+	beside := filepath.Join(t.TempDir(), stubCollectorName())
+	for _, bin := range []string{onPath, beside} {
+		if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0755); err != nil {
+			t.Fatalf("write fake collector: %v", err)
+		}
+	}
+	t.Setenv("PATH", filepath.Dir(onPath))
+	withCollectorDiscovery(t, nil, nil)
+	discoverSiblingBinary = func() string { return beside }
+
+	if got := DiscoverBinary(""); got != beside {
+		t.Fatalf("DiscoverBinary = %q, want the collector beside the CLI %q", got, beside)
+	}
+}
+
 func withCollectorDiscovery(t *testing.T, lookup func(string) (string, error), candidates func() []string) {
 	t.Helper()
 	oldLookPath := lookPath
+	oldSibling := discoverSiblingBinary
 	oldCandidates := discoverDefaultBinaryCandidates
 	if lookup == nil {
 		lookup = execLookPath
@@ -416,9 +438,11 @@ func withCollectorDiscovery(t *testing.T, lookup func(string) (string, error), c
 		candidates = func() []string { return nil }
 	}
 	lookPath = lookup
+	discoverSiblingBinary = func() string { return "" }
 	discoverDefaultBinaryCandidates = candidates
 	t.Cleanup(func() {
 		lookPath = oldLookPath
+		discoverSiblingBinary = oldSibling
 		discoverDefaultBinaryCandidates = oldCandidates
 	})
 }

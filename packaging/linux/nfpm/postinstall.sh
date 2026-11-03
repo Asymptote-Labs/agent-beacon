@@ -37,6 +37,9 @@ if [ -x /opt/beacon/bin/beacon ]; then
   # this re-reconcile is idempotent and covers an upgrade that skipped install.
   /opt/beacon/bin/beacon endpoint inventory install-daemon --system >/dev/null 2>&1 || \
     echo "beacon: scheduled inventory job not configured (endpoint is installed and running)" >&2
+  # The scheduled session sync is opt-in (--session-sync); reconciled the same way, kept on upgrade.
+  /opt/beacon/bin/beacon endpoint sessions install-daemon --system >/dev/null 2>&1 || \
+    echo "beacon: scheduled session sync job not configured (endpoint is installed and running)" >&2
 fi
 
 echo "beacon: endpoint installed. Check it with: beacon endpoint status --system"

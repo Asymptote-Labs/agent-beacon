@@ -97,7 +97,7 @@ func runEndpointClineSync(cmd *cobra.Command, args []string) error {
 	if endpointClineOpts.watch && !endpointClineOpts.print {
 		return watchCline(ctx, cmd, opts)
 	}
-	summary, err := clinesession.CollectOnce(opts)
+	summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, endpointSweepLockWait, clinesession.CollectOnce, opts)
 	reportClineSweep(cmd, summary)
 	return err
 }
@@ -108,7 +108,7 @@ func watchCline(ctx context.Context, cmd *cobra.Command, opts clinesession.Colle
 		interval = 5 * time.Second
 	}
 	for {
-		summary, err := clinesession.CollectOnce(opts)
+		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, clinesession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "cline sync error: %v\n", err)
 		}

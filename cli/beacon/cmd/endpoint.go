@@ -42,6 +42,8 @@ var endpointOpts struct {
 	onboardingResend          bool
 	connect                   bool
 	noBackfill                bool
+	sessionSync               bool
+	noSessionSync             bool
 	noBrowser                 bool
 	fix                       bool
 	allTargets                bool
@@ -459,6 +461,7 @@ func init() {
 	registerSplunkFlags(endpointInstallCmd)
 	registerFalconFlags(endpointInstallCmd)
 	registerOTLPForwardFlags(endpointInstallCmd)
+	registerSessionSyncFlags(endpointInstallCmd)
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.harnesses, "harness", endpointHarnessAuto, "Harnesses to configure: auto (detected runtimes), all, or a comma-separated list")
 	endpointRepairCmd.Flags().IntVar(&endpointOpts.grpcPort, "otlp-grpc-port", endpointconfig.DefaultGRPCPort, "Local OTLP gRPC port")
 	endpointRepairCmd.Flags().IntVar(&endpointOpts.httpPort, "otlp-http-port", endpointconfig.DefaultHTTPPort, "Local OTLP HTTP port")
@@ -477,6 +480,7 @@ func init() {
 	registerSplunkFlags(endpointRepairCmd)
 	registerFalconFlags(endpointRepairCmd)
 	registerOTLPForwardFlags(endpointRepairCmd)
+	registerSessionSyncFlags(endpointRepairCmd)
 	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 	endpointDashboardCmd.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths and the system collector service")
 	endpointDashboardCmd.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
@@ -794,6 +798,11 @@ func registerFalconFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&endpointOpts.falconSourcetype, "falcon-sourcetype", endpointconfig.DefaultFalconSourcetype, "Optional Falcon LogScale parser or sourcetype")
 	cmd.Flags().BoolVar(&endpointOpts.falconInsecureSkipVerify, "falcon-insecure-skip-verify", false, "Skip Falcon LogScale HEC TLS certificate verification")
 	cmd.Flags().StringVar(&endpointOpts.falconCAFile, "falcon-ca-file", "", "Optional CA certificate path for Falcon LogScale HEC TLS verification")
+}
+
+func registerSessionSyncFlags(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&endpointOpts.sessionSync, "session-sync", false, "Turn on the scheduled session sync: every 15 minutes, read new records from the agent runtimes' local session stores into the runtime log (kept by repair and upgrades)")
+	cmd.Flags().BoolVar(&endpointOpts.noSessionSync, "no-session-sync", false, "Turn off the scheduled session sync")
 }
 
 func registerOTLPForwardFlags(cmd *cobra.Command) {

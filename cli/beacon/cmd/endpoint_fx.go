@@ -112,7 +112,7 @@ func runEndpointFxSync(cmd *cobra.Command, args []string) error {
 		return watchFx(ctx, cmd, opts)
 	}
 
-	summary, err := fxsession.CollectOnce(opts)
+	summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, endpointSweepLockWait, fxsession.CollectOnce, opts)
 	// The summary is reported even when the sweep hit an error, because a sweep that collected
 	// nine sessions and failed on the tenth did nine sessions' worth of work.
 	reportFxSweep(cmd, summary)
@@ -127,7 +127,7 @@ func watchFx(ctx context.Context, cmd *cobra.Command, opts fxsession.CollectOpti
 		interval = 5 * time.Second
 	}
 	for {
-		summary, err := fxsession.CollectOnce(opts)
+		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, fxsession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "fx sync error: %v\n", err)
 		}
