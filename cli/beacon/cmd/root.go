@@ -236,6 +236,7 @@ var docsCmd = &cobra.Command{
 
 // Execute runs the root command
 func Execute() {
+	startDebugStackTimer(os.Stderr)
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
