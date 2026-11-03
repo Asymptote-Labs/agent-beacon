@@ -860,6 +860,34 @@ jobs:
               [pscustomobject]@{ ExitCode = $code }
           }
           '@ | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'msiexec-watchdog.ps1')
+      # A separate process for the rest of the job, so the steps that run msiexec stay exactly as on
+      # main: every 12 s it posts uptime, the Beacon/msiexec/runner process tree, the collector service
+      # and the MSI log tails to this attempt's comment. If the runner vanishes, heartbeats that keep
+      # coming mean the machine is alive; heartbeats that stop mean it froze or restarted.
+      - name: TEMPORARY background heartbeat
+        run: |
+          @'
+          $boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+          . (Join-Path $env:RUNNER_TEMP 'msiexec-watchdog.ps1')
+          $done = Join-Path $env:RUNNER_TEMP 'job-finished.txt'
+          for ($i = 0; $i -lt 150 -and -not (Test-Path -LiteralPath $done); $i++) {
+              $lines = @("heartbeat $i at $(Get-Date -Format o) | booted $($boot.ToString('o')) | uptime $([int]((Get-Date) - $boot).TotalSeconds)s")
+              $lines += Get-CimInstance Win32_Process |
+                  Where-Object { $_.Name -match '^(msiexec|beacon|beacon-hooks|beacon-otelcol|powershell|pwsh|Runner\.Worker|Runner\.Listener)\.exe$' } |
+                  Sort-Object ProcessId | ForEach-Object {
+                      $cmd = ("$($_.CommandLine)" -replace '\s+', ' ')
+                      '{0,6} <- {1,6}  {2}' -f $_.ProcessId, $_.ParentProcessId, $cmd.Substring(0, [Math]::Min(200, $cmd.Length))
+                  }
+              $lines += & sc.exe queryex BeaconCollector | Select-String 'STATE|PID' | ForEach-Object Line
+              foreach ($name in 'upgrade.log', 'uninstall.log') {
+                  $log = Join-Path $env:GITHUB_WORKSPACE $name
+                  if (Test-Path -LiteralPath $log) { $lines += "--- $name (tail)"; $lines += Get-Content -LiteralPath $log -Tail 8 }
+              }
+              Send-WatchdogState $lines
+              Start-Sleep 12
+          }
+          '@ | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'heartbeat.ps1')
+          Start-Process pwsh -WindowStyle Hidden -ArgumentList @('-NoProfile', '-File', (Join-Path $env:RUNNER_TEMP 'heartbeat.ps1'))
       - uses: ./.github/actions/setup-go
         with:
           # The exporter is listed because builder.yaml compiles it into the
@@ -1123,5 +1151,7 @@ jobs:
       - name: TEMPORARY watchdog final status
         if: always()
         run: |
+          'done' | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'job-finished.txt')
+          Start-Sleep 13
           . (Join-Path $env:RUNNER_TEMP 'msiexec-watchdog.ps1')
           Send-WatchdogState @("job finished: ${{ job.status }} at $(Get-Date -Format o)")
