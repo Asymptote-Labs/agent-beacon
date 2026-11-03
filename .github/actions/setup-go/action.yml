@@ -23,6 +23,15 @@ inputs:
       already part of the key.
     required: false
     default: ""
+  cache-job:
+    description: >
+      Build cache to use instead of this job's own, named by the job that
+      writes it. Only pushes to main save build caches, so a job that never
+      runs on main never has one; it can name a main job that compiles the
+      same packages. It only ever reads that cache: the job is not on main, so
+      it saves nothing.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -51,7 +60,7 @@ runs:
       shell: bash
       env:
         MODULES: ${{ inputs.modules }}
-        JOB: ${{ github.job }}${{ inputs.cache-key && format('-{0}', inputs.cache-key) || '' }}
+        JOB: ${{ inputs.cache-job || github.job }}${{ inputs.cache-key && format('-{0}', inputs.cache-key) || '' }}
       run: |
         set -euo pipefail
         sums=()

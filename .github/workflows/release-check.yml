@@ -41,6 +41,11 @@ jobs:
             cli/beacon
             cli/beacon-hooks
             collector-builder/exporter/beaconjsonexporter
+          # This job never runs on main, so it never saves a build cache of its own. It reads
+          # linux-package-smoke's, which compiles the same three modules and the linux/amd64
+          # collector on every push to main. If that job stops building the collector, this one
+          # still works, only colder.
+          cache-job: linux-package-smoke
       - uses: goreleaser/goreleaser-action@v7
         with:
           # Keep formulas working until we intentionally migrate the tap to casks.
