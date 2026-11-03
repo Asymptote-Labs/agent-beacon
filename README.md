@@ -15,10 +15,6 @@
 </p>
 
 <p align="center">
-  ⭐ <em>Help us reach more developers and grow the Beacon community. Star this repo!</em>
-</p>
-
-<p align="center">
   <a href="https://beacon.sh">Website</a>
   ·
   <a href="https://docs.beacon.sh">Docs</a>
@@ -46,6 +42,8 @@
   </picture>
  </a>
 </p>
+
+⭐ *Help us reach more developers and grow the Beacon community. Star this repo!*
 
 Beacon captures **agent session history** across Claude Code, Cursor, Codex, OpenCode, and 20+ other harnesses, then turns useful workflows, corrections, and debugging patterns into reusable knowledge for future agents.
 
