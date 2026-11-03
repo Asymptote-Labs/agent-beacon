@@ -3,10 +3,8 @@
 #
 # An MSI custom action has no console and no time limit of its own. A beacon.exe call that never
 # returns therefore holds the whole installation open: msiexec waits on the action, a fleet tool
-# (Intune, Workspace ONE, SCCM) waits on msiexec, and nothing records which step it was. CI saw
-# exactly that, intermittently, in both an upgrade and an uninstall, and each time the job was
-# cancelled at its time limit with its log discarded. So every call made here is bounded, and every
-# call leaves a record.
+# (Intune, Workspace ONE, SCCM) waits on msiexec, and nothing records which step it was. So every
+# call made here is bounded, and every call leaves a record.
 #
 # The record is a file of its own in the temporary directory of the account running the script --
 # SYSTEM, for the MSI -- because nothing else survives: Windows Installer keeps no output from an
