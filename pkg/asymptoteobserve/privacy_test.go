@@ -139,6 +139,9 @@ func TestRedactStringRedactsCommonCredentialFormats(t *testing.T) {
 		{"basic auth", "Authorization: Basic dXNlcjpwYXNzd29yZA==", "dXNlcjpwYXNzd29yZA=="},
 		{"bare bearer", "Bearer abcdef0123456789", "abcdef0123456789"},
 		{"slack", "xoxb-1234567890-abcdefghijkl", "abcdefghijkl"},
+		{"slack app-level token", "connect in socket mode with xapp-1-A0123ABCDEF-1234567890123-0123456789abcdef", "0123456789abcdef"},
+		// Split so secret scanners do not take the fake fixture for a live Slack token.
+		{"slack refresh token", "rotated: xoxe" + "-1-EXAMPLEnotarealrefreshtoken", "EXAMPLEnotarealrefreshtoken"},
 		{"stripe", "sk_live_AbCdEfGhIjKlMnOpQrSt", "AbCdEfGhIjKlMnOpQrSt"},
 		{"google", "AIzaSyA-abcdefghijklmnopqrstuvwxyz012345", "abcdefghijklmnopqrstuvwxyz012345"},
 		{"google oauth access token", "$ gcloud auth print-access-token\nya29.a0AfB_byC1x2Y3z4-W5v6U7t8S9r0QpOnMlKjIhGfEdCbA\n", "a0AfB_byC1x2Y3z4-W5v6U7t8S9r0QpOnMlKjIhGfEdCbA"},
