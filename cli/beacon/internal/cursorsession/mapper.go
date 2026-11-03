@@ -2,7 +2,6 @@ package cursorsession
 
 import (
 	"crypto/sha1"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -277,9 +276,7 @@ func applyFile(ev *schema.Event, record Record) {
 	}
 	if diff := diffFromArgs(record.Args); diff != "" {
 		info.Diff = diff
-		info.DiffBytes = len(diff)
-		info.DiffHash = sha256Hex(diff)
-		ev.Content = asymptoteobserve.RetainedContent(diff, asymptoteobserve.DefaultStringLimit)
+		ev.Content, info.DiffHash, info.DiffBytes = asymptoteobserve.RetainedDiff(diff, asymptoteobserve.DefaultStringLimit)
 	}
 	ev.File = info
 }
@@ -343,11 +340,6 @@ func withGenAI(genAI *schema.GenAIInfo, edit func(*schema.GenAIInfo)) *schema.Ge
 	}
 	edit(genAI)
 	return genAI
-}
-
-func sha256Hex(value string) string {
-	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:])
 }
 
 var cursorIDNamespace = [16]byte{

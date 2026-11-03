@@ -73,7 +73,7 @@ func (w jsonlWriter) append(event beaconEvent) error {
 // compactRetainedContent drops an event's retained text and records that it did,
 // so a reader can still tell what the event was about and that its content was
 // held back rather than never captured. The hash and byte count in the content
-// marker describe the original text and stay put.
+// marker describe the whole redacted text and stay put.
 func compactRetainedContent(event *beaconEvent) {
 	if event.File != nil {
 		event.File.Diff = ""

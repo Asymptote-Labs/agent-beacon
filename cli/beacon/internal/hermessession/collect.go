@@ -809,9 +809,7 @@ func (m *mapper) mapToolResult(message Message, call toolCall) {
 		}
 		if diff := firstString(call.Arguments, "diff", "patch"); diff != "" {
 			ev.File.Diff = diff
-			ev.File.DiffBytes = len(diff)
-			ev.File.DiffHash = sha256String(diff)
-			ev.Content = asymptoteobserve.RetainedContent(diff, asymptoteobserve.DefaultStringLimit)
+			ev.Content, ev.File.DiffHash, ev.File.DiffBytes = asymptoteobserve.RetainedDiff(diff, asymptoteobserve.DefaultStringLimit)
 		}
 	case "mcp.tool_invoked":
 		ev.MCP = &schema.MCPInfo{Tool: call.Name}
@@ -1099,11 +1097,6 @@ func sessionCost(session Session) float64 {
 		return session.ActualCostUSD
 	}
 	return session.EstimatedCostUSD
-}
-
-func sha256String(value string) string {
-	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:])
 }
 
 var hermesIDNamespace = [16]byte{

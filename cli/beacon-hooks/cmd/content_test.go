@@ -81,6 +81,49 @@ func TestPromptSubmitRecordsRetainedPromptContent(t *testing.T) {
 	}
 }
 
+// content.hash and file.diff_hash leave the machine where the text does not (Metadata-only keeps
+// them), so each is the hash of what the hook writer stores after redaction: a hash of the text
+// before it lets anyone holding the event confirm a guessed secret offline.
+func TestHookHashesAreOfTheStoredRedactedText(t *testing.T) {
+	const secret = "deploy with ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8 and password=hunter2"
+	const stored = "deploy with ghp_[REDACTED] and password=[REDACTED]"
+	hexHash := func(text string) string {
+		sum := sha256.Sum256([]byte(text))
+		return hex.EncodeToString(sum[:])
+	}
+	setupHookConfigDirs(t)
+	platformFlag = "claude"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	runHookWithInput(t, runPromptSubmit, map[string]interface{}{"session_id": "redacted-hash-session", "prompt": secret})
+	prompt := lastEndpointEvent(t, logPath)
+	if got := prompt["prompt"].(map[string]interface{})["text"]; got != stored {
+		t.Fatalf("prompt.text = %q, want %q", got, stored)
+	}
+	content := prompt["content"].(map[string]interface{})
+	if content["hash"] != hexHash(stored) || content["bytes"] != float64(len(secret)) || content["redacted"] != true {
+		t.Fatalf("content = %#v, want the hash of %q and the original size", content, stored)
+	}
+
+	runHookWithInput(t, runPostTool, map[string]interface{}{
+		"session_id": "redacted-hash-session",
+		"cwd":        "/repo",
+		"tool_name":  "Edit",
+		"tool_input": map[string]interface{}{"file_path": "/repo/main.go", "old_string": "old", "new_string": secret},
+	})
+	edit := lastEndpointEvent(t, logPath)
+	file := edit["file"].(map[string]interface{})
+	diff, _ := file["diff"].(string)
+	if !strings.Contains(diff, stored) || strings.Contains(diff, "hunter2") {
+		t.Fatalf("file.diff = %q, want the redacted secret", diff)
+	}
+	marker := edit["content"].(map[string]interface{})
+	if file["diff_hash"] != hexHash(diff) || marker["hash"] != file["diff_hash"] || marker["bytes"] != file["diff_bytes"] {
+		t.Fatalf("file = %#v content = %#v, want diff_hash of the stored diff, matching the marker", file, marker)
+	}
+}
+
 func TestPromptSubmitWithoutAPromptWritesNoContentMarker(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "claude"

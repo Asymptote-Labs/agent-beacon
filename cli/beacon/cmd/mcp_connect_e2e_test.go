@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 // These tests run the harnesses' own CLIs against the configs `beacon mcp connect` writes, in a
@@ -21,6 +23,9 @@ func realCLI(t *testing.T, name string) string {
 	if testing.Short() {
 		t.Skip("real-CLI tests are skipped in -short mode")
 	}
+	// The point is the CLI as the user installed it, interpreter and all, so this test gets the
+	// machine's whole PATH rather than the empty one the package runs with.
+	testenv.UseHostPath(t)
 	path, err := exec.LookPath(name)
 	if err != nil {
 		t.Skipf("%s is not installed", name)

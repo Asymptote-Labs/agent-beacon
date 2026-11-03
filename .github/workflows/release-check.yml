@@ -18,11 +18,16 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same pull request supersedes the running snapshot build.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   release-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: ./.github/actions/setup-go
@@ -36,7 +41,12 @@ jobs:
             cli/beacon
             cli/beacon-hooks
             collector-builder/exporter/beaconjsonexporter
-      - uses: goreleaser/goreleaser-action@v6
+          # This job is never part of a push to main, so it never saves a build cache of its own. It
+          # reads linux-package-smoke's, which compiles the same three modules and the linux/amd64
+          # collector on every push to main, and never writes to it, even when dispatched on main.
+          # If that job stops building the collector, this one still works, only colder.
+          cache-job: linux-package-smoke
+      - uses: goreleaser/goreleaser-action@v7
         with:
           # Keep formulas working until we intentionally migrate the tap to casks.
           version: "v2.13.3"
