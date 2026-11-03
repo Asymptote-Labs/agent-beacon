@@ -188,9 +188,9 @@ func TestPerRuntimeSyncCommandsTakeTheSweepLock(t *testing.T) {
 	}
 }
 
-// An install or connect that skipped its backfill leaves a floor: a session sync then reads only
-// sessions active since, instead of the 30 days the operator opted out of. A backfill that runs
-// reads the whole window again and lifts the floor.
+// An install or connect that skipped its backfill floors each runtime no sweep has read: a session
+// sync then reads only its sessions active since, instead of the 30 days the operator opted out of.
+// A backfill that runs reads the whole window again and lifts the floors.
 func TestSkippedBackfillFloorsTheSessionSync(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	isolateSweepState(t)
@@ -202,12 +202,12 @@ func TestSkippedBackfillFloorsTheSessionSync(t *testing.T) {
 
 	recordSkippedBackfill(&bytes.Buffer{}, true)
 	result := runSessionSweep(logPath, true, true)
-	if !since.Equal(now) || !result.Floor {
-		t.Fatalf("session sync after a skipped backfill read from %s (floor %t), want %s", since, result.Floor, now)
+	if !since.Equal(now) || !result.Floored.Equal(now) {
+		t.Fatalf("session sync after a skipped backfill read from %s (floored %s), want %s", since, result.Floored, now)
 	}
 	var out bytes.Buffer
 	reportSessionSweep(&out, "Session sync", result)
-	if !strings.Contains(out.String(), "since the skipped backfill at "+now.UTC().Format(time.RFC3339)) {
+	if !strings.Contains(out.String(), "skipped backfill at "+now.UTC().Format(time.RFC3339)) {
 		t.Fatalf("report = %q", out.String())
 	}
 
@@ -215,8 +215,8 @@ func TestSkippedBackfillFloorsTheSessionSync(t *testing.T) {
 	if !since.Equal(window) {
 		t.Fatalf("backfill read from %s, want the whole window from %s", since, window)
 	}
-	if result := runSessionSweep(logPath, true, true); !since.Equal(window) || result.Floor {
-		t.Fatalf("session sync after a backfill read from %s (floor %t), want the window again", since, result.Floor)
+	if result := runSessionSweep(logPath, true, true); !since.Equal(window) || !result.Floored.IsZero() {
+		t.Fatalf("session sync after a backfill read from %s (floored %s), want the window again", since, result.Floored)
 	}
 
 	// A dry run records nothing.
@@ -229,29 +229,56 @@ func TestSkippedBackfillFloorsTheSessionSync(t *testing.T) {
 	}
 }
 
-// Only the first skipped backfill sets a floor. A later skip must not move it, and an endpoint whose
-// cursors already exist gets none: a floor set then would drop sessions that went idle with records
-// the cursors have not reached.
-func TestSkippedBackfillNeverMovesTheFloorOrHidesUnreadRecords(t *testing.T) {
-	stubBackfill(t, 1<<20, 1<<20)
+// The floor is per runtime and set once. A runtime whose own cursor exists gets none, since a floor
+// would drop its sessions that went idle with records the cursor has not reached; another runtime
+// with no cursor still gets one; and a later skip never moves a floor.
+func TestSkippedBackfillFloorsOnlyRuntimesWithoutCursors(t *testing.T) {
 	isolateSweepState(t)
-	stateDir := filepath.Dir(sessionSyncFloorPath(true))
+	cursors := t.TempDir()
+	withState := func(name string) endpointBackfillRunner {
+		state := filepath.Join(cursors, name+".json")
+		return endpointBackfillRunner{Name: name, Sync: "beacon endpoint x sync",
+			State: func(bool) []string { return []string{"", state} },
+			Run:   func(endpointBackfillRun) (int, error) { return 0, nil }}
+	}
+	stubBackfill(t, 1<<20, 1<<20, withState("Claude Code"), withState("Codex CLI"))
+	if err := os.WriteFile(filepath.Join(cursors, "Claude Code.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	first := endpointBackfillNow()
 
 	recordSkippedBackfill(&bytes.Buffer{}, true)
-	endpointBackfillNow = func() time.Time { return first.Add(time.Hour) }
-	recordSkippedBackfill(&bytes.Buffer{}, true)
-	if got := readSessionSyncFloor(true); !got.Equal(first) {
-		t.Fatalf("a second skipped backfill moved the floor to %s, want %s", got, first)
+	floors := readSessionSyncFloors(true)
+	if _, ok := floors["Claude Code"]; ok || !floors["Codex CLI"].Equal(first) {
+		t.Fatalf("floors = %v, want only Codex CLI at %s", floors, first)
 	}
 
-	_ = os.Remove(sessionSyncFloorPath(true))
-	if err := os.WriteFile(filepath.Join(stateDir, "claude.json"), []byte("{}"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	endpointBackfillNow = func() time.Time { return first.Add(time.Hour) }
 	recordSkippedBackfill(&bytes.Buffer{}, true)
-	if got := readSessionSyncFloor(true); !got.IsZero() {
-		t.Fatalf("a skipped backfill beside existing cursors set a floor at %s", got)
+	if got := readSessionSyncFloors(true)["Codex CLI"]; !got.Equal(first) {
+		t.Fatalf("a second skipped backfill moved the floor to %s, want %s", got, first)
+	}
+}
+
+// Every session-store runner names its cursor files in both modes, so a skipped backfill can tell
+// which runtimes a sweep has already read.
+func TestEveryBackfillRunnerNamesItsCursors(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	for _, runner := range endpointBackfillRunners() {
+		for _, userMode := range []bool{true, false} {
+			if runner.State == nil {
+				t.Fatalf("%s has no State", runner.Name)
+			}
+			named := 0
+			for _, path := range runner.State(userMode) {
+				if path != "" {
+					named++
+				}
+			}
+			if named == 0 {
+				t.Errorf("%s names no cursor file (userMode=%t)", runner.Name, userMode)
+			}
+		}
 	}
 }
 

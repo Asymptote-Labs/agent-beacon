@@ -75,6 +75,9 @@ type endpointBackfillRunner struct {
 	Sync string
 	// Run sweeps the store once and reports how many events it wrote.
 	Run func(endpointBackfillRun) (int, error)
+	// State lists the cursor files Run saves for a mode, resolved in the home the sweep reads. A
+	// skipped backfill floors only the runtimes with none of them (recordSkippedBackfill).
+	State func(userMode bool) []string
 	// SQLite says the store is a SQLite database, which a confined (system) sweep reads from a
 	// private copy; the scheduled session sync takes that copy at most every endpointSnapshotInterval.
 	SQLite bool
@@ -86,69 +89,71 @@ type endpointBackfillRunner struct {
 // collector joins the list in sessionfs's collectors_test.go too.
 var endpointBackfillRunners = func() []endpointBackfillRunner {
 	return []endpointBackfillRunner{
-		{Name: "Claude Code", Sync: "beacon endpoint claude sync", Run: func(r endpointBackfillRun) (int, error) {
+		{Name: "Claude Code", Sync: "beacon endpoint claude sync", State: func(m bool) []string { return []string{resolveClaudeStatePath("", m)} }, Run: func(r endpointBackfillRun) (int, error) {
 			s, err := claudesession.CollectOnce(claudesession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveClaudeStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
 		}},
-		{Name: "Codex CLI", Sync: "beacon endpoint codex sync", Run: func(r endpointBackfillRun) (int, error) {
+		{Name: "Codex CLI", Sync: "beacon endpoint codex sync", State: func(m bool) []string { return []string{resolveCodexStatePath("", m)} }, Run: func(r endpointBackfillRun) (int, error) {
 			s, err := codexsession.CollectOnce(codexsession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveCodexStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
 		}},
-		{Name: "Cursor", Sync: "beacon endpoint cursor sync", Run: func(r endpointBackfillRun) (int, error) {
+		{Name: "Cursor", Sync: "beacon endpoint cursor sync", State: func(m bool) []string { return []string{resolveCursorStatePath("", m)} }, Run: func(r endpointBackfillRun) (int, error) {
 			s, err := cursorsession.CollectOnce(cursorsession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveCursorStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
 		}, SQLite: true},
-		{Name: "OpenCode", Sync: "beacon endpoint opencode sync", Run: func(r endpointBackfillRun) (int, error) {
+		{Name: "OpenCode", Sync: "beacon endpoint opencode sync", State: func(m bool) []string { return []string{resolveOpenCodeStatePath("", m)} }, Run: func(r endpointBackfillRun) (int, error) {
 			s, err := opencodesession.CollectOnce(opencodesession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveOpenCodeStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
 		}, SQLite: true},
-		{Name: "GitHub Copilot CLI", Sync: "beacon endpoint copilot sync", Run: func(r endpointBackfillRun) (int, error) {
+		{Name: "GitHub Copilot CLI", Sync: "beacon endpoint copilot sync", State: func(m bool) []string { return []string{resolveCopilotStatePath("", m)} }, Run: func(r endpointBackfillRun) (int, error) {
 			s, err := copilotsession.CollectOnce(copilotsession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveCopilotStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
 		}},
-		{Name: "Cline", Sync: "beacon endpoint cline sync", Run: func(r endpointBackfillRun) (int, error) {
+		{Name: "Cline", Sync: "beacon endpoint cline sync", State: func(m bool) []string { return []string{resolveClineStatePath("", m)} }, Run: func(r endpointBackfillRun) (int, error) {
 			s, err := clinesession.CollectOnce(clinesession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveClineStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
 		}},
-		{Name: "Factory Droid", Sync: "beacon endpoint factory sync", Run: func(r endpointBackfillRun) (int, error) {
+		{Name: "Factory Droid", Sync: "beacon endpoint factory sync", State: func(m bool) []string { return []string{resolveFactoryStatePath("", m)} }, Run: func(r endpointBackfillRun) (int, error) {
 			s, err := factorysession.CollectOnce(factorysession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveFactoryStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
 		}},
-		{Name: "Pi", Sync: "beacon endpoint pi sync", Run: func(r endpointBackfillRun) (int, error) {
+		{Name: "Pi", Sync: "beacon endpoint pi sync", State: func(m bool) []string { return []string{resolvePiStatePath("", m)} }, Run: func(r endpointBackfillRun) (int, error) {
 			s, err := pisession.CollectOnce(pisession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolvePiStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
 		}},
-		{Name: "Prime Agent", Sync: "beacon endpoint prime sync", Run: func(r endpointBackfillRun) (int, error) {
+		{Name: "Prime Agent", Sync: "beacon endpoint prime sync", State: func(m bool) []string { return []string{resolvePrimeStatePath("", m)} }, Run: func(r endpointBackfillRun) (int, error) {
 			s, err := primesession.CollectOnce(primesession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolvePrimeStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
 		}},
-		{Name: "Hermes Agent", Sync: "beacon endpoint hermes sync", Run: func(r endpointBackfillRun) (int, error) {
+		{Name: "Hermes Agent", Sync: "beacon endpoint hermes sync", State: func(m bool) []string {
+			return []string{resolveHermesStatePath("", "", m), legacyHermesStatePath("", "", m)}
+		}, Run: func(r endpointBackfillRun) (int, error) {
 			s, err := hermessession.CollectOnce(hermessession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveHermesStatePath("", "", r.UserMode), LegacyStatePath: legacyHermesStatePath("", "", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
 		}, SQLite: true},
-		{Name: "Devin CLI", Sync: "beacon endpoint devin sync", Run: func(r endpointBackfillRun) (int, error) {
+		{Name: "Devin CLI", Sync: "beacon endpoint devin sync", State: func(m bool) []string { return []string{resolveEndpointDevinStatePath("", m)} }, Run: func(r endpointBackfillRun) (int, error) {
 			s, err := devinsession.CollectOnce(devinsession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveEndpointDevinStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget, LiveCoverage: endpointDevinLiveCoverage(r.LogPath)})
 			return s.EventsEmitted, err
 		}, SQLite: true},
-		{Name: "DeepSeek Harness", Sync: "beacon endpoint dsh sync", Run: func(r endpointBackfillRun) (int, error) {
+		{Name: "DeepSeek Harness", Sync: "beacon endpoint dsh sync", State: func(m bool) []string { return []string{resolveDshStatePath("", m)} }, Run: func(r endpointBackfillRun) (int, error) {
 			s, err := dshsession.CollectOnce(dshsession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveDshStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
 		}},
-		{Name: "fx", Sync: "beacon endpoint fx sync", Run: func(r endpointBackfillRun) (int, error) {
+		{Name: "fx", Sync: "beacon endpoint fx sync", State: func(m bool) []string { return []string{resolveFxStatePath("", m)} }, Run: func(r endpointBackfillRun) (int, error) {
 			s, err := fxsession.CollectOnce(fxsession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveFxStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
 		}},
-		{Name: "Grok Build", Sync: "beacon endpoint grok sync", Run: func(r endpointBackfillRun) (int, error) {
+		{Name: "Grok Build", Sync: "beacon endpoint grok sync", State: func(m bool) []string { return []string{resolveGrokStatePath("", m)} }, Run: func(r endpointBackfillRun) (int, error) {
 			s, err := groksession.CollectOnce(groksession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveGrokStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
 		}},
-		{Name: "Harness²", Sync: "beacon endpoint harness2 sync", Run: func(r endpointBackfillRun) (int, error) {
+		{Name: "Harness²", Sync: "beacon endpoint harness2 sync", State: func(m bool) []string { return []string{resolveHarness2StatePath("", m)} }, Run: func(r endpointBackfillRun) (int, error) {
 			opts := harness2session.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveHarness2StatePath("", r.UserMode), Since: r.Since, Budget: r.Budget}
 			opts.ExtraRoots = harness2BackfillExtraRoots(r.UserMode)
 			s, err := harness2session.CollectOnce(opts)
 			return s.EventsEmitted, err
 		}},
-		{Name: "OpenClaw Gateway", Sync: "beacon endpoint integrations openclaw sessions sync", Run: func(r endpointBackfillRun) (int, error) {
+		{Name: "OpenClaw Gateway", Sync: "beacon endpoint integrations openclaw sessions sync", State: func(m bool) []string { return []string{resolveOpenClawSessionsStatePath("", m)} }, Run: func(r endpointBackfillRun) (int, error) {
 			s, err := openclawsession.CollectOnce(openclawsession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveOpenClawSessionsStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
 		}},
@@ -204,8 +209,9 @@ type endpointBackfillResult struct {
 	// names a few of them with the reason.
 	Refused         int
 	RefusedExamples []string
-	// Floor says Since is the session sync floor a skipped backfill left, not the window's start.
-	Floor bool
+	// Floored is the earliest floor a skipped backfill left that limited a runtime in this sweep,
+	// or zero.
+	Floored time.Time
 }
 
 // endpointBackfillEnabled reports whether this install or connect should backfill. Every real
@@ -275,15 +281,15 @@ func runEndpointBackfillLocked(logPath string, userMode bool, wait time.Duration
 	if kind == sweepBackfill {
 		_ = os.Remove(sessionSyncFloorPath(userMode))
 	} else {
-		sweep.Floor = readSessionSyncFloor(userMode)
+		sweep.Floors = readSessionSyncFloors(userMode)
 	}
 	return runEndpointBackfillUnlocked(logPath, userMode, sweep)
 }
 
-// endpointSweep is what a sweep reads beyond the window: no session older than Floor when that is
-// later, and, with ThrottleSnapshots, a SQLite store only if its private copy is due.
+// endpointSweep is what a sweep reads beyond the window: for a runtime with a floor, no session
+// older than it, and, with ThrottleSnapshots, a SQLite store only if its private copy is due.
 type endpointSweep struct {
-	Floor             time.Time
+	Floors            map[string]time.Time
 	ThrottleSnapshots bool
 }
 
@@ -320,34 +326,47 @@ func writeEndpointSnapshotTimes(times map[string]time.Time) {
 	}
 }
 
-// sessionSyncFloorPath records when an install or connect skipped its backfill, beside the lock.
+// sessionSyncFloorPath records, per runtime, when an install or connect skipped its backfill,
+// beside the lock.
 func sessionSyncFloorPath(userMode bool) string {
 	return filepath.Join(filepath.Dir(endpointSweepLockPath(userMode)), "session-sync-floor.json")
 }
 
-type sessionSyncFloor struct {
-	NotBefore time.Time `json:"not_before"`
+type sessionSyncFloors struct {
+	NotBefore map[string]time.Time `json:"not_before"`
 }
 
 // recordSkippedBackfill notes that an install or connect skipped its backfill (--no-backfill or
-// BEACON_BACKFILL=0) on an endpoint where no sweep has moved the cursors yet. Without a floor the
-// next session sync would read the whole window the operator opted out of, and on a connected
-// endpoint forward it, as lines written after the connection point. With it, a session sync reads
-// only sessions active since.
+// BEACON_BACKFILL=0). A runtime no sweep has read has no cursors, so without a floor the next
+// session sync would read its whole window, which the operator opted out of, and on a connected
+// endpoint forward it, as lines written after the connection point. With one, a session sync reads
+// only that runtime's sessions active since.
 //
-// Only the first skip needs one. Once cursors exist, a sync reads on from them, and a floor set then
-// would drop every session that went idle with records the cursors have not reached yet; so an
-// existing floor is never moved later and none is written beside existing cursors. A dry run
-// records nothing.
+// The floor is per runtime and set once. A runtime whose cursors exist reads on from them, and a
+// floor set then would drop every session that went idle with records its cursors have not
+// reached; so a runtime with cursors gets none, and an existing floor is never moved later. A dry
+// run records nothing.
 func recordSkippedBackfill(out io.Writer, userMode bool) {
 	if endpointOpts.dryRun {
 		return
 	}
-	path := sessionSyncFloorPath(userMode)
-	if _, err := os.Stat(path); err == nil || sessionCursorsExist(filepath.Dir(path)) {
+	floors := readSessionSyncFloors(userMode)
+	now := endpointBackfillNow().UTC()
+	changed := false
+	withSweepHome(userMode, func() {
+		for _, runner := range endpointBackfillRunners() {
+			if _, ok := floors[runner.Name]; ok || runnerHasCursors(runner, userMode) {
+				continue
+			}
+			floors[runner.Name] = now
+			changed = true
+		}
+	})
+	if !changed {
 		return
 	}
-	data, _ := json.Marshal(sessionSyncFloor{NotBefore: endpointBackfillNow().UTC()})
+	path := sessionSyncFloorPath(userMode)
+	data, _ := json.Marshal(sessionSyncFloors{NotBefore: floors})
 	tmp := path + ".tmp"
 	err := os.MkdirAll(filepath.Dir(path), 0o700)
 	if err == nil {
@@ -362,34 +381,45 @@ func recordSkippedBackfill(out io.Writer, userMode bool) {
 	}
 }
 
-// sessionCursorsExist reports whether a session-store collector has saved a cursor in the endpoint's
-// state directory, where every one keeps its default cursor file (claude.json, codex.json, ...).
-// cursor-usage.json belongs to the Cursor Admin API collector, which is not a session-store sweep.
-func sessionCursorsExist(stateDir string) bool {
-	entries, err := os.ReadDir(stateDir)
-	if err != nil {
+// withSweepHome runs fn in the home a sweep for the mode reads: the invoking user's, or for a system
+// endpoint the console user's, which some cursor paths are keyed by (Hermes). With nobody logged in
+// it runs in place.
+func withSweepHome(userMode bool, fn func()) {
+	if !userMode {
+		if info, ok, err := activeConsoleUser(); err == nil && ok && strings.TrimSpace(info.HomeDir) != "" {
+			_, _ = withUserHome(info.HomeDir, func() (struct{}, error) { fn(); return struct{}{}, nil })
+			return
+		}
+	}
+	fn()
+}
+
+// runnerHasCursors reports whether a sweep has saved any of runner's cursor files for the mode.
+func runnerHasCursors(runner endpointBackfillRunner, userMode bool) bool {
+	if runner.State == nil {
 		return false
 	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.Type().IsRegular() && strings.HasSuffix(name, ".json") && name != "session-sync-floor.json" && name != "cursor-usage.json" {
+	for _, path := range runner.State(userMode) {
+		if path == "" {
+			continue
+		}
+		if _, err := os.Stat(path); err == nil {
 			return true
 		}
 	}
 	return false
 }
 
-// readSessionSyncFloor is the floor recordSkippedBackfill left, or zero.
-func readSessionSyncFloor(userMode bool) time.Time {
-	data, err := os.ReadFile(sessionSyncFloorPath(userMode))
-	if err != nil {
-		return time.Time{}
+// readSessionSyncFloors is the per-runtime floors recordSkippedBackfill left, never nil.
+func readSessionSyncFloors(userMode bool) map[string]time.Time {
+	var floors sessionSyncFloors
+	if data, err := os.ReadFile(sessionSyncFloorPath(userMode)); err == nil {
+		_ = json.Unmarshal(data, &floors)
 	}
-	var floor sessionSyncFloor
-	if json.Unmarshal(data, &floor) != nil {
-		return time.Time{}
+	if floors.NotBefore == nil {
+		return map[string]time.Time{}
 	}
-	return floor.NotBefore
+	return floors.NotBefore
 }
 
 // collectUnderSweepLock runs one per-runtime sync (`beacon endpoint <runtime> sync`, once or per
@@ -485,9 +515,6 @@ func runEndpointBackfillUnlocked(logPath string, userMode bool, sweep endpointSw
 func sweepEndpointBackfill(logPath string, userMode bool, sweep endpointSweep) endpointBackfillResult {
 	now := endpointBackfillNow()
 	result := endpointBackfillResult{Since: now.Add(-endpointBackfillWindow)}
-	if sweep.Floor.After(result.Since) {
-		result.Since, result.Floor = sweep.Floor, true
-	}
 	var copied map[string]time.Time
 	if sweep.ThrottleSnapshots {
 		copied = readEndpointSnapshotTimes()
@@ -501,8 +528,15 @@ func sweepEndpointBackfill(logPath string, userMode bool, sweep endpointSweep) e
 			}
 			copied[runner.Name] = now
 		}
+		since := result.Since
+		if floor := sweep.Floors[runner.Name]; floor.After(since) {
+			since = floor
+			if result.Floored.IsZero() || floor.Before(result.Floored) {
+				result.Floored = floor
+			}
+		}
 		share := total.Sub(endpointBackfillShareBytes)
-		events, err := runner.Run(endpointBackfillRun{LogPath: logPath, UserMode: userMode, Since: result.Since, Budget: share})
+		events, err := runner.Run(endpointBackfillRun{LogPath: logPath, UserMode: userMode, Since: since, Budget: share})
 		// A confined (system) sweep reads SQLite stores through private snapshots; drop each
 		// runtime's before the next one runs. A no-op otherwise.
 		sessionfs.DropSnapshots()
@@ -549,15 +583,13 @@ func reportEndpointBackfill(out io.Writer, result endpointBackfillResult) {
 // and its scheduled job run the same sweep and say "Session sync".
 func reportSessionSweep(out io.Writer, label string, result endpointBackfillResult) {
 	window := fmt.Sprintf("from the last %d days", int(endpointBackfillWindow/(24*time.Hour)))
-	if result.Floor {
-		window = "since the skipped backfill at " + result.Since.Format(time.RFC3339)
-	}
 	if result.Skipped != "" {
 		fmt.Fprintf(out, "%s skipped: %s.\n", label, result.Skipped)
 		return
 	}
 	if result.Events == 0 && !result.Limited && len(result.Runtimes) == 0 {
 		fmt.Fprintf(out, "%s: no new agent session activity %s.\n", label, window)
+		reportSessionSyncFloor(out, result)
 		reportEndpointBackfillRefusals(out, result)
 		return
 	}
@@ -587,7 +619,15 @@ func reportSessionSweep(out io.Writer, label string, result endpointBackfillResu
 			fmt.Fprintf(out, "  %s: stopped at the backfill size limit; `%s` reads the rest.\n", r.Name, r.Sync)
 		}
 	}
+	reportSessionSyncFloor(out, result)
 	reportEndpointBackfillRefusals(out, result)
+}
+
+// reportSessionSyncFloor says when a skipped backfill limited what some runtimes read.
+func reportSessionSyncFloor(out io.Writer, result endpointBackfillResult) {
+	if !result.Floored.IsZero() {
+		fmt.Fprintf(out, "  Runtimes not read before the skipped backfill at %s read only sessions active since.\n", result.Floored.Format(time.RFC3339))
+	}
 }
 
 // endpointConnectBackfill is the backfill a connect ships, or nil when it ships none. Every connect
