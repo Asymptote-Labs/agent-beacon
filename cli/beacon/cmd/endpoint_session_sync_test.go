@@ -118,7 +118,7 @@ func TestEndpointSweepLockSerializes(t *testing.T) {
 	if _, err := acquireEndpointSweepLock(true, 50*time.Millisecond); !errors.Is(err, errEndpointSweepBusy) {
 		t.Fatalf("second sweep after a short wait = %v, want busy", err)
 	}
-	result := runEndpointBackfillLocked(filepath.Join(t.TempDir(), "runtime.jsonl"), true, 0)
+	result := runEndpointBackfillLocked(filepath.Join(t.TempDir(), "runtime.jsonl"), true, 0, true)
 	if result.Skipped == "" || result.Events != 0 {
 		t.Fatalf("locked-out sweep = %+v, want skipped", result)
 	}
@@ -186,6 +186,46 @@ func TestPerRuntimeSyncCommandsTakeTheSweepLock(t *testing.T) {
 				t.Errorf("%s:%d calls a session-store collector without the sweep lock; use collectUnderSweepLock", file, i+1)
 			}
 		}
+	}
+}
+
+// An install or connect that skipped its backfill leaves a floor: a session sync then reads only
+// sessions active since, instead of the 30 days the operator opted out of. A backfill that runs
+// reads the whole window again and lifts the floor.
+func TestSkippedBackfillFloorsTheSessionSync(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	var since time.Time
+	stubBackfill(t, 1<<20, 1<<20, writingRunner("Claude", 1, &since))
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	now := endpointBackfillNow()
+	window := now.Add(-endpointBackfillWindow)
+
+	recordSkippedBackfill(&bytes.Buffer{}, true)
+	result := runSessionSweep(logPath, true, 0)
+	if !since.Equal(now) || !result.Floor {
+		t.Fatalf("session sync after a skipped backfill read from %s (floor %t), want %s", since, result.Floor, now)
+	}
+	var out bytes.Buffer
+	reportSessionSweep(&out, "Session sync", result)
+	if !strings.Contains(out.String(), "since the skipped backfill at "+now.UTC().Format(time.RFC3339)) {
+		t.Fatalf("report = %q", out.String())
+	}
+
+	runEndpointBackfill(logPath, true)
+	if !since.Equal(window) {
+		t.Fatalf("backfill read from %s, want the whole window from %s", since, window)
+	}
+	if result := runSessionSweep(logPath, true, 0); !since.Equal(window) || result.Floor {
+		t.Fatalf("session sync after a backfill read from %s (floor %t), want the window again", since, result.Floor)
+	}
+
+	// A dry run records nothing.
+	old := endpointOpts
+	t.Cleanup(func() { endpointOpts = old })
+	endpointOpts.dryRun = true
+	recordSkippedBackfill(&bytes.Buffer{}, true)
+	if _, err := os.Stat(sessionSyncFloorPath(true)); !os.IsNotExist(err) {
+		t.Fatalf("a dry run recorded a floor: %v", err)
 	}
 }
 

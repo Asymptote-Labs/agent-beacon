@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -200,6 +201,8 @@ type endpointBackfillResult struct {
 	// names a few of them with the reason.
 	Refused         int
 	RefusedExamples []string
+	// Floor says Since is the session sync floor a skipped backfill left, not the window's start.
+	Floor bool
 }
 
 // endpointBackfillEnabled reports whether this install or connect should backfill. Every real
@@ -230,7 +233,7 @@ func endpointBackfillDays() int {
 // hook repair and inventory resolve, while its cursors stay under the system base directory. With
 // nobody to read for, it reads nothing and says so.
 func runEndpointBackfill(logPath string, userMode bool) endpointBackfillResult {
-	return runEndpointBackfillLocked(logPath, userMode, endpointSweepLockWait)
+	return runEndpointBackfillLocked(logPath, userMode, endpointSweepLockWait, false)
 }
 
 // runEndpointBackfillLocked is runEndpointBackfill with an explicit wait for the sweep lock. Every
@@ -241,13 +244,70 @@ func runEndpointBackfill(logPath string, userMode bool) endpointBackfillResult {
 // and append the same records twice. A sweep that waits for another starts from the cursors that
 // one saved and reads only what is new. wait <= 0 does not wait: the scheduled job skips a run
 // while another sweep holds the lock, since the next run picks up whatever it leaves.
-func runEndpointBackfillLocked(logPath string, userMode bool, wait time.Duration) endpointBackfillResult {
+//
+// sessionSync marks `beacon endpoint sessions sync` and its scheduled job, which read no session
+// older than the floor a skipped backfill recorded (recordSkippedBackfill). An install or connect
+// backfill reads the whole window, so it lifts that floor.
+func runEndpointBackfillLocked(logPath string, userMode bool, wait time.Duration, sessionSync bool) endpointBackfillResult {
 	release, err := acquireEndpointSweepLock(userMode, wait)
 	if err != nil {
 		return endpointBackfillResult{Skipped: err.Error()}
 	}
 	defer release()
-	return runEndpointBackfillUnlocked(logPath, userMode)
+	var floor time.Time
+	if sessionSync {
+		floor = readSessionSyncFloor(userMode)
+	} else {
+		_ = os.Remove(sessionSyncFloorPath(userMode))
+	}
+	return runEndpointBackfillUnlocked(logPath, userMode, floor)
+}
+
+// sessionSyncFloorPath records when an install or connect skipped its backfill, beside the lock.
+func sessionSyncFloorPath(userMode bool) string {
+	return filepath.Join(filepath.Dir(endpointSweepLockPath(userMode)), "session-sync-floor.json")
+}
+
+type sessionSyncFloor struct {
+	NotBefore time.Time `json:"not_before"`
+}
+
+// recordSkippedBackfill notes that an install or connect skipped its backfill (--no-backfill or
+// BEACON_BACKFILL=0). No sweep has moved the cursors then, so without a floor the next session sync
+// would read the whole window the operator opted out of, and on a connected endpoint forward it, as
+// lines written after the connection point. With it, a session sync reads only sessions active
+// since. A dry run records nothing.
+func recordSkippedBackfill(out io.Writer, userMode bool) {
+	if endpointOpts.dryRun {
+		return
+	}
+	path := sessionSyncFloorPath(userMode)
+	data, _ := json.Marshal(sessionSyncFloor{NotBefore: endpointBackfillNow().UTC()})
+	tmp := path + ".tmp"
+	err := os.MkdirAll(filepath.Dir(path), 0o700)
+	if err == nil {
+		err = os.WriteFile(tmp, append(data, '\n'), 0o600)
+	}
+	if err == nil {
+		err = os.Rename(tmp, path)
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+		fmt.Fprintf(out, "Warning: could not record the skipped session backfill (%v); a scheduled session sync may read the last %d days.\n", err, int(endpointBackfillWindow/(24*time.Hour)))
+	}
+}
+
+// readSessionSyncFloor is the floor recordSkippedBackfill left, or zero.
+func readSessionSyncFloor(userMode bool) time.Time {
+	data, err := os.ReadFile(sessionSyncFloorPath(userMode))
+	if err != nil {
+		return time.Time{}
+	}
+	var floor sessionSyncFloor
+	if json.Unmarshal(data, &floor) != nil {
+		return time.Time{}
+	}
+	return floor.NotBefore
 }
 
 // collectUnderSweepLock runs one per-runtime sync (`beacon endpoint <runtime> sync`, once or per
@@ -308,9 +368,9 @@ func acquireEndpointSweepLock(userMode bool, wait time.Duration) (func(), error)
 	}, nil
 }
 
-func runEndpointBackfillUnlocked(logPath string, userMode bool) endpointBackfillResult {
+func runEndpointBackfillUnlocked(logPath string, userMode bool, floor time.Time) endpointBackfillResult {
 	if userMode {
-		return sweepEndpointBackfill(logPath, true)
+		return sweepEndpointBackfill(logPath, true, floor)
 	}
 	info, ok, err := activeConsoleUser()
 	switch {
@@ -332,14 +392,18 @@ func runEndpointBackfillUnlocked(logPath string, userMode bool) endpointBackfill
 	}
 	defer confined.Release()
 	result, _ := withUserHome(info.HomeDir, func() (endpointBackfillResult, error) {
-		return sweepEndpointBackfill(logPath, false), nil
+		return sweepEndpointBackfill(logPath, false, floor), nil
 	})
 	result.Refused, result.RefusedExamples = confined.Refused()
 	return result
 }
 
-func sweepEndpointBackfill(logPath string, userMode bool) endpointBackfillResult {
+// sweepEndpointBackfill reads sessions active within the window, or since floor when that is later.
+func sweepEndpointBackfill(logPath string, userMode bool, floor time.Time) endpointBackfillResult {
 	result := endpointBackfillResult{Since: endpointBackfillNow().Add(-endpointBackfillWindow)}
+	if floor.After(result.Since) {
+		result.Since, result.Floor = floor, true
+	}
 	total := writer.NewBudget(endpointBackfillMaxBytes)
 	for _, runner := range endpointBackfillRunners() {
 		share := total.Sub(endpointBackfillShareBytes)
@@ -389,13 +453,16 @@ func reportEndpointBackfill(out io.Writer, result endpointBackfillResult) {
 // reportSessionSweep is reportEndpointBackfill under another name: `beacon endpoint sessions sync`
 // and its scheduled job run the same sweep and say "Session sync".
 func reportSessionSweep(out io.Writer, label string, result endpointBackfillResult) {
-	days := int(endpointBackfillWindow / (24 * time.Hour))
+	window := fmt.Sprintf("from the last %d days", int(endpointBackfillWindow/(24*time.Hour)))
+	if result.Floor {
+		window = "since the skipped backfill at " + result.Since.Format(time.RFC3339)
+	}
 	if result.Skipped != "" {
 		fmt.Fprintf(out, "%s skipped: %s.\n", label, result.Skipped)
 		return
 	}
 	if result.Events == 0 && !result.Limited && len(result.Runtimes) == 0 {
-		fmt.Fprintf(out, "%s: no new agent session activity from the last %d days.\n", label, days)
+		fmt.Fprintf(out, "%s: no new agent session activity %s.\n", label, window)
 		reportEndpointBackfillRefusals(out, result)
 		return
 	}
@@ -405,7 +472,7 @@ func reportSessionSweep(out io.Writer, label string, result endpointBackfillResu
 			parts = append(parts, fmt.Sprintf("%s %d", r.Name, r.Events))
 		}
 	}
-	line := fmt.Sprintf("%s: %d events from the last %d days", label, result.Events, days)
+	line := fmt.Sprintf("%s: %d events %s", label, result.Events, window)
 	if len(parts) > 0 {
 		line += " (" + strings.Join(parts, ", ") + ")"
 	}
@@ -435,6 +502,7 @@ func reportSessionSweep(out io.Writer, label string, result endpointBackfillResu
 // connect does not sweep again and spend a second budget; it still stages what the first sweep wrote.
 func endpointConnectBackfill(out io.Writer, userMode bool, logPath string, synced bool) *asymptote.ConnectBackfill {
 	if !endpointBackfillEnabled() {
+		recordSkippedBackfill(out, userMode)
 		return nil
 	}
 	backfill := &asymptote.ConnectBackfill{Options: asymptote.BackfillOptions{

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -58,7 +59,9 @@ func init() {
 // runSessionSweep is the seam tests replace. wait is how long to wait for a sweep that is already
 // running: the scheduled job does not wait (the next run picks up what that one leaves), a manual
 // run waits like install does.
-var runSessionSweep = runEndpointBackfillLocked
+var runSessionSweep = func(logPath string, userMode bool, wait time.Duration) endpointBackfillResult {
+	return runEndpointBackfillLocked(logPath, userMode, wait, true)
+}
 
 func runEndpointSessionsSync(cmd *cobra.Command, args []string) error {
 	userMode := endpointUserMode()

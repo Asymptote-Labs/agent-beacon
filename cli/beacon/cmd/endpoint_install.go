@@ -281,6 +281,8 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 		}
 		reportEndpointBackfill(backfillOut, runEndpointBackfill(result.LogPath, endpointUserMode()))
 		backfilled = true
+	} else {
+		recordSkippedBackfill(cmd.ErrOrStderr(), endpointUserMode())
 	}
 	finishCloudSetup(cmd, onboarded, connectAfterInstall, summary, func() error {
 		return connectEndpointFor(cmd, endpointUserMode(), result.LogPath, backfilled, summary)
