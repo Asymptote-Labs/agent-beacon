@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -56,11 +55,13 @@ func init() {
 	_ = endpointSessionsSyncCmd.Flags().MarkHidden("scheduled")
 }
 
-// runSessionSweep is the seam tests replace. wait is how long to wait for a sweep that is already
-// running: the scheduled job does not wait (the next run picks up what that one leaves), a manual
-// run waits like install does.
-var runSessionSweep = func(logPath string, userMode bool, wait time.Duration) endpointBackfillResult {
-	return runEndpointBackfillLocked(logPath, userMode, wait, true)
+// runSessionSweep is the seam tests replace. The scheduled job does not wait for a sweep that is
+// already running (the next run picks up what that one leaves); a manual run waits like install.
+var runSessionSweep = func(logPath string, userMode, scheduled bool) endpointBackfillResult {
+	if scheduled {
+		return runEndpointBackfillLocked(logPath, userMode, 0, sweepScheduledSync)
+	}
+	return runEndpointBackfillLocked(logPath, userMode, endpointSweepLockWait, sweepManualSync)
 }
 
 func runEndpointSessionsSync(cmd *cobra.Command, args []string) error {
@@ -69,7 +70,6 @@ func runEndpointSessionsSync(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("syncing session stores into the system log needs elevated privileges; %s", lifecycle.SystemPrivilegeHint())
 	}
 	cfg := loadConfigForMode(userMode, endpointOpts.logPath)
-	wait := endpointSweepLockWait
 	if endpointSessionsOpts.scheduled {
 		// The setting governs the job and what it does: a job that outlived the setting (config
 		// edited to off without a repair, or an unload that failed) writes nothing. A manual run is
@@ -78,9 +78,8 @@ func runEndpointSessionsSync(cmd *cobra.Command, args []string) error {
 			fmt.Fprintln(cmd.OutOrStdout(), "Session sync is off in the endpoint config; nothing read. `beacon endpoint repair` removes this job.")
 			return nil
 		}
-		wait = 0
 	}
-	result := runSessionSweep(cfg.LogPath, userMode, wait)
+	result := runSessionSweep(cfg.LogPath, userMode, endpointSessionsOpts.scheduled)
 	reportSessionSweep(cmd.OutOrStdout(), "Session sync", result)
 	// A runtime that failed is reported above and the rest still ran. The scheduled job exits
 	// cleanly so the scheduler keeps it on its interval; a manual run says it failed.

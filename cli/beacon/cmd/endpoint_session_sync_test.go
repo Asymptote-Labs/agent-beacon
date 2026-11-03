@@ -47,10 +47,10 @@ func TestSessionsSyncReportsAndOnlyFailsByHand(t *testing.T) {
 	endpointOpts.userMode, endpointOpts.systemMode = true, false
 
 	var gotLog string
-	var gotWait []time.Duration
-	runSessionSweep = func(logPath string, userMode bool, wait time.Duration) endpointBackfillResult {
+	var gotScheduled []bool
+	runSessionSweep = func(logPath string, userMode, scheduled bool) endpointBackfillResult {
 		gotLog = logPath
-		gotWait = append(gotWait, wait)
+		gotScheduled = append(gotScheduled, scheduled)
 		return endpointBackfillResult{Events: 3, Runtimes: []endpointBackfillRuntimeResult{
 			{Name: "Claude Code", Sync: "beacon endpoint claude sync", Events: 3},
 			{Name: "Codex CLI", Sync: "beacon endpoint codex sync", Err: errors.New("store unreadable")},
@@ -74,9 +74,8 @@ func TestSessionsSyncReportsAndOnlyFailsByHand(t *testing.T) {
 	if err := runEndpointSessionsSync(endpointSessionsSyncCmd, nil); err == nil || !strings.Contains(err.Error(), "Codex CLI") {
 		t.Fatalf("manual run error = %v, want the failed runtime named", err)
 	}
-	// The scheduled run skips while another sweep runs; a manual one waits like install.
-	if len(gotWait) != 2 || gotWait[0] != 0 || gotWait[1] <= 0 {
-		t.Fatalf("lock waits = %v, want [0, >0]", gotWait)
+	if len(gotScheduled) != 2 || !gotScheduled[0] || gotScheduled[1] {
+		t.Fatalf("sweeps scheduled = %v, want [true false]", gotScheduled)
 	}
 }
 
@@ -89,7 +88,7 @@ func TestScheduledSessionsSyncHonoursConfigOff(t *testing.T) {
 	endpointOpts.userMode, endpointOpts.systemMode = true, false
 
 	swept := 0
-	runSessionSweep = func(string, bool, time.Duration) endpointBackfillResult { swept++; return endpointBackfillResult{} }
+	runSessionSweep = func(string, bool, bool) endpointBackfillResult { swept++; return endpointBackfillResult{} }
 	var out bytes.Buffer
 	endpointSessionsSyncCmd.SetOut(&out)
 	endpointSessionsOpts.scheduled = true
@@ -118,7 +117,7 @@ func TestEndpointSweepLockSerializes(t *testing.T) {
 	if _, err := acquireEndpointSweepLock(true, 50*time.Millisecond); !errors.Is(err, errEndpointSweepBusy) {
 		t.Fatalf("second sweep after a short wait = %v, want busy", err)
 	}
-	result := runEndpointBackfillLocked(filepath.Join(t.TempDir(), "runtime.jsonl"), true, 0, true)
+	result := runEndpointBackfillLocked(filepath.Join(t.TempDir(), "runtime.jsonl"), true, 0, sweepScheduledSync)
 	if result.Skipped == "" || result.Events != 0 {
 		t.Fatalf("locked-out sweep = %+v, want skipped", result)
 	}
@@ -194,6 +193,7 @@ func TestPerRuntimeSyncCommandsTakeTheSweepLock(t *testing.T) {
 // reads the whole window again and lifts the floor.
 func TestSkippedBackfillFloorsTheSessionSync(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
+	isolateSweepState(t)
 	var since time.Time
 	stubBackfill(t, 1<<20, 1<<20, writingRunner("Claude", 1, &since))
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
@@ -201,7 +201,7 @@ func TestSkippedBackfillFloorsTheSessionSync(t *testing.T) {
 	window := now.Add(-endpointBackfillWindow)
 
 	recordSkippedBackfill(&bytes.Buffer{}, true)
-	result := runSessionSweep(logPath, true, 0)
+	result := runSessionSweep(logPath, true, true)
 	if !since.Equal(now) || !result.Floor {
 		t.Fatalf("session sync after a skipped backfill read from %s (floor %t), want %s", since, result.Floor, now)
 	}
@@ -215,7 +215,7 @@ func TestSkippedBackfillFloorsTheSessionSync(t *testing.T) {
 	if !since.Equal(window) {
 		t.Fatalf("backfill read from %s, want the whole window from %s", since, window)
 	}
-	if result := runSessionSweep(logPath, true, 0); !since.Equal(window) || result.Floor {
+	if result := runSessionSweep(logPath, true, true); !since.Equal(window) || result.Floor {
 		t.Fatalf("session sync after a backfill read from %s (floor %t), want the window again", since, result.Floor)
 	}
 
@@ -227,6 +227,72 @@ func TestSkippedBackfillFloorsTheSessionSync(t *testing.T) {
 	if _, err := os.Stat(sessionSyncFloorPath(true)); !os.IsNotExist(err) {
 		t.Fatalf("a dry run recorded a floor: %v", err)
 	}
+}
+
+// Only the first skipped backfill sets a floor. A later skip must not move it, and an endpoint whose
+// cursors already exist gets none: a floor set then would drop sessions that went idle with records
+// the cursors have not reached.
+func TestSkippedBackfillNeverMovesTheFloorOrHidesUnreadRecords(t *testing.T) {
+	stubBackfill(t, 1<<20, 1<<20)
+	isolateSweepState(t)
+	stateDir := filepath.Dir(sessionSyncFloorPath(true))
+	first := endpointBackfillNow()
+
+	recordSkippedBackfill(&bytes.Buffer{}, true)
+	endpointBackfillNow = func() time.Time { return first.Add(time.Hour) }
+	recordSkippedBackfill(&bytes.Buffer{}, true)
+	if got := readSessionSyncFloor(true); !got.Equal(first) {
+		t.Fatalf("a second skipped backfill moved the floor to %s, want %s", got, first)
+	}
+
+	_ = os.Remove(sessionSyncFloorPath(true))
+	if err := os.WriteFile(filepath.Join(stateDir, "claude.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recordSkippedBackfill(&bytes.Buffer{}, true)
+	if got := readSessionSyncFloor(true); !got.IsZero() {
+		t.Fatalf("a skipped backfill beside existing cursors set a floor at %s", got)
+	}
+}
+
+// The scheduled system sync copies a SQLite store at most once an hour; JSONL stores, read in place,
+// are read every run. Nothing else throttles.
+func TestScheduledSystemSyncCopiesSQLiteStoresHourly(t *testing.T) {
+	isolateSweepState(t)
+	runs := map[string]int{}
+	runner := func(name string, sqlite bool) endpointBackfillRunner {
+		return endpointBackfillRunner{Name: name, Sync: "beacon endpoint x sync", SQLite: sqlite, Run: func(endpointBackfillRun) (int, error) {
+			runs[name]++
+			return 0, nil
+		}}
+	}
+	stubBackfill(t, 1<<20, 1<<20, runner("Claude Code", false), runner("Cursor", true))
+	start := endpointBackfillNow()
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	throttled := endpointSweep{ThrottleSnapshots: true}
+
+	for _, offset := range []time.Duration{0, 15 * time.Minute, 45 * time.Minute, time.Hour} {
+		endpointBackfillNow = func() time.Time { return start.Add(offset) }
+		sweepEndpointBackfill(logPath, false, throttled)
+	}
+	if runs["Claude Code"] != 4 || runs["Cursor"] != 2 {
+		t.Fatalf("runs = %v, want Claude Code every run and Cursor at 0 and 60 minutes", runs)
+	}
+
+	sweepEndpointBackfill(logPath, false, endpointSweep{})
+	if runs["Cursor"] != 3 {
+		t.Fatalf("an unthrottled sweep skipped the SQLite store: runs = %v", runs)
+	}
+}
+
+// isolateSweepState gives a test its own sweep lock and floor, away from the directory TestMain shares
+// with every install test (each of which skips its backfill and so may leave a floor there).
+func isolateSweepState(t *testing.T) {
+	t.Helper()
+	old := endpointSweepLockPath
+	t.Cleanup(func() { endpointSweepLockPath = old })
+	dir := t.TempDir()
+	endpointSweepLockPath = func(bool) string { return filepath.Join(dir, "session-sweep.lock") }
 }
 
 func enableSessionSyncConfig(t *testing.T, enabled bool) {

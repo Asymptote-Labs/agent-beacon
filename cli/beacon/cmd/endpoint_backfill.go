@@ -75,6 +75,9 @@ type endpointBackfillRunner struct {
 	Sync string
 	// Run sweeps the store once and reports how many events it wrote.
 	Run func(endpointBackfillRun) (int, error)
+	// SQLite says the store is a SQLite database, which a confined (system) sweep reads from a
+	// private copy; the scheduled session sync takes that copy at most every endpointSnapshotInterval.
+	SQLite bool
 }
 
 // endpointBackfillRunners lists every session-store collector, a seam for tests. Each one runs with
@@ -94,11 +97,11 @@ var endpointBackfillRunners = func() []endpointBackfillRunner {
 		{Name: "Cursor", Sync: "beacon endpoint cursor sync", Run: func(r endpointBackfillRun) (int, error) {
 			s, err := cursorsession.CollectOnce(cursorsession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveCursorStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
-		}},
+		}, SQLite: true},
 		{Name: "OpenCode", Sync: "beacon endpoint opencode sync", Run: func(r endpointBackfillRun) (int, error) {
 			s, err := opencodesession.CollectOnce(opencodesession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveOpenCodeStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
-		}},
+		}, SQLite: true},
 		{Name: "GitHub Copilot CLI", Sync: "beacon endpoint copilot sync", Run: func(r endpointBackfillRun) (int, error) {
 			s, err := copilotsession.CollectOnce(copilotsession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveCopilotStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
@@ -122,11 +125,11 @@ var endpointBackfillRunners = func() []endpointBackfillRunner {
 		{Name: "Hermes Agent", Sync: "beacon endpoint hermes sync", Run: func(r endpointBackfillRun) (int, error) {
 			s, err := hermessession.CollectOnce(hermessession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveHermesStatePath("", "", r.UserMode), LegacyStatePath: legacyHermesStatePath("", "", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
-		}},
+		}, SQLite: true},
 		{Name: "Devin CLI", Sync: "beacon endpoint devin sync", Run: func(r endpointBackfillRun) (int, error) {
 			s, err := devinsession.CollectOnce(devinsession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveEndpointDevinStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget, LiveCoverage: endpointDevinLiveCoverage(r.LogPath)})
 			return s.EventsEmitted, err
-		}},
+		}, SQLite: true},
 		{Name: "DeepSeek Harness", Sync: "beacon endpoint dsh sync", Run: func(r endpointBackfillRun) (int, error) {
 			s, err := dshsession.CollectOnce(dshsession.CollectOptions{Write: true, UserMode: r.UserMode, LogPath: r.LogPath, StatePath: resolveDshStatePath("", r.UserMode), Since: r.Since, Budget: r.Budget})
 			return s.EventsEmitted, err
@@ -233,8 +236,22 @@ func endpointBackfillDays() int {
 // hook repair and inventory resolve, while its cursors stay under the system base directory. With
 // nobody to read for, it reads nothing and says so.
 func runEndpointBackfill(logPath string, userMode bool) endpointBackfillResult {
-	return runEndpointBackfillLocked(logPath, userMode, endpointSweepLockWait, false)
+	return runEndpointBackfillLocked(logPath, userMode, endpointSweepLockWait, sweepBackfill)
 }
+
+// endpointSweepKind is who runs a sweep, which decides the window it reads and how it treats the
+// session sync floor and SQLite copies.
+type endpointSweepKind int
+
+const (
+	// sweepBackfill is install or connect: the whole window, and it lifts the session sync floor.
+	sweepBackfill endpointSweepKind = iota
+	// sweepManualSync is `beacon endpoint sessions sync` run by hand: it honours the floor.
+	sweepManualSync
+	// sweepScheduledSync is the scheduled job: it honours the floor and, confined, copies each
+	// SQLite store at most every endpointSnapshotInterval.
+	sweepScheduledSync
+)
 
 // runEndpointBackfillLocked is runEndpointBackfill with an explicit wait for the sweep lock. Every
 // sweep (install, connect, `beacon endpoint sessions sync` and its scheduled job) and every
@@ -245,22 +262,62 @@ func runEndpointBackfill(logPath string, userMode bool) endpointBackfillResult {
 // one saved and reads only what is new. wait <= 0 does not wait: the scheduled job skips a run
 // while another sweep holds the lock, since the next run picks up whatever it leaves.
 //
-// sessionSync marks `beacon endpoint sessions sync` and its scheduled job, which read no session
-// older than the floor a skipped backfill recorded (recordSkippedBackfill). An install or connect
-// backfill reads the whole window, so it lifts that floor.
-func runEndpointBackfillLocked(logPath string, userMode bool, wait time.Duration, sessionSync bool) endpointBackfillResult {
+// A session sync (manual or scheduled) reads no session older than the floor a skipped backfill
+// recorded (recordSkippedBackfill). An install or connect backfill reads the whole window, so it
+// lifts that floor.
+func runEndpointBackfillLocked(logPath string, userMode bool, wait time.Duration, kind endpointSweepKind) endpointBackfillResult {
 	release, err := acquireEndpointSweepLock(userMode, wait)
 	if err != nil {
 		return endpointBackfillResult{Skipped: err.Error()}
 	}
 	defer release()
-	var floor time.Time
-	if sessionSync {
-		floor = readSessionSyncFloor(userMode)
-	} else {
+	sweep := endpointSweep{ThrottleSnapshots: kind == sweepScheduledSync && !userMode}
+	if kind == sweepBackfill {
 		_ = os.Remove(sessionSyncFloorPath(userMode))
+	} else {
+		sweep.Floor = readSessionSyncFloor(userMode)
 	}
-	return runEndpointBackfillUnlocked(logPath, userMode, floor)
+	return runEndpointBackfillUnlocked(logPath, userMode, sweep)
+}
+
+// endpointSweep is what a sweep reads beyond the window: no session older than Floor when that is
+// later, and, with ThrottleSnapshots, a SQLite store only if its private copy is due.
+type endpointSweep struct {
+	Floor             time.Time
+	ThrottleSnapshots bool
+}
+
+// endpointSnapshotInterval is how often the scheduled system session sync copies a SQLite store
+// (Cursor's state.vscdb, OpenCode, Devin CLI, Hermes Agent) to read it. A copy can approach
+// sessionfs.MaxSnapshotBytes, and those runtimes are captured live by their hooks or plugins, so
+// their stores are read hourly rather than every run. JSONL stores, which are read in place, are
+// read every run.
+const endpointSnapshotInterval = time.Hour
+
+// endpointSnapshotTimesPath records when the scheduled system session sync last copied each
+// runtime's SQLite store, beside the lock.
+func endpointSnapshotTimesPath() string {
+	return filepath.Join(filepath.Dir(endpointSweepLockPath(false)), "session-sync-snapshots.json")
+}
+
+func readEndpointSnapshotTimes() map[string]time.Time {
+	times := map[string]time.Time{}
+	if data, err := os.ReadFile(endpointSnapshotTimesPath()); err == nil {
+		_ = json.Unmarshal(data, &times)
+	}
+	return times
+}
+
+func writeEndpointSnapshotTimes(times map[string]time.Time) {
+	path := endpointSnapshotTimesPath()
+	data, err := json.Marshal(times)
+	if err != nil || os.MkdirAll(filepath.Dir(path), 0o700) != nil {
+		return
+	}
+	tmp := path + ".tmp"
+	if os.WriteFile(tmp, data, 0o600) != nil || os.Rename(tmp, path) != nil {
+		_ = os.Remove(tmp)
+	}
 }
 
 // sessionSyncFloorPath records when an install or connect skipped its backfill, beside the lock.
@@ -273,15 +330,23 @@ type sessionSyncFloor struct {
 }
 
 // recordSkippedBackfill notes that an install or connect skipped its backfill (--no-backfill or
-// BEACON_BACKFILL=0). No sweep has moved the cursors then, so without a floor the next session sync
-// would read the whole window the operator opted out of, and on a connected endpoint forward it, as
-// lines written after the connection point. With it, a session sync reads only sessions active
-// since. A dry run records nothing.
+// BEACON_BACKFILL=0) on an endpoint where no sweep has moved the cursors yet. Without a floor the
+// next session sync would read the whole window the operator opted out of, and on a connected
+// endpoint forward it, as lines written after the connection point. With it, a session sync reads
+// only sessions active since.
+//
+// Only the first skip needs one. Once cursors exist, a sync reads on from them, and a floor set then
+// would drop every session that went idle with records the cursors have not reached yet; so an
+// existing floor is never moved later and none is written beside existing cursors. A dry run
+// records nothing.
 func recordSkippedBackfill(out io.Writer, userMode bool) {
 	if endpointOpts.dryRun {
 		return
 	}
 	path := sessionSyncFloorPath(userMode)
+	if _, err := os.Stat(path); err == nil || sessionCursorsExist(filepath.Dir(path)) {
+		return
+	}
 	data, _ := json.Marshal(sessionSyncFloor{NotBefore: endpointBackfillNow().UTC()})
 	tmp := path + ".tmp"
 	err := os.MkdirAll(filepath.Dir(path), 0o700)
@@ -295,6 +360,23 @@ func recordSkippedBackfill(out io.Writer, userMode bool) {
 		_ = os.Remove(tmp)
 		fmt.Fprintf(out, "Warning: could not record the skipped session backfill (%v); a scheduled session sync may read the last %d days.\n", err, int(endpointBackfillWindow/(24*time.Hour)))
 	}
+}
+
+// sessionCursorsExist reports whether a session-store collector has saved a cursor in the endpoint's
+// state directory, where every one keeps its default cursor file (claude.json, codex.json, ...).
+// cursor-usage.json belongs to the Cursor Admin API collector, which is not a session-store sweep.
+func sessionCursorsExist(stateDir string) bool {
+	entries, err := os.ReadDir(stateDir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.Type().IsRegular() && strings.HasSuffix(name, ".json") && name != "session-sync-floor.json" && name != "cursor-usage.json" {
+			return true
+		}
+	}
+	return false
 }
 
 // readSessionSyncFloor is the floor recordSkippedBackfill left, or zero.
@@ -368,9 +450,9 @@ func acquireEndpointSweepLock(userMode bool, wait time.Duration) (func(), error)
 	}, nil
 }
 
-func runEndpointBackfillUnlocked(logPath string, userMode bool, floor time.Time) endpointBackfillResult {
+func runEndpointBackfillUnlocked(logPath string, userMode bool, sweep endpointSweep) endpointBackfillResult {
 	if userMode {
-		return sweepEndpointBackfill(logPath, true, floor)
+		return sweepEndpointBackfill(logPath, true, sweep)
 	}
 	info, ok, err := activeConsoleUser()
 	switch {
@@ -392,20 +474,33 @@ func runEndpointBackfillUnlocked(logPath string, userMode bool, floor time.Time)
 	}
 	defer confined.Release()
 	result, _ := withUserHome(info.HomeDir, func() (endpointBackfillResult, error) {
-		return sweepEndpointBackfill(logPath, false, floor), nil
+		return sweepEndpointBackfill(logPath, false, sweep), nil
 	})
 	result.Refused, result.RefusedExamples = confined.Refused()
 	return result
 }
 
-// sweepEndpointBackfill reads sessions active within the window, or since floor when that is later.
-func sweepEndpointBackfill(logPath string, userMode bool, floor time.Time) endpointBackfillResult {
-	result := endpointBackfillResult{Since: endpointBackfillNow().Add(-endpointBackfillWindow)}
-	if floor.After(result.Since) {
-		result.Since, result.Floor = floor, true
+// sweepEndpointBackfill reads sessions active within the window, or since sweep.Floor when that is
+// later.
+func sweepEndpointBackfill(logPath string, userMode bool, sweep endpointSweep) endpointBackfillResult {
+	now := endpointBackfillNow()
+	result := endpointBackfillResult{Since: now.Add(-endpointBackfillWindow)}
+	if sweep.Floor.After(result.Since) {
+		result.Since, result.Floor = sweep.Floor, true
+	}
+	var copied map[string]time.Time
+	if sweep.ThrottleSnapshots {
+		copied = readEndpointSnapshotTimes()
+		defer writeEndpointSnapshotTimes(copied)
 	}
 	total := writer.NewBudget(endpointBackfillMaxBytes)
 	for _, runner := range endpointBackfillRunners() {
+		if sweep.ThrottleSnapshots && runner.SQLite {
+			if last, ok := copied[runner.Name]; ok && now.Sub(last) < endpointSnapshotInterval && !last.After(now) {
+				continue
+			}
+			copied[runner.Name] = now
+		}
 		share := total.Sub(endpointBackfillShareBytes)
 		events, err := runner.Run(endpointBackfillRun{LogPath: logPath, UserMode: userMode, Since: result.Since, Budget: share})
 		// A confined (system) sweep reads SQLite stores through private snapshots; drop each
