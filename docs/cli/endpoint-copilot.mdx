@@ -64,7 +64,7 @@ beacon endpoint copilot sync --print
 beacon endpoint copilot sync --watch --interval 5m
 ```
 
-Nothing sweeps on its own. Run `sync` under whatever scheduler the platform already uses, or leave `--watch` running in the account that owns the Copilot directory. A scheduler that starts `sync` without your shell's environment needs `COPILOT_HOME` set in it, or `--copilot-dir`.
+Unless the [scheduled session sync](/cli/endpoint-install#scheduled-session-sync) is on, nothing sweeps on its own. Run `sync` under whatever scheduler the platform already uses, or leave `--watch` running in the account that owns the Copilot directory. A scheduler that starts `sync` without your shell's environment needs `COPILOT_HOME` set in it, or `--copilot-dir`.
 
 ## Status
 

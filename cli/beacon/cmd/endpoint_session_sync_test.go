@@ -341,3 +341,38 @@ func TestSessionSyncStatusLine(t *testing.T) {
 		t.Fatalf("on = %q", got)
 	}
 }
+
+// `sessions enable|disable` hand the setting to lifecycle.SetSessionSync and report the job.
+func TestSessionsEnableAndDisable(t *testing.T) {
+	oldOpts, oldSet := endpointOpts, setSessionSync
+	t.Cleanup(func() { endpointOpts, setSessionSync = oldOpts, oldSet })
+	endpointOpts.userMode, endpointOpts.systemMode = true, false
+
+	var got []bool
+	setSessionSync = func(opts lifecycle.InventoryJobOptions, enabled bool) (lifecycle.SessionSyncJobResult, error) {
+		if !opts.UserMode || !opts.Load {
+			t.Fatalf("options = %+v, want a user-mode job that is loaded", opts)
+		}
+		got = append(got, enabled)
+		if enabled {
+			return lifecycle.SessionSyncJobResult{Enabled: true, UnitPath: "/fake/session-sync.plist", Loaded: true}, nil
+		}
+		return lifecycle.SessionSyncJobResult{Removed: true}, nil
+	}
+	var out bytes.Buffer
+	endpointSessionsEnableCmd.SetOut(&out)
+	if err := endpointSessionsEnableCmd.RunE(endpointSessionsEnableCmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Scheduled session sync job installed (/fake/session-sync.plist)") {
+		t.Fatalf("enable output %q", out.String())
+	}
+	out.Reset()
+	endpointSessionsDisableCmd.SetOut(&out)
+	if err := endpointSessionsDisableCmd.RunE(endpointSessionsDisableCmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Session sync is off") || len(got) != 2 || !got[0] || got[1] {
+		t.Fatalf("disable output %q, calls %v", out.String(), got)
+	}
+}

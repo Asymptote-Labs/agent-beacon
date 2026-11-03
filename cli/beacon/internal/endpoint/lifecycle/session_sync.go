@@ -2,6 +2,9 @@ package lifecycle
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
@@ -108,6 +111,24 @@ func reconcileSessionSyncJobWith(job inventoryJobController, opts InventoryJobOp
 		result.Loaded = true
 	}
 	return result, nil
+}
+
+// SetSessionSync turns the scheduled session sync on or off on an installed endpoint. A repair
+// rebuilds the config from its flags, so one run without the flags an endpoint was set up with
+// resets its harnesses and ports and drops its HEC destinations; this records only
+// `session_sync.enabled` in config.json, leaves every other key as it is, and reconciles the job.
+func SetSessionSync(opts InventoryJobOptions, enabled bool) (SessionSyncJobResult, error) {
+	path := endpointconfig.ConfigPath(opts.UserMode)
+	if err := setConfigFileKey(opts.UserMode, path, "session_sync", endpointconfig.SessionSync{Enabled: enabled}); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return SessionSyncJobResult{}, fmt.Errorf("no endpoint is installed here (%s): install it first; `beacon endpoint install --session-sync` turns the sync on with it", path)
+		}
+		return SessionSyncJobResult{}, err
+	}
+	if opts.LogPath == "" {
+		opts.LogPath = loadOrDefault(opts.UserMode, "").LogPath
+	}
+	return ReconcileSessionSyncJob(opts)
 }
 
 // sessionSyncEnabledFromConfigFile reads `session_sync.enabled` from the config on disk. A

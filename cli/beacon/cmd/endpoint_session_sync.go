@@ -38,6 +38,26 @@ var endpointSessionsInstallDaemonCmd = &cobra.Command{
 	RunE:         runSessionsInstallDaemon,
 }
 
+var endpointSessionsEnableCmd = &cobra.Command{
+	Use:   "enable",
+	Short: "Turn the scheduled session sync on for the installed endpoint",
+	Long: "Records `session_sync.enabled` in the endpoint config and installs and loads the scheduled session sync job. " +
+		"Every other setting is left as it is: unlike `beacon endpoint repair --session-sync`, it does not rebuild the config, " +
+		"collector or hooks, so it cannot reset harnesses or ports or drop a HEC destination.",
+	Args:         cobra.NoArgs,
+	SilenceUsage: true,
+	RunE:         func(cmd *cobra.Command, args []string) error { return runSessionsSet(cmd, true) },
+}
+
+var endpointSessionsDisableCmd = &cobra.Command{
+	Use:          "disable",
+	Short:        "Turn the scheduled session sync off and remove its job",
+	Long:         "Records `session_sync.enabled: false` in the endpoint config and unloads and removes the scheduled session sync job, leaving every other setting as it is.",
+	Args:         cobra.NoArgs,
+	SilenceUsage: true,
+	RunE:         func(cmd *cobra.Command, args []string) error { return runSessionsSet(cmd, false) },
+}
+
 var endpointSessionsOpts struct {
 	scheduled bool
 }
@@ -46,7 +66,9 @@ func init() {
 	endpointCmd.AddCommand(endpointSessionsCmd)
 	endpointSessionsCmd.AddCommand(endpointSessionsSyncCmd)
 	endpointSessionsCmd.AddCommand(endpointSessionsInstallDaemonCmd)
-	for _, c := range []*cobra.Command{endpointSessionsSyncCmd, endpointSessionsInstallDaemonCmd} {
+	endpointSessionsCmd.AddCommand(endpointSessionsEnableCmd)
+	endpointSessionsCmd.AddCommand(endpointSessionsDisableCmd)
+	for _, c := range []*cobra.Command{endpointSessionsSyncCmd, endpointSessionsInstallDaemonCmd, endpointSessionsEnableCmd, endpointSessionsDisableCmd} {
 		c.Flags().BoolVar(&endpointOpts.userMode, "user", true, "Use per-user endpoint paths")
 		c.Flags().BoolVar(&endpointOpts.systemMode, "system", false, "Use system endpoint paths")
 		c.Flags().StringVar(&endpointOpts.logPath, "log-path", "", "Runtime JSONL log path")
@@ -114,10 +136,31 @@ func runSessionsInstallDaemon(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// setSessionSync is indirected so the commands can be tested without a scheduler.
+var setSessionSync = lifecycle.SetSessionSync
+
+func runSessionsSet(cmd *cobra.Command, enabled bool) error {
+	userMode := endpointUserMode()
+	if !userMode && !lifecycle.HasSystemPrivileges() {
+		return fmt.Errorf("changing the system session sync needs elevated privileges; %s", lifecycle.SystemPrivilegeHint())
+	}
+	result, err := setSessionSync(lifecycle.InventoryJobOptions{
+		UserMode: userMode,
+		Program:  lifecycle.DefaultInventoryJobProgram(userMode),
+		LogPath:  endpointOpts.logPath,
+		Load:     true,
+	}, enabled)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), sessionSyncReconcileMessage(result))
+	return nil
+}
+
 func sessionSyncReconcileMessage(result lifecycle.SessionSyncJobResult) string {
 	switch {
 	case !result.Enabled:
-		return "Session sync is off (turn it on with `beacon endpoint repair --session-sync`); no scheduled job installed."
+		return "Session sync is off (turn it on with `beacon endpoint sessions enable`); no scheduled job installed."
 	case result.Skipped != "":
 		return "Scheduled session sync job not installed: " + result.Skipped
 	default:
