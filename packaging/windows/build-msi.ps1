@@ -51,6 +51,7 @@ try {
     Copy-Item -LiteralPath $CollectorExe -Destination (Join-Path $stage 'bin\beacon-otelcol.exe')
     Copy-Item -LiteralPath (Join-Path $scriptDir 'install-endpoint.ps1') -Destination (Join-Path $stage 'scripts\install-endpoint.ps1')
     Copy-Item -LiteralPath (Join-Path $scriptDir 'uninstall-endpoint.ps1') -Destination (Join-Path $stage 'scripts\uninstall-endpoint.ps1')
+    Copy-Item -LiteralPath (Join-Path $scriptDir 'package-common.ps1') -Destination (Join-Path $stage 'scripts\package-common.ps1')
 
     # The dotnet tool rather than a preinstalled WiX: it pins a version, it does not depend on what a
     # runner image happens to ship, and it works the same on a maintainer's machine.
