@@ -352,7 +352,7 @@ STUB_LOG="$STUB_LOG" \
 
 REPAIR_ARGS="$(cat "$STUB_LOG")"
 case "$REPAIR_ARGS" in
-  "endpoint repair --collector /tmp/beacon-otelcol --harness claude,codex --otlp-grpc-port 4317 --otlp-http-port 4318 --splunk-hec-endpoint https://splunk.example:8088/services/collector --splunk-hec-token hec-token --falcon-hec-endpoint https://cloud.us.humio.com/api/v1/ingest/hec --falcon-hec-token falcon-token") ;;
+  "endpoint repair --system --collector /tmp/beacon-otelcol --harness claude,codex --otlp-grpc-port 4317 --otlp-http-port 4318 --splunk-hec-endpoint https://splunk.example:8088/services/collector --splunk-hec-token hec-token --falcon-hec-endpoint https://cloud.us.humio.com/api/v1/ingest/hec --falcon-hec-token falcon-token") ;;
   *)
     echo "unexpected repair args: $REPAIR_ARGS" >&2
     exit 1
@@ -418,6 +418,40 @@ case "$INSTALL_ARGS" in
     ;;
 esac
 
+# BEACON_SESSION_SYNC turns the scheduled session sync on or off from MDM; unset keeps the
+# endpoint's own setting, so no flag is passed (the cases above).
+BEACON_BIN="$STUB_BIN" \
+BEACON_COLLECTOR="/tmp/beacon-otelcol" \
+BEACON_SESSION_SYNC="1" \
+STUB_LOG="$STUB_LOG" \
+"$INSTALL_SCRIPT"
+
+INSTALL_ARGS="$(cat "$STUB_LOG")"
+case "$INSTALL_ARGS" in
+  "endpoint install --system --harness claude,codex --otlp-grpc-port 4317 --otlp-http-port 4318 --collector /tmp/beacon-otelcol --session-sync") ;;
+  *)
+    echo "unexpected session sync install args: $INSTALL_ARGS" >&2
+    exit 1
+    ;;
+esac
+
+for repair_script in "$REPAIR_SCRIPT" "$FLEET_REPAIR_SCRIPT"; do
+  BEACON_BIN="$STUB_BIN" \
+  BEACON_COLLECTOR="/tmp/beacon-otelcol" \
+  BEACON_SESSION_SYNC="0" \
+  STUB_LOG="$STUB_LOG" \
+  "$repair_script"
+
+  REPAIR_ARGS="$(cat "$STUB_LOG")"
+  case "$REPAIR_ARGS" in
+    "endpoint repair --system --collector /tmp/beacon-otelcol --harness claude,codex --otlp-grpc-port 4317 --otlp-http-port 4318 --no-session-sync") ;;
+    *)
+      echo "unexpected session sync repair args from $repair_script: $REPAIR_ARGS" >&2
+      exit 1
+      ;;
+  esac
+done
+
 BEACON_BIN="$STUB_BIN" \
 BEACON_KEEP_LOGS="1" \
 BEACON_KEEP_CONFIG="1" \
@@ -473,7 +507,7 @@ STUB_LOG="$STUB_LOG" \
 
 REPAIR_ARGS="$(cat "$STUB_LOG")"
 case "$REPAIR_ARGS" in
-  "endpoint repair --collector /tmp/beacon-otelcol --harness claude,cursor --otlp-grpc-port 8317 --otlp-http-port 8318 --splunk-hec-endpoint https://splunk.example:8088/services/collector --splunk-hec-token hec-token --splunk-index beacon --falcon-hec-endpoint https://cloud.us.humio.com/api/v1/ingest/hec --falcon-hec-token falcon-token --falcon-index beacon-repo") ;;
+  "endpoint repair --system --collector /tmp/beacon-otelcol --harness claude,cursor --otlp-grpc-port 8317 --otlp-http-port 8318 --splunk-hec-endpoint https://splunk.example:8088/services/collector --splunk-hec-token hec-token --splunk-index beacon --falcon-hec-endpoint https://cloud.us.humio.com/api/v1/ingest/hec --falcon-hec-token falcon-token --falcon-index beacon-repo") ;;
   *)
     echo "unexpected Fleet positional repair args: $REPAIR_ARGS" >&2
     exit 1

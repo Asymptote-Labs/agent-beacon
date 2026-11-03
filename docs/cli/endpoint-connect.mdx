@@ -11,7 +11,9 @@ Forwarding is opt-in and revocable. Runtime telemetry starts at the end of the
 existing runtime log, so pre-connect runtime events are not sent, with one bounded
 exception: every connect uploads the last 30 days of agent sessions read
 from the runtimes' own session stores, so the dashboard shows your recent work at once
-(see [Session backfill](#session-backfill)). Inventory starts
+(see [Session backfill](#session-backfill)). With the
+[scheduled session sync](/cli/endpoint-install#scheduled-session-sync) on, its later runs keep adding
+session-store records to the log, and those are forwarded as they are written. Inventory starts
 at the beginning of `inventory_state.jsonl` so the dashboard receives the endpoint's
 current inventory baseline, including inventory records written before connection.
 Revoking the device from the dashboard stops ingestion within about a minute.
@@ -68,6 +70,12 @@ forwarder already shipped; every event keeps the deterministic event id it was w
 the dashboard collapses a re-sent event on it. A privacy-mode change clears the checkpoints and
 replaces the staged file, so the backfill is resent in the new mode. `disconnect` removes the file.
 `--no-backfill` or `BEACON_BACKFILL=0` connects without uploading any history.
+
+The backfill is a one-time upload per connect. With the
+[scheduled session sync](/cli/endpoint-install#scheduled-session-sync) on, the job keeps reading the
+session stores every 15 minutes, and the forwarder ships what it writes as ordinary new runtime
+events. When the backfill stopped at its size limit, the job's first runs also read the rest of the
+last 30 days, so that history arrives over the next runs rather than not at all.
 
 ## Privacy modes
 

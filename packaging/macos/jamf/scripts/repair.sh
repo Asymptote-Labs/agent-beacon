@@ -20,12 +20,25 @@ BEACON_FALCON_SOURCE="${BEACON_FALCON_SOURCE:-}"
 BEACON_FALCON_SOURCETYPE="${BEACON_FALCON_SOURCETYPE:-}"
 BEACON_FALCON_INSECURE_SKIP_VERIFY="${BEACON_FALCON_INSECURE_SKIP_VERIFY:-0}"
 BEACON_FALCON_CA_FILE="${BEACON_FALCON_CA_FILE:-}"
+# 1 turns the scheduled session sync on and 0 turns it off; empty keeps what the endpoint already
+# has, so a package upgrade never changes it.
+BEACON_SESSION_SYNC="${BEACON_SESSION_SYNC:-}"
 
 set -- endpoint repair \
+  --system \
   --collector "$BEACON_COLLECTOR" \
   --harness "$BEACON_ENDPOINT_HARNESSES" \
   --otlp-grpc-port "$BEACON_OTLP_GRPC_PORT" \
   --otlp-http-port "$BEACON_OTLP_HTTP_PORT"
+
+case "$BEACON_SESSION_SYNC" in
+  1|true|TRUE|yes|YES)
+    set -- "$@" --session-sync
+    ;;
+  0|false|FALSE|no|NO)
+    set -- "$@" --no-session-sync
+    ;;
+esac
 
 if [ -n "$BEACON_SPLUNK_HEC_ENDPOINT" ]; then
   set -- "$@" --splunk-hec-endpoint "$BEACON_SPLUNK_HEC_ENDPOINT"

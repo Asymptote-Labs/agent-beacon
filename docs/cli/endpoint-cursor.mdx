@@ -36,7 +36,7 @@ beacon endpoint cursor sync --print
 beacon endpoint cursor sync --watch --interval 5m
 ```
 
-`--print` neither writes the runtime log nor advances the cursor, so running it twice shows the same events. Nothing sweeps on its own: run `sync` on a schedule, or leave `--watch` running in the account that owns the Cursor data. [`beacon endpoint install`](/cli/endpoint-install#session-backfill) runs the same sweep once for the last 30 days.
+`--print` neither writes the runtime log nor advances the cursor, so running it twice shows the same events. Unless the [scheduled session sync](/cli/endpoint-install#scheduled-session-sync) is on, nothing sweeps on its own: run `sync` on a schedule, or leave `--watch` running in the account that owns the Cursor data. [`beacon endpoint install`](/cli/endpoint-install#session-backfill) runs the same sweep once for the last 30 days. On a system install, the backfill and the scheduled session sync skip a Cursor database over 512 MiB, so run `sync` as the user there.
 
 ```bash title="Show Cursor's stores and collection progress"
 beacon endpoint cursor status
