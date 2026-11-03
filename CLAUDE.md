@@ -292,9 +292,11 @@ A pushed `v*` tag runs the full release end-to-end via
    workflow's OIDC token) for every file `checksums.txt` lists. It needs
    `id-token: write` and `attestations: write` and no `release`-environment secrets.
 
-Every third-party action in `release.yml` and `release-extension.yml` is pinned to
-a full commit SHA with the version in a trailing comment, because these jobs hold
-the signing secrets. Bump them by SHA, never back to a tag.
+Every third-party action in `release.yml`, `release-extension.yml` and
+`npm-publish-sdk.yml` is pinned to a full commit SHA with the version in a
+trailing comment, because these jobs hold the signing secrets or, for the SDK,
+the `id-token` npm's trusted publisher accepts. Bump them by SHA, never back to
+a tag.
 
 Required `release`-environment secrets: `HOMEBREW_TAP_TOKEN`,
 `DEVELOPER_ID_APP_CERT_P12`, `DEVELOPER_ID_APP_CERT_PASSWORD`,
