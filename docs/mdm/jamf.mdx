@@ -227,10 +227,10 @@ including Claude Code, Codex, and Cursor setup.
     sudo tail -n 5 /Library/Logs/Beacon/com.beacon.endpoint.session-sync.out
     ```
 
-    If the setting is on but the job is missing, reconcile it:
+    If the job is missing, turn the setting on again, which reinstalls and loads it:
 
     ```bash
-    sudo /opt/beacon/bin/beacon endpoint sessions install-daemon --system
+    sudo /opt/beacon/bin/beacon endpoint sessions enable --system
     ```
   </Accordion>
   <Accordion title="Configured harnesses are wrong">
@@ -277,12 +277,14 @@ including Claude Code, Codex, and Cursor setup.
 
 Use `/opt/beacon/jamf/scripts/repair.sh` as a remediation policy for Macs where extension attributes report a stale or unhealthy install.
 
-To turn on the [scheduled session sync](/cli/endpoint-install#scheduled-session-sync), which reads new records from the agents' session files every 15 minutes, run the repair helper once with `BEACON_SESSION_SYNC=1` in its environment. `BEACON_SESSION_SYNC=0` turns it off. Package upgrades keep the choice, so the variable is needed only when you change it:
+To turn on the [scheduled session sync](/cli/endpoint-install#scheduled-session-sync), which reads new records from the agents' session files every 15 minutes, run this once from a Jamf script policy. It changes only that setting, and package upgrades keep it:
 
 ```bash
 #!/bin/sh
-BEACON_SESSION_SYNC=1 /opt/beacon/jamf/scripts/repair.sh "$@"
+/opt/beacon/bin/beacon endpoint sessions enable --system
 ```
+
+`sessions disable --system` turns it off. For new installs, set `BEACON_SESSION_SYNC=1` in the environment of the install helper instead.
 
 Use `/opt/beacon/jamf/scripts/uninstall.sh` to remove endpoint service files. Set `BEACON_KEEP_LOGS=1` or Jamf parameter 4 to preserve runtime logs during removal. Set `BEACON_KEEP_CONFIG=1` or Jamf parameter 5 to preserve harness telemetry configuration.
 

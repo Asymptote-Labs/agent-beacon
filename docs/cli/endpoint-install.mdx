@@ -109,10 +109,11 @@ off. If this install also connects to Beacon Cloud, the same history is
 The session backfill runs once, at install. To keep reading the runtimes' session stores after that, turn on the scheduled session sync:
 
 ```bash
-sudo beacon endpoint install --system --session-sync   # or: sudo beacon endpoint repair --system --session-sync
+sudo beacon endpoint sessions enable --system   # an endpoint that is already installed
+sudo beacon endpoint sessions disable --system  # turn it off and remove the job
 ```
 
-Without `--harness`, repair configures every runtime it detects, so on a package install name the harnesses it already has (`--harness claude,codex` by default). For a package or MDM rollout, set `BEACON_SESSION_SYNC=1` in the environment of the package's install script (`/opt/beacon/scripts/install-endpoint.sh`) or of the Jamf and Fleet repair helpers. `BEACON_SESSION_SYNC=0` turns it off, and leaving it unset keeps what the endpoint already has, so a package upgrade never changes it.
+`sessions enable` and `disable` change only this setting and the job. `install` and `repair` take `--session-sync` and `--no-session-sync` too, but repair rebuilds the endpoint from its flags: run without the ones the endpoint was set up with, it resets the harnesses and OTLP ports and drops a Splunk or Falcon HEC destination. For a package or MDM rollout, set `BEACON_SESSION_SYNC=1` in the environment of the package's install script (`/opt/beacon/scripts/install-endpoint.sh`), or run `/opt/beacon/bin/beacon endpoint sessions enable --system` on Macs that already have Beacon. `BEACON_SESSION_SYNC=0` turns it off, and leaving it unset keeps what the endpoint already has, so a package upgrade never changes it.
 
 It is off by default. Hooks and OTLP already capture sessions live, and the session stores add what only they record, such as Claude Code's per-request token usage and complete assistant text from its transcripts. Turning it on writes those records as poll events (`harness.collection_method=poll`) alongside the live ones, which matters when the runtime log is forwarded elsewhere. Token reports keep live usage authoritative over poll usage for the same session.
 
@@ -131,7 +132,7 @@ The first runs catch up. When the backfill stopped at its size limit, the rest o
 
 ### Settings and status
 
-The setting is `session_sync.enabled` in `config.json`. Repair and package upgrades keep it, and `--no-session-sync` turns it off and removes the job. A scheduled run also checks the setting, so a job left behind after the config was set to off reads nothing. `beacon endpoint status` shows `Session sync: every 15m0s; job loaded=true`, and `beacon endpoint sessions sync` runs the same sweep by hand. A host without launchd or systemd cannot run the job; run `beacon endpoint sessions sync` from your own scheduler there.
+The setting is `session_sync.enabled` in `config.json`. Repair and package upgrades keep it, and `beacon endpoint sessions disable` or `--no-session-sync` turns it off and removes the job. A scheduled run also checks the setting, so a job left behind after the config was set to off reads nothing. `beacon endpoint status` shows `Session sync: every 15m0s; job loaded=true`, and `beacon endpoint sessions sync` runs the same sweep by hand. A host without launchd or systemd cannot run the job; run `beacon endpoint sessions sync` from your own scheduler there.
 
 ## Interactive onboarding wizard
 
