@@ -258,12 +258,7 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	case result.InventoryJobDetail != "":
 		fmt.Fprintf(details, "Scheduled inventory job not installed: %s\n", result.InventoryJobDetail)
 	}
-	switch {
-	case result.SessionSyncJobPath != "":
-		fmt.Fprintf(details, "Scheduled session sync job: %s\n", result.SessionSyncJobPath)
-	case result.SessionSyncJobDetail != "":
-		fmt.Fprintf(details, "Scheduled session sync job not installed: %s\n", result.SessionSyncJobDetail)
-	}
+	reportSessionSyncJob(details, result)
 	reportLogAccess(details, result)
 	reportManagedForwarder(details, cmd.ErrOrStderr(), result.ManagedForwarder)
 	printLingerGap(cmd.ErrOrStderr(), result)
@@ -535,12 +530,24 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Printf("Endpoint repaired. Manifest: %s\n", result.ManifestPath)
+	reportSessionSyncJob(os.Stdout, result)
 	reportLogAccess(os.Stdout, result)
 	reportManagedForwarder(os.Stdout, cmd.ErrOrStderr(), result.ManagedForwarder)
 	printLingerGap(cmd.ErrOrStderr(), result)
 	installHookTargetsFromEndpointInstall(os.Stdout, cmd.ErrOrStderr(), selection.Hooks)
 	refreshAgentSkills(cmd.ErrOrStderr())
 	return nil
+}
+
+// reportSessionSyncJob says where the scheduled session sync job was installed, or why it was not,
+// when the setting is on; with it off (the default) install and repair say nothing about it.
+func reportSessionSyncJob(out io.Writer, result lifecycle.InstallResult) {
+	switch {
+	case result.SessionSyncJobPath != "":
+		fmt.Fprintf(out, "Scheduled session sync job: %s\n", result.SessionSyncJobPath)
+	case result.SessionSyncJobDetail != "":
+		fmt.Fprintf(out, "Scheduled session sync job not installed: %s\n", result.SessionSyncJobDetail)
+	}
 }
 
 func reportEndpointTargetSelection(cmd *cobra.Command, selection endpointTargetSelection) {
