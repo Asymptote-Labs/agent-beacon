@@ -325,10 +325,12 @@ Runtime upload starts at the beginning of the active log (`BEACON_VECTOR_READ_FR
 
 Some backends run their own agent on the Mac that points Claude Code's and Codex's OTLP settings back at the backend every few minutes. Beacon and that agent then overwrite each other: the Step 6 audit fails on every run, and its remediation points the settings back at the collector until the other agent rewrites them.
 
-Let the other agent keep the OTLP settings. Beacon does not need them for anything it records:
+Let the other agent keep the OTLP settings. Beacon still records most of what the agents do without them:
 
-- Beacon's hooks record sessions, prompts, tool calls, and commands as they happen. The audit below reinstalls them if the other agent removes them.
-- The [scheduled session sync](/cli/endpoint-install#scheduled-session-sync), which Steps 5 and 6 turn on with `--session-sync`, reads Claude Code's and Codex's session files every 15 minutes. That is where Beacon gets the per-request token usage, complete replies, and Codex's prompts and tool calls that would otherwise arrive over OTLP.
+- Beacon's hooks record Claude Code sessions, prompts, tool calls, and commands as they happen. Codex's hooks record only the session start and the final reply. The audit below reinstalls the hooks if the other agent removes them.
+- The [scheduled session sync](/cli/endpoint-install#scheduled-session-sync), which Steps 5 and 6 turn on with `--session-sync`, reads Claude Code's and Codex's session files every 15 minutes. It adds Claude Code's per-request token usage and complete replies, and Codex's prompts, tool calls, and token usage, up to 15 minutes after the agent writes them.
+
+Some records exist only in the OTLP export, so they stop reaching Beacon, and GCS, while the other agent owns the settings: Claude Code's runtime-reported cost, Claude Code's tool approval decisions, and Codex's approval events. The other backend still receives them.
 
 Keep the OTLP forward. A package upgrade, and the remediation when it runs, point the settings at the collector until the other agent rewrites them, and the forward keeps the backend's data flowing in that window.
 
