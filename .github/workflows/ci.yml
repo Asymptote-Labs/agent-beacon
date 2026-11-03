@@ -868,9 +868,10 @@ jobs:
           }
 
       # Each MSI step has its own bound, inside the job's. A wedged msiexec then fails its step instead
-      # of holding the job until GitHub cancels it, and a cancelled job keeps no log at all -- which is
-      # how intermittent upgrade and uninstall hangs went undiagnosed. With the step bound, the
-      # diagnostics and the package logs below still run and upload.
+      # of holding the job until GitHub cancels it, and a cancelled job keeps no log at all. With the
+      # step bound, the diagnostics and the package logs below still run and upload. None of that
+      # helps when the runner itself goes away mid-step, which still happens now and then: nothing
+      # after that point runs, and re-running the job is the workaround.
       #
       # Each step bound is longer than the package scripts' own limits for the actions it runs
       # (packaging/windows/install-endpoint.ps1 and uninstall-endpoint.ps1), so a hung beacon.exe call
