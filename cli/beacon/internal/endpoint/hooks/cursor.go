@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/hookcmd"
 )
 
 type Level string
@@ -109,25 +111,24 @@ func installCursorHooksJSON(path, binaryPath, logPath, configPath string) error 
 		return err
 	}
 	commandPrefix := endpointCommandPrefix("cursor", binaryPath, logPath, configPath)
-	endpointHooks := map[string]HookRef{
-		"sessionStart":       {Command: commandPrefix + " session-start"},
-		"beforeSubmitPrompt": {Command: commandPrefix + " prompt-submit", Timeout: 30},
-		"preToolUse":         {Command: commandPrefix + " pre-tool", Matcher: "Write|Edit|MultiEdit|Shell|MCP"},
-		"afterAgentThought":  {Command: commandPrefix + " agent-thought"},
-		"afterAgentResponse": {Command: commandPrefix + " agent-response"},
-		"afterFileEdit":      {Command: commandPrefix + " post-tool"},
-		"postToolUse":        {Command: commandPrefix + " post-tool"},
-		"postToolUseFailure": {Command: commandPrefix + " post-tool"},
-		"stop":               {Command: commandPrefix + " stop"},
-		"sessionEnd":         {Command: commandPrefix + " session-end"},
-	}
-	entries := make(map[string][]json.RawMessage, len(endpointHooks))
-	for hookName, ref := range endpointHooks {
+	// The subcommand-to-event wiring is hookcmd.CursorEvents, which the hooks binary also reads to
+	// decide which Cursor entries a Claude Code hook running the same subcommand may defer to.
+	entries := make(map[string][]json.RawMessage)
+	for subcommand, events := range hookcmd.CursorEvents {
+		ref := HookRef{Command: commandPrefix + " " + subcommand}
+		switch subcommand {
+		case "prompt-submit":
+			ref.Timeout = 30
+		case "pre-tool":
+			ref.Matcher = "Write|Edit|MultiEdit|Shell|MCP"
+		}
 		entry, err := json.Marshal(ref)
 		if err != nil {
 			return err
 		}
-		entries[hookName] = []json.RawMessage{entry}
+		for _, event := range events {
+			entries[event] = []json.RawMessage{entry}
+		}
 	}
 	if cursorExtraHooks != nil {
 		for hookName, refs := range cursorExtraHooks(commandPrefix) {
@@ -367,7 +368,7 @@ func removeEndpointHooks(path string) (bool, error) {
 }
 
 func isEndpointHook(command string) bool {
-	return isEndpointHookCommand(command, "cursor")
+	return hookcmd.IsEndpointHook(command, "cursor")
 }
 
 func isCursorInstalledAt(path string) bool {

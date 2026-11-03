@@ -31,11 +31,14 @@ jobs:
         run: |
           echo "npm publish runs only from an sdk-js-v* tag (got ${GITHUB_REF})" >&2
           exit 1
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
+          # A publish job uses no cache. setup-node v5+ turns npm caching on by itself when
+          # package.json gains a packageManager field; this keeps that from reaching the release.
+          package-manager-cache: false
       - name: Verify npm supports trusted publishing
         shell: bash
         run: |

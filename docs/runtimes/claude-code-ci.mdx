@@ -62,7 +62,6 @@ Use the Beacon GitHub Action when you want the workflow to install the CI collec
   with:
     command: claude --print "Review this pull request"
     upload-artifact: "true"
-    artifact-name: beacon-runtime-log
 ```
 
 To wrap a third-party action that launches an agent internally, start and finish a Beacon session around that action. Anthropic's Claude Code Security Review action is one example:

@@ -156,8 +156,9 @@ share screenshots or logs.
   <img src="/images/claude-code-on-the-web/beacon-cloud-setup-print-env.png" alt="Terminal showing beacon cloud gcs setup --apply --print-env output with bucket, prefix, and credentials environment variables." />
 </Frame>
 
-The helper creates a dedicated uploader service account and grants it object
-upload access to the selected bucket.
+The helper creates a dedicated uploader service account and grants it
+`roles/storage.objectUser` on the selected bucket, which can read, list,
+overwrite, and delete objects in that bucket, not only upload them.
 
 ### S3
 
@@ -349,7 +350,7 @@ vendor=beacon
 product=endpoint-agent
 schema_version=1.0
 origin=cloud
-harness.name=claude
+harness.name=claude_code
 run.provider=claude_code_web
 run.run_id=cse_...
 ```
@@ -363,8 +364,9 @@ nothing and grants no dashboard access, and revoking the device under
 device key lives in an environment variable: a sandbox has no keychain and no
 secrets file to hold it, unlike a laptop, where the key stays in a `0600` file.
 
-The self-serve GCS flow above creates a dedicated service account scoped to
-object uploads for one bucket. The S3 flow creates a dedicated IAM user scoped
+The self-serve GCS flow above creates a dedicated service account with
+`roles/storage.objectUser` on one bucket, which can read, list, overwrite, and
+delete objects in it. The S3 flow creates a dedicated IAM user scoped
 to `s3:PutObject` under one prefix. All three flows store credentials in the
 Claude Code environment, so treat those environment variables as sensitive
 credentials.

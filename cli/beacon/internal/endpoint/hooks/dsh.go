@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/hookcmd"
 )
 
 // DeepSeek Harness is the one supported runtime where installing hooks takes two files, because
@@ -399,7 +401,7 @@ func dshHasEndpointHooks(path string) bool {
 	for _, groups := range file {
 		for _, group := range groups {
 			for _, hook := range group.Hooks {
-				if isEndpointHookCommand(hook.Command, "dsh") {
+				if hookcmd.IsEndpointHook(hook.Command, "dsh") {
 					return true
 				}
 			}
@@ -425,7 +427,7 @@ func dshHookFileIsBeacons(path string) error {
 	for event, groups := range file {
 		for _, group := range groups {
 			for _, hook := range group.Hooks {
-				if !isEndpointHookCommand(hook.Command, "dsh") {
+				if !hookcmd.IsEndpointHook(hook.Command, "dsh") {
 					return fmt.Errorf(
 						"%s already defines a %s hook Beacon did not write (%q); Beacon owns that "+
 							"filename, so it will not overwrite it. Point the bridge at your own "+

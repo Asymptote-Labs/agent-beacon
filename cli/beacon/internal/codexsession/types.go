@@ -12,6 +12,9 @@ import (
 	"fmt"
 )
 
+// Harness is Codex's runtime name. The desktop app writes its rollouts to the same store, and
+// each rollout's events are named by the originator in its session_meta (codex_desktop for the
+// desktop app), the same mapping the live collector uses.
 const Harness = "codex_cli"
 
 type Entry struct {

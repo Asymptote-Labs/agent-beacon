@@ -140,7 +140,7 @@ use for manual goose configuration.
 
 ### The file is not the whole answer
 
-Three environment conditions leave the config file saying "local" while goose exports nothing, so `beacon endpoint status` reads the environment as well as the file:
+Three environment conditions leave the config file saying "local" while goose exports nothing, so check goose's launch environment as well as the file:
 
 | Condition | What goose does |
 |-----------|-----------------|
@@ -148,7 +148,7 @@ Three environment conditions leave the config file saying "local" while goose ex
 | `OTEL_SDK_DISABLED=true` | Disables every signal |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` set to a gRPC variant | goose **disables the signal** rather than panicking its exporter threads, with one stderr warning as the only sign |
 
-Reporting "enabled" from the file alone would say a runtime is covered when it is silent, so each of these is reported as misconfigured with the variable named.
+Beacon has no goose discovery or status check yet, so nothing reports these for you: check each variable yourself.
 
 ## Discovery and status
 
@@ -287,7 +287,7 @@ If goose hook telemetry is missing:
 If goose token usage or model data is missing:
 
 - Confirm `otel_exporter_otlp_endpoint` is in `~/.config/goose/config.yaml` and names the collector's **HTTP** port, not the gRPC one.
-- Check `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SDK_DISABLED` and `OTEL_EXPORTER_OTLP_PROTOCOL` in goose's launch environment. Each can silently turn the export off or redirect it, and `beacon endpoint status` names whichever one is doing it.
+- Check `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SDK_DISABLED` and `OTEL_EXPORTER_OTLP_PROTOCOL` in goose's launch environment. Each can silently turn the export off or redirect it, and Beacon does not check them for goose.
 - Confirm the collector is running and listening on the HTTP port.
 
 ## Related

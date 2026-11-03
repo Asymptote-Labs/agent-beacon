@@ -97,7 +97,7 @@ func runEndpointFactorySync(cmd *cobra.Command, args []string) error {
 	if endpointFactoryOpts.watch && !endpointFactoryOpts.print {
 		return watchFactory(ctx, cmd, opts)
 	}
-	summary, err := factorysession.CollectOnce(opts)
+	summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, endpointSweepLockWait, factorysession.CollectOnce, opts)
 	reportFactorySweep(cmd, summary)
 	return err
 }
@@ -108,7 +108,7 @@ func watchFactory(ctx context.Context, cmd *cobra.Command, opts factorysession.C
 		interval = 5 * time.Second
 	}
 	for {
-		summary, err := factorysession.CollectOnce(opts)
+		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, factorysession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Factory sync error: %v\n", err)
 		}

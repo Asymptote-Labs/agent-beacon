@@ -7,11 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/brewpath"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sysacl"
 )
 
 const (
@@ -22,6 +24,7 @@ const (
 var (
 	lookPath                        = exec.LookPath
 	currentExecutable               = os.Executable
+	discoverSiblingBinary           = siblingBinary
 	discoverDefaultBinaryCandidates = defaultBinaryCandidates
 	// pollInterval is how often the readiness and port waits re-check; tests shorten it.
 	pollInterval = 250 * time.Millisecond
@@ -58,6 +61,13 @@ func DiscoverBinary(configured string) string {
 			return configured
 		}
 	}
+	// The collector beside this CLI comes from the same release, so it comes before PATH. An older
+	// beacon-otelcol earlier on PATH (a Homebrew install on a Mac that also has the package, which
+	// sudo finds first) can lack components this CLI's collector config needs, and a repair that
+	// took it refused to install.
+	if sibling := discoverSiblingBinary(); sibling != "" && validateExecutable(sibling) == nil {
+		return sibling
+	}
 	if path, err := lookPath(BinaryName); err == nil && validateExecutable(path) == nil {
 		return path
 	}
@@ -69,7 +79,7 @@ func DiscoverBinary(configured string) string {
 	return ""
 }
 
-// defaultBinaryCandidates lists where to look for the collector when it is not on PATH.
+// defaultBinaryCandidates lists where to look for the collector besides PATH.
 //
 // A sibling of the running CLI comes first, because that is what an extracted release archive looks
 // like: beacon and beacon-otelcol next to each other in whatever directory the user unpacked them
@@ -81,15 +91,21 @@ func DiscoverBinary(configured string) string {
 // collector at all.
 func defaultBinaryCandidates() []string {
 	paths := packagedBinaryPaths()
-	// A Homebrew CLI runs from its versioned keg, and the collector path found here goes into
-	// the service unit, so it is mapped to the <prefix>/bin link that survives `brew upgrade`.
-	// PATH usually finds that link first, but not under sudo, whose secure_path leaves out the
-	// Linuxbrew prefix.
-	if executable, err := currentExecutable(); err == nil {
-		sibling := brewpath.Stable(filepath.Join(filepath.Dir(executable), binaryFileName()))
+	if sibling := siblingBinary(); sibling != "" {
 		paths = append([]string{sibling}, paths...)
 	}
 	return paths
+}
+
+// siblingBinary is the collector beside the running CLI, or "" when the executable is unknown.
+// A Homebrew CLI runs from its versioned keg, and the collector path found here goes into the
+// service unit, so it is mapped to the <prefix>/bin link that survives `brew upgrade`.
+func siblingBinary() string {
+	executable, err := currentExecutable()
+	if err != nil {
+		return ""
+	}
+	return brewpath.Stable(filepath.Join(filepath.Dir(executable), binaryFileName()))
 }
 
 func validateExecutable(path string) error {
@@ -117,17 +133,19 @@ func WriteConfig(cfg endpointconfig.Config) error {
 	if err := os.MkdirAll(filepath.Dir(cfg.Collector.SpoolPath), 0755); err != nil {
 		return err
 	}
-	perm := os.FileMode(0644)
 	if endpointconfig.HasSecretDestinations(cfg) {
-		perm = 0600
+		// The collector config renders the destinations' tokens and headers. On a system install
+		// it is created SYSTEM and Administrators only (the 0600 mode means nothing on Windows,
+		// and the tree's DACL lets every user read below it); per-user configs keep the mode.
+		if !cfg.UserMode {
+			return sysacl.WriteSecretFile(cfg.Collector.ConfigPath, []byte(ConfigYAML(cfg)))
+		}
+		if err := os.WriteFile(cfg.Collector.ConfigPath, []byte(ConfigYAML(cfg)), 0600); err != nil {
+			return err
+		}
+		return os.Chmod(cfg.Collector.ConfigPath, 0600)
 	}
-	if err := os.WriteFile(cfg.Collector.ConfigPath, []byte(ConfigYAML(cfg)), perm); err != nil {
-		return err
-	}
-	if endpointconfig.HasSecretDestinations(cfg) {
-		return os.Chmod(cfg.Collector.ConfigPath, perm)
-	}
-	return nil
+	return os.WriteFile(cfg.Collector.ConfigPath, []byte(ConfigYAML(cfg)), 0644)
 }
 
 // IngestExtension is the collector extension that serves the local ingest socket in the restricted
@@ -146,12 +164,41 @@ func ConfigYAML(cfg endpointconfig.Config) string {
 		exporterNames = append(exporterNames, "falcon_hec")
 	}
 	exporters := "[" + strings.Join(exporterNames, ", ") + "]"
+	forwardExporter, forwardName := otlpForwardYAML(cfg)
+	// The OTLP forward stands in for the export a runtime had to another backend before Beacon's
+	// settings pointed it at this collector. It has pipelines of its own, fed by the same receiver,
+	// that keep Beacon's own pipelines independent of that backend and give it only:
+	//   - the runtimes it is meant to carry (beacon_forward_filter), never the browser extension's
+	//     chats or another runtime's OTLP;
+	//   - Claude Code API body events under the same policy as everywhere else (claude_api_body);
+	//   - secrets redacted, as for the HEC exporters (beacon_privacy).
+	forwardPipelines, forwardFilterYAML := "", ""
+	if forwardName != "" {
+		// Quoted like every other value the forward renders: a harness name the operator typed can
+		// hold YAML syntax (`#`, `: `), and a config the collector cannot parse stops Beacon's own
+		// pipelines too.
+		quoted := make([]string, 0, len(cfg.Destinations.OTLPForward.Harnesses))
+		for _, name := range cfg.Destinations.OTLPForward.Harnesses {
+			quoted = append(quoted, fmt.Sprintf("%q", name))
+		}
+		forwardFilterYAML = "  " + ForwardFilterProcessor + ":\n    harnesses: [" + strings.Join(quoted, ", ") + "]\n"
+		for _, signal := range []string{"logs", "traces", "metrics"} {
+			apiBody := ""
+			if signal == "logs" {
+				apiBody = "claude_api_body, "
+			}
+			forwardPipelines += fmt.Sprintf("    %s/forward:\n      receivers: [otlp]\n      processors: [memory_limiter, %s, %sbeacon_privacy, batch]\n      exporters: [%s]\n", signal, ForwardFilterProcessor, apiBody, forwardName)
+		}
+	}
 	// The direct HEC exporters send what they receive, so beacon_privacy redacts before the
 	// fanout. beaconjson redacts in its own writer; with no HEC exporter the processor would only
 	// repeat that on every record.
 	privacyYAML, privacyStep := "", ""
 	if len(exporterNames) > 1 {
 		privacyYAML, privacyStep = "  beacon_privacy: {}\n", "beacon_privacy, "
+	}
+	if forwardName != "" {
+		privacyYAML = "  beacon_privacy: {}\n" + forwardFilterYAML
 	}
 	runtimeMetricsYAML := ""
 	if cfg.Collector.IncludeRuntimeMetrics {
@@ -228,7 +275,63 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, %sbatch]
       exporters: %s
-`, cfg.Collector.GRPCPort, grpcLimitYAML, cfg.Collector.HTTPPort, modelContextYAML, privacyYAML, cfg.LogPath, runtimeMetricsYAML+codexSpansYAML+modelContextYAML+splunkExporter+falconExporter, endpointconfig.HealthCheckPort(cfg.Collector), ingestYAML, extensions, privacyStep, exporters, privacyStep, exporters, privacyStep, exporters)
+%s`, cfg.Collector.GRPCPort, grpcLimitYAML, cfg.Collector.HTTPPort, modelContextYAML, privacyYAML, cfg.LogPath, runtimeMetricsYAML+codexSpansYAML+modelContextYAML+splunkExporter+falconExporter+forwardExporter, endpointconfig.HealthCheckPort(cfg.Collector), ingestYAML, extensions, privacyStep, exporters, privacyStep, exporters, privacyStep, exporters, forwardPipelines)
+}
+
+// ForwardFilterProcessor keeps an OTLP forward to the runtimes it is meant to carry.
+const ForwardFilterProcessor = "beacon_forward_filter"
+
+// OTLPForwardExporters are the collector exporters an OTLP forward is rendered with, by protocol.
+var OTLPForwardExporters = map[string]string{
+	endpointconfig.OTLPForwardProtocolGRPC: "otlp",
+	endpointconfig.OTLPForwardProtocolHTTP: "otlphttp",
+}
+
+// otlpForwardYAML renders the exporter for the configured OTLP forward and returns its name, or
+// "" for both when forwarding is off.
+func otlpForwardYAML(cfg endpointconfig.Config) (string, string) {
+	if cfg.Destinations == nil || cfg.Destinations.OTLPForward == nil || !cfg.Destinations.OTLPForward.Enabled {
+		return "", ""
+	}
+	forward := cfg.Destinations.OTLPForward
+	kind := OTLPForwardExporters[forward.Protocol]
+	if kind == "" {
+		kind = OTLPForwardExporters[endpointconfig.OTLPForwardProtocolGRPC]
+	}
+	name := kind + "/forward"
+	var b strings.Builder
+	fmt.Fprintf(&b, "  %s:\n", name)
+	fmt.Fprintf(&b, "    endpoint: %q\n", forward.Endpoint)
+	if len(forward.Headers) > 0 {
+		keys := make([]string, 0, len(forward.Headers))
+		for key := range forward.Headers {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		fmt.Fprintf(&b, "    headers:\n")
+		for _, key := range keys {
+			fmt.Fprintf(&b, "      %q: %q\n", key, forward.Headers[key])
+		}
+	}
+	// Bounded well below memory_limiter's 128 MiB, so a backend that is down or slow sheds forward
+	// data after a couple of minutes instead of holding enough in memory to make the limiter
+	// refuse Beacon's own pipelines.
+	fmt.Fprintf(&b, "    timeout: 10s\n")
+	fmt.Fprintf(&b, "    sending_queue:\n      enabled: true\n      num_consumers: 2\n      queue_size: 20\n")
+	fmt.Fprintf(&b, "    retry_on_failure:\n      enabled: true\n      max_elapsed_time: 120s\n")
+	if forward.Insecure || forward.InsecureSkipVerify || forward.CAFile != "" {
+		fmt.Fprintf(&b, "    tls:\n")
+		if forward.Insecure {
+			fmt.Fprintf(&b, "      insecure: true\n")
+		}
+		if forward.InsecureSkipVerify {
+			fmt.Fprintf(&b, "      insecure_skip_verify: true\n")
+		}
+		if forward.CAFile != "" {
+			fmt.Fprintf(&b, "      ca_file: %q\n", forward.CAFile)
+		}
+	}
+	return b.String(), name
 }
 
 func splunkHECYAML(cfg endpointconfig.Config) string {

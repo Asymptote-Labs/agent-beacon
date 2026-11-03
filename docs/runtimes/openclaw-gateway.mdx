@@ -171,13 +171,13 @@ beacon endpoint hooks status --harness openclaw
 beacon endpoint hooks uninstall --harness openclaw
 ```
 
-`beacon endpoint install --harness openclaw` is **not** the command — OpenClaw's OTLP export lives in OpenClaw's own config, so Beacon prints the settings rather than writing them. Running it says so and names both commands.
+`beacon endpoint install` also installs the plugin at user level when it detects OpenClaw, or when given `--harness openclaw`; it runs the same plugin install as `hooks install`. It does not configure the OTLP export, which lives in OpenClaw's own config: Beacon prints those settings with `beacon endpoint integrations openclaw print-config` rather than writing them.
 
 ## Telemetry coverage
 
 | Area | Support |
 |------|---------|
-| Runtime discovery | Supported through the plugin directory at both scopes |
+| Runtime discovery | Supported through the user-scope plugin directory. `beacon endpoint inventory` reports both scopes |
 | Harness attribution | Supported. `openclaw`, `openclaw_gateway`, `open-claw` and related spellings normalize to `openclaw_gateway` |
 | Plugin install, status, uninstall, and repair | Supported |
 | OTLP export configuration | Printed, not written. It lives in OpenClaw's own config |

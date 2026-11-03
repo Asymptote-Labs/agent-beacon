@@ -102,7 +102,7 @@ func runEndpointDshSync(cmd *cobra.Command, args []string) error {
 	if endpointDshOpts.watch && !endpointDshOpts.print {
 		return watchDsh(ctx, cmd, opts)
 	}
-	summary, err := dshsession.CollectOnce(opts)
+	summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, endpointSweepLockWait, dshsession.CollectOnce, opts)
 	reportDshSweep(cmd, summary)
 	return err
 }
@@ -113,7 +113,7 @@ func watchDsh(ctx context.Context, cmd *cobra.Command, opts dshsession.CollectOp
 		interval = 5 * time.Second
 	}
 	for {
-		summary, err := dshsession.CollectOnce(opts)
+		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, dshsession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "dsh sync error: %v\n", err)
 		}

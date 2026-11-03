@@ -22,6 +22,7 @@ import (
 // beacon, and what it passed is parsed by the real command's flags.
 func TestCIActionPassesUploadsToTheCommandsItRuns(t *testing.T) {
 	testenv.RequirePOSIXExecutableFixtures(t)
+	testenv.RequireCommands(t, "bash")
 	data, err := os.ReadFile(filepath.Join("..", "..", "..", "action.yml"))
 	if err != nil {
 		t.Fatalf("read action.yml: %v", err)

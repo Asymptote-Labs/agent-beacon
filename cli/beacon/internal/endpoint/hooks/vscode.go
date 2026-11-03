@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/hookcmd"
 )
 
 type VSCodeOptions struct {
@@ -111,7 +113,7 @@ func readVSCodeHooks(path string) (vscodeHooksFile, error) {
 func mergeVSCodeEndpointHook(existing []vscodeHookRef, ref vscodeHookRef) []vscodeHookRef {
 	out := make([]vscodeHookRef, 0, len(existing)+1)
 	for _, item := range existing {
-		if !isEndpointHookCommand(item.Command, "vscode") {
+		if !hookcmd.IsEndpointHook(item.Command, "vscode") {
 			out = append(out, item)
 		}
 	}
@@ -130,7 +132,7 @@ func removeVSCodeEndpointHooks(path string) (bool, error) {
 	for eventName, refs := range hooksFile.Hooks {
 		filtered := refs[:0]
 		for _, ref := range refs {
-			if isEndpointHookCommand(ref.Command, "vscode") {
+			if hookcmd.IsEndpointHook(ref.Command, "vscode") {
 				changed = true
 				continue
 			}
@@ -162,7 +164,7 @@ func isVSCodeInstalledAt(path string) bool {
 	}
 	for _, refs := range hooksFile.Hooks {
 		for _, ref := range refs {
-			if isEndpointHookCommand(ref.Command, "vscode") {
+			if hookcmd.IsEndpointHook(ref.Command, "vscode") {
 				return true
 			}
 		}

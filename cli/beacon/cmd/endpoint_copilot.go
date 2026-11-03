@@ -102,7 +102,7 @@ func runEndpointCopilotSync(cmd *cobra.Command, args []string) error {
 	if endpointCopilotOpts.watch && !endpointCopilotOpts.print {
 		return watchCopilot(ctx, cmd, opts)
 	}
-	summary, err := copilotsession.CollectOnce(opts)
+	summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, endpointSweepLockWait, copilotsession.CollectOnce, opts)
 	reportCopilotSweep(cmd, summary)
 	return err
 }
@@ -113,7 +113,7 @@ func watchCopilot(ctx context.Context, cmd *cobra.Command, opts copilotsession.C
 		interval = 5 * time.Second
 	}
 	for {
-		summary, err := copilotsession.CollectOnce(opts)
+		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, copilotsession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "copilot sync error: %v\n", err)
 		}

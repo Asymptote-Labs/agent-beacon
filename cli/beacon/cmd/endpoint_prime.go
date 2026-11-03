@@ -100,7 +100,7 @@ func runEndpointPrimeSync(cmd *cobra.Command, args []string) error {
 	if endpointPrimeOpts.watch && !endpointPrimeOpts.print {
 		return watchPrime(ctx, cmd, opts)
 	}
-	summary, err := primesession.CollectOnce(opts)
+	summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, endpointSweepLockWait, primesession.CollectOnce, opts)
 	reportPrimeSweep(cmd, summary)
 	return err
 }
@@ -111,7 +111,7 @@ func watchPrime(ctx context.Context, cmd *cobra.Command, opts primesession.Colle
 		interval = 5 * time.Second
 	}
 	for {
-		summary, err := primesession.CollectOnce(opts)
+		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, primesession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Prime Agent sync error: %v\n", err)
 		}

@@ -405,9 +405,31 @@ func TestDiscoverBinaryFindsAdjacentBeaconOtelcol(t *testing.T) {
 	}
 }
 
+// A package CLI run under sudo on a Mac with a Homebrew Beacon finds Homebrew's older
+// beacon-otelcol first on PATH. The collector beside the CLI is the one from its own release, so
+// it wins; a repair that took the PATH one refused to install and left the endpoint without its
+// collector.
+func TestDiscoverBinaryPrefersTheCollectorBesideTheCLIOverPath(t *testing.T) {
+	onPath := filepath.Join(t.TempDir(), stubCollectorName())
+	beside := filepath.Join(t.TempDir(), stubCollectorName())
+	for _, bin := range []string{onPath, beside} {
+		if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0755); err != nil {
+			t.Fatalf("write fake collector: %v", err)
+		}
+	}
+	t.Setenv("PATH", filepath.Dir(onPath))
+	withCollectorDiscovery(t, nil, nil)
+	discoverSiblingBinary = func() string { return beside }
+
+	if got := DiscoverBinary(""); got != beside {
+		t.Fatalf("DiscoverBinary = %q, want the collector beside the CLI %q", got, beside)
+	}
+}
+
 func withCollectorDiscovery(t *testing.T, lookup func(string) (string, error), candidates func() []string) {
 	t.Helper()
 	oldLookPath := lookPath
+	oldSibling := discoverSiblingBinary
 	oldCandidates := discoverDefaultBinaryCandidates
 	if lookup == nil {
 		lookup = execLookPath
@@ -416,13 +438,87 @@ func withCollectorDiscovery(t *testing.T, lookup func(string) (string, error), c
 		candidates = func() []string { return nil }
 	}
 	lookPath = lookup
+	discoverSiblingBinary = func() string { return "" }
 	discoverDefaultBinaryCandidates = candidates
 	t.Cleanup(func() {
 		lookPath = oldLookPath
+		discoverSiblingBinary = oldSibling
 		discoverDefaultBinaryCandidates = oldCandidates
 	})
 }
 
 func execLookPath(file string) (string, error) {
 	return exec.LookPath(file)
+}
+
+func TestConfigYAMLForwardsFilteredRedactedOTLPWhenConfigured(t *testing.T) {
+	for _, tc := range []struct {
+		protocol, endpoint, exporter string
+	}{
+		{endpointconfig.OTLPForwardProtocolGRPC, "otel.backend.example:4317", "otlp/forward"},
+		{endpointconfig.OTLPForwardProtocolHTTP, "https://otel.backend.example", "otlphttp/forward"},
+	} {
+		t.Run(tc.protocol, func(t *testing.T) {
+			cfg := testConfig(t)
+			cfg.Destinations = &endpointconfig.Destinations{OTLPForward: &endpointconfig.OTLPForward{
+				Endpoint: tc.endpoint,
+				Protocol: tc.protocol,
+				Headers:  map[string]string{"x-b": "2", "authorization": "Bearer secret"},
+				CAFile:   "/tmp/ca.pem",
+			}}
+			endpointconfig.NormalizeDestinations(&cfg)
+
+			yaml := ConfigYAML(cfg)
+
+			for _, want := range []string{
+				"  " + tc.exporter + ":\n    endpoint: \"" + tc.endpoint + "\"\n    headers:\n      \"authorization\": \"Bearer secret\"\n      \"x-b\": \"2\"\n",
+				// A down backend sheds forward data rather than filling memory_limiter.
+				"    sending_queue:\n      enabled: true\n      num_consumers: 2\n      queue_size: 20\n",
+				"    retry_on_failure:\n      enabled: true\n      max_elapsed_time: 120s\n",
+				"    tls:\n      ca_file: \"/tmp/ca.pem\"\n",
+				"  beacon_privacy: {}\n  beacon_forward_filter:\n    harnesses: [\"claude_code\", \"codex_cli\", \"codex_desktop\"]\n",
+				"    logs/forward:\n      receivers: [otlp]\n      processors: [memory_limiter, beacon_forward_filter, claude_api_body, beacon_privacy, batch]\n      exporters: [" + tc.exporter + "]\n",
+				"    traces/forward:\n      receivers: [otlp]\n      processors: [memory_limiter, beacon_forward_filter, beacon_privacy, batch]\n",
+				"    metrics/forward:\n      receivers: [otlp]\n      processors: [memory_limiter, beacon_forward_filter, beacon_privacy, batch]\n",
+				// Beacon's own pipelines are unchanged by a forward.
+				"    logs:\n      receivers: [otlp]\n      processors: [memory_limiter, claude_api_body, batch]\n      exporters: [beaconjson]\n",
+			} {
+				if !strings.Contains(yaml, want) {
+					t.Fatalf("ConfigYAML missing %q:\n%s", want, yaml)
+				}
+			}
+		})
+	}
+}
+
+func TestConfigYAMLHasNoForwardWhenDisabled(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Destinations = &endpointconfig.Destinations{OTLPForward: &endpointconfig.OTLPForward{}}
+	endpointconfig.NormalizeDestinations(&cfg)
+	if yaml := ConfigYAML(cfg); strings.Contains(yaml, "/forward") {
+		t.Fatalf("ConfigYAML has a forward with none configured:\n%s", yaml)
+	}
+}
+
+// Harness names are typed by the operator, so YAML syntax in one must not break the config the
+// collector shares with Beacon's own pipelines.
+func TestConfigYAMLQuotesForwardHarnessNames(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Destinations = &endpointconfig.Destinations{OTLPForward: &endpointconfig.OTLPForward{
+		Endpoint:  "otel.example:4317",
+		Harnesses: []string{"claude_code", "my agent #2", "foo: bar"},
+	}}
+	endpointconfig.NormalizeDestinations(&cfg)
+	var parsed struct {
+		Processors map[string]struct {
+			Harnesses []string `yaml:"harnesses"`
+		} `yaml:"processors"`
+	}
+	if err := yaml.Unmarshal([]byte(ConfigYAML(cfg)), &parsed); err != nil {
+		t.Fatalf("collector config does not parse: %v", err)
+	}
+	got := parsed.Processors["beacon_forward_filter"].Harnesses
+	if strings.Join(got, "|") != "claude_code|my agent #2|foo: bar" {
+		t.Fatalf("harnesses = %q", got)
+	}
 }

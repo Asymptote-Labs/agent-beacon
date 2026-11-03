@@ -166,9 +166,16 @@ func removeService() error {
 	})
 }
 
-// stopAndWait asks the service to stop and waits for it, so a delete does not race a running
-// process. A service that will not stop is reported rather than force-killed: the SCM has no
-// equivalent of SIGKILL for a service, and pretending otherwise would hide a wedged collector.
+// stopAndWait asks the service to stop and waits until its process has exited, so a delete does
+// not race a running process and a caller that then removes or replaces the binary finds it free.
+// A service that will not stop is reported rather than force-killed: the SCM has no equivalent of
+// SIGKILL for a service, and pretending otherwise would hide a wedged collector.
+//
+// SERVICE_STOPPED alone is not enough. The collector reports it from inside its service handler,
+// and the process still has to return from svc.Run and exit before Windows releases the image. An
+// MSI uninstall or upgrade that reaches beacon-otelcol.exe in that window cannot remove it,
+// schedules the delete for the next boot, and -- under msiexec /qn without /norestart, which is how
+// fleet tooling runs it -- restarts the machine on the spot.
 func stopAndWait(s *mgr.Service) error {
 	status, err := s.Query()
 	if err != nil {
@@ -177,26 +184,67 @@ func stopAndWait(s *mgr.Service) error {
 	if status.State == svc.Stopped {
 		return nil
 	}
+	// Opened before the stop request, so the handle is to this service's process and cannot become
+	// whatever reuses the PID after it exits. Best effort: without a handle the wait below falls
+	// back to the service state alone, which is what it always was.
+	process := openServiceProcess(status.ProcessId)
+	if process != 0 {
+		defer windows.CloseHandle(process)
+	}
+	deadline := time.Now().Add(serviceStopTimeout)
+
 	if _, err := s.Control(svc.Stop); err != nil {
-		// Already stopped between the query and the control request; that is the outcome we want.
+		// Already stopped between the query and the control request; that is the outcome we want,
+		// once its process is gone.
 		if errors.Is(err, windows.ERROR_SERVICE_NOT_ACTIVE) {
-			return nil
+			return waitForServiceProcess(process, deadline)
 		}
 		return fmt.Errorf("stop the %s service: %w", WindowsServiceName, err)
 	}
 
-	deadline := time.Now().Add(serviceStopTimeout)
 	for time.Now().Before(deadline) {
 		status, err := s.Query()
 		if err != nil {
 			return fmt.Errorf("query the %s service while stopping: %w", WindowsServiceName, err)
 		}
 		if status.State == svc.Stopped {
-			return nil
+			return waitForServiceProcess(process, deadline)
 		}
 		time.Sleep(300 * time.Millisecond)
 	}
 	return fmt.Errorf("the %s service did not stop within %s", WindowsServiceName, serviceStopTimeout)
+}
+
+// openServiceProcess returns a handle that can wait on the service's process, or 0 when there is no
+// process to wait on or it cannot be opened.
+func openServiceProcess(pid uint32) windows.Handle {
+	if pid == 0 {
+		return 0
+	}
+	h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, pid)
+	if err != nil {
+		return 0
+	}
+	return h
+}
+
+// waitForServiceProcess waits, until deadline, for the process behind a stopped service to exit.
+func waitForServiceProcess(process windows.Handle, deadline time.Time) error {
+	if process == 0 {
+		return nil
+	}
+	remaining := time.Until(deadline)
+	if remaining < 0 {
+		remaining = 0
+	}
+	event, err := windows.WaitForSingleObject(process, uint32(remaining.Milliseconds()))
+	if err != nil {
+		return fmt.Errorf("wait for the %s service's process to exit: %w", WindowsServiceName, err)
+	}
+	if event == uint32(windows.WAIT_TIMEOUT) {
+		return fmt.Errorf("the %s service stopped but its process did not exit within %s", WindowsServiceName, serviceStopTimeout)
+	}
+	return nil
 }
 
 func restartService() error {

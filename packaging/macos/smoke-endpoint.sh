@@ -63,6 +63,7 @@ run_beacon endpoint install \
   --collector "$COLLECTOR_BIN" \
   --log-path "$LOG_PATH" \
   --harness claude,codex \
+  --session-sync \
   --otlp-grpc-port 55317 \
   --otlp-http-port 55318 >"$INSTALL_OUTPUT" 2>&1
 cat "$INSTALL_OUTPUT"
@@ -76,6 +77,18 @@ INVENTORY_PLIST="$HOME_DIR/Library/LaunchAgents/com.beacon.endpoint.inventory.pl
 test -f "$INVENTORY_PLIST"
 if ! grep -q -- "--scheduled" "$INVENTORY_PLIST" || ! grep -q -- "$LOG_PATH" "$INVENTORY_PLIST"; then
   echo "scheduled inventory job must invoke the heartbeat with --scheduled and this install's log path" >&2
+  exit 1
+fi
+# --session-sync writes the opt-in session sync job the same way. Unlike inventory it does not run
+# at load, so the install backfill is the only sweep at install time.
+SESSION_SYNC_PLIST="$HOME_DIR/Library/LaunchAgents/com.beacon.endpoint.session-sync.plist"
+test -f "$SESSION_SYNC_PLIST"
+if ! grep -q -- "<string>--scheduled</string>" "$SESSION_SYNC_PLIST" || ! grep -q -- "$LOG_PATH" "$SESSION_SYNC_PLIST"; then
+  echo "scheduled session sync job must run the sync with --scheduled and this install's log path" >&2
+  exit 1
+fi
+if ! tr -d ' \n' <"$SESSION_SYNC_PLIST" | grep -q '<key>RunAtLoad</key><false/>'; then
+  echo "scheduled session sync job must not run at load" >&2
   exit 1
 fi
 test -f "$LOG_PATH"
@@ -100,6 +113,11 @@ STATUS_OUTPUT="$TMP_DIR/status.txt"
 run_beacon endpoint status --user --log-path "$LOG_PATH" >"$STATUS_OUTPUT"
 if ! grep -q '^Inventory heartbeat: scheduled every' "$STATUS_OUTPUT"; then
   echo "endpoint status must report the scheduled inventory job" >&2
+  cat "$STATUS_OUTPUT" >&2
+  exit 1
+fi
+if ! grep -q '^Session sync: every 15m0s' "$STATUS_OUTPUT"; then
+  echo "endpoint status must report the scheduled session sync job" >&2
   cat "$STATUS_OUTPUT" >&2
   exit 1
 fi
@@ -202,6 +220,11 @@ if [ -f "$INVENTORY_PLIST" ]; then
   exit 1
 fi
 echo "ok: the scheduled inventory job plist was removed"
+if [ -f "$SESSION_SYNC_PLIST" ]; then
+  echo "scheduled session sync job plist survived uninstall: $SESSION_SYNC_PLIST" >&2
+  exit 1
+fi
+echo "ok: the scheduled session sync job plist was removed"
 
 # Deliberately not asked of launchd. This install passes --no-start into a temporary HOME, so no job is
 # ever bootstrapped -- which means any answer launchctl gave would be about some *other* install of the

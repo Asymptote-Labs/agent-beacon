@@ -238,18 +238,11 @@ func decodeObject(line []byte) (map[string]interface{}, error) {
 	dec := json.NewDecoder(bytes.NewReader(line))
 	dec.UseNumber()
 	var event map[string]interface{}
-	if err := dec.Decode(&event); err != nil {
+	if err := asymptoteobserve.DecodeOnly(dec, &event); err != nil {
 		return nil, fmt.Errorf("not a JSON object: %v", err)
 	}
 	if event == nil {
 		return nil, errors.New("not a JSON object")
-	}
-	if dec.More() {
-		return nil, errors.New("more than one JSON value on the line")
-	}
-	var trailing json.RawMessage
-	if err := dec.Decode(&trailing); err == nil {
-		return nil, errors.New("more than one JSON value on the line")
 	}
 	return event, nil
 }

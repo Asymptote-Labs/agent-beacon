@@ -690,9 +690,22 @@ func liveScopeFor(endpoint, harness, session string) (liveScope, bool) {
 	}
 	return liveScope{
 		endpoint: strings.ToLower(strings.TrimSpace(endpoint)),
-		harness:  asymptoteobserve.NormalizeHarnessName(harness),
+		harness:  usageHarnessKey(harness),
 		session:  session,
 	}, true
+}
+
+// usageHarnessKey is the harness a session's live/poll check groups by. Codex's CLI and desktop app
+// are one runtime with one session store, and a conversation id belongs to one of them, so folding
+// the two names never merges two sessions. Logs written before the collector and `codex sync` both
+// went by the originator hold one session under both names -- the collector named every app-server
+// session codex_desktop, `codex sync` every rollout codex_cli -- and the fold counts it once.
+func usageHarnessKey(harness string) string {
+	normalized := asymptoteobserve.NormalizeHarnessName(harness)
+	if normalized == "codex_desktop" {
+		return "codex_cli"
+	}
+	return normalized
 }
 
 // isLiveCollectionMethod reports whether a collection method observed the runtime as it worked.

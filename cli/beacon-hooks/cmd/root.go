@@ -10,6 +10,11 @@ import (
 
 var platformFlag string
 
+// hookCommand is the subcommand this process runs (session-start, pre-tool, ...), as cobra resolved
+// it. It is how a run tells whether another hook entry runs the same command; see
+// cursorRecordsThisHook.
+var hookCommand string
+
 // The endpoint settings a hook needs, as flags.
 //
 // They already existed as environment variables, and still do -- an already-installed hook carries
@@ -48,7 +53,10 @@ func init() {
 	// every use, and several runtimes surface hook stderr to the person at the keyboard.
 	rootCmd.PersistentFlags().StringVar(&cliFlag, "cli", "", "Ignored; kept for hook commands written by older versions (mapped to BEACON_ENDPOINT_CLI)")
 	_ = rootCmd.PersistentFlags().MarkHidden("cli")
-	rootCmd.PersistentPreRun = func(*cobra.Command, []string) { applyEndpointFlagsToEnv() }
+	rootCmd.PersistentPreRun = func(cmd *cobra.Command, _ []string) {
+		hookCommand = cmd.Name()
+		applyEndpointFlagsToEnv()
+	}
 }
 
 // applyEndpointFlagsToEnv puts flag values where the rest of the binary already looks for them.

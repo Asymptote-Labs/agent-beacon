@@ -11,6 +11,7 @@ Stay up to date with the latest changes to the Beacon Observe SDK.
 
 ## Unreleased
 
+- **Promised async iterators stay traced through consumption** · An observed async function returning an async generator or query iterator ended its span before the first item was read. Iterators with their own `next()` now keep the same consumption, cancellation and context behavior as directly returned iterators. Platform streams without `next()` remain unchanged values.
 - **Anthropic `instrumentModules` example fixed** · The documented `import Anthropic from` example crashed `Observe.initialize()`; pass the module namespace (`import * as Anthropic`) instead, and a clear error now says so.
 - **Empty environment variables are ignored** · A declared but empty `ASYMPTOTE_BASE_URL` made `Observe.initialize()` throw `Invalid URL`, and an empty `OTEL_SERVICE_NAME` exported spans with a blank service name. Empty values now fall back to the defaults.
 

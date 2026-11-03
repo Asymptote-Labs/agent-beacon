@@ -34,6 +34,60 @@ func TestRetainedContentDescribesTheOriginalText(t *testing.T) {
 	}
 }
 
+// secretBearingText holds a GitHub token and an assigned password, both of which
+// RedactString replaces; secretBearingStored is what every writer stores for it.
+const (
+	secretBearingText   = "deploy with ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8 and password=hunter2"
+	secretBearingStored = "deploy with ghp_[REDACTED] and password=[REDACTED]"
+)
+
+func sha256Hex(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])
+}
+
+func TestRetainedContentHashesTheRedactedText(t *testing.T) {
+	// The hash leaves the machine where the text does not (Metadata-only keeps it),
+	// so a hash of the text before redaction confirms a guessed secret offline.
+	if stored := CleanString(secretBearingText, DefaultStringLimit, true); stored != secretBearingStored {
+		t.Fatalf("stored text = %q, want %q", stored, secretBearingStored)
+	}
+	info := RetainedContent(secretBearingText, DefaultStringLimit)
+	if info.Hash != sha256Hex(secretBearingStored) || info.Bytes != len(secretBearingText) {
+		t.Fatalf("marker = %#v, want the hash of the stored redacted text %s and the original size %d", info, sha256Hex(secretBearingStored), len(secretBearingText))
+	}
+	if info.Hash == sha256Hex(secretBearingText) {
+		t.Fatal("hash is of the text before redaction; it confirms the secret")
+	}
+	if !info.Redacted || info.Truncated {
+		t.Fatalf("marker = %#v, want redacted and not truncated", info)
+	}
+
+	content, diffHash, diffBytes := RetainedDiff(secretBearingText, DefaultStringLimit)
+	if *content != *info || diffHash != info.Hash || diffBytes != info.Bytes {
+		t.Fatalf("RetainedDiff = %#v %q %d, want the RetainedContent marker and its hash and size", content, diffHash, diffBytes)
+	}
+	fields, fieldsHash, fieldsBytes := RetainedDiffFields(secretBearingText, DefaultStringLimit)
+	if fields["hash"] != info.Hash || fieldsHash != info.Hash || fieldsBytes != info.Bytes {
+		t.Fatalf("RetainedDiffFields = %#v %q %d, want the RetainedContent hash and size", fields, fieldsHash, fieldsBytes)
+	}
+	if content, diffHash, diffBytes := RetainedDiff("", DefaultStringLimit); content != nil || diffHash != "" || diffBytes != 0 {
+		t.Fatalf("RetainedDiff(\"\") = %#v %q %d, want nothing", content, diffHash, diffBytes)
+	}
+}
+
+func TestRetainedContentHashOfTextWithoutSecretsIsUnchanged(t *testing.T) {
+	// Pinned from before hashes were taken after redaction: ordinary events keep
+	// the content.hash and file.diff_hash they always had.
+	const want = "9ecb36561341d18eb65484e833efea61edc74b84cf5e6ae1b81c63533e25fc8f"
+	if info := RetainedContent("the quick brown fox", DefaultStringLimit); info.Hash != want || info.Bytes != 19 || info.Redacted {
+		t.Fatalf("marker = %#v, want hash %s over 19 bytes", info, want)
+	}
+	if _, diffHash, diffBytes := RetainedDiff("the quick brown fox", DefaultStringLimit); diffHash != want || diffBytes != 19 {
+		t.Fatalf("diff = %q %d, want %s over 19 bytes", diffHash, diffBytes, want)
+	}
+}
+
 func TestRetainedContentTruncationFollowsTheWritersLimit(t *testing.T) {
 	// The same text is truncated by one writer and not the other, so the marker
 	// has to answer against the limit it is given rather than a constant.

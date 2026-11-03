@@ -68,11 +68,19 @@ var hookClockEpoch = time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC)
 
 // stubGitHookTime makes each phase of the next hook runs take steps[phase] on the hook's clock, and
 // ends the hook's time as phase expireIn begins (never, when expireIn is empty). The returned func
-// ends the latest run's time at once, for a test that has to end it mid-phase. The budgets are
-// the production ones; nothing here waits for them.
+// ends the latest run's time at once, for a test that has to end it mid-phase. The hooks' budgets
+// are the production ones; nothing here waits for them.
+//
+// A manual deadline reports no Deadline(), so the fresh real timers the pre-push hook writes notes
+// and pushes the notes ref on after its share phase (gitShareAfterContext) get only their floors,
+// gitShareNoteWriteBudget and gitShareNotesReserve, which a slow runner's git spawns can use up.
+// Those are a minute here.
 func stubGitHookTime(t *testing.T, steps map[string]time.Duration, expireIn string) (expire func()) {
 	t.Helper()
 	prev := startGitHook
+	prevNoteWrite, prevNotesReserve := gitShareNoteWriteBudget, gitShareNotesReserve
+	gitShareNoteWriteBudget, gitShareNotesReserve = time.Minute, time.Minute
+	t.Cleanup(func() { gitShareNoteWriteBudget, gitShareNotesReserve = prevNoteWrite, prevNotesReserve })
 	var mu sync.Mutex
 	var latest *manualDeadline
 	startGitHook = func(parent context.Context, hook string, budget time.Duration) (*gitlink.HookRun, context.Context, context.CancelFunc) {

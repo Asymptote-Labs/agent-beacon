@@ -283,7 +283,7 @@ func BenchmarkCommandEvent(b *testing.B) {
 			ParsedCommands(benchCommand)
 		}
 	})
-	// The open corpus's single-event rules, three of which reference parsed_commands.
+	// The open corpus's single-event rules, eight of which reference parsed_commands.
 	b.Run("corpus", func(b *testing.B) {
 		rules, err := LoadDir(filepath.Join("..", "..", "..", "rules"))
 		if err != nil {

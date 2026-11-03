@@ -100,7 +100,7 @@ beacon endpoint hooks status --harness qwen
 
 ## Install or configuration support
 
-`beacon endpoint install` prepares shared endpoint config and runtime log paths. Qwen Code hooks are installed separately, because Qwen loads them from the user's own profile rather than from a machine-wide location:
+`beacon endpoint install` prepares shared endpoint config and runtime log paths, and installs the user-level Qwen Code hooks when it detects Qwen Code (or when given `--harness qwen`). Install, refresh, or remove them on their own, or at project level, with `beacon endpoint hooks`:
 
 ```bash
 beacon endpoint hooks install --harness qwen                    # user level (default)
@@ -110,8 +110,6 @@ beacon endpoint hooks uninstall --harness qwen
 ```
 
 A project-level install reports that Qwen Code runs project hooks only in a trusted folder. Without that, the file is written and nothing runs.
-
-`beacon endpoint install` does not configure Qwen Code. Passing `--harness qwen` to it fails with a message pointing at `beacon endpoint hooks install`.
 
 ## Telemetry coverage
 
@@ -171,10 +169,9 @@ Qwen carries signal with no endpoint-schema field of its own: `permission_mode` 
 
 ## Known gaps
 
-- **No OTLP path.** Qwen Code is a Gemini CLI fork without Gemini's OpenTelemetry export, so there is no collector endpoint to configure. Hooks are the only collection path, and `beacon endpoint install --harness qwen` says so rather than appearing to succeed.
+- **No OTLP path.** Qwen Code is a Gemini CLI fork without Gemini's OpenTelemetry export, so there is no collector endpoint to configure. Hooks are the only collection path.
 - **Token spend is not collected, and cannot be.** Qwen's `Stop` payload carries no per-call token counts. Its `input_tokens` is the prompt for that turn, which in a multi-turn session already contains every prior turn, so summing it into `gen_ai.usage` would inflate a session's total by roughly the square of its length. Qwen Code therefore contributes no rows to the spend totals in `beacon token-usage`.
 - **Context utilization is collected.** The same numbers describe how full the window was, which is a level rather than an amount, so they normalize into `gen_ai.context` instead: `input_tokens` becomes `gen_ai.context.used_tokens` and `context_limit` becomes `gen_ai.context.limit_tokens`. Qwen Code appears in the context utilization section of `beacon token-usage`, measured against the window it reported rather than a static model table. `context_usage` is the ratio of the two and stays in `raw.qwen` rather than being stored a second time in different units.
-- **A policy deny is honored in one of two phases.** The seam runs in both the `pre-tool` and `permission-request` hooks, and Beacon returns Claude Code's deny shape, which Qwen's `PreToolUse` contract honors. Qwen's `PermissionRequest` event reads a differently shaped `hookSpecificOutput.decision` object, so a deny raised from that phase is not honored. Because the seam fails open, the cost is a deny that does not take effect on one phase, never a tool call blocked for the wrong reason.
 - **Assistant text is not collected.** `MessageDisplay` is not registered, so Beacon records no assistant output or reasoning for Qwen Code. See [Events that are not collected](#events-that-are-not-collected).
 - **Project-level installs need a trusted folder.** Qwen gates project hooks behind trusted-folder status, so a user-level install is the one that works without further interaction. Grok Build has the same caveat.
 - **Payload fixtures are built from documentation.** Beacon's Qwen fixtures are constructed from Qwen Code's published hooks documentation rather than captured from a running install. The documentation specifies the envelope and per-event fields precisely, so the shapes match the documented contract, but they are not evidence that a shipped build sends exactly this.

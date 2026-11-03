@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudeotel"
 	endpointcollector "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/collector"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
@@ -61,6 +62,7 @@ type Session struct {
 	Harnesses       []string        `json:"harnesses,omitempty"`
 	WorkDir         string          `json:"work_dir,omitempty"`
 	StartedAt       string          `json:"started_at"`
+	UploadSession   string          `json:"upload_session"` // see newUploadSession
 	StatePath       string          `json:"state_path,omitempty"`
 	CollectorPID    int             `json:"collector_pid,omitempty"`
 	Run             *schema.RunInfo `json:"run,omitempty"`
@@ -138,7 +140,7 @@ func Provision(opts Options) (*Session, error) {
 	// A CI job opts in to model-context capture by setting OTEL_LOG_RAW_API_BODIES itself, and the
 	// collector is this job's alone, so it keeps what the job asked Claude Code to send. Without
 	// this the collector would drop every body the job turned on.
-	cfg.ClaudeCaptureModelContext = inlineRawBodies(os.Getenv("OTEL_LOG_RAW_API_BODIES"))
+	cfg.ClaudeCaptureModelContext = claudeotel.InlineRawBodies(os.Getenv("OTEL_LOG_RAW_API_BODIES"))
 	forward, err := normalizeForward(opts.Forward)
 	if err != nil {
 		return nil, err
@@ -156,9 +158,13 @@ func Provision(opts Options) (*Session, error) {
 		// environment and can resolve them; the child has these vars stripped.
 		replaceTokensWithEnvRefs(&cfg)
 	}
-	startedAt := time.Now().UTC()
+	startedAt := sessionClock().UTC()
+	uploadSession, err := newUploadSession(startedAt)
+	if err != nil {
+		return nil, err
+	}
 	run := detectRunInfo()
-	uploads, err := resolveUploadDestinations(opts.Uploads, run, logPath, startedAt)
+	uploads, err := resolveUploadDestinations(opts.Uploads, run, logPath, uploadSession)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +199,8 @@ func Provision(opts Options) (*Session, error) {
 		Harness:         HarnessesString(harnesses),
 		Harnesses:       harnesses,
 		WorkDir:         opts.WorkDir,
-		StartedAt:       startedAt.Format(time.RFC3339),
+		StartedAt:       startedAt.Format(time.RFC3339Nano),
+		UploadSession:   uploadSession,
 		Run:             run,
 		Forward:         forward,
 		ForwardEndpoint: forwardEndpoint,

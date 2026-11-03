@@ -15,7 +15,7 @@ Before enabling Cline telemetry, make sure:
 
 - Cline is installed in at least one host, or has a local config directory at `~/.cline`.
 - `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
-- Beacon's Cline plugin is installed with `beacon endpoint hooks install --harness cline`.
+- Beacon's Cline plugin is installed, either by `beacon endpoint install` when it detects Cline or with `beacon endpoint hooks install --harness cline`.
 - Cline is restarted after plugin install or removal so new sessions load the updated plugin. In the IDE hosts this means reloading the window.
 
 ## Collection paths
@@ -46,7 +46,7 @@ Use `beacon endpoint cline status` to inspect Cline session stores and how much 
 
 ## Install or configuration support
 
-`beacon endpoint install` prepares shared endpoint config and runtime log paths. Install Cline hooks separately:
+`beacon endpoint install` prepares shared endpoint config and runtime log paths, and installs the Cline plugin at user level when it detects Cline (or when you pass `--harness cline`). To install, refresh, or manage the plugin on its own, including at project level:
 
 ```bash title="Install runtime hooks"
 beacon endpoint hooks install --harness cline

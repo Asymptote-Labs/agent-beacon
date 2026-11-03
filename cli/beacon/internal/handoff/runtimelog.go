@@ -118,7 +118,7 @@ func LogSessions(logPath string, filter Filter) ([]Session, error) {
 			order = append(order, key)
 		}
 		if session.Directory == "" {
-			session.Directory = strings.TrimSpace(event.Session.WorkingDirectory)
+			session.Directory = event.Session.WorkingDirectory
 		}
 		if session.Branch == "" {
 			session.Branch = strings.TrimSpace(event.Branch)
