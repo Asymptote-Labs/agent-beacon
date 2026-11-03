@@ -66,3 +66,23 @@ func IsSecretFile(path string) bool {
 	obj, err := ReadObject(path)
 	return err == nil && obj.Protected && reflect.DeepEqual(obj.DACL, SecretFileDACL())
 }
+
+// SecureSecretDir gives dir Administrators ownership and the protected SecretDirDACL, and resets
+// everything already below it to what it inherits from that, so nothing in it stays readable by
+// other accounts and everything written there later inherits the same two entries. dir is created
+// if missing and replaced if it is a link; links below it are removed. A directory that is already
+// private passes SecureSystemTree's checks, so a later pass over the tree leaves it alone.
+func SecureSecretDir(dir string) error {
+	return withPrivileges(func() error {
+		h, err := ensureRealDir(dir)
+		if err != nil {
+			return err
+		}
+		err = setSecurity(h, true, SecretDirDACL())
+		windows.CloseHandle(h)
+		if err != nil {
+			return fmt.Errorf("secure %s: %w", dir, err)
+		}
+		return resetRestricted(dir, SecretDirDACL(), "")
+	})
+}
