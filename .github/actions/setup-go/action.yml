@@ -23,6 +23,15 @@ inputs:
       already part of the key.
     required: false
     default: ""
+  cache-job:
+    description: >
+      Build cache to use instead of this job's own, named by the job that
+      writes it. Only pushes to main save build caches, so a job that is never
+      part of one never has a cache; it can name a main job that compiles the
+      same packages. A named cache is only ever restored, never saved, on any
+      ref, so a dispatch on main cannot write into the other job's entries.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -51,7 +60,7 @@ runs:
       shell: bash
       env:
         MODULES: ${{ inputs.modules }}
-        JOB: ${{ github.job }}${{ inputs.cache-key && format('-{0}', inputs.cache-key) || '' }}
+        JOB: ${{ inputs.cache-job || github.job }}${{ inputs.cache-key && format('-{0}', inputs.cache-key) || '' }}
       run: |
         set -euo pipefail
         sums=()
@@ -88,13 +97,15 @@ runs:
         key: ${{ steps.keys.outputs.mod-key }}
         restore-keys: ${{ steps.keys.outputs.mod-prefix }}
 
-    - if: github.ref == 'refs/heads/main'
+    # A borrowed build cache (cache-job) is only ever restored, on any ref: a manual dispatch on main
+    # would otherwise save this job's build under the other job's key and could take its entry.
+    - if: github.ref == 'refs/heads/main' && inputs.cache-job == ''
       uses: actions/cache@v6
       with:
         path: ${{ steps.keys.outputs.gocache }}
         key: ${{ steps.keys.outputs.build-key }}
         restore-keys: ${{ steps.keys.outputs.build-prefix }}
-    - if: github.ref != 'refs/heads/main'
+    - if: github.ref != 'refs/heads/main' || inputs.cache-job != ''
       uses: actions/cache/restore@v6
       with:
         path: ${{ steps.keys.outputs.gocache }}
