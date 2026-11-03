@@ -97,7 +97,7 @@ func runEndpointGrokSync(cmd *cobra.Command, args []string) error {
 	if endpointGrokOpts.watch && !endpointGrokOpts.print {
 		return watchGrok(ctx, cmd, opts)
 	}
-	summary, err := groksession.CollectOnce(opts)
+	summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, endpointSweepLockWait, groksession.CollectOnce, opts)
 	reportGrokSweep(cmd, summary)
 	return err
 }
@@ -108,7 +108,7 @@ func watchGrok(ctx context.Context, cmd *cobra.Command, opts groksession.Collect
 		interval = 5 * time.Second
 	}
 	for {
-		summary, err := groksession.CollectOnce(opts)
+		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, groksession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "grok sync error: %v\n", err)
 		}

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,11 +16,11 @@ func TestSessionSyncUnitsRunTheScheduledSweep(t *testing.T) {
 		t.Fatalf("user args = %q", got)
 	}
 
-	plist := jobPlist(SessionSyncLabel, "/opt/beacon/bin/beacon", args, 15*time.Minute, "/l.out", "/l.err", nil)
+	plist := jobPlist(SessionSyncLabel, "/opt/beacon/bin/beacon", args, 15*time.Minute, sessionSyncSpec.runAtLoad, "/l.out", "/l.err", nil)
 	for _, want := range []string{
 		"<string>com.beacon.endpoint.session-sync</string>",
 		"<string>endpoint</string>\n    <string>sessions</string>\n    <string>sync</string>\n    <string>--scheduled</string>\n    <string>--system</string>",
-		"<key>RunAtLoad</key>\n  <true/>",
+		"<key>RunAtLoad</key>\n  <false/>",
 		"<key>StartInterval</key>\n  <integer>900</integer>",
 	} {
 		if !strings.Contains(plist, want) {
@@ -37,7 +38,8 @@ func TestSessionSyncUnitsRunTheScheduledSweep(t *testing.T) {
 		}
 	}
 	timer := jobTimerUnit(sessionSyncSpec, SessionSyncInterval())
-	if !strings.Contains(timer, "OnUnitActiveSec=900s") || !strings.Contains(timer, "Unit=beacon-session-sync.service") {
+	if !strings.Contains(timer, "OnActiveSec=900s") || strings.Contains(timer, "OnBootSec") ||
+		!strings.Contains(timer, "OnUnitActiveSec=900s") || !strings.Contains(timer, "Unit=beacon-session-sync.service") {
 		t.Fatalf("timer = %s", timer)
 	}
 }
@@ -58,7 +60,7 @@ func TestSessionSyncAndInventoryJobsDoNotCollide(t *testing.T) {
 		t.Fatal("the session sync job reuses an inventory job name")
 	}
 	m := SessionSyncManager{UserMode: false, Kind: KindLaunchd}
-	if path, err := m.UnitPath(); err != nil || path != "/Library/LaunchDaemons/com.beacon.endpoint.session-sync.plist" {
+	if path, err := m.UnitPath(); err != nil || filepath.ToSlash(path) != "/Library/LaunchDaemons/com.beacon.endpoint.session-sync.plist" {
 		t.Fatalf("unit path = %q, %v", path, err)
 	}
 }

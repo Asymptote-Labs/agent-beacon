@@ -36,6 +36,7 @@ var inventorySpec = jobSpec{
 	manualHint:  "Run `beacon endpoint inventory heartbeat` from your own scheduler.",
 	interval:    InventoryInterval,
 	args:        inventoryJobArgs,
+	runAtLoad:   true,
 }
 
 // InventoryManager manages the scheduled job that writes inventory heartbeats, in both user and
@@ -94,5 +95,5 @@ func inventoryServiceUnit(program string, args []string, userMode bool, env map[
 func inventoryTimerUnit(interval time.Duration) string { return jobTimerUnit(inventorySpec, interval) }
 
 func inventoryPlist(label, program string, args []string, interval time.Duration, stdoutPath, stderrPath string, env map[string]string) string {
-	return jobPlist(label, program, args, interval, stdoutPath, stderrPath, env)
+	return jobPlist(label, program, args, interval, inventorySpec.runAtLoad, stdoutPath, stderrPath, env)
 }

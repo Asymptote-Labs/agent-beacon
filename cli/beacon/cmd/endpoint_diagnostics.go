@@ -932,6 +932,25 @@ func plannedInstallActions(repair bool, kind service.Kind, otlpTargets, hookTarg
 		plannedAction{Action: "write_file", Target: endpointconfig.ConfigPath(cfg.UserMode), Message: "endpoint configuration"},
 		inventoryAction,
 	)
+	// The session sync job follows --session-sync/--no-session-sync, or else the setting the
+	// endpoint already records, as buildConfig resolves it.
+	sessionSync, sessionSyncChosen := false, false
+	if existing, err := endpointconfig.Load(cfg.UserMode); err == nil {
+		sessionSync = endpointconfig.SessionSyncEnabled(existing)
+	}
+	if on, _ := sessionSyncOption(); on != nil {
+		sessionSync, sessionSyncChosen = *on, true
+	}
+	switch {
+	case sessionSync:
+		sessionSyncAction := plannedAction{Action: "write_unit", Message: "scheduled session sync job"}
+		if unitPath, err := (service.SessionSyncManager{UserMode: cfg.UserMode, Kind: kind}).UnitPath(); err == nil {
+			sessionSyncAction.Target = unitPath
+		}
+		actions = append(actions, sessionSyncAction)
+	case sessionSyncChosen:
+		actions = append(actions, plannedAction{Action: "unload_service", Message: "remove scheduled session sync job if present"})
+	}
 	for _, h := range otlpTargets {
 		actions = append(actions, plannedAction{Action: "configure_harness", Target: h})
 	}
@@ -943,6 +962,9 @@ func plannedInstallActions(repair bool, kind service.Kind, otlpTargets, hookTarg
 			plannedAction{Action: "load_service", Message: "start endpoint collector service"},
 			plannedAction{Action: "load_service", Message: "start scheduled inventory heartbeat job"},
 		)
+		if sessionSync {
+			actions = append(actions, plannedAction{Action: "load_service", Message: "start scheduled session sync job"})
+		}
 	}
 	return actions
 }
@@ -952,6 +974,7 @@ func plannedUninstallActions() []plannedAction {
 	actions := []plannedAction{
 		{Action: "unload_service", Message: "stop endpoint collector service if present"},
 		{Action: "unload_service", Message: "remove scheduled inventory heartbeat job if present"},
+		{Action: "unload_service", Message: "remove scheduled session sync job if present"},
 	}
 	if !cfg.UserMode && runtime.GOOS == "darwin" {
 		actions = append(actions, plannedAction{Action: "unload_service", Message: "stop and remove the S3, GCS and Falcon forwarders if present"})

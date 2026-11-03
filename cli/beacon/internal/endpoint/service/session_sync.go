@@ -21,6 +21,10 @@ func SessionSyncInterval() time.Duration {
 	return intervalFromEnv(SessionSyncIntervalEnv, defaultSessionSyncInterval)
 }
 
+// The session sync does not run at load. An install that turns it on runs its own backfill right
+// after loading the job, and a run fired at load would take that sweep's lock first, leaving the
+// install to wait for it and then report nothing new; the first scheduled run comes one interval
+// later and reads what has changed since.
 var sessionSyncSpec = jobSpec{
 	label:       SessionSyncLabel,
 	serviceUnit: SessionSyncServiceUnit,

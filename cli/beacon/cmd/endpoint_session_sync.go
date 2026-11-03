@@ -78,7 +78,7 @@ func runEndpointSessionsSync(cmd *cobra.Command, args []string) error {
 		wait = 0
 	}
 	result := runSessionSweep(cfg.LogPath, userMode, wait)
-	reportEndpointBackfill(cmd.OutOrStdout(), result)
+	reportSessionSweep(cmd.OutOrStdout(), "Session sync", result)
 	// A runtime that failed is reported above and the rest still ran. The scheduled job exits
 	// cleanly so the scheduler keeps it on its interval; a manual run says it failed.
 	if !endpointSessionsOpts.scheduled {

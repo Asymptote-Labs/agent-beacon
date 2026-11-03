@@ -29,8 +29,11 @@ type jobSpec struct {
 	docs string
 	// manualHint is what UnsupportedReason tells someone on a host with no scheduler to run instead.
 	manualHint string
-	// interval is how often the job runs after the one firing at load.
+	// interval is how often the job runs.
 	interval func() time.Duration
+	// runAtLoad fires the job once when it is loaded (install, boot, package upgrade) as well as
+	// every interval. Without it the first run is one interval after loading.
+	runAtLoad bool
 	// args is the argument vector after the program, for this mode and runtime log.
 	args func(userMode bool, logPath string) []string
 }
@@ -48,10 +51,10 @@ func intervalFromEnv(env string, def time.Duration) time.Duration {
 // scheduledJob is one jobSpec installed in one mode. It is a one-shot job on a timer, like the
 // updater, but it exists in both user and system modes, like the forwarder.
 //
-// The job fires once when loaded (install, boot, package upgrade) and then every interval. There
-// is no jitter: launchd measures StartInterval from the moment the job was loaded, and systemd's
-// OnUnitActiveSec from the last run, so a fleet installed at different times is naturally
-// staggered.
+// The job runs every interval, and with spec.runAtLoad also once when loaded (install, boot,
+// package upgrade). There is no jitter: launchd measures StartInterval from the moment the job was
+// loaded, and systemd's OnUnitActiveSec from the last run, so a fleet installed at different times
+// is naturally staggered.
 type scheduledJob struct {
 	spec     jobSpec
 	userMode bool
@@ -184,16 +187,16 @@ func (m scheduledJob) WriteUnit(program, logPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	content := jobPlist(m.spec.label, program, args, m.spec.interval(), stdout, stderr, m.env)
+	content := jobPlist(m.spec.label, program, args, m.spec.interval(), m.spec.runAtLoad, stdout, stderr, m.env)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return "", err
 	}
 	return path, nil
 }
 
-// Load activates the schedule. Loading fires the job once (RunAtLoad on launchd, an already
-// elapsed OnBootSec on systemd). An already-loaded launchd job is re-bootstrapped so a rewritten
-// unit takes effect.
+// Load activates the schedule. With spec.runAtLoad, loading fires the job once (RunAtLoad on
+// launchd, an already elapsed OnBootSec on systemd). An already-loaded launchd job is
+// re-bootstrapped so a rewritten unit takes effect.
 func (m scheduledJob) Load() error {
 	if !m.Supported() {
 		return fmt.Errorf("%s", m.UnsupportedReason())
@@ -296,26 +299,31 @@ func jobServiceUnit(spec jobSpec, program string, args []string, userMode bool, 
 	return b.String()
 }
 
-// jobTimerUnit schedules the job: shortly after the timer starts (so enabling it after boot
-// fires at once), then every interval. Persistent=true runs a firing missed while asleep.
+// jobTimerUnit schedules the job every interval. With spec.runAtLoad the first firing is shortly
+// after boot (so enabling the timer after boot fires at once); without it, one interval after the
+// timer starts. Persistent=true runs a firing missed while asleep.
 func jobTimerUnit(spec jobSpec, interval time.Duration) string {
+	first := "OnBootSec=2min"
+	if !spec.runAtLoad {
+		first = fmt.Sprintf("OnActiveSec=%ds", int(interval.Seconds()))
+	}
 	return fmt.Sprintf(`[Unit]
 Description=Beacon endpoint %s
 
 [Timer]
-OnBootSec=2min
+%s
 OnUnitActiveSec=%ds
 Persistent=true
 Unit=%s
 
 [Install]
 WantedBy=timers.target
-`, spec.description, int(interval.Seconds()), spec.serviceUnit)
+`, spec.description, first, int(interval.Seconds()), spec.serviceUnit)
 }
 
-// jobPlist renders the launchd job: one shot at load, then every interval. No KeepAlive,
-// so launchd does not restart a job that exited normally.
-func jobPlist(label, program string, args []string, interval time.Duration, stdoutPath, stderrPath string, env map[string]string) string {
+// jobPlist renders the launchd job: every interval, and with runAtLoad one shot at load too. No
+// KeepAlive, so launchd does not restart a job that exited normally.
+func jobPlist(label, program string, args []string, interval time.Duration, runAtLoad bool, stdoutPath, stderrPath string, env map[string]string) string {
 	var argv strings.Builder
 	fmt.Fprintf(&argv, "    <string>%s</string>\n", xmlEscape(program))
 	for _, arg := range args {
@@ -339,7 +347,7 @@ func jobPlist(label, program string, args []string, interval time.Duration, stdo
   <array>
 %s  </array>
 %s  <key>RunAtLoad</key>
-  <true/>
+  <%t/>
   <key>StartInterval</key>
   <integer>%d</integer>
   <key>StandardOutPath</key>
@@ -348,5 +356,5 @@ func jobPlist(label, program string, args []string, interval time.Duration, stdo
   <string>%s</string>
 </dict>
 </plist>
-`, xmlEscape(label), argv.String(), envBlock.String(), int(interval.Seconds()), xmlEscape(stdoutPath), xmlEscape(stderrPath))
+`, xmlEscape(label), argv.String(), envBlock.String(), runAtLoad, int(interval.Seconds()), xmlEscape(stdoutPath), xmlEscape(stderrPath))
 }

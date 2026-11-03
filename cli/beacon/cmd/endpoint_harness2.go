@@ -118,7 +118,7 @@ func runEndpointHarness2Sync(cmd *cobra.Command, args []string) error {
 		return watchHarness2(ctx, cmd, opts)
 	}
 
-	summary, err := harness2session.CollectOnce(opts)
+	summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, endpointSweepLockWait, harness2session.CollectOnce, opts)
 	// Reported even when the sweep hit an error: a sweep that read nine rollouts and failed on the
 	// tenth did nine rollouts' worth of work.
 	reportHarness2Sweep(cmd, summary)
@@ -150,7 +150,7 @@ func watchHarness2(ctx context.Context, cmd *cobra.Command, opts harness2session
 		interval = 5 * time.Second
 	}
 	for {
-		summary, err := harness2session.CollectOnce(opts)
+		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, harness2session.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Harness² sync error: %v\n", err)
 		}

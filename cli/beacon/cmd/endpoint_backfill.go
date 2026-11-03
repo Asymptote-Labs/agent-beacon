@@ -234,7 +234,8 @@ func runEndpointBackfill(logPath string, userMode bool) endpointBackfillResult {
 }
 
 // runEndpointBackfillLocked is runEndpointBackfill with an explicit wait for the sweep lock. Every
-// sweep (install, connect, `beacon endpoint sessions sync` and its scheduled job) holds one
+// sweep (install, connect, `beacon endpoint sessions sync` and its scheduled job) and every
+// per-runtime `beacon endpoint <runtime> sync` that writes (collectUnderSweepLock) holds one
 // exclusive lock per mode for its whole run, because each collector loads its cursors at the start
 // and saves them at the end: two sweeps running together would both start from the same cursors
 // and append the same records twice. A sweep that waits for another starts from the cursors that
@@ -249,20 +250,38 @@ func runEndpointBackfillLocked(logPath string, userMode bool, wait time.Duration
 	return runEndpointBackfillUnlocked(logPath, userMode)
 }
 
+// collectUnderSweepLock runs one per-runtime sync (`beacon endpoint <runtime> sync`, once or per
+// --watch tick) under the sweep lock, so it never overlaps the scheduled session sync or an install
+// backfill reading the same cursor files. A run that writes nothing (--print) moves no cursors and
+// takes no lock. A one-shot sync waits like install does; a watch tick passes wait 0 and reports
+// the busy lock as that tick's error, and the next tick reads what the other sweep left.
+func collectUnderSweepLock[O, S any](write, userMode bool, wait time.Duration, collect func(O) (S, error), opts O) (S, error) {
+	if !write {
+		return collect(opts)
+	}
+	release, err := acquireEndpointSweepLock(userMode, wait)
+	if err != nil {
+		var zero S
+		return zero, err
+	}
+	defer release()
+	return collect(opts)
+}
+
 // endpointSweepLockWait bounds how long an install, connect or manual sync waits for a sweep that
-// is already running (normally the scheduled job's run at load).
+// is already running (normally a scheduled run).
 var endpointSweepLockWait = 10 * time.Minute
 
 // errEndpointSweepBusy is the skip reason when another sweep holds the lock.
 var errEndpointSweepBusy = errors.New("another session sync is already running; its cursors carry over to the next run")
 
-// endpointSweepLockPath is the lock file every sweep for the mode takes, beside the cursors.
-func endpointSweepLockPath(userMode bool) string {
+// endpointSweepLockPath is the lock file every sweep for the mode takes, beside the cursors. A
+// seam for tests, which must not create the system base directory.
+var endpointSweepLockPath = func(userMode bool) string {
 	return filepath.Join(endpointconfig.BaseDir(userMode), "state", "session-sweep.lock")
 }
 
-// acquireEndpointSweepLock is the seam tests replace.
-var acquireEndpointSweepLock = func(userMode bool, wait time.Duration) (func(), error) {
+func acquireEndpointSweepLock(userMode bool, wait time.Duration) (func(), error) {
 	path := endpointSweepLockPath(userMode)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("could not create the session sync lock directory: %w", err)
@@ -364,13 +383,19 @@ func onlyStopped(err error) bool {
 // reportEndpointBackfill prints what a backfill wrote: one line when it went cleanly, plus a line
 // per runtime that hit the limit or failed, each naming the command that picks up from there.
 func reportEndpointBackfill(out io.Writer, result endpointBackfillResult) {
+	reportSessionSweep(out, "Session backfill", result)
+}
+
+// reportSessionSweep is reportEndpointBackfill under another name: `beacon endpoint sessions sync`
+// and its scheduled job run the same sweep and say "Session sync".
+func reportSessionSweep(out io.Writer, label string, result endpointBackfillResult) {
 	days := int(endpointBackfillWindow / (24 * time.Hour))
 	if result.Skipped != "" {
-		fmt.Fprintf(out, "Session backfill skipped: %s.\n", result.Skipped)
+		fmt.Fprintf(out, "%s skipped: %s.\n", label, result.Skipped)
 		return
 	}
 	if result.Events == 0 && !result.Limited && len(result.Runtimes) == 0 {
-		fmt.Fprintf(out, "Session backfill: no new agent session activity from the last %d days.\n", days)
+		fmt.Fprintf(out, "%s: no new agent session activity from the last %d days.\n", label, days)
 		reportEndpointBackfillRefusals(out, result)
 		return
 	}
@@ -380,7 +405,7 @@ func reportEndpointBackfill(out io.Writer, result endpointBackfillResult) {
 			parts = append(parts, fmt.Sprintf("%s %d", r.Name, r.Events))
 		}
 	}
-	line := fmt.Sprintf("Session backfill: %d events from the last %d days", result.Events, days)
+	line := fmt.Sprintf("%s: %d events from the last %d days", label, result.Events, days)
 	if len(parts) > 0 {
 		line += " (" + strings.Join(parts, ", ") + ")"
 	}

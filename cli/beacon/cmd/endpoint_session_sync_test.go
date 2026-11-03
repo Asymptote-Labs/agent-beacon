@@ -3,7 +3,9 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -126,6 +128,65 @@ func TestEndpointSweepLockSerializes(t *testing.T) {
 		t.Fatalf("after release: %v", err)
 	}
 	again()
+}
+
+// A per-runtime sync shares the sweep's cursor files, so it takes the same lock: while a sweep runs,
+// a sync that writes waits and then gives up without reading or writing anything, and a --print dry
+// run, which moves no cursor, is not held up.
+func TestPerRuntimeSyncWaitsForTheSweepLock(t *testing.T) {
+	f := newClaudeCommandFixture(t)
+	oldWait := endpointSweepLockWait
+	t.Cleanup(func() { endpointSweepLockWait = oldWait; endpointClaudeOpts.print = false })
+	endpointSweepLockWait = 50 * time.Millisecond
+	release, err := acquireEndpointSweepLock(true, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := runClaudeSync(t); !errors.Is(err, errEndpointSweepBusy) {
+		t.Fatalf("sync during a sweep = %v, want busy", err)
+	}
+	if _, statErr := os.Stat(f.logPath); !os.IsNotExist(statErr) {
+		t.Fatal("a sync that could not take the lock wrote the runtime log")
+	}
+	endpointClaudeOpts.print = true
+	if out, err := runClaudeSync(t); err != nil || !strings.Contains(out, "sess-1") {
+		t.Fatalf("--print during a sweep: err=%v out=%q", err, out)
+	}
+	endpointClaudeOpts.print = false
+
+	release()
+	if _, err := runClaudeSync(t); err != nil {
+		t.Fatalf("sync after the sweep: %v", err)
+	}
+	if _, statErr := os.Stat(f.statePath); statErr != nil {
+		t.Fatalf("sync after the sweep did not save its cursor: %v", statErr)
+	}
+}
+
+// Every per-runtime sync command reaches its collector through collectUnderSweepLock, so a new
+// `beacon endpoint <runtime> sync` cannot race the scheduled session sync by calling it directly.
+// The backfill runners are exempt: runEndpointBackfillLocked holds the lock around all of them.
+func TestPerRuntimeSyncCommandsTakeTheSweepLock(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct := regexp.MustCompile(`\b\w+session\.CollectOnce\(`)
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") || file == "endpoint_backfill.go" {
+			continue
+		}
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, line := range strings.Split(string(data), "\n") {
+			if direct.MatchString(line) {
+				t.Errorf("%s:%d calls a session-store collector without the sweep lock; use collectUnderSweepLock", file, i+1)
+			}
+		}
+	}
 }
 
 func enableSessionSyncConfig(t *testing.T, enabled bool) {

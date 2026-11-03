@@ -101,7 +101,7 @@ func runEndpointHermesSync(cmd *cobra.Command, args []string) error {
 	if endpointHermesOpts.watch && !endpointHermesOpts.print {
 		return watchHermes(ctx, cmd, opts)
 	}
-	summary, err := hermessession.CollectOnce(opts)
+	summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, endpointSweepLockWait, hermessession.CollectOnce, opts)
 	reportHermesSweep(cmd, summary)
 	return err
 }
@@ -112,7 +112,7 @@ func watchHermes(ctx context.Context, cmd *cobra.Command, opts hermessession.Col
 		interval = 5 * time.Second
 	}
 	for {
-		summary, err := hermessession.CollectOnce(opts)
+		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, hermessession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Hermes sync error: %v\n", err)
 		}

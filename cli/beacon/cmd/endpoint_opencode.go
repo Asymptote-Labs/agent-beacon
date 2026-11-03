@@ -96,7 +96,7 @@ func runEndpointOpenCodeSync(cmd *cobra.Command, args []string) error {
 	if endpointOpenCodeOpts.watch && !endpointOpenCodeOpts.print {
 		return watchOpenCode(ctx, cmd, opts)
 	}
-	summary, err := opencodesession.CollectOnce(opts)
+	summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, endpointSweepLockWait, opencodesession.CollectOnce, opts)
 	reportOpenCodeSweep(cmd, summary)
 	return err
 }
@@ -107,7 +107,7 @@ func watchOpenCode(ctx context.Context, cmd *cobra.Command, opts opencodesession
 		interval = 5 * time.Second
 	}
 	for {
-		summary, err := opencodesession.CollectOnce(opts)
+		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, opencodesession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "opencode sync error: %v\n", err)
 		}
