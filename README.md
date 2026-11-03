@@ -34,11 +34,11 @@
    <img alt="GitHub Trending Repository of the Day" width="227" height="54" src="https://api.star-history.com/badge?repo=Asymptote-Labs/agent-beacon&type=trending&v=2" />
   </picture>
  </a>
- <a href="https://www.producthunt.com/products/asymptotelabs?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-beacon-sh" target="_blank" rel="noopener noreferrer">
+ <a href="https://www.producthunt.com/products/asymptotelabs?embed=true&utm_source=badge-top-post-badge&utm_medium=badge&utm_campaign=badge-beacon-sh" target="_blank" rel="noopener noreferrer">
   <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1292351&theme=dark&t=1793641146622" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1292351&theme=light&t=1793641146622" />
-   <img alt="beacon.sh - Open-source self-improving memory for AI coding agents | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1292351&theme=light&t=1793641146622" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=1292351&theme=dark&period=daily&t=1793685827673" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=1292351&theme=light&period=daily&t=1793685827673" />
+   <img alt="beacon.sh - Open-source self-improving memory for AI coding agents | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=1292351&theme=light&period=daily&t=1793685827673" />
   </picture>
  </a>
 </p>
