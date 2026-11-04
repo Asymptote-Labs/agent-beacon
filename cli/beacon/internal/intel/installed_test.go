@@ -266,6 +266,17 @@ func TestFromInventoryKnowsBeaconByDefinitionNotName(t *testing.T) {
 	}
 }
 
+func TestFromInventoryKeepsThePrivateBasisWhicheverSourceComesFirst(t *testing.T) {
+	public := server("cursor", "a", "user", map[string]interface{}{"command": "npx", "args": []interface{}{"-y", "foo"}})
+	private := server("claude_code", "b", "user", map[string]interface{}{"command": "npx", "args": []interface{}{"--registry=https://npm.corp.example", "-y", "foo"}})
+	for _, order := range [][]inventory.MCPServer{{public, private}, {private, public}} {
+		items, _ := FromInventory(inventory.Result{MCPServers: order}, FromInventoryOptions{IncludePrivateNames: true})
+		if len(items) != 1 || items[0].Q != "npm:foo" || items[0].Basis != BasisPrivateNPM || len(items[0].Sources) != 2 {
+			t.Errorf("order %s, %s: items = %+v", order[0].ServerName, order[1].ServerName, items)
+		}
+	}
+}
+
 func TestPackageFromCommandRefusesSpecsOffTheRegistry(t *testing.T) {
 	for _, tc := range []struct {
 		command string

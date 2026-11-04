@@ -100,6 +100,10 @@ func FromInventory(res inventory.Result, opts FromInventoryOptions) ([]Installed
 			item = &Installed{Kind: kind, Q: q, Basis: basis}
 			byKey[key] = item
 			order = append(order, key)
+		} else if basis == BasisPrivateNPM || basis == BasisPrivatePyPI {
+			// One source fetching the package from a private registry or index makes every
+			// match a match by name for that source, so the private basis wins.
+			item.Basis = basis
 		}
 		for _, s := range item.Sources {
 			if s == src {

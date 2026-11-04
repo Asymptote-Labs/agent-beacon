@@ -247,6 +247,40 @@ func TestLocalRegistriesFollowsAConfigFileNamedInTheEnvironment(t *testing.T) {
 	}
 }
 
+func TestLocalRegistriesResolvesConfigPathsNamedInTheEnvironment(t *testing.T) {
+	home := t.TempDir()
+	writeConfig(t, filepath.Join(home, ".npmrc-work"), "registry=https://npm.corp.example\n")
+	writeConfig(t, filepath.Join(home, "pip-work.conf"), "[global]\nindex-url = https://pypi.corp.example/simple\n")
+	// ~ is resolved as npm and pip resolve it, so the file they read is read here too.
+	if reg := LocalRegistries(RegistryEnv{Home: home, Environ: []string{"npm_config_userconfig=~/.npmrc-work"}}); !reg.private("npm:plain") {
+		t.Errorf("npm_config_userconfig=~/... was not followed: %+v", reg)
+	}
+	if reg := LocalRegistries(RegistryEnv{Home: home, Environ: []string{"PIP_CONFIG_FILE=~/pip-work.conf"}}); !reg.private("pypi:x") {
+		t.Errorf("PIP_CONFIG_FILE=~/... was not followed: %+v", reg)
+	}
+	// A path Beacon cannot resolve is still one the launcher reads, so nothing reads as public.
+	for _, kv := range []string{
+		"npm_config_userconfig=relative/.npmrc",
+		"npm_config_globalconfig=${UNSET_VAR}/npmrc",
+		"npm_config_prefix=relative-prefix",
+	} {
+		if reg := LocalRegistries(RegistryEnv{Home: home, Environ: []string{kv}}); !reg.private("npm:plain") {
+			t.Errorf("%s left npm packages public: %+v", kv, reg)
+		}
+	}
+	for _, kv := range []string{"PIP_CONFIG_FILE=relative/pip.conf", "UV_CONFIG_FILE=${UNSET_VAR}/uv.toml"} {
+		if reg := LocalRegistries(RegistryEnv{Home: home, Environ: []string{kv}}); !reg.private("pypi:x") {
+			t.Errorf("%s left PyPI packages public: %+v", kv, reg)
+		}
+	}
+	// An absolute path to a file with nothing private in it changes nothing.
+	empty := filepath.Join(home, "empty-npmrc")
+	writeConfig(t, empty, "color=false\n")
+	if reg := LocalRegistries(RegistryEnv{Home: home, Environ: []string{"npm_config_userconfig=" + empty}}); reg.private("npm:plain") {
+		t.Errorf("an empty npmrc named in the environment made npm private: %+v", reg)
+	}
+}
+
 func TestCurrentRegistryEnvReadsSystemAndProjectFiles(t *testing.T) {
 	if env := CurrentRegistryEnv(); !env.System || env.WorkingDir == "" {
 		t.Fatalf("CurrentRegistryEnv() = %+v", env)

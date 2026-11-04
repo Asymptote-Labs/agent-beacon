@@ -106,16 +106,31 @@ func LocalRegistries(env RegistryEnv) Registries {
 		return path
 	}
 
+	// A config file or prefix the environment names is resolved as npm, pip and uv resolve it
+	// (${VAR}, ~, an absolute path). One Beacon cannot resolve is still read by the launcher, so
+	// it leaves Beacon unable to tell where packages come from.
+	envPath := func(k string, private *bool) string {
+		v := getenv(k)
+		if v == "" {
+			return ""
+		}
+		path, ok := reg.expandPath(v)
+		if !ok {
+			*private = true
+		}
+		return path
+	}
+
 	// npm and pnpm: user, project and global npmrc.
-	userNpmrc := getenv("npm_config_userconfig")
-	if userNpmrc == "" {
+	userNpmrc := envPath("npm_config_userconfig", &reg.NPM)
+	if getenv("npm_config_userconfig") == "" {
 		userNpmrc = join(home, ".npmrc")
 	}
-	npmrcs := []string{userNpmrc, getenv("npm_config_globalconfig")}
+	npmrcs := []string{userNpmrc, envPath("npm_config_globalconfig", &reg.NPM)}
 	// The global npmrc lives under npm's prefix, and npm's builtin npmrc beside the npm the node
 	// ships; npm derives both from the node it runs on (nvm, fnm, Volta and system installs each
 	// have their own).
-	npmrcs = append(npmrcs, join(getenv("npm_config_prefix"), "etc", "npmrc"))
+	npmrcs = append(npmrcs, join(envPath("npm_config_prefix", &reg.NPM), "etc", "npmrc"))
 	npmrcs = append(npmrcs, nodeNpmrcs(filepath.SplitList(getenv("PATH")))...)
 	for _, path := range append(npmrcs, system("/etc/npmrc"),
 		// pnpm's global config (pnpm config set --location=global), npmrc format.
@@ -135,7 +150,7 @@ func LocalRegistries(env RegistryEnv) Registries {
 		}
 	}
 	// pip (and pipx, which runs pip): every config file pip reads.
-	for _, path := range []string{getenv("PIP_CONFIG_FILE"), join(home, ".pip", "pip.conf"), join(xdg, "pip", "pip.conf"),
+	for _, path := range []string{envPath("PIP_CONFIG_FILE", &reg.PyPI), join(home, ".pip", "pip.conf"), join(xdg, "pip", "pip.conf"),
 		join(home, "Library", "Application Support", "pip", "pip.conf"), join(appData, "pip", "pip.ini"), join(home, "pip", "pip.ini"),
 		system("/etc/pip.conf"), system("/etc/xdg/pip/pip.conf"), system("/Library/Application Support/pip/pip.conf"),
 		join(getenv("ProgramData"), "pip", "pip.ini"), join(getenv("VIRTUAL_ENV"), "pip.conf")} {
@@ -144,7 +159,7 @@ func LocalRegistries(env RegistryEnv) Registries {
 		}
 	}
 	// uv: user, system and project configuration.
-	for _, path := range []string{getenv("UV_CONFIG_FILE"), join(xdg, "uv", "uv.toml"), join(appData, "uv", "uv.toml"),
+	for _, path := range []string{envPath("UV_CONFIG_FILE", &reg.PyPI), join(xdg, "uv", "uv.toml"), join(appData, "uv", "uv.toml"),
 		system("/etc/uv/uv.toml"), system("/etc/xdg/uv/uv.toml"), join(getenv("ProgramData"), "uv", "uv.toml")} {
 		if registryLine(path, isPyPIIndexLine) {
 			reg.PyPI = true
