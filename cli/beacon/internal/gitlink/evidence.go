@@ -155,7 +155,7 @@ func scanLogFile(ctx context.Context, path string, repo Repo, since, until time.
 			session = &SessionEvidence{Link: link}
 			sessions[key] = session
 		}
-		cwd := strings.TrimSpace(event.Session.WorkingDirectory)
+		cwd := event.Session.WorkingDirectory
 		if session.WorkingDirectory == "" && filepath.IsAbs(cwd) {
 			session.WorkingDirectory = filepath.Clean(cwd)
 		}

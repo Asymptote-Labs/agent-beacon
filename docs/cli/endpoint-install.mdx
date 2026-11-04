@@ -30,7 +30,7 @@ The `claude` harness writes both Claude Code's OpenTelemetry settings and its us
 | `--otlp-grpc-port <port>` | Local OTLP gRPC port. Defaults to `4317` |
 | `--otlp-http-port <port>` | Local OTLP HTTP port. Defaults to `4318` |
 | `--health-port <port>` | Local collector health-check port. Defaults to `13133`, moved by the same amount as `--otlp-http-port` when that is changed (HTTP port `4328` gives `13143`), so a second collector on alternate OTLP ports does not collide with the first |
-| `--collector <path>` | Path to a `beacon-otelcol` binary |
+| `--collector <path>` | Path to a `beacon-otelcol` binary. Without it, Beacon uses the one beside the `beacon` CLI, then one on `PATH` |
 | `--no-start` | Write files without starting the collector service |
 | `--no-browser` | During interactive setup, print the sign-in URL instead of opening a browser, and do not open the hosted dashboard when setup finishes. Useful where no browser can be opened. Open the URL on this machine, or on another computer after forwarding the port it names over SSH |
 | `--service <kind>` | Service manager to use: `auto` (default), `launchd`, `systemd`, or `none` for a supervised collector process |
@@ -52,6 +52,17 @@ The `claude` harness writes both Claude Code's OpenTelemetry settings and its us
 | `--falcon-sourcetype <type>` | Optional Falcon LogScale parser or sourcetype |
 | `--falcon-insecure-skip-verify` | Skip Falcon LogScale HEC TLS certificate verification |
 | `--falcon-ca-file <path>` | Optional CA certificate path for Falcon LogScale HEC TLS verification |
+| `--otlp-forward-endpoint <endpoint>` | Also forward the Claude Code and Codex OTLP the local collector receives, with secrets redacted and raw API bodies dropped, to a second OTLP endpoint: `host:port` or a URL for gRPC, the base URL for HTTP. For runtimes that already exported to another backend before Beacon took over their OTLP settings. See [Kandji, GCS and an existing OTLP backend](/guides/kandji-otlp-forward-mdm). Omitted, install and repair keep the forward the endpoint already has |
+| `--otlp-forward-protocol <protocol>` | `grpc` (default) or `http/protobuf` |
+| `--otlp-forward-harness <list>` | Runtimes whose OTLP the forward carries, comma-separated. Default `claude,codex`; any other source, such as the browser extension, stays local |
+| `--otlp-forward-header <name=value>` | Header sent with every forwarded export, usually the backend's API key; repeatable. Values are stored in a root-only `otlp-forward-headers.json` beside `config.json`, which keeps only the names; status and doctor show names only |
+| `--otlp-forward-insecure` | Send the forward without TLS (plaintext gRPC) |
+| `--otlp-forward-insecure-skip-verify` | Skip TLS certificate verification for the forward |
+| `--otlp-forward-ca-file <path>` | Optional CA certificate path for the forward's TLS verification |
+| `--no-otlp-forward` | Remove a configured OTLP forward |
+| `--session-sync` | Turn on the [scheduled session sync](#scheduled-session-sync): every 15 minutes, read new records from the agent runtimes' local session stores into the runtime log. Kept by repair and package upgrades |
+| `--no-session-sync` | Turn the scheduled session sync off and remove its job |
+| `--log-access <mode>` | System log access: `shared` (the default) or `restricted`. See [Restricted log access](#restricted-log-access). Omitted, an install keeps the mode the endpoint already has. System installs on macOS and Linux only |
 | `--no-backfill` | Skip the [session backfill](#session-backfill). `BEACON_BACKFILL=0` does the same |
 | `--connect` | After a successful install, attempt to connect this endpoint to Beacon Cloud ingest. User mode uses the signed-in CLI account; system mode opens browser approval. A connection failure does not roll back or fail the completed local install; verify with `beacon endpoint status --json` and retry with [`beacon endpoint connect`](/cli/endpoint-connect) |
 
@@ -92,6 +103,36 @@ nobody is logged in, install says the backfill was skipped and the next connect 
 reads the sessions. `--dry-run` installs skip it, and `--no-backfill` or `BEACON_BACKFILL=0` turn it
 off. If this install also connects to Beacon Cloud, the same history is
 [uploaded by the connect](/cli/endpoint-connect#session-backfill).
+
+## Scheduled session sync
+
+The session backfill runs once, at install. To keep reading the runtimes' session stores after that, turn on the scheduled session sync:
+
+```bash
+sudo beacon endpoint sessions enable --system   # an endpoint that is already installed
+sudo beacon endpoint sessions disable --system  # turn it off and remove the job
+```
+
+`sessions enable` and `disable` change only this setting and the job. `install` and `repair` take `--session-sync` and `--no-session-sync` too, but repair rebuilds the endpoint from its flags: run without the ones the endpoint was set up with, it resets the harnesses and OTLP ports and drops a Splunk or Falcon HEC destination. For a package or MDM rollout, set `BEACON_SESSION_SYNC=1` in the environment of the package's install script (`/opt/beacon/scripts/install-endpoint.sh`), or run `/opt/beacon/bin/beacon endpoint sessions enable --system` on Macs that already have Beacon. `BEACON_SESSION_SYNC=0` turns it off, and leaving it unset keeps what the endpoint already has, so a package upgrade never changes it.
+
+It is off by default. Hooks and OTLP already capture sessions live, and the session stores add what only they record, such as Claude Code's per-request token usage and complete assistant text from its transcripts. Turning it on writes those records as poll events (`harness.collection_method=poll`) alongside the live ones, which matters when the runtime log is forwarded elsewhere. Token reports keep live usage authoritative over poll usage for the same session.
+
+### How it runs
+
+- The job runs `beacon endpoint sessions sync` every 15 minutes: `com.beacon.endpoint.session-sync` (a LaunchDaemon in system mode, a LaunchAgent in user mode) or `beacon-session-sync.timer` on systemd. The first run is 15 minutes after the job is loaded by the install, a repair, a reboot or a package upgrade, never at load.
+- Each run is the same sweep as the backfill above, with the same 30-day window, size budget and, in system mode, the same confined read of the console user's stores. Each runtime's cursor makes a run read only what is new. With nobody logged in, a system run reads nothing.
+- In system mode a SQLite store (Cursor, OpenCode, Devin CLI, Hermes Agent) is read from a private copy, as the backfill does. A copy can approach 512 MiB and those runtimes are captured live by their hooks or plugins, so the scheduled job copies each one at most once an hour. A store over 512 MiB is skipped and named in the job's output; run that runtime's sync command as the user to read it.
+- Only one sync runs at a time. An install, connect, `beacon endpoint sessions sync` or `beacon endpoint <runtime> sync` waits for a sync already in progress and then reads only what it left. A scheduled run or a `--watch` sweep skips its turn while another sync is running, and `--print` dry runs never wait.
+- When the install or a later connect skipped the backfill (`--no-backfill` or `BEACON_BACKFILL=0`), each runtime no sync had read yet is limited to sessions active since that skip, not the last 30 days. A session that continues past the skip is read from its start, a runtime that was already synced reads on from where it was, and a later backfill lifts the limit.
+- A user-mode job keeps the store locations the install saw (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME`, `XDG_DATA_HOME`, `OPENCODE_DB` and the rest), because the scheduler does not pass a shell's environment.
+
+### What to expect when you turn it on
+
+The first runs catch up. When the backfill stopped at its size limit, the rest of the last 30 days is left for the job, and each run writes up to another 12 MiB per runtime (24 MiB in all) until it has read everything. After that, a run writes only what the agents recorded since the previous one. On a machine with a lot of agent history the catch-up takes a few runs, and because the runtime log rotates at 10 MiB and keeps five archives, it pushes older local events out of the log sooner than live telemetry alone would. A connected endpoint forwards the catch-up like any other new events.
+
+### Settings and status
+
+The setting is `session_sync.enabled` in `config.json`. Repair and package upgrades keep it, and `beacon endpoint sessions disable` or `--no-session-sync` turns it off and removes the job. A scheduled run also checks the setting, so a job left behind after the config was set to off reads nothing. `beacon endpoint status` shows `Session sync: every 15m0s; job loaded=true`, and `beacon endpoint sessions sync` runs the same sweep by hand. A host without launchd or systemd cannot run the job; run `beacon endpoint sessions sync` from your own scheduler there.
 
 ## Interactive onboarding wizard
 
@@ -242,6 +283,42 @@ beacon endpoint hooks install --harness grok --level project
 <Note>
   System-mode install (`--system`) is supported on macOS and on Linux distributions that use systemd. Omit `--system` for the default non-root local install. GitHub Copilot CLI and Factory Droid OTLP use launch-environment settings rather tha Beacon-managed shell-profile edits.
 </Note>
+
+## Restricted log access
+
+A system-mode endpoint keeps one runtime log, `/var/log/beacon-agent/runtime.jsonl`, for every user on the machine. By default the log is shared: hooks run as each logged-in user and append to it directly, so the file is `0666`. That also means any local account can truncate or rewrite the log, and read every other user's prompts, command output and diffs.
+
+`--log-access restricted` makes the collector the only writer:
+
+```bash title="Install with restricted log access"
+sudo beacon endpoint install --system --log-access restricted
+```
+
+- Hooks send their events to the collector over a local Unix socket, `/var/run/beacon-agent/ingest.sock`, instead of writing the file. Nothing leaves the machine.
+- The collector records each event under the account the operating system says sent it, not the account the event claims.
+- The log directory becomes `root:beacon-log` mode `2750`, the log and its archives `0640`, and its lock `0600`. Only the collector writes the log; only root and members of the `beacon-log` group read it. Switching an existing log to restricted replaces its files with fresh copies, so a handle another account opened while the log was shared stops reaching it.
+- If the collector is stopped or restarting, hooks keep their events in a private spool in each user's home (`~/.beacon/endpoint/spool`, `0600`) and send them with the next event once the collector is back. The agent is never held up.
+
+Install creates the `beacon-log` group when it is missing and adds nobody to it. Add each account that should read the log, such as a log shipper's service account, then restart that shipper:
+
+```bash title="Let a log shipper read a restricted log"
+# Linux
+sudo usermod -aG beacon-log <account>
+# macOS
+sudo dseditgroup -o edit -a <account> -t user beacon-log
+```
+
+The log format and every event field stay the same, so a SIEM or forwarder that parses the log needs no change. Shippers that run as root, and the Beacon Cloud forwarder, keep working without one.
+
+The mode is recorded in `config.json` as `log_access`, and in a root-owned `.beacon-log-access` marker beside the log. `beacon endpoint repair`, package upgrades, the Jamf `repair-hooks.sh` policy, and a reinstall after `uninstall --keep-logs` keep it. To go back, run `sudo beacon endpoint repair --system --log-access shared`; the log is writable by every account again at once. For package installs, set `BEACON_LOG_ACCESS=restricted` in the environment of the package's install script.
+
+What this does and does not change:
+
+- Local accounts can no longer alter or delete events already in the log, or read other users' sessions.
+- Every event that arrives over the socket records the account that sent it, as the operating system reports it. A user still controls their own agent, so they can still send events of their own choosing, including ones that name another session's id, but always under their own account.
+- The collector's OTLP ports on `127.0.0.1` still accept telemetry from any local process, as they do in the shared mode. Agents that export over OTLP, such as Claude Code and Codex, use them. Events that arrive that way are not attributed by the operating system.
+
+While the endpoint is restricted, commands that read the system log as the person running them (`beacon endpoint dashboard`, `beacon scan`, `beacon traces`, and the session lookups in `beacon share`, `beacon handoff` and `beacon git` commit linking) see it only when run as root or by a `beacon-log` member. [`beacon endpoint doctor`](/cli/endpoint-doctor#runtime_log_access) connects to the socket and reports a collector that is not answering on it, including one that was killed and left its socket behind, and any events waiting in the caller's spool. On Windows the mode works the same way with Windows mechanisms: hooks send to the named pipe `\\.\pipe\beacon-agent-ingest`, the log directory's ACL gives SYSTEM and Administrators full control, the `beacon-log` local group read and nobody else anything, events record the sender's SID and account name, and the commands run from an elevated shell (see [On Windows](/security/restricted-log-access#on-windows)). For how the mode fits with log shippers such as Microsoft Sentinel, and what it does and does not protect, see [Restricted log access](/security/restricted-log-access).
 
 ## Running user and system mode together
 

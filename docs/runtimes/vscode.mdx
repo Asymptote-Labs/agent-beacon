@@ -55,7 +55,7 @@ User-level hooks:
 beacon endpoint hooks install --harness vscode --level user
 ```
 
-Hook-derived events use `harness.name=vscode`. They can capture VS Code lifecycle events such as prompt submission, pre-tool and post-tool activity, stop events, and subagent start/stop where VS Code exposes those hook payloads. Because hooks are preview, behavior may vary across VS Code versions, organizations, and agent surfaces.
+Hook-derived events also use `harness.name=vscode_copilot`, so one session is not split across two names; tell them apart from OTel-derived events by `harness.collection_method` (`hook` vs `otlp`). They can capture VS Code lifecycle events such as prompt submission, pre-tool and post-tool activity, stop events, and subagent start/stop where VS Code exposes those hook payloads. Because hooks are preview, behavior may vary across VS Code versions, organizations, and agent surfaces.
 
 ## Discovery and status
 
@@ -88,7 +88,7 @@ For managed endpoint deployments, include `vscode` in the endpoint harness list 
 beacon endpoint install --system --harness claude,codex,vscode
 ```
 
-If hooks are allowed by organization policy, install them separately in the logged-in user's context or within the target project. Do not rely on hooks as the primary VS Code signal path; Copilot OTel is preferred and should provide most of the session, prompt, model, and tool visibility needed for Beacon.
+A default `beacon endpoint install` (`--harness auto`) also writes user-level VS Code hooks to `~/.copilot/hooks/beacon.json` when it detects VS Code; an explicit `--harness vscode` configures OTel only. If hooks are not allowed by organization policy, remove them with `beacon endpoint hooks uninstall --harness vscode`; if they are allowed, install them in the logged-in user's context or within the target project. Do not rely on hooks as the primary VS Code signal path; Copilot OTel is preferred and should provide most of the session, prompt, model, and tool visibility needed for Beacon.
 
 ## Related
 

@@ -64,6 +64,8 @@ User mode is the default for local evaluation and writes under the current user'
 
 The system package is designed for Jamf Pro, Fleet, or another macOS MDM. It installs a signed and notarized `.pkg`, creates system endpoint configuration, loads the local collector LaunchDaemon, and writes endpoint events to `/var/log/beacon-agent/runtime.jsonl`.
 
+By default the system runtime log is shared: hooks run as each logged-in user and append to it directly, so it is mode `0666`. With [restricted log access](/security/restricted-log-access) the collector is the only writer, hooks send their events over the local socket `/var/run/beacon-agent/ingest.sock`, and the log is `0640 root:beacon-log`, readable only by root and members of the `beacon-log` group.
+
 The active runtime log rotates when the next write would exceed 10 MiB. Beacon keeps up to five numbered local archives next to the active file, preserving the active path as the handoff point for local inspection and customer-managed shippers.
 
 ## Network behavior

@@ -5,24 +5,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
-	"strconv"
-	"strings"
+	"runtime"
+	"testing"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/localingest"
 )
 
 const (
 	UserLogPath           = ".beacon/endpoint/logs/runtime.jsonl"
 	MaxEventBytes         = 64 * 1024
 	DefaultRotateBytes    = 10 * 1024 * 1024
-	DefaultRotateArchives = 5
+	DefaultRotateArchives = asymptoteobserve.DefaultRuntimeLogRotateArchives
 	RotateBytes           = DefaultRotateBytes
 	// runtimeFileMode is the shared (system-mode) log's mode. A log inside the current user's home
 	// is private instead; asymptoteobserve.RuntimeLogModes decides, identically in all three writers.
@@ -41,7 +41,16 @@ type Options struct {
 	// Budget, when set, caps what this append may add to the log; an event that does not fit
 	// is refused with ErrBudgetSpent. See Budget.
 	Budget *Budget
+	// RequireWritten makes a line that could only be spooled an error (ErrSpooled) rather than a
+	// success. A caller whose job is to prove the log takes events, such as a destination
+	// validation, sets it; telemetry writers leave it unset, because a spooled line is late, not
+	// lost.
+	RequireWritten bool
 }
+
+// ErrSpooled reports that a restricted log refused a line while its collector was unreachable, so
+// the line waits in this account's spool for a later one to carry it in.
+var ErrSpooled = errors.New("the event was spooled: the restricted runtime log refused it and the Beacon collector is unreachable")
 
 // SystemLogPath is the system-mode runtime log, resolved per platform.
 //
@@ -121,10 +130,55 @@ func AppendEvent(event schema.Event, opts Options) (string, error) {
 		}
 	}
 	line := append(data, '\n')
+	if opts.Guard == nil && opts.Budget == nil && Ingest.Applies(opts.Path) {
+		if err := deliver(opts, data); err != nil {
+			return "", err
+		}
+		return opts.Path, nil
+	}
 	if err := appendJSONL(opts.Path, line, opts.RotateSize, opts.RotateArchives, opts.Guard, opts.Budget); err != nil {
 		return "", err
 	}
 	return opts.Path, nil
+}
+
+// Ingest delivers to the system log through the collector when the endpoint is in the restricted
+// log access mode. Tests point it at a socket and spool of their own; nothing else changes it.
+var Ingest = defaultIngest()
+
+// defaultIngest is the real socket and the account's spool, except in a test binary, where a
+// test that writes a system log as an ordinary account must never reach the machine's collector
+// or leave lines in the developer's own spool: there it is a socket that does not exist and a
+// spool in a private temporary directory.
+func defaultIngest() localingest.Deliverer {
+	if !testing.Testing() {
+		return localingest.Deliverer{}
+	}
+	dir := filepath.Join(os.TempDir(), fmt.Sprintf("beacon-writer-test-%d", os.Getpid()))
+	socket := filepath.Join(dir, "no-collector.sock")
+	if runtime.GOOS == "windows" {
+		socket = fmt.Sprintf(`\\.\pipe\beacon-writer-test-%d-none`, os.Getpid())
+	}
+	return localingest.Deliverer{
+		Client: localingest.Client{SocketPath: socket},
+		Spool:  localingest.Spool{Dir: filepath.Join(dir, "spool")},
+	}
+}
+
+// deliver writes one line to the system log as an account that is not root, the way the hook
+// adapter does: through the collector's ingest socket when there is one, directly otherwise, and
+// into this account's private spool only when the restricted log refuses the direct append (see
+// localingest.Deliverer.Write). A guarded or budgeted append (a session backfill) never comes
+// here: those limits are decided under the log's lock, which only a direct writer holds, and the
+// backfill that sets them runs as root on a system log.
+func deliver(opts Options, data []byte) error {
+	outcome, err := Ingest.WriteOutcome(opts.Path, data, func(line []byte) error {
+		return appendJSONL(opts.Path, append(line[:len(line):len(line)], '\n'), opts.RotateSize, opts.RotateArchives, nil, nil)
+	})
+	if err == nil && outcome == localingest.Spooled && opts.RequireWritten {
+		return ErrSpooled
+	}
+	return err
 }
 
 // compactRetainedContent drops an event's retained text and records that it did, so a reader can
@@ -254,7 +308,8 @@ func SanitizeEvent(event schema.Event, maxBytes int) schema.Event {
 	return asymptoteobserve.SanitizeEvent(event, maxBytes)
 }
 
-// Keep this rotation and file-mode contract mirrored with the hook adapter and beaconjson exporter.
+// Keep this file-mode contract mirrored with the hook adapter and beaconjson exporter; the rotation
+// itself is asymptoteobserve.RotateRuntimeLog for all three.
 func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int, guard *RetentionGuard, budget *Budget) (err error) {
 	_, dirMode, _ := asymptoteobserve.RuntimeLogModes(path)
 	if err := os.MkdirAll(filepath.Dir(path), dirMode); err != nil {
@@ -293,7 +348,7 @@ func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int
 	if guard != nil {
 		// Decided under the lock, so no other Beacon writer can rotate between the check and the
 		// rotation it permits.
-		rotate, err := needsRotation(path, rotateBytes, int64(len(line)))
+		rotate, err := asymptoteobserve.RuntimeLogNeedsRotation(path, rotateBytes, int64(len(line)))
 		if err != nil {
 			return err
 		}
@@ -307,9 +362,13 @@ func appendJSONL(path string, line []byte, rotateBytes int64, rotateArchives int
 			}
 		}
 	}
-	if err := rotateIfNeeded(path, rotateBytes, rotateArchives, int64(len(line))); err != nil && !rotationRefused(err) {
-		return err
-	}
+	// A rotation that cannot happen now is deferred, never fatal, and the line is appended past the
+	// size limit for a later write to rotate. Two cases reach here. An unprivileged writer of a system
+	// log may not rename or delete in its directory: on POSIX it is root-owned 0755, and on Windows its
+	// ACL withholds those rights on purpose, since they would let a user redirect a SYSTEM write. And
+	// on Windows a reader that holds the log open without delete sharing blocks the rename for
+	// everyone until it lets go. asymptoteobserve.RotateRuntimeLog moves nothing in either case.
+	_ = asymptoteobserve.RotateRuntimeLog(path, rotateBytes, rotateArchives, int64(len(line)))
 	f, err := openRuntimeFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY)
 	if err != nil {
 		return err
@@ -344,87 +403,4 @@ func openRuntimeFileAs(path, logPath string, flag int) (*os.File, error) {
 // with the same count, so the list covers whichever process wrote the log.
 func RetainedLogPaths(path string) []string {
 	return retainedPaths(path, DefaultRotateArchives)
-}
-
-func rotateIfNeeded(path string, maxSize int64, archives int, nextWriteBytes int64) error {
-	if maxSize <= 0 {
-		return nil
-	}
-	if archives < 1 {
-		archives = DefaultRotateArchives
-	}
-	rotate, err := needsRotation(path, maxSize, nextWriteBytes)
-	if err != nil || !rotate {
-		return err
-	}
-	if err := removeOverflowArchives(path, archives); err != nil {
-		return err
-	}
-	for i := archives - 1; i >= 1; i-- {
-		from := path + fmt.Sprintf(".%d", i)
-		to := path + fmt.Sprintf(".%d", i+1)
-		if err := os.Rename(from, to); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-	}
-	rotated := path + ".1"
-	if err := os.Rename(path, rotated); err != nil {
-		return err
-	}
-	asymptoteobserve.TightenPrivateRuntimeLogArchives(path, archives)
-	return nil
-}
-
-// rotationRefused reports whether a rotation failed because this process may not rename or delete
-// in the log directory, which is the expected outcome for an unprivileged writer of a system log.
-//
-// Rotation belongs to the privileged writers there: on POSIX the directory is root-owned 0755, and
-// on Windows its ACL gives ordinary users no right to add, rename or delete entries -- which is the
-// point, since those are the rights that let a user redirect a SYSTEM write. The first step of a
-// rotation is therefore the one refused, nothing has moved, and the event is better appended past
-// the size limit than lost; the collector rotates the log at its next write.
-func rotationRefused(err error) bool {
-	return errors.Is(err, fs.ErrPermission)
-}
-
-// needsRotation reports whether appending nextWriteBytes to path would take it past maxSize, which
-// is when rotateIfNeeded rotates. An empty or missing file never rotates, so one oversized line
-// still lands somewhere.
-func needsRotation(path string, maxSize int64, nextWriteBytes int64) (bool, error) {
-	if maxSize <= 0 {
-		return false, nil
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	return info.Size() > 0 && info.Size()+nextWriteBytes > maxSize, nil
-}
-
-func removeOverflowArchives(path string, archives int) error {
-	dir := filepath.Dir(path)
-	base := filepath.Base(path)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-	prefix := base + "."
-	for _, entry := range entries {
-		name := entry.Name()
-		suffix, ok := strings.CutPrefix(name, prefix)
-		if !ok {
-			continue
-		}
-		index, err := strconv.Atoi(suffix)
-		if err != nil || index < archives {
-			continue
-		}
-		if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-	}
-	return nil
 }

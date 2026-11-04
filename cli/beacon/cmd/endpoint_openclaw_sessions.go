@@ -99,7 +99,7 @@ func runEndpointOpenClawSessionsSync(cmd *cobra.Command, args []string) error {
 	if endpointOpenClawSessionsOpts.watch && !endpointOpenClawSessionsOpts.print {
 		return watchOpenClawSessions(ctx, cmd, opts)
 	}
-	summary, err := openclawsession.CollectOnce(opts)
+	summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, endpointSweepLockWait, openclawsession.CollectOnce, opts)
 	reportOpenClawSessionsSweep(cmd, summary)
 	return err
 }
@@ -110,7 +110,7 @@ func watchOpenClawSessions(ctx context.Context, cmd *cobra.Command, opts opencla
 		interval = 5 * time.Second
 	}
 	for {
-		summary, err := openclawsession.CollectOnce(opts)
+		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, openclawsession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "openclaw sessions sync error: %v\n", err)
 		}

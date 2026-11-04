@@ -511,6 +511,7 @@ When you remove Beacon everywhere, also delete the IAM access key and the two Fl
 | `/opt/beacon/bin/beacon`, `beacon-otelcol`, `vector` | The CLI, the collector, and the forwarder |
 | `/Library/LaunchDaemons/com.beacon.endpoint.collector.plist` | The collector service |
 | `/Library/LaunchDaemons/com.beacon.endpoint.inventory.plist` | The inventory job, every 6 hours |
+| `/Library/LaunchDaemons/com.beacon.endpoint.session-sync.plist` | The [session sync](/cli/endpoint-install#scheduled-session-sync) job, every 15 minutes, only when you turn it on |
 | `/Library/LaunchDaemons/com.beacon.endpoint.s3-forwarder.plist` | The S3 forwarder, after step 5 |
 | `/Library/Application Support/Beacon/Endpoint/` | Beacon's configuration |
 | `/Library/Application Support/Beacon/Forwarders/s3-vector.env` | The AWS keys, readable only by root |

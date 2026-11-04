@@ -97,7 +97,7 @@ func runEndpointPiSync(cmd *cobra.Command, args []string) error {
 	if endpointPiOpts.watch && !endpointPiOpts.print {
 		return watchPi(ctx, cmd, opts)
 	}
-	summary, err := pisession.CollectOnce(opts)
+	summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, endpointSweepLockWait, pisession.CollectOnce, opts)
 	reportPiSweep(cmd, summary)
 	return err
 }
@@ -108,7 +108,7 @@ func watchPi(ctx context.Context, cmd *cobra.Command, opts pisession.CollectOpti
 		interval = 5 * time.Second
 	}
 	for {
-		summary, err := pisession.CollectOnce(opts)
+		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, pisession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Pi sync error: %v\n", err)
 		}

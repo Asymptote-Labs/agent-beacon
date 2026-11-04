@@ -62,7 +62,7 @@ beacon endpoint fx sync --print
 beacon endpoint fx sync --watch --interval 5m
 ```
 
-Nothing sweeps on its own. Run `sync` under whatever scheduler the platform already uses, or leave `--watch` running.
+Unless the [scheduled session sync](/cli/endpoint-install#scheduled-session-sync) is on, nothing sweeps on its own. Run `sync` under whatever scheduler the platform already uses, or leave `--watch` running.
 
 A sweep prints what it did, and says out loud the two conditions a counter would hide:
 

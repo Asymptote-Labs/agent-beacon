@@ -275,3 +275,33 @@ func TestCallbackServerAcceptsABarePastedCode(t *testing.T) {
 		t.Fatalf("exchange got code=%q state=%q", gotCode, gotState)
 	}
 }
+
+func TestCallbackServerSuccessPageLinksToTheDashboard(t *testing.T) {
+	cs, err := NewCallbackServer("s", "v", func(context.Context, string, string, string) error { return nil }, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.listener.Close()
+	if strings.Contains(cs.successHTML(), "<a ") {
+		t.Fatalf("no link expected unless one is set: %s", cs.successHTML())
+	}
+
+	cs.SetSuccessLink("Go to dashboard", `https://beacon.example/?a=1&b="2"`)
+	want := `<a class="button" href="https://beacon.example/?a=1&amp;b=&#34;2&#34;">Go to dashboard</a>`
+	if page := cs.successHTML(); !strings.Contains(page, want) {
+		t.Fatalf("success page should contain %s, got %s", want, page)
+	}
+}
+
+func TestDashboardHomeURL(t *testing.T) {
+	for base, want := range map[string]string{
+		"https://beacon.sh":           "https://beacon.sh/dashboard",
+		"https://beacon.sh/":          "https://beacon.sh/dashboard",
+		"https://beacon.sh/dashboard": "https://beacon.sh/dashboard",
+		"":                            "https://beacon.sh/dashboard",
+	} {
+		if got := DashboardHomeURL(base); got != want {
+			t.Fatalf("DashboardHomeURL(%q) = %q, want %q", base, got, want)
+		}
+	}
+}

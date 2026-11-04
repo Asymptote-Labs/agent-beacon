@@ -2,8 +2,11 @@ package beaconjsonexporter
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -225,6 +228,82 @@ func TestJSONLWriterKeepsToolDescriptionsToThePromptTextLimit(t *testing.T) {
 	}
 	if got := sanitized.GenAI.Agent.Description; len(got) > asymptoteobserve.DefaultRawStringLimit {
 		t.Fatalf("agent description = %d bytes, want the raw-attribute limit to still apply elsewhere", len(got))
+	}
+}
+
+// A browser chat answer keeps up to 16 KB and is written once, without its raw copy; every other
+// runtime's gen_ai output keeps the raw-attribute limit and its raw attributes as before.
+func TestJSONLWriterKeepsBrowserChatAnswersToTheResponseLimit(t *testing.T) {
+	writer := jsonlWriter{maxEventBytes: defaultMaxEventBytes, redactSecrets: true}
+	answerText := func(event beaconEvent) string {
+		messages := event.GenAI.Output.Messages.([]interface{})
+		parts := messages[0].(map[string]interface{})["parts"].([]interface{})
+		return parts[0].(map[string]interface{})["content"].(string)
+	}
+	for _, tc := range []struct {
+		harness, answer string
+		limit           int
+		wantRawCopy     bool
+	}{
+		{harness: "claude_web", answer: strings.Repeat("Sunny, high of 70. ", 500), limit: browserResponseStringLimit},
+		{harness: "chatgpt_web", answer: strings.Repeat("Sunny, high of 70. ", 2000), limit: browserResponseStringLimit},
+		{harness: "claude_code", answer: strings.Repeat("Sunny, high of 70. ", 500), limit: asymptoteobserve.DefaultRawStringLimit, wantRawCopy: true},
+	} {
+		messages := []interface{}{map[string]interface{}{
+			"role":  "assistant",
+			"parts": []interface{}{map[string]interface{}{"type": "text", "content": tc.answer}},
+		}}
+		attrs := map[string]interface{}{"gen_ai.output.messages": `[{"role":"assistant"}]`, "beacon.response.chars": int64(len(tc.answer))}
+		event := newBeaconEvent("agent.response.completed", "agent", "info", tc.harness, time.Now())
+		event.GenAI = &beaconevent.GenAIInfo{Output: &beaconevent.GenAIOutputInfo{Messages: messages}}
+		event.Raw = map[string]interface{}{"attributes": attrs}
+
+		sanitized := writer.sanitize(event)
+		if got, want := answerText(sanitized), asymptoteobserve.TruncateString(tc.answer, tc.limit); got != want {
+			t.Errorf("%s: answer = %d bytes, want %d of %d", tc.harness, len(got), len(want), len(tc.answer))
+		}
+		_, rawCopy := sanitized.Raw["attributes"].(map[string]interface{})["gen_ai.output.messages"]
+		if rawCopy != tc.wantRawCopy {
+			t.Errorf("%s: raw copy of the answer kept = %v, want %v", tc.harness, rawCopy, tc.wantRawCopy)
+		}
+		if _, ok := sanitized.Raw["attributes"].(map[string]interface{})["beacon.response.chars"]; !ok {
+			t.Errorf("%s: beacon.response.chars dropped from raw", tc.harness)
+		}
+		if _, ok := attrs["gen_ai.output.messages"]; !ok {
+			t.Errorf("%s: the caller's attributes were changed", tc.harness)
+		}
+	}
+}
+
+// A gen_ai block holding a value JSON cannot represent (NaN, an out-of-range integer) is sanitized
+// like any other: its text redacted and cut, the value that cannot be represented left out.
+func TestJSONLWriterSanitizesGenAIHoldingUnrepresentableValues(t *testing.T) {
+	nan, maxInt64 := math.NaN(), int64(math.MaxInt64)
+	long := strings.Repeat("x", 5000)
+	for _, redact := range []bool{true, false} {
+		writer := jsonlWriter{maxEventBytes: defaultMaxEventBytes, redactSecrets: redact}
+		event := newBeaconEvent("file.read", "file", "info", "claude_code", time.Now())
+		event.GenAI = &beaconevent.GenAIInfo{
+			Request: &beaconevent.GenAIRequestInfo{Temperature: &nan},
+			Usage:   &beaconevent.GenAIUsageInfo{InputTokens: &maxInt64},
+			Tool: &beaconevent.GenAIToolInfo{Call: &beaconevent.GenAIToolCallInfo{
+				Result: "token=abcdefgh12345678 " + long,
+			}},
+		}
+		sanitized := writer.sanitize(event)
+		if _, err := json.Marshal(sanitized); err != nil {
+			t.Fatalf("redact %v: sanitized event does not marshal: %v", redact, err)
+		}
+		result := sanitized.GenAI.Tool.Call.Result.(string)
+		if len(result) > asymptoteobserve.DefaultRawStringLimit {
+			t.Errorf("redact %v: result = %d bytes, want at most %d", redact, len(result), asymptoteobserve.DefaultRawStringLimit)
+		}
+		if redact && strings.Contains(result, "abcdefgh12345678") {
+			t.Errorf("credential left in %.80q", result)
+		}
+		if sanitized.GenAI.Request.Temperature != nil || sanitized.GenAI.Usage.InputTokens != nil {
+			t.Errorf("redact %v: unrepresentable values kept: %+v %+v", redact, sanitized.GenAI.Request, sanitized.GenAI.Usage)
+		}
 	}
 }
 
@@ -929,6 +1008,43 @@ func TestConsumeLogsMapsGeminiPrompt(t *testing.T) {
 	}
 	if event.Prompt == nil || event.Prompt.Text != "summarize token=[REDACTED]" {
 		t.Fatalf("prompt = %#v, want redacted Gemini prompt", event.Prompt)
+	}
+}
+
+// content.hash leaves the machine where the prompt does not (Metadata-only keeps it), so it is the
+// hash of the prompt the exporter stores after redaction, never of the text before it.
+func TestConsumeLogsHashesTheStoredRedactedPrompt(t *testing.T) {
+	hexHash := func(text string) string {
+		sum := sha256.Sum256([]byte(text))
+		return hex.EncodeToString(sum[:])
+	}
+	for _, tc := range []struct{ prompt, stored string }{
+		{"deploy with ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8 and password=hunter2", "deploy with ghp_[REDACTED] and password=[REDACTED]"},
+		// Nothing to redact: the hash is the one it always was.
+		{"the quick brown fox", "the quick brown fox"},
+	} {
+		exp, path := newTestExporter(t)
+		logs := plog.NewLogs()
+		rl := logs.ResourceLogs().AppendEmpty()
+		rl.Resource().Attributes().PutStr("service.name", "claude-code")
+		rec := rl.ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+		rec.Body().SetStr("claude_code.user_prompt")
+		rec.Attributes().PutStr("event.name", "user_prompt")
+		rec.Attributes().PutStr("session.id", "claude-session")
+		rec.Attributes().PutStr("prompt", tc.prompt)
+		if err := exp.consumeLogs(context.Background(), logs); err != nil {
+			t.Fatalf("consumeLogs returned error: %v", err)
+		}
+		event := readEvent(t, path)
+		if event.Prompt == nil || event.Prompt.Text != tc.stored {
+			t.Fatalf("prompt = %#v, want %q", event.Prompt, tc.stored)
+		}
+		if event.Content == nil || event.Content.Hash != hexHash(tc.stored) || event.Content.Bytes != len(tc.prompt) {
+			t.Fatalf("content = %#v, want hash %s and the original %d bytes", event.Content, hexHash(tc.stored), len(tc.prompt))
+		}
+		if event.Content.Redacted != (tc.prompt != tc.stored) {
+			t.Fatalf("content.redacted = %t for %q", event.Content.Redacted, tc.prompt)
+		}
 	}
 }
 

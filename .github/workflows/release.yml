@@ -30,15 +30,15 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: cli/beacon/go.mod
 
-      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           version: "v2.13.3"
           install-only: true
@@ -72,6 +72,19 @@ jobs:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: goreleaser check
 
+      # GoReleaser takes the nearest tag of any kind as the previous release, so an
+      # ext-v* or sdk-js-v* tag between two CLI releases cuts the changelog short:
+      # v1.3.47's started at sdk-js-v0.2.0 and left out everything before it. Only
+      # v* tags count here, and both ends are passed to the publish step.
+      - name: Find the previous CLI release
+        id: tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          previous="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          echo "Changelog covers ${previous:-the start of history}..${GITHUB_REF_NAME}"
+
       # Run from cli/beacon because the release pre-hook writes target-specific
       # beacon-hooks binaries to a shared embedded path; --parallelism 1 avoids
       # racing on it.
@@ -80,6 +93,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+          GORELEASER_PREVIOUS_TAG: ${{ steps.tags.outputs.previous }}
         run: goreleaser release --clean --parallelism 1
 
   package:
@@ -99,11 +114,11 @@ jobs:
       BEACON_PKG_ARCHES: "arm64"
       VECTOR_VERSION: "0.56.0"
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: cli/beacon/go.mod
 
@@ -326,7 +341,7 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Fetch the published Windows archive
         env:

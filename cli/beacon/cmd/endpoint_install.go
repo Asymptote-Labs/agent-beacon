@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/auth"
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/dashboard"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
@@ -18,6 +19,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/onboarding"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/version"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/spf13/cobra"
 )
 
@@ -117,6 +119,9 @@ var (
 // install and repair (#640). So the list is always handed over non-nil.
 func endpointInstallOptions(selection endpointTargetSelection, serviceKind service.Kind) lifecycle.InstallOptions {
 	harnesses := append([]string{}, selection.OTLP...)
+	// Install and repair validate the forward flags before anything is written.
+	otlpForward, _ := otlpForwardOptions()
+	sessionSync, _ := sessionSyncOption()
 	return lifecycle.InstallOptions{
 		UserMode:                  endpointUserMode(),
 		LogPath:                   endpointOpts.logPath,
@@ -131,8 +136,55 @@ func endpointInstallOptions(selection endpointTargetSelection, serviceKind servi
 		ClaudeCaptureModelContext: endpointOpts.claudeCaptureModelContext,
 		SplunkHEC:                 splunkHECOptions(),
 		FalconHEC:                 falconHECOptions(),
+		OTLPForward:               otlpForward,
+		SessionSync:               sessionSync,
 		ServiceKind:               serviceKind,
+		LogAccess:                 strings.ToLower(strings.TrimSpace(endpointOpts.logAccess)),
 	}
+}
+
+// warnMissingOTLPForwardHeaders says when the configured OTLP forward names headers whose values
+// are gone -- a package removal or cleanup took otlp-forward-headers.json -- and this run does not
+// set them again. The forward keeps running, so without this the backend would just start
+// refusing it.
+func warnMissingOTLPForwardHeaders(out io.Writer) {
+	if forward, _ := otlpForwardOptions(); forward != nil {
+		return
+	}
+	cfg, err := endpointconfig.Load(endpointUserMode())
+	if err != nil || cfg.Destinations == nil || cfg.Destinations.OTLPForward == nil {
+		return
+	}
+	if forward := cfg.Destinations.OTLPForward; forward.Enabled && forward.HeadersMissing {
+		fmt.Fprintf(out, "Warning: the OTLP forward to %s names headers (%s) whose values are missing (%s was removed), so it sends without them. Set the forward again with all its flags:\n  %s\n",
+			forward.Endpoint, strings.Join(forward.HeaderNames, ", "), endpointconfig.OTLPForwardSecretsPath(endpointUserMode()), otlpForwardFlags(forward))
+	}
+}
+
+// otlpForwardFlags spells the flags that set forward again as it is configured, with a placeholder
+// for each header value. Passing --otlp-forward-endpoint replaces the whole forward, so every
+// setting is restated, not only the headers.
+func otlpForwardFlags(forward *endpointconfig.OTLPForward) string {
+	flags := []string{"--otlp-forward-endpoint " + shellQuote(forward.Endpoint)}
+	if forward.Protocol != "" && forward.Protocol != endpointconfig.OTLPForwardProtocolGRPC {
+		flags = append(flags, "--otlp-forward-protocol "+forward.Protocol)
+	}
+	if len(forward.Harnesses) > 0 && strings.Join(forward.Harnesses, ",") != strings.Join(endpointconfig.DefaultOTLPForwardHarnesses, ",") {
+		flags = append(flags, "--otlp-forward-harness "+shellQuote(strings.Join(forward.Harnesses, ",")))
+	}
+	if forward.Insecure {
+		flags = append(flags, "--otlp-forward-insecure")
+	}
+	if forward.InsecureSkipVerify {
+		flags = append(flags, "--otlp-forward-insecure-skip-verify")
+	}
+	if forward.CAFile != "" {
+		flags = append(flags, "--otlp-forward-ca-file "+shellQuote(forward.CAFile))
+	}
+	for _, name := range forward.HeaderNames {
+		flags = append(flags, "--otlp-forward-header "+shellQuote(name+"=<value>"))
+	}
+	return strings.Join(flags, " ")
 }
 
 // errSetupCancelled replaces the wizard's own "onboarding cancelled", which read as a failure
@@ -150,6 +202,13 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if _, err := otlpForwardOptions(); err != nil {
+		return err
+	}
+	if _, err := sessionSyncOption(); err != nil {
+		return err
+	}
+	warnMissingOTLPForwardHeaders(cmd.ErrOrStderr())
 	if endpointOpts.dryRun {
 		return printPlannedActions(plannedInstallActions(false, serviceKind, selection.OTLP, selection.Hooks))
 	}
@@ -199,6 +258,8 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	case result.InventoryJobDetail != "":
 		fmt.Fprintf(details, "Scheduled inventory job not installed: %s\n", result.InventoryJobDetail)
 	}
+	reportSessionSyncJob(details, result)
+	reportLogAccess(details, result)
 	reportManagedForwarder(details, cmd.ErrOrStderr(), result.ManagedForwarder)
 	printLingerGap(cmd.ErrOrStderr(), result)
 	installHookTargetsFromEndpointInstall(details, cmd.ErrOrStderr(), selection.Hooks)
@@ -215,6 +276,8 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 		}
 		reportEndpointBackfill(backfillOut, runEndpointBackfill(result.LogPath, endpointUserMode()))
 		backfilled = true
+	} else {
+		recordSkippedBackfill(cmd.ErrOrStderr(), endpointUserMode())
 	}
 	finishCloudSetup(cmd, onboarded, connectAfterInstall, summary, func() error {
 		return connectEndpointFor(cmd, endpointUserMode(), result.LogPath, backfilled, summary)
@@ -352,10 +415,18 @@ func runEndpointStatus(cmd *cobra.Command, args []string) error {
 			fmt.Printf("Diagnostic: %s %s (%s)\n", check.Name, check.Status, check.Message)
 		}
 	}
-	if status.LastEvent == "" {
-		fmt.Println("Last event: none")
-	} else {
+	if status.LogAccess != "" {
+		fmt.Printf("Runtime log access: %s\n", status.LogAccess)
+	}
+	switch {
+	case status.LastEvent != "":
 		fmt.Println("Last event: present")
+	case status.LogAccess == asymptoteobserve.LogAccessRestricted && !readable(status.LogPath):
+		// A restricted log is unreadable to an account outside its readers group, which is not the
+		// same as empty.
+		fmt.Printf("Last event: unknown (this account cannot read the restricted log; run %s)\n", elevatedRunHint())
+	default:
+		fmt.Println("Last event: none")
 	}
 	for _, forwarder := range status.ScriptForwarders {
 		fmt.Println(scriptForwarderStatusLine(forwarder))
@@ -364,6 +435,7 @@ func runEndpointStatus(cmd *cobra.Command, args []string) error {
 		fmt.Println(line)
 	}
 	fmt.Println(inventoryHeartbeatStatusLine(status.InventoryHeartbeat))
+	fmt.Println(sessionSyncStatusLine(status.SessionSync))
 	return nil
 }
 
@@ -440,6 +512,13 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if _, err := otlpForwardOptions(); err != nil {
+		return err
+	}
+	if _, err := sessionSyncOption(); err != nil {
+		return err
+	}
+	warnMissingOTLPForwardHeaders(cmd.ErrOrStderr())
 	if endpointOpts.dryRun {
 		return printPlannedActions(plannedInstallActions(true, serviceKind, selection.OTLP, selection.Hooks))
 	}
@@ -451,11 +530,24 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Printf("Endpoint repaired. Manifest: %s\n", result.ManifestPath)
+	reportSessionSyncJob(os.Stdout, result)
+	reportLogAccess(os.Stdout, result)
 	reportManagedForwarder(os.Stdout, cmd.ErrOrStderr(), result.ManagedForwarder)
 	printLingerGap(cmd.ErrOrStderr(), result)
 	installHookTargetsFromEndpointInstall(os.Stdout, cmd.ErrOrStderr(), selection.Hooks)
 	refreshAgentSkills(cmd.ErrOrStderr())
 	return nil
+}
+
+// reportSessionSyncJob says where the scheduled session sync job was installed, or why it was not,
+// when the setting is on; with it off (the default) install and repair say nothing about it.
+func reportSessionSyncJob(out io.Writer, result lifecycle.InstallResult) {
+	switch {
+	case result.SessionSyncJobPath != "":
+		fmt.Fprintf(out, "Scheduled session sync job: %s\n", result.SessionSyncJobPath)
+	case result.SessionSyncJobDetail != "":
+		fmt.Fprintf(out, "Scheduled session sync job not installed: %s\n", result.SessionSyncJobDetail)
+	}
 }
 
 func reportEndpointTargetSelection(cmd *cobra.Command, selection endpointTargetSelection) {

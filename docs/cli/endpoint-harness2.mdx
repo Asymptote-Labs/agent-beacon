@@ -70,7 +70,7 @@ beacon endpoint harness2 sync --print
 beacon endpoint harness2 sync --watch --interval 1m
 ```
 
-Nothing sweeps on its own. Run `sync` after an experiment, under whatever scheduler the platform already uses, or leave `--watch` running during one.
+Unless the [scheduled session sync](/cli/endpoint-install#scheduled-session-sync) is on, nothing sweeps on its own. Run `sync` after an experiment, under whatever scheduler the platform already uses, or leave `--watch` running during one.
 
 ```text
 Harness² sync: 48 rollouts, 12 changed, 1934 events, 0 errors

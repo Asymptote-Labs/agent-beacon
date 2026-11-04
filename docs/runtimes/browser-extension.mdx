@@ -156,11 +156,19 @@ Retention defaults to `full`. Browser chat telemetry has little investigative va
 
 | Mode | What is retained |
 |------|------------------|
-| `full` (default) | Complete prompt text, full assistant response, tool call arguments and results |
+| `full` (default) | Prompt text, assistant response, tool call arguments and results |
 | `redacted` | The same text with emails and API-key-shaped tokens scrubbed in the browser |
 | `metadata` | No chat text. Actions, models, token counts, and tool names only |
 
-Retention is enforced in the browser before anything is sent, so under `metadata` the text never leaves the page. Endpoint-side redaction, sanitization, truncation, and event-size limits apply to whatever is sent.
+Retention is enforced in the browser before anything is sent, so under `metadata` the text never leaves the page. The extension sends at most 48,000 bytes of any one field, and the endpoint redacts secrets and keeps less of some fields when it writes the log:
+
+| Event field | Kept in the log |
+|-------------|-----------------|
+| `prompt.text` | The first 4 KB of the prompt |
+| `gen_ai.output.messages` | The first 16 KB of the response |
+| `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result` | The first 2 KB of each value |
+
+A value that was cut ends in `...[truncated]`. The response's full length is in `raw.attributes["beacon.response.chars"]`.
 
 Change the mode in the extension's popup before enabling it on a machine where the same browser profile is used for personal conversations.
 
@@ -204,9 +212,9 @@ Coverage that is the same for both sites:
 
 | Area | Support |
 |------|---------|
-| Prompt telemetry | Supported, with full prompt text under `full` and `redacted` retention |
+| Prompt telemetry | Supported, with prompt text under `full` and `redacted` retention |
 | Turn identity | Supported. Each chat request's turn id is sent as `beacon.prompt.id` and lands in `prompt.id` |
-| Assistant response telemetry | Supported, including the response text and model |
+| Assistant response telemetry | Supported. `agent.response.completed` events carry the response text in `gen_ai.output.messages` and the model |
 | Reasoning telemetry | Not available. Neither site sends the model's reasoning to the page, only short summaries of it, and those summaries are not recorded |
 | Command and file telemetry | Not applicable. Browser chat performs no local commands or file edits |
 | Approval telemetry | Not available. Neither site exposes approval decisions to a page script |

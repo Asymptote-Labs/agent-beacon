@@ -34,6 +34,11 @@ func stubBackfill(t *testing.T, maxBytes, shareBytes int64, runners ...endpointB
 	t.Cleanup(func() { endpointBackfillScratchDir = oldScratch })
 	scratch := filepath.Join(t.TempDir(), "backfill-snapshots")
 	endpointBackfillScratchDir = func() string { return scratch }
+	// Securing the directory on Windows sets its owner, which needs an elevated token; the tests
+	// that check it put the real one back.
+	oldSecure := secureBackfillScratchDir
+	t.Cleanup(func() { secureBackfillScratchDir = oldSecure })
+	secureBackfillScratchDir = func(string) error { return nil }
 }
 
 func writingRunner(name string, events int, since *time.Time) endpointBackfillRunner {
@@ -200,6 +205,49 @@ func TestSystemEndpointBackfillReadsTheConsoleUsersStores(t *testing.T) {
 	runEndpointBackfill(filepath.Join(t.TempDir(), "runtime.jsonl"), false)
 	if sawHome != "" {
 		t.Fatal("a system backfill with no console user read root's home")
+	}
+}
+
+// A system backfill makes its snapshot directory private before it reads anything, and reads
+// nothing when it cannot: the copies it would make there are the console user's session stores.
+func TestSystemEndpointBackfillSecuresTheSnapshotDirectoryFirst(t *testing.T) {
+	ran := false
+	stubBackfill(t, 1<<20, 1<<20, endpointBackfillRunner{Name: "Codex", Sync: "beacon endpoint codex sync", Run: func(endpointBackfillRun) (int, error) {
+		ran = true
+		return 0, nil
+	}})
+	stubConsoleUser(t, consoleUserInfo{Username: "alice", HomeDir: t.TempDir()}, true, nil)
+	scratch := endpointBackfillScratchDir()
+
+	var secured []string
+	secureBackfillScratchDir = func(dir string) error {
+		if ran {
+			t.Error("the snapshot directory was secured after a runtime was read")
+		}
+		secured = append(secured, dir)
+		return nil
+	}
+	runEndpointBackfill(filepath.Join(t.TempDir(), "runtime.jsonl"), false)
+	if !ran || len(secured) != 1 || secured[0] != scratch {
+		t.Fatalf("secured %v (runtime read: %t), want %s once, before the runtime is read", secured, ran, scratch)
+	}
+
+	ran = false
+	secureBackfillScratchDir = func(string) error { return errors.New("access is denied") }
+	result := runEndpointBackfill(filepath.Join(t.TempDir(), "runtime.jsonl"), false)
+	if ran {
+		t.Fatal("a system backfill read session stores although its snapshot directory could not be made private")
+	}
+	if !strings.Contains(result.Skipped, scratch) || !strings.Contains(result.Skipped, "access is denied") {
+		t.Fatalf("Skipped = %q, want it to name %s and the error", result.Skipped, scratch)
+	}
+
+	// A user backfill reads the user's own stores and makes no copies in the system tree.
+	secured = nil
+	secureBackfillScratchDir = func(dir string) error { secured = append(secured, dir); return nil }
+	runEndpointBackfill(filepath.Join(t.TempDir(), "runtime.jsonl"), true)
+	if len(secured) != 0 {
+		t.Fatalf("a user backfill secured %v", secured)
 	}
 }
 

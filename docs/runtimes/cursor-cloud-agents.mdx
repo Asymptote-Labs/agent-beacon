@@ -145,8 +145,9 @@ share screenshots or logs.
   <img src="/images/cursor-cloud-agents/beacon-cloud-setup-print-env.png" alt="Terminal showing beacon cloud gcs setup --apply --print-env output with bucket, prefix, and credentials environment variables." />
 </Frame>
 
-The helper creates a dedicated uploader service account and grants it object
-upload access to the selected bucket.
+The helper creates a dedicated uploader service account and grants it
+`roles/storage.objectUser` on the selected bucket, which can read, list,
+overwrite, and delete objects in that bucket, not only upload them.
 
 ### S3
 
@@ -387,9 +388,10 @@ run.provider=cursor_cloud
 
 ## Security note
 
-The self-serve flows create a dedicated GCS service account or AWS IAM user
-scoped to object uploads, then store its credentials in the Cursor cloud
-environment. This is useful for proof-of-concept testing, but treat those
+The self-serve flows create a dedicated GCS service account with
+`roles/storage.objectUser` on one bucket (read, list, overwrite, and delete) or
+an AWS IAM user scoped to object uploads, then store its credentials in the
+Cursor cloud environment. This is useful for proof-of-concept testing, but treat those
 environment variables as sensitive credentials.
 
 Store credential values as Cursor Runtime Secrets, avoid broad credentials,

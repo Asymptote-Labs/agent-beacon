@@ -573,6 +573,7 @@ function finishResult<T>(result: T, span: Span, options?: ObserveOptions): unkno
   if (isPromiseLike(result)) {
     return result.then(
       value => {
+        if (isAsyncIterator(value)) return finishResult(value, span, options);
         if (!options?.ignoreOutput) {
           span.setAttribute("asymptote.observe.output.type", typeof value);
         }

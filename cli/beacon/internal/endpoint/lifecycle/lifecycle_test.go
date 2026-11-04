@@ -377,7 +377,7 @@ func TestUninstallFallbackRemovesKnownFiles(t *testing.T) {
 	testenv.SetHome(t, home)
 	logPath := filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl")
 	cfg := endpointconfig.Default(true, logPath)
-	for _, path := range []string{endpointconfig.ConfigPath(true), cfg.Collector.ConfigPath, logPath} {
+	for _, path := range []string{endpointconfig.ConfigPath(true), endpointconfig.OTLPForwardSecretsPath(true), cfg.Collector.ConfigPath, logPath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 			t.Fatalf("mkdir %s: %v", path, err)
 		}
@@ -389,7 +389,7 @@ func TestUninstallFallbackRemovesKnownFiles(t *testing.T) {
 	if err := Uninstall(UninstallOptions{UserMode: true, LogPath: logPath}); err != nil {
 		t.Fatalf("Uninstall returned error: %v", err)
 	}
-	for _, path := range []string{endpointconfig.ConfigPath(true), cfg.Collector.ConfigPath, logPath} {
+	for _, path := range []string{endpointconfig.ConfigPath(true), endpointconfig.OTLPForwardSecretsPath(true), cfg.Collector.ConfigPath, logPath} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("%s still exists or unexpected error: %v", path, err)
 		}
@@ -609,6 +609,61 @@ func TestRepairPreservesExistingConfigWhenReinstallFails(t *testing.T) {
 	}
 	if string(data) != originalConfig {
 		t.Fatalf("config was not restored: %s", string(data))
+	}
+}
+
+// Repair tears the endpoint down before it reinstalls, and a failed reinstall restores only the
+// endpoint config. A collector the reinstall would refuse (an older beacon-otelcol, as sudo finds
+// Homebrew's on a Mac that also has the package) left the endpoint with no collector unit or
+// config, so repair refuses it before the teardown.
+func TestRepairRefusesAnOlderCollectorBeforeTearingDown(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("install preflight is macOS-only")
+	}
+	testenv.RequirePOSIXExecutableFixtures(t)
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	logPath := filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl")
+	bin := filepath.Join(home, "bin")
+	if err := os.MkdirAll(bin, 0755); err != nil {
+		t.Fatal(err)
+	}
+	current := filepath.Join(bin, "beacon-otelcol")
+	if err := os.WriteFile(current, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	older := filepath.Join(bin, "beacon-otelcol-older")
+	if err := os.WriteFile(older, []byte("#!/bin/sh\n[ \"$1\" = components ] && printf 'processors:\\n  - name: batch\\n'\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	opts := InstallOptions{
+		UserMode:      true,
+		LogPath:       logPath,
+		Harnesses:     []string{},
+		GRPCPort:      freePort(t),
+		HTTPPort:      freePort(t),
+		CollectorPath: current,
+		StartService:  false,
+	}
+	if _, err := Install(opts); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	cfg := endpointconfig.Default(true, logPath)
+	installed := []string{endpointconfig.ConfigPath(true), cfg.Collector.ConfigPath, manifestPath(true)}
+	for _, path := range installed {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("install did not write %s: %v", path, err)
+		}
+	}
+
+	opts.CollectorPath = older
+	if _, err := Repair(opts); err == nil || !strings.Contains(err.Error(), "older than this beacon CLI") {
+		t.Fatalf("Repair error = %v, want the older collector refused", err)
+	}
+	for _, path := range installed {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("a refused repair removed %s: %v", path, err)
+		}
 	}
 }
 

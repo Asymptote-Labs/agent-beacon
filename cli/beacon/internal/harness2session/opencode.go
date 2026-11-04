@@ -81,7 +81,7 @@ func (m *mapper) emitOpenCodeTool(line Line, ts int64, part map[string]interface
 	case "file":
 		ev.File = openCodeFile(action, ev.Tool.Path, args, object(state, "metadata"))
 		if ev.File.Diff != "" {
-			ev.Content = asymptoteobserve.RetainedContent(ev.File.Diff, asymptoteobserve.DefaultStringLimit)
+			ev.Content, ev.File.DiffHash, ev.File.DiffBytes = asymptoteobserve.RetainedDiff(ev.File.Diff, asymptoteobserve.DefaultStringLimit)
 		}
 	case "mcp":
 		ev.MCP = &schema.MCPInfo{Tool: name}
@@ -131,12 +131,7 @@ func openCodeFile(action, path string, args, metadata map[string]interface{}) *s
 		file.Language = strings.TrimPrefix(filepath.Ext(path), ".")
 	}
 	if operation != "read" {
-		diff := firstNonEmpty(str(metadata, "diff"), argString(args, "diff", "patch", "patchText"), argString(args, "content", "newString", "new_string"))
-		if diff != "" {
-			file.Diff = diff
-			file.DiffBytes = len(diff)
-			file.DiffHash = sha256Hex(diff)
-		}
+		file.Diff = firstNonEmpty(str(metadata, "diff"), argString(args, "diff", "patch", "patchText"), argString(args, "content", "newString", "new_string"))
 	}
 	return file
 }

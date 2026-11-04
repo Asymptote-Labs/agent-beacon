@@ -2,13 +2,16 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/atomicfile"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sysacl"
 )
 
 const (
@@ -109,11 +112,25 @@ type Config struct {
 	EventCategories []string  `json:"event_categories,omitempty"`
 	// ClaudeCaptureModelContext is the --claude-capture-model-context opt-in, recorded so the per-user
 	// config repair writes Claude Code's settings the way the install did.
-	ClaudeCaptureModelContext bool           `json:"claude_capture_model_context,omitempty"`
-	Inventory                 *Inventory     `json:"inventory_heartbeat,omitempty"`
-	Destinations              *Destinations  `json:"destinations,omitempty"`
-	ManagedIngest             *ManagedIngest `json:"managed_ingest,omitempty"`
-	AutoUpdate                *AutoUpdate    `json:"auto_update,omitempty"`
+	ClaudeCaptureModelContext bool       `json:"claude_capture_model_context,omitempty"`
+	Inventory                 *Inventory `json:"inventory_heartbeat,omitempty"`
+	// SessionSync turns on the scheduled job that reads the agent runtimes' own session stores
+	// into the runtime log. Off unless set: see SessionSync.
+	SessionSync   *SessionSync   `json:"session_sync,omitempty"`
+	Destinations  *Destinations  `json:"destinations,omitempty"`
+	ManagedIngest *ManagedIngest `json:"managed_ingest,omitempty"`
+	AutoUpdate    *AutoUpdate    `json:"auto_update,omitempty"`
+	// LogAccess is the system log's access mode: "shared" (empty, the default) or "restricted".
+	// Read it through RestrictedLogAccess, which also accounts for user mode.
+	LogAccess string `json:"log_access,omitempty"`
+}
+
+// RestrictedLogAccess reports whether this endpoint's system log is in the restricted access mode:
+// written only by the privileged collector, readable by root (SYSTEM and Administrators on
+// Windows) and the beacon-log group, with hooks sending their events over the local ingest socket
+// or pipe. It is never true in user mode, whose log is already private.
+func (c Config) RestrictedLogAccess() bool {
+	return !c.UserMode && strings.EqualFold(strings.TrimSpace(c.LogAccess), "restricted")
 }
 
 // ManagedIngest records that this endpoint forwards to Asymptote managed ingest. It holds
@@ -148,6 +165,19 @@ type Collector struct {
 	IncludeCodexSpans     bool   `json:"include_codex_spans,omitempty"`
 }
 
+// SessionSync is the `session_sync` block. Unlike the inventory heartbeat it is opt-in: the job
+// re-reads session stores that hooks and OTLP already capture live, so turning it on adds poll
+// events (`harness.collection_method=poll`) alongside the live ones, which a deployment that
+// forwards the runtime log elsewhere chooses deliberately.
+type SessionSync struct {
+	Enabled bool `json:"enabled"`
+}
+
+// SessionSyncEnabled reports whether cfg turns the scheduled session sync on.
+func SessionSyncEnabled(cfg Config) bool {
+	return cfg.SessionSync != nil && cfg.SessionSync.Enabled
+}
+
 // Inventory is the `inventory_heartbeat` block. `enabled` nil means enabled; it governs both the
 // scheduled job and the writer. A `ttl_seconds` key written by older versions is ignored: the
 // heartbeat runs on the scheduler's interval, not a TTL.
@@ -168,6 +198,149 @@ type InventorySettings struct {
 type Destinations struct {
 	SplunkHEC *SplunkHEC `json:"splunk_hec,omitempty"`
 	FalconHEC *FalconHEC `json:"falcon_hec,omitempty"`
+	// OTLPForward sends the OTLP the local collector receives on to a second OTLP endpoint,
+	// unchanged, alongside Beacon's own pipeline. It exists for machines whose runtimes already
+	// exported to another OTLP backend before Beacon took over their export settings.
+	OTLPForward *OTLPForward `json:"otlp_forward,omitempty"`
+}
+
+// OTLP forwarding protocols.
+const (
+	OTLPForwardProtocolGRPC = "grpc"
+	OTLPForwardProtocolHTTP = "http/protobuf"
+)
+
+type OTLPForward struct {
+	Enabled bool `json:"enabled,omitempty"`
+	// Endpoint is the receiving collector: host:port or a URL for gRPC, the base URL for HTTP
+	// (the exporter appends /v1/logs, /v1/traces and /v1/metrics).
+	Endpoint string `json:"endpoint,omitempty"`
+	// Protocol is "grpc" (the default) or "http/protobuf".
+	Protocol string `json:"protocol,omitempty"`
+	// Harnesses are the canonical harness names whose OTLP is forwarded; empty means Claude Code
+	// and Codex (DefaultOTLPForwardHarnesses). Every other source the collector receives, such as
+	// the browser extension's chats, stays local.
+	Harnesses []string `json:"harnesses,omitempty"`
+	// Headers are sent with every export, typically an authorization header the backend issued.
+	// Their values are credentials, so they are kept out of config.json (which ordinary accounts
+	// read to find the system log) and stored in the root-only OTLPForwardSecretsPath; config.json
+	// carries only HeaderNames.
+	Headers     map[string]string `json:"-"`
+	HeaderNames []string          `json:"header_names,omitempty"`
+	// HeadersMissing is set by Load when config.json names headers but their file is gone (a
+	// package removal or a manual cleanup took it). The forward would then send no credentials,
+	// so status reports it and install and repair warn.
+	HeadersMissing     bool   `json:"-"`
+	Insecure           bool   `json:"insecure,omitempty"`
+	InsecureSkipVerify bool   `json:"insecure_skip_verify,omitempty"`
+	CAFile             string `json:"ca_file,omitempty"`
+}
+
+// DefaultOTLPForwardHarnesses are the runtimes a forward carries when none are named: the two
+// whose OTLP export Beacon takes over.
+var DefaultOTLPForwardHarnesses = []string{"claude_code", "codex_cli", "codex_desktop"}
+
+// OTLPForwardSecretsPath holds the forward's header values, beside config.json and 0600.
+func OTLPForwardSecretsPath(userMode bool) string {
+	return filepath.Join(filepath.Dir(ConfigPath(userMode)), "otlp-forward-headers.json")
+}
+
+type otlpForwardSecrets struct {
+	Headers map[string]string `json:"headers"`
+}
+
+// loadOTLPForwardSecrets fills in the forward's header values. An account that cannot read the
+// secrets file (anyone but root, for a system install) gets the forward without them, which is
+// all status and the runtime-log lookup need; only root renders the collector config.
+func loadOTLPForwardSecrets(cfg *Config) {
+	if cfg.Destinations == nil || cfg.Destinations.OTLPForward == nil || len(cfg.Destinations.OTLPForward.HeaderNames) == 0 {
+		return
+	}
+	data, err := os.ReadFile(OTLPForwardSecretsPath(cfg.UserMode))
+	if os.IsNotExist(err) {
+		cfg.Destinations.OTLPForward.HeadersMissing = true
+		return
+	}
+	if err != nil {
+		return
+	}
+	var secrets otlpForwardSecrets
+	if json.Unmarshal(data, &secrets) == nil && len(secrets.Headers) > 0 {
+		cfg.Destinations.OTLPForward.Headers = secrets.Headers
+	}
+}
+
+// saveOTLPForwardSecrets writes the forward's header values to their root-only file, or removes
+// the file when the forward has none.
+func saveOTLPForwardSecrets(cfg Config) error {
+	path := OTLPForwardSecretsPath(cfg.UserMode)
+	if cfg.Destinations == nil || cfg.Destinations.OTLPForward == nil || !cfg.Destinations.OTLPForward.Enabled || len(cfg.Destinations.OTLPForward.Headers) == 0 {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	data, err := json.MarshalIndent(otlpForwardSecrets{Headers: cfg.Destinations.OTLPForward.Headers}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeSecretFile(cfg.UserMode, path, data)
+}
+
+// RewriteSystemConfig replaces the system config.json with data, for the callers that edit its raw
+// JSON in place (the auto-update mode) rather than going through Save. It is written the way Save
+// would write it: SYSTEM and Administrators only on Windows, 0600 on POSIX, when it holds a
+// credential or was already private, and otherwise readable like any config.json. Writing it with
+// atomicfile.Write alone gave a Windows file the tree's DACL, so every user could read a HEC token.
+func RewriteSystemConfig(path string, data []byte, wasPrivate bool) error {
+	return RewriteConfig(false, path, data, wasPrivate)
+}
+
+// RewriteConfig is RewriteSystemConfig for either mode: a private user config is written 0600.
+func RewriteConfig(userMode bool, path string, data []byte, wasPrivate bool) error {
+	if wasPrivate || rawConfigHoldsCredential(data) {
+		return writeSecretFile(userMode, path, data)
+	}
+	return atomicfile.Write(path, data, 0644)
+}
+
+// rawConfigHoldsCredential reports whether config.json text holds a HEC token. It reads only the
+// token fields, so a field elsewhere of an unexpected type (a hand-edited "grpc_port": "4317")
+// cannot hide one, and text it cannot parse at all counts as holding one: the private write is the
+// safe one to fall back to.
+func rawConfigHoldsCredential(data []byte) bool {
+	var partial struct {
+		Destinations struct {
+			SplunkHEC struct {
+				Token json.RawMessage `json:"token"`
+			} `json:"splunk_hec"`
+			FalconHEC struct {
+				Token json.RawMessage `json:"token"`
+			} `json:"falcon_hec"`
+		} `json:"destinations"`
+	}
+	if err := json.Unmarshal(data, &partial); err != nil {
+		var typeErr *json.UnmarshalTypeError
+		if !errors.As(err, &typeErr) {
+			return true
+		}
+	}
+	present := func(raw json.RawMessage) bool {
+		text := strings.TrimSpace(string(raw))
+		return text != "" && text != "null" && text != `""`
+	}
+	return present(partial.Destinations.SplunkHEC.Token) || present(partial.Destinations.FalconHEC.Token)
+}
+
+// writeSecretFile writes a file holding a credential. A system install's files sit in the
+// machine-wide tree, whose Windows DACL lets every user read what is below it and ignores the
+// mode, so they are created with SYSTEM and Administrators only (sysacl.WriteSecretFile); per-user
+// files are in the person's own profile and keep the mode.
+func writeSecretFile(userMode bool, path string, data []byte) error {
+	if userMode {
+		return atomicfile.Write(path, data, 0600)
+	}
+	return sysacl.WriteSecretFile(path, data)
 }
 
 type SplunkHEC struct {
@@ -355,6 +528,7 @@ func Load(userMode bool) (Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return Config{}, err
 	}
+	loadOTLPForwardSecrets(&cfg)
 	NormalizeDestinations(&cfg)
 	if err := ValidateDestinations(cfg.Destinations); err != nil {
 		return Config{}, err
@@ -375,11 +549,18 @@ func Save(cfg Config) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	perm := os.FileMode(0644)
-	if HasSecretDestinations(cfg) {
-		perm = 0600
+	// The forward's header values live in their own root-only file, so a forward alone leaves
+	// config.json readable to the accounts that look up the system log through it.
+	if err := saveOTLPForwardSecrets(cfg); err != nil {
+		return "", err
 	}
-	if err := atomicfile.Write(path, data, perm); err != nil {
+	if hasSecretConfigFields(cfg) {
+		if err := writeSecretFile(cfg.UserMode, path, data); err != nil {
+			return "", err
+		}
+		return path, nil
+	}
+	if err := atomicfile.Write(path, data, 0644); err != nil {
 		return "", err
 	}
 	return path, nil
@@ -402,6 +583,30 @@ func NormalizeDestinations(cfg *Config) {
 			}
 		}
 	}
+	if forward := cfg.Destinations.OTLPForward; forward != nil {
+		forward.Endpoint = strings.TrimSpace(forward.Endpoint)
+		forward.Protocol = strings.ToLower(strings.TrimSpace(forward.Protocol))
+		switch forward.Protocol {
+		case "http", "http/protobuf", "otlphttp":
+			forward.Protocol = OTLPForwardProtocolHTTP
+		}
+		if forward.Endpoint != "" {
+			forward.Enabled = true
+		}
+		if forward.Enabled && forward.Protocol == "" {
+			forward.Protocol = OTLPForwardProtocolGRPC
+		}
+		if forward.Enabled && len(forward.Harnesses) == 0 {
+			forward.Harnesses = append([]string(nil), DefaultOTLPForwardHarnesses...)
+		}
+		if forward.Headers != nil {
+			forward.HeaderNames = forward.HeaderNames[:0:0]
+			for name := range forward.Headers {
+				forward.HeaderNames = append(forward.HeaderNames, name)
+			}
+			sort.Strings(forward.HeaderNames)
+		}
+	}
 	if falcon := cfg.Destinations.FalconHEC; falcon != nil {
 		if falcon.Endpoint != "" || falcon.Token != "" {
 			falcon.Enabled = true
@@ -420,6 +625,35 @@ func NormalizeDestinations(cfg *Config) {
 func ValidateDestinations(destinations *Destinations) error {
 	if destinations == nil {
 		return nil
+	}
+	if forward := destinations.OTLPForward; forward != nil {
+		configured := forward.Enabled ||
+			forward.Endpoint != "" ||
+			len(forward.Headers) > 0 ||
+			forward.Insecure ||
+			forward.InsecureSkipVerify ||
+			forward.CAFile != ""
+		if configured {
+			if strings.TrimSpace(forward.Endpoint) == "" {
+				return fmt.Errorf("OTLP forward endpoint is required when OTLP forwarding is configured")
+			}
+			switch forward.Protocol {
+			case "", OTLPForwardProtocolGRPC, OTLPForwardProtocolHTTP:
+			default:
+				return fmt.Errorf("unsupported OTLP forward protocol %q: use %q or %q", forward.Protocol, OTLPForwardProtocolGRPC, OTLPForwardProtocolHTTP)
+			}
+			if forward.Protocol == OTLPForwardProtocolHTTP && !strings.HasPrefix(forward.Endpoint, "https://") && !strings.HasPrefix(forward.Endpoint, "http://") {
+				return fmt.Errorf("OTLP forward endpoint %q must be an http:// or https:// URL for the %s protocol", forward.Endpoint, OTLPForwardProtocolHTTP)
+			}
+			for name, value := range forward.Headers {
+				if strings.TrimSpace(name) == "" || strings.ContainsAny(name, ":\r\n") {
+					return fmt.Errorf("invalid OTLP forward header name %q", name)
+				}
+				if strings.ContainsAny(value, "\r\n") {
+					return fmt.Errorf("OTLP forward header %q has a line break in its value", name)
+				}
+			}
+		}
 	}
 	if destinations.SplunkHEC != nil {
 		splunk := destinations.SplunkHEC
@@ -463,6 +697,16 @@ func ValidateDestinations(destinations *Destinations) error {
 }
 
 func HasSecretDestinations(cfg Config) bool {
+	return cfg.Destinations != nil &&
+		((cfg.Destinations.SplunkHEC != nil && cfg.Destinations.SplunkHEC.Token != "") ||
+			(cfg.Destinations.FalconHEC != nil && cfg.Destinations.FalconHEC.Token != "") ||
+			(cfg.Destinations.OTLPForward != nil && len(cfg.Destinations.OTLPForward.Headers) > 0))
+}
+
+// hasSecretConfigFields reports whether config.json itself holds a credential. The forward's
+// header values are not in it (see OTLPForwardSecretsPath), so they do not count here; they do
+// for the collector config, which renders them (HasSecretDestinations).
+func hasSecretConfigFields(cfg Config) bool {
 	return cfg.Destinations != nil &&
 		((cfg.Destinations.SplunkHEC != nil && cfg.Destinations.SplunkHEC.Token != "") ||
 			(cfg.Destinations.FalconHEC != nil && cfg.Destinations.FalconHEC.Token != ""))

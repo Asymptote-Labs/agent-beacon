@@ -115,9 +115,10 @@ func (s retentionSegment) firstLineAt(path string) bool {
 }
 
 // rotationWouldDiscardOwnOutput reports whether rotating path now would delete a file holding the
-// guard's output. Rotation deletes the archive at .archives (and anything numbered past it, which
-// no reader looks at), so that is the one file to check. Called under the log's lock, so the answer
-// holds for the rotation that follows it.
+// guard's output. Rotation deletes at most the archive at .archives (and anything numbered past it,
+// which no reader looks at), so that is the one file to check; when an earlier rotation left a gap
+// below it, asymptoteobserve.RotateRuntimeLog fills the gap and deletes nothing, and the answer is
+// merely cautious. Called under the log's lock, so the answer holds for the rotation that follows it.
 func (g *RetentionGuard) rotationWouldDiscardOwnOutput(path string, archives int) (bool, error) {
 	if len(g.segments) == 0 {
 		return false, nil

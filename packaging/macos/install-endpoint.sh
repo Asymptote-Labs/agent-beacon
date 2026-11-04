@@ -28,6 +28,12 @@ BEACON_FALCON_SOURCE="${BEACON_FALCON_SOURCE:-}"
 BEACON_FALCON_SOURCETYPE="${BEACON_FALCON_SOURCETYPE:-}"
 BEACON_FALCON_INSECURE_SKIP_VERIFY="${BEACON_FALCON_INSECURE_SKIP_VERIFY:-0}"
 BEACON_FALCON_CA_FILE="${BEACON_FALCON_CA_FILE:-}"
+# shared or restricted; empty keeps the mode the endpoint already has, so a package upgrade never
+# changes it.
+BEACON_LOG_ACCESS="${BEACON_LOG_ACCESS:-}"
+# 1 turns the scheduled session sync on and 0 turns it off; empty keeps what the endpoint already
+# has, so a package upgrade never changes it.
+BEACON_SESSION_SYNC="${BEACON_SESSION_SYNC:-}"
 
 if [ -z "$BEACON_COLLECTOR" ] && [ -x "/opt/beacon/bin/beacon-otelcol" ]; then
   BEACON_COLLECTOR="/opt/beacon/bin/beacon-otelcol"
@@ -42,6 +48,19 @@ set -- endpoint install \
 if [ -n "$BEACON_COLLECTOR" ]; then
   set -- "$@" --collector "$BEACON_COLLECTOR"
 fi
+
+if [ -n "$BEACON_LOG_ACCESS" ]; then
+  set -- "$@" --log-access "$BEACON_LOG_ACCESS"
+fi
+
+case "$BEACON_SESSION_SYNC" in
+  1|true|TRUE|yes|YES)
+    set -- "$@" --session-sync
+    ;;
+  0|false|FALSE|no|NO)
+    set -- "$@" --no-session-sync
+    ;;
+esac
 
 if [ -n "$BEACON_SPLUNK_HEC_ENDPOINT" ]; then
   set -- "$@" --splunk-hec-endpoint "$BEACON_SPLUNK_HEC_ENDPOINT"

@@ -73,6 +73,10 @@
       <Component Id="UninstallScript" Directory="ScriptsFolder">
         <File Id="UninstallEndpointScriptFile" Source="$(var.StageDir)\scripts\uninstall-endpoint.ps1" KeyPath="yes" />
       </Component>
+      <!-- Dot-sourced by both scripts above: how they run beacon.exe, bounded and logged. -->
+      <Component Id="PackageCommonScript" Directory="ScriptsFolder">
+        <File Id="PackageCommonScriptFile" Source="$(var.StageDir)\scripts\package-common.ps1" KeyPath="yes" />
+      </Component>
     </ComponentGroup>
 
     <Feature Id="Main" Title="Beacon Endpoint Agent" Level="1">

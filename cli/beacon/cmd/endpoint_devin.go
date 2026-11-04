@@ -130,7 +130,7 @@ func runEndpointDevinSync(cmd *cobra.Command, args []string) error {
 		return watchEndpointDevin(ctx, cmd, opts)
 	}
 
-	summary, err := devinsession.CollectOnce(opts)
+	summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, endpointSweepLockWait, devinsession.CollectOnce, opts)
 	reportEndpointDevinSweep(cmd, summary)
 	return err
 }
@@ -141,7 +141,7 @@ func watchEndpointDevin(ctx context.Context, cmd *cobra.Command, opts devinsessi
 		interval = 5 * time.Second
 	}
 	for {
-		summary, err := devinsession.CollectOnce(opts)
+		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, devinsession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Devin CLI sync error: %v\n", err)
 		}

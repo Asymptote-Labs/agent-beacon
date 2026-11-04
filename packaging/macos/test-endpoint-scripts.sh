@@ -185,7 +185,7 @@ FULL_CLEANUP_LOCAL_RUNTIME="$TMP_DIR/full-cleanup-local-runtime"
 mkdir -p "$FULL_CLEANUP_LOCAL_HOME/.claude" "$FULL_CLEANUP_LOCAL_CONFIG/Endpoint" "$FULL_CLEANUP_LOCAL_RUNTIME"
 printf '%s\n' '{"collector":{"grpc_port":54317,"http_port":54318}}' \
   >"$FULL_CLEANUP_LOCAL_CONFIG/Endpoint/config.json"
-printf '%s\n' '{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:54318/","OTEL_LOGS_EXPORTER":"otlp","UNRELATED":"kept"}}' \
+printf '%s\n' '{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_ENDPOINT":"http://127.0.0.1:54318/","OTEL_LOGS_EXPORTER":"otlp","OTEL_EXPORTER_OTLP_LOGS_ENDPOINT":"","OTEL_EXPORTER_OTLP_LOGS_PROTOCOL":"grpc","OTEL_EXPORTER_OTLP_TRACES_ENDPOINT":"https://later.example.com","UNRELATED":"kept"}}' \
   >"$FULL_CLEANUP_LOCAL_HOME/.claude/settings.json"
 printf '%s\n' secret-prompt >"$FULL_CLEANUP_LOCAL_RUNTIME/runtime.jsonl"
 PATH="$FULL_CLEANUP_USER_BIN:$FULL_CLEANUP_BIN:$PATH" \
@@ -202,8 +202,9 @@ RUNTIME_DIR="$FULL_CLEANUP_LOCAL_RUNTIME" \
 SYSTEM_CONFIG_DIR="$FULL_CLEANUP_LOCAL_CONFIG" \
 OPT_BEACON_DIR="$TMP_DIR/full-cleanup-local-opt" \
 "$FULL_CLEANUP_SCRIPT" >/dev/null 2>&1
-if grep -q -e OTEL_EXPORTER_OTLP_ENDPOINT -e CLAUDE_CODE_ENABLE_TELEMETRY -e OTEL_LOGS_EXPORTER "$FULL_CLEANUP_LOCAL_HOME/.claude/settings.json" ||
-   ! grep -q '"UNRELATED": "kept"' "$FULL_CLEANUP_LOCAL_HOME/.claude/settings.json"; then
+if grep -q -e OTEL_EXPORTER_OTLP_ENDPOINT -e CLAUDE_CODE_ENABLE_TELEMETRY -e OTEL_LOGS_EXPORTER -e OTEL_EXPORTER_OTLP_LOGS_ "$FULL_CLEANUP_LOCAL_HOME/.claude/settings.json" ||
+   ! grep -q '"UNRELATED": "kept"' "$FULL_CLEANUP_LOCAL_HOME/.claude/settings.json" ||
+   ! grep -q '"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "https://later.example.com"' "$FULL_CLEANUP_LOCAL_HOME/.claude/settings.json"; then
   echo "full cleanup should remove only the Claude OTLP settings that point at the installed Beacon collector" >&2
   exit 1
 fi
@@ -416,6 +417,29 @@ case "$INSTALL_ARGS" in
     exit 1
     ;;
 esac
+
+# BEACON_SESSION_SYNC turns the scheduled session sync on or off from MDM; unset keeps the
+# endpoint's own setting, so no flag is passed (the cases above).
+for value in 1 0; do
+  BEACON_BIN="$STUB_BIN" \
+  BEACON_COLLECTOR="/tmp/beacon-otelcol" \
+  BEACON_SESSION_SYNC="$value" \
+  STUB_LOG="$STUB_LOG" \
+  "$INSTALL_SCRIPT"
+
+  case "$value" in
+    1) want_flag="--session-sync" ;;
+    0) want_flag="--no-session-sync" ;;
+  esac
+  INSTALL_ARGS="$(cat "$STUB_LOG")"
+  case "$INSTALL_ARGS" in
+    "endpoint install --system --harness claude,codex --otlp-grpc-port 4317 --otlp-http-port 4318 --collector /tmp/beacon-otelcol $want_flag") ;;
+    *)
+      echo "unexpected session sync install args for BEACON_SESSION_SYNC=$value: $INSTALL_ARGS" >&2
+      exit 1
+      ;;
+  esac
+done
 
 BEACON_BIN="$STUB_BIN" \
 BEACON_KEEP_LOGS="1" \
@@ -760,6 +784,25 @@ case "$(ls -l "$TMP_DIR/s3-runtime.jsonl" | awk '{print $1}')" in
   -rw-rw-rw-*) ;;
   *)
     echo "S3 forwarder installer should create a missing runtime log as 0666" >&2
+    exit 1
+    ;;
+esac
+# A log in the restricted access mode is written only by the collector, so an installer that has
+# to create it creates it 0640 instead.
+mkdir -p "$TMP_DIR/restricted-logs"
+printf 'restricted\n' >"$TMP_DIR/restricted-logs/.beacon-log-access"
+BEACON_VECTOR_BIN="$FAKE_VECTOR" \
+BEACON_S3_FORWARDER_WRAPPER="$ROOT_DIR/packaging/macos/jamf/claude/s3/run-forwarder.sh" \
+BEACON_FORWARDER_BASE_DIR="$S3_FORWARDER_BASE" \
+BEACON_LAUNCHDAEMONS_DIR="$S3_LAUNCHDAEMONS_DIR" \
+BEACON_RUNTIME_LOG_PATHS="$TMP_DIR/restricted-logs/runtime.jsonl" \
+BEACON_NO_START="1" \
+AWS_REGION="us-west-2" \
+"$ROOT_DIR/packaging/macos/jamf/claude/s3/install-forwarder.sh" _ _ _ "beacon-test-bucket" "us-west-2" "beacon/claude/runtime/" "STANDARD_IA" "end" >/dev/null
+case "$(ls -l "$TMP_DIR/restricted-logs/runtime.jsonl" | awk '{print $1}')" in
+  -rw-r-----*) ;;
+  *)
+    echo "S3 forwarder installer should create a missing restricted runtime log as 0640" >&2
     exit 1
     ;;
 esac
@@ -1149,6 +1192,12 @@ STUB
 # The log directory carries grants an earlier version of the script (and the Jamf guide) left.
 cat >"$REPAIR_HOOKS_BIN/ls" <<'STUB'
 #!/bin/sh
+if [ "$1" = "-led" ] && [ -f "$2" ]; then
+  # A log an earlier shared-mode run granted the console user.
+  printf -- '-rw-r-----+ 1 root beacon-log 0 Jan  1 00:00 %s\n' "$2"
+  printf ' 0: user:hookuser allow read,write,append,readattr\n'
+  exit 0
+fi
 if [ "$1" = "-led" ]; then
   printf 'drwxr-xr-x+ 2 root wheel 64 Jan  1 00:00 %s\n' "$2"
   printf ' 0: user:olduser allow add_file,add_subdirectory\n'
@@ -1212,6 +1261,44 @@ if ! grep -qx "sudo -u hookuser mkdir -p $REPAIR_HOOKS_HOME/.beacon/endpoint/hoo
   echo "repair-hooks should create the hook directory as the console user and install hooks there" >&2
   exit 1
 fi
+# On a restricted endpoint (the marker beside the log) the script must leave the log's
+# root:beacon-log ownership and 0640 mode alone, grant nobody anything, and revoke the per-user
+# grants an earlier shared-mode run left on the log and its lock.
+REPAIR_HOOKS_RESTRICTED="$TMP_DIR/repair-hooks-restricted"
+mkdir -p "$REPAIR_HOOKS_RESTRICTED"
+printf 'restricted\n' >"$REPAIR_HOOKS_RESTRICTED/.beacon-log-access"
+: >"$REPAIR_HOOKS_RESTRICTED/runtime.jsonl"
+: >"$REPAIR_HOOKS_RESTRICTED/runtime.jsonl.lock"
+/bin/chmod 640 "$REPAIR_HOOKS_RESTRICTED/runtime.jsonl" "$REPAIR_HOOKS_RESTRICTED/runtime.jsonl.lock"
+: >"$REPAIR_HOOKS_CALLS"
+REPAIR_HOOKS_LOGS_SHARED="$REPAIR_HOOKS_LOGS"
+REPAIR_HOOKS_LOGS="$REPAIR_HOOKS_RESTRICTED"
+run_repair_hooks || {
+  echo "repair-hooks should succeed on a restricted endpoint" >&2
+  exit 1
+}
+REPAIR_HOOKS_LOGS="$REPAIR_HOOKS_LOGS_SHARED"
+for file in runtime.jsonl runtime.jsonl.lock; do
+  if [ "$(stat -f %Lp "$REPAIR_HOOKS_RESTRICTED/$file" 2>/dev/null || stat -c %a "$REPAIR_HOOKS_RESTRICTED/$file")" != 640 ]; then
+    echo "repair-hooks changed the mode of the restricted $file" >&2
+    exit 1
+  fi
+done
+if grep -q -e "^chown .*$REPAIR_HOOKS_RESTRICTED" -e '^acl +a' "$REPAIR_HOOKS_CALLS"; then
+  echo "repair-hooks must not chown or grant anything on a restricted log" >&2
+  exit 1
+fi
+if [ -e "$REPAIR_HOOKS_RESTRICTED/inventory_state.jsonl" ]; then
+  echo "repair-hooks must not create files in a restricted log directory" >&2
+  exit 1
+fi
+for file in runtime.jsonl runtime.jsonl.lock; do
+  if ! grep -qx "acl -a# 0 $REPAIR_HOOKS_RESTRICTED/$file" "$REPAIR_HOOKS_CALLS"; then
+    echo "repair-hooks should revoke the per-user grant on the restricted $file" >&2
+    exit 1
+  fi
+done
+
 # A ~/.beacon the user turned into a symlink is refused, not followed as root.
 REPAIR_HOOKS_VICTIM="$TMP_DIR/repair-hooks-victim"
 mkdir -p "$REPAIR_HOOKS_VICTIM"
@@ -1326,6 +1413,7 @@ for expected in \
   'endpoint user-config repair-installed --system --harness claude,codex' \
   'endpoint update install-daemon' \
   'endpoint inventory install-daemon --system' \
+  'endpoint sessions install-daemon --system' \
   'endpoint asymptote reconcile --system'
 do
   if ! grep -qxF "$expected" "$POSTINSTALL_BEACON_LOG"; then

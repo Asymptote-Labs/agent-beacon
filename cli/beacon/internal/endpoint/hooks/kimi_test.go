@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/hookcmd"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -581,11 +582,11 @@ func TestKimiCommandIsRecognizedInBothQuotingForms(t *testing.T) {
 		"windows": `"C:\Program Files\Beacon\beacon-hooks.exe" --platform kimi --log "C:\ProgramData\Beacon\runtime.jsonl" pre-tool`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if !isEndpointHookCommand(command, "kimi") {
-				t.Fatalf("isEndpointHookCommand(%q) = false", command)
+			if !hookcmd.IsEndpointHook(command, "kimi") {
+				t.Fatalf("hookcmd.IsEndpointHook(%q) = false", command)
 			}
 			// And it must not claim another runtime's hook.
-			if isEndpointHookCommand(strings.Replace(command, "--platform kimi", "--platform claude", 1), "kimi") {
+			if hookcmd.IsEndpointHook(strings.Replace(command, "--platform kimi", "--platform claude", 1), "kimi") {
 				t.Fatal("a Claude Code hook was claimed as Kimi Code's")
 			}
 		})

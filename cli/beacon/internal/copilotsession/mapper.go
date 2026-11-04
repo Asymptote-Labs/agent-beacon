@@ -2,7 +2,6 @@ package copilotsession
 
 import (
 	"crypto/sha1"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -589,10 +588,7 @@ func applyFile(ev *schema.Event, call toolCall, result toolResult, action string
 	}
 	if diff := diffFromCall(call, path); diff != "" && action != "file.read" {
 		info.Diff = diff
-		info.DiffBytes = len(diff)
-		sum := sha256.Sum256([]byte(diff))
-		info.DiffHash = hex.EncodeToString(sum[:])
-		ev.Content = asymptoteobserve.RetainedContent(diff, asymptoteobserve.DefaultStringLimit)
+		ev.Content, info.DiffHash, info.DiffBytes = asymptoteobserve.RetainedDiff(diff, asymptoteobserve.DefaultStringLimit)
 	} else if result.Text != "" {
 		ev.Content = asymptoteobserve.RetainedContent(result.Text, asymptoteobserve.DefaultStringLimit)
 	}

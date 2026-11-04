@@ -1,0 +1,277 @@
+{
+ "runtime": "Codex app-server (desktop app)",
+ "version": "0.164.0",
+ "originator": "Codex_Desktop",
+ "conversation": "019a1802-4c1b-7d40-9e2f-6a0d3c5b7e21",
+ "logs": {
+  "resourceLogs": [
+   {
+    "resource": {
+     "attributes": [
+      {"key": "service.name", "value": {"stringValue": "codex-app-server"}},
+      {"key": "service.version", "value": {"stringValue": "0.164.0"}},
+      {"key": "env", "value": {"stringValue": "dev"}},
+      {"key": "host.name", "value": {"stringValue": "mac-studio.local"}},
+      {"key": "telemetry.sdk.language", "value": {"stringValue": "rust"}},
+      {"key": "telemetry.sdk.name", "value": {"stringValue": "opentelemetry"}},
+      {"key": "telemetry.sdk.version", "value": {"stringValue": "0.31.0"}}
+     ]
+    },
+    "scopeLogs": [
+     {
+      "scope": {
+       "name": "codex_otel.log_only"
+      },
+      "logRecords": [
+       {
+        "timeUnixNano": "1793286607102000000",
+        "observedTimeUnixNano": "1793286607102000000",
+        "severityNumber": 9,
+        "severityText": "INFO",
+        "eventName": "event otel/src/events/session_telemetry.rs:690",
+        "attributes": [
+         {"key": "event.name", "value": {"stringValue": "codex.conversation_starts"}},
+         {"key": "provider_name", "value": {"stringValue": "OpenAI"}},
+         {"key": "auth.env_openai_api_key_present", "value": {"boolValue": false}},
+         {"key": "auth.env_codex_api_key_present", "value": {"boolValue": false}},
+         {"key": "auth.env_codex_api_key_enabled", "value": {"boolValue": false}},
+         {"key": "auth.env_provider_key_present", "value": {"boolValue": false}},
+         {"key": "auth.env_refresh_token_url_override_present", "value": {"boolValue": false}},
+         {"key": "reasoning_effort", "value": {"stringValue": "medium"}},
+         {"key": "reasoning_summary", "value": {"stringValue": "auto"}},
+         {"key": "context_window", "value": {"intValue": "272000"}},
+         {"key": "auto_compact_token_limit", "value": {"intValue": "244800"}},
+         {"key": "approval_policy", "value": {"stringValue": "on-request"}},
+         {"key": "sandbox_policy", "value": {"stringValue": "workspace-write"}},
+         {"key": "mcp_servers", "value": {"stringValue": ""}},
+         {"key": "event.timestamp", "value": {"stringValue": "2026-10-29T15:10:07.102Z"}},
+         {"key": "conversation.id", "value": {"stringValue": "019a1802-4c1b-7d40-9e2f-6a0d3c5b7e21"}},
+         {"key": "app.version", "value": {"stringValue": "0.164.0"}},
+         {"key": "auth_mode", "value": {"stringValue": "Chatgpt"}},
+         {"key": "originator", "value": {"stringValue": "Codex_Desktop"}},
+         {"key": "user.account_id", "value": {"stringValue": "8f1c2a6e-3b7d-4f0a-9c5e-2d4b6a8e0f13"}},
+         {"key": "user.email", "value": {"stringValue": "dev@example.com"}},
+         {"key": "terminal.type", "value": {"stringValue": "Codex Desktop/0.164.0 (Mac OS 15.6.1; arm64) unknown"}},
+         {"key": "model", "value": {"stringValue": "gpt-5.5"}},
+         {"key": "slug", "value": {"stringValue": "gpt-5.5"}}
+        ]
+       },
+       {
+        "timeUnixNano": "1793286609417000000",
+        "observedTimeUnixNano": "1793286609417000000",
+        "severityNumber": 9,
+        "severityText": "INFO",
+        "eventName": "event otel/src/events/session_telemetry.rs:1179",
+        "attributes": [
+         {"key": "event.name", "value": {"stringValue": "codex.user_prompt"}},
+         {"key": "prompt_length", "value": {"stringValue": "27"}},
+         {"key": "prompt", "value": {"stringValue": "list the files in this repo"}},
+         {"key": "event.timestamp", "value": {"stringValue": "2026-10-29T15:10:09.417Z"}},
+         {"key": "conversation.id", "value": {"stringValue": "019a1802-4c1b-7d40-9e2f-6a0d3c5b7e21"}},
+         {"key": "app.version", "value": {"stringValue": "0.164.0"}},
+         {"key": "auth_mode", "value": {"stringValue": "Chatgpt"}},
+         {"key": "originator", "value": {"stringValue": "Codex_Desktop"}},
+         {"key": "user.account_id", "value": {"stringValue": "8f1c2a6e-3b7d-4f0a-9c5e-2d4b6a8e0f13"}},
+         {"key": "user.email", "value": {"stringValue": "dev@example.com"}},
+         {"key": "terminal.type", "value": {"stringValue": "Codex Desktop/0.164.0 (Mac OS 15.6.1; arm64) unknown"}},
+         {"key": "model", "value": {"stringValue": "gpt-5.5"}},
+         {"key": "slug", "value": {"stringValue": "gpt-5.5"}}
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "traces": {
+  "resourceSpans": [
+   {
+    "resource": {
+     "attributes": [
+      {"key": "service.name", "value": {"stringValue": "codex-app-server"}},
+      {"key": "service.version", "value": {"stringValue": "0.164.0"}},
+      {"key": "env", "value": {"stringValue": "dev"}},
+      {"key": "telemetry.sdk.language", "value": {"stringValue": "rust"}},
+      {"key": "telemetry.sdk.name", "value": {"stringValue": "opentelemetry"}},
+      {"key": "telemetry.sdk.version", "value": {"stringValue": "0.31.0"}}
+     ]
+    },
+    "scopeSpans": [
+     {
+      "scope": {
+       "name": "codex-app-server"
+      },
+      "spans": [
+       {
+        "traceId": "0af7651916cd43dd8448eb211c80319c",
+        "spanId": "b7ad6b7169203331",
+        "name": "session_task.turn",
+        "kind": 1,
+        "startTimeUnixNano": "1793286609417000000",
+        "endTimeUnixNano": "1793286617837000000",
+        "attributes": [
+         {"key": "code.file.path", "value": {"stringValue": "core/src/tasks/mod.rs"}},
+         {"key": "code.module.name", "value": {"stringValue": "codex_core::tasks"}},
+         {"key": "code.line.number", "value": {"intValue": "369"}},
+         {"key": "thread.id", "value": {"intValue": "23"}},
+         {"key": "thread.name", "value": {"stringValue": "tokio-runtime-worker"}},
+         {"key": "target", "value": {"stringValue": "codex_core::tasks"}},
+         {"key": "thread.id", "value": {"stringValue": "019a1802-4c1b-7d40-9e2f-6a0d3c5b7e21"}},
+         {"key": "turn.id", "value": {"stringValue": "1"}},
+         {"key": "model", "value": {"stringValue": "gpt-5.5"}},
+         {"key": "codex.turn.reasoning_effort", "value": {"stringValue": "medium"}},
+         {"key": "codex.turn.token_usage.input_tokens", "value": {"intValue": "13347"}},
+         {"key": "codex.turn.token_usage.cached_input_tokens", "value": {"intValue": "9984"}},
+         {"key": "codex.turn.token_usage.cache_write_input_tokens", "value": {"intValue": "0"}},
+         {"key": "codex.turn.token_usage.non_cached_input_tokens", "value": {"intValue": "3363"}},
+         {"key": "codex.turn.token_usage.output_tokens", "value": {"intValue": "512"}},
+         {"key": "codex.turn.token_usage.reasoning_output_tokens", "value": {"intValue": "64"}},
+         {"key": "codex.turn.token_usage.total_tokens", "value": {"intValue": "13859"}},
+         {"key": "busy_ns", "value": {"intValue": "41250000"}},
+         {"key": "idle_ns", "value": {"intValue": "8378750000"}}
+        ],
+        "status": {}
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "metrics": {
+  "resourceMetrics": [
+   {
+    "resource": {
+     "attributes": [
+      {"key": "service.name", "value": {"stringValue": "codex-app-server"}},
+      {"key": "service.version", "value": {"stringValue": "0.164.0"}},
+      {"key": "env", "value": {"stringValue": "dev"}},
+      {"key": "telemetry.sdk.language", "value": {"stringValue": "rust"}},
+      {"key": "telemetry.sdk.name", "value": {"stringValue": "opentelemetry"}},
+      {"key": "telemetry.sdk.version", "value": {"stringValue": "0.31.0"}}
+     ]
+    },
+    "scopeMetrics": [
+     {
+      "scope": {
+       "name": "codex"
+      },
+      "metrics": [
+       {
+        "name": "codex.turn.token_usage",
+        "histogram": {
+         "aggregationTemporality": 1,
+         "dataPoints": [
+          {
+           "attributes": [
+            {"key": "token_type", "value": {"stringValue": "total"}},
+            {"key": "tmp_mem_enabled", "value": {"stringValue": "false"}},
+            {"key": "auth_mode", "value": {"stringValue": "Chatgpt"}},
+            {"key": "session_source", "value": {"stringValue": "vscode"}},
+            {"key": "originator", "value": {"stringValue": "Codex_Desktop"}},
+            {"key": "model", "value": {"stringValue": "gpt-5.5"}},
+            {"key": "app.version", "value": {"stringValue": "0.164.0"}}
+           ],
+           "startTimeUnixNano": "1793286609417000000",
+           "timeUnixNano": "1793286619417000000",
+           "count": "1",
+           "sum": 13859.0,
+           "min": 13859.0,
+           "max": 13859.0
+          },
+          {
+           "attributes": [
+            {"key": "token_type", "value": {"stringValue": "input"}},
+            {"key": "tmp_mem_enabled", "value": {"stringValue": "false"}},
+            {"key": "auth_mode", "value": {"stringValue": "Chatgpt"}},
+            {"key": "session_source", "value": {"stringValue": "vscode"}},
+            {"key": "originator", "value": {"stringValue": "Codex_Desktop"}},
+            {"key": "model", "value": {"stringValue": "gpt-5.5"}},
+            {"key": "app.version", "value": {"stringValue": "0.164.0"}}
+           ],
+           "startTimeUnixNano": "1793286609417000000",
+           "timeUnixNano": "1793286619417000000",
+           "count": "1",
+           "sum": 13347.0,
+           "min": 13347.0,
+           "max": 13347.0
+          },
+          {
+           "attributes": [
+            {"key": "token_type", "value": {"stringValue": "cached_input"}},
+            {"key": "tmp_mem_enabled", "value": {"stringValue": "false"}},
+            {"key": "auth_mode", "value": {"stringValue": "Chatgpt"}},
+            {"key": "session_source", "value": {"stringValue": "vscode"}},
+            {"key": "originator", "value": {"stringValue": "Codex_Desktop"}},
+            {"key": "model", "value": {"stringValue": "gpt-5.5"}},
+            {"key": "app.version", "value": {"stringValue": "0.164.0"}}
+           ],
+           "startTimeUnixNano": "1793286609417000000",
+           "timeUnixNano": "1793286619417000000",
+           "count": "1",
+           "sum": 9984.0,
+           "min": 9984.0,
+           "max": 9984.0
+          },
+          {
+           "attributes": [
+            {"key": "token_type", "value": {"stringValue": "cache_write_input"}},
+            {"key": "tmp_mem_enabled", "value": {"stringValue": "false"}},
+            {"key": "auth_mode", "value": {"stringValue": "Chatgpt"}},
+            {"key": "session_source", "value": {"stringValue": "vscode"}},
+            {"key": "originator", "value": {"stringValue": "Codex_Desktop"}},
+            {"key": "model", "value": {"stringValue": "gpt-5.5"}},
+            {"key": "app.version", "value": {"stringValue": "0.164.0"}}
+           ],
+           "startTimeUnixNano": "1793286609417000000",
+           "timeUnixNano": "1793286619417000000",
+           "count": "1",
+           "sum": 0.0,
+           "min": 0.0,
+           "max": 0.0
+          },
+          {
+           "attributes": [
+            {"key": "token_type", "value": {"stringValue": "output"}},
+            {"key": "tmp_mem_enabled", "value": {"stringValue": "false"}},
+            {"key": "auth_mode", "value": {"stringValue": "Chatgpt"}},
+            {"key": "session_source", "value": {"stringValue": "vscode"}},
+            {"key": "originator", "value": {"stringValue": "Codex_Desktop"}},
+            {"key": "model", "value": {"stringValue": "gpt-5.5"}},
+            {"key": "app.version", "value": {"stringValue": "0.164.0"}}
+           ],
+           "startTimeUnixNano": "1793286609417000000",
+           "timeUnixNano": "1793286619417000000",
+           "count": "1",
+           "sum": 512.0,
+           "min": 512.0,
+           "max": 512.0
+          },
+          {
+           "attributes": [
+            {"key": "token_type", "value": {"stringValue": "reasoning_output"}},
+            {"key": "tmp_mem_enabled", "value": {"stringValue": "false"}},
+            {"key": "auth_mode", "value": {"stringValue": "Chatgpt"}},
+            {"key": "session_source", "value": {"stringValue": "vscode"}},
+            {"key": "originator", "value": {"stringValue": "Codex_Desktop"}},
+            {"key": "model", "value": {"stringValue": "gpt-5.5"}},
+            {"key": "app.version", "value": {"stringValue": "0.164.0"}}
+           ],
+           "startTimeUnixNano": "1793286609417000000",
+           "timeUnixNano": "1793286619417000000",
+           "count": "1",
+           "sum": 64.0,
+           "min": 64.0,
+           "max": 64.0
+          }
+         ]
+        }
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

@@ -49,6 +49,20 @@ func NormalizeDashboardURL(raw string) string {
 	return strings.TrimRight(raw, "/")
 }
 
+// DashboardHomeURL turns a service URL into the page a person can actually open.
+// The service root serves the marketing site and the dashboard is a single page
+// at /dashboard, so a base that already ends there is returned as is.
+func DashboardHomeURL(base string) string {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	if base == "" {
+		base = DefaultDashboardURL
+	}
+	if strings.HasSuffix(base, "/dashboard") {
+		return base
+	}
+	return base + "/dashboard"
+}
+
 // PostJSON sends body as JSON to url and decodes a 2xx response into out. Error
 // responses are reduced to the dashboard's `detail` or `error` text when present,
 // so callers can show the server's own explanation.

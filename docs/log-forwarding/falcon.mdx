@@ -205,6 +205,14 @@ These packaged helpers come from the repository paths:
 - [`packaging/macos/jamf/claude/falcon/repair-hooks-and-forwarder.sh`](https://github.com/asymptote-labs/agent-beacon/blob/main/packaging/macos/jamf/claude/falcon/repair-hooks-and-forwarder.sh)
 - [`packaging/macos/jamf/claude/falcon/run-forwarder.sh`](https://github.com/asymptote-labs/agent-beacon/blob/main/packaging/macos/jamf/claude/falcon/run-forwarder.sh)
 
+To see the Vector config Beacon generates for this path without installing anything, print it. The HEC endpoint and token are not in it: Vector reads them from `BEACON_FALCON_HEC_ENDPOINT` and `BEACON_FALCON_HEC_TOKEN` in its environment:
+
+```bash title="Print the Falcon Vector config"
+beacon endpoint falcon print-config
+```
+
+`beacon endpoint falcon install-pack` writes the same content to a directory.
+
 ### Manual setup without Jamf
 
 To simulate the Jamf setup on one Mac, install the Beacon package, then run the packaged helper manually. Jamf reserves script arguments 1-3, so pass `_ _ _` before the custom parameters:

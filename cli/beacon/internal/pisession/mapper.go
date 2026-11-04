@@ -2,7 +2,6 @@ package pisession
 
 import (
 	"crypto/sha1"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -413,9 +412,7 @@ func (m *mapper) applyFileResult(ev *schema.Event, name string, message map[stri
 	diff := firstNonEmpty(stringValue(details["patch"]), stringValue(details["diff"]))
 	if diff != "" {
 		ev.File.Diff = diff
-		ev.File.DiffBytes = len(diff)
-		ev.File.DiffHash = sha256Hex(diff)
-		ev.Content = asymptoteobserve.RetainedContent(diff, asymptoteobserve.DefaultStringLimit)
+		ev.Content, ev.File.DiffHash, ev.File.DiffBytes = asymptoteobserve.RetainedDiff(diff, asymptoteobserve.DefaultStringLimit)
 	}
 }
 
@@ -796,11 +793,6 @@ func refTimestamp(ref SessionRef) time.Time {
 		return time.UnixMilli(ref.ModTimeMS).UTC()
 	}
 	return time.Now().UTC()
-}
-
-func sha256Hex(value string) string {
-	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:])
 }
 
 var piIDNamespace = [16]byte{

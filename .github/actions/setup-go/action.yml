@@ -1,8 +1,8 @@
 name: Set up Go
 description: >
-  actions/setup-go plus the two things this repository needs on top of it: a
-  module cache that actually restores, and a module download that survives a
-  transient proxy timeout.
+  actions/setup-go plus the three things this repository needs on top of it: a
+  build cache that keeps up with the code, caches that only main writes, and a
+  module download that survives a transient proxy timeout.
 
 inputs:
   go-version-file:
@@ -16,43 +16,101 @@ inputs:
       front so a slow proxy fails a step that retries rather than a test step
       that does not.
     required: true
+  cache-key:
+    description: >
+      Extra build-cache discriminator for matrix legs of one job that compile
+      different things, such as one cross-build per target. The job id is
+      already part of the key.
+    required: false
+    default: ""
+  cache-job:
+    description: >
+      Build cache to use instead of this job's own, named by the job that
+      writes it. Only pushes to main save build caches, so a job that is never
+      part of one never has a cache; it can name a main job that compiles the
+      same packages. A named cache is only ever restored, never saved, on any
+      ref, so a dispatch on main cannot write into the other job's entries.
+    required: false
+    default: ""
 
 runs:
   using: composite
   steps:
-    # actions/setup-go looks for go.sum in the working directory and walks up.
-    # This repository keeps five modules in subdirectories and none at the
-    # root, so the default lookup finds nothing, logs "Restore cache failed:
-    # Dependencies file is not found", and every job re-downloads every module
-    # from proxy.golang.org on every run. Naming the go.sum files explicitly is
-    # what turns the module cache on at all.
+    # The caches are handled below rather than by actions/setup-go. Its cache is
+    # keyed on go.sum alone and saved only on a miss, so once go.sum stops
+    # changing the build cache it restores is frozen at that commit: every
+    # source change since is recompiled and every test re-run, on every job.
+    # Two caches replace it:
     #
-    # The list is per-job rather than all five everywhere on purpose: it is
-    # hashed into the cache key, so a job that needs the collector's OTel tree
-    # gets an entry of its own instead of restoring -- and then never
-    # re-saving over -- the smaller entry written by a job that only builds the
-    # CLI.
-    - id: sums
+    #   modules  keyed on the go.sum files, like before. Downloaded modules
+    #            only change when go.sum does.
+    #   build    keyed on the commit, restored from the newest earlier entry
+    #            for the same job, so it tracks main and `go test` can reuse
+    #            results for packages a change did not touch.
+    #
+    # Only pushes to main save. A pull request restores main's entries and
+    # writes nothing: per-PR entries of 500-800 MB each are what kept the
+    # repository at its 10 GB cache limit and evicting main's.
+    - uses: actions/setup-go@v7
+      with:
+        go-version-file: ${{ inputs.go-version-file }}
+        cache: false
+
+    - id: keys
       shell: bash
       env:
         MODULES: ${{ inputs.modules }}
+        JOB: ${{ inputs.cache-job || github.job }}${{ inputs.cache-key && format('-{0}', inputs.cache-key) || '' }}
       run: |
         set -euo pipefail
+        sums=()
+        while read -r dir; do
+          dir="${dir%/}"
+          [ -n "$dir" ] || continue
+          test -f "$dir/go.sum" || { echo "no go.sum in $dir" >&2; exit 1; }
+          sums+=("$dir/go.sum")
+        done <<< "$MODULES"
+        # git is on every runner image; sha256sum and shasum are not both everywhere.
+        sum_hash=$(cat "${sums[@]}" | git hash-object --stdin)
+        # ImageOS (ubuntu24, macos15, win25) because a new runner image can ship a different C
+        # toolchain, and cgo objects built against the old one must not be reused.
+        base="go-${RUNNER_OS}-${RUNNER_ARCH}-${ImageOS:-unknown}-$(go env GOVERSION)"
         {
-          echo 'paths<<SUMS_EOF'
-          while read -r dir; do
-            dir="${dir%/}"
-            [ -n "$dir" ] || continue
-            test -f "$dir/go.sum" || { echo "no go.sum in $dir" >&2; exit 1; }
-            echo "$dir/go.sum"
-          done <<< "$MODULES"
-          echo 'SUMS_EOF'
+          echo "gomodcache=$(go env GOMODCACHE)"
+          echo "gocache=$(go env GOCACHE)"
+          echo "mod-key=${base}-mod-${sum_hash}"
+          echo "mod-prefix=${base}-mod-"
+          echo "build-key=${base}-build-${JOB}-${GITHUB_SHA}"
+          echo "build-prefix=${base}-build-${JOB}-"
         } >> "$GITHUB_OUTPUT"
 
-    - uses: actions/setup-go@v5
+    - if: github.ref == 'refs/heads/main'
+      uses: actions/cache@v6
       with:
-        go-version-file: ${{ inputs.go-version-file }}
-        cache-dependency-path: ${{ steps.sums.outputs.paths }}
+        path: ${{ steps.keys.outputs.gomodcache }}
+        key: ${{ steps.keys.outputs.mod-key }}
+        restore-keys: ${{ steps.keys.outputs.mod-prefix }}
+    - if: github.ref != 'refs/heads/main'
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ steps.keys.outputs.gomodcache }}
+        key: ${{ steps.keys.outputs.mod-key }}
+        restore-keys: ${{ steps.keys.outputs.mod-prefix }}
+
+    # A borrowed build cache (cache-job) is only ever restored, on any ref: a manual dispatch on main
+    # would otherwise save this job's build under the other job's key and could take its entry.
+    - if: github.ref == 'refs/heads/main' && inputs.cache-job == ''
+      uses: actions/cache@v6
+      with:
+        path: ${{ steps.keys.outputs.gocache }}
+        key: ${{ steps.keys.outputs.build-key }}
+        restore-keys: ${{ steps.keys.outputs.build-prefix }}
+    - if: github.ref != 'refs/heads/main' || inputs.cache-job != ''
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ steps.keys.outputs.gocache }}
+        key: ${{ steps.keys.outputs.build-key }}
+        restore-keys: ${{ steps.keys.outputs.build-prefix }}
 
     # A cache hit makes this a no-op. On a miss it is where the download
     # happens, and it retries: `go test` and `go build` fetch modules inline
