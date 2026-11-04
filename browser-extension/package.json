@@ -1,6 +1,6 @@
 {
   "name": "agent-beacon-browser-extension",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "Chrome and Firefox extension that relays LLM chat telemetry (ChatGPT, Claude) into the local Agent Beacon pipeline, with a fully automated self-verifying build/test loop.",
