@@ -359,6 +359,10 @@ CI release automation should:
 - Trigger only on pushed tags matching `v*`.
 - Check out the tagged commit with full history (`fetch-depth: 0`) so GoReleaser
   can compute changelogs from the previous tag.
+- Name that previous tag for GoReleaser (`GORELEASER_PREVIOUS_TAG`, the nearest
+  `v*` tag before this one). Left to itself, GoReleaser takes the nearest tag of
+  any kind, so an `ext-v*` or `sdk-js-v*` tag between two CLI releases cuts the
+  changelog short; v1.3.47's started at `sdk-js-v0.2.0`.
 - Build or restore the collector binaries expected by `.goreleaser.yaml` under
   `collector-builder/dist/beacon-otelcol/<goos>_<goarch>/beacon-otelcol`.
 - Run `goreleaser check` before publishing.
