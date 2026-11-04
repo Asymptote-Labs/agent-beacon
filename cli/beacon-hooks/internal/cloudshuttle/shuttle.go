@@ -145,6 +145,12 @@ func inSandbox(label, p, name string) string {
 }
 
 func MaybeUpload(ctx context.Context, force bool) error {
+	// Only a recognized cloud sandbox may honor BEACON_CLOUD_* from the environment. A
+	// repository can supply those variables; without BEACON_ORIGIN=cloud they must not
+	// trigger a network upload from Stop / SessionEnd.
+	if strings.TrimSpace(os.Getenv("BEACON_ORIGIN")) != "cloud" {
+		return nil
+	}
 	return Upload(ctx, ConfigFromEnv(), force)
 }
 

@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -121,11 +122,30 @@ func DefaultPath() string {
 	return HookPath()
 }
 
+// AccountHomeLookup resolves the process account's home from the OS account database
+// (passwd / Windows profile), not $HOME or USERPROFILE. A repository can put those in the
+// hook environment; it cannot change the account the process runs as. Tests replace it.
+var AccountHomeLookup = defaultAccountHome
+
+func defaultAccountHome() (string, error) {
+	u, err := user.Current()
+	if err == nil && strings.TrimSpace(u.HomeDir) != "" {
+		return u.HomeDir, nil
+	}
+	return os.UserHomeDir()
+}
+
+// AccountHome is the home directory hooks use for paths under ~/.beacon. Prefer this over
+// os.UserHomeDir in the hook path so a repo-supplied HOME cannot redirect them.
+func AccountHome() (string, error) {
+	return AccountHomeLookup()
+}
+
 // HookPath is the user file the hooks read: ~/.beacon/endpoint/share.json. It ignores
-// BEACON_SHARE_SETTINGS_FILE, because a hook's environment can come from the repository it runs
-// in, and a repository must never be able to turn auto-share on for itself.
+// BEACON_SHARE_SETTINGS_FILE and $HOME, because a hook's environment can come from the
+// repository it runs in, and a repository must never be able to turn auto-share on for itself.
 func HookPath() string {
-	home, err := os.UserHomeDir()
+	home, err := AccountHomeLookup()
 	if err != nil || home == "" {
 		return ""
 	}

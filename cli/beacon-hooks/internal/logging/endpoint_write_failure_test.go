@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/config"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/shareauto"
 )
 
 // A hook that cannot write the runtime log records nothing, and on DeepSeek Harness that is the
@@ -54,15 +55,21 @@ func captureStderr(t *testing.T, fn func()) string {
 
 // isolateHookHome keeps the per-runtime state directories NewLoggerForPlatform creates out of the
 // real home. They are resolved once at package init, so setting HOME alone would not move them.
+// AccountHomeLookup is stubbed too: the default endpoint log and share settings ignore $HOME.
 func isolateHookHome(t *testing.T) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	prevHome := shareauto.AccountHomeLookup
+	shareauto.AccountHomeLookup = func() (string, error) { return home, nil }
 	origDsh, origCursor := config.DshDir, config.CursorDir
 	config.DshDir = filepath.Join(home, ".beacon", "dsh")
 	config.CursorDir = filepath.Join(home, ".beacon", "cursor")
-	t.Cleanup(func() { config.DshDir, config.CursorDir = origDsh, origCursor })
+	t.Cleanup(func() {
+		shareauto.AccountHomeLookup = prevHome
+		config.DshDir, config.CursorDir = origDsh, origCursor
+	})
 }
 
 func TestEndpointWriteFailureExplainsTheDshSandbox(t *testing.T) {
