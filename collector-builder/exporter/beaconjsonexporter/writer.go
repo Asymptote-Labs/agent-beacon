@@ -130,17 +130,36 @@ func (w jsonlWriter) sanitize(event beaconEvent) beaconEvent {
 	if event.MCP != nil {
 		event.MCP = asymptoteobserve.SanitizeMCP(event.MCP, w.privacyOptions())
 	}
+	browserResponse := event.GenAI != nil && event.GenAI.Output != nil && browserChatHarnesses[event.Harness.Name]
 	if event.GenAI != nil {
+		output := event.GenAI.Output
 		event.GenAI = asymptoteobserve.SanitizeGenAI(event.GenAI, w.privacyOptions())
+		if browserResponse {
+			opts := w.privacyOptions()
+			opts.StringLimit = browserResponseStringLimit
+			event.GenAI.Output = asymptoteobserve.SanitizeGenAI(&beaconevent.GenAIInfo{Output: output}, opts).Output
+		}
 	}
 	if event.Raw != nil {
 		event.Raw = w.sanitizeMap(event.Raw)
+		// The answer is in gen_ai.output.messages already, so the raw copy would only add its first
+		// 2 KB to the line again. SanitizeMap returned new maps, so this leaves the caller's alone.
+		if attrs, ok := event.Raw["attributes"].(map[string]interface{}); ok && browserResponse {
+			delete(attrs, "gen_ai.output.messages")
+		}
 	}
 	if data, err := json.Marshal(event); err == nil && len(data) > w.maxEventBytes {
 		event.Truncated = true
 	}
 	return event
 }
+
+// A claude.ai or chatgpt.com answer is what a browser chat event is about, and most run past the
+// 2 KB raw-attribute limit the rest of gen_ai keeps, so the log keeps up to 16 KB of it. A coding
+// agent's reply rarely needs more, and its OTLP gen_ai fields can carry whole message histories.
+const browserResponseStringLimit = 16 * 1024
+
+var browserChatHarnesses = map[string]bool{"claude_web": true, "chatgpt_web": true}
 
 func (w jsonlWriter) sanitizeMap(input map[string]interface{}) map[string]interface{} {
 	return asymptoteobserve.SanitizeMap(input, w.privacyOptions())
