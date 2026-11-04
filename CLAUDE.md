@@ -271,7 +271,7 @@ local GoReleaser publish only as a fallback when CI release automation is not
 available or the maintainer explicitly asks for a local release.
 
 A pushed `v*` tag runs the full release end-to-end via
-`.github/workflows/release.yml` (no local publish steps required), in four jobs:
+`.github/workflows/release.yml` (no local publish steps required), in five jobs:
 
 1. `goreleaser` (ubuntu, `environment: release`) builds the collector dists,
    publishes the GitHub release + changelog and tarballs, and updates the
@@ -287,7 +287,19 @@ A pushed `v*` tag runs the full release end-to-end via
    works, and attaches the `.msi` and its `.sha256`. Deliberately **not** in the
    `release` environment: that environment gates signing secrets, and the MSI is
    unsigned, so this job has none to gate.
-4. `finalize` (ubuntu, `needs` all three, runs whenever `goreleaser` succeeded)
+4. `apt-repository` (ubuntu, `needs: goreleaser`, `environment: release`) adds the
+   released `.deb` files, checked against `checksums.txt`, to the signed apt repository
+   (`deb <APT_REPO_URL> stable main`) in an S3-compatible bucket, because 85-90 MB packages
+   outgrow a git-backed Pages repo. `packaging/linux/apt/build-apt-repo.sh` reads back only the
+   published index, verifies it against the committed public key
+   `packaging/linux/apt/beacon-archive-keyring.asc` before re-signing (so a bucket edit is never
+   laundered into a valid signature), refuses to replace a published version, and fails unless
+   the secret's key signs for the committed one, so rotating the key is a reviewed commit.
+   `verify-apt-repo.sh` runs a real, isolated `apt-get update`/`download` against the staged
+   tree and again against the public URL; CI's `apt-repository` job runs `test-apt-repo.sh`.
+   Upload order is pool, index, then `Release.gpg`/`Release`/`InRelease` with `Acquire-By-Hash`.
+   Skipped with a notice until every `APT_*` setting exists, and for prerelease (`-`) tags.
+5. `finalize` (ubuntu, `needs` goreleaser, package and windows-package, runs whenever `goreleaser` succeeded)
    appends the `.pkg`, `.msi` and `install.sh` to `checksums.txt` from the released bytes and
    records a GitHub build-provenance attestation (Sigstore, keyless, through the
    workflow's OIDC token) for every file `checksums.txt` lists. It needs
@@ -304,6 +316,9 @@ Required `release`-environment secrets: `HOMEBREW_TAP_TOKEN`,
 `DEVELOPER_ID_INSTALLER_CERT_P12`, `DEVELOPER_ID_INSTALLER_CERT_PASSWORD`,
 `NOTARY_API_KEY_P8`, `NOTARY_API_KEY_ID`, `NOTARY_API_ISSUER`; plus Variables
 `DEVELOPER_ID_APP_IDENTITY`, `DEVELOPER_ID_INSTALLER_IDENTITY`, `APPLE_TEAM_ID`.
+The apt repository adds secrets `APT_GPG_PRIVATE_KEY` (armored, no passphrase),
+`APT_S3_ACCESS_KEY_ID`, `APT_S3_SECRET_ACCESS_KEY` and Variables `APT_S3_BUCKET`,
+`APT_REPO_URL` (https), plus optional `APT_S3_ENDPOINT` (R2/GCS) and `APT_S3_REGION`.
 Keep one-time Apple-side onboarding steps out of the repo and share them with
 the release maintainer directly. Never use `pull_request_target` or build
 untrusted PR code in the signing job.

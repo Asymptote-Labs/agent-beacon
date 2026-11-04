@@ -9,9 +9,12 @@ name: Release
 #   3. windows-package — (after goreleaser) builds the Windows MSI from the archive
 #                    goreleaser just published, installs it to prove it works, and
 #                    attaches it. Unsigned for now, so it needs no secrets.
-#   4. finalize    — (after all three) adds the .pkg, .msi and install.sh to checksums.txt and
-#                    records a GitHub build-provenance attestation for every file
-#                    checksums.txt lists.
+#   4. apt-repository — (after goreleaser) adds the released .deb files to the signed apt
+#                    repository in object storage. Skipped until its APT_* secrets and
+#                    variables are configured.
+#   5. finalize    — (after goreleaser, package and windows-package) adds the .pkg, .msi and
+#                    install.sh to checksums.txt and records a GitHub build-provenance
+#                    attestation for every file checksums.txt lists.
 #
 # Triggered only by pushed version tags, so outside contributors (whose fork PRs
 # never receive secrets) cannot run it. All release secrets live in the protected
@@ -418,6 +421,216 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & gh release upload $env:TAG (Get-ChildItem dist\windows -Filter '*.msi').FullName (Get-ChildItem dist\windows -Filter '*.msi.sha256').FullName --repo $env:REPO --clobber
           if ($LASTEXITCODE -ne 0) { throw "uploading the MSI failed" }
+
+  # The signed apt repository (`deb https://<APT_REPO_URL> stable main`), so Debian and Ubuntu hosts
+  # can `apt install beacon` and get upgrades with `apt upgrade`.
+  #
+  # The .deb files are 85-90 MB each, past what a git-backed GitHub Pages repository can hold for
+  # long, so the repository lives in an S3-compatible bucket (R2, S3, or GCS through its interop
+  # API) served over HTTPS at APT_REPO_URL. The pool keeps every version; only the index is read
+  # back. packaging/linux/apt/build-apt-repo.sh checks the published index against the committed
+  # public key before re-signing it, so a bucket edit cannot be laundered into a valid signature,
+  # and refuses to replace a version that is already published.
+  #
+  # The packages are the bytes goreleaser published, checked against checksums.txt, not a rebuild.
+  #
+  # Skipped with a notice until every APT_* secret and variable exists, and for prerelease tags,
+  # which do not belong in `stable`. Serialized so two tags cannot race on the index.
+  apt-repository:
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    environment: release
+    timeout-minutes: 30
+    concurrency:
+      group: apt-repository
+      cancel-in-progress: false
+    env:
+      REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.APT_S3_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.APT_S3_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ vars.APT_S3_REGION || 'us-east-1' }}
+      # R2 and GCS interop do not accept the CRC checksums newer AWS CLIs send by default.
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+      APT_S3_BUCKET: ${{ vars.APT_S3_BUCKET }}
+      APT_S3_ENDPOINT: ${{ vars.APT_S3_ENDPOINT }}
+      APT_REPO_URL: ${{ vars.APT_REPO_URL }}
+      KEYRING_ASC: packaging/linux/apt/beacon-archive-keyring.asc
+    steps:
+      - name: Decide whether to publish
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=""
+          for name in APT_GPG_PRIVATE_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY APT_S3_BUCKET APT_REPO_URL; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::notice title=apt repository skipped::not configured (missing:$missing). The release is unaffected."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "$TAG" in
+            *-*)
+              echo "::notice title=apt repository skipped::$TAG is a prerelease; only releases go to the stable suite."
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+          case "$APT_REPO_URL" in
+            https://*) ;;
+            *) echo "APT_REPO_URL must be https://" >&2; exit 1 ;;
+          esac
+          # Set only when present: the AWS CLI treats an empty AWS_ENDPOINT_URL as an endpoint.
+          if [ -n "$APT_S3_ENDPOINT" ]; then
+            echo "AWS_ENDPOINT_URL=$APT_S3_ENDPOINT" >> "$GITHUB_ENV"
+          fi
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.gate.outputs.publish == 'true'
+
+      - name: Install apt repository tools
+        if: steps.gate.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq apt-utils dpkg-dev gnupg
+          aws --version
+
+      # The keyring users install is the committed one, never one exported from the secret, and
+      # build-apt-repo.sh fails unless the secret's key signs for it. Rotating the key is therefore a
+      # reviewed commit, not a secret edit.
+      - name: Import the signing key
+        if: steps.gate.outputs.publish == 'true'
+        id: key
+        run: |
+          set -euo pipefail
+          [ -f "$KEYRING_ASC" ] || { echo "$KEYRING_ASC is not committed; commit the public key before configuring APT_GPG_PRIVATE_KEY" >&2; exit 1; }
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -m 0700 "$GNUPGHOME"
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+          printf '%s\n' "$APT_GPG_PRIVATE_KEY" | gpg --batch --quiet --import
+          gpg --batch --yes --dearmor --output "$RUNNER_TEMP/beacon-archive-keyring.gpg" "$KEYRING_ASC"
+          fpr="$(gpg --batch --with-colons --show-keys "$KEYRING_ASC" | awk -F: '$1 == "fpr" { print $10; exit }')"
+          [ -n "$fpr" ] || { echo "no fingerprint in $KEYRING_ASC" >&2; exit 1; }
+          echo "fingerprint=$fpr" >> "$GITHUB_OUTPUT"
+          echo "signing with $fpr"
+
+      - name: Fetch the released .deb files
+        if: steps.gate.outputs.publish == 'true'
+        env:
+          VERSION: ${{ steps.gate.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/apt-debs && cd dist/apt-debs
+          gh release download "$TAG" --repo "$REPO" --pattern checksums.txt
+          for arch in amd64 arm64; do
+            gh release download "$TAG" --repo "$REPO" --pattern "beacon_${VERSION}_linux_${arch}.deb"
+          done
+          # Every .deb must be listed; --ignore-missing alone would pass an unlisted one.
+          for f in beacon_*.deb; do
+            awk -v name="$f" '$2 == name { found = 1 } END { exit !found }' checksums.txt \
+              || { echo "$f is not in checksums.txt" >&2; exit 1; }
+          done
+          sha256sum --check --ignore-missing --strict checksums.txt
+
+      # Only the signed index is read back. An empty prefix is the first publish; a failed listing
+      # fails the job rather than starting the repository over.
+      - name: Fetch the published index
+        if: steps.gate.outputs.publish == 'true'
+        id: existing
+        run: |
+          set -euo pipefail
+          # Counts Contents rather than reading KeyCount, which some S3-compatible stores omit; a
+          # missing KeyCount read as zero would start the index over and drop every older version.
+          # shellcheck disable=SC2016 # the backticks are a JMESPath literal, not a command
+          count="$(aws s3api list-objects-v2 --bucket "$APT_S3_BUCKET" --prefix dists/stable/ --query 'length(Contents || `[]`)' --output text)"
+          case "$count" in
+            ''|*[!0-9]*) echo "unexpected object count '$count' for dists/stable/" >&2; exit 1 ;;
+          esac
+          if [ "$count" = "0" ]; then
+            echo "::notice::the bucket has no published index; this is the first publish"
+            echo "dir=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          dir="$RUNNER_TEMP/apt-existing"
+          aws s3 cp --no-progress "s3://$APT_S3_BUCKET/dists/stable/InRelease" "$dir/InRelease"
+          for arch in amd64 arm64; do
+            rel="main/binary-$arch/Packages"
+            # An architecture added after the first publish has no index yet; build-apt-repo.sh
+            # fails if InRelease lists one that is missing here.
+            aws s3 cp --no-progress "s3://$APT_S3_BUCKET/dists/stable/$rel" "$dir/$rel" || true
+          done
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+
+      - name: Build and sign the repository update
+        if: steps.gate.outputs.publish == 'true'
+        env:
+          FINGERPRINT: ${{ steps.key.outputs.fingerprint }}
+          EXISTING: ${{ steps.existing.outputs.dir }}
+        run: |
+          set -euo pipefail
+          set -- --out dist/apt-repo --keyring "$RUNNER_TEMP/beacon-archive-keyring.gpg" --signing-key "$FINGERPRINT"
+          if [ -n "$EXISTING" ]; then
+            set -- "$@" --existing "$EXISTING"
+          fi
+          sh packaging/linux/apt/build-apt-repo.sh "$@" dist/apt-debs/beacon_*.deb
+          cp "$KEYRING_ASC" dist/apt-repo/beacon-archive-keyring.asc
+          cp "$RUNNER_TEMP/beacon-archive-keyring.gpg" dist/apt-repo/beacon-archive-keyring.gpg
+
+      - name: Check the update with apt before publishing
+        if: steps.gate.outputs.publish == 'true'
+        env:
+          VERSION: ${{ steps.gate.outputs.version }}
+        run: |
+          set -euo pipefail
+          # A rerun of a published tag stages no packages, so there is nothing local to download;
+          # the check against the public URL below still runs.
+          if [ -z "$(find dist/apt-repo/pool -name '*.deb')" ]; then
+            echo "::notice::$TAG is already in the apt repository; only the index is republished"
+            exit 0
+          fi
+          sh packaging/linux/apt/verify-apt-repo.sh "file:$PWD/dist/apt-repo" \
+            "$RUNNER_TEMP/beacon-archive-keyring.gpg" "$VERSION"
+
+      # Order matters: packages, then index files, then the signed Release files with InRelease
+      # last, so no client is pointed at a file that is not there yet. Packages are immutable and
+      # cached for a year; everything under dists/ and the keyring is revalidated on every request.
+      - name: Publish to the bucket
+        if: steps.gate.outputs.publish == 'true'
+        working-directory: dist/apt-repo
+        run: |
+          set -euo pipefail
+          bucket="s3://$APT_S3_BUCKET"
+          if [ -d pool ]; then
+            aws s3 cp --no-progress --recursive pool "$bucket/pool" \
+              --content-type application/vnd.debian.binary-package \
+              --cache-control 'public, max-age=31536000, immutable'
+          fi
+          aws s3 cp --no-progress --recursive dists/stable/main "$bucket/dists/stable/main" \
+            --cache-control 'no-cache'
+          for f in beacon-archive-keyring.asc beacon-archive-keyring.gpg; do
+            aws s3 cp --no-progress "$f" "$bucket/$f" --cache-control 'no-cache'
+          done
+          for f in Release.gpg Release InRelease; do
+            aws s3 cp --no-progress "dists/stable/$f" "$bucket/dists/stable/$f" \
+              --content-type text/plain --cache-control 'no-cache'
+          done
+
+      - name: Check the published repository with apt
+        if: steps.gate.outputs.publish == 'true'
+        env:
+          VERSION: ${{ steps.gate.outputs.version }}
+        run: |
+          set -euo pipefail
+          sh packaging/linux/apt/verify-apt-repo.sh "${APT_REPO_URL%/}" \
+            "$RUNNER_TEMP/beacon-archive-keyring.gpg" "$VERSION"
 
   # One checksums.txt for everything a user installs, and signed provenance for all of it.
   #

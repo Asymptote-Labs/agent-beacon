@@ -754,6 +754,22 @@ jobs:
           BEACON_SMOKE_FORMAT: rpm
         run: sh packaging/linux/smoke-package.sh
 
+  # The scripts release.yml uses to publish the signed apt repository, run against stand-in
+  # packages, a throwaway key and a local directory in place of the bucket. Checks a merge keeps
+  # older versions installable and that a replaced package, a tampered index and the wrong key are
+  # refused, all through a real apt-get running as an ordinary user.
+  apt-repository:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install apt repository tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq apt-utils dpkg-dev gnupg
+      - name: Test the apt repository scripts
+        run: sh packaging/linux/apt/test-apt-repo.sh
+
   package-smoke:
     runs-on: macos-latest
     steps:
