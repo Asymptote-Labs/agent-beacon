@@ -874,7 +874,8 @@ func Uninstall(opts UninstallOptions) error {
 	// success. Install has always had this gate; uninstall never did, which is the asymmetry that
 	// let an unprivileged removal look like it worked.
 	if !cfg.UserMode && !HasSystemPrivileges() {
-		return fmt.Errorf("removing a system endpoint needs root: rerun with sudo, or pass --user to remove a user-mode install")
+		return fmt.Errorf("removing a system endpoint needs elevated privileges; %s, or pass --user to remove a user-mode install",
+			SystemPrivilegeHint())
 	}
 
 	var problems []string

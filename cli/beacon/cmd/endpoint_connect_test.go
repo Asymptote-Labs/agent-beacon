@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/account"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/lifecycle"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/managedprivacy"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/onboarding"
@@ -80,6 +82,43 @@ func TestDashboardHomeURL(t *testing.T) {
 	} {
 		if got := dashboardHomeURL(base); got != want {
 			t.Fatalf("dashboardHomeURL(%q) = %q, want %q", base, got, want)
+		}
+	}
+}
+
+// A system connect or disconnect from a shell without privileges used to say "rerun with sudo",
+// which names a command Windows does not have. The hint has to come from the platform, as it
+// already does for install, update and the job commands.
+func TestSystemConnectAndDisconnectNameThePlatformElevationHint(t *testing.T) {
+	if lifecycle.HasSystemPrivileges() {
+		t.Skip("an elevated process can connect a system endpoint")
+	}
+	originalEndpointOpts := endpointOpts
+	originalConnect := connectManagedEndpoint
+	t.Cleanup(func() {
+		endpointOpts = originalEndpointOpts
+		connectManagedEndpoint = originalConnect
+	})
+	endpointOpts.userMode, endpointOpts.systemMode = false, true
+	connectManagedEndpoint = func(context.Context, asymptote.ConnectOptions) (*asymptote.ConnectResult, error) {
+		return nil, errors.New("must not run")
+	}
+	for name, run := range map[string]func(*cobra.Command, []string) error{
+		"connect":    runEndpointConnect,
+		"disconnect": runEndpointDisconnect,
+	} {
+		err := run(&cobra.Command{}, nil)
+		if err == nil {
+			t.Fatalf("%s: a system %s without privileges returned nil", name, name)
+		}
+		if !strings.Contains(err.Error(), "elevated privileges") {
+			t.Fatalf("%s: error = %v, want it to name the elevation requirement", name, err)
+		}
+		if !strings.Contains(err.Error(), lifecycle.SystemPrivilegeHint()) {
+			t.Fatalf("%s: error = %v, want it to carry this platform's hint (%q)", name, err, lifecycle.SystemPrivilegeHint())
+		}
+		if strings.Contains(err.Error(), "sudo") && runtime.GOOS == "windows" {
+			t.Fatalf("%s: error = %v names sudo on Windows", name, err)
 		}
 	}
 }
