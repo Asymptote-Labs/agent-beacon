@@ -48,6 +48,7 @@ var endpointPrimeOpts struct {
 	print        bool
 	watch        bool
 	interval     time.Duration
+	rotateBytes  int64
 }
 
 func init() {
@@ -70,11 +71,16 @@ func init() {
 	sync.BoolVar(&endpointPrimeOpts.print, "print", false, "Print mapped events as JSON without writing them or advancing the cursor (dry run)")
 	sync.BoolVar(&endpointPrimeOpts.watch, "watch", false, "Sweep continuously on --interval (default: one sweep then exit)")
 	sync.DurationVar(&endpointPrimeOpts.interval, "interval", time.Minute, "Sweep interval for --watch")
+	addSyncRotateBytesFlag(sync, &endpointPrimeOpts.rotateBytes)
 }
 
 func runEndpointPrimeSync(cmd *cobra.Command, args []string) error {
+	if err := checkSyncRotateBytes(endpointPrimeOpts.rotateBytes); err != nil {
+		return err
+	}
 	userMode := endpointUserMode()
 	opts := primesession.CollectOptions{
+		RotateBytes:  endpointPrimeOpts.rotateBytes,
 		SessionsDir:  endpointPrimeOpts.sessionsDir,
 		ArtifactsDir: endpointPrimeOpts.artifactsDir,
 		Print:        endpointPrimeOpts.print,
@@ -94,7 +100,7 @@ func runEndpointPrimeSync(cmd *cobra.Command, args []string) error {
 	if endpointPrimeOpts.watch && !endpointPrimeOpts.print {
 		return watchPrime(ctx, cmd, opts)
 	}
-	summary, err := primesession.CollectOnce(opts)
+	summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, endpointSweepLockWait, primesession.CollectOnce, opts)
 	reportPrimeSweep(cmd, summary)
 	return err
 }
@@ -105,7 +111,7 @@ func watchPrime(ctx context.Context, cmd *cobra.Command, opts primesession.Colle
 		interval = 5 * time.Second
 	}
 	for {
-		summary, err := primesession.CollectOnce(opts)
+		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, primesession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Prime Agent sync error: %v\n", err)
 		}
@@ -128,6 +134,7 @@ func reportPrimeSweep(cmd *cobra.Command, summary primesession.Summary) {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Prime Agent sync: %d sessions, %d changed, %d events, %d errors\n",
 		summary.Sessions, summary.SessionsChanged, summary.EventsEmitted, summary.Errors)
+	reportSyncRetention(cmd.OutOrStdout(), summary.Retention)
 	if summary.MalformedLines > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "  %d unreadable line(s) in Prime Agent session logs\n", summary.MalformedLines)
 	}

@@ -29,14 +29,31 @@ func TestEventIDForLineIsAVersion5UUID(t *testing.T) {
 	}
 }
 
-// The point of the call identity: the hook writes when the tool runs and the
-// collector writes when its batch flushes, so the two reports of one call agree
-// on almost nothing except the call ID. They must still name one event.
+// The point of the call identity: the hook writes when the tool runs and the collector writes
+// when its batch flushes, so the two reports of one call agree on almost nothing except the call
+// ID. They must still name one event.
 func TestEventIDForLineIgnoresWhatTheTwoCapturePathsDisagreeOn(t *testing.T) {
-	hook := EventIDForLine(callLine("claude_code", "2026-08-21T18:00:01Z", "toolu_1", "echo hi"))
-	otlp := EventIDForLine(callLine("otel", "2026-08-21T18:00:07Z", "toolu_1", "echo hi"))
-	if hook != otlp {
-		t.Fatalf("one call reported twice derived two IDs: %s and %s", hook, otlp)
+	for name, pair := range map[string][2]string{
+		"harness and timestamp": {
+			string(callLine("claude_code", "2026-08-21T18:00:01Z", "toolu_1", "echo hi")),
+			string(callLine("otel", "2026-08-21T18:00:07Z", "toolu_1", "echo hi")),
+		},
+		// The hook records a Claude Code Write as "modify", the collector as "create".
+		"operation name": {
+			`{"timestamp":"2026-08-21T18:00:01Z","event":{"action":"file.modified"},"harness":{"name":"claude_code"},"session":{"id":"s1","working_directory":"/repo"},"file":{"path":"/repo/notes.md","operation":"modify"},"gen_ai":{"tool":{"call":{"id":"toolu_w"}}}}`,
+			`{"timestamp":"2026-08-21T18:00:07Z","event":{"action":"file.modified"},"harness":{"name":"claude_code"},"session":{"id":"s1","working_directory":"/repo"},"file":{"path":"/repo/notes.md","operation":"create"},"gen_ai":{"tool":{"call":{"id":"toolu_w"}}}}`,
+		},
+		// harness.collection_method and event.fidelity differ between the two paths by design. If
+		// either reached the call identity, one action would derive two IDs again -- exactly how
+		// the August dedup regression happened.
+		"provenance markers": {
+			`{"timestamp":"2026-08-21T18:00:01Z","event":{"action":"command.executed","fidelity":"observed"},"harness":{"name":"claude_code","collection_method":"hook"},"session":{"id":"s1","working_directory":"/repo"},"command":{"command":"echo hi"},"gen_ai":{"tool":{"call":{"id":"toolu_1"}}}}`,
+			`{"timestamp":"2026-08-21T18:00:07Z","event":{"action":"command.executed","fidelity":"inferred"},"harness":{"name":"claude_code","collection_method":"otlp"},"session":{"id":"s1","working_directory":"/repo"},"command":{"command":"echo hi"},"gen_ai":{"tool":{"call":{"id":"toolu_1"}}}}`,
+		},
+	} {
+		if hook, other := EventIDForLine([]byte(pair[0])), EventIDForLine([]byte(pair[1])); hook != other {
+			t.Errorf("%s: one call reported twice derived two IDs: %s and %s", name, hook, other)
+		}
 	}
 }
 
@@ -82,34 +99,6 @@ func TestEventIDForLineIsStableAcrossReleases(t *testing.T) {
 	if got != want {
 		t.Fatalf("EventIDForLine = %s, want %s -- if this is deliberate, every ID Beacon has "+
 			"ever written just changed meaning", got, want)
-	}
-}
-
-// The same disagreement, at the identity layer: the hook's and the collector's
-// reports of one Write must derive one event ID even though they name the
-// operation differently.
-func TestEventIDForLineIgnoresHowTheOperationIsNamed(t *testing.T) {
-	hook := EventIDForLine([]byte(`{"timestamp":"2026-08-21T18:00:01Z","event":{"action":"file.modified"},"harness":{"name":"claude_code"},"session":{"id":"s1","working_directory":"/repo"},"file":{"path":"/repo/notes.md","operation":"modify"},"gen_ai":{"tool":{"call":{"id":"toolu_w"}}}}`))
-	collector := EventIDForLine([]byte(`{"timestamp":"2026-08-21T18:00:07Z","event":{"action":"file.modified"},"harness":{"name":"claude_code"},"session":{"id":"s1","working_directory":"/repo"},"file":{"path":"/repo/notes.md","operation":"create"},"gen_ai":{"tool":{"call":{"id":"toolu_w"}}}}`))
-	if hook != collector {
-		t.Fatalf("one Write derived two IDs: %s and %s", hook, collector)
-	}
-}
-
-// Provenance markers must not split the identity of one action.
-//
-// harness.collection_method and event.fidelity exist precisely because the two
-// capture paths differ, so they differ on the two reports of one call by design:
-// the hook says hook/observed, the collector says otlp and may say inferred for
-// an action it classified by substring. If either reached the call identity, one
-// action would derive two IDs again -- which is the failure this whole change
-// exists to remove, arriving by way of an unrelated and perfectly correct
-// addition. Exactly how the August dedup regression happened.
-func TestEventIDForLineIgnoresProvenanceMarkers(t *testing.T) {
-	hook := EventIDForLine([]byte(`{"timestamp":"2026-08-21T18:00:01Z","event":{"action":"command.executed","fidelity":"observed"},"harness":{"name":"claude_code","collection_method":"hook"},"session":{"id":"s1","working_directory":"/repo"},"command":{"command":"echo hi"},"gen_ai":{"tool":{"call":{"id":"toolu_1"}}}}`))
-	collector := EventIDForLine([]byte(`{"timestamp":"2026-08-21T18:00:07Z","event":{"action":"command.executed","fidelity":"inferred"},"harness":{"name":"claude_code","collection_method":"otlp"},"session":{"id":"s1","working_directory":"/repo"},"command":{"command":"echo hi"},"gen_ai":{"tool":{"call":{"id":"toolu_1"}}}}`))
-	if hook != collector {
-		t.Fatalf("provenance markers split one call into two IDs: %s and %s", hook, collector)
 	}
 }
 

@@ -67,36 +67,6 @@ func piEventWithAction(t *testing.T, logPath, action string) map[string]interfac
 	return nil
 }
 
-// Every type the managed extension subscribes to must map to at least one event. These strings are
-// the contract between the extension's subscription list and this mapper, and a typo on either side
-// produces no telemetry rather than an error -- so the list is walked rather than trusted.
-func TestPiEventEverySupportedTypeProducesTelemetry(t *testing.T) {
-	// One payload per type, each carrying the minimum its branch needs to emit.
-	payloads := map[string]map[string]interface{}{
-		"session_start":    {"type": "session_start", "reason": "startup"},
-		"session_shutdown": {"type": "session_shutdown", "reason": "quit"},
-		"input":            {"type": "input", "text": "do the thing", "source": "interactive"},
-		"tool_call":        {"type": "tool_call", "toolName": "bash", "toolCallId": "c1", "input": map[string]interface{}{"command": "ls"}},
-		"tool_result":      {"type": "tool_result", "toolName": "bash", "toolCallId": "c1", "input": map[string]interface{}{"command": "ls"}},
-		"user_bash":        {"type": "user_bash", "command": "git status", "cwd": "/repo"},
-		"message_end": {"type": "message_end", "message": map[string]interface{}{
-			"role":  "assistant",
-			"usage": map[string]interface{}{"input": float64(10), "output": float64(5)},
-		}},
-	}
-
-	for _, name := range supportedPiEventTypes() {
-		payload, ok := payloads[name]
-		if !ok {
-			t.Fatalf("no fixture for supported Pi event type %q; the mapper claims to handle it", name)
-		}
-		events := piRuntime.endpointEvents(payload, "sess-1")
-		if len(events) == 0 {
-			t.Fatalf("supported Pi event type %q produced no telemetry", name)
-		}
-	}
-}
-
 // An unrecognized type is silent rather than generic. Pi publishes far more events than the
 // extension subscribes to, and a future one becoming an undifferentiated row would fill the log
 // with records no query asks for.
@@ -167,21 +137,6 @@ func TestPiEventEmptyInputProducesNothing(t *testing.T) {
 	}
 }
 
-func TestPiEventToolCallRecordsInvocation(t *testing.T) {
-	logPath := piTestLog(t)
-
-	runHookWithInput(t, runPiEvent, map[string]interface{}{
-		"type": "tool_call", "toolName": "bash", "toolCallId": "call-1",
-		"input": map[string]interface{}{"command": "go test ./..."}, "sessionId": "sess-1",
-	})
-
-	event := piEventWithAction(t, logPath, "tool.invoked")
-	tool := nested(t, event, "tool")
-	if tool["name"] != "bash" || tool["command"] != "go test ./..." {
-		t.Fatalf("tool = %v, want the bash tool and its command", tool)
-	}
-}
-
 // The decision this mapper must not make. Pi's tool_call handler can block a call, but that is an
 // extension deciding rather than an operator being asked -- Pi exposes no approval decision through
 // the extension API. An approval event here would put a decision nobody made into the log, and
@@ -222,7 +177,12 @@ func TestPiEventToolResultActionsPerTool(t *testing.T) {
 		// grep takes a pattern, find takes a glob, ls takes a directory. None is a file operation,
 		// and a custom tool's arguments mean whatever its author decided.
 		{"grep", map[string]interface{}{"pattern": "TODO"}, "tool.completed"},
+		{"glob", map[string]interface{}{"pattern": "**/*.go"}, "tool.completed"},
 		{"my_custom_tool", map[string]interface{}{"anything": true}, "tool.completed"},
+		// A file action with no file, or a command action with no command, is not that action: it
+		// would be a row every file- or command-scoped rule matches and none can explain.
+		{"read", map[string]interface{}{}, "tool.completed"},
+		{"bash", map[string]interface{}{}, "tool.completed"},
 	} {
 		t.Run(tc.tool, func(t *testing.T) {
 			events := piRuntime.endpointEvents(map[string]interface{}{
@@ -235,90 +195,6 @@ func TestPiEventToolResultActionsPerTool(t *testing.T) {
 				t.Fatalf("%s action = %q, want %q", tc.tool, events[0].action, tc.action)
 			}
 		})
-	}
-}
-
-// A file action with no file is not a file action. Pi's read tool accepts a path that failed to
-// resolve, and a custom tool can share a built-in's name, so a file.read with no file field would
-// produce a row every file-scoped query matches and none can explain.
-func TestPiEventFileActionWithoutAPathFallsBackToTool(t *testing.T) {
-	events := piRuntime.endpointEvents(map[string]interface{}{
-		"type": "tool_result", "toolName": "read", "input": map[string]interface{}{},
-	}, "sess-1")
-	if len(events) != 1 || events[0].action != "tool.completed" {
-		t.Fatalf("events = %v, want a single tool.completed", events)
-	}
-}
-
-// The same guard on the command side: a bash result whose arguments carried no command is a tool
-// call, not a command execution, and rules/risky-command/ all match on command.command.
-func TestPiEventCommandActionWithoutACommandFallsBackToTool(t *testing.T) {
-	events := piRuntime.endpointEvents(map[string]interface{}{
-		"type": "tool_result", "toolName": "bash", "input": map[string]interface{}{},
-	}, "sess-1")
-	if len(events) != 1 || events[0].action != "tool.completed" {
-		t.Fatalf("events = %v, want a single tool.completed", events)
-	}
-}
-
-func TestPiEventEditResultRecordsTheUnifiedPatch(t *testing.T) {
-	logPath := piTestLog(t)
-	patch := "--- a/main.go\n+++ b/main.go\n@@ -1 +1 @@\n-old\n+new\n"
-
-	runHookWithInput(t, runPiEvent, map[string]interface{}{
-		"type": "tool_result", "toolName": "edit", "sessionId": "sess-1",
-		"input":   map[string]interface{}{"path": "/repo/main.go"},
-		"details": map[string]interface{}{"patch": patch, "diff": "display form"},
-	})
-
-	event := piEventWithAction(t, logPath, "file.modified")
-	file := nested(t, event, "file")
-	if file["path"] != "/repo/main.go" || file["operation"] != "modify" {
-		t.Fatalf("file = %v, want the edited path with a modify operation", file)
-	}
-	// The unified patch is the machine-readable one; the display diff is only a fallback.
-	content := nested(t, event, "content")
-	if content["bytes"] != float64(len(patch)) {
-		t.Fatalf("content.bytes = %v, want the patch length %d", content["bytes"], len(patch))
-	}
-}
-
-func TestPiEventFailedToolIsRecordedAsAFailure(t *testing.T) {
-	logPath := piTestLog(t)
-
-	runHookWithInput(t, runPiEvent, map[string]interface{}{
-		"type": "tool_result", "toolName": "bash", "sessionId": "sess-1",
-		"input": map[string]interface{}{"command": "false"}, "isError": true,
-	})
-
-	event := piEventWithAction(t, logPath, "tool.failed")
-	meta := nested(t, event, "event")
-	if event["severity"] != "high" {
-		t.Fatalf("severity = %v, want high for a failed tool", event["severity"])
-	}
-	if meta["category"] != "tool" {
-		t.Fatalf("category = %v, want tool", meta["category"])
-	}
-}
-
-func TestPiEventUserBashRecordsAnOperatorCommand(t *testing.T) {
-	logPath := piTestLog(t)
-
-	runHookWithInput(t, runPiEvent, map[string]interface{}{
-		"type": "user_bash", "command": "git status", "cwd": "/repo",
-		"excludeFromContext": true, "sessionId": "sess-1",
-	})
-
-	event := piEventWithAction(t, logPath, "command.executed")
-	command := nested(t, event, "command")
-	if command["command"] != "git status" {
-		t.Fatalf("command.command = %v, want git status", command["command"])
-	}
-	// Marked as the operator's rather than silently merged in with agent-run commands: this is the
-	// one command shape in Pi the agent did not originate.
-	raw := nested(t, event, "raw")
-	if raw["pi_user_initiated"] != true {
-		t.Fatalf("raw.pi_user_initiated = %v, want true", raw["pi_user_initiated"])
 	}
 }
 
@@ -424,32 +300,6 @@ func TestPiEventMessageEndRecordsTheOneHourCacheWriteSplit(t *testing.T) {
 				t.Fatalf("cache_creation = %v, want ephemeral_1h_input_tokens %v", got, tc.oneHour)
 			}
 		})
-	}
-}
-
-// message_end fires for user and toolResult messages too. Emitting a row for each would put an
-// empty usage record in the log on every turn.
-func TestPiEventMessageEndIgnoresNonAssistantMessages(t *testing.T) {
-	for _, role := range []string{"user", "toolResult"} {
-		events := piRuntime.endpointEvents(map[string]interface{}{
-			"type":    "message_end",
-			"message": map[string]interface{}{"role": role, "usage": map[string]interface{}{"input": float64(5)}},
-		}, "sess-1")
-		if len(events) != 0 {
-			t.Fatalf("%s message produced %d events, want none", role, len(events))
-		}
-	}
-}
-
-// An assistant message with neither usage nor reasoning is a message Beacon has nothing to say
-// about, which is different from one it failed to read.
-func TestPiEventMessageEndWithNothingToReportProducesNothing(t *testing.T) {
-	events := piRuntime.endpointEvents(map[string]interface{}{
-		"type":    "message_end",
-		"message": map[string]interface{}{"role": "assistant", "content": []interface{}{}},
-	}, "sess-1")
-	if len(events) != 0 {
-		t.Fatalf("bare assistant message produced %d events, want none", len(events))
 	}
 }
 

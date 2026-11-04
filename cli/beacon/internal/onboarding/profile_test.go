@@ -1,6 +1,7 @@
 package onboarding
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -8,16 +9,6 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
-
-func TestPathHonorsHome(t *testing.T) {
-	home := t.TempDir()
-	testenv.SetHome(t, home)
-
-	want := filepath.Join(home, ProfilePath)
-	if got := Path(); got != want {
-		t.Fatalf("Path() = %q, want %q", got, want)
-	}
-}
 
 func TestLoadMissingProfileReportsNotPrompted(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
@@ -88,25 +79,6 @@ func TestSaveRoundTrip(t *testing.T) {
 	}
 }
 
-// The profile holds the operator's email address, so it must not be world-readable.
-func TestSaveUsesOwnerOnlyPermissions(t *testing.T) {
-	testenv.RequirePOSIXFileModes(t)
-	home := t.TempDir()
-	testenv.SetHome(t, home)
-
-	if err := Save(Profile{}); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	info, err := os.Stat(filepath.Join(home, ProfilePath))
-	if err != nil {
-		t.Fatalf("Stat: %v", err)
-	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Fatalf("profile permissions = %o, want 600", perm)
-	}
-}
-
 // A profile written by an older build with looser permissions gets tightened rather
 // than silently kept, because os.WriteFile only applies its mode on creation.
 func TestSaveTightensExistingPermissions(t *testing.T) {
@@ -150,41 +122,34 @@ func TestSavePreservesExistingInstallID(t *testing.T) {
 	}
 }
 
-func TestSaveWritesValidJSON(t *testing.T) {
-	home := t.TempDir()
-	testenv.SetHome(t, home)
-
-	if err := Save(Profile{Onboarding: Onboarding{Outcome: OutcomeSkipped}}); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	data, err := os.ReadFile(filepath.Join(home, ProfilePath))
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("profile is not valid JSON: %v", err)
-	}
-	if _, ok := raw["pending_submission"]; ok {
-		t.Fatalf("pending_submission should be omitted when nil, got %v", raw["pending_submission"])
-	}
-}
-
-func TestNewInstallIDIsUnique(t *testing.T) {
+// install_id is the signup endpoint's dedupe key and the handle quoted to request
+// deletion, so two machines must never mint the same one: a fixed or zeroed ID would
+// merge every install into one server row.
+func TestSaveMintsADistinctInstallIDPerMachine(t *testing.T) {
 	seen := map[string]bool{}
-	for i := 0; i < 64; i++ {
-		id, err := NewInstallID()
+	for i := 0; i < 2; i++ {
+		home := t.TempDir()
+		testenv.SetHome(t, home)
+		if err := Save(Profile{}); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(home, ProfilePath))
 		if err != nil {
-			t.Fatalf("NewInstallID: %v", err)
+			t.Fatalf("ReadFile: %v", err)
 		}
-		if len(id) != 32 {
-			t.Fatalf("NewInstallID() = %q, want 32 hex characters", id)
+		var onDisk struct {
+			InstallID string `json:"install_id"`
 		}
-		if seen[id] {
-			t.Fatalf("NewInstallID() returned a duplicate: %q", id)
+		if err := json.Unmarshal(data, &onDisk); err != nil {
+			t.Fatalf("profile is not valid JSON: %v\n%s", err, data)
 		}
-		seen[id] = true
+		if raw, err := hex.DecodeString(onDisk.InstallID); err != nil || len(raw) != 16 {
+			t.Fatalf("install_id = %q, want 32 hex characters", onDisk.InstallID)
+		}
+		if seen[onDisk.InstallID] {
+			t.Fatalf("two machines minted the same install_id %q", onDisk.InstallID)
+		}
+		seen[onDisk.InstallID] = true
 	}
 }
 

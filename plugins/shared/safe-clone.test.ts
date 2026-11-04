@@ -41,12 +41,15 @@ function chain(layers: number, leaf: unknown): unknown {
   return value
 }
 
-// Every serializer under test: the canonical module, and the copy in each plugin source and in
-// each embedded asset, evaluated from the file itself.
+// Every distinct serializer form: the canonical module, one TypeScript plugin copy and the
+// JavaScript copy, each evaluated from its plugin file. Every other copy is byte-identical to one
+// of these, which the drift tests below enforce, so running the suite against it again adds nothing.
+const typescriptCopy = consumers.find((c) => c.sourcePath.endsWith(".ts"))!
+const javascriptCopy = consumers.find((c) => c.sourcePath.endsWith(".js"))!
 const implementations: Array<[string, SafeClone]> = [
   ["plugins/shared/safe-clone.ts", canonicalSafeClone],
-  ...consumers.flatMap(({ sourcePath, embeddedPath }) =>
-    [sourcePath, embeddedPath].map((path): [string, SafeClone] => [relative(repoRoot, path), load(path)])
+  ...[typescriptCopy.sourcePath, javascriptCopy.sourcePath].map(
+    (path): [string, SafeClone] => [relative(repoRoot, path), load(path)],
   ),
 ]
 

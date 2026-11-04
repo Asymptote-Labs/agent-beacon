@@ -47,6 +47,7 @@ var endpointGrokOpts struct {
 	print       bool
 	watch       bool
 	interval    time.Duration
+	rotateBytes int64
 }
 
 func init() {
@@ -68,11 +69,16 @@ func init() {
 	sync.BoolVar(&endpointGrokOpts.print, "print", false, "Print mapped events as JSON without writing them or advancing the cursor (dry run)")
 	sync.BoolVar(&endpointGrokOpts.watch, "watch", false, "Sweep continuously on --interval (default: one sweep then exit)")
 	sync.DurationVar(&endpointGrokOpts.interval, "interval", time.Minute, "Sweep interval for --watch")
+	addSyncRotateBytesFlag(sync, &endpointGrokOpts.rotateBytes)
 }
 
 func runEndpointGrokSync(cmd *cobra.Command, args []string) error {
+	if err := checkSyncRotateBytes(endpointGrokOpts.rotateBytes); err != nil {
+		return err
+	}
 	userMode := endpointUserMode()
 	opts := groksession.CollectOptions{
+		RotateBytes: endpointGrokOpts.rotateBytes,
 		SessionsDir: endpointGrokOpts.sessionsDir,
 		Print:       endpointGrokOpts.print,
 		Out:         cmd.OutOrStdout(),
@@ -91,7 +97,7 @@ func runEndpointGrokSync(cmd *cobra.Command, args []string) error {
 	if endpointGrokOpts.watch && !endpointGrokOpts.print {
 		return watchGrok(ctx, cmd, opts)
 	}
-	summary, err := groksession.CollectOnce(opts)
+	summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, endpointSweepLockWait, groksession.CollectOnce, opts)
 	reportGrokSweep(cmd, summary)
 	return err
 }
@@ -102,7 +108,7 @@ func watchGrok(ctx context.Context, cmd *cobra.Command, opts groksession.Collect
 		interval = 5 * time.Second
 	}
 	for {
-		summary, err := groksession.CollectOnce(opts)
+		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, groksession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "grok sync error: %v\n", err)
 		}
@@ -125,6 +131,7 @@ func reportGrokSweep(cmd *cobra.Command, summary groksession.SummaryResult) {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "grok sync: %d sessions, %d changed, %d events, %d errors\n",
 		summary.Sessions, summary.SessionsChanged, summary.EventsEmitted, summary.Errors)
+	reportSyncRetention(cmd.OutOrStdout(), summary.Retention)
 	if summary.MalformedLines > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "  %d unreadable line(s) in Grok session logs\n", summary.MalformedLines)
 	}

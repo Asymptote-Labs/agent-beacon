@@ -65,17 +65,20 @@ func TestPidRunsProgramWaitsForAnExecInProgress(t *testing.T) {
 		}
 	}
 	oldRoot, oldRetries, oldDelay := procRoot, cmdlineRetries, cmdlineRetryDelay
-	procRoot, cmdlineRetries, cmdlineRetryDelay = root, 50, 5*time.Millisecond
+	// A generous retry budget at a short delay: 4242's arguments appear after a few retries.
+	procRoot, cmdlineRetries, cmdlineRetryDelay = root, 500, time.Millisecond
 	t.Cleanup(func() { procRoot, cmdlineRetries, cmdlineRetryDelay = oldRoot, oldRetries, oldDelay })
 
 	// 4242 finishes its exec a little later; 4343 never shows arguments (a zombie).
 	go func() {
-		time.Sleep(40 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 		_ = os.WriteFile(filepath.Join(root, "4242", "cmdline"), []byte("/tmp/beacon-fake-collector\x00--config\x00x\x00"), 0o644)
 	}()
 	if !pidRunsProgram(4242, "/tmp/beacon-fake-collector") {
 		t.Error("a collector still finishing its exec was taken for another program")
 	}
+	// 4343 only has to exhaust the budget, not wait out a long one.
+	cmdlineRetries = 3
 	start := time.Now()
 	if pidRunsProgram(4343, "/tmp/beacon-fake-collector") {
 		t.Error("a process that never shows arguments must not match")
@@ -92,7 +95,8 @@ func TestPidRunsProgramRightAfterStart(t *testing.T) {
 		t.Skip("reads procfs")
 	}
 	stub := stubCollectorPath(t)
-	for i := 0; i < 20; i++ {
+	// The race lost on most attempts before the fix, so a handful of attempts still catches it.
+	for i := 0; i < 5; i++ {
 		cmd := exec.Command(stub, "--config", "unused")
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
@@ -115,6 +119,7 @@ func TestSupervisedIgnoresARecycledPID(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
 	m := Manager{UserMode: true, Kind: KindSupervised}
+	fastSupervisedStop(t)
 
 	stranger := exec.Command(stubCollectorPath(t), "--config", "unrelated")
 	if err := stranger.Start(); err != nil {
@@ -147,7 +152,7 @@ func TestSupervisedIgnoresARecycledPID(t *testing.T) {
 	select {
 	case <-exited:
 		t.Fatal("unload signalled a process that is not the collector")
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(50 * time.Millisecond):
 	}
 	st, err := b.read(true)
 	if err != nil {
@@ -169,6 +174,7 @@ func TestSupervisedUnloadStopsACollectorStartedAsAnotherProgram(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
 	m := Manager{UserMode: true, Kind: KindSupervised}
+	fastSupervisedStop(t)
 
 	if _, err := m.WriteUnit(stubCollectorPath(t), "300"); err != nil {
 		t.Fatalf("WriteUnit: %v", err)

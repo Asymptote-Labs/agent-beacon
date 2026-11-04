@@ -82,7 +82,7 @@ func TestOnboardingRegistersCloudMCPWithoutAsking(t *testing.T) {
 	mcpStdin = strings.NewReader("n\n") // would decline if it were asked
 	cmd, out, errOut := agentToolsCommand(t)
 
-	connectCloudMCPFromOnboarding(cmd)
+	connectCloudMCPFromOnboarding(cmd, false)
 
 	if errOut.Len() != 0 {
 		t.Fatalf("stderr: %s\nstdout: %s", errOut, out)
@@ -111,7 +111,7 @@ func TestOnboardingCloudMCPFailureIsAWarning(t *testing.T) {
 		return errors.New("offline")
 	}
 	cmd, _, errOut := agentToolsCommand(t)
-	connectCloudMCPFromOnboarding(cmd)
+	connectCloudMCPFromOnboarding(cmd, false)
 	if !got.yes || got.dryRun || got.force || got.tokenEnv != "" || len(got.harnesses) != 0 || got.url != "" {
 		t.Fatalf("request = %+v", got)
 	}
@@ -211,6 +211,7 @@ func TestRefreshAgentSkillsOnlyUpdatesInstalledCopies(t *testing.T) {
 func TestFinishCloudSetupRegistersMCPOnlyAfterConnectSucceeds(t *testing.T) {
 	prev := agentToolsConnectCloudMCP
 	t.Cleanup(func() { agentToolsConnectCloudMCP = prev })
+	opened := stubDashboardOpener(t)
 	for _, tc := range []struct {
 		name       string
 		outcome    onboardingOutcome
@@ -228,13 +229,19 @@ func TestFinishCloudSetupRegistersMCPOnlyAfterConnectSucceeds(t *testing.T) {
 	} {
 		h := newOnboardingHarness(t)
 		h.loaded = onboarding.Profile{Onboarding: onboarding.Onboarding{CompletedAt: "2026-10-05T00:00:00Z"}}
-		ran := false
-		agentToolsConnectCloudMCP = func(context.Context, io.Writer, cloudMCPRequest) error {
-			ran = true
+		ran, brief := false, false
+		agentToolsConnectCloudMCP = func(_ context.Context, _ io.Writer, req cloudMCPRequest) error {
+			ran, brief = true, req.brief
 			return nil
 		}
+		// As runEndpointInstall does: the wizard's Beacon Cloud connect closes on the summary.
+		var summary *cloudSummary
+		if tc.outcome.briefClose() {
+			summary = &cloudSummary{}
+		}
+		*opened = nil
 		connected := false
-		finishCloudSetup(h.cmd, tc.outcome, tc.connect, func() error {
+		finishCloudSetup(h.cmd, tc.outcome, tc.connect, summary, func() error {
 			connected = true
 			return tc.connectErr
 		})
@@ -243,6 +250,12 @@ func TestFinishCloudSetupRegistersMCPOnlyAfterConnectSucceeds(t *testing.T) {
 		}
 		if ran != tc.wantMCP {
 			t.Fatalf("%s: Beacon Cloud MCP ran = %t, want %t", tc.name, ran, tc.wantMCP)
+		}
+		if ran && brief != (summary != nil) {
+			t.Fatalf("%s: Beacon Cloud MCP brief = %t, want %t", tc.name, brief, summary != nil)
+		}
+		if wantOpened := tc.outcome.Connect && tc.connectErr == nil; (len(*opened) == 1) != wantOpened {
+			t.Fatalf("%s: dashboard opened %v, want opened = %t", tc.name, *opened, wantOpened)
 		}
 		if tc.wantStderr != "" && !strings.Contains(h.stderr.String(), tc.wantStderr) {
 			t.Fatalf("%s: stderr = %q", tc.name, h.stderr)

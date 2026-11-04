@@ -1,5 +1,5 @@
 id: approval-denied-command-executed-anyway
-version: 1
+version: 2
 title: Denied dangerous command executed anyway within the session
 description: >
   An approval for a destructive or high-impact shell command was explicitly denied
@@ -27,11 +27,11 @@ correlation:
     - id: denied
       match: >
         e.event.action == "approval.denied" &&
-        e.command.command.matches("(?i)(\\brm\\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\\b|\\bmkfs\\b|\\bdd\\s+if=|:\\(\\)\\s*\\{\\s*:\\|:|>\\s*/dev/sd|\\b(curl|wget)\\b.*\\|\\s*(ba)?sh\\b|\\bsudo\\s+-s\\b|\\bchmod\\s+-R\\s+777\\b)")
+        e.command.command.matches("(?i)(\\brm\\s+-[a-z]*(r[a-z]*f|f[a-z]*r)[a-z]*\\b|\\bmkfs\\b|\\bdd\\s+if=|:\\(\\)\\s*\\{\\s*:\\|:|>\\s*/dev/sd|\\b(curl|wget)\\b.*\\|\\s*(ba)?sh\\b|\\bsudo\\s+-s\\b|\\bchmod\\s+-R\\s+777\\b)")
     - id: executed
       match: >
         e.event.action == "command.executed" &&
-        e.command.command.matches("(?i)(\\brm\\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\\b|\\bmkfs\\b|\\bdd\\s+if=|:\\(\\)\\s*\\{\\s*:\\|:|>\\s*/dev/sd|\\b(curl|wget)\\b.*\\|\\s*(ba)?sh\\b|\\bsudo\\s+-s\\b|\\bchmod\\s+-R\\s+777\\b)")
+        e.command.command.matches("(?i)(\\brm\\s+-[a-z]*(r[a-z]*f|f[a-z]*r)[a-z]*\\b|\\bmkfs\\b|\\bdd\\s+if=|:\\(\\)\\s*\\{\\s*:\\|:|>\\s*/dev/sd|\\b(curl|wget)\\b.*\\|\\s*(ba)?sh\\b|\\bsudo\\s+-s\\b|\\bchmod\\s+-R\\s+777\\b)")
 
 emit:
   reason: "Dangerous command executed in a session after an explicit approval denial"
@@ -48,6 +48,18 @@ tests:
       - timestamp: "2026-06-13T10:00:45Z"
         event: { action: command.executed }
         command: { command: "rm -rf /var/data" }
+        session: { id: s1 }
+  - name: denied_rm_rfv_then_executed
+    verdict: match
+    events:
+      - timestamp: "2026-06-13T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rfv /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-13T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "rm -frv /var/data" }
         session: { id: s1 }
   - name: denied_then_curl_pipe_shell
     verdict: match

@@ -26,11 +26,31 @@ Doctor verifies:
 - Runtime log permissions
 - Service definition: launchd plist on macOS, systemd unit on Linux
 - Configured harness telemetry and recent observed events
+- Whether DeepSeek Harness can load the hook bridge its hooks depend on (`dsh_hook_bridge`)
 - Whether DeepSeek Harness hooks are actually recording live events (`dsh_hook_capture`)
 - Whether Beacon's git hooks ran out of time recently (`git_hook_budget`)
 - Whether a real user's agent runtime points at the collector (system mode only)
+- The system log's access mode, and in the restricted mode whether the collector is serving the ingest socket (`runtime_log_access`)
 
 The runtime log itself can be missing before the first event is written. In that case, doctor reports a warning instead of a hard failure.
+
+### `runtime_log_access`
+
+System mode only. Reports whether the system log is shared or [restricted](/cli/endpoint-install#restricted-log-access), and in the restricted mode whether everything it depends on is in place.
+
+| Evidence | Status | Meaning |
+|---|---|---|
+| `log_access_shared` | ok | Hooks append to the log directly; any local account can modify or read it |
+| `log_access_restricted` | ok | Only the collector writes the log; root and the `beacon-log` group read it |
+| `ingest_socket_missing` | fail | The collector is not serving `/var/run/beacon-agent/ingest.sock`, so hooks are spooling their events instead of recording them. Start or repair the collector |
+| `ingest_socket_unresponsive` | fail | The socket is there but nothing answers on it, usually because the collector was killed and left it behind. Doctor sends an empty batch rather than only checking the file. Restart the collector |
+| `ingest_log_mismatch` | fail | The collector behind the socket writes a different runtime log from the one in `config.json`, so hooks are spooling their events |
+| `ingest_socket_untrusted` | fail | Something is at the socket path that root does not own, so hooks will not send to it |
+| `log_access_marker_missing` | fail | `config.json` says restricted but the log is not marked, so the collector would widen it again. Run `sudo beacon endpoint repair --system` |
+| `log_access_mismatch` | warn | The log is marked restricted but `config.json` says shared, so hooks cannot append |
+| `ingest_spool_pending` | warn | Events from the account running doctor are waiting in its spool; they go to the collector with its next event |
+
+In the restricted mode, `runtime_log_permissions` checks that the log and its directory are closed to other accounts instead of checking that hooks can append. On Windows it reads the ACL of the log directory and of everything directly in it, and reports `restricted_acl` when only SYSTEM, Administrators and the `beacon-log` group (read only) can reach them, or `restricted_log_too_open` naming each grant to anyone else. Run without `sudo` (or, on Windows, unelevated), doctor cannot open a restricted log, and says so rather than reporting a failure. On Windows the suggested repair is `beacon endpoint repair --system` from an elevated shell.
 
 ### `console_user_configured`
 
@@ -47,6 +67,26 @@ console_user_configured: fail target=alice (alice has no agent runtime pointed a
 Everything else can be green when this fails. The collector is running, the service is loaded, and the harness check passes, because `doctor --system` runs as root and sees the settings the install wrote for root. The person whose sessions matter is the one with nothing.
 
 If no logged-in user can be identified at all, this reports a warning rather than a failure: an unattended host legitimately has nobody to configure, and that is not something an operator can act on.
+
+### `dsh_hook_bridge`
+
+This check runs only when DeepSeek Harness is detected and Beacon's hooks for it are installed. `dsh` does not ship the Claude Code hook bridge the hooks run through, and a mount it cannot load is skipped at boot with a warning, so an install can be complete on disk and record nothing. The check reports what Beacon found about the bridge:
+
+```
+dsh_hook_bridge: warn target=deepseek_harness (DeepSeek Harness hooks are installed but dsh cannot
+  load them: hook bridge cannot be loaded by dsh 0.2.2: dsh is 0.2.2 but
+  @deepseek-ai/dsh-hooks-claude-code is 0.2.1-rc.2 and @deepseek-ai/dsh-hook-protocol is 0.2.1-rc.2; ...)
+  action="run `dsh plugin --profile <profile> add @deepseek-ai/dsh-hooks-claude-code@0.2.2 @deepseek-ai/dsh-hook-protocol@0.2.2` (Beacon does not install packages), then restart dsh; ..."
+```
+
+| Evidence | Status | Meaning |
+|----------|--------|---------|
+| `dsh_hook_bridge_loads` | ok | A bridge and protocol matching `dsh` load, from a profile, the installation, or a path mount |
+| `dsh_hook_bridge_partial` | warn | Some profiles have no bridge and boot without hooks; they are named |
+| `dsh_hook_bridge_unavailable` | warn | Nothing loads a matching bridge, most often after a `dsh` upgrade (both versions are named), or a bridge mounted by path whose `dsh` peers do not resolve from where it sits |
+| `dsh_version_unknown` | warn | A bridge resolves, but `dsh` is not on `PATH`, so its version cannot be compared |
+
+It is a warning, not a failure: installing packages into a `dsh` profile is the operator's step, and Beacon does not take it. `--fix` lists the check as a manual skip. See [Installing the hook bridge](/runtimes/deepseek-harness#installing-the-hook-bridge).
 
 ### `dsh_hook_capture`
 

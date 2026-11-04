@@ -57,9 +57,8 @@ func TestSystemEndpointBackfillNamesTheSyncForAStoreTooLargeToCopy(t *testing.T)
 	if !os.IsNotExist(bigErr) {
 		t.Fatalf("an oversized store was opened: %v", bigErr)
 	}
-	want := "  Cursor: " + big + " is too large for a system backfill to copy; run `beacon endpoint cursor sync` as the console user to read it."
-	if !strings.Contains(out.String(), want) {
-		t.Fatalf("report does not name the sync command:\n%s", out.String())
+	if !strings.Contains(out.String(), big) || !strings.Contains(out.String(), "`beacon endpoint cursor sync`") {
+		t.Fatalf("report does not name the oversized store and its sync command:\n%s", out.String())
 	}
 	if strings.Contains(out.String(), "retry with `beacon endpoint cursor sync`") {
 		t.Fatalf("report also lists the oversized store as a failure:\n%s", out.String())

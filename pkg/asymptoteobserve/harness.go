@@ -46,12 +46,11 @@ func NormalizeHarnessName(name string) string {
 		return "openclaw_gateway"
 	case strings.Contains(lower, "antigravity") || strings.Contains(lower, "anti-gravity"):
 		return "antigravity_cli"
-	// Codex Desktop runs the Codex app-server, which exports OTLP with
-	// service.name=codex-app-server. Keep it separate from the terminal Codex CLI so dashboards
-	// and SIEM queries do not merge two local surfaces under one harness.name.
-	case lower == "codex_desktop" || lower == "codex-desktop" || lower == "codex desktop" ||
-		lower == "codex_app_server" || lower == "codex-app-server" || lower == "codex app server" ||
-		lower == "codex_appserver" || lower == "codex-appserver" || lower == "codex appserver":
+	// codex-app-server is not a Desktop name. The desktop app and, since about CLI 0.158, the terminal
+	// CLI both run Codex's app-server and export OTLP under that one service name, so it falls
+	// through to codex_cli here. What tells them apart is the `originator` Codex reports for each
+	// conversation; CodexSurface maps it.
+	case lower == "codex_desktop" || lower == "codex-desktop" || lower == "codex desktop":
 		return "codex_desktop"
 	case strings.Contains(lower, "codex"):
 		return "codex_cli"
@@ -392,6 +391,25 @@ func NormalizeHarnessName(name string) string {
 		lower == "kimi_code_acp" || lower == "kimi-code-acp" ||
 		lower == "moonshot_kimi_code" || lower == "moonshot-kimi-code":
 		return "kimi_code"
+	// Harness² (google-research/harness2) is a framework that drives other agents rather than
+	// being one: it refines an OpenCode or Codex executor's harness by running that executor over
+	// benchmark tasks, many times per task. Beacon reads the trajectories it records under its runs
+	// directory and files them under this one name, with the executor that produced each one kept
+	// beside it, because the question a reader of these sessions asks first is "which of these
+	// came from an experiment" rather than "which agent binary ran".
+	//
+	// Equality against a closed set rather than Contains(lower, "harness"), and the reason is a
+	// different product. Harness (harness.io) is a CI/CD platform with its own `harness` CLI and
+	// delegate, and "harness" is also what half the field calls the code around a model -- this
+	// function's own name uses the word that way. A substring rule would file any of those under
+	// this framework. Bare "harness" is therefore deliberately NOT in the set and falls to the
+	// passthrough case, as a visible anomaly rather than a silent misattribution. The superscript
+	// spelling is the project's own name for itself; "harness^2" is how it is typed without one.
+	case lower == "harness2" || lower == "harness²" || lower == "harness^2" || lower == "harness_2" ||
+		lower == "harness-2" || lower == "harness 2" || lower == "harness2_cli" || lower == "harness2-cli" ||
+		lower == "google-research/harness2" || lower == "google_research/harness2" ||
+		lower == "google_harness2" || lower == "google-harness2":
+		return "harness2"
 	case name != "":
 		// An unrecognized runtime keeps its own name rather than being coerced or dropped. A new
 		// harness should show up in the log as itself, not as "unknown".
@@ -399,4 +417,30 @@ func NormalizeHarnessName(name string) string {
 	default:
 		return ""
 	}
+}
+
+// CodexSurface is the harness a Codex originator names. Every Codex client (the terminal CLI,
+// `codex exec`, the IDE extension, the desktop app) runs on Codex's app-server and reports its
+// client name as `originator`: on OTLP records sanitized to a metric tag ("codex-tui",
+// "codex_exec", "Codex_Desktop"), and verbatim in a rollout's session_meta ("Codex Desktop"). The
+// live collector and `codex sync` both name a conversation from it, so one conversation gets one
+// name on both paths. Only the desktop app is codex_desktop.
+func CodexSurface(originator string) string {
+	lower := strings.ToLower(strings.TrimSpace(originator))
+	switch {
+	case strings.Contains(lower, "desktop"):
+		return "codex_desktop"
+	// The IDE extension is the CLI's agent in an editor panel, with no harness of its own.
+	case lower == "codex_vscode":
+		return "codex_cli"
+	default:
+		return "codex_cli"
+	}
+}
+
+// IsCodexAppServer reports whether a service name is Codex's app-server, the one the CLI and the
+// desktop app share and that therefore needs an originator to place.
+func IsCodexAppServer(serviceName string) bool {
+	normalized := strings.NewReplacer("-", "", "_", "", " ", "").Replace(strings.ToLower(strings.TrimSpace(serviceName)))
+	return normalized == "codexappserver"
 }

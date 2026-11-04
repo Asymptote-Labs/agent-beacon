@@ -218,19 +218,32 @@ func (r *Rule) Validate() error {
 }
 
 // validateExpressions compiles every CEL match in the rule, surfacing unknown-field and
-// non-bool errors at load time.
+// non-bool errors at load time, and requires the spec version of any field the rule uses that
+// an earlier version lacks.
 func (r *Rule) validateExpressions() error {
 	if r.Match != "" {
-		if _, err := CompileMatch(r.Match); err != nil {
+		if err := r.validateExpression(r.Match); err != nil {
 			return fmt.Errorf("match: %w", err)
 		}
 	}
 	if r.Correlation != nil {
 		for i, step := range r.Correlation.Steps {
-			if _, err := CompileMatch(step.Match); err != nil {
+			if err := r.validateExpression(step.Match); err != nil {
 				return fmt.Errorf("correlation.steps[%d] (%s): %w", i, step.ID, err)
 			}
 		}
+	}
+	return nil
+}
+
+func (r *Rule) validateExpression(expr string) error {
+	_, ast, err := compileMatch(expr)
+	if err != nil {
+		return err
+	}
+	// Already known to be parseable and supported (Validate checked it first).
+	if v, _ := parseSpec(r.Spec); specV1_2.newerThan(v) && selectsField(ast, "parsed_commands") {
+		return fmt.Errorf("e.%s requires spec: threat-rules/v1.2 or later (engines before v1.2 reject the field)", ParsedCommandsPath)
 	}
 	return nil
 }

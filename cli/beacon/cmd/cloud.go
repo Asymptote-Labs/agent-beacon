@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -54,10 +55,11 @@ var cloudClaudeWebPrintHooksCmd = &cobra.Command{
 		if strings.TrimSpace(cloudOpts.binaryPath) == "" {
 			return fmt.Errorf("--binary-path is required")
 		}
-		if strings.TrimSpace(cloudOpts.logPath) == "" {
-			cloudOpts.logPath = "/tmp/beacon/runtime.jsonl"
+		logPath, err := cloudLogPath(cloudOpts.logPath)
+		if err != nil {
+			return err
 		}
-		fmt.Print(renderClaudeWebHooks(cloudOpts.binaryPath, cloudOpts.logPath))
+		fmt.Print(renderClaudeWebHooks(cloudOpts.binaryPath, logPath))
 		return nil
 	},
 }
@@ -83,9 +85,13 @@ var cloudCursorPrintHooksCmd = &cobra.Command{
 		if strings.TrimSpace(cloudOpts.binaryPath) == "" {
 			return fmt.Errorf("--binary-path is required")
 		}
+		logPath, err := cloudLogPath(cloudOpts.logPath)
+		if err != nil {
+			return err
+		}
 		rendered, err := endpointhooks.RenderCursorCloudHooks(endpointhooks.CursorCloudOptions{
 			BinaryPath: cloudOpts.binaryPath,
-			LogPath:    defaultCloudLogPath(cloudOpts.logPath),
+			LogPath:    logPath,
 			SafeHooks:  cloudOpts.safeHooks,
 		})
 		if err != nil {
@@ -172,11 +178,20 @@ func init() {
 	cloudS3SetupCmd.Flags().BoolVar(&cloudOpts.printEnv, "print-env", false, "Print Claude web environment variables after setup")
 }
 
-func defaultCloudLogPath(path string) string {
-	if strings.TrimSpace(path) == "" {
-		return "/tmp/beacon/runtime.jsonl"
+const cloudSandboxDir = "/tmp/beacon"
+
+// cloudLogPath keeps the hook log where the cloud shuttle reads it: the shuttle uploads only files
+// under cloudSandboxDir, so a log anywhere else would never be shipped.
+func cloudLogPath(p string) (string, error) {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return cloudSandboxDir + "/runtime.jsonl", nil
 	}
-	return path
+	clean := path.Clean(p)
+	if !strings.HasPrefix(clean, cloudSandboxDir+"/") {
+		return "", fmt.Errorf("--log-path %s must be under %s, the only directory the cloud shuttle uploads from", p, cloudSandboxDir)
+	}
+	return clean, nil
 }
 
 func renderClaudeWebHooks(binaryPath, logPath string) string {

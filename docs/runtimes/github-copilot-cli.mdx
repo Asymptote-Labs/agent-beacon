@@ -38,7 +38,7 @@ Beacon reports Copilot CLI telemetry as configured only when `COPILOT_OTEL_ENABL
 
 `beacon endpoint install` prepares the collector, endpoint config, and runtime log paths. Copilot CLI telemetry is configured outside Beacon through MDM, shell profile management, or another customer-owned launch policy.
 
-Do not add Copilot CLI to the `--harness` list. If `copilot`, `copilot_cli`, or `github_copilot` is passed to `beacon endpoint install --harness` or `beacon endpoint repair --harness`, Beacon reports that Copilot CLI telemetry is MDM-managed instead of writing Copilot configuration directly.
+Do not add Copilot CLI to the `--harness` list. If `copilot`, `copilot_cli`, or `github_copilot` is passed to `beacon endpoint install --harness` or `beacon endpoint repair --harness`, Beacon rejects it as an unsupported harness and writes no Copilot configuration.
 
 Configure Copilot CLI's launch environment to export to the local OTLP HTTP receiver:
 

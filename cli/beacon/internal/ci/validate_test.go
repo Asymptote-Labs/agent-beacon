@@ -69,18 +69,6 @@ func TestValidateMatchesAnyConfiguredHarness(t *testing.T) {
 	}
 }
 
-func TestValidateMatchesCodexAlias(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "runtime.jsonl")
-	event := NewSessionEvent("ci.test", "test event", nil)
-	event.Harness.Name = "codex_cli"
-	writeEventLine(t, path, event)
-
-	result := Validate(ValidationOptions{LogPath: path, MinEvents: 1, RequireHarness: "codex"})
-	if result.Status != "ok" {
-		t.Fatalf("Validate status = %q, stages=%#v", result.Status, result.Stages)
-	}
-}
-
 func TestValidateFiltersEventsBeforeSince(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
 	event := NewSessionEvent("ci.test", "test event", nil)

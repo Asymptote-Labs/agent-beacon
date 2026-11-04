@@ -21,6 +21,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/hermessession"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 const (
@@ -342,11 +343,13 @@ func copilotCandidates(home string) []candidate {
 	return []candidate{{runtime: "copilot_cli", path: shellProfilePath(home), scope: ScopeUser, format: formatMetadataOnly, kind: KindProfile}}
 }
 
+// opencodeCandidates resolves the user plugin through XDG_CONFIG_HOME, as OpenCode does.
 func opencodeCandidates(home, wd string) []candidate {
-	return []candidate{
-		{runtime: "opencode", path: filepath.Join(home, ".config", "opencode", "plugins", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin},
-		{runtime: "opencode", path: filepath.Join(wd, ".opencode", "plugins", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin},
+	items := []candidate{}
+	if dir, err := hooks.OpenCodeConfigDir(home); err == nil {
+		items = append(items, candidate{runtime: "opencode", path: filepath.Join(dir, "plugins", "beacon.ts"), scope: ScopeUser, format: formatMetadataOnly, kind: KindPlugin})
 	}
+	return append(items, candidate{runtime: "opencode", path: filepath.Join(wd, ".opencode", "plugins", "beacon.ts"), scope: ScopeProject, format: formatMetadataOnly, kind: KindPlugin})
 }
 
 // clineCandidates resolves the user plugin through CLINE_DIR, as Cline does. Project scope is
@@ -523,11 +526,14 @@ func devinCandidates(home, wd string) []candidate {
 // native config file that Beacon merges into rather than a file Beacon owns. That is why it is
 // classified KindHookConfig and detected by the hook command it contains rather than by a
 // Beacon-managed marker: there is no marker to write into a file the user also edits.
+//
+// The user file follows QWEN_HOME, as Qwen Code does, through the same resolver the installer uses.
 func qwenCandidates(home, wd string) []candidate {
-	return []candidate{
-		{runtime: "qwen_code", path: filepath.Join(home, ".qwen", "settings.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
-		{runtime: "qwen_code", path: filepath.Join(wd, ".qwen", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig},
+	items := []candidate{}
+	if path, err := hooks.QwenSettingsPathForHome(hooks.LevelUser, home); err == nil {
+		items = append(items, candidate{runtime: "qwen_code", path: path, scope: ScopeUser, format: formatJSON, kind: KindHookConfig})
 	}
+	return append(items, candidate{runtime: "qwen_code", path: filepath.Join(wd, ".qwen", "settings.json"), scope: ScopeProject, format: formatJSON, kind: KindHookConfig})
 }
 
 // Muse Code is two files: the managed hooks file Beacon owns outright, and Muse's own settings.json,
@@ -604,12 +610,27 @@ func kiroCandidates(home, wd string) []candidate {
 // The patch file is listed as YAML and the hooks file as JSON, which is what they are -- and the
 // patch file is also the user's own, so the inventory may well find rows in it that have nothing to
 // do with Beacon. Detection keys on Beacon's mount, not on the file existing.
+//
+// Each profile's own patch layer is listed too, because that is where a declarative setup (a Nix
+// store path, say) mounts the bridge at Beacon's hooks file instead of Beacon's row in the home
+// layer. Without it, an install that works would look like a half-install here.
 func dshCandidates(home string) []candidate {
 	dir := dshUserDir(home)
-	return []candidate{
+	items := []candidate{
 		{runtime: "deepseek_harness", path: filepath.Join(dir, "beacon-endpoint-hooks.json"), scope: ScopeUser, format: formatJSON, kind: KindHookConfig},
 		{runtime: "deepseek_harness", path: filepath.Join(dir, "cordis.patch.yml"), scope: ScopeUser, format: formatYAML, kind: KindHookConfig},
 	}
+	entries, _ := readDirPath(filepath.Join(dir, "profiles"))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		layer := filepath.Join(dir, "profiles", entry.Name(), "cordis.patch.yml")
+		if _, err := statPath(layer); err == nil {
+			items = append(items, candidate{runtime: "deepseek_harness", path: layer, scope: ScopeUser, format: formatYAML, kind: KindHookConfig})
+		}
+	}
+	return items
 }
 
 // kimiCandidates covers the one file a Kimi Code install touches.
@@ -971,6 +992,9 @@ func dedupeServers(servers []MCPServer) []MCPServer {
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Runtime == out[j].Runtime {
 			if out[i].SourcePathHash == out[j].SourcePathHash {
+				if out[i].ServerNameHash == out[j].ServerNameHash {
+					return out[i].DefinitionHash < out[j].DefinitionHash
+				}
 				return out[i].ServerNameHash < out[j].ServerNameHash
 			}
 			return out[i].SourcePathHash < out[j].SourcePathHash
@@ -999,7 +1023,7 @@ func valuesForEnvKeys(keys []string, redaction string) []string {
 }
 
 func safeEnvKey(key string) bool {
-	return !containsSecretMarker(key)
+	return !asymptoteobserve.IsSecretKeyName(key)
 }
 
 func mapKeys(raw interface{}) []string {
@@ -1037,6 +1061,10 @@ func beaconManaged(item candidate, data []byte) bool {
 	switch item.runtime {
 	case "claude_code", "cursor", "antigravity_cli", "vscode", "factory", "hermes", "devin-cli", "devin-desktop":
 		if strings.Contains(text, "BEACON_ENDPOINT_MODE=1") {
+			return true
+		}
+		// Hooks written since the settings moved to --log/--config flags carry no prefix.
+		if managed, _ := hooks.ConfigHasEndpointHook(data, ""); managed {
 			return true
 		}
 	case "opencode":
@@ -1105,9 +1133,13 @@ func beaconManaged(item candidate, data []byte) bool {
 	// the plugin specifier the loader resolves, so it cannot be edited to something else and still
 	// work. A user who mounts the bridge themselves would match too -- which is correct, since
 	// that is a live route from this runtime into a hooks file.
+	//
+	// A patch layer that mounts the bridge by path (a Nix store path names no package) is
+	// recognized by the hooks file it points the bridge at, which is Beacon's.
 	case "deepseek_harness":
 		return strings.Contains(text, "--platform dsh") || strings.Contains(text, "--platform=dsh") ||
-			strings.Contains(text, "@deepseek-ai/dsh-hooks-claude-code")
+			strings.Contains(text, "@deepseek-ai/dsh-hooks-claude-code") ||
+			strings.Contains(text, "beacon-endpoint-hooks.json")
 	// Matched on the hook command rather than on the comment Beacon writes above its block, and
 	// here that is not a preference between two working options: Kimi Code's legacy migration
 	// from `kimi-cli` rewrites this file by serializing the merged config, which keeps the
@@ -1191,7 +1223,7 @@ func localEndpointText(text string) bool {
 // command name, a timestamp, or a whole config file's bytes. A secret value must not be hashed
 // here -- a digest over one short, low-entropy secret is a lookup table away from the secret
 // itself -- so route anything that may hold a secret through redactStructured first, the way
-// serverFromDefinition does. Secret-looking keys are stripped by containsSecretMarker.
+// serverFromDefinition does. Secret-looking keys are stripped by asymptoteobserve.IsSecretKeyName.
 
 func hashString(value string) string {
 	if value == "" {

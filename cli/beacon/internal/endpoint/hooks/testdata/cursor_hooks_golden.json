@@ -1,0 +1,78 @@
+{
+  "hooks": {
+    "afterAgentResponse": [
+      {
+        "command": "'/opt/beacon hooks/beacon-hooks' --platform cursor --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' agent-response"
+      }
+    ],
+    "afterAgentThought": [
+      {
+        "command": "'/opt/beacon hooks/beacon-hooks' --platform cursor --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' agent-thought"
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": "echo edited"
+      },
+      {
+        "command": "'/opt/beacon hooks/beacon-hooks' --platform cursor --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' post-tool"
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "type": "prompt",
+        "prompt": "Is this command safe to run?",
+        "model": "fast"
+      },
+      {
+        "command": "BEACON_ENDPOINT_MODE=1 BEACON_ENDPOINT_LOG=/tmp/old.jsonl /old/beacon-hooks --platform cursor pre-tool"
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "command": "/usr/local/bin/prompt-guard",
+        "timeout": 5,
+        "failClosed": true
+      },
+      {
+        "command": "'/opt/beacon hooks/beacon-hooks' --platform cursor --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' prompt-submit",
+        "timeout": 30
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "'/opt/beacon hooks/beacon-hooks' --platform cursor --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' post-tool"
+      }
+    ],
+    "postToolUseFailure": [
+      {
+        "command": "'/opt/beacon hooks/beacon-hooks' --platform cursor --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' post-tool"
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "'/opt/beacon hooks/beacon-hooks' --platform cursor --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' pre-tool",
+        "matcher": "Write|Edit|MultiEdit|Shell|MCP"
+      }
+    ],
+    "sessionEnd": [
+      {
+        "command": "'/opt/beacon hooks/beacon-hooks' --platform cursor --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' session-end"
+      }
+    ],
+    "sessionStart": [
+      {
+        "command": "'/opt/beacon hooks/beacon-hooks' --platform cursor --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' session-start"
+      }
+    ],
+    "stop": [
+      {
+        "command": "'/opt/beacon hooks/beacon-hooks' --platform cursor --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' stop"
+      }
+    ]
+  },
+  "note": {
+    "owner": "user"
+  },
+  "version": 1
+}

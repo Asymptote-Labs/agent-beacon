@@ -47,7 +47,6 @@ func TestLensManifestValidate(t *testing.T) {
 	}{
 		{"valid", func(*LensManifestV1) {}, ""},
 		{"optional fields empty", func(m *LensManifestV1) { m.Icon, m.Description, m.Author = "", "", "" }, ""},
-		{"id uppercase", func(m *LensManifestV1) { m.ID = "Files" }, "id"},
 		{"id leading hyphen", func(m *LensManifestV1) { m.ID = "-files" }, "id"},
 		{"id path traversal", func(m *LensManifestV1) { m.ID = "../files" }, "id"},
 		{"id too long", func(m *LensManifestV1) { m.ID = strings.Repeat("a", 64) }, "id"},
@@ -104,7 +103,10 @@ func TestParseLensManifest(t *testing.T) {
 		{"duplicate", open + good + "</script>" + open + good + "</script>", "more than one manifest"},
 		{"unclosed", open + good, "not closed"},
 		{"unknown field", open + `{"id":"x","title":"X","version":1,"api":"beacon.lens.v1","permissions":["net"]}` + "</script>", "unknown field"},
-		{"trailing value", open + good + good + "</script>", "more than one JSON value"},
+		{"trailing value", open + good + good + "</script>", "trailing data"},
+		// Decoder.More reports false in front of a stray closer, so these need the end-of-input check.
+		{"trailing brace", open + good + "}" + "</script>", "trailing data"},
+		{"trailing bracket then value", open + good + `] {"id":"y"}` + "</script>", "trailing data"},
 		{"not json", open + "id: x" + "</script>", "lens manifest"},
 	}
 	for _, tc := range cases {

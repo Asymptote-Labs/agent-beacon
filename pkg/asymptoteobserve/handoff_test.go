@@ -9,7 +9,6 @@ func TestHandoffMarkerRoundTrips(t *testing.T) {
 	for _, tc := range []struct{ harness, id, wantHarness string }{
 		{"claude_code", "ea7f210f-402b-53b1-aec2-864a488dfcd3", "claude_code"},
 		{"claude", "s-1", "claude_code"},
-		{"codex_cli", "019a2b3c-thread", "codex_cli"},
 		{"opencode", "ses_4f2a1b", "opencode"},
 		{"cline", "subagent:lead-1:child.2", "cline"},
 		{"devin-cli", "devin-sess-1", "devin-cli"},

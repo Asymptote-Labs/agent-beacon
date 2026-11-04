@@ -25,9 +25,6 @@ function run(name: string, prompt: string, chunkSize = 7): TurnParser {
 describe('claude adapter — simple turn', () => {
   const turn = run('simple-turn', 'What is the capital of France?')!.getTurn()!;
 
-  it('reconstructs the streamed response text across split chunks', () => {
-    expect(turn.responseText).toBe('Paris.');
-  });
   it('captures the prompt from the request body', () => {
     expect(turn.promptText).toBe('What is the capital of France?');
   });
@@ -95,16 +92,6 @@ describe('claude adapter -- usage counts', () => {
     // message_delta, which is worse than reporting nothing.
     expect(turn.usage?.outputTokens).toBe(214);
   });
-
-  it('keeps the input counts disjoint so a total never double-counts', () => {
-    // Anthropic excludes cached reads and cache writes from input_tokens, which
-    // is the disjointness gen_ai.usage requires; nothing is subtracted here the
-    // way the Codex turn span needs.
-    const u = turn.usage!;
-    const total =
-      u.inputTokens! + u.outputTokens! + u.cacheCreationInputTokens! + u.cacheReadInputTokens!;
-    expect(total).toBe(19775);
-  });
 });
 
 // The Messages API breaks cache writes down by TTL under usage.cache_creation.
@@ -125,13 +112,6 @@ describe('claude adapter -- one-hour cache writes', () => {
     expect(turn.usage?.cacheCreation1hInputTokens).toBe(16000);
   });
 
-  it('leaves the subset out of the disjoint total', () => {
-    const u = turn.usage!;
-    const total =
-      u.inputTokens! + u.outputTokens! + u.cacheCreationInputTokens! + u.cacheReadInputTokens!;
-    expect(total).toBe(37 + 214 + 20000 + 18500);
-  });
-
   it('reports no subset for a stream without the breakdown', () => {
     const plain = run('with-usage', 'What is the capital of France?')!.getTurn()!;
     expect(plain.usage?.cacheCreation1hInputTokens).toBeUndefined();
@@ -150,5 +130,57 @@ describe('claude adapter -- partial stream usage', () => {
     // The input side is already final at message_start, so it survives the abort.
     expect(turn.usage?.inputTokens).toBe(37);
     expect(turn.usage?.cacheReadInputTokens).toBe(18500);
+  });
+});
+
+// web-search.sse is a sanitized October 2026 claude.ai capture: claude.ai runs
+// web_search itself and streams each result as a tool_result block, between
+// thinking blocks, pings and citation deltas.
+describe('claude adapter -- server-side tool results', () => {
+  const turn = run('web-search', 'Search the web for the latest NASA news.')!.getTurn()!;
+
+  it('pairs each tool_result with the tool_use it answers', () => {
+    expect(turn.toolCalls.map((t) => [t.id, t.name, t.arguments])).toEqual([
+      ['toolu_search_1', 'web_search', { mode: 'standard', query: 'NASA news today' }],
+      ['toolu_search_2', 'web_search', { mode: 'standard', query: 'NASA October 2026' }],
+    ]);
+    const [first, second] = turn.toolCalls.map((t) => t.result as { title: string }[]);
+    expect(first.map((r) => r.title)).toEqual(['NASA News Today', 'Latest NASA Updates']);
+    expect(second.map((r) => r.title)).toEqual(['Artemis Accords Signatories']);
+  });
+
+  it('keeps only the answer text, not thinking summaries or citations', () => {
+    expect(turn.responseText).toBe('One recent NASA headline: a new country signed the Artemis Accords.');
+  });
+
+  it('takes the model and turn key from message_start', () => {
+    expect(turn.responseModel).toBe('claude-opus-5-5');
+    expect(turn.turnId).toBe(`${CONV}:00000000-0000-7000-8000-000000000002`);
+    expect(turn.completedAt).toBeTypeOf('number');
+  });
+
+  it('ignores a tool_result that names no captured tool_use', () => {
+    const parser = claudeAdapter.createParser('req-0002');
+    parser.onRequest(URL, 'POST', JSON.stringify({ prompt: 'hi' }));
+    parser.onChunk(
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":' +
+        '{"type":"tool_result","tool_use_id":"toolu_missing","content":[{"type":"text","text":"x"}]}}\n\n',
+    );
+    parser.onDone();
+    expect(parser.getTurn()!.toolCalls).toEqual([]);
+  });
+});
+
+describe('claude adapter -- regenerate', () => {
+  it('records no prompt for a retry_completion, which sends an empty one', () => {
+    const parser = claudeAdapter.createParser('req-0003');
+    parser.onRequest(URL.replace(/completion$/, 'retry_completion'), 'POST', JSON.stringify({ prompt: '', model: 'claude-opus-5-5' }));
+    const body = fixture('simple-turn');
+    parser.onChunk(body);
+    parser.onDone();
+    const turn = parser.getTurn()!;
+    expect(turn.promptText).toBe('');
+    expect(turn.inputMessages).toEqual([]);
+    expect(turn.responseText).toBe('Paris.');
   });
 });

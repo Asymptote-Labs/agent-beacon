@@ -1,5 +1,5 @@
 id: ssh-authorized-keys-modified
-version: 1
+version: 2
 title: SSH authorized_keys or sshd_config modified
 description: >
   The agent modified an SSH trust file: a user authorized_keys
@@ -22,7 +22,7 @@ taxonomy:
   mitre_atlas: AML.T0011
 
 match: >
-  e.event.action == "file.modified" && (
+  e.event.action in ["file.modified", "file.created", "file.edited"] && (
     e.file.path.matches("(?i)(^|/)\\.ssh/authorized_keys(2)?$") ||
     e.file.path.matches("(?i)(^|/)\\.ssh/known_hosts(2)?$") ||
     e.file.path.matches("(?i)(^|/)etc/ssh/sshd_config$") ||
@@ -80,4 +80,10 @@ tests:
     events:
       - event: { action: file.modified }
         file: { path: "/home/u/.ssh/authorized_keys.bak" }
+        session: { id: s1 }
+  - name: modify_authorized_keys_created
+    verdict: match
+    events:
+      - event: { action: file.created }
+        file: { path: "/home/u/.ssh/authorized_keys" }
         session: { id: s1 }

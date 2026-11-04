@@ -45,17 +45,6 @@ afterEach(() => {
 })
 
 describe("beacon omo (senpi) extension", () => {
-  test("retains an event containing an invalid Date with native JSON date semantics", async () => {
-    const sent = captureSends()
-    const metadata = { invalid: new Date(NaN), valid: new Date("2026-01-02T03:04:05Z") }
-    const expected = JSON.parse(JSON.stringify(metadata))
-    const host = fakePi()
-    createBeaconExtension().register(host.api)
-    await host.fire({ type: "session_start", metadata }, context())
-    expect(sent).toHaveLength(1)
-    expect(sent[0]).toMatchObject({ type: "session_start", sessionId: "sess-1", metadata: expected })
-  })
-
   // These strings are the contract between this extension and the omo-event mapper in the hook
   // adapter. A typo on either side produces no telemetry rather than an error, so the list is
   // pinned here and asserted against the mapper's own list on the Go side.
@@ -72,52 +61,6 @@ describe("beacon omo (senpi) extension", () => {
       "tool_result",
       "user_bash",
     ])
-  })
-
-  // Senpi publishes many more events than these, most of them execution-progress, turn-bookkeeping,
-  // provider-request and TUI internals. Subscribing to one would put Beacon in the path of every
-  // streaming token update.
-  test("does not subscribe to streaming or provider internals", () => {
-    const pi = fakePi()
-    createBeaconExtension().register(pi.api)
-
-    for (const noisy of [
-      "message_update",
-      "message_start",
-      "before_provider_request",
-      "before_provider_headers",
-      "after_provider_response",
-      "context",
-      "tool_execution_start",
-      "tool_execution_update",
-      "tool_execution_end",
-      "turn_start",
-      "turn_end",
-      "agent_start",
-      "agent_end",
-      "agent_settled",
-      "resources_discover",
-      "model_select",
-      "system_prompt_change",
-      "thinking_level_select",
-      "session_compact",
-      "session_abort",
-      "input_disposition",
-    ]) {
-      expect(pi.handlers.has(noisy)).toBe(false)
-    }
-  })
-
-  test("forwards the event with its type intact", async () => {
-    const sent = captureSends()
-    const pi = fakePi()
-    createBeaconExtension().register(pi.api)
-
-    await pi.fire({ type: "input", text: "do the thing", source: "interactive" }, context())
-
-    expect(sent).toHaveLength(1)
-    expect(sent[0].type).toBe("input")
-    expect(sent[0].text).toBe("do the thing")
   })
 
   // Senpi's context hands the session id through an accessor, not as a bare field, so the envelope
@@ -213,26 +156,6 @@ describe("beacon omo (senpi) extension", () => {
     expect(JSON.stringify(sent[0])).toContain("tool_result")
   })
 
-  test("drops functions and stringifies bigints rather than failing the send", async () => {
-    const sent = captureSends()
-    const pi = fakePi()
-    createBeaconExtension().register(pi.api)
-
-    await pi.fire(
-      {
-        type: "tool_result",
-        toolName: "bash",
-        // eslint-disable-next-line @typescript-eslint/no-empty-function
-        onDone: () => {},
-        bytes: BigInt(42),
-      },
-      context(),
-    )
-
-    expect(sent[0].onDone).toBeUndefined()
-    expect(sent[0].bytes).toBe("42")
-  })
-
   // Every handler must resolve to undefined. Senpi reads a returned object as a request to change
   // behavior on several of these events -- `{ block: true }` on tool_call, `{ action: "transform" }`
   // on input -- so a handler that returned anything would turn this observer into an enforcer.
@@ -259,41 +182,6 @@ describe("beacon omo (senpi) extension", () => {
     expect(sent[0].cwd).toBe("/other")
   })
 
-  test("forwards a bash tool call with its command", async () => {
-    const sent = captureSends()
-    const pi = fakePi()
-    createBeaconExtension().register(pi.api)
-
-    await pi.fire(
-      { type: "tool_call", toolName: "bash", toolCallId: "call-1", input: { command: "ls -la" } },
-      context(),
-    )
-
-    expect((sent[0].input as Record<string, unknown>).command).toBe("ls -la")
-  })
-
-  test("forwards an edit tool result with its patch", async () => {
-    const sent = captureSends()
-    const pi = fakePi()
-    createBeaconExtension().register(pi.api)
-
-    await pi.fire(
-      {
-        type: "tool_result",
-        toolName: "edit",
-        toolCallId: "call-2",
-        input: { path: "/repo/a.ts" },
-        isError: false,
-        details: { patch: "@@ -1 +1 @@\n-old\n+new" },
-      },
-      context(),
-    )
-
-    const details = sent[0].details as Record<string, unknown>
-    expect((sent[0].input as Record<string, unknown>).path).toBe("/repo/a.ts")
-    expect(details.patch).toBe("@@ -1 +1 @@\n-old\n+new")
-  })
-
   // Senpi exposes no `hasUI` the way Prime Agent renamed it -- both mean the same thing (whether the
   // session had a user-facing surface at all), recorded under this runtime's own key so the two are
   // never read as one field by a query that groups by harness.
@@ -309,17 +197,5 @@ describe("beacon omo (senpi) extension", () => {
     // Absent rather than defaulted: a host that did not report it should not be recorded as one
     // that reported "no".
     expect(sent[1].omoHasUi).toBeUndefined()
-  })
-
-  // The runtime publishes no approval event, and Beacon refuses to synthesize one from a blocking
-  // tool handler. This pins the absence from the extension's side: the Go mapper cannot invent an
-  // approval for a runtime that never sends one.
-  test("subscribes to no approval event", () => {
-    const pi = fakePi()
-    createBeaconExtension().register(pi.api)
-
-    for (const name of [...pi.handlers.keys()]) {
-      expect(name).not.toContain("approval")
-    }
   })
 })

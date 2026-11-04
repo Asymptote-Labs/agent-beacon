@@ -271,7 +271,7 @@ func dedupeTarget(action string, event map[string]interface{}) string {
 			),
 		)
 	case "command.executed":
-		return canonicalTarget("command", nestedString(event, "command", "command"), nestedString(event, "tool", "command"))
+		return canonicalLiteralTarget("command", nestedString(event, "command", "command"), nestedString(event, "tool", "command"))
 	case "file.read", "file.modified":
 		// The path alone, deliberately. file.operation is the one part of a file
 		// event the two capture paths describe differently for the same action:
@@ -285,7 +285,7 @@ func dedupeTarget(action string, event map[string]interface{}) string {
 		// between two words for the same event -- so it discriminated nothing
 		// and disagreed often. The sandbox checker's mirror of this key has
 		// always used the path alone.
-		return canonicalTarget("file", nestedString(event, "file", "path"))
+		return canonicalLiteralTarget("file", nestedString(event, "file", "path"))
 	case "tool.completed":
 		return canonicalTarget("tool.completed", stringValue(event["model"]), stringValue(event["message"]))
 	case "tool.invoked", "tool.failed":
@@ -295,13 +295,37 @@ func dedupeTarget(action string, event map[string]interface{}) string {
 	}
 }
 
+// canonicalTarget builds a dedupe key from values that name an MCP server or
+// tool. Those arrive spelled differently from the two capture paths -- a Claude
+// Code tool name reaches the hook as "mcp__server__tool" and the collector
+// reports the server and tool separately -- so the prefix and "__" separator
+// are folded away to let one call match itself.
 func canonicalTarget(prefix string, values ...string) string {
+	return joinCanonicalTarget(prefix, values, true)
+}
+
+// canonicalLiteralTarget builds a dedupe key from free-form text: a shell
+// command line or a filesystem path. It folds case, because the two capture
+// paths can spell the same command or directory differently, but leaves the
+// text otherwise intact.
+//
+// The MCP alias rules canonicalTarget applies have no meaning here: "__" is an
+// ordinary character sequence in a command argument or a path segment, and
+// rewriting it to ":" makes the key lossy about input it was never meant to
+// interpret.
+func canonicalLiteralTarget(prefix string, values ...string) string {
+	return joinCanonicalTarget(prefix, values, false)
+}
+
+func joinCanonicalTarget(prefix string, values []string, aliasMCPNames bool) string {
 	var parts []string
 	for _, value := range values {
 		value = strings.ToLower(strings.TrimSpace(value))
-		value = strings.TrimPrefix(value, "mcp:")
-		value = strings.TrimPrefix(value, "mcp__")
-		value = strings.ReplaceAll(value, "__", ":")
+		if aliasMCPNames {
+			value = strings.TrimPrefix(value, "mcp:")
+			value = strings.TrimPrefix(value, "mcp__")
+			value = strings.ReplaceAll(value, "__", ":")
+		}
 		if value != "" && value != "<nil>" {
 			parts = append(parts, value)
 		}

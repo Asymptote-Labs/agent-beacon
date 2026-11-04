@@ -1178,10 +1178,12 @@ func probeUninstall(ctx context.Context, g guest, sc scenario.Scenario,
 	if label != "" && kind != "" && kind != "none" {
 		query := sh.ServiceQuery(kind, label)
 		if query != "" {
-			q, _ := g.Exec(ctx, query, opts)
+			q, err := g.Exec(ctx, query, opts)
 			art.Meta["uninstall_service_query"] = oneLine(q.Stdout + q.Stderr)
 			art.Meta["uninstall_service_query_rc"] = fmt.Sprintf("%d", q.ExitCode)
-			art.Meta["uninstall_service_gone"] = fmt.Sprintf("%v", sh.ServiceAbsent(kind, q.ExitCode, q.Stdout+q.Stderr))
+			if err == nil {
+				art.Meta["uninstall_service_gone"] = fmt.Sprintf("%v", sh.ServiceAbsent(kind, q.ExitCode, q.Stdout+q.Stderr))
+			}
 			logf("service %s after uninstall: gone=%s", label, art.Meta["uninstall_service_gone"])
 		}
 	} else if kind == "none" {
@@ -1193,13 +1195,15 @@ func probeUninstall(ctx context.Context, g guest, sc scenario.Scenario,
 	// Retention, asked of the filesystem. An absent path is reported as unknown rather than as
 	// retained: a check that could not look must not conclude the file survived.
 	if logPath != "" {
-		e, _ := g.Exec(ctx, sh.PathExists(logPath), opts)
-		art.Meta["uninstall_log_retained"] = fmt.Sprintf("%v", e.ExitCode == 0)
+		if e, err := g.Exec(ctx, sh.PathExists(logPath), opts); err == nil {
+			art.Meta["uninstall_log_retained"] = fmt.Sprintf("%v", e.ExitCode == 0)
+		}
 	}
 
 	// Beacon's own account of itself, recorded alongside the machine's. When the two disagree, that
 	// disagreement is the finding.
+	// Saved whole: the checker decodes it, and clipping hides service.running.
 	if s, err := g.Exec(ctx, "beacon endpoint status "+scope+" --json 2>&1", opts); err == nil {
-		art.Meta["uninstall_status"] = oneLine(s.Stdout)
+		art.Meta["uninstall_status"] = s.Stdout
 	}
 }

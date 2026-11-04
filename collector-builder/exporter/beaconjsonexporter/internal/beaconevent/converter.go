@@ -92,6 +92,9 @@ type Options struct {
 	// CaptureModelContext keeps what Beacon records from Claude Code's API bodies. Off, every body
 	// event is dropped; see takeClaudeAPIBody.
 	CaptureModelContext bool
+	// CodexSurfaces remembers which Codex surface (CLI or desktop app) each conversation runs in,
+	// for records that don't say (see codex_surface.go). Nil places each record on its own.
+	CodexSurfaces *CodexSurfaces
 }
 
 type Converter struct {
@@ -368,6 +371,7 @@ func (c Converter) eventFromLog(resourceAttrs map[string]interface{}, record plo
 	// Last, so it sees the action and category the normalizers settled on rather
 	// than the ones InferAction guessed.
 	c.PromoteRetainedContent(&event, attrs, body)
+	c.opts.CodexSurfaces.settle(&event, attrs)
 	return event, !isAPIBody || kept.webFetch.text != "", c.claudeMCPToolListings(attrs, record, kept.mcpTools)
 }
 
@@ -413,6 +417,7 @@ func (c Converter) EventFromSpan(resourceAttrs map[string]interface{}, span ptra
 	}
 	event.Raw = c.RawPayload(attrs, rawExtra)
 	c.PromoteRetainedContent(&event, attrs, span.Name())
+	c.opts.CodexSurfaces.settle(&event, attrs)
 	return event
 }
 
@@ -596,24 +601,19 @@ func NormalizeCodexToolResult(event *Event, attrs map[string]interface{}) {
 	event.Message = FirstNonEmpty(toolName, "Codex tool result")
 }
 
+// codexShellCommand is the command line of a Codex shell tool call, or "" for any other tool, so an
+// MCP tool that takes a `command` argument stays a tool call.
 func codexShellCommand(toolName, args string) string {
-	if strings.EqualFold(toolName, "shell") {
-		if cmd := codexArgumentCommand(args); cmd != "" {
-			return cmd
-		}
-		return args
-	}
-	return codexArgumentCommand(args)
-}
-
-func codexArgumentCommand(args string) string {
-	var payload struct {
-		Cmd string `json:"cmd"`
-	}
-	if err := json.Unmarshal([]byte(args), &payload); err != nil {
+	if !asymptoteobserve.IsShellCommandTool(toolName) {
 		return ""
 	}
-	return strings.TrimSpace(payload.Cmd)
+	if cmd := asymptoteobserve.ToolCommandLine(toolName, args); cmd != "" {
+		return cmd
+	}
+	if strings.EqualFold(toolName, "shell") {
+		return args
+	}
+	return ""
 }
 
 func isClaudeOTelLogHarness(name string) bool {
@@ -904,6 +904,7 @@ func (c Converter) EventFromMetric(resourceAttrs map[string]interface{}, metric 
 		"metric_description": metric.Description(),
 		"metric_unit":        metric.Unit(),
 	})
+	c.opts.CodexSurfaces.settle(&event, attrs)
 	return event
 }
 
@@ -1137,6 +1138,7 @@ func (c Converter) usageEventFromDataPoint(resourceAttrs map[string]interface{},
 		rawExtra[k] = v
 	}
 	event.Raw = c.RawPayload(attrs, rawExtra)
+	c.opts.CodexSurfaces.settle(&event, attrs)
 	return event
 }
 
@@ -1192,6 +1194,11 @@ func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 	event.Repository = FirstString(attrs, "vcs.repository.url", "repository", "repo.path", "workspace.repository")
 	event.Branch = FirstString(attrs, "vcs.branch.name", "git.branch", "branch")
 	event.UserAgent = UserAgentFromAttrs(attrs)
+	// A sender that cut a field to fit (the browser extension) says so on the record; promoted, so
+	// the flag survives metadata-only forwarding, which drops raw attributes.
+	if truncated, _ := BoolAttr(attrs, "beacon.field_truncated"); truncated {
+		event.Truncated = true
+	}
 	if id := FirstString(attrs, "gen_ai.conversation.id", "beacon.session.id", "copilot_chat.session_id", "copilot_chat.chat_session_id", "conversation.id", "conversation_id", "session.id"); id != "" || FirstString(attrs, "cwd", "working_directory", "workspace") != "" {
 		event.Session = &SessionInfo{
 			ID:               id,
@@ -1208,7 +1215,7 @@ func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 	path := FirstString(attrs, "file.path", "file_path", "code.filepath")
 	operation := FirstString(attrs, "file.operation", "operation")
 	if path == "" {
-		path = FilePathFromURI(FirstString(attrs, "mcp.resource.uri"))
+		path = asymptoteobserve.FilePathFromURI(FirstString(attrs, "mcp.resource.uri"))
 		if path != "" && operation == "" && event.Event.Action == "file.read" {
 			operation = "read"
 		}
@@ -2228,18 +2235,7 @@ func IsMeaningfulValue(value interface{}) bool {
 }
 
 func IsFileURI(value string) bool {
-	return FilePathFromURI(value) != ""
-}
-
-func FilePathFromURI(value string) string {
-	parsed, err := url.Parse(value)
-	if err != nil || parsed.Scheme != "file" {
-		return ""
-	}
-	if parsed.Host != "" && parsed.Host != "localhost" {
-		return "//" + parsed.Host + parsed.Path
-	}
-	return parsed.Path
+	return asymptoteobserve.FilePathFromURI(value) != ""
 }
 
 func HasPromptLikeContent(attrs map[string]interface{}) bool {

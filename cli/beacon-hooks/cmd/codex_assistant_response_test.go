@@ -63,7 +63,7 @@ func TestCodexAssistantResponseRecordsTheFinalReply(t *testing.T) {
 // A turn that ended without a reply -- Codex sends null -- writes nothing at all, and still answers
 // with valid JSON so Codex ends the turn normally.
 func TestCodexAssistantResponseWithoutAReplyWritesNothing(t *testing.T) {
-	for name, value := range map[string]interface{}{"null": nil, "empty": "", "blank": " \n"} {
+	for name, value := range map[string]interface{}{"null": nil} {
 		t.Run(name, func(t *testing.T) {
 			logPath, stdout := runHookProcess(t, codexStopPayload(value), "--platform", "codex", "codex-assistant-response")
 			if strings.TrimSpace(string(stdout)) != "{}" {

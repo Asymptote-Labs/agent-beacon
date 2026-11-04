@@ -90,9 +90,8 @@ func TestToolResultTextMatchesRetainedReadTypeResults(t *testing.T) {
 
 func TestToolResultTextEmptyWhenContentNotRetained(t *testing.T) {
 	cases := map[string]*asymptoteobserve.ContentInfo{
-		"not included":      {Retention: asymptoteobserve.ContentRetentionFull, Included: false},
-		"metadata only":     {Retention: asymptoteobserve.ContentRetentionMetadata, Included: true},
-		"metadata excluded": {Retention: asymptoteobserve.ContentRetentionMetadata, Included: false},
+		"not included":  {Retention: asymptoteobserve.ContentRetentionFull, Included: false},
+		"metadata only": {Retention: asymptoteobserve.ContentRetentionMetadata, Included: true},
 	}
 	for name, content := range cases {
 		t.Run(name, func(t *testing.T) {

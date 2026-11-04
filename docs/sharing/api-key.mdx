@@ -22,7 +22,7 @@ beacon share --cwd . --json
 
 No `beacon login` is needed. Prefer the environment variable to `--key`, which puts the key on the command line where process listings can see it.
 
-`beacon share` uses the first credential available: `--key`, then a `beacon login` sign-in carrying `traces:write`, then `BEACON_API_KEY`. On a machine that is also signed in, pass `--key` to use the key. The key is sent only in the request's `Authorization` header to beacon.sh, redirects are refused, and it is never printed. For a self-hosted Beacon service, set `BEACON_AUTH_URL` (or `--auth-url`) to that service.
+`beacon share` uses the first credential available: `--key`, then a `beacon login` sign-in carrying `traces:write`, then `BEACON_API_KEY`. On a machine that is also signed in, pass `--key` to use the key. The key is sent only in the request's `Authorization` header to beacon.sh's API (`api.beacon.sh`), redirects are refused, and it is never printed. For a self-hosted Beacon service, set `BEACON_AUTH_URL` (or `--auth-url`) to that service, and `BEACON_API_URL` too if its API is on another host.
 
 ## Run the share in the agent's job
 

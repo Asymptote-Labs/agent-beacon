@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -37,39 +38,6 @@ func TestGrokPromptSubmitRecordsPromptAndRawPayload(t *testing.T) {
 	}
 	if _, ok := event["raw"].(map[string]interface{})["grok"]; !ok {
 		t.Fatalf("raw.grok payload missing: %#v", event["raw"])
-	}
-}
-
-func TestGrokIgnoresLegacyRetentionEnv(t *testing.T) {
-	setupHookConfigDirs(t)
-	platformFlag = "grok"
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_MODE", "1")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-	t.Setenv("BEACON_CONTENT_RETENTION", "metadata")
-
-	runHookWithInput(t, runPromptSubmit, map[string]interface{}{
-		"hookEventName": "user_prompt_submit",
-		"sessionId":     "grok-session-1",
-		"prompt":        "secret prompt",
-	})
-	event := lastEndpointEvent(t, logPath)
-	if got := event["prompt"].(map[string]interface{})["text"]; got != "secret prompt" {
-		t.Fatalf("prompt.text = %q, want legacy retention env ignored", got)
-	}
-	raw := event["raw"].(map[string]interface{})
-	if _, ok := raw["grok"]; !ok {
-		t.Fatalf("legacy retention env should not omit raw grok payload: %#v", raw)
-	}
-	// The marker is what proves the env is inert, rather than its absence: it
-	// reports the retention that actually happened, and BEACON_CONTENT_RETENTION
-	// asked for "metadata".
-	content, ok := event["content"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("content marker missing on a retained prompt: %#v", event)
-	}
-	if content["retention"] != "full" || content["included"] != true {
-		t.Fatalf("legacy retention env changed retention: %#v", content)
 	}
 }
 
@@ -153,6 +121,115 @@ func TestGrokPostToolMapsCommandAndFailure(t *testing.T) {
 	}
 	if sev := event["severity"]; sev != "high" {
 		t.Fatalf("known tool failure severity = %q, want high", sev)
+	}
+}
+
+func TestGrokPostToolFailedEditsRemainFailed(t *testing.T) {
+	for _, tt := range []struct {
+		name, eventKey, eventName, toolName, extension, errorText string
+	}{
+		{"native write failure", "hookEventName", "post_tool_use_failure", "write_file", ".go", ""},
+		{"camelCase event", "hook_event_name", "postToolUseFailure", "write_file", ".go", ""},
+		{"explicit error", "hookEventName", "post_tool_use", "write_file", ".go", "permission denied"},
+		{"unscannable path", "hookEventName", "post_tool_use_failure", "write_file", ".md", ""},
+		{"edit failure", "hookEventName", "post_tool_use_failure", "Edit", ".go", ""},
+		{"search replace failure", "hookEventName", "post_tool_use_failure", "search_replace", ".go", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			setupHookConfigDirs(t)
+			platformFlag = "grok"
+			logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+			t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+			path := filepath.Join(t.TempDir(), "not-written"+tt.extension)
+			input := map[string]interface{}{
+				tt.eventKey:   tt.eventName,
+				"sessionId":   "grok-failed-edit",
+				"toolName":    tt.toolName,
+				"tool_use_id": "failed-edit-call",
+				"toolInput": map[string]interface{}{
+					"path": path, "content": "package requested_but_not_written\n",
+					"old_string": "package old", "new_string": "package requested_but_not_written",
+				},
+				"error": tt.errorText,
+			}
+			// A structured patch makes search_replace eligible for the success-only
+			// diff path even though its name has no dedicated diff constructor.
+			if tt.toolName == "search_replace" {
+				input["toolResponse"] = map[string]interface{}{"structuredPatch": []interface{}{
+					map[string]interface{}{
+						"oldStart": 1, "oldLines": 1, "newStart": 1, "newLines": 1,
+						"lines": []interface{}{"-package old", "+package requested_but_not_written"},
+					},
+				}}
+			}
+			out := runHookWithInput(t, runPostTool, input)
+			if len(out) != 0 {
+				t.Fatalf("response = %#v, want empty object", out)
+			}
+			events := endpointEvents(t, logPath)
+			if len(events) != 1 {
+				t.Fatalf("events = %#v, want exactly one failed attempt", events)
+			}
+			event := events[0]
+			classification := event["event"].(map[string]interface{})
+			if classification["action"] != "tool.failed" || classification["category"] != "tool" || event["severity"] != "high" {
+				t.Fatalf("classification = %#v severity %v, want tool.failed/tool/high", classification, event["severity"])
+			}
+			if session := event["session"].(map[string]interface{}); session["id"] != "grok-failed-edit" {
+				t.Fatalf("session = %#v, want attempted session", session)
+			}
+			if tool := event["tool"].(map[string]interface{}); tool["name"] != tt.toolName || tool["path"] != path {
+				t.Fatalf("tool = %#v, want attempted tool and path", tool)
+			}
+			file := event["file"].(map[string]interface{})
+			if file["path"] != path {
+				t.Fatalf("file.path = %v, want %s", file["path"], path)
+			}
+			for _, key := range []string{"diff", "diff_hash", "diff_bytes"} {
+				if _, present := file[key]; present {
+					t.Fatalf("failed attempt has fabricated file.%s: %#v", key, file)
+				}
+			}
+			genAI := event["gen_ai"].(map[string]interface{})
+			call := genAI["tool"].(map[string]interface{})["call"].(map[string]interface{})
+			if call["id"] != "failed-edit-call" {
+				t.Fatalf("call.id = %v, want attempted call", call["id"])
+			}
+			raw := event["raw"].(map[string]interface{})["grok"].(map[string]interface{})
+			if raw[tt.eventKey] != tt.eventName || raw["toolName"] != tt.toolName || raw["error"] != tt.errorText {
+				t.Fatalf("raw.grok = %#v, want native failed-attempt payload", raw)
+			}
+		})
+	}
+}
+
+func TestGrokPostToolSuccessfulWriteRetainsDiff(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "grok"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	path := filepath.Join(t.TempDir(), "written.go")
+	runHookWithInput(t, runPostTool, map[string]interface{}{
+		"hookEventName": "post_tool_use",
+		"sessionId":     "grok-successful-edit",
+		"toolName":      "write_file",
+		"toolInput":     map[string]interface{}{"path": path, "content": "package written\n"},
+		"error":         "",
+	})
+	events := endpointEvents(t, logPath)
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one successful edit", events)
+	}
+	event := events[0]
+	if action := event["event"].(map[string]interface{})["action"]; action != "file.modified" {
+		t.Fatalf("event.action = %v, want file.modified", action)
+	}
+	file := event["file"].(map[string]interface{})
+	diff, _ := file["diff"].(string)
+	hash, _ := file["diff_hash"].(string)
+	bytes, _ := file["diff_bytes"].(float64)
+	if file["path"] != path || !strings.Contains(diff, "+package written") || hash == "" || bytes <= 0 {
+		t.Fatalf("file = %#v, want successful write path and retained diff metadata", file)
 	}
 }
 

@@ -2,7 +2,6 @@ package openclawsession
 
 import (
 	"crypto/sha1"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -295,9 +294,7 @@ func applyFile(ev *schema.Event, name string, record Record) {
 	}
 	if diff := diffText(name, record); diff != "" {
 		file.Diff = diff
-		file.DiffBytes = len(diff)
-		file.DiffHash = sha256Hex(diff)
-		ev.Content = asymptoteobserve.RetainedContent(diff, asymptoteobserve.DefaultStringLimit)
+		ev.Content, file.DiffHash, file.DiffBytes = asymptoteobserve.RetainedDiff(diff, asymptoteobserve.DefaultStringLimit)
 	}
 	ev.File = file
 }
@@ -437,9 +434,4 @@ func firstNonZero(values ...int64) int64 {
 		}
 	}
 	return 0
-}
-
-func sha256Hex(value string) string {
-	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:])
 }

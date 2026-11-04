@@ -1,5 +1,5 @@
 id: container-or-iac-file-modified
-version: 1
+version: 2
 title: Container or IaC file modified (Dockerfile / compose / Terraform / K8s / Helm)
 description: >
   The agent modified a container, orchestration, or infrastructure-as-code
@@ -22,7 +22,7 @@ taxonomy:
   mitre_atlas: AML.T0011
 
 match: >
-  e.event.action == "file.modified" && (
+  e.event.action in ["file.modified", "file.created", "file.edited"] && (
     e.file.path.matches("(?i)(^|/)dockerfile(\\.prod|\\.dev|\\.local|\\.test|\\.staging|\\.debug|\\.alpine|\\.nginx|\\.node|\\.python|\\.go|\\.rust|\\.java|\\.base|\\.builder|\\.runtime|\\.ci|\\.prod|\\.pr[a-z0-9]+)?$") ||
     e.file.path.matches("(?i)(^|/)containerfile(\\.prod|\\.dev|\\.local|\\.test|\\.staging|\\.debug|\\.alpine|\\.nginx|\\.node|\\.python|\\.go|\\.rust|\\.java|\\.base|\\.builder|\\.runtime|\\.ci|\\.pr[a-z0-9]+)?$") ||
     e.file.path.matches("(?i)(^|/)docker-compose(-[^/]+)?\\.(yml|yaml)$") ||
@@ -109,4 +109,10 @@ tests:
     events:
       - event: { action: file.modified }
         file: { path: "app/Dockerfile.bak" }
+        session: { id: s1 }
+  - name: modify_dockerfile_created
+    verdict: match
+    events:
+      - event: { action: file.created }
+        file: { path: "app/Dockerfile" }
         session: { id: s1 }

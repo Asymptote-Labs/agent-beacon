@@ -74,6 +74,16 @@ Hook-derived events use `harness.name=vscode`. OTel-derived events use `harness.
 | `--system` | Use system endpoint paths and launch daemon |
 | `--log-path <path>` | Runtime JSONL log path |
 
+## beacon endpoint integrations vscode print-config
+
+`beacon endpoint integrations vscode print-config` prints the VS Code Copilot OpenTelemetry settings and setup steps for this endpoint without changing any file. Use it when you manage VS Code settings yourself, for example through an MDM profile or a committed `.vscode/settings.json`.
+
+```bash title="Print the settings to apply"
+beacon endpoint integrations vscode print-config
+```
+
+`--endpoint`, `--workspace` and `--capture-content` shape the printed settings the same way they shape `setup`.
+
 ## beacon endpoint integrations vscode setup
 
 `beacon endpoint integrations vscode setup` writes VS Code Copilot OTel settings without reinstalling the endpoint collector.

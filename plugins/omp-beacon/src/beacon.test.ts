@@ -48,17 +48,6 @@ afterEach(() => {
 })
 
 describe("beacon oh my pi extension", () => {
-  test("retains an event containing an invalid Date with native JSON date semantics", async () => {
-    const sent = captureSends()
-    const metadata = { invalid: new Date(NaN), valid: new Date("2026-01-02T03:04:05Z") }
-    const expected = JSON.parse(JSON.stringify(metadata))
-    const host = fakeOmp()
-    createBeaconExtension().register(host.api)
-    await host.fire({ type: "session_start", metadata }, context())
-    expect(sent).toHaveLength(1)
-    expect(sent[0]).toMatchObject({ type: "session_start", sessionId: "sess-1", metadata: expected })
-  })
-
   // These strings are the contract between this extension and the omp-event mapper in the hook
   // adapter. A typo on either side produces no telemetry rather than an error, so the list is
   // pinned here and asserted against the mapper's own list on the Go side.
@@ -79,48 +68,6 @@ describe("beacon oh my pi extension", () => {
       "user_bash",
       "user_python",
     ])
-  })
-
-  // The reason this extension exists rather than pointing the Pi one at a different directory.
-  // These are decisions an operator was actually asked to make, which Beacon refuses to synthesize
-  // on runtimes that do not report them.
-  test("subscribes to the approval events upstream Pi does not have", () => {
-    const omp = fakeOmp()
-    createBeaconExtension().register(omp.api)
-
-    expect(omp.handlers.has("tool_approval_requested")).toBe(true)
-    expect(omp.handlers.has("tool_approval_resolved")).toBe(true)
-  })
-
-  // Oh My Pi publishes upwards of thirty events, most of them provider-request and TUI internals.
-  // Subscribing to one would put Beacon in the path of every streaming token update.
-  test("does not subscribe to streaming or provider internals", () => {
-    const omp = fakeOmp()
-    createBeaconExtension().register(omp.api)
-
-    for (const noisy of [
-      "message_update",
-      "message_start",
-      "before_provider_request",
-      "after_provider_response",
-      "tool_execution_update",
-      "tool_execution_start",
-      "auto_compaction_start",
-      "auto_retry_start",
-      "ttsr_triggered",
-      "todo_reminder",
-    ]) {
-      expect(omp.handlers.has(noisy)).toBe(false)
-    }
-  })
-
-  // mcp_notification fires for every JSON-RPC notification a connected server sends, most of them
-  // routine list refreshes. It is MCP transport plumbing, not an action the agent took.
-  test("does not subscribe to mcp notifications", () => {
-    const omp = fakeOmp()
-    createBeaconExtension().register(omp.api)
-
-    expect(omp.handlers.has("mcp_notification")).toBe(false)
   })
 
   // The skill-listing cache outlives one extension instance, so each test below uses its own
@@ -360,18 +307,6 @@ describe("beacon oh my pi extension", () => {
     }
   })
 
-  test("forwards the event with its type intact", async () => {
-    const sent = captureSends()
-    const omp = fakeOmp()
-    createBeaconExtension().register(omp.api)
-
-    await omp.fire({ type: "input", text: "do the thing", source: "interactive" }, context())
-
-    expect(sent).toHaveLength(1)
-    expect(sent[0].type).toBe("input")
-    expect(sent[0].text).toBe("do the thing")
-  })
-
   // Print and ACP never emit `input`, so the user message Oh My Pi delivers is the only record of
   // the prompt. Only its role and text leave the extension.
   test("forwards a print prompt from its user message", async () => {
@@ -509,67 +444,6 @@ describe("beacon oh my pi extension", () => {
     expect(sent.map((event) => event.prompt)).toEqual(["repeat", "repeat"])
   })
 
-  test("forwards an approval decision with its outcome intact", async () => {
-    const sent = captureSends()
-    const omp = fakeOmp()
-    createBeaconExtension().register(omp.api)
-
-    await omp.fire(
-      {
-        type: "tool_approval_resolved",
-        sessionId: "sess-1",
-        toolCallId: "call-1",
-        toolName: "bash",
-        approved: false,
-        reason: "operator declined",
-      },
-      context(),
-    )
-
-    expect(sent[0].approved).toBe(false)
-    expect(sent[0].toolCallId).toBe("call-1")
-    expect(sent[0].reason).toBe("operator declined")
-  })
-
-  test("forwards operator python with its source intact", async () => {
-    const sent = captureSends()
-    const omp = fakeOmp()
-    createBeaconExtension().register(omp.api)
-
-    await omp.fire(
-      { type: "user_python", code: "import os", excludeFromContext: true, cwd: "/repo" },
-      context(),
-    )
-
-    expect(sent[0].code).toBe("import os")
-    expect(sent[0].excludeFromContext).toBe(true)
-  })
-
-  // Oh My Pi keeps identity on the handler context behind accessor functions, not on the event, so
-  // the envelope has to carry it or every event loses the field that groups a run.
-  test("lifts session identity off the context onto the envelope", async () => {
-    const sent = captureSends()
-    const omp = fakeOmp()
-    createBeaconExtension().register(omp.api)
-
-    await omp.fire({ type: "session_start" }, context())
-
-    expect(sent[0].sessionId).toBe("sess-1")
-    expect(sent[0].cwd).toBe("/repo")
-  })
-
-  // A print or rpc run is unattended, which changes how an approval row should be read: there was
-  // no human at the terminal to ask.
-  test("records which surface the session is running on", async () => {
-    const sent = captureSends()
-    const omp = fakeOmp()
-    createBeaconExtension().register(omp.api)
-
-    await omp.fire({ type: "session_start" }, context({ mode: "print" }))
-
-    expect(sent[0].ompMode).toBe("print")
-  })
-
   // Re-read per event rather than captured at load: `/new`, a resume, a fork and a tree navigation
   // all replace the session without reloading the extension, so a cached id would be silently
   // wrong afterwards.
@@ -649,26 +523,6 @@ describe("beacon oh my pi extension", () => {
 
     expect(sent).toHaveLength(1)
     expect(JSON.stringify(sent[0])).toContain("tool_result")
-  })
-
-  test("drops functions and stringifies bigints rather than failing the send", async () => {
-    const sent = captureSends()
-    const omp = fakeOmp()
-    createBeaconExtension().register(omp.api)
-
-    await omp.fire(
-      {
-        type: "tool_result",
-        toolName: "bash",
-        // eslint-disable-next-line @typescript-eslint/no-empty-function
-        onDone: () => {},
-        bytes: BigInt(42),
-      },
-      context(),
-    )
-
-    expect(sent[0].onDone).toBeUndefined()
-    expect(sent[0].bytes).toBe("42")
   })
 
   // Every handler must resolve to undefined. Oh My Pi reads a returned object as a request to

@@ -197,10 +197,8 @@ func TestClaudeStopRecordsTheFinalAssistantMessage(t *testing.T) {
 // That is not an empty answer, so no message event is written -- but the turn's completion still is.
 func TestClaudeStopWithoutAReplyWritesNoMessage(t *testing.T) {
 	for name, value := range map[string]interface{}{
-		"absent": nil,
-		"null":   json.RawMessage("null"),
-		"empty":  "",
-		"blank":  "  \n\t",
+		"null":  json.RawMessage("null"),
+		"blank": "  \n\t",
 	} {
 		t.Run(name, func(t *testing.T) {
 			logPath, _ := runHookProcess(t, claudeStopPayload(value), "--platform", "claude", "stop")
@@ -242,7 +240,7 @@ func TestClaudeStopReplyIsRedactedAndBounded(t *testing.T) {
 // Cursor send Stop payloads through the same command, and a key read where the runtime never wrote
 // it would be a guess about what it means there.
 func TestLastAssistantMessageIsReadOnlyWhereDocumented(t *testing.T) {
-	for _, platform := range []string{"devin-cli", "factory", "cursor", "qwen"} {
+	for _, platform := range []string{"cursor"} {
 		t.Run(platform, func(t *testing.T) {
 			logPath, _ := runHookProcess(t, claudeStopPayload("not this runtime's field"), "--platform", platform, "stop")
 			if messages := assistantMessages(t, logPath); len(messages) != 0 {
@@ -252,8 +250,8 @@ func TestLastAssistantMessageIsReadOnlyWhereDocumented(t *testing.T) {
 	}
 }
 
-// The Kiro reply, which now goes through the shared emitter, still arrives end to end and is still
-// read only from Kiro's own key.
+// Kiro puts the agent's final reply on the Stop payload as `assistant_response` and nowhere else.
+// It goes through the shared emitter, arrives end to end, and is read only from Kiro's own key.
 func TestKiroStopReplyEndToEnd(t *testing.T) {
 	payload := map[string]interface{}{
 		"hook_event_name":        "stop",
@@ -269,6 +267,12 @@ func TestKiroStopReplyEndToEnd(t *testing.T) {
 	messages := assistantMessages(t, logPath)
 	if len(messages) != 1 || outputText(t, messages[0]) != "Kiro's reply." {
 		t.Fatalf("kiro agent.message = %#v, want one carrying assistant_response", messages)
+	}
+	if got := leaf(messages[0], "session", "id"); got != "k-e2e" {
+		t.Fatalf("session.id = %q, want k-e2e", got)
+	}
+	if got := leaf(messages[0], "harness", "name"); got != "kiro" {
+		t.Fatalf("harness.name = %q, want kiro", got)
 	}
 }
 

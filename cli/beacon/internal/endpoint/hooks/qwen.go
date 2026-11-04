@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/homepath"
 )
 
 // Qwen Code hook timeouts are milliseconds.
@@ -157,12 +159,37 @@ func isQwenInstalledAt(path string) bool {
 	return isSettingsEndpointInstalledAt(path, "qwen")
 }
 
+// qwenHomeEnv moves Qwen Code's user directory. Qwen reads it in getGlobalQwenDir
+// (packages/core/src/config/storage.ts) and keeps settings.json directly inside it.
+const qwenHomeEnv = "QWEN_HOME"
+
+// QwenUserDir returns Qwen Code's user directory for the given home directory.
+//
+// Qwen uses QWEN_HOME whenever it is non-empty: a leading `~` is expanded against the home
+// directory and a relative path is made absolute, but nothing is trimmed and no `.qwen` is
+// appended. Otherwise it is `.qwen` under the home directory. The home directory is only needed
+// for the default and for a `~` override, so an absolute QWEN_HOME resolves without one.
+func QwenUserDir(home string) (string, error) {
+	if override := os.Getenv(qwenHomeEnv); override != "" {
+		dir, err := homepath.ExpandTilde(override, home)
+		if err != nil {
+			return "", fmt.Errorf("resolve %s: %w", qwenHomeEnv, err)
+		}
+		return filepath.Abs(dir)
+	}
+	if home == "" {
+		return "", fmt.Errorf("home directory is required to resolve Qwen Code's directory")
+	}
+	return filepath.Join(home, ".qwen"), nil
+}
+
 // QwenSettingsPath returns the settings file Beacon merges into for a given install level.
 //
-// Qwen Code resolves settings from `~/.qwen/settings.json` for the user and `.qwen/settings.json`
-// in the project root, with project settings taking precedence. The user level is the default here
-// for the same reason it is elsewhere: a project-level install only takes effect once the folder is
-// trusted, so it is the one that needs a caveat rather than the one to reach for first.
+// Qwen Code resolves settings from `settings.json` in its user directory (`~/.qwen`, or QWEN_HOME
+// when that is set) and `.qwen/settings.json` in the project root, with project settings taking
+// precedence. The user level is the default here for the same reason it is elsewhere: a
+// project-level install only takes effect once the folder is trusted, so it is the one that needs
+// a caveat rather than the one to reach for first.
 //
 // Exported because `harness` reports on the same file and must not rebuild the path itself. Two
 // copies of "where the settings live" is how discovery comes to report on a file the installer does
@@ -170,13 +197,26 @@ func isQwenInstalledAt(path string) bool {
 // user path into the *project* path, so discovery would read whatever repository the command ran
 // from and report it as the machine's state.
 func QwenSettingsPath(level Level) (string, error) {
+	if level == "" || level == LevelUser {
+		home, err := os.UserHomeDir()
+		if err != nil && os.Getenv(qwenHomeEnv) == "" {
+			return "", err
+		}
+		return QwenSettingsPathForHome(level, home)
+	}
+	return QwenSettingsPathForHome(level, "")
+}
+
+// QwenSettingsPathForHome is QwenSettingsPath for a caller that already knows the home directory,
+// as the inventory scan does.
+func QwenSettingsPathForHome(level Level, home string) (string, error) {
 	switch level {
 	case "", LevelUser:
-		home, err := os.UserHomeDir()
+		dir, err := QwenUserDir(home)
 		if err != nil {
 			return "", err
 		}
-		return filepath.Join(home, ".qwen", "settings.json"), nil
+		return filepath.Join(dir, "settings.json"), nil
 	case LevelProject:
 		cwd, err := os.Getwd()
 		if err != nil {

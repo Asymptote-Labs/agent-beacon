@@ -20,6 +20,7 @@ func writeDatedSession(t *testing.T, codexDir, id string, at time.Time) {
 	}
 }
 
+// sessionIDs lists the sessions in the runtime log in the order their first event was written.
 func sessionIDs(t *testing.T, logPath string) []string {
 	t.Helper()
 	var ids []string
@@ -34,74 +35,66 @@ func sessionIDs(t *testing.T, logPath string) []string {
 	return ids
 }
 
-func TestCollectOnceSinceReadsRecentSessionsNewestFirstAndLeavesOlderOnes(t *testing.T) {
+// The install backfill (`beacon endpoint backfill`, b1d2b9de) runs this collector with a Since
+// window and a byte budget. Neither is enforced by the shared sync machinery: the collector has to
+// pass Since to the window filter and Budget to the sink, and treat a spent budget as "come back
+// later", not as a failed session. A sweep that ignored either would ship a machine's whole Codex
+// history on first connect; one that advanced past the budget would lose sessions for good.
+func TestBackfillReadsTheWindowNewestFirstWithinBudgetAndLeavesTheRestForSync(t *testing.T) {
+	now := time.Now()
+	since := now.Add(-30 * 24 * time.Hour)
+
+	// Learn how many bytes the newest session takes, then give the real sweep exactly that.
+	probeDir := t.TempDir()
+	probe := writer.NewBudget(1 << 30)
+	writeDatedSession(t, filepath.Join(probeDir, ".codex"), "newest", now.Add(-time.Hour))
+	if _, err := CollectOnce(CollectOptions{CodexDir: filepath.Join(probeDir, ".codex"), StatePath: filepath.Join(probeDir, "state.json"), LogPath: filepath.Join(probeDir, "runtime.jsonl"), Write: true, UserMode: true, Since: since, Budget: probe}); err != nil {
+		t.Fatal(err)
+	}
+
 	dir := t.TempDir()
 	codexDir := filepath.Join(dir, ".codex")
-	now := time.Now()
 	writeDatedSession(t, codexDir, "old", now.Add(-60*24*time.Hour))
 	writeDatedSession(t, codexDir, "recent", now.Add(-2*time.Hour))
 	writeDatedSession(t, codexDir, "newest", now.Add(-time.Hour))
 	statePath := filepath.Join(dir, "state", "codex.json")
 	logPath := filepath.Join(dir, "runtime.jsonl")
 
-	opts := CollectOptions{CodexDir: codexDir, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true, Since: now.Add(-30 * 24 * time.Hour)}
-	if _, err := CollectOnce(opts); err != nil {
-		t.Fatalf("windowed CollectOnce: %v", err)
-	}
-	if got := sessionIDs(t, logPath); len(got) != 2 || got[0] != "newest" || got[1] != "recent" {
-		t.Fatalf("windowed sweep read sessions %v, want [newest recent]", got)
-	}
-
-	// The session outside the window was never consumed: an ordinary sync still reads it.
-	if _, err := CollectOnce(CollectOptions{CodexDir: codexDir, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true}); err != nil {
-		t.Fatalf("ordinary CollectOnce: %v", err)
-	}
-	if got := sessionIDs(t, logPath); len(got) != 3 || got[2] != "old" {
-		t.Fatalf("ordinary sweep after the window read %v, want old last", got)
-	}
-}
-
-func TestCollectOnceStopsAtTheBudgetAndLeavesTheRestForTheNextSweep(t *testing.T) {
-	dir := t.TempDir()
-	codexDir := filepath.Join(dir, ".codex")
-	now := time.Now()
-	writeDatedSession(t, codexDir, "first", now.Add(-time.Hour))
-	writeDatedSession(t, codexDir, "second", now.Add(-2*time.Hour))
-	statePath := filepath.Join(dir, "state", "codex.json")
-	logPath := filepath.Join(dir, "runtime.jsonl")
-
-	// Learn how many bytes the newest session takes, then give a fresh sweep exactly that.
-	probeDir := t.TempDir()
-	probe := writer.NewBudget(1 << 30)
-	writeDatedSession(t, filepath.Join(probeDir, ".codex"), "first", now.Add(-time.Hour))
-	if _, err := CollectOnce(CollectOptions{CodexDir: filepath.Join(probeDir, ".codex"), StatePath: filepath.Join(probeDir, "state.json"), LogPath: filepath.Join(probeDir, "runtime.jsonl"), Write: true, UserMode: true, Since: now.Add(-24 * time.Hour), Budget: probe}); err != nil {
-		t.Fatal(err)
-	}
-
-	budget := writer.NewBudget(probe.Used())
-	summary, err := CollectOnce(CollectOptions{CodexDir: codexDir, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true, Since: now.Add(-24 * time.Hour), Budget: budget})
+	summary, err := CollectOnce(CollectOptions{CodexDir: codexDir, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true, Since: since, Budget: writer.NewBudget(probe.Used())})
 	if !errors.Is(err, writer.ErrBudgetSpent) {
-		t.Fatalf("budgeted CollectOnce = %v, want ErrBudgetSpent", err)
+		t.Fatalf("budgeted backfill = %v, want ErrBudgetSpent", err)
 	}
 	if summary.Errors != 0 {
 		t.Fatalf("a spent budget counted as %d session errors", summary.Errors)
 	}
-	if got := sessionIDs(t, logPath); len(got) != 1 || got[0] != "first" {
-		t.Fatalf("budgeted sweep read %v, want only the newest session", got)
+	if summary.Sessions != 2 {
+		t.Fatalf("backfill considered %d sessions, want the 2 inside the window", summary.Sessions)
+	}
+	if got := sessionIDs(t, logPath); len(got) != 1 || got[0] != "newest" {
+		t.Fatalf("budgeted backfill wrote %v, want only the newest session", got)
 	}
 
-	if _, err := CollectOnce(CollectOptions{CodexDir: codexDir, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true}); err != nil {
-		t.Fatalf("follow-up CollectOnce: %v", err)
+	// A second windowed run picks up where the budget stopped, and still leaves the old session.
+	if _, err := CollectOnce(CollectOptions{CodexDir: codexDir, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true, Since: since}); err != nil {
+		t.Fatalf("second backfill: %v", err)
 	}
-	events := readLog(t, logPath)
-	if got := sessionIDs(t, logPath); len(got) != 2 || got[1] != "second" {
-		t.Fatalf("follow-up sweep read %v, want second added", got)
+	if got := sessionIDs(t, logPath); len(got) != 2 || got[1] != "recent" {
+		t.Fatalf("second backfill wrote %v, want recent added and old left alone", got)
+	}
+
+	// The session outside the window was never consumed: an ordinary sync still reads it, and
+	// nothing the backfill wrote is written again.
+	if _, err := CollectOnce(CollectOptions{CodexDir: codexDir, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true}); err != nil {
+		t.Fatalf("ordinary sync: %v", err)
+	}
+	if got := sessionIDs(t, logPath); len(got) != 3 || got[2] != "old" {
+		t.Fatalf("ordinary sync after the backfill wrote %v, want old last", got)
 	}
 	perSession := map[string]int{}
-	for _, ev := range events {
+	for _, ev := range readLog(t, logPath) {
 		perSession[ev.Session.ID]++
 	}
-	if perSession["first"] != perSession["second"] {
+	if perSession["newest"] != perSession["recent"] || perSession["recent"] != perSession["old"] {
 		t.Fatalf("a session was written twice or partly: %v", perSession)
 	}
 }

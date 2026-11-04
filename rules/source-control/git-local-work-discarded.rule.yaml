@@ -1,0 +1,405 @@
+id: git-local-work-discarded
+version: 1
+title: Local Git work discarded
+description: >
+  An agent hard-resets Git, force-cleans directories or ignored files, restores
+  the whole working tree, or clears every stash. The command expresses intent
+  to discard work; telemetry alone cannot establish whether uncommitted work
+  existed. Dry-run clean, branch checkout and staged-only restores are excluded.
+severity: medium
+status: experimental
+posture: detect
+taxonomy:
+  beacon_category: source-control
+  owasp_llm: LLM06
+
+# Command prefixes accept environment assignments, relative executable paths, and
+# sudo execution options. Value-taking sudo options consume their argument;
+# inspection modes such as sudo -l/-v are not execution prefixes.
+match: >
+  e.event.action == "command.executed" && (
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+reset\\b[^;&|\\n#]*[ \\t]--hard(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+clean[ \\t]+(?:-[dfxXq]+[ \\t]+)*(?:-[dxXq]*f[dfxXq]*[dxX][dfxXq]*|-[dfxXq]*[dxX][dfxXq]*f[dfxXq]*|-[dfxXq]*f[dfxXq]*[ \\t]+(?:-[dfxXq]+[ \\t]+)*-[dfxXq]*[dxX][dfxXq]*|-[dfxXq]*[dxX][dfxXq]*[ \\t]+(?:-[dfxXq]+[ \\t]+)*-[dfxXq]*f[dfxXq]*)(?:[ \\t]+-[dfxXq]+)*(?:[ \\t]+--)?(?:[ \\t]+[^\\s;&|<>#-][^\\s;&|<>#]*)*[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+checkout[ \\t]+(?:HEAD[ \\t]+)?(?:--[ \\t]+)?[\\\"\\x27]?(?:\\.|:/)[\\\"\\x27]?[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+checkout[ \\t]+(?:-f|--force)(?:[ \\t]|$|[;&|\\n<>#])") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+restore[ \\t]+(?:(?:(?:--source|-s)(?:=|[ \\t]+)[^\\s;&|]+|--worktree|-W)[ \\t]+)*(?:--[ \\t]+)?[\\\"\\x27]?(?:\\.|:/)[\\\"\\x27]?[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+restore[ \\t]+(?:(?:--staged|-S)[ \\t]+)?(?:--worktree|-W|-SW|-WS)[ \\t]+(?:(?:--staged|-S)[ \\t]+)?(?:--[ \\t]+)?[\\\"\\x27]?(?:\\.|:/)[\\\"\\x27]?[ \\t]*(?:$|[;&|\\n#]|[0-9]*[<>]|&>)") ||
+    e.command.command.matches("(^|[;&|\\n])[ \\t]*(?:(?:then|do|else)[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*(?:sudo[ \\t]+(?:(?:-[ugCDRTp][ \\t]*(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|--(?:user|group|close-from|chdir|chroot|command-timeout|prompt)(?:=|[ \\t]+)(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+|-[nEHkPSb]+|--(?:non-interactive|preserve-env(?:=[A-Za-z0-9_,]+)?|set-home|reset-timestamp|stdin|background))[ \\t]+)*(?:--[ \\t]+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:(?:[^\\s;&|<>#\\x27\"`]+|\\x27[^\\x27\\n]*\\x27|\"[^\"\\n]*\")+)?[ \\t]+)*)?(?:[^\\s;&|<>#\\x27\"`=]*/)?git(?:[ \\t]+-C[ \\t]+[^\\s;&|]+)*[ \\t]+stash[ \\t]+clear(?:[ \\t]|$|[;&|\\n<>#])")
+  )
+
+emit:
+  reason: "Local Git work discarded"
+
+tests:
+  - name: match_1_git_reset_hard_head_1
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git reset --hard HEAD~1" }
+        session: { id: s1 }
+  - name: match_2_git_c_repo_reset_hard
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git -C repo reset --hard" }
+        session: { id: s1 }
+  - name: match_3_git_clean_fd
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clean -fd" }
+        session: { id: s1 }
+  - name: match_4_git_clean_fx
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clean -fX" }
+        session: { id: s1 }
+  - name: match_5_git_clean_xdf
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clean -xdf" }
+        session: { id: s1 }
+  - name: match_6_git_clean_f_d
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clean -f -d" }
+        session: { id: s1 }
+  - name: match_7_git_clean_x_f
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clean -x -f" }
+        session: { id: s1 }
+  - name: match_8_git_clean_ffdx_build
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clean -ffdx -- build" }
+        session: { id: s1 }
+  - name: match_9_git_checkout
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git checkout -- ." }
+        session: { id: s1 }
+  - name: match_10_git_checkout
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git checkout ." }
+        session: { id: s1 }
+  - name: match_11_git_checkout_f_main
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git checkout -f main" }
+        session: { id: s1 }
+  - name: match_12_git_restore
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git restore ." }
+        session: { id: s1 }
+  - name: match_13_git_restore_worktree
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git restore --worktree -- ." }
+        session: { id: s1 }
+  - name: match_14_git_stash_clear
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git stash clear" }
+        session: { id: s1 }
+  - name: match_15_git_checkout_head
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git checkout HEAD -- ." }
+        session: { id: s1 }
+  - name: match_16_git_restore_source_head
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git restore --source=HEAD -- ." }
+        session: { id: s1 }
+  - name: match_17_git_restore_staged_worktree
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git restore --staged --worktree ." }
+        session: { id: s1 }
+  - name: match_18_git_restore_sw
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git restore -SW ." }
+        session: { id: s1 }
+  - name: match_19_git_restore_dev_null
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git restore .>/dev/null" }
+        session: { id: s1 }
+  - name: match_20_git_checkout_discard
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git checkout -- . # discard" }
+        session: { id: s1 }
+  - name: match_21_git_clean_fd_2_dev_null
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clean -fd 2>/dev/null" }
+        session: { id: s1 }
+  - name: match_22_git_checkout
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git checkout -- \".\"" }
+        session: { id: s1 }
+  - name: no_match_1_git_reset_soft_head_1
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git reset --soft HEAD~1" }
+        session: { id: s1 }
+  - name: no_match_2_git_reset_mixed
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git reset --mixed" }
+        session: { id: s1 }
+  - name: no_match_3_git_clean_nfd
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clean -nfd" }
+        session: { id: s1 }
+  - name: no_match_4_git_clean_fdn
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clean -fdn" }
+        session: { id: s1 }
+  - name: no_match_5_git_clean_n_fd
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clean -n -fd" }
+        session: { id: s1 }
+  - name: no_match_6_git_clean_fd_n
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clean -fd -n" }
+        session: { id: s1 }
+  - name: no_match_7_git_clean_f
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clean -f" }
+        session: { id: s1 }
+  - name: no_match_8_git_clean_d
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clean -d" }
+        session: { id: s1 }
+  - name: no_match_9_git_checkout_feature
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git checkout feature" }
+        session: { id: s1 }
+  - name: no_match_10_git_checkout_file_go
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git checkout -- file.go" }
+        session: { id: s1 }
+  - name: no_match_11_git_restore_staged_file_go
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git restore --staged file.go" }
+        session: { id: s1 }
+  - name: no_match_12_git_restore_staged
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git restore --staged ." }
+        session: { id: s1 }
+  - name: no_match_13_git_restore_file_go
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git restore file.go" }
+        session: { id: s1 }
+  - name: no_match_14_git_stash_list
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git stash list" }
+        session: { id: s1 }
+  - name: no_match_15_git_status_echo_hard
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git status; echo --hard" }
+        session: { id: s1 }
+  - name: no_match_16_git_reset_echo_hard
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git reset\necho --hard" }
+        session: { id: s1 }
+  - name: no_match_17_git_clean_f_echo_d
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clean -f; echo -d" }
+        session: { id: s1 }
+  - name: no_match_18_git_reset_hard
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git reset # --hard" }
+        session: { id: s1 }
+  - name: no_match_19_git_clean_fd_dry_run
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clean -fd --dry-run" }
+        session: { id: s1 }
+  - name: no_match_20_git_clean_nfd
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clean -Nfd" }
+        session: { id: s1 }
+  - name: no_match_21_git_clean_fd_build_n
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git clean -fd build -n" }
+        session: { id: s1 }
+  - name: no_match_22_git_restore_source_head_staged
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git restore --source=HEAD --staged ." }
+        session: { id: s1 }
+  - name: newline
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "true\ngit reset --hard HEAD~1" }
+        session: { id: s1 }
+  - name: then
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "if true; then git reset --hard HEAD~1" }
+        session: { id: s1 }
+  - name: do
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "for x in a; do git reset --hard HEAD~1" }
+        session: { id: s1 }
+  - name: else
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "if false; then true; else git reset --hard HEAD~1" }
+        session: { id: s1 }
+  - name: redirect_or_comment_1
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git reset --hard HEAD~1 2>/dev/null" }
+        session: { id: s1 }
+  - name: redirect_or_comment_2
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git reset --hard HEAD~1 >/dev/null 2>&1" }
+        session: { id: s1 }
+  - name: redirect_or_comment_3
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git reset --hard HEAD~1&>/dev/null" }
+        session: { id: s1 }
+  - name: redirect_or_comment_4
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git reset --hard HEAD~1 # maintenance" }
+        session: { id: s1 }
+  - name: mention_1
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo \"git reset --hard HEAD~1\"" }
+        session: { id: s1 }
+  - name: mention_2
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "grep -F \"git reset --hard HEAD~1\"" }
+        session: { id: s1 }
+  - name: mention_3
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "git commit -m \"git reset --hard HEAD~1\"" }
+        session: { id: s1 }
+  - name: wrong_event_action
+    verdict: no_match
+    events:
+      - event: { action: tool.invoked }
+        command: { command: "git reset --hard HEAD~1" }
+        session: { id: s1 }
+  - name: git_env
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "GIT_DIR=.git git reset --hard HEAD" }
+        session: { id: s1 }
+  - name: sudo_git
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -u deploy git clean -fd" }
+        session: { id: s1 }
+  - name: relative_git
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "GIT_DIR=.git ./bin/git stash clear" }
+        session: { id: s1 }
+  - name: git_env_read
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "GIT_DIR=.git git status" }
+        session: { id: s1 }
+  - name: sudo_git_dry_run
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -u deploy git clean -nd" }
+        session: { id: s1 }
+  - name: sudo_git_echo
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo -u deploy echo \"git reset --hard\"" }
+        session: { id: s1 }

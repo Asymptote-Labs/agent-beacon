@@ -1,0 +1,128 @@
+---
+title: "Plans and pricing"
+sidebarTitle: "Plans"
+description: "Compare Open Source, Beacon Cloud, Beacon Cloud Pro and Enterprise"
+---
+
+Beacon records your agent sessions on your machine whatever plan you choose. The plans differ in
+where that history goes and what Beacon does with it once it is there.
+
+- **Open Source** is the free, local-only agent. Sessions stay on the machine, you browse them in
+  the local dashboard, and you can forward them to your own Elastic, S3, GCS or OpenTelemetry
+  stack.
+- **Beacon Cloud** is free. Connected devices upload to [beacon.sh](https://beacon.sh), where every
+  agent and machine shares one timeline, and Beacon Cloud reviews your sessions for
+  [findings](/cloud/findings).
+- **Beacon Cloud Pro** is Beacon Cloud for people who work with agents every day: unlimited
+  findings, the full [MCP](/deployment/managed-mcp) toolset including findings and memory, and
+  real-time alerts. $20 a month, or $15 a month billed annually.
+- **Enterprise** adds fleet rollout, enforcement, SSO, RBAC and audit logs, with hosting in Beacon
+  Cloud or your own bucket. [Talk to us](https://beacon.sh/pricing) for pricing.
+
+Current prices are always on the [pricing page](https://beacon.sh/pricing).
+
+## Compare plans
+
+| | Open Source | Beacon Cloud | Beacon Cloud Pro | Enterprise |
+| --- | --- | --- | --- | --- |
+| **Price** | $0 | $0 | $20/mo ($15/mo annually) | Custom |
+| **Hosting** | You run it | Managed | Managed | Managed or your bucket |
+| **Agents** | 20+ | 20+ | 20+ | 20+, on endpoints, CI and cloud |
+| Prompts, commands, diffs and token usage | ✓ | ✓ | ✓ | ✓ |
+| Export to Elastic, S3 or OTel | ✓ | ✓ | ✓ | ✓ |
+| Offline threat detection (`beacon scan`) | ✓ | ✓ | ✓ | ✓ |
+| Every agent and machine in one timeline | — | ✓ | ✓ | ✓ |
+| [Findings](/cloud/findings) (risks, skills, habits) | Local rules only | 50 included | Unlimited | Unlimited, org-wide |
+| One-click skills and fix prompts | — | ✓ | ✓ | ✓ |
+| [MCP access](/deployment/managed-mcp) | — | Session search | Sessions, findings and feedback | Sessions, findings and feedback |
+| [Agent memories over MCP](/deployment/managed-mcp#memory) | — | — | ✓ | ✓ |
+| Skills pulled from your sessions | — | — | ✓ | ✓ |
+| [Share sessions by link](/sharing/index) | — | ✓ | ✓ | ✓ |
+| Evidence trail on every finding | — | — | ✓ | ✓ |
+| Alerts | — | Daily digest | Real-time email | Real-time and custom |
+| Block or require approval for risky actions | — | — | — | ✓ |
+| Fleet rollout (Jamf, Intune, Fleet) | — | — | — | ✓ |
+| SSO, RBAC, audit logs | — | — | — | ✓ |
+| Support | Community | Community | Priority | Dedicated SLA |
+
+The Beacon CLI, hooks, local dashboard, threat rules, session sharing commands and
+[Agent Skills](/concepts/beacon-skills) are the same open-source build on every plan. Nothing on
+the machine changes when you upgrade: Pro is a property of your beacon.sh account.
+
+## What Beacon Cloud Pro adds
+
+- **Unlimited findings.** A free account gets 50 findings over its lifetime. Pro has no limit, so
+  every new risk, skill opportunity and habit Beacon notices keeps showing up.
+- **Findings and feedback over MCP.** Your agents can list and read your findings, with their
+  evidence and recommendation, and record your feedback or resolve them, through
+  `beacon_findings_list`, `beacon_get_finding` and `beacon_finding_feedback`.
+- **Memory over MCP.** Agents can file lessons from your sessions as memory candidates, review
+  them with you, recall approved memory in later sessions on any machine or harness, and render a
+  memory as an Agent Skill. See [Memory](/deployment/managed-mcp#memory).
+- **Skills pulled from your sessions.** The `beacon_memory_skill` tool and the
+  `beacon-memory-promote` skill turn an approved memory into a `SKILL.md` your agents load
+  automatically.
+- **The full evidence trail** behind every finding, and **real-time email alerts** in place of the
+  daily digest.
+- **Priority support.**
+
+Session search, lenses and session sharing over MCP stay available on the free plan.
+
+## Upgrade, trial and cancel
+
+Open **Billing** at [beacon.sh/dashboard/billing](https://beacon.sh/dashboard/billing), or choose
+**Upgrade to Pro** on the [pricing page](https://beacon.sh/pricing). Pick monthly or annual billing
+and finish checkout in the browser. When a free trial is offered, the button reads
+**Start a free trial**, and a trial has every Pro feature.
+
+- Pro reaches your agents within about a minute of checkout. Reconnecting MCP is not needed.
+- Findings resume from your next new telemetry once you upgrade. Sessions analyzed while you were
+  at the free limit are not re-analyzed.
+- **Cancel subscription** on the Billing page keeps Pro until the end of the period you paid for,
+  then moves the account back to free Beacon Cloud. Your sessions, findings, memory, lenses and
+  shared traces are kept.
+- If a payment fails, the account stays on Pro while the payment is retried, and Billing shows it
+  as past due.
+
+Beacon never asks for payment details in the CLI or through an agent. When an agent sets Beacon
+up for you, it sends you to the Billing page to finish upgrading.
+
+## What a free account sees at a limit
+
+- **Findings.** After 50 findings, Beacon Cloud stops analyzing new activity for the account. A
+  finding you already have still updates when it recurs. Your sessions keep uploading and stay
+  searchable.
+- **MCP.** A findings or memory tool called from a free account returns an error that says the
+  tool is part of Beacon Cloud Pro and links to the pricing page, so your agent can tell you why.
+  Every other tool keeps working.
+
+## Choosing a plan
+
+- Choose **Open Source** when nothing may leave the machine, or when you forward to a data stack
+  you already run. See [Local](/deployment/open-source).
+- Choose **Beacon Cloud** to see every agent on every machine in one place, share sessions and try
+  findings. See [Beacon Cloud](/deployment/managed).
+- Choose **Beacon Cloud Pro** when your agents should learn from your history: memory, findings
+  and feedback over MCP, and no findings limit.
+- Choose **Enterprise** to roll Beacon out across a team or fleet with MDM, require approval for
+  risky actions, or keep the data in your own bucket.
+
+You can start local and connect later with `beacon login` and `beacon endpoint connect`, and you
+can upgrade or cancel Pro at any time without touching your devices.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Hosting options" icon="server" href="/deployment/hosting-options">
+    Install Beacon locally or connect it to Beacon Cloud.
+  </Card>
+  <Card title="Findings" icon="magnifying-glass" href="/cloud/findings">
+    What Beacon Cloud notices in your sessions.
+  </Card>
+  <Card title="Beacon Cloud MCP" icon="plug" href="/deployment/managed-mcp">
+    The tools your agents can use on each plan.
+  </Card>
+  <Card title="Connect devices" icon="laptop" href="/cloud/devices">
+    Enroll a machine in Beacon Cloud.
+  </Card>
+</Columns>

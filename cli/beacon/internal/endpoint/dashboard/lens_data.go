@@ -39,17 +39,17 @@ func BuildLensData(logPath, traceID string, opts LensDataOptions) (LensDataV1, b
 	if err != nil || !ok {
 		return LensDataV1{}, ok, err
 	}
-	var raw []schema.Event
-	err = StreamEvents(logPath, func(event schema.Event) error {
-		if traceProjectionID(event) == traceID {
-			raw = append(raw, event)
+	var records []EventRecord
+	err = streamEventRecords(logPath, func(record EventRecord) error {
+		if traceProjectionID(record.Event) == traceID {
+			records = append(records, record)
 		}
 		return nil
 	})
 	if err != nil {
 		return LensDataV1{}, false, err
 	}
-	return lensDataFromShow(show, raw, opts), true, nil
+	return lensDataFromShow(show, records, opts), true, nil
 }
 
 // BuildSessionLensData is BuildLensData for the dashboard's session page, which shows every event
@@ -78,25 +78,23 @@ func BuildSessionLensData(logPath, session string, opts LensDataOptions) (LensDa
 	if harness == "" {
 		harness = strings.TrimSpace(first.Harness.Name)
 	}
-	builder := asymptoteobserve.NewTraceBuilder("session:"+harness+":"+session, first)
-	raw := make([]schema.Event, 0, len(records))
+	fold := newTraceFold("session:"+harness+":"+session, first)
 	for _, record := range records {
-		builder.Add(record.Event, traceEventFromRecord(record, 0))
-		raw = append(raw, record.Event)
+		fold.add(record.Event, traceEventFromRecord(record, 0))
 	}
-	events := builder.Events()
+	events := fold.builder.Events()
 	total := len(events)
 	show := TraceShowResultV1{
-		Trace:  builder.Summary(),
+		Trace:  fold.summary(),
 		Events: events,
 		Spans:  asymptoteobserve.TraceSpans(events),
 		Range:  TraceRangeV1{TotalEvents: total, ReturnedEvents: total, Offset: 1, Limit: total},
 	}
-	return lensDataFromShow(show, raw, opts), true, nil
+	return lensDataFromShow(show, records, opts), true, nil
 }
 
 // lensDataFromShow finishes lens data from a projected trace and the endpoint events behind it.
-func lensDataFromShow(show TraceShowResultV1, raw []schema.Event, opts LensDataOptions) LensDataV1 {
+func lensDataFromShow(show TraceShowResultV1, records []EventRecord, opts LensDataOptions) LensDataV1 {
 	data := LensDataV1{
 		APIVersion: asymptoteobserve.LensAPIVersion,
 		Trace:      TraceBundleFromShow(show, version.Version),
@@ -105,8 +103,12 @@ func lensDataFromShow(show TraceShowResultV1, raw []schema.Event, opts LensDataO
 	// Findings and coverage are each optional in the contract. A rule pack that fails to load
 	// leaves Findings nil -- "not scanned" -- instead of failing the whole lens, since every other
 	// part of the data is still right.
-	if findings, err := lensFindings(raw, opts); err == nil {
+	if findings, err := lensFindings(records, opts); err == nil {
 		data.Findings = findings
+	}
+	raw := make([]schema.Event, 0, len(records))
+	for _, record := range records {
+		raw = append(raw, record.Event)
 	}
 	data.TokenCoverage = lensTokenCoverage(raw, show.Trace.Harness.Name)
 	data.TokenUsage = lensTokenUsage(raw)
@@ -173,8 +175,8 @@ func fitLensEvents(bundle *asymptoteobserve.TraceBundleV1, budget int) bool {
 
 // lensFindings runs the active rules over the trace's events. Any error, including no active rules
 // (*detect.NoRulesError), leaves the caller's Findings nil: "not scanned".
-func lensFindings(raw []schema.Event, opts LensDataOptions) (*asymptoteobserve.LensFindingsV1, error) {
-	if len(raw) == 0 {
+func lensFindings(records []EventRecord, opts LensDataOptions) (*asymptoteobserve.LensFindingsV1, error) {
+	if len(records) == 0 {
 		// The trace is known only to the history: its lines have rotated out of the live log.
 		// Scanning nothing would report a clean scan of a trace no rule ever saw.
 		return nil, errors.New("no live events to scan")
@@ -183,7 +185,15 @@ func lensFindings(raw []schema.Event, opts LensDataOptions) (*asymptoteobserve.L
 	if err != nil {
 		return nil, err
 	}
-	events := append([]asymptoteobserve.Event(nil), raw...)
+	events := make([]asymptoteobserve.Event, 0, len(records))
+	for _, record := range records {
+		event := record.Event
+		// Only scan copies receive fallback IDs; token aggregation and source logs keep raw IDs.
+		if event.Event.ID == "" {
+			event.Event.ID = record.ID
+		}
+		events = append(events, event)
+	}
 	// Same reason as RunScan: the log is in append order, not the order things happened, and
 	// ordered correlation rules miss without this.
 	threatrules.SortEvents(events)
@@ -201,9 +211,8 @@ func lensFindings(raw []schema.Event, opts LensDataOptions) (*asymptoteobserve.L
 	for _, f := range found {
 		ids := make([]string, 0, len(f.Events))
 		for _, event := range f.Events {
-			// Trace events take their ID from the endpoint event ID, so evidence resolves against
-			// trace.events[].id without copying the event.
-			if id := strings.TrimSpace(event.Event.ID); id != "" {
+			// The scan copy uses the same explicit ID or record fallback as trace.events[].id.
+			if id := event.Event.ID; id != "" {
 				ids = append(ids, id)
 			}
 		}

@@ -27,11 +27,12 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/objectkey"
 )
 
 const (
-	defaultLogPath     = "/tmp/beacon/runtime.jsonl"
-	defaultStatePath   = "/tmp/beacon/shuttle-state.json"
+	defaultLogName     = "runtime.jsonl"
+	defaultStateName   = "shuttle-state.json"
 	defaultTokenURI    = "https://oauth2.googleapis.com/token"
 	defaultGCSEndpoint = "https://storage.googleapis.com"
 	defaultS3Region    = "us-east-1"
@@ -42,6 +43,11 @@ const (
 )
 
 var httpClient = http.DefaultClient
+
+// SandboxDir is the cloud sandbox's Beacon directory. The shuttle reads and writes only under it,
+// so an environment a repository supplies cannot select a host log to upload. Tests point it
+// elsewhere.
+var SandboxDir = "/tmp/beacon"
 var nowUTC = func() time.Time { return time.Now().UTC() }
 
 type Config struct {
@@ -87,7 +93,7 @@ type tokenResponse struct {
 }
 
 func ConfigFromEnv() Config {
-	statePath := firstEnvDefault(defaultStatePath, "BEACON_CLOUD_SHUTTLE_STATE")
+	statePath := inSandbox("state path", firstEnv("BEACON_CLOUD_SHUTTLE_STATE"), defaultStateName)
 	upload := cloudUploadFromEnv()
 	bucket := strings.TrimSpace(os.Getenv("BEACON_CLOUD_GCS_BUCKET"))
 	prefix := strings.Trim(strings.TrimSpace(os.Getenv("BEACON_CLOUD_GCS_PREFIX")), "/")
@@ -97,7 +103,7 @@ func ConfigFromEnv() Config {
 	}
 	return Config{
 		Upload:         upload,
-		LogPath:        firstEnvDefault(defaultLogPath, "BEACON_CLOUD_LOG_PATH", "BEACON_ENDPOINT_LOG", "BEACON_LOG_PATH", "BEACON_RUNTIME_LOG"),
+		LogPath:        inSandbox("log path", firstEnv("BEACON_CLOUD_LOG_PATH", "BEACON_ENDPOINT_LOG", "BEACON_LOG_PATH", "BEACON_RUNTIME_LOG"), defaultLogName),
 		StatePath:      statePath,
 		Bucket:         bucket,
 		Prefix:         prefix,
@@ -117,6 +123,27 @@ func ConfigFromEnv() Config {
 	}
 }
 
+// inSandbox is p when it lies under SandboxDir, else the default file there. A refused p is
+// reported on stderr, never stdout, which some runtimes add to the model's context, and only
+// under BEACON_ORIGIN=cloud: local installs always set BEACON_ENDPOINT_LOG outside the sandbox
+// and reach this through every SessionStart, Stop and SessionEnd, where the shuttle is inert.
+func inSandbox(label, p, name string) string {
+	fallback := filepath.Join(SandboxDir, name)
+	if p == "" {
+		return fallback
+	}
+	if filepath.IsAbs(p) {
+		rel, err := filepath.Rel(SandboxDir, p)
+		if err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return p
+		}
+	}
+	if strings.TrimSpace(os.Getenv("BEACON_ORIGIN")) == "cloud" {
+		fmt.Fprintf(os.Stderr, "beacon-hooks: cloud shuttle ignores %s %s outside %s; using %s\n", label, p, SandboxDir, fallback)
+	}
+	return fallback
+}
+
 func MaybeUpload(ctx context.Context, force bool) error {
 	return Upload(ctx, ConfigFromEnv(), force)
 }
@@ -126,56 +153,56 @@ func ResetFromEnv() error {
 	if strings.TrimSpace(os.Getenv("BEACON_ORIGIN")) != "cloud" {
 		return nil
 	}
-	if err := preserveExistingLog(cfg); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	release, err := lockUpload(ctx, cfg.StatePath)
+	if err != nil {
 		return err
 	}
-	for _, path := range []string{cfg.LogPath + ".lock", cfg.StatePath} {
-		if path == "" {
-			continue
-		}
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return err
-		}
+	defer release()
+	if err := preserveExistingLogLocked(ctx, cfg); err != nil {
+		return err
+	}
+	// Lock files are stable protocol identities: unlinking one lets another process
+	// lock a new inode while an existing holder still owns the old inode.
+	if err := os.Remove(cfg.StatePath); err != nil && !os.IsNotExist(err) {
+		return err
 	}
 	return nil
 }
 
 func Upload(ctx context.Context, cfg Config, force bool) error {
 	cfg = normalizeConfig(cfg)
-	if !uploadConfigured(cfg) {
+	if !uploadConfigured(cfg) || strings.TrimSpace(cfg.RunID) == "" || !force {
 		return nil
 	}
-	if strings.TrimSpace(cfg.RunID) == "" {
-		return nil
+	release, err := lockUpload(ctx, cfg.StatePath)
+	if err != nil {
+		return err
 	}
-	info, err := os.Stat(cfg.LogPath)
+	defer release()
+
+	snapshot, cleanup, err := snapshotLog(ctx, cfg.LogPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
 		return err
 	}
-	if info.Size() == 0 {
-		return nil
-	}
-	if !force {
-		return nil
-	}
-	snapshot, cleanup, err := snapshotLog(cfg.LogPath)
-	if err != nil {
-		return err
-	}
 	defer cleanup()
+	if snapshot.info.Size() == 0 {
+		return nil
+	}
 	if cfg.Upload == uploadAsymptote {
-		return uploadAsymptoteIncremental(ctx, cfg, snapshot, info.Size())
+		return uploadAsymptoteIncremental(ctx, cfg, snapshot.path, snapshot.info.Size())
 	}
 	objectName := uploadObjectName(cfg)
-	if err := uploadSnapshot(ctx, cfg, objectName, snapshot); err != nil {
+	if err := uploadSnapshot(ctx, cfg, objectName, snapshot.path); err != nil {
 		return err
 	}
 	return writeState(cfg.StatePath, state{
 		LastUpload: time.Now().UTC().Format(time.RFC3339),
-		LastSize:   info.Size(),
+		LastSize:   snapshot.info.Size(),
 		LastObject: objectName,
 		Provider:   cfg.Provider,
 		RunID:      cfg.RunID,
@@ -198,68 +225,71 @@ func stateObjectMatchesConfig(st state, cfg Config) bool {
 	if st.Provider != "" || st.RunID != "" {
 		return st.Provider == cfg.Provider && st.RunID == cfg.RunID
 	}
-	provider := cleanKeyPart(defaultString(cfg.Provider, "unknown"))
-	runID := cleanKeyPart(defaultString(cfg.RunID, "unknown"))
+	provider := objectkey.CleanPart(defaultString(cfg.Provider, "unknown"))
+	runID := objectkey.CleanPart(defaultString(cfg.RunID, "unknown"))
 	return strings.HasSuffix(path.Base(objectName), "-"+provider+"-"+runID+".jsonl.gz")
 }
 
 func ObjectName(cfg Config) string {
 	now := nowUTC()
-	parts := cleanKeyParts(cfg.Prefix)
+	parts := objectkey.CleanParts(cfg.Prefix)
 	parts = append(parts, "runtime", "date="+now.Format("2006-01-02"))
 	filename := strings.Join([]string{
 		fmt.Sprintf("%d", now.Unix()),
-		cleanKeyPart(defaultString(cfg.Provider, "unknown")),
-		cleanKeyPart(defaultString(cfg.RunID, "unknown")),
+		objectkey.CleanPart(defaultString(cfg.Provider, "unknown")),
+		objectkey.CleanPart(defaultString(cfg.RunID, "unknown")),
 	}, "-") + ".jsonl.gz"
 	parts = append(parts, filename)
 	return path.Join(parts...)
 }
 
-func snapshotLog(logPath string) (string, func(), error) {
+type logSnapshot struct {
+	path string
+	info os.FileInfo
+}
+
+func snapshotLog(ctx context.Context, logPath string) (logSnapshot, func(), error) {
 	lock, err := os.OpenFile(logPath+".lock", os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
-		return "", func() {}, err
+		return logSnapshot{}, func() {}, err
 	}
-	held, err := filelock.Shared(lock)
+	defer lock.Close()
+	held, err := filelock.SharedContext(ctx, lock)
 	if err != nil {
-		_ = lock.Close()
-		return "", func() {}, err
+		return logSnapshot{}, func() {}, err
 	}
-	// Registered close-first so LIFO runs it last: the lock is released, then the handle closed.
-	// The previous order relied on closing the descriptor to drop the lock implicitly, which left
-	// the explicit unlock failing on a closed handle with its error discarded.
-	defer func() {
-		if err := lock.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "cloudshuttle: failed to close lock file %s.lock: %v\n", logPath, err)
-		}
-	}()
 	defer held.Release()
 
 	source, err := os.Open(logPath)
 	if err != nil {
-		return "", func() {}, err
+		return logSnapshot{}, func() {}, err
 	}
 	defer source.Close()
-	if err := os.MkdirAll(filepath.Dir(logPath), 0755); err != nil {
-		return "", func() {}, err
+	// Identity and length belong to the same opened source under the writer lock.
+	// A separate pre-lock Stat can describe a different generation or older size.
+	info, err := source.Stat()
+	if err != nil {
+		return logSnapshot{}, func() {}, err
 	}
 	temp, err := os.CreateTemp(filepath.Dir(logPath), "beacon-cloud-*.jsonl")
 	if err != nil {
-		return "", func() {}, err
+		return logSnapshot{}, func() {}, err
 	}
-	tempPath := temp.Name()
-	cleanup := func() { _ = os.Remove(tempPath) }
-	if _, err := io.Copy(temp, source); err != nil {
+	cleanup := func() { _ = os.Remove(temp.Name()) }
+	if _, err := io.CopyN(temp, source, info.Size()); err != nil {
 		_ = temp.Close()
 		cleanup()
-		return "", func() {}, err
+		return logSnapshot{}, func() {}, err
 	}
 	if err := temp.Close(); err != nil {
 		cleanup()
-		return "", func() {}, err
+		return logSnapshot{}, func() {}, err
 	}
-	return tempPath, cleanup, nil
+	if err := ctx.Err(); err != nil {
+		cleanup()
+		return logSnapshot{}, func() {}, err
+	}
+	return logSnapshot{path: temp.Name(), info: info}, cleanup, nil
 }
 
 func accessToken(ctx context.Context, credentialsB64 string) (string, error) {
@@ -419,7 +449,7 @@ func uploadGCSObject(ctx context.Context, endpoint, bucket, objectName, filePath
 		return err
 	}
 	defer file.Close()
-	uploadURL := strings.TrimRight(endpoint, "/") + "/" + escapePath(bucket) + "/" + escapeObjectName(objectName)
+	uploadURL := strings.TrimRight(endpoint, "/") + "/" + objectkey.EscapeName(bucket) + "/" + objectkey.EscapeName(objectName)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL, file)
 	if err != nil {
 		return err
@@ -459,7 +489,7 @@ func uploadS3Object(ctx context.Context, cfg Config, objectName, filePath string
 	if endpoint == "" {
 		endpoint = "https://s3." + cfg.S3Region + ".amazonaws.com"
 	}
-	uploadURL := endpoint + "/" + escapePath(cfg.Bucket) + "/" + escapeObjectName(objectName)
+	uploadURL := endpoint + "/" + objectkey.EscapeName(cfg.Bucket) + "/" + objectkey.EscapeName(objectName)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL, file)
 	if err != nil {
 		return err
@@ -555,44 +585,46 @@ func writeState(path string, st state) error {
 
 func preserveExistingLog(cfg Config) error {
 	cfg = normalizeConfig(cfg)
-	info, err := os.Stat(cfg.LogPath)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	release, err := lockUpload(ctx, cfg.StatePath)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return preserveExistingLogLocked(ctx, cfg)
+}
+
+// The caller owns the upload transaction; this must never acquire that lock again.
+func preserveExistingLogLocked(ctx context.Context, cfg Config) error {
+	snapshot, cleanup, err := snapshotLog(ctx, cfg.LogPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
 		return err
 	}
-	if info.Size() == 0 {
-		return os.Remove(cfg.LogPath)
-	}
+	defer cleanup()
+	uploaded := snapshot.info.Size() == 0
 	st, stateErr := readState(cfg.StatePath)
 	hasState := stateErr == nil && st.LastObject != ""
-	// Bucket targets can only re-upload under the object name a previous run already used, so
-	// they need state. Managed ingest is addressed by the lines' own session ids, so a log from
-	// a run that never got a successful batch out (no state) is shipped whole rather than
-	// renamed aside, where an ephemeral sandbox would lose it.
-	if uploadConfigured(cfg) && (hasState || cfg.Upload == uploadAsymptote) {
-		snapshot, cleanup, err := snapshotLog(cfg.LogPath)
-		if err == nil {
-			defer cleanup()
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			var uploadErr error
-			if cfg.Upload == uploadAsymptote {
-				// Ship whatever the previous run's last hook did not get to, under that run's
-				// identity so the stored offset applies and nothing is sent twice.
-				previous := cfg
-				if hasState {
-					previous.Provider, previous.RunID = st.Provider, st.RunID
-				}
-				uploadErr = uploadAsymptoteIncremental(ctx, previous, snapshot, info.Size())
-			} else {
-				uploadErr = uploadSnapshot(ctx, cfg, st.LastObject, snapshot)
+	// Bucket targets retain their previous run object. Managed ingest can ship a
+	// never-uploaded run because each line carries its own session identity.
+	if !uploaded && uploadConfigured(cfg) && (hasState || cfg.Upload == uploadAsymptote) {
+		var uploadErr error
+		if cfg.Upload == uploadAsymptote {
+			previous := cfg
+			if hasState {
+				previous.Provider, previous.RunID = st.Provider, st.RunID
 			}
-			if uploadErr == nil {
-				return os.Remove(cfg.LogPath)
-			}
+			uploadErr = uploadAsymptoteIncremental(ctx, previous, snapshot.path, snapshot.info.Size())
+		} else {
+			uploadErr = uploadSnapshot(ctx, cfg, st.LastObject, snapshot.path)
 		}
+		uploaded = uploadErr == nil
+	}
+	if uploaded {
+		return os.Remove(cfg.LogPath)
 	}
 	preservedPath := fmt.Sprintf("%s.previous-%d", cfg.LogPath, time.Now().UTC().UnixNano())
 	if err := os.Rename(cfg.LogPath, preservedPath); err != nil && !os.IsNotExist(err) {
@@ -628,10 +660,10 @@ func normalizeConfig(cfg Config) Config {
 		}
 	}
 	if cfg.LogPath == "" {
-		cfg.LogPath = defaultLogPath
+		cfg.LogPath = filepath.Join(SandboxDir, defaultLogName)
 	}
 	if cfg.StatePath == "" {
-		cfg.StatePath = defaultStatePath
+		cfg.StatePath = filepath.Join(SandboxDir, defaultStateName)
 	}
 	if cfg.GCSEndpoint == "" {
 		cfg.GCSEndpoint = defaultGCSEndpoint
@@ -682,38 +714,6 @@ func hmacSHA256(key []byte, value string) []byte {
 	mac := hmac.New(sha256.New, key)
 	mac.Write([]byte(value))
 	return mac.Sum(nil)
-}
-
-func cleanKeyParts(value string) []string {
-	var parts []string
-	for _, part := range strings.Split(strings.Trim(value, "/"), "/") {
-		if cleaned := cleanKeyPart(part); cleaned != "" {
-			parts = append(parts, cleaned)
-		}
-	}
-	return parts
-}
-
-func cleanKeyPart(value string) string {
-	cleaned := strings.TrimSpace(value)
-	cleaned = strings.ReplaceAll(cleaned, "\\", "-")
-	cleaned = strings.Trim(cleaned, "/")
-	if cleaned == "." || cleaned == ".." {
-		return ""
-	}
-	return cleaned
-}
-
-func escapeObjectName(objectName string) string {
-	parts := strings.Split(objectName, "/")
-	for i, part := range parts {
-		parts[i] = escapePath(part)
-	}
-	return strings.Join(parts, "/")
-}
-
-func escapePath(value string) string {
-	return (&url.URL{Path: value}).EscapedPath()
 }
 
 func awsCanonicalURI(pathValue string) string {

@@ -1,8 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The cloud shuttle uploads only from /tmp/beacon, so a path outside it is refused.
+under_sandbox() {
+  case "$1" in
+    */../* | */..) return 1 ;;
+    /tmp/beacon | /tmp/beacon/*) return 0 ;;
+  esac
+  return 1
+}
+
 BEACON_HOME="${BEACON_HOME:-/tmp/beacon}"
+if ! under_sandbox "$BEACON_HOME"; then
+  echo "Beacon ignores BEACON_HOME=$BEACON_HOME outside /tmp/beacon." >&2
+  BEACON_HOME=/tmp/beacon
+fi
 BEACON_LOG_PATH="${BEACON_CLOUD_LOG_PATH:-$BEACON_HOME/runtime.jsonl}"
+if [ "$BEACON_LOG_PATH" = /tmp/beacon ] || ! under_sandbox "$BEACON_LOG_PATH"; then
+  echo "Beacon ignores BEACON_CLOUD_LOG_PATH=$BEACON_LOG_PATH outside /tmp/beacon." >&2
+  BEACON_LOG_PATH="$BEACON_HOME/runtime.jsonl"
+fi
 
 mkdir -p "$(dirname "$BEACON_LOG_PATH")"
 

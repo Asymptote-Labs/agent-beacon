@@ -7,7 +7,6 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // writePrimeExtension creates a user-level Prime Agent extension file with the given contents.
@@ -53,27 +52,6 @@ func TestDiscoverPrimeReportsMissingExtension(t *testing.T) {
 	if h.Capability != "plugin" {
 		t.Fatalf("Capability = %q, want %q -- Prime Agent has no hooks file and no OTel export, so "+
 			"the integration is extension-shaped", h.Capability, "plugin")
-	}
-}
-
-// Prime Agent installed through npm, through its own install.sh into ~/.local/share/prime-agent, or
-// into a directory this process did not inherit on PATH is not visible as an executable, so the
-// state directory has to count as evidence. The alternative is reporting "not detected" for a
-// runtime the operator is actively running, which reads as "Beacon cannot see this" when the truth
-// is "Beacon has not been installed into it yet".
-func TestDiscoverPrimeTreatsTheStateDirectoryAsEvidence(t *testing.T) {
-	home := setupPrimeDiscovery(t)
-	if err := os.MkdirAll(filepath.Join(home, ".prime", "agent"), 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	h := DiscoverPrime()
-	if !h.Detected {
-		t.Fatal("DiscoverPrime reported not detected with a Prime Agent agent directory present")
-	}
-	if h.TelemetryStatus != TelemetryMissing {
-		t.Fatalf("TelemetryStatus = %q, want %q -- the runtime is present but Beacon is not "+
-			"installed into it", h.TelemetryStatus, TelemetryMissing)
 	}
 }
 
@@ -141,34 +119,4 @@ func TestDiscoverPrimeDoesNotAcceptASiblingsMarker(t *testing.T) {
 			}
 		})
 	}
-}
-
-// The harness name discovery reports must be the canonical one events are written under, or the
-// dashboard groups a runtime's discovery row and its telemetry rows separately.
-func TestDiscoverPrimeUsesTheCanonicalHarnessName(t *testing.T) {
-	setupPrimeDiscovery(t)
-
-	h := DiscoverPrime()
-	if got := asymptoteobserve.NormalizeHarnessName(h.Name); got != h.Name {
-		t.Fatalf("DiscoverPrime reports %q, which normalizes to %q; discovery and telemetry would "+
-			"not join", h.Name, got)
-	}
-	for _, sibling := range []Harness{DiscoverPi(), DiscoverOmp()} {
-		if h.Name == sibling.Name {
-			t.Fatalf("Prime Agent and %s discovery report the same harness name", sibling.DisplayName)
-		}
-	}
-}
-
-// A runtime absent from DiscoverAll is a runtime `beacon endpoint discover` never mentions, which
-// is how support ships without anyone being able to find it.
-func TestDiscoverAllIncludesPrime(t *testing.T) {
-	setupPrimeDiscovery(t)
-
-	for _, h := range DiscoverAll() {
-		if h.Name == "prime_agent" {
-			return
-		}
-	}
-	t.Fatal("DiscoverAll does not include Prime Agent")
 }

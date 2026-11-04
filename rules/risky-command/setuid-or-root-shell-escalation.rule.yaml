@@ -1,9 +1,10 @@
 id: setuid-or-root-shell-escalation
-version: 1
+version: 2
 title: Setuid bit installed or interactive root shell requested
 description: >
-  A command either installs the setuid bit on a file (chmod u+s, chmod with a leading
-  4 octal mode such as 4755, or chmod g+s setgid) — creating a standing privileged
+  A command either installs the setuid bit on a file (chmod u+s or +s, chmod with a
+  four-digit octal mode carrying the setuid or setgid bit such as 4755, 6755 or 04755,
+  or chmod g+s setgid) — creating a standing privileged
   binary that runs as its owner — or escalates to an interactive root shell via
   `su - root` / `su root` / `su -` or `pkexec` (polkit). Setuid root binaries and
   pkexec are classic local-privilege-escalation primitives. The setuid mode is
@@ -19,7 +20,7 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(^|[;&|]\\s*)chmod\\s+([^;&|]*\\s)?([ug]\\+[rwx]*s|[42][0-7]{3})\\b") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*)chmod\\s+([^;&|]*\\s)?([ugoa]*\\+[rwxXt]*s\\b|0?[2-7][0-7]{3}(\\s|$))") ||
     e.command.command.matches("(?i)(^|[;&|]\\s*)su\\s+(-l?\\s+|-\\s+)?root\\b") ||
     e.command.command.matches("(?i)(^|[;&|]\\s*)su\\s+-\\s*$") ||
     e.command.command.matches("(?i)(^|[;&|]\\s*)pkexec\\b")
@@ -41,6 +42,30 @@ tests:
       - event: { action: command.executed }
         command: { command: "chmod 4755 /usr/local/bin/x" }
         session: { id: s1 }
+  - name: chmod_plus_s_no_who
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "chmod +s /tmp/rootbash" }
+        session: { id: s1 }
+  - name: chmod_6755_setuid_and_setgid
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "chmod 6755 /usr/local/bin/x" }
+        session: { id: s1 }
+  - name: chmod_04755_leading_zero
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "chmod 04755 /usr/local/bin/x" }
+        session: { id: s1 }
+  - name: chmod_sticky_only
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "chmod 1777 /srv/shared" }
+        session: { id: s1 }
   - name: su_dash_root
     verdict: match
     events:
@@ -58,6 +83,12 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "chmod 755 deploy.sh" }
+        session: { id: s1 }
+  - name: chmod_normal_mode_on_numbered_file
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "chmod 644 2024.csv" }
         session: { id: s1 }
   - name: su_to_regular_user
     verdict: no_match

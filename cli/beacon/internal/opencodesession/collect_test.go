@@ -149,3 +149,53 @@ func loggedActions(t *testing.T, path string) []string {
 	}
 	return actions
 }
+
+// OpenCode 2.x lists sessions in session_v2 and keeps their history in session_message, migrating
+// 1.x sessions into both under the same ids and timestamps. The migrated copy must not be written
+// twice, and what 2.x added afterwards must be.
+func TestCollectOnceReadsOpenCode2Sessions(t *testing.T) {
+	dir := t.TempDir()
+	db := newOpenCodeDB(t, filepath.Join(dir, "opencode.db"))
+	insertJSON(t, db, `INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)`, "msg_1", "ses_1", int64(1770000000100), map[string]interface{}{"id": "msg_1", "role": "user"})
+	insertJSON(t, db, `INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)`, "prt_1", "msg_1", "ses_1", int64(1770000000100), map[string]interface{}{"id": "prt_1", "type": "text", "text": "old prompt"})
+	mustExec(t, db, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT NOT NULL, title TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, time_archived INTEGER)`)
+	mustExec(t, db, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, seq INTEGER NOT NULL, time_created INTEGER NOT NULL, data TEXT NOT NULL)`)
+	mustExec(t, db, `INSERT INTO session_v2 (id, directory, time_created, time_updated) VALUES ('ses_1', '/repo', 1770000000000, 1770000000900), ('ses_2', '/repo2', 1770000001000, 1770000001500)`)
+	insert := `INSERT INTO session_message (id, session_id, type, seq, time_created, data) VALUES (?, ?, ?, ?, ?, ?)`
+	insertJSON(t, db, insert, "msg_1", "ses_1", "user", 1, int64(1770000000100), map[string]interface{}{"text": "old prompt"})
+	insertJSON(t, db, insert, "msg_2", "ses_1", "user", 2, int64(1770000000800), map[string]interface{}{"text": "resumed in 2.x"})
+	insertJSON(t, db, insert, "msg_3", "ses_2", "user", 1, int64(1770000001100), map[string]interface{}{"text": "run tests"})
+	insertJSON(t, db, insert, "msg_4", "ses_2", "assistant", 2, int64(1770000001200), map[string]interface{}{
+		"model": map[string]interface{}{"id": "claude-sonnet-4-5", "providerID": "anthropic"},
+		"content": []interface{}{
+			map[string]interface{}{"type": "text", "text": "Running them."},
+			map[string]interface{}{"type": "tool", "id": "call_1", "name": "bash",
+				"state": map[string]interface{}{"status": "completed", "input": map[string]interface{}{"command": "go test ./..."},
+					"content": []interface{}{map[string]interface{}{"type": "text", "text": "ok"}}, "metadata": map[string]interface{}{"exit": 0}},
+				"time": map[string]interface{}{"created": 1770000001300, "completed": 1770000001400}},
+		},
+		"tokens": map[string]interface{}{"input": 100, "output": 20, "reasoning": 5, "cache": map[string]interface{}{"read": 0, "write": 0}},
+		"cost":   0.01,
+	})
+	// A completed compaction carries the usage of the summarizing model call.
+	insertJSON(t, db, insert, "msg_5", "ses_2", "compaction", 3, int64(1770000001450), map[string]interface{}{
+		"status": "completed", "model": map[string]interface{}{"id": "claude-sonnet-4-5", "providerID": "anthropic"},
+		"tokens": map[string]interface{}{"input": 400, "output": 50, "reasoning": 0, "cache": map[string]interface{}{"read": 0, "write": 0}},
+		"cost":   0.02,
+	})
+
+	logPath := filepath.Join(dir, "runtime.jsonl")
+	if _, err := CollectOnce(CollectOptions{DataDir: dir, StatePath: filepath.Join(dir, "state.json"), LogPath: logPath, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int{}
+	for _, action := range loggedActions(t, logPath) {
+		got[action]++
+	}
+	want := map[string]int{"prompt.submitted": 3, "agent.message": 1, "command.executed": 1, "token.usage": 2}
+	for action, n := range want {
+		if got[action] != n {
+			t.Fatalf("logged %v, want %v", got, want)
+		}
+	}
+}

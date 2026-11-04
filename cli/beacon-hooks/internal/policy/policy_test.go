@@ -83,7 +83,7 @@ func TestEvaluateFailsOpenOnTimeout(t *testing.T) {
 	t.Setenv(ProviderEnv, "fake")
 	fakeProvider(t, "sleep")
 	orig := Timeout
-	Timeout = 100 * time.Millisecond
+	Timeout = 20 * time.Millisecond
 	t.Cleanup(func() { Timeout = orig })
 
 	start := time.Now()

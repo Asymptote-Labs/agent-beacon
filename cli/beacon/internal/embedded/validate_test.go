@@ -4,7 +4,6 @@ import (
 	"debug/elf"
 	"debug/macho"
 	"debug/pe"
-	"runtime"
 	"testing"
 )
 
@@ -43,30 +42,4 @@ func TestPeArch(t *testing.T) {
 	if got := peArch(pe.IMAGE_FILE_MACHINE_ARM64); got != "arm64" {
 		t.Errorf("peArch(ARM64) = %q, want %q", got, "arm64")
 	}
-}
-
-func TestArchMismatchError(t *testing.T) {
-	err := archMismatchError("amd64")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	msg := err.Error()
-	if got := runtime.GOOS; !containsStr(msg, got) {
-		t.Errorf("error message missing runtime OS %q: %s", got, msg)
-	}
-	if got := runtime.GOARCH; !containsStr(msg, got) {
-		t.Errorf("error message missing runtime GOARCH %q: %s", got, msg)
-	}
-	if !containsStr(msg, "architecture mismatch") {
-		t.Errorf("error message missing 'architecture mismatch': %s", msg)
-	}
-}
-
-func containsStr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

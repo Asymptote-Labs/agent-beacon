@@ -15,7 +15,7 @@ func TestMapSessionRecordsAHandoffLink(t *testing.T) {
 		{ID: 2, SessionID: "new-1", Role: "assistant", Content: "Reading the brief.", TimestampMS: 1780632832000, Active: true},
 		{ID: 3, SessionID: "new-1", Role: "user", Content: "no marker here", TimestampMS: 1780632833000, Active: true},
 	}
-	mapped, _ := MapSession(session, messages, nil)
+	mapped, _ := MapSession(session, messages, &Cursor{})
 	var links []MappedEvent
 	for _, m := range mapped {
 		if m.Event.Event.Action == "session.handoff" {
@@ -45,7 +45,7 @@ func TestMapSessionRecordsAHandoffLink(t *testing.T) {
 		}
 		ids[m.Event.Event.ID] = true
 	}
-	again, _ := MapSession(session, messages, nil)
+	again, _ := MapSession(session, messages, &Cursor{})
 	for i := range mapped {
 		if again[i].Event.Event.ID != mapped[i].Event.Event.ID {
 			t.Fatal("event ids must be deterministic, so a second sync never duplicates the link")

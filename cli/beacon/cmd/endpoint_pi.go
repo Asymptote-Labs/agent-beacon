@@ -47,6 +47,7 @@ var endpointPiOpts struct {
 	print       bool
 	watch       bool
 	interval    time.Duration
+	rotateBytes int64
 }
 
 func init() {
@@ -68,11 +69,16 @@ func init() {
 	sync.BoolVar(&endpointPiOpts.print, "print", false, "Print mapped events as JSON without writing them or advancing the cursor (dry run)")
 	sync.BoolVar(&endpointPiOpts.watch, "watch", false, "Sweep continuously on --interval (default: one sweep then exit)")
 	sync.DurationVar(&endpointPiOpts.interval, "interval", time.Minute, "Sweep interval for --watch")
+	addSyncRotateBytesFlag(sync, &endpointPiOpts.rotateBytes)
 }
 
 func runEndpointPiSync(cmd *cobra.Command, args []string) error {
+	if err := checkSyncRotateBytes(endpointPiOpts.rotateBytes); err != nil {
+		return err
+	}
 	userMode := endpointUserMode()
 	opts := pisession.CollectOptions{
+		RotateBytes: endpointPiOpts.rotateBytes,
 		SessionsDir: endpointPiOpts.sessionsDir,
 		Print:       endpointPiOpts.print,
 		Out:         cmd.OutOrStdout(),
@@ -91,7 +97,7 @@ func runEndpointPiSync(cmd *cobra.Command, args []string) error {
 	if endpointPiOpts.watch && !endpointPiOpts.print {
 		return watchPi(ctx, cmd, opts)
 	}
-	summary, err := pisession.CollectOnce(opts)
+	summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, endpointSweepLockWait, pisession.CollectOnce, opts)
 	reportPiSweep(cmd, summary)
 	return err
 }
@@ -102,7 +108,7 @@ func watchPi(ctx context.Context, cmd *cobra.Command, opts pisession.CollectOpti
 		interval = 5 * time.Second
 	}
 	for {
-		summary, err := pisession.CollectOnce(opts)
+		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, pisession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Pi sync error: %v\n", err)
 		}
@@ -125,6 +131,7 @@ func reportPiSweep(cmd *cobra.Command, summary pisession.Summary) {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Pi sync: %d sessions, %d changed, %d events, %d errors\n",
 		summary.Sessions, summary.SessionsChanged, summary.EventsEmitted, summary.Errors)
+	reportSyncRetention(cmd.OutOrStdout(), summary.Retention)
 	if summary.MalformedLines > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "  %d unreadable line(s) in Pi session logs\n", summary.MalformedLines)
 	}

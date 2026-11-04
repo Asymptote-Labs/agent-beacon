@@ -48,6 +48,7 @@ var endpointFactoryOpts struct {
 	print       bool
 	watch       bool
 	interval    time.Duration
+	rotateBytes int64
 }
 
 func init() {
@@ -69,11 +70,16 @@ func init() {
 	sync.BoolVar(&endpointFactoryOpts.print, "print", false, "Print mapped events as JSON without writing them or advancing the cursor (dry run)")
 	sync.BoolVar(&endpointFactoryOpts.watch, "watch", false, "Sweep continuously on --interval (default: one sweep then exit)")
 	sync.DurationVar(&endpointFactoryOpts.interval, "interval", time.Minute, "Sweep interval for --watch")
+	addSyncRotateBytesFlag(sync, &endpointFactoryOpts.rotateBytes)
 }
 
 func runEndpointFactorySync(cmd *cobra.Command, args []string) error {
+	if err := checkSyncRotateBytes(endpointFactoryOpts.rotateBytes); err != nil {
+		return err
+	}
 	userMode := endpointUserMode()
 	opts := factorysession.CollectOptions{
+		RotateBytes: endpointFactoryOpts.rotateBytes,
 		SessionsDir: endpointFactoryOpts.sessionsDir,
 		Print:       endpointFactoryOpts.print,
 		Out:         cmd.OutOrStdout(),
@@ -91,7 +97,7 @@ func runEndpointFactorySync(cmd *cobra.Command, args []string) error {
 	if endpointFactoryOpts.watch && !endpointFactoryOpts.print {
 		return watchFactory(ctx, cmd, opts)
 	}
-	summary, err := factorysession.CollectOnce(opts)
+	summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, endpointSweepLockWait, factorysession.CollectOnce, opts)
 	reportFactorySweep(cmd, summary)
 	return err
 }
@@ -102,7 +108,7 @@ func watchFactory(ctx context.Context, cmd *cobra.Command, opts factorysession.C
 		interval = 5 * time.Second
 	}
 	for {
-		summary, err := factorysession.CollectOnce(opts)
+		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, factorysession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Factory sync error: %v\n", err)
 		}
@@ -125,6 +131,7 @@ func reportFactorySweep(cmd *cobra.Command, summary factorysession.Summary) {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Factory sync: %d sessions, %d changed, %d events, %d errors\n",
 		summary.Sessions, summary.SessionsChanged, summary.EventsEmitted, summary.Errors)
+	reportSyncRetention(cmd.OutOrStdout(), summary.Retention)
 	if summary.MalformedLines > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "  %d unreadable line(s) in Factory session logs\n", summary.MalformedLines)
 	}

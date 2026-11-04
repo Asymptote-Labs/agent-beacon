@@ -120,52 +120,66 @@ func TestMCPMemoryToolsSearchGetAndContext(t *testing.T) {
 	}
 }
 
-func TestMCPMemoryToolsSearchOlderMatchesBeforeLimit(t *testing.T) {
+// Regression (1ebdfc47, aba38e81, #961): a text query must be matched against every approved
+// memory, not only the newest page of rows. Over the stdio protocol an agent's search_memory (q)
+// and get_memory_context (task) both find an older memory from another harness behind more newer,
+// unrelated memories than the store's default page holds.
+func TestMCPMemoryToolsFindAnOlderMatchBehindNewerMemories(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "endpoint", "logs", "runtime.jsonl")
-	if err := os.MkdirAll(filepath.Dir(logPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	store := learning.Open(learning.PathForRuntimeLog(logPath))
 	project := asymptoteobserve.LearningProjectV1{ID: "project-1"}
-	if err := store.PutMemory(asymptoteobserve.LearningMemoryV1{
-		ID:          "memory-older-match",
-		CandidateID: "candidate-older-match",
-		Kind:        asymptoteobserve.LearningMemoryKindDebuggingPattern,
-		Title:       "Older matching memory",
-		Body:        "Use the unique-needle recovery step when package smoke flakes.",
-		Project:     project,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	setStoredMemoryUpdatedAt(t, store.Path(), "memory-older-match", "2026-01-01T00:00:00Z")
-	for i := 0; i < 5; i++ {
-		id := fmt.Sprintf("memory-newer-%d", i)
-		if err := store.PutMemory(asymptoteobserve.LearningMemoryV1{
-			ID:          id,
-			CandidateID: "candidate-" + id,
-			Kind:        asymptoteobserve.LearningMemoryKindConvention,
-			Title:       "Newer unrelated memory",
-			Body:        "Use the ordinary local workflow.",
-			Project:     project,
-		}); err != nil {
+	put := func(memory asymptoteobserve.LearningMemoryV1, updatedAt string) {
+		t.Helper()
+		memory.Project = project
+		if err := store.PutMemory(memory); err != nil {
 			t.Fatal(err)
 		}
-		setStoredMemoryUpdatedAt(t, store.Path(), id, fmt.Sprintf("2026-01-02T00:00:0%dZ", i))
+		setStoredMemoryUpdatedAt(t, store.Path(), memory.ID, updatedAt)
 	}
-	server := New(Options{LogPath: logPath})
-	search, err := server.callTool(t.Context(), callToolParams{Name: "search_memory", Arguments: map[string]interface{}{"project_id": "project-1", "q": "unique-needle", "limit": 5}})
-	if err != nil {
-		t.Fatalf("search_memory: %v", err)
+	put(asymptoteobserve.LearningMemoryV1{
+		ID: "memory-older-match", CandidateID: "candidate-claude", Kind: asymptoteobserve.LearningMemoryKindDebuggingPattern,
+		Title: "Claude Code trace: retry package smoke", Body: "Rerun the unique-needle smoke once before changing code.",
+		Evidence: []asymptoteobserve.LearningEvidenceV1{{TraceID: "session:claude_code:s1"}},
+	}, "2026-01-01T00:00:00Z")
+	for i := range 60 {
+		id := fmt.Sprintf("memory-newer-%02d", i)
+		put(asymptoteobserve.LearningMemoryV1{
+			ID: id, CandidateID: "candidate-" + id, Kind: asymptoteobserve.LearningMemoryKindConvention,
+			Title: "Newer unrelated memory", Body: "Use the ordinary local workflow.",
+		}, fmt.Sprintf("2026-01-02T00:%02d:00Z", i))
 	}
-	if !strings.Contains(search.Content[0].Text, "memory-older-match") {
-		t.Fatalf("search_memory missing older match: %s", search.Content[0].Text)
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_memory","arguments":{"project_id":"project-1","q":"unique-needle"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_memory_context","arguments":{"project_id":"project-1","task":"unique-needle smoke"}}}`,
+		"",
+	}, "\n")
+	var output bytes.Buffer
+	if err := New(Options{LogPath: logPath}).ServeStdio(t.Context(), strings.NewReader(input), &output); err != nil {
+		t.Fatalf("ServeStdio: %v", err)
 	}
-	context, err := server.callTool(t.Context(), callToolParams{Name: "get_memory_context", Arguments: map[string]interface{}{"project_id": "project-1", "task": "unique-needle"}})
-	if err != nil {
-		t.Fatalf("get_memory_context: %v", err)
+	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("response lines = %d, want 2:\n%s", len(lines), output.String())
 	}
-	if !strings.Contains(context.Content[0].Text, "memory-older-match") {
-		t.Fatalf("get_memory_context missing older match: %s", context.Content[0].Text)
+	for i, field := range []string{"memories", "context"} {
+		var response struct {
+			Result toolResult `json:"result"`
+		}
+		if err := json.Unmarshal([]byte(lines[i]), &response); err != nil || len(response.Result.Content) != 1 {
+			t.Fatalf("response %d: %v\n%s", i+1, err, lines[i])
+		}
+		var result map[string]json.RawMessage
+		var got []memorySummary
+		if err := json.Unmarshal([]byte(response.Result.Content[0].Text), &result); err != nil || json.Unmarshal(result[field], &got) != nil {
+			t.Fatalf("response %d content: %v\n%s", i+1, err, response.Result.Content[0].Text)
+		}
+		if len(got) != 1 || got[0].ID != "memory-older-match" {
+			t.Fatalf("response %d %s = %+v, want only memory-older-match", i+1, field, got)
+		}
 	}
 }
 

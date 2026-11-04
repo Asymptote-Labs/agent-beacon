@@ -11,11 +11,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudeotel"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/claudesession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/codexsession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/devinsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/integrations/cowork"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/hermessession"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tomledit"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/hookcmd"
 	"gopkg.in/yaml.v3"
 )
 
@@ -185,9 +189,13 @@ func DiscoverOpenCode() Harness {
 	h := Harness{Name: "opencode", DisplayName: "opencode", Capability: "plugin"}
 	detectExecutable(&h, "opencode")
 	home, _ := os.UserHomeDir()
-	pluginPath := filepath.Join(home, ".config", "opencode", "plugins", "beacon.ts")
+	configDir, dirErr := hooks.OpenCodeConfigDir(home)
+	pluginPath := filepath.Join(configDir, "plugins", "beacon.ts")
+	if dirErr != nil {
+		pluginPath = filepath.Join(".config", "opencode", "plugins", "beacon.ts")
+	}
 	h.ConfigPath = pluginPath
-	if !h.Detected && dirExists(filepath.Join(home, ".config", "opencode")) {
+	if !h.Detected && dirErr == nil && dirExists(configDir) {
 		h.Detected = true
 	}
 	if fileExists(pluginPath) {
@@ -287,7 +295,7 @@ func DiscoverCursor() Harness {
 	}
 	if fileExists(h.ConfigPath) {
 		data, _ := os.ReadFile(h.ConfigPath)
-		if strings.Contains(string(data), "BEACON_ENDPOINT_MODE=1") {
+		if configured, _ := hooks.ConfigHasEndpointHook(data, "cursor"); configured {
 			h.TelemetryStatus = TelemetryEnabled
 			h.Message = "Cursor endpoint hooks are configured"
 		} else {
@@ -314,13 +322,17 @@ func DiscoverDevin() Harness {
 	if !h.Detected && (dirExists(filepath.Join(home, ".config", "devin")) || dirExists(".devin")) {
 		h.Detected = true
 	}
+	if dbPath := devinsession.DefaultDBPath(); fileExists(dbPath) {
+		h.Detected = true
+		h.Message = fmt.Sprintf(" Session history found at %s; read it with beacon endpoint devin sync.", dbPath)
+	}
 	if fileExists(h.ConfigPath) {
 		status, msg := devinStatus(h.ConfigPath, "devin", "devin-cli")
 		h.TelemetryStatus = status
-		h.Message = msg
+		h.Message = msg + h.Message
 	} else {
 		h.TelemetryStatus = TelemetryMissing
-		h.Message = "Devin CLI endpoint hooks were not found"
+		h.Message = "Devin CLI endpoint hooks were not found" + h.Message
 	}
 	return h
 }
@@ -386,29 +398,29 @@ func ConfigureClaude(opts ConfigureOptions) (string, error) {
 		return "", err
 	}
 	path := filepath.Join(claudesession.ConfigDir(home), "settings.json")
-	settings := map[string]interface{}{}
-	if data, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(data, &settings)
-		if err := backup(path, data); err != nil {
-			return "", err
-		}
+	settings, err := readSettingsForUpdate("Claude", path)
+	if err != nil {
+		return "", err
 	}
 	env, _ := settings["env"].(map[string]interface{})
 	if env == nil {
 		env = map[string]interface{}{}
 	}
-	env["CLAUDE_CODE_ENABLE_TELEMETRY"] = "1"
-	env["OTEL_LOGS_EXPORTER"] = "otlp"
-	env["OTEL_METRICS_EXPORTER"] = "otlp"
-	// Delta temporality keeps token usage counters per-interval so downstream
-	// aggregation can sum datapoints without deduping cumulative series.
-	env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"] = "delta"
-	env["OTEL_EXPORTER_OTLP_PROTOCOL"] = "grpc"
-	env["OTEL_EXPORTER_OTLP_ENDPOINT"] = opts.Endpoint
-	// Tool details expose the command, file path, URL, search pattern, and MCP
-	// identity/arguments needed to reconstruct agent activity from OTel events.
-	env["OTEL_LOG_TOOL_DETAILS"] = "1"
-	env["OTEL_LOG_USER_PROMPTS"] = "1"
+	// Claude Code runs with the user's shell environment, and a value in settings.json replaces the
+	// same variable from there. The routing a session would otherwise get is both, as far as Beacon
+	// can see the shell from here.
+	caller := map[string]string{}
+	for _, entry := range os.Environ() {
+		if key, value, ok := strings.Cut(entry, "="); ok {
+			caller[key] = value
+		}
+	}
+	for key, value := range env {
+		caller[key] = fmt.Sprint(value)
+	}
+	for key, value := range claudeotel.OTLPEnv(opts.Endpoint, caller) {
+		env[key] = value
+	}
 	// Inline API bodies carry the page WebFetch sends to its summarizer model and the
 	// MCP tool definitions the model is shown, the only place Claude Code reports
 	// either, and also the system prompt and the whole conversation. The collector's
@@ -419,12 +431,12 @@ func ConfigureClaude(opts ConfigureOptions) (string, error) {
 	switch {
 	case opts.CaptureModelContext && !configured:
 		env["OTEL_LOG_RAW_API_BODIES"] = "1"
-	case !opts.CaptureModelContext && claudeInlineRawBodies(rawBodies):
+	case !opts.CaptureModelContext && claudeotel.InlineRawBodies(fmt.Sprint(rawBodies)):
 		delete(env, "OTEL_LOG_RAW_API_BODIES")
 	}
 	contentLimit, limited := env["CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH"]
 	switch {
-	case opts.CaptureModelContext && !limited && claudeInlineRawBodies(env["OTEL_LOG_RAW_API_BODIES"]):
+	case opts.CaptureModelContext && !limited && claudeotel.InlineRawBodies(fmt.Sprint(env["OTEL_LOG_RAW_API_BODIES"])):
 		env["CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH"] = claudeModelContextContentLimit
 	case !opts.CaptureModelContext && fmt.Sprint(contentLimit) == claudeModelContextContentLimit:
 		delete(env, "CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH")
@@ -509,45 +521,13 @@ func mergeCodexOTEL(existing, endpoint string) string {
 	return mergeCodexOTELWithPrompt(existing, endpoint, true)
 }
 
+// mergeCodexOTELWithPrompt replaces every [otel] and [otel.*] table with Beacon's, appended at
+// the end of the document.
 func mergeCodexOTELWithPrompt(existing, endpoint string, logUserPrompt bool) string {
-	lines := strings.Split(existing, "\n")
-	var out []string
-	inOTEL := false
-	wroteOTEL := false
-	for _, line := range lines {
-		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "[") && strings.HasSuffix(trim, "]") {
-			isOTELHeader := codexOTELHeader(trim)
-			if inOTEL && !isOTELHeader && !wroteOTEL {
-				out = append(out, codexOTELBlock(endpoint, logUserPrompt)...)
-				wroteOTEL = true
-			}
-			inOTEL = isOTELHeader
-			if !inOTEL {
-				out = append(out, line)
-			}
-			continue
-		}
-		if inOTEL {
-			continue
-		}
-		out = append(out, line)
-	}
-	if inOTEL && !wroteOTEL {
-		out = append(out, codexOTELBlock(endpoint, logUserPrompt)...)
-		wroteOTEL = true
-	}
-	if !wroteOTEL {
-		if strings.TrimSpace(existing) != "" {
-			out = append(out, "")
-		}
-		out = append(out, codexOTELBlock(endpoint, logUserPrompt)...)
-	}
-	return strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
-}
-
-func codexOTELHeader(header string) bool {
-	return header == "[otel]" || strings.HasPrefix(header, "[otel.")
+	eol := tomledit.LineEnding(existing, "\n")
+	stripped, _ := tomledit.RemoveTable(existing, "otel")
+	block := strings.Join(codexOTELBlock(endpoint, logUserPrompt), eol) + eol
+	return tomledit.Append(stripped, block, eol)
 }
 
 func codexOTELBlock(endpoint string, logUserPrompt bool) []string {
@@ -573,9 +553,9 @@ func claudeStatus(path string) (TelemetryStatus, string) {
 	if err != nil {
 		return TelemetryMissing, err.Error()
 	}
-	var settings map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return TelemetryMisconfigured, "Claude settings JSON is invalid"
+	settings, err := decodeSettings("Claude", path, data)
+	if err != nil {
+		return TelemetryMisconfigured, err.Error()
 	}
 	env, _ := settings["env"].(map[string]interface{})
 	if env == nil {
@@ -584,11 +564,20 @@ func claudeStatus(path string) (TelemetryStatus, string) {
 	if fmt.Sprint(env["CLAUDE_CODE_ENABLE_TELEMETRY"]) != "1" {
 		return TelemetryDisabled, "CLAUDE_CODE_ENABLE_TELEMETRY is not enabled"
 	}
-	if !strings.Contains(fmt.Sprint(env["OTEL_EXPORTER_OTLP_ENDPOINT"]), "127.0.0.1") &&
-		!strings.Contains(fmt.Sprint(env["OTEL_EXPORTER_OTLP_ENDPOINT"]), "localhost") {
+	if !localOTLPEndpoint(env["OTEL_EXPORTER_OTLP_ENDPOINT"]) {
 		return TelemetryMisconfigured, "OTLP endpoint does not point to localhost"
 	}
+	for _, key := range claudeotel.RedirectKeys() {
+		if value, set := env[key]; set && strings.TrimSpace(fmt.Sprint(value)) != "" && !localOTLPEndpoint(value) {
+			return TelemetryMisconfigured, key + " sends Claude telemetry away from localhost"
+		}
+	}
 	return TelemetryEnabled, "Claude telemetry is configured for local OTLP"
+}
+
+func localOTLPEndpoint(value interface{}) bool {
+	endpoint := fmt.Sprint(value)
+	return strings.Contains(endpoint, "127.0.0.1") || strings.Contains(endpoint, "localhost")
 }
 
 func codexStatus(path string) (TelemetryStatus, string) {
@@ -650,22 +639,20 @@ func hasBeaconDevinHooks(data []byte, platforms ...string) (bool, error) {
 	if raw, ok := root["hooks"]; ok {
 		rawHooks = raw
 	}
-	var hooks map[string][]struct {
+	var events map[string][]struct {
 		Hooks []struct {
 			Command string `json:"command"`
 		} `json:"hooks"`
 	}
-	if err := json.Unmarshal(rawHooks, &hooks); err != nil {
+	if err := json.Unmarshal(rawHooks, &events); err != nil {
 		return false, nil
 	}
-	for _, groups := range hooks {
+	for _, groups := range events {
 		for _, group := range groups {
 			for _, hook := range group.Hooks {
-				if strings.Contains(hook.Command, "BEACON_ENDPOINT_MODE=1") {
-					for _, platform := range platforms {
-						if commandHasPlatform(hook.Command, platform) {
-							return true, nil
-						}
+				for _, platform := range platforms {
+					if hookcmd.IsEndpointHook(hook.Command, platform) {
+						return true, nil
 					}
 				}
 			}
@@ -696,9 +683,9 @@ func hasBeaconWindsurfHooks(data []byte, platform string) (bool, error) {
 	if err := json.Unmarshal(data, &root); err != nil {
 		return false, err
 	}
-	for _, hooks := range root.Hooks {
-		for _, hook := range hooks {
-			if strings.Contains(hook.Command, "BEACON_ENDPOINT_MODE=1") && commandHasPlatform(hook.Command, platform) {
+	for _, refs := range root.Hooks {
+		for _, hook := range refs {
+			if hookcmd.IsEndpointHook(hook.Command, platform) {
 				return true, nil
 			}
 		}
@@ -735,25 +722,12 @@ func hasBeaconHermesHooks(data []byte) (bool, error) {
 	}
 	for _, refs := range root.Hooks {
 		for _, ref := range refs {
-			if strings.Contains(ref.Command, "BEACON_ENDPOINT_MODE=1") && commandHasPlatform(ref.Command, "hermes") {
+			if hookcmd.IsEndpointHook(ref.Command, "hermes") {
 				return true, nil
 			}
 		}
 	}
 	return false, nil
-}
-
-func commandHasPlatform(command, platform string) bool {
-	fields := strings.Fields(command)
-	for i, field := range fields {
-		if field == "--platform" && i+1 < len(fields) {
-			return strings.Trim(fields[i+1], `"'`) == platform
-		}
-		if strings.HasPrefix(field, "--platform=") {
-			return strings.Trim(strings.TrimPrefix(field, "--platform="), `"'`) == platform
-		}
-	}
-	return false
 }
 
 func antigravityStatus(path string) (TelemetryStatus, string) {
@@ -776,12 +750,7 @@ func hasBeaconAntigravityHooks(data []byte) (bool, error) {
 	if err := json.Unmarshal(data, &blocks); err != nil {
 		return false, err
 	}
-	for _, raw := range blocks {
-		if strings.Contains(string(raw), "BEACON_ENDPOINT_MODE=1") && strings.Contains(string(raw), "--platform antigravity") {
-			return true, nil
-		}
-	}
-	return false, nil
+	return hooks.ConfigHasEndpointHook(data, "antigravity")
 }
 
 func shellExportValue(text, key string) string {
@@ -842,14 +811,38 @@ func commandVersion(path string) string {
 // per session.
 const claudeModelContextContentLimit = "262144"
 
-// claudeInlineRawBodies reports whether an OTEL_LOG_RAW_API_BODIES value has Claude Code put
-// API bodies inline in its log events, rather than leave them off or write them to files.
-func claudeInlineRawBodies(value interface{}) bool {
-	switch strings.ToLower(strings.TrimSpace(fmt.Sprint(value))) {
-	case "1", "true":
-		return true
+// decodeSettings parses a harness's JSON settings file. The error names the file so the user
+// knows which one to fix.
+func decodeSettings(product, path string, data []byte) (map[string]interface{}, error) {
+	var settings map[string]interface{}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return nil, fmt.Errorf("%s settings file %s is not valid JSON: %w", product, path, err)
 	}
-	return false
+	if settings == nil {
+		settings = map[string]interface{}{}
+	}
+	return settings, nil
+}
+
+// readSettingsForUpdate reads a harness's JSON settings file before Beacon rewrites it. A missing
+// file is an empty object. A file that does not parse is refused rather than replaced, because it
+// still holds the user's own settings; a file that does is backed up first.
+func readSettingsForUpdate(product, path string) (map[string]interface{}, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return map[string]interface{}{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	settings, err := decodeSettings(product, path, data)
+	if err != nil {
+		return nil, err
+	}
+	if err := backup(path, data); err != nil {
+		return nil, err
+	}
+	return settings, nil
 }
 
 func backup(path string, data []byte) error {

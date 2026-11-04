@@ -9,6 +9,9 @@ import (
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/tomledit"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/hookcmd"
 )
 
 // Kimi Code is the one supported runtime whose hook registration lives inside a file that also
@@ -231,7 +234,7 @@ func kimiStatusFromRuntime(status runtimeStatus) KimiStatus {
 // There is no command-line escape for it, and the alternative -- leaving the path unquoted --
 // fails on the far more common space.
 //
-// The detection side needs no matching change: commandFields already accepts both quote
+// The detection side needs no matching change: hookcmd.Fields already accepts both quote
 // characters, precisely so a command written for either shell can be recognized.
 func kimiCommandPrefix(binaryPath, logPath, configPath string) string {
 	if runtime.GOOS != "windows" {
@@ -327,7 +330,7 @@ func installKimiHooks(path, binaryPath, logPath, configPath string) error {
 	if err != nil {
 		return err
 	}
-	updated := kimiEndWithNewline(kimiJoin(stripped, block, eol), eol)
+	updated := tomledit.EndWithNewline(tomledit.Append(stripped, block, eol), eol)
 
 	want := append(kept, kimiExpectedEntries(binaryPath, logPath, configPath)...)
 	if err := verifyKimiRewrite(path, original, updated, want); err != nil {
@@ -361,7 +364,7 @@ func removeKimiHooks(path string) (bool, error) {
 	}
 
 	stripped, kept := stripKimiHooks(original)
-	updated := kimiEndWithNewline(stripped, kimiLineEnding(original))
+	updated := tomledit.EndWithNewline(stripped, kimiLineEnding(original))
 	if err := verifyKimiRewrite(path, original, updated, kept); err != nil {
 		return false, err
 	}
@@ -388,7 +391,7 @@ func isKimiInstalledAt(path string) bool {
 // comment.
 func kimiConfigHasEndpointHooks(parsed map[string]interface{}) bool {
 	for _, entry := range kimiHookEntries(parsed) {
-		if isEndpointHookCommand(entry.Command, "kimi") {
+		if hookcmd.IsEndpointHook(entry.Command, "kimi") {
 			return true
 		}
 	}
@@ -449,31 +452,12 @@ func kimiHooksAreAppendable(path, text string, parsed map[string]interface{}) er
 		path)
 }
 
-// kimiHookHeaderPattern matches an array-of-tables header for the hooks key.
-//
-// Whitespace inside the brackets is allowed because TOML allows it, and a trailing comment is
-// allowed because a person may have written one. A dotted or quoted spelling is deliberately not
-// matched: `["hooks"]` and `[a.hooks]` are different keys, and treating them as this one would
-// have Beacon delete a table it does not own.
+// kimiHookHeaderPattern matches an array-of-tables header for the hooks key, in any of TOML's
+// spellings of it and with or without a trailing comment. `[hooks]` and `[[a.hooks]]` are
+// different keys, and treating them as this one would have Beacon delete a table it does not own.
 func kimiHookHeaderPattern(line string) bool {
-	trimmed := strings.TrimSpace(line)
-	if !strings.HasPrefix(trimmed, "[[") {
-		return false
-	}
-	closing := strings.Index(trimmed, "]]")
-	if closing < 0 {
-		return false
-	}
-	if strings.TrimSpace(trimmed[2:closing]) != kimiHooksKey {
-		return false
-	}
-	rest := strings.TrimSpace(trimmed[closing+2:])
-	return rest == "" || strings.HasPrefix(rest, "#")
-}
-
-// kimiIsTopLevelHeader reports whether a line opens any table, which is what ends a hooks block.
-func kimiIsTopLevelHeader(line string) bool {
-	return strings.HasPrefix(strings.TrimSpace(line), "[")
+	key, array, ok := tomledit.Header(line)
+	return ok && array && len(key) == 1 && key[0] == kimiHooksKey
 }
 
 func kimiCountHookHeaders(text string) int {
@@ -509,13 +493,17 @@ func stripKimiHooks(text string) (string, []kimiHookEntry) {
 			kept = append(kept, lines[index])
 			continue
 		}
+		// The block runs to the next table header of any kind.
 		end := index + 1
-		for end < len(lines) && !kimiIsTopLevelHeader(lines[end]) {
+		for end < len(lines) {
+			if _, _, header := tomledit.Header(lines[end]); header {
+				break
+			}
 			end++
 		}
 		block := lines[index:end]
 		entry := kimiEntryFromBlock(block)
-		if !isEndpointHookCommand(entry.Command, "kimi") {
+		if !hookcmd.IsEndpointHook(entry.Command, "kimi") {
 			kept = append(kept, block...)
 			keptEntries = append(keptEntries, entry)
 			index = end - 1
@@ -652,45 +640,15 @@ func verifyKimiRewrite(path, original, updated string, want []kimiHookEntry) err
 	return nil
 }
 
-// kimiJoin appends a block to a document, keeping exactly one blank line between them.
-func kimiJoin(text, block, eol string) string {
-	trimmed := strings.TrimRight(text, " \t\r\n")
-	if trimmed == "" {
-		return block
-	}
-	return trimmed + eol + eol + block
-}
-
-// kimiEndWithNewline gives a non-empty document exactly one trailing line ending.
-//
-// stripKimiHooks trims the blank lines that sat above a removed block, which on a config whose
-// only hooks were Beacon's takes the file's final newline with them. A POSIX text file ends in a
-// newline, several editors add one back on the next save, and a config that gained or lost one
-// every time Beacon was installed and removed would show up as a spurious diff in any dotfiles
-// repository the user keeps.
-func kimiEndWithNewline(text, eol string) string {
-	trimmed := strings.TrimRight(text, " \t\r\n")
-	if trimmed == "" {
-		return ""
-	}
-	return trimmed + eol
-}
-
 // kimiLineEnding is the line ending the existing document uses, so an edit does not mix them.
 //
 // A file with no newline at all -- empty, or one line -- gets the platform's, which is what a
 // fresh install on Windows should write.
 func kimiLineEnding(text string) string {
-	if strings.Contains(text, "\r\n") {
-		return "\r\n"
-	}
-	if strings.Contains(text, "\n") {
-		return "\n"
-	}
 	if runtime.GOOS == "windows" {
-		return "\r\n"
+		return tomledit.LineEnding(text, "\r\n")
 	}
-	return "\n"
+	return tomledit.LineEnding(text, "\n")
 }
 
 func readKimiConfigText(path string) (string, error) {

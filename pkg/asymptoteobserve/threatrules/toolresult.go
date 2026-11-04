@@ -53,10 +53,25 @@ func ToolResultText(event asymptoteobserve.Event) string {
 	return asymptoteobserve.CleanString(text, ToolResultTextLimit, true)
 }
 
+// deriveObserver, when set, is called once per withDerivedFields call. It is nil outside tests,
+// which set it to count how often an event's fields are derived.
+var deriveObserver func()
+
 // withDerivedFields returns event with the engine-derived fields filled in. The sub-objects on
 // the path are copied rather than written through, so the caller's event -- which is shared
 // across rules and may be evidence in a Finding -- is never mutated.
 func withDerivedFields(event asymptoteobserve.Event) asymptoteobserve.Event {
+	if deriveObserver != nil {
+		deriveObserver()
+	}
+	if event.Command != nil {
+		// Derived, never asserted: an in-process caller's value is replaced, even by nothing.
+		if parsed := ParsedCommands(event.Command.Command); parsed != nil || event.Command.ParsedCommands != nil {
+			command := *event.Command
+			command.ParsedCommands = parsed
+			event.Command = &command
+		}
+	}
 	if event.GenAI == nil {
 		return event
 	}

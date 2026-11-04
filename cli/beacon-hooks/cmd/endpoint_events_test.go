@@ -27,25 +27,6 @@ func TestResolveBranchPrefersRuntimeProvidedBranch(t *testing.T) {
 	}
 }
 
-func TestResolveBranchReadsLocalCheckout(t *testing.T) {
-	repo := t.TempDir()
-	writeGitHead(t, repo, "ref: refs/heads/feature/local\n")
-
-	got := resolveBranch(map[string]interface{}{}, repo)
-	if got != "feature/local" {
-		t.Fatalf("resolveBranch = %q, want feature/local", got)
-	}
-}
-
-func TestResolveBranchOutsideRepo(t *testing.T) {
-	if got := resolveBranch(map[string]interface{}{}, t.TempDir()); got != "" {
-		t.Fatalf("resolveBranch = %q, want empty outside a repo", got)
-	}
-	if got := resolveBranch(map[string]interface{}{}, ""); got != "" {
-		t.Fatalf("resolveBranch = %q, want empty without cwd", got)
-	}
-}
-
 func TestResolveBranchDisabledByEnv(t *testing.T) {
 	repo := t.TempDir()
 	writeGitHead(t, repo, "ref: refs/heads/feature/local\n")
@@ -111,7 +92,10 @@ func TestRunPromptSubmitOmitsBranchOutsideRepo(t *testing.T) {
 	}
 }
 
-func TestRunOpenCodeEventEmitsLocalGitBranch(t *testing.T) {
+// opencode events are written by their own mapper rather than through emitHookEvent, so the
+// workspace enrichment has to be applied there explicitly. Regression for f46a0295 ("Fill branch on
+// hook emitters that bypass emitHookEvent").
+func TestRunOpenCodeEventEmitsWorkspaceAndLocalGitBranch(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "opencode"
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
@@ -130,6 +114,12 @@ func TestRunOpenCodeEventEmitsLocalGitBranch(t *testing.T) {
 	event := lastEndpointEvent(t, logPath)
 	if got := event["branch"]; got != "feature/opencode" {
 		t.Fatalf("branch = %q, want feature/opencode", got)
+	}
+	if got := event["repository"]; got != repo {
+		t.Fatalf("repository = %q, want %q", got, repo)
+	}
+	if got := leaf(event, "session", "working_directory"); got != repo {
+		t.Fatalf("session.working_directory = %q, want %q", got, repo)
 	}
 }
 

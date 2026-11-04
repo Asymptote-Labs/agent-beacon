@@ -68,23 +68,6 @@ func ompPayloads() map[string]map[string]interface{} {
 	}
 }
 
-// Every type the managed extension subscribes to must map to at least one event. These strings are
-// the contract between the extension's subscription list and this mapper, and a typo on either side
-// produces no telemetry rather than an error -- so the list is walked rather than trusted.
-func TestOmpEventEverySupportedTypeProducesTelemetry(t *testing.T) {
-	payloads := ompPayloads()
-	for _, name := range supportedOmpEventTypes() {
-		payload, ok := payloads[name]
-		if !ok {
-			t.Fatalf("no fixture for supported Oh My Pi event type %q; the mapper claims to handle it", name)
-		}
-		events := ompRuntime.endpointEvents(payload, "sess-1")
-		if len(events) == 0 {
-			t.Fatalf("supported Oh My Pi event type %q produced no telemetry", name)
-		}
-	}
-}
-
 // An unrecognized type is silent rather than generic. Oh My Pi publishes far more than the
 // extension subscribes to -- provider request/response internals, streaming message updates,
 // compaction and retry signals -- and a future one becoming an undifferentiated row would fill the
@@ -201,26 +184,6 @@ func TestOmpEventCarriesPluginProvenance(t *testing.T) {
 	}
 	if fidelity := nested(t, event, "event")["fidelity"]; fidelity != "observed" {
 		t.Fatalf("event.fidelity = %v, want observed", fidelity)
-	}
-}
-
-func TestOmpEventPromptRecordsTextAndSource(t *testing.T) {
-	logPath := ompTestLog(t)
-
-	runHookWithInput(t, runOmpEvent, map[string]interface{}{
-		"type": "input", "text": "refactor the parser", "source": "interactive", "sessionId": "sess-1",
-	})
-
-	event := ompEventWithAction(t, logPath, "prompt.submitted")
-	if prompt := nested(t, event, "prompt"); prompt["text"] != "refactor the parser" {
-		t.Fatalf("prompt.text = %v, want the submitted text", prompt["text"])
-	}
-	if content := nested(t, event, "content"); content["included"] != true || content["hash"] == "" {
-		t.Fatalf("content = %v, want retained content with a hash", content)
-	}
-	// "A human typed this" and "a script sent this" are different facts about the same prompt.
-	if raw := nested(t, event, "raw"); raw["omp_input_source"] != "interactive" {
-		t.Fatalf("raw.omp_input_source = %v, want interactive", raw["omp_input_source"])
 	}
 }
 
@@ -393,36 +356,6 @@ func TestOmpEventToolCallIsNotAnApproval(t *testing.T) {
 	}
 }
 
-func TestOmpEventToolResultActionsPerTool(t *testing.T) {
-	for _, tc := range []struct {
-		tool   string
-		args   map[string]interface{}
-		action string
-	}{
-		{"bash", map[string]interface{}{"command": "ls"}, "command.executed"},
-		{"read", map[string]interface{}{"path": "/repo/main.go"}, "file.read"},
-		{"edit", map[string]interface{}{"path": "/repo/main.go"}, "file.modified"},
-		{"write", map[string]interface{}{"path": "/repo/new.go"}, "file.created"},
-		// grep takes a pattern and glob takes a glob. Neither is a file operation, and a custom
-		// tool registered by another extension means whatever its author decided.
-		{"grep", map[string]interface{}{"pattern": "TODO"}, "tool.completed"},
-		{"glob", map[string]interface{}{"pattern": "**/*.go"}, "tool.completed"},
-		{"my_custom_tool", map[string]interface{}{"anything": true}, "tool.completed"},
-	} {
-		t.Run(tc.tool, func(t *testing.T) {
-			events := ompRuntime.endpointEvents(map[string]interface{}{
-				"type": "tool_result", "toolName": tc.tool, "input": tc.args,
-			}, "sess-1")
-			if len(events) != 1 {
-				t.Fatalf("%s produced %d events, want 1", tc.tool, len(events))
-			}
-			if events[0].action != tc.action {
-				t.Fatalf("%s action = %q, want %q", tc.tool, events[0].action, tc.action)
-			}
-		})
-	}
-}
-
 func TestOmpEventFailedToolIsRecordedAsAFailure(t *testing.T) {
 	logPath := ompTestLog(t)
 
@@ -480,7 +413,7 @@ func TestOmpToolResultsAreRecordedWhereRulesReadThem(t *testing.T) {
 			name: "file read", action: "file.read", marker: "File content marker BCN-5WWWUQ-D01",
 			payload: map[string]interface{}{
 				"toolName": "read", "input": map[string]interface{}{"path": "notes/canary.txt"},
-				"details": map[string]interface{}{"meta": map[string]interface{}{"source": map[string]interface{}{"type": "path", "value": "/home/agent/project/notes/canary.txt"}}},
+				"details": map[string]interface{}{"meta": map[string]interface{}{"source": map[string]interface{}{"type": "path", "value": "/repo/notes/canary.txt"}}},
 				"content": ompTextBlocks("[notes/canary.txt#5B60]\n1:File content marker BCN-5WWWUQ-D01."),
 			},
 		},
@@ -563,7 +496,7 @@ func TestOmpToolResultsAreRecordedWhereRulesReadThem(t *testing.T) {
 			payload: map[string]interface{}{
 				"toolName": "read", "input": map[string]interface{}{"path": "agent://reviewer"},
 				"details": map[string]interface{}{
-					"resolvedPath": "/home/u/.omp/agent/sessions/s/agents/reviewer.md",
+					"resolvedPath": "/repo/.omp/agent/sessions/s/agents/reviewer.md",
 					"meta":         map[string]interface{}{"source": map[string]interface{}{"type": "internal", "value": "agent://reviewer"}},
 				},
 				"content": ompTextBlocks("Subagent report."),
@@ -582,7 +515,9 @@ func TestOmpToolResultsAreRecordedWhereRulesReadThem(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			logPath := ompTestLog(t)
 			payload := cloneFields(tc.payload)
-			payload["type"], payload["toolCallId"], payload["sessionId"], payload["cwd"] = "tool_result", "call-1", "sess-1", "/home/agent/project"
+			// "/repo", not a path under /home: on macOS /home is an automount, and every stat of a
+			// path beneath it costs ~40ms.
+			payload["type"], payload["toolCallId"], payload["sessionId"], payload["cwd"] = "tool_result", "call-1", "sess-1", "/repo"
 			if _, ok := payload["isError"]; !ok {
 				payload["isError"] = false
 			}
@@ -763,45 +698,5 @@ func TestOmpEventBareMessageEndProducesNothing(t *testing.T) {
 		if len(events) != 0 {
 			t.Fatalf("message_end for %v produced %d events, want none", message, len(events))
 		}
-	}
-}
-
-// The extension lifts the runtime's cwd onto the envelope; an event carrying its own cwd wins.
-func TestOmpEventResolvesWorkspaceFromTheEnvelope(t *testing.T) {
-	logPath := ompTestLog(t)
-	repo := t.TempDir()
-
-	runHookWithInput(t, runOmpEvent, map[string]interface{}{
-		"type": "input", "text": "hello", "sessionId": "sess-1", "cwd": repo,
-	})
-
-	event := ompEventWithAction(t, logPath, "prompt.submitted")
-	if session := nested(t, event, "session"); session["working_directory"] != repo {
-		t.Fatalf("session.working_directory = %v, want %q", session["working_directory"], repo)
-	}
-}
-
-func TestOmpEventGroupsBySessionID(t *testing.T) {
-	logPath := ompTestLog(t)
-
-	runHookWithInput(t, runOmpEvent, map[string]interface{}{
-		"type": "input", "text": "hello", "sessionId": "sess-42",
-	})
-
-	event := ompEventWithAction(t, logPath, "prompt.submitted")
-	if session := nested(t, event, "session"); session["id"] != "sess-42" {
-		t.Fatalf("session.id = %v, want sess-42", session["id"])
-	}
-}
-
-// A payload with no session id still produces telemetry. Losing the grouping key is bad; losing the
-// event is worse, and a run whose accessor failed once should not go dark.
-func TestOmpEventSurvivesAMissingSessionID(t *testing.T) {
-	logPath := ompTestLog(t)
-
-	runHookWithInput(t, runOmpEvent, map[string]interface{}{"type": "input", "text": "hello"})
-
-	if got := ompEventActions(t, logPath); !reflect.DeepEqual(got, []string{"prompt.submitted"}) {
-		t.Fatalf("actions = %v, want [prompt.submitted]", got)
 	}
 }

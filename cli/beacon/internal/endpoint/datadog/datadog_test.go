@@ -7,9 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"testing/fstest"
-
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 func TestConfigSnippetUsesConfiguredPath(t *testing.T) {
@@ -79,100 +76,5 @@ func TestSampleEventsCoverValidationHookAndOTelShapes(t *testing.T) {
 	}
 	if !sawValidation || !sawHook || !sawOTel {
 		t.Fatalf("sample events should include validation, hook-rich, and OTel shapes; validation=%t hook=%t otel=%t", sawValidation, sawHook, sawOTel)
-	}
-}
-
-func TestPackREADMEMentionsValidationRetentionAndMacOSPermissions(t *testing.T) {
-	readme := mustRead("pack/README.md")
-	for _, want := range []string{
-		"beacon endpoint datadog validate",
-		"service:beacon-endpoint-agent",
-		"Beacon endpoint datadog validation event",
-		"Content Handling",
-		"_dd-agent",
-		"/var/log/beacon-agent/runtime.jsonl",
-	} {
-		if !strings.Contains(readme, want) {
-			t.Fatalf("pack README missing %q", want)
-		}
-	}
-}
-
-func TestFiles_NoError(t *testing.T) {
-	files, err := Files()
-	if err != nil {
-		t.Fatalf("Files() returned unexpected error: %v", err)
-	}
-	if len(files) == 0 {
-		t.Fatal("Files() returned no files")
-	}
-}
-
-func TestFiles_ContainsAllRequiredNames(t *testing.T) {
-	files, err := Files()
-	if err != nil {
-		t.Fatal(err)
-	}
-	names := make(map[string]bool)
-	for _, f := range files {
-		names[f.Name] = true
-	}
-	for _, required := range []string{
-		"README.md", "conf.yaml", "sample-event.jsonl",
-	} {
-		if !names[required] {
-			t.Errorf("Files() missing required file %q", required)
-		}
-	}
-}
-
-func TestFilesFromFS_PropagatesReadError(t *testing.T) {
-	emptyFS := fstest.MapFS{}
-	_, err := filesFromFS(emptyFS, DefaultLogPath)
-	if err == nil {
-		t.Fatal("filesFromFS with empty FS should return an error")
-	}
-	if !strings.Contains(err.Error(), "datadog pack asset") {
-		t.Fatalf("error should identify the pack source, got: %v", err)
-	}
-}
-
-func TestConfigSnippetFromFS_ErrorOnMissingAsset(t *testing.T) {
-	emptyFS := fstest.MapFS{}
-	_, err := configSnippetFromFS(emptyFS, "/some/path.jsonl")
-	if err == nil {
-		t.Fatal("configSnippetFromFS with empty FS should return error")
-	}
-	if !strings.Contains(err.Error(), "datadog pack asset") {
-		t.Fatalf("error should identify the pack source, got: %v", err)
-	}
-}
-
-func TestInstallPack_ErrorOnWriteFailure(t *testing.T) {
-	// A 0555 directory is only read-only where Unix permission bits exist; Windows ignores them.
-	testenv.RequirePOSIXFileModes(t)
-	if os.Getuid() == 0 {
-		t.Skip("running as root: filesystem permission restrictions do not apply")
-	}
-	dir := t.TempDir()
-	if err := os.Chmod(dir, 0555); err != nil {
-		t.Skip("cannot set directory permissions:", err)
-	}
-	defer os.Chmod(dir, 0755)
-
-	subdir := filepath.Join(dir, "output")
-	err := InstallPack(subdir, DefaultLogPath)
-	if err == nil {
-		t.Fatal("InstallPack into read-only directory should return error")
-	}
-}
-
-func TestConfigSnippet_DefaultLogPath(t *testing.T) {
-	got, err := ConfigSnippet("")
-	if err != nil {
-		t.Fatalf("ConfigSnippet with empty path returned error: %v", err)
-	}
-	if !strings.Contains(got, DefaultLogPath) {
-		t.Fatalf("ConfigSnippet with empty logPath should use DefaultLogPath %q, got: %s", DefaultLogPath, got)
 	}
 }

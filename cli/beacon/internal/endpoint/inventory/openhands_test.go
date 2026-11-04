@@ -32,43 +32,6 @@ func TestOpenHandsManagedDetectionReadsTheHookCommand(t *testing.T) {
 	}
 }
 
-// OpenHands reads the first hooks.json it finds rather than merging the two, so a repository with
-// its own file shadows the user-level one entirely. Reporting both scopes is what lets an operator
-// see that -- an inventory showing only the user file would report a working install for a machine
-// where Beacon's hooks never run.
-func TestOpenHandsCandidatesCoverBothScopes(t *testing.T) {
-	t.Setenv("OH_PERSISTENCE_DIR", "")
-	home := t.TempDir()
-	work := t.TempDir()
-
-	items := openHandsCandidates(home, work)
-	if len(items) != 2 {
-		t.Fatalf("openHandsCandidates returned %d entries, want one per scope: %+v", len(items), items)
-	}
-	byScope := map[string]candidate{}
-	for _, item := range items {
-		byScope[item.scope] = item
-	}
-	if got, want := byScope[ScopeUser].path, filepath.Join(home, ".openhands", "hooks.json"); got != want {
-		t.Errorf("user candidate = %q, want %q", got, want)
-	}
-	if got, want := byScope[ScopeProject].path, filepath.Join(work, ".openhands", "hooks.json"); got != want {
-		t.Errorf("project candidate = %q, want %q", got, want)
-	}
-	for _, item := range items {
-		// KindHookConfig rather than KindManagedConfig: Beacon merges into a file the user owns,
-		// it does not own the file.
-		if item.kind != KindHookConfig {
-			t.Errorf("candidate %q kind = %q, want %q", item.path, item.kind, KindHookConfig)
-		}
-		// The runtime name is the canonical harness name, so an inventory row and a telemetry row
-		// for the same machine name the same runtime.
-		if item.runtime != "openhands" {
-			t.Errorf("candidate %q runtime = %q, want openhands", item.path, item.runtime)
-		}
-	}
-}
-
 // Sandboxed and containerized setups redirect OpenHands state onto a volume with
 // OH_PERSISTENCE_DIR, and on a machine that sets it ~/.openhands is not where OpenHands looks. An
 // inventory scanning the wrong directory reports "not installed" for a working install.

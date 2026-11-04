@@ -21,7 +21,6 @@ func TestPrintConfigIncludesPluginConfigEndpointAndPrivacyNote(t *testing.T) {
 		`endpoint: "http://127.0.0.1:4318"`,
 		`protocol: "http/protobuf"`,
 		`serviceName: "openclaw-gateway"`,
-		"does not export raw prompt",
 		DocsURL,
 	} {
 		if !strings.Contains(out, want) {

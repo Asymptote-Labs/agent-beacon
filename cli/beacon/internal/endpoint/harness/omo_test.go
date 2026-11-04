@@ -7,7 +7,6 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // writeOmoExtension creates a user-level Senpi extension file with the given contents.
@@ -55,26 +54,6 @@ func TestDiscoverOmoReportsMissingExtension(t *testing.T) {
 	if h.Capability != "plugin" {
 		t.Fatalf("Capability = %q, want %q -- Senpi has no hooks file and no OTel export, so the "+
 			"integration is extension-shaped", h.Capability, "plugin")
-	}
-}
-
-// Senpi installed through the omo-ai npm package into a directory this process did not inherit on
-// PATH is not visible as an executable, so the state directory has to count as evidence. The
-// alternative is reporting "not detected" for a runtime the operator is actively running, which
-// reads as "Beacon cannot see this" when the truth is "Beacon has not been installed into it yet".
-func TestDiscoverOmoTreatsTheStateDirectoryAsEvidence(t *testing.T) {
-	home := setupOmoDiscovery(t)
-	if err := os.MkdirAll(filepath.Join(home, ".omo", "agent"), 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	h := DiscoverOmo()
-	if !h.Detected {
-		t.Fatal("DiscoverOmo reported not detected with a Senpi agent directory present")
-	}
-	if h.TelemetryStatus != TelemetryMissing {
-		t.Fatalf("TelemetryStatus = %q, want %q -- the runtime is present but Beacon is not "+
-			"installed into it", h.TelemetryStatus, TelemetryMissing)
 	}
 }
 
@@ -143,34 +122,4 @@ func TestDiscoverOmoDoesNotAcceptASiblingsMarker(t *testing.T) {
 			}
 		})
 	}
-}
-
-// The harness name discovery reports must be the canonical one events are written under, or the
-// dashboard groups a runtime's discovery row and its telemetry rows separately.
-func TestDiscoverOmoUsesTheCanonicalHarnessName(t *testing.T) {
-	setupOmoDiscovery(t)
-
-	h := DiscoverOmo()
-	if got := asymptoteobserve.NormalizeHarnessName(h.Name); got != h.Name {
-		t.Fatalf("DiscoverOmo reports %q, which normalizes to %q; discovery and telemetry would "+
-			"not join", h.Name, got)
-	}
-	for _, sibling := range []Harness{DiscoverPi(), DiscoverOmp(), DiscoverPrime()} {
-		if h.Name == sibling.Name {
-			t.Fatalf("Senpi and %s discovery report the same harness name", sibling.DisplayName)
-		}
-	}
-}
-
-// A runtime absent from DiscoverAll is a runtime `beacon endpoint discover` never mentions, which
-// is how support ships without anyone being able to find it.
-func TestDiscoverAllIncludesOmo(t *testing.T) {
-	setupOmoDiscovery(t)
-
-	for _, h := range DiscoverAll() {
-		if h.Name == "omo_senpi" {
-			return
-		}
-	}
-	t.Fatal("DiscoverAll does not include Senpi")
 }

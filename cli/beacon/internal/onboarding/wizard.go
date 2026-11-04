@@ -16,6 +16,9 @@ import (
 
 var ErrWizardCancelled = errors.New("onboarding cancelled")
 
+// signInBrowserHint follows the sign-in URL once a browser has been opened for it.
+const signInBrowserHint = "Open it in the browser where you are signed in to beacon.sh. If a different browser opened, copy the URL there."
+
 // Account is what a completed sign-in tells the wizard.
 //
 // It carries no token. This package draws a terminal and holds no credential, and
@@ -295,6 +298,12 @@ func (m wizardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case signInDoneMsg:
 		return m.signInFinished(msg)
 	case tea.KeyMsg:
+		if step := menuStep(msg); step != 0 {
+			if n := m.choiceCount(); m.isPicker() && n > 0 {
+				m.selected = (m.selected + step + n) % n
+			}
+			return m, nil
+		}
 		switch msg.String() {
 		// esc and ctrl+c cancel; "q" deliberately does not. It used to, on every
 		// screen, so a user typing q at the destination list killed the install --
@@ -310,14 +319,6 @@ func (m wizardModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m.cancelAndQuit()
-		case "up", "k":
-			if n := m.choiceCount(); m.isPicker() && n > 0 {
-				m.selected = (m.selected - 1 + n) % n
-			}
-		case "down", "j":
-			if n := m.choiceCount(); m.isPicker() && n > 0 {
-				m.selected = (m.selected + 1) % n
-			}
 		case " ", "space", "x":
 			if m.screen == agentToolsScreen {
 				m.toggleAgentTool()
@@ -632,6 +633,11 @@ func (m wizardModel) View() string {
 			body = "Open this URL to sign in:"
 		}
 		raw = m.prompt.URL
+		if m.prompt.URL != "" && m.prompt.WillOpen && m.prompt.BrowserErr == nil {
+			// The default browser is not always the one signed in to beacon.sh. Copying
+			// the URL to the one that is saves signing in a second time.
+			raw += "\n\n" + wizardDim.Width(contentWidth).Render(signInBrowserHint)
+		}
 		if m.prompt.URL != "" && m.prompt.SSHForward != "" && (!m.prompt.WillOpen || m.prompt.BrowserErr != nil) {
 			raw += "\n\n" + wizardDim.Render("From another computer over SSH, forward the port first:") +
 				"\n" + m.prompt.SSHForward

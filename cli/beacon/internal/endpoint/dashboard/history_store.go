@@ -43,7 +43,7 @@ const (
 	// historyDerivationVersion covers everything computed from a stored line: trace keys, event
 	// numbers, types, summaries and search text. Bump it when that projection changes; the next
 	// catch-up recomputes it from the stored lines, so history survives the change.
-	historyDerivationVersion = 14 // 14: trace labels preserve UTF-8 at byte limits; 2: trace events carry the event's policy block; 3: and its error; 4: usage carries the 1h cache-write split; 5: agent.response is an agent message; 6: the summary names its project; 7-11 were the sharing-staleness steps on a parallel branch; 12: sharing goes stale on activity after what a share covered (shared_through), ignoring a share's own events and events the share projection skips, and carries a refresh command; 13: redaction recognizes more credential shapes, so trace text and search text change
+	historyDerivationVersion = 16 // 16: retained browser role/text messages are readable; 15: completed assistant responses and plans retain their answer; 14: trace labels preserve UTF-8 at byte limits; 2: trace events carry the event's policy block; 3: and its error; 4: usage carries the 1h cache-write split; 5: agent.response is an agent message; 6: the summary names its project; 7-11 were the sharing-staleness steps on a parallel branch; 12: sharing goes stale on activity after what a share covered (shared_through), ignoring a share's own events and events the share projection skips, and carries a refresh command; 13: redaction recognizes more credential shapes, so trace text and search text change
 
 	defaultHistoryRetentionDays = 90
 	// maxHistoryRetentionDays is 100 years: a retention this long or longer means nothing expires.

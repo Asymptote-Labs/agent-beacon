@@ -50,6 +50,11 @@ Or forward the port over SSH before opening the URL: ssh -L 43121:127.0.0.1:4312
 Waiting for Beacon sign-in...
 ```
 
+Under WSL, `beacon login` opens the sign-in page in your Windows browser. WSL2
+forwards `127.0.0.1` to Windows, so the redirect back to the CLI works without extra
+setup. If Windows interop is turned off, `beacon login` falls back to the Linux
+behavior above; use `--no-browser` and open the printed URL in Windows yourself.
+
 ### Signing in to a remote machine
 
 Open the URL in the browser on your own computer and approve. That browser then
@@ -98,7 +103,7 @@ The CLI uses the versioned `2026-09-01` grant contract:
 - `GET /cli/auth?state=...&port=...&scopes=...` authenticates the person, lists every requested scope (space-separated in `scopes`), and redirects to the loopback callback with `state` and a one-time `exchange_code`.
 - `POST /api/cli/auth/exchange` accepts the exchange code, state, and PKCE verifier. It returns a scoped access token, expiry, user identity, organization memberships, and optional active organization.
 - `POST /api/cli/mcp/tokens` accepts `{"name": ..., "expires_in_days": ...}` with the access token as a Bearer credential and returns a personal Beacon Cloud MCP token (`token`, `access_token` metadata, `mcp_url`). It requires `mcp:token:create`.
-- `PUT /v1/traces/{external_id}`, `POST /v1/traces/{external_id}/events/batch` and `GET /v1/traces/{external_id}` create a shared trace from its `beacon.trace.v1` summary, upsert its trace events, and read it back (with the id of the last event held) for [`beacon share`](/cli/share) (and for the git pre-push hook, only after you opt in with [`beacon git setup --share-sessions`](/cli/git#sharing-sessions-on-push)), with the access token (or a `bcn_api_` API key) as a Bearer credential. They require `traces:write`.
+- `PUT /v1/traces/{external_id}`, `POST /v1/traces/{external_id}/events/batch` and `GET /v1/traces/{external_id}` create a shared trace from its `beacon.trace.v1` summary, upsert its trace events, and read it back (with the id of the last event held) for [`beacon share`](/cli/share) (and for the git pre-push hook, only after you opt in with [`beacon git setup --share-sessions`](/cli/git#sharing-sessions-on-push)), with the access token (or a `bcn_api_` API key) as a Bearer credential. They require `traces:write`. For a beacon.sh sign-in they go to `https://api.beacon.sh`; see [where the requests go](/cli/share#where-the-requests-go).
 - `POST /api/cli/auth/revoke` accepts the access token as a Bearer credential and revokes it.
 
 `beacon login` requests `profile:read`, `device:enroll`, `mcp:token:create` and `traces:write`. A later `beacon endpoint connect` can use `device:enroll` to mint a device-specific ingest key without treating the account token as an ingest credential, and `beacon mcp token create` uses `mcp:token:create` to mint a personal MCP token. beacon.sh approves the sign-in only when the permissions its page showed match the ones the CLI registered, so a crafted link cannot hide one. `beacon share` uses `traces:write` to upload a session you choose to share. A session from an older `beacon login` lacks `mcp:token:create` or `traces:write`; run `beacon login` again to create MCP tokens or share traces from the CLI.

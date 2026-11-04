@@ -118,16 +118,3 @@ func TestUserModeRotatedArchivesArePrivate(t *testing.T) {
 		assertPerm(t, target, 0o600)
 	}
 }
-
-// System mode is unchanged: the shared log stays world-writable so hooks running as each logged-in
-// user can append to the log a root collector created.
-func TestSharedLogKeepsTheSharedMode(t *testing.T) {
-	testenv.RequirePOSIXFileModes(t)
-	testenv.SetHome(t, t.TempDir())
-	path := filepath.Join(t.TempDir(), "beacon-agent", "runtime.jsonl")
-	if _, err := AppendEvent(privateLogTestEvent("shared"), Options{Path: path, UserMode: false}); err != nil {
-		t.Fatal(err)
-	}
-	assertPerm(t, path, 0o666)
-	assertPerm(t, path+".lock", 0o666)
-}

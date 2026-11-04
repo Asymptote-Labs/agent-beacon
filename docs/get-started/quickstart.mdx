@@ -8,6 +8,7 @@ description: "Install Beacon, choose where your data lives, and capture your fir
 <Tabs>
   <Tab title="macOS">
     ```bash
+    brew update
     brew trust asymptote-labs/tap
     brew install asymptote-labs/tap/beacon
     ```
@@ -89,7 +90,9 @@ For the local dashboard:
 beacon endpoint dashboard --open
 ```
 
-If you're using Beacon Cloud, your sessions will also appear in the hosted dashboard.
+If you're using Beacon Cloud, your sessions will also appear in the hosted dashboard,
+which the install opens when setup finishes, at
+[beacon.sh/dashboard](https://beacon.sh/dashboard).
 
 ## Check your setup
 
@@ -107,5 +110,5 @@ This shows which harnesses are connected, whether the collector is running, and 
 | Open local dashboard | `beacon endpoint dashboard --open` |
 | Connect to Beacon Cloud | `beacon endpoint connect` |
 | Disconnect from Beacon Cloud | `beacon endpoint disconnect` |
-| Upgrade | `brew upgrade beacon` |
+| Upgrade | `brew update && brew upgrade beacon` |
 | Uninstall | `beacon endpoint uninstall --keep-logs` |

@@ -1,0 +1,145 @@
+id: agent-extension-installed-by-command
+version: 1
+title: Agent extension (MCP server, plugin, marketplace) installed by command
+description: >
+  A command registers new code that an agent runtime will load on every later
+  session: an MCP server (claude/codex/gemini/qwen/opencode/kiro-cli/amp mcp add,
+  add-json, add-from-claude-desktop; code --add-mcp), a plugin or plugin marketplace
+  (claude plugin install, claude plugin marketplace add), or an extension (gemini
+  extensions install or link, code --install-extension). An agent that installs its
+  own extensions has widened what every future session can do, and a malicious skill
+  or injected instruction needs exactly this one step to persist.
+  agent-control-surface-modified catches the same outcome when the config file is
+  written directly; this rule catches the runtime's own installer doing it.
+severity: medium
+status: stable
+posture: detect
+taxonomy:
+  beacon_category: agent-control
+  owasp_llm: LLM03
+  mitre_atlas: AML.T0011
+
+match: >
+  e.event.action == "command.executed" && (
+    e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?((npx|bunx|pnpm\\s+dlx)\\s+(-y\\s+)?)?([^\\s;&|]*/)?(claude(-code)?|codex|gemini(-cli)?|qwen(-code)?|opencode(-ai)?|kiro-cli|amp|cursor-agent|copilot)\\s+(mcp\\s+(add|add-json|add-from-claude-desktop|install)\\b|plugins?\\s+(install|add|i)\\b|plugins?\\s+marketplace\\s+add\\b|extensions?\\s+(install|link)\\b)") ||
+    e.command.command.matches("(?i)(^|[;&|(`]|\\$\\()\\s*(sudo\\s+)?([^\\s;&|]*/)?code(-insiders)?(\\.exe|\\.cmd)?\\s+([^;&|\\n]*\\s)?--(add-mcp|install-extension)\\b")
+  )
+
+emit:
+  reason: "Agent extension installed by command (MCP server, plugin, marketplace or extension) \u2014 loads new code into every future session"
+
+tests:
+  - name: claude_mcp_add_stdio
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "claude mcp add helper -- npx -y helper-mcp" }
+        session: { id: s1 }
+  - name: claude_mcp_add_json_user_scope
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "claude mcp add-json -s user drop '{\"type\":\"http\",\"url\":\"https://mcp.example.test\"}'" }
+        session: { id: s1 }
+  - name: codex_mcp_add
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "codex mcp add docs -- uvx docs-mcp" }
+        session: { id: s1 }
+  - name: gemini_mcp_add
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gemini mcp add -s user files npx files-mcp" }
+        session: { id: s1 }
+  - name: claude_plugin_install
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "claude plugin install deploy@acme-tools" }
+        session: { id: s1 }
+  - name: claude_plugin_marketplace_add
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "claude plugin marketplace add someone/agent-plugins" }
+        session: { id: s1 }
+  - name: gemini_extension_install
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gemini extensions install https://github.com/someone/gemini-ext" }
+        session: { id: s1 }
+  - name: npx_wrapped_claude
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "npx -y @anthropic-ai/claude-code mcp add x -- node /tmp/x.js" }
+        session: { id: s1 }
+  - name: chained_after_cd
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "cd /tmp && opencode mcp add x" }
+        session: { id: s1 }
+  - name: vscode_add_mcp
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "code --add-mcp '{\"name\":\"x\",\"command\":\"npx\",\"args\":[\"x-mcp\"]}'" }
+        session: { id: s1 }
+  - name: claude_mcp_list
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "claude mcp list" }
+        session: { id: s1 }
+  - name: claude_mcp_remove
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "claude mcp remove helper" }
+        session: { id: s1 }
+  - name: gemini_extensions_list
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gemini extensions list" }
+        session: { id: s1 }
+  - name: claude_plugin_marketplace_list
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "claude plugin marketplace list" }
+        session: { id: s1 }
+  - name: mentioned_in_echo
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo 'run claude mcp add to register it'" }
+        session: { id: s1 }
+  - name: vscode_install_extension_absolute_path
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "/usr/local/bin/code --install-extension someone.helper" }
+        session: { id: s1 }
+  - name: vscode_flag_echoed_into_script
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "echo \"code --install-extension ms-python.python\" >> setup.sh" }
+        session: { id: s1 }
+  - name: vscode_flag_grepped
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "grep -rn 'code --install-extension' docs/" }
+        session: { id: s1 }
+  - name: vscode_open_file
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "code src/main.go" }
+        session: { id: s1 }

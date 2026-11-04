@@ -9,33 +9,13 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
-// A runtime missing from DiscoverAll is invisible to `beacon endpoint discover`, which is where an
-// operator looks to find out what is on the machine. It fails silently: the command succeeds and
-// simply never mentions Qwen Code.
-func TestDiscoverAllIncludesQwen(t *testing.T) {
-	for _, h := range DiscoverAll() {
-		if h.Name == "qwen_code" {
-			if h.DisplayName != "Qwen Code" {
-				t.Errorf("DisplayName = %q, want Qwen Code", h.DisplayName)
-			}
-			// "hooks", not "otel_env": Qwen Code is a Gemini CLI fork without Gemini's
-			// OpenTelemetry export, so there is no endpoint to point at the local collector and
-			// `endpoint install --harness qwen` has nothing to configure.
-			if h.Capability != "hooks" {
-				t.Errorf("Capability = %q, want hooks", h.Capability)
-			}
-			return
-		}
-	}
-	t.Fatal("DiscoverAll does not include qwen_code; `beacon endpoint discover` would never mention it")
-}
-
 // Qwen Code installs through npm, so a version manager, a shell alias or a per-project install all
 // hide the binary from the PATH this process inherited while ~/.qwen is still there. Reporting "not
 // detected" for a runtime the user is actively using is the failure this guards.
 func TestDiscoverQwenDetectsConfigDirectoryWithoutAnExecutable(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
+	t.Setenv("QWEN_HOME", "")
 	t.Setenv("PATH", t.TempDir())
 	if err := os.MkdirAll(filepath.Join(home, ".qwen"), 0755); err != nil {
 		t.Fatalf("mkdir qwen config dir: %v", err)
@@ -127,5 +107,37 @@ func TestDiscoverQwenDoesNotFallBackToTheProjectPath(t *testing.T) {
 	}
 	if h.TelemetryStatus == TelemetryEnabled {
 		t.Fatalf("TelemetryStatus = enabled from a project settings file: %#v", h)
+	}
+}
+
+// With QWEN_HOME set, Qwen Code's directory is that one, so it is the one whose presence counts as
+// evidence of the runtime and whose settings.json discovery reports.
+func TestDiscoverQwenHonorsQwenHome(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	t.Setenv("PATH", t.TempDir())
+	qwenHome := filepath.Join(t.TempDir(), "qwen-moved")
+	t.Setenv("QWEN_HOME", qwenHome)
+	if err := os.MkdirAll(qwenHome, 0755); err != nil {
+		t.Fatalf("mkdir QWEN_HOME: %v", err)
+	}
+
+	h := DiscoverQwen()
+	if !h.Detected {
+		t.Fatalf("DiscoverQwen did not detect Qwen Code from its QWEN_HOME directory: %#v", h)
+	}
+	if want := filepath.Join(qwenHome, "settings.json"); h.ConfigPath != want {
+		t.Fatalf("ConfigPath = %q, want %q", h.ConfigPath, want)
+	}
+
+	// A stale ~/.qwen is not evidence of anything once QWEN_HOME points elsewhere.
+	if err := os.RemoveAll(qwenHome); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".qwen"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if h := DiscoverQwen(); h.Detected {
+		t.Fatalf("DiscoverQwen detected Qwen Code from ~/.qwen with QWEN_HOME set elsewhere: %#v", h)
 	}
 }

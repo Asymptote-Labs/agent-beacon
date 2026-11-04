@@ -181,7 +181,7 @@ That last row is worth knowing about. A system-mode endpoint runs as root, so th
 sudo beacon endpoint user-config repair-installed --system
 ```
 
-Other users on the same machine run the same command for themselves. They all export to the same collector and the same log. That is why `/var/log/beacon-agent/runtime.jsonl` is group- and world-writable: hooks run as the logged-in user and append to it directly.
+Other users on the same machine run the same command for themselves. They all export to the same collector and the same log. That is why `/var/log/beacon-agent/runtime.jsonl` is group- and world-writable: hooks run as the logged-in user and append to it directly. To stop other accounts from modifying or reading it, install with [`--log-access restricted`](/cli/endpoint-install#restricted-log-access): the collector becomes the only writer and hooks send their events to it over a local socket.
 
 ## Managing the service
 

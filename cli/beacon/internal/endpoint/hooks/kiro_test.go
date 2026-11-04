@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -131,28 +130,35 @@ func TestInstallKiroBindsEveryTrigger(t *testing.T) {
 	}
 }
 
-// version is the whole reason the file loads. A value Kiro does not recognize is not a warning, it
-// is hooks that never run.
-func TestInstallKiroWritesTheV1SchemaVersion(t *testing.T) {
+// The emitted document, pinned against Kiro's v1 schema:
+//   - `version` is the whole reason the file loads; a value Kiro does not recognize is hooks that
+//     never run.
+//   - Only the two documented top-level keys. Kiro's behavior for an unknown one is undocumented,
+//     so the marker other runtimes get goes on each hook's name instead.
+//   - Every hook is a command hook (an `agent` action spends model tokens and observes nothing),
+//     enabled, with a uniquely identifying name and an explicit non-zero timeout -- Kiro's default
+//     is 60 seconds, and zero means no timeout at all.
+//   - No matcher: it is a regex whose subject depends on the trigger, and omitting it is
+//     always-match. The `"*"` Kiro's IDE shows for "all tools" is not a valid regex.
+func TestInstallKiroWritesTheV1Schema(t *testing.T) {
 	path := kiroUserHooksPath(t)
 	installKiroFixture(t, path)
 
-	if got, _ := readKiroFile(t, path)["version"].(string); got != "v1" {
+	document := readKiroFile(t, path)
+	if got, _ := document["version"].(string); got != "v1" {
 		t.Fatalf("version = %q, want v1", got)
 	}
-}
-
-// Every hook is a command hook with an explicit timeout and an explicit enabled flag. The timeout
-// matters: Kiro's default is 60 seconds, which is a long time to hold an agent turn for a hook
-// that finishes in milliseconds.
-func TestInstallKiroWritesTypedCommandHooks(t *testing.T) {
-	path := kiroUserHooksPath(t)
-	installKiroFixture(t, path)
+	for key := range document {
+		if key != "version" && key != "hooks" {
+			t.Fatalf("hook file carries an undocumented top-level key %q", key)
+		}
+	}
 
 	timeouts := map[string]int{}
 	for _, event := range kiroEvents {
 		timeouts[event.trigger] = event.timeout
 	}
+	names := map[string]bool{}
 	for _, hook := range kiroHookObjects(t, path) {
 		trigger, _ := hook["trigger"].(string)
 		action, _ := hook["action"].(map[string]interface{})
@@ -166,86 +172,17 @@ func TestInstallKiroWritesTypedCommandHooks(t *testing.T) {
 		if !ok {
 			t.Fatalf("trigger %q has no timeout: %#v", trigger, hook)
 		}
-		if int(timeout) != timeouts[trigger] {
-			t.Errorf("trigger %q timeout = %d, want %d", trigger, int(timeout), timeouts[trigger])
+		if int(timeout) != timeouts[trigger] || timeout == 0 {
+			t.Errorf("trigger %q timeout = %d, want %d (never 0)", trigger, int(timeout), timeouts[trigger])
 		}
-		// Zero does not mean "the default" on Kiro, it means no timeout at all -- a hook that hung
-		// would hang the agent turn with it, indefinitely.
-		if timeout == 0 {
-			t.Errorf("trigger %q timeout = 0, which disables the timeout entirely", trigger)
-		}
-	}
-}
-
-// Names must be unique: Kiro documents `name` as the hook's identifier and all five live in one
-// file.
-func TestInstallKiroWritesUniqueHookNames(t *testing.T) {
-	path := kiroUserHooksPath(t)
-	installKiroFixture(t, path)
-
-	seen := map[string]bool{}
-	for _, hook := range kiroHookObjects(t, path) {
 		name, _ := hook["name"].(string)
-		if name == "" {
-			t.Fatalf("hook has no name: %#v", hook)
+		if name == "" || names[name] {
+			t.Fatalf("hook name %q is empty or used twice", name)
 		}
-		if seen[name] {
-			t.Fatalf("hook name %q used twice", name)
-		}
-		seen[name] = true
-	}
-}
-
-// No matcher, on any trigger. The field is a regex whose subject depends on the trigger -- a tool
-// name here, the prompt text there, nothing at all on SessionStart and Stop -- and omitting it
-// means always-match, which is what a telemetry hook wants everywhere. The `"*"` that reads as
-// "all tools" in Kiro's IDE tool-name field is not a valid regex, so writing it here would at best
-// match nothing.
-func TestInstallKiroWritesNoMatcher(t *testing.T) {
-	path := kiroUserHooksPath(t)
-	installKiroFixture(t, path)
-
-	for _, hook := range kiroHookObjects(t, path) {
+		names[name] = true
 		if matcher, ok := hook["matcher"]; ok {
-			t.Fatalf("trigger %v carries a matcher %q; omitting it is what makes it always-match",
-				hook["trigger"], matcher)
-		}
-	}
-	// The reason, stated as a check rather than only as prose: "*" does not compile as a regex, so
-	// a future edit that "helpfully" adds it would be adding a hook that cannot fire.
-	if _, err := regexp.Compile("*"); err == nil {
-		t.Fatal("regexp.Compile(\"*\") succeeded; the reason this test gives for omitting the matcher no longer holds")
-	}
-}
-
-// Only the two documented top-level keys. Kiro's v1 schema publishes `version` and `hooks` and
-// nothing else, and its behavior for an unknown top-level key is not documented -- so the marker
-// that other runtimes get goes on each hook's name and description instead.
-func TestInstallKiroWritesOnlyDocumentedTopLevelKeys(t *testing.T) {
-	path := kiroUserHooksPath(t)
-	installKiroFixture(t, path)
-
-	for key := range readKiroFile(t, path) {
-		if key != "version" && key != "hooks" {
-			t.Fatalf("hook file carries an undocumented top-level key %q", key)
-		}
-	}
-}
-
-// The `agent` action type injects a prompt instead of running a command: it spends model tokens
-// and cannot observe anything. Beacon never writes one, and this is the record of why rather than
-// an accident of the struct.
-func TestInstallKiroWritesNoAgentActionsOrConfirmPrompts(t *testing.T) {
-	path := kiroUserHooksPath(t)
-	installKiroFixture(t, path)
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read hook file: %v", err)
-	}
-	for _, forbidden := range []string{`"prompt"`, `"confirm"`, `"confirmCommand"`, `"type": "agent"`} {
-		if strings.Contains(string(data), forbidden) {
-			t.Fatalf("hook file contains %s:\n%s", forbidden, data)
+			t.Fatalf("trigger %q carries a matcher %q; omitting it is what makes it always-match",
+				trigger, matcher)
 		}
 	}
 }
@@ -267,26 +204,6 @@ func TestInstallKiroWritesAWorldReadableFile(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0644 {
 		t.Fatalf("hook file mode = %v, want 0644", info.Mode().Perm())
-	}
-}
-
-// The triggers Beacon deliberately does not subscribe to must stay unsubscribed. The file triggers
-// would record a second event for a write PostToolUse already covers, in a security log where
-// double-counting a file change is worse than the coverage it buys; the task triggers have no
-// documented payload; Manual is a person running a hook by hand.
-func TestInstallKiroDoesNotSubscribeToDuplicateOrUndocumentedTriggers(t *testing.T) {
-	path := kiroUserHooksPath(t)
-	installKiroFixture(t, path)
-
-	unwanted := map[string]bool{
-		"PostFileCreate": true, "PostFileSave": true, "PostFileDelete": true,
-		"PreTaskExec": true, "PostTaskExec": true, "Manual": true,
-	}
-	for _, hook := range kiroHookObjects(t, path) {
-		trigger, _ := hook["trigger"].(string)
-		if unwanted[trigger] {
-			t.Fatalf("subscribed to %q; see the kiroEvents comment for why it is excluded", trigger)
-		}
 	}
 }
 
@@ -408,9 +325,6 @@ func TestInstallKiroRefusesAFileItDoesNotOwn(t *testing.T) {
 	if err == nil {
 		t.Fatal("install overwrote a hook file Beacon did not write")
 	}
-	if !strings.Contains(err.Error(), "lint-on-save") {
-		t.Errorf("error does not name the hook it refused to replace: %v", err)
-	}
 	data, readErr := os.ReadFile(path)
 	if readErr != nil {
 		t.Fatalf("read hook file: %v", readErr)
@@ -522,26 +436,6 @@ func TestKiroProjectScopeIsRelativeToTheWorkingDirectory(t *testing.T) {
 func TestKiroUnknownLevelIsAnError(t *testing.T) {
 	if _, err := kiroHooksPath("machine"); err == nil {
 		t.Fatal("kiroHooksPath accepted an unknown level")
-	}
-}
-
-// Kiro merges hooks across scopes rather than resolving them by precedence, so a user-scope
-// install and a project-scope one are both live at once and must not collide on a path. This is
-// the opposite of OpenHands, where a project file hides the user one entirely.
-func TestKiroScopesAreDistinctPaths(t *testing.T) {
-	testenv.SetHome(t, t.TempDir())
-	t.Setenv("KIRO_HOME", "")
-
-	user, err := kiroHooksPath(LevelUser)
-	if err != nil {
-		t.Fatalf("kiroHooksPath(user): %v", err)
-	}
-	project, err := kiroHooksPath(LevelProject)
-	if err != nil {
-		t.Fatalf("kiroHooksPath(project): %v", err)
-	}
-	if user == project {
-		t.Fatalf("both scopes resolved to %q", user)
 	}
 }
 

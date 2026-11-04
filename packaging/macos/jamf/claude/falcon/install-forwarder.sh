@@ -73,10 +73,16 @@ include_array() {
       *)
         mkdir -p "$(dirname "$path")"
         # Hooks run as the console user and append to the runtime log, so a missing log is
-        # created 0666, the mode Beacon's own writer uses. An existing log keeps its mode.
+        # created 0666, the mode Beacon's own writer uses. A log in the restricted access mode,
+        # which only the collector writes, is created 0640 instead (its directory's setgid bit
+        # gives it the beacon-log group). An existing log keeps its mode.
         if [ ! -e "$path" ]; then
           touch "$path"
-          chmod 0666 "$path" || true
+          if grep -qx restricted "$(dirname "$path")/.beacon-log-access" 2>/dev/null; then
+            chmod 0640 "$path" || true
+          else
+            chmod 0666 "$path" || true
+          fi
         fi
         ;;
     esac

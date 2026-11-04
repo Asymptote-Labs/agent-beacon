@@ -50,6 +50,11 @@ func TestMapSessionProducesLifecycleAndMessages(t *testing.T) {
 		if ev.Harness.Name != "devin" {
 			t.Fatalf("harness = %q, want devin", ev.Harness.Name)
 		}
+		// Devin Cloud is polled after the run, neither a hook nor an OTLP stream: recording that
+		// on every event stops these from being read as endpoint-grade observation.
+		if ev.Harness.CollectionMethod != "poll" {
+			t.Fatalf("event %q collection_method = %q, want poll", ev.Event.Action, ev.Harness.CollectionMethod)
+		}
 		if ev.Run == nil || ev.Run.Provider != "devin_cloud" || ev.Run.RunID != "sess1" || ev.Run.Actor != "user-1" {
 			t.Fatalf("run = %+v", ev.Run)
 		}
@@ -121,15 +126,6 @@ func TestMessageDedupIDHandlesEmptyAndDuplicate(t *testing.T) {
 	}
 }
 
-func TestMapSessionHasNoEndedRegardlessOfStatus(t *testing.T) {
-	for _, st := range []string{"working", "suspended", "finished"} {
-		mapped := MapSession(Session{SessionID: "s", Status: st, CreatedAt: 10}, nil)
-		if len(mapped) != 1 || mapped[0].Event.Event.Action != "session.started" {
-			t.Fatalf("status %q: MapSession should emit only session.started, got %d events", st, len(mapped))
-		}
-	}
-}
-
 func TestStatusClassification(t *testing.T) {
 	for _, st := range []string{"finished", "expired", "suspended"} {
 		if !IsTerminal(st) {
@@ -159,27 +155,6 @@ func TestObjectNameLayout(t *testing.T) {
 	want2 := "provider=devin_cloud/user_id=unknown/run_id=unknown/runtime.jsonl"
 	if got2 != want2 {
 		t.Fatalf("ObjectName empties = %q, want %q", got2, want2)
-	}
-}
-
-// Devin Cloud is the one collection path that is neither a hook nor an OTLP stream: Beacon polls
-// the sessions API and maps whatever it returns after the run. Recording that on every event is
-// what stops these from being read as endpoint-grade observation of the agent at work.
-func TestMappedEventsRecordPollCollectionMethod(t *testing.T) {
-	s := Session{SessionID: "sess-poll", Status: "finished", UserID: "user-1", CreatedAt: 1000, UpdatedAt: 1200}
-	msgs := []Message{
-		{EventID: "e1", Source: "user", Message: "do the thing", CreatedAt: 1000},
-		{EventID: "e2", Source: "devin", Message: "done", CreatedAt: 1100},
-	}
-
-	mapped := MapSession(s, msgs)
-	if len(mapped) == 0 {
-		t.Fatal("MapSession produced no events")
-	}
-	for i, m := range mapped {
-		if got := m.Event.Harness.CollectionMethod; got != "poll" {
-			t.Fatalf("event %d (%s) collection_method = %q, want poll", i, m.Event.Event.Action, got)
-		}
 	}
 }
 

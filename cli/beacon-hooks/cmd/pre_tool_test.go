@@ -16,45 +16,15 @@ import (
 	hookconfig "github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/config"
 )
 
-func TestRunPreToolAllowsAndEmitsTelemetry(t *testing.T) {
-	tests := []struct {
-		name      string
-		sessionID string
-	}{
-		{
-			name: "missing session allows",
-		},
-		{
-			name:      "session allows",
-			sessionID: "conv-observe",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			setupHookConfigDirs(t)
-			platformFlag = "cursor"
-
-			input := map[string]interface{}{}
-			if tt.sessionID != "" {
-				input["conversation_id"] = tt.sessionID
-			}
-			out := runHookWithInput(t, runPreTool, input)
-
-			if out["permission"] != "allow" {
-				t.Fatalf("permission = %v, want allow; output=%#v", out["permission"], out)
-			}
-		})
-	}
-}
-
-func TestRunPromptSubmitUsesCursorResponse(t *testing.T) {
+// Cursor reads the pre-tool answer as the call's permission; a payload with no session must still
+// let the call proceed.
+func TestRunPreToolAllowsCursorWithoutSession(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "cursor"
 
-	out := runHookWithInput(t, runPromptSubmit, map[string]interface{}{"conversation_id": "conv-submit"})
-	if out["continue"] != true {
-		t.Fatalf("cursor prompt response = %#v, want continue=true", out)
+	out := runHookWithInput(t, runPreTool, map[string]interface{}{})
+	if out["permission"] != "allow" {
+		t.Fatalf("permission = %v, want allow; output=%#v", out["permission"], out)
 	}
 }
 
@@ -85,6 +55,10 @@ func TestRunPreToolEmitsCursorBeforeShellExecution(t *testing.T) {
 	event := lastEndpointEvent(t, logPath)
 	if action := event["event"].(map[string]interface{})["action"]; action != "approval.allowed" {
 		t.Fatalf("event.action = %q, want approval.allowed", action)
+	}
+	// Every shell command becomes an approval.allowed whether or not anything gated it.
+	if got := eventFidelity(t, event); got != "inferred" {
+		t.Fatalf("event.fidelity = %q, want inferred for a synthesized shell approval", got)
 	}
 	if command := event["command"].(map[string]interface{})["command"]; command != "npm test" {
 		t.Fatalf("command = %q, want npm test", command)
@@ -187,32 +161,6 @@ func TestVSCodeHooksEmitLowNoiseTelemetry(t *testing.T) {
 	}
 }
 
-func TestRunSubagentLifecycleEmitsVSCodeEvents(t *testing.T) {
-	setupHookConfigDirs(t)
-	platformFlag = "vscode"
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-
-	runHookWithInput(t, func(cmd *cobra.Command, args []string) {
-		runSubagentLifecycle("subagent.started", "Subagent started")
-	}, map[string]interface{}{
-		"sessionId":  "vscode-session",
-		"agent_id":   "agent-1",
-		"agent_type": "Plan",
-	})
-
-	event := lastEndpointEvent(t, logPath)
-	if action := event["event"].(map[string]interface{})["action"]; action != "subagent.started" {
-		t.Fatalf("event.action = %q, want subagent.started", action)
-	}
-	if harness := event["harness"].(map[string]interface{})["name"]; harness != "vscode_copilot" {
-		t.Fatalf("harness = %q, want vscode_copilot", harness)
-	}
-	if _, ok := event["tool"]; ok {
-		t.Fatalf("subagent event should not be encoded as tool: %#v", event["tool"])
-	}
-}
-
 func TestRunSubagentLifecycleEmitsCursorCloudFields(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "cursor"
@@ -247,29 +195,6 @@ func TestRunSubagentLifecycleEmitsCursorCloudFields(t *testing.T) {
 	}
 }
 
-func TestRunCursorEventEmitsPreCompact(t *testing.T) {
-	setupHookConfigDirs(t)
-	platformFlag = "cursor"
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-	t.Setenv("BEACON_ORIGIN", "cloud")
-	t.Setenv("BEACON_RUN_PROVIDER", "cursor_cloud")
-
-	out := runHookWithInput(t, runCursorEvent, map[string]interface{}{
-		"conversation_id": "conv-compact",
-		"hook_event_name": "preCompact",
-		"cwd":             "/repo",
-	})
-	if len(out) != 0 {
-		t.Fatalf("cursor-event response = %#v, want empty response", out)
-	}
-
-	event := lastEndpointEvent(t, logPath)
-	if action := event["event"].(map[string]interface{})["action"]; action != "session.compacting" {
-		t.Fatalf("event.action = %q, want session.compacting", action)
-	}
-}
-
 // Cursor is the second runtime to report context occupancy, and the first to prove the alias-list
 // design pays off: its preCompact payload names the same measurement Qwen does under different
 // keys, and reading it took two list entries and no change to this mapper.
@@ -283,7 +208,7 @@ func TestRunCursorEventNormalizesPreCompactContextSize(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
 
-	runHookWithInput(t, runCursorEvent, map[string]interface{}{
+	out := runHookWithInput(t, runCursorEvent, map[string]interface{}{
 		"conversation_id":       "conv-compact",
 		"hook_event_name":       "preCompact",
 		"cwd":                   "/repo",
@@ -294,8 +219,14 @@ func TestRunCursorEventNormalizesPreCompactContextSize(t *testing.T) {
 		"context_window_size":   200000,
 		"message_count":         64,
 	})
+	if len(out) != 0 {
+		t.Fatalf("cursor-event response = %#v, want empty response", out)
+	}
 
 	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "session.compacting" {
+		t.Fatalf("event.action = %q, want session.compacting", action)
+	}
 	genAI, ok := event["gen_ai"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("event has no gen_ai block: %#v", event)
@@ -353,79 +284,39 @@ func TestRunPromptSubmitEmitsFactoryPromptEvent(t *testing.T) {
 	}
 }
 
+// Antigravity names the prompt `prompt` on one hook and `userPrompt` on another.
 func TestRunPromptSubmitEmitsAntigravityPromptEvent(t *testing.T) {
-	setupHookConfigDirs(t)
-	platformFlag = "antigravity"
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-	t.Setenv("BEACON_CONTENT_RETENTION", "full")
+	for _, key := range []string{"prompt", "userPrompt"} {
+		t.Run(key, func(t *testing.T) {
+			setupHookConfigDirs(t)
+			platformFlag = "antigravity"
+			logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+			t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+			t.Setenv("BEACON_CONTENT_RETENTION", "full")
 
-	out := runHookWithInput(t, runPromptSubmit, map[string]interface{}{
-		"conversationId": "ag-session",
-		"workspacePaths": []interface{}{"/repo"},
-		"prompt":         "summarize token=ag-secret",
-	})
-	if len(out) != 0 {
-		t.Fatalf("antigravity prompt response = %#v, want empty response", out)
-	}
+			out := runHookWithInput(t, runPromptSubmit, map[string]interface{}{
+				"conversationId": "ag-session",
+				"workspacePaths": []interface{}{"/repo"},
+				key:              "summarize token=ag-secret",
+			})
+			if len(out) != 0 {
+				t.Fatalf("antigravity prompt response = %#v, want empty response", out)
+			}
 
-	event := lastEndpointEvent(t, logPath)
-	if action := event["event"].(map[string]interface{})["action"]; action != "prompt.submitted" {
-		t.Fatalf("event.action = %q, want prompt.submitted", action)
-	}
-	if harness := event["harness"].(map[string]interface{})["name"]; harness != "antigravity_cli" {
-		t.Fatalf("harness = %q, want antigravity_cli", harness)
-	}
-	if got := event["prompt"].(map[string]interface{})["text"]; got != "summarize token=[REDACTED]" {
-		t.Fatalf("prompt.text = %q, want redacted prompt", got)
-	}
-	if got := event["repository"]; got != "/repo" {
-		t.Fatalf("repository = %q, want /repo", got)
-	}
-}
-
-func TestRunPromptSubmitEmitsAntigravityUserPromptEvent(t *testing.T) {
-	setupHookConfigDirs(t)
-	platformFlag = "antigravity"
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-	t.Setenv("BEACON_CONTENT_RETENTION", "full")
-
-	out := runHookWithInput(t, runPromptSubmit, map[string]interface{}{
-		"conversationId": "ag-session",
-		"userPrompt":     "explain this repo token=ag-secret",
-	})
-	if len(out) != 0 {
-		t.Fatalf("antigravity prompt response = %#v, want empty response", out)
-	}
-
-	event := lastEndpointEvent(t, logPath)
-	if action := event["event"].(map[string]interface{})["action"]; action != "prompt.submitted" {
-		t.Fatalf("event.action = %q, want prompt.submitted", action)
-	}
-	if got := event["prompt"].(map[string]interface{})["text"]; got != "explain this repo token=[REDACTED]" {
-		t.Fatalf("prompt.text = %q, want redacted prompt", got)
-	}
-}
-
-func TestRunPromptSubmitIgnoresLegacyRetentionEnvForAntigravity(t *testing.T) {
-	setupHookConfigDirs(t)
-	platformFlag = "antigravity"
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-	t.Setenv("BEACON_CONTENT_RETENTION", "metadata")
-
-	out := runHookWithInput(t, runPromptSubmit, map[string]interface{}{
-		"conversationId": "ag-session",
-		"prompt":         "summarize this file",
-	})
-	if len(out) != 0 {
-		t.Fatalf("antigravity prompt response = %#v, want empty response", out)
-	}
-
-	event := lastEndpointEvent(t, logPath)
-	if got := event["prompt"].(map[string]interface{})["text"]; got != "summarize this file" {
-		t.Fatalf("prompt.text = %q, want legacy retention env ignored", got)
+			event := lastEndpointEvent(t, logPath)
+			if action := event["event"].(map[string]interface{})["action"]; action != "prompt.submitted" {
+				t.Fatalf("event.action = %q, want prompt.submitted", action)
+			}
+			if harness := event["harness"].(map[string]interface{})["name"]; harness != "antigravity_cli" {
+				t.Fatalf("harness = %q, want antigravity_cli", harness)
+			}
+			if got := event["prompt"].(map[string]interface{})["text"]; got != "summarize token=[REDACTED]" {
+				t.Fatalf("prompt.text = %q, want redacted prompt", got)
+			}
+			if got := event["repository"]; got != "/repo" {
+				t.Fatalf("repository = %q, want /repo", got)
+			}
+		})
 	}
 }
 
@@ -521,94 +412,6 @@ func TestRunPromptSubmitEmitsDevinDesktopPromptWithDesktopHarness(t *testing.T) 
 	}
 }
 
-func TestRunPromptSubmitIgnoresLegacyRetentionEnvForDevinDesktop(t *testing.T) {
-	setupHookConfigDirs(t)
-	platformFlag = "devin-desktop"
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-	t.Setenv("BEACON_CONTENT_RETENTION", "metadata")
-
-	out := runHookWithInput(t, runPromptSubmit, map[string]interface{}{
-		"agent_action_name": "pre_user_prompt",
-		"trajectory_id":     "cascade-session",
-		"tool_info": map[string]interface{}{
-			"user_prompt": "summarize token=desktop-secret",
-		},
-	})
-	if len(out) != 0 {
-		t.Fatalf("devin desktop prompt response = %#v, want empty response", out)
-	}
-
-	event := lastEndpointEvent(t, logPath)
-	if got := event["prompt"].(map[string]interface{})["text"]; got != "summarize token=[REDACTED]" {
-		t.Fatalf("prompt.text = %q, want redacted prompt", got)
-	}
-	// The marker is what proves the env is inert, rather than its absence: it
-	// reports the retention that actually happened, and BEACON_CONTENT_RETENTION
-	// asked for "metadata".
-	content, ok := event["content"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("content marker missing on a retained prompt: %#v", event)
-	}
-	if content["retention"] != "full" || content["included"] != true {
-		t.Fatalf("legacy retention env changed retention: %#v", content)
-	}
-}
-
-func TestRunPreToolEmitsDevinToolTelemetryWithoutApproval(t *testing.T) {
-	setupHookConfigDirs(t)
-	platformFlag = "devin"
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-
-	out := runHookWithInput(t, runPreTool, map[string]interface{}{
-		"hook_event_name": "PreToolUse",
-		"tool_name":       "exec",
-		"tool_input": map[string]interface{}{
-			"command": "git status",
-		},
-	})
-	if len(out) != 0 {
-		t.Fatalf("devin pre-tool response = %#v, want empty response", out)
-	}
-
-	event := lastEndpointEvent(t, logPath)
-	if action := event["event"].(map[string]interface{})["action"]; action != "tool.invoked" {
-		t.Fatalf("event.action = %q, want tool.invoked", action)
-	}
-	if _, ok := event["approval"]; ok {
-		t.Fatalf("PreToolUse should not emit approval telemetry: %#v", event["approval"])
-	}
-	if command := event["command"].(map[string]interface{})["command"]; command != "git status" {
-		t.Fatalf("command = %q, want git status", command)
-	}
-}
-
-func TestRunPermissionRequestObservesDevinCLI(t *testing.T) {
-	setupHookConfigDirs(t)
-	platformFlag = "devin-cli"
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-
-	out := runHookWithInput(t, runPermissionRequest, map[string]interface{}{
-		"tool_name": "exec",
-		"tool_input": map[string]interface{}{
-			"command": "git status",
-		},
-	})
-	if len(out) != 0 {
-		t.Fatalf("devin-cli permission response = %#v, want an empty object carrying no decision", out)
-	}
-
-	event := lastEndpointEvent(t, logPath)
-	if harness := event["harness"].(map[string]interface{})["name"]; harness != "devin-cli" {
-		t.Fatalf("harness = %q, want devin-cli", harness)
-	}
-	if action := event["event"].(map[string]interface{})["action"]; action != "approval.requested" {
-		t.Fatalf("event.action = %q, want approval.requested", action)
-	}
-}
-
 func TestRunPreToolEmitsClaudeTelemetryWithoutDecision(t *testing.T) {
 	setupHookConfigDirs(t)
 	platformFlag = "claude"
@@ -645,6 +448,36 @@ func TestRunPreToolEmitsClaudeTelemetryWithoutDecision(t *testing.T) {
 	session := event["session"].(map[string]interface{})
 	if session["id"] != "claude-session" || session["working_directory"] != "/repo" {
 		t.Fatalf("session = %#v, want id and working_directory", session)
+	}
+}
+
+// Devin has a real PermissionRequest hook that Beacon also subscribes to, so its PreToolUse is
+// observed as tool.invoked rather than turned into a synthesized approval.allowed: one approval per
+// call, and only the one an operator gave. The response carries no decision.
+func TestDevinPreToolObservesWithoutSynthesizingAnApproval(t *testing.T) {
+	setupHookConfigDirs(t)
+	platformFlag = "devin"
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+
+	out := runHookWithInput(t, runPreTool, map[string]interface{}{
+		"hook_event_name": "PreToolUse",
+		"tool_name":       "exec",
+		"tool_input":      map[string]interface{}{"command": "git status"},
+	})
+	if len(out) != 0 {
+		t.Fatalf("devin pre-tool response = %#v, want an empty object carrying no decision", out)
+	}
+
+	event := lastEndpointEvent(t, logPath)
+	if action := event["event"].(map[string]interface{})["action"]; action != "tool.invoked" {
+		t.Fatalf("event.action = %q, want tool.invoked", action)
+	}
+	if _, ok := event["approval"]; ok {
+		t.Fatalf("PreToolUse should not emit approval telemetry: %#v", event["approval"])
+	}
+	if command := event["command"].(map[string]interface{})["command"]; command != "git status" {
+		t.Fatalf("command = %q, want git status", command)
 	}
 }
 
@@ -799,63 +632,6 @@ func TestRunPreToolRetriesAntigravityPromptUntilTranscriptExists(t *testing.T) {
 	}
 	if got := events[1]["prompt"].(map[string]interface{})["text"]; got != "show me the full prompt" {
 		t.Fatalf("prompt.text = %q, want full transcript prompt", got)
-	}
-}
-
-func TestRunPermissionRequestEmitsDevinApprovalRequest(t *testing.T) {
-	setupHookConfigDirs(t)
-	platformFlag = "devin"
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-
-	out := runHookWithInput(t, runPermissionRequest, map[string]interface{}{
-		"hook_event_name": "PermissionRequest",
-		"tool_name":       "exec",
-		"tool_input": map[string]interface{}{
-			"command": "git status",
-		},
-	})
-	if len(out) != 0 {
-		t.Fatalf("devin permission response = %#v, want an empty object carrying no decision", out)
-	}
-
-	event := lastEndpointEvent(t, logPath)
-	if action := event["event"].(map[string]interface{})["action"]; action != "approval.requested" {
-		t.Fatalf("event.action = %q, want approval.requested", action)
-	}
-	approval := event["approval"].(map[string]interface{})
-	if approval["decision"] != "requested" || approval["required"] != true {
-		t.Fatalf("approval = %#v, want a required request with no decision", approval)
-	}
-}
-
-func TestRunPermissionRequestEmitsClaudeTelemetryWithoutDecision(t *testing.T) {
-	setupHookConfigDirs(t)
-	platformFlag = "claude"
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-
-	out := runHookWithInput(t, runPermissionRequest, map[string]interface{}{
-		"session_id":      "claude-session",
-		"cwd":             "/repo",
-		"hook_event_name": "PermissionRequest",
-		"tool_name":       "Bash",
-		"tool_input":      map[string]interface{}{"command": "git status"},
-	})
-	if len(out) != 0 {
-		t.Fatalf("claude permission response = %#v, want empty response", out)
-	}
-
-	event := lastEndpointEvent(t, logPath)
-	if action := event["event"].(map[string]interface{})["action"]; action != "approval.requested" {
-		t.Fatalf("event.action = %q, want approval.requested", action)
-	}
-	approval := event["approval"].(map[string]interface{})
-	if approval["decision"] != "requested" {
-		t.Fatalf("approval = %#v, want requested", approval)
-	}
-	if command := event["command"].(map[string]interface{})["command"]; command != "git status" {
-		t.Fatalf("command = %q, want git status", command)
 	}
 }
 
@@ -1207,30 +983,11 @@ func TestRunPreToolMarksSynthesizedCursorApprovalInferred(t *testing.T) {
 	}
 }
 
-// beforeShellExecution is the same synthesis on a different Cursor hook: every shell command
-// becomes an approval.allowed whether or not anything gated it.
-func TestRunPreToolMarksCursorShellApprovalInferred(t *testing.T) {
-	setupHookConfigDirs(t)
-	platformFlag = "cursor"
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-
-	runHookWithInput(t, runPreTool, map[string]interface{}{
-		"conversation_id": "conv-shell-inferred",
-		"hook_event_name": "beforeShellExecution",
-		"command":         "npm test",
-	})
-
-	event := lastEndpointEvent(t, logPath)
-	if got := eventFidelity(t, event); got != "inferred" {
-		t.Fatalf("event.fidelity = %q, want inferred for a synthesized shell approval", got)
-	}
-}
-
 // The counterpart, and the reason emitPreToolDecision takes fidelity as a parameter rather than
 // hardcoding it: the permission-request hook fires because a runtime genuinely asked for a
 // decision, so its approval events must stay observed. Marking this path inferred alongside the
-// pre-tool one would delete the distinction the field exists to record.
+// pre-tool one would delete the distinction the field exists to record. The hook only observes:
+// it answers with no decision and records a request, not an approval nobody gave.
 func TestRunPermissionRequestKeepsRealApprovalObserved(t *testing.T) {
 	for _, platform := range []string{"devin", "claude"} {
 		t.Run(platform, func(t *testing.T) {
@@ -1239,41 +996,31 @@ func TestRunPermissionRequestKeepsRealApprovalObserved(t *testing.T) {
 			logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 			t.Setenv("BEACON_ENDPOINT_LOG", logPath)
 
-			runHookWithInput(t, runPermissionRequest, map[string]interface{}{
-				"session_id": "conv-permission",
-				"tool_name":  "Bash",
+			out := runHookWithInput(t, runPermissionRequest, map[string]interface{}{
+				"session_id":      "conv-permission",
+				"cwd":             "/repo",
+				"hook_event_name": "PermissionRequest",
+				"tool_name":       "Bash",
+				"tool_input":      map[string]interface{}{"command": "git status"},
 			})
+			if len(out) != 0 {
+				t.Fatalf("permission response = %#v, want an empty object carrying no decision", out)
+			}
 
 			event := lastEndpointEvent(t, logPath)
-			action, _ := event["event"].(map[string]interface{})["action"].(string)
-			if !strings.HasPrefix(action, "approval.") {
-				t.Fatalf("event.action = %q, want an approval event", action)
+			if action := event["event"].(map[string]interface{})["action"]; action != "approval.requested" {
+				t.Fatalf("event.action = %q, want approval.requested", action)
+			}
+			approval := event["approval"].(map[string]interface{})
+			if approval["decision"] != "requested" || approval["required"] != true {
+				t.Fatalf("approval = %#v, want a required request with no decision", approval)
+			}
+			if command := event["command"].(map[string]interface{})["command"]; command != "git status" {
+				t.Fatalf("command = %q, want git status", command)
 			}
 			if got := eventFidelity(t, event); got != "observed" {
 				t.Fatalf("event.fidelity = %q, want observed for a real permission request", got)
 			}
 		})
-	}
-}
-
-// Ordinary telemetry is unaffected: a hook that fires for a named lifecycle event reports an
-// action the runtime gave it, so nothing about this change should make normal events look
-// uncertain.
-func TestRunPostToolKeepsObservedFidelity(t *testing.T) {
-	setupHookConfigDirs(t)
-	platformFlag = "cursor"
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-
-	runHookWithInput(t, runPostTool, map[string]interface{}{
-		"conversation_id": "conv-post",
-		"hook_event_name": "afterShellExecution",
-		"command":         "go test ./...",
-		"exit_code":       float64(0),
-	})
-
-	event := lastEndpointEvent(t, logPath)
-	if got := eventFidelity(t, event); got != "observed" {
-		t.Fatalf("event.fidelity = %q, want observed for a reported hook event", got)
 	}
 }

@@ -41,14 +41,15 @@ var endpointCopilotStatusCmd = &cobra.Command{
 }
 
 var endpointCopilotOpts struct {
-	copilotDir string
-	statePath  string
-	logPath    string
-	print      bool
-	watch      bool
-	interval   time.Duration
-	workspace  string
-	sessionID  string
+	copilotDir  string
+	statePath   string
+	logPath     string
+	print       bool
+	watch       bool
+	interval    time.Duration
+	workspace   string
+	sessionID   string
+	rotateBytes int64
 }
 
 func init() {
@@ -72,18 +73,23 @@ func init() {
 	sync.BoolVar(&endpointCopilotOpts.print, "print", false, "Print mapped events as JSON without writing them or advancing the cursor")
 	sync.BoolVar(&endpointCopilotOpts.watch, "watch", false, "Sweep continuously on --interval")
 	sync.DurationVar(&endpointCopilotOpts.interval, "interval", time.Minute, "Sweep interval for --watch")
+	addSyncRotateBytesFlag(sync, &endpointCopilotOpts.rotateBytes)
 }
 
 func runEndpointCopilotSync(cmd *cobra.Command, args []string) error {
+	if err := checkSyncRotateBytes(endpointCopilotOpts.rotateBytes); err != nil {
+		return err
+	}
 	userMode := endpointUserMode()
 	opts := copilotsession.CollectOptions{
-		CopilotDir: endpointCopilotOpts.copilotDir,
-		Print:      endpointCopilotOpts.print,
-		Out:        cmd.OutOrStdout(),
-		Write:      !endpointCopilotOpts.print,
-		UserMode:   userMode,
-		Workspace:  endpointCopilotOpts.workspace,
-		SessionID:  endpointCopilotOpts.sessionID,
+		RotateBytes: endpointCopilotOpts.rotateBytes,
+		CopilotDir:  endpointCopilotOpts.copilotDir,
+		Print:       endpointCopilotOpts.print,
+		Out:         cmd.OutOrStdout(),
+		Write:       !endpointCopilotOpts.print,
+		UserMode:    userMode,
+		Workspace:   endpointCopilotOpts.workspace,
+		SessionID:   endpointCopilotOpts.sessionID,
 	}
 	if !endpointCopilotOpts.print {
 		opts.StatePath = resolveCopilotStatePath(endpointCopilotOpts.statePath, userMode)
@@ -96,7 +102,7 @@ func runEndpointCopilotSync(cmd *cobra.Command, args []string) error {
 	if endpointCopilotOpts.watch && !endpointCopilotOpts.print {
 		return watchCopilot(ctx, cmd, opts)
 	}
-	summary, err := copilotsession.CollectOnce(opts)
+	summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, endpointSweepLockWait, copilotsession.CollectOnce, opts)
 	reportCopilotSweep(cmd, summary)
 	return err
 }
@@ -107,7 +113,7 @@ func watchCopilot(ctx context.Context, cmd *cobra.Command, opts copilotsession.C
 		interval = 5 * time.Second
 	}
 	for {
-		summary, err := copilotsession.CollectOnce(opts)
+		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, copilotsession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "copilot sync error: %v\n", err)
 		}
@@ -130,6 +136,7 @@ func reportCopilotSweep(cmd *cobra.Command, summary copilotsession.Summary) {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "copilot sync: %d sessions, %d changed, %d events, %d errors\n",
 		summary.Sessions, summary.SessionsChanged, summary.EventsEmitted, summary.Errors)
+	reportSyncRetention(cmd.OutOrStdout(), summary.Retention)
 	if summary.MalformedLines > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "  %d unreadable line(s) in GitHub Copilot CLI session logs\n", summary.MalformedLines)
 	}

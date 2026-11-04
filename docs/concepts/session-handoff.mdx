@@ -38,6 +38,18 @@ beacon handoff resume 7f3c2a91 --agent codex   # continue it in another runtime
 3. **Continue it.** `beacon handoff resume` prints its plan, asks you to confirm, and
    launches the runtime in this terminal, in the session's recorded directory.
 
+From inside another agent harness, use Beacon's CLI with detached launch. It uses the same planner
+and runtime registry, but starts the destination in a separate terminal surface so it does not
+depend on the source harness's non-TTY command subprocess:
+
+```text
+source harness -> Beacon CLI -> private launch spec -> new terminal or tmux -> destination runtime
+```
+
+The private launch specification contains Beacon's validated executable and argument vector. The
+destination terminal consumes it once and confirms process startup before the command reports
+success.
+
 ## Two ways to resume
 
 **Reopen natively.** Beacon reopens the session with its full context when you continue
@@ -113,6 +125,10 @@ The marker is text in a prompt, not a verified identity, and anyone can type it.
 - **Confirmation before launch.** `resume` asks before it starts a runtime, and it
   launches without a terminal only with `--yes`. It stops if the session's directory no
   longer exists, rather than starting somewhere else.
+- **Detached launch is one-time and structured.** A new-terminal or tmux launch reads a private,
+  expiring specification containing the executable and argument vector. Beacon does not construct
+  a shell command from prompt content, and the source process waits for the destination runtime to
+  confirm that it started.
 - **Approvals stay on.** Beacon never passes a flag that turns a runtime's approvals off.
   Where a CLI takes an approval mode, Beacon names the one that asks. For example, Cline
   is always started with `--auto-approve false`, because it approves every tool call by

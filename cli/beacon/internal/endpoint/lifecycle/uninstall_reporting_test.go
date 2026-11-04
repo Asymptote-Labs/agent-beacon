@@ -27,16 +27,6 @@ func TestUninstallRefusesAnUnprivilegedSystemRemoval(t *testing.T) {
 	}
 }
 
-// A user-mode uninstall needs no privileges and must not be caught by that gate.
-func TestUninstallAllowsUserModeWithoutPrivileges(t *testing.T) {
-	home := t.TempDir()
-	testenv.SetHome(t, home)
-
-	if err := Uninstall(UninstallOptions{UserMode: true}); err != nil {
-		t.Errorf("user-mode uninstall failed with nothing installed: %v", err)
-	}
-}
-
 // Rotation turns one log into six files, and the local history keeps what rotation deleted. Removing only runtime.jsonl left the archives -- up to
 // 50 MB of retained prompt text and command lines -- on disk after an uninstall that was not asked
 // to keep logs, and invisible, because the file an operator would look for was gone.

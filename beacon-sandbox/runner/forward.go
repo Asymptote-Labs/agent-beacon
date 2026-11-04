@@ -232,7 +232,7 @@ echo "FORWARD_VECTOR_EXE=$(readlink /proc/$pid/exe)"`,
 // forwardCollect waits for the session's events to reach the stand-in, then brings its record
 // home.
 //
-// The pack batches for up to 60 seconds, so the wait is a poll for the two things the check needs,
+// The pack batches for up to 10 seconds, so the wait is a poll for the two things the check needs,
 // bounded well past one batch. It is skipped when setup failed, since nothing is running to wait
 // for; whatever the stand-in and Vector wrote is still collected. Vector and the stand-in are
 // stopped afterwards; on a disposable sandbox that is tidiness, on a machine that outlives the run

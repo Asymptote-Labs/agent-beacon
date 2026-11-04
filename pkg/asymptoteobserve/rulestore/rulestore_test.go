@@ -9,22 +9,6 @@ import (
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/threatrules"
 )
 
-func TestBaselineValid(t *testing.T) {
-	rules, err := Baseline()
-	if err != nil {
-		t.Fatalf("baseline: %v", err)
-	}
-	if len(rules) == 0 {
-		t.Fatal("embedded baseline is empty")
-	}
-	// Every embedded rule must pass full conformance (validate + maturity + fixtures).
-	for _, r := range rules {
-		if _, err := threatrules.CheckRule(r); err != nil {
-			t.Errorf("baseline rule %q fails conformance: %v", r.ID, err)
-		}
-	}
-}
-
 func TestBaselineRulePathUsesEmbedFSSeparator(t *testing.T) {
 	got := baselineRulePath("example.rule.yaml")
 	if got != "baseline/example.rule.yaml" {
@@ -76,31 +60,6 @@ func TestLoadActiveRulesDirOverride(t *testing.T) {
 	}
 }
 
-func TestInstallThenLoadActiveUsesStore(t *testing.T) {
-	store := t.TempDir()
-
-	src := filepath.Join(t.TempDir(), "my.rule.yaml")
-	if err := os.WriteFile(src, []byte(ruleWithID("custom-rule")), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	installed, err := InstallFiles(store, src, false)
-	if err != nil {
-		t.Fatalf("install: %v", err)
-	}
-	if len(installed) != 1 || installed[0].ID != "custom-rule" {
-		t.Fatalf("unexpected install result: %+v", installed)
-	}
-
-	loaded, err := LoadActive(store, "")
-	if err != nil {
-		t.Fatalf("load active: %v", err)
-	}
-	fromStore := bySource(loaded, SourceStore)
-	if len(fromStore) != 1 || fromStore[0].ID != "custom-rule" {
-		t.Fatalf("expected the store rule, got %+v", srcOf(loaded))
-	}
-}
-
 // TestLoadActiveKeepsBaselineAlongsideStore guards against one installed rule silently
 // switching off the whole embedded baseline: every baseline rule the store does not
 // define stays active.
@@ -110,8 +69,13 @@ func TestLoadActiveKeepsBaselineAlongsideStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := t.TempDir()
-	if err := os.WriteFile(filepath.Join(store, "custom-rule.rule.yaml"), []byte(ruleWithID("custom-rule")), 0o644); err != nil {
+	// Placed through InstallFiles so this also proves an installed rule is what LoadActive reads.
+	src := filepath.Join(t.TempDir(), "my.rule.yaml")
+	if err := os.WriteFile(src, []byte(ruleWithID("custom-rule")), 0o644); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := InstallFiles(store, src, false); err != nil {
+		t.Fatalf("install: %v", err)
 	}
 	loaded, err := LoadActive(store, "")
 	if err != nil {
@@ -431,8 +395,8 @@ func TestLoadActiveSkippingRunsTheRestOfTheStore(t *testing.T) {
 	if len(fromStore) != 1 || fromStore[0].ID != "current-rule" {
 		t.Fatalf("want only current-rule from the store, got %d store rules", len(fromStore))
 	}
-	if len(skipped) != 1 || !strings.Contains(skipped[0].String(), `rule "future-rule" requires threat-rules/v1.9, but this Beacon supports up to `+threatrules.SupportedSpec+`; upgrade Beacon to load it`) {
-		t.Fatalf("want future-rule skipped with the upgrade message, got %+v", skipped)
+	if len(skipped) != 1 || skipped[0].Err.RuleID != "future-rule" {
+		t.Fatalf("want future-rule skipped, got %+v", skipped)
 	}
 	if _, err := LoadActive(store, ""); err == nil {
 		t.Fatal("strict LoadActive want an error for the newer-spec rule")

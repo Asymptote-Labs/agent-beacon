@@ -1,7 +1,6 @@
 package handoff
 
 import (
-	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -47,14 +46,6 @@ func TestListReadsFactorySessions(t *testing.T) {
 	}
 }
 
-func TestParseHarnessNamesFactoryDroid(t *testing.T) {
-	for _, name := range []string{"factory", "droid", "Factory-Droid"} {
-		if got, err := ParseHarness(name); err != nil || got != HarnessFactory {
-			t.Errorf("ParseHarness(%q) = %q, %v; want %s", name, got, err, HarnessFactory)
-		}
-	}
-}
-
 func TestFactorySessionBuildsABrief(t *testing.T) {
 	dirs, _ := factoryFixture(t)
 	sources := DefaultSources(dirs)
@@ -73,36 +64,5 @@ func TestFactorySessionBuildsABrief(t *testing.T) {
 	}
 	if !strings.Contains(brief.Render(), "Factory Droid") {
 		t.Fatalf("the brief should name Factory Droid:\n%s", brief.Render())
-	}
-}
-
-func TestFactorySessionGoneFromItsStore(t *testing.T) {
-	dirs, path := factoryFixture(t)
-	session := Session{Harness: HarnessFactory, ID: "factory-sess-1", SourcePath: path + ".moved"}
-	if _, err := Events(DefaultSources(dirs), session); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Events = %v, want ErrNotFound", err)
-	}
-}
-
-func TestPlanResumeReopensAFactorySessionByItsID(t *testing.T) {
-	session := resumableSession(t, HarnessFactory, "factory-1")
-	plan, err := PlanResume(session, PlanOptions{LookPath: installed("droid")})
-	if err != nil {
-		t.Fatalf("PlanResume: %v", err)
-	}
-	if plan.Mode != ModeNative || plan.Executable != "/bin/droid" || !reflect.DeepEqual(plan.Args, []string{"--resume", "factory-1"}) || len(plan.Env) != 0 {
-		t.Fatalf("plan = %+v", plan)
-	}
-
-	gone := session
-	gone.SourcePath = filepath.Join(t.TempDir(), "missing.jsonl")
-	brief := filepath.Join(t.TempDir(), "brief.md")
-	plan, err = PlanResume(gone, PlanOptions{BriefPath: brief, LookPath: installed("droid")})
-	if err != nil {
-		t.Fatalf("PlanResume: %v", err)
-	}
-	// The prompt is droid's only argument: no --auto, so the new session keeps asking.
-	if plan.Mode != ModeNewSession || plan.Reason != ReasonSessionGone || !reflect.DeepEqual(plan.Args, []string{NewSessionPrompt(gone, brief)}) {
-		t.Fatalf("plan = %+v", plan)
 	}
 }

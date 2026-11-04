@@ -170,6 +170,9 @@ func TestPipelinePrivacyBeforeSinkAndNoEnvelopeMutation(t *testing.T) {
 	if strings.Contains(rawText, "secret-token") || strings.Contains(rawText, "nested-secret") {
 		t.Fatalf("sink saw unredacted raw: %s", rawText)
 	}
+	if events[0].Raw["prompt"] != "summarize" {
+		t.Fatalf("privacy unexpectedly removed non-secret raw: %#v", events[0].Raw)
+	}
 	if envelope.Raw["command"] != "curl -H 'Authorization: Bearer secret-token'" {
 		t.Fatalf("source envelope was mutated: %#v", envelope.Raw)
 	}
@@ -220,84 +223,34 @@ func TestPipelinePrivacyRunsBeforeAdditionalProcessors(t *testing.T) {
 	}
 }
 
-func TestPipelinePrivacyKeepsRawTelemetry(t *testing.T) {
-	sink := &captureEventSink{}
-	pipeline := NewPipeline(PipelineOptions{
-		Source:  staticSource{NewEnvelopeRecord(testEnvelope())},
-		Sink:    sink,
-		Privacy: &PrivacyPolicy{},
-	})
-
-	if err := pipeline.Run(context.Background()); err != nil {
-		t.Fatalf("Run returned error: %v", err)
+func TestPipelineRunErrorsPropagate(t *testing.T) {
+	envelope := testEnvelope()
+	event := NewEvent(NewEventOptions{Action: "tool.invoked", Harness: HarnessInfo{Name: "cursor"}})
+	sourceErr := errors.New("source failed")
+	normalizeErr := errors.New("normalize failed")
+	writeErr := errors.New("sink failed")
+	flushErr := errors.New("flush failed")
+	closeErr := errors.New("close failed")
+	cases := []struct {
+		name string
+		opts PipelineOptions
+		want error
+	}{
+		{"missing source", PipelineOptions{Sink: &captureEventSink{}}, ErrPipelineMissingSource},
+		{"source", PipelineOptions{Source: errorRawTraceSource{err: sourceErr}, Sink: &captureEventSink{}}, sourceErr},
+		{"empty record", PipelineOptions{Source: staticSource{{}}, Sink: &captureEventSink{}}, ErrRecordEmpty},
+		{"mixed record", PipelineOptions{Source: staticSource{{Envelope: &envelope, Event: &event}}, Sink: &captureEventSink{}}, ErrRecordMixed},
+		{"normalizer", PipelineOptions{Source: staticSource{NewEnvelopeRecord(testEnvelope())}, Normalizer: errorNormalizer{err: normalizeErr}, Sink: &captureEventSink{}}, normalizeErr},
+		{"sink write", PipelineOptions{Source: staticSource{NewEnvelopeRecord(testEnvelope())}, Sink: &captureEventSink{writeErr: writeErr}}, writeErr},
+		{"flush", PipelineOptions{Source: staticSource{NewEnvelopeRecord(testEnvelope())}, Sink: &captureEventSink{flushErr: flushErr}}, flushErr},
+		{"close", PipelineOptions{Source: staticSource{NewEnvelopeRecord(testEnvelope())}, Sink: &captureEventSink{closeErr: closeErr}}, closeErr},
 	}
-	events, _, _ := sink.snapshot()
-	if len(events) != 1 {
-		t.Fatalf("events = %d, want 1", len(events))
-	}
-	if events[0].Raw["prompt"] != "summarize" {
-		t.Fatalf("privacy unexpectedly removed raw: %#v", events[0].Raw)
-	}
-}
-
-func TestPipelineSourceErrorPropagates(t *testing.T) {
-	want := errors.New("source failed")
-	pipeline := NewPipeline(PipelineOptions{
-		Source: errorRawTraceSource{err: want},
-		Sink:   &captureEventSink{},
-	})
-
-	if err := pipeline.Run(context.Background()); !errors.Is(err, want) {
-		t.Fatalf("Run error = %v, want %v", err, want)
-	}
-}
-
-func TestPipelineNormalizerErrorPropagates(t *testing.T) {
-	want := errors.New("normalize failed")
-	pipeline := NewPipeline(PipelineOptions{
-		Source:     staticSource{NewEnvelopeRecord(testEnvelope())},
-		Normalizer: errorNormalizer{err: want},
-		Sink:       &captureEventSink{},
-	})
-
-	if err := pipeline.Run(context.Background()); !errors.Is(err, want) {
-		t.Fatalf("Run error = %v, want %v", err, want)
-	}
-}
-
-func TestPipelineSinkErrorPropagates(t *testing.T) {
-	want := errors.New("sink failed")
-	pipeline := NewPipeline(PipelineOptions{
-		Source: staticSource{NewEnvelopeRecord(testEnvelope())},
-		Sink:   &captureEventSink{writeErr: want},
-	})
-
-	if err := pipeline.Run(context.Background()); !errors.Is(err, want) {
-		t.Fatalf("Run error = %v, want %v", err, want)
-	}
-}
-
-func TestPipelineFlushErrorPropagates(t *testing.T) {
-	want := errors.New("flush failed")
-	pipeline := NewPipeline(PipelineOptions{
-		Source: staticSource{NewEnvelopeRecord(testEnvelope())},
-		Sink:   &captureEventSink{flushErr: want},
-	})
-
-	if err := pipeline.Run(context.Background()); !errors.Is(err, want) {
-		t.Fatalf("Run error = %v, want %v", err, want)
-	}
-}
-
-func TestPipelineCloseErrorPropagates(t *testing.T) {
-	want := errors.New("close failed")
-	pipeline := NewPipeline(PipelineOptions{
-		Source: staticSource{NewEnvelopeRecord(testEnvelope())},
-		Sink:   &captureEventSink{closeErr: want},
-	})
-
-	if err := pipeline.Run(context.Background()); !errors.Is(err, want) {
-		t.Fatalf("Run error = %v, want %v", err, want)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := NewPipeline(tc.opts).Run(context.Background()); !errors.Is(err, tc.want) {
+				t.Fatalf("Run error = %v, want %v", err, tc.want)
+			}
+		})
 	}
 }
 
@@ -315,31 +268,6 @@ func TestPipelineCanLeaveSinkOpen(t *testing.T) {
 	_, flushes, closes := sink.snapshot()
 	if flushes != 1 || closes != 0 {
 		t.Fatalf("flushes/closes = %d/%d, want 1/0", flushes, closes)
-	}
-}
-
-func TestPipelineRejectsMissingSource(t *testing.T) {
-	if err := NewPipeline(PipelineOptions{Sink: &captureEventSink{}}).Run(context.Background()); !errors.Is(err, ErrPipelineMissingSource) {
-		t.Fatalf("missing source error = %v", err)
-	}
-}
-
-func TestPipelineRejectsEmptyOrMixedRecords(t *testing.T) {
-	if err := NewPipeline(PipelineOptions{
-		Source: staticSource{{}},
-		Sink:   &captureEventSink{},
-	}).Run(context.Background()); !errors.Is(err, ErrRecordEmpty) {
-		t.Fatalf("empty record error = %v", err)
-	}
-
-	envelope := testEnvelope()
-	event := NewEvent(NewEventOptions{Action: "tool.invoked", Harness: HarnessInfo{Name: "cursor"}})
-	err := NewPipeline(PipelineOptions{
-		Source: staticSource{{Envelope: &envelope, Event: &event}},
-		Sink:   &captureEventSink{},
-	}).Run(context.Background())
-	if !errors.Is(err, ErrRecordMixed) {
-		t.Fatalf("mixed record error = %v", err)
 	}
 }
 

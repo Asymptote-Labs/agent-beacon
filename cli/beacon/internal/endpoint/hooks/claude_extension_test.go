@@ -11,6 +11,7 @@ import (
 // The extension points are nil in this build, and with them nil the settings Beacon writes must
 // not change by a byte. The golden file was captured from the installer before they existed.
 func TestInstallClaudeSettingsUnchangedWithoutExtensions(t *testing.T) {
+	withoutHookExtensions(t)
 	path := filepath.Join(t.TempDir(), "settings.json")
 	existing := `{"env":{"EXISTING":"1"},"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"}]}],"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"http","url":"https://guard.example/check","headers":{"X":"1"}}]}]}}`
 	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
@@ -40,6 +41,7 @@ func TestClaudeExtraHookGroupsFollowBeaconHooks(t *testing.T) {
 		installed bool
 	}
 	var changes []change
+	withoutHookExtensions(t)
 	claudeExtraHookGroups = func(prefix string) map[string][]settingsHookGroup {
 		return map[string][]settingsHookGroup{
 			"PreToolUse":          {{Matcher: "mcp__.*", Hooks: []settingsHookRef{{Type: "command", Command: prefix + " extra-tool", Timeout: 15}}}},
@@ -50,10 +52,6 @@ func TestClaudeExtraHookGroupsFollowBeaconHooks(t *testing.T) {
 		changes = append(changes, change{path, installed})
 		return nil
 	}
-	t.Cleanup(func() {
-		claudeExtraHookGroups = nil
-		claudeSettingsChanged = nil
-	})
 
 	path := filepath.Join(t.TempDir(), "settings.json")
 	existing := `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo keep"}]}]}}`

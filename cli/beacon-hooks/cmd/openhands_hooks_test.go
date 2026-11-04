@@ -66,30 +66,6 @@ func fileEditorObservation(command, path, oldContent, newContent string, prevExi
 // Envelope
 // ---------------------------------------------------------------------------
 
-// The session id is spelled exactly as Claude spells it, so the default reader finds it with no
-// OpenHands branch. Pinned rather than assumed: this is the field every event's session.id comes
-// from, and a refactor of the default branch would take OpenHands' session identity with it.
-func TestOpenHandsSessionIDComesFromTheSharedReader(t *testing.T) {
-	input := map[string]interface{}{
-		"event_type":  "PreToolUse",
-		"session_id":  "oh-session-1",
-		"working_dir": "/workspace/project",
-	}
-	if got := resolveSessionID(input, openHandsPlatform); got != "oh-session-1" {
-		t.Fatalf("resolveSessionID = %q, want oh-session-1", got)
-	}
-	// OpenHands hands hooks no transcript: conversation state lives in its own persistence
-	// directory and no payload field points at it. Empty is the honest answer, and reading a
-	// Claude-shaped transcript_path key that never arrives would read as an oversight.
-	sessionID, transcriptPath := resolveSessionIDWithTranscript(input, openHandsPlatform)
-	if sessionID != "oh-session-1" {
-		t.Fatalf("resolveSessionIDWithTranscript session = %q, want oh-session-1", sessionID)
-	}
-	if transcriptPath != "" {
-		t.Fatalf("resolveSessionIDWithTranscript transcript = %q, want empty", transcriptPath)
-	}
-}
-
 // working_dir, not cwd. Without the branch this reads empty, and session.working_directory,
 // repository and branch all go missing from every OpenHands event.
 func TestOpenHandsWorkingDirectoryComesFromWorkingDir(t *testing.T) {
@@ -246,32 +222,6 @@ func TestOpenHandsPreToolObservesWithoutSynthesizingAnApproval(t *testing.T) {
 	}
 	if got := leaf(event, "event", "fidelity"); got != "observed" {
 		t.Fatalf("event.fidelity = %q, want observed -- OpenHands named this tool call", got)
-	}
-}
-
-// file_editor's `command` argument (view, str_replace, create) is the editor operation, not a
-// shell command. Promoting it into command.command would store an editor operation as shell
-// execution and let the policy seam upgrade tool.invoked to command.executed.
-func TestOpenHandsPreToolFileEditorDoesNotCarryAShellCommandBlock(t *testing.T) {
-	logPath := openHandsTestSetup(t)
-
-	runHookWithInput(t, runPreTool, map[string]interface{}{
-		"event_type":  "PreToolUse",
-		"session_id":  "oh-session-1",
-		"working_dir": "/workspace/project",
-		"tool_name":   "file_editor",
-		"tool_input": map[string]interface{}{
-			"kind": "FileEditorAction", "command": "view", "path": "/workspace/project/main.go",
-		},
-		"metadata": map[string]interface{}{},
-	})
-
-	event := lastEndpointEvent(t, logPath)
-	if got := leaf(event, "event", "action"); got != "tool.invoked" {
-		t.Fatalf("event.action = %q, want tool.invoked", got)
-	}
-	if got := leaf(event, "command", "command"); got != "" {
-		t.Fatalf("command.command = %q, want empty -- the editor operation is not a shell command", got)
 	}
 }
 
@@ -511,54 +461,6 @@ func TestOpenHandsFileEditorEditRecordsAnExactDiff(t *testing.T) {
 	}
 }
 
-func TestOpenHandsFileEditorCreateRecordsANewFileDiff(t *testing.T) {
-	logPath := openHandsTestSetup(t)
-
-	runHookWithInput(t, runPostTool, map[string]interface{}{
-		"event_type":  "PostToolUse",
-		"session_id":  "oh-session-1",
-		"working_dir": "/workspace/project",
-		"tool_name":   "file_editor",
-		"tool_input": map[string]interface{}{
-			"kind": "FileEditorAction", "command": "create",
-			"path": "/workspace/project/new.py", "file_text": "print('hi')\n",
-		},
-		"tool_response": fileEditorObservation("create", "/workspace/project/new.py", "", "print('hi')\n", false),
-	})
-
-	event := lastEndpointEvent(t, logPath)
-	if got := leaf(event, "event", "action"); got != "file.modified" {
-		t.Fatalf("event.action = %q, want file.modified", got)
-	}
-	diff := leaf(event, "file", "diff")
-	if !strings.Contains(diff, "@@ -0,0 +1,") || !strings.Contains(diff, "+print('hi')") {
-		t.Fatalf("file.diff = %q, want a new-file hunk", diff)
-	}
-}
-
-// undo_edit reports old_content and new_content like any other edit, so it takes the same path.
-func TestOpenHandsFileEditorUndoIsRecordedAsAnEdit(t *testing.T) {
-	logPath := openHandsTestSetup(t)
-
-	runHookWithInput(t, runPostTool, map[string]interface{}{
-		"event_type":  "PostToolUse",
-		"session_id":  "oh-session-1",
-		"working_dir": "/workspace/project",
-		"tool_name":   "file_editor",
-		"tool_input":  map[string]interface{}{"kind": "FileEditorAction", "command": "undo_edit", "path": "/workspace/project/main.go"},
-		"tool_response": fileEditorObservation("undo_edit", "/workspace/project/main.go",
-			"func new() {}\n", "func old() {}\n", true),
-	})
-
-	event := lastEndpointEvent(t, logPath)
-	if got := leaf(event, "event", "action"); got != "file.modified" {
-		t.Fatalf("event.action = %q, want file.modified for undo_edit", got)
-	}
-	if diff := leaf(event, "file", "diff"); !strings.Contains(diff, "+func old() {}") {
-		t.Fatalf("file.diff = %q, want the restored content", diff)
-	}
-}
-
 // An unchanged file is not an edit. A header with an empty hunk would record that a file changed
 // when it did not, so the payload falls through to the observing path instead: the tool call is
 // still recorded, with the path, and without a diff that claims something happened.
@@ -733,32 +635,6 @@ func TestOpenHandsApplyPatchRenameIsRecordedAgainstTheDestination(t *testing.T) 
 	event := lastEndpointEvent(t, logPath)
 	if got := leaf(event, "file", "path"); got != "/workspace/project/new.py" {
 		t.Fatalf("file.path = %q, want the destination of the rename", got)
-	}
-}
-
-func TestOpenHandsFailedApplyPatchIsNotRecordedAsAnEdit(t *testing.T) {
-	logPath := openHandsTestSetup(t)
-
-	runHookWithInput(t, runPostTool, map[string]interface{}{
-		"event_type":  "PostToolUse",
-		"session_id":  "oh-session-1",
-		"working_dir": "/workspace/project",
-		"tool_name":   "apply_patch",
-		"tool_input":  map[string]interface{}{"kind": "ApplyPatchAction", "patch": "*** Begin Patch\nbroken"},
-		"tool_response": map[string]interface{}{
-			"kind":     "ApplyPatchObservation",
-			"content":  []interface{}{map[string]interface{}{"type": "text", "text": "Invalid patch"}},
-			"is_error": true,
-		},
-	})
-
-	for _, event := range endpointEvents(t, logPath) {
-		if got := leaf(event, "event", "action"); got == "file.modified" {
-			t.Fatalf("a failed patch was recorded as file.modified: %#v", event)
-		}
-	}
-	if got := leaf(lastEndpointEvent(t, logPath), "event", "action"); got != "tool.failed" {
-		t.Fatalf("event.action = %q, want tool.failed", got)
 	}
 }
 

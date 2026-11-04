@@ -978,11 +978,8 @@ func normalizeToolName(name string) string {
 // Harness, Grok Build and fx spellings.
 var traceToolKindsByName = func() map[string]string {
 	table := map[string][]string{
-		TraceToolKindTerminalCommand: {
-			"bash", "shell", "execcommand", "exec", "localshell", "runterminalcmd", "runterminalcommand",
-			"runcommand", "runshellcommand", "executebash", "executecommand", "terminal", "command",
-			"bashoutput", "killshell", "killbash", "terminalsend", "ipython", "powershell", "cmd",
-		},
+		// The shell tools, plus the tools that drive a shell without running a command line.
+		TraceToolKindTerminalCommand: append([]string{"bashoutput", "killshell", "killbash", "ipython"}, shellCommandToolNames...),
 		TraceToolKindRead: {
 			"read", "view", "readfile", "viewfile", "cat", "notebookread", "readmanyfiles", "openfile",
 			"fsread", "readimage",

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
 )
 
 // cachedEmailKey is the ItemTable row where Cursor keeps the email of the account signed in to
@@ -24,7 +26,7 @@ func CachedAccountEmail(globalDBPath string) (string, error) {
 	if !fileExists(globalDBPath) {
 		return "", nil
 	}
-	db, err := openSQLiteReadOnly(globalDBPath)
+	db, err := sessionsync.OpenSQLite(globalDBPath, "busy_timeout(1000)")
 	if err != nil {
 		return "", fmt.Errorf("open Cursor global storage: %w", err)
 	}

@@ -4,36 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
-
-// orderingExporter builds an exporter writing to a fresh runtime log, and returns it with
-// the log path.
-func orderingExporter(t *testing.T) (*beaconExporter, string) {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "runtime.jsonl")
-	exp, err := newExporter(&Config{
-		Path:                  path,
-		MaxEventBytes:         defaultMaxEventBytes,
-		RotateBytes:           defaultRotateBytes,
-		RedactSecrets:         true,
-		IncludeRuntimeMetrics: true,
-	}, exporter.Settings{})
-	if err != nil {
-		t.Fatalf("newExporter returned error: %v", err)
-	}
-	return exp, path
-}
 
 // writtenEvents decodes the events the exporter wrote, in file order.
 func writtenEvents(t *testing.T, path string) []asymptoteobserve.Event {
@@ -76,7 +56,7 @@ func TestConsumeLogsKeepsWireNanosecondPrecision(t *testing.T) {
 	// The exporter already received nanosecond timestamps off the wire and threw the
 	// sub-second part away formatting them, which is why no event in a real runtime log
 	// carried one.
-	exp, path := orderingExporter(t)
+	exp, path := newTestExporter(t)
 	at := time.Date(2026, 8, 21, 9, 14, 3, 123456789, time.UTC)
 	if err := exp.consumeLogs(context.Background(), promptLogs(at)); err != nil {
 		t.Fatalf("consumeLogs returned error: %v", err)
@@ -89,7 +69,7 @@ func TestConsumeLogsKeepsWireNanosecondPrecision(t *testing.T) {
 }
 
 func TestConsumeLogsStampsSequenceInWireOrder(t *testing.T) {
-	exp, path := orderingExporter(t)
+	exp, path := newTestExporter(t)
 	base := time.Date(2026, 8, 21, 9, 14, 3, 0, time.UTC)
 	logs := promptLogs(base, base.Add(time.Millisecond), base.Add(2*time.Millisecond))
 	if err := exp.consumeLogs(context.Background(), logs); err != nil {
@@ -110,7 +90,7 @@ func TestConsumeLogsStampsSequenceInWireOrder(t *testing.T) {
 func TestSequenceContinuesAcrossExports(t *testing.T) {
 	// One counter for the exporter's lifetime, so two batches never claim the same
 	// number and the second export cannot look like it came first.
-	exp, path := orderingExporter(t)
+	exp, path := newTestExporter(t)
 	base := time.Date(2026, 8, 21, 9, 14, 3, 0, time.UTC)
 	if err := exp.consumeLogs(context.Background(), promptLogs(base)); err != nil {
 		t.Fatalf("first consumeLogs returned error: %v", err)
@@ -132,7 +112,7 @@ func TestConsumeMetricsSeparatesDatapointsSharingATimestamp(t *testing.T) {
 	// The case a more precise timestamp cannot fix: one export flushes a batch of
 	// datapoints that all carry that export's collection instant. Token attribution
 	// depends on recovering their emission order.
-	exp, path := orderingExporter(t)
+	exp, path := newTestExporter(t)
 	at := pcommon.NewTimestampFromTime(time.Date(2026, 8, 21, 9, 14, 3, 500000000, time.UTC))
 
 	metrics := pmetric.NewMetrics()
@@ -169,7 +149,7 @@ func TestConsumeMetricsSeparatesDatapointsSharingATimestamp(t *testing.T) {
 func TestConsumeLogsPromotesRuntimeSuppliedSequence(t *testing.T) {
 	// A runtime that numbers its own telemetry keeps its numbering; the exporter only
 	// fills in what nobody counted.
-	exp, path := orderingExporter(t)
+	exp, path := newTestExporter(t)
 	logs := plog.NewLogs()
 	records := logs.ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty().LogRecords()
 
@@ -201,7 +181,7 @@ func TestConsumeLogsPromotesRuntimeSuppliedSequence(t *testing.T) {
 func TestPromotedSequenceRejectsNonPositiveValues(t *testing.T) {
 	// Zero is the schema's "unsequenced" and a negative counter is not a counter, so
 	// neither may displace the exporter's own number.
-	exp, _ := orderingExporter(t)
+	exp, _ := newTestExporter(t)
 	for _, supplied := range []int64{0, -7} {
 		record := plog.NewLogs().ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
 		record.Attributes().PutStr("beacon.event.action", "prompt.submitted")

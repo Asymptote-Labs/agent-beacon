@@ -106,21 +106,35 @@ func TestScanHonorsDshHome(t *testing.T) {
 	}
 }
 
-// dsh has no project scope: its plugin tree is composed from the Harness home, so there is nowhere
-// in a repository for a hook bridge to be mounted from. A project candidate would be a path the
-// runtime never reads, reported as if it might be monitored.
-func TestScanReportsNoProjectScopedDshConfig(t *testing.T) {
+// A declarative setup mounts the bridge by absolute path in a profile's own patch layer, pointing
+// it at Beacon's hooks file. That layer is reported, and as Beacon-managed even though it names no
+// package, so a working install is not shown as a half-install.
+func TestScanReportsAProfileLayerThatMountsTheBridgeByPath(t *testing.T) {
 	home := t.TempDir()
 	work := t.TempDir()
 	t.Setenv("DSH_HOME", "")
-
+	dir := filepath.Join(home, ".dsh")
+	hooksPath := filepath.Join(dir, "beacon-endpoint-hooks.json")
+	layer := filepath.Join(dir, "profiles", "web", "cordis.patch.yml")
+	other := filepath.Join(dir, "profiles", "tui", "cordis.patch.yml")
+	for path, content := range map[string]string{
+		layer: "- insert:\n    - id: hooks-bridge\n      name: /nix/store/abc-bridge/lib/index.js\n      config:\n        configPath: " + hooksPath + "\n",
+		other: "- id: tools\n  config: {}\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	result := Scan(Options{HomeDir: home, WorkingDir: work})
-	for _, config := range result.Configs {
-		if config.Runtime != "deepseek_harness" {
-			continue
-		}
-		if config.Scope == ScopeProject {
-			t.Fatalf("scan reported a project-scoped dsh config at %s", config.Path)
-		}
+	mounted := findConfig(result.Configs, "deepseek_harness", layer)
+	if mounted == nil || !mounted.BeaconManaged {
+		t.Fatalf("profile layer mounting the bridge at Beacon's hooks file = %+v, want reported and Beacon-managed", mounted)
+	}
+	unrelated := findConfig(result.Configs, "deepseek_harness", other)
+	if unrelated == nil || unrelated.BeaconManaged {
+		t.Fatalf("an unrelated profile layer = %+v, want reported and not Beacon-managed", unrelated)
 	}
 }

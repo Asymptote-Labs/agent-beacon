@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -167,13 +168,47 @@ func TestServiceAppearanceIsDetected(t *testing.T) {
 	}
 }
 
-// A running collector's pid changes on restart; that must not read as a state change, or the
-// guard fires whenever the developer's own service restarts.
-func TestServicePidChurnIsIgnored(t *testing.T) {
-	before := Snapshot{ServicesAvailable: true, Paths: map[string]string{}, Services: []string{"com.beacon.endpoint.collector"}}
-	after := Snapshot{ServicesAvailable: true, Paths: map[string]string{}, Services: []string{"com.beacon.endpoint.collector"}}
-	if !Compare(before, after).Clean() {
-		t.Error("the same service present in both snapshots must be clean")
+// A running collector restarting between the two snapshots changes its launchctl pid column (and,
+// mid-restart, its systemd ACTIVE/SUB columns) but not its identity. Reading anything but the label
+// as the service would turn the developer's own service restarting into a host-escape FAIL. Drives
+// Take() against a fake service manager on PATH, so the real probe and parser are what is tested.
+func TestServiceRestartBetweenSnapshotsIsClean(t *testing.T) {
+	var first, second, name string
+	switch runtime.GOOS {
+	case "darwin":
+		name = "launchctl"
+		first = "PID\tStatus\tLabel\n4101\t0\tcom.beacon.endpoint.collector\n-\t0\tcom.apple.unrelated\n"
+		second = "PID\tStatus\tLabel\n4187\t0\tcom.beacon.endpoint.collector\n-\t0\tcom.apple.unrelated\n"
+	case "linux":
+		name = "systemctl"
+		first = "beacon-collector.service loaded active running Beacon collector\n"
+		second = "beacon-collector.service loaded activating start Beacon collector\n"
+	default:
+		t.Skipf("no fake service manager for %s", runtime.GOOS)
+	}
+	bin := t.TempDir()
+	state := filepath.Join(t.TempDir(), "calls")
+	for i, out := range []string{first, second} {
+		if err := os.WriteFile(filepath.Join(bin, "out"+strconv.Itoa(i)), []byte(out), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Each call prints the next listing: the first snapshot sees out0, the second out1.
+	script := "#!/bin/sh\nn=$(cat \"" + state + "\" 2>/dev/null || echo 0)\n" +
+		"echo $((n + 1)) > \"" + state + "\"\ncat \"" + bin + "/out$n\"\n"
+	if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("HOME", t.TempDir())
+
+	before := Take()
+	after := Take()
+	if !before.ServicesAvailable || len(before.Services) != 1 {
+		t.Fatalf("the fake %s was not read as one Beacon service: %+v", name, before.Services)
+	}
+	if d := Compare(before, after); !d.Clean() {
+		t.Fatalf("a restart of an existing service must be clean, got %s", d.Describe())
 	}
 }
 

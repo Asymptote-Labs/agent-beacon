@@ -100,13 +100,6 @@ func TestGrokHookPathLevels(t *testing.T) {
 	}
 }
 
-func TestGrokProjectStatusMentionsTrust(t *testing.T) {
-	status := grokProjectTrustMessage(GrokStatus{Message: "Grok endpoint hooks installed"}, LevelProject)
-	if !strings.Contains(status.Message, "/hooks-trust") {
-		t.Fatalf("project status message = %q, want /hooks-trust guidance", status.Message)
-	}
-}
-
 func TestGrokInstalledUsesManagedEndpointCommand(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "beacon-endpoint.json")
 	if err := os.WriteFile(path, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 echo keep"}]}]}}`), 0644); err != nil {

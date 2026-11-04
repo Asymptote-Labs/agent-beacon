@@ -3,7 +3,6 @@ package clinesession
 import (
 	"crypto/sha1"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionwindow"
 )
 
@@ -31,46 +31,17 @@ type State struct {
 	Traces  map[string]*Cursor `json:"traces"`
 }
 
-func LoadState(path string) (*State, error) {
-	state := &State{Version: StateVersion, Traces: map[string]*Cursor{}}
-	if strings.TrimSpace(path) == "" {
-		return state, nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return state, nil
-		}
-		return nil, err
-	}
-	var stored State
-	if err := json.Unmarshal(data, &stored); err != nil {
-		return nil, fmt.Errorf("read Cline collector state %s: %w", path, err)
-	}
-	if stored.Version != StateVersion || stored.Traces == nil {
-		return state, nil
-	}
-	return &stored, nil
+var stateFile = sessionsync.StateFile[State]{
+	Name:      "Cline",
+	New:       func() *State { return &State{Version: StateVersion, Traces: map[string]*Cursor{}} },
+	Valid:     func(s *State) bool { return s.Version == StateVersion && s.Traces != nil },
+	Stamp:     func(s *State) { s.Version = StateVersion },
+	BlankPath: true,
 }
 
-func (s *State) Save(path string) error {
-	if strings.TrimSpace(path) == "" {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	s.Version = StateVersion
-	data, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
+func LoadState(path string) (*State, error) { return stateFile.Load(path) }
+
+func (s *State) Save(path string) error { return stateFile.Save(path, s) }
 
 func (s *State) cursor(ref TraceRef) *Cursor {
 	if s.Traces == nil {
@@ -108,6 +79,12 @@ type CollectOptions struct {
 	// Budget, when set, caps the bytes this sweep may append. The sweep stops at the first event
 	// that does not fit and returns writer.ErrBudgetSpent, with cursors past only what was written.
 	Budget *writer.Budget
+	// RotateBytes is the size the runtime log rotates at while this sweep writes it; zero is
+	// writer.DefaultRotateBytes.
+	RotateBytes int64
+
+	// guard keeps the sweep from rotating its own output out of the log; CollectOnce sets it.
+	guard *writer.RetentionGuard
 }
 
 type Summary struct {
@@ -115,6 +92,7 @@ type Summary struct {
 	TracesChanged int `json:"traces_changed"`
 	EventsEmitted int `json:"events_emitted"`
 	Errors        int `json:"errors"`
+	sessionsync.Retention
 }
 
 func CollectOnce(opts CollectOptions) (summary Summary, err error) {
@@ -139,14 +117,17 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 	}()
 
 	var errs []error
+	opts.guard = sessionsync.NewRetentionGuard(opts.Print, opts.Write)
+	var stopErr error
 	for _, ref := range refs {
 		changed, collectErr := collectTrace(store, ref, state, opts, &summary)
-		if errors.Is(collectErr, writer.ErrBudgetSpent) {
+		if sessionsync.Stopped(collectErr) {
 			// Not a failed session: this one and the rest are left for a later sync, with cursors
 			// that have not moved past anything that was not written.
 			if changed {
 				summary.TracesChanged++
 			}
+			stopErr = collectErr
 			errs = append(errs, collectErr)
 			break
 		}
@@ -158,6 +139,9 @@ func CollectOnce(opts CollectOptions) (summary Summary, err error) {
 		if changed {
 			summary.TracesChanged++
 		}
+	}
+	if rotatedOut := summary.Finish(opts.sink(), stopErr); rotatedOut != nil {
+		errs = append(errs, rotatedOut)
 	}
 	if len(errs) > 0 {
 		return summary, errors.Join(errs...)
@@ -240,25 +224,11 @@ func kanbanContentHash(r Record) string {
 	return hex.EncodeToString(h[:])
 }
 
-// emitEvent is emit, swapped by tests to fail a chosen write.
-var emitEvent = emit
+// emitEvent emits through opts.sink(), swapped by tests to fail a chosen write.
+var emitEvent = func(event schema.Event, opts CollectOptions) error { return opts.sink().Emit(event) }
 
-func emit(event schema.Event, opts CollectOptions) error {
-	if opts.Print && opts.Out != nil {
-		data, err := json.Marshal(event)
-		if err != nil {
-			return err
-		}
-		if _, err := opts.Out.Write(append(data, '\n')); err != nil {
-			return err
-		}
-	}
-	if opts.Write {
-		if _, err := writer.AppendEvent(event, writer.Options{Path: opts.LogPath, UserMode: opts.UserMode, Budget: opts.Budget}); err != nil {
-			return err
-		}
-	}
-	return nil
+func (o CollectOptions) sink() sessionsync.Sink {
+	return sessionsync.Sink{Print: o.Print, Out: o.Out, Write: o.Write, Log: writer.Options{Path: o.LogPath, UserMode: o.UserMode, RotateSize: o.RotateBytes, Budget: o.Budget, Guard: o.guard}}
 }
 
 // recordComplete reports whether mapped[i] is the last event of its source record.

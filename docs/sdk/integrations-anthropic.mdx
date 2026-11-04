@@ -80,17 +80,17 @@ All supported Anthropic SDK calls are now traced through the configured Beacon e
 If your application imports or creates the Anthropic client before initialization, pass the module to `instrumentModules` or patch it after initialization.
 
 ```typescript title="Instrument an already-loaded Anthropic module" lines
-import Anthropic from "@anthropic-ai/sdk";
+import * as AnthropicSDK from "@anthropic-ai/sdk";
 import { Observe } from "@asymptote/sdk";
 
-const anthropic = new Anthropic({
+const anthropic = new AnthropicSDK.Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
 Observe.initialize({
   apiKey: process.env.ASYMPTOTE_API_KEY,
   instrumentModules: {
-    Anthropic,
+    Anthropic: AnthropicSDK,
   },
 });
 ```

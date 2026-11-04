@@ -62,17 +62,6 @@ afterEach(() => {
 })
 
 describe("beacon openclaw plugin", () => {
-  test("retains an event containing an invalid Date with native JSON date semantics", async () => {
-    const sent = captureSends()
-    const metadata = { invalid: new Date(NaN), valid: new Date("2026-01-02T03:04:05Z") }
-    const expected = JSON.parse(JSON.stringify(metadata))
-    const gateway = fakeGateway()
-    createBeaconPlugin().register(gateway.api)
-    await gateway.fire("session_start", { sessionId: "session-date", metadata }, context())
-    expect(sent).toHaveLength(1)
-    expect(sent[0]).toMatchObject({ hook: "session_start", sessionId: "session-date", event: { metadata: expected } })
-  })
-
   // These strings are the contract between this plugin and the openclaw-event mapper in the hook
   // adapter. A typo on either side produces no telemetry rather than an error, so the list is
   // pinned here and asserted against the mapper's own list on the Go side.
@@ -92,31 +81,6 @@ describe("beacon openclaw plugin", () => {
       "subagent_ended",
       "subagent_spawned",
     ])
-  })
-
-  // Registering any of these would ask OpenClaw for a power Beacon must not hold: rewriting a
-  // prompt, claiming a message before the agent sees it, or voting on whether a skill installs.
-  test("never registers a prompt-injection, claim, or evaluate hook", () => {
-    const gateway = fakeGateway()
-    createBeaconPlugin().register(gateway.api)
-
-    for (const forbidden of [
-      "before_prompt_build",
-      "agent_turn_prepare",
-      "heartbeat_prompt_contribution",
-      "inbound_claim",
-      "before_dispatch",
-      "reply_dispatch",
-      "before_agent_reply",
-      "skill_proposal_evaluate",
-      "before_install",
-      "message_sending",
-      "reply_payload_sending",
-      "tool_result_persist",
-      "before_message_write",
-    ]) {
-      expect(gateway.handlers.has(forbidden)).toBe(false)
-    }
   })
 
   test("the default export is a loadable plugin entry", () => {

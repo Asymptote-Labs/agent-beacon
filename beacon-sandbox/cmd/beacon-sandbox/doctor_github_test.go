@@ -49,13 +49,24 @@ func TestLocalChecksRefuseAnUnprovableHost(t *testing.T) {
 
 // A dispatch runs a pushed ref, not the working tree. That makes uncommitted work silently not
 // under test -- the same class of wasted investigation the stale-collector warning prevents -- so
-// it has to be reported, and reported as satisfiable by doing what it asks.
+// it has to be reported, and reported as satisfiable by doing what it asks. Warning on every edit
+// anywhere would make the check fire constantly and be ignored, so only the trees a Windows run
+// actually exercises count. And a branch that is pushed but has local commits on top would
+// dispatch the pushed commit, silently running code the contributor is not looking at while
+// `git status` reads clean. One repository walks through all three states in turn.
 func TestDispatchRefCheckWarnsWhenTheWorkingTreeIsNotWhatWouldRun(t *testing.T) {
 	root := newTestRepo(t)
 
-	// Clean tree with no upstream: nothing is knowably missing from a dispatch.
+	// Clean tree, level with its upstream: nothing is knowably missing from a dispatch.
 	if got := dispatchRefCheck(root); got.Status != statusOK {
 		t.Errorf("a clean tree should pass, got %q: %s", got.Status, got.Detail)
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("# edited\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := dispatchRefCheck(root); got.Status != statusOK {
+		t.Errorf("an edit outside the watched trees must not warn, got %q: %s", got.Status, got.Detail)
 	}
 
 	// An edit under a watched tree is not in the pushed ref.
@@ -73,17 +84,16 @@ func TestDispatchRefCheckWarnsWhenTheWorkingTreeIsNotWhatWouldRun(t *testing.T) 
 	if got.Fix == "" {
 		t.Error("the warning must be satisfiable by doing what it asks")
 	}
-}
 
-// Warning on every edit anywhere would make the check fire constantly and be ignored, which is
-// worse than not having it. Only the trees a Windows run actually exercises count.
-func TestDispatchRefCheckIgnoresUnrelatedEdits(t *testing.T) {
-	root := newTestRepo(t)
-	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("# edited\n"), 0o600); err != nil {
-		t.Fatal(err)
+	// Committed but not pushed: the tree is clean and the branch is ahead of its upstream.
+	gitIn(t, root, "add", "-A")
+	gitIn(t, root, "commit", "-qm", "local only")
+	got = dispatchRefCheck(root)
+	if got.Status != statusWarn {
+		t.Errorf("being ahead of upstream must warn, got %q: %s", got.Status, got.Detail)
 	}
-	if got := dispatchRefCheck(root); got.Status != statusOK {
-		t.Errorf("an edit outside the watched trees must not warn, got %q: %s", got.Status, got.Detail)
+	if !strings.Contains(got.Detail, "ahead") {
+		t.Errorf("the warning should say the branch is ahead, got %q", got.Detail)
 	}
 }
 
@@ -103,23 +113,6 @@ func TestDispatchRefCheckWarnsWhenTheBranchWasNeverPushed(t *testing.T) {
 	}
 	if got.Fix == "" {
 		t.Error("the warning must be satisfiable by doing what it asks")
-	}
-}
-
-// A branch that is pushed but has local commits on top would dispatch the pushed commit, silently
-// running code the contributor is not looking at while `git status` reads clean.
-func TestDispatchRefCheckWarnsWhenAheadOfUpstream(t *testing.T) {
-	root := newTestRepo(t)
-	writeFile(t, root, filepath.Join("cli", "beacon", "extra.go"), "package main\n")
-	gitIn(t, root, "add", "-A")
-	gitIn(t, root, "commit", "-qm", "local only")
-
-	got := dispatchRefCheck(root)
-	if got.Status != statusWarn {
-		t.Errorf("being ahead of upstream must warn, got %q: %s", got.Status, got.Detail)
-	}
-	if !strings.Contains(got.Detail, "ahead") {
-		t.Errorf("the warning should say the branch is ahead, got %q", got.Detail)
 	}
 }
 

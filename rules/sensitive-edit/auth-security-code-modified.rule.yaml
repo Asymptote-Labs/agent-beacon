@@ -1,5 +1,5 @@
 id: auth-security-code-modified
-version: 4
+version: 5
 title: Authentication, payment, or security source modified
 description: >
   The agent modified a source file in the auth / payment / security surface (basename
@@ -17,7 +17,7 @@ taxonomy:
   owasp_llm: LLM06
 
 match: >
-  e.event.action == "file.modified" &&
+  e.event.action in ["file.modified", "file.created", "file.edited"] &&
   e.file.path.matches("(?i)[^/]*(auth|login|session|password|passwd|credential|payment|billing|charge|stripe|checkout|security|crypto|token|oauth|jwt|rbac|permission)[^/]*\\.[a-z0-9]+$") &&
   !e.file.path.matches("(?i)\\.(md|txt|lock)$") &&
   !e.file.path.matches("(?i)\\.github/workflows/[^/]*\\.ya?ml$") &&
@@ -86,4 +86,10 @@ tests:
     events:
       - event: { action: file.modified }
         file: { path: "src/utils/format.ts" }
+        session: { id: s1 }
+  - name: edit_login_handler_created
+    verdict: match
+    events:
+      - event: { action: file.created }
+        file: { path: "src/auth/login.ts" }
         session: { id: s1 }

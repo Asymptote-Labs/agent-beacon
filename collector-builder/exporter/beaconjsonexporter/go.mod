@@ -2,15 +2,17 @@ module github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconj
 
 go 1.27.0
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve v0.0.0
 	go.opentelemetry.io/collector/component v1.27.0
+	go.opentelemetry.io/collector/component/componentstatus v0.121.0
 	go.opentelemetry.io/collector/config/configretry v1.27.0
 	go.opentelemetry.io/collector/consumer v1.27.0
 	go.opentelemetry.io/collector/consumer/consumertest v0.121.0
 	go.opentelemetry.io/collector/exporter v0.121.0
+	go.opentelemetry.io/collector/extension v1.27.0
 	go.opentelemetry.io/collector/pdata v1.27.0
 	go.opentelemetry.io/collector/processor v0.121.0
 	go.opentelemetry.io/collector/processor/processortest v0.121.0
@@ -20,6 +22,7 @@ require (
 replace github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve => ../../../pkg/asymptoteobserve
 
 require (
+	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
@@ -40,12 +43,10 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/collector/component/componentstatus v0.121.0 // indirect
 	go.opentelemetry.io/collector/component/componenttest v0.121.0 // indirect
 	go.opentelemetry.io/collector/confmap v1.27.0 // indirect
 	go.opentelemetry.io/collector/consumer/consumererror v0.121.0 // indirect
 	go.opentelemetry.io/collector/consumer/xconsumer v0.121.0 // indirect
-	go.opentelemetry.io/collector/extension v1.27.0 // indirect
 	go.opentelemetry.io/collector/extension/xextension v0.121.0 // indirect
 	go.opentelemetry.io/collector/featuregate v1.27.0 // indirect
 	go.opentelemetry.io/collector/pdata/pprofile v0.121.0 // indirect

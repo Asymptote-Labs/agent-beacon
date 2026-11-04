@@ -1,0 +1,56 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/bin/codex-guard",
+            "timeout": 5,
+            "statusMessage": "Checking the command"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo hello"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/opt/beacon hooks/beacon-hooks' --platform codex --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' codex-session-context",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo done"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/opt/beacon hooks/beacon-hooks' --platform codex --log '/var/log/beacon-agent/runtime.jsonl' --config '/Library/Application Support/Beacon/Endpoint/config.json' codex-assistant-response",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "note": "user-owned"
+}

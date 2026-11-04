@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/fxsession"
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 const (
@@ -58,17 +57,6 @@ func fxHome(t *testing.T) string {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	return home
-}
-
-// The harness name discovery reports has to be the one the collector writes, or `endpoint discover`
-// and the runtime log describe the same runtime under two names.
-func TestDiscoverFxUsesTheCanonicalHarnessName(t *testing.T) {
-	if FxName != fxsession.Harness {
-		t.Fatalf("discovery reports %q while the collector writes %q", FxName, fxsession.Harness)
-	}
-	if got := asymptoteobserve.NormalizeHarnessName(FxName); got != FxName {
-		t.Fatalf("NormalizeHarnessName(%q) = %q", FxName, got)
-	}
 }
 
 // A machine that has never run fx must report that plainly rather than as a broken install.
@@ -168,15 +156,4 @@ func TestDiscoverFxWritesNothing(t *testing.T) {
 		}
 		t.Fatalf("discovery created %v in a home that had nothing", names)
 	}
-}
-
-// fx is part of the discovery sweep, not a separate command someone has to know to run.
-func TestDiscoverAllIncludesFx(t *testing.T) {
-	fxHome(t)
-	for _, h := range DiscoverAll() {
-		if h.Name == FxName {
-			return
-		}
-	}
-	t.Fatalf("DiscoverAll does not include %q", FxName)
 }

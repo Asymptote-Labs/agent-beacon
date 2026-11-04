@@ -90,7 +90,7 @@ Kiro reports as the `kiro` harness with capability `hooks`, and every event carr
 
 ## Install or configuration support
 
-`beacon endpoint install` prepares shared endpoint config and runtime log paths. Kiro hooks are installed separately, because they live in a user config directory or a repository rather than in collector service configuration:
+`beacon endpoint install` prepares shared endpoint config and runtime log paths, and installs the user-scope Kiro hook file when it detects Kiro (or when given `--harness kiro`). Install, refresh, or remove the hooks on their own, or at project scope, with `beacon endpoint hooks`:
 
 ```bash
 beacon endpoint hooks install --harness kiro                      # ~/.kiro/hooks/
@@ -107,7 +107,7 @@ Uninstall removes the file Beacon wrote and nothing else. Your own hook files in
 
 | Area | Support |
 |------|---------|
-| Runtime discovery | Supported through `.kiro/hooks/beacon-endpoint.json` at both scopes |
+| Runtime discovery | Supported through the user-scope `~/.kiro/hooks/beacon-endpoint.json` (or under `$KIRO_HOME`). `beacon endpoint inventory` reports both scopes |
 | Harness attribution | Supported. `kiro`, `kiro_ide`, `kiro-ide`, `kiro ide`, `kiro_cli`, `kiro-cli`, `kiro cli`, `kirocli`, `kiro_code`, `kiro-code`, `kiro code`, `kirocode`, `kiro_agent`, `kiro-agent`, `kiro agent`, and `kiro.dev` normalize to `kiro` |
 | Hook install, status, uninstall, and repair | Supported |
 | Session lifecycle | Supported. `session.started` from `SessionStart`, and `tool.completed` from `Stop` |
@@ -172,7 +172,7 @@ A failed write is never recorded as an edit. Kiro reports one with the same tool
 
 Kiro genuinely does ask the operator — through `permissions.yaml` rules and an interactive trust picker — and exposes none of that to a hook. `PreToolUse` fires identically whether the call was pre-approved by a rule, waved through by autopilot, or about to stop and wait for a person. An `approval.allowed` derived from it would therefore claim a decision in exactly the cases where none has been made yet, which is worse than the runtimes that have no approval gate at all. This is the same call already settled for [Cline](/runtimes/cline), [Pi](/runtimes/pi), [OpenHands](/runtimes/openhands), and [fx](/runtimes/vercel-fx).
 
-Enforcement stays behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`), which is inert unless it names an executable and fails open on any error. Kiro is one of the runtimes where a provider deny does take effect, and it is the only one where the deny is **not** a JSON object: Beacon exits with code **2** and writes the reason to stderr, which is Kiro's documented way to block `PreToolUse`. Kiro hands that stderr text to the agent as the explanation for the refusal. Any other non-zero exit code is an error to Kiro rather than a block, which is why Beacon exits 0 on every other path.
+Enforcement stays behind the optional, off-by-default policy provider seam (`BEACON_POLICY_PROVIDER`), which is inert unless it names an executable and fails open on any error. Kiro is one of the runtimes where a provider deny does take effect, and, like [Kimi Code](/runtimes/kimi-code), the deny is **not** a JSON object: Beacon exits with code **2** and writes the reason to stderr, which is Kiro's documented way to block `PreToolUse`. Kiro hands that stderr text to the agent as the explanation for the refusal. Any other non-zero exit code is an error to Kiro rather than a block, which is why Beacon exits 0 on every other path.
 
 ## Data handling
 

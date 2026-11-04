@@ -112,18 +112,14 @@ func (m ForwarderManager) WriteUnit(vectorBin, configPath string) (string, error
 	if err := ensureDir(path); err != nil {
 		return "", err
 	}
-	var content string
-	if m.resolvedKind() == KindSystemd {
-		content = forwarderUnitFile(vectorBin, configPath, m.UserMode)
-	} else {
+	if m.resolvedKind() == KindLaunchd {
 		if err := ensureLaunchdLogDir(m.UserMode, ForwarderLabel); err != nil {
 			return "", err
 		}
-		stdout, stderr, err := launchdLogPaths(m.UserMode, ForwarderLabel)
-		if err != nil {
-			return "", err
-		}
-		content = forwarderPlist(ForwarderLabel, vectorBin, configPath, stdout, stderr)
+	}
+	content, err := m.unitContent(vectorBin, configPath)
+	if err != nil {
+		return "", err
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return "", err
@@ -134,6 +130,36 @@ func (m ForwarderManager) WriteUnit(vectorBin, configPath string) (string, error
 		}
 	}
 	return path, nil
+}
+
+// UnitCurrent reports whether the installed unit is the one WriteUnit would write now. Reconcile
+// rewrites one that is not, so a unit an earlier release wrote, such as one logging to /tmp, is
+// brought up to date by an upgrade rather than only by a fresh connect.
+func (m ForwarderManager) UnitCurrent(vectorBin, configPath string) (bool, error) {
+	path, err := m.UnitPath()
+	if err != nil {
+		return false, err
+	}
+	installed, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	want, err := m.unitContent(vectorBin, configPath)
+	if err != nil {
+		return false, err
+	}
+	return string(installed) == want, nil
+}
+
+func (m ForwarderManager) unitContent(vectorBin, configPath string) (string, error) {
+	if m.resolvedKind() == KindSystemd {
+		return forwarderUnitFile(vectorBin, configPath, m.UserMode), nil
+	}
+	stdout, stderr, err := launchdLogPaths(m.UserMode, ForwarderLabel)
+	if err != nil {
+		return "", err
+	}
+	return forwarderPlist(ForwarderLabel, vectorBin, configPath, stdout, stderr), nil
 }
 
 // Load registers and starts the forwarder. An already-loaded launchd job is re-bootstrapped so a

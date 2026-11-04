@@ -324,7 +324,7 @@ func opencodeToolFields(input map[string]interface{}, completed bool) map[string
 			}
 		}
 		if action, _ := opencodeToolAction(input); action == "command.executed" {
-			command := firstToolString(toolInput, "command", "cmd")
+			command := normalizeToolString(asymptoteobserve.ToolCommandLine(toolName, toolInput))
 			commandFields := map[string]interface{}{"command": command}
 			if output, ok := toolResponse["output"]; ok {
 				commandFields["output"] = output
@@ -504,8 +504,8 @@ func opencodeUsage(input map[string]interface{}) map[string]interface{} {
 // 2026) did not either, but a live event is far more likely to come from the
 // current runtime, so a missing total is taken as the current shape. The poll
 // backfill (cli/beacon/internal/opencodesession) makes the same call, except
-// that a stored message without a total is from those early releases, because
-// 2.x keeps its messages in a table the backfill does not read.
+// that a stored 1.x message without a total is from those early releases; it
+// reads 2.x's session_message rows as the current shape.
 func opencodeOutputTokens(tokens, cache map[string]interface{}, output, reasoning int) int {
 	if reasoning <= 0 {
 		return output

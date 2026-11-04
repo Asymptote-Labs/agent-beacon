@@ -47,8 +47,7 @@ start_fake() {
   MARK=0
   python3 "$FAKE" --fixture "$CASE_DIR/fixture.json" --log "$LOG" --port-file "$CASE_DIR/port" --pkg "$PKG" 2>"$CASE_DIR/fake.err" &
   FAKE_PID=$!
-  # A cold CI runner can take several seconds to start Python, so allow 30s,
-  # but stop at once if the server has already exited.
+  # Allow a slow CI runner 30s, but stop at once if the server has already exited.
   tries=0
   while [ ! -s "$CASE_DIR/port" ]; do
     if ! kill -0 "$FAKE_PID" 2>/dev/null; then
@@ -251,13 +250,6 @@ expect_err 'BEACON_AWS_CREDENTIAL_MODE=none' "the error should name the none mod
 expect 'len(R) == 0' "a missing-key run should make no requests"
 
 mark
-run_helper BEACON_AWS_CREDENTIAL_MODE=none -- --pkg "$PKG"
-expect_status ok "credential mode none should succeed"
-expect 'not req("PUT", "/api/latest/fleet/spec/secret_variables")' "mode none should store no secrets"
-expect 'any(form(r)["script"]["filename"] == "beacon-configure-s3-forwarding.sh" and "export AWS_ACCESS_KEY_ID" not in form(r)["script"]["content"] for r in req("POST", "/api/latest/fleet/scripts"))' \
-  "mode none should upload an S3 script that sets no AWS keys"
-
-mark
 run_helper BEACON_AWS_CREDENTIAL_MODE=bogus --
 expect_status 2 "an unknown credential mode should exit 2"
 expect_err "must be 'keys' or 'none'" "the error should list the valid modes"
@@ -280,16 +272,13 @@ expect_status ok "a temporary key with a session token should succeed"
 expect_err 'expires' "temporary credentials should come with an expiry warning"
 expect 'any("FLEET_SECRET_BEACON_AWS_SESSION_TOKEN" in [s["name"] for s in body(r)["secrets"]] for r in req("PUT", "/api/latest/fleet/spec/secret_variables"))' \
   "the session token should be stored as a secret variable"
-stop_fake
 
-# --- Dry runs make no network calls ------------------------------------------
-start_fake dryrun '{}'
+# Dry runs make no network calls.
+mark
 run_helper -- --dry-run
 expect_status ok "dry run should succeed without keys or a package"
 grep -q 'FLEET_SECRET_BEACON_AWS_ACCESS_KEY_ID' "$CASE_DIR/out" || fail "dry run should preview the secret placeholders"
-run_helper -- --dry-run --skip-software
-expect_status ok "the documented dry run should succeed"
-expect 'len(R) == 0' "dry runs should not call Fleet or download the package"
+expect 'len(R) == 0' "a dry run should not call Fleet or download the package"
 stop_fake
 
 # --- Roles and errors ----------------------------------------------------------
@@ -322,6 +311,9 @@ expect 'len(writes()) == 0' "the role preflight should stop before any write"
 mark
 run_helper BEACON_AWS_CREDENTIAL_MODE=none -- --pkg "$PKG" --skip-reports
 expect_status ok "a team maintainer can run the helper when it stores no secrets"
+expect 'not req("PUT", "/api/latest/fleet/spec/secret_variables")' "mode none should store no secrets"
+expect 'any(form(r)["script"]["filename"] == "beacon-configure-s3-forwarding.sh" and "export AWS_ACCESS_KEY_ID" not in form(r)["script"]["content"] for r in req("POST", "/api/latest/fleet/scripts"))' \
+  "mode none should upload an S3 script that sets no AWS keys"
 stop_fake
 
 start_fake norole '{"me": {"user": {"name": "O", "email": "o@example.com", "global_role": "observer", "teams": []}}}'

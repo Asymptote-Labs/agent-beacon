@@ -109,7 +109,10 @@ ss -ltnp | grep beacon-otelcol
 ## Privileges and data
 
 - In system mode the collector runs as root. Hooks run as the logged-in user and append to the same
-  log, which is why `/var/log/beacon-agent/runtime.jsonl` is mode `0666`.
+  log, which is why `/var/log/beacon-agent/runtime.jsonl` is mode `0666`. With
+  [`--log-access restricted`](/cli/endpoint-install#restricted-log-access) the collector is the only
+  writer instead: hooks send events to it over `/var/run/beacon-agent/ingest.sock`, the log is
+  `0640 root:beacon-log`, and log shippers that do not run as root join the `beacon-log` group.
 - In user mode everything runs as you under `~/.beacon`, with no privileges required.
 - The log contains prompt text, command lines, file paths, and tool inputs, after redaction and a
   64 KiB per-event limit. Treat it as sensitive data.

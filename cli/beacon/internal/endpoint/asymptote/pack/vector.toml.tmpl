@@ -66,10 +66,12 @@ method = "newline_delimited"
 Content-Type = "application/x-ndjson"
 
 [sinks.asymptote_runtime.batch]
-# Stays under the ingest service's 8 MiB compressed / 10,000 line limits.
+# Stays under the ingest service's 8 MiB compressed / 10,000 line limits. A
+# short window puts a new user's first sessions on the dashboard within seconds
+# of connecting; a busy device still fills batches by size.
 max_bytes = 5000000
 max_events = 5000
-timeout_secs = 60
+timeout_secs = 10
 
 [sinks.asymptote_runtime.buffer]
 # Survives offline periods and forwarder restarts; drains on reconnect.
@@ -81,6 +83,11 @@ when_full = "block"
 timeout_secs = 30
 retry_initial_backoff_secs = 2
 retry_max_duration_secs = 300
+# At most one request a second, the rate the ingest service allows each
+# device. A backfill or a backlog drained after an offline period is sent in
+# full batches at that pace instead of tripping 429s.
+rate_limit_num = 1
+rate_limit_duration_secs = 1
 
 # The healthcheck carries the bearer key, so a revoked or expired device shows up
 # as an unhealthy sink at startup (401) instead of silently dropping batches.

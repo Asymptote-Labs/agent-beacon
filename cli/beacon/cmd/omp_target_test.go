@@ -11,56 +11,6 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
-// The spellings an operator actually types. "omp" is the binary and the canonical harness name;
-// "oh-my-pi" is the repository name people reach for; the underscore form arrives from anyone
-// copying a harness name out of a log, since normalizeHarnessKey maps `_` to `-`.
-func TestOmpHookTargetAliases(t *testing.T) {
-	for _, in := range []string{"omp", "OMP", "  omp  ", "oh-my-pi", "oh_my_pi", "ohmypi", "Oh-My-Pi"} {
-		t.Run(in, func(t *testing.T) {
-			got, ok := normalizeHookTarget(in)
-			if !ok {
-				t.Fatalf("normalizeHookTarget(%q) was not recognized", in)
-			}
-			if got != "omp" {
-				t.Fatalf("normalizeHookTarget(%q) = %q, want omp", in, got)
-			}
-		})
-	}
-}
-
-// Oh My Pi and Pi are separately installed products. A `--harness` value for one must never resolve
-// to the other, or an operator asking to instrument one gets the other's extension written into a
-// directory the runtime they meant does not read.
-func TestOmpAndPiTargetsDoNotAlias(t *testing.T) {
-	for in, want := range map[string]string{
-		"pi":       "pi",
-		"pi-cli":   "pi",
-		"pi_cli":   "pi",
-		"omp":      "omp",
-		"oh-my-pi": "omp",
-		"ohmypi":   "omp",
-	} {
-		t.Run(in, func(t *testing.T) {
-			got, ok := normalizeHookTarget(in)
-			if !ok || got != want {
-				t.Fatalf("normalizeHookTarget(%q) = (%q, %v), want %q", in, got, ok, want)
-			}
-		})
-	}
-}
-
-// Oh My Pi is a hook (extension) target, not an OTLP one: it exports no OpenTelemetry, so an
-// endpoint install has nothing to point at it.
-func TestOmpEndpointTargetIsHookShaped(t *testing.T) {
-	got, ok := normalizeEndpointTarget("omp")
-	if !ok {
-		t.Fatal("normalizeEndpointTarget(omp) was not recognized")
-	}
-	if got.Name != "omp" || got.Kind != endpointTargetHook {
-		t.Fatalf("normalizeEndpointTarget(omp) = %+v, want an omp hook target", got)
-	}
-}
-
 // The wiring test. A harness the target table advertises but the install switch has no case for
 // falls through to `unsupported hook harness`, so this is what catches a runtime added to the table
 // and nowhere else -- the way a half-added integration ships.

@@ -2,10 +2,8 @@ package logging
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	osuser "os/user"
 	"path/filepath"
@@ -13,12 +11,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/config"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/activesession"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/filelock"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/localingest"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/shareauto"
 )
 
@@ -28,12 +28,23 @@ var endpointSequence asymptoteobserve.Sequencer
 
 const (
 	defaultEndpointRotateBytes    = 10 * 1024 * 1024
-	defaultEndpointRotateArchives = 5
+	defaultEndpointRotateArchives = asymptoteobserve.DefaultRuntimeLogRotateArchives
 	// endpointRuntimeFileMode is the shared (system-mode) log's mode. A log inside the current
 	// user's home is private instead; asymptoteobserve.RuntimeLogModes decides, identically in all
 	// three writers.
 	endpointRuntimeFileMode = asymptoteobserve.SharedRuntimeLogFileMode
 )
+
+// endpointEventsSuppressed stops this process writing endpoint events. A hook sets it when another
+// hook of Beacon's records the same event, as when Cursor runs Beacon's Claude Code hooks next to
+// its own.
+var endpointEventsSuppressed bool
+
+// SuppressEndpointEvents turns endpoint event writes off (true) or back on (false) for the rest of
+// this process.
+func SuppressEndpointEvents(suppress bool) {
+	endpointEventsSuppressed = suppress
+}
 
 // Logger provides structured JSON logging for hook events
 type Logger struct {
@@ -122,6 +133,9 @@ func (l *Logger) EndpointEvent(action, category, severity, message string, field
 // approval from a pre-tool notification, for instance -- so those events are distinguishable from
 // the ones a runtime actually reported.
 func (l *Logger) EndpointEventWithFidelity(action, category, severity, message, fidelity string, fields map[string]interface{}) error {
+	if endpointEventsSuppressed {
+		return nil
+	}
 	path := endpointLogPath()
 	if path == "" {
 		return nil
@@ -148,6 +162,10 @@ func (l *Logger) EndpointEventWithFidelity(action, category, severity, message, 
 	return nil
 }
 
+// ShareSettingsPath locates the user's share settings. It is never taken from the environment,
+// which a repository can supply; tests replace it.
+var ShareSettingsPath = shareauto.HookPath
+
 // requestShareOnce writes one session.share_requested event for the event's session when the person
 // turned auto-share on for its working directory (`beacon share auto enable`). It is the first event
 // of the session the hooks see -- SessionStart where the runtime has one -- and never more than one
@@ -173,7 +191,7 @@ func (l *Logger) requestShareOnce(event map[string]interface{}) {
 	if id == "" || dir == "" || name == "" {
 		return
 	}
-	decision := shareauto.ForHook(shareauto.DefaultPath(), dir)
+	decision := shareauto.ForHook(ShareSettingsPath(), dir)
 	if !decision.Enabled {
 		return
 	}
@@ -517,7 +535,45 @@ func writeEndpointJSONFile(path string, event map[string]interface{}) error {
 	if data, err = withEndpointEventID(event, data); err != nil {
 		return err
 	}
-	return appendEndpointJSONL(path, append(data, '\n'), defaultEndpointRotateBytes, defaultEndpointRotateArchives)
+	return deliverEndpointLine(path, data)
+}
+
+// EndpointIngest delivers to the system log through the collector when the endpoint is in the
+// restricted log access mode. Tests point it at a socket and spool of their own; nothing else
+// changes it.
+var EndpointIngest = defaultEndpointIngest()
+
+// defaultEndpointIngest is the real socket and the account's spool, except in a test binary, where
+// a test writing a system log as an ordinary account must never reach the machine's collector or
+// leave lines in the developer's own spool.
+func defaultEndpointIngest() localingest.Deliverer {
+	if !testing.Testing() {
+		return localingest.Deliverer{}
+	}
+	dir := filepath.Join(os.TempDir(), fmt.Sprintf("beacon-hooks-test-%d", os.Getpid()))
+	socket := filepath.Join(dir, "no-collector.sock")
+	if runtime.GOOS == "windows" {
+		socket = fmt.Sprintf(`\\.\pipe\beacon-hooks-test-%d-none`, os.Getpid())
+	}
+	return localingest.Deliverer{
+		Client: localingest.Client{SocketPath: socket},
+		Spool:  localingest.Spool{Dir: filepath.Join(dir, "spool")},
+	}
+}
+
+// deliverEndpointLine writes one finished line to the runtime log at path.
+//
+// A hook writing the system log as an ordinary account hands the line to the collector over the
+// local ingest socket when the endpoint has one (the restricted log access mode, in which the log
+// is not writable by this account at all), and otherwise appends directly, as hooks always have.
+// Only a direct append the log refuses -- a restricted endpoint whose collector is restarting --
+// puts the line in this account's private spool, and it reaches the log with a later event
+// instead of being lost. Root and per-user logs are always written directly. See
+// localingest.Deliverer.Write.
+func deliverEndpointLine(path string, data []byte) error {
+	return EndpointIngest.Write(path, data, func(line []byte) error {
+		return appendEndpointJSONL(path, append(line[:len(line):len(line)], '\n'), defaultEndpointRotateBytes, defaultEndpointRotateArchives)
+	})
 }
 
 // withEndpointEventID fills event.id on an event assembled as a map and returns
@@ -624,10 +680,6 @@ func endpointLogPath() string {
 	return filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl")
 }
 
-func redactEndpointString(value string) string {
-	return asymptoteobserve.RedactString(value)
-}
-
 func sanitizeEndpointMap(input map[string]interface{}) map[string]interface{} {
 	return asymptoteobserve.SanitizeMap(input, asymptoteobserve.PrivacyOptions{
 		RedactSecrets: true,
@@ -646,7 +698,8 @@ func truncateEndpoint(value string, limit int) string {
 	return asymptoteobserve.TruncateString(value, limit)
 }
 
-// Keep this rotation and file-mode contract mirrored with the endpoint CLI and beaconjson exporter.
+// Keep this file-mode contract mirrored with the endpoint CLI and beaconjson exporter; the rotation
+// itself is asymptoteobserve.RotateRuntimeLog for all three.
 func appendEndpointJSONL(path string, line []byte, rotateBytes int64, rotateArchives int) error {
 	_, dirMode, _ := asymptoteobserve.RuntimeLogModes(path)
 	if err := os.MkdirAll(filepath.Dir(path), dirMode); err != nil {
@@ -667,15 +720,15 @@ func appendEndpointJSONL(path string, line []byte, rotateBytes int64, rotateArch
 	if asymptoteobserve.IsDuplicateEndpointEvent(path, line, asymptoteobserve.EndpointDuplicateWindow) {
 		return nil
 	}
-	// A hook usually runs as the person at the keyboard, and on a system-mode log it may not rename
-	// or delete anything in the directory: the directory is root-owned 0755 on POSIX, and on Windows
-	// its ACL gives ordinary users no right to add, rename or delete entries -- the rights that would
-	// let one redirect a SYSTEM write. Rotation is the privileged writers' job there. The refusal
-	// comes at the first step, so nothing has moved, and the event is appended past the size limit
-	// rather than lost; the collector rotates at its next write.
-	if err := rotateEndpointLogIfNeeded(path, rotateBytes, rotateArchives, int64(len(line))); err != nil && !errors.Is(err, fs.ErrPermission) {
-		return err
-	}
+	// A rotation that cannot happen now is deferred, never fatal, and the event is appended past the
+	// size limit for a later write to rotate. A hook usually runs as the person at the keyboard, and
+	// on a system-mode log it may not rename or delete anything in the directory: the directory is
+	// root-owned 0755 on POSIX, and on Windows its ACL gives ordinary users no right to add, rename or
+	// delete entries -- the rights that would let one redirect a SYSTEM write. Rotation is the
+	// privileged writers' job there. And on Windows a reader holding the log open without delete
+	// sharing blocks the rename for every writer until it lets go. asymptoteobserve.RotateRuntimeLog
+	// moves nothing in either case.
+	_ = asymptoteobserve.RotateRuntimeLog(path, rotateBytes, rotateArchives, int64(len(line)))
 	f, err := openEndpointRuntimeFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY)
 	if err != nil {
 		return err
@@ -695,65 +748,6 @@ func openEndpointRuntimeFile(path string, flag int) (*os.File, error) {
 // follows a symlink or opens anything but a regular file there.
 func openEndpointRuntimeFileAs(path, logPath string, flag int) (*os.File, error) {
 	return asymptoteobserve.OpenRuntimeLogFile(path, logPath, flag)
-}
-
-func rotateEndpointLogIfNeeded(path string, maxSize int64, archives int, nextWriteBytes int64) error {
-	if maxSize <= 0 {
-		return nil
-	}
-	if archives < 1 {
-		archives = defaultEndpointRotateArchives
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	if info.Size() == 0 || info.Size()+nextWriteBytes <= maxSize {
-		return nil
-	}
-	if err := removeOverflowEndpointArchives(path, archives); err != nil {
-		return err
-	}
-	for i := archives - 1; i >= 1; i-- {
-		from := path + fmt.Sprintf(".%d", i)
-		to := path + fmt.Sprintf(".%d", i+1)
-		if err := os.Rename(from, to); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-	}
-	if err := os.Rename(path, path+".1"); err != nil {
-		return err
-	}
-	asymptoteobserve.TightenPrivateRuntimeLogArchives(path, archives)
-	return nil
-}
-
-func removeOverflowEndpointArchives(path string, archives int) error {
-	dir := filepath.Dir(path)
-	base := filepath.Base(path)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-	prefix := base + "."
-	for _, entry := range entries {
-		name := entry.Name()
-		suffix, ok := strings.CutPrefix(name, prefix)
-		if !ok {
-			continue
-		}
-		index, err := strconv.Atoi(suffix)
-		if err != nil || index < archives {
-			continue
-		}
-		if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-	}
-	return nil
 }
 
 // Debug logs a debug message

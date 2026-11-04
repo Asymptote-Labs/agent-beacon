@@ -57,7 +57,8 @@
             "pages": [
               "deployment/hosting-options",
               "deployment/open-source",
-              "deployment/managed"
+              "deployment/managed",
+              "deployment/plans"
             ]
           },
           {
@@ -72,6 +73,7 @@
                 ]
               },
               "cloud/sessions",
+              "cloud/findings",
               "deployment/managed-mcp",
               {
                 "group": "Lenses",
@@ -169,6 +171,7 @@
                       "runtimes/github-copilot-cli",
                       "runtimes/goose",
                       "runtimes/grok-build",
+                      "runtimes/harness2",
                       "runtimes/kimi-code",
                       "runtimes/kiro",
                       "runtimes/muse-code",
@@ -235,6 +238,7 @@
               "security/data-inventory",
               "security/retention-redaction",
               "security/endpoint-operations",
+              "security/restricted-log-access",
               "security/policy"
             ]
           },
@@ -331,9 +335,12 @@
                   "cli/endpoint-onboarding",
                   "cli/endpoint-opencode",
                   "cli/endpoint-pi",
+                  "cli/endpoint-cursor",
                   "cli/endpoint-copilot",
+                  "cli/endpoint-devin",
                   "cli/endpoint-dsh",
                   "cli/endpoint-fx",
+                  "cli/endpoint-harness2",
                   "cli/endpoint-traces",
                   "cli/dashboard",
                   "cli/wazuh",
@@ -388,6 +395,7 @@
                   "cli/scan-ci-gates"
                 ]
               },
+              "cli/intel",
               "cli/handoff",
               "cli/share",
               "cli/lenses",
@@ -498,7 +506,8 @@
                   "log-forwarding/cloudwatch",
                   "log-forwarding/customer-managed",
                   "log-forwarding/datadog",
-                  "log-forwarding/elastic"
+                  "log-forwarding/elastic",
+                  "log-forwarding/rsyslog"
                 ]
               },
               {
@@ -551,6 +560,13 @@
                 "root": "mdm/fleet",
                 "pages": [
                   "guides/fleet-s3-mdm"
+                ]
+              },
+              {
+                "group": "Kandji",
+                "expanded": true,
+                "pages": [
+                  "guides/kandji-otlp-forward-mdm"
                 ]
               }
             ]
@@ -630,6 +646,7 @@
             "icon": "clock",
             "pages": [
               "changelog/cli",
+              "changelog/cloud",
               "changelog/sdk"
             ]
           }
@@ -676,6 +693,12 @@
       "vscode"
     ]
   },
+  "integrations": {
+    "posthog": {
+      "apiKey": "phc_mAC6ywfI3poAo9dBeuNJUJySdxYdJzvoYapN5Wn9cVN",
+      "apiHost": "https://us.i.posthog.com"
+    }
+  },
   "redirects": [
     {
       "source": "/manage/configure-s3-data-connector",
@@ -696,6 +719,14 @@
     {
       "source": "/guides/claude-s3-system",
       "destination": "/guides/macos-object-storage-system"
+    },
+    {
+      "source": "/pricing",
+      "destination": "/deployment/plans"
+    },
+    {
+      "source": "/cloud-changelog",
+      "destination": "/changelog/cloud"
     },
     {
       "source": "/product-changelog",

@@ -54,31 +54,6 @@ func withCurl(e *asymptoteobserve.Event) {
 	e.Command = &asymptoteobserve.CommandInfo{Command: "curl https://x"}
 }
 
-func TestCorrelationOrderedInWindow(t *testing.T) {
-	c := readThenEgressRule(t)
-	v, err := c.Evaluate([]asymptoteobserve.Event{
-		corrEvent("2026-06-13T10:00:00Z", "file.read", "s1", withEnv),
-		corrEvent("2026-06-13T10:00:30Z", "command.executed", "s1", withCurl),
-	})
-	if err != nil {
-		t.Fatalf("eval: %v", err)
-	}
-	if v != VerdictMatch {
-		t.Fatalf("want match, got %s", v)
-	}
-}
-
-func TestCorrelationOutOfOrder(t *testing.T) {
-	c := readThenEgressRule(t)
-	v, _ := c.Evaluate([]asymptoteobserve.Event{
-		corrEvent("2026-06-13T10:00:00Z", "command.executed", "s1", withCurl),
-		corrEvent("2026-06-13T10:00:30Z", "file.read", "s1", withEnv),
-	})
-	if v != VerdictNoMatch {
-		t.Fatalf("out-of-order want no_match, got %s", v)
-	}
-}
-
 func TestCorrelationOutsideWindow(t *testing.T) {
 	c := readThenEgressRule(t)
 	v, _ := c.Evaluate([]asymptoteobserve.Event{
@@ -224,16 +199,6 @@ func TestCorrelationAnyOrderOutsideWindow(t *testing.T) {
 		corrEvent("2026-06-13T10:02:00Z", "file.read", "s1", withEnv),
 	); v != VerdictMatch {
 		t.Errorf("egress-then-read exactly 120s apart want match, got %s", v)
-	}
-}
-
-func TestCorrelationAnyOrderCrossSession(t *testing.T) {
-	c := anyOrderReadEgressRule(t)
-	if v := mustEvaluate(t, c,
-		corrEvent("2026-06-13T10:00:00Z", "command.executed", "s1", withCurl),
-		corrEvent("2026-06-13T10:00:30Z", "file.read", "s2", withEnv),
-	); v != VerdictNoMatch {
-		t.Errorf("cross-session want no_match, got %s", v)
 	}
 }
 

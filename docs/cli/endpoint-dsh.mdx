@@ -17,6 +17,8 @@ This complements the live [DeepSeek Harness hooks](/runtimes/deepseek-harness).
 Hooks observe current tool activity and optional policy decisions. Session sync
 backfills assistant text and reasoning, tool failure status, persisted
 command/file/MCP detail, and token usage that the hook bridge does not expose.
+See [Reading the session store](/runtimes/deepseek-harness#reading-the-session-store)
+for how each record maps.
 
 Every event from this command is marked
 `harness.collection_method=poll`. Beacon reads committed records after the fact,
@@ -52,6 +54,7 @@ Both subcommands accept:
 | `--print` | Print mapped events without writing them or advancing the cursor |
 | `--watch` | Sweep continuously on `--interval` |
 | `--interval <duration>` | Sweep interval for `--watch`. Defaults to `1m`, with a 5-second floor |
+| `--rotate-bytes <bytes>` | Rotate the runtime log at this many bytes while this sync writes it. Defaults to 10485760, the size every Beacon writer uses; must not be smaller. See [large backfills and log rotation](/runtimes/claude-code#large-backfills-and-log-rotation) |
 
 ## Sweeping
 

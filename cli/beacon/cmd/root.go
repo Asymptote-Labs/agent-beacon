@@ -119,7 +119,7 @@ func printRootUpdateNotice(out io.Writer, result updatecheck.Result, color bool,
 	fmt.Fprintf(out, "Release notes: %s\n", beaconCLIChangelogURL)
 	switch install.Kind {
 	case selfupdate.InstallHomebrew:
-		fmt.Fprintln(out, "Update with: brew upgrade beacon")
+		fmt.Fprintln(out, "Update with: brew update && brew upgrade beacon")
 	case selfupdate.InstallSystemPkg:
 		fmt.Fprintln(out, "Update with: sudo beacon endpoint update --apply")
 	default:
@@ -236,6 +236,7 @@ var docsCmd = &cobra.Command{
 
 // Execute runs the root command
 func Execute() {
+	startDebugStackTimer(os.Stderr)
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}

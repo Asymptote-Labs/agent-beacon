@@ -223,11 +223,15 @@ func parseClaudeCopilotInput(input map[string]interface{}, logger *logging.Logge
 	// missing the event: the log would assert a file changed when it did not.
 	//
 	// Returning nil hands the payload back to emitPostToolObserved, which classifies it as
-	// `tool.failed` at high severity. Antigravity guards the same way just above, for the same
-	// reason. Scoped to the platform rather than applied to every runtime because the branch above
-	// establishes that each runtime's failure signal is its own; widening it would change Claude
-	// Code's recorded behavior with no fixture to say what that behavior should become.
+	// `tool.failed` at high severity. Antigravity guards the same way just above, and Grok just
+	// below, for the same reason. Scoped to the platform rather than applied to every runtime
+	// because the branch above establishes that each runtime's failure signal is its own; widening
+	// it would change Claude Code's recorded behavior with no fixture to say what that behavior
+	// should become.
 	if platformFlag == "qwen" && qwenToolFailed(input) {
+		return nil
+	}
+	if platformFlag == "grok" && reportedPostToolFailure(getFirstStr(input, "hook_event_name", "hookEventName"), input) {
 		return nil
 	}
 
@@ -480,7 +484,7 @@ func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) 
 	if platformFlag == kimiPlatform {
 		applyKimiToolResult(fields, toolName, toolInput, input)
 	}
-	if hookEvent == "PostToolUseFailure" || hookEvent == "postToolUseFailure" || hookEvent == "post_tool_use_failure" || getFirstStr(input, "error") != "" {
+	if reportedPostToolFailure(hookEvent, input) {
 		emitHookEvent(logger, "tool.failed", "tool", "high", "Tool execution failed", input, fields)
 		return
 	}
@@ -552,6 +556,11 @@ func emitPostToolObserved(logger *logging.Logger, input map[string]interface{}) 
 		message = "Shell command executed"
 	}
 	emitHookEvent(logger, action, category, "info", message, input, fields)
+}
+
+func reportedPostToolFailure(hookEvent string, input map[string]interface{}) bool {
+	return hookEvent == "PostToolUseFailure" || hookEvent == "postToolUseFailure" ||
+		hookEvent == "post_tool_use_failure" || getFirstStr(input, "error") != ""
 }
 
 func emitCursorPostHookObserved(logger *logging.Logger, input map[string]interface{}) bool {

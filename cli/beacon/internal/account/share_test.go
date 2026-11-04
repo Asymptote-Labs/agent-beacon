@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +19,13 @@ import (
 )
 
 const shareTestToken = "bcn_cli_share_secret"
+
+// The share client reads BEACON_API_URL. A developer's own setting must not send these tests'
+// requests anywhere but their test servers.
+func TestMain(m *testing.M) {
+	_ = os.Unsetenv(APIURLEnv)
+	os.Exit(m.Run())
+}
 
 func shareCred(baseURL string) ShareCredential {
 	return ShareCredential{BaseURL: baseURL, Token: shareTestToken, Source: CredentialSourceLogin, User: User{ID: "u", Email: "dev@example.com"}}
@@ -308,6 +316,102 @@ func TestShareClientMapsAuthFailures(t *testing.T) {
 		if strings.Contains(err.Error(), shareTestToken) {
 			t.Fatalf("%d/%s: the token reached the error: %v", tc.status, tc.source, err)
 		}
+	}
+}
+
+// beacon.sh serves its web app, not /v1: a sign-in there shares through api.beacon.sh. Other
+// services keep their own base URL, and BEACON_API_URL names the API outright.
+func TestShareAPIBaseURL(t *testing.T) {
+	for _, tc := range []struct{ base, env, want string }{
+		{"https://beacon.sh", "", DefaultAPIURL},
+		{"https://beacon.sh/", "", DefaultAPIURL},
+		{"https://www.beacon.sh", "", DefaultAPIURL},
+		{"https://BEACON.SH", "", DefaultAPIURL},
+		{"https://beacon.example.com", "", "https://beacon.example.com"},
+		{"http://127.0.0.1:8787/", "", "http://127.0.0.1:8787"},
+		{"https://beacon.sh", " https://api.staging.example.com/ ", "https://api.staging.example.com"},
+	} {
+		getenv := func(name string) string {
+			if name == APIURLEnv {
+				return tc.env
+			}
+			return ""
+		}
+		if got := ShareAPIBaseURL(tc.base, getenv); got != tc.want {
+			t.Errorf("ShareAPIBaseURL(%q, %s=%q) = %q, want %q", tc.base, APIURLEnv, tc.env, got, tc.want)
+		}
+	}
+	if got := ShareAPIBaseURL("https://beacon.sh", nil); got != DefaultAPIURL {
+		t.Errorf("ShareAPIBaseURL with no environment = %q", got)
+	}
+}
+
+type shareRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f shareRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// Regression (02b19892): beacon.sh's web host answers /v1 with an HTML 404, so a beacon.sh sign-in
+// must send its share requests, and the credential, to api.beacon.sh.
+func TestShareClientSendsABeaconShSignInToTheAPIHost(t *testing.T) {
+	t.Setenv(APIURLEnv, "")
+	var requested []string
+	httpClient := &http.Client{Transport: shareRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requested = append(requested, r.Method+" "+r.URL.String()+" "+r.Header.Get("Authorization"))
+		body := `{"id":"k3x","url":"https://beacon.sh/s/k3x","visibility":"direct","event_count":0,"last_event_id":"","max_number":0}`
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	})}
+	client, err := NewShareClient(shareCred("https://beacon.sh"), httpClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := client.GetTrace(context.Background(), "claude_code:abc"); err != nil || !found {
+		t.Fatalf("GetTrace: found=%v err=%v", found, err)
+	}
+	if want := "GET https://api.beacon.sh/v1/traces/claude_code:abc Bearer " + shareTestToken; len(requested) != 1 || requested[0] != want {
+		t.Fatalf("requests = %q, want [%q]", requested, want)
+	}
+}
+
+func TestShareClientTakesTheAPIFromTheEnvironment(t *testing.T) {
+	s := newShareServer(t)
+	t.Setenv(APIURLEnv, s.server.URL+"/")
+	client, err := NewShareClient(shareCred("https://beacon.sh"), s.server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := client.GetTrace(context.Background(), "claude_code:abc"); err != nil || !found {
+		t.Fatalf("GetTrace: found=%v err=%v", found, err)
+	}
+	if len(s.paths) != 1 || s.paths[0] != "GET /v1/traces/claude_code:abc" {
+		t.Fatalf("requests = %v", s.paths)
+	}
+
+	t.Setenv(APIURLEnv, "http://api.example.com")
+	if _, err := NewShareClient(shareCred("https://beacon.sh"), nil); err == nil || !strings.Contains(err.Error(), "insecure") {
+		t.Fatalf("an http %s was accepted: %v", APIURLEnv, err)
+	}
+}
+
+// A host with no trace API answers with its own HTML 404 page. That is not "the trace does not exist
+// yet": GetTrace reports it, so the caller never goes on to create the trace there.
+func TestShareClientReportsAHostWithNoTraceAPI(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, "<!DOCTYPE html><html><head><title>404: This page could not be found.</title></head><body>404</body></html>")
+	}))
+	defer server.Close()
+	client, err := NewShareClient(shareCred(server.URL), server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := server.URL + " has no trace API (HTTP 404: endpoint not found)"
+	state, found, err := client.GetTrace(context.Background(), "claude_code:abc")
+	if err == nil || found || state != nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("GetTrace = %+v found=%v err=%v, want %q", state, found, err, want)
+	}
+	if _, err := client.PutTrace(context.Background(), "claude_code:abc", shareTrace("direct")); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("PutTrace err = %v, want %q", err, want)
 	}
 }
 

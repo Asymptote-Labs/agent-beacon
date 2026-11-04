@@ -106,8 +106,8 @@ func (s *hermesSource) Events(session Session) ([]schema.Event, error) {
 		if err != nil {
 			return nil, err
 		}
-		// A nil cursor maps the whole session, as a first sync would.
-		mapped, _ := hermessession.MapSession(h, messages, nil)
+		// A zero cursor includes session-total usage, as a first sync would.
+		mapped, _ := hermessession.MapSession(h, messages, &hermessession.Cursor{})
 		events := make([]schema.Event, 0, len(mapped))
 		for _, m := range mapped {
 			events = append(events, m.Event)

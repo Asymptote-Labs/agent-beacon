@@ -1,0 +1,92 @@
+event: delta_encoding
+data: "v1"
+
+data: {"type":"resume_conversation_token","kind":"topic","token":"REDACTED","conversation_id":"6adb0000-0000-8000-8000-000000000001"}
+
+event: delta
+data: {"p":"","o":"add","v":{"message":{"id":"seed-system","author":{"role":"system","name":null,"metadata":{}},"create_time":1792775744.0,"update_time":null,"content":{"content_type":"text","parts":[""]},"status":"finished_successfully","end_turn":null,"weight":1.0,"metadata":{},"recipient":"all","channel":null},"conversation_id":"6adb0000-0000-8000-8000-000000000001","error":null},"c":0}
+
+event: delta
+data: {"v":{"message":{"id":"user-0001","author":{"role":"user","name":null,"metadata":{}},"create_time":1792775744.0,"update_time":null,"content":{"content_type":"text","parts":["First, without searching, say what the Boston Marathon is. Then search for the date of the next one."]},"status":"finished_successfully","end_turn":null,"weight":1.0,"metadata":{},"recipient":"all","channel":null},"conversation_id":"6adb0000-0000-8000-8000-000000000001","error":null},"c":1}
+
+data: {"type":"input_message","conversation_id":"6adb0000-0000-8000-8000-000000000001"}
+
+event: delta
+data: {"v":{"message":{"id":"context-0001","author":{"role":"assistant","name":null,"metadata":{}},"create_time":1792775744.0,"update_time":null,"content":{"content_type":"model_editable_context","model_set_context":""},"status":"finished_successfully","end_turn":null,"weight":1.0,"metadata":{},"recipient":"all","channel":null},"conversation_id":"6adb0000-0000-8000-8000-000000000001","error":null},"c":2}
+
+event: delta
+data: {"v":{"message":{"id":"seg-0001","author":{"role":"assistant","name":null,"metadata":{}},"create_time":1792775744.0,"update_time":null,"content":{"content_type":"text","parts":[""]},"status":"in_progress","end_turn":null,"weight":1.0,"metadata":{"model_slug":"gpt-6","merged_message_id":"merged-0001"},"recipient":"all","channel":"final"},"conversation_id":"6adb0000-0000-8000-8000-000000000001","error":null},"c":3}
+
+event: delta
+data: {"v":{"message":{"id":"merged-0001","author":{"role":"assistant","name":null,"metadata":{}},"create_time":1792775744.0,"update_time":null,"content":{"content_type":"text","parts":[""]},"status":"in_progress","end_turn":null,"weight":1.0,"metadata":{"model_slug":"gpt-6","is_merged_message":true,"source_message_ids":["seg-0001"]},"recipient":"all","channel":"final"},"conversation_id":"6adb0000-0000-8000-8000-000000000001","error":null},"c":4}
+
+event: delta
+data: {"p":"/message/content/parts/0","o":"append","v":"The Boston Marathon is ","c":3}
+
+data: {"type":"title_generation","title":"Boston Marathon","conversation_id":"6adb0000-0000-8000-8000-000000000001"}
+
+data: {"type":"message_marker","conversation_id":"6adb0000-0000-8000-8000-000000000001","message_id":"merged-0001","marker":"user_visible_token","event":"first"}
+
+event: delta
+data: {"p":"","o":"patch","v":[{"p":"/message/update_time","o":"replace","v":1792775744.8},{"p":"/message/content/parts/0","o":"append","v":"The Boston Marathon is "}],"c":4}
+
+event: delta
+data: {"p":"/message/content/parts/0","o":"append","v":"the world's oldest annual ","c":3}
+
+event: delta
+data: {"v":"marathon.\n\n","c":3}
+
+event: delta
+data: {"p":"","o":"patch","v":[{"p":"/message/content/parts/0","o":"append","v":"the world's oldest annual "}],"c":4}
+
+event: delta
+data: {"v":[{"p":"/message/content/parts/0","o":"append","v":"marathon.\n\n"},{"p":"/message/metadata","o":"append","v":{"citations":[]}}],"c":4}
+
+event: delta
+data: {"p":"","o":"patch","v":[{"p":"/message/status","o":"replace","v":"finished_successfully"},{"p":"/message/end_turn","o":"replace","v":false},{"p":"/message/metadata","o":"append","v":{"finish_details":{"type":"interrupted"}}}],"c":3}
+
+event: delta
+data: {"p":"","o":"add","v":{"message":{"id":"call-0001","author":{"role":"assistant","name":null,"metadata":{}},"create_time":1792775744.0,"update_time":null,"content":{"content_type":"text","parts":[""]},"status":"finished_successfully","end_turn":null,"weight":1.0,"metadata":{"reasoning_title":"Searching the web"},"recipient":"web.run","channel":null},"conversation_id":"6adb0000-0000-8000-8000-000000000001","error":null},"c":5}
+
+event: delta
+data: {"v":{"message":{"id":"tool-query-0001","author":{"role":"tool","name":"web.run","metadata":{}},"create_time":1792775744.0,"update_time":null,"content":{"content_type":"text","parts":[""]},"status":"finished_successfully","end_turn":null,"weight":1.0,"metadata":{"search_model_queries":{"type":"search_model_queries","queries":["2027 Boston Marathon date"]}},"recipient":"all","channel":null},"conversation_id":"6adb0000-0000-8000-8000-000000000001","error":null},"c":6}
+
+event: delta
+data: {"v":{"message":{"id":"tool-result-0001","author":{"role":"tool","name":"web.run","metadata":{}},"create_time":1792775744.0,"update_time":null,"content":{"content_type":"text","parts":[""]},"status":"finished_successfully","end_turn":null,"weight":1.0,"metadata":{"search_result_groups":[{"type":"search_result_group","domain":"www.example.org","entries":[{"type":"search_result","url":"https://www.example.org/boston-2027","title":"2027 Boston Marathon","snippet":"","ref_id":{"turn_index":1,"ref_type":"search","ref_index":0},"attribution":"example.org"}]}]},"recipient":"all","channel":null},"conversation_id":"6adb0000-0000-8000-8000-000000000001","error":null},"c":7}
+
+event: delta
+data: {"v":{"message":{"id":"seg-0002","author":{"role":"assistant","name":null,"metadata":{}},"create_time":1792775744.0,"update_time":null,"content":{"content_type":"text","parts":[""]},"status":"in_progress","end_turn":null,"weight":1.0,"metadata":{"model_slug":"gpt-6","merged_message_id":"merged-0001"},"recipient":"all","channel":"final"},"conversation_id":"6adb0000-0000-8000-8000-000000000001","error":null},"c":8}
+
+data: {"type":"streaming_parent_patch","conversation_id":"6adb0000-0000-8000-8000-000000000001","logical_answer_id":"merged-0001","revision":1,"updates":[{"message_id":"call-0001","streaming_parent_id":"seg-0001"}]}
+
+event: delta
+data: {"p":"","o":"patch","v":[{"p":"/message/metadata/source_message_ids","o":"append","v":["seg-0002"]},{"p":"/message/metadata/continuation_message_id","o":"replace","v":"seg-0002"}],"c":4}
+
+event: delta
+data: {"p":"/message/content/parts/0","o":"append","v":"**Next race:** Monday, ","c":8}
+
+event: delta
+data: {"p":"","o":"patch","v":[{"p":"/message/content/parts/0","o":"append","v":"**Next race:** Monday, "}],"c":4}
+
+event: delta
+data: {"p":"/message/content/parts/0","o":"append","v":"April 19, 2027.","c":8}
+
+event: delta
+data: {"p":"","o":"patch","v":[{"p":"/message/content/parts/0","o":"append","v":"April 19, 2027."},{"p":"/message/metadata","o":"append","v":{"search_result_groups":[{"type":"search_result_group","domain":"www.example.org","entries":[{"type":"search_result","url":"https://www.example.org/boston-2027","title":"2027 Boston Marathon","snippet":"","ref_id":{"turn_index":1,"ref_type":"search","ref_index":0},"attribution":"example.org"}]}]}}],"c":4}
+
+event: delta
+data: {"p":"","o":"patch","v":[{"p":"/message/metadata/finish_details","o":"remove"},{"p":"/message/status","o":"replace","v":"finished_successfully"},{"p":"/message/end_turn","o":"replace","v":true}],"c":8}
+
+event: delta
+data: {"p":"","o":"add","v":{"message":{"id":"thoughts-0001","author":{"role":"assistant","name":null,"metadata":{}},"create_time":1792775744.0,"update_time":null,"content":{"content_type":"thoughts","thoughts":[{"summary":"Checking the date","content":"The 2027 race falls on Patriots' Day."}],"source_analysis_msg_id":"REDACTED"},"status":"finished_successfully","end_turn":null,"weight":1.0,"metadata":{},"recipient":"all","channel":null},"conversation_id":"6adb0000-0000-8000-8000-000000000001","error":null},"c":9}
+
+event: delta
+data: {"v":{"message":{"id":"recap-0001","author":{"role":"assistant","name":null,"metadata":{}},"create_time":1792775744.0,"update_time":null,"content":{"content_type":"reasoning_recap","content":"Thought for 2s"},"status":"finished_successfully","end_turn":null,"weight":1.0,"metadata":{},"recipient":"all","channel":null},"conversation_id":"6adb0000-0000-8000-8000-000000000001","error":null},"c":10}
+
+event: delta
+data: {"p":"","o":"patch","v":[{"p":"/message/status","o":"replace","v":"finished_successfully"},{"p":"/message/end_turn","o":"replace","v":true}],"c":4}
+
+data: {"type":"message_stream_complete","conversation_id":"6adb0000-0000-8000-8000-000000000001"}
+
+data: [DONE]
+

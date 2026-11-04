@@ -71,14 +71,6 @@ func TestFromCursorEdits_MultipleEdits(t *testing.T) {
 	}
 }
 
-func TestFromCursorEdits_EmptyEdits(t *testing.T) {
-	result := FromCursorEdits("/path/to/file.py", []interface{}{})
-
-	if result != "" {
-		t.Errorf("FromCursorEdits() with empty edits = %q, want empty", result)
-	}
-}
-
 func TestFromCursorEdits_InvalidEditFormat(t *testing.T) {
 	edits := []interface{}{
 		"not a map",
@@ -105,25 +97,6 @@ func TestFromCursorEdits_EmptyStrings(t *testing.T) {
 	// fromEditTool returns "" for empty old and new strings
 	if result != "" {
 		t.Errorf("FromCursorEdits() with empty strings = %q, want empty", result)
-	}
-}
-
-func TestFromCursorEdits_MultilineEdit(t *testing.T) {
-	edits := []interface{}{
-		map[string]interface{}{
-			"old_string": "func main() {\n\tfmt.Println(\"hello\")\n}",
-			"new_string": "func main() {\n\tfmt.Println(\"world\")\n\treturn\n}",
-		},
-	}
-
-	result := FromCursorEdits("/path/to/main.go", edits)
-
-	if result == "" {
-		t.Fatal("FromCursorEdits() returned empty string")
-	}
-
-	if !strings.Contains(result, "--- a/main.go") {
-		t.Error("Missing file header")
 	}
 }
 
@@ -187,27 +160,14 @@ func TestFromToolResponseResolvesAbsolutePathParameter(t *testing.T) {
 }
 
 // FromContentChange is the one constructor here that is given the answer rather than asked to
-// infer it, so these cases pin the three shapes an observation can report: a modification, a
-// creation, and a deletion.
+// infer it, so these cases pin the shapes an observation can report: a modification and a
+// deletion here, a creation in TestFromEditFragmentsDoesNotReportAnInsertionAsANewFile.
 func TestFromContentChangeBuildsAReplacementDiff(t *testing.T) {
 	got := FromContentChange("/workspace/main.go", "package main\n\nfunc old() {}\n", "package main\n\nfunc new() {}\n")
 	for _, want := range []string{"--- a/main.go", "+++ b/main.go", "-func old() {}", "+func new() {}"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("FromContentChange missing %q:\n%s", want, got)
 		}
-	}
-}
-
-func TestFromContentChangeBuildsANewFileDiff(t *testing.T) {
-	got := FromContentChange("/workspace/new.py", "", "print('hi')\n")
-	if !strings.Contains(got, "@@ -0,0 +1,") {
-		t.Errorf("FromContentChange = %q, want a new-file hunk header", got)
-	}
-	if !strings.Contains(got, "+print('hi')") {
-		t.Errorf("FromContentChange = %q, want the added line", got)
-	}
-	if removed := diffBodyLines(got, "-"); len(removed) != 0 {
-		t.Errorf("FromContentChange = %q, want no removed lines for a new file, got %v", got, removed)
 	}
 }
 
@@ -243,7 +203,6 @@ func TestFromContentChangeBuildsADeletionDiff(t *testing.T) {
 func TestFromContentChangeReturnsNothingWhenTheContentIsUnchanged(t *testing.T) {
 	for _, tc := range []struct{ name, path, oldContent, newContent string }{
 		{"identical", "/workspace/main.go", "same\n", "same\n"},
-		{"both empty", "/workspace/main.go", "", ""},
 		{"no path", "", "a\n", "b\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/siempack"
 )
@@ -56,7 +55,7 @@ func inputSnippetFromFS(fsys fs.FS, logPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("elastic pack asset %q: %w", "pack/filebeat.yml.tmpl", err)
 	}
-	return strings.ReplaceAll(content, "{{LOG_PATH}}", logPath), nil
+	return siempack.RenderLogPath("filebeat.yml", content, logPath), nil
 }
 
 // standaloneAgentConfigFromFS renders the elastic-agent standalone config using the supplied FS.
@@ -68,7 +67,7 @@ func standaloneAgentConfigFromFS(fsys fs.FS, logPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("elastic pack asset %q: %w", "pack/elastic-agent-standalone.yml.tmpl", err)
 	}
-	return strings.ReplaceAll(content, "{{LOG_PATH}}", logPath), nil
+	return siempack.RenderLogPath("elastic-agent-standalone.yml", content, logPath), nil
 }
 
 // filesFromFS builds the full file list from the supplied FS, propagating any

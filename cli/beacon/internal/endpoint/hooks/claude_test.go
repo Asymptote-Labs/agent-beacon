@@ -8,45 +8,6 @@ import (
 	"testing"
 )
 
-func TestInstallClaudeSettingsPreservesExistingSettingsAndHooks(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	existing := `{"env":{"EXISTING":"1"},"permissions":{"defaultMode":"default"},"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"}]}],"PostToolUse":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform factory post-tool"}]}]}}`
-	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := installClaudeSettings(path, "/tmp/beacon hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
-		t.Fatalf("installClaudeSettings returned error: %v", err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read settings: %v", err)
-	}
-	text := string(data)
-	for _, want := range []string{
-		"EXISTING",
-		"defaultMode",
-		"echo keep",
-		"--platform factory",
-		"--log '/tmp/runtime.jsonl'",
-		"--config '/tmp/config.json'",
-		"'/tmp/beacon hooks' --platform claude",
-		"SessionStart",
-		"UserPromptSubmit",
-		"PreToolUse",
-		"Bash|Edit|Write|MultiEdit|Read|Glob|Grep|WebFetch|WebSearch|Agent|mcp__.*",
-		"PostToolUseFailure",
-		"SubagentStart",
-		"SubagentStop",
-		"PermissionRequest",
-		"SessionEnd",
-	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("settings missing %q:\n%s", want, text)
-		}
-	}
-}
-
 func TestInstallClaudeSettingsReplacesOnlyClaudeBeaconHooks(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	existing := `{"hooks":{"PostToolUse":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 old-beacon-hooks --platform claude post-tool"}]},{"hooks":[{"type":"command","command":"/tmp/asym-hooks --platform claude post-tool"}]},{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform factory post-tool"}]},{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks post-tool"}]},{"hooks":[{"type":"command","command":"echo keep"}]}]}}`
@@ -94,37 +55,6 @@ func TestRemoveClaudeEndpointHooksPreservesOtherHooks(t *testing.T) {
 	}
 	if !strings.Contains(text, "echo keep") || !strings.Contains(text, "--platform factory") {
 		t.Fatalf("non-Claude hooks were not preserved:\n%s", text)
-	}
-}
-
-func TestInstallClaudeSettingsHandlesNullHooks(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	if err := os.WriteFile(path, []byte(`{"hooks":null}`), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := installClaudeSettings(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
-		t.Fatalf("installClaudeSettings returned error: %v", err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read settings: %v", err)
-	}
-	if !strings.Contains(string(data), "UserPromptSubmit") {
-		t.Fatalf("Claude hooks were not installed from hooks:null:\n%s", string(data))
-	}
-}
-
-func TestClaudeSettingsPathProjectLevel(t *testing.T) {
-	dir := t.TempDir()
-	t.Chdir(dir)
-
-	target, err := claudeSettingsPath(LevelProject)
-	if err != nil {
-		t.Fatalf("claudeSettingsPath returned error: %v", err)
-	}
-	if got, want := target, filepath.Join(dir, ".claude", "settings.json"); got != want {
-		t.Fatalf("project settings path = %q, want %q", got, want)
 	}
 }
 

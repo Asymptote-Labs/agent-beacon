@@ -1,32 +1,23 @@
 package cmd
 
 import (
-	"io"
-	"os"
+	"strings"
 	"testing"
 )
 
-// Old Codex hooks call this subcommand on every prompt. It must answer and do nothing else: no
-// subprocess, no file, however the environment is set.
-func TestInventoryHeartbeatSubcommandIsANoOp(t *testing.T) {
+// Codex hooks installed before inventory became a scheduled job still run
+// `beacon-hooks --platform codex inventory-heartbeat` on every session start and prompt, and only a
+// hooks reinstall rewrites them. The command must keep parsing and exit 0 with the empty response,
+// writing nothing: an unknown subcommand would fail every one of those hooks. Regression for
+// 5e6bbec9 ("keep the old hook commands parsing").
+func TestRetiredInventoryHeartbeatStillAnswersOldCodexHooks(t *testing.T) {
 	t.Setenv("BEACON_ENDPOINT_CLI", "/definitely/not/a/binary")
-	t.Setenv("BEACON_ENDPOINT_LOG", t.TempDir()+"/runtime.jsonl")
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
+	logPath, stdout := runHookProcess(t, map[string]interface{}{"session_id": "s1", "cwd": "/repo"},
+		"--platform", "codex", "inventory-heartbeat")
+	if got := strings.TrimSpace(string(stdout)); got != "{}" {
+		t.Fatalf("stdout = %q, want the empty response", got)
 	}
-	oldStdin := os.Stdin
-	os.Stdin = r
-	t.Cleanup(func() { os.Stdin = oldStdin })
-	_, _ = io.WriteString(w, `{"session_id":"s1","cwd":"/repo"}`)
-	_ = w.Close()
-
-	runInventoryHeartbeat(inventoryHeartbeatCmd, nil)
-
-	if entries, _ := os.ReadDir(t.TempDir()); len(entries) != 0 {
-		t.Fatalf("no-op must not write files: %v", entries)
-	}
-	if !inventoryHeartbeatCmd.Hidden {
-		t.Fatal("the retired subcommand should be hidden from help")
+	if events := endpointEventsIfAny(t, logPath); len(events) != 0 {
+		t.Fatalf("the retired command wrote %d events: %#v", len(events), events)
 	}
 }

@@ -137,14 +137,42 @@ func opencodePluginPath(level Level) (string, error) {
 	return filepath.Join(dir, opencodePluginFileName), nil
 }
 
+// OpenCodeConfigDir returns OpenCode's global config directory for the given home directory.
+//
+// OpenCode roots it at `$XDG_CONFIG_HOME/opencode` and falls back to `~/.config/opencode`
+// (packages/util/src/global-roots.ts: `process.env.XDG_CONFIG_HOME || path.join(home, ".config")`).
+// An empty value falls back and nothing is trimmed; a relative value is resolved against the
+// working directory, so it is made absolute here. The home directory is only needed for the
+// default, so an XDG_CONFIG_HOME override resolves without one.
+//
+// Exported because discovery and the inventory scan report on the same plugin the installer
+// writes and must not rebuild the path themselves.
+func OpenCodeConfigDir(home string) (string, error) {
+	if base := os.Getenv("XDG_CONFIG_HOME"); base != "" {
+		abs, err := filepath.Abs(base)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(abs, "opencode"), nil
+	}
+	if home == "" {
+		return "", fmt.Errorf("home directory is required to resolve opencode's config directory")
+	}
+	return filepath.Join(home, ".config", "opencode"), nil
+}
+
 func opencodePluginDir(level Level) (string, error) {
 	switch level {
 	case "", LevelUser:
 		home, err := os.UserHomeDir()
+		if err != nil && os.Getenv("XDG_CONFIG_HOME") == "" {
+			return "", err
+		}
+		dir, err := OpenCodeConfigDir(home)
 		if err != nil {
 			return "", err
 		}
-		return filepath.Join(home, ".config", "opencode", "plugins"), nil
+		return filepath.Join(dir, "plugins"), nil
 	case LevelProject:
 		cwd, err := os.Getwd()
 		if err != nil {

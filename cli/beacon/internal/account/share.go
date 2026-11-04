@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -24,8 +25,9 @@ import (
 //
 // They authorize with the signed-in CLI token when it carries ScopeTracesWrite, or with a Beacon API
 // key (bcn_api_...) that carries the same scope. Either credential goes only in the Authorization
-// header of these requests, to the base URL it belongs to, and redirects are refused so it can never
-// be resent somewhere else.
+// header of these requests, to the API of the service it belongs to (ShareAPIBaseURL: beacon.sh
+// serves its API from api.beacon.sh), and redirects are refused so it can never be resent somewhere
+// else.
 
 const (
 	// TracesPath is the prefix of the shared-trace write API.
@@ -35,6 +37,11 @@ const (
 	APIKeyEnv = "BEACON_API_KEY"
 	// APIKeyPrefix starts every Beacon API key.
 	APIKeyPrefix = "bcn_api_"
+	// APIURLEnv names the environment variable that says where the shared-trace API is, for a
+	// service whose API is neither at its sign-in URL nor at the host ShareAPIBaseURL knows for it.
+	APIURLEnv = "BEACON_API_URL"
+	// DefaultAPIURL is the API of DefaultBaseURL. The beacon.sh web host does not serve /v1.
+	DefaultAPIURL = "https://api.beacon.sh"
 
 	// ShareMaxBatchBytes bounds one batch body before compression. beacon.sh accepts 8 MiB; the
 	// margin covers the batch envelope and JSON escaping differences.
@@ -159,16 +166,44 @@ func apiKeyCredential(key, baseURL, source, origin string) (ShareCredential, err
 	return ShareCredential{BaseURL: ResolveBaseURL(baseURL), Token: key, Source: source}, nil
 }
 
+// ShareAPIBaseURL is where the shared-trace API of the service at baseURL lives: the URL in
+// BEACON_API_URL when it is set, https://api.beacon.sh for beacon.sh (whose web host answers /v1 with
+// its own HTML 404 page), and otherwise baseURL itself, as a self-hosted or local service serves
+// both. getenv may be nil.
+func ShareAPIBaseURL(baseURL string, getenv func(string) string) string {
+	if getenv != nil {
+		if override := strings.TrimRight(strings.TrimSpace(getenv(APIURLEnv)), "/"); override != "" {
+			return override
+		}
+	}
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if u, err := url.Parse(base); err == nil && strings.EqualFold(u.Scheme, "https") {
+		switch strings.ToLower(u.Hostname()) {
+		case "beacon.sh", "www.beacon.sh":
+			return DefaultAPIURL
+		}
+	}
+	return base
+}
+
 // ShareClient talks to the shared-trace write API.
 type ShareClient struct {
 	cred ShareCredential
-	http *http.Client
+	// apiBase is where the requests go: ShareAPIBaseURL of the credential's base URL, which stays
+	// the service that issued the credential.
+	apiBase string
+	http    *http.Client
 }
 
-// NewShareClient checks the credential and its base URL before anything is sent. client may be nil.
+// NewShareClient checks the credential, its base URL and the API it is sent to before anything is
+// sent. client may be nil.
 func NewShareClient(cred ShareCredential, client *http.Client) (*ShareClient, error) {
 	if !secureURL(cred.BaseURL) {
 		return nil, errors.New("refusing to send the Beacon credential to an insecure URL")
+	}
+	apiBase := ShareAPIBaseURL(cred.BaseURL, os.Getenv)
+	if !secureURL(apiBase) {
+		return nil, fmt.Errorf("refusing to send the Beacon credential to an insecure URL (%s)", APIURLEnv)
 	}
 	if strings.TrimSpace(cred.Token) == "" {
 		return nil, ErrNoShareCredential
@@ -179,11 +214,11 @@ func NewShareClient(cred ShareCredential, client *http.Client) (*ShareClient, er
 	// A redirect would resend the credential somewhere else.
 	clientCopy := *client
 	clientCopy.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &ShareClient{cred: cred, http: &clientCopy}, nil
+	return &ShareClient{cred: cred, apiBase: apiBase, http: &clientCopy}, nil
 }
 
-// BaseURL is the service the client sends to.
-func (c *ShareClient) BaseURL() string { return c.cred.BaseURL }
+// BaseURL is the API the client sends its requests to (ShareAPIBaseURL).
+func (c *ShareClient) BaseURL() string { return c.apiBase }
 
 // PutTrace creates or updates a trace's summary and sharing settings.
 func (c *ShareClient) PutTrace(ctx context.Context, externalID string, trace asymptoteobserve.ShareTraceV1) (*asymptoteobserve.ShareTraceResultV1, error) {
@@ -263,7 +298,9 @@ func (c *ShareClient) GetTrace(ctx context.Context, externalID string) (*asympto
 	if err != nil {
 		return nil, false, err
 	}
-	if status == http.StatusNotFound {
+	// Only the API's own JSON answer means the trace is not there yet. A 404 page from a host with no
+	// trace API is an error: creating the trace there next would fail the same way.
+	if status == http.StatusNotFound && jsonBody(payload) {
 		return nil, false, nil
 	}
 	if err := c.statusError("read shared trace", status, payload); err != nil {
@@ -332,7 +369,7 @@ func (c *ShareClient) do(ctx context.Context, method, externalID, suffix string,
 	if !asymptoteobserve.ValidShareExternalID(externalID) {
 		return nil, 0, fmt.Errorf("invalid external id %q", externalID)
 	}
-	target := c.cred.BaseURL + TracesPath + url.PathEscape(externalID) + suffix
+	target := c.apiBase + TracesPath + url.PathEscape(externalID) + suffix
 	var reader io.Reader
 	encoding := ""
 	if body != nil {
@@ -366,7 +403,7 @@ func (c *ShareClient) do(ctx context.Context, method, externalID, suffix string,
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, 0, fmt.Errorf("%s %s: %w", method, c.cred.BaseURL+TracesPath+"…", scrubURLError(err))
+		return nil, 0, fmt.Errorf("%s %s: %w", method, c.apiBase+TracesPath+"…", scrubURLError(err))
 	}
 	defer resp.Body.Close()
 	payload, err := io.ReadAll(io.LimitReader(resp.Body, shareMaxResponseBytes))
@@ -374,7 +411,7 @@ func (c *ShareClient) do(ctx context.Context, method, externalID, suffix string,
 		return nil, 0, err
 	}
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-		return nil, resp.StatusCode, fmt.Errorf("beacon.sh answered with a redirect (HTTP %d); not following it with the credential", resp.StatusCode)
+		return nil, resp.StatusCode, fmt.Errorf("%s answered with a redirect (HTTP %d); not following it with the credential", c.apiBase, resp.StatusCode)
 	}
 	return payload, resp.StatusCode, nil
 }
@@ -412,9 +449,19 @@ func (c *ShareClient) statusError(what string, status int, payload []byte) error
 		}
 		return fmt.Errorf("the %s cannot share traces: it needs the %s scope (%s)", c.cred, ScopeTracesWrite, detail)
 	case http.StatusNotFound:
-		return fmt.Errorf("%s: the trace does not exist on %s (%s)", what, c.cred.BaseURL, detail)
+		if !jsonBody(payload) {
+			return fmt.Errorf("%s: %s has no trace API (HTTP 404: endpoint not found)", what, c.apiBase)
+		}
+		return fmt.Errorf("%s: the trace does not exist on %s (%s)", what, c.apiBase, detail)
 	case http.StatusRequestEntityTooLarge:
 		return fmt.Errorf("%s: beacon.sh refused the request as too large (%s)", what, detail)
 	}
 	return fmt.Errorf("%s: %s", what, detail)
+}
+
+// jsonBody reports whether a response body is JSON, as every answer of the trace API is. A web
+// host's 404 page is HTML.
+func jsonBody(payload []byte) bool {
+	payload = bytes.TrimSpace(payload)
+	return len(payload) > 0 && json.Valid(payload)
 }

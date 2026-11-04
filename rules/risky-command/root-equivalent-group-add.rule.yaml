@@ -1,13 +1,13 @@
 id: root-equivalent-group-add
-version: 1
+version: 2
 title: User added to a root-equivalent or admin group
 description: >
   A command adds an account to a group that is root-equivalent or grants
   administrative escalation — docker, lxd, libvirt, kvm, incus, podman (container/VM
   escape to the host) or sudo, wheel, admin, adm, root (sudo becomes available). This
-  is done with usermod -aG, gpasswd -a, adduser <user> <group>, or by writing the
-  group into /etc/group. Membership in any of these is a standing path to root.
-  The group token is required so unrelated usermod calls (e.g. changing a shell) do
+  is done with usermod -aG (or --append --groups), gpasswd -a (or --add),
+  adduser <user> <group>, or by writing the group into /etc/group. Membership in any
+  of these is a standing path to root. The group token is required so unrelated usermod calls (e.g. changing a shell) do
   not match.
 severity: high
 status: stable
@@ -19,8 +19,7 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" &&
-  e.command.command.matches("(?i)(^|[;&|]\\s*)(sudo\\s+)?(usermod\\s+(-[a-z]+\\s+)*-a?G\\b|gpasswd\\s+(-[a-z]+\\s+)*-a\\b|adduser\\b|addgroup\\b)") &&
-  e.command.command.matches("(?i)(^|[\\s,=])(docker|lxd|libvirt|kvm|incus|podman|sudo|wheel|admin|adm|root)(\\s|,|$)")
+  e.command.command.matches("(?i)(^|[;&|]\\s*)(sudo\\s+)?(usermod\\s+(--?[a-z]+\\s+)*(-a?G|--groups)(\\s+|=)([a-z0-9_.-]+,)*(docker|lxd|libvirt|kvm|incus|podman|sudo|wheel|admin|adm|root)(,|\\s|$)|gpasswd\\s+(--?[a-z]+\\s+)*(-a|--add)\\s+\\S+\\s+(docker|lxd|libvirt|kvm|incus|podman|sudo|wheel|admin|adm|root)(\\s|$)|(adduser|addgroup)\\s+(--?[a-z-]+\\s+)*[^\\s-]\\S*\\s+(docker|lxd|libvirt|kvm|incus|podman|sudo|wheel|admin|adm|root)(\\s|$))")
 
 emit:
   reason: "Account added to a root-equivalent or admin group (standing escalation to root)"
@@ -50,11 +49,41 @@ tests:
       - event: { action: command.executed }
         command: { command: "adduser worker lxd" }
         session: { id: s1 }
+  - name: usermod_long_options_docker
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo usermod --append --groups docker agent" }
+        session: { id: s1 }
+  - name: gpasswd_long_add_sudo
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "gpasswd --add ci sudo" }
+        session: { id: s1 }
+  - name: usermod_long_options_benign_group
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "usermod --append --groups www-data deploy" }
+        session: { id: s1 }
   - name: usermod_nonprivileged_group
     verdict: no_match
     events:
       - event: { action: command.executed }
         command: { command: "usermod -aG www-data deploy" }
+        session: { id: s1 }
+  - name: sudo_usermod_nonprivileged_group
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo usermod -aG video agent" }
+        session: { id: s1 }
+  - name: sudo_adduser_new_account
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "sudo adduser alice" }
         session: { id: s1 }
   - name: usermod_change_shell
     verdict: no_match

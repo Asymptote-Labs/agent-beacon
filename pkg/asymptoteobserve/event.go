@@ -78,6 +78,9 @@ type HarnessInfo struct {
 	Version        string `json:"version,omitempty"`
 	ExecutablePath string `json:"executable_path,omitempty"`
 	ConfigPath     string `json:"config_path,omitempty"`
+	// Profile names the runtime profile the event came from, for runtimes that keep separate
+	// configuration and state per profile on one host.
+	Profile string `json:"profile,omitempty"`
 	// CollectionMethod records the mechanism that carried this event off the runtime.
 	// See the CollectionMethod* constants in provenance.go. Empty for events Beacon emits
 	// about itself, which no harness collected.
@@ -161,9 +164,11 @@ type FileInfo struct {
 	Language  string `json:"language,omitempty"`
 	DiffHash  string `json:"diff_hash,omitempty"`
 	DiffBytes int    `json:"diff_bytes,omitempty"`
-	// Diff is the retained unified diff for the edit. DiffHash and DiffBytes
-	// describe the original diff, so they stay stable when the stored text is
-	// redacted or truncated; the accompanying Content marker says which happened.
+	// Diff is the retained unified diff for the edit. DiffHash is the hash of the
+	// whole diff after secret redaction and DiffBytes the original diff's size
+	// (RetainedDiff), so both stay stable when the stored copy is truncated and
+	// the hash never confirms a guess at a secret the stored diff no longer
+	// shows; the accompanying Content marker says whether either happened.
 	//
 	// Declared here because the hook adapter has always written it. It assembles
 	// events as maps, so `file.diff` reached the log while this struct -- what the
@@ -182,6 +187,44 @@ type CommandInfo struct {
 	// reports it. Same history as FileInfo.Diff: Cursor's afterShellExecution hook
 	// has always written `command.output`, and this struct has always dropped it.
 	Output string `json:"output,omitempty"`
+	// ParsedCommands is Command read as a bash command line, for the threat-rules engine only:
+	// the commands it runs, so a rule can tell `curl ... | sudo bash` from the same text inside
+	// a quoted string or a here-document. It is never written or read; the engine fills it on
+	// its own copy of each event, as it does GenAIToolCallInfo.ResultText. See
+	// threatrules.ParsedCommands.
+	ParsedCommands []ParsedCommand `json:"-" cel:"parsed_commands"`
+}
+
+// ParsedCommand is one command of a command line, as the threat-rules engine presents it to
+// rules (e.command.parsed_commands). It is never serialized; the cel tags are the names a rule
+// uses. threatrules.ParsedCommands says how each field is derived.
+type ParsedCommand struct {
+	// Name is the base name of the command after its wrappers (sudo, env, exec, ...): rm for
+	// `sudo /bin/rm -rf x`. Empty when it is unknown.
+	Name string `cel:"name"`
+	// Argv are the command's words as the shell passes them, wrappers included; a word whose
+	// value the parse cannot know (a parameter, substitution, glob or leading tilde) is "".
+	Argv []string `cel:"argv"`
+	// ArgvRaw are the same words as written, quotes and expansions included ($HOME, /*).
+	ArgvRaw []string `cel:"argv_raw"`
+	// Env are the NAME=value assignments before the command; an unknown value is "".
+	Env map[string]string `cel:"env"`
+	// FileEffects are the files the command evidently writes, and how.
+	FileEffects []ParsedFileEffect `cel:"file_effects"`
+	// Pipeline identifies the command's pipeline: the stages of one pipeline share it. Stage
+	// is the 0-based position in it (curl ... | sh: sh is stage 1).
+	Pipeline int `cel:"pipeline"`
+	Stage    int `cel:"stage"`
+	// Nested is true for a command inside a command or process substitution, or inside the
+	// script a shell runs with -c.
+	Nested bool `cel:"nested"`
+}
+
+// ParsedFileEffect is a file a parsed command evidently writes. Op is one of write, append,
+// touch, truncate, edit, delete, move_from, move_to, link.
+type ParsedFileEffect struct {
+	Path string `cel:"path"`
+	Op   string `cel:"op"`
 }
 
 type MCPMethodInfo struct {
@@ -267,9 +310,11 @@ const (
 	SystemContextSourceTranscript   = "transcript"
 )
 
-// ContentInfo marks how an event's retained raw content was handled. Hash and
-// Bytes describe the original content before redaction/truncation, so events
-// keep a stable identifier and size even when the stored text was cut down.
+// ContentInfo marks how an event's retained raw content was handled. Hash is of
+// the whole content after secret redaction and Bytes the original content's
+// size, both before truncation, so events keep a stable identifier and size
+// even when the stored text was cut down, and the hash confirms nothing
+// redaction removed.
 type ContentInfo struct {
 	Retention string `json:"retention"`
 	Included  bool   `json:"included"`

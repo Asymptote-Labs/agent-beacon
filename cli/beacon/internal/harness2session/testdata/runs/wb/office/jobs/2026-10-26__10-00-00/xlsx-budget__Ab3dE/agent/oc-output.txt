@@ -1,0 +1,5 @@
+Performing one time database migration, may take a few minutes...
+sqlite-migration:done
+{"type":"step_start","timestamp":1793006000000,"sessionID":"ses_wb0001","part":{"id":"p1","sessionID":"ses_wb0001","messageID":"m1","type":"step-start"}}
+{"type":"text","timestamp":1793006001000,"sessionID":"ses_wb0001","part":{"id":"p2","sessionID":"ses_wb0001","messageID":"m1","type":"text","text":"Done.","time":{"start":1793006000500,"end":1793006001000}}}
+{"type":"error","timestamp":1793006002000,"sessionID":"ses_wb0001","error":{"name":"APIError","data":{"message":"rate limited","isRetryable":true}}}

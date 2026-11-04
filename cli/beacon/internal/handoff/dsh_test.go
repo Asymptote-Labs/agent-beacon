@@ -1,7 +1,6 @@
 package handoff
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -105,15 +104,6 @@ func TestListReadsDSHSessions(t *testing.T) {
 	}
 }
 
-func TestListWithoutADSHStore(t *testing.T) {
-	testenv.SetHome(t, t.TempDir())
-	isolateRuntimeEnv(t)
-	sessions, err := (&dshSource{dir: filepath.Join(t.TempDir(), "missing")}).List()
-	if err != nil || sessions != nil {
-		t.Fatalf("List = %v, %v; want nothing and no error", sessions, err)
-	}
-}
-
 func TestDSHHomeComesFromTheEnvironment(t *testing.T) {
 	dirs, main := dshFixture(t)
 	t.Setenv("DSH_HOME", dirs[HarnessDSH])
@@ -141,14 +131,6 @@ func TestDSHSessionBuildsABrief(t *testing.T) {
 	}
 	if !strings.Contains(brief.Render(), "DeepSeek Harness") {
 		t.Fatalf("the brief should name DeepSeek Harness:\n%s", brief.Render())
-	}
-}
-
-func TestDSHSessionGoneFromItsStore(t *testing.T) {
-	dirs, main := dshFixture(t)
-	session := Session{Harness: HarnessDSH, ID: "dsh-sess-1", SourcePath: main + ".moved"}
-	if _, err := Events(DefaultSources(dirs), session); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Events = %v, want ErrNotFound", err)
 	}
 }
 

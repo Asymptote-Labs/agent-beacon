@@ -5,7 +5,7 @@
 // endpoint/user/timestamp itself, so we MUST NOT emit those. We emit the
 // beacon.* + gen_ai.* attributes that converter.go maps into the Event schema.
 
-import type { ChatTurn, Retention, ToolCall } from './types.js';
+import type { ChatTurn, Msg, Retention, ToolCall } from './types.js';
 import {
   type KeyValue,
   type LogRecord,
@@ -35,25 +35,33 @@ export interface NormalizedTurn {
 
 const encoder = new TextEncoder();
 
-/** Truncate a string to a UTF-8 byte budget; returns [text, wasTruncated]. */
-function capBytes(text: string, max = MAX_FIELD_BYTES): [string, boolean] {
-  if (encoder.encode(text).length <= max) return [text, false];
+const utf8Bytes = (text: string) => encoder.encode(text).length;
+const jsonBytes = (value: unknown) => encoder.encode(JSON.stringify(value)).length;
+
+/** Truncate a string to a byte budget, as UTF-8 or as measured by `size`,
+ *  never splitting a surrogate pair; returns [text, wasTruncated]. */
+function capBytes(text: string, max = MAX_FIELD_BYTES, size = utf8Bytes): [string, boolean] {
+  if (size(text) <= max) return [text, false];
+  const prefix = (end: number) =>
+    text.slice(0, /[\uD800-\uDBFF]/.test(text[end - 1] ?? '') ? end - 1 : end);
   // Binary-search the largest prefix that fits (chars ≠ bytes for multibyte).
   let lo = 0;
   let hi = text.length;
   while (lo < hi) {
     const mid = (lo + hi + 1) >> 1;
-    if (encoder.encode(text.slice(0, mid)).length <= max) lo = mid;
+    if (size(prefix(mid)) <= max) lo = mid;
     else hi = mid - 1;
   }
-  return [text.slice(0, lo), true];
+  return [prefix(lo), true];
 }
 
 /** Light client-side scrubber for retention=redacted (defense in depth; the
  *  collector also redacts). Masks emails and long token-like strings. */
 function scrub(text: string): string {
   return text
-    .replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, '[email]')
+    // The lookbehind starts a match only where a run of these characters begins; without it, a
+    // long run with no '@' (a base64 blob, say) is rescanned from every position, quadratically.
+    .replace(/(?<![\w.+-])[\w.+-]+@[\w-]+\.[\w.-]+/g, '[email]')
     .replace(/\b(sk|pk|ghp|xox[baprs]|AKIA)[A-Za-z0-9_-]{12,}\b/g, '[token]');
 }
 
@@ -69,6 +77,29 @@ function shapeText(text: string, retention: Retention): Shaped | null {
   const shown = retention === 'redacted' ? scrub(text) : text;
   const [capped, truncated] = capBytes(shown);
   return { text: capped, truncated };
+}
+
+/** Retention and cap for gen_ai.*.messages, as semconv JSON. The budget is the
+ *  serialized value, so a capped field still parses: messages are kept in order
+ *  and the first that does not fit is cut to the longest text that does. */
+function shapeMessages(messages: Msg[], retention: Retention): Shaped | null {
+  if (retention === 'metadata') return null;
+  const out: { role: Msg['role']; parts: { type: 'text'; content: string }[] }[] = [];
+  let bytes = 2; // array brackets
+  for (const { role, text } of messages) {
+    const content = retention === 'redacted' ? scrub(text) : text;
+    const message = { role, parts: [{ type: 'text' as const, content }] };
+    const size = jsonBytes(message) + (out.length ? 1 : 0);
+    if (bytes + size <= MAX_FIELD_BYTES) {
+      out.push(message);
+      bytes += size;
+      continue;
+    }
+    const room = jsonBytes(content) - (bytes + size - MAX_FIELD_BYTES);
+    if (room >= 2) out.push({ role, parts: [{ type: 'text', content: capBytes(content, room, jsonBytes)[0] }] });
+    return { text: JSON.stringify(out), truncated: true };
+  }
+  return { text: JSON.stringify(out), truncated: false };
 }
 
 /**
@@ -115,9 +146,11 @@ export function normalizeTurn(
   // converter lifts the text into the top-level Event.prompt.text field (it
   // only does so for prompt-category events). Without this, the prompt stays
   // buried in raw.attributes and never reaches the queryable prompt.text column.
+  // A turn with no prompt (a regenerated answer) gets no prompt record.
+  const hasPrompt = turn.promptText !== '' || turn.inputMessages.length > 0;
   const prompt = shapeText(turn.promptText, retention);
-  const inputMsgs = shapeText(JSON.stringify(turn.inputMessages), retention);
-  if (prompt || inputMsgs) {
+  const inputMsgs = shapeMessages(turn.inputMessages, retention);
+  if (hasPrompt && (prompt || inputMsgs)) {
     const attrs = base('prompt.submitted');
     if (turn.requestModel) attrs.push(str('gen_ai.request.model', turn.requestModel));
     let truncated = false;
@@ -182,7 +215,7 @@ export function normalizeTurn(
     respAttrs.push(int('gen_ai.usage.cache_read.input_tokens', turn.usage.cacheReadInputTokens));
 
   let respTrunc = false;
-  const outputMsgs = shapeText(JSON.stringify(turn.outputMessages), retention);
+  const outputMsgs = shapeMessages(turn.outputMessages, retention);
   if (outputMsgs) {
     respAttrs.push(str('gen_ai.output.messages', outputMsgs.text));
     respTrunc ||= outputMsgs.truncated;
@@ -239,12 +272,18 @@ function toolRecord(
     str('gen_ai.tool.call.id', tool.id),
     str('gen_ai.tool.call.name', tool.name),
   ];
-  const args = shapeText(stringify(tool.arguments), retention);
+  // A call whose input the site does not expose has no arguments, not "null".
+  const args = tool.arguments === undefined ? null : shapeText(stringify(tool.arguments), retention);
+  let truncated = args?.truncated ?? false;
   if (args) attrs.push(str('gen_ai.tool.call.arguments', args.text));
   if (tool.result !== undefined) {
     const res = shapeText(stringify(tool.result), retention);
-    if (res) attrs.push(str('gen_ai.tool.call.result', res.text));
+    if (res) {
+      attrs.push(str('gen_ai.tool.call.result', res.text));
+      truncated ||= res.truncated;
+    }
   }
+  if (truncated) attrs.push(bool('beacon.field_truncated', true));
   return {
     timeUnixNano: when,
     severityNumber: severityNumber('info'),

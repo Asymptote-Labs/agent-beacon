@@ -14,6 +14,8 @@ BEACON_SPLUNK_SOURCE="${BEACON_SPLUNK_SOURCE:-}" \
 BEACON_SPLUNK_SOURCETYPE="${BEACON_SPLUNK_SOURCETYPE:-}" \
 BEACON_SPLUNK_INSECURE_SKIP_VERIFY="${BEACON_SPLUNK_INSECURE_SKIP_VERIFY:-0}" \
 BEACON_SPLUNK_CA_FILE="${BEACON_SPLUNK_CA_FILE:-}" \
+BEACON_LOG_ACCESS="${BEACON_LOG_ACCESS:-}" \
+BEACON_SESSION_SYNC="${BEACON_SESSION_SYNC:-}" \
 BEACON_NO_START=1 \
   /opt/beacon/scripts/install-endpoint.sh
 
@@ -129,6 +131,10 @@ if command -v launchctl >/dev/null 2>&1; then
   # Non-fatal: the endpoint is installed and collecting either way.
   "${BEACON_BIN:-/opt/beacon/bin/beacon}" endpoint inventory install-daemon --system || \
     echo "Warning: scheduled inventory job not configured (endpoint is installed and running)" >&2
+  # The scheduled session sync is opt-in (`session_sync.enabled`, set with --session-sync). This
+  # loads it when on and removes it when off, so an upgrade keeps whatever the endpoint chose.
+  "${BEACON_BIN:-/opt/beacon/bin/beacon}" endpoint sessions install-daemon --system || \
+    echo "Warning: scheduled session sync job not configured (endpoint is installed and running)" >&2
   # A connected endpoint's Beacon Cloud forwarder config is re-rendered from this version's pack,
   # validated, and swapped in with a forwarder restart only when it changed. The install above ran
   # with --no-start, so it left this to the package. Never enrolls or touches the device key, and

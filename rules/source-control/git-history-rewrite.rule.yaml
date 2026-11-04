@@ -1,5 +1,5 @@
 id: git-history-rewrite
-version: 1
+version: 2
 title: Git history rewritten (filter-branch / filter-repo / interactive rebase)
 description: >
   A history-rewriting git subcommand was invoked: filter-branch,
@@ -22,10 +22,10 @@ taxonomy:
 
 match: >
   e.event.action == "command.executed" && (
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*git\\b[^;&|]*\\bfilter-(branch|repo)\\b") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*git\\b[^;&|]*\\brebase\\b[^;&|]*(\\s-i\\b|\\s--interactive\\b)") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*git\\b[^;&|]*\\bcommit\\b[^;&|]*\\s--amend\\b") ||
-    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*git\\b[^;&|]*\\breplace\\b\\s+(--edit|--graft|--convert-forkpoint)")
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\bfilter-(branch|repo)\\b") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\brebase\\b[^;&|]*(\\s-i\\b|\\s--interactive\\b)") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\bcommit\\b[^;&|]*\\s--amend\\b") ||
+    e.command.command.matches("(?i)(^|[;&|]\\s*|\\bsudo\\s+|\\bgit\\s+)\\s*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^\\s;&|]*)\\s+)*git\\b[^;&|]*\\breplace\\b\\s+(--edit|--graft|--convert-forkpoint)")
   )
 
 emit:
@@ -67,6 +67,24 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "git replace --edit oldsha newsha" }
+        session: { id: s1 }
+  - name: filter_branch_env_prefix
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch --index-filter 'git rm --cached -q secrets.env' HEAD" }
+        session: { id: s1 }
+  - name: interactive_rebase_sequence_editor
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "GIT_SEQUENCE_EDITOR=\"sed -i -e 's/^pick/squash/'\" git rebase -i HEAD~3" }
+        session: { id: s1 }
+  - name: env_prefix_ordinary_commit
+    verdict: no_match
+    events:
+      - event: { action: command.executed }
+        command: { command: "GIT_AUTHOR_DATE=now git commit -m 'add feature'" }
         session: { id: s1 }
   - name: ordinary_rebase
     verdict: no_match

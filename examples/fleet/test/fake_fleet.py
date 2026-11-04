@@ -33,6 +33,7 @@ import json
 import os
 import re
 import sys
+import socketserver
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -302,6 +303,15 @@ class Handler(BaseHTTPRequestHandler):
         self.handle_any("PATCH")
 
 
+class Server(ThreadingHTTPServer):
+    # HTTPServer.server_bind sets server_name with socket.getfqdn, a reverse DNS lookup of
+    # 127.0.0.1. macOS sends that to the network resolver, and on CI runners it stalls for many
+    # seconds per start. Nothing here reads server_name, so skip the lookup.
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--fixture", required=True)
@@ -310,7 +320,7 @@ def main():
     ap.add_argument("--pkg", required=True)
     args = ap.parse_args()
     fixture = json.load(open(args.fixture))
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = Server(("127.0.0.1", 0), Handler)
     server.state = State(fixture, args.pkg)
     server.log_path = args.log
     open(args.log, "a").close()

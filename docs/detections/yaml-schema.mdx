@@ -7,7 +7,7 @@ description: "Human-readable reference for Beacon threat-rule YAML files"
 
 Beacon detection rules are YAML documents ending in `.rule.yaml`. Each rule describes one security condition over Beacon endpoint events and includes enough metadata and tests for the rule to be validated before it runs.
 
-The structural schema is the `threat-rules/v1.1` JSON Schema in the Agent Beacon repository. The runtime engine also compiles CEL expressions and checks rule fixtures, because those checks cannot be fully represented by JSON Schema alone.
+The structural schema is the `threat-rules/v1.2` JSON Schema in the Agent Beacon repository. The runtime engine also compiles CEL expressions and checks rule fixtures, because those checks cannot be fully represented by JSON Schema alone.
 
 ## Minimal rule
 
@@ -45,7 +45,7 @@ tests:
 | `status` | Yes | One of `experimental`, `stable`, or `deprecated`. |
 | `posture` | Yes | `detect` for observe-only rules or `enforce-capable` for rules designed to support enforcement. |
 | `taxonomy` | No | External references such as OWASP, MITRE ATLAS, or CVEs. |
-| `spec` | No | Minimum spec version the rule needs, such as `threat-rules/v1.1`. Omit it unless the rule uses a newer feature. Required for `correlation.order`. |
+| `spec` | No | Minimum spec version the rule needs, such as `threat-rules/v1.1`. Omit it unless the rule uses a newer feature. Required for `correlation.order` (v1.1) and `e.command.parsed_commands` (v1.2). |
 | `match` | One of `match` or `correlation` | CEL boolean expression for a single event. |
 | `correlation` | One of `match` or `correlation` | Ordered multi-event sequence definition. |
 | `emit.reason` | Yes | Human-readable finding reason. |
@@ -142,6 +142,7 @@ CEL expressions use `e.<field>` paths that match the Beacon event schema. Common
 | --- | --- |
 | `e.event.action` | Match the normalized event action. |
 | `e.command.command` | Match shell or process command text. |
+| `e.command.parsed_commands` | Match the commands a command line runs rather than its text, so a pattern inside a quoted string or a here-document does not count: `e.command.parsed_commands.exists(c, c.name == "rm" && c.argv.exists(a, a == "/"))`. Each entry has `name`, `argv`, `argv_raw`, `env`, `file_effects`, `pipeline`, `stage` and `nested`. Derived by the engine from `command.command` read as bash; empty when it does not parse, so keep a `command.command` fallback. Requires `spec: threat-rules/v1.2`. |
 | `e.file.path` | Match file paths. |
 | `e.prompt.text` | Match prompt text when retained. |
 | `e.gen_ai.tool.call.result_text` | Match what a file read, web fetch, or MCP tool returned, when retained. Derived by the engine, redacted, capped at 4 KB, and empty for other actions. |

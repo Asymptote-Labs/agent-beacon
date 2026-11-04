@@ -31,7 +31,8 @@ const (
 	FileName = "share.json"
 	// MarkerDir is the project directory that holds the marker.
 	MarkerDir = ".beacon"
-	// PathEnv overrides where the user file lives (tests, unusual homes).
+	// PathEnv overrides where the CLI's user file lives (tests, unusual homes). The hooks never
+	// read it: see HookPath.
 	PathEnv = "BEACON_SHARE_SETTINGS_FILE"
 	// SchemaVersion is written into both files.
 	SchemaVersion = "beacon.share_settings.v1"
@@ -112,11 +113,18 @@ func (s *Settings) SetGlobal(state string) {
 	s.Auto.Enabled = state == GlobalOn
 }
 
-// DefaultPath is BEACON_SHARE_SETTINGS_FILE, or ~/.beacon/endpoint/share.json.
+// DefaultPath is the user file the CLI reads and writes: BEACON_SHARE_SETTINGS_FILE, or HookPath.
 func DefaultPath() string {
 	if p := strings.TrimSpace(os.Getenv(PathEnv)); p != "" {
 		return p
 	}
+	return HookPath()
+}
+
+// HookPath is the user file the hooks read: ~/.beacon/endpoint/share.json. It ignores
+// BEACON_SHARE_SETTINGS_FILE, because a hook's environment can come from the repository it runs
+// in, and a repository must never be able to turn auto-share on for itself.
+func HookPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return ""

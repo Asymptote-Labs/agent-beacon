@@ -7,6 +7,7 @@ import { test, expect, seedSettings } from './fixtures.js';
 import { allRecords, flatAttrs, recordByAction } from './helpers/otlp-assertions.js';
 
 const CONV = '11111111-2222-3333-4444-555555555555';
+const BARRIER = '33333333-4444-5555-6666-777777777777';
 const COMPLETION_PATH = '/api/organizations/org-test/chat_conversations/{conv}/completion';
 const FORGED = 'FORGED PROMPT FROM A PAGE SCRIPT';
 
@@ -26,6 +27,13 @@ test('page scripts cannot inject telemetry, and the real turn is still captured'
     name: 'simple-turn',
     conversationId: CONV,
     prompt: 'What is the capital of France?',
+    completionPath: COMPLETION_PATH,
+  });
+  replay.setCase({
+    site: 'claude',
+    name: 'simple-turn',
+    conversationId: BARRIER,
+    prompt: 'A later real turn',
     completionPath: COMPLETION_PATH,
   });
   await seedSettings(serviceWorker, {
@@ -84,8 +92,6 @@ test('page scripts cannot inject telemetry, and the real turn is still captured'
       } catch {
         fingerprintable = false;
       }
-
-      await new Promise((r) => setTimeout(r, 1500));
       return { stolen: stolenOnHello, claimed, fingerprintable };
     },
     { forged: FORGED, conv: CONV, path: COMPLETION_PATH, extensionId },
@@ -95,11 +101,18 @@ test('page scripts cannot inject telemetry, and the real turn is still captured'
   expect(probe.claimed).toBe(false);
   expect(probe.fingerprintable).toBe(false);
 
-  // Give anything forged time to have been delivered, then check none was.
-  await new Promise((r) => setTimeout(r, 1000));
-  const recs = allRecords(mockCollector.received).map((r) => flatAttrs(r.attributes));
-  const prompts = recs.filter((a) => a['beacon.event.action'] === 'prompt.submitted');
-  expect(prompts.map((a) => a['beacon.prompt.text'])).toEqual(['What is the capital of France?']);
+  // A later real turn is a barrier: delivery is ordered, so once it has landed,
+  // anything the forged events had produced would have landed before it.
+  const later = await context.newPage();
+  await later.goto(`https://claude.ai/chat?conv=${BARRIER}`);
+  await expect(later.locator('[data-testid="assistant-message"]')).toHaveAttribute('data-complete', '1');
+  const prompts = () =>
+    allRecords(mockCollector.received)
+      .map((r) => flatAttrs(r.attributes))
+      .filter((a) => a['beacon.event.action'] === 'prompt.submitted')
+      .map((a) => a['beacon.prompt.text']);
+  await expect.poll(prompts, { timeout: 10_000 }).toContain('A later real turn');
+  expect(prompts()).toEqual(['What is the capital of France?', 'A later real turn']);
   expect(JSON.stringify(mockCollector.received)).not.toContain(FORGED);
   expect(JSON.stringify(mockCollector.received)).not.toContain('forged-model');
 });

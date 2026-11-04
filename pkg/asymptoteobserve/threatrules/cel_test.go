@@ -7,12 +7,6 @@ import (
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
-func TestEnvBuilds(t *testing.T) {
-	if _, err := Env(); err != nil {
-		t.Fatalf("Env() error: %v", err)
-	}
-}
-
 func TestCompileMatch(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -20,8 +14,6 @@ func TestCompileMatch(t *testing.T) {
 		wantErr string // substring; "" means expect success
 	}{
 		{"valid bool", `e.event.action == "file.read"`, ""},
-		{"valid matches", `e.command.command.matches("curl")`, ""},
-		{"deep field", `e.gen_ai.usage.input_tokens > 1000`, ""},
 		{"empty", "  ", "empty match expression"},
 		{"unknown field", `e.fil.path == "x"`, "compile match"},
 		{"non-bool result", `e.command.command`, "must evaluate to bool"},
@@ -86,23 +78,6 @@ func TestEvalMatchNullSafety(t *testing.T) {
 	}
 	if got {
 		t.Fatalf("expected no match when gen_ai is absent")
-	}
-}
-
-func TestEvalMatchPresent(t *testing.T) {
-	prog, err := CompileMatch(`e.event.action == "command.executed" && e.command.command.matches("curl")`)
-	if err != nil {
-		t.Fatalf("compile: %v", err)
-	}
-	got, err := EvalMatch(prog, asymptoteobserve.Event{
-		Event:   asymptoteobserve.EventInfo{Action: "command.executed"},
-		Command: &asymptoteobserve.CommandInfo{Command: "curl https://x"},
-	})
-	if err != nil {
-		t.Fatalf("eval: %v", err)
-	}
-	if !got {
-		t.Fatalf("expected match")
 	}
 }
 

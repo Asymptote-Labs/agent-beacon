@@ -5,15 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sqliteuri"
 	"io/fs"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionfs"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/sessionsync"
 
 	_ "modernc.org/sqlite"
 )
@@ -99,7 +99,7 @@ func (s *Store) listGlobalStorage() ([]TraceRef, error) {
 	if !fileExists(s.GlobalDBPath) {
 		return nil, nil
 	}
-	db, err := openSQLiteReadOnly(s.GlobalDBPath)
+	db, err := sessionsync.OpenSQLite(s.GlobalDBPath, "busy_timeout(1000)")
 	if err != nil {
 		return nil, fmt.Errorf("open Cursor global storage: %w", err)
 	}
@@ -268,7 +268,7 @@ func (s *Store) Read(ref TraceRef) ([]Record, error) {
 }
 
 func (s *Store) readGlobalStorage(ref TraceRef) ([]Record, error) {
-	db, err := openSQLiteReadOnly(s.GlobalDBPath)
+	db, err := sessionsync.OpenSQLite(s.GlobalDBPath, "busy_timeout(1000)")
 	if err != nil {
 		return nil, fmt.Errorf("open Cursor global storage: %w", err)
 	}
@@ -426,14 +426,6 @@ func (s *Store) readTranscript(ref TraceRef) ([]Record, error) {
 		}
 	}
 	return out, nil
-}
-
-func openSQLiteReadOnly(path string) (*sql.DB, error) {
-	path, err := sessionfs.SQLitePath(path)
-	if err != nil {
-		return nil, err
-	}
-	return sql.Open("sqlite", sqliteuri.File(path, url.Values{"mode": {"ro"}, "_pragma": {"busy_timeout(1000)"}}))
 }
 
 func fileExists(path string) bool {

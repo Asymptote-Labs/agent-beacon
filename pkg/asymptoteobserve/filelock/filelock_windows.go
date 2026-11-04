@@ -3,6 +3,7 @@
 package filelock
 
 import (
+	"errors"
 	"os"
 
 	"golang.org/x/sys/windows"
@@ -36,13 +37,21 @@ func lockFile(f *os.File, exclusive bool) error {
 		0, lockRangeLow, lockRangeHigh, &overlapped)
 }
 
-// tryLockFile takes an exclusive lock without waiting, reporting ERROR_LOCK_VIOLATION when another
+// tryLockFile takes a lock without waiting, reporting ERROR_LOCK_VIOLATION when another
 // holder has it.
-func tryLockFile(f *os.File) error {
+func tryLockFile(f *os.File, exclusive bool) error {
+	flags := uint32(windows.LOCKFILE_FAIL_IMMEDIATELY)
+	if exclusive {
+		flags |= windows.LOCKFILE_EXCLUSIVE_LOCK
+	}
 	var overlapped windows.Overlapped
 	return windows.LockFileEx(windows.Handle(f.Fd()),
-		windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY,
+		flags,
 		0, lockRangeLow, lockRangeHigh, &overlapped)
+}
+
+func isContention(err error) bool {
+	return errors.Is(err, windows.ERROR_LOCK_VIOLATION)
 }
 
 func unlockFile(f *os.File) error {

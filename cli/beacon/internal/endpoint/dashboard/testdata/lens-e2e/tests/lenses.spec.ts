@@ -124,8 +124,10 @@ test('a lens that throws before rendering falls back to the full session', async
 });
 
 test('a lens that never renders falls back after the timeout', async ({ page }) => {
+  await page.clock.install();
   await openLens(page, 'staller');
   await expect(page.locator('#lens-status')).toBeVisible();
+  await page.clock.runFor(10_000);
   await expectFellBack(page, /did not render within 10 seconds/);
 });
 
@@ -179,7 +181,7 @@ test('clicking the active tab neither reloads the lens nor adds history', async 
   const frame = page.locator('iframe.lens-frame');
   await frame.evaluate((f) => { (f as any).dataset.marker = 'same'; });
   await page.locator('.lens-tab[aria-selected="true"]').click();
-  await page.waitForTimeout(300);
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   expect(await page.evaluate(() => history.length)).toBe(before);
   await expect(page.locator('iframe.lens-frame')).toHaveAttribute('data-marker', 'same');
 });

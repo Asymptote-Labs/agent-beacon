@@ -60,7 +60,12 @@ func installAgentSkillsFromOnboarding(cmd *cobra.Command, decided onboardingOutc
 	if !decided.InstallSkills {
 		return
 	}
-	if err := installAgentSkills(cmd.OutOrStdout()); err != nil {
+	// The wizard's short closing leaves out where each copy went; a failure is still a warning.
+	out := cmd.OutOrStdout()
+	if decided.briefClose() {
+		out = io.Discard
+	}
+	if err := installAgentSkills(out); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "beacon: the Beacon agent skills were not installed (%v). Run `beacon skills install` to try again.\n", err)
 	}
 }
@@ -69,10 +74,13 @@ func installAgentSkillsFromOnboarding(cmd *cobra.Command, decided onboardingOutc
 // `beacon mcp connect --yes` would, once this endpoint forwards to Beacon Cloud. Leaving the
 // row selected on the wizard's agent tools screen is the confirmation connect would otherwise
 // ask for. It writes only the URL (each harness signs in with OAuth on first use) and never a
-// token. A failure is a warning naming the retry.
-func connectCloudMCPFromOnboarding(cmd *cobra.Command) {
-	fmt.Fprintln(cmd.OutOrStdout())
-	err := agentToolsConnectCloudMCP(commandContext(cmd), cmd.OutOrStdout(), cloudMCPRequest{yes: true})
+// token. A failure is a warning naming the retry. brief says the outcome in one line, the last
+// line of the wizard's short closing.
+func connectCloudMCPFromOnboarding(cmd *cobra.Command, brief bool) {
+	if !brief {
+		fmt.Fprintln(cmd.OutOrStdout())
+	}
+	err := agentToolsConnectCloudMCP(commandContext(cmd), cmd.OutOrStdout(), cloudMCPRequest{yes: true, brief: brief})
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "beacon: Beacon Cloud MCP was not registered (%v). Run `beacon mcp connect` to try again.\n", err)
 	}

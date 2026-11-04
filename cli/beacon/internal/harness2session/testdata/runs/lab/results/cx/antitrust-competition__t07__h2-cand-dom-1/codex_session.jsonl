@@ -1,0 +1,11 @@
+{"type":"thread.started","thread_id":"0199f1c2-7d1e-7c41-9a3b-5e2b8d0f6a11"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"reasoning","text":"**Reviewing the data room**"}}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"bash -lc 'ls documents'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"bash -lc 'ls documents'","aggregated_output":"merger_agreement.pdf\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"command_execution","command":"bash -lc 'pdftotext missing.pdf -'","aggregated_output":"I/O Error: Couldn't open file\n","exit_code":1,"status":"failed"}}
+{"type":"item.completed","item":{"id":"item_3","type":"file_change","changes":[{"path":"/work/memo.md","kind":"add"},{"path":"/work/draft.md","kind":"update"},{"path":"/work/scratch.txt","kind":"delete"}],"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_4","type":"mcp_tool_call","server":"docs","tool":"search","arguments":{"q":"HSR filing"},"result":{"content":[{"type":"text","text":"3 hits"}],"structured_content":null},"error":null,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_5","type":"todo_list","items":[{"text":"draft memo","completed":true}]}}
+{"type":"item.completed","item":{"id":"item_6","type":"agent_message","text":"Memo written to memo.md."}}
+{"type":"turn.completed","usage":{"input_tokens":5000,"cached_input_tokens":3000,"output_tokens":700,"reasoning_output_tokens":300}}

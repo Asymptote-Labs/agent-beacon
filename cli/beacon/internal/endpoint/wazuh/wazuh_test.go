@@ -8,12 +8,30 @@ import (
 )
 
 func TestLocalfileSnippetUsesConfiguredPath(t *testing.T) {
-	got := LocalfileSnippet("/tmp/beacon/runtime.jsonl")
+	got, err := LocalfileSnippet("/tmp/beacon/runtime.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(got, "/tmp/beacon/runtime.jsonl") {
 		t.Fatalf("snippet did not include configured path: %s", got)
 	}
 	if strings.Contains(got, "{{LOG_PATH}}") {
 		t.Fatalf("snippet still contains template token: %s", got)
+	}
+}
+
+// Wazuh's XML parser reads a '<' in the location as the start of an element and has no escape for it.
+func TestLogPathWithAngleBracketIsRefused(t *testing.T) {
+	const path = "/tmp/a<b/runtime.jsonl"
+	if got, err := LocalfileSnippet(path); err == nil {
+		t.Fatalf("LocalfileSnippet accepted %q: %s", path, got)
+	}
+	dir := filepath.Join(t.TempDir(), "pack")
+	if err := InstallPack(dir, path); err == nil {
+		t.Fatalf("InstallPack accepted %q", path)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("InstallPack wrote %s before refusing the path: %v", dir, err)
 	}
 }
 

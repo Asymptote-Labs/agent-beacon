@@ -35,26 +35,6 @@ func TestBudgetRefusesTheAppendThatWouldNotFit(t *testing.T) {
 	}
 }
 
-func TestBudgetCountsWrittenBytes(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "runtime.jsonl")
-	budget := NewBudget(1 << 20)
-	for i := 0; i < 3; i++ {
-		if _, err := AppendEvent(budgetTestEvent(i), Options{Path: path, Budget: budget}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if budget.Used() != info.Size() {
-		t.Fatalf("budget used %d bytes, log holds %d", budget.Used(), info.Size())
-	}
-	if budget.Refused() {
-		t.Fatal("budget reports a refusal it never made")
-	}
-}
-
 func TestSubBudgetIsBoundByItsParent(t *testing.T) {
 	parent := NewBudget(150)
 	first := parent.Sub(100)

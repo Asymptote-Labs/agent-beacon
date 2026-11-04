@@ -3,12 +3,9 @@ package beaconjsonexporter
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/pdata/plog"
 )
 
@@ -16,16 +13,8 @@ import (
 // exporter. The prompt whose text is too large for the event ceiling loses its text to compaction
 // and keeps its id, because the id is what places it in the turn.
 func TestConsumeLogsWritesClaudePromptIDThroughCompaction(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "runtime.jsonl")
-	exp, err := newExporter(&Config{
-		Path:          path,
-		MaxEventBytes: 4096, // below the 4 KiB the prompt keeps after truncation, so compaction runs
-		RotateBytes:   defaultRotateBytes,
-		RedactSecrets: true,
-	}, exporter.Settings{})
-	if err != nil {
-		t.Fatalf("newExporter returned error: %v", err)
-	}
+	// MaxEventBytes is below the 4 KiB the prompt keeps after truncation, so compaction runs.
+	exp, path := newTestExporter(t, func(cfg *Config) { cfg.MaxEventBytes = 4096 })
 
 	logs := plog.NewLogs()
 	rl := logs.ResourceLogs().AppendEmpty()
@@ -48,13 +37,9 @@ func TestConsumeLogsWritesClaudePromptIDThroughCompaction(t *testing.T) {
 	if err := exp.consumeLogs(context.Background(), logs); err != nil {
 		t.Fatalf("consumeLogs returned error: %v", err)
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	lines := strings.Split(readLog(t, path), "\n")
 	if len(lines) != 3 {
-		t.Fatalf("wrote %d events, want 3:\n%s", len(lines), data)
+		t.Fatalf("wrote %d events, want 3:\n%s", len(lines), readLog(t, path))
 	}
 	for _, line := range lines {
 		var event struct {

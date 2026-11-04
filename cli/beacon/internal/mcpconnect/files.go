@@ -47,6 +47,10 @@ func readConfig(path string) (configFile, error) {
 	return cf, nil
 }
 
+// syncFile flushes a written config to stable storage before it is renamed into place. Tests
+// replace it: on macOS it is F_FULLFSYNC, which costs milliseconds per write.
+var syncFile = (*os.File).Sync
+
 // write replaces the config atomically: a temporary file in the same directory, given the
 // existing file's mode, renamed over it. A reader never sees half a config. A file Beacon creates
 // is 0600, because several of these configs are where users keep API keys.
@@ -65,7 +69,7 @@ func (cf configFile) write(text string) error {
 		tmp.Close()
 		return err
 	}
-	if err := tmp.Sync(); err != nil {
+	if err := syncFile(tmp); err != nil {
 		tmp.Close()
 		return err
 	}

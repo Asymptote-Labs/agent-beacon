@@ -304,6 +304,11 @@ The local dashboard also includes a read-only Memory page showing evaluation,
 candidate, and approved-memory counts. Mutating actions still live in this CLI
 workflow.
 
+Sessions forwarded to Beacon Cloud can go through the same review over
+[Beacon Cloud MCP](/deployment/managed-mcp#memory), which keeps its own candidates and
+approved memory, separate from this local store. See
+[Memory in Beacon Cloud](/concepts/cross-harness-memory#memory-in-beacon-cloud).
+
 ## Network boundary
 
 `beacon memory evaluations run` is the only command in this workflow that can call

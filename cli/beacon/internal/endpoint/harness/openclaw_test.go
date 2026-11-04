@@ -26,6 +26,10 @@ func openClawHome(t *testing.T) string {
 // appears once a plugin is installed.
 func TestDiscoverOpenClawDetectsAGatewayWithNoPluginsInstalled(t *testing.T) {
 	home := openClawHome(t)
+	// Nothing on disk and nothing on PATH is genuinely not detected.
+	if h := DiscoverOpenClaw(); h.Detected {
+		t.Fatal("OpenClaw reported as detected with no state directory and no executable")
+	}
 	if err := os.MkdirAll(filepath.Join(home, ".openclaw"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -36,16 +40,6 @@ func TestDiscoverOpenClawDetectsAGatewayWithNoPluginsInstalled(t *testing.T) {
 	}
 	if h.TelemetryStatus != TelemetryMissing {
 		t.Fatalf("telemetry status = %q, want %q", h.TelemetryStatus, TelemetryMissing)
-	}
-}
-
-// Nothing on disk and nothing on PATH is genuinely not detected.
-func TestDiscoverOpenClawReportsAbsent(t *testing.T) {
-	openClawHome(t)
-
-	h := DiscoverOpenClaw()
-	if h.Detected {
-		t.Fatal("OpenClaw reported as detected with no state directory and no executable")
 	}
 }
 

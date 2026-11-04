@@ -2,7 +2,7 @@ module github.com/asymptote-labs/agent-beacon/cli/beacon-hooks
 
 go 1.27.0
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve v0.0.0
@@ -12,7 +12,8 @@ require (
 replace github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve => ../../pkg/asymptoteobserve
 
 require (
+	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	golang.org/x/sys v0.44.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
 )

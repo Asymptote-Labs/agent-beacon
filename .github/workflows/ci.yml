@@ -9,6 +9,13 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same pull request makes the running checks moot, so they are cancelled
+# rather than left to hold Windows and macOS runners for ten minutes. Pushes to main are keyed by
+# commit, so every main commit still gets a full run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   typescript-sdk:
     runs-on: ubuntu-latest
@@ -17,8 +24,8 @@ jobs:
       matrix:
         node-version: [20, 22, 24]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
@@ -65,8 +72,8 @@ jobs:
     env:
       BROWSER_CHANNEL: ${{ matrix.browser }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -137,7 +144,7 @@ jobs:
       - name: Cache Playwright browsers
         if: matrix.browser == 'chromium'
         id: pw-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
@@ -176,7 +183,7 @@ jobs:
       # retains on failure; the HTML report alone is not enough to debug from.
       - name: Upload Playwright report and traces
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: browser-extension-playwright-report-${{ matrix.browser }}
           path: |
@@ -188,7 +195,7 @@ jobs:
   go-test:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -269,6 +276,8 @@ jobs:
           ./beacon lenses --help > /tmp/beacon-lenses-help.txt
           ./beacon pricing --help > /tmp/beacon-pricing-help.txt
           ./beacon pricing info > /tmp/beacon-pricing-info.txt
+          ./beacon intel --help > /tmp/beacon-intel-help.txt
+          ./beacon intel check --help > /tmp/beacon-intel-check-help.txt
           for forbidden in init update claude cursor dep-scan config; do
             if grep -E "^[[:space:]]+$forbidden([[:space:]]|$)" /tmp/beacon-help.txt; then
               echo "forbidden command exposed: $forbidden"
@@ -279,7 +288,7 @@ jobs:
   beacon-sandbox:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
         with:
           go-version-file: beacon-sandbox/go.mod
@@ -301,15 +310,22 @@ jobs:
   terraform:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.14.3
           terraform_wrapper: false
       # Hermetic: the tests mock the AWS and Google providers, so no cloud account or
       # credentials are involved. Only the provider downloads reach the network.
       - name: Check Terraform modules
+        env:
+          # Eight inits download the same AWS and Google providers; one shared directory makes that
+          # two downloads. There are no committed lock files for the cache to conflict with: each
+          # init writes a fresh one, so the cache is allowed to satisfy it.
+          TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/terraform-plugin-cache
+          TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE: "true"
         run: |
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
           terraform fmt -check -recursive -diff terraform
           for module in terraform/*/; do
             terraform -chdir="$module" init -backend=false -input=false
@@ -343,9 +359,11 @@ jobs:
             goarch: amd64
             make_target: build-windows-amd64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
         with:
+          # Each target compiles a different package set, so each keeps its own build cache.
+          cache-key: ${{ matrix.goos }}-${{ matrix.goarch }}
           modules: |
             cli/beacon
             cli/beacon-hooks
@@ -399,14 +417,14 @@ jobs:
       run:
         working-directory: cli/beacon/internal/endpoint/dashboard/testdata/lens-e2e
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
         with:
           modules: |
             cli/beacon
             cli/beacon-hooks
             pkg/asymptoteobserve
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -422,7 +440,7 @@ jobs:
         run: npx playwright test
       - name: Upload Playwright report and traces
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: lens-e2e-playwright-report
           path: |
@@ -434,7 +452,7 @@ jobs:
   linux-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
         with:
           modules: |
@@ -478,7 +496,23 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      # Two settings, both measured on this runner (#1160):
+      #
+      # - TEMP, TMP, GOTMPDIR and GOCACHE go to RUNNER_TEMP on D:. TEMP and the Go cache default to
+      #   C:, the runner's OS disk, where a small-file create or rename costs 0.6 ms against about 0.1
+      #   ms on D: and a stat of a missing file 0.19 ms against 0.007 ms -- and every t.TempDir(),
+      #   every SQLite fixture and every test-cache fingerprint is made of those operations. Written
+      #   to GITHUB_ENV before setup-go, so the build cache it restores and saves follows to D: too.
+      # - Every go test here runs with -count=1. Go's test-result cache fingerprints each file and
+      #   directory a test touched, before the run to look the result up and after it to store it.
+      #   On this runner that bookkeeping cost about 60 s per session package against 14 s of tests,
+      #   and checking a fully cached result took as long as running the tests again -- so it never
+      #   pays here. The Linux and macOS jobs keep test caching, where it is cheap.
+      - name: Keep temporary files and the Go build cache on D
+        run: |
+          foreach ($name in 'TEMP', 'TMP', 'GOTMPDIR') { "$name=$env:RUNNER_TEMP" >> $env:GITHUB_ENV }
+          "GOCACHE=$(Join-Path $env:RUNNER_TEMP go-build)" >> $env:GITHUB_ENV
       - uses: ./.github/actions/setup-go
         with:
           modules: |
@@ -519,7 +553,7 @@ jobs:
       - name: Test the ported packages on Windows
         working-directory: cli/beacon
         run: |
-          go test `
+          go test -count=1 `
             . `
             ./cmd/... `
             ./internal/account/... `
@@ -548,6 +582,7 @@ jobs:
             ./internal/endpoint/integrations/... `
             ./internal/endpoint/inventory/... `
             ./internal/endpoint/lifecycle/... `
+            ./internal/endpoint/loggroup/... `
             ./internal/endpoint/rapid7/... `
             ./internal/endpoint/schema/... `
             ./internal/endpoint/selfupdate/... `
@@ -563,6 +598,7 @@ jobs:
             ./internal/fxsession/... `
             ./internal/groksession/... `
             ./internal/hermessession/... `
+            ./internal/intel/... `
             ./internal/learning/... `
             ./internal/managedprivacy/... `
             ./internal/mcpconnect/... `
@@ -580,23 +616,23 @@ jobs:
       - name: Test the ported packages with the race detector
         working-directory: cli/beacon
         run: |
-          go test -race `
+          go test -race -count=1 `
             ./internal/endpoint/writer/... `
             ./internal/endpoint/inventory/... `
             ./internal/endpoint/service/...
       - name: Test hook adapter on Windows
         working-directory: cli/beacon-hooks
-        run: go test ./...
+        run: go test -count=1 ./...
       - name: Test collector exporter on Windows
         working-directory: collector-builder/exporter/beaconjsonexporter
-        run: go test ./...
+        run: go test -count=1 ./...
       - name: Test observe SDK and threat rules on Windows
         working-directory: pkg/asymptoteobserve
-        run: go test ./...
+        run: go test -count=1 ./...
       # Runs the generated-PowerShell parse test, which skips on a machine without pwsh.
       - name: Test the sandbox harness on Windows
         working-directory: beacon-sandbox
-        run: go test ./...
+        run: go test -count=1 ./...
 
   # Exercises the real systemd install path: unit generation, systemctl enable/active,
   # Restart=always actually restarting, and uninstall leaving nothing behind. Needs systemd as
@@ -605,7 +641,7 @@ jobs:
   linux-systemd-smoke:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
         with:
           # The exporter is listed because builder.yaml compiles it into the
@@ -641,7 +677,7 @@ jobs:
   linux-package-smoke:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
         with:
           # The exporter is listed because builder.yaml compiles it into the
@@ -659,25 +695,23 @@ jobs:
           cd collector-builder
           # builder mkdirs its output path without -p, so the parent has to exist.
           mkdir -p dist
-          for arch in amd64 arm64; do
-            GOOS=linux GOARCH=$arch CGO_ENABLED=0 "$(go env GOPATH)/bin/builder" --config builder.yaml
-            mkdir -p dist/beacon-otelcol/linux_$arch
-            cp dist/beacon-otelcol/beacon-otelcol dist/beacon-otelcol/linux_$arch/beacon-otelcol
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 "$(go env GOPATH)/bin/builder" --config builder.yaml
+          mkdir -p dist/beacon-otelcol/linux_amd64
+          cp dist/beacon-otelcol/beacon-otelcol dist/beacon-otelcol/linux_amd64/beacon-otelcol
+          # The goreleaser before-hook stages every release target, so each one must exist here.
+          # Only linux/amd64 is built and packaged below; the rest are stand-ins that are copied
+          # and never used.
+          for target in linux_arm64 darwin_amd64 darwin_arm64; do
+            mkdir -p dist/beacon-otelcol/$target
+            cp dist/beacon-otelcol/linux_amd64/beacon-otelcol dist/beacon-otelcol/$target/beacon-otelcol
           done
-          # The goreleaser before-hook stages every target, so each one must exist here. These are
-          # stand-ins: this job checks that packaging works, not that the binaries run, so a Linux
-          # build stood in a darwin directory is enough to exercise the archive and package steps.
-          for arch in amd64 arm64; do
-            mkdir -p dist/beacon-otelcol/darwin_$arch
-            cp dist/beacon-otelcol/linux_$arch/beacon-otelcol dist/beacon-otelcol/darwin_$arch/beacon-otelcol
-          done
-          # Windows is amd64 only, and carries the .exe the release archive ships -- the same name
+          # Windows carries the .exe the release archive ships -- the same name
           # build-release-collectors.sh stages, so the before-hook finds it under either script.
           mkdir -p dist/beacon-otelcol/windows_amd64
           cp dist/beacon-otelcol/linux_amd64/beacon-otelcol dist/beacon-otelcol/windows_amd64/beacon-otelcol.exe
       # The real Vector build, not a stand-in: the smoke test runs it and checks it is static.
       # Cached by the script's hash, which is where the version is pinned.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         id: vector-cache
         with:
           path: cli/beacon/release-vector
@@ -685,13 +719,22 @@ jobs:
       - name: Download Vector for the Linux packages
         if: steps.vector-cache.outputs.cache-hit != 'true'
         run: sh packaging/linux/fetch-vector.sh
-      - uses: goreleaser/goreleaser-action@v6
+      # The version release.yml publishes with, so this smoke builds what a release would.
+      - uses: goreleaser/goreleaser-action@v7
         with:
-          version: latest
+          version: "v2.13.3"
           install-only: true
+      # linux/amd64 only: it is the one target the steps below install and run. Building all five
+      # here, serially and with -a, took about six of this job's ten minutes for archives and
+      # arm64 packages nothing looked at. release-check still builds every target, on every pull
+      # request that touches the release config or packaging.
       - name: Build packages
         working-directory: cli/beacon
-        run: goreleaser release --snapshot --clean --skip=publish,homebrew,announce --parallelism 1
+        run: |
+          yq '(.builds[].goos) = ["linux"] | (.builds[].goarch) = ["amd64"] | del(.builds[].ignore)' \
+            .goreleaser.yaml > "$RUNNER_TEMP/goreleaser-linux-amd64.yaml"
+          goreleaser release --config "$RUNNER_TEMP/goreleaser-linux-amd64.yaml" \
+            --snapshot --clean --skip=publish,homebrew,announce --parallelism 1
       # Every generated Vector pack has to load in the Vector the packages ship. Vector 0.57 and 0.58
       # changed how ${VAR} expands and broke most of them with no Beacon change at all. Uses the CLI
       # goreleaser just built, which carries the real embedded hooks binary.
@@ -714,7 +757,7 @@ jobs:
   package-smoke:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
         with:
           modules: |
@@ -748,13 +791,14 @@ jobs:
   windows-package-smoke:
     runs-on: windows-2025
     # Bounded for the same reason windows-test is: a wedged msiexec would otherwise hold a runner for
-    # the GitHub default of six hours.
-    timeout-minutes: 25
+    # the GitHub default of six hours. A healthy run takes about five minutes; the bound leaves room
+    # for one MSI step to run to its own limit (below) and for the diagnostics after it.
+    timeout-minutes: 40
     defaults:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
         with:
           # The exporter is listed because builder.yaml compiles it into the
@@ -823,17 +867,39 @@ jobs:
             }
           }
 
+      # Each MSI step has its own bound, inside the job's. A wedged msiexec then fails its step instead
+      # of holding the job until GitHub cancels it, and a cancelled job keeps no log at all. With the
+      # step bound, the diagnostics and the package logs below still run and upload. None of that
+      # helps when the runner itself goes away mid-step, which still happens now and then: nothing
+      # after that point runs, and re-running the job is the workaround.
+      #
+      # Each step bound is longer than the package scripts' own limits for the actions it runs
+      # (packaging/windows/install-endpoint.ps1 and uninstall-endpoint.ps1), so a hung beacon.exe call
+      # is stopped by the script -- which writes the TIMEOUT line and the goroutine stacks -- before
+      # GitHub stops the step. A step stopped first would leave the custom action running inside the
+      # Windows Installer service, outside the step's process tree, and record nothing. Install runs
+      # install (10 min) and user config (5 min): 17. An upgrade runs the old package's uninstall
+      # (3 min) before both: 20. Uninstall runs uninstall and its service fallback: 5.
       - name: Install it
+        timeout-minutes: 17
         run: |
           # /qn is silent, and the verbose log is what makes a custom-action failure diagnosable --
           # without it msiexec reports only an exit code.
+          #
+          # /norestart on every msiexec here: a silent msiexec that finds a file it cannot remove or
+          # replace schedules the change for the next boot and restarts the machine itself. On a runner
+          # that looked like a hang -- the runner vanished mid-step, never uploaded its log, and the job
+          # ran out its timeout. With /norestart the same condition returns 3010, which fails the step
+          # at once, and the step prints the files the log says were in use.
           $log = "$env:GITHUB_WORKSPACE\install.log"
           $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
-            '/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.1.msi", '/qn', '/l*v', $log
+            '/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.1.msi", '/qn', '/norestart', '/l*v', $log
           )
           if ($p.ExitCode -ne 0) {
             Write-Output "--- install log (tail) ---"
             Get-Content -LiteralPath $log -Tail 120 | Write-Output
+            Write-Output "--- files in use (Info 1903 schedules a reboot to finish) ---"
+            Select-String -LiteralPath $log -Pattern 'Info 1903|Note: 1: 2329|in use' | Select-Object -Last 10 | ForEach-Object Line
             throw "msiexec /i exited $($p.ExitCode)"
           }
 
@@ -864,23 +930,25 @@ jobs:
           exit 0
 
       - name: Upgrading must replace the payload and leave it running
+        timeout-minutes: 20
         run: |
           $configPath = Join-Path $env:ProgramData 'Beacon\Endpoint\config.json'
           if (-not (Test-Path -LiteralPath $configPath)) { throw "no configuration before the upgrade" }
 
           $log = "$env:GITHUB_WORKSPACE\upgrade.log"
           $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
-            '/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.2.msi", '/qn', '/l*v', $log
+            '/i', "$env:GITHUB_WORKSPACE\Beacon-0.0.2.msi", '/qn', '/norestart', '/l*v', $log
           )
           if ($p.ExitCode -ne 0) {
             Write-Output "--- upgrade log (tail) ---"
             Get-Content -LiteralPath $log -Tail 150 | Write-Output
+            Write-Output "--- files in use (Info 1903 schedules a reboot to finish) ---"
+            Select-String -LiteralPath $log -Pattern 'Info 1903|Note: 1: 2329|in use' | Select-Object -Last 10 | ForEach-Object Line
             throw "msiexec upgrade exited $($p.ExitCode)"
           }
 
-          # 3010 is "reboot required", which msiexec returns when it could not replace a file in use
-          # and deferred it. It is not an error code, which is exactly why it has to be checked for:
-          # the install would report success while still running the old collector.
+          # A deferred replacement also leaves "Reboot" in the log. With /norestart it returns 3010 and
+          # fails the step above; these lines say which file it was if anything still slips through.
           if (Select-String -LiteralPath $log -Pattern 'Reboot' -Quiet) {
             Write-Output "--- reboot mentions in the upgrade log ---"
             Select-String -LiteralPath $log -Pattern 'Reboot' | Select-Object -First 10 | Write-Output
@@ -934,7 +1002,15 @@ jobs:
           }
           exit 0
 
+      # The restricted log access mode against a real ordinary account on the installed endpoint: its
+      # hook reaches the log only through the collector's pipe, stamped as itself; it can neither read
+      # nor append to the log; it spools while the collector is stopped; and shared puts it all back.
+      - name: Restricted log access must hold against an ordinary account
+        timeout-minutes: 8
+        run: pwsh -NoProfile -File packaging/windows/smoke-restricted-log.ps1
+
       - name: Uninstall must remove the service and keep the data
+        timeout-minutes: 5
         run: |
           $logDir = Join-Path $env:ProgramData 'Beacon\Endpoint\logs'
           $configPath = Join-Path $env:ProgramData 'Beacon\Endpoint\config.json'
@@ -956,11 +1032,13 @@ jobs:
           # The upgraded product is what is installed, so that is what gets removed. Each build gets a
           # fresh ProductCode, so removing with the 0.0.1 package would not match anything.
           $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
-            '/x', "$env:GITHUB_WORKSPACE\Beacon-0.0.2.msi", '/qn',
+            '/x', "$env:GITHUB_WORKSPACE\Beacon-0.0.2.msi", '/qn', '/norestart',
             '/l*v', "$env:GITHUB_WORKSPACE\uninstall.log"
           )
           if ($p.ExitCode -ne 0) {
             Get-Content -LiteralPath "$env:GITHUB_WORKSPACE\uninstall.log" -Tail 120 | Write-Output
+            Write-Output "--- files in use (Info 1903 schedules a reboot to finish) ---"
+            Select-String -LiteralPath "$env:GITHUB_WORKSPACE\uninstall.log" -Pattern 'Info 1903|Note: 1: 2329|in use' | Select-Object -Last 10 | ForEach-Object Line
             throw "msiexec /x exited $($p.ExitCode)"
           }
 
@@ -998,3 +1076,74 @@ jobs:
           Write-Output "marker survived: the operator's own configuration came back"
           Write-Output "config retained: $(Test-Path -LiteralPath $configPath), logs retained: $(Test-Path -LiteralPath $logDir)"
           exit 0
+
+      # The install and uninstall scripts bound every beacon.exe call and stop one that outlives its
+      # bound (packaging/windows/package-common.ps1), so a hang no longer wedges the MSI -- which also
+      # means it no longer fails a step on its own. Each script leaves a package log in SYSTEM's
+      # temporary directory, and a TIMEOUT line there is a hang this job must not pass over.
+      - name: Every package action must finish within its bound
+        if: always()
+        run: |
+          $logs = @(
+            foreach ($dir in @((Join-Path $env:SystemRoot 'Temp'), (Join-Path $env:SystemRoot 'SystemTemp'), $env:TEMP)) {
+              if ($dir -and (Test-Path -LiteralPath $dir)) {
+                Get-ChildItem -LiteralPath $dir -Filter 'beacon-package-*.log' -File -ErrorAction SilentlyContinue
+              }
+            }
+          ) | Sort-Object FullName -Unique | Sort-Object LastWriteTime
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\package-logs" | Out-Null
+          $timedOut = @()
+          foreach ($log in $logs) {
+            Write-Output "=== $($log.FullName) ==="
+            Get-Content -LiteralPath $log.FullName | Write-Output
+            Copy-Item -LiteralPath $log.FullName -Destination "$env:GITHUB_WORKSPACE\package-logs\" -Force
+            if (Select-String -LiteralPath $log.FullName -Pattern 'TIMEOUT:' -SimpleMatch -Quiet) { $timedOut += $log.Name }
+          }
+          Write-Output "package logs: $($logs.Count)"
+          if ($timedOut.Count -gt 0) {
+            throw "a package action outlived its bound and was stopped: $($timedOut -join ', ')"
+          }
+
+      - name: Diagnose a failed package step
+        if: failure()
+        run: |
+          Write-Output '--- processes ---'
+          Get-CimInstance Win32_Process |
+            Where-Object { $_.Name -match '^(beacon|msiexec|powershell|pwsh|cmd|sc|taskkill|net)' } |
+            Sort-Object ProcessId |
+            Format-Table -AutoSize ProcessId, ParentProcessId, Name, CreationDate, CommandLine |
+            Out-String -Width 500 | Write-Output
+          Write-Output '--- BeaconCollector ---'
+          & sc.exe queryex BeaconCollector 2>&1 | Write-Output
+          & sc.exe qc BeaconCollector 2>&1 | Write-Output
+          Write-Output '--- Windows Installer, collector and service control events ---'
+          foreach ($filter in @(
+            @{ LogName = 'Application'; ProviderName = 'MsiInstaller' },
+            @{ LogName = 'Application'; ProviderName = 'BeaconCollector' },
+            @{ LogName = 'System'; ProviderName = 'Service Control Manager' }
+          )) {
+            Get-WinEvent -FilterHashtable $filter -MaxEvents 25 -ErrorAction SilentlyContinue |
+              Sort-Object TimeCreated |
+              Format-List TimeCreated, ProviderName, Id, Message |
+              Out-String -Width 300 | Write-Output
+          }
+          foreach ($name in @('install.log', 'upgrade.log', 'uninstall.log')) {
+            $path = Join-Path $env:GITHUB_WORKSPACE $name
+            if (Test-Path -LiteralPath $path) {
+              Write-Output "--- $name (tail) ---"
+              Get-Content -LiteralPath $path -Tail 80 | Write-Output
+            }
+          }
+          $global:LASTEXITCODE = 0
+
+      - name: Upload the package logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-package-logs
+          path: |
+            ${{ github.workspace }}/install.log
+            ${{ github.workspace }}/upgrade.log
+            ${{ github.workspace }}/uninstall.log
+            ${{ github.workspace }}/package-logs/
+          if-no-files-found: ignore

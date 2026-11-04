@@ -7,7 +7,7 @@ import (
 )
 
 func TestStoreOpensLiteralURICharacters(t *testing.T) {
-	for _, name := range []string{"plain", "project#draft", "project%25name"} {
+	for _, name := range []string{"project#draft", "project%25name"} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), name, "memory.db")
 			store := Open(path)

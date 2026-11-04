@@ -83,6 +83,10 @@ Before anything leaves the machine:
 
 beacon.sh redacts every string again on its side. Redaction catches common credential shapes, not everything sensitive, so read `--print` before sharing a session that touched secrets.
 
+### Metadata-only endpoints
+
+When this machine forwards to [Beacon Cloud](/cli/endpoint-connect) in Metadata-only privacy mode (user or system mode), `beacon share` leaves out what forwarding leaves out, so a share never sends more than the endpoint's privacy mode allows. The trace keeps the session's shape: event types and order, tool and command names, command lines, file paths, MCP servers and tools, approval and policy decisions, models, token usage and the ids that tie events together. It has no prompt text, answers or reasoning, tool arguments or results, command output, diffs, raw payloads, or approval and policy reasons. The title is not taken from the session either, because most runtimes title a session with its first prompt; pass `--title` to give the trace one. Event ids are the same in both modes, so sharing a session again with `beacon share` after the endpoint switched to Metadata-only upserts the events already on beacon.sh rather than adding copies; `refresh` sends only the newer ones. This applies to `beacon share`, `refresh`, `--follow` and the git pre-push hook. On a machine connected in system mode, these commands read the privacy mode from the system `config.json`, because the enrollment record is readable only by root; when neither can be read, they share as Metadata-only. Run `--print` to see the result.
+
 `--print` (or `--dry-run`) prints exactly that payload as JSON and sends nothing: the external id the requests go to, `trace` (the body of `PUT /v1/traces/{external_id}`) and `events` (every event the `POST /v1/traces/{external_id}/events/batch` requests would carry, at most 1,000 per request):
 
 ```json
@@ -173,6 +177,10 @@ Where nobody can run `beacon login` (CI runners, containers, scheduled jobs), us
 4. Run `beacon share` in the same job as the agent, after it: the session is read from the runner's own disk.
 
 With no sign-in on the machine, `BEACON_API_KEY` is used. On a machine that also has a sign-in carrying `traces:write`, the sign-in wins unless you pass `--key`. A key for a self-hosted Beacon service goes with `BEACON_AUTH_URL` (or `--auth-url`) set to that service. An API key is sent to beacon.sh, or to `--auth-url` / `BEACON_AUTH_URL` when set. Either credential goes only in the request's `Authorization` header, redirects are refused, and neither is printed.
+
+### Where the requests go
+
+beacon.sh serves its API from `https://api.beacon.sh`, so a beacon.sh sign-in or key sends the three trace requests there. Any other service gets them at its own URL (the one you signed in to, or `--auth-url` / `BEACON_AUTH_URL`). `BEACON_API_URL` names the API outright, for a service whose API is on another host; it must be `https://`, or `http://` on loopback. When the host answers with a web page's 404 instead of the API's own reply, `beacon share` stops with `<url> has no trace API (HTTP 404: endpoint not found)` and creates nothing.
 
 ## CI examples
 
@@ -280,7 +288,7 @@ The link goes to stdout and a summary to stderr. `--json` prints one document:
 | `--cwd <dir>` | Most recent session in this directory (default: current directory) |
 | `--harness <runtime>` | Only this runtime's sessions, or `auto` (default) |
 | `--visibility <level>` | `public`, `direct` (default for a new trace) or `private` |
-| `--title <text>` | Title for the trace (default: the session's title or first prompt) |
+| `--title <text>` | Title for the trace (default: the session's title or first prompt; none in Metadata-only mode) |
 | `--key <key>` | Beacon API key to share with |
 | `--auth-url <url>` | Service an API key is sent to |
 | `--list` | List candidate sessions and share nothing |

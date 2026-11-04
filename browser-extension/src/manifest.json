@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Agent Beacon — Browser Collector",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Relays LLM chat telemetry (Claude, ChatGPT) into the local Agent Beacon pipeline.",
   "permissions": ["storage", "alarms"],
   "host_permissions": [

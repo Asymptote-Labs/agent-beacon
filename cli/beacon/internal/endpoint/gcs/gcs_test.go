@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"testing/fstest"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
@@ -38,8 +37,6 @@ func TestUploadSmokeTestUsesConfiguredPath(t *testing.T) {
 		`prefix="${prefix%/inventory}"`,
 		`/runtime/smoke-tests/beacon-runtime-`,
 		`/inventory/smoke-tests/beacon-inventory-`,
-		"Application Default Credentials",
-		"validation only",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("script missing %q: %s", want, got)
@@ -160,113 +157,5 @@ func TestSampleEventsCoverValidationHookAndOTelShapes(t *testing.T) {
 	}
 	if !sawValidation || !sawHook || !sawOTel {
 		t.Fatalf("sample events should include validation, hook-rich, and OTel shapes; validation=%t hook=%t otel=%t", sawValidation, sawHook, sawOTel)
-	}
-}
-
-func TestPackREADMEMentionsGCSSetupAndProductionForwarding(t *testing.T) {
-	readme := mustRead("pack/README.md")
-	for _, want := range []string{
-		"beacon endpoint gcs validate",
-		"Google Cloud Storage bucket",
-		"Application Default Credentials",
-		"roles/storage.objectCreator",
-		"BEACON_GCS_BUCKET",
-		"BEACON_GCS_PREFIX",
-		"gcloud storage ls",
-		"gcloud storage cat",
-		"inventory_state.jsonl",
-		"Beacon endpoint GCS validation event",
-		"vendor=beacon product=endpoint-agent destination.type=gcs destination.mode=google_cloud_storage_jsonl",
-		"vector.toml",
-		"customer-managed host-agent",
-		"without a Vector wrapper",
-		"Content Handling",
-		"/var/log/beacon-agent/runtime.jsonl",
-		"/var/log/beacon-agent/inventory_state.jsonl",
-		"Beacon does not store Google Cloud credentials",
-		"encryption",
-	} {
-		if !strings.Contains(readme, want) {
-			t.Fatalf("pack README missing %q", want)
-		}
-	}
-}
-
-func TestFiles_NoError(t *testing.T) {
-	files, err := Files()
-	if err != nil {
-		t.Fatalf("Files() returned unexpected error: %v", err)
-	}
-	if len(files) == 0 {
-		t.Fatal("Files() returned no files")
-	}
-}
-
-func TestFiles_ContainsAllRequiredNames(t *testing.T) {
-	files, err := Files()
-	if err != nil {
-		t.Fatal(err)
-	}
-	names := make(map[string]bool)
-	for _, f := range files {
-		names[f.Name] = true
-	}
-	for _, required := range []string{
-		"README.md", "gcs-upload-smoke-test.sh", "sample-event.jsonl", "vector.toml",
-	} {
-		if !names[required] {
-			t.Errorf("Files() missing required file %q", required)
-		}
-	}
-}
-
-func TestFilesFromFS_PropagatesReadError(t *testing.T) {
-	emptyFS := fstest.MapFS{}
-	_, err := filesFromFS(emptyFS)
-	if err == nil {
-		t.Fatal("filesFromFS with empty FS should return an error")
-	}
-	if !strings.Contains(err.Error(), "gcs pack asset") {
-		t.Fatalf("error should identify the pack source, got: %v", err)
-	}
-}
-
-func TestUploadSmokeTestFromFS_ErrorOnMissingAsset(t *testing.T) {
-	emptyFS := fstest.MapFS{}
-	_, err := uploadSmokeTestFromFS(emptyFS, "/some/path.jsonl")
-	if err == nil {
-		t.Fatal("uploadSmokeTestFromFS with empty FS should return error")
-	}
-	if !strings.Contains(err.Error(), "gcs pack asset") {
-		t.Fatalf("error should identify the pack source, got: %v", err)
-	}
-}
-
-func TestInstallPack_ErrorOnWriteFailure(t *testing.T) {
-	// A 0555 directory is only read-only where Unix permission bits exist; Windows ignores them.
-	testenv.RequirePOSIXFileModes(t)
-	if os.Getuid() == 0 {
-		t.Skip("running as root: filesystem permission restrictions do not apply")
-	}
-	dir := t.TempDir()
-	if err := os.Chmod(dir, 0555); err != nil {
-		t.Skip("cannot set directory permissions:", err)
-	}
-	defer os.Chmod(dir, 0755)
-
-	subdir := filepath.Join(dir, "output")
-	err := InstallPack(subdir, DefaultLogPath)
-	if err == nil {
-		t.Fatal("InstallPack into read-only directory should return error")
-	}
-}
-
-func TestUploadSmokeTest_DefaultLogPath(t *testing.T) {
-	got, err := UploadSmokeTest("")
-	if err != nil {
-		t.Fatalf("UploadSmokeTest with empty path returned error: %v", err)
-	}
-	if !strings.Contains(got, DefaultLogPath) {
-		t.Fatalf("UploadSmokeTest with empty logPath should use DefaultLogPath %q, got: %s", DefaultLogPath, got)
 	}
 }

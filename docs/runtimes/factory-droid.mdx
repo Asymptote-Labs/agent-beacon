@@ -14,7 +14,7 @@ Before enabling Factory Droid telemetry, make sure:
 - Factory Droid is installed and available as the `droid` executable for the user or managed endpoint.
 - `beacon endpoint install` has run so the local collector, shared endpoint config, and runtime log paths exist.
 - Droid's launch environment sets `OTEL_TELEMETRY_ENDPOINT=http://127.0.0.1:4318` through MDM or another customer-owned policy.
-- Optional hook telemetry is installed with `beacon endpoint hooks install --harness factory`.
+- Optional hook telemetry is installed by `beacon endpoint install` when it detects `droid` (or with `--harness factory`), or with `beacon endpoint hooks install --harness factory`.
 - Historical session telemetry can be synced from Factory's local session store with `beacon endpoint factory sync`.
 - Factory Droid is restarted after launch-environment or hook changes so new sessions use the updated settings.
 
@@ -34,9 +34,9 @@ Use `beacon endpoint factory status` to inspect local Factory sessions and how m
 
 `beacon endpoint install` prepares the collector, shared endpoint config, and runtime log paths. Factory Droid's launch environment is managed by MDM or customer policy.
 
-Install optional Factory hooks separately:
+`beacon endpoint install` also installs user-level Factory hooks when it detects the `droid` executable, or when `--harness factory` (or `droid`) is given. To install, refresh, or manage the hooks on their own:
 
-```bash title="Install optional Factory hooks separately"
+```bash title="Install Factory hooks on their own"
 beacon endpoint hooks install --harness factory
 ```
 

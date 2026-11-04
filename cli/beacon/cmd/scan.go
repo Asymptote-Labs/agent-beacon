@@ -199,11 +199,7 @@ func summarizeEvent(e asymptoteobserve.Event) string {
 }
 
 func truncate(s string, n int) string {
-	s = strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\r", " ")
-	if len(s) <= n {
-		return s
-	}
-	return s[:n-1] + "…"
+	return truncateRunes(strings.NewReplacer("\n", " ", "\r", " ").Replace(s), n)
 }
 
 func init() {

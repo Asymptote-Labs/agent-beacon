@@ -58,6 +58,7 @@ var endpointFxOpts struct {
 	print       bool
 	watch       bool
 	interval    time.Duration
+	rotateBytes int64
 }
 
 func init() {
@@ -79,11 +80,16 @@ func init() {
 	sync.BoolVar(&endpointFxOpts.print, "print", false, "Print mapped events as JSON without writing them or advancing the cursor (dry run)")
 	sync.BoolVar(&endpointFxOpts.watch, "watch", false, "Sweep continuously on --interval (default: one sweep then exit)")
 	sync.DurationVar(&endpointFxOpts.interval, "interval", time.Minute, "Sweep interval for --watch")
+	addSyncRotateBytesFlag(sync, &endpointFxOpts.rotateBytes)
 }
 
 func runEndpointFxSync(cmd *cobra.Command, args []string) error {
+	if err := checkSyncRotateBytes(endpointFxOpts.rotateBytes); err != nil {
+		return err
+	}
 	userMode := endpointUserMode()
 	opts := fxsession.CollectOptions{
+		RotateBytes: endpointFxOpts.rotateBytes,
 		SessionsDir: endpointFxOpts.sessionsDir,
 		Print:       endpointFxOpts.print,
 		Out:         cmd.OutOrStdout(),
@@ -106,7 +112,7 @@ func runEndpointFxSync(cmd *cobra.Command, args []string) error {
 		return watchFx(ctx, cmd, opts)
 	}
 
-	summary, err := fxsession.CollectOnce(opts)
+	summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, endpointSweepLockWait, fxsession.CollectOnce, opts)
 	// The summary is reported even when the sweep hit an error, because a sweep that collected
 	// nine sessions and failed on the tenth did nine sessions' worth of work.
 	reportFxSweep(cmd, summary)
@@ -121,7 +127,7 @@ func watchFx(ctx context.Context, cmd *cobra.Command, opts fxsession.CollectOpti
 		interval = 5 * time.Second
 	}
 	for {
-		summary, err := fxsession.CollectOnce(opts)
+		summary, err := collectUnderSweepLock(opts.Write, opts.UserMode, 0, fxsession.CollectOnce, opts)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "fx sync error: %v\n", err)
 		}
@@ -144,6 +150,7 @@ func reportFxSweep(cmd *cobra.Command, summary fxsession.Summary) {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "fx sync: %d sessions, %d changed, %d events, %d errors\n",
 		summary.Sessions, summary.SessionsChanged, summary.EventsEmitted, summary.Errors)
+	reportSyncRetention(cmd.OutOrStdout(), summary.Retention)
 	// Said out loud rather than left in a counter: a damaged session log and an empty one produce
 	// the same event count, and only one of them is a reason to look at the machine.
 	if summary.MalformedLines > 0 {

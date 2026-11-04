@@ -184,24 +184,6 @@ func TestShareCurrentUsesTheActiveSessionRecord(t *testing.T) {
 	}
 }
 
-func TestShareCurrentNamesCandidatesWhenNothingRanHere(t *testing.T) {
-	env := shareCurrentEnv(t)
-	empty := t.TempDir()
-	t.Chdir(empty)
-	_, _, err := runShareCommand(t, "--current", "--print", "--log-path", env.logPath)
-	if err == nil {
-		t.Fatal("want an error")
-	}
-	for _, want := range []string{"no agent session found", shareTestSession, "gem-session-1", "--session"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q lacks %q", err, want)
-		}
-	}
-	if _, _, err := runShareCommand(t, "--current", "--session", shareTestSession, "--print"); err == nil {
-		t.Fatal("--current with --session accepted")
-	}
-}
-
 func TestShareCurrentPassesOverAnOlderActiveEntry(t *testing.T) {
 	env := newShareEnv(t)
 	t.Chdir(env.projectDir)

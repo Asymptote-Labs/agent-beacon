@@ -1,6 +1,7 @@
 package threatrules
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,7 +13,7 @@ import (
 )
 
 func TestDerivedFieldsAreReadFromTheSchema(t *testing.T) {
-	want := []string{SystemInstructionsTextPath, ToolResultTextPath}
+	want := []string{ParsedCommandsPath, SystemInstructionsTextPath, ToolResultTextPath}
 	if got := DerivedFields(); !slices.Equal(got, want) {
 		t.Fatalf("DerivedFields = %q, want %q", got, want)
 	}
@@ -22,8 +23,14 @@ func TestDerivedFieldsAreReadFromTheSchema(t *testing.T) {
 			t.Errorf("a rule naming %s is not marked as needing derivation", name)
 		}
 	}
-	if referencesDerivedField(`e.gen_ai.system_instructions == null || e.prompt.text == "x"`) {
-		t.Error("a rule naming no derived field is marked as needing derivation")
+	for _, expr := range []string{
+		`e.gen_ai.system_instructions == null || e.prompt.text == "x"`,
+		// The other command fields, and a command line that merely says "parsed".
+		`e.command.command.matches("parsed") && e.command.output != ""`,
+	} {
+		if referencesDerivedField(expr) {
+			t.Errorf("a rule naming no derived field is marked as needing derivation: %s", expr)
+		}
 	}
 }
 
@@ -78,7 +85,14 @@ func setDerived(t *testing.T, v reflect.Value, segments []string, value string) 
 		t.Fatalf("no field %q on %s", segments[0], v.Type())
 	}
 	if len(segments) == 1 {
-		field.SetString(value)
+		switch field.Kind() {
+		case reflect.String:
+			field.SetString(value)
+		case reflect.Slice:
+			field.Set(reflect.MakeSlice(field.Type(), 1, 1))
+		default:
+			t.Fatalf("derived field %q is a %s", segments[0], field.Kind())
+		}
 		return
 	}
 	if field.Kind() == reflect.Pointer {
@@ -102,5 +116,11 @@ func derivedValue(v reflect.Value, segments []string) string {
 			return ""
 		}
 	}
-	return v.String()
+	switch {
+	case v.IsZero():
+		return ""
+	case v.Kind() == reflect.String:
+		return v.String()
+	}
+	return fmt.Sprint(v.Interface())
 }

@@ -2,7 +2,7 @@
 name: beacon-memory-promote
 description: Install approved Beacon project memory as an Agent Skill in the repository (.agents/skills/<slug>/SKILL.md), so every skill-capable harness loads the lesson automatically without a memory lookup. Use when the user asks to "make this a skill", "promote", "install", or "share" an approved Beacon memory, or wants the team's agents to always follow a learned workflow or convention.
 license: MIT
-compatibility: Requires the Beacon CLI (beacon) on PATH. Local only. Writes files inside the current project.
+compatibility: Requires the Beacon CLI (beacon) on PATH for local memory, or a Beacon Cloud MCP connection (beacon-managed) for memory approved there. Writes files inside the current project.
 metadata:
   author: asymptote-labs
   homepage: https://docs.beacon.sh/cli/memory
@@ -32,6 +32,23 @@ Leave in memory, where recall finds them when needed:
 - One-off gotchas tied to a single file or incident.
 - Anything that duplicates the repository's CLAUDE.md, AGENTS.md, or contributing docs.
   Suggest editing those docs instead.
+
+## Memory approved through Beacon Cloud
+
+Memory approved through Beacon Cloud MCP is promoted with `beacon_memory_skill`, which
+returns the same `SKILL.md` that `beacon memory skills install` writes, plus the path to
+write it at. Beacon Cloud cannot write into the repository, so you write the file:
+
+1. Find the memory with `beacon_memory_search` and read it with `beacon_memory_get`.
+2. Call `beacon_memory_skill` with its `memory_id`, and check the returned `content` with
+   the user as in Step 2.
+3. After the user confirms, write `content` to the returned `path`
+   (`.agents/skills/<slug>/SKILL.md`) in the repository. If a file is already there, show
+   the difference and ask before replacing it. For Claude Code, offer the same link as in
+   Step 3.
+4. Hand off as in Step 4.
+
+For local memory, follow the steps below.
 
 ## Step 1: choose the memory
 
@@ -89,6 +106,7 @@ Show the path and remind the user that:
 ## Boundaries
 
 - Never install without the user seeing the preview and confirming.
-- Never approve or edit memory here. Use `beacon-memory-distill`.
+- Never approve or edit memory here, locally or through Beacon Cloud. Use
+  `beacon-memory-distill`.
 - Do not write to user-level skill directories (such as `~/.agents/skills`). Beacon memory
   is scoped to a project.

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/hookcmd"
 )
 
 type Level string
@@ -48,9 +50,27 @@ var cursorRuntime = hookRuntime{
 	displayName: "Cursor",
 	configPath:  cursorHooksJSONPath,
 	install:     installCursorHooksJSON,
-	uninstall:   removeEndpointHooks,
+	uninstall:   removeCursorEndpointHooks,
 	isInstalled: isCursorInstalledAt,
 }
+
+// Extension points for a build of Beacon that compiles in hook subcommands of its own (see
+// version.Edition). Both are nil in this build, which installs exactly the hooks listed in
+// installCursorHooksJSON.
+var (
+	// cursorExtraHooks returns further hook entries to install for Cursor, keyed by event, given
+	// the command prefix Beacon's own hooks use. Their commands carry that prefix, so repair,
+	// status and uninstall treat them as Beacon's hooks. Every event the map names is stripped of
+	// Beacon's entries like the events Beacon installs, then gets Beacon's own entry, if it has
+	// one, followed by these. An event named with no entries is stripped and left with only the
+	// user's, so a build stops installing a hook by naming its event with none: an event left out
+	// of the map keeps whatever Beacon wrote there until an uninstall.
+	cursorExtraHooks func(prefix string) map[string][]HookRef
+
+	// cursorHooksChanged runs after Beacon has written its hooks into a Cursor hooks.json
+	// (installed true) or taken them out (installed false), as whoever ran the install.
+	cursorHooksChanged func(hooksPath string, installed bool) error
+)
 
 func InstallCursor(opts CursorOptions) (CursorStatus, error) {
 	status, err := installRuntimeHooks(cursorRuntime, RuntimeOptions(opts))
@@ -91,30 +111,62 @@ func installCursorHooksJSON(path, binaryPath, logPath, configPath string) error 
 		return err
 	}
 	commandPrefix := endpointCommandPrefix("cursor", binaryPath, logPath, configPath)
-	endpointHooks := map[string]HookRef{
-		"sessionStart":       {Command: commandPrefix + " session-start"},
-		"beforeSubmitPrompt": {Command: commandPrefix + " prompt-submit", Timeout: 30},
-		"preToolUse":         {Command: commandPrefix + " pre-tool", Matcher: "Write|Edit|MultiEdit|Shell|MCP"},
-		"afterAgentThought":  {Command: commandPrefix + " agent-thought"},
-		"afterAgentResponse": {Command: commandPrefix + " agent-response"},
-		"afterFileEdit":      {Command: commandPrefix + " post-tool"},
-		"postToolUse":        {Command: commandPrefix + " post-tool"},
-		"postToolUseFailure": {Command: commandPrefix + " post-tool"},
-		"stop":               {Command: commandPrefix + " stop"},
-		"sessionEnd":         {Command: commandPrefix + " session-end"},
-	}
-	for hookName, ref := range endpointHooks {
+	// The subcommand-to-event wiring is hookcmd.CursorEvents, which the hooks binary also reads to
+	// decide which Cursor entries a Claude Code hook running the same subcommand may defer to.
+	entries := make(map[string][]json.RawMessage)
+	for subcommand, events := range hookcmd.CursorEvents {
+		ref := HookRef{Command: commandPrefix + " " + subcommand}
+		switch subcommand {
+		case "prompt-submit":
+			ref.Timeout = 30
+		case "pre-tool":
+			ref.Matcher = "Write|Edit|MultiEdit|Shell|MCP"
+		}
 		entry, err := json.Marshal(ref)
 		if err != nil {
 			return err
 		}
-		hooksFile.hooks[hookName] = mergeEndpointHook(hooksFile.hooks[hookName], entry)
+		for _, event := range events {
+			entries[event] = []json.RawMessage{entry}
+		}
+	}
+	if cursorExtraHooks != nil {
+		for hookName, refs := range cursorExtraHooks(commandPrefix) {
+			list := entries[hookName]
+			for _, ref := range refs {
+				entry, err := json.Marshal(ref)
+				if err != nil {
+					return err
+				}
+				list = append(list, entry)
+			}
+			entries[hookName] = list
+		}
+	}
+	for hookName, list := range entries {
+		existing := hooksFile.hooks[hookName]
+		merged := mergeEndpointHooks(existing, list)
+		if len(merged) == 0 {
+			// Only an extension's event can end up empty. Drop it when Beacon's entries were
+			// all it held; an event that was already empty is the user's and stays as it was.
+			if len(existing) > 0 {
+				delete(hooksFile.hooks, hookName)
+			}
+			continue
+		}
+		hooksFile.hooks[hookName] = merged
 	}
 	data, err := hooksFile.marshal()
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return err
+	}
+	if cursorHooksChanged != nil {
+		return cursorHooksChanged(path, true)
+	}
+	return nil
 }
 
 func RenderCursorCloudHooks(opts CursorCloudOptions) (string, error) {
@@ -251,14 +303,28 @@ func isEndpointHookEntry(entry json.RawMessage) bool {
 	return isEndpointHook(cursorHookCommand(entry))
 }
 
-func mergeEndpointHook(existing []json.RawMessage, ref json.RawMessage) []json.RawMessage {
+// mergeEndpointHooks keeps an event's entries that are not Beacon's, in order, and appends refs.
+func mergeEndpointHooks(existing []json.RawMessage, refs []json.RawMessage) []json.RawMessage {
 	out := make([]json.RawMessage, 0, len(existing))
 	for _, item := range existing {
 		if !isEndpointHookEntry(item) {
 			out = append(out, item)
 		}
 	}
-	return append(out, ref)
+	return append(out, refs...)
+}
+
+func removeCursorEndpointHooks(path string) (bool, error) {
+	removed, err := removeEndpointHooks(path)
+	if err != nil {
+		return removed, err
+	}
+	if cursorHooksChanged != nil {
+		if err := cursorHooksChanged(path, false); err != nil {
+			return removed, err
+		}
+	}
+	return removed, nil
 }
 
 func removeEndpointHooks(path string) (bool, error) {
@@ -302,7 +368,7 @@ func removeEndpointHooks(path string) (bool, error) {
 }
 
 func isEndpointHook(command string) bool {
-	return isEndpointHookCommand(command, "cursor")
+	return hookcmd.IsEndpointHook(command, "cursor")
 }
 
 func isCursorInstalledAt(path string) bool {

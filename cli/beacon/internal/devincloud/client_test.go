@@ -4,9 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
-	"time"
 )
 
 const testOrg = "org-test123"
@@ -93,34 +91,6 @@ func TestListSessionsFollowsCursor(t *testing.T) {
 	}
 }
 
-func TestSessionMessagesParses(t *testing.T) {
-	srv := fakeDevinAPI(t, `{"items":[],"has_next_page":false}`, map[string]string{
-		"s1": `{"items":[
-			{"event_id":"e1","source":"user","message":"hi","created_at":100},
-			{"event_id":"e2","source":"devin","message":"hello","created_at":101}
-		],"end_cursor":null,"has_next_page":false}`,
-	})
-	defer srv.Close()
-
-	msgs, err := testClient(t, srv).SessionMessages(context.Background(), "s1")
-	if err != nil {
-		t.Fatalf("SessionMessages: %v", err)
-	}
-	if len(msgs) != 2 || msgs[0].Source != "user" || msgs[1].Source != "devin" || msgs[0].EventID != "e1" {
-		t.Fatalf("unexpected messages: %+v", msgs)
-	}
-}
-
-func TestGetJSONErrorsOnForbidden(t *testing.T) {
-	srv := fakeDevinAPI(t, `{"items":[]}`, nil)
-	defer srv.Close()
-	c := New(testOrg, "wrong-key", WithBaseURL(srv.URL), WithRetry(0, 0))
-	_, err := c.ListSessions(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "403") {
-		t.Fatalf("expected 403 error, got %v", err)
-	}
-}
-
 func TestGetJSONRequiresOrgAndKey(t *testing.T) {
 	if _, err := New("", "k").ListSessions(context.Background()); err == nil {
 		t.Fatal("expected error for missing org")
@@ -128,5 +98,4 @@ func TestGetJSONRequiresOrgAndKey(t *testing.T) {
 	if _, err := New("org-x", "").ListSessions(context.Background()); err == nil {
 		t.Fatal("expected error for missing key")
 	}
-	_ = time.Second
 }

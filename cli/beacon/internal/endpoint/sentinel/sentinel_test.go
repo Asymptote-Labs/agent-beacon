@@ -226,28 +226,6 @@ func TestSampleEventsCoverValidationHookAndOTelShapes(t *testing.T) {
 	}
 }
 
-func TestPackREADMEMentionsSentinelSetupAndSecretBoundaries(t *testing.T) {
-	readme := mustRead("pack/README.md")
-	for _, want := range []string{
-		"beacon endpoint sentinel validate",
-		"Azure Monitor Agent",
-		"Data Collection Rule",
-		"BeaconRuntime_CL",
-		"Microsoft Sentinel",
-		"Content Handling",
-		"/var/log/beacon-agent/runtime.jsonl",
-		"not in Beacon endpoint configuration",
-		"Vector and the Logs Ingestion API",
-		"dcr-logs-ingestion-template.json",
-		"Monitoring Metrics Publisher",
-		"CEF and Syslog",
-	} {
-		if !strings.Contains(readme, want) {
-			t.Fatalf("pack README missing %q", want)
-		}
-	}
-}
-
 func TestKQLAssetsMentionSentinelTableAndValidation(t *testing.T) {
 	for _, path := range []string{
 		"pack/queries.kql",

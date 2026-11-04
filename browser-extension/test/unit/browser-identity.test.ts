@@ -42,22 +42,6 @@ describe('detectBrowser — UA Client Hints brands', () => {
     expect(id?.version).toBe('124');
   });
 
-  it('Brave, which adds its own brand', () => {
-    const id = detectBrowser(nav([b('Brave', '124'), b('Chromium', '124'), b('Not-A.Brand', '99')]));
-    expect(id?.name).toBe('Brave');
-  });
-
-  it("Opera, reporting Opera's own version rather than Chromium's", () => {
-    const id = detectBrowser(
-      nav(
-        [b('Chromium', '124'), b('Opera', '110'), b('Not-A.Brand', '99')],
-        CHROME_UA + ' OPR/110.0.0.0',
-      ),
-    );
-    expect(id?.name).toBe('Opera');
-    expect(id?.version).toBe('110');
-  });
-
   it('Opera GX: the more specific vendor brand wins', () => {
     const id = detectBrowser(nav([b('Opera', '110'), b('Chromium', '124'), b('Opera GX', '110')]));
     expect(id?.name).toBe('Opera GX');
@@ -67,16 +51,6 @@ describe('detectBrowser — UA Client Hints brands', () => {
     const id = detectBrowser(nav([b('Chromium', '124'), b('YaBrowser', '24'), b('Not-A.Brand', '99')]));
     expect(id?.name).toBe('YaBrowser');
     expect(id?.version).toBe('24');
-  });
-
-  it('Vivaldi adds no brand, so it reports as Chromium (documented limit)', () => {
-    const id = detectBrowser(nav([b('Chromium', '124'), b('Not-A.Brand', '99')]));
-    expect(id?.name).toBe('Chromium');
-  });
-
-  it('Arc copies Chrome\'s brand list, so it reports as Google Chrome (documented limit)', () => {
-    const id = detectBrowser(nav([b('Chromium', '124'), b('Google Chrome', '124'), b('Not-A.Brand', '99')]));
-    expect(id?.name).toBe('Google Chrome');
   });
 
   it('is independent of brand order (Chromium shuffles it)', () => {

@@ -21,6 +21,14 @@ func freeTestPort(t *testing.T) int {
 	return ln.Addr().(*net.TCPAddr).Port
 }
 
+// fastPortPolling shortens the port waits' re-check interval for the test.
+func fastPortPolling(t *testing.T) {
+	t.Helper()
+	old := pollInterval
+	pollInterval = 2 * time.Millisecond
+	t.Cleanup(func() { pollInterval = old })
+}
+
 // serveHealth answers 200 on a free loopback port, standing in for the health_check extension.
 func serveHealth(t *testing.T) int {
 	t.Helper()
@@ -108,6 +116,9 @@ func TestCheckStatusNamesTheHealthPortItProbed(t *testing.T) {
 
 	status := CheckStatus(cfg)
 
+	if !status.GRPCReady || !status.HTTPReady {
+		t.Fatalf("OTLP ports should appear open: %#v", status)
+	}
 	if status.HealthReady {
 		t.Fatalf("HealthReady = true with nothing on the health port: %#v", status)
 	}
@@ -119,6 +130,7 @@ func TestCheckStatusNamesTheHealthPortItProbed(t *testing.T) {
 // #447: the readiness preflight used to check only the OTLP ports, so a health port held by the
 // system collector passed it and the install failed later with an error blaming the OTLP ports.
 func TestWaitForPortsAvailableReportsAHealthPortConflict(t *testing.T) {
+	fastPortPolling(t)
 	healthLn, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -126,7 +138,7 @@ func TestWaitForPortsAvailableReportsAHealthPortConflict(t *testing.T) {
 	defer healthLn.Close()
 	healthPort := healthLn.Addr().(*net.TCPAddr).Port
 
-	err = WaitForPortsAvailable(freeTestPort(t), freeTestPort(t), healthPort, 50*time.Millisecond)
+	err = WaitForPortsAvailable(freeTestPort(t), freeTestPort(t), healthPort, 10*time.Millisecond)
 
 	if err == nil {
 		t.Fatal("WaitForPortsAvailable returned nil with the health port held")

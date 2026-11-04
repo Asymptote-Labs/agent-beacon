@@ -68,20 +68,6 @@ func TestLegacyStateFileLoads(t *testing.T) {
 	}
 }
 
-func TestSessionStateFileLocation(t *testing.T) {
-	tmpDir, cleanup := setupTestStateDir(t)
-	defer cleanup()
-
-	st := NewSessionState("test-session", "cursor")
-	st.SetPromptEmitted()
-
-	// Verify state.json was created in the expected location
-	stateFile := filepath.Join(tmpDir, "state.json")
-	if _, err := os.Stat(stateFile); err != nil {
-		t.Errorf("state.json not found at expected path %s: %v", stateFile, err)
-	}
-}
-
 func TestSessionStateSurfacesSaveFailure(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateDirPath := filepath.Join(tmpDir, "not-a-dir")

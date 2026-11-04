@@ -13,7 +13,7 @@ Beacon models each event as an action plus a set of typed entities. The [`event`
 |--------|---------|---------------|
 | `endpoint` | Device and agent context for the machine where telemetry was collected | `hostname`, `os`, `agent_version` |
 | `user` | Local operating system user context | `name`, `uid` |
-| `harness` | Agent harness that produced the signal | `name`, `version`, `executable_path`, `config_path` |
+| `harness` | Agent harness that produced the signal | `name`, `version`, `executable_path`, `config_path`, `profile` |
 | `origin` | Event origin for local endpoint, cloud, or CI telemetry | `local`, `cloud`, `ci` |
 | `run` | CI or ephemeral run context | `provider`, `run_id`, `run_attempt`, `workflow`, `job`, `event_name`, `commit`, `repository`, `branch`, `pr`, `pr_number`, `actor`, `ephemeral` |
 | `session` | Conversation or runtime session context | `id`, `working_directory` |

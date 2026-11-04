@@ -126,11 +126,26 @@ function shellMutationPaths(tool, args) {
   if (name !== "bash" && !name.includes("shell")) return []
   const command = String(args?.command || args?.cmd || "")
   const paths = []
-  const pattern =
-    /(?:(?:^|&&|\|\||;|\n)[ \t]*)(?:sudo\s+)?(?:command\s+)?(?:\/bin\/)?(?:rm|unlink)\s+(?:-[^\s]+\s+)*(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/g
+  // Operands end at a separator or a redirection; `2>/dev/null` is not a path.
+  const operand = /[ \t]+(?:"([^"]+)"|'([^']+)'|([^\s;&|<>"']+))(?=[\s;&|]|$)/y
+  const pattern = /(?:(?:^|&&|\|\||;|\n)[ \t]*)(?:sudo\s+)?(?:command\s+)?(?:\/bin\/)?(?:rm|unlink)(?=[ \t])/g
   for (const match of command.matchAll(pattern)) {
-    const path = match[1] || match[2] || match[3]
-    if (path) paths.push(path)
+    operand.lastIndex = match.index + match[0].length
+    let options = true
+    for (let arg = operand.exec(command); arg; arg = operand.exec(command)) {
+      const bare = arg[3]
+      // A comment ends the command, and a command substitution is another command.
+      if (bare?.startsWith("#") || /\$\(|`/.test(arg[0])) break
+      if (options && bare === "--") {
+        options = false
+        continue
+      }
+      if (options && bare?.startsWith("-")) continue
+      // A variable or glob is not a path this can know, and a wrong path is worse than none.
+      if (/\$/.test(arg[1] || "") || (bare && /[$*?[]|^~/.test(bare))) continue
+      const path = arg[1] || arg[2] || bare
+      if (path) paths.push(path)
+    }
   }
   return paths
 }
@@ -157,6 +172,13 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
       .then(() => sendToBeacon(client, value))
       .catch((err) => debugLog(client, "Beacon event queue failed", { error: String(err), type: value?.type }))
     return eventQueue
+  }
+  // Only the caller times out; ordered delivery still governs session cleanup.
+  const enqueueDirect = (value) => {
+    const completed = enqueue(value)
+    let timer
+    const deadline = new Promise((resolve) => { timer = setTimeout(resolve, sendTimeoutMs) })
+    return Promise.race([completed, deadline]).finally(() => clearTimeout(timer))
   }
   const rememberFilePath = (tool, args, sid, callID, includeShell = false) => {
     const paths = []
@@ -248,7 +270,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
         messageRoles.set(output.message.id, "user")
         messageSessions.set(output.message.id, sessionID(input))
       }
-      await enqueue({
+      await enqueueDirect({
         type: "chat.message",
         session_id: sessionID(input),
         model: modelName(input),
@@ -258,7 +280,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
       })
     },
     "command.execute.before": async (input, output) => {
-      await enqueue(
+      await enqueueDirect(
         payload("command.execute.before", {
           session_id: sessionID(input),
           command_name: input?.command,
@@ -276,7 +298,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
         started_at: Date.now(),
       })
       rememberFilePath(input?.tool, output?.args || {}, sid, input?.callID)
-      await enqueue(
+      await enqueueDirect(
         payload("tool.execute.before", {
           session_id: sessionID(input),
           tool_name: input?.tool,
@@ -290,7 +312,7 @@ export const BeaconEndpointPlugin = async ({ project, directory, worktree, clien
       const args = input?.args || active?.args || {}
       const exitCode = output?.metadata?.exit ?? output?.metadata?.exitCode ?? output?.metadata?.exit_code
       rememberFilePath(input?.tool, args, sessionID(input), input?.callID, exitCode === 0)
-      await enqueue(
+      await enqueueDirect(
         payload("tool.execute.after", {
           session_id: sessionID(input),
           tool_name: input?.tool,

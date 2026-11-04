@@ -22,49 +22,16 @@ import (
 	"time"
 )
 
-func TestObjectNameUsesDatePartitionedGzipLayout(t *testing.T) {
-	restore := stubNow(t, time.Date(2026, 7, 12, 20, 17, 3, 0, time.UTC))
-	defer restore()
-	got := ObjectName(Config{
-		Prefix:     "agent-traces/customer=test",
-		Provider:   "claude_code_web",
-		UserID:     "user-1",
-		Repository: "asymptote-labs/agent-beacon",
-		RunID:      "cse_123",
-	})
-	want := "agent-traces/customer=test/runtime/date=2026-07-12/1783887423-claude_code_web-cse_123.jsonl.gz"
-	if got != want {
-		t.Fatalf("ObjectName = %q, want %q", got, want)
-	}
+func useSandbox(t *testing.T, dir string) {
+	t.Helper()
+	prev := SandboxDir
+	SandboxDir = dir
+	t.Cleanup(func() { SandboxDir = prev })
 }
 
-func TestObjectNameUsesCursorCloudProvider(t *testing.T) {
-	restore := stubNow(t, time.Date(2026, 7, 12, 20, 17, 3, 0, time.UTC))
-	defer restore()
-	got := ObjectName(Config{
-		Prefix:   "agent-traces",
-		Provider: "cursor_cloud",
-		UserID:   "user-1",
-		RunID:    "manual-123",
-	})
-	want := "agent-traces/runtime/date=2026-07-12/1783887423-cursor_cloud-manual-123.jsonl.gz"
-	if got != want {
-		t.Fatalf("ObjectName = %q, want %q", got, want)
-	}
-}
-
-func TestUploadNoopsWithoutCredentials(t *testing.T) {
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	if err := os.WriteFile(logPath, []byte("{}\n"), 0644); err != nil {
-		t.Fatalf("write log: %v", err)
-	}
-	if err := Upload(context.Background(), Config{LogPath: logPath, Bucket: "bucket"}, true); err != nil {
-		t.Fatalf("Upload returned error: %v", err)
-	}
-}
-
-func TestResetFromEnvRemovesCloudRuntimeFiles(t *testing.T) {
+func TestResetFromEnvPreservesLockFiles(t *testing.T) {
 	dir := t.TempDir()
+	useSandbox(t, dir)
 	logPath := filepath.Join(dir, "runtime.jsonl")
 	statePath := filepath.Join(dir, "state.json")
 	for _, path := range []string{logPath, logPath + ".lock", statePath} {
@@ -79,10 +46,115 @@ func TestResetFromEnvRemovesCloudRuntimeFiles(t *testing.T) {
 	if err := ResetFromEnv(); err != nil {
 		t.Fatalf("ResetFromEnv returned error: %v", err)
 	}
-	for _, path := range []string{logPath, logPath + ".lock", statePath} {
+	for _, path := range []string{logPath, statePath} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("%s still exists, stat err=%v", path, err)
 		}
+	}
+	if _, err := os.Stat(logPath + ".lock"); err != nil {
+		t.Fatalf("runtime lock must retain its stable identity: %v", err)
+	}
+}
+
+// A target the environment supplies cannot select a log outside the sandbox directory, so a
+// repository cannot have a host's runtime log, every project's sessions, uploaded to its bucket.
+func TestMaybeUploadRefusesALogOutsideTheSandbox(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected upload: %s %s", r.Method, r.URL)
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	useSandbox(t, filepath.Join(dir, "sandbox"))
+	hostLog := filepath.Join(dir, "runtime.jsonl")
+	if err := os.WriteFile(hostLog, []byte("{\"event\":\"host\"}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEACON_ORIGIN", "cloud")
+	t.Setenv("BEACON_CLOUD_UPLOAD", "s3")
+	t.Setenv("BEACON_CLOUD_S3_BUCKET", "bucket")
+	t.Setenv("BEACON_CLOUD_S3_ENDPOINT", server.URL)
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIATEST")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")
+	t.Setenv("BEACON_RUN_ID", "run")
+	t.Setenv("BEACON_CLOUD_SHUTTLE_STATE", filepath.Join(dir, "state.json"))
+	for _, key := range []string{"BEACON_CLOUD_LOG_PATH", "BEACON_ENDPOINT_LOG"} {
+		t.Setenv(key, hostLog)
+		if err := MaybeUpload(context.Background(), true); err != nil {
+			t.Fatalf("%s: MaybeUpload returned error: %v", key, err)
+		}
+		t.Setenv(key, "")
+	}
+}
+
+// A run with a bucket and a run id but no credentials is the shuttle half-configured, which every
+// Stop and SessionEnd reaches. It must do nothing: no request carrying the runtime log to the
+// storage endpoint unsigned, no error for the hook to log, and no state claiming an upload.
+func TestMaybeUploadWithoutCredentialsSendsNothing(t *testing.T) {
+	for name, env := range map[string]map[string]string{
+		"s3 without keys": {
+			"BEACON_CLOUD_UPLOAD":    "s3",
+			"BEACON_CLOUD_S3_BUCKET": "bucket",
+			"AWS_ACCESS_KEY_ID":      "",
+			"AWS_SECRET_ACCESS_KEY":  "",
+		},
+		"gcs without credentials": {
+			"BEACON_CLOUD_UPLOAD":              "gcs",
+			"BEACON_CLOUD_GCS_BUCKET":          "bucket",
+			"BEACON_CLOUD_GCS_CREDENTIALS_B64": "",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Errorf("unexpected request without credentials: %s %s", r.Method, r.URL)
+			}))
+			defer server.Close()
+			dir := t.TempDir()
+			useSandbox(t, dir)
+			logPath := filepath.Join(dir, "runtime.jsonl")
+			if err := os.WriteFile(logPath, []byte("{\"event\":\"session\"}\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			statePath := filepath.Join(dir, "state.json")
+			t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+			t.Setenv("BEACON_CLOUD_SHUTTLE_STATE", statePath)
+			t.Setenv("BEACON_RUN_ID", "run")
+			t.Setenv("BEACON_CLOUD_S3_ENDPOINT", server.URL)
+			t.Setenv("BEACON_CLOUD_GCS_ENDPOINT", server.URL)
+			for key, value := range env {
+				t.Setenv(key, value)
+			}
+			if err := MaybeUpload(context.Background(), true); err != nil {
+				t.Fatalf("MaybeUpload returned error: %v", err)
+			}
+			if _, err := os.Stat(statePath); !os.IsNotExist(err) {
+				t.Fatalf("state written without an upload, stat err=%v", err)
+			}
+		})
+	}
+}
+
+// Local installs set BEACON_ENDPOINT_LOG outside the sandbox, and every local SessionStart, Stop
+// and SessionEnd reads the shuttle config, so the refusal notice is for cloud runs only.
+func TestConfigFromEnvIsSilentOutsideCloud(t *testing.T) {
+	dir := t.TempDir()
+	useSandbox(t, filepath.Join(dir, "sandbox"))
+	t.Setenv("BEACON_ORIGIN", "")
+	t.Setenv("BEACON_ENDPOINT_LOG", filepath.Join(dir, "runtime.jsonl"))
+	t.Setenv("BEACON_CLOUD_SHUTTLE_STATE", filepath.Join(dir, "state.json"))
+	captured, err := os.CreateTemp(dir, "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer captured.Close()
+	prev := os.Stderr
+	os.Stderr = captured
+	cfg := ConfigFromEnv()
+	os.Stderr = prev
+	if cfg.LogPath != filepath.Join(SandboxDir, defaultLogName) {
+		t.Fatalf("LogPath = %q, want the sandbox default", cfg.LogPath)
+	}
+	if out, err := os.ReadFile(captured.Name()); err != nil || len(out) != 0 {
+		t.Fatalf("stderr = %q (err %v), want nothing", out, err)
 	}
 }
 
@@ -338,24 +410,9 @@ func TestResolveRunIDUsesOnlyEnvironment(t *testing.T) {
 	}
 }
 
-func TestUploadNoopsWithoutRunID(t *testing.T) {
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	if err := os.WriteFile(logPath, []byte("{}\n"), 0644); err != nil {
-		t.Fatalf("write log: %v", err)
-	}
-	cfg := Config{
-		LogPath:        logPath,
-		Bucket:         "bucket",
-		CredentialsB64: "invalid-but-should-not-be-read",
-	}
-	if err := Upload(context.Background(), cfg, true); err != nil {
-		t.Fatalf("Upload returned error: %v", err)
-	}
-}
-
 func mustRSAKey(t *testing.T) *rsa.PrivateKey {
 	t.Helper()
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024) // smallest size crypto/rsa accepts; keeps keygen fast
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}

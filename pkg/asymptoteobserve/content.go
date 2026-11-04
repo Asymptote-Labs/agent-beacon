@@ -59,6 +59,8 @@ func SystemInstructionParts(text string) []interface{} {
 //   - a message whose body is "content" rather than "parts", as a string or a
 //     block list, and a part whose text is under "text" rather than "content",
 //     the shapes several session mappers and providers write;
+//   - a legacy browser message {"role", "text"}, only when both "parts" and
+//     "content" are absent; this body is text, never reasoning;
 //   - a {"messages": [...]} wrapper;
 //   - a bare string, as the whole value, a message body or a list element,
 //     which is text and never reasoning;
@@ -112,7 +114,13 @@ func collectGenAIText(v interface{}, role, partType string, out *[]string) {
 			return
 		}
 		if !hasParts {
-			body = typed["content"]
+			var hasContent bool
+			body, hasContent = typed["content"]
+			if !hasContent && hasRole && (kind == "" || kind == "message") {
+				// Older browser captures wrote their internal role/text message
+				// directly. Never override an explicit (even empty) typed body.
+				body, _ = typed["text"].(string)
+			}
 		}
 		collectGenAIText(body, role, partType, out)
 	case nil, bool, float64, float32, int, int64, int32, json.Number:
@@ -151,12 +159,19 @@ func ReasoningOutputMessages(text string) []interface{} {
 // RetainedContent builds the content marker for an event that keeps text
 // verbatim -- a prompt, an assistant response, command output, a diff.
 //
-// Hash and Bytes are computed over the original text, before the writer's
-// redaction and truncation touch the stored copy, so an event keeps a stable
-// identifier and a true size even when what is stored is shorter. That is the
-// point of the marker: without it a reader cannot tell a short response from a
-// truncated long one, and cannot tell that two truncated copies of the same
-// response are the same response.
+// Hash is computed over the whole text after secret redaction (RedactString)
+// and before the writer's truncation; Bytes is the size of the original text.
+// So an event keeps a stable identifier and a true size even when what is
+// stored is shorter. That is the point of the marker: without it a reader
+// cannot tell a short response from a truncated long one, and cannot tell that
+// two truncated copies of the same response are the same response.
+//
+// The hash is of the redacted text because it leaves the machine wherever the
+// text does not (a Metadata-only forward keeps it and drops the text). A hash of
+// the text before redaction would let anyone holding the event confirm a guess
+// at the secret the stored copy shows as [REDACTED]; a hash of the redacted text
+// says nothing the stored text does not. Text with nothing to redact hashes
+// exactly as it is.
 //
 // storeLimit is the per-string truncation limit the writer emitting this event
 // will apply to the text, and it is a parameter rather than a constant because
@@ -172,7 +187,8 @@ func RetainedContent(text string, storeLimit int) *ContentInfo {
 	if text == "" {
 		return nil
 	}
-	sum := sha256.Sum256([]byte(text))
+	redacted := RedactString(text)
+	sum := sha256.Sum256([]byte(redacted))
 	info := &ContentInfo{
 		Retention: ContentRetentionFull,
 		Included:  true,
@@ -182,10 +198,29 @@ func RetainedContent(text string, storeLimit int) *ContentInfo {
 	if storeLimit > 0 && len(text) > storeLimit {
 		info.Truncated = true
 	}
-	if RedactString(text) != text {
+	if redacted != text {
 		info.Redacted = true
 	}
 	return info
+}
+
+// RetainedDiff is RetainedContent for a retained diff, together with the
+// file.diff_hash and file.diff_bytes that sit beside it. All three come from one
+// redaction of diff, so diff_hash is the marker's hash of the redacted diff,
+// diff_bytes its original size, and every capture path computes them the same
+// way. An empty diff returns nil, "" and 0.
+func RetainedDiff(diff string, storeLimit int) (content *ContentInfo, diffHash string, diffBytes int) {
+	content = RetainedContent(diff, storeLimit)
+	if content == nil {
+		return nil, "", 0
+	}
+	return content, content.Hash, content.Bytes
+}
+
+// RetainedDiffFields is RetainedDiff in the map form used by the hook adapter.
+func RetainedDiffFields(diff string, storeLimit int) (content map[string]interface{}, diffHash string, diffBytes int) {
+	info, diffHash, diffBytes := RetainedDiff(diff, storeLimit)
+	return contentFields(info), diffHash, diffBytes
 }
 
 // RetainedContentFields is RetainedContent in the map form used by the hook

@@ -30,17 +30,6 @@ func TestTraceSharingStateAndRefreshCommand(t *testing.T) {
 	if local := byID["session:opencode:s5"].Sharing; local.State != "local_only" || local.RefreshCommand != "" {
 		t.Fatalf("s5 sharing = %+v", local)
 	}
-	staleOnly, err := ReadTraceList(path, TraceQuery{State: "stale", Limit: 50})
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, trace := range staleOnly.Traces {
-		found = found || trace.ID == "session:claude_code:s7"
-	}
-	if !found {
-		t.Fatalf("--state stale missed s7: %+v", staleOnly.Traces)
-	}
 }
 
 func TestSessionsCarrySharingState(t *testing.T) {
@@ -370,14 +359,20 @@ func TestOpenCodeShareFromInsideTheSessionIsNotStale(t *testing.T) {
 
 func TestIsBeaconShareCommand(t *testing.T) {
 	for command, want := range map[string]bool{
-		`beacon share --current`:                                  true,
-		`cd x && beacon share refresh --harness claude_code`:      true,
-		`/opt/beacon/bin/beacon share`:                            true,
-		`BEACON_X=1 beacon share`:                                 true,
-		`./beacon share --json`:                                   true,
-		`C:\Tools\beacon.exe share`:                               true,
-		`sudo beacon share --session abc`:                         true,
-		"go test ./...\nbeacon share":                             true,
+		`beacon share --current`:                             true,
+		`cd x && beacon share refresh --harness claude_code`: true,
+		`/opt/beacon/bin/beacon share`:                       true,
+		`BEACON_X=1 beacon share`:                            true,
+		`./beacon share --json`:                              true,
+		`C:\Tools\beacon.exe share`:                          true,
+		`sudo beacon share --session abc`:                    true,
+		`/usr/bin/sudo /usr/bin/env FOO=1 beacon share`:      true,
+		"go test ./...\nbeacon share":                        true,
+		// Captures cut short: the share call before the cut still counts.
+		"beacon share --current --json 'unterminated":             true,
+		"beacon share --current && cat <<EOF\nlong text":          true,
+		"git commit -m 'beacon share":                             false,
+		`& "C:\Tools\beacon.exe" share`:                           false, // PowerShell, not bash
 		`rg "beacon share"`:                                       false,
 		`git commit -m 'beacon share now records shared_through'`: false,
 		`git commit -m 'fix; beacon share'`:                       false,

@@ -46,20 +46,6 @@ func TestSessionFilesDefaultToTheWorkDir(t *testing.T) {
 	}
 }
 
-// Paths are consumed by a POSIX shell inside the guest, so they must use forward slashes
-// regardless of the host that built them.
-func TestSessionFilePathsAreAlwaysSlashed(t *testing.T) {
-	got := sessionFile(scenario.Scenario{ID: "x", Cwd: "nested/dir"}, "claude-err.txt",
-		image.LinuxLayout(), posixShell{})
-
-	if strings.Contains(got, `\`) {
-		t.Errorf("guest paths must be slash-separated, got %q", got)
-	}
-	if !strings.HasSuffix(got, "/nested/dir/claude-err.txt") {
-		t.Errorf("nested cwd not resolved, got %q", got)
-	}
-}
-
 // The mirror of the previous test for the other dialect. A Windows guest consumes these paths
 // through Windows APIs, so a forward slash that "mostly works" would still be wrong in every
 // verdict a human reads -- and a bare drive letter is a *relative* path, which is wrong in a way

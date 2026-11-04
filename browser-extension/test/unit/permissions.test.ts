@@ -175,6 +175,29 @@ describe('mountPermissionBanner', () => {
     expect(els['perm-missing'].hidden).toBe(true);
   });
 
+  it.each([false, true])('keeps the newest permission state when an older check finishes late (latest granted=%s)', async (latestGranted) => {
+    const { doc, els } = fakeDoc();
+    const { api } = fakeApi([]);
+    const oldReads: Array<(granted: boolean) => void> = [];
+    let firstCheck = true;
+    let changed: (() => void) | undefined;
+    api.permissions.contains = () => firstCheck
+      ? new Promise<boolean>(resolve => oldReads.push(resolve))
+      : Promise.resolve(latestGranted);
+    api.permissions.onRemoved = { addListener: fn => { changed = fn; } };
+    mountPermissionBanner(api, doc);
+    await settle();
+    expect(oldReads).toHaveLength(HOSTS.length);
+    firstCheck = false;
+    changed!();
+    await settle();
+    expect(els['perm-missing'].hidden).toBe(latestGranted);
+    oldReads.forEach(resolve => resolve(!latestGranted));
+    await settle();
+    expect(els['perm-missing'].hidden).toBe(latestGranted);
+    expect(els['perm-missing'].dataset.state).toBe(latestGranted ? 'granted' : 'missing');
+  });
+
   it('does nothing on a page without the banner markup', () => {
     const doc = { getElementById: () => null } as unknown as Document;
     expect(() => mountPermissionBanner(fakeApi([]).api, doc)).not.toThrow();

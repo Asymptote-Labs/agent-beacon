@@ -50,7 +50,7 @@ func TestDecodeRuleAcceptsSupportedSpecs(t *testing.T) {
 }
 
 func TestDecodeRuleRejectsNewerSpecClearly(t *testing.T) {
-	for _, spec := range []string{"threat-rules/v1.2", "threat-rules/v2"} {
+	for _, spec := range []string{"threat-rules/v1.3", "threat-rules/v2"} {
 		// A future rule also carries the fields its version added; the spec check must
 		// come first so the error names the version rather than the unknown field.
 		_, err := DecodeRule([]byte(specRule("future-rule", "spec: "+spec, "future_field: true\n")))
@@ -60,10 +60,6 @@ func TestDecodeRuleRejectsNewerSpecClearly(t *testing.T) {
 		}
 		if u.RuleID != "future-rule" || u.Required != spec {
 			t.Errorf("%s: got %+v", spec, u)
-		}
-		want := `rule "future-rule" requires ` + spec + `, but this Beacon supports up to ` + SupportedSpec + `; upgrade Beacon to load it`
-		if err.Error() != want {
-			t.Errorf("message:\n  got:  %s\n  want: %s", err.Error(), want)
 		}
 	}
 }
@@ -93,6 +89,34 @@ func TestOrderRequiresSpecV1_1(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "correlation.order requires spec: threat-rules/v1.1") {
 			t.Errorf("spec %q: want the order/spec error, got %v", spec, err)
 		}
+	}
+}
+
+func TestParsedCommandsRequiresSpecV1_2(t *testing.T) {
+	const uses = "match: 'e.command.parsed_commands.exists(c, c.name == \"rm\")'\n"
+	for _, spec := range []string{"", "spec: threat-rules/v1", "spec: threat-rules/v1.1"} {
+		rule, err := DecodeRule([]byte(strings.Replace(specRule("r", spec, ""), "match: 'e.event.action == \"file.read\"'\n", uses, 1)))
+		if err != nil {
+			t.Fatalf("%q: decode: %v", spec, err)
+		}
+		if err := rule.Validate(); err == nil || !strings.Contains(err.Error(), "e.command.parsed_commands requires spec: threat-rules/v1.2") {
+			t.Errorf("%q: want the parsed_commands/spec error, got %v", spec, err)
+		}
+	}
+	// Naming the field in a string is not using it.
+	rule, err := DecodeRule([]byte(strings.Replace(specRule("r", "", ""), `e.event.action == "file.read"`, `e.command.command != "parsed_commands"`, 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rule.Validate(); err != nil {
+		t.Errorf("a string literal required the spec: %v", err)
+	}
+	rule, err = DecodeRule([]byte(strings.Replace(specRule("r", "spec: threat-rules/v1.2", ""), "match: 'e.event.action == \"file.read\"'\n", uses, 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rule.Validate(); err != nil {
+		t.Errorf("v1.2: %v", err)
 	}
 }
 

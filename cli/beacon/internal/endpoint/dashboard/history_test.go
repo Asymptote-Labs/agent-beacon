@@ -94,16 +94,23 @@ func mustJSON(t *testing.T, value any) string {
 	return string(data)
 }
 
+// parityQueries are the search strings the parity test answers both ways: plain words, phrases,
+// FTS syntax a naive query would pass through, punctuation, non-ASCII text and IDs.
+var parityQueries = []string{
+	"", "index", "INDEX LOCAL", "go", "go test", "dashboard go", "endpoint.dashboard", "endpoint/dashboard",
+	"(", `"quoted"`, "a-b", "path:/repo", "*", "AND", "NEAR", "ü", "naïve café", "claude_code.token.usage",
+	"nothing-matches-this", "  ", "evt", "s1", "codex_cli", "retained answer", "no-near enforce",
+}
+
+// followQueries are enough for the tests that compare which events the history holds after
+// appends and rotations; query parsing itself is the parity test's job.
+var followQueries = []string{"", "late", "event-0003"}
+
 // traceAnswers runs a fixed set of list, search and show queries against a log and returns their
 // JSON, keyed by query, so two ways of answering can be compared byte for byte.
-func traceAnswers(t *testing.T, path string, showIDs []string) map[string]string {
+func traceAnswers(t *testing.T, path string, showIDs, queries []string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
-	queries := []string{
-		"", "index", "INDEX LOCAL", "go", "go test", "dashboard go", "endpoint.dashboard", "endpoint/dashboard",
-		"(", `"quoted"`, "a-b", "path:/repo", "*", "AND", "NEAR", "ü", "naïve café", "claude_code.token.usage",
-		"nothing-matches-this", "  ", "evt", "s1", "codex_cli", "retained answer", "no-near enforce",
-	}
 	for _, q := range queries {
 		for _, page := range []int{1, 2} {
 			list, err := ReadTraceList(path, TraceQuery{EventQuery: EventQuery{Q: q}, Limit: 3, Page: page})
@@ -226,11 +233,11 @@ var parityShowIDs = []string{
 func TestHistoryAnswersExactlyLikeTheJSONLScan(t *testing.T) {
 	path := newTestLog(t, parityFixture())
 	withoutHistory(t)
-	want := traceAnswers(t, path, parityShowIDs)
+	want := traceAnswers(t, path, parityShowIDs, parityQueries)
 
 	withHistory(t)
 	optIn(t, path)
-	compareAnswers(t, want, traceAnswers(t, path, parityShowIDs))
+	compareAnswers(t, want, traceAnswers(t, path, parityShowIDs, parityQueries))
 }
 
 func TestHistoryIsNotCreatedWithoutOptIn(t *testing.T) {
@@ -488,17 +495,19 @@ func (r *rotatingLog) appendRotations(t *testing.T, n int) {
 func (r *rotatingLog) compare(t *testing.T) {
 	t.Helper()
 	ids := []string{"session:cursor:s0", "session:cursor:s1", "session:cursor:s2", "session:cursor:s3"}
-	history := traceAnswers(t, r.path, ids)
+	history := traceAnswers(t, r.path, ids, followQueries)
 	previous := os.Getenv(endpointconfig.HistoryStoreEnv)
 	withoutHistory(t)
-	want := traceAnswers(t, r.shadow, ids)
+	want := traceAnswers(t, r.shadow, ids, followQueries)
 	t.Setenv(endpointconfig.HistoryStoreEnv, previous)
 	compareAnswers(t, want, history)
 }
 
 func TestHistoryFollowsTheLogAcrossRotation(t *testing.T) {
 	withHistory(t)
-	log := newRotatingLog(t, 4*1024)
+	// Three events to a file: a rotation every few appends, and the two appended after a
+	// rotation never force another.
+	log := newRotatingLog(t, 2*1024)
 	log.append(t, 5)
 	optIn(t, log.path)
 	// One rotation, then three, then five between catch-ups: never more than the five archives
@@ -620,7 +629,8 @@ func TestHistoryTreatsAReplacedOrShrunkFileAsNew(t *testing.T) {
 // Readers and a writer at once, as the MCP server, the CLI and the agents' hooks will be.
 func TestHistoryConcurrentWriterAndReaders(t *testing.T) {
 	withHistory(t)
-	log := newRotatingLog(t, 32*1024)
+	// About four rotations while the readers catch up.
+	log := newRotatingLog(t, 8*1024)
 	log.append(t, 5)
 	optIn(t, log.path)
 	done := make(chan struct{})
@@ -642,7 +652,7 @@ func TestHistoryConcurrentWriterAndReaders(t *testing.T) {
 			}
 		}()
 	}
-	log.append(t, 250)
+	log.append(t, 60)
 	close(done)
 	wg.Wait()
 	log.compare(t)
@@ -868,6 +878,9 @@ func TestStoredLineKeepsEverythingButUnreadRawKeys(t *testing.T) {
 // Events that arrive after later ones are folded into their place in the trace, both before the
 // first checkpoint and after one, and the trace reads exactly as the JSONL scan reads it.
 func TestHistoryRefoldsWhenAnEventArrivesLate(t *testing.T) {
+	previousEvery := historyCheckpointEvery
+	historyCheckpointEvery = 4
+	t.Cleanup(func() { historyCheckpointEvery = previousEvery })
 	withHistory(t)
 	path := newTestLog(t, nil)
 	base := time.Date(2026, 6, 11, 10, 0, 0, 0, time.UTC)
@@ -880,17 +893,17 @@ func TestHistoryRefoldsWhenAnEventArrivesLate(t *testing.T) {
 		lines = append(lines, marshalEvents(t, event)...)
 		writeTestLog(t, path, lines...)
 	}
-	for i := 0; i < 600; i++ {
+	for i := 0; i < 12; i++ {
 		appendEvent(base.Add(time.Duration(i)*time.Second), fmt.Sprintf("in-order-%d", i), fmt.Sprintf("prompt %d", i))
 	}
 	optIn(t, path)
 	check := func(label string) {
 		t.Helper()
 		ids := []string{"session:claude_code:long"}
-		history := traceAnswers(t, path, ids)
+		history := traceAnswers(t, path, ids, followQueries)
 		previous := os.Getenv(endpointconfig.HistoryStoreEnv)
 		withoutHistory(t)
-		want := traceAnswers(t, path, ids)
+		want := traceAnswers(t, path, ids, followQueries)
 		t.Setenv(endpointconfig.HistoryStoreEnv, previous)
 		for key, w := range want {
 			if history[key] != w {
@@ -898,17 +911,17 @@ func TestHistoryRefoldsWhenAnEventArrivesLate(t *testing.T) {
 			}
 		}
 	}
-	// Lands after the second checkpoint (event 512).
-	appendEvent(base.Add(550*time.Second+time.Millisecond), "late-after-checkpoint", "late near the end")
+	// Lands after the second checkpoint (event 8).
+	appendEvent(base.Add(10*time.Second+time.Millisecond), "late-after-checkpoint", "late near the end")
 	check("after a checkpoint")
 	// Lands between the first two checkpoints.
-	appendEvent(base.Add(300*time.Second+time.Millisecond), "late-mid", "late in the middle")
+	appendEvent(base.Add(5*time.Second+time.Millisecond), "late-mid", "late in the middle")
 	check("between checkpoints")
 	// Becomes the first event: the trace refolds from its start.
 	appendEvent(base.Add(-time.Hour), "late-first", "late and first")
 	check("first event")
 	show, ok, err := ShowTrace(path, "session:claude_code:long", TraceQuery{Limit: 1})
-	if err != nil || !ok || show.Events[0].ID != "late-first" || show.Trace.EventCount != 603 {
+	if err != nil || !ok || show.Events[0].ID != "late-first" || show.Trace.EventCount != 15 {
 		t.Fatalf("show = %#v ok=%v err=%v", show.Range, ok, err)
 	}
 }
@@ -952,61 +965,23 @@ func TestHistoryRenamesIDlessEventsWhenTheirFileRotates(t *testing.T) {
 	}
 	writeTestLog(t, path, idless("2026-06-11T10:00:03Z", "a", "third-idless"))
 	ids := []string{"trace:t-idless"}
-	history := traceAnswers(t, path, ids)
-	for _, q := range []string{"line-1", "archive-1-line-3", "archive-1", "line-3"} {
-		result, err := SearchTraces(path, TraceQuery{EventQuery: EventQuery{Q: q}, ResultLevel: "event", Limit: 10})
-		if err != nil {
-			t.Fatal(err)
-		}
-		history["idless "+q] = mustJSON(t, result)
-	}
+	queries := []string{"", "line-1", "archive-1-line-3", "archive-1", "line-3"}
+	history := traceAnswers(t, path, ids, queries)
 	previous := os.Getenv(endpointconfig.HistoryStoreEnv)
 	withoutHistory(t)
-	want := traceAnswers(t, path, ids)
-	for _, q := range []string{"line-1", "archive-1-line-3", "archive-1", "line-3"} {
-		result, err := SearchTraces(path, TraceQuery{EventQuery: EventQuery{Q: q}, ResultLevel: "event", Limit: 10})
-		if err != nil {
-			t.Fatal(err)
-		}
-		want["idless "+q] = mustJSON(t, result)
-	}
+	want := traceAnswers(t, path, ids, queries)
 	t.Setenv(endpointconfig.HistoryStoreEnv, previous)
 	compareAnswers(t, want, history)
-	if !strings.Contains(want["idless archive-1-line-3"], "archive-1-line-3") {
-		t.Fatalf("fixture did not produce a rotated ID: %s", want["idless archive-1-line-3"])
+	rotated := want[`search q="archive-1-line-3" level=event`]
+	if !strings.Contains(rotated, "archive-1-line-3") {
+		t.Fatalf("fixture did not produce a rotated ID: %s", rotated)
 	}
 }
 
-// An event's error is part of the trace projection: a session-store MCP failure keeps its mcp
-// action and records only error.type, so without it no lens could tell the call failed.
-func TestTraceEventsCarryTheErrorType(t *testing.T) {
-	path := newTestLog(t, parityFixture())
-	for name, setup := range map[string]func(){
-		"jsonl":   func() { withoutHistory(t) },
-		"history": func() { withHistory(t); optIn(t, path) },
-	} {
-		setup()
-		show, ok, err := ShowTrace(path, "session:cursor:s1", TraceQuery{Limit: 100})
-		if err != nil || !ok {
-			t.Fatalf("%s: ShowTrace = ok %v, err %v", name, ok, err)
-		}
-		for _, event := range show.Events {
-			switch {
-			case event.ID == "e6" && (event.Error == nil || event.Error.Type != "mcp_timeout"):
-				t.Fatalf("%s: e6 error = %#v, want mcp_timeout", name, event.Error)
-			case event.ID != "e6" && event.Error != nil:
-				t.Fatalf("%s: %s error = %#v, want none", name, event.ID, event.Error)
-			}
-		}
-		found, err := SearchTraces(path, TraceQuery{EventQuery: EventQuery{Q: "mcp_timeout"}, ResultLevel: "event", Limit: 10})
-		if err != nil || found.TotalMatched != 1 || found.Events[0].Event.ID != "e6" {
-			t.Fatalf("%s: search for the error type = %+v, %v", name, found, err)
-		}
-	}
-}
-
-// The policy block is part of the trace projection, so both the JSONL scan and the history serve it.
-func TestTraceEventsCarryThePolicyBlock(t *testing.T) {
+// An event's error and policy blocks are part of the trace projection, served and searchable on the
+// JSONL scan and the history alike. A session-store MCP failure keeps its mcp action and records only
+// error.type, so without it no lens could tell the call failed.
+func TestTraceEventsCarryTheErrorTypeAndPolicyBlock(t *testing.T) {
 	path := newTestLog(t, parityFixture())
 	for name, setup := range map[string]func(){
 		"jsonl":   func() { withoutHistory(t) },
@@ -1019,6 +994,12 @@ func TestTraceEventsCarryThePolicyBlock(t *testing.T) {
 		}
 		var policy *TracePolicyV1
 		for _, event := range show.Events {
+			switch {
+			case event.ID == "e6" && (event.Error == nil || event.Error.Type != "mcp_timeout"):
+				t.Fatalf("%s: e6 error = %#v, want mcp_timeout", name, event.Error)
+			case event.ID != "e6" && event.Error != nil:
+				t.Fatalf("%s: %s error = %#v, want none", name, event.ID, event.Error)
+			}
 			if event.ID == "e5" {
 				policy = event.Policy
 			}
@@ -1027,10 +1008,11 @@ func TestTraceEventsCarryThePolicyBlock(t *testing.T) {
 		if policy == nil || *policy != want {
 			t.Fatalf("%s: e5 policy = %#v, want %#v", name, policy, want)
 		}
-		// The policy block is searchable, like the approval beside it.
-		found, err := SearchTraces(path, TraceQuery{EventQuery: EventQuery{Q: "no-near"}, ResultLevel: "event", Limit: 10})
-		if err != nil || found.TotalMatched != 1 || found.Events[0].Event.ID != "e5" {
-			t.Fatalf("%s: search for the policy id = %+v, %v", name, found, err)
+		for q, id := range map[string]string{"mcp_timeout": "e6", "no-near": "e5"} {
+			found, err := SearchTraces(path, TraceQuery{EventQuery: EventQuery{Q: q}, ResultLevel: "event", Limit: 10})
+			if err != nil || found.TotalMatched != 1 || found.Events[0].Event.ID != id {
+				t.Fatalf("%s: search for %q = %+v, %v", name, q, found, err)
+			}
 		}
 	}
 }

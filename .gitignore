@@ -49,6 +49,9 @@ cli/beacon-hooks/*.exe
 # during development. Without this exception the `*.jsonl` rule above silently drops it and the
 # tests that read it fail on a fresh clone while passing on the machine that captured it.
 !cli/beacon/internal/fxsession/testdata/**/*.jsonl
+# Harness² trajectories: recorded from the real OpenCode and Codex releases it pins, and laid out as
+# its benchmarks write them. The same rule would drop them.
+!cli/beacon/internal/harness2session/testdata/**/*.jsonl
 !cli/beacon/internal/endpoint/falcon/pack/sample-event.jsonl
 !cli/beacon/internal/endpoint/gcs/pack/sample-event.jsonl
 *.log

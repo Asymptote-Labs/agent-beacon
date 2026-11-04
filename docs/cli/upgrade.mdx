@@ -26,8 +26,8 @@ the explicit `beacon version check` command.
 Upgrade Beacon with the standard Homebrew flow:
 
 ```bash title="Upgrade Beacon"
-brew trust asymptote-labs/tap
 brew update
+brew trust asymptote-labs/tap
 brew upgrade beacon
 beacon version
 ```
@@ -147,7 +147,7 @@ Common states:
 | Symptom | What to check |
 | --- | --- |
 | `mode=off` or `Updater daemon: loaded=false` | Re-enable with `sudo /opt/beacon/bin/beacon endpoint update enable` or `--check-only`. |
-| `homebrew_install` or `not_system_package` | The seamless updater applies only to the signed system package install. Use `brew upgrade beacon` for Homebrew. |
+| `homebrew_install` or `not_system_package` | The seamless updater applies only to the signed system package install. Use `brew update && brew upgrade beacon` for Homebrew. |
 | Manual non-root check cannot write `system.jsonl` | Run manual system checks with `sudo`, or rely on the root scheduled updater. |
 | Package apply fails before install | Check checksum, signature, Gatekeeper, manifest URL, and network access to the package URL. |
 | Package apply fails after install | Beacon should roll back and write `update.failed` to `system.jsonl`; inspect `/Library/Application Support/Beacon/Endpoint/updates/last_failure.json` if present. |

@@ -56,7 +56,7 @@ page.
 
 By default, inventory is metadata- and hash-only. Beacon hashes config, hook, and `SKILL.md` files for change detection but does not retain file bodies, full MCP server definitions, or skill instruction bodies in inventory JSON, dashboard responses, or inventory snapshot events.
 
-Operators can opt into capturing full definitions with the `--contents` flag (CLI) or the `include_contents` config setting (snapshot telemetry). When enabled, configs, hooks, and skills gain a redacted `content` block and MCP servers gain a full `definition` block. Captured contents always pass through local secret redaction and a per-file size cap (64 KiB by default, configurable with `max_content_bytes`). Redaction replaces values under keys matching `TOKEN`, `SECRET`, `PASSWORD`, `KEY`, `AUTH`, or `CREDENTIAL` with `***REDACTED***`.
+Operators can opt into capturing full definitions with the `--contents` flag (CLI) or the `include_contents` config setting (snapshot telemetry). When enabled, configs, hooks, and skills gain a redacted `content` block and MCP servers gain a full `definition` block. Captured contents always pass through local secret redaction and a per-file size cap (64 KiB by default, configurable with `max_content_bytes`). Redaction is the one Beacon applies to session telemetry (recognizable credentials, `Authorization` header credentials, secret flag values, URL passwords, and values under a key with a word naming a secret, such as `token`, `key`, `auth`, `secret`, `password` or `credential`), each replaced with `[REDACTED]`.
 
 Inventory heartbeat telemetry uses a separate local JSONL file, `inventory_state.jsonl`, so `runtime.jsonl` stays scoped to agent runtime activity. A scheduled local job (every 6 hours, and once at install, boot, or upgrade) writes:
 
@@ -111,7 +111,7 @@ skill preview/install do not call an evaluator.
 |--------|---------|---------------|
 | `endpoint` | Device and agent context | `hostname`, `os`, `agent_version` |
 | `user` | Local operating system user context | `name`, `uid` |
-| `harness` | Agent harness context | `name`, `version`, `executable_path`, `config_path` |
+| `harness` | Agent harness context | `name`, `version`, `executable_path`, `config_path`, `profile` |
 | `session` | Conversation or runtime session context | `id`, `working_directory` |
 | `tool` | Tool invocation context | `name`, `command`, `path` |
 | `file` | File activity context | `path`, `operation`, `language`, `diff_hash`, `diff_bytes` |

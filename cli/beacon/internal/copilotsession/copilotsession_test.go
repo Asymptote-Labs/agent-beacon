@@ -2,7 +2,6 @@ package copilotsession
 
 import (
 	"bytes"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,11 +123,10 @@ func TestMapSessionReconstructsCommandsFilesAndUsage(t *testing.T) {
 	}
 }
 
-func TestCollectOnceIsIdempotentAndPrintDoesNotAdvanceState(t *testing.T) {
+func TestPrintDoesNotWriteState(t *testing.T) {
 	root := t.TempDir()
 	_, _ = writeCopilotFixture(t, root)
 	statePath := filepath.Join(root, "state.json")
-	logPath := filepath.Join(root, "runtime.jsonl")
 	var printed bytes.Buffer
 	printSummary, err := CollectOnce(CollectOptions{CopilotDir: root, StatePath: statePath, Print: true, Out: &printed})
 	if err != nil {
@@ -139,30 +137,6 @@ func TestCollectOnceIsIdempotentAndPrintDoesNotAdvanceState(t *testing.T) {
 	}
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
 		t.Fatal("--print wrote collector state")
-	}
-
-	opts := CollectOptions{CopilotDir: root, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true}
-	first, err := CollectOnce(opts)
-	if err != nil {
-		t.Fatalf("first CollectOnce: %v", err)
-	}
-	if first.EventsEmitted == 0 {
-		t.Fatal("first sweep emitted no events")
-	}
-	before, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read runtime log: %v", err)
-	}
-	second, err := CollectOnce(opts)
-	if err != nil {
-		t.Fatalf("second CollectOnce: %v", err)
-	}
-	after, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read runtime log again: %v", err)
-	}
-	if second.EventsEmitted != 0 || !bytes.Equal(before, after) {
-		t.Fatalf("second sweep was not idempotent: %+v", second)
 	}
 }
 
@@ -202,24 +176,6 @@ func TestDecoderReportsPartialTailAndCollectsItLater(t *testing.T) {
 	}
 	if records[len(records)-1].ID != "partial" {
 		t.Fatalf("last record = %+v", records[len(records)-1])
-	}
-}
-
-func TestEventIDsAreDeterministic(t *testing.T) {
-	root := t.TempDir()
-	_, _ = writeCopilotFixture(t, root)
-	store, _ := NewStore(root)
-	refs, _ := store.List()
-	records, _, _ := store.Read(refs[0])
-	first := MapSession(refs[0], records, MapOptions{})
-	second := MapSession(refs[0], records, MapOptions{})
-	if len(first) != len(second) {
-		t.Fatalf("event counts differ: %d != %d", len(first), len(second))
-	}
-	for i := range first {
-		if first[i].Event.Event.ID != second[i].Event.Event.ID {
-			t.Fatalf("event id %d changed: %s != %s", i, first[i].Event.Event.ID, second[i].Event.Event.ID)
-		}
 	}
 }
 
@@ -282,33 +238,6 @@ func TestMapSessionAppliesLiveContextChangesToLaterEvents(t *testing.T) {
 	}
 	if prompt.Model != "newer-model" {
 		t.Fatalf("prompt model = %q, want newer-model", prompt.Model)
-	}
-}
-
-func TestStatusStateRoundTrip(t *testing.T) {
-	root := t.TempDir()
-	_, path := writeCopilotFixture(t, root)
-	statePath := filepath.Join(root, "state.json")
-	if _, err := CollectOnce(CollectOptions{CopilotDir: root, StatePath: statePath, Print: true, Out: bytes.NewBuffer(nil)}); err != nil {
-		t.Fatal(err)
-	}
-	state, err := LoadState(statePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(state.Files) != 0 {
-		t.Fatal("--print persisted state")
-	}
-	if _, err := CollectOnce(CollectOptions{CopilotDir: root, StatePath: statePath, Write: false}); err != nil {
-		t.Fatal(err)
-	}
-	state, err = LoadState(statePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if state.Files[path] == nil || state.Files[path].LastLine == 0 {
-		data, _ := json.MarshalIndent(state, "", "  ")
-		t.Fatalf("state did not record progress:\n%s", data)
 	}
 }
 

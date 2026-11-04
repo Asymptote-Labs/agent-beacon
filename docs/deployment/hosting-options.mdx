@@ -3,20 +3,23 @@ title: "Hosting Options"
 description: "Choose between local Beacon and Beacon Cloud"
 ---
 
-Both options are free. Run Beacon locally with full control of your data, or use [Beacon Cloud](/concepts/core-concepts#beacon-cloud) for hosted storage, search, analytics, and unlimited retention.
+Run Beacon locally with full control of your data, or connect it to [Beacon Cloud](/deployment/managed) for one hosted timeline of every agent and machine, findings, sharing and MCP. Local and Beacon Cloud are free; [Beacon Cloud Pro](/deployment/plans) adds unlimited findings, memory and findings over MCP, and real-time alerts for $20 a month ($15 billed annually).
 
-| Capability | Local | Beacon Cloud |
-| --- | --- | --- |
-| Cross-harness agent telemetry | ✓ | ✓ |
-| Local, CI & cloud collection | ✓ | ✓ |
-| Unified agent session history | ✓ | ✓ |
-| Store data locally | ✓ | ✓ |
-| Forward to your own data stack | ✓ | ✓ |
-| Hosted ingest & storage | — | ✓ |
-| Search & analytics | — | ✓ |
-| Identity mapping | — | ✓ |
-| **Agent Session Retention** | **You manage** | **Unlimited** |
-| SSO & RBAC | — | ✓ |
+| Capability | Local | Beacon Cloud | Beacon Cloud Pro |
+| --- | --- | --- | --- |
+| Price | $0 | $0 | $20/mo |
+| Cross-harness agent telemetry | ✓ | ✓ | ✓ |
+| Local, CI & cloud collection | ✓ | ✓ | ✓ |
+| Store data locally | ✓ | ✓ | ✓ |
+| Forward to your own data stack | ✓ | ✓ | ✓ |
+| Offline threat detection | ✓ | ✓ | ✓ |
+| Hosted timeline across agents and machines | — | ✓ | ✓ |
+| Share sessions by link | — | ✓ | ✓ |
+| [Findings](/cloud/findings) | Local rules only | 50 included | Unlimited |
+| MCP access | Local server | Session search, lenses, sharing | Plus findings, feedback and memory |
+| Alerts | — | Daily digest | Real-time email |
+
+Enterprise adds fleet rollout, approvals for risky actions, SSO, RBAC and audit logs. See [Plans and pricing](/deployment/plans) for the full comparison.
 
 ## Local
 
@@ -27,6 +30,7 @@ Use the open-source local path when you want endpoint telemetry without a hosted
     Install Beacon with Homebrew:
 
     ```bash
+    brew update
     brew trust asymptote-labs/tap
     brew tap asymptote-labs/tap
     brew install beacon
@@ -103,6 +107,9 @@ System-mode connect remains account-free and uses browser approval instead.
 
 Beacon Cloud gives you the open-source Agent Beacon experience without having to run the backend yourself.
 
+Beacon Cloud is free. To upgrade to [Beacon Cloud Pro](/deployment/plans), open
+[beacon.sh/dashboard/billing](https://beacon.sh/dashboard/billing); nothing on the endpoint changes.
+
 For cloud-hosted agent applications, install the [Observe SDK](/concepts/core-concepts#observe-sdk) and initialize hosted export with a Beacon API key:
 
 ```bash title="Set the hosted Observe API key"
@@ -122,6 +129,9 @@ See [Beacon Cloud](/deployment/managed) for managed platform capabilities and [S
 ## Related
 
 <Columns cols={2}>
+  <Card title="Plans and pricing" icon="tag" href="/deployment/plans">
+    Compare Open Source, Beacon Cloud, Beacon Cloud Pro and Enterprise.
+  </Card>
   <Card title="Beacon Cloud" icon="key" href="/deployment/managed">
     Review managed ingest, governance, investigations, access control, and rollout support.
   </Card>

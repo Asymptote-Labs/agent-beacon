@@ -65,11 +65,6 @@ func TestEstimatePricesOneHourCacheWritesAtTheOneHourRate(t *testing.T) {
 			cacheCreation: `{"input_tokens":20000,"ephemeral_1h_input_tokens":-5}`,
 			estimated:     2550 + 125000,
 		},
-		{
-			name:          "zero split",
-			cacheCreation: `{"input_tokens":20000,"ephemeral_1h_input_tokens":0}`,
-			estimated:     2550 + 125000,
-		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

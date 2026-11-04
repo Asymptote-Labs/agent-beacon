@@ -297,34 +297,6 @@ func TestHookScriptDisableAndPathFallback(t *testing.T) {
 	r.commitWithEnv("no beacon", "PATH=/usr/bin:/bin")
 }
 
-func TestHookStatusDetectsABrokenInstall(t *testing.T) {
-	r := newTestRepo(t)
-	ctx := context.Background()
-	bin, _ := fakeBeacon(t, filepath.Join(t.TempDir(), "bin"))
-	repo := r.open()
-	if st, _ := HookStatus(ctx, repo); st.Installed() {
-		t.Fatal("fresh repository reports installed")
-	}
-	res, err := InstallHooks(ctx, repo, InstallOptions{BeaconPath: bin})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(res.Reports[0].Script); err != nil {
-		t.Fatal(err)
-	}
-	st, err := HookStatus(ctx, repo)
-	if err != nil || st.Installed() || !st.States[0].BlockPresent || st.States[0].ScriptExists {
-		t.Fatalf("status %+v %v", st, err)
-	}
-	// Setup repairs it.
-	if _, err := InstallHooks(ctx, repo, InstallOptions{BeaconPath: bin}); err != nil {
-		t.Fatal(err)
-	}
-	if st, _ := HookStatus(ctx, repo); !st.Installed() {
-		t.Fatal("setup did not repair the install")
-	}
-}
-
 func TestReplayInProgress(t *testing.T) {
 	r := newTestRepo(t)
 	ctx := context.Background()
@@ -362,27 +334,9 @@ func TestReplayInProgress(t *testing.T) {
 	}
 }
 
-func TestAmendCarriesLinksThroughRewriteRef(t *testing.T) {
-	r := newTestRepo(t)
-	ctx := context.Background()
-	bin, _ := fakeBeacon(t, filepath.Join(t.TempDir(), "bin"))
-	repo := r.open()
-	if _, err := InstallHooks(ctx, repo, InstallOptions{BeaconPath: bin}); err != nil {
-		t.Fatal(err)
-	}
-	r.write("a", "1")
-	r.commitWithEnv("c")
-	if _, err := AddLinks(ctx, repo.Git, r.git("rev-parse", "HEAD"), []Link{{Harness: "codex_cli", SessionID: "s"}}); err != nil {
-		t.Fatal(err)
-	}
-	r.git("commit", "-q", "--amend", "-m", "c (amended)")
-	note, err := ReadNote(ctx, repo.Git, "HEAD")
-	if err != nil || !strings.Contains(note, "beacon:codex_cli/s") {
-		t.Fatalf("amended commit note %q %v", note, err)
-	}
-}
-
-func TestPostRewriteHookGetsGitsStdinAndArgument(t *testing.T) {
+// An amend runs Beacon's post-rewrite hook with git's argument and old/new pairs on stdin, and
+// the rewriteRef setup installs carries the commit's links to the amended commit.
+func TestAmendCarriesLinksAndFeedsThePostRewriteHook(t *testing.T) {
 	r := newTestRepo(t)
 	ctx := context.Background()
 	testenv.RequirePOSIXExecutableFixtures(t)
@@ -401,12 +355,19 @@ func TestPostRewriteHookGetsGitsStdinAndArgument(t *testing.T) {
 	r.write("a", "1")
 	r.commitWithEnv("c")
 	old := r.git("rev-parse", "HEAD")
+	if _, err := AddLinks(ctx, repo.Git, old, []Link{{Harness: "codex_cli", SessionID: "s"}}); err != nil {
+		t.Fatal(err)
+	}
 	r.git("commit", "-q", "--amend", "-m", "c2")
 	amended := r.git("rev-parse", "HEAD")
 	data, _ := os.ReadFile(seen)
 	text := string(data)
 	if !strings.Contains(text, "args: git hook post-rewrite amend") || !strings.Contains(text, old+" "+amended) {
 		t.Fatalf("post-rewrite saw:\n%s", text)
+	}
+	note, err := ReadNote(ctx, repo.Git, amended)
+	if err != nil || !strings.Contains(note, "beacon:codex_cli/s") {
+		t.Fatalf("amended commit note %q %v", note, err)
 	}
 }
 

@@ -16,6 +16,7 @@
 import type { InterceptEvent } from '../shared/types.js';
 import { looksLikeChatRequest } from '../adapters/adapter.js';
 import { offerChannel } from '../shared/channel.js';
+import { captureRequestBody } from './request-body.js';
 
 declare global {
   interface Window {
@@ -50,33 +51,28 @@ declare global {
 
     const matched = looksLikeChatRequest(url);
 
-    // Capture the request body BEFORE fetch consumes it. Prefer a string
-    // init.body; otherwise read a clone of the Request (fetch(new Request(...))),
-    // whose body would otherwise never be seen and the prompt would be lost.
-    let body: string | null = null;
-    if (matched) {
-      if (typeof init?.body === 'string') {
-        body = init.body;
-      } else if (input instanceof Request) {
-        try {
-          body = await input.clone().text();
-        } catch {
-          body = null;
-        }
-      }
-    }
+    // Snapshot the request body before fetch consumes it, and decode it while
+    // the request is in flight. claude.ai sends it gzip-compressed, so it is
+    // not always a string (see request-body.ts).
+    const body = matched ? captureRequestBody(input, init) : null;
 
     const response = await originalFetch(input as RequestInfo, init);
 
-    if (matched && response.body) {
+    if (body && response.body) {
       const reqId = randomId();
-      post({ kind: 'request', reqId, url, method, body });
-
-      // Tee the stream via a clone so the page's own reader is untouched.
+      // Clone now, before the page starts reading, so its own reader is
+      // untouched; the clone buffers until the body is decoded.
       const clone = response.clone();
-      teeStream(clone, reqId, post).catch((err) =>
-        post({ kind: 'error', reqId, message: String(err).slice(0, 1024) }),
-      );
+      void body
+        .then((text) => {
+          post({ kind: 'request', reqId, url, method, body: text });
+          return teeStream(clone, reqId, post).catch((err) =>
+            post({ kind: 'error', reqId, message: String(err).slice(0, 1024) }),
+          );
+        })
+        .catch(() => {
+          /* the channel is gone; nothing to report to */
+        });
     }
 
     return response;

@@ -28,3 +28,27 @@ test('options page refuses a non-loopback endpoint and keeps the saved one', asy
     .poll(() => serviceWorker.evaluate(async () => (await chrome.storage.local.get('settings')).settings.endpoint))
     .toBe('http://localhost:4319/v1/logs');
 });
+
+// Regression for 68b99ad0: the site checkboxes had no label, so neither a screen reader nor a
+// click on the site name reached them.
+test('options page site toggles are named by their site and save what the user clicked', async ({
+  context,
+  extensionId,
+  serviceWorker,
+}) => {
+  const page = await context.newPage();
+  await page.goto(`chrome-extension://${extensionId}/options.html`);
+  const claude = page.getByRole('checkbox', { name: 'claude.ai', exact: true });
+  const chatgpt = page.getByRole('checkbox', { name: 'chatgpt.com', exact: true });
+  await expect(claude).toBeChecked();
+  await expect(chatgpt).toBeChecked();
+
+  await page.getByText('claude.ai', { exact: true }).click();
+  await expect(claude).not.toBeChecked();
+  await expect(chatgpt).toBeChecked();
+  await page.locator('#save').click();
+  await expect(page.locator('#saved')).toBeVisible();
+  await expect
+    .poll(() => serviceWorker.evaluate(async () => (await chrome.storage.local.get('settings')).settings.sites))
+    .toEqual({ claude_web: false, chatgpt_web: true });
+});

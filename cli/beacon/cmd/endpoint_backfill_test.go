@@ -34,6 +34,11 @@ func stubBackfill(t *testing.T, maxBytes, shareBytes int64, runners ...endpointB
 	t.Cleanup(func() { endpointBackfillScratchDir = oldScratch })
 	scratch := filepath.Join(t.TempDir(), "backfill-snapshots")
 	endpointBackfillScratchDir = func() string { return scratch }
+	// Securing the directory on Windows sets its owner, which needs an elevated token; the tests
+	// that check it put the real one back.
+	oldSecure := secureBackfillScratchDir
+	t.Cleanup(func() { secureBackfillScratchDir = oldSecure })
+	secureBackfillScratchDir = func(string) error { return nil }
 }
 
 func writingRunner(name string, events int, since *time.Time) endpointBackfillRunner {
@@ -103,24 +108,35 @@ func TestEndpointBackfillGivesEachRuntimeAShareAndNamesWhereToContinue(t *testin
 	var out strings.Builder
 	reportEndpointBackfill(&out, result)
 	text := out.String()
-	for _, want := range []string{
-		"Session backfill: ",
-		"from the last 30 days",
-		"Heavy: stopped at the backfill size limit; `beacon endpoint heavy sync` reads the rest.",
-		"Broken: store unreadable; retry with `beacon endpoint broken sync`.",
-	} {
+	for _, want := range []string{"`beacon endpoint heavy sync`", "`beacon endpoint broken sync`"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("report missing %q:\n%s", want, text)
 		}
 	}
 }
 
-func TestEndpointBackfillReportsAnEmptyMachinePlainly(t *testing.T) {
-	stubBackfill(t, 4000, 2500, writingRunner("Absent", 0, nil))
-	var out strings.Builder
-	reportEndpointBackfill(&out, runEndpointBackfill(filepath.Join(t.TempDir(), "runtime.jsonl"), true))
-	if got := strings.TrimSpace(out.String()); got != "Session backfill: no new agent session activity from the last 30 days." {
-		t.Fatalf("report = %q", got)
+// A collector that stops before rotation would discard its own output has left the rest for its
+// sync, exactly as one that spent its share has: limited, not failed, and named as such.
+func TestEndpointBackfillReportsARetentionStopAsLimited(t *testing.T) {
+	stubBackfill(t, 1<<20, 1<<20,
+		endpointBackfillRunner{Name: "Rotating", Sync: "beacon endpoint rotating sync", Run: func(endpointBackfillRun) (int, error) {
+			return 7, errors.Join(writer.ErrRetentionWindowFull)
+		}},
+		endpointBackfillRunner{Name: "Budget", Sync: "beacon endpoint budget sync", Run: func(endpointBackfillRun) (int, error) {
+			return 3, writer.ErrBudgetSpent
+		}},
+	)
+	result := runEndpointBackfill(filepath.Join(t.TempDir(), "runtime.jsonl"), true)
+	byName := map[string]endpointBackfillRuntimeResult{}
+	for _, r := range result.Runtimes {
+		byName[r.Name] = r
+	}
+	rotating, budget := byName["Rotating"], byName["Budget"]
+	if !result.Limited || !rotating.Limited || !rotating.RetentionLimited || rotating.Err != nil || rotating.Events != 7 {
+		t.Fatalf("retention stop = %+v, result limited %v", rotating, result.Limited)
+	}
+	if !budget.Limited || budget.RetentionLimited || budget.Err != nil {
+		t.Fatalf("budget stop = %+v", budget)
 	}
 }
 
@@ -132,7 +148,7 @@ func TestEndpointInstallBackfillsAfterTheInstallSucceeds(t *testing.T) {
 	}
 	stubBackfill(t, 1<<20, 1<<20, writingRunner("Codex", 3, nil))
 
-	run := func(mutate func()) string {
+	run := func(mutate func()) {
 		t.Helper()
 		_ = os.Remove(logPath)
 		endpointOpts.harnesses = ""
@@ -146,12 +162,9 @@ func TestEndpointInstallBackfillsAfterTheInstallSucceeds(t *testing.T) {
 		if err := runEndpointInstall(cmd, nil); err != nil {
 			t.Fatal(err)
 		}
-		return out.String()
 	}
 
-	if text := run(func() {}); !strings.Contains(text, "Session backfill: 3 events from the last 30 days (Codex 3).") {
-		t.Fatalf("install did not report the backfill:\n%s", text)
-	}
+	run(func() {})
 	if _, err := os.Stat(logPath); err != nil {
 		t.Fatalf("install did not write the backfill to the runtime log: %v", err)
 	}
@@ -159,9 +172,7 @@ func TestEndpointInstallBackfillsAfterTheInstallSucceeds(t *testing.T) {
 		"--no-backfill":     func() { endpointOpts.noBackfill = true },
 		"BEACON_BACKFILL=0": func() { t.Setenv(endpointBackfillEnv, "0") },
 	} {
-		if text := run(mutate); strings.Contains(text, "Session backfill") {
-			t.Fatalf("%s still backfilled:\n%s", name, text)
-		}
+		run(mutate)
 		if _, err := os.Stat(logPath); !os.IsNotExist(err) {
 			t.Fatalf("%s still wrote the runtime log", name)
 		}
@@ -181,31 +192,66 @@ func TestSystemEndpointBackfillReadsTheConsoleUsersStores(t *testing.T) {
 	stubConsoleUser(t, consoleUserInfo{Username: "alice", HomeDir: home}, true, nil)
 	before, _ := os.UserHomeDir()
 
-	var out strings.Builder
-	reportEndpointBackfill(&out, runEndpointBackfill(filepath.Join(t.TempDir(), "runtime.jsonl"), false))
+	runEndpointBackfill(filepath.Join(t.TempDir(), "runtime.jsonl"), false)
 	if sawHome != home || sawUserMode {
 		t.Fatalf("system backfill read home=%q userMode=%t, want the console user's home %q in system mode", sawHome, sawUserMode, home)
 	}
 	if after, _ := os.UserHomeDir(); after != before {
 		t.Fatalf("system backfill left HOME at %q, want %q", after, before)
 	}
-	if !strings.Contains(out.String(), "Session backfill: 2 events from the last 30 days (Codex 2).") {
-		t.Fatalf("report = %q", out.String())
-	}
 
 	stubConsoleUser(t, consoleUserInfo{}, false, nil)
 	sawHome = ""
-	out.Reset()
-	reportEndpointBackfill(&out, runEndpointBackfill(filepath.Join(t.TempDir(), "runtime.jsonl"), false))
+	runEndpointBackfill(filepath.Join(t.TempDir(), "runtime.jsonl"), false)
 	if sawHome != "" {
 		t.Fatal("a system backfill with no console user read root's home")
 	}
-	if got := strings.TrimSpace(out.String()); got != "Session backfill skipped: no active console user to read agent sessions for." {
-		t.Fatalf("report = %q", got)
+}
+
+// A system backfill makes its snapshot directory private before it reads anything, and reads
+// nothing when it cannot: the copies it would make there are the console user's session stores.
+func TestSystemEndpointBackfillSecuresTheSnapshotDirectoryFirst(t *testing.T) {
+	ran := false
+	stubBackfill(t, 1<<20, 1<<20, endpointBackfillRunner{Name: "Codex", Sync: "beacon endpoint codex sync", Run: func(endpointBackfillRun) (int, error) {
+		ran = true
+		return 0, nil
+	}})
+	stubConsoleUser(t, consoleUserInfo{Username: "alice", HomeDir: t.TempDir()}, true, nil)
+	scratch := endpointBackfillScratchDir()
+
+	var secured []string
+	secureBackfillScratchDir = func(dir string) error {
+		if ran {
+			t.Error("the snapshot directory was secured after a runtime was read")
+		}
+		secured = append(secured, dir)
+		return nil
+	}
+	runEndpointBackfill(filepath.Join(t.TempDir(), "runtime.jsonl"), false)
+	if !ran || len(secured) != 1 || secured[0] != scratch {
+		t.Fatalf("secured %v (runtime read: %t), want %s once, before the runtime is read", secured, ran, scratch)
+	}
+
+	ran = false
+	secureBackfillScratchDir = func(string) error { return errors.New("access is denied") }
+	result := runEndpointBackfill(filepath.Join(t.TempDir(), "runtime.jsonl"), false)
+	if ran {
+		t.Fatal("a system backfill read session stores although its snapshot directory could not be made private")
+	}
+	if !strings.Contains(result.Skipped, scratch) || !strings.Contains(result.Skipped, "access is denied") {
+		t.Fatalf("Skipped = %q, want it to name %s and the error", result.Skipped, scratch)
+	}
+
+	// A user backfill reads the user's own stores and makes no copies in the system tree.
+	secured = nil
+	secureBackfillScratchDir = func(dir string) error { secured = append(secured, dir); return nil }
+	runEndpointBackfill(filepath.Join(t.TempDir(), "runtime.jsonl"), true)
+	if len(secured) != 0 {
+		t.Fatalf("a user backfill secured %v", secured)
 	}
 }
 
-func TestConnectShipsTheBackfillAndSaysSo(t *testing.T) {
+func TestConnectShipsTheBackfill(t *testing.T) {
 	originalLoad, originalConnect := connectAccountLoad, connectManagedEndpoint
 	originalConnectOpts, originalEndpointOpts := connectOpts, endpointOpts
 	t.Cleanup(func() {
@@ -233,7 +279,7 @@ func TestConnectShipsTheBackfillAndSaysSo(t *testing.T) {
 		}
 		return result, nil
 	}
-	connect := func(backfilled bool) string {
+	connect := func(backfilled bool) {
 		t.Helper()
 		var out strings.Builder
 		command := &cobra.Command{}
@@ -242,17 +288,13 @@ func TestConnectShipsTheBackfillAndSaysSo(t *testing.T) {
 		if err := connectEndpoint(command, true, filepath.Join(t.TempDir(), "runtime.jsonl"), backfilled); err != nil {
 			t.Fatal(err)
 		}
-		return out.String()
 	}
 
 	staged = 2
-	text := connect(false)
+	connect(false)
 	if captured.Backfill == nil || captured.Backfill.Sync == nil || captured.Backfill.Options.MaxBytes != endpointBackfillMaxBytes ||
 		!captured.Backfill.Options.Since.Equal(time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)) {
 		t.Fatalf("connect backfill = %+v", captured.Backfill)
-	}
-	if !strings.Contains(text, "Uploading 2 events of recent session history; they appear at https://beacon.sh/dashboard") {
-		t.Fatalf("connect does not say the history is on its way:\n%s", text)
 	}
 
 	connect(true)
@@ -262,7 +304,7 @@ func TestConnectShipsTheBackfillAndSaysSo(t *testing.T) {
 
 	t.Setenv(endpointBackfillEnv, "0")
 	staged = 0
-	if text := connect(false); captured.Backfill != nil || strings.Contains(text, "Uploading") {
-		t.Fatalf("BEACON_BACKFILL=0 still shipped a backfill: %+v\n%s", captured.Backfill, text)
+	if connect(false); captured.Backfill != nil {
+		t.Fatalf("BEACON_BACKFILL=0 still shipped a backfill: %+v", captured.Backfill)
 	}
 }

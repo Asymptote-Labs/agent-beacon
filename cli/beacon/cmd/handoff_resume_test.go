@@ -44,7 +44,7 @@ func newResumeFixture(t *testing.T) *resumeFixture {
 		}},
 	})
 
-	prevLook, prevLaunch, prevTerm, prevStdin, prevExit := handoffLookPath, handoffLaunch, handoffIsTerminal, handoffStdin, handoffExit
+	prevLook, prevLaunch, prevDetached, prevTerm, prevStdin, prevExit, prevExecutable := handoffLookPath, handoffLaunch, handoffLaunchDetached, handoffIsTerminal, handoffStdin, handoffExit, handoffExecutable
 	handoffLookPath = func(name string) (string, error) {
 		if name == "claude" || name == "codex" {
 			return "/bin/" + name, nil
@@ -55,11 +55,16 @@ func newResumeFixture(t *testing.T) *resumeFixture {
 		f.launched = append(f.launched, plan)
 		return f.exitCode, nil
 	}
+	handoffLaunchDetached = func(plan handoff.Plan, _ handoff.DetachedOptions) (handoff.DetachedResult, error) {
+		f.launched = append(f.launched, plan)
+		return handoff.DetachedResult{Status: "launched", Mode: handoff.LaunchModeNewTerminal, Launcher: "Test Terminal"}, nil
+	}
 	handoffIsTerminal = func() bool { return true }
 	handoffStdin = strings.NewReader("\n")
 	handoffExit = func(code int) { f.exitCalled = code }
+	handoffExecutable = func() (string, error) { return "/bin/beacon", nil }
 	t.Cleanup(func() {
-		handoffLookPath, handoffLaunch, handoffIsTerminal, handoffStdin, handoffExit = prevLook, prevLaunch, prevTerm, prevStdin, prevExit
+		handoffLookPath, handoffLaunch, handoffLaunchDetached, handoffIsTerminal, handoffStdin, handoffExit, handoffExecutable = prevLook, prevLaunch, prevDetached, prevTerm, prevStdin, prevExit, prevExecutable
 	})
 	return f
 }
@@ -75,7 +80,7 @@ func TestHandoffResumeCommandRegistered(t *testing.T) {
 	if err != nil || cmd == nil || cmd.Name() != "resume" {
 		t.Fatalf("handoff resume not registered: %v", err)
 	}
-	for _, flag := range []string{"agent", "new", "cwd", "print", "yes", "json", "output-dir", "log-path", "harness", "claude-projects-dir", "codex-dir", "opencode-dir", "cline-dir"} {
+	for _, flag := range []string{"agent", "new", "cwd", "launch", "print", "yes", "json", "output-dir", "log-path", "harness", "claude-projects-dir", "codex-dir", "opencode-dir", "cline-dir"} {
 		if cmd.Flags().Lookup(flag) == nil {
 			t.Fatalf("handoff resume missing --%s", flag)
 		}
@@ -212,6 +217,55 @@ func TestHandoffResumeRefusesToLaunchWithoutATerminal(t *testing.T) {
 	}
 	if _, _, err := runResume(t, f, "claude-1", "--yes"); err != nil || len(f.launched) != 1 {
 		t.Fatalf("--yes launches without a terminal: %v", err)
+	}
+}
+
+func TestHandoffResumeLaunchesInANewTerminalFromANonTTY(t *testing.T) {
+	f := newResumeFixture(t)
+	handoffIsTerminal = func() bool { return false }
+	var options handoff.DetachedOptions
+	handoffLaunchDetached = func(plan handoff.Plan, opts handoff.DetachedOptions) (handoff.DetachedResult, error) {
+		f.launched = append(f.launched, plan)
+		options = opts
+		return handoff.DetachedResult{Status: "launched", Mode: handoff.LaunchModeNewTerminal, Launcher: "Terminal.app"}, nil
+	}
+	out, _, err := runResume(t, f, "claude-1", "--launch", "auto", "--yes")
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if len(f.launched) != 1 || options.Mode != handoff.LaunchModeAuto || options.BeaconExecutable != "/bin/beacon" || options.SpecDir != f.briefDir {
+		t.Fatalf("launch = %+v, options = %+v", f.launched, options)
+	}
+	if !strings.Contains(out, "Launched Claude Code with Terminal.app.") {
+		t.Fatalf("stdout = %q", out)
+	}
+}
+
+func TestHandoffResumeTmuxPrintsAttachCommand(t *testing.T) {
+	f := newResumeFixture(t)
+	handoffLaunchDetached = func(plan handoff.Plan, opts handoff.DetachedOptions) (handoff.DetachedResult, error) {
+		f.launched = append(f.launched, plan)
+		return handoff.DetachedResult{
+			Status:        "launched",
+			Mode:          handoff.LaunchModeTmux,
+			Launcher:      "tmux",
+			SessionName:   "beacon-handoff-abcd1234",
+			AttachCommand: "tmux attach -t beacon-handoff-abcd1234",
+		}, nil
+	}
+	out, _, err := runResume(t, f, "claude-1", "--launch", "tmux", "--yes")
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if !strings.Contains(out, "Attach with: tmux attach -t beacon-handoff-abcd1234") {
+		t.Fatalf("stdout = %q", out)
+	}
+}
+
+func TestHandoffResumeRejectsInvalidLaunchMode(t *testing.T) {
+	f := newResumeFixture(t)
+	if _, _, err := runResume(t, f, "claude-1", "--launch", "background"); err == nil || !strings.Contains(err.Error(), "--launch") {
+		t.Fatalf("err = %v", err)
 	}
 }
 

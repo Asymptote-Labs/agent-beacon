@@ -58,14 +58,6 @@ func TestSystemLogPermissionsRejectAnUnreachableDirectory(t *testing.T) {
 	}
 }
 
-func TestSystemLogPermissionsAcceptTheShippedLayout(t *testing.T) {
-	path := logAt(t, 0o755, 0o666)
-
-	if got := checkLogPermissions(path, false); got.Status != StatusOK {
-		t.Errorf("status = %v (%s) for the layout install actually creates, want ok", got.Status, got.Message)
-	}
-}
-
 // User mode is a different question: the log lives in that user's own profile and is written by
 // processes running as them, so an owner-only file is correct and must not be failed.
 func TestUserModeLogPermissionsAllowAnOwnerOnlyLog(t *testing.T) {

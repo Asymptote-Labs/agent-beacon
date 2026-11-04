@@ -49,6 +49,139 @@ func TestTraceEventFromEvent(t *testing.T) {
 	}
 }
 
+func TestAssistantActionsRetainTheirAnswerInTraceMessages(t *testing.T) {
+	for _, tc := range []struct{ action, category string }{
+		{"agent.message", "agent"},
+		{"assistant.message", "agent"},
+		{"agent.response", "agent"},
+		{"agent.response.completed", "agent"},
+		{"agent.plan", "agent"},
+		{"agent.response.completed", "session"},
+	} {
+		t.Run(tc.action+"/"+tc.category, func(t *testing.T) {
+			event := shareEventAt("2026-10-01T10:00:02Z", "chatgpt_web", CollectionMethodOTLP, tc.action, tc.category)
+			event.Event.ID = "answer-event"
+			event.Message = "chatgpt_web assistant response completed"
+			event.Model = "gpt-5"
+			event.GenAI = &GenAIInfo{
+				Output: &GenAIOutputInfo{Messages: []interface{}{
+					map[string]interface{}{"role": RoleAssistant, "parts": []interface{}{
+						map[string]interface{}{"type": GenAIPartTypeText, "content": "The retained answer."},
+						map[string]interface{}{"type": GenAIPartTypeReasoning, "content": "Private reasoning."},
+					}},
+				}},
+				Usage: &GenAIUsageInfo{InputTokens: int64Ptr(10), OutputTokens: int64Ptr(4)},
+			}
+			event.Content = RetainedContent("The retained answer.", DefaultStringLimit)
+			builder := NewTraceBuilder("browser-answer", event)
+			projected := builder.Add(event, TraceEventFromEvent(event, "", 1))
+			if projected.Type != "agent_message" || projected.Actor != "assistant" || projected.Content == nil || projected.Content.Text != "The retained answer." {
+				t.Fatalf("assistant projection = %+v", projected)
+			}
+			if projected.ID != event.Event.ID || projected.Action != tc.action || projected.Summary != event.Message || projected.Model != event.Model ||
+				projected.Usage == nil || projected.Usage.InputTokens != 10 || projected.Usage.OutputTokens != 4 {
+				t.Fatalf("assistant metadata changed = %+v", projected)
+			}
+			bundle := builder.Bundle(TraceProvenanceV1{})
+			messages := TraceMessages(bundle)
+			if len(messages) != 1 || messages[0].Role != TraceRoleAssistant || messages[0].Kind != TraceMessageKindAssistant || messages[0].Text != "The retained answer." {
+				t.Fatalf("assistant messages = %+v", messages)
+			}
+			if messages[0].ID != event.Event.ID || messages[0].Model != event.Model || messages[0].TokenUsage == nil || messages[0].TokenUsage.OutputTokens != 4 {
+				t.Fatalf("message metadata changed = %+v", messages[0])
+			}
+			if bundle.Summary.LocalMessageCount != 1 {
+				t.Fatalf("message count = %d, want 1", bundle.Summary.LocalMessageCount)
+			}
+		})
+	}
+}
+
+func TestTextlessAssistantCompletionDoesNotInventAnAnswer(t *testing.T) {
+	for _, category := range []string{"agent", "session"} {
+		t.Run(category, func(t *testing.T) {
+			event := shareEventAt("2026-10-01T10:00:02Z", "opencode", CollectionMethodPlugin, "agent.response.completed", category)
+			event.Event.ID = "textless-completion"
+			event.Message = "opencode assistant response completed"
+			projected := TraceEventFromEvent(event, "", 1)
+			messages := TraceMessages(TraceBundleV1{Events: []TraceEventV1{projected}})
+			if len(messages) != 0 {
+				t.Fatalf("textless completion invented assistant text: %+v", messages)
+			}
+		})
+	}
+}
+
+func TestOpenCodeCompletionKeepsOneAssistantAnswer(t *testing.T) {
+	prompt := shareEventAt("2026-10-01T10:00:00Z", "opencode", CollectionMethodPlugin, "prompt.submitted", "prompt")
+	prompt.Event.ID = "opencode-prompt"
+	prompt.Prompt = &PromptInfo{Text: "Explain the lookup cache."}
+	response := shareEventAt("2026-10-01T10:00:01Z", "opencode", CollectionMethodPlugin, "agent.response", "session")
+	response.Event.ID = "opencode-answer"
+	response.Message = "opencode assistant response captured"
+	response.GenAI = &GenAIInfo{Output: &GenAIOutputInfo{Messages: TextOutputMessages("It memoizes lookups.")}}
+	completion := shareEventAt("2026-10-01T10:00:02Z", "opencode", CollectionMethodPlugin, "agent.response.completed", "session")
+	completion.Event.ID = "opencode-completion"
+	completion.Message = "opencode assistant response completed"
+	completion.GenAI = &GenAIInfo{Response: &GenAIResponseInfo{ID: "assistant-turn"}, Usage: &GenAIUsageInfo{
+		InputTokens: int64Ptr(10), OutputTokens: int64Ptr(4),
+	}}
+	builder := NewTraceBuilder("opencode-turn", prompt)
+	for i, event := range []Event{prompt, response, completion} {
+		builder.Add(event, TraceEventFromEvent(event, "", i+1))
+	}
+	bundle := builder.Bundle(TraceProvenanceV1{})
+	if bundle.Summary.LocalMessageCount != 2 || bundle.Summary.EventCount != 3 || bundle.Events[2].Type != "session" {
+		t.Fatalf("completion changed message count or lifecycle type: summary=%+v events=%+v", bundle.Summary, bundle.Events)
+	}
+	if bundle.Summary.Title != prompt.Prompt.Text || bundle.Summary.Preview != prompt.Prompt.Text ||
+		bundle.Summary.TokenUsage == nil || bundle.Summary.TokenUsage.InputTokens != 10 || bundle.Summary.TokenUsage.OutputTokens != 4 {
+		t.Fatalf("completion changed title, preview or usage: %+v", bundle.Summary)
+	}
+	messages := TraceMessages(bundle)
+	if len(messages) != 2 || messages[0].Role != TraceRoleUser || messages[1].Role != TraceRoleAssistant || messages[1].Text != "It memoizes lookups." {
+		t.Fatalf("completion changed the conversation: %+v", messages)
+	}
+}
+
+func TestMetadataOnlyBrowserCompletionStillCountsAsAnAnswer(t *testing.T) {
+	event := shareEventAt("2026-10-01T10:00:02Z", "chatgpt_web", CollectionMethodOTLP, "agent.response.completed", "agent")
+	event.Event.ID = "browser-completion"
+	event.Message = "chatgpt_web agent.response.completed"
+	event.Content = &ContentInfo{Retention: ContentRetentionMetadata}
+	builder := NewTraceBuilder("metadata-browser-turn", event)
+	projected := builder.Add(event, TraceEventFromEvent(event, "", 1))
+	bundle := builder.Bundle(TraceProvenanceV1{})
+	if projected.Type != "agent_message" || projected.Actor != "assistant" || bundle.Summary.LocalMessageCount != 1 {
+		t.Fatalf("browser completion lost its assistant identity: event=%+v summary=%+v", projected, bundle.Summary)
+	}
+	if messages := TraceMessages(bundle); len(messages) != 0 {
+		t.Fatalf("metadata-only browser completion invented text: %+v", messages)
+	}
+}
+
+func TestTraceEventTypeKeepsUnrelatedClassifications(t *testing.T) {
+	for _, tc := range []struct{ action, category, want string }{
+		{"prompt.submitted", "prompt", "user_message"},
+		{"agent.reasoning", "agent", "agent_reasoning"},
+		{"tool.invoked", "tool", "tool_call"},
+		{"tool.completed", "tool", "tool_result"},
+		{"command.executed", "command", "command"},
+		{"file.read", "file", "file"},
+		{"metric.observed", "metric", "other"},
+		{"session.ended", "session", "session"},
+		{"agent.unknown", "agent", "other"},
+		{"AGENT.RESPONSE", "agent", "agent_message"},
+		{" agent.response", "agent", "other"},
+	} {
+		t.Run(tc.action, func(t *testing.T) {
+			if got := TraceEventType(Event{Event: EventInfo{Action: tc.action, Category: tc.category}}); got != tc.want {
+				t.Fatalf("type = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeTraceEvent(t *testing.T) {
 	metric := Event{Raw: map[string]interface{}{"metric_name": "claude_code.cost.usage"}}
 	NormalizeTraceEvent(&metric)

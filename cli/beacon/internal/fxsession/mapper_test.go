@@ -291,7 +291,9 @@ func TestToolCallIDIsPromotedOnEveryToolEvent(t *testing.T) {
 }
 
 // The provider fx authenticated against is part of what a session cost and where its data went, and
-// it must survive every later edit to the gen_ai block.
+// it must survive every later edit to the gen_ai block. fx reports the model with a vendor prefix
+// ("anthropic/claude-opus-4") that is canonicalized away, but the provider is fx's own reported
+// "gateway", never derived from that prefix.
 func TestProviderSurvivesTheRestOfTheGenAIBlock(t *testing.T) {
 	mapped := mapFixture(t, []string{sessionStartedLine(1, "/repo"), assistantTurnLine(2)}, MapOptions{})
 	for _, item := range mapped {
@@ -390,6 +392,10 @@ func TestTurnUsageReportsTheTurnNotTheSessionTotal(t *testing.T) {
 		t.Errorf("output tokens = %+v, want the turn's 340", usage.GenAI.Usage.OutputTokens)
 	}
 	raw := rawFx(t, usage)
+	// A turn summary, when fx writes one, wins over the cumulative-totals fallback.
+	if raw["token_source"] != "turn_summary" {
+		t.Errorf("raw.fx.token_source = %v, want turn_summary", raw["token_source"])
+	}
 	if raw["input_exact"] != true || raw["output_exact"] != false {
 		t.Errorf("raw.fx exactness = %v/%v, want fx's own flags carried through", raw["input_exact"], raw["output_exact"])
 	}
@@ -725,37 +731,5 @@ func TestResumedSweepMeasuresAgainstTheTurnBeforeTheCursor(t *testing.T) {
 	}
 	if got := *usage[0].GenAI.Usage.InputTokens; got != 1500 {
 		t.Fatalf("input tokens = %d, want the 1500 increase over the skipped turn, not the 2500 total", got)
-	}
-}
-
-// A turn summary, when fx writes one, still wins: it is the runtime's own per-turn count with its
-// exactness flags, and the cumulative difference is only a fallback.
-func TestATurnSummaryIsPreferredOverTheCumulativeFallback(t *testing.T) {
-	mapped := mapFixture(t, []string{sessionStartedLine(1, "/repo"), assistantTurnLine(2)}, MapOptions{})
-	usage := find(t, mapped, "token.usage")
-	if source := rawFx(t, usage)["token_source"]; source != "turn_summary" {
-		t.Fatalf("raw.fx.token_source = %v, want turn_summary", source)
-	}
-	if got := *usage.GenAI.Usage.InputTokens; got != 1200 {
-		t.Errorf("input tokens = %d, want the summary's 1200 rather than the record's 4200 total", got)
-	}
-}
-
-// fx reports its model with a vendor prefix ("anthropic/claude-opus-4") and its provider
-// separately ("gateway"). Canonicalizing the model is what lets an fx turn group with the same
-// model reported by a hook or OTLP runtime, which spell it "claude-opus-4".
-//
-// The provider is deliberately not derived from the stripped prefix here. fx already names its
-// provider, and on this fixture the two disagree on purpose: the prefix is the model's vendor
-// while the provider is the gateway routing the call. Deriving one from the other would overwrite
-// a reported fact with a parsed guess.
-func TestFxModelIsCanonicalizedWithoutDisturbingTheReportedProvider(t *testing.T) {
-	mapped := mapFixture(t, []string{sessionStartedLine(1, "/repo"), assistantTurnLine(2)}, MapOptions{})
-	prompt := find(t, mapped, "prompt.submitted")
-	if prompt.Model != "claude-opus-4" {
-		t.Errorf("model = %q, want the vendor prefix stripped", prompt.Model)
-	}
-	if prompt.GenAI == nil || prompt.GenAI.Provider == nil || prompt.GenAI.Provider.Name != "gateway" {
-		t.Errorf("provider = %+v, want fx's own reported provider left untouched", prompt.GenAI)
 	}
 }

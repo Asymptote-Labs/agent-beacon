@@ -664,7 +664,7 @@ func clineDiffFields(toolName string, toolInput, toolResponse map[string]interfa
 }
 
 func clineCommandFields(input, toolInput, toolResponse map[string]interface{}) map[string]interface{} {
-	fields := map[string]interface{}{"command": firstToolString(toolInput, "command", "cmd")}
+	fields := map[string]interface{}{"command": normalizeToolString(asymptoteobserve.ToolCommandLine("", toolInput))}
 	if output := firstToolString(toolResponse, "output", "stdout", "text", "result"); output != "" {
 		fields["output"] = output
 	}

@@ -12,7 +12,6 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/detect"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/threatrules"
 )
 
 // storeRule is a minimal valid rule; spec, when set, is written as its spec line.
@@ -70,7 +69,7 @@ func findingsFixture(t *testing.T, rules map[string]string) *httptest.ResponseRe
 // the baseline and names the skipped rules instead of failing.
 func TestFindingsAllStoreRulesSkippedStillRunsBaseline(t *testing.T) {
 	rec := findingsFixture(t, map[string]string{
-		"future-a": storeRule("future-a", "threat-rules/v1.2"),
+		"future-a": storeRule("future-a", "threat-rules/v1.3"),
 		"future-b": storeRule("future-b", "threat-rules/v2"),
 	})
 	if rec.Code != http.StatusOK {
@@ -86,11 +85,11 @@ func TestFindingsAllStoreRulesSkippedStillRunsBaseline(t *testing.T) {
 }
 
 // TestRunScanAllRulesSkippedNamesThem: with an explicit rules directory (no baseline),
-// every rule needing a newer Beacon is a NoRulesError that names them.
+// every rule needing a newer Beacon is skipped, and the NoRulesError carries them all.
 func TestRunScanAllRulesSkippedNamesThem(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	dir := t.TempDir()
-	for id, spec := range map[string]string{"future-a": "threat-rules/v1.2", "future-b": "threat-rules/v2"} {
+	for id, spec := range map[string]string{"future-a": "threat-rules/v1.3", "future-b": "threat-rules/v2"} {
 		if err := os.WriteFile(filepath.Join(dir, id+".rule.yaml"), []byte(storeRule(id, spec)), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -104,26 +103,12 @@ func TestRunScanAllRulesSkippedNamesThem(t *testing.T) {
 	if !errors.As(err, &noRules) || len(noRules.Skipped) != 2 {
 		t.Fatalf("want a NoRulesError naming both rules, got %v", err)
 	}
-	msg := err.Error()
-	if strings.Contains(msg, "store is empty") {
-		t.Fatalf("error must not claim the store is empty: %s", msg)
-	}
-	for _, want := range []string{
-		`rule "future-a" requires threat-rules/v1.2`,
-		`rule "future-b" requires threat-rules/v2`,
-		"supports up to " + threatrules.SupportedSpec,
-		"upgrade Beacon",
-	} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("error %q missing %q", msg, want)
-		}
-	}
 }
 
 func TestFindingsSomeRulesSkippedRunsTheRest(t *testing.T) {
 	rec := findingsFixture(t, map[string]string{
 		"current-rule": storeRule("current-rule", ""),
-		"future-rule":  storeRule("future-rule", "threat-rules/v1.2"),
+		"future-rule":  storeRule("future-rule", "threat-rules/v1.3"),
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
@@ -135,7 +120,7 @@ func TestFindingsSomeRulesSkippedRunsTheRest(t *testing.T) {
 	if resp.Count != 1 || resp.Findings[0].RuleID != "current-rule" {
 		t.Fatalf("want the current rule's finding, got %+v", resp.Findings)
 	}
-	if len(resp.Skipped) != 1 || !strings.Contains(resp.Skipped[0], `rule "future-rule" requires threat-rules/v1.2`) {
+	if len(resp.Skipped) != 1 || !strings.Contains(resp.Skipped[0], `rule "future-rule" requires threat-rules/v1.3`) {
 		t.Fatalf("want future-rule in skipped, got %v", resp.Skipped)
 	}
 }

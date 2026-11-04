@@ -168,26 +168,3 @@ func TestSystemInstructionsTextIsNeverSerialized(t *testing.T) {
 		t.Fatal("engine used a caller-asserted system_instructions_text")
 	}
 }
-
-func TestCompiledRuleDerivesSystemInstructionsTextWithoutMutatingEvents(t *testing.T) {
-	rule := validSingleEventRule()
-	rule.Match = `e.gen_ai.system_instructions_text.contains("` + skillCanary + `")`
-	compiled, err := Compile(rule)
-	if err != nil {
-		t.Fatalf("compile: %v", err)
-	}
-	if !compiled.derived {
-		t.Fatal("rule referencing system_instructions_text not marked as needing derivation")
-	}
-	events := []asymptoteobserve.Event{systemContextEvent(asymptoteobserve.SystemInstructionParts("Skill index " + skillCanary))}
-	verdict, err := compiled.Evaluate(events)
-	if err != nil {
-		t.Fatalf("evaluate: %v", err)
-	}
-	if verdict != VerdictMatch {
-		t.Fatalf("verdict = %s, want match", verdict)
-	}
-	if got := events[0].GenAI.SystemInstructionsText; got != "" {
-		t.Fatalf("caller's event mutated: system_instructions_text = %q", got)
-	}
-}

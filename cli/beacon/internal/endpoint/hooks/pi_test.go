@@ -33,10 +33,14 @@ func TestPiExtensionPathDefaultsToUserLevel(t *testing.T) {
 // Pi's project-level extension directory is `.pi/extensions`, not `.pi/agent/extensions`: the
 // `agent` segment exists only under the home directory. Deriving one path from the other would
 // write the project extension where Pi does not look for it, so the install would report success
-// and collect nothing.
+// and collect nothing. PI_CODING_AGENT_DIR moves only the user path, so it is set here to prove
+// the project path ignores it.
 func TestPiExtensionPathProjectLevelOmitsAgentSegment(t *testing.T) {
+	home := t.TempDir()
 	cwd := t.TempDir()
+	testenv.SetHome(t, home)
 	t.Chdir(cwd)
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(home, "elsewhere", "agent"))
 
 	got, err := PiExtensionPath(LevelProject)
 	if err != nil {
@@ -48,20 +52,68 @@ func TestPiExtensionPathProjectLevelOmitsAgentSegment(t *testing.T) {
 	}
 }
 
-func TestPiExtensionPathRejectsUnknownLevel(t *testing.T) {
-	if _, err := PiExtensionPath(Level("machine")); err == nil {
-		t.Fatal("PiExtensionPath accepted an unknown level; a typo in a scope flag must fail loudly " +
-			"rather than silently installing at the default scope")
+// Every pi-family runtime resolves its level in its own switch. A typo in a scope flag must fail
+// loudly rather than silently installing at the default scope.
+func TestPiFamilyExtensionPathsRejectUnknownLevel(t *testing.T) {
+	for name, resolve := range map[string]func(Level) (string, error){
+		"pi":    PiExtensionPath,
+		"omp":   OmpExtensionPath,
+		"omo":   OmoExtensionPath,
+		"prime": PrimeExtensionPath,
+	} {
+		if _, err := resolve(Level("machine")); err == nil {
+			t.Errorf("%s extension path accepted an unknown level", name)
+		}
+	}
+}
+
+// The pi-family runtimes are separately installed products that one machine can run side by side.
+// One writing into another's extension directory would attribute a whole runtime's activity to the
+// wrong harness.
+func TestPiFamilyRuntimesInstallToDifferentDirectories(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	testenv.SetHome(t, home)
+	t.Chdir(cwd)
+	for _, name := range omoAgentDirEnvNames {
+		t.Setenv(name, "")
+	}
+	t.Setenv(primeAgentDirEnv, "")
+	clearOmpEnv(t)
+
+	for _, level := range []Level{LevelUser, LevelProject} {
+		seen := map[string]string{}
+		for name, resolve := range map[string]func(Level) (string, error){
+			"pi":    PiExtensionPath,
+			"omp":   OmpExtensionPath,
+			"omo":   OmoExtensionPath,
+			"prime": PrimeExtensionPath,
+		} {
+			path, err := resolve(level)
+			if err != nil {
+				t.Fatalf("%s %s extension path: %v", name, level, err)
+			}
+			if other, ok := seen[path]; ok {
+				t.Fatalf("%s and %s share the %s extension path %q", name, other, level, path)
+			}
+			seen[path] = name
+		}
 	}
 }
 
 // The marker is the only thing that distinguishes a file Beacon may overwrite from one it must
-// not, and it is read by two other packages. Pinning the literal here means a change to it is a
-// deliberate edit to a test rather than a silent break of install/uninstall/status agreement.
-func TestPiManagedExtensionMarkerIsStable(t *testing.T) {
-	if PiManagedExtensionMarker != "beacon-managed-pi-extension:v1" {
-		t.Fatalf("PiManagedExtensionMarker = %q; changing it strands extensions installed by "+
-			"earlier builds, which uninstall then refuses to remove", PiManagedExtensionMarker)
+// not, and it is read by three packages. Changing one strands extensions installed by earlier
+// builds, which uninstall then refuses to remove.
+func TestPiFamilyManagedExtensionMarkersAreStable(t *testing.T) {
+	for got, want := range map[string]string{
+		PiManagedExtensionMarker:    "beacon-managed-pi-extension:v1",
+		OmpManagedExtensionMarker:   "beacon-managed-omp-extension:v1",
+		OmoManagedExtensionMarker:   "beacon-managed-omo-extension:v1",
+		PrimeManagedExtensionMarker: "beacon-managed-prime-extension:v1",
+	} {
+		if got != want {
+			t.Errorf("managed extension marker = %q, want %q", got, want)
+		}
 	}
 }
 
@@ -115,66 +167,6 @@ func TestInstallPiExtensionWritesManagedExtension(t *testing.T) {
 	}
 }
 
-// A Windows path is the case that a hand-rolled quoting rule gets wrong, and the case a JSON-encoded
-// argv gets right for free.
-func TestRenderPiExtensionEncodesWindowsPaths(t *testing.T) {
-	source, err := piExtension.render(`C:\Program Files\beacon\beacon-hooks.exe`, `C:\ProgramData\beacon\runtime.jsonl`, "")
-	if err != nil {
-		t.Fatalf("piExtension.render returned error: %v", err)
-	}
-	argv := piRenderedArgv(t, source)
-	if argv[0] != `C:\Program Files\beacon\beacon-hooks.exe` {
-		t.Fatalf("argv[0] = %q, want the unescaped Windows path back", argv[0])
-	}
-}
-
-func TestInstallPiExtensionRefusesToOverwriteUnmanagedExtension(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "beacon.ts")
-	// Somebody else's extension that happens to share the filename. Overwriting it would delete
-	// their work, and Pi loads exactly one file per path.
-	if err := os.WriteFile(path, []byte("export default function () {}\n"), 0644); err != nil {
-		t.Fatalf("seed unmanaged extension: %v", err)
-	}
-	if err := piExtension.install(path, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", ""); err == nil {
-		t.Fatal("installPiExtension overwrote an unmanaged extension")
-	}
-	data, _ := os.ReadFile(path)
-	if string(data) != "export default function () {}\n" {
-		t.Fatalf("unmanaged extension was modified: %q", string(data))
-	}
-}
-
-func TestRemovePiExtensionOnlyRemovesManagedExtension(t *testing.T) {
-	dir := t.TempDir()
-	managed := filepath.Join(dir, "managed.ts")
-	unmanaged := filepath.Join(dir, "unmanaged.ts")
-	if err := piExtension.install(managed, "/tmp/beacon-hooks", "/tmp/runtime.jsonl", ""); err != nil {
-		t.Fatalf("installPiExtension returned error: %v", err)
-	}
-	if err := os.WriteFile(unmanaged, []byte("export default function () {}\n"), 0644); err != nil {
-		t.Fatalf("seed unmanaged extension: %v", err)
-	}
-
-	removed, err := piExtension.remove(managed)
-	if err != nil || !removed {
-		t.Fatalf("piExtension.remove(managed) = %v, %v; want true, nil", removed, err)
-	}
-	if _, err := os.Stat(managed); !os.IsNotExist(err) {
-		t.Fatal("managed extension survived removal")
-	}
-
-	removed, err = piExtension.remove(unmanaged)
-	if err != nil {
-		t.Fatalf("piExtension.remove(unmanaged) returned error: %v", err)
-	}
-	if removed {
-		t.Fatal("removePiExtension removed an extension Beacon does not manage")
-	}
-	if _, err := os.Stat(unmanaged); err != nil {
-		t.Fatalf("unmanaged extension was deleted: %v", err)
-	}
-}
-
 func TestRemovePiExtensionIsQuietWhenNothingIsInstalled(t *testing.T) {
 	removed, err := piExtension.remove(filepath.Join(t.TempDir(), "absent.ts"))
 	if err != nil {
@@ -199,89 +191,16 @@ func TestPiEmbeddedExtensionMatchesRootSource(t *testing.T) {
 	}
 }
 
-// The marker alone is not enough to call an install healthy. An extension file outlives the binary
-// it was rendered against -- a Beacon uninstall, a partial update, a restored home directory -- and
-// in each case Pi loads an extension that spawns nothing.
-func TestPiStatusRejectsAnExtensionWithNoBinary(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "beacon.ts")
-	missing := filepath.Join(dir, "beacon-hooks")
-	if err := piExtension.install(path, missing, "/tmp/runtime.jsonl", ""); err != nil {
-		t.Fatalf("installPiExtension returned error: %v", err)
-	}
-	status := piStatusFromRuntime(runtimeStatus{Installed: true, BinaryPath: missing, ConfigPath: path})
-	if status.Installed {
-		t.Fatal("status reported installed while the hook binary is absent")
-	}
-	if !strings.Contains(status.Message, "missing") {
-		t.Fatalf("status message = %q, want it to name the missing binary", status.Message)
-	}
-}
-
-func TestPiStatusRejectsAnExtensionPointingElsewhere(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "beacon.ts")
-	stale := filepath.Join(dir, "old-beacon-hooks")
-	current := filepath.Join(dir, "beacon-hooks")
-	for _, binary := range []string{stale, current} {
-		if err := os.WriteFile(binary, []byte("#!/bin/sh\n"), 0755); err != nil {
-			t.Fatalf("seed binary: %v", err)
-		}
-	}
-	if err := piExtension.install(path, stale, "/tmp/runtime.jsonl", ""); err != nil {
-		t.Fatalf("installPiExtension returned error: %v", err)
-	}
-	status := piStatusFromRuntime(runtimeStatus{Installed: true, BinaryPath: current, ConfigPath: path})
-	if status.Installed {
-		t.Fatal("status reported installed while the extension spawns a different binary")
-	}
-}
-
-func TestPiStatusAcceptsAHealthyInstall(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "beacon.ts")
-	binary := filepath.Join(dir, "beacon-hooks")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"), 0755); err != nil {
-		t.Fatalf("seed binary: %v", err)
-	}
-	if err := piExtension.install(path, binary, "/tmp/runtime.jsonl", ""); err != nil {
-		t.Fatalf("installPiExtension returned error: %v", err)
-	}
-	status := piStatusFromRuntime(runtimeStatus{Installed: true, BinaryPath: binary, ConfigPath: path})
-	if !status.Installed {
-		t.Fatalf("status reported not installed for a healthy install: %q", status.Message)
-	}
-	if status.ExtensionPath != path {
-		t.Fatalf("status.ExtensionPath = %q, want %q", status.ExtensionPath, path)
-	}
-}
-
-func TestIsPiInstalledAtRequiresTheManagedMarker(t *testing.T) {
-	dir := t.TempDir()
-	managed := filepath.Join(dir, "managed.ts")
-	unmanaged := filepath.Join(dir, "unmanaged.ts")
-	if err := piExtension.install(managed, "/tmp/beacon-hooks", "", ""); err != nil {
-		t.Fatalf("installPiExtension returned error: %v", err)
-	}
-	if err := os.WriteFile(unmanaged, []byte("export default function () {}\n"), 0644); err != nil {
-		t.Fatalf("seed unmanaged extension: %v", err)
-	}
-	if !piExtension.installedAt(managed) {
-		t.Fatal("isPiInstalledAt did not recognize Beacon's own extension")
-	}
-	if piExtension.installedAt(unmanaged) {
-		t.Fatal("isPiInstalledAt claimed an unmanaged extension as Beacon's")
-	}
-	if piExtension.installedAt(filepath.Join(dir, "absent.ts")) {
-		t.Fatal("isPiInstalledAt claimed a file that does not exist")
-	}
-}
-
+// A Windows path is the case a hand-rolled quoting rule gets wrong: the argv must decode back to
+// the unescaped path, and the status check must find the binary in its JSON-escaped form.
 func TestPiExtensionReferencesBinaryHandlesWindowsPaths(t *testing.T) {
 	binary := `C:\Program Files\beacon\beacon-hooks.exe`
 	source, err := piExtension.render(binary, `C:\ProgramData\beacon\runtime.jsonl`, "")
 	if err != nil {
 		t.Fatalf("piExtension.render returned error: %v", err)
+	}
+	if argv := piRenderedArgv(t, source); argv[0] != binary {
+		t.Fatalf("argv[0] = %q, want the unescaped Windows path back", argv[0])
 	}
 	if !extensionReferencesBinary(source, binary) {
 		t.Fatal("a correctly installed Windows extension was reported as not referencing its own binary")
@@ -317,21 +236,5 @@ func TestPiExtensionPathHonorsTheAgentDirOverride(t *testing.T) {
 	}
 	if want := filepath.Join(home, "custom", "agent", "extensions", "beacon.ts"); got != want {
 		t.Fatalf("PiExtensionPath with ~ = %q, want %q", got, want)
-	}
-}
-
-func TestPiAgentDirOverrideDoesNotMoveTheProjectPath(t *testing.T) {
-	home := t.TempDir()
-	cwd := t.TempDir()
-	testenv.SetHome(t, home)
-	t.Chdir(cwd)
-	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(home, "elsewhere", "agent"))
-
-	got, err := PiExtensionPath(LevelProject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := filepath.Join(cwd, ".pi", "extensions", "beacon.ts"); got != want {
-		t.Fatalf("PiExtensionPath(project) = %q, want %q", got, want)
 	}
 }

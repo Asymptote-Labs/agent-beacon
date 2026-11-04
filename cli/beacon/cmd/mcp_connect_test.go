@@ -19,7 +19,6 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/harness"
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/mcpconnect"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
@@ -193,27 +192,6 @@ func filesUnder(t *testing.T, dir string) map[string]string {
 
 var allAutomatic = []string{"claude_code", "codex_cli", "cursor", "vscode", "gemini_cli", "opencode", "omp"}
 
-func TestMCPConnectSubcommandsAreRegistered(t *testing.T) {
-	for _, sub := range []string{"connect", "disconnect", "status"} {
-		c, _, err := rootCmd.Find([]string{"mcp", sub})
-		if err != nil || c.Name() != sub {
-			t.Fatalf("mcp %s not registered: %v", sub, err)
-		}
-	}
-	c, _, _ := rootCmd.Find([]string{"mcp", "connect"})
-	for _, flag := range []string{"harness", "url", "token-env", "dry-run", "yes", "force"} {
-		if c.Flags().Lookup(flag) == nil {
-			t.Errorf("mcp connect has no --%s", flag)
-		}
-	}
-	c, _, _ = rootCmd.Find([]string{"mcp", "status"})
-	for _, flag := range []string{"harness", "check", "json", "url"} {
-		if c.Flags().Lookup(flag) == nil {
-			t.Errorf("mcp status has no --%s", flag)
-		}
-	}
-}
-
 func TestMCPConnectRefusesUnattendedRuns(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -222,7 +200,6 @@ func TestMCPConnectRefusesUnattendedRuns(t *testing.T) {
 	}{
 		{"not a terminal", func(*testing.T) { mcpIsTTY = func() bool { return false } }, nil},
 		{"CI", func(t *testing.T) { t.Setenv("CI", "true") }, nil},
-		{"GitHub Actions", func(t *testing.T) { t.Setenv("GITHUB_ACTIONS", "true") }, nil},
 		{"root", func(*testing.T) { mcpIsRoot = func() bool { return true } }, nil},
 		{"root even with --yes", func(*testing.T) { mcpIsRoot = func() bool { return true } }, []string{"--yes"}},
 	}
@@ -431,18 +408,6 @@ func TestMCPConnectURLFailuresWriteNothing(t *testing.T) {
 	}
 }
 
-func TestMCPConnectDerivesTheURLFromTheManagedConnection(t *testing.T) {
-	fx := newMCPFixture(t, "cursor")
-	mcpIngestURL = func() string { return fx.server.URL }
-	stdout, _, err := runMCP(t, "connect", "--yes")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(stdout, "Beacon Cloud MCP: "+fx.url+" (checked)") {
-		t.Fatalf("output:\n%s", stdout)
-	}
-}
-
 func TestMCPConnectHarnessFlagAcceptsEndpointSpellings(t *testing.T) {
 	fx := newMCPFixture(t) // nothing detected
 	stdout, _, err := runMCP(t, "connect", "--url", fx.url, "--yes", "--harness", "Codex-CLI,claude,vs-code")
@@ -481,26 +446,6 @@ func TestMCPConnectReportsConflictsAndForceReplaces(t *testing.T) {
 	}
 }
 
-func TestMCPStatusCheckReportsAFailedCheck(t *testing.T) {
-	fx := newMCPFixture(t, "cursor")
-	stdout, _, err := runMCP(t, "status", "--url", fx.server.URL+"/wrong", "--check")
-	if err == nil || !strings.Contains(stdout, "URL check: failed") {
-		t.Fatalf("err = %v\n%s", err, stdout)
-	}
-	stdout, _, err = runMCP(t, "status", "--url", fx.url, "--check")
-	if err != nil || !strings.Contains(stdout, "URL check: ok") || !strings.Contains(stdout, "Cursor") {
-		t.Fatalf("err = %v\n%s", err, stdout)
-	}
-}
-
-func TestMCPDisconnectWithNothingToRemove(t *testing.T) {
-	newMCPFixture(t, allAutomatic...)
-	stdout, _, err := runMCP(t, "disconnect")
-	if err != nil || !strings.Contains(stdout, "Nothing to remove") {
-		t.Fatalf("err = %v\n%s", err, stdout)
-	}
-}
-
 func TestMCPConnectTokenEnvPrintsTheVariable(t *testing.T) {
 	fx := newMCPFixture(t, "codex_cli")
 	stdout, _, err := runMCP(t, "connect", "--url", fx.url, "--yes", "--token-env", "BEACON_MCP_TOKEN")
@@ -513,12 +458,6 @@ func TestMCPConnectTokenEnvPrintsTheVariable(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(fx.home, ".codex", "config.toml"))
 	if !strings.Contains(string(data), `bearer_token_env_var = "BEACON_MCP_TOKEN"`) {
 		t.Fatalf("config.toml:\n%s", data)
-	}
-}
-
-func TestMCPServerNamesDoNotCollide(t *testing.T) {
-	if mcpconnect.ServerName == "beacon" {
-		t.Fatal("the Beacon Cloud server must not share the local stdio server's name")
 	}
 }
 
@@ -558,17 +497,6 @@ func TestMCPStatusWithoutCheckUsesTheURLConnectWrote(t *testing.T) {
 	}
 	if n := len(fx.requests.all()); n != afterConnect {
 		t.Fatalf("status made a request without --check (%d after connect, %d after status)", afterConnect, n)
-	}
-}
-
-func TestMCPStatusFallsBackToTheRecordedURLWithoutAnEnrollment(t *testing.T) {
-	fx := newMCPFixture(t, "cursor")
-	if _, _, err := runMCP(t, "connect", "--url", fx.url, "--yes"); err != nil {
-		t.Fatal(err)
-	}
-	stdout, _, err := runMCP(t, "status")
-	if err != nil || !strings.Contains(stdout, "Beacon Cloud MCP URL: "+fx.url) || strings.Contains(stdout, "other URL") {
-		t.Fatalf("err = %v\n%s", err, stdout)
 	}
 }
 

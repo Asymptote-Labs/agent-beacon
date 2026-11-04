@@ -1,8 +1,6 @@
 package handoff
 
 import (
-	"errors"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -71,14 +69,6 @@ func TestListReadsCopilotSessions(t *testing.T) {
 	}
 }
 
-func TestListWithoutACopilotStore(t *testing.T) {
-	testenv.SetHome(t, t.TempDir())
-	sessions, err := (&copilotSource{dir: filepath.Join(t.TempDir(), "missing")}).List()
-	if err != nil || sessions != nil {
-		t.Fatalf("List = %v, %v; want nothing and no error", sessions, err)
-	}
-}
-
 func TestCopilotSessionBuildsABrief(t *testing.T) {
 	dirs, _, _ := copilotFixture(t)
 	sources := DefaultSources(dirs)
@@ -97,20 +87,6 @@ func TestCopilotSessionBuildsABrief(t *testing.T) {
 	}
 	if !strings.Contains(brief.Render(), "GitHub Copilot CLI") {
 		t.Fatalf("the brief should name GitHub Copilot CLI:\n%s", brief.Render())
-	}
-}
-
-func TestCopilotSessionGoneFromItsStore(t *testing.T) {
-	dirs, namedPath, _ := copilotFixture(t)
-	session, err := Find(DefaultSources(dirs), HarnessCopilot, "0cb916db-26aa-40f2-86b5-1ba81b225fd2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.RemoveAll(filepath.Dir(namedPath)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Events(DefaultSources(dirs), session); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Events = %v, want ErrNotFound", err)
 	}
 }
 

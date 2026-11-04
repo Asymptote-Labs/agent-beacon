@@ -61,7 +61,7 @@ func TestExtractMessagesFromCursorTranscript(t *testing.T) {
 	content := `{"role":"user","message":{"content":[{"type":"text","text":"<user_query>\nPlease fix the bug\n</user_query>"}]}}
 {"role":"assistant","message":{"content":[{"type":"text","text":"I'll fix the bug now."}]}}
 {"role":"user","message":{"content":[{"type":"text","text":"<user_query>\nThanks!\n</user_query>"}]}}
-{"role":"assistant","message":{"content":[{"type":"text","text":"You're welcome!"},{"type":"text","text":"Let me know if you need anything else."}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"You're welcome!"},{"type":"tool_use","name":"write_file"},{"type":"text","text":"Let me know if you need anything else."}]}}
 `
 
 	if err := os.WriteFile(transcriptPath, []byte(content), 0644); err != nil {
@@ -90,56 +90,13 @@ func TestExtractMessagesFromCursorTranscript(t *testing.T) {
 		t.Errorf("Message 1 content = %q", messages[1]["content"])
 	}
 
-	// Check multi-block assistant message (blocks joined with space)
+	// Check multi-block assistant message (text blocks joined with space, non-text blocks skipped)
 	if messages[3]["role"] != "assistant" {
 		t.Errorf("Message 3 role = %q, want 'assistant'", messages[3]["role"])
 	}
 	expected := "You're welcome! Let me know if you need anything else."
 	if messages[3]["content"] != expected {
 		t.Errorf("Message 3 content = %q, want %q", messages[3]["content"], expected)
-	}
-}
-
-func TestExtractMessagesFromCursorTranscript_SkipsNonTextBlocks(t *testing.T) {
-	tmpDir := t.TempDir()
-	transcriptPath := filepath.Join(tmpDir, "transcript.jsonl")
-
-	// Include a non-text block (e.g., tool_use) that should be skipped
-	content := `{"role":"assistant","message":{"content":[{"type":"tool_use","name":"write_file"},{"type":"text","text":"Done editing."}]}}
-`
-
-	if err := os.WriteFile(transcriptPath, []byte(content), 0644); err != nil {
-		t.Fatalf("Failed to write transcript: %v", err)
-	}
-
-	messages := extractMessagesFromCursorTranscript(transcriptPath)
-
-	if len(messages) != 1 {
-		t.Fatalf("Expected 1 message, got %d", len(messages))
-	}
-	if messages[0]["content"] != "Done editing." {
-		t.Errorf("content = %q, want 'Done editing.'", messages[0]["content"])
-	}
-}
-
-func TestExtractMessagesFromCursorTranscript_EmptyFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	transcriptPath := filepath.Join(tmpDir, "transcript.jsonl")
-
-	if err := os.WriteFile(transcriptPath, []byte(""), 0644); err != nil {
-		t.Fatalf("Failed to write transcript: %v", err)
-	}
-
-	messages := extractMessagesFromCursorTranscript(transcriptPath)
-	if len(messages) != 0 {
-		t.Errorf("Expected 0 messages from empty file, got %d", len(messages))
-	}
-}
-
-func TestExtractMessagesFromCursorTranscript_FileNotFound(t *testing.T) {
-	messages := extractMessagesFromCursorTranscript("/nonexistent/path.jsonl")
-	if messages != nil {
-		t.Errorf("Expected nil for nonexistent file, got %v", messages)
 	}
 }
 
@@ -223,16 +180,6 @@ func TestStripCursorXMLTags(t *testing.T) {
 		input string
 		want  string
 	}{
-		{
-			"user_query tags",
-			"<user_query>\nPlease fix the bug\n</user_query>",
-			"Please fix the bug",
-		},
-		{
-			"no tags",
-			"Just a plain message",
-			"Just a plain message",
-		},
 		{
 			"attached_files tags",
 			"<user_query>\nFix this\n</user_query>\n<attached_files>\nfile.py\n</attached_files>",

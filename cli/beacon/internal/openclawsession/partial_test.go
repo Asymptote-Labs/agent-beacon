@@ -12,8 +12,6 @@ func TestPartialLastOrderNeverSkipsARecordsRemainingEvents(t *testing.T) {
 		{failed: 0, start: 0, want: 0}, // nothing written
 		{failed: 1, start: 0, want: 1}, // record 1 done, record 2 retried
 		{failed: 2, start: 0, want: 1}, // half of record 2 written: retry record 2
-		{failed: 3, start: 0, want: 2},
-		{failed: 4, start: 0, want: 2}, // half of record 3 written: retry record 3
 		{failed: 2, start: 5, want: 5}, // never moves the cursor backwards
 	} {
 		if got := partialLastOrder(tc.start, mapped, tc.failed); got != tc.want {

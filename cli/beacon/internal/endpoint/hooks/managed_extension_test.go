@@ -11,7 +11,7 @@ import (
 // assert a property of that shape rather than of one runtime walk this list, so a runtime added
 // later inherits the same guarantees instead of quietly opting out of them.
 func managedExtensions() []managedExtension {
-	return []managedExtension{piExtension, ompExtension}
+	return []managedExtension{piExtension, ompExtension, omoExtension, primeExtension}
 }
 
 // testExtension builds a managedExtension over a caller-supplied template, so the render contract
@@ -41,21 +41,6 @@ func TestRenderRejectsUnresolvedPlaceholders(t *testing.T) {
 		"const leftover = \"__BEACON_SOMETHING_ELSE__\"\n")
 	if _, err := ext.render("/tmp/beacon-hooks", "", ""); err == nil {
 		t.Fatal("render accepted a template with an unresolved placeholder")
-	}
-}
-
-// Every shipped extension source must carry both placeholders. A source that lost one would fail
-// only at install time, on a user's machine, with the runtime already configured to load it.
-func TestShippedExtensionSourcesCarryTheirPlaceholders(t *testing.T) {
-	for _, ext := range managedExtensions() {
-		t.Run(ext.platform, func(t *testing.T) {
-			if !strings.Contains(ext.template, argvPlaceholder) {
-				t.Fatalf("%s extension source is missing %s", ext.platform, argvPlaceholder)
-			}
-			if !strings.Contains(ext.template, managedMarkerPlaceholder) {
-				t.Fatalf("%s extension source is missing %s", ext.platform, managedMarkerPlaceholder)
-			}
-		})
 	}
 }
 

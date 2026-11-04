@@ -1,7 +1,8 @@
-# Beacon memory skills
+# Beacon Agent Skills
 
-Agent Skills that turn Beacon's cross-harness traces into reviewed project memory, and
-bring that memory back to any agent in any harness.
+Agent Skills that turn Beacon's cross-harness traces into reviewed project memory, bring that
+memory back to any agent in any harness, create dashboard lenses, share traces, and continue
+sessions in another runtime.
 
 | Skill | What it does | Network |
 |-------|--------------|---------|
@@ -10,6 +11,7 @@ bring that memory back to any agent in any harness.
 | `beacon-memory-promote` | Install an approved memory as `.agents/skills/<slug>/SKILL.md` so harnesses load it automatically. | None |
 | `beacon-lens-create` | Build, lint, preview and install a lens for the local Beacon dashboard. | None |
 | `beacon-trace-share` | Share the current session as a trace on beacon.sh (`beacon share --current`) and post the link; direct by default, asks before public. | Uploads the session, on request |
+| `beacon-session-handoff` | Continue a selected local agent session in another supported runtime using Beacon's detached CLI launch. | None |
 
 Every skill needs the [Beacon CLI](https://docs.beacon.sh/get-started/overview) with endpoint
 capture installed. The plugin also registers the local `beacon mcp serve` server for

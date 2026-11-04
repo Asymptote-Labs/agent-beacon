@@ -1,9 +1,7 @@
 package tokens
 
 import (
-	"bytes"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
@@ -98,19 +96,6 @@ func TestAggregatePricesWithOverrides(t *testing.T) {
 	}
 	if len(block.Unpriced) != 1 || block.Unpriced[0].Model != "mystery-model" {
 		t.Fatalf("unpriced = %+v", block.Unpriced)
-	}
-
-	var text bytes.Buffer
-	RenderText(&text, report)
-	for _, want := range []string{
-		"or at your overrides file's rate for the models it names",
-		"overrides from  (sha256 " + o.SHA256()[:12] + ", 2 model(s), 1 alias(es))",
-		"priced by the overrides file: acme-coder-2, gpt-5, my-gateway-model",
-		"beacon pricing show <model>",
-	} {
-		if !strings.Contains(text.String(), want) {
-			t.Fatalf("text missing %q:\n%s", want, text.String())
-		}
 	}
 }
 

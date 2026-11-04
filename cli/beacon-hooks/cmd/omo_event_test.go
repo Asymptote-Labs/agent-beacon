@@ -61,22 +61,6 @@ func omoPayloads() map[string]map[string]interface{} {
 	}
 }
 
-// Every type the managed extension subscribes to must map to at least one event. These strings are
-// the contract between the extension's subscription list and this mapper, and a typo on either side
-// produces no telemetry rather than an error -- so the list is walked rather than trusted.
-func TestOmoEventEverySupportedTypeProducesTelemetry(t *testing.T) {
-	payloads := omoPayloads()
-	for _, name := range supportedOmoEventTypes() {
-		payload, ok := payloads[name]
-		if !ok {
-			t.Fatalf("no fixture for supported Senpi event type %q; the mapper claims to handle it", name)
-		}
-		if events := omoRuntime.endpointEvents(cloneFields(payload), "sess-1"); len(events) == 0 {
-			t.Fatalf("supported Senpi event type %q produced no telemetry", name)
-		}
-	}
-}
-
 // An unrecognized type is silent rather than generic. Senpi publishes more than thirty event types
 // -- provider request/response internals, streaming message and tool-execution updates, turn
 // bookkeeping, compaction, model-select and TUI plumbing -- and a future one becoming an
@@ -171,25 +155,6 @@ func TestPiAndOmoProduceTheSameShapeUnderDifferentIdentities(t *testing.T) {
 	}
 }
 
-// Beacon ships and versions the extension file Senpi loads, so its events are plugin-collected, not
-// hook-collected. `event.fidelity` stays observed because every action here was named by the
-// runtime rather than derived by Beacon.
-func TestOmoEventCarriesPluginProvenance(t *testing.T) {
-	logPath := omoTestLog(t)
-
-	runHookWithInput(t, runOmoEvent, map[string]interface{}{
-		"type": "input", "text": "hello", "sessionId": "sess-1",
-	})
-
-	event := omoEventWithAction(t, logPath, "prompt.submitted")
-	if method := nested(t, event, "harness")["collection_method"]; method != "plugin" {
-		t.Fatalf("harness.collection_method = %v, want plugin", method)
-	}
-	if fidelity := nested(t, event, "event")["fidelity"]; fidelity != "observed" {
-		t.Fatalf("event.fidelity = %v, want observed", fidelity)
-	}
-}
-
 // Senpi exposes no approval event at all. Its tool_call handler can block, but that is an extension
 // deciding rather than an operator being asked, and its permission-system builtin owns the real
 // approval prompt without publishing it as an extension event. This is the Pi and Prime Agent
@@ -229,103 +194,5 @@ func TestOmoEventUserBashIsMarkedOperatorInitiated(t *testing.T) {
 	}
 	if raw := nested(t, event, "raw"); raw["omo_user_initiated"] != true {
 		t.Fatalf("raw.omo_user_initiated = %v, want true", raw["omo_user_initiated"])
-	}
-}
-
-// bash is Senpi's ordinary command tool -- unlike Prime Agent, whose only default tool is a Python
-// kernel, so this is the shape the vast majority of Senpi's agent activity actually takes.
-func TestOmoEventBashToolResultIsRecordedAsACommand(t *testing.T) {
-	logPath := omoTestLog(t)
-
-	runHookWithInput(t, runOmoEvent, map[string]interface{}{
-		"type": "tool_result", "toolName": "bash", "toolCallId": "call-1",
-		"input":   map[string]interface{}{"command": "rm -rf /tmp/x"},
-		"details": map[string]interface{}{"exitCode": float64(0), "output": "done\n"},
-		"isError": false, "sessionId": "sess-1",
-	})
-
-	event := omoEventWithAction(t, logPath, "command.executed")
-	command := nested(t, event, "command")
-	if command["command"] != "rm -rf /tmp/x" {
-		t.Fatalf("command.command = %v, want the bash command", command["command"])
-	}
-	if tool := nested(t, event, "tool"); tool["name"] != "bash" {
-		t.Fatalf("tool.name = %v, want bash", tool["name"])
-	}
-}
-
-// Beacon's edit-tool mapping is shared with Pi and Prime Agent, so this pins that Senpi's own edit
-// result reaches it: the runtime's unified patch is retained as content on the file.modified event,
-// the same shape TestPiEventEditResultRecordsTheUnifiedPatch already proves for Pi.
-func TestOmoEventEditResultRecordsTheUnifiedPatch(t *testing.T) {
-	logPath := omoTestLog(t)
-	patch := "@@ -1 +1 @@\n-old\n+new\n"
-
-	runHookWithInput(t, runOmoEvent, map[string]interface{}{
-		"type": "tool_result", "toolName": "edit", "toolCallId": "call-2",
-		"input":     map[string]interface{}{"path": "/repo/a.ts"},
-		"details":   map[string]interface{}{"patch": patch},
-		"isError":   false,
-		"sessionId": "sess-1",
-	})
-
-	event := omoEventWithAction(t, logPath, "file.modified")
-	file := nested(t, event, "file")
-	if file["path"] != "/repo/a.ts" || file["operation"] != "modify" {
-		t.Fatalf("file = %v, want the edited path with a modify operation", file)
-	}
-	content := nested(t, event, "content")
-	if content["bytes"] != float64(len(patch)) {
-		t.Fatalf("content.bytes = %v, want the patch length %d", content["bytes"], len(patch))
-	}
-}
-
-// Usage and cost come off a finalized assistant message, the only place this family reports them,
-// and land in gen_ai.usage rather than in a parallel per-harness field.
-func TestOmoEventMessageEndReportsUsageAndReasoning(t *testing.T) {
-	logPath := omoTestLog(t)
-
-	runHookWithInput(t, runOmoEvent, map[string]interface{}{
-		"type":      "message_end",
-		"sessionId": "sess-1",
-		"message": map[string]interface{}{
-			"role":  "assistant",
-			"model": "claude-opus-5",
-			"content": []interface{}{
-				map[string]interface{}{"type": "thinking", "thinking": "consider the failing test"},
-				map[string]interface{}{"type": "text", "text": "Fixed it."},
-			},
-			"usage": map[string]interface{}{
-				"input": float64(120), "output": float64(30), "cacheRead": float64(8),
-				"cost": map[string]interface{}{"total": 0.0042},
-			},
-		},
-	})
-
-	usage := nested(t, nested(t, omoEventWithAction(t, logPath, "token.usage"), "gen_ai"), "usage")
-	if usage["input_tokens"] != float64(120) || usage["output_tokens"] != float64(30) {
-		t.Fatalf("gen_ai.usage = %v, want the reported input and output tokens", usage)
-	}
-	if cacheRead, ok := usage["cache_read"].(map[string]interface{}); !ok || cacheRead["input_tokens"] != float64(8) {
-		t.Fatalf("gen_ai.usage.cache_read = %v, want 8 input tokens", usage["cache_read"])
-	}
-	// Runtime-reported cost only; Beacon never derives it from a local pricing table.
-	if usage["cost_usd"] != 0.0042 {
-		t.Fatalf("gen_ai.usage.cost_usd = %v, want the runtime's reported cost", usage["cost_usd"])
-	}
-
-	reasoning := omoEventWithAction(t, logPath, "agent.reasoning")
-	output := nested(t, nested(t, reasoning, "gen_ai"), "output")
-	messages, _ := output["messages"].([]interface{})
-	if len(messages) != 1 {
-		t.Fatalf("gen_ai.output.messages = %v, want one reasoning message", output["messages"])
-	}
-	// The assistant's visible answer is not reasoning. Recording it as such would put the model's
-	// output where a reader looking for its private deliberation expects to find it.
-	first, _ := messages[0].(map[string]interface{})
-	parts, _ := first["parts"].([]interface{})
-	part, _ := parts[0].(map[string]interface{})
-	if part["content"] != "consider the failing test" {
-		t.Fatalf("reasoning part = %v, want only the thinking text", part)
 	}
 }

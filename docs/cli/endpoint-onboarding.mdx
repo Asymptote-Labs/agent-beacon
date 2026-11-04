@@ -34,13 +34,17 @@ The first interactive `beacon endpoint install` opens a full-screen terminal wiz
 5. Review the destination, privacy mode and agent tools, then confirm installation.
 
 Move between choices with the arrow keys, continue with <kbd>enter</kbd>, and cancel
-with <kbd>esc</kbd>.
+with <kbd>esc</kbd>. Cancelling ends the install before anything is written, and the
+error says so: run `beacon endpoint install` again when you are ready, or set
+`BEACON_ONBOARDING=0` to install without the guided setup.
 
 Signing in happens inside the wizard. The full-screen view stays up while your
 browser is open, showing the sign-in URL, a spinner, and how long is left before the
 attempt times out. The URL is printed before any browser is opened, so it is usable
 even when none can be, and <kbd>esc</kbd> during the wait returns to the sign-in
-screen rather than ending the install.
+screen rather than ending the install. Once a browser has opened, the screen also asks
+you to open the URL in the browser where you are signed in to beacon.sh, and to copy it
+there if a different browser opened.
 
 If sign-in cannot finish -- an offline machine, no browser, or the wait expiring --
 the wizard offers to try again, to show the URL for you to open yourself, or to
@@ -107,11 +111,12 @@ the beginning of `inventory_state.jsonl` so the hosted dashboard receives the
 endpoint's current inventory baseline.
 
 The managed destination is recorded only once enrollment succeeds. If it fails, the
-local install still succeeds and prints `beacon endpoint connect` as the retry
-command, and the next `beacon endpoint install` offers the question again rather than
-treating the machine as settled. Verify forwarding with `beacon endpoint status
---json`. The onboarding record itself is written only after the install succeeds, so
-a failed install leaves nothing behind and asks again next time.
+local install still succeeds, says that the machine is not connected yet, and prints
+`beacon endpoint connect` as the retry command, and the next `beacon endpoint install`
+offers the question again rather than treating the machine as settled. Verify
+forwarding with `beacon endpoint status --json`. The onboarding record itself is
+written only after the install succeeds, so a failed install leaves nothing behind and
+asks again next time.
 
 ## Agent tools
 
@@ -154,6 +159,41 @@ The wizard never appears non-interactively. Package postinstall scripts, MDM
 deployments, `--system` installs, CI, `--dry-run`, `TERM=dumb`, and any piped or
 redirected stdin skip it silently, including a redirect to `/dev/null`. These paths
 remain account-free.
+
+## When setup finishes
+
+When you confirm Beacon Cloud, the install says `Installing Beacon and connecting to
+Beacon Cloud...` while it works, then ends on a short summary rather than the list of
+files it wrote:
+
+```text title="End of a Beacon Cloud setup"
+Beacon is installed and connected to Beacon Cloud as you@example.com (device dev_7f3a, Standard privacy).
+Session backfill: 8 events from the last 30 days (Claude Code 6, Codex 2).
+  Claude Code: stopped at the backfill size limit; `beacon endpoint claude sync` reads the rest.
+Dashboard: https://beacon.sh/dashboard (your recent sessions appear within a minute)
+Beacon Cloud MCP added to Claude Code, Cursor, VS Code; sign in to beacon-managed once in each app (Claude Code: /mcp in a new session).
+```
+
+In order, the lines give:
+
+1. The account, device and privacy mode this machine forwards with.
+2. What the [session backfill](/cli/endpoint-install#session-backfill) read, with the
+   sync command for any runtime that had more history than the backfill takes.
+3. The hosted dashboard. Sessions from the backfill appear there within a minute;
+   new sessions appear within about 15 seconds of agent activity.
+4. Where Beacon Cloud MCP was added and what is left to do in each app. A harness that
+   takes it only by hand is named on a line of its own, and
+   `beacon mcp connect --dry-run` prints its steps. If you turned Beacon Cloud MCP off,
+   this line says to run `beacon mcp connect` instead.
+
+Beacon then opens the dashboard in your default browser, except with `--no-browser`,
+in an SSH session, or on Linux without a display. The URL is printed either way.
+
+A runtime that needs a restart or a trust prompt before it collects still says so above
+the summary, and warnings still go to stderr. Run `beacon endpoint status` for the
+paths and service state the summary leaves out. Choosing Local, setup on an endpoint
+that was already connected, `beacon endpoint connect`, `beacon mcp connect`, and
+installs that skip the wizard keep their full output.
 
 ## Flags
 

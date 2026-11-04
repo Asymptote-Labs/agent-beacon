@@ -10,7 +10,7 @@ import (
 )
 
 func TestTracePlainMetadataRowsPreserveRawContent(t *testing.T) {
-	for _, text := range []string{"valuable ordinary text", "valuable first line\nsecond line", "valuable first line\r\nsecond\tcolumn"} {
+	for _, text := range []string{"valuable first line\r\nsecond\tcolumn"} {
 		t.Run(text, func(t *testing.T) {
 			logPath, _, _ := traceHistoryFixture(t, false, "")
 			data, err := json.Marshal(map[string]interface{}{

@@ -2,7 +2,6 @@ package groksession
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -181,40 +180,41 @@ func TestCollectOnceCollectsALineThatWasTornOnTheFirstSweep(t *testing.T) {
 	}
 }
 
-func TestCollectOnceIsIdempotentAndPrintDoesNotAdvanceState(t *testing.T) {
+// `beacon endpoint grok sync --print` runs the collector with Print, an Out writer and nothing
+// to write or save. The collector has to hand Print to its sink: without it the sweep maps every
+// event and prints none, and the dry run a user runs to see what sync would ship shows nothing.
+func TestPrintSweepShowsEveryEventAndLeavesTheSessionForSync(t *testing.T) {
 	root := t.TempDir()
 	writeFixtureSession(t, root, "/tmp/grok project", "session-1")
-	statePath := filepath.Join(t.TempDir(), "state.json")
+
+	var printed strings.Builder
+	summary, err := CollectOnce(CollectOptions{SessionsDir: root, Print: true, Out: &printed})
+	if err != nil {
+		t.Fatalf("print CollectOnce: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(printed.String()), "\n")
+	if summary.EventsEmitted == 0 || printed.Len() == 0 || len(lines) != summary.EventsEmitted {
+		t.Fatalf("printed %d lines for %d events:\n%s", len(lines), summary.EventsEmitted, printed.String())
+	}
+	var sawPrompt bool
+	for _, line := range lines {
+		var ev jsonEvent
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("print output is not one event per line: %v\n%s", err, line)
+		}
+		sawPrompt = sawPrompt || ev.Prompt.Text == "run ls token=secret"
+	}
+	if !sawPrompt {
+		t.Fatalf("print output has no event for the session's prompt:\n%s", printed.String())
+	}
+
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-
-	var printed bytes.Buffer
-	printSummary, err := CollectOnce(CollectOptions{SessionsDir: root, StatePath: statePath, Print: true, Out: &printed})
+	real, err := CollectOnce(CollectOptions{SessionsDir: root, StatePath: filepath.Join(t.TempDir(), "state.json"), LogPath: logPath, Write: true, UserMode: true})
 	if err != nil {
-		t.Fatalf("print CollectOnce returned error: %v", err)
+		t.Fatalf("sync after print: %v", err)
 	}
-	if printSummary.EventsEmitted == 0 || printed.Len() == 0 {
-		t.Fatalf("print emitted nothing: summary=%+v output=%q", printSummary, printed.String())
-	}
-	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
-		t.Fatalf("--print advanced state or unexpected stat error: %v", err)
-	}
-
-	first, err := CollectOnce(CollectOptions{SessionsDir: root, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true})
-	if err != nil {
-		t.Fatalf("CollectOnce returned error: %v", err)
-	}
-	if first.EventsEmitted == 0 {
-		t.Fatal("first CollectOnce emitted no events")
-	}
-	second, err := CollectOnce(CollectOptions{SessionsDir: root, StatePath: statePath, LogPath: logPath, Write: true, UserMode: true})
-	if err != nil {
-		t.Fatalf("second CollectOnce returned error: %v", err)
-	}
-	if second.EventsEmitted != 0 || second.SessionsChanged != 0 {
-		t.Fatalf("second summary = %+v, want no new work", second)
-	}
-	if lines := countLines(t, logPath); lines != first.EventsEmitted {
-		t.Fatalf("runtime lines = %d, want %d", lines, first.EventsEmitted)
+	if real.EventsEmitted != summary.EventsEmitted || countLines(t, logPath) != summary.EventsEmitted {
+		t.Fatalf("sync after --print wrote %d events, want the %d the dry run showed", real.EventsEmitted, summary.EventsEmitted)
 	}
 }
 

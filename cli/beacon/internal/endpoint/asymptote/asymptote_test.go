@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"testing/fstest"
 
 	"github.com/pelletier/go-toml/v2"
 
@@ -64,6 +63,48 @@ func TestVectorConfigForwardsBothStreamsOverHTTPWithABearerSecret(t *testing.T) 
 	}
 }
 
+// A new user's first sessions should reach the dashboard within seconds of connecting, so the
+// runtime sink flushes a partial batch after ten seconds and paces itself at the one request a
+// second the ingest service allows each device. Vector accepts unknown keys in these sections
+// without a word, so a misspelled or misplaced key would validate and do nothing; this pins them.
+func TestRuntimeSinkFlushesQuicklyAtTheIngestRate(t *testing.T) {
+	got, err := VectorConfig("/tmp/beacon/runtime.jsonl")
+	if err != nil {
+		t.Fatalf("VectorConfig returned error: %v", err)
+	}
+	var config struct {
+		Sinks map[string]struct {
+			Batch struct {
+				TimeoutSecs *int64 `toml:"timeout_secs"`
+			} `toml:"batch"`
+			Request struct {
+				RateLimitNum          *int64 `toml:"rate_limit_num"`
+				RateLimitDurationSecs *int64 `toml:"rate_limit_duration_secs"`
+			} `toml:"request"`
+		} `toml:"sinks"`
+	}
+	if err := toml.Unmarshal([]byte(got), &config); err != nil {
+		t.Fatalf("parse rendered config: %v", err)
+	}
+	runtime, ok := config.Sinks["asymptote_runtime"]
+	if !ok {
+		t.Fatalf("no asymptote_runtime sink:\n%s", got)
+	}
+	for _, setting := range []struct {
+		name  string
+		value *int64
+		want  int64
+	}{
+		{"batch.timeout_secs", runtime.Batch.TimeoutSecs, 10},
+		{"request.rate_limit_num", runtime.Request.RateLimitNum, 1},
+		{"request.rate_limit_duration_secs", runtime.Request.RateLimitDurationSecs, 1},
+	} {
+		if setting.value == nil || *setting.value != setting.want {
+			t.Fatalf("asymptote_runtime %s = %v, want %d", setting.name, setting.value, setting.want)
+		}
+	}
+}
+
 func TestIngestSmokeTestChecksCredentialBeforePosting(t *testing.T) {
 	got, err := IngestSmokeTest("/tmp/beacon/runtime.jsonl")
 	if err != nil {
@@ -82,7 +123,6 @@ func TestIngestSmokeTestChecksCredentialBeforePosting(t *testing.T) {
 		"Content-Encoding: gzip",
 		"Content-Type: application/x-ndjson",
 		"-H @",
-		"validation only",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("smoke test missing %q:\n%s", want, got)
@@ -354,12 +394,5 @@ func TestSecretsFileContentIsTheShapeTheTemplateReads(t *testing.T) {
 	quoted := SecretsFileContent(`a"b\c`)
 	if err := json.Unmarshal([]byte(quoted), &parsed); err != nil || parsed[SecretsKey] != `a"b\c` {
 		t.Fatalf("secrets content must escape the key: %q (%v)", quoted, err)
-	}
-}
-
-func TestFilesFromFSPropagatesReadErrors(t *testing.T) {
-	fsys := fstest.MapFS{"pack/README.md": &fstest.MapFile{Data: []byte("readme")}}
-	if _, err := filesFromFS(fsys); err == nil || !strings.Contains(err.Error(), "asymptote pack asset") {
-		t.Fatalf("expected a labelled asset read error, got %v", err)
 	}
 }

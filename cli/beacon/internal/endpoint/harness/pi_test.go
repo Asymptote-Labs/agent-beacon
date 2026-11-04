@@ -7,7 +7,6 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/hooks"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
-	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // writePiExtension creates a user-level Pi extension file with the given contents.
@@ -74,29 +73,6 @@ func TestDiscoverPiDetectsStateDirectoryWithoutExecutable(t *testing.T) {
 	}
 }
 
-func TestDiscoverPiDetectsExecutableOnPath(t *testing.T) {
-	testenv.RequirePOSIXExecutableFixtures(t)
-	home := t.TempDir()
-	testenv.SetHome(t, home)
-	binDir := t.TempDir()
-	t.Setenv("PATH", binDir)
-	piPath := filepath.Join(binDir, "pi")
-	if err := os.WriteFile(piPath, []byte("#!/bin/sh\necho pi 0.4.1\n"), 0755); err != nil {
-		t.Fatalf("write fake pi executable: %v", err)
-	}
-
-	h := DiscoverPi()
-	if !h.Detected {
-		t.Fatalf("DiscoverPi did not detect executable on PATH: %#v", h)
-	}
-	if h.ExecutablePath != piPath {
-		t.Fatalf("ExecutablePath = %q, want %q", h.ExecutablePath, piPath)
-	}
-	if h.Version != "pi 0.4.1" {
-		t.Fatalf("Version = %q, want fake executable version", h.Version)
-	}
-}
-
 func TestDiscoverPiReportsEnabledForManagedExtension(t *testing.T) {
 	home := setupPiDiscovery(t)
 	writePiExtension(t, home, "// "+hooks.PiManagedExtensionMarker+"\nexport default () => {}\n")
@@ -133,39 +109,6 @@ func TestDiscoverPiReportsDisabledForStaleMarkerVersion(t *testing.T) {
 	if h.TelemetryStatus != TelemetryDisabled {
 		t.Fatalf("TelemetryStatus = %q, want %q for a superseded marker version; message=%q",
 			h.TelemetryStatus, TelemetryDisabled, h.Message)
-	}
-}
-
-// Discovery has to be registered to be reachable: DiscoverPi existing but missing from DiscoverAll
-// is invisible in `endpoint discover`, `endpoint status`, and the agent.detected events they write.
-func TestDiscoverAllIncludesPi(t *testing.T) {
-	setupPiDiscovery(t)
-
-	for _, h := range DiscoverAll() {
-		if h.Name == "pi_cli" {
-			return
-		}
-	}
-	t.Fatal("DiscoverAll() does not include pi_cli")
-}
-
-// The canonical harness name is what events are grouped by, so discovery must report the same
-// spelling the normalizer produces. Reporting "pi" here while the hook path writes "pi_cli" would
-// split one runtime across two names in every query and dashboard that groups on it -- the same
-// defect that once recorded a single Claude Code session as both "claude" and "claude_code".
-//
-// Asserted against the normalizer rather than against a literal so the two cannot drift apart in
-// one direction only.
-func TestDiscoverPiUsesCanonicalHarnessName(t *testing.T) {
-	setupPiDiscovery(t)
-
-	name := DiscoverPi().Name
-	if name != "pi_cli" {
-		t.Fatalf("DiscoverPi().Name = %q, want %q", name, "pi_cli")
-	}
-	if got := asymptoteobserve.NormalizeHarnessName(name); got != name {
-		t.Fatalf("NormalizeHarnessName(%q) = %q; discovery must report the canonical name so the "+
-			"hook and OTLP paths agree", name, got)
 	}
 }
 

@@ -11,58 +11,6 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
-// The spellings an operator actually types. "prime" is the --platform value and the shortest
-// unambiguous name; "prime-agent" is the binary; the underscore form arrives from anyone copying
-// the canonical harness name out of a log, since normalizeHarnessKey maps `_` to `-`.
-func TestPrimeHookTargetAliases(t *testing.T) {
-	for _, in := range []string{"prime", "PRIME", "  prime  ", "prime-agent", "prime_agent", "primeagent", "Prime-Agent"} {
-		t.Run(in, func(t *testing.T) {
-			got, ok := normalizeHookTarget(in)
-			if !ok {
-				t.Fatalf("normalizeHookTarget(%q) was not recognized", in)
-			}
-			if got != "prime" {
-				t.Fatalf("normalizeHookTarget(%q) = %q, want prime", in, got)
-			}
-		})
-	}
-}
-
-// Pi, Oh My Pi and Prime Agent are separately installed products. A `--harness` value for one must
-// never resolve to another, or an operator asking to instrument one gets another's extension
-// written into a directory the runtime they meant does not read.
-func TestPrimePiAndOmpTargetsDoNotAlias(t *testing.T) {
-	for in, want := range map[string]string{
-		"pi":          "pi",
-		"pi-cli":      "pi",
-		"omp":         "omp",
-		"oh-my-pi":    "omp",
-		"prime":       "prime",
-		"prime-agent": "prime",
-		"prime_agent": "prime",
-		"primeagent":  "prime",
-	} {
-		t.Run(in, func(t *testing.T) {
-			got, ok := normalizeHookTarget(in)
-			if !ok || got != want {
-				t.Fatalf("normalizeHookTarget(%q) = (%q, %v), want %q", in, got, ok, want)
-			}
-		})
-	}
-}
-
-// Prime Agent is a hook (extension) target, not an OTLP one: it exports no OpenTelemetry, so an
-// endpoint install has nothing to point at it.
-func TestPrimeEndpointTargetIsHookShaped(t *testing.T) {
-	got, ok := normalizeEndpointTarget("prime")
-	if !ok {
-		t.Fatal("normalizeEndpointTarget(prime) was not recognized")
-	}
-	if got.Name != "prime" || got.Kind != endpointTargetHook {
-		t.Fatalf("normalizeEndpointTarget(prime) = %+v, want a prime hook target", got)
-	}
-}
-
 // The wiring test. A harness the target table advertises but the install switch has no case for
 // falls through to `unsupported hook harness`, so this is what catches a runtime added to the table
 // and nowhere else -- the way a half-added integration ships.

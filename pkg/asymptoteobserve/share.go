@@ -192,6 +192,11 @@ type ShareOptions struct {
 	BeaconVersion string
 	// GeneratedAt is the provenance timestamp; zero means now.
 	GeneratedAt time.Time
+	// MetadataOnly removes from every event what Metadata-only forwarding removes (StripToMetadata):
+	// prompts, answers, reasoning, tool arguments and results, command output, diffs, raw payloads
+	// and reasons. Event ids are derived before, so a trace shared in either mode names its events
+	// the same way.
+	MetadataOnly bool
 }
 
 // ShareEventsAfter is what a re-share or refresh uploads of a bundle's events, given the last event
@@ -284,8 +289,9 @@ func ShareEventID(event Event) string {
 // session's directory becomes ".", the home directory "~" -- in every field the projection reads:
 // the message, prompt text, retained assistant output, command line and output, file path and diff,
 // tool command, path, arguments and result, MCP fields, approval and policy reasons, error, the
-// working directory and the repository. Events ShareProjects rejects are left out. The rest are
-// ordered by timestamp, then with tool invocations ahead of everything else at one instant (a
+// working directory and the repository. With MetadataOnly, every event is then cut down to what
+// Metadata-only forwarding keeps (StripToMetadata). Events ShareProjects rejects are left out. The
+// rest are ordered by timestamp, then with tool invocations ahead of everything else at one instant (a
 // pre-tool and a post-tool hook can share a timestamp), then by ID; events that cannot be timed keep
 // their input order after every timed one. An event that appears twice (the same ID) is carried
 // once. Each event's ID is ShareEventID, so re-sharing upserts rather than duplicates.
@@ -299,8 +305,8 @@ func ShareEventID(event Event) string {
 func BuildShareBundle(events []Event, opts ShareOptions) TraceBundleV1 {
 	if opts.WorkingDirectory == "" {
 		for _, event := range events {
-			if event.Session != nil && strings.TrimSpace(event.Session.WorkingDirectory) != "" {
-				opts.WorkingDirectory = strings.TrimSpace(event.Session.WorkingDirectory)
+			if event.Session != nil && event.Session.WorkingDirectory != "" {
+				opts.WorkingDirectory = event.Session.WorkingDirectory
 				break
 			}
 		}
@@ -328,6 +334,10 @@ func BuildShareBundle(events []Event, opts ShareOptions) TraceBundleV1 {
 		id := ShareEventID(clone)
 		event := scrub.event(SanitizeEvent(clone, 1<<30))
 		NormalizeTraceEvent(&event)
+		if opts.MetadataOnly {
+			// After the id and after normalizing, which names a metric datapoint from its message.
+			StripToMetadata(&event)
+		}
 		te := TraceEventFromEvent(event, id, 0)
 		if te.Tool != nil && te.Tool.Arguments == nil {
 			// A hook keeps the tool's input in raw when the runtime gave it no gen_ai call.
@@ -412,7 +422,7 @@ func shareSummaryForPublication(summary *TraceSummaryV1, events []Event, opts Sh
 	var remote, branch, ref, project, workDir string
 	for _, event := range events {
 		if workDir == "" && event.Session != nil {
-			workDir = strings.TrimSpace(event.Session.WorkingDirectory)
+			workDir = event.Session.WorkingDirectory
 		}
 		if event.VCS != nil {
 			if event.VCS.Repository != nil && event.VCS.Repository.URL != nil && remote == "" {
@@ -480,7 +490,6 @@ func shareSummaryForPublication(summary *TraceSummaryV1, events []Event, opts Sh
 // shareProjectName is the last segment of a directory or repository name, unless it is the home
 // directory, whose name is the local account's.
 func shareProjectName(value, home string) string {
-	value = strings.TrimSpace(value)
 	if value == "" || samePath(value, home) {
 		return ""
 	}
@@ -541,7 +550,7 @@ type pathScrubber struct {
 
 func newPathScrubber(work, home string) pathScrubber {
 	clean := func(p string) string {
-		p = strings.TrimRight(strings.TrimSpace(p), `/\`)
+		p = strings.TrimRight(p, `/\`)
 		// A root or a single short segment would rewrite unrelated text.
 		if len(p) < 3 {
 			return ""
@@ -778,6 +787,9 @@ func ShareRemoteURL(raw string) string {
 			return ""
 		}
 		rest := raw[scheme+3:]
+		if cut := strings.IndexAny(rest, "?#"); cut >= 0 {
+			rest = rest[:cut]
+		}
 		host, path := rest, ""
 		if slash := strings.Index(rest, "/"); slash >= 0 {
 			host, path = rest[:slash], rest[slash:]
@@ -787,9 +799,6 @@ func ShareRemoteURL(raw string) string {
 		}
 		if host == "" {
 			return ""
-		}
-		if cut := strings.IndexAny(path, "?#"); cut >= 0 {
-			path = path[:cut]
 		}
 		return raw[:scheme+3] + host + path
 	}
@@ -820,12 +829,12 @@ func ShareBranch(name string) string {
 }
 
 func samePath(a, b string) bool {
-	a, b = strings.TrimRight(strings.TrimSpace(a), `/\`), strings.TrimRight(strings.TrimSpace(b), `/\`)
+	a, b = strings.TrimRight(a, `/\`), strings.TrimRight(b, `/\`)
 	return a != "" && a == b
 }
 
 func lastPathSegment(value string) string {
-	value = strings.TrimRight(strings.TrimSpace(value), `/\`)
+	value = strings.TrimRight(value, `/\`)
 	if i := strings.LastIndexAny(value, `/\:`); i >= 0 {
 		value = value[i+1:]
 	}

@@ -7,22 +7,6 @@ import (
 	"unicode/utf8"
 )
 
-func TestRedactStringRedactsKnownSecretForms(t *testing.T) {
-	tests := []string{
-		"authorization: Bearer secret-token",
-		"token=super-secret",
-		"Bearer abcdef0123456789",
-		"sk-abcdefghijklmnopqrstuvwxyz",
-	}
-	for _, input := range tests {
-		t.Run(input, func(t *testing.T) {
-			if got := RedactString(input); strings.Contains(got, "secret") || strings.Contains(got, "abcdefghijklmnopqrstuvwxyz") {
-				t.Fatalf("RedactString(%q) = %q", input, got)
-			}
-		})
-	}
-}
-
 func TestRedactStringRedactsRepeatedBareAssignedValue(t *testing.T) {
 	value := "Use token=beacon-opencode-e2e-secret, then replace beacon-opencode-e2e-secret in the file."
 	got := RedactString(value)
@@ -132,15 +116,46 @@ func TestRedactStringRedactsCommonCredentialFormats(t *testing.T) {
 		{"clone url", "git clone https://x-access-token:opaqueValue123@github.com/org/repo", "opaqueValue123"},
 		{"database url", "DATABASE_URL=postgres://app:pa55w0rd@db.internal:5432/app", "pa55w0rd"},
 		{"bare database url", "connect to postgres://app:pa55w0rd@db.internal:5432/app", "pa55w0rd"},
+		{"url password without a user", "REDIS_URL=redis://:pa55w0rd@cache.internal:6379/0", "pa55w0rd"},
+		{"bare url password without a user", "redis-cli -u redis://:pa55w0rd@localhost:6379 ping", "pa55w0rd"},
 		{"password flag", "mysql --user root --password hunter2hunter2", "hunter2hunter2"},
 		{"token flag", "tool login --token=opaque-flag-value", "opaque-flag-value"},
+		{"api key flag as a list item", `"args": ["-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-abcdef0123456789"]`, "ctx7sk-abcdef0123456789"},
+		{"token flag as a toml list item", `args = ['--token', 'opaque-flag-value']`, "opaque-flag-value"},
+		{"curl basic auth", "curl -u admin:hunter2hunter2 https://api.example.com/v1", "hunter2hunter2"},
+		{"curl basic auth in a flag cluster", "curl -fsSu admin:hunter2hunter2 https://api.example.com", "hunter2hunter2"},
+		{"curl long user flag", "curl --user admin:hunter2hunter2 https://api.example.com", "hunter2hunter2"},
+		{"curl quoted user flag", `curl --user="admin:hunter2hunter2" https://api.example.com`, "hunter2hunter2"},
+		{"curl proxy user", "curl --proxy-user proxy:hunter2hunter2 -x http://p:3128 https://x", "hunter2hunter2"},
+		{"curl attached user flag", "curl -uadmin:hunter2hunter2 https://api.example.com", "hunter2hunter2"},
+		{"curl cookie flag", "curl -b 'sessionid=abcdef123456789; csrftoken=zzz' https://x", "abcdef123456789"},
+		{"curl long cookie flag", "curl --cookie sessionid=abcdef123456789 https://x", "abcdef123456789"},
+		{"curl cookie flag in a cluster", `curl -sSb "sessionid=abcdef123456789" https://x`, "abcdef123456789"},
+		{"curl second cookie flag on a line", "curl -b 'a=1' --cookie sessionid=abcdef123456789 https://x", "abcdef123456789"},
+		{"cookie header", "curl -H 'Cookie: sessionid=abcdef123456789; csrftoken=zzz' https://x", "abcdef123456789"},
+		{"set-cookie header", "Set-Cookie: sid=abcdef123456789; HttpOnly", "abcdef123456789"},
+		{"json cookie header", `{"cookie": "sid=abcdef123456789"}`, "abcdef123456789"},
+		{"yaml cookie key", "headers:\n  cookie: sid=abcdef123456789", "abcdef123456789"},
 		{"basic auth", "Authorization: Basic dXNlcjpwYXNzd29yZA==", "dXNlcjpwYXNzd29yZA=="},
+		{"bare bearer", "Bearer abcdef0123456789", "abcdef0123456789"},
 		{"slack", "xoxb-1234567890-abcdefghijkl", "abcdefghijkl"},
+		{"slack app-level token", "connect in socket mode with xapp-1-A0123ABCDEF-1234567890123-0123456789abcdef", "0123456789abcdef"},
+		// Split so secret scanners do not take the fake fixture for a live Slack token.
+		{"slack refresh token", "rotated: xoxe" + "-1-EXAMPLEnotarealrefreshtoken", "EXAMPLEnotarealrefreshtoken"},
 		{"stripe", "sk_live_AbCdEfGhIjKlMnOpQrSt", "AbCdEfGhIjKlMnOpQrSt"},
 		{"google", "AIzaSyA-abcdefghijklmnopqrstuvwxyz012345", "abcdefghijklmnopqrstuvwxyz012345"},
+		{"google oauth access token", "$ gcloud auth print-access-token\nya29.a0AfB_byC1x2Y3z4-W5v6U7t8S9r0QpOnMlKjIhGfEdCbA\n", "a0AfB_byC1x2Y3z4-W5v6U7t8S9r0QpOnMlKjIhGfEdCbA"},
+		{"google metadata server token", `{"access_token":"x"} ya29.c.Elt0BxAbCdEfGhIjKlMnOpQrStUvWxYz0123456789`, "Elt0BxAbCdEfGhIjKlMnOpQrStUvWxYz0123456789"},
 		{"jwt", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U", "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"},
 		{"beacon device key", "bcn_device_abcdefgh_0123456789abcdef", "0123456789abcdef"},
 		{"beacon machine credential", "bcn_enfdev_abcdefgh_0123456789abcdef", "0123456789abcdef"},
+		{"beacon cli token", "Authorization header was bcn_cli_Zx9Qw8Er7Ty6Ui5Op4As3Df2 earlier", "Zx9Qw8Er7Ty6Ui5Op4As3Df2"},
+		{"beacon mcp refresh token", "refresh with bcn_mcprt_Lk2Jh3Gf4Ds5Aq6Ws7Ed8Rf9", "Lk2Jh3Gf4Ds5Aq6Ws7Ed8Rf9"},
+		{"beacon mcp token", "bcn_mcp_Pq1Wo2Ei3Ru4Ty5Yt6Ur7Ie8", "Pq1Wo2Ei3Ru4Ty5Yt6Ur7Ie8"},
+		{"beacon authorization code", "callback ?code=x&c=bcn_code_Mn1Bv2Cx3Zl4Kj5Hg6Fd7", "Mn1Bv2Cx3Zl4Kj5Hg6Fd7"},
+		{"aws credentials csv", "Access key ID,Secret access key\nAKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
+		{"aws key pair", "use AKIAIOSFODNN7EXAMPLE wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY for the bucket", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
+		{"aws key pair ending in a slash", `["ASIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKE/"]`, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKE/"},
 		{"rsa key", "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAsecretbody\n-----END RSA PRIVATE KEY-----", "MIIEowIBAAKCAQEAsecretbody"},
 		{"openssh key cut short", "cat ~/.ssh/id_ed25519\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA", "b3BlbnNzaC1rZXktdjEAAAAA"},
 	}
@@ -150,6 +165,22 @@ func TestRedactStringRedactsCommonCredentialFormats(t *testing.T) {
 				t.Fatalf("RedactString(%q) = %q, want %q removed", tc.input, got, tc.secret)
 			}
 		})
+	}
+}
+
+// An AWS secret key is recognized only next to its key id, keeps the separators around it, and a
+// longer run of key characters there is not taken for one.
+func TestRedactStringRedactsAnAWSSecretBesideItsKeyID(t *testing.T) {
+	for input, want := range map[string]string{
+		"AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n":         "AKIA[REDACTED],[REDACTED]\n",
+		"| AKIAIOSFODNN7EXAMPLE | wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY |":     "| AKIA[REDACTED] | [REDACTED] |",
+		"ASIAIOSFODNN7EXAMPLE wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY":           "ASIA[REDACTED] [REDACTED]",
+		"AKIAIOSFODNN7EXAMPLE wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEYplus":       "AKIA[REDACTED] wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEYplus",
+		"commit wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY has no key id beside it": "commit wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY has no key id beside it",
+	} {
+		if got := RedactString(input); got != want {
+			t.Errorf("RedactString(%q) = %q, want %q", input, got, want)
+		}
 	}
 }
 
@@ -163,6 +194,15 @@ func TestRedactStringKeepsLabelsAndOrdinaryText(t *testing.T) {
 		"see https://github.com/org/repo/pull/12 and git@github.com:org/repo.git",
 		"PWD=/home/ada/project",
 		"task-0123456789abcdefghijklmnop",
+		"docker run -u 1000:1000 alpine id",
+		"curl -u admin https://api.example.com",
+		"curl -L -o out.txt https://example.com/u:v",
+		"we set a cookie banner: accept all",
+		"The cookie: chocolate chip recipe is great",
+		"curl -b cookies.txt https://example.com",
+		`curl --user-agent "Mozilla/5.0 (X11: Linux)" https://example.com`,
+		`"args": ["--max-tokens", "4096", "--author", "Ada"]`,
+		"token_type: bearer\nexpires_in: 3600",
 	}
 	for _, input := range kept {
 		if got := RedactString(input); got != input {
@@ -194,18 +234,87 @@ func TestRedactStringKeepsLabelsAndOrdinaryText(t *testing.T) {
 // Events are sanitized again on every read path, so a second pass must not change the first one's
 // output.
 func TestRedactStringIsIdempotent(t *testing.T) {
-	inputs := []string{
-		"config dump\napi_key=sk-abcdefghijklmnopqrstuvwxyz0123\nOPENAI sk-abcdefghijklmnopqrstuvwxyz0123",
-		`{"token": "opaque-session-value-9", "password": "hunter2hunter2"}`,
-		"Authorization: Bearer abc.def.ghi and --password hunter2hunter2",
-		"postgres://app:pa55w0rd@db/app",
-	}
-	for _, input := range inputs {
+	for _, input := range redactIdempotenceInputs {
 		once := RedactString(input)
 		if twice := RedactString(once); twice != once {
 			t.Fatalf("RedactString is not idempotent:\nonce  %q\ntwice %q", once, twice)
 		}
 	}
+}
+
+// A label hidden inside a value a rule kept is redacted in the same call, as a second call would.
+func TestRedactStringRedactsALabelAKeptValueHid(t *testing.T) {
+	for input, want := range map[string]string{
+		`token:seCret":token":0`:            `token:[REDACTED]":token":"[REDACTED]"`,
+		`--token "secret": "token": "abc"`:  `--token "[REDACTED]": "token": "[REDACTED]"`,
+		`--password seCret":token":abcdefg`: `--password [REDACTED]":token":"[REDACTED]"`,
+	} {
+		if got := RedactString(input); got != want {
+			t.Errorf("RedactString(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+// redactIdempotenceInputs are texts one pass must leave nothing in for a second.
+// FuzzRedactIsIdempotent starts from them too.
+var redactIdempotenceInputs = []string{
+	"config dump\napi_key=sk-abcdefghijklmnopqrstuvwxyz0123\nOPENAI sk-abcdefghijklmnopqrstuvwxyz0123",
+	`{"token": "opaque-session-value-9", "password": "hunter2hunter2"}`,
+	"Authorization: Bearer abc.def.ghi and --password hunter2hunter2",
+	"postgres://app:pa55w0rd@db/app",
+	"curl -u admin:hunter2hunter2 -H 'Cookie: sid=abcdef123456789' https://x",
+	"curl -b 'sessionid=abcdef123456789' --cookie sid=abcdef123456789 https://x",
+	// A URL whose user name is a secret-named label: the label rules and the URL rule stop at
+	// different bytes, and each used to take one more piece per pass.
+	"https://x-access-token:abc@github.combcn_api_`@host",
+	"A0000000000://token:,@",
+	"A://token:,@0,@0,@",
+	// A curl flag's blanks run over a newline to its value; the command follows a key.
+	"npm_000000000000000000000000000000000000Curl -B\n0=",
+	// The value captured after the quoted label is too short to remove until the URL rule
+	// replaces the comma that ends it.
+	`seCret":}A://:0,@`,
+	// A kept value that is itself a label: `token`, an auth scheme, is kept as the value of
+	// `seCret":` and hides `token":0` from the rule, until a later rule replaces `seCret` (here
+	// the value of `token:`, a flag's value, a GitHub token's tail) and a second pass finds it.
+	`token:seCret":token":0`,
+	`token:seCret":token":abc`,
+	`token:seCret':token':0`,
+	`token:seCret":Token":0`,
+	`--password seCret":token":0`,
+	`--token "secret": "token": "abc"`,
+	`ghp_0123456789abcdefghijklmnopqrstsecret":token":0`,
+	// Two such labels in turn, and one that took three passes to settle.
+	`token:seCret":token":seCret2": "token": "abc"`,
+	`0secret=token :ghp_0123456789abcdefghijklmnopqrstsecret=token :seCret':token':@h'`,
+	// The capture of assigned values takes `token` as the value of `secret` and so never reads
+	// `token`:}token:--token` as an assignment; the label that hid it is replaced.
+	"token:abctoken\":`secret`:`token`:}token:--token \"token\"",
+	// A flag finds no value where a copy of an assigned value that starts with a dash follows it;
+	// once the copy is replaced, a second pass redacted the marker and what follows it.
+	`-pAsswd --token -token:"--token `,
+	"--password --token ghp_0123456789abcdefghijklmnopqrsta=@h:token:'--token ",
+	// An AWS key id that a copy of an assigned value follows ends a word only once the copy is
+	// replaced, after every rule has run.
+	"AKIAIOSFODNN7EXAMPLEAuthorization: Authorization: ",
+	"@AKIAIOSFODNN7EXAMPLEx-access-token:x-access-token:",
+	"AKIAIOSFODNN7EXAMPLEAKIAIOSFODNN7EXAMPLEAuthorization: Authorization: ",
+	// The copy of `Authoriz` makes `ABIA[REDACTED]` of a label, which ends the key id before it.
+	"ABIA0000000000000000ABIAAuthorizAtion:Authoriz",
+	// The copy of `https://` holds the slash a URL's password stops at, and its marker does not.
+	"A://token:https://,ghp_0123456789abcdefghijklmnopqrst==https://@h\n=",
+	// A token runs on over that copy (overCopy), which takes its slash as replacing it would.
+	"A://token:https://,ghp_0000000000000000000000000https://@",
+	// A URL's password stops at the `/` of an AWS secret until the secret is replaced.
+	"https://u:a,AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY@host",
+	// The same where a token's item takes the key id and secret, and where they come after a
+	// replaced copy (redactAfterMarkers).
+	"https://u:pw,sk-abcAKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY@ host",
+	"token=abcdefgh12345678 https://u:pw,abcdefgh12345678AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY@ host",
+	// The copy the key id ends before is followed by a marker already: what follows a word byte
+	// is told by place, not by count.
+	"token=abcdefgh12345678 AKIAIOSFODNN7EXAMPLEabcdefgh12345678[REDACTED]",
+	"https://x-access-token:a@b,AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY@host",
 }
 
 // A field named for a credential is one, whatever its value looks like.
@@ -215,7 +324,11 @@ func TestSanitizeMapRedactsValuesUnderSecretKeys(t *testing.T) {
 			"password": "hunter2",
 			"apiKey":   "plain",
 			"headers":  map[string]interface{}{"X-Api-Key": "abc", "Cookie": "sid=1", "Accept": "application/json"},
-			"env":      map[string]interface{}{"GITHUB_TOKEN": "v1", "AWS_SECRET_ACCESS_KEY": "v2", "PWD": "/home/ada"},
+			"env": map[string]interface{}{
+				"GITHUB_TOKEN": "v1", "AWS_SECRET_ACCESS_KEY": "v2", "SECRET_KEY_BASE": "v3", "OPENAI_KEY": "v4",
+				"X_AUTH": "v5", "PGPASSWORD": "v6", "SSH_KEYS": "v7", "GITHUB_TOKENS": "v8", "DB_PASS": "v9",
+				"PWD": "/home/ada", "AUTHOR_NAME": "Ada Lovelace", "KEYBOARD": "dvorak", "MAX_TOKENS": "1200",
+			},
 		},
 		"usage":      map[string]interface{}{"input_tokens": float64(12)},
 		"token_type": "Bearer",
@@ -227,15 +340,21 @@ func TestSanitizeMapRedactsValuesUnderSecretKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, secret := range []string{"hunter2", `"plain"`, `"abc"`, "sid=1", `"v1"`, `"v2"`} {
+	for _, secret := range []string{"hunter2", `"plain"`, `"abc"`, "sid=1", `"v1"`, `"v2"`, `"v3"`, `"v4"`, `"v5"`, `"v6"`, `"v7"`, `"v8"`, `"v9"`} {
 		if strings.Contains(text, secret) {
 			t.Fatalf("SanitizeMap leaked %s: %s", secret, text)
 		}
 	}
-	for _, keep := range []string{"application/json", "/home/ada", `"input_tokens":12`, `"token_type":"Bearer"`, `"author":"Ada"`} {
+	for _, keep := range []string{"application/json", "/home/ada", `"input_tokens":12`, `"token_type":"Bearer"`, `"author":"Ada"`, "Ada Lovelace", "dvorak", `"MAX_TOKENS":"1200"`} {
 		if !strings.Contains(text, keep) {
 			t.Fatalf("SanitizeMap dropped %s: %s", keep, text)
 		}
+	}
+	args := SanitizeMap(map[string]interface{}{
+		"args": []interface{}{"-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-abcdef0123456789", "--max-tokens", "4096"},
+	}, PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
+	if data, _ := json.Marshal(args); string(data) != `{"args":["-y","@upstash/context7-mcp","--api-key","[REDACTED]","--max-tokens","4096"]}` {
+		t.Fatalf("argument list = %s, want only the value after --api-key redacted", data)
 	}
 	headers := SanitizeMap(map[string]interface{}{
 		"Authorization": []interface{}{"Basic dXNlcjpwYXNz"},

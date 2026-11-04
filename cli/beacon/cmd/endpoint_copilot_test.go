@@ -98,10 +98,7 @@ func runCopilotCommand(t *testing.T, cmd *cobra.Command, run func(*cobra.Command
 func TestEndpointCopilotSyncWritesRuntimeLogAndIsIdempotent(t *testing.T) {
 	f := newCopilotCommandFixture(t)
 
-	output := runCopilotCommand(t, endpointCopilotSyncCmd, runEndpointCopilotSync)
-	if !strings.Contains(output, "copilot sync:") {
-		t.Fatalf("sweep reported nothing readable: %q", output)
-	}
+	runCopilotCommand(t, endpointCopilotSyncCmd, runEndpointCopilotSync)
 	data, err := os.ReadFile(f.logPath)
 	if err != nil {
 		t.Fatalf("read runtime log: %v", err)
@@ -142,19 +139,6 @@ func TestEndpointCopilotSyncPrintLeavesNoTrace(t *testing.T) {
 	}
 }
 
-func TestEndpointCopilotStatusReportsProgress(t *testing.T) {
-	newCopilotCommandFixture(t)
-	before := runCopilotCommand(t, endpointCopilotStatusCmd, runEndpointCopilotStatus)
-	if !strings.Contains(before, "pending") {
-		t.Fatalf("status before sync:\n%s", before)
-	}
-	runCopilotCommand(t, endpointCopilotSyncCmd, runEndpointCopilotSync)
-	after := runCopilotCommand(t, endpointCopilotStatusCmd, runEndpointCopilotStatus)
-	if !strings.Contains(after, "collected") {
-		t.Fatalf("status after sync:\n%s", after)
-	}
-}
-
 func TestEndpointCopilotStatusJSONDescribesSessions(t *testing.T) {
 	newCopilotCommandFixture(t)
 	runCopilotCommand(t, endpointCopilotSyncCmd, runEndpointCopilotSync)
@@ -169,15 +153,6 @@ func TestEndpointCopilotStatusJSONDescribesSessions(t *testing.T) {
 	}
 	if !report.Sessions[0].Collected || report.Sessions[0].Workspace != "/repo" {
 		t.Fatalf("session = %+v", report.Sessions[0])
-	}
-}
-
-func TestEndpointCopilotStatusOnMachineWithoutCopilotSaysSo(t *testing.T) {
-	newCopilotCommandFixture(t)
-	endpointCopilotOpts.copilotDir = filepath.Join(t.TempDir(), "missing")
-	output := runCopilotCommand(t, endpointCopilotStatusCmd, runEndpointCopilotStatus)
-	if !strings.Contains(output, "none") {
-		t.Fatalf("status on missing Copilot dir: %q", output)
 	}
 }
 

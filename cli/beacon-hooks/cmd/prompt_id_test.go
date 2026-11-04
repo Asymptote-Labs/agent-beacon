@@ -256,6 +256,9 @@ func TestNewestPromptIDFromTranscriptTail(t *testing.T) {
 		"skips malformed":       {`{"promptId":"a"}` + "\n" + `{"promptId":` + "\n", false, "a"},
 		"partial first line":    {`ptId":"cut"}` + "\n" + `{"type":"assistant"}`, true, ""},
 		"none":                  {`{"type":"assistant"}`, false, ""},
+		// Quoted text that mentions promptId is escaped inside a JSON string and never matches the bare key.
+		"ignores quoted mentions": {`{"type":"user","promptId":"real"}` + "\n" +
+			`{"type":"assistant","message":{"content":"{\"promptId\":\"forged\"}"}}` + "\n", false, "real"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got := newestPromptID([]byte(tc.tail), tc.partial); got != tc.want {
@@ -265,20 +268,8 @@ func TestNewestPromptIDFromTranscriptTail(t *testing.T) {
 	}
 }
 
-// A transcript longer than the read window is read from its end only, and the fragment the window
-// starts in is not mistaken for an entry.
-func TestClaudeTranscriptPromptIDReadsOnlyTheTail(t *testing.T) {
-	filler := `{"type":"assistant","message":{"content":"` + strings.Repeat("x", 4096) + `"}}`
-	lines := []string{`{"type":"user","promptId":"p-early"}`}
-	for i := 0; i < (claudeTranscriptTailBytes/len(filler))+8; i++ {
-		lines = append(lines, filler)
-	}
-	lines = append(lines, `{"type":"user","promptId":"p-late"}`, filler)
-	path := writeClaudeTranscript(t, lines...)
-
-	if got := claudeTranscriptPromptID(path); got != "p-late" {
-		t.Fatalf("claudeTranscriptPromptID = %q, want p-late", got)
-	}
+// A missing or unreadable transcript yields no id.
+func TestClaudeTranscriptPromptIDUnreadable(t *testing.T) {
 	if got := claudeTranscriptPromptID(filepath.Join(t.TempDir(), "missing.jsonl")); got != "" {
 		t.Fatalf("missing transcript gave %q", got)
 	}
@@ -330,16 +321,6 @@ func TestClaudeTranscriptPromptIDAcrossChunkBoundaries(t *testing.T) {
 				t.Fatalf("claudeTranscriptPromptID = %q, want %q", got, tc.want)
 			}
 		})
-	}
-}
-
-// Quoted text that mentions promptId -- a tool result that printed a transcript, say -- is escaped
-// inside a JSON string and never matches the bare key.
-func TestNewestPromptIDIgnoresQuotedMentions(t *testing.T) {
-	tail := `{"type":"user","promptId":"real"}` + "\n" +
-		`{"type":"assistant","message":{"content":"{\"promptId\":\"forged\"}"}}` + "\n"
-	if got := newestPromptID([]byte(tail), false); got != "real" {
-		t.Fatalf("newestPromptID = %q, want real", got)
 	}
 }
 

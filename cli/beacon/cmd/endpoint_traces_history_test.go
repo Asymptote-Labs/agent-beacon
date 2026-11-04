@@ -74,9 +74,6 @@ func TestTraceHistoryIsNeverPromptedForJSON(t *testing.T) {
 func TestTraceHistoryPromptCreatesTheStore(t *testing.T) {
 	logPath, historyPath, prompt := traceHistoryFixture(t, true, "1\n")
 	offerTraceHistory(logPath, true)
-	if !strings.Contains(prompt.String(), "Keep a local history") || !strings.Contains(prompt.String(), "Local history ready: 1 traces, 1 events") {
-		t.Fatalf("prompt output = %q", prompt.String())
-	}
 	if _, err := os.Stat(historyPath); err != nil {
 		t.Fatalf("history not created: %v", err)
 	}

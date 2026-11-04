@@ -11,6 +11,13 @@
 //   message_stop
 // A legacy shape ({ completion: "…delta" }) is also tolerated.
 //
+// claude.ai adds blocks of its own: `tool_result` (content_block_start carrying
+// tool_use_id and the whole result as `content`, for tools it runs server side),
+// `thinking` with thinking_summary_delta, and citation deltas on text blocks,
+// plus `ping` and `message_limit` events. As of October 2026 it sends no
+// `usage` at all. The request body is {prompt, model, ...}, sent gzip-compressed;
+// the interceptor decompresses it (src/interceptor/request-body.ts).
+//
 // The exact claude.ai envelope must be confirmed against recorded live traffic
 // (the live-smoke drift alarm exists for exactly this); the parser is written
 // defensively so minor wrapping differences degrade gracefully.
@@ -107,6 +114,12 @@ class ClaudeParser implements TurnParser {
         };
         if (cb.type === 'tool_use') {
           entry.tool = { id: String(cb.id ?? ''), name: String(cb.name ?? '') };
+        } else if (cb.type === 'tool_result') {
+          // claude.ai runs its tools (web search, weather, connectors) server
+          // side and streams each result whole, as its own block naming the
+          // tool_use it answers.
+          const call = this.toolCall(cb.tool_use_id);
+          if (call && cb.content !== undefined) call.result = cb.content;
         }
         this.blocks.set(obj.index ?? this.blocks.size, entry);
         break;
@@ -135,6 +148,12 @@ class ClaudeParser implements TurnParser {
         break;
       }
     }
+  }
+
+  private toolCall(id: unknown): ToolCall | undefined {
+    if (typeof id !== 'string' || id === '') return undefined;
+    for (const entry of this.blocks.values()) if (entry.tool?.id === id) return entry.tool;
+    return undefined;
   }
 
   /** Merge the input-side counts of an Anthropic `usage` object into the turn.
@@ -220,8 +239,9 @@ function extractPrompt(body: any): { text: string; messages: Msg[] } {
   const messages: Msg[] = [];
   let text = '';
   if (typeof body?.prompt === 'string') {
+    // A retry_completion (regenerate) sends an empty prompt: no new message.
     text = body.prompt;
-    messages.push({ role: 'user', text });
+    if (text) messages.push({ role: 'user', text });
   } else if (Array.isArray(body?.messages)) {
     for (const m of body.messages) {
       const t = coerceContent(m?.content);

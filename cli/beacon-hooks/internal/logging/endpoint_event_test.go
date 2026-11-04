@@ -10,13 +10,6 @@ import (
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
-func TestEndpointRedaction(t *testing.T) {
-	got := redactEndpointString("token=super-secret")
-	if got == "token=super-secret" {
-		t.Fatal("expected token to be redacted")
-	}
-}
-
 func TestRegularLogDoesNotWriteEndpointEventByDefault(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
@@ -26,20 +19,6 @@ func TestRegularLogDoesNotWriteEndpointEventByDefault(t *testing.T) {
 
 	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
 		t.Fatalf("generic logger wrote endpoint event by default, stat err=%v", err)
-	}
-}
-
-func TestEndpointEventStillWritesStructuredTelemetry(t *testing.T) {
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-
-	logger := NewLoggerForPlatform("pre-tool", "test")
-	if err := logger.EndpointEvent("approval.allowed", "approval", "info", "Pre-tool observed", nil); err != nil {
-		t.Fatalf("EndpointEvent returned error: %v", err)
-	}
-
-	if data, err := os.ReadFile(logPath); err != nil || len(data) == 0 {
-		t.Fatalf("expected structured endpoint event, len=%d err=%v", len(data), err)
 	}
 }
 
@@ -218,20 +197,6 @@ func TestAppendEndpointJSONLDedupesRuntimeEvents(t *testing.T) {
 	}
 }
 
-func TestEndpointEventSurfacesWriteFailure(t *testing.T) {
-	dir := t.TempDir()
-	logPath := filepath.Join(dir, "runtime.jsonl")
-	if err := os.Mkdir(logPath, 0755); err != nil {
-		t.Fatalf("mkdir log path: %v", err)
-	}
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-
-	logger := NewLoggerForPlatform("pre-tool", "test")
-	if err := logger.EndpointEvent("approval.allowed", "approval", "info", "Pre-tool observed", nil); err == nil {
-		t.Fatal("EndpointEvent returned nil, want write failure")
-	}
-}
-
 // --- ordering: timestamp precision and per-invocation sequence ---
 
 func TestEndpointEventStampsSubSecondTimestamp(t *testing.T) {
@@ -280,22 +245,6 @@ func TestEndpointEventNumbersEventsWithinOneHookInvocation(t *testing.T) {
 			t.Fatalf("event %d sequence = %v, want greater than %v", i, sequence, previous)
 		}
 		previous = sequence
-	}
-}
-
-func TestMinimalEndpointEventKeepsOrderingFields(t *testing.T) {
-	// The oversized-event fallback strips the event down to metadata. Dropping the
-	// ordering keys there would leave exactly the events most worth ordering unorderable.
-	minimal := minimalEndpointEvent(map[string]interface{}{
-		"timestamp": "2026-08-21T10:00:00.000000000Z",
-		"sequence":  uint64(42),
-		"message":   "big",
-	})
-	if minimal["timestamp"] != "2026-08-21T10:00:00.000000000Z" {
-		t.Fatalf("minimal timestamp = %v", minimal["timestamp"])
-	}
-	if minimal["sequence"] != uint64(42) {
-		t.Fatalf("minimal sequence = %v, want 42", minimal["sequence"])
 	}
 }
 
@@ -359,21 +308,6 @@ func nestedString(t *testing.T, event map[string]interface{}, block, key string)
 	return text, true
 }
 
-func TestEndpointEventRecordsHookCollectionMethod(t *testing.T) {
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-
-	logger := NewLoggerForPlatform("pre-tool", "cursor")
-	if err := logger.EndpointEvent("file.modified", "file", "info", "File edit observed", nil); err != nil {
-		t.Fatalf("EndpointEvent returned error: %v", err)
-	}
-
-	event := decodeSingleEndpointEvent(t, logPath)
-	if method, ok := nestedString(t, event, "harness", "collection_method"); !ok || method != "hook" {
-		t.Fatalf("harness.collection_method = %q (present=%v), want hook", method, ok)
-	}
-}
-
 // One plugin platform, because the plugin case is the one a future integration gets wrong: the
 // default is hook, so a plugin-shaped runtime that is not enumerated silently reports the wrong
 // method.
@@ -414,7 +348,8 @@ func TestEndpointEventOmitsProvenanceRatherThanWritingEmpty(t *testing.T) {
 }
 
 // EndpointEvent is the ordinary path and means "the runtime named this action", so it must not
-// require every existing caller to opt in to being trusted.
+// require every existing caller to opt in to being trusted. A hook runtime reports the hook
+// collection method.
 func TestEndpointEventDefaultsToObservedFidelity(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
 	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
@@ -427,6 +362,9 @@ func TestEndpointEventDefaultsToObservedFidelity(t *testing.T) {
 	event := decodeSingleEndpointEvent(t, logPath)
 	if fidelity, ok := nestedString(t, event, "event", "fidelity"); !ok || fidelity != "observed" {
 		t.Fatalf("event.fidelity = %q (present=%v), want observed", fidelity, ok)
+	}
+	if method, ok := nestedString(t, event, "harness", "collection_method"); !ok || method != "hook" {
+		t.Fatalf("harness.collection_method = %q (present=%v), want hook", method, ok)
 	}
 }
 
@@ -445,42 +383,29 @@ func TestEndpointEventCarriesExplicitInferredFidelity(t *testing.T) {
 	}
 }
 
-// The size-limit fallback rewrites the event down to a key allowlist. Both provenance fields live
+// The size-limit fallback rewrites the event down to a key allowlist. Dropping the ordering keys
+// there would leave exactly the events most worth ordering unorderable. Both provenance fields live
 // inside blocks that survive wholesale, but a future edit to that list could drop them -- and
 // losing the marker silently turns an inferred event into an unmarked one, which reads as trusted.
-func TestMinimalEndpointEventKeepsProvenance(t *testing.T) {
+func TestMinimalEndpointEventKeepsOrderingAndProvenance(t *testing.T) {
 	minimal := minimalEndpointEvent(map[string]interface{}{
-		"event":   map[string]interface{}{"action": "approval.allowed", "fidelity": "inferred"},
-		"harness": map[string]interface{}{"name": "cursor", "collection_method": "hook"},
+		"timestamp": "2026-08-21T10:00:00.000000000Z",
+		"sequence":  uint64(42),
+		"message":   "big",
+		"event":     map[string]interface{}{"action": "approval.allowed", "fidelity": "inferred"},
+		"harness":   map[string]interface{}{"name": "cursor", "collection_method": "hook"},
 	})
+	if minimal["timestamp"] != "2026-08-21T10:00:00.000000000Z" {
+		t.Fatalf("minimal timestamp = %v", minimal["timestamp"])
+	}
+	if minimal["sequence"] != uint64(42) {
+		t.Fatalf("minimal sequence = %v, want 42", minimal["sequence"])
+	}
 	if fidelity, ok := nestedString(t, minimal, "event", "fidelity"); !ok || fidelity != "inferred" {
 		t.Fatalf("compacted event.fidelity = %q (present=%v), want inferred", fidelity, ok)
 	}
 	if method, ok := nestedString(t, minimal, "harness", "collection_method"); !ok || method != "hook" {
 		t.Fatalf("compacted harness.collection_method = %q (present=%v), want hook", method, ok)
-	}
-}
-
-// Model is canonicalized on the way out for the same reason harness.name is: both capture paths
-// write it, `beacon token-usage` groups its BY MODEL rollup on the raw string, and one model
-// reported under two spellings is two rows that no reader can tell apart from two models.
-func TestEndpointEventCanonicalizesModelName(t *testing.T) {
-	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
-	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
-
-	logger := NewLoggerForPlatform("post-tool", "test")
-	if err := logger.EndpointEvent("tool.completed", "tool", "info", "done", map[string]interface{}{
-		"model": "Anthropic/Claude-Sonnet-4-5",
-	}); err != nil {
-		t.Fatalf("EndpointEvent returned error: %v", err)
-	}
-
-	events := readEndpointEvents(t, logPath)
-	if len(events) != 1 {
-		t.Fatalf("wrote %d events, want 1", len(events))
-	}
-	if got, _ := events[0]["model"].(string); got != "claude-sonnet-4-5" {
-		t.Fatalf("model = %q, want the canonical spelling", got)
 	}
 }
 

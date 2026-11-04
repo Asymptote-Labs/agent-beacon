@@ -12,7 +12,6 @@ const (
 	schemaVersion = beaconevent.SchemaVersion
 )
 
-type eventInfo = beaconevent.EventInfo
 type endpointInfo = beaconevent.EndpointInfo
 type userInfo = beaconevent.UserInfo
 type harnessInfo = beaconevent.HarnessInfo

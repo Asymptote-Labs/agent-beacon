@@ -2,8 +2,10 @@ package testenv
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -59,5 +61,46 @@ func TestHasPOSIXFileModesMatchesWhatStatReports(t *testing.T) {
 	preserved := info.Mode().Perm() == 0o600
 	if HasPOSIXFileModes() != preserved {
 		t.Fatalf("HasPOSIXFileModes() = %t, but a 0600 file reads back as %o", HasPOSIXFileModes(), info.Mode().Perm())
+	}
+}
+
+// RequireCommands is only worth having if it narrows: the declared command must resolve to the
+// file the machine's PATH finds, a command the test did not declare must not resolve at all, and a
+// declared command that is not installed must skip the test rather than let it run without it.
+func TestRequireCommandsKeepsOnlyTheDeclaredCommands(t *testing.T) {
+	exe := func(dir, name string) string {
+		if runtime.GOOS == "windows" {
+			name += ".exe"
+		}
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("stub"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	declaredDir, otherDir := t.TempDir(), t.TempDir()
+	declared := exe(declaredDir, "beacon-declared")
+	exe(otherDir, "beacon-undeclared")
+	saved := hostPath
+	hostPath = strings.Join([]string{declaredDir, otherDir}, string(os.PathListSeparator))
+	t.Cleanup(func() { hostPath = saved })
+
+	t.Run("declared", func(t *testing.T) {
+		RequireCommands(t, "beacon-declared")
+		if got, err := exec.LookPath("beacon-declared"); err != nil || got != declared {
+			t.Fatalf("LookPath(declared) = %q, %v; want %q", got, err, declared)
+		}
+		if got, err := exec.LookPath("beacon-undeclared"); err == nil {
+			t.Fatalf("LookPath(undeclared) = %q; a command the test did not declare must not resolve", got)
+		}
+	})
+
+	ranWithoutIt := false
+	t.Run("missing", func(t *testing.T) {
+		RequireCommands(t, "beacon-not-installed")
+		ranWithoutIt = true
+	})
+	if ranWithoutIt {
+		t.Fatal("a test that requires a missing command ran instead of skipping")
 	}
 }

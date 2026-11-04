@@ -16,6 +16,7 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.command.duration_ms` | int |
 | `e.command.exit_code` | int |
 | `e.command.output` | string |
+| `e.command.parsed_commands` | list(asymptoteobserve.ParsedCommand) |
 | `e.content.bytes` | int |
 | `e.content.hash` | string |
 | `e.content.included` | bool |
@@ -96,6 +97,7 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 | `e.harness.config_path` | string |
 | `e.harness.executable_path` | string |
 | `e.harness.name` | string |
+| `e.harness.profile` | string |
 | `e.harness.version` | string |
 | `e.health.component` | string |
 | `e.health.reason` | string |
@@ -180,6 +182,14 @@ Regenerate with `beacon rules fields --markdown > spec/threat-rules/FIELDS.md`.
 These are computed by the engine from the event just before evaluation. They are
 never written to or read from the log, so a fixture sets the source field, not these.
 
+- `e.command.parsed_commands`: `command.command` read as a bash command line (spec v1.2): one
+  entry per command it runs, each with `name` (base name after sudo/env/exec/... wrappers,
+  "" when unknown), `argv` and `argv_raw` (every word, wrappers included: as passed, ""
+  when it depends on an expansion, glob or `~`; and as written), `env` (NAME=value prefixes),
+  `file_effects` (`{path, op}`), `pipeline`, `stage` (0-based) and `nested` (inside `$(...)`,
+  `<(...)` or a shell's `-c` script, which is read too). Here-document bodies and other
+  strings are not commands. The first 4096 bytes are read; a cut capture yields the
+  commands before the cut, and one that does not parse yields an empty list.
 - `e.gen_ai.system_instructions_text`: `gen_ai.system_instructions` as text: the `content` of each
   `text` part, one per line (a bare string as is), when content was retained. These are
   runtime-provided instructions such as a skill index, never operator prompt text.

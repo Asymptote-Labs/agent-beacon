@@ -252,3 +252,149 @@ func TestLoadRejectsCorruptJSON(t *testing.T) {
 		t.Fatal("expected corrupt JSON error")
 	}
 }
+
+// The forward's header values are credentials, but config.json must stay readable: ordinary
+// accounts read the system config to find the system runtime log. So the values go to a 0600 file
+// of their own and config.json carries only their names.
+func TestSaveLoadOTLPForwardKeepsHeaderValuesOutOfConfigJSON(t *testing.T) {
+	testenv.RequirePOSIXFileModes(t)
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	cfg := Default(true, filepath.Join(home, "logs", "runtime.jsonl"))
+	cfg.Destinations = &Destinations{OTLPForward: &OTLPForward{
+		Endpoint: " https://otel.backend.example ",
+		Protocol: "http",
+		Headers:  map[string]string{"authorization": "Bearer secret"},
+	}}
+
+	path, err := Save(cfg)
+	if err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0644 {
+		t.Fatalf("config.json permissions = %o, want 644", got)
+	}
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), "Bearer secret") || !strings.Contains(string(data), `"authorization"`) {
+		t.Fatalf("config.json should name the header and not hold its value:\n%s", data)
+	}
+	secrets, err := os.Stat(OTLPForwardSecretsPath(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := secrets.Mode().Perm(); got != 0600 {
+		t.Fatalf("secrets permissions = %o, want 600", got)
+	}
+
+	loaded, err := Load(true)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	forward := loaded.Destinations.OTLPForward
+	if !forward.Enabled || forward.Endpoint != "https://otel.backend.example" || forward.Protocol != OTLPForwardProtocolHTTP || forward.Headers["authorization"] != "Bearer secret" {
+		t.Fatalf("OTLP forward did not round-trip: %#v", forward)
+	}
+	if strings.Join(forward.Harnesses, ",") != "claude_code,codex_cli,codex_desktop" {
+		t.Fatalf("default harnesses = %v", forward.Harnesses)
+	}
+
+	// An account that cannot read the secrets still loads the forward, without the values.
+	if err := os.Chmod(OTLPForwardSecretsPath(true), 0); err == nil && os.Geteuid() != 0 {
+		loaded, err := Load(true)
+		if err != nil {
+			t.Fatalf("Load without the secrets returned error: %v", err)
+		}
+		if f := loaded.Destinations.OTLPForward; !f.Enabled || f.Headers != nil || strings.Join(f.HeaderNames, ",") != "authorization" {
+			t.Fatalf("forward without secrets = %#v", f)
+		}
+	}
+
+	// Removing the headers removes the secrets file.
+	cfg.Destinations.OTLPForward.Headers = nil
+	cfg.Destinations.OTLPForward.HeaderNames = nil
+	if _, err := Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(OTLPForwardSecretsPath(true)); !os.IsNotExist(err) {
+		t.Fatalf("secrets file left behind: %v", err)
+	}
+}
+
+func TestValidateDestinationsRejectsBadOTLPForward(t *testing.T) {
+	for name, forward := range map[string]OTLPForward{
+		"no endpoint":        {Headers: map[string]string{"a": "b"}},
+		"unknown protocol":   {Endpoint: "otel.example:4317", Protocol: "udp"},
+		"http without a URL": {Endpoint: "otel.example:4318", Protocol: OTLPForwardProtocolHTTP},
+		"header name colon":  {Endpoint: "otel.example:4317", Headers: map[string]string{"a:b": "c"}},
+		"header value break": {Endpoint: "otel.example:4317", Headers: map[string]string{"a": "b\r\nx: y"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			forward := forward
+			if err := ValidateDestinations(&Destinations{OTLPForward: &forward}); err == nil {
+				t.Fatal("expected an error")
+			}
+		})
+	}
+}
+
+// Callers that edit config.json's raw JSON (the auto-update mode) write it as Save would: private
+// when it holds a credential or already was, readable otherwise. On Windows the private case is the
+// SYSTEM/Administrators-only DACL (sysacl.WriteSecretFile), which TestWriteSecretFile covers there.
+func TestRewriteSystemConfigKeepsCredentialsPrivate(t *testing.T) {
+	testenv.RequirePOSIXFileModes(t)
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		name, body string
+		wasPrivate bool
+		want       os.FileMode
+	}{
+		{"hec token", `{"destinations":{"splunk_hec":{"endpoint":"https://splunk.example","token":"t"}}}`, false, 0600},
+		{"already private", `{"auto_update":{"mode":"off"}}`, true, 0600},
+		{"nothing secret", `{"auto_update":{"mode":"off"}}`, false, 0644},
+		// A wrong-typed field elsewhere must not hide the token.
+		{"token beside a bad field", `{"collector":{"grpc_port":"4317"},"destinations":{"falcon_hec":{"token":"t"}}}`, false, 0600},
+		{"destinations of the wrong shape", `{"destinations":"oops"}`, false, 0644},
+		{"unparseable", `{"destinations":`, false, 0600},
+	} {
+		path := filepath.Join(dir, strings.ReplaceAll(tc.name, " ", "-")+".json")
+		if err := RewriteSystemConfig(path, []byte(tc.body), tc.wasPrivate); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != tc.want {
+			t.Errorf("%s: permissions = %o, want %o", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A package removal or cleanup can take the headers file while config.json still names them. Load
+// says so instead of handing back a forward that silently sends without credentials.
+func TestLoadReportsMissingOTLPForwardHeaders(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	cfg := Default(true, filepath.Join(home, "logs", "runtime.jsonl"))
+	cfg.Destinations = &Destinations{OTLPForward: &OTLPForward{Endpoint: "otel.example:4317", Headers: map[string]string{"authorization": "Bearer x"}}}
+	if _, err := Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if loaded, err := Load(true); err != nil || loaded.Destinations.OTLPForward.HeadersMissing {
+		t.Fatalf("HeadersMissing with the file present: %v", err)
+	}
+	if err := os.Remove(OTLPForwardSecretsPath(true)); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := loaded.Destinations.OTLPForward; !f.HeadersMissing || f.Headers != nil || strings.Join(f.HeaderNames, ",") != "authorization" {
+		t.Fatalf("forward without its headers file = %#v", f)
+	}
+}

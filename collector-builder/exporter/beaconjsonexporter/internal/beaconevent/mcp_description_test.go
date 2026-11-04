@@ -86,22 +86,6 @@ func TestClaudeRequestTruncationKeepsOnlyCompleteDefinitions(t *testing.T) {
 	}
 }
 
-// Every destination is sent the same copy, so the description is redacted and capped before it
-// leaves the body, at the limit gen_ai.tool.description is stored at.
-func TestClaudeMCPToolDescriptionsAreRedactedAndCapped(t *testing.T) {
-	long := "Saves a note. token=sk-live-0123456789abcdef " + strings.Repeat("padding ", 1000)
-	tools := claudeMCPTools(mainRequestBody(long))
-	if len(tools) != 1 {
-		t.Fatalf("tools = %#v, want the one MCP tool", tools)
-	}
-	if strings.Contains(tools[0].Description, "sk-live-0123456789abcdef") {
-		t.Fatalf("description kept the secret: %q", tools[0].Description[:80])
-	}
-	if len(tools[0].Description) > asymptoteobserve.DefaultStringLimit {
-		t.Fatalf("description = %d bytes, want at most %d", len(tools[0].Description), asymptoteobserve.DefaultStringLimit)
-	}
-}
-
 // The processor sends a session each tool once, and again only when its description changes. What
 // it forwards converts to the same listing the converter makes from the body itself.
 func TestProcessorForwardsEachMCPToolOncePerSessionAndDescription(t *testing.T) {

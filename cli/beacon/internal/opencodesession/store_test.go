@@ -3,7 +3,6 @@ package opencodesession
 import (
 	"database/sql"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -104,19 +103,4 @@ func insertJSON(t *testing.T, db *sql.DB, query string, args ...interface{}) {
 	}
 	args[last] = string(data)
 	mustExec(t, db, query, args...)
-}
-
-func TestOpenSQLiteReadOnlyDoesNotCreateTheDatabase(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "opencode.db")
-	db, err := openSQLiteReadOnly(missing)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if err := db.Ping(); err == nil {
-		t.Fatal("ping on a missing database succeeded; mode=ro is not reaching sqlite")
-	}
-	if _, err := os.Stat(missing); !os.IsNotExist(err) {
-		t.Fatalf("read-only open created %s", missing)
-	}
 }

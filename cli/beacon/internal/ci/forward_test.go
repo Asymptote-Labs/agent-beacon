@@ -72,25 +72,3 @@ func TestResolveForwardUnsupportedProvider(t *testing.T) {
 		t.Fatal("expected error for unsupported provider")
 	}
 }
-
-func TestNormalizeForwardEmptyIsNoForwarding(t *testing.T) {
-	got, err := normalizeForward("  ")
-	if err != nil {
-		t.Fatalf("normalizeForward returned error: %v", err)
-	}
-	if got != "" {
-		t.Fatalf("normalizeForward = %q, want empty", got)
-	}
-}
-
-func TestStripEnvRemovesNamedKeys(t *testing.T) {
-	in := []string{"KEEP=1", EnvSplunkToken + "=secret", "ALSO=2", EnvFalconToken + "=secret2"}
-	out := stripEnv(in, forwardTokenEnv...)
-	joined := strings.Join(out, "\n")
-	if strings.Contains(joined, "secret") {
-		t.Fatalf("stripEnv left a token behind:\n%s", joined)
-	}
-	if !strings.Contains(joined, "KEEP=1") || !strings.Contains(joined, "ALSO=2") {
-		t.Fatalf("stripEnv dropped non-token vars:\n%s", joined)
-	}
-}

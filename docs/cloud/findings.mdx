@@ -1,0 +1,89 @@
+---
+title: "Findings"
+description: "Security risks, reusable workflows and habits Beacon Cloud notices in your sessions"
+---
+
+Every hour, Beacon Cloud reviews the new activity your connected devices forwarded and surfaces
+what is worth your attention as findings. They are on the **Findings** page at
+[beacon.sh/dashboard/findings](https://beacon.sh/dashboard/findings).
+
+Findings are separate from the local [`beacon scan`](/cli/scan) results, which run open
+[threat rules](/detections/index) on the machine and never leave it.
+
+## Kinds of findings
+
+| Kind | What it covers | Examples |
+| --- | --- | --- |
+| **Security** | Risky things your agents did | A secret pasted into a prompt or command, a destructive or privilege-raising command, an agent bypassing its approvals, prompt injection arriving through a tool result, a call to an unknown MCP server |
+| **Skill** | Workflows worth reusing | Steps you walk an agent through more than once, drafted as a reusable Agent Skill |
+| **Behavior** | Patterns in how you work with agents | Retry loops, abandoned sessions, approvals you always grant, expensive models used for simple tasks |
+
+Each finding shows what happened, how severe it is, which sessions and harnesses it came from,
+and a recommendation. A skill finding has a **Download skill** button that saves the drafted
+`SKILL.md`, and findings carry a prompt you can copy into your agent to fix the problem.
+
+## Review a finding
+
+- Filter the list by kind (security, skills, behavior) and severity. Findings that still need
+  review come first.
+- Open a finding to read its detail, the sessions it cites and the events it rests on. On
+  [Beacon Cloud Pro](/deployment/plans) the full evidence trail is shown.
+- Use **Mark as** to set a finding open, resolved or dismissed.
+- Mark it helpful or not helpful and add a note. The next analysis reads your feedback, so it
+  stops repeating what you rejected.
+
+A finding that recurs updates the one you already have instead of creating a duplicate.
+
+## Your first findings
+
+Beacon Cloud analyzes a new account soon after its first sessions arrive, including the 30 days of
+history a device uploads when it [connects](/cloud/devices). You get one email with your first
+findings right after that analysis. Later findings arrive in a daily digest on the free plan, or
+as real-time email alerts on Pro.
+
+## Plan limits
+
+| Plan | Findings |
+| --- | --- |
+| Beacon Cloud | 50 over the lifetime of the account |
+| Beacon Cloud Pro | Unlimited |
+| Enterprise | Unlimited, org-wide |
+
+Every finding counts toward the free allowance, whatever its status. Once a free account has used
+it, Beacon Cloud stops analyzing its new activity; its sessions keep uploading and stay
+searchable. After an upgrade, findings resume from the next new telemetry. See
+[Plans and pricing](/deployment/plans).
+
+## Findings from your agent
+
+On Beacon Cloud Pro, [Beacon Cloud MCP](/deployment/managed-mcp) lets the agent you are working in
+list your findings (`beacon_findings_list`), read one with its evidence (`beacon_get_finding`) and
+record your feedback or status (`beacon_finding_feedback`, which needs write access). Both
+`beacon_get_finding` and `beacon_finding_feedback` accept a finding's dashboard URL.
+
+## How analysis handles your data
+
+- Only activity from devices you connected is analyzed, in an isolated sandbox per account.
+- Events are projected to a compact, redacted record before analysis, so a secret is reported from
+  Beacon's redaction marker rather than its value.
+- Every finding must cite events from your own sessions.
+- On a device forwarding in Metadata-only mode, prompts, responses, tool arguments and output never
+  reach Beacon Cloud, so findings can only use what was sent. See
+  [What leaves your machine](/deployment/managed#what-leaves-your-machine).
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Plans and pricing" icon="tag" href="/deployment/plans">
+    Free and Pro findings limits.
+  </Card>
+  <Card title="Sessions" icon="list" href="/cloud/sessions">
+    Open the sessions a finding cites.
+  </Card>
+  <Card title="Beacon Cloud MCP" icon="plug" href="/deployment/managed-mcp">
+    Read and review findings from your agent.
+  </Card>
+  <Card title="Local detections" icon="shield" href="/detections/index">
+    Offline threat rules with `beacon scan`.
+  </Card>
+</Columns>

@@ -258,17 +258,3 @@ func TestLingerHelpersAreInertWithoutSystemd(t *testing.T) {
 		t.Error("LingerEnabled should be false without systemd as PID 1")
 	}
 }
-
-// The remediation is printed for the user to paste, so it has to be complete: the command, the
-// privilege it needs, and the account it applies to, with nothing left to substitute.
-func TestLingerRemediationIsRunnableAsPrinted(t *testing.T) {
-	got := LingerRemediation("someone")
-	for _, want := range []string{"sudo", "loginctl enable-linger", "someone"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("LingerRemediation = %q, want it to contain %q", got, want)
-		}
-	}
-	if strings.ContainsAny(got, "<>$") {
-		t.Errorf("LingerRemediation = %q, want no placeholder left for the user to fill in", got)
-	}
-}

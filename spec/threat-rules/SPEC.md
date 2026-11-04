@@ -1,4 +1,4 @@
-# Threat Rules — Specification (v1.1)
+# Threat Rules — Specification (v1.2)
 
 An open detection-rule format for AI-agent security threats, native to the Beacon
 endpoint event schema. A rule is a YAML document whose match conditions are
@@ -9,7 +9,7 @@ This is the "Sigma for agent telemetry" layer: the rule format and corpus are op
 evaluation engine that consumes them may be separate (and closed). Any engine that
 produces the same `verdict` for a rule's fixtures conforms to this spec.
 
-- Spec version: `threat-rules/v1.1` (see `VERSION` and [Versioning](#versioning)).
+- Spec version: `threat-rules/v1.2` (see `VERSION` and [Versioning](#versioning)).
 - Canonical event schema: the Beacon endpoint event
   (`pkg/asymptoteobserve` `Event`, `schema_version: "1.0"`).
 - Machine-readable structural schema: `schema.json` (JSON Schema, draft 2020-12).
@@ -79,7 +79,7 @@ Exactly one of `match` or `correlation` must be present. Required:
 | Field | Required | Type / values | Meaning |
 |---|---|---|---|
 | `id` | yes | string `^[a-z0-9][a-z0-9-]*$` | Stable unique identity. Unique across the pack. Flows to `policy.id` on a finding. |
-| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required (v1.1 or later) when the rule uses a v1.1 feature. See [Versioning](#versioning). |
+| `spec` | no | `threat-rules/v<major>[.<minor>]` (default `threat-rules/v1`) | Minimum spec version the rule needs. Required when the rule uses a feature added after v1: v1.1 or later for `correlation.order`, v1.2 or later for `e.command.parsed_commands`. See [Versioning](#versioning). |
 | `version` | yes | int ≥ 1 | Rule content revision; bump on logic change. |
 | `title` | yes | string | Human-readable name. Flows to `policy.name`. |
 | `description` | no | string | Documentation only; never evaluated. |
@@ -143,8 +143,10 @@ the steps in both orders still fires once. A single event never satisfies two st
   evaluation of one expression against one event may do, and MUST report an evaluation it
   stops as an error for that rule, never as a `match` or `no_match`. The reference engine
   uses cel-go's runtime cost limit at 5,000,000 (`threatrules.MaxEvalCost`); every rule in
-  the open corpus spends under 4,000 on its fixtures. A rule should stay orders of
-  magnitude below the limit on any event the writer can produce (at most 64 KiB).
+  the open corpus spends under 50,000 (a hundredth of the limit) on its fixtures, and under
+  1,000,000 (a fifth) on a pessimistic event whose every string field is 64 KiB. A rule
+  should stay orders of magnitude below the limit on any event the writer can produce (at
+  most 64 KiB).
 - Derived fields. `e.gen_ai.tool.call.result_text` is not on the wire: an engine MUST
   compute it from the event before evaluation, and MUST ignore any value an input
   claims for it. It is `gen_ai.tool.call.result` as text (a string as is; for an object
@@ -173,6 +175,34 @@ the steps in both orders still fires once. A single event never satisfies two st
   It is runtime-provided model instructions (for example the skill index on
   `session.context`), never operator-submitted prompt text. The reference derivation is
   `threatrules.SystemInstructionsText`.
+- `e.command.parsed_commands` (since v1.2; a rule that selects it MUST declare
+  `spec: threat-rules/v1.2` or later) is derived under the same rules (computed, never read
+  from input). It is `command.command`, its first 4096 bytes, read as a bash command line: a
+  list with one entry per simple command, and per compound command that carries
+  redirections, in walk order (each statement, then the statements inside it). Each entry
+  has `name` (the base name of the first word after the wrappers `command`, `builtin`,
+  `exec`, `nohup`, `time`, and `sudo` and `env` with their options and `NAME=value` words,
+  each recognized by its base name so `/usr/bin/env` is `env`; `""` when that word is
+  unknown or a wrapper option moves or replaces the command, as `sudo -i` and `env -C` do),
+  `argv` (every word after brace expansion, wrappers included,
+  as the shell passes it on, or `""` when its value depends on a parameter, command or
+  arithmetic substitution, an ANSI-C or locale string, an unquoted glob character, or a
+  leading tilde), `argv_raw` (the same words as written), `env` (the `NAME=value`
+  assignments before the command, `""` for an unknown value), `file_effects` (the files the
+  command evidently writes, `{path, op}`), `pipeline` (shared by the stages of one
+  pipeline), `stage` (0-based position in it; a command inside a compound stage such as
+  `{ a; b; } | c` or `(a) | c` carries that stage unless it is a stage of an inner pipeline
+  or inside a substitution) and `nested` (inside a command or process
+  substitution, or inside a `-c` script). When `sh`, `bash`, `zsh`, `dash` or `ksh` appears
+  as a word of a command with an option cluster containing `c`, its first operand, if known,
+  is read the same way, at most two levels deep, and its commands follow the shell's with
+  `nested` true and pipeline numbers of their own. Here-document bodies and the strings of
+  other commands are not read as commands. A command line that ends early (an unclosed
+  quote, here-document, substitution or compound command) yields the commands before the
+  point where it became incomplete; one that does not parse yields the empty list, so a
+  rule that must not miss such captures keeps a `command.command` fallback for it. The
+  reference derivation is `threatrules.ParsedCommands` over `shellcmd.Parse`, and the file
+  effects are `shellcmd.FileEffects`.
 - `e.system_context` is on the wire, not derived: on `session.context` it names what the
   runtime gave the model. `kind` is `skill_listing` for a skill index, `source` is where
   Beacon read it (`system_prompt`, `transcript`), and `skills` names each listed skill as
@@ -220,6 +250,7 @@ v1.1 field, as an unknown field, and refuse the directory that contains it.
 
 ### Changelog
 
+- **v1.2**: the derived field `e.command.parsed_commands`.
 - **v1.1**: `correlation.order` (`sequence` default, or `any` for order-insensitive steps),
   and the per-rule `spec` field with the engine rules above.
 - **v1**: initial version.

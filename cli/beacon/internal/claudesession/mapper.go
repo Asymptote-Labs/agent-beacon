@@ -50,10 +50,13 @@ type mapper struct {
 	// to the same prompt by their place in the file. The whole file is read on every sync, so the
 	// value is right even for the first record past the cursor.
 	promptID string
+	// fallbackTimestamp stamps records that carry no timestamp of their own (see fallbackTimestamp).
+	fallbackTimestamp string
 }
 
 func MapSession(ref SessionRef, records []Record, opts MapOptions) []MappedEvent {
 	m := &mapper{ref: ref, opts: opts, tools: map[string]toolCall{}}
+	m.fallbackTimestamp = fallbackTimestamp(ref, records, opts.MinLine)
 	m.usage = planUsage(ref, records, opts.MinLine, opts.responses)
 	for i := range records {
 		m.consume(records[i])
@@ -243,7 +246,7 @@ func (m *mapper) emitToolInvoked(record Record, block int, call toolCall) {
 	ev := m.base(record, action, category, schema.SeverityInfo, schema.FidelityObserved, "Claude Code tool invocation observed")
 	ev.Tool = &schema.ToolInfo{Name: call.Name}
 	ev.GenAI = mergeGenAI(ev.GenAI, &schema.GenAIInfo{Tool: &schema.GenAIToolInfo{Name: call.Name, Call: &schema.GenAIToolCallInfo{ID: call.ID, Arguments: call.Input}}})
-	if command := commandFromTool(call); command != "" {
+	if command := asymptoteobserve.ToolCommandLine(call.Name, call.Input); command != "" {
 		ev.Tool.Command = command
 	}
 	if path := pathFromTool(call); path != "" {
@@ -266,10 +269,11 @@ func (m *mapper) emitToolResult(record Record, block int, result map[string]inte
 	content := toolResultText(result["content"])
 	isError, _ := result["is_error"].(bool)
 	switch {
-	case isCommandTool(call):
+	case asymptoteobserve.IsShellCommandTool(call.Name):
+		command := asymptoteobserve.ToolCommandLine(call.Name, call.Input)
 		ev := m.base(record, "command.executed", "command", severityForError(isError), schema.FidelityObserved, "Claude Code command completed")
-		ev.Command = &schema.CommandInfo{Command: commandFromTool(call), Output: content}
-		ev.Tool = &schema.ToolInfo{Name: call.Name, Command: commandFromTool(call)}
+		ev.Command = &schema.CommandInfo{Command: command, Output: content}
+		ev.Tool = &schema.ToolInfo{Name: call.Name, Command: command}
 		ev.GenAI = toolResultGenAI(call, content)
 		m.append(record, "tool.result."+itoa(block), ev)
 	case isFileTool(call):
@@ -322,6 +326,8 @@ func (m *mapper) base(record Record, action, category string, severity schema.Se
 	})
 	if ts := parseTimestamp(entry.Timestamp); ts != "" {
 		ev.Timestamp = ts
+	} else if m.fallbackTimestamp != "" {
+		ev.Timestamp = m.fallbackTimestamp
 	}
 	sessionID := entry.SessionID
 	if sessionID == "" {
@@ -462,11 +468,51 @@ func mergeGenAI(base, next *schema.GenAIInfo) *schema.GenAIInfo {
 }
 
 func parseTimestamp(value string) string {
-	if strings.TrimSpace(value) == "" {
-		return ""
+	if ts, ok := recordTime(value); ok {
+		return schema.FormatTimestamp(ts)
 	}
-	if ts, err := time.Parse(time.RFC3339Nano, value); err == nil {
-		return schema.FormatTimestamp(ts.UTC())
+	return ""
+}
+
+func recordTime(value string) (time.Time, bool) {
+	if strings.TrimSpace(value) == "" {
+		return time.Time{}, false
+	}
+	ts, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return ts.UTC(), true
+}
+
+// fallbackTimestamp is the time given to a record that has none of its own. Claude Code writes
+// bookkeeping records (permission-mode, mode, last-prompt, ai-title, agent-name, summary) that
+// carry a sessionId but no timestamp, and the first of them is often the record session.started
+// is emitted for. Stamping those with the time of the sync made every backfilled session look as
+// if it ran until the backfill. The earliest timestamp past the cursor is used, then the earliest
+// in the file, then the file's modification time; only a file with none of these is left with
+// the time of the sync.
+func fallbackTimestamp(ref SessionRef, records []Record, minLine int) string {
+	var earliest, earliestPastCursor time.Time
+	for _, record := range records {
+		ts, ok := recordTime(record.Entry.Timestamp)
+		if !ok {
+			continue
+		}
+		if earliest.IsZero() || ts.Before(earliest) {
+			earliest = ts
+		}
+		if record.Line > minLine && (earliestPastCursor.IsZero() || ts.Before(earliestPastCursor)) {
+			earliestPastCursor = ts
+		}
+	}
+	switch {
+	case !earliestPastCursor.IsZero():
+		return schema.FormatTimestamp(earliestPastCursor)
+	case !earliest.IsZero():
+		return schema.FormatTimestamp(earliest)
+	case ref.ModTimeUnixMS > 0:
+		return schema.FormatTimestamp(time.UnixMilli(ref.ModTimeUnixMS).UTC())
 	}
 	return ""
 }
@@ -504,15 +550,6 @@ func toolResultText(value interface{}) string {
 	}
 }
 
-func isCommandTool(call toolCall) bool {
-	switch strings.ToLower(call.Name) {
-	case "bash", "shell", "terminal":
-		return true
-	default:
-		return false
-	}
-}
-
 func isFileTool(call toolCall) bool {
 	switch strings.ToLower(call.Name) {
 	case "read", "write", "edit", "multiedit", "notebookread", "notebookedit":
@@ -520,10 +557,6 @@ func isFileTool(call toolCall) bool {
 	default:
 		return false
 	}
-}
-
-func commandFromTool(call toolCall) string {
-	return firstString(call.Input, "command", "cmd", "shell_command")
 }
 
 func pathFromTool(call toolCall) string {

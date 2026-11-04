@@ -13,7 +13,7 @@ Before enabling Antigravity hooks, make sure:
 
 - Antigravity CLI is installed as `antigravity` or `antigravity-cli`, or an Antigravity hook config directory exists.
 - `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
-- Beacon hooks are installed with `beacon endpoint hooks install --harness antigravity`.
+- Beacon hooks are installed, either by `beacon endpoint install` when it detects Antigravity (or with `--harness antigravity`) or with `beacon endpoint hooks install --harness antigravity`.
 - For project-level collection, install hooks from the target project with `--level project`.
 - Antigravity is restarted after hook install or removal so new sessions load the updated hook configuration.
 
@@ -29,7 +29,7 @@ Use `beacon endpoint hooks status --harness antigravity` to inspect Antigravity 
 
 ## Install or configuration support
 
-`beacon endpoint install` prepares shared endpoint config and runtime log paths. Install Antigravity hooks separately:
+`beacon endpoint install` prepares shared endpoint config and runtime log paths, and installs the user-level Antigravity hooks when it detects Antigravity (or when run with `--harness antigravity`). To install, refresh, or manage the hooks on their own, run:
 
 ```bash title="Install runtime hooks"
 beacon endpoint hooks install --harness antigravity

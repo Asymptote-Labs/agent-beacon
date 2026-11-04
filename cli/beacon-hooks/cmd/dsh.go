@@ -323,30 +323,6 @@ func dshEffectiveToolKind(toolName string, toolInput map[string]interface{}) (ds
 	return kind, true
 }
 
-// dshTerminalCommand reads the command line a `terminal_send` call submitted, or "" for any other
-// tool.
-//
-// dsh's persistent terminal names its payload `text`, not `command`, so every key in the shared
-// reader's list misses it and a command run through a terminal session would be recorded as a
-// command event with no command in it -- invisible to every rule that matches on command.command,
-// which is most of them.
-//
-// A call with `submit: false` is still read. It carries control characters or an incomplete REPL
-// line rather than a whole command, so what is recorded is a fragment of shell input; that is worth
-// stating and is worse than nothing only if a reader assumes the field is always complete.
-// `submit` itself rides along under gen_ai.tool.call.arguments, so the distinction is recoverable.
-// The alternative -- dropping those calls -- would make the escape hatch of sending a command in
-// two writes a way to run commands Beacon does not record.
-//
-// Guarded on the tool name rather than on the key: `text` is an ordinary argument name that other
-// tools use for other things, which is exactly why it is not in the shared key list.
-func dshTerminalCommand(toolName string, toolInput map[string]interface{}) string {
-	if strings.ToLower(strings.TrimSpace(toolName)) != "terminal_send" {
-		return ""
-	}
-	return firstToolString(toolInput, "text")
-}
-
 // dshToolAction maps a dsh tool call onto an endpoint event action, or returns "" to let the
 // generic classifier decide.
 //

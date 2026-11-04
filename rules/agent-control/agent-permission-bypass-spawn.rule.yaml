@@ -1,12 +1,12 @@
 id: agent-permission-bypass-spawn
-version: 1
+version: 2
 title: Agent runtime spawned with permission/approval gating disabled
 description: >
   A command.executed event launches a known AI agent runtime CLI (Claude Code, Codex,
   Cursor Agent, Aider, Goose, OpenCode, Gemini) with a flag that disables the runtime's
   own permission/approval gate — for example --dangerously-skip-permissions,
   --dangerously-bypass-approvals-and-sandbox, --permission-mode bypassPermissions,
-  --sandbox danger-full-access, --ask-for-approval never, --full-auto, or --yolo.
+  --sandbox (or -s) danger-full-access, --ask-for-approval never, --full-auto, or --yolo.
   Spawning a nested agent with its approval gate turned off is a control-bypass signal:
   whatever guardrails the parent runtime enforces (interactive approvals, sandboxing) do
   not apply inside the spawned agent, so the child can run arbitrary tools and commands
@@ -26,7 +26,7 @@ taxonomy:
 match: >
   e.event.action == "command.executed" &&
   e.command.command.matches("(?i)(^|[;&|]|&&|\\|\\||\\bsudo\\s+|\\benv\\s+|\\bnpx\\s+)\\s*(claude|codex|cursor-agent|aider|goose|opencode|gemini)\\b") &&
-  e.command.command.matches("(?i)(--dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--permission-mode[ =]+bypasspermissions|--sandbox[ =]+danger-full-access|--ask-for-approval[ =]+never|--full-auto|--yolo|(^|\\s)-a[ =]+never\\b|--force\\b)")
+  e.command.command.matches("(?i)(--dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--permission-mode[ =]+bypasspermissions|(--sandbox|(^|\\s)-s)[ =]+danger-full-access|--ask-for-approval[ =]+never|--full-auto|--yolo|(^|\\s)-a[ =]+never\\b|--force\\b)")
 
 emit:
   reason: "AI agent runtime spawned with its permission/approval gate disabled"
@@ -66,6 +66,20 @@ tests:
       - timestamp: "2026-06-13T10:04:00Z"
         event: { action: command.executed }
         command: { command: "claude -p --permission-mode bypassPermissions \"go\"" }
+        session: { id: s1 }
+  - name: codex_short_sandbox_flag
+    verdict: match
+    events:
+      - timestamp: "2026-06-13T10:04:30Z"
+        event: { action: command.executed }
+        command: { command: "codex exec -s danger-full-access \"apply the patch\"" }
+        session: { id: s1 }
+  - name: codex_read_only_sandbox
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-13T10:04:40Z"
+        event: { action: command.executed }
+        command: { command: "codex exec -s read-only \"review the diff\"" }
         session: { id: s1 }
   - name: claude_normal_invocation_no_bypass
     verdict: no_match

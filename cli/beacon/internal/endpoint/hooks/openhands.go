@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/hookcmd"
 )
 
 // OpenHands registers hooks in one file, `.openhands/hooks.json`, which the runtime reads directly
@@ -359,7 +361,7 @@ func isOpenHandsEndpointHook(raw json.RawMessage) bool {
 	if err := json.Unmarshal(raw, &ref); err != nil {
 		return false
 	}
-	return isEndpointHookCommand(ref.Command, "openhands")
+	return hookcmd.IsEndpointHook(ref.Command, "openhands")
 }
 
 // removeOpenHandsHooks takes Beacon's hooks back out and leaves the user's in place.

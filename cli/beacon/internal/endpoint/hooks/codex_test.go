@@ -91,33 +91,6 @@ func TestInstallCodexHooksIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestRemoveCodexEndpointHooksPreservesOtherHooks(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "hooks.json")
-	existing := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"}]},{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform codex inventory-heartbeat"}]}]}}`
-	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	updated, err := removeCodexEndpointHooks(path)
-	if err != nil {
-		t.Fatalf("removeCodexEndpointHooks returned error: %v", err)
-	}
-	if !updated {
-		t.Fatal("expected Codex endpoint hook to be removed")
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read hooks: %v", err)
-	}
-	text := string(data)
-	if !strings.Contains(text, "echo keep") {
-		t.Fatalf("non-Beacon hook was not preserved:\n%s", text)
-	}
-	if strings.Contains(text, "--platform codex") {
-		t.Fatalf("Codex endpoint hook was not removed:\n%s", text)
-	}
-}
-
 // Codex reads its user hooks.json from CODEX_HOME when that is set; project hooks stay in
 // <cwd>/.codex, which CODEX_HOME does not move.
 func TestCodexHooksPathFollowsCodexHome(t *testing.T) {

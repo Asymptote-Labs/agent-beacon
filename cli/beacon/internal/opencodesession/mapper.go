@@ -224,9 +224,10 @@ func (m *mapper) emitUsage(record Record) {
 // Total settles which shape a message has: OpenCode copies the provider's
 // total, which is the full input side plus every output token, so it reaches
 // input + cache + output + reasoning only when output left reasoning out. A
-// reasoning count above output can only mean the same. A message with no
-// total predates v1.1.57 (the 2.x runtime keeps its messages in
-// session_message, which this store does not read), so it keeps its output.
+// reasoning count above output can only mean the same. A 1.x message with no
+// total predates v1.1.57, so it keeps its output. 2.x session_message rows
+// carry no total either; sessionMessageRecords gives them one that covers
+// reasoning.
 // The live hook mapper (cli/beacon-hooks/cmd/opencode_event.go) makes the
 // same call, except that it takes a missing total as a 2.x step event.
 func (u TokenUsage) outputTokens() int64 {
@@ -324,9 +325,7 @@ func applyFile(ev *schema.Event, name string, record Record) {
 	}
 	if diff := diffText(name, record); diff != "" {
 		file.Diff = diff
-		file.DiffBytes = len(diff)
-		file.DiffHash = sha256Hex(diff)
-		ev.Content = asymptoteobserve.RetainedContent(diff, asymptoteobserve.DefaultStringLimit)
+		ev.Content, file.DiffHash, file.DiffBytes = asymptoteobserve.RetainedDiff(diff, asymptoteobserve.DefaultStringLimit)
 	}
 	ev.File = file
 }
