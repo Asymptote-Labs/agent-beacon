@@ -231,6 +231,50 @@ func TestJSONLWriterKeepsToolDescriptionsToThePromptTextLimit(t *testing.T) {
 	}
 }
 
+// A browser chat answer keeps up to 16 KB and is written once, without its raw copy; every other
+// runtime's gen_ai output keeps the raw-attribute limit and its raw attributes as before.
+func TestJSONLWriterKeepsBrowserChatAnswersToTheResponseLimit(t *testing.T) {
+	writer := jsonlWriter{maxEventBytes: defaultMaxEventBytes, redactSecrets: true}
+	answerText := func(event beaconEvent) string {
+		messages := event.GenAI.Output.Messages.([]interface{})
+		parts := messages[0].(map[string]interface{})["parts"].([]interface{})
+		return parts[0].(map[string]interface{})["content"].(string)
+	}
+	for _, tc := range []struct {
+		harness, answer string
+		limit           int
+		wantRawCopy     bool
+	}{
+		{harness: "claude_web", answer: strings.Repeat("Sunny, high of 70. ", 500), limit: browserResponseStringLimit},
+		{harness: "chatgpt_web", answer: strings.Repeat("Sunny, high of 70. ", 2000), limit: browserResponseStringLimit},
+		{harness: "claude_code", answer: strings.Repeat("Sunny, high of 70. ", 500), limit: asymptoteobserve.DefaultRawStringLimit, wantRawCopy: true},
+	} {
+		messages := []interface{}{map[string]interface{}{
+			"role":  "assistant",
+			"parts": []interface{}{map[string]interface{}{"type": "text", "content": tc.answer}},
+		}}
+		attrs := map[string]interface{}{"gen_ai.output.messages": `[{"role":"assistant"}]`, "beacon.response.chars": int64(len(tc.answer))}
+		event := newBeaconEvent("agent.response.completed", "agent", "info", tc.harness, time.Now())
+		event.GenAI = &beaconevent.GenAIInfo{Output: &beaconevent.GenAIOutputInfo{Messages: messages}}
+		event.Raw = map[string]interface{}{"attributes": attrs}
+
+		sanitized := writer.sanitize(event)
+		if got, want := answerText(sanitized), asymptoteobserve.TruncateString(tc.answer, tc.limit); got != want {
+			t.Errorf("%s: answer = %d bytes, want %d of %d", tc.harness, len(got), len(want), len(tc.answer))
+		}
+		_, rawCopy := sanitized.Raw["attributes"].(map[string]interface{})["gen_ai.output.messages"]
+		if rawCopy != tc.wantRawCopy {
+			t.Errorf("%s: raw copy of the answer kept = %v, want %v", tc.harness, rawCopy, tc.wantRawCopy)
+		}
+		if _, ok := sanitized.Raw["attributes"].(map[string]interface{})["beacon.response.chars"]; !ok {
+			t.Errorf("%s: beacon.response.chars dropped from raw", tc.harness)
+		}
+		if _, ok := attrs["gen_ai.output.messages"]; !ok {
+			t.Errorf("%s: the caller's attributes were changed", tc.harness)
+		}
+	}
+}
+
 // A gen_ai block holding a value JSON cannot represent (NaN, an out-of-range integer) is sanitized
 // like any other: its text redacted and cut, the value that cannot be represented left out.
 func TestJSONLWriterSanitizesGenAIHoldingUnrepresentableValues(t *testing.T) {

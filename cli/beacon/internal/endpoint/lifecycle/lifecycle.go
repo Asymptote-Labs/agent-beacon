@@ -1080,6 +1080,12 @@ func autoUpdateModeFromConfigFile(path string) (string, error) {
 }
 
 func setAutoUpdateModeInConfigFile(path, mode string) error {
+	return setConfigFileKey(false, path, "auto_update", endpointconfig.AutoUpdate{Mode: mode})
+}
+
+// setConfigFileKey replaces one top-level key of config.json and leaves every other key as it is,
+// where install and repair rebuild the whole config from their flags.
+func setConfigFileKey(userMode bool, path, key string, value any) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -1088,16 +1094,16 @@ func setAutoUpdateModeInConfigFile(path, mode string) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	autoUpdate, err := json.Marshal(endpointconfig.AutoUpdate{Mode: mode})
+	encoded, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	raw["auto_update"] = autoUpdate
+	raw[key] = encoded
 	out, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
 		return err
 	}
-	return endpointconfig.RewriteSystemConfig(path, out, configIsPrivate(path))
+	return endpointconfig.RewriteConfig(userMode, path, out, configIsPrivate(path))
 }
 
 // configIsPrivate reports whether the file at path is readable by its owner only. Only POSIX modes

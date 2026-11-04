@@ -693,6 +693,12 @@
       "vscode"
     ]
   },
+  "integrations": {
+    "posthog": {
+      "apiKey": "phc_mAC6ywfI3poAo9dBeuNJUJySdxYdJzvoYapN5Wn9cVN",
+      "apiHost": "https://us.i.posthog.com"
+    }
+  },
   "redirects": [
     {
       "source": "/manage/configure-s3-data-connector",

@@ -151,6 +151,8 @@ Because users cannot create files in the log directory, the install creates `run
 
 `%ProgramData%\Beacon` is reset even when it already exists. `%ProgramData%` lets any user create a subdirectory, so one found there before the package was installed may belong to someone else: the install takes ownership, replaces its ACL, removes any junction, symbolic link or hard link inside it (Beacon creates none), and resets anything below it that grants an ordinary user write, delete or ownership rights. Anything already locked down further than this is left as it is.
 
+A few things below `%ProgramData%\Beacon` are kept from ordinary users entirely, with access for SYSTEM and Administrators only: `config.json` and `otelcol.yaml` when they hold a Splunk or Falcon HEC token, the OTLP forward's headers, and `Endpoint\state\backfill-snapshots`, where the session backfill copies the signed-in user's SQLite session stores to read them and deletes each copy once read.
+
 `doctor --system` checks both halves: that interactive users can append, and that nothing grants them more. An endpoint installed by an older version carries a broader grant (Modify for `INTERACTIVE` on the log directory) and is reported as `acl_too_broad`. Upgrading the package fixes it, as does running this from an elevated shell:
 
 ```powershell title="Reset the log directory ACL"

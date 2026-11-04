@@ -218,6 +218,21 @@ including Claude Code, Codex, and Cursor setup.
     logged in still heartbeats, with `user_scope.mode` set to `no_console_user`,
     and writes a snapshot the next time a user is at the console.
   </Accordion>
+  <Accordion title="Session sync is not running">
+    The scheduled session sync is off unless turned on (see [Repair and uninstall](#repair-and-uninstall)). When it is on, a root job, `com.beacon.endpoint.session-sync`, runs every 15 minutes, starting 15 minutes after it is loaded. Confirm it is loaded and how its last run ended:
+
+    ```bash
+    sudo launchctl print system/com.beacon.endpoint.session-sync | grep -E 'state|runs|last exit'
+    sudo /opt/beacon/bin/beacon endpoint status --system | grep 'Session sync'
+    sudo tail -n 5 /Library/Logs/Beacon/com.beacon.endpoint.session-sync.out
+    ```
+
+    If the job is missing, turn the setting on again, which reinstalls and loads it:
+
+    ```bash
+    sudo /opt/beacon/bin/beacon endpoint sessions enable --system
+    ```
+  </Accordion>
   <Accordion title="Configured harnesses are wrong">
     Check Jamf parameter 4 on the install policy. The default is `claude,codex`; set the parameter explicitly when you want a narrower or broader harness list. Include `gemini` when Gemini CLI telemetry should be managed. Do not include GitHub Copilot CLI in this list; manage Copilot's OTel environment separately.
 
@@ -261,6 +276,15 @@ including Claude Code, Codex, and Cursor setup.
 ## Repair and uninstall
 
 Use `/opt/beacon/jamf/scripts/repair.sh` as a remediation policy for Macs where extension attributes report a stale or unhealthy install.
+
+To turn on the [scheduled session sync](/cli/endpoint-install#scheduled-session-sync), which reads new records from the agents' session files every 15 minutes, run this once from a Jamf script policy. It changes only that setting, and package upgrades keep it:
+
+```bash
+#!/bin/sh
+/opt/beacon/bin/beacon endpoint sessions enable --system
+```
+
+`sessions disable --system` turns it off. For new installs, set `BEACON_SESSION_SYNC=1` in the environment of the install helper instead.
 
 Use `/opt/beacon/jamf/scripts/uninstall.sh` to remove endpoint service files. Set `BEACON_KEEP_LOGS=1` or Jamf parameter 4 to preserve runtime logs during removal. Set `BEACON_KEEP_CONFIG=1` or Jamf parameter 5 to preserve harness telemetry configuration.
 

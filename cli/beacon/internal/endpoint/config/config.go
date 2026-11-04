@@ -293,9 +293,13 @@ func saveOTLPForwardSecrets(cfg Config) error {
 // credential or was already private, and otherwise readable like any config.json. Writing it with
 // atomicfile.Write alone gave a Windows file the tree's DACL, so every user could read a HEC token.
 func RewriteSystemConfig(path string, data []byte, wasPrivate bool) error {
-	secret := wasPrivate || rawConfigHoldsCredential(data)
-	if secret {
-		return writeSecretFile(false, path, data)
+	return RewriteConfig(false, path, data, wasPrivate)
+}
+
+// RewriteConfig is RewriteSystemConfig for either mode: a private user config is written 0600.
+func RewriteConfig(userMode bool, path string, data []byte, wasPrivate bool) error {
+	if wasPrivate || rawConfigHoldsCredential(data) {
+		return writeSecretFile(userMode, path, data)
 	}
 	return atomicfile.Write(path, data, 0644)
 }

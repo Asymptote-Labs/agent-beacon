@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
@@ -155,5 +157,71 @@ func TestRollbackRestoresSessionSyncJobTurnedOff(t *testing.T) {
 	tx.Rollback(Manifest{})
 	if len(*calls) != 0 {
 		t.Fatalf("calls = %v, want nothing for a job that was not scheduled before", *calls)
+	}
+}
+
+// Turning the sync on or off changes session_sync and nothing else. A repair would rebuild the
+// config from its flags, resetting harnesses and ports and dropping a HEC destination.
+func TestSetSessionSyncChangesOnlyItsOwnKey(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	const body = `{"user_mode":true,"log_path":"/l/runtime.jsonl","harnesses":["claude","cursor"],` +
+		`"collector":{"grpc_port":5317,"http_port":5318},` +
+		`"destinations":{"splunk_hec":{"enabled":true,"endpoint":"https://splunk.example:8088","token":"hec-token"}},` +
+		`"not_yet_known":{"kept":true}}`
+	writeInventoryConfig(t, true, body)
+	calls := &[]string{}
+	old := newSessionSyncJob
+	newSessionSyncJob = func(bool, service.Kind) inventoryJobController {
+		return recordingInventoryJob{calls: calls, supported: true, unitPath: "/fake/s.plist"}
+	}
+	t.Cleanup(func() { newSessionSyncJob = old })
+
+	result, err := SetSessionSync(InventoryJobOptions{UserMode: true, Program: "/bin/beacon", Load: true}, true)
+	if err != nil || !result.Enabled || !result.Loaded {
+		t.Fatalf("enable: %+v, %v", result, err)
+	}
+	// The job takes the config's log path when none is given.
+	if want := []string{"write /bin/beacon /l/runtime.jsonl", "load"}; !reflect.DeepEqual(*calls, want) {
+		t.Fatalf("calls = %v, want %v", *calls, want)
+	}
+	path := endpointconfig.ConfigPath(true)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before, after map[string]any
+	if err := json.Unmarshal([]byte(body), &before); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &after); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(after["session_sync"], map[string]any{"enabled": true}) {
+		t.Fatalf("session_sync = %v", after["session_sync"])
+	}
+	delete(after, "session_sync")
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("other keys changed:\nbefore %v\nafter  %v", before, after)
+	}
+	// It holds a HEC token, so the rewrite keeps it private.
+	if testenv.HasPOSIXFileModes() {
+		if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("config mode = %v, %v; want 0600", info.Mode().Perm(), err)
+		}
+	}
+
+	*calls = nil
+	if result, err = SetSessionSync(InventoryJobOptions{UserMode: true, Program: "/bin/beacon", Load: true}, false); err != nil || !result.Removed {
+		t.Fatalf("disable: %+v, %v", result, err)
+	}
+	if want := []string{"unload", "remove"}; !reflect.DeepEqual(*calls, want) {
+		t.Fatalf("calls = %v, want %v", *calls, want)
+	}
+}
+
+func TestSetSessionSyncNeedsAnInstalledEndpoint(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	if _, err := SetSessionSync(InventoryJobOptions{UserMode: true, Program: "/bin/beacon"}, true); err == nil || !strings.Contains(err.Error(), "install it first") {
+		t.Fatalf("err = %v, want a pointer to install", err)
 	}
 }

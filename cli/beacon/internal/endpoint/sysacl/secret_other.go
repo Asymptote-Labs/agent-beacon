@@ -12,3 +12,6 @@ func WriteSecretFile(path string, data []byte) error {
 // IsSecretFile is false off Windows: POSIX keeps the guarantee in the mode, which a snapshot
 // records and a restore puts back itself.
 func IsSecretFile(string) bool { return false }
+
+// SecureSecretDir is a no-op off Windows, where a root-owned 0700 directory is already private.
+func SecureSecretDir(string) error { return nil }

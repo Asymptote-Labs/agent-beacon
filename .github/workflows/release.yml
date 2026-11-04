@@ -94,6 +94,19 @@ jobs:
       - name: Authenticode-sign the Windows collector
         run: pwsh -NoProfile -File packaging/windows/sign-authenticode.ps1 -Path collector-builder/dist/beacon-otelcol/windows_amd64/beacon-otelcol.exe
 
+      # GoReleaser takes the nearest tag of any kind as the previous release, so an
+      # ext-v* or sdk-js-v* tag between two CLI releases cuts the changelog short:
+      # v1.3.47's started at sdk-js-v0.2.0 and left out everything before it. Only
+      # v* tags count here, and both ends are passed to the publish step.
+      - name: Find the previous CLI release
+        id: tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          previous="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          echo "Changelog covers ${previous:-the start of history}..${GITHUB_REF_NAME}"
+
       # Run from cli/beacon because the release pre-hook writes target-specific
       # beacon-hooks binaries to a shared embedded path; --parallelism 1 avoids
       # racing on it.
@@ -102,6 +115,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+          GORELEASER_PREVIOUS_TAG: ${{ steps.tags.outputs.previous }}
         run: goreleaser release --clean --parallelism 1
 
   package:

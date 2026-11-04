@@ -20,6 +20,7 @@ import (
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/dshsession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/asymptote"
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sysacl"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/factorysession"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/fxsession"
@@ -177,6 +178,10 @@ func harness2BackfillExtraRoots(userMode bool) []string {
 var endpointBackfillScratchDir = func() string {
 	return filepath.Join(endpointconfig.BaseDir(false), "state", "backfill-snapshots")
 }
+
+// secureBackfillScratchDir makes the scratch directory readable by SYSTEM and Administrators alone
+// before a system backfill copies anything into it. A seam for tests.
+var secureBackfillScratchDir = sysacl.SecureSecretDir
 
 // endpointBackfillNow is time.Now, a seam for tests.
 var endpointBackfillNow = time.Now
@@ -498,7 +503,15 @@ func runEndpointBackfillUnlocked(logPath string, userMode bool, sweep endpointSw
 	if err != nil {
 		return endpointBackfillResult{Skipped: fmt.Sprintf("could not read the owner of the console user's home: %v", err)}
 	}
-	confined, err := sessionfs.Confine(info.HomeDir, uid, sessionfs.Options{ScratchDir: endpointBackfillScratchDir()})
+	// The snapshots are copies of that user's session stores. On Windows their directory would
+	// inherit the machine-wide tree's grant of read to every user, which 0700 does nothing about, so
+	// it is made SYSTEM and Administrators only first, and nothing is copied when that fails.
+	// Elsewhere root ownership and 0700 already keep it private.
+	scratch := endpointBackfillScratchDir()
+	if err := secureBackfillScratchDir(scratch); err != nil {
+		return endpointBackfillResult{Skipped: fmt.Sprintf("could not make the snapshot directory %s private: %v", scratch, err)}
+	}
+	confined, err := sessionfs.Confine(info.HomeDir, uid, sessionfs.Options{ScratchDir: scratch})
 	if err != nil {
 		return endpointBackfillResult{Skipped: err.Error()}
 	}
