@@ -172,9 +172,9 @@ if (-not (Test-Path -LiteralPath $beacon)) { Write-Error 'Beacon is not installe
 exit $LASTEXITCODE
 ```
 
-It points that person's Claude Code and Codex at the collector and installs their hooks. It also writes the person's Windows account (their SID) into Claude Code's settings, so Claude Code's own events name them even on a machine several people use. Hook events always do. That setting replaces an `OTEL_RESOURCE_ATTRIBUTES` the person exports in their shell; resource attributes of their own belong in Claude Code's `settings.json`, where Beacon keeps them.
+It points that person's Claude Code and Codex at the collector and installs their hooks. The hooks run as that person, so their events carry the person's Windows account (their SID), which is how every event is attributed on a machine several people use. See step 3.
 
-**Success looks like:** the script exits 0, and `%USERPROFILE%\.claude\settings.json` contains `OTEL_EXPORTER_OTLP_ENDPOINT` and `beacon.os.user.id`.
+**Success looks like:** the script exits 0, and `%USERPROFILE%\.claude\settings.json` contains `OTEL_EXPORTER_OTLP_ENDPOINT` and Beacon's hooks.
 
 ## 3. Check one machine
 
@@ -194,16 +194,20 @@ BeaconRuntime_CL
 | where Message has "Beacon endpoint Sentinel validation event"
 ```
 
-Then have someone run Claude Code and check that their events carry their account:
+Then have someone run Claude Code and check whose sessions arrived. Hook events carry the person's account. Claude Code's and Codex's own OpenTelemetry events (token usage, cost, API requests) carry the collector's own account, the machine account `COMPUTERNAME$`, because every account sends to the same local port, but they share the session's id, so the join below names the person behind every event:
 
 ```kql
+let owners = BeaconRuntime_CL
+    | where isnotempty(SessionId) and tostring(RawData.harness.collection_method) in ("hook", "plugin")
+    | summarize OwnerId = take_any(tostring(RawData.user.uid)), Owner = take_any(tostring(RawData.user.name)) by HostName, SessionId;
 BeaconRuntime_CL
-| where TimeGenerated > ago(1h)
-| extend UserId = tostring(RawData.user.uid), User = tostring(RawData.user.name)
+| where TimeGenerated > ago(1h) and isnotempty(SessionId)
+| join kind=leftouter owners on HostName, SessionId
+| extend UserId = coalesce(OwnerId, tostring(RawData.user.uid)), User = coalesce(Owner, tostring(RawData.user.name))
 | summarize Events = count() by HostName, User, UserId, HarnessName
 ```
 
-Codex's own events carry the collector's account rather than the person's, because Codex has no setting for it. Its hook events carry the person, under the same `SessionId`.
+See [Who ran each session](/log-forwarding/microsoft-sentinel#who-ran-each-session) for more.
 
 ## Upgrades and removal
 
@@ -218,7 +222,7 @@ Codex's own events carry the collector's account rather than the person's, becau
 | The forwarder script fails with "PKCS12 parsing failed" | The PFX password is wrong. Check `BEACON_SENTINEL_PFX_PASSWORD`. |
 | `status` reports `Retrying after response` with 403 | The role assignment has not applied yet. Wait up to 30 minutes; nothing is lost meanwhile. |
 | `status` reports an `AADSTS` error | Entra ID refused the credential: a wrong tenant or client ID, or a certificate that was not uploaded to the app, has expired or was removed. Vector drops what it cannot send while this lasts, so renew certificates before they expire and rerun the forwarder script with the new one. |
-| Events arrive under the collector's account (`SYSTEM`) | They are Codex's or Gemini CLI's own events, or the person's agent-tools script has not run yet (check its Login trigger). |
+| Events arrive under the machine account (`COMPUTERNAME$`) | Agents' own OpenTelemetry events always do; attribute them with the join in step 3. If a session has no hook events at all, the person's agent-tools script has not run yet (check its Login trigger). |
 | An app, script or hook is blocked | AppLocker or WDAC; allow everything listed under the app above. |
 
 ## Related
