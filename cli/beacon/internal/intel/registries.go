@@ -229,8 +229,11 @@ func (r *Registries) readProject(dir string) {
 //     uv is told to use one (--directory, --project). A directory Beacon cannot resolve (a
 //     relative path, ${workspaceFolder}) leaves it unable to tell, so both ecosystems are held
 //     back for that server.
-func (r Registries) forServer(command string, args []string, def map[string]interface{}) Registries {
-	var nodeDirs, projects []string
+func (r Registries) forServer(command string, args []string, def map[string]interface{}, projectDirs []string) Registries {
+	// The runtime starts a server declared in a project's entry (Claude Code's local scope) in
+	// that project, so the launcher reads the project's config whatever the server's own cwd.
+	projects := append([]string(nil), projectDirs...)
+	var nodeDirs []string
 	unresolved := false
 	if command = strings.TrimSpace(command); command != "" && strings.ContainsAny(command, `/\`) {
 		nodeDirs = append(nodeDirs, filepath.Dir(command))

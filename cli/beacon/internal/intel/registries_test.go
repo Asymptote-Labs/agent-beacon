@@ -1,6 +1,7 @@
 package intel
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -183,8 +184,8 @@ func TestRegistriesForAServerOnItsOwnNode(t *testing.T) {
 	if base.private("npm:@acme/x") {
 		t.Fatal("the nvm node is not on Beacon's PATH in this test")
 	}
-	byCommand := base.forServer(filepath.Join(nvm, "bin", "npx"), nil, map[string]interface{}{})
-	byPath := base.forServer("npx", nil, map[string]interface{}{"env": map[string]interface{}{"PATH": filepath.Join(nvm, "bin") + string(filepath.ListSeparator) + "/usr/bin"}})
+	byCommand := base.forServer(filepath.Join(nvm, "bin", "npx"), nil, map[string]interface{}{}, nil)
+	byPath := base.forServer("npx", nil, map[string]interface{}{"env": map[string]interface{}{"PATH": filepath.Join(nvm, "bin") + string(filepath.ListSeparator) + "/usr/bin"}}, nil)
 	for name, reg := range map[string]Registries{"absolute command": byCommand, "env PATH": byPath} {
 		if !reg.private("npm:@acme/x") || reg.private("npm:@playwright/mcp") {
 			t.Errorf("%s: %+v", name, reg)
@@ -326,5 +327,37 @@ func TestFromInventoryHoldsBackLauncherConfigAndEnvFiles(t *testing.T) {
 	items, _ = FromInventory(res, FromInventoryOptions{Registries: reg, IncludePrivateNames: true})
 	if len(items) != 3 {
 		t.Fatalf("with consent = %+v", items)
+	}
+}
+
+// Claude Code starts a local-scope server in its project, so npx there reads the project's
+// npmrc whatever directory the agent asking runs in.
+func TestFromInventoryReadsTheProjectAClaudeLocalServerRunsIn(t *testing.T) {
+	home := t.TempDir()
+	project := filepath.Join(home, "work", "acme")
+	writeConfig(t, filepath.Join(project, ".npmrc"), "@acme:registry=https://npm.acme.internal/\n")
+	config, err := json.Marshal(map[string]interface{}{"projects": map[string]interface{}{
+		project: map[string]interface{}{"mcpServers": map[string]interface{}{
+			"tool":   map[string]interface{}{"command": "npx", "args": []string{"-y", "@acme/secret-tool"}},
+			"public": map[string]interface{}{"command": "npx", "args": []string{"-y", "@playwright/mcp"}},
+		}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeConfig(t, filepath.Join(home, ".claude.json"), string(config))
+	inv := inventory.Scan(inventory.Options{HomeDir: home, SkipProjectScope: true, Runtimes: []string{"claude_code"}, IncludeContents: true})
+	// The agent asks from somewhere else entirely.
+	reg := LocalRegistries(RegistryEnv{Home: home, WorkingDir: t.TempDir()})
+	items, skipped := FromInventory(inv, FromInventoryOptions{Registries: reg})
+	var sent []string
+	for _, item := range items {
+		sent = append(sent, item.Q)
+	}
+	if strings.Join(sent, ",") != "npm:@playwright/mcp" {
+		t.Fatalf("sent = %v, skipped = %+v", sent, skipped)
+	}
+	if len(skipped) != 1 || skipped[0].Name != "tool" || skipped[0].Reason != ReasonPrivatePackage {
+		t.Fatalf("skipped = %+v", skipped)
 	}
 }

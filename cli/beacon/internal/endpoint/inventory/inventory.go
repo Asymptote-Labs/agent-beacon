@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -138,6 +139,11 @@ type MCPServer struct {
 	ParserStatus    string                 `json:"parser_status"`
 	Redaction       string                 `json:"redaction"`
 	Definition      map[string]interface{} `json:"definition,omitempty"`
+	// ProjectDirs are the directories of the projects whose entry in a runtime's own config
+	// declares the server (Claude Code's ~/.claude.json projects.<path>.mcpServers), which the
+	// runtime starts it in. In memory only, for readers such as Beacon Intel that must read the
+	// config a launcher finds there; never serialized, so the inventory record is unchanged.
+	ProjectDirs []string `json:"-"`
 }
 
 type candidate struct {
@@ -860,6 +866,12 @@ func serversFromNestedMCPBlocks(item candidate, value interface{}, redaction str
 	switch typed := value.(type) {
 	case map[string]interface{}:
 		for key, nested := range typed {
+			if key == "projects" {
+				if projects, ok := nested.(map[string]interface{}); ok {
+					servers = append(servers, serversFromProjects(item, projects, redaction, co)...)
+					continue
+				}
+			}
 			if isMCPServerBlockKey(key) {
 				servers = append(servers, serversFromBlock(item, nested, redaction, co)...)
 			}
@@ -869,6 +881,24 @@ func serversFromNestedMCPBlocks(item candidate, value interface{}, redaction str
 		for _, nested := range typed {
 			servers = append(servers, serversFromNestedMCPBlocks(item, nested, redaction, co)...)
 		}
+	}
+	return servers
+}
+
+// serversFromProjects reads a projects block keyed by project directory (Claude Code's
+// ~/.claude.json), and records each server's project so a reader knows where it is started.
+func serversFromProjects(item candidate, projects map[string]interface{}, redaction string, co contentOptions) []MCPServer {
+	var servers []MCPServer
+	for dir, nested := range projects {
+		found := serversFromNestedMCPBlocks(item, nested, redaction, co)
+		if filepath.IsAbs(dir) {
+			for i := range found {
+				if len(found[i].ProjectDirs) == 0 {
+					found[i].ProjectDirs = []string{dir}
+				}
+			}
+		}
+		servers = append(servers, found...)
 	}
 	return servers
 }
@@ -978,15 +1008,27 @@ func inferTransport(def map[string]interface{}, url, command string) string {
 	}
 }
 
+func mergeDirs(dirs, more []string) []string {
+	for _, d := range more {
+		if !slices.Contains(dirs, d) {
+			dirs = append(dirs, d)
+		}
+	}
+	sort.Strings(dirs)
+	return dirs
+}
+
 func dedupeServers(servers []MCPServer) []MCPServer {
-	seen := map[string]bool{}
+	seen := map[string]int{}
 	out := make([]MCPServer, 0, len(servers))
 	for _, server := range servers {
 		key := server.Runtime + "\x00" + server.SourcePathHash + "\x00" + server.ServerNameHash + "\x00" + server.DefinitionHash
-		if seen[key] {
+		if i, ok := seen[key]; ok {
+			// The same definition in several projects is one entry, started in each of them.
+			out[i].ProjectDirs = mergeDirs(out[i].ProjectDirs, server.ProjectDirs)
 			continue
 		}
-		seen[key] = true
+		seen[key] = len(out)
 		out = append(out, server)
 	}
 	sort.Slice(out, func(i, j int) bool {

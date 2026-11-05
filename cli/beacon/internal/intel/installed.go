@@ -123,7 +123,7 @@ func FromInventory(res inventory.Result, opts FromInventoryOptions) ([]Installed
 		}
 		if q, basis, ok := PackageFromCommand(command, args); ok {
 			program, programArgs := launcher(command, args)
-			if registryFromEnv(s.Definition) || opts.Registries.forServer(program, programArgs, s.Definition).private(q) {
+			if registryFromEnv(s.Definition) || opts.Registries.forServer(program, programArgs, s.Definition, s.ProjectDirs).private(q) {
 				basis = privateBasis(basis)
 			}
 			if (basis == BasisPrivateNPM || basis == BasisPrivatePyPI) && !opts.IncludePrivateNames {
