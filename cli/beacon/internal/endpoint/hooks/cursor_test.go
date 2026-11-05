@@ -234,6 +234,35 @@ func TestInstallCursorWithUnknownLevelFailsBeforeWritingTarget(t *testing.T) {
 // hooks.json that uses Cursor options Beacon has no fields for. Everything that is not Beacon's must
 // come back with the same value: dropping `failClosed` would make a user's blocking hook fail open,
 // and a prompt-type hook decoded into a command struct would be written back as an empty command.
+// hookcmd.binaries matches "beacon-hooks" as a substring of a command's basename, not an exact
+// name, so a user's own script whose path merely contains it (and names no platform, and carries
+// none of BEACON_ENDPOINT_MODE/--log/--config/--cli) must not be mistaken for Beacon's own hook
+// and deleted by install/repair/uninstall.
+func TestIsEndpointHookRejectsUnrelatedUserCommandContainingTheBinaryName(t *testing.T) {
+	decoys := []string{
+		`'/home/user/scripts/my-beacon-hooks-wrapper.sh' --notify-slack`,
+		`'/home/user/scripts/my-beacon-hooks-wrapper.sh'`,
+	}
+	for _, command := range decoys {
+		if isEndpointHook(command) {
+			t.Fatalf("isEndpointHook(%q) = true, want false (a user's own unrelated command)", command)
+		}
+	}
+	// Still recognized: a genuine current install (names cursor), and the pre-platform-flag
+	// legacy form the install/uninstall round trip above already relies on.
+	genuine := []string{
+		// A real installed command: endpointCommandPrefix always adds --log/--config, as every
+		// real caller passes both paths non-empty.
+		`'/opt/beacon/bin/beacon-hooks' --platform cursor --log '/tmp/runtime.jsonl' --config '/tmp/config.json' stop`,
+		"BEACON_ENDPOINT_MODE=1 beacon-hooks stop",
+	}
+	for _, command := range genuine {
+		if !isEndpointHook(command) {
+			t.Fatalf("isEndpointHook(%q) = false, want true (a genuine Beacon command)", command)
+		}
+	}
+}
+
 func TestCursorHooksJSONKeepsFieldsBeaconDoesNotModel(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hooks.json")
 	existing := `{

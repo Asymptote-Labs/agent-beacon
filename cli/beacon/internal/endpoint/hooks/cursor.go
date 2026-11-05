@@ -368,7 +368,35 @@ func removeEndpointHooks(path string) (bool, error) {
 }
 
 func isEndpointHook(command string) bool {
-	return hookcmd.IsEndpointHook(command, "cursor")
+	if !hookcmd.IsEndpointHook(command, "cursor") {
+		return false
+	}
+	// hookcmd.IsEndpointHook's loose fallback -- a command naming no platform at all, and
+	// carrying none of BEACON_ENDPOINT_MODE/--log/--config/--cli either -- trusts the binary's
+	// name alone, matched as a substring of the basename. Claude Code and Codex close this with
+	// their own platform guard (isSettingsEndpointHookCommand) before ever calling in here, but
+	// Cursor's hooks.json can hold arbitrary other commands a person wrote themselves, so a user
+	// script whose path merely contains "beacon-hooks" (e.g. a personal
+	// my-beacon-hooks-wrapper.sh) was silently treated as Beacon's own and deleted on every
+	// install, repair, or uninstall. A genuine Beacon command either explicitly names cursor,
+	// carries the stronger endpoint-settings evidence, or -- the one case neither covers, a
+	// pre-platform-flag legacy hook like "BEACON_ENDPOINT_MODE=1 beacon-hooks stop", already
+	// caught by carriesEndpointSettings above -- ends in exactly one of its known Cursor
+	// subcommands; a user's own command does not.
+	if hookcmd.HasPlatform(command, "cursor") || hookcmd.CarriesEndpointSettings(command) {
+		return true
+	}
+	fields := hookcmd.Fields(command)
+	if len(fields) == 0 {
+		return false
+	}
+	last := fields[len(fields)-1]
+	for subcommand := range hookcmd.CursorEvents {
+		if last == subcommand {
+			return true
+		}
+	}
+	return false
 }
 
 func isCursorInstalledAt(path string) bool {
