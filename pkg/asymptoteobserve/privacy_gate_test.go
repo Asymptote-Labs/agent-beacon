@@ -18,6 +18,8 @@ var redactGateFragments = []string{
 	"hunter2hunter2", "null", "true", "42", "https://", "postgres://user:", "pw", "@host", "://",
 	"sk-", "sk-ant-api03-", "AKIA", "ASIA", "ABCDEFGHIJKLMNOP", "ghp_", "gho_", "ghs_", "github_pat_",
 	"glpat-", "xoxb-", "xoxe-", "xapp-", "sk_live_", "rk_test_", "AIza", "ya29.", "npm_", "hf_", "bcn_api_", "bcn_device_",
+	"hvs.", "hvb.", "gsk_", "pplx-", "r8_", "xai-", "lsv2_pt_", "lsv2_sk_", "pcsk_", "dop_v1_", "doo_v1_", "dapi",
+	"pypi-AgEIcHlwaS5vcmc", "pypi-", "shpat_", "shpss_", "lin_api_", "dp.pt.", "SG.",
 	"bcn_cli_", "bcn_mcprt_", "bcn_code_", "bcn_client_", "bcn_exchange_", "bcn_mcp_", "bcn_enfdev_", "bcn_other_",
 	"AKIAIOSFODNN7EXAMPLE", "ASIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "|", "/", "+",
 	"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJ", "-----BEGIN RSA PRIVATE KEY-----",
