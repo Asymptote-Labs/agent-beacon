@@ -150,8 +150,8 @@ switch ($Phase) {
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $pfx)) { throw "openssl could not make the test PFX" }
         Remove-Item -LiteralPath $key
 
-        # Which PFX encodings the bundled Vector can read, recorded for the docs: Windows'
-        # Export-PfxCertificate with each algorithm, and OpenSSL's default.
+        # The PFX encodings the docs say work: Windows' Export-PfxCertificate with either algorithm,
+        # and OpenSSL's default. The bundled Vector has to read every one.
         $cert = New-SelfSignedCertificate -Subject 'CN=beacon-sentinel-smoke-export' -CertStoreLocation Cert:\LocalMachine\My `
             -KeyAlgorithm RSA -KeyLength 2048 -KeyExportPolicy Exportable -NotAfter (Get-Date).AddDays(2)
         $cert.Thumbprint | Set-Content -LiteralPath (Join-Path $work 'cert-thumbprint')
@@ -185,9 +185,11 @@ certificate_path = '$($variants[$name])'
 certificate_password = '$pfxPassword'
 "@ | Set-Content -LiteralPath $probe -Encoding ascii
             $out = & $vectorExe validate --skip-healthchecks $probe 2>&1 | Out-String
-            $verdict = if ($LASTEXITCODE -eq 0) { 'accepted' } else { 'REJECTED: ' + (($out -split "`n" | Where-Object { $_ -match 'PKCS12|Sink' }) -join ' ').Trim() }
-            Write-Output "pfx probe: $name -> $verdict"
-            $global:LASTEXITCODE = 0
+            if ($LASTEXITCODE -ne 0) {
+                Write-Output $out
+                throw "the bundled Vector cannot read a PFX made with $name"
+            }
+            Write-Output "ok: the bundled Vector reads a PFX made with $name"
         }
 
         # The mock outlives this step: it keeps answering through the upgrade and the log access

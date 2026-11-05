@@ -404,21 +404,22 @@ func TestForwarderInstallRemovesAServiceThatNeverStarted(t *testing.T) {
 // The Vector install was told to run is the one reconcile keeps running.
 func TestForwarderReconcileKeepsTheVectorInstallWasGiven(t *testing.T) {
 	newForwarderFixture(t)
+	custom := filepath.Join(t.TempDir(), "vector")
 	var asked []string
 	findVector = func(explicit string) (asymptote.VectorInfo, error) {
 		asked = append(asked, explicit)
-		return asymptote.VectorInfo{Path: "/custom/vector", Version: "0.56.0"}, nil
+		return asymptote.VectorInfo{Path: custom, Version: "0.56.0"}, nil
 	}
 	o := validInstall()
-	o.VectorBin = "/custom/vector"
+	o.VectorBin = custom
 	if _, err := Install(o); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Reconcile(ReconcileOptions{Restart: true}); err != nil {
 		t.Fatal(err)
 	}
-	if len(asked) != 2 || asked[0] != "/custom/vector" || asked[1] != "/custom/vector" {
-		t.Fatalf("findVector was asked for %q", asked)
+	if len(asked) != 2 || asked[0] != custom || asked[1] != custom {
+		t.Fatalf("findVector was asked for %q, want %s twice", asked, custom)
 	}
 }
 
