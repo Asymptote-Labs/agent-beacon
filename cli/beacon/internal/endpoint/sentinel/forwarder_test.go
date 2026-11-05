@@ -19,6 +19,7 @@ type fakeService struct {
 	spec        service.ForwarderSpec
 	unsupported string
 	loadErr     error
+	unloadErr   error
 	units       []string
 	loads       int
 	unloads     int
@@ -43,7 +44,14 @@ func (f *fakeService) Load() error {
 	f.running = true
 	return nil
 }
-func (f *fakeService) Unload() error { f.unloads++; f.running = false; return nil }
+func (f *fakeService) Unload() error {
+	f.unloads++
+	if f.unloadErr != nil {
+		return f.unloadErr
+	}
+	f.running = false
+	return nil
+}
 func (f *fakeService) RemoveUnits()  { f.removed++ }
 func (f *fakeService) Status() service.Status {
 	return service.Status{Label: f.spec.Label, Loaded: f.running, Running: f.running}
@@ -441,15 +449,15 @@ func TestForwarderValidatesWithTheCredentialAndRunsWithTheReference(t *testing.T
 		t.Fatal(err)
 	}
 	o := validInstall()
-	o.ClientSecret, o.CertificatePath, o.CertificatePassword = "", pfx, `pfx "pass"`
+	o.ClientSecret, o.CertificatePath, o.CertificatePassword = "", pfx, `pfx "pa$s"`
 	if _, err := Install(o); err != nil {
 		t.Fatal(err)
 	}
-	if len(checked) != 1 || !strings.Contains(checked[0], `certificate_password = "pfx \"pass\""`) {
+	if len(checked) != 1 || !strings.Contains(checked[0], `certificate_password = "pfx \"pa$$s\""`) {
 		t.Fatalf("the checked copy must carry the password itself:\n%v", checked)
 	}
 	config := readFile(t, filepath.Join(f.dir, configFileName))
-	if strings.Contains(config, "pfx") && strings.Contains(config, `\"pass\"`) || !strings.Contains(config, "SECRET[beacon_sentinel.certificate_password]") {
+	if strings.Contains(config, "pa$s") || !strings.Contains(config, "SECRET[beacon_sentinel.certificate_password]") {
 		t.Fatalf("the installed config must hold only the reference:\n%s", config)
 	}
 	matches, _ := filepath.Glob(filepath.Join(f.dir, "*", ".validate-*"))
@@ -464,7 +472,7 @@ func TestForwarderValidatesWithTheCredentialAndRunsWithTheReference(t *testing.T
 	if _, err := Reconcile(ReconcileOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if len(checked) != 2 || !strings.Contains(checked[1], `certificate_password = "pfx \"pass\""`) {
+	if len(checked) != 2 || !strings.Contains(checked[1], `certificate_password = "pfx \"pa$$s\""`) {
 		t.Fatalf("reconcile must check a copy with the password in it")
 	}
 }
@@ -511,6 +519,36 @@ func TestForwarderRecordsAVectorChosenThroughTheEnvironment(t *testing.T) {
 	}
 	settings, err := ReadSettings()
 	if err != nil || settings.VectorBin != "/env/vector" {
+		t.Fatalf("settings = %+v (%v)", settings, err)
+	}
+}
+
+// A service that would not stop keeps its settings, so a later remove can still find it.
+func TestForwarderRemoveKeepsTheSettingsWhenTheServiceWouldNotStop(t *testing.T) {
+	f := newForwarderFixture(t)
+	if _, err := Install(validInstall()); err != nil {
+		t.Fatal(err)
+	}
+	f.svc.unloadErr = errors.New("the service did not stop")
+	if err := Remove(false); err == nil {
+		t.Fatal("Remove must report a service that would not stop")
+	}
+	if _, err := ReadSettings(); err != nil {
+		t.Fatalf("the settings must stay for a retry: %v", err)
+	}
+}
+
+// A repair that moves the log updates what status reports, along with what Vector reads.
+func TestForwarderReconcileRecordsAMovedLog(t *testing.T) {
+	newForwarderFixture(t)
+	if _, err := Install(validInstall()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Reconcile(ReconcileOptions{LogPath: "/srv/beacon/runtime.jsonl", Restart: true}); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := ReadSettings()
+	if err != nil || settings.LogPath != "/srv/beacon/runtime.jsonl" {
 		t.Fatalf("settings = %+v (%v)", settings, err)
 	}
 }

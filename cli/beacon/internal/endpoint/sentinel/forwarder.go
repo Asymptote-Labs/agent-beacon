@@ -449,7 +449,10 @@ func Install(o InstallOptions) (InstallResult, error) {
 // created in dir (readable only by root, or SYSTEM and Administrators) and removed straight after.
 func validateConfig(vectorBin, dir, rendered string, secrets map[string]string) error {
 	for key, value := range secrets {
-		rendered = strings.ReplaceAll(rendered, fmt.Sprintf("SECRET[%s.%s]", secretBackend, key), siempack.TOMLEscape(value))
+		// Doubled dollars, because Vector expands $NAME in the config text before it reads the
+		// TOML, and the secret backend hands it the value untouched at runtime.
+		literal := strings.ReplaceAll(siempack.TOMLEscape(value), "$", "$$")
+		rendered = strings.ReplaceAll(rendered, fmt.Sprintf("SECRET[%s.%s]", secretBackend, key), literal)
 	}
 	f, err := os.CreateTemp(dir, ".validate-*.toml")
 	if err != nil {
@@ -543,15 +546,15 @@ func Remove(keepState bool) error {
 		settings = Settings{}
 	}
 	manager := newForwarderService(ForwarderSpec(settings.AuthorityHost))
-	unloadErr := manager.Unload()
+	if err := manager.Unload(); err != nil {
+		// The settings stay while the service might still be registered, so a retry can find it.
+		return err
+	}
 	manager.RemoveUnits()
 	if keepState {
-		return unloadErr
+		return nil
 	}
-	if err := os.RemoveAll(ForwarderDir()); err != nil {
-		return errors.Join(unloadErr, err)
-	}
-	return unloadErr
+	return os.RemoveAll(ForwarderDir())
 }
 
 // ReconcileResult reports what Reconcile did.
@@ -621,10 +624,11 @@ func Reconcile(opts ReconcileOptions) (ReconcileResult, error) {
 		return ReconcileResult{Warning: err.Error()}, err
 	}
 	pruneVectorLogs(filepath.Join(dir, logDirName))
-	if logPath != "" {
+	logPathChanged := logPath != "" && logPath != settings.LogPath
+	if logPathChanged {
 		settings.LogPath = logPath
 	}
-	_, secretsPath, certificatePath, configPath, dataDir, logDir := paths(dir)
+	settingsPath, secretsPath, certificatePath, configPath, dataDir, logDir := paths(dir)
 	hasPassword := false
 	if settings.Credential == CredentialCertificate {
 		if _, err := os.Stat(secretsPath); err == nil {
@@ -663,6 +667,11 @@ func Reconcile(opts ReconcileOptions) (ReconcileResult, error) {
 			configChanged = false
 		} else if err := atomicfile.Write(configPath, []byte(rendered), 0o600); err != nil {
 			return ReconcileResult{Warning: err.Error()}, err
+		} else if logPathChanged {
+			// What status reports follows what Vector now reads.
+			if data, err := json.MarshalIndent(settings, "", "  "); err == nil {
+				_ = atomicfile.Write(settingsPath, append(data, '\n'), 0o600)
+			}
 		}
 	}
 	unitCurrent, _ := manager.UnitCurrent(vector.Path, configPath)
