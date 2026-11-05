@@ -467,3 +467,49 @@ func TestForwarderValidatesWithTheCredentialAndRunsWithTheReference(t *testing.T
 		t.Fatalf("reconcile must check a copy with the password in it")
 	}
 }
+
+// An install told not to start services still registers the forwarder, which an MSI upgrade's
+// uninstall step removed; it is left stopped.
+func TestForwarderReconcileWithoutStartingRegistersTheService(t *testing.T) {
+	f := newForwarderFixture(t)
+	if _, err := Install(validInstall()); err != nil {
+		t.Fatal(err)
+	}
+	if err := Remove(true); err != nil {
+		t.Fatal(err)
+	}
+	f.svc.current = false
+	units, loads := len(f.svc.units), f.svc.loads
+	got, err := Reconcile(ReconcileOptions{NoStart: true})
+	if err != nil || !got.NotStarted || len(f.svc.units) != units+1 || f.svc.loads != loads {
+		t.Fatalf("got %+v %v units=%d loads=%d", got, err, len(f.svc.units), f.svc.loads)
+	}
+}
+
+// Without Beacon's settings there is nothing of Beacon's to remove, even when a service exists
+// under the same name (the Jamf guide had people register the macOS label by hand).
+func TestForwarderRemoveLeavesAServiceBeaconDidNotSetUp(t *testing.T) {
+	f := newForwarderFixture(t)
+	if err := Remove(false); err != nil {
+		t.Fatal(err)
+	}
+	if f.svc.unloads != 0 || f.svc.removed != 0 {
+		t.Fatalf("unloads=%d removed=%d; a service Beacon did not set up was touched", f.svc.unloads, f.svc.removed)
+	}
+}
+
+// A Vector chosen through BEACON_VECTOR_BIN is recorded as the binary it resolved to.
+func TestForwarderRecordsAVectorChosenThroughTheEnvironment(t *testing.T) {
+	newForwarderFixture(t)
+	t.Setenv(asymptote.VectorBinEnv, "/env/vector")
+	findVector = func(explicit string) (asymptote.VectorInfo, error) {
+		return asymptote.VectorInfo{Path: "/env/vector", Version: "0.56.0"}, nil
+	}
+	if _, err := Install(validInstall()); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := ReadSettings()
+	if err != nil || settings.VectorBin != "/env/vector" {
+		t.Fatalf("settings = %+v (%v)", settings, err)
+	}
+}

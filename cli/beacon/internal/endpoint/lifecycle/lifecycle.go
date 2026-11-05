@@ -69,8 +69,8 @@ var (
 	// reconcileSentinelForwarder and removeSentinelForwarder are the seams for the managed Sentinel
 	// forwarder. Install always restarts it: an install or repair may have replaced the log with a
 	// copy (switching log access does), which Vector only notices when it restarts.
-	reconcileSentinelForwarder = func(logPath string) (sentinel.ReconcileResult, error) {
-		return sentinel.Reconcile(sentinel.ReconcileOptions{LogPath: logPath, Restart: true})
+	reconcileSentinelForwarder = func(logPath string, start bool) (sentinel.ReconcileResult, error) {
+		return sentinel.Reconcile(sentinel.ReconcileOptions{LogPath: logPath, Restart: start, NoStart: !start})
 	}
 	removeSentinelForwarder = sentinel.Remove
 	sentinelForwarderStatus = sentinel.ReadStatus
@@ -851,9 +851,12 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		}
 		managedForwarder = &reconciled
 	}
+	// Unlike the Beacon Cloud forwarder, this runs without StartService too: an MSI upgrade can be
+	// told not to start services, and its uninstall step removed the registration, which only this
+	// puts back. Without StartService it registers the service and leaves it stopped.
 	var sentinelForwarder *sentinel.ReconcileResult
-	if opts.StartService && !cfg.UserMode {
-		reconciled, err := reconcileSentinelForwarder(cfg.LogPath)
+	if !cfg.UserMode {
+		reconciled, err := reconcileSentinelForwarder(cfg.LogPath, opts.StartService)
 		if err != nil && reconciled.Warning == "" {
 			reconciled.Warning = err.Error()
 		}

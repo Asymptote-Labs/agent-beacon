@@ -157,7 +157,7 @@ func (o InstallOptions) settings() (Settings, error) {
 		AuthorityHost:  strings.TrimRight(strings.TrimSpace(o.AuthorityHost), "/"),
 		ReadFrom:       strings.TrimSpace(o.ReadFrom),
 		LogPath:        o.LogPath,
-		VectorBin:      strings.TrimSpace(o.VectorBin),
+		VectorBin:      absPath(strings.TrimSpace(o.VectorBin)),
 	}
 	if err := httpsURL("--endpoint", s.Endpoint, true); err != nil {
 		return s, err
@@ -197,6 +197,17 @@ func (o InstallOptions) settings() (Settings, error) {
 		return s, errors.New("no runtime log path")
 	}
 	return s, nil
+}
+
+// absPath makes a path given on the command line absolute, since the service runs elsewhere.
+func absPath(path string) string {
+	if path == "" || !strings.ContainsAny(path, `/\`) {
+		return path // empty, or a bare name for findVector to look up on PATH
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
 }
 
 // httpsURL accepts an https URL with a host, and with a path only where one makes sense.
@@ -244,8 +255,8 @@ func renderForwarderConfig(o renderOptions) string {
 		secrets = fmt.Sprintf("\n[secret.%s]\ntype = \"file\"\npath = %s\n", secretBackend, q(o.SecretsPath))
 	}
 	vectorLog := fmt.Sprintf(`
-# Vector's own warnings and errors, one file a day, kept for a week. A Windows service has nowhere
-# else to write them.
+# Vector's own warnings and errors, one file a day; install, repair and upgrades delete those over
+# a week old. A Windows service has nowhere else to write them.
 [sources.beacon_vector_logs]
 type = "internal_logs"
 
@@ -341,6 +352,11 @@ func Install(o InstallOptions) (InstallResult, error) {
 	vector, err := findVector(settings.VectorBin)
 	if err != nil {
 		return InstallResult{}, err
+	}
+	// A Vector chosen with --vector or BEACON_VECTOR_BIN is recorded as the binary it resolved to,
+	// so reconcile, which runs from packages and repairs without that flag or environment, keeps it.
+	if settings.VectorBin != "" || strings.TrimSpace(os.Getenv(asymptote.VectorBinEnv)) != "" {
+		settings.VectorBin = vector.Path
 	}
 	var certificate []byte
 	if settings.Credential == CredentialCertificate {
@@ -517,8 +533,13 @@ func ReadSettings() (Settings, error) {
 // removes the old package this way before installing the new one.
 func Remove(keepState bool) error {
 	settings, err := ReadSettings()
-	if err != nil && !errors.Is(err, ErrNotInstalled) {
-		// Unreadable settings must not keep the service running; remove it with the default name.
+	if errors.Is(err, ErrNotInstalled) {
+		// Nothing Beacon set up. The macOS label is the one the Jamf guide had people register by
+		// hand, so a service under it without Beacon's settings is not Beacon's to remove.
+		return nil
+	}
+	if err != nil {
+		// Beacon's, but unreadable: it must not keep running. Remove it with the default name.
 		settings = Settings{}
 	}
 	manager := newForwarderService(ForwarderSpec(settings.AuthorityHost))
@@ -538,7 +559,9 @@ type ReconcileResult struct {
 	Skipped   string `json:"skipped,omitempty"`
 	Unchanged bool   `json:"unchanged,omitempty"`
 	Restarted bool   `json:"restarted,omitempty"`
-	Warning   string `json:"warning,omitempty"`
+	// NotStarted is a NoStart reconcile: the service is registered and left stopped.
+	NotStarted bool   `json:"not_started,omitempty"`
+	Warning    string `json:"warning,omitempty"`
 }
 
 // Message is a one-line summary for install, repair and the reconcile command.
@@ -548,6 +571,8 @@ func (r ReconcileResult) Message() string {
 		return "Sentinel forwarder: " + r.Skipped
 	case r.Warning != "":
 		return "Sentinel forwarder: " + r.Warning
+	case r.NotStarted:
+		return "Sentinel forwarder: registered, not started"
 	case r.Unchanged:
 		return "Sentinel forwarder: running, unchanged"
 	default:
@@ -564,6 +589,9 @@ type ReconcileOptions struct {
 	// log access does), and Vector, which recognizes a file by its first line, keeps reading the
 	// replaced file until it restarts. After a restart it resumes in the copy where it left off.
 	Restart bool
+	// NoStart registers the service without starting it, for an install told not to start
+	// services. The MSI upgrade can be one, and its uninstall step removed the registration.
+	NoStart bool
 }
 
 // Reconcile brings an installed forwarder up to date with this version: it re-renders the config
@@ -642,6 +670,9 @@ func Reconcile(opts ReconcileOptions) (ReconcileResult, error) {
 		if _, err := manager.WriteUnit(vector.Path, configPath); err != nil {
 			return ReconcileResult{Warning: err.Error()}, err
 		}
+	}
+	if opts.NoStart {
+		return ReconcileResult{NotStarted: true, Warning: rejected}, nil
 	}
 	if !opts.Restart && !configChanged && unitCurrent && manager.Status().Running {
 		return ReconcileResult{Unchanged: rejected == "", Warning: rejected}, nil

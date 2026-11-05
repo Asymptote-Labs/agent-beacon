@@ -30,7 +30,7 @@ func TestMain(m *testing.M) {
 	}
 	// Tests that run a system install or uninstall must not reach a real Sentinel forwarder under
 	// the machine's system directory; the ones about it set these themselves.
-	reconcileSentinelForwarder = func(string) (sentinel.ReconcileResult, error) {
+	reconcileSentinelForwarder = func(string, bool) (sentinel.ReconcileResult, error) {
 		return sentinel.ReconcileResult{Skipped: "not installed"}, nil
 	}
 	removeSentinelForwarder = func(bool) error { return nil }

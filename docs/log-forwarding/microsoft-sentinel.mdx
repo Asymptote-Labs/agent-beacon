@@ -215,7 +215,7 @@ The host needs outbound HTTPS to `login.microsoftonline.com` and to the DCR's `*
 sudo /opt/beacon/bin/beacon endpoint sentinel forwarder status --system
 ```
 
-`beacon endpoint status --system` shows the same service state. Vector's own warnings and errors are in `forwarders/sentinel/logs/vector-<date>.log` under the endpoint's system directory, kept for a week.
+`beacon endpoint status --system` shows the same service state. Vector's own warnings and errors are in `forwarders/sentinel/logs/vector-<date>.log` under the endpoint's system directory; install, repair and upgrades delete files over a week old.
 
 - To change a setting or rotate the credential, run `forwarder install` again with the new values.
 - Repair and package upgrades keep the forwarder. An upgrade restarts it on the new package's Vector.

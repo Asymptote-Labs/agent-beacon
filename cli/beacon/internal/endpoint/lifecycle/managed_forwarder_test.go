@@ -112,7 +112,7 @@ func TestInstallWithoutStartingServicesLeavesTheForwarderToTheCaller(t *testing.
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}
-	if called || result.ManagedForwarder != nil || result.SentinelForwarder != nil {
+	if called || result.ManagedForwarder != nil {
 		t.Fatal("a --no-start install reconciled the forwarder")
 	}
 }
