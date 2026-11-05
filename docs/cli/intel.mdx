@@ -113,6 +113,9 @@ they claim no risk. The gate fails closed: a matched artifact whose risk this `b
 recognize fails every `--fail-on`, and under `--fail-on partial` so does one whose coverage is
 neither `complete` nor `partial`. An index that still answers with a retired verdict is ranked
 as its replacement (`malicious` as `high`, `suspicious` as `medium`, `inconclusive` as `low`).
+In an answer of that retired shape (it carries retired verdicts, or no matched artifact names a
+coverage), coverage was part of the verdict, so a `benign` there passes `--fail-on partial`, as
+it passed `--fail-on inconclusive`.
 
 The retired values `malicious`, `suspicious` and `inconclusive` are refused as `--fail-on`
 thresholds with a message naming the new ones, so update CI scripts that pass them: `--fail-on

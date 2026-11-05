@@ -292,11 +292,40 @@ func parseIntelFailOn(value string) (*intelGate, error) {
 	return nil, fmt.Errorf("--fail-on must be high, medium, low or partial, not %q", termLine(value, 40))
 }
 
+// intelRetiredShape reports whether a check answer comes from an index still on the retired
+// verdicts: its counts or results carry malicious, suspicious or inconclusive, or no matched
+// result names a coverage at all (the current shape always does). In that shape the verdict
+// carried coverage itself, inconclusive being the partial one, so a benign there was covered
+// and --fail-on partial must not read its missing coverage as unrecognized. An answer where
+// some matched results name a coverage and others do not is current, and still fails closed.
+func intelRetiredShape(res *intelapi.CheckResult) bool {
+	for key, n := range res.Counts {
+		if _, ok := intelRetiredRisks[key]; ok && n > 0 {
+			return true
+		}
+	}
+	matched := false
+	for _, r := range res.Results {
+		if r.Status != "matched" {
+			continue
+		}
+		if _, ok := intelRetiredRisks[r.Risk]; ok {
+			return true
+		}
+		if r.Coverage != "" {
+			return false
+		}
+		matched = true
+	}
+	return matched
+}
+
 // fails says why a check result fails the gate, or "" when it passes. Only matched results
 // can fail: ambiguous and not_found claim no risk. It fails closed: a matched result whose
 // risk this build does not know fails at every threshold rather than ranking lowest, and with
 // partial, so does one whose coverage is neither complete nor partial.
-func (g *intelGate) fails(r intelapi.CheckOutcome) string {
+// retiredShape is intelRetiredShape of the whole answer.
+func (g *intelGate) fails(r intelapi.CheckOutcome, retiredShape bool) string {
 	if r.Status != "matched" {
 		return ""
 	}
@@ -315,9 +344,10 @@ func (g *intelGate) fails(r intelapi.CheckOutcome) string {
 			return fmt.Sprintf("%s (%s, partial)", termLine(r.Q, 80), risk)
 		}
 		return fmt.Sprintf("%s (%s)", termLine(r.Q, 80), risk)
-	case !g.partial || r.Risk == "unchecked" || retired || r.Coverage == "complete":
+	case !g.partial || r.Risk == "unchecked" || retired || r.Coverage == "complete" || (retiredShape && r.Coverage == ""):
 		// unchecked was never analyzed, so it has no coverage, and a retired verdict carried
-		// its coverage in the verdict itself (inconclusive ranks as low above).
+		// its coverage in the verdict itself (inconclusive ranks as low above), as does a
+		// benign in an answer of the retired shape.
 		return ""
 	case r.Coverage == "partial":
 		return fmt.Sprintf("%s (%s, partial)", termLine(r.Q, 80), risk)
@@ -411,8 +441,9 @@ func runIntelCheck(cmd *cobra.Command, args []string) error {
 	}
 	if gate != nil {
 		var failed []string
+		retiredShape := intelRetiredShape(res)
 		for _, r := range res.Results {
-			if why := gate.fails(r); why != "" {
+			if why := gate.fails(r, retiredShape); why != "" {
 				failed = append(failed, why)
 			}
 		}

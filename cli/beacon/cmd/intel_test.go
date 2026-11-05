@@ -347,12 +347,22 @@ func TestIntelCheckFailOnFailsClosed(t *testing.T) {
 	if !strings.Contains(out, "1 benign, 1 inconclusive, 1 malicious.") {
 		t.Errorf("counts line hid a retired count:\n%s", out)
 	}
+	// In the retired shape a benign was covered: --fail-on partial, the hint for
+	// --fail-on inconclusive, fails what inconclusive failed and passes the benign.
 	_, err = runIntel(t, "", "check", "a", "--fail-on", "partial")
-	if !errors.Is(err, errIntelCheckFailed) || !strings.Contains(err.Error(), "3 at or above low or with partial coverage") ||
-		!strings.Contains(err.Error(), "old-ok (benign, coverage - not recognized)") {
-		// benign with no coverage cannot be told from a new answer missing its coverage, so
-		// --fail-on partial fails it rather than read it as complete.
+	if !errors.Is(err, errIntelCheckFailed) || !strings.Contains(err.Error(), "2 at or above low or with partial coverage") || strings.Contains(err.Error(), "old-ok") {
 		t.Fatalf("retired values under --fail-on partial: %v", err)
+	}
+	// An old answer of only benign matches carries no retired key, and no coverage either.
+	f.answer("/api/v1/check", 200, `{"api":"intel.v1","results":[{"q":"old-ok","status":"matched","risk":"benign"},{"q":"gone","status":"not_found","risk":null}],"counts":{"benign":1,"not_found":1}}`)
+	if _, err := runIntel(t, "", "check", "a", "--fail-on", "partial"); err != nil {
+		t.Fatalf("old all-benign answer under --fail-on partial: %v", err)
+	}
+	// A current answer missing one result's coverage still fails closed.
+	f.answer("/api/v1/check", 200, `{"api":"intel.v1","results":[{"q":"ok","status":"matched","risk":"benign","coverage":"complete"},{"q":"bare","status":"matched","risk":"benign"}],"counts":{"benign":2}}`)
+	_, err = runIntel(t, "", "check", "a", "--fail-on", "partial")
+	if !errors.Is(err, errIntelCheckFailed) || !strings.Contains(err.Error(), "1 at or above low or with partial coverage: bare (benign, coverage - not recognized)") {
+		t.Fatalf("current answer missing coverage: %v", err)
 	}
 
 	f.answer("/api/v1/check", 200, `{"api":"intel.v1","results":[
