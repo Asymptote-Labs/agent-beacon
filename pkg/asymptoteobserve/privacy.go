@@ -461,6 +461,7 @@ var redactionRules = concatRules([]redactionRule{
 	shapeRule(`\b(glpat-)[A-Za-z0-9_-]{20,}`, "${1}"+redactedValue, "glpat-"),                                   // GitLab
 	shapeRule(`\b(xox[abeposr]-|xapp-)[A-Za-z0-9-]{10,}`, "${1}"+redactedValue, "xox", "xapp-"),                 // Slack, with xoxe- refresh and xapp- app-level tokens
 	shapeRule(`\b([rs]k_(?:live|test)_)[A-Za-z0-9]{16,}`, "${1}"+redactedValue, "k_live_", "k_test_").before(1), // Stripe
+	shapeRule(`\b(whsec_)[A-Za-z0-9]{32,}`, "${1}"+redactedValue, "whsec_"),                                     // Stripe webhook signing secret
 	shapeRule(`\b(AIza)[0-9A-Za-z_-]{35}`, "${1}"+redactedValue, "AIza"),                                        // Google API key
 	shapeRule(`\b(ya29\.)(?:c\.)?[0-9A-Za-z_-]{20,}`, "${1}"+redactedValue, "ya29."),                            // Google OAuth access token
 	shapeRule(`\b(npm_)[A-Za-z0-9]{36}`, "${1}"+redactedValue, "npm_"),                                          // npm
