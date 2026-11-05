@@ -52,7 +52,7 @@ func (f *fakeService) Unload() error {
 	f.running = false
 	return nil
 }
-func (f *fakeService) RemoveUnits()  { f.removed++ }
+func (f *fakeService) RemoveUnits() { f.removed++ }
 func (f *fakeService) Status() service.Status {
 	return service.Status{Label: f.spec.Label, Loaded: f.running, Running: f.running}
 }
@@ -115,7 +115,7 @@ func TestForwarderInstallWritesStateValidatesThenRunsTheService(t *testing.T) {
 		`endpoint = "https://beacon-dcr-abcd.eastus-1.ingest.monitor.azure.com"`,
 		`dcr_immutable_id = "dcr-0123456789abcdef0123456789abcdef"`,
 		`azure_tenant_id = "11111111-2222-3333-4444-555555555555"`,
-		`azure_client_secret = "SECRET[beacon_sentinel.client_secret]"`,
+		"azure_client_secret = '''SECRET[beacon_sentinel.client_secret]'''",
 		`[secret.beacon_sentinel]`,
 		`read_from = "beginning"`,
 		`include = ["/var/log/beacon-agent/runtime.jsonl", "/var/log/beacon-agent/runtime.jsonl.1"]`,
@@ -237,7 +237,7 @@ func TestForwarderInstallWithACertificate(t *testing.T) {
 		t.Fatal(err)
 	}
 	config = readFile(t, filepath.Join(f.dir, configFileName))
-	if !strings.Contains(config, `certificate_password = "SECRET[beacon_sentinel.certificate_password]"`) || strings.Contains(config, "pfx-password") {
+	if !strings.Contains(config, "certificate_password = '''SECRET[beacon_sentinel.certificate_password]'''") || strings.Contains(config, "pfx-password") {
 		t.Fatalf("certificate config with a password:\n%s", config)
 	}
 	if !strings.Contains(readFile(t, filepath.Join(f.dir, secretsFileName)), "pfx-password") {
@@ -449,15 +449,15 @@ func TestForwarderValidatesWithTheCredentialAndRunsWithTheReference(t *testing.T
 		t.Fatal(err)
 	}
 	o := validInstall()
-	o.ClientSecret, o.CertificatePath, o.CertificatePassword = "", pfx, `pfx "pa$s"`
+	o.ClientSecret, o.CertificatePath, o.CertificatePassword = "", pfx, `p"a\$s'`
 	if _, err := Install(o); err != nil {
 		t.Fatal(err)
 	}
-	if len(checked) != 1 || !strings.Contains(checked[0], `certificate_password = "pfx \"pa$$s\""`) {
+	if len(checked) != 1 || !strings.Contains(checked[0], `certificate_password = '''p"a\$$s''''`) {
 		t.Fatalf("the checked copy must carry the password itself:\n%v", checked)
 	}
 	config := readFile(t, filepath.Join(f.dir, configFileName))
-	if strings.Contains(config, "pa$s") || !strings.Contains(config, "SECRET[beacon_sentinel.certificate_password]") {
+	if strings.Contains(config, `p"a`) || !strings.Contains(config, "SECRET[beacon_sentinel.certificate_password]") {
 		t.Fatalf("the installed config must hold only the reference:\n%s", config)
 	}
 	matches, _ := filepath.Glob(filepath.Join(f.dir, "*", ".validate-*"))
@@ -472,7 +472,7 @@ func TestForwarderValidatesWithTheCredentialAndRunsWithTheReference(t *testing.T
 	if _, err := Reconcile(ReconcileOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if len(checked) != 2 || !strings.Contains(checked[1], `certificate_password = "pfx \"pa$$s\""`) {
+	if len(checked) != 2 || !strings.Contains(checked[1], `certificate_password = '''p"a\$$s''''`) {
 		t.Fatalf("reconcile must check a copy with the password in it")
 	}
 }
@@ -550,5 +550,17 @@ func TestForwarderReconcileRecordsAMovedLog(t *testing.T) {
 	settings, err := ReadSettings()
 	if err != nil || settings.LogPath != "/srv/beacon/runtime.jsonl" {
 		t.Fatalf("settings = %+v (%v)", settings, err)
+	}
+}
+
+// A credential Vector's secret backend cannot carry into the config is refused before anything runs.
+func TestForwarderRefusesACredentialVectorCannotTake(t *testing.T) {
+	newForwarderFixture(t)
+	for _, secret := range []string{"ends'''here", "line\nbreak", "tab\tin"} {
+		o := validInstall()
+		o.ClientSecret = secret
+		if _, err := Install(o); err == nil || !strings.Contains(err.Error(), "secret store") {
+			t.Errorf("secret %q: %v", secret, err)
+		}
 	}
 }

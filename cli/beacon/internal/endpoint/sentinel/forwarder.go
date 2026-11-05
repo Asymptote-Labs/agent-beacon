@@ -196,6 +196,12 @@ func (o InstallOptions) settings() (Settings, error) {
 	if strings.TrimSpace(s.LogPath) == "" {
 		return s, errors.New("no runtime log path")
 	}
+	if err := validCredential("client secret", o.ClientSecret); err != nil {
+		return s, err
+	}
+	if err := validCredential("certificate password", o.CertificatePassword); err != nil {
+		return s, err
+	}
 	return s, nil
 }
 
@@ -243,12 +249,12 @@ func renderForwarderConfig(o renderOptions) string {
 		fmt.Fprintf(&auth, "azure_tenant_id = %s\nazure_client_id = %s\n", q(s.TenantID), q(s.ClientID))
 		fmt.Fprintf(&auth, "certificate_path = %s\n", q(o.CertificatePath))
 		if o.HasCertificatePassword {
-			fmt.Fprintf(&auth, "certificate_password = \"SECRET[%s.certificate_password]\"\n", secretBackend)
+			fmt.Fprintf(&auth, "certificate_password = %s\n", secretRef("certificate_password"))
 		}
 	default:
 		auth.WriteString("azure_credential_kind = \"client_secret_credential\"\n")
 		fmt.Fprintf(&auth, "azure_tenant_id = %s\nazure_client_id = %s\n", q(s.TenantID), q(s.ClientID))
-		fmt.Fprintf(&auth, "azure_client_secret = \"SECRET[%s.client_secret]\"\n", secretBackend)
+		fmt.Fprintf(&auth, "azure_client_secret = %s\n", secretRef("client_secret"))
 	}
 	var secrets string
 	if s.Credential == CredentialClientSecret || o.HasCertificatePassword {
@@ -285,6 +291,22 @@ codec = "json"
 		"{{AUTH}}":             auth.String(),
 		"{{VECTOR_LOG}}":       vectorLog,
 	}, s.LogPath)
+}
+
+// secretRef is a reference Vector replaces with the secret's value. Vector pastes the value into the
+// config text as it is, before reading the TOML, so the reference sits in a multi-line literal
+// string, which takes quotes and backslashes as they are; validCredential refuses what it cannot.
+func secretRef(key string) string {
+	return fmt.Sprintf("'''SECRET[%s.%s]'''", secretBackend, key)
+}
+
+// validCredential refuses a credential the config cannot carry through Vector's secret backend: one
+// that would end the literal string, or a control character.
+func validCredential(name, value string) error {
+	if strings.Contains(value, "'''") || strings.IndexFunc(value, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+		return fmt.Errorf("the %s contains three single quotes in a row or a control character, which Vector cannot take from its secret store", name)
+	}
+	return nil
 }
 
 // manualVectorConfig is the pack's vector.toml for running Vector by hand: values come from the
@@ -449,10 +471,9 @@ func Install(o InstallOptions) (InstallResult, error) {
 // created in dir (readable only by root, or SYSTEM and Administrators) and removed straight after.
 func validateConfig(vectorBin, dir, rendered string, secrets map[string]string) error {
 	for key, value := range secrets {
-		// Doubled dollars, because Vector expands $NAME in the config text before it reads the
-		// TOML, and the secret backend hands it the value untouched at runtime.
-		literal := strings.ReplaceAll(siempack.TOMLEscape(value), "$", "$$")
-		rendered = strings.ReplaceAll(rendered, fmt.Sprintf("SECRET[%s.%s]", secretBackend, key), literal)
+		// Exactly what Vector pastes in at runtime, inside the same literal string, with dollars
+		// doubled: here the value goes in before Vector expands $NAME in the text, at runtime after.
+		rendered = strings.ReplaceAll(rendered, fmt.Sprintf("SECRET[%s.%s]", secretBackend, key), strings.ReplaceAll(value, "$", "$$"))
 	}
 	f, err := os.CreateTemp(dir, ".validate-*.toml")
 	if err != nil {
