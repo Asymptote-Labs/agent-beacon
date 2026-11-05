@@ -120,6 +120,11 @@ func TestRedactStringRedactsCommonCredentialFormats(t *testing.T) {
 		{"bare url password without a user", "redis-cli -u redis://:pa55w0rd@localhost:6379 ping", "pa55w0rd"},
 		{"password flag", "mysql --user root --password hunter2hunter2", "hunter2hunter2"},
 		{"token flag", "tool login --token=opaque-flag-value", "opaque-flag-value"},
+		{"snake_case client secret flag", "gcloud auth application-default login --client_secret 1a2b3c4d5e6f7g8h9i0j", "1a2b3c4d5e6f7g8h9i0j"},
+		{"snake_case api key flag", "tool --api_key abcdef0123456789abcdef0123456789", "abcdef0123456789abcdef0123456789"},
+		{"snake_case access key flag", "gcloud auth --access_key plainOpaqueValueNoShape1234567890", "plainOpaqueValueNoShape1234567890"},
+		{"private key flag", "openssl rsautl --private-key pemEncodedPrivateKeyStringValue123", "pemEncodedPrivateKeyStringValue123"},
+		{"secret key flag", "vault-tool --secret-key abcdefghijklmnopqrstuvwxyz0123456789", "abcdefghijklmnopqrstuvwxyz0123456789"},
 		{"api key flag as a list item", `"args": ["-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-abcdef0123456789"]`, "ctx7sk-abcdef0123456789"},
 		{"token flag as a toml list item", `args = ['--token', 'opaque-flag-value']`, "opaque-flag-value"},
 		{"curl basic auth", "curl -u admin:hunter2hunter2 https://api.example.com/v1", "hunter2hunter2"},
@@ -255,6 +260,7 @@ func TestRedactStringKeepsLabelsAndOrdinaryText(t *testing.T) {
 	kept := []string{
 		"input_tokens: 812, output_tokens=95, max_tokens=4096",
 		"run go test ./... --max-tokens 10",
+		"run go test ./... --max_tokens 10",
 		"the author: Ada",
 		"see https://github.com/org/repo/pull/12 and git@github.com:org/repo.git",
 		"PWD=/home/ada/project",
@@ -279,6 +285,12 @@ func TestRedactStringKeepsLabelsAndOrdinaryText(t *testing.T) {
 	}
 	if got := RedactString("git clone https://u:pw123456@example.com/r"); got != "git clone https://u:[REDACTED]@example.com/r" {
 		t.Fatalf("URL credential = %q, want the scheme, user and host kept", got)
+	}
+	// An unquoted value stops at a URL query-string delimiter, not just a quote or whitespace: the
+	// generic unquoted-value grammar used to run right through `&`, erasing every parameter after
+	// the secret instead of leaving them as readable, non-secret diagnostic data.
+	if got := RedactString("GET https://api.example.com/v1/data?api_key=sk-liveabcdef0123456789&user=alice&format=json"); got != "GET https://api.example.com/v1/data?api_key=[REDACTED]&user=alice&format=json" {
+		t.Fatalf("URL query string = %q, want only api_key's value redacted and the other parameters kept", got)
 	}
 	// Detection rules match what kind of credential a line held, so the public type prefix and the
 	// Authorization scheme stay.

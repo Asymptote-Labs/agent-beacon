@@ -96,17 +96,26 @@ func quotedRules(kind quotedKind, keep func(string) bool) []redactionRule {
 	return rules
 }
 
-// redactUnquoted is an unquoted value, up to a quote, a comma or whitespace. Brackets, braces and
-// backslashes are part of it: a generated password is full of them. It never starts with a quote,
-// escaped or not, so it leaves a value the quoted rule already replaced alone.
-const redactUnquoted = `(?:[^"'` + "`" + `,\s\\]|\\[^"'` + "`" + `])[^"'` + "`" + `,\s]*`
+// redactUnquoted is an unquoted value, up to a quote, a comma, whitespace, or a URL query-string
+// delimiter. Brackets, braces and backslashes are part of it: a generated password is full of
+// them. It never starts with a quote, escaped or not, so it leaves a value the quoted rule already
+// replaced alone. `&`, `?` and `#` stop the value too: without them, a label matched inside a URL
+// query string (`?api_key=...&user=alice&format=json`) swallowed every parameter after the secret,
+// destroying non-secret diagnostic data that sits next to it rather than just redacting the key.
+const redactUnquoted = `(?:[^"'` + "`" + `,\s\\&?#]|\\[^"'` + "`" + `])[^"'` + "`" + `,\s&?#]*`
 
 // redactBare is a bare value after a quoted label: a JSON number or literal, which ends at the
 // structure around it.
 const redactBare = `[^"'` + "`" + `\\\s,{}\[\]][^"'` + "`" + `\\\s,{}\[\]]*`
 
-// redactFlagName is a command-line flag named for a secret: `--password`, `--token`, `-api-key`.
-const redactFlagName = `--?[a-z0-9-]*(?:password|passwd|passphrase|token|secret|api-?key|access-?key)`
+// redactFlagName is a command-line flag named for a secret: `--password`, `--token`, `-api-key`,
+// `--client_secret`, `--private-key`. The prefix class carries `_` as well as `-`, matching
+// redactLabel's `[A-Za-z0-9_.-]*?`: snake_case flags (`--client_secret`, `--api_key`,
+// `--access_key`) are the default naming style for argparse/click-style CLIs and otherwise passed
+// through unredacted. `secret[_-]?key` and `private[_-]?key` join the alternation for the same
+// reason redactLabel already has them (`--private-key`, `--secret-key`): openssl, ssh-keygen
+// wrappers and KMS/cloud CLIs commonly take a key material flag by that name.
+const redactFlagName = `--?[a-z0-9_-]*(?:password|passwd|passphrase|token|secret|api[_-]?key|access[_-]?key|secret[_-]?key|private[_-]?key)`
 
 // redactFlag is a redactFlagName and its separator: `--password `, `--token=`, `-api-key `.
 const redactFlag = `(?:^|\s)` + redactFlagName + `(?:=|\s+)`
@@ -280,22 +289,22 @@ var redactListedFlagNeedles = func() *redactNeedles {
 }()
 
 // startsFlag reports whether the text before a flag word ends in what redactFlag puts ahead of it:
-// `(?:^|\s)--?[a-z0-9-]*`.
+// `(?:^|\s)--?[a-z0-9_-]*`.
 func startsFlag(before string) bool {
 	start, ok := flagStart(before)
 	return ok && (start == 0 || strings.ContainsRune(regexpSpace, rune(before[start-1])))
 }
 
 // flagStart finds the dash that opens the flag the text before a flag word ends in: the start of
-// the run of letters, digits and dashes at its end. A pattern's `--?[a-z0-9-]*` can only begin
-// where that maximal run does, because what it requires before the dash (whitespace, a quote) is
-// not part of the run. The patterns are case-insensitive, so the run takes capitals too: the
-// needle scan reads the text as it is, not lower-cased.
+// the run of letters, digits, underscores and dashes at its end. A pattern's `--?[a-z0-9_-]*` can
+// only begin where that maximal run does, because what it requires before the dash (whitespace, a
+// quote) is not part of the run. The patterns are case-insensitive, so the run takes capitals too:
+// the needle scan reads the text as it is, not lower-cased.
 func flagStart(before string) (int, bool) {
 	start := len(before)
 	for start > 0 {
 		c := before[start-1]
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-') {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
 			break
 		}
 		start--
