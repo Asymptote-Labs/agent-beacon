@@ -33,15 +33,24 @@ fits:
 A URL that points into a repository's directory lists that directory's artifact first. If a
 repository or package matches nothing, the name is tried as text instead.
 
-## Risk
+## Risk and coverage
+
+Each analyzed artifact has a **risk** and a **coverage**. Risk is how much the artifact works
+against the person who installs it, from what the analysis covered:
 
 | Risk | Meaning | What an agent should do |
 |------|---------|-------------------------|
-| `malicious` | The analysis confirmed harmful behavior | Don't install or run it |
-| `suspicious` | Risky behavior the analysis could not rule out | Install or run it only after showing the user the findings and getting their explicit go-ahead |
-| `inconclusive` | The analysis could not cover enough to decide | Tell the user and let them choose |
-| `benign` | No suspicious or malicious behavior found in the analyzed code | Not a guarantee |
+| `high` | Reviewed evidence shows it deliberately works against the person who installs it | Don't install or run it |
+| `medium` | It can do serious harm to the person who installs it, or puts a flagged pattern in what the agent loads, without established intent | Install or run it only after showing the user the findings and getting their explicit go-ahead |
+| `low` | It overreaches in limited ways, or has findings the review has not confirmed | Show the user the findings before installing it |
+| `benign` | Nothing found that works against the person who installs it | Not a guarantee |
 | `unchecked` | A registry lists it, but it has not been analyzed yet | Tell the user |
+
+Coverage is `complete` or `partial`. Partial means the analysis did not cover everything, so
+there may be more than it found: tell the user and let them choose. Partial coverage is never
+a clearance, whatever the risk; Beacon prints such a risk as, for example, `benign (partial)`.
+Every answer also carries `guidance`, the sentence an agent should follow for its risk and
+coverage.
 
 An artifact that is **not found** is not in the index, so it has never been checked. Not found
 never means safe.
@@ -69,7 +78,7 @@ beacon intel show mcp:evil/server
 
 `show` prints one artifact in full:
 
-- the verdict, with its reasons, findings and unresolved questions; refuted findings are only counted
+- the verdict: risk and coverage, the reasons for each, findings (with severity, level and review) and unresolved questions; notes, third-party flags and refuted findings are only counted
 - the repository's lineage
 - package advisories
 - linked repositories with risky lineage
@@ -83,23 +92,29 @@ skipped. Nothing you send is stored.
 
 ```bash
 beacon intel check @playwright/mcp anthropics/skills "Desktop Commander"
-beacon intel check --file agent-extensions.txt --fail-on suspicious
+beacon intel check --file agent-extensions.txt --fail-on medium
 ```
 
 Each artifact comes back with one of three statuses:
 
-- `matched`: the artifact was found, and its risk is shown.
+- `matched`: the artifact was found, and its risk and coverage are shown.
 - `ambiguous`: your text matched names but no name exactly. The status claims no risk; check
   one of the listed candidates by its key.
 - `not_found`: the artifact isn't in the index.
 
-`--fail-on malicious|suspicious|inconclusive` exits with status 1 when any matched artifact is
-at or above that risk, which makes `check` a CI gate. Ambiguous and not-found artifacts never
-fail it, because they claim no risk.
+The summary line counts matched artifacts by risk, then ambiguous and not-found ones, and says
+how many of the matched ones had partial coverage.
+
+`--fail-on high|medium|low` exits with status 1 when any matched artifact is at or above that
+risk, which makes `check` a CI gate. Ambiguous and not-found artifacts never fail it, because
+they claim no risk. The retired values `malicious`, `suspicious` and `inconclusive` are
+refused with a message naming the new ones, so update CI scripts that pass them: `--fail-on
+medium` is the usual replacement for `--fail-on suspicious`.
 
 ## Status
 
-`beacon intel status` shows how many MCP servers and skills the index lists and has analyzed.
+`beacon intel status` shows how many MCP servers and skills the index lists and has analyzed,
+how many it rates at each risk, and how many have partial coverage.
 It also shows when the newest verdict and registry update arrived. The index is refreshed
 hourly.
 

@@ -30,7 +30,7 @@ func TestContractAgainstARealServer(t *testing.T) {
 		t.Fatalf("lookup = %+v", lookup)
 	}
 	evil := lookup.Results[0]
-	if evil.EntityKey != "mcp:evil/server" || evil.Kind != "mcp" || evil.Name != "Evil Server" || evil.Risk != "malicious" ||
+	if evil.EntityKey != "mcp:evil/server" || evil.Kind != "mcp" || evil.Name != "Evil Server" || evil.Risk != "high" || evil.Coverage != "complete" ||
 		evil.Guidance == "" || evil.AnalyzedAt == "" || evil.URL == "" || evil.Stars == nil || len(evil.RepositoryFlags) == 0 {
 		t.Fatalf("summary = %+v", evil)
 	}
@@ -39,7 +39,8 @@ func TestContractAgainstARealServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.Risk != "malicious" || a.Verdict == nil || a.Verdict.Model != "judge-x" || len(a.Verdict.Findings) != 1 ||
+	if a.Risk != "high" || a.Coverage != "complete" || a.Verdict == nil || a.Verdict.Risk != "high" || a.Verdict.Coverage != "complete" ||
+		a.Verdict.Model != "judge-x" || len(a.Verdict.Findings) != 1 || a.Verdict.Findings[0].Level == "" || a.Verdict.Findings[0].Review == "" ||
 		a.Verdict.Findings[0].ClassLabel == "" || len(a.Verdict.Findings[0].Lines) != 2 || a.Verdict.RefutedFindings != 1 ||
 		len(a.Verdict.Reasons) != 1 || a.RepositoryLineage == nil || len(a.RepositoryLineage.Flags) == 0 || a.Note == "" {
 		t.Fatalf("artifact = %+v", a)
@@ -54,17 +55,18 @@ func TestContractAgainstARealServer(t *testing.T) {
 	}
 	statuses := []string{}
 	for _, r := range check.Results {
-		statuses = append(statuses, r.Status+":"+r.Risk)
+		statuses = append(statuses, r.Status+":"+r.Risk+":"+r.Coverage)
 	}
-	if got := statuses; len(got) != 4 || got[0] != "matched:malicious" || got[1] != "ambiguous:" || got[2] != "matched:benign" || got[3] != "not_found:" {
+	if got := statuses; len(got) != 4 || got[0] != "matched:high:complete" || got[1] != "ambiguous::" ||
+		got[2] != "matched:benign:partial" || got[3] != "not_found::" {
 		t.Fatalf("check statuses = %v", got)
 	}
-	if check.Counts["malicious"] != 1 || check.Counts["not_found"] != 1 || check.Note == "" {
+	if check.Counts["high"] != 1 || check.Counts["benign"] != 1 || check.Counts["partial"] != 1 || check.Counts["not_found"] != 1 || check.Note == "" {
 		t.Fatalf("check counts = %v", check.Counts)
 	}
 
 	s, _, err := c.Status(ctx)
-	if err != nil || s.Index["mcp"].Artifacts == 0 || s.LatestAnalyzedAt == "" {
+	if err != nil || s.Index["mcp"].Artifacts == 0 || s.Index["mcp"].High == 0 || s.Index["skill"].Partial == 0 || s.LatestAnalyzedAt == "" {
 		t.Fatalf("status = %+v, %v", s, err)
 	}
 }
