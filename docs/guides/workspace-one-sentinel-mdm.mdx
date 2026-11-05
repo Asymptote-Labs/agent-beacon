@@ -84,9 +84,11 @@ Create one app and two scripts, scoped to the pilot smart group:
 | --- | --- | --- | --- |
 | 1 | Beacon MSI (app) | System | Installs Beacon, the collector and Vector |
 | 2 | Forward to Sentinel (script) | System | Sets up the `BeaconSentinelForwarder` service |
-| 3 | Configure agent tools (script) | Current user | Points that person's Claude Code and Codex at the collector |
+| 3 | Configure agent tools (script) | Current user, at every sign-in | Points that person's Claude Code and Codex at the collector |
 
-If a scheduled task ships the log today, remove it once the forwarder is running, or every line is sent twice.
+Workspace ONE does not order an app and scripts by itself. Both scripts exit with an error until Beacon is installed, so give them a schedule or a retry, and the app installs first in practice.
+
+If a scheduled task ships the log today, remove it before the forwarder script runs, and add `--read-from end` to the forwarder command, or every line already shipped is sent again.
 
 ### App: the Beacon MSI
 
@@ -106,11 +108,17 @@ Add it in Workspace ONE as a Windows app, installed in device context, with:
 
 Keep `/norestart`. The package never needs a reboot, and without it Windows Installer restarts the machine on its own if something holds a file it has to replace.
 
-To keep users from reading or writing the log themselves, set the machine environment variable `BEACON_LOG_ACCESS` to `restricted` before the app installs. See [restricted log access](/security/restricted-log-access#on-windows). The forwarder works the same either way.
+To keep users from reading or writing the log themselves, turn on [restricted log access](/security/restricted-log-access#on-windows) in the forwarder script below. The forwarder works the same either way.
 
-The installer is not code-signed yet. If you run AppLocker or WDAC, allow `beacon.exe`, `beacon-hooks.exe`, `beacon-otelcol.exe` and `vector.exe` in `C:\Program Files\Beacon\bin` by path or file hash.
+The installer and its programs are not code-signed yet. If you run AppLocker or WDAC, allow by path or file hash:
 
-**Success looks like:** `sc.exe query BeaconCollector` reports `RUNNING`.
+- the MSI itself;
+- `beacon.exe`, `beacon-hooks.exe`, `beacon-otelcol.exe` and `vector.exe` in `C:\Program Files\Beacon\bin`;
+- the package's PowerShell scripts in `C:\Program Files\Beacon\scripts`, which the MSI runs as SYSTEM;
+- the copy of the hook program agents run from each profile, `%USERPROFILE%\.beacon\endpoint\hooks\beacon-hooks.exe`;
+- the two scripts in this guide.
+
+**Success looks like:** `sc.exe query BeaconCollector` reports `RUNNING`. With restricted log access turned on, `beacon.exe endpoint status --system --json` also reports `"log_access": "restricted"`.
 
 ### Script: forward to Sentinel
 
@@ -122,12 +130,15 @@ Add a PowerShell script that runs as **System**, after the app. Give it these va
 | `BEACON_SENTINEL_DCR_ID` | The `dcr-...` immutable ID |
 | `BEACON_SENTINEL_TENANT_ID` | The tenant ID |
 | `BEACON_SENTINEL_CLIENT_ID` | The app's client ID |
-| `BEACON_SENTINEL_PFX_BASE64` | The PFX, base64-encoded (`[Convert]::ToBase64String([IO.File]::ReadAllBytes('beacon-sentinel.pfx'))`) |
+| `BEACON_SENTINEL_PFX_BASE64` | The PFX, base64-encoded (`[Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path 'beacon-sentinel.pfx')))`) |
 | `BEACON_SENTINEL_PFX_PASSWORD` | The PFX password |
 
 ```powershell title="Forward to Sentinel"
 $ErrorActionPreference = 'Stop'
 $beacon = Join-Path $env:ProgramFiles 'Beacon\bin\beacon.exe'
+if (-not (Test-Path -LiteralPath $beacon)) { Write-Error 'Beacon is not installed yet'; exit 1 }
+# Optional: keep users from reading or writing the runtime log.
+# & $beacon endpoint repair --system --log-access restricted
 $pfx = Join-Path $env:SystemRoot ('Temp\beacon-sentinel-' + [Guid]::NewGuid().ToString('N') + '.pfx')
 [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:BEACON_SENTINEL_PFX_BASE64))
 try {
@@ -152,14 +163,16 @@ Running the script again replaces the settings, which is how you rotate the cert
 
 ### Script: configure agent tools
 
-Add a PowerShell script that runs as the **current user**, so it runs for each person who signs in:
+Add a PowerShell script that runs as the **current user**, with the **Login** trigger, so it runs for each person who signs in, including people who were not signed in when it was first deployed:
 
 ```powershell title="Configure agent tools"
-& (Join-Path $env:ProgramFiles 'Beacon\bin\beacon.exe') endpoint user-config repair-installed --system --harness claude,codex
+$beacon = Join-Path $env:ProgramFiles 'Beacon\bin\beacon.exe'
+if (-not (Test-Path -LiteralPath $beacon)) { Write-Error 'Beacon is not installed yet'; exit 1 }
+& $beacon endpoint user-config repair-installed --system --harness claude,codex
 exit $LASTEXITCODE
 ```
 
-It points that person's Claude Code and Codex at the collector and installs their hooks. It also writes the person's Windows account (their SID) into Claude Code's settings, so Claude Code's own events name them even on a machine several people use. Hook events always do.
+It points that person's Claude Code and Codex at the collector and installs their hooks. It also writes the person's Windows account (their SID) into Claude Code's settings, so Claude Code's own events name them even on a machine several people use. Hook events always do. That setting replaces an `OTEL_RESOURCE_ATTRIBUTES` the person exports in their shell; resource attributes of their own belong in Claude Code's `settings.json`, where Beacon keeps them.
 
 **Success looks like:** the script exits 0, and `%USERPROFILE%\.claude\settings.json` contains `OTEL_EXPORTER_OTLP_ENDPOINT` and `beacon.os.user.id`.
 
@@ -205,8 +218,8 @@ Codex's own events carry the collector's account rather than the person's, becau
 | The forwarder script fails with "PKCS12 parsing failed" | The PFX password is wrong. Check `BEACON_SENTINEL_PFX_PASSWORD`. |
 | `status` reports `Retrying after response` with 403 | The role assignment has not applied yet. Wait up to 30 minutes; nothing is lost meanwhile. |
 | `status` reports an `AADSTS` error | Entra ID refused the credential: a wrong tenant or client ID, or a certificate that was not uploaded to the app, has expired or was removed. Vector drops what it cannot send while this lasts, so renew certificates before they expire and rerun the forwarder script with the new one. |
-| Events arrive under the collector's account (`SYSTEM`) | They are Codex's own events, or the person's agent-tools script has not run yet. |
-| An app or script is blocked | AppLocker or WDAC; allow the four programs in `C:\Program Files\Beacon\bin`. |
+| Events arrive under the collector's account (`SYSTEM`) | They are Codex's or Gemini CLI's own events, or the person's agent-tools script has not run yet (check its Login trigger). |
+| An app, script or hook is blocked | AppLocker or WDAC; allow everything listed under the app above. |
 
 ## Related
 
