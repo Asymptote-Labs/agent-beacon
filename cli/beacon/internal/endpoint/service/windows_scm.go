@@ -5,10 +5,12 @@ package service
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 )
@@ -32,18 +34,18 @@ func withManager(fn func(*mgr.Mgr) error) error {
 	return fn(m)
 }
 
-// createOrUpdateService registers the collector, or points an existing registration at the new
-// binary and config.
+// createOrUpdateService registers a service, or points an existing registration at the new binary,
+// arguments and environment.
 //
 // Updating in place rather than delete-and-recreate: a delete only takes effect once every handle
 // to the service closes, so a recreate immediately afterwards can fail with "marked for deletion"
 // on a machine where services.msc happens to be open. Reconfiguring has no such window, and an
 // upgrade that changes the binary path is the common case.
-func createOrUpdateService(program, configPath string) error {
+func createOrUpdateService(spec scmService) error {
 	return withManager(func(m *mgr.Mgr) error {
 		cfg := mgr.Config{
-			DisplayName: WindowsServiceDisplayName,
-			Description: "Collects local AI agent telemetry and writes the Beacon endpoint log.",
+			DisplayName: spec.DisplayName,
+			Description: spec.Description,
 			// Automatic is the equivalent of launchd's RunAtLoad and systemd's
 			// WantedBy=multi-user.target: the endpoint must come back after a reboot without
 			// anyone logging in.
@@ -54,31 +56,105 @@ func createOrUpdateService(program, configPath string) error {
 			DelayedAutoStart: true,
 		}
 
-		existing, err := m.OpenService(WindowsServiceName)
+		existing, err := m.OpenService(spec.Name)
 		if err == nil {
 			defer existing.Close()
 			current, cerr := existing.Config()
 			if cerr != nil {
-				return fmt.Errorf("read the existing %s service configuration: %w", WindowsServiceName, cerr)
+				return fmt.Errorf("read the existing %s service configuration: %w", spec.Name, cerr)
 			}
 			current.DisplayName = cfg.DisplayName
 			current.Description = cfg.Description
 			current.StartType = cfg.StartType
 			current.DelayedAutoStart = cfg.DelayedAutoStart
-			current.BinaryPathName = serviceBinaryPath(program, configPath)
+			current.BinaryPathName = serviceBinaryPath(spec.Program, spec.Args...)
 			if err := existing.UpdateConfig(current); err != nil {
-				return fmt.Errorf("update the %s service: %w", WindowsServiceName, err)
+				return fmt.Errorf("update the %s service: %w", spec.Name, err)
 			}
-			return setRecoveryActions(existing)
+			if err := setServiceEnvironment(spec); err != nil {
+				return err
+			}
+			return setRecoveryActions(existing, spec.Name)
 		}
 
-		created, err := m.CreateService(WindowsServiceName, program, cfg, "--config", configPath)
+		created, err := m.CreateService(spec.Name, spec.Program, cfg, spec.Args...)
 		if err != nil {
-			return fmt.Errorf("register the %s service: %w", WindowsServiceName, err)
+			return fmt.Errorf("register the %s service: %w", spec.Name, err)
 		}
 		defer created.Close()
-		return setRecoveryActions(created)
+		if err := setServiceEnvironment(spec); err != nil {
+			return err
+		}
+		return setRecoveryActions(created, spec.Name)
 	})
+}
+
+// setServiceEnvironment writes the variables the SCM adds to the service process's environment:
+// the Environment value under the service's key, one NAME=value string per entry. No variables
+// removes the value, so a registration that once carried some does not keep them.
+func setServiceEnvironment(spec scmService) error {
+	if !spec.OwnsEnv {
+		return nil
+	}
+	name, env := spec.Name, spec.Env
+	key, err := registry.OpenKey(registry.LOCAL_MACHINE, serviceRegistryKey(name), registry.SET_VALUE)
+	if err != nil {
+		return fmt.Errorf("open the %s service's registry key: %w", name, err)
+	}
+	defer key.Close()
+	if len(env) == 0 {
+		if err := key.DeleteValue("Environment"); err != nil && !errors.Is(err, registry.ErrNotExist) {
+			return fmt.Errorf("clear the %s service's environment: %w", name, err)
+		}
+		return nil
+	}
+	if err := key.SetStringsValue("Environment", env); err != nil {
+		return fmt.Errorf("set the %s service's environment: %w", name, err)
+	}
+	return nil
+}
+
+// serviceEnvironment reads back what setServiceEnvironment wrote.
+func serviceEnvironment(name string) ([]string, error) {
+	key, err := registry.OpenKey(registry.LOCAL_MACHINE, serviceRegistryKey(name), registry.QUERY_VALUE)
+	if err != nil {
+		return nil, err
+	}
+	defer key.Close()
+	env, _, err := key.GetStringsValue("Environment")
+	if errors.Is(err, registry.ErrNotExist) {
+		return nil, nil
+	}
+	return env, err
+}
+
+func serviceRegistryKey(name string) string {
+	return `SYSTEM\CurrentControlSet\Services\` + name
+}
+
+// serviceCurrent reports whether the registered service runs what spec describes, so a reconcile
+// rewrites only a registration that changed.
+func serviceCurrent(spec scmService) (bool, error) {
+	var current bool
+	err := withManager(func(m *mgr.Mgr) error {
+		s, err := m.OpenService(spec.Name)
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		cfg, err := s.Config()
+		if err != nil {
+			return err
+		}
+		env, err := serviceEnvironment(spec.Name)
+		if err != nil {
+			return err
+		}
+		current = strings.EqualFold(cfg.BinaryPathName, serviceBinaryPath(spec.Program, spec.Args...)) &&
+			cfg.StartType == mgr.StartAutomatic && slices.Equal(env, spec.Env)
+		return nil
+	})
+	return current, err
 }
 
 // setRecoveryActions is the KeepAlive / Restart=always equivalent.
@@ -88,7 +164,7 @@ func createOrUpdateService(program, configPath string) error {
 // the supervised backend. Three escalating restarts rather than infinite immediate ones: a
 // collector that cannot start at all should stop thrashing and leave a visible stopped service,
 // not loop forever writing the same error.
-func setRecoveryActions(s *mgr.Service) error {
+func setRecoveryActions(s *mgr.Service, name string) error {
 	actions := []mgr.RecoveryAction{
 		{Type: mgr.ServiceRestart, Delay: 5 * time.Second},
 		{Type: mgr.ServiceRestart, Delay: 15 * time.Second},
@@ -97,7 +173,7 @@ func setRecoveryActions(s *mgr.Service) error {
 	// The reset period returns the failure count to zero after a day of health, so a service that
 	// dies once a week does not eventually exhaust its restarts.
 	if err := s.SetRecoveryActions(actions, uint32((24 * time.Hour).Seconds())); err != nil {
-		return fmt.Errorf("set restart-on-failure for %s: %w", WindowsServiceName, err)
+		return fmt.Errorf("set restart-on-failure for %s: %w", name, err)
 	}
 	return nil
 }
@@ -115,19 +191,19 @@ func setRecoveryActions(s *mgr.Service) error {
 // upgrade would report success, and the service would fail to start after the next reboot with a
 // file-not-found the operator has no reason to connect to an upgrade. Sharing the escaper also
 // means create and update cannot drift apart.
-func serviceBinaryPath(program, configPath string) string {
-	parts := make([]string, 0, 3)
-	for _, arg := range []string{program, "--config", configPath} {
+func serviceBinaryPath(program string, args ...string) string {
+	parts := make([]string, 0, 1+len(args))
+	for _, arg := range append([]string{program}, args...) {
 		parts = append(parts, windows.EscapeArg(arg))
 	}
 	return strings.Join(parts, " ")
 }
 
-func startService() error {
+func startService(name string) error {
 	return withManager(func(m *mgr.Mgr) error {
-		s, err := m.OpenService(WindowsServiceName)
+		s, err := m.OpenService(name)
 		if err != nil {
-			return fmt.Errorf("open the %s service (was it installed?): %w", WindowsServiceName, err)
+			return fmt.Errorf("open the %s service (was it installed?): %w", name, err)
 		}
 		defer s.Close()
 
@@ -140,27 +216,58 @@ func startService() error {
 			if errors.Is(err, windows.ERROR_SERVICE_ALREADY_RUNNING) {
 				return nil
 			}
-			return fmt.Errorf("start the %s service: %w", WindowsServiceName, err)
+			return fmt.Errorf("start the %s service: %w", name, err)
 		}
 		return nil
 	})
 }
 
-// removeService stops and deletes the registration, treating an absent service as success.
-func removeService() error {
+// waitForServiceRunning waits until the service reports running. A service that stops instead, or
+// is still starting when the time is up, is an error naming its state: a process that hangs in
+// START_PENDING cannot be stopped and never triggers its recovery actions, so it must not be
+// reported as started.
+func waitForServiceRunning(name string, timeout time.Duration) error {
 	return withManager(func(m *mgr.Mgr) error {
-		s, err := m.OpenService(WindowsServiceName)
+		s, err := m.OpenService(name)
+		if err != nil {
+			return fmt.Errorf("open the %s service: %w", name, err)
+		}
+		defer s.Close()
+		deadline := time.Now().Add(timeout)
+		for {
+			status, err := s.Query()
+			if err != nil {
+				return fmt.Errorf("query the %s service: %w", name, err)
+			}
+			switch status.State {
+			case svc.Running:
+				return nil
+			case svc.Stopped:
+				return fmt.Errorf("the %s service stopped while starting (exit code %d)", name, status.Win32ExitCode)
+			}
+			if time.Now().After(deadline) {
+				return fmt.Errorf("the %s service is still %s after %s", name, serviceStateName(status.State), timeout)
+			}
+			time.Sleep(300 * time.Millisecond)
+		}
+	})
+}
+
+// removeService stops and deletes the registration, treating an absent service as success.
+func removeService(name string, stopTimeout time.Duration) error {
+	return withManager(func(m *mgr.Mgr) error {
+		s, err := m.OpenService(name)
 		if err != nil {
 			// Nothing registered. Uninstall and repair both call this speculatively.
 			return nil
 		}
 		defer s.Close()
 
-		if err := stopAndWait(s); err != nil {
+		if err := stopAndWait(s, name, stopTimeout); err != nil {
 			return err
 		}
 		if err := s.Delete(); err != nil && !errors.Is(err, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
-			return fmt.Errorf("delete the %s service: %w", WindowsServiceName, err)
+			return fmt.Errorf("delete the %s service: %w", name, err)
 		}
 		return nil
 	})
@@ -176,10 +283,10 @@ func removeService() error {
 // MSI uninstall or upgrade that reaches beacon-otelcol.exe in that window cannot remove it,
 // schedules the delete for the next boot, and -- under msiexec /qn without /norestart, which is how
 // fleet tooling runs it -- restarts the machine on the spot.
-func stopAndWait(s *mgr.Service) error {
+func stopAndWait(s *mgr.Service, name string, timeout time.Duration) error {
 	status, err := s.Query()
 	if err != nil {
-		return fmt.Errorf("query the %s service: %w", WindowsServiceName, err)
+		return fmt.Errorf("query the %s service: %w", name, err)
 	}
 	if status.State == svc.Stopped {
 		return nil
@@ -191,28 +298,28 @@ func stopAndWait(s *mgr.Service) error {
 	if process != 0 {
 		defer windows.CloseHandle(process)
 	}
-	deadline := time.Now().Add(serviceStopTimeout)
+	deadline := time.Now().Add(timeout)
 
 	if _, err := s.Control(svc.Stop); err != nil {
 		// Already stopped between the query and the control request; that is the outcome we want,
 		// once its process is gone.
 		if errors.Is(err, windows.ERROR_SERVICE_NOT_ACTIVE) {
-			return waitForServiceProcess(process, deadline)
+			return waitForServiceProcess(process, name, deadline, timeout)
 		}
-		return fmt.Errorf("stop the %s service: %w", WindowsServiceName, err)
+		return fmt.Errorf("stop the %s service: %w", name, err)
 	}
 
 	for time.Now().Before(deadline) {
 		status, err := s.Query()
 		if err != nil {
-			return fmt.Errorf("query the %s service while stopping: %w", WindowsServiceName, err)
+			return fmt.Errorf("query the %s service while stopping: %w", name, err)
 		}
 		if status.State == svc.Stopped {
-			return waitForServiceProcess(process, deadline)
+			return waitForServiceProcess(process, name, deadline, timeout)
 		}
 		time.Sleep(300 * time.Millisecond)
 	}
-	return fmt.Errorf("the %s service did not stop within %s", WindowsServiceName, serviceStopTimeout)
+	return fmt.Errorf("the %s service did not stop within %s", name, timeout)
 }
 
 // openServiceProcess returns a handle that can wait on the service's process, or 0 when there is no
@@ -229,7 +336,7 @@ func openServiceProcess(pid uint32) windows.Handle {
 }
 
 // waitForServiceProcess waits, until deadline, for the process behind a stopped service to exit.
-func waitForServiceProcess(process windows.Handle, deadline time.Time) error {
+func waitForServiceProcess(process windows.Handle, name string, deadline time.Time, timeout time.Duration) error {
 	if process == 0 {
 		return nil
 	}
@@ -239,41 +346,41 @@ func waitForServiceProcess(process windows.Handle, deadline time.Time) error {
 	}
 	event, err := windows.WaitForSingleObject(process, uint32(remaining.Milliseconds()))
 	if err != nil {
-		return fmt.Errorf("wait for the %s service's process to exit: %w", WindowsServiceName, err)
+		return fmt.Errorf("wait for the %s service's process to exit: %w", name, err)
 	}
 	if event == uint32(windows.WAIT_TIMEOUT) {
-		return fmt.Errorf("the %s service stopped but its process did not exit within %s", WindowsServiceName, serviceStopTimeout)
+		return fmt.Errorf("the %s service stopped but its process did not exit within %s", name, timeout)
 	}
 	return nil
 }
 
-func restartService() error {
+func restartService(name string, stopTimeout time.Duration) error {
 	if err := withManager(func(m *mgr.Mgr) error {
-		s, err := m.OpenService(WindowsServiceName)
+		s, err := m.OpenService(name)
 		if err != nil {
 			// Not installed. Installing it is the right recovery, and mirrors the systemd
 			// backend's restart-falls-back-to-load behavior.
 			return errServiceNotInstalled
 		}
 		defer s.Close()
-		return stopAndWait(s)
+		return stopAndWait(s, name, stopTimeout)
 	}); err != nil {
 		if errors.Is(err, errServiceNotInstalled) {
-			return startService()
+			return startService(name)
 		}
 		return err
 	}
-	return startService()
+	return startService(name)
 }
 
 // errServiceNotInstalled distinguishes "there is nothing to restart" from a real failure, so
 // restart can fall back to starting rather than reporting an error for a recoverable state.
 var errServiceNotInstalled = errors.New("service is not installed")
 
-func queryService() Status {
-	status := Status{Label: WindowsServiceName}
+func queryService(name string) Status {
+	status := Status{Label: name, Kind: string(KindWindowsService)}
 	err := withManager(func(m *mgr.Mgr) error {
-		s, err := m.OpenService(WindowsServiceName)
+		s, err := m.OpenService(name)
 		if err != nil {
 			status.Message = "service not installed"
 			return nil

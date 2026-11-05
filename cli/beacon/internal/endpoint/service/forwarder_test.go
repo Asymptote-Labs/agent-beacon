@@ -13,7 +13,7 @@ import (
 )
 
 func TestForwarderPlistRunsVectorResidentWithKeepAlive(t *testing.T) {
-	got := forwarderPlist(ForwarderLabel, "/opt/beacon/bin/vector", "/Users/me/.beacon/endpoint/asymptote/vector.toml", "/Users/me/Library/Logs/Beacon/f.out", "/Users/me/Library/Logs/Beacon/f.err")
+	got := forwarderPlist(AsymptoteForwarderSpec(), "/opt/beacon/bin/vector", "/Users/me/.beacon/endpoint/asymptote/vector.toml", "/Users/me/Library/Logs/Beacon/f.out", "/Users/me/Library/Logs/Beacon/f.err")
 	for _, want := range []string{
 		"<string>com.beacon.endpoint.asymptote-forwarder</string>",
 		"<string>/opt/beacon/bin/vector</string>",
@@ -30,7 +30,7 @@ func TestForwarderPlistRunsVectorResidentWithKeepAlive(t *testing.T) {
 	if strings.Contains(got, "StartCalendarInterval") {
 		t.Fatal("forwarder must be resident, not scheduled")
 	}
-	escaped := forwarderPlist("l", "/tmp/a&b", "/tmp/<c>.toml", `/x/"o".out`, "/x/e&.err")
+	escaped := forwarderPlist(ForwarderSpec{Label: "l"}, "/tmp/a&b", "/tmp/<c>.toml", `/x/"o".out`, "/x/e&.err")
 	if !strings.Contains(escaped, "/tmp/a&amp;b") || !strings.Contains(escaped, "&lt;c&gt;") ||
 		!strings.Contains(escaped, "/x/&quot;o&quot;.out") || !strings.Contains(escaped, "/x/e&amp;.err") {
 		t.Fatalf("plist must XML-escape paths:\n%s", escaped)
@@ -38,7 +38,7 @@ func TestForwarderPlistRunsVectorResidentWithKeepAlive(t *testing.T) {
 }
 
 func TestForwarderSystemdUnitRestartsAlwaysAndScopesByMode(t *testing.T) {
-	system := forwarderUnitFile("/usr/bin/vector", "/var/lib/beacon/asymptote/vector.toml", false)
+	system := forwarderUnitFile(AsymptoteForwarderSpec(), "/usr/bin/vector", "/var/lib/beacon/asymptote/vector.toml", false)
 	for _, want := range []string{
 		`ExecStart="/usr/bin/vector" --config "/var/lib/beacon/asymptote/vector.toml"`,
 		"Restart=always",
@@ -50,7 +50,7 @@ func TestForwarderSystemdUnitRestartsAlwaysAndScopesByMode(t *testing.T) {
 			t.Fatalf("system unit missing %q:\n%s", want, system)
 		}
 	}
-	user := forwarderUnitFile("/usr/bin/vector", "/home/me/.beacon/endpoint/asymptote/vector.toml", true)
+	user := forwarderUnitFile(AsymptoteForwarderSpec(), "/usr/bin/vector", "/home/me/.beacon/endpoint/asymptote/vector.toml", true)
 	if strings.Contains(user, "User=root") || !strings.Contains(user, "WantedBy=default.target") {
 		t.Fatalf("user unit must not run as root and must hook default.target:\n%s", user)
 	}
@@ -190,5 +190,117 @@ func TestForwarderLoadFailsWhenTheNewInstanceNeverStarts(t *testing.T) {
 	err := m.Load()
 	if err == nil || !strings.Contains(err.Error(), "has not started") {
 		t.Fatalf("Load should report a forwarder that never started, got %v", err)
+	}
+}
+
+// The Asymptote forwarder's unit and plist are what connect wrote before forwarders had a spec.
+// UnitCurrent compares them byte for byte, so any change here would rewrite and restart every
+// connected endpoint's forwarder on its next upgrade.
+func TestAsymptoteForwarderUnitsAreUnchangedBySpecs(t *testing.T) {
+	unit := forwarderUnitFile(AsymptoteForwarderSpec(), "/opt/beacon/bin/vector", "/etc/beacon/endpoint/asymptote/vector.toml", false)
+	wantUnit := `[Unit]
+Description=Beacon endpoint forwarder to Asymptote managed ingest
+Documentation=https://docs.asymptotelabs.ai/cli/endpoint-connect
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart="/opt/beacon/bin/vector" --config "/etc/beacon/endpoint/asymptote/vector.toml"
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+User=root
+
+[Install]
+WantedBy=multi-user.target
+`
+	if unit != wantUnit {
+		t.Fatalf("systemd unit changed:\n%s\nwant:\n%s", unit, wantUnit)
+	}
+	plist := forwarderPlist(AsymptoteForwarderSpec(), "/opt/beacon/bin/vector", "/a/vector.toml", "/l/f.out", "/l/f.err")
+	if !strings.Contains(plist, "    <string>/a/vector.toml</string>\n  </array>\n  <key>RunAtLoad</key>") ||
+		strings.Contains(plist, "EnvironmentVariables") {
+		t.Fatalf("plist changed:\n%s", plist)
+	}
+	if (ForwarderManager{}).spec().WindowsService != "" {
+		t.Fatal("the Asymptote forwarder must not be offered as a Windows service")
+	}
+}
+
+// Another forwarder carries its own names, extra Vector arguments and environment into every unit.
+func TestForwarderSpecReachesTheUnitPlistAndNames(t *testing.T) {
+	spec := ForwarderSpec{
+		Label:          "com.beacon.endpoint.test-forwarder",
+		SystemdUnit:    "beacon-test-forwarder.service",
+		WindowsService: "BeaconTestForwarder",
+		Description:    "Beacon test forwarder",
+		Args:           []string{"--graceful-shutdown-limit-secs", "10"},
+		Env:            []string{"AZURE_AUTHORITY_HOST=https://login.example.test"},
+	}
+	unit := forwarderUnitFile(spec, "/opt/beacon/bin/vector", "/etc/f/vector.toml", false)
+	for _, want := range []string{
+		"Description=Beacon test forwarder\n",
+		`ExecStart="/opt/beacon/bin/vector" --config "/etc/f/vector.toml" "--graceful-shutdown-limit-secs" "10"`,
+		`Environment="AZURE_AUTHORITY_HOST=https://login.example.test"`,
+	} {
+		if !strings.Contains(unit, want) {
+			t.Fatalf("unit missing %q:\n%s", want, unit)
+		}
+	}
+	if strings.Contains(unit, "Documentation=") {
+		t.Fatalf("a spec without documentation must not write an empty Documentation=:\n%s", unit)
+	}
+	plist := forwarderPlist(spec, "/opt/beacon/bin/vector", "/etc/f/vector.toml", "/l/o", "/l/e")
+	for _, want := range []string{
+		"<string>com.beacon.endpoint.test-forwarder</string>",
+		"    <string>--graceful-shutdown-limit-secs</string>\n    <string>10</string>\n  </array>",
+		"<key>EnvironmentVariables</key>\n  <dict>\n    <key>AZURE_AUTHORITY_HOST</key>\n    <string>https://login.example.test</string>\n  </dict>",
+	} {
+		if !strings.Contains(plist, want) {
+			t.Fatalf("plist missing %q:\n%s", want, plist)
+		}
+	}
+	names := map[Kind]string{KindSystemd: spec.SystemdUnit, KindLaunchd: spec.Label, KindWindowsService: spec.WindowsService}
+	for kind, want := range names {
+		if got := (ForwarderManager{Kind: kind, Spec: spec}).Label(); got != want {
+			t.Errorf("%s label = %q, want %q", kind, got, want)
+		}
+	}
+	path, err := ForwarderManager{Kind: KindWindowsService, Spec: spec}.UnitPath()
+	if err != nil || path != `HKLM\SYSTEM\CurrentControlSet\Services\BeaconTestForwarder` {
+		t.Fatalf("Windows unit path = %q (%v)", path, err)
+	}
+}
+
+// A forwarder with a Windows service is supported only by a system install on Windows; the
+// Asymptote forwarder keeps refusing there with the message it always had.
+func TestForwarderWindowsServiceSupport(t *testing.T) {
+	spec := ForwarderSpec{WindowsService: "BeaconTestForwarder", Label: "l", SystemdUnit: "u.service"}
+	system := ForwarderManager{Kind: KindWindowsService, Spec: spec}
+	user := ForwarderManager{Kind: KindWindowsService, Spec: spec, UserMode: true}
+	asymptote := ForwarderManager{Kind: KindWindowsService}
+
+	if asymptote.Supported() || !strings.Contains(asymptote.UnsupportedReason(), "install-pack") {
+		t.Fatalf("Asymptote forwarder on Windows: supported=%t reason=%q", asymptote.Supported(), asymptote.UnsupportedReason())
+	}
+	if user.Supported() {
+		t.Fatal("a user-mode forwarder must be refused on Windows")
+	}
+	if runtime.GOOS == "windows" {
+		if !system.Supported() {
+			t.Fatalf("system forwarder unsupported: %s", system.UnsupportedReason())
+		}
+		if !strings.Contains(user.UnsupportedReason(), "--system") {
+			t.Fatalf("user-mode reason should point at --system: %q", user.UnsupportedReason())
+		}
+		return
+	}
+	if system.Supported() || !strings.Contains(system.UnsupportedReason(), "only on Windows") {
+		t.Fatalf("off Windows: supported=%t reason=%q", system.Supported(), system.UnsupportedReason())
+	}
+	if err := system.Unload(); err != nil {
+		t.Fatalf("Unload off Windows must be a no-op, got %v", err)
 	}
 }
