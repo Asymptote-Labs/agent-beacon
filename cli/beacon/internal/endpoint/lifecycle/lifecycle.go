@@ -62,9 +62,12 @@ var (
 	// scriptForwarderStatuses is the seam for reading those forwarders' state in GetStatus.
 	scriptForwarderStatuses = service.ScriptForwarderStatuses
 	// reconcileManagedForwarder is the seam for the Beacon Cloud forwarder reconcile, so tests can
-	// see whether Install reaches it without a connected endpoint or a service manager.
+	// see whether Install reaches it without a connected endpoint or a service manager. It always
+	// restarts a running forwarder, as the Sentinel one below does: an install or repair may have
+	// replaced the log with a copy (switching to restricted log access does), which Vector only
+	// notices when it restarts, and a package upgrade may have installed a new Vector.
 	reconcileManagedForwarder = func(userMode bool, logPath string) (asymptote.ReconcileResult, error) {
-		return asymptote.ReconcileForwarder(asymptote.ReconcileOptions{UserMode: userMode, LogPath: logPath})
+		return asymptote.ReconcileForwarder(asymptote.ReconcileOptions{UserMode: userMode, LogPath: logPath, Restart: true})
 	}
 	// reconcileSentinelForwarder and removeSentinelForwarder are the seams for the managed Sentinel
 	// forwarder. Install always restarts it: an install or repair may have replaced the log with a

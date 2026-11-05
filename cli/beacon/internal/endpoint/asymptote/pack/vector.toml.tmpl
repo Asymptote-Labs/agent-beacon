@@ -22,7 +22,13 @@ path = "${BEACON_ASYMPTOTE_SECRETS_FILE}"
 
 [sources.beacon_runtime]
 type = "file"
-include = ["{{LOG_PATH}}"]
+# The first rotated file too, as the Sentinel pack reads it. Vector recognizes a file by its first
+# line, so when the log is replaced by a copy (switching to restricted log access does) it keeps
+# reading the replaced file until it restarts or the log rotates. At the rotation it finds its file
+# again as the .1, reopens it and resumes at its checkpoint, so the lines written in between ship
+# instead of being lost. A rotated file it was already reading is the same file to Vector, so
+# nothing is read twice.
+include = ["{{LOG_PATH}}", "{{LOG_PATH}}.1"]
 # Nothing recorded before the device was approved is shipped.
 read_from = "end"
 
