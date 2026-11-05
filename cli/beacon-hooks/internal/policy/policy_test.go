@@ -67,6 +67,20 @@ func TestEvaluateProviderAllows(t *testing.T) {
 	}
 }
 
+func TestEvaluateFailsOpenOnDuplicateDecisionKey(t *testing.T) {
+	// A syntactically valid response with a duplicate top-level "decision" key is ambiguous, not a
+	// genuine allow or deny: plain json.Unmarshal would silently take the last value (here,
+	// "allow") with no error, masking that the response ever said "deny" at all. Evaluate must
+	// treat this the same as any other malformed response -- fail open -- rather than trust
+	// whichever value happened to come last.
+	t.Setenv(ProviderEnv, "fake")
+	fakeProvider(t, "duplicate-key")
+	got := Evaluate(context.Background(), sampleRequest())
+	if got.Denied() {
+		t.Fatalf("expected fail-open allow for a duplicate-key response, got %+v", got)
+	}
+}
+
 func TestEvaluateFailsOpenOnError(t *testing.T) {
 	for _, behavior := range []string{"exit-error", "garbage"} {
 		t.Run(behavior, func(t *testing.T) {
@@ -96,6 +110,28 @@ func TestEvaluateFailsOpenOnTimeout(t *testing.T) {
 	}
 }
 
+func TestTopLevelJSONKeysAreUnique(t *testing.T) {
+	cases := []struct {
+		name string
+		data string
+		want bool
+	}{
+		{"ordinary object", `{"decision":"deny","reason":"x"}`, true},
+		{"duplicate top-level key", `{"decision":"deny","reason":"x","decision":"allow"}`, false},
+		{"duplicate key, nested object untouched", `{"decision":"deny","nested":{"decision":"allow"}}`, true},
+		{"not an object", `"just a string"`, true},
+		{"not json at all", `not json at all`, true},
+		{"empty object", `{}`, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := topLevelJSONKeysAreUnique([]byte(c.data)); got != c.want {
+				t.Fatalf("topLevelJSONKeysAreUnique(%q) = %v, want %v", c.data, got, c.want)
+			}
+		})
+	}
+}
+
 // TestHelperProcess is not a real test: it is the fake provider invoked by
 // fakeProvider via the test binary.
 func TestHelperProcess(t *testing.T) {
@@ -109,6 +145,8 @@ func TestHelperProcess(t *testing.T) {
 		os.Stdout.WriteString(`{"decision":"allow"}`)
 	case "garbage":
 		os.Stdout.WriteString("not json at all")
+	case "duplicate-key":
+		os.Stdout.WriteString(`{"decision":"deny","reason":"blocked: rm -rf /","decision":"allow"}`)
 	case "exit-error":
 		os.Stdout.WriteString(`{"decision":"deny"}`) // output ignored because exit is non-zero
 		os.Exit(3)

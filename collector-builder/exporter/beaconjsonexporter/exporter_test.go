@@ -110,6 +110,38 @@ func TestNewExporterAcceptsDeprecatedContentRetention(t *testing.T) {
 	}
 }
 
+// Model/Repository/Branch are populated from the same class of externally-reachable attributes as
+// Message/Command/Prompt.Text (a model name; a VCS branch or repository an attacker can set by
+// opening a PR from a crafted branch), but writer.sanitize never declared them, so a
+// credential-shaped value in any of them reached the written line unredacted, and an oversized
+// value in any of them was never truncated either.
+func TestJSONLWriterRedactsAndTruncatesModelRepositoryBranch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "runtime.jsonl")
+	writer := jsonlWriter{path: path, maxEventBytes: defaultMaxEventBytes, rotateBytes: defaultRotateBytes, rotateArchives: defaultRotateArchives, redactSecrets: true}
+
+	event := newBeaconEvent("tool.invoked", "tool", "info", "test", time.Now())
+	event.Model = "model-AKIAABCDEFGHIJKLMNOP"
+	event.Repository = "https://example.com/repo?token=AKIAABCDEFGHIJKLMNOP"
+	event.Branch = "feature/leak-AKIAABCDEFGHIJKLMNOP"
+	if err := writer.append(event); err != nil {
+		t.Fatalf("append returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if strings.Contains(string(data), "AKIAABCDEFGHIJKLMNOP") {
+		t.Fatalf("secret was not redacted from model/repository/branch: %s", data)
+	}
+
+	oversized := newBeaconEvent("tool.invoked", "tool", "info", "test", time.Now())
+	oversized.Branch = strings.Repeat("b", 3000)
+	if err := writer.append(oversized); err != nil {
+		t.Fatalf("append returned error for an oversized branch value: %v", err)
+	}
+}
+
 func TestIntAttrRejectsOutOfRangeString(t *testing.T) {
 	attrs := map[string]interface{}{"value": "9223372036854775808"}
 	if got, ok := intAttr(attrs, "value"); ok {

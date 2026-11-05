@@ -1469,6 +1469,14 @@ func SanitizeEvent(event Event, maxBytes int) Event {
 	if event.Prompt != nil {
 		event.Prompt.Text = CleanString(event.Prompt.Text, DefaultStringLimit, true)
 	}
+	// Model/Repository/Branch are top-level strings populated from the same class of
+	// externally-reachable OTLP attributes as the fields above (a model name, or a VCS
+	// branch/repository an attacker can set by opening a PR from a crafted branch), but were never
+	// declared here, so a credential-shaped value in any of them reached the log unredacted and
+	// uncapped -- an oversized one could sink the whole event past every other truncation fallback.
+	event.Model = CleanString(event.Model, DefaultRawStringLimit, true)
+	event.Repository = CleanString(event.Repository, DefaultRawStringLimit, true)
+	event.Branch = CleanString(event.Branch, DefaultRawStringLimit, true)
 	if event.MCP != nil {
 		event.MCP = SanitizeMCP(event.MCP, PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
 	}

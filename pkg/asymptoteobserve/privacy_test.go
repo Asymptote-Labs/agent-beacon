@@ -78,6 +78,12 @@ func TestSanitizeEventRedactsAndTruncates(t *testing.T) {
 	event.Prompt = &PromptInfo{Text: "token=prompt-secret"}
 	event.GenAI = &GenAIInfo{SystemInstructions: SystemInstructionParts("token=system-instructions-secret")}
 	event.Raw = map[string]interface{}{"nested": map[string]interface{}{"token": "token=raw-secret"}}
+	// Model/Repository/Branch are externally-reachable (a model name; a VCS branch or repository
+	// an attacker can set by opening a PR from a crafted branch) the same way the fields above are,
+	// but were never declared in this function at all.
+	event.Model = "token=model-secret"
+	event.Repository = "token=repository-secret"
+	event.Branch = "token=branch-secret"
 
 	sanitized := SanitizeEvent(event, 64*1024)
 	data, err := json.Marshal(sanitized)
@@ -85,13 +91,40 @@ func TestSanitizeEventRedactsAndTruncates(t *testing.T) {
 		t.Fatalf("marshal sanitized event: %v", err)
 	}
 	text := string(data)
-	for _, secret := range []string{"message-secret", "command-secret", "policy-secret", "prompt-secret", "system-instructions-secret", "raw-secret"} {
+	for _, secret := range []string{
+		"message-secret", "command-secret", "policy-secret", "prompt-secret", "system-instructions-secret",
+		"raw-secret", "model-secret", "repository-secret", "branch-secret",
+	} {
 		if strings.Contains(text, secret) {
 			t.Fatalf("secret %q was not redacted: %s", secret, text)
 		}
 	}
 	if len(sanitized.Tool.Path) > DefaultRawStringLimit {
 		t.Fatalf("tool path was not truncated: %d", len(sanitized.Tool.Path))
+	}
+}
+
+// Model/Repository/Branch previously went straight into the log: a credential-shaped value in any
+// of them (an AWS access key id, which redaction elsewhere in this file treats as a secret) was
+// never redacted, and an oversized value in any of them was never truncated either.
+func TestSanitizeEventRedactsAndTruncatesModelRepositoryBranch(t *testing.T) {
+	event := NewEvent(NewEventOptions{Action: "tool.invoked", Harness: HarnessInfo{Name: "test"}})
+	event.Model = "model-AKIAABCDEFGHIJKLMNOP"
+	event.Repository = "https://example.com/repo?token=AKIAABCDEFGHIJKLMNOP"
+	event.Branch = "feature/leak-AKIAABCDEFGHIJKLMNOP"
+
+	sanitized := SanitizeEvent(event, 64*1024)
+	for name, got := range map[string]string{"model": sanitized.Model, "repository": sanitized.Repository, "branch": sanitized.Branch} {
+		if strings.Contains(got, "AKIAABCDEFGHIJKLMNOP") {
+			t.Fatalf("%s was not redacted: %q", name, got)
+		}
+	}
+
+	oversized := NewEvent(NewEventOptions{Action: "tool.invoked", Harness: HarnessInfo{Name: "test"}})
+	oversized.Branch = strings.Repeat("b", 3000)
+	sanitized = SanitizeEvent(oversized, 64*1024)
+	if len(sanitized.Branch) > DefaultRawStringLimit {
+		t.Fatalf("branch was not truncated: %d bytes", len(sanitized.Branch))
 	}
 }
 

@@ -127,6 +127,15 @@ func (w jsonlWriter) sanitize(event beaconEvent) beaconEvent {
 	if event.Prompt != nil {
 		event.Prompt.Text = w.cleanString(event.Prompt.Text, asymptoteobserve.DefaultStringLimit)
 	}
+	// Mirrors SanitizeEvent: Model/Repository/Branch are populated from the same class of
+	// externally-reachable OTLP attributes as the fields above (a model name, or a VCS
+	// branch/repository an attacker can set by opening a PR from a crafted branch), but were never
+	// declared here, so a credential-shaped value in any of them reached the written line
+	// unredacted and uncapped -- an oversized one could sink the whole event past every truncation
+	// fallback in append, including compactRetainedContent, with a hard error.
+	event.Model = w.cleanString(event.Model, asymptoteobserve.DefaultRawStringLimit)
+	event.Repository = w.cleanString(event.Repository, asymptoteobserve.DefaultRawStringLimit)
+	event.Branch = w.cleanString(event.Branch, asymptoteobserve.DefaultRawStringLimit)
 	if event.MCP != nil {
 		event.MCP = asymptoteobserve.SanitizeMCP(event.MCP, w.privacyOptions())
 	}
