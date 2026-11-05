@@ -254,7 +254,13 @@ func waitForServiceRunning(name string, timeout time.Duration) error {
 }
 
 // removeService stops and deletes the registration, treating an absent service as success.
-func removeService(name string, stopTimeout time.Duration) error {
+//
+// terminateHung ends the service's process when it will not stop, and deletes the registration
+// anyway. The collector never sets it: a wedged collector is reported, not hidden. A forwarder does,
+// because Vector hangs in START_PENDING when it fails to start, and a service in that state refuses
+// the stop request outright, which would otherwise leave it registered, running and holding
+// vector.exe. Ending Vector loses nothing: its read position is saved only for what Azure accepted.
+func removeService(name string, stopTimeout time.Duration, terminateHung bool) error {
 	return withManager(func(m *mgr.Mgr) error {
 		s, err := m.OpenService(name)
 		if err != nil {
@@ -264,7 +270,12 @@ func removeService(name string, stopTimeout time.Duration) error {
 		defer s.Close()
 
 		if err := stopAndWait(s, name, stopTimeout); err != nil {
-			return err
+			if !terminateHung {
+				return err
+			}
+			if killErr := terminateServiceProcess(s, name, stopTimeout); killErr != nil {
+				return errors.Join(err, killErr)
+			}
 		}
 		if err := s.Delete(); err != nil && !errors.Is(err, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
 			return fmt.Errorf("delete the %s service: %w", name, err)
@@ -322,6 +333,27 @@ func stopAndWait(s *mgr.Service, name string, timeout time.Duration) error {
 	return fmt.Errorf("the %s service did not stop within %s", name, timeout)
 }
 
+// terminateServiceProcess ends the process behind a service that would not stop, and waits for it
+// to exit so its image is released. A service with no process left is already what we want.
+func terminateServiceProcess(s *mgr.Service, name string, timeout time.Duration) error {
+	status, err := s.Query()
+	if err != nil {
+		return fmt.Errorf("query the %s service: %w", name, err)
+	}
+	if status.State == svc.Stopped || status.ProcessId == 0 {
+		return nil
+	}
+	process, err := windows.OpenProcess(windows.PROCESS_TERMINATE|windows.SYNCHRONIZE, false, status.ProcessId)
+	if err != nil {
+		return fmt.Errorf("open the %s service's process to end it: %w", name, err)
+	}
+	defer windows.CloseHandle(process)
+	if err := windows.TerminateProcess(process, 1); err != nil {
+		return fmt.Errorf("end the %s service's process: %w", name, err)
+	}
+	return waitForServiceProcess(process, name, time.Now().Add(timeout), timeout)
+}
+
 // openServiceProcess returns a handle that can wait on the service's process, or 0 when there is no
 // process to wait on or it cannot be opened.
 func openServiceProcess(pid uint32) windows.Handle {
@@ -354,7 +386,7 @@ func waitForServiceProcess(process windows.Handle, name string, deadline time.Ti
 	return nil
 }
 
-func restartService(name string, stopTimeout time.Duration) error {
+func restartService(name string, stopTimeout time.Duration, terminateHung bool) error {
 	if err := withManager(func(m *mgr.Mgr) error {
 		s, err := m.OpenService(name)
 		if err != nil {
@@ -363,7 +395,15 @@ func restartService(name string, stopTimeout time.Duration) error {
 			return errServiceNotInstalled
 		}
 		defer s.Close()
-		return stopAndWait(s, name, stopTimeout)
+		if err := stopAndWait(s, name, stopTimeout); err != nil {
+			if !terminateHung {
+				return err
+			}
+			if killErr := terminateServiceProcess(s, name, stopTimeout); killErr != nil {
+				return errors.Join(err, killErr)
+			}
+		}
+		return nil
 	}); err != nil {
 		if errors.Is(err, errServiceNotInstalled) {
 			return startService(name)

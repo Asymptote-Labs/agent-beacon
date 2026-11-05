@@ -189,7 +189,7 @@ func (m ForwarderManager) UnitPath() (string, error) {
 func (m ForwarderManager) RemoveUnits() {
 	if m.resolvedKind() == KindWindowsService {
 		if m.Supported() {
-			_ = removeService(m.spec().WindowsService, m.stopTimeout())
+			_ = removeService(m.spec().WindowsService, m.stopTimeout(), true)
 		}
 		return
 	}
@@ -287,7 +287,7 @@ func (m ForwarderManager) Load() error {
 	case KindWindowsService:
 		// A restart, not a start, so a rewritten config takes effect, then a wait for RUNNING: the
 		// SCM reports a start as accepted long before Vector has loaded its config.
-		if err := restartService(spec.WindowsService, m.stopTimeout()); err != nil {
+		if err := restartService(spec.WindowsService, m.stopTimeout(), true); err != nil {
 			return err
 		}
 		return waitForServiceRunning(spec.WindowsService, forwarderStartTimeout)
@@ -343,7 +343,7 @@ func (m ForwarderManager) Unload() error {
 		if !m.Supported() {
 			return nil
 		}
-		return removeService(spec.WindowsService, m.stopTimeout())
+		return removeService(spec.WindowsService, m.stopTimeout(), true)
 	default:
 		return nil
 	}

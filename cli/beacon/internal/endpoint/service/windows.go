@@ -105,14 +105,14 @@ func (b windowsBackend) unload(userMode bool) error {
 	if !b.available() {
 		return nil
 	}
-	return removeService(WindowsServiceName, serviceStopTimeout)
+	return removeService(WindowsServiceName, serviceStopTimeout, false)
 }
 
 func (b windowsBackend) restart(userMode bool) error {
 	if !b.available() {
 		return fmt.Errorf("%s", b.unsupportedReason())
 	}
-	return restartService(WindowsServiceName, serviceStopTimeout)
+	return restartService(WindowsServiceName, serviceStopTimeout, false)
 }
 
 func (b windowsBackend) status(userMode bool) Status {

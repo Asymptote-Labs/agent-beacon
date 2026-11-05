@@ -35,9 +35,9 @@ func serviceCurrent(scmService) (bool, error) { return false, errNotWindows("ins
 // removeService is the one exception, and deliberately so: uninstall and repair call unload
 // speculatively on every backend, and failing there would block removing an endpoint that was
 // never a Windows service to begin with.
-func removeService(string, time.Duration) error { return nil }
+func removeService(string, time.Duration, bool) error { return nil }
 
-func restartService(string, time.Duration) error { return errNotWindows("restart") }
+func restartService(string, time.Duration, bool) error { return errNotWindows("restart") }
 
 func queryService(name string) Status {
 	return Status{
