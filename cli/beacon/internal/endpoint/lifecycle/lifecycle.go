@@ -20,6 +20,7 @@ import (
 	endpointinventory "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sentinel"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sysacl"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
@@ -65,6 +66,14 @@ var (
 	reconcileManagedForwarder = func(userMode bool, logPath string) (asymptote.ReconcileResult, error) {
 		return asymptote.ReconcileForwarder(asymptote.ReconcileOptions{UserMode: userMode, LogPath: logPath})
 	}
+	// reconcileSentinelForwarder and removeSentinelForwarder are the seams for the managed Sentinel
+	// forwarder. Install always restarts it: an install or repair may have replaced the log with a
+	// copy (switching log access does), which Vector only notices when it restarts.
+	reconcileSentinelForwarder = func(logPath string) (sentinel.ReconcileResult, error) {
+		return sentinel.Reconcile(sentinel.ReconcileOptions{LogPath: logPath, Restart: true})
+	}
+	removeSentinelForwarder = sentinel.Remove
+	sentinelForwarderStatus = sentinel.ReadStatus
 )
 
 // inventoryJobController is what lifecycle needs from service.InventoryManager.
@@ -379,6 +388,9 @@ type InstallResult struct {
 	// ManagedForwarder reports the Beacon Cloud forwarder reconcile. It never fails the install:
 	// a config Vector rejects leaves the running forwarder on its old one and is reported here.
 	ManagedForwarder *asymptote.ReconcileResult `json:"managed_forwarder,omitempty"`
+	// SentinelForwarder reports the managed Sentinel forwarder reconcile on a system install. Like
+	// ManagedForwarder it never fails the install.
+	SentinelForwarder *sentinel.ReconcileResult `json:"sentinel_forwarder,omitempty"`
 }
 
 type Status struct {
@@ -402,6 +414,9 @@ type Status struct {
 	// ScriptForwarders are the S3, GCS and Falcon forwarders the package helpers install, one entry
 	// per forwarder that is set up on this machine.
 	ScriptForwarders []service.Status `json:"script_forwarders,omitempty"`
+	// SentinelForwarder is the managed Sentinel forwarder, on a system endpoint where one is set up
+	// and this account can read its settings.
+	SentinelForwarder *sentinel.Status `json:"sentinel_forwarder,omitempty"`
 	// LogAccess is the system log's access mode, "shared" or "restricted"; empty in user mode.
 	LogAccess string `json:"log_access,omitempty"`
 }
@@ -836,8 +851,17 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		}
 		managedForwarder = &reconciled
 	}
+	var sentinelForwarder *sentinel.ReconcileResult
+	if opts.StartService && !cfg.UserMode {
+		reconciled, err := reconcileSentinelForwarder(cfg.LogPath)
+		if err != nil && reconciled.Warning == "" {
+			reconciled.Warning = err.Error()
+		}
+		sentinelForwarder = &reconciled
+	}
 	return InstallResult{
 		ManagedForwarder:       managedForwarder,
+		SentinelForwarder:      sentinelForwarder,
 		ConfigPath:             configPath,
 		CollectorConfigPath:    cfg.Collector.ConfigPath,
 		PlistPath:              plistPath,
@@ -901,6 +925,10 @@ func Uninstall(opts UninstallOptions) error {
 	// from their env files, so they go with the endpoint the same way the managed forwarder does.
 	if !cfg.UserMode && !opts.KeepForwarders {
 		fail("remove package forwarders", removeScriptForwarders(opts.KeepConfig))
+		// The service always goes, so a package upgrade can replace Vector's binary; its settings,
+		// credential and read positions stay with --keep-config, which is how the MSI upgrade runs
+		// the old package's uninstall, so the install that follows brings it back where it was.
+		fail("remove the Sentinel forwarder", removeSentinelForwarder(opts.KeepConfig))
 	}
 	// The managed-ingest forwarder and its credentials go with the endpoint; server-side the
 	// device stays registered until it is revoked from the dashboard. Repair keeps all of it.
@@ -1158,8 +1186,20 @@ func buildStatus(requestedUserMode bool, effectiveCfg endpointconfig.Config, run
 		InventoryHeartbeat: inventoryHeartbeatStatus(requestedUserMode, runtimeLog.RequestedLogPath),
 		SessionSync:        sessionSyncStatus(requestedUserMode, runtimeLog.RequestedLogPath),
 		ScriptForwarders:   scriptForwarderStatuses(),
+		SentinelForwarder:  sentinelForwarderStatusFor(requestedUserMode),
 		LogAccess:          logAccessOf(effectiveCfg),
 	}
+}
+
+func sentinelForwarderStatusFor(userMode bool) *sentinel.Status {
+	if userMode {
+		return nil
+	}
+	status := sentinelForwarderStatus()
+	if !status.Installed {
+		return nil
+	}
+	return &status
 }
 
 func ResolveRuntimeLog(userMode bool, logPath string) RuntimeLogSource {

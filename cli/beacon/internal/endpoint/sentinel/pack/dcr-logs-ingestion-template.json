@@ -14,8 +14,9 @@
     },
     "dataCollectionEndpointResourceId": {
       "type": "string",
+      "defaultValue": "",
       "metadata": {
-        "description": "Resource ID of a Data Collection Endpoint in the workspace's region."
+        "description": "Optional. Resource ID of a Data Collection Endpoint in the workspace's region, for Private Link. Without one the DCR gets its own logs ingestion URL (properties.endpoints.logsIngestion)."
       }
     },
     "location": {
@@ -31,7 +32,7 @@
       "location": "[parameters('location')]",
       "kind": "Direct",
       "properties": {
-        "dataCollectionEndpointId": "[parameters('dataCollectionEndpointResourceId')]",
+        "dataCollectionEndpointId": "[if(empty(parameters('dataCollectionEndpointResourceId')), null(), parameters('dataCollectionEndpointResourceId'))]",
         "streamDeclarations": {
           "Custom-BeaconRuntimeRaw": {
             "columns": [
