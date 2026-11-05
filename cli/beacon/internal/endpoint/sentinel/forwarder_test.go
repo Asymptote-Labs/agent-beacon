@@ -421,3 +421,49 @@ func TestForwarderReconcileKeepsTheVectorInstallWasGiven(t *testing.T) {
 		t.Fatalf("findVector was asked for %q", asked)
 	}
 }
+
+// Vector's validate takes secret references literally, so the copy it checks has the credential
+// written in, and is gone afterwards; the config Vector runs keeps only the reference.
+func TestForwarderValidatesWithTheCredentialAndRunsWithTheReference(t *testing.T) {
+	f := newForwarderFixture(t)
+	var checked []string
+	validateVector = func(_, config string) error {
+		data, err := os.ReadFile(config)
+		if err != nil {
+			return err
+		}
+		checked = append(checked, string(data))
+		return nil
+	}
+	pfx := filepath.Join(t.TempDir(), "app.pfx")
+	if err := os.WriteFile(pfx, []byte("pfx bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o := validInstall()
+	o.ClientSecret, o.CertificatePath, o.CertificatePassword = "", pfx, `pfx "pass"`
+	if _, err := Install(o); err != nil {
+		t.Fatal(err)
+	}
+	if len(checked) != 1 || !strings.Contains(checked[0], `certificate_password = "pfx \"pass\""`) {
+		t.Fatalf("the checked copy must carry the password itself:\n%v", checked)
+	}
+	config := readFile(t, filepath.Join(f.dir, configFileName))
+	if strings.Contains(config, "pfx") && strings.Contains(config, `\"pass\"`) || !strings.Contains(config, "SECRET[beacon_sentinel.certificate_password]") {
+		t.Fatalf("the installed config must hold only the reference:\n%s", config)
+	}
+	matches, _ := filepath.Glob(filepath.Join(f.dir, "*", ".validate-*"))
+	more, _ := filepath.Glob(filepath.Join(f.dir, ".validate-*"))
+	if len(matches)+len(more) != 0 {
+		t.Fatalf("validation copies left behind: %v %v", matches, more)
+	}
+	// Reconcile checks a rewritten config the same way.
+	if err := os.WriteFile(filepath.Join(f.dir, configFileName), []byte("# old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Reconcile(ReconcileOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(checked) != 2 || !strings.Contains(checked[1], `certificate_password = "pfx \"pass\""`) {
+		t.Fatalf("reconcile must check a copy with the password in it")
+	}
+}

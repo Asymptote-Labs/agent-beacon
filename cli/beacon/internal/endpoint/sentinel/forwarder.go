@@ -384,11 +384,7 @@ func Install(o InstallOptions) (InstallResult, error) {
 	if err := writeFiles(preflight, secretsJSON, certificate); err != nil {
 		return InstallResult{}, err
 	}
-	preflightConfig := filepath.Join(scratch, configFileName)
-	if err := atomicfile.Write(preflightConfig, []byte(renderForwarderConfig(preflight)), 0o600); err != nil {
-		return InstallResult{}, err
-	}
-	if err := validateVector(vector.Path, preflightConfig); err != nil {
+	if err := validateConfig(vector.Path, scratch, renderForwarderConfig(preflight), secrets); err != nil {
 		return InstallResult{}, err
 	}
 
@@ -429,6 +425,30 @@ func Install(o InstallOptions) (InstallResult, error) {
 		return InstallResult{}, fmt.Errorf("%w; the service was removed, and Vector's own log is in %s", err, logDir)
 	}
 	return InstallResult{Dir: dir, Config: configPath, Unit: unit, Vector: vector.Path, Service: manager.Status()}, nil
+}
+
+// validateConfig has Vector check a rendered config. `vector validate` does not read secret
+// backends: it takes a SECRET[...] reference as the literal value, which makes a certificate's
+// password wrong and fails a config that runs. So it checks a copy with the credential written in,
+// created in dir (readable only by root, or SYSTEM and Administrators) and removed straight after.
+func validateConfig(vectorBin, dir, rendered string, secrets map[string]string) error {
+	for key, value := range secrets {
+		rendered = strings.ReplaceAll(rendered, fmt.Sprintf("SECRET[%s.%s]", secretBackend, key), siempack.TOMLEscape(value))
+	}
+	f, err := os.CreateTemp(dir, ".validate-*.toml")
+	if err != nil {
+		return err
+	}
+	path := f.Name()
+	defer os.Remove(path)
+	if _, err := f.WriteString(rendered); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return validateVector(vectorBin, path)
 }
 
 // writeFiles writes the credential files and the directories the config points at.
@@ -600,12 +620,11 @@ func Reconcile(opts ReconcileOptions) (ReconcileResult, error) {
 	configChanged := string(current) != rendered
 	var rejected string
 	if configChanged {
-		candidate := configPath + ".new"
-		if err := atomicfile.Write(candidate, []byte(rendered), 0o600); err != nil {
-			return ReconcileResult{Warning: err.Error()}, err
+		secrets := map[string]string{}
+		if data, err := os.ReadFile(secretsPath); err == nil {
+			_ = json.Unmarshal(data, &secrets)
 		}
-		if err := validateVector(vector.Path, candidate); err != nil {
-			_ = os.Remove(candidate)
+		if err := validateConfig(vector.Path, dir, rendered, secrets); err != nil {
 			if readErr != nil {
 				// Nothing to fall back to.
 				return ReconcileResult{Warning: "Vector rejected the config, and there is no previous one: " + err.Error()}, nil
@@ -614,7 +633,7 @@ func Reconcile(opts ReconcileOptions) (ReconcileResult, error) {
 			// upgrade removed it before this install, and an old config running beats none.
 			rejected = "kept the previous config, which Vector still runs: " + err.Error()
 			configChanged = false
-		} else if err := os.Rename(candidate, configPath); err != nil {
+		} else if err := atomicfile.Write(configPath, []byte(rendered), 0o600); err != nil {
 			return ReconcileResult{Warning: err.Error()}, err
 		}
 	}

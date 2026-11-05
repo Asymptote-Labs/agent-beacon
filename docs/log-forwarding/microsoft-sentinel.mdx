@@ -224,6 +224,8 @@ sudo /opt/beacon/bin/beacon endpoint sentinel forwarder status --system
 
 Vector saves its place in the log only after Azure has accepted a batch, and retries throttling, server errors and `401`/`403` answers without a limit. An outage or a role assignment that has not applied yet holds lines back rather than dropping them. After a crash some lines can be sent twice. Every row's `RawData` carries the event's `event.id`, so you can remove duplicates in a query.
 
+One case is not retried. When Microsoft Entra ID refuses the credential itself, because the tenant or client ID is wrong or the certificate or secret has expired or been removed, Vector drops the batches it cannot get a token for, and `status` shows Entra's error. Lines written while the credential is refused are not sent. Renew the certificate or secret before it expires, and run `forwarder install` again with the new one.
+
 ### Run Vector yourself
 
 `vector.toml` in the pack is the same config for running Vector under your own service manager, with the values taken from its environment: `BEACON_SENTINEL_DCE_ENDPOINT` (the logs ingestion URL), `BEACON_SENTINEL_DCR_IMMUTABLE_ID`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET`. If you already run it that way, stop that service before you install the managed forwarder, or every line is sent twice.

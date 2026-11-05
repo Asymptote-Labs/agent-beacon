@@ -167,17 +167,17 @@ switch ($Phase) {
             $probe = Join-Path $work 'pfx-probe.toml'
             @"
 data_dir = '$work'
-[sources.probe]
+[sources.probe_source]
 type = 'demo_logs'
 format = 'json'
 count = 1
-[sinks.probe]
+[sinks.probe_sink]
 type = 'azure_logs_ingestion'
-inputs = ['probe']
+inputs = ['probe_source']
 endpoint = 'https://127.0.0.1:9'
 dcr_immutable_id = '$dcr'
 stream_name = 'Custom-BeaconRuntimeRaw'
-[sinks.probe.auth]
+[sinks.probe_sink.auth]
 azure_credential_kind = 'client_certificate_credential'
 azure_tenant_id = '$tenant'
 azure_client_id = '$client'
