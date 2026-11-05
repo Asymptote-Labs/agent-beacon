@@ -189,6 +189,12 @@ try {
         if ($LASTEXITCODE -eq 0) { Fail "assert-authenticode.ps1 accepted a file signed by another publisher" }
         & pwsh -NoProfile -File $assert -Path $pwsh -Publisher 'Microsoft Corporation'
         if ($LASTEXITCODE -ne 0) { Fail "assert-authenticode.ps1 refused a validly signed file" }
+
+        # The release workflow calls the script in-process and tests $LASTEXITCODE, so exercise that
+        # path too: a script that ends without `exit 0` leaves it $null and fails every signed release.
+        $global:LASTEXITCODE = $null
+        & $assert -Path $pwsh -Publisher 'Microsoft Corporation' | Out-Null
+        if ($LASTEXITCODE -ne 0) { Fail "assert-authenticode.ps1 run in-process left LASTEXITCODE '$LASTEXITCODE' after a passing run, want 0" }
     }
 } finally {
     Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue

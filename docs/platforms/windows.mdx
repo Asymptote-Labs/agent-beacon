@@ -41,6 +41,8 @@ Each step has a time limit: 10 minutes for the install, 5 for configuring the si
   ```
 
   A signed package reports `Status: Valid` with a signer of `CN=Asymptote Labs, Inc.`. An unsigned one reports `NotSigned`. Windows SmartScreen then warns that the publisher is unknown, and you need to choose "More info" then "Run anyway". Compare the hash with the published `.sha256` first, because for an unsigned package the checksum is the only integrity check it has.
+
+  The release pipeline's signature check covers the MSI and the three Beacon executables. It does not cover the `.zip` archive, which cannot carry an Authenticode signature, or the bundled `vector.exe`, which is Vector's own build rather than Asymptote Labs'.
 </Warning>
 
 <Note>

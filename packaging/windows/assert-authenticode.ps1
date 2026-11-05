@@ -29,3 +29,6 @@ foreach ($file in $Path) {
     $failures++
 }
 if ($failures -gt 0) { exit 1 }
+# Explicit, because the release workflow calls this in-process and tests $LASTEXITCODE: a script that
+# simply ends leaves it $null, and `$null -ne 0` would fail every correctly signed release.
+exit 0
