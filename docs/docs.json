@@ -543,7 +543,8 @@
                   "guides/jamf-gcs-mdm",
                   "guides/jamf-s3-mdm",
                   "guides/jamf-falcon-mdm",
-                  "guides/jamf-sentinel-mdm"
+                  "guides/jamf-sentinel-mdm",
+                  "guides/workspace-one-sentinel-mdm"
                 ]
               },
               {
