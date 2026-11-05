@@ -148,7 +148,8 @@ func TestRedactStringRedactsCommonCredentialFormats(t *testing.T) {
 		// Split so secret scanners do not take the fake fixture for a live Slack token.
 		{"slack refresh token", "rotated: xoxe" + "-1-EXAMPLEnotarealrefreshtoken", "EXAMPLEnotarealrefreshtoken"},
 		{"stripe", "sk_live_AbCdEfGhIjKlMnOpQrSt", "AbCdEfGhIjKlMnOpQrSt"},
-		{"stripe webhook secret", "got webhook secret whsec_8f9a7cb1d9e4f2a0b3c6d7e8f9a0b1c2d3e4f5a6", "8f9a7cb1d9e4f2a0b3c6d7e8f9a0b1c2d3e4f5a6"},
+		// Split so secret scanners do not take the fake fixture for a live Stripe webhook secret.
+		{"stripe webhook secret", "got webhook secret whsec_" + "8f9a7cb1d9e4f2a0b3c6d7e8f9a0b1c2d3e4f5a6", "8f9a7cb1d9e4f2a0b3c6d7e8f9a0b1c2d3e4f5a6"},
 		{"google", "AIzaSyA-abcdefghijklmnopqrstuvwxyz012345", "abcdefghijklmnopqrstuvwxyz012345"},
 		{"google oauth access token", "$ gcloud auth print-access-token\nya29.a0AfB_byC1x2Y3z4-W5v6U7t8S9r0QpOnMlKjIhGfEdCbA\n", "a0AfB_byC1x2Y3z4-W5v6U7t8S9r0QpOnMlKjIhGfEdCbA"},
 		{"google metadata server token", `{"access_token":"x"} ya29.c.Elt0BxAbCdEfGhIjKlMnOpQrStUvWxYz0123456789`, "Elt0BxAbCdEfGhIjKlMnOpQrStUvWxYz0123456789"},
