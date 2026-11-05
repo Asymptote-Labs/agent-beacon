@@ -418,7 +418,11 @@ func Install(o InstallOptions) (InstallResult, error) {
 		return InstallResult{}, err
 	}
 	if err := manager.Load(); err != nil {
-		return InstallResult{}, fmt.Errorf("%w; Vector's own log is in %s", err, logDir)
+		// A Vector that never reached running is removed rather than left hanging, registered and
+		// holding its binary. The settings stay, so fixing the cause and installing again, or the
+		// next repair or upgrade, brings it back.
+		_ = manager.Unload()
+		return InstallResult{}, fmt.Errorf("%w; the service was removed, and Vector's own log is in %s", err, logDir)
 	}
 	return InstallResult{Dir: dir, Config: configPath, Unit: unit, Vector: vector.Path, Service: manager.Status()}, nil
 }

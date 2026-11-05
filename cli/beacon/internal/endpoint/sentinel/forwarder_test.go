@@ -18,6 +18,7 @@ import (
 type fakeService struct {
 	spec        service.ForwarderSpec
 	unsupported string
+	loadErr     error
 	units       []string
 	loads       int
 	unloads     int
@@ -34,9 +35,16 @@ func (f *fakeService) WriteUnit(vectorBin, configPath string) (string, error) {
 	return "unit:" + f.spec.Label, nil
 }
 func (f *fakeService) UnitCurrent(string, string) (bool, error) { return f.current, nil }
-func (f *fakeService) Load() error                              { f.loads++; f.running = true; return nil }
-func (f *fakeService) Unload() error                            { f.unloads++; f.running = false; return nil }
-func (f *fakeService) RemoveUnits()                             { f.removed++ }
+func (f *fakeService) Load() error {
+	f.loads++
+	if f.loadErr != nil {
+		return f.loadErr
+	}
+	f.running = true
+	return nil
+}
+func (f *fakeService) Unload() error { f.unloads++; f.running = false; return nil }
+func (f *fakeService) RemoveUnits()  { f.removed++ }
 func (f *fakeService) Status() service.Status {
 	return service.Status{Label: f.spec.Label, Loaded: f.running, Running: f.running}
 }
@@ -363,5 +371,20 @@ func TestManualVectorConfigKeepsItsEnvironmentContract(t *testing.T) {
 		if strings.Contains(strings.ReplaceAll(manual, "{{LOG_PATH}}", ""), unwanted) {
 			t.Errorf("manual vector.toml contains %q", unwanted)
 		}
+	}
+}
+
+// A Vector that never reaches running is removed, not left hanging with its binary locked.
+func TestForwarderInstallRemovesAServiceThatNeverStarted(t *testing.T) {
+	f := newForwarderFixture(t)
+	f.svc.loadErr = errors.New("the BeaconSentinelForwarder service is still starting after 1m0s")
+	if _, err := Install(validInstall()); err == nil || !strings.Contains(err.Error(), "removed") {
+		t.Fatalf("Install: %v", err)
+	}
+	if f.svc.unloads != 1 {
+		t.Fatalf("unloads = %d, want the hung service removed", f.svc.unloads)
+	}
+	if _, err := ReadSettings(); err != nil {
+		t.Fatalf("the settings must stay for the next install or reconcile: %v", err)
 	}
 }
