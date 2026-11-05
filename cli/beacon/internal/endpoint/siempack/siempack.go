@@ -66,6 +66,9 @@ func logPathEscaper(name string) func(string) string {
 
 func verbatim(value string) string { return value }
 
+// TOMLEscape escapes value for a TOML basic string, as pack templates render paths.
+func TOMLEscape(value string) string { return tomlEscape(value) }
+
 // tomlEscape takes JSON string escapes, which TOML basic strings share, plus DEL, which TOML forbids.
 func tomlEscape(value string) string {
 	return strings.ReplaceAll(JSONEscapeForString(value), "\x7f", `\u007f`)

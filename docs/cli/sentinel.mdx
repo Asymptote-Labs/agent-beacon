@@ -7,7 +7,7 @@ description: "Generate Microsoft Sentinel forwarding content and validation even
 
 Use `beacon endpoint sentinel` to generate Microsoft Sentinel forwarding content for Beacon endpoint events. The generated pack keeps Beacon as a local JSONL producer and gets `runtime.jsonl` into a Log Analytics custom table through a Data Collection Rule, either with Azure Monitor Agent or with the Vector that ships with Beacon and the Logs Ingestion API. The Vector path needs no Azure Arc.
 
-Beacon does not store Azure tenant IDs, client secrets, workspace IDs, DCR identifiers, ingestion endpoints, or Azure Monitor Agent configuration. Keep those values in Azure, endpoint-management policy, or deployment tooling.
+`beacon endpoint sentinel forwarder` runs that Vector as a system service on macOS, Linux and Windows. Its settings and Entra credential stay in a directory of its own that only root can read (SYSTEM and Administrators on Windows), never in Beacon's `config.json`.
 
 ```bash title="Command syntax"
 beacon endpoint sentinel [command]
@@ -25,6 +25,9 @@ beacon endpoint sentinel [command]
   <Card title="beacon endpoint sentinel validate" icon="check" href="#beacon-endpoint-sentinel-validate">
     Write and describe a Beacon Microsoft Sentinel validation event.
   </Card>
+  <Card title="beacon endpoint sentinel forwarder" icon="paper-plane" href="#beacon-endpoint-sentinel-forwarder">
+    Run Vector as a system service that sends the runtime log to Sentinel.
+  </Card>
 </Columns>
 
 ## Runtime log paths
@@ -32,7 +35,8 @@ beacon endpoint sentinel [command]
 | Mode | Path |
 |------|------|
 | User mode | `~/.beacon/endpoint/logs/runtime.jsonl` |
-| System mode | `/var/log/beacon-agent/runtime.jsonl` |
+| System mode, macOS and Linux | `/var/log/beacon-agent/runtime.jsonl` |
+| System mode, Windows | `C:\ProgramData\Beacon\Endpoint\logs\runtime.jsonl` |
 
 ## beacon endpoint sentinel print-config
 
@@ -157,6 +161,50 @@ Expected validation query: BeaconRuntime_CL | where Message has "Beacon endpoint
 | `--user` | Use per-user endpoint paths. Enabled by default |
 | `--system` | Use system endpoint paths and launch daemon |
 | `--log-path <path>` | Runtime JSONL log path |
+
+## beacon endpoint sentinel forwarder
+
+`beacon endpoint sentinel forwarder install` runs the Vector bundled with Beacon as a system service that sends every runtime log line to Microsoft Sentinel through the Logs Ingestion API. It works the same on macOS, Linux and Windows, and needs a system install and root (an elevated shell, or `LocalSystem`, on Windows). See [Vector and the Logs Ingestion API](/log-forwarding/microsoft-sentinel#vector-and-the-logs-ingestion-api) for the Azure side.
+
+```bash title="Set up the forwarder with a certificate"
+sudo /opt/beacon/bin/beacon endpoint sentinel forwarder install --system \
+  --endpoint https://<dcr>.<region>-1.ingest.monitor.azure.com \
+  --dcr-immutable-id dcr-<32 hex digits> \
+  --tenant-id <tenant ID> --client-id <app ID> \
+  --client-certificate /path/to/app.pfx
+```
+
+```bash title="Set up the forwarder with a client secret"
+printf '%s' "$CLIENT_SECRET" | sudo /opt/beacon/bin/beacon endpoint sentinel forwarder install --system \
+  --endpoint https://<dcr>.<region>-1.ingest.monitor.azure.com \
+  --dcr-immutable-id dcr-<32 hex digits> \
+  --tenant-id <tenant ID> --client-id <app ID> --client-secret-stdin
+```
+
+The credential is never a command-line argument. Vector checks the config before anything changes, so a rejected install leaves a running forwarder as it was. Run `install` again to change a setting or rotate the credential.
+
+```bash title="Check and remove it"
+sudo /opt/beacon/bin/beacon endpoint sentinel forwarder status --system
+sudo /opt/beacon/bin/beacon endpoint sentinel forwarder remove --system
+```
+
+`status` shows the settings, the service state and Vector's latest warning. `remove` stops the service and deletes the settings and credential. Repair and package upgrades keep the forwarder; uninstall removes the service, and keeps the settings with `--keep-config`.
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--system` | Required. The forwarder runs only with a system install |
+| `--endpoint <url>` | The DCR's logs ingestion URL, or a Data Collection Endpoint's |
+| `--dcr-immutable-id <id>` | The DCR's immutable ID (`dcr-` and 32 hex digits) |
+| `--tenant-id <id>` | Microsoft Entra tenant ID |
+| `--client-id <id>` | App registration (client) ID |
+| `--client-certificate <path>` | Authenticate with this PFX certificate. Its password, if any, comes from `AZURE_CLIENT_CERTIFICATE_PASSWORD` or stdin with `--certificate-password-stdin` |
+| `--client-secret-stdin` | Read the client secret from stdin. Without it the secret comes from `AZURE_CLIENT_SECRET` |
+| `--authority-host <url>` | Entra authority for a sovereign cloud, such as `https://login.microsoftonline.us` |
+| `--read-from beginning\|end` | Where to start in a log not read before. `beginning`, the default, sends the current log once |
+| `--vector <path>` | Vector binary to run. Defaults to the one Beacon's package installed |
+| `--json` | Print the result as JSON |
 
 ## Related
 

@@ -21,7 +21,8 @@ func TestServiceBinaryPathIsEscapedTheWayTheSCMReadsIt(t *testing.T) {
 		program = `C:\Program Files\Beacon\bin\beacon-otelcol.exe`
 		config  = `C:\ProgramData\Beacon\Endpoint\collector.yaml`
 	)
-	got := serviceBinaryPath(program, config)
+	collector := collectorService(program, config)
+	got := serviceBinaryPath(collector.Program, collector.Args...)
 
 	// Quoted because of the space, and left alone because there is not one.
 	want := `"` + program + `" --config ` + config
@@ -40,12 +41,32 @@ func TestServiceBinaryPathIsEscapedTheWayTheSCMReadsIt(t *testing.T) {
 }
 
 func TestServiceBinaryPathQuotesOnlyWhenItMustAndAlwaysCarriesTheConfig(t *testing.T) {
-	got := serviceBinaryPath(`C:\Beacon\beacon-otelcol.exe`, `C:\Beacon\collector.yaml`)
+	collector := collectorService(`C:\Beacon\beacon-otelcol.exe`, `C:\Beacon\collector.yaml`)
+	got := serviceBinaryPath(collector.Program, collector.Args...)
 	if got != `C:\Beacon\beacon-otelcol.exe --config C:\Beacon\collector.yaml` {
 		t.Fatalf("serviceBinaryPath = %s", got)
 	}
 	if !strings.Contains(got, "--config") {
 		t.Fatalf("serviceBinaryPath dropped the config flag: %s; "+
 			"the collector would start with its default configuration and write nowhere Beacon reads", got)
+	}
+}
+
+// A forwarder registration carries Vector's config and the spec's extra arguments, escaped the same
+// way, so an upgrade's UpdateConfig writes what CreateService would have.
+func TestForwarderServiceRunsVectorWithTheConfigAndSpecArguments(t *testing.T) {
+	m := ForwarderManager{Kind: KindWindowsService, Spec: ForwarderSpec{
+		WindowsService: "BeaconTestForwarder",
+		Description:    "Beacon test forwarder",
+		Args:           []string{"--graceful-shutdown-limit-secs", "10"},
+		Env:            []string{"AZURE_AUTHORITY_HOST=https://login.example.test"},
+	}}
+	spec := m.scmService(`C:\Program Files\Beacon\bin\vector.exe`, `C:\ProgramData\Beacon\Endpoint\forwarders\sentinel\vector.toml`)
+	want := `"C:\Program Files\Beacon\bin\vector.exe" --config C:\ProgramData\Beacon\Endpoint\forwarders\sentinel\vector.toml --graceful-shutdown-limit-secs 10`
+	if got := serviceBinaryPath(spec.Program, spec.Args...); got != want {
+		t.Fatalf("ImagePath = %s, want %s", got, want)
+	}
+	if spec.Name != "BeaconTestForwarder" || len(spec.Env) != 1 {
+		t.Fatalf("spec = %+v", spec)
 	}
 }

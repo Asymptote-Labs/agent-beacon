@@ -86,22 +86,34 @@ fields. Flattening those events into CEF loses useful context.
 ## Without Azure Monitor Agent: Vector and the Logs Ingestion API
 
 On a machine outside Azure, Azure Monitor Agent needs Azure Arc first, and it
-does not run on macOS at all. `vector.toml` is the alternative. The Vector that
-ships with Beacon (`/opt/beacon/bin/vector`) posts each line to the Logs
-Ingestion API with a Microsoft Entra app registration. It needs no Arc and no
-agent extension.
+does not run on macOS at all. The Vector that ships with Beacon (`/opt/beacon/bin/vector`
+on macOS and Linux, `vector.exe` beside `beacon.exe` on Windows) posts each line
+to the Logs Ingestion API with a Microsoft Entra app registration instead. It
+needs no Arc and no agent extension.
 
-1. Deploy `dcr-logs-ingestion-template.json` with your workspace and Data
-   Collection Endpoint resource IDs, and note the `dcrImmutableId` output. It
-   runs the same transform into the same `BeaconRuntime_CL` table.
+1. Deploy `dcr-logs-ingestion-template.json` with your workspace's resource ID,
+   and note the `dcrImmutableId` output. It runs the same transform into the same
+   `BeaconRuntime_CL` table. The DCR gets its own logs ingestion URL
+   (`az monitor data-collection rule show ... --query endpoints.logsIngestion`);
+   pass a Data Collection Endpoint only if you use Private Link.
 2. Grant your app registration the Monitoring Metrics Publisher role on that DCR.
-3. Run Vector with `vector.toml`, setting `BEACON_SENTINEL_DCE_ENDPOINT`,
-   `BEACON_SENTINEL_DCR_IMMUTABLE_ID`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and
-   `AZURE_CLIENT_SECRET` in the Vector service's environment.
+3. On each host, as root or an administrator:
 
-The host needs outbound HTTPS to `login.microsoftonline.com` and the DCE's
-`*.ingest.monitor.azure.com` hostname. The Azure credentials live only in the
-Vector service's environment, never in Beacon config.
+   ```
+   beacon endpoint sentinel forwarder install --system \
+     --endpoint <logs ingestion URL> --dcr-immutable-id <dcr-...> \
+     --tenant-id <tenant> --client-id <app> --client-certificate app.pfx
+   ```
+
+   It runs Vector as a system service with this config, the values written in
+   and the credential readable only by root (SYSTEM and Administrators on
+   Windows). `vector.toml` in this pack is the same config for running Vector
+   yourself, with the values in the Vector service's environment:
+   `BEACON_SENTINEL_DCE_ENDPOINT`, `BEACON_SENTINEL_DCR_IMMUTABLE_ID`,
+   `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET`.
+
+The host needs outbound HTTPS to `login.microsoftonline.com` and the
+`*.ingest.monitor.azure.com` hostname of the logs ingestion URL.
 
 ## Content Handling
 

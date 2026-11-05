@@ -413,15 +413,19 @@ func TestStableProgramPathPrefersTheLinkedHomebrewBinary(t *testing.T) {
 // with them, and must not reach for /Library.
 func TestUserUninstallLeavesScriptForwardersAlone(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
-	old := removeScriptForwarders
-	called := false
+	old, oldSentinel := removeScriptForwarders, removeSentinelForwarder
+	called, sentinelCalled := false, false
 	removeScriptForwarders = func(bool) error { called = true; return nil }
-	t.Cleanup(func() { removeScriptForwarders = old })
+	removeSentinelForwarder = func(bool) error { sentinelCalled = true; return nil }
+	t.Cleanup(func() { removeScriptForwarders, removeSentinelForwarder = old, oldSentinel })
 	if err := Uninstall(UninstallOptions{UserMode: true}); err != nil {
 		t.Fatal(err)
 	}
 	if called {
 		t.Fatal("a user-mode uninstall removed the system S3/GCS/Falcon forwarders")
+	}
+	if sentinelCalled {
+		t.Fatal("a user-mode uninstall removed the system Sentinel forwarder")
 	}
 }
 
