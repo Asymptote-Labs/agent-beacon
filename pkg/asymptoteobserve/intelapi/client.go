@@ -231,18 +231,52 @@ type CheckResult struct {
 
 // Status is GET /api/v1/status.
 type Status struct {
-	Index map[string]struct {
-		Artifacts int `json:"artifacts"`
-		Analyzed  int `json:"analyzed"`
-		High      int `json:"high"`
-		Medium    int `json:"medium"`
-		Low       int `json:"low"`
-		Benign    int `json:"benign"`
-		// Analyzed with partial coverage, at any risk.
-		Partial int `json:"partial"`
-	} `json:"index"`
-	LatestAnalyzedAt string `json:"latest_analyzed_at"`
-	LatestListedAt   string `json:"latest_listed_at"`
+	Index            map[string]IndexCounts `json:"index"`
+	LatestAnalyzedAt string                 `json:"latest_analyzed_at"`
+	LatestListedAt   string                 `json:"latest_listed_at"`
+}
+
+// IndexCounts is one kind's counts in Status. Other keeps every other numeric count the index
+// sent, such as the retired malicious, suspicious and inconclusive of an index not yet on risk
+// and coverage, so a reader can show what the fixed fields would otherwise drop.
+type IndexCounts struct {
+	Artifacts int `json:"artifacts"`
+	Analyzed  int `json:"analyzed"`
+	High      int `json:"high"`
+	Medium    int `json:"medium"`
+	Low       int `json:"low"`
+	Benign    int `json:"benign"`
+	// Analyzed with partial coverage, at any risk.
+	Partial int            `json:"partial"`
+	Other   map[string]int `json:"other,omitempty"`
+}
+
+var indexCountsKnown = map[string]bool{"artifacts": true, "analyzed": true, "high": true, "medium": true, "low": true, "benign": true, "partial": true}
+
+// UnmarshalJSON decodes the known counts and collects the rest into Other.
+func (k *IndexCounts) UnmarshalJSON(data []byte) error {
+	type plain IndexCounts
+	var p plain
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	p.Other = nil
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err != nil {
+		return err
+	}
+	for key, raw := range all {
+		var n int
+		if indexCountsKnown[key] || json.Unmarshal(raw, &n) != nil {
+			continue
+		}
+		if p.Other == nil {
+			p.Other = map[string]int{}
+		}
+		p.Other[key] = n
+	}
+	*k = IndexCounts(p)
+	return nil
 }
 
 // APIError is an answer other than 200. NotFound reports a 404.

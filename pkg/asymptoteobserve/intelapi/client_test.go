@@ -218,6 +218,17 @@ func TestCheckPostsTheItems(t *testing.T) {
 	}
 }
 
+func TestIndexCountsKeepsCountsItDoesNotName(t *testing.T) {
+	var s Status
+	if err := json.Unmarshal([]byte(`{"index":{"mcp":{"artifacts":3,"analyzed":2,"high":1,"malicious":4,"note":"x"}}}`), &s); err != nil {
+		t.Fatal(err)
+	}
+	k := s.Index["mcp"]
+	if k.Artifacts != 3 || k.High != 1 || len(k.Other) != 1 || k.Other["malicious"] != 4 {
+		t.Fatalf("counts = %+v", k)
+	}
+}
+
 func TestStatus(t *testing.T) {
 	_, c := newFake(t, func(w http.ResponseWriter, r *http.Request, _ string) {
 		writeJSON(w, 200, map[string]any{"api": "intel.v1", "index": map[string]any{"mcp": map[string]int{"artifacts": 4, "high": 1, "partial": 2}}, "latest_analyzed_at": "2026-10-02T00:00:00.000Z"})

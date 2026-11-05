@@ -106,15 +106,28 @@ The summary line counts matched artifacts by risk, then ambiguous and not-found 
 how many of the matched ones had partial coverage.
 
 `--fail-on high|medium|low` exits with status 1 when any matched artifact is at or above that
-risk, which makes `check` a CI gate. Ambiguous and not-found artifacts never fail it, because
-they claim no risk. The retired values `malicious`, `suspicious` and `inconclusive` are
-refused with a message naming the new ones, so update CI scripts that pass them: `--fail-on
-medium` is the usual replacement for `--fail-on suspicious`.
+risk, which makes `check` a CI gate. `--fail-on partial` is the strictest gate: it fails on
+`low` or above and on any artifact whose coverage is partial, at any risk, because partial
+coverage is never a clearance. Ambiguous and not-found artifacts never fail it, because
+they claim no risk. The gate fails closed: a matched artifact whose risk this `beacon` does not
+recognize fails every `--fail-on`, and under `--fail-on partial` so does one whose coverage is
+neither `complete` nor `partial`. An index that still answers with a retired verdict is ranked
+as its replacement (`malicious` as `high`, `suspicious` as `medium`, `inconclusive` as `low`).
+
+The retired values `malicious`, `suspicious` and `inconclusive` are refused as `--fail-on`
+thresholds with a message naming the new ones, so update CI scripts that pass them: `--fail-on
+medium` replaces `--fail-on suspicious`, `--fail-on high` replaces `--fail-on malicious`, and
+`--fail-on partial` replaces `--fail-on inconclusive`.
+
+The summary line never hides a count the index sent: one this `beacon` does not know is
+printed after the known ones.
 
 ## Status
 
 `beacon intel status` shows how many MCP servers and skills the index lists and has analyzed,
-how many it rates at each risk, and how many have partial coverage.
+how many it rates at each risk, and how many have partial coverage. When an index sends counts
+the columns do not show (an index still on the retired verdicts, for example), or analyzed
+artifacts no count accounts for, a line below the table names them.
 It also shows when the newest verdict and registry update arrived. The index is refreshed
 hourly.
 

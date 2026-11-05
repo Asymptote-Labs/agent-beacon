@@ -301,6 +301,19 @@ func TestIntelCheckFailOn(t *testing.T) {
 		t.Fatalf("ambiguous failed the check: %v", err)
 	}
 	before := f.requests()
+	// partial also fails a match with partial coverage, at any risk.
+	f.answer("/api/v1/check", 200, `{"api":"intel.v1","results":[
+{"q":"pdf","status":"matched","risk":"benign","coverage":"partial"},
+{"q":"ok","status":"matched","risk":"benign","coverage":"complete"},
+{"q":"new","status":"matched","risk":"unchecked"}],"counts":{"benign":2,"unchecked":1,"partial":1}}`)
+	if _, err := runIntel(t, "", "check", "a", "--fail-on", "low"); err != nil {
+		t.Fatalf("--fail-on low failed on benign: %v", err)
+	}
+	_, err = runIntel(t, "", "check", "a", "--fail-on", "partial")
+	if !errors.Is(err, errIntelCheckFailed) || !strings.Contains(err.Error(), "1 at or above low or with partial coverage: pdf (benign, partial)") {
+		t.Fatalf("--fail-on partial: %v", err)
+	}
+	before = f.requests()
 	for _, bad := range []string{"benign", "unchecked", "critical", "malicious", "suspicious", "inconclusive"} {
 		if _, err := runIntel(t, "", "check", "a", "--fail-on", bad); err == nil {
 			t.Errorf("--fail-on %s accepted", bad)
@@ -313,6 +326,47 @@ func TestIntelCheckFailOn(t *testing.T) {
 	if _, err := runIntel(t, "", "check", "a", "--fail-on", "suspicious"); err == nil || !strings.Contains(err.Error(), "no longer a risk") ||
 		!strings.Contains(err.Error(), "use high, medium or low") {
 		t.Fatalf("retired value: %v", err)
+	}
+	if _, err := runIntel(t, "", "check", "a", "--fail-on", "inconclusive"); err == nil || !strings.Contains(err.Error(), "use partial") {
+		t.Fatalf("retired inconclusive: %v", err)
+	}
+}
+
+// An index still answering with the retired verdicts, or with a risk this build does not
+// know, must not pass a gate silently.
+func TestIntelCheckFailOnFailsClosed(t *testing.T) {
+	f := startFakeIntel(t)
+	f.answer("/api/v1/check", 200, `{"api":"intel.v1","results":[
+{"q":"old-evil","status":"matched","risk":"malicious"},
+{"q":"old-maybe","status":"matched","risk":"inconclusive"},
+{"q":"old-ok","status":"matched","risk":"benign"}],"counts":{"malicious":1,"inconclusive":1,"benign":1}}`)
+	out, err := runIntel(t, "", "check", "a", "--fail-on", "high")
+	if !errors.Is(err, errIntelCheckFailed) || !strings.Contains(err.Error(), "1 at or above high: old-evil (malicious)") {
+		t.Fatalf("retired malicious under --fail-on high: %v", err)
+	}
+	if !strings.Contains(out, "1 benign, 1 inconclusive, 1 malicious.") {
+		t.Errorf("counts line hid a retired count:\n%s", out)
+	}
+	_, err = runIntel(t, "", "check", "a", "--fail-on", "partial")
+	if !errors.Is(err, errIntelCheckFailed) || !strings.Contains(err.Error(), "3 at or above low or with partial coverage") ||
+		!strings.Contains(err.Error(), "old-ok (benign, coverage - not recognized)") {
+		// benign with no coverage cannot be told from a new answer missing its coverage, so
+		// --fail-on partial fails it rather than read it as complete.
+		t.Fatalf("retired values under --fail-on partial: %v", err)
+	}
+
+	f.answer("/api/v1/check", 200, `{"api":"intel.v1","results":[
+{"q":"odd","status":"matched","risk":"critical","coverage":"complete"},
+{"q":"blank","status":"matched","risk":null},
+{"q":"odd-coverage","status":"matched","risk":"benign","coverage":"sampled"}],"counts":{"critical":1}}`)
+	_, err = runIntel(t, "", "check", "a", "--fail-on", "high")
+	if !errors.Is(err, errIntelCheckFailed) || !strings.Contains(err.Error(), "odd (risk critical not recognized)") ||
+		!strings.Contains(err.Error(), "blank (risk - not recognized)") || strings.Contains(err.Error(), "odd-coverage") {
+		t.Fatalf("unknown risk under --fail-on high: %v", err)
+	}
+	_, err = runIntel(t, "", "check", "a", "--fail-on", "partial")
+	if !errors.Is(err, errIntelCheckFailed) || !strings.Contains(err.Error(), "odd-coverage (benign, coverage sampled not recognized)") {
+		t.Fatalf("unknown coverage under --fail-on partial: %v", err)
 	}
 }
 
