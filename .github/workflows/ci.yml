@@ -846,6 +846,13 @@ jobs:
           if (-not (Test-Path -LiteralPath $produced)) { throw "collector build produced no binary" }
           Copy-Item $produced beacon-otelcol.exe
 
+      # The same pinned build the release ships, checked against packaging/vector/ before it is used.
+      - name: Fetch Vector
+        run: |
+          $vector = pwsh -NoProfile -File packaging\windows\fetch-vector.ps1 -OutDir "$env:RUNNER_TEMP\vector" | Select-Object -Last 1
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $vector)) { throw "fetch-vector.ps1 staged no vector.exe" }
+          "VECTOR_EXE=$vector" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Build two MSIs, so the upgrade path can be exercised
         run: |
           # Two versions rather than one. Installing over an existing install is a different code path
@@ -858,6 +865,7 @@ jobs:
               -BeaconExe cli\beacon\beacon.exe `
               -HooksExe cli\beacon-hooks\beacon-hooks.exe `
               -CollectorExe collector-builder\beacon-otelcol.exe `
+              -VectorExe $env:VECTOR_EXE `
               -OutFile "$env:GITHUB_WORKSPACE\Beacon-$version.msi"
             if (-not (Test-Path -LiteralPath "$env:GITHUB_WORKSPACE\Beacon-$version.msi")) {
               throw "no MSI was produced for $version"
@@ -907,10 +915,14 @@ jobs:
         run: |
           $beacon = Join-Path $env:ProgramFiles 'Beacon\bin\beacon.exe'
           if (-not (Test-Path -LiteralPath $beacon)) { throw "beacon.exe is not at $beacon" }
-          foreach ($name in @('beacon-hooks.exe', 'beacon-otelcol.exe')) {
+          foreach ($name in @('beacon-hooks.exe', 'beacon-otelcol.exe', 'vector.exe')) {
             $path = Join-Path $env:ProgramFiles "Beacon\bin\$name"
             if (-not (Test-Path -LiteralPath $path)) { throw "$name is missing from the payload" }
           }
+          # The packaged Vector has to run, and be the copy FindVector picks.
+          $vectorVersion = (& (Join-Path $env:ProgramFiles 'Beacon\bin\vector.exe') --version) -join ' '
+          if ($LASTEXITCODE -ne 0 -or $vectorVersion -notmatch '^vector 0\.56\.0\b') { throw "the packaged vector.exe reported '$vectorVersion'" }
+          Write-Output $vectorVersion
 
           # The claim a package makes is a *running* endpoint, so the service is asserted rather than
           # the files. Installing three binaries and registering nothing would pass a file check.
@@ -1056,8 +1068,10 @@ jobs:
             throw "the BeaconCollector service still exists after uninstall"
           }
 
-          if (Test-Path -LiteralPath (Join-Path $env:ProgramFiles 'Beacon\bin\beacon.exe')) {
-            throw "the payload was not removed"
+          foreach ($name in @('beacon.exe', 'vector.exe')) {
+            if (Test-Path -LiteralPath (Join-Path $env:ProgramFiles "Beacon\bin\$name")) {
+              throw "the payload was not removed: $name is still installed"
+            }
           }
 
           # Retention, which is a contract rather than an accident: an uninstall is often the first

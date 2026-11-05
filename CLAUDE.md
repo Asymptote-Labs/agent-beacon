@@ -283,7 +283,9 @@ A pushed `v*` tag runs the full release end-to-end via
    GoReleaser still publishes multi-arch CLI tarballs; the signed endpoint
    `.pkg` is arm64-only so it can carry a current Vector release.
 3. `windows-package` (windows-2025, `needs: goreleaser`) builds the x64 MSI from
-   the published archive, installs and uninstalls it on the runner to prove it
+   the published archive plus `vector.exe` (`packaging/windows/fetch-vector.ps1`,
+   checked against the same pinned `packaging/vector/` checksums; the Windows zip
+   itself carries no Vector), installs and uninstalls it on the runner to prove it
    works, and attaches the `.msi` and its `.sha256`. Deliberately **not** in the
    `release` environment: that environment gates signing secrets, and the MSI is
    unsigned, so this job has none to gate.
@@ -611,7 +613,7 @@ unpacked through Chrome's developer mode.
 - `cross-build` (ubuntu): builds all five release targets and asserts the Linux binaries are statically linked (no `PT_INTERP`).
 - `package-smoke` (macOS): `packaging/macos/test-endpoint-scripts.sh`, a `build-pkg.sh` payload check, and `packaging/macos/smoke-endpoint.sh`.
 - `linux-systemd-smoke` and `linux-package-smoke` (ubuntu): the real systemd install path, and installing the built `.deb` in a systemd container.
-- `windows-package-smoke` (windows-2025): `packaging/windows/test-endpoint-scripts.ps1`, then building the MSI and installing it.
+- `windows-package-smoke` (windows-2025): `packaging/windows/test-endpoint-scripts.ps1`, then fetching the pinned Vector, building the MSI and installing it.
 
 The Go jobs build the embedded hooks binary first (`make build-hooks-current`); `cli/beacon` tests
 fail against the placeholder because `InstallFactory` requires a real binary.
