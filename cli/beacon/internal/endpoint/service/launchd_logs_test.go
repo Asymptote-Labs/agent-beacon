@@ -35,7 +35,7 @@ func TestSystemLaunchDaemonsNeverLogToTmp(t *testing.T) {
 	out, errPath := paths(SystemLabel)
 	plists[SystemLabel] = plist(SystemLabel, "/opt/beacon/bin/beacon-otelcol", "/etc/beacon/endpoint/otelcol.yaml", out, errPath)
 	out, errPath = paths(ForwarderLabel)
-	plists[ForwarderLabel] = forwarderPlist(ForwarderLabel, "/opt/beacon/bin/vector", "/etc/beacon/endpoint/asymptote/vector.toml", out, errPath)
+	plists[ForwarderLabel] = forwarderPlist(AsymptoteForwarderSpec(), "/opt/beacon/bin/vector", "/etc/beacon/endpoint/asymptote/vector.toml", out, errPath)
 	out, errPath = paths(UpdaterLabel)
 	plists[UpdaterLabel] = updaterPlist(UpdaterLabel, "/opt/beacon/bin/beacon", out, errPath)
 	out, errPath = paths(InventoryLabel)

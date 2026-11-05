@@ -14,14 +14,15 @@ Beacon `v0.0.32` added the [Microsoft Sentinel content pack](/concepts/core-conc
 
 On a desktop or server outside Azure, the Vector path is usually simpler.
 
-Use this path when you want Sentinel ingestion without storing Azure tenant IDs, client secrets, workspace IDs, DCR identifiers, or ingestion endpoints in Beacon endpoint configuration.
+Beacon's `config.json` never holds Azure values. On the Vector path, the forwarder keeps its settings and credential in a directory only root can read (SYSTEM and Administrators on Windows).
 
 ## Runtime log paths
 
 | Mode | Runtime log |
 |------|-------------|
 | User mode | `~/.beacon/endpoint/logs/runtime.jsonl` |
-| System mode | `/var/log/beacon-agent/runtime.jsonl` |
+| System mode, macOS and Linux | `/var/log/beacon-agent/runtime.jsonl` |
+| System mode, Windows | `C:\ProgramData\Beacon\Endpoint\logs\runtime.jsonl` |
 
 Use system mode for MDM deployments so Azure Monitor Agent can tail `/var/log/beacon-agent/runtime.jsonl` without per-user home directory permissions.
 
@@ -31,7 +32,7 @@ Use system mode for MDM deployments so Azure Monitor Agent can tail `/var/log/be
 - A Log Analytics workspace, with Microsoft Sentinel enabled if you want Sentinel hunting and analytics workflows.
 - A custom Log Analytics table named `BeaconRuntime_CL`.
 - For the Azure Monitor Agent path: AMA on the endpoint (Azure Arc first, outside Azure) and a DCR associated with it.
-- For the Vector path: an Entra app registration, a Data Collection Endpoint, and the Logs Ingestion DCR from the pack.
+- For the Vector path: an Entra app registration and the Logs Ingestion DCR from the pack, and a system install of Beacon.
 
 ## Install the Sentinel pack
 
@@ -153,61 +154,100 @@ A host that cannot reach Azure at all cannot use either path.
 
 ## Vector and the Logs Ingestion API
 
-Vector reads `runtime.jsonl` and posts each line to the [Logs Ingestion API](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/logs-ingestion-api-overview) with an Entra app registration. It needs no Arc, no AMA, and no Azure resource per machine. Vector ships with Beacon: the `.deb`, `.rpm`, and macOS package install it at `/opt/beacon/bin/vector`, and the Linux archive carries it as `beacon-vector`.
+Vector reads `runtime.jsonl` and posts each line to the [Logs Ingestion API](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/logs-ingestion-api-overview) with a Microsoft Entra app registration. It needs no Arc, no AMA, and no Azure resource per machine. Vector ships with Beacon on all three platforms: the macOS package and the Linux `.deb` and `.rpm` install it at `/opt/beacon/bin/vector`, and the Windows MSI installs `vector.exe` beside `beacon.exe`. `beacon endpoint sentinel forwarder install` runs it as a system service, so one command sets up forwarding the same way on every machine.
 
 Each record carries the original Beacon line as `RawData`. The Logs Ingestion DCR runs the same transform as the AMA path, so the rows are identical either way.
 
 ### 1. Azure side, once
 
-1. Create the `BeaconRuntime_CL` table and a Data Collection Endpoint in the workspace's region, as in steps 2 and 3 above.
-2. Deploy `dcr-logs-ingestion-template.json` with the workspace and DCE resource IDs. Note the `dcrImmutableId` output.
-3. Register an app in Microsoft Entra ID and create a client secret for it.
-4. On the DCR, grant the app the **Monitoring Metrics Publisher** role.
+1. Create the `BeaconRuntime_CL` table as in step 3 above.
+2. Deploy `dcr-logs-ingestion-template.json` from the pack with the workspace resource ID, and note the `dcrImmutableId` output. Then read the DCR's logs ingestion URL:
+
+   ```bash title="Read the DCR's logs ingestion URL"
+   az monitor data-collection rule show \
+     --resource-group <resource group> --name dcr-beacon-runtime-ingestion \
+     --query endpoints.logsIngestion --output tsv
+   ```
+
+   You need a Data Collection Endpoint only for Private Link. Pass its resource ID as `dataCollectionEndpointResourceId` and use its logs ingestion URL instead.
+3. Register an app in Microsoft Entra ID and give it a certificate. A client secret also works, but Microsoft recommends a certificate for production.
+4. On the DCR, grant the app the **Monitoring Metrics Publisher** role. A new role assignment can take up to 30 minutes to apply; the forwarder keeps retrying until it does.
 
 ### 2. Each host
 
-The host needs outbound HTTPS to `login.microsoftonline.com` and to your DCE's `*.ingest.monitor.azure.com` hostname. Nothing else.
+Run this as root, or from an elevated shell on Windows. A fleet tool running as `LocalSystem` works too.
 
-```bash title="Install the config and credentials"
-sudo mkdir -p /etc/beacon-sentinel
-sudo cp beacon-sentinel-pack/vector.toml /etc/beacon-sentinel/vector.toml
-sudo install -m 0600 /dev/null /etc/beacon-sentinel/azure.env
-sudo tee /etc/beacon-sentinel/azure.env >/dev/null <<'ENV'
-BEACON_SENTINEL_DCE_ENDPOINT=https://<dce>.<region>.ingest.monitor.azure.com
-BEACON_SENTINEL_DCR_IMMUTABLE_ID=dcr-...
-AZURE_TENANT_ID=...
-AZURE_CLIENT_ID=...
-AZURE_CLIENT_SECRET=...
-ENV
+<CodeGroup>
+```bash title="macOS and Linux"
+sudo AZURE_CLIENT_CERTIFICATE_PASSWORD='<pfx password>' \
+  /opt/beacon/bin/beacon endpoint sentinel forwarder install --system \
+  --endpoint https://<dcr>.<region>-1.ingest.monitor.azure.com \
+  --dcr-immutable-id dcr-<32 hex digits> \
+  --tenant-id <tenant ID> --client-id <app ID> \
+  --client-certificate /path/to/app.pfx
 ```
 
-```ini title="/etc/systemd/system/beacon-sentinel.service"
-[Unit]
-Description=Vector: Beacon events to Microsoft Sentinel
-After=network-online.target
-Wants=network-online.target
+```powershell title="Windows"
+$env:AZURE_CLIENT_CERTIFICATE_PASSWORD = '<pfx password>'
+& "$env:ProgramFiles\Beacon\bin\beacon.exe" endpoint sentinel forwarder install --system `
+  --endpoint https://<dcr>.<region>-1.ingest.monitor.azure.com `
+  --dcr-immutable-id dcr-<32 hex digits> `
+  --tenant-id <tenant ID> --client-id <app ID> `
+  --client-certificate C:\path\to\app.pfx
+```
+</CodeGroup>
 
-[Service]
-ExecStart=/opt/beacon/bin/vector --config /etc/beacon-sentinel/vector.toml
-EnvironmentFile=/etc/beacon-sentinel/azure.env
-DynamicUser=yes
-StateDirectory=vector/beacon-sentinel
-Restart=always
+Leave out the password variable for a certificate without one. To use a client secret instead of a certificate, drop `--client-certificate` and pass the secret on stdin with `--client-secret-stdin`, or in `AZURE_CLIENT_SECRET`. The credential is never a command-line argument.
 
-[Install]
-WantedBy=multi-user.target
+The command:
+
+1. Copies the certificate, its password or the secret into `forwarders/sentinel` under the endpoint's system directory (`/etc/beacon/endpoint` on Linux, `/Library/Application Support/Beacon/Endpoint` on macOS, `C:\ProgramData\Beacon\Endpoint` on Windows). Only root can read that directory, or SYSTEM and Administrators on Windows. You can delete your own copy of the certificate afterwards.
+2. Writes Vector's config with the values in it and has Vector check it. If Vector rejects it, nothing changes, and a forwarder that was already running keeps running as it was.
+3. Starts Vector as a service that restarts on failure and after a reboot: `BeaconSentinelForwarder` on Windows, `beacon-sentinel-forwarder.service` on Linux, and `com.beacon.endpoint.sentinel-forwarder` on macOS.
+
+On its first start the forwarder sends the current runtime log once, including the sessions the install backfilled, then only new lines. Pass `--read-from end` to skip what is already in the log.
+
+The host needs outbound HTTPS to `login.microsoftonline.com` and to the DCR's `*.ingest.monitor.azure.com` hostname. For Azure Government or another sovereign cloud, pass its Entra authority with `--authority-host`, such as `https://login.microsoftonline.us`.
+
+### Operate the forwarder
+
+```bash title="Check it"
+sudo /opt/beacon/bin/beacon endpoint sentinel forwarder status --system
 ```
 
-```bash title="Start it"
-sudo systemctl daemon-reload
-sudo systemctl enable --now beacon-sentinel
+`beacon endpoint status --system` shows the same service state. Vector's own warnings and errors are in `forwarders/sentinel/logs/vector-<date>.log` under the endpoint's system directory; install, repair and upgrades delete files over a week old.
+
+- To change a setting or rotate the credential, run `forwarder install` again with the new values.
+- Repair and package upgrades keep the forwarder. An upgrade restarts it on the new package's Vector.
+- Uninstall removes the service. A non-purge uninstall (`--keep-config`, or a Windows MSI removal without `BEACON_PURGE=1`) keeps its settings, so installing Beacon again brings it back. `beacon endpoint sentinel forwarder remove --system` deletes the settings and credential too.
+- With [restricted log access](/security/restricted-log-access), nothing changes: the forwarder runs as root or SYSTEM and can read the log.
+
+Vector saves its place in the log only after Azure has accepted a batch, and retries throttling, server errors and `401`/`403` answers without a limit. An outage or a role assignment that has not applied yet holds lines back rather than dropping them. After a crash some lines can be sent twice. Every row's `RawData` carries the event's `event.id`, so you can remove duplicates in a query.
+
+One case is not retried. When Microsoft Entra ID refuses the credential itself, because the tenant or client ID is wrong or the certificate or secret has expired or been removed, Vector drops the batches it cannot get a token for, and `status` shows Entra's error. Lines written while the credential is refused are not sent. Renew the certificate or secret before it expires, and run `forwarder install` again with the new one.
+
+### Run Vector yourself
+
+`vector.toml` in the pack is the same config for running Vector under your own service manager, with the values taken from its environment: `BEACON_SENTINEL_DCE_ENDPOINT` (the logs ingestion URL), `BEACON_SENTINEL_DCR_IMMUTABLE_ID`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET`. If you already run it that way, stop that service before you install the managed forwarder, or every line is sent twice.
+
+### Who ran each session
+
+On a machine several people use, the person behind an event is in `RawData.user`: `uid` is the account's uid, or its SID on Windows, and `name` its name. Hook and plugin events carry it, because each hook and plugin runs as the person who ran the agent; with [restricted log access](/security/restricted-log-access) the operating system vouches for it. Events from an agent's own OpenTelemetry export, such as Claude Code's token usage and cost, carry the collector's own account instead (such as `root`, or the machine account `COMPUTERNAME$` on Windows), because every account sends to the same local port. Claude Cowork is the exception: its events name the cloud account it reports. Both kinds share the session's id, so take the person from the hook and plugin events, and keep an event's own user where its session has none:
+
+```kql title="Attribute every event to the person who ran its session"
+let owners = BeaconRuntime_CL
+    | where isnotempty(SessionId) and tostring(RawData.harness.collection_method) in ("hook", "plugin")
+    | summarize OwnerId = take_any(tostring(RawData.user.uid)), Owner = take_any(tostring(RawData.user.name)) by HostName, SessionId;
+BeaconRuntime_CL
+| where isnotempty(SessionId)
+| join kind=leftouter owners on HostName, SessionId
+| extend UserId = coalesce(OwnerId, tostring(RawData.user.uid)), User = coalesce(Owner, tostring(RawData.user.name))
+| summarize Events = count() by HostName, User, UserId, HarnessName
 ```
 
-`DynamicUser` runs Vector as an unprivileged user. It can read the runtime log because the default shared log is world-readable, and systemd reads `azure.env` as root before dropping privileges. If the endpoint uses [restricted log access](/security/restricted-log-access), add `SupplementaryGroups=beacon-log` under `[Service]` so Vector can still read it. `StateDirectory` creates `/var/lib/vector/beacon-sentinel`, where Vector keeps its read position.
+Claude Code's events also carry the Anthropic account the person signed in with, in `RawData.raw.attributes["user.email"]` and `["user.account_uuid"]`. That names the Claude account rather than the operating system login.
 
-The pack ships a client secret config. Vector also supports a certificate (`azure_credential_kind = "client_certificate_credential"` with `certificate_path`); see the [`azure_logs_ingestion` sink](https://vector.dev/docs/reference/configuration/sinks/azure_logs_ingestion/).
-
-The generated table schema includes columns such as `Vendor`, `Product`, `EventAction`, `Severity`, `HostName`, `UserName`, `HarnessName`, `SessionId`, `ToolName`, `CommandLine`, `Repository`, `Branch`, `Message`, `ContentRetention`, and `RawData`.
+The generated table schema includes columns such as `Vendor`, `Product`, `EventAction`, `Severity`, `HostName`, `UserName`, `HarnessName`, `SessionId`, `ToolName`, `CommandLine`, `Repository`, `Branch`, `Message`, and `RawData`.
 
 ## Validate forwarding
 
@@ -233,7 +273,7 @@ BeaconRuntime_CL
 | order by TimeGenerated desc
 ```
 
-If the validation query does not return data, check the DCR association, Azure Monitor Agent health state, configured file path, and table schema. On the Vector path, check `journalctl -u beacon-sentinel` for authentication errors and confirm the app has Monitoring Metrics Publisher on the DCR. Role assignments can take several minutes to apply. The target table must exist before the DCR can route transformed records to it.
+If the validation query does not return data, check the DCR association, Azure Monitor Agent health state, configured file path, and table schema. On the Vector path, run `beacon endpoint sentinel forwarder status --system`, which shows Vector's last warning, and confirm the app has Monitoring Metrics Publisher on the DCR. Role assignments can take several minutes to apply. The target table must exist before the DCR can route transformed records to it.
 
 ## Hunting content
 
@@ -245,7 +285,7 @@ Use `detections.kql` as example analytics rule logic. Review and tune thresholds
 
 Microsoft Sentinel can also collect CEF and Syslog through Azure Monitor Agent, but the generated Beacon pack uses custom logs because Beacon events are rich structured JSON with prompts, tool calls, commands, files, runtime metadata, and optional raw fields. Flattening those events into CEF loses useful context.
 
-Beacon's own endpoint config never holds Azure credentials. On the Vector path, the Entra secret, DCR ID, and ingestion endpoint live only in the Vector service's environment file. Vector does the batching and retries.
+Beacon's `config.json` never holds Azure values. The managed forwarder keeps its settings and credential in its own directory, readable only by root, or by SYSTEM and Administrators on Windows. Vector does the batching and retries.
 
 ## Content handling
 
@@ -256,6 +296,9 @@ Beacon applies redaction, sanitization, truncation, and event-size limits before
 <Columns cols={2}>
   <Card title="Jamf and Sentinel" icon="screwdriver-wrench" href="/guides/jamf-sentinel-mdm">
     Roll Beacon out to Macs with Jamf Pro and forward runtime events to Sentinel.
+  </Card>
+  <Card title="Workspace ONE and Sentinel" icon="windows" href="/guides/workspace-one-sentinel-mdm">
+    Roll Beacon out to Windows machines with Workspace ONE and forward runtime events to Sentinel.
   </Card>
   <Card title="beacon endpoint sentinel" icon="terminal" href="/cli/sentinel">
     Review Microsoft Sentinel command syntax, flags, and examples.

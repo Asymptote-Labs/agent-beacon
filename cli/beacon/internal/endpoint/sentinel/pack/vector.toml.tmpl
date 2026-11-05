@@ -1,26 +1,26 @@
 # Beacon Endpoint Agent -> Microsoft Sentinel, through the Azure Monitor Logs Ingestion API
 #
 # For hosts that cannot run Azure Monitor Agent, which on a machine outside Azure means
-# onboarding it to Azure Arc first. Vector posts to a Data Collection Endpoint with a
-# Microsoft Entra app registration instead, so no Arc and no agent extension are needed.
-# Beacon's Linux packages ship Vector at /opt/beacon/bin/vector.
+# onboarding it to Azure Arc first. Vector posts to a data collection rule with a Microsoft
+# Entra app registration instead, so no Arc and no agent extension are needed. Beacon's
+# packages ship Vector: /opt/beacon/bin/vector on macOS and Linux, and vector.exe beside
+# beacon.exe on Windows.
 #
 # Each record carries the original Beacon line as RawData. The DCR in
 # dcr-logs-ingestion-template.json runs the same transform as the Azure Monitor Agent
 # path, so both paths produce identical BeaconRuntime_CL rows.
 #
-# Set in the Vector service environment, not in Beacon config:
-#   BEACON_SENTINEL_DCE_ENDPOINT      https://<dce>.<region>.ingest.monitor.azure.com
-#   BEACON_SENTINEL_DCR_IMMUTABLE_ID  dcr-... (the DCR's immutableId)
-#   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
+{{SETTINGS_NOTE}}
 # The app registration needs the Monitoring Metrics Publisher role on the DCR.
 
-data_dir = "/var/lib/vector/beacon-sentinel"
-
+data_dir = "{{DATA_DIR}}"
+{{SECRET_BACKEND}}
 [sources.beacon_runtime]
 type = "file"
-include = ["{{LOG_PATH}}"]
-read_from = "end"
+# The active log and the file a rotation renamed it to, so lines written just before a rotation
+# are still sent when Vector was behind or stopped. Checkpoints keep either from being read twice.
+include = ["{{LOG_PATH}}", "{{LOG_PATH}}.1"]
+read_from = "{{READ_FROM}}"
 
 [transforms.beacon_raw_record]
 type = "remap"
@@ -39,16 +39,17 @@ if err == null && is_object(parsed) {
 [sinks.beacon_sentinel]
 type = "azure_logs_ingestion"
 inputs = ["beacon_raw_record"]
-endpoint = "${BEACON_SENTINEL_DCE_ENDPOINT}"
-dcr_immutable_id = "${BEACON_SENTINEL_DCR_IMMUTABLE_ID}"
+endpoint = "{{ENDPOINT}}"
+dcr_immutable_id = "{{DCR_IMMUTABLE_ID}}"
 stream_name = "Custom-BeaconRuntimeRaw"
 timestamp_field = "TimeGenerated"
 
 [sinks.beacon_sentinel.auth]
-azure_credential_kind = "client_secret_credential"
-azure_tenant_id = "${AZURE_TENANT_ID}"
-azure_client_id = "${AZURE_CLIENT_ID}"
-azure_client_secret = "${AZURE_CLIENT_SECRET}"
+{{AUTH}}
+# A line's read position is saved only once Azure has accepted it, so a restart or a stretch of
+# failures resends rather than skips.
+[sinks.beacon_sentinel.acknowledgements]
+enabled = true
 
 # The Logs Ingestion API rejects a request over 1 MB with 413, and the sink's own default is 10 MB.
 # 512 KB leaves room for the JSON escaping of RawData; one Beacon event is at most 64 KB.
@@ -57,7 +58,16 @@ max_bytes = 524288
 max_events = 1000
 timeout_secs = 30
 
+# Retried without a limit, backing off to five minutes, so an outage or a credential that is not
+# yet accepted holds the log back instead of dropping it.
 [sinks.beacon_sentinel.request]
-retry_attempts = 10
 retry_initial_backoff_secs = 1
 retry_max_duration_secs = 300
+
+# The sink's default retries only 408, 429 and 5xx, and drops a batch on any other error. A new
+# role assignment on the DCR answers 403 for up to 30 minutes, so 401 and 403 are retried too.
+# 400 and 413 are not: resending the same request cannot fix them.
+[sinks.beacon_sentinel.retry_strategy]
+type = "custom"
+status_codes = [401, 403, 408, 429, 500, 502, 503, 504]
+{{VECTOR_LOG}}

@@ -32,32 +32,39 @@ $uninstallTimeoutSeconds = 180
 # defer the replacement to a reboot or keep running the old collector. The registration goes too, so
 # a removal leaves no service pointing at a deleted binary; an upgrade's install action registers it
 # again.
-function Stop-BeaconCollectorService {
-    param([string]$InstallRoot)
+function Stop-BeaconService {
+    param([string]$Name, [string]$Executable)
     # Best effort throughout: sc.exe reports a service that is already gone on stderr, which the
     # script's 'Stop' preference would otherwise turn into a failed uninstall.
     $ErrorActionPreference = 'Continue'
-    $name = 'BeaconCollector'
-    $service = Get-Service -Name $name -ErrorAction SilentlyContinue
+    $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
     if ($null -eq $service) { return }
     if ($service.Status -ne 'Stopped') {
-        Write-BeaconPackageLog "stopping the $name service directly"
-        & sc.exe stop $name 2>&1 | ForEach-Object { Write-BeaconPackageLog "  $_" }
+        Write-BeaconPackageLog "stopping the $Name service directly"
+        & sc.exe stop $Name 2>&1 | ForEach-Object { Write-BeaconPackageLog "  $_" }
         try {
             $service.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
         } catch {
-            Write-BeaconPackageLog "the $name service did not stop within 30s"
+            Write-BeaconPackageLog "the $Name service did not stop within 30s"
         }
     }
-    $collector = Join-Path $InstallRoot 'bin\beacon-otelcol.exe'
-    Get-Process -Name 'beacon-otelcol' -ErrorAction SilentlyContinue |
-        Where-Object { $_.Path -eq $collector } |
+    $processName = [System.IO.Path]::GetFileNameWithoutExtension($Executable)
+    Get-Process -Name $processName -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -eq $Executable } |
         ForEach-Object {
-            Write-BeaconPackageLog "terminating collector process $($_.Id)"
+            Write-BeaconPackageLog "terminating $processName process $($_.Id)"
             Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
         }
-    & sc.exe delete $name 2>&1 | ForEach-Object { Write-BeaconPackageLog "  $_" }
+    & sc.exe delete $Name 2>&1 | ForEach-Object { Write-BeaconPackageLog "  $_" }
     $global:LASTEXITCODE = 0
+}
+
+# The services that hold a file the package is about to remove or replace: the collector, and the
+# Sentinel forwarder's Vector when one is set up.
+function Stop-BeaconServices {
+    param([string]$InstallRoot)
+    Stop-BeaconService -Name 'BeaconCollector' -Executable (Join-Path $InstallRoot 'bin\beacon-otelcol.exe')
+    Stop-BeaconService -Name 'BeaconSentinelForwarder' -Executable (Join-Path $InstallRoot 'bin\vector.exe')
 }
 
 function Get-EnvOrDefault {
@@ -150,7 +157,7 @@ $code = Invoke-BeaconBounded -Beacon $beaconBin -Arguments $uninstallArgs -Timeo
 if ($code -eq $script:BeaconTimeoutExitCode) {
     # Stopped, not waited on. A removal that hangs is worse for the person running it than one that
     # finishes with the collector forced down, and the package log records what happened.
-    Stop-BeaconCollectorService -InstallRoot $installRoot
+    Stop-BeaconServices -InstallRoot $installRoot
 } elseif ($code -ne 0) {
     # Reported, not thrown. The service and its registration are what matter here, and `endpoint
     # uninstall` is idempotent -- so a non-zero exit is worth surfacing but not worth wedging an MSI

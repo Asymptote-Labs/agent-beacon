@@ -3,9 +3,9 @@ package sentinel
 import (
 	"embed"
 	"fmt"
-	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"strings"
 
+	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/siempack"
 )
 
@@ -28,7 +28,7 @@ func Files() []siempack.File {
 		{Name: "dcr-template.json", Content: renderDCRTemplate("pack/dcr-template.json"), TemplateLogPath: true},
 		// The Logs Ingestion API path, for hosts without Azure Monitor Agent: Vector sends each line
 		// as RawData to a DCR that runs the same transform, so both paths fill the same table.
-		{Name: "vector.toml", Content: mustRead("pack/vector.toml.tmpl"), TemplateLogPath: true},
+		{Name: "vector.toml", Content: manualVectorConfig(), TemplateLogPath: true},
 		{Name: "dcr-logs-ingestion-template.json", Content: renderDCRTemplate("pack/dcr-logs-ingestion-template.json")},
 		{Name: "queries.kql", Content: mustRead("pack/queries.kql")},
 		{Name: "detections.kql", Content: mustRead("pack/detections.kql")},
