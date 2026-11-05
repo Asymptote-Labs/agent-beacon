@@ -141,6 +141,11 @@ if command -v launchctl >/dev/null 2>&1; then
   # a no-op on an endpoint that is not connected. Non-fatal: a rejected config keeps the old one.
   "${BEACON_BIN:-/opt/beacon/bin/beacon}" endpoint asymptote reconcile --system || \
     echo "Warning: Beacon Cloud forwarder config not reconciled (endpoint is installed and running)" >&2
+  # A Sentinel forwarder set up with `beacon endpoint sentinel forwarder install` gets this version's
+  # config and is restarted, so it runs the Vector this package just installed. A no-op where none
+  # is set up. Non-fatal: a rejected config keeps the old one.
+  "${BEACON_BIN:-/opt/beacon/bin/beacon}" endpoint sentinel forwarder reconcile --system || \
+    echo "Warning: Sentinel forwarder not reconciled (endpoint is installed and running)" >&2
 fi
 
 exit 0

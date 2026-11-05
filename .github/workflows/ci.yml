@@ -471,6 +471,14 @@ jobs:
       - name: Test endpoint packages with the race detector
         working-directory: cli/beacon
         run: go test -race ./internal/endpoint/...
+      # The Sentinel forwarder's config run by the Vector the packages ship, against a mock of
+      # Entra ID and the Logs Ingestion API: retried 403s, a rotation, a restart, the log copy.
+      - name: Run the Sentinel forwarder against real Vector
+        run: |
+          sh packaging/linux/fetch-vector.sh "$RUNNER_TEMP/vector" amd64
+          cd cli/beacon
+          BEACON_TEST_VECTOR_BIN="$RUNNER_TEMP/vector/linux_amd64/beacon-vector" \
+            go test -count=1 -run TestForwarderConfigDeliversThroughRealVector -v ./internal/endpoint/sentinel/
       - name: Test hook adapter on Linux
         working-directory: cli/beacon-hooks
         run: go test ./...
@@ -620,6 +628,17 @@ jobs:
             ./internal/endpoint/writer/... `
             ./internal/endpoint/inventory/... `
             ./internal/endpoint/service/...
+      # The same real-Vector run as on Linux. The mock's CA goes into LocalMachine\Root, which is
+      # where Vector's token client looks on Windows; the test removes it again.
+      - name: Run the Sentinel forwarder against real Vector
+        run: |
+          $vector = pwsh -NoProfile -File packaging\windows\fetch-vector.ps1 -OutDir "$env:RUNNER_TEMP\vector" | Select-Object -Last 1
+          if ($LASTEXITCODE -ne 0) { throw "fetch-vector.ps1 failed" }
+          Set-Location cli\beacon
+          $env:BEACON_TEST_VECTOR_BIN = $vector
+          $env:BEACON_TEST_SENTINEL_TRUST_STORE = '1'
+          go test -count=1 -run TestForwarderConfigDeliversThroughRealVector -v ./internal/endpoint/sentinel/
+          if ($LASTEXITCODE -ne 0) { throw "the Sentinel forwarder end-to-end test failed" }
       - name: Test hook adapter on Windows
         working-directory: cli/beacon-hooks
         run: go test -count=1 ./...
@@ -827,6 +846,9 @@ jobs:
           Set-Location ..\beacon
           go build -o beacon.exe .
           if ($LASTEXITCODE -ne 0) { throw "beacon build failed" }
+          # Stands in for Entra ID and the Logs Ingestion API in the Sentinel forwarder smoke.
+          go build -o sentinel-mock.exe ./internal/endpoint/sentinel/sentinelmock/cmd/sentinel-mock
+          if ($LASTEXITCODE -ne 0) { throw "sentinel-mock build failed" }
 
       - name: Build the collector
         run: |
@@ -941,6 +963,12 @@ jobs:
           Write-Output "installed, running, backend=windows-service"
           exit 0
 
+      # The managed Sentinel forwarder the way a fleet sets it up: as SYSTEM, with a certificate,
+      # against a mock of Entra ID and the Logs Ingestion API that refuses the first batches with 403.
+      - name: The Sentinel forwarder must deliver, keeping its credential private
+        timeout-minutes: 6
+        run: pwsh -NoProfile -File packaging/windows/smoke-sentinel-forwarder.ps1 -Phase setup -MockExe cli\beacon\sentinel-mock.exe
+
       - name: Upgrading must replace the payload and leave it running
         timeout-minutes: 20
         run: |
@@ -1017,9 +1045,18 @@ jobs:
       # The restricted log access mode against a real ordinary account on the installed endpoint: its
       # hook reaches the log only through the collector's pipe, stamped as itself; it can neither read
       # nor append to the log; it spools while the collector is stopped; and shared puts it all back.
+      - name: The Sentinel forwarder must come back after the upgrade
+        timeout-minutes: 4
+        run: pwsh -NoProfile -File packaging/windows/smoke-sentinel-forwarder.ps1 -Phase after-upgrade
+
       - name: Restricted log access must hold against an ordinary account
         timeout-minutes: 8
         run: pwsh -NoProfile -File packaging/windows/smoke-restricted-log.ps1
+
+      # Switching log access replaces the log with a copy, which Vector follows only once restarted.
+      - name: The Sentinel forwarder must have sent every event exactly once
+        timeout-minutes: 5
+        run: pwsh -NoProfile -File packaging/windows/smoke-sentinel-forwarder.ps1 -Phase verify
 
       - name: Uninstall must remove the service and keep the data
         timeout-minutes: 5
@@ -1095,6 +1132,14 @@ jobs:
       # bound (packaging/windows/package-common.ps1), so a hang no longer wedges the MSI -- which also
       # means it no longer fails a step on its own. Each script leaves a package log in SYSTEM's
       # temporary directory, and a TIMEOUT line there is a hang this job must not pass over.
+      - name: Uninstall must remove the Sentinel forwarder service and keep its settings
+        timeout-minutes: 2
+        run: pwsh -NoProfile -File packaging/windows/smoke-sentinel-forwarder.ps1 -Phase after-uninstall
+
+      - name: Stop the Sentinel mock and remove its certificates
+        if: always()
+        run: pwsh -NoProfile -File packaging/windows/smoke-sentinel-forwarder.ps1 -Phase cleanup
+
       - name: Every package action must finish within its bound
         if: always()
         run: |
@@ -1130,6 +1175,12 @@ jobs:
           Write-Output '--- BeaconCollector ---'
           & sc.exe queryex BeaconCollector 2>&1 | Write-Output
           & sc.exe qc BeaconCollector 2>&1 | Write-Output
+          Write-Output '--- BeaconSentinelForwarder ---'
+          & sc.exe queryex BeaconSentinelForwarder 2>&1 | Write-Output
+          $forwarderLogs = Join-Path $env:ProgramData 'Beacon\Endpoint\forwarders\sentinel\logs'
+          Get-ChildItem $forwarderLogs -Filter 'vector-*.log' -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Output "--- $($_.Name) (tail) ---"; Get-Content -LiteralPath $_.FullName -Tail 40 | Write-Output }
+          Get-Content (Join-Path $env:RUNNER_TEMP 'sentinel-smoke\mock.err') -Tail 40 -ErrorAction SilentlyContinue | Write-Output
           Write-Output '--- Windows Installer, collector and service control events ---'
           foreach ($filter in @(
             @{ LogName = 'Application'; ProviderName = 'MsiInstaller' },

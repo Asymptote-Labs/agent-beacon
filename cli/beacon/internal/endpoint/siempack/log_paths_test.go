@@ -48,6 +48,8 @@ func TestTOMLLogPathsRoundTrip(t *testing.T) {
 		render    func(string) (string, error)
 		inventory bool
 		backfill  bool
+		// rotated packs also read the file a rotation renamed the log to.
+		rotated bool
 	}{
 		{name: "asymptote", install: asymptote.InstallPack, render: asymptote.VectorConfig, inventory: true, backfill: true},
 		{name: "cloudwatch", install: cloudwatch.InstallPack, render: cloudwatch.ConfigSnippet},
@@ -55,13 +57,16 @@ func TestTOMLLogPathsRoundTrip(t *testing.T) {
 		{name: "gcs", install: gcs.InstallPack, inventory: true},
 		{name: "rapid7", install: rapid7.InstallPack},
 		{name: "s3", install: s3.InstallPack, inventory: true},
-		{name: "sentinel", install: sentinel.InstallPack},
+		{name: "sentinel", install: sentinel.InstallPack, rotated: true},
 		{name: "sumo", install: sumo.InstallPack},
 	}
 	for _, pack := range packs {
 		for _, path := range logPaths {
 			t.Run(pack.name+"/"+path.name, func(t *testing.T) {
 				want := map[string][]string{"beacon_runtime": {path.path}}
+				if pack.rotated {
+					want["beacon_runtime"] = append(want["beacon_runtime"], path.path+".1")
+				}
 				if pack.inventory {
 					want["beacon_inventory"] = []string{siempack.InventoryLogPath(path.path)}
 				}

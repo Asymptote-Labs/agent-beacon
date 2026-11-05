@@ -20,7 +20,7 @@ function Fail {
     $script:failures++
 }
 
-$scripts = @('install-endpoint.ps1', 'uninstall-endpoint.ps1', 'package-common.ps1', 'build-msi.ps1', 'fetch-vector.ps1', 'smoke-restricted-log.ps1')
+$scripts = @('install-endpoint.ps1', 'uninstall-endpoint.ps1', 'package-common.ps1', 'build-msi.ps1', 'fetch-vector.ps1', 'smoke-restricted-log.ps1', 'smoke-sentinel-forwarder.ps1')
 foreach ($name in $scripts) {
     $path = Join-Path $scriptDir $name
     if (-not (Test-Path -LiteralPath $path)) {
