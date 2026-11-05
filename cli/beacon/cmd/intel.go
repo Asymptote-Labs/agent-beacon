@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -39,8 +40,10 @@ An artifact is named by a GitHub URL or owner/repo, a package (npm:<name>, pypi:
 name to the Beacon Intel API; set BEACON_INTEL=0 to turn these commands off, or
 BEACON_INTEL_URL to use another host.
 
-Risk is malicious, suspicious, inconclusive, benign, or unchecked (listed but not analyzed).
-Not found means the index has never checked it: it never means safe.`,
+Risk is high, medium, low, benign, or unchecked (listed but not analyzed). Coverage is
+complete or partial: partial means the analysis did not cover everything, so it is never a
+clearance, whatever the risk. Not found means the index has never checked it: it never means
+safe.`,
 }
 
 var intelLookupCmd = &cobra.Command{
@@ -68,7 +71,9 @@ Nothing you send is stored.
 
 Each is matched (with its risk), ambiguous (no artifact has exactly that name: check one of
 the candidates by its key), or not_found. --fail-on exits non-zero when any matched artifact
-is at or above a risk, for use in CI.`,
+is at or above a risk, for use in CI; --fail-on partial also fails one whose coverage is
+partial, at any risk. A matched artifact whose risk this beacon does not recognize fails every
+--fail-on.`,
 	SilenceUsage: true,
 	RunE:         runIntelCheck,
 }
@@ -91,7 +96,7 @@ func init() {
 	intelLookupCmd.Flags().IntVar(&intelOpts.limit, "limit", 10, fmt.Sprintf("Results to show (at most %d)", intelapi.MaxLimit))
 	intelCheckCmd.Flags().StringVar(&intelOpts.kind, "kind", "", "Read every artifact as mcp or skill")
 	intelCheckCmd.Flags().StringVar(&intelOpts.file, "file", "", "Read artifacts from a file, one per line (- for standard input)")
-	intelCheckCmd.Flags().StringVar(&intelOpts.failOn, "fail-on", "", "Exit non-zero when a matched artifact is at or above this risk: malicious, suspicious or inconclusive")
+	intelCheckCmd.Flags().StringVar(&intelOpts.failOn, "fail-on", "", "Exit non-zero when a matched artifact is at or above this risk (high, medium or low), or with partial also has partial coverage")
 }
 
 // newIntelClient is the test seam for the client.
@@ -120,7 +125,7 @@ func runIntelLookup(cmd *cobra.Command, args []string) error {
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "RISK\tKIND\tNAME\tKEY\tFLAGS")
 	for _, r := range res.Results {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", termLine(r.Risk, 16), termLine(r.Kind, 8), termLine(orDash(r.Name), 48),
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", intelRisk(r.Risk, r.Coverage), termLine(r.Kind, 8), termLine(orDash(r.Name), 48),
 			termLine(r.EntityKey, 120), termLine(orDash(strings.Join(r.RepositoryFlags, ",")), 80))
 	}
 	if err := tw.Flush(); err != nil {
@@ -153,7 +158,7 @@ func runIntelShow(cmd *cobra.Command, args []string) error {
 		return writeIntelJSON(out, raw)
 	}
 	fmt.Fprintf(out, "%s (%s)\n", termLine(orDash(a.Name), 120), termLine(a.EntityKey, 160))
-	fmt.Fprintf(out, "Risk:        %s. %s\n", termLine(a.Risk, 16), termLine(a.Guidance, 200))
+	fmt.Fprintf(out, "Risk:        %s. %s\n", intelRisk(a.Risk, a.Coverage), termLine(a.Guidance, 200))
 	if a.Repository != "" {
 		repo := termLine(a.Repository, 120)
 		if a.CodePath != "" {
@@ -178,14 +183,15 @@ func runIntelShow(cmd *cobra.Command, args []string) error {
 		if v.Commit != "" {
 			line += " at commit " + termLine(v.Commit, 40)
 		}
-		if !v.CoverageComplete {
-			line += " (coverage incomplete)"
-		}
 		fmt.Fprintln(out, line)
+		if v.Coverage != "" {
+			fmt.Fprintf(out, "Coverage:    %s\n", termLine(v.Coverage, 16))
+		}
 	}
 	fmt.Fprintf(out, "Page:        %s\n", termLine(a.URL, 300))
 	if v := a.Verdict; v != nil {
 		printIntelList(out, "Reasons", v.Reasons)
+		printIntelList(out, "Why coverage is partial", v.CoverageReasons)
 		if len(v.Findings) > 0 || v.RefutedFindings > 0 {
 			fmt.Fprintf(out, "\nFindings (%d shown of %d; %d refuted on review):\n", len(v.Findings), v.FindingsTotal, v.RefutedFindings)
 			for _, f := range v.Findings {
@@ -193,8 +199,18 @@ func runIntelShow(cmd *cobra.Command, args []string) error {
 				if len(f.Lines) == 2 {
 					where += fmt.Sprintf(":%d-%d", f.Lines[0], f.Lines[1])
 				}
-				fmt.Fprintf(out, "  - [%s] %s %s: %s\n", termLine(orDash(f.Severity), 16), termLine(f.ClassLabel, 40), orDash(where), termLine(f.Claim, 500))
+				label := termLine(orDash(f.Severity), 16)
+				if f.Level != "" {
+					label += ", " + termLine(f.Level, 16)
+				}
+				if f.Review != "" {
+					label += ", " + termLine(f.Review, 16)
+				}
+				fmt.Fprintf(out, "  - [%s] %s %s: %s\n", label, termLine(f.ClassLabel, 40), orDash(where), termLine(f.Claim, 500))
 			}
+		}
+		if v.NotesTotal > 0 || v.FlagsTotal > 0 {
+			fmt.Fprintf(out, "\n%d notes and %d third-party flags are not shown; they never change the risk. See --json or the page.\n", v.NotesTotal, v.FlagsTotal)
 		}
 		printIntelList(out, "Unresolved", v.Unresolved)
 	}
@@ -239,20 +255,131 @@ func printIntelList(out io.Writer, title string, items []string) {
 	}
 }
 
-// intelRiskRank orders risks for --fail-on; unchecked and anything unknown rank lowest.
-var intelRiskRank = map[string]int{"benign": 1, "inconclusive": 2, "suspicious": 3, "malicious": 4}
+// intelRiskRank orders risks for --fail-on. unchecked (listed, never analyzed) ranks lowest.
+var intelRiskRank = map[string]int{"unchecked": 0, "benign": 1, "low": 2, "medium": 3, "high": 4}
+
+// intelRetiredRisks are the verdict values the index used before risk and coverage replaced
+// them, with the risk each one became. --fail-on refuses them as thresholds, naming what
+// replaced them, and ranks them as their replacement when an index that has not moved to risk
+// and coverage still answers with one, so a malicious match still trips --fail-on high.
+var intelRetiredRisks = map[string]int{"malicious": 4, "suspicious": 3, "inconclusive": 2}
+
+// intelGate is what --fail-on fails a check on: a matched artifact at or above rank, and with
+// partial, also one whose analysis did not cover everything (what --fail-on inconclusive
+// caught before coverage was its own field).
+type intelGate struct {
+	name    string
+	rank    int
+	partial bool
+}
+
+func parseIntelFailOn(value string) (*intelGate, error) {
+	switch value {
+	case "":
+		return nil, nil
+	case "high", "medium", "low":
+		return &intelGate{name: value, rank: intelRiskRank[value]}, nil
+	case "partial":
+		return &intelGate{name: value, rank: intelRiskRank["low"], partial: true}, nil
+	}
+	if _, ok := intelRetiredRisks[value]; ok {
+		hint := "use high, medium or low"
+		if value == "inconclusive" {
+			hint = "use partial, which fails on low or above and on partial coverage at any risk, as inconclusive did"
+		}
+		return nil, fmt.Errorf("--fail-on %s is no longer a risk: Beacon Intel now rates risk as high, medium, low or benign, with coverage apart; %s", value, hint)
+	}
+	return nil, fmt.Errorf("--fail-on must be high, medium, low or partial, not %q", termLine(value, 40))
+}
+
+// intelRetiredShape reports whether a check answer comes from an index still on the retired
+// verdicts: its counts or results carry malicious, suspicious or inconclusive, or no matched
+// result names a coverage at all (the current shape always does). In that shape the verdict
+// carried coverage itself, inconclusive being the partial one, so a benign there was covered
+// and --fail-on partial must not read its missing coverage as unrecognized. An answer where
+// some matched results name a coverage and others do not is current, and still fails closed.
+func intelRetiredShape(res *intelapi.CheckResult) bool {
+	for key, n := range res.Counts {
+		if _, ok := intelRetiredRisks[key]; ok && n > 0 {
+			return true
+		}
+	}
+	matched := false
+	for _, r := range res.Results {
+		if r.Status != "matched" {
+			continue
+		}
+		if _, ok := intelRetiredRisks[r.Risk]; ok {
+			return true
+		}
+		if r.Coverage != "" {
+			return false
+		}
+		matched = true
+	}
+	return matched
+}
+
+// fails says why a check result fails the gate, or "" when it passes. Only matched results
+// can fail: ambiguous and not_found claim no risk. It fails closed: a matched result whose
+// risk this build does not know fails at every threshold rather than ranking lowest, and with
+// partial, so does one whose coverage is neither complete nor partial.
+// retiredShape is intelRetiredShape of the whole answer.
+func (g *intelGate) fails(r intelapi.CheckOutcome, retiredShape bool) string {
+	if r.Status != "matched" {
+		return ""
+	}
+	risk := termLine(orDash(r.Risk), 16)
+	rank, known := intelRiskRank[r.Risk]
+	retired := false
+	if !known {
+		rank, retired = intelRetiredRisks[r.Risk]
+		known = retired
+	}
+	switch {
+	case !known:
+		return fmt.Sprintf("%s (risk %s not recognized)", termLine(r.Q, 80), risk)
+	case rank >= g.rank:
+		if r.Coverage == "partial" {
+			return fmt.Sprintf("%s (%s, partial)", termLine(r.Q, 80), risk)
+		}
+		return fmt.Sprintf("%s (%s)", termLine(r.Q, 80), risk)
+	case !g.partial || r.Risk == "unchecked" || retired || r.Coverage == "complete" || (retiredShape && r.Coverage == ""):
+		// unchecked was never analyzed, so it has no coverage, and a retired verdict carried
+		// its coverage in the verdict itself (inconclusive ranks as low above), as does a
+		// benign in an answer of the retired shape.
+		return ""
+	case r.Coverage == "partial":
+		return fmt.Sprintf("%s (%s, partial)", termLine(r.Q, 80), risk)
+	default:
+		return fmt.Sprintf("%s (%s, coverage %s not recognized)", termLine(r.Q, 80), risk, termLine(orDash(r.Coverage), 16))
+	}
+}
+
+func (g *intelGate) describe() string {
+	if g.partial {
+		return "at or above low or with partial coverage"
+	}
+	return "at or above " + g.name
+}
+
+// intelRisk is a risk as the tables print it, marked when the analysis covered only part of
+// the artifact, which is never a clearance.
+func intelRisk(risk, coverage string) string {
+	out := termLine(orDash(risk), 16)
+	if coverage == "partial" {
+		out += " (partial)"
+	}
+	return out
+}
 
 // errIntelCheckFailed is the error --fail-on returns; its message names what failed.
 var errIntelCheckFailed = errors.New("intel check failed")
 
 func runIntelCheck(cmd *cobra.Command, args []string) error {
-	threshold := 0
-	if intelOpts.failOn != "" {
-		rank, ok := intelRiskRank[intelOpts.failOn]
-		if !ok || rank < 2 {
-			return fmt.Errorf("--fail-on must be malicious, suspicious or inconclusive, not %q", intelOpts.failOn)
-		}
-		threshold = rank
+	gate, err := parseIntelFailOn(intelOpts.failOn)
+	if err != nil {
+		return err
 	}
 	if err := intelapi.ValidateKind(intelOpts.kind); err != nil {
 		return err
@@ -303,40 +430,62 @@ func runIntelCheck(cmd *cobra.Command, args []string) error {
 				}
 				match = "candidates: " + strings.Join(keys, ", ")
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", termLine(r.Status, 16), termLine(orDash(r.Risk), 16), termLine(r.Q, 80), termLine(match, 300))
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", termLine(r.Status, 16), intelRisk(r.Risk, r.Coverage), termLine(r.Q, 80), termLine(match, 300))
 		}
 		if err := tw.Flush(); err != nil {
 			return err
 		}
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, intelCountsLine(res.Counts))
-		fmt.Fprintln(out, "not_found means never checked, not safe. Details: beacon intel show <key>")
+		fmt.Fprintln(out, "not_found means never checked, not safe; partial coverage is never a clearance. Details: beacon intel show <key>")
 	}
-	if threshold > 0 {
+	if gate != nil {
 		var failed []string
+		retiredShape := intelRetiredShape(res)
 		for _, r := range res.Results {
-			if r.Status == "matched" && intelRiskRank[r.Risk] >= threshold {
-				failed = append(failed, fmt.Sprintf("%s (%s)", termLine(r.Q, 80), r.Risk))
+			if why := gate.fails(r, retiredShape); why != "" {
+				failed = append(failed, why)
 			}
 		}
 		if len(failed) > 0 {
-			return fmt.Errorf("%w: %d at or above %s: %s", errIntelCheckFailed, len(failed), intelOpts.failOn, strings.Join(failed, ", "))
+			return fmt.Errorf("%w: %d %s: %s", errIntelCheckFailed, len(failed), gate.describe(), strings.Join(failed, ", "))
 		}
 	}
 	return nil
 }
 
+// intelCountKeys are the check counts in the order the summary line prints them.
+var intelCountKeys = []string{"high", "medium", "low", "benign", "unchecked", "ambiguous", "not_found"}
+
 func intelCountsLine(counts map[string]int) string {
 	parts := []string{}
-	for _, key := range []string{"malicious", "suspicious", "inconclusive", "benign", "unchecked", "ambiguous", "not_found"} {
+	for _, key := range intelCountKeys {
 		if counts[key] > 0 {
 			parts = append(parts, fmt.Sprintf("%d %s", counts[key], key))
 		}
 	}
+	// Never hide a count the server sent: one this build does not know (a retired verdict
+	// such as malicious, or a value added later) is printed after the known ones.
+	var others []string
+	for key, n := range counts {
+		if n > 0 && key != "partial" && !slices.Contains(intelCountKeys, key) {
+			others = append(others, key)
+		}
+	}
+	sort.Strings(others)
+	for _, key := range others {
+		parts = append(parts, fmt.Sprintf("%d %s", counts[key], termLine(key, 32)))
+	}
+
 	if len(parts) == 0 {
 		return "Nothing checked."
 	}
-	return strings.Join(parts, ", ") + "."
+	line := strings.Join(parts, ", ") + "."
+	// partial overlaps the risk counts: how many of the matched ones had partial coverage.
+	if n := counts["partial"]; n > 0 {
+		line += fmt.Sprintf(" %d matched with partial coverage.", n)
+	}
+	return line
 }
 
 // intelCheckFileMax bounds what --file reads.
@@ -390,17 +539,49 @@ func runIntelStatus(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintf(out, "Beacon Intel: %s\n\n", client.BaseURL)
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "KIND\tLISTED\tANALYZED\tMALICIOUS\tSUSPICIOUS\tINCONCLUSIVE\tBENIGN")
+	fmt.Fprintln(tw, "KIND\tLISTED\tANALYZED\tHIGH\tMEDIUM\tLOW\tBENIGN\tPARTIAL")
 	for _, kind := range []string{"mcp", "skill"} {
 		k := s.Index[kind]
-		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d\n", kind, k.Artifacts, k.Analyzed, k.Malicious, k.Suspicious, k.Inconclusive, k.Benign)
+		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", kind, k.Artifacts, k.Analyzed, k.High, k.Medium, k.Low, k.Benign, k.Partial)
 	}
 	if err := tw.Flush(); err != nil {
 		return err
 	}
+	for _, kind := range []string{"mcp", "skill"} {
+		if line := intelStatusOthers(kind, s.Index[kind]); line != "" {
+			fmt.Fprintln(out, line)
+		}
+	}
 	fmt.Fprintf(out, "\nNewest verdict:         %s\n", termLine(orDash(s.LatestAnalyzedAt), 40))
 	fmt.Fprintf(out, "Newest registry update: %s\n", termLine(orDash(s.LatestListedAt), 40))
 	return nil
+}
+
+// intelStatusOthers names analyzed artifacts the table's risk columns do not show: counts
+// under a risk this build does not know (an index still on the retired verdicts answers with
+// malicious, suspicious and inconclusive), and analyzed artifacts no count accounts for.
+// PARTIAL overlaps the risk columns, so it is not part of the sum.
+func intelStatusOthers(kind string, k intelapi.IndexCounts) string {
+	var parts []string
+	keys := make([]string, 0, len(k.Other))
+	for key := range k.Other {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	shown := k.High + k.Medium + k.Low + k.Benign
+	for _, key := range keys {
+		if n := k.Other[key]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, termLine(key, 32)))
+			shown += n
+		}
+	}
+	if rest := k.Analyzed - shown; rest > 0 {
+		parts = append(parts, fmt.Sprintf("%d with no risk count", rest))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s also: %s (not in the columns above; --json shows the full answer)", kind, strings.Join(parts, ", "))
 }
 
 // writeIntelJSON re-indents the API's answer. It was decoded already, so it is valid JSON.

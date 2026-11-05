@@ -79,7 +79,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 const lookupAnswer = `{"api":"intel.v1","query":{"q":"evil","kind":null,"limit":10,"matched_by":"text"},
 "results":[{"entity_key":"mcp:evil/server","kind":"mcp","name":"Evil Server","description":null,"repository":"evil/server",
-"code_path":null,"registries":["smithery"],"risk":"malicious","guidance":"Do not install or run it.","analyzed_at":"2026-10-02T00:00:00.000Z",
+"code_path":null,"registries":["smithery"],"risk":"high","coverage":"complete","guidance":"Do not install or run it.","analyzed_at":"2026-10-02T00:00:00.000Z",
 "repository_flags":["hijackable"],"stars":5,"url":"https://intel.beacon.sh/mcp-servers/github/evil/server"}],"more":true,"note":"data"}`
 
 func TestLookupSendsTheQueryAndDecodes(t *testing.T) {
@@ -102,7 +102,7 @@ func TestLookupSendsTheQueryAndDecodes(t *testing.T) {
 	if r.Header.Get("User-Agent") != "beacon/test" || r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" {
 		t.Fatalf("headers = %v; want the user agent and no credentials", r.Header)
 	}
-	if len(res.Results) != 1 || res.Results[0].Risk != "malicious" || !res.More || res.Query.MatchedBy != "text" ||
+	if len(res.Results) != 1 || res.Results[0].Risk != "high" || res.Results[0].Coverage != "complete" || !res.More || res.Query.MatchedBy != "text" ||
 		res.Results[0].Stars == nil || *res.Results[0].Stars != 5 || res.Results[0].Description != "" {
 		t.Fatalf("decoded = %+v", res)
 	}
@@ -165,8 +165,11 @@ func TestArtifactAndNotFound(t *testing.T) {
 			return
 		}
 		writeJSON(w, 200, map[string]any{"api": "intel.v1", "artifact": map[string]any{
-			"entity_key": "mcp:evil/server", "risk": "malicious",
-			"verdict":         map[string]any{"verdict": "malicious", "model": "judge-x", "findings": []map[string]any{{"id": "f1", "lines": []int{4, 6}}}},
+			"entity_key": "mcp:evil/server", "risk": "high", "coverage": "partial",
+			"verdict": map[string]any{
+				"risk": "high", "coverage": "partial", "model": "judge-x", "coverage_reasons": []string{"partial: gap clone_failed at sub"},
+				"findings": []map[string]any{{"id": "f1", "lines": []int{4, 6}, "level": "abuse", "review": "confirmed", "affects": "installer"}},
+			},
 			"execution_chain": map[string][]string{"url": {"https://evil.example"}},
 		}})
 	})
@@ -177,7 +180,9 @@ func TestArtifactAndNotFound(t *testing.T) {
 	if f.requests[0].URL.Path != "/api/v1/artifact" || f.requests[0].URL.Query().Get("key") != "mcp:evil/server" {
 		t.Fatalf("request = %s", f.requests[0].URL)
 	}
-	if a.Risk != "malicious" || a.Verdict == nil || a.Verdict.Model != "judge-x" || len(a.Verdict.Findings[0].Lines) != 2 ||
+	if a.Risk != "high" || a.Coverage != "partial" || a.Verdict == nil || a.Verdict.Model != "judge-x" || len(a.Verdict.Findings[0].Lines) != 2 ||
+		a.Verdict.Risk != "high" || a.Verdict.Coverage != "partial" || len(a.Verdict.CoverageReasons) != 1 ||
+		a.Verdict.Findings[0].Level != "abuse" || a.Verdict.Findings[0].Review != "confirmed" || a.Verdict.Findings[0].Affects != "installer" ||
 		a.ExecutionChain["url"][0] != "https://evil.example" {
 		t.Fatalf("artifact = %+v", a)
 	}
@@ -213,12 +218,23 @@ func TestCheckPostsTheItems(t *testing.T) {
 	}
 }
 
+func TestIndexCountsKeepsCountsItDoesNotName(t *testing.T) {
+	var s Status
+	if err := json.Unmarshal([]byte(`{"index":{"mcp":{"artifacts":3,"analyzed":2,"high":1,"malicious":4,"note":"x"}}}`), &s); err != nil {
+		t.Fatal(err)
+	}
+	k := s.Index["mcp"]
+	if k.Artifacts != 3 || k.High != 1 || len(k.Other) != 1 || k.Other["malicious"] != 4 {
+		t.Fatalf("counts = %+v", k)
+	}
+}
+
 func TestStatus(t *testing.T) {
 	_, c := newFake(t, func(w http.ResponseWriter, r *http.Request, _ string) {
-		writeJSON(w, 200, map[string]any{"api": "intel.v1", "index": map[string]any{"mcp": map[string]int{"artifacts": 4, "malicious": 1}}, "latest_analyzed_at": "2026-10-02T00:00:00.000Z"})
+		writeJSON(w, 200, map[string]any{"api": "intel.v1", "index": map[string]any{"mcp": map[string]int{"artifacts": 4, "high": 1, "partial": 2}}, "latest_analyzed_at": "2026-10-02T00:00:00.000Z"})
 	})
 	s, _, err := c.Status(context.Background())
-	if err != nil || s.Index["mcp"].Artifacts != 4 || s.LatestAnalyzedAt == "" {
+	if err != nil || s.Index["mcp"].Artifacts != 4 || s.Index["mcp"].High != 1 || s.Index["mcp"].Partial != 2 || s.LatestAnalyzedAt == "" {
 		t.Fatalf("status = %+v, %v", s, err)
 	}
 }

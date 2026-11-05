@@ -110,6 +110,7 @@ type Summary struct {
 	CodePath        string   `json:"code_path"`
 	Registries      []string `json:"registries"`
 	Risk            string   `json:"risk"`
+	Coverage        string   `json:"coverage"`
 	Guidance        string   `json:"guidance"`
 	AnalyzedAt      string   `json:"analyzed_at"`
 	RepositoryFlags []string `json:"repository_flags"`
@@ -130,17 +131,21 @@ type LookupResult struct {
 	Note    string    `json:"note"`
 }
 
-// Finding is one finding of a verdict.
+// Finding is one finding of a verdict. Level is how far it works against the installer
+// (abuse, overreach, ...), Review what the classifier's own review made of it, and Affects whom
+// it is aimed at.
 type Finding struct {
-	ID          string `json:"id"`
-	Class       string `json:"class"`
-	ClassLabel  string `json:"class_label"`
-	Severity    string `json:"severity"`
-	Confidence  string `json:"confidence"`
-	Disposition string `json:"disposition"`
-	Path        string `json:"path"`
-	Lines       []int  `json:"lines"`
-	Claim       string `json:"claim"`
+	ID         string `json:"id"`
+	Class      string `json:"class"`
+	ClassLabel string `json:"class_label"`
+	Severity   string `json:"severity"`
+	Confidence string `json:"confidence"`
+	Level      string `json:"level"`
+	Review     string `json:"review"`
+	Affects    string `json:"affects"`
+	Path       string `json:"path"`
+	Lines      []int  `json:"lines"`
+	Claim      string `json:"claim"`
 }
 
 // Artifact is GET /api/v1/artifact's artifact. Fields the CLI does not print stay in the raw
@@ -155,18 +160,22 @@ type Artifact struct {
 	URL         string   `json:"url"`
 	Registries  []string `json:"registries"`
 	Risk        string   `json:"risk"`
+	Coverage    string   `json:"coverage"`
 	Guidance    string   `json:"guidance"`
 	Verdict     *struct {
-		Verdict          string    `json:"verdict"`
-		AnalyzedAt       string    `json:"analyzed_at"`
-		Model            string    `json:"model"`
-		Commit           string    `json:"commit"`
-		CoverageComplete bool      `json:"coverage_complete"`
-		Reasons          []string  `json:"reasons"`
-		Unresolved       []string  `json:"unresolved"`
-		Findings         []Finding `json:"findings"`
-		FindingsTotal    int       `json:"findings_total"`
-		RefutedFindings  int       `json:"refuted_findings"`
+		Risk            string    `json:"risk"`
+		Coverage        string    `json:"coverage"`
+		AnalyzedAt      string    `json:"analyzed_at"`
+		Model           string    `json:"model"`
+		Commit          string    `json:"commit"`
+		Reasons         []string  `json:"reasons"`
+		CoverageReasons []string  `json:"coverage_reasons"`
+		Unresolved      []string  `json:"unresolved"`
+		Findings        []Finding `json:"findings"`
+		FindingsTotal   int       `json:"findings_total"`
+		NotesTotal      int       `json:"notes_total"`
+		FlagsTotal      int       `json:"flags_total"`
+		RefutedFindings int       `json:"refuted_findings"`
 	} `json:"verdict"`
 	RepositoryLineage *struct {
 		FullName      string   `json:"full_name"`
@@ -207,6 +216,7 @@ type CheckOutcome struct {
 	MatchedBy string    `json:"matched_by"`
 	Status    string    `json:"status"`
 	Risk      string    `json:"risk"`
+	Coverage  string    `json:"coverage"`
 	Guidance  string    `json:"guidance"`
 	Matches   []Summary `json:"matches"`
 	More      bool      `json:"more"`
@@ -221,16 +231,52 @@ type CheckResult struct {
 
 // Status is GET /api/v1/status.
 type Status struct {
-	Index map[string]struct {
-		Artifacts    int `json:"artifacts"`
-		Analyzed     int `json:"analyzed"`
-		Malicious    int `json:"malicious"`
-		Suspicious   int `json:"suspicious"`
-		Inconclusive int `json:"inconclusive"`
-		Benign       int `json:"benign"`
-	} `json:"index"`
-	LatestAnalyzedAt string `json:"latest_analyzed_at"`
-	LatestListedAt   string `json:"latest_listed_at"`
+	Index            map[string]IndexCounts `json:"index"`
+	LatestAnalyzedAt string                 `json:"latest_analyzed_at"`
+	LatestListedAt   string                 `json:"latest_listed_at"`
+}
+
+// IndexCounts is one kind's counts in Status. Other keeps every other numeric count the index
+// sent, such as the retired malicious, suspicious and inconclusive of an index not yet on risk
+// and coverage, so a reader can show what the fixed fields would otherwise drop.
+type IndexCounts struct {
+	Artifacts int `json:"artifacts"`
+	Analyzed  int `json:"analyzed"`
+	High      int `json:"high"`
+	Medium    int `json:"medium"`
+	Low       int `json:"low"`
+	Benign    int `json:"benign"`
+	// Analyzed with partial coverage, at any risk.
+	Partial int            `json:"partial"`
+	Other   map[string]int `json:"other,omitempty"`
+}
+
+var indexCountsKnown = map[string]bool{"artifacts": true, "analyzed": true, "high": true, "medium": true, "low": true, "benign": true, "partial": true}
+
+// UnmarshalJSON decodes the known counts and collects the rest into Other.
+func (k *IndexCounts) UnmarshalJSON(data []byte) error {
+	type plain IndexCounts
+	var p plain
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	p.Other = nil
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err != nil {
+		return err
+	}
+	for key, raw := range all {
+		var n int
+		if indexCountsKnown[key] || json.Unmarshal(raw, &n) != nil {
+			continue
+		}
+		if p.Other == nil {
+			p.Other = map[string]int{}
+		}
+		p.Other[key] = n
+	}
+	*k = IndexCounts(p)
+	return nil
 }
 
 // APIError is an answer other than 200. NotFound reports a 404.
