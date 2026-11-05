@@ -79,7 +79,10 @@ type Settings struct {
 	AuthorityHost  string `json:"authority_host,omitempty"`
 	ReadFrom       string `json:"read_from"`
 	LogPath        string `json:"log_path"`
-	InstalledAt    string `json:"installed_at"`
+	// VectorBin is the Vector binary install was told to run, so reconcile keeps running it; empty
+	// means the one Beacon's package installed, found again each time.
+	VectorBin   string `json:"vector_bin,omitempty"`
+	InstalledAt string `json:"installed_at"`
 }
 
 // InstallOptions is what `forwarder install` was given.
@@ -154,6 +157,7 @@ func (o InstallOptions) settings() (Settings, error) {
 		AuthorityHost:  strings.TrimRight(strings.TrimSpace(o.AuthorityHost), "/"),
 		ReadFrom:       strings.TrimSpace(o.ReadFrom),
 		LogPath:        o.LogPath,
+		VectorBin:      strings.TrimSpace(o.VectorBin),
 	}
 	if err := httpsURL("--endpoint", s.Endpoint, true); err != nil {
 		return s, err
@@ -334,7 +338,7 @@ func Install(o InstallOptions) (InstallResult, error) {
 	if !manager.Supported() {
 		return InstallResult{}, errors.New(manager.UnsupportedReason())
 	}
-	vector, err := findVector(o.VectorBin)
+	vector, err := findVector(settings.VectorBin)
 	if err != nil {
 		return InstallResult{}, err
 	}
@@ -560,7 +564,7 @@ func Reconcile(opts ReconcileOptions) (ReconcileResult, error) {
 	if !manager.Supported() {
 		return ReconcileResult{Skipped: manager.UnsupportedReason()}, nil
 	}
-	vector, err := findVector("")
+	vector, err := findVector(settings.VectorBin)
 	if err != nil {
 		return ReconcileResult{Warning: err.Error()}, err
 	}
@@ -592,8 +596,9 @@ func Reconcile(opts ReconcileOptions) (ReconcileResult, error) {
 		LogDir:                 logDir,
 		HasCertificatePassword: hasPassword,
 	})
-	current, _ := os.ReadFile(configPath)
+	current, readErr := os.ReadFile(configPath)
 	configChanged := string(current) != rendered
+	var rejected string
 	if configChanged {
 		candidate := configPath + ".new"
 		if err := atomicfile.Write(candidate, []byte(rendered), 0o600); err != nil {
@@ -601,9 +606,15 @@ func Reconcile(opts ReconcileOptions) (ReconcileResult, error) {
 		}
 		if err := validateVector(vector.Path, candidate); err != nil {
 			_ = os.Remove(candidate)
-			return ReconcileResult{Warning: "kept the previous config: " + err.Error()}, nil
-		}
-		if err := os.Rename(candidate, configPath); err != nil {
+			if readErr != nil {
+				// Nothing to fall back to.
+				return ReconcileResult{Warning: "Vector rejected the config, and there is no previous one: " + err.Error()}, nil
+			}
+			// The previous config still runs. The service is put back regardless, because the MSI
+			// upgrade removed it before this install, and an old config running beats none.
+			rejected = "kept the previous config, which Vector still runs: " + err.Error()
+			configChanged = false
+		} else if err := os.Rename(candidate, configPath); err != nil {
 			return ReconcileResult{Warning: err.Error()}, err
 		}
 	}
@@ -614,12 +625,12 @@ func Reconcile(opts ReconcileOptions) (ReconcileResult, error) {
 		}
 	}
 	if !opts.Restart && !configChanged && unitCurrent && manager.Status().Running {
-		return ReconcileResult{Unchanged: true}, nil
+		return ReconcileResult{Unchanged: rejected == "", Warning: rejected}, nil
 	}
 	if err := manager.Load(); err != nil {
 		return ReconcileResult{Warning: err.Error()}, err
 	}
-	return ReconcileResult{Restarted: true}, nil
+	return ReconcileResult{Restarted: true, Warning: rejected}, nil
 }
 
 // Status is what `forwarder status` and `endpoint status` show.

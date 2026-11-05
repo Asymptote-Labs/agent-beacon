@@ -2,7 +2,10 @@ package sentinel
 
 import (
 	"bufio"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"os/exec"
@@ -111,23 +114,27 @@ func TestForwarderConfigDeliversThroughRealVector(t *testing.T) {
 	// The restricted-mode switch replaces the log with a copy under the same name. Vector recognizes
 	// a file by its first line, so it keeps reading the replaced one; install and repair, which make
 	// the switch, then restart the forwarder (Reconcile with Restart), and it resumes in the copy.
-	data, err := os.ReadFile(settings.LogPath)
-	if err != nil {
-		t.Fatal(err)
+	// On Windows a plain rename cannot replace a file Vector holds open (Beacon's writer renames with
+	// POSIX semantics instead), so there the MSI smoke covers it, with the real switch.
+	if runtime.GOOS != "windows" {
+		data, err := os.ReadFile(settings.LogPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(settings.LogPath+".copy", data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(settings.LogPath+".copy", settings.LogPath); err != nil {
+			t.Fatal(err)
+		}
+		log.append(5) // between the switch and the restart
+		if !vector.stop() {
+			graceful = false
+		}
+		vector = startVector(t, vectorBin, configPath, mock.URL, caFile)
+		log.append(5)
+		waitForRows(t, mock, log.ids, 60*time.Second)
 	}
-	if err := os.WriteFile(settings.LogPath+".copy", data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(settings.LogPath+".copy", settings.LogPath); err != nil {
-		t.Fatal(err)
-	}
-	log.append(5) // between the switch and the restart
-	if !vector.stop() {
-		graceful = false
-	}
-	vector = startVector(t, vectorBin, configPath, mock.URL, caFile)
-	log.append(5)
-	waitForRows(t, mock, log.ids, 60*time.Second)
 	time.Sleep(3 * time.Second) // let anything resent arrive before counting
 	vector.stop()
 
@@ -158,7 +165,7 @@ func TestForwarderConfigDeliversThroughRealVector(t *testing.T) {
 	}
 	if !t.Failed() {
 		tokens, ingests, _ := mock.Counts()
-		t.Logf("%d events delivered exactly once across a rotation, a restart and a log copy; %d token requests, %d ingest requests", len(log.ids), tokens, ingests)
+		t.Logf("%d events delivered exactly once across retried 403s, a rotation, a restart and (off Windows) a log copy; %d token requests, %d ingest requests", len(log.ids), tokens, ingests)
 	}
 }
 
@@ -279,12 +286,21 @@ func trustCA(t *testing.T, caFile string) {
 		t.Fatalf("certutil -addstore Root: %v\n%s", err, out)
 	}
 	t.Cleanup(func() {
-		// The mock's CA has its own random name; delete exactly that certificate.
-		out, _ := exec.Command("powershell", "-NoProfile", "-Command",
-			`$c = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2('`+caFile+`'); `+
-				`Get-ChildItem Cert:\LocalMachine\Root | Where-Object Thumbprint -eq $c.Thumbprint | Remove-Item`).CombinedOutput()
-		if len(out) > 0 {
-			t.Logf("removing the mock CA: %s", out)
+		// The mock's CA has its own random name; delete exactly that certificate, by its SHA-1
+		// thumbprint, which is how certutil names one.
+		data, err := os.ReadFile(caFile)
+		if err != nil {
+			t.Logf("removing the mock CA: %v", err)
+			return
+		}
+		block, _ := pem.Decode(data)
+		if block == nil {
+			t.Log("removing the mock CA: not PEM")
+			return
+		}
+		thumbprint := sha1.Sum(block.Bytes)
+		if out, err := exec.Command("certutil", "-delstore", "Root", hex.EncodeToString(thumbprint[:])).CombinedOutput(); err != nil {
+			t.Logf("removing the mock CA: %v\n%s", err, out)
 		}
 	})
 }

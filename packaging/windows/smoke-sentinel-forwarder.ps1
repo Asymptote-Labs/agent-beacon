@@ -140,12 +140,55 @@ switch ($Phase) {
         New-Item -ItemType Directory -Force -Path $work | Out-Null
         if (-not $MockExe -or -not (Test-Path -LiteralPath $MockExe)) { throw "-MockExe must name the built sentinel-mock.exe" }
 
-        # A certificate credential, the one the docs lead with, exported the way OpenSSL 3 reads it.
-        $cert = New-SelfSignedCertificate -Subject 'CN=beacon-sentinel-smoke' -CertStoreLocation Cert:\LocalMachine\My `
+        # A certificate credential, the one the docs lead with, made with `openssl pkcs12 -export`.
+        $openssl = (Get-Command openssl -ErrorAction SilentlyContinue).Source
+        if (-not $openssl) { $openssl = Join-Path $env:ProgramFiles 'Git\usr\bin\openssl.exe' }
+        $key = Join-Path $work 'app-key.pem'
+        $certPem = Join-Path $work 'app-cert.pem'
+        & $openssl req -x509 -newkey rsa:2048 -nodes -keyout $key -out $certPem -days 2 -subj '/CN=beacon-sentinel-smoke' 2>&1 | Out-Null
+        & $openssl pkcs12 -export -inkey $key -in $certPem -out $pfx -passout "pass:$pfxPassword" 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $pfx)) { throw "openssl could not make the test PFX" }
+        Remove-Item -LiteralPath $key
+
+        # Which PFX encodings the bundled Vector can read, recorded for the docs: Windows'
+        # Export-PfxCertificate with each algorithm, and OpenSSL's default.
+        $cert = New-SelfSignedCertificate -Subject 'CN=beacon-sentinel-smoke-export' -CertStoreLocation Cert:\LocalMachine\My `
             -KeyAlgorithm RSA -KeyLength 2048 -KeyExportPolicy Exportable -NotAfter (Get-Date).AddDays(2)
-        $secure = ConvertTo-SecureString $pfxPassword -AsPlainText -Force
-        Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $secure -CryptoAlgorithmOption AES256_SHA256 | Out-Null
         $cert.Thumbprint | Set-Content -LiteralPath (Join-Path $work 'cert-thumbprint')
+        $secure = ConvertTo-SecureString $pfxPassword -AsPlainText -Force
+        $variants = [ordered]@{ 'openssl pkcs12 -export' = $pfx }
+        foreach ($algorithm in @('AES256_SHA256', 'TripleDES_SHA1')) {
+            $path = Join-Path $work "export-$algorithm.pfx"
+            Export-PfxCertificate -Cert $cert -FilePath $path -Password $secure -CryptoAlgorithmOption $algorithm | Out-Null
+            $variants["Export-PfxCertificate -CryptoAlgorithmOption $algorithm"] = $path
+        }
+        $vectorExe = Join-Path $env:ProgramFiles 'Beacon\bin\vector.exe'
+        foreach ($name in $variants.Keys) {
+            $probe = Join-Path $work 'pfx-probe.toml'
+            @"
+data_dir = '$work'
+[sources.probe]
+type = 'demo_logs'
+format = 'json'
+count = 1
+[sinks.probe]
+type = 'azure_logs_ingestion'
+inputs = ['probe']
+endpoint = 'https://127.0.0.1:9'
+dcr_immutable_id = '$dcr'
+stream_name = 'Custom-BeaconRuntimeRaw'
+[sinks.probe.auth]
+azure_credential_kind = 'client_certificate_credential'
+azure_tenant_id = '$tenant'
+azure_client_id = '$client'
+certificate_path = '$($variants[$name])'
+certificate_password = '$pfxPassword'
+"@ | Set-Content -LiteralPath $probe -Encoding ascii
+            $out = & $vectorExe validate --skip-healthchecks $probe 2>&1 | Out-String
+            $verdict = if ($LASTEXITCODE -eq 0) { 'accepted' } else { 'REJECTED: ' + (($out -split "`n" | Where-Object { $_ -match 'PKCS12|Sink' }) -join ' ').Trim() }
+            Write-Output "pfx probe: $name -> $verdict"
+            $global:LASTEXITCODE = 0
+        }
 
         # The mock outlives this step: it keeps answering through the upgrade and the log access
         # switches, until the cleanup phase stops it.

@@ -311,6 +311,18 @@ func TestForwarderReconcile(t *testing.T) {
 	if readFile(t, configPath) != "# old\n" {
 		t.Fatal("a rejected reconcile replaced the config")
 	}
+	// After an MSI upgrade removed the service, a rejected config still gets the service back, on
+	// the previous config.
+	if err := Remove(true); err != nil {
+		t.Fatal(err)
+	}
+	f.svc.current = false
+	if got, err := Reconcile(ReconcileOptions{Restart: true}); err != nil || got.Warning == "" || !got.Restarted || !f.svc.running {
+		t.Fatalf("rejected after upgrade: %+v %v running=%t", got, err, f.svc.running)
+	}
+	if readFile(t, configPath) != "# old\n" {
+		t.Fatal("a rejected reconcile replaced the config")
+	}
 	f.reject = nil
 	// The MSI upgrade removes the service and keeps the state; the install that follows puts the
 	// service back.
@@ -386,5 +398,26 @@ func TestForwarderInstallRemovesAServiceThatNeverStarted(t *testing.T) {
 	}
 	if _, err := ReadSettings(); err != nil {
 		t.Fatalf("the settings must stay for the next install or reconcile: %v", err)
+	}
+}
+
+// The Vector install was told to run is the one reconcile keeps running.
+func TestForwarderReconcileKeepsTheVectorInstallWasGiven(t *testing.T) {
+	newForwarderFixture(t)
+	var asked []string
+	findVector = func(explicit string) (asymptote.VectorInfo, error) {
+		asked = append(asked, explicit)
+		return asymptote.VectorInfo{Path: "/custom/vector", Version: "0.56.0"}, nil
+	}
+	o := validInstall()
+	o.VectorBin = "/custom/vector"
+	if _, err := Install(o); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Reconcile(ReconcileOptions{Restart: true}); err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 2 || asked[0] != "/custom/vector" || asked[1] != "/custom/vector" {
+		t.Fatalf("findVector was asked for %q", asked)
 	}
 }
