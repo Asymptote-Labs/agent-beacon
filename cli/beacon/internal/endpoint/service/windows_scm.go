@@ -319,7 +319,16 @@ func stopAndWait(s *mgr.Service, name string, timeout time.Duration, terminateHu
 		if err := waitForServiceProcess(process, name, time.Now().Add(timeout), timeout); err != nil {
 			return errors.Join(stopErr, err)
 		}
-		return nil
+		// The SCM learns of the exit on its own, a moment later. Until it has, the service still
+		// reads as pending, and a start issued now is refused as already running.
+		settle := time.Now().Add(timeout)
+		for time.Now().Before(settle) {
+			if status, err := s.Query(); err == nil && status.State == svc.Stopped {
+				return nil
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		return errors.Join(stopErr, fmt.Errorf("the %s service's process was ended but the service never reported stopped", name))
 	}
 
 	if _, err := s.Control(svc.Stop); err != nil {
