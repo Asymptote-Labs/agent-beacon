@@ -162,3 +162,48 @@ func TestRootsAddClaudeOnlyWhenClaudeIsSetUp(t *testing.T) {
 		t.Fatalf("roots = %v", roots)
 	}
 }
+
+func TestManagedReadsOnlyARegularMarker(t *testing.T) {
+	root := t.TempDir()
+	for _, r := range Install([]string{root}) {
+		if r.Err != nil {
+			t.Fatal(r.Err)
+		}
+	}
+	name := Names()[0]
+	if !Managed(filepath.Join(root, name)) {
+		t.Fatal("Beacon's own skill was not recognized")
+	}
+
+	skill := func(t *testing.T) string {
+		dir := filepath.Join(t.TempDir(), name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	t.Run("oversized", func(t *testing.T) {
+		dir := skill(t)
+		if err := os.WriteFile(filepath.Join(dir, MarkerFile), []byte(markerContent+strings.Repeat("x", 1<<20)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if Managed(dir) {
+			t.Error("an oversized marker was taken for Beacon's")
+		}
+	})
+	t.Run("symlinked", func(t *testing.T) {
+		dir := skill(t)
+		// A link to a genuine marker is still not followed, and a link to a device that never
+		// ends must not be read at all.
+		for _, target := range []string{filepath.Join(root, name, MarkerFile), "/dev/zero"} {
+			link := filepath.Join(dir, MarkerFile)
+			_ = os.Remove(link)
+			if err := os.Symlink(target, link); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+			if Managed(dir) {
+				t.Errorf("a marker linked to %s was taken for Beacon's", target)
+			}
+		}
+	})
+}
