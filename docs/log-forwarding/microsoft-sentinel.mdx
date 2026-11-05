@@ -230,6 +230,23 @@ One case is not retried. When Microsoft Entra ID refuses the credential itself, 
 
 `vector.toml` in the pack is the same config for running Vector under your own service manager, with the values taken from its environment: `BEACON_SENTINEL_DCE_ENDPOINT` (the logs ingestion URL), `BEACON_SENTINEL_DCR_IMMUTABLE_ID`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET`. If you already run it that way, stop that service before you install the managed forwarder, or every line is sent twice.
 
+### Who ran each session
+
+On a machine several people use, the person behind an event is in `RawData.user`: `uid` is the account's uid, or its SID on Windows, and `name` its name. Hook and plugin events carry it, because each hook and plugin runs as the person who ran the agent; with [restricted log access](/security/restricted-log-access) the operating system vouches for it. Events from an agent's own OpenTelemetry export, such as Claude Code's token usage and cost, carry the collector's own account instead (such as `root`, or the machine account `COMPUTERNAME$` on Windows), because every account sends to the same local port. Claude Cowork is the exception: its events name the cloud account it reports. Both kinds share the session's id, so take the person from the hook and plugin events, and keep an event's own user where its session has none:
+
+```kql title="Attribute every event to the person who ran its session"
+let owners = BeaconRuntime_CL
+    | where isnotempty(SessionId) and tostring(RawData.harness.collection_method) in ("hook", "plugin")
+    | summarize OwnerId = take_any(tostring(RawData.user.uid)), Owner = take_any(tostring(RawData.user.name)) by HostName, SessionId;
+BeaconRuntime_CL
+| where isnotempty(SessionId)
+| join kind=leftouter owners on HostName, SessionId
+| extend UserId = coalesce(OwnerId, tostring(RawData.user.uid)), User = coalesce(Owner, tostring(RawData.user.name))
+| summarize Events = count() by HostName, User, UserId, HarnessName
+```
+
+Claude Code's events also carry the Anthropic account the person signed in with, in `RawData.raw.attributes["user.email"]` and `["user.account_uuid"]`. That names the Claude account rather than the operating system login.
+
 The generated table schema includes columns such as `Vendor`, `Product`, `EventAction`, `Severity`, `HostName`, `UserName`, `HarnessName`, `SessionId`, `ToolName`, `CommandLine`, `Repository`, `Branch`, `Message`, and `RawData`.
 
 ## Validate forwarding
