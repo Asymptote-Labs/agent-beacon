@@ -251,10 +251,11 @@ PY
 
 # OTLP is attributed to the account that sent it, not to the root collector. Every account exports to
 # the same loopback collector, so before this every OTLP event on a system install read as root.
-# Each export below also claims to be root through the peer attributes, which must be ignored.
+# Each export below also claims to be root through the peer attributes, on the resource and on the
+# record, and both claims must be ignored.
 otlp_from() {
   # $1 = account, $2 = session id; a browser-extension-shaped log over OTLP/HTTP JSON.
-  body='{"resourceLogs":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"chatgpt_web"}},{"key":"beacon.peer.uid","value":{"stringValue":"0"}},{"key":"beacon.peer.user","value":{"stringValue":"root"}}]},"scopeLogs":[{"logRecords":[{"timeUnixNano":"1762430000000000000","body":{"stringValue":"smoke"},"attributes":[{"key":"event.name","value":{"stringValue":"user_prompt"}},{"key":"session.id","value":{"stringValue":"'"$2"'"}}]}]}]}]}'
+  body='{"resourceLogs":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"chatgpt_web"}},{"key":"beacon.peer.uid","value":{"stringValue":"0"}},{"key":"beacon.peer.user","value":{"stringValue":"root"}}]},"scopeLogs":[{"logRecords":[{"timeUnixNano":"1762430000000000000","body":{"stringValue":"smoke"},"attributes":[{"key":"event.name","value":{"stringValue":"user_prompt"}},{"key":"session.id","value":{"stringValue":"'"$2"'"}},{"key":"beacon.peer.uid","value":{"stringValue":"0"}},{"key":"beacon.peer.user","value":{"stringValue":"root"}}]}]}]}]}'
   docker exec "$CONTAINER" su -s /bin/sh "$1" -c "curl -fsS -o /dev/null -H 'Content-Type: application/json' --data-binary '$body' http://127.0.0.1:4318/v1/logs" || {
     echo "OTLP export as $1 failed" >&2; exit 1; }
 }

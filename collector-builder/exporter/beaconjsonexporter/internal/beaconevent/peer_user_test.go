@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 )
 
@@ -70,5 +71,69 @@ func TestCoworkIdentityStillWinsOverThePeer(t *testing.T) {
 	}
 	if event.User.Name != "person@example.com" {
 		t.Fatalf("user = %+v, want the Cowork identity", event.User)
+	}
+}
+
+// A sender cannot name an account from below the resource: beacon_peer writes the resource, and a
+// record, span or datapoint attribute of the same name used to win the merge.
+func TestPeerAttributesBelowTheResourceAreIgnored(t *testing.T) {
+	t.Setenv("USER", "root")
+	conv := NewConverter(Options{PeerUser: true})
+
+	// The kernel named alice; the record claims root.
+	resource, record := peerLog("chatgpt_web")
+	record.Attributes().PutStr(PeerUIDAttribute, "0")
+	record.Attributes().PutStr(PeerUserAttribute, "root")
+	if got := conv.EventFromLog(resource, record).User; got.Name != "alice" || got.UID != "1001" {
+		t.Fatalf("log user = %+v, want the kernel's alice over the record's claim", got)
+	}
+
+	// The kernel named nobody; the record's claim must not stand in.
+	unknown := map[string]interface{}{"service.name": "chatgpt_web"}
+	if got := conv.EventFromLog(unknown, record).User; got != (UserInfo{}) {
+		t.Fatalf("log user = %+v, want none: the only identity was the sender's own claim", got)
+	}
+
+	span := ptrace.NewSpan()
+	span.SetName("tool")
+	span.Attributes().PutStr(PeerUIDAttribute, "0")
+	span.Attributes().PutStr(PeerUserAttribute, "root")
+	if got := conv.EventFromSpan(resource, span).User; got.Name != "alice" || got.UID != "1001" {
+		t.Fatalf("span user = %+v, want alice", got)
+	}
+	if got := conv.EventFromSpan(unknown, span).User; got != (UserInfo{}) {
+		t.Fatalf("span user = %+v, want none", got)
+	}
+
+	metrics := pmetric.NewMetrics()
+	rm := metrics.ResourceMetrics().AppendEmpty()
+	rm.Resource().Attributes().PutStr("service.name", "claude-code")
+	sum := rm.ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
+	sum.SetName("claude_code.token.usage")
+	dp := sum.SetEmptySum().DataPoints().AppendEmpty()
+	dp.SetIntValue(10)
+	dp.Attributes().PutStr("type", "input")
+	dp.Attributes().PutStr(PeerUIDAttribute, "0")
+	dp.Attributes().PutStr(PeerUserAttribute, "root")
+	events := conv.EventsFromMetrics(metrics)
+	if len(events) == 0 {
+		t.Fatal("no events from the token usage metric")
+	}
+	for _, e := range events {
+		if e.User != (UserInfo{}) {
+			t.Fatalf("metric user = %+v, want none: the datapoint's claim must not stand in", e.User)
+		}
+	}
+}
+
+// With the processor in the pipeline, an export it could not attribute carries no user rather than
+// the collector's own account, which on a system install would read exactly like root's own.
+func TestAnUnidentifiedSenderCarriesNoUser(t *testing.T) {
+	t.Setenv("USER", "root")
+	t.Setenv("UID", "0")
+	_, record := peerLog("chatgpt_web")
+	event := NewConverter(Options{PeerUser: true}).EventFromLog(map[string]interface{}{"service.name": "chatgpt_web"}, record)
+	if event.User != (UserInfo{}) {
+		t.Fatalf("user = %+v, want none", event.User)
 	}
 }

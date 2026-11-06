@@ -4,6 +4,6 @@ package peercred
 
 import "net"
 
-func lookupUID(*net.TCPAddr) (string, error) {
+func lookupUID(_, _ *net.TCPAddr) (string, error) {
 	return "", ErrUnsupported
 }

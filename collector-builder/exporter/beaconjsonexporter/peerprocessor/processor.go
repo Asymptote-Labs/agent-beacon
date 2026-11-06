@@ -19,6 +19,7 @@ package peerprocessor
 import (
 	"context"
 	"net"
+	"net/http"
 
 	"go.opentelemetry.io/collector/client"
 	"go.opentelemetry.io/collector/component"
@@ -30,6 +31,7 @@ import (
 	"go.opentelemetry.io/collector/processor"
 	"go.opentelemetry.io/collector/processor/processorhelper"
 	"go.uber.org/zap"
+	grpcpeer "google.golang.org/grpc/peer"
 
 	"github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/internal/accountname"
 	"github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/internal/beaconevent"
@@ -50,7 +52,7 @@ func NewFactory() processor.Factory {
 
 // peer resolves a client address to an account.
 type peer struct {
-	uid    func(*net.TCPAddr) (string, error)
+	uid    func(client, server *net.TCPAddr) (string, error)
 	name   func(uid string) string
 	logger *zap.Logger
 }
@@ -75,12 +77,33 @@ func (p *peer) identify(ctx context.Context) (uid, name string) {
 	if !ok || addr == nil {
 		return "", ""
 	}
-	uid, err := p.uid(addr)
+	// The collector's own end of the connection, so the lookup matches the whole connection rather
+	// than any socket that happens to share the client's port.
+	server := serverAddr(ctx)
+	if server == nil {
+		return "", ""
+	}
+	uid, err := p.uid(addr, server)
 	if err != nil {
 		p.logger.Debug("could not identify the account that sent an export", zap.Stringer("client", addr), zap.Error(err))
 		return "", ""
 	}
 	return uid, p.name(uid)
+}
+
+// serverAddr is the local address of the connection the export arrived on: the gRPC server records
+// it in the request's peer, and net/http in the request context, which the beacon_otlp_http receiver
+// passes down.
+func serverAddr(ctx context.Context) *net.TCPAddr {
+	if p, ok := grpcpeer.FromContext(ctx); ok && p != nil {
+		if addr, ok := p.LocalAddr.(*net.TCPAddr); ok {
+			return addr
+		}
+	}
+	if addr, ok := ctx.Value(http.LocalAddrContextKey).(*net.TCPAddr); ok {
+		return addr
+	}
+	return nil
 }
 
 // stamp makes a resource's peer attributes exactly what the kernel said: none of the sender's.
@@ -97,6 +120,74 @@ func stamp(resource pcommon.Resource, uid, name string) {
 	}
 }
 
+// strip removes the peer attributes from one attribute map below the resource. Only the resource may
+// carry them, and only as this processor wrote them: the converter reads them from the resource
+// alone, and removing them here keeps a sender's claim out of raw attributes and out of the HEC
+// exporters, which see the data as it leaves this processor.
+func strip(attrs pcommon.Map) {
+	attrs.Remove(beaconevent.PeerUIDAttribute)
+	attrs.Remove(beaconevent.PeerUserAttribute)
+}
+
+func stripLogs(rl plog.ResourceLogs) {
+	for i := 0; i < rl.ScopeLogs().Len(); i++ {
+		sl := rl.ScopeLogs().At(i)
+		strip(sl.Scope().Attributes())
+		for j := 0; j < sl.LogRecords().Len(); j++ {
+			strip(sl.LogRecords().At(j).Attributes())
+		}
+	}
+}
+
+func stripTraces(rs ptrace.ResourceSpans) {
+	for i := 0; i < rs.ScopeSpans().Len(); i++ {
+		ss := rs.ScopeSpans().At(i)
+		strip(ss.Scope().Attributes())
+		for j := 0; j < ss.Spans().Len(); j++ {
+			span := ss.Spans().At(j)
+			strip(span.Attributes())
+			for k := 0; k < span.Events().Len(); k++ {
+				strip(span.Events().At(k).Attributes())
+			}
+			for k := 0; k < span.Links().Len(); k++ {
+				strip(span.Links().At(k).Attributes())
+			}
+		}
+	}
+}
+
+func stripMetrics(rm pmetric.ResourceMetrics) {
+	for i := 0; i < rm.ScopeMetrics().Len(); i++ {
+		sm := rm.ScopeMetrics().At(i)
+		strip(sm.Scope().Attributes())
+		for j := 0; j < sm.Metrics().Len(); j++ {
+			m := sm.Metrics().At(j)
+			switch m.Type() {
+			case pmetric.MetricTypeGauge:
+				for k := 0; k < m.Gauge().DataPoints().Len(); k++ {
+					strip(m.Gauge().DataPoints().At(k).Attributes())
+				}
+			case pmetric.MetricTypeSum:
+				for k := 0; k < m.Sum().DataPoints().Len(); k++ {
+					strip(m.Sum().DataPoints().At(k).Attributes())
+				}
+			case pmetric.MetricTypeHistogram:
+				for k := 0; k < m.Histogram().DataPoints().Len(); k++ {
+					strip(m.Histogram().DataPoints().At(k).Attributes())
+				}
+			case pmetric.MetricTypeExponentialHistogram:
+				for k := 0; k < m.ExponentialHistogram().DataPoints().Len(); k++ {
+					strip(m.ExponentialHistogram().DataPoints().At(k).Attributes())
+				}
+			case pmetric.MetricTypeSummary:
+				for k := 0; k < m.Summary().DataPoints().Len(); k++ {
+					strip(m.Summary().DataPoints().At(k).Attributes())
+				}
+			}
+		}
+	}
+}
+
 var mutates = processorhelper.WithCapabilities(consumer.Capabilities{MutatesData: true})
 
 func createLogs(ctx context.Context, set processor.Settings, cfg component.Config, next consumer.Logs) (processor.Logs, error) {
@@ -105,6 +196,7 @@ func createLogs(ctx context.Context, set processor.Settings, cfg component.Confi
 		uid, name := p.identify(ctx)
 		for i := 0; i < logs.ResourceLogs().Len(); i++ {
 			stamp(logs.ResourceLogs().At(i).Resource(), uid, name)
+			stripLogs(logs.ResourceLogs().At(i))
 		}
 		return logs, nil
 	}, mutates)
@@ -116,6 +208,7 @@ func createTraces(ctx context.Context, set processor.Settings, cfg component.Con
 		uid, name := p.identify(ctx)
 		for i := 0; i < traces.ResourceSpans().Len(); i++ {
 			stamp(traces.ResourceSpans().At(i).Resource(), uid, name)
+			stripTraces(traces.ResourceSpans().At(i))
 		}
 		return traces, nil
 	}, mutates)
@@ -127,6 +220,7 @@ func createMetrics(ctx context.Context, set processor.Settings, cfg component.Co
 		uid, name := p.identify(ctx)
 		for i := 0; i < metrics.ResourceMetrics().Len(); i++ {
 			stamp(metrics.ResourceMetrics().At(i).Resource(), uid, name)
+			stripMetrics(metrics.ResourceMetrics().At(i))
 		}
 		return metrics, nil
 	}, mutates)

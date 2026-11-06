@@ -39,12 +39,25 @@ func TestUIDNamesTheOwnerOfARealLoopbackConnection(t *testing.T) {
 			server := <-accepted
 			defer server.Close()
 
-			uid, err := UID(server.RemoteAddr().(*net.TCPAddr))
-			if err != nil {
-				t.Fatalf("UID(%s) = %v", server.RemoteAddr(), err)
+			remote, local := server.RemoteAddr().(*net.TCPAddr), server.LocalAddr().(*net.TCPAddr)
+			want := strconv.Itoa(os.Geteuid())
+			if uid, err := sockDiagUID(remote, local); err != nil || uid != want {
+				if errors.Is(err, errDiagUnavailable) {
+					t.Logf("sock_diag unavailable here: %v", err)
+				} else {
+					t.Fatalf("sock_diag UID(%s -> %s) = %q, %v; want %s", remote, local, uid, err, want)
+				}
 			}
-			if want := strconv.Itoa(os.Geteuid()); uid != want {
-				t.Fatalf("UID = %s, want this process's %s", uid, want)
+			if uid, err := procLookup(remote, local); err != nil || uid != want {
+				t.Fatalf("/proc UID(%s -> %s) = %q, %v; want %s", remote, local, uid, err, want)
+			}
+			if uid, err := UID(remote, local); err != nil || uid != want {
+				t.Fatalf("UID = %q, %v; want this process's %s", uid, err, want)
+			}
+			// The same client address paired with another destination is another connection.
+			other := &net.TCPAddr{IP: local.IP, Port: local.Port + 1}
+			if uid, err := UID(remote, other); err == nil {
+				t.Fatalf("UID matched a connection to %s that does not exist: %s", other, uid)
 			}
 		})
 	}
@@ -65,25 +78,59 @@ func TestUIDOfAClosedClientIsUnknown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	remote := server.RemoteAddr().(*net.TCPAddr)
+	remote, local := server.RemoteAddr().(*net.TCPAddr), server.LocalAddr().(*net.TCPAddr)
 	// The server closes first, so the server's end takes TIME_WAIT; then the client's end closes
 	// with a reset so it leaves the table entirely.
 	_ = server.Close()
 	_ = client.(*net.TCPConn).SetLinger(0)
 	_ = client.Close()
-	if uid, err := UID(remote); err == nil {
+	if uid, err := UID(remote, local); err == nil {
 		t.Fatalf("UID of a closed client = %s, want unknown", uid)
 	}
 }
 
 func TestUIDRefusesWhatItCannotSee(t *testing.T) {
-	if _, err := UID(&net.TCPAddr{IP: net.ParseIP("10.1.2.3"), Port: 5000}); !errors.Is(err, ErrNotLoopback) {
+	collector := &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 4318}
+	if _, err := UID(&net.TCPAddr{IP: net.ParseIP("10.1.2.3"), Port: 5000}, collector); !errors.Is(err, ErrNotLoopback) {
 		t.Fatalf("remote address err = %v, want ErrNotLoopback", err)
 	}
 	for _, addr := range []*net.TCPAddr{nil, {IP: net.ParseIP("127.0.0.1")}, {IP: net.ParseIP("127.0.0.1"), Port: 70000}} {
-		if _, err := UID(addr); !errors.Is(err, ErrNotFound) {
+		if _, err := UID(addr, collector); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("UID(%v) err = %v, want ErrNotFound", addr, err)
 		}
+	}
+	if _, err := UID(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 5000}, nil); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("no server address err = %v, want ErrNotFound", err)
+	}
+}
+
+// The fallback is used only when sock_diag itself is unavailable, not when it answers "no such
+// socket".
+func TestLookupFallsBackOnlyWhenSockDiagIsUnavailable(t *testing.T) {
+	old := diagLookup
+	t.Cleanup(func() { diagLookup = old })
+	dir := t.TempDir()
+	oldProc := procNet
+	procNet = dir
+	t.Cleanup(func() { procNet = oldProc })
+	header := "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
+	row := "   2: 0100007F:B5D2 0100007F:10E6 01 00000000:00000000 00:00000000 00000000  1001        0 102 1 0 20 4 30 10 -1\n"
+	if err := os.WriteFile(filepath.Join(dir, "tcp"), []byte(header+row), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	client := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0xB5D2}
+	server := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0x10E6}
+	if procAddr4(client.IP, client.Port) != "0100007F:B5D2" {
+		t.Skip("fixtures are little-endian")
+	}
+
+	diagLookup = func(_, _ *net.TCPAddr) (string, error) { return "", errDiagUnavailable }
+	if uid, err := lookupUID(client, server); err != nil || uid != "1001" {
+		t.Fatalf("with sock_diag unavailable: %q, %v; want the /proc answer", uid, err)
+	}
+	diagLookup = func(_, _ *net.TCPAddr) (string, error) { return "", ErrNotFound }
+	if uid, err := lookupUID(client, server); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("with sock_diag saying no such socket: %q, %v; want ErrNotFound without a second guess", uid, err)
 	}
 }
 
@@ -99,6 +146,7 @@ func TestScanTableFixtures(t *testing.T) {
 		return fmt.Sprintf("%4d: %s %s %s 00000000:00000000 00:00000000 00000000 %5s        0 %s 1 0000000000000000 20 4 30 10 -1\n", sl, local, remote, st, uid, inode)
 	}
 	client := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0xB5D2}
+	server := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0x10E6}
 	write := func(tcp, tcp6 string) {
 		t.Helper()
 		if err := os.WriteFile(filepath.Join(dir, "tcp"), []byte(header+tcp), 0o644); err != nil {
@@ -134,9 +182,27 @@ func TestScanTableFixtures(t *testing.T) {
 			err:  ErrNotFound,
 		},
 		{
-			name: "two owners is ambiguous",
+			// Linux lets connections to different destinations share a source port.
+			name: "another account's socket on the same port to another service is not this client",
 			tcp: line(2, "0100007F:B5D2", "0100007F:10E6", "01", "1001", "102") +
 				line(3, "0100007F:B5D2", "0100007F:1F90", "01", "1002", "103"),
+			want: "1001",
+		},
+		{
+			name: "and when this client has gone, that socket is still not named",
+			tcp:  line(3, "0100007F:B5D2", "0100007F:1F90", "01", "1002", "103"),
+			err:  ErrNotFound,
+		},
+		{
+			name: "an unrelated time wait on the same port does not stop the lookup",
+			tcp: line(1, "0100007F:B5D2", "0100007F:1538", "06", "0", "0") +
+				line(2, "0100007F:B5D2", "0100007F:10E6", "01", "1001", "102"),
+			want: "1001",
+		},
+		{
+			name: "two owners of the same connection is ambiguous",
+			tcp: line(2, "0100007F:B5D2", "0100007F:10E6", "01", "1001", "102") +
+				line(3, "0100007F:B5D2", "0100007F:10E6", "01", "1002", "103"),
 			err: ErrAmbiguous,
 		},
 		{
@@ -155,11 +221,16 @@ func TestScanTableFixtures(t *testing.T) {
 			tcp:  line(2, "0100007F:B5D3", "0100007F:10E6", "01", "1001", "102"),
 			err:  ErrNotFound,
 		},
+		{
+			name: "the client end, not the collector's end of the same connection",
+			tcp:  line(1, "0100007F:10E6", "0100007F:B5D2", "01", "0", "101"),
+			err:  ErrNotFound,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			write(tc.tcp, tc.tcp6)
-			uid, err := UID(client)
+			uid, err := procLookup(client, server)
 			if tc.err != nil {
 				if !errors.Is(err, tc.err) {
 					t.Fatalf("UID = %q, %v; want %v", uid, err, tc.err)

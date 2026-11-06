@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http"
 	"testing"
 
 	"go.opentelemetry.io/collector/client"
@@ -13,6 +14,8 @@ import (
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.opentelemetry.io/collector/processor/processortest"
 
+	grpcpeer "google.golang.org/grpc/peer"
+
 	"github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/internal/beaconevent"
 )
 
@@ -21,7 +24,10 @@ func fakeKernel(t *testing.T, owner *net.TCPAddr, uid, name string) {
 	t.Helper()
 	oldUID, oldName := lookupUID, lookupName
 	t.Cleanup(func() { lookupUID, lookupName = oldUID, oldName })
-	lookupUID = func(addr *net.TCPAddr) (string, error) {
+	lookupUID = func(addr, server *net.TCPAddr) (string, error) {
+		if server == nil || server.Port != collectorPort {
+			return "", errors.New("not the collector's end")
+		}
 		if owner != nil && addr.IP.Equal(owner.IP) && addr.Port == owner.Port {
 			return uid, nil
 		}
@@ -35,8 +41,13 @@ func fakeKernel(t *testing.T, owner *net.TCPAddr, uid, name string) {
 	}
 }
 
+const collectorPort = 4318
+
+// from is the context an export arrives with: the client's address in client.Info and the
+// collector's own end where net/http puts it.
 func from(addr net.Addr) context.Context {
-	return client.NewContext(context.Background(), client.Info{Addr: addr})
+	ctx := context.WithValue(context.Background(), http.LocalAddrContextKey, &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: collectorPort})
+	return client.NewContext(ctx, client.Info{Addr: addr})
 }
 
 func forgedLogs() plog.Logs {
@@ -162,5 +173,98 @@ func TestDeclaresThatItMutates(t *testing.T) {
 	p, _ := NewFactory().CreateLogs(context.Background(), processortest.NewNopSettings(componentType), &Config{}, new(consumertest.LogsSink))
 	if !p.Capabilities().MutatesData {
 		t.Fatal("MutatesData = false")
+	}
+}
+
+// A claim below the resource is removed everywhere a sender can put one, so only the resource
+// carries an account, and only the kernel's.
+func TestClaimsBelowTheResourceAreRemoved(t *testing.T) {
+	alice := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 50126}
+	fakeKernel(t, alice, "1001", "alice")
+	set := processortest.NewNopSettings(componentType)
+	forge := func(m interface{ PutStr(string, string) }) {
+		m.PutStr(beaconevent.PeerUIDAttribute, "0")
+		m.PutStr(beaconevent.PeerUserAttribute, "root")
+	}
+
+	logs := plog.NewLogs()
+	sl := logs.ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty()
+	forge(sl.Scope().Attributes())
+	forge(sl.LogRecords().AppendEmpty().Attributes())
+	lsink := new(consumertest.LogsSink)
+	lp, _ := NewFactory().CreateLogs(context.Background(), set, &Config{}, lsink)
+	if err := lp.ConsumeLogs(from(alice), logs); err != nil {
+		t.Fatal(err)
+	}
+	gotSL := lsink.AllLogs()[0].ResourceLogs().At(0).ScopeLogs().At(0)
+	for name, attrs := range map[string]int{
+		"scope":  gotSL.Scope().Attributes().Len(),
+		"record": gotSL.LogRecords().At(0).Attributes().Len(),
+	} {
+		if attrs != 0 {
+			t.Errorf("log %s kept %d peer attributes", name, attrs)
+		}
+	}
+
+	traces := ptrace.NewTraces()
+	span := traces.ResourceSpans().AppendEmpty().ScopeSpans().AppendEmpty().Spans().AppendEmpty()
+	forge(span.Attributes())
+	forge(span.Events().AppendEmpty().Attributes())
+	forge(span.Links().AppendEmpty().Attributes())
+	tsink := new(consumertest.TracesSink)
+	tp, _ := NewFactory().CreateTraces(context.Background(), set, &Config{}, tsink)
+	if err := tp.ConsumeTraces(from(alice), traces); err != nil {
+		t.Fatal(err)
+	}
+	gotSpan := tsink.AllTraces()[0].ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0)
+	if gotSpan.Attributes().Len()+gotSpan.Events().At(0).Attributes().Len()+gotSpan.Links().At(0).Attributes().Len() != 0 {
+		t.Error("a span, span event or link kept a peer attribute")
+	}
+
+	metrics := pmetric.NewMetrics()
+	ms := metrics.ResourceMetrics().AppendEmpty().ScopeMetrics().AppendEmpty().Metrics()
+	forge(ms.AppendEmpty().SetEmptySum().DataPoints().AppendEmpty().Attributes())
+	forge(ms.AppendEmpty().SetEmptyGauge().DataPoints().AppendEmpty().Attributes())
+	forge(ms.AppendEmpty().SetEmptyHistogram().DataPoints().AppendEmpty().Attributes())
+	forge(ms.AppendEmpty().SetEmptyExponentialHistogram().DataPoints().AppendEmpty().Attributes())
+	forge(ms.AppendEmpty().SetEmptySummary().DataPoints().AppendEmpty().Attributes())
+	msink := new(consumertest.MetricsSink)
+	mp, _ := NewFactory().CreateMetrics(context.Background(), set, &Config{}, msink)
+	if err := mp.ConsumeMetrics(from(alice), metrics); err != nil {
+		t.Fatal(err)
+	}
+	got := msink.AllMetrics()[0].ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
+	n := got.At(0).Sum().DataPoints().At(0).Attributes().Len() +
+		got.At(1).Gauge().DataPoints().At(0).Attributes().Len() +
+		got.At(2).Histogram().DataPoints().At(0).Attributes().Len() +
+		got.At(3).ExponentialHistogram().DataPoints().At(0).Attributes().Len() +
+		got.At(4).Summary().DataPoints().At(0).Attributes().Len()
+	if n != 0 {
+		t.Errorf("metric datapoints kept %d peer attributes", n)
+	}
+}
+
+// Without the collector's end of the connection the lookup cannot be pinned to this connection, so
+// it is not made.
+func TestNoServerAddressMeansNoAttribution(t *testing.T) {
+	alice := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 50127}
+	fakeKernel(t, alice, "1001", "alice")
+	sink := new(consumertest.LogsSink)
+	p, _ := NewFactory().CreateLogs(context.Background(), processortest.NewNopSettings(componentType), &Config{}, sink)
+	ctx := client.NewContext(context.Background(), client.Info{Addr: alice})
+	if err := p.ConsumeLogs(ctx, forgedLogs()); err != nil {
+		t.Fatal(err)
+	}
+	if got := peerAttrs(t, sink.AllLogs()[0]); got[0] != "/" {
+		t.Fatalf("peer attributes = %v, want none without the server address", got)
+	}
+}
+
+// The gRPC server records the collector's end in the request's peer.
+func TestServerAddressFromGRPCPeer(t *testing.T) {
+	want := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 4317}
+	ctx := grpcpeer.NewContext(context.Background(), &grpcpeer.Peer{LocalAddr: want})
+	if got := serverAddr(ctx); got == nil || got.String() != want.String() {
+		t.Fatalf("serverAddr = %v, want %v", got, want)
 	}
 }

@@ -179,7 +179,7 @@ func (c Converter) EventsFromMetrics(metrics pmetric.Metrics) []Event {
 }
 
 func ShouldDropLog(resourceAttrs map[string]interface{}, record plog.LogRecord) bool {
-	attrs := MergeMaps(resourceAttrs, AttrsToMap(record.Attributes()))
+	attrs := mergeSignalAttrs(resourceAttrs, AttrsToMap(record.Attributes()))
 	if name := ClaudeLogEventName(attrs, record.Body().AsString()); isClaudeAPIBody(name) {
 		// A request body is decided once it is parsed, in eventFromLog: it is kept for a WebFetch
 		// page or for the MCP tools it advertised. Nothing is kept from a response body.
@@ -350,7 +350,7 @@ func (c Converter) EventFromLog(resourceAttrs map[string]interface{}, record plo
 // listings are the mcp.tool_listed events for the MCP tools a Claude Code request body advertised,
 // which are kept in its place.
 func (c Converter) eventFromLog(resourceAttrs map[string]interface{}, record plog.LogRecord) (event Event, keep bool, listings []Event) {
-	attrs := MergeMaps(resourceAttrs, AttrsToMap(record.Attributes()))
+	attrs := mergeSignalAttrs(resourceAttrs, AttrsToMap(record.Attributes()))
 	body := record.Body().AsString()
 	kept, isAPIBody := takeClaudeAPIBody(attrs, ClaudeLogEventName(attrs, body), c.opts.CaptureModelContext)
 	ts := Timestamp(record.Timestamp().AsTime())
@@ -388,7 +388,7 @@ func (c Converter) eventFromLog(resourceAttrs map[string]interface{}, record plo
 }
 
 func (c Converter) EventFromSpan(resourceAttrs map[string]interface{}, span ptrace.Span) Event {
-	attrs := MergeMaps(resourceAttrs, AttrsToMap(span.Attributes()))
+	attrs := mergeSignalAttrs(resourceAttrs, AttrsToMap(span.Attributes()))
 	codexTurnUsage := IsCodexTurnUsageSpan(attrs, span.Name())
 	action := statedAction(attrs, "beacon.event.action", "event.action", "gen_ai.agent.action", "ai.agent.action")
 	fidelity := asymptoteobserve.FidelityObserved
@@ -434,7 +434,7 @@ func (c Converter) EventFromSpan(resourceAttrs map[string]interface{}, span ptra
 }
 
 func (c Converter) ShouldDropSpan(resourceAttrs map[string]interface{}, span ptrace.Span) bool {
-	attrs := MergeMaps(resourceAttrs, AttrsToMap(span.Attributes()))
+	attrs := mergeSignalAttrs(resourceAttrs, AttrsToMap(span.Attributes()))
 	harness := HarnessName(attrs, span.Name())
 	if isCodexHarness(harness) {
 		return !c.opts.IncludeCodexSpans && !IsCodexTurnUsageSpan(attrs, span.Name())
@@ -899,7 +899,7 @@ func JSONMapAttr(attrs map[string]interface{}, key string) map[string]interface{
 }
 
 func (c Converter) EventFromMetric(resourceAttrs map[string]interface{}, metric pmetric.Metric) Event {
-	attrs := MergeMaps(resourceAttrs, map[string]interface{}{})
+	attrs := mergeSignalAttrs(resourceAttrs, map[string]interface{}{})
 	action := statedAction(attrs, "beacon.event.action", "event.action")
 	if action == "" {
 		action = "metric.observed"
@@ -1109,7 +1109,7 @@ func numberDataPointValue(dp pmetric.NumberDataPoint) float64 {
 }
 
 func (c Converter) usageEventFromDataPoint(resourceAttrs map[string]interface{}, metric pmetric.Metric, dpAttrs pcommon.Map, ts pcommon.Timestamp, value float64, extra map[string]interface{}) Event {
-	attrs := MergeMaps(resourceAttrs, AttrsToMap(dpAttrs))
+	attrs := mergeSignalAttrs(resourceAttrs, AttrsToMap(dpAttrs))
 	action := "token.usage"
 	if IsCostUsageMetric(metric.Name()) {
 		action = "cost.usage"
@@ -2365,12 +2365,34 @@ func (c Converter) applyPeerUser(event *Event, attrs map[string]interface{}) {
 	if !c.opts.PeerUser {
 		return
 	}
+	// With the processor in the pipeline, the collector's own account is never a fallback: on a
+	// system install it is root, and a sender that closed its connection before the lookup would
+	// otherwise be recorded exactly like root's own, kernel-attributed exports. An event whose sender
+	// could not be identified carries no user at all.
 	uid := FirstString(attrs, PeerUIDAttribute)
 	if uid == "" {
+		event.User = UserInfo{}
 		return
 	}
 	event.User.UID = uid
 	// An account the system cannot name is still recorded by its id, rather than keeping the
 	// collector's name beside someone else's uid.
 	event.User.Name = FirstString(attrs, PeerUserAttribute)
+}
+
+// mergeSignalAttrs is MergeMaps(resource, signal) for one record, span or datapoint, except that the
+// peer attributes come from the resource alone. beacon_peer writes them on the resource, and in a
+// plain merge a record, span or datapoint attribute of the same name would win, letting a sender
+// name any account it liked. The processor also strips them below the resource; this keeps the
+// converter right on its own.
+func mergeSignalAttrs(resource, signal map[string]interface{}) map[string]interface{} {
+	merged := MergeMaps(resource, signal)
+	for _, key := range []string{PeerUIDAttribute, PeerUserAttribute} {
+		if value, ok := resource[key]; ok {
+			merged[key] = value
+		} else {
+			delete(merged, key)
+		}
+	}
+	return merged
 }

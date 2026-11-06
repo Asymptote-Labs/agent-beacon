@@ -5,6 +5,7 @@ package peercred
 import (
 	"bufio"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -13,35 +14,48 @@ import (
 	"strings"
 )
 
-// procNet is where the socket tables are read. A var so tests can point it at fixtures.
+// procNet is where the fallback reads the socket tables. A var so tests can point it at fixtures.
 var procNet = "/proc/net"
 
-// lookupUID finds the client socket in the kernel's TCP tables.
+// diagLookup is the kernel's own exact lookup (see diag_linux.go); a var so tests can force the
+// fallback.
+var diagLookup = sockDiagUID
+
+// lookupUID asks the kernel who owns the client socket of the connection client -> server.
 //
-// /proc/net/tcp and tcp6 list every socket in this network namespace, one per line:
+// The first answer is NETLINK_SOCK_DIAG, the interface ss uses: given the connection's four-tuple
+// the kernel looks that one socket up in its connection hash, so the cost does not grow with the
+// number of sockets on the machine, which matters because this runs for every export. Where the
+// kernel offers no sock_diag (a module left out, a sandbox that refuses netlink), the socket tables
+// in /proc/net are read instead, matching the same four-tuple.
+//
+// Either way an answer is refused rather than guessed when it cannot be the sender: a socket in
+// TIME_WAIT or otherwise orphaned reports uid 0 and inode 0 whoever created it, which would name
+// root for a client that has gone; and no socket at all means the client closed before the lookup,
+// which a sender could do on purpose.
+func lookupUID(client, server *net.TCPAddr) (string, error) {
+	uid, err := diagLookup(client, server)
+	if err == nil || errors.Is(err, ErrNotFound) {
+		return uid, err
+	}
+	return procLookup(client, server)
+}
+
+// procLookup reads /proc/net/tcp and tcp6, where each socket is one line:
 //
 //	sl  local_address rem_address   st tx_queue:rx_queue tr:tm->when retrnsmt   uid  timeout inode
 //	 0: 0100007F:B5D2 0100007F:10E6 01 00000000:00000000 00:00000000 00000000  1001        0 81234
 //
-// The client end of a loopback connection is the line whose local address is the address the
-// collector saw as remote, and its uid column is the account that created that socket (sk_uid,
-// fixed at creation). The table is world-readable, so this needs no privilege beyond the
-// collector's own, and it reads the namespace the collector listens in, which is the one a
-// loopback client must share.
-//
-// Three cases are refused rather than guessed. A line with inode 0 is a socket in TIME_WAIT or
-// otherwise orphaned: the kernel prints uid 0 for those, which would name root for a client that
-// has gone. Two matching lines with different uids cannot both be the client. And no match at all
-// means the client closed before the lookup, which a sender could do deliberately; the event is
-// then left unattributed, never attributed to whoever else is connected.
-func lookupUID(client *net.TCPAddr) (string, error) {
-	want := map[string]bool{}
-	if ip4 := client.IP.To4(); ip4 != nil {
-		want[procAddr4(ip4, client.Port)] = true
+// The client's end of the connection is the line whose local address is the client and whose
+// remote address is the collector's listener.
+func procLookup(client, server *net.TCPAddr) (string, error) {
+	want := map[[2]string]bool{}
+	if c4, s4 := client.IP.To4(), server.IP.To4(); c4 != nil && s4 != nil {
+		want[[2]string{procAddr4(c4, client.Port), procAddr4(s4, server.Port)}] = true
 		// A dual-stack listener sees an IPv4 client as ::ffff:a.b.c.d in tcp6.
-		want[procAddr6(net.IP(append(net.IP{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff}, ip4...)), client.Port)] = true
+		want[[2]string{procAddr6(mapped(c4), client.Port), procAddr6(mapped(s4), server.Port)}] = true
 	} else {
-		want[procAddr6(client.IP.To16(), client.Port)] = true
+		want[[2]string{procAddr6(client.IP.To16(), client.Port), procAddr6(server.IP.To16(), server.Port)}] = true
 	}
 	found := ""
 	for _, table := range []string{"tcp", "tcp6"} {
@@ -52,7 +66,7 @@ func lookupUID(client *net.TCPAddr) (string, error) {
 		uid, err := scanTable(f, want)
 		_ = f.Close()
 		switch {
-		case err == ErrNotFound:
+		case errors.Is(err, ErrNotFound):
 			continue
 		case err != nil:
 			return "", err
@@ -67,18 +81,19 @@ func lookupUID(client *net.TCPAddr) (string, error) {
 	return found, nil
 }
 
-func scanTable(r io.Reader, want map[string]bool) (string, error) {
+func scanTable(r io.Reader, want map[[2]string]bool) (string, error) {
 	scanner := bufio.NewScanner(r)
 	found := ""
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
 		// sl, local, remote, st, queues, timer, retransmits, uid, timeout, inode
-		if len(fields) < 10 || !want[strings.ToUpper(fields[1])] {
+		if len(fields) < 10 || !want[[2]string{strings.ToUpper(fields[1]), strings.ToUpper(fields[2])}] {
 			continue
 		}
 		if fields[9] == "0" {
-			// TIME_WAIT and orphans: the uid column is 0 for them whoever made the socket.
-			return "", ErrNotFound
+			// TIME_WAIT and orphans: the uid column is 0 for them whoever made the socket. Not an
+			// answer, and not a reason to stop looking either.
+			continue
 		}
 		uid := fields[7]
 		if !isDecimal(uid) {
@@ -96,6 +111,10 @@ func scanTable(r io.Reader, want map[string]bool) (string, error) {
 		return "", ErrNotFound
 	}
 	return found, nil
+}
+
+func mapped(ip4 net.IP) net.IP {
+	return append(net.IP{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff}, ip4...)
 }
 
 // procAddr4 is how the kernel prints an IPv4 socket address: the address as one 32-bit word in host

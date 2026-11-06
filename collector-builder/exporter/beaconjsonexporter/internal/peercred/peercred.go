@@ -30,14 +30,22 @@ var (
 	ErrNotLoopback = errors.New("not a loopback address")
 )
 
-// UID returns the account id, as a decimal string, that owns the client socket bound to client: the
-// remote address of a connection the collector accepted.
-func UID(client *net.TCPAddr) (string, error) {
+// UID returns the account id, as a decimal string, that owns the client end of the connection from
+// client to server: the remote and local addresses of a connection the collector accepted.
+//
+// Both ends are matched, never the client's address alone. Linux lets connections to different
+// destinations share one source port, so 127.0.0.1:P can at the same time be this client and an
+// unrelated socket another account opened to some other service; matching only P would then name
+// that account, or give up on a stray TIME_WAIT entry, instead of finding this connection.
+func UID(client, server *net.TCPAddr) (string, error) {
 	if client == nil || client.Port <= 0 || client.Port > 65535 {
+		return "", ErrNotFound
+	}
+	if server == nil || server.Port <= 0 || server.Port > 65535 {
 		return "", ErrNotFound
 	}
 	if !client.IP.IsLoopback() {
 		return "", ErrNotLoopback
 	}
-	return lookupUID(client)
+	return lookupUID(client, server)
 }
