@@ -132,6 +132,11 @@ case "$sessions" in
 esac
 echo "ok: $SMOKE_USER and $SMOKE_USER2 are logged in (logind)"
 
+# A settings file, as a configuration manager would drop one before installing: its harness list has
+# to reach both the system install and the step that configures the user, and a trailing comment
+# must not fail the install.
+docker exec "$CONTAINER" sh -c 'printf "%s\n" "# managed by config management" "BEACON_ENDPOINT_HARNESSES=claude,codex,cursor # all three" >/etc/default/beacon && chmod 600 /etc/default/beacon'
+
 if ! docker exec "$CONTAINER" env -u SUDO_USER sh -c "$PKGMGR_INSTALL" >/tmp/beacon-pkg-install.log 2>&1; then
   echo "package install failed:" >&2
   tail -30 /tmp/beacon-pkg-install.log >&2
@@ -228,6 +233,15 @@ if docker exec "$CONTAINER" test -e /home/beaconsvc/.claude/settings.json; then
   echo "beaconsvc, whose only session is a background one, was configured as if it were a person" >&2; exit 1
 fi
 echo "ok: every logged-in user was configured, and the install said so for each (and not a background session's account)"
+
+docker exec "$CONTAINER" test -f "/home/$SMOKE_USER/.cursor/hooks.json" || {
+  echo "Cursor from /etc/default/beacon was not configured for $SMOKE_USER" >&2
+  grep -i "hook\|ignoring" /tmp/beacon-pkg-install.log >&2 || true
+  exit 1
+}
+grep -q "sudo usermod -aG beacon-log" /tmp/beacon-pkg-install.log || {
+  echo "the install did not say how to let someone read the restricted log" >&2; exit 1; }
+echo "ok: the settings file reached the user step (Cursor configured), and the beacon-log hint was printed"
 
 # Reachable by name, not just by absolute path.
 #

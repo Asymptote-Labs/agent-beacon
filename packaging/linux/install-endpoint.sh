@@ -6,78 +6,13 @@
 # mixed fleet has one contract rather than two.
 set -eu
 
-# Settings a configuration manager drops before installing the package. Salt's pkg.installed,
-# Ansible's apt/dnf modules, Puppet and Chef all run the package manager without letting the caller
-# set the environment of the maintainer scripts, so the BEACON_* variables below could not reach a
-# centrally deployed install any other way. /etc/default is the Debian convention and
-# /etc/sysconfig the RHEL one; the first that exists is read.
-#
-# The file is read, never sourced: only the variables this script documents are taken, as plain
-# KEY=VALUE lines (an optional `export`, matching single or double quotes, comments), so nothing in
-# it runs. It is skipped unless root owns it and no one else can write it, because this script runs
-# as root from the package manager. A variable already set in the environment wins over the file.
-BEACON_DEFAULTS_FILE="${BEACON_DEFAULTS_FILE:-}"
-if [ -z "$BEACON_DEFAULTS_FILE" ]; then
-  for candidate in /etc/default/beacon /etc/sysconfig/beacon; do
-    if [ -f "$candidate" ]; then
-      BEACON_DEFAULTS_FILE="$candidate"
-      break
-    fi
-  done
-fi
-
-beacon_defaults_trusted() {
-  # Owner uid and permission bits, from GNU stat (every Linux userland Beacon packages for) or
-  # BusyBox, which accepts the same format.
-  meta="$(stat -c '%u %a' "$1" 2>/dev/null)" || return 1
-  owner="${meta%% *}"
-  mode="${meta##* }"
-  # BEACON_DEFAULTS_OWNER lets the packaging tests run as an ordinary account.
-  [ "$owner" = "${BEACON_DEFAULTS_OWNER:-0}" ] || return 1
-  # The last two octal digits are group and other: neither may include write (2, 3, 6, 7).
-  case "$mode" in
-    *[2367]?|*[2367]) return 1 ;;
-  esac
-  return 0
-}
-
-if [ -n "$BEACON_DEFAULTS_FILE" ] && [ -f "$BEACON_DEFAULTS_FILE" ]; then
-  if beacon_defaults_trusted "$BEACON_DEFAULTS_FILE"; then
-    while IFS= read -r line || [ -n "$line" ]; do
-      line="${line#"${line%%[![:space:]]*}"}"
-      case "$line" in
-        ''|'#'*) continue ;;
-        export\ *) line="${line#export }"; line="${line#"${line%%[![:space:]]*}"}" ;;
-      esac
-      case "$line" in
-        *=*) ;;
-        *) continue ;;
-      esac
-      key="${line%%=*}"
-      value="${line#*=}"
-      case "$key" in
-        BEACON_ENDPOINT_HARNESSES|BEACON_OTLP_GRPC_PORT|BEACON_OTLP_HTTP_PORT|BEACON_COLLECTOR|\
-        BEACON_NO_START|BEACON_SERVICE|BEACON_LOG_ACCESS|BEACON_SESSION_SYNC|\
-        BEACON_SPLUNK_HEC_ENDPOINT|BEACON_SPLUNK_HEC_TOKEN|BEACON_SPLUNK_INDEX|BEACON_SPLUNK_SOURCE|\
-        BEACON_SPLUNK_SOURCETYPE|BEACON_SPLUNK_INSECURE_SKIP_VERIFY|BEACON_SPLUNK_CA_FILE) ;;
-        *) continue ;;
-      esac
-      # Trailing whitespace, then one pair of matching quotes.
-      value="${value%"${value##*[![:space:]]}"}"
-      case "$value" in
-        \"*\") value="${value#\"}"; value="${value%\"}" ;;
-        \'*\') value="${value#\'}"; value="${value%\'}" ;;
-      esac
-      # $key is one of the names above, so the indirection below cannot evaluate anything else.
-      eval "already=\${$key+set}"
-      if [ -z "$already" ]; then
-        export "$key=$value"
-      fi
-    done <"$BEACON_DEFAULTS_FILE"
-  else
-    echo "beacon: ignoring $BEACON_DEFAULTS_FILE: it must be owned by root and writable by no one else" >&2
-  fi
-fi
+# The install settings a configuration manager can drop in /etc/default/beacon or
+# /etc/sysconfig/beacon; see beacon-settings.sh. It sits beside this script in the package
+# (/opt/beacon/scripts) and in the repository.
+BEACON_SCRIPTS_DIR="${BEACON_SCRIPTS_DIR:-$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)}"
+# shellcheck source=beacon-settings.sh
+. "$BEACON_SCRIPTS_DIR/beacon-settings.sh"
+beacon_load_settings
 
 if [ -z "${BEACON_BIN:-}" ]; then
   if [ -x "/opt/beacon/bin/beacon" ]; then
@@ -105,13 +40,30 @@ BEACON_SPLUNK_CA_FILE="${BEACON_SPLUNK_CA_FILE:-}"
 BEACON_LOG_ACCESS="${BEACON_LOG_ACCESS:-}"
 # A first install from the package defaults to restricted: a package is installed by root for the
 # whole machine, often by a configuration manager across a fleet, and that is the install that
-# should make the collector the only writer of the system log without a second step. "First" means
-# there is no system config yet; an upgrade, or a reinstall over a kept config, keeps whatever mode
-# the endpoint has, so this never narrows (or widens) a running endpoint behind its operator's back.
+# should make the collector the only writer of the system log without a second step.
+#
+# Only a genuinely first install, and only where the collector will be a systemd service:
+#   - a system config means an upgrade or a reinstall over a kept config, and a runtime log left
+#     behind by `uninstall --keep-logs` means a reinstall whose old mode (recorded beside that log
+#     when it was restricted) the install keeps on its own. Either way no mode is passed, so this
+#     never narrows or widens an existing endpoint behind its operator's back.
+#   - without systemd as PID 1 (a container, WSL without systemd) or with BEACON_SERVICE=none, the
+#     collector is a supervised process nothing restarts. A restricted log there would leave every
+#     hook event spooled in its user's home whenever that process is down, where a shared log keeps
+#     taking them directly, so those installs stay shared unless asked.
 # BEACON_LOG_ACCESS=shared opts a new install out.
 BEACON_SYSTEM_CONFIG="${BEACON_SYSTEM_CONFIG:-/etc/beacon/endpoint/config.json}"
-if [ -z "$BEACON_LOG_ACCESS" ] && [ ! -e "$BEACON_SYSTEM_CONFIG" ]; then
-  BEACON_LOG_ACCESS=restricted
+BEACON_SYSTEM_LOG="${BEACON_SYSTEM_LOG:-/var/log/beacon-agent/runtime.jsonl}"
+BEACON_INIT_COMM="${BEACON_INIT_COMM:-/proc/1/comm}"
+if [ -z "$BEACON_LOG_ACCESS" ] && [ ! -e "$BEACON_SYSTEM_CONFIG" ] && [ ! -e "$BEACON_SYSTEM_LOG" ]; then
+  init="$(cat "$BEACON_INIT_COMM" 2>/dev/null || true)"
+  case "$BEACON_SERVICE" in
+    ''|auto|systemd)
+      if [ "$init" = systemd ]; then
+        BEACON_LOG_ACCESS=restricted
+      fi
+      ;;
+  esac
 fi
 # 1 turns the scheduled session sync on and 0 turns it off; empty keeps what the endpoint already
 # has, so a package upgrade never changes it.
