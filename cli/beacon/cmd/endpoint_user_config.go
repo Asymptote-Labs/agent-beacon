@@ -140,6 +140,8 @@ func repairInstalledEndpointUserConfig() (endpointUserConfigRepairResult, error)
 	first := result.Users[0]
 	result.User, result.HomeDir, result.RuntimeLogPath = first.User, first.HomeDir, first.RuntimeLogPath
 	result.NativeConfigTargets, result.NativeConfigPaths, result.HookTargets = first.NativeConfigTargets, first.NativeConfigPaths, first.HookTargets
+	// With its error, so a reader of the single-user shape never takes a failure for success.
+	result.Error = first.Error
 	return result, errors.Join(errs...)
 }
 

@@ -174,8 +174,12 @@ func fakeLoginctl(t *testing.T, sessions []fakeSession) {
 			seat = "-" // what loginctl really prints for an unseated session
 		}
 		fmt.Fprintf(&table, "%s 1000 %s %s tty1 %s no -\n", sess.id, sess.user, seat, sess.state)
-		fmt.Fprintf(&cases, "  %s) printf 'Name=%s\\nSeat=%s\\nState=%s\\n' ;;\n",
-			sess.id, sess.user, sess.seat, sess.state)
+		class := sess.class
+		if class == "" {
+			class = "user"
+		}
+		fmt.Fprintf(&cases, "  %s) printf 'Name=%s\\nSeat=%s\\nState=%s\\nClass=%s\\n' ;;\n",
+			sess.id, sess.user, sess.seat, sess.state, class)
 	}
 	dir := t.TempDir()
 	script := "#!/bin/sh\ncase \"$1\" in\n" +
@@ -189,7 +193,7 @@ func fakeLoginctl(t *testing.T, sessions []fakeSession) {
 }
 
 type fakeSession struct {
-	id, user, seat, state string
+	id, user, seat, state, class string
 }
 
 func shellSingleQuote(s string) string {
@@ -387,5 +391,39 @@ func TestActiveConsoleUsersSkipsTheUnresolvable(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	if users, err := defaultActiveConsoleUsers(); err != nil || len(users) != 0 {
 		t.Fatalf("users, err = %+v, %v; want none and no error without logind", users, err)
+	}
+}
+
+// A display manager's greeter and a lingering account's service manager are live logind sessions
+// but nobody's login: on a GNOME desktop gdm (home /var/lib/gdm3) sits on seat0 beside the person.
+func TestActiveConsoleUsersSkipsGreeterAndManagerSessions(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("linux-only resolution")
+	}
+	t.Setenv("SUDO_USER", "")
+	stubLookup(t)
+	fakeLoginctl(t, []fakeSession{
+		{id: "c1", user: "gdm", seat: "seat0", state: "online", class: "greeter"},
+		{id: "c2", user: "lightdm", seat: "seat0", state: "active", class: "lock-screen"},
+		{id: "c3", user: "svc", seat: "", state: "active", class: "manager"},
+		{id: "c4", user: "builder", seat: "", state: "active", class: "background"},
+		{id: "5", user: "alice", seat: "seat0", state: "active"},
+		{id: "6", user: "early", seat: "", state: "active", class: "user-early"},
+	})
+	users, err := defaultActiveConsoleUsers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, u := range users {
+		names = append(names, u.Username)
+	}
+	if got, want := strings.Join(names, ","), "alice,early"; got != want {
+		t.Fatalf("users = %s, want %s: only people's logins", got, want)
+	}
+	// The single pick is filtered the same way: with only a greeter, nobody is at the keyboard.
+	fakeLoginctl(t, []fakeSession{{id: "c1", user: "gdm", seat: "seat0", state: "active", class: "greeter"}})
+	if info, ok, _ := linuxActiveConsoleUser(); ok {
+		t.Fatalf("linuxActiveConsoleUser() = %+v from a greeter session", info)
 	}
 }

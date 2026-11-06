@@ -111,8 +111,14 @@ for u in "$SMOKE_USER" "$SMOKE_USER2"; do
   docker exec "$CONTAINER" useradd -m -s /bin/bash "$u" >/dev/null 2>&1 || true
   docker exec "$CONTAINER" test -d "/home/$u" || {
     echo "could not create the test user $u" >&2; exit 1; }
-  docker exec -d "$CONTAINER" su -l "$u" -c 'exec sleep infinity'
+  # -t: a login on a terminal, which logind classes "user". Without one it is a "background"
+  # session (what cron opens), which Beacon rightly does not take for a person.
+  docker exec -dt "$CONTAINER" su -l "$u" -c 'exec sleep infinity'
 done
+# And an account whose only session is not a person's login: no terminal, so logind classes it
+# "background", as it does cron's. A display manager's greeter is the desktop case of the same thing.
+docker exec "$CONTAINER" useradd -m -s /bin/bash beaconsvc >/dev/null 2>&1 || true
+docker exec -d "$CONTAINER" su -l beaconsvc -c 'exec sleep infinity'
 i=0
 while [ "$i" -lt 20 ]; do
   sessions="$(docker exec "$CONTAINER" loginctl list-sessions --no-legend 2>/dev/null || true)"
@@ -204,7 +210,10 @@ for u in "$SMOKE_USER" "$SMOKE_USER2"; do
     exit 1
   }
 done
-echo "ok: every logged-in user was configured, and the install said so for each"
+if docker exec "$CONTAINER" test -e /home/beaconsvc/.claude/settings.json; then
+  echo "beaconsvc, whose only session is a background one, was configured as if it were a person" >&2; exit 1
+fi
+echo "ok: every logged-in user was configured, and the install said so for each (and not a background session's account)"
 
 # Reachable by name, not just by absolute path.
 #

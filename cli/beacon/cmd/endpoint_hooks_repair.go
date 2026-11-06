@@ -355,7 +355,7 @@ func (s logindSession) rank() int {
 
 // describeLogindSession reads one session's properties, skipping anything that is not a live login.
 func describeLogindSession(id string) (logindSession, bool) {
-	out, err := exec.Command("loginctl", "show-session", id, "-p", "Name", "-p", "State", "-p", "Seat").Output()
+	out, err := exec.Command("loginctl", "show-session", id, "-p", "Name", "-p", "State", "-p", "Seat", "-p", "Class").Output()
 	if err != nil {
 		return logindSession{}, false
 	}
@@ -371,6 +371,17 @@ func describeLogindSession(id string) (logindSession, bool) {
 		return logindSession{}, false
 	}
 	if props["Name"] == "" {
+		return logindSession{}, false
+	}
+	// Only a person's login. A display manager keeps its greeter session (gdm, lightdm, sddm, each
+	// with a real home under /var/lib) open beside the desktop it started, and systemd 256 lists
+	// lingering accounts' service managers as sessions too; a session with no terminal or seat
+	// (cron, a script's su) is "background". None of them is anyone whose agent runtime to
+	// configure. "user-early" is a login made before the system finished booting. A logind too old
+	// to report a class reports only people's sessions as live ones, so an empty class is kept.
+	switch props["Class"] {
+	case "", "user", "user-early":
+	default:
 		return logindSession{}, false
 	}
 	return logindSession{

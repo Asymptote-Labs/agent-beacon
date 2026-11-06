@@ -175,7 +175,7 @@ Vector comes with Beacon. The `.deb` and `.rpm` install it at `/opt/beacon/bin/v
 | Runtime log | `/var/log/beacon-agent/runtime.jsonl` |
 | Agent runtime | Claude Code and Codex CLI settings and hooks for the installing user and everyone logged in, pointed at `127.0.0.1:4317` |
 
-That last row is worth knowing about. A system-mode endpoint runs as root, so the install has to work out whose agent settings to configure, and the collector is useless if nothing exports to it. Beacon configures the user named by `SUDO_USER`, which is set when you install with `sudo`, and every account logind reports a live session for, which is what an install by a configuration manager running as root (Salt, Ansible, Puppet) has to go on. Each is configured as that user, in their own home, and the install prints one line per person:
+That last row is worth knowing about. A system-mode endpoint runs as root, so the install has to work out whose agent settings to configure, and the collector is useless if nothing exports to it. Beacon configures the user named by `SUDO_USER`, which is set when you install with `sudo`, and every account logind reports a live login session for (a desktop, ssh or terminal login; not a display manager's greeter or a background session such as cron's), which is what an install by a configuration manager running as root (Salt, Ansible, Puppet) has to go on. Each is configured as that user, in their own home, and the install prints one line per person:
 
 ```
 beacon: the hook lines above are root's own; configuring the agent runtimes of logged-in users

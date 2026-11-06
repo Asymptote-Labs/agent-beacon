@@ -2105,6 +2105,20 @@ func TestRepairInstalledEndpointUserConfigConfiguresEveryLoggedInUser(t *testing
 	if result.Users[2].User != "carol" || result.Users[2].Error != "" {
 		t.Errorf("carol's entry = %+v, want configured after bob failed", result.Users[2])
 	}
+	// When the first person fails, the single-user fields carry the error too, so a reader of the
+	// older shape never sees their user without it.
+	bobFirst, err := func() (endpointUserConfigRepairResult, error) {
+		stubConsoleUsers(t, bob, alice)
+		return repairInstalledEndpointUserConfig()
+	}()
+	if err == nil || bobFirst.User != "bob" || bobFirst.Error == "" {
+		t.Fatalf("bob first = %+v, %v; want bob with his error at the top level", bobFirst, err)
+	}
+	stubConsoleUsers(t, alice, bob, carol)
+	if result.Error != "" {
+		t.Errorf("top-level error = %q when the first person succeeded", result.Error)
+	}
+
 	// The single-user fields still describe the first person, for readers of the older shape.
 	if result.User != "alice" || result.HomeDir != alice.HomeDir || strings.Join(result.HookTargets, ",") != "claude,codex,cursor" {
 		t.Errorf("top-level result = %+v, want alice's", result)
