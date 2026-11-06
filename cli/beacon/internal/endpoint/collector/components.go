@@ -37,8 +37,14 @@ func CheckComponents(binary string, extensions ...string) error {
 }
 
 // CheckComponentsFor is CheckComponents with the processors and exporters the config will use
-// beyond Beacon's own -- the OTLP forward's -- refused the same way.
+// beyond Beacon's own -- the OTLP forward's -- refused the same way. Where ConfigYAML renders peer
+// attribution, its receiver and processor are required too.
 func CheckComponentsFor(binary string, extensions, processors, exporters []string) error {
+	var receivers []string
+	if PeerAttribution {
+		processors = append(append([]string{}, processors...), PeerProcessor)
+		receivers = append(receivers, OTLPHTTPReceiver)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	out, err := listComponents(ctx, binary)
@@ -46,6 +52,9 @@ func CheckComponentsFor(binary string, extensions, processors, exporters []strin
 		return nil
 	}
 	var listed struct {
+		Receivers []struct {
+			Name string `yaml:"name"`
+		} `yaml:"receivers"`
 		Processors []struct {
 			Name string `yaml:"name"`
 		} `yaml:"processors"`
@@ -66,6 +75,16 @@ func CheckComponentsFor(binary string, extensions, processors, exporters []strin
 	for _, name := range append(append([]string{}, requiredProcessors...), processors...) {
 		if !have[name] {
 			return fmt.Errorf("collector %s is older than this beacon CLI: it has no %q processor, which the collector config needs; "+
+				"use the %s from the same Beacon release, or pass --collector with one", binary, name, BinaryName)
+		}
+	}
+	haveReceiver := map[string]bool{}
+	for _, receiver := range listed.Receivers {
+		haveReceiver[receiver.Name] = true
+	}
+	for _, name := range receivers {
+		if !haveReceiver[name] {
+			return fmt.Errorf("collector %s is older than this beacon CLI: it has no %q receiver, which the collector config needs; "+
 				"use the %s from the same Beacon release, or pass --collector with one", binary, name, BinaryName)
 		}
 	}

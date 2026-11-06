@@ -95,7 +95,19 @@ type Options struct {
 	// CodexSurfaces remembers which Codex surface (CLI or desktop app) each conversation runs in,
 	// for records that don't say (see codex_surface.go). Nil places each record on its own.
 	CodexSurfaces *CodexSurfaces
+	// PeerUser takes each event's user from the PeerUIDAttribute and PeerUserAttribute resource
+	// attributes. Only a collector whose pipeline runs the beacon_peer processor sets it: that
+	// processor removes whatever a sender put under those names and writes the account the kernel
+	// says owns the sending socket, so without it the attributes are only what the sender claimed.
+	PeerUser bool
 }
+
+const (
+	// PeerUIDAttribute and PeerUserAttribute are the resource attributes the beacon_peer processor
+	// writes: the account id that owns the client socket an export arrived on, and its name.
+	PeerUIDAttribute  = "beacon.peer.uid"
+	PeerUserAttribute = "beacon.peer.user"
+)
 
 type Converter struct {
 	opts Options
@@ -1179,6 +1191,7 @@ func ApplyTokenUsage(event *Event, tokenType string, value int64) {
 
 func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 	populateRunContext(event, attrs)
+	c.applyPeerUser(event, attrs)
 	// A runtime that numbers its own telemetry gets that number preserved; the exporter
 	// stamps its own emission counter for everything else (see beaconExporter.
 	// stampSequence). Zero and negative values are ignored -- zero is the schema's
@@ -2338,4 +2351,26 @@ func EventCategory(action, explicit string) string {
 	default:
 		return ""
 	}
+}
+
+// applyPeerUser records the account that sent an export in place of the collector's own.
+//
+// Without it every OTLP event carries the collector process's account, which on a system install
+// is root for everyone: a prompt typed by one person on a shared machine reads as root's. The
+// beacon_peer processor resolves the sender from the kernel; this only copies what it found, and
+// changes nothing when it found nobody, so an unattributed event is the collector's account as it
+// always was rather than someone's guess. Runtime-specific identities (Claude Cowork's cloud user)
+// are applied after this and still win.
+func (c Converter) applyPeerUser(event *Event, attrs map[string]interface{}) {
+	if !c.opts.PeerUser {
+		return
+	}
+	uid := FirstString(attrs, PeerUIDAttribute)
+	if uid == "" {
+		return
+	}
+	event.User.UID = uid
+	// An account the system cannot name is still recorded by its id, rather than keeping the
+	// collector's name beside someone else's uid.
+	event.User.Name = FirstString(attrs, PeerUserAttribute)
 }
