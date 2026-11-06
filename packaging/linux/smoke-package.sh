@@ -212,6 +212,15 @@ adapter_owner="$(docker exec "$CONTAINER" stat -c %U "$ADAPTER" 2>/dev/null || t
   echo "$ADAPTER is owned by $adapter_owner, not $SMOKE_USER" >&2; exit 1; }
 echo "ok: hooks installed for the user and runnable by them"
 
+docker exec "$CONTAINER" test -f "/home/$SMOKE_USER/.cursor/hooks.json" || {
+  echo "Cursor from /etc/default/beacon was not configured for $SMOKE_USER" >&2
+  grep -i "hook\|ignoring" "$POSTINST_LOG" >&2 || true
+  exit 1
+}
+grep -q "sudo usermod -aG beacon-log" "$POSTINST_LOG" || {
+  echo "the install did not say how to let someone read the restricted log" >&2; exit 1; }
+echo "ok: the settings file reached the user step (Cursor configured), and the beacon-log hint was printed"
+
 # The second person logged in is configured too, as themselves, and the install says so for both
 # rather than leaving the root context's own hook lines as the only output.
 SETTINGS2="/home/$SMOKE_USER2/.claude/settings.json"
@@ -233,15 +242,6 @@ if docker exec "$CONTAINER" test -e /home/beaconsvc/.claude/settings.json; then
   echo "beaconsvc, whose only session is a background one, was configured as if it were a person" >&2; exit 1
 fi
 echo "ok: every logged-in user was configured, and the install said so for each (and not a background session's account)"
-
-docker exec "$CONTAINER" test -f "/home/$SMOKE_USER/.cursor/hooks.json" || {
-  echo "Cursor from /etc/default/beacon was not configured for $SMOKE_USER" >&2
-  grep -i "hook\|ignoring" /tmp/beacon-pkg-install.log >&2 || true
-  exit 1
-}
-grep -q "sudo usermod -aG beacon-log" /tmp/beacon-pkg-install.log || {
-  echo "the install did not say how to let someone read the restricted log" >&2; exit 1; }
-echo "ok: the settings file reached the user step (Cursor configured), and the beacon-log hint was printed"
 
 # Reachable by name, not just by absolute path.
 #
