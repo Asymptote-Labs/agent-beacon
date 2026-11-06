@@ -9,6 +9,15 @@ set -eu
 # Both package managers invoke this for upgrades as well as first installs. `endpoint install` is
 # idempotent and rewrites its own config, so no branch on the argument is needed -- but an upgrade
 # must not lose an operator's explicit auto-update choice, which reconcile below preserves.
+# The settings a configuration manager wrote to /etc/default/beacon or /etc/sysconfig/beacon, loaded
+# here as well as inside install-endpoint.sh: the user-config step below is a separate command, and
+# a harness list that reached only the system install left each person's own runtime unconfigured.
+if [ -r /opt/beacon/scripts/beacon-settings.sh ]; then
+  # shellcheck source=../beacon-settings.sh
+  . /opt/beacon/scripts/beacon-settings.sh
+  beacon_load_settings
+fi
+
 if ! /opt/beacon/scripts/install-endpoint.sh; then
   echo "beacon: endpoint install failed" >&2
   exit 1
@@ -40,6 +49,15 @@ if [ -x /opt/beacon/bin/beacon ]; then
   # The scheduled session sync is opt-in (--session-sync); reconciled the same way, kept on upgrade.
   /opt/beacon/bin/beacon endpoint sessions install-daemon --system >/dev/null 2>&1 || \
     echo "beacon: scheduled session sync job not configured (endpoint is installed and running)" >&2
+fi
+
+# A restricted log is readable only by root and the beacon-log group, and install adds nobody to it,
+# so the people on the machine can no longer read the system log with the local tools that read it
+# (the dashboard, `beacon share`, `beacon traces`). That is the point of the mode on a shared machine;
+# on someone's own workstation an administrator grants it per person.
+if grep -q '"log_access": *"restricted"' /etc/beacon/endpoint/config.json 2>/dev/null; then
+  echo "beacon: the system log is restricted to root and the beacon-log group. To let someone read it with" \
+       "the local tools (dashboard, beacon share, beacon traces): sudo usermod -aG beacon-log <user>, then log in again"
 fi
 
 echo "beacon: endpoint installed. Check it with: beacon endpoint status --system"

@@ -164,6 +164,11 @@ nfpms:
         dst: /opt/beacon/scripts/uninstall-endpoint.sh
         file_info:
           mode: 0755
+      # Sourced by install-endpoint.sh and the postinstall: the /etc/default/beacon settings parser.
+      - src: ../../packaging/linux/beacon-settings.sh
+        dst: /opt/beacon/scripts/beacon-settings.sh
+        file_info:
+          mode: 0644
       # Without these the payload is unreachable by name and every documented command fails with
       # "beacon: command not found" -- including the one this package's own postinstall prints.
       # 103 documentation pages call the binary bare, so the package is the right place to make

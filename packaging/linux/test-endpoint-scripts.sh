@@ -40,6 +40,8 @@ run_install() {
     BEACON_SYSTEM_CONFIG="$TMP_DIR/etc/config.json" \
     BEACON_DEFAULTS_FILE="$TMP_DIR/none" \
     BEACON_DEFAULTS_OWNER="$(id -u)" \
+    BEACON_SYSTEM_LOG="$TMP_DIR/log/runtime.jsonl" \
+    BEACON_INIT_COMM="$TMP_DIR/init-comm" \
     "$@" sh "$INSTALL_SCRIPT" >"$TMP_DIR/out" 2>&1 || { cat "$TMP_DIR/out" >&2; return 1; }
 }
 
@@ -56,6 +58,9 @@ expect_log_access() {
   got="$(flag_value --log-access)"
   [ "$got" = "$1" ] || fail "$2: --log-access is '$got', want '$1'"
 }
+
+# systemd is PID 1 unless a test says otherwise.
+printf 'systemd\n' >"$TMP_DIR/init-comm"
 
 # A first install, with no system config, defaults to restricted.
 run_install
@@ -77,6 +82,27 @@ run_install BEACON_LOG_ACCESS=restricted
 expect_log_access restricted "upgrade with BEACON_LOG_ACCESS=restricted"
 rm -f "$TMP_DIR/etc/config.json"
 
+# Only where the collector will be a systemd service: a supervised collector nothing restarts would
+# leave a restricted log spooling every hook event whenever it is down.
+printf 'init\n' >"$TMP_DIR/init-comm"
+run_install
+has_flag --log-access && fail "no systemd: passed --log-access $(flag_value --log-access), want the shared default"
+printf 'systemd\n' >"$TMP_DIR/init-comm"
+run_install BEACON_SERVICE=none
+has_flag --log-access && fail "BEACON_SERVICE=none: passed --log-access $(flag_value --log-access), want the shared default"
+run_install BEACON_SERVICE=systemd
+expect_log_access restricted "BEACON_SERVICE=systemd"
+run_install BEACON_SERVICE=none BEACON_LOG_ACCESS=restricted
+expect_log_access restricted "BEACON_SERVICE=none asking for restricted"
+
+# A runtime log left by `uninstall --keep-logs` is a reinstall: the install keeps the mode recorded
+# beside it, so no mode is passed.
+mkdir -p "$TMP_DIR/log"
+: >"$TMP_DIR/log/runtime.jsonl"
+run_install
+has_flag --log-access && fail "reinstall over a kept log: passed --log-access $(flag_value --log-access); the kept mode must be kept"
+rm -rf "$TMP_DIR/log"
+
 # A defaults file supplies settings a configuration manager cannot pass through the environment.
 DEFAULTS="$TMP_DIR/default-beacon"
 cat >"$DEFAULTS" <<'CONF'
@@ -88,7 +114,7 @@ BEACON_OTLP_HTTP_PORT=4319
 NOT_A_BEACON_SETTING=1
 BEACON_BIN=/tmp/evil
 PATH=/tmp/evil
-BEACON_SERVICE=$(touch /tmp/beacon-defaults-ran)
+BEACON_SERVICE=$(touch${IFS}/tmp/beacon-defaults-ran)
 not even an assignment
 CONF
 chmod 600 "$DEFAULTS"
@@ -100,8 +126,40 @@ has_flag --session-sync || fail "defaults file: BEACON_SESSION_SYNC='1' did not 
 # Only documented install settings are taken: the binary still came from the environment, and the
 # command substitution was passed as an inert string rather than run.
 [ -s "$ARGS" ] || fail "defaults file: BEACON_BIN in the file replaced the binary"
-[ "$(flag_value --service)" = '$(touch /tmp/beacon-defaults-ran)' ] || fail "defaults file: --service is '$(flag_value --service)'"
+[ "$(flag_value --service)" = '$(touch${IFS}/tmp/beacon-defaults-ran)' ] || fail "defaults file: --service is '$(flag_value --service)'"
 [ -e /tmp/beacon-defaults-ran ] && fail "defaults file: a value was executed"
+
+# Trailing comments, as a shell reads them, and values that are not one value are skipped with a
+# warning instead of failing the package install.
+cat >"$DEFAULTS" <<'CONF'
+BEACON_LOG_ACCESS=shared # fleet default
+BEACON_OTLP_HTTP_PORT="4320"   # alt port
+BEACON_ENDPOINT_HARNESSES='claude,cursor'#no space so part of nothing: quoted then comment-less junk
+BEACON_OTLP_GRPC_PORT=4317 4318
+BEACON_SERVICE="systemd
+BEACON_SPLUNK_INDEX=main#notacomment
+CONF
+chmod 600 "$DEFAULTS"
+run_install BEACON_DEFAULTS_FILE="$DEFAULTS"
+expect_log_access shared "trailing comment"
+[ "$(flag_value --otlp-http-port)" = "4320" ] || fail "quoted value with a comment: --otlp-http-port is '$(flag_value --otlp-http-port)'"
+[ "$(flag_value --harness)" = "claude,codex" ] || fail "junk after a closing quote was taken: --harness is '$(flag_value --harness)'"
+[ "$(flag_value --otlp-grpc-port)" = "4317" ] || fail "two words were taken as one value: --otlp-grpc-port is '$(flag_value --otlp-grpc-port)'"
+has_flag --service && fail "an unterminated quote was taken: --service $(flag_value --service)"
+[ "$(flag_value --splunk-index)" = "main#notacomment" ] || fail "a # inside a word is not a comment: --splunk-index is '$(flag_value --splunk-index)'"
+for key in BEACON_ENDPOINT_HARNESSES BEACON_OTLP_GRPC_PORT BEACON_SERVICE; do
+  grep -q "ignoring $key in $DEFAULTS" "$TMP_DIR/out" || fail "no warning for the malformed $key"
+done
+grep -q "4318" "$TMP_DIR/out" && fail "a warning printed a value; it must name the key only"
+
+# The package postinstall loads the same settings itself, for the step that configures each
+# logged-in user, which runs as a separate command.
+printf 'BEACON_ENDPOINT_HARNESSES=claude,codex,cursor # all three\n' >"$DEFAULTS"
+got="$(env -i PATH="$PATH" BEACON_DEFAULTS_FILE="$DEFAULTS" BEACON_DEFAULTS_OWNER="$(id -u)" \
+  sh -c '. "$1"; beacon_load_settings; printf %s "${BEACON_ENDPOINT_HARNESSES:-}"' sh "$ROOT_DIR/packaging/linux/beacon-settings.sh")"
+[ "$got" = "claude,codex,cursor" ] || fail "beacon_load_settings exported BEACON_ENDPOINT_HARNESSES='$got'"
+grep -q 'beacon_load_settings' "$ROOT_DIR/packaging/linux/nfpm/postinstall.sh" || fail "postinstall does not load the settings file"
+grep -q 'beacon-settings.sh' "$ROOT_DIR/cli/beacon/.goreleaser.yaml" || fail "the packages do not ship beacon-settings.sh"
 
 # The environment wins over the file.
 run_install BEACON_DEFAULTS_FILE="$DEFAULTS" BEACON_LOG_ACCESS=restricted
