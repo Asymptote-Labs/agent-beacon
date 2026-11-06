@@ -139,6 +139,20 @@ if ! docker exec "$CONTAINER" env -u SUDO_USER sh -c "$PKGMGR_INSTALL" >/tmp/bea
 fi
 echo "ok: package installed"
 
+# What the postinstall prints for the person installing. apt passes maintainer-script output
+# through, but `dnf -q` does not show scriptlet output at all, so on rpm the installed %post is run
+# again, as the package manager runs it, to read what it says. It is idempotent: every upgrade runs
+# it the same way over an installed endpoint.
+POSTINST_LOG=/tmp/beacon-pkg-install.log
+if [ "$FORMAT" = rpm ]; then
+  POSTINST_LOG=/tmp/beacon-postinstall.log
+  if ! docker exec "$CONTAINER" env -u SUDO_USER sh -c 'rpm -q --qf "%{POSTIN}" beacon >/tmp/beacon-postin.sh && sh /tmp/beacon-postin.sh' >"$POSTINST_LOG" 2>&1; then
+    echo "the installed %post script failed when run again:" >&2
+    tail -30 "$POSTINST_LOG" >&2
+    exit 1
+  fi
+fi
+
 # Everything below must be true without any further user action.
 unit_state="$(docker exec "$CONTAINER" systemctl is-active beacon-collector.service 2>/dev/null || true)"
 [ "$unit_state" = active ] || {
@@ -204,9 +218,9 @@ docker exec "$CONTAINER" grep -q '"hooks"' "$SETTINGS2" || {
 owner2="$(docker exec "$CONTAINER" stat -c %U "$SETTINGS2" 2>/dev/null || true)"
 [ "$owner2" = "$SMOKE_USER2" ] || { echo "$SETTINGS2 is owned by $owner2" >&2; exit 1; }
 for u in "$SMOKE_USER" "$SMOKE_USER2"; do
-  grep -q "^Configured $u (/home/$u): " /tmp/beacon-pkg-install.log || {
+  grep -q "^Configured $u (/home/$u): " "$POSTINST_LOG" || {
     echo "the install did not report configuring $u:" >&2
-    tail -20 /tmp/beacon-pkg-install.log >&2
+    tail -20 "$POSTINST_LOG" >&2
     exit 1
   }
 done
