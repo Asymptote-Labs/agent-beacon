@@ -195,7 +195,7 @@ Vector comes with Beacon. The `.deb` and `.rpm` install it at `/opt/beacon/bin/v
 | Unpack | `beacon`, `beacon-hooks`, `beacon-otelcol` and `vector` under `/opt/beacon/bin` |
 | System install | Config and collector config under `/etc/beacon/endpoint` |
 | Service | `/etc/systemd/system/beacon-collector.service`, enabled and started |
-| Runtime log | `/var/log/beacon-agent/runtime.jsonl` |
+| Runtime log | `/var/log/beacon-agent/runtime.jsonl`, in [restricted log access](/security/restricted-log-access) on a first install: `0640 root:beacon-log`, written only by the collector |
 | Agent runtime | Claude Code and Codex CLI settings and hooks for the installing user and everyone logged in, pointed at `127.0.0.1:4317` |
 
 That last row is worth knowing about. A system-mode endpoint runs as root, so the install has to work out whose agent settings to configure, and the collector is useless if nothing exports to it. Beacon configures the user named by `SUDO_USER`, which is set when you install with `sudo`, and every account logind reports a live login session for (a desktop, ssh or terminal login; not a display manager's greeter or a background session such as cron's), which is what an install by a configuration manager running as root (Salt, Ansible, Puppet) has to go on. Each is configured as that user, in their own home, and the install prints one line per person:
@@ -212,7 +212,36 @@ The `Claude Code hooks installed: /root/...` lines printed before it are root's 
 sudo beacon endpoint user-config repair-installed --system
 ```
 
-Other users on the same machine run the same command for themselves. They all export to the same collector and the same log. That is why `/var/log/beacon-agent/runtime.jsonl` is group- and world-writable: hooks run as the logged-in user and append to it directly. To stop other accounts from modifying or reading it, install with [`--log-access restricted`](/cli/endpoint-install#restricted-log-access): the collector becomes the only writer and hooks send their events to it over a local socket.
+Other users on the same machine run the same command for themselves. They all export to the same collector and the same log. A first package install sets the log to [restricted access](/cli/endpoint-install#restricted-log-access): the collector is the only writer, hooks hand their events to it over a local socket and are recorded under the account the kernel says sent them, and only root and the `beacon-log` group can read the log. A package upgrade keeps whatever mode the endpoint already has, so an endpoint installed from an earlier package stays shared until you switch it with `sudo beacon endpoint repair --system --log-access restricted`. To install with the older shared log instead, where every account appends to the file directly, set `BEACON_LOG_ACCESS=shared` (see below).
+
+### Settings for configuration-manager installs
+
+Salt's `pkg.installed`, Ansible's `apt` and `dnf` modules, Puppet and Chef run the package manager for you and give you no way to set the environment of the package's install script. Write the settings to `/etc/default/beacon` (Debian, Ubuntu) or `/etc/sysconfig/beacon` (Fedora, RHEL) before the package is installed, and the install script reads them:
+
+```bash title="/etc/default/beacon"
+BEACON_LOG_ACCESS=restricted
+BEACON_ENDPOINT_HARNESSES=claude,codex,cursor
+BEACON_SESSION_SYNC=1
+```
+
+```yaml title="Salt state"
+/etc/default/beacon:
+  file.managed:
+    - user: root
+    - group: root
+    - mode: "0600"
+    - contents: |
+        BEACON_LOG_ACCESS=restricted
+
+beacon:
+  pkg.installed:
+    - sources:
+      - beacon: salt://beacon/beacon_<version>_linux_amd64.deb
+    - require:
+      - file: /etc/default/beacon
+```
+
+The file is read, not run: each line is a `KEY=VALUE` (an `export` in front and quotes around the value are allowed), and only the install settings the script documents are taken (`BEACON_LOG_ACCESS`, `BEACON_ENDPOINT_HARNESSES`, `BEACON_OTLP_GRPC_PORT`, `BEACON_OTLP_HTTP_PORT`, `BEACON_SESSION_SYNC`, `BEACON_SERVICE`, `BEACON_NO_START`, `BEACON_COLLECTOR` and the `BEACON_SPLUNK_*` settings). Because the install script runs as root, the file is ignored, with a warning, unless root owns it and no other account can write it. A variable set in the install script's environment wins over the file. The file is read on every install and upgrade, so keep it in step with what you want the endpoint to be; an unset `BEACON_LOG_ACCESS` on an upgrade keeps the mode the endpoint has.
 
 ## Managing the service
 
