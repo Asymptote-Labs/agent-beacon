@@ -5,8 +5,10 @@
 #
 #   packaging/linux/apt/test-apt-repo.sh
 #
-# It publishes two releases in sequence and checks that both stay installable, that a rerun is a
-# no-op, and that a replaced package, a tampered index and the wrong signing key are all refused.
+# It publishes releases in sequence and checks that every version stays installable, that a rerun
+# is a no-op, that a publish interrupted before InRelease does not block the next one, that a key
+# rotation can re-sign an index the retired key signed, and that a replaced package, a tampered
+# index and the wrong signing key are all refused.
 set -eu
 
 HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
@@ -58,14 +60,18 @@ publish() {
   done
 }
 
-# existing -- the copy of the published index the release workflow downloads.
+# existing -- the copy of the published index the release workflow downloads: InRelease, and each
+# Packages file through the immutable by-hash path InRelease names (as release.yml fetches it).
 existing() {
   rm -rf "$work/existing"
   mkdir -p "$work/existing/main"
   cp "$work/bucket/dists/stable/InRelease" "$work/existing/"
   for arch in amd64 arm64; do
+    rel="main/binary-$arch/Packages"
+    sum="$(awk -v rel="$rel" '/^[^ ]/ { in_sha = ($0 == "SHA256:"); next } in_sha && $3 == rel { print $1 }' \
+      "$work/existing/InRelease")"
     mkdir -p "$work/existing/main/binary-$arch"
-    cp "$work/bucket/dists/stable/main/binary-$arch/Packages" "$work/existing/main/binary-$arch/"
+    cp "$work/bucket/dists/stable/main/binary-$arch/by-hash/SHA256/$sum" "$work/existing/$rel"
   done
 }
 
@@ -148,7 +154,36 @@ fi
 grep -q 'signing key is not the committed key' "$work/err7" || { cat "$work/err7" >&2; fail "wrong error for the wrong signing key"; }
 pass "the wrong signing key is refused"
 
-# 8. A client that trusts another key refuses the repository.
+# 8. A publish that died after the index files but before InRelease leaves a new plain Packages
+#    beside the old InRelease; the next run reads the by-hash copy InRelease names and goes on.
+sh "$BUILD" --out "$work/out8a" --keyring "$work/keyring.gpg" --signing-key "$fpr" \
+  --existing "$work/existing" "$deb_a3" "$deb_b3"
+cp -R "$work/out8a/pool" "$work/bucket/"
+cp -R "$work/out8a/dists/stable/main" "$work/bucket/dists/stable/"
+cmp -s "$work/out8a/dists/stable/main/binary-amd64/Packages" "$work/bucket/dists/stable/main/binary-amd64/Packages" \
+  || fail "the interrupted publish did not overwrite the plain index"
+existing
+sh "$BUILD" --out "$work/out8" --keyring "$work/keyring.gpg" --signing-key "$fpr" \
+  --existing "$work/existing" "$deb_a3" "$deb_b3"
+publish "$work/out8"
+sh "$VERIFY" "file:$work/bucket" "$work/keyring.gpg" 1.0.2
+sh "$VERIFY" "file:$work/bucket" "$work/keyring.gpg" 1.0.0
+existing
+pass "a publish interrupted before InRelease does not block the next one"
+
+# 9. Key rotation: the published index is signed by the retired key, the new one signs.
+gpg --batch --export "$fpr" "$other_fpr" > "$work/both-keyring.gpg"
+if sh "$BUILD" --out "$work/out9a" --keyring "$work/other-keyring.gpg" --signing-key "$other_fpr" \
+  --existing "$work/existing" "$deb_a3" "$deb_b3" 2>"$work/err9"; then
+  fail "a rotation without the retired key was accepted"
+fi
+sh "$BUILD" --out "$work/out9" --keyring "$work/other-keyring.gpg" --signing-key "$other_fpr" \
+  --existing "$work/existing" --existing-keyring "$work/both-keyring.gpg" "$deb_a3" "$deb_b3"
+gpgv --keyring "$work/other-keyring.gpg" "$work/out9/dists/stable/InRelease" 2>/dev/null \
+  || fail "the rotated index is not signed by the new key"
+pass "a key rotation re-signs an index the retired key signed"
+
+# 10. A client that trusts another key refuses the repository.
 if sh "$VERIFY" "file:$work/bucket" "$work/other-keyring.gpg" 1.0.1 >/dev/null 2>&1; then
   fail "a client trusting another key accepted the repository"
 fi

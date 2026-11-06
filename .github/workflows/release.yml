@@ -435,7 +435,10 @@ jobs:
   # The packages are the bytes goreleaser published, checked against checksums.txt, not a rebuild.
   #
   # Skipped with a notice until every APT_* secret and variable exists, and for prerelease tags,
-  # which do not belong in `stable`. Serialized so two tags cannot race on the index.
+  # which do not belong in `stable`. Serialized so two tags cannot race on the index. GitHub keeps
+  # only one pending job per concurrency group and cancels the older one when a third tag arrives;
+  # the next release adds the cancelled one's packages (see "Fetch the released .deb files"), and
+  # re-running the cancelled job does so straight away.
   apt-repository:
     needs: goreleaser
     runs-on: ubuntu-latest
@@ -459,6 +462,7 @@ jobs:
       APT_S3_ENDPOINT: ${{ vars.APT_S3_ENDPOINT }}
       APT_REPO_URL: ${{ vars.APT_REPO_URL }}
       KEYRING_ASC: packaging/linux/apt/beacon-archive-keyring.asc
+      RETIRED_KEYS_ASC: packaging/linux/apt/retired-archive-keys.asc
     steps:
       - name: Decide whether to publish
         id: gate
@@ -505,7 +509,9 @@ jobs:
 
       # The keyring users install is the committed one, never one exported from the secret, and
       # build-apt-repo.sh fails unless the secret's key signs for it. Rotating the key is therefore a
-      # reviewed commit, not a secret edit.
+      # reviewed commit, not a secret edit: add the new public key to beacon-archive-keyring.asc,
+      # move the old one to retired-archive-keys.asc, then replace the secret. A retired key is
+      # trusted only to check the index already in the bucket, never by users or for the new index.
       - name: Import the signing key
         if: steps.gate.outputs.publish == 'true'
         id: key
@@ -516,58 +522,130 @@ jobs:
           mkdir -m 0700 "$GNUPGHOME"
           echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
           printf '%s\n' "$APT_GPG_PRIVATE_KEY" | gpg --batch --quiet --import
+          # Sign with the key the secret holds, not the first one the committed file names, so the
+          # committed file can carry more than one key during a rotation.
+          keys="$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "sec" { n++ } END { print n + 0 }')"
+          [ "$keys" = 1 ] || { echo "APT_GPG_PRIVATE_KEY must hold exactly one secret key (found $keys)" >&2; exit 1; }
+          fpr="$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print $10; exit }')"
+          [ -n "$fpr" ] || { echo "no fingerprint for the key in APT_GPG_PRIVATE_KEY" >&2; exit 1; }
           gpg --batch --yes --dearmor --output "$RUNNER_TEMP/beacon-archive-keyring.gpg" "$KEYRING_ASC"
-          fpr="$(gpg --batch --with-colons --show-keys "$KEYRING_ASC" | awk -F: '$1 == "fpr" { print $10; exit }')"
-          [ -n "$fpr" ] || { echo "no fingerprint in $KEYRING_ASC" >&2; exit 1; }
+          cp "$RUNNER_TEMP/beacon-archive-keyring.gpg" "$RUNNER_TEMP/existing-keyring.gpg"
+          if [ -f "$RETIRED_KEYS_ASC" ]; then
+            gpg --batch --yes --dearmor --output "$RUNNER_TEMP/retired-keys.gpg" "$RETIRED_KEYS_ASC"
+            cat "$RUNNER_TEMP/retired-keys.gpg" >> "$RUNNER_TEMP/existing-keyring.gpg"
+          fi
           echo "fingerprint=$fpr" >> "$GITHUB_OUTPUT"
           echo "signing with $fpr"
 
-      - name: Fetch the released .deb files
-        if: steps.gate.outputs.publish == 'true'
-        env:
-          VERSION: ${{ steps.gate.outputs.version }}
-        run: |
-          set -euo pipefail
-          mkdir -p dist/apt-debs && cd dist/apt-debs
-          gh release download "$TAG" --repo "$REPO" --pattern checksums.txt
-          for arch in amd64 arm64; do
-            gh release download "$TAG" --repo "$REPO" --pattern "beacon_${VERSION}_linux_${arch}.deb"
-          done
-          # Every .deb must be listed; --ignore-missing alone would pass an unlisted one.
-          for f in beacon_*.deb; do
-            awk -v name="$f" '$2 == name { found = 1 } END { exit !found }' checksums.txt \
-              || { echo "$f is not in checksums.txt" >&2; exit 1; }
-          done
-          sha256sum --check --ignore-missing --strict checksums.txt
-
-      # Only the signed index is read back. An empty prefix is the first publish; a failed listing
-      # fails the job rather than starting the repository over.
+      # Only the signed index is read back. Whether one exists is decided by InRelease itself, so a
+      # first publish that died before writing it starts over cleanly, and any error other than
+      # "not found" fails the job rather than starting the repository over (which would drop every
+      # older version). Each Packages file is read through the immutable by-hash path that InRelease
+      # names, never the plain path a publish that died before InRelease may already have replaced.
       - name: Fetch the published index
         if: steps.gate.outputs.publish == 'true'
         id: existing
         run: |
           set -euo pipefail
-          # Counts Contents rather than reading KeyCount, which some S3-compatible stores omit; a
-          # missing KeyCount read as zero would start the index over and drop every older version.
-          # shellcheck disable=SC2016 # the backticks are a JMESPath literal, not a command
-          count="$(aws s3api list-objects-v2 --bucket "$APT_S3_BUCKET" --prefix dists/stable/ --query 'length(Contents || `[]`)' --output text)"
-          case "$count" in
-            ''|*[!0-9]*) echo "unexpected object count '$count' for dists/stable/" >&2; exit 1 ;;
-          esac
-          if [ "$count" = "0" ]; then
-            echo "::notice::the bucket has no published index; this is the first publish"
-            echo "dir=" >> "$GITHUB_OUTPUT"
-            exit 0
+          if ! aws s3api head-object --bucket "$APT_S3_BUCKET" --key dists/stable/InRelease >/dev/null 2>"$RUNNER_TEMP/head.err"; then
+            if grep -qE '\(404\)|Not Found|NoSuchKey' "$RUNNER_TEMP/head.err"; then
+              echo "::notice::the bucket has no published InRelease; this is the first publish"
+              echo "dir=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            cat "$RUNNER_TEMP/head.err" >&2
+            echo "could not check for dists/stable/InRelease" >&2
+            exit 1
           fi
           dir="$RUNNER_TEMP/apt-existing"
           aws s3 cp --no-progress "s3://$APT_S3_BUCKET/dists/stable/InRelease" "$dir/InRelease"
           for arch in amd64 arm64; do
             rel="main/binary-$arch/Packages"
-            # An architecture added after the first publish has no index yet; build-apt-repo.sh
-            # fails if InRelease lists one that is missing here.
-            aws s3 cp --no-progress "s3://$APT_S3_BUCKET/dists/stable/$rel" "$dir/$rel" || true
+            # build-apt-repo.sh checks the signature and this hash; here it only names the file.
+            sum="$(awk -v rel="$rel" '
+              /^[^ ]/ { in_sha = ($0 == "SHA256:"); next }
+              in_sha && $3 == rel { print $1 }' "$dir/InRelease")"
+            # An architecture added after the first publish has no index yet.
+            [ -n "$sum" ] || continue
+            case "$sum" in *[!0-9a-f]*) echo "unexpected SHA256 '$sum' for $rel" >&2; exit 1 ;; esac
+            aws s3 cp --no-progress "s3://$APT_S3_BUCKET/dists/stable/main/binary-$arch/by-hash/SHA256/$sum" "$dir/$rel"
           done
           echo "dir=$dir" >> "$GITHUB_OUTPUT"
+
+      # This tag's .deb files, plus those of any earlier release missing from the index. A job
+      # waiting in the apt-repository concurrency group is cancelled when a third tag arrives, and an
+      # index rolled back in the bucket to an older signed copy drops the versions after it; either
+      # way the next release adds them back instead of re-signing an index without them. Only
+      # releases between the oldest version already published and this tag are considered, so
+      # the first publish does not pull in every release made before the repository existed.
+      - name: Fetch the released .deb files
+        if: steps.gate.outputs.publish == 'true'
+        id: debs
+        env:
+          VERSION: ${{ steps.gate.outputs.version }}
+          EXISTING: ${{ steps.existing.outputs.dir }}
+          MAX_BACKFILL: 10
+        run: |
+          set -euo pipefail
+          tags="$TAG"
+          if [ -n "$EXISTING" ]; then
+            # A version counts as published only when every architecture's index lists it.
+            for arch in amd64 arm64; do
+              f="$EXISTING/main/binary-$arch/Packages"
+              if [ -f "$f" ]; then
+                awk '/^Package: / { p = $2 } /^Version: / && p == "beacon" { print $2 }' "$f" | sort -u
+              fi
+            done | sort | uniq -c | awk '$1 == 2 { print $2 }' > "$RUNNER_TEMP/published-versions"
+            oldest=""
+            while read -r v; do
+              if [ -z "$oldest" ] || dpkg --compare-versions "$v" lt "$oldest"; then oldest="$v"; fi
+            done < "$RUNNER_TEMP/published-versions"
+            if [ -n "$oldest" ]; then
+              missing=""
+              for t in $(gh release list --repo "$REPO" --exclude-drafts --exclude-pre-releases --limit 1000 \
+                  --json tagName --jq '.[].tagName' | grep -E '^v[0-9][0-9A-Za-z.+~]*$' | grep -v -- '-' || true); do
+                v="${t#v}"
+                [ "$t" = "$TAG" ] && continue
+                grep -qxF "$v" "$RUNNER_TEMP/published-versions" && continue
+                dpkg --compare-versions "$v" lt "$oldest" && continue
+                # A later tag's release may still be uploading; its own job publishes it.
+                dpkg --compare-versions "$v" gt "$VERSION" && continue
+                missing="$missing $t"
+              done
+              if [ -n "$missing" ]; then
+                # Oldest first, at most MAX_BACKFILL per run; the next release picks up the rest.
+                sorted="$(for t in $missing; do echo "$t"; done | sort -V)"
+                take="$(echo "$sorted" | head -n "$MAX_BACKFILL" | tr '\n' ' ')"
+                left="$(echo "$sorted" | tail -n +"$((MAX_BACKFILL + 1))" | tr '\n' ' ')"
+                echo "::warning title=apt repository backfill::adding releases missing from the index: $take"
+                if [ -n "$left" ]; then
+                  echo "::warning title=apt repository backfill::still missing, for a later run: $left"
+                fi
+                tags="$take $tags"
+              fi
+            fi
+          fi
+          versions=""
+          for t in $tags; do
+            v="${t#v}"
+            d="dist/apt-debs/$t"
+            mkdir -p "$d"
+            (
+              cd "$d"
+              gh release download "$t" --repo "$REPO" --pattern checksums.txt
+              for arch in amd64 arm64; do
+                gh release download "$t" --repo "$REPO" --pattern "beacon_${v}_linux_${arch}.deb"
+              done
+              # Every .deb must be listed; --ignore-missing alone would pass an unlisted one.
+              for f in beacon_*.deb; do
+                awk -v name="$f" '$2 == name { found = 1 } END { exit !found }' checksums.txt \
+                  || { echo "$t: $f is not in checksums.txt" >&2; exit 1; }
+              done
+              sha256sum --check --ignore-missing --strict checksums.txt
+            )
+            versions="$versions $v"
+          done
+          echo "versions=${versions# }" >> "$GITHUB_OUTPUT"
 
       - name: Build and sign the repository update
         if: steps.gate.outputs.publish == 'true'
@@ -578,26 +656,28 @@ jobs:
           set -euo pipefail
           set -- --out dist/apt-repo --keyring "$RUNNER_TEMP/beacon-archive-keyring.gpg" --signing-key "$FINGERPRINT"
           if [ -n "$EXISTING" ]; then
-            set -- "$@" --existing "$EXISTING"
+            set -- "$@" --existing "$EXISTING" --existing-keyring "$RUNNER_TEMP/existing-keyring.gpg"
           fi
-          sh packaging/linux/apt/build-apt-repo.sh "$@" dist/apt-debs/beacon_*.deb
+          sh packaging/linux/apt/build-apt-repo.sh "$@" dist/apt-debs/*/beacon_*.deb
           cp "$KEYRING_ASC" dist/apt-repo/beacon-archive-keyring.asc
           cp "$RUNNER_TEMP/beacon-archive-keyring.gpg" dist/apt-repo/beacon-archive-keyring.gpg
 
       - name: Check the update with apt before publishing
         if: steps.gate.outputs.publish == 'true'
-        env:
-          VERSION: ${{ steps.gate.outputs.version }}
         run: |
           set -euo pipefail
-          # A rerun of a published tag stages no packages, so there is nothing local to download;
-          # the check against the public URL below still runs.
-          if [ -z "$(find dist/apt-repo/pool -name '*.deb')" ]; then
+          # Only versions staged here have their .deb files in the local tree. A rerun of a
+          # published tag stages none; the check against the public URL below still runs.
+          staged="$(find dist/apt-repo/pool -name 'beacon_*_amd64.deb' -printf '%f\n' \
+            | sed -e 's/^beacon_//' -e 's/_amd64\.deb$//' | sort -u)"
+          if [ -z "$staged" ]; then
             echo "::notice::$TAG is already in the apt repository; only the index is republished"
             exit 0
           fi
-          sh packaging/linux/apt/verify-apt-repo.sh "file:$PWD/dist/apt-repo" \
-            "$RUNNER_TEMP/beacon-archive-keyring.gpg" "$VERSION"
+          for v in $staged; do
+            sh packaging/linux/apt/verify-apt-repo.sh "file:$PWD/dist/apt-repo" \
+              "$RUNNER_TEMP/beacon-archive-keyring.gpg" "$v"
+          done
 
       # Order matters: packages, then index files, then the signed Release files with InRelease
       # last, so no client is pointed at a file that is not there yet. Packages are immutable and
@@ -626,11 +706,13 @@ jobs:
       - name: Check the published repository with apt
         if: steps.gate.outputs.publish == 'true'
         env:
-          VERSION: ${{ steps.gate.outputs.version }}
+          VERSIONS: ${{ steps.debs.outputs.versions }}
         run: |
           set -euo pipefail
-          sh packaging/linux/apt/verify-apt-repo.sh "${APT_REPO_URL%/}" \
-            "$RUNNER_TEMP/beacon-archive-keyring.gpg" "$VERSION"
+          for v in $VERSIONS; do
+            sh packaging/linux/apt/verify-apt-repo.sh "${APT_REPO_URL%/}" \
+              "$RUNNER_TEMP/beacon-archive-keyring.gpg" "$v"
+          done
 
   # One checksums.txt for everything a user installs, and signed provenance for all of it.
   #

@@ -2,7 +2,7 @@
 # Builds the next state of Beacon's signed apt repository from the .deb files of one release.
 #
 #   packaging/linux/apt/build-apt-repo.sh --out DIR --keyring FILE --signing-key FPR \
-#     [--existing DIR] DEB...
+#     [--existing DIR [--existing-keyring FILE]] DEB...
 #
 # The published repository lives in object storage and keeps every version's .deb under pool/, so
 # this script never downloads the pool. It takes the published index instead (--existing: a copy
@@ -10,6 +10,11 @@
 # the committed public key (--keyring, a binary keyring), adds the new packages to it, and signs
 # the result with --signing-key. Without --existing it starts an empty repository, which is right
 # only for the very first publish.
+#
+# --existing-keyring names the keys the published index may be signed by, when that is more than
+# --keyring: during a key rotation the bucket's InRelease is still signed by the retired key, which
+# users no longer need to trust. It defaults to --keyring. The new index is always checked against
+# --keyring alone.
 #
 # Checking the published index first matters because the result is re-signed: a Packages file
 # altered in the bucket would otherwise come back out carrying a valid signature.
@@ -42,12 +47,14 @@ out=""
 keyring=""
 signing_key=""
 existing=""
+existing_keyring=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --out) out="$2"; shift 2 ;;
     --keyring) keyring="$2"; shift 2 ;;
     --signing-key) signing_key="$2"; shift 2 ;;
     --existing) existing="$2"; shift 2 ;;
+    --existing-keyring) existing_keyring="$2"; shift 2 ;;
     --) shift; break ;;
     -*) fail "unknown option $1" ;;
     *) break ;;
@@ -67,6 +74,12 @@ fi
 mkdir -p "$out"
 out="$(CDPATH='' cd -- "$out" && pwd)"
 keyring="$(CDPATH='' cd -- "$(dirname -- "$keyring")" && pwd)/$(basename -- "$keyring")"
+if [ -n "$existing_keyring" ]; then
+  [ -f "$existing_keyring" ] || fail "keyring $existing_keyring does not exist"
+  existing_keyring="$(CDPATH='' cd -- "$(dirname -- "$existing_keyring")" && pwd)/$(basename -- "$existing_keyring")"
+else
+  existing_keyring="$keyring"
+fi
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT INT TERM
@@ -94,9 +107,9 @@ for arch in $ARCHES; do
 done
 if [ -n "$existing" ]; then
   [ -f "$existing/InRelease" ] || fail "$existing/InRelease does not exist"
-  gpgv --keyring "$keyring" --output "$work/old-Release" "$existing/InRelease" 2>"$work/gpgv.log" || {
+  gpgv --keyring "$existing_keyring" --output "$work/old-Release" "$existing/InRelease" 2>"$work/gpgv.log" || {
     cat "$work/gpgv.log" >&2
-    fail "the published InRelease is not signed by the committed key"
+    fail "the published InRelease is not signed by the committed key or a retired one"
   }
   for arch in $ARCHES; do
     rel="$COMPONENT/binary-$arch/Packages"

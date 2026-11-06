@@ -294,8 +294,15 @@ A pushed `v*` tag runs the full release end-to-end via
    published index, verifies it against the committed public key
    `packaging/linux/apt/beacon-archive-keyring.asc` before re-signing (so a bucket edit is never
    laundered into a valid signature), refuses to replace a published version, and fails unless
-   the secret's key signs for the committed one, so rotating the key is a reviewed commit.
-   `verify-apt-repo.sh` runs a real, isolated `apt-get update`/`download` against the staged
+   the secret's key signs for the committed one, so rotating the key is a reviewed commit (add the
+   new key to that file, move the old one to `retired-archive-keys.asc`, which only checks the
+   index already in the bucket, then replace the secret). Whether an index exists is decided by a
+   `head-object` on `InRelease` (404 is a first publish, any other error fails), and each
+   `Packages` is read through the `by-hash` path that `InRelease` names, so a publish that died
+   before `InRelease` does not block the next. Each run also adds every non-prerelease release
+   between the oldest published version and its tag that the index lacks (at most 10 per run), so a
+   job cancelled in the serialized concurrency group or an index rolled back in the bucket is
+   repaired by the next release. `verify-apt-repo.sh` runs a real, isolated `apt-get update`/`download` against the staged
    tree and again against the public URL; CI's `apt-repository` job runs `test-apt-repo.sh`.
    Upload order is pool, index, then `Release.gpg`/`Release`/`InRelease` with `Acquire-By-Hash`.
    Skipped with a notice until every `APT_*` setting exists, and for prerelease (`-`) tags.
