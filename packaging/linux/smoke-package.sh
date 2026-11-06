@@ -118,6 +118,20 @@ if ! docker exec -e SUDO_USER="$SMOKE_USER" "$CONTAINER" sh -c "$PKGMGR_INSTALL"
 fi
 echo "ok: package installed"
 
+# What the postinstall prints for the person installing. apt passes maintainer-script output
+# through, but `dnf -q` does not show scriptlet output at all, so on rpm the installed %post is run
+# again, as the package manager runs it, to read what it says. It is idempotent: every upgrade runs
+# it the same way over an installed endpoint.
+POSTINST_LOG=/tmp/beacon-pkg-install.log
+if [ "$FORMAT" = rpm ]; then
+  POSTINST_LOG=/tmp/beacon-postinstall.log
+  if ! docker exec -e SUDO_USER="$SMOKE_USER" "$CONTAINER" sh -c 'rpm -q --qf "%{POSTIN}" beacon >/tmp/beacon-postin.sh && sh /tmp/beacon-postin.sh' >"$POSTINST_LOG" 2>&1; then
+    echo "the installed %post script failed when run again:" >&2
+    tail -30 "$POSTINST_LOG" >&2
+    exit 1
+  fi
+fi
+
 # Everything below must be true without any further user action.
 unit_state="$(docker exec "$CONTAINER" systemctl is-active beacon-collector.service 2>/dev/null || true)"
 [ "$unit_state" = active ] || {
@@ -174,10 +188,10 @@ echo "ok: hooks installed for the user and runnable by them"
 
 docker exec "$CONTAINER" test -f "/home/$SMOKE_USER/.cursor/hooks.json" || {
   echo "Cursor from /etc/default/beacon was not configured for $SMOKE_USER" >&2
-  grep -i "hook\|ignoring" /tmp/beacon-pkg-install.log >&2 || true
+  grep -i "hook\|ignoring" "$POSTINST_LOG" >&2 || true
   exit 1
 }
-grep -q "sudo usermod -aG beacon-log" /tmp/beacon-pkg-install.log || {
+grep -q "sudo usermod -aG beacon-log" "$POSTINST_LOG" || {
   echo "the install did not say how to let someone read the restricted log" >&2; exit 1; }
 echo "ok: the settings file reached the user step (Cursor configured), and the beacon-log hint was printed"
 
