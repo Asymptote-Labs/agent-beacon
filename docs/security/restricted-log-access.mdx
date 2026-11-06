@@ -59,7 +59,7 @@ On an endpoint that is already installed, including one installed from the signe
 sudo beacon endpoint repair --system --log-access restricted
 ```
 
-For package installs you can instead set `BEACON_LOG_ACCESS=restricted` in the environment of the package's install script.
+For package installs you can instead set `BEACON_LOG_ACCESS=restricted` in the environment of the package's install script. On Linux a first install from the `.deb` or `.rpm` is restricted already, with no setting; an upgrade keeps the mode the endpoint has, and `BEACON_LOG_ACCESS=shared` installs a new endpoint shared instead. A configuration manager that cannot set the install script's environment (Salt, Ansible, Puppet, Chef) can put the setting in `/etc/default/beacon` or `/etc/sysconfig/beacon`; see [Settings for configuration-manager installs](/platforms/linux#settings-for-configuration-manager-installs).
 
 Switching replaces the log and its archives with fresh copies, so a file handle another account opened while the log was shared stops reaching it. Existing events are kept.
 

@@ -310,7 +310,7 @@ sudo dseditgroup -o edit -a <account> -t user beacon-log
 
 The log format and every event field stay the same, so a SIEM or forwarder that parses the log needs no change. Shippers that run as root, and the Beacon Cloud forwarder, keep working without one.
 
-The mode is recorded in `config.json` as `log_access`, and in a root-owned `.beacon-log-access` marker beside the log. `beacon endpoint repair`, package upgrades, the Jamf `repair-hooks.sh` policy, and a reinstall after `uninstall --keep-logs` keep it. To go back, run `sudo beacon endpoint repair --system --log-access shared`; the log is writable by every account again at once. For package installs, set `BEACON_LOG_ACCESS=restricted` in the environment of the package's install script.
+The mode is recorded in `config.json` as `log_access`, and in a root-owned `.beacon-log-access` marker beside the log. `beacon endpoint repair`, package upgrades, the Jamf `repair-hooks.sh` policy, and a reinstall after `uninstall --keep-logs` keep it. To go back, run `sudo beacon endpoint repair --system --log-access shared`; the log is writable by every account again at once. For package installs, set `BEACON_LOG_ACCESS=restricted` in the environment of the package's install script. A first install from the Linux `.deb` or `.rpm` is restricted without it (`BEACON_LOG_ACCESS=shared` opts out), and the Linux install script also reads its settings from `/etc/default/beacon` or `/etc/sysconfig/beacon` for configuration managers that cannot set its environment.
 
 What this does and does not change:
 

@@ -249,6 +249,37 @@ if failed:
 print(f"ok: doctor reports no failures across {len(checks)} checks")
 PY
 
+# A first package install lands in restricted log access with no second step: the collector is the
+# only writer, the log is 0640 root:beacon-log, and hooks hand their events to the ingest socket.
+# This is what a configuration manager (Salt pkg.installed, Ansible apt) gets, since it cannot pass
+# BEACON_LOG_ACCESS through to the postinstall.
+LOG=/var/log/beacon-agent/runtime.jsonl
+mode="$(docker exec "$CONTAINER" cat /etc/beacon/endpoint/config.json | python3 -c 'import json, sys; print(json.load(sys.stdin).get("log_access", ""))')"
+[ "$mode" = restricted ] || { echo "config.json log_access is '$mode' after a first install, want restricted" >&2; exit 1; }
+perms="$(docker exec "$CONTAINER" stat -c '%a %U:%G' "$LOG")"
+[ "$perms" = "640 root:beacon-log" ] || { echo "$LOG is $perms, want 640 root:beacon-log" >&2; exit 1; }
+docker exec "$CONTAINER" test -S /var/run/beacon-agent/ingest.sock || {
+  echo "the collector is not serving /var/run/beacon-agent/ingest.sock" >&2; exit 1; }
+if docker exec "$CONTAINER" su - "$SMOKE_USER" -c "cat $LOG" >/dev/null 2>&1; then
+  echo "$SMOKE_USER can read $LOG; restricted access did not apply" >&2; exit 1
+fi
+echo "ok: a first package install is restricted (640 root:beacon-log, ingest socket up)"
+
+# The installed hook, run as the user exactly as Claude Code runs it, reaches the log through the
+# socket and is recorded under the account the kernel says sent it.
+HOOK_CMD="$(docker exec "$CONTAINER" cat "$SETTINGS" | python3 -c '
+import json, sys
+print(json.load(sys.stdin)["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"])')"
+docker exec "$CONTAINER" su - "$SMOKE_USER" -c "printf '%s' '{\"session_id\":\"smoke-restricted\",\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"smoke\",\"cwd\":\"/tmp\"}' | $HOOK_CMD" >/dev/null 2>&1 || {
+  echo "the installed prompt hook failed for $SMOKE_USER" >&2; exit 1; }
+recorded="$(docker exec "$CONTAINER" sh -c "grep smoke-restricted $LOG" | python3 -c '
+import json, sys
+users = {json.loads(line).get("user", {}).get("name", "") for line in sys.stdin if line.strip()}
+print(",".join(sorted(users)))')"
+[ "$recorded" = "$SMOKE_USER" ] || {
+  echo "the hook event was recorded as '$recorded', want $SMOKE_USER" >&2; exit 1; }
+echo "ok: $SMOKE_USER's hook event reached the restricted log through the socket, as $SMOKE_USER"
+
 # Reinstalling the same package is an upgrade as far as both package managers are concerned, and it
 # is the exact sequence `beacon endpoint update --apply` performs. It is worth its own assertion
 # because the old package's pre-removal script runs during an upgrade -- and on rpm it runs *after*
@@ -267,6 +298,8 @@ after_upgrade="$(docker exec "$CONTAINER" systemctl is-active beacon-collector.s
 }
 docker exec "$CONTAINER" test -f /etc/beacon/endpoint/config.json || {
   echo "an upgrade must not remove the config" >&2; exit 1; }
+mode="$(docker exec "$CONTAINER" cat /etc/beacon/endpoint/config.json | python3 -c 'import json, sys; print(json.load(sys.stdin).get("log_access", ""))')"
+[ "$mode" = restricted ] || { echo "an upgrade changed log_access to '$mode'" >&2; exit 1; }
 echo "ok: upgrade left the service running and the config in place"
 
 # Removal must stop the service while the binaries it points at still exist, and must not destroy
