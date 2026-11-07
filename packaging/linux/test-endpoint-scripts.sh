@@ -210,6 +210,11 @@ INSTALL_ARGS='claude,codex,cursor'
 run_install BEACON_DEFAULTS_FILE="$DEFAULTS" BEACON_ENDPOINT_HARNESSES=codex
 INSTALL_ARGS=''
 [ "$(flag_value --harness)" = "codex" ] || fail "environment over positional: --harness is '$(flag_value --harness)'"
+# A variable set to an empty string is unset as far as the file is concerned: a wrapper that passes
+# every variable must not shadow the file with empty ones.
+run_install BEACON_DEFAULTS_FILE="$DEFAULTS" BEACON_ENDPOINT_HARNESSES= BEACON_OTLP_HTTP_PORT=
+[ "$(flag_value --harness)" = "claude" ] || fail "empty environment variable shadowed the file: --harness is '$(flag_value --harness)'"
+[ "$(flag_value --otlp-http-port)" = "5318" ] || fail "empty environment variable shadowed the file: --otlp-http-port is '$(flag_value --otlp-http-port)'"
 
 # A key assigned twice takes its last value, as a shell would: configuration managers override a
 # setting by appending a line. The environment still wins over every one of them.
@@ -259,18 +264,28 @@ expect_readers() {
 rm -f "$DEFAULTS"
 run_install
 has_flag --log-readers && fail "configuration-manager install (no SUDO_USER) passed --log-readers $(flag_value --log-readers)"
-run_install SUDO_USER=alice
+run_install SUDO_USER=alice BEACON_INSTALL_TTY=1
 expect_readers alice "first install by sudo"
-run_install SUDO_USER=root
+# sudo also sets SUDO_USER for automation (Ansible become, a Packer sudo provisioner), which has no
+# terminal: its login account must not be added.
+run_install SUDO_USER=deploy BEACON_INSTALL_TTY=0
+has_flag --log-readers && fail "sudo install without a terminal added $(flag_value --log-readers)"
+run_install SUDO_USER=deploy
+has_flag --log-readers && fail "sudo install with no terminal on stdin added $(flag_value --log-readers)"
+run_install SUDO_USER=deploy BEACON_INSTALL_TTY=1 DEBIAN_FRONTEND=noninteractive
+has_flag --log-readers && fail "DEBIAN_FRONTEND=noninteractive install added $(flag_value --log-readers)"
+run_install SUDO_USER=deploy BEACON_INSTALL_TTY=0 BEACON_LOG_READERS=svc_splunk
+expect_readers svc_splunk "explicit BEACON_LOG_READERS without a terminal"
+run_install SUDO_USER=root BEACON_INSTALL_TTY=1
 has_flag --log-readers && fail "SUDO_USER=root added root as a reader"
-run_install SUDO_USER=alice BEACON_LOG_ACCESS=shared
+run_install SUDO_USER=alice BEACON_INSTALL_TTY=1 BEACON_LOG_ACCESS=shared
 has_flag --log-readers && fail "shared first install by sudo passed --log-readers"
-run_install SUDO_USER=alice BEACON_LOG_READERS=
+run_install SUDO_USER=alice BEACON_INSTALL_TTY=1 BEACON_LOG_READERS=
 has_flag --log-readers && fail "BEACON_LOG_READERS= (nobody) still added the sudo user"
 run_install SUDO_USER=alice BEACON_LOG_READERS=svc_splunk,bob
 expect_readers svc_splunk,bob "BEACON_LOG_READERS over the sudo user"
 printf 'BEACON_LOG_READERS= # fleet: nobody implicitly\n' >"$DEFAULTS"
-run_install BEACON_DEFAULTS_FILE="$DEFAULTS" SUDO_USER=alice
+run_install BEACON_DEFAULTS_FILE="$DEFAULTS" SUDO_USER=alice BEACON_INSTALL_TTY=1
 has_flag --log-readers && fail "defaults file BEACON_LOG_READERS= still added the sudo user"
 printf 'BEACON_LOG_READERS=svc_splunk\n' >"$DEFAULTS"
 run_install BEACON_DEFAULTS_FILE="$DEFAULTS"
@@ -278,7 +293,7 @@ expect_readers svc_splunk "defaults file BEACON_LOG_READERS"
 rm -f "$DEFAULTS"
 mkdir -p "$TMP_DIR/etc"
 echo '{}' >"$TMP_DIR/etc/config.json"
-run_install SUDO_USER=alice
+run_install SUDO_USER=alice BEACON_INSTALL_TTY=1
 has_flag --log-readers && fail "upgrade by sudo added the sudo user implicitly"
 run_install SUDO_USER=alice BEACON_LOG_READERS=svc_splunk
 expect_readers svc_splunk "upgrade with explicit BEACON_LOG_READERS"

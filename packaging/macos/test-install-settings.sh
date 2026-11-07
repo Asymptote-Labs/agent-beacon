@@ -146,6 +146,67 @@ run_install BEACON_INSTALLER_GUI=1 BEACON_CONSOLE_USER=alice
 has_flag --log-readers && fail "upgrade in Installer.app added the person implicitly"
 rm -f "$TMP_DIR/system/config.json"
 
+# Without the test override, Installer.app is recognized by the executable the kernel reports for an
+# Installer process the console user owns, never by the process name alone, which any account can use.
+PGREP_STUB="$TMP_DIR/pgrep"
+LSOF_STUB="$TMP_DIR/lsof"
+cat >"$PGREP_STUB" <<'STUB'
+#!/bin/sh
+# pgrep -x -u USER Installer: one pid when the test says an Installer process runs as USER.
+[ "$3" = "$BEACON_TEST_INSTALLER_USER" ] && echo 4242
+exit 0
+STUB
+cat >"$LSOF_STUB" <<'STUB'
+#!/bin/sh
+printf 'p4242\nftxt\nn%s\nftxt\nn/usr/lib/dyld\n' "$BEACON_TEST_INSTALLER_EXE"
+STUB
+chmod 755 "$PGREP_STUB" "$LSOF_STUB"
+APPLE_INSTALLER=/System/Library/CoreServices/Installer.app/Contents/MacOS/Installer
+run_install BEACON_INSTALLER_GUI= BEACON_PGREP_BIN="$PGREP_STUB" BEACON_LSOF_BIN="$LSOF_STUB" \
+  BEACON_CONSOLE_USER=alice BEACON_TEST_INSTALLER_USER=alice BEACON_TEST_INSTALLER_EXE="$APPLE_INSTALLER"
+expect --log-readers alice "Apple's Installer.app running as the console user"
+run_install BEACON_INSTALLER_GUI= BEACON_PGREP_BIN="$PGREP_STUB" BEACON_LSOF_BIN="$LSOF_STUB" \
+  BEACON_CONSOLE_USER=alice BEACON_TEST_INSTALLER_USER=alice BEACON_TEST_INSTALLER_EXE=/Users/alice/bin/Installer
+has_flag --log-readers && fail "a program named Installer that is not Apple's added $(flag_value --log-readers)"
+run_install BEACON_INSTALLER_GUI= BEACON_PGREP_BIN="$PGREP_STUB" BEACON_LSOF_BIN="$LSOF_STUB" \
+  BEACON_CONSOLE_USER=alice BEACON_TEST_INSTALLER_USER=bob BEACON_TEST_INSTALLER_EXE="$APPLE_INSTALLER"
+has_flag --log-readers && fail "Installer.app running as another account added $(flag_value --log-readers)"
+run_install BEACON_INSTALLER_GUI= BEACON_PGREP_BIN="$TMP_DIR/missing" BEACON_LSOF_BIN="$LSOF_STUB" \
+  BEACON_CONSOLE_USER=alice BEACON_TEST_INSTALLER_USER=alice BEACON_TEST_INSTALLER_EXE="$APPLE_INSTALLER"
+has_flag --log-readers && fail "no pgrep: treated as Installer.app and added $(flag_value --log-readers)"
+
+# The Fleet wrapper passes only the arguments it was given, so the managed preferences fill the rest
+# instead of being shadowed by its defaults.
+printf 'BEACON_ENDPOINT_HARNESSES=claude,codex,cursor\nBEACON_OTLP_HTTP_PORT=6318\nBEACON_SPLUNK_INDEX=fleet\n' >"$MANAGED.plist"
+chmod 644 "$MANAGED.plist"
+# run_fleet [ARG ...] runs the Fleet wrapper the way run_install runs the install script.
+run_fleet() {
+  rm -f "$ARGS"
+  env -i PATH="$PATH" HOME="$TMP_DIR" BEACON_BIN="$STUB" BEACON_TEST_ARGS="$ARGS" \
+    BEACON_INSTALL_SCRIPT="$INSTALL_SCRIPT" \
+    BEACON_SYSTEM_CONFIG="$TMP_DIR/system/config.json" \
+    BEACON_SYSTEM_LOG="$TMP_DIR/system/runtime.jsonl" \
+    BEACON_DEFAULTS_BIN="$DEFAULTS_STUB" \
+    BEACON_MANAGED_PREFS="$MANAGED" \
+    BEACON_LOCAL_PREFS="$LOCAL" \
+    BEACON_SETTINGS_OWNER="$(id -u)" \
+    BEACON_INSTALLER_GUI=0 \
+    sh "$ROOT_DIR/packaging/macos/fleet/scripts/install.sh" "$@" >"$TMP_DIR/out" 2>&1 || { cat "$TMP_DIR/out" >&2; return 1; }
+}
+run_fleet
+expect --harness claude,codex,cursor "Fleet wrapper with no arguments: managed harnesses"
+expect --otlp-http-port 6318 "Fleet wrapper with no arguments: managed HTTP port"
+expect --otlp-grpc-port 4317 "Fleet wrapper with no arguments: default gRPC port"
+expect --splunk-index fleet "Fleet wrapper with no arguments: managed Splunk index"
+run_fleet codex
+expect --harness codex "Fleet wrapper argument over managed preferences"
+# An empty variable, as a wrapper or an MDM parameter left blank passes it, does not shadow the
+# preferences either; an empty BEACON_LOG_READERS still means nobody.
+run_install BEACON_ENDPOINT_HARNESSES= BEACON_SPLUNK_INDEX=
+expect --harness claude,codex,cursor "empty BEACON_ENDPOINT_HARNESSES shadowed managed preferences"
+expect --splunk-index fleet "empty BEACON_SPLUNK_INDEX shadowed managed preferences"
+rm -f "$MANAGED.plist"
+
 if [ "$failures" -ne 0 ]; then
   echo "$failures check(s) failed" >&2
   exit 1

@@ -15,9 +15,10 @@
 # single or double quotes, whole-line and trailing `# comments`), so nothing in it runs. A value with
 # anything else left over (an unquoted space, an unterminated quote) is skipped with a warning rather
 # than passed on. The file is ignored unless root owns it and no one else can write it, because the
-# package scripts run as root. A variable already set in the environment wins over the file; within
-# the file, a later assignment of a key replaces an earlier one, as it would for a shell, because a
-# configuration manager often overrides a setting by appending a line.
+# package scripts run as root. A variable already set in the environment to a non-empty value (or
+# BEACON_LOG_READERS set at all, even empty) wins over the file; within the file, a later assignment
+# of a key replaces an earlier one, as it would for a shell, because a configuration manager often
+# overrides a setting by appending a line.
 
 # The documented install settings, the only keys taken from the file.
 BEACON_SETTINGS_KEYS='BEACON_ENDPOINT_HARNESSES BEACON_OTLP_GRPC_PORT BEACON_OTLP_HTTP_PORT
@@ -112,7 +113,14 @@ beacon_load_settings() {
   for _beacon_key in $BEACON_SETTINGS_KEYS; do
     _beacon_known="$_beacon_known$_beacon_key "
     # $_beacon_key is one of the fixed names above, so the indirection cannot evaluate anything else.
-    eval "_beacon_set=\${$_beacon_key+set}"
+    # A variable set to an empty string counts as unset, as on macOS, so a wrapper that passes every
+    # variable never shadows the file with empty ones; BEACON_LOG_READERS is the exception, because
+    # empty there is a value of its own (nobody is added).
+    if [ "$_beacon_key" = BEACON_LOG_READERS ]; then
+      eval "_beacon_set=\${$_beacon_key+set}"
+    else
+      eval "_beacon_set=\${$_beacon_key:+set}"
+    fi
     if [ -n "$_beacon_set" ]; then
       _beacon_preset="$_beacon_preset$_beacon_key "
     fi
