@@ -303,7 +303,9 @@ A pushed `v*` tag runs the full release end-to-end via
    the `apt-repository` concurrency group cancels a pending job when a third arrives; that also
    repairs an index rolled back in the bucket within the window.
    `verify-apt-repo.sh` runs a real, isolated `apt-get update`/`download` against the staged
-   tree and again against the public URL; CI's `apt-repository` job runs `test-apt-repo.sh`.
+   tree (the index, then each staged package by its own version and architecture, since the
+   tree holds only what the run adds) and again against the public URL for the tag's version;
+   CI's `apt-repository` job runs `test-apt-repo.sh`.
    Upload order is pool, index, then `Release.gpg`/`Release`/`InRelease` with `Acquire-By-Hash`.
    Skipped with a notice until every `APT_*` setting exists, and for prerelease (`-`) tags.
 5. `finalize` (ubuntu, `needs` goreleaser, package and windows-package, runs whenever `goreleaser` succeeded)

@@ -200,4 +200,17 @@ sh "$BUILD" --out "$work/out11" --keyring "$work/other-keyring.gpg" --signing-ke
   --existing "$work/existing" "$deb_a6" "$deb_b6"
 pass "after a rotation the old key can be removed from the committed keyring"
 
+# 12. A staged tree holds only what a run adds, so the pre-publish check verifies the index ("-")
+#     and each staged package's own version and architecture, not every architecture.
+existing
+deb_b7="$(make_deb 1.0.6 arm64)"
+sh "$BUILD" --out "$work/out12" --keyring "$work/both-keyring.gpg" --signing-key "$other_fpr" \
+  --existing "$work/existing" "$deb_b7"
+sh "$VERIFY" "file:$work/out12" "$work/both-keyring.gpg" - >/dev/null
+APT_VERIFY_ARCHES=arm64 sh "$VERIFY" "file:$work/out12" "$work/both-keyring.gpg" 1.0.6 >/dev/null
+if sh "$VERIFY" "file:$work/out12" "$work/both-keyring.gpg" 1.0.6 >/dev/null 2>&1; then
+  fail "a staged tree without the amd64 package passed a check for both architectures"
+fi
+pass "the staged tree is checked for the packages it holds"
+
 echo "all apt repository checks passed"

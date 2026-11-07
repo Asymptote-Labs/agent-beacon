@@ -5,6 +5,10 @@
 #
 #   packaging/linux/apt/verify-apt-repo.sh URL KEYRING VERSION [PACKAGE]
 #
+# VERSION "-" checks only the signature and the index (apt-get update) and downloads nothing.
+# APT_VERIFY_ARCHES limits the downloads to some of the architectures (default amd64 arm64), for a
+# staged tree that holds only the packages a run adds.
+#
 # URL is the repository root (https://..., or file:/path for a staged copy). KEYRING is a binary
 # keyring file. Runs as an ordinary user: apt gets private state, cache and source directories and
 # never reads or changes the host's own configuration.
@@ -23,7 +27,7 @@ url="$1"
 keyring="$2"
 version="$3"
 package="${4:-beacon}"
-ARCHES="amd64 arm64"
+ARCHES="${APT_VERIFY_ARCHES:-amd64 arm64}"
 
 [ -f "$keyring" ] || fail "keyring $keyring does not exist"
 keyring="$(CDPATH='' cd -- "$(dirname -- "$keyring")" && pwd)/$(basename -- "$keyring")"
@@ -58,6 +62,11 @@ APT_CONFIG="$dir/apt.conf"
 export APT_CONFIG
 
 apt-get --error-on=any update || fail "apt-get update against $url failed"
+
+if [ "$version" = "-" ]; then
+  echo "verify-apt-repo: $url has a valid index signed by the given key"
+  exit 0
+fi
 
 for arch in $ARCHES; do
   (cd "$dir/download" && apt-get download "$package:$arch=$version") \

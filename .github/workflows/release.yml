@@ -657,20 +657,25 @@ jobs:
           cp "$KEYRING_ASC" dist/apt-repo/beacon-archive-keyring.asc
           cp "$RUNNER_TEMP/beacon-archive-keyring.gpg" dist/apt-repo/beacon-archive-keyring.gpg
 
+      # Checks what this run stages, not this tag's version: the staged pool holds only packages the
+      # index lacked, which on a rerun or after a partial publish need not include this tag's own,
+      # and may include backfilled releases. The check against the public URL below covers $VERSION.
       - name: Check the update with apt before publishing
         if: steps.gate.outputs.publish == 'true'
-        env:
-          VERSION: ${{ steps.gate.outputs.version }}
         run: |
           set -euo pipefail
-          # A rerun of a published tag stages no packages, so there is nothing local to download;
-          # the check against the public URL below still runs.
-          if [ -z "$(find dist/apt-repo/pool -name '*.deb')" ]; then
-            echo "::notice::$TAG is already in the apt repository; only the index is republished"
+          url="file:$PWD/dist/apt-repo"
+          keyring="$RUNNER_TEMP/beacon-archive-keyring.gpg"
+          sh packaging/linux/apt/verify-apt-repo.sh "$url" "$keyring" -
+          find dist/apt-repo/pool -name '*.deb' 2>/dev/null | sort > "$RUNNER_TEMP/staged"
+          if [ ! -s "$RUNNER_TEMP/staged" ]; then
+            echo "::notice::every package is already in the apt repository; only the index is republished"
             exit 0
           fi
-          sh packaging/linux/apt/verify-apt-repo.sh "file:$PWD/dist/apt-repo" \
-            "$RUNNER_TEMP/beacon-archive-keyring.gpg" "$VERSION"
+          while read -r deb; do
+            APT_VERIFY_ARCHES="$(dpkg-deb -f "$deb" Architecture)" \
+              sh packaging/linux/apt/verify-apt-repo.sh "$url" "$keyring" "$(dpkg-deb -f "$deb" Version)" < /dev/null
+          done < "$RUNNER_TEMP/staged"
 
       # Order matters: packages, then index files, then the signed Release files with InRelease
       # last, so no client is pointed at a file that is not there yet. Packages are immutable and
