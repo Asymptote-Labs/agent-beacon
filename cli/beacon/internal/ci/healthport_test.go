@@ -10,7 +10,7 @@ import (
 // install would, rather than always 13133, so it can run beside an endpoint collector.
 func TestProvisionDerivesTheHealthPortFromTheOTLPPorts(t *testing.T) {
 	t.Setenv("RUNNER_TEMP", t.TempDir())
-	collector := fakeExecutable(t, "collector", "#!/bin/sh\nsleep 60\n")
+	collector := fakeExecutable(t, "collector", fakeCollectorPrelude+"sleep 60\n")
 	oldResolve := resolveCollectorBinary
 	resolveCollectorBinary = func(string) (string, error) { return collector, nil }
 	t.Cleanup(func() { resolveCollectorBinary = oldResolve })

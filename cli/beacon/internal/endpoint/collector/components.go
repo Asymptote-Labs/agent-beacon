@@ -19,7 +19,9 @@ var requiredComponents = map[string][]string{
 
 // listComponents runs `beacon-otelcol components`, which prints what the binary was built with.
 var listComponents = func(ctx context.Context, binary string) ([]byte, error) {
-	return exec.CommandContext(ctx, binary, "components").Output()
+	cmd := exec.CommandContext(ctx, binary, "components")
+	cmd.WaitDelay = componentsWaitDelay
+	return cmd.Output()
 }
 
 type namedComponents []struct {
@@ -57,7 +59,7 @@ func (l componentListing) has(kind, name string) bool {
 // readComponents lists binary's components. ok is false for a binary that cannot list them -- a
 // stand-in, or a build without the command -- or whose listing does not parse: nothing to judge it on.
 func readComponents(binary string) (componentListing, bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), componentsTimeout)
 	defer cancel()
 	out, err := listComponents(ctx, binary)
 	if err != nil {
@@ -155,3 +157,13 @@ func CheckComponentsFor(binary string, extensions, processors, exporters []strin
 	}
 	return nil
 }
+
+// componentsTimeout bounds `beacon-otelcol components`. A variable for tests.
+var componentsTimeout = 10 * time.Second
+
+// componentsWaitDelay is how long listComponents waits, after the timeout kills the binary, for its
+// output pipes to close. A child the binary started keeps them open after the binary is killed (a
+// shell script's commands are such children), and without a bound Output() would wait for that child
+// however long it runs, so a binary that hangs on `components` would stall install, repair and every
+// config render on macOS and Windows, which consult this listing to decide on peer attribution.
+const componentsWaitDelay = 2 * time.Second
