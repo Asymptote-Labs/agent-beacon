@@ -60,6 +60,15 @@ if ($install -notmatch "BEACON_LOG_READERS" -or $install -notmatch [regex]::Esca
 if ($install -notmatch [regex]::Escape('HKLM:\SOFTWARE\Policies\Beacon\Endpoint')) {
     Fail "install-endpoint.ps1 no longer reads install settings from the HKLM:\SOFTWARE\Policies\Beacon\Endpoint policy key"
 }
+# The first-install restricted default applies only where the collector is a Windows service, as on
+# Linux only where it is a systemd one: a supervised collector (BEACON_SERVICE=none) is restarted by
+# nothing, so a restricted log there would spool every hook event while it is down.
+if ($install -notmatch [regex]::Escape('$firstInstall -and $windowsService')) {
+    Fail "install-endpoint.ps1 must default a first install to restricted only when the collector is a Windows service"
+}
+if ($install -notmatch [regex]::Escape("@('', 'auto', 'windows-service', 'windows', 'scm')")) {
+    Fail "install-endpoint.ps1 no longer lists the --service values that resolve to the Service Control Manager"
+}
 # Only a person at the installer's full interface may be added implicitly, which the script can tell
 # only from the UILevel the MSI passes it.
 $wxs = Get-Content -Raw -LiteralPath (Join-Path $scriptDir 'beacon.wxs')

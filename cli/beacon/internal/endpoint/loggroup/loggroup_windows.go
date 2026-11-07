@@ -59,8 +59,8 @@ func create(name string) error {
 	return err
 }
 
-// accountDomainSeparator is true: a Windows account may be named DOMAIN\name.
-const accountDomainSeparator = true
+// accountWindowsNames is true: a Windows account may be named DOMAIN\name, and its name may hold spaces and non-ASCII letters.
+const accountWindowsNames = true
 
 // addMember adds the account to the local group with net.exe from the system directory. net.exe
 // reports an existing member as error 1378, which counts as success.

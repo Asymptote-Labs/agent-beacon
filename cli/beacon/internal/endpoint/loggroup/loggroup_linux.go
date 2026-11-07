@@ -48,8 +48,8 @@ func create(name string) error {
 	return errors.New("neither groupadd nor addgroup is available")
 }
 
-// accountDomainSeparator is false: Linux account names never contain a backslash.
-const accountDomainSeparator = false
+// accountWindowsNames is false: Linux account names hold no backslash, space or non-ASCII letter.
+const accountWindowsNames = false
 
 // addMember uses gpasswd, which resolves the account through NSS and so accepts a directory (SSSD,
 // LDAP) account that usermod, which reads only /etc/passwd, refuses; busybox addgroup where that is

@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
@@ -104,11 +105,17 @@ func AddMember(group, account string) error {
 	return addMember(group, account)
 }
 
-// validAccount accepts the account names local and directory accounts use -- letters, digits and
-// . _ - $ @, plus one DOMAIN\name separator on Windows -- so a name is never read as an option, a
-// path or a second argument by the tools it is passed to.
+// validAccount accepts the account names local and directory accounts use, so a name is never read
+// as an option, a path or a second argument by the tools it is passed to. Every platform accepts
+// letters, digits and . _ - $ @. Windows also accepts one DOMAIN\name separator and, because OOBE
+// makes a local account's name from what the person typed (`John Smith`, `José`), letters and digits
+// from any script, combining marks, interior spaces and an apostrophe. The tools get each name as one
+// argv entry (exec.Command, never a shell), so a space cannot split it; a leading - or / (net.exe's
+// option prefix) is refused so it is never read as an option, and a comma never, because
+// --log-readers is a comma-separated list.
 func validAccount(account string) error {
-	if account == "" || len(account) > 256 || strings.HasPrefix(account, "-") {
+	if account == "" || len(account) > 256 || strings.HasPrefix(account, "-") ||
+		strings.TrimSpace(account) != account {
 		return fmt.Errorf("invalid account name %q", account)
 	}
 	backslashes := 0
@@ -116,14 +123,22 @@ func validAccount(account string) error {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
 		case r == '.' || r == '_' || r == '-' || r == '$' || r == '@':
-		case r == '\\' && accountDomainSeparator:
+		case r == '\\' && accountWindowsNames:
 			backslashes++
+		case accountWindowsNames && (r == ' ' || r == '\'' ||
+			r > unicode.MaxASCII && (unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsMark(r))):
 		default:
 			return fmt.Errorf("invalid account name %q", account)
 		}
 	}
 	if backslashes > 1 || strings.HasPrefix(account, "\\") || strings.HasSuffix(account, "\\") {
 		return fmt.Errorf("invalid account name %q", account)
+	}
+	if backslashes == 1 {
+		domain, name, _ := strings.Cut(account, "\\")
+		if strings.TrimSpace(domain) != domain || strings.TrimSpace(name) != name {
+			return fmt.Errorf("invalid account name %q", account)
+		}
 	}
 	return nil
 }

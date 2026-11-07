@@ -69,7 +69,7 @@ The mode is recorded in `config.json` as `log_access` and in a root-owned `.beac
 
 The `.deb` and `.rpm`, the macOS `.pkg` and the Windows MSI follow the same rules.
 
-**A first install is restricted.** A package is installed by an administrator for the whole machine, often by fleet tooling, so it sets up restricted access without a second step. An upgrade, a reinstall over a kept config, or a reinstall over a log kept by `uninstall --keep-logs` keeps whatever mode the endpoint already has, so existing endpoints never change. On Linux, a host without systemd as PID 1 (a container, WSL without systemd), or with `BEACON_SERVICE=none`, stays shared, because nothing there restarts the collector. `BEACON_LOG_ACCESS=shared` installs a new endpoint shared.
+**A first install is restricted.** A package is installed by an administrator for the whole machine, often by fleet tooling, so it sets up restricted access without a second step. An upgrade, a reinstall over a kept config, or a reinstall over a log kept by `uninstall --keep-logs` keeps whatever mode the endpoint already has, so existing endpoints never change. An install whose collector is not an OS service stays shared, because nothing there restarts the collector: on Linux a host without systemd as PID 1 (a container, WSL without systemd), and on Linux or Windows one installed with `BEACON_SERVICE=none`. `BEACON_LOG_ACCESS=shared` installs a new endpoint shared.
 
 **Who is added to `beacon-log` depends on how the package was installed:**
 
