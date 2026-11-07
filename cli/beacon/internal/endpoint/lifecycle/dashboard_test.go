@@ -2,6 +2,8 @@ package lifecycle
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -113,6 +115,39 @@ func TestStatusReportsTheDashboardSwitch(t *testing.T) {
 		status := buildStatus(true, cfg, runtimeLog, asymptote.StatusOptions{SkipCredentialCheck: true})
 		if status.Dashboard != tc.wantMode || (status.DashboardError != "") != tc.wantError {
 			t.Errorf("%s: dashboard = %q, error %q", tc.name, status.Dashboard, status.DashboardError)
+		}
+	}
+}
+
+// The dashboard marker goes wherever config.json goes. A normal uninstall removes config.json
+// through the manifest; a marker left behind would bring a later clean install back disabled.
+// Repair keeps both.
+func TestUninstallRemovesTheDashboardMarkerWithTheConfig(t *testing.T) {
+	for _, withManifest := range []bool{false, true} {
+		for _, repair := range []bool{false, true} {
+			testenv.SetHome(t, t.TempDir())
+			cfg := endpointconfig.Default(true, filepath.Join(t.TempDir(), "runtime.jsonl"))
+			configPath, err := endpointconfig.Save(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			marker := endpointconfig.DashboardMarkerPath(configPath)
+			if err := os.WriteFile(marker, []byte("disabled\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if withManifest {
+				if _, err := writeManifest(true, Manifest{Files: []string{configPath}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_ = Uninstall(UninstallOptions{UserMode: true, KeepManagedIngest: repair})
+			_, err = os.Stat(marker)
+			if repair && err != nil {
+				t.Errorf("manifest=%v: repair removed the dashboard marker: %v", withManifest, err)
+			}
+			if !repair && !os.IsNotExist(err) {
+				t.Errorf("manifest=%v: uninstall left the dashboard marker behind: %v", withManifest, err)
+			}
 		}
 	}
 }

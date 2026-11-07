@@ -724,6 +724,9 @@ func Install(opts InstallOptions) (InstallResult, error) {
 	manifest.Files = append(manifest.Files, configPath)
 	forwardSecretsPath := endpointconfig.OTLPForwardSecretsPath(cfg.UserMode)
 	tx.Track(forwardSecretsPath)
+	// Save writes or removes the dashboard marker beside the system config; a failed install puts it
+	// back as it was, so it keeps matching the config the rollback restores.
+	tx.Track(endpointconfig.DashboardMarkerPath(configPath))
 	if _, err := saveEndpointConfig(cfg); err != nil {
 		tx.Rollback(manifest)
 		return InstallResult{}, err
@@ -991,9 +994,6 @@ func Uninstall(opts UninstallOptions) error {
 		fail("remove "+cfg.Collector.ConfigPath, os.Remove(cfg.Collector.ConfigPath))
 		if !opts.KeepManagedIngest {
 			fail("remove endpoint config", os.Remove(endpointConfigPath))
-			// The marker records the config's dashboard switch; left behind, a later install's
-			// buildConfig would read it as the switch of a config that no longer exists.
-			fail("remove the dashboard switch marker", os.Remove(endpointconfig.DashboardMarkerPath(endpointConfigPath)))
 		}
 	}
 	// The forward's header values are a credential, so they go with config.json whether or not the
@@ -1001,6 +1001,10 @@ func Uninstall(opts UninstallOptions) error {
 	// would otherwise leave the backend's token behind.
 	if !opts.KeepManagedIngest {
 		fail("remove the OTLP forward headers", os.Remove(forwardSecretsPath))
+		// The dashboard marker records config.json's switch, so it goes whenever config.json does,
+		// however that was removed: left behind, a later install's buildConfig would read it as
+		// the switch of a config that no longer exists and come back disabled.
+		fail("remove the dashboard switch marker", os.Remove(endpointconfig.DashboardMarkerPath(endpointConfigPath)))
 	}
 	if !opts.KeepLogs {
 		for _, path := range runtimeLogFiles(cfg.LogPath) {
