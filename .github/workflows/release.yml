@@ -76,6 +76,10 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$BEACON_LINUX_SIGNING_KEY" ]; then
+            if [ -n "$(xargs < cli/beacon/internal/endpoint/selfupdate/release-key.fingerprint)" ]; then
+              echo "::error title=Linux signing key missing::release-key.fingerprint is pinned but BEACON_LINUX_SIGNING_KEY is not configured."
+              exit 1
+            fi
             echo "::notice title=Linux signing skipped::BEACON_LINUX_SIGNING_KEY is not configured, so the .deb and .rpm are unsigned."
             exit 0
           fi
@@ -489,7 +493,13 @@ jobs:
           BEACON_LINUX_SIGNING_KEY_PASSPHRASE: ${{ secrets.BEACON_LINUX_SIGNING_KEY_PASSPHRASE }}
         run: |
           set -euo pipefail
+          # The pin is what the goreleaser before-hook stamped into this release's install.sh.
+          pinned="$(sed -n 's/^release_key_fingerprints=//p' install.sh | tr -d '\r' | tr a-f A-F)"
           if [ -z "$BEACON_LINUX_SIGNING_KEY" ]; then
+            if [ -n "$pinned" ]; then
+              echo "::error title=Linux signing key missing::this release pins ${pinned} but BEACON_LINUX_SIGNING_KEY is not configured."
+              exit 1
+            fi
             echo "::notice title=Linux signing skipped::BEACON_LINUX_SIGNING_KEY is not configured, so checksums.txt is unsigned."
             exit 0
           fi
@@ -497,6 +507,10 @@ jobs:
           mkdir -m 0700 "$GNUPGHOME"
           printf '%s\n' "$BEACON_LINUX_SIGNING_KEY" | gpg --batch --import
           fpr="$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print $10; exit }')"
+          if [ -n "$pinned" ] && ! printf '%s\n' "$pinned" | tr , '\n' | grep -qxF "$(printf '%s' "$fpr" | tr a-f A-F)"; then
+            echo "::error title=Signing key not pinned::BEACON_LINUX_SIGNING_KEY is ${fpr}, which release-key.fingerprint (${pinned}) does not list."
+            exit 1
+          fi
           printf '%s' "$BEACON_LINUX_SIGNING_KEY_PASSPHRASE" | gpg --batch --pinentry-mode loopback --passphrase-fd 0 \
             --local-user "$fpr" --output checksums.txt.sig --detach-sign checksums.txt
           gpg --batch --export "$fpr" > beacon-release-key.gpg

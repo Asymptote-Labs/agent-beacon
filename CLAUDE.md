@@ -319,8 +319,12 @@ released `install.sh`, so pinning is a change to that file alone. Empty means
 checksum-only, as before. Once set, `install.sh` and `beacon endpoint update
 --apply` on Linux refuse a package unless a `checksums.txt` signed by a pinned
 key lists it. Publish the fingerprint in `docs/platforms/linux.mdx#release-signing`.
-To rotate, add the new fingerprint in a release still signed by the old key,
-then switch the secret and drop the old fingerprint in the next release.
+To rotate, add the new fingerprint in a release still signed by the old key. Then
+sign `checksums.txt` with both keys and ship both in `beacon-release-key.gpg` (the
+`finalize` step signs with one key today, so extend it first; `gpgv` and
+`validSigFrom` accept either pinned key), and keep the old fingerprint pinned until
+the fleet has moved. A host that skipped the transition pins only the old key, cannot
+verify a new-key-only release, and must reinstall.
 Do not pin a fingerprint until the release publishes only after `finalize` has signed
 `checksums.txt` (for example a draft release published at the end, with the Homebrew
 tap push deferred): today `finalize` uploads the `.sig` after the release is public, so

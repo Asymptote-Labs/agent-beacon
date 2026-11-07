@@ -271,13 +271,14 @@ The installer and the self-updater pin that fingerprint. They take the key from 
 
 ```bash title="Verify a signed release"
 FPR="<release key fingerprint>"
-curl -fsSLO "${BASE}/checksums.txt.sig" && curl -fsSLO "${BASE}/beacon-release-key.gpg" && curl -fsSLO "${BASE}/beacon-release-key.asc"
-test "$(gpg --show-keys --with-colons beacon-release-key.asc | awk -F: '$1 == "fpr" { print $10; exit }')" = "$FPR" && \
-  gpgv --keyring "$PWD/beacon-release-key.gpg" checksums.txt.sig checksums.txt
-sudo rpm --import beacon-release-key.asc && rpm -K "${PKG}"    # .rpm
+curl -fsSLO "${BASE}/checksums.txt.sig" && curl -fsSLO "${BASE}/beacon-release-key.gpg"
+gpg --show-keys --with-colons beacon-release-key.gpg | awk -F: -v fpr="$FPR" '$1 == "fpr" && toupper($10) == toupper(fpr) { ok = 1 } END { exit !ok }' && \
+  gpgv --keyring "$PWD/beacon-release-key.gpg" --status-fd 1 checksums.txt.sig checksums.txt 2>/dev/null | \
+  awk -v fpr="$FPR" '$1 == "[GNUPG:]" && $2 == "VALIDSIG" && toupper($NF) == toupper(fpr) { ok = 1 } END { exit !ok }' && echo "signed by $FPR"
+sudo rpm --import beacon-release-key.gpg && rpm -K "${PKG}"    # .rpm
 ```
 
-Rotation: one release pins both the old and the new fingerprint and is still signed by the old key; the release after it is signed by the new key and drops the old pin. Installed agents therefore trust the new key before they need it. The new fingerprint is published here and in the release notes of the release that first pins it.
+Rotation: one release pins both the old and the new fingerprint and is still signed by the old key. Later releases are signed by both keys, with both in the key file, and keep the old fingerprint pinned until the installed fleet has moved to a build that pins the new one, because a host that still pins only the old key refuses a release signed only by the new key. Such a host has to reinstall with the current installer. The new fingerprint is published here and in the release notes of the release that first pins it.
 
 Upgrading the package keeps your configuration and your collected log.
 
