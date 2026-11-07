@@ -211,7 +211,11 @@ checksum:
   algorithm: sha256
 
 # Signs checksums.txt with the Linux release key release.yml imports (GNUPGHOME and
-# BEACON_LINUX_SIGNING_KEY_FPR); release.yml passes --skip=sign when no key is configured.
+# BEACON_LINUX_SIGNING_KEY_FPR); release.yml passes --skip=sign when no key is configured, and
+# every snapshot invocation passes it too. GoReleaser OSS has no `if`/`skip` on signs, so without
+# --skip=sign and without the variable this fails closed: gpg is asked for a key named
+# "BEACON_LINUX_SIGNING_KEY_FPR-unset", reports "No secret key" and never falls back to a default
+# key; signing runs before publish, so nothing is uploaded.
 # GoReleaser uploads into a draft and publishes last, so checksums.txt.sig is on the release
 # before it becomes latest. Its checksums.txt is rewritten deterministically at publish, so the
 # signature still matches; finalize extends the file and signs it again.
@@ -228,7 +232,7 @@ signs:
       - --passphrase-fd
       - "0"
       - --local-user
-      - '{{ envOrDefault "BEACON_LINUX_SIGNING_KEY_FPR" "" }}'
+      - '{{ envOrDefault "BEACON_LINUX_SIGNING_KEY_FPR" "BEACON_LINUX_SIGNING_KEY_FPR-unset" }}'
       - --output
       - "${signature}"
       - --detach-sign

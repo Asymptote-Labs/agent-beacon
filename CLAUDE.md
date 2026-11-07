@@ -495,12 +495,15 @@ git -C .tmp/release-<tag> tag -a <tag> -m "<tag>"
 git -C .tmp/release-<tag> push origin <tag>
 cd .tmp/release-<tag>/cli/beacon
 goreleaser check
-GITHUB_TOKEN="${GITHUB_TOKEN:-$(gh auth token)}" HOMEBREW_TAP_TOKEN="${HOMEBREW_TAP_TOKEN:-$(gh auth token)}" goreleaser release --clean --parallelism 1
+GITHUB_TOKEN="${GITHUB_TOKEN:-$(gh auth token)}" HOMEBREW_TAP_TOKEN="${HOMEBREW_TAP_TOKEN:-$(gh auth token)}" goreleaser release --clean --parallelism 1 $([ -n "${BEACON_LINUX_SIGNING_KEY_FPR:-}" ] || echo --skip=sign)
 ```
 
 The `signs` entry signs `checksums.txt` with the key named by `BEACON_LINUX_SIGNING_KEY_FPR` (and `GNUPGHOME`
-holding it, as `release.yml` sets up). Without it gpg fails at the sign step, before anything is published, so a
-local release must either export both or add `--skip=sign`, which publishes an unsigned `checksums.txt`.
+holding it, as `release.yml` sets up). The command above adds `--skip=sign` when the variable is unset, which
+publishes an unsigned `checksums.txt`; once `release-key.fingerprint` pins a key, installers refuse that release,
+so a pinned fallback release must export both. Run without either, the entry fails closed at the sign step (gpg
+is asked for a key named `BEACON_LINUX_SIGNING_KEY_FPR-unset`, never a default key) before anything is published.
+GoReleaser OSS has no `if`/`skip` on `signs`, so every snapshot invocation passes `--skip=sign` itself.
 
 After GoReleaser succeeds, verify both the GitHub release and the Homebrew tap:
 
