@@ -498,6 +498,10 @@ goreleaser check
 GITHUB_TOKEN="${GITHUB_TOKEN:-$(gh auth token)}" HOMEBREW_TAP_TOKEN="${HOMEBREW_TAP_TOKEN:-$(gh auth token)}" goreleaser release --clean --parallelism 1
 ```
 
+The `signs` entry signs `checksums.txt` with the key named by `BEACON_LINUX_SIGNING_KEY_FPR` (and `GNUPGHOME`
+holding it, as `release.yml` sets up). Without it gpg fails at the sign step, before anything is published, so a
+local release must either export both or add `--skip=sign`, which publishes an unsigned `checksums.txt`.
+
 After GoReleaser succeeds, verify both the GitHub release and the Homebrew tap:
 
 ```bash
