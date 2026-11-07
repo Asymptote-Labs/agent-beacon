@@ -85,19 +85,25 @@ fi
 # machine can use the dashboard, `beacon traces` and `beacon share` without a second step. A
 # configuration manager running as root has no SUDO_USER, and one that reaches root through sudo
 # (Ansible `become`, a Packer sudo provisioner) sets SUDO_USER to its automation login, so SUDO_USER
-# alone is not a person: the install must also have a terminal on standard input and not run under
+# alone is not a person: the install must also have a controlling terminal and not run under
 # DEBIAN_FRONTEND=noninteractive, which Ansible's apt module sets. Otherwise nobody is added, and the
-# postinstall prints how to add someone. Members are only ever added, never removed.
+# postinstall prints how to add someone. Automation that allocates a terminal (ssh -tt) passes this
+# check, so a fleet sets BEACON_LOG_READERS= to add nobody whatever runs the install. Members are
+# only ever added, never removed.
 #
-# beacon_person_at_terminal succeeds when a person is running this install interactively.
-# BEACON_INSTALL_TTY=1|0 lets the packaging tests, which run without a terminal, say either way.
+# beacon_person_at_terminal succeeds when a person is running this install interactively. It asks
+# for a controlling terminal (/dev/tty) rather than a terminal on standard input, because rpm runs
+# scriptlets with standard input on a pipe of its own even under `sudo dnf install` at a terminal;
+# the controlling terminal is the session's and survives that. BEACON_INSTALL_TTY=1|0 lets the
+# packaging tests, which run without a terminal, say either way.
 beacon_person_at_terminal() {
   [ "${DEBIAN_FRONTEND:-}" != noninteractive ] || return 1
   case "${BEACON_INSTALL_TTY:-}" in
     1) return 0 ;;
     0) return 1 ;;
   esac
-  [ -t 0 ]
+  # A subshell: a failed redirection on a builtin would end this non-interactive shell.
+  ( : <"${BEACON_CONTROLLING_TTY:-/dev/tty}" ) 2>/dev/null
 }
 if [ -z "${BEACON_LOG_READERS+set}" ]; then
   BEACON_LOG_READERS=
