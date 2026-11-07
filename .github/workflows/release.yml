@@ -2,8 +2,8 @@ name: Release
 
 # Full hands-off release on a pushed v* tag:
 #   1. goreleaser  — builds tarballs, publishes the GitHub release + changelog,
-#                    and updates the Homebrew tap. Signs the .deb/.rpm when the
-#                    Linux signing key secret exists.
+#                    and updates the Homebrew tap. Signs the .deb/.rpm and
+#                    checksums.txt when the Linux signing key secret exists.
 #   2. package     — (after goreleaser) builds, signs, notarizes, and staples the
 #                    macOS .pkg for both arches and attaches them plus the
 #                    package update manifest to the same release.
@@ -12,8 +12,8 @@ name: Release
 #                    attaches it. Unsigned for now, so it needs no secrets.
 #   4. finalize    — (after all three) adds the .pkg, .msi and install.sh to checksums.txt and
 #                    records a GitHub build-provenance attestation for every file
-#                    checksums.txt lists. Signs checksums.txt when the Linux signing
-#                    key secret exists.
+#                    checksums.txt lists. Re-signs the extended checksums.txt when
+#                    the Linux signing key secret exists.
 #
 # Triggered only by pushed version tags, so outside contributors (whose fork PRs
 # never receive secrets) cannot run it. All release secrets live in the protected
@@ -68,24 +68,45 @@ jobs:
       - name: Download Vector for the Linux packages
         run: sh packaging/linux/fetch-vector.sh
 
-      # nfpm signs the .deb and .rpm when BEACON_LINUX_SIGNING_KEY_FILE names a key, so they ship
-      # unsigned, as before, until the BEACON_LINUX_SIGNING_KEY secret exists.
+      # nfpm signs the .deb and .rpm when BEACON_LINUX_SIGNING_KEY_FILE names a key, and GoReleaser's
+      # signs entry signs checksums.txt with the key imported here, so checksums.txt.sig and the public
+      # key are attached while GoReleaser's release is still a draft: a pinned install.sh or self-updater
+      # never sees this release as latest without them. Unsigned, as before, until the
+      # BEACON_LINUX_SIGNING_KEY secret exists.
       - name: Stage the Linux release signing key
         env:
           BEACON_LINUX_SIGNING_KEY: ${{ secrets.BEACON_LINUX_SIGNING_KEY }}
         run: |
           set -euo pipefail
+          pinned="$(xargs < cli/beacon/internal/endpoint/selfupdate/release-key.fingerprint | tr ' a-f' ',A-F')"
           if [ -z "$BEACON_LINUX_SIGNING_KEY" ]; then
-            if [ -n "$(xargs < cli/beacon/internal/endpoint/selfupdate/release-key.fingerprint)" ]; then
+            if [ -n "$pinned" ]; then
               echo "::error title=Linux signing key missing::release-key.fingerprint is pinned but BEACON_LINUX_SIGNING_KEY is not configured."
               exit 1
             fi
-            echo "::notice title=Linux signing skipped::BEACON_LINUX_SIGNING_KEY is not configured, so the .deb and .rpm are unsigned."
+            echo "::notice title=Linux signing skipped::BEACON_LINUX_SIGNING_KEY is not configured, so the .deb, .rpm and checksums.txt are unsigned."
+            echo "BEACON_GORELEASER_SKIP=--skip=sign" >> "$GITHUB_ENV"
             exit 0
           fi
           key="$RUNNER_TEMP/beacon-linux-signing.asc"
           (umask 077 && printf '%s\n' "$BEACON_LINUX_SIGNING_KEY" > "$key")
-          echo "BEACON_LINUX_SIGNING_KEY_FILE=$key" >> "$GITHUB_ENV"
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -m 0700 "$GNUPGHOME"
+          gpg --batch --import "$key"
+          fpr="$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print toupper($10); exit }')"
+          if [ -n "$pinned" ] && ! printf '%s\n' "$pinned" | tr , '\n' | grep -qxF "$fpr"; then
+            echo "::error title=Signing key not pinned::BEACON_LINUX_SIGNING_KEY is ${fpr}, which release-key.fingerprint (${pinned}) does not list."
+            exit 1
+          fi
+          # Attached by the release's extra_files only when BEACON_LINUX_SIGNING_KEY_FILE is set.
+          mkdir -p cli/beacon/release-key
+          gpg --batch --export "$fpr" > cli/beacon/release-key/beacon-release-key.gpg
+          gpg --batch --armor --export "$fpr" > cli/beacon/release-key/beacon-release-key.asc
+          {
+            echo "BEACON_LINUX_SIGNING_KEY_FILE=$key"
+            echo "BEACON_LINUX_SIGNING_KEY_FPR=$fpr"
+            echo "GNUPGHOME=$GNUPGHOME"
+          } >> "$GITHUB_ENV"
 
       - name: Check GoReleaser config
         working-directory: cli/beacon
@@ -117,7 +138,7 @@ jobs:
           NFPM_PASSPHRASE: ${{ secrets.BEACON_LINUX_SIGNING_KEY_PASSPHRASE }}
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
           GORELEASER_PREVIOUS_TAG: ${{ steps.tags.outputs.previous }}
-        run: goreleaser release --clean --parallelism 1
+        run: goreleaser release --clean --parallelism 1 ${BEACON_GORELEASER_SKIP:-}
 
   package:
     needs: goreleaser
@@ -482,11 +503,12 @@ jobs:
             sha256sum "$f" >> checksums.txt
           done
           sha256sum --check checksums.txt --ignore-missing
-          gh release upload "$TAG" checksums.txt --repo "$REPO" --clobber
 
-      # Here rather than in goreleaser because the step above rewrites checksums.txt. Inert, like the
-      # package signing, until the BEACON_LINUX_SIGNING_KEY secret exists.
-      - name: Sign checksums.txt
+      # GoReleaser already signed the checksums.txt it published. The step above extends it, so it is
+      # signed again here, before it is uploaded: the new checksums.txt and its .sig go up together,
+      # and a failure before that leaves GoReleaser's matching pair in place. Inert, like the package
+      # signing, until the BEACON_LINUX_SIGNING_KEY secret exists.
+      - name: Sign and upload checksums.txt
         working-directory: dist/release
         env:
           BEACON_LINUX_SIGNING_KEY: ${{ secrets.BEACON_LINUX_SIGNING_KEY }}
@@ -507,6 +529,7 @@ jobs:
               exit 1
             fi
             echo "::notice title=Linux signing skipped::BEACON_LINUX_SIGNING_KEY is not configured, so checksums.txt is unsigned."
+            gh release upload "$TAG" checksums.txt --repo "$REPO" --clobber
             exit 0
           fi
           export GNUPGHOME="$RUNNER_TEMP/gnupg"
@@ -519,10 +542,10 @@ jobs:
           fi
           printf '%s' "$BEACON_LINUX_SIGNING_KEY_PASSPHRASE" | gpg --batch --pinentry-mode loopback --passphrase-fd 0 \
             --local-user "$fpr" --output checksums.txt.sig --detach-sign checksums.txt
-          gpg --batch --export "$fpr" > beacon-release-key.gpg
-          gpg --batch --armor --export "$fpr" > beacon-release-key.asc
+          # Check against the public key GoReleaser attached, the one installers download.
+          gh release download "$TAG" --repo "$REPO" --pattern beacon-release-key.gpg --clobber
           gpgv --keyring "$PWD/beacon-release-key.gpg" checksums.txt.sig checksums.txt
-          gh release upload "$TAG" checksums.txt.sig beacon-release-key.gpg beacon-release-key.asc --repo "$REPO" --clobber
+          gh release upload "$TAG" checksums.txt checksums.txt.sig --repo "$REPO" --clobber
 
       - name: Download every file checksums.txt lists
         working-directory: dist/release

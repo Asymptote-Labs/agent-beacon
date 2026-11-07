@@ -276,7 +276,12 @@ A pushed `v*` tag runs the full release end-to-end via
 1. `goreleaser` (ubuntu, `environment: release`) builds the collector dists,
    publishes the GitHub release + changelog and tarballs, and updates the
    Homebrew tap. When the `BEACON_LINUX_SIGNING_KEY` secret exists, nfpm
-   signs the `.deb`/`.rpm` with it; without it they ship unsigned.
+   signs the `.deb`/`.rpm` with it, and GoReleaser's `signs` entry signs
+   `checksums.txt` as `checksums.txt.sig` and attaches the public key
+   (`beacon-release-key.{asc,gpg}`, staged by the workflow under
+   `cli/beacon/release-key/`). GoReleaser uploads into a draft and publishes
+   last, so a pinned installer never sees a latest release without its `.sig`.
+   Without the secret the workflow passes `--skip=sign` and they ship unsigned.
 2. `package` (macOS, `needs: goreleaser`, `environment: release`) builds the
    Apple Silicon `beacon`/`beacon-hooks` package payload plus arch-matched
    collector and Vector binaries for `darwin_arm64`, then signs, notarizes,
@@ -294,9 +299,9 @@ A pushed `v*` tag runs the full release end-to-end via
    workflow's OIDC token) for every file `checksums.txt` lists. It needs
    `id-token: write` and `attestations: write`, and runs in the `release`
    environment only so that, when `BEACON_LINUX_SIGNING_KEY` exists, it can sign
-   the final `checksums.txt` as `checksums.txt.sig` and attach the public key as
-   `beacon-release-key.{asc,gpg}`. Anything else that rewrites `checksums.txt`
-   must come before that step.
+   the extended `checksums.txt` again before uploading it, in one upload with its
+   `.sig`; a failure before that leaves GoReleaser's matching pair in place.
+   Anything else that rewrites `checksums.txt` must come before that step.
 
 Every third-party action in `release.yml`, `release-extension.yml` and
 `npm-publish-sdk.yml` is pinned to a full commit SHA with the version in a
@@ -321,15 +326,11 @@ checksum-only, as before. Once set, `install.sh` and `beacon endpoint update
 key lists it. Publish the fingerprint in `docs/platforms/linux.mdx#release-signing`.
 To rotate, add the new fingerprint in a release still signed by the old key. Then
 sign `checksums.txt` with both keys and ship both in `beacon-release-key.gpg` (the
-`finalize` step signs with one key today, so extend it first; `gpgv` and
+GoReleaser `signs` entry and the `finalize` step sign with one key today, so extend
+both first; `gpgv` and
 `validSigFrom` accept either pinned key), and keep the old fingerprint pinned until
 the fleet has moved. A host that skipped the transition pins only the old key, cannot
 verify a new-key-only release, and must reinstall.
-Do not pin a fingerprint until the release publishes only after `finalize` has signed
-`checksums.txt` (for example a draft release published at the end, with the Homebrew
-tap push deferred): today `finalize` uploads the `.sig` after the release is public, so
-a pinned `install.sh` and `beacon endpoint update --apply` refuse the release while the
-`.sig` is missing.
 
 Keep one-time Apple-side onboarding steps out of the repo and share them with
 the release maintainer directly. Never use `pull_request_target` or build

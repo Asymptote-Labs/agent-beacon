@@ -210,6 +210,30 @@ checksum:
   name_template: "checksums.txt"
   algorithm: sha256
 
+# Signs checksums.txt with the Linux release key release.yml imports (GNUPGHOME and
+# BEACON_LINUX_SIGNING_KEY_FPR); release.yml passes --skip=sign when no key is configured.
+# GoReleaser uploads into a draft and publishes last, so checksums.txt.sig is on the release
+# before it becomes latest. Its checksums.txt is rewritten deterministically at publish, so the
+# signature still matches; finalize extends the file and signs it again.
+signs:
+  - id: checksums
+    artifacts: checksum
+    cmd: gpg
+    signature: "${artifact}.sig"
+    stdin: '{{ envOrDefault "NFPM_PASSPHRASE" "" }}'
+    args:
+      - --batch
+      - --pinentry-mode
+      - loopback
+      - --passphrase-fd
+      - "0"
+      - --local-user
+      - '{{ envOrDefault "BEACON_LINUX_SIGNING_KEY_FPR" "" }}'
+      - --output
+      - "${signature}"
+      - --detach-sign
+      - "${artifact}"
+
 changelog:
   sort: asc
   filters:
@@ -303,6 +327,8 @@ release:
     - glob: ./release-rules/threat-rules.tar.gz
     # The Linux one-line installer, served from releases/latest/download/install.sh.
     - glob: ./release-install/install.sh
+    # The Linux release public key, staged by release.yml only when it signs the release.
+    - glob: '{{ if isEnvSet "BEACON_LINUX_SIGNING_KEY_FILE" }}./release-key/beacon-release-key.*{{ end }}'
   footer: |
     ## Installation
 
