@@ -270,12 +270,21 @@ A signed release carries `checksums.txt.sig` (a detached OpenPGP signature over 
 The installer and the self-updater pin that fingerprint. They take the key from the release but trust it only if its fingerprint matches, and they refuse a package whose `checksums.txt` is unsigned, signed by another key, or does not list the package. To check a download yourself:
 
 ```bash title="Verify a signed release"
-FPR="<release key fingerprint>"
-curl -fsSLO "${BASE}/checksums.txt.sig" && curl -fsSLO "${BASE}/beacon-release-key.gpg"
-gpg --show-keys --with-colons beacon-release-key.gpg | awk -F: -v fpr="$FPR" '$1 == "fpr" && toupper($10) == toupper(fpr) { ok = 1 } END { exit !ok }' && \
-  gpgv --keyring "$PWD/beacon-release-key.gpg" --status-fd 1 checksums.txt.sig checksums.txt 2>/dev/null | \
-  awk -v fpr="$FPR" '$1 == "[GNUPG:]" && $2 == "VALIDSIG" && toupper($NF) == toupper(fpr) { ok = 1 } END { exit !ok }' && echo "signed by $FPR"
-sudo rpm --import beacon-release-key.gpg && rpm -K "${PKG}"    # .rpm
+(
+  set -euo pipefail
+  FPR="<release key fingerprint>"
+  H="$(mktemp -d)"
+  curl -fsSLO "${BASE}/checksums.txt" -O "${BASE}/checksums.txt.sig" -O "${BASE}/beacon-release-key.gpg"
+  # Keep only the pinned key: the file comes from the release, so it may hold others.
+  gpg --homedir "$H" --batch --import beacon-release-key.gpg
+  gpg --homedir "$H" --export "$FPR" > pinned.gpg
+  gpg --homedir "$H" --export --armor "$FPR" > pinned.asc
+  test -s pinned.gpg
+  gpgv --homedir "$H" --keyring "$PWD/pinned.gpg" --status-fd 1 checksums.txt.sig checksums.txt 2>/dev/null |
+    awk -v fpr="$FPR" '$1 == "[GNUPG:]" && $2 == "VALIDSIG" && toupper($NF) == toupper(fpr) { ok = 1 } END { exit !ok }'
+  awk -v name="$PKG" '$2 == name' checksums.txt | sha256sum --check --strict -
+  # .rpm only, after the checks above: sudo rpm --import pinned.asc && rpm -K "${PKG}"
+)
 ```
 
 Rotation: one release pins both the old and the new fingerprint and is still signed by the old key. Later releases are signed by both keys, with both in the key file, and keep the old fingerprint pinned until the installed fleet has moved to a build that pins the new one, because a host that still pins only the old key refuses a release signed only by the new key. Such a host has to reinstall with the current installer. The new fingerprint is published here and in the release notes of the release that first pins it.
