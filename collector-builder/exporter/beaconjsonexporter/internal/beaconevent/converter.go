@@ -799,11 +799,15 @@ func NormalizeClaudeToolResult(event *Event, attrs map[string]interface{}) {
 // normalizeClaudeCoworkContext applies what Claude Cowork reports about itself: where it ran and,
 // unless peerUser is set, the cloud identity it names in place of the collector's account.
 //
-// With peerUser (beacon_peer in the pipeline) the user field is the kernel's answer for the account
-// that sent the export, and nothing a sender writes replaces it. The identity attributes are whatever
-// the sender put there, and the harness is only a service name, so letting them win would let any
-// local account record an event as uid 0 / root by calling itself Cowork. The cloud identity still
-// reaches the log in the event's raw attributes.
+// With peerUser (beacon_peer in the pipeline) a Cowork event has no user. Neither answer at hand is
+// the person: Cowork runs in the cloud and Claude Desktop does not ship for Linux, so its export
+// reaches the collector through a relay (`beacon endpoint cowork --ngrok`, a reverse proxy) and the
+// kernel names the relay's local account, the same one for every member of the org; and the cloud
+// identity attributes are whatever the sender wrote, behind a harness that is only a service name,
+// so honoring them would let any local account record an event as uid 0 / root by calling itself
+// Cowork. An empty user is unknown rather than wrong. Both answers stay in the event's raw
+// attributes: the cloud identity as Cowork sent it, and the relaying account as beacon.peer.uid and
+// beacon.peer.user.
 func normalizeClaudeCoworkContext(event *Event, attrs map[string]interface{}, peerUser bool) {
 	if event.Harness.Name != "claude_cowork" {
 		return
@@ -815,6 +819,7 @@ func normalizeClaudeCoworkContext(event *Event, attrs map[string]interface{}, pe
 		event.Origin = asymptoteobserve.OriginLocal
 	}
 	if peerUser {
+		event.User = UserInfo{}
 		return
 	}
 	if name := FirstString(attrs, "user.email", "enduser.id", "user.account_id", "user.account_uuid", "user.id"); name != "" {
@@ -2371,7 +2376,8 @@ func EventCategory(action, explicit string) string {
 // beacon_peer processor resolves the sender from the kernel; this only copies what it found, and
 // changes nothing when it found nobody, so an unattributed event is the collector's account as it
 // always was rather than someone's guess. With it on, nothing a sender reports replaces the kernel's
-// answer, including Claude Cowork's cloud user (see normalizeClaudeCoworkContext).
+// answer; a Claude Cowork event, which arrives through a relay, gets no user instead (see
+// normalizeClaudeCoworkContext).
 func (c Converter) applyPeerUser(event *Event, attrs map[string]interface{}) {
 	if !c.opts.PeerUser {
 		return

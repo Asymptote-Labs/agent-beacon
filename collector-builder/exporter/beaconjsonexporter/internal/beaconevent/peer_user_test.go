@@ -59,18 +59,18 @@ func TestPeerUserWithoutANameKeepsOnlyTheID(t *testing.T) {
 	}
 }
 
-// With beacon_peer in the pipeline the kernel's answer is the user, even for a sender that calls
-// itself Claude Cowork: the harness is only a service name and the identity attributes are whatever
-// the sender wrote, so otherwise any account could record an event as uid 0 / root. The cloud
-// identity stays in the raw attributes.
-func TestCoworkIdentityDoesNotReplaceThePeer(t *testing.T) {
+// With beacon_peer in the pipeline a Claude Cowork event has no user: the kernel names the relay
+// that delivered it (the same local account for everyone in the org), and the cloud identity is the
+// sender's own claim, which would otherwise let any account record an event as uid 0 / root. Both
+// stay in the raw attributes.
+func TestCoworkEventHasNoUserUnderThePeer(t *testing.T) {
 	t.Setenv("USER", "root")
 	for _, forged := range []map[string]string{
 		{"user.email": "person@example.com"},
 		{"user.email": "root", "user.account_id": "0"},
 	} {
 		resource, record := peerLog("my-cowork")
-		resource["cowork.surface"] = "desktop"
+		resource["cowork.surface"] = "remote"
 		for k, v := range forged {
 			record.Attributes().PutStr(k, v)
 		}
@@ -78,15 +78,18 @@ func TestCoworkIdentityDoesNotReplaceThePeer(t *testing.T) {
 		if event.Harness.Name != "claude_cowork" {
 			t.Fatalf("fixture did not resolve to claude_cowork (%q)", event.Harness.Name)
 		}
-		if event.User.Name != "alice" || event.User.UID != "1001" {
-			t.Fatalf("user = %+v with %v, want the kernel's alice/1001", event.User, forged)
+		if event.User != (UserInfo{}) {
+			t.Fatalf("user = %+v with %v, want none: neither the relay's account nor the claim is the person", event.User, forged)
 		}
-		if event.Origin != "local" {
+		if event.Origin != "cloud" {
 			t.Fatalf("origin = %q, want Cowork's surface still applied", event.Origin)
 		}
 		attrs, _ := event.Raw["attributes"].(map[string]interface{})
 		if attrs["user.email"] != forged["user.email"] {
 			t.Fatalf("raw attributes lost the Cowork identity: %v", attrs)
+		}
+		if attrs[PeerUIDAttribute] != "1001" || attrs[PeerUserAttribute] != "alice" {
+			t.Fatalf("raw attributes lost the relaying account: %v", attrs)
 		}
 	}
 }
