@@ -62,7 +62,8 @@ The `claude` harness writes both Claude Code's OpenTelemetry settings and its us
 | `--no-otlp-forward` | Remove a configured OTLP forward |
 | `--session-sync` | Turn on the [scheduled session sync](#scheduled-session-sync): every 15 minutes, read new records from the agent runtimes' local session stores into the runtime log. Kept by repair and package upgrades |
 | `--no-session-sync` | Turn the scheduled session sync off and remove its job |
-| `--log-access <mode>` | System log access: `shared` (the default) or `restricted`. See [Restricted log access](#restricted-log-access). Omitted, an install keeps the mode the endpoint already has. System installs on macOS and Linux only |
+| `--log-access <mode>` | System log access: `shared` (the default) or `restricted`. See [Restricted log access](#restricted-log-access). Omitted, an install keeps the mode the endpoint already has. A first install from a package is restricted ([Package installs](/security/restricted-log-access#package-installs)). System installs only |
+| `--log-readers <accounts>` | Accounts to add to the `beacon-log` group of a restricted log, comma-separated (`DOMAIN\name` on Windows). Accounts are only added, never removed; one that cannot be added is reported without failing the install. Package installs set it from `BEACON_LOG_READERS`. System installs only |
 | `--no-backfill` | Skip the [session backfill](#session-backfill). `BEACON_BACKFILL=0` does the same |
 | `--connect` | After a successful install, attempt to connect this endpoint to Beacon Cloud ingest. User mode uses the signed-in CLI account; system mode opens browser approval. A connection failure does not roll back or fail the completed local install; verify with `beacon endpoint status --json` and retry with [`beacon endpoint connect`](/cli/endpoint-connect) |
 
@@ -310,7 +311,7 @@ sudo dseditgroup -o edit -a <account> -t user beacon-log
 
 The log format and every event field stay the same, so a SIEM or forwarder that parses the log needs no change. Shippers that run as root, and the Beacon Cloud forwarder, keep working without one.
 
-The mode is recorded in `config.json` as `log_access`, and in a root-owned `.beacon-log-access` marker beside the log. `beacon endpoint repair`, package upgrades, the Jamf `repair-hooks.sh` policy, and a reinstall after `uninstall --keep-logs` keep it. To go back, run `sudo beacon endpoint repair --system --log-access shared`; the log is writable by every account again at once. For package installs, set `BEACON_LOG_ACCESS=restricted` in the environment of the package's install script.
+The mode is recorded in `config.json` as `log_access`, and in a root-owned `.beacon-log-access` marker beside the log. `beacon endpoint repair`, package upgrades, the Jamf `repair-hooks.sh` policy, and a reinstall after `uninstall --keep-logs` keep it. To go back, run `sudo beacon endpoint repair --system --log-access shared`; the log is writable by every account again at once. A first install from a package (the `.deb` or `.rpm`, the macOS `.pkg`, the Windows MSI) is restricted without any setting, and adds to `beacon-log` only the person who ran it interactively, or the accounts in `BEACON_LOG_READERS`; `BEACON_LOG_ACCESS=shared` opts out. Fleet tooling that cannot set the install script's environment sets these in `/etc/default/beacon` on Linux, managed preferences on macOS, or registry policy on Windows; see [Package installs](/security/restricted-log-access#package-installs).
 
 What this does and does not change:
 

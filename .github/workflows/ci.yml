@@ -697,6 +697,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # Fast and needs nothing built: the install script's arguments, against a stub binary.
+      - name: Validate the packaging scripts
+        run: sh packaging/linux/test-endpoint-scripts.sh
       - uses: ./.github/actions/setup-go
         with:
           # The exporter is listed because builder.yaml compiles it into the

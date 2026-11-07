@@ -15,6 +15,16 @@ trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
 # invocation in this file inside the temp dir instead.
 BEACON_FORWARDER_LOG_DIR="$TMP_DIR/forwarder-logs"
 export BEACON_FORWARDER_LOG_DIR
+# Keep every install in this file away from the machine's own Beacon state and settings: the system
+# config exists (so installs read as upgrades and keep their mode unless a test says otherwise), no
+# preferences are read, and no Installer.app session is detected.
+mkdir -p "$TMP_DIR/system-endpoint"
+echo '{}' >"$TMP_DIR/system-endpoint/config.json"
+BEACON_SYSTEM_CONFIG="$TMP_DIR/system-endpoint/config.json"
+BEACON_SYSTEM_LOG="$TMP_DIR/system-endpoint/runtime.jsonl"
+BEACON_DEFAULTS_BIN="$TMP_DIR/no-defaults-binary"
+BEACON_INSTALLER_GUI=0
+export BEACON_SYSTEM_CONFIG BEACON_SYSTEM_LOG BEACON_DEFAULTS_BIN BEACON_INSTALLER_GUI
 
 sh -n "$INSTALL_SCRIPT"
 sh -n "$UNINSTALL_SCRIPT"
@@ -1323,6 +1333,7 @@ POSTINSTALL_LAUNCHCTL_LOG="$POSTINSTALL_ROOT/launchctl.log"
 POSTINSTALL_BEACON_LOG="$POSTINSTALL_ROOT/beacon.log"
 mkdir -p "$POSTINSTALL_BIN" "$POSTINSTALL_DAEMONS"
 sed -e "s#/opt/beacon/scripts/install-endpoint.sh#$POSTINSTALL_BIN/install-endpoint.sh#g" \
+  -e "s#/opt/beacon/scripts/beacon-settings.sh#$ROOT_DIR/packaging/macos/beacon-settings.sh#g" \
   -e "s#/Library/LaunchDaemons/#$POSTINSTALL_DAEMONS/#g" \
   "$ROOT_DIR/packaging/macos/scripts/postinstall" >"$POSTINSTALL_ROOT/postinstall"
 if grep -q -e '/opt/beacon/scripts/' -e '/Library/LaunchDaemons/' "$POSTINSTALL_ROOT/postinstall"; then
@@ -1443,3 +1454,6 @@ sh "$ROOT_DIR/packaging/macos/safari/test-safari-packaging.sh"
 # Fleet osquery files (packaging/macos/fleet) and the Fleet admin helper (examples/fleet).
 sh "$ROOT_DIR/examples/fleet/test/test-fleet-sql.sh"
 sh "$ROOT_DIR/examples/fleet/test/test-configure-beacon-macos-s3.sh"
+
+# Install settings (managed preferences) and the first-install rules. Runs on Linux too.
+sh "$ROOT_DIR/packaging/macos/test-install-settings.sh"

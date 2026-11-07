@@ -63,6 +63,7 @@ mkdir -p "$OUT_DIR" "$PKG_ROOT/opt/beacon/bin" "$PKG_ROOT/opt/beacon/scripts" \
 copy_file "$BEACON_BIN" "$PKG_ROOT/opt/beacon/bin/beacon"
 copy_file "$COLLECTOR_BIN" "$PKG_ROOT/opt/beacon/bin/beacon-otelcol"
 copy_file "$ROOT_DIR/packaging/macos/install-endpoint.sh" "$PKG_ROOT/opt/beacon/scripts/install-endpoint.sh"
+copy_file "$ROOT_DIR/packaging/macos/beacon-settings.sh" "$PKG_ROOT/opt/beacon/scripts/beacon-settings.sh"
 copy_file "$ROOT_DIR/packaging/macos/uninstall-endpoint.sh" "$PKG_ROOT/opt/beacon/scripts/uninstall-endpoint.sh"
 copy_file "$ROOT_DIR/packaging/macos/scripts/postinstall" "$PKG_SCRIPTS/postinstall"
 copy_file "$ROOT_DIR/packaging/macos/scripts/preinstall" "$PKG_SCRIPTS/preinstall"

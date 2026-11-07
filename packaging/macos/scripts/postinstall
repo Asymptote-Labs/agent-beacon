@@ -1,21 +1,19 @@
 #!/bin/sh
 set -eu
 
+# The step that configures the logged-in user needs the harness list the MDM's managed preferences
+# (or the environment) give; install-endpoint.sh reads every other setting itself. Only that one
+# value is taken here, so a forwarder token in the preferences never reaches the processes this
+# script starts.
+# shellcheck source=../beacon-settings.sh
+. /opt/beacon/scripts/beacon-settings.sh
+BEACON_ENDPOINT_HARNESSES="${BEACON_ENDPOINT_HARNESSES:-$(beacon_settings_harnesses)}"
+
+# Only what this step decides is passed. install-endpoint.sh applies its own defaults for the rest,
+# after reading the managed preferences, so a variable set here (even to an empty default) would
+# shadow the MDM's value for it.
 BEACON_BIN="${BEACON_BIN:-/opt/beacon/bin/beacon}" \
 BEACON_COLLECTOR="${BEACON_COLLECTOR:-/opt/beacon/bin/beacon-otelcol}" \
-BEACON_ENDPOINT_HARNESSES="${BEACON_ENDPOINT_HARNESSES:-claude,codex}" \
-BEACON_CONTENT_RETENTION="${BEACON_CONTENT_RETENTION:-full}" \
-BEACON_OTLP_GRPC_PORT="${BEACON_OTLP_GRPC_PORT:-4317}" \
-BEACON_OTLP_HTTP_PORT="${BEACON_OTLP_HTTP_PORT:-4318}" \
-BEACON_SPLUNK_HEC_ENDPOINT="${BEACON_SPLUNK_HEC_ENDPOINT:-}" \
-BEACON_SPLUNK_HEC_TOKEN="${BEACON_SPLUNK_HEC_TOKEN:-}" \
-BEACON_SPLUNK_INDEX="${BEACON_SPLUNK_INDEX:-}" \
-BEACON_SPLUNK_SOURCE="${BEACON_SPLUNK_SOURCE:-}" \
-BEACON_SPLUNK_SOURCETYPE="${BEACON_SPLUNK_SOURCETYPE:-}" \
-BEACON_SPLUNK_INSECURE_SKIP_VERIFY="${BEACON_SPLUNK_INSECURE_SKIP_VERIFY:-0}" \
-BEACON_SPLUNK_CA_FILE="${BEACON_SPLUNK_CA_FILE:-}" \
-BEACON_LOG_ACCESS="${BEACON_LOG_ACCESS:-}" \
-BEACON_SESSION_SYNC="${BEACON_SESSION_SYNC:-}" \
 BEACON_NO_START=1 \
   /opt/beacon/scripts/install-endpoint.sh
 
