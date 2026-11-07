@@ -150,3 +150,17 @@ beacon_load_settings() {
     export "$_beacon_key=$_beacon_value"
   done <"$_beacon_file"
 }
+
+# beacon_settings_harnesses prints BEACON_ENDPOINT_HARNESSES as the environment or the defaults file
+# sets it, or nothing, without exporting anything into the caller.
+#
+# The package postinstall needs only this one value, for the step that configures each logged-in
+# user. That step re-runs the CLI as each of them (runuser keeps the environment), so loading every
+# setting into the postinstall's own environment would hand a Splunk HEC token from a root-only
+# file to processes those users own. The rest is read by install-endpoint.sh, which runs as root.
+beacon_settings_harnesses() {
+  (
+    beacon_load_settings
+    printf '%s' "${BEACON_ENDPOINT_HARNESSES:-}"
+  )
+}

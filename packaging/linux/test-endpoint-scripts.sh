@@ -160,7 +160,37 @@ printf 'BEACON_ENDPOINT_HARNESSES=claude,codex,cursor # all three\n' >"$DEFAULTS
 got="$(env -i PATH="$PATH" BEACON_DEFAULTS_FILE="$DEFAULTS" BEACON_DEFAULTS_OWNER="$(id -u)" \
   sh -c '. "$1"; beacon_load_settings; printf %s "${BEACON_ENDPOINT_HARNESSES:-}"' sh "$ROOT_DIR/packaging/linux/beacon-settings.sh")"
 [ "$got" = "claude,codex,cursor" ] || fail "beacon_load_settings exported BEACON_ENDPOINT_HARNESSES='$got'"
-grep -q 'beacon_load_settings' "$ROOT_DIR/packaging/linux/nfpm/postinstall.sh" || fail "postinstall does not load the settings file"
+
+# Run the real postinstall, with its /opt/beacon paths pointed at stubs, as a configuration manager
+# would: root, no environment of its own, a settings file holding a harness list and a Splunk HEC
+# token. The per-user step re-runs the CLI as each logged-in user with the postinstall's
+# environment, so the harness list must reach it and the token must not.
+PI_ROOT="$TMP_DIR/pi"
+mkdir -p "$PI_ROOT/opt/scripts" "$PI_ROOT/opt/bin" "$PI_ROOT/env"
+cp "$ROOT_DIR/packaging/linux/beacon-settings.sh" "$PI_ROOT/opt/scripts/beacon-settings.sh"
+printf '#!/bin/sh\nexit 0\n' >"$PI_ROOT/opt/scripts/install-endpoint.sh"
+cat >"$PI_ROOT/opt/bin/beacon" <<'STUB'
+#!/bin/sh
+# One file per subcommand: its arguments, then its environment.
+out="$BEACON_TEST_PI_ENV/$2"
+printf '%s\n' "$@" >"$out.args"
+env >"$out.env"
+STUB
+chmod 755 "$PI_ROOT/opt/scripts/install-endpoint.sh" "$PI_ROOT/opt/bin/beacon"
+sed "s#/opt/beacon#$PI_ROOT/opt#g; s#/etc/beacon/endpoint/config.json#$PI_ROOT/none.json#g" \
+  "$ROOT_DIR/packaging/linux/nfpm/postinstall.sh" >"$PI_ROOT/postinstall.sh"
+printf '%s\n' 'BEACON_ENDPOINT_HARNESSES=claude,codex,cursor' 'BEACON_SPLUNK_HEC_TOKEN=pi-secret-token' >"$DEFAULTS"
+chmod 600 "$DEFAULTS"
+env -i PATH="$PATH" BEACON_DEFAULTS_FILE="$DEFAULTS" BEACON_DEFAULTS_OWNER="$(id -u)" \
+  BEACON_TEST_PI_ENV="$PI_ROOT/env" sh "$PI_ROOT/postinstall.sh" >"$TMP_DIR/out" 2>&1 || {
+  cat "$TMP_DIR/out" >&2; fail "the postinstall failed"; }
+if [ -f "$PI_ROOT/env/user-config.args" ]; then
+  grep -qx 'claude,codex,cursor' "$PI_ROOT/env/user-config.args" || \
+    fail "postinstall: the user-config step did not get the file's harness list: $(tr '\n' ' ' <"$PI_ROOT/env/user-config.args")"
+  grep -rq 'pi-secret-token' "$PI_ROOT/env" && fail "postinstall: the Splunk HEC token reached a command's environment or arguments"
+else
+  fail "postinstall: the user-config step did not run"
+fi
 grep -q 'beacon-settings.sh' "$ROOT_DIR/cli/beacon/.goreleaser.yaml" || fail "the packages do not ship beacon-settings.sh"
 
 # The environment wins over the file.
