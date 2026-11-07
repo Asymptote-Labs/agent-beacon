@@ -494,7 +494,13 @@ jobs:
         run: |
           set -euo pipefail
           # The pin is what the goreleaser before-hook stamped into this release's install.sh.
-          pinned="$(sed -n 's/^release_key_fingerprints=//p' install.sh | tr -d '\r' | tr a-f A-F)"
+          pinned=""
+          if [ -f install.sh ]; then
+            pinned="$(sed -n 's/^release_key_fingerprints=//p' install.sh | tr -d '\r' | tr a-f A-F)"
+          elif [ -n "$BEACON_LINUX_SIGNING_KEY" ]; then
+            echo "::error title=install.sh missing::cannot read the pinned release key without the release's install.sh."
+            exit 1
+          fi
           if [ -z "$BEACON_LINUX_SIGNING_KEY" ]; then
             if [ -n "$pinned" ]; then
               echo "::error title=Linux signing key missing::this release pins ${pinned} but BEACON_LINUX_SIGNING_KEY is not configured."
