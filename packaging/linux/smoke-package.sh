@@ -356,6 +356,40 @@ print(",".join(sorted(users)))')"
   echo "the hook event was recorded as '$recorded', want $SMOKE_USER" >&2; exit 1; }
 echo "ok: $SMOKE_USER's hook event reached the restricted log through the socket, as $SMOKE_USER"
 
+# OTLP is attributed to the account that sent it, not to the root collector. Every account exports to
+# the same loopback collector, so before this every OTLP event on a system install read as root.
+# Each export below also claims to be root through the peer attributes, on the resource and on the
+# record, and both claims must be ignored.
+otlp_from() {
+  # $1 = account, $2 = session id; a browser-extension-shaped log over OTLP/HTTP JSON.
+  body='{"resourceLogs":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"chatgpt_web"}},{"key":"beacon.peer.uid","value":{"stringValue":"0"}},{"key":"beacon.peer.user","value":{"stringValue":"root"}}]},"scopeLogs":[{"logRecords":[{"timeUnixNano":"1762430000000000000","body":{"stringValue":"smoke"},"attributes":[{"key":"event.name","value":{"stringValue":"user_prompt"}},{"key":"session.id","value":{"stringValue":"'"$2"'"}},{"key":"beacon.peer.uid","value":{"stringValue":"0"}},{"key":"beacon.peer.user","value":{"stringValue":"root"}}]}]}]}]}'
+  docker exec "$CONTAINER" su -s /bin/sh "$1" -c "curl -fsS -o /dev/null -H 'Content-Type: application/json' --data-binary '$body' http://127.0.0.1:4318/v1/logs" || {
+    echo "OTLP export as $1 failed" >&2; exit 1; }
+}
+otlp_from "$SMOKE_USER" smoke-otlp-user
+otlp_from root smoke-otlp-root
+attributed=""
+i=0
+while [ "$i" -lt 20 ]; do
+  attributed="$(docker exec "$CONTAINER" cat /var/log/beacon-agent/runtime.jsonl | python3 -c '
+import json, sys
+seen = {}
+for line in sys.stdin:
+    e = json.loads(line)
+    sid = (e.get("session") or {}).get("id", "")
+    if sid.startswith("smoke-otlp-"):
+        seen[sid] = (e.get("user") or {}).get("name", "")
+print(" ".join("%s=%s" % kv for kv in sorted(seen.items())))')"
+  case "$attributed" in *smoke-otlp-root=*smoke-otlp-user=*|*smoke-otlp-user=*smoke-otlp-root=*) break ;; esac
+  i=$((i+1)); sleep 1
+done
+[ "$attributed" = "smoke-otlp-root=root smoke-otlp-user=$SMOKE_USER" ] || {
+  echo "OTLP events were attributed as '$attributed', want smoke-otlp-root=root smoke-otlp-user=$SMOKE_USER" >&2
+  docker exec "$CONTAINER" journalctl -u beacon-collector.service --no-pager -n 30 >&2 || true
+  exit 1
+}
+echo "ok: OTLP events are recorded under the account that sent them ($attributed)"
+
 # Reinstalling the same package is an upgrade as far as both package managers are concerned, and it
 # is the exact sequence `beacon endpoint update --apply` performs. It is worth its own assertion
 # because the old package's pre-removal script runs during an upgrade -- and on rpm it runs *after*

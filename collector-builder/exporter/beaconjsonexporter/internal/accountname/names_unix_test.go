@@ -1,6 +1,6 @@
 //go:build !windows
 
-package beaconingestextension
+package accountname
 
 import (
 	"os"

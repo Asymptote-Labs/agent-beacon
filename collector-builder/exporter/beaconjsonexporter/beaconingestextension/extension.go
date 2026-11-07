@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/internal/accountname"
 	"net"
 	"sync"
 	"time"
@@ -29,7 +30,7 @@ import (
 type ingest struct {
 	cfg    *Config
 	logger *zap.Logger
-	names  *nameCache
+	names  *accountname.Cache
 
 	// listen, serveListener and appendLine are the seams tests replace.
 	listen        func(path string) (localingest.Listener, error)
@@ -51,7 +52,7 @@ func newIngest(cfg *Config, logger *zap.Logger) *ingest {
 	return &ingest{
 		cfg:        cfg,
 		logger:     logger,
-		names:      newNameCache(),
+		names:      accountname.NewCache(),
 		listen:     localingest.Listen,
 		appendLine: runtimelog.Append,
 	}
@@ -135,7 +136,7 @@ func (e *ingest) serve(host component.Host, l localingest.Listener) {
 	server := &localingest.Server{
 		Append:             e.append,
 		LogPath:            e.cfg.LogPath,
-		LookupName:         e.names.lookup,
+		LookupName:         e.names.Lookup,
 		MaxConns:           e.cfg.MaxConnections,
 		MaxConnsPerUID:     e.cfg.MaxConnectionsPerUID,
 		RateBytesPerSecond: e.cfg.RateBytesPerSecond,

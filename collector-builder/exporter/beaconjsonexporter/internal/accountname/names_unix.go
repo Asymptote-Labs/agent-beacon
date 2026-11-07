@@ -1,6 +1,6 @@
 //go:build !windows
 
-package beaconingestextension
+package accountname
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// resolveName names a uid. The collector is built with CGO_ENABLED=0, whose os/user reads /etc/passwd and never asks NSS or
+// Resolve names a uid. The collector is built with CGO_ENABLED=0, whose os/user reads /etc/passwd and never asks NSS or
 // Directory Services, so accounts from LDAP, SSSD, AD or macOS's own directory would come back
 // unnamed. `id -nu <uid>` asks the system's own resolver on both Linux and macOS and is the
 // fallback.
@@ -29,8 +29,8 @@ func firstExecutable(paths []string) string {
 	return ""
 }
 
-func resolveName(id string) string {
-	if u, err := user.LookupId(id); err == nil && validName(u.Username) {
+func Resolve(id string) string {
+	if u, err := user.LookupId(id); err == nil && ValidName(u.Username) {
 		return u.Username
 	}
 	// id(1) is tried once: on merged-/usr systems both paths are the same binary, and running it
@@ -45,7 +45,7 @@ func resolveName(id string) string {
 	if err != nil {
 		return ""
 	}
-	if name := strings.TrimSpace(string(out)); validName(name) {
+	if name := strings.TrimSpace(string(out)); ValidName(name) {
 		return name
 	}
 	return ""
