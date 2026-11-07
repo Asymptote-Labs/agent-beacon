@@ -21,7 +21,7 @@ taxonomy:
 match: >
   e.event.action == "command.executed" && (
     e.command.parsed_commands.exists(c,
-      c.argv.exists(a, a.matches("(^|/)rm$")) &&
+      c.argv.exists(a, a.matches("(?i)(^|/)rm$")) &&
       c.argv.exists(a, a.matches("^-[a-zA-Z]*[rRfF][a-zA-Z]*$") || a in ["--recursive", "--force"]) &&
       c.argv_raw.exists(a, a == "*" ||
         a.matches("^([\"']?(~|\\$HOME|\\$\\{HOME\\})[\"']?/*|[\"']?/+[\"']?)\\*?$"))) ||
@@ -38,6 +38,16 @@ tests:
     events:
       - event: { action: command.executed }
         command: { command: "rm -rf /" }
+        session: { id: s1 }
+  - name: rm_rf_root_uppercase_binary
+    # The structured match's own binary-name regex was case-sensitive, so this parsed to a
+    # non-empty parsed_commands list with argv[0]="RM" and was never caught by either branch: the
+    # structured one required a literal lowercase "rm", and the text fallback (which does have
+    # (?i)) only runs when parsed_commands is empty.
+    verdict: match
+    events:
+      - event: { action: command.executed }
+        command: { command: "RM -rf /" }
         session: { id: s1 }
   - name: rm_rf_home
     verdict: match
