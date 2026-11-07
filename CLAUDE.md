@@ -678,9 +678,10 @@ without first shipping a version whose `update_url` names the new place. The job
 refuses to offer a lower version than the feed already does, so re-running an old
 tag cannot roll fleets back (a failure to read the current feed fails the job
 rather than skipping that check), and reads the feed back through that URL
-before finishing. A re-run of a release that already has its CRX keeps the
-published zip and CRX: the rebuilt zip has new file times, so a re-signed CRX
-would no longer match the hash the live feed pins.
+before finishing. A re-run of a release that already has its zip, CRX and both
+checksums keeps them: the rebuilt zip has new file times, so a re-signed CRX
+would no longer match the hash the live feed pins. A release left with its CRX
+but not the rest fails the run with instructions instead of re-signing.
 
 The zip is unsigned, so its `.sha256` is its integrity check, the same posture as
 the Windows MSI; Chrome checks the CRX's signature against its ID when it installs
