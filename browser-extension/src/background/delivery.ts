@@ -10,9 +10,16 @@
 // for minutes (restarting during an install or upgrade, not yet started after
 // boot, crash-looping) loses nothing it comes back from within the age limit.
 // A batch the collector rejects (a non-retryable status) is dropped at once.
+//
+// Policy: a batch goes out under the locks in force when it is sent, not when it
+// was queued, so a lock an admin pushes later also covers what is still queued.
+// A copy installed by policy also holds delivery for a short while after an
+// install or update, until Chrome delivers its managed settings, because
+// turns captured in that window were shaped before any lock was known.
 
 import { ext } from '../shared/browser.js';
-import type { ChatTurn, Settings } from '../shared/types.js';
+import type { ChatTurn, LockedSetting, Retention, Settings, SiteName } from '../shared/types.js';
+import { getSettingsState, type SettingsState } from './settings.js';
 import { turnToEnvelope } from '../shared/normalize.js';
 import type { LogsEnvelope } from '../shared/otlp.js';
 import type { BrowserIdentity } from '../shared/browser-identity.js';
@@ -36,6 +43,15 @@ export const MAX_QUEUE_ITEMS = 2_000;
 export const MAX_QUEUE_BYTES = 6 * 1024 * 1024;
 /** Longest wait between retries, and so the longest delay after the collector recovers. */
 export const MAX_RETRY_DELAY_MS = 60_000;
+/**
+ * How long a copy installed by policy holds delivery after an install or update while Chrome has
+ * delivered none of its managed settings. Chrome delivers them a moment after the install; an
+ * admin who pushes none gets delivery once this passes.
+ */
+export const POLICY_GRACE_MS = 30_000;
+/** How long the queue waits before trying again when Chrome cannot read the policy at all. */
+const UNREADABLE_POLICY_RETRY_MS = 60_000;
+const INSTALLED_KEY = 'installed_at';
 
 interface QueueItem {
   id: string;
@@ -49,6 +65,9 @@ interface QueueItem {
   queuedAt?: number;
   /** UTF-8 size of the serialized envelope, counted against MAX_QUEUE_BYTES. */
   bytes?: number;
+  /** The site and retention the envelope was built for, checked against policy at send time. */
+  site?: SiteName;
+  retention?: Retention;
 }
 
 async function readQueue(): Promise<QueueItem[]> {
@@ -77,6 +96,8 @@ export async function enqueueTurn(
     envelope,
     attempts: 0,
     queuedAt: Date.now(),
+    site: turn.site,
+    retention: settings.retention,
   };
   await withQueueLock(async () => {
     const queue = await readQueue();
@@ -100,10 +121,21 @@ export async function flush(): Promise<void> {
     if (stored.length === 0) return;
     const queue = pruneQueue(stored, Date.now());
 
+    // Nothing goes out while the locks in force are unknown.
+    const policy = await getSettingsState();
+    const hold = policy.managedError != null ? UNREADABLE_POLICY_RETRY_MS : await policyPendingMs(policy);
+    if (hold > 0) {
+      await writeQueue(queue);
+      ext.alarms.create(ALARM, { when: Date.now() + hold });
+      return;
+    }
+
     const remaining: QueueItem[] = [];
     const waiting = new Set<string>();
 
-    for (const item of queue) {
+    for (const queued of queue) {
+      const item = underPolicy(queued, policy);
+      if (!item) continue;
       // Checked again at send time, not only when settings are saved: an item
       // queued by an older build, or a tampered queue, must not reach anything
       // but the local collector. Such an item is dropped, not retried.
@@ -126,6 +158,43 @@ export async function flush(): Promise<void> {
     await writeQueue(remaining);
     scheduleRetry(remaining);
   });
+}
+
+const STRICTNESS: Record<Retention, number> = { full: 0, redacted: 1, metadata: 2 };
+
+/**
+ * A queued batch under the locks in force: the batch, sent to a locked endpoint if one is set, or
+ * undefined when a lock forbids sending it at all. A locked retention stricter than the one the
+ * batch was built with drops it, because its content cannot be taken back out.
+ */
+export function underPolicy(item: QueueItem, policy: SettingsState): QueueItem | undefined {
+  const { settings, locked } = policy;
+  const isLocked = (key: LockedSetting) => locked.includes(key);
+  if (isLocked('enabled') && !settings.enabled) return undefined;
+  if (item.site && isLocked(`sites.${item.site}`) && settings.sites[item.site] === false) return undefined;
+  if (isLocked('retention') && STRICTNESS[item.retention ?? 'full'] < STRICTNESS[settings.retention]) return undefined;
+  if (isLocked('endpoint')) item.endpoint = settings.endpoint;
+  return item;
+}
+
+/** Record an install or update, which starts a policy-installed copy's grace period. */
+export async function markInstalled(): Promise<void> {
+  await ext.storage.local.set({ [INSTALLED_KEY]: Date.now() });
+}
+
+/**
+ * Milliseconds to keep holding the queue for a policy that has not arrived: only a copy installed
+ * by policy, only within POLICY_GRACE_MS of its install or update, and only while no managed value
+ * is in force. Zero otherwise.
+ */
+async function policyPendingMs(policy: SettingsState): Promise<number> {
+  if (policy.locked.length > 0) return 0;
+  const installedAt = (await ext.storage.local.get(INSTALLED_KEY))[INSTALLED_KEY];
+  if (typeof installedAt !== 'number') return 0;
+  const left = installedAt + POLICY_GRACE_MS - Date.now();
+  if (left <= 0) return 0;
+  const self = await ext.management?.getSelf?.().catch(() => undefined);
+  return self?.installType === 'admin' ? left : 0;
 }
 
 /**
@@ -211,4 +280,8 @@ export function installFlushAlarm(): void {
   // update, so a queue left from before would otherwise wait for the next turn.
   // Flushing on worker start sends what is due and re-arms the retry for the rest.
   void flush();
+  // A held queue goes out as soon as Chrome delivers or changes the policy.
+  ext.storage.onChanged?.addListener((_changes, area) => {
+    if (area === 'managed') void flush();
+  });
 }

@@ -7,7 +7,7 @@ import { ext } from '../shared/browser.js';
 import type { ChatTurn } from '../shared/types.js';
 import { getSettingsState, lockedIn, saveSettings, siteEnabled } from './settings.js';
 import { Assembler } from './assembler.js';
-import { enqueueTurn, flush, installFlushAlarm } from './delivery.js';
+import { enqueueTurn, flush, installFlushAlarm, markInstalled } from './delivery.js';
 import { detectBrowser } from '../shared/browser-identity.js';
 import { parseHost, parseInterceptEvent, parseSettingsPatch } from '../shared/validate.js';
 import { isExtensionPage, isOwnContentScript, senderHost, type SenderLike } from './sender.js';
@@ -41,8 +41,9 @@ function finalizeAll(turns: ChatTurn[]): void {
   for (const turn of turns) void finalizeTurn(turn);
 }
 
-ext.runtime.onInstalled.addListener(() => {
+ext.runtime.onInstalled.addListener((details) => {
   void saveSettings({}); // materialize defaults
+  if (details.reason === 'install' || details.reason === 'update') void markInstalled();
 });
 
 installFlushAlarm();
