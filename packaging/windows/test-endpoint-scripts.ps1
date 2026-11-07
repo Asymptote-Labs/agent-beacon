@@ -51,6 +51,10 @@ foreach ($needle in @('endpoint', 'install', '--system', 'user-config', 'repair-
 if ($install -notmatch "BEACON_LOG_ACCESS" -or $install -notmatch [regex]::Escape("'--log-access'")) {
     Fail "install-endpoint.ps1 no longer passes BEACON_LOG_ACCESS on as --log-access"
 }
+# BEACON_DASHBOARD is the administrator's dashboard switch, the same contract on all three platforms.
+if ($install -notmatch "BEACON_DASHBOARD" -or $install -notmatch [regex]::Escape("'--dashboard'")) {
+    Fail "install-endpoint.ps1 no longer passes BEACON_DASHBOARD on as --dashboard"
+}
 # The step whose absence made the Linux package produce a healthy collector that captured nothing.
 if ($install -notmatch 'repair-installed') {
     Fail "install-endpoint.ps1 must configure the interactive user's runtime, or the endpoint captures nothing"

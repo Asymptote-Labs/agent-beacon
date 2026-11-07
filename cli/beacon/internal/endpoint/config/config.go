@@ -123,6 +123,61 @@ type Config struct {
 	// LogAccess is the system log's access mode: "shared" (empty, the default) or "restricted".
 	// Read it through RestrictedLogAccess, which also accounts for user mode.
 	LogAccess string `json:"log_access,omitempty"`
+	// Dashboard is the administrator's switch for `beacon endpoint dashboard`: "enabled" (empty,
+	// the default) or "disabled". Only the system config's value counts, and it applies to every
+	// account on the machine; read it through SystemDashboardDisabled.
+	Dashboard string `json:"dashboard,omitempty"`
+}
+
+const (
+	DashboardEnabled  = "enabled"
+	DashboardDisabled = "disabled"
+)
+
+// ParseDashboardMode normalizes a --dashboard value. Empty stays empty, which install and repair
+// read as "keep the recorded setting".
+func ParseDashboardMode(value string) (string, error) {
+	switch mode := strings.ToLower(strings.TrimSpace(value)); mode {
+	case "", DashboardEnabled, DashboardDisabled:
+		return mode, nil
+	default:
+		return "", fmt.Errorf("--dashboard must be enabled or disabled, not %q", value)
+	}
+}
+
+// DashboardMode is the setting this config records, with empty read as enabled.
+func (c Config) DashboardMode() string {
+	if strings.EqualFold(strings.TrimSpace(c.Dashboard), DashboardDisabled) {
+		return DashboardDisabled
+	}
+	return DashboardEnabled
+}
+
+// SystemDashboardDisabled reports whether the system config turns the local dashboard off for
+// everyone on this machine. A machine without a system config (a user-mode endpoint) has it on.
+// The system config is readable by every account, which already reads it to find the system log.
+func SystemDashboardDisabled() (bool, error) {
+	return DashboardDisabledAt(SystemConfigPath())
+}
+
+// DashboardDisabledAt is SystemDashboardDisabled for the config file at path. Only a missing file
+// means enabled: a config that exists but cannot be read or parsed is an error, so a broken or
+// unreadable file never silently turns the administrator's switch back on.
+func DashboardDisabledAt(path string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var cfg struct {
+		Dashboard string `json:"dashboard"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return false, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return Config{Dashboard: cfg.Dashboard}.DashboardMode() == DashboardDisabled, nil
 }
 
 // RestrictedLogAccess reports whether this endpoint's system log is in the restricted access mode:

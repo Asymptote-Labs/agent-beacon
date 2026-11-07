@@ -79,7 +79,16 @@ func runEndpointDashboard(cmd *cobra.Command, args []string) error {
 	if err := dashboard.ValidateLoopbackAddr(endpointOpts.dashboardAddr); err != nil {
 		return err
 	}
-	url := dashboard.URL(endpointOpts.dashboardAddr)
+	if err := refuseDisabledDashboard(); err != nil {
+		return err
+	}
+	// The launch secret lives only in memory and in the URL printed here, which is the one way in:
+	// another account that reaches the loopback port without it is refused.
+	token, err := dashboard.NewToken()
+	if err != nil {
+		return fmt.Errorf("create the dashboard launch secret: %w", err)
+	}
+	url := dashboard.LaunchURL(endpointOpts.dashboardAddr, token, "/")
 	fmt.Printf("Beacon endpoint dashboard: %s\n", url)
 	fmt.Printf("Runtime log: %s\n", cfg.LogPath)
 	if runtimeLog.Warning != "" {
@@ -99,6 +108,7 @@ func runEndpointDashboard(cmd *cobra.Command, args []string) error {
 		Addr:     endpointOpts.dashboardAddr,
 		LogPath:  endpointOpts.logPath,
 		UserMode: userMode,
+		Token:    token,
 	})
 }
 
@@ -122,6 +132,7 @@ func endpointInstallOptions(selection endpointTargetSelection, serviceKind servi
 	// Install and repair validate the forward flags before anything is written.
 	otlpForward, _ := otlpForwardOptions()
 	sessionSync, _ := sessionSyncOption()
+	dashboardSwitch, _ := dashboardSwitchOption()
 	return lifecycle.InstallOptions{
 		UserMode:                  endpointUserMode(),
 		LogPath:                   endpointOpts.logPath,
@@ -140,6 +151,7 @@ func endpointInstallOptions(selection endpointTargetSelection, serviceKind servi
 		SessionSync:               sessionSync,
 		ServiceKind:               serviceKind,
 		LogAccess:                 strings.ToLower(strings.TrimSpace(endpointOpts.logAccess)),
+		Dashboard:                 dashboardSwitch,
 	}
 }
 
@@ -206,6 +218,9 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if _, err := sessionSyncOption(); err != nil {
+		return err
+	}
+	if _, err := dashboardSwitchOption(); err != nil {
 		return err
 	}
 	warnMissingOTLPForwardHeaders(cmd.ErrOrStderr())
@@ -419,6 +434,7 @@ func runEndpointStatus(cmd *cobra.Command, args []string) error {
 	if status.LogAccess != "" {
 		fmt.Printf("Runtime log access: %s\n", status.LogAccess)
 	}
+	fmt.Println(dashboardStatusLine(status))
 	switch {
 	case status.LastEvent != "":
 		fmt.Println("Last event: present")
@@ -521,6 +537,9 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if _, err := sessionSyncOption(); err != nil {
+		return err
+	}
+	if _, err := dashboardSwitchOption(); err != nil {
 		return err
 	}
 	warnMissingOTLPForwardHeaders(cmd.ErrOrStderr())
