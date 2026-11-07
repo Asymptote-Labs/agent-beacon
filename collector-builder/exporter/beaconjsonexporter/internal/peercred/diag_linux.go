@@ -137,6 +137,8 @@ func sockDiagOne(family uint8, src net.IP, sport int, dst net.IP, dport int) (st
 				continue
 			}
 			if syscall.Errno(errno) == syscall.ENOENT {
+				// No such socket, or no TCP diag handler to ask: the kernel says ENOENT for both.
+				// lookupUID tells them apart.
 				return "", ErrNotFound
 			}
 			return "", fmt.Errorf("%w: %v", errDiagUnavailable, syscall.Errno(errno))
@@ -146,6 +148,9 @@ func sockDiagOne(family uint8, src net.IP, sport int, dst net.IP, dport int) (st
 				return "", errDiagUnavailable
 			}
 			m = *(*inetDiagMsg)(unsafe.Pointer(&reply.Data[0]))
+			// A reply with a socket in it, whichever: the TCP diag handler is there, so its ENOENT
+			// means no such socket from now on (see lookupUID).
+			diag.CompareAndSwap(diagUnknown, diagSeesSockets)
 			// The kernel answered for exactly this connection, or the answer is not about it.
 			if m.ID.SPort != req.ID.SPort || m.ID.DPort != req.ID.DPort {
 				return "", ErrNotFound

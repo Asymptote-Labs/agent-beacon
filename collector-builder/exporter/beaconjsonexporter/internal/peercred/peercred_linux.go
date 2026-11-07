@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 )
 
 // procNet is where the fallback reads the socket tables. A var so tests can point it at fixtures.
@@ -29,17 +30,48 @@ var diagLookup = sockDiagUID
 // kernel offers no sock_diag (a module left out, a sandbox that refuses netlink), the socket tables
 // in /proc/net are read instead, matching the same four-tuple.
 //
+// A missing diag handler is not always a refused channel: with tcp_diag absent or unloadable
+// (CONFIG_INET_TCP_DIAG=m on a host with kernel.modules_disabled=1, a blacklist, a container host
+// whose kernel ships no module) the kernel answers ENOENT, the same answer as for a socket that does
+// not exist. Until sock_diag has answered once with a socket, which proves the handler is there, its
+// "no such socket" is checked against /proc; if /proc finds the socket, sock_diag is taken to be
+// unable to see it and /proc answers from then on.
+//
 // Either way an answer is refused rather than guessed when it cannot be the sender: a socket in
 // TIME_WAIT or otherwise orphaned reports uid 0 and inode 0 whoever created it, which would name
 // root for a client that has gone; and no socket at all means the client closed before the lookup,
 // which a sender could do on purpose.
 func lookupUID(client, server *net.TCPAddr) (string, error) {
-	uid, err := diagLookup(client, server)
-	if err == nil || errors.Is(err, ErrNotFound) {
-		return uid, err
+	if diag.Load() == diagBlind {
+		return procLookup(client, server)
 	}
-	return procLookup(client, server)
+	uid, err := diagLookup(client, server)
+	switch {
+	case err == nil:
+		return uid, nil
+	case !errors.Is(err, ErrNotFound):
+		return procLookup(client, server)
+	case diag.Load() == diagSeesSockets:
+		return "", ErrNotFound
+	}
+	uid, err = procLookup(client, server)
+	if err == nil {
+		diag.CompareAndSwap(diagUnknown, diagBlind)
+	}
+	return uid, err
 }
+
+// What sock_diag has shown it can do on this kernel. It starts unknown; one reply carrying a socket
+// proves the TCP handler is registered (diagSeesSockets), and a socket /proc found where sock_diag
+// said ENOENT proves it is not (diagBlind). Neither changes afterwards: a kernel does not drop a
+// registered diag handler, and the lookup it costs to re-check would run on every export.
+const (
+	diagUnknown int32 = iota
+	diagSeesSockets
+	diagBlind
+)
+
+var diag atomic.Int32
 
 // procLookup reads /proc/net/tcp and tcp6, where each socket is one line:
 //

@@ -80,6 +80,28 @@ func TestConfigYAMLRendersPeerAttribution(t *testing.T) {
 	}
 }
 
+// falcon_hec runs its own converter after beacon_peer, so it is told to trust the peer too, or
+// LogScale would record the collector's account for events runtime.jsonl attributes to the sender.
+func TestPeerAttributionReachesFalconHEC(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Destinations = &endpointconfig.Destinations{
+		FalconHEC: &endpointconfig.FalconHEC{Endpoint: "https://falcon.example/api/v1/ingest/hec", Token: "test-token"},
+	}
+	endpointconfig.NormalizeDestinations(&cfg)
+	if text := ConfigYAML(cfg); strings.Contains(text, "peer_user") {
+		t.Fatalf("peer_user rendered without peer attribution:\n%s", text)
+	}
+	withPeerAttribution(t)
+	out := render(t, cfg)
+	falcon, ok := out.Exporters["falcon_hec"].(map[string]any)
+	if !ok {
+		t.Fatalf("no falcon_hec exporter:\n%s", ConfigYAML(cfg))
+	}
+	if falcon["peer_user"] != true {
+		t.Fatalf("falcon_hec peer_user = %v, want true", falcon["peer_user"])
+	}
+}
+
 // The OTLP forward hears HTTP exports too, but never runs beacon_peer: Beacon's attribution of
 // local accounts stays on this machine.
 func TestPeerAttributionStaysOutOfTheOTLPForward(t *testing.T) {

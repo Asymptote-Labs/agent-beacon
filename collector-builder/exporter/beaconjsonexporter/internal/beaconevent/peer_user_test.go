@@ -59,15 +59,47 @@ func TestPeerUserWithoutANameKeepsOnlyTheID(t *testing.T) {
 	}
 }
 
-// A runtime that reports its own cloud identity (Claude Cowork) keeps it: the sender's local account
-// is the desktop app's, not the person's.
-func TestCoworkIdentityStillWinsOverThePeer(t *testing.T) {
+// With beacon_peer in the pipeline the kernel's answer is the user, even for a sender that calls
+// itself Claude Cowork: the harness is only a service name and the identity attributes are whatever
+// the sender wrote, so otherwise any account could record an event as uid 0 / root. The cloud
+// identity stays in the raw attributes.
+func TestCoworkIdentityDoesNotReplaceThePeer(t *testing.T) {
+	t.Setenv("USER", "root")
+	for _, forged := range []map[string]string{
+		{"user.email": "person@example.com"},
+		{"user.email": "root", "user.account_id": "0"},
+	} {
+		resource, record := peerLog("my-cowork")
+		resource["cowork.surface"] = "desktop"
+		for k, v := range forged {
+			record.Attributes().PutStr(k, v)
+		}
+		event := NewConverter(Options{PeerUser: true}).EventFromLog(resource, record)
+		if event.Harness.Name != "claude_cowork" {
+			t.Fatalf("fixture did not resolve to claude_cowork (%q)", event.Harness.Name)
+		}
+		if event.User.Name != "alice" || event.User.UID != "1001" {
+			t.Fatalf("user = %+v with %v, want the kernel's alice/1001", event.User, forged)
+		}
+		if event.Origin != "local" {
+			t.Fatalf("origin = %q, want Cowork's surface still applied", event.Origin)
+		}
+		attrs, _ := event.Raw["attributes"].(map[string]interface{})
+		if attrs["user.email"] != forged["user.email"] {
+			t.Fatalf("raw attributes lost the Cowork identity: %v", attrs)
+		}
+	}
+}
+
+// Without beacon_peer (macOS, Windows), Claude Cowork's cloud identity replaces the collector's own
+// account, as it always has.
+func TestCoworkIdentityWinsWithoutThePeer(t *testing.T) {
 	resource, record := peerLog("claude-cowork")
 	resource["cowork.surface"] = "desktop"
 	record.Attributes().PutStr("user.email", "person@example.com")
-	event := NewConverter(Options{PeerUser: true}).EventFromLog(resource, record)
+	event := NewConverter(Options{}).EventFromLog(resource, record)
 	if event.Harness.Name != "claude_cowork" {
-		t.Skipf("fixture did not resolve to claude_cowork (%q)", event.Harness.Name)
+		t.Fatalf("fixture did not resolve to claude_cowork (%q)", event.Harness.Name)
 	}
 	if event.User.Name != "person@example.com" {
 		t.Fatalf("user = %+v, want the Cowork identity", event.User)

@@ -641,7 +641,7 @@ func (c Converter) NormalizeClaudeLogEvent(event *Event, attrs map[string]interf
 	if event == nil || !isClaudeOTelLogHarness(event.Harness.Name) {
 		return
 	}
-	normalizeClaudeCoworkContext(event, attrs)
+	normalizeClaudeCoworkContext(event, attrs, c.opts.PeerUser)
 	originalAction := event.Event.Action
 	originalCategory := event.Event.Category
 	preserveAction := statedAction(attrs, "beacon.event.action", "event.action", "gen_ai.agent.action", "ai.agent.action") != ""
@@ -796,7 +796,15 @@ func NormalizeClaudeToolResult(event *Event, attrs map[string]interface{}) {
 	}
 }
 
-func normalizeClaudeCoworkContext(event *Event, attrs map[string]interface{}) {
+// normalizeClaudeCoworkContext applies what Claude Cowork reports about itself: where it ran and,
+// unless peerUser is set, the cloud identity it names in place of the collector's account.
+//
+// With peerUser (beacon_peer in the pipeline) the user field is the kernel's answer for the account
+// that sent the export, and nothing a sender writes replaces it. The identity attributes are whatever
+// the sender put there, and the harness is only a service name, so letting them win would let any
+// local account record an event as uid 0 / root by calling itself Cowork. The cloud identity still
+// reaches the log in the event's raw attributes.
+func normalizeClaudeCoworkContext(event *Event, attrs map[string]interface{}, peerUser bool) {
 	if event.Harness.Name != "claude_cowork" {
 		return
 	}
@@ -805,6 +813,9 @@ func normalizeClaudeCoworkContext(event *Event, attrs map[string]interface{}) {
 		event.Origin = asymptoteobserve.OriginCloud
 	case "local", "desktop":
 		event.Origin = asymptoteobserve.OriginLocal
+	}
+	if peerUser {
+		return
 	}
 	if name := FirstString(attrs, "user.email", "enduser.id", "user.account_id", "user.account_uuid", "user.id"); name != "" {
 		event.User.Name = name
@@ -2359,8 +2370,8 @@ func EventCategory(action, explicit string) string {
 // is root for everyone: a prompt typed by one person on a shared machine reads as root's. The
 // beacon_peer processor resolves the sender from the kernel; this only copies what it found, and
 // changes nothing when it found nobody, so an unattributed event is the collector's account as it
-// always was rather than someone's guess. Runtime-specific identities (Claude Cowork's cloud user)
-// are applied after this and still win.
+// always was rather than someone's guess. With it on, nothing a sender reports replaces the kernel's
+// answer, including Claude Cowork's cloud user (see normalizeClaudeCoworkContext).
 func (c Converter) applyPeerUser(event *Event, attrs map[string]interface{}) {
 	if !c.opts.PeerUser {
 		return

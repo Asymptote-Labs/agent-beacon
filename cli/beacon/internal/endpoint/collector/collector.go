@@ -417,6 +417,12 @@ func falconHECYAML(cfg endpointconfig.Config) string {
 	if cfg.ClaudeCaptureModelContext {
 		fmt.Fprintf(&b, "    capture_model_context: true\n")
 	}
+	if PeerAttribution {
+		// falcon_hec converts on its own, after beacon_peer in the same pipelines, so it is told to
+		// trust the account beacon_peer resolved just as beaconjson is; otherwise LogScale would
+		// record the collector's account for an event runtime.jsonl attributes to its sender.
+		fmt.Fprintf(&b, "    peer_user: true\n")
+	}
 	if falcon.Source != "" {
 		fmt.Fprintf(&b, "    source: %q\n", falcon.Source)
 	}

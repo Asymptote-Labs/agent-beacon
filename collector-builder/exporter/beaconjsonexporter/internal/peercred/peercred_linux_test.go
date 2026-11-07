@@ -109,28 +109,94 @@ func TestUIDRefusesWhatItCannotSee(t *testing.T) {
 func TestLookupFallsBackOnlyWhenSockDiagIsUnavailable(t *testing.T) {
 	old := diagLookup
 	t.Cleanup(func() { diagLookup = old })
+	oldState := diag.Load()
+	t.Cleanup(func() { diag.Store(oldState) })
 	dir := t.TempDir()
 	oldProc := procNet
 	procNet = dir
 	t.Cleanup(func() { procNet = oldProc })
 	header := "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
 	row := "   2: 0100007F:B5D2 0100007F:10E6 01 00000000:00000000 00:00000000 00000000  1001        0 102 1 0 20 4 30 10 -1\n"
-	if err := os.WriteFile(filepath.Join(dir, "tcp"), []byte(header+row), 0o644); err != nil {
-		t.Fatal(err)
+	writeTable := func(content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "tcp"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
+	writeTable(header + row)
 	client := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0xB5D2}
 	server := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0x10E6}
 	if procAddr4(client.IP, client.Port) != "0100007F:B5D2" {
 		t.Skip("fixtures are little-endian")
 	}
+	diagCalls := 0
+	answer := func(err error) {
+		diagCalls = 0
+		diagLookup = func(_, _ *net.TCPAddr) (string, error) { diagCalls++; return "", err }
+	}
 
-	diagLookup = func(_, _ *net.TCPAddr) (string, error) { return "", errDiagUnavailable }
+	diag.Store(diagUnknown)
+	answer(errDiagUnavailable)
 	if uid, err := lookupUID(client, server); err != nil || uid != "1001" {
 		t.Fatalf("with sock_diag unavailable: %q, %v; want the /proc answer", uid, err)
 	}
-	diagLookup = func(_, _ *net.TCPAddr) (string, error) { return "", ErrNotFound }
+
+	// Once sock_diag has shown it can see sockets, its ENOENT is final.
+	diag.Store(diagSeesSockets)
+	answer(ErrNotFound)
 	if uid, err := lookupUID(client, server); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("with sock_diag saying no such socket: %q, %v; want ErrNotFound without a second guess", uid, err)
+		t.Fatalf("with a working sock_diag saying no such socket: %q, %v; want ErrNotFound without a second guess", uid, err)
+	}
+
+	// Before that, ENOENT may mean no tcp_diag handler: /proc is asked, and a client /proc can see
+	// but sock_diag cannot settles it, so later lookups go straight to /proc.
+	diag.Store(diagUnknown)
+	answer(ErrNotFound)
+	writeTable(header)
+	if uid, err := lookupUID(client, server); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("with neither finding the socket: %q, %v; want ErrNotFound", uid, err)
+	}
+	if got := diag.Load(); got != diagUnknown {
+		t.Fatalf("state after agreeing ErrNotFound = %d, want still unknown", got)
+	}
+	writeTable(header + row)
+	if uid, err := lookupUID(client, server); err != nil || uid != "1001" {
+		t.Fatalf("with sock_diag blind to a socket /proc has: %q, %v; want the /proc answer", uid, err)
+	}
+	if got := diag.Load(); got != diagBlind {
+		t.Fatalf("state = %d, want sock_diag marked blind", got)
+	}
+	answer(ErrNotFound)
+	if uid, err := lookupUID(client, server); err != nil || uid != "1001" || diagCalls != 0 {
+		t.Fatalf("after marking sock_diag blind: %q, %v, %d sock_diag calls; want /proc alone", uid, err, diagCalls)
+	}
+}
+
+// A real answer from sock_diag proves its handler is there, so a later ENOENT is final.
+func TestSockDiagAnswerMarksItWorking(t *testing.T) {
+	oldState := diag.Load()
+	t.Cleanup(func() { diag.Store(oldState) })
+	diag.Store(diagUnknown)
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	client, err := net.Dial("tcp4", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	server, err := ln.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	if _, err := sockDiagUID(server.RemoteAddr().(*net.TCPAddr), server.LocalAddr().(*net.TCPAddr)); err != nil {
+		t.Skipf("sock_diag cannot see this socket here: %v", err)
+	}
+	if got := diag.Load(); got != diagSeesSockets {
+		t.Fatalf("state = %d after a sock_diag answer, want diagSeesSockets", got)
 	}
 }
 
