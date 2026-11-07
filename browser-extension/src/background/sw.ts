@@ -5,7 +5,7 @@ import '../adapters/claude.js'; // registers the Claude adapter (side effect)
 import '../adapters/chatgpt.js'; // registers the ChatGPT adapter (side effect)
 import { ext } from '../shared/browser.js';
 import type { ChatTurn } from '../shared/types.js';
-import { getSettings, getSettingsState, lockedIn, saveSettings, siteEnabled } from './settings.js';
+import { getSettingsState, lockedIn, saveSettings, siteEnabled } from './settings.js';
 import { Assembler } from './assembler.js';
 import { enqueueTurn, flush, installFlushAlarm } from './delivery.js';
 import { detectBrowser } from '../shared/browser-identity.js';
@@ -79,7 +79,10 @@ ext.runtime.onMessage.addListener((msg: unknown, sender, sendResponse) => {
 });
 
 async function finalizeTurn(turn: ChatTurn): Promise<void> {
-  const settings = await getSettings();
+  const { settings, managedError } = await getSettingsState();
+  // Fail closed: when Chrome cannot read the policy, the retention and endpoint an admin locked
+  // are unknown, so the turn is not captured rather than sent under the user's settings.
+  if (managedError) return;
   // siteEnabled covers both the global toggle and the per-site toggle.
   if (!siteEnabled(settings, turn.site)) return;
   await enqueueTurn(turn, settings, browserIdentity);
@@ -99,14 +102,17 @@ function isControlType(type: unknown): type is ControlMessage['type'] {
 async function handleControl(msg: ControlMessage): Promise<unknown> {
   switch (msg.type) {
     case 'GET_STATUS': {
-      const { settings, locked } = await getSettingsState();
+      const state = await getSettingsState();
       const q = await ext.storage.local.get('delivery_queue');
-      return { settings, locked, queueDepth: (q.delivery_queue ?? []).length, active: assembler.active };
+      return { ...state, queueDepth: (q.delivery_queue ?? []).length, active: assembler.active };
     }
     case 'SET_SETTINGS': {
       const parsed = parseSettingsPatch(msg.patch);
       const state = await getSettingsState();
       if (!parsed.ok) return { error: parsed.error, ...state };
+      if (state.managedError) {
+        return { error: `your organization's settings could not be read: ${state.managedError}`, ...state };
+      }
       const locked = lockedIn(parsed.patch, state.locked);
       if (locked) return { error: `${locked} is set by your organization and cannot be changed here`, ...state };
       return { settings: await saveSettings(parsed.patch), locked: state.locked };

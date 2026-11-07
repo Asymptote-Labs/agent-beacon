@@ -65,9 +65,16 @@ describe('effective settings', () => {
     expect(locked).toEqual(['enabled', 'endpoint']);
   });
 
-  it('treats a browser without managed storage as unmanaged', async () => {
+  it("reads Firefox's no-policy refusal as unmanaged", async () => {
     managed.get.mockRejectedValue(new Error('Managed storage manifest not found'));
     expect(await getSettingsState()).toEqual({ settings: DEFAULT_SETTINGS, locked: [] });
+  });
+
+  it('reports any other managed-storage failure instead of reading it as no policy', async () => {
+    managed.get.mockRejectedValue(new Error('IO error: LOCK: Resource temporarily unavailable'));
+    const state = await getSettingsState();
+    expect(state.managedError).toContain('IO error');
+    expect(state.locked).toEqual([]);
   });
 
   it('saves the user choice beside a lock without writing the policy value', async () => {

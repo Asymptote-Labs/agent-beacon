@@ -16,10 +16,13 @@ const KEY = 'settings';
 // Concurrent popup and options patches must merge over the preceding write, not a stale snapshot.
 const withSettingsLock = serial();
 
-/** Effective settings plus the ones policy fixed. */
+/** Effective settings plus the ones policy fixed. `managedError` is set when Chrome could not
+ *  read the policy values, in which case nothing may be captured or changed: the locks in force
+ *  are unknown. */
 export interface SettingsState {
   settings: Settings;
   locked: LockedSetting[];
+  managedError?: string;
 }
 
 /**
@@ -82,8 +85,10 @@ export function lockedIn(patch: Partial<Settings>, locked: readonly LockedSettin
 
 export async function getSettingsState(): Promise<SettingsState> {
   const [stored, managed] = await Promise.all([getStoredSettings(), readManaged()]);
-  const { patch, locked } = resolveManaged(managed);
-  return { settings: merge(stored, patch), locked };
+  const { patch, locked } = resolveManaged(managed.values);
+  const state: SettingsState = { settings: merge(stored, patch), locked };
+  if (managed.error) state.managedError = managed.error;
+  return state;
 }
 
 export async function getSettings(): Promise<Settings> {
@@ -100,7 +105,7 @@ export function saveSettings(patch: Partial<Settings>): Promise<Settings> {
     const [current, managed] = await Promise.all([getStoredSettings(), readManaged()]);
     const next = merge(current, patch);
     await ext.storage.local.set({ [KEY]: next });
-    return merge(next, resolveManaged(managed).patch);
+    return merge(next, resolveManaged(managed.values).patch);
   });
 }
 
@@ -113,14 +118,18 @@ async function getStoredSettings(): Promise<Settings> {
   return resolveSettings(got[KEY]);
 }
 
-// Managed storage is absent where nothing manages the browser: Firefox rejects
-// the read without an enterprise policy, and test doubles have no managed area.
-// Both mean no policy values.
-async function readManaged(): Promise<unknown> {
+// No managed area (test doubles) and Firefox's refusal when no enterprise policy
+// configures the extension both mean no policy. Any other failure is reported, not
+// read as "no policy": that would drop an admin's locks silently.
+async function readManaged(): Promise<{ values?: unknown; error?: string }> {
+  const area = ext.storage.managed;
+  if (!area) return {};
   try {
-    return await ext.storage.managed?.get(null);
-  } catch {
-    return undefined;
+    return { values: await area.get(null) };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/managed storage manifest not found/i.test(message)) return {};
+    return { error: message };
   }
 }
 
