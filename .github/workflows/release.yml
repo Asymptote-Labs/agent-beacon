@@ -505,9 +505,14 @@ jobs:
           sha256sum --check checksums.txt --ignore-missing
 
       # GoReleaser already signed the checksums.txt it published. The step above extends it, so it is
-      # signed again here, before it is uploaded: the new checksums.txt and its .sig go up together,
-      # and a failure before that leaves GoReleaser's matching pair in place. Inert, like the package
-      # signing, until the BEACON_LINUX_SIGNING_KEY secret exists.
+      # signed again here before anything is uploaded; a failure before the upload leaves GoReleaser's
+      # matching pair in place. GitHub replaces release assets one at a time, so the two uploads below
+      # leave a few seconds in which a client can pair files from different uploads (install.sh and
+      # the self-updater fetch both again once before refusing), and a failure between them would
+      # leave a mismatched pair on a public release. So the step reads back what is published and
+      # re-uploads until the pair on the release is exactly what was signed and gpgv accepts it,
+      # failing loudly if it never is. Inert, like the package signing, until the
+      # BEACON_LINUX_SIGNING_KEY secret exists.
       - name: Sign and upload checksums.txt
         working-directory: dist/release
         env:
@@ -545,7 +550,26 @@ jobs:
           # Check against the public key GoReleaser attached, the one installers download.
           gh release download "$TAG" --repo "$REPO" --pattern beacon-release-key.gpg --clobber
           gpgv --keyring "$PWD/beacon-release-key.gpg" checksums.txt.sig checksums.txt
-          gh release upload "$TAG" checksums.txt checksums.txt.sig --repo "$REPO" --clobber
+          published="$RUNNER_TEMP/published"
+          for attempt in 1 2 3; do
+            # checksums.txt first: its old signature then fails for at most the one upload, and a
+            # signature is never published ahead of the file it covers.
+            gh release upload "$TAG" checksums.txt --repo "$REPO" --clobber &&
+              gh release upload "$TAG" checksums.txt.sig --repo "$REPO" --clobber ||
+              echo "::warning::upload attempt ${attempt} failed"
+            rm -rf "$published" && mkdir -p "$published"
+            if gh release download "$TAG" --repo "$REPO" --dir "$published" \
+                --pattern checksums.txt --pattern checksums.txt.sig &&
+              cmp -s checksums.txt "$published/checksums.txt" &&
+              cmp -s checksums.txt.sig "$published/checksums.txt.sig" &&
+              gpgv --keyring "$PWD/beacon-release-key.gpg" "$published/checksums.txt.sig" "$published/checksums.txt"; then
+              exit 0
+            fi
+            echo "::warning::the published checksums.txt and checksums.txt.sig do not match what was signed (attempt ${attempt})"
+            sleep $((attempt * 5))
+          done
+          echo "::error title=checksums.txt and its signature do not match::${TAG} is left with a checksums.txt and checksums.txt.sig that pinned installers refuse. Rerun this job."
+          exit 1
 
       - name: Download every file checksums.txt lists
         working-directory: dist/release

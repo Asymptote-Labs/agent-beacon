@@ -299,8 +299,12 @@ A pushed `v*` tag runs the full release end-to-end via
    workflow's OIDC token) for every file `checksums.txt` lists. It needs
    `id-token: write` and `attestations: write`, and runs in the `release`
    environment only so that, when `BEACON_LINUX_SIGNING_KEY` exists, it can sign
-   the extended `checksums.txt` again before uploading it, in one upload with its
-   `.sig`; a failure before that leaves GoReleaser's matching pair in place.
+   the extended `checksums.txt` again before uploading it; a failure before that
+   leaves GoReleaser's matching pair in place. GitHub replaces assets one at a time,
+   so it uploads `checksums.txt` then its `.sig`, reads both back and re-uploads
+   until the published pair is what it signed, and fails loudly otherwise;
+   `install.sh` and the self-updater fetch the pair once more before refusing a
+   signature that does not verify, which covers the seconds between the uploads.
    Anything else that rewrites `checksums.txt` must come before that step.
 
 Every third-party action in `release.yml`, `release-extension.yml` and

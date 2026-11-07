@@ -3,11 +3,13 @@ package selfupdate
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // pinnedReleaseKeys holds the OpenPGP fingerprints, one per line, of the keys allowed to sign a
@@ -27,6 +29,12 @@ var releaseKeyFingerprints = strings.Fields(pinnedReleaseKeys)
 // fingerprint.
 const releaseKeyAsset = "beacon-release-key.gpg"
 
+// releaseSignatureRetryDelay is how long verifyReleaseSignature waits before fetching checksums.txt
+// and its signature a second time. The release's finalize job replaces both after the release is
+// public, and GitHub replaces assets one at a time, so for a few seconds a client can download a
+// checksums.txt and a signature from different uploads; a second fetch gets a matching pair.
+var releaseSignatureRetryDelay = 5 * time.Second
+
 // verifyReleaseSignature checks that checksums.txt beside the package is signed by a pinned key
 // and lists the package's file name with the downloaded bytes' SHA-256.
 func (a *Applier) verifyReleaseSignature(ctx context.Context, pkgURL, pkgPath string) error {
@@ -40,30 +48,60 @@ func (a *Applier) verifyReleaseSignature(ctx context.Context, pkgURL, pkgPath st
 		return err
 	}
 	defer os.RemoveAll(dir)
+	if err := a.fetchSignedChecksums(ctx, base, dir); err != nil {
+		var mismatch *signatureMismatchError
+		if !errors.As(err, &mismatch) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(releaseSignatureRetryDelay):
+		}
+		if err := a.fetchSignedChecksums(ctx, base, dir); err != nil {
+			return err
+		}
+	}
+	want, err := checksumFor(filepath.Join(dir, "checksums.txt"), name)
+	if err != nil {
+		return err
+	}
+	return verifySHA256(pkgPath, want)
+}
+
+// signatureMismatchError is a checksums.txt whose signature does not verify, the one failure a
+// second fetch can fix.
+type signatureMismatchError struct{ msg string }
+
+func (e *signatureMismatchError) Error() string { return e.msg }
+
+// fetchSignedChecksums downloads checksums.txt, its signature and the release key into dir and
+// checks that a pinned key signed that checksums.txt.
+func (a *Applier) fetchSignedChecksums(ctx context.Context, base, dir string) error {
 	for _, f := range []string{"checksums.txt", "checksums.txt.sig", releaseKeyAsset} {
 		if err := a.download(ctx, base+"/"+f, filepath.Join(dir, f)); err != nil {
 			return fmt.Errorf("download %s: %w", f, err)
 		}
 	}
-	sums := filepath.Join(dir, "checksums.txt")
 	// Status is read from stdout alone, because stderr repeats the key's user ID and the release
 	// supplies the key.
 	var stderr strings.Builder
 	cmd := exec.CommandContext(ctx, "gpgv", "--homedir", dir, "--keyring", filepath.Join(dir, releaseKeyAsset),
-		"--status-fd", "1", filepath.Join(dir, "checksums.txt.sig"), sums)
+		"--status-fd", "1", filepath.Join(dir, "checksums.txt.sig"), filepath.Join(dir, "checksums.txt"))
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return fmt.Errorf("checksums.txt signature does not verify: %v: %s", err, strings.TrimSpace(stderr.String()))
+		var exit *exec.ExitError
+		msg := fmt.Sprintf("checksums.txt signature does not verify: %v: %s", err, strings.TrimSpace(stderr.String()))
+		if errors.As(err, &exit) {
+			return &signatureMismatchError{msg: msg}
+		}
+		return errors.New(msg)
 	}
 	if !validSigFrom(string(out), releaseKeyFingerprints) {
 		return fmt.Errorf("checksums.txt is not signed by a Beacon release key (%s)", strings.Join(releaseKeyFingerprints, ", "))
 	}
-	want, err := checksumFor(sums, name)
-	if err != nil {
-		return err
-	}
-	return verifySHA256(pkgPath, want)
+	return nil
 }
 
 // validSigFrom reports whether gpgv's status output has a good signature whose primary key is one
