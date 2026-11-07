@@ -302,9 +302,7 @@ func TestRepairInstalledEndpointUserConfigConfiguresNativeAndHooks(t *testing.T)
 	loadConfigForUserRepair = func(userMode bool, logPath string) endpointconfig.Config {
 		return endpointconfig.Default(userMode, logPath)
 	}
-	activeConsoleUser = func() (consoleUserInfo, bool, error) {
-		return consoleUserInfo{Username: "alice", HomeDir: home}, true, nil
-	}
+	stubConsoleUsers(t, consoleUserInfo{Username: "alice", HomeDir: home})
 	var repairArgs []string
 	runHookRepairAsUser = func(info consoleUserInfo, args ...string) error {
 		if info.Username != "alice" || info.HomeDir != home {
@@ -401,9 +399,7 @@ func TestRepairInstalledEndpointUserConfigAllowsNativeOnlyHarness(t *testing.T) 
 	endpointOpts.userMode = true
 	endpointOpts.systemMode = true
 	endpointOpts.hookHarnesses = "gemini"
-	activeConsoleUser = func() (consoleUserInfo, bool, error) {
-		return consoleUserInfo{Username: "alice", HomeDir: home}, true, nil
-	}
+	stubConsoleUsers(t, consoleUserInfo{Username: "alice", HomeDir: home})
 	runHookRepairAsUser = func(info consoleUserInfo, args ...string) error {
 		t.Fatalf("native-only Gemini repair should not invoke hook repair, args=%v", args)
 		return nil
@@ -439,9 +435,7 @@ func TestRepairInstalledEndpointUserConfigHonorsHookOnlyAliases(t *testing.T) {
 	endpointOpts.userMode = true
 	endpointOpts.systemMode = true
 	endpointOpts.hookHarnesses = "claude-hooks"
-	activeConsoleUser = func() (consoleUserInfo, bool, error) {
-		return consoleUserInfo{Username: "alice", HomeDir: home}, true, nil
-	}
+	stubConsoleUsers(t, consoleUserInfo{Username: "alice", HomeDir: home})
 	var repairArgs []string
 	runHookRepairAsUser = func(info consoleUserInfo, args ...string) error {
 		repairArgs = append([]string(nil), args...)
@@ -2035,5 +2029,132 @@ func TestEndpointInstallHookFailureIsAWarningAndOtherHooksStillInstall(t *testin
 	}
 	if data, _ := os.ReadFile(filepath.Join(claudeDir, "settings.json")); string(data) != `{"hooks": "not-an-object"}` {
 		t.Fatalf("a settings file the merge cannot read must be left untouched, got %s", data)
+	}
+}
+
+// stubConsoleUsers makes users the people a system install resolves: the first is the console user,
+// and all of them are who repair-installed configures.
+func stubConsoleUsers(t *testing.T, users ...consoleUserInfo) {
+	t.Helper()
+	oldUser, oldUsers := activeConsoleUser, activeConsoleUsers
+	t.Cleanup(func() { activeConsoleUser, activeConsoleUsers = oldUser, oldUsers })
+	activeConsoleUser = func() (consoleUserInfo, bool, error) {
+		if len(users) == 0 {
+			return consoleUserInfo{}, false, nil
+		}
+		return users[0], true, nil
+	}
+	activeConsoleUsers = func() ([]consoleUserInfo, error) {
+		return append([]consoleUserInfo(nil), users...), nil
+	}
+}
+
+// Every logged-in person is configured, each in their own home and as themselves, and one person's
+// failure neither stops the others nor goes unreported.
+func TestRepairInstalledEndpointUserConfigConfiguresEveryLoggedInUser(t *testing.T) {
+	writeNativeConfigInProcess(t)
+	oldOpts := endpointOpts
+	oldRunHookRepairAsUser := runHookRepairAsUser
+	oldLoadConfigForUserRepair := loadConfigForUserRepair
+	t.Cleanup(func() {
+		endpointOpts = oldOpts
+		runHookRepairAsUser = oldRunHookRepairAsUser
+		loadConfigForUserRepair = oldLoadConfigForUserRepair
+	})
+	logPath := filepath.Join(t.TempDir(), "runtime.jsonl")
+	endpointOpts.userMode = true
+	endpointOpts.systemMode = true
+	endpointOpts.logPath = logPath
+	endpointOpts.hookHarnesses = ""
+	endpointOpts.hookLevel = "user"
+	loadConfigForUserRepair = func(userMode bool, logPath string) endpointconfig.Config {
+		return endpointconfig.Default(userMode, logPath)
+	}
+	alice := consoleUserInfo{Username: "alice", HomeDir: t.TempDir()}
+	bob := consoleUserInfo{Username: "bob", HomeDir: t.TempDir()}
+	carol := consoleUserInfo{Username: "carol", HomeDir: t.TempDir()}
+	stubConsoleUsers(t, alice, bob, carol)
+	hooked := map[string]string{}
+	runHookRepairAsUser = func(info consoleUserInfo, args ...string) error {
+		if info.Username == "bob" {
+			return fmt.Errorf("refresh hooks for bob: runuser refused")
+		}
+		hooked[info.Username] = strings.Join(args, " ")
+		return nil
+	}
+
+	result, err := repairInstalledEndpointUserConfig()
+	if err == nil || !strings.Contains(err.Error(), "bob") {
+		t.Fatalf("err = %v, want bob's failure reported", err)
+	}
+	if len(result.Users) != 3 {
+		t.Fatalf("users = %+v, want alice, bob and carol", result.Users)
+	}
+	for _, u := range []consoleUserInfo{alice, carol} {
+		if !strings.Contains(hooked[u.Username], "--harness claude,codex,cursor") {
+			t.Errorf("%s hooks = %q, want the default hook targets installed", u.Username, hooked[u.Username])
+		}
+		settings, err := os.ReadFile(filepath.Join(u.HomeDir, ".claude", "settings.json"))
+		if err != nil || !strings.Contains(string(settings), "127.0.0.1:4317") {
+			t.Errorf("%s's Claude Code settings do not point at the collector: %v %s", u.Username, err, settings)
+		}
+	}
+	if result.Users[1].User != "bob" || result.Users[1].Error == "" {
+		t.Errorf("bob's entry = %+v, want his error", result.Users[1])
+	}
+	if result.Users[2].User != "carol" || result.Users[2].Error != "" {
+		t.Errorf("carol's entry = %+v, want configured after bob failed", result.Users[2])
+	}
+	// When the first person fails, the single-user fields carry the error too, so a reader of the
+	// older shape never sees their user without it.
+	bobFirst, err := func() (endpointUserConfigRepairResult, error) {
+		stubConsoleUsers(t, bob, alice)
+		return repairInstalledEndpointUserConfig()
+	}()
+	if err == nil || bobFirst.User != "bob" || bobFirst.Error == "" {
+		t.Fatalf("bob first = %+v, %v; want bob with his error at the top level", bobFirst, err)
+	}
+	stubConsoleUsers(t, alice, bob, carol)
+	if result.Error != "" {
+		t.Errorf("top-level error = %q when the first person succeeded", result.Error)
+	}
+
+	// The single-user fields still describe the first person, for readers of the older shape.
+	if result.User != "alice" || result.HomeDir != alice.HomeDir || strings.Join(result.HookTargets, ",") != "claude,codex,cursor" {
+		t.Errorf("top-level result = %+v, want alice's", result)
+	}
+
+	var out strings.Builder
+	reportUserConfigRepair(&out, result)
+	text := out.String()
+	for _, want := range []string{
+		"Configured alice (" + alice.HomeDir + "): telemetry for claude, codex; hooks for claude, codex, cursor, writing to " + logPath,
+		"Could not configure bob (" + bob.HomeDir + "): refresh hooks for bob: runuser refused",
+		"Configured carol (" + carol.HomeDir + ")",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("report missing %q:\n%s", want, text)
+		}
+	}
+}
+
+// With nobody to configure the command says so and says what to run, instead of printing nothing
+// after a package install that otherwise reported success.
+func TestRepairInstalledEndpointUserConfigReportsNobodyToConfigure(t *testing.T) {
+	oldOpts := endpointOpts
+	t.Cleanup(func() { endpointOpts = oldOpts })
+	endpointOpts.userMode = true
+	endpointOpts.systemMode = true
+	stubConsoleUsers(t)
+
+	result, err := repairInstalledEndpointUserConfig()
+	if err != nil || result.SkippedReason != "no_active_console_user" {
+		t.Fatalf("result, err = %+v, %v; want a no_active_console_user skip", result, err)
+	}
+	var out strings.Builder
+	reportUserConfigRepair(&out, result)
+	if !strings.Contains(out.String(), "No logged-in user to configure") ||
+		!strings.Contains(out.String(), "sudo beacon endpoint user-config repair-installed --system") {
+		t.Fatalf("report = %q, want the skip explained with the command to run", out.String())
 	}
 }

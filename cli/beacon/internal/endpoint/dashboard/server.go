@@ -442,13 +442,7 @@ func ValidateLoopbackAddr(addr string) error {
 // one place the request can be told apart from a local client.
 func RequireLoopbackHost(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host := r.Host
-		if h, _, err := net.SplitHostPort(host); err == nil {
-			host = h
-		}
-		host = strings.Trim(host, "[]")
-		ip := net.ParseIP(host)
-		if !strings.EqualFold(host, "localhost") && (ip == nil || !ip.IsLoopback()) {
+		if !asymptoteobserve.IsLoopbackHost(r.Host) {
 			writeError(w, http.StatusForbidden, fmt.Errorf("request host must be a loopback address"))
 			return
 		}

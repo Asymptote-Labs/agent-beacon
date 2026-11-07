@@ -15,7 +15,15 @@
 # single or double quotes, whole-line and trailing `# comments`), so nothing in it runs. A value with
 # anything else left over (an unquoted space, an unterminated quote) is skipped with a warning rather
 # than passed on. The file is ignored unless root owns it and no one else can write it, because the
-# package scripts run as root. A variable already set in the environment wins over the file.
+# package scripts run as root. A variable already set in the environment wins over the file; within
+# the file, a later assignment of a key replaces an earlier one, as it would for a shell, because a
+# configuration manager often overrides a setting by appending a line.
+
+# The documented install settings, the only keys taken from the file.
+BEACON_SETTINGS_KEYS='BEACON_ENDPOINT_HARNESSES BEACON_OTLP_GRPC_PORT BEACON_OTLP_HTTP_PORT
+BEACON_COLLECTOR BEACON_NO_START BEACON_SERVICE BEACON_LOG_ACCESS BEACON_SESSION_SYNC
+BEACON_SPLUNK_HEC_ENDPOINT BEACON_SPLUNK_HEC_TOKEN BEACON_SPLUNK_INDEX BEACON_SPLUNK_SOURCE
+BEACON_SPLUNK_SOURCETYPE BEACON_SPLUNK_INSECURE_SKIP_VERIFY BEACON_SPLUNK_CA_FILE'
 
 # beacon_defaults_trusted FILE succeeds when FILE is owned by root and not group- or world-writable.
 beacon_defaults_trusted() {
@@ -96,6 +104,18 @@ beacon_load_settings() {
     echo "beacon: ignoring $_beacon_file: it must be owned by root and writable by no one else" >&2
     return 0
   fi
+  # Which settings are already set is decided once, before the file is read, so that a key the file
+  # assigns twice takes its last value rather than its first.
+  _beacon_known=' '
+  _beacon_preset=' '
+  for _beacon_key in $BEACON_SETTINGS_KEYS; do
+    _beacon_known="$_beacon_known$_beacon_key "
+    # $_beacon_key is one of the fixed names above, so the indirection cannot evaluate anything else.
+    eval "_beacon_set=\${$_beacon_key+set}"
+    if [ -n "$_beacon_set" ]; then
+      _beacon_preset="$_beacon_preset$_beacon_key "
+    fi
+  done
   while IFS= read -r _beacon_line || [ -n "$_beacon_line" ]; do
     _beacon_line="${_beacon_line#"${_beacon_line%%[![:space:]]*}"}"
     case "$_beacon_line" in
@@ -110,22 +130,23 @@ beacon_load_settings() {
       *) continue ;;
     esac
     _beacon_key="${_beacon_line%%=*}"
+    # A plain name only: anything else (a space, say) could otherwise match two adjacent names below.
     case "$_beacon_key" in
-      BEACON_ENDPOINT_HARNESSES|BEACON_OTLP_GRPC_PORT|BEACON_OTLP_HTTP_PORT|BEACON_COLLECTOR|\
-      BEACON_NO_START|BEACON_SERVICE|BEACON_LOG_ACCESS|BEACON_SESSION_SYNC|\
-      BEACON_SPLUNK_HEC_ENDPOINT|BEACON_SPLUNK_HEC_TOKEN|BEACON_SPLUNK_INDEX|BEACON_SPLUNK_SOURCE|\
-      BEACON_SPLUNK_SOURCETYPE|BEACON_SPLUNK_INSECURE_SKIP_VERIFY|BEACON_SPLUNK_CA_FILE) ;;
+      ''|*[!A-Z0-9_]*) continue ;;
+    esac
+    case "$_beacon_known" in
+      *" $_beacon_key "*) ;;
       *) continue ;;
+    esac
+    # Set before the file was read: the environment (or an explicit argument) wins.
+    case "$_beacon_preset" in
+      *" $_beacon_key "*) continue ;;
     esac
     if ! _beacon_value="$(beacon_settings_value "${_beacon_line#*=}")"; then
       # The key only, never the value: it may be a token.
       echo "beacon: ignoring $_beacon_key in $_beacon_file: not a single value (quote a value with spaces)" >&2
       continue
     fi
-    # $_beacon_key is one of the names above, so the indirection cannot evaluate anything else.
-    eval "_beacon_set=\${$_beacon_key+set}"
-    if [ -z "$_beacon_set" ]; then
-      export "$_beacon_key=$_beacon_value"
-    fi
+    export "$_beacon_key=$_beacon_value"
   done <"$_beacon_file"
 }

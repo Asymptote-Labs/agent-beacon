@@ -319,7 +319,7 @@ func TestQwenStopContextIsNormalizedIntoContextNotUsage(t *testing.T) {
 		t.Fatal("stop fixture has no session id; the mapping under test would not run")
 	}
 	logger := newHookLogger("stop", platformFlag, sessionID)
-	emitHookEvent(logger, "tool.completed", "tool", "info", "Agent response completed", input, sessionFields(sessionID, input))
+	emitHookEvent(logger, "tool.completed", "tool", "info", "Agent response completed", input, stopFields(sessionID, input))
 
 	event := lastEndpointEvent(t, logPath)
 	if got := qwenAction(t, event); got != "tool.completed" {

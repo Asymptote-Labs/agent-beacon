@@ -173,9 +173,17 @@ Vector comes with Beacon. The `.deb` and `.rpm` install it at `/opt/beacon/bin/v
 | System install | Config and collector config under `/etc/beacon/endpoint` |
 | Service | `/etc/systemd/system/beacon-collector.service`, enabled and started |
 | Runtime log | `/var/log/beacon-agent/runtime.jsonl`, in [restricted log access](/security/restricted-log-access) on a first install: `0640 root:beacon-log`, written only by the collector |
-| Agent runtime | Claude Code and Codex CLI settings for the installing user, pointed at `127.0.0.1:4317` |
+| Agent runtime | Claude Code and Codex CLI settings and hooks for the installing user and everyone logged in, pointed at `127.0.0.1:4317` |
 
-That last row is worth knowing about. A system-mode endpoint runs as root, so the install has to work out whose agent settings to configure, and the collector is useless if nothing exports to it. Beacon uses `SUDO_USER`, which is set for every normal install path, and falls back to asking logind who has an active session. If it cannot identify anyone, it says so instead of failing, and you can configure yourself later:
+That last row is worth knowing about. A system-mode endpoint runs as root, so the install has to work out whose agent settings to configure, and the collector is useless if nothing exports to it. Beacon configures the user named by `SUDO_USER`, which is set when you install with `sudo`, and every account logind reports a live login session for (a desktop, ssh or terminal login; not a display manager's greeter or a background session such as cron's), which is what an install by a configuration manager running as root (Salt, Ansible, Puppet) has to go on. Each is configured as that user, in their own home, and the install prints one line per person:
+
+```
+beacon: the hook lines above are root's own; configuring the agent runtimes of logged-in users
+Configured alice (/home/alice): telemetry for claude, codex; hooks for claude, codex, writing to /var/log/beacon-agent/runtime.jsonl
+Configured bob (/home/bob): telemetry for claude, codex; hooks for claude, codex, writing to /var/log/beacon-agent/runtime.jsonl
+```
+
+The `Claude Code hooks installed: /root/...` lines printed before it are root's own settings, not anyone else's. A person who was not logged in during the install is not configured. If nobody can be identified, the install says so instead of failing, and each person configures themselves later:
 
 ```bash title="Configure your own agent runtime against an already-installed endpoint"
 sudo beacon endpoint user-config repair-installed --system
@@ -210,7 +218,7 @@ beacon:
       - file: /etc/default/beacon
 ```
 
-The file is read, not run: each line is a `KEY=VALUE` written as a shell would read it (an `export` in front, quotes around the value, and `# comments` on their own line or after the value are allowed; a value with an unquoted space or an unclosed quote is skipped with a warning naming the key), and only the install settings the script documents are taken (`BEACON_LOG_ACCESS`, `BEACON_ENDPOINT_HARNESSES`, `BEACON_OTLP_GRPC_PORT`, `BEACON_OTLP_HTTP_PORT`, `BEACON_SESSION_SYNC`, `BEACON_SERVICE`, `BEACON_NO_START`, `BEACON_COLLECTOR` and the `BEACON_SPLUNK_*` settings). Because the install script runs as root, the file is ignored, with a warning, unless root owns it and no other account can write it. A variable set in the install script's environment wins over the file. The package reads it for both of its steps, so `BEACON_ENDPOINT_HARNESSES` reaches the system install and the agent runtimes of the people it configures. The file is read on every install and upgrade, so keep it in step with what you want the endpoint to be; an unset `BEACON_LOG_ACCESS` on an upgrade keeps the mode the endpoint has.
+The file is read, not run: each line is a `KEY=VALUE` written as a shell would read it (an `export` in front, quotes around the value, and `# comments` on their own line or after the value are allowed; a value with an unquoted space or an unclosed quote is skipped with a warning naming the key), and only the install settings the script documents are taken (`BEACON_LOG_ACCESS`, `BEACON_ENDPOINT_HARNESSES`, `BEACON_OTLP_GRPC_PORT`, `BEACON_OTLP_HTTP_PORT`, `BEACON_SESSION_SYNC`, `BEACON_SERVICE`, `BEACON_NO_START`, `BEACON_COLLECTOR` and the `BEACON_SPLUNK_*` settings). Because the install script runs as root, the file is ignored, with a warning, unless root owns it and no other account can write it. A variable set in the install script's environment, or passed as one of its positional arguments when you run `/opt/beacon/scripts/install-endpoint.sh` yourself, wins over the file. A key the file sets twice takes the last value, as a shell would, so appending a line overrides an earlier one. The package reads it for both of its steps, so `BEACON_ENDPOINT_HARNESSES` reaches the system install and the agent runtimes of the people it configures. The file is read on every install and upgrade, so keep it in step with what you want the endpoint to be; an unset `BEACON_LOG_ACCESS` on an upgrade keeps the mode the endpoint has.
 
 ## Managing the service
 
@@ -288,7 +296,35 @@ sudo beacon endpoint update --check
 sudo beacon endpoint update --apply
 ```
 
-`--apply` downloads the release package for your platform, verifies its SHA-256, installs it with `dpkg` or `rpm`, restarts the collector, and rolls back if the new version fails its health check. Verification is checksum-over-HTTPS from GitHub Releases, the same trust root you used to download the package in the first place. macOS additionally verifies Apple notarization; Linux has no OS-level equivalent, and `beacon endpoint update` reports which verification it performed rather than implying both.
+`--apply` downloads the release package for your platform, verifies its SHA-256, installs it with `dpkg` or `rpm`, restarts the collector, and rolls back if the new version fails its health check. Verification is checksum-over-HTTPS from GitHub Releases, the same trust root you used to download the package in the first place. macOS additionally verifies Apple notarization. On Linux, once a build pins the release key (see [Release signing](#release-signing)), the package must also be listed in a `checksums.txt` signed by that key, which needs `gpgv`. `beacon endpoint update` reports which verification it performed (`sha256`, `sha256+gpg` or `sha256+notarization`) rather than implying more.
+
+## Release signing
+
+Signing is wired into the release but not yet active: Beacon has no Linux release key yet, so current `.deb`, `.rpm` and `checksums.txt` files are unsigned, and the installer and `beacon endpoint update` check checksums only. This section applies once a release publishes the key. A signed release never becomes the latest release without its signature: GoReleaser signs `checksums.txt` and attaches the signature and the public key before it publishes the release, and when the macOS and Windows packages are added later, `checksums.txt` is signed again before the extended file replaces it.
+
+A signed release carries `checksums.txt.sig` (a detached OpenPGP signature over `checksums.txt`) and the public key as `beacon-release-key.asc` and `beacon-release-key.gpg`. The `.rpm` carries an RPM signature and the `.deb` a `_gpgorigin` signature member, both from the same key. Release key fingerprint: _not yet published_.
+
+The installer and the self-updater pin that fingerprint. They take the key from the release but trust it only if its fingerprint matches, and they refuse a package whose `checksums.txt` is unsigned, signed by another key, or does not list the package. To check a download yourself:
+
+```bash title="Verify a signed release"
+(
+  set -euo pipefail
+  FPR="<release key fingerprint>"
+  H="$(mktemp -d)"
+  curl -fsSLO "${BASE}/checksums.txt" -O "${BASE}/checksums.txt.sig" -O "${BASE}/beacon-release-key.gpg"
+  # Keep only the pinned key: the file comes from the release, so it may hold others.
+  gpg --homedir "$H" --batch --import beacon-release-key.gpg
+  gpg --homedir "$H" --export "$FPR" > pinned.gpg
+  gpg --homedir "$H" --export --armor "$FPR" > pinned.asc
+  test -s pinned.gpg
+  gpgv --homedir "$H" --keyring "$PWD/pinned.gpg" --status-fd 1 checksums.txt.sig checksums.txt 2>/dev/null |
+    awk -v fpr="$FPR" '$1 == "[GNUPG:]" && $2 == "VALIDSIG" && toupper($NF) == toupper(fpr) { ok = 1 } END { exit !ok }'
+  awk -v name="$PKG" '$2 == name' checksums.txt | sha256sum --check --strict -
+  # .rpm only, after the checks above: sudo rpm --import pinned.asc && rpm -K "${PKG}"
+)
+```
+
+Rotation: one release pins both the old and the new fingerprint and is still signed by the old key. Later releases are signed by both keys, with both in the key file, and keep the old fingerprint pinned until the installed fleet has moved to a build that pins the new one, because a host that still pins only the old key refuses a release signed only by the new key. Such a host has to reinstall with the current installer. The new fingerprint is published here and in the release notes of the release that first pins it.
 
 Upgrading the package keeps your configuration and your collected log.
 

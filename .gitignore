@@ -26,6 +26,7 @@ cli/beacon/beacon
 cli/beacon/beacon-*
 cli/beacon/dist/
 cli/beacon/release-install/
+cli/beacon/release-key/
 cli/beacon/release-rules/
 dist/
 

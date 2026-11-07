@@ -42,8 +42,10 @@ run_install() {
     BEACON_DEFAULTS_OWNER="$(id -u)" \
     BEACON_SYSTEM_LOG="$TMP_DIR/log/runtime.jsonl" \
     BEACON_INIT_COMM="$TMP_DIR/init-comm" \
-    "$@" sh "$INSTALL_SCRIPT" >"$TMP_DIR/out" 2>&1 || { cat "$TMP_DIR/out" >&2; return 1; }
+    "$@" sh "$INSTALL_SCRIPT" $INSTALL_ARGS >"$TMP_DIR/out" 2>&1 || { cat "$TMP_DIR/out" >&2; return 1; }
 }
+# Positional arguments for run_install, split on spaces (none of the tests' values contain one).
+INSTALL_ARGS=''
 
 # flag_value FLAG prints the value passed after FLAG, or nothing when it was not passed.
 flag_value() {
@@ -164,6 +166,37 @@ grep -q 'beacon-settings.sh' "$ROOT_DIR/cli/beacon/.goreleaser.yaml" || fail "th
 # The environment wins over the file.
 run_install BEACON_DEFAULTS_FILE="$DEFAULTS" BEACON_LOG_ACCESS=restricted
 expect_log_access restricted "environment over defaults file"
+
+# Positional arguments are explicit too, so they win over the file; the file fills what they leave.
+printf 'BEACON_ENDPOINT_HARNESSES=claude\nBEACON_OTLP_GRPC_PORT=5317\nBEACON_OTLP_HTTP_PORT=5318\n' >"$DEFAULTS"
+INSTALL_ARGS='claude,codex,cursor 4417'
+run_install BEACON_DEFAULTS_FILE="$DEFAULTS"
+INSTALL_ARGS=''
+[ "$(flag_value --harness)" = "claude,codex,cursor" ] || fail "positional over defaults file: --harness is '$(flag_value --harness)'"
+[ "$(flag_value --otlp-grpc-port)" = "4417" ] || fail "positional over defaults file: --otlp-grpc-port is '$(flag_value --otlp-grpc-port)'"
+[ "$(flag_value --otlp-http-port)" = "5318" ] || fail "defaults file under positional: --otlp-http-port is '$(flag_value --otlp-http-port)'"
+# ...and the environment still wins over a positional argument, as before.
+INSTALL_ARGS='claude,codex,cursor'
+run_install BEACON_DEFAULTS_FILE="$DEFAULTS" BEACON_ENDPOINT_HARNESSES=codex
+INSTALL_ARGS=''
+[ "$(flag_value --harness)" = "codex" ] || fail "environment over positional: --harness is '$(flag_value --harness)'"
+
+# A key assigned twice takes its last value, as a shell would: configuration managers override a
+# setting by appending a line. The environment still wins over every one of them.
+printf 'BEACON_LOG_ACCESS=restricted\nBEACON_LOG_ACCESS=shared # appended\n' >"$DEFAULTS"
+run_install BEACON_DEFAULTS_FILE="$DEFAULTS"
+expect_log_access shared "defaults file key assigned twice"
+run_install BEACON_DEFAULTS_FILE="$DEFAULTS" BEACON_LOG_ACCESS=restricted
+expect_log_access restricted "environment over a key assigned twice"
+# A malformed later line is skipped, so the earlier value stands.
+printf 'BEACON_LOG_ACCESS=shared\nBEACON_LOG_ACCESS=restricted junk\n' >"$DEFAULTS"
+run_install BEACON_DEFAULTS_FILE="$DEFAULTS"
+expect_log_access shared "malformed later assignment"
+# A name that is not a plain identifier is ignored, and does not fail the install.
+printf 'BEACON_LOG_ACCESS BEACON_SESSION_SYNC=1\n' >"$DEFAULTS"
+run_install BEACON_DEFAULTS_FILE="$DEFAULTS" || fail "a key with a space failed the install"
+has_flag --session-sync && fail "a key with a space set BEACON_SESSION_SYNC"
+expect_log_access restricted "key with a space"
 
 # Without a mode, a defaults file still gets the first-install default.
 printf 'BEACON_SESSION_SYNC=0\n' >"$DEFAULTS"
