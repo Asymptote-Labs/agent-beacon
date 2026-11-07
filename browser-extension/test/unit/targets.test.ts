@@ -7,6 +7,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   assertSafeOutdir,
+  CHROME_EXTENSION_ID,
+  CHROME_UPDATE_URL,
   FIREFOX_MIN_VERSION,
   GECKO_ID,
   MIN_FIREFOX_FOR_MAIN_WORLD,
@@ -83,12 +85,17 @@ describe('firefoxManifest', () => {
   it('carries over everything else unchanged, including the MAIN-world interceptor', () => {
     const b = base();
     const m = firefoxManifest(b);
-    const { background: _b1, options_page: _o1, ...restBase } = b;
+    const { background: _b1, options_page: _o1, update_url: _u1, ...restBase } = b;
     const { background: _b2, browser_specific_settings: _s, options_ui: _o2, ...restFf } = m;
     expect(restFf).toEqual(restBase);
     expect(m.content_scripts[0]).toMatchObject({ js: ['interceptor.js'], world: 'MAIN', run_at: 'document_start' });
     expect(m.version).toBe(b.version);
     expect(m.manifest_version).toBe(3);
+  });
+
+  it("drops Chrome's self-hosted update feed, which Firefox must not poll", () => {
+    expect(base().update_url).toBe(CHROME_UPDATE_URL);
+    expect(firefoxManifest(base()).update_url).toBeUndefined();
   });
 
   it("uses Firefox's options_ui in place of Chrome's options_page", () => {
@@ -131,5 +138,30 @@ describe('assertSafeOutdir', () => {
     '/repo/browser-extension/src/popup', // inside src
   ])('refuses %s, which the build would delete along with sources', (out) => {
     expect(() => assertSafeOutdir(project, src, out)).toThrow(/refusing to build into/);
+  });
+});
+
+describe('chrome self-hosted build', () => {
+  it('pins the extension ID that fleet policies name', () => {
+    // Chrome derives the ID from the CRX signing key, and every fleet's force-install policy names
+    // it. Changing it means a new key, a new extension, and rewriting every policy, so this
+    // assertion is deliberately a literal.
+    expect(CHROME_EXTENSION_ID).toMatch(/^[a-p]{32}$/);
+    expect(CHROME_EXTENSION_ID).toBe('omjgmakjpomopmmpdgmjbfojhbgdgijc');
+  });
+
+  it('points installed copies at the update feed the release workflow publishes', () => {
+    expect(CHROME_UPDATE_URL).toBe(
+      'https://github.com/Asymptote-Labs/agent-beacon/releases/download/ext-updates/updates.xml',
+    );
+    expect(base().update_url).toBe(CHROME_UPDATE_URL);
+  });
+
+  it('declares the managed-settings schema that policy values are checked against', () => {
+    expect(base().storage).toEqual({ managed_schema: 'managed_schema.json' });
+    const schema = JSON.parse(readFileSync(path.join(root, 'src', 'managed_schema.json'), 'utf8'));
+    expect(schema.type).toBe('object');
+    expect(Object.keys(schema.properties).sort()).toEqual(['enabled', 'endpoint', 'retention', 'sites']);
+    expect(Object.keys(schema.properties.sites.properties).sort()).toEqual(['chatgpt_web', 'claude_web']);
   });
 });

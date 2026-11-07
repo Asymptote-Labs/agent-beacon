@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { GECKO_ID } from '../../tools/targets.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const FILES = ['manifest.json', 'sw.js', 'content.js', 'interceptor.js', 'popup.html', 'popup.js', 'options.html', 'options.js'];
+const FILES = ['manifest.json', 'managed_schema.json', 'sw.js', 'content.js', 'interceptor.js', 'popup.html', 'popup.js', 'options.html', 'options.js'];
 
 let work: string;
 const out = (t: string) => path.join(work, t);

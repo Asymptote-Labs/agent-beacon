@@ -21,6 +21,24 @@ import path from 'node:path';
 export const GECKO_ID = 'browser-collector@agent-beacon.asymptotelabs.ai';
 
 /**
+ * Pinned Chrome extension ID of the signed, self-hosted build. Chrome derives it
+ * from the public half of the CRX signing key, and IT names it in the policy that
+ * force-installs the extension, so it must never change: a new key is a new
+ * extension, and every fleet would have to rewrite its policy. The release
+ * workflow refuses to publish a CRX whose ID differs.
+ */
+export const CHROME_EXTENSION_ID = 'omjgmakjpomopmmpdgmjbfojhbgdgijc';
+
+/**
+ * Where an installed copy checks for new versions (`update_url` in
+ * src/manifest.json). Chrome uses the policy's URL only for the first install and
+ * this one afterwards, unless the policy sets `override_update_url`. The release
+ * workflow replaces `updates.xml` on this fixed release after each signed build.
+ */
+export const CHROME_UPDATE_URL =
+  'https://github.com/Asymptote-Labs/agent-beacon/releases/download/ext-updates/updates.xml';
+
+/**
  * Oldest Firefox the Firefox build supports. 140 is the current ESR, which is
  * what managed fleets run, and the first release that understands
  * `data_collection_permissions`. It is also well past 128, the first release
@@ -56,8 +74,10 @@ export const FIREFOX_DATA_COLLECTION = Object.freeze({
  * Chrome's service worker becomes a Firefox MV3 background script (an event
  * page; Firefox does not run extension service workers), and Firefox gets its
  * add-on ID, minimum version, and data-collection declaration; `options_page`
- * becomes Firefox's `options_ui`. Nothing else changes: the MAIN-world content script, host permissions, popup and options
- * page carry over as they are.
+ * becomes Firefox's `options_ui`. Chrome's top-level `update_url` names the
+ * self-hosted Chrome update feed, which Firefox must not read (its own lives
+ * under `gecko`), so it is dropped. Nothing else changes: the MAIN-world content
+ * script, host permissions, popup and options page carry over as they are.
  *
  * @param {Record<string, any>} base parsed src/manifest.json (not mutated)
  * @returns {Record<string, any>}
@@ -71,6 +91,7 @@ export function firefoxManifest(base) {
   // The bundles are IIFEs (see esbuild.config.mjs), so a classic script is
   // right; `type: "module"` would be wrong for them.
   m.background = { scripts: [worker] };
+  delete m.update_url;
   // Firefox documents `options_ui` as its options key; `options_page` is the
   // Chrome spelling. Open in a tab, matching how Chrome shows options_page.
   if (typeof m.options_page === 'string') {
