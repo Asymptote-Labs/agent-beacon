@@ -263,7 +263,7 @@ sudo beacon endpoint update --apply
 
 ## Release signing
 
-Signing is wired into the release but not yet active: Beacon has no Linux release key yet, so current `.deb`, `.rpm` and `checksums.txt` files are unsigned, and the installer and `beacon endpoint update` check checksums only. This section applies once a release publishes the key.
+Signing is wired into the release but not yet active: Beacon has no Linux release key yet, so current `.deb`, `.rpm` and `checksums.txt` files are unsigned, and the installer and `beacon endpoint update` check checksums only. This section applies once a release publishes the key. Do not pin the fingerprint until the release flow publishes only after `finalize` has signed `checksums.txt` (for example a draft release published at the end, with the Homebrew tap push deferred); until then a pinned installer and `beacon endpoint update --apply` refuse a release whose `.sig` is not yet attached.
 
 A signed release carries `checksums.txt.sig` (a detached OpenPGP signature over `checksums.txt`) and the public key as `beacon-release-key.asc` and `beacon-release-key.gpg`. The `.rpm` carries an RPM signature and the `.deb` a `_gpgorigin` signature member, both from the same key. Release key fingerprint: _not yet published_.
 

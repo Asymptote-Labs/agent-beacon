@@ -321,6 +321,11 @@ checksum-only, as before. Once set, `install.sh` and `beacon endpoint update
 key lists it. Publish the fingerprint in `docs/platforms/linux.mdx#release-signing`.
 To rotate, add the new fingerprint in a release still signed by the old key,
 then switch the secret and drop the old fingerprint in the next release.
+Do not pin a fingerprint until the release publishes only after `finalize` has signed
+`checksums.txt` (for example a draft release published at the end, with the Homebrew
+tap push deferred): today `finalize` uploads the `.sig` after the release is public, so
+a pinned `install.sh` and `beacon endpoint update --apply` refuse the release while the
+`.sig` is missing.
 
 Keep one-time Apple-side onboarding steps out of the repo and share them with
 the release maintainer directly. Never use `pull_request_target` or build
