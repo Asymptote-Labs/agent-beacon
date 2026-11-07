@@ -126,6 +126,44 @@ func TestOwnerPIDFixtures(t *testing.T) {
 			err:   ErrNotFound,
 		},
 		{
+			name:  "FIN_WAIT1: the client closed its end, and the PID may be an exited process's",
+			rows4: []fixtureRow{{local: client, remote: server, state: mibTCPStateFinWait1, pid: 1234}},
+			err:   ErrNotFound,
+		},
+		{
+			name:  "FIN_WAIT2 is a closed client end",
+			rows4: []fixtureRow{{local: client, remote: server, state: mibTCPStateFinWait2, pid: 1234}},
+			err:   ErrNotFound,
+		},
+		{
+			name:  "CLOSING is a closed client end",
+			rows4: []fixtureRow{{local: client, remote: server, state: mibTCPStateClosing, pid: 1234}},
+			err:   ErrNotFound,
+		},
+		{
+			name:  "LAST_ACK is a closed client end",
+			rows4: []fixtureRow{{local: client, remote: server, state: mibTCPStateLastAck, pid: 1234}},
+			err:   ErrNotFound,
+		},
+		{
+			name:  "a closed client end in the IPv6 table is not an answer either",
+			rows6: []fixtureRow{{local: &net.TCPAddr{IP: mapped(lo.To4()), Port: client.Port}, remote: &net.TCPAddr{IP: mapped(lo.To4()), Port: server.Port}, state: mibTCPStateFinWait2, pid: 2222}},
+			err:   ErrNotFound,
+		},
+		{
+			name: "a closed row does not make a live one ambiguous",
+			rows4: []fixtureRow{
+				{local: client, remote: server, state: mibTCPStateLastAck, pid: 9999},
+				{local: client, remote: server, state: estab, pid: 1234},
+			},
+			want: 1234,
+		},
+		{
+			name:  "CLOSE_WAIT is still held by the client (the collector closed first)",
+			rows4: []fixtureRow{{local: client, remote: server, state: 8, pid: 1234}},
+			want:  1234,
+		},
+		{
 			name:  "PID 0 is nobody",
 			rows4: []fixtureRow{{local: client, remote: server, state: estab, pid: 0}},
 			err:   ErrNotFound,

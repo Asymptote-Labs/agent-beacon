@@ -38,6 +38,10 @@ const (
 
 	mibTCPStateClosed    = 1  // MIB_TCP_STATE_CLOSED
 	mibTCPStateListen    = 2  // MIB_TCP_STATE_LISTEN
+	mibTCPStateFinWait1  = 6  // MIB_TCP_STATE_FIN_WAIT1
+	mibTCPStateFinWait2  = 7  // MIB_TCP_STATE_FIN_WAIT2
+	mibTCPStateClosing   = 9  // MIB_TCP_STATE_CLOSING
+	mibTCPStateLastAck   = 10 // MIB_TCP_STATE_LAST_ACK
 	mibTCPStateTimeWait  = 11 // MIB_TCP_STATE_TIME_WAIT
 	mibTCPStateDeleteTCB = 12 // MIB_TCP_STATE_DELETE_TCB
 
@@ -95,7 +99,14 @@ func tcpTable6Rows(buf []byte) ([]tcpOwnerRow, error) {
 // ownerPID finds the process that owns the client end of client -> server among rows: the row whose
 // local end is client and remote end is server. Rows nobody owns any more are passed over (TIME_WAIT
 // and the like report PID 0), as is one owned by the System process (PID 4), whose token names
-// SYSTEM rather than whoever caused the connection. Two rows with different owners are ambiguous;
+// SYSTEM rather than whoever caused the connection.
+//
+// So is a client end that has already been closed: FIN_WAIT1, FIN_WAIT2, CLOSING and LAST_ACK are
+// the states a socket reaches only after its own side closed it. Windows can keep the PID of a
+// process that has exited on such an orphaned row, and once that PID is handed to another process
+// the re-read in lookupUID would still match and name the new process's account. A client that is
+// still sending its export has not closed its end, so these are never the answer (the macOS
+// equivalent is the SS_NOFDREF skip). Two rows with different owners are ambiguous;
 // none is not found.
 func ownerPID(rows []tcpOwnerRow, client, server *net.TCPAddr) (uint32, error) {
 	var found uint32
@@ -106,7 +117,8 @@ func ownerPID(rows []tcpOwnerRow, client, server *net.TCPAddr) (uint32, error) {
 			continue
 		}
 		switch row.state {
-		case mibTCPStateClosed, mibTCPStateListen, mibTCPStateTimeWait, mibTCPStateDeleteTCB:
+		case mibTCPStateClosed, mibTCPStateListen, mibTCPStateTimeWait, mibTCPStateDeleteTCB,
+			mibTCPStateFinWait1, mibTCPStateFinWait2, mibTCPStateClosing, mibTCPStateLastAck:
 			continue
 		}
 		if row.pid == pidSystemIdle || row.pid == pidSystem {
