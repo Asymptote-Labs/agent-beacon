@@ -146,8 +146,8 @@ describe('chrome self-hosted build', () => {
     // Chrome derives the ID from the CRX signing key, and every fleet's force-install policy names
     // it. Changing it means a new key, a new extension, and rewriting every policy, so this
     // assertion is deliberately a literal.
-    // Fails until the production signing key's ID is pinned here, so a placeholder cannot merge.
     expect(CHROME_EXTENSION_ID).toMatch(/^[a-p]{32}$/);
+    expect(CHROME_EXTENSION_ID).toBe('omjgmakjpomopmmpdgmjbfojhbgdgijc');
   });
 
   it('points installed copies at the update feed the release workflow publishes', () => {

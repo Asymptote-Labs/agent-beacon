@@ -27,7 +27,7 @@ export const GECKO_ID = 'browser-collector@agent-beacon.asymptotelabs.ai';
  * extension, and every fleet would have to rewrite its policy. The release
  * workflow refuses to publish a CRX whose ID differs.
  */
-export const CHROME_EXTENSION_ID = 'PENDING_SIGNING_KEY';
+export const CHROME_EXTENSION_ID = 'omjgmakjpomopmmpdgmjbfojhbgdgijc';
 
 /**
  * Where an installed copy checks for new versions (`update_url` in
