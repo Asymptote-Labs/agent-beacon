@@ -2,18 +2,21 @@ name: Release
 
 # Full hands-off release on a pushed v* tag:
 #   1. goreleaser  — builds tarballs, publishes the GitHub release + changelog,
-#                    and updates the Homebrew tap. Signs the .deb/.rpm and
-#                    checksums.txt when the Linux signing key secret exists.
+#                    updates the Homebrew tap, and attests the .deb files it built. Signs the
+#                    .deb/.rpm and checksums.txt when the Linux signing key secret exists.
 #   2. package     — (after goreleaser) builds, signs, notarizes, and staples the
 #                    macOS .pkg for both arches and attaches them plus the
 #                    package update manifest to the same release.
 #   3. windows-package — (after goreleaser) builds the Windows MSI from the archive and the pinned Vector
 #                    goreleaser just published, installs it to prove it works, and
 #                    attaches it.
-#   4. finalize    — (after all three) adds the .pkg, .msi and install.sh to checksums.txt and
-#                    records a GitHub build-provenance attestation for every file
-#                    checksums.txt lists. Re-signs the extended checksums.txt when
-#                    the Linux signing key secret exists.
+#   4. finalize    — (after goreleaser, package and windows-package) adds the .pkg, .msi and
+#                    install.sh to checksums.txt and records a GitHub build-provenance
+#                    attestation for every file checksums.txt lists. Re-signs the extended
+#                    checksums.txt when the Linux signing key secret exists.
+#   5. apt-repository — (after goreleaser) adds the released .deb files, each checked against
+#                    goreleaser's attestation, to the signed apt repository in object storage. Skipped
+#                    until its APT_* secrets and variables are configured.
 #
 # Windows binaries and the MSI are Authenticode-signed through Azure Trusted Signing when the
 # AZURE_TRUSTED_SIGNING_* variables are set, and ship unsigned otherwise. Signing always happens
@@ -38,7 +41,9 @@ jobs:
     environment: release
     permissions:
       contents: write
+      # Azure sign-in for Authenticode, and "Attest the Linux packages goreleaser built", below.
       id-token: write
+      attestations: write
     env:
       AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ vars.AZURE_TRUSTED_SIGNING_ENDPOINT }}
       AZURE_TRUSTED_SIGNING_ACCOUNT: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT }}
@@ -161,6 +166,24 @@ jobs:
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
           GORELEASER_PREVIOUS_TAG: ${{ steps.tags.outputs.previous }}
         run: goreleaser release --clean --parallelism 1 ${BEACON_GORELEASER_SKIP:-}
+
+      # The apt repository signs only packages this attests: goreleaser's own output, hashed here
+      # from dist/ in the release-environment job that built it, never from the release. Its
+      # predicate type is this repository's own, which finalize never writes. finalize re-hashes
+      # the release's assets, which anyone who can edit a release can swap together with
+      # checksums.txt, and its job can be re-run without approval; so an attestation from it
+      # proves only what the release held when it ran. The apt job asks for this predicate type.
+      #
+      # Non-fatal: the release is already published by now, and a failure here (a Sigstore or
+      # attestation API error) must not skip the .pkg, MSI and finalize, which need this job to
+      # succeed. Without the attestation the apt job refuses this tag's packages and fails alone.
+      - name: Attest the Linux packages goreleaser built
+        continue-on-error: true
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: cli/beacon/dist/*.deb
+          predicate-type: https://github.com/Asymptote-Labs/agent-beacon/attestations/goreleaser-deb/v1
+          predicate: '{"builder":"goreleaser","job":"goreleaser"}'
 
   package:
     needs: goreleaser
@@ -518,13 +541,367 @@ jobs:
           & gh release upload $env:TAG (Get-ChildItem dist\windows -Filter '*.msi').FullName (Get-ChildItem dist\windows -Filter '*.msi.sha256').FullName --repo $env:REPO --clobber
           if ($LASTEXITCODE -ne 0) { throw "uploading the MSI failed" }
 
+  # The signed apt repository (`deb https://<APT_REPO_URL> stable main`), so Debian and Ubuntu hosts
+  # can `apt install beacon` and get upgrades with `apt upgrade`.
+  #
+  # The .deb files are 85-90 MB each, past what a git-backed GitHub Pages repository can hold for
+  # long, so the repository lives in an S3-compatible bucket (R2, S3, or GCS through its interop
+  # API) served over HTTPS at APT_REPO_URL. The pool keeps every version; only the index is read
+  # back. packaging/linux/apt/build-apt-repo.sh checks the published index against the committed
+  # public key before re-signing it, so an edited index is never re-signed, and refuses to replace
+  # a version that is already published. An older index this key once signed does pass that check;
+  # the backfill below re-adds any recent release such a rollback dropped.
+  #
+  # The packages are the bytes goreleaser published, checked against the attestation the goreleaser
+  # job made of what it built, not a rebuild.
+  #
+  # Skipped with a notice until every APT_* secret and variable exists, and for prerelease tags,
+  # which do not belong in `stable`. Serialized so two tags cannot race on the index. GitHub
+  # cancels a pending job when a third joins the group, so serializing alone can drop a release;
+  # each run therefore also adds recent releases the index is missing (see "Fetch the released
+  # .deb files"), and a release whose run was cancelled is published by the next one.
+  apt-repository:
+    # After goreleaser, whose attestation of the packages it built every package is checked against
+    # before it is signed into the index. Not after finalize: its attestations hash the release's
+    # replaceable assets, so the apt repository does not rely on them.
+    needs: goreleaser
+    if: ${{ !cancelled() && needs.goreleaser.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: read
+    environment: release
+    timeout-minutes: 30
+    concurrency:
+      group: apt-repository
+      cancel-in-progress: false
+    env:
+      REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.APT_S3_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.APT_S3_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ vars.APT_S3_REGION || 'us-east-1' }}
+      # R2 and GCS interop do not accept the CRC checksums newer AWS CLIs send by default.
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+      APT_S3_BUCKET: ${{ vars.APT_S3_BUCKET }}
+      APT_S3_ENDPOINT: ${{ vars.APT_S3_ENDPOINT }}
+      APT_REPO_URL: ${{ vars.APT_REPO_URL }}
+      KEYRING_ASC: packaging/linux/apt/beacon-archive-keyring.asc
+      # Written only by the goreleaser job's attestation of what it built (see that step).
+      APT_DEB_PREDICATE: https://github.com/Asymptote-Labs/agent-beacon/attestations/goreleaser-deb/v1
+      # How many recent stable releases each run checks for and adds when the index lacks them.
+      APT_BACKFILL_RELEASES: 10
+    steps:
+      - name: Decide whether to publish
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=""
+          for name in APT_GPG_PRIVATE_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY APT_S3_BUCKET APT_REPO_URL; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::notice title=apt repository skipped::not configured (missing:$missing). The release is unaffected."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "$TAG" in
+            *-*)
+              echo "::notice title=apt repository skipped::$TAG is a prerelease; only releases go to the stable suite."
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+          case "$APT_REPO_URL" in
+            https://*) ;;
+            *) echo "APT_REPO_URL must be https://" >&2; exit 1 ;;
+          esac
+          # Set only when present: the AWS CLI treats an empty AWS_ENDPOINT_URL as an endpoint.
+          if [ -n "$APT_S3_ENDPOINT" ]; then
+            echo "AWS_ENDPOINT_URL=$APT_S3_ENDPOINT" >> "$GITHUB_ENV"
+          fi
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
+      # Full history and tags: every package is trusted only when its tag's commit is an ancestor
+      # of this run's commit (see "Fetch the released .deb files").
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.gate.outputs.publish == 'true'
+        with:
+          fetch-depth: 0
+
+      - name: Install apt repository tools
+        if: steps.gate.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq apt-utils dpkg-dev gnupg
+          aws --version
+
+      # The keyring users install is built from the committed public key file, never exported from
+      # the secret, and build-apt-repo.sh fails unless every key in the secret is in that file and
+      # signed. Rotating the key is therefore a reviewed commit, not only a secret edit, in two steps:
+      #   1. Commit the new public key beside the old one in beacon-archive-keyring.asc and put both
+      #      secret keys in APT_GPG_PRIVATE_KEY. Every release then signs the index with both, so
+      #      hosts that trust only the old key keep updating, and the published keyring carries
+      #      both keys for hosts to fetch again.
+      #   2. Once hosts have the new keyring, remove the old key from the file and the secret.
+      #      A host that never fetched it fails `apt update` from then on: hosts install the
+      #      keyring once and the package does not ship it, so step 1 must last long enough.
+      # The published index is checked against every key in the file, and a signature from a key
+      # no longer in it is ignored, so each step accepts the index the previous one signed.
+      - name: Import the signing keys
+        if: steps.gate.outputs.publish == 'true'
+        id: key
+        run: |
+          set -euo pipefail
+          [ -f "$KEYRING_ASC" ] || { echo "$KEYRING_ASC is not committed; commit the public key before configuring APT_GPG_PRIVATE_KEY" >&2; exit 1; }
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -m 0700 "$GNUPGHOME"
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+          printf '%s\n' "$APT_GPG_PRIVATE_KEY" | gpg --batch --quiet --import
+          # Sign with every key the secret holds, not the keys in the committed file: during step 2
+          # of a rotation the file may still be catching up, and a key in the file without its
+          # secret cannot sign.
+          secret="$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "sec" { want = 1; next } want && $1 == "fpr" { print $10; want = 0 }')"
+          [ -n "$secret" ] || { echo "APT_GPG_PRIVATE_KEY holds no secret key" >&2; exit 1; }
+          committed="$(gpg --batch --with-colons --show-keys "$KEYRING_ASC" | awk -F: '$1 == "pub" { want = 1; next } want && $1 == "fpr" { print $10; want = 0 }')"
+          [ -n "$committed" ] || { echo "no key in $KEYRING_ASC" >&2; exit 1; }
+          for fpr in $secret; do
+            printf '%s\n' "$committed" | grep -qxF "$fpr" \
+              || { echo "the key $fpr in APT_GPG_PRIVATE_KEY is not in $KEYRING_ASC; commit its public key first" >&2; exit 1; }
+          done
+          gpg --batch --quiet --import "$KEYRING_ASC"
+          # shellcheck disable=SC2086 # one fingerprint per word
+          gpg --batch --export $committed > "$RUNNER_TEMP/beacon-archive-keyring.gpg"
+          echo "fingerprints=$(printf '%s\n' "$secret" | paste -sd' ')" >> "$GITHUB_OUTPUT"
+          echo "signing with: $(printf '%s\n' "$secret" | paste -sd' '); trusted keys: $(printf '%s\n' "$committed" | paste -sd' ')"
+
+      # Only the signed index is read back. A missing InRelease is the first publish (or a first
+      # publish that stopped before writing it, which this resumes); any other error fails the job
+      # rather than starting the repository over. Checking InRelease itself rather than listing
+      # the prefix keeps the answer independent of pagination.
+      #
+      # Each Packages file is read through the by-hash path that InRelease names, never the plain
+      # path: by-hash copies are written before InRelease and never replaced, so a publish that
+      # stopped partway (plain Packages already new, InRelease still old) leaves them consistent.
+      # build-apt-repo.sh checks the signature and these hashes.
+      - name: Fetch the published index
+        if: steps.gate.outputs.publish == 'true'
+        id: existing
+        run: |
+          set -euo pipefail
+          if ! aws s3api head-object --bucket "$APT_S3_BUCKET" --key dists/stable/InRelease >/dev/null 2>"$RUNNER_TEMP/head.err"; then
+            if grep -q '(404)' "$RUNNER_TEMP/head.err"; then
+              echo "::notice::the bucket has no published InRelease; this is the first publish"
+              echo "dir=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            cat "$RUNNER_TEMP/head.err" >&2
+            echo "could not check dists/stable/InRelease" >&2
+            exit 1
+          fi
+          dir="$RUNNER_TEMP/apt-existing"
+          aws s3 cp --no-progress "s3://$APT_S3_BUCKET/dists/stable/InRelease" "$dir/InRelease"
+          for arch in amd64 arm64; do
+            rel="main/binary-$arch/Packages"
+            want="$(awk -v rel="$rel" '/^[^ ]/ { in_sha = ($0 == "SHA256:"); next } in_sha && $3 == rel { print $1 }' "$dir/InRelease")"
+            # An architecture added after the first publish has no index yet.
+            [ -n "$want" ] || continue
+            case "$want" in *[!0-9a-f]*) echo "malformed SHA256 for $rel in InRelease" >&2; exit 1 ;; esac
+            aws s3 cp --no-progress "s3://$APT_S3_BUCKET/dists/stable/main/binary-$arch/by-hash/SHA256/$want" "$dir/$rel"
+          done
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+
+      # This tag's packages, plus those of any of the last APT_BACKFILL_RELEASES stable releases up
+      # to this one that the index lacks. A concurrency group keeps one job running and one
+      # pending, and cancels the pending one when a third tag arrives, so a release tagged close to
+      # two others can lose its run; the next run adds it. The same repairs a first publish that
+      # stopped partway and an index rolled back in the bucket, within the window.
+      - name: Fetch the released .deb files
+        if: steps.gate.outputs.publish == 'true'
+        env:
+          VERSION: ${{ steps.gate.outputs.version }}
+          EXISTING: ${{ steps.existing.outputs.dir }}
+        run: |
+          set -euo pipefail
+          published() {
+            [ -n "$EXISTING" ] && [ -f "$EXISTING/main/binary-$2/Packages" ] || return 1
+            awk -v v="$1" '
+              BEGIN { RS = "" }
+              {
+                p = ver = ""
+                n = split($0, line, "\n")
+                for (i = 1; i <= n; i++) {
+                  if (line[i] ~ /^Package: /) p = substr(line[i], 10)
+                  else if (line[i] ~ /^Version: /) ver = substr(line[i], 10)
+                }
+                if (p == "beacon" && ver == v) found = 1
+              }
+              END { exit !found }' "$EXISTING/main/binary-$2/Packages"
+          }
+          # fetch TAG MODE ARCH... -- downloads TAG's .debs for ARCH into dist/apt-debs/TAG. Each must
+          # carry the attestation the goreleaser job made of the bytes it built
+          # ($APT_DEB_PREDICATE), from this repository's release workflow at refs/tags/TAG: not
+          # checksums.txt, which anyone who can edit a release can replace together with the .deb,
+          # and not finalize's provenance, which re-hashes those same replaceable assets (see the
+          # goreleaser job's attest step). Its control fields must also name beacon,
+          # TAG's version and ARCH, since build-apt-repo.sh indexes a package by what it says
+          # about itself. This tag's packages (MODE required) must pass; a backfilled release whose
+          # package has no such attestation (one from before this check, or a replaced asset) is
+          # left out with a warning. A package that is attested but misnamed fails the job.
+          #
+          # The workflow path and ref alone are not enough: anyone who can push a v* tag can run
+          # their own release.yml at that tag (one that attests from a job outside the release
+          # environment, or attests anything) and so mint a matching attestation. So TAG's commit must be an ancestor of this run's commit,
+          # the history this release was built from, and the attestation must name that commit as
+          # both its source and its signer workflow's commit. A tag on a side commit, or one moved
+          # since its package was attested, is not trusted. This run's own commit is the trust
+          # root, as it already is for everything else this job signs.
+          fetch() {
+            tag="$1" mode="$2" version="${1#v}" dir="dist/apt-debs/$1"
+            shift 2
+            if ! commit="$(git rev-parse --verify --quiet "refs/tags/$tag^{commit}")" \
+              || ! git merge-base --is-ancestor "$commit" "$GITHUB_SHA"; then
+              if [ "$mode" = required ]; then
+                echo "$tag does not resolve to a commit in the history of $GITHUB_SHA" >&2
+                exit 1
+              fi
+              echo "::warning title=apt repository::$tag is not in the history of this release ($GITHUB_SHA); its packages are not published"
+              return 0
+            fi
+            mkdir -p "$dir"
+            for arch in "$@"; do
+              name="beacon_${version}_linux_${arch}.deb"
+              deb="$dir/$name"
+              gh release download "$tag" --repo "$REPO" --dir "$dir" --pattern "$name"
+              if ! gh attestation verify "$deb" --repo "$REPO" \
+                --signer-workflow "$REPO/.github/workflows/release.yml" --source-ref "refs/tags/$tag" \
+                --source-digest "$commit" --signer-digest "$commit" --predicate-type "$APT_DEB_PREDICATE" \
+                --deny-self-hosted-runners > "$RUNNER_TEMP/attestation.log" 2>&1; then
+                cat "$RUNNER_TEMP/attestation.log" >&2
+                if [ "$mode" = required ]; then
+                  echo "$name has no attestation from the goreleaser job of $REPO's release workflow at $tag ($commit)" >&2
+                  exit 1
+                fi
+                echo "::warning title=apt repository::$name has no attestation from the goreleaser job of the release workflow at $tag ($commit); it is not published"
+                rm -f "$deb"
+                continue
+              fi
+              for field in "Package=beacon" "Version=$version" "Architecture=$arch"; do
+                got="$(dpkg-deb -f "$deb" "${field%%=*}")"
+                [ "$got" = "${field#*=}" ] \
+                  || { echo "$name from $tag declares ${field%%=*} '$got', expected '${field#*=}'" >&2; exit 1; }
+              done
+            done
+            rmdir "$dir" 2>/dev/null || true
+          }
+          # This tag's packages are always fetched, so a rerun checks them against the index again.
+          fetch "$TAG" required amd64 arm64
+          tags="$(gh release list --repo "$REPO" --exclude-drafts --exclude-pre-releases --limit 200 \
+            --json tagName --jq '.[].tagName' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)"
+          # Releases up to this one only: a newer tag's assets may still be uploading.
+          window="$(printf '%s\n%s\n' "$tags" "$TAG" | grep -v '^$' | sort -uV \
+            | awk -v cur="$TAG" '{ print } $0 == cur { exit }' | tail -n "$APT_BACKFILL_RELEASES")"
+          for tag in $window; do
+            [ "$tag" = "$TAG" ] && continue
+            assets="$(gh release view "$tag" --repo "$REPO" --json assets --jq '.assets[].name')"
+            missing=""
+            for arch in amd64 arm64; do
+              # Only what the release has: one without a .deb for an architecture is not retried.
+              printf '%s\n' "$assets" | grep -qxF "beacon_${tag#v}_linux_${arch}.deb" || continue
+              published "${tag#v}" "$arch" || missing="$missing $arch"
+            done
+            [ -n "$missing" ] || continue
+            echo "::notice::$tag is missing from the apt repository for$missing; adding it"
+            # shellcheck disable=SC2086 # one architecture per word
+            fetch "$tag" optional $missing
+          done
+
+      - name: Build and sign the repository update
+        if: steps.gate.outputs.publish == 'true'
+        env:
+          FINGERPRINTS: ${{ steps.key.outputs.fingerprints }}
+          EXISTING: ${{ steps.existing.outputs.dir }}
+        run: |
+          set -euo pipefail
+          set -- --out dist/apt-repo --keyring "$RUNNER_TEMP/beacon-archive-keyring.gpg"
+          for fpr in $FINGERPRINTS; do
+            set -- "$@" --signing-key "$fpr"
+          done
+          if [ -n "$EXISTING" ]; then
+            set -- "$@" --existing "$EXISTING"
+          fi
+          sh packaging/linux/apt/build-apt-repo.sh "$@" dist/apt-debs/*/beacon_*.deb
+          cp "$KEYRING_ASC" dist/apt-repo/beacon-archive-keyring.asc
+          cp "$RUNNER_TEMP/beacon-archive-keyring.gpg" dist/apt-repo/beacon-archive-keyring.gpg
+
+      # Checks what this run stages, not this tag's version: the staged pool holds only packages the
+      # index lacked, which on a rerun or after a partial publish need not include this tag's own,
+      # and may include backfilled releases. The check against the public URL below covers $VERSION.
+      - name: Check the update with apt before publishing
+        if: steps.gate.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          url="file:$PWD/dist/apt-repo"
+          keyring="$RUNNER_TEMP/beacon-archive-keyring.gpg"
+          sh packaging/linux/apt/verify-apt-repo.sh "$url" "$keyring" -
+          find dist/apt-repo/pool -name '*.deb' 2>/dev/null | sort > "$RUNNER_TEMP/staged"
+          if [ ! -s "$RUNNER_TEMP/staged" ]; then
+            echo "::notice::every package is already in the apt repository; only the index is republished"
+            exit 0
+          fi
+          while read -r deb; do
+            APT_VERIFY_ARCHES="$(dpkg-deb -f "$deb" Architecture)" \
+              sh packaging/linux/apt/verify-apt-repo.sh "$url" "$keyring" "$(dpkg-deb -f "$deb" Version)" < /dev/null
+          done < "$RUNNER_TEMP/staged"
+
+      # Order matters: packages, then index files, then the signed Release files with InRelease
+      # last, so no client is pointed at a file that is not there yet. Packages are immutable and
+      # cached for a year; everything under dists/ and the keyring is revalidated on every request.
+      - name: Publish to the bucket
+        if: steps.gate.outputs.publish == 'true'
+        working-directory: dist/apt-repo
+        run: |
+          set -euo pipefail
+          bucket="s3://$APT_S3_BUCKET"
+          if [ -d pool ]; then
+            aws s3 cp --no-progress --recursive pool "$bucket/pool" \
+              --content-type application/vnd.debian.binary-package \
+              --cache-control 'public, max-age=31536000, immutable'
+          fi
+          aws s3 cp --no-progress --recursive dists/stable/main "$bucket/dists/stable/main" \
+            --cache-control 'no-cache'
+          for f in beacon-archive-keyring.asc beacon-archive-keyring.gpg; do
+            aws s3 cp --no-progress "$f" "$bucket/$f" --cache-control 'no-cache'
+          done
+          for f in Release.gpg Release InRelease; do
+            aws s3 cp --no-progress "dists/stable/$f" "$bucket/dists/stable/$f" \
+              --content-type text/plain --cache-control 'no-cache'
+          done
+
+      - name: Check the published repository with apt
+        if: steps.gate.outputs.publish == 'true'
+        env:
+          VERSION: ${{ steps.gate.outputs.version }}
+        run: |
+          set -euo pipefail
+          sh packaging/linux/apt/verify-apt-repo.sh "${APT_REPO_URL%/}" \
+            "$RUNNER_TEMP/beacon-archive-keyring.gpg" "$VERSION"
+
   # One checksums.txt for everything a user installs, and signed provenance for all of it.
   #
   # goreleaser writes checksums.txt before the .pkg and .msi exist, so they are appended here from the
   # bytes on the release. The attestation is a Sigstore-signed statement, made with this workflow's
   # OIDC identity, that this repository's release workflow built each file at this tag; anyone can
   # check a download with `gh attestation verify <file> --repo Asymptote-Labs/agent-beacon`. Unlike
-  # checksums.txt, it cannot be replaced by someone who can only edit the release.
+  # checksums.txt, it cannot be replaced by someone who can only edit the release. It does hash the
+  # release's assets as they are when this job runs, though, so it vouches for what the release
+  # held then; the apt repository relies on the goreleaser job's attestation of its own output.
   #
   # Runs when goreleaser succeeded even if a packaging job failed, so the archives and Linux packages
   # are still covered; a missing .pkg or .msi is simply not appended.
