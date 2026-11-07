@@ -31,6 +31,48 @@ func TestBuildConfigWithoutAnExistingConfigHasTheDashboardOn(t *testing.T) {
 	}
 }
 
+// A hand-written value --dashboard refuses is carried as disabled, how the dashboard reads it,
+// rather than raw into a preflight that would fail every repair and package upgrade.
+func TestCarriedDashboard(t *testing.T) {
+	for in, want := range map[string]string{
+		"": "", "enabled": "enabled", " Disabled ": "disabled", "off": "disabled", "no": "disabled",
+	} {
+		if got := carriedDashboard(in); got != want {
+			t.Errorf("carriedDashboard(%q) = %q, want %q", in, got, want)
+		}
+		if err := validateDashboard(endpointconfig.Config{Dashboard: carriedDashboard(in)}); err != nil {
+			t.Errorf("carried %q fails preflight: %v", in, err)
+		}
+	}
+	testenv.SetHome(t, t.TempDir())
+	writeInventoryConfig(t, true, `{"user_mode":true,"log_path":"/tmp/runtime.jsonl","dashboard":"off"}`)
+	if cfg := buildConfig(InstallOptions{UserMode: true}); cfg.Dashboard != endpointconfig.DashboardDisabled {
+		t.Fatalf("Dashboard = %q, want a hand-written \"off\" carried as disabled", cfg.Dashboard)
+	}
+}
+
+// Repairing a system config that no longer loads must not turn the dashboard back on: the marker
+// beside it still records the switch.
+func TestBuildConfigKeepsTheDashboardOffWhenTheSystemConfigDoesNotLoad(t *testing.T) {
+	prevMarked, prevRestricted := systemDashboardMarked, logIsRestricted
+	t.Cleanup(func() { systemDashboardMarked, logIsRestricted = prevMarked, prevRestricted })
+	logIsRestricted = func(string) bool { return false }
+	if _, err := endpointconfig.Load(false); err == nil {
+		t.Skip("this machine has a loadable system config")
+	}
+	systemDashboardMarked = func() bool { return true }
+	if cfg := buildConfig(InstallOptions{}); cfg.Dashboard != endpointconfig.DashboardDisabled {
+		t.Fatalf("Dashboard = %q, want disabled from the marker", cfg.Dashboard)
+	}
+	if cfg := buildConfig(InstallOptions{Dashboard: endpointconfig.DashboardEnabled}); cfg.Dashboard != endpointconfig.DashboardEnabled {
+		t.Fatalf("Dashboard = %q, want the explicit --dashboard enabled to win", cfg.Dashboard)
+	}
+	systemDashboardMarked = func() bool { return false }
+	if cfg := buildConfig(InstallOptions{}); cfg.Dashboard != "" {
+		t.Fatalf("Dashboard = %q, want unset without a marker", cfg.Dashboard)
+	}
+}
+
 func TestValidateDashboard(t *testing.T) {
 	for _, mode := range []string{"", "enabled", "disabled", "Disabled"} {
 		if err := validateDashboard(endpointconfig.Config{Dashboard: mode}); err != nil {

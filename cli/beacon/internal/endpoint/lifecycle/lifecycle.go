@@ -991,6 +991,9 @@ func Uninstall(opts UninstallOptions) error {
 		fail("remove "+cfg.Collector.ConfigPath, os.Remove(cfg.Collector.ConfigPath))
 		if !opts.KeepManagedIngest {
 			fail("remove endpoint config", os.Remove(endpointConfigPath))
+			// The marker records the config's dashboard switch; left behind, a later install's
+			// buildConfig would read it as the switch of a config that no longer exists.
+			fail("remove the dashboard switch marker", os.Remove(endpointconfig.DashboardMarkerPath(endpointConfigPath)))
 		}
 	}
 	// The forward's header values are a credential, so they go with config.json whether or not the
@@ -1222,6 +1225,25 @@ func buildStatus(requestedUserMode bool, effectiveCfg endpointconfig.Config, run
 	}
 }
 
+// carriedDashboard is the dashboard switch a repair or upgrade keeps from the existing config. A
+// value --dashboard would refuse (one written into config.json by hand, such as "off") is kept as
+// disabled, which is how the dashboard already reads it, rather than carried raw into a preflight
+// that would then fail every repair and package upgrade over a flag nobody passed.
+func carriedDashboard(value string) string {
+	mode, err := endpointconfig.ParseDashboardMode(value)
+	if err != nil {
+		return endpointconfig.DashboardDisabled
+	}
+	return mode
+}
+
+// systemDashboardMarked reports whether the disabled-dashboard marker sits beside the system config.
+// A variable so tests need not write to the system config directory.
+var systemDashboardMarked = func() bool {
+	_, err := os.Stat(endpointconfig.DashboardMarkerPath(endpointconfig.SystemConfigPath()))
+	return err == nil
+}
+
 // systemDashboardDisabled is the seam status reads the administrator's dashboard switch through.
 var systemDashboardDisabled = endpointconfig.SystemDashboardDisabled
 
@@ -1319,12 +1341,19 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 		// it would silently make a restricted log world-writable again.
 		cfg.LogAccess = existing.LogAccess
 		// The dashboard switch is an administrator's choice too; an upgrade must not turn it back on.
-		cfg.Dashboard = existing.Dashboard
-	} else if !opts.UserMode && logIsRestricted(cfg.LogPath) {
-		// No config to carry the mode over from -- an uninstall with --keep-logs removed it, or it
-		// does not load -- but the root-owned marker beside the kept log still records restricted.
-		// Defaulting to shared here would make every kept event world-readable.
-		cfg.LogAccess = asymptoteobserve.LogAccessRestricted
+		cfg.Dashboard = carriedDashboard(existing.Dashboard)
+	} else if !opts.UserMode {
+		if logIsRestricted(cfg.LogPath) {
+			// No config to carry the mode over from -- an uninstall with --keep-logs removed it, or it
+			// does not load -- but the root-owned marker beside the kept log still records restricted.
+			// Defaulting to shared here would make every kept event world-readable.
+			cfg.LogAccess = asymptoteobserve.LogAccessRestricted
+		}
+		if systemDashboardMarked() {
+			// Likewise a config that no longer loads still has the dashboard marker beside it, so a
+			// repair of a damaged file keeps the dashboard off instead of turning it back on.
+			cfg.Dashboard = endpointconfig.DashboardDisabled
+		}
 	}
 	if opts.LogAccess != "" {
 		cfg.LogAccess = opts.LogAccess

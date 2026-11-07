@@ -145,28 +145,56 @@ func ParseDashboardMode(value string) (string, error) {
 	}
 }
 
-// DashboardMode is the setting this config records, with empty read as enabled.
+// DashboardMode is the setting this config records. Empty and "enabled" read as enabled; any other
+// value, including one written by hand that --dashboard would refuse ("off", "no"), reads as
+// disabled, so a mistyped switch fails closed rather than leaving the dashboard on.
 func (c Config) DashboardMode() string {
-	if strings.EqualFold(strings.TrimSpace(c.Dashboard), DashboardDisabled) {
+	switch strings.ToLower(strings.TrimSpace(c.Dashboard)) {
+	case "", DashboardEnabled:
+		return DashboardEnabled
+	default:
 		return DashboardDisabled
 	}
-	return DashboardEnabled
+}
+
+// dashboardDisabledMarker is the file, beside the system config, that records a disabled dashboard
+// for the accounts that cannot read config.json itself: Save makes config.json readable only by root
+// (SYSTEM and Administrators on Windows) once it holds a Splunk or Falcon HEC token, and the switch
+// has to reach exactly those ordinary accounts. It holds no secret, so it is readable by everyone,
+// and it lives in the root-owned system config directory, so no one else can create or remove it.
+const dashboardDisabledMarker = "dashboard-disabled"
+
+// DashboardMarkerPath is the disabled-dashboard marker that goes with the config file at configPath.
+func DashboardMarkerPath(configPath string) string {
+	return filepath.Join(filepath.Dir(configPath), dashboardDisabledMarker)
 }
 
 // SystemDashboardDisabled reports whether the system config turns the local dashboard off for
 // everyone on this machine. A machine without a system config (a user-mode endpoint) has it on.
-// The system config is readable by every account, which already reads it to find the system log.
 func SystemDashboardDisabled() (bool, error) {
 	return DashboardDisabledAt(SystemConfigPath())
 }
 
-// DashboardDisabledAt is SystemDashboardDisabled for the config file at path. Only a missing file
-// means enabled: a config that exists but cannot be read or parsed is an error, so a broken or
-// unreadable file never silently turns the administrator's switch back on.
+// DashboardDisabledAt is SystemDashboardDisabled for the config file at path. The config decides
+// when it can be read. When it exists but this account may not read it (it holds a HEC token, so
+// it is root-only), the marker Save keeps beside it decides instead. A missing config means enabled;
+// one that does not parse, or a marker whose presence cannot be checked, is an error, so a broken
+// file never silently turns the administrator's switch back on.
 func DashboardDisabledAt(path string) (bool, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
+	}
+	if errors.Is(err, os.ErrPermission) {
+		_, markerErr := os.Stat(DashboardMarkerPath(path))
+		switch {
+		case markerErr == nil:
+			return true, nil
+		case errors.Is(markerErr, os.ErrNotExist):
+			return false, nil
+		default:
+			return false, fmt.Errorf("check %s: %w", DashboardMarkerPath(path), markerErr)
+		}
 	}
 	if err != nil {
 		return false, err
@@ -178,6 +206,19 @@ func DashboardDisabledAt(path string) (bool, error) {
 		return false, fmt.Errorf("parse %s: %w", path, err)
 	}
 	return Config{Dashboard: cfg.Dashboard}.DashboardMode() == DashboardDisabled, nil
+}
+
+// syncDashboardMarker writes the disabled-dashboard marker beside a system config that disables the
+// dashboard, and removes it beside one that does not.
+func syncDashboardMarker(configPath string, disabled bool) error {
+	marker := DashboardMarkerPath(configPath)
+	if disabled {
+		return atomicfile.Write(marker, []byte("The administrator disabled the local Beacon dashboard on this machine (config.json \"dashboard\").\n"), 0644)
+	}
+	if err := os.Remove(marker); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 // RestrictedLogAccess reports whether this endpoint's system log is in the restricted access mode:
@@ -613,10 +654,14 @@ func Save(cfg Config) (string, error) {
 		if err := writeSecretFile(cfg.UserMode, path, data); err != nil {
 			return "", err
 		}
-		return path, nil
-	}
-	if err := atomicfile.Write(path, data, 0644); err != nil {
+	} else if err := atomicfile.Write(path, data, 0644); err != nil {
 		return "", err
+	}
+	// The dashboard switch has to reach accounts that cannot read a root-only config.json.
+	if !cfg.UserMode {
+		if err := syncDashboardMarker(path, cfg.DashboardMode() == DashboardDisabled); err != nil {
+			return "", fmt.Errorf("record the dashboard switch: %w", err)
+		}
 	}
 	return path, nil
 }

@@ -336,11 +336,14 @@ sudo beacon endpoint install --system --dashboard disabled
 The setting is recorded in the system `config.json` as `"dashboard": "disabled"` and kept by
 `beacon endpoint repair`, package upgrades and reinstalls until `--dashboard enabled` turns it back
 on. While it is off, `beacon endpoint dashboard` and `beacon lenses preview` refuse to start for
-everyone, including a user-mode run on the same machine. The check needs no privileges: while the
-switch is off, install also keeps a world-readable `dashboard-disabled` marker beside the system
-config, which answers for accounts that cannot read a root-only config (one holding a HEC token). A
-system config that is readable but does not parse refuses too, and an unrecognized value reads as
-disabled.
+everyone, including a user-mode run on the same machine. The check needs no privileges. Once the
+system config holds a Splunk or Falcon HEC token it is readable only by root (SYSTEM and
+Administrators on Windows), so install and repair also keep a `dashboard-disabled` file beside it
+while the dashboard is off, which every account can read; an account that cannot read
+`config.json` goes by that file. Any value other than `enabled` (or none) reads as disabled, and a
+system config that does not parse refuses too, so a damaged or mistyped setting never turns the
+dashboard back on. If you edit `config.json` by hand, run `beacon endpoint repair --system` so the
+file beside it follows.
 `beacon endpoint status` prints `Dashboard: enabled` or `Dashboard: disabled by the administrator`
 (`dashboard` in `--json`). `--dashboard` is refused in user mode, whose config would switch nothing off.
 
