@@ -7,6 +7,7 @@
 #
 # It publishes two releases in sequence and checks that both stay installable, that a rerun is a
 # no-op, and that a replaced package, a tampered index and the wrong signing key are all refused.
+# It also resumes a publish that stopped before InRelease and rotates the signing key.
 set -eu
 
 HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
@@ -58,14 +59,17 @@ publish() {
   done
 }
 
-# existing -- the copy of the published index the release workflow downloads.
+# existing -- the copy of the published index the release workflow downloads: InRelease, and
+# each Packages file through the by-hash path InRelease names, never the plain path.
 existing() {
   rm -rf "$work/existing"
   mkdir -p "$work/existing/main"
   cp "$work/bucket/dists/stable/InRelease" "$work/existing/"
   for arch in amd64 arm64; do
+    rel="main/binary-$arch/Packages"
+    want="$(awk -v rel="$rel" '/^[^ ]/ { in_sha = ($0 == "SHA256:"); next } in_sha && $3 == rel { print $1 }' "$work/existing/InRelease")"
     mkdir -p "$work/existing/main/binary-$arch"
-    cp "$work/bucket/dists/stable/main/binary-$arch/Packages" "$work/existing/main/binary-$arch/"
+    cp "$work/bucket/dists/stable/main/binary-$arch/by-hash/SHA256/$want" "$work/existing/$rel"
   done
 }
 
@@ -137,7 +141,7 @@ if sh "$BUILD" --out "$work/out6" --keyring "$work/other-keyring.gpg" --signing-
   --existing "$work/existing" "$deb_a3" "$deb_b3" 2>"$work/err6"; then
   fail "an index signed by another key was accepted"
 fi
-grep -q 'not signed by the committed key' "$work/err6" || { cat "$work/err6" >&2; fail "wrong error for another key's index"; }
+grep -q 'not signed by any committed key' "$work/err6" || { cat "$work/err6" >&2; fail "wrong error for another key's index"; }
 pass "an index signed by another key is refused"
 
 # 7. A signing key that is not the committed key is refused before anything is published.
@@ -153,5 +157,47 @@ if sh "$VERIFY" "file:$work/bucket" "$work/other-keyring.gpg" 1.0.1 >/dev/null 2
   fail "a client trusting another key accepted the repository"
 fi
 pass "a client trusting another key refuses the repository"
+
+# 9. A publish that stopped after the index files and before InRelease is resumed: the plain
+#    Packages is already ahead of InRelease, but the by-hash copies InRelease names are not.
+existing
+sh "$BUILD" --out "$work/out9" --keyring "$work/keyring.gpg" --signing-key "$fpr" \
+  --existing "$work/existing" "$deb_a3" "$deb_b3"
+cp -R "$work/out9/pool" "$work/bucket/"
+cp -R "$work/out9/dists/stable/main" "$work/bucket/dists/stable/"
+existing
+sh "$BUILD" --out "$work/out9b" --keyring "$work/keyring.gpg" --signing-key "$fpr" \
+  --existing "$work/existing" "$deb_a3" "$deb_b3"
+publish "$work/out9b"
+for v in 1.0.0 1.0.1 1.0.2; do
+  sh "$VERIFY" "file:$work/bucket" "$work/keyring.gpg" "$v" >/dev/null
+done
+pass "a publish that stopped before InRelease is resumed"
+
+# 10. Key rotation: the committed keyring holds the old and the new key and the new key signs.
+#     The published index the old key signed is still accepted, and clients trusting both or only
+#     the new key accept the result. Several releases merge in one run (a missed release added
+#     by the next one).
+gpg --batch --export "$fpr" "$other_fpr" > "$work/both-keyring.gpg"
+existing
+deb_a4="$(make_deb 1.0.3 amd64)"
+deb_b4="$(make_deb 1.0.3 arm64)"
+deb_a5="$(make_deb 1.0.4 amd64)"
+deb_b5="$(make_deb 1.0.4 arm64)"
+sh "$BUILD" --out "$work/out10" --keyring "$work/both-keyring.gpg" --signing-key "$other_fpr" \
+  --existing "$work/existing" "$deb_a4" "$deb_b4" "$deb_a5" "$deb_b5"
+publish "$work/out10"
+for v in 1.0.0 1.0.3 1.0.4; do
+  sh "$VERIFY" "file:$work/bucket" "$work/both-keyring.gpg" "$v" >/dev/null
+done
+sh "$VERIFY" "file:$work/bucket" "$work/other-keyring.gpg" 1.0.4 >/dev/null
+pass "a rotated key re-signs the old key's index, keeping every version"
+
+existing
+deb_a6="$(make_deb 1.0.5 amd64)"
+deb_b6="$(make_deb 1.0.5 arm64)"
+sh "$BUILD" --out "$work/out11" --keyring "$work/other-keyring.gpg" --signing-key "$other_fpr" \
+  --existing "$work/existing" "$deb_a6" "$deb_b6"
+pass "after a rotation the old key can be removed from the committed keyring"
 
 echo "all apt repository checks passed"

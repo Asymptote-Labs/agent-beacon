@@ -6,9 +6,11 @@
 #
 # The published repository lives in object storage and keeps every version's .deb under pool/, so
 # this script never downloads the pool. It takes the published index instead (--existing: a copy
-# of dists/stable holding InRelease and main/binary-<arch>/Packages), checks that index against
-# the committed public key (--keyring, a binary keyring), adds the new packages to it, and signs
-# the result with --signing-key. Without --existing it starts an empty repository, which is right
+# of dists/stable holding InRelease and main/binary-<arch>/Packages, the latter fetched through the
+# by-hash path InRelease names so a publish that stopped partway still reads consistently), checks
+# that index against the committed public keys (--keyring, a binary keyring that may hold the old
+# and new key during a rotation), adds the new packages to it, and signs the result with
+# --signing-key, which must be one of those keys. Without --existing it starts an empty repository, which is right
 # only for the very first publish.
 #
 # Checking the published index first matters because the result is re-signed: a Packages file
@@ -96,7 +98,7 @@ if [ -n "$existing" ]; then
   [ -f "$existing/InRelease" ] || fail "$existing/InRelease does not exist"
   gpgv --keyring "$keyring" --output "$work/old-Release" "$existing/InRelease" 2>"$work/gpgv.log" || {
     cat "$work/gpgv.log" >&2
-    fail "the published InRelease is not signed by the committed key"
+    fail "the published InRelease is not signed by any committed key"
   }
   for arch in $ARCHES; do
     rel="$COMPONENT/binary-$arch/Packages"

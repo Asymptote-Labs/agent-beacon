@@ -291,10 +291,17 @@ A pushed `v*` tag runs the full release end-to-end via
    released `.deb` files, checked against `checksums.txt`, to the signed apt repository
    (`deb <APT_REPO_URL> stable main`) in an S3-compatible bucket, because 85-90 MB packages
    outgrow a git-backed Pages repo. `packaging/linux/apt/build-apt-repo.sh` reads back only the
-   published index, verifies it against the committed public key
-   `packaging/linux/apt/beacon-archive-keyring.asc` before re-signing (so a bucket edit is never
-   laundered into a valid signature), refuses to replace a published version, and fails unless
-   the secret's key signs for the committed one, so rotating the key is a reviewed commit.
+   published index (InRelease, and each `Packages` through the by-hash path it names, so a
+   publish that stopped partway reads consistently and resumes), verifies it against the
+   committed public keys `packaging/linux/apt/beacon-archive-keyring.asc` before re-signing (so
+   an edited index is never re-signed), refuses to replace a published version, and fails unless
+   the secret's key is one of the committed ones. Rotating the key is a reviewed commit: add the
+   new public key beside the old, replace the secret (the job signs with the key the secret
+   holds), and drop the old key after one release. First publish is decided by a `head-object` on
+   `dists/stable/InRelease` (404 only; any other error fails). Each run adds its own tag plus any
+   of the last `APT_BACKFILL_RELEASES` (10) stable releases up to it that the index lacks, because
+   the `apt-repository` concurrency group cancels a pending job when a third arrives; that also
+   repairs an index rolled back in the bucket within the window.
    `verify-apt-repo.sh` runs a real, isolated `apt-get update`/`download` against the staged
    tree and again against the public URL; CI's `apt-repository` job runs `test-apt-repo.sh`.
    Upload order is pool, index, then `Release.gpg`/`Release`/`InRelease` with `Acquire-By-Hash`.
