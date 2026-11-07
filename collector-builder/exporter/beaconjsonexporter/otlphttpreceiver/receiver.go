@@ -7,7 +7,8 @@
 // (confighttp's parseIP), and the port is what tells one loopback connection from another. This one
 // records the full address, so the beacon_peer processor can ask the kernel which account owns the
 // sending socket, as it already can for gRPC. Beacon renders it in place of the upstream HTTP
-// protocol only where that lookup exists (Linux), so everywhere else nothing changes.
+// protocol only where that lookup exists (Linux, macOS and Windows), so everywhere else nothing
+// changes.
 package otlphttpreceiver
 
 import (

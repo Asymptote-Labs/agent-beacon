@@ -5,7 +5,7 @@ dist:
 
 receivers:
   - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.121.0
-  # OTLP/HTTP that keeps the client's port, so beacon_peer can name the sending account (Linux).
+  # OTLP/HTTP that keeps the client's port, so beacon_peer can name the sending account.
   - gomod: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter v0.0.0
     import: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/otlphttpreceiver
     path: ./exporter/beaconjsonexporter
@@ -44,6 +44,11 @@ extensions:
     path: ./exporter/beaconjsonexporter
   - gomod: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter v0.0.0
     import: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/beaconingestextension
+    path: ./exporter/beaconjsonexporter
+  # A marker no config names: listed by `beacon-otelcol components`, it tells the CLI this
+  # collector's beacon_peer can identify senders on macOS and Windows as well as Linux.
+  - gomod: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter v0.0.0
+    import: github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/peerlookupextension
     path: ./exporter/beaconjsonexporter
 
 replaces:
