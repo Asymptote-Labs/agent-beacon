@@ -1,7 +1,9 @@
 package collector
 
 import (
+	"errors"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -14,17 +16,46 @@ import (
 // TestMain changes it.
 var shippedPeerAttribution = PeerAttribution
 
+// shippedMarkerRequired is peerLookupMarkerRequired as the package sets it for this platform.
+var shippedMarkerRequired = peerLookupMarkerRequired
+
 // The other tests in this package pin the config rendered without peer attribution (a platform with
 // no lookup); the tests below set PeerAttribution themselves.
 func TestMain(m *testing.M) {
 	PeerAttribution = false
+	peerLookupMarkerRequired = false
 	os.Exit(m.Run())
 }
 
+// withPeerAttribution renders peer attribution the way Linux does, for any collector.
 func withPeerAttribution(t *testing.T) {
 	t.Helper()
 	PeerAttribution = true
 	t.Cleanup(func() { PeerAttribution = false })
+}
+
+// withPeerAttributionIfMarked renders it the way macOS and Windows do: only for a collector that
+// lists PeerLookupExtension.
+func withPeerAttributionIfMarked(t *testing.T) {
+	t.Helper()
+	withPeerAttribution(t)
+	peerLookupMarkerRequired = true
+	t.Cleanup(func() { peerLookupMarkerRequired = false })
+}
+
+// fakeCollector is an executable file for cfg.Collector.BinaryPath; what it lists comes from
+// stubComponents.
+func fakeCollector(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "beacon-otelcol")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func rendersPeer(text string) bool {
+	return strings.Contains(text, PeerProcessor) || strings.Contains(text, OTLPHTTPReceiver) || strings.Contains(text, "peer_user")
 }
 
 type renderedConfig struct {
@@ -148,6 +179,112 @@ func TestPeerAttributionIsOnWhereTheLookupExists(t *testing.T) {
 	if shippedPeerAttribution != want {
 		t.Fatalf("PeerAttribution on %s = %v, want %v", runtime.GOOS, shippedPeerAttribution, want)
 	}
+	// Linux collectors have done the lookup since beacon_peer shipped; on macOS and Windows only a
+	// collector that says so does.
+	if wantMarker := runtime.GOOS == "darwin" || runtime.GOOS == "windows"; shippedMarkerRequired != wantMarker {
+		t.Fatalf("peerLookupMarkerRequired on %s = %v, want %v", runtime.GOOS, shippedMarkerRequired, wantMarker)
+	}
+}
+
+// On macOS and Windows a collector from before peer attribution reached them lists beacon_peer and
+// beacon_otlp_http, but its lookup names nobody there. Its config stays the previous one, so OTLP
+// events keep the collector's account instead of losing their user, and install does not require
+// the peer components of it.
+func TestAnOlderCollectorKeepsThePreviousConfigWhereTheMarkerIsRequired(t *testing.T) {
+	withPeerAttributionIfMarked(t)
+	cfg := testConfig(t)
+	cfg.Collector.BinaryPath = fakeCollector(t)
+
+	stubComponents(t, peerComponents, nil) // beacon_peer and beacon_otlp_http, no marker
+	if PeerAttributionFor(cfg.Collector.BinaryPath) {
+		t.Fatal("PeerAttributionFor an unmarked collector = true")
+	}
+	text := ConfigYAML(cfg)
+	if rendersPeer(text) {
+		t.Fatalf("config for an unmarked collector renders peer attribution:\n%s", text)
+	}
+	if text != ConfigYAMLWithPeer(cfg, false) {
+		t.Fatalf("config for an unmarked collector differs from the previous config:\n%s", text)
+	}
+	if err := WriteConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if written, err := os.ReadFile(cfg.Collector.ConfigPath); err != nil || rendersPeer(string(written)) {
+		t.Fatalf("WriteConfig wrote peer attribution for an unmarked collector (%v):\n%s", err, written)
+	}
+	if err := CheckComponents(cfg.Collector.BinaryPath); err != nil {
+		t.Fatalf("CheckComponents = %v, want an unmarked collector accepted", err)
+	}
+	// Even one without the peer components at all: the config it gets does not name them.
+	stubComponents(t, strings.Replace(strings.Replace(peerComponents, "    - name: beacon_peer\n", "", 1), "    - name: beacon_otlp_http\n", "", 1), nil)
+	if err := CheckComponents(cfg.Collector.BinaryPath); err != nil {
+		t.Fatalf("CheckComponents = %v; a collector that gets no peer attribution needs neither component", err)
+	}
+	if rendersPeer(ConfigYAML(cfg)) {
+		t.Fatal("config renders peer attribution for a collector without its components")
+	}
+
+	// A collector that cannot list its components is not judged, and gets the previous config.
+	stubComponents(t, "", errors.New("unknown command"))
+	if rendersPeer(ConfigYAML(cfg)) || CheckComponents(cfg.Collector.BinaryPath) != nil {
+		t.Fatal("a collector that cannot list its components got peer attribution or was refused")
+	}
+	// As does a config whose collector cannot be found.
+	cfg.Collector.BinaryPath = filepath.Join(t.TempDir(), "missing")
+	stubComponents(t, markedPeerComponents, nil)
+	if rendersPeer(ConfigYAML(cfg)) {
+		t.Fatal("peer attribution rendered for a collector that does not exist")
+	}
+}
+
+// A collector that lists the marker gets peer attribution, and must then have its components.
+func TestAMarkedCollectorGetsPeerAttributionWhereTheMarkerIsRequired(t *testing.T) {
+	withPeerAttributionIfMarked(t)
+	cfg := testConfig(t)
+	cfg.Collector.BinaryPath = fakeCollector(t)
+	stubComponents(t, markedPeerComponents, nil)
+	if !PeerAttributionFor(cfg.Collector.BinaryPath) {
+		t.Fatal("PeerAttributionFor a marked collector = false")
+	}
+	text := ConfigYAML(cfg)
+	if text != ConfigYAMLWithPeer(cfg, true) {
+		t.Fatalf("config for a marked collector is not the peer config:\n%s", text)
+	}
+	out := render(t, cfg)
+	if _, ok := out.Processors[PeerProcessor]; !ok {
+		t.Fatalf("no %s processor:\n%s", PeerProcessor, text)
+	}
+	if out.Exporters["beaconjson"].(map[string]any)["peer_user"] != true {
+		t.Fatalf("beaconjson peer_user missing:\n%s", text)
+	}
+	if err := CheckComponents(cfg.Collector.BinaryPath); err != nil {
+		t.Fatalf("CheckComponents = %v, want a marked collector accepted", err)
+	}
+	stubComponents(t, strings.Replace(markedPeerComponents, "    - name: beacon_peer\n", "", 1), nil)
+	if err := CheckComponents(cfg.Collector.BinaryPath); err == nil || !strings.Contains(err.Error(), `"beacon_peer" processor`) {
+		t.Fatalf("CheckComponents = %v, want the missing processor named", err)
+	}
+}
+
+// Linux needs no marker: every collector there renders and requires peer attribution, as before.
+func TestLinuxNeedsNoMarker(t *testing.T) {
+	withPeerAttribution(t)
+	cfg := testConfig(t)
+	cfg.Collector.BinaryPath = fakeCollector(t)
+	for _, listing := range []string{peerComponents, markedPeerComponents} {
+		stubComponents(t, listing, nil)
+		if !PeerAttributionFor(cfg.Collector.BinaryPath) || ConfigYAML(cfg) != ConfigYAMLWithPeer(cfg, true) {
+			t.Fatalf("Linux config without peer attribution for listing:\n%s", listing)
+		}
+	}
+	stubComponents(t, "", errors.New("unknown command"))
+	if !rendersPeer(ConfigYAML(cfg)) {
+		t.Fatal("Linux config lost peer attribution for a collector that cannot list its components")
+	}
+	stubComponents(t, strings.Replace(peerComponents, "    - name: beacon_peer\n", "", 1), nil)
+	if err := CheckComponents(cfg.Collector.BinaryPath); err == nil {
+		t.Fatal("Linux accepted a collector without beacon_peer")
+	}
 }
 
 // Without peer attribution the config is what it always was.
@@ -179,6 +316,9 @@ extensions:
     - name: health_check
     - name: loopback_host
 `
+
+// markedPeerComponents is a collector that also lists the macOS/Windows lookup marker.
+var markedPeerComponents = strings.Replace(peerComponents, "    - name: loopback_host\n", "    - name: loopback_host\n    - name: "+PeerLookupExtension+"\n", 1)
 
 // A collector from before peer attribution would refuse the whole config at start; install says so
 // first, as it does for every other component.

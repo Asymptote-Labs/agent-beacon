@@ -22,6 +22,54 @@ var listComponents = func(ctx context.Context, binary string) ([]byte, error) {
 	return exec.CommandContext(ctx, binary, "components").Output()
 }
 
+type namedComponents []struct {
+	Name string `yaml:"name"`
+}
+
+// componentListing is what `beacon-otelcol components` prints, by kind.
+type componentListing struct {
+	Receivers  namedComponents `yaml:"receivers"`
+	Processors namedComponents `yaml:"processors"`
+	Extensions namedComponents `yaml:"extensions"`
+	Exporters  namedComponents `yaml:"exporters"`
+}
+
+func (l componentListing) has(kind, name string) bool {
+	var list namedComponents
+	switch kind {
+	case "receiver":
+		list = l.Receivers
+	case "processor":
+		list = l.Processors
+	case "extension":
+		list = l.Extensions
+	case "exporter":
+		list = l.Exporters
+	}
+	for _, c := range list {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// readComponents lists binary's components. ok is false for a binary that cannot list them -- a
+// stand-in, or a build without the command -- or whose listing does not parse: nothing to judge it on.
+func readComponents(binary string) (componentListing, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := listComponents(ctx, binary)
+	if err != nil {
+		return componentListing{}, false
+	}
+	var listed componentListing
+	if yaml.Unmarshal(out, &listed) != nil || len(listed.Processors) == 0 {
+		return componentListing{}, false
+	}
+	return listed, true
+}
+
 // CheckComponents refuses a collector binary that is older than the config this CLI writes.
 //
 // Packages and archives ship the collector beside the CLI from the same release, so this fails only
@@ -42,29 +90,19 @@ func CheckComponents(binary string, extensions ...string) error {
 // CheckComponentsFor is CheckComponents with the processors and exporters the config will use
 // beyond Beacon's own -- the OTLP forward's -- refused the same way. Where ConfigYAML renders peer
 // attribution, its receiver and processor are required too.
+//
+// Which config that is depends on the collector: on macOS and Windows peer attribution is rendered
+// only for a collector that lists PeerLookupExtension (see PeerAttributionFor), so its receiver and
+// processor are required exactly when the listing says the config will name them.
 func CheckComponentsFor(binary string, extensions, processors, exporters []string) error {
+	listed, ok := readComponents(binary)
+	if !ok {
+		return nil
+	}
 	var receivers []string
-	if PeerAttribution {
+	if PeerAttribution && (!peerLookupMarkerRequired || listed.has("extension", PeerLookupExtension)) {
 		processors = append(append([]string{}, processors...), PeerProcessor)
 		receivers = append(receivers, OTLPHTTPReceiver)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	out, err := listComponents(ctx, binary)
-	if err != nil {
-		return nil
-	}
-	type named []struct {
-		Name string `yaml:"name"`
-	}
-	var listed struct {
-		Receivers  named `yaml:"receivers"`
-		Processors named `yaml:"processors"`
-		Extensions named `yaml:"extensions"`
-		Exporters  named `yaml:"exporters"`
-	}
-	if yaml.Unmarshal(out, &listed) != nil || len(listed.Processors) == 0 {
-		return nil
 	}
 	have := map[string]bool{}
 	for _, c := range listed.Processors {
