@@ -148,6 +148,9 @@ anyone else's data. A tool that needs write access is hidden from read-only conn
 | `beacon_memory_search` | Searches your approved memory; every word must match | Pro |
 | `beacon_memory_get` | Returns one approved memory in full | Pro |
 | `beacon_memory_skill` | Renders an approved memory as an Agent Skill (`SKILL.md`) for the agent to save in your repository | Pro |
+| `beacon_intel_lookup` | Looks up an MCP server or skill in [Beacon Intel](/cli/intel) and returns its risk | All |
+| `beacon_intel_get_artifact` | Returns one Beacon Intel artifact in full: verdict, findings, repository lineage, advisories | All |
+| `beacon_intel_check` | Checks up to 50 MCP servers and skills in one call | All |
 
 Time filters accept a relative window such as `24h`, `7d` or `2w`, or exact `after` and `before`
 dates. `beacon_read_session` also accepts a dashboard session URL.

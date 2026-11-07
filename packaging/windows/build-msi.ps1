@@ -5,13 +5,18 @@
 # from the one in the archive next to it.
 #
 # Usage:
-#   .\build-msi.ps1 -Version 0.1.2 -BeaconExe ... -HooksExe ... -CollectorExe ... -OutFile ...
+#   .\build-msi.ps1 -Version 0.1.2 -BeaconExe ... -HooksExe ... -CollectorExe ... -VectorExe ... -OutFile ...
+#
+# VectorExe is the vector.exe that fetch-vector.ps1 staged. It is required, as the macOS release
+# requires it in the .pkg: the forwarder helpers and docs assume the package carries Vector, so a
+# package without it would install cleanly and fail later, on the first forwarder install.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Version,
     [Parameter(Mandatory = $true)][string]$BeaconExe,
     [Parameter(Mandatory = $true)][string]$HooksExe,
     [Parameter(Mandatory = $true)][string]$CollectorExe,
+    [Parameter(Mandatory = $true)][string]$VectorExe,
     [string]$OutFile,
     # Pinned by the caller so a build is reproducible and a WiX release cannot change the output
     # underneath us.
@@ -35,7 +40,7 @@ if ([string]::IsNullOrWhiteSpace($OutFile)) {
     $OutFile = Join-Path (Get-Location) "BeaconEndpointAgent-$normalized-x64.msi"
 }
 
-foreach ($input in @($BeaconExe, $HooksExe, $CollectorExe)) {
+foreach ($input in @($BeaconExe, $HooksExe, $CollectorExe, $VectorExe)) {
     if (-not (Test-Path -LiteralPath $input)) {
         throw "input binary not found: $input"
     }
@@ -49,6 +54,7 @@ try {
     Copy-Item -LiteralPath $BeaconExe -Destination (Join-Path $stage 'bin\beacon.exe')
     Copy-Item -LiteralPath $HooksExe -Destination (Join-Path $stage 'bin\beacon-hooks.exe')
     Copy-Item -LiteralPath $CollectorExe -Destination (Join-Path $stage 'bin\beacon-otelcol.exe')
+    Copy-Item -LiteralPath $VectorExe -Destination (Join-Path $stage 'bin\vector.exe')
     Copy-Item -LiteralPath (Join-Path $scriptDir 'install-endpoint.ps1') -Destination (Join-Path $stage 'scripts\install-endpoint.ps1')
     Copy-Item -LiteralPath (Join-Path $scriptDir 'uninstall-endpoint.ps1') -Destination (Join-Path $stage 'scripts\uninstall-endpoint.ps1')
     Copy-Item -LiteralPath (Join-Path $scriptDir 'package-common.ps1') -Destination (Join-Path $stage 'scripts\package-common.ps1')

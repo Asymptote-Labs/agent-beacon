@@ -373,7 +373,11 @@ var siemDestinations = []siemDestination{
 func buildDestinationCommands() []*cobra.Command {
 	groups := make([]*cobra.Command, 0, len(siemDestinations))
 	for _, d := range siemDestinations {
-		groups = append(groups, buildDestinationGroup(d))
+		group := buildDestinationGroup(d)
+		if d.name == "sentinel" {
+			group.AddCommand(newSentinelForwarderCommand())
+		}
+		groups = append(groups, group)
 	}
 	return groups
 }

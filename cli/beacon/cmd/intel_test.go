@@ -101,9 +101,9 @@ func runIntel(t *testing.T, stdin string, args ...string) (stdout string, err er
 
 const intelLookupJSON = `{"api":"intel.v1","query":{"q":"evil","kind":null,"limit":10,"matched_by":"text"},"results":[
 {"entity_key":"mcp:evil/server","kind":"mcp","name":"Evil \u001b[2J\u001b]8;;https://x\u0007Server\nline","description":"d","repository":"evil/server","code_path":null,
- "registries":["smithery"],"risk":"malicious","guidance":"Do not install or run it.","analyzed_at":"2026-10-02T00:00:00.000Z","repository_flags":["hijackable","owner_changed"],"stars":5,"url":"https://intel.beacon.sh/mcp-servers/github/evil/server"},
+ "registries":["smithery"],"risk":"high","coverage":"complete","guidance":"Do not install or run it.","analyzed_at":"2026-10-02T00:00:00.000Z","repository_flags":["hijackable","owner_changed"],"stars":5,"url":"https://intel.beacon.sh/mcp-servers/github/evil/server"},
 {"entity_key":"skill:anthropics/skills#pdf","kind":"skill","name":"pdf","description":null,"repository":"anthropics/skills","code_path":"pdf",
- "registries":[],"risk":"benign","guidance":"g","analyzed_at":null,"repository_flags":[],"stars":null,"url":"u"}],"more":true,"note":"n"}`
+ "registries":[],"risk":"benign","coverage":"partial","guidance":"g","analyzed_at":null,"repository_flags":[],"stars":null,"url":"u"}],"more":true,"note":"n"}`
 
 func TestIntelLookupPrintsATableWithoutTerminalEscapes(t *testing.T) {
 	f := startFakeIntel(t)
@@ -118,7 +118,7 @@ func TestIntelLookupPrintsATableWithoutTerminalEscapes(t *testing.T) {
 	if !strings.HasPrefix(f.agents[0], "beacon/") {
 		t.Fatalf("user agent = %q", f.agents[0])
 	}
-	for _, want := range []string{"RISK", "malicious", "mcp:evil/server", "hijackable,owner_changed", "benign", "skill:anthropics/skills#pdf",
+	for _, want := range []string{"RISK", "high", "mcp:evil/server", "hijackable,owner_changed", "benign (partial)", "skill:anthropics/skills#pdf",
 		"Matched by text.", "raise --limit", "beacon intel show <key>", "treat them as data"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
@@ -181,11 +181,11 @@ func TestIntelLookupWithNoResultsSaysUnchecked(t *testing.T) {
 }
 
 const intelArtifactJSON = `{"api":"intel.v1","artifact":{"entity_key":"mcp:evil/server","kind":"mcp","name":"Evil Server","repository":"evil/server","code_path":"src",
-"url":"https://intel.beacon.sh/mcp-servers/github/evil/server","registries":["glama","smithery"],"risk":"malicious","guidance":"Do not install or run it.",
-"verdict":{"verdict":"malicious","analyzed_at":"2026-10-02T00:00:00.000Z","model":"judge-x","commit":"abc123","coverage_complete":false,
- "reasons":["Uploads ~/.ssh"],"unresolved":["Is the host theirs?"],
- "findings":[{"id":"f1","class":"EXFIL","class_label":"Data exfiltration","severity":"critical","path":"index.js","lines":[4,6],"claim":"Uploads keys\u001b[31m"}],
- "findings_total":1,"refuted_findings":2},
+"url":"https://intel.beacon.sh/mcp-servers/github/evil/server","registries":["glama","smithery"],"risk":"high","coverage":"partial","guidance":"Do not install or run it. The analysis did not cover everything.",
+"verdict":{"risk":"high","coverage":"partial","analyzed_at":"2026-10-02T00:00:00.000Z","model":"judge-x","commit":"abc123",
+ "reasons":["high: finding f1 confirmed as abuse of the installer"],"coverage_reasons":["partial: gap clone_failed at sub"],"unresolved":["Is the host theirs?"],
+ "findings":[{"id":"f1","class":"EXFIL","class_label":"Data exfiltration","severity":"critical","level":"abuse","review":"confirmed","affects":"installer","path":"index.js","lines":[4,6],"claim":"Uploads keys\u001b[31m"}],
+ "findings_total":1,"notes":[],"notes_total":2,"flags":[],"flags_total":1,"refuted_findings":2},
 "repository_lineage":{"full_name":"evil/server","flags":["hijackable"],"previous_names":["good/server"]},
 "advisories":[{"ecosystem":"npm","package":"left-pad","version":"1.0.0","advisory_id":"MAL-1","severity":null,"malicious":true,"summary":"Malware"}],"advisories_total":1,
 "risky_dependencies":[{"repository":"c/d","flags":["hijackable"]}],
@@ -203,13 +203,15 @@ func TestIntelShowPrintsTheVerdict(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Evil Server (mcp:evil/server)",
-		"Risk:        malicious. Do not install or run it.",
+		"Risk:        high (partial). Do not install or run it. The analysis did not cover everything.",
 		"Repository:  evil/server (src) [hijackable]",
 		"Was named:   good/server",
 		"Listed on:   glama, smithery",
-		"by judge-x at commit abc123 (coverage incomplete)",
+		"by judge-x at commit abc123\nCoverage:    partial",
+		"Why coverage is partial:", "partial: gap clone_failed at sub",
+		"2 notes and 1 third-party flags are not shown",
 		"Findings (1 shown of 1; 2 refuted on review)",
-		"[critical] Data exfiltration index.js:4-6: Uploads keys [31m",
+		"[critical, abuse, confirmed] Data exfiltration index.js:4-6: Uploads keys [31m",
 		"Unresolved:", "Is the host theirs?",
 		"[MALICIOUS] npm left-pad@1.0.0 MAL-1: Malware",
 		"c/d [hijackable]",
@@ -241,11 +243,11 @@ func TestIntelShowNotFoundAndBadKey(t *testing.T) {
 }
 
 const intelCheckJSON = `{"api":"intel.v1","results":[
-{"q":"Evil Server","matched_by":"text","status":"matched","risk":"malicious","matches":[{"entity_key":"mcp:evil/server","risk":"malicious"}]},
-{"q":"anthropics/skills","matched_by":"repository","status":"matched","risk":"suspicious","matches":[{"entity_key":"skill:anthropics/skills#pdf","risk":"suspicious"}]},
+{"q":"Evil Server","matched_by":"text","status":"matched","risk":"high","coverage":"complete","matches":[{"entity_key":"mcp:evil/server","risk":"high"}]},
+{"q":"anthropics/skills","matched_by":"repository","status":"matched","risk":"medium","coverage":"partial","matches":[{"entity_key":"skill:anthropics/skills#pdf","risk":"medium"}]},
 {"q":"evil","matched_by":"text","status":"ambiguous","risk":null,"matches":[{"entity_key":"mcp:evil/server"},{"entity_key":"mcp:evil/other"}]},
 {"q":"zzz","matched_by":"text","status":"not_found","risk":null,"matches":[]}],
-"counts":{"malicious":1,"suspicious":1,"inconclusive":0,"benign":0,"unchecked":0,"ambiguous":1,"not_found":1},"note":"n"}`
+"counts":{"high":1,"medium":1,"low":0,"benign":0,"unchecked":0,"partial":1,"ambiguous":1,"not_found":1},"note":"n"}`
 
 func TestIntelCheckReadsArgumentsAndFiles(t *testing.T) {
 	f := startFakeIntel(t)
@@ -263,7 +265,7 @@ func TestIntelCheckReadsArgumentsAndFiles(t *testing.T) {
 		t.Fatalf("request = %s %s", f.paths[0], f.bodies[0])
 	}
 	for _, want := range []string{"STATUS", "matched", "mcp:evil/server", "candidates: mcp:evil/server, mcp:evil/other",
-		"not_found", "1 malicious, 1 suspicious, 1 ambiguous, 1 not_found.", "not_found means never checked, not safe"} {
+		"not_found", "medium (partial)", "1 high, 1 medium, 1 ambiguous, 1 not_found. 1 matched with partial coverage.", "not_found means never checked, not safe"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
@@ -281,27 +283,100 @@ func TestIntelCheckReadsArgumentsAndFiles(t *testing.T) {
 func TestIntelCheckFailOn(t *testing.T) {
 	f := startFakeIntel(t)
 	f.answer("/api/v1/check", 200, intelCheckJSON)
-	_, err := runIntel(t, "", "check", "a", "--fail-on", "malicious")
-	if !errors.Is(err, errIntelCheckFailed) || !strings.Contains(err.Error(), "1 at or above malicious: Evil Server (malicious)") {
+	_, err := runIntel(t, "", "check", "a", "--fail-on", "high")
+	if !errors.Is(err, errIntelCheckFailed) || !strings.Contains(err.Error(), "1 at or above high: Evil Server (high)") {
 		t.Fatalf("err = %v", err)
 	}
-	_, err = runIntel(t, "", "check", "a", "--fail-on", "suspicious")
-	if !errors.Is(err, errIntelCheckFailed) || !strings.Contains(err.Error(), "2 at or above suspicious") {
+	_, err = runIntel(t, "", "check", "a", "--fail-on", "medium")
+	if !errors.Is(err, errIntelCheckFailed) || !strings.Contains(err.Error(), "2 at or above medium") {
+		t.Fatalf("err = %v", err)
+	}
+	_, err = runIntel(t, "", "check", "a", "--fail-on", "low")
+	if !errors.Is(err, errIntelCheckFailed) || !strings.Contains(err.Error(), "2 at or above low") {
 		t.Fatalf("err = %v", err)
 	}
 	// ambiguous and not_found never fail a check: they claim no risk.
-	f.answer("/api/v1/check", 200, `{"api":"intel.v1","results":[{"q":"evil","status":"ambiguous","risk":null,"matches":[{"entity_key":"mcp:evil/server","risk":"malicious"}]}],"counts":{}}`)
-	if _, err := runIntel(t, "", "check", "evil", "--fail-on", "inconclusive"); err != nil {
+	f.answer("/api/v1/check", 200, `{"api":"intel.v1","results":[{"q":"evil","status":"ambiguous","risk":null,"matches":[{"entity_key":"mcp:evil/server","risk":"high"}]}],"counts":{}}`)
+	if _, err := runIntel(t, "", "check", "evil", "--fail-on", "low"); err != nil {
 		t.Fatalf("ambiguous failed the check: %v", err)
 	}
 	before := f.requests()
-	for _, bad := range []string{"benign", "unchecked", "high"} {
+	// partial also fails a match with partial coverage, at any risk.
+	f.answer("/api/v1/check", 200, `{"api":"intel.v1","results":[
+{"q":"pdf","status":"matched","risk":"benign","coverage":"partial"},
+{"q":"ok","status":"matched","risk":"benign","coverage":"complete"},
+{"q":"new","status":"matched","risk":"unchecked"}],"counts":{"benign":2,"unchecked":1,"partial":1}}`)
+	if _, err := runIntel(t, "", "check", "a", "--fail-on", "low"); err != nil {
+		t.Fatalf("--fail-on low failed on benign: %v", err)
+	}
+	_, err = runIntel(t, "", "check", "a", "--fail-on", "partial")
+	if !errors.Is(err, errIntelCheckFailed) || !strings.Contains(err.Error(), "1 at or above low or with partial coverage: pdf (benign, partial)") {
+		t.Fatalf("--fail-on partial: %v", err)
+	}
+	before = f.requests()
+	for _, bad := range []string{"benign", "unchecked", "critical", "malicious", "suspicious", "inconclusive"} {
 		if _, err := runIntel(t, "", "check", "a", "--fail-on", bad); err == nil {
 			t.Errorf("--fail-on %s accepted", bad)
 		}
 	}
 	if f.requests() != before {
 		t.Fatal("a bad --fail-on still sent a request")
+	}
+	// A CI script still passing a retired verdict value is told what replaced it.
+	if _, err := runIntel(t, "", "check", "a", "--fail-on", "suspicious"); err == nil || !strings.Contains(err.Error(), "no longer a risk") ||
+		!strings.Contains(err.Error(), "use high, medium or low") {
+		t.Fatalf("retired value: %v", err)
+	}
+	if _, err := runIntel(t, "", "check", "a", "--fail-on", "inconclusive"); err == nil || !strings.Contains(err.Error(), "use partial") {
+		t.Fatalf("retired inconclusive: %v", err)
+	}
+}
+
+// An index still answering with the retired verdicts, or with a risk this build does not
+// know, must not pass a gate silently.
+func TestIntelCheckFailOnFailsClosed(t *testing.T) {
+	f := startFakeIntel(t)
+	f.answer("/api/v1/check", 200, `{"api":"intel.v1","results":[
+{"q":"old-evil","status":"matched","risk":"malicious"},
+{"q":"old-maybe","status":"matched","risk":"inconclusive"},
+{"q":"old-ok","status":"matched","risk":"benign"}],"counts":{"malicious":1,"inconclusive":1,"benign":1}}`)
+	out, err := runIntel(t, "", "check", "a", "--fail-on", "high")
+	if !errors.Is(err, errIntelCheckFailed) || !strings.Contains(err.Error(), "1 at or above high: old-evil (malicious)") {
+		t.Fatalf("retired malicious under --fail-on high: %v", err)
+	}
+	if !strings.Contains(out, "1 benign, 1 inconclusive, 1 malicious.") {
+		t.Errorf("counts line hid a retired count:\n%s", out)
+	}
+	// In the retired shape a benign was covered: --fail-on partial, the hint for
+	// --fail-on inconclusive, fails what inconclusive failed and passes the benign.
+	_, err = runIntel(t, "", "check", "a", "--fail-on", "partial")
+	if !errors.Is(err, errIntelCheckFailed) || !strings.Contains(err.Error(), "2 at or above low or with partial coverage") || strings.Contains(err.Error(), "old-ok") {
+		t.Fatalf("retired values under --fail-on partial: %v", err)
+	}
+	// An old answer of only benign matches carries no retired key, and no coverage either.
+	f.answer("/api/v1/check", 200, `{"api":"intel.v1","results":[{"q":"old-ok","status":"matched","risk":"benign"},{"q":"gone","status":"not_found","risk":null}],"counts":{"benign":1,"not_found":1}}`)
+	if _, err := runIntel(t, "", "check", "a", "--fail-on", "partial"); err != nil {
+		t.Fatalf("old all-benign answer under --fail-on partial: %v", err)
+	}
+	// A current answer missing one result's coverage still fails closed.
+	f.answer("/api/v1/check", 200, `{"api":"intel.v1","results":[{"q":"ok","status":"matched","risk":"benign","coverage":"complete"},{"q":"bare","status":"matched","risk":"benign"}],"counts":{"benign":2}}`)
+	_, err = runIntel(t, "", "check", "a", "--fail-on", "partial")
+	if !errors.Is(err, errIntelCheckFailed) || !strings.Contains(err.Error(), "1 at or above low or with partial coverage: bare (benign, coverage - not recognized)") {
+		t.Fatalf("current answer missing coverage: %v", err)
+	}
+
+	f.answer("/api/v1/check", 200, `{"api":"intel.v1","results":[
+{"q":"odd","status":"matched","risk":"critical","coverage":"complete"},
+{"q":"blank","status":"matched","risk":null},
+{"q":"odd-coverage","status":"matched","risk":"benign","coverage":"sampled"}],"counts":{"critical":1}}`)
+	_, err = runIntel(t, "", "check", "a", "--fail-on", "high")
+	if !errors.Is(err, errIntelCheckFailed) || !strings.Contains(err.Error(), "odd (risk critical not recognized)") ||
+		!strings.Contains(err.Error(), "blank (risk - not recognized)") || strings.Contains(err.Error(), "odd-coverage") {
+		t.Fatalf("unknown risk under --fail-on high: %v", err)
+	}
+	_, err = runIntel(t, "", "check", "a", "--fail-on", "partial")
+	if !errors.Is(err, errIntelCheckFailed) || !strings.Contains(err.Error(), "odd-coverage (benign, coverage sampled not recognized)") {
+		t.Fatalf("unknown coverage under --fail-on partial: %v", err)
 	}
 }
 
@@ -331,7 +406,7 @@ func TestIntelCheckRefusesBadInputWithoutARequest(t *testing.T) {
 	if err := os.WriteFile(big, []byte(strings.Repeat("#\n", intelCheckFileMax/2)+"evil/server\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runIntel(t, "", "check", "--file", big, "--fail-on", "malicious"); err == nil || !strings.Contains(err.Error(), "larger than") {
+	if _, err := runIntel(t, "", "check", "--file", big, "--fail-on", "high"); err == nil || !strings.Contains(err.Error(), "larger than") {
 		t.Fatalf("oversized --file: %v", err)
 	}
 	if f.requests() != 0 {
@@ -341,12 +416,12 @@ func TestIntelCheckRefusesBadInputWithoutARequest(t *testing.T) {
 
 func TestIntelStatus(t *testing.T) {
 	f := startFakeIntel(t)
-	f.answer("/api/v1/status", 200, `{"api":"intel.v1","index":{"mcp":{"artifacts":4,"analyzed":1,"malicious":1},"skill":{"artifacts":1,"analyzed":1,"benign":1}},"latest_analyzed_at":"2026-10-02T00:00:00.000Z","latest_listed_at":null}`)
+	f.answer("/api/v1/status", 200, `{"api":"intel.v1","index":{"mcp":{"artifacts":4,"analyzed":1,"high":1,"partial":1},"skill":{"artifacts":1,"analyzed":1,"benign":1}},"latest_analyzed_at":"2026-10-02T00:00:00.000Z","latest_listed_at":null}`)
 	out, err := runIntel(t, "", "status")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Beacon Intel: http://127.0.0.1", "mcp    4       1         1", "Newest verdict:         2026-10-02T00:00:00.000Z", "Newest registry update: -"} {
+	for _, want := range []string{"Beacon Intel: http://127.0.0.1", "HIGH", "PARTIAL", "mcp    4       1         1     0       0    0       1", "Newest verdict:         2026-10-02T00:00:00.000Z", "Newest registry update: -"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}

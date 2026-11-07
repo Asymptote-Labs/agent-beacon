@@ -261,6 +261,7 @@ func runEndpointInstall(cmd *cobra.Command, args []string) error {
 	reportSessionSyncJob(details, result)
 	reportLogAccess(details, result)
 	reportManagedForwarder(details, cmd.ErrOrStderr(), result.ManagedForwarder)
+	reportSentinelForwarder(details, cmd.ErrOrStderr(), result.SentinelForwarder)
 	printLingerGap(cmd.ErrOrStderr(), result)
 	installHookTargetsFromEndpointInstall(details, cmd.ErrOrStderr(), selection.Hooks)
 	refreshAgentSkills(cmd.ErrOrStderr())
@@ -431,7 +432,11 @@ func runEndpointStatus(cmd *cobra.Command, args []string) error {
 	for _, forwarder := range status.ScriptForwarders {
 		fmt.Println(scriptForwarderStatusLine(forwarder))
 	}
-	if line := cloudStatusLine(status.ManagedIngest, endpointUserMode(), len(status.ScriptForwarders) > 0); line != "" {
+	if status.SentinelForwarder != nil {
+		fmt.Println(sentinelForwarderStatusLine(*status.SentinelForwarder))
+	}
+	otherForwarders := len(status.ScriptForwarders) > 0 || status.SentinelForwarder != nil
+	if line := cloudStatusLine(status.ManagedIngest, endpointUserMode(), otherForwarders); line != "" {
 		fmt.Println(line)
 	}
 	fmt.Println(inventoryHeartbeatStatusLine(status.InventoryHeartbeat))
@@ -533,6 +538,7 @@ func runEndpointRepair(cmd *cobra.Command, args []string) error {
 	reportSessionSyncJob(os.Stdout, result)
 	reportLogAccess(os.Stdout, result)
 	reportManagedForwarder(os.Stdout, cmd.ErrOrStderr(), result.ManagedForwarder)
+	reportSentinelForwarder(os.Stdout, cmd.ErrOrStderr(), result.SentinelForwarder)
 	printLingerGap(cmd.ErrOrStderr(), result)
 	installHookTargetsFromEndpointInstall(os.Stdout, cmd.ErrOrStderr(), selection.Hooks)
 	refreshAgentSkills(cmd.ErrOrStderr())

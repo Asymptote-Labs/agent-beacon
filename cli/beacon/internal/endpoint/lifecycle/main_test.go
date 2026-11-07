@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sentinel"
 )
 
 // TestMain puts stand-ins for the service managers first on PATH for the whole package.
@@ -26,6 +28,13 @@ func TestMain(m *testing.M) {
 	for _, name := range append(append([]string{}, inventoryJobPathEnv...), inventoryJobNameEnv...) {
 		_ = os.Unsetenv(name)
 	}
+	// Tests that run a system install or uninstall must not reach a real Sentinel forwarder under
+	// the machine's system directory; the ones about it set these themselves.
+	reconcileSentinelForwarder = func(string, bool) (sentinel.ReconcileResult, error) {
+		return sentinel.ReconcileResult{Skipped: "not installed"}, nil
+	}
+	removeSentinelForwarder = func(bool) error { return nil }
+	sentinelForwarderStatus = func() sentinel.Status { return sentinel.Status{} }
 	os.Exit(runWithServiceManagerStandIns(m))
 }
 

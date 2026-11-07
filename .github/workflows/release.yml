@@ -2,16 +2,18 @@ name: Release
 
 # Full hands-off release on a pushed v* tag:
 #   1. goreleaser  — builds tarballs, publishes the GitHub release + changelog,
-#                    updates the Homebrew tap, and attests the .deb files it built.
+#                    updates the Homebrew tap, and attests the .deb files it built. Signs the
+#                    .deb/.rpm and checksums.txt when the Linux signing key secret exists.
 #   2. package     — (after goreleaser) builds, signs, notarizes, and staples the
 #                    macOS .pkg for both arches and attaches them plus the
 #                    package update manifest to the same release.
-#   3. windows-package — (after goreleaser) builds the Windows MSI from the archive
+#   3. windows-package — (after goreleaser) builds the Windows MSI from the archive and the pinned Vector
 #                    goreleaser just published, installs it to prove it works, and
 #                    attaches it. Unsigned for now, so it needs no secrets.
 #   4. finalize    — (after goreleaser, package and windows-package) adds the .pkg, .msi and
 #                    install.sh to checksums.txt and records a GitHub build-provenance
-#                    attestation for every file checksums.txt lists.
+#                    attestation for every file checksums.txt lists. Re-signs the extended
+#                    checksums.txt when the Linux signing key secret exists.
 #   5. apt-repository — (after goreleaser) adds the released .deb files, each checked against
 #                    goreleaser's attestation, to the signed apt repository in object storage. Skipped
 #                    until its APT_* secrets and variables are configured.
@@ -74,6 +76,46 @@ jobs:
       - name: Download Vector for the Linux packages
         run: sh packaging/linux/fetch-vector.sh
 
+      # nfpm signs the .deb and .rpm when BEACON_LINUX_SIGNING_KEY_FILE names a key, and GoReleaser's
+      # signs entry signs checksums.txt with the key imported here, so checksums.txt.sig and the public
+      # key are attached while GoReleaser's release is still a draft: a pinned install.sh or self-updater
+      # never sees this release as latest without them. Unsigned, as before, until the
+      # BEACON_LINUX_SIGNING_KEY secret exists.
+      - name: Stage the Linux release signing key
+        env:
+          BEACON_LINUX_SIGNING_KEY: ${{ secrets.BEACON_LINUX_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          pinned="$(xargs < cli/beacon/internal/endpoint/selfupdate/release-key.fingerprint | tr ' a-f' ',A-F')"
+          if [ -z "$BEACON_LINUX_SIGNING_KEY" ]; then
+            if [ -n "$pinned" ]; then
+              echo "::error title=Linux signing key missing::release-key.fingerprint is pinned but BEACON_LINUX_SIGNING_KEY is not configured."
+              exit 1
+            fi
+            echo "::notice title=Linux signing skipped::BEACON_LINUX_SIGNING_KEY is not configured, so the .deb, .rpm and checksums.txt are unsigned."
+            echo "BEACON_GORELEASER_SKIP=--skip=sign" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          key="$RUNNER_TEMP/beacon-linux-signing.asc"
+          (umask 077 && printf '%s\n' "$BEACON_LINUX_SIGNING_KEY" > "$key")
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -m 0700 "$GNUPGHOME"
+          gpg --batch --import "$key"
+          fpr="$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print toupper($10); exit }')"
+          if [ -n "$pinned" ] && ! printf '%s\n' "$pinned" | tr , '\n' | grep -qxF "$fpr"; then
+            echo "::error title=Signing key not pinned::BEACON_LINUX_SIGNING_KEY is ${fpr}, which release-key.fingerprint (${pinned}) does not list."
+            exit 1
+          fi
+          # Attached by the release's extra_files only when BEACON_LINUX_SIGNING_KEY_FILE is set.
+          mkdir -p cli/beacon/release-key
+          gpg --batch --export "$fpr" > cli/beacon/release-key/beacon-release-key.gpg
+          gpg --batch --armor --export "$fpr" > cli/beacon/release-key/beacon-release-key.asc
+          {
+            echo "BEACON_LINUX_SIGNING_KEY_FILE=$key"
+            echo "BEACON_LINUX_SIGNING_KEY_FPR=$fpr"
+            echo "GNUPGHOME=$GNUPGHOME"
+          } >> "$GITHUB_ENV"
+
       - name: Check GoReleaser config
         working-directory: cli/beacon
         env:
@@ -101,9 +143,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          NFPM_PASSPHRASE: ${{ secrets.BEACON_LINUX_SIGNING_KEY_PASSPHRASE }}
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
           GORELEASER_PREVIOUS_TAG: ${{ steps.tags.outputs.previous }}
-        run: goreleaser release --clean --parallelism 1
+        run: goreleaser release --clean --parallelism 1 ${BEACON_GORELEASER_SKIP:-}
 
       # The apt repository signs only packages this attests: goreleaser's own output, hashed here
       # from dist/ in the release-environment job that built it, never from the release. Its
@@ -393,6 +436,14 @@ jobs:
             }
           }
 
+      # Not in the archive: the Windows zip stays the CLI and collector, and only the MSI carries
+      # Vector. Checked against packaging/vector/, never against a checksum from the download host.
+      - name: Fetch Vector
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vector = pwsh -NoProfile -File packaging\windows\fetch-vector.ps1 -OutDir dist\windows\vector | Select-Object -Last 1
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $vector)) { throw "fetch-vector.ps1 staged no vector.exe" }
+
       - name: Build the MSI
         run: |
           $ErrorActionPreference = 'Stop'
@@ -402,6 +453,7 @@ jobs:
             -BeaconExe dist\windows\extracted\beacon.exe `
             -HooksExe dist\windows\extracted\beacon-hooks.exe `
             -CollectorExe dist\windows\extracted\beacon-otelcol.exe `
+            -VectorExe dist\windows\vector\vector.exe `
             -OutFile "dist\windows\BeaconEndpointAgent-$version-x64.msi"
           if ($LASTEXITCODE -ne 0) { throw "building the MSI failed" }
 
@@ -410,7 +462,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $msi = (Get-ChildItem dist\windows -Filter '*.msi' | Select-Object -First 1).FullName
           $log = "$env:GITHUB_WORKSPACE\release-install.log"
-          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $msi, '/qn', '/l*v', $log)
+          # /norestart, as in CI: without it a silent msiexec that finds a file in use reboots the
+          # runner instead of failing the step.
+          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/i', $msi, '/qn', '/norestart', '/l*v', $log)
           if ($p.ExitCode -ne 0) {
             Get-Content -LiteralPath $log -Tail 120 | Write-Output
             throw "the release MSI failed to install (exit $($p.ExitCode))"
@@ -424,6 +478,9 @@ jobs:
           Write-Output $state
           if ($state -notmatch 'RUNNING') { throw "the release MSI did not leave a running collector" }
 
+          $vectorVersion = (& (Join-Path $env:ProgramFiles 'Beacon\bin\vector.exe') --version) -join ' '
+          if ($LASTEXITCODE -ne 0 -or $vectorVersion -notmatch '^vector 0\.56\.0\b') { throw "the release MSI's vector.exe reported '$vectorVersion'" }
+
           # The version a user will see, checked against the tag being released.
           $beacon = Join-Path $env:ProgramFiles 'Beacon\bin\beacon.exe'
           $reported = (& $beacon version | Out-String).Trim()
@@ -433,7 +490,7 @@ jobs:
             throw "the packaged binary reports '$reported', which does not contain the released version $expected"
           }
 
-          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/x', $msi, '/qn')
+          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @('/x', $msi, '/qn', '/norestart')
           if ($p.ExitCode -ne 0) { throw "the release MSI failed to uninstall (exit $($p.ExitCode))" }
           exit 0
 
@@ -813,6 +870,7 @@ jobs:
     needs: [goreleaser, package, windows-package]
     if: ${{ !cancelled() && needs.goreleaser.result == 'success' }}
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: write
       id-token: write
@@ -839,7 +897,73 @@ jobs:
             sha256sum "$f" >> checksums.txt
           done
           sha256sum --check checksums.txt --ignore-missing
-          gh release upload "$TAG" checksums.txt --repo "$REPO" --clobber
+
+      # GoReleaser already signed the checksums.txt it published. The step above extends it, so it is
+      # signed again here before anything is uploaded; a failure before the upload leaves GoReleaser's
+      # matching pair in place. GitHub replaces release assets one at a time, so the two uploads below
+      # leave a few seconds in which a client can pair files from different uploads (install.sh and
+      # the self-updater fetch both again once before refusing), and a failure between them would
+      # leave a mismatched pair on a public release. So the step reads back what is published and
+      # re-uploads until the pair on the release is exactly what was signed and gpgv accepts it,
+      # failing loudly if it never is. Inert, like the package signing, until the
+      # BEACON_LINUX_SIGNING_KEY secret exists.
+      - name: Sign and upload checksums.txt
+        working-directory: dist/release
+        env:
+          BEACON_LINUX_SIGNING_KEY: ${{ secrets.BEACON_LINUX_SIGNING_KEY }}
+          BEACON_LINUX_SIGNING_KEY_PASSPHRASE: ${{ secrets.BEACON_LINUX_SIGNING_KEY_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          # The pin is what the goreleaser before-hook stamped into this release's install.sh.
+          pinned=""
+          if [ -f install.sh ]; then
+            pinned="$(sed -n 's/^release_key_fingerprints=//p' install.sh | tr -d '\r' | tr a-f A-F)"
+          elif [ -n "$BEACON_LINUX_SIGNING_KEY" ]; then
+            echo "::error title=install.sh missing::cannot read the pinned release key without the release's install.sh."
+            exit 1
+          fi
+          if [ -z "$BEACON_LINUX_SIGNING_KEY" ]; then
+            if [ -n "$pinned" ]; then
+              echo "::error title=Linux signing key missing::this release pins ${pinned} but BEACON_LINUX_SIGNING_KEY is not configured."
+              exit 1
+            fi
+            echo "::notice title=Linux signing skipped::BEACON_LINUX_SIGNING_KEY is not configured, so checksums.txt is unsigned."
+            gh release upload "$TAG" checksums.txt --repo "$REPO" --clobber
+            exit 0
+          fi
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -m 0700 "$GNUPGHOME"
+          printf '%s\n' "$BEACON_LINUX_SIGNING_KEY" | gpg --batch --import
+          fpr="$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print $10; exit }')"
+          if [ -n "$pinned" ] && ! printf '%s\n' "$pinned" | tr , '\n' | grep -qxF "$(printf '%s' "$fpr" | tr a-f A-F)"; then
+            echo "::error title=Signing key not pinned::BEACON_LINUX_SIGNING_KEY is ${fpr}, which release-key.fingerprint (${pinned}) does not list."
+            exit 1
+          fi
+          printf '%s' "$BEACON_LINUX_SIGNING_KEY_PASSPHRASE" | gpg --batch --pinentry-mode loopback --passphrase-fd 0 \
+            --local-user "$fpr" --output checksums.txt.sig --detach-sign checksums.txt
+          # Check against the public key GoReleaser attached, the one installers download.
+          gh release download "$TAG" --repo "$REPO" --pattern beacon-release-key.gpg --clobber
+          gpgv --keyring "$PWD/beacon-release-key.gpg" checksums.txt.sig checksums.txt
+          published="$RUNNER_TEMP/published"
+          for attempt in 1 2 3; do
+            # checksums.txt first: its old signature then fails for at most the one upload, and a
+            # signature is never published ahead of the file it covers.
+            gh release upload "$TAG" checksums.txt --repo "$REPO" --clobber &&
+              gh release upload "$TAG" checksums.txt.sig --repo "$REPO" --clobber ||
+              echo "::warning::upload attempt ${attempt} failed"
+            rm -rf "$published" && mkdir -p "$published"
+            if gh release download "$TAG" --repo "$REPO" --dir "$published" \
+                --pattern checksums.txt --pattern checksums.txt.sig &&
+              cmp -s checksums.txt "$published/checksums.txt" &&
+              cmp -s checksums.txt.sig "$published/checksums.txt.sig" &&
+              gpgv --keyring "$PWD/beacon-release-key.gpg" "$published/checksums.txt.sig" "$published/checksums.txt"; then
+              exit 0
+            fi
+            echo "::warning::the published checksums.txt and checksums.txt.sig do not match what was signed (attempt ${attempt})"
+            sleep $((attempt * 5))
+          done
+          echo "::error title=checksums.txt and its signature do not match::${TAG} is left with a checksums.txt and checksums.txt.sig that pinned installers refuse. Rerun this job."
+          exit 1
 
       - name: Download every file checksums.txt lists
         working-directory: dist/release

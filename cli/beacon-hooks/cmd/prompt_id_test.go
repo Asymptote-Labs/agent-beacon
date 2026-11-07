@@ -154,7 +154,7 @@ func TestCursorTurnCarriesOneIDAcrossHookFamilies(t *testing.T) {
 	stopInput := envelope("stop", "gen-1", map[string]interface{}{"status": "completed"})
 	stopSession := resolveSessionID(stopInput, "cursor")
 	emitHookEvent(newHookLogger("stop", "cursor", stopSession), "tool.completed", "tool", "info",
-		"Agent response completed", stopInput, sessionFields(stopSession, stopInput))
+		"Agent response completed", stopInput, stopFields(stopSession, stopInput))
 	runHookWithInput(t, runPromptSubmit, envelope("beforeSubmitPrompt", "gen-2", map[string]interface{}{"prompt": "now a license"}))
 
 	events := endpointEvents(t, logPath)

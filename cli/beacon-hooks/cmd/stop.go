@@ -63,7 +63,7 @@ func runStop(cmd *cobra.Command, args []string) {
 	if sessionID == "" {
 		if isDevinLikePlatform(platformFlag) {
 			logger.Info("stop completed")
-			emitHookEvent(logger, "tool.completed", "tool", "info", "Agent response completed", input, sessionFields("", input))
+			emitHookEvent(logger, "tool.completed", "tool", "info", "Agent response completed", input, stopFields("", input))
 			uploadCloudTelemetry(logger, true)
 			outputJSON(stopResponse())
 			return
@@ -82,9 +82,34 @@ func runStop(cmd *cobra.Command, args []string) {
 
 	elapsed := time.Since(start)
 	logger.Info("stop completed", "duration_ms", elapsed.Milliseconds())
-	emitHookEvent(logger, "tool.completed", "tool", "info", "Agent response completed", input, sessionFields(sessionID, input))
+	emitHookEvent(logger, "tool.completed", "tool", "info", "Agent response completed", input, stopFields(sessionID, input))
 	uploadCloudTelemetry(logger, true)
 	outputJSONAndExit(stopResponse())
+}
+
+// stopFields is the turn-end event's fields: the session, plus how the turn ended when the runtime
+// says so.
+//
+// The action and message stay tool.completed / "Agent response completed" on every runtime, because
+// the dashboard and TraceMessages recognize the turn end by that shape. What changes is that Cursor,
+// whose stop hook sends status completed, aborted or error, now has that status recorded verbatim
+// as turn.status, so in the event log and to threat rules a stopped or failed turn no longer reads
+// exactly like a finished one.
+//
+// Read on Cursor only, as subagent.go reads Cursor's subagentStop status. As of each runtime's hook
+// reference, no other runtime that reaches this hook sends a top-level status on Stop (Claude Code
+// and Qwen nest one per background task, which is not the turn's outcome), so a status key showing
+// up elsewhere is not known to mean how the turn ended. A payload with no status gets no turn block
+// at all rather than a default.
+func stopFields(sessionID string, input map[string]interface{}) map[string]interface{} {
+	fields := sessionFields(sessionID, input)
+	if platformFlag != "cursor" {
+		return fields
+	}
+	if status := strings.TrimSpace(getFirstStr(input, "status")); status != "" {
+		fields["turn"] = map[string]interface{}{"status": status}
+	}
+	return fields
 }
 
 // platformToTranscriptName maps the platform flag to the transcript platform identifier.

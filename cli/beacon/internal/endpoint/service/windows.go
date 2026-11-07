@@ -5,6 +5,32 @@ import (
 	"runtime"
 )
 
+// scmService is one service registration with the Windows Service Control Manager: the collector,
+// or a forwarder. Env holds NAME=value entries the SCM adds to the service's environment.
+type scmService struct {
+	Name        string
+	DisplayName string
+	Description string
+	Program     string
+	Args        []string
+	Env         []string
+	// OwnsEnv says the service's Environment value is Beacon's: rewritten on every registration
+	// and removed when Env is empty. The collector leaves it alone, as it always has, so a value an
+	// administrator set there survives an upgrade.
+	OwnsEnv bool
+}
+
+// collectorService is the collector's registration.
+func collectorService(program, configPath string) scmService {
+	return scmService{
+		Name:        WindowsServiceName,
+		DisplayName: WindowsServiceDisplayName,
+		Description: "Collects local AI agent telemetry and writes the Beacon endpoint log.",
+		Program:     program,
+		Args:        []string{"--config", configPath},
+	}
+}
+
 // windowsBackend manages the collector through the Windows Service Control Manager.
 //
 // Mapping from the two backends it joins:
@@ -58,7 +84,7 @@ func (b windowsBackend) writeUnit(userMode bool, program, configPath string) (st
 	if !b.available() {
 		return "", fmt.Errorf("%s", b.unsupportedReason())
 	}
-	if err := createOrUpdateService(program, configPath); err != nil {
+	if err := createOrUpdateService(collectorService(program, configPath)); err != nil {
 		return "", err
 	}
 	return b.unitPath(userMode)
@@ -68,7 +94,7 @@ func (b windowsBackend) load(userMode bool) error {
 	if !b.available() {
 		return fmt.Errorf("%s", b.unsupportedReason())
 	}
-	return startService()
+	return startService(WindowsServiceName)
 }
 
 // unload stops and deletes the service, tolerating its absence.
@@ -79,14 +105,14 @@ func (b windowsBackend) unload(userMode bool) error {
 	if !b.available() {
 		return nil
 	}
-	return removeService()
+	return removeService(WindowsServiceName, serviceStopTimeout, false)
 }
 
 func (b windowsBackend) restart(userMode bool) error {
 	if !b.available() {
 		return fmt.Errorf("%s", b.unsupportedReason())
 	}
-	return restartService()
+	return restartService(WindowsServiceName, serviceStopTimeout, false)
 }
 
 func (b windowsBackend) status(userMode bool) Status {
@@ -95,5 +121,5 @@ func (b windowsBackend) status(userMode bool) Status {
 		status.Message = b.unsupportedReason()
 		return status
 	}
-	return queryService()
+	return queryService(WindowsServiceName)
 }

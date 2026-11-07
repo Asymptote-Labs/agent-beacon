@@ -2,7 +2,13 @@
 
 package service
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
+
+// serviceStopTimeout matches the Windows value so callers compile everywhere; nothing waits on it here.
+const serviceStopTimeout = 20 * time.Second
 
 // The Service Control Manager exists only on Windows, so these report rather than pretend.
 //
@@ -18,20 +24,24 @@ func errNotWindows(action string) error {
 		"use --service=auto, or systemd/launchd/none as appropriate", action)
 }
 
-func createOrUpdateService(program, configPath string) error { return errNotWindows("register") }
+func createOrUpdateService(scmService) error { return errNotWindows("register") }
 
-func startService() error { return errNotWindows("start") }
+func startService(string) error { return errNotWindows("start") }
+
+func waitForServiceRunning(string, time.Duration) error { return errNotWindows("start") }
+
+func serviceCurrent(scmService) (bool, error) { return false, errNotWindows("inspect") }
 
 // removeService is the one exception, and deliberately so: uninstall and repair call unload
 // speculatively on every backend, and failing there would block removing an endpoint that was
 // never a Windows service to begin with.
-func removeService() error { return nil }
+func removeService(string, time.Duration, bool) error { return nil }
 
-func restartService() error { return errNotWindows("restart") }
+func restartService(string, time.Duration, bool) error { return errNotWindows("restart") }
 
-func queryService() Status {
+func queryService(name string) Status {
 	return Status{
-		Label:   WindowsServiceName,
+		Label:   name,
 		Message: "Windows service management is available only on Windows",
 	}
 }

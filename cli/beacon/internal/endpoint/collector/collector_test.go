@@ -90,7 +90,8 @@ func TestConfigYAMLIncludesReleaseContractFields(t *testing.T) {
 
 	for _, want := range []string{
 		"endpoint: 127.0.0.1:14317",
-		"endpoint: 127.0.0.1:14318",
+		"endpoint: 127.0.0.1:14318\n        include_metadata: true\n        auth:\n          authenticator: loopback_host\n",
+		"extensions: [health_check, loopback_host]",
 		"beaconjson:",
 		// %q, matching how the config is generated. Hand-quoting the path only agreed with the
 		// generator by accident: a POSIX path contains nothing that needs escaping, while a

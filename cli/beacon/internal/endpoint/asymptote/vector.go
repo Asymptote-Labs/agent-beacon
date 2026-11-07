@@ -24,6 +24,11 @@ const VectorBinEnv = "BEACON_VECTOR_BIN"
 // PackagedVectorPath is where the macOS package and the Linux .deb and .rpm install Vector.
 const PackagedVectorPath = "/opt/beacon/bin/vector"
 
+// WindowsVectorName is what the Windows MSI installs Vector as, beside beacon.exe in
+// %ProgramFiles%\Beacon\bin. The plain upstream name is safe there, unlike in a Linux archive
+// unpacked onto PATH: that directory belongs to the package, and nothing puts it on PATH.
+const WindowsVectorName = "vector.exe"
+
 // ArchiveVectorName is what the Linux release archive calls Vector, next to the beacon binary.
 // Homebrew-on-Linux installs it under the same name. Not "vector", because people unpack the
 // archive into a directory on PATH, and a file named vector there would shadow the Vector they
@@ -66,6 +71,10 @@ func vectorNotFoundMessage(goos string) string {
 		return "vector was not found; the Beacon .deb and .rpm install it as " + PackagedVectorPath +
 			" and the release archive carries it as " + ArchiveVectorName + " beside beacon. " +
 			"Reinstall Beacon from one of those, install Vector " + MinVectorVersion +
+			" or newer from https://vector.dev, or set " + VectorBinEnv
+	case "windows":
+		return "vector was not found; the Beacon MSI installs it as " + WindowsVectorName + " beside beacon.exe in " +
+			`%ProgramFiles%\Beacon\bin` + ". Reinstall the MSI, install Vector " + MinVectorVersion +
 			" or newer from https://vector.dev, or set " + VectorBinEnv
 	default:
 		return "vector was not found; install Vector " + MinVectorVersion +
@@ -129,6 +138,9 @@ var vectorSearchPaths = defaultVectorSearchPaths
 var currentExecutable = os.Executable
 
 func defaultVectorSearchPaths() []string {
+	if runtime.GOOS == "windows" {
+		return windowsVectorSearchPaths()
+	}
 	var paths []string
 	// Beside the CLI first, which is what an extracted Linux release archive and a
 	// Homebrew-on-Linux install look like. Only under ArchiveVectorName: a plain vector beside
@@ -149,6 +161,23 @@ func defaultVectorSearchPaths() []string {
 	}
 	for _, prefix := range prefixes {
 		paths = append(paths, filepath.Join(prefix, "bin", "vector"))
+	}
+	return paths
+}
+
+// windowsVectorSearchPaths is where the MSI puts Vector: beside the running beacon.exe, and in
+// the package's own directory for a beacon.exe started from somewhere else. There is no Homebrew
+// and no /opt on Windows to look in.
+func windowsVectorSearchPaths() []string {
+	var paths []string
+	if executable, err := currentExecutable(); err == nil {
+		paths = append(paths, filepath.Join(filepath.Dir(executable), WindowsVectorName))
+	}
+	if programFiles := os.Getenv("ProgramFiles"); programFiles != "" {
+		packaged := filepath.Join(programFiles, "Beacon", "bin", WindowsVectorName)
+		if len(paths) == 0 || !strings.EqualFold(paths[0], packaged) {
+			paths = append(paths, packaged)
+		}
 	}
 	return paths
 }

@@ -109,7 +109,16 @@ which would rotate the device key. The re-render:
 - validates the new config with the forwarder's own Vector exactly as `connect` does, and only
   then replaces the old file atomically. A config Vector rejects is reported as a warning, and the
   running forwarder keeps the old one;
-- restarts the forwarder only when the content changed and the forwarder is running (a stopped one reads the new config when it next starts).
+- restarts the forwarder when it is running, even when the config is current, after checking that
+  its Vector still accepts that config. Switching to restricted log access replaces the runtime log
+  with a copy, and Vector keeps reading the replaced file until it restarts, then resumes in the
+  copy where it left off; an upgrade may also have installed a new Vector. A stopped forwarder is
+  never started, and a forwarder whose config was refused, or whose Vector is missing, keeps running
+  as it was.
+
+The forwarder also reads the first rotated log (`runtime.jsonl.1`), as the Sentinel forwarder
+does, so lines written to a replaced log before a restart are picked up at the next rotation
+instead of lost. It still ships nothing written before the device was connected.
 
 It does nothing on an endpoint that is not connected, after a connect that did not finish, when
 the forwarder service is not installed, or where the service manager cannot run it (supervised

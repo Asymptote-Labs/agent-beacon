@@ -20,7 +20,7 @@ function Fail {
     $script:failures++
 }
 
-$scripts = @('install-endpoint.ps1', 'uninstall-endpoint.ps1', 'package-common.ps1', 'build-msi.ps1', 'smoke-restricted-log.ps1')
+$scripts = @('install-endpoint.ps1', 'uninstall-endpoint.ps1', 'package-common.ps1', 'build-msi.ps1', 'fetch-vector.ps1', 'smoke-restricted-log.ps1', 'smoke-sentinel-forwarder.ps1')
 foreach ($name in $scripts) {
     $path = Join-Path $scriptDir $name
     if (-not (Test-Path -LiteralPath $path)) {
@@ -154,6 +154,14 @@ foreach ($needle in @('install-endpoint.ps1', 'uninstall-endpoint.ps1')) {
 $build = Get-Content -Raw -LiteralPath (Join-Path $scriptDir 'build-msi.ps1')
 if ($wxs -notmatch [regex]::Escape('scripts\package-common.ps1') -or $build -notmatch [regex]::Escape('package-common.ps1')) {
     Fail "the MSI no longer ships package-common.ps1 beside the scripts that dot-source it"
+}
+# Vector ships in the MSI as it does in the .pkg and the Linux packages, and only from the pinned build.
+if ($wxs -notmatch [regex]::Escape('bin\vector.exe') -or $build -notmatch [regex]::Escape("'bin\vector.exe'")) {
+    Fail "the MSI no longer ships bin\vector.exe"
+}
+$fetch = Get-Content -Raw -LiteralPath (Join-Path $scriptDir 'fetch-vector.ps1')
+if ($fetch -notmatch [regex]::Escape('packaging\vector\vector-$Version-SHA256SUMS') -or $fetch -match '(?i)timber\.io[^\n]*SHA256SUMS') {
+    Fail "fetch-vector.ps1 must check the archive against the checksums committed in packaging\vector, not a downloaded file"
 }
 if ($wxs -match 'ExeCommand="[^"]*beacon\.exe') {
     Fail "beacon.wxs invokes beacon.exe directly; the install contract belongs in one place, not two"

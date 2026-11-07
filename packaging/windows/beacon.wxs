@@ -67,6 +67,14 @@
       <Component Id="BeaconCollector" Directory="BinFolder">
         <File Id="BeaconOtelcolExeFile" Source="$(var.StageDir)\bin\beacon-otelcol.exe" KeyPath="yes" />
       </Component>
+      <!--
+        Vector, the log forwarder the macOS and Linux packages also carry. Installed as vector.exe
+        beside beacon.exe, where FindVector looks for it. The package only lays the file down;
+        nothing runs it until a forwarder is set up.
+      -->
+      <Component Id="BeaconVector" Directory="BinFolder">
+        <File Id="VectorExeFile" Source="$(var.StageDir)\bin\vector.exe" KeyPath="yes" />
+      </Component>
       <Component Id="InstallScript" Directory="ScriptsFolder">
         <File Id="InstallEndpointScriptFile" Source="$(var.StageDir)\scripts\install-endpoint.ps1" KeyPath="yes" />
       </Component>

@@ -1414,7 +1414,8 @@ for expected in \
   'endpoint update install-daemon' \
   'endpoint inventory install-daemon --system' \
   'endpoint sessions install-daemon --system' \
-  'endpoint asymptote reconcile --system'
+  'endpoint asymptote reconcile --system' \
+  'endpoint sentinel forwarder reconcile --system'
 do
   if ! grep -qxF "$expected" "$POSTINSTALL_BEACON_LOG"; then
     echo "postinstall should run: $expected" >&2
