@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	"golang.org/x/sys/windows"
 )
@@ -70,7 +69,7 @@ func addMember(group, account string) error {
 		return fmt.Errorf("find the system directory: %w", err)
 	}
 	if _, err := run(filepath.Join(system, "net.exe"), "localgroup", group, account, "/add"); err != nil {
-		if strings.Contains(err.Error(), "1378") {
+		if netSystemError(err, account) == errMemberInAlias {
 			return nil
 		}
 		return err
