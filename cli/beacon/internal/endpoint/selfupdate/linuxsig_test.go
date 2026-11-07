@@ -2,6 +2,11 @@ package selfupdate
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -114,24 +119,94 @@ func TestReleaseKeyPinMatchesPublishedKey(t *testing.T) {
 	if !strings.Contains(string(docs), want) {
 		t.Errorf("docs/platforms/linux.mdx does not publish the pinned fingerprint %s", want)
 	}
-	if _, err := exec.LookPath("gpg"); err != nil {
-		t.Skip("gpg is not installed; skipping the apt keyring check")
-	}
-	out, err := exec.Command("gpg", "--batch", "--homedir", t.TempDir(), "--with-colons", "--show-keys",
-		filepath.Join(repo, "packaging", "linux", "apt", "beacon-archive-keyring.asc")).Output()
+	armored, err := os.ReadFile(filepath.Join(repo, "packaging", "linux", "apt", "beacon-archive-keyring.asc"))
 	if err != nil {
-		t.Fatalf("gpg --show-keys: %v", err)
+		t.Fatal(err)
 	}
-	var primary []string
-	lines := strings.Split(string(out), "\n")
-	for i, line := range lines {
-		if strings.HasPrefix(line, "pub:") && i+1 < len(lines) && strings.HasPrefix(lines[i+1], "fpr:") {
-			primary = append(primary, strings.Split(lines[i+1], ":")[9])
-		}
+	primary, err := primaryKeyFingerprints(armored)
+	if err != nil {
+		t.Fatalf("beacon-archive-keyring.asc: %v", err)
 	}
 	if len(primary) != 1 || primary[0] != want {
 		t.Errorf("beacon-archive-keyring.asc holds %v, want [%s]", primary, want)
 	}
+}
+
+// primaryKeyFingerprints returns the v4 fingerprint of every primary public key in an armored
+// OpenPGP key block: SHA-1 over 0x99, the two-byte body length, and the public-key packet body
+// (RFC 4880 section 12.2). It is computed here rather than with gpg, whose Windows build on the
+// CI runners does not accept a native temporary --homedir.
+func primaryKeyFingerprints(armored []byte) ([]string, error) {
+	text := strings.ReplaceAll(string(armored), "\r\n", "\n")
+	begin := strings.Index(text, "-----BEGIN PGP PUBLIC KEY BLOCK-----")
+	end := strings.Index(text, "-----END PGP PUBLIC KEY BLOCK-----")
+	if begin < 0 || end < begin {
+		return nil, fmt.Errorf("no armored public key block")
+	}
+	body := text[begin:end]
+	blank := strings.Index(body, "\n\n")
+	if blank < 0 {
+		return nil, fmt.Errorf("armor has no blank line after its headers")
+	}
+	var b64 strings.Builder
+	for _, line := range strings.Split(body[blank+2:], "\n") {
+		if strings.HasPrefix(line, "=") {
+			break // CRC-24 checksum line
+		}
+		b64.WriteString(strings.TrimSpace(line))
+	}
+	data, err := base64.StdEncoding.DecodeString(b64.String())
+	if err != nil {
+		return nil, err
+	}
+	var fprs []string
+	for len(data) > 0 {
+		hdr := data[0]
+		if hdr&0x80 == 0 {
+			return nil, fmt.Errorf("invalid packet header %#x", hdr)
+		}
+		var tag, n, hlen int
+		if hdr&0x40 == 0 { // old format
+			tag = int(hdr>>2) & 0x0f
+			switch hdr & 0x03 {
+			case 0:
+				hlen, n = 2, int(data[1])
+			case 1:
+				hlen, n = 3, int(binary.BigEndian.Uint16(data[1:3]))
+			case 2:
+				hlen, n = 5, int(binary.BigEndian.Uint32(data[1:5]))
+			default:
+				return nil, fmt.Errorf("indeterminate packet length")
+			}
+		} else { // new format
+			tag = int(hdr & 0x3f)
+			switch o := data[1]; {
+			case o < 192:
+				hlen, n = 2, int(o)
+			case o < 224:
+				hlen, n = 3, (int(o)-192)<<8+int(data[2])+192
+			case o == 255:
+				hlen, n = 6, int(binary.BigEndian.Uint32(data[2:6]))
+			default:
+				return nil, fmt.Errorf("partial packet lengths are not used in key blocks")
+			}
+		}
+		if hlen+n > len(data) {
+			return nil, fmt.Errorf("truncated packet")
+		}
+		packet := data[hlen : hlen+n]
+		if tag == 6 { // public-key packet (subkeys are tag 14)
+			if len(packet) == 0 || packet[0] != 4 {
+				return nil, fmt.Errorf("primary key is not a v4 key")
+			}
+			h := sha1.New()
+			h.Write([]byte{0x99, byte(n >> 8), byte(n)})
+			h.Write(packet)
+			fprs = append(fprs, strings.ToUpper(hex.EncodeToString(h.Sum(nil))))
+		}
+		data = data[hlen+n:]
+	}
+	return fprs, nil
 }
 
 // With the real pin, a Linux update refuses a release that has no signed checksums.txt and never
