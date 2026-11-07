@@ -98,6 +98,25 @@ func TestAddMemberAddsToTheLocalGroup(t *testing.T) {
 	}
 }
 
+// The console account an interactive MSI install adds is named from what the person typed at setup,
+// so it may hold a space or a non-ASCII letter. It reaches net.exe as one argument.
+func TestAddMemberAcceptsTheNamesWindowsGivesLocalAccounts(t *testing.T) {
+	fakeAccounts(t, map[string]string{Name: "S-1-5-21-1-2-3-1500"})
+	var got [][]string
+	run = func(_ string, args ...string) (string, error) {
+		got = append(got, append([]string(nil), args...))
+		return "", nil
+	}
+	for _, account := range []string{`DESKTOP-AB12\John Smith`, `PC\José`} {
+		if err := AddMember(Name, account); err != nil {
+			t.Fatalf("AddMember(%q) = %v", account, err)
+		}
+	}
+	if len(got) != 2 || got[0][2] != `DESKTOP-AB12\John Smith` || got[1][2] != `PC\José` || len(got[0]) != 4 {
+		t.Fatalf("net.exe arguments = %q", got)
+	}
+}
+
 func TestAddMemberTreatsAnExistingMemberAsSuccess(t *testing.T) {
 	fakeAccounts(t, map[string]string{Name: "S-1-5-21-1-2-3-1500"})
 	run = func(string, ...string) (string, error) {

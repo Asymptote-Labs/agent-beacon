@@ -91,12 +91,20 @@ $logAccess = Get-BeaconSetting 'BEACON_LOG_ACCESS' ''
 # that should make the collector the only writer of the runtime log without a second step. Only a
 # genuinely first install: an existing system config (an upgrade, or a reinstall over a kept config)
 # or a runtime log left by `uninstall --keep-logs` passes no mode, so this never narrows or widens an
-# existing endpoint. BEACON_LOG_ACCESS=shared opts a new install out.
+# existing endpoint. And only where the collector will be a Windows service, as on Linux, where it
+# must be a systemd one: with BEACON_SERVICE=none the collector is a supervised process nothing
+# restarts or starts at boot, and a restricted log there would leave every hook event spooled in its
+# user's profile whenever that process is down, where a shared log keeps taking them directly. So a
+# supervised install stays shared unless BEACON_LOG_ACCESS=restricted asks for it. BEACON_LOG_ACCESS=
+# shared opts a new install out.
 $systemBase = Join-Path $env:ProgramData 'Beacon\Endpoint'
 $systemConfig = Get-EnvOrDefault 'BEACON_SYSTEM_CONFIG' (Join-Path $systemBase 'config.json')
 $systemLog = Get-EnvOrDefault 'BEACON_SYSTEM_LOG' (Join-Path $systemBase 'logs\runtime.jsonl')
 $firstInstall = -not (Test-Path -LiteralPath $systemConfig) -and -not (Test-Path -LiteralPath $systemLog)
-if ([string]::IsNullOrWhiteSpace($logAccess) -and $firstInstall) { $logAccess = 'restricted' }
+# The --service values that resolve to the Service Control Manager (service.ParseKind): empty and
+# auto auto-detect, which for a system install on Windows is the SCM.
+$windowsService = @('', 'auto', 'windows-service', 'windows', 'scm') -contains $service.Trim().ToLowerInvariant()
+if ([string]::IsNullOrWhiteSpace($logAccess) -and $firstInstall -and $windowsService) { $logAccess = 'restricted' }
 
 # Accounts to add to the beacon-log local group of a restricted log, comma-separated (DOMAIN\name).
 # Set -- in the environment, or as a policy value, even an empty one -- it is exactly the list: a
