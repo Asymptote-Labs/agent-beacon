@@ -670,7 +670,7 @@ missing key fails the release. The key fixes the extension ID that every fleet's
 policy names, so it is never rotated; a copy is kept in the company password
 manager, and losing it means a new extension ID and a policy change for every fleet.
 
-The `feed` job then downloads the CRX from its public release URL, verifies it,
+The `feed` job (one concurrency group across all tags) then downloads the CRX from its public release URL, verifies it,
 and replaces `updates.xml` on the fixed `ext-updates` release (created on first
 use, `--latest=false --prerelease`). That file's URL is `CHROME_UPDATE_URL`, the
 manifest's `update_url` and the URL fleets put in policy, so it must never move

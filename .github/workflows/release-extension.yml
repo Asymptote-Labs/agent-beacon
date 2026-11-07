@@ -345,6 +345,11 @@ jobs:
     needs: [build, sign, release]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # One feed for every tag: the read-check-write below must not interleave
+    # with another tag's, or the lower version could upload last and win.
+    concurrency:
+      group: extension-update-feed
+      cancel-in-progress: false
     permissions:
       contents: write
     env:
@@ -403,9 +408,15 @@ jobs:
             --codebase "$codebase" --sha256 "$sha256" --out updates.xml --current current.xml
           gh release upload "$FEED_TAG" updates.xml --repo "$REPO" --clobber
 
-          # Read it back through the URL installed copies poll.
+          # Read it back through the URL installed copies poll, parsing the
+          # version the feed offers for this extension (a plain grep would also
+          # match the XML declaration's version='1.0').
           for _ in 1 2 3 4 5 6; do
-            if curl -fsSL "$update_url" | grep -qF "version='${VERSION}'"; then
+            live="$(curl -fsSL "$update_url" | node --input-type=module -e '
+              import { feedVersion } from "./browser-extension/tools/pack-crx.mjs";
+              let xml = ""; for await (const chunk of process.stdin) xml += chunk;
+              console.log(feedVersion(xml, process.argv[1]) ?? "");' "$EXTENSION_ID" || true)"
+            if [ "$live" = "$VERSION" ]; then
               echo "feed now offers ${VERSION}: $update_url"
               exit 0
             fi
