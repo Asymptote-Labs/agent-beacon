@@ -75,8 +75,8 @@ The `.deb` and `.rpm`, the macOS `.pkg` and the Windows MSI follow the same rule
 
 | Installed by | How the install recognizes it | Added to `beacon-log` |
 |---|---|---|
-| Fleet tooling, unattended (Salt, Ansible, Jamf, Kandji, Intune, SCCM) | Linux: root with no `SUDO_USER`. macOS: `installer` (sets `COMMAND_LINE_INSTALL`). Windows: a silent MSI (`msiexec /qn`) | Nobody |
-| A person, as an administrator | Linux: `sudo apt install` or `sudo dpkg -i`. macOS: Installer.app. Windows: the installer's full interface | That person, so the dashboard, `beacon traces` and `beacon share` work for them after they log in again |
+| Fleet tooling, unattended (Salt, Ansible, Jamf, Kandji, Intune, SCCM) | Linux: root with no `SUDO_USER`, or sudo with no terminal or under `DEBIAN_FRONTEND=noninteractive` (Ansible `become`, a Packer sudo provisioner). macOS: `installer` (sets `COMMAND_LINE_INSTALL`). Windows: a silent MSI (`msiexec /qn`) | Nobody |
+| A person, as an administrator | Linux: `sudo apt install` or `sudo dpkg -i` at a terminal. macOS: Apple's Installer.app, running as the logged-in user. Windows: the installer's full interface | That person, so the dashboard, `beacon traces` and `beacon share` work for them after they log in again |
 | Anyone, with `BEACON_LOG_READERS` set | The setting, even an empty one | Exactly the accounts it lists, comma-separated (`DOMAIN\name` on Windows) |
 
 Set `BEACON_LOG_READERS` to an empty value in a fleet's settings so that nobody is ever added implicitly, whatever runs the install. Accounts are only ever added, never removed, and one that cannot be added is reported without failing the install. `--log-readers` does the same on `beacon endpoint install|repair --system`.
@@ -89,7 +89,7 @@ Set `BEACON_LOG_READERS` to an empty value in a fleet's settings so that nobody 
 | macOS | Managed preferences for the domain `com.beacon.endpoint` (a configuration profile), or `/Library/Preferences/com.beacon.endpoint`; see [Settings for MDM installs](/platforms/macos#settings-for-mdm-installs) | Jamf, Kandji, Intune, or `sudo defaults write` |
 | Windows | String values under `HKLM\SOFTWARE\Policies\Beacon\Endpoint`; see [Settings for fleet installs](/platforms/windows#settings-for-fleet-installs) | Intune, Group Policy, SCCM |
 
-Each is read only when root (SYSTEM or Administrators on Windows) controls it, and a value set in the install script's environment wins over it.
+Each is read only when root (SYSTEM or Administrators on Windows) controls it, and a value set in the install script's environment wins over it. On Linux and macOS a variable set to an empty value counts as not set, so a wrapper that passes every variable, such as the Fleet install script, does not hide the settings file or profile; `BEACON_LOG_READERS` is the exception, where empty means nobody.
 
 ## On Windows
 

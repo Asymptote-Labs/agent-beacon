@@ -80,16 +80,31 @@ if [ -z "$BEACON_LOG_ACCESS" ] && [ "$first_install" = 1 ]; then
 fi
 # Accounts to add to the beacon-log group of a restricted log, comma-separated. Set, even to
 # nothing, it is exactly the list: an unattended fleet install sets BEACON_LOG_READERS= so that nobody
-# is ever added implicitly. Unset, a first install that a person ran with sudo (`sudo apt install`,
-# `sudo dpkg -i`) adds that person, so whoever installed Beacon on their own machine can use the
-# dashboard, `beacon traces` and `beacon share` without a second step. A configuration manager runs
-# as root with no SUDO_USER, so its installs add nobody. Members are only ever added, never removed.
+# is ever added implicitly. Unset, a first install that a person ran with sudo at a terminal
+# (`sudo apt install`, `sudo dpkg -i`) adds that person, so whoever installed Beacon on their own
+# machine can use the dashboard, `beacon traces` and `beacon share` without a second step. A
+# configuration manager running as root has no SUDO_USER, and one that reaches root through sudo
+# (Ansible `become`, a Packer sudo provisioner) sets SUDO_USER to its automation login, so SUDO_USER
+# alone is not a person: the install must also have a terminal on standard input and not run under
+# DEBIAN_FRONTEND=noninteractive, which Ansible's apt module sets. Otherwise nobody is added, and the
+# postinstall prints how to add someone. Members are only ever added, never removed.
+#
+# beacon_person_at_terminal succeeds when a person is running this install interactively.
+# BEACON_INSTALL_TTY=1|0 lets the packaging tests, which run without a terminal, say either way.
+beacon_person_at_terminal() {
+  [ "${DEBIAN_FRONTEND:-}" != noninteractive ] || return 1
+  case "${BEACON_INSTALL_TTY:-}" in
+    1) return 0 ;;
+    0) return 1 ;;
+  esac
+  [ -t 0 ]
+}
 if [ -z "${BEACON_LOG_READERS+set}" ]; then
   BEACON_LOG_READERS=
   if [ "$first_install" = 1 ] && [ "$BEACON_LOG_ACCESS" = restricted ]; then
     case "${SUDO_USER:-}" in
       ''|root) ;;
-      *) BEACON_LOG_READERS="$SUDO_USER" ;;
+      *) beacon_person_at_terminal && BEACON_LOG_READERS="$SUDO_USER" ;;
     esac
   fi
 fi
