@@ -322,15 +322,22 @@ jobs:
           fi
 
           # A re-run rebuilds the zip with new file times and signs different
-          # bytes, while the live updates.xml pins the published CRX's hash:
+          # bytes, while the live updates.xml may pin the published CRX's hash:
           # replacing it would make Chrome refuse every install until the feed
-          # caught up. Once a signed build is attached, keep the published pair,
-          # the way the firefox job keeps an .xpi AMO already signed.
+          # caught up. So a release whose four files are all attached is kept as
+          # it is, the way the firefox job keeps an .xpi AMO already signed, and
+          # one without its CRX gets a fresh, matching set. A CRX attached
+          # without the rest (gh uploads files concurrently, so a failed run can
+          # leave that) cannot be completed from a rebuild, so it stops here.
           # Captured first: piping into `grep -q` under pipefail can fail the
           # pipeline with SIGPIPE on a match and read as "not attached".
           assets="$(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name')"
-          if printf '%s\n' "$assets" | grep -qxF "$CRX"; then
-            echo "::notice title=Signed build kept::$CRX is already attached to $TAG; the published zip and CRX are left as they are."
+          attached() { printf '%s\n' "$assets" | grep -qxF "$1"; }
+          if attached "$CRX" && attached "$CRX.sha256" && attached "$NAME" && attached "$NAME.sha256"; then
+            echo "::notice title=Signed build kept::$TAG already has its zip, CRX and checksums; they are left as they are."
+          elif attached "$CRX"; then
+            echo "::error title=Partial release::$TAG has $CRX but not all of $NAME, $NAME.sha256 and $CRX.sha256. A rebuild would sign different bytes, so this run cannot complete the set. If updates.xml does not offer this version yet, delete $CRX from the release and re-run; otherwise attach the missing files from the run that built $CRX."
+            exit 1
           else
             gh release upload "$TAG" "$NAME" "$NAME.sha256" "$CRX" "$CRX.sha256" \
               --repo "$REPO" --clobber
