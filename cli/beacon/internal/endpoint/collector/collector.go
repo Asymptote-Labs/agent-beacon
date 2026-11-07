@@ -162,10 +162,12 @@ const (
 	OTLPHTTPReceiver = "beacon_otlp_http"
 )
 
-// PeerAttribution reports whether ConfigYAML renders peer attribution. Only Linux: the processor's
-// lookup reads /proc/net/tcp, and elsewhere it would name nobody, so the upstream HTTP receiver
-// stays as it was. A var so tests on any platform can render either form.
-var PeerAttribution = runtime.GOOS == "linux"
+// PeerAttribution reports whether ConfigYAML renders peer attribution: on the platforms where the
+// processor can ask the kernel who owns a loopback client socket (Linux: sock_diag or /proc/net/tcp;
+// macOS: the net.inet.tcp.pcblist_n table; Windows: GetExtendedTcpTable and the owning process's
+// token). Elsewhere it would name nobody, so the upstream HTTP receiver stays as it was. A var so
+// tests on any platform can render either form.
+var PeerAttribution = runtime.GOOS == "linux" || runtime.GOOS == "darwin" || runtime.GOOS == "windows"
 
 func ConfigYAML(cfg endpointconfig.Config) string {
 	endpointconfig.NormalizeDestinations(&cfg)

@@ -2,6 +2,7 @@ package collector
 
 import (
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -9,8 +10,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// The other tests in this package pin the config every platform but Linux renders; the tests below
-// set PeerAttribution themselves.
+// shippedPeerAttribution is PeerAttribution as the package sets it for this platform, read before
+// TestMain changes it.
+var shippedPeerAttribution = PeerAttribution
+
+// The other tests in this package pin the config rendered without peer attribution (a platform with
+// no lookup); the tests below set PeerAttribution themselves.
 func TestMain(m *testing.M) {
 	PeerAttribution = false
 	os.Exit(m.Run())
@@ -44,7 +49,7 @@ func render(t *testing.T, cfg endpointconfig.Config) renderedConfig {
 	return out
 }
 
-// On Linux, OTLP/HTTP is served by beacon_otlp_http on the same port (so every runtime keeps
+// With peer attribution (Linux, macOS and Windows), OTLP/HTTP is served by beacon_otlp_http on the same port (so every runtime keeps
 // exporting where it did), every Beacon pipeline runs beacon_peer before batch, and beaconjson
 // trusts what it wrote.
 func TestConfigYAMLRendersPeerAttribution(t *testing.T) {
@@ -137,7 +142,15 @@ func TestPeerAttributionStaysOutOfTheOTLPForward(t *testing.T) {
 	}
 }
 
-// Everywhere else the config is what it always was.
+// Peer attribution is rendered on every platform the collector's lookup supports, and nowhere else.
+func TestPeerAttributionIsOnWhereTheLookupExists(t *testing.T) {
+	want := runtime.GOOS == "linux" || runtime.GOOS == "darwin" || runtime.GOOS == "windows"
+	if shippedPeerAttribution != want {
+		t.Fatalf("PeerAttribution on %s = %v, want %v", runtime.GOOS, shippedPeerAttribution, want)
+	}
+}
+
+// Without peer attribution the config is what it always was.
 func TestConfigYAMLWithoutPeerAttributionIsUnchanged(t *testing.T) {
 	cfg := testConfig(t)
 	text := ConfigYAML(cfg)

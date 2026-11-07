@@ -145,10 +145,6 @@ func scanTable(r io.Reader, want map[[2]string]bool) (string, error) {
 	return found, nil
 }
 
-func mapped(ip4 net.IP) net.IP {
-	return append(net.IP{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff}, ip4...)
-}
-
 // procAddr4 is how the kernel prints an IPv4 socket address: the address as one 32-bit word in host
 // byte order, then the port, both in upper-case hex.
 func procAddr4(ip net.IP, port int) string {
