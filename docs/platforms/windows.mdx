@@ -128,12 +128,16 @@ See the [event schema](/telemetry-schema/event-schema) for the full field refere
 
 | Step | Result |
 |---|---|
-| Unpack | `beacon.exe`, `beacon-hooks.exe`, and `beacon-otelcol.exe` under `%ProgramFiles%\Beacon\bin` |
+| Unpack | `beacon.exe`, `beacon-hooks.exe`, `beacon-otelcol.exe`, and `vector.exe` under `%ProgramFiles%\Beacon\bin` |
 | System install | Config and collector config under `%ProgramData%\Beacon\Endpoint`, with `%ProgramData%\Beacon` owned by Administrators and locked down |
 | Service | `BeaconCollector`, registered with the SCM, automatic start, restart on failure |
 | Runtime log | `%ProgramData%\Beacon\Endpoint\logs\runtime.jsonl` |
 | Log permissions | `INTERACTIVE` may append to the runtime log files, and nothing more |
 | Agent runtime | Claude Code and Codex CLI settings for the interactive user, pointed at `127.0.0.1:4317` |
+
+`vector.exe` is [Vector](https://vector.dev) 0.56.0, the log forwarder the macOS and Linux packages also carry. The package only installs it: nothing runs it until you set up a forwarder.
+
+If you run AppLocker or Windows Defender Application Control, allow the four programs in `%ProgramFiles%\Beacon\bin`. None of them is code-signed yet (see below), so a publisher rule cannot match them; use a path or file hash rule.
 
 Two of those rows deserve explanation.
 
