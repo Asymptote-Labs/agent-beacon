@@ -380,6 +380,7 @@ func TestVerifyGatekeeperFailsStaplerValidationFailure(t *testing.T) {
 }
 
 func TestApplyRestartsCollectorBeforeHealthCheck(t *testing.T) {
+	withoutReleaseKeyPin(t) // covers the restart and rollback, not the signature check
 	artifact, sha := makeBeaconTarball(t, "9.9.9")
 	// The production install path, not the extraction seam -- the stubbed runner below stands in
 	// for the platform's installer. So the artifact has to be named like one this host installs.
@@ -681,6 +682,7 @@ func TestSelectArtifactOnDarwinUsesTheArchKeyUnchanged(t *testing.T) {
 // them again. An update whose install fails never reaches that postinstall, so the rollback has to
 // bring them back itself, or forwarding stays off until the Mac reboots.
 func TestApplyRollbackRestoresScriptForwarders(t *testing.T) {
+	withoutReleaseKeyPin(t) // covers the restart and rollback, not the signature check
 	artifact, sha := makeBeaconTarball(t, "9.9.9")
 	srv := nativeManifestServer(t, "9.9.9", sha, artifact)
 	defer srv.Close()
