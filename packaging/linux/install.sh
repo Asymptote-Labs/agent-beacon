@@ -81,27 +81,41 @@ curl -fsSL "${base}/${package}" -o "${tmp}/${package}"
 curl -fsSL "${base}/checksums.txt" -o "${tmp}/checksums.txt"
 
 if [[ -n "$release_key_fingerprints" ]]; then
-  command -v gpgv >/dev/null 2>&1 || fail "gpgv is needed to verify the release signature; install gpgv or gnupg and rerun."
+  # gpgv on most systems; sqv (Sequoia) where it replaces gpgv, as on Debian trixie-based images.
+  if command -v gpgv >/dev/null 2>&1; then
+    verifier=gpgv
+  elif command -v sqv >/dev/null 2>&1; then
+    verifier=sqv
+  else
+    fail "gpgv or sqv is needed to verify the release signature; install gpgv (apt-get install gpgv, dnf install gnupg2) and rerun."
+  fi
   curl -fsSL "${base}/checksums.txt.sig" -o "${tmp}/checksums.txt.sig" || fail "${tag} has no checksums.txt.sig."
   curl -fsSL "${base}/beacon-release-key.gpg" -o "${tmp}/beacon-release-key.gpg" || fail "${tag} has no beacon-release-key.gpg."
   mkdir -m 0700 "${tmp}/gnupg"
+  # Prints the primary-key fingerprint of each good signature, one per line, and fails when the
+  # signature does not verify.
   verify_checksums() {
-    gpgv --homedir "${tmp}/gnupg" --keyring "${tmp}/beacon-release-key.gpg" --status-fd 1 \
-      "${tmp}/checksums.txt.sig" "${tmp}/checksums.txt" 2>/dev/null
+    if [[ "$verifier" == gpgv ]]; then
+      gpgv --homedir "${tmp}/gnupg" --keyring "${tmp}/beacon-release-key.gpg" --status-fd 1 \
+        "${tmp}/checksums.txt.sig" "${tmp}/checksums.txt" 2>/dev/null |
+        awk '$1 == "[GNUPG:]" && $2 == "VALIDSIG" { print $NF }'
+      return "${PIPESTATUS[0]}"
+    fi
+    sqv --keyring "${tmp}/beacon-release-key.gpg" "${tmp}/checksums.txt.sig" "${tmp}/checksums.txt" 2>/dev/null
   }
   # The release's finalize job replaces checksums.txt and its signature after the release is public,
   # one asset at a time, so a download in those few seconds can pair files from different uploads.
   # Fetch both once more before giving up.
-  if ! status="$(verify_checksums)"; then
+  if ! signers="$(verify_checksums)"; then
     sleep 5
     curl -fsSL "${base}/checksums.txt" -o "${tmp}/checksums.txt" || fail "${tag} has no checksums.txt."
     curl -fsSL "${base}/checksums.txt.sig" -o "${tmp}/checksums.txt.sig" || fail "${tag} has no checksums.txt.sig."
-    status="$(verify_checksums)" || fail "checksums.txt signature does not verify."
+    signers="$(verify_checksums)" || fail "checksums.txt signature does not verify."
   fi
   # The key file comes from the release too, so only the pinned fingerprint makes it Beacon's.
   awk -v fprs="$release_key_fingerprints" 'BEGIN { n = split(toupper(fprs), pinned, ",") }
-    $1 == "[GNUPG:]" && $2 == "VALIDSIG" { for (i = 1; i <= n; i++) if (toupper($NF) == pinned[i]) ok = 1 }
-    END { exit !ok }' <<<"$status" ||
+    { for (i = 1; i <= n; i++) if (toupper($1) == pinned[i]) ok = 1 }
+    END { exit !ok }' <<<"$signers" ||
     fail "checksums.txt is not signed by a Beacon release key (${release_key_fingerprints})."
 fi
 

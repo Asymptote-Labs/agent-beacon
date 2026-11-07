@@ -20,13 +20,37 @@ import (
 // testdata/signed-release is a release signed by a throwaway test key with this fingerprint.
 const testReleaseKeyFingerprint = "492264C703AE4B306CF804C9E0F25BE9BE03411C"
 
+// TestVerifyReleaseSignature runs once per supported verifier, each alone, so both gpgv and the
+// sqv fallback are checked wherever they are installed.
 func TestVerifyReleaseSignature(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("release signatures are verified on Linux only")
 	}
-	if _, err := exec.LookPath("gpgv"); err != nil {
-		t.Skip("gpgv is not installed")
+	for _, verifier := range []string{"gpgv", "sqv"} {
+		t.Run(verifier, func(t *testing.T) {
+			if _, err := exec.LookPath(verifier); err != nil {
+				t.Skipf("%s is not installed", verifier)
+			}
+			old := signatureVerifiers
+			signatureVerifiers = []string{verifier}
+			t.Cleanup(func() { signatureVerifiers = old })
+			testVerifyReleaseSignature(t)
+		})
 	}
+}
+
+// A host with neither verifier gets an error that names what to install, not an exec failure.
+func TestVerifyReleaseSignatureWithoutVerifier(t *testing.T) {
+	old := signatureVerifiers
+	signatureVerifiers = []string{"beacon-test-no-such-verifier"}
+	t.Cleanup(func() { signatureVerifiers = old })
+	_, err := goodSignatures(context.Background(), t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "needs gpgv or sqv") {
+		t.Fatalf("goodSignatures error = %v, want one naming gpgv or sqv", err)
+	}
+}
+
+func testVerifyReleaseSignature(t *testing.T) {
 	tampered := false
 	// staleChecksums makes the next N checksums.txt downloads come from a different upload than
 	// the signature, as a client sees while finalize replaces the pair.
