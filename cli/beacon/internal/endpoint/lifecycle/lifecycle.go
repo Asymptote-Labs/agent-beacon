@@ -340,6 +340,10 @@ type InstallOptions struct {
 	// LogAccess sets the system log's access mode, "shared" or "restricted". Empty keeps what the
 	// existing config records, so repair and a package upgrade never change it.
 	LogAccess string
+	// LogReaders are accounts to add to the readers group of a restricted system log after the
+	// install. Members are only ever added, never removed, and an account that cannot be added is
+	// reported rather than failing the install. Ignored, and reported, for a shared log.
+	LogReaders []string
 	// SessionSync turns the scheduled session-store sync on or off; nil keeps what the existing
 	// config records (off for a new install), so repair and package upgrades never change it.
 	SessionSync *bool
@@ -382,8 +386,12 @@ type InstallResult struct {
 	LogAccess string `json:"log_access,omitempty"`
 	// LogReadersGroupCreated is true when this install created the readers group a restricted log
 	// is readable by, which then has no members yet.
-	LogReadersGroupCreated bool   `json:"log_readers_group_created,omitempty"`
-	InventoryJobDetail     string `json:"inventory_job_detail,omitempty"`
+	LogReadersGroupCreated bool `json:"log_readers_group_created,omitempty"`
+	// LogReadersAdded are the LogReaders accounts now in the readers group; LogReaderErrors say why
+	// any others are not, or that they were ignored because the log is shared.
+	LogReadersAdded    []string `json:"log_readers_added,omitempty"`
+	LogReaderErrors    []string `json:"log_reader_errors,omitempty"`
+	InventoryJobDetail string   `json:"inventory_job_detail,omitempty"`
 	// SessionSyncJobPath is the scheduled session sync unit when `session_sync.enabled` is on;
 	// SessionSyncJobDetail says why it is not installed on a host without a scheduler.
 	SessionSyncJobPath   string `json:"session_sync_job_path,omitempty"`
@@ -678,6 +686,7 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		logReadersGroupCreated = created
 		restoreLogAccess = restore
 	}
+	logReadersAdded, logReaderErrors := addLogReaders(cfg, opts.LogReaders)
 
 	tx := newInstallRollback(manager)
 	tx.RestoreLogAccess = restoreLogAccess
@@ -884,6 +893,8 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		SessionSyncJobDetail:   sessionSyncResult.Skipped,
 		LogAccess:              logAccessOf(cfg),
 		LogReadersGroupCreated: logReadersGroupCreated,
+		LogReadersAdded:        logReadersAdded,
+		LogReaderErrors:        logReaderErrors,
 	}, nil
 }
 

@@ -58,10 +58,11 @@ if [ -x /opt/beacon/bin/beacon ]; then
     echo "beacon: scheduled session sync job not configured (endpoint is installed and running)" >&2
 fi
 
-# A restricted log is readable only by root and the beacon-log group, and install adds nobody to it,
-# so the people on the machine can no longer read the system log with the local tools that read it
-# (the dashboard, `beacon share`, `beacon traces`). That is the point of the mode on a shared machine;
-# on someone's own workstation an administrator grants it per person.
+# A restricted log is readable only by root and the beacon-log group. Install adds only the accounts
+# in BEACON_LOG_READERS, or, on a first install a person ran with sudo, that person; anyone else on
+# the machine can no longer read the system log with the local tools that read it (the dashboard,
+# `beacon share`, `beacon traces`). That is the point of the mode on a shared machine; an
+# administrator grants it per person.
 if grep -q '"log_access": *"restricted"' /etc/beacon/endpoint/config.json 2>/dev/null; then
   echo "beacon: the system log is restricted to root and the beacon-log group. To let someone read it with" \
        "the local tools (dashboard, beacon share, beacon traces): sudo usermod -aG beacon-log <user>, then log in again"

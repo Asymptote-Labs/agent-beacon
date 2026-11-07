@@ -87,3 +87,23 @@ func TestEnsureAgainstThisMachine(t *testing.T) {
 		t.Fatalf("second Ensure = created %v, %v", created, err)
 	}
 }
+
+func TestAddMemberAddsToTheLocalGroup(t *testing.T) {
+	calls := fakeAccounts(t, map[string]string{Name: "S-1-5-21-1-2-3-1500"})
+	if err := AddMember(Name, `CORP\alice`); err != nil {
+		t.Fatal(err)
+	}
+	if len(*calls) != 1 || (*calls)[0] != "net.exe localgroup "+Name+` CORP\alice /add` {
+		t.Fatalf("calls = %q", *calls)
+	}
+}
+
+func TestAddMemberTreatsAnExistingMemberAsSuccess(t *testing.T) {
+	fakeAccounts(t, map[string]string{Name: "S-1-5-21-1-2-3-1500"})
+	run = func(string, ...string) (string, error) {
+		return "", fmt.Errorf("net.exe: exit status 2: System error 1378 has occurred. The specified account name is already a member of the group.")
+	}
+	if err := AddMember(Name, "alice"); err != nil {
+		t.Fatalf("AddMember = %v, want success for an existing member", err)
+	}
+}

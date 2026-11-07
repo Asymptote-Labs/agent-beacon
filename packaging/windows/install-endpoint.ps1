@@ -9,7 +9,12 @@
 # scripts call install-endpoint.sh -- two lists of flags that must agree is a thing that stops
 # agreeing.
 [CmdletBinding()]
-param()
+param(
+    # The MSI's UILevel property (2 none, 3 basic, 4 reduced, 5 full), passed by its custom action so
+    # this script can tell a person running the installer from a silent fleet deployment. Empty when
+    # fleet tooling runs the script directly, which counts as unattended.
+    [string]$UiLevel = ''
+)
 
 $ErrorActionPreference = 'Stop'
 
@@ -30,6 +35,35 @@ function Get-EnvOrDefault {
     return $value
 }
 
+# The install settings fleet tooling (Intune, Group Policy, SCCM) sets as registry policy: values
+# named exactly like the BEACON_* variables the Linux and macOS install scripts read, under this key.
+# The Windows counterpart of /etc/default/beacon on Linux and the com.beacon.endpoint managed
+# preferences on macOS, because an MSI deployment cannot set the environment of its custom action.
+# HKLM\SOFTWARE\Policies is writable only by administrators. BEACON_POLICY_KEY lets the packaging
+# tests point elsewhere.
+$policyKey = Get-EnvOrDefault 'BEACON_POLICY_KEY' 'HKLM:\SOFTWARE\Policies\Beacon\Endpoint'
+
+# Test-BeaconPolicy reports whether the policy key sets a value, even an empty one.
+function Test-BeaconPolicy {
+    param([string]$Name)
+    if (-not (Test-Path -LiteralPath $policyKey)) { return $false }
+    $item = Get-ItemProperty -LiteralPath $policyKey -Name $Name -ErrorAction SilentlyContinue
+    return $null -ne $item
+}
+
+# Get-BeaconSetting reads a documented install setting: the environment wins, then the policy key,
+# then the default.
+function Get-BeaconSetting {
+    param([string]$Name, [string]$Default)
+    $value = [Environment]::GetEnvironmentVariable($Name)
+    if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
+    if (Test-BeaconPolicy $Name) {
+        $policy = [string](Get-ItemProperty -LiteralPath $policyKey -Name $Name).$Name
+        if (-not [string]::IsNullOrWhiteSpace($policy)) { return $policy.Trim() }
+    }
+    return $Default
+}
+
 # The installed layout, which mirrors /opt/beacon: bin next to scripts, so the collector sits beside
 # the CLI where DiscoverBinary looks for it first.
 $installRoot = Get-EnvOrDefault 'BEACON_INSTALL_ROOT' (Join-Path $env:ProgramFiles 'Beacon')
@@ -40,17 +74,54 @@ if (-not (Test-Path -LiteralPath $beaconBin)) {
     throw "beacon.exe was not found at $beaconBin"
 }
 
-$harnesses = Get-EnvOrDefault 'BEACON_ENDPOINT_HARNESSES' 'claude,codex'
-$grpcPort = Get-EnvOrDefault 'BEACON_OTLP_GRPC_PORT' '4317'
-$httpPort = Get-EnvOrDefault 'BEACON_OTLP_HTTP_PORT' '4318'
-$collector = Get-EnvOrDefault 'BEACON_COLLECTOR' ''
-$service = Get-EnvOrDefault 'BEACON_SERVICE' ''
-$noStart = Get-EnvOrDefault 'BEACON_NO_START' '0'
+$harnesses = Get-BeaconSetting 'BEACON_ENDPOINT_HARNESSES' 'claude,codex'
+$grpcPort = Get-BeaconSetting 'BEACON_OTLP_GRPC_PORT' '4317'
+$httpPort = Get-BeaconSetting 'BEACON_OTLP_HTTP_PORT' '4318'
+$collector = Get-BeaconSetting 'BEACON_COLLECTOR' ''
+$service = Get-BeaconSetting 'BEACON_SERVICE' ''
+$noStart = Get-BeaconSetting 'BEACON_NO_START' '0'
 # shared or restricted; empty keeps whatever the endpoint already has, so an upgrade never changes
 # the mode. Restricted makes the SYSTEM collector the only writer of the runtime log: hooks send their
 # events to it over a local named pipe, and only SYSTEM, Administrators and the beacon-log group can
 # read the log. The same variable the Linux and macOS install scripts read.
-$logAccess = Get-EnvOrDefault 'BEACON_LOG_ACCESS' ''
+$logAccess = Get-BeaconSetting 'BEACON_LOG_ACCESS' ''
+
+# A first install defaults to restricted, as on Linux and macOS: an MSI is installed by an
+# administrator for the whole machine, often by Intune or SCCM across a fleet, and that is the install
+# that should make the collector the only writer of the runtime log without a second step. Only a
+# genuinely first install: an existing system config (an upgrade, or a reinstall over a kept config)
+# or a runtime log left by `uninstall --keep-logs` passes no mode, so this never narrows or widens an
+# existing endpoint. BEACON_LOG_ACCESS=shared opts a new install out.
+$systemBase = Join-Path $env:ProgramData 'Beacon\Endpoint'
+$systemConfig = Get-EnvOrDefault 'BEACON_SYSTEM_CONFIG' (Join-Path $systemBase 'config.json')
+$systemLog = Get-EnvOrDefault 'BEACON_SYSTEM_LOG' (Join-Path $systemBase 'logs\runtime.jsonl')
+$firstInstall = -not (Test-Path -LiteralPath $systemConfig) -and -not (Test-Path -LiteralPath $systemLog)
+if ([string]::IsNullOrWhiteSpace($logAccess) -and $firstInstall) { $logAccess = 'restricted' }
+
+# Accounts to add to the beacon-log local group of a restricted log, comma-separated (DOMAIN\name).
+# Set -- in the environment, or as a policy value, even an empty one -- it is exactly the list: a
+# fleet sets an empty BEACON_LOG_READERS policy value so that nobody is ever added implicitly. Unset,
+# a first install that a person ran from the installer's full interface adds the person signed in at
+# the console, so whoever installed Beacon on their own machine can use the dashboard, beacon traces
+# and beacon share without a second step. A silent install (msiexec /qn, which Intune and SCCM run)
+# adds nobody. Members are only ever added, never removed.
+$logReaders = [Environment]::GetEnvironmentVariable('BEACON_LOG_READERS')
+if ([string]::IsNullOrWhiteSpace($logReaders)) {
+    if (Test-BeaconPolicy 'BEACON_LOG_READERS') {
+        $logReaders = [string](Get-ItemProperty -LiteralPath $policyKey -Name 'BEACON_LOG_READERS').BEACON_LOG_READERS
+    } else {
+        $logReaders = ''
+        $interactive = 0
+        [void][int]::TryParse($UiLevel, [ref]$interactive)
+        if ($firstInstall -and $logAccess -eq 'restricted' -and $interactive -ge 4) {
+            $console = Get-EnvOrDefault 'BEACON_CONSOLE_USER' ''
+            if ([string]::IsNullOrWhiteSpace($console)) {
+                try { $console = [string](Get-CimInstance -ClassName Win32_ComputerSystem).UserName } catch { $console = '' }
+            }
+            if (-not [string]::IsNullOrWhiteSpace($console)) { $logReaders = $console.Trim() }
+        }
+    }
+}
 
 # Auto-detected rather than required, so a manual invocation without BEACON_COLLECTOR still works.
 # DiscoverBinary would find this on its own -- it is passed explicitly so that a failure says which
@@ -72,6 +143,7 @@ if (-not [string]::IsNullOrWhiteSpace($collector)) { $installArgs += @('--collec
 if (-not [string]::IsNullOrWhiteSpace($service)) { $installArgs += @('--service', $service) }
 if ($noStart -eq '1') { $installArgs += '--no-start' }
 if (-not [string]::IsNullOrWhiteSpace($logAccess)) { $installArgs += @('--log-access', $logAccess) }
+if (-not [string]::IsNullOrWhiteSpace($logReaders)) { $installArgs += @('--log-readers', $logReaders.Trim()) }
 
 # The access control on %ProgramData%\Beacon is applied by the install itself, not here, so a fleet
 # that runs `beacon endpoint install --system` directly gets the same result as the MSI. It resets the
