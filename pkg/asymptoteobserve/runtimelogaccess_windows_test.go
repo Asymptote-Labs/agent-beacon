@@ -30,6 +30,24 @@ func systemLogFixture(t *testing.T) string {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	// The marker inherits its DACL from this directory, and what a temp directory inherits varies
+	// by machine: CI points TEMP at the runner's work drive, whose ACL may let other accounts write
+	// the files below it, and then a marker is rightly not trusted. Protect the directory with a DACL
+	// that names only SYSTEM, Administrators and this account, so a marker written here is trusted
+	// exactly when the code under test says it should be, and the tests that want an untrusted one
+	// grant the access themselves.
+	sd, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;" + logAccessMarkerTrustedSID + ")")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := windows.SetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil); err != nil {
+		t.Fatalf("protect %s: %v", dir, err)
+	}
 	return filepath.Join(dir, "runtime.jsonl")
 }
 
