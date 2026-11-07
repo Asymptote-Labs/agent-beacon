@@ -64,7 +64,11 @@ BEACON_LOG_ACCESS="${BEACON_LOG_ACCESS:-}"
 BEACON_SYSTEM_CONFIG="${BEACON_SYSTEM_CONFIG:-/etc/beacon/endpoint/config.json}"
 BEACON_SYSTEM_LOG="${BEACON_SYSTEM_LOG:-/var/log/beacon-agent/runtime.jsonl}"
 BEACON_INIT_COMM="${BEACON_INIT_COMM:-/proc/1/comm}"
-if [ -z "$BEACON_LOG_ACCESS" ] && [ ! -e "$BEACON_SYSTEM_CONFIG" ] && [ ! -e "$BEACON_SYSTEM_LOG" ]; then
+first_install=0
+if [ ! -e "$BEACON_SYSTEM_CONFIG" ] && [ ! -e "$BEACON_SYSTEM_LOG" ]; then
+  first_install=1
+fi
+if [ -z "$BEACON_LOG_ACCESS" ] && [ "$first_install" = 1 ]; then
   init="$(cat "$BEACON_INIT_COMM" 2>/dev/null || true)"
   case "$BEACON_SERVICE" in
     ''|auto|systemd)
@@ -73,6 +77,21 @@ if [ -z "$BEACON_LOG_ACCESS" ] && [ ! -e "$BEACON_SYSTEM_CONFIG" ] && [ ! -e "$B
       fi
       ;;
   esac
+fi
+# Accounts to add to the beacon-log group of a restricted log, comma-separated. Set, even to
+# nothing, it is exactly the list: an unattended fleet install sets BEACON_LOG_READERS= so that nobody
+# is ever added implicitly. Unset, a first install that a person ran with sudo (`sudo apt install`,
+# `sudo dpkg -i`) adds that person, so whoever installed Beacon on their own machine can use the
+# dashboard, `beacon traces` and `beacon share` without a second step. A configuration manager runs
+# as root with no SUDO_USER, so its installs add nobody. Members are only ever added, never removed.
+if [ -z "${BEACON_LOG_READERS+set}" ]; then
+  BEACON_LOG_READERS=
+  if [ "$first_install" = 1 ] && [ "$BEACON_LOG_ACCESS" = restricted ]; then
+    case "${SUDO_USER:-}" in
+      ''|root) ;;
+      *) BEACON_LOG_READERS="$SUDO_USER" ;;
+    esac
+  fi
 fi
 # 1 turns the scheduled session sync on and 0 turns it off; empty keeps what the endpoint already
 # has, so a package upgrade never changes it.
@@ -94,6 +113,7 @@ set -- endpoint install --system \
 [ -n "$BEACON_SERVICE" ] && set -- "$@" --service "$BEACON_SERVICE"
 [ "$BEACON_NO_START" = "1" ] && set -- "$@" --no-start
 [ -n "$BEACON_LOG_ACCESS" ] && set -- "$@" --log-access "$BEACON_LOG_ACCESS"
+[ -n "$BEACON_LOG_READERS" ] && set -- "$@" --log-readers "$BEACON_LOG_READERS"
 case "$BEACON_SESSION_SYNC" in
   1|true|TRUE|yes|YES)
     set -- "$@" --session-sync

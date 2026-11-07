@@ -59,11 +59,37 @@ On an endpoint that is already installed, including one installed from the signe
 sudo beacon endpoint repair --system --log-access restricted
 ```
 
-For package installs you can instead set `BEACON_LOG_ACCESS=restricted` in the environment of the package's install script. On Linux a first install from the `.deb` or `.rpm` is restricted already, with no setting; an upgrade keeps the mode the endpoint has, and `BEACON_LOG_ACCESS=shared` installs a new endpoint shared instead. A configuration manager that cannot set the install script's environment (Salt, Ansible, Puppet, Chef) can put the setting in `/etc/default/beacon` or `/etc/sysconfig/beacon`; see [Settings for configuration-manager installs](/platforms/linux#settings-for-configuration-manager-installs).
+A first install from a package is restricted already, with no setting, on Linux, macOS and Windows; see [Package installs](#package-installs).
 
 Switching replaces the log and its archives with fresh copies, so a file handle another account opened while the log was shared stops reaching it. Existing events are kept.
 
 The mode is recorded in `config.json` as `log_access` and in a root-owned `.beacon-log-access` marker beside the log. `beacon endpoint repair`, package upgrades, the Jamf `repair-hooks.sh` policy, and a reinstall after `uninstall --keep-logs` all keep it, so you set it once per endpoint.
+
+## Package installs
+
+The `.deb` and `.rpm`, the macOS `.pkg` and the Windows MSI follow the same rules.
+
+**A first install is restricted.** A package is installed by an administrator for the whole machine, often by fleet tooling, so it sets up restricted access without a second step. An upgrade, a reinstall over a kept config, or a reinstall over a log kept by `uninstall --keep-logs` keeps whatever mode the endpoint already has, so existing endpoints never change. On Linux, a host without systemd as PID 1 (a container, WSL without systemd), or with `BEACON_SERVICE=none`, stays shared, because nothing there restarts the collector. `BEACON_LOG_ACCESS=shared` installs a new endpoint shared.
+
+**Who is added to `beacon-log` depends on how the package was installed:**
+
+| Installed by | How the install recognizes it | Added to `beacon-log` |
+|---|---|---|
+| Fleet tooling, unattended (Salt, Ansible, Jamf, Kandji, Intune, SCCM) | Linux: root with no `SUDO_USER`. macOS: `installer` (sets `COMMAND_LINE_INSTALL`). Windows: a silent MSI (`msiexec /qn`) | Nobody |
+| A person, as an administrator | Linux: `sudo apt install` or `sudo dpkg -i`. macOS: Installer.app. Windows: the installer's full interface | That person, so the dashboard, `beacon traces` and `beacon share` work for them after they log in again |
+| Anyone, with `BEACON_LOG_READERS` set | The setting, even an empty one | Exactly the accounts it lists, comma-separated (`DOMAIN\name` on Windows) |
+
+Set `BEACON_LOG_READERS` to an empty value in a fleet's settings so that nobody is ever added implicitly, whatever runs the install. Accounts are only ever added, never removed, and one that cannot be added is reported without failing the install. `--log-readers` does the same on `beacon endpoint install|repair --system`.
+
+**Fleet tooling sets these settings where it already writes settings,** because an MDM or a configuration manager cannot set the environment of a package's install script. The names are the same everywhere: `BEACON_LOG_ACCESS`, `BEACON_LOG_READERS`, `BEACON_ENDPOINT_HARNESSES` and the other documented `BEACON_*` install settings.
+
+| Platform | Where | Written by |
+|---|---|---|
+| Linux | `/etc/default/beacon` (Debian, Ubuntu) or `/etc/sysconfig/beacon` (Fedora, RHEL), as `KEY=VALUE` lines; see [Settings for configuration-manager installs](/platforms/linux#settings-for-configuration-manager-installs) | Salt, Ansible, Puppet, Chef |
+| macOS | Managed preferences for the domain `com.beacon.endpoint` (a configuration profile), or `/Library/Preferences/com.beacon.endpoint`; see [Settings for MDM installs](/platforms/macos#settings-for-mdm-installs) | Jamf, Kandji, Intune, or `sudo defaults write` |
+| Windows | String values under `HKLM\SOFTWARE\Policies\Beacon\Endpoint`; see [Settings for fleet installs](/platforms/windows#settings-for-fleet-installs) | Intune, Group Policy, SCCM |
+
+Each is read only when root (SYSTEM or Administrators on Windows) controls it, and a value set in the install script's environment wins over it.
 
 ## On Windows
 
@@ -86,7 +112,7 @@ Run the commands from an elevated shell:
 beacon endpoint repair --system --log-access restricted
 ```
 
-For the MSI and `install-endpoint.ps1`, set `BEACON_LOG_ACCESS=restricted` in the machine environment before installing. An upgrade with the variable unset keeps whatever mode the endpoint has. The MSI's install step runs inside the Windows Installer service, which sees a machine variable set after the service started only once it restarts, so after installing check that `beacon endpoint status --system --json` reports `"log_access": "restricted"`, and if it does not, switch with `beacon endpoint repair --system --log-access restricted`.
+A first MSI install is restricted already. An upgrade keeps whatever mode the endpoint has. Fleet tooling sets `BEACON_LOG_ACCESS` and the other install settings as policy values; see [Package installs](#package-installs).
 
 Switching replaces every file in the log directory with a fresh copy and resets the security of everything in it, so a handle another account opened while the log was shared stops reaching it. Windows cannot replace a file that another process holds open without allowing deletes. If one does, the switch waits a few seconds, then fails and names the file. The log is put back to shared, so hooks keep writing. Close that process (or sign the account out) and run the command again.
 
@@ -113,7 +139,7 @@ It lists `NT AUTHORITY\SYSTEM`, `BUILTIN\Administrators` and `beacon-log` and no
 
 ## Let your log shipper read the log
 
-Install creates the `beacon-log` group if it is missing and adds nobody to it. A shipper that runs as root keeps working with no change, and so does the Beacon Cloud forwarder. A shipper that runs as its own account needs to join the group, and then be restarted so it picks up the new membership:
+Install creates the `beacon-log` group if it is missing and adds only the accounts named by `BEACON_LOG_READERS` or `--log-readers`, or the person who ran a first package install interactively (see [Package installs](#package-installs)). A shipper that runs as root keeps working with no change, and so does the Beacon Cloud forwarder. A shipper that runs as its own account needs to join the group, and then be restarted so it picks up the new membership:
 
 ```bash title="Add a shipper's account to beacon-log"
 # Linux

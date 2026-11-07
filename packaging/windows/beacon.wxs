@@ -103,10 +103,14 @@
 
       -NonInteractive and -NoProfile because there is no console here and a machine's PowerShell
       profile must not be able to change what an installer does.
+
+      -UiLevel passes the UILevel property, formatted when the action is scheduled, so the script
+      can tell a person running the installer's full interface (5) from a silent deployment (2,
+      msiexec /qn, as Intune and SCCM run it). Only the former adds the console user to beacon-log.
     -->
     <CustomAction Id="BeaconInstallEndpoint"
                   Directory="ScriptsFolder"
-                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;install-endpoint.ps1&quot;"
+                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;install-endpoint.ps1&quot; -UiLevel &quot;[UILevel]&quot;"
                   Execute="deferred"
                   Impersonate="no"
                   Return="check" />

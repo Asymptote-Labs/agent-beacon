@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"fmt"
+	"strings"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/loggroup"
@@ -13,6 +14,7 @@ import (
 // Seams for tests, which cannot be root or change the account database.
 var (
 	ensureLogReadersGroup   = loggroup.Ensure
+	addLogReaderMember      = loggroup.AddMember
 	logIsRestricted         = asymptoteobserve.RuntimeLogAccessRestricted
 	removeStaleIngestSocket = localingest.RemoveStale
 	restrictSystemLog       = writer.RestrictSystemLog
@@ -87,4 +89,31 @@ func logAccessRestorer(cfg endpointconfig.Config) func() {
 		}
 		_ = shareSystemLog(cfg.LogPath)
 	}
+}
+
+// addLogReaders puts each named account in the readers group of a restricted system log. It never
+// removes anyone, and an account that cannot be added (unknown, or a tool that failed) is reported
+// rather than failing an install that has otherwise succeeded: a fleet install must not stop over
+// one misspelled name. A shared log has no readers group, so the names are reported as ignored.
+func addLogReaders(cfg endpointconfig.Config, readers []string) (added, problems []string) {
+	if cfg.UserMode || len(readers) == 0 {
+		return nil, nil
+	}
+	if !cfg.RestrictedLogAccess() {
+		return nil, []string{fmt.Sprintf("ignored log readers %s: the system log is shared, so every account can already read it", strings.Join(readers, ", "))}
+	}
+	seen := map[string]bool{}
+	for _, account := range readers {
+		account = strings.TrimSpace(account)
+		if account == "" || seen[account] {
+			continue
+		}
+		seen[account] = true
+		if err := addLogReaderMember(loggroup.Name, account); err != nil {
+			problems = append(problems, fmt.Sprintf("could not add %s to the %s group: %v", account, loggroup.Name, err))
+			continue
+		}
+		added = append(added, account)
+	}
+	return added, problems
 }

@@ -48,6 +48,10 @@ func install(t *testing.T, sys *fakeSystem) {
 				return line + "\n", nil
 			}
 			return "", exitCode(t, 2)
+		case strings.HasSuffix(path, "gpasswd"):
+			return "Adding user " + args[1] + " to group " + args[2] + "\n", nil
+		case strings.HasSuffix(path, "addgroup") && len(args) == 2 && args[0] != "-S":
+			return "", nil
 		case strings.HasSuffix(path, "groupadd"), strings.HasSuffix(path, "addgroup"):
 			if sys.failAdd != nil {
 				return "", sys.failAdd
@@ -164,4 +168,43 @@ func contains(calls []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestAddMemberUsesGpasswd(t *testing.T) {
+	sys := &fakeSystem{groups: map[string]string{}, tools: map[string]bool{"gpasswd": true, "addgroup": true}}
+	install(t, sys)
+	if err := AddMember("beacon-log", "alice@corp.example"); err != nil {
+		t.Fatal(err)
+	}
+	if !contains(sys.calls, "/usr/sbin/gpasswd -a alice@corp.example beacon-log") {
+		t.Fatalf("calls = %v", sys.calls)
+	}
+}
+
+func TestAddMemberFallsBackToBusyboxAddgroup(t *testing.T) {
+	sys := &fakeSystem{groups: map[string]string{}, tools: map[string]bool{"addgroup": true}}
+	install(t, sys)
+	if err := AddMember("beacon-log", "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if !contains(sys.calls, "/usr/sbin/addgroup alice beacon-log") {
+		t.Fatalf("calls = %v", sys.calls)
+	}
+	install(t, &fakeSystem{groups: map[string]string{}, tools: map[string]bool{}})
+	if err := AddMember("beacon-log", "alice"); err == nil {
+		t.Fatal("AddMember succeeded with no tool to add a member")
+	}
+}
+
+func TestInvalidAccountsNeverReachATool(t *testing.T) {
+	sys := &fakeSystem{groups: map[string]string{}, tools: map[string]bool{"gpasswd": true}}
+	install(t, sys)
+	for _, account := range []string{"", "-a", "a b", "a/b", "a;b", "a,b", `CORP\alice`, "$(id)", strings.Repeat("x", 257)} {
+		if err := AddMember("beacon-log", account); err == nil {
+			t.Errorf("AddMember(%q) accepted", account)
+		}
+	}
+	if len(sys.calls) != 0 {
+		t.Fatalf("ran a tool for an invalid account: %v", sys.calls)
+	}
 }

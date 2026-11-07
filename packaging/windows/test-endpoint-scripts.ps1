@@ -51,6 +51,21 @@ foreach ($needle in @('endpoint', 'install', '--system', 'user-config', 'repair-
 if ($install -notmatch "BEACON_LOG_ACCESS" -or $install -notmatch [regex]::Escape("'--log-access'")) {
     Fail "install-endpoint.ps1 no longer passes BEACON_LOG_ACCESS on as --log-access"
 }
+# BEACON_LOG_READERS is the readers list on all three platforms, and the policy key is where Windows
+# fleet tooling sets every install setting, as /etc/default/beacon and the com.beacon.endpoint managed
+# preferences are on Linux and macOS.
+if ($install -notmatch "BEACON_LOG_READERS" -or $install -notmatch [regex]::Escape("'--log-readers'")) {
+    Fail "install-endpoint.ps1 no longer passes BEACON_LOG_READERS on as --log-readers"
+}
+if ($install -notmatch [regex]::Escape('HKLM:\SOFTWARE\Policies\Beacon\Endpoint')) {
+    Fail "install-endpoint.ps1 no longer reads install settings from the HKLM:\SOFTWARE\Policies\Beacon\Endpoint policy key"
+}
+# Only a person at the installer's full interface may be added implicitly, which the script can tell
+# only from the UILevel the MSI passes it.
+$wxs = Get-Content -Raw -LiteralPath (Join-Path $scriptDir 'beacon.wxs')
+if ($wxs -notmatch [regex]::Escape('-UiLevel &quot;[UILevel]&quot;')) {
+    Fail "beacon.wxs no longer passes [UILevel] to install-endpoint.ps1"
+}
 # The step whose absence made the Linux package produce a healthy collector that captured nothing.
 if ($install -notmatch 'repair-installed') {
     Fail "install-endpoint.ps1 must configure the interactive user's runtime, or the endpoint captures nothing"

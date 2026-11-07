@@ -193,3 +193,40 @@ func TestRollbackRestoresTheLogAccessMode(t *testing.T) {
 		t.Fatal("Rollback did not restore the log access mode")
 	}
 }
+
+func TestAddLogReaders(t *testing.T) {
+	var added []string
+	prev := addLogReaderMember
+	t.Cleanup(func() { addLogReaderMember = prev })
+	addLogReaderMember = func(group, account string) error {
+		if group != loggroup.Name {
+			t.Fatalf("added to group %q, want %q", group, loggroup.Name)
+		}
+		if account == "nosuchuser" {
+			return errors.New("user does not exist")
+		}
+		added = append(added, account)
+		return nil
+	}
+	restricted := endpointconfig.Config{LogAccess: "restricted"}
+
+	got, problems := addLogReaders(restricted, []string{"alice", " alice ", "", "nosuchuser", "svc_splunk"})
+	if strings.Join(got, ",") != "alice,svc_splunk" || strings.Join(added, ",") != "alice,svc_splunk" {
+		t.Fatalf("added = %v (calls %v), want alice and svc_splunk once each", got, added)
+	}
+	if len(problems) != 1 || !strings.Contains(problems[0], "nosuchuser") {
+		t.Fatalf("problems = %v, want one naming nosuchuser", problems)
+	}
+
+	added = nil
+	got, problems = addLogReaders(endpointconfig.Config{LogAccess: "shared"}, []string{"alice"})
+	if len(got) != 0 || len(added) != 0 || len(problems) != 1 || !strings.Contains(problems[0], "shared") {
+		t.Fatalf("shared log: added %v, calls %v, problems %v; want nothing added and one note", got, added, problems)
+	}
+	if got, problems := addLogReaders(endpointconfig.Config{UserMode: true, LogAccess: "restricted"}, []string{"alice"}); got != nil || problems != nil {
+		t.Fatalf("user mode: %v, %v; want nothing", got, problems)
+	}
+	if got, problems := addLogReaders(restricted, nil); got != nil || problems != nil {
+		t.Fatalf("no readers: %v, %v; want nothing", got, problems)
+	}
+}

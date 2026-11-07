@@ -91,6 +91,43 @@ func Lookup(name string) (gid int, found bool, err error) {
 	return lookup(name)
 }
 
+// AddMember adds account to the group, which must exist. Adding an account that is already a member
+// succeeds. The account may come from a directory service, so it is resolved by the system's own
+// tools, never by os/user.
+func AddMember(group, account string) error {
+	if err := validName(group); err != nil {
+		return err
+	}
+	if err := validAccount(account); err != nil {
+		return err
+	}
+	return addMember(group, account)
+}
+
+// validAccount accepts the account names local and directory accounts use -- letters, digits and
+// . _ - $ @, plus one DOMAIN\name separator on Windows -- so a name is never read as an option, a
+// path or a second argument by the tools it is passed to.
+func validAccount(account string) error {
+	if account == "" || len(account) > 256 || strings.HasPrefix(account, "-") {
+		return fmt.Errorf("invalid account name %q", account)
+	}
+	backslashes := 0
+	for _, r := range account {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '.' || r == '_' || r == '-' || r == '$' || r == '@':
+		case r == '\\' && accountDomainSeparator:
+			backslashes++
+		default:
+			return fmt.Errorf("invalid account name %q", account)
+		}
+	}
+	if backslashes > 1 || strings.HasPrefix(account, "\\") || strings.HasSuffix(account, "\\") {
+		return fmt.Errorf("invalid account name %q", account)
+	}
+	return nil
+}
+
 // validName accepts only what both platforms accept as a group name, so a name is never read as an
 // option or a path by the tools it is passed to.
 func validName(name string) error {

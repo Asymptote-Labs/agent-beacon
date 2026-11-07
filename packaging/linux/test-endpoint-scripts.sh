@@ -249,6 +249,41 @@ expect_log_access shared "defaults file mode 644"
 run_install BEACON_DEFAULTS_FILE="$DEFAULTS" BEACON_DEFAULTS_OWNER=12345
 expect_log_access restricted "defaults file owned by someone else"
 
+# Log readers. A first install a person ran with sudo adds that person; a configuration manager's
+# (no SUDO_USER) adds nobody; an upgrade adds nobody implicitly; BEACON_LOG_READERS, set even to
+# nothing, is exactly the list.
+expect_readers() {
+  got="$(flag_value --log-readers)"
+  [ "$got" = "$1" ] || fail "$2: --log-readers is '$got', want '$1'"
+}
+rm -f "$DEFAULTS"
+run_install
+has_flag --log-readers && fail "configuration-manager install (no SUDO_USER) passed --log-readers $(flag_value --log-readers)"
+run_install SUDO_USER=alice
+expect_readers alice "first install by sudo"
+run_install SUDO_USER=root
+has_flag --log-readers && fail "SUDO_USER=root added root as a reader"
+run_install SUDO_USER=alice BEACON_LOG_ACCESS=shared
+has_flag --log-readers && fail "shared first install by sudo passed --log-readers"
+run_install SUDO_USER=alice BEACON_LOG_READERS=
+has_flag --log-readers && fail "BEACON_LOG_READERS= (nobody) still added the sudo user"
+run_install SUDO_USER=alice BEACON_LOG_READERS=svc_splunk,bob
+expect_readers svc_splunk,bob "BEACON_LOG_READERS over the sudo user"
+printf 'BEACON_LOG_READERS= # fleet: nobody implicitly\n' >"$DEFAULTS"
+run_install BEACON_DEFAULTS_FILE="$DEFAULTS" SUDO_USER=alice
+has_flag --log-readers && fail "defaults file BEACON_LOG_READERS= still added the sudo user"
+printf 'BEACON_LOG_READERS=svc_splunk\n' >"$DEFAULTS"
+run_install BEACON_DEFAULTS_FILE="$DEFAULTS"
+expect_readers svc_splunk "defaults file BEACON_LOG_READERS"
+rm -f "$DEFAULTS"
+mkdir -p "$TMP_DIR/etc"
+echo '{}' >"$TMP_DIR/etc/config.json"
+run_install SUDO_USER=alice
+has_flag --log-readers && fail "upgrade by sudo added the sudo user implicitly"
+run_install SUDO_USER=alice BEACON_LOG_READERS=svc_splunk
+expect_readers svc_splunk "upgrade with explicit BEACON_LOG_READERS"
+rm -f "$TMP_DIR/etc/config.json"
+
 if [ "$failures" -ne 0 ]; then
   echo "$failures check(s) failed" >&2
   exit 1
