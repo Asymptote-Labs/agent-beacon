@@ -287,17 +287,31 @@ A pushed `v*` tag runs the full release end-to-end via
    works, and attaches the `.msi` and its `.sha256`. Deliberately **not** in the
    `release` environment: that environment gates signing secrets, and the MSI is
    unsigned, so this job has none to gate.
-4. `apt-repository` (ubuntu, `needs: goreleaser`, `environment: release`) adds the
-   released `.deb` files, checked against `checksums.txt`, to the signed apt repository
+4. `finalize` (ubuntu, `needs` goreleaser, package and windows-package, runs whenever `goreleaser` succeeded)
+   appends the `.pkg`, `.msi` and `install.sh` to `checksums.txt` from the released bytes and
+   records a GitHub build-provenance attestation (Sigstore, keyless, through the
+   workflow's OIDC token) for every file `checksums.txt` lists. It needs
+   `id-token: write` and `attestations: write` and no `release`-environment secrets.
+5. `apt-repository` (ubuntu, `needs: [goreleaser, finalize]`, `environment: release`,
+   `contents: read`/`attestations: read`) adds the released `.deb` files to the signed apt
+   repository
    (`deb <APT_REPO_URL> stable main`) in an S3-compatible bucket, because 85-90 MB packages
    outgrow a git-backed Pages repo. `packaging/linux/apt/build-apt-repo.sh` reads back only the
    published index (InRelease, and each `Packages` through the by-hash path it names, so a
    publish that stopped partway reads consistently and resumes), verifies it against the
    committed public keys `packaging/linux/apt/beacon-archive-keyring.asc` before re-signing (so
    an edited index is never re-signed), refuses to replace a published version, and fails unless
-   the secret's key is one of the committed ones. Rotating the key is a reviewed commit: add the
-   new public key beside the old, replace the secret (the job signs with the key the secret
-   holds), and drop the old key after one release. First publish is decided by a `head-object` on
+   every key in the secret is a committed one and signed. Every `.deb` (this tag's and each
+   backfilled one) must pass `gh attestation verify` against finalize's attestation from
+   `release.yml` at `refs/tags/<tag>`, never the release's replaceable `checksums.txt`, and its
+   control fields must name `beacon`, the tag's version and the architecture; this tag's must
+   pass, and a backfilled one without an attestation is left out with a warning. Rotating the
+   key is a reviewed commit in two steps: commit the new public key beside the old and put both
+   secret keys in `APT_GPG_PRIVATE_KEY`, so every release is signed by both and hosts that trust
+   only the old key keep updating while they fetch the new keyring; then remove the old key from
+   the file and the secret. Hosts install the keyring once and the package does not ship it, so
+   one that never refetches it breaks at step two. A published index counts as signed with at
+   least one good signature from a committed key and no bad one. First publish is decided by a `head-object` on
    `dists/stable/InRelease` (404 only; any other error fails). Each run adds its own tag plus any
    of the last `APT_BACKFILL_RELEASES` (10) stable releases up to it that the index lacks, because
    the `apt-repository` concurrency group cancels a pending job when a third arrives; that also
@@ -308,11 +322,6 @@ A pushed `v*` tag runs the full release end-to-end via
    CI's `apt-repository` job runs `test-apt-repo.sh`.
    Upload order is pool, index, then `Release.gpg`/`Release`/`InRelease` with `Acquire-By-Hash`.
    Skipped with a notice until every `APT_*` setting exists, and for prerelease (`-`) tags.
-5. `finalize` (ubuntu, `needs` goreleaser, package and windows-package, runs whenever `goreleaser` succeeded)
-   appends the `.pkg`, `.msi` and `install.sh` to `checksums.txt` from the released bytes and
-   records a GitHub build-provenance attestation (Sigstore, keyless, through the
-   workflow's OIDC token) for every file `checksums.txt` lists. It needs
-   `id-token: write` and `attestations: write` and no `release`-environment secrets.
 
 Every third-party action in `release.yml`, `release-extension.yml` and
 `npm-publish-sdk.yml` is pinned to a full commit SHA with the version in a
@@ -325,7 +334,7 @@ Required `release`-environment secrets: `HOMEBREW_TAP_TOKEN`,
 `DEVELOPER_ID_INSTALLER_CERT_P12`, `DEVELOPER_ID_INSTALLER_CERT_PASSWORD`,
 `NOTARY_API_KEY_P8`, `NOTARY_API_KEY_ID`, `NOTARY_API_ISSUER`; plus Variables
 `DEVELOPER_ID_APP_IDENTITY`, `DEVELOPER_ID_INSTALLER_IDENTITY`, `APPLE_TEAM_ID`.
-The apt repository adds secrets `APT_GPG_PRIVATE_KEY` (armored, no passphrase),
+The apt repository adds secrets `APT_GPG_PRIVATE_KEY` (armored, no passphrase; both keys during a rotation),
 `APT_S3_ACCESS_KEY_ID`, `APT_S3_SECRET_ACCESS_KEY` and Variables `APT_S3_BUCKET`,
 `APT_REPO_URL` (https), plus optional `APT_S3_ENDPOINT` (R2/GCS) and `APT_S3_REGION`.
 Keep one-time Apple-side onboarding steps out of the repo and share them with

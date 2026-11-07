@@ -2,16 +2,22 @@
 # Builds the next state of Beacon's signed apt repository from the .deb files of one release.
 #
 #   packaging/linux/apt/build-apt-repo.sh --out DIR --keyring FILE --signing-key FPR \
-#     [--existing DIR] DEB...
+#     [--signing-key FPR...] [--existing DIR] DEB...
 #
 # The published repository lives in object storage and keeps every version's .deb under pool/, so
 # this script never downloads the pool. It takes the published index instead (--existing: a copy
 # of dists/stable holding InRelease and main/binary-<arch>/Packages, the latter fetched through the
 # by-hash path InRelease names so a publish that stopped partway still reads consistently), checks
 # that index against the committed public keys (--keyring, a binary keyring that may hold the old
-# and new key during a rotation), adds the new packages to it, and signs the result with
-# --signing-key, which must be one of those keys. Without --existing it starts an empty repository, which is right
-# only for the very first publish.
+# and new key during a rotation), adds the new packages to it, and signs the result with every
+# --signing-key, each of which must be one of those keys. Without --existing it starts an empty
+# repository, which is right only for the very first publish.
+#
+# During a key rotation the index is signed by the old and the new key at once. apt accepts it when
+# any signature comes from a key the client trusts, so hosts that still have only the old keyring
+# keep updating while they pick up the new one. A published index therefore counts as signed when
+# at least one signature is good from a committed key and none is bad; a signature from a key that
+# is no longer committed is ignored, so the old key can later be removed.
 #
 # Checking the published index first matters because the result is re-signed: a Packages file
 # altered in the bucket would otherwise come back out carrying a valid signature.
@@ -42,13 +48,13 @@ fail() {
 
 out=""
 keyring=""
-signing_key=""
+signing_keys=""
 existing=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --out) out="$2"; shift 2 ;;
     --keyring) keyring="$2"; shift 2 ;;
-    --signing-key) signing_key="$2"; shift 2 ;;
+    --signing-key) signing_keys="$signing_keys $2"; shift 2 ;;
     --existing) existing="$2"; shift 2 ;;
     --) shift; break ;;
     -*) fail "unknown option $1" ;;
@@ -57,7 +63,7 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$out" ] || fail "--out is required"
 [ -n "$keyring" ] || fail "--keyring is required"
-[ -n "$signing_key" ] || fail "--signing-key is required"
+[ -n "$signing_keys" ] || fail "--signing-key is required"
 [ $# -gt 0 ] || fail "no .deb files given"
 [ -f "$keyring" ] || fail "keyring $keyring does not exist"
 for tool in apt-ftparchive dpkg-deb gpg gpgv sha256sum; do
@@ -73,6 +79,23 @@ keyring="$(CDPATH='' cd -- "$(dirname -- "$keyring")" && pwd)/$(basename -- "$ke
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT INT TERM
 dists="$out/dists/$SUITE"
+
+# good_sigs FILE [DATA] -- verifies a clearsigned FILE, or a detached signature FILE over DATA,
+# against the committed keyring and prints the primary fingerprint of each good signature. Fails
+# when a signature is bad, expired or revoked, or when none is good. A signature from a key that
+# is not in the keyring (NO_PUBKEY) is neither: during a rotation it is the other key's.
+good_sigs() {
+  gpgv --status-fd 3 --keyring "$keyring" ${GOOD_SIGS_OUTPUT:+--output "$GOOD_SIGS_OUTPUT"} "$@" \
+    3>"$work/gpgv.status" >/dev/null 2>"$work/gpgv.log" || true
+  if grep -qE '^\[GNUPG:\] (BADSIG|EXPSIG|EXPKEYSIG|REVKEYSIG) ' "$work/gpgv.status"; then
+    cat "$work/gpgv.log" >&2
+    return 1
+  fi
+  awk '$2 == "VALIDSIG" { print $NF; n++ } END { exit n == 0 }' "$work/gpgv.status" || {
+    cat "$work/gpgv.log" >&2
+    return 1
+  }
+}
 
 # Prints one "package|version|arch sha256" line per stanza of a Packages file.
 stanza_keys() {
@@ -96,10 +119,9 @@ for arch in $ARCHES; do
 done
 if [ -n "$existing" ]; then
   [ -f "$existing/InRelease" ] || fail "$existing/InRelease does not exist"
-  gpgv --keyring "$keyring" --output "$work/old-Release" "$existing/InRelease" 2>"$work/gpgv.log" || {
-    cat "$work/gpgv.log" >&2
-    fail "the published InRelease is not signed by any committed key"
-  }
+  GOOD_SIGS_OUTPUT="$work/old-Release" good_sigs "$existing/InRelease" >/dev/null \
+    || fail "the published InRelease is not signed by any committed key"
+  [ -s "$work/old-Release" ] || fail "the published InRelease holds no Release"
   for arch in $ARCHES; do
     rel="$COMPONENT/binary-$arch/Packages"
     # The SHA256 block lists " <hash> <size> <path>"; only that block is read.
@@ -225,21 +247,27 @@ for arch in $ARCHES; do
   done
 done
 
-set -- --batch --yes --local-user "$signing_key"
+set -- --batch --yes
+for fpr in $signing_keys; do
+  set -- "$@" --local-user "$fpr"
+done
 if [ -n "${APT_GPG_PASSPHRASE_FILE:-}" ]; then
   set -- "$@" --pinentry-mode loopback --passphrase-file "$APT_GPG_PASSPHRASE_FILE"
 fi
 gpg "$@" --digest-algo SHA512 --clearsign --output "$dists/InRelease" "$dists/Release"
 gpg "$@" --digest-algo SHA512 --armor --detach-sign --output "$dists/Release.gpg" "$dists/Release"
 
-# The signing key in the secret must be the key users were told to trust.
-gpgv --keyring "$keyring" "$dists/InRelease" 2>"$work/gpgv.log" || {
-  cat "$work/gpgv.log" >&2
-  fail "the new InRelease does not verify against $keyring; the signing key is not the committed key"
-}
-gpgv --keyring "$keyring" "$dists/Release.gpg" "$dists/Release" 2>"$work/gpgv.log" || {
-  cat "$work/gpgv.log" >&2
-  fail "the new Release.gpg does not verify against $keyring"
-}
+# Every signing key in the secret must be a key users were told to trust, and must have signed.
+for f in InRelease Release.gpg; do
+  if [ "$f" = InRelease ]; then
+    good_sigs "$dists/InRelease" > "$work/signed-by" || true
+  else
+    good_sigs "$dists/Release.gpg" "$dists/Release" > "$work/signed-by" || true
+  fi
+  for fpr in $signing_keys; do
+    grep -qxiF "$fpr" "$work/signed-by" \
+      || fail "the new $f carries no good signature from $fpr in $keyring; the signing key is not a committed key"
+  done
+done
 
 echo "build-apt-repo: staged $(find "$out/pool" -name '*.deb' | wc -l | tr -d ' ') new package(s) in $out"

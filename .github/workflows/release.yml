@@ -9,12 +9,12 @@ name: Release
 #   3. windows-package — (after goreleaser) builds the Windows MSI from the archive
 #                    goreleaser just published, installs it to prove it works, and
 #                    attaches it. Unsigned for now, so it needs no secrets.
-#   4. apt-repository — (after goreleaser) adds the released .deb files to the signed apt
-#                    repository in object storage. Skipped until its APT_* secrets and
-#                    variables are configured.
-#   5. finalize    — (after goreleaser, package and windows-package) adds the .pkg, .msi and
+#   4. finalize    — (after goreleaser, package and windows-package) adds the .pkg, .msi and
 #                    install.sh to checksums.txt and records a GitHub build-provenance
 #                    attestation for every file checksums.txt lists.
+#   5. apt-repository — (after finalize) adds the released .deb files, each checked against its
+#                    attestation, to the signed apt repository in object storage. Skipped
+#                    until its APT_* secrets and variables are configured.
 #
 # Triggered only by pushed version tags, so outside contributors (whose fork PRs
 # never receive secrets) cannot run it. All release secrets live in the protected
@@ -433,7 +433,8 @@ jobs:
   # a version that is already published. An older index this key once signed does pass that check;
   # the backfill below re-adds any recent release such a rollback dropped.
   #
-  # The packages are the bytes goreleaser published, checked against checksums.txt, not a rebuild.
+  # The packages are the bytes goreleaser published, checked against the build-provenance attestation
+  # finalize recorded for them, not a rebuild.
   #
   # Skipped with a notice until every APT_* secret and variable exists, and for prerelease tags,
   # which do not belong in `stable`. Serialized so two tags cannot race on the index. GitHub
@@ -441,8 +442,14 @@ jobs:
   # each run therefore also adds recent releases the index is missing (see "Fetch the released
   # .deb files"), and a release whose run was cancelled is published by the next one.
   apt-repository:
-    needs: goreleaser
+    # After finalize, which records the build-provenance attestations every package is checked
+    # against before it is signed into the index.
+    needs: [goreleaser, finalize]
+    if: ${{ !cancelled() && needs.finalize.result == 'success' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: read
     environment: release
     timeout-minutes: 30
     concurrency:
@@ -510,13 +517,18 @@ jobs:
           aws --version
 
       # The keyring users install is built from the committed public key file, never exported from
-      # the secret, and build-apt-repo.sh fails unless the secret's key signs for it. Rotating the
-      # key is therefore a reviewed commit, not a secret edit: add the new public key to
-      # beacon-archive-keyring.asc beside the old one, replace the secret, and remove the old key
-      # once a release signed by the new one is published. The published index is checked against
-      # every key in the file, so the first release after a rotation still accepts the index the
-      # old key signed.
-      - name: Import the signing key
+      # the secret, and build-apt-repo.sh fails unless every key in the secret is in that file and
+      # signed. Rotating the key is therefore a reviewed commit, not only a secret edit, in two steps:
+      #   1. Commit the new public key beside the old one in beacon-archive-keyring.asc and put both
+      #      secret keys in APT_GPG_PRIVATE_KEY. Every release then signs the index with both, so
+      #      hosts that trust only the old key keep updating, and the published keyring carries
+      #      both keys for hosts to fetch again.
+      #   2. Once hosts have the new keyring, remove the old key from the file and the secret.
+      #      A host that never fetched it fails `apt update` from then on: hosts install the
+      #      keyring once and the package does not ship it, so step 1 must last long enough.
+      # The published index is checked against every key in the file, and a signature from a key
+      # no longer in it is ignored, so each step accepts the index the previous one signed.
+      - name: Import the signing keys
         if: steps.gate.outputs.publish == 'true'
         id: key
         run: |
@@ -526,19 +538,22 @@ jobs:
           mkdir -m 0700 "$GNUPGHOME"
           echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
           printf '%s\n' "$APT_GPG_PRIVATE_KEY" | gpg --batch --quiet --import
-          # Sign with the key the secret holds, not the first one in the committed file, which
-          # during a rotation is the retired key.
-          sec="$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "sec" { n++; want = 1; next } want && $1 == "fpr" { print $10; want = 0 } END { if (n != 1) exit 1 }')" \
-            || { echo "APT_GPG_PRIVATE_KEY must hold exactly one secret key" >&2; exit 1; }
+          # Sign with every key the secret holds, not the keys in the committed file: during step 2
+          # of a rotation the file may still be catching up, and a key in the file without its
+          # secret cannot sign.
+          secret="$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "sec" { want = 1; next } want && $1 == "fpr" { print $10; want = 0 }')"
+          [ -n "$secret" ] || { echo "APT_GPG_PRIVATE_KEY holds no secret key" >&2; exit 1; }
           committed="$(gpg --batch --with-colons --show-keys "$KEYRING_ASC" | awk -F: '$1 == "pub" { want = 1; next } want && $1 == "fpr" { print $10; want = 0 }')"
           [ -n "$committed" ] || { echo "no key in $KEYRING_ASC" >&2; exit 1; }
-          printf '%s\n' "$committed" | grep -qxF "$sec" \
-            || { echo "the key in APT_GPG_PRIVATE_KEY ($sec) is not in $KEYRING_ASC; commit its public key first" >&2; exit 1; }
+          for fpr in $secret; do
+            printf '%s\n' "$committed" | grep -qxF "$fpr" \
+              || { echo "the key $fpr in APT_GPG_PRIVATE_KEY is not in $KEYRING_ASC; commit its public key first" >&2; exit 1; }
+          done
           gpg --batch --quiet --import "$KEYRING_ASC"
           # shellcheck disable=SC2086 # one fingerprint per word
           gpg --batch --export $committed > "$RUNNER_TEMP/beacon-archive-keyring.gpg"
-          echo "fingerprint=$sec" >> "$GITHUB_OUTPUT"
-          echo "signing with $sec; trusted keys: $(printf '%s\n' "$committed" | paste -sd' ')"
+          echo "fingerprints=$(printf '%s\n' "$secret" | paste -sd' ')" >> "$GITHUB_OUTPUT"
+          echo "signing with: $(printf '%s\n' "$secret" | paste -sd' '); trusted keys: $(printf '%s\n' "$committed" | paste -sd' ')"
 
       # Only the signed index is read back. A missing InRelease is the first publish (or a first
       # publish that stopped before writing it, which this resumes); any other error fails the job
@@ -603,25 +618,44 @@ jobs:
               }
               END { exit !found }' "$EXISTING/main/binary-$2/Packages"
           }
-          # fetch TAG ARCH... -- downloads TAG's .debs for ARCH into dist/apt-debs/TAG and checks
-          # them against that release's checksums.txt.
+          # fetch TAG MODE ARCH... -- downloads TAG's .debs for ARCH into dist/apt-debs/TAG. Each must
+          # carry a build-provenance attestation that this repository's release workflow made at
+          # refs/tags/TAG (finalize records them): not checksums.txt, which anyone who can edit a
+          # release can replace together with the .deb. Its control fields must also name beacon,
+          # TAG's version and ARCH, since build-apt-repo.sh indexes a package by what it says
+          # about itself. This tag's packages (MODE required) must pass; a backfilled release whose
+          # package has no such attestation (one from before attestations, or a replaced asset) is
+          # left out with a warning. A package that is attested but misnamed fails the job.
           fetch() {
-            tag="$1" version="${1#v}" dir="dist/apt-debs/$1"
-            shift
+            tag="$1" mode="$2" version="${1#v}" dir="dist/apt-debs/$1"
+            shift 2
             mkdir -p "$dir"
             for arch in "$@"; do
-              gh release download "$tag" --repo "$REPO" --dir "$dir" --pattern "beacon_${version}_linux_${arch}.deb"
+              name="beacon_${version}_linux_${arch}.deb"
+              deb="$dir/$name"
+              gh release download "$tag" --repo "$REPO" --dir "$dir" --pattern "$name"
+              if ! gh attestation verify "$deb" --repo "$REPO" \
+                --signer-workflow "$REPO/.github/workflows/release.yml" --source-ref "refs/tags/$tag" \
+                --deny-self-hosted-runners > "$RUNNER_TEMP/attestation.log" 2>&1; then
+                cat "$RUNNER_TEMP/attestation.log" >&2
+                if [ "$mode" = required ]; then
+                  echo "$name has no build-provenance attestation from $REPO's release workflow at $tag" >&2
+                  exit 1
+                fi
+                echo "::warning title=apt repository::$name has no build-provenance attestation from the release workflow at $tag; it is not published"
+                rm -f "$deb"
+                continue
+              fi
+              for field in "Package=beacon" "Version=$version" "Architecture=$arch"; do
+                got="$(dpkg-deb -f "$deb" "${field%%=*}")"
+                [ "$got" = "${field#*=}" ] \
+                  || { echo "$name from $tag declares ${field%%=*} '$got', expected '${field#*=}'" >&2; exit 1; }
+              done
             done
-            gh release download "$tag" --repo "$REPO" --dir "$dir" --pattern checksums.txt
-            # Every .deb must be listed; --ignore-missing alone would pass an unlisted one.
-            for f in "$dir"/beacon_*.deb; do
-              awk -v name="${f##*/}" '$2 == name { found = 1 } END { exit !found }' "$dir/checksums.txt" \
-                || { echo "${f##*/} is not in $tag's checksums.txt" >&2; exit 1; }
-            done
-            (cd "$dir" && sha256sum --check --ignore-missing --strict checksums.txt)
+            rmdir "$dir" 2>/dev/null || true
           }
           # This tag's packages are always fetched, so a rerun checks them against the index again.
-          fetch "$TAG" amd64 arm64
+          fetch "$TAG" required amd64 arm64
           tags="$(gh release list --repo "$REPO" --exclude-drafts --exclude-pre-releases --limit 200 \
             --json tagName --jq '.[].tagName' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)"
           # Releases up to this one only: a newer tag's assets may still be uploading.
@@ -639,17 +673,20 @@ jobs:
             [ -n "$missing" ] || continue
             echo "::notice::$tag is missing from the apt repository for$missing; adding it"
             # shellcheck disable=SC2086 # one architecture per word
-            fetch "$tag" $missing
+            fetch "$tag" optional $missing
           done
 
       - name: Build and sign the repository update
         if: steps.gate.outputs.publish == 'true'
         env:
-          FINGERPRINT: ${{ steps.key.outputs.fingerprint }}
+          FINGERPRINTS: ${{ steps.key.outputs.fingerprints }}
           EXISTING: ${{ steps.existing.outputs.dir }}
         run: |
           set -euo pipefail
-          set -- --out dist/apt-repo --keyring "$RUNNER_TEMP/beacon-archive-keyring.gpg" --signing-key "$FINGERPRINT"
+          set -- --out dist/apt-repo --keyring "$RUNNER_TEMP/beacon-archive-keyring.gpg"
+          for fpr in $FINGERPRINTS; do
+            set -- "$@" --signing-key "$fpr"
+          done
           if [ -n "$EXISTING" ]; then
             set -- "$@" --existing "$EXISTING"
           fi

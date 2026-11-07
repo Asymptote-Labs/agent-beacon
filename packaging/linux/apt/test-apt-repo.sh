@@ -149,7 +149,7 @@ if sh "$BUILD" --out "$work/out7" --keyring "$work/keyring.gpg" --signing-key "$
   --existing "$work/existing" "$deb_a3" "$deb_b3" 2>"$work/err7"; then
   fail "signing with another key was accepted"
 fi
-grep -q 'signing key is not the committed key' "$work/err7" || { cat "$work/err7" >&2; fail "wrong error for the wrong signing key"; }
+grep -q 'signing key is not a committed key' "$work/err7" || { cat "$work/err7" >&2; fail "wrong error for the wrong signing key"; }
 pass "the wrong signing key is refused"
 
 # 8. A client that trusts another key refuses the repository.
@@ -174,31 +174,42 @@ for v in 1.0.0 1.0.1 1.0.2; do
 done
 pass "a publish that stopped before InRelease is resumed"
 
-# 10. Key rotation: the committed keyring holds the old and the new key and the new key signs.
-#     The published index the old key signed is still accepted, and clients trusting both or only
-#     the new key accept the result. Several releases merge in one run (a missed release added
-#     by the next one).
+# 10. Key rotation, step one: the new public key is committed beside the old one and both keys
+#     sign. The index the old key alone signed is accepted, and a client that still trusts only
+#     the old key, one that trusts only the new key, and one that trusts both all accept the
+#     result. Several releases merge in one run (a missed release added by the next one).
 gpg --batch --export "$fpr" "$other_fpr" > "$work/both-keyring.gpg"
 existing
 deb_a4="$(make_deb 1.0.3 amd64)"
 deb_b4="$(make_deb 1.0.3 arm64)"
 deb_a5="$(make_deb 1.0.4 amd64)"
 deb_b5="$(make_deb 1.0.4 arm64)"
-sh "$BUILD" --out "$work/out10" --keyring "$work/both-keyring.gpg" --signing-key "$other_fpr" \
+sh "$BUILD" --out "$work/out10" --keyring "$work/both-keyring.gpg" \
+  --signing-key "$fpr" --signing-key "$other_fpr" \
   --existing "$work/existing" "$deb_a4" "$deb_b4" "$deb_a5" "$deb_b5"
 publish "$work/out10"
 for v in 1.0.0 1.0.3 1.0.4; do
   sh "$VERIFY" "file:$work/bucket" "$work/both-keyring.gpg" "$v" >/dev/null
 done
-sh "$VERIFY" "file:$work/bucket" "$work/other-keyring.gpg" 1.0.4 >/dev/null
-pass "a rotated key re-signs the old key's index, keeping every version"
+sh "$VERIFY" "file:$work/bucket" "$work/keyring.gpg" 1.0.4 >/dev/null \
+  || fail "a client that trusts only the old key refused the index during the rotation"
+sh "$VERIFY" "file:$work/bucket" "$work/other-keyring.gpg" 1.0.4 >/dev/null \
+  || fail "a client that trusts only the new key refused the index during the rotation"
+pass "during a rotation both keys sign, so clients trusting either key keep updating"
 
+# 11. Step two: the old key is removed from the keyring and the secret. The index both keys
+#     signed is still read (the old key's signature is ignored, the new one's is good).
 existing
 deb_a6="$(make_deb 1.0.5 amd64)"
 deb_b6="$(make_deb 1.0.5 arm64)"
 sh "$BUILD" --out "$work/out11" --keyring "$work/other-keyring.gpg" --signing-key "$other_fpr" \
   --existing "$work/existing" "$deb_a6" "$deb_b6"
-pass "after a rotation the old key can be removed from the committed keyring"
+publish "$work/out11"
+sh "$VERIFY" "file:$work/bucket" "$work/other-keyring.gpg" 1.0.5 >/dev/null
+if sh "$VERIFY" "file:$work/bucket" "$work/keyring.gpg" 1.0.5 >/dev/null 2>&1; then
+  fail "a client trusting only the removed key still accepted the index"
+fi
+pass "after the rotation the old key is removed and its signature is no longer made"
 
 # 12. A staged tree holds only what a run adds, so the pre-publish check verifies the index ("-")
 #     and each staged package's own version and architecture, not every architecture.
