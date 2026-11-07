@@ -505,8 +505,12 @@ jobs:
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
           echo "publish=true" >> "$GITHUB_OUTPUT"
 
+      # Full history and tags: every package is trusted only when its tag's commit is an ancestor
+      # of this run's commit (see "Fetch the released .deb files").
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.gate.outputs.publish == 'true'
+        with:
+          fetch-depth: 0
 
       - name: Install apt repository tools
         if: steps.gate.outputs.publish == 'true'
@@ -626,9 +630,26 @@ jobs:
           # about itself. This tag's packages (MODE required) must pass; a backfilled release whose
           # package has no such attestation (one from before attestations, or a replaced asset) is
           # left out with a warning. A package that is attested but misnamed fails the job.
+          #
+          # The workflow path and ref alone are not enough: anyone who can push a v* tag can run
+          # their own release.yml at that tag (finalize is outside the release environment) and so
+          # mint a matching attestation. So TAG's commit must be an ancestor of this run's commit,
+          # the history this release was built from, and the attestation must name that commit as
+          # both its source and its signer workflow's commit. A tag on a side commit, or one moved
+          # since its package was attested, is not trusted. This run's own commit is the trust
+          # root, as it already is for everything else this job signs.
           fetch() {
             tag="$1" mode="$2" version="${1#v}" dir="dist/apt-debs/$1"
             shift 2
+            if ! commit="$(git rev-parse --verify --quiet "refs/tags/$tag^{commit}")" \
+              || ! git merge-base --is-ancestor "$commit" "$GITHUB_SHA"; then
+              if [ "$mode" = required ]; then
+                echo "$tag does not resolve to a commit in the history of $GITHUB_SHA" >&2
+                exit 1
+              fi
+              echo "::warning title=apt repository::$tag is not in the history of this release ($GITHUB_SHA); its packages are not published"
+              return 0
+            fi
             mkdir -p "$dir"
             for arch in "$@"; do
               name="beacon_${version}_linux_${arch}.deb"
@@ -636,13 +657,14 @@ jobs:
               gh release download "$tag" --repo "$REPO" --dir "$dir" --pattern "$name"
               if ! gh attestation verify "$deb" --repo "$REPO" \
                 --signer-workflow "$REPO/.github/workflows/release.yml" --source-ref "refs/tags/$tag" \
+                --source-digest "$commit" --signer-digest "$commit" \
                 --deny-self-hosted-runners > "$RUNNER_TEMP/attestation.log" 2>&1; then
                 cat "$RUNNER_TEMP/attestation.log" >&2
                 if [ "$mode" = required ]; then
-                  echo "$name has no build-provenance attestation from $REPO's release workflow at $tag" >&2
+                  echo "$name has no build-provenance attestation from $REPO's release workflow at $tag ($commit)" >&2
                   exit 1
                 fi
-                echo "::warning title=apt repository::$name has no build-provenance attestation from the release workflow at $tag; it is not published"
+                echo "::warning title=apt repository::$name has no build-provenance attestation from the release workflow at $tag ($commit); it is not published"
                 rm -f "$deb"
                 continue
               fi

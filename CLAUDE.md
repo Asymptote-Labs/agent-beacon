@@ -303,9 +303,13 @@ A pushed `v*` tag runs the full release end-to-end via
    an edited index is never re-signed), refuses to replace a published version, and fails unless
    every key in the secret is a committed one and signed. Every `.deb` (this tag's and each
    backfilled one) must pass `gh attestation verify` against finalize's attestation from
-   `release.yml` at `refs/tags/<tag>`, never the release's replaceable `checksums.txt`, and its
-   control fields must name `beacon`, the tag's version and the architecture; this tag's must
-   pass, and a backfilled one without an attestation is left out with a warning. Rotating the
+   `release.yml` at `refs/tags/<tag>`, never the release's replaceable `checksums.txt`, pinned
+   (`--source-digest`/`--signer-digest`) to the tag's commit, which must be an ancestor of this
+   run's commit: anyone who can push a `v*` tag can run their own `release.yml` and mint an
+   attestation for that path and ref, so only packages built from this release's history are
+   trusted (the checkout uses `fetch-depth: 0` for the check). Its control fields must name
+   `beacon`, the tag's version and the architecture; this tag's must pass, and a backfilled one
+   that fails (no attestation, or a tag outside the history) is left out with a warning. Rotating the
    key is a reviewed commit in two steps: commit the new public key beside the old and put both
    secret keys in `APT_GPG_PRIVATE_KEY`, so every release is signed by both and hosts that trust
    only the old key keep updating while they fetch the new keyring; then remove the old key from
