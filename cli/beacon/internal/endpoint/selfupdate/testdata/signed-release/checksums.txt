@@ -1,0 +1,2 @@
+4e9416efcf77b84013f263e1f9008c656861298be5aabc82f458e6e47c60d9ff  beacon_1.0.0_linux_amd64.deb
+ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff  beacon_1.0.0_linux_amd64.rpm

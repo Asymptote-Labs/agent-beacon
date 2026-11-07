@@ -753,7 +753,7 @@ jobs:
           yq '(.builds[].goos) = ["linux"] | (.builds[].goarch) = ["amd64"] | del(.builds[].ignore)' \
             .goreleaser.yaml > "$RUNNER_TEMP/goreleaser-linux-amd64.yaml"
           goreleaser release --config "$RUNNER_TEMP/goreleaser-linux-amd64.yaml" \
-            --snapshot --clean --skip=publish,homebrew,announce --parallelism 1
+            --snapshot --clean --skip=publish,homebrew,announce,sign --parallelism 1
       # Every generated Vector pack has to load in the Vector the packages ship. Vector 0.57 and 0.58
       # changed how ${VAR} expands and broke most of them with no Beacon change at all. Uses the CLI
       # goreleaser just built, which carries the real embedded hooks binary.
