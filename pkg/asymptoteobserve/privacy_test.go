@@ -288,11 +288,42 @@ func TestRedactStringKeepsLabelsAndOrdinaryText(t *testing.T) {
 	if got := RedactString("git clone https://u:pw123456@example.com/r"); got != "git clone https://u:[REDACTED]@example.com/r" {
 		t.Fatalf("URL credential = %q, want the scheme, user and host kept", got)
 	}
-	// An unquoted value stops at a URL query-string delimiter, not just a quote or whitespace: the
-	// generic unquoted-value grammar used to run right through `&`, erasing every parameter after
-	// the secret instead of leaving them as readable, non-secret diagnostic data.
-	if got := RedactString("GET https://api.example.com/v1/data?api_key=sk-liveabcdef0123456789&user=alice&format=json"); got != "GET https://api.example.com/v1/data?api_key=[REDACTED]&user=alice&format=json" {
-		t.Fatalf("URL query string = %q, want only api_key's value redacted and the other parameters kept", got)
+	// A secret-named query parameter's value ends at the next parameter or the fragment, so the
+	// parameters after it stay readable instead of being erased with it.
+	for input, want := range map[string]string{
+		"GET https://api.example.com/v1/data?api_key=sk-liveabcdef0123456789&user=alice&format=json": "GET https://api.example.com/v1/data?api_key=[REDACTED]&user=alice&format=json",
+		"GET /v1?user=alice&token=opaque-query-value&format=json#top":                                "GET /v1?user=alice&token=[REDACTED]&format=json#top",
+		"GET /v1?access_token=opaque-one&client_secret=opaque-two&page=2":                            "GET /v1?access_token=[REDACTED]&client_secret=[REDACTED]&page=2",
+	} {
+		if got := RedactString(input); got != want {
+			t.Fatalf("RedactString(%q) = %q, want %q", input, got, want)
+		}
+	}
+	// Outside a URL query, `&`, `?` and `#` are part of a labeled value: generated passwords hold
+	// them, so the whole value goes.
+	for input, want := range map[string]string{
+		"export DB_PASSWORD=#Xy9kqLmN2pQ":  "export DB_PASSWORD=[REDACTED]",
+		"password: s3cr3t#tail&more":       "password: [REDACTED]",
+		"token=?abcdef0123456789 next":     "token=[REDACTED] next",
+		"API_KEY=ab&cd?ef#gh rest of line": "API_KEY=[REDACTED] rest of line",
+	} {
+		if got := RedactString(input); got != want {
+			t.Fatalf("RedactString(%q) = %q, want %q", input, got, want)
+		}
+	}
+	// A diff's removed line that assigns a snake_case secret keeps its `=`: the flag rule does not
+	// take the assignment's separator for a flag's value.
+	for input, want := range map[string]string{
+		"diff:\n-SECRET_KEY = 'django-insecure-abc'\n+DEBUG = False": "diff:\n-SECRET_KEY = '[REDACTED]'\n+DEBUG = False",
+		"-api_token = opaque-diff-value":                             "-api_token = [REDACTED]",
+		"-api-token : opaque-diff-value":                             "-api-token : [REDACTED]",
+	} {
+		if got := RedactString(input); got != want {
+			t.Fatalf("RedactString(%q) = %q, want %q", input, got, want)
+		}
+	}
+	if got := RedactString("tool --token =opaque-flag-value"); got != "tool --token [REDACTED]" {
+		t.Fatalf("flag value opening with = was %q, want it redacted", got)
 	}
 	// Detection rules match what kind of credential a line held, so the public type prefix and the
 	// Authorization scheme stay.

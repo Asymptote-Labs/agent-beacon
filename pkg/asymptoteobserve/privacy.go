@@ -96,13 +96,17 @@ func quotedRules(kind quotedKind, keep func(string) bool) []redactionRule {
 	return rules
 }
 
-// redactUnquoted is an unquoted value, up to a quote, a comma, whitespace, or a URL query-string
-// delimiter. Brackets, braces and backslashes are part of it: a generated password is full of
-// them. It never starts with a quote, escaped or not, so it leaves a value the quoted rule already
-// replaced alone. `&`, `?` and `#` stop the value too: without them, a label matched inside a URL
-// query string (`?api_key=...&user=alice&format=json`) swallowed every parameter after the secret,
-// destroying non-secret diagnostic data that sits next to it rather than just redacting the key.
-const redactUnquoted = `(?:[^"'` + "`" + `,\s\\&?#]|\\[^"'` + "`" + `])[^"'` + "`" + `,\s&?#]*`
+// redactUnquoted is an unquoted value, up to a quote, a comma or whitespace. Brackets, braces and
+// backslashes are part of it: a generated password is full of them. It never starts with a quote,
+// escaped or not, so it leaves a value the quoted rule already replaced alone.
+const redactUnquoted = `(?:[^"'` + "`" + `,\s\\]|\\[^"'` + "`" + `])[^"'` + "`" + `,\s]*`
+
+// redactQueryValue is the value of a URL query parameter: up to the `&` that opens the next
+// parameter or the `#` that opens the fragment, and otherwise where redactUnquoted stops. Only the
+// query rule uses it, whose label follows a `?` or `&`: a labeled assignment anywhere else keeps
+// redactUnquoted, because a password (`DB_PASSWORD=#Xy9…`, `password: s3cr3t#tail&more`) can hold
+// those characters.
+const redactQueryValue = `[^"'` + "`" + `,\s\\&#][^"'` + "`" + `,\s&#]*`
 
 // redactBare is a bare value after a quoted label: a JSON number or literal, which ends at the
 // structure around it.
@@ -250,6 +254,36 @@ var redactQuotedLabelNeedles = func() *redactNeedles {
 	return set
 }()
 
+// redactQueryLabelNeedles gate the rule for a secret-named URL query parameter: the label is the
+// whole name of a parameter, so the run of label characters before the needle opens right after a
+// `?` or an `&`.
+var redactQueryLabelNeedles = func() *redactNeedles {
+	set := newRedactNeedles(true, redactLabelWords...)
+	set.within = redactLabelNeedles
+	set.followedBy = func(rest string) bool { return strings.HasPrefix(rest, "=") }
+	set.precededBy = func(before string) bool {
+		_, ok := queryLabelStart(before)
+		return ok
+	}
+	return set
+}()
+
+// queryLabelStart finds the `?` or `&` that opens the query parameter the text before a label word
+// ends in: the byte before the run of label characters (labelClass) at its end.
+func queryLabelStart(before string) (int, bool) {
+	run := len(before)
+	for run > 0 && labelClass[before[run-1]] {
+		run--
+	}
+	if redactWork != nil {
+		redactWork(len(before) - run)
+	}
+	if run == 0 || before[run-1] != '?' && before[run-1] != '&' {
+		return 0, false
+	}
+	return run - 1, true
+}
+
 // redactFlagWords are the words every redactFlag match ends in, lower-cased.
 var redactFlagWords = []string{"password", "passwd", "passphrase", "token", "secret", "key"}
 
@@ -370,6 +404,15 @@ func isAuthScheme(value string) bool {
 	return false
 }
 
+// isAuthSchemeOrRedactedParam is isAuthScheme, plus a query parameter's value the query rule
+// already replaced and the parameters after it: `[REDACTED]&user=alice`, `[REDACTED]#top`.
+func isAuthSchemeOrRedactedParam(value string) bool {
+	if rest, ok := strings.CutPrefix(value, redactedValue); ok && rest != "" && (rest[0] == '&' || rest[0] == '#') {
+		return true
+	}
+	return isAuthScheme(value)
+}
+
 // isRedactedJWTPrefix keeps the `eyJ` the header rule left in `Bearer eyJ[REDACTED]`, which the
 // bearer rule would otherwise take for a token of its own.
 func isRedactedJWTPrefix(value string) bool {
@@ -415,14 +458,24 @@ var redactionRules = concatRules([]redactionRule{
 		expr:        `(?i)(\b` + redactLabel + `(?P<q>` + redactOpenQuote + `)\s*[:=]\s*)(?P<value>` + redactBare + `)`,
 		replacement: "${1}${q}" + redactedValue + "${q}", keep: isLiteralOrAuthScheme, needles: redactQuotedLabelNeedles, start: startLabel,
 	},
+	// A secret-named URL query parameter: `?api_key=x&user=alice`. Its value ends at the next
+	// parameter or the fragment, so the parameters after it stay readable; the unquoted rule below
+	// then keeps what this one wrote rather than taking the rest of the query for the value.
+	{
+		expr:        `(?i)([?&]` + redactLabel + `=)(?P<value>` + redactQueryValue + `)`,
+		replacement: "${1}" + redactedValue, needles: redactQueryLabelNeedles, start: startQuery,
+	},
 	{
 		expr:        `(?i)(\b` + redactLabel + `\s*[:=]\s*)(?P<value>` + redactUnquoted + `)`,
-		replacement: "${1}" + redactedValue, keep: isAuthScheme, needles: redactLabelNeedles, start: startLabel,
+		replacement: "${1}" + redactedValue, keep: isAuthSchemeOrRedactedParam, needles: redactLabelNeedles, start: startLabel,
 	},
 	// A command-line flag: `--password x`, `--token=x`, `--api-key x`, and quoted, the way agents
 	// usually write arguments: `--password "x y"`, `--token='x'`.
 }, quotedRules(quotedFlag, nil), []redactionRule{
-	{expr: `(?i)(` + redactFlag + `)([^\s"'-][^\s"']*)`, replacement: "${1}" + redactedValue, needles: redactFlagNeedles, start: startFlag},
+	// The value never starts with a dash (that is the next flag), nor is it a lone `=` or `:`: that
+	// is an assignment's separator, as on a diff's removed line `-SECRET_KEY = 'x'`, which the label
+	// rules have already redacted.
+	{expr: `(?i)(` + redactFlag + `)((?:[^\s"'=:-]|[=:][^\s"'])[^\s"']*)`, replacement: "${1}" + redactedValue, needles: redactFlagNeedles, start: startFlag},
 	// A flag and its value as two quoted items of an argument list, the way an MCP server's args
 	// are written in JSON, TOML and YAML: `"args": ["--api-key", "x"]`.
 	{

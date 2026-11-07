@@ -59,6 +59,9 @@ const (
 	// startScheme: at a letter on a word boundary in the run of [A-Za-z0-9+.-] before the needle,
 	// a URL's `\b[a-z][a-z0-9+.-]*` scheme. The pattern opens with \b.
 	startScheme
+	// startQuery: at the `?` or `&` right before the run of [A-Za-z0-9_.-] that ends at the
+	// needle, where a URL query parameter's name begins.
+	startQuery
 	// startLine: anywhere on the line of the needle or the blank lines before it. The pattern runs
 	// whole from the start of that line, where its (?m)^ and \b see what they see in the whole
 	// text.
@@ -531,6 +534,12 @@ func (rule redactionRule) startFor(t string, h redactHit, pos int, boundary bool
 			}
 		}
 		return -1
+	case startQuery:
+		q, ok := queryLabelStart(t[:h.start])
+		if !ok || q < pos {
+			return -1
+		}
+		return q
 	case startFlag, startListedFlag:
 		// The needle set's precededBy has checked that what comes before the flag is whitespace,
 		// the start of the text, or (listed) a quote.
