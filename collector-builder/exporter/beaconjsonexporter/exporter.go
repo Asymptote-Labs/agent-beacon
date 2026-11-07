@@ -86,6 +86,7 @@ func newExporter(raw component.Config, set exporter.Settings) (*beaconExporter, 
 			IncludeRuntimeMetrics: cfg.IncludeRuntimeMetrics,
 			IncludeCodexSpans:     cfg.IncludeCodexSpans,
 			CaptureModelContext:   cfg.CaptureModelContext,
+			PeerUser:              cfg.PeerUser,
 			CodexSurfaces:         codexSurfaces,
 		}),
 	}, nil
@@ -234,6 +235,7 @@ func (e *beaconExporter) eventConverter() beaconevent.Converter {
 		IncludeRuntimeMetrics: e.cfg.IncludeRuntimeMetrics,
 		IncludeCodexSpans:     e.cfg.IncludeCodexSpans,
 		CaptureModelContext:   e.cfg.CaptureModelContext,
+		PeerUser:              e.cfg.PeerUser,
 		CodexSurfaces:         e.codexSurfaces,
 	})
 }

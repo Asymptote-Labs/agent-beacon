@@ -95,7 +95,19 @@ type Options struct {
 	// CodexSurfaces remembers which Codex surface (CLI or desktop app) each conversation runs in,
 	// for records that don't say (see codex_surface.go). Nil places each record on its own.
 	CodexSurfaces *CodexSurfaces
+	// PeerUser takes each event's user from the PeerUIDAttribute and PeerUserAttribute resource
+	// attributes. Only a collector whose pipeline runs the beacon_peer processor sets it: that
+	// processor removes whatever a sender put under those names and writes the account the kernel
+	// says owns the sending socket, so without it the attributes are only what the sender claimed.
+	PeerUser bool
 }
+
+const (
+	// PeerUIDAttribute and PeerUserAttribute are the resource attributes the beacon_peer processor
+	// writes: the account id that owns the client socket an export arrived on, and its name.
+	PeerUIDAttribute  = "beacon.peer.uid"
+	PeerUserAttribute = "beacon.peer.user"
+)
 
 type Converter struct {
 	opts Options
@@ -167,7 +179,7 @@ func (c Converter) EventsFromMetrics(metrics pmetric.Metrics) []Event {
 }
 
 func ShouldDropLog(resourceAttrs map[string]interface{}, record plog.LogRecord) bool {
-	attrs := MergeMaps(resourceAttrs, AttrsToMap(record.Attributes()))
+	attrs := mergeSignalAttrs(resourceAttrs, AttrsToMap(record.Attributes()))
 	if name := ClaudeLogEventName(attrs, record.Body().AsString()); isClaudeAPIBody(name) {
 		// A request body is decided once it is parsed, in eventFromLog: it is kept for a WebFetch
 		// page or for the MCP tools it advertised. Nothing is kept from a response body.
@@ -338,7 +350,7 @@ func (c Converter) EventFromLog(resourceAttrs map[string]interface{}, record plo
 // listings are the mcp.tool_listed events for the MCP tools a Claude Code request body advertised,
 // which are kept in its place.
 func (c Converter) eventFromLog(resourceAttrs map[string]interface{}, record plog.LogRecord) (event Event, keep bool, listings []Event) {
-	attrs := MergeMaps(resourceAttrs, AttrsToMap(record.Attributes()))
+	attrs := mergeSignalAttrs(resourceAttrs, AttrsToMap(record.Attributes()))
 	body := record.Body().AsString()
 	kept, isAPIBody := takeClaudeAPIBody(attrs, ClaudeLogEventName(attrs, body), c.opts.CaptureModelContext)
 	ts := Timestamp(record.Timestamp().AsTime())
@@ -376,7 +388,7 @@ func (c Converter) eventFromLog(resourceAttrs map[string]interface{}, record plo
 }
 
 func (c Converter) EventFromSpan(resourceAttrs map[string]interface{}, span ptrace.Span) Event {
-	attrs := MergeMaps(resourceAttrs, AttrsToMap(span.Attributes()))
+	attrs := mergeSignalAttrs(resourceAttrs, AttrsToMap(span.Attributes()))
 	codexTurnUsage := IsCodexTurnUsageSpan(attrs, span.Name())
 	action := statedAction(attrs, "beacon.event.action", "event.action", "gen_ai.agent.action", "ai.agent.action")
 	fidelity := asymptoteobserve.FidelityObserved
@@ -422,7 +434,7 @@ func (c Converter) EventFromSpan(resourceAttrs map[string]interface{}, span ptra
 }
 
 func (c Converter) ShouldDropSpan(resourceAttrs map[string]interface{}, span ptrace.Span) bool {
-	attrs := MergeMaps(resourceAttrs, AttrsToMap(span.Attributes()))
+	attrs := mergeSignalAttrs(resourceAttrs, AttrsToMap(span.Attributes()))
 	harness := HarnessName(attrs, span.Name())
 	if isCodexHarness(harness) {
 		return !c.opts.IncludeCodexSpans && !IsCodexTurnUsageSpan(attrs, span.Name())
@@ -629,7 +641,7 @@ func (c Converter) NormalizeClaudeLogEvent(event *Event, attrs map[string]interf
 	if event == nil || !isClaudeOTelLogHarness(event.Harness.Name) {
 		return
 	}
-	normalizeClaudeCoworkContext(event, attrs)
+	normalizeClaudeCoworkContext(event, attrs, c.opts.PeerUser)
 	originalAction := event.Event.Action
 	originalCategory := event.Event.Category
 	preserveAction := statedAction(attrs, "beacon.event.action", "event.action", "gen_ai.agent.action", "ai.agent.action") != ""
@@ -784,7 +796,19 @@ func NormalizeClaudeToolResult(event *Event, attrs map[string]interface{}) {
 	}
 }
 
-func normalizeClaudeCoworkContext(event *Event, attrs map[string]interface{}) {
+// normalizeClaudeCoworkContext applies what Claude Cowork reports about itself: where it ran and,
+// unless peerUser is set, the cloud identity it names in place of the collector's account.
+//
+// With peerUser (beacon_peer in the pipeline) a Cowork event has no user. Neither answer at hand is
+// the person: Cowork runs in the cloud and Claude Desktop does not ship for Linux, so its export
+// reaches the collector through a relay (`beacon endpoint cowork --ngrok`, a reverse proxy) and the
+// kernel names the relay's local account, the same one for every member of the org; and the cloud
+// identity attributes are whatever the sender wrote, behind a harness that is only a service name,
+// so honoring them would let any local account record an event as uid 0 / root by calling itself
+// Cowork. An empty user is unknown rather than wrong. Both answers stay in the event's raw
+// attributes: the cloud identity as Cowork sent it, and the relaying account as beacon.peer.uid and
+// beacon.peer.user.
+func normalizeClaudeCoworkContext(event *Event, attrs map[string]interface{}, peerUser bool) {
 	if event.Harness.Name != "claude_cowork" {
 		return
 	}
@@ -793,6 +817,10 @@ func normalizeClaudeCoworkContext(event *Event, attrs map[string]interface{}) {
 		event.Origin = asymptoteobserve.OriginCloud
 	case "local", "desktop":
 		event.Origin = asymptoteobserve.OriginLocal
+	}
+	if peerUser {
+		event.User = UserInfo{}
+		return
 	}
 	if name := FirstString(attrs, "user.email", "enduser.id", "user.account_id", "user.account_uuid", "user.id"); name != "" {
 		event.User.Name = name
@@ -887,7 +915,7 @@ func JSONMapAttr(attrs map[string]interface{}, key string) map[string]interface{
 }
 
 func (c Converter) EventFromMetric(resourceAttrs map[string]interface{}, metric pmetric.Metric) Event {
-	attrs := MergeMaps(resourceAttrs, map[string]interface{}{})
+	attrs := mergeSignalAttrs(resourceAttrs, map[string]interface{}{})
 	action := statedAction(attrs, "beacon.event.action", "event.action")
 	if action == "" {
 		action = "metric.observed"
@@ -1097,7 +1125,7 @@ func numberDataPointValue(dp pmetric.NumberDataPoint) float64 {
 }
 
 func (c Converter) usageEventFromDataPoint(resourceAttrs map[string]interface{}, metric pmetric.Metric, dpAttrs pcommon.Map, ts pcommon.Timestamp, value float64, extra map[string]interface{}) Event {
-	attrs := MergeMaps(resourceAttrs, AttrsToMap(dpAttrs))
+	attrs := mergeSignalAttrs(resourceAttrs, AttrsToMap(dpAttrs))
 	action := "token.usage"
 	if IsCostUsageMetric(metric.Name()) {
 		action = "cost.usage"
@@ -1179,6 +1207,7 @@ func ApplyTokenUsage(event *Event, tokenType string, value int64) {
 
 func (c Converter) PopulateCommon(event *Event, attrs map[string]interface{}) {
 	populateRunContext(event, attrs)
+	c.applyPeerUser(event, attrs)
 	// A runtime that numbers its own telemetry gets that number preserved; the exporter
 	// stamps its own emission counter for everything else (see beaconExporter.
 	// stampSequence). Zero and negative values are ignored -- zero is the schema's
@@ -2338,4 +2367,52 @@ func EventCategory(action, explicit string) string {
 	default:
 		return ""
 	}
+}
+
+// applyPeerUser records the account that sent an export in place of the collector's own.
+//
+// Without it every OTLP event carries the collector process's account, which on a system install
+// is root for everyone: a prompt typed by one person on a shared machine reads as root's. The
+// beacon_peer processor resolves the sender from the kernel; this only copies what it found, and
+// changes nothing when it found nobody, so an unattributed event is the collector's account as it
+// always was rather than someone's guess. With it on, nothing a sender reports replaces the kernel's
+// answer; a Claude Cowork event of any signal, which arrives through a relay, gets no user instead
+// (see normalizeClaudeCoworkContext).
+func (c Converter) applyPeerUser(event *Event, attrs map[string]interface{}) {
+	if !c.opts.PeerUser {
+		return
+	}
+	// With the processor in the pipeline, the collector's own account is never a fallback: on a
+	// system install it is root, and a sender that closed its connection before the lookup would
+	// otherwise be recorded exactly like root's own, kernel-attributed exports. An event whose sender
+	// could not be identified carries no user at all.
+	uid := FirstString(attrs, PeerUIDAttribute)
+	// Claude Cowork reaches the collector only through a relay (see normalizeClaudeCoworkContext),
+	// so the kernel's answer is the relay's account, not the person. That holds for every signal,
+	// including the spans and metric datapoints that never pass through the log normalizer.
+	if uid == "" || event.Harness.Name == "claude_cowork" {
+		event.User = UserInfo{}
+		return
+	}
+	event.User.UID = uid
+	// An account the system cannot name is still recorded by its id, rather than keeping the
+	// collector's name beside someone else's uid.
+	event.User.Name = FirstString(attrs, PeerUserAttribute)
+}
+
+// mergeSignalAttrs is MergeMaps(resource, signal) for one record, span or datapoint, except that the
+// peer attributes come from the resource alone. beacon_peer writes them on the resource, and in a
+// plain merge a record, span or datapoint attribute of the same name would win, letting a sender
+// name any account it liked. The processor also strips them below the resource; this keeps the
+// converter right on its own.
+func mergeSignalAttrs(resource, signal map[string]interface{}) map[string]interface{} {
+	merged := MergeMaps(resource, signal)
+	for _, key := range []string{PeerUIDAttribute, PeerUserAttribute} {
+		if value, ok := resource[key]; ok {
+			merged[key] = value
+		} else {
+			delete(merged, key)
+		}
+	}
+	return merged
 }

@@ -1,4 +1,4 @@
-package beaconingestextension
+package accountname
 
 import (
 	"sync"
@@ -17,12 +17,12 @@ const (
 	nameCacheTTL = 10 * time.Minute
 )
 
-// nameCache resolves the account name stamped on each event from the peer's account: a uid on
-// Unix, a SID on Windows (see resolveName for each). At most one lookup per account runs at a time:
+// Cache resolves the account name stamped on each event from the peer's account: a uid on
+// Unix, a SID on Windows (see Resolve for each). At most one lookup per account runs at a time:
 // connections that arrive while it runs wait on that one, and one that outlasts the wait still
 // fills the cache when it returns, so a slow directory service leaves the account unnamed only
 // until it answers rather than for nameCacheTTL.
-type nameCache struct {
+type Cache struct {
 	mu      sync.Mutex
 	entries map[string]nameEntry
 	pending map[string]chan struct{}
@@ -36,17 +36,17 @@ type nameEntry struct {
 	expires time.Time
 }
 
-func newNameCache() *nameCache {
-	return &nameCache{
+func NewCache() *Cache {
+	return &Cache{
 		entries: map[string]nameEntry{},
 		pending: map[string]chan struct{}{},
 		now:     time.Now,
 		wait:    nameLookupTimeout,
-		lookup1: resolveName,
+		lookup1: Resolve,
 	}
 }
 
-func (c *nameCache) lookup(uid string) string {
+func (c *Cache) Lookup(uid string) string {
 	c.mu.Lock()
 	if entry, ok := c.entries[uid]; ok && c.now().Before(entry.expires) {
 		c.mu.Unlock()
@@ -79,9 +79,9 @@ func (c *nameCache) lookup(uid string) string {
 	return c.entries[uid].name
 }
 
-// validName accepts what an account name can be and nothing that could disturb a log line or a
+// ValidName accepts what an account name can be and nothing that could disturb a log line or a
 // reader: no control characters or whitespace, bounded length.
-func validName(name string) bool {
+func ValidName(name string) bool {
 	if name == "" || len(name) > 256 {
 		return false
 	}

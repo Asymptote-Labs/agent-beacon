@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -152,6 +153,20 @@ func WriteConfig(cfg endpointconfig.Config) error {
 // log access mode.
 const IngestExtension = "beacon_ingest"
 
+// PeerProcessor and OTLPHTTPReceiver are the collector components that record which local account
+// sent each OTLP export: the receiver serves OTLP/HTTP keeping the client's port, which the upstream
+// one drops, and the processor asks the kernel who owns that client socket (gRPC already carries
+// the port). See collector-builder/exporter/beaconjsonexporter/peerprocessor.
+const (
+	PeerProcessor    = "beacon_peer"
+	OTLPHTTPReceiver = "beacon_otlp_http"
+)
+
+// PeerAttribution reports whether ConfigYAML renders peer attribution. Only Linux: the processor's
+// lookup reads /proc/net/tcp, and elsewhere it would name nobody, so the upstream HTTP receiver
+// stays as it was. A var so tests on any platform can render either form.
+var PeerAttribution = runtime.GOOS == "linux"
+
 func ConfigYAML(cfg endpointconfig.Config) string {
 	endpointconfig.NormalizeDestinations(&cfg)
 	exporterNames := []string{"beaconjson"}
@@ -223,6 +238,22 @@ func ConfigYAML(cfg endpointconfig.Config) string {
 	// The restricted log access mode makes the collector the only writer of the system log: hooks
 	// send their events to beacon_ingest over a local socket instead of appending, so the log can
 	// be 0640 root:beacon-log. Its rotation matches beaconjson's, since both append to one log.
+	// Peer attribution. Without it every OTLP event records the collector's own account (root, on
+	// a system install), whoever sent it. beacon_peer goes right after memory_limiter and before
+	// batch, which would drop the connection details it reads; beaconjson is told to trust what it
+	// writes, and only then. The OTLP forward's pipelines do not run it, so Beacon's attribution
+	// never reaches that backend.
+	receivers, httpReceiverYAML, otlpHTTPYAML, peerYAML, peerStep, peerExporterYAML := "[otlp]", "", "", "", "", ""
+	if PeerAttribution {
+		receivers = "[otlp, " + OTLPHTTPReceiver + "]"
+		httpReceiverYAML = fmt.Sprintf("  %s:\n    endpoint: 127.0.0.1:%d\n%s", OTLPHTTPReceiver, cfg.Collector.HTTPPort, loopbackHostAuthYAML("    "))
+		peerYAML = "  " + PeerProcessor + ": {}\n"
+		peerStep = PeerProcessor + ", "
+		peerExporterYAML = "    peer_user: true\n"
+	} else {
+		otlpHTTPYAML = fmt.Sprintf("      http:\n        endpoint: 127.0.0.1:%d\n%s", cfg.Collector.HTTPPort, loopbackHostAuthYAML("        "))
+	}
+	forwardPipelines = strings.ReplaceAll(forwardPipelines, "receivers: [otlp]", "receivers: "+receivers)
 	ingestYAML, extensions := "", "[health_check, loopback_host]"
 	if cfg.RestrictedLogAccess() {
 		ingestYAML = fmt.Sprintf("  %s:\n    log_path: %q\n    rotate_bytes: 10485760\n    rotate_archives: 5\n", IngestExtension, cfg.LogPath)
@@ -233,11 +264,7 @@ func ConfigYAML(cfg endpointconfig.Config) string {
     protocols:
       grpc:
         endpoint: 127.0.0.1:%d
-%s      http:
-        endpoint: 127.0.0.1:%d
-        include_metadata: true
-        auth:
-          authenticator: loopback_host
+%s%s%s
 
 processors:
   memory_limiter:
@@ -248,7 +275,7 @@ processors:
     send_batch_size: 128
   claude_api_body:
 %s
-%sexporters:
+%s%sexporters:
   beaconjson:
     path: %q
     max_event_bytes: 65536
@@ -268,18 +295,33 @@ service:
   extensions: %s
   pipelines:
     logs:
-      receivers: [otlp]
-      processors: [memory_limiter, claude_api_body, %sbatch]
+      receivers: %s
+      processors: [memory_limiter, %sclaude_api_body, %sbatch]
       exporters: %s
     traces:
-      receivers: [otlp]
-      processors: [memory_limiter, %sbatch]
+      receivers: %s
+      processors: [memory_limiter, %s%sbatch]
       exporters: %s
     metrics:
-      receivers: [otlp]
-      processors: [memory_limiter, %sbatch]
+      receivers: %s
+      processors: [memory_limiter, %s%sbatch]
       exporters: %s
-%s`, cfg.Collector.GRPCPort, grpcLimitYAML, cfg.Collector.HTTPPort, modelContextYAML, privacyYAML, cfg.LogPath, runtimeMetricsYAML+codexSpansYAML+modelContextYAML+splunkExporter+falconExporter+forwardExporter, endpointconfig.HealthCheckPort(cfg.Collector), ingestYAML, extensions, privacyStep, exporters, privacyStep, exporters, privacyStep, exporters, forwardPipelines)
+%s`, cfg.Collector.GRPCPort, grpcLimitYAML, otlpHTTPYAML, httpReceiverYAML, modelContextYAML, privacyYAML, peerYAML, cfg.LogPath,
+		runtimeMetricsYAML+codexSpansYAML+modelContextYAML+peerExporterYAML+splunkExporter+falconExporter+forwardExporter,
+		endpointconfig.HealthCheckPort(cfg.Collector), ingestYAML, extensions,
+		receivers, peerStep, privacyStep, exporters,
+		receivers, peerStep, privacyStep, exporters,
+		receivers, peerStep, privacyStep, exporters,
+		forwardPipelines)
+}
+
+// loopbackHostAuthYAML attaches the loopback_host authenticator to an OTLP HTTP receiver, at the
+// indentation of that receiver's settings. It refuses any request whose Host header is not a
+// loopback name, so a DNS-rebinding page cannot post telemetry; include_metadata is how confighttp
+// hands the Host header to it. beacon_otlp_http is built on the same confighttp server, so it takes
+// the same two settings.
+func loopbackHostAuthYAML(indent string) string {
+	return indent + "include_metadata: true\n" + indent + "auth:\n" + indent + "  authenticator: loopback_host\n"
 }
 
 // ForwardFilterProcessor keeps an OTLP forward to the runtimes it is meant to carry.
@@ -385,6 +427,12 @@ func falconHECYAML(cfg endpointconfig.Config) string {
 	}
 	if cfg.ClaudeCaptureModelContext {
 		fmt.Fprintf(&b, "    capture_model_context: true\n")
+	}
+	if PeerAttribution {
+		// falcon_hec converts on its own, after beacon_peer in the same pipelines, so it is told to
+		// trust the account beacon_peer resolved just as beaconjson is; otherwise LogScale would
+		// record the collector's account for an event runtime.jsonl attributes to its sender.
+		fmt.Fprintf(&b, "    peer_user: true\n")
 	}
 	if falcon.Source != "" {
 		fmt.Fprintf(&b, "    source: %q\n", falcon.Source)
