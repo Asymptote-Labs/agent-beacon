@@ -22,8 +22,12 @@ func TestUninstallRefusesAnUnprivilegedSystemRemoval(t *testing.T) {
 	if err == nil {
 		t.Fatal("an unprivileged system uninstall returned nil, which the CLI prints as success")
 	}
-	if !strings.Contains(err.Error(), "root") {
-		t.Errorf("error %q should say privileges are the problem, so the operator knows to rerun with sudo", err)
+	if !strings.Contains(err.Error(), "elevated privileges") {
+		t.Errorf("error %q should say privileges are the problem", err)
+	}
+	// The advice has to be runnable on the platform that printed it: sudo does not exist on Windows.
+	if !strings.Contains(err.Error(), SystemPrivilegeHint()) {
+		t.Errorf("error %q should carry this platform's hint (%q)", err, SystemPrivilegeHint())
 	}
 }
 

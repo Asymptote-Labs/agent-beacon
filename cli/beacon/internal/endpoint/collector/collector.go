@@ -246,18 +246,18 @@ func ConfigYAML(cfg endpointconfig.Config) string {
 	receivers, httpReceiverYAML, otlpHTTPYAML, peerYAML, peerStep, peerExporterYAML := "[otlp]", "", "", "", "", ""
 	if PeerAttribution {
 		receivers = "[otlp, " + OTLPHTTPReceiver + "]"
-		httpReceiverYAML = fmt.Sprintf("  %s:\n    endpoint: 127.0.0.1:%d\n", OTLPHTTPReceiver, cfg.Collector.HTTPPort)
+		httpReceiverYAML = fmt.Sprintf("  %s:\n    endpoint: 127.0.0.1:%d\n%s", OTLPHTTPReceiver, cfg.Collector.HTTPPort, loopbackHostAuthYAML("    "))
 		peerYAML = "  " + PeerProcessor + ": {}\n"
 		peerStep = PeerProcessor + ", "
 		peerExporterYAML = "    peer_user: true\n"
 	} else {
-		otlpHTTPYAML = fmt.Sprintf("      http:\n        endpoint: 127.0.0.1:%d\n", cfg.Collector.HTTPPort)
+		otlpHTTPYAML = fmt.Sprintf("      http:\n        endpoint: 127.0.0.1:%d\n%s", cfg.Collector.HTTPPort, loopbackHostAuthYAML("        "))
 	}
 	forwardPipelines = strings.ReplaceAll(forwardPipelines, "receivers: [otlp]", "receivers: "+receivers)
-	ingestYAML, extensions := "", "[health_check]"
+	ingestYAML, extensions := "", "[health_check, loopback_host]"
 	if cfg.RestrictedLogAccess() {
 		ingestYAML = fmt.Sprintf("  %s:\n    log_path: %q\n    rotate_bytes: 10485760\n    rotate_archives: 5\n", IngestExtension, cfg.LogPath)
-		extensions = "[health_check, " + IngestExtension + "]"
+		extensions = "[health_check, loopback_host, " + IngestExtension + "]"
 	}
 	return fmt.Sprintf(`receivers:
   otlp:
@@ -265,6 +265,7 @@ func ConfigYAML(cfg endpointconfig.Config) string {
       grpc:
         endpoint: 127.0.0.1:%d
 %s%s%s
+
 processors:
   memory_limiter:
     check_interval: 1s
@@ -285,6 +286,7 @@ processors:
 extensions:
   health_check:
     endpoint: 127.0.0.1:%d
+  loopback_host:
 %s
 service:
   telemetry:
@@ -311,6 +313,15 @@ service:
 		receivers, peerStep, privacyStep, exporters,
 		receivers, peerStep, privacyStep, exporters,
 		forwardPipelines)
+}
+
+// loopbackHostAuthYAML attaches the loopback_host authenticator to an OTLP HTTP receiver, at the
+// indentation of that receiver's settings. It refuses any request whose Host header is not a
+// loopback name, so a DNS-rebinding page cannot post telemetry; include_metadata is how confighttp
+// hands the Host header to it. beacon_otlp_http is built on the same confighttp server, so it takes
+// the same two settings.
+func loopbackHostAuthYAML(indent string) string {
+	return indent + "include_metadata: true\n" + indent + "auth:\n" + indent + "  authenticator: loopback_host\n"
 }
 
 // ForwardFilterProcessor keeps an OTLP forward to the runtimes it is meant to carry.

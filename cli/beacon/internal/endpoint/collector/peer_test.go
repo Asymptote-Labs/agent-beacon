@@ -63,6 +63,14 @@ func TestConfigYAMLRendersPeerAttribution(t *testing.T) {
 	if got := out.Receivers[OTLPHTTPReceiver].(map[string]any)["endpoint"]; got != "127.0.0.1:14318" {
 		t.Fatalf("%s endpoint = %v, want the configured HTTP port on loopback", OTLPHTTPReceiver, got)
 	}
+	// The receiver that takes over the HTTP port keeps the DNS-rebinding guard the upstream one has.
+	httpReceiver := out.Receivers[OTLPHTTPReceiver].(map[string]any)
+	if httpReceiver["include_metadata"] != true {
+		t.Fatalf("%s include_metadata = %v, want true so the Host header reaches loopback_host", OTLPHTTPReceiver, httpReceiver["include_metadata"])
+	}
+	if auth, _ := httpReceiver["auth"].(map[string]any); auth["authenticator"] != "loopback_host" {
+		t.Fatalf("%s auth = %v, want the loopback_host authenticator:\n%s", OTLPHTTPReceiver, httpReceiver["auth"], text)
+	}
 	if _, ok := out.Processors[PeerProcessor]; !ok {
 		t.Fatalf("no %s processor:\n%s", PeerProcessor, text)
 	}
@@ -138,7 +146,7 @@ func TestConfigYAMLWithoutPeerAttributionIsUnchanged(t *testing.T) {
 			t.Fatalf("config names %s without peer attribution:\n%s", absent, text)
 		}
 	}
-	if !strings.Contains(text, "      http:\n        endpoint: 127.0.0.1:14318\n") {
+	if !strings.Contains(text, "      http:\n        endpoint: 127.0.0.1:14318\n        include_metadata: true\n        auth:\n          authenticator: loopback_host\n") {
 		t.Fatalf("otlp lost its HTTP protocol:\n%s", text)
 	}
 }
@@ -154,6 +162,9 @@ processors:
     - name: claude_api_body
     - name: beacon_privacy
     - name: beacon_peer
+extensions:
+    - name: health_check
+    - name: loopback_host
 `
 
 // A collector from before peer attribution would refuse the whole config at start; install says so
