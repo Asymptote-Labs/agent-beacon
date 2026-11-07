@@ -8,7 +8,7 @@
 # users experience.
 #
 # Needs systemd as PID 1, which only a privileged container provides. Build the packages first:
-#   cd cli/beacon && goreleaser release --snapshot --clean --skip=publish,homebrew,announce
+#   cd cli/beacon && goreleaser release --snapshot --clean --skip=publish,homebrew,announce,sign
 set -eu
 
 ROOT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)"
@@ -30,7 +30,7 @@ if [ -z "$PKG" ]; then
 fi
 if [ -z "$PKG" ] || [ ! -f "$PKG" ]; then
   echo "no $FORMAT package for linux_$ARCH in cli/beacon/dist" >&2
-  echo "build one with: cd cli/beacon && goreleaser release --snapshot --clean --skip=publish,homebrew,announce" >&2
+  echo "build one with: cd cli/beacon && goreleaser release --snapshot --clean --skip=publish,homebrew,announce,sign" >&2
   exit 1
 fi
 echo "package: $(basename "$PKG")"
