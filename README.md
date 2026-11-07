@@ -135,7 +135,7 @@ grep "  ${PKG}$" checksums.txt | sha256sum --check - && \
 sudo apt install "./${PKG}"   # or: sudo dnf install "./${PKG}"
 ```
 
-`checksums.txt` is published with the release, so it catches a corrupted or swapped download but does not prove who built the release. To check that, verify the package's build-provenance attestation, which shows it was built by this repository's release workflow: `gh attestation verify "${PKG}" --repo asymptote-labs/agent-beacon`. You can also pin `VERSION` to a release you have reviewed instead of following `latest`. To install without root, use the tarball in user mode ([Linux install guide](https://docs.asymptotelabs.ai/platforms/linux#without-root-or-without-a-package-manager)).
+`checksums.txt` on its own catches a corrupted download but does not prove who built the release. From 1.3.57 on, `checksums.txt.sig` signs it with Beacon's Linux release key (fingerprint `07BEA34ED6A411F4C066D98322F94195DCDC8F45`), which `install.sh` checks; the [Linux install guide](https://docs.asymptotelabs.ai/platforms/linux#release-signing) shows how to check it by hand and how to install from the signed apt repository instead. You can also verify the package's build-provenance attestation, which shows it was built by this repository's release workflow: `gh attestation verify "${PKG}" --repo asymptote-labs/agent-beacon`. You can also pin `VERSION` to a release you have reviewed instead of following `latest`. To install without root, use the tarball in user mode ([Linux install guide](https://docs.asymptotelabs.ai/platforms/linux#without-root-or-without-a-package-manager)).
 
 </details>
 

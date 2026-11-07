@@ -373,10 +373,15 @@ Optional: `BEACON_LINUX_SIGNING_KEY` (ASCII-armored OpenPGP secret key) and
 Linux signing is trusted only through the fingerprints, one per line, in
 `cli/beacon/internal/endpoint/selfupdate/release-key.fingerprint`. The
 self-updater embeds that file and the goreleaser before-hook stamps it into the
-released `install.sh`, so pinning is a change to that file alone. Empty means
-checksum-only, as before. Once set, `install.sh` and `beacon endpoint update
---apply` on Linux refuse a package unless a `checksums.txt` signed by a pinned
-key lists it. Publish the fingerprint in `docs/platforms/linux.mdx#release-signing`.
+released `install.sh`, so pinning is a change to that file alone. It pins
+`07BEA34ED6A411F4C066D98322F94195DCDC8F45` (Beacon Linux Release Signing, RSA 4096),
+the key that has signed releases since v1.3.57 and the apt repository; that same key's
+public half is `packaging/linux/apt/beacon-archive-keyring.asc`. `install.sh` and
+`beacon endpoint update --apply` on Linux refuse a package unless a `checksums.txt`
+signed by a pinned key lists it, so every release must be signed (a release without
+`BEACON_LINUX_SIGNING_KEY` fails in the goreleaser job), and the installer refuses the
+unsigned releases before v1.3.57. The fingerprint is published in
+`docs/platforms/linux.mdx#release-signing`; change both together.
 To rotate, add the new fingerprint in a release still signed by the old key. Then
 sign `checksums.txt` with both keys and ship both in `beacon-release-key.gpg` (the
 GoReleaser `signs` entry and the `finalize` step sign with one key today, so extend

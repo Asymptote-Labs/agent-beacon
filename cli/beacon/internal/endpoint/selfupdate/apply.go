@@ -223,8 +223,8 @@ func (a *Applier) installPackage(ctx context.Context, pkg Package, result ApplyR
 	// SHA-256 verification above still applies on every platform and is not optional. The trust
 	// root that leaves is HTTPS plus the release checksum -- which is the same trust root the
 	// user relied on to obtain the package they are updating, so this is parity with the install
-	// path rather than a downgrade. Once a release key is pinned, Linux also requires the
-	// package in a checksums.txt signed by Beacon's release key.
+	// path rather than a downgrade. On Linux, Beacon's release key is pinned, so the package must
+	// also be listed in a checksums.txt signed by that key (verified with gpgv or sqv).
 	switch {
 	case runtime.GOOS == "linux" && len(releaseKeyFingerprints) > 0 && !a.AllowInsecureTest:
 		result.Verification = "sha256+gpg"
