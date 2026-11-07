@@ -1,22 +1,31 @@
 id: approval-bypass-via-renamed-binary
-version: 2
+version: 3
 title: Denied dangerous command re-invoked via a renamed copy of the binary
 description: >
   An approval for a destructive or high-impact shell command was explicitly denied
   (event.action approval.denied), and within the same session a command.executed event
   invokes a renamed copy of the same dangerous binary class — a copy of rm as
   /tmp/myrm or a wrapper script, a copy of curl, a copy of dd, a copy of mkfs, or
-  any other shim that uses the same dangerous command pattern. The deny+shim pair
-  indicates the operator blocked the canonical path and the agent re-issued the
-  action through a wrapper or copy to evade the gate. The rule is a
-  correlation between an approval.denied event in the same session and a
-  dangerous-class command that is not the literal denied path. The `-rf`/`-fr`
-  flag patterns are anchored to a preceding rm-like binary basename
-  (e.g. `myrm`, `crm`, `rm`) so that legitimate tar-archive operations like
-  `tar -rf /tmp/myarchive.tar /var/data` do not correlate after a denied
-  `rm -rf`. Negative fixtures cover denials with no follow-up, follow-ups in a
-  different session, follow-ups that are unrelated benign commands, and the
-  legitimate-tar-archive shape.
+  any other shim that uses the same dangerous command pattern, whatever that shim
+  is named. The deny+shim pair indicates the operator blocked the canonical path
+  and the agent re-issued the action through a wrapper or copy to evade the gate.
+  The rule is a correlation between an approval.denied event in the same session
+  and a dangerous-class command that is not the literal denied path. The
+  `-rf`/`-fr` flag patterns key on an executable path rooted under /tmp, /var/tmp
+  or $(mktemp) — a freshly-created or scratch location, not a project path —
+  immediately followed by the destructive flag, regardless of what the shim is
+  named: v2 required that path to also contain an rm-like basename, which meant
+  a shim named anything else (`/tmp/x -rf /var/data`, `/tmp/wiper -rf /var/data`)
+  was invisible to the rule even though it carries the identical payload that
+  fired on the denied command. Path-then-flag ordering, not the binary's name, is
+  what already kept this from firing on legitimate tar-archive operations like
+  `tar -rf /tmp/myarchive.tar /var/data`: there the `/tmp/` reference is an
+  argument that comes after the flag, not an executable path that comes before
+  it, so it still does not correlate. Negative fixtures cover denials with no
+  follow-up, follow-ups in a different session, follow-ups that are unrelated
+  benign commands, the legitimate-tar-archive shape, and other-named binaries
+  whose only /tmp reference likewise comes after the flag rather than before an
+  executable path.
 severity: critical
 status: experimental
 posture: detect
@@ -37,7 +46,7 @@ correlation:
       match: >
         e.event.action == "command.executed" &&
         e.command.command.matches("(?i)(/tmp/|/var/tmp/|\\$\\(mktemp\\))") &&
-        e.command.command.matches("(?i)(\\s+if\\s*=|\\s+of\\s*=/dev/sd|(?:/tmp/|/var/tmp/|\\$\\(mktemp\\))[^;&|\"'`\\s]*?\\b[a-z]*rm\\b[^;&|]*\\s+-[a-z]*r[a-z]*f\\b|(?:/tmp/|/var/tmp/|\\$\\(mktemp\\))[^;&|\"'`\\s]*?\\b[a-z]*rm\\b[^;&|]*\\s+-[a-z]*f[a-z]*r\\b|\\bmkfs\\b|\\|\\s*(ba)?sh\\b|\\bchmod\\s+-R\\s+777\\b|\\bsudo\\s+-s\\b)")
+        e.command.command.matches("(?i)(\\s+if\\s*=|\\s+of\\s*=/dev/sd|(?:/tmp/|/var/tmp/|\\$\\(mktemp\\))[^;&|\"'`\\s]*\\s+-[a-z]*r[a-z]*f\\b|(?:/tmp/|/var/tmp/|\\$\\(mktemp\\))[^;&|\"'`\\s]*\\s+-[a-z]*f[a-z]*r\\b|\\bmkfs\\b|\\|\\s*(ba)?sh\\b|\\bchmod\\s+-R\\s+777\\b|\\bsudo\\s+-s\\b)")
 
 emit:
   reason: "Denied dangerous command re-invoked via a renamed or shimmed binary in the same session"
@@ -193,4 +202,30 @@ tests:
       - timestamp: "2026-06-23T10:00:45Z"
         event: { action: command.executed }
         command: { command: "/tmp/myrm -rf /var/data" }
+        session: { id: s1 }
+  - name: renamed_to_unrelated_name_still_detected
+    # v2's bypass: a shim named anything other than an rm-like basename was invisible to the rule
+    # even though it carries the identical payload that fired on the denied command.
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "cp /bin/rm /tmp/x && /tmp/x -rf /var/data" }
+        session: { id: s1 }
+  - name: renamed_to_wiper_still_detected
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "/tmp/wiper -rf /var/data" }
         session: { id: s1 }
