@@ -66,6 +66,11 @@ export const test = base.extend<Fixtures>({
   serviceWorker: async ({ context }, use) => {
     let [worker] = context.serviceWorkers();
     if (!worker) worker = await context.waitForEvent('serviceworker');
+    // Every settings read waits for Chrome's managed storage, so a policy lock holds from the first
+    // turn. Linux Chromium answers that read only about five seconds after the browser starts; each
+    // test launches a fresh browser, so wait that out once here instead of inside timing-sensitive
+    // assertions.
+    await worker.evaluate(() => chrome.storage.managed.get(null).catch(() => undefined));
     await use(worker);
   },
 
