@@ -5,7 +5,7 @@ import '../adapters/claude.js'; // registers the Claude adapter (side effect)
 import '../adapters/chatgpt.js'; // registers the ChatGPT adapter (side effect)
 import { ext } from '../shared/browser.js';
 import type { ChatTurn } from '../shared/types.js';
-import { getSettings, saveSettings, siteEnabled } from './settings.js';
+import { getSettings, getSettingsState, lockedIn, saveSettings, siteEnabled } from './settings.js';
 import { Assembler } from './assembler.js';
 import { enqueueTurn, flush, installFlushAlarm } from './delivery.js';
 import { detectBrowser } from '../shared/browser-identity.js';
@@ -99,14 +99,17 @@ function isControlType(type: unknown): type is ControlMessage['type'] {
 async function handleControl(msg: ControlMessage): Promise<unknown> {
   switch (msg.type) {
     case 'GET_STATUS': {
-      const settings = await getSettings();
+      const { settings, locked } = await getSettingsState();
       const q = await ext.storage.local.get('delivery_queue');
-      return { settings, queueDepth: (q.delivery_queue ?? []).length, active: assembler.active };
+      return { settings, locked, queueDepth: (q.delivery_queue ?? []).length, active: assembler.active };
     }
     case 'SET_SETTINGS': {
       const parsed = parseSettingsPatch(msg.patch);
-      if (!parsed.ok) return { error: parsed.error, settings: await getSettings() };
-      return { settings: await saveSettings(parsed.patch) };
+      const state = await getSettingsState();
+      if (!parsed.ok) return { error: parsed.error, ...state };
+      const locked = lockedIn(parsed.patch, state.locked);
+      if (locked) return { error: `${locked} is set by your organization and cannot be changed here`, ...state };
+      return { settings: await saveSettings(parsed.patch), locked: state.locked };
     }
     case 'FLUSH_NOW':
       await flush();

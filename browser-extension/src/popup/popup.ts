@@ -1,10 +1,11 @@
 // Popup UI: toggle capture, choose retention, show live status.
 import { ext } from '../shared/browser.js';
 import { mountPermissionBanner } from '../shared/permissions.js';
-import type { Settings } from '../shared/types.js';
+import type { LockedSetting, Settings } from '../shared/types.js';
 
 interface Status {
   settings: Settings;
+  locked?: LockedSetting[];
   queueDepth: number;
   active: number;
 }
@@ -18,6 +19,11 @@ async function refresh(): Promise<void> {
   $('endpoint').textContent = status.settings.endpoint;
   $('queue').textContent = String(status.queueDepth);
   $('active').textContent = String(status.active);
+  // Settings fixed by policy stay visible but cannot be changed here.
+  const locked = new Set(status.locked ?? []);
+  ($('enabled') as HTMLInputElement).disabled = locked.has('enabled');
+  ($('retention') as HTMLSelectElement).disabled = locked.has('retention');
+  $('managed').hidden = locked.size === 0;
 }
 
 $('enabled').addEventListener('change', async (e) => {

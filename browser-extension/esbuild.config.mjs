@@ -52,6 +52,8 @@ async function writeManifest() {
 /** Copy static assets (manifest, html, icons) into the output directory. */
 async function copyStatic() {
   await writeManifest();
+  // Named by the manifest's storage.managed_schema: the settings an admin can lock through policy.
+  await cp(path.join(src, 'managed_schema.json'), path.join(dist, 'managed_schema.json'));
   for (const surface of ['popup', 'options']) {
     await cp(path.join(src, surface, `${surface}.html`), path.join(dist, `${surface}.html`));
   }
@@ -85,7 +87,7 @@ async function run() {
     let staticRefresh = Promise.resolve();
     watchFiles(src, { recursive: true }, (_event, filename) => {
       const name = filename?.replaceAll('\\', '/');
-      if (name && name !== 'manifest.json' && name !== 'popup/popup.html' &&
+      if (name && name !== 'manifest.json' && name !== 'managed_schema.json' && name !== 'popup/popup.html' &&
           name !== 'options/options.html' && name !== 'icons' && !name.startsWith('icons/')) return;
       staticRefresh = staticRefresh.then(async () => {
         await copyStatic();

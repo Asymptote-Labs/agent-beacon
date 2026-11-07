@@ -70,6 +70,10 @@ export interface Settings {
   sites: Record<SiteName, boolean>;
 }
 
+/** A setting an administrator fixed through Chrome policy (managed storage). The popup and options
+ *  page show it disabled, and the service worker refuses to change it. */
+export type LockedSetting = 'enabled' | 'retention' | 'endpoint' | `sites.${SiteName}`;
+
 export const DEFAULT_SETTINGS: Settings = {
   enabled: true,
   retention: 'full',

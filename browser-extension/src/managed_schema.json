@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "properties": {
+    "enabled": {
+      "title": "Capture enabled",
+      "description": "Whether the extension captures chats at all. Locks the popup's Capture enabled switch.",
+      "type": "boolean"
+    },
+    "retention": {
+      "title": "Content retention",
+      "description": "How much chat content is kept: full text, redacted text, or metadata only.",
+      "type": "string",
+      "enum": ["full", "redacted", "metadata"]
+    },
+    "endpoint": {
+      "title": "Collector endpoint",
+      "description": "OTLP logs URL of the local Beacon collector. Must be on 127.0.0.1, localhost or [::1].",
+      "type": "string"
+    },
+    "sites": {
+      "title": "Sites",
+      "description": "Per-site capture switches.",
+      "type": "object",
+      "properties": {
+        "claude_web": { "title": "claude.ai", "type": "boolean" },
+        "chatgpt_web": { "title": "chatgpt.com", "type": "boolean" }
+      }
+    }
+  }
+}
