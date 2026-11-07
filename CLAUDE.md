@@ -278,7 +278,9 @@ A pushed `v*` tag runs the full release end-to-end via
    Homebrew tap. It then attests the `.deb` files from its own `dist/` with
    `actions/attest` and this repository's predicate type
    (`.../attestations/goreleaser-deb/v1`), which the apt repository requires
-   (`id-token: write`, `attestations: write` on that job).
+   (`id-token: write`, `attestations: write` on that job). The step is
+   `continue-on-error`, because the release is already published by then: a
+   failed attestation fails only the apt job, never the `.pkg`, MSI or finalize.
 2. `package` (macOS, `needs: goreleaser`, `environment: release`) builds the
    Apple Silicon `beacon`/`beacon-hooks` package payload plus arch-matched
    collector and Vector binaries for `darwin_arm64`, then signs, notarizes,

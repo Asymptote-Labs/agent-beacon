@@ -111,7 +111,12 @@ jobs:
       # the release's assets, which anyone who can edit a release can swap together with
       # checksums.txt, and its job can be re-run without approval; so an attestation from it
       # proves only what the release held when it ran. The apt job asks for this predicate type.
+      #
+      # Non-fatal: the release is already published by now, and a failure here (a Sigstore or
+      # attestation API error) must not skip the .pkg, MSI and finalize, which need this job to
+      # succeed. Without the attestation the apt job refuses this tag's packages and fails alone.
       - name: Attest the Linux packages goreleaser built
+        continue-on-error: true
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: cli/beacon/dist/*.deb
