@@ -275,7 +275,10 @@ A pushed `v*` tag runs the full release end-to-end via
 
 1. `goreleaser` (ubuntu, `environment: release`) builds the collector dists,
    publishes the GitHub release + changelog and tarballs, and updates the
-   Homebrew tap.
+   Homebrew tap. It then attests the `.deb` files from its own `dist/` with
+   `actions/attest` and this repository's predicate type
+   (`.../attestations/goreleaser-deb/v1`), which the apt repository requires
+   (`id-token: write`, `attestations: write` on that job).
 2. `package` (macOS, `needs: goreleaser`, `environment: release`) builds the
    Apple Silicon `beacon`/`beacon-hooks` package payload plus arch-matched
    collector and Vector binaries for `darwin_arm64`, then signs, notarizes,
@@ -292,7 +295,7 @@ A pushed `v*` tag runs the full release end-to-end via
    records a GitHub build-provenance attestation (Sigstore, keyless, through the
    workflow's OIDC token) for every file `checksums.txt` lists. It needs
    `id-token: write` and `attestations: write` and no `release`-environment secrets.
-5. `apt-repository` (ubuntu, `needs: [goreleaser, finalize]`, `environment: release`,
+5. `apt-repository` (ubuntu, `needs: goreleaser`, `environment: release`,
    `contents: read`/`attestations: read`) adds the released `.deb` files to the signed apt
    repository
    (`deb <APT_REPO_URL> stable main`) in an S3-compatible bucket, because 85-90 MB packages
@@ -302,8 +305,10 @@ A pushed `v*` tag runs the full release end-to-end via
    committed public keys `packaging/linux/apt/beacon-archive-keyring.asc` before re-signing (so
    an edited index is never re-signed), refuses to replace a published version, and fails unless
    every key in the secret is a committed one and signed. Every `.deb` (this tag's and each
-   backfilled one) must pass `gh attestation verify` against finalize's attestation from
-   `release.yml` at `refs/tags/<tag>`, never the release's replaceable `checksums.txt`, pinned
+   backfilled one) must pass `gh attestation verify --predicate-type` against the goreleaser
+   job's attestation of the bytes it built, from `release.yml` at `refs/tags/<tag>`. Never the
+   release's replaceable `checksums.txt`, and never finalize's provenance, which re-hashes those
+   same replaceable assets and whose job re-runs without approval. It is pinned
    (`--source-digest`/`--signer-digest`) to the tag's commit, which must be an ancestor of this
    run's commit: anyone who can push a `v*` tag can run their own `release.yml` and mint an
    attestation for that path and ref, so only packages built from this release's history are

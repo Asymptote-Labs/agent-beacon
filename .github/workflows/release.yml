@@ -2,7 +2,7 @@ name: Release
 
 # Full hands-off release on a pushed v* tag:
 #   1. goreleaser  — builds tarballs, publishes the GitHub release + changelog,
-#                    and updates the Homebrew tap.
+#                    updates the Homebrew tap, and attests the .deb files it built.
 #   2. package     — (after goreleaser) builds, signs, notarizes, and staples the
 #                    macOS .pkg for both arches and attaches them plus the
 #                    package update manifest to the same release.
@@ -12,8 +12,8 @@ name: Release
 #   4. finalize    — (after goreleaser, package and windows-package) adds the .pkg, .msi and
 #                    install.sh to checksums.txt and records a GitHub build-provenance
 #                    attestation for every file checksums.txt lists.
-#   5. apt-repository — (after finalize) adds the released .deb files, each checked against its
-#                    attestation, to the signed apt repository in object storage. Skipped
+#   5. apt-repository — (after goreleaser) adds the released .deb files, each checked against
+#                    goreleaser's attestation, to the signed apt repository in object storage. Skipped
 #                    until its APT_* secrets and variables are configured.
 #
 # Triggered only by pushed version tags, so outside contributors (whose fork PRs
@@ -32,6 +32,11 @@ jobs:
   goreleaser:
     runs-on: ubuntu-latest
     environment: release
+    permissions:
+      contents: write
+      # Only for "Attest the Linux packages goreleaser built", below.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -99,6 +104,19 @@ jobs:
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
           GORELEASER_PREVIOUS_TAG: ${{ steps.tags.outputs.previous }}
         run: goreleaser release --clean --parallelism 1
+
+      # The apt repository signs only packages this attests: goreleaser's own output, hashed here
+      # from dist/ in the release-environment job that built it, never from the release. Its
+      # predicate type is this repository's own, which finalize never writes. finalize re-hashes
+      # the release's assets, which anyone who can edit a release can swap together with
+      # checksums.txt, and its job can be re-run without approval; so an attestation from it
+      # proves only what the release held when it ran. The apt job asks for this predicate type.
+      - name: Attest the Linux packages goreleaser built
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: cli/beacon/dist/*.deb
+          predicate-type: https://github.com/Asymptote-Labs/agent-beacon/attestations/goreleaser-deb/v1
+          predicate: '{"builder":"goreleaser","job":"goreleaser"}'
 
   package:
     needs: goreleaser
@@ -433,8 +451,8 @@ jobs:
   # a version that is already published. An older index this key once signed does pass that check;
   # the backfill below re-adds any recent release such a rollback dropped.
   #
-  # The packages are the bytes goreleaser published, checked against the build-provenance attestation
-  # finalize recorded for them, not a rebuild.
+  # The packages are the bytes goreleaser published, checked against the attestation the goreleaser
+  # job made of what it built, not a rebuild.
   #
   # Skipped with a notice until every APT_* secret and variable exists, and for prerelease tags,
   # which do not belong in `stable`. Serialized so two tags cannot race on the index. GitHub
@@ -442,10 +460,11 @@ jobs:
   # each run therefore also adds recent releases the index is missing (see "Fetch the released
   # .deb files"), and a release whose run was cancelled is published by the next one.
   apt-repository:
-    # After finalize, which records the build-provenance attestations every package is checked
-    # against before it is signed into the index.
-    needs: [goreleaser, finalize]
-    if: ${{ !cancelled() && needs.finalize.result == 'success' }}
+    # After goreleaser, whose attestation of the packages it built every package is checked against
+    # before it is signed into the index. Not after finalize: its attestations hash the release's
+    # replaceable assets, so the apt repository does not rely on them.
+    needs: goreleaser
+    if: ${{ !cancelled() && needs.goreleaser.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -470,6 +489,8 @@ jobs:
       APT_S3_ENDPOINT: ${{ vars.APT_S3_ENDPOINT }}
       APT_REPO_URL: ${{ vars.APT_REPO_URL }}
       KEYRING_ASC: packaging/linux/apt/beacon-archive-keyring.asc
+      # Written only by the goreleaser job's attestation of what it built (see that step).
+      APT_DEB_PREDICATE: https://github.com/Asymptote-Labs/agent-beacon/attestations/goreleaser-deb/v1
       # How many recent stable releases each run checks for and adds when the index lacks them.
       APT_BACKFILL_RELEASES: 10
     steps:
@@ -623,17 +644,19 @@ jobs:
               END { exit !found }' "$EXISTING/main/binary-$2/Packages"
           }
           # fetch TAG MODE ARCH... -- downloads TAG's .debs for ARCH into dist/apt-debs/TAG. Each must
-          # carry a build-provenance attestation that this repository's release workflow made at
-          # refs/tags/TAG (finalize records them): not checksums.txt, which anyone who can edit a
-          # release can replace together with the .deb. Its control fields must also name beacon,
+          # carry the attestation the goreleaser job made of the bytes it built
+          # ($APT_DEB_PREDICATE), from this repository's release workflow at refs/tags/TAG: not
+          # checksums.txt, which anyone who can edit a release can replace together with the .deb,
+          # and not finalize's provenance, which re-hashes those same replaceable assets (see the
+          # goreleaser job's attest step). Its control fields must also name beacon,
           # TAG's version and ARCH, since build-apt-repo.sh indexes a package by what it says
           # about itself. This tag's packages (MODE required) must pass; a backfilled release whose
-          # package has no such attestation (one from before attestations, or a replaced asset) is
+          # package has no such attestation (one from before this check, or a replaced asset) is
           # left out with a warning. A package that is attested but misnamed fails the job.
           #
           # The workflow path and ref alone are not enough: anyone who can push a v* tag can run
-          # their own release.yml at that tag (finalize is outside the release environment) and so
-          # mint a matching attestation. So TAG's commit must be an ancestor of this run's commit,
+          # their own release.yml at that tag (one that attests from a job outside the release
+          # environment, or attests anything) and so mint a matching attestation. So TAG's commit must be an ancestor of this run's commit,
           # the history this release was built from, and the attestation must name that commit as
           # both its source and its signer workflow's commit. A tag on a side commit, or one moved
           # since its package was attested, is not trusted. This run's own commit is the trust
@@ -657,14 +680,14 @@ jobs:
               gh release download "$tag" --repo "$REPO" --dir "$dir" --pattern "$name"
               if ! gh attestation verify "$deb" --repo "$REPO" \
                 --signer-workflow "$REPO/.github/workflows/release.yml" --source-ref "refs/tags/$tag" \
-                --source-digest "$commit" --signer-digest "$commit" \
+                --source-digest "$commit" --signer-digest "$commit" --predicate-type "$APT_DEB_PREDICATE" \
                 --deny-self-hosted-runners > "$RUNNER_TEMP/attestation.log" 2>&1; then
                 cat "$RUNNER_TEMP/attestation.log" >&2
                 if [ "$mode" = required ]; then
-                  echo "$name has no build-provenance attestation from $REPO's release workflow at $tag ($commit)" >&2
+                  echo "$name has no attestation from the goreleaser job of $REPO's release workflow at $tag ($commit)" >&2
                   exit 1
                 fi
-                echo "::warning title=apt repository::$name has no build-provenance attestation from the release workflow at $tag ($commit); it is not published"
+                echo "::warning title=apt repository::$name has no attestation from the goreleaser job of the release workflow at $tag ($commit); it is not published"
                 rm -f "$deb"
                 continue
               fi
@@ -775,7 +798,9 @@ jobs:
   # bytes on the release. The attestation is a Sigstore-signed statement, made with this workflow's
   # OIDC identity, that this repository's release workflow built each file at this tag; anyone can
   # check a download with `gh attestation verify <file> --repo Asymptote-Labs/agent-beacon`. Unlike
-  # checksums.txt, it cannot be replaced by someone who can only edit the release.
+  # checksums.txt, it cannot be replaced by someone who can only edit the release. It does hash the
+  # release's assets as they are when this job runs, though, so it vouches for what the release
+  # held then; the apt repository relies on the goreleaser job's attestation of its own output.
   #
   # Runs when goreleaser succeeded even if a packaging job failed, so the archives and Linux packages
   # are still covered; a missing .pkg or .msi is simply not appended.
