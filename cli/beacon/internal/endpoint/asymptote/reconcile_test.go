@@ -3,6 +3,7 @@ package asymptote
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -172,6 +173,106 @@ func TestReconcileLeavesACurrentConfigAndTheForwarderAlone(t *testing.T) {
 		t.Fatal("an unchanged config restarted the forwarder")
 	}
 	f.assertCredentialsAndCheckpointsUntouched(t)
+}
+
+// Switching to restricted log access replaces the runtime log with a copy that starts with the same
+// line, and Vector keeps tailing the replaced file until it restarts. Install, repair and the
+// package upgrade therefore ask for a restart even when the config is current; nothing is
+// rewritten.
+func TestReconcileRestartsARunningForwarderWithACurrentConfigWhenAsked(t *testing.T) {
+	f := newReconcileFixture(t, "standard")
+	before, _ := os.ReadFile(VectorConfigPath(true))
+	beforeInfo, _ := os.Stat(VectorConfigPath(true))
+	loads, unloads := f.fwd.loads, f.fwd.unloads
+
+	result, err := ReconcileForwarder(ReconcileOptions{UserMode: true, Forwarder: f.fwd, Restart: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Unchanged || result.Updated || result.UnitUpdated || !result.Restarted || result.Warning != "" {
+		t.Fatalf("result = %+v, want an unchanged config and a restart", result)
+	}
+	if f.fwd.loads != loads+1 || f.fwd.unloads != unloads {
+		t.Fatalf("forwarder loads %d->%d unloads %d->%d, want exactly one restart", loads, f.fwd.loads, unloads, f.fwd.unloads)
+	}
+	after, _ := os.ReadFile(VectorConfigPath(true))
+	afterInfo, _ := os.Stat(VectorConfigPath(true))
+	if !bytes.Equal(before, after) || !afterInfo.ModTime().Equal(beforeInfo.ModTime()) {
+		t.Fatal("a requested restart rewrote a current config")
+	}
+	if !strings.Contains(result.Message(), "restarted") {
+		t.Fatalf("message %q does not say the forwarder restarted", result.Message())
+	}
+	f.assertCredentialsAndCheckpointsUntouched(t)
+}
+
+// A requested restart never starts a forwarder an operator stopped.
+func TestReconcileRestartLeavesAStoppedForwarderStopped(t *testing.T) {
+	f := newReconcileFixture(t, "standard")
+	f.fwd.stopped = true
+	loads := f.fwd.loads
+
+	result, err := ReconcileForwarder(ReconcileOptions{UserMode: true, Forwarder: f.fwd, Restart: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Unchanged || result.Restarted {
+		t.Fatalf("result = %+v, want unchanged without a restart", result)
+	}
+	if f.fwd.loads != loads {
+		t.Fatal("a requested restart started a forwarder an operator stopped")
+	}
+}
+
+// A restart that fails is reported: on launchd the bootout has already run, so the forwarder may
+// be stopped.
+func TestReconcileReportsAFailedRequestedRestart(t *testing.T) {
+	f := newReconcileFixture(t, "standard")
+	f.fwd.loadErr = errors.New("bootstrap failed")
+
+	result, err := ReconcileForwarder(ReconcileOptions{UserMode: true, Forwarder: f.fwd, Restart: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Restarted || !strings.Contains(result.Warning, "bootstrap failed") || !strings.Contains(result.Warning, "beacon endpoint status") {
+		t.Fatalf("result = %+v, want a warning naming the failed restart", result)
+	}
+}
+
+// A requested restart never takes down a forwarder that is running fine. The kept config after a
+// refused render, and a current config the forwarder's own Vector now rejects, would both leave
+// nothing running after a restart, so neither restarts.
+func TestReconcileRequestedRestartNeverStopsAWorkingForwarder(t *testing.T) {
+	for _, stale := range []bool{true, false} {
+		f := newReconcileFixture(t, "metadata-only")
+		if stale {
+			writeStaleConfig(t)
+		}
+		before, _ := os.ReadFile(VectorConfigPath(true))
+		enrollment, err := LoadEnrollment(true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		enrollment.VectorBin = fakeVector(t, "0.56.0", 78)
+		if err := SaveEnrollment(true, *enrollment); err != nil {
+			t.Fatal(err)
+		}
+		loads := f.fwd.loads
+
+		result, err := ReconcileForwarder(ReconcileOptions{UserMode: true, Forwarder: f.fwd, Restart: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Updated || result.Restarted || !strings.Contains(result.Warning, "reject") {
+			t.Fatalf("stale=%v: result = %+v, want a warning and no restart", stale, result)
+		}
+		if f.fwd.loads != loads {
+			t.Fatalf("stale=%v: a requested restart loaded a config the forwarder's Vector rejects", stale)
+		}
+		if got, _ := os.ReadFile(VectorConfigPath(true)); !bytes.Equal(got, before) {
+			t.Fatalf("stale=%v: the config changed", stale)
+		}
+	}
 }
 
 func TestReconcileKeepsTheOldConfigWhenVectorRejectsTheNewOne(t *testing.T) {
