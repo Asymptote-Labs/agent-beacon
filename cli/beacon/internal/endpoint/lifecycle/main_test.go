@@ -35,6 +35,8 @@ func TestMain(m *testing.M) {
 	}
 	removeSentinelForwarder = func(bool) error { return nil }
 	sentinelForwarderStatus = func() sentinel.Status { return sentinel.Status{} }
+	// Status must not depend on whether the machine running the tests has a system config.
+	systemDashboardDisabled = func() (bool, error) { return false, nil }
 	os.Exit(runWithServiceManagerStandIns(m))
 }
 

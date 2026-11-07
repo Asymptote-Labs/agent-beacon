@@ -51,6 +51,10 @@ $noStart = Get-EnvOrDefault 'BEACON_NO_START' '0'
 # events to it over a local named pipe, and only SYSTEM, Administrators and the beacon-log group can
 # read the log. The same variable the Linux and macOS install scripts read.
 $logAccess = Get-EnvOrDefault 'BEACON_LOG_ACCESS' ''
+# enabled or disabled: whether any account may run `beacon endpoint dashboard`. Empty keeps what the
+# endpoint already has, so an upgrade never changes it. The same variable the Linux and macOS install
+# scripts read.
+$dashboard = Get-EnvOrDefault 'BEACON_DASHBOARD' ''
 
 # Auto-detected rather than required, so a manual invocation without BEACON_COLLECTOR still works.
 # DiscoverBinary would find this on its own -- it is passed explicitly so that a failure says which
@@ -72,6 +76,7 @@ if (-not [string]::IsNullOrWhiteSpace($collector)) { $installArgs += @('--collec
 if (-not [string]::IsNullOrWhiteSpace($service)) { $installArgs += @('--service', $service) }
 if ($noStart -eq '1') { $installArgs += '--no-start' }
 if (-not [string]::IsNullOrWhiteSpace($logAccess)) { $installArgs += @('--log-access', $logAccess) }
+if (-not [string]::IsNullOrWhiteSpace($dashboard)) { $installArgs += @('--dashboard', $dashboard) }
 
 # The access control on %ProgramData%\Beacon is applied by the install itself, not here, so a fleet
 # that runs `beacon endpoint install --system` directly gets the same result as the MSI. It resets the

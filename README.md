@@ -296,6 +296,10 @@ beacon endpoint dashboard
 ```
 
 Use it to explore session history across harnesses and understand what your agents actually did.
+Open the URL it prints: it carries a secret for that run, so other accounts on a shared machine
+cannot read your log through the port. Administrators can turn the dashboard off for everyone
+with `beacon endpoint install|repair --system --dashboard disabled` (`BEACON_DASHBOARD=disabled`
+for package installs).
 
 Each session page can also show **lenses**: purpose-built views of one trace, such as files
 changed with their diffs, an itemized token bill, a security review grouped by risk, or the

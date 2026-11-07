@@ -31,6 +31,9 @@ BEACON_FALCON_CA_FILE="${BEACON_FALCON_CA_FILE:-}"
 # shared or restricted; empty keeps the mode the endpoint already has, so a package upgrade never
 # changes it.
 BEACON_LOG_ACCESS="${BEACON_LOG_ACCESS:-}"
+# enabled or disabled: whether any account may run `beacon endpoint dashboard`. Empty keeps what the
+# endpoint already has, so a package upgrade never changes it.
+BEACON_DASHBOARD="${BEACON_DASHBOARD:-}"
 # 1 turns the scheduled session sync on and 0 turns it off; empty keeps what the endpoint already
 # has, so a package upgrade never changes it.
 BEACON_SESSION_SYNC="${BEACON_SESSION_SYNC:-}"
@@ -51,6 +54,10 @@ fi
 
 if [ -n "$BEACON_LOG_ACCESS" ]; then
   set -- "$@" --log-access "$BEACON_LOG_ACCESS"
+fi
+
+if [ -n "$BEACON_DASHBOARD" ]; then
+  set -- "$@" --dashboard "$BEACON_DASHBOARD"
 fi
 
 case "$BEACON_SESSION_SYNC" in
