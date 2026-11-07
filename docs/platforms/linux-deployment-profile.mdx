@@ -13,11 +13,11 @@ Beacon loads nothing into the kernel and needs nothing beyond a standard POSIX s
 |---|---|
 | Kernel modules | None loaded, none required |
 | eBPF / audit subsystem | Not used |
-| netlink | One `NETLINK_SOCK_DIAG` query per OpenTelemetry export, to look up which account owns the sending loopback connection |
+| netlink | `NETLINK_SOCK_DIAG` per OpenTelemetry export, to look up which account owns the sending loopback connection: one exact query, or two for an IPv4 connection (as IPv4, then as an IPv4-mapped IPv6 address) |
 | ptrace, process injection | Not used |
 | cgroups, `/sys`, udev | Not read |
 | Capabilities, setuid, setcap | None |
-| `/proc` | `/proc/1/comm`, to detect whether systemd is PID 1; `/proc/net/tcp` and `/proc/net/tcp6` only when `NETLINK_SOCK_DIAG` is unavailable, for the same connection lookup |
+| `/proc` | `/proc/1/comm`, to detect whether systemd is PID 1; `/proc/net/tcp` and `/proc/net/tcp6` for the same connection lookup when the `NETLINK_SOCK_DIAG` query fails, and when it finds nothing before it has once found a socket (the kernel answers the same way when the `tcp_diag` module is missing) |
 
 Everything it uses from the kernel:
 
@@ -25,7 +25,7 @@ Everything it uses from the kernel:
 |---|---|---|
 | TCP loopback | Three listeners on `127.0.0.1` | Collector cannot start |
 | `flock(2)` | Serializing writes to the runtime log | Degrades on some network filesystems; fine on local disk |
-| `fork`/`exec` | One short-lived hook process per agent event | Hook capture stops; OpenTelemetry capture continues |
+| `fork`/`exec` | One short-lived hook process per agent event. The collector also runs `/usr/bin/id -nu <uid>` (500 ms limit) to name a sender whose account is not in `/etc/passwd`, such as an LDAP, SSSD or AD account, at most once per account every 10 minutes | Hook capture stops; OpenTelemetry capture continues. Without `id`, a directory account's events carry its uid without a name |
 | Ordinary file I/O | Config and log | None |
 | `/proc/1/comm` | systemd detection | Falls back to a supervised collector, which does not restart on exit or start at boot |
 | `NETLINK_SOCK_DIAG`, `/proc/net/tcp{,6}` | Recording each OpenTelemetry export under the account that sent it | The export is recorded with no account, never as root or anyone else |
@@ -118,7 +118,7 @@ ss -ltnp | grep beacon-otelcol
 - In user mode everything runs as you under `~/.beacon`, with no privileges required.
 - The log contains prompt text, command lines, file paths, and tool inputs, after redaction and a
   64 KiB per-event limit. Treat it as sensitive data.
-- Account lookup goes through `getent`, so accounts from OpenLDAP, SSSD, or AD resolve normally.
+- The CLI looks accounts up through `getent`, and the collector names a sender from `/etc/passwd` and then `id -nu`, so accounts from OpenLDAP, SSSD, or AD resolve normally.
 
 ## Pinning it to housekeeping cores
 

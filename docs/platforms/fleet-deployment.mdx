@@ -5,6 +5,10 @@ description: "Deploy Beacon to managed Linux, macOS and Windows machines with re
 
 This page puts the fleet settings together for each platform: the package, the settings your fleet tooling writes before installing it, how to pin and roll out versions, and how to check the result. The behavior is the same on Linux, macOS and Windows.
 
+<Note>
+  Everything on this page needs a release newer than 1.3.57. Version 1.3.57 and earlier ignore these settings and install a shared log, and record OpenTelemetry events on macOS and Windows under the collector's account. Pin a newer version in the examples below.
+</Note>
+
 ## What a fleet install gives you
 
 | | Result |
@@ -36,7 +40,7 @@ Each is ignored, with a warning in the install output, unless root (SYSTEM or Ad
 
 ## Linux with Salt
 
-The signed apt repository at `https://apt.beacon.sh` carries every release from 1.3.57 on, so a machine can install any of them by version. Pin the repository key by its hash, so a changed key stops the state instead of being trusted:
+The signed apt repository at `https://apt.beacon.sh` keeps every release it has published, so a machine can install any of them by version. Pin the repository key by its hash, so a changed key stops the state instead of being trusted:
 
 ```yaml title="beacon.sls"
 /etc/default/beacon:
@@ -64,7 +68,7 @@ The signed apt repository at `https://apt.beacon.sh` carries every release from 
 
 beacon:
   pkg.installed:
-    - version: 1.3.57        # the release you approved; raise it to roll forward
+    - version: "<version>"   # the release you approved (newer than 1.3.57); raise it to roll forward
     - hold: True
     - refresh: True
     - require:
@@ -122,17 +126,29 @@ Beacon never updates itself. `beacon endpoint update --apply` runs only when som
 
 ## Check a machine
 
-On the machine, as root (an elevated shell on Windows):
+On Linux and macOS, as root:
 
-```bash title="Status"
+```bash title="Status (Linux, macOS)"
 sudo beacon endpoint status --system --json | jq '{log_access, dashboard}'
 sudo beacon endpoint doctor --system
 ```
 
-Expect `"log_access": "restricted"` (and `"dashboard": "disabled"` if you set it), and `runtime_log_access: ok` from `doctor`. Then confirm that events name the person: as an ordinary account, send one prompt in an agent Beacon configured, and look at the newest events:
+On Windows, in an elevated PowerShell:
 
-```bash title="Who acted"
+```powershell title="Status (Windows)"
+beacon endpoint status --system --json | ConvertFrom-Json | Select-Object log_access, dashboard
+beacon endpoint doctor --system
+```
+
+Expect `log_access` to be `restricted` (and `dashboard` to be `disabled` if you set it), and `runtime_log_access: ok` from `doctor`. Then confirm that events name the person: as an ordinary account, send one prompt in an agent Beacon configured, and look at the newest events:
+
+```bash title="Who acted (Linux, macOS)"
 sudo tail -n 20 /var/log/beacon-agent/runtime.jsonl | jq -c '{action: .event.action, harness: .harness.name, user: .user.name}'
+```
+
+```powershell title="Who acted (Windows, elevated)"
+Get-Content "$env:ProgramData\Beacon\Endpoint\logs\runtime.jsonl" -Tail 20 | ConvertFrom-Json |
+  Select-Object @{n='action';e={$_.event.action}}, @{n='harness';e={$_.harness.name}}, @{n='user';e={$_.user.name}}
 ```
 
 The person's account should appear, not `root` (or `COMPUTERNAME$` on Windows). An event recorded with an empty `user` came from a sender the collector could not identify, for example one that disconnected before the lookup; it is never attributed to someone else. Events from collectors older than this behavior carry the collector's account until the endpoint is upgraded or repaired. In Microsoft Sentinel the same account is the `UserName` column; see [Microsoft Sentinel](/log-forwarding/microsoft-sentinel).
