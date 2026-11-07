@@ -12,11 +12,12 @@ Beacon loads nothing into the kernel and needs nothing beyond a standard POSIX s
 | | |
 |---|---|
 | Kernel modules | None loaded, none required |
-| eBPF / netlink / audit subsystem | Not used |
+| eBPF / audit subsystem | Not used |
+| netlink | One `NETLINK_SOCK_DIAG` query per OpenTelemetry export, to look up which account owns the sending loopback connection |
 | ptrace, process injection | Not used |
 | cgroups, `/sys`, udev | Not read |
 | Capabilities, setuid, setcap | None |
-| `/proc` | One file: `/proc/1/comm`, to detect whether systemd is PID 1 |
+| `/proc` | `/proc/1/comm`, to detect whether systemd is PID 1; `/proc/net/tcp` and `/proc/net/tcp6` only when `NETLINK_SOCK_DIAG` is unavailable, for the same connection lookup |
 
 Everything it uses from the kernel:
 
@@ -27,6 +28,7 @@ Everything it uses from the kernel:
 | `fork`/`exec` | One short-lived hook process per agent event | Hook capture stops; OpenTelemetry capture continues |
 | Ordinary file I/O | Config and log | None |
 | `/proc/1/comm` | systemd detection | Falls back to a supervised collector, which does not restart on exit or start at boot |
+| `NETLINK_SOCK_DIAG`, `/proc/net/tcp{,6}` | Recording each OpenTelemetry export under the account that sent it | The export is recorded with no account, never as root or anyone else |
 
 To see the syscalls for yourself:
 
