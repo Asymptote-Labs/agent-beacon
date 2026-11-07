@@ -172,3 +172,54 @@ func TestAnUnidentifiedSenderCarriesNoUser(t *testing.T) {
 		t.Fatalf("user = %+v, want none", event.User)
 	}
 }
+
+// The same holds for Claude Cowork's spans and metric datapoints, which never pass through the log
+// normalizer: the relay's account must not become the person on any signal.
+func TestCoworkSpansAndMetricsHaveNoUserUnderThePeer(t *testing.T) {
+	t.Setenv("USER", "root")
+	conv := NewConverter(Options{PeerUser: true})
+	resource := map[string]interface{}{
+		"service.name":    "claude-cowork",
+		PeerUIDAttribute:  "1001",
+		PeerUserAttribute: "alice",
+	}
+
+	span := ptrace.NewSpan()
+	span.SetName("tool")
+	span.Attributes().PutStr("user.email", "root")
+	event := conv.EventFromSpan(resource, span)
+	if event.Harness.Name != "claude_cowork" {
+		t.Fatalf("span fixture did not resolve to claude_cowork (%q)", event.Harness.Name)
+	}
+	if event.User != (UserInfo{}) {
+		t.Fatalf("span user = %+v, want none: the kernel named the relay, not the person", event.User)
+	}
+
+	metrics := pmetric.NewMetrics()
+	rm := metrics.ResourceMetrics().AppendEmpty()
+	for k, v := range resource {
+		rm.Resource().Attributes().PutStr(k, v.(string))
+	}
+	sum := rm.ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
+	sum.SetName("claude_code.token.usage")
+	dp := sum.SetEmptySum().DataPoints().AppendEmpty()
+	dp.SetIntValue(10)
+	dp.Attributes().PutStr("type", "input")
+	events := conv.EventsFromMetrics(metrics)
+	if len(events) == 0 {
+		t.Fatal("no events from the Cowork token usage metric")
+	}
+	for _, e := range events {
+		if e.Harness.Name != "claude_cowork" {
+			t.Fatalf("metric fixture did not resolve to claude_cowork (%q)", e.Harness.Name)
+		}
+		if e.User != (UserInfo{}) {
+			t.Fatalf("metric user = %+v, want none: the kernel named the relay, not the person", e.User)
+		}
+	}
+
+	// Without the processor (macOS, Windows) nothing changes for these signals.
+	if got := NewConverter(Options{}).EventFromSpan(resource, span).User; got == (UserInfo{}) {
+		t.Fatal("span user empty without peer_user; want the collector's account as before")
+	}
+}

@@ -2376,8 +2376,8 @@ func EventCategory(action, explicit string) string {
 // beacon_peer processor resolves the sender from the kernel; this only copies what it found, and
 // changes nothing when it found nobody, so an unattributed event is the collector's account as it
 // always was rather than someone's guess. With it on, nothing a sender reports replaces the kernel's
-// answer; a Claude Cowork event, which arrives through a relay, gets no user instead (see
-// normalizeClaudeCoworkContext).
+// answer; a Claude Cowork event of any signal, which arrives through a relay, gets no user instead
+// (see normalizeClaudeCoworkContext).
 func (c Converter) applyPeerUser(event *Event, attrs map[string]interface{}) {
 	if !c.opts.PeerUser {
 		return
@@ -2387,7 +2387,10 @@ func (c Converter) applyPeerUser(event *Event, attrs map[string]interface{}) {
 	// otherwise be recorded exactly like root's own, kernel-attributed exports. An event whose sender
 	// could not be identified carries no user at all.
 	uid := FirstString(attrs, PeerUIDAttribute)
-	if uid == "" {
+	// Claude Cowork reaches the collector only through a relay (see normalizeClaudeCoworkContext),
+	// so the kernel's answer is the relay's account, not the person. That holds for every signal,
+	// including the spans and metric datapoints that never pass through the log normalizer.
+	if uid == "" || event.Harness.Name == "claude_cowork" {
 		event.User = UserInfo{}
 		return
 	}
