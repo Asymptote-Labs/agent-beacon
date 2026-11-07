@@ -270,8 +270,13 @@ expect_readers alice "first install by sudo"
 # terminal: its login account must not be added.
 run_install SUDO_USER=deploy BEACON_INSTALL_TTY=0
 has_flag --log-readers && fail "sudo install without a terminal added $(flag_value --log-readers)"
-run_install SUDO_USER=deploy
-has_flag --log-readers && fail "sudo install with no terminal on stdin added $(flag_value --log-readers)"
+# Without the override it asks for a controlling terminal, not a terminal on stdin: rpm gives
+# scriptlets a pipe on stdin even under `sudo dnf install` at a terminal.
+run_install SUDO_USER=deploy BEACON_CONTROLLING_TTY="$TMP_DIR/no-such-tty"
+has_flag --log-readers && fail "sudo install with no controlling terminal added $(flag_value --log-readers)"
+: >"$TMP_DIR/fake-tty"
+run_install SUDO_USER=alice BEACON_CONTROLLING_TTY="$TMP_DIR/fake-tty" </dev/null
+expect_readers alice "sudo install with a controlling terminal and stdin on a pipe (rpm)"
 run_install SUDO_USER=deploy BEACON_INSTALL_TTY=1 DEBIAN_FRONTEND=noninteractive
 has_flag --log-readers && fail "DEBIAN_FRONTEND=noninteractive install added $(flag_value --log-readers)"
 run_install SUDO_USER=deploy BEACON_INSTALL_TTY=0 BEACON_LOG_READERS=svc_splunk
