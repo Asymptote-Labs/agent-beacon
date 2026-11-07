@@ -676,8 +676,11 @@ use, `--latest=false --prerelease`). That file's URL is `CHROME_UPDATE_URL`, the
 manifest's `update_url` and the URL fleets put in policy, so it must never move
 without first shipping a version whose `update_url` names the new place. The job
 refuses to offer a lower version than the feed already does, so re-running an old
-tag cannot roll fleets back, and reads the feed back through that URL before
-finishing.
+tag cannot roll fleets back (a failure to read the current feed fails the job
+rather than skipping that check), and reads the feed back through that URL
+before finishing. A re-run of a release that already has its CRX keeps the
+published zip and CRX: the rebuilt zip has new file times, so a re-signed CRX
+would no longer match the hash the live feed pins.
 
 The zip is unsigned, so its `.sha256` is its integrity check, the same posture as
 the Windows MSI; Chrome checks the CRX's signature against its ID when it installs
