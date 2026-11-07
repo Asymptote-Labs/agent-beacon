@@ -3,6 +3,7 @@
 package loggroup
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -119,10 +120,52 @@ func TestAddMemberAcceptsTheNamesWindowsGivesLocalAccounts(t *testing.T) {
 
 func TestAddMemberTreatsAnExistingMemberAsSuccess(t *testing.T) {
 	fakeAccounts(t, map[string]string{Name: "S-1-5-21-1-2-3-1500"})
-	run = func(string, ...string) (string, error) {
-		return "", fmt.Errorf("net.exe: exit status 2: System error 1378 has occurred. The specified account name is already a member of the group.")
+	run = func(path string, args ...string) (string, error) {
+		return "", &toolError{command: path + " " + strings.Join(args, " "), err: errors.New("exit status 2"),
+			Stderr: "System error 1378 has occurred.\r\n\r\nThe specified account name is already a member of the group."}
 	}
 	if err := AddMember(Name, "alice"); err != nil {
 		t.Fatalf("AddMember = %v, want success for an existing member", err)
+	}
+	// In another display language the sentence is translated but the number is not.
+	run = func(path string, args ...string) (string, error) {
+		return "", &toolError{command: path + " " + strings.Join(args, " "), err: errors.New("exit status 2"),
+			Stderr: "Systemfehler 1378 aufgetreten.\r\n\r\nDer angegebene Kontoname ist bereits ein Mitglied der Gruppe."}
+	}
+	if err := AddMember(Name, "alice"); err != nil {
+		t.Fatalf("AddMember (German net.exe) = %v, want success for an existing member", err)
+	}
+}
+
+// Only net.exe's own error number counts as "already a member": never a 1378 in the account name,
+// the command line, or another error's text. Otherwise an account that does not exist would be
+// reported as added, and the operator told a log shipper can read the log when it cannot.
+func TestAddMemberReportsOtherFailuresEvenWith1378InTheName(t *testing.T) {
+	fakeAccounts(t, map[string]string{Name: "S-1-5-21-1-2-3-1500"})
+	cases := []struct{ account, stderr string }{
+		// The name is on the command line, which Error() includes.
+		{"svc1378", "System error 1332 has occurred.\r\n\r\nNo mapping between account names and security IDs was done."},
+		{`CORP\svc1378`, "System error 1332 has occurred."},
+		// net.exe echoing the name, with or without its domain.
+		{`CORP\svc1378`, "There is no such global user or group: svc1378.\r\n\r\nMore help is available by typing NET HELPMSG 3783."},
+		{"app1378", "The account app1378 could not be added."},
+		{"alice", "System error 5 has occurred.\r\n\r\nAccess is denied."},
+		{"alice", ""},
+	}
+	for _, c := range cases {
+		stderr := c.stderr
+		run = func(path string, args ...string) (string, error) {
+			return "", &toolError{command: path + " " + strings.Join(args, " "), err: errors.New("exit status 2"), Stderr: stderr}
+		}
+		if err := AddMember(Name, c.account); err == nil {
+			t.Errorf("AddMember(%q) with net.exe saying %q = nil, want the failure reported", c.account, c.stderr)
+		}
+	}
+	// A plain error from run (one that is not a toolError) is never read as a net.exe error number.
+	run = func(string, ...string) (string, error) {
+		return "", fmt.Errorf("net.exe localgroup %s svc1378 /add: 1378", Name)
+	}
+	if err := AddMember(Name, "svc1378"); err == nil {
+		t.Error("AddMember with an untyped error mentioning 1378 = nil, want the failure reported")
 	}
 }

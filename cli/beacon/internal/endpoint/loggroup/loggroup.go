@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +33,24 @@ const commandTimeout = 10 * time.Second
 // ErrUnsupported is returned where Beacon cannot manage groups.
 var ErrUnsupported = errors.New("managing the log readers group is not supported on this platform")
 
+// toolError is a system tool that failed. Stderr is what the tool itself printed, kept apart from
+// the command line in Error(), so a caller that recognizes a tool's message by its text (net.exe's
+// system error number, say) never matches an account name or path it was given.
+type toolError struct {
+	command string
+	err     error
+	Stderr  string
+}
+
+func (e *toolError) Error() string {
+	if e.Stderr != "" {
+		return fmt.Sprintf("%s: %v: %s", e.command, e.err, e.Stderr)
+	}
+	return fmt.Sprintf("%s: %v", e.command, e.err)
+}
+
+func (e *toolError) Unwrap() error { return e.err }
+
 // run executes a system tool by absolute path and returns its standard output. A variable so tests
 // can stand in for the account database, which a test cannot change portably.
 var run = func(path string, args ...string) (string, error) {
@@ -40,11 +59,12 @@ var run = func(path string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, path, args...)
 	out, err := cmd.Output()
 	if err != nil {
+		failure := &toolError{command: path + " " + strings.Join(args, " "), err: err}
 		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
-			return string(out), fmt.Errorf("%s %s: %w: %s", path, strings.Join(args, " "), err, strings.TrimSpace(string(exitErr.Stderr)))
+		if errors.As(err, &exitErr) {
+			failure.Stderr = strings.TrimSpace(string(exitErr.Stderr))
 		}
-		return string(out), fmt.Errorf("%s %s: %w", path, strings.Join(args, " "), err)
+		return string(out), failure
 	}
 	return string(out), nil
 }
@@ -163,4 +183,39 @@ func parseGID(field string) (int, error) {
 		return 0, fmt.Errorf("unexpected gid %q", field)
 	}
 	return gid, nil
+}
+
+// errMemberInAlias is ERROR_MEMBER_IN_ALIAS: the account is already a member of the local group.
+const errMemberInAlias = 1378
+
+// netErrorNumber matches the number in net.exe's "System error N has occurred." In other display
+// languages the sentence is translated but the number is the same, so only the number is read.
+var netErrorNumber = regexp.MustCompile(`(?:^|[^0-9])([0-9]{1,5})(?:[^0-9]|$)`)
+
+// netSystemError returns the system error number net.exe printed for a failed command, or 0. It is
+// used on Windows and lives here so every platform runs its test. It reads only what net.exe wrote
+// to standard error, never the command line (which holds the account name and the path), and
+// ignores the account name wherever net.exe echoes it, so a name such as svc1378 can never pass for
+// an error number.
+func netSystemError(err error, account string) int {
+	var failure *toolError
+	if !errors.As(err, &failure) || failure.Stderr == "" {
+		return 0
+	}
+	stderr := failure.Stderr
+	if account != "" {
+		stderr = strings.ReplaceAll(stderr, account, " ")
+		if _, name, ok := strings.Cut(account, `\`); ok && name != "" {
+			stderr = strings.ReplaceAll(stderr, name, " ")
+		}
+	}
+	match := netErrorNumber.FindStringSubmatch(stderr)
+	if match == nil {
+		return 0
+	}
+	n, convErr := strconv.Atoi(match[1])
+	if convErr != nil {
+		return 0
+	}
+	return n
 }
