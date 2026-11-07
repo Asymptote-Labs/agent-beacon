@@ -451,6 +451,72 @@ for value in 1 0; do
   esac
 done
 
+# BEACON_LOG_ACCESS and BEACON_DASHBOARD pass straight through as --log-access and --dashboard;
+# unset passes nothing and keeps the endpoint's own setting (the cases above).
+BEACON_BIN="$STUB_BIN" \
+BEACON_COLLECTOR="/tmp/beacon-otelcol" \
+BEACON_LOG_ACCESS="restricted" \
+BEACON_DASHBOARD="disabled" \
+STUB_LOG="$STUB_LOG" \
+"$INSTALL_SCRIPT"
+
+INSTALL_ARGS="$(cat "$STUB_LOG")"
+case "$INSTALL_ARGS" in
+  "endpoint install --system --harness claude,codex --otlp-grpc-port 4317 --otlp-http-port 4318 --collector /tmp/beacon-otelcol --log-access restricted --dashboard disabled") ;;
+  *)
+    echo "unexpected log access/dashboard install args: $INSTALL_ARGS" >&2
+    exit 1
+    ;;
+esac
+
+for value in enabled disabled; do
+  BEACON_BIN="$STUB_BIN" \
+  BEACON_COLLECTOR="/tmp/beacon-otelcol" \
+  BEACON_DASHBOARD="$value" \
+  STUB_LOG="$STUB_LOG" \
+  "$INSTALL_SCRIPT"
+
+  INSTALL_ARGS="$(cat "$STUB_LOG")"
+  case "$INSTALL_ARGS" in
+    "endpoint install --system --harness claude,codex --otlp-grpc-port 4317 --otlp-http-port 4318 --collector /tmp/beacon-otelcol --dashboard $value") ;;
+    *)
+      echo "unexpected dashboard install args for BEACON_DASHBOARD=$value: $INSTALL_ARGS" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# The Linux package script follows the same contract.
+LINUX_INSTALL_SCRIPT="$ROOT_DIR/packaging/linux/install-endpoint.sh"
+BEACON_BIN="$STUB_BIN" \
+BEACON_COLLECTOR="/tmp/beacon-otelcol" \
+BEACON_LOG_ACCESS="restricted" \
+BEACON_DASHBOARD="disabled" \
+STUB_LOG="$STUB_LOG" \
+sh "$LINUX_INSTALL_SCRIPT"
+
+INSTALL_ARGS="$(cat "$STUB_LOG")"
+case "$INSTALL_ARGS" in
+  "endpoint install --system --harness claude,codex --otlp-grpc-port 4317 --otlp-http-port 4318 --collector /tmp/beacon-otelcol --log-access restricted --dashboard disabled") ;;
+  *)
+    echo "unexpected Linux log access/dashboard install args: $INSTALL_ARGS" >&2
+    exit 1
+    ;;
+esac
+BEACON_BIN="$STUB_BIN" \
+BEACON_COLLECTOR="/tmp/beacon-otelcol" \
+STUB_LOG="$STUB_LOG" \
+sh "$LINUX_INSTALL_SCRIPT"
+
+INSTALL_ARGS="$(cat "$STUB_LOG")"
+case "$INSTALL_ARGS" in
+  "endpoint install --system --harness claude,codex --otlp-grpc-port 4317 --otlp-http-port 4318 --collector /tmp/beacon-otelcol") ;;
+  *)
+    echo "unexpected Linux default install args: $INSTALL_ARGS" >&2
+    exit 1
+    ;;
+esac
+
 BEACON_BIN="$STUB_BIN" \
 BEACON_KEEP_LOGS="1" \
 BEACON_KEEP_CONFIG="1" \

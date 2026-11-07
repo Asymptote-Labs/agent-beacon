@@ -130,6 +130,10 @@ if ([string]::IsNullOrWhiteSpace($logReaders)) {
         }
     }
 }
+# enabled or disabled: whether any account may run `beacon endpoint dashboard`. Empty keeps what the
+# endpoint already has, so an upgrade never changes it. The same variable the Linux and macOS install
+# scripts read.
+$dashboard = Get-BeaconSetting 'BEACON_DASHBOARD' ''
 
 # Auto-detected rather than required, so a manual invocation without BEACON_COLLECTOR still works.
 # DiscoverBinary would find this on its own -- it is passed explicitly so that a failure says which
@@ -152,6 +156,7 @@ if (-not [string]::IsNullOrWhiteSpace($service)) { $installArgs += @('--service'
 if ($noStart -eq '1') { $installArgs += '--no-start' }
 if (-not [string]::IsNullOrWhiteSpace($logAccess)) { $installArgs += @('--log-access', $logAccess) }
 if (-not [string]::IsNullOrWhiteSpace($logReaders)) { $installArgs += @('--log-readers', $logReaders.Trim()) }
+if (-not [string]::IsNullOrWhiteSpace($dashboard)) { $installArgs += @('--dashboard', $dashboard) }
 
 # The access control on %ProgramData%\Beacon is applied by the install itself, not here, so a fleet
 # that runs `beacon endpoint install --system` directly gets the same result as the MSI. It resets the

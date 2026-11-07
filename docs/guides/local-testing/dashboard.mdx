@@ -35,13 +35,15 @@ beacon endpoint dashboard --open
 ```bash title="Sample output"
 $ beacon endpoint dashboard --open
 
-Reading runtime log: ~/.beacon/endpoint/logs/runtime.jsonl
-Dashboard listening on http://127.0.0.1:8765
-Opened browser window
+Beacon endpoint dashboard: http://127.0.0.1:8765/?token=3Wq…
+Runtime log: ~/.beacon/endpoint/logs/runtime.jsonl
 ```
 </Accordion>
 
 By default, the dashboard binds to a loopback address and reads the configured runtime log plus its numbered local archives. It is intended for local investigation, not remote administration.
+
+Open the URL exactly as printed: it carries a secret for this run, and the dashboard refuses
+requests without it ([access control](/cli/dashboard#access-control)).
 
 To use a custom local address:
 

@@ -142,11 +142,14 @@ installed. The command runs until you stop it.
 ```bash
 beacon lenses preview ./command-log.lens.html --session 5f0c2a9e
 # Previewing Command Log (command-log) from /home/me/command-log.lens.html
-# Open: http://127.0.0.1:8766/session.html?id=5f0c2a9e&lens=command-log
+# Open: http://127.0.0.1:8766/session.html?id=5f0c2a9e&lens=command-log&token=3Wq…
 ```
 
 The preview listens on `127.0.0.1:8766` by default, so it can run next to a dashboard on
-the default `8765`. A lens with a built-in's `id` cannot be previewed; give it its own.
+the default `8765`. A lens with a built-in's `id` cannot be previewed; give it its own. Like
+the dashboard, it serves only the browser that opened the printed URL with its per-run secret
+([access control](/cli/dashboard#access-control)), and it does not start when an administrator
+has [turned the dashboard off](/cli/dashboard#turning-the-dashboard-off).
 
 | Flag | Description |
 |------|-------------|

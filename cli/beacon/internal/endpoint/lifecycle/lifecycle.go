@@ -347,6 +347,10 @@ type InstallOptions struct {
 	// SessionSync turns the scheduled session-store sync on or off; nil keeps what the existing
 	// config records (off for a new install), so repair and package upgrades never change it.
 	SessionSync *bool
+	// Dashboard is the administrator's switch for the local dashboard, "enabled" or "disabled".
+	// Empty keeps what the existing config records (enabled for a new install). It applies to a
+	// system install only.
+	Dashboard string
 }
 
 type UninstallOptions struct {
@@ -430,6 +434,12 @@ type Status struct {
 	SentinelForwarder *sentinel.Status `json:"sentinel_forwarder,omitempty"`
 	// LogAccess is the system log's access mode, "shared" or "restricted"; empty in user mode.
 	LogAccess string `json:"log_access,omitempty"`
+	// Dashboard is "enabled" or "disabled": whether the system config lets anyone on this machine
+	// run `beacon endpoint dashboard`. It is reported in both modes, because the system setting
+	// applies to every account. DashboardError says why the setting could not be read, in which
+	// case the dashboard refuses to start and Dashboard reads disabled.
+	Dashboard      string `json:"dashboard"`
+	DashboardError string `json:"dashboard_error,omitempty"`
 }
 
 type DestinationStatus struct {
@@ -1188,6 +1198,7 @@ func buildStatus(requestedUserMode bool, effectiveCfg endpointconfig.Config, run
 			Message:  runtimeLog.Warning,
 		})
 	}
+	dashboardMode, dashboardErr := dashboardStatus()
 	return Status{
 		Version:            version.GetVersion(),
 		Edition:            version.ReportedEdition(),
@@ -1206,7 +1217,25 @@ func buildStatus(requestedUserMode bool, effectiveCfg endpointconfig.Config, run
 		ScriptForwarders:   scriptForwarderStatuses(),
 		SentinelForwarder:  sentinelForwarderStatusFor(requestedUserMode),
 		LogAccess:          logAccessOf(effectiveCfg),
+		Dashboard:          dashboardMode,
+		DashboardError:     dashboardErr,
 	}
+}
+
+// systemDashboardDisabled is the seam status reads the administrator's dashboard switch through.
+var systemDashboardDisabled = endpointconfig.SystemDashboardDisabled
+
+// dashboardStatus is the dashboard switch as status reports it. A setting that cannot be read
+// reads disabled, because that is what `beacon endpoint dashboard` then does.
+func dashboardStatus() (string, string) {
+	disabled, err := systemDashboardDisabled()
+	switch {
+	case err != nil:
+		return endpointconfig.DashboardDisabled, err.Error()
+	case disabled:
+		return endpointconfig.DashboardDisabled, ""
+	}
+	return endpointconfig.DashboardEnabled, ""
 }
 
 func sentinelForwarderStatusFor(userMode bool) *sentinel.Status {
@@ -1289,6 +1318,8 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 		// The log access mode is an operator's security choice; a repair or upgrade that dropped
 		// it would silently make a restricted log world-writable again.
 		cfg.LogAccess = existing.LogAccess
+		// The dashboard switch is an administrator's choice too; an upgrade must not turn it back on.
+		cfg.Dashboard = existing.Dashboard
 	} else if !opts.UserMode && logIsRestricted(cfg.LogPath) {
 		// No config to carry the mode over from -- an uninstall with --keep-logs removed it, or it
 		// does not load -- but the root-owned marker beside the kept log still records restricted.
@@ -1300,6 +1331,9 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 	}
 	if opts.SessionSync != nil {
 		cfg.SessionSync = &endpointconfig.SessionSync{Enabled: *opts.SessionSync}
+	}
+	if opts.Dashboard != "" {
+		cfg.Dashboard = opts.Dashboard
 	}
 	if opts.Harnesses != nil {
 		cfg.Harnesses = opts.Harnesses
@@ -1465,6 +1499,9 @@ func preflight(cfg endpointconfig.Config, startService bool, kind service.Kind) 
 		return err
 	}
 	if err := validateLogAccess(cfg); err != nil {
+		return err
+	}
+	if err := validateDashboard(cfg); err != nil {
 		return err
 	}
 	// Replaces a blanket "macOS only" refusal. What actually matters is whether a service
