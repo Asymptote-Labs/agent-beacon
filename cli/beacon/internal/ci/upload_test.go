@@ -39,7 +39,7 @@ func TestResolveUploadDestinationsRequiresBucket(t *testing.T) {
 
 func TestResolveUploadDestinationsRequiresUploadSession(t *testing.T) {
 	t.Setenv(EnvS3Bucket, "beacon-ci")
-	for _, session := range []string{"", " ", ".."} {
+	for _, session := range []string{"", " ", "..", "../../outside"} {
 		if _, err := resolveUploadDestinations([]string{"s3"}, nil, "/tmp/runtime.jsonl", session); err == nil {
 			t.Fatalf("resolveUploadDestinations(session %q) returned no error; an empty session folder would let sessions overwrite each other", session)
 		}
@@ -72,6 +72,24 @@ func TestResolveUploadDestinationsBuildsGitHubObjectKeys(t *testing.T) {
 	run.Job = ""
 	if got, want := uploadObjectKey("logs", run, "/tmp/runtime.jsonl", "s"), "logs/asymptote-labs/agent-beacon/123/2/s/runtime.jsonl"; got != want {
 		t.Fatalf("key without a job = %q, want %q", got, want)
+	}
+}
+
+func TestUploadObjectKeyStaysUnderPrefix(t *testing.T) {
+	session := "1700000000-abcd"
+	run := &schema.RunInfo{
+		Repository: "owner/repo",
+		RunID:      "../../../../outside",
+		RunAttempt: "1",
+		Job:        "build",
+	}
+	if got, want := uploadObjectKey("tenant/logs", run, "/tmp/runtime.jsonl", session), "tenant/logs/owner/repo/1/build/"+session+"/runtime.jsonl"; got != want {
+		t.Fatalf("key with a parent run id = %q, want %q", got, want)
+	}
+	run.RunID = "123"
+	run.Job = "../../../../../outside"
+	if got, want := uploadObjectKey("tenant/logs", run, "/tmp/../../etc/passwd", session), "tenant/logs/owner/repo/123/1/"+session+"/passwd"; got != want {
+		t.Fatalf("key with a parent job = %q, want %q", got, want)
 	}
 }
 
