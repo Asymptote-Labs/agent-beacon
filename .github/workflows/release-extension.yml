@@ -321,8 +321,20 @@ jobs:
               --verify-tag --latest=false
           fi
 
-          gh release upload "$TAG" "$NAME" "$NAME.sha256" "$CRX" "$CRX.sha256" \
-            --repo "$REPO" --clobber
+          # A re-run rebuilds the zip with new file times and signs different
+          # bytes, while the live updates.xml pins the published CRX's hash:
+          # replacing it would make Chrome refuse every install until the feed
+          # caught up. Once a signed build is attached, keep the published pair,
+          # the way the firefox job keeps an .xpi AMO already signed.
+          # Captured first: piping into `grep -q` under pipefail can fail the
+          # pipeline with SIGPIPE on a match and read as "not attached".
+          assets="$(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name')"
+          if printf '%s\n' "$assets" | grep -qxF "$CRX"; then
+            echo "::notice title=Signed build kept::$CRX is already attached to $TAG; the published zip and CRX are left as they are."
+          else
+            gh release upload "$TAG" "$NAME" "$NAME.sha256" "$CRX" "$CRX.sha256" \
+              --repo "$REPO" --clobber
+          fi
 
   # Points the update feed at this release's CRX. The feed is updates.xml on a
   # fixed `ext-updates` release, so its URL never changes: it is the manifest's
@@ -379,8 +391,14 @@ jobs:
               --target "$GITHUB_SHA" --latest=false --prerelease
           fi
 
+          # Only a feed release without updates.xml means "no feed yet". Any
+          # other failure to read the current feed fails the job, because
+          # skipping the comparison below could roll fleets back.
           rm -f current.xml
-          gh release download "$FEED_TAG" --repo "$REPO" --pattern updates.xml --output current.xml 2>/dev/null || rm -f current.xml
+          feed_assets="$(gh release view "$FEED_TAG" --repo "$REPO" --json assets --jq '.assets[].name')"
+          if printf '%s\n' "$feed_assets" | grep -qxF updates.xml; then
+            gh release download "$FEED_TAG" --repo "$REPO" --pattern updates.xml --output current.xml
+          fi
           node "$tools/pack-crx.mjs" feed --id "$EXTENSION_ID" --version "$VERSION" \
             --codebase "$codebase" --sha256 "$sha256" --out updates.xml --current current.xml
           gh release upload "$FEED_TAG" updates.xml --repo "$REPO" --clobber
