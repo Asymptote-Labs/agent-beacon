@@ -18,6 +18,9 @@ param(
     [Parameter(Mandatory = $true)][string]$CollectorExe,
     [Parameter(Mandatory = $true)][string]$VectorExe,
     [string]$OutFile,
+    # Authenticode-signs the MSI with sign-authenticode.ps1, which does nothing unless signing is
+    # configured. Before the checksum, so the .sha256 names the bytes that ship.
+    [switch]$Sign,
     # Pinned by the caller so a build is reproducible and a WiX release cannot change the output
     # underneath us.
     [string]$WixVersion = '5.0.2'
@@ -80,6 +83,10 @@ try {
 
     if (-not (Test-Path -LiteralPath $OutFile)) {
         throw "wix reported success but produced no file at $OutFile"
+    }
+
+    if ($Sign) {
+        & (Join-Path $scriptDir 'sign-authenticode.ps1') -Path $OutFile
     }
 
     # The checksum ships beside the package for the same reason the macOS .pkg has one: it is the
