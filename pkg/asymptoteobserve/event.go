@@ -278,6 +278,16 @@ type PromptInfo struct {
 	Text string `json:"text,omitempty"`
 }
 
+// TurnInfo says how the agent's turn ended, as the runtime reported it on its turn-end hook.
+//
+// Status is the runtime's own word, kept verbatim: Cursor's stop hook sends completed, aborted or
+// error. The block is set only when the runtime names a status. Beacon never fills in a default,
+// because a turn recorded as completed when the runtime said nothing would read like one the
+// runtime confirmed.
+type TurnInfo struct {
+	Status string `json:"status,omitempty"`
+}
+
 // SystemContextInfo says what a session.context event recorded when the runtime gave the model
 // context of its own, outside the conversation: which kind it was, where Beacon read it, and for a
 // skill index, which skills it listed. The text itself is in gen_ai.system_instructions. This block
@@ -724,6 +734,7 @@ type Event struct {
 	Approval      *ApprovalInfo          `json:"approval,omitempty"`
 	Policy        *PolicyInfo            `json:"policy,omitempty"`
 	Prompt        *PromptInfo            `json:"prompt,omitempty"`
+	Turn          *TurnInfo              `json:"turn,omitempty"`
 	SystemContext *SystemContextInfo     `json:"system_context,omitempty"`
 	Content       *ContentInfo           `json:"content,omitempty"`
 	Destination   *DestinationInfo       `json:"destination,omitempty"`

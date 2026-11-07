@@ -135,9 +135,10 @@ if command -v launchctl >/dev/null 2>&1; then
   # loads it when on and removes it when off, so an upgrade keeps whatever the endpoint chose.
   "${BEACON_BIN:-/opt/beacon/bin/beacon}" endpoint sessions install-daemon --system || \
     echo "Warning: scheduled session sync job not configured (endpoint is installed and running)" >&2
-  # A connected endpoint's Beacon Cloud forwarder config is re-rendered from this version's pack,
-  # validated, and swapped in with a forwarder restart only when it changed. The install above ran
-  # with --no-start, so it left this to the package. Never enrolls or touches the device key, and
+  # A connected endpoint's Beacon Cloud forwarder config is re-rendered from this version's pack and
+  # validated, and a running forwarder is restarted, so it runs the Vector this package installed and
+  # reads the current runtime log, which the install may have replaced with a copy (switching to
+  # restricted log access does). The install above ran with --no-start, so it left this to the package. Never enrolls or touches the device key, and
   # a no-op on an endpoint that is not connected. Non-fatal: a rejected config keeps the old one.
   "${BEACON_BIN:-/opt/beacon/bin/beacon}" endpoint asymptote reconcile --system || \
     echo "Warning: Beacon Cloud forwarder config not reconciled (endpoint is installed and running)" >&2
