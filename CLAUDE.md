@@ -568,19 +568,47 @@ repository secrets exist, and skips when the release already has that `.xpi`,
 because AMO signs each version once. Without the secrets it is a no-op and the
 release still succeeds with the Chrome zip alone.
 
-The zip is unsigned, so its `.sha256` is the only integrity check it has, the
-same posture as the Windows MSI. The workflow proves the artifact works by
-unzipping the published bytes and asserting they are a loadable MV3 extension.
-Verify after the run:
+The `sign` job signs the same zip as `agent-beacon-browser-extension-<version>-chrome.crx`
+(CRX3) for managed fleets, which force-install it through Chrome policy. It is the
+only job that sees the signing key: it runs in the `extension-signing` environment
+(secret `CHROME_EXTENSION_SIGNING_KEY`, deployments allowed only from `ext-v*` tags),
+checks out only `browser-extension/tools`, and runs the dependency-free
+`tools/pack-crx.mjs` with plain Node, never `npm ci`. `pack` refuses a key whose
+extension ID is not `CHROME_EXTENSION_ID` in `tools/targets.mjs`, and `verify`
+re-reads the CRX as Chrome does and checks it carries exactly the published zip. A
+missing key fails the release. The key fixes the extension ID that every fleet's
+policy names, so it is never rotated; a copy is kept in the company password
+manager, and losing it means a new extension ID and a policy change for every fleet.
+
+The `feed` job then downloads the CRX from its public release URL, verifies it,
+and replaces `updates.xml` on the fixed `ext-updates` release (created on first
+use, `--latest=false --prerelease`). That file's URL is `CHROME_UPDATE_URL`, the
+manifest's `update_url` and the URL fleets put in policy, so it must never move
+without first shipping a version whose `update_url` names the new place. The job
+refuses to offer a lower version than the feed already does, so re-running an old
+tag cannot roll fleets back, and reads the feed back through that URL before
+finishing.
+
+The zip is unsigned, so its `.sha256` is its integrity check, the same posture as
+the Windows MSI; Chrome checks the CRX's signature against its ID when it installs
+it. The workflow proves the zip works by unzipping the published bytes and
+asserting they are a loadable MV3 extension with the pinned `update_url`. Verify
+after the run:
 
 ```bash
 gh release download ext-v<version> --repo Asymptote-Labs/agent-beacon \
-  --pattern 'agent-beacon-browser-extension-*-chrome.zip*'
+  --pattern 'agent-beacon-browser-extension-*-chrome.*'
 shasum -a 256 -c agent-beacon-browser-extension-<version>-chrome.zip.sha256
+shasum -a 256 -c agent-beacon-browser-extension-<version>-chrome.crx.sha256
+node browser-extension/tools/pack-crx.mjs verify \
+  --crx agent-beacon-browser-extension-<version>-chrome.crx \
+  --zip agent-beacon-browser-extension-<version>-chrome.zip
+curl -fsSL https://github.com/Asymptote-Labs/agent-beacon/releases/download/ext-updates/updates.xml
 ```
 
-Chrome Web Store publication is not yet wired. Until it is, the zip is loaded
-unpacked through Chrome's developer mode.
+The feed must name `<version>`, the CRX's release URL and its SHA-256. Chrome Web
+Store publication is not wired; unmanaged machines load the zip unpacked through
+developer mode.
 
 ## Implementation Notes
 

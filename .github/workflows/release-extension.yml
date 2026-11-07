@@ -15,9 +15,11 @@ name: Release Browser Extension
 # two never collide.
 #
 # No `environment: release`. That environment exists to gate the Apple signing
-# secrets; these jobs have none -- they use github.token only -- so putting them
-# behind the same approval would add friction without protecting anything. Same
-# reasoning as the windows-package job in release.yml.
+# secrets, which these jobs do not use, so putting them behind the same approval
+# would add friction without protecting anything. Same reasoning as the
+# windows-package job in release.yml. The one secret here, the Chrome signing
+# key, lives in its own `extension-signing` environment, which admits only
+# `ext-v*` tags and is entered only by the `sign` job.
 #
 # The jobs that run `npm ci` hold a read-only token: a dependency's lifecycle
 # script runs with whatever token the job has, and a write token would let it
@@ -25,8 +27,14 @@ name: Release Browser Extension
 # over as workflow artifacts, and only `release` and `attach-firefox`, which
 # never check out or install anything, get `contents: write` (#904).
 #
-# Chrome Web Store publication is deferred. Until then the artifact is a zip you
-# load unpacked, and its .sha256 is the only integrity check it has.
+# Chrome: besides the zip (load unpacked, for development), the `sign` job signs
+# the same bytes as a CRX3 file with the key that fixes the extension ID
+# (CHROME_EXTENSION_ID in browser-extension/tools/targets.mjs), and the `feed`
+# job publishes `updates.xml` on the fixed `ext-updates` release. Managed fleets
+# force-install the CRX through Chrome policy from that feed, and every installed
+# copy polls it for new versions (the manifest's `update_url`). The signer is
+# dependency-free, so the job holding the key never runs npm code. Chrome Web
+# Store publication is deferred.
 #
 # Firefox: the `firefox` job signs the Firefox build through AMO as an unlisted
 # (self-distributed) add-on and attaches `-firefox.xpi` to the same release. It
@@ -169,13 +177,16 @@ jobs:
           set -euo pipefail
           tmp="$(mktemp -d)"
           unzip -q "${{ steps.pack.outputs.name }}" -d "$tmp"
-          node -e '
-            const fs = require("fs");
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import { CHROME_UPDATE_URL } from "./tools/targets.mjs";
             const dir = process.argv[1], want = process.argv[2];
             const m = JSON.parse(fs.readFileSync(dir + "/manifest.json", "utf8"));
             if (m.manifest_version !== 3) throw new Error("not MV3");
             if (m.version !== want) throw new Error("manifest version " + m.version + " != " + want);
-            for (const f of ["sw.js", "content.js", "interceptor.js",
+            // Installed copies poll this for updates; a wrong one strands every fleet on this version.
+            if (m.update_url !== CHROME_UPDATE_URL) throw new Error("update_url " + m.update_url + " != " + CHROME_UPDATE_URL);
+            for (const f of ["managed_schema.json", "sw.js", "content.js", "interceptor.js",
                              "popup.html", "popup.js", "options.html", "options.js"]) {
               if (!fs.existsSync(dir + "/" + f)) throw new Error("missing " + f);
             }
@@ -194,8 +205,67 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  release:
+  # The only job that sees the signing key. It checks out nothing but
+  # browser-extension/tools and runs the dependency-free signer with plain Node,
+  # so no npm package executes beside the key. A missing key fails the release
+  # rather than publishing a build fleets cannot install.
+  sign:
     needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: extension-signing
+    permissions:
+      contents: read
+    outputs:
+      crx: ${{ steps.sign.outputs.crx }}
+      id: ${{ steps.sign.outputs.id }}
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      NAME: ${{ needs.build.outputs.name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: browser-extension/tools
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: chrome-release
+
+      # `pack` refuses a key whose extension ID is not the pinned one, and
+      # `verify` re-reads the file as Chrome will: the signature covers exactly
+      # the zip the build job verified, and the ID is CHROME_EXTENSION_ID.
+      - name: Sign the CRX
+        id: sign
+        shell: bash
+        env:
+          CHROME_EXTENSION_SIGNING_KEY: ${{ secrets.CHROME_EXTENSION_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          shasum -a 256 -c "$NAME.sha256"
+          crx="agent-beacon-browser-extension-${VERSION}-chrome.crx"
+          id="$(node browser-extension/tools/pack-crx.mjs pack \
+            --zip "$NAME" --key-env CHROME_EXTENSION_SIGNING_KEY --out "$crx")"
+          node browser-extension/tools/pack-crx.mjs verify --crx "$crx" --zip "$NAME"
+          shasum -a 256 "$crx" > "$crx.sha256"
+          cat "$crx.sha256"
+          echo "crx=$crx" >> "$GITHUB_OUTPUT"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: chrome-crx
+          path: |
+            ${{ steps.sign.outputs.crx }}
+            ${{ steps.sign.outputs.crx }}.sha256
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    needs: [build, sign]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -204,34 +274,40 @@ jobs:
       REPO: ${{ github.repository }}
       TAG: ${{ github.ref_name }}
       NAME: ${{ needs.build.outputs.name }}
+      CRX: ${{ needs.sign.outputs.crx }}
+      EXTENSION_ID: ${{ needs.sign.outputs.id }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: chrome-release
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: chrome-crx
 
       - name: Publish the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.build.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
-          version="$VERSION"
           shasum -a 256 -c "$NAME.sha256"
+          shasum -a 256 -c "$CRX.sha256"
 
           printf '%s\n' \
-            "Unpacked Chromium MV3 build of the Agent Beacon browser collector (\`browser-extension/\`). The same archive loads in Chrome, Edge, Brave, Opera, Vivaldi and Arc; CI tests it in Chromium and Edge." \
+            "Agent Beacon browser collector (\`browser-extension/\`) for Chromium browsers, in two forms built from the same bytes:" \
             "" \
-            "**Install:** download and unzip, then open the browser's extensions page (\`chrome://extensions\`, \`edge://extensions\`, \`brave://extensions\`, ...) -> Developer mode -> Load unpacked -> select the unzipped folder." \
+            "- **\`${CRX}\`**: the signed build for managed fleets. Chrome policy force-installs it from the update feed, and installed copies update themselves from it. Extension ID \`${EXTENSION_ID}\`, update URL \`https://github.com/${REPO}/releases/download/ext-updates/updates.xml\`. See https://docs.beacon.sh/runtimes/browser-extension-chrome-policy." \
+            "- **\`${NAME}\`**: the unpacked build, for development and single machines. Unzip it, open the extensions page (\`chrome://extensions\`, \`edge://extensions\`, ...), turn on Developer mode, and choose Load unpacked." \
             "" \
             "Requires a running Beacon endpoint: the extension POSTs OTLP GenAI logs to \`http://127.0.0.1:4318/v1/logs\`." \
             "" \
-            "**Retention defaults to \`full\`**, meaning complete prompt and response text from claude.ai and chatgpt.com is written to the local runtime log. Change it in the extension's options page before enabling it on a machine where you use those sites personally." \
+            "**Retention defaults to \`full\`**, meaning complete prompt and response text from claude.ai and chatgpt.com is written to the local runtime log. Admins can lock retention and the other settings through Chrome policy; on a single machine, change it in the extension's options page before enabling it where you use those sites personally." \
             "" \
-            "The archive is unsigned. Verify it against the \`.sha256\` published beside it:" \
+            "Verify either file against the \`.sha256\` published beside it. Chrome also checks the CRX signature against the extension ID when it installs it:" \
             "" \
             '```' \
-            "shasum -a 256 -c agent-beacon-browser-extension-${version}-chrome.zip.sha256" \
+            "shasum -a 256 -c ${NAME}.sha256" \
+            "shasum -a 256 -c ${CRX}.sha256" \
             '```' \
             > /tmp/ext-release-notes.md
 
@@ -245,8 +321,80 @@ jobs:
               --verify-tag --latest=false
           fi
 
-          gh release upload "$TAG" "$NAME" "$NAME.sha256" \
+          gh release upload "$TAG" "$NAME" "$NAME.sha256" "$CRX" "$CRX.sha256" \
             --repo "$REPO" --clobber
+
+  # Points the update feed at this release's CRX. The feed is updates.xml on a
+  # fixed `ext-updates` release, so its URL never changes: it is the manifest's
+  # update_url and the URL fleets put in policy. It runs after the CRX is
+  # published and downloadable, and refuses to offer a lower version than the
+  # feed already does, so re-running an old tag cannot roll fleets back.
+  feed:
+    needs: [build, sign, release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      VERSION: ${{ needs.build.outputs.version }}
+      CRX: ${{ needs.sign.outputs.crx }}
+      EXTENSION_ID: ${{ needs.sign.outputs.id }}
+      FEED_TAG: ext-updates
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: browser-extension/tools
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Publish updates.xml
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools=browser-extension/tools
+          update_url="$(node --input-type=module -e 'import { CHROME_UPDATE_URL } from "./browser-extension/tools/targets.mjs"; console.log(CHROME_UPDATE_URL)')"
+          if [ "$update_url" != "https://github.com/${REPO}/releases/download/${FEED_TAG}/updates.xml" ]; then
+            echo "CHROME_UPDATE_URL ($update_url) is not this workflow's feed"
+            exit 1
+          fi
+
+          # Fetch the CRX the way Chrome will, through its public download URL,
+          # and check it is the signed build before pointing anyone at it.
+          codebase="https://github.com/${REPO}/releases/download/${TAG}/${CRX}"
+          curl -fsSL --retry 5 --retry-all-errors -o "$CRX" "$codebase"
+          node "$tools/pack-crx.mjs" verify --crx "$CRX"
+          sha256="$(shasum -a 256 "$CRX" | cut -d' ' -f1)"
+
+          # Created once, never "Latest" (the CLI keeps that label) and marked
+          # pre-release so it is not mistaken for a version.
+          if ! gh release view "$FEED_TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release create "$FEED_TAG" --repo "$REPO" \
+              --title "Browser extension update feed" \
+              --notes "updates.xml for the signed Chrome extension. Managed fleets and installed copies read it from https://github.com/${REPO}/releases/download/${FEED_TAG}/updates.xml; each ext-v* release replaces it." \
+              --target "$GITHUB_SHA" --latest=false --prerelease
+          fi
+
+          rm -f current.xml
+          gh release download "$FEED_TAG" --repo "$REPO" --pattern updates.xml --output current.xml 2>/dev/null || rm -f current.xml
+          node "$tools/pack-crx.mjs" feed --id "$EXTENSION_ID" --version "$VERSION" \
+            --codebase "$codebase" --sha256 "$sha256" --out updates.xml --current current.xml
+          gh release upload "$FEED_TAG" updates.xml --repo "$REPO" --clobber
+
+          # Read it back through the URL installed copies poll.
+          for _ in 1 2 3 4 5 6; do
+            if curl -fsSL "$update_url" | grep -qF "version='${VERSION}'"; then
+              echo "feed now offers ${VERSION}: $update_url"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "the feed at $update_url does not offer ${VERSION}"
+          exit 1
 
   firefox:
     needs: [build, release]
