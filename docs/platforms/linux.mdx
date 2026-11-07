@@ -173,9 +173,17 @@ Vector comes with Beacon. The `.deb` and `.rpm` install it at `/opt/beacon/bin/v
 | System install | Config and collector config under `/etc/beacon/endpoint` |
 | Service | `/etc/systemd/system/beacon-collector.service`, enabled and started |
 | Runtime log | `/var/log/beacon-agent/runtime.jsonl` |
-| Agent runtime | Claude Code and Codex CLI settings for the installing user, pointed at `127.0.0.1:4317` |
+| Agent runtime | Claude Code and Codex CLI settings and hooks for the installing user and everyone logged in, pointed at `127.0.0.1:4317` |
 
-That last row is worth knowing about. A system-mode endpoint runs as root, so the install has to work out whose agent settings to configure, and the collector is useless if nothing exports to it. Beacon uses `SUDO_USER`, which is set for every normal install path, and falls back to asking logind who has an active session. If it cannot identify anyone, it says so instead of failing, and you can configure yourself later:
+That last row is worth knowing about. A system-mode endpoint runs as root, so the install has to work out whose agent settings to configure, and the collector is useless if nothing exports to it. Beacon configures the user named by `SUDO_USER`, which is set when you install with `sudo`, and every account logind reports a live login session for (a desktop, ssh or terminal login; not a display manager's greeter or a background session such as cron's), which is what an install by a configuration manager running as root (Salt, Ansible, Puppet) has to go on. Each is configured as that user, in their own home, and the install prints one line per person:
+
+```
+beacon: the hook lines above are root's own; configuring the agent runtimes of logged-in users
+Configured alice (/home/alice): telemetry for claude, codex; hooks for claude, codex, writing to /var/log/beacon-agent/runtime.jsonl
+Configured bob (/home/bob): telemetry for claude, codex; hooks for claude, codex, writing to /var/log/beacon-agent/runtime.jsonl
+```
+
+The `Claude Code hooks installed: /root/...` lines printed before it are root's own settings, not anyone else's. A person who was not logged in during the install is not configured. If nobody can be identified, the install says so instead of failing, and each person configures themselves later:
 
 ```bash title="Configure your own agent runtime against an already-installed endpoint"
 sudo beacon endpoint user-config repair-installed --system

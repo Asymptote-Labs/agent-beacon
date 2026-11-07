@@ -15,13 +15,16 @@ if ! /opt/beacon/scripts/install-endpoint.sh; then
 fi
 
 # A system endpoint runs as root, and `endpoint install` above configured root's own Claude Code
-# and Codex settings. The person who ran the install is who actually needs pointing at the
-# collector, so this second step resolves them (from SUDO_USER, else logind) and configures their
-# runtime. Without it the collector runs perfectly and captures nothing anyone cares about.
+# and Codex settings. The people who use the machine are who actually need pointing at the
+# collector, so this second step resolves them -- the installing sudo user, and everyone with a live
+# logind session, which is what a configuration manager running as root (Salt, Ansible) has to go on
+# -- configures each one's runtime as that user, and prints who it configured. Without it the
+# collector runs perfectly and captures nothing anyone cares about.
 #
 # Non-fatal, and it prints why when it cannot: on an unattended install there may be no such user,
 # which is a legitimate outcome rather than a failure.
 if [ -x /opt/beacon/bin/beacon ]; then
+  echo "beacon: the hook lines above are root's own; configuring the agent runtimes of logged-in users"
   /opt/beacon/bin/beacon endpoint user-config repair-installed \
     --system --harness "${BEACON_ENDPOINT_HARNESSES:-claude,codex}" || \
     echo "beacon: could not configure the installing user's agent runtime; run" \
