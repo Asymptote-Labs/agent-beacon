@@ -9,13 +9,17 @@ set -eu
 # Both package managers invoke this for upgrades as well as first installs. `endpoint install` is
 # idempotent and rewrites its own config, so no branch on the argument is needed -- but an upgrade
 # must not lose an operator's explicit auto-update choice, which reconcile below preserves.
-# The settings a configuration manager wrote to /etc/default/beacon or /etc/sysconfig/beacon, loaded
-# here as well as inside install-endpoint.sh: the user-config step below is a separate command, and
-# a harness list that reached only the system install left each person's own runtime unconfigured.
+# The harness list a configuration manager wrote to /etc/default/beacon or /etc/sysconfig/beacon,
+# read here as well as inside install-endpoint.sh: the user-config step below is a separate command,
+# and a harness list that reached only the system install left each person's own runtime
+# unconfigured. Only that one value is taken, in a subshell: the user-config step runs the CLI as
+# each logged-in user with this script's environment, so exporting every setting would put a Splunk
+# HEC token from a root-only settings file into processes those users own. install-endpoint.sh
+# reads the rest itself, as root.
 if [ -r /opt/beacon/scripts/beacon-settings.sh ]; then
   # shellcheck source=../beacon-settings.sh
   . /opt/beacon/scripts/beacon-settings.sh
-  beacon_load_settings
+  BEACON_ENDPOINT_HARNESSES="$(beacon_settings_harnesses)"
 fi
 
 if ! /opt/beacon/scripts/install-endpoint.sh; then
