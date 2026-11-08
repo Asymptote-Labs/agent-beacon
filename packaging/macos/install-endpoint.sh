@@ -1,6 +1,27 @@
 #!/bin/sh
 set -eu
 
+# The install settings an MDM pushes as managed preferences (com.beacon.endpoint); see
+# beacon-settings.sh beside this script (/opt/beacon/scripts in the package).
+BEACON_SCRIPTS_DIR="${BEACON_SCRIPTS_DIR:-$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)}"
+# Positional arguments (Jamf passes them from $4) are named on the command line, so like the
+# environment they win over the preferences: each is resolved into its variable before those are read.
+[ -n "${4:-}" ] && BEACON_ENDPOINT_HARNESSES="${BEACON_ENDPOINT_HARNESSES:-$4}"
+[ -n "${5:-}" ] && BEACON_OTLP_GRPC_PORT="${BEACON_OTLP_GRPC_PORT:-$5}"
+[ -n "${6:-}" ] && BEACON_OTLP_HTTP_PORT="${BEACON_OTLP_HTTP_PORT:-$6}"
+[ -n "${7:-}" ] && BEACON_COLLECTOR="${BEACON_COLLECTOR:-$7}"
+[ -n "${8:-}" ] && BEACON_NO_START="${BEACON_NO_START:-$8}"
+[ -n "${9:-}" ] && BEACON_SPLUNK_HEC_ENDPOINT="${BEACON_SPLUNK_HEC_ENDPOINT:-$9}"
+[ -n "${10:-}" ] && BEACON_SPLUNK_HEC_TOKEN="${BEACON_SPLUNK_HEC_TOKEN:-${10}}"
+[ -n "${11:-}" ] && BEACON_SPLUNK_INDEX="${BEACON_SPLUNK_INDEX:-${11}}"
+[ -n "${12:-}" ] && BEACON_SPLUNK_SOURCE="${BEACON_SPLUNK_SOURCE:-${12}}"
+[ -n "${13:-}" ] && BEACON_SPLUNK_SOURCETYPE="${BEACON_SPLUNK_SOURCETYPE:-${13}}"
+[ -n "${14:-}" ] && BEACON_SPLUNK_INSECURE_SKIP_VERIFY="${BEACON_SPLUNK_INSECURE_SKIP_VERIFY:-${14}}"
+[ -n "${15:-}" ] && BEACON_SPLUNK_CA_FILE="${BEACON_SPLUNK_CA_FILE:-${15}}"
+# shellcheck source=beacon-settings.sh
+. "$BEACON_SCRIPTS_DIR/beacon-settings.sh"
+beacon_load_settings
+
 if [ -z "${BEACON_BIN:-}" ]; then
   if [ -x "/opt/beacon/bin/beacon" ]; then
     BEACON_BIN="/opt/beacon/bin/beacon"
@@ -31,6 +52,35 @@ BEACON_FALCON_CA_FILE="${BEACON_FALCON_CA_FILE:-}"
 # shared or restricted; empty keeps the mode the endpoint already has, so a package upgrade never
 # changes it.
 BEACON_LOG_ACCESS="${BEACON_LOG_ACCESS:-}"
+# The CLI takes the mode in any case and ignores surrounding blanks, so the checks below must too:
+# `Restricted` from a settings file installs a restricted log, and has to add its readers.
+BEACON_LOG_ACCESS="$(printf '%s' "$BEACON_LOG_ACCESS" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+# A first install from the package defaults to restricted, as on Linux and Windows: a package is
+# installed by an administrator for the whole machine, often by an MDM across a fleet, and that is
+# the install that should make the collector the only writer of the system log without a second
+# step. Only a genuinely first install: an existing system config (an upgrade, or a reinstall over a
+# kept config) or a runtime log left by `uninstall --keep-logs` passes no mode, so this never narrows
+# or widens an existing endpoint. BEACON_LOG_ACCESS=shared opts a new install out.
+BEACON_SYSTEM_CONFIG="${BEACON_SYSTEM_CONFIG:-/Library/Application Support/Beacon/Endpoint/config.json}"
+BEACON_SYSTEM_LOG="${BEACON_SYSTEM_LOG:-/var/log/beacon-agent/runtime.jsonl}"
+first_install=0
+if [ ! -e "$BEACON_SYSTEM_CONFIG" ] && [ ! -e "$BEACON_SYSTEM_LOG" ]; then
+  first_install=1
+fi
+if [ -z "$BEACON_LOG_ACCESS" ] && [ "$first_install" = 1 ]; then
+  BEACON_LOG_ACCESS=restricted
+fi
+# Accounts to add to the beacon-log group of a restricted log, comma-separated. Set, even to nothing,
+# it is exactly the list: an MDM sets BEACON_LOG_READERS to an empty string so that nobody is ever
+# added implicitly. Unset, a first install that a person ran in Installer.app adds that person, so
+# whoever installed Beacon on their own Mac can use the dashboard, `beacon traces` and `beacon share`
+# without a second step. Members are only ever added, never removed.
+if [ -z "${BEACON_LOG_READERS+set}" ]; then
+  BEACON_LOG_READERS=
+  if [ "$first_install" = 1 ] && [ "$BEACON_LOG_ACCESS" = restricted ]; then
+    BEACON_LOG_READERS="$(beacon_installing_person)"
+  fi
+fi
 # 1 turns the scheduled session sync on and 0 turns it off; empty keeps what the endpoint already
 # has, so a package upgrade never changes it.
 BEACON_SESSION_SYNC="${BEACON_SESSION_SYNC:-}"
@@ -51,6 +101,10 @@ fi
 
 if [ -n "$BEACON_LOG_ACCESS" ]; then
   set -- "$@" --log-access "$BEACON_LOG_ACCESS"
+fi
+
+if [ -n "$BEACON_LOG_READERS" ]; then
+  set -- "$@" --log-readers "$BEACON_LOG_READERS"
 fi
 
 case "$BEACON_SESSION_SYNC" in

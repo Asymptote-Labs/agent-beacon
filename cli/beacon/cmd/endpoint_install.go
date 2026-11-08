@@ -140,6 +140,7 @@ func endpointInstallOptions(selection endpointTargetSelection, serviceKind servi
 		SessionSync:               sessionSync,
 		ServiceKind:               serviceKind,
 		LogAccess:                 strings.ToLower(strings.TrimSpace(endpointOpts.logAccess)),
+		LogReaders:                endpointOpts.logReaders,
 	}
 }
 
