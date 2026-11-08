@@ -287,6 +287,18 @@ run_install SUDO_USER=alice BEACON_INSTALL_TTY=1 BEACON_LOG_ACCESS=shared
 has_flag --log-readers && fail "shared first install by sudo passed --log-readers"
 run_install SUDO_USER=alice BEACON_INSTALL_TTY=1 BEACON_LOG_READERS=
 has_flag --log-readers && fail "BEACON_LOG_READERS= (nobody) still added the sudo user"
+# The CLI takes the mode in any case, so the script must too: a restricted log from `Restricted`
+# still adds the person who installed it.
+run_install SUDO_USER=alice BEACON_INSTALL_TTY=1 BEACON_LOG_ACCESS=' Restricted '
+expect_readers alice "first install by sudo with BEACON_LOG_ACCESS=Restricted"
+expect_log_access restricted "BEACON_LOG_ACCESS=Restricted"
+printf 'BEACON_LOG_ACCESS=RESTRICTED\n' >"$DEFAULTS"
+run_install BEACON_DEFAULTS_FILE="$DEFAULTS" SUDO_USER=alice BEACON_INSTALL_TTY=1
+expect_readers alice "defaults file BEACON_LOG_ACCESS=RESTRICTED"
+printf 'BEACON_LOG_ACCESS=Shared\n' >"$DEFAULTS"
+run_install BEACON_DEFAULTS_FILE="$DEFAULTS" SUDO_USER=alice BEACON_INSTALL_TTY=1
+has_flag --log-readers && fail "defaults file BEACON_LOG_ACCESS=Shared passed --log-readers"
+rm -f "$DEFAULTS"
 run_install SUDO_USER=alice BEACON_LOG_READERS=svc_splunk,bob
 expect_readers svc_splunk,bob "BEACON_LOG_READERS over the sudo user"
 printf 'BEACON_LOG_READERS= # fleet: nobody implicitly\n' >"$DEFAULTS"

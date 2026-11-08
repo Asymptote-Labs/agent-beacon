@@ -52,6 +52,9 @@ BEACON_FALCON_CA_FILE="${BEACON_FALCON_CA_FILE:-}"
 # shared or restricted; empty keeps the mode the endpoint already has, so a package upgrade never
 # changes it.
 BEACON_LOG_ACCESS="${BEACON_LOG_ACCESS:-}"
+# The CLI takes the mode in any case and ignores surrounding blanks, so the checks below must too:
+# `Restricted` from a settings file installs a restricted log, and has to add its readers.
+BEACON_LOG_ACCESS="$(printf '%s' "$BEACON_LOG_ACCESS" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
 # A first install from the package defaults to restricted, as on Linux and Windows: a package is
 # installed by an administrator for the whole machine, often by an MDM across a fleet, and that is
 # the install that should make the collector the only writer of the system log without a second

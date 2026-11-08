@@ -131,6 +131,12 @@ run_install BEACON_INSTALLER_GUI=1 BEACON_CONSOLE_USER=loginwindow
 has_flag --log-readers && fail "loginwindow added as a reader"
 run_install BEACON_INSTALLER_GUI=1 BEACON_CONSOLE_USER=alice BEACON_LOG_ACCESS=shared
 has_flag --log-readers && fail "shared install added a reader"
+# The CLI takes the mode in any case, so the script must too.
+run_install BEACON_INSTALLER_GUI=1 BEACON_CONSOLE_USER=alice BEACON_LOG_ACCESS=' Restricted '
+expect --log-readers alice "Installer.app first install with BEACON_LOG_ACCESS=Restricted"
+expect --log-access restricted "BEACON_LOG_ACCESS=Restricted"
+run_install BEACON_INSTALLER_GUI=1 BEACON_CONSOLE_USER=alice BEACON_LOG_ACCESS=SHARED
+has_flag --log-readers && fail "BEACON_LOG_ACCESS=SHARED install added a reader"
 run_install BEACON_INSTALLER_GUI=1 BEACON_CONSOLE_USER=alice BEACON_LOG_READERS=
 has_flag --log-readers && fail "BEACON_LOG_READERS= still added the installing person"
 printf 'BEACON_LOG_READERS=\n' >"$MANAGED.plist"
