@@ -94,7 +94,7 @@ func TestCoworkEventHasNoUserUnderThePeer(t *testing.T) {
 	}
 }
 
-// Without beacon_peer (macOS, Windows), Claude Cowork's cloud identity replaces the collector's own
+// Without beacon_peer (a collector config that does not render it), Claude Cowork's cloud identity replaces the collector's own
 // account, as it always has.
 func TestCoworkIdentityWinsWithoutThePeer(t *testing.T) {
 	resource, record := peerLog("claude-cowork")
@@ -218,7 +218,7 @@ func TestCoworkSpansAndMetricsHaveNoUserUnderThePeer(t *testing.T) {
 		}
 	}
 
-	// Without the processor (macOS, Windows) nothing changes for these signals.
+	// Without the processor nothing changes for these signals.
 	if got := NewConverter(Options{}).EventFromSpan(resource, span).User; got == (UserInfo{}) {
 		t.Fatal("span user empty without peer_user; want the collector's account as before")
 	}
