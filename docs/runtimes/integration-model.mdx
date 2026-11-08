@@ -15,7 +15,7 @@ Beacon supports multiple [runtime surfaces](/concepts/core-concepts#runtime-surf
 |---------|--------------------------------------|
 | [Claude Code](/runtimes/claude-code) | Looks for the `claude` executable and Claude settings paths |
 | [Codex CLI](/runtimes/codex-cli) | Looks for the `codex` executable and `~/.codex/config.toml` |
-| [Antigravity CLI](/runtimes/antigravity-cli) | Looks for the `antigravity` or `antigravity-cli` executable, treating `~/.gemini/config` or `./.agents` as an extra signal, then checks `hooks.json` there (the project file wins when present) for Beacon's hooks |
+| [Antigravity CLI](/runtimes/antigravity-cli) | Looks for the `agy`, `antigravity`, or `antigravity-cli` executable, treating `~/.gemini/config` or `./.agents` as an extra signal, then checks `hooks.json` there (the project file wins when present) for Beacon's hooks |
 | [Gemini CLI](/runtimes/gemini-cli) | Looks for the `gemini` executable and `~/.gemini/settings.json` |
 | [GitHub Copilot CLI](/runtimes/github-copilot-cli) | Looks for the `copilot` executable or `~/.copilot/config.json`, then validates Copilot OTel environment variables |
 | [DeepSeek Harness](/runtimes/deepseek-harness) | Looks for the `dsh` executable or `$DSH_HOME` (default `~/.dsh`), then checks both Beacon's owned hook file and its mount row in `cordis.patch.yml` |
