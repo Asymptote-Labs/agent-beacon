@@ -10,6 +10,15 @@ set -eu
 # /etc/sysconfig/beacon; see beacon-settings.sh. It sits beside this script in the package
 # (/opt/beacon/scripts) and in the repository.
 BEACON_SCRIPTS_DIR="${BEACON_SCRIPTS_DIR:-$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)}"
+# Positional arguments are named on the command line, so like the environment they win over the
+# settings file: each is resolved into its variable before the file is read, which then fills only
+# what neither gave.
+[ -n "${1:-}" ] && BEACON_ENDPOINT_HARNESSES="${BEACON_ENDPOINT_HARNESSES:-$1}"
+[ -n "${2:-}" ] && BEACON_OTLP_GRPC_PORT="${BEACON_OTLP_GRPC_PORT:-$2}"
+[ -n "${3:-}" ] && BEACON_OTLP_HTTP_PORT="${BEACON_OTLP_HTTP_PORT:-$3}"
+[ -n "${4:-}" ] && BEACON_COLLECTOR="${BEACON_COLLECTOR:-$4}"
+[ -n "${5:-}" ] && BEACON_NO_START="${BEACON_NO_START:-$5}"
+[ -n "${6:-}" ] && BEACON_SERVICE="${BEACON_SERVICE:-$6}"
 # shellcheck source=beacon-settings.sh
 . "$BEACON_SCRIPTS_DIR/beacon-settings.sh"
 beacon_load_settings
