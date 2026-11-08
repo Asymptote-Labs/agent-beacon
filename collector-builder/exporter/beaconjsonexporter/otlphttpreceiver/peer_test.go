@@ -1,12 +1,10 @@
-//go:build linux
+//go:build linux || darwin || windows
 
 package otlphttpreceiver
 
 import (
 	"context"
 	"net/http"
-	"os"
-	"strconv"
 	"testing"
 
 	"go.opentelemetry.io/collector/component/componenttest"
@@ -54,7 +52,7 @@ func TestAnHTTPExportIsAttributedToTheSendingAccount(t *testing.T) {
 	if !ok {
 		t.Fatal("no peer uid recorded")
 	}
-	if want := strconv.Itoa(os.Geteuid()); uid.AsString() != want {
+	if want := currentOwner(t); uid.AsString() != want {
 		t.Fatalf("peer uid = %s, want this process's %s rather than the claimed 4242", uid.AsString(), want)
 	}
 }

@@ -194,7 +194,7 @@ BeaconRuntime_CL
 | where Message has "Beacon endpoint Sentinel validation event"
 ```
 
-Then have someone run Claude Code and check whose sessions arrived. Hook events carry the person's account. Claude Code's and Codex's own OpenTelemetry events (token usage, cost, API requests) carry the collector's own account, the machine account `COMPUTERNAME$`, because every account sends to the same local port, but they share the session's id, so the join below names the person behind every event:
+Then have someone run Claude Code and check whose sessions arrived. Hook events carry the person's account. Claude Code's and Codex's own OpenTelemetry events (token usage, cost, API requests) carry the account that sent them too, as Windows reports the owner of the connection they arrived on; one whose sender disconnected before the collector could look has no `user`. They share the session's id, so the join below names the person behind every event, including those:
 
 ```kql
 let owners = BeaconRuntime_CL
@@ -222,7 +222,7 @@ See [Who ran each session](/log-forwarding/microsoft-sentinel#who-ran-each-sessi
 | The forwarder script fails with "PKCS12 parsing failed" | The PFX password is wrong. Check `BEACON_SENTINEL_PFX_PASSWORD`. |
 | `status` reports `Retrying after response` with 403 | The role assignment has not applied yet. Wait up to 30 minutes; nothing is lost meanwhile. |
 | `status` reports an `AADSTS` error | Entra ID refused the credential: a wrong tenant or client ID, or a certificate that was not uploaded to the app, has expired or was removed. Vector drops what it cannot send while this lasts, so renew certificates before they expire and rerun the forwarder script with the new one. |
-| Events arrive under the machine account (`COMPUTERNAME$`) | Agents' own OpenTelemetry events always do; attribute them with the join in step 3. If a session has no hook events at all, the person's agent-tools script has not run yet (check its Login trigger). |
+| Events arrive under the machine account (`COMPUTERNAME$`) | Agents' own OpenTelemetry events did with collectors from earlier releases; repair the endpoint (`beacon endpoint repair --system`) so the collector config names the sender, and attribute older events with the join in step 3. If a session has no hook events at all, the person's agent-tools script has not run yet (check its Login trigger). |
 | An app, script or hook is blocked | AppLocker or WDAC; allow everything listed under the app above. |
 
 ## Related
