@@ -34,7 +34,7 @@ For deployment across machines, use the signed, notarized, and stapled `.pkg` at
 
 The package also configures the console user's agent runtime, because a system endpoint runs as root and the collector is useless if nothing is exporting to it.
 
-A first install from the package sets up [restricted log access](/security/restricted-log-access): only the collector writes the log, and only root and the `beacon-log` group can read it. An upgrade keeps the mode the endpoint already has. A person who installs the package in Installer.app is added to `beacon-log`, so the dashboard, `beacon traces` and `beacon share` work for them after they log in again; an MDM install adds nobody. See [Package installs](/security/restricted-log-access#package-installs).
+A first install from the package sets up [restricted log access](/security/restricted-log-access): only the collector writes the log, and only root and the `beacon-log` group can read it. An upgrade keeps the mode the endpoint already has. A person who installs the package in Installer.app is added to `beacon-log`, so `beacon traces` and `beacon share` work for them after they log in again; an MDM install adds nobody. A first install also turns the [local dashboard](/cli/dashboard#turning-the-dashboard-off) off; set `BEACON_DASHBOARD=enabled` to keep it. See [Package installs](/security/restricted-log-access#package-installs).
 
 ### Settings for MDM installs
 

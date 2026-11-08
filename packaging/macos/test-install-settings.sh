@@ -84,6 +84,28 @@ rm -f "$TMP_DIR/system/runtime.jsonl"
 run_install BEACON_LOG_ACCESS=shared
 expect --log-access shared "first install with BEACON_LOG_ACCESS=shared"
 
+# The dashboard follows the same rule: disabled on a first install, nothing passed on an upgrade or a
+# reinstall over a kept log, and BEACON_DASHBOARD (environment or preferences) decides either way.
+run_install
+expect --dashboard disabled "first install dashboard"
+run_install BEACON_DASHBOARD=enabled
+expect --dashboard enabled "first install with BEACON_DASHBOARD=enabled"
+echo '{}' >"$TMP_DIR/system/config.json"
+run_install
+has_flag --dashboard && fail "upgrade passed --dashboard $(flag_value --dashboard)"
+run_install BEACON_DASHBOARD=disabled
+expect --dashboard disabled "upgrade with BEACON_DASHBOARD=disabled"
+rm -f "$TMP_DIR/system/config.json"
+: >"$TMP_DIR/system/runtime.jsonl"
+run_install
+has_flag --dashboard && fail "reinstall over a kept log passed --dashboard $(flag_value --dashboard)"
+rm -f "$TMP_DIR/system/runtime.jsonl"
+printf 'BEACON_DASHBOARD=enabled\n' >"$MANAGED.plist"
+chmod 644 "$MANAGED.plist"
+run_install
+expect --dashboard enabled "managed BEACON_DASHBOARD=enabled on a first install"
+rm -f "$MANAGED.plist"
+
 # Managed preferences are read, win over local ones, and lose to the environment and to arguments.
 printf 'BEACON_LOG_ACCESS=shared\nBEACON_ENDPOINT_HARNESSES=claude,cursor\nBEACON_SESSION_SYNC=1\n' >"$MANAGED.plist"
 printf 'BEACON_LOG_ACCESS=restricted\nBEACON_OTLP_GRPC_PORT=6317\n' >"$LOCAL.plist"
