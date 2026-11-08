@@ -1,11 +1,13 @@
 package hooks
 
 import (
-	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/testenv"
 )
 
 func TestInstallAntigravityHooksPreservesNonBeaconBlocks(t *testing.T) {
@@ -30,15 +32,45 @@ func TestInstallAntigravityHooksPreservesNonBeaconBlocks(t *testing.T) {
 		"--log '/tmp/runtime.jsonl'",
 		"--config '/tmp/config.json'",
 		"'/tmp/beacon hooks' --platform antigravity",
-		"PreInvocation",
-		"UserPromptSubmit",
-		"PreToolUse",
-		"PostToolUse",
-		"PostInvocation",
-		"Stop",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("Antigravity hooks missing %q:\n%s", want, text)
+		}
+	}
+	var blocks map[string]map[string]json.RawMessage
+	if err := json.Unmarshal(data, &blocks); err != nil {
+		t.Fatal(err)
+	}
+	managed := blocks["beacon-endpoint"]
+	if len(managed) != 4 {
+		t.Errorf("managed hook events = %v, want four lifecycle and tool events", managed)
+	}
+	type handler struct {
+		Type    string `json:"type"`
+		Command string `json:"command"`
+	}
+	for event, suffix := range map[string]string{"SessionStart": " session-start", "Stop": " stop"} {
+		var handlers []handler
+		if err := json.Unmarshal(managed[event], &handlers); err != nil {
+			t.Errorf("%s must be a direct handler list: %v", event, err)
+			continue
+		}
+		if len(handlers) != 1 || handlers[0].Type != "command" || !strings.HasSuffix(handlers[0].Command, suffix) {
+			t.Errorf("%s handlers = %#v, want one command ending in %q", event, handlers, suffix)
+		}
+	}
+	for event, suffix := range map[string]string{"PreToolUse": " pre-tool", "PostToolUse": " post-tool"} {
+		var groups []struct {
+			Matcher string    `json:"matcher"`
+			Hooks   []handler `json:"hooks"`
+		}
+		if err := json.Unmarshal(managed[event], &groups); err != nil {
+			t.Errorf("%s must be a matcher group list: %v", event, err)
+			continue
+		}
+		if len(groups) != 1 || groups[0].Matcher != "*" || len(groups[0].Hooks) != 1 ||
+			groups[0].Hooks[0].Type != "command" || !strings.HasSuffix(groups[0].Hooks[0].Command, suffix) {
+			t.Errorf("%s groups = %#v, want a wildcard group with one command ending in %q", event, groups, suffix)
 		}
 	}
 }
@@ -50,8 +82,14 @@ func TestInstallAntigravityHooksReplacesManagedBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if isAntigravityInstalledAt(path) {
+		t.Error("legacy grouped Stop reported as installed")
+	}
 	if err := installAntigravityHooks(path, "/tmp/new-beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
 		t.Fatalf("installAntigravityHooks returned error: %v", err)
+	}
+	if !isAntigravityInstalledAt(path) {
+		t.Error("refreshed hooks were not detected")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -133,7 +171,7 @@ func TestAntigravityHookStatusDetectsInstalled(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(`{"beacon-endpoint":{"Stop":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform antigravity stop"}]}]}}`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"beacon-endpoint":{"Stop":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform antigravity stop"}]}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -143,5 +181,25 @@ func TestAntigravityHookStatusDetectsInstalled(t *testing.T) {
 	}
 	if status.ConfigPath != path {
 		t.Fatalf("ConfigPath = %q, want %q", status.ConfigPath, path)
+	}
+}
+
+func TestAntigravityConfigHasEndpointHook(t *testing.T) {
+	const command = `"command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform antigravity stop"`
+	for _, tc := range []struct {
+		name   string
+		config string
+		want   bool
+	}{
+		{"legacy", `{"beacon-endpoint":{"Stop":[{"hooks":[{` + command + `}]}],"PreToolUse":[{"hooks":[{` + command + `}]}]}}`, false},
+		{"unsupported event", `{"beacon-endpoint":{"UserPromptSubmit":[{` + command + `}]}}`, false},
+		{"custom block", `{"custom":{"Stop":[{` + command + `}]}}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := AntigravityConfigHasEndpointHook([]byte(tc.config))
+			if err != nil || got != tc.want {
+				t.Fatalf("configured = %v, err = %v, want %v", got, err, tc.want)
+			}
+		})
 	}
 }

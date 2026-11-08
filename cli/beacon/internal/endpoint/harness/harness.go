@@ -735,7 +735,7 @@ func antigravityStatus(path string) (TelemetryStatus, string) {
 	if err != nil {
 		return TelemetryMissing, err.Error()
 	}
-	hasHooks, err := hasBeaconAntigravityHooks(data)
+	hasHooks, err := hooks.AntigravityConfigHasEndpointHook(data)
 	if err != nil {
 		return TelemetryMisconfigured, "Antigravity hooks JSON is invalid"
 	}
@@ -743,14 +743,6 @@ func antigravityStatus(path string) (TelemetryStatus, string) {
 		return TelemetryEnabled, "Antigravity endpoint hooks are configured"
 	}
 	return TelemetryDisabled, "Antigravity hooks exist but endpoint hooks were not found"
-}
-
-func hasBeaconAntigravityHooks(data []byte) (bool, error) {
-	var blocks map[string]json.RawMessage
-	if err := json.Unmarshal(data, &blocks); err != nil {
-		return false, err
-	}
-	return hooks.ConfigHasEndpointHook(data, "antigravity")
 }
 
 func shellExportValue(text, key string) string {

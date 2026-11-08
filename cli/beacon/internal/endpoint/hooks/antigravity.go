@@ -36,12 +36,12 @@ type antigravityHookRef struct {
 }
 
 type antigravityHookBlock struct {
-	PreInvocation    []antigravityHookGroup `json:"PreInvocation,omitempty"`
-	UserPromptSubmit []antigravityHookGroup `json:"UserPromptSubmit,omitempty"`
-	PostInvocation   []antigravityHookGroup `json:"PostInvocation,omitempty"`
-	PreToolUse       []antigravityHookGroup `json:"PreToolUse,omitempty"`
-	PostToolUse      []antigravityHookGroup `json:"PostToolUse,omitempty"`
-	Stop             []antigravityHookGroup `json:"Stop,omitempty"`
+	SessionStart   []antigravityHookRef   `json:"SessionStart,omitempty"`
+	PreInvocation  []antigravityHookRef   `json:"PreInvocation,omitempty"`
+	PostInvocation []antigravityHookRef   `json:"PostInvocation,omitempty"`
+	PreToolUse     []antigravityHookGroup `json:"PreToolUse,omitempty"`
+	PostToolUse    []antigravityHookGroup `json:"PostToolUse,omitempty"`
+	Stop           []antigravityHookRef   `json:"Stop,omitempty"`
 }
 
 type antigravityConfig struct {
@@ -96,24 +96,16 @@ func installAntigravityHooks(path, binaryPath, logPath, configPath string) error
 	}
 	prefix := endpointCommandPrefix("antigravity", binaryPath, logPath, configPath)
 	block := antigravityHookBlock{
-		PreInvocation: []antigravityHookGroup{{
-			Hooks: []antigravityHookRef{{Type: "command", Command: prefix + " prompt-submit", Timeout: 30}},
-		}},
-		UserPromptSubmit: []antigravityHookGroup{{
-			Hooks: []antigravityHookRef{{Type: "command", Command: prefix + " prompt-submit", Timeout: 30}},
-		}},
+		SessionStart: []antigravityHookRef{{Type: "command", Command: prefix + " session-start"}},
 		PreToolUse: []antigravityHookGroup{{
-			Hooks: []antigravityHookRef{{Type: "command", Command: prefix + " pre-tool"}},
+			Matcher: "*",
+			Hooks:   []antigravityHookRef{{Type: "command", Command: prefix + " pre-tool"}},
 		}},
 		PostToolUse: []antigravityHookGroup{{
-			Hooks: []antigravityHookRef{{Type: "command", Command: prefix + " post-tool"}},
+			Matcher: "*",
+			Hooks:   []antigravityHookRef{{Type: "command", Command: prefix + " post-tool"}},
 		}},
-		PostInvocation: []antigravityHookGroup{{
-			Hooks: []antigravityHookRef{{Type: "command", Command: prefix + " stop", Timeout: 45}},
-		}},
-		Stop: []antigravityHookGroup{{
-			Hooks: []antigravityHookRef{{Type: "command", Command: prefix + " stop", Timeout: 45}},
-		}},
+		Stop: []antigravityHookRef{{Type: "command", Command: prefix + " stop", Timeout: 45}},
 	}
 	data, err := json.Marshal(block)
 	if err != nil {
@@ -184,28 +176,47 @@ func isAntigravityInstalledAt(path string) bool {
 	return hasAntigravityEndpointHook(raw)
 }
 
+func AntigravityConfigHasEndpointHook(data []byte) (bool, error) {
+	var blocks map[string]json.RawMessage
+	if err := json.Unmarshal(data, &blocks); err != nil {
+		return false, err
+	}
+	for _, block := range blocks {
+		if hasAntigravityEndpointHook(block) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func hasAntigravityEndpointHook(raw json.RawMessage) bool {
 	var block antigravityHookBlock
 	if err := json.Unmarshal(raw, &block); err != nil {
 		return false
 	}
-	for _, groups := range [][]antigravityHookGroup{
+	handlers := [][]antigravityHookRef{
+		block.SessionStart,
 		block.PreInvocation,
-		block.UserPromptSubmit,
 		block.PostInvocation,
-		block.PreToolUse,
-		block.PostToolUse,
 		block.Stop,
-	} {
+	}
+	for _, groups := range [][]antigravityHookGroup{block.PreToolUse, block.PostToolUse} {
 		for _, group := range groups {
-			for _, hook := range group.Hooks {
-				if hookcmd.IsEndpointHook(hook.Command, "antigravity") {
-					return true
-				}
+			handlers = append(handlers, group.Hooks)
+		}
+	}
+	found := false
+	for _, hooks := range handlers {
+		for _, hook := range hooks {
+			if hook.Command == "" {
+				return false
+			}
+			if hookcmd.IsEndpointHook(hook.Command, "antigravity") {
+				found = true
 			}
 		}
 	}
-	return false
+	return found
 }
 
 func antigravityConfigPath(level Level) (string, error) {
