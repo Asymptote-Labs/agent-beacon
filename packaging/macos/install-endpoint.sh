@@ -108,6 +108,7 @@ fi
 
 if [ -n "$BEACON_LOG_READERS" ]; then
   set -- "$@" --log-readers "$BEACON_LOG_READERS"
+fi
 if [ -n "$BEACON_DASHBOARD" ]; then
   set -- "$@" --dashboard "$BEACON_DASHBOARD"
 fi
