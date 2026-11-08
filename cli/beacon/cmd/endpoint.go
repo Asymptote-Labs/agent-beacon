@@ -63,6 +63,7 @@ var endpointOpts struct {
 	hookLevel                 string
 	logAccess                 string
 	logReaders                []string
+	dashboardSwitch           string
 	contentRetention          string
 	splunkHECEndpoint         string
 	splunkHECToken            string
@@ -460,6 +461,7 @@ func init() {
 	_ = endpointInstallCmd.Flags().MarkDeprecated("content-retention", "Beacon now always captures full content; this flag is ignored")
 	endpointInstallCmd.Flags().StringVar(&endpointOpts.logAccess, "log-access", "", logAccessUsage)
 	endpointInstallCmd.Flags().StringSliceVar(&endpointOpts.logReaders, "log-readers", nil, logReadersUsage)
+	registerDashboardSwitchFlag(endpointInstallCmd)
 	registerSplunkFlags(endpointInstallCmd)
 	registerFalconFlags(endpointInstallCmd)
 	registerOTLPForwardFlags(endpointInstallCmd)
@@ -480,6 +482,7 @@ func init() {
 	_ = endpointRepairCmd.Flags().MarkDeprecated("content-retention", "Beacon now always captures full content; this flag is ignored")
 	endpointRepairCmd.Flags().StringVar(&endpointOpts.logAccess, "log-access", "", logAccessUsage)
 	endpointRepairCmd.Flags().StringSliceVar(&endpointOpts.logReaders, "log-readers", nil, logReadersUsage)
+	registerDashboardSwitchFlag(endpointRepairCmd)
 	registerSplunkFlags(endpointRepairCmd)
 	registerFalconFlags(endpointRepairCmd)
 	registerOTLPForwardFlags(endpointRepairCmd)

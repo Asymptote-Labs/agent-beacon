@@ -147,3 +147,17 @@ func addLogReaders(cfg endpointconfig.Config, readers []string) (added, problems
 	}
 	return added, problems
 }
+
+// validateDashboard refuses a dashboard switch the endpoint cannot have. The switch belongs to
+// the system config, which every account's dashboard reads; a user config's value would switch
+// nothing off, so a user-mode install refuses to record one instead of appearing to.
+func validateDashboard(cfg endpointconfig.Config) error {
+	mode, err := endpointconfig.ParseDashboardMode(cfg.Dashboard)
+	if err != nil {
+		return err
+	}
+	if mode != "" && cfg.UserMode {
+		return fmt.Errorf("--dashboard %s applies to a system install (--system); it is the administrator's switch for every account", mode)
+	}
+	return nil
+}

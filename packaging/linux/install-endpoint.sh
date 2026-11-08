@@ -117,6 +117,9 @@ if [ -z "${BEACON_LOG_READERS+set}" ]; then
     esac
   fi
 fi
+# enabled or disabled: whether any account may run `beacon endpoint dashboard`. Empty keeps what the
+# endpoint already has, so a package upgrade never changes it.
+BEACON_DASHBOARD="${BEACON_DASHBOARD:-}"
 # 1 turns the scheduled session sync on and 0 turns it off; empty keeps what the endpoint already
 # has, so a package upgrade never changes it.
 BEACON_SESSION_SYNC="${BEACON_SESSION_SYNC:-}"
@@ -138,6 +141,7 @@ set -- endpoint install --system \
 [ "$BEACON_NO_START" = "1" ] && set -- "$@" --no-start
 [ -n "$BEACON_LOG_ACCESS" ] && set -- "$@" --log-access "$BEACON_LOG_ACCESS"
 [ -n "$BEACON_LOG_READERS" ] && set -- "$@" --log-readers "$BEACON_LOG_READERS"
+[ -n "$BEACON_DASHBOARD" ] && set -- "$@" --dashboard "$BEACON_DASHBOARD"
 case "$BEACON_SESSION_SYNC" in
   1|true|TRUE|yes|YES)
     set -- "$@" --session-sync

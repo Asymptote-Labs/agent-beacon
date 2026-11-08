@@ -172,11 +172,14 @@ func TestLensesPreviewServesTheFileAgainstARealSession(t *testing.T) {
 	if err := lensesPreviewCmd.RunE(cmd, []string{file}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(buf.String(), "Open: http://127.0.0.1:8766/session.html?id=newer&lens=my-lens") {
+	if served.Token == "" || !strings.Contains(buf.String(), "Open: http://127.0.0.1:8766/session.html?id=newer&lens=my-lens&token="+served.Token+"\n") {
 		t.Fatalf("preview output = %q", buf.String())
 	}
 	if served.Addr != lensPreviewAddr || len(served.LensFiles) != 1 || !filepath.IsAbs(served.LensFiles[0]) || served.LogPath != lensToolsOpts.logPath {
 		t.Fatalf("served = %+v", served)
+	}
+	if strings.Count(buf.String(), served.Token) != 1 {
+		t.Fatalf("the launch secret appears outside the URL: %q", buf.String())
 	}
 
 	cmd, _ = newCmd()

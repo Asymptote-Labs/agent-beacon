@@ -45,6 +45,8 @@ func TestMain(m *testing.M) {
 	onboardingOpenDashboard = func(string) error { return nil }
 	_ = os.Unsetenv(account.APIURLEnv)
 	shareAutoCloud = func() (bool, string) { return false, "" }
+	// The dashboard commands must not depend on the system config of the machine running the tests.
+	dashboardSystemDisabled = func() (bool, error) { return false, nil }
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)

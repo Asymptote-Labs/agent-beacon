@@ -75,6 +75,10 @@ $wxs = Get-Content -Raw -LiteralPath (Join-Path $scriptDir 'beacon.wxs')
 if ($wxs -notmatch [regex]::Escape('-UiLevel &quot;[UILevel]&quot;')) {
     Fail "beacon.wxs no longer passes [UILevel] to install-endpoint.ps1"
 }
+# BEACON_DASHBOARD is the administrator's dashboard switch, the same contract on all three platforms.
+if ($install -notmatch "BEACON_DASHBOARD" -or $install -notmatch [regex]::Escape("'--dashboard'")) {
+    Fail "install-endpoint.ps1 no longer passes BEACON_DASHBOARD on as --dashboard"
+}
 # The step whose absence made the Linux package produce a healthy collector that captured nothing.
 if ($install -notmatch 'repair-installed') {
     Fail "install-endpoint.ps1 must configure the interactive user's runtime, or the endpoint captures nothing"

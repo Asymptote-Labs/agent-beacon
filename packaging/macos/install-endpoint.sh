@@ -81,6 +81,9 @@ if [ -z "${BEACON_LOG_READERS+set}" ]; then
     BEACON_LOG_READERS="$(beacon_installing_person)"
   fi
 fi
+# enabled or disabled: whether any account may run `beacon endpoint dashboard`. Empty keeps what the
+# endpoint already has, so a package upgrade never changes it.
+BEACON_DASHBOARD="${BEACON_DASHBOARD:-}"
 # 1 turns the scheduled session sync on and 0 turns it off; empty keeps what the endpoint already
 # has, so a package upgrade never changes it.
 BEACON_SESSION_SYNC="${BEACON_SESSION_SYNC:-}"
@@ -105,6 +108,9 @@ fi
 
 if [ -n "$BEACON_LOG_READERS" ]; then
   set -- "$@" --log-readers "$BEACON_LOG_READERS"
+fi
+if [ -n "$BEACON_DASHBOARD" ]; then
+  set -- "$@" --dashboard "$BEACON_DASHBOARD"
 fi
 
 case "$BEACON_SESSION_SYNC" in
