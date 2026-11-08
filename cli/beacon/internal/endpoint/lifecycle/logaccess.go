@@ -1,7 +1,10 @@
 package lifecycle
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"strings"
 
 	endpointconfig "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/config"
@@ -75,9 +78,23 @@ func prepareSystemLog(cfg endpointconfig.Config) (groupCreated bool, err error) 
 
 // logAccessRestorer records the system log's access mode before an install changes it and returns
 // what puts it back. Restoring is best effort, like the rest of a rollback.
+//
+// When there was no log before, the install created it (with its lock, and for a restricted log
+// the marker), and restoring removes exactly the files it created rather than choosing a mode for
+// them. The package install scripts treat a log found without a system config as one kept by
+// uninstall --keep-logs and keep its mode, so a log left behind by a failed first install would
+// make the retry an upgrade: an MSI retry would install shared, and every script would skip adding
+// the person who installed to the readers group.
 func logAccessRestorer(cfg endpointconfig.Config) func() {
 	wasRestricted := logIsRestricted(cfg.LogPath)
+	created := logFilesAbsent(cfg.LogPath)
 	return func() {
+		if len(created) > 0 && created[0] == cfg.LogPath {
+			for _, path := range created {
+				_ = os.Remove(path)
+			}
+			return
+		}
 		if logIsRestricted(cfg.LogPath) == wasRestricted {
 			return
 		}
@@ -89,6 +106,19 @@ func logAccessRestorer(cfg endpointconfig.Config) func() {
 		}
 		_ = shareSystemLog(cfg.LogPath)
 	}
+}
+
+// logFilesAbsent lists which of the log, its lock and the access marker do not exist yet, the log
+// first. A path that cannot be checked for any reason but its absence is left out, so a rollback
+// never removes a file it could not see before.
+func logFilesAbsent(logPath string) []string {
+	var absent []string
+	for _, path := range []string{logPath, logPath + ".lock", asymptoteobserve.LogAccessMarkerPath(logPath)} {
+		if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
+			absent = append(absent, path)
+		}
+	}
+	return absent
 }
 
 // addLogReaders puts each named account in the readers group of a restricted system log. It never

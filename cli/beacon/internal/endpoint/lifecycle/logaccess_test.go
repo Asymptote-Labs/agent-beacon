@@ -2,6 +2,8 @@ package lifecycle
 
 import (
 	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -157,7 +159,11 @@ func TestLogAccessRestorerPutsBackWhatAFailedInstallChanged(t *testing.T) {
 	logIsRestricted = func(string) bool { return restricted }
 	t.Cleanup(func() { logIsRestricted = prev })
 	calls := fakeLogAccess(t, 77, false, nil, nil)
-	cfg := endpointconfig.Config{LogPath: "/var/log/beacon-agent/runtime.jsonl"}
+	// An existing log: one with nothing beside it is removed instead (below).
+	cfg := endpointconfig.Config{LogPath: filepath.Join(t.TempDir(), "runtime.jsonl")}
+	if err := os.WriteFile(cfg.LogPath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	// Shared before; the failed install restricted it.
 	restore := logAccessRestorer(cfg)
@@ -181,6 +187,64 @@ func TestLogAccessRestorerPutsBackWhatAFailedInstallChanged(t *testing.T) {
 	restore()
 	if calls.shared != 1 || len(calls.restricted) != 1 {
 		t.Fatalf("an unchanged mode was touched: %+v", calls)
+	}
+}
+
+// A failed first install must leave no log behind. The package install scripts read a log without
+// a system config as one kept by uninstall --keep-logs and keep its mode, so a leftover log would
+// turn the retry of a first MSI install into a shared one, and stop every script adding the person
+// who installed to the readers group.
+func TestLogAccessRestorerRemovesTheFilesAFailedFirstInstallCreated(t *testing.T) {
+	dir := t.TempDir()
+	cfg := endpointconfig.Config{LogPath: filepath.Join(dir, "runtime.jsonl"), LogAccess: "restricted"}
+	marker := asymptoteobserve.LogAccessMarkerPath(cfg.LogPath)
+	calls := fakeLogAccess(t, 77, true, nil, nil)
+	restricted := false
+	prev := logIsRestricted
+	logIsRestricted = func(string) bool { return restricted }
+	t.Cleanup(func() { logIsRestricted = prev })
+
+	restore := logAccessRestorer(cfg)
+	// What restricting a missing log creates, plus a file the install did not create.
+	for _, path := range []string{cfg.LogPath, cfg.LogPath + ".lock", marker, filepath.Join(dir, "other")} {
+		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	restricted = true
+	restore()
+	for _, path := range []string{cfg.LogPath, cfg.LogPath + ".lock", marker} {
+		if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("%s survived the rollback of the install that created it (%v)", path, err)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "other")); err != nil {
+		t.Fatalf("removed a file the install did not create: %v", err)
+	}
+	if calls.shared != 0 || len(calls.restricted) != 0 {
+		t.Fatalf("chose a mode for files it removed: %+v", calls)
+	}
+}
+
+// A lock or marker that was already there, without a log, belongs to someone else's state: only
+// the files that were absent are removed.
+func TestLogAccessRestorerKeepsFilesThatExistedBefore(t *testing.T) {
+	dir := t.TempDir()
+	cfg := endpointconfig.Config{LogPath: filepath.Join(dir, "runtime.jsonl")}
+	fakeLogAccess(t, 0, false, nil, nil)
+	if err := os.WriteFile(cfg.LogPath+".lock", nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restore := logAccessRestorer(cfg)
+	if err := os.WriteFile(cfg.LogPath, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restore()
+	if _, err := os.Lstat(cfg.LogPath); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("the log the install created survived: %v", err)
+	}
+	if _, err := os.Lstat(cfg.LogPath + ".lock"); err != nil {
+		t.Fatalf("removed a lock that existed before the install: %v", err)
 	}
 }
 
