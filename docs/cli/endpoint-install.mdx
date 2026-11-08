@@ -349,9 +349,10 @@ file beside it follows.
 
 For package installs, set `BEACON_DASHBOARD=enabled` or `BEACON_DASHBOARD=disabled` in the
 environment of the package's install script (`install-endpoint.sh` on macOS and Linux,
-`install-endpoint.ps1` on Windows). Unset, a first package install (no system config or log on the
-machine) turns the dashboard off, and an upgrade or a reinstall over a kept config or log keeps the
-endpoint's setting. Fleet tooling can set it
+`install-endpoint.ps1` on Windows). Unset, an unattended first package install (no system config or
+log on the machine, and no person installing it, by the same test that decides who is added to
+`beacon-log`) turns the dashboard off; a person's own install keeps it, and an upgrade or a reinstall
+over a kept config or log keeps the endpoint's setting. Fleet tooling can set it
 where it writes the other install settings (`/etc/default/beacon` or `/etc/sysconfig/beacon`, the
 `com.beacon.endpoint` managed preferences, or the `HKLM\SOFTWARE\Policies\Beacon\Endpoint` policy key);
 see [Package installs](/security/restricted-log-access#package-installs).

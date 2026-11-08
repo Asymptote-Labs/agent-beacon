@@ -84,10 +84,19 @@ rm -f "$TMP_DIR/system/runtime.jsonl"
 run_install BEACON_LOG_ACCESS=shared
 expect --log-access shared "first install with BEACON_LOG_ACCESS=shared"
 
-# The dashboard follows the same rule: disabled on a first install, nothing passed on an upgrade or a
-# reinstall over a kept log, and BEACON_DASHBOARD (environment or preferences) decides either way.
+# The dashboard: disabled on an unattended first install, kept for a person in Installer.app, nothing
+# passed on an upgrade or a reinstall over a kept log, and BEACON_DASHBOARD (environment or
+# preferences) decides either way.
 run_install
 expect --dashboard disabled "first install dashboard"
+run_install BEACON_INSTALLER_GUI=1 BEACON_CONSOLE_USER=alice
+has_flag --dashboard && fail "Installer.app first install passed --dashboard $(flag_value --dashboard), want the dashboard kept"
+run_install BEACON_INSTALLER_GUI=1 BEACON_CONSOLE_USER=alice BEACON_DASHBOARD=disabled
+expect --dashboard disabled "Installer.app first install with BEACON_DASHBOARD=disabled"
+run_install BEACON_INSTALLER_GUI=1 BEACON_CONSOLE_USER=alice COMMAND_LINE_INSTALL=1
+expect --dashboard disabled "installer(8) first install"
+run_install BEACON_INSTALLER_GUI=1 BEACON_CONSOLE_USER=loginwindow
+expect --dashboard disabled "first install at the login window"
 run_install BEACON_DASHBOARD=enabled
 expect --dashboard enabled "first install with BEACON_DASHBOARD=enabled"
 echo '{}' >"$TMP_DIR/system/config.json"

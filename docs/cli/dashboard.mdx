@@ -177,11 +177,14 @@ package upgrades keep until `--dashboard enabled` turns it back on. While it is 
 mode too, and say that the administrator disabled it. Accounts that cannot read a root-only
 system config read the switch from a world-readable marker beside it, and a config that does not
 parse also refuses. `beacon endpoint status` (and `--json`, as `dashboard`) reports the setting.
-Package installs take it from `BEACON_DASHBOARD=enabled|disabled`, and a first package install
-(the `.deb` or `.rpm`, the macOS `.pkg` or the Windows MSI, with no system config or log already on
-the machine) turns the dashboard off when `BEACON_DASHBOARD` is not set. Upgrades keep what the
-endpoint already has. To keep the dashboard on a new install, set `BEACON_DASHBOARD=enabled`, or
-turn it on afterwards with `sudo beacon endpoint repair --system --dashboard enabled`; see
+Package installs take it from `BEACON_DASHBOARD=enabled|disabled`. When it is not set, an
+unattended first package install (the `.deb` or `.rpm`, the macOS `.pkg` or the Windows MSI, with
+no system config or log already on the machine, installed by a configuration manager, an MDM or a
+silent `msiexec`) turns the dashboard off. A person who installs the package on their own machine
+(`sudo` at a terminal, Installer.app, the MSI's full interface) keeps it, and upgrades keep what
+the endpoint already has. To keep the dashboard on an unattended install, set
+`BEACON_DASHBOARD=enabled`, or turn it on afterwards with
+`sudo beacon endpoint repair --system --dashboard enabled`; see
 [`beacon endpoint install`](/cli/endpoint-install#local-dashboard).
 
 ## Related

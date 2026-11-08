@@ -110,8 +110,8 @@ if ([string]::IsNullOrWhiteSpace($logAccess) -and $firstInstall -and $windowsSer
 # Set -- in the environment, or as a policy value, even an empty one -- it is exactly the list: a
 # fleet sets an empty BEACON_LOG_READERS policy value so that nobody is ever added implicitly. Unset,
 # a first install that a person ran from the installer's full interface adds the person signed in at
-# the console, so whoever installed Beacon on their own machine can use beacon traces and beacon
-# share without a second step. A silent install (msiexec /qn, which Intune and SCCM run)
+# the console, so whoever installed Beacon on their own machine can use the dashboard, beacon traces
+# and beacon share without a second step. A silent install (msiexec /qn, which Intune and SCCM run)
 # adds nobody. Members are only ever added, never removed.
 $logReaders = [Environment]::GetEnvironmentVariable('BEACON_LOG_READERS')
 if ([string]::IsNullOrWhiteSpace($logReaders)) {
@@ -132,11 +132,15 @@ if ([string]::IsNullOrWhiteSpace($logReaders)) {
 }
 # enabled or disabled: whether any account may run `beacon endpoint dashboard`. Empty keeps what the
 # endpoint already has, so an upgrade never changes it. The same variable the Linux and macOS install
-# scripts read. A first install defaults to disabled, as it defaults to a restricted log: the MSI is
-# installed for the whole machine, and its users should not be able to open a view of its telemetry
-# unless the administrator says so. BEACON_DASHBOARD=enabled opts a new install out.
+# scripts read. An unattended first install (msiexec /qn, which Intune and SCCM run, or anything
+# below the installer's full interface, by the same test as BEACON_LOG_READERS above) defaults to
+# disabled: that install sets up the machine for the people who use it, who should not be able to
+# open a view of its telemetry unless the administrator says so. A person who installs from the
+# full interface keeps the dashboard. BEACON_DASHBOARD=enabled or disabled decides either way.
 $dashboard = Get-BeaconSetting 'BEACON_DASHBOARD' ''
-if ([string]::IsNullOrWhiteSpace($dashboard) -and $firstInstall) { $dashboard = 'disabled' }
+$uiLevelValue = 0
+[void][int]::TryParse($UiLevel, [ref]$uiLevelValue)
+if ([string]::IsNullOrWhiteSpace($dashboard) -and $firstInstall -and $uiLevelValue -lt 4) { $dashboard = 'disabled' }
 
 # Auto-detected rather than required, so a manual invocation without BEACON_COLLECTOR still works.
 # DiscoverBinary would find this on its own -- it is passed explicitly so that a failure says which

@@ -73,7 +73,7 @@ fi
 # Accounts to add to the beacon-log group of a restricted log, comma-separated. Set, even to nothing,
 # it is exactly the list: an MDM sets BEACON_LOG_READERS to an empty string so that nobody is ever
 # added implicitly. Unset, a first install that a person ran in Installer.app adds that person, so
-# whoever installed Beacon on their own Mac can use `beacon traces` and `beacon share`
+# whoever installed Beacon on their own Mac can use the dashboard, `beacon traces` and `beacon share`
 # without a second step. Members are only ever added, never removed.
 if [ -z "${BEACON_LOG_READERS+set}" ]; then
   BEACON_LOG_READERS=
@@ -82,13 +82,15 @@ if [ -z "${BEACON_LOG_READERS+set}" ]; then
   fi
 fi
 # enabled or disabled: whether any account may run `beacon endpoint dashboard`. Empty keeps what the
-# endpoint already has, so a package upgrade never changes it. A first install defaults to disabled,
-# for the same reason it defaults to a restricted log: a package is installed by root for the whole
-# machine, and the people using that machine should not be able to open a view of its telemetry
-# unless the administrator says so. BEACON_DASHBOARD=enabled opts a new install out.
+# endpoint already has, so a package upgrade never changes it. An unattended first install (an MDM,
+# `installer`, anything but a person in Installer.app, by the same test as BEACON_LOG_READERS above)
+# defaults to disabled: that install sets up the machine for the people who use it, who should not
+# be able to open a view of its telemetry unless the administrator says so. A person who installs
+# the package on their own Mac keeps the dashboard. BEACON_DASHBOARD=enabled or disabled decides
+# either way.
 BEACON_DASHBOARD="${BEACON_DASHBOARD:-}"
 BEACON_DASHBOARD="$(printf '%s' "$BEACON_DASHBOARD" | tr -d '[:space:]')"
-if [ -z "$BEACON_DASHBOARD" ] && [ "$first_install" = 1 ]; then
+if [ -z "$BEACON_DASHBOARD" ] && [ "$first_install" = 1 ] && [ -z "$(beacon_installing_person)" ]; then
   BEACON_DASHBOARD=disabled
 fi
 # 1 turns the scheduled session sync on and 0 turns it off; empty keeps what the endpoint already

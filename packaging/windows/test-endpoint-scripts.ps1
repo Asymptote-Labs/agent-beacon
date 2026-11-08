@@ -79,9 +79,10 @@ if ($wxs -notmatch [regex]::Escape('-UiLevel &quot;[UILevel]&quot;')) {
 if ($install -notmatch "BEACON_DASHBOARD" -or $install -notmatch [regex]::Escape("'--dashboard'")) {
     Fail "install-endpoint.ps1 no longer passes BEACON_DASHBOARD on as --dashboard"
 }
-# A first install defaults the dashboard to disabled, whatever the service mode, as on Linux and macOS.
-if ($install -notmatch [regex]::Escape("[string]::IsNullOrWhiteSpace(`$dashboard) -and `$firstInstall) { `$dashboard = 'disabled' }")) {
-    Fail "install-endpoint.ps1 must default a first install's dashboard to disabled"
+# An unattended first install (below the installer's full interface) defaults the dashboard to
+# disabled, whatever the service mode, as on Linux and macOS.
+if ($install -notmatch [regex]::Escape("[string]::IsNullOrWhiteSpace(`$dashboard) -and `$firstInstall -and `$uiLevelValue -lt 4) { `$dashboard = 'disabled' }")) {
+    Fail "install-endpoint.ps1 must default an unattended first install's dashboard to disabled"
 }
 # The step whose absence made the Linux package produce a healthy collector that captured nothing.
 if ($install -notmatch 'repair-installed') {

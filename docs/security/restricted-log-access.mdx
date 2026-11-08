@@ -76,7 +76,7 @@ The `.deb` and `.rpm`, the macOS `.pkg` and the Windows MSI follow the same rule
 | Installed by | How the install recognizes it | Added to `beacon-log` |
 |---|---|---|
 | Fleet tooling, unattended (Salt, Ansible, Jamf, Kandji, Intune, SCCM) | Linux: root with no `SUDO_USER`, or sudo with no terminal or under `DEBIAN_FRONTEND=noninteractive` (Ansible `become`, a Packer sudo provisioner). macOS: `installer` (sets `COMMAND_LINE_INSTALL`). Windows: a silent MSI (`msiexec /qn`) | Nobody |
-| A person, as an administrator | Linux: `sudo apt install` or `sudo dpkg -i` at a terminal. macOS: Apple's Installer.app, running as the logged-in user. Windows: the installer's full interface | That person, so `beacon traces`, `beacon share` and, if an administrator enables it, the dashboard work for them after they log in again |
+| A person, as an administrator | Linux: `sudo apt install` or `sudo dpkg -i` at a terminal. macOS: Apple's Installer.app, running as the logged-in user. Windows: the installer's full interface | That person, so the dashboard, `beacon traces` and `beacon share` work for them after they log in again |
 | Anyone, with `BEACON_LOG_READERS` set | The setting, even an empty one | Exactly the accounts it lists, comma-separated (`DOMAIN\name` on Windows) |
 
 Set `BEACON_LOG_READERS` to an empty value in a fleet's settings so that nobody is ever added implicitly, whatever runs the install. Accounts are only ever added, never removed, and one that cannot be added is reported without failing the install. `--log-readers` does the same on `beacon endpoint install|repair --system`.
