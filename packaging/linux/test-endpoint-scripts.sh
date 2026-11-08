@@ -97,6 +97,45 @@ expect_log_access restricted "BEACON_SERVICE=systemd"
 run_install BEACON_SERVICE=none BEACON_LOG_ACCESS=restricted
 expect_log_access restricted "BEACON_SERVICE=none asking for restricted"
 
+# The dashboard. An unattended first install defaults to disabled, whatever the service manager; a
+# person who ran it with sudo at a terminal keeps the dashboard; an upgrade passes nothing, so the
+# endpoint keeps its setting; BEACON_DASHBOARD decides either way.
+expect_dashboard() {
+  got="$(flag_value --dashboard)"
+  [ "$got" = "$1" ] || fail "$2: --dashboard is '$got', want '$1'"
+}
+run_install
+expect_dashboard disabled "first install"
+run_install BEACON_SERVICE=none
+expect_dashboard disabled "first install with BEACON_SERVICE=none"
+run_install BEACON_DASHBOARD=enabled
+expect_dashboard enabled "first install with BEACON_DASHBOARD=enabled"
+run_install BEACON_DASHBOARD=' '
+expect_dashboard disabled "first install with a blank BEACON_DASHBOARD"
+run_install SUDO_USER=alice BEACON_INSTALL_TTY=1
+has_flag --dashboard && fail "first install by sudo at a terminal: passed --dashboard $(flag_value --dashboard), want the dashboard kept"
+run_install SUDO_USER=alice BEACON_INSTALL_TTY=1 BEACON_SERVICE=none
+has_flag --dashboard && fail "first install by sudo at a terminal, supervised: passed --dashboard $(flag_value --dashboard)"
+run_install SUDO_USER=alice BEACON_INSTALL_TTY=1 BEACON_DASHBOARD=disabled
+expect_dashboard disabled "first install by sudo at a terminal with BEACON_DASHBOARD=disabled"
+run_install SUDO_USER=alice BEACON_INSTALL_TTY=0
+expect_dashboard disabled "first install by sudo without a terminal (automation)"
+run_install SUDO_USER=alice BEACON_INSTALL_TTY=1 DEBIAN_FRONTEND=noninteractive
+expect_dashboard disabled "first install by sudo under DEBIAN_FRONTEND=noninteractive"
+run_install SUDO_USER=root BEACON_INSTALL_TTY=1
+expect_dashboard disabled "first install with SUDO_USER=root"
+echo '{}' >"$TMP_DIR/etc/config.json"
+run_install
+has_flag --dashboard && fail "upgrade: passed --dashboard $(flag_value --dashboard); the existing setting must be kept"
+run_install BEACON_DASHBOARD=disabled
+expect_dashboard disabled "upgrade with BEACON_DASHBOARD=disabled"
+rm -f "$TMP_DIR/etc/config.json"
+mkdir -p "$TMP_DIR/log"
+: >"$TMP_DIR/log/runtime.jsonl"
+run_install
+has_flag --dashboard && fail "reinstall over a kept log: passed --dashboard $(flag_value --dashboard)"
+rm -f "$TMP_DIR/log/runtime.jsonl"
+
 # A runtime log left by `uninstall --keep-logs` is a reinstall: the install keeps the mode recorded
 # beside it, so no mode is passed.
 mkdir -p "$TMP_DIR/log"

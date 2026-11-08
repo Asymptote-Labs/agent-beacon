@@ -16,7 +16,7 @@ This page puts the fleet settings together for each platform: the package, the s
 | Log access | A first package install is [restricted](/security/restricted-log-access): only the collector writes the runtime log, and only root (SYSTEM and Administrators on Windows) and the `beacon-log` group can read it. No second command |
 | Who can read the log | Nobody is added to `beacon-log` by an unattended install. Name exactly who is with `BEACON_LOG_READERS`, such as a log shipper's account |
 | Who acted | Hook events are recorded under the account the operating system says sent them. OpenTelemetry events (browser chats, Claude Code and Codex spans and token data) are recorded under the account that owns the sending connection. On a shared machine each person's events carry their own account, not `root` |
-| The local dashboard | Opens only through the per-launch URL it prints. `BEACON_DASHBOARD=disabled` turns it off for every account |
+| The local dashboard | Off for every account on an unattended first install. `BEACON_DASHBOARD=enabled` keeps it, and then it opens only through the per-launch URL it prints |
 | Versions | Nothing updates on its own. You choose the version each machine installs, including holding back one release |
 
 ## The settings
@@ -27,7 +27,7 @@ Fleet tooling cannot set the environment of a package's install script, so each 
 |---|---|---|
 | `BEACON_LOG_ACCESS` | `restricted` | Explicit restricted log access. A first install is restricted without it; setting it keeps the intent in your configuration |
 | `BEACON_LOG_READERS` | empty, or a list | Exactly the accounts added to `beacon-log`, comma-separated (`DOMAIN\name` on Windows). Empty means nobody is ever added implicitly |
-| `BEACON_DASHBOARD` | `disabled` (optional) | Refuse to start the local dashboard and lens preview on the machine |
+| `BEACON_DASHBOARD` | `disabled` | Refuse to start the local dashboard and lens preview on the machine. An unattended first install is disabled without it; setting it also covers a machine someone installed by hand and machines upgraded from an earlier release |
 | `BEACON_ENDPOINT_HARNESSES` | for example `claude,codex,cursor` | The agent runtimes to configure |
 
 | Platform | Where the settings live |

@@ -23,7 +23,7 @@ msiexec /i BeaconEndpointAgent-<version>-x64.msi /qn /l*v install.log
 
 The install needs administrator rights, because it writes under `%ProgramData%` and registers a service. Elevation is requested for you when you double-click the package. A silent install must already be running elevated, which is the normal case for Intune, SCCM, or a management agent.
 
-A first install sets up [restricted log access](/security/restricted-log-access#on-windows): only the SYSTEM collector writes the log, and only SYSTEM, Administrators and the `beacon-log` local group can read it. An upgrade keeps the mode the endpoint already has. Installing interactively adds the account signed in at the console to `beacon-log`, so the dashboard, `beacon traces` and `beacon share` work for it after signing in again; a silent install (`/qn`) adds nobody. See [Package installs](/security/restricted-log-access#package-installs).
+A first install sets up [restricted log access](/security/restricted-log-access#on-windows): only the SYSTEM collector writes the log, and only SYSTEM, Administrators and the `beacon-log` local group can read it. An upgrade keeps the mode the endpoint already has. Installing interactively adds the account signed in at the console to `beacon-log`, so the dashboard, `beacon traces` and `beacon share` work for it after signing in again; a silent install (`/qn`) adds nobody and turns the [local dashboard](/cli/dashboard#turning-the-dashboard-off) off, unless `BEACON_DASHBOARD=enabled` is set. See [Package installs](/security/restricted-log-access#package-installs).
 
 ### Settings for fleet installs
 
@@ -135,6 +135,8 @@ beacon endpoint dashboard    # local web view of sessions, timelines, and event 
 beacon scan                  # run threat detection rules over the log
 beacon token-usage           # token and cost rollups
 ```
+
+An unattended package install, such as one from a configuration manager or MDM, turns the dashboard off unless `BEACON_DASHBOARD=enabled` was set; see [Turning the dashboard off](/cli/dashboard#turning-the-dashboard-off).
 
 See the [event schema](/telemetry-schema/event-schema) for the full field reference.
 

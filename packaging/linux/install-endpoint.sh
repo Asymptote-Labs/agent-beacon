@@ -118,8 +118,20 @@ if [ -z "${BEACON_LOG_READERS+set}" ]; then
   fi
 fi
 # enabled or disabled: whether any account may run `beacon endpoint dashboard`. Empty keeps what the
-# endpoint already has, so a package upgrade never changes it.
+# endpoint already has, so a package upgrade never changes it. An unattended first install (a
+# configuration manager, or anything else with no person at a terminal behind sudo, by the same test
+# as BEACON_LOG_READERS above) defaults to disabled: that install sets up the machine for the people
+# who use it, who should not be able to open a view of its telemetry unless the administrator says
+# so. A person who installs the package on their own machine keeps the dashboard.
+# BEACON_DASHBOARD=enabled or disabled decides either way.
 BEACON_DASHBOARD="${BEACON_DASHBOARD:-}"
+BEACON_DASHBOARD="$(printf '%s' "$BEACON_DASHBOARD" | tr -d '[:space:]')"
+if [ -z "$BEACON_DASHBOARD" ] && [ "$first_install" = 1 ]; then
+  case "${SUDO_USER:-}" in
+    ''|root) BEACON_DASHBOARD=disabled ;;
+    *) beacon_person_at_terminal || BEACON_DASHBOARD=disabled ;;
+  esac
+fi
 # 1 turns the scheduled session sync on and 0 turns it off; empty keeps what the endpoint already
 # has, so a package upgrade never changes it.
 BEACON_SESSION_SYNC="${BEACON_SESSION_SYNC:-}"
