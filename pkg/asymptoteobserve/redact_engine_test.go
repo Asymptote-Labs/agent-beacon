@@ -2,6 +2,7 @@ package asymptoteobserve
 
 import (
 	"fmt"
+	"maps"
 	mrand "math/rand"
 	"math/rand/v2"
 	"slices"
@@ -166,6 +167,52 @@ func TestRedactFromSafeStartsNeverChangesAResult(t *testing.T) {
 	})
 }
 
+// The searches for long values' copies replace what strings.Replacer does, over values that
+// overlap, contain each other, start or end alike, and texts made of their pieces.
+func TestCopySearchesAgreeWithReplacer(t *testing.T) {
+	r := rand.New(rand.NewPCG(3, 9))
+	piece := func(n int) string {
+		b := make([]byte, n)
+		for i := range b {
+			b[i] = "ab"[r.IntN(2)]
+		}
+		return string(b)
+	}
+	for range 20000 {
+		set := map[string]struct{}{}
+		for range 1 + r.IntN(5) {
+			set[piece(1+r.IntN(9))] = struct{}{}
+		}
+		values := slices.SortedFunc(maps.Keys(set), func(a, b string) int {
+			if len(a) != len(b) {
+				return len(b) - len(a)
+			}
+			return strings.Compare(a, b)
+		})
+		var text strings.Builder
+		for range r.IntN(12) {
+			if r.IntN(3) == 0 {
+				text.WriteString(piece(1 + r.IntN(4)))
+			} else {
+				text.WriteString(values[r.IntN(len(values))])
+			}
+		}
+		pairs := make([]string, 0, 2*len(values))
+		for _, v := range values {
+			pairs = append(pairs, v, "#")
+		}
+		want := strings.NewReplacer(pairs...).Replace(text.String())
+		if got := newCopyFinder(values).replace(text.String(), "#"); got != want {
+			t.Fatalf("copies of %q in %q: got %q, want %q", values, text.String(), got, want)
+		}
+		if len(values) == 1 {
+			if got := replaceOne(text.String(), values[0], "#"); got != want {
+				t.Fatalf("copies of %q in %q: got %q, want %q", values[0], text.String(), got, want)
+			}
+		}
+	}
+}
+
 // Redaction's work is linear in the text whatever the text holds. Each text below makes some rule
 // try many places, each of which a pattern could read on from to the end of a long line or run:
 // many curl commands on one line, JWT-shaped and private-key-shaped fragments that never complete,
@@ -263,6 +310,28 @@ func TestRedactionWorkIsLinear(t *testing.T) {
 			fmt.Fprintf(&b, "token=aaaaaaaa%06d\n", i)
 		}
 		return b.String() + repeatTo("ghp_"+strings.Repeat("a", 40)+" ", n/2)
+	}
+	// Long assigned values, whose copies are searched for in the whole text: one as long as half
+	// the text, many of fixed length, and many ending the same way, which share a run of states
+	// with many edges out of it.
+	texts["one value as long as half the text"] = func(n int) string {
+		a := strings.Repeat("a", n/2)
+		return "token=" + a + " hf_" + a
+	}
+	texts["many long values"] = func(n int) string {
+		var b strings.Builder
+		for i := 0; b.Len() < n; i++ {
+			fmt.Fprintf(&b, "token=%070d\n", i)
+		}
+		return b.String()
+	}
+	texts["many long values ending the same way"] = func(n int) string {
+		var b strings.Builder
+		tail := strings.Repeat("a", 70)
+		for i := 0; b.Len() < n/2; i++ {
+			fmt.Fprintf(&b, "token=%d%s\n", i, tail)
+		}
+		return b.String() + repeatTo("a", n/2)
 	}
 	for name, text := range texts {
 		work := func(n int) int {

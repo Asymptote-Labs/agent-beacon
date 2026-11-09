@@ -818,3 +818,125 @@ func (sc *needleScanner) record(t string, s uint32, end int, hits []redactHit, f
 	}
 	return hits
 }
+
+// ---- the copy finder ----
+
+// copyFinder is an Aho-Corasick automaton over the assigned values written backwards. Reading a
+// text from its end, the state it is in after reading the byte at i tells the longest value that
+// starts at i, so one pass finds, for every byte, the copy strings.Replacer would take there.
+//
+// A state's children are a list, the root's a table: values are few and most states have one
+// child, while a table per state would cost a row per byte of every value. A step follows at most
+// one edge forward and, on the way, failure links that each shorten the state, so a pass costs at
+// most twice the text's length in steps, each reading at most 256 edges.
+type copyFinder struct {
+	root    [256]int32 // the root's child by byte; 0 for none
+	label   []byte     // per state, the byte of the edge into it
+	child   []int32    // per state, its first child; 0 for none
+	sibling []int32    // per state, its parent's next child; 0 for none
+	fail    []int32    // per state, the longest proper suffix of its string that is a state
+	longest []int32    // per state, the length of the longest value its string ends with
+	work    int        // edges and links followed, for redactWork
+}
+
+func newCopyFinder(values []string) *copyFinder {
+	f := &copyFinder{label: []byte{0}, child: []int32{0}, sibling: []int32{0}, longest: []int32{0}}
+	for _, v := range values {
+		s := int32(0)
+		for i := len(v) - 1; i >= 0; i-- {
+			c := v[i]
+			next := f.next(s, c)
+			if next <= 0 {
+				next = int32(len(f.label))
+				f.label = append(f.label, c)
+				f.child = append(f.child, 0)
+				f.longest = append(f.longest, 0)
+				if s == 0 {
+					f.sibling = append(f.sibling, 0)
+					f.root[c] = next
+				} else {
+					f.sibling = append(f.sibling, f.child[s])
+					f.child[s] = next
+				}
+			}
+			s = next
+		}
+		f.longest[s] = int32(len(v))
+	}
+	// Failure links, breadth first, so a state's link and its link's longest are known before
+	// its children's.
+	f.fail = make([]int32, len(f.label))
+	queue := make([]int32, 0, len(f.label))
+	for _, s := range f.root {
+		if s != 0 {
+			queue = append(queue, s)
+		}
+	}
+	for len(queue) > 0 {
+		s := queue[0]
+		queue = queue[1:]
+		for x := f.child[s]; x != 0; x = f.sibling[x] {
+			f.fail[x] = f.step(f.fail[s], f.label[x])
+			if f.longest[x] == 0 {
+				f.longest[x] = f.longest[f.fail[x]]
+			}
+			queue = append(queue, x)
+		}
+	}
+	return f
+}
+
+// next returns s's child by c: 0 from the root, and -1 from another state, when it has none.
+func (f *copyFinder) next(s int32, c byte) int32 {
+	if s == 0 {
+		return f.root[c]
+	}
+	for x := f.child[s]; x != 0; x = f.sibling[x] {
+		f.work++
+		if f.label[x] == c {
+			return x
+		}
+	}
+	return -1
+}
+
+// step returns the state after reading c in state s.
+func (f *copyFinder) step(s int32, c byte) int32 {
+	for {
+		if next := f.next(s, c); next >= 0 {
+			return next
+		}
+		f.work++
+		s = f.fail[s]
+	}
+}
+
+// replace replaces the copies in t with place, as replaceCopies does.
+func (f *copyFinder) replace(t string, place string) string {
+	// From the end: the longest copy that starts at each byte, latest first.
+	type copyAt struct{ start, n int }
+	var starts []copyAt
+	s := int32(0)
+	for i := len(t) - 1; i >= 0; i-- {
+		s = f.step(s, t[i])
+		if n := f.longest[s]; n > 0 {
+			starts = append(starts, copyAt{i, int(n)})
+		}
+	}
+	redactWorked(len(f.label) + len(t) + f.work)
+	if len(starts) == 0 {
+		return t
+	}
+	var b strings.Builder
+	b.Grow(len(t))
+	end := 0
+	for k := len(starts) - 1; k >= 0; k-- {
+		if c := starts[k]; c.start >= end {
+			b.WriteString(t[end:c.start])
+			b.WriteString(place)
+			end = c.start + c.n
+		}
+	}
+	b.WriteString(t[end:])
+	return b.String()
+}
