@@ -39,6 +39,27 @@ func TestDiscoverAntigravityDetectsAgyOnPath(t *testing.T) {
 	}
 }
 
+// Beacon hooks written in the legacy grouped schema are never run by Antigravity, so discovery must
+// not report them as enabled, and its message must say why and how to rewrite them.
+func TestDiscoverAntigravityReportsLegacyHooks(t *testing.T) {
+	home := setupHookOnlyDiscovery(t)
+	t.Chdir(t.TempDir())
+	path := filepath.Join(home, ".gemini", "config", "hooks.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"beacon-endpoint":{"Stop":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform antigravity stop"}]}]}}`
+	if err := os.WriteFile(path, []byte(legacy), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := DiscoverAntigravity()
+	const want = "Beacon's Antigravity CLI hooks use the legacy schema, which Antigravity does not run; rerun beacon endpoint hooks install --harness antigravity to rewrite them"
+	if got.TelemetryStatus != TelemetryDisabled || got.Message != want {
+		t.Fatalf("DiscoverAntigravity() = %q (%s), want %q (%s)", got.TelemetryStatus, got.Message, TelemetryDisabled, want)
+	}
+}
+
 func TestDiscoverKiroDetectsProfileDirectory(t *testing.T) {
 	home := setupHookOnlyDiscovery(t)
 	if err := os.MkdirAll(filepath.Join(home, ".kiro"), 0755); err != nil {

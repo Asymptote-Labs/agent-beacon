@@ -74,12 +74,22 @@ const (
 	// re-fires over an unchanged transcript after that writes the reply again, which costs one
 	// duplicate event rather than an unbounded state file.
 	replyMarkerTTL = 14 * 24 * time.Hour
+	// promptMarkerTTL is how long a session's first-prompt marker is remembered. Antigravity
+	// recovers a session's first prompt from its transcript on the first tool call, and a
+	// conversation resumed hours later still starts with that prompt; while the marker is kept it
+	// is not recorded again. Past the TTL a resumed conversation records it once more, which costs
+	// one duplicate event rather than an unbounded state file.
+	promptMarkerTTL = 14 * 24 * time.Hour
 )
 
 // SessionData represents data for a single session. Older state files also carry evaluations,
 // reprompt_count and model keys; they are ignored on load and dropped on the next save.
 type SessionData struct {
 	PromptEmitted bool `json:"prompt_emitted,omitempty"`
+	// PromptEmittedAt is when PromptEmitted was set. Stale-session cleanup keeps a session whose
+	// prompt marker is younger than promptMarkerTTL. Markers written before this field existed
+	// carry none and are aged from CreatedAt.
+	PromptEmittedAt string `json:"prompt_emitted_at,omitempty"`
 	// LastReplyID names the last assistant reply a hook recorded for this session, so a reply read
 	// from a transcript that has not moved since the previous turn is not recorded twice.
 	LastReplyID string `json:"last_reply_id,omitempty"`
@@ -168,7 +178,7 @@ func (s *SessionState) SetPromptEmitted() error {
 
 	state := s.loadStateFile()
 	s.ensureSession(state)
-	state[s.sessionID].PromptEmitted = true
+	state[s.sessionID].markPromptEmitted()
 	return s.saveStateFile(state)
 }
 
@@ -180,11 +190,16 @@ func (s *SessionState) MarkPromptEmittedIfNeeded() (bool, error) {
 	if state[s.sessionID].PromptEmitted {
 		return false, nil
 	}
-	state[s.sessionID].PromptEmitted = true
+	state[s.sessionID].markPromptEmitted()
 	if err := s.saveStateFile(state); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+func (d *SessionData) markPromptEmitted() {
+	d.PromptEmitted = true
+	d.PromptEmittedAt = time.Now().UTC().Format(time.RFC3339)
 }
 
 // MarkReplyRecorded records id as the session's last recorded assistant reply. It reports false,
@@ -230,7 +245,7 @@ func CleanupStaleForPlatform(platform string) int {
 	sessionsToRemove := []string{}
 
 	for sessionID, sessionData := range state {
-		if sessionData.hasRecentReplyMarker() {
+		if sessionData.hasRecentReplyMarker() || sessionData.hasRecentPromptMarker() {
 			continue
 		}
 		createdAt, err := time.Parse(time.RFC3339, sessionData.CreatedAt)
@@ -263,4 +278,18 @@ func (d *SessionData) hasRecentReplyMarker() bool {
 	}
 	at, err := time.Parse(time.RFC3339, d.LastReplyAt)
 	return err == nil && time.Since(at) < replyMarkerTTL
+}
+
+// hasRecentPromptMarker reports whether the session's first-prompt marker was set within
+// promptMarkerTTL, aging a marker that predates PromptEmittedAt from CreatedAt.
+func (d *SessionData) hasRecentPromptMarker() bool {
+	if !d.PromptEmitted {
+		return false
+	}
+	stamp := d.PromptEmittedAt
+	if stamp == "" {
+		stamp = d.CreatedAt
+	}
+	at, err := time.Parse(time.RFC3339, stamp)
+	return err == nil && time.Since(at) < promptMarkerTTL
 }

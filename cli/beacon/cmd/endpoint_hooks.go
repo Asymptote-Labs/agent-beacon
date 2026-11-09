@@ -816,7 +816,11 @@ func runEndpointHooksStatus(cmd *cobra.Command, args []string) error {
 		switch strings.TrimSpace(name) {
 		case "antigravity":
 			status := statuses["antigravity"].(endpointhooks.AntigravityStatus)
-			fmt.Printf("Antigravity hooks: installed=%t path=%s\n", status.Installed, status.ConfigPath)
+			fmt.Printf("Antigravity hooks: installed=%t", status.Installed)
+			if status.NeedsReinstall {
+				fmt.Print(" needs_reinstall=true")
+			}
+			fmt.Printf(" path=%s\n", status.ConfigPath)
 			fmt.Println(status.Message)
 		case "cursor":
 			status := statuses["cursor"].(endpointhooks.CursorStatus)

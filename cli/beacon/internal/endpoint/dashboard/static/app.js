@@ -1021,7 +1021,7 @@ function inventoryTableForView(view, ctx) {
           ...inventoryIdentityColumns(),
           { label: "Agent Runtime", render: (row) => inventoryRuntimeCell(inventoryRuntimeValue(row)) },
           { label: "Scope", render: (row) => row.source_scope || row.scope ? badge(row.source_scope || row.scope, "badge-muted") : `<span class="muted">-</span>` },
-          { label: "Status", render: (row) => badge(row.status || (row.installed ? "configured" : "not_installed"), row.installed ? "badge-ok" : "badge-muted") },
+          { label: "Status", render: (row) => hookStatusBadge(row) },
           { label: "Beacon Cloud", render: (row) => row.beacon_managed ? badge("managed", "badge-ok") : `<span class="muted">no</span>` },
           { label: "Modified", className: "nowrap", render: (row) => row.modified_at ? escapeHTML(formatTime(row.modified_at)) : `<span class="muted">-</span>` },
           { label: "Manifest SHA", className: "mono sha-cell", render: (row) => hashCell(row.file_sha256 || row.path_hash) },
@@ -1309,7 +1309,7 @@ function renderInventoryHooks(hooks, configs = []) {
         <tr class="${hook.installed ? "" : "row-absent"}">
           <td>${escapeHTML(runtimeLabel(hook.target))}</td>
           <td>${config.scope ? badge(config.scope, "badge-muted") : `<span class="muted">-</span>`}</td>
-          <td>${badge(hook.status || (hook.installed ? "configured" : "not_installed"), hook.installed ? "badge-ok" : "badge-muted")}</td>
+          <td>${hookStatusBadge(hook)}</td>
           <td>${config.beacon_managed ? badge("managed", "badge-ok") : `<span class="muted">no</span>`}</td>
           <td class="nowrap">${config.modified_at ? escapeHTML(formatTime(config.modified_at)) : `<span class="muted">-</span>`}</td>
           <td class="mono sha-cell">${hashCell(config.file_sha256)}</td>
@@ -1358,7 +1358,7 @@ function renderHookTargets(hooks, configs = []) {
       return `
         <tr class="${hook.installed ? "" : "row-absent"}">
           <td>${escapeHTML(runtimeLabel(hook.target))}</td>
-          <td>${badge(hook.status || (hook.installed ? "configured" : "not_installed"), hook.installed ? "badge-ok" : "badge-muted")}</td>
+          <td>${hookStatusBadge(hook)}</td>
           <td>${config.scope ? badge(config.scope, "badge-muted") : `<span class="muted">-</span>`}</td>
           <td>${config.beacon_managed ? badge("managed", "badge-ok") : `<span class="muted">no</span>`}</td>
           <td class="mono path-cell">${hook.binary_path ? escapeHTML(hook.binary_path) : `<span class="muted">-</span>`}</td>
@@ -1414,6 +1414,14 @@ function telemetryBadge(status, detected) {
     misconfigured: "badge-warn",
   };
   return badge(status || "unknown", classes[status] || "badge-muted");
+}
+
+// A hook that needs a reinstall is still installed (repair rewrites it) but does not run, so it
+// reads as a warning rather than as configured.
+function hookStatusBadge(hook) {
+  const status = hook.status || (hook.installed ? "configured" : "not_installed");
+  if (status === "needs_reinstall") return badge("needs reinstall", "badge-warn");
+  return badge(status, hook.installed ? "badge-ok" : "badge-muted");
 }
 
 function parserBadge(config) {

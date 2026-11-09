@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -561,6 +562,55 @@ func TestRunPreToolSynthesizesAntigravityPromptFromTranscript(t *testing.T) {
 	}
 	if got := events[1]["file"].(map[string]interface{})["path"]; got != "/repo" {
 		t.Fatalf("file.path = %q, want normalized /repo", got)
+	}
+}
+
+// SessionStart runs the stale-session sweep on Antigravity as on every runtime. A conversation
+// that recorded its first prompt more than two hours ago can still be resumed, so the sweep must
+// keep its prompt marker, or the resumed conversation's first tool call records that prompt again.
+func TestAntigravitySessionStartDoesNotReplayAnOlderPrompt(t *testing.T) {
+	setupHookConfigDirs(t)
+	t.Setenv("BEACON_ENDPOINT_MODE", "1")
+	platformFlag = "antigravity"
+	t.Cleanup(func() { platformFlag = "claude" })
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "runtime.jsonl")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	transcript := filepath.Join(dir, "transcript.jsonl")
+	if err := os.WriteFile(transcript, []byte(`{"type":"USER_INPUT","content":"first prompt"}`+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := hookconfig.EnsureStateDir(platformFlag); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-3 * time.Hour).UTC().Format(time.RFC3339)
+	statePath := filepath.Join(hookconfig.GetStateDir(platformFlag), "state.json")
+	data := fmt.Appendf(nil, `{"old-session":{"prompt_emitted":true,"prompt_emitted_at":%q,"created_at":%q},"stale-session":{"created_at":%q}}`, oldTime, oldTime, oldTime)
+	if err := os.WriteFile(statePath, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	runHookWithInput(t, runSessionStart, map[string]interface{}{"conversationId": "new-session"})
+	after, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sessions map[string]json.RawMessage
+	if err := json.Unmarshal(after, &sessions); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := sessions["stale-session"]; ok {
+		t.Fatalf("session start did not sweep the stale session: %s", after)
+	}
+	if _, ok := sessions["new-session"]; !ok {
+		t.Fatalf("session start did not register the new session: %s", after)
+	}
+	input := map[string]interface{}{"conversationId": "old-session", "transcriptPath": transcript}
+	emitAntigravityPromptFromTranscript(newHookLogger("pre-tool", platformFlag, "old-session"), input, "old-session")
+	for _, event := range endpointEvents(t, logPath) {
+		if event["event"].(map[string]interface{})["action"] == "prompt.submitted" {
+			t.Fatal("starting a new session replayed the first prompt from an older session")
+		}
 	}
 }
 

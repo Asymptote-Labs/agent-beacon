@@ -1193,6 +1193,7 @@ func TestRepairInstalledEndpointHooksDetectsAlreadyInstalledBeaconHooks(t *testi
 	writeTestFile(t, filepath.Join(home, ".claude", "settings.json"), `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"},{"type":"command","command":"BEACON_ENDPOINT_MODE=1 old-beacon-hooks --platform claude session-start"}]}]}}`)
 	writeTestFile(t, filepath.Join(home, ".codex", "hooks.json"), `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"}]}]}}`)
 	writeTestFile(t, filepath.Join(home, ".factory", "settings.json"), `{"hooks":{"PostToolUse":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform factory post-tool"}]}]}}`)
+	writeTestFile(t, filepath.Join(home, ".gemini", "config", "hooks.json"), `{"beacon-endpoint":{"Stop":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform antigravity stop"}]}]}}`)
 	activeConsoleUser = func() (consoleUserInfo, bool, error) {
 		return consoleUserInfo{Username: "shad", HomeDir: home}, true, nil
 	}
@@ -1209,10 +1210,10 @@ func TestRepairInstalledEndpointHooksDetectsAlreadyInstalledBeaconHooks(t *testi
 	if err != nil {
 		t.Fatalf("repairInstalledEndpointHooks returned error: %v", err)
 	}
-	if strings.Join(result.Targets, ",") != "claude,factory" {
-		t.Fatalf("targets = %#v, want claude,factory", result.Targets)
+	if strings.Join(result.Targets, ",") != "claude,factory,antigravity" {
+		t.Fatalf("targets = %#v, want claude,factory,antigravity", result.Targets)
 	}
-	wantArgs := []string{"endpoint", "hooks", "install", "--harness", "claude,factory", "--level", "user", "--log-path", logPath}
+	wantArgs := []string{"endpoint", "hooks", "install", "--harness", "claude,factory,antigravity", "--level", "user", "--log-path", logPath}
 	if strings.Join(gotArgs, "\x00") != strings.Join(wantArgs, "\x00") {
 		t.Fatalf("repair args = %#v, want %#v", gotArgs, wantArgs)
 	}

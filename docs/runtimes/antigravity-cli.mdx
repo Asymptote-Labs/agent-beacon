@@ -47,17 +47,19 @@ Beacon writes user-level Antigravity hooks to `~/.gemini/config/hooks.json` and 
 
 | Area | Support |
 |------|---------|
-| Prompt telemetry | Supported through `PreInvocation` and `UserPromptSubmit` hooks |
-| Command, tool, and file telemetry | Supported for pre-tool, post-tool, invocation stop, command, failed edit, quoted path, diff, and file edit payloads where Antigravity exposes them |
+| Prompt telemetry | The first prompt in a session can be recovered from the transcript by `PreToolUse`. Sessions without tool calls do not use this fallback |
+| Session, command, tool, and file telemetry | Uses `SessionStart`, `PreToolUse`, `PostToolUse`, and `Stop`, where Antigravity emits those hooks and exposes the corresponding payloads |
 | Approvals | Not recorded or synthesized. The `PreToolUse` hook writes nothing to stdout, so Antigravity's own permission settings decide every call: Antigravity reads a hook's `allow` as approving the call automatically and an object without a decision as a deny. A deny from a `BEACON_POLICY_PROVIDER` policy provider still returns `{"decision":"deny"}` |
 | Local JSONL and dashboard | Supported |
 | MDM deployment | Supported for the endpoint agent. Antigravity hooks are installed separately in the logged-in user's context or project context |
 
-Antigravity can invoke a pre-tool hook before its transcript file contains readable prompt text. Beacon waits until the transcript is available before marking `prompt.submitted` as emitted, so the next hook in the same session can still record the prompt event.
+Antigravity can invoke a pre-tool hook before its transcript file contains readable prompt text. Beacon waits until the transcript is available before marking `prompt.submitted` as emitted, so the next hook in the same session can still record the prompt event. Beacon remembers that a session's first prompt was recorded for 14 days, so a conversation resumed within that time does not record it again.
 
 ## Deployment notes
 
 Restart Antigravity after installing or removing hooks so new sessions pick up the updated hook configuration.
+
+Earlier Beacon releases wrote the Antigravity hooks with grouped lifecycle handlers, which Antigravity does not run. `beacon endpoint hooks status --harness antigravity` reports such hooks as `installed=true needs_reinstall=true`, discovery and `beacon endpoint doctor` report Antigravity telemetry as disabled with a warning, and the dashboard shows the hooks as needing a reinstall. Package repair rewrites older managed user-level hooks. For project-level or manual installs, rerun `beacon endpoint hooks install --harness antigravity` at the same level to rewrite the managed block.
 
 If Antigravity telemetry is missing, check the selected hook level, confirm the hook file contains commands with `--platform antigravity`, and run `beacon endpoint hooks status --harness antigravity`.
 
