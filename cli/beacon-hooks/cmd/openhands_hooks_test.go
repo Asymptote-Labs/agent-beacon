@@ -899,7 +899,7 @@ func TestOpenHandsSessionLifecycleEvents(t *testing.T) {
 		t.Fatalf("stop session id = %q; the mapping under test would not run", stopSession)
 	}
 	emitHookEvent(newHookLogger("stop", platformFlag, stopSession), "tool.completed", "tool", "info",
-		"Agent response completed", stopInput, sessionFields(stopSession, stopInput))
+		"Agent response completed", stopInput, stopFields(stopSession, stopInput))
 	stopEvent := lastEndpointEvent(t, logPath)
 	if got := leaf(stopEvent, "event", "action"); got != "tool.completed" {
 		t.Fatalf("event.action = %q, want tool.completed", got)

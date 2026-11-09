@@ -199,6 +199,7 @@
                 "group": "Browser Chat",
                 "pages": [
                   "runtimes/browser-extension",
+                  "runtimes/browser-extension-chrome-policy",
                   "runtimes/browser-extension-chromium",
                   "runtimes/claude-web",
                   "runtimes/chatgpt-web"
@@ -275,7 +276,8 @@
                   "platforms/macos",
                   "platforms/linux",
                   "platforms/linux-deployment-profile",
-                  "platforms/windows"
+                  "platforms/windows",
+                  "platforms/fleet-deployment"
                 ]
               },
               "cli/upgrade",
@@ -543,7 +545,8 @@
                   "guides/jamf-gcs-mdm",
                   "guides/jamf-s3-mdm",
                   "guides/jamf-falcon-mdm",
-                  "guides/jamf-sentinel-mdm"
+                  "guides/jamf-sentinel-mdm",
+                  "guides/workspace-one-sentinel-mdm"
                 ]
               },
               {

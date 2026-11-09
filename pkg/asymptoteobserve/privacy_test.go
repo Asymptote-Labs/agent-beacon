@@ -168,6 +168,71 @@ func TestRedactStringRedactsCommonCredentialFormats(t *testing.T) {
 	}
 }
 
+// Keys for model providers and developer platforms that agents read and paste all day, often
+// with no label beside them: a positional argument, a pasted line in a prompt, command output.
+// Each length and alphabet is gitleaks' rule of the same name, or trufflehog's detector where
+// gitleaks has none. Fixtures are built with strings.Repeat so secret scanners do not take them
+// for live keys.
+func TestRedactStringRedactsProviderTokenShapes(t *testing.T) {
+	hex := func(n int) string { return strings.Repeat("0123456789abcdef", 8)[:n] }
+	alnum := func(n int) string { return strings.Repeat("Ab3Cd4Ef5Gh6", 12)[:n] }
+	tests := []struct {
+		name, input, want string
+	}{
+		{"hashicorp vault service token", "export VAULT_ADDR=x; vault login " + "hvs." + alnum(90), "export VAULT_ADDR=x; vault login hvs.[REDACTED]"},
+		{"hashicorp vault batch token", "token hvb." + alnum(138), "token hvb.[REDACTED]"},
+		{"groq", `Groq(api_key_value="` + "gsk_" + alnum(52) + `")`, `Groq(api_key_value="gsk_[REDACTED]")`},
+		{"perplexity", "use " + "pplx-" + alnum(48) + " for search", "use pplx-[REDACTED] for search"},
+		{"replicate", "replicate " + "r8_" + alnum(36) + "-", "replicate r8_[REDACTED]"},
+		{"xai", "key: " + "xai-" + alnum(80), "key: xai-[REDACTED]"},
+		{"langsmith personal token", "lsv2_pt_" + hex(32) + "_" + hex(10), "lsv2_pt_[REDACTED]"},
+		{"langsmith service key", "lsv2_sk_" + hex(32) + "_" + hex(10), "lsv2_sk_[REDACTED]"},
+		{"pinecone", `Pinecone("` + "pcsk_" + alnum(6) + "_" + alnum(63) + `")`, `Pinecone("pcsk_[REDACTED]")`},
+		{"digitalocean personal token", "doctl auth init -t " + "dop_v1_" + hex(64), "doctl auth init -t dop_v1_[REDACTED]"},
+		{"digitalocean oauth token", "doo_v1_" + hex(64), "doo_v1_[REDACTED]"},
+		{"databricks", "host=x " + "dapi" + hex(32) + "-2", "host=x dapi[REDACTED]"},
+		{"pypi upload token", "twine upload -p " + "pypi-AgEIcHlwaS5vcmc" + alnum(60) + " dist/*", "twine upload -p pypi-[REDACTED] dist/*"},
+		{"shopify admin token", "shpat_" + hex(32), "shpat_[REDACTED]"},
+		{"shopify shared secret", "shpss_" + hex(32), "shpss_[REDACTED]"},
+		{"linear", "lin_api_" + alnum(40), "lin_api_[REDACTED]"},
+		{"doppler", "created service token " + "dp.pt." + alnum(43) + " for ci", "created service token dp.pt.[REDACTED] for ci"},
+		{"sendgrid", "SG." + alnum(22) + "." + alnum(43), "SG.[REDACTED]"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := RedactString(tc.input); got != tc.want {
+				t.Fatalf("RedactString(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+// Text that only resembles those keys stays readable: too short, the wrong alphabet, or the
+// prefix inside a longer word.
+func TestRedactStringLeavesProviderTokenLookalikes(t *testing.T) {
+	for _, input := range []string{
+		"gsk_short",
+		"pplx-search is the package name",
+		"r8_tooshort",
+		"xai-sdk",
+		"lsv2_pt_notahexvalue_atall",
+		"pcsk_abc",
+		"dop_v1_0123abcd",
+		"dapi_reference and dapiVersion",
+		"pip install pypi-simple",
+		"shpat_ZZZZ",
+		"lin_api_key",
+		"dp.pt.short",
+		"SG.aaaa.bbbb",
+		"hvs.short",
+		"rapidapi" + strings.Repeat("0", 32),
+	} {
+		if got := RedactString(input); got != input {
+			t.Errorf("RedactString(%q) = %q, want it unchanged", input, got)
+		}
+	}
+}
+
 // An AWS secret key is recognized only next to its key id, keeps the separators around it, and a
 // longer run of key characters there is not taken for one.
 func TestRedactStringRedactsAnAWSSecretBesideItsKeyID(t *testing.T) {

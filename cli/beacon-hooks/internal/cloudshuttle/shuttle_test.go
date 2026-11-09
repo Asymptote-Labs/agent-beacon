@@ -431,6 +431,18 @@ func TestUploadReusesLastObjectForSameRun(t *testing.T) {
 	}
 }
 
+func TestObjectNameStaysUnderPrefix(t *testing.T) {
+	when := time.Date(2026, 7, 12, 16, 17, 3, 0, time.UTC)
+	restore := stubNow(t, when)
+	defer restore()
+
+	got := ObjectName(Config{Prefix: "tenant/logs", Provider: "claude_code_web", RunID: "../../../../../outside"})
+	want := "tenant/logs/runtime/date=2026-07-12/1783873023-claude_code_web-.jsonl.gz"
+	if got != want {
+		t.Fatalf("ObjectName = %q, want %q", got, want)
+	}
+}
+
 func TestResolveRunIDUsesOnlyEnvironment(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_REMOTE_SESSION_ID", "cse_env")
 	if got := resolveRunID(); got != "cse_env" {

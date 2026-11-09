@@ -15,6 +15,16 @@ trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
 # invocation in this file inside the temp dir instead.
 BEACON_FORWARDER_LOG_DIR="$TMP_DIR/forwarder-logs"
 export BEACON_FORWARDER_LOG_DIR
+# Keep every install in this file away from the machine's own Beacon state and settings: the system
+# config exists (so installs read as upgrades and keep their mode unless a test says otherwise), no
+# preferences are read, and no Installer.app session is detected.
+mkdir -p "$TMP_DIR/system-endpoint"
+echo '{}' >"$TMP_DIR/system-endpoint/config.json"
+BEACON_SYSTEM_CONFIG="$TMP_DIR/system-endpoint/config.json"
+BEACON_SYSTEM_LOG="$TMP_DIR/system-endpoint/runtime.jsonl"
+BEACON_DEFAULTS_BIN="$TMP_DIR/no-defaults-binary"
+BEACON_INSTALLER_GUI=0
+export BEACON_SYSTEM_CONFIG BEACON_SYSTEM_LOG BEACON_DEFAULTS_BIN BEACON_INSTALLER_GUI
 
 sh -n "$INSTALL_SCRIPT"
 sh -n "$UNINSTALL_SCRIPT"
@@ -440,6 +450,72 @@ for value in 1 0; do
       ;;
   esac
 done
+
+# BEACON_LOG_ACCESS and BEACON_DASHBOARD pass straight through as --log-access and --dashboard;
+# unset passes nothing and keeps the endpoint's own setting (the cases above).
+BEACON_BIN="$STUB_BIN" \
+BEACON_COLLECTOR="/tmp/beacon-otelcol" \
+BEACON_LOG_ACCESS="restricted" \
+BEACON_DASHBOARD="disabled" \
+STUB_LOG="$STUB_LOG" \
+"$INSTALL_SCRIPT"
+
+INSTALL_ARGS="$(cat "$STUB_LOG")"
+case "$INSTALL_ARGS" in
+  "endpoint install --system --harness claude,codex --otlp-grpc-port 4317 --otlp-http-port 4318 --collector /tmp/beacon-otelcol --log-access restricted --dashboard disabled") ;;
+  *)
+    echo "unexpected log access/dashboard install args: $INSTALL_ARGS" >&2
+    exit 1
+    ;;
+esac
+
+for value in enabled disabled; do
+  BEACON_BIN="$STUB_BIN" \
+  BEACON_COLLECTOR="/tmp/beacon-otelcol" \
+  BEACON_DASHBOARD="$value" \
+  STUB_LOG="$STUB_LOG" \
+  "$INSTALL_SCRIPT"
+
+  INSTALL_ARGS="$(cat "$STUB_LOG")"
+  case "$INSTALL_ARGS" in
+    "endpoint install --system --harness claude,codex --otlp-grpc-port 4317 --otlp-http-port 4318 --collector /tmp/beacon-otelcol --dashboard $value") ;;
+    *)
+      echo "unexpected dashboard install args for BEACON_DASHBOARD=$value: $INSTALL_ARGS" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# The Linux package script follows the same contract.
+LINUX_INSTALL_SCRIPT="$ROOT_DIR/packaging/linux/install-endpoint.sh"
+BEACON_BIN="$STUB_BIN" \
+BEACON_COLLECTOR="/tmp/beacon-otelcol" \
+BEACON_LOG_ACCESS="restricted" \
+BEACON_DASHBOARD="disabled" \
+STUB_LOG="$STUB_LOG" \
+sh "$LINUX_INSTALL_SCRIPT"
+
+INSTALL_ARGS="$(cat "$STUB_LOG")"
+case "$INSTALL_ARGS" in
+  "endpoint install --system --harness claude,codex --otlp-grpc-port 4317 --otlp-http-port 4318 --collector /tmp/beacon-otelcol --log-access restricted --dashboard disabled") ;;
+  *)
+    echo "unexpected Linux log access/dashboard install args: $INSTALL_ARGS" >&2
+    exit 1
+    ;;
+esac
+BEACON_BIN="$STUB_BIN" \
+BEACON_COLLECTOR="/tmp/beacon-otelcol" \
+STUB_LOG="$STUB_LOG" \
+sh "$LINUX_INSTALL_SCRIPT"
+
+INSTALL_ARGS="$(cat "$STUB_LOG")"
+case "$INSTALL_ARGS" in
+  "endpoint install --system --harness claude,codex --otlp-grpc-port 4317 --otlp-http-port 4318 --collector /tmp/beacon-otelcol") ;;
+  *)
+    echo "unexpected Linux default install args: $INSTALL_ARGS" >&2
+    exit 1
+    ;;
+esac
 
 BEACON_BIN="$STUB_BIN" \
 BEACON_KEEP_LOGS="1" \
@@ -1323,6 +1399,7 @@ POSTINSTALL_LAUNCHCTL_LOG="$POSTINSTALL_ROOT/launchctl.log"
 POSTINSTALL_BEACON_LOG="$POSTINSTALL_ROOT/beacon.log"
 mkdir -p "$POSTINSTALL_BIN" "$POSTINSTALL_DAEMONS"
 sed -e "s#/opt/beacon/scripts/install-endpoint.sh#$POSTINSTALL_BIN/install-endpoint.sh#g" \
+  -e "s#/opt/beacon/scripts/beacon-settings.sh#$ROOT_DIR/packaging/macos/beacon-settings.sh#g" \
   -e "s#/Library/LaunchDaemons/#$POSTINSTALL_DAEMONS/#g" \
   "$ROOT_DIR/packaging/macos/scripts/postinstall" >"$POSTINSTALL_ROOT/postinstall"
 if grep -q -e '/opt/beacon/scripts/' -e '/Library/LaunchDaemons/' "$POSTINSTALL_ROOT/postinstall"; then
@@ -1414,7 +1491,8 @@ for expected in \
   'endpoint update install-daemon' \
   'endpoint inventory install-daemon --system' \
   'endpoint sessions install-daemon --system' \
-  'endpoint asymptote reconcile --system'
+  'endpoint asymptote reconcile --system' \
+  'endpoint sentinel forwarder reconcile --system'
 do
   if ! grep -qxF "$expected" "$POSTINSTALL_BEACON_LOG"; then
     echo "postinstall should run: $expected" >&2
@@ -1442,3 +1520,6 @@ sh "$ROOT_DIR/packaging/macos/safari/test-safari-packaging.sh"
 # Fleet osquery files (packaging/macos/fleet) and the Fleet admin helper (examples/fleet).
 sh "$ROOT_DIR/examples/fleet/test/test-fleet-sql.sh"
 sh "$ROOT_DIR/examples/fleet/test/test-configure-beacon-macos-s3.sh"
+
+# Install settings (managed preferences) and the first-install rules. Runs on Linux too.
+sh "$ROOT_DIR/packaging/macos/test-install-settings.sh"

@@ -84,7 +84,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           HOMEBREW_TAP_TOKEN: snapshot
-        run: goreleaser release --snapshot --clean --parallelism 1
+        # --snapshot does not imply --skip=sign, and the checksums `signs` entry needs the release
+        # key this job does not have, so gpg would fail on an empty keyring.
+        run: goreleaser release --snapshot --clean --skip=sign --parallelism 1
 
       - name: Assert release archives
         working-directory: cli/beacon

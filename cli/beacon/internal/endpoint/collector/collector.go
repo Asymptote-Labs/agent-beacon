@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -152,14 +153,88 @@ func WriteConfig(cfg endpointconfig.Config) error {
 // log access mode.
 const IngestExtension = "beacon_ingest"
 
+// PeerProcessor and OTLPHTTPReceiver are the collector components that record which local account
+// sent each OTLP export: the receiver serves OTLP/HTTP keeping the client's port, which the upstream
+// one drops, and the processor asks the kernel who owns that client socket (gRPC already carries
+// the port). See collector-builder/exporter/beaconjsonexporter/peerprocessor.
+const (
+	PeerProcessor    = "beacon_peer"
+	OTLPHTTPReceiver = "beacon_otlp_http"
+)
+
+// PeerAttribution reports whether ConfigYAML can render peer attribution: on the platforms where the
+// processor can ask the kernel who owns a loopback client socket (Linux: sock_diag or /proc/net/tcp;
+// macOS: the net.inet.tcp.pcblist_n table; Windows: GetExtendedTcpTable and the owning process's
+// token). Elsewhere it would name nobody, so the upstream HTTP receiver stays as it was. On macOS and
+// Windows it also takes a collector that can do the lookup (PeerAttributionFor). A var so tests on
+// any platform can render either form.
+var PeerAttribution = runtime.GOOS == "linux" || runtime.GOOS == "darwin" || runtime.GOOS == "windows"
+
+// PeerLookupExtension is the marker a collector lists in `beacon-otelcol components` when its
+// beacon_peer can identify senders on macOS and Windows (collector-builder/.../peerlookupextension).
+// No config names it.
+const PeerLookupExtension = "beacon_peer_lookup"
+
+// peerLookupMarkerRequired is where a collector must list PeerLookupExtension for its config to
+// render peer attribution: macOS and Windows. Collectors released before peer attribution reached
+// them already carry beacon_peer and beacon_otlp_http, with a lookup that always answers
+// "unsupported" there; a config with peer_user would give every OTLP event from such a collector no
+// user at all, where it used to carry the collector's account. So a new CLI with an older collector
+// (--collector, a CLI-only upgrade, a repair before the collector is replaced) keeps the previous
+// config. Linux collectors have done the lookup since beacon_peer first shipped, so Linux needs no
+// marker and renders exactly as before. A var so tests on any platform can take either path.
+var peerLookupMarkerRequired = runtime.GOOS == "darwin" || runtime.GOOS == "windows"
+
+// PeerAttributionFor reports whether the config for the collector binary renders peer attribution.
+// Where the marker is required, a binary that does not list it -- including one that cannot list
+// its components at all -- gets the config without peer attribution: it records the collector's
+// account, as before, rather than no one.
+func PeerAttributionFor(binary string) bool {
+	if !PeerAttribution {
+		return false
+	}
+	if !peerLookupMarkerRequired {
+		return true
+	}
+	if binary == "" {
+		return false
+	}
+	listed, ok := readComponents(binary)
+	return ok && listed.has("extension", PeerLookupExtension)
+}
+
+// peerAttributionForConfig is PeerAttributionFor the collector cfg runs: the binary install,
+// repair and the CI session resolve from cfg.Collector.BinaryPath, and check with
+// CheckComponentsFor, before they write the config.
+func peerAttributionForConfig(cfg endpointconfig.Config) bool {
+	if !PeerAttribution {
+		return false
+	}
+	if !peerLookupMarkerRequired {
+		return true
+	}
+	binary, err := ResolveBinary(cfg.Collector.BinaryPath)
+	if err != nil {
+		return false
+	}
+	return PeerAttributionFor(binary)
+}
+
+// ConfigYAML renders the collector config for cfg, with peer attribution where the collector cfg
+// runs can do the lookup (see PeerAttributionFor).
 func ConfigYAML(cfg endpointconfig.Config) string {
+	return ConfigYAMLWithPeer(cfg, peerAttributionForConfig(cfg))
+}
+
+// ConfigYAMLWithPeer renders the collector config for cfg with or without peer attribution.
+func ConfigYAMLWithPeer(cfg endpointconfig.Config, peer bool) string {
 	endpointconfig.NormalizeDestinations(&cfg)
 	exporterNames := []string{"beaconjson"}
 	splunkExporter := splunkHECYAML(cfg)
 	if splunkExporter != "" {
 		exporterNames = append(exporterNames, "splunk_hec")
 	}
-	falconExporter := falconHECYAML(cfg)
+	falconExporter := falconHECYAML(cfg, peer)
 	if falconExporter != "" {
 		exporterNames = append(exporterNames, "falcon_hec")
 	}
@@ -223,18 +298,33 @@ func ConfigYAML(cfg endpointconfig.Config) string {
 	// The restricted log access mode makes the collector the only writer of the system log: hooks
 	// send their events to beacon_ingest over a local socket instead of appending, so the log can
 	// be 0640 root:beacon-log. Its rotation matches beaconjson's, since both append to one log.
-	ingestYAML, extensions := "", "[health_check]"
+	// Peer attribution. Without it every OTLP event records the collector's own account (root, on
+	// a system install), whoever sent it. beacon_peer goes right after memory_limiter and before
+	// batch, which would drop the connection details it reads; beaconjson is told to trust what it
+	// writes, and only then. The OTLP forward's pipelines do not run it, so Beacon's attribution
+	// never reaches that backend.
+	receivers, httpReceiverYAML, otlpHTTPYAML, peerYAML, peerStep, peerExporterYAML := "[otlp]", "", "", "", "", ""
+	if peer {
+		receivers = "[otlp, " + OTLPHTTPReceiver + "]"
+		httpReceiverYAML = fmt.Sprintf("  %s:\n    endpoint: 127.0.0.1:%d\n%s", OTLPHTTPReceiver, cfg.Collector.HTTPPort, loopbackHostAuthYAML("    "))
+		peerYAML = "  " + PeerProcessor + ": {}\n"
+		peerStep = PeerProcessor + ", "
+		peerExporterYAML = "    peer_user: true\n"
+	} else {
+		otlpHTTPYAML = fmt.Sprintf("      http:\n        endpoint: 127.0.0.1:%d\n%s", cfg.Collector.HTTPPort, loopbackHostAuthYAML("        "))
+	}
+	forwardPipelines = strings.ReplaceAll(forwardPipelines, "receivers: [otlp]", "receivers: "+receivers)
+	ingestYAML, extensions := "", "[health_check, loopback_host]"
 	if cfg.RestrictedLogAccess() {
 		ingestYAML = fmt.Sprintf("  %s:\n    log_path: %q\n    rotate_bytes: 10485760\n    rotate_archives: 5\n", IngestExtension, cfg.LogPath)
-		extensions = "[health_check, " + IngestExtension + "]"
+		extensions = "[health_check, loopback_host, " + IngestExtension + "]"
 	}
 	return fmt.Sprintf(`receivers:
   otlp:
     protocols:
       grpc:
         endpoint: 127.0.0.1:%d
-%s      http:
-        endpoint: 127.0.0.1:%d
+%s%s%s
 
 processors:
   memory_limiter:
@@ -245,7 +335,7 @@ processors:
     send_batch_size: 128
   claude_api_body:
 %s
-%sexporters:
+%s%sexporters:
   beaconjson:
     path: %q
     max_event_bytes: 65536
@@ -256,6 +346,7 @@ processors:
 extensions:
   health_check:
     endpoint: 127.0.0.1:%d
+  loopback_host:
 %s
 service:
   telemetry:
@@ -264,18 +355,33 @@ service:
   extensions: %s
   pipelines:
     logs:
-      receivers: [otlp]
-      processors: [memory_limiter, claude_api_body, %sbatch]
+      receivers: %s
+      processors: [memory_limiter, %sclaude_api_body, %sbatch]
       exporters: %s
     traces:
-      receivers: [otlp]
-      processors: [memory_limiter, %sbatch]
+      receivers: %s
+      processors: [memory_limiter, %s%sbatch]
       exporters: %s
     metrics:
-      receivers: [otlp]
-      processors: [memory_limiter, %sbatch]
+      receivers: %s
+      processors: [memory_limiter, %s%sbatch]
       exporters: %s
-%s`, cfg.Collector.GRPCPort, grpcLimitYAML, cfg.Collector.HTTPPort, modelContextYAML, privacyYAML, cfg.LogPath, runtimeMetricsYAML+codexSpansYAML+modelContextYAML+splunkExporter+falconExporter+forwardExporter, endpointconfig.HealthCheckPort(cfg.Collector), ingestYAML, extensions, privacyStep, exporters, privacyStep, exporters, privacyStep, exporters, forwardPipelines)
+%s`, cfg.Collector.GRPCPort, grpcLimitYAML, otlpHTTPYAML, httpReceiverYAML, modelContextYAML, privacyYAML, peerYAML, cfg.LogPath,
+		runtimeMetricsYAML+codexSpansYAML+modelContextYAML+peerExporterYAML+splunkExporter+falconExporter+forwardExporter,
+		endpointconfig.HealthCheckPort(cfg.Collector), ingestYAML, extensions,
+		receivers, peerStep, privacyStep, exporters,
+		receivers, peerStep, privacyStep, exporters,
+		receivers, peerStep, privacyStep, exporters,
+		forwardPipelines)
+}
+
+// loopbackHostAuthYAML attaches the loopback_host authenticator to an OTLP HTTP receiver, at the
+// indentation of that receiver's settings. It refuses any request whose Host header is not a
+// loopback name, so a DNS-rebinding page cannot post telemetry; include_metadata is how confighttp
+// hands the Host header to it. beacon_otlp_http is built on the same confighttp server, so it takes
+// the same two settings.
+func loopbackHostAuthYAML(indent string) string {
+	return indent + "include_metadata: true\n" + indent + "auth:\n" + indent + "  authenticator: loopback_host\n"
 }
 
 // ForwardFilterProcessor keeps an OTLP forward to the runtimes it is meant to carry.
@@ -364,7 +470,7 @@ func splunkHECYAML(cfg endpointconfig.Config) string {
 	return b.String()
 }
 
-func falconHECYAML(cfg endpointconfig.Config) string {
+func falconHECYAML(cfg endpointconfig.Config, peer bool) string {
 	if cfg.Destinations == nil || cfg.Destinations.FalconHEC == nil || !cfg.Destinations.FalconHEC.Enabled {
 		return ""
 	}
@@ -381,6 +487,12 @@ func falconHECYAML(cfg endpointconfig.Config) string {
 	}
 	if cfg.ClaudeCaptureModelContext {
 		fmt.Fprintf(&b, "    capture_model_context: true\n")
+	}
+	if peer {
+		// falcon_hec converts on its own, after beacon_peer in the same pipelines, so it is told to
+		// trust the account beacon_peer resolved just as beaconjson is; otherwise LogScale would
+		// record the collector's account for an event runtime.jsonl attributes to its sender.
+		fmt.Fprintf(&b, "    peer_user: true\n")
 	}
 	if falcon.Source != "" {
 		fmt.Fprintf(&b, "    source: %q\n", falcon.Source)

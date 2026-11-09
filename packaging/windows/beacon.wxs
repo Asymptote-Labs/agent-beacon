@@ -67,6 +67,14 @@
       <Component Id="BeaconCollector" Directory="BinFolder">
         <File Id="BeaconOtelcolExeFile" Source="$(var.StageDir)\bin\beacon-otelcol.exe" KeyPath="yes" />
       </Component>
+      <!--
+        Vector, the log forwarder the macOS and Linux packages also carry. Installed as vector.exe
+        beside beacon.exe, where FindVector looks for it. The package only lays the file down;
+        nothing runs it until a forwarder is set up.
+      -->
+      <Component Id="BeaconVector" Directory="BinFolder">
+        <File Id="VectorExeFile" Source="$(var.StageDir)\bin\vector.exe" KeyPath="yes" />
+      </Component>
       <Component Id="InstallScript" Directory="ScriptsFolder">
         <File Id="InstallEndpointScriptFile" Source="$(var.StageDir)\scripts\install-endpoint.ps1" KeyPath="yes" />
       </Component>
@@ -95,10 +103,14 @@
 
       -NonInteractive and -NoProfile because there is no console here and a machine's PowerShell
       profile must not be able to change what an installer does.
+
+      -UiLevel passes the UILevel property, formatted when the action is scheduled, so the script
+      can tell a person running the installer's full interface (5) from a silent deployment (2,
+      msiexec /qn, as Intune and SCCM run it). Only the former adds the console user to beacon-log.
     -->
     <CustomAction Id="BeaconInstallEndpoint"
                   Directory="ScriptsFolder"
-                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;install-endpoint.ps1&quot;"
+                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;install-endpoint.ps1&quot; -UiLevel &quot;[UILevel]&quot;"
                   Execute="deferred"
                   Impersonate="no"
                   Return="check" />

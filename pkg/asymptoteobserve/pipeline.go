@@ -171,6 +171,10 @@ func copyEvent(event Event) Event {
 		prompt := *event.Prompt
 		out.Prompt = &prompt
 	}
+	if event.Turn != nil {
+		turn := *event.Turn
+		out.Turn = &turn
+	}
 	if event.Content != nil {
 		content := *event.Content
 		out.Content = &content

@@ -34,6 +34,34 @@ For deployment across machines, use the signed, notarized, and stapled `.pkg` at
 
 The package also configures the console user's agent runtime, because a system endpoint runs as root and the collector is useless if nothing is exporting to it.
 
+A first install from the package sets up [restricted log access](/security/restricted-log-access): only the collector writes the log, and only root and the `beacon-log` group can read it. An upgrade keeps the mode the endpoint already has. A person who installs the package in Installer.app is added to `beacon-log`, so the dashboard, `beacon traces` and `beacon share` work for them after they log in again; an MDM install adds nobody and turns the [local dashboard](/cli/dashboard#turning-the-dashboard-off) off, unless `BEACON_DASHBOARD=enabled` is set. See [Package installs](/security/restricted-log-access#package-installs).
+
+### Settings for MDM installs
+
+An MDM installs the package without letting you set the environment of its install script. Push the settings as a configuration profile for the preference domain `com.beacon.endpoint` instead, with keys named exactly like the variables, and the install script reads them from the managed preferences:
+
+```xml title="Configuration profile payload (com.beacon.endpoint)"
+<dict>
+  <key>PayloadType</key>
+  <string>com.beacon.endpoint</string>
+  <key>BEACON_LOG_ACCESS</key>
+  <string>restricted</string>
+  <key>BEACON_LOG_READERS</key>
+  <string></string>
+  <key>BEACON_ENDPOINT_HARNESSES</key>
+  <string>claude,codex,cursor</string>
+</dict>
+```
+
+An empty `BEACON_LOG_READERS` means nobody is added to `beacon-log` implicitly. Without an MDM, write the same keys to the local preferences as an administrator, before installing:
+
+```bash title="Local install settings"
+sudo defaults write /Library/Preferences/com.beacon.endpoint BEACON_LOG_ACCESS restricted
+sudo defaults write /Library/Preferences/com.beacon.endpoint BEACON_LOG_READERS ""
+```
+
+Managed preferences win over local ones, and a variable set in the install script's environment wins over both. Only the documented `BEACON_*` install settings are read, one key at a time, so nothing in the files runs, and a file is ignored with a warning unless root owns it and no other account can write it. The settings are read on every install and upgrade.
+
 <Columns cols={2}>
   <Card title="Jamf Pro" icon="screwdriver-wrench" href="/mdm/jamf">
     Package deployment, policy scripts, validation, and Extension Attributes.

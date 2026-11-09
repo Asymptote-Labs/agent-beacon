@@ -2,6 +2,8 @@ package lifecycle
 
 import (
 	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -157,7 +159,11 @@ func TestLogAccessRestorerPutsBackWhatAFailedInstallChanged(t *testing.T) {
 	logIsRestricted = func(string) bool { return restricted }
 	t.Cleanup(func() { logIsRestricted = prev })
 	calls := fakeLogAccess(t, 77, false, nil, nil)
-	cfg := endpointconfig.Config{LogPath: "/var/log/beacon-agent/runtime.jsonl"}
+	// An existing log: one with nothing beside it is removed instead (below).
+	cfg := endpointconfig.Config{LogPath: filepath.Join(t.TempDir(), "runtime.jsonl")}
+	if err := os.WriteFile(cfg.LogPath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	// Shared before; the failed install restricted it.
 	restore := logAccessRestorer(cfg)
@@ -184,6 +190,64 @@ func TestLogAccessRestorerPutsBackWhatAFailedInstallChanged(t *testing.T) {
 	}
 }
 
+// A failed first install must leave no log behind. The package install scripts read a log without
+// a system config as one kept by uninstall --keep-logs and keep its mode, so a leftover log would
+// turn the retry of a first MSI install into a shared one, and stop every script adding the person
+// who installed to the readers group.
+func TestLogAccessRestorerRemovesTheFilesAFailedFirstInstallCreated(t *testing.T) {
+	dir := t.TempDir()
+	cfg := endpointconfig.Config{LogPath: filepath.Join(dir, "runtime.jsonl"), LogAccess: "restricted"}
+	marker := asymptoteobserve.LogAccessMarkerPath(cfg.LogPath)
+	calls := fakeLogAccess(t, 77, true, nil, nil)
+	restricted := false
+	prev := logIsRestricted
+	logIsRestricted = func(string) bool { return restricted }
+	t.Cleanup(func() { logIsRestricted = prev })
+
+	restore := logAccessRestorer(cfg)
+	// What restricting a missing log creates, plus a file the install did not create.
+	for _, path := range []string{cfg.LogPath, cfg.LogPath + ".lock", marker, filepath.Join(dir, "other")} {
+		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	restricted = true
+	restore()
+	for _, path := range []string{cfg.LogPath, cfg.LogPath + ".lock", marker} {
+		if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("%s survived the rollback of the install that created it (%v)", path, err)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "other")); err != nil {
+		t.Fatalf("removed a file the install did not create: %v", err)
+	}
+	if calls.shared != 0 || len(calls.restricted) != 0 {
+		t.Fatalf("chose a mode for files it removed: %+v", calls)
+	}
+}
+
+// A lock or marker that was already there, without a log, belongs to someone else's state: only
+// the files that were absent are removed.
+func TestLogAccessRestorerKeepsFilesThatExistedBefore(t *testing.T) {
+	dir := t.TempDir()
+	cfg := endpointconfig.Config{LogPath: filepath.Join(dir, "runtime.jsonl")}
+	fakeLogAccess(t, 0, false, nil, nil)
+	if err := os.WriteFile(cfg.LogPath+".lock", nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restore := logAccessRestorer(cfg)
+	if err := os.WriteFile(cfg.LogPath, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restore()
+	if _, err := os.Lstat(cfg.LogPath); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("the log the install created survived: %v", err)
+	}
+	if _, err := os.Lstat(cfg.LogPath + ".lock"); err != nil {
+		t.Fatalf("removed a lock that existed before the install: %v", err)
+	}
+}
+
 func TestRollbackRestoresTheLogAccessMode(t *testing.T) {
 	called := false
 	tx := newInstallRollback(service.Manager{UserMode: true, Kind: service.KindSupervised})
@@ -191,5 +255,42 @@ func TestRollbackRestoresTheLogAccessMode(t *testing.T) {
 	tx.Rollback(Manifest{})
 	if !called {
 		t.Fatal("Rollback did not restore the log access mode")
+	}
+}
+
+func TestAddLogReaders(t *testing.T) {
+	var added []string
+	prev := addLogReaderMember
+	t.Cleanup(func() { addLogReaderMember = prev })
+	addLogReaderMember = func(group, account string) error {
+		if group != loggroup.Name {
+			t.Fatalf("added to group %q, want %q", group, loggroup.Name)
+		}
+		if account == "nosuchuser" {
+			return errors.New("user does not exist")
+		}
+		added = append(added, account)
+		return nil
+	}
+	restricted := endpointconfig.Config{LogAccess: "restricted"}
+
+	got, problems := addLogReaders(restricted, []string{"alice", " alice ", "", "nosuchuser", "svc_splunk"})
+	if strings.Join(got, ",") != "alice,svc_splunk" || strings.Join(added, ",") != "alice,svc_splunk" {
+		t.Fatalf("added = %v (calls %v), want alice and svc_splunk once each", got, added)
+	}
+	if len(problems) != 1 || !strings.Contains(problems[0], "nosuchuser") {
+		t.Fatalf("problems = %v, want one naming nosuchuser", problems)
+	}
+
+	added = nil
+	got, problems = addLogReaders(endpointconfig.Config{LogAccess: "shared"}, []string{"alice"})
+	if len(got) != 0 || len(added) != 0 || len(problems) != 1 || !strings.Contains(problems[0], "shared") {
+		t.Fatalf("shared log: added %v, calls %v, problems %v; want nothing added and one note", got, added, problems)
+	}
+	if got, problems := addLogReaders(endpointconfig.Config{UserMode: true, LogAccess: "restricted"}, []string{"alice"}); got != nil || problems != nil {
+		t.Fatalf("user mode: %v, %v; want nothing", got, problems)
+	}
+	if got, problems := addLogReaders(restricted, nil); got != nil || problems != nil {
+		t.Fatalf("no readers: %v, %v; want nothing", got, problems)
 	}
 }

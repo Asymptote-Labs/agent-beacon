@@ -673,9 +673,8 @@ func endpointLogPath() string {
 	if os.Getenv("BEACON_ENDPOINT_MODE") == "" {
 		return ""
 	}
-	// Account home, not $HOME: a repository can supply HOME in the hook environment.
-	home, err := shareauto.AccountHome()
-	if err != nil || home == "" {
+	home, err := os.UserHomeDir()
+	if err != nil {
 		return ""
 	}
 	return filepath.Join(home, ".beacon", "endpoint", "logs", "runtime.jsonl")

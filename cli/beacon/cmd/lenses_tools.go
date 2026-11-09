@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -189,14 +188,21 @@ installed; use 'beacon lenses add' when it is done. Runs until interrupted.`,
 		if err := dashboard.ValidateLoopbackAddr(lensToolsOpts.addr); err != nil {
 			return err
 		}
+		if err := refuseDisabledDashboard(); err != nil {
+			return err
+		}
+		token, err := dashboard.NewToken()
+		if err != nil {
+			return fmt.Errorf("create the dashboard launch secret: %w", err)
+		}
 		logPath := lensesLogPath()
 		session := lensToolsOpts.session
 		if session == "" {
 			session, _ = latestSession(logPath)
 		}
-		page := dashboard.URL(lensToolsOpts.addr)
+		page := dashboard.LaunchURL(lensToolsOpts.addr, token, "/")
 		if session != "" {
-			page = strings.TrimRight(page, "/") + "/session.html?" + url.Values{"id": {session}, "lens": {manifest.ID}}.Encode()
+			page = dashboard.LaunchURL(lensToolsOpts.addr, token, "/session.html?"+url.Values{"id": {session}, "lens": {manifest.ID}}.Encode())
 		}
 		fmt.Fprintf(out, "Previewing %s (%s) from %s\n", manifest.Title, manifest.ID, file)
 		if session == "" {
@@ -213,6 +219,7 @@ installed; use 'beacon lenses add' when it is done. Runs until interrupted.`,
 			LogPath:   logPath,
 			UserMode:  lensesUserMode(),
 			LensFiles: []string{file},
+			Token:     token,
 		})
 	},
 }

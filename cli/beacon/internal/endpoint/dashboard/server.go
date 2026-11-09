@@ -35,6 +35,9 @@ type Options struct {
 	// LensFiles are lens files served alongside the built-ins, read from disk on every request.
 	// They are for developing a lens; the dashboard never writes them.
 	LensFiles []string
+	// Token is this launch's secret (NewToken). ListenAndServe refuses to start without one and
+	// serves only requests that carry it (RequireToken); print it only inside LaunchURL.
+	Token string
 }
 
 type StatusResponse struct {
@@ -410,16 +413,29 @@ func ListenAndServe(opts Options) error {
 	if err := ValidateLoopbackAddr(opts.Addr); err != nil {
 		return err
 	}
-	handler, err := Handler(opts)
+	handler, err := servedHandler(opts)
 	if err != nil {
 		return err
 	}
 	server := &http.Server{
 		Addr:              opts.Addr,
-		Handler:           RequireLoopbackHost(handler),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return server.ListenAndServe()
+}
+
+// servedHandler is the handler ListenAndServe serves: Handler behind the loopback Host check and
+// the launch secret.
+func servedHandler(opts Options) (http.Handler, error) {
+	if opts.Token == "" {
+		return nil, errNoToken
+	}
+	handler, err := Handler(opts)
+	if err != nil {
+		return nil, err
+	}
+	return RequireLoopbackHost(RequireToken(opts.Token, CookieName(opts.Addr), handler)), nil
 }
 
 func ValidateLoopbackAddr(addr string) error {
@@ -442,13 +458,7 @@ func ValidateLoopbackAddr(addr string) error {
 // one place the request can be told apart from a local client.
 func RequireLoopbackHost(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host := r.Host
-		if h, _, err := net.SplitHostPort(host); err == nil {
-			host = h
-		}
-		host = strings.Trim(host, "[]")
-		ip := net.ParseIP(host)
-		if !strings.EqualFold(host, "localhost") && (ip == nil || !ip.IsLoopback()) {
+		if !asymptoteobserve.IsLoopbackHost(r.Host) {
 			writeError(w, http.StatusForbidden, fmt.Errorf("request host must be a loopback address"))
 			return
 		}

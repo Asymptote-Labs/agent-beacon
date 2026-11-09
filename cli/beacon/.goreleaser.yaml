@@ -23,8 +23,9 @@ before:
     # as a release asset users install with `beacon rules pull <asset-url>`.
     - bash -c 'mkdir -p release-rules && COPYFILE_DISABLE=1 tar --exclude="._*" --exclude=".DS_Store" -czf release-rules/threat-rules.tar.gz -C ../.. rules'
     # GoReleaser v2 rejects release extra_files outside its working directory. Stage the
-    # repository-level one-line installer locally before attaching it to the release.
-    - bash -c 'mkdir -p release-install && cp ../../packaging/linux/install.sh release-install/install.sh'
+    # repository-level one-line installer locally before attaching it to the release, pinning the
+    # Linux release key the self-updater embeds.
+    - bash -c 'mkdir -p release-install && fprs="$(xargs < internal/endpoint/selfupdate/release-key.fingerprint | tr " " ,)" && sed "s/^release_key_fingerprints=$/release_key_fingerprints=$fprs/" ../../packaging/linux/install.sh > release-install/install.sh && grep -qx "release_key_fingerprints=$fprs" release-install/install.sh'
 
 builds:
   - id: beacon
@@ -164,6 +165,11 @@ nfpms:
         dst: /opt/beacon/scripts/uninstall-endpoint.sh
         file_info:
           mode: 0755
+      # Sourced by install-endpoint.sh and the postinstall: the /etc/default/beacon settings parser.
+      - src: ../../packaging/linux/beacon-settings.sh
+        dst: /opt/beacon/scripts/beacon-settings.sh
+        file_info:
+          mode: 0644
       # Without these the payload is unreachable by name and every documented command fails with
       # "beacon: command not found" -- including the one this package's own postinstall prints.
       # 103 documentation pages call the binary bare, so the package is the right place to make
@@ -190,6 +196,9 @@ nfpms:
       - systemd
     rpm:
       group: Applications/System
+      # Signed with the Linux release key when release.yml imports one, and unsigned otherwise.
+      signature:
+        key_file: '{{ envOrDefault "BEACON_LINUX_SIGNING_KEY_FILE" "" }}'
       scripts:
         # rpm runs the outgoing package's %preun after the incoming package's %post during an
         # upgrade, so an older package can stop the service the new one just started -- and nothing
@@ -199,10 +208,40 @@ nfpms:
     deb:
       fields:
         Bugs: https://github.com/asymptote-labs/agent-beacon/issues
+      signature:
+        key_file: '{{ envOrDefault "BEACON_LINUX_SIGNING_KEY_FILE" "" }}'
 
 checksum:
   name_template: "checksums.txt"
   algorithm: sha256
+
+# Signs checksums.txt with the Linux release key release.yml imports (GNUPGHOME and
+# BEACON_LINUX_SIGNING_KEY_FPR); release.yml passes --skip=sign when no key is configured, and
+# every snapshot invocation passes it too. GoReleaser OSS has no `if`/`skip` on signs, so without
+# --skip=sign and without the variable this fails closed: gpg is asked for a key named
+# "BEACON_LINUX_SIGNING_KEY_FPR-unset", reports "No secret key" and never falls back to a default
+# key; signing runs before publish, so nothing is uploaded.
+# GoReleaser uploads into a draft and publishes last, so checksums.txt.sig is on the release
+# before it becomes latest. Its checksums.txt is rewritten deterministically at publish, so the
+# signature still matches; finalize extends the file and signs it again.
+signs:
+  - id: checksums
+    artifacts: checksum
+    cmd: gpg
+    signature: "${artifact}.sig"
+    stdin: '{{ envOrDefault "NFPM_PASSPHRASE" "" }}'
+    args:
+      - --batch
+      - --pinentry-mode
+      - loopback
+      - --passphrase-fd
+      - "0"
+      - --local-user
+      - '{{ envOrDefault "BEACON_LINUX_SIGNING_KEY_FPR" "BEACON_LINUX_SIGNING_KEY_FPR-unset" }}'
+      - --output
+      - "${signature}"
+      - --detach-sign
+      - "${artifact}"
 
 changelog:
   sort: asc
@@ -297,6 +336,8 @@ release:
     - glob: ./release-rules/threat-rules.tar.gz
     # The Linux one-line installer, served from releases/latest/download/install.sh.
     - glob: ./release-install/install.sh
+    # The Linux release public key, staged by release.yml only when it signs the release.
+    - glob: '{{ if isEnvSet "BEACON_LINUX_SIGNING_KEY_FILE" }}./release-key/beacon-release-key.*{{ end }}'
   footer: |
     ## Installation
 

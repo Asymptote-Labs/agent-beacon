@@ -71,6 +71,7 @@ var metadataOnlyKept = []string{
 	"approval.decision",
 	"policy.id", "policy.name", "policy.decision", "policy.enforcement",
 	"prompt.id",
+	"turn.status",
 	"system_context.kind", "system_context.source",
 	"system_context.skills.skill_name", "system_context.skills.skill_name_hash",
 	"content.retention", "content.hash",

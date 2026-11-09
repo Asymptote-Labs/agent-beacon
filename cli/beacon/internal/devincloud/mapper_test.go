@@ -156,6 +156,11 @@ func TestObjectNameLayout(t *testing.T) {
 	if got2 != want2 {
 		t.Fatalf("ObjectName empties = %q, want %q", got2, want2)
 	}
+	got3 := ObjectName("tenant/logs", "devin_cloud", "user-1", "../../../../../../outside")
+	want3 := "tenant/logs/provider=devin_cloud/user_id=user-1/run_id=unknown/runtime.jsonl"
+	if got3 != want3 {
+		t.Fatalf("ObjectName traversal = %q, want %q", got3, want3)
+	}
 }
 
 func TestMapSessionRecordsRetainedMessageContent(t *testing.T) {

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -41,6 +43,12 @@ type endpointUserConfigRepairResult struct {
 	NativeConfigPaths   []string `json:"native_config_paths,omitempty"`
 	HookTargets         []string `json:"hook_targets,omitempty"`
 	SkippedReason       string   `json:"skipped_reason,omitempty"`
+	// Users holds one result per person configured, in the order they were resolved. The fields
+	// above repeat the first of them, which is who this command configured when it configured only
+	// one person, so a reader of the older single-user shape keeps working.
+	Users []endpointUserConfigRepairResult `json:"users,omitempty"`
+	// Error says why configuring this person failed, in a Users entry.
+	Error string `json:"error,omitempty"`
 }
 
 type userConfigTargets struct {
@@ -54,19 +62,50 @@ func runEndpointUserConfigRepairInstalled(cmd *cobra.Command, args []string) err
 	result, err := repairInstalledEndpointUserConfig()
 	if endpointOpts.jsonOutput {
 		_ = json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+	} else {
+		reportUserConfigRepair(cmd.OutOrStdout(), result)
 	}
 	return err
+}
+
+// reportUserConfigRepair says, in words, whose agent runtimes a root install pointed at the
+// collector. A package postinstall runs as root, and the lines `endpoint install` prints before this
+// describe root's own settings, so without this the install read as a success that had configured
+// nobody who uses the machine -- or did configure them and never said so.
+func reportUserConfigRepair(w io.Writer, result endpointUserConfigRepairResult) {
+	if result.SkippedReason == "no_active_console_user" {
+		fmt.Fprintln(w, "No logged-in user to configure: nobody is logged in, or only root is, so no one's agent runtime points at the collector yet.")
+		fmt.Fprintln(w, "Each person who runs agents on this machine configures themselves once, logged in: sudo beacon endpoint user-config repair-installed --system")
+		return
+	}
+	for _, user := range result.Users {
+		if user.Error != "" {
+			fmt.Fprintf(w, "Could not configure %s (%s): %s\n", user.User, user.HomeDir, user.Error)
+			continue
+		}
+		parts := []string{}
+		if len(user.NativeConfigTargets) > 0 {
+			parts = append(parts, "telemetry for "+strings.Join(user.NativeConfigTargets, ", "))
+		}
+		if len(user.HookTargets) > 0 {
+			parts = append(parts, "hooks for "+strings.Join(user.HookTargets, ", "))
+		}
+		if len(parts) == 0 {
+			parts = append(parts, "nothing to configure")
+		}
+		fmt.Fprintf(w, "Configured %s (%s): %s, writing to %s\n", user.User, user.HomeDir, strings.Join(parts, "; "), user.RuntimeLogPath)
+	}
 }
 
 func repairInstalledEndpointUserConfig() (endpointUserConfigRepairResult, error) {
 	if endpointUserMode() {
 		return endpointUserConfigRepairResult{SkippedReason: "requires_system_endpoint"}, fmt.Errorf("endpoint user-config repair-installed is intended for system endpoint installs; pass --system")
 	}
-	info, ok, err := activeConsoleUser()
+	users, err := activeConsoleUsers()
 	if err != nil {
 		return endpointUserConfigRepairResult{}, err
 	}
-	if !ok {
+	if len(users) == 0 {
 		return endpointUserConfigRepairResult{SkippedReason: "no_active_console_user"}, nil
 	}
 
@@ -85,25 +124,43 @@ func repairInstalledEndpointUserConfig() (endpointUserConfigRepairResult, error)
 		}
 	}
 
-	nativeTargets, nativePaths, err := repairNativeRuntimeConfigForUser(info, cfg, targets.native)
-	if err != nil {
-		return endpointUserConfigRepairResult{}, err
-	}
-	var hookTargets []string
-	if len(targets.hooks) > 0 {
-		hookTargets, err = repairHookTargetsForUser(info, cfg.LogPath, targets.hooks)
+	// One person's broken home (a config file they made unparseable, a launcher that refuses them)
+	// must not leave everyone after them unconfigured, so each is attempted and the failures are
+	// reported together.
+	var result endpointUserConfigRepairResult
+	var errs []error
+	for _, info := range users {
+		one, err := repairEndpointUserConfigFor(info, cfg, targets)
 		if err != nil {
-			return endpointUserConfigRepairResult{}, err
+			one.Error = err.Error()
+			errs = append(errs, err)
+		}
+		result.Users = append(result.Users, one)
+	}
+	first := result.Users[0]
+	result.User, result.HomeDir, result.RuntimeLogPath = first.User, first.HomeDir, first.RuntimeLogPath
+	result.NativeConfigTargets, result.NativeConfigPaths, result.HookTargets = first.NativeConfigTargets, first.NativeConfigPaths, first.HookTargets
+	// With its error, so a reader of the single-user shape never takes a failure for success.
+	result.Error = first.Error
+	return result, errors.Join(errs...)
+}
+
+// repairEndpointUserConfigFor points one person's runtimes at the collector.
+func repairEndpointUserConfigFor(info consoleUserInfo, cfg endpointconfig.Config, targets userConfigTargets) (endpointUserConfigRepairResult, error) {
+	result := endpointUserConfigRepairResult{User: info.Username, HomeDir: info.HomeDir, RuntimeLogPath: cfg.LogPath}
+	nativeTargets, nativePaths, err := repairNativeRuntimeConfigForUser(info, cfg, targets.native)
+	result.NativeConfigTargets, result.NativeConfigPaths = nativeTargets, nativePaths
+	if err != nil {
+		return result, err
+	}
+	if len(targets.hooks) > 0 {
+		hookTargets, err := repairHookTargetsForUser(info, cfg.LogPath, targets.hooks)
+		result.HookTargets = hookTargets
+		if err != nil {
+			return result, err
 		}
 	}
-	return endpointUserConfigRepairResult{
-		User:                info.Username,
-		HomeDir:             info.HomeDir,
-		RuntimeLogPath:      cfg.LogPath,
-		NativeConfigTargets: nativeTargets,
-		NativeConfigPaths:   nativePaths,
-		HookTargets:         hookTargets,
-	}, nil
+	return result, nil
 }
 
 func resolveUserConfigTargets(values []string) (userConfigTargets, error) {

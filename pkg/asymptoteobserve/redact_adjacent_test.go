@@ -208,6 +208,10 @@ var adjacentSecrets = []string{
 	"glpat-abcdefghijklmnopqrstuv", "xoxb-1234567890-abc", "sk_live_abcdefghijklmnop", "ya29.abcdefghijklmnopqrstuvwxyz",
 	"bcn_api_abcdefgh", "postgres://user:pw@host/db", "https://x-access-token:abc@github.com", "token=abcdefgh12345678",
 	"Bearer abcdefghijk", "curl -u admin:hunter2 ", "abcdefgh12345678",
+	"hvs." + strings.Repeat("Ab3_", 8), "gsk_" + strings.Repeat("Ab3C", 13), "r8_" + strings.Repeat("Ab3-", 9) + "x",
+	"lsv2_pt_" + strings.Repeat("0a", 16) + "_" + strings.Repeat("0a", 5), "pcsk_Ab3Cd_" + strings.Repeat("Ab3", 21),
+	"dapi" + strings.Repeat("0a", 16) + "-2", "pypi-AgEIcHlwaS5vcmc" + strings.Repeat("Ab3_", 13),
+	"dp.pt." + strings.Repeat("Ab3", 14) + "C", "SG." + strings.Repeat("Ab", 11) + "." + strings.Repeat("Ab3", 14) + "C",
 }
 
 // Idempotence and the gate's equivalence over many random texts where secrets meet, beyond what

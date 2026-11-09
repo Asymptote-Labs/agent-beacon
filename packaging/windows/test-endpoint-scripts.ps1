@@ -20,7 +20,7 @@ function Fail {
     $script:failures++
 }
 
-$scripts = @('install-endpoint.ps1', 'uninstall-endpoint.ps1', 'package-common.ps1', 'build-msi.ps1', 'smoke-restricted-log.ps1')
+$scripts = @('install-endpoint.ps1', 'uninstall-endpoint.ps1', 'package-common.ps1', 'build-msi.ps1', 'fetch-vector.ps1', 'smoke-restricted-log.ps1', 'smoke-sentinel-forwarder.ps1')
 foreach ($name in $scripts) {
     $path = Join-Path $scriptDir $name
     if (-not (Test-Path -LiteralPath $path)) {
@@ -50,6 +50,39 @@ foreach ($needle in @('endpoint', 'install', '--system', 'user-config', 'repair-
 # BEACON_LOG_ACCESS is the one contract for the log access mode across all three platforms' scripts.
 if ($install -notmatch "BEACON_LOG_ACCESS" -or $install -notmatch [regex]::Escape("'--log-access'")) {
     Fail "install-endpoint.ps1 no longer passes BEACON_LOG_ACCESS on as --log-access"
+}
+# BEACON_LOG_READERS is the readers list on all three platforms, and the policy key is where Windows
+# fleet tooling sets every install setting, as /etc/default/beacon and the com.beacon.endpoint managed
+# preferences are on Linux and macOS.
+if ($install -notmatch "BEACON_LOG_READERS" -or $install -notmatch [regex]::Escape("'--log-readers'")) {
+    Fail "install-endpoint.ps1 no longer passes BEACON_LOG_READERS on as --log-readers"
+}
+if ($install -notmatch [regex]::Escape('HKLM:\SOFTWARE\Policies\Beacon\Endpoint')) {
+    Fail "install-endpoint.ps1 no longer reads install settings from the HKLM:\SOFTWARE\Policies\Beacon\Endpoint policy key"
+}
+# The first-install restricted default applies only where the collector is a Windows service, as on
+# Linux only where it is a systemd one: a supervised collector (BEACON_SERVICE=none) is restarted by
+# nothing, so a restricted log there would spool every hook event while it is down.
+if ($install -notmatch [regex]::Escape('$firstInstall -and $windowsService')) {
+    Fail "install-endpoint.ps1 must default a first install to restricted only when the collector is a Windows service"
+}
+if ($install -notmatch [regex]::Escape("@('', 'auto', 'windows-service', 'windows', 'scm')")) {
+    Fail "install-endpoint.ps1 no longer lists the --service values that resolve to the Service Control Manager"
+}
+# Only a person at the installer's full interface may be added implicitly, which the script can tell
+# only from the UILevel the MSI passes it.
+$wxs = Get-Content -Raw -LiteralPath (Join-Path $scriptDir 'beacon.wxs')
+if ($wxs -notmatch [regex]::Escape('-UiLevel &quot;[UILevel]&quot;')) {
+    Fail "beacon.wxs no longer passes [UILevel] to install-endpoint.ps1"
+}
+# BEACON_DASHBOARD is the administrator's dashboard switch, the same contract on all three platforms.
+if ($install -notmatch "BEACON_DASHBOARD" -or $install -notmatch [regex]::Escape("'--dashboard'")) {
+    Fail "install-endpoint.ps1 no longer passes BEACON_DASHBOARD on as --dashboard"
+}
+# An unattended first install (below the installer's full interface) defaults the dashboard to
+# disabled, whatever the service mode, as on Linux and macOS.
+if ($install -notmatch [regex]::Escape("[string]::IsNullOrWhiteSpace(`$dashboard) -and `$firstInstall -and `$uiLevelValue -lt 4) { `$dashboard = 'disabled' }")) {
+    Fail "install-endpoint.ps1 must default an unattended first install's dashboard to disabled"
 }
 # The step whose absence made the Linux package produce a healthy collector that captured nothing.
 if ($install -notmatch 'repair-installed') {
@@ -154,6 +187,14 @@ foreach ($needle in @('install-endpoint.ps1', 'uninstall-endpoint.ps1')) {
 $build = Get-Content -Raw -LiteralPath (Join-Path $scriptDir 'build-msi.ps1')
 if ($wxs -notmatch [regex]::Escape('scripts\package-common.ps1') -or $build -notmatch [regex]::Escape('package-common.ps1')) {
     Fail "the MSI no longer ships package-common.ps1 beside the scripts that dot-source it"
+}
+# Vector ships in the MSI as it does in the .pkg and the Linux packages, and only from the pinned build.
+if ($wxs -notmatch [regex]::Escape('bin\vector.exe') -or $build -notmatch [regex]::Escape("'bin\vector.exe'")) {
+    Fail "the MSI no longer ships bin\vector.exe"
+}
+$fetch = Get-Content -Raw -LiteralPath (Join-Path $scriptDir 'fetch-vector.ps1')
+if ($fetch -notmatch [regex]::Escape('packaging\vector\vector-$Version-SHA256SUMS') -or $fetch -match '(?i)timber\.io[^\n]*SHA256SUMS') {
+    Fail "fetch-vector.ps1 must check the archive against the checksums committed in packaging\vector, not a downloaded file"
 }
 if ($wxs -match 'ExeCommand="[^"]*beacon\.exe') {
     Fail "beacon.wxs invokes beacon.exe directly; the install contract belongs in one place, not two"

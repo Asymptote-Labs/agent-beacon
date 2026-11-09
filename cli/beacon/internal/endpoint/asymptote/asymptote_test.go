@@ -23,7 +23,7 @@ func TestVectorConfigForwardsBothStreamsOverHTTPWithABearerSecret(t *testing.T) 
 		t.Fatalf("VectorConfig returned error: %v", err)
 	}
 	for _, want := range []string{
-		`include = ["/tmp/beacon/runtime.jsonl"]`,
+		`include = ["/tmp/beacon/runtime.jsonl", "/tmp/beacon/runtime.jsonl.1"]`,
 		`include = ["/tmp/beacon/inventory_state.jsonl"]`,
 		`read_from = "end"`,
 		`read_from = "beginning"`,
@@ -224,7 +224,7 @@ func TestRenderVectorConfigReplacesEveryEnvironmentReference(t *testing.T) {
 		`uri = "https://ingest.example.test/v1/ingest/runtime"`,
 		`uri = "https://ingest.example.test/v1/ingest/inventory"`,
 		`uri = "https://ingest.example.test/v1/ingest/health"`,
-		`include = ["/Users/me/.beacon/endpoint/logs/runtime.jsonl"]`,
+		`include = ["/Users/me/.beacon/endpoint/logs/runtime.jsonl", "/Users/me/.beacon/endpoint/logs/runtime.jsonl.1"]`,
 		`token = "SECRET[beacon.device_key]"`,
 	} {
 		if !strings.Contains(got, want) {

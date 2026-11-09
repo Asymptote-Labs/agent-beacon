@@ -27,20 +27,9 @@
 </p>
 
 <p align="center">
- <a href="https://www.star-history.com/asymptote-labs/agent-beacon">
-  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=Asymptote-Labs/agent-beacon&type=trending&theme=dark&v=2" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/badge?repo=Asymptote-Labs/agent-beacon&type=trending&v=2" />
-   <img alt="GitHub Trending Repository of the Day" width="227" height="54" src="https://api.star-history.com/badge?repo=Asymptote-Labs/agent-beacon&type=trending&v=2" />
-  </picture>
- </a>
- <a href="https://www.producthunt.com/products/asymptotelabs?embed=true&utm_source=badge-top-post-badge&utm_medium=badge&utm_campaign=badge-beacon-sh" target="_blank" rel="noopener noreferrer">
-  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=1292351&theme=dark&period=daily&t=1793685827673" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=1292351&theme=neutral&period=daily&t=1793685827673" />
-   <img alt="beacon.sh - Open-source self-improving memory for AI coding agents | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=1292351&theme=neutral&period=daily&t=1793685827673" />
-  </picture>
- </a>
+  <a href="https://trendshift.io/repositories/30512?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-30512" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/30512" alt="Asymptote-Labs%2Fagent-beacon | Trendshift" width="250" height="55" /></a>
+  <a href="https://www.producthunt.com/products/asymptotelabs?embed=true&utm_source=badge-top-post-badge&utm_medium=badge&utm_campaign=badge-beacon-sh" target="_blank" rel="noopener noreferrer"><picture><source media="(prefers-color-scheme: dark)" srcset="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=1292351&theme=dark&period=daily&t=1793685827673" /><source media="(prefers-color-scheme: light)" srcset="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=1292351&theme=neutral&period=daily&t=1793685827673" /><img alt="beacon.sh - Open-source self-improving memory for AI coding agents | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=1292351&theme=neutral&period=daily&t=1793685827673" /></picture></a>
+  <a href="https://www.producthunt.com/products/asymptotelabs?embed=true&utm_source=badge-top-post-badge&utm_medium=badge&utm_campaign=badge-beacon-sh" target="_blank" rel="noopener noreferrer"><picture><source media="(prefers-color-scheme: dark)" srcset="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=1292351&theme=dark&period=weekly&t=1794218691353" /><source media="(prefers-color-scheme: light)" srcset="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=1292351&theme=neutral&period=weekly&t=1794218691353" /><img alt="beacon.sh - Open-source self-improving memory for AI coding agents | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=1292351&theme=neutral&period=weekly&t=1794218691353" /></picture></a>
 </p>
 
 ⭐ *Help us reach more developers and grow the Beacon community. Star this repo!*
@@ -139,7 +128,7 @@ grep "  ${PKG}$" checksums.txt | sha256sum --check - && \
 sudo apt install "./${PKG}"   # or: sudo dnf install "./${PKG}"
 ```
 
-`checksums.txt` is published with the release, so it catches a corrupted or swapped download but does not prove who built the release. To check that, verify the package's build-provenance attestation, which shows it was built by this repository's release workflow: `gh attestation verify "${PKG}" --repo asymptote-labs/agent-beacon`. You can also pin `VERSION` to a release you have reviewed instead of following `latest`. To install without root, use the tarball in user mode ([Linux install guide](https://docs.asymptotelabs.ai/platforms/linux#without-root-or-without-a-package-manager)).
+`checksums.txt` on its own catches a corrupted download but does not prove who built the release. From 1.3.57 on, `checksums.txt.sig` signs it with Beacon's Linux release key (fingerprint `07BEA34ED6A411F4C066D98322F94195DCDC8F45`), which `install.sh` checks; the [Linux install guide](https://docs.asymptotelabs.ai/platforms/linux#release-signing) shows how to check it by hand and how to install from the signed apt repository instead. You can also verify the package's build-provenance attestation, which shows it was built by this repository's release workflow: `gh attestation verify "${PKG}" --repo asymptote-labs/agent-beacon`. You can also pin `VERSION` to a release you have reviewed instead of following `latest`. To install without root, use the tarball in user mode ([Linux install guide](https://docs.asymptotelabs.ai/platforms/linux#without-root-or-without-a-package-manager)).
 
 </details>
 
@@ -300,6 +289,10 @@ beacon endpoint dashboard
 ```
 
 Use it to explore session history across harnesses and understand what your agents actually did.
+Open the URL it prints: it carries a secret for that run, so other accounts on a shared machine
+cannot read your log through the port. Administrators can turn the dashboard off for everyone
+with `beacon endpoint install|repair --system --dashboard disabled` (`BEACON_DASHBOARD=disabled`
+for package installs).
 
 Each session page can also show **lenses**: purpose-built views of one trace, such as files
 changed with their diffs, an itemized token bill, a security review grouped by risk, or the

@@ -229,3 +229,43 @@ func configNoRetry() configretry.BackOffConfig {
 	cfg.Enabled = false
 	return cfg
 }
+
+// With peer_user, LogScale records the account beacon_peer resolved, as runtime.jsonl does.
+func TestPeerUserReachesFalconPayload(t *testing.T) {
+	t.Setenv("USER", "root")
+	var payload hecPayload
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	cfg := createDefaultConfig()
+	cfg.Endpoint, cfg.Token, cfg.PeerUser = server.URL, "test-ingest-token", true
+	exp, err := newExporter(cfg, exporter.Settings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs := plog.NewLogs()
+	rl := logs.ResourceLogs().AppendEmpty()
+	rl.Resource().Attributes().PutStr("service.name", "claude-code")
+	rl.Resource().Attributes().PutStr(beaconevent.PeerUIDAttribute, "1001")
+	rl.Resource().Attributes().PutStr(beaconevent.PeerUserAttribute, "alice")
+	rec := rl.ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+	rec.Body().SetStr("prompt submitted")
+	rec.Attributes().PutStr("beacon.event.action", "prompt.submitted")
+	if err := exp.consumeLogs(context.Background(), logs); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := json.Marshal(payload.Event)
+	var event struct {
+		User beaconevent.UserInfo `json:"user"`
+	}
+	if err := json.Unmarshal(data, &event); err != nil {
+		t.Fatal(err)
+	}
+	if event.User.Name != "alice" || event.User.UID != "1001" {
+		t.Fatalf("falcon user = %+v, want alice/1001: %s", event.User, data)
+	}
+}

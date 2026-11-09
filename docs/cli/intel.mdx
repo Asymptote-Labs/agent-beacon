@@ -33,15 +33,24 @@ fits:
 A URL that points into a repository's directory lists that directory's artifact first. If a
 repository or package matches nothing, the name is tried as text instead.
 
-## Risk
+## Risk and coverage
+
+Each analyzed artifact has a **risk** and a **coverage**. Risk is how much the artifact works
+against the person who installs it, from what the analysis covered:
 
 | Risk | Meaning | What an agent should do |
 |------|---------|-------------------------|
-| `malicious` | The analysis confirmed harmful behavior | Don't install or run it |
-| `suspicious` | Risky behavior the analysis could not rule out | Install or run it only after showing the user the findings and getting their explicit go-ahead |
-| `inconclusive` | The analysis could not cover enough to decide | Tell the user and let them choose |
-| `benign` | No suspicious or malicious behavior found in the analyzed code | Not a guarantee |
+| `high` | Reviewed evidence shows it deliberately works against the person who installs it | Don't install or run it |
+| `medium` | It can do serious harm to the person who installs it, or puts a flagged pattern in what the agent loads, without established intent | Install or run it only after showing the user the findings and getting their explicit go-ahead |
+| `low` | It overreaches in limited ways, or has findings the review has not confirmed | Show the user the findings before installing it |
+| `benign` | Nothing found that works against the person who installs it | Not a guarantee |
 | `unchecked` | A registry lists it, but it has not been analyzed yet | Tell the user |
+
+Coverage is `complete` or `partial`. Partial means the analysis did not cover everything, so
+there may be more than it found: tell the user and let them choose. Partial coverage is never
+a clearance, whatever the risk; Beacon prints such a risk as, for example, `benign (partial)`.
+Every answer also carries `guidance`, the sentence an agent should follow for its risk and
+coverage.
 
 An artifact that is **not found** is not in the index, so it has never been checked. Not found
 never means safe.
@@ -69,7 +78,7 @@ beacon intel show mcp:evil/server
 
 `show` prints one artifact in full:
 
-- the verdict, with its reasons, findings and unresolved questions; refuted findings are only counted
+- the verdict: risk and coverage, the reasons for each, findings (with severity, level and review) and unresolved questions; notes, third-party flags and refuted findings are only counted
 - the repository's lineage
 - package advisories
 - linked repositories with risky lineage
@@ -83,32 +92,109 @@ skipped. Nothing you send is stored.
 
 ```bash
 beacon intel check @playwright/mcp anthropics/skills "Desktop Commander"
-beacon intel check --file agent-extensions.txt --fail-on suspicious
+beacon intel check --file agent-extensions.txt --fail-on medium
 ```
 
 Each artifact comes back with one of three statuses:
 
-- `matched`: the artifact was found, and its risk is shown.
+- `matched`: the artifact was found, and its risk and coverage are shown.
 - `ambiguous`: your text matched names but no name exactly. The status claims no risk; check
   one of the listed candidates by its key.
 - `not_found`: the artifact isn't in the index.
 
-`--fail-on malicious|suspicious|inconclusive` exits with status 1 when any matched artifact is
-at or above that risk, which makes `check` a CI gate. Ambiguous and not-found artifacts never
-fail it, because they claim no risk.
+The summary line counts matched artifacts by risk, then ambiguous and not-found ones, and says
+how many of the matched ones had partial coverage.
+
+`--fail-on high|medium|low` exits with status 1 when any matched artifact is at or above that
+risk, which makes `check` a CI gate. `--fail-on partial` is the strictest gate: it fails on
+`low` or above and on any artifact whose coverage is partial, at any risk, because partial
+coverage is never a clearance. Ambiguous and not-found artifacts never fail it, because
+they claim no risk. The gate fails closed: a matched artifact whose risk this `beacon` does not
+recognize fails every `--fail-on`, and under `--fail-on partial` so does one whose coverage is
+neither `complete` nor `partial`. An index that still answers with a retired verdict is ranked
+as its replacement (`malicious` as `high`, `suspicious` as `medium`, `inconclusive` as `low`).
+In an answer of that retired shape (it carries retired verdicts, or no matched artifact names a
+coverage), coverage was part of the verdict, so a `benign` there passes `--fail-on partial`, as
+it passed `--fail-on inconclusive`.
+
+The retired values `malicious`, `suspicious` and `inconclusive` are refused as `--fail-on`
+thresholds with a message naming the new ones, so update CI scripts that pass them: `--fail-on
+medium` replaces `--fail-on suspicious`, `--fail-on high` replaces `--fail-on malicious`, and
+`--fail-on partial` replaces `--fail-on inconclusive`.
+
+The summary line never hides a count the index sent: one this `beacon` does not know is
+printed after the known ones.
 
 ## Status
 
-`beacon intel status` shows how many MCP servers and skills the index lists and has analyzed.
+`beacon intel status` shows how many MCP servers and skills the index lists and has analyzed,
+how many it rates at each risk, and how many have partial coverage. When an index sends counts
+the columns do not show (an index still on the retired verdicts, for example), or analyzed
+artifacts no count accounts for, a line below the table names them.
 It also shows when the newest verdict and registry update arrived. The index is refreshed
 hourly.
+
+## For agents
+
+The local `beacon` MCP server ([`beacon mcp serve`](/cli/mcp)) gives agents the same checks as
+tools, so an agent can check an MCP server or skill before it installs or runs it:
+
+| Tool | Does |
+|------|------|
+| `intel_lookup` | `beacon intel lookup` |
+| `intel_get_artifact` | `beacon intel show` |
+| `intel_check` | `beacon intel check` |
+| `intel_check_installed` | Checks every MCP server and skill configured on this machine |
+
+[Beacon Cloud MCP](/deployment/managed-mcp) has the first three as `beacon_intel_lookup`,
+`beacon_intel_get_artifact` and `beacon_intel_check`, free on every plan. Checking what is
+installed needs the machine's own config, so `intel_check_installed` is local only.
+
+`intel_check_installed` works like a dependency audit over a lockfile. Beacon reads each
+runtime's own MCP and skill configuration (the same files `beacon endpoint inventory` reads).
+By default it sends only public identifiers: the npm or PyPI package, from the public registry,
+in a server's launch command, without its version. For example, `npx -y @playwright/mcp@latest`
+is sent as `npm:@playwright/mcp`, `uvx mcp-server-fetch` as `pypi:mcp-server-fetch`, and the
+Windows form `cmd /c npx -y @playwright/mcp` the same way. A launch command with an option
+Beacon does not recognize is skipped rather than guessed at, so an option's value is never sent
+as a package. `npm exec` and `npm x` read npm's options after the package too (up to `--`), so
+Beacon reads them there as well. So is a package that does not come from a registry: a git or tarball URL, a direct
+reference such as `name @ git+https://…`, an `npm:` alias, a path or a local wheel or tarball.
+
+Names that may be private are held back and listed as skipped unless the agent passes
+`include_private_names`, which it should do only when you agree:
+
+- the configured name of a server with no package in its command, such as a local script, a
+  binary, a container or a remote URL;
+- a package that may come from a registry or index other than the public one. Beacon checks
+  where launchers usually find one: the launch command (`--registry`, `--index-url`, a config
+  file and the like), the server's `env` or `envFile`, the environment it inherits
+  (`npm_config_registry`, `npm_config_@scope:registry`, `UV_INDEX_URL`, `PIP_INDEX_URL` and the
+  like), and the npm, yarn, bun, pip and uv configuration files in your home directory, the system
+  locations, and the working directory and those above it, whether or not `include_project` is set,
+  as well as the project directory a server runs in (its `cwd`, uv's `--directory`, or the project a
+  Claude Code local-scope server is declared for in `~/.claude.json`) and those above it
+  (`.npmrc`, including the global and builtin ones under npm's prefix, pnpm's global `rc`,
+  `.yarnrc.yml`, `bunfig.toml`, `pip.conf`, `uv.toml`, `pyproject.toml`). A private npm scope holds back only that scope's packages.
+  Settings that name the public registry don't count. A registry configured anywhere else (a
+  shell profile the agent did not inherit, say) is not seen, so check with `dry_run` first;
+- skill names, since a skill may be one you wrote.
+
+Paths, URLs, environment variables and other arguments are never sent. Beacon's own server and
+skills are skipped: the `beacon` server that runs the `beacon` binary, the `beacon-managed`
+Beacon Cloud MCP entry, and skills Beacon installed. A server or skill that only shares one of
+those names is checked like any other. A result matched only by a name, including a package the
+index could only match by name and a package from a private registry or index (the index knows
+only the public package that shares its name), is marked `name_only`: it may be a different artifact with the same name, so
+confirm the repository before relying on it. `dry_run` returns exactly what would be sent and
+sends nothing. Results map back to every runtime and config where each artifact was found.
 
 ## Network and privacy
 
 Every `beacon intel` command makes one HTTPS request to `https://intel.beacon.sh`. The request
 carries only what you named, plus Beacon's version in the `User-Agent`. No account token,
 device key or telemetry is sent, and redirects are refused. Hooks, plugins and background jobs
-never make this request.
+never make this request; the MCP tools above make it only when an agent calls one.
 
 | Variable | Effect |
 |----------|--------|

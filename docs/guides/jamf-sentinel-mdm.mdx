@@ -5,6 +5,10 @@ description: "Roll out Beacon to Apple Silicon Macs with Jamf Pro and send runti
 
 This guide takes you from no Beacon on your Macs to every Mac in a Jamf pilot sending its AI agent activity to one Microsoft Sentinel table. Follow the steps in order.
 
+<Note>
+  Beacon can now set up and manage the Sentinel forwarder itself: `sudo /opt/beacon/bin/beacon endpoint sentinel forwarder install --system` replaces the script in Policy 2 and works the same on Linux and Windows. See [Vector and the Logs Ingestion API](/log-forwarding/microsoft-sentinel#vector-and-the-logs-ingestion-api), and [Beacon with Workspace ONE and Microsoft Sentinel](/guides/workspace-one-sentinel-mdm) for a Windows rollout. On a Mac that already forwards with Policy 2, pass `--read-from end` so what Policy 2 sent is not sent again; the managed forwarder takes over the `com.beacon.endpoint.sentinel-forwarder` LaunchDaemon, and you can then delete Policy 2's files in `/Library/Application Support/Beacon/Forwarders` and `/var/lib/vector/beacon-sentinel`.
+</Note>
+
 A Homebrew install on one Mac is only for looking at events locally. It does not include Vector, and it writes a per-user log. The Macs in the pilot use the signed package, which writes `/var/log/beacon-agent/runtime.jsonl` and ships Vector at `/opt/beacon/bin/vector`.
 
 ## What you'll set up

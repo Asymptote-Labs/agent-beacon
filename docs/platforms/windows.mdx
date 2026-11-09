@@ -23,6 +23,20 @@ msiexec /i BeaconEndpointAgent-<version>-x64.msi /qn /l*v install.log
 
 The install needs administrator rights, because it writes under `%ProgramData%` and registers a service. Elevation is requested for you when you double-click the package. A silent install must already be running elevated, which is the normal case for Intune, SCCM, or a management agent.
 
+A first install sets up [restricted log access](/security/restricted-log-access#on-windows): only the SYSTEM collector writes the log, and only SYSTEM, Administrators and the `beacon-log` local group can read it. An upgrade keeps the mode the endpoint already has. Installing interactively adds the account signed in at the console to `beacon-log`, so the dashboard, `beacon traces` and `beacon share` work for it after signing in again; a silent install (`/qn`) adds nobody and turns the [local dashboard](/cli/dashboard#turning-the-dashboard-off) off, unless `BEACON_DASHBOARD=enabled` is set. See [Package installs](/security/restricted-log-access#package-installs).
+
+### Settings for fleet installs
+
+The MSI cannot take environment variables from Intune or SCCM, so its install step also reads the install settings as string values under `HKLM\SOFTWARE\Policies\Beacon\Endpoint`, named exactly like the variables. Set them before installing, with an Intune or Group Policy registry setting, or:
+
+```powershell title="Install settings as policy values (elevated)"
+New-Item -Path 'HKLM:\SOFTWARE\Policies\Beacon\Endpoint' -Force | Out-Null
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Beacon\Endpoint' -Name BEACON_LOG_ACCESS -Value restricted
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Beacon\Endpoint' -Name BEACON_LOG_READERS -Value ''
+```
+
+An empty `BEACON_LOG_READERS` value means nobody is added to `beacon-log` implicitly. A variable set in the install step's environment wins over the policy value. The values are read on every install and upgrade.
+
 The `/l*v` log records what Windows Installer did, but not what Beacon's own install and uninstall steps printed. Those go to a separate log for each run, in the temporary directory of the account that ran the package (`C:\Windows\Temp` when a management agent installs as SYSTEM):
 
 ```powershell title="Find the logs of Beacon's install and uninstall steps"
@@ -122,18 +136,24 @@ beacon scan                  # run threat detection rules over the log
 beacon token-usage           # token and cost rollups
 ```
 
+An unattended package install, such as one from a configuration manager or MDM, turns the dashboard off unless `BEACON_DASHBOARD=enabled` was set; see [Turning the dashboard off](/cli/dashboard#turning-the-dashboard-off).
+
 See the [event schema](/telemetry-schema/event-schema) for the full field reference.
 
 ## What the install does
 
 | Step | Result |
 |---|---|
-| Unpack | `beacon.exe`, `beacon-hooks.exe`, and `beacon-otelcol.exe` under `%ProgramFiles%\Beacon\bin` |
+| Unpack | `beacon.exe`, `beacon-hooks.exe`, `beacon-otelcol.exe`, and `vector.exe` under `%ProgramFiles%\Beacon\bin` |
 | System install | Config and collector config under `%ProgramData%\Beacon\Endpoint`, with `%ProgramData%\Beacon` owned by Administrators and locked down |
 | Service | `BeaconCollector`, registered with the SCM, automatic start, restart on failure |
 | Runtime log | `%ProgramData%\Beacon\Endpoint\logs\runtime.jsonl` |
 | Log permissions | `INTERACTIVE` may append to the runtime log files, and nothing more |
 | Agent runtime | Claude Code and Codex CLI settings for the interactive user, pointed at `127.0.0.1:4317` |
+
+`vector.exe` is [Vector](https://vector.dev) 0.56.0, the log forwarder the macOS and Linux packages also carry. The package only installs it: nothing runs it until you set up a forwarder.
+
+If you run AppLocker or Windows Defender Application Control, allow the four programs in `%ProgramFiles%\Beacon\bin`. None of them is code-signed yet (see below), so a publisher rule cannot match them; use a path or file hash rule.
 
 Two of those rows deserve explanation.
 

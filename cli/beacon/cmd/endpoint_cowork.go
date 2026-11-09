@@ -174,7 +174,7 @@ func startNgrokTunnel(ctx context.Context, port int, username, password string) 
 	if _, err := exec.LookPath("ngrok"); err != nil {
 		return nil, fmt.Errorf("ngrok was not found on PATH; install ngrok or use --endpoint with a public HTTPS collector")
 	}
-	cmd := exec.CommandContext(ctx, "ngrok", "http", strconv.Itoa(port), "--basic-auth", username+":"+password, "--log", "stdout", "--log-format", "logfmt")
+	cmd := exec.CommandContext(ctx, "ngrok", "http", strconv.Itoa(port), "--basic-auth", username+":"+password, "--host-header=rewrite", "--log", "stdout", "--log-format", "logfmt")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err

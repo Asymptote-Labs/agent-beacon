@@ -174,8 +174,12 @@ func fakeLoginctl(t *testing.T, sessions []fakeSession) {
 			seat = "-" // what loginctl really prints for an unseated session
 		}
 		fmt.Fprintf(&table, "%s 1000 %s %s tty1 %s no -\n", sess.id, sess.user, seat, sess.state)
-		fmt.Fprintf(&cases, "  %s) printf 'Name=%s\\nSeat=%s\\nState=%s\\n' ;;\n",
-			sess.id, sess.user, sess.seat, sess.state)
+		class := sess.class
+		if class == "" {
+			class = "user"
+		}
+		fmt.Fprintf(&cases, "  %s) printf 'Name=%s\\nSeat=%s\\nState=%s\\nClass=%s\\n' ;;\n",
+			sess.id, sess.user, sess.seat, sess.state, class)
 	}
 	dir := t.TempDir()
 	script := "#!/bin/sh\ncase \"$1\" in\n" +
@@ -189,7 +193,7 @@ func fakeLoginctl(t *testing.T, sessions []fakeSession) {
 }
 
 type fakeSession struct {
-	id, user, seat, state string
+	id, user, seat, state, class string
 }
 
 func shellSingleQuote(s string) string {
@@ -280,5 +284,146 @@ func TestLinuxActiveConsoleUserIgnoresClosingSessions(t *testing.T) {
 
 	if info, ok, _ := linuxActiveConsoleUser(); ok {
 		t.Errorf("resolved %+v from a closing session", info)
+	}
+}
+
+// A system install configures every person logged in, not only the one at the keyboard: one
+// collector and one log serve everyone on the machine, and the people a root install skipped
+// exported nowhere without anything saying so.
+func TestActiveConsoleUsersListsEveryLoggedInAccountOnce(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("linux-only resolution")
+	}
+	t.Setenv("SUDO_USER", "")
+	stubLookup(t)
+	fakeLoginctl(t, []fakeSession{
+		{id: "11", user: "remoteuser", seat: "", state: "active"},
+		{id: "9", user: "desktop", seat: "seat0", state: "online"},
+		{id: "12", user: "desktop", seat: "", state: "active"},
+		{id: "4", user: "leaving", seat: "seat0", state: "closing"},
+	})
+
+	users, err := defaultActiveConsoleUsers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, u := range users {
+		names = append(names, u.Username)
+	}
+	if got, want := strings.Join(names, ","), "desktop,remoteuser"; got != want {
+		t.Fatalf("users = %s, want %s: every live login once, the person at the machine first", got, want)
+	}
+	// The first entry is what activeConsoleUser answers, so callers that read one person's session
+	// stores and callers that configure everyone agree on who comes first.
+	first, ok, err := linuxActiveConsoleUser()
+	if err != nil || !ok || first.Username != users[0].Username {
+		t.Fatalf("linuxActiveConsoleUser() = %+v, %v, %v; want %s", first, ok, err, users[0].Username)
+	}
+}
+
+// sudo names the person who ran the install; they are configured first, and everyone else logged in
+// is still configured after them.
+func TestActiveConsoleUsersPutsTheSudoUserFirst(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("linux-only resolution")
+	}
+	t.Setenv("SUDO_USER", "installer")
+	stubLookup(t)
+	fakeLoginctl(t, []fakeSession{
+		{id: "9", user: "desktop", seat: "seat0", state: "active"},
+		{id: "10", user: "installer", seat: "", state: "active"},
+	})
+
+	users, err := defaultActiveConsoleUsers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, u := range users {
+		names = append(names, u.Username)
+	}
+	if got, want := strings.Join(names, ","), "installer,desktop"; got != want {
+		t.Fatalf("users = %s, want %s", got, want)
+	}
+}
+
+// root and accounts with nowhere to put a settings file are skipped, as activeConsoleUser skips
+// them, and a lookup that fails for one person does not hide the others.
+func TestActiveConsoleUsersSkipsTheUnresolvable(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("linux-only resolution")
+	}
+	t.Setenv("SUDO_USER", "")
+	restore := lookupConsoleUser
+	lookupConsoleUser = func(name string) (consoleUserInfo, bool, error) {
+		switch name {
+		case "root", "nohome":
+			return consoleUserInfo{}, false, nil
+		case "broken":
+			return consoleUserInfo{}, false, fmt.Errorf("directory service timed out")
+		}
+		return consoleUserInfo{Username: name, HomeDir: "/home/" + name}, true, nil
+	}
+	t.Cleanup(func() { lookupConsoleUser = restore })
+	fakeLoginctl(t, []fakeSession{
+		{id: "1", user: "root", seat: "seat0", state: "active"},
+		{id: "2", user: "broken", seat: "seat0", state: "online"},
+		{id: "3", user: "nohome", seat: "", state: "active"},
+		{id: "4", user: "alice", seat: "", state: "active"},
+	})
+
+	users, err := defaultActiveConsoleUsers()
+	if err != nil {
+		t.Fatalf("err = %v; one person's failed lookup must not fail the others", err)
+	}
+	if len(users) != 1 || users[0].Username != "alice" {
+		t.Fatalf("users = %+v, want only alice", users)
+	}
+
+	// With nobody resolvable, the lookup error is what explains it.
+	fakeLoginctl(t, []fakeSession{{id: "2", user: "broken", seat: "seat0", state: "online"}})
+	if users, err := defaultActiveConsoleUsers(); err == nil || len(users) != 0 {
+		t.Fatalf("users, err = %+v, %v; want the lookup error when nobody resolved", users, err)
+	}
+
+	// No logind and no sudo is a skip, not an error.
+	t.Setenv("PATH", t.TempDir())
+	if users, err := defaultActiveConsoleUsers(); err != nil || len(users) != 0 {
+		t.Fatalf("users, err = %+v, %v; want none and no error without logind", users, err)
+	}
+}
+
+// A display manager's greeter and a lingering account's service manager are live logind sessions
+// but nobody's login: on a GNOME desktop gdm (home /var/lib/gdm3) sits on seat0 beside the person.
+func TestActiveConsoleUsersSkipsGreeterAndManagerSessions(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("linux-only resolution")
+	}
+	t.Setenv("SUDO_USER", "")
+	stubLookup(t)
+	fakeLoginctl(t, []fakeSession{
+		{id: "c1", user: "gdm", seat: "seat0", state: "online", class: "greeter"},
+		{id: "c2", user: "lightdm", seat: "seat0", state: "active", class: "lock-screen"},
+		{id: "c3", user: "svc", seat: "", state: "active", class: "manager"},
+		{id: "c4", user: "builder", seat: "", state: "active", class: "background"},
+		{id: "5", user: "alice", seat: "seat0", state: "active"},
+		{id: "6", user: "early", seat: "", state: "active", class: "user-early"},
+	})
+	users, err := defaultActiveConsoleUsers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, u := range users {
+		names = append(names, u.Username)
+	}
+	if got, want := strings.Join(names, ","), "alice,early"; got != want {
+		t.Fatalf("users = %s, want %s: only people's logins", got, want)
+	}
+	// The single pick is filtered the same way: with only a greeter, nobody is at the keyboard.
+	fakeLoginctl(t, []fakeSession{{id: "c1", user: "gdm", seat: "seat0", state: "active", class: "greeter"}})
+	if info, ok, _ := linuxActiveConsoleUser(); ok {
+		t.Fatalf("linuxActiveConsoleUser() = %+v from a greeter session", info)
 	}
 }

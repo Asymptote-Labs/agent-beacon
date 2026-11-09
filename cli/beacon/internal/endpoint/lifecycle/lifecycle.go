@@ -20,6 +20,7 @@ import (
 	endpointinventory "github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/inventory"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/schema"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/selfupdate"
+	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sentinel"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/service"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/sysacl"
 	"github.com/asymptote-labs/agent-beacon/cli/beacon/internal/endpoint/writer"
@@ -61,10 +62,21 @@ var (
 	// scriptForwarderStatuses is the seam for reading those forwarders' state in GetStatus.
 	scriptForwarderStatuses = service.ScriptForwarderStatuses
 	// reconcileManagedForwarder is the seam for the Beacon Cloud forwarder reconcile, so tests can
-	// see whether Install reaches it without a connected endpoint or a service manager.
+	// see whether Install reaches it without a connected endpoint or a service manager. It always
+	// restarts a running forwarder, as the Sentinel one below does: an install or repair may have
+	// replaced the log with a copy (switching to restricted log access does), which Vector only
+	// notices when it restarts, and a package upgrade may have installed a new Vector.
 	reconcileManagedForwarder = func(userMode bool, logPath string) (asymptote.ReconcileResult, error) {
-		return asymptote.ReconcileForwarder(asymptote.ReconcileOptions{UserMode: userMode, LogPath: logPath})
+		return asymptote.ReconcileForwarder(asymptote.ReconcileOptions{UserMode: userMode, LogPath: logPath, Restart: true})
 	}
+	// reconcileSentinelForwarder and removeSentinelForwarder are the seams for the managed Sentinel
+	// forwarder. Install always restarts it: an install or repair may have replaced the log with a
+	// copy (switching log access does), which Vector only notices when it restarts.
+	reconcileSentinelForwarder = func(logPath string, start bool) (sentinel.ReconcileResult, error) {
+		return sentinel.Reconcile(sentinel.ReconcileOptions{LogPath: logPath, Restart: start, NoStart: !start})
+	}
+	removeSentinelForwarder = sentinel.Remove
+	sentinelForwarderStatus = sentinel.ReadStatus
 )
 
 // inventoryJobController is what lifecycle needs from service.InventoryManager.
@@ -328,9 +340,17 @@ type InstallOptions struct {
 	// LogAccess sets the system log's access mode, "shared" or "restricted". Empty keeps what the
 	// existing config records, so repair and a package upgrade never change it.
 	LogAccess string
+	// LogReaders are accounts to add to the readers group of a restricted system log after the
+	// install. Members are only ever added, never removed, and an account that cannot be added is
+	// reported rather than failing the install. Ignored, and reported, for a shared log.
+	LogReaders []string
 	// SessionSync turns the scheduled session-store sync on or off; nil keeps what the existing
 	// config records (off for a new install), so repair and package upgrades never change it.
 	SessionSync *bool
+	// Dashboard is the administrator's switch for the local dashboard, "enabled" or "disabled".
+	// Empty keeps what the existing config records (enabled for a new install). It applies to a
+	// system install only.
+	Dashboard string
 }
 
 type UninstallOptions struct {
@@ -370,8 +390,12 @@ type InstallResult struct {
 	LogAccess string `json:"log_access,omitempty"`
 	// LogReadersGroupCreated is true when this install created the readers group a restricted log
 	// is readable by, which then has no members yet.
-	LogReadersGroupCreated bool   `json:"log_readers_group_created,omitempty"`
-	InventoryJobDetail     string `json:"inventory_job_detail,omitempty"`
+	LogReadersGroupCreated bool `json:"log_readers_group_created,omitempty"`
+	// LogReadersAdded are the LogReaders accounts now in the readers group; LogReaderErrors say why
+	// any others are not, or that they were ignored because the log is shared.
+	LogReadersAdded    []string `json:"log_readers_added,omitempty"`
+	LogReaderErrors    []string `json:"log_reader_errors,omitempty"`
+	InventoryJobDetail string   `json:"inventory_job_detail,omitempty"`
 	// SessionSyncJobPath is the scheduled session sync unit when `session_sync.enabled` is on;
 	// SessionSyncJobDetail says why it is not installed on a host without a scheduler.
 	SessionSyncJobPath   string `json:"session_sync_job_path,omitempty"`
@@ -379,6 +403,9 @@ type InstallResult struct {
 	// ManagedForwarder reports the Beacon Cloud forwarder reconcile. It never fails the install:
 	// a config Vector rejects leaves the running forwarder on its old one and is reported here.
 	ManagedForwarder *asymptote.ReconcileResult `json:"managed_forwarder,omitempty"`
+	// SentinelForwarder reports the managed Sentinel forwarder reconcile on a system install. Like
+	// ManagedForwarder it never fails the install.
+	SentinelForwarder *sentinel.ReconcileResult `json:"sentinel_forwarder,omitempty"`
 }
 
 type Status struct {
@@ -402,8 +429,17 @@ type Status struct {
 	// ScriptForwarders are the S3, GCS and Falcon forwarders the package helpers install, one entry
 	// per forwarder that is set up on this machine.
 	ScriptForwarders []service.Status `json:"script_forwarders,omitempty"`
+	// SentinelForwarder is the managed Sentinel forwarder, on a system endpoint where one is set up
+	// and this account can read its settings.
+	SentinelForwarder *sentinel.Status `json:"sentinel_forwarder,omitempty"`
 	// LogAccess is the system log's access mode, "shared" or "restricted"; empty in user mode.
 	LogAccess string `json:"log_access,omitempty"`
+	// Dashboard is "enabled" or "disabled": whether the system config lets anyone on this machine
+	// run `beacon endpoint dashboard`. It is reported in both modes, because the system setting
+	// applies to every account. DashboardError says why the setting could not be read, in which
+	// case the dashboard refuses to start and Dashboard reads disabled.
+	Dashboard      string `json:"dashboard"`
+	DashboardError string `json:"dashboard_error,omitempty"`
 }
 
 type DestinationStatus struct {
@@ -660,6 +696,7 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		logReadersGroupCreated = created
 		restoreLogAccess = restore
 	}
+	logReadersAdded, logReaderErrors := addLogReaders(cfg, opts.LogReaders)
 
 	tx := newInstallRollback(manager)
 	tx.RestoreLogAccess = restoreLogAccess
@@ -687,6 +724,9 @@ func Install(opts InstallOptions) (InstallResult, error) {
 	manifest.Files = append(manifest.Files, configPath)
 	forwardSecretsPath := endpointconfig.OTLPForwardSecretsPath(cfg.UserMode)
 	tx.Track(forwardSecretsPath)
+	// Save writes or removes the dashboard marker beside the system config; a failed install puts it
+	// back as it was, so it keeps matching the config the rollback restores.
+	tx.Track(endpointconfig.DashboardMarkerPath(configPath))
 	if _, err := saveEndpointConfig(cfg); err != nil {
 		tx.Rollback(manifest)
 		return InstallResult{}, err
@@ -836,8 +876,20 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		}
 		managedForwarder = &reconciled
 	}
+	// Unlike the Beacon Cloud forwarder, this runs without StartService too: an MSI upgrade can be
+	// told not to start services, and its uninstall step removed the registration, which only this
+	// puts back. Without StartService it registers the service and leaves it stopped.
+	var sentinelForwarder *sentinel.ReconcileResult
+	if !cfg.UserMode {
+		reconciled, err := reconcileSentinelForwarder(cfg.LogPath, opts.StartService)
+		if err != nil && reconciled.Warning == "" {
+			reconciled.Warning = err.Error()
+		}
+		sentinelForwarder = &reconciled
+	}
 	return InstallResult{
 		ManagedForwarder:       managedForwarder,
+		SentinelForwarder:      sentinelForwarder,
 		ConfigPath:             configPath,
 		CollectorConfigPath:    cfg.Collector.ConfigPath,
 		PlistPath:              plistPath,
@@ -854,6 +906,8 @@ func Install(opts InstallOptions) (InstallResult, error) {
 		SessionSyncJobDetail:   sessionSyncResult.Skipped,
 		LogAccess:              logAccessOf(cfg),
 		LogReadersGroupCreated: logReadersGroupCreated,
+		LogReadersAdded:        logReadersAdded,
+		LogReaderErrors:        logReaderErrors,
 	}, nil
 }
 
@@ -874,7 +928,8 @@ func Uninstall(opts UninstallOptions) error {
 	// success. Install has always had this gate; uninstall never did, which is the asymmetry that
 	// let an unprivileged removal look like it worked.
 	if !cfg.UserMode && !HasSystemPrivileges() {
-		return fmt.Errorf("removing a system endpoint needs root: rerun with sudo, or pass --user to remove a user-mode install")
+		return fmt.Errorf("removing a system endpoint needs elevated privileges; %s, or pass --user to remove a user-mode install",
+			SystemPrivilegeHint())
 	}
 
 	var problems []string
@@ -901,6 +956,10 @@ func Uninstall(opts UninstallOptions) error {
 	// from their env files, so they go with the endpoint the same way the managed forwarder does.
 	if !cfg.UserMode && !opts.KeepForwarders {
 		fail("remove package forwarders", removeScriptForwarders(opts.KeepConfig))
+		// The service always goes, so a package upgrade can replace Vector's binary; its settings,
+		// credential and read positions stay with --keep-config, which is how the MSI upgrade runs
+		// the old package's uninstall, so the install that follows brings it back where it was.
+		fail("remove the Sentinel forwarder", removeSentinelForwarder(opts.KeepConfig))
 	}
 	// The managed-ingest forwarder and its credentials go with the endpoint; server-side the
 	// device stays registered until it is revoked from the dashboard. Repair keeps all of it.
@@ -942,6 +1001,10 @@ func Uninstall(opts UninstallOptions) error {
 	// would otherwise leave the backend's token behind.
 	if !opts.KeepManagedIngest {
 		fail("remove the OTLP forward headers", os.Remove(forwardSecretsPath))
+		// The dashboard marker records config.json's switch, so it goes whenever config.json does,
+		// however that was removed: left behind, a later install's buildConfig would read it as
+		// the switch of a config that no longer exists and come back disabled.
+		fail("remove the dashboard switch marker", os.Remove(endpointconfig.DashboardMarkerPath(endpointConfigPath)))
 	}
 	if !opts.KeepLogs {
 		for _, path := range runtimeLogFiles(cfg.LogPath) {
@@ -1142,6 +1205,7 @@ func buildStatus(requestedUserMode bool, effectiveCfg endpointconfig.Config, run
 			Message:  runtimeLog.Warning,
 		})
 	}
+	dashboardMode, dashboardErr := dashboardStatus()
 	return Status{
 		Version:            version.GetVersion(),
 		Edition:            version.ReportedEdition(),
@@ -1158,8 +1222,57 @@ func buildStatus(requestedUserMode bool, effectiveCfg endpointconfig.Config, run
 		InventoryHeartbeat: inventoryHeartbeatStatus(requestedUserMode, runtimeLog.RequestedLogPath),
 		SessionSync:        sessionSyncStatus(requestedUserMode, runtimeLog.RequestedLogPath),
 		ScriptForwarders:   scriptForwarderStatuses(),
+		SentinelForwarder:  sentinelForwarderStatusFor(requestedUserMode),
 		LogAccess:          logAccessOf(effectiveCfg),
+		Dashboard:          dashboardMode,
+		DashboardError:     dashboardErr,
 	}
+}
+
+// carriedDashboard is the dashboard switch a repair or upgrade keeps from the existing config. A
+// value --dashboard would refuse (one written into config.json by hand, such as "off") is kept as
+// disabled, which is how the dashboard already reads it, rather than carried raw into a preflight
+// that would then fail every repair and package upgrade over a flag nobody passed.
+func carriedDashboard(value string) string {
+	mode, err := endpointconfig.ParseDashboardMode(value)
+	if err != nil {
+		return endpointconfig.DashboardDisabled
+	}
+	return mode
+}
+
+// systemDashboardMarked reports whether the disabled-dashboard marker sits beside the system config.
+// A variable so tests need not write to the system config directory.
+var systemDashboardMarked = func() bool {
+	_, err := os.Stat(endpointconfig.DashboardMarkerPath(endpointconfig.SystemConfigPath()))
+	return err == nil
+}
+
+// systemDashboardDisabled is the seam status reads the administrator's dashboard switch through.
+var systemDashboardDisabled = endpointconfig.SystemDashboardDisabled
+
+// dashboardStatus is the dashboard switch as status reports it. A setting that cannot be read
+// reads disabled, because that is what `beacon endpoint dashboard` then does.
+func dashboardStatus() (string, string) {
+	disabled, err := systemDashboardDisabled()
+	switch {
+	case err != nil:
+		return endpointconfig.DashboardDisabled, err.Error()
+	case disabled:
+		return endpointconfig.DashboardDisabled, ""
+	}
+	return endpointconfig.DashboardEnabled, ""
+}
+
+func sentinelForwarderStatusFor(userMode bool) *sentinel.Status {
+	if userMode {
+		return nil
+	}
+	status := sentinelForwarderStatus()
+	if !status.Installed {
+		return nil
+	}
+	return &status
 }
 
 func ResolveRuntimeLog(userMode bool, logPath string) RuntimeLogSource {
@@ -1231,17 +1344,29 @@ func buildConfig(opts InstallOptions) endpointconfig.Config {
 		// The log access mode is an operator's security choice; a repair or upgrade that dropped
 		// it would silently make a restricted log world-writable again.
 		cfg.LogAccess = existing.LogAccess
-	} else if !opts.UserMode && logIsRestricted(cfg.LogPath) {
-		// No config to carry the mode over from -- an uninstall with --keep-logs removed it, or it
-		// does not load -- but the root-owned marker beside the kept log still records restricted.
-		// Defaulting to shared here would make every kept event world-readable.
-		cfg.LogAccess = asymptoteobserve.LogAccessRestricted
+		// The dashboard switch is an administrator's choice too; an upgrade must not turn it back on.
+		cfg.Dashboard = carriedDashboard(existing.Dashboard)
+	} else if !opts.UserMode {
+		if logIsRestricted(cfg.LogPath) {
+			// No config to carry the mode over from -- an uninstall with --keep-logs removed it, or it
+			// does not load -- but the root-owned marker beside the kept log still records restricted.
+			// Defaulting to shared here would make every kept event world-readable.
+			cfg.LogAccess = asymptoteobserve.LogAccessRestricted
+		}
+		if systemDashboardMarked() {
+			// Likewise a config that no longer loads still has the dashboard marker beside it, so a
+			// repair of a damaged file keeps the dashboard off instead of turning it back on.
+			cfg.Dashboard = endpointconfig.DashboardDisabled
+		}
 	}
 	if opts.LogAccess != "" {
 		cfg.LogAccess = opts.LogAccess
 	}
 	if opts.SessionSync != nil {
 		cfg.SessionSync = &endpointconfig.SessionSync{Enabled: *opts.SessionSync}
+	}
+	if opts.Dashboard != "" {
+		cfg.Dashboard = opts.Dashboard
 	}
 	if opts.Harnesses != nil {
 		cfg.Harnesses = opts.Harnesses
@@ -1407,6 +1532,9 @@ func preflight(cfg endpointconfig.Config, startService bool, kind service.Kind) 
 		return err
 	}
 	if err := validateLogAccess(cfg); err != nil {
+		return err
+	}
+	if err := validateDashboard(cfg); err != nil {
 		return err
 	}
 	// Replaces a blanket "macOS only" refusal. What actually matters is whether a service

@@ -62,7 +62,9 @@ The `claude` harness writes both Claude Code's OpenTelemetry settings and its us
 | `--no-otlp-forward` | Remove a configured OTLP forward |
 | `--session-sync` | Turn on the [scheduled session sync](#scheduled-session-sync): every 15 minutes, read new records from the agent runtimes' local session stores into the runtime log. Kept by repair and package upgrades |
 | `--no-session-sync` | Turn the scheduled session sync off and remove its job |
-| `--log-access <mode>` | System log access: `shared` (the default) or `restricted`. See [Restricted log access](#restricted-log-access). Omitted, an install keeps the mode the endpoint already has. System installs on macOS and Linux only |
+| `--log-access <mode>` | System log access: `shared` (the default) or `restricted`. See [Restricted log access](#restricted-log-access). Omitted, an install keeps the mode the endpoint already has. A first install from a package is restricted ([Package installs](/security/restricted-log-access#package-installs)). System installs only |
+| `--log-readers <accounts>` | Accounts to add to the `beacon-log` group of a restricted log, comma-separated (`DOMAIN\name` on Windows). Accounts are only added, never removed; one that cannot be added is reported without failing the install. Package installs set it from `BEACON_LOG_READERS`. System installs only |
+| `--dashboard <mode>` | `enabled` (the default) or `disabled`: whether any account on this machine may run the [local dashboard](/cli/dashboard). See [Local dashboard](#local-dashboard). Omitted, an install keeps the recorded setting. System installs only |
 | `--no-backfill` | Skip the [session backfill](#session-backfill). `BEACON_BACKFILL=0` does the same |
 | `--connect` | After a successful install, attempt to connect this endpoint to Beacon Cloud ingest. User mode uses the signed-in CLI account; system mode opens browser approval. A connection failure does not roll back or fail the completed local install; verify with `beacon endpoint status --json` and retry with [`beacon endpoint connect`](/cli/endpoint-connect) |
 
@@ -310,15 +312,50 @@ sudo dseditgroup -o edit -a <account> -t user beacon-log
 
 The log format and every event field stay the same, so a SIEM or forwarder that parses the log needs no change. Shippers that run as root, and the Beacon Cloud forwarder, keep working without one.
 
-The mode is recorded in `config.json` as `log_access`, and in a root-owned `.beacon-log-access` marker beside the log. `beacon endpoint repair`, package upgrades, the Jamf `repair-hooks.sh` policy, and a reinstall after `uninstall --keep-logs` keep it. To go back, run `sudo beacon endpoint repair --system --log-access shared`; the log is writable by every account again at once. For package installs, set `BEACON_LOG_ACCESS=restricted` in the environment of the package's install script.
+The mode is recorded in `config.json` as `log_access`, and in a root-owned `.beacon-log-access` marker beside the log. `beacon endpoint repair`, package upgrades, the Jamf `repair-hooks.sh` policy, and a reinstall after `uninstall --keep-logs` keep it. To go back, run `sudo beacon endpoint repair --system --log-access shared`; the log is writable by every account again at once. A first install from a package (the `.deb` or `.rpm`, the macOS `.pkg`, the Windows MSI) is restricted without any setting, and adds to `beacon-log` only the person who ran it interactively, or the accounts in `BEACON_LOG_READERS`; `BEACON_LOG_ACCESS=shared` opts out. Fleet tooling that cannot set the install script's environment sets these in `/etc/default/beacon` on Linux, managed preferences on macOS, or registry policy on Windows; see [Package installs](/security/restricted-log-access#package-installs).
 
 What this does and does not change:
 
 - Local accounts can no longer alter or delete events already in the log, or read other users' sessions.
 - Every event that arrives over the socket records the account that sent it, as the operating system reports it. A user still controls their own agent, so they can still send events of their own choosing, including ones that name another session's id, but always under their own account.
-- The collector's OTLP ports on `127.0.0.1` still accept telemetry from any local process, as they do in the shared mode. Agents that export over OTLP, such as Claude Code and Codex, use them. Events that arrive that way are not attributed by the operating system.
+- The collector's OTLP ports on `127.0.0.1` still accept telemetry from any local process, as they do in the shared mode. Agents that export over OTLP, such as Claude Code and Codex, and the browser extension use them. Events that arrive that way are recorded under the account that owns the sending connection, as the operating system reports it, in either mode and on Linux, macOS and Windows (with no `user` when the sender disconnected before the collector could look). That names the sender; it does not stop an account sending whatever it likes under its own name.
 
 While the endpoint is restricted, commands that read the system log as the person running them (`beacon endpoint dashboard`, `beacon scan`, `beacon traces`, and the session lookups in `beacon share`, `beacon handoff` and `beacon git` commit linking) see it only when run as root or by a `beacon-log` member. [`beacon endpoint doctor`](/cli/endpoint-doctor#runtime_log_access) connects to the socket and reports a collector that is not answering on it, including one that was killed and left its socket behind, and any events waiting in the caller's spool. On Windows the mode works the same way with Windows mechanisms: hooks send to the named pipe `\\.\pipe\beacon-agent-ingest`, the log directory's ACL gives SYSTEM and Administrators full control, the `beacon-log` local group read and nobody else anything, events record the sender's SID and account name, and the commands run from an elevated shell (see [On Windows](/security/restricted-log-access#on-windows)). For how the mode fits with log shippers such as Microsoft Sentinel, and what it does and does not protect, see [Restricted log access](/security/restricted-log-access).
+
+## Local dashboard
+
+[`beacon endpoint dashboard`](/cli/dashboard) runs only while someone runs it, binds to loopback,
+and serves only the browser that opened the secret URL it printed
+([access control](/cli/dashboard#access-control)). An administrator who does not want it run at
+all can turn it off for every account, root included:
+
+```bash title="Turn the local dashboard off on this machine"
+sudo beacon endpoint install --system --dashboard disabled
+```
+
+The setting is recorded in the system `config.json` as `"dashboard": "disabled"` and kept by
+`beacon endpoint repair`, package upgrades and reinstalls until `--dashboard enabled` turns it back
+on. While it is off, `beacon endpoint dashboard` and `beacon lenses preview` refuse to start for
+everyone, including a user-mode run on the same machine. The check needs no privileges. Once the
+system config holds a Splunk or Falcon HEC token it is readable only by root (SYSTEM and
+Administrators on Windows), so install and repair also keep a `dashboard-disabled` file beside it
+while the dashboard is off, which every account can read; an account that cannot read
+`config.json` goes by that file. Any value other than `enabled` (or none) reads as disabled, and a
+system config that does not parse refuses too, so a damaged or mistyped setting never turns the
+dashboard back on. If you edit `config.json` by hand, run `beacon endpoint repair --system` so the
+file beside it follows.
+`beacon endpoint status` prints `Dashboard: enabled` or `Dashboard: disabled by the administrator`
+(`dashboard` in `--json`). `--dashboard` is refused in user mode, whose config would switch nothing off.
+
+For package installs, set `BEACON_DASHBOARD=enabled` or `BEACON_DASHBOARD=disabled` in the
+environment of the package's install script (`install-endpoint.sh` on macOS and Linux,
+`install-endpoint.ps1` on Windows). Unset, an unattended first package install (no system config or
+log on the machine, and no person installing it, by the same test that decides who is added to
+`beacon-log`) turns the dashboard off; a person's own install keeps it, and an upgrade or a reinstall
+over a kept config or log keeps the endpoint's setting. Fleet tooling can set it
+where it writes the other install settings (`/etc/default/beacon` or `/etc/sysconfig/beacon`, the
+`com.beacon.endpoint` managed preferences, or the `HKLM\SOFTWARE\Policies\Beacon\Endpoint` policy key);
+see [Package installs](/security/restricted-log-access#package-installs).
 
 ## Running user and system mode together
 

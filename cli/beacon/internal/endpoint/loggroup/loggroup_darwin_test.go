@@ -77,3 +77,14 @@ func TestDarwinLookupOnThisSystem(t *testing.T) {
 		t.Fatalf("Lookup(missing) = %v, %v", found, err)
 	}
 }
+
+func TestAddMemberEditsTheLocalGroup(t *testing.T) {
+	calls := fakeDirectory(t, map[string]int{Name: 401})
+	if err := AddMember(Name, "alice"); err != nil {
+		t.Fatal(err)
+	}
+	want := dseditgroup + " -o edit -a alice -t user " + Name
+	if len(*calls) != 1 || (*calls)[0] != want {
+		t.Fatalf("calls = %q, want [%q]", *calls, want)
+	}
+}

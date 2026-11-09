@@ -5,3 +5,7 @@ package loggroup
 func lookup(string) (int, bool, error) { return 0, false, ErrUnsupported }
 
 func create(string) error { return ErrUnsupported }
+
+const accountWindowsNames = false
+
+func addMember(string, string) error { return ErrUnsupported }

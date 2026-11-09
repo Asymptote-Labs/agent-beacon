@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/asymptote-labs/agent-beacon/collector-builder/exporter/beaconjsonexporter/internal/accountname"
 	"net"
 	"os"
 	"path/filepath"
@@ -120,7 +121,7 @@ func TestEventsSentToTheSocketLandInTheLogUnderTheSendersAccount(t *testing.T) {
 		t.Fatalf("log has %d lines, want 2", len(lines))
 	}
 	uid := fmt.Sprint(os.Geteuid())
-	want := resolveName(strconv.Itoa(os.Geteuid()))
+	want := accountname.Resolve(strconv.Itoa(os.Geteuid()))
 	for i, line := range lines {
 		user := line["user"].(map[string]interface{})
 		if user["uid"] != uid {

@@ -1441,3 +1441,41 @@ func TestScanFollowsPiAgentDirForTheUserExtension(t *testing.T) {
 		t.Fatalf("pi user candidates = %v, want [%s]", got, want)
 	}
 }
+
+// Claude Code starts a local-scope server (~/.claude.json projects.<path>.mcpServers) in its
+// project, so the scan keeps that directory for in-memory readers, and keeps it out of the record.
+func TestClaudeProjectServersCarryTheirProjectInMemoryOnly(t *testing.T) {
+	home := t.TempDir()
+	a, b, c := filepath.Join(home, "work", "proj-alpha"), filepath.Join(home, "work", "proj-beta"), filepath.Join(home, "work", "proj-gamma")
+	config, err := json.Marshal(map[string]interface{}{
+		"mcpServers": map[string]interface{}{"global": map[string]interface{}{"command": "npx", "args": []string{"-y", "g"}}},
+		"projects": map[string]interface{}{
+			a:          map[string]interface{}{"mcpServers": map[string]interface{}{"tool": map[string]interface{}{"command": "npx", "args": []string{"-y", "@acme/tool"}}}},
+			b:          map[string]interface{}{"mcpServers": map[string]interface{}{"tool": map[string]interface{}{"command": "npx", "args": []string{"-y", "@acme/tool"}}}},
+			c:          map[string]interface{}{"mcpServers": map[string]interface{}{"other": map[string]interface{}{"command": "uvx", "args": []string{"x"}}}},
+			"relative": map[string]interface{}{"mcpServers": map[string]interface{}{"rel": map[string]interface{}{"command": "uvx", "args": []string{"y"}}}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(home, ".claude.json"), string(config))
+	result := Scan(Options{HomeDir: home, SkipProjectScope: true, Runtimes: []string{"claude_code"}, Now: fixedNow, IncludeContents: true})
+	got := map[string][]string{}
+	for _, s := range result.MCPServers {
+		got[s.ServerName] = s.ProjectDirs
+		encoded, err := json.Marshal(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(encoded), "proj-") || strings.Contains(strings.ToLower(string(encoded)), "projectdirs") {
+			t.Errorf("project directory serialized: %s", encoded)
+		}
+	}
+	want := map[string][]string{"global": nil, "tool": {a, b}, "other": {c}, "rel": nil}
+	for name, dirs := range want {
+		if !slices.Equal(got[name], dirs) {
+			t.Errorf("%s ProjectDirs = %v, want %v", name, got[name], dirs)
+		}
+	}
+}
