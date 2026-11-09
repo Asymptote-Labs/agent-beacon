@@ -213,6 +213,11 @@ type TraceErrorV1 struct {
 	Type string `json:"type,omitempty"`
 }
 
+// ToolFailedErrorType is the error.type a trace event gets when its source is a tool.failed that
+// carried no error of its own, as hook adapters write them. It is the type the session mappers
+// already give a failed tool result.
+const ToolFailedErrorType = "tool_execution_failed"
+
 // TraceUsageV1 is gen_ai.usage flattened. CacheCreation1hInputTokens is the subset of
 // CacheCreationInputTokens written with a one-hour TTL, where the source reported it; like
 // ReasoningOutputTokens it is a breakdown and never part of a total.
