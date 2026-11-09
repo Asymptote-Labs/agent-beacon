@@ -179,6 +179,11 @@ func TestRedactStringRedactsCommonCredentialFormats(t *testing.T) {
 		{"aws credentials csv", "Access key ID,Secret access key\nAKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
 		{"aws key pair", "use AKIAIOSFODNN7EXAMPLE wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY for the bucket", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
 		{"aws key pair ending in a slash", `["ASIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKE/"]`, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKE/"},
+		{"aws key pair as a labeled value", "aws_credentials=AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
+		{"aws key pair as a quoted labeled value", `token="AKIAIOSFODNN7EXAMPLE","wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"`, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
+		{"aws key pair as a flag's value", "tool --access-key AKIAIOSFODNN7EXAMPLE wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
+		{"aws key pair after a labeled user name", "x-access-token:abc@AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
+		{"aws key pair glued to a host", "https://x-access-token:a,b@hostAKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
 		{"rsa key", "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAsecretbody\n-----END RSA PRIVATE KEY-----", "MIIEowIBAAKCAQEAsecretbody"},
 		{"openssh key cut short", "cat ~/.ssh/id_ed25519\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA", "b3BlbnNzaC1rZXktdjEAAAAA"},
 	}
@@ -419,6 +424,9 @@ var redactIdempotenceInputs = []string{
 	// A scheme replaced right before `://` by a copy of an assigned value, and by a token's tail.
 	"token=00000000 00000000://:0@",
 	"ghp_0123456789abcdefghijklmnopqrstuvwxyz://u:hunter2@h",
+	"token=AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY}AKIAIOSFODNN7EXAMPLE",
+	"https://x-access-token:a,b@hostAKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+	"token=abcdefgh12345678AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY-----BEGIN PRIVATE KEY-----",
 	// A URL whose user name is a secret-named label: the label rules and the URL rule stop at
 	// different bytes, and each used to take one more piece per pass.
 	"https://x-access-token:abc@github.combcn_api_`@host",

@@ -13,6 +13,8 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 Changes on `main` since v1.3.58. They ship in the next release.
 
+- **An AWS secret key after a labeled key id is redacted** · Where a label's or a flag's value ended in an AWS access key id and its secret access key followed after a comma, a blank or a quote (`token=AKIA…,<secret>`, `--access-key AKIA… <secret>`, `x-access-token:abc@AKIA…,<secret>`), the value rule replaced the key id and the rule for a key id and its secret then found no key id, so the secret was kept. The secret is now replaced with the value, keeping the separators: `token=[REDACTED],[REDACTED]`. A URL password that runs on over a key id written right after a host name (`…@hostAKIA…,<secret>`) takes the secret too.
+
 - **A URL password after `Bearer` is redacted** · The Bearer rule takes the token after `Bearer` up to a `:`, so for `Bearer postgres://user:pw@host` it replaced the scheme, and the URL rule then found no scheme before `://` and kept the password. A password after a replaced scheme is now redacted too: `Bearer [REDACTED]://user:[REDACTED]@host`.
 
 - **Every curl password and cookie on a command line is redacted** · The curl rules redacted the first `-u`/`--user`/`--proxy-user` password on a line and left the rest (`curl -u a:x -u b:y` kept `y`), and applied the cookie rule at most 16 more times, so a line with more `-b`/`--cookie` strings kept the later ones and redacting the output again changed it. Each rule now redacts every flag on its line in one pass.

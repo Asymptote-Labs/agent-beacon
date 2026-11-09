@@ -342,6 +342,11 @@ func TestRedactionWorkIsLinear(t *testing.T) {
 	// URLs whose scheme a Bearer token took, and replaced schemes with no password after them.
 	texts["URLs after Bearer tokens"] = func(n int) string { return repeatTo("Bearer a://u:p@h ", n) }
 	texts["replaced schemes without passwords"] = func(n int) string { return "[REDACTED]://u:" + repeatTo("[REDACTED]://u:", n) }
+	// Labeled values ending in AWS key ids, with and without their secrets after them.
+	texts["labeled key ids and secrets"] = func(n int) string {
+		return repeatTo("token=AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY ", n)
+	}
+	texts["labeled key ids without secrets"] = func(n int) string { return repeatTo("token=xAKIAIOSFODNN7EXAMPLE::|,", n) }
 	for name, text := range texts {
 		work := func(n int) int {
 			total := 0
