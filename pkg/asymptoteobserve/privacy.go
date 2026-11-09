@@ -96,17 +96,38 @@ func quotedRules(kind quotedKind, keep func(string) bool) []redactionRule {
 	return rules
 }
 
-// redactUnquoted is an unquoted value, up to a quote, a comma or whitespace. Brackets, braces and
-// backslashes are part of it: a generated password is full of them. It never starts with a quote,
-// escaped or not, so it leaves a value the quoted rule already replaced alone.
-const redactUnquoted = `(?:[^"'` + "`" + `,\s\\]|\\[^"'` + "`" + `])[^"'` + "`" + `,\s]*`
+// redactValueStops are the bytes an unquoted labeled value stops at: a quote, a comma and
+// whitespace (regexp's \s). redactUnquoted is built from them, and urlRunsOn reads a label's value
+// with them, so the two read the same value.
+const redactValueStops = redactQuotes + "," + regexpSpace
+
+// redactUnquoted is an unquoted value, up to one of redactValueStops. Brackets, braces,
+// backslashes, `#`, `&` and `?` are part of it: a generated password is full of them. It never
+// starts with a quote, escaped or not, so it leaves a value the quoted rule already replaced
+// alone.
+const redactUnquoted = `(?:[^` + redactValueStops + `\\]|\\[^` + redactQuotes + `])[^` + redactValueStops + `]*`
+
+// redactParamStops are the bytes a URL query parameter's value stops at: redactValueStops, and
+// the `&` that opens the next parameter and the `#` that opens the fragment.
+const redactParamStops = redactValueStops + "&#"
+
+// redactParamValue is redactUnquoted for the value of a URL query parameter, a label opened by
+// `?` or `&`: `?api_key=x&user=alice` keeps `&user=alice`. Only there do `&` and `#` end a value;
+// after any other label they are a password's own characters (`DB_PASSWORD=#Xy9&z`).
+const redactParamValue = `(?:[^` + redactParamStops + `\\]|\\[^` + redactQuotes + `])[^` + redactParamStops + `]*`
 
 // redactBare is a bare value after a quoted label: a JSON number or literal, which ends at the
 // structure around it.
 const redactBare = `[^"'` + "`" + `\\\s,{}\[\]][^"'` + "`" + `\\\s,{}\[\]]*`
 
-// redactFlagName is a command-line flag named for a secret: `--password`, `--token`, `-api-key`.
-const redactFlagName = `--?[a-z0-9-]*(?:password|passwd|passphrase|token|secret|api-?key|access-?key)`
+// redactFlagName is a command-line flag named for a secret: `--password`, `--token`, `-api-key`,
+// `--client_secret`, `--private-key`. The prefix class carries `_` as well as `-`, matching
+// redactLabel's `[A-Za-z0-9_.-]*?`: snake_case flags (`--client_secret`, `--api_key`,
+// `--access_key`) are the default naming style for argparse/click-style CLIs and otherwise passed
+// through unredacted. `secret[_-]?key` and `private[_-]?key` join the alternation for the same
+// reason redactLabel already has them (`--private-key`, `--secret-key`): openssl, ssh-keygen
+// wrappers and KMS/cloud CLIs commonly take a key material flag by that name.
+const redactFlagName = `--?[a-z0-9_-]*(?:password|passwd|passphrase|token|secret|api[_-]?key|access[_-]?key|secret[_-]?key|private[_-]?key)`
 
 // redactFlag is a redactFlagName and its separator: `--password `, `--token=`, `-api-key `.
 const redactFlag = `(?:^|\s)` + redactFlagName + `(?:=|\s+)`
@@ -280,22 +301,22 @@ var redactListedFlagNeedles = func() *redactNeedles {
 }()
 
 // startsFlag reports whether the text before a flag word ends in what redactFlag puts ahead of it:
-// `(?:^|\s)--?[a-z0-9-]*`.
+// `(?:^|\s)--?[a-z0-9_-]*`.
 func startsFlag(before string) bool {
 	start, ok := flagStart(before)
 	return ok && (start == 0 || strings.ContainsRune(regexpSpace, rune(before[start-1])))
 }
 
 // flagStart finds the dash that opens the flag the text before a flag word ends in: the start of
-// the run of letters, digits and dashes at its end. A pattern's `--?[a-z0-9-]*` can only begin
-// where that maximal run does, because what it requires before the dash (whitespace, a quote) is
-// not part of the run. The patterns are case-insensitive, so the run takes capitals too: the
-// needle scan reads the text as it is, not lower-cased.
+// the run of letters, digits, underscores and dashes at its end. A pattern's `--?[a-z0-9_-]*` can
+// only begin where that maximal run does, because what it requires before the dash (whitespace, a
+// quote) is not part of the run. The patterns are case-insensitive, so the run takes capitals too:
+// the needle scan reads the text as it is, not lower-cased.
 func flagStart(before string) (int, bool) {
 	start := len(before)
 	for start > 0 {
 		c := before[start-1]
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-') {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
 			break
 		}
 		start--
@@ -406,14 +427,22 @@ var redactionRules = concatRules([]redactionRule{
 		expr:        `(?i)(\b` + redactLabel + `(?P<q>` + redactOpenQuote + `)\s*[:=]\s*)(?P<value>` + redactBare + `)`,
 		replacement: "${1}${q}" + redactedValue + "${q}", keep: isLiteralOrAuthScheme, needles: redactQuotedLabelNeedles, start: startLabel,
 	},
+	// An unquoted value. A label opened by `?` or `&` is a URL query parameter, whose value ends
+	// at the `&` of the next one or the `#` of the fragment: `?api_key=x&user=alice` keeps
+	// `&user=alice`. The two are alternatives of one rule so that the parameter, which starts a
+	// byte earlier, is the match: a rule for the label alone, run after it, would read the
+	// redacted parameter as a value running on over `&user=alice`.
 	{
-		expr:        `(?i)(\b` + redactLabel + `\s*[:=]\s*)(?P<value>` + redactUnquoted + `)`,
-		replacement: "${1}" + redactedValue, keep: isAuthScheme, needles: redactLabelNeedles, start: startLabel,
+		expr: `(?i)(?:([?&]` + redactLabel + `=)(?P<value>` + redactParamValue + `)|` +
+			`(\b` + redactLabel + `\s*[:=]\s*)(?P<value>` + redactUnquoted + `))`,
+		replacement: "${1}${3}" + redactedValue, keep: isAuthScheme, needles: redactLabelNeedles, start: startParam,
 	},
 	// A command-line flag: `--password x`, `--token=x`, `--api-key x`, and quoted, the way agents
-	// usually write arguments: `--password "x y"`, `--token='x'`.
+	// usually write arguments: `--password "x y"`, `--token='x'`. An unquoted value does not start
+	// with `=` or `:`, which is an assignment's separator after a word that only looks like a flag:
+	// a diff's removed line `-SECRET_KEY = 'x'`.
 }, quotedRules(quotedFlag, nil), []redactionRule{
-	{expr: `(?i)(` + redactFlag + `)([^\s"'-][^\s"']*)`, replacement: "${1}" + redactedValue, needles: redactFlagNeedles, start: startFlag},
+	{expr: `(?i)(` + redactFlag + `)([^\s"'=:-][^\s"']*)`, replacement: "${1}" + redactedValue, needles: redactFlagNeedles, start: startFlag},
 	// A flag and its value as two quoted items of an argument list, the way an MCP server's args
 	// are written in JSON, TOML and YAML: `"args": ["--api-key", "x"]`.
 	{
@@ -452,6 +481,7 @@ var redactionRules = concatRules([]redactionRule{
 	shapeRule(`\b(glpat-)[A-Za-z0-9_-]{20,}`, "${1}"+redactedValue, "glpat-"),                                   // GitLab
 	shapeRule(`\b(xox[abeposr]-|xapp-)[A-Za-z0-9-]{10,}`, "${1}"+redactedValue, "xox", "xapp-"),                 // Slack, with xoxe- refresh and xapp- app-level tokens
 	shapeRule(`\b([rs]k_(?:live|test)_)[A-Za-z0-9]{16,}`, "${1}"+redactedValue, "k_live_", "k_test_").before(1), // Stripe
+	shapeRule(`\b(whsec_)[A-Za-z0-9]{32,}`, "${1}"+redactedValue, "whsec_"),                                     // Stripe webhook signing secret: Stripe's alphanumeric shape only, not other services' base64 whsec_ (Svix)
 	shapeRule(`\b(AIza)[0-9A-Za-z_-]{35}`, "${1}"+redactedValue, "AIza"),                                        // Google API key
 	shapeRule(`\b(ya29\.)(?:c\.)?[0-9A-Za-z_-]{20,}`, "${1}"+redactedValue, "ya29."),                            // Google OAuth access token
 	shapeRule(`\b(npm_)[A-Za-z0-9]{36}`, "${1}"+redactedValue, "npm_"),                                          // npm
@@ -533,11 +563,7 @@ func (rule redactionRule) applyOnce(text *redactGate, slot *redactSlot) string {
 			continue // inside a match that ran on (redactionRule.runsOn)
 		}
 		if keep := use.rule.keep; keep != nil {
-			index := use.pattern.SubexpIndex("value")
-			if index < 0 {
-				index = 2
-			}
-			if group := 2 * index; match[group] >= 0 && keep(value[match[group]:match[group+1]]) {
+			if group := 2 * valueGroup(use.pattern, match); match[group] >= 0 && keep(value[match[group]:match[group+1]]) {
 				text.hidden = text.hidden || keptLabel(value, match[group+1])
 				continue
 			}
@@ -571,13 +597,29 @@ func (rule *redactionRule) replacing(t string, match []int) (string, int) {
 	return rule.replacement, match[1]
 }
 
+// valueGroup returns the index of the group named value that took part in match, which a rule's
+// keep reads: a pattern with alternatives names one in each. A pattern that names none has its
+// value in the second group.
+func valueGroup(re *regexp.Regexp, match []int) int {
+	index := 2
+	for i, name := range re.SubexpNames() {
+		if name == "value" {
+			if index = i; match[2*i] >= 0 {
+				return i
+			}
+		}
+	}
+	return index
+}
+
 // urlRunsOn returns where the password of a URL match runs on to when the URL's user name is a
 // secret-named label (`https://x-access-token:…@`), which the label rules redact too, or -1. The
-// two stop at different bytes, a label's value at a quote, a comma or whitespace and a URL's
-// password at an `@`, a slash, a quote or whitespace, and once one has replaced its part, the
-// other's runs on over the marker; so each pass of the rules took one more piece of what follows,
-// starting with the `@`. The value runs on as far as the two take it in turn, which is where
-// every later pass would leave it.
+// two stop at different bytes, a label's value at redactValueStops and a URL's password at an `@`,
+// a slash, a quote or whitespace, and once one has replaced its part, the other's runs on over the
+// marker; so each pass of the rules took one more piece of what follows, starting with the `@`.
+// The value runs on as far as the two take it in turn. That is where every later pass would leave
+// it because the label's value is read here with the stops redactUnquoted is built from: a label
+// in a user name is never a query parameter, whose separator is `=`, not the user name's `:`.
 //
 // The shape rules run after this one, and one of them changes where either run stops: an AWS key
 // id followed by its secret (awsPairAt), a secret recognized only after its key id, which holds
@@ -594,7 +636,7 @@ func urlRunsOn(t string, m []int) int {
 		// The label's value: the marker the URL rule wrote and what follows it. A key id it ends
 		// in, before any separators it takes (`:`, `|`), takes its secret with it.
 		for run := end; ; {
-			for end < len(t) && !strings.ContainsRune("\"'`,", rune(t[end])) && !isRegexpSpace(t[end]) {
+			for end < len(t) && strings.IndexByte(redactValueStops, t[end]) < 0 {
 				end++
 			}
 			k := end
@@ -681,13 +723,14 @@ func labelEndsAt(s string) bool {
 // redactLabelEnd matches text that ends in one of redactLabel's markers.
 var redactLabelEnd = lazyPattern(`(?i)(?:` + strings.TrimPrefix(redactLabel, `[A-Za-z0-9_.-]*?`) + `)$`)
 
-// redactAssignedRule captures the value of a labeled assignment, quoted with ", ' or a backtick
-// (${1} to ${3}) or not (${4}), so a bare copy of it elsewhere in the same text is
-// removed too.
+// redactAssignedRule captures the value of a labeled assignment, so a bare copy of it elsewhere in
+// the same text is removed too: a URL query parameter's (${1}), as the label rule reads it, then
+// one quoted with ", ' or a backtick, or an unquoted one (the last group).
 var redactAssignedRule = sync.OnceValue(func() redactionRule {
 	return redactionRule{
-		expr:    `(?i)\b` + redactLabel + redactSeparator + `(?:` + quotedAlternatives() + `|(` + redactUnquoted + `))`,
-		needles: redactLabelNeedles, start: startLabel,
+		expr: `(?i)(?:[?&]` + redactLabel + `=(` + redactParamValue + `)|` +
+			`\b` + redactLabel + redactSeparator + `(?:` + quotedAlternatives() + `|(` + redactUnquoted + `)))`,
+		needles: redactLabelNeedles, start: startParam,
 	}
 })
 

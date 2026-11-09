@@ -212,6 +212,7 @@ var adjacentSecrets = []string{
 	"lsv2_pt_" + strings.Repeat("0a", 16) + "_" + strings.Repeat("0a", 5), "pcsk_Ab3Cd_" + strings.Repeat("Ab3", 21),
 	"dapi" + strings.Repeat("0a", 16) + "-2", "pypi-AgEIcHlwaS5vcmc" + strings.Repeat("Ab3_", 13),
 	"dp.pt." + strings.Repeat("Ab3", 14) + "C", "SG." + strings.Repeat("Ab", 11) + "." + strings.Repeat("Ab3", 14) + "C",
+	"whsec_" + strings.Repeat("Ab3", 11),
 }
 
 // Idempotence and the gate's equivalence over many random texts where secrets meet, beyond what

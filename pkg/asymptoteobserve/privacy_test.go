@@ -131,6 +131,11 @@ func TestRedactStringRedactsCommonCredentialFormats(t *testing.T) {
 		{"bare url password without a user", "redis-cli -u redis://:pa55w0rd@localhost:6379 ping", "pa55w0rd"},
 		{"password flag", "mysql --user root --password hunter2hunter2", "hunter2hunter2"},
 		{"token flag", "tool login --token=opaque-flag-value", "opaque-flag-value"},
+		{"snake_case client secret flag", "gcloud auth application-default login --client_secret 1a2b3c4d5e6f7g8h9i0j", "1a2b3c4d5e6f7g8h9i0j"},
+		{"snake_case api key flag", "tool --api_key abcdef0123456789abcdef0123456789", "abcdef0123456789abcdef0123456789"},
+		{"snake_case access key flag", "gcloud auth --access_key plainOpaqueValueNoShape1234567890", "plainOpaqueValueNoShape1234567890"},
+		{"private key flag", "openssl rsautl --private-key pemEncodedPrivateKeyStringValue123", "pemEncodedPrivateKeyStringValue123"},
+		{"secret key flag", "vault-tool --secret-key abcdefghijklmnopqrstuvwxyz0123456789", "abcdefghijklmnopqrstuvwxyz0123456789"},
 		{"api key flag as a list item", `"args": ["-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-abcdef0123456789"]`, "ctx7sk-abcdef0123456789"},
 		{"token flag as a toml list item", `args = ['--token', 'opaque-flag-value']`, "opaque-flag-value"},
 		{"curl basic auth", "curl -u admin:hunter2hunter2 https://api.example.com/v1", "hunter2hunter2"},
@@ -154,6 +159,8 @@ func TestRedactStringRedactsCommonCredentialFormats(t *testing.T) {
 		// Split so secret scanners do not take the fake fixture for a live Slack token.
 		{"slack refresh token", "rotated: xoxe" + "-1-EXAMPLEnotarealrefreshtoken", "EXAMPLEnotarealrefreshtoken"},
 		{"stripe", "sk_live_AbCdEfGhIjKlMnOpQrSt", "AbCdEfGhIjKlMnOpQrSt"},
+		// Split so secret scanners do not take the fake fixture for a live Stripe webhook secret.
+		{"stripe webhook secret", "got webhook secret whsec_" + "8f9a7cb1d9e4f2a0b3c6d7e8f9a0b1c2d3e4f5a6", "8f9a7cb1d9e4f2a0b3c6d7e8f9a0b1c2d3e4f5a6"},
 		{"google", "AIzaSyA-abcdefghijklmnopqrstuvwxyz012345", "abcdefghijklmnopqrstuvwxyz012345"},
 		{"google oauth access token", "$ gcloud auth print-access-token\nya29.a0AfB_byC1x2Y3z4-W5v6U7t8S9r0QpOnMlKjIhGfEdCbA\n", "a0AfB_byC1x2Y3z4-W5v6U7t8S9r0QpOnMlKjIhGfEdCbA"},
 		{"google metadata server token", `{"access_token":"x"} ya29.c.Elt0BxAbCdEfGhIjKlMnOpQrStUvWxYz0123456789`, "Elt0BxAbCdEfGhIjKlMnOpQrStUvWxYz0123456789"},
@@ -266,6 +273,8 @@ func TestRedactStringKeepsLabelsAndOrdinaryText(t *testing.T) {
 	kept := []string{
 		"input_tokens: 812, output_tokens=95, max_tokens=4096",
 		"run go test ./... --max-tokens 10",
+		"run go test ./... --max_tokens 10",
+		"vault operator init --num_secret_shares 3",
 		"the author: Ada",
 		"see https://github.com/org/repo/pull/12 and git@github.com:org/repo.git",
 		"PWD=/home/ada/project",
@@ -291,6 +300,32 @@ func TestRedactStringKeepsLabelsAndOrdinaryText(t *testing.T) {
 	if got := RedactString("git clone https://u:pw123456@example.com/r"); got != "git clone https://u:[REDACTED]@example.com/r" {
 		t.Fatalf("URL credential = %q, want the scheme, user and host kept", got)
 	}
+	// A label opened by `?` or `&` is a URL query parameter: its value ends at the next `&` or the
+	// fragment's `#`, so the parameters after the secret stay readable. Only there: after any
+	// other label `&`, `#` and `?` are the value's own characters (TestRedactStringTakesWholeValues).
+	for input, want := range map[string]string{
+		"GET https://api.example.com/v1/data?api_key=sk-liveabcdef0123456789&user=alice&format=json": "GET https://api.example.com/v1/data?api_key=[REDACTED]&user=alice&format=json",
+		"https://x/y?token=SECRET&user=alice#frag":                                                   "https://x/y?token=[REDACTED]&user=alice#frag",
+		"https://x/y?user=alice&access_token=abc#x&password=hunter2&page=2":                          "https://x/y?user=alice&access_token=[REDACTED]#x&password=[REDACTED]&page=2",
+		// `token:` is not a parameter, whose separator is `=`.
+		"https://x/y?token: abc&def": "https://x/y?token: [REDACTED]",
+	} {
+		if got := RedactString(input); got != want {
+			t.Fatalf("URL query string %q = %q, want %q", input, got, want)
+		}
+	}
+	// A diff's removed line can start with what looks like a flag named for a secret. Its `=` is
+	// the assignment's, not the flag's value, so the line keeps it; the value after it is the
+	// label rules' to redact.
+	for input, kept := range map[string]string{
+		"-SECRET_KEY = 'django-insecure-abc'": "-SECRET_KEY = '",
+		"-SECRET_KEY = 'x'":                   "-SECRET_KEY = '",
+		`-API_TOKEN = os.environ["X"]`:        "-API_TOKEN = ",
+	} {
+		if got := RedactString(input); !strings.HasPrefix(got, kept) {
+			t.Fatalf("diff line %q = %q, want it to start with %q", input, got, kept)
+		}
+	}
 	// Detection rules match what kind of credential a line held, so the public type prefix and the
 	// Authorization scheme stay.
 	for input, want := range map[string]string{
@@ -315,6 +350,22 @@ func TestRedactStringIsIdempotent(t *testing.T) {
 		if twice := RedactString(once); twice != once {
 			t.Fatalf("RedactString is not idempotent:\nonce  %q\ntwice %q", once, twice)
 		}
+	}
+}
+
+// A URL whose user name is a secret-named label, with `&` in its password and a query string after
+// it. `x-access-token:` is a label, not a query parameter, so `&` is part of its value, which runs
+// to the whitespace over the host and the query string, as any label's unquoted value does; the
+// URL rule reads that value with the same stops (urlRunsOn), so one pass leaves what a second does.
+func TestRedactStringURLLabelPasswordWithQueryString(t *testing.T) {
+	const input = "git clone https://x-access-token:ab&cd@github.com/o/r?ref=main&user=alice"
+	const want = "git clone https://x-access-token:[REDACTED]"
+	once := RedactString(input)
+	if once != want {
+		t.Fatalf("RedactString(%q) = %q, want %q", input, once, want)
+	}
+	if twice := RedactString(once); twice != once {
+		t.Fatalf("RedactString is not idempotent:\nonce  %q\ntwice %q", once, twice)
 	}
 }
 
@@ -391,6 +442,9 @@ var redactIdempotenceInputs = []string{
 	// is told by place, not by count.
 	"token=abcdefgh12345678 AKIAIOSFODNN7EXAMPLEabcdefgh12345678[REDACTED]",
 	"https://x-access-token:a@b,AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY@host",
+	// `&` in a URL password that a label's value runs on over, and a query string after it.
+	"git clone https://x-access-token:ab&cd@github.com/o/r?ref=main&user=alice",
+	"https://x/y?token=abcdefgh12345678&user=alice#frag&password=x",
 }
 
 // A field named for a credential is one, whatever its value looks like.
@@ -460,13 +514,18 @@ func TestCleanStringRedactsBeforeTruncating(t *testing.T) {
 	}
 }
 
-// A generated password is full of brackets, braces and backslashes, and a quoted one can hold
-// spaces and commas. None of it may survive past the first such character.
+// A generated password is full of brackets, braces, backslashes, `#`, `&` and `?`, and a quoted one
+// can hold spaces and commas. None of it may survive past the first such character.
 func TestRedactStringTakesWholeValues(t *testing.T) {
 	tests := []struct {
 		name, input, want string
 	}{
 		{"unquoted symbols", "DB_PASSWORD=Xy7]kL9}pQ next", "DB_PASSWORD=[REDACTED] next"},
+		{"leading hash", "export DB_PASSWORD=#Xy9kqLmN2pQ", "export DB_PASSWORD=[REDACTED]"},
+		{"hash and ampersand", "password: s3cr3t#tail&more", "password: [REDACTED]"},
+		{"short hash and ampersand", "password: a#b&c", "password: [REDACTED]"},
+		{"query delimiters before a command", "PGPASSWORD=Pa55w0rdAbCd#EfGh&IjKl?MnOp psql", "PGPASSWORD=[REDACTED] psql"},
+		{"question mark", "token=x?y", "token=[REDACTED]"},
 		{"unquoted backslash", `password=ab\cdEFgh`, "password=[REDACTED]"},
 		{"leading bracket", "token=[abcDEF123]", "token=[REDACTED]"},
 		{"quoted with spaces", `secret: "correct horse, battery staple"`, `secret: "[REDACTED]"`},
