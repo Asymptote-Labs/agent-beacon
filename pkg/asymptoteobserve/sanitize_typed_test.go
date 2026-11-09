@@ -291,7 +291,7 @@ func TestTypedFieldNamesAreNotSecret(t *testing.T) {
 			walk(f.Type, path+"."+f.Name)
 		}
 	}
-	for _, v := range []any{MCPInfo{}, SystemContextInfo{}, GenAIInfo{}} {
+	for _, v := range []any{MCPInfo{}, SystemContextInfo{}, GenAIInfo{}, RunInfo{}, VCSInfo{}} {
 		walk(reflect.TypeOf(v), reflect.TypeOf(v).Name())
 	}
 }
@@ -330,7 +330,9 @@ func TestTypedConversionKeepsEveryField(t *testing.T) {
 	var mcp MCPInfo
 	var context SystemContextInfo
 	var genAI GenAIInfo
-	for _, v := range []any{&mcp, &context, &genAI} {
+	var run RunInfo
+	var vcs VCSInfo
+	for _, v := range []any{&mcp, &context, &genAI, &run, &vcs} {
 		fill(reflect.ValueOf(v).Elem())
 	}
 	opts := PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit}
@@ -339,6 +341,12 @@ func TestTypedConversionKeepsEveryField(t *testing.T) {
 	}
 	if got := sanitizeSystemContext(&context); !reflect.DeepEqual(*got, context) {
 		t.Errorf("system context = %+v, want %+v", *got, context)
+	}
+	if got := SanitizeRun(&run, opts); !reflect.DeepEqual(*got, run) {
+		t.Errorf("run = %+v, want %+v", *got, run)
+	}
+	if got := SanitizeVCS(&vcs, opts); !reflect.DeepEqual(*got, vcs) {
+		t.Errorf("vcs = %s\nwant %s", mustJSON(t, got), mustJSON(t, vcs))
 	}
 	want := genAI
 	want.SystemInstructionsText = ""

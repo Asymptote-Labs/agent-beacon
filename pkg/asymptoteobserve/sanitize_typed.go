@@ -484,6 +484,63 @@ func SanitizeMCP(in *MCPInfo, opts PrivacyOptions) *MCPInfo {
 	return out
 }
 
+// SanitizeRun returns a sanitized copy of a run block, every string cleaned with opts. Its values
+// come from the CI or cloud environment, and a branch or pull-request ref is named by whoever opens
+// the pull request.
+func SanitizeRun(in *RunInfo, opts PrivacyOptions) *RunInfo {
+	if in == nil {
+		return nil
+	}
+	g := newGenericSanitizer(opts)
+	return &RunInfo{
+		Provider:   g.text(in.Provider),
+		RunID:      g.text(in.RunID),
+		RunAttempt: g.text(in.RunAttempt),
+		Workflow:   g.text(in.Workflow),
+		Job:        g.text(in.Job),
+		EventName:  g.text(in.EventName),
+		Commit:     g.text(in.Commit),
+		Repository: g.text(in.Repository),
+		Branch:     g.text(in.Branch),
+		PR:         g.text(in.PR),
+		PRNumber:   g.text(in.PRNumber),
+		Actor:      g.text(in.Actor),
+		Ephemeral:  in.Ephemeral,
+	}
+}
+
+// SanitizeVCS returns a sanitized copy of a vcs block, every string cleaned with opts. A branch name
+// and a remote URL are text the repository's owner, not Beacon, chose.
+func SanitizeVCS(in *VCSInfo, opts PrivacyOptions) *VCSInfo {
+	if in == nil {
+		return nil
+	}
+	g := newGenericSanitizer(opts)
+	out := &VCSInfo{}
+	if in.Ref != nil {
+		out.Ref = &VCSRefInfo{}
+		if h := in.Ref.Head; h != nil {
+			out.Ref.Head = &VCSRefHeadInfo{Revision: g.text(h.Revision), Name: g.text(h.Name), Type: g.text(h.Type)}
+		}
+	}
+	if in.Repository != nil {
+		out.Repository = &VCSRepositoryInfo{}
+		if u := in.Repository.URL; u != nil {
+			out.Repository.URL = &VCSRepositoryURLInfo{Full: g.text(u.Full)}
+		}
+	}
+	if a := in.Attribution; a != nil {
+		out.Attribution = &VCSAttributionInfo{Method: g.text(a.Method), ChangedFiles: a.ChangedFiles, MatchedFiles: a.MatchedFiles}
+	}
+	if h := in.Hook; h != nil {
+		out.Hook = &VCSHookInfo{
+			Name: g.text(h.Name), Phase: g.text(h.Phase), BudgetMS: h.BudgetMS, ElapsedMS: h.ElapsedMS,
+			PhaseElapsedMS: h.PhaseElapsedMS, GitSpawns: h.GitSpawns, CutShort: h.CutShort,
+		}
+	}
+	return out
+}
+
 func sanitizeSystemContext(in *SystemContextInfo) *SystemContextInfo {
 	g := newGenericSanitizer(PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
 	out := &SystemContextInfo{Kind: g.text(in.Kind), Source: g.text(in.Source)}
