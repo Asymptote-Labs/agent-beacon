@@ -21,7 +21,7 @@ One extension covers both supported sites:
 This page covers install, configuration, and verification, which are the same for both sites. The site pages cover what each one captures and where each one falls short.
 
 <Note>
-The extension is in beta. It is not published on the Chrome Web Store and installs unpacked. It reads two chat streams whose APIs are private and undocumented, so a change on either site can interrupt capture until the adapter is updated.
+The extension is in beta and is not on the Chrome Web Store. Managed fleets force-install a signed build through Chrome policy; a single machine can load it unpacked. It reads two chat streams whose APIs are private and undocumented, so a change on either site can interrupt capture until the adapter is updated.
 </Note>
 
 ## Prerequisites
@@ -58,11 +58,28 @@ Its presence is therefore observed rather than declared: the evidence that it is
 
 ## Install
 
-The extension installs unpacked through Chrome's developer mode, so Chrome will not auto-update it. To move to a new version, download or build it again and reload.
+<Tip>
+To install it across a managed fleet, with no clicks on each machine, settings employees can't change, and automatic updates, follow [Deploy with Chrome policy](/runtimes/browser-extension-chrome-policy). The rest of this section loads it by hand on one machine.
+</Tip>
+
+Loaded by hand, the extension installs unpacked through Chrome's developer mode, so Chrome will not auto-update it. To move to a new version, download or build it again and reload.
+
+### Use a release archive
+
+Download `agent-beacon-browser-extension-<version>-chrome.zip` with its `.sha256` from the latest [`ext-v*` release](https://github.com/asymptote-labs/agent-beacon/releases), then verify and unzip it:
+
+```bash
+shasum -a 256 -c agent-beacon-browser-extension-<version>-chrome.zip.sha256
+unzip agent-beacon-browser-extension-<version>-chrome.zip -d agent-beacon-extension
+```
+
+The unzipped folder is what you load. The zip is unsigned, so its `.sha256` is its integrity check. The release also carries the signed `.crx` that Chrome policy installs; it cannot be loaded unpacked.
+
+The `-chrome` archive is the build for every Chromium browser, including Edge, Brave, Opera, Vivaldi, and Arc. There is no separate archive per browser.
 
 ### Build from source
 
-No prebuilt archive is published yet, so building from source is currently the only way to get the extension. It needs Node 22 or newer and takes a few seconds:
+To build it yourself instead, you need Node 22 or newer. It takes a few seconds:
 
 ```bash
 git clone https://github.com/asymptote-labs/agent-beacon.git
@@ -77,24 +94,11 @@ That writes the loadable extension to `browser-extension/dist`. Note the full pa
 pwd -P  # then append /dist
 ```
 
-### Use a release archive
-
-Once an `ext-v*` release is published, you will be able to skip the build and download `agent-beacon-browser-extension-<version>-chrome.zip` with its `.sha256` from the [releases page](https://github.com/asymptote-labs/agent-beacon/releases), then verify and unzip it:
-
-```bash
-shasum -a 256 -c agent-beacon-browser-extension-<version>-chrome.zip.sha256
-unzip agent-beacon-browser-extension-<version>-chrome.zip -d agent-beacon-extension
-```
-
-The archive is unsigned, so its `.sha256` is the only integrity check it has. The unzipped folder is what you load, in place of `dist`.
-
-The `-chrome` archive is the build for every Chromium browser, including Edge, Brave, Opera, Vivaldi, and Arc. There is no separate archive per browser.
-
 ### Load it in Chrome
 
 1. Open `chrome://extensions`.
 2. Turn on **Developer mode**, top right.
-3. Choose **Load unpacked**, then select the `dist` folder you built, or the unzipped release folder.
+3. Choose **Load unpacked**, then select the unzipped release folder, or the `dist` folder you built.
 4. Confirm the Agent Beacon browser collector now appears in the list and is enabled.
 5. Click the extension's toolbar icon to check its status and, if you want, change the retention mode before capturing anything.
 
@@ -124,6 +128,8 @@ The extension is configured in its own UI, not by `beacon`. There is no CLI comm
 | Options page | Right-click the icon and choose **Options**, or use **Details** then **Extension options** in `chrome://extensions` | OTLP logs endpoint (loopback only: `http(s)` on `127.0.0.1`, `localhost` or `[::1]`), and per-site checkboxes for claude.ai and chatgpt.com |
 
 Both sites are enabled by default. Turn one off in the options page to collect from the other alone.
+
+An administrator can lock any of these settings through Chrome policy. Locked settings show as managed by your organization and can't be changed in the popup or options page. See [Lock the extension's settings](/runtimes/browser-extension-chrome-policy#2-lock-the-extensions-settings).
 
 ## Firefox enterprise policy
 
@@ -220,7 +226,7 @@ Coverage that is the same for both sites:
 | Approval telemetry | Not available. Neither site exposes approval decisions to a page script |
 | Session lifecycle | Partial. Turns are correlated by conversation id; there is no session start or stop signal |
 | Local JSONL and dashboard | Supported after events reach the collector |
-| MDM deployment | Not covered by Beacon's MDM assets. Distribute through browser policy instead, such as Firefox's [`ExtensionSettings`](#firefox-enterprise-policy). Chromium force-install needs a store listing or signed package, which do not exist yet; see [Force-install through browser policy](/runtimes/browser-extension-chromium#force-install-through-browser-policy) |
+| MDM deployment | Through browser policy, not Beacon's MDM assets. Google Chrome force-installs the signed build with locked settings; see [Deploy with Chrome policy](/runtimes/browser-extension-chrome-policy). Firefox uses [`ExtensionSettings`](#firefox-enterprise-policy) with a signed `.xpi` |
 | Browser attribution | Supported. `user_agent.name` and `user_agent.version` name the browser on every event |
 
 Tool telemetry and token usage differ by site. See [Claude.ai](/runtimes/claude-web) and [ChatGPT](/runtimes/chatgpt-web).
