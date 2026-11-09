@@ -31,6 +31,7 @@ package events
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"runtime"
@@ -182,6 +183,11 @@ type builder struct {
 	seenCalls map[string]bool
 	// recordedCalls are the read and MCP calls a reply records.
 	recordedCalls []string
+	// session, conversation and raw are shared by the call's events.
+	session      *obs.SessionInfo
+	conversation *obs.GenAIConversationInfo
+	raw          map[string]interface{}
+	rawBytes     int
 }
 
 func (b *builder) request() {
@@ -397,6 +403,10 @@ var hostname, _ = os.Hostname()
 // person behind the call).
 func (b *builder) event(action, category, fidelity string) obs.Event {
 	c := b.t.Call
+	if b.session == nil {
+		b.session = &obs.SessionInfo{ID: b.t.SessionID}
+		b.conversation = &obs.GenAIConversationInfo{ID: b.t.SessionID}
+	}
 	e := obs.Event{
 		Timestamp:     obs.FormatTimestamp(c.Time),
 		Vendor:        obs.Vendor,
@@ -407,10 +417,9 @@ func (b *builder) event(action, category, fidelity string) obs.Event {
 		Endpoint:      obs.EndpointInfo{Hostname: hostname, OS: runtime.GOOS, AgentVersion: b.a.cfg.Version},
 		Harness:       obs.HarnessInfo{Name: b.t.Harness.Name, Version: b.t.Harness.Version, CollectionMethod: obs.CollectionMethodGateway},
 		Origin:        obs.OriginLocal,
-		Session:       &obs.SessionInfo{ID: b.t.SessionID},
+		Session:       b.session,
 		Model:         c.Model,
-		GenAI:         &obs.GenAIInfo{Conversation: &obs.GenAIConversationInfo{ID: b.t.SessionID}},
-		Raw:           map[string]interface{}{"gateway.name": c.Gateway, "gateway.call_id": c.ID},
+		GenAI:         &obs.GenAIInfo{Conversation: b.conversation},
 	}
 	if id := c.Client.Identity; id.User != "" || id.Email != "" {
 		e.User = obs.UserInfo{Name: firstNonEmpty(id.Email, id.User), UID: id.User}
@@ -418,10 +427,27 @@ func (b *builder) event(action, category, fidelity string) obs.Event {
 	return e
 }
 
-// finish sanitizes the event as Beacon's writers do. A recorded event is stamped with its
-// sequence; its id is derived when it is written or cited.
+// rawBlock is the call's raw block, sanitized as SanitizeEvent sanitizes raw, once per call: every
+// event of the call shares it (events are never modified once built). rawBytes is what it adds
+// to an event's serialized size.
+func (b *builder) rawBlock() (map[string]interface{}, int) {
+	if b.raw == nil {
+		c := b.t.Call
+		b.raw = obs.SanitizeMap(map[string]interface{}{"gateway.name": c.Gateway, "gateway.call_id": c.ID},
+			obs.PrivacyOptions{RedactSecrets: true, StringLimit: obs.DefaultRawStringLimit})
+		line, _ := json.Marshal(b.raw)
+		b.rawBytes = len(`,"raw":`) + len(line)
+	}
+	return b.raw, b.rawBytes
+}
+
+// finish sanitizes the event as Beacon's writers do, with the call's raw block, sanitized once. A
+// recorded event is stamped with its sequence; its id is derived when it is written or cited.
 func (b *builder) finish(e obs.Event, record bool) *pipeline.Event {
-	e = obs.SanitizeEvent(e, maxEventBytes)
+	raw, rawBytes := b.rawBlock()
+	// The size check that sets field_truncated runs without raw, against the room raw leaves.
+	e = obs.SanitizeEvent(e, maxEventBytes-rawBytes)
+	e.Raw = raw
 	if record {
 		e.Sequence = b.a.seq.Add(1)
 	}
