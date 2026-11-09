@@ -203,3 +203,53 @@ func TestCleanupKeepsARecentReplyMarker(t *testing.T) {
 		t.Fatal("the reply was treated as new after cleanup")
 	}
 }
+
+// Antigravity recovers a session's first prompt from its transcript, and a conversation resumed
+// after the two-hour sweep still starts with that prompt. Its marker has to survive the sweep for
+// promptMarkerTTL, measured from when it was set (or, for a marker written before that was
+// recorded, from the session's creation), or the resumed conversation records the prompt again.
+func TestCleanupKeepsARecentPromptMarker(t *testing.T) {
+	_, cleanup := setupTestStateDir(t)
+	defer cleanup()
+
+	old := time.Now().Add(-3 * time.Hour).UTC().Format(time.RFC3339)
+	expired := time.Now().Add(-promptMarkerTTL - time.Hour).UTC().Format(time.RFC3339)
+	st := NewSessionState("seed", "cursor")
+	state := map[string]*SessionData{
+		"recent-prompt":  {CreatedAt: old, PromptEmitted: true, PromptEmittedAt: old},
+		"legacy-prompt":  {CreatedAt: old, PromptEmitted: true},
+		"expired-prompt": {CreatedAt: expired, PromptEmitted: true, PromptEmittedAt: expired},
+		"expired-legacy": {CreatedAt: expired, PromptEmitted: true},
+		"no-prompt":      {CreatedAt: old},
+	}
+	if err := st.saveStateFile(state); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := CleanupStaleForPlatform("cursor"); got != 3 {
+		t.Fatalf("CleanupStaleForPlatform = %d, want 3", got)
+	}
+
+	after := st.loadStateFile()
+	if after["recent-prompt"] == nil || after["legacy-prompt"] == nil {
+		t.Fatalf("cleanup removed a session with a recent prompt marker: %v", after)
+	}
+	if claimed, _ := NewSessionState("recent-prompt", "cursor").MarkPromptEmittedIfNeeded(); claimed {
+		t.Fatal("the first prompt was claimed again after cleanup")
+	}
+}
+
+func TestMarkPromptEmittedRecordsWhen(t *testing.T) {
+	_, cleanup := setupTestStateDir(t)
+	defer cleanup()
+
+	st := NewSessionState("s1", "cursor")
+	if claimed, err := st.MarkPromptEmittedIfNeeded(); err != nil || !claimed {
+		t.Fatalf("MarkPromptEmittedIfNeeded = %v, %v", claimed, err)
+	}
+	data := st.loadStateFile()["s1"]
+	at, err := time.Parse(time.RFC3339, data.PromptEmittedAt)
+	if err != nil || time.Since(at) > time.Minute {
+		t.Fatalf("prompt_emitted_at = %q, want the time the marker was set", data.PromptEmittedAt)
+	}
+}

@@ -1076,7 +1076,13 @@ func hookStatusesWithConfig(targets []string, cfg endpointconfig.Config) map[str
 		switch strings.TrimSpace(name) {
 		case "antigravity":
 			status := endpointhooks.AntigravityHookStatus(endpointhooks.AntigravityOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
-			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.ConfigPath, Raw: status}
+			result := hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.ConfigPath, Raw: status}
+			// Installed stays true for a legacy block so repair rewrites it, but Antigravity does
+			// not run it, so it must not read as configured.
+			if status.NeedsReinstall {
+				result.Status = "needs_reinstall"
+			}
+			statuses[name] = result
 		case "cursor":
 			status := endpointhooks.CursorHookStatus(endpointhooks.CursorOptions{Level: endpointhooks.Level(endpointOpts.hookLevel), LogPath: cfg.LogPath, UserMode: cfg.UserMode})
 			statuses[name] = hookTargetResult{Target: name, Status: targetStatus(status.Installed), Installed: status.Installed, Message: status.Message, Path: status.HooksJSONPath, Raw: status}

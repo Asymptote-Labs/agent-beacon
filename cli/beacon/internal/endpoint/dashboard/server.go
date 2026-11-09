@@ -552,6 +552,10 @@ func hookStatuses(logPath string, userMode bool) []HookStatus {
 	level := endpointhooks.LevelUser
 	antigravity := endpointhooks.AntigravityHookStatus(endpointhooks.AntigravityOptions{Level: level, LogPath: logPath, UserMode: userMode})
 	add("antigravity", antigravity.Installed, antigravity.ConfigPath, antigravity.BinaryPath, antigravity.Message)
+	if antigravity.NeedsReinstall {
+		// Installed, so repair rewrites the block, but Antigravity does not run its legacy schema.
+		out[len(out)-1].Status = "needs_reinstall"
+	}
 	cline := endpointhooks.ClineHookStatus(endpointhooks.ClineOptions{Level: level, LogPath: logPath, UserMode: userMode})
 	add("cline", cline.Installed, cline.PluginPath, cline.BinaryPath, cline.Message)
 	cursor := endpointhooks.CursorHookStatus(endpointhooks.CursorOptions{Level: level, LogPath: logPath, UserMode: userMode})
