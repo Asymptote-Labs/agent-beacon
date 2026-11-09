@@ -1512,6 +1512,15 @@ func SanitizeEvent(event Event, maxBytes int) Event {
 	if event.Prompt != nil {
 		event.Prompt.Text = CleanString(event.Prompt.Text, DefaultStringLimit, true)
 	}
+	// The run, vcs and top-level model, repository and branch strings come from the environment, a
+	// runtime's attributes or the repository's own refs (a pull request names its branch), so they
+	// get the raw-attribute limit and secret redaction too.
+	metadata := PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit}
+	event.Run = SanitizeRun(event.Run, metadata)
+	event.VCS = SanitizeVCS(event.VCS, metadata)
+	event.Model = CleanString(event.Model, DefaultRawStringLimit, true)
+	event.Repository = CleanString(event.Repository, DefaultRawStringLimit, true)
+	event.Branch = CleanString(event.Branch, DefaultRawStringLimit, true)
 	if event.MCP != nil {
 		event.MCP = SanitizeMCP(event.MCP, PrivacyOptions{RedactSecrets: true, StringLimit: DefaultRawStringLimit})
 	}
