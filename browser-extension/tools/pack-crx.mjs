@@ -144,6 +144,30 @@ export function feedVersion(xml, id) {
   return app ? /\bversion=['"]([^'"]+)['"]/.exec(app[1])?.[1] : undefined;
 }
 
+/** The signed build's asset name on an `ext-v<version>` release. */
+export function crxAssetName(version) {
+  return `agent-beacon-browser-extension-${version}-chrome.crx`;
+}
+
+/**
+ * The highest version among published `ext-v*` releases that carry a signed CRX and its checksum,
+ * or undefined. The feed offers this rather than whichever release ran last, so a feed job that
+ * never ran, or a re-run of an older tag, cannot leave fleets on an older version.
+ * @param {{ tag?: string, draft?: boolean, assets?: string[] }[]} releases
+ */
+export function newestSignedVersion(releases) {
+  let newest;
+  for (const release of releases) {
+    if (release.draft || !release.tag?.startsWith('ext-v')) continue;
+    const version = release.tag.slice('ext-v'.length);
+    if (!VERSION_PATTERN.test(version)) continue;
+    const crx = crxAssetName(version);
+    if (!release.assets?.includes(crx) || !release.assets.includes(`${crx}.sha256`)) continue;
+    if (newest === undefined || compareVersions(version, newest) > 0) newest = version;
+  }
+  return newest;
+}
+
 /** Compare dotted Chrome versions numerically: negative, zero or positive. */
 export function compareVersions(a, b) {
   const pa = a.split('.').map(Number);
@@ -218,10 +242,12 @@ const USAGE = `usage:
   pack-crx.mjs pack   --zip <archive.zip> --key-env <VAR> | --key <key.pem>  --out <file.crx> [--expect-id <id>]
   pack-crx.mjs verify --crx <file.crx> [--zip <archive.zip>] [--expect-id <id>]
   pack-crx.mjs feed   --id <id> --version <v> --codebase <url> --sha256 <hex> --out <updates.xml> [--current <updates.xml>]
+  pack-crx.mjs newest --releases <releases.ndjson>
 
 --expect-id defaults to CHROME_EXTENSION_ID in targets.mjs. pack prints the extension ID.
 feed refuses to write a version lower than the one in --current, so re-running an old release
-cannot roll installed extensions back.`;
+cannot roll installed extensions back. newest prints the highest ext-v* version whose release has a
+signed CRX and its checksum, from one {"tag", "draft", "assets"} object per line.`;
 
 function parseArgs(argv) {
   const opts = {};
@@ -273,6 +299,13 @@ function main(argv) {
       const xml = feedXml({ id, version, codebase: need(opts, 'codebase'), sha256: need(opts, 'sha256') });
       fs.writeFileSync(need(opts, 'out'), xml);
       process.stdout.write(xml);
+      return;
+    }
+    case 'newest': {
+      const lines = fs.readFileSync(need(opts, 'releases'), 'utf8').split('\n').filter((line) => line.trim());
+      const version = newestSignedVersion(lines.map((line) => JSON.parse(line)));
+      if (!version) throw new Error('no published ext-v* release has a signed CRX and its checksum');
+      console.log(version);
       return;
     }
     default:

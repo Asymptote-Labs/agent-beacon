@@ -670,9 +670,14 @@ missing key fails the release. The key fixes the extension ID that every fleet's
 policy names, so it is never rotated; a copy is kept in the company password
 manager, and losing it means a new extension ID and a policy change for every fleet.
 
-The `feed` job (one concurrency group across all tags) then downloads the CRX from its public release URL, verifies it,
-and replaces `updates.xml` on the fixed `ext-updates` release (created on first
-use, `--latest=false --prerelease`). That file's URL is `CHROME_UPDATE_URL`, the
+The `feed` job (one concurrency group across all tags) then picks the highest
+published `ext-v*` release that has a signed CRX and its checksum (`pack-crx.mjs
+newest`), not only its own version, because GitHub keeps one waiting job per
+concurrency group and cancels the rest. It downloads that CRX from its public
+release URL, verifies it, and swaps a new `updates.xml` in on the fixed
+`ext-updates` release (created on first use, `--latest=false --prerelease`),
+uploading it as `updates.xml.new` and renaming it so a failed upload leaves the
+live feed in place. That file's URL is `CHROME_UPDATE_URL`, the
 manifest's `update_url` and the URL fleets put in policy, so it must never move
 without first shipping a version whose `update_url` names the new place. The job
 refuses to offer a lower version than the feed already does, so re-running an old

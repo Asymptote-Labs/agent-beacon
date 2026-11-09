@@ -17,15 +17,18 @@ name: Release Browser Extension
 # No `environment: release`. That environment exists to gate the Apple signing
 # secrets, which these jobs do not use, so putting them behind the same approval
 # would add friction without protecting anything. Same reasoning as the
-# windows-package job in release.yml. The one secret here, the Chrome signing
-# key, lives in its own `extension-signing` environment, which admits only
-# `ext-v*` tags and is entered only by the `sign` job.
+# windows-package job in release.yml. The Chrome signing key lives in its own
+# `extension-signing` environment, which admits only `ext-v*` tags and is
+# entered only by the `sign` job; the `firefox` job reads the AMO_JWT_ISSUER and
+# AMO_JWT_SECRET repository secrets.
 #
 # The jobs that run `npm ci` hold a read-only token: a dependency's lifecycle
 # script runs with whatever token the job has, and a write token would let it
 # overwrite release assets and their .sha256 files. They hand their archives
-# over as workflow artifacts, and only `release` and `attach-firefox`, which
-# never check out or install anything, get `contents: write` (#904).
+# over as workflow artifacts. Only `release` and `attach-firefox`, which never
+# check out or install anything, and `feed`, which checks out only
+# browser-extension/tools and runs it with plain Node, get `contents: write`
+# (#904).
 #
 # Chrome: besides the zip (load unpacked, for development), the `sign` job signs
 # the same bytes as a CRX3 file with the key that fixes the extension ID
@@ -343,11 +346,13 @@ jobs:
               --repo "$REPO" --clobber
           fi
 
-  # Points the update feed at this release's CRX. The feed is updates.xml on a
-  # fixed `ext-updates` release, so its URL never changes: it is the manifest's
-  # update_url and the URL fleets put in policy. It runs after the CRX is
-  # published and downloadable, and refuses to offer a lower version than the
-  # feed already does, so re-running an old tag cannot roll fleets back.
+  # Points the update feed at the newest published signed build. The feed is
+  # updates.xml on a fixed `ext-updates` release, so its URL never changes: it
+  # is the manifest's update_url and the URL fleets put in policy. It runs after
+  # this release's CRX is published, offers the highest ext-v* release with a
+  # signed CRX rather than only this run's version, and refuses to offer a lower
+  # version than the feed already does, so neither a feed job GitHub cancelled
+  # nor a re-run of an older tag can leave fleets behind.
   feed:
     needs: [build, sign, release]
     runs-on: ubuntu-latest
@@ -363,7 +368,6 @@ jobs:
       REPO: ${{ github.repository }}
       TAG: ${{ github.ref_name }}
       VERSION: ${{ needs.build.outputs.version }}
-      CRX: ${{ needs.sign.outputs.crx }}
       EXTENSION_ID: ${{ needs.sign.outputs.id }}
       FEED_TAG: ext-updates
       GH_TOKEN: ${{ github.token }}
@@ -387,12 +391,24 @@ jobs:
             exit 1
           fi
 
+          # Offer the newest published release with a signed build, not only
+          # this run's version. GitHub keeps one waiting job per concurrency
+          # group and cancels the others, so a newer tag's feed job may never
+          # run; whichever job runs last still leaves the feed right.
+          gh api --paginate "repos/${REPO}/releases?per_page=100" \
+            --jq '.[] | {tag: .tag_name, draft: .draft, assets: [.assets[].name]}' > releases.ndjson
+          offered="$(node "$tools/pack-crx.mjs" newest --releases releases.ndjson)"
+          if [ "$offered" != "$VERSION" ]; then
+            echo "::notice title=Feed offers a newer release::ext-v${offered} is newer than this run's ${VERSION}, so the feed offers it."
+          fi
+
           # Fetch the CRX the way Chrome will, through its public download URL,
           # and check it is the signed build before pointing anyone at it.
-          codebase="https://github.com/${REPO}/releases/download/${TAG}/${CRX}"
-          curl -fsSL --retry 5 --retry-all-errors -o "$CRX" "$codebase"
-          node "$tools/pack-crx.mjs" verify --crx "$CRX"
-          sha256="$(shasum -a 256 "$CRX" | cut -d' ' -f1)"
+          crx="agent-beacon-browser-extension-${offered}-chrome.crx"
+          codebase="https://github.com/${REPO}/releases/download/ext-v${offered}/${crx}"
+          curl -fsSL --retry 5 --retry-all-errors -o "$crx" "$codebase"
+          node "$tools/pack-crx.mjs" verify --crx "$crx"
+          sha256="$(shasum -a 256 "$crx" | cut -d' ' -f1)"
 
           # Created once, never "Latest" (the CLI keeps that label) and marked
           # pre-release so it is not mistaken for a version.
@@ -404,16 +420,27 @@ jobs:
           fi
 
           # Only a feed release without updates.xml means "no feed yet". Any
-          # other failure to read the current feed fails the job, because
-          # skipping the comparison below could roll fleets back.
+          # other failure to read the current feed fails the job.
           rm -f current.xml
           feed_assets="$(gh release view "$FEED_TAG" --repo "$REPO" --json assets --jq '.assets[].name')"
           if printf '%s\n' "$feed_assets" | grep -qxF updates.xml; then
             gh release download "$FEED_TAG" --repo "$REPO" --pattern updates.xml --output current.xml
           fi
-          node "$tools/pack-crx.mjs" feed --id "$EXTENSION_ID" --version "$VERSION" \
-            --codebase "$codebase" --sha256 "$sha256" --out updates.xml --current current.xml
-          gh release upload "$FEED_TAG" updates.xml --repo "$REPO" --clobber
+          node "$tools/pack-crx.mjs" feed --id "$EXTENSION_ID" --version "$offered" \
+            --codebase "$codebase" --sha256 "$sha256" --out updates.xml.new --current current.xml
+
+          # Upload under a temporary name, then swap it in, so a failed upload
+          # leaves the live feed in place. `--clobber` would delete it first.
+          asset_id() {
+            gh api "repos/${REPO}/releases/tags/${FEED_TAG}" --jq ".assets[] | select(.name == \"$1\") | .id"
+          }
+          stale="$(asset_id updates.xml.new)"
+          if [ -n "$stale" ]; then gh api -X DELETE "repos/${REPO}/releases/assets/${stale}"; fi
+          gh release upload "$FEED_TAG" updates.xml.new --repo "$REPO"
+          new_id="$(asset_id updates.xml.new)"
+          old_id="$(asset_id updates.xml)"
+          if [ -n "$old_id" ]; then gh api -X DELETE "repos/${REPO}/releases/assets/${old_id}"; fi
+          gh api -X PATCH "repos/${REPO}/releases/assets/${new_id}" -f name=updates.xml >/dev/null
 
           # Read it back through the URL installed copies poll, parsing the
           # version the feed offers for this extension (a plain grep would also
@@ -423,13 +450,13 @@ jobs:
               import { feedVersion } from "./browser-extension/tools/pack-crx.mjs";
               let xml = ""; for await (const chunk of process.stdin) xml += chunk;
               console.log(feedVersion(xml, process.argv[1]) ?? "");' "$EXTENSION_ID" || true)"
-            if [ "$live" = "$VERSION" ]; then
-              echo "feed now offers ${VERSION}: $update_url"
+            if [ "$live" = "$offered" ]; then
+              echo "feed now offers ${offered}: $update_url"
               exit 0
             fi
             sleep 10
           done
-          echo "the feed at $update_url does not offer ${VERSION}"
+          echo "the feed at $update_url does not offer ${offered}"
           exit 1
 
   firefox:

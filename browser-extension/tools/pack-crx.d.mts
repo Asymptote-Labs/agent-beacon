@@ -7,3 +7,7 @@ export declare function readCrx(crx: Buffer): { id: string; zip: Buffer };
 export declare function feedXml(feed: { id: string; version: string; codebase: string; sha256: string }): string;
 export declare function feedVersion(xml: string, id: string): string | undefined;
 export declare function compareVersions(a: string, b: string): number;
+export declare function crxAssetName(version: string): string;
+export declare function newestSignedVersion(
+  releases: { tag?: string; draft?: boolean; assets?: string[] }[],
+): string | undefined;
