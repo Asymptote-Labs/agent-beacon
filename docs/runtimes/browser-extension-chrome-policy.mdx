@@ -12,7 +12,7 @@ When you finish, Chrome on every machine in scope:
 
 - Installs the signed Beacon browser extension without anyone clicking anything. Employees can't remove it or turn it off.
 - Runs it with the settings you lock, such as capture on and full retention. The extension's popup shows them as managed by your organization.
-- Captures chats on claude.ai and chatgpt.com and hands them to the Beacon agent on the same machine. The extension sends nothing anywhere else.
+- Captures chats on claude.ai and chatgpt.com and hands them to the Beacon agent on the same machine. Beacon sends them to the same destination as the rest of its telemetry: your own SIEM or storage, such as [Microsoft Sentinel](/log-forwarding/microsoft-sentinel), [Splunk](/log-forwarding/splunk), or an S3 bucket, or [Beacon Cloud](/log-forwarding/asymptote). The extension itself sends nothing anywhere else.
 - Updates it by itself when a new version is released.
 
 ```mermaid
@@ -21,7 +21,8 @@ flowchart LR
   Feed["updates.xml + signed .crx (GitHub, or your mirror)"] -->|install and updates| Chrome
   Chrome --> Ext[Beacon extension]
   Ext -->|chats on claude.ai, chatgpt.com| Agent["Beacon agent (127.0.0.1:4318)"]
-  Agent --> Log[runtime.jsonl and your destinations]
+  Agent --> Log[runtime.jsonl]
+  Log --> Dest["Your destination: SIEM, storage, or Beacon Cloud"]
 ```
 
 ## Before you start
@@ -29,6 +30,7 @@ flowchart LR
 | You need | Why |
 | --- | --- |
 | Beacon installed and running on each machine, version 1.3.54 or later | The extension hands every chat to the local Beacon collector on `127.0.0.1:4318`. See the [macOS](/platforms/macos), [Windows](/platforms/windows), or [Linux](/platforms/linux) install. Earlier versions keep only the first 2 KB of each browser answer. |
+| Beacon forwarding to your destination, if the chats should leave the machine | Browser chats follow the same path as the rest of Beacon's telemetry, to your SIEM or storage, or Beacon Cloud. See [Log forwarding](/log-forwarding). Without forwarding, they stay in the machine's runtime log. |
 | Google Chrome 120 or later | |
 | Machines your organization manages | Chrome installs an extension from outside the Chrome Web Store only on managed machines. On Windows that means joined to Active Directory or Microsoft Entra ID, or enrolled in Chrome Enterprise Core. On macOS it means enrolled in an MDM, or Chrome enrolled in Chrome Enterprise Core. Linux has no such requirement. |
 | Access to the Chrome policy in your management tool | The Google Admin console, your MDM, or Group Policy. |
@@ -247,7 +249,7 @@ The examples lock capture on with full retention.
 </Tabs>
 
 <Note>
-  With `full` retention, the complete text of every prompt and answer on claude.ai and chatgpt.com is written to the machine's runtime log, and goes wherever Beacon forwards that log. Make sure that matches the notice your organization gives employees.
+  With `full` retention, the complete text of every prompt and answer on claude.ai and chatgpt.com is written to the machine's runtime log, and goes wherever Beacon forwards that log: your SIEM or storage, or Beacon Cloud. Make sure that matches the notice your organization gives employees.
 </Note>
 
 ## 3. Try it on one machine
@@ -269,7 +271,7 @@ Apply the policies to one test machine first.
    ```
    </CodeGroup>
 
-   Each line is one event. Its `beacon.content.retention` attribute shows the retention you set.
+   Each line is one event. Its `beacon.content.retention` attribute shows the retention you set. Beacon then forwards these events like the rest of its telemetry, so within a few minutes they also appear in your destination, such as your Microsoft Sentinel workspace or Beacon Cloud. Search for the harness names `claude_web` and `chatgpt_web`.
 
 ## 4. Roll out
 
@@ -333,6 +335,19 @@ If Chrome can't reach GitHub, or you want to approve each version before it reac
   </Accordion>
   <Accordion title="No events reach the runtime log">
     Check that Beacon is running on the machine: `sudo /opt/beacon/bin/beacon endpoint status --system` on macOS. The popup shows the endpoint the extension sends to and how many events are waiting to be delivered.
+  </Accordion>
+  <Accordion title="Chats are in the runtime log but not in your SIEM">
+    Browser chats reach your destination only through Beacon's forwarding, the same path as the rest of its telemetry. Check that forwarding to that destination is set up and running; see [Log forwarding](/log-forwarding).
+
+    In Microsoft Sentinel, browser chats land in `BeaconRuntime_CL` with `HarnessName` `claude_web` or `chatgpt_web`. The prompt and answer text are inside `RawData`, so a custom data collection rule transform that drops `RawData` loses them. To see them:
+
+    ```kusto
+    BeaconRuntime_CL
+    | where HarnessName in ("claude_web", "chatgpt_web")
+    | extend Event = todynamic(tostring(RawData))
+    | project TimeGenerated, HarnessName, EventAction, ContentRetention,
+        Prompt = tostring(Event.prompt.text), Answer = tostring(Event.gen_ai.output.messages)
+    ```
   </Accordion>
   <Accordion title="Two copies of the extension are installed">
     One is a copy loaded by hand in developer mode. Remove it from `chrome://extensions`. See [Roll out](#4-roll-out).
