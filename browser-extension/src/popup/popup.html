@@ -11,6 +11,7 @@
       .status { margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee; }
       .perm { margin: 0 0 10px; padding: 8px; border: 1px solid #e0a800; background: #fff8e1; border-radius: 4px; }
       .perm p { margin: 0 0 6px; }
+      .managed { margin: 0 0 10px; padding: 8px; border: 1px solid #c5d3e8; background: #f2f6fc; border-radius: 4px; }
     </style>
   </head>
   <body>
@@ -20,6 +21,7 @@
         <span id="perm-list" data-testid="perm-list"></span></p>
       <button id="perm-grant" data-testid="perm-grant">Grant site access</button>
     </div>
+    <p class="managed" id="managed" data-testid="managed" hidden>Some settings are managed by your organization.</p>
     <div class="row">
       <label for="enabled">Capture enabled</label>
       <input type="checkbox" id="enabled" />

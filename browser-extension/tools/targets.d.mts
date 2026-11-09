@@ -2,6 +2,8 @@
 // `strict` without enabling allowJs for the whole project.
 
 export declare const GECKO_ID: string;
+export declare const CHROME_EXTENSION_ID: string;
+export declare const CHROME_UPDATE_URL: string;
 export declare const FIREFOX_MIN_VERSION: string;
 export declare const FIREFOX_ANDROID_MIN_VERSION: string;
 export declare const MIN_FIREFOX_FOR_MAIN_WORLD: number;
