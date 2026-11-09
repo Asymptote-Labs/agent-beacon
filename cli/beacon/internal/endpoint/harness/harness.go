@@ -99,14 +99,16 @@ func DiscoverAntigravity() Harness {
 	userConfig := filepath.Join(home, ".gemini", "config", "hooks.json")
 	projectConfig := filepath.Join(".agents", "hooks.json")
 	h.ConfigPath = userConfig
+	level := hooks.LevelUser
 	if fileExists(projectConfig) {
 		h.ConfigPath = projectConfig
+		level = hooks.LevelProject
 	}
 	if !h.Detected && (dirExists(filepath.Join(home, ".gemini", "config")) || dirExists(".agents")) {
 		h.Detected = true
 	}
 	if fileExists(h.ConfigPath) {
-		status, msg := antigravityStatus(h.ConfigPath)
+		status, msg := antigravityStatus(h.ConfigPath, level)
 		h.TelemetryStatus = status
 		h.Message = msg
 	} else {
@@ -730,27 +732,22 @@ func hasBeaconHermesHooks(data []byte) (bool, error) {
 	return false, nil
 }
 
-func antigravityStatus(path string) (TelemetryStatus, string) {
+func antigravityStatus(path string, level hooks.Level) (TelemetryStatus, string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return TelemetryMissing, err.Error()
 	}
-	hasHooks, err := hasBeaconAntigravityHooks(data)
+	current, legacy, err := hooks.AntigravityConfigEndpointHooks(data)
 	if err != nil {
 		return TelemetryMisconfigured, "Antigravity hooks JSON is invalid"
 	}
-	if hasHooks {
+	if current {
 		return TelemetryEnabled, "Antigravity endpoint hooks are configured"
 	}
-	return TelemetryDisabled, "Antigravity hooks exist but endpoint hooks were not found"
-}
-
-func hasBeaconAntigravityHooks(data []byte) (bool, error) {
-	var blocks map[string]json.RawMessage
-	if err := json.Unmarshal(data, &blocks); err != nil {
-		return false, err
+	if legacy {
+		return TelemetryDisabled, hooks.AntigravityLegacyHooksMessage(level)
 	}
-	return hooks.ConfigHasEndpointHook(data, "antigravity")
+	return TelemetryDisabled, "Antigravity hooks exist but endpoint hooks were not found"
 }
 
 func shellExportValue(text, key string) string {

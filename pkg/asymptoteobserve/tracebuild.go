@@ -166,6 +166,11 @@ func TraceEventFromEvent(event Event, fallbackID string, number int) TraceEventV
 	}
 	if event.Error != nil && event.Error.Type != "" {
 		te.Error = &TraceErrorV1{Type: event.Error.Type}
+	} else if strings.EqualFold(strings.TrimSpace(event.Event.Action), "tool.failed") {
+		// Hook adapters report a failed call as tool.failed and say nothing under error, so the
+		// action alone carries the failure. error.type is what a reader of the trace checks for
+		// one, so the projection names it rather than leaving tool.failed the one failure without it.
+		te.Error = &TraceErrorV1{Type: ToolFailedErrorType}
 	}
 	if event.Approval != nil {
 		te.Approval = &TraceApprovalV1{Required: event.Approval.Required, Decision: event.Approval.Decision, Reason: event.Approval.Reason}

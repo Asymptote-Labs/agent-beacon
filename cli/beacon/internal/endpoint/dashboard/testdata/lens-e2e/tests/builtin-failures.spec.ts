@@ -27,7 +27,7 @@ test('failures: every failed call once, its output, and what the next identical 
   const edit = rows.nth(1).locator('td');
   await expect(edit.nth(2)).toHaveText('tool call');
   await expect(edit.nth(3)).toHaveText('Edit /work/api/a.go');
-  await expect(edit.nth(4)).toHaveText('tool_failed');
+  await expect(edit.nth(4)).toHaveText('tool_execution_failed');
   await expect(edit.nth(5)).toHaveText('no later attempt');
 
   // Claude Code reports a successful command with no exit code; a result that did not fail is the success.
@@ -48,7 +48,7 @@ test('failures: every failed call once, its output, and what the next identical 
   const mcp = rows.nth(4).locator('td');
   await expect(mcp.nth(2)).toHaveText('MCP call');
   await expect(mcp.nth(3)).toHaveText('github / create_issue');
-  await expect(mcp.nth(4)).toHaveText('tool_failed');
+  await expect(mcp.nth(4)).toHaveText('tool_execution_failed');
   await expect(mcp.nth(5)).toHaveText('succeeded at #18');
   await expect(frame.locator('#root')).not.toContainText('Tool execution failed');
 });
