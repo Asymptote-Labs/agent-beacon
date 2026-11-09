@@ -33,17 +33,19 @@ var CursorEvents = map[string][]string{
 // Both directions are costly. A false negative makes repair add a second hook beside the first
 // and leaves uninstall's behind; a false positive rewrites or deletes a hook somebody else
 // installed.
+//
+// The executable has to be the hooks binary, and running it is not enough on its own: every
+// command an install has written also carries endpoint settings or, for the legacy binary, the
+// platform. A Beacon-named binary with neither is not something Beacon wrote -- every installer
+// has named the platform since the first one -- so claiming it would only ever delete a user's
+// own hook.
 func IsEndpointHook(command, platform string) bool {
 	fields := Fields(command)
 	hasPlatform := platform == "" || hasPlatform(fields, platform)
-	namesPlatform := namesPlatform(fields)
 	beacon, legacy := binaries(fields)
 
 	if carriesEndpointSettings(fields) && beacon {
-		return hasPlatform || !namesPlatform
-	}
-	if beacon && !namesPlatform {
-		return true
+		return hasPlatform || !namesPlatform(fields)
 	}
 	return legacy && hasPlatform
 }
@@ -91,22 +93,58 @@ func carriesEndpointSettings(fields []string) bool {
 	return false
 }
 
-// binaries reports whether any token names the Beacon or legacy hooks binary: its basename, with
-// either path separator, contains the stem (so `beacon-hooks.exe` and a renamed
-// `old-beacon-hooks` both count). Looking at each token's basename rather than searching the
-// whole command keeps a directory named after the binary from passing as the binary itself.
+// binaries reports whether the command's executable is the Beacon or legacy hooks binary.
+//
+// Only the executable counts: the first token after an optional `env` and any `VAR=value`
+// assignments, which is where every installer has put the binary. A token anywhere else that
+// mentions the binary -- `echo beacon-hooks`, a log file named after it -- is an argument to some
+// other program. Its basename, with either path separator and with any `.exe` dropped, must end
+// with the stem, so `beacon-hooks.exe` and a renamed `old-beacon-hooks` both count while a user's
+// `my-beacon-hooks-wrapper.sh` does not, and a directory named after the binary is not the binary.
 func binaries(fields []string) (beacon, legacy bool) {
-	for _, field := range fields {
-		name := field[strings.LastIndexAny(field, `/\`)+1:]
-		beacon = beacon || strings.Contains(name, BinaryStem)
-		legacy = legacy || strings.Contains(name, LegacyBinaryStem)
+	name := executable(fields)
+	name = name[strings.LastIndexAny(name, `/\`)+1:]
+	if len(name) > len(".exe") && strings.EqualFold(name[len(name)-len(".exe"):], ".exe") {
+		name = name[:len(name)-len(".exe")]
 	}
-	return beacon, legacy
+	return strings.HasSuffix(name, BinaryStem), strings.HasSuffix(name, LegacyBinaryStem)
 }
 
-// namesPlatform reports whether a command specifies a platform at all. A command that names none
-// is treated as an any-platform install, which is how hooks written before the flag existed are
-// still recognized. Both `--platform x` and `--platform=x` count.
+// executable returns the program a command runs, skipping the `env` and `VAR=value` prefixes
+// POSIX hook commands have been written with (Hermes's were `env BEACON_ENDPOINT_MODE=1 ...`).
+func executable(fields []string) string {
+	i := 0
+	if i < len(fields) && fields[i][strings.LastIndex(fields[i], "/")+1:] == "env" {
+		i++
+	}
+	for i < len(fields) && isAssignment(fields[i]) {
+		i++
+	}
+	if i == len(fields) {
+		return ""
+	}
+	return fields[i]
+}
+
+// isAssignment reports whether field is a shell `NAME=value` environment assignment.
+func isAssignment(field string) bool {
+	name, _, found := strings.Cut(field, "=")
+	if !found || name == "" {
+		return false
+	}
+	for i, r := range name {
+		letter := r == '_' || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')
+		if !letter && (i == 0 || r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// namesPlatform reports whether a command specifies a platform at all. A command that carries
+// endpoint settings but names none is treated as an any-platform install: the settings already
+// show an endpoint install wrote it, and nothing ties it to one runtime. Both `--platform x` and
+// `--platform=x` count.
 func namesPlatform(fields []string) bool {
 	for _, field := range fields {
 		if field == "--platform" || strings.HasPrefix(field, "--platform=") {
