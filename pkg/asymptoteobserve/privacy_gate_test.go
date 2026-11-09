@@ -13,13 +13,13 @@ var redactGateFragments = []string{
 	"secret", "client_secret", "secret_key", "private-key", "password", "PassWord", "passwd",
 	"passphrase", "authorization", "Authorization", "credential", "credentials", "keyboard", "key",
 	"GITHUB_TOKEN", "export ", "--token", "--db-password", "-x-token", "a-token", "9", "_", "-password", "--api-key", "--access-key", "-x", "--", "-",
-	"=", ":", " ", "  ", "\t", "\n", "\r", ",", `"`, "'", "`", `\`, `\"`, `\\\"`, "{", "}", "[", "]",
+	"=", ":", " ", "  ", "\t", "\n", "\r", ",", `"`, "'", "`", `\`, `\"`, `\\\"`, "{", "}", "[", "]", "?", "&", "#",
 	"Bearer ", "bearer", "Basic ", "Digest ", "eyJ", "eyJhbGciOiJIUzI1NiJ9", ".", "abcdefgh12345678",
 	"hunter2hunter2", "null", "true", "42", "https://", "postgres://user:", "pw", "@host", "://",
 	"sk-", "sk-ant-api03-", "AKIA", "ASIA", "ABCDEFGHIJKLMNOP", "ghp_", "gho_", "ghs_", "github_pat_",
 	"glpat-", "xoxb-", "xoxe-", "xapp-", "sk_live_", "rk_test_", "AIza", "ya29.", "npm_", "hf_", "bcn_api_", "bcn_device_",
 	"hvs.", "hvb.", "gsk_", "pplx-", "r8_", "xai-", "lsv2_pt_", "lsv2_sk_", "pcsk_", "dop_v1_", "doo_v1_", "dapi",
-	"pypi-AgEIcHlwaS5vcmc", "pypi-", "shpat_", "shpss_", "lin_api_", "dp.pt.", "SG.",
+	"pypi-AgEIcHlwaS5vcmc", "pypi-", "shpat_", "shpss_", "lin_api_", "dp.pt.", "SG.", "whsec_",
 	"bcn_cli_", "bcn_mcprt_", "bcn_code_", "bcn_client_", "bcn_exchange_", "bcn_mcp_", "bcn_enfdev_", "bcn_other_",
 	"AKIAIOSFODNN7EXAMPLE", "ASIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "|", "/", "+",
 	"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJ", "-----BEGIN RSA PRIVATE KEY-----",
@@ -45,6 +45,7 @@ func TestRedactGateNeverChangesAResult(t *testing.T) {
 		"mysql --password hunter2 -u root", "postgres://user:pw@host/db", "input_tokens: 812",
 		"ſecret=abcdefgh12345678", "KEY=abcdefgh12345678", "toKen\\\"=\"abc\"", `["--api-key", "abcdefgh12345678"]`,
 		"-----BEGIN RSA PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END RSA PRIVATE KEY-----",
+		"https://x/y?token=abcdefgh12345678&user=alice#frag", "a?-token=x&y", "?token: a&b", "x&&api_key=#a&b",
 	}
 	r := rand.New(rand.NewSource(1))
 	for i := 0; i < 3000; i++ {
