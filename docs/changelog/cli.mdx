@@ -13,6 +13,8 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 Changes on `main` since v1.3.58. They ship in the next release.
 
+- **Every curl password and cookie on a command line is redacted** · The curl rules redacted the first `-u`/`--user`/`--proxy-user` password on a line and left the rest (`curl -u a:x -u b:y` kept `y`), and applied the cookie rule at most 16 more times, so a line with more `-b`/`--cookie` strings kept the later ones and redacting the output again changed it. Each rule now redacts every flag on its line in one pass.
+
 - **Redacting a long assigned value takes time in proportion to the text** · After the rules run, redaction removes bare copies of every assigned value (`token=…`) from the rest of the text. For a value longer than a few dozen bytes that search grew with the square of the value's length, so 256 KB of text holding one long value took about 4 seconds. Copies of values longer than 64 bytes are now found in one pass over the text; the result is unchanged.
 
 - **Failures lens** · A new built-in lens lists everything that went wrong in a session, in order: commands that exited non-zero, tool and MCP calls the runtime reported as failed, and error events, each with the output that explains it, or the output's hash and size when the log did not keep it. A call reported by both a hook and OpenTelemetry is listed once. For each failed call it says what the next identical call did -- the same command line, the same tool on the same path, or the same MCP tool with the same arguments: succeeded, failed again, or never came. Long lists page with **Show more**. See [Lenses](/concepts/lenses#built-in-lenses).

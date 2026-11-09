@@ -101,8 +101,8 @@ const (
 	followRun redactFollowerKind = iota
 	// followScheme: a URL, which holds no `/` and no whitespace after its `://`.
 	followScheme
-	// followLine: a curl rule, which reads its whole command line and is applied to it until it
-	// stops changing (redactLinesAfterMarkers).
+	// followLine: a curl rule, which reads its whole command line and redacts every flag on it
+	// (redactLinesAfterMarkers).
 	followLine
 )
 
@@ -138,7 +138,7 @@ func (e *redactEngine) adjacency() *redactAdjacency {
 			switch {
 			case rule.start == startScheme:
 				f.kind = followScheme
-			case rule.repeat:
+			case rule.wholeLine:
 				f.kind = followLine
 				f.lead = leadPattern(rule)
 			default:
@@ -621,7 +621,7 @@ func (c *redactChain) run(si int, m []int, use redactUse, yield func([]int, reda
 				item[1] = sm[2*g]
 			}
 			// The item is yielded with the first secret's rule: an AWS secret it takes is not seen
-			// as one where the replacements are made (redactionRule.applyOnce).
+			// as one where the replacements are made (redactionRule.apply).
 			c.slashed = c.slashed || slashedAWSSecret(redactionRules[c.adj.shapes[sj].rule].expr, c.t, sm)
 			si, m = sj, sm
 			continue
@@ -864,8 +864,8 @@ func markerBeforeWord(t string, from int) int {
 // before a word byte, the followers and then the shape rules, in rule order, are tried there; the
 // first that matches is applied, and a shape rule's chain after it. Each place is tried once, left
 // to right, so a chain that alternates between them is redacted in one pass. The curl rules,
-// which read a whole command line and are applied to it until it stops changing, are then
-// applied to the line from the first such place where a curl command starts.
+// which read a whole command line and redact every flag on it, are then applied to the line from
+// the first such place where a curl command starts.
 //
 // It also reports whether it replaced an AWS secret that holds a `/` (slashedAWSSecret).
 func (e *redactEngine) redactAfterMarkers(t string) (string, bool) {

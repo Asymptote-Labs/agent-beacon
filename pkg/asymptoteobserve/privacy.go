@@ -145,10 +145,10 @@ type redactionRule struct {
 	// needles are literals the pattern cannot match without: when the text holds none of them,
 	// the rule is skipped without running the pattern.
 	needles *redactNeedles
-	// repeat applies the rule until the text stops changing. A rule scoped to a command line
-	// matches from the command to the value, so a second such value on the line lies inside the
-	// first match and is reached only by another pass.
-	repeat bool
+	// wholeLine marks a rule scoped to a command line: its pattern opens with the command word and
+	// the lazy run of the line (`\bcurl\b[^\n]*?`), so a match takes the first flag after the
+	// command, and the rest of the line is searched for the flag again (restOfLine).
+	wholeLine bool
 	// start says where, around an occurrence of one of its needles, a match can begin, and offset
 	// how many bytes before the needle a startNeedle match does. See redact_engine.go.
 	start  redactStart
@@ -207,10 +207,10 @@ func foldedRule(expr, replacement string, keep func(string) bool, needles ...str
 }
 
 // curlRule is a foldedRule scoped to a curl command line. A flag curl accepts more than once (two
-// -b cookie strings) is redacted at every occurrence on the line.
+// -b cookie strings, two -u credentials) is redacted at every occurrence on the line.
 func curlRule(expr, replacement string) redactionRule {
 	r := foldedRule(expr, replacement, nil, "curl")
-	r.repeat = true
+	r.wholeLine = true
 	return r
 }
 
@@ -542,19 +542,8 @@ func (rule redactionRule) runningOn(runsOn func(t string, match []int) int) reda
 	return rule
 }
 
-// apply replaces every match of the rule in the gate's text, except one whose value keep passes,
-// and a repeating rule until the text stops changing.
+// apply replaces every match of the rule in the gate's text, except one whose value keep passes.
 func (rule redactionRule) apply(text *redactGate, slot *redactSlot) string {
-	out := rule.applyOnce(text, slot)
-	// Each pass redacts at least one more value, and a redacted value matches no further.
-	for pass := 0; rule.repeat && out != text.value && pass < 16; pass++ {
-		text.set(out)
-		out = rule.applyOnce(text, slot)
-	}
-	return out
-}
-
-func (rule redactionRule) applyOnce(text *redactGate, slot *redactSlot) string {
 	value := text.value
 	var out []byte
 	last, slashed := 0, false
@@ -572,6 +561,9 @@ func (rule redactionRule) applyOnce(text *redactGate, slot *redactSlot) string {
 		replacement, end := use.rule.replacing(value, match)
 		out = use.pattern.ExpandString(out, replacement, value, match)
 		last = end
+		if use.rule.wholeLine {
+			out, last = use.rule.restOfLine(out, value, match[0], last)
+		}
 		// An AWS secret may hold a `/`, where the URL rule, which runs before the shape rules,
 		// stopped a password; once the secret is replaced, the password can run on to its `@`.
 		slashed = slashed || slashedAWSSecret(use.rule.expr, value, match)
@@ -583,6 +575,50 @@ func (rule redactionRule) applyOnce(text *redactGate, slot *redactSlot) string {
 		return value
 	}
 	return string(append(out, value[last:]...))
+}
+
+// restOfLine redacts the flag of a wholeLine rule again and again on the rest of the command line
+// a match starting at start took the first flag of, from last, where that match's replacement
+// ended: one search over the line, however many flags it holds. A flag must start on the line, or
+// at the newline ending it, as the rule's lazy run requires; its value can reach the next lines
+// (commandLineEnd). The rule itself cannot find the next flag: its match opens with the command
+// word, which lies before the end of the last match.
+func (rule *redactionRule) restOfLine(out []byte, t string, start, last int) ([]byte, int) {
+	nl := len(t)
+	if i := strings.IndexByte(t[start:], '\n'); i >= 0 {
+		nl = start + i
+	}
+	if last > nl {
+		return out, last
+	}
+	end := commandLineEnd(t, last)
+	redactWorked(end - last)
+	re := rule.flagPattern()
+	from := last
+	for _, m := range re.FindAllStringSubmatchIndex(t[from:end], -1) {
+		for i := range m {
+			if m[i] >= 0 {
+				m[i] += from
+			}
+		}
+		if m[0] > nl {
+			break
+		}
+		out = append(out, t[last:m[0]]...)
+		out = re.ExpandString(out, rule.replacement, t, m)
+		last = m[1]
+	}
+	return out, last
+}
+
+// flagPattern is a wholeLine rule's pattern without the command word and the lazy run after it:
+// the flag and its value, in the same groups.
+func (rule *redactionRule) flagPattern() *regexp.Regexp {
+	const run = `\bcurl\b[^\n]*?`
+	if !strings.Contains(rule.expr, "("+run) {
+		panic("asymptoteobserve: a whole-line rule opens with `curl` and the lazy run of its line: " + rule.expr)
+	}
+	return compiledPattern(strings.Replace(rule.expr, run, "", 1))
 }
 
 // replacing returns the replacement of match in t, and where the text it replaces ends: the

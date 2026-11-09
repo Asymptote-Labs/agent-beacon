@@ -148,6 +148,9 @@ func TestRedactStringRedactsCommonCredentialFormats(t *testing.T) {
 		{"curl long cookie flag", "curl --cookie sessionid=abcdef123456789 https://x", "abcdef123456789"},
 		{"curl cookie flag in a cluster", `curl -sSb "sessionid=abcdef123456789" https://x`, "abcdef123456789"},
 		{"curl second cookie flag on a line", "curl -b 'a=1' --cookie sessionid=abcdef123456789 https://x", "abcdef123456789"},
+		{"curl basic auth given twice", "curl -u a:hunter2hunter2 -u b:opaque-second-pw https://x", "opaque-second-pw"},
+		{"curl user and proxy user", "curl --user a:hunter2hunter2 --proxy-user p:opaque-proxy-pw https://x", "opaque-proxy-pw"},
+		{"curl with many cookie flags", "curl " + strings.Repeat("-b a=1 ", 20) + "-b sessionid=abcdef123456789 https://x", "abcdef123456789"},
 		{"cookie header", "curl -H 'Cookie: sessionid=abcdef123456789; csrftoken=zzz' https://x", "abcdef123456789"},
 		{"set-cookie header", "Set-Cookie: sid=abcdef123456789; HttpOnly", "abcdef123456789"},
 		{"json cookie header", `{"cookie": "sid=abcdef123456789"}`, "abcdef123456789"},
@@ -391,6 +394,8 @@ var redactIdempotenceInputs = []string{
 	"postgres://app:pa55w0rd@db/app",
 	"curl -u admin:hunter2hunter2 -H 'Cookie: sid=abcdef123456789' https://x",
 	"curl -b 'sessionid=abcdef123456789' --cookie sid=abcdef123456789 https://x",
+	"curl -u a:hunter2hunter2 -u b:opaque-second-pw --proxy-user p:opaque-proxy-pw https://x",
+	"curl " + strings.Repeat("-b a=1 ", 20) + "-b sessionid=abcdef123456789 https://x",
 	// A URL whose user name is a secret-named label: the label rules and the URL rule stop at
 	// different bytes, and each used to take one more piece per pass.
 	"https://x-access-token:abc@github.combcn_api_`@host",
