@@ -263,6 +263,7 @@ func TestRedactStringKeepsLabelsAndOrdinaryText(t *testing.T) {
 		"input_tokens: 812, output_tokens=95, max_tokens=4096",
 		"run go test ./... --max-tokens 10",
 		"run go test ./... --max_tokens 10",
+		"vault operator init --num_secret_shares 3",
 		"the author: Ada",
 		"see https://github.com/org/repo/pull/12 and git@github.com:org/repo.git",
 		"PWD=/home/ada/project",
@@ -288,11 +289,31 @@ func TestRedactStringKeepsLabelsAndOrdinaryText(t *testing.T) {
 	if got := RedactString("git clone https://u:pw123456@example.com/r"); got != "git clone https://u:[REDACTED]@example.com/r" {
 		t.Fatalf("URL credential = %q, want the scheme, user and host kept", got)
 	}
-	// An unquoted value stops at a URL query-string delimiter, not just a quote or whitespace: the
-	// generic unquoted-value grammar used to run right through `&`, erasing every parameter after
-	// the secret instead of leaving them as readable, non-secret diagnostic data.
-	if got := RedactString("GET https://api.example.com/v1/data?api_key=sk-liveabcdef0123456789&user=alice&format=json"); got != "GET https://api.example.com/v1/data?api_key=[REDACTED]&user=alice&format=json" {
-		t.Fatalf("URL query string = %q, want only api_key's value redacted and the other parameters kept", got)
+	// A label opened by `?` or `&` is a URL query parameter: its value ends at the next `&` or the
+	// fragment's `#`, so the parameters after the secret stay readable. Only there: after any
+	// other label `&`, `#` and `?` are the value's own characters (TestRedactStringTakesWholeValues).
+	for input, want := range map[string]string{
+		"GET https://api.example.com/v1/data?api_key=sk-liveabcdef0123456789&user=alice&format=json": "GET https://api.example.com/v1/data?api_key=[REDACTED]&user=alice&format=json",
+		"https://x/y?token=SECRET&user=alice#frag":                                                   "https://x/y?token=[REDACTED]&user=alice#frag",
+		"https://x/y?user=alice&access_token=abc#x&password=hunter2&page=2":                          "https://x/y?user=alice&access_token=[REDACTED]#x&password=[REDACTED]&page=2",
+		// `token:` is not a parameter, whose separator is `=`.
+		"https://x/y?token: abc&def": "https://x/y?token: [REDACTED]",
+	} {
+		if got := RedactString(input); got != want {
+			t.Fatalf("URL query string %q = %q, want %q", input, got, want)
+		}
+	}
+	// A diff's removed line can start with what looks like a flag named for a secret. Its `=` is
+	// the assignment's, not the flag's value, so the line keeps it; the value after it is the
+	// label rules' to redact.
+	for input, kept := range map[string]string{
+		"-SECRET_KEY = 'django-insecure-abc'": "-SECRET_KEY = '",
+		"-SECRET_KEY = 'x'":                   "-SECRET_KEY = '",
+		`-API_TOKEN = os.environ["X"]`:        "-API_TOKEN = ",
+	} {
+		if got := RedactString(input); !strings.HasPrefix(got, kept) {
+			t.Fatalf("diff line %q = %q, want it to start with %q", input, got, kept)
+		}
 	}
 	// Detection rules match what kind of credential a line held, so the public type prefix and the
 	// Authorization scheme stay.
@@ -318,6 +339,22 @@ func TestRedactStringIsIdempotent(t *testing.T) {
 		if twice := RedactString(once); twice != once {
 			t.Fatalf("RedactString is not idempotent:\nonce  %q\ntwice %q", once, twice)
 		}
+	}
+}
+
+// A URL whose user name is a secret-named label, with `&` in its password and a query string after
+// it. `x-access-token:` is a label, not a query parameter, so `&` is part of its value, which runs
+// to the whitespace over the host and the query string, as any label's unquoted value does; the
+// URL rule reads that value with the same stops (urlRunsOn), so one pass leaves what a second does.
+func TestRedactStringURLLabelPasswordWithQueryString(t *testing.T) {
+	const input = "git clone https://x-access-token:ab&cd@github.com/o/r?ref=main&user=alice"
+	const want = "git clone https://x-access-token:[REDACTED]"
+	once := RedactString(input)
+	if once != want {
+		t.Fatalf("RedactString(%q) = %q, want %q", input, once, want)
+	}
+	if twice := RedactString(once); twice != once {
+		t.Fatalf("RedactString is not idempotent:\nonce  %q\ntwice %q", once, twice)
 	}
 }
 
@@ -394,6 +431,9 @@ var redactIdempotenceInputs = []string{
 	// is told by place, not by count.
 	"token=abcdefgh12345678 AKIAIOSFODNN7EXAMPLEabcdefgh12345678[REDACTED]",
 	"https://x-access-token:a@b,AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY@host",
+	// `&` in a URL password that a label's value runs on over, and a query string after it.
+	"git clone https://x-access-token:ab&cd@github.com/o/r?ref=main&user=alice",
+	"https://x/y?token=abcdefgh12345678&user=alice#frag&password=x",
 }
 
 // A field named for a credential is one, whatever its value looks like.
@@ -463,13 +503,18 @@ func TestCleanStringRedactsBeforeTruncating(t *testing.T) {
 	}
 }
 
-// A generated password is full of brackets, braces and backslashes, and a quoted one can hold
-// spaces and commas. None of it may survive past the first such character.
+// A generated password is full of brackets, braces, backslashes, `#`, `&` and `?`, and a quoted one
+// can hold spaces and commas. None of it may survive past the first such character.
 func TestRedactStringTakesWholeValues(t *testing.T) {
 	tests := []struct {
 		name, input, want string
 	}{
 		{"unquoted symbols", "DB_PASSWORD=Xy7]kL9}pQ next", "DB_PASSWORD=[REDACTED] next"},
+		{"leading hash", "export DB_PASSWORD=#Xy9kqLmN2pQ", "export DB_PASSWORD=[REDACTED]"},
+		{"hash and ampersand", "password: s3cr3t#tail&more", "password: [REDACTED]"},
+		{"short hash and ampersand", "password: a#b&c", "password: [REDACTED]"},
+		{"query delimiters before a command", "PGPASSWORD=Pa55w0rdAbCd#EfGh&IjKl?MnOp psql", "PGPASSWORD=[REDACTED] psql"},
+		{"question mark", "token=x?y", "token=[REDACTED]"},
 		{"unquoted backslash", `password=ab\cdEFgh`, "password=[REDACTED]"},
 		{"leading bracket", "token=[abcDEF123]", "token=[REDACTED]"},
 		{"quoted with spaces", `secret: "correct horse, battery staple"`, `secret: "[REDACTED]"`},
