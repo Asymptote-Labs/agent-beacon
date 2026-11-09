@@ -127,6 +127,12 @@ func (w jsonlWriter) sanitize(event beaconEvent) beaconEvent {
 	if event.Prompt != nil {
 		event.Prompt.Text = w.cleanString(event.Prompt.Text, asymptoteobserve.DefaultStringLimit)
 	}
+	// Mirrors SanitizeEvent: the run block and the top-level model, repository and branch come from
+	// OTLP resource attributes and the CI environment, where a pull request names its own branch.
+	event.Run = asymptoteobserve.SanitizeRun(event.Run, w.privacyOptions())
+	event.Model = w.cleanString(event.Model, asymptoteobserve.DefaultRawStringLimit)
+	event.Repository = w.cleanString(event.Repository, asymptoteobserve.DefaultRawStringLimit)
+	event.Branch = w.cleanString(event.Branch, asymptoteobserve.DefaultRawStringLimit)
 	if event.MCP != nil {
 		event.MCP = asymptoteobserve.SanitizeMCP(event.MCP, w.privacyOptions())
 	}
