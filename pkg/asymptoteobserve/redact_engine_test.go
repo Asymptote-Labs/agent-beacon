@@ -339,6 +339,9 @@ func TestRedactionWorkIsLinear(t *testing.T) {
 	texts["curl cookies on one line"] = func(n int) string { return "curl" + repeatTo(" -b a=1", n) }
 	texts["curl cookies that never close"] = func(n int) string { return "curl -b a=1" + repeatTo(" -b 'x", n) }
 	texts["curl lines with flags"] = func(n int) string { return repeatTo("curl -b a=1 -u a:b -b 'x\n", n) }
+	// URLs whose scheme a Bearer token took, and replaced schemes with no password after them.
+	texts["URLs after Bearer tokens"] = func(n int) string { return repeatTo("Bearer a://u:p@h ", n) }
+	texts["replaced schemes without passwords"] = func(n int) string { return "[REDACTED]://u:" + repeatTo("[REDACTED]://u:", n) }
 	for name, text := range texts {
 		work := func(n int) int {
 			total := 0

@@ -810,11 +810,12 @@ func RedactString(value string) string {
 // (`token` names an auth scheme) and never sees `token":0`; the rule for unquoted labels then
 // replaces `seCret`, the label that hid it, and only the next pass redacted `0`. Copies of
 // assigned values, replaced after every rule has run, can be where a match starts or ends
-// (copyHidesMatch); and the URL rule stops a password at a `/` in an AWS secret, which the shape
-// rules replace after it. Such text is redacted again until it stops changing, as every later call
-// would redact it. A pass can only uncover what the one before hid; texts the tests and fuzzing
-// have tried took at most three passes that change them, and redactMaxPasses keeps the cost
-// linear whatever the text.
+// (copyHidesMatch); the URL rule stops a password at a `/` in an AWS secret, which the shape
+// rules replace after it; and a password after a replaced scheme is replaced only once every rule
+// has run (redactPasswordsAfterMarkers). Such text is redacted again until it stops changing, as
+// every later call would redact it. A pass can only uncover what the one before hid; texts the
+// tests and fuzzing have tried took at most three passes that change them, and redactMaxPasses
+// keeps the cost linear whatever the text.
 func redactString(value string, gated bool) string {
 	for pass := 1; ; pass++ {
 		out, hidden := redactPass(value, gated)
@@ -867,8 +868,62 @@ func redactPass(value string, gated bool) (string, bool) {
 	replaced, glued := replaceAssigned(text.value, assigned)
 	hidden := text.hidden || replaced != text.value && copyHidesMatch(assigned, glued)
 	out, slashed := engine.redactAfterMarkers(replaced)
-	return out, hidden || slashed && strings.Contains(out, "://")
+	hidden = hidden || slashed && strings.Contains(out, "://")
+	if after := redactPasswordsAfterMarkers(out); after != out {
+		return after, true
+	}
+	return out, hidden
 }
+
+// redactPasswordsAfterMarkers replaces the password of a URL whose scheme a rule replaced: the
+// Bearer rule's token stops at a `:`, so of `Bearer postgres://user:pw@host` it takes the scheme,
+// and the URL rule, which needs a scheme before `://`, finds none in what is left. A copy of an
+// assigned value or a token can be replaced right before `://` too. It runs once every rule has
+// run and copies are replaced, on what a pass would return, so it only ever adds a replacement:
+// `Bearer [REDACTED]://user:[REDACTED]@host`. The user name and password are read as the URL rule
+// reads them.
+func redactPasswordsAfterMarkers(t string) string {
+	const scheme = redactedValue + "://"
+	var out []byte
+	last := 0
+	for from := 0; ; {
+		i := strings.Index(t[from:], scheme)
+		if i < 0 {
+			break
+		}
+		user := from + i + len(scheme)
+		from = user
+		colon := user
+		for colon < len(t) && strings.IndexByte(redactUserStops, t[colon]) < 0 {
+			colon++
+		}
+		if colon == len(t) || t[colon] != ':' {
+			redactWorked(colon - user)
+			continue
+		}
+		at := colon + 1
+		for at < len(t) && strings.IndexByte(redactPasswordStops, t[at]) < 0 {
+			at++
+		}
+		redactWorked(at - user)
+		if at == colon+1 || at == len(t) || t[at] != '@' {
+			continue
+		}
+		out = append(append(append(out, t[last:colon+1]...), redactedValue...), '@')
+		last, from = at+1, at+1
+	}
+	if out == nil {
+		return t
+	}
+	return string(append(out, t[last:]...))
+}
+
+// redactUserStops and redactPasswordStops end a URL's user name and password as the URL rule reads
+// them: `[^/\s:@"'<>]*:` and `[^@/\s"'<>]+@`.
+const (
+	redactUserStops     = `/:@"'<>` + regexpSpace
+	redactPasswordStops = `@/"'<>` + regexpSpace
+)
 
 // copyHidesMatch reports whether replacing copies of assigned values, which happens after every
 // rule has run, may have made a match where the rules found none: where a copy that starts with a
