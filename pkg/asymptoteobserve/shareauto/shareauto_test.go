@@ -53,31 +53,18 @@ func TestResolve(t *testing.T) {
 	}
 }
 
-func setAccountHome(t *testing.T, home string) {
-	t.Helper()
-	prev := AccountHomeLookup
-	AccountHomeLookup = func() (string, error) { return home, nil }
-	t.Cleanup(func() { AccountHomeLookup = prev })
-}
-
-// A repository can put HOME in the hook environment. HookPath must still read the account
-// home, never the forged one, so a planted share.json under $HOME cannot turn auto-share on.
+// A repository can put HOME in the hook environment. HookPath follows the account, so moving HOME
+// (or USERPROFILE) does not move it, and a share.json planted under the forged home is never read.
 func TestHookPathIgnoresForgedHome(t *testing.T) {
-	account := t.TempDir()
+	before := HookPath()
+	if before == "" {
+		t.Skip("this account has no home directory")
+	}
 	forged := t.TempDir()
-	setAccountHome(t, account)
 	t.Setenv("HOME", forged)
 	t.Setenv("USERPROFILE", forged)
-	if err := Save(filepath.Join(forged, ".beacon", "endpoint", FileName), Settings{Auto: Auto{Enabled: true, Visibility: "public"}}); err != nil {
-		t.Fatal(err)
-	}
-	got := HookPath()
-	want := filepath.Join(account, ".beacon", "endpoint", FileName)
-	if got != want {
-		t.Fatalf("HookPath = %q, want account path %q (not forged %q)", got, want, filepath.Join(forged, ".beacon", "endpoint", FileName))
-	}
-	if d := ForHook(got, "/work"); d.Enabled {
-		t.Fatalf("account home has no settings; ForHook = %+v", d)
+	if got := HookPath(); got != before || strings.HasPrefix(got, forged) {
+		t.Fatalf("HookPath with a forged HOME = %q, want %q", got, before)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/accounthome"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/activesession"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/shareauto"
 )
@@ -120,11 +121,13 @@ func TestAutoShareOffWritesNothing(t *testing.T) {
 	}
 }
 
+// setAccountHome stands in for the account's own home, so these tests never read the real
+// ~/.beacon/endpoint/share.json of whoever runs them.
 func setAccountHome(t *testing.T, home string) {
 	t.Helper()
-	prev := shareauto.AccountHomeLookup
-	shareauto.AccountHomeLookup = func() (string, error) { return home, nil }
-	t.Cleanup(func() { shareauto.AccountHomeLookup = prev })
+	prev := accounthome.Dir
+	accounthome.Dir = func() (string, error) { return home, nil }
+	t.Cleanup(func() { accounthome.Dir = prev })
 }
 
 // The hook's environment can come from the repository, so the settings-file override must not point
@@ -150,7 +153,7 @@ func TestAutoShareIgnoresRepoSuppliedSettingsPath(t *testing.T) {
 }
 
 // A forged HOME with auto-share enabled under it must not publish sessions: HookPath reads the
-// account home, which has no settings here.
+// account's home, which has no settings here.
 func TestAutoShareIgnoresForgedHome(t *testing.T) {
 	logPath := shareAutoHookEnv(t, nil)
 	account := t.TempDir()
