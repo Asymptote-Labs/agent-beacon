@@ -138,21 +138,33 @@ func inSandbox(label, p, name string) string {
 			return p
 		}
 	}
-	if strings.TrimSpace(os.Getenv("BEACON_ORIGIN")) == "cloud" {
+	if inCloudSandbox() {
 		fmt.Fprintf(os.Stderr, "beacon-hooks: cloud shuttle ignores %s %s outside %s; using %s\n", label, p, SandboxDir, fallback)
 	}
 	return fallback
 }
 
+// inCloudSandbox reports whether the hook says it runs in a cloud sandbox (BEACON_ORIGIN=cloud),
+// the only place the shuttle acts. The marker comes from the same environment as BEACON_CLOUD_*,
+// so it keeps a local install that happens to carry those variables from uploading; it does not
+// stop a repository that sets both. That case is bounded by inSandbox, which keeps the shuttle to
+// the sandbox's own files.
+func inCloudSandbox() bool {
+	return strings.TrimSpace(os.Getenv("BEACON_ORIGIN")) == "cloud"
+}
+
 func MaybeUpload(ctx context.Context, force bool) error {
+	if !inCloudSandbox() {
+		return nil
+	}
 	return Upload(ctx, ConfigFromEnv(), force)
 }
 
 func ResetFromEnv() error {
-	cfg := ConfigFromEnv()
-	if strings.TrimSpace(os.Getenv("BEACON_ORIGIN")) != "cloud" {
+	if !inCloudSandbox() {
 		return nil
 	}
+	cfg := ConfigFromEnv()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	release, err := lockUpload(ctx, cfg.StatePath)

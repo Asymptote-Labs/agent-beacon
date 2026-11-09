@@ -7,7 +7,16 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compareVersions, crxIdFromPublicKey, feedVersion, feedXml, packCrx, readCrx } from '../../tools/pack-crx.mjs';
+import {
+  compareVersions,
+  crxAssetName,
+  crxIdFromPublicKey,
+  feedVersion,
+  feedXml,
+  newestSignedVersion,
+  packCrx,
+  readCrx,
+} from '../../tools/pack-crx.mjs';
 
 const tool = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'tools', 'pack-crx.mjs');
 const rsaPem = () =>
@@ -86,6 +95,23 @@ describe('update feed', () => {
     expect(() => feedXml({ ...ok, version: '0.2.0-rc1' })).toThrow('version');
     expect(() => feedXml({ ...ok, codebase: 'file:///tmp/x.crx' })).toThrow('http(s)');
     expect(() => feedXml({ ...ok, sha256: 'A'.repeat(64) })).toThrow('SHA-256');
+  });
+
+  it('offers the newest published release that carries a signed build', () => {
+    const signed = (v: string) => [crxAssetName(v), `${crxAssetName(v)}.sha256`, `agent-beacon-browser-extension-${v}-chrome.zip`];
+    expect(
+      newestSignedVersion([
+        { tag: 'ext-v0.2.0', assets: signed('0.2.0') },
+        { tag: 'ext-v0.10.0', assets: signed('0.10.0') },
+        { tag: 'ext-v0.9.0', assets: signed('0.9.0') },
+        { tag: 'ext-v0.11.0', draft: true, assets: signed('0.11.0') }, // not published
+        { tag: 'ext-v0.12.0', assets: [crxAssetName('0.12.0')] }, // CRX without its checksum
+        { tag: 'ext-v0.1.1', assets: ['agent-beacon-browser-extension-0.1.1-chrome.zip'] }, // before signing
+        { tag: 'v1.3.60', assets: signed('1.3.60') }, // a CLI release
+        { tag: 'ext-updates', assets: ['updates.xml'] },
+      ]),
+    ).toBe('0.10.0');
+    expect(newestSignedVersion([{ tag: 'ext-v0.1.1', assets: [] }])).toBeUndefined();
   });
 
   it('compares dotted versions numerically', () => {

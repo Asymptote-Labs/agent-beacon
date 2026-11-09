@@ -143,12 +143,7 @@ For IT-managed fleets, Chromium browsers can install an extension without user a
 
 Beacon has not verified an enterprise policy path for Opera, Vivaldi, or Arc. Check the vendor's current enterprise documentation, and test on one machine, before relying on policy there.
 
-Each `ExtensionInstallForcelist` entry is `<extension id>;<update URL>`. Two things block force-install today:
-
-- **There is no update URL to point at.** The extension is not in the Chrome Web Store or Microsoft Edge Add-ons, and Beacon does not publish a signed `.crx` with an update manifest. Force-install needs one of those.
-- **There is no stable extension ID.** An unpacked extension's ID is derived from the folder it was loaded from, because the manifest carries no `key`. A policy has nothing fixed to name until the extension is packaged with a key or listed in a store.
-
-Until then, distribution is load-unpacked. Managed profiles can also block developer mode, which blocks **Load unpacked**. If your fleet does, allow developer mode for the profiles that should run the extension, or wait for a store listing.
+The signed build and its update feed work with any of these policies: name extension ID `omjgmakjpomopmmpdgmjbfojhbgdgijc` with the update URL `https://github.com/Asymptote-Labs/agent-beacon/releases/download/ext-updates/updates.xml`. [Deploy with Chrome policy](/runtimes/browser-extension-chrome-policy) walks through it for Google Chrome, including locking the extension's settings and hosting your own copy. Beacon has tested that path in Google Chrome only; in another browser, use its own policy location from the table above and test on one machine first.
 
 ## Related
 

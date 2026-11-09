@@ -53,6 +53,21 @@ func TestResolve(t *testing.T) {
 	}
 }
 
+// A repository can put HOME in the hook environment. HookPath follows the account, so moving HOME
+// (or USERPROFILE) does not move it, and a share.json planted under the forged home is never read.
+func TestHookPathIgnoresForgedHome(t *testing.T) {
+	before := HookPath()
+	if before == "" {
+		t.Skip("this account has no home directory")
+	}
+	forged := t.TempDir()
+	t.Setenv("HOME", forged)
+	t.Setenv("USERPROFILE", forged)
+	if got := HookPath(); got != before || strings.HasPrefix(got, forged) {
+		t.Fatalf("HookPath with a forged HOME = %q, want %q", got, before)
+	}
+}
+
 func TestForHookAndSave(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "endpoint", FileName)
 	if d := ForHook(path, "/x"); d.Enabled {

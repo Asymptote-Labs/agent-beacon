@@ -12,14 +12,17 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/accounthome"
 )
 
 // spoolDirInHome is where a writer's spools live, under its account's home directory.
 const spoolDirInHome = ".beacon/endpoint/spool"
 
-// DefaultSpoolDir is the current account's spool directory, or "" when it has no home.
+// DefaultSpoolDir is the current account's spool directory, or "" when it has no home. The home
+// comes from the account, not the environment: a process started under other credentials can
+// inherit its parent's HOME or USERPROFILE, which would point the spool at a home it cannot write.
 func DefaultSpoolDir() string {
-	home, err := accountHome()
+	home, err := accounthome.Dir()
 	if err != nil || home == "" {
 		return ""
 	}
