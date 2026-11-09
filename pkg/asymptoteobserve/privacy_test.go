@@ -78,6 +78,14 @@ func TestSanitizeEventRedactsAndTruncates(t *testing.T) {
 	event.Prompt = &PromptInfo{Text: "token=prompt-secret"}
 	event.GenAI = &GenAIInfo{SystemInstructions: SystemInstructionParts("token=system-instructions-secret")}
 	event.Raw = map[string]interface{}{"nested": map[string]interface{}{"token": "token=raw-secret"}}
+	event.Model = "token=model-secret"
+	event.Repository = "token=repository-secret"
+	event.Branch = strings.Repeat("b", 3000)
+	event.Run = &RunInfo{Branch: "feature/AKIAABCDEFGHIJKLMNOP", PR: "token=pr-secret"}
+	event.VCS = &VCSInfo{
+		Ref:        &VCSRefInfo{Head: &VCSRefHeadInfo{Name: "token=vcs-branch-secret"}},
+		Repository: &VCSRepositoryInfo{URL: &VCSRepositoryURLInfo{Full: "https://example.com/r?token=vcs-url-secret"}},
+	}
 
 	sanitized := SanitizeEvent(event, 64*1024)
 	data, err := json.Marshal(sanitized)
@@ -85,13 +93,16 @@ func TestSanitizeEventRedactsAndTruncates(t *testing.T) {
 		t.Fatalf("marshal sanitized event: %v", err)
 	}
 	text := string(data)
-	for _, secret := range []string{"message-secret", "command-secret", "policy-secret", "prompt-secret", "system-instructions-secret", "raw-secret"} {
+	for _, secret := range []string{
+		"message-secret", "command-secret", "policy-secret", "prompt-secret", "system-instructions-secret", "raw-secret",
+		"model-secret", "repository-secret", "AKIAABCDEFGHIJKLMNOP", "pr-secret", "vcs-branch-secret", "vcs-url-secret",
+	} {
 		if strings.Contains(text, secret) {
 			t.Fatalf("secret %q was not redacted: %s", secret, text)
 		}
 	}
-	if len(sanitized.Tool.Path) > DefaultRawStringLimit {
-		t.Fatalf("tool path was not truncated: %d", len(sanitized.Tool.Path))
+	if len(sanitized.Tool.Path) > DefaultRawStringLimit || len(sanitized.Branch) > DefaultRawStringLimit {
+		t.Fatalf("tool path or branch was not truncated: %d, %d", len(sanitized.Tool.Path), len(sanitized.Branch))
 	}
 }
 

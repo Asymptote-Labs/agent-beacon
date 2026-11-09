@@ -110,6 +110,33 @@ func TestNewExporterAcceptsDeprecatedContentRetention(t *testing.T) {
 	}
 }
 
+// The run block and the top-level model, repository and branch come from resource attributes and
+// the CI environment, where a pull request names its own branch. They are redacted and capped like
+// every other attribute string: a credential in one does not reach the line, and a branch name past
+// the event size limit no longer makes the whole event unwritable.
+func TestJSONLWriterSanitizesRunAndMetadata(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.jsonl")
+	writer := jsonlWriter{path: path, maxEventBytes: defaultMaxEventBytes, rotateBytes: defaultRotateBytes, rotateArchives: defaultRotateArchives, redactSecrets: true}
+
+	event := newBeaconEvent("tool.invoked", "tool", "info", "test", time.Now())
+	event.Model = "token=model-secret"
+	event.Repository = "https://example.com/repo?token=repository-secret"
+	event.Branch = strings.Repeat("b", defaultMaxEventBytes+1)
+	event.Run = &beaconevent.RunInfo{Branch: "feature/AKIAABCDEFGHIJKLMNOP", PR: "token=pr-secret"}
+	if err := writer.append(event); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"model-secret", "repository-secret", "AKIAABCDEFGHIJKLMNOP", "pr-secret"} {
+		if strings.Contains(string(data), secret) {
+			t.Fatalf("%q reached the log: %s", secret, data)
+		}
+	}
+}
+
 func TestIntAttrRejectsOutOfRangeString(t *testing.T) {
 	attrs := map[string]interface{}{"value": "9223372036854775808"}
 	if got, ok := intAttr(attrs, "value"); ok {
