@@ -1,0 +1,6 @@
+gateways:
+  - type: litellm
+    addr: 127.0.0.1:4019
+outputs:
+  - jsonl: gateway-findings.jsonl
+    kinds: [finding]
