@@ -103,7 +103,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for f in manifest.json sw.js content.js interceptor.js \
+          for f in manifest.json managed_schema.json sw.js content.js interceptor.js \
                    popup.html popup.js options.html options.js; do
             test -s "dist/$f" || { echo "missing or empty dist/$f"; exit 1; }
           done
@@ -186,6 +186,56 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: browser-extension-playwright-report-${{ matrix.browser }}
+          path: |
+            browser-extension/playwright-report/
+            browser-extension/test-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+  # The self-hosted install path: Chrome policy force-installs a CRX signed by
+  # tools/pack-crx.mjs from a local update feed, with every other extension
+  # blocked and the settings locked through managed storage. Branded Google
+  # Chrome, because that is what fleets run and it no longer loads unpacked
+  # extensions from the command line. Linux reads machine policy from /etc with
+  # no device-management check, and the runner's passwordless sudo writes it.
+  browser-extension-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BROWSER_CHANNEL: chrome
+      POLICY_E2E: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: browser-extension/package-lock.json
+
+      - name: Install extension dependencies
+        working-directory: browser-extension
+        run: npm ci
+
+      - name: Build extension
+        working-directory: browser-extension
+        run: npm run build
+
+      # Google Chrome stable from Google's apt repository, plus its system
+      # libraries. It installs outside ~/.cache/ms-playwright, so there is
+      # nothing to cache.
+      - name: Install Google Chrome for Playwright
+        working-directory: browser-extension
+        run: npx playwright install --with-deps chrome
+
+      - name: Policy install e2e
+        working-directory: browser-extension
+        run: npx playwright test e2e/policy-install.spec.ts
+
+      - name: Upload Playwright report and traces
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-extension-policy-playwright-report
           path: |
             browser-extension/playwright-report/
             browser-extension/test-results/

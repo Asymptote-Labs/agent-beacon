@@ -19,6 +19,26 @@ func setupHookOnlyDiscovery(t *testing.T) string {
 	return home
 }
 
+func TestDiscoverAntigravityDetectsAgyOnPath(t *testing.T) {
+	testenv.RequirePOSIXExecutableFixtures(t)
+	home := setupHookOnlyDiscovery(t)
+	t.Chdir(home)
+	binDir := t.TempDir()
+	t.Setenv("PATH", binDir)
+	agyPath := filepath.Join(binDir, "agy")
+	if err := os.WriteFile(agyPath, []byte("#!/bin/sh\necho agy 1.5.1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	got := DiscoverAntigravity()
+	if !got.Detected || got.ExecutablePath != agyPath || got.Version != "agy 1.5.1" {
+		t.Fatalf("DiscoverAntigravity() = %#v, want agy discovered on PATH", got)
+	}
+	if got.TelemetryStatus != TelemetryMissing {
+		t.Fatalf("TelemetryStatus = %q, want %q", got.TelemetryStatus, TelemetryMissing)
+	}
+}
+
 func TestDiscoverKiroDetectsProfileDirectory(t *testing.T) {
 	home := setupHookOnlyDiscovery(t)
 	if err := os.MkdirAll(filepath.Join(home, ".kiro"), 0755); err != nil {

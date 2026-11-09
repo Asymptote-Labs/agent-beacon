@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Agent Beacon — Browser Collector",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Relays LLM chat telemetry (Claude, ChatGPT) into the local Agent Beacon pipeline.",
+  "update_url": "https://github.com/Asymptote-Labs/agent-beacon/releases/download/ext-updates/updates.xml",
   "permissions": ["storage", "alarms"],
   "host_permissions": [
     "https://claude.ai/*",
@@ -11,6 +12,9 @@
     "http://127.0.0.1/*",
     "http://localhost/*"
   ],
+  "storage": {
+    "managed_schema": "managed_schema.json"
+  },
   "background": {
     "service_worker": "sw.js"
   },

@@ -94,7 +94,7 @@ func DiscoverAll() []Harness {
 
 func DiscoverAntigravity() Harness {
 	h := Harness{Name: "antigravity_cli", DisplayName: "Antigravity CLI", Capability: "hooks"}
-	detectExecutable(&h, "antigravity", "antigravity-cli")
+	detectExecutable(&h, "antigravity", "antigravity-cli", "agy")
 	home, _ := os.UserHomeDir()
 	userConfig := filepath.Join(home, ".gemini", "config", "hooks.json")
 	projectConfig := filepath.Join(".agents", "hooks.json")
