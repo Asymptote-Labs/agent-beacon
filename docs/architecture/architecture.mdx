@@ -72,7 +72,7 @@ The generated pipeline receives logs, traces, and metrics locally, batches them,
 
 Logs, traces, metrics, resource attributes, and hook payloads are mapped into one event model through the `beaconjson` exporter and the hook adapter. Every event carries a stable action plus the typed context its source provided: endpoint, user, harness, origin, run, session, tool, command, file, MCP, approval, policy, prompt, content, token usage, and destination.
 
-Two provenance markers travel with every event so a reader can tell how it was obtained: `harness.collection_method` records the mechanism (`hook`, `otlp`, `plugin`, `poll`) and `event.fidelity` records whether the runtime named the action (`observed`) or Beacon derived it (`inferred`). See [Normalization](/telemetry-schema/normalization) and the [endpoint event schema](/telemetry-schema/event-schema).
+Two provenance markers travel with every event so a reader can tell how it was obtained: `harness.collection_method` records the mechanism (`hook`, `otlp`, `plugin`, `poll`, `gateway`) and `event.fidelity` records whether the runtime named the action (`observed`) or Beacon derived it (`inferred`). See [Normalization](/telemetry-schema/normalization) and the [endpoint event schema](/telemetry-schema/event-schema).
 
 Generic process and runtime OTLP metrics are filtered out of the log by default so timelines stay focused on prompts, tools, approvals, and file activity. Use `--include-runtime-metrics` when low-level process, runtime, or harness metrics are required.
 
