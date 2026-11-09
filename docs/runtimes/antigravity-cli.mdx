@@ -59,7 +59,7 @@ Antigravity can invoke a pre-tool hook before its transcript file contains reada
 
 Restart Antigravity after installing or removing hooks so new sessions pick up the updated hook configuration.
 
-If an older install wrote grouped lifecycle handlers, rerun the hook installer at the same level to refresh the managed block.
+Package repair refreshes older managed user-level hooks that used grouped lifecycle handlers. For project-level or manual installs, rerun the hook installer at the same level to refresh the managed block.
 
 If Antigravity telemetry is missing, check the selected hook level, confirm the hook file contains commands with `--platform antigravity`, and run `beacon endpoint hooks status --harness antigravity`.
 

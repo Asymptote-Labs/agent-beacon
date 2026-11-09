@@ -82,8 +82,8 @@ func TestInstallAntigravityHooksReplacesManagedBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if isAntigravityInstalledAt(path) {
-		t.Error("legacy grouped Stop reported as installed")
+	if !isAntigravityInstalledAt(path) {
+		t.Error("managed legacy grouped Stop must remain eligible for repair")
 	}
 	if err := installAntigravityHooks(path, "/tmp/new-beacon-hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
 		t.Fatalf("installAntigravityHooks returned error: %v", err)
@@ -194,6 +194,7 @@ func TestAntigravityConfigHasEndpointHook(t *testing.T) {
 		{"legacy", `{"beacon-endpoint":{"Stop":[{"hooks":[{` + command + `}]}],"PreToolUse":[{"hooks":[{` + command + `}]}]}}`, false},
 		{"unsupported event", `{"beacon-endpoint":{"UserPromptSubmit":[{` + command + `}]}}`, false},
 		{"custom block", `{"custom":{"Stop":[{` + command + `}]}}`, true},
+		{"custom block with non-command handler", `{"custom":{"Stop":[{"type":"other"},{` + command + `}]}}`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := AntigravityConfigHasEndpointHook([]byte(tc.config))

@@ -30,9 +30,10 @@ type antigravityHookGroup struct {
 }
 
 type antigravityHookRef struct {
-	Type    string `json:"type,omitempty"`
-	Command string `json:"command"`
-	Timeout int    `json:"timeout,omitempty"`
+	Type    string               `json:"type,omitempty"`
+	Command string               `json:"command"`
+	Timeout int                  `json:"timeout,omitempty"`
+	Hooks   []antigravityHookRef `json:"hooks,omitempty"`
 }
 
 type antigravityHookBlock struct {
@@ -173,7 +174,7 @@ func isAntigravityInstalledAt(path string) bool {
 	if !ok {
 		return false
 	}
-	return hasAntigravityEndpointHook(raw)
+	return hasAntigravityEndpointHook(raw, true)
 }
 
 func AntigravityConfigHasEndpointHook(data []byte) (bool, error) {
@@ -182,37 +183,42 @@ func AntigravityConfigHasEndpointHook(data []byte) (bool, error) {
 		return false, err
 	}
 	for _, block := range blocks {
-		if hasAntigravityEndpointHook(block) {
+		if hasAntigravityEndpointHook(block, false) {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-func hasAntigravityEndpointHook(raw json.RawMessage) bool {
+func hasAntigravityEndpointHook(raw json.RawMessage, allowLegacy bool) bool {
 	var block antigravityHookBlock
 	if err := json.Unmarshal(raw, &block); err != nil {
 		return false
 	}
-	handlers := [][]antigravityHookRef{
+	directHandlers := [][]antigravityHookRef{
 		block.SessionStart,
 		block.PreInvocation,
 		block.PostInvocation,
 		block.Stop,
 	}
-	for _, groups := range [][]antigravityHookGroup{block.PreToolUse, block.PostToolUse} {
-		for _, group := range groups {
-			handlers = append(handlers, group.Hooks)
+	found := false
+	for _, hooks := range directHandlers {
+		for _, hook := range hooks {
+			if hook.Hooks != nil {
+				if !allowLegacy {
+					return false
+				}
+				for _, legacy := range hook.Hooks {
+					found = found || hookcmd.IsEndpointHook(legacy.Command, "antigravity")
+				}
+			}
+			found = found || hookcmd.IsEndpointHook(hook.Command, "antigravity")
 		}
 	}
-	found := false
-	for _, hooks := range handlers {
-		for _, hook := range hooks {
-			if hook.Command == "" {
-				return false
-			}
-			if hookcmd.IsEndpointHook(hook.Command, "antigravity") {
-				found = true
+	for _, groups := range [][]antigravityHookGroup{block.PreToolUse, block.PostToolUse} {
+		for _, group := range groups {
+			for _, hook := range group.Hooks {
+				found = found || hookcmd.IsEndpointHook(hook.Command, "antigravity")
 			}
 		}
 	}
