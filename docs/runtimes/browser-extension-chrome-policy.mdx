@@ -345,7 +345,8 @@ If Chrome can't reach GitHub, or you want to approve each version before it reac
     BeaconRuntime_CL
     | where HarnessName in ("claude_web", "chatgpt_web")
     | extend Event = todynamic(tostring(RawData))
-    | project TimeGenerated, HarnessName, EventAction, ContentRetention,
+    | project TimeGenerated, HarnessName, EventAction,
+        Retention = tostring(Event.raw.attributes["beacon.content.retention"]),
         Prompt = tostring(Event.prompt.text), Answer = tostring(Event.gen_ai.output.messages)
     ```
   </Accordion>

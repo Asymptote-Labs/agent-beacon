@@ -226,7 +226,7 @@ Coverage that is the same for both sites:
 | Approval telemetry | Not available. Neither site exposes approval decisions to a page script |
 | Session lifecycle | Partial. Turns are correlated by conversation id; there is no session start or stop signal |
 | Local JSONL and dashboard | Supported after events reach the collector |
-| MDM deployment | Through browser policy, not Beacon's MDM assets. Google Chrome force-installs the signed build with locked settings; see [Deploy with Chrome policy](/runtimes/browser-extension-chrome-policy). Firefox uses [`ExtensionSettings`](#firefox-enterprise-policy) with a signed `.xpi` |
+| MDM deployment | Through browser policy, not Beacon's MDM assets. Google Chrome force-installs the signed build with locked settings; see [Deploy with Chrome policy](/runtimes/browser-extension-chrome-policy). Firefox can use [`ExtensionSettings`](#firefox-enterprise-policy) once a signed `.xpi` is published |
 | Browser attribution | Supported. `user_agent.name` and `user_agent.version` name the browser on every event |
 
 Tool telemetry and token usage differ by site. See [Claude.ai](/runtimes/claude-web) and [ChatGPT](/runtimes/chatgpt-web).
