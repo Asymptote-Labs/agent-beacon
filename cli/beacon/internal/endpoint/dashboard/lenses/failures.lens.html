@@ -66,10 +66,23 @@
     return typeof code === "number" ? code : null;
   }
 
-  // A failure is a non-zero exit, an error the runtime reported on the event, or an error event.
+  // A failure is a non-zero exit, or what the MCP Calls lens counts as failed: an error the runtime
+  // recorded on the event, an error event or failed action (session-store mappers write tool.failed
+  // without error), or a result that says isError or carries an error member.
   function isFailure(event) {
     var code = exitCode(event);
-    return (code !== null && code !== 0) || !!(event.error && event.error.type) || event.type === "error";
+    if (code !== null && code !== 0) return true;
+    if (event.error && event.error.type) return true;
+    if (event.type === "error" || /error|fail/i.test(String(event.action || ""))) return true;
+    var result = event.tool && event.tool.result;
+    if (!result || typeof result !== "object") return false;
+    if (result.isError === true || result.is_error === true || String(result.isError) === "true") return true;
+    return result.error !== undefined && result.error !== null && result.error !== false && result.error !== "";
+  }
+
+  // A pre-call event (tool.invoked, tool.started) only says a call began, so it is never an outcome.
+  function isOutcome(event) {
+    return event.type !== "tool_call" || isFailure(event);
   }
 
   function kind(event) {
@@ -100,18 +113,25 @@
     try { return JSON.stringify(value, null, 2); } catch (e) { return String(value); }
   }
 
-  // The output that explains the failure, or why there is none to show.
+  function withheld(content) {
+    if (!content || content.included || !(content.hash || content.bytes)) return null;
+    var size = [content.bytes ? number.format(content.bytes) + " bytes" : "", content.hash || ""].filter(Boolean).join(", ");
+    return { note: "Output not retained (" + size + ")." };
+  }
+
+  // The output that explains the failure, or why there is none to show. Output that was not kept
+  // leaves no command.output at all; its size and hash are on the event's content.
   function output(event) {
     var out = event.command && event.command.output;
-    if (out) {
-      if (out.included && out.text) return { text: out.text };
-      if (out.hash || out.bytes) return { note: "Output not retained" + (out.bytes ? " (" + number.format(out.bytes) + " bytes" + (out.hash ? ", " + out.hash : "") + ")" : "") + "." };
-    }
+    if (out && out.included && out.text) return { text: out.text };
     var result = event.tool && text(event.tool.result);
     if (result) return { text: result };
     var content = event.content;
     if (content && content.included && content.text) return { text: content.text };
-    if (event.summary && event.summary !== event.action) return { text: event.summary };
+    var note = withheld(out) || withheld(content);
+    if (note) return note;
+    // Only an error event's message describes the failure; on a command or tool it is a label.
+    if (kind(event) === "error" && event.summary && event.summary !== event.action) return { text: event.summary };
     return null;
   }
 
@@ -122,7 +142,7 @@
     var again = null;
     for (var i = index + 1; i < events.length; i++) {
       var e = events[i];
-      if (subject(e) !== key || kind(e) !== kind(events[index])) continue;
+      if (!isOutcome(e) || subject(e) !== key || kind(e) !== kind(events[index])) continue;
       if (!isFailure(e)) return { ok: true, event: e };
       if (!again) again = e;
     }
