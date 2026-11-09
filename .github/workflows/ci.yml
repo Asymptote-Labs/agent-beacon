@@ -103,7 +103,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for f in manifest.json sw.js content.js interceptor.js \
+          for f in manifest.json managed_schema.json sw.js content.js interceptor.js \
                    popup.html popup.js options.html options.js; do
             test -s "dist/$f" || { echo "missing or empty dist/$f"; exit 1; }
           done
@@ -186,6 +186,56 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: browser-extension-playwright-report-${{ matrix.browser }}
+          path: |
+            browser-extension/playwright-report/
+            browser-extension/test-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+  # The self-hosted install path: Chrome policy force-installs a CRX signed by
+  # tools/pack-crx.mjs from a local update feed, with every other extension
+  # blocked and the settings locked through managed storage. Branded Google
+  # Chrome, because that is what fleets run and it no longer loads unpacked
+  # extensions from the command line. Linux reads machine policy from /etc with
+  # no device-management check, and the runner's passwordless sudo writes it.
+  browser-extension-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BROWSER_CHANNEL: chrome
+      POLICY_E2E: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: browser-extension/package-lock.json
+
+      - name: Install extension dependencies
+        working-directory: browser-extension
+        run: npm ci
+
+      - name: Build extension
+        working-directory: browser-extension
+        run: npm run build
+
+      # Google Chrome stable from Google's apt repository, plus its system
+      # libraries. It installs outside ~/.cache/ms-playwright, so there is
+      # nothing to cache.
+      - name: Install Google Chrome for Playwright
+        working-directory: browser-extension
+        run: npx playwright install --with-deps chrome
+
+      - name: Policy install e2e
+        working-directory: browser-extension
+        run: npx playwright test e2e/policy-install.spec.ts
+
+      - name: Upload Playwright report and traces
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-extension-policy-playwright-report
           path: |
             browser-extension/playwright-report/
             browser-extension/test-results/
@@ -697,6 +747,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # Fast and needs nothing built: the install script's arguments, against a stub binary.
+      - name: Validate the packaging scripts
+        run: sh packaging/linux/test-endpoint-scripts.sh
       - uses: ./.github/actions/setup-go
         with:
           # The exporter is listed because builder.yaml compiles it into the
@@ -753,7 +806,7 @@ jobs:
           yq '(.builds[].goos) = ["linux"] | (.builds[].goarch) = ["amd64"] | del(.builds[].ignore)' \
             .goreleaser.yaml > "$RUNNER_TEMP/goreleaser-linux-amd64.yaml"
           goreleaser release --config "$RUNNER_TEMP/goreleaser-linux-amd64.yaml" \
-            --snapshot --clean --skip=publish,homebrew,announce --parallelism 1
+            --snapshot --clean --skip=publish,homebrew,announce,sign --parallelism 1
       # Every generated Vector pack has to load in the Vector the packages ship. Vector 0.57 and 0.58
       # changed how ${VAR} expands and broke most of them with no Beacon change at all. Uses the CLI
       # goreleaser just built, which carries the real embedded hooks binary.
@@ -772,6 +825,22 @@ jobs:
           BEACON_SMOKE_ARCH: amd64
           BEACON_SMOKE_FORMAT: rpm
         run: sh packaging/linux/smoke-package.sh
+
+  # The scripts release.yml uses to publish the signed apt repository, run against stand-in
+  # packages, a throwaway key and a local directory in place of the bucket. Checks a merge keeps
+  # older versions installable and that a replaced package, a tampered index and the wrong key are
+  # refused, all through a real apt-get running as an ordinary user.
+  apt-repository:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install apt repository tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq apt-utils dpkg-dev gnupg
+      - name: Test the apt repository scripts
+        run: sh packaging/linux/apt/test-apt-repo.sh
 
   package-smoke:
     runs-on: macos-latest

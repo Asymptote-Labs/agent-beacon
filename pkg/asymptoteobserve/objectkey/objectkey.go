@@ -20,13 +20,16 @@ func CleanParts(value string) []string {
 }
 
 // CleanPart makes one value safe to use as a single key segment: it trims spaces, turns
-// backslashes into dashes, strips surrounding slashes, and rejects "." and ".." so a value
-// cannot climb out of its prefix. It returns "" when nothing usable is left.
+// backslashes into dashes, strips surrounding slashes, and rejects ".", "..", and any value
+// that still contains a slash. A leftover slash would survive into path.Join, whose Clean
+// treats ".." as a parent and can climb out of the configured prefix. It returns "" when
+// nothing usable is left. Callers with a slash-separated value, such as a prefix or an
+// owner/repo name, use CleanParts.
 func CleanPart(value string) string {
 	cleaned := strings.TrimSpace(value)
 	cleaned = strings.ReplaceAll(cleaned, "\\", "-")
 	cleaned = strings.Trim(cleaned, "/")
-	if cleaned == "." || cleaned == ".." {
+	if cleaned == "." || cleaned == ".." || strings.Contains(cleaned, "/") {
 		return ""
 	}
 	return cleaned

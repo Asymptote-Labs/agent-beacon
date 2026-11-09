@@ -57,3 +57,22 @@ func create(name string) error {
 		"/comment:Accounts that may read the Beacon system runtime log")
 	return err
 }
+
+// accountWindowsNames is true: a Windows account may be named DOMAIN\name, and its name may hold spaces and non-ASCII letters.
+const accountWindowsNames = true
+
+// addMember adds the account to the local group with net.exe from the system directory. net.exe
+// reports an existing member as error 1378, which counts as success.
+func addMember(group, account string) error {
+	system, err := windows.GetSystemDirectory()
+	if err != nil {
+		return fmt.Errorf("find the system directory: %w", err)
+	}
+	if _, err := run(filepath.Join(system, "net.exe"), "localgroup", group, account, "/add"); err != nil {
+		if netSystemError(err, account) == errMemberInAlias {
+			return nil
+		}
+		return err
+	}
+	return nil
+}

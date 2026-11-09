@@ -51,7 +51,7 @@ func TestTOMLLogPathsRoundTrip(t *testing.T) {
 		// rotated packs also read the file a rotation renamed the log to.
 		rotated bool
 	}{
-		{name: "asymptote", install: asymptote.InstallPack, render: asymptote.VectorConfig, inventory: true, backfill: true},
+		{name: "asymptote", install: asymptote.InstallPack, render: asymptote.VectorConfig, inventory: true, backfill: true, rotated: true},
 		{name: "cloudwatch", install: cloudwatch.InstallPack, render: cloudwatch.ConfigSnippet},
 		{name: "falcon", install: falcon.InstallPack, render: falcon.ConfigSnippet},
 		{name: "gcs", install: gcs.InstallPack, inventory: true},

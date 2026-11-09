@@ -44,10 +44,17 @@ JSON
 "$TMPDIR/beacon" endpoint dashboard --log-path "$LOG" --addr "$DASHBOARD_ADDR" >"$TMPDIR/dashboard.log" 2>&1 &
 DASHBOARD_PID="$!"
 
+# The dashboard answers only a browser that opened the launch URL it prints, which carries a
+# per-launch token: opening it sets the session cookie (through a 303 back to the page), and the API
+# requests after it send that cookie.
+COOKIES="$TMPDIR/dashboard-cookies"
 SUMMARY=""
 i=0
 while [ "$i" -lt 20 ]; do
-  SUMMARY="$(curl -fsS "http://$DASHBOARD_ADDR/api/summary" 2>/dev/null || true)"
+  LAUNCH_URL="$(sed -n 's/^Beacon endpoint dashboard: //p' "$TMPDIR/dashboard.log" 2>/dev/null | head -n 1)"
+  if [ -n "$LAUNCH_URL" ] && curl -fsSL -c "$COOKIES" -b "$COOKIES" -o /dev/null "$LAUNCH_URL" 2>/dev/null; then
+    SUMMARY="$(curl -fsS -b "$COOKIES" "http://$DASHBOARD_ADDR/api/summary" 2>/dev/null || true)"
+  fi
   if [ -n "$SUMMARY" ]; then
     break
   fi

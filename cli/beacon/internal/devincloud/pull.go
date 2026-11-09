@@ -211,9 +211,9 @@ func marshalEvents(mapped []MappedEvent) ([]byte, error) {
 // in-sandbox hook providers: {prefix}/provider=.../user_id=.../run_id=.../runtime.jsonl
 func ObjectName(prefix, provider, userID, sessionID string) string {
 	parts := objectkey.CleanParts(prefix)
-	parts = append(parts, "provider="+defaultIfEmpty(provider, "unknown"))
-	parts = append(parts, "user_id="+defaultIfEmpty(userID, "unknown"))
-	parts = append(parts, "run_id="+defaultIfEmpty(sessionID, "unknown"))
+	parts = append(parts, "provider="+defaultIfEmpty(objectkey.CleanPart(provider), "unknown"))
+	parts = append(parts, "user_id="+defaultIfEmpty(objectkey.CleanPart(userID), "unknown"))
+	parts = append(parts, "run_id="+defaultIfEmpty(objectkey.CleanPart(sessionID), "unknown"))
 	parts = append(parts, "runtime.jsonl")
 	return path.Join(parts...)
 }

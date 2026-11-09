@@ -11,7 +11,7 @@ Beacon supports Antigravity CLI through native hook payloads sent to `beacon-hoo
 
 Before enabling Antigravity hooks, make sure:
 
-- Antigravity CLI is installed as `antigravity` or `antigravity-cli`, or an Antigravity hook config directory exists.
+- Antigravity CLI is installed as `agy`, `antigravity`, or `antigravity-cli`, or an Antigravity hook config directory exists.
 - `beacon endpoint install` has run so shared endpoint config and runtime log paths exist.
 - Beacon hooks are installed, either by `beacon endpoint install` when it detects Antigravity (or with `--harness antigravity`) or with `beacon endpoint hooks install --harness antigravity`.
 - For project-level collection, install hooks from the target project with `--level project`.
@@ -23,7 +23,7 @@ Antigravity invokes Beacon's hook adapter from Antigravity hook configuration. T
 
 ## Discovery and status
 
-Beacon detects Antigravity through the `antigravity` or `antigravity-cli` executable, `~/.gemini/config`, or `./.agents`, then checks Beacon hook configuration.
+Beacon detects Antigravity through the `agy`, `antigravity`, or `antigravity-cli` executable, `~/.gemini/config`, or `./.agents`, then checks Beacon hook configuration.
 
 Use `beacon endpoint hooks status --harness antigravity` to inspect Antigravity hook status.
 

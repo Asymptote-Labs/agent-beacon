@@ -1,7 +1,7 @@
 ---
 title: "Plans and pricing"
 sidebarTitle: "Plans"
-description: "Compare Open Source, Beacon Cloud, Beacon Cloud Pro and Enterprise"
+description: "Compare Open Source, Beacon Cloud, Beacon Cloud Pro, Beacon Cloud Team and Enterprise"
 ---
 
 Beacon records your agent sessions on your machine whatever plan you choose. The plans differ in
@@ -16,6 +16,10 @@ where that history goes and what Beacon does with it once it is there.
 - **Beacon Cloud Pro** is Beacon Cloud for people who work with agents every day: unlimited
   findings, the full [MCP](/deployment/managed-mcp) toolset including findings and memory, and
   real-time alerts. $20 a month, or $15 a month billed annually.
+- **Beacon Cloud Team** is Pro for every member of an organization, plus a shared workspace: one
+  namespace for the team's shared traces, privacy settings for what the team shares, and org API
+  keys and agents for CI and bots. $30 per seat a month plus a $10 base fee ($5 billed annually),
+  for up to 20 seats.
 - **Enterprise** adds fleet rollout, enforcement, SSO, RBAC and audit logs, with hosting in Beacon
   Cloud or your own bucket. [Talk to us](https://beacon.sh/pricing) for pricing.
 
@@ -23,31 +27,33 @@ Current prices are always on the [pricing page](https://beacon.sh/pricing).
 
 ## Compare plans
 
-| | Open Source | Beacon Cloud | Beacon Cloud Pro | Enterprise |
-| --- | --- | --- | --- | --- |
-| **Price** | $0 | $0 | $20/mo ($15/mo annually) | Custom |
-| **Hosting** | You run it | Managed | Managed | Managed or your bucket |
-| **Agents** | 20+ | 20+ | 20+ | 20+, on endpoints, CI and cloud |
-| Prompts, commands, diffs and token usage | ✓ | ✓ | ✓ | ✓ |
-| Export to Elastic, S3 or OTel | ✓ | ✓ | ✓ | ✓ |
-| Offline threat detection (`beacon scan`) | ✓ | ✓ | ✓ | ✓ |
-| Every agent and machine in one timeline | — | ✓ | ✓ | ✓ |
-| [Findings](/cloud/findings) (risks, skills, habits) | Local rules only | 50 included | Unlimited | Unlimited, org-wide |
-| One-click skills and fix prompts | — | ✓ | ✓ | ✓ |
-| [MCP access](/deployment/managed-mcp) | — | Session search | Sessions, findings and feedback | Sessions, findings and feedback |
-| [Agent memories over MCP](/deployment/managed-mcp#memory) | — | — | ✓ | ✓ |
-| Skills pulled from your sessions | — | — | ✓ | ✓ |
-| [Share sessions by link](/sharing/index) | — | ✓ | ✓ | ✓ |
-| Evidence trail on every finding | — | — | ✓ | ✓ |
-| Alerts | — | Daily digest | Real-time email | Real-time and custom |
-| Block or require approval for risky actions | — | — | — | ✓ |
-| Fleet rollout (Jamf, Intune, Fleet) | — | — | — | ✓ |
-| SSO, RBAC, audit logs | — | — | — | ✓ |
-| Support | Community | Community | Priority | Dedicated SLA |
+| | Open Source | Beacon Cloud | Beacon Cloud Pro | Beacon Cloud Team | Enterprise |
+| --- | --- | --- | --- | --- | --- |
+| **Price** | $0 | $0 | $20/mo ($15/mo annually) | $30/seat/mo + $10/mo base ($5/mo annually) | Custom |
+| **Hosting** | You run it | Managed | Managed | Managed | Managed or your bucket |
+| **Agents** | 20+ | 20+ | 20+ | 20+ | 20+, on endpoints, CI and cloud |
+| Prompts, commands, diffs and token usage | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Export to Elastic, S3 or OTel | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Offline threat detection (`beacon scan`) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Every agent and machine in one timeline | — | ✓ | ✓ | ✓ | ✓ |
+| [Findings](/cloud/findings) (risks, skills, habits) | Local rules only | 50 included | Unlimited | Unlimited, for every member | Unlimited, org-wide |
+| One-click skills and fix prompts | — | ✓ | ✓ | ✓ | ✓ |
+| [MCP access](/deployment/managed-mcp) | — | Session search | Sessions, findings and feedback | Sessions, findings and feedback | Sessions, findings and feedback |
+| [Agent memories over MCP](/deployment/managed-mcp#memory) | — | — | ✓ | ✓ | ✓ |
+| Skills pulled from your sessions | — | — | ✓ | ✓ | ✓ |
+| [Share sessions by link](/sharing/index) | — | ✓ | ✓ | ✓ | ✓ |
+| Team workspace: shared traces, privacy, org API keys | — | — | — | ✓ | ✓ |
+| Evidence trail on every finding | — | — | ✓ | ✓ | ✓ |
+| Alerts | — | Daily digest | Real-time email | Real-time email | Real-time and custom |
+| Block or require approval for risky actions | — | — | — | — | ✓ |
+| Fleet rollout (Jamf, Intune, Fleet) | — | — | — | — | ✓ |
+| SSO, RBAC, audit logs | — | — | — | — | ✓ |
+| Support | Community | Community | Priority | Priority | Dedicated SLA |
 
 The Beacon CLI, hooks, local dashboard, threat rules, session sharing commands and
 [Agent Skills](/concepts/beacon-skills) are the same open-source build on every plan. Nothing on
-the machine changes when you upgrade: Pro is a property of your beacon.sh account.
+the machine changes when you upgrade: Pro is a property of your beacon.sh account, and Team a
+property of your organization.
 
 ## What Beacon Cloud Pro adds
 
@@ -68,6 +74,26 @@ the machine changes when you upgrade: Pro is a property of your beacon.sh accoun
 
 Session search, lenses and session sharing over MCP stay available on the free plan.
 
+## What Beacon Cloud Team adds
+
+Team is an organization plan. While an organization is on it, every member has every Beacon Cloud
+Pro feature without a plan of their own, and the organization gets:
+
+- **One namespace for your team's shared traces.** Members publish into the organization, and
+  everyone in it sees the team's traces in one place. A trace moves between your personal
+  namespace and the organization without changing its link.
+- **Privacy settings for what your team shares.** Admins choose which visibilities the
+  organization allows and which one new traces get by default.
+- **Org API keys and agents for CI and bots.** Admins create `bcn_api_` keys that publish into the
+  organization's namespace and keep working after the person who created them leaves. Link a key
+  to an agent (a CI pipeline or a bot, up to 25 per organization) and traces uploaded with it show
+  that agent. See [Sharing via API key](/sharing/api-key).
+- **Members and admin roles you manage**, and **one invoice for every seat**.
+
+Team costs $30 per seat a month plus a base fee of $10 a month, or $5 a month billed annually.
+An organization can have up to 20 seats. For more seats, SSO, RBAC or fleet rollout, see
+Enterprise.
+
 ## Upgrade, trial and cancel
 
 Open **Billing** at [beacon.sh/dashboard/billing](https://beacon.sh/dashboard/billing), or choose
@@ -83,6 +109,18 @@ and finish checkout in the browser. When a free trial is offered, the button rea
   shared traces are kept.
 - If a payment fails, the account stays on Pro while the payment is retried, and Billing shows it
   as past due.
+
+### Team
+
+Switch to the organization at the top of the Billing page, or choose Team on the
+[pricing page](https://beacon.sh/pricing). Only an organization's admins can buy or change its
+plan; other members are asked to contact an admin.
+
+- Checkout starts with one seat per current member, and you can add seats up to 20 before paying.
+- **Manage members** on the Billing page opens the organization's member settings.
+- **Cancel subscription** keeps Team until the end of the period you paid for, then moves the
+  organization back to free Beacon Cloud. Its sessions, findings, memory and shared traces are
+  kept.
 
 Beacon never asks for payment details in the CLI or through an agent. When an agent sets Beacon
 up for you, it sends you to the Billing page to finish upgrading.
@@ -104,11 +142,13 @@ up for you, it sends you to the Billing page to finish upgrading.
   findings. See [Beacon Cloud](/deployment/managed).
 - Choose **Beacon Cloud Pro** when your agents should learn from your history: memory, findings
   and feedback over MCP, and no findings limit.
-- Choose **Enterprise** to roll Beacon out across a team or fleet with MDM, require approval for
-  risky actions, or keep the data in your own bucket.
+- Choose **Beacon Cloud Team** to give a team of up to 20 people Pro and one place for the
+  traces they share, with org API keys for CI.
+- Choose **Enterprise** to roll Beacon out across a fleet with MDM, require approval for risky
+  actions, add SSO and audit logs, or keep the data in your own bucket.
 
 You can start local and connect later with `beacon login` and `beacon endpoint connect`, and you
-can upgrade or cancel Pro at any time without touching your devices.
+can upgrade or cancel Pro or Team at any time without touching your devices.
 
 ## Related
 

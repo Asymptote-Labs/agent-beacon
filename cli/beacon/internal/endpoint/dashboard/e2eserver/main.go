@@ -1,6 +1,10 @@
 // Command e2eserver runs the real dashboard handler for the lens browser tests in
 // testdata/lens-e2e. It is the dashboard plus lens files from disk (Options.LensFiles), so the tests
 // can serve hostile lenses through the same frame route, CSP and prelude a user's lens gets.
+//
+// It serves behind the same launch secret as `beacon endpoint dashboard`. The tests pass theirs in
+// $BEACON_E2E_DASHBOARD_TOKEN (the environment, not argv, which other accounts can read); without
+// one it makes its own and prints the launch URL.
 package main
 
 import (
@@ -23,7 +27,16 @@ func main() {
 	logPath := flag.String("log", "", "runtime JSONL log to serve")
 	flag.Var(&lenses, "lens", "lens file to serve (repeatable)")
 	flag.Parse()
-	err := dashboard.ListenAndServe(dashboard.Options{Addr: *addr, LogPath: *logPath, UserMode: true, LensFiles: lenses})
+	token := os.Getenv("BEACON_E2E_DASHBOARD_TOKEN")
+	if token == "" {
+		var err error
+		if token, err = dashboard.NewToken(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println(dashboard.LaunchURL(*addr, token, "/"))
+	}
+	err := dashboard.ListenAndServe(dashboard.Options{Addr: *addr, LogPath: *logPath, UserMode: true, LensFiles: lenses, Token: token})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

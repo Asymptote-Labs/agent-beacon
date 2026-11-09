@@ -47,3 +47,21 @@ func create(name string) error {
 	}
 	return errors.New("neither groupadd nor addgroup is available")
 }
+
+// accountWindowsNames is false: Linux account names hold no backslash, space or non-ASCII letter.
+const accountWindowsNames = false
+
+// addMember uses gpasswd, which resolves the account through NSS and so accepts a directory (SSSD,
+// LDAP) account that usermod, which reads only /etc/passwd, refuses; busybox addgroup where that is
+// all there is. Both are no-ops for an existing member.
+func addMember(group, account string) error {
+	if gpasswd, ok := lookPath("gpasswd", "/usr/bin/gpasswd", "/usr/sbin/gpasswd", "/bin/gpasswd"); ok {
+		_, err := run(gpasswd, "-a", account, group)
+		return err
+	}
+	if addgroup, ok := lookPath("addgroup", "/usr/sbin/addgroup", "/sbin/addgroup"); ok {
+		_, err := run(addgroup, account, group)
+		return err
+	}
+	return errors.New("neither gpasswd nor addgroup is available")
+}

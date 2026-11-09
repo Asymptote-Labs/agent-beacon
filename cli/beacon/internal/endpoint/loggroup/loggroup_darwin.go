@@ -41,3 +41,12 @@ func create(name string) error {
 	}
 	return nil
 }
+
+// accountWindowsNames is false: macOS short names hold no backslash, space or non-ASCII letter.
+const accountWindowsNames = false
+
+// addMember adds the user to the local group record; dseditgroup succeeds for an existing member.
+func addMember(group, account string) error {
+	_, err := run(dseditgroup, "-o", "edit", "-a", account, "-t", "user", group)
+	return err
+}

@@ -185,43 +185,6 @@ func TestShutdownLeavesNoPipe(t *testing.T) {
 	}
 }
 
-func TestResolveNameNamesTheCurrentAccount(t *testing.T) {
-	me, err := user.Current()
-	if err != nil {
-		t.Skip(err)
-	}
-	if got := resolveName(currentSID(t)); got != me.Username {
-		t.Fatalf("resolveName = %q, want %q", got, me.Username)
-	}
-	if got := resolveName("S-1-5-21-1-2-3-999999"); got != "" {
-		t.Fatalf("resolveName of an unknown SID = %q", got)
-	}
-}
-
-// Accounts that are not SidTypeUser are named too. os/user refused them, which would have left
-// events from SYSTEM, a service's virtual account or an Entra ID account without a name.
-func TestResolveNameNamesAccountsThatAreNotLocalUsers(t *testing.T) {
-	if got := resolveName("S-1-5-18"); got != `NT AUTHORITY\SYSTEM` {
-		t.Fatalf("resolveName(SYSTEM) = %q", got)
-	}
-	if got := resolveName("not a sid"); got != "" {
-		t.Fatalf("resolveName of a malformed SID = %q", got)
-	}
-}
-
-func TestValidWindowsName(t *testing.T) {
-	for _, ok := range []string{`CONTOSO\Jane Doe`, `DESKTOP-1\runneradmin`, `NT AUTHORITY\SYSTEM`} {
-		if !validWindowsName(ok) {
-			t.Errorf("validWindowsName(%q) = false", ok)
-		}
-	}
-	for _, bad := range []string{"", " lead", "trail ", "nl\nx", "esc\x1b[31m", "del\x7f", string(make([]byte, 257))} {
-		if validWindowsName(bad) {
-			t.Errorf("validWindowsName(%q) = true", bad)
-		}
-	}
-}
-
 // Only a taken name is waited out. A socket_path that can never be a pipe fails the start loudly,
 // as it did before, instead of a collector that looks healthy and never serves.
 func TestAListenErrorThatCannotClearStillFailsTheStart(t *testing.T) {

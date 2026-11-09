@@ -8,6 +8,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/cli/beacon-hooks/internal/logging"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
+	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/accounthome"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/activesession"
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve/shareauto"
 )
@@ -120,10 +121,21 @@ func TestAutoShareOffWritesNothing(t *testing.T) {
 	}
 }
 
+// setAccountHome stands in for the account's own home, so these tests never read the real
+// ~/.beacon/endpoint/share.json of whoever runs them.
+func setAccountHome(t *testing.T, home string) {
+	t.Helper()
+	prev := accounthome.Dir
+	accounthome.Dir = func() (string, error) { return home, nil }
+	t.Cleanup(func() { accounthome.Dir = prev })
+}
+
 // The hook's environment can come from the repository, so the settings-file override must not point
 // it at a file that turns auto-share on.
 func TestAutoShareIgnoresRepoSuppliedSettingsPath(t *testing.T) {
 	logPath := shareAutoHookEnv(t, nil)
+	account := t.TempDir()
+	setAccountHome(t, account)
 	setShareSettingsPath(t, shareauto.HookPath)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -137,6 +149,28 @@ func TestAutoShareIgnoresRepoSuppliedSettingsPath(t *testing.T) {
 	runClaudeSessionHooks(t, "sess-a")
 	if n := len(shareRequests(t, logPath)); n != 0 {
 		t.Fatalf("share requests from a repo-supplied settings file = %d", n)
+	}
+}
+
+// A forged HOME with auto-share enabled under it must not publish sessions: HookPath reads the
+// account's home, which has no settings here.
+func TestAutoShareIgnoresForgedHome(t *testing.T) {
+	logPath := shareAutoHookEnv(t, nil)
+	account := t.TempDir()
+	forged := t.TempDir()
+	setAccountHome(t, account)
+	setShareSettingsPath(t, shareauto.HookPath)
+	t.Setenv("HOME", forged)
+	t.Setenv("USERPROFILE", forged)
+	if err := shareauto.Save(filepath.Join(forged, ".beacon", "endpoint", shareauto.FileName), shareauto.Settings{
+		Auto: shareauto.Auto{Enabled: true, Visibility: "public"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	runClaudeSessionHooks(t, "sess-a")
+	if n := len(shareRequests(t, logPath)); n != 0 {
+		t.Fatalf("share requests from a forged HOME = %d", n)
 	}
 }
 

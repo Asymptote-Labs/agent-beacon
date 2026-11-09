@@ -8,7 +8,7 @@
 # users experience.
 #
 # Needs systemd as PID 1, which only a privileged container provides. Build the packages first:
-#   cd cli/beacon && goreleaser release --snapshot --clean --skip=publish,homebrew,announce
+#   cd cli/beacon && goreleaser release --snapshot --clean --skip=publish,homebrew,announce,sign
 set -eu
 
 ROOT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)"
@@ -30,7 +30,7 @@ if [ -z "$PKG" ]; then
 fi
 if [ -z "$PKG" ] || [ ! -f "$PKG" ]; then
   echo "no $FORMAT package for linux_$ARCH in cli/beacon/dist" >&2
-  echo "build one with: cd cli/beacon && goreleaser release --snapshot --clean --skip=publish,homebrew,announce" >&2
+  echo "build one with: cd cli/beacon && goreleaser release --snapshot --clean --skip=publish,homebrew,announce,sign" >&2
   exit 1
 fi
 echo "package: $(basename "$PKG")"
@@ -48,7 +48,7 @@ cleanup
 case "$FORMAT" in
   deb) IMAGE=beacon-package-smoke-deb
        BASE="${BEACON_SMOKE_BASE:-ubuntu:24.04}"
-       INSTALL_PKGS="systemd systemd-sysv dbus curl ca-certificates iproute2 binutils"
+       INSTALL_PKGS="systemd systemd-sysv dbus libpam-systemd curl ca-certificates iproute2 binutils"
        PKGMGR_INSTALL="apt-get install -y -qq /var/tmp/beacon.deb" ;;
   rpm) IMAGE=beacon-package-smoke-rpm
        BASE="${BEACON_SMOKE_BASE:-rockylinux/rockylinux:9}"
@@ -97,21 +97,66 @@ echo "ok: systemd is PID 1"
 # and dnf reports it as unopenable. Ubuntu does not do this, which is why only the rpm lane hit it.
 docker cp "$PKG" "$CONTAINER":/var/tmp/beacon."$FORMAT" >/dev/null
 
-# A human has to exist for the install to have anyone to configure. A system endpoint runs as root,
+# Humans have to exist for the install to have anyone to configure. A system endpoint runs as root,
 # so `endpoint install` configures root's agent settings -- and the postinstall's second step is what
-# points the actual operator's Claude Code at the collector. SUDO_USER is how that operator is
-# identified, and dpkg/rpm pass their environment through to maintainer scripts, so setting it here
-# is the same thing `sudo apt install ./beacon.deb` does.
-docker exec "$CONTAINER" useradd -m -s /bin/bash "$SMOKE_USER" >/dev/null 2>&1 || true
-docker exec "$CONTAINER" test -d "/home/$SMOKE_USER" || {
-  echo "could not create the test user $SMOKE_USER" >&2; exit 1; }
+# points the people using the machine at the collector.
+#
+# The install below runs the way a configuration manager runs it: as root, with no SUDO_USER, so the
+# only way to know who uses the machine is logind. Two people are logged in, because one machine
+# often has several (a shared workstation, staff signing in to someone else's), and the install has
+# to configure every one of them, not just the first. `su -l` opens a real logind session through
+# pam_systemd. The SUDO_USER path is covered by the CLI's unit tests.
+SMOKE_USER2="${SMOKE_USER}2"
+for u in "$SMOKE_USER" "$SMOKE_USER2"; do
+  docker exec "$CONTAINER" useradd -m -s /bin/bash "$u" >/dev/null 2>&1 || true
+  docker exec "$CONTAINER" test -d "/home/$u" || {
+    echo "could not create the test user $u" >&2; exit 1; }
+  # -t: a login on a terminal, which logind classes "user". Without one it is a "background"
+  # session (what cron opens), which Beacon rightly does not take for a person.
+  docker exec -dt "$CONTAINER" su -l "$u" -c 'exec sleep infinity'
+done
+# And an account whose only session is not a person's login: no terminal, so logind classes it
+# "background", as it does cron's. A display manager's greeter is the desktop case of the same thing.
+docker exec "$CONTAINER" useradd -m -s /bin/bash beaconsvc >/dev/null 2>&1 || true
+docker exec -d "$CONTAINER" su -l beaconsvc -c 'exec sleep infinity'
+i=0
+while [ "$i" -lt 20 ]; do
+  sessions="$(docker exec "$CONTAINER" loginctl list-sessions --no-legend 2>/dev/null || true)"
+  case "$sessions" in *"$SMOKE_USER2"*) case "$sessions" in *"$SMOKE_USER "*) break ;; esac ;; esac
+  i=$((i+1)); sleep 1
+done
+case "$sessions" in
+  *"$SMOKE_USER2"*) ;;
+  *) echo "logind has no sessions for the test users, so there is nobody to configure:" >&2
+     echo "$sessions" >&2; exit 1 ;;
+esac
+echo "ok: $SMOKE_USER and $SMOKE_USER2 are logged in (logind)"
 
-if ! docker exec -e SUDO_USER="$SMOKE_USER" "$CONTAINER" sh -c "$PKGMGR_INSTALL" >/tmp/beacon-pkg-install.log 2>&1; then
+# A settings file, as a configuration manager would drop one before installing: its harness list has
+# to reach both the system install and the step that configures the user, and a trailing comment
+# must not fail the install.
+docker exec "$CONTAINER" sh -c 'printf "%s\n" "# managed by config management" "BEACON_ENDPOINT_HARNESSES=claude,codex,cursor # all three" >/etc/default/beacon && chmod 600 /etc/default/beacon'
+
+if ! docker exec "$CONTAINER" env -u SUDO_USER sh -c "$PKGMGR_INSTALL" >/tmp/beacon-pkg-install.log 2>&1; then
   echo "package install failed:" >&2
   tail -30 /tmp/beacon-pkg-install.log >&2
   exit 1
 fi
 echo "ok: package installed"
+
+# What the postinstall prints for the person installing. apt passes maintainer-script output
+# through, but `dnf -q` does not show scriptlet output at all, so on rpm the installed %post is run
+# again, as the package manager runs it, to read what it says. It is idempotent: every upgrade runs
+# it the same way over an installed endpoint.
+POSTINST_LOG=/tmp/beacon-pkg-install.log
+if [ "$FORMAT" = rpm ]; then
+  POSTINST_LOG=/tmp/beacon-postinstall.log
+  if ! docker exec "$CONTAINER" env -u SUDO_USER sh -c 'rpm -q --qf "%{POSTIN}" beacon >/tmp/beacon-postin.sh && sh /tmp/beacon-postin.sh' >"$POSTINST_LOG" 2>&1; then
+    echo "the installed %post script failed when run again:" >&2
+    tail -30 "$POSTINST_LOG" >&2
+    exit 1
+  fi
+fi
 
 # Everything below must be true without any further user action.
 unit_state="$(docker exec "$CONTAINER" systemctl is-active beacon-collector.service 2>/dev/null || true)"
@@ -166,6 +211,37 @@ adapter_owner="$(docker exec "$CONTAINER" stat -c %U "$ADAPTER" 2>/dev/null || t
 [ "$adapter_owner" = "$SMOKE_USER" ] || {
   echo "$ADAPTER is owned by $adapter_owner, not $SMOKE_USER" >&2; exit 1; }
 echo "ok: hooks installed for the user and runnable by them"
+
+docker exec "$CONTAINER" test -f "/home/$SMOKE_USER/.cursor/hooks.json" || {
+  echo "Cursor from /etc/default/beacon was not configured for $SMOKE_USER" >&2
+  grep -i "hook\|ignoring" "$POSTINST_LOG" >&2 || true
+  exit 1
+}
+grep -q "sudo usermod -aG beacon-log" "$POSTINST_LOG" || {
+  echo "the install did not say how to let someone read the restricted log" >&2; exit 1; }
+echo "ok: the settings file reached the user step (Cursor configured), and the beacon-log hint was printed"
+
+# The second person logged in is configured too, as themselves, and the install says so for both
+# rather than leaving the root context's own hook lines as the only output.
+SETTINGS2="/home/$SMOKE_USER2/.claude/settings.json"
+docker exec "$CONTAINER" grep -q '"hooks"' "$SETTINGS2" || {
+  echo "$SETTINGS2 has no hooks, so only the first logged-in user was configured" >&2
+  grep -i "configur" /tmp/beacon-pkg-install.log >&2 || true
+  exit 1
+}
+owner2="$(docker exec "$CONTAINER" stat -c %U "$SETTINGS2" 2>/dev/null || true)"
+[ "$owner2" = "$SMOKE_USER2" ] || { echo "$SETTINGS2 is owned by $owner2" >&2; exit 1; }
+for u in "$SMOKE_USER" "$SMOKE_USER2"; do
+  grep -q "^Configured $u (/home/$u): " "$POSTINST_LOG" || {
+    echo "the install did not report configuring $u:" >&2
+    tail -20 "$POSTINST_LOG" >&2
+    exit 1
+  }
+done
+if docker exec "$CONTAINER" test -e /home/beaconsvc/.claude/settings.json; then
+  echo "beaconsvc, whose only session is a background one, was configured as if it were a person" >&2; exit 1
+fi
+echo "ok: every logged-in user was configured, and the install said so for each (and not a background session's account)"
 
 # Reachable by name, not just by absolute path.
 #
@@ -249,6 +325,71 @@ if failed:
 print(f"ok: doctor reports no failures across {len(checks)} checks")
 PY
 
+# A first package install lands in restricted log access with no second step: the collector is the
+# only writer, the log is 0640 root:beacon-log, and hooks hand their events to the ingest socket.
+# This is what a configuration manager (Salt pkg.installed, Ansible apt) gets, since it cannot pass
+# BEACON_LOG_ACCESS through to the postinstall.
+LOG=/var/log/beacon-agent/runtime.jsonl
+mode="$(docker exec "$CONTAINER" cat /etc/beacon/endpoint/config.json | python3 -c 'import json, sys; print(json.load(sys.stdin).get("log_access", ""))')"
+[ "$mode" = restricted ] || { echo "config.json log_access is '$mode' after a first install, want restricted" >&2; exit 1; }
+perms="$(docker exec "$CONTAINER" stat -c '%a %U:%G' "$LOG")"
+[ "$perms" = "640 root:beacon-log" ] || { echo "$LOG is $perms, want 640 root:beacon-log" >&2; exit 1; }
+docker exec "$CONTAINER" test -S /var/run/beacon-agent/ingest.sock || {
+  echo "the collector is not serving /var/run/beacon-agent/ingest.sock" >&2; exit 1; }
+if docker exec "$CONTAINER" su - "$SMOKE_USER" -c "cat $LOG" >/dev/null 2>&1; then
+  echo "$SMOKE_USER can read $LOG; restricted access did not apply" >&2; exit 1
+fi
+echo "ok: a first package install is restricted (640 root:beacon-log, ingest socket up)"
+
+# The installed hook, run as the user exactly as Claude Code runs it, reaches the log through the
+# socket and is recorded under the account the kernel says sent it.
+HOOK_CMD="$(docker exec "$CONTAINER" cat "$SETTINGS" | python3 -c '
+import json, sys
+print(json.load(sys.stdin)["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"])')"
+docker exec "$CONTAINER" su - "$SMOKE_USER" -c "printf '%s' '{\"session_id\":\"smoke-restricted\",\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"smoke\",\"cwd\":\"/tmp\"}' | $HOOK_CMD" >/dev/null 2>&1 || {
+  echo "the installed prompt hook failed for $SMOKE_USER" >&2; exit 1; }
+recorded="$(docker exec "$CONTAINER" sh -c "grep smoke-restricted $LOG" | python3 -c '
+import json, sys
+users = {json.loads(line).get("user", {}).get("name", "") for line in sys.stdin if line.strip()}
+print(",".join(sorted(users)))')"
+[ "$recorded" = "$SMOKE_USER" ] || {
+  echo "the hook event was recorded as '$recorded', want $SMOKE_USER" >&2; exit 1; }
+echo "ok: $SMOKE_USER's hook event reached the restricted log through the socket, as $SMOKE_USER"
+
+# OTLP is attributed to the account that sent it, not to the root collector. Every account exports to
+# the same loopback collector, so before this every OTLP event on a system install read as root.
+# Each export below also claims to be root through the peer attributes, on the resource and on the
+# record, and both claims must be ignored.
+otlp_from() {
+  # $1 = account, $2 = session id; a browser-extension-shaped log over OTLP/HTTP JSON.
+  body='{"resourceLogs":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"chatgpt_web"}},{"key":"beacon.peer.uid","value":{"stringValue":"0"}},{"key":"beacon.peer.user","value":{"stringValue":"root"}}]},"scopeLogs":[{"logRecords":[{"timeUnixNano":"1762430000000000000","body":{"stringValue":"smoke"},"attributes":[{"key":"event.name","value":{"stringValue":"user_prompt"}},{"key":"session.id","value":{"stringValue":"'"$2"'"}},{"key":"beacon.peer.uid","value":{"stringValue":"0"}},{"key":"beacon.peer.user","value":{"stringValue":"root"}}]}]}]}]}'
+  docker exec "$CONTAINER" su -s /bin/sh "$1" -c "curl -fsS -o /dev/null -H 'Content-Type: application/json' --data-binary '$body' http://127.0.0.1:4318/v1/logs" || {
+    echo "OTLP export as $1 failed" >&2; exit 1; }
+}
+otlp_from "$SMOKE_USER" smoke-otlp-user
+otlp_from root smoke-otlp-root
+attributed=""
+i=0
+while [ "$i" -lt 20 ]; do
+  attributed="$(docker exec "$CONTAINER" cat /var/log/beacon-agent/runtime.jsonl | python3 -c '
+import json, sys
+seen = {}
+for line in sys.stdin:
+    e = json.loads(line)
+    sid = (e.get("session") or {}).get("id", "")
+    if sid.startswith("smoke-otlp-"):
+        seen[sid] = (e.get("user") or {}).get("name", "")
+print(" ".join("%s=%s" % kv for kv in sorted(seen.items())))')"
+  case "$attributed" in *smoke-otlp-root=*smoke-otlp-user=*|*smoke-otlp-user=*smoke-otlp-root=*) break ;; esac
+  i=$((i+1)); sleep 1
+done
+[ "$attributed" = "smoke-otlp-root=root smoke-otlp-user=$SMOKE_USER" ] || {
+  echo "OTLP events were attributed as '$attributed', want smoke-otlp-root=root smoke-otlp-user=$SMOKE_USER" >&2
+  docker exec "$CONTAINER" journalctl -u beacon-collector.service --no-pager -n 30 >&2 || true
+  exit 1
+}
+echo "ok: OTLP events are recorded under the account that sent them ($attributed)"
+
 # Reinstalling the same package is an upgrade as far as both package managers are concerned, and it
 # is the exact sequence `beacon endpoint update --apply` performs. It is worth its own assertion
 # because the old package's pre-removal script runs during an upgrade -- and on rpm it runs *after*
@@ -267,6 +408,8 @@ after_upgrade="$(docker exec "$CONTAINER" systemctl is-active beacon-collector.s
 }
 docker exec "$CONTAINER" test -f /etc/beacon/endpoint/config.json || {
   echo "an upgrade must not remove the config" >&2; exit 1; }
+mode="$(docker exec "$CONTAINER" cat /etc/beacon/endpoint/config.json | python3 -c 'import json, sys; print(json.load(sys.stdin).get("log_access", ""))')"
+[ "$mode" = restricted ] || { echo "an upgrade changed log_access to '$mode'" >&2; exit 1; }
 echo "ok: upgrade left the service running and the config in place"
 
 # Removal must stop the service while the binaries it points at still exist, and must not destroy

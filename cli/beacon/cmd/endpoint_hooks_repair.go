@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -41,6 +42,8 @@ type endpointHookRepairResult struct {
 
 var (
 	activeConsoleUser = defaultActiveConsoleUser
+	// activeConsoleUsers is everyone a system install configures; see defaultActiveConsoleUsers.
+	activeConsoleUsers = defaultActiveConsoleUsers
 	// lookupConsoleUser is a seam so the SUDO_USER-before-logind ordering can be tested without
 	// depending on which accounts happen to exist on the machine running the tests -- as root in
 	// a container, the obvious test skips, which left the ordering unverified.
@@ -234,6 +237,20 @@ func linuxActiveConsoleUser() (consoleUserInfo, bool, error) {
 	if u := strings.TrimSpace(os.Getenv("SUDO_USER")); u != "" {
 		return lookupConsoleUser(u)
 	}
+	for _, name := range logindSessionUsers() {
+		if info, ok, err := lookupConsoleUser(name); ok || err != nil {
+			return info, ok, err
+		}
+	}
+	return consoleUserInfo{}, false, nil
+}
+
+// logindSessionUsers lists the account names of the live logind sessions, best answer first:
+// someone at the machine in the foreground, then anyone at the machine, then a remote login. Ranked
+// rather than filtered -- a remote session is still a real human whose agent runs on this host, so
+// it is the right answer when it is the only one. Names repeat when one account has several
+// sessions; callers resolve and deduplicate. Empty when logind is absent or refuses.
+func logindSessionUsers() []string {
 	// The session table is used only to enumerate ids. Every other column is read back through
 	// `show-session`, which reports `Key=Value` lines -- unambiguous, self-labeling, and free of the
 	// table's placeholders.
@@ -247,7 +264,7 @@ func linuxActiveConsoleUser() (consoleUserInfo, bool, error) {
 	if err != nil {
 		// No logind, or it refused. Not an error worth failing an install over: this is a
 		// best-effort identification, and the caller already handles "unknown".
-		return consoleUserInfo{}, false, nil
+		return nil
 	}
 	var sessions []logindSession
 	for _, line := range strings.Split(string(out), "\n") {
@@ -259,16 +276,59 @@ func linuxActiveConsoleUser() (consoleUserInfo, bool, error) {
 			sessions = append(sessions, s)
 		}
 	}
-	// Best answer first: someone at the machine in the foreground, then anyone at the machine, then
-	// a remote login. Ranked rather than filtered -- a remote session is still a real human whose
-	// agent runs on this host, so it is the right answer when it is the only one.
 	sort.SliceStable(sessions, func(i, j int) bool { return sessions[i].rank() > sessions[j].rank() })
+	names := make([]string, 0, len(sessions))
 	for _, sess := range sessions {
-		if info, ok, err := lookupConsoleUser(sess.user); ok || err != nil {
-			return info, ok, err
-		}
+		names = append(names, sess.user)
 	}
-	return consoleUserInfo{}, false, nil
+	return names
+}
+
+// defaultActiveConsoleUsers resolves every person whose agent runtime a system install should reach.
+//
+// activeConsoleUser answers "who is at the keyboard", which is right for reading one person's
+// session stores. Configuring runtimes is a different question: a machine several people log in
+// to -- a shared workstation, or staff signing in to someone else's machine -- has one collector and
+// one log for all of them, and a root install (a package postinstall, a configuration manager)
+// that configured only the top-ranked session left everyone else exporting nowhere, silently.
+//
+// On Linux that is the installing sudo user, then every account with a live logind session, each
+// once, in activeConsoleUser's order, so the first entry is always what activeConsoleUser returns.
+// macOS and Windows have one console user at a time and keep that single answer. An account that
+// cannot be resolved (root, no home, a directory service that does not answer) is skipped, as
+// activeConsoleUser skips it; an error is returned only when nobody could be resolved.
+func defaultActiveConsoleUsers() ([]consoleUserInfo, error) {
+	if runtime.GOOS != "linux" {
+		info, ok, err := activeConsoleUser()
+		if err != nil || !ok {
+			return nil, err
+		}
+		return []consoleUserInfo{info}, nil
+	}
+	var candidates []string
+	if u := strings.TrimSpace(os.Getenv("SUDO_USER")); u != "" {
+		candidates = append(candidates, u)
+	}
+	candidates = append(candidates, logindSessionUsers()...)
+	var users []consoleUserInfo
+	var errs []error
+	seen := map[string]bool{}
+	for _, name := range candidates {
+		info, ok, err := lookupConsoleUser(name)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if !ok || seen[info.Username] {
+			continue
+		}
+		seen[info.Username] = true
+		users = append(users, info)
+	}
+	if len(users) == 0 && len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+	return users, nil
 }
 
 // logindSession is what one session says about itself.
@@ -295,7 +355,7 @@ func (s logindSession) rank() int {
 
 // describeLogindSession reads one session's properties, skipping anything that is not a live login.
 func describeLogindSession(id string) (logindSession, bool) {
-	out, err := exec.Command("loginctl", "show-session", id, "-p", "Name", "-p", "State", "-p", "Seat").Output()
+	out, err := exec.Command("loginctl", "show-session", id, "-p", "Name", "-p", "State", "-p", "Seat", "-p", "Class").Output()
 	if err != nil {
 		return logindSession{}, false
 	}
@@ -311,6 +371,17 @@ func describeLogindSession(id string) (logindSession, bool) {
 		return logindSession{}, false
 	}
 	if props["Name"] == "" {
+		return logindSession{}, false
+	}
+	// Only a person's login. A display manager keeps its greeter session (gdm, lightdm, sddm, each
+	// with a real home under /var/lib) open beside the desktop it started, and systemd 256 lists
+	// lingering accounts' service managers as sessions too; a session with no terminal or seat
+	// (cron, a script's su) is "background". None of them is anyone whose agent runtime to
+	// configure. "user-early" is a login made before the system finished booting. A logind too old
+	// to report a class reports only people's sessions as live ones, so an empty class is kept.
+	switch props["Class"] {
+	case "", "user", "user-early":
+	default:
 		return logindSession{}, false
 	}
 	return logindSession{

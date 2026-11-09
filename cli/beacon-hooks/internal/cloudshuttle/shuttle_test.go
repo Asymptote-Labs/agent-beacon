@@ -56,6 +56,33 @@ func TestResetFromEnvPreservesLockFiles(t *testing.T) {
 	}
 }
 
+// Stop and SessionEnd call MaybeUpload whenever BEACON_CLOUD_* is set. Without the cloud
+// sandbox marker those variables must not open a network connection.
+func TestMaybeUploadWithoutCloudOriginSendsNothing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected upload without BEACON_ORIGIN=cloud: %s %s", r.Method, r.URL)
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	useSandbox(t, dir)
+	logPath := filepath.Join(dir, "runtime.jsonl")
+	if err := os.WriteFile(logPath, []byte("{\"event\":\"session\"}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEACON_ORIGIN", "")
+	t.Setenv("BEACON_CLOUD_UPLOAD", "s3")
+	t.Setenv("BEACON_CLOUD_S3_BUCKET", "bucket")
+	t.Setenv("BEACON_CLOUD_S3_ENDPOINT", server.URL)
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIATEST")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")
+	t.Setenv("BEACON_RUN_ID", "run")
+	t.Setenv("BEACON_ENDPOINT_LOG", logPath)
+	t.Setenv("BEACON_CLOUD_SHUTTLE_STATE", filepath.Join(dir, "state.json"))
+	if err := MaybeUpload(context.Background(), true); err != nil {
+		t.Fatalf("MaybeUpload returned error: %v", err)
+	}
+}
+
 // A target the environment supplies cannot select a log outside the sandbox directory, so a
 // repository cannot have a host's runtime log, every project's sessions, uploaded to its bucket.
 func TestMaybeUploadRefusesALogOutsideTheSandbox(t *testing.T) {
@@ -115,6 +142,7 @@ func TestMaybeUploadWithoutCredentialsSendsNothing(t *testing.T) {
 				t.Fatal(err)
 			}
 			statePath := filepath.Join(dir, "state.json")
+			t.Setenv("BEACON_ORIGIN", "cloud")
 			t.Setenv("BEACON_ENDPOINT_LOG", logPath)
 			t.Setenv("BEACON_CLOUD_SHUTTLE_STATE", statePath)
 			t.Setenv("BEACON_RUN_ID", "run")
@@ -400,6 +428,18 @@ func TestUploadReusesLastObjectForSameRun(t *testing.T) {
 	want := "/bucket/prefix/runtime/date=2026-07-12/1783887423-cursor_cloud-run.jsonl.gz"
 	if uploadedPaths[0] != want {
 		t.Fatalf("upload path = %q, want %q", uploadedPaths[0], want)
+	}
+}
+
+func TestObjectNameStaysUnderPrefix(t *testing.T) {
+	when := time.Date(2026, 7, 12, 16, 17, 3, 0, time.UTC)
+	restore := stubNow(t, when)
+	defer restore()
+
+	got := ObjectName(Config{Prefix: "tenant/logs", Provider: "claude_code_web", RunID: "../../../../../outside"})
+	want := "tenant/logs/runtime/date=2026-07-12/1783873023-claude_code_web-.jsonl.gz"
+	if got != want {
+		t.Fatalf("ObjectName = %q, want %q", got, want)
 	}
 }
 
