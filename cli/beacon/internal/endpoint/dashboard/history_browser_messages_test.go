@@ -92,8 +92,8 @@ func TestHistoryRebuildsVersion15LegacyBrowserMessages(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer store.close()
-				if version := store.metaInt("derivation_version", 0); version != 16 {
-					t.Fatalf("derivation version=%d, want 16 (actual predecessor 15)", version)
+				if version := store.metaInt("derivation_version", 0); version != historyDerivationVersion {
+					t.Fatalf("derivation version=%d, want %d (seeded from actual predecessor 15)", version, historyDerivationVersion)
 				}
 				var rowID int64
 				var count int
