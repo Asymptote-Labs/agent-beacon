@@ -1,22 +1,27 @@
 id: approval-bypass-via-renamed-binary
-version: 2
+version: 3
 title: Denied dangerous command re-invoked via a renamed copy of the binary
 description: >
   An approval for a destructive or high-impact shell command was explicitly denied
   (event.action approval.denied), and within the same session a command.executed event
-  invokes a renamed copy of the same dangerous binary class — a copy of rm as
-  /tmp/myrm or a wrapper script, a copy of curl, a copy of dd, a copy of mkfs, or
-  any other shim that uses the same dangerous command pattern. The deny+shim pair
-  indicates the operator blocked the canonical path and the agent re-issued the
-  action through a wrapper or copy to evade the gate. The rule is a
-  correlation between an approval.denied event in the same session and a
-  dangerous-class command that is not the literal denied path. The `-rf`/`-fr`
-  flag patterns are anchored to a preceding rm-like binary basename
-  (e.g. `myrm`, `crm`, `rm`) so that legitimate tar-archive operations like
-  `tar -rf /tmp/myarchive.tar /var/data` do not correlate after a denied
-  `rm -rf`. Negative fixtures cover denials with no follow-up, follow-ups in a
-  different session, follow-ups that are unrelated benign commands, and the
-  legitimate-tar-archive shape.
+  re-issues a dangerous action through a copy or shim staged in a temp location —
+  a copy of rm run as /tmp/x, a copy of dd fed if=/of=/dev/sd, mkfs, a pipe to sh,
+  `chmod -R 777`, or `sudo -s`. The deny+shim pair indicates the operator blocked
+  the canonical path and the agent re-issued the action through a wrapper or copy
+  to evade the gate. For the rm-shaped case the shim's name is not trusted (a copy
+  can be called anything), so the rule instead requires that an executable under
+  /tmp/, /var/tmp/, or $(mktemp ...) sits at command position (start of the command,
+  after `;`, `&&`, `||`, `|`, `(`, a backtick, `$(`, or the opening quote of a
+  `sh -c`/`bash -c`/`eval` script; optionally after VAR=value assignments and
+  wrapper commands such as sudo, doas, env, nohup, exec, command, nice, time,
+  timeout, xargs, stdbuf, setsid, with their options) and
+  that a later argument of that same simple command is an rm-style short-option
+  cluster made only of rm's flags (d, f, i, I, r, R, v) containing both a recursive
+  and a force flag. Temp paths passed as arguments to other tools, quoted or not
+  (`cp "/tmp/build" -rf`, `tar -C /tmp/stage -rf`, `find /tmp/build -printf`), and non-rm flag words
+  therefore do not correlate. Negative fixtures cover denials with no follow-up,
+  follow-ups in a different session, unrelated benign commands, and those
+  argument-position and tar/find/ffmpeg shapes.
 severity: critical
 status: experimental
 posture: detect
@@ -36,8 +41,8 @@ correlation:
     - id: renamed_dangerous
       match: >
         e.event.action == "command.executed" &&
-        e.command.command.matches("(?i)(/tmp/|/var/tmp/|\\$\\(mktemp\\))") &&
-        e.command.command.matches("(?i)(\\s+if\\s*=|\\s+of\\s*=/dev/sd|(?:/tmp/|/var/tmp/|\\$\\(mktemp\\))[^;&|\"'`\\s]*?\\b[a-z]*rm\\b[^;&|]*\\s+-[a-z]*r[a-z]*f\\b|(?:/tmp/|/var/tmp/|\\$\\(mktemp\\))[^;&|\"'`\\s]*?\\b[a-z]*rm\\b[^;&|]*\\s+-[a-z]*f[a-z]*r\\b|\\bmkfs\\b|\\|\\s*(ba)?sh\\b|\\bchmod\\s+-R\\s+777\\b|\\bsudo\\s+-s\\b)")
+        e.command.command.matches("(?i)(/tmp/|/var/tmp/|\\$\\(mktemp\\b)") &&
+        e.command.command.matches("(?i)(\\s+if\\s*=|\\s+of\\s*=/dev/sd|(?:^|[;&|(`]|(?:\\b(?:ba|z|da|k)?sh(?:\\s+-[a-z]+)*\\s+-c\\s+|\\beval\\s+)[\"'])\\s*(?:[a-z_][a-z0-9_]*=[^;&|\\s]*\\s+|(?:sudo|doas|env|nohup|exec|command|nice|time|xargs|timeout|stdbuf|setsid|eval)(?:\\s+(?:-[^;&|\\s]*(?:\\s+[a-z0-9_][^;&|\\s/]*)?|[0-9][^;&|\\s]*))*\\s+)*(?:/tmp/|/var/tmp/|\\$\\(mktemp[^)]*\\))[^;&|\\s\"'`]*(?:\\s+[^;&|\\s]+)*?\\s+-[dfirv]*(?:r[dfirv]*f|f[dfirv]*r)[dfirv]*(?:[\\s\"'`)]|$)|\\bmkfs\\b|\\|\\s*(ba)?sh\\b|\\bchmod\\s+-R\\s+777\\b|\\bsudo\\s+-s\\b)")
 
 emit:
   reason: "Denied dangerous command re-invoked via a renamed or shimmed binary in the same session"
@@ -193,4 +198,184 @@ tests:
       - timestamp: "2026-06-23T10:00:45Z"
         event: { action: command.executed }
         command: { command: "/tmp/myrm -rf /var/data" }
+        session: { id: s1 }
+  - name: renamed_rm_with_arbitrary_name
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "/tmp/x -rf /" }
+        session: { id: s1 }
+  - name: renamed_rm_with_flag_after_other_option
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "cp /bin/rm /tmp/myrm && /tmp/myrm -v -rf /var/data" }
+        session: { id: s1 }
+  - name: renamed_rm_with_trailing_flag
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "/tmp/myrm /var/data -rf" }
+        session: { id: s1 }
+  - name: renamed_rm_in_mktemp_dir
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "LC_ALL=C $(mktemp -d)/x -fR /var/data" }
+        session: { id: s1 }
+  - name: denied_rm_then_find_tmp_printf
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "find /tmp/build -printf %p" }
+        session: { id: s1 }
+  - name: denied_rm_then_ffmpeg_tmp_filter
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "ffmpeg -i /tmp/in.mp4 -filter:v scale=1" }
+        session: { id: s1 }
+  - name: denied_rm_then_cp_tmp_arg_with_rf
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "cp /tmp/build -rf ./dist" }
+        session: { id: s1 }
+  - name: denied_rm_then_tar_chdir_tmp_with_rf
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "tar -C /tmp/stage -rf out.tar f" }
+        session: { id: s1 }
+  - name: denied_rm_then_tar_append_tmp_archive
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "tar -rf /tmp/x.tar f" }
+        session: { id: s1 }
+  - name: renamed_rm_under_sudo
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "sudo /tmp/myrm -rf /var/data" }
+        session: { id: s1 }
+  - name: renamed_rm_in_bash_c_script
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "bash -c \"/tmp/x -rf /var/data\"" }
+        session: { id: s1 }
+  - name: renamed_rm_under_timeout
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "timeout 5 /tmp/x -rf /var/data" }
+        session: { id: s1 }
+  - name: renamed_rm_in_backticks
+    verdict: match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "echo `/tmp/x -rf /`" }
+        session: { id: s1 }
+  - name: denied_rm_then_cp_quoted_tmp_arg_with_rf
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "cp \"/tmp/build\" -rf ./dist" }
+        session: { id: s1 }
+  - name: denied_rm_then_tar_chdir_quoted_tmp_with_rf
+    verdict: no_match
+    events:
+      - timestamp: "2026-06-23T10:00:00Z"
+        event: { action: approval.denied }
+        command: { command: "rm -rf /var/data" }
+        approval: { decision: "denied", required: true }
+        session: { id: s1 }
+      - timestamp: "2026-06-23T10:00:45Z"
+        event: { action: command.executed }
+        command: { command: "tar -C '/tmp/stage' -rf out.tar f" }
         session: { id: s1 }
