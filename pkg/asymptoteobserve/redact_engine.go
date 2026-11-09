@@ -59,6 +59,11 @@ const (
 	// startScheme: at a letter on a word boundary in the run of [A-Za-z0-9+.-] before the needle,
 	// a URL's `\b[a-z][a-z0-9+.-]*` scheme. The pattern opens with \b.
 	startScheme
+	// startParam: at the `?` or `&` right before the run of [A-Za-z0-9_.-] that ends at the
+	// needle, where a URL query parameter opens, and where startLabel begins when there is none
+	// there or the pattern does not match from it. The pattern is two alternatives: the parameter
+	// with its `?` or `&`, and a label that opens with \b.
+	startParam
 	// startLine: anywhere on the line of the needle or the blank lines before it. The pattern runs
 	// whole from the start of that line, where its (?m)^ and \b see what they see in the whole
 	// text.
@@ -342,7 +347,8 @@ func (set *redactNeedles) passes(engine *redactEngine, t string, h redactHit, wi
 // Where a match can begin anywhere in a run before the needle (startLabel, startScheme), only the
 // leftmost place in the run is tried. Whatever a match from a later place in the run takes, a
 // match from the earlier one can take too, its lazy or starred run of the same characters taking
-// the ones between; so when the earlier place does not match, no place in the run does.
+// the ones between; so when the earlier place does not match, no place in the run does. A
+// startParam rule tries the `?` or `&` before the run first, then that place.
 //
 // When the places would hand the pattern more text than the budget allows (redactAnchoredPerByte),
 // the whole pattern runs once from a safe start before the first of them instead. No match starts
@@ -444,7 +450,11 @@ func (rule redactionRule) matches(text *redactGate, slot *redactSlot) iter.Seq2[
 				first = q
 			}
 			last = q
-			if handed += len(t) - q; handed > budget {
+			places := 1
+			if rule.opensParam(t, q) {
+				places = 2 // the label after it, where the parameter does not match
+			}
+			if handed += places * (len(t) - q); handed > budget {
 				break
 			}
 		}
@@ -455,6 +465,18 @@ func (rule redactionRule) matches(text *redactGate, slot *redactSlot) iter.Seq2[
 			whole(slot.safeStart(t, first))
 			return
 		}
+		anchoredAt := func(q int) []int {
+			if redactWork != nil {
+				redactWork(len(t) - q)
+			}
+			m := slot.anchored.FindStringSubmatchIndex(t[q:])
+			for i := range m {
+				if m[i] >= 0 {
+					m[i] += q
+				}
+			}
+			return m
+		}
 		pos, failed := 0, -1
 		for _, h := range text.hits {
 			if mask&(1<<h.id) == 0 || h.start < pos || !rule.needles.passes(engine, t, h, true) {
@@ -464,14 +486,13 @@ func (rule redactionRule) matches(text *redactGate, slot *redactSlot) iter.Seq2[
 			if q < 0 || q == failed {
 				continue
 			}
-			if redactWork != nil {
-				redactWork(len(t) - q)
-			}
-			m := slot.anchored.FindStringSubmatchIndex(t[q:])
-			for i := range m {
-				if m[i] >= 0 {
-					m[i] += q
+			m := anchoredAt(q)
+			if m == nil && rule.opensParam(t, q) {
+				// No parameter opens at the `?` or `&`: the label after it may still match.
+				if q = rule.startFor(t, h, q+1, slot.boundary); q < 0 {
+					continue
 				}
+				m = anchoredAt(q)
 			}
 			if m == nil && chain != nil {
 				m = chain.rescue(chain.adj.byRule[slot.index], q)
@@ -513,7 +534,7 @@ func (rule redactionRule) startFor(t string, h redactHit, pos int, boundary bool
 			return -1
 		}
 		return q
-	case startLabel, startScheme:
+	case startLabel, startScheme, startParam:
 		class, last := &labelClass, h.start
 		if rule.start == startScheme {
 			class, last = &schemeClass, h.start-1
@@ -525,8 +546,11 @@ func (rule redactionRule) startFor(t string, h redactHit, pos int, boundary bool
 		if redactWork != nil {
 			redactWork(h.start - run)
 		}
+		if rule.start == startParam && run > pos && (t[run-1] == '?' || t[run-1] == '&') {
+			return run - 1
+		}
 		for q := max(run, pos); q <= last; q++ {
-			if wordBoundary(t, q) && (rule.start == startLabel || isASCIILetter(t[q])) {
+			if wordBoundary(t, q) && (rule.start != startScheme || isASCIILetter(t[q])) {
 				return q
 			}
 		}
@@ -544,6 +568,12 @@ func (rule redactionRule) startFor(t string, h redactHit, pos int, boundary bool
 		return q
 	}
 	panic("asymptoteobserve: no start for a redaction rule")
+}
+
+// opensParam reports whether q, a place startFor returned, is the `?` or `&` a startParam rule's
+// query parameter opens with, rather than its label's place: a label holds neither.
+func (rule redactionRule) opensParam(t string, q int) bool {
+	return rule.start == startParam && (t[q] == '?' || t[q] == '&')
 }
 
 // lineStart returns the start of a line at or before every place a startLine match holding one of
