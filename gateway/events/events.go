@@ -10,17 +10,19 @@
 //	new user turn                → prompt.submitted     prompt.text
 //	the model's text             → agent.message        gen_ai.output.messages, gen_ai.response
 //	the reply's token counts     → token.usage          gen_ai.usage, gen_ai.response
-//	the model's tool call        → command.executed (shell), mcp.tool_invoked (MCP),
-//	                               tool.invoked (reads, fetches, anything else)
-//	the tool's result            → file.read (reads), tool.completed (anything else),
-//	                               tool.failed (an error result)
+//	the model's tool call        → command.executed (shell), file.read (read), mcp.tool_invoked
+//	                               (MCP), tool.invoked (fetch, anything else)
+//	the tool's result            → file.read (read), mcp.tool_invoked (MCP), tool.completed
+//	                               (shell, fetch, anything else), tool.failed (an error result)
 //
-// A call and its result never share an action, so they never share an event id. Actions with an
-// effect outside the agent (running a command, calling an MCP server) are recorded when the model
-// asks for them, before they happen; a read is recorded where its content arrives, as the
-// session-store readers record it, so one read is one file.read carrying both its path and what
-// it returned. Both a read's and an MCP tool's result are where a rule sees content from outside
-// the agent (gen_ai.tool.call.result_text).
+// A gateway sees a tool call before the harness acts on it, so a call is recorded as the action
+// it asks for: a rule can judge a read or a command before it happens. A read's or an MCP tool's
+// result is recorded under the same action, where Beacon derives gen_ai.tool.call.result_text, the
+// text rules match for content from outside the agent. When this gateway recorded the call, the
+// result leaves out the call's target (its path, or its MCP server and tool): the call already
+// carried it, so a rule on the target fires once, and the two events get different event ids.
+// A result whose call the gateway never saw (history from before it saw the session) keeps its
+// target. Which calls were recorded is kept in the store, so any replica can tell.
 //
 // System text and tool definitions are resent on every call. They are recorded once per session;
 // a request that resends them lists them on the Turn (Turn.Resent) for analyzers that judge them
@@ -34,6 +36,7 @@ import (
 	"runtime"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	obs "github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 
@@ -41,10 +44,18 @@ import (
 	"github.com/asymptote-labs/agent-beacon/gateway/harness"
 	"github.com/asymptote-labs/agent-beacon/gateway/llm"
 	"github.com/asymptote-labs/agent-beacon/gateway/pipeline"
+	"github.com/asymptote-labs/agent-beacon/gateway/store"
 )
 
 // maxEventBytes is the size Beacon's writers cap an event at.
 const maxEventBytes = 65536
+
+// callTTL bounds how long a recorded call is remembered for its result, which normally comes back
+// within seconds.
+const callTTL = time.Hour
+
+// callKey marks a read or MCP call this gateway recorded, for the request that carries its result.
+func callKey(session, callID string) string { return "events/call/" + session + "/" + callID }
 
 // Retention values: what recorded events keep of the content they describe. They are
 // asymptoteobserve's content retention values.
@@ -88,12 +99,23 @@ func New(cfg Config) (*Analyzer, error) {
 func (a *Analyzer) Name() string { return "events" }
 
 // Analyze implements pipeline.Analyzer. It builds the call's events, leaves them on the Turn,
-// and records the ones that are new.
-func (a *Analyzer) Analyze(_ context.Context, t *pipeline.Turn) (pipeline.Report, error) {
+// and records the ones that are new. It makes at most one store round trip: on a request, whether
+// the read and MCP calls its results answer were recorded; on a reply, that its read and MCP calls
+// were. A store failure is reported, and results then keep their targets.
+func (a *Analyzer) Analyze(ctx context.Context, t *pipeline.Turn) (pipeline.Report, error) {
 	b := builder{a: a, t: t}
+	var err error
 	if t.Call.Phase == gateway.PhaseResponse {
 		b.response()
+		if len(b.recordedCalls) > 0 {
+			entries := make([]store.Entry, len(b.recordedCalls))
+			for i, id := range b.recordedCalls {
+				entries[i] = store.Entry{Key: callKey(t.SessionID, id), Value: recorded, TTL: callTTL}
+			}
+			err = t.Store.Set(ctx, entries...)
+		}
 	} else {
+		err = b.lookupCalls(ctx)
 		b.request()
 	}
 	t.Events = b.events
@@ -106,14 +128,60 @@ func (a *Analyzer) Analyze(_ context.Context, t *pipeline.Turn) (pipeline.Report
 			}
 		}
 	}
-	return rep, nil
+	if err != nil {
+		err = fmt.Errorf("store: %w", err)
+	}
+	return rep, err
 }
+
+// recorded is the value of every call key; stores copy what they keep.
+var recorded = []byte{1}
+
+// lookupCalls asks the store which of the read and MCP calls this request's results answer were
+// recorded, in one batch.
+func (b *builder) lookupCalls(ctx context.Context) error {
+	var ids []string
+	for _, m := range b.t.New.Tail {
+		for _, part := range m.Parts {
+			if part.Kind != llm.PartToolResult {
+				continue
+			}
+			if tc, ok := b.t.ToolCall(part.Result.CallID); ok && targeted(harness.Bind(tc.Name, tc.Arguments).Kind) {
+				ids = append(ids, part.Result.CallID)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	keys := make([]string, len(ids))
+	for i, id := range ids {
+		keys[i] = callKey(b.t.SessionID, id)
+	}
+	vals, err := b.t.Store.Get(ctx, keys...)
+	if err != nil {
+		return err
+	}
+	b.seenCalls = make(map[string]bool, len(ids))
+	for i, id := range ids {
+		b.seenCalls[id] = vals[i] != nil
+	}
+	return nil
+}
+
+// targeted reports whether a call's result repeats its action, so the result leaves out the
+// target when the call was recorded.
+func targeted(k harness.Kind) bool { return k == harness.Read || k == harness.MCP }
 
 // builder builds one call's events.
 type builder struct {
 	a      *Analyzer
 	t      *pipeline.Turn
 	events []*pipeline.Event
+	// seenCalls holds, per read or MCP call id a result answers, whether the call was recorded.
+	seenCalls map[string]bool
+	// recordedCalls are the read and MCP calls a reply records.
+	recordedCalls []string
 }
 
 func (b *builder) request() {
@@ -192,13 +260,15 @@ func (b *builder) toolListed(tool *llm.Tool, bound harness.Call) obs.Event {
 	return e
 }
 
-// result records one tool result, as the action its call names it: the content of a read lands
-// on the file.read, and every other result completes its call as tool.completed, keeping the
-// call's target so the result says what it answers.
+// result records one tool result. A read's or an MCP tool's result repeats its call's action,
+// where Beacon derives gen_ai.tool.call.result_text; when this gateway recorded the call, it
+// leaves out the target the call carried. Every other result completes its call as
+// tool.completed, keeping the call's target so the result says what it answers.
 func (b *builder) result(r *llm.ToolResult) {
 	tc, _ := b.t.ToolCall(r.CallID)
 	call := harness.Bind(tc.Name, tc.Arguments)
 	text := llm.JoinText(r.Parts)
+	seen := b.seenCalls[r.CallID]
 	var e obs.Event
 	switch {
 	case r.IsError:
@@ -207,8 +277,16 @@ func (b *builder) result(r *llm.ToolResult) {
 		e.MCP = mcpTarget(call)
 	case call.Kind == harness.Read:
 		e = b.event("file.read", "file", obs.FidelityInferred)
-		e.File = &obs.FileInfo{Path: call.Path, Operation: "read"}
-		e.Tool = &obs.ToolInfo{Name: call.Name, Path: call.Path}
+		if !seen {
+			e.File = &obs.FileInfo{Path: call.Path, Operation: "read"}
+			e.Tool = target(call)
+		}
+	case call.Kind == harness.MCP:
+		e = b.event("mcp.tool_invoked", "mcp", obs.FidelityInferred)
+		if !seen {
+			e.MCP = mcpTarget(call)
+			e.Tool = target(call)
+		}
 	case call.Kind == harness.Shell:
 		e = b.event("tool.completed", "command", obs.FidelityObserved)
 		e.Command = &obs.CommandInfo{Command: call.Command, Output: text}
@@ -216,15 +294,14 @@ func (b *builder) result(r *llm.ToolResult) {
 	default:
 		e = b.event("tool.completed", "tool", obs.FidelityObserved)
 		e.Tool = target(call)
-		e.MCP = mcpTarget(call)
 	}
 	e.GenAI.Tool = &obs.GenAIToolInfo{Name: call.Name, Call: &obs.GenAIToolCallInfo{ID: r.CallID, Result: text}}
 	b.add(e, true)
 }
 
 // response records the model's reply: its text, its token counts, and the tool calls it made. A
-// gateway sees the calls before the harness acts on them, so a command or MCP call is recorded
-// before it runs.
+// gateway sees the calls before the harness acts on them, so a command, read or MCP call is
+// recorded, and can be judged, before it happens.
 func (b *builder) response() {
 	resp := b.t.Call.Response
 	var info *obs.GenAIResponseInfo
@@ -254,9 +331,14 @@ func (b *builder) response() {
 		case harness.Shell:
 			e = b.event("command.executed", "command", obs.FidelityInferred)
 			e.Command = &obs.CommandInfo{Command: call.Command}
+		case harness.Read:
+			e = b.event("file.read", "file", obs.FidelityInferred)
+			e.File = &obs.FileInfo{Path: call.Path, Operation: "read"}
+			b.recordedCalls = append(b.recordedCalls, tc.ID)
 		case harness.MCP:
 			e = b.event("mcp.tool_invoked", "mcp", obs.FidelityInferred)
 			e.MCP = mcpTarget(call)
+			b.recordedCalls = append(b.recordedCalls, tc.ID)
 		default:
 			e = b.event("tool.invoked", "tool", obs.FidelityObserved)
 		}
