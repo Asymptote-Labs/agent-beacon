@@ -16,7 +16,8 @@ const KindEvent = "beacon.event"
 // it read them there rather than building or sanitizing their own. Events are shared: nobody
 // modifies one once it is on the Turn.
 type Event struct {
-	// Beacon is the event, without an event.id: the id is derived when it is needed (ID).
+	// Beacon is the event as analyzers read it, without an event.id (ID derives it) and without
+	// what only its written record needs (Complete adds that).
 	Beacon obs.Event
 	// Recorded reports that the event is written. Content a session already reported, which a
 	// request sends again, is never recorded again; its events exist only for analyzers that ask
@@ -26,21 +27,39 @@ type Event struct {
 	// (asymptoteobserve.StripToMetadata). Analyzers still read it whole, and its id is that of the
 	// whole event, as the endpoint stamps its id before forwarding strips anything.
 	MetadataOnly bool
+	// Complete, when set, adds to a copy of Beacon the fields only the written record needs and
+	// no rule reads, such as a content marker, whose redaction pass and hash would otherwise be
+	// paid on the call path. Written applies it once.
+	Complete func(*obs.Event)
 
-	idOnce sync.Once
-	id     string
+	writtenOnce sync.Once
+	written     obs.Event
+	idOnce      sync.Once
+	id          string
 }
 
-// ID is the event's Beacon identity (asymptoteobserve.EventID), derived on first use: when the
-// event is written, or when an analyzer cites it as evidence.
+// Written is the event as it is written, without its id: Beacon completed. It is derived on first
+// use, when the event is written or cited, or when an analyzer asks.
+func (e *Event) Written() *obs.Event {
+	e.writtenOnce.Do(func() {
+		e.written = e.Beacon
+		if e.Complete != nil {
+			e.Complete(&e.written)
+		}
+	})
+	return &e.written
+}
+
+// ID is the event's Beacon identity (asymptoteobserve.EventID of the written event), derived on
+// first use: when the event is written, or when an analyzer cites it as evidence.
 func (e *Event) ID() string {
-	e.idOnce.Do(func() { e.id = obs.EventID(e.Beacon) })
+	e.idOnce.Do(func() { e.id = obs.EventID(*e.Written()) })
 	return e.id
 }
 
 // MarshalJSON writes the event as a runtime.jsonl line, with its id.
 func (e *Event) MarshalJSON() ([]byte, error) {
-	ev := e.Beacon
+	ev := *e.Written()
 	ev.Event.ID = e.ID()
 	if e.MetadataOnly {
 		obs.StripToMetadata(&ev)

@@ -32,7 +32,8 @@ func (Marker) Inline() bool { return true }
 func (m Marker) Analyze(_ context.Context, t *pipeline.Turn) (pipeline.Report, error) {
 	var rep pipeline.Report
 	for _, e := range t.Events {
-		line, err := json.Marshal(e.Beacon)
+		// The written form: a reply's text is in its message copy, which is left to the record.
+		line, err := json.Marshal(e.Written())
 		if err != nil {
 			return rep, err
 		}

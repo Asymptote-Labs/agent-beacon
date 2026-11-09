@@ -14,6 +14,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/gateway"
 	"github.com/asymptote-labs/agent-beacon/gateway/llm"
+	"github.com/asymptote-labs/agent-beacon/gateway/llm/codec"
 	"github.com/asymptote-labs/agent-beacon/gateway/pipeline"
 )
 
@@ -148,7 +149,7 @@ func checkCommon(t *testing.T, e *pipeline.Event) {
 	if e.Recorded && b.Sequence == 0 {
 		t.Errorf("%s: recorded without a sequence", b.Event.Action)
 	}
-	if got, want := e.ID(), lineID(t, b); got != want {
+	if got, want := e.ID(), lineID(t, *e.Written()); got != want {
 		t.Errorf("%s: id %s, Beacon's %s", b.Event.Action, got, want)
 	}
 	line, err := json.Marshal(e)
@@ -175,7 +176,7 @@ func TestRequestEvents(t *testing.T) {
 	for _, e := range evs {
 		checkCommon(t, e)
 	}
-	read, mcp, shell, fetch, failed, prompt := evs[2].Beacon, evs[3].Beacon, evs[4].Beacon, evs[5].Beacon, evs[6].Beacon, evs[7].Beacon
+	read, mcp, shell, fetch, failed, prompt := evs[2].Beacon, evs[3].Beacon, evs[4].Beacon, evs[5].Beacon, evs[6].Beacon, *evs[7].Written()
 	if read.File == nil || read.File.Path != "/repo/README.md" || read.GenAI.Tool.Call.Result != "# readme" || read.GenAI.Tool.Call.ID != "t_read" {
 		t.Errorf("read result: file %+v tool %+v", read.File, read.GenAI.Tool)
 	}
@@ -211,7 +212,7 @@ func TestResponseEvents(t *testing.T) {
 	for _, e := range evs {
 		checkCommon(t, e)
 	}
-	msg, usage := evs[0].Beacon, evs[1].Beacon
+	msg, usage := *evs[0].Written(), evs[1].Beacon
 	for _, e := range []obs.Event{msg, usage} {
 		r := e.GenAI.Response
 		if r == nil || r.ID != "msg_01" || r.Model != "claude-sonnet-4-5-20250929" || !slices.Equal(r.FinishReasons, []string{"tool_use"}) {
@@ -246,7 +247,7 @@ func TestStreamedReplyUsage(t *testing.T) {
 	if got := actions(evs); !slices.Equal(got, []string{"agent.message", "token.usage"}) {
 		t.Fatalf("actions %v", got)
 	}
-	if out := evs[0].Beacon.GenAI.Output; out == nil || !strings.Contains(string(mustJSON(t, out)), "Hello") {
+	if out := evs[0].Written().GenAI.Output; out == nil || !strings.Contains(string(mustJSON(t, out)), "Hello") {
 		t.Errorf("message %s", mustJSON(t, out))
 	}
 	u, r := evs[1].Beacon.GenAI.Usage, evs[1].Beacon.GenAI.Response
@@ -401,7 +402,7 @@ func TestMetadataRetention(t *testing.T) {
 				t.Errorf("%s written with %q: %s", e.Beacon.Event.Action, content, text)
 			}
 		}
-		if got, want := line["event"].(map[string]any)["id"], lineID(t, e.Beacon); got != want {
+		if got, want := line["event"].(map[string]any)["id"], lineID(t, *e.Written()); got != want {
 			t.Errorf("%s: id %v, want the whole event's %s", e.Beacon.Event.Action, got, want)
 		}
 	}
@@ -528,4 +529,74 @@ func (turnKeeper) Name() string { return "turns" }
 func (k turnKeeper) Analyze(_ context.Context, t *pipeline.Turn) (pipeline.Report, error) {
 	*k.turns = append(*k.turns, t)
 	return pipeline.Report{}, nil
+}
+
+// A prompt's and a reply's content marker and gen_ai message copy are left to the written record;
+// written, the event is exactly the one SanitizeEvent makes of the whole event, secrets and long
+// text included, and analyzers read the same event without them.
+func TestCompletedAtWrite(t *testing.T) {
+	long := strings.Repeat("x", 70000)
+	for _, text := range []string{"run with --api-key sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA please", long} {
+		for _, phase := range []gateway.Phase{gateway.PhaseRequest, gateway.PhaseResponse} {
+			body := `{"model":"m","messages":[{"role":"user","content":` + string(mustJSON(t, text)) + `}]}`
+			if phase == gateway.PhaseResponse {
+				body = `{"id":"msg_1","model":"m","content":[{"type":"text","text":` + string(mustJSON(t, text)) + `}]}`
+			}
+			p, s := newPipeline(t, Config{})
+			p.Handle(context.Background(), anthropic("c", phase, "m", body))
+			p.Close()
+			e := s.events()[0]
+			if e.Beacon.Content != nil || (e.Beacon.GenAI.Input != nil || e.Beacon.GenAI.Output != nil) {
+				t.Errorf("%s: content marker or message copy built on the call path", e.Beacon.Event.Action)
+			}
+			eager := e.Beacon
+			eager.Raw = map[string]interface{}{"gateway.name": "test", "gateway.call_id": "c"}
+			eager.Content = obs.RetainedContent(text, obs.DefaultRawStringLimit)
+			genAI := *eager.GenAI
+			if phase == gateway.PhaseRequest {
+				eager.Prompt = &obs.PromptInfo{Text: text}
+				genAI.Input = &obs.GenAIInputInfo{Messages: obs.TextInputMessages(text)}
+			} else {
+				genAI.Output = &obs.GenAIOutputInfo{Messages: obs.TextOutputMessages(text)}
+			}
+			eager.GenAI = &genAI
+			eager.Truncated = false
+			eager = obs.SanitizeEvent(eager, maxEventBytes)
+			if got, want := string(mustJSON(t, e.Written())), string(mustJSON(t, eager)); got != want {
+				t.Errorf("%s (%d bytes of text): written\n%.400s\nwant\n%.400s", e.Beacon.Event.Action, len(text), got, want)
+			}
+		}
+	}
+}
+
+// A tool call's arguments are left to the written record too, and written as SanitizeEvent writes
+// them: redacted, and long ones within the size the writers keep.
+func TestArgumentsCompletedAtWrite(t *testing.T) {
+	for _, input := range []string{`{"command":"curl -H 'Authorization: Bearer sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' x"}`, `{"content":"` + strings.Repeat("y", 70000) + `"}`} {
+		body := `{"id":"msg_1","model":"m","content":[{"type":"tool_use","id":"t1","name":"Write","input":` + input + `}]}`
+		resp, err := codec.DecodeResponse(llm.AnthropicMessages, []byte(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		args := llm.ToolCalls(resp.Parts)[0].Arguments
+		p, s := newPipeline(t, Config{})
+		p.Handle(context.Background(), anthropic("c", gateway.PhaseResponse, "m", body))
+		p.Close()
+		e := s.events()[0]
+		if e.Beacon.GenAI.Tool.Call.Arguments != nil {
+			t.Error("arguments built on the call path")
+		}
+		eager := e.Beacon
+		eager.Raw = map[string]interface{}{"gateway.name": "test", "gateway.call_id": "c"}
+		genAI := *eager.GenAI
+		tool := *genAI.Tool
+		tool.Call = &obs.GenAIToolCallInfo{ID: "t1", Arguments: args}
+		genAI.Tool = &tool
+		eager.GenAI = &genAI
+		eager.Truncated = false
+		eager = obs.SanitizeEvent(eager, maxEventBytes)
+		if got, want := string(mustJSON(t, e.Written())), string(mustJSON(t, eager)); got != want {
+			t.Errorf("written\n%.300s\nwant\n%.300s", got, want)
+		}
+	}
 }

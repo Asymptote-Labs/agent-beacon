@@ -247,9 +247,7 @@ func (b *builder) request() {
 		text := strings.Join(prompt, "\n")
 		e := b.event("prompt.submitted", "prompt", obs.FidelityObserved)
 		e.Prompt = &obs.PromptInfo{Text: text}
-		e.Content = obs.RetainedContent(text, obs.DefaultRawStringLimit)
-		e.GenAI.Input = &obs.GenAIInputInfo{Messages: obs.TextInputMessages(text)}
-		b.add(e, true)
+		b.addCompleted(e, retained(text, true))
 	}
 }
 
@@ -319,10 +317,8 @@ func (b *builder) response() {
 	}
 	if text := llm.JoinText(resp.Parts); text != "" {
 		e := b.event("agent.message", "agent", obs.FidelityObserved)
-		e.Content = obs.RetainedContent(text, obs.DefaultRawStringLimit)
-		e.GenAI.Output = &obs.GenAIOutputInfo{Messages: obs.TextOutputMessages(text)}
 		e.GenAI.Response = info
-		b.add(e, true)
+		b.addCompleted(e, retained(text, false))
 	}
 	if usage := b.usage(resp.Usage); usage != nil {
 		e := b.event("token.usage", "metric", obs.FidelityObserved)
@@ -349,8 +345,8 @@ func (b *builder) response() {
 			e = b.event("tool.invoked", "tool", obs.FidelityObserved)
 		}
 		e.Tool = target(call)
-		e.GenAI.Tool = &obs.GenAIToolInfo{Name: call.Name, Call: &obs.GenAIToolCallInfo{ID: tc.ID, Arguments: tc.Arguments}}
-		b.add(e, true)
+		e.GenAI.Tool = &obs.GenAIToolInfo{Name: call.Name, Call: &obs.GenAIToolCallInfo{ID: tc.ID}}
+		b.addCompleted(e, arguments(tc.Arguments))
 	}
 }
 
@@ -456,6 +452,76 @@ func (b *builder) finish(e obs.Event, record bool) *pipeline.Event {
 
 func (b *builder) add(e obs.Event, record bool) {
 	b.events = append(b.events, b.finish(e, record))
+}
+
+// addCompleted records an event whose written form complete finishes (pipeline.Event.Complete).
+func (b *builder) addCompleted(e obs.Event, complete func(*obs.Event)) {
+	ev := b.finish(e, true)
+	ev.Complete = complete
+	b.events = append(b.events, ev)
+}
+
+// rawGenAI are the options SanitizeEvent sanitizes gen_ai with.
+var rawGenAI = obs.PrivacyOptions{RedactSecrets: true, StringLimit: obs.DefaultRawStringLimit}
+
+// truncationCheckFrom is the retained text length from which completing an event checks its size
+// again: below it the marker and the message copy cannot take an event past maxEventBytes.
+const truncationCheckFrom = 4096
+
+// retained completes an event that retains text, a prompt (input) or a reply, as the session
+// readers record one: a content marker (a redaction pass and a hash of the text) and gen_ai's
+// message copy of the text, sanitized as SanitizeEvent sanitizes gen_ai. No rule reads either, so
+// both are left to the written record (pipeline.Event.Written).
+func retained(text string, input bool) func(*obs.Event) {
+	return func(ev *obs.Event) {
+		ev.Content = obs.RetainedContent(text, obs.DefaultRawStringLimit)
+		var add obs.GenAIInfo
+		if input {
+			add.Input = &obs.GenAIInputInfo{Messages: obs.TextInputMessages(text)}
+		} else {
+			add.Output = &obs.GenAIOutputInfo{Messages: obs.TextOutputMessages(text)}
+		}
+		clean := obs.SanitizeGenAI(&add, rawGenAI)
+		genAI := *ev.GenAI
+		if input {
+			genAI.Input = clean.Input
+		} else {
+			genAI.Output = clean.Output
+		}
+		ev.GenAI = &genAI
+		if !ev.Truncated && len(text) >= truncationCheckFrom {
+			if line, err := json.Marshal(ev); err == nil && len(line) > maxEventBytes {
+				ev.Truncated = true
+			}
+		}
+	}
+}
+
+// arguments completes a tool call's event with its arguments, sanitized as SanitizeEvent
+// sanitizes gen_ai. gen_ai.tool.call.arguments is not a field rules can address (what rules match
+// is bound into command, file, tool and mcp), so it is left to the written record.
+func arguments(args string) func(*obs.Event) {
+	return func(ev *obs.Event) {
+		if args == "" {
+			return
+		}
+		add := obs.GenAIInfo{Tool: &obs.GenAIToolInfo{Call: &obs.GenAIToolCallInfo{Arguments: args}}}
+		clean := obs.SanitizeGenAI(&add, rawGenAI)
+		genAI := *ev.GenAI
+		tool := *genAI.Tool
+		call := *tool.Call
+		if clean != nil && clean.Tool != nil && clean.Tool.Call != nil {
+			call.Arguments = clean.Tool.Call.Arguments
+		}
+		tool.Call = &call
+		genAI.Tool = &tool
+		ev.GenAI = &genAI
+		if !ev.Truncated && len(args) >= truncationCheckFrom {
+			if line, err := json.Marshal(ev); err == nil && len(line) > maxEventBytes {
+				ev.Truncated = true
+			}
+		}
+	}
 }
 
 func firstNonEmpty(s ...string) string {
