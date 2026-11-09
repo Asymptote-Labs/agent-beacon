@@ -565,6 +565,9 @@ func TestRunPreToolSynthesizesAntigravityPromptFromTranscript(t *testing.T) {
 	}
 }
 
+// SessionStart runs the stale-session sweep on Antigravity as on every runtime. A conversation
+// that recorded its first prompt more than two hours ago can still be resumed, so the sweep must
+// keep its prompt marker, or the resumed conversation's first tool call records that prompt again.
 func TestAntigravitySessionStartDoesNotReplayAnOlderPrompt(t *testing.T) {
 	setupHookConfigDirs(t)
 	t.Setenv("BEACON_ENDPOINT_MODE", "1")
@@ -581,12 +584,27 @@ func TestAntigravitySessionStartDoesNotReplayAnOlderPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldTime := time.Now().Add(-3 * time.Hour).UTC().Format(time.RFC3339)
-	data := fmt.Appendf(nil, `{"old-session":{"prompt_emitted":true,"created_at":%q}}`, oldTime)
-	if err := os.WriteFile(filepath.Join(hookconfig.GetStateDir(platformFlag), "state.json"), data, 0600); err != nil {
+	statePath := filepath.Join(hookconfig.GetStateDir(platformFlag), "state.json")
+	data := fmt.Appendf(nil, `{"old-session":{"prompt_emitted":true,"prompt_emitted_at":%q,"created_at":%q},"stale-session":{"created_at":%q}}`, oldTime, oldTime, oldTime)
+	if err := os.WriteFile(statePath, data, 0600); err != nil {
 		t.Fatal(err)
 	}
 
 	runHookWithInput(t, runSessionStart, map[string]interface{}{"conversationId": "new-session"})
+	after, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sessions map[string]json.RawMessage
+	if err := json.Unmarshal(after, &sessions); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := sessions["stale-session"]; ok {
+		t.Fatalf("session start did not sweep the stale session: %s", after)
+	}
+	if _, ok := sessions["new-session"]; !ok {
+		t.Fatalf("session start did not register the new session: %s", after)
+	}
 	input := map[string]interface{}{"conversationId": "old-session", "transcriptPath": transcript}
 	emitAntigravityPromptFromTranscript(newHookLogger("pre-tool", platformFlag, "old-session"), input, "old-session")
 	for _, event := range endpointEvents(t, logPath) {

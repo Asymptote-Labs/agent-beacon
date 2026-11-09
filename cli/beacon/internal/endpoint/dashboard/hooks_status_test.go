@@ -89,3 +89,30 @@ func TestHookStatusesListEachRuntimeOnceWithItsPath(t *testing.T) {
 		}
 	}
 }
+
+// Legacy Antigravity hooks stay installed so repair rewrites them, but Antigravity does not run
+// them, so the row must not read as configured and must carry the reinstall message.
+func TestHookStatusesFlagLegacyAntigravityHooks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	path := filepath.Join(home, ".gemini", "config", "hooks.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"beacon-endpoint":{"Stop":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform antigravity stop"}]}]}}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, status := range hookStatuses(filepath.Join(t.TempDir(), "runtime.jsonl"), true) {
+		if status.Target != "antigravity" {
+			continue
+		}
+		if !status.Installed || status.Status != "needs_reinstall" || status.Message != endpointhooks.AntigravityLegacyHooksMessage(endpointhooks.LevelUser) {
+			t.Fatalf("antigravity row = %#v, want installed, needs_reinstall and the reinstall message", status)
+		}
+		return
+	}
+	t.Fatal("antigravity is missing from the hook status list")
+}

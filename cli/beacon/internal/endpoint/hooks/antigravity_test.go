@@ -176,30 +176,57 @@ func TestAntigravityHookStatusDetectsInstalled(t *testing.T) {
 	}
 
 	status := AntigravityHookStatus(AntigravityOptions{Level: LevelUser, UserMode: true})
-	if !status.Installed {
-		t.Fatalf("AntigravityHookStatus installed = false, status=%#v", status)
+	if !status.Installed || status.NeedsReinstall {
+		t.Fatalf("AntigravityHookStatus = %#v, want installed in the current schema", status)
 	}
 	if status.ConfigPath != path {
 		t.Fatalf("ConfigPath = %q, want %q", status.ConfigPath, path)
 	}
 }
 
-func TestAntigravityConfigHasEndpointHook(t *testing.T) {
+// A managed block in the legacy grouped schema stays installed, so repair rewrites it, but
+// Antigravity never runs it, so status must say so and name the command that rewrites it.
+func TestAntigravityHookStatusReportsLegacySchema(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	path := filepath.Join(home, ".gemini", "config", "hooks.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"beacon-endpoint":{"Stop":[{"hooks":[{"type":"command","command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform antigravity stop"}]}]}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	status := AntigravityHookStatus(AntigravityOptions{Level: LevelUser, UserMode: true})
+	if !status.Installed || !status.NeedsReinstall {
+		t.Fatalf("AntigravityHookStatus = %#v, want installed and needing a reinstall", status)
+	}
+	const want = "Beacon's Antigravity CLI hooks use the legacy schema, which Antigravity does not run; rerun beacon endpoint hooks install --harness antigravity to rewrite them"
+	if status.Message != want {
+		t.Fatalf("Message = %q, want %q", status.Message, want)
+	}
+	if got := AntigravityLegacyHooksMessage(LevelProject); !strings.Contains(got, "--harness antigravity --level project ") {
+		t.Fatalf("project-level message = %q, want the project-level install command", got)
+	}
+}
+
+func TestAntigravityConfigEndpointHooks(t *testing.T) {
 	const command = `"command":"BEACON_ENDPOINT_MODE=1 beacon-hooks --platform antigravity stop"`
 	for _, tc := range []struct {
-		name   string
-		config string
-		want   bool
+		name                    string
+		config                  string
+		wantCurrent, wantLegacy bool
 	}{
-		{"legacy", `{"beacon-endpoint":{"Stop":[{"hooks":[{` + command + `}]}],"PreToolUse":[{"hooks":[{` + command + `}]}]}}`, false},
-		{"unsupported event", `{"beacon-endpoint":{"UserPromptSubmit":[{` + command + `}]}}`, false},
-		{"custom block", `{"custom":{"Stop":[{` + command + `}]}}`, true},
-		{"custom block with non-command handler", `{"custom":{"Stop":[{"type":"other"},{` + command + `}]}}`, true},
+		{"legacy", `{"beacon-endpoint":{"Stop":[{"hooks":[{` + command + `}]}],"PreToolUse":[{"hooks":[{` + command + `}]}]}}`, false, true},
+		{"unsupported event", `{"beacon-endpoint":{"UserPromptSubmit":[{` + command + `}]}}`, false, false},
+		{"custom block", `{"custom":{"Stop":[{` + command + `}]}}`, true, false},
+		{"custom block with non-command handler", `{"custom":{"Stop":[{"type":"other"},{` + command + `}]}}`, true, false},
+		{"someone else's legacy block", `{"custom":{"Stop":[{"hooks":[{"command":"echo keep"}]}]}}`, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := AntigravityConfigHasEndpointHook([]byte(tc.config))
-			if err != nil || got != tc.want {
-				t.Fatalf("configured = %v, err = %v, want %v", got, err, tc.want)
+			current, legacy, err := AntigravityConfigEndpointHooks([]byte(tc.config))
+			if err != nil || current != tc.wantCurrent || legacy != tc.wantLegacy {
+				t.Fatalf("current = %v, legacy = %v, err = %v, want %v, %v", current, legacy, err, tc.wantCurrent, tc.wantLegacy)
 			}
 		})
 	}

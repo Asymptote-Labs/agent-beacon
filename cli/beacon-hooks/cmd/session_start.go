@@ -57,18 +57,14 @@ func runSessionStart(cmd *cobra.Command, args []string) {
 		platformLogger.Info("Rotated log file (exceeded size limit)")
 	}
 
-	// Antigravity can resume conversations after the stale-session cutoff. Keep its
-	// existing prompt deduplication state when another conversation starts.
-	if asymptoteobserve.NormalizeHarnessName(platformFlag) != "antigravity_cli" {
-		cleaned := state.CleanupStaleForPlatform(platformFlag)
-		if cleaned > 0 {
-			logger.Info(fmt.Sprintf("Cleaned up %d stale sessions", cleaned))
-		}
+	cleaned := state.CleanupStaleForPlatform(platformFlag)
+	if cleaned > 0 {
+		logger.Info(fmt.Sprintf("Cleaned up %d stale sessions", cleaned))
+	}
 
-		// Recording the session lets a later sweep remove its log if session-end never runs.
-		if err := state.NewSessionState(sessionID, platformFlag).Register(); err != nil {
-			logger.Warn("Failed to record session state", "error", err.Error())
-		}
+	// Recording the session lets a later sweep remove its log if session-end never runs
+	if err := state.NewSessionState(sessionID, platformFlag).Register(); err != nil {
+		logger.Warn("Failed to record session state", "error", err.Error())
 	}
 
 	logger.Info("Session initialized", "session_id", sessionID, "platform", platformFlag)
