@@ -7,5 +7,7 @@ gateways:
   - type: portkey   # Portkey default.webhook
     addr: 127.0.0.1:4022
 outputs:
+  - jsonl: /tmp/bgw-smoke/events.jsonl
+    kinds: [beacon.event]
   - jsonl: /tmp/bgw-smoke/findings.jsonl
     kinds: [finding]

@@ -47,7 +47,16 @@ store:
   type: memory
   max_entries: 1000000
 
-# Each output receives the record kinds listed (all kinds if none).
+# What recorded events keep of the content they describe: full (default) or metadata, which writes
+# them as Beacon's Metadata-only forwarding does (no prompt, reply, instructions, tool arguments or
+# results; identifiers, paths, commands, model and token usage stay).
+content:
+  retention: full
+
+# Each output receives the record kinds listed (all kinds if none): beacon.event (lines in
+# runtime.jsonl's schema; `beacon scan --log-path` reads them) and finding.
 outputs:
+  - jsonl: gateway-events.jsonl
+    kinds: [beacon.event]
   - jsonl: gateway-findings.jsonl
     kinds: [finding]

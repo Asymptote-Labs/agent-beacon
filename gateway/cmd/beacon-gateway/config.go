@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 
 	"github.com/asymptote-labs/agent-beacon/gateway"
 	"github.com/asymptote-labs/agent-beacon/gateway/envoy"
+	"github.com/asymptote-labs/agent-beacon/gateway/events"
 	"github.com/asymptote-labs/agent-beacon/gateway/litellm"
 	"github.com/asymptote-labs/agent-beacon/gateway/pipeline"
 	"github.com/asymptote-labs/agent-beacon/gateway/portkey"
@@ -58,12 +60,16 @@ type config struct {
 		MaxInFlight  int           `yaml:"max_in_flight"`
 		QueueWait    time.Duration `yaml:"queue_wait"`
 	} `yaml:"pipeline"`
-	// Store holds every piece of cross-call state. Only "memory" is built in.
-	Store struct {
-		Type       string `yaml:"type"`
-		MaxEntries int    `yaml:"max_entries"`
-	} `yaml:"store"`
-	Outputs []struct {
+	// Content is what recorded events keep of the content they describe (events.Config).
+	Content events.Config `yaml:"content"`
+	// Store holds every piece of cross-call state; its type picks the implementation, "memory"
+	// by default.
+	Store yaml.Node `yaml:"store"`
+	// Analyzers, Policy and Observers configure extensions a build registers (extend.go).
+	Analyzers map[string]yaml.Node `yaml:"analyzers"`
+	Policy    yaml.Node            `yaml:"policy"`
+	Observers map[string]yaml.Node `yaml:"observers"`
+	Outputs   []struct {
 		JSONL string   `yaml:"jsonl"`
 		Kinds []string `yaml:"kinds"`
 	} `yaml:"outputs"`
@@ -111,16 +117,98 @@ func loadConfig(path string) (*config, error) {
 	return &cfg, nil
 }
 
-func (cfg *config) store() (store.Store, error) {
-	switch cfg.Store.Type {
-	case "", "memory":
-		n := cfg.Store.MaxEntries
-		if n <= 0 {
-			n = 1_000_000
-		}
-		return store.NewMemory(n), nil
+// present reports whether a configuration node was given.
+func present(n *yaml.Node) bool { return n.Kind != 0 }
+
+func (cfg *config) store(env Env) (store.Store, error) {
+	var head struct {
+		Type string `yaml:"type"`
 	}
-	return nil, fmt.Errorf("store.type: unknown store %q", cfg.Store.Type)
+	var node *yaml.Node
+	if present(&cfg.Store) {
+		node = &cfg.Store
+		if err := node.Decode(&head); err != nil {
+			return nil, fmt.Errorf("store: %w", err)
+		}
+	}
+	if head.Type == "" {
+		head.Type = "memory"
+	}
+	build, ok := storeFactories[head.Type]
+	if !ok {
+		return nil, fmt.Errorf("store.type: unknown store %q", head.Type)
+	}
+	s, err := build(node, env)
+	if err != nil {
+		return nil, fmt.Errorf("store (%s): %w", head.Type, err)
+	}
+	return s, nil
+}
+
+// analyzers builds the events analyzer, then every configured extension analyzer, in name order.
+func (cfg *config) analyzers(env Env) ([]pipeline.Analyzer, error) {
+	ec := cfg.Content
+	ec.Version = env.Version
+	ev, err := events.New(ec)
+	if err != nil {
+		return nil, err
+	}
+	out := []pipeline.Analyzer{ev}
+	for _, name := range sortedNames(cfg.Analyzers) {
+		build, ok := analyzerFactories[name]
+		if !ok {
+			return nil, fmt.Errorf("analyzers.%s: no such analyzer in this build", name)
+		}
+		n := cfg.Analyzers[name]
+		a, err := build(&n, env)
+		if err != nil {
+			return nil, fmt.Errorf("analyzers.%s: %w", name, err)
+		}
+		out = append(out, a)
+	}
+	return out, nil
+}
+
+// policy builds the configured policy; nil, the default, allows every call.
+func (cfg *config) policy(env Env) (pipeline.Policy, error) {
+	if !present(&cfg.Policy) {
+		if policyFactory == nil {
+			return nil, nil
+		}
+	} else if policyFactory == nil {
+		return nil, fmt.Errorf("policy: this build has no configurable policy")
+	}
+	p, err := policyFactory(&cfg.Policy, env)
+	if err != nil {
+		return nil, fmt.Errorf("policy: %w", err)
+	}
+	return p, nil
+}
+
+func (cfg *config) observers(env Env) ([]pipeline.Observer, error) {
+	var out []pipeline.Observer
+	for _, name := range sortedNames(cfg.Observers) {
+		build, ok := observerFactories[name]
+		if !ok {
+			return nil, fmt.Errorf("observers.%s: no such observer in this build", name)
+		}
+		n := cfg.Observers[name]
+		o, err := build(&n, env)
+		if err != nil {
+			return nil, fmt.Errorf("observers.%s: %w", name, err)
+		}
+		out = append(out, o)
+	}
+	return out, nil
+}
+
+func sortedNames(m map[string]yaml.Node) []string {
+	names := make([]string, 0, len(m))
+	for name := range m {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
 }
 
 func (cfg *config) routes() ([]pipeline.Route, error) {

@@ -23,12 +23,17 @@ func TestBind(t *testing.T) {
 	}
 }
 
+// Harness names end in asymptoteobserve.NormalizeHarnessName, so a gateway and an endpoint name
+// one harness the same way.
 func TestIdentify(t *testing.T) {
 	for ua, want := range map[string]Harness{
 		"claude-cli/2.1.306 (external, cli)":        {"claude_code", "2.1.306"},
 		"codex_cli_rs/0.163.0 (Mac OS 26.0; arm64)": {"codex_cli", "0.163.0"},
-		"":             {Name: "unknown"},
-		"My-Agent/1.0": {"my-agent", "1.0"},
+		"GitHubCopilotChat/0.30.0":                  {"vscode_copilot", "0.30.0"},
+		"opencode/1.2.3":                            {"opencode", "1.2.3"},
+		"Gemini-CLI/0.9":                            {"gemini_cli", "0.9"},
+		"":                                          {Name: "unknown"},
+		"My-Agent/1.0":                              {"my-agent", "1.0"},
 	} {
 		if got := Identify(ua); got != want {
 			t.Errorf("Identify(%q) = %+v, want %+v", ua, got, want)

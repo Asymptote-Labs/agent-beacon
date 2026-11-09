@@ -5,16 +5,51 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
+	"github.com/asymptote-labs/agent-beacon/gateway"
 	"github.com/asymptote-labs/agent-beacon/gateway/store"
 )
 
-// Analyzer inspects a turn and reports findings and records. Analyze runs on the call's path and
-// concurrently with other calls, including calls of the same session: it must be fast and keep
-// anything that outlives the call in Turn.Store, not in its own memory.
+// Analyzer inspects a turn and reports findings and records. Analyze runs concurrently with
+// other calls, including calls of the same session: it must be fast and keep anything that
+// outlives the call in Turn.Store, not in its own memory. Analyzers run in order, one at a time
+// per call; the events analyzer runs first and leaves the call's events on the Turn.
 type Analyzer interface {
 	Name() string
 	Analyze(ctx context.Context, t *Turn) (Report, error)
+}
+
+// Inline is implemented by an analyzer whose findings must be known before a call is answered.
+// When no analyzer is inline and the policy is the default, nothing analysis finds can change a
+// verdict, so the pipeline answers each call as soon as it is admitted and analyzes it after.
+type Inline interface {
+	Inline() bool
+}
+
+// ResentReader is implemented by an analyzer that judges content a session already reported when
+// a request sends it again (Turn.Resent). Without one, resent content is not listed at all.
+type ResentReader interface {
+	ReadsResent() bool
+}
+
+// Observer is called once per analyzed call, after its verdict, with everything the pipeline
+// knows of it, and returns records of its own for the call's batch. It runs on the analysis path
+// and must be fast.
+type Observer interface {
+	Observe(o *Observation) []Record
+}
+
+// Observation is one analyzed call, as an Observer sees it.
+type Observation struct {
+	Turn *Turn
+	// Findings are new; Standing held over from earlier calls. Both counted toward Verdict.
+	Findings, Standing []Finding
+	Verdict            gateway.Verdict
+	// Errors are why analysis did not complete, if it did not.
+	Errors []error
+	// Elapsed is the time from the start of analysis to the verdict.
+	Elapsed time.Duration
 }
 
 // Background is implemented by analyzers that also work off the call path, such as analysis

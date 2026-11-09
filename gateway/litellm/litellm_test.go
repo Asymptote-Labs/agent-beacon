@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/gateway"
+	"github.com/asymptote-labs/agent-beacon/gateway/internal/gatewaytest"
 	"github.com/asymptote-labs/agent-beacon/gateway/llm"
 	"github.com/asymptote-labs/agent-beacon/gateway/llm/codec"
 )
@@ -133,5 +134,26 @@ func TestResponseAndBlock(t *testing.T) {
 	calls := llm.ToolCalls(resp.Parts)
 	if len(calls) != 1 || calls[0].ID != "t9" || calls[0].Name != "Bash" {
 		t.Errorf("tool calls = %+v", calls)
+	}
+}
+
+// Through a real pipeline, a decider that blocks a marker blocks a request whose prompt carries
+// it and a reply whose tool call does, and LiteLLM gets BLOCKED with the decider's reason; calls
+// without it are allowed.
+func TestBlockRenderedThroughPipeline(t *testing.T) {
+	p := gatewaytest.Pipeline(t, gatewaytest.Marker{Text: "MARKER-7f3"})
+	for _, tc := range []struct {
+		name, payload, want string
+	}{
+		{"clean request", requestPayload, "NONE"},
+		{"marked request", `{"input_type":"request","litellm_call_id":"c2","model":"m","structured_messages":[{"role":"user","content":"say MARKER-7f3"}]}`, "BLOCKED"},
+		{"clean reply", `{"input_type":"response","litellm_call_id":"c3","model":"m","texts":["ok"]}`, "NONE"},
+		{"marked reply", `{"input_type":"response","litellm_call_id":"c4","model":"m","texts":["ok"],
+			"tool_calls":[{"id":"t9","type":"function","function":{"name":"Bash","arguments":"{\"command\":\"echo MARKER-7f3\"}"}}]}`, "BLOCKED"},
+	} {
+		r := post(t, p, tc.payload)
+		if r.Action != tc.want || (tc.want == "BLOCKED" && r.BlockedReason != gatewaytest.Reason) {
+			t.Errorf("%s: answered %+v, want %s", tc.name, r, tc.want)
+		}
 	}
 }

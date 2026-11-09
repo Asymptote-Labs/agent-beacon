@@ -7,35 +7,33 @@ import (
 	"encoding/json"
 	"net/url"
 	"strings"
+
+	obs "github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
 
 // Harness is the client that made a call.
 type Harness struct {
-	// Name is the canonical harness name when the product is known (claude_code, codex_cli),
-	// otherwise the user agent's product token, lowercased; "unknown" without a user agent.
+	// Name is the canonical harness name (asymptoteobserve.NormalizeHarnessName) of the user
+	// agent's product; "unknown" without a user agent.
 	Name    string
 	Version string
 }
 
-// products maps user-agent product tokens to canonical harness names.
+// products maps user-agent product tokens that do not name their harness to the name they mean.
 var products = map[string]string{
 	"claude-cli":   "claude_code",
-	"claude-code":  "claude_code",
 	"codex_cli_rs": "codex_cli",
 	"codex_exec":   "codex_cli",
 	"codex-tui":    "codex_cli",
-	"opencode":     "opencode",
-	"gemini-cli":   "gemini_cli",
 	"geminicli":    "gemini_cli",
-	"omp":          "omp",
-	"cursor":       "cursor",
-	"cline":        "cline",
-	"aider":        "aider",
-	"goose":        "goose",
+	// VS Code's Copilot Chat extension; the bare word "copilot" would normalize to the CLI.
+	"githubcopilotchat": "vscode_copilot",
 }
 
 // Identify names the harness from a user agent's leading product token
-// ("claude-cli/2.1.306 (external, cli)" → claude_code 2.1.306).
+// ("claude-cli/2.1.306 (external, cli)" → claude_code 2.1.306). The name ends in
+// asymptoteobserve.NormalizeHarnessName, so a gateway's events name a harness as every other
+// collection path does.
 func Identify(userAgent string) Harness {
 	token, _, _ := strings.Cut(strings.TrimSpace(userAgent), " ")
 	product, version, _ := strings.Cut(token, "/")
@@ -44,9 +42,9 @@ func Identify(userAgent string) Harness {
 		return Harness{Name: "unknown"}
 	}
 	if name, ok := products[product]; ok {
-		return Harness{Name: name, Version: version}
+		product = name
 	}
-	return Harness{Name: product, Version: version}
+	return Harness{Name: obs.NormalizeHarnessName(product), Version: version}
 }
 
 // Kind is the neutral action a tool call performs.

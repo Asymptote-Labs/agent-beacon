@@ -70,6 +70,17 @@ func (b *budget) release(n int64) {
 	b.mu.Unlock()
 }
 
+// hold counts n more bytes as in use without waiting, clamped to the budget like a reservation:
+// for a body an analysis keeps reading after its adapter released the reservation it was read
+// under. It returns what to release.
+func (b *budget) hold(n int64) int64 {
+	n = min(max(n, 0), b.size)
+	b.mu.Lock()
+	b.used += n
+	b.mu.Unlock()
+	return n
+}
+
 // grant admits waiters in order while the next fits. b.mu is held.
 func (b *budget) grant() {
 	for e := b.waiters.Front(); e != nil; e = b.waiters.Front() {
@@ -125,10 +136,10 @@ func (p *Pipeline) analyze(ctx context.Context) bool {
 
 func (p *Pipeline) release() { <-p.slots }
 
-// overloaded counts a refusal and returns the refusal's verdict: the call goes through unanalyzed.
+// overloaded counts a refusal and returns the policy's verdict for it.
 func (p *Pipeline) overloaded(what string) gateway.Verdict {
 	if n := p.stats.refused.Add(1); n&(n-1) == 0 {
 		p.log.Warn("overloaded: calls refused", "refused", n, "limit", what, "max_in_flight", p.cfg.MaxInFlight, "max_body_bytes", p.cfg.MaxBodyBytes)
 	}
-	return gateway.Verdict{Action: gateway.Allow}
+	return p.cfg.Policy.Overloaded()
 }

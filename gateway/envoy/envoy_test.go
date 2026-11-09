@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"maps"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -21,6 +22,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/asymptote-labs/agent-beacon/gateway"
+	"github.com/asymptote-labs/agent-beacon/gateway/internal/gatewaytest"
 	"github.com/asymptote-labs/agent-beacon/gateway/llm"
 )
 
@@ -436,6 +438,53 @@ func TestBlockedReply(t *testing.T) {
 				t.Errorf("body %s, want %s", g, tc.wantBody)
 			}
 		})
+	}
+}
+
+// Through a real pipeline, a decider that blocks a marker replaces a BUFFERED request or reply
+// that carries it with the provider-shaped error, and a STREAMED reply, which the client already
+// holds, is let through.
+func TestBlockRenderedThroughPipeline(t *testing.T) {
+	p := gatewaytest.Pipeline(t, gatewaytest.Marker{Text: "MARKER-7f3"})
+	headers := reqHeaders(":method", "POST", ":path", "/v1/messages", "user-agent", "claude-cli/2.1.306")
+	clean := reqBody(`{"model":"claude-x","messages":[{"role":"user","content":"hi"}]}`)
+	marked := `{"id":"msg_1","model":"claude-x-1","content":[{"type":"text","text":"MARKER-7f3"}]}`
+	for _, tc := range []struct {
+		name string
+		msgs []*extprocv3.ProcessingRequest
+		want []string
+	}{
+		{"marked request", []*extprocv3.ProcessingRequest{headers, reqBody(`{"model":"claude-x","messages":[{"role":"user","content":"MARKER-7f3"}]}`)},
+			[]string{"continue", "immediate"}},
+		{"marked buffered reply", []*extprocv3.ProcessingRequest{headers, clean, respHeaders(":status", "200"), respBody(marked, true)},
+			[]string{"continue", "continue", "continue", "immediate"}},
+		{"marked streamed reply", []*extprocv3.ProcessingRequest{headers, clean, respHeaders(":status", "200"), respBody(marked[:20], false), respBody(marked[20:], true)},
+			[]string{"continue", "continue", "continue", "continue", "continue"}},
+		{"clean exchange", []*extprocv3.ProcessingRequest{headers, clean, respHeaders(":status", "200"), respBody(`{"id":"m","model":"x","content":[{"type":"text","text":"ok"}]}`, true)},
+			[]string{"continue", "continue", "continue", "continue"}},
+	} {
+		resps := exchangeWith(t, Config{}, p, tc.msgs)
+		if got := kinds(resps); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: answers %v, want %v", tc.name, got, tc.want)
+			continue
+		}
+		if ir := resps[len(resps)-1].GetImmediateResponse(); ir != nil && !strings.Contains(string(ir.GetBody()), gatewaytest.Reason) {
+			t.Errorf("%s: block body %s", tc.name, ir.GetBody())
+		}
+	}
+}
+
+// The reply's call names the model the request asked for, so both phases' events name one model.
+func TestModelSpansPhases(t *testing.T) {
+	rec := &recorder{}
+	exchangeWith(t, Config{}, rec, []*extprocv3.ProcessingRequest{
+		reqHeaders(":method", "POST", ":path", "/v1/messages"),
+		reqBody(`{"model":"claude-x","messages":[]}`),
+		respHeaders(":status", "200"),
+		respBody(`{"id":"m","model":"claude-x-20260101","content":[]}`, true),
+	})
+	if len(rec.calls) != 2 || rec.calls[0].Model != "claude-x" || rec.calls[1].Model != "claude-x" {
+		t.Errorf("calls %+v", rec.calls)
 	}
 }
 

@@ -40,6 +40,19 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	env := Env{Log: log, Version: version}
+	analyzers, err := cfg.analyzers(env)
+	if err != nil {
+		return err
+	}
+	policy, err := cfg.policy(env)
+	if err != nil {
+		return err
+	}
+	observers, err := cfg.observers(env)
+	if err != nil {
+		return err
+	}
 	adapters, err := cfg.gateways(log)
 	if err != nil {
 		return err
@@ -48,7 +61,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	st, err := cfg.store()
+	st, err := cfg.store(env)
 	if err != nil {
 		return err
 	}
@@ -67,6 +80,9 @@ func run() error {
 		bodyBytes = memLimit / 4
 	}
 	p := pipeline.New(pipeline.Config{
+		Analyzers:      analyzers,
+		Policy:         policy,
+		Observers:      observers,
 		Routes:         routes,
 		Store:          st,
 		SeenTTL:        cfg.Pipeline.SeenTTL,
@@ -80,7 +96,11 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	log.Info("starting", "version", version, "gateways", len(adapters))
+	names := make([]string, len(analyzers))
+	for i, a := range analyzers {
+		names[i] = a.Name()
+	}
+	log.Info("starting", "version", version, "gateways", len(adapters), "analyzers", names, "answers_first", p.AnswersFirst(), "content", cfg.Content.Retention)
 	return serve(ctx, stop, p, adapters, cfg.Admin, cfg.Debug.Pprof, log)
 }
 

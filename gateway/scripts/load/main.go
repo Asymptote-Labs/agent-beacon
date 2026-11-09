@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/gateway"
+	"github.com/asymptote-labs/agent-beacon/gateway/events"
 	"github.com/asymptote-labs/agent-beacon/gateway/internal/synth"
 	"github.com/asymptote-labs/agent-beacon/gateway/llm"
 	"github.com/asymptote-labs/agent-beacon/gateway/pipeline"
@@ -103,8 +104,14 @@ func run(cfg config) error {
 	return nil
 }
 
-// analyzers are the analyzers the replay runs.
-func analyzers() []pipeline.Analyzer { return nil }
+// analyzers are the analyzers the replay runs: the events analyzer, as the gateway runs it.
+func analyzers() []pipeline.Analyzer {
+	ev, err := events.New(events.Config{})
+	if err != nil {
+		panic(err)
+	}
+	return []pipeline.Analyzer{ev}
+}
 
 func liveHeap() uint64 {
 	runtime.GC()

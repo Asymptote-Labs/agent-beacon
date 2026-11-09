@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/asymptote-labs/agent-beacon/gateway"
+	"github.com/asymptote-labs/agent-beacon/gateway/internal/gatewaytest"
 	"github.com/asymptote-labs/agent-beacon/gateway/llm"
 )
 
@@ -108,10 +109,34 @@ func TestWebhookCalls(t *testing.T) {
 			if c.Client.Identity != identity || c.Client.Session != "s-1" || len(c.Client.Headers) != 0 {
 				t.Errorf("client = %+v", c.Client)
 			}
+			// The reply's call names the model the request asked for; the request's is read
+			// from its body by the pipeline.
+			if want := map[gateway.Phase]string{gateway.PhaseRequest: "", gateway.PhaseResponse: "gpt-4o"}[tt.phase]; c.Model != want {
+				t.Errorf("Model = %q, want %q", c.Model, want)
+			}
 			if c.ID != callID([]byte(chatRequest)) {
 				t.Errorf("ID = %q, want hash of request.json", c.ID)
 			}
 		})
+	}
+}
+
+// Through a real pipeline, a decider that blocks a marker denies a request or reply that carries
+// it, with its reason and rule in the data Portkey reports to the client.
+func TestBlockRenderedThroughPipeline(t *testing.T) {
+	p := gatewaytest.Pipeline(t, gatewaytest.Marker{Text: "MARKER-7f3"})
+	marked := strings.Replace(chatRequest, "list files", "MARKER-7f3", 1)
+	markedReply := strings.Replace(chatResponse, `\"ls\"`, `\"echo MARKER-7f3\"`, 1)
+	for _, tc := range []struct{ name, body, want string }{
+		{"clean request", payload("beforeRequestHook", "chatComplete", chatRequest, `{}`, false), `{"verdict":true}`},
+		{"marked request", payload("beforeRequestHook", "chatComplete", marked, `{}`, false),
+			`{"verdict":false,"data":{"reason":"` + gatewaytest.Reason + `","rules":["test-marker"]}}`},
+		{"marked reply", payload("afterRequestHook", "chatComplete", chatRequest, markedReply, false),
+			`{"verdict":false,"data":{"reason":"` + gatewaytest.Reason + `","rules":["test-marker"]}}`},
+	} {
+		if status, body := post(t, Config{}, p, "", tc.body); status != http.StatusOK || body != tc.want {
+			t.Errorf("%s: %d %s, want %s", tc.name, status, body, tc.want)
+		}
 	}
 }
 

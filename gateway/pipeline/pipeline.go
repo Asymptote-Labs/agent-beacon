@@ -7,6 +7,10 @@
 //
 // The call path holds no per-session memory: everything that outlives a call is in the Store, so
 // replicas are interchangeable and the store can be shared.
+//
+// When nothing analysis finds can change a verdict (the default policy, and no Inline analyzer),
+// the pipeline answers each call as soon as it is admitted and analyzes it afterwards, holding the
+// call's analysis slot and body bytes until it is done.
 package pipeline
 
 import (
@@ -15,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -26,10 +31,14 @@ import (
 
 // Config assembles a pipeline.
 type Config struct {
+	// Analyzers run in order on every call; the events analyzer goes first.
 	Analyzers []Analyzer
-	// Policy decides verdicts; nil means AllowAll.
+	// Policy decides verdicts; nil means AllowAll, and lets the pipeline answer calls before
+	// analyzing them when no analyzer is Inline.
 	Policy Policy
-	Routes []Route
+	// Observers see every analyzed call after its verdict.
+	Observers []Observer
+	Routes    []Route
 	// Store holds cross-call state; nil means an in-memory store of a million keys.
 	Store store.Store
 	// SeenTTL is how long a session remembers having reported a system prompt or tool
@@ -39,8 +48,8 @@ type Config struct {
 	SessionHeaders []string
 	// MaxBodyBytes bounds the bytes of call bodies being read and analyzed at once (default
 	// 1 GiB); MaxInFlight bounds the calls being analyzed at once (default 2 per CPU). A call
-	// waits up to QueueWait (default 250ms) for either, and is then refused with an allow, so
-	// overload costs a gateway a fast answer rather than a timeout.
+	// waits up to QueueWait (default 250ms) for either, and is then refused with the policy's
+	// Overloaded verdict, so overload costs a gateway a fast answer rather than a timeout.
 	MaxBodyBytes int64
 	MaxInFlight  int
 	QueueWait    time.Duration
@@ -58,7 +67,14 @@ type Pipeline struct {
 	out    *output
 	seen   *seenMemo
 	log    *slog.Logger
-	stats  struct{ calls, blocked, failed, refused atomic.Uint64 }
+	// answerFirst is set when no verdict depends on analysis: Handle answers at admission.
+	answerFirst bool
+	// resent is set when an analyzer reads resent content.
+	resent bool
+	// pending counts analyses still running after their call was answered.
+	pending   sync.WaitGroup
+	closeOnce sync.Once
+	stats     struct{ calls, blocked, failed, refused atomic.Uint64 }
 }
 
 // New builds a pipeline, starts its output routes and its background analyzers.
@@ -66,6 +82,7 @@ func New(cfg Config) *Pipeline {
 	if cfg.Log == nil {
 		cfg.Log = slog.Default()
 	}
+	answerFirst := cfg.Policy == nil
 	if cfg.Policy == nil {
 		cfg.Policy = AllowAll{}
 	}
@@ -96,23 +113,36 @@ func New(cfg Config) *Pipeline {
 		log:    cfg.Log,
 	}
 	for _, a := range cfg.Analyzers {
+		if in, ok := a.(Inline); ok && in.Inline() {
+			answerFirst = false
+		}
+		if r, ok := a.(ResentReader); ok && r.ReadsResent() {
+			p.resent = true
+		}
 		if b, ok := a.(Background); ok {
 			b.Start(Env{Emit: p.out.emit, Store: cfg.Store, Log: cfg.Log})
 		}
 	}
+	p.answerFirst = answerFirst
 	return p
 }
 
-// Close stops the background analyzers, then flushes and closes the sinks. Call it after every
-// adapter has stopped.
+// Close waits for analyses still running, stops the background analyzers, then flushes and
+// closes the sinks. Call it after every adapter has stopped; calls after the first do nothing.
 func (p *Pipeline) Close() {
-	for _, a := range p.cfg.Analyzers {
-		if b, ok := a.(Background); ok {
-			b.Stop()
+	p.closeOnce.Do(func() {
+		p.pending.Wait()
+		for _, a := range p.cfg.Analyzers {
+			if b, ok := a.(Background); ok {
+				b.Stop()
+			}
 		}
-	}
-	p.out.close()
+		p.out.close()
+	})
 }
+
+// AnswersFirst reports whether Handle answers calls before analyzing them.
+func (p *Pipeline) AnswersFirst() bool { return p.answerFirst }
 
 // Stats is a snapshot of the pipeline's counters.
 type Stats struct {
@@ -162,18 +192,37 @@ func (p *Pipeline) Handle(ctx context.Context, c *gateway.Call) gateway.Verdict 
 	if !p.analyze(ctx) {
 		return p.overloaded("analysis slots")
 	}
-	defer p.release()
-	start := time.Now()
 	if c.Time.IsZero() {
-		c.Time = start
+		c.Time = time.Now()
 	}
+	if !p.answerFirst {
+		defer p.release()
+		return p.run(ctx, c)
+	}
+	// The adapter releases its reservation for the body when Handle returns; the analysis
+	// still reading it holds the bytes again until it ends. The two overlap, so the budget is
+	// briefly counted twice rather than ever not at all.
+	held := p.bodies.hold(int64(len(c.Body)))
+	p.pending.Add(1)
+	go func() {
+		defer p.pending.Done()
+		defer p.release()
+		defer p.bodies.release(held)
+		p.run(context.WithoutCancel(ctx), c)
+	}()
+	return allow
+}
+
+// run analyzes one call and returns its verdict.
+func (p *Pipeline) run(ctx context.Context, c *gateway.Call) gateway.Verdict {
+	start := time.Now()
 	p.stats.calls.Add(1)
 
 	var errs []error
 	if err := decode(c); err != nil {
 		errs = append(errs, err)
 	}
-	t := &Turn{Call: c, SessionID: p.sessionID(c), Harness: harness.Identify(c.Client.UserAgent), Store: p.cfg.Store}
+	t := &Turn{Call: c, SessionID: p.sessionID(c), Harness: harness.Identify(c.Client.UserAgent), Store: p.cfg.Store, wantsResent: p.resent}
 
 	var findings, standing []Finding
 	var recs []Record
@@ -208,6 +257,7 @@ func (p *Pipeline) Handle(ctx context.Context, c *gateway.Call) gateway.Verdict 
 	if len(errs) > 0 {
 		p.stats.failed.Add(1)
 		p.log.Error("analysis incomplete", "gateway", c.Gateway, "call_id", c.ID, "phase", c.Phase, "err", errors.Join(errs...))
+		v = p.cfg.Policy.Incomplete(t, v, errs)
 	}
 	if v.Action == gateway.Block && c.Enforce {
 		p.stats.blocked.Add(1)
@@ -215,6 +265,12 @@ func (p *Pipeline) Handle(ctx context.Context, c *gateway.Call) gateway.Verdict 
 	}
 	for _, f := range findings {
 		recs = append(recs, Record{Kind: KindFinding, Value: f})
+	}
+	if len(p.cfg.Observers) > 0 {
+		o := &Observation{Turn: t, Findings: findings, Standing: standing, Verdict: v, Errors: errs, Elapsed: time.Since(start)}
+		for _, obs := range p.cfg.Observers {
+			recs = append(recs, obs.Observe(o)...)
+		}
 	}
 	p.out.emit(recs...)
 	return v

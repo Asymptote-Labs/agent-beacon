@@ -1,6 +1,7 @@
 // Package perf benchmarks the request pipeline end to end, in process: a gateway.Call with a
-// realistic body through decode, delta, analyzers, policy and outputs. It holds no code, only
-// benchmarks, so profiles of the call path come from one place:
+// realistic body through decode, delta, the events analyzer, policy and outputs, all on the call
+// path, as a build whose verdict waits for analysis runs them. It holds no code, only benchmarks,
+// so profiles of the call path come from one place:
 //
 //	go test ./internal/perf -run '^$' -bench . -benchmem -cpuprofile cpu.out -memprofile mem.out
 package perf
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/asymptote-labs/agent-beacon/gateway"
+	"github.com/asymptote-labs/agent-beacon/gateway/events"
 	"github.com/asymptote-labs/agent-beacon/gateway/internal/synth"
 	"github.com/asymptote-labs/agent-beacon/gateway/llm"
 	"github.com/asymptote-labs/agent-beacon/gateway/pipeline"
@@ -25,9 +27,23 @@ type discard struct{}
 func (discard) Write(context.Context, []pipeline.Record) error { return nil }
 func (discard) Close() error                                   { return nil }
 
+// onPath keeps analysis on the call path, as an inline analyzer does.
+type onPath struct{}
+
+func (onPath) Name() string { return "on-path" }
+func (onPath) Inline() bool { return true }
+func (onPath) Analyze(context.Context, *pipeline.Turn) (pipeline.Report, error) {
+	return pipeline.Report{}, nil
+}
+
 func newPipeline(b testing.TB) *pipeline.Pipeline {
 	b.Helper()
+	ev, err := events.New(events.Config{})
+	if err != nil {
+		b.Fatal(err)
+	}
 	p := pipeline.New(pipeline.Config{
+		Analyzers:   []pipeline.Analyzer{ev, onPath{}},
 		Routes:      []pipeline.Route{{Name: "all", Sink: discard{}}},
 		MaxInFlight: 1 << 16,
 	})

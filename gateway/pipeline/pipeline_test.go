@@ -13,7 +13,8 @@ import (
 	"github.com/asymptote-labs/agent-beacon/gateway/store"
 )
 
-// recorder is an analyzer that keeps the turns it saw and reports scripted findings.
+// recorder is an analyzer that keeps the turns it saw and reports scripted findings. It is
+// inline, so a call is analyzed before Handle returns.
 type recorder struct {
 	turns    []Turn
 	findings []Finding
@@ -21,6 +22,7 @@ type recorder struct {
 }
 
 func (r *recorder) Name() string { return "recorder" }
+func (r *recorder) Inline() bool { return true }
 
 func (r *recorder) Analyze(_ context.Context, t *Turn) (Report, error) {
 	r.turns = append(r.turns, *t)
@@ -249,13 +251,159 @@ func TestAnalysisSlots(t *testing.T) {
 	}
 }
 
-// A call the pipeline cannot analyze is allowed and counted as failed.
-func TestFailurePolicy(t *testing.T) {
+// A call the default pipeline cannot analyze is allowed and counted as failed.
+func TestUnanalyzableCallAllowed(t *testing.T) {
 	broken := &gateway.Call{Gateway: "g", ID: "c", Phase: gateway.PhaseRequest, Enforce: true, Protocol: llm.OpenAIChat, Body: []byte("{not json")}
 	p := New(Config{})
+	if v := p.Handle(context.Background(), broken); v.Action != gateway.Allow {
+		t.Errorf("undecodable call answered %+v", v)
+	}
+	p.Close()
+	if p.Stats().Failed != 1 {
+		t.Errorf("failed %d, want 1", p.Stats().Failed)
+	}
+}
+
+// policyFake blocks a call with a finding, a call analysis could not complete when it is
+// enforced, and every call refused under overload; it records what it was asked.
+type policyFake struct {
+	decided    []int
+	incomplete [][]error
+}
+
+func (p *policyFake) Decide(_ *Turn, findings []Finding) gateway.Verdict {
+	p.decided = append(p.decided, len(findings))
+	if len(findings) > 0 {
+		return gateway.Verdict{Action: gateway.Block, Reason: "test: finding", Rules: []string{findings[0].Rule}}
+	}
+	return gateway.Verdict{}
+}
+
+func (p *policyFake) Incomplete(t *Turn, decided gateway.Verdict, errs []error) gateway.Verdict {
+	p.incomplete = append(p.incomplete, errs)
+	if t.Call.Enforce {
+		return gateway.Verdict{Action: gateway.Block, Reason: "test: incomplete"}
+	}
+	return decided
+}
+
+func (p *policyFake) Overloaded() gateway.Verdict {
+	return gateway.Verdict{Action: gateway.Block, Reason: "test: overloaded"}
+}
+
+// A policy decides every verdict: findings, standing ones included, through Decide; a call whose
+// analysis did not complete (it did not decode, or an analyzer failed) through Incomplete; a call
+// refused for capacity, at admission or for an analysis slot, through Overloaded.
+func TestPolicyDecidesEveryVerdict(t *testing.T) {
+	ctx := context.Background()
+	req := &llm.Request{Messages: []llm.Message{text(llm.RoleUser, "hi")}}
+
+	pol := &policyFake{}
+	rec := &recorder{}
+	p := New(Config{Analyzers: []Analyzer{rec}, Policy: pol, MaxBodyBytes: 10, QueueWait: time.Millisecond})
 	defer p.Close()
-	if v := p.Handle(context.Background(), broken); v.Action != gateway.Allow || p.Stats().Failed != 1 {
-		t.Errorf("undecodable call answered %+v, failed %d", v, p.Stats().Failed)
+	if v := p.Handle(ctx, call("clean", req)); v.Action != gateway.Allow {
+		t.Errorf("clean call: %+v", v)
+	}
+	rec.findings = []Finding{{Rule: "r1", Severity: SeverityHigh}}
+	if v := p.Handle(ctx, call("found", req)); v.Action != gateway.Block || !slices.Equal(v.Rules, []string{"r1"}) {
+		t.Errorf("call with a finding: %+v", v)
+	}
+	rec.findings, rec.err = nil, errors.New("boom")
+	if v := p.Handle(ctx, call("failed", req)); v.Reason != "test: incomplete" || len(pol.incomplete) != 1 {
+		t.Errorf("call whose analyzer failed: %+v (incomplete asked %d times)", v, len(pol.incomplete))
+	}
+	broken := &gateway.Call{Gateway: "g", ID: "c", Phase: gateway.PhaseRequest, Protocol: llm.OpenAIChat, Body: []byte("{not json")}
+	if v := p.Handle(ctx, broken); v.Action != gateway.Allow || len(pol.incomplete) != 2 {
+		t.Errorf("unenforced undecodable call: %+v (incomplete asked %d times)", v, len(pol.incomplete))
+	}
+	hold, _, _ := p.Admit(ctx, 10)
+	if _, v, ok := p.Admit(ctx, 5); ok || v.Reason != "test: overloaded" {
+		t.Errorf("refused at admission: ok=%v %+v", ok, v)
+	}
+	hold()
+	if p.AnswersFirst() {
+		t.Error("a pipeline with a policy answers before analyzing")
+	}
+}
+
+// gate is an analyzer that holds every call until released, and reports when it ends.
+type gate struct {
+	entered, release, done chan struct{}
+}
+
+func (g *gate) Name() string { return "gate" }
+func (g *gate) Analyze(context.Context, *Turn) (Report, error) {
+	g.entered <- struct{}{}
+	<-g.release
+	defer func() { g.done <- struct{}{} }()
+	return Report{Records: []Record{{Kind: "test.event"}}}, nil
+}
+
+// With the default policy and no inline analyzer, nothing analysis finds changes a verdict: Handle
+// answers at once and analysis goes on after it, holding its analysis slot and the body's bytes
+// until it ends, and Close waits for it before closing the sinks.
+func TestAnswersFirst(t *testing.T) {
+	g := &gate{entered: make(chan struct{}), release: make(chan struct{}), done: make(chan struct{}, 1)}
+	sink := &memSink{}
+	p := New(Config{Analyzers: []Analyzer{g}, Routes: []Route{{Name: "all", Sink: sink}}})
+	if !p.AnswersFirst() {
+		t.Fatal("default pipeline does not answer first")
+	}
+	body := []byte(`{"messages":[{"role":"user","content":"hi"}]}`)
+	c := &gateway.Call{Gateway: "g", ID: "c", Phase: gateway.PhaseRequest, Enforce: true, Protocol: llm.OpenAIChat, Body: body}
+	release, _, _ := p.Admit(context.Background(), int64(len(body)))
+	if v := p.Handle(context.Background(), c); v.Action != gateway.Allow {
+		t.Fatalf("answered %+v", v)
+	}
+	release() // the adapter is done with the call
+	<-g.entered
+	if s := p.Stats(); s.InFlight != 1 || s.BodyBytes != int64(len(body)) {
+		t.Errorf("while analysis runs: in_flight %d body_bytes %d, want 1 and %d", s.InFlight, s.BodyBytes, len(body))
+	}
+	closed := make(chan struct{})
+	go func() { p.Close(); close(closed) }()
+	select {
+	case <-closed:
+		t.Fatal("Close returned while an analysis was running")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(g.release)
+	<-closed
+	if s := p.Stats(); s.InFlight != 0 || s.BodyBytes != 0 || s.Calls != 1 {
+		t.Errorf("after analysis: %+v", s)
+	}
+	if len(sink.got) != 1 || !sink.closed {
+		t.Errorf("sink got %d records (closed %v), want the analysis's one before closing", len(sink.got), sink.closed)
+	}
+}
+
+// observer records what it was shown and adds a record of its own.
+type observer struct{ seen []Observation }
+
+func (o *observer) Observe(ob *Observation) []Record {
+	o.seen = append(o.seen, *ob)
+	return []Record{{Kind: "test.observed", Value: ob.Turn.Call.ID}}
+}
+
+// An observer sees each call after its verdict, with the findings, errors and time that led to
+// it, and its records join the call's.
+func TestObserver(t *testing.T) {
+	rec := &recorder{findings: []Finding{{Rule: "r", Severity: SeverityLow}}, err: errors.New("boom")}
+	ob := &observer{}
+	sink := &memSink{}
+	p := New(Config{Analyzers: []Analyzer{rec}, Policy: &policyFake{}, Observers: []Observer{ob}, Routes: []Route{{Name: "all", Sink: sink, Kinds: []string{"test.observed"}}}})
+	p.Handle(context.Background(), call("c1", &llm.Request{Messages: []llm.Message{text(llm.RoleUser, "hi")}}))
+	p.Close()
+	if len(ob.seen) != 1 {
+		t.Fatalf("observed %d calls", len(ob.seen))
+	}
+	o := ob.seen[0]
+	if o.Turn.Call.ID != "c1" || len(o.Findings) != 1 || o.Verdict.Reason != "test: incomplete" || len(o.Errors) != 1 || o.Elapsed <= 0 {
+		t.Errorf("observation = %+v", o)
+	}
+	if len(sink.got) != 1 || sink.got[0].Value != "c1" {
+		t.Errorf("observer records = %+v", sink.got)
 	}
 }
 

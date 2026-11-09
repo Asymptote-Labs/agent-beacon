@@ -31,6 +31,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/asymptote-labs/agent-beacon/gateway"
+	"github.com/asymptote-labs/agent-beacon/gateway/internal/jsonscan"
 	"github.com/asymptote-labs/agent-beacon/gateway/llm"
 	"github.com/asymptote-labs/agent-beacon/gateway/llm/codec"
 )
@@ -194,6 +195,8 @@ type exchange struct {
 	client   gateway.Client
 	protocol llm.Protocol
 	encoding string
+	// model is the model the request named.
+	model    string
 	request  body
 	response body
 }
@@ -403,6 +406,10 @@ func (x *exchange) finish(ctx context.Context, phase gateway.Phase, b *body) (v 
 		if data, ok = x.decode(data); !ok {
 			return v, false
 		}
+	} else {
+		// The model the client asked for names both phases' events; the reply names the
+		// provider's own model separately.
+		x.model = jsonscan.FirstString(data, "model")
 	}
 	// A request is held until its last chunk is answered, so a block still stops it; a streamed
 	// reply has already reached the client.
@@ -414,6 +421,7 @@ func (x *exchange) finish(ctx context.Context, phase gateway.Phase, b *body) (v 
 		Enforce:  enforce,
 		Time:     time.Now(),
 		Client:   x.client,
+		Model:    x.model,
 		Protocol: x.protocol,
 		Body:     data,
 	})

@@ -137,3 +137,22 @@ func checkMembers(t *testing.T, b []byte) {
 		t.Fatalf("%q: Members %v, want %v", b, got, want)
 	}
 }
+
+// FirstString reads the first member of the name, unescaped, when it is a string, and stops there:
+// what follows it need not even be valid.
+func TestFirstString(t *testing.T) {
+	for body, want := range map[string]string{
+		`{"model":"claude-x","messages":[]}`:              "claude-x",
+		`{"stream":true, "model" : "gpt-\u0034o","x":1}`:  "gpt-4o",
+		`{"model":"a","model":"b"}`:                       "a",
+		`{"model":null}`:                                  "",
+		`{"model":7}`:                                     "",
+		`{"messages":[{"model":"inner"}]}`:                "",
+		`{"model":"first", "messages":[ this is not json`: "first",
+		`not json`: "",
+	} {
+		if got := FirstString([]byte(body), "model"); got != want {
+			t.Errorf("FirstString(%s) = %q, want %q", body, got, want)
+		}
+	}
+}

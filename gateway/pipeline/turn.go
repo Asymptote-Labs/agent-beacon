@@ -28,9 +28,20 @@ type Turn struct {
 	New Delta
 	// Store is the shared state store. Analyzers namespace their keys ("<analyzer>/...").
 	Store store.Store
+	// Events are the Beacon events the events analyzer built for this call, in order. Analyzers
+	// after it read them here.
+	Events []*Event
+	// Resent lists the content of this request the session already reported (system messages,
+	// MCP tool definitions), when an analyzer is a ResentReader; nil otherwise.
+	Resent []*Resent
 
-	calls map[string]llm.ToolCall
+	wantsResent bool
+	calls       map[string]llm.ToolCall
 }
+
+// WantsResent reports whether an analyzer reads Resent, so whoever builds the turn's events
+// lists it.
+func (t *Turn) WantsResent() bool { return t.wantsResent }
 
 // Delta is the part of a turn that is new.
 type Delta struct {

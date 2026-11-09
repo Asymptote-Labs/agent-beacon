@@ -25,5 +25,7 @@ store:
   type: memory
   max_entries: 2000000
 outputs:
+  - jsonl: /tmp/bgw-stress/events.jsonl
+    kinds: [beacon.event]
   - jsonl: /tmp/bgw-stress/findings.jsonl
     kinds: [finding]

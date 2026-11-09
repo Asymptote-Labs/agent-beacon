@@ -39,6 +39,29 @@ func Members(b []byte, enter func(name string) bool, yield func(parent, name str
 	return trailing(b, end)
 }
 
+// errFound stops a walk once FirstString has its member.
+var errFound = errors.New("found")
+
+// FirstString is the value of the first top-level member of the object b named name, when it is
+// a string, and "" otherwise. It reads only as far as that member: a model call names its model
+// near the top, ahead of the conversation. Unlike a decoder, which keeps the last of duplicate
+// names, it keeps the first.
+func FirstString(b []byte, name string) string {
+	var out string
+	_ = Object(b, func(n string, value []byte) error {
+		if n != name {
+			return nil
+		}
+		if len(value) > 0 && value[0] == '"' {
+			if s, err := jsontext.AppendUnquote(nil, value); err == nil {
+				out = string(s)
+			}
+		}
+		return errFound
+	})
+	return out
+}
+
 // object walks the object starting at b[i] == '{', yielding its members under parent, and returns
 // the index just past it. Only the top level (parent "") enters members.
 func object(b []byte, i int, parent string, enter func(string) bool, yield func(parent, name string, value []byte) error) (int, error) {
