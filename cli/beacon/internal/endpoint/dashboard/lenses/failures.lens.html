@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Failures</title>
+<script type="application/beacon-lens+json">
+{
+  "id": "failures",
+  "title": "Failures",
+  "description": "Everything that went wrong in order: commands that exited non-zero, tool and MCP calls the runtime reported as failed, and error events, with their output and whether a later attempt succeeded.",
+  "icon": "alert",
+  "version": 1,
+  "api": "beacon.lens.v1",
+  "author": "Beacon"
+}
+</script>
+<style>
+  body {
+    margin: 0;
+    color: var(--beacon-text, #111827);
+    font: 400 13px/1.5 var(--beacon-font-sans, ui-sans-serif, system-ui, sans-serif);
+  }
+  .muted { color: var(--beacon-muted, #6b7280); }
+  .mono { font: 13px var(--beacon-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); overflow-wrap: anywhere; }
+  .fail { color: var(--beacon-danger, #b91c1c); }
+  .ok { color: var(--beacon-ok, #047857); }
+  p { margin: 0 0 8px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 4px 8px; border-bottom: 1px solid var(--beacon-line, rgba(0,0,0,0.1)); font-weight: 400; text-align: left; vertical-align: top; }
+  th { color: var(--beacon-muted, #6b7280); white-space: nowrap; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tr.detail td { padding-top: 0; }
+  pre {
+    margin: 0;
+    padding: 6px 8px;
+    max-height: 240px;
+    overflow: auto;
+    background: var(--beacon-panel-soft, #f9fafb);
+    font: 13px/1.4 var(--beacon-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+</style>
+</head>
+<body>
+<p id="status" class="muted">Loading trace…</p>
+<main id="root" hidden></main>
+<script>
+(function () {
+  "use strict";
+  var root = document.getElementById("root");
+  var number = new Intl.NumberFormat();
+  var MAX_ROWS = 500;
+  var MAX_OUTPUT = 4000;
+
+  // Every node is built with textContent: commands, output and results are untrusted.
+  function el(tag, text, className) {
+    var node = document.createElement(tag);
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    if (className) node.className = className;
+    return node;
+  }
+
+  function exitCode(event) {
+    var code = event.command && event.command.exit_code;
+    return typeof code === "number" ? code : null;
+  }
+
+  // A failure is a non-zero exit, an error the runtime reported on the event, or an error event.
+  function isFailure(event) {
+    var code = exitCode(event);
+    return (code !== null && code !== 0) || !!(event.error && event.error.type) || event.type === "error";
+  }
+
+  function kind(event) {
+    if (event.command && event.command.command) return "command";
+    if (event.mcp && (event.mcp.server || event.mcp.tool)) return "MCP call";
+    if (event.tool && event.tool.name) return "tool call";
+    return "error";
+  }
+
+  // What was attempted, also the key that matches a later attempt at the same thing.
+  function subject(event) {
+    if (event.command && event.command.command) return event.command.command;
+    if (event.mcp && (event.mcp.server || event.mcp.tool)) return [event.mcp.server, event.mcp.tool].filter(Boolean).join(" / ");
+    if (event.tool && (event.tool.command || event.tool.name)) return event.tool.command || event.tool.name;
+    return "";
+  }
+
+  function reason(event) {
+    var code = exitCode(event);
+    if (code !== null && code !== 0) return "exit " + code;
+    if (event.error && event.error.type) return event.error.type;
+    return event.action;
+  }
+
+  function text(value) {
+    if (value === undefined || value === null) return "";
+    if (typeof value === "string") return value;
+    try { return JSON.stringify(value, null, 2); } catch (e) { return String(value); }
+  }
+
+  // The output that explains the failure, or why there is none to show.
+  function output(event) {
+    var out = event.command && event.command.output;
+    if (out) {
+      if (out.included && out.text) return { text: out.text };
+      if (out.hash || out.bytes) return { note: "Output not retained" + (out.bytes ? " (" + number.format(out.bytes) + " bytes" + (out.hash ? ", " + out.hash : "") + ")" : "") + "." };
+    }
+    var result = event.tool && text(event.tool.result);
+    if (result) return { text: result };
+    var content = event.content;
+    if (content && content.included && content.text) return { text: content.text };
+    if (event.summary && event.summary !== event.action) return { text: event.summary };
+    return null;
+  }
+
+  // The first later attempt at the same subject that did not fail, or the first that failed again.
+  function laterAttempt(events, index) {
+    var key = subject(events[index]);
+    if (!key) return null;
+    var again = null;
+    for (var i = index + 1; i < events.length; i++) {
+      var e = events[i];
+      if (subject(e) !== key || kind(e) !== kind(events[index])) continue;
+      if (!isFailure(e)) return { ok: true, event: e };
+      if (!again) again = e;
+    }
+    return again ? { ok: false, event: again } : null;
+  }
+
+  function render(data) {
+    var trace = data.trace || {};
+    var events = Array.isArray(trace.events) ? trace.events : [];
+    var failures = [];
+    events.forEach(function (e, i) { if (e && isFailure(e)) failures.push(i); });
+
+    if (failures.length === 0) {
+      root.appendChild(el("p", "Nothing failed in this trace: no non-zero exits, failed tool or MCP calls, or error events were recorded.", "muted"));
+      if (data.truncated) root.appendChild(el("p", "This trace was truncated; later failures may be missing.", "muted"));
+      return finish();
+    }
+
+    var counts = {};
+    var recovered = 0;
+    var rows = failures.map(function (i) {
+      var e = events[i];
+      var k = kind(e);
+      counts[k] = (counts[k] || 0) + 1;
+      var later = laterAttempt(events, i);
+      if (later && later.ok) recovered += 1;
+      return { event: e, kind: k, later: later };
+    });
+
+    var parts = ["command", "tool call", "MCP call", "error"].filter(function (k) { return counts[k]; }).map(function (k) {
+      return number.format(counts[k]) + " " + k + (counts[k] === 1 ? "" : "s");
+    });
+    root.appendChild(el("p", number.format(rows.length) + (rows.length === 1 ? " failure: " : " failures: ") + parts.join(", ") + "."));
+    root.appendChild(el("p", recovered
+      ? number.format(recovered) + " later succeeded when the agent ran the same thing again."
+      : "None was followed by a successful attempt at the same thing.", "muted"));
+
+    var t = el("table");
+    var head = t.appendChild(el("thead")).appendChild(el("tr"));
+    [["#", true], ["Time", true], ["Kind"], ["What"], ["Failure"], ["Later"]].forEach(function (h) {
+      head.appendChild(el("th", h[0], h[1] ? "num" : ""));
+    });
+    var body = t.appendChild(el("tbody"));
+    rows.slice(0, MAX_ROWS).forEach(function (row) {
+      var e = row.event;
+      var when = e.timestamp ? new Date(e.timestamp) : null;
+      var tr = body.appendChild(el("tr"));
+      tr.appendChild(el("td", "#" + e.number, "num"));
+      tr.appendChild(el("td", when && !isNaN(when) ? when.toLocaleTimeString() : "—", "num"));
+      tr.appendChild(el("td", row.kind));
+      tr.appendChild(el("td", subject(e) || e.title || e.action, "mono"));
+      tr.appendChild(el("td", reason(e), "fail"));
+      if (!row.later) tr.appendChild(el("td", "—", "muted"));
+      else if (row.later.ok) tr.appendChild(el("td", "succeeded at #" + row.later.event.number, "ok"));
+      else tr.appendChild(el("td", "failed again at #" + row.later.event.number, "fail"));
+
+      var out = output(e);
+      if (out) {
+        var detail = body.appendChild(el("tr", null, "detail"));
+        var cell = detail.appendChild(el("td"));
+        cell.colSpan = 6;
+        if (out.note) cell.appendChild(el("p", out.note, "muted"));
+        else cell.appendChild(el("pre", out.text.length > MAX_OUTPUT ? out.text.slice(0, MAX_OUTPUT) + "\n…" : out.text));
+      }
+    });
+    root.appendChild(t);
+
+    if (rows.length > MAX_ROWS) root.appendChild(el("p", "Showing the first " + number.format(MAX_ROWS) + " of " + number.format(rows.length) + " failures.", "muted"));
+    if (data.truncated) root.appendChild(el("p", "This trace was truncated; later failures and retries may be missing.", "muted"));
+    finish();
+  }
+
+  function finish() {
+    document.getElementById("status").hidden = true;
+    root.hidden = false;
+  }
+
+  window.beacon.getTrace().then(render, function (err) {
+    document.getElementById("status").textContent = "Could not load this trace: " + ((err && err.message) || err);
+  });
+})();
+</script>
+</body>
+</html>
