@@ -7,7 +7,7 @@
 {
   "id": "failures",
   "title": "Failures",
-  "description": "Everything that went wrong in order: commands that exited non-zero, tool and MCP calls the runtime reported as failed, and error events, with their output and whether a later attempt succeeded.",
+  "description": "Everything that went wrong, in order: commands that exited non-zero, calls the runtime reported as failed, and error events, with their output and what the next identical call did.",
   "icon": "alert",
   "version": 1,
   "api": "beacon.lens.v1",
@@ -15,6 +15,7 @@
 }
 </script>
 <style>
+  [hidden] { display: none !important; }
   body {
     margin: 0;
     color: var(--beacon-text, #111827);
@@ -40,18 +41,31 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
+  .more { margin: 8px 0 0; padding: 0; border: 0; background: none; color: var(--beacon-accent, #036aa2); font: inherit; cursor: pointer; }
+  .more:focus-visible { outline: 2px solid var(--beacon-accent, #036aa2); outline-offset: 2px; }
 </style>
 </head>
 <body>
 <p id="status" class="muted">Loading trace…</p>
-<main id="root" hidden></main>
+<main id="root" hidden>
+  <p id="summary"></p>
+  <div id="notes"></div>
+  <table id="table" hidden>
+    <thead><tr><th class="num">#</th><th class="num">Time</th><th>Kind</th><th>What</th><th>Failure</th><th>Later attempt</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</main>
 <script>
 (function () {
   "use strict";
-  var root = document.getElementById("root");
-  var number = new Intl.NumberFormat();
-  var MAX_ROWS = 500;
+  var PAGE = 100;
   var MAX_OUTPUT = 4000;
+  var fmt = new Intl.NumberFormat();
+  // The event types that belong to a tool call. A tool_call only says a call began; the others report
+  // how it went (Claude Code's hooks report a successful Edit or Read as a file event).
+  var CALL_TYPES = { tool_call: true, tool_result: true, command: true, mcp: true, file: true };
+  var RESULT_TYPES = { tool_result: true, command: true, mcp: true, file: true };
+  var KINDS = ["command", "tool call", "MCP call", "error"];
 
   // Every node is built with textContent: commands, output and results are untrusted.
   function el(tag, text, className) {
@@ -61,50 +75,149 @@
     return node;
   }
 
+  function str(value) {
+    return typeof value === "string" ? value.trim() : "";
+  }
+
   function exitCode(event) {
     var code = event.command && event.command.exit_code;
     return typeof code === "number" ? code : null;
   }
 
-  // A failure is a non-zero exit, or what the MCP Calls lens counts as failed: an error the runtime
-  // recorded on the event, an error event or failed action (session-store mappers write tool.failed
-  // without error), or a result that says isError or carries an error member.
-  function isFailure(event) {
+  // A failure is what the runtime reported as one: an error.type on the event (set on any event the
+  // runtime reported as failed, whatever its type), or a command's exit code other than 0.
+  function failed(event) {
     var code = exitCode(event);
     if (code !== null && code !== 0) return true;
-    if (event.error && event.error.type) return true;
-    if (event.type === "error" || /error|fail/i.test(String(event.action || ""))) return true;
-    var result = event.tool && event.tool.result;
-    if (!result || typeof result !== "object") return false;
-    if (result.isError === true || result.is_error === true || String(result.isError) === "true") return true;
-    return result.error !== undefined && result.error !== null && result.error !== false && result.error !== "";
+    return !!(event.error && str(event.error.type));
   }
 
-  // A pre-call event (tool.invoked, tool.started) only says a call began, so it is never an outcome.
-  function isOutcome(event) {
-    return event.type !== "tool_call" || isFailure(event);
+  // The server and tool a Claude-style name carries: mcp__<server>__<tool>, or MCP:<tool>.
+  function fromName(name) {
+    var text = str(name);
+    var lower = text.toLowerCase();
+    if (lower.indexOf("mcp__") === 0) {
+      var parts = text.split("__");
+      return parts.length >= 3 ? { server: parts[1], tool: parts.slice(2).join("__") } : { server: "", tool: "" };
+    }
+    if (lower.indexOf("mcp:") === 0) return { server: "", tool: text.slice(4).trim() };
+    return null;
   }
 
-  function kind(event) {
-    if (event.command && event.command.command) return "command";
-    if (event.mcp && (event.mcp.server || event.mcp.tool)) return "MCP call";
-    if (event.tool && event.tool.name) return "tool call";
-    return "error";
+  // Arguments as text with sorted keys, so the same arguments compare equal whatever their order.
+  function canonical(value) {
+    if (value === undefined || value === null) return "";
+    if (Array.isArray(value)) return "[" + value.map(canonical).join(",") + "]";
+    if (typeof value === "object") {
+      return "{" + Object.keys(value).sort().map(function (k) { return JSON.stringify(k) + ":" + canonical(value[k]); }).join(",") + "}";
+    }
+    return JSON.stringify(value);
   }
 
-  // What was attempted, also the key that matches a later attempt at the same thing.
-  function subject(event) {
-    if (event.command && event.command.command) return event.command.command;
-    if (event.mcp && (event.mcp.server || event.mcp.tool)) return [event.mcp.server, event.mcp.tool].filter(Boolean).join(" / ");
-    if (event.tool && (event.tool.command || event.tool.name)) return event.tool.command || event.tool.name;
-    return "";
+  // What a call was, from every event reported for it: the pre-call event often names what the
+  // result does not.
+  function absorb(f, event) {
+    var command = event.command || {};
+    var tool = event.tool || {};
+    var mcp = event.mcp || {};
+    var named = fromName(tool.name);
+    if (!f.command) f.command = str(command.command) || str(tool.command);
+    if (str(mcp.server) || str(mcp.tool) || named || event.type === "mcp") f.mcp = true;
+    if (!f.server) f.server = str(mcp.server) || (named ? named.server : "");
+    if (!f.mcpTool) f.mcpTool = str(mcp.tool) || (named ? named.tool : "");
+    if (!f.name) f.name = str(tool.name);
+    if (!f.path) f.path = str(tool.path);
+    if (f.args === undefined && tool.arguments !== undefined && tool.arguments !== null) f.args = tool.arguments;
+  }
+
+  // kind and subject are shown; key is what a later call must match to be another attempt at the
+  // same thing: the command line, the MCP tool and its arguments, or the tool and the path it acted
+  // on (its arguments, for a tool that names no path).
+  function identify(f) {
+    if (f.command) return { kind: "command", subject: f.command, key: "command\u0000" + f.command };
+    if (f.mcp) {
+      var mcpName = [f.server, f.mcpTool].filter(Boolean).join(" / ") || f.name;
+      return { kind: "MCP call", subject: mcpName, key: mcpName ? "mcp\u0000" + f.server + "\u0000" + (f.mcpTool || f.name) + "\u0000" + canonical(f.args) : "" };
+    }
+    if (f.name) {
+      return {
+        kind: "tool call",
+        subject: f.path ? f.name + " " + f.path : f.name,
+        key: "tool\u0000" + f.name + "\u0000" + f.path + "\u0000" + (f.path ? "" : canonical(f.args))
+      };
+    }
+    return { kind: "tool call", subject: "", key: "" };
+  }
+
+  function fieldsOf(event) {
+    var f = {};
+    absorb(f, event);
+    return f;
+  }
+
+  // Calls are joined on tool_call_id, so the pre-call event, the result and a second copy of the
+  // result (a hook and an OTLP export of one call) are one call. A copy with no call id joins the
+  // call whose result has its subject and timestamp.
+  function collect(events) {
+    var calls = [];
+    var loose = [];
+    var byID = {};
+    var byTwin = {};
+    events.forEach(function (event) {
+      if (!CALL_TYPES[event.type]) {
+        if (event.type !== "approval" && (event.type === "error" || failed(event))) loose.push(event);
+        return;
+      }
+      var id = str(event.tool_call_id);
+      var result = !!RESULT_TYPES[event.type];
+      var twin = "";
+      if (result && event.timestamp) {
+        var own = identify(fieldsOf(event)).key;
+        if (own) twin = own + "\u0000" + event.timestamp;
+      }
+      var call = id ? byID[id] : (twin ? byTwin[twin] : null);
+      if (!call) {
+        call = { fields: {}, events: [], results: [], failure: null };
+        calls.push(call);
+        if (id) byID[id] = call;
+      }
+      if (twin && !byTwin[twin]) byTwin[twin] = call;
+      absorb(call.fields, event);
+      call.events.push(event);
+      if (!result) return;
+      call.results.push(event);
+      if (!call.failure && failed(event)) call.failure = event;
+    });
+    calls.forEach(function (call) {
+      var who = identify(call.fields);
+      call.kind = who.kind;
+      call.subject = who.subject;
+      call.key = who.key;
+      // Only a reported result judges a call: a call that failed in any copy failed, and one with a
+      // result that did not fail succeeded. A call with no result has no outcome.
+      call.outcome = call.failure || call.results[0] || null;
+    });
+    return { calls: calls, loose: loose };
+  }
+
+  // For each failed call, the next later call with the same key and an outcome. One pass from the
+  // end, so it costs the same however many failures there are.
+  function linkAttempts(calls) {
+    var judged = calls.filter(function (c) { return c.outcome && c.key; });
+    judged.sort(function (a, b) { return a.outcome.number - b.outcome.number; });
+    var next = {};
+    for (var i = judged.length - 1; i >= 0; i--) {
+      var call = judged[i];
+      if (call.failure) call.next = next[call.key] || null;
+      next[call.key] = call;
+    }
   }
 
   function reason(event) {
     var code = exitCode(event);
     if (code !== null && code !== 0) return "exit " + code;
-    if (event.error && event.error.type) return event.error.type;
-    return event.action;
+    if (event.error && str(event.error.type)) return str(event.error.type);
+    return event.action || "error";
   }
 
   function text(value) {
@@ -113,111 +226,145 @@
     try { return JSON.stringify(value, null, 2); } catch (e) { return String(value); }
   }
 
-  function withheld(content) {
-    if (!content || content.included || !(content.hash || content.bytes)) return null;
-    var size = [content.bytes ? number.format(content.bytes) + " bytes" : "", content.hash || ""].filter(Boolean).join(", ");
-    return { note: "Output not retained (" + size + ")." };
+  function retainedText(content) {
+    return content && content.included && typeof content.text === "string" ? content.text : "";
   }
 
-  // The output that explains the failure, or why there is none to show. Output that was not kept
-  // leaves no command.output at all; its size and hash are on the event's content.
-  function output(event) {
-    var out = event.command && event.command.output;
-    if (out && out.included && out.text) return { text: out.text };
-    var result = event.tool && text(event.tool.result);
-    if (result) return { text: result };
-    var content = event.content;
-    if (content && content.included && content.text) return { text: content.text };
-    var note = withheld(out) || withheld(content);
-    if (note) return note;
-    // Only an error event's message describes the failure; on a command or tool it is a label.
-    if (kind(event) === "error" && event.summary && event.summary !== event.action) return { text: event.summary };
+  // The output that explains a failure, or why there is none to show. The failing event's copy comes
+  // first; another copy of the same call can carry the output that one lacks.
+  function output(row) {
+    var events = [row.event];
+    if (row.call) row.call.results.forEach(function (e) { if (e !== row.event) events.push(e); });
+    for (var i = 0; i < events.length; i++) {
+      var e = events[i];
+      var out = retainedText(e.command && e.command.output) || text(e.tool && e.tool.result) || retainedText(e.content);
+      if (out) return { text: out };
+    }
+    // Output that was not kept leaves no command.output at all; what it was is on the event's content.
+    var content = row.event.content;
+    if (content && content.included === false) {
+      var parts = [content.redacted ? "Output redacted" : "Output not retained"];
+      if (str(content.retention)) parts.push("retention " + content.retention);
+      if (typeof content.bytes === "number" && content.bytes > 0) parts.push(fmt.format(content.bytes) + " bytes");
+      if (str(content.hash)) parts.push(content.hash);
+      return { note: parts.join(" · ") + "." };
+    }
+    // An error event's message describes it; on a call it is only a label.
+    var summary = str(row.event.summary);
+    if (!row.call && summary && summary !== row.event.action && summary !== row.event.title) return { text: summary };
     return null;
   }
 
-  // The first later attempt at the same subject that did not fail, or the first that failed again.
-  function laterAttempt(events, index) {
-    var key = subject(events[index]);
-    if (!key) return null;
-    var again = null;
-    for (var i = index + 1; i < events.length; i++) {
-      var e = events[i];
-      if (!isOutcome(e) || subject(e) !== key || kind(e) !== kind(events[index])) continue;
-      if (!isFailure(e)) return { ok: true, event: e };
-      if (!again) again = e;
-    }
-    return again ? { ok: false, event: again } : null;
+  function when(timestamp) {
+    var date = new Date(timestamp);
+    return timestamp && !isNaN(date.getTime()) ? date.toLocaleTimeString() : "—";
+  }
+
+  function renderRow(body, row) {
+    var e = row.event;
+    var tr = body.appendChild(el("tr"));
+    tr.appendChild(el("td", "#" + e.number, "num"));
+    tr.appendChild(el("td", when(e.timestamp), "num"));
+    tr.appendChild(el("td", row.kind));
+    tr.appendChild(el("td", row.subject || e.title || e.action, "mono"));
+    tr.appendChild(el("td", reason(e), "fail"));
+    if (!row.call) tr.appendChild(el("td", "—", "muted"));
+    else if (!row.call.next) tr.appendChild(el("td", "no later attempt", "muted"));
+    else if (row.call.next.failure) tr.appendChild(el("td", "failed again at #" + row.call.next.failure.number, "fail"));
+    else tr.appendChild(el("td", "succeeded at #" + row.call.next.outcome.number, "ok"));
+
+    var out = output(row);
+    if (!out) return;
+    var cell = body.appendChild(el("tr", null, "detail")).appendChild(el("td"));
+    cell.colSpan = 6;
+    if (out.note) cell.appendChild(el("p", out.note, "muted"));
+    else cell.appendChild(el("pre", out.text.length > MAX_OUTPUT ? out.text.slice(0, MAX_OUTPUT) + "\n…" : out.text));
+  }
+
+  function plural(n, one, many) {
+    return fmt.format(n) + " " + (n === 1 ? one : many);
+  }
+
+  function list(parts) {
+    return parts.length < 2 ? parts.join("") : parts.slice(0, -1).join(", ") + " and " + parts[parts.length - 1];
   }
 
   function render(data) {
-    var trace = data.trace || {};
-    var events = Array.isArray(trace.events) ? trace.events : [];
-    var failures = [];
-    events.forEach(function (e, i) { if (e && isFailure(e)) failures.push(i); });
+    var trace = (data && data.trace) || {};
+    var events = (Array.isArray(trace.events) ? trace.events : []).filter(Boolean).slice();
+    events.sort(function (a, b) { return (a.number || 0) - (b.number || 0); });
+    var total = trace.summary && trace.summary.event_count;
+    var partial = (data && data.truncated) || (typeof total === "number" && events.length < total);
+    var over = partial ? ", over the first " + fmt.format(events.length) + (typeof total === "number" ? " of " + fmt.format(total) : "") + " events" : "";
 
-    if (failures.length === 0) {
-      root.appendChild(el("p", "Nothing failed in this trace: no non-zero exits, failed tool or MCP calls, or error events were recorded.", "muted"));
-      if (data.truncated) root.appendChild(el("p", "This trace was truncated; later failures may be missing.", "muted"));
+    var collected = collect(events);
+    linkAttempts(collected.calls);
+    var rows = [];
+    collected.calls.forEach(function (call) {
+      if (call.failure) rows.push({ event: call.failure, call: call, kind: call.kind, subject: call.subject });
+    });
+    collected.loose.forEach(function (event) {
+      rows.push({ event: event, call: null, kind: "error", subject: "" });
+    });
+    rows.sort(function (a, b) { return a.event.number - b.event.number; });
+
+    var summary = document.getElementById("summary");
+    var notes = document.getElementById("notes");
+    if (!rows.length) {
+      summary.textContent = "Nothing failed in this trace" + over + ": no command exited non-zero, and the runtime reported no failed call and no error.";
+      summary.className = "muted";
       return finish();
     }
 
     var counts = {};
-    var recovered = 0;
-    var rows = failures.map(function (i) {
-      var e = events[i];
-      var k = kind(e);
-      counts[k] = (counts[k] || 0) + 1;
-      var later = laterAttempt(events, i);
-      if (later && later.ok) recovered += 1;
-      return { event: e, kind: k, later: later };
+    var outcomes = { ok: 0, again: 0, none: 0 };
+    rows.forEach(function (row) {
+      counts[row.kind] = (counts[row.kind] || 0) + 1;
+      if (!row.call) return;
+      if (!row.call.next) outcomes.none += 1;
+      else if (row.call.next.failure) outcomes.again += 1;
+      else outcomes.ok += 1;
     });
+    summary.textContent = plural(rows.length, "failure", "failures") + ": " + KINDS.filter(function (k) { return counts[k]; }).map(function (k) {
+      return plural(counts[k], k, k + "s");
+    }).join(", ") + over + ".";
 
-    var parts = ["command", "tool call", "MCP call", "error"].filter(function (k) { return counts[k]; }).map(function (k) {
-      return number.format(counts[k]) + " " + k + (counts[k] === 1 ? "" : "s");
-    });
-    root.appendChild(el("p", number.format(rows.length) + (rows.length === 1 ? " failure: " : " failures: ") + parts.join(", ") + "."));
-    root.appendChild(el("p", recovered
-      ? number.format(recovered) + " later succeeded when the agent ran the same thing again."
-      : "None was followed by a successful attempt at the same thing.", "muted"));
+    var failedCalls = outcomes.ok + outcomes.again + outcomes.none;
+    if (failedCalls) {
+      var parts = [];
+      if (outcomes.ok) parts.push(fmt.format(outcomes.ok) + " succeeded on the next identical call");
+      if (outcomes.again) parts.push(fmt.format(outcomes.again) + " failed again");
+      if (outcomes.none) parts.push(fmt.format(outcomes.none) + " had no later identical call");
+      notes.appendChild(el("p", "Of " + plural(failedCalls, "failed call", "failed calls") + ", " + list(parts) + "."));
+      notes.appendChild(el("p", "A later call is identical when it ran the same command line, the same MCP tool with the same arguments, or the same tool on the same path (with the same arguments, for a tool that names no path). It succeeded when its result reported no failure." +
+        (partial ? " Calls after the events shown are not included." : ""), "muted"));
+    }
 
-    var t = el("table");
-    var head = t.appendChild(el("thead")).appendChild(el("tr"));
-    [["#", true], ["Time", true], ["Kind"], ["What"], ["Failure"], ["Later"]].forEach(function (h) {
-      head.appendChild(el("th", h[0], h[1] ? "num" : ""));
-    });
-    var body = t.appendChild(el("tbody"));
-    rows.slice(0, MAX_ROWS).forEach(function (row) {
-      var e = row.event;
-      var when = e.timestamp ? new Date(e.timestamp) : null;
-      var tr = body.appendChild(el("tr"));
-      tr.appendChild(el("td", "#" + e.number, "num"));
-      tr.appendChild(el("td", when && !isNaN(when) ? when.toLocaleTimeString() : "—", "num"));
-      tr.appendChild(el("td", row.kind));
-      tr.appendChild(el("td", subject(e) || e.title || e.action, "mono"));
-      tr.appendChild(el("td", reason(e), "fail"));
-      if (!row.later) tr.appendChild(el("td", "—", "muted"));
-      else if (row.later.ok) tr.appendChild(el("td", "succeeded at #" + row.later.event.number, "ok"));
-      else tr.appendChild(el("td", "failed again at #" + row.later.event.number, "fail"));
-
-      var out = output(e);
-      if (out) {
-        var detail = body.appendChild(el("tr", null, "detail"));
-        var cell = detail.appendChild(el("td"));
-        cell.colSpan = 6;
-        if (out.note) cell.appendChild(el("p", out.note, "muted"));
-        else cell.appendChild(el("pre", out.text.length > MAX_OUTPUT ? out.text.slice(0, MAX_OUTPUT) + "\n…" : out.text));
-      }
-    });
-    root.appendChild(t);
-
-    if (rows.length > MAX_ROWS) root.appendChild(el("p", "Showing the first " + number.format(MAX_ROWS) + " of " + number.format(rows.length) + " failures.", "muted"));
-    if (data.truncated) root.appendChild(el("p", "This trace was truncated; later failures and retries may be missing.", "muted"));
+    var body = document.getElementById("rows");
+    var shown = 0;
+    var button = null;
+    function more() {
+      rows.slice(shown, shown + PAGE).forEach(function (row) { renderRow(body, row); });
+      shown = Math.min(rows.length, shown + PAGE);
+      if (!button) return;
+      if (shown >= rows.length) button.remove();
+      else button.textContent = "Show more (" + fmt.format(rows.length - shown) + " left)";
+    }
+    if (rows.length > PAGE) {
+      button = el("button", "", "more");
+      button.type = "button";
+      button.addEventListener("click", more);
+    }
+    more();
+    var table = document.getElementById("table");
+    table.hidden = false;
+    if (button && shown < rows.length) table.after(button);
     finish();
   }
 
   function finish() {
     document.getElementById("status").hidden = true;
-    root.hidden = false;
+    document.getElementById("root").hidden = false;
   }
 
   window.beacon.getTrace().then(render, function (err) {
