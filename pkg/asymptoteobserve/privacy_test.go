@@ -128,6 +128,8 @@ func TestRedactStringRedactsCommonCredentialFormats(t *testing.T) {
 		{"database url", "DATABASE_URL=postgres://app:pa55w0rd@db.internal:5432/app", "pa55w0rd"},
 		{"bare database url", "connect to postgres://app:pa55w0rd@db.internal:5432/app", "pa55w0rd"},
 		{"url password without a user", "REDIS_URL=redis://:pa55w0rd@cache.internal:6379/0", "pa55w0rd"},
+		{"database url after a bearer token", "Authorization header: Bearer postgres://app:pa55w0rd@db.internal:5432/app", "pa55w0rd"},
+		{"url password without a user after a bearer token", "bearer redis://:pa55w0rd@cache.internal:6379/0", "pa55w0rd"},
 		{"bare url password without a user", "redis-cli -u redis://:pa55w0rd@localhost:6379 ping", "pa55w0rd"},
 		{"password flag", "mysql --user root --password hunter2hunter2", "hunter2hunter2"},
 		{"token flag", "tool login --token=opaque-flag-value", "opaque-flag-value"},
@@ -148,6 +150,9 @@ func TestRedactStringRedactsCommonCredentialFormats(t *testing.T) {
 		{"curl long cookie flag", "curl --cookie sessionid=abcdef123456789 https://x", "abcdef123456789"},
 		{"curl cookie flag in a cluster", `curl -sSb "sessionid=abcdef123456789" https://x`, "abcdef123456789"},
 		{"curl second cookie flag on a line", "curl -b 'a=1' --cookie sessionid=abcdef123456789 https://x", "abcdef123456789"},
+		{"curl basic auth given twice", "curl -u a:hunter2hunter2 -u b:opaque-second-pw https://x", "opaque-second-pw"},
+		{"curl user and proxy user", "curl --user a:hunter2hunter2 --proxy-user p:opaque-proxy-pw https://x", "opaque-proxy-pw"},
+		{"curl with many cookie flags", "curl " + strings.Repeat("-b a=1 ", 20) + "-b sessionid=abcdef123456789 https://x", "abcdef123456789"},
 		{"cookie header", "curl -H 'Cookie: sessionid=abcdef123456789; csrftoken=zzz' https://x", "abcdef123456789"},
 		{"set-cookie header", "Set-Cookie: sid=abcdef123456789; HttpOnly", "abcdef123456789"},
 		{"json cookie header", `{"cookie": "sid=abcdef123456789"}`, "abcdef123456789"},
@@ -174,6 +179,11 @@ func TestRedactStringRedactsCommonCredentialFormats(t *testing.T) {
 		{"aws credentials csv", "Access key ID,Secret access key\nAKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
 		{"aws key pair", "use AKIAIOSFODNN7EXAMPLE wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY for the bucket", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
 		{"aws key pair ending in a slash", `["ASIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKE/"]`, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKE/"},
+		{"aws key pair as a labeled value", "aws_credentials=AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
+		{"aws key pair as a quoted labeled value", `token="AKIAIOSFODNN7EXAMPLE","wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"`, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
+		{"aws key pair as a flag's value", "tool --access-key AKIAIOSFODNN7EXAMPLE wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
+		{"aws key pair after a labeled user name", "x-access-token:abc@AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
+		{"aws key pair glued to a host", "https://x-access-token:a,b@hostAKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
 		{"rsa key", "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAsecretbody\n-----END RSA PRIVATE KEY-----", "MIIEowIBAAKCAQEAsecretbody"},
 		{"openssh key cut short", "cat ~/.ssh/id_ed25519\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA", "b3BlbnNzaC1rZXktdjEAAAAA"},
 	}
@@ -369,6 +379,53 @@ func TestRedactStringURLLabelPasswordWithQueryString(t *testing.T) {
 	}
 }
 
+// awsPairLabelRun is 34 bytes of an AWS secret access key's alphabet: with a 6-byte label word
+// after it, the label is exactly as long as a secret access key, 40 bytes.
+const awsPairLabelRun = "Ab3Ab3Ab3Ab3Ab3Ab3Ab3Ab3Ab3Ab3Ab3x"
+
+// A labeled or flag value that ends in an AWS access key id takes the secret access key written
+// after it (awsPairRunsOn). This guards that a 40-byte run after the key id that is itself a
+// secret-named label with its separator is not taken for the secret: the value rule would run on
+// over the label, the label's own match would then lie inside that run-on and be skipped, and a
+// value under 8 bytes, which copy removal leaves alone, would be kept. The label's value is
+// redacted, as on main. The quoted and the `:` cases are the ones that kept the value; with `=`,
+// which no secret ends at, and after a flag, whose value the label rules redact first, it was
+// redacted already, and stays so. A label may also start in the 40 bytes and go on past them, in
+// bytes a secret does not hold (`-`, `_`, ſ), and a real secret access key can be where it starts.
+func TestRedactStringRedactsALabelAfterAnAWSKeyPair(t *testing.T) {
+	for input, want := range map[string]string{
+		`{"token": "AKIAIOSFODNN7EXAMPLE", "` + awsPairLabelRun + `Secret": "pin123"}`:            `{"token": "[REDACTED]", "` + awsPairLabelRun + `Secret": "[REDACTED]"}`,
+		"token=AKIAIOSFODNN7EXAMPLE," + awsPairLabelRun + "secret: pin123":                        "token=[REDACTED]," + awsPairLabelRun + "secret: [REDACTED]",
+		"token=AKIAIOSFODNN7EXAMPLE," + awsPairLabelRun + "secret=pin123":                         "token=[REDACTED]," + awsPairLabelRun + "secret=[REDACTED]",
+		"tool --access-key AKIAIOSFODNN7EXAMPLE " + awsPairLabelRun + "token: pin123":             "tool --access-key [REDACTED] " + awsPairLabelRun + "token: [REDACTED]",
+		"token=AKIAIOSFODNN7EXAMPLE," + awsPairLabelRun + "Secret--db-password=pin12":             "token=[REDACTED]," + awsPairLabelRun + "Secret--db-password=[REDACTED]",
+		"token=AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY--db-password: pin12": "token=[REDACTED],wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY--db-password: [REDACTED]",
+		"token=AKIAIOSFODNN7EXAMPLE," + awsPairLabelRun + "secret\u017fecret_apikey : pin12":      "token=[REDACTED]," + awsPairLabelRun + "secret\u017fecret_apikey : [REDACTED]",
+	} {
+		got := RedactString(input)
+		if strings.Contains(got, "pin12") || got != want {
+			t.Errorf("RedactString(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+// A URL's password after a scheme a rule replaced is redacted: the Bearer rule takes a scheme
+// written after it, and a copy or a token's tail can end right before `://`. A copy that holds
+// the password is still removed whole.
+func TestRedactStringRedactsAPasswordAfterAReplacedScheme(t *testing.T) {
+	for input, want := range map[string]string{
+		"Bearer postgres://user:pw@host/db":                      "Bearer [REDACTED]://user:[REDACTED]@host/db",
+		"bearer redis://:pa55w0rd@cache.internal:6379/0":         "bearer [REDACTED]://:[REDACTED]@cache.internal:6379/0",
+		"token=00000000 00000000://:0@":                          "token=[REDACTED] [REDACTED]://:[REDACTED]@",
+		"ghp_0123456789abcdefghijklmnopqrstuvwxyz://u:hunter2@h": "ghp_[REDACTED]z://u:[REDACTED]@h",
+		"Bearer api_key-x-token://c:dnpm_@curl ABC":              "Bearer [REDACTED]:[REDACTED] ABC",
+	} {
+		if got := RedactString(input); got != want {
+			t.Errorf("RedactString(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 // A label hidden inside a value a rule kept is redacted in the same call, as a second call would.
 func TestRedactStringRedactsALabelAKeptValueHid(t *testing.T) {
 	for input, want := range map[string]string{
@@ -391,6 +448,23 @@ var redactIdempotenceInputs = []string{
 	"postgres://app:pa55w0rd@db/app",
 	"curl -u admin:hunter2hunter2 -H 'Cookie: sid=abcdef123456789' https://x",
 	"curl -b 'sessionid=abcdef123456789' --cookie sid=abcdef123456789 https://x",
+	"curl -u a:hunter2hunter2 -u b:opaque-second-pw --proxy-user p:opaque-proxy-pw https://x",
+	"curl " + strings.Repeat("-b a=1 ", 20) + "-b sessionid=abcdef123456789 https://x",
+	"Bearer postgres://app:pa55w0rd@db/app",
+	// A scheme replaced right before `://` by a copy of an assigned value, and by a token's tail.
+	"token=00000000 00000000://:0@",
+	"ghp_0123456789abcdefghijklmnopqrstuvwxyz://u:hunter2@h",
+	"token=AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY}AKIAIOSFODNN7EXAMPLE",
+	"https://x-access-token:a,b@hostAKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+	"token=abcdefgh12345678AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY-----BEGIN PRIVATE KEY-----",
+	// A 40-byte run after a labeled key id that is itself a label with its separator.
+	`{"token": "AKIAIOSFODNN7EXAMPLE", "` + awsPairLabelRun + `Secret": "pin123"}`,
+	"token=AKIAIOSFODNN7EXAMPLE," + awsPairLabelRun + "secret: pin123",
+	"token=AKIAIOSFODNN7EXAMPLE," + awsPairLabelRun + "secret=pin123",
+	"tool --access-key AKIAIOSFODNN7EXAMPLE " + awsPairLabelRun + "token: pin123",
+	"token=AKIAIOSFODNN7EXAMPLE," + awsPairLabelRun + "Secret--db-password=pin12",
+	"token=AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY--db-password: pin12",
+	"token=AKIAIOSFODNN7EXAMPLE," + awsPairLabelRun + "secret\u017fecret_apikey : pin12",
 	// A URL whose user name is a secret-named label: the label rules and the URL rule stop at
 	// different bytes, and each used to take one more piece per pass.
 	"https://x-access-token:abc@github.combcn_api_`@host",
