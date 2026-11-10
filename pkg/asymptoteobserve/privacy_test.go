@@ -376,6 +376,83 @@ func TestRedactStringIsIdempotent(t *testing.T) {
 	}
 }
 
+// An Authorization header names a scheme and then the credential. For a scheme the header rule
+// does not list, the label rules took the scheme word for the value and stopped at the blank, so
+// the scheme was replaced and the credential after it stayed: `Authorization: [REDACTED] <key>`.
+// Elasticsearch (ApiKey, the scheme docs/log-forwarding/elastic.mdx has people type), Okta (SSWS),
+// Discord (Bot), Splunk HEC and Kerberos (Negotiate) all send theirs this way.
+func TestRedactStringAuthorizationCredentialAfterAnyScheme(t *testing.T) {
+	const credential = "VnVhQ2ZHY0JDZGJrUW0tZTVhT3g6dWkybHAyYXhUTm1zeWFrdzl0dk5udw=="
+	for input, want := range map[string]string{
+		"Authorization: ApiKey " + credential:                                         "Authorization: [REDACTED]",
+		"Authorization: SSWS " + credential:                                           "Authorization: [REDACTED]",
+		"Authorization: Bot " + credential:                                            "Authorization: [REDACTED]",
+		"Authorization: Splunk " + credential:                                         "Authorization: [REDACTED]",
+		"Authorization: sso-key " + credential:                                        "Authorization: [REDACTED]",
+		"authorization=ApiKey " + credential:                                          "authorization=[REDACTED]",
+		"Proxy-Authorization: Negotiate " + credential:                                "Proxy-Authorization: [REDACTED]",
+		`curl -H "Authorization: ApiKey ` + credential + `" https://es.example:9200/`: `curl -H "Authorization: [REDACTED]" https://es.example:9200/`,
+		"curl -H 'Authorization: SSWS " + credential + "' https://example.okta.com":   "curl -H 'Authorization: [REDACTED]' https://example.okta.com",
+		"headers:\n  Authorization: ApiKey " + credential + "\n  Accept: json":        "headers:\n  Authorization: [REDACTED]\n  Accept: json",
+		// Quoted whole, the value was already one marker; the two forms now agree.
+		`{"Authorization": "ApiKey ` + credential + `"}`: `{"Authorization": "[REDACTED]"}`,
+		// A variable reference after the scheme goes with it, as it does after Bearer.
+		`-H "Authorization: ApiKey $ES_API_KEY"`: `-H "Authorization: [REDACTED]"`,
+	} {
+		got := RedactString(input)
+		if got != want {
+			t.Errorf("RedactString(%q) = %q, want %q", input, got, want)
+		}
+		if strings.Contains(got, credential) {
+			t.Errorf("RedactString(%q) kept the credential: %q", input, got)
+		}
+		if twice := RedactString(got); twice != got {
+			t.Errorf("RedactString is not idempotent:\nonce  %q\ntwice %q", got, twice)
+		}
+	}
+
+	// The schemes the header rule lists keep their name, as before: detection rules match on what
+	// kind of credential a line held.
+	for input, want := range map[string]string{
+		"Authorization: Bearer " + credential:                "Authorization: Bearer [REDACTED]",
+		"Authorization: Basic " + credential:                 "Authorization: Basic [REDACTED]",
+		"Authorization: Token " + credential:                 "Authorization: Token [REDACTED]",
+		"Authorization: Digest " + credential:                "Authorization: Digest [REDACTED]",
+		"Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.e30.sig": "Authorization: Bearer eyJ[REDACTED]",
+		`{"authorization": "Basic dXNlcjpwYXNz"}`:            `{"authorization": "Basic [REDACTED]"}`,
+	} {
+		if got := RedactString(input); got != want {
+			t.Errorf("RedactString(%q) = %q, want %q", input, got, want)
+		}
+	}
+
+	// A credential sent with no scheme is the first word, and is still the one replaced. Reading
+	// it as a scheme to keep would leave it in the text whenever something follows it on the line.
+	for input, want := range map[string]string{
+		"Authorization: " + credential:                     "Authorization: [REDACTED]",
+		"Authorization: sk-live-abcdef0123456789 # prod":   "Authorization: [REDACTED] prod",
+		"AUTHORIZATION=abcdef0123456789 --verbose":         "AUTHORIZATION=[REDACTED]",
+		"Authorization: $TOKEN extra":                      "Authorization: [REDACTED] extra",
+		"authorization: " + credential + "\nnext: line":    "authorization: [REDACTED]\nnext: line",
+		"-H 'Authorization: " + credential + "' -H 'A: b'": "-H 'Authorization: [REDACTED]' -H 'A: b'",
+	} {
+		got := RedactString(input)
+		if got != want {
+			t.Errorf("RedactString(%q) = %q, want %q", input, got, want)
+		}
+		if twice := RedactString(got); twice != got {
+			t.Errorf("RedactString is not idempotent:\nonce  %q\ntwice %q", got, twice)
+		}
+	}
+
+	// The same header reaches the log through an event's command line.
+	event := NewEvent(NewEventOptions{Action: "command.executed", Harness: HarnessInfo{Name: "claude_code"}})
+	event.Command = &CommandInfo{Command: `curl -H "Authorization: ApiKey ` + credential + `" https://es.example:9200/`}
+	if got := SanitizeEvent(event, 64*1024).Command.Command; strings.Contains(got, credential) {
+		t.Errorf("SanitizeEvent kept the credential in command.command: %s", got)
+	}
+}
+
 // A URL whose user name is a secret-named label, with `&` in its password and a query string after
 // it. `x-access-token:` is a label, not a query parameter, so `&` is part of its value, which runs
 // to the whitespace over the host and the query string, as any label's unquoted value does; the
@@ -474,6 +551,10 @@ var redactIdempotenceInputs = []string{
 	"config dump\napi_key=sk-abcdefghijklmnopqrstuvwxyz0123\nOPENAI sk-abcdefghijklmnopqrstuvwxyz0123",
 	`{"token": "opaque-session-value-9", "password": "hunter2hunter2"}`,
 	"Authorization: Bearer abc.def.ghi and --password hunter2hunter2",
+	// A scheme the header rule does not list, with more after the credential on the line.
+	"Authorization: ApiKey VnVhQ2ZHY0JDZGJrUW0tZTVhT3g6dWkybHAyYXhUTm1zeWFrdzl0dk5udw== and more after it",
+	"Authorization: Hawk id=dh37fgj492je, ts=1353832234, mac=6R4rV5iENPoymWwjeHzjAGXUtLNIxmo1vpMofpLAE=",
+	"Proxy-Authorization: Negotiate YIIabcdef Authorization: SSWS 00abcdefghij Authorization: a b c d",
 	"postgres://app:pa55w0rd@db/app",
 	"curl -u admin:hunter2hunter2 -H 'Cookie: sid=abcdef123456789' https://x",
 	"curl -b 'sessionid=abcdef123456789' --cookie sid=abcdef123456789 https://x",

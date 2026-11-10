@@ -378,11 +378,24 @@ func isAuthScheme(value string) bool {
 	if len(fields) == 0 || len(fields) > 2 || (len(fields) == 2 && fields[1] != redactedValue) {
 		return false
 	}
-	switch strings.ToLower(fields[0]) {
+	return isAuthSchemeName(fields[0])
+}
+
+// isAuthSchemeName reports whether word is a scheme the Authorization header rule names.
+func isAuthSchemeName(word string) bool {
+	switch strings.ToLower(word) {
 	case "bearer", "basic", "token", "digest":
 		return true
 	}
 	return false
+}
+
+// opensWithAuthScheme reports whether an Authorization value opens with a scheme the header rule
+// names. That rule has already replaced the credential after it and kept the scheme, so the rule
+// for every other scheme leaves the value as it is.
+func opensWithAuthScheme(value string) bool {
+	fields := strings.Fields(value)
+	return len(fields) > 0 && isAuthSchemeName(fields[0])
 }
 
 // isRedactedJWTPrefix keeps the `eyJ` the header rule left in `Bearer eyJ[REDACTED]`, which the
@@ -417,6 +430,14 @@ var redactionRules = concatRules([]redactionRule{
 	// a `$VARIABLE`.
 	foldedRule(`(?i)(authorization["']?\s*[:=]\s*["']?(?:bearer|basic|token|digest)[ \t]+(?-i:eyJ)?)([^"'\s,]+)()`, "${1}"+redactedValue, nil, "authorization"),
 	foldedRule(`(?i)(\bbearer[ \t]+(?-i:eyJ)?)(?P<value>[a-z0-9._~+/=-]+)`, "${1}"+redactedValue, isRedactedJWTPrefix, "bearer"),
+	// An Authorization header with any other scheme: `ApiKey` (Elasticsearch), `SSWS` (Okta), `Bot`
+	// (Discord), `Splunk`, `Negotiate`, and whatever a vendor names its own. The label rules below
+	// read the scheme word as the value and stop at the blank after it, which replaced the scheme
+	// and left the credential in the text. The scheme and the credential go together here, as they
+	// already do when the value is quoted whole (`"Authorization": "ApiKey x"`). The first word is
+	// not kept the way a listed scheme is: a credential sent with no scheme is also one word, and
+	// kept as if it were a scheme it would stay whenever something follows it on the line.
+	foldedRule(`(?i)(authorization["']?\s*[:=]\s*["']?)(?P<value>[a-z][a-z0-9_.-]*[ \t]+[^"'\s,]+)`, "${1}"+redactedValue, opensWithAuthScheme, "authorization"),
 	// A labeled assignment in prose, shell, env files, YAML, TOML or JSON: `token=x`,
 	// `export GITHUB_TOKEN="x"`, `{"api_key": "x"}`. The closing quote of a quoted label is allowed
 	// between the label and the separator. A quoted value runs to its closing quote; the unquoted
