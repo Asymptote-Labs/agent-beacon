@@ -16,7 +16,7 @@ func BenchmarkRedactStringRepeatedAssignments(b *testing.B) {
 	}
 }
 
-// BenchmarkRedactStringLongAssignedValue covers copies of a value longer than redactCopyShort: a
+// BenchmarkRedactStringLongAssignedValue covers copies of a value longer than replaceLiteralsShort: a
 // token as long as a JWT, assigned once and quoted again later in 8 KiB of output.
 func BenchmarkRedactStringLongAssignedValue(b *testing.B) {
 	value := strings.Repeat("abcdefghijklmnopqrstuvwxyz0123456789-_ABCDEFGHIJKLMNOPQRSTUVWXYZ", 10)

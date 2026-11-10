@@ -1089,7 +1089,8 @@ func replaceAssigned(value string, assigned map[string]struct{}) (string, bool) 
 	if strings.IndexByte(value, 0) >= 0 {
 		place = redactedValue
 	}
-	replaced := replaceCopies(value, values, place)
+	replaced, work := replaceLiterals(value, values, place)
+	redactWorked(work)
 	if place == redactedValue {
 		return replaced, markersAfterWords(replaced) > markersAfterWords(value)
 	}
@@ -1103,84 +1104,6 @@ func replaceAssigned(value string, assigned map[string]struct{}) (string, bool) 
 		i += 1 + j
 	}
 	return strings.ReplaceAll(replaced, place, redactedValue), glued
-}
-
-// redactCopyShort is the longest assigned value whose copies a strings.Replacer finds. Its search
-// reads up to the longest value's length at each byte of the text, and for one value it first
-// builds a table in time quadratic in that length, so a long value made a long text cost a
-// quadratic amount. Past it, one value's copies are found by replaceOne and several values' by
-// copyFinder, each reading every byte a bounded number of times whatever the values hold.
-const redactCopyShort = 64
-
-// replaceCopies replaces the copies of values, sorted longest first, with place, as
-// strings.NewReplacer(values[0], place, values[1], place, …).Replace(t) does: left to right, the
-// longest copy where several start at one byte, none overlapping.
-func replaceCopies(t string, values []string, place string) string {
-	longest, total := len(values[0]), 0
-	for _, v := range values {
-		total += len(v)
-	}
-	switch {
-	case longest > redactCopyShort && len(values) == 1:
-		return replaceOne(t, values[0], place)
-	case longest > redactCopyShort:
-		return newCopyFinder(values).replace(t, place)
-	}
-	redactWorked((len(t) + total) * longest)
-	pairs := make([]string, 0, 2*len(values))
-	for _, copied := range values {
-		pairs = append(pairs, copied, place)
-	}
-	return strings.NewReplacer(pairs...).Replace(t)
-}
-
-// replaceOne replaces the copies of v in t with place, left to right and none overlapping. It is
-// Knuth-Morris-Pratt's search: where no part of v is matched it skips to the next byte v starts
-// with, and otherwise each byte read either extends the part matched or shortens it.
-func replaceOne(t, v, place string) string {
-	// border[j] is the length of the longest proper prefix of v[:j+1] that is also its suffix.
-	border := make([]int32, len(v))
-	for j, k := 1, 0; j < len(v); j++ {
-		for k > 0 && v[j] != v[k] {
-			k = int(border[k-1])
-		}
-		if v[j] == v[k] {
-			k++
-		}
-		border[j] = int32(k)
-	}
-	var b strings.Builder
-	last, k, steps := 0, 0, 0
-	for i := 0; i < len(t); i++ {
-		if k == 0 {
-			j := strings.IndexByte(t[i:], v[0])
-			if j < 0 {
-				break
-			}
-			i += j
-		}
-		for k > 0 && t[i] != v[k] {
-			k = int(border[k-1])
-			steps++
-		}
-		if t[i] == v[k] {
-			k++
-		}
-		if k == len(v) {
-			if last == 0 {
-				b.Grow(len(t))
-			}
-			b.WriteString(t[last : i+1-len(v)])
-			b.WriteString(place)
-			last, k = i+1, 0
-		}
-	}
-	redactWorked(2*len(v) + len(t) + steps)
-	if last == 0 {
-		return t
-	}
-	b.WriteString(t[last:])
-	return b.String()
 }
 
 // redactCopyMin is the least length of an assigned value whose copies are removed.
