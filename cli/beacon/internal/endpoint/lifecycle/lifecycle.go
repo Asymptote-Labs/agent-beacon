@@ -47,7 +47,7 @@ var (
 	}
 	// newInventoryJob and removeInventoryJob are the seams tests replace so Install, Uninstall
 	// and Repair can be exercised without touching launchd or systemd.
-	newInventoryJob = func(userMode bool, kind service.Kind) inventoryJobController {
+	newInventoryJob = func(userMode bool, kind service.Kind) service.ScheduledJob {
 		return service.InventoryManager{UserMode: userMode, Kind: kind, Env: inventoryJobEnv(userMode)}
 	}
 	removeInventoryJob = func(userMode bool) {
@@ -79,19 +79,6 @@ var (
 	sentinelForwarderStatus = sentinel.ReadStatus
 )
 
-// inventoryJobController is what lifecycle needs from service.InventoryManager.
-type inventoryJobController interface {
-	Supported() bool
-	UnsupportedReason() string
-	UnitPath() (string, error)
-	UnitPaths() []string
-	WriteUnit(program, logPath string) (string, error)
-	Load() error
-	Unload() error
-	RemoveUnits()
-	Status() service.Status
-}
-
 // InventoryJobOptions drives ReconcileInventoryJob.
 type InventoryJobOptions struct {
 	UserMode bool
@@ -122,7 +109,7 @@ func ReconcileInventoryJob(opts InventoryJobOptions) (InventoryJobResult, error)
 	return reconcileInventoryJobWith(newInventoryJob(opts.UserMode, opts.Kind), opts)
 }
 
-func reconcileInventoryJobWith(job inventoryJobController, opts InventoryJobOptions) (InventoryJobResult, error) {
+func reconcileInventoryJobWith(job service.ScheduledJob, opts InventoryJobOptions) (InventoryJobResult, error) {
 	result := InventoryJobResult{Enabled: inventoryEnabledFromConfigFile(endpointconfig.ConfigPath(opts.UserMode))}
 	if !job.Supported() {
 		result.Skipped = job.UnsupportedReason()
@@ -516,14 +503,14 @@ type installRollback struct {
 	// it started, so the scheduler is not left registered against rolled-back config.
 	// InventoryWasLoaded records a job that was already scheduled before this install began; a
 	// reinstall that re-enabled it and then failed must bring it back, exactly like the collector.
-	InventoryJob       inventoryJobController
+	InventoryJob       service.ScheduledJob
 	InventoryLoaded    bool
 	InventoryWasLoaded bool
 	// SessionSyncJob and the two flags beside it do the same for the scheduled session sync.
 	// SessionSyncRemoved records that this install unloaded and removed the job (the setting
 	// turned off): unlike the inventory job, off is an ordinary choice here, so a rollback has to
 	// put back a job that was scheduled before as well as unload one it started.
-	SessionSyncJob       inventoryJobController
+	SessionSyncJob       service.ScheduledJob
 	SessionSyncLoaded    bool
 	SessionSyncRemoved   bool
 	SessionSyncWasLoaded bool

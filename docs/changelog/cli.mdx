@@ -13,6 +13,8 @@ Stay up to date with the latest changes to the Agent Beacon CLI.
 
 Changes on `main` since v1.3.58. They ship in the next release.
 
+- **`install --dry-run` no longer plans scheduled jobs the host cannot run** · On a host with no scheduler for Beacon's jobs (Windows, or a supervised collector in a container or under WSL), `beacon endpoint install --dry-run` and `repair --dry-run` listed a launchd plist under `~/Library/LaunchAgents` for the inventory heartbeat job, and for the session sync job with `--session-sync`, plus a step that started each. The install does none of that there: it skips both jobs and says why. The plan now shows a `skip_unit` line with that same reason instead. On macOS and on Linux with systemd the plan is unchanged.
+
 - **An AWS secret key after a labeled key id is redacted** · Where a label's or a flag's value ended in an AWS access key id and its secret access key followed after a comma, a blank or a quote (`token=AKIA…,<secret>`, `--access-key AKIA… <secret>`, `x-access-token:abc@AKIA…,<secret>`), the value rule replaced the key id and the rule for a key id and its secret then found no key id, so the secret was kept. The secret is now replaced with the value, keeping the separators: `token=[REDACTED],[REDACTED]`. A URL password that runs on over a key id written right after a host name (`…@hostAKIA…,<secret>`) takes the secret too.
 
 - **A URL password after `Bearer` is redacted** · The Bearer rule takes the token after `Bearer` up to a `:`, so for `Bearer postgres://user:pw@host` it replaced the scheme, and the URL rule then found no scheme before `://` and kept the password. A password after a replaced scheme is now redacted too: `Bearer [REDACTED]://user:[REDACTED]@host`.
