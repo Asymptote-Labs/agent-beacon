@@ -3,14 +3,12 @@ package threatrules
 import (
 	"fmt"
 	"reflect"
-	"regexp"
 	"strings"
 	"sync"
 
 	"github.com/google/cel-go/cel"
 	celast "github.com/google/cel-go/common/ast"
 	"github.com/google/cel-go/ext"
-	"github.com/google/cel-go/interpreter"
 
 	"github.com/asymptote-labs/agent-beacon/pkg/asymptoteobserve"
 )
@@ -29,14 +27,42 @@ func celObjectTypeName(t reflect.Type) string {
 	return segments[len(segments)-1] + "." + t.Name()
 }
 
-// celEnv is the shared, immutable CEL environment for compiling match expressions.
-// It is built once: the native-type registration walks the whole Event struct tree and
-// is comparatively expensive, and the resulting env is safe for concurrent use.
-var (
-	celEnvOnce sync.Once
-	celEnvInst *cel.Env
-	celEnvErr  error
-)
+// nativeEnv is the environment as cel-go's native-types extension builds it. It is built once: the
+// registration walks the whole Event struct tree and is comparatively expensive, and the resulting
+// env is safe for concurrent use.
+var nativeEnv = sync.OnceValues(func() (*cel.Env, error) {
+	return cel.NewEnv(
+		ext.NativeTypes(reflect.TypeOf(asymptoteobserve.Event{}), ext.ParseStructField(celFieldName)),
+		cel.Variable(eventVar, cel.ObjectType(eventCELType)),
+	)
+})
+
+// fastTypes are the event's types read by index (see fastobj.go), or nil if they cannot be built
+// against nativeEnv; TestFastEnvIsInstalled guards against that.
+var fastTypes = sync.OnceValue(func() *fastAdapter {
+	env, err := nativeEnv()
+	if err != nil {
+		return nil
+	}
+	a, err := newFastAdapter(env)
+	if err != nil {
+		return nil
+	}
+	return a
+})
+
+// celEnv is nativeEnv with fastTypes installed, or nativeEnv itself without them.
+var celEnv = sync.OnceValues(func() (*cel.Env, error) {
+	env, err := nativeEnv()
+	if err != nil {
+		return nil, err
+	}
+	a := fastTypes()
+	if a == nil {
+		return env, nil
+	}
+	return env.Extend(cel.CustomTypeAdapter(a), cel.CustomTypeProvider(a.provider))
+})
 
 // Env returns the shared CEL environment that match expressions compile against.
 //
@@ -47,13 +73,7 @@ var (
 // "e.command.command" on an event without a command sub-object evaluates to "" rather
 // than erroring.
 func Env() (*cel.Env, error) {
-	celEnvOnce.Do(func() {
-		celEnvInst, celEnvErr = cel.NewEnv(
-			ext.NativeTypes(reflect.TypeOf(asymptoteobserve.Event{}), ext.ParseStructField(celFieldName)),
-			cel.Variable(eventVar, cel.ObjectType(eventCELType)),
-		)
-	})
-	return celEnvInst, celEnvErr
+	return celEnv()
 }
 
 // celFieldName is the CEL name of an event struct field: its `cel` tag when it has one,
@@ -99,30 +119,15 @@ const MaxEvalCost uint64 = 5_000_000
 // stop quickly.
 var evalCostLimit = MaxEvalCost
 
-// constantRegex compiles the constant pattern of a matches() call once, when the program is
-// built. Without it cel-go compiles the pattern on every evaluation, for every rule and every
-// event, which dominated the time and allocation of a scan. A pattern that does not compile is
-// left to the call as written, so a rule with a broken pattern still loads and still fails when
-// it is evaluated, exactly as before (TestInvalidRegexErrorsAtEval): moving that failure to load
-// time would make rulestore skip the rule instead. Results and CEL costs are unchanged
-// (TestConstantRegexChangesNothing).
-var constantRegex = &interpreter.RegexOptimization{
-	Function:   interpreter.MatchesRegexOptimization.Function,
-	RegexIndex: interpreter.MatchesRegexOptimization.RegexIndex,
-	Factory: func(call interpreter.InterpretableCall, pattern string) (interpreter.InterpretableCall, error) {
-		if _, err := regexp.Compile(pattern); err != nil {
-			return call, nil
-		}
-		return interpreter.MatchesRegexOptimization.Factory(call, pattern)
-	},
-}
-
 // CompileMatch compiles a single match expression and verifies it types to bool. The
 // returned program is safe for concurrent reuse across events, and each evaluation is
 // bounded by MaxEvalCost: one that exceeds it fails with an error rather than matching. A
 // compile or type-check error (including a reference to an unknown event field) is
 // returned to the caller; this is what makes "every shipped rule provably compiles
 // against the schema" a load-time guarantee.
+//
+// Constant matches() patterns are compiled once, here, and run behind a prefilter (see
+// prefilter.go). Neither changes a result, an error or a CEL cost.
 func CompileMatch(expr string) (cel.Program, error) {
 	prog, _, err := compileMatch(expr)
 	return prog, err
@@ -144,7 +149,7 @@ func compileMatch(expr string) (cel.Program, *cel.Ast, error) {
 	if ast.OutputType() != cel.BoolType {
 		return nil, nil, fmt.Errorf("match expression must evaluate to bool, got %s", ast.OutputType())
 	}
-	prog, err := env.Program(ast, cel.CostLimit(evalCostLimit), cel.OptimizeRegex(constantRegex))
+	prog, err := env.Program(ast, cel.CostLimit(evalCostLimit), cel.OptimizeRegex(prefilteredMatches))
 	if err != nil {
 		return nil, nil, fmt.Errorf("build CEL program: %w", err)
 	}
@@ -171,11 +176,11 @@ func selectsField(ast *cel.Ast, name string) bool {
 // step for rules that never reference a derived field, and ScanEvents does it once per event
 // for all the rules that do.
 func EvalMatch(prog cel.Program, event asymptoteobserve.Event) (bool, error) {
-	return evalMatch(prog, withDerivedFields(event))
+	return evalMatch(prog, newEventActivation(withDerivedFields(event)))
 }
 
-func evalMatch(prog cel.Program, event asymptoteobserve.Event) (bool, error) {
-	out, _, err := prog.Eval(map[string]any{eventVar: event})
+func evalMatch(prog cel.Program, act *eventActivation) (bool, error) {
+	out, _, err := prog.Eval(act)
 	if err != nil {
 		return false, fmt.Errorf("eval match: %w", err)
 	}
