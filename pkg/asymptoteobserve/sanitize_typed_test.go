@@ -265,6 +265,76 @@ func TestJSONSizeBoundIsABound(t *testing.T) {
 	}
 }
 
+// field sanitizes a value already in decoded shape as it is, and decodes anything else first.
+// isDecoded must hold exactly when decoding leaves the value as it was, and field must give what
+// decoding then sanitizing gives, for every shape: random values of every kind a field holds,
+// secret-named keys and flags, keys and strings that are not valid UTF-8, NaN, nil and empty
+// containers, a cycle, and nesting on either side of maxGenericDepth.
+func TestFieldIsDecodedThenSanitized(t *testing.T) {
+	nested := func(depth int, leaf any, asMap bool) any {
+		v := leaf
+		for range depth {
+			if asMap {
+				v = map[string]any{"k": v}
+			} else {
+				v = []any{"--token", v}
+			}
+		}
+		return v
+	}
+	cycle := map[string]any{"a": "x"}
+	cycle["self"] = cycle
+	values := []any{
+		nil, true, 1.5, math.NaN(), math.Inf(-1), float32(0.1), 42, json.Number("12"), []byte("b"),
+		"plain", "token=abcdefgh12345678", "bad \xff utf-8",
+		[]any(nil), map[string]any(nil), []any{}, map[string]any{}, []string{"--token", "t"}, map[string]string{"a": "b"},
+		map[string]any{"\xffkey": "x", "a": "token=abcdefgh12345678"},
+		map[string]any{"a": map[string]any{"\xffkey": "x"}},
+		[]any{"--api-key", "secret", "--api-key", map[string]any{"a": 1.0}, json.Number("1"), "x"},
+		[]any{[]string{"--token", "t"}, "v", "--token", []byte("b")},
+		map[string]any{"password": []any{"a", []any{"b"}, map[string]any{"c": "d"}}, "args": []any{"--password", "p"}},
+		map[string]any{"max_tokens": "1200", "token_type": "bearer", "GITHUB_TOKENS": "abc", "n": 3.0},
+		cycle,
+	}
+	for _, depth := range []int{maxGenericDepth - 2, maxGenericDepth - 1, maxGenericDepth, maxGenericDepth + 1, maxGenericDepth + 5} {
+		for _, asMap := range []bool{false, true} {
+			values = append(values, nested(depth, "token=abcdefgh12345678", asMap), nested(depth, 3.0, asMap), nested(depth, []any{}, asMap))
+		}
+	}
+	r := rand.New(rand.NewPCG(7, 8))
+	for range 20000 {
+		values = append(values, randomGeneric(r, 0))
+	}
+	asIs := 0
+	for i, v := range values {
+		if got, want := isDecoded(v, 0), reflect.DeepEqual(decoded(v, 0), v); got != want {
+			t.Fatalf("value %d (%#v): isDecoded %v, decoding leaves it as it was %v", i, v, got, want)
+		}
+		if isDecoded(v, 0) {
+			asIs++
+		}
+	}
+	compared := 0
+	for _, opts := range []PrivacyOptions{
+		{RedactSecrets: true, StringLimit: DefaultRawStringLimit},
+		{RedactSecrets: true, StringLimit: 40},
+		{RedactSecrets: false, StringLimit: DefaultStringLimit},
+	} {
+		g := newGenericSanitizer(opts)
+		for i, v := range values {
+			got, want := g.field(v), g.sanitizeDecoded(decodedField(v))
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("value %d (%#v), %+v:\n got %#v\nwant %#v", i, v, opts, got, want)
+			}
+			compared++
+		}
+	}
+	if asIs < 1000 || asIs == len(values) {
+		t.Fatalf("%d of %d values in decoded shape; want both kinds", asIs, len(values))
+	}
+	t.Logf("%d values sanitized alike (%d of %d in decoded shape)", compared, asIs, len(values))
+}
+
 // The typed conversion sanitizes typed string and list fields without asking whether their name
 // marks them as a credential, which holds only while no such field has a name that does.
 func TestTypedFieldNamesAreNotSecret(t *testing.T) {
