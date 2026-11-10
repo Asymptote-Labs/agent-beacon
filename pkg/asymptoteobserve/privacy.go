@@ -502,6 +502,9 @@ var redactionRules = concatRules([]redactionRule{
 	shapeRule(`\b(lin_api_)[A-Za-z0-9]{40}\b`, "${1}"+redactedValue, "lin_api_"),                                        // Linear
 	shapeRule(`\b(dp\.pt\.)[A-Za-z0-9]{43}\b`, "${1}"+redactedValue, "dp.pt."),                                          // Doppler
 	shapeRule(`\b(SG\.)[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}`, "${1}"+redactedValue, "SG."),                              // SendGrid
+	shapeRule(`\b(PMAK-)[a-fA-F0-9]{24}-[a-fA-F0-9]{34}\b`, "${1}"+redactedValue, "PMAK-"),                              // Postman
+	shapeRule(`\b(dckr_pat_)[A-Za-z0-9_-]{27,}`, "${1}"+redactedValue, "dckr_pat_"),                                     // Docker Hub personal access token
+	shapeRule(`\b(sbp_(?:oauth_|v0_)?)[a-f0-9]{40}\b`, "${1}"+redactedValue, "sbp_"),                                    // Supabase personal access token
 	// Beacon's own keys and tokens: API keys, device and enforcement keys, MCP tokens and their refresh
 	// tokens, and the CLI sign-in's access token, authorization code, client and exchange values.
 	shapeRule(`\b(bcn_(?:api|device|mcprt|mcp|enfdev|cli|code|client|exchange)_)[A-Za-z0-9_-]{8,}`, "${1}"+redactedValue, "bcn_"),

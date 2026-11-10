@@ -215,6 +215,9 @@ func TestRedactStringRedactsProviderTokenShapes(t *testing.T) {
 		{"linear", "lin_api_" + alnum(40), "lin_api_[REDACTED]"},
 		{"doppler", "created service token " + "dp.pt." + alnum(43) + " for ci", "created service token dp.pt.[REDACTED] for ci"},
 		{"sendgrid", "SG." + alnum(22) + "." + alnum(43), "SG.[REDACTED]"},
+		{"postman api key", "found PMAK-" + hex(24) + "-" + hex(34), "found PMAK-[REDACTED]"},
+		{"docker hub personal access token", "found dckr_pat_" + alnum(27), "found dckr_pat_[REDACTED]"},
+		{"supabase personal access token", "found sbp_" + hex(40), "found sbp_[REDACTED]"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
