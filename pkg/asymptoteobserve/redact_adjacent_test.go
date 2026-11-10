@@ -246,3 +246,75 @@ func TestRedactIsIdempotentWhereSecretsMeet(t *testing.T) {
 		t.Fatalf("only %d texts redacted a secret right after another", met)
 	}
 }
+
+// overCopyByFirstBytes is overCopy as it first searched, the reference
+// TestOverCopyFindsWhatItsFirstSearchFound holds it to: at each place of the window, the values
+// that share its first redactCopyMin bytes, compared whole, the window growing with every copy
+// that runs past its end.
+func overCopyByFirstBytes(t string, values map[string]struct{}, item []int) (int, bool) {
+	byFirst, longest := map[string][]string{}, 0
+	for v := range values {
+		byFirst[v[:redactCopyMin]] = append(byFirst[v[:redactCopyMin]], v)
+		longest = max(longest, len(v))
+	}
+	end, hid := item[1], false
+	for x := max(item[0]+1, end-longest+1); x < end && x+redactCopyMin <= len(t); x++ {
+		for _, v := range byFirst[t[x:x+redactCopyMin]] {
+			if x+len(v) > end && strings.HasPrefix(t[x:], v) {
+				end, hid = x+len(v), true
+			}
+		}
+	}
+	return end, hid
+}
+
+// overCopy takes an item to where the first search took it, item after item along one chain:
+// values that overlap, contain each other and start alike, in texts made of their pieces, so
+// copies cross items' ends and run on into each other.
+func TestOverCopyFindsWhatItsFirstSearchFound(t *testing.T) {
+	r := rand.New(rand.NewPCG(5, 11))
+	piece := func(n int) string {
+		b := make([]byte, n)
+		for i := range b {
+			b[i] = "ab"[r.IntN(2)]
+		}
+		return string(b)
+	}
+	ranOn := 0
+	for range 20000 {
+		values := map[string]struct{}{}
+		var list []string
+		for range 1 + r.IntN(4) {
+			v := piece(redactCopyMin + r.IntN(12))
+			values[v] = struct{}{}
+			list = append(list, v)
+		}
+		var text strings.Builder
+		for range 1 + r.IntN(10) {
+			if r.IntN(3) == 0 {
+				text.WriteString(piece(1 + r.IntN(6)))
+			} else {
+				text.WriteString(list[r.IntN(len(list))])
+			}
+		}
+		s := text.String()
+		c := &redactChain{t: s, copies: &copyIndex{values: values}}
+		for pos := 0; pos < len(s); {
+			start := pos + r.IntN(len(s)-pos)
+			item := []int{start, start + 1 + r.IntN(len(s)-start)}
+			wantEnd, wantHid := overCopyByFirstBytes(s, values, item)
+			c.hid = false
+			got := c.overCopy(item)
+			if got[1] != wantEnd || c.hid != wantHid || got[0] != item[0] {
+				t.Fatalf("overCopy(%v) in %q with %q: got end %d hid %v, want %d %v", item, s, list, got[1], c.hid, wantEnd, wantHid)
+			}
+			if wantEnd > item[1] {
+				ranOn++
+			}
+			pos = got[1]
+		}
+	}
+	if ranOn < 1000 {
+		t.Fatalf("only %d items ran on over a copy: the texts no longer exercise overCopy", ranOn)
+	}
+}

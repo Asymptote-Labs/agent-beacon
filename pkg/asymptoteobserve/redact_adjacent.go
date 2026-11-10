@@ -101,8 +101,8 @@ const (
 	followRun redactFollowerKind = iota
 	// followScheme: a URL, which holds no `/` and no whitespace after its `://`.
 	followScheme
-	// followLine: a curl rule, which reads its whole command line and is applied to it until it
-	// stops changing (redactLinesAfterMarkers).
+	// followLine: a curl rule, which reads its whole command line and redacts every flag on it
+	// (redactLinesAfterMarkers).
 	followLine
 )
 
@@ -138,7 +138,7 @@ func (e *redactEngine) adjacency() *redactAdjacency {
 			switch {
 			case rule.start == startScheme:
 				f.kind = followScheme
-			case rule.repeat:
+			case rule.wholeLine:
 				f.kind = followLine
 				f.lead = leadPattern(rule)
 			default:
@@ -348,14 +348,13 @@ type redactChain struct {
 	// last place followerAt was asked about and its answer.
 	runFrom, runTo int
 	asked          []redactAsked
-	// The assigned values whose copies are removed after every rule has run (overCopy), what
-	// running on over them may still read (copyBudget), and whether running on over one, or
-	// over an AWS secret that holds a `/`, may hide a match from this pass, as replacing a copy
-	// may (copyHidesMatch); matches reports it to the gate.
-	copies     *redactCopies
-	copyBudget int
-	hid        bool
-	slashed    bool
+	// The pass's assigned values whose copies are removed after every rule has run (overCopy),
+	// and whether running on over a copy, or over an AWS secret that holds a `/`, may hide a
+	// match from this pass, as replacing a copy may (copyHidesMatch); matches reports it to the
+	// gate.
+	copies  *copyIndex
+	hid     bool
+	slashed bool
 }
 
 // redactAsked is followerAt's answer for one follower at a place.
@@ -366,16 +365,8 @@ type redactAsked struct {
 
 func newRedactChain(engine *redactEngine, t string, hits []redactHit) *redactChain {
 	return &redactChain{engine: engine, adj: engine.adjacency(), t: t, hits: hits, segFrom: -1, restAt: -1,
-		schemeFrom: -1, schemeTo: -1, schemeAt: -1, lineFrom: -1, lineTo: -1, lineFirst: -1, runFrom: -1, runTo: -1,
-		copyBudget: redactCopyWorkPerByte*len(t) + redactCopyWorkBase}
+		schemeFrom: -1, schemeTo: -1, schemeAt: -1, lineFrom: -1, lineTo: -1, lineFirst: -1, runFrom: -1, runTo: -1}
 }
-
-// overCopy may read redactCopyWorkPerByte bytes and copies per byte of the text, and
-// redactCopyWorkBase more; past that it leaves items as they are, as main does.
-const (
-	redactCopyWorkPerByte = 8
-	redactCopyWorkBase    = 1 << 16
-)
 
 func redactWorked(n int) {
 	if redactWork != nil {
@@ -621,7 +612,7 @@ func (c *redactChain) run(si int, m []int, use redactUse, yield func([]int, reda
 				item[1] = sm[2*g]
 			}
 			// The item is yielded with the first secret's rule: an AWS secret it takes is not seen
-			// as one where the replacements are made (redactionRule.applyOnce).
+			// as one where the replacements are made (redactionRule.apply).
 			c.slashed = c.slashed || slashedAWSSecret(redactionRules[c.adj.shapes[sj].rule].expr, c.t, sm)
 			si, m = sj, sm
 			continue
@@ -671,32 +662,76 @@ func (c *redactChain) run(si int, m []int, use redactUse, yield func([]int, reda
 // ends past it, the item having taken the copy's first bytes; or item. The copy is removed after
 // every rule has run, which finds it only whole: of `hf_…opaque-flag-value` with `opaque-flag-value`
 // assigned, the token's pattern takes `opaque`, and `-flag-value` was left. Such a copy starts
-// less than the longest copy's length before the item's end. What it reads, places, copies looked
-// at and bytes compared, comes out of the chain's copyBudget, linear in the text; once that is
-// spent, items are left as they are.
+// less than the longest copy's length before the item's end, and once the item runs on, a copy
+// that starts before its new end and ends past it takes it further.
+//
+// What it reads of the text is what copyIndex.longestAt finds near the items, for every chain of
+// the pass that reads the same text, and each item reads its own bytes, which no other item of the
+// chain holds: what overCopy reads stays linear in the text.
 func (c *redactChain) overCopy(item []int) []int {
-	if c.copies == nil || c.copyBudget <= 0 {
+	if c.copies == nil {
 		return item
 	}
-	t, work := c.t, 0
-	for x := max(item[0]+1, item[1]-c.copies.longest+1); x < item[1] && x+redactCopyMin <= len(t) && work < c.copyBudget; x++ {
-		work++
-		for _, v := range c.copies.byFirst[t[x:x+redactCopyMin]] {
-			work++
-			if x+len(v) <= item[1] {
-				continue
-			}
-			work += len(v)
-			if strings.HasPrefix(t[x:], v) {
-				item = slices.Clone(item)
-				item[1] = x + len(v)
-				c.hid = true
-			}
+	idx := c.copies
+	from, end := max(item[0]+1, item[1]-idx.built().maxLen+1), item[1]
+	for x := from; x < end; x++ {
+		if e := x + int(idx.longestAt(c.t, x, end)); e > end {
+			end, c.hid = e, true
 		}
 	}
-	c.copyBudget -= work
-	redactWorked(work)
+	redactWorked(max(0, end-from))
+	if end == item[1] {
+		return item
+	}
+	item = slices.Clone(item)
+	item[1] = end
 	return item
+}
+
+// copyIndex is what the chains of one redaction pass find of the assigned values in the text
+// (overCopy): their finder, built the first time a chain asks, and, for the text the gate holds,
+// the length of the longest copy starting at each byte of the stretch [lo, lo+len(at)) that the
+// chains asked about last. A rule that changes the text moves its bytes, so redactGate.set drops
+// what was found of it.
+type copyIndex struct {
+	values map[string]struct{}
+	finder *literalFinder
+	lo     int
+	at     []int32
+}
+
+// built returns the finder over the values, building it the first time.
+func (idx *copyIndex) built() *literalFinder {
+	if idx.finder == nil {
+		values := make([]string, 0, len(idx.values))
+		for v := range idx.values {
+			values = append(values, v)
+		}
+		idx.finder = newLiteralFinder(values)
+		redactWorked(len(idx.finder.label) + idx.finder.work)
+	}
+	return idx.finder
+}
+
+// longestAt returns the length of the longest copy starting at x in t, the text of the gate the
+// index belongs to, after built. Where it has not found that yet, it finds the bytes from x, or
+// from the end of the stretch it found last when that ends less than the longest value's length
+// before x, up to upto and at least that length past where it starts (literalFinder.longestIn). The
+// chains ask about places in order, so it finds each byte of the text at most once per chain, and
+// reads at most twice what it finds: only the stretches near items, however long the text.
+func (idx *copyIndex) longestAt(t string, x, upto int) int32 {
+	if hi := idx.lo + len(idx.at); idx.lo <= x && x < hi {
+		return idx.at[x-idx.lo]
+	}
+	f := idx.finder
+	hi := idx.lo + len(idx.at)
+	if len(idx.at) == 0 || x < idx.lo || x > hi+f.maxLen {
+		idx.lo, idx.at, hi = x, idx.at[:0], x
+	}
+	end := min(len(t), max(upto, x+1, hi+f.maxLen))
+	idx.at = slices.Grow(idx.at, end-hi)[:end-idx.lo]
+	redactWorked(f.longestIn(t, idx.at[hi-idx.lo:], hi, end))
+	return idx.at[x-idx.lo]
 }
 
 // slashedAWSSecret reports whether m, a match of the pattern expr, is one of the rule for an AWS
@@ -864,8 +899,8 @@ func markerBeforeWord(t string, from int) int {
 // before a word byte, the followers and then the shape rules, in rule order, are tried there; the
 // first that matches is applied, and a shape rule's chain after it. Each place is tried once, left
 // to right, so a chain that alternates between them is redacted in one pass. The curl rules,
-// which read a whole command line and are applied to it until it stops changing, are then
-// applied to the line from the first such place where a curl command starts.
+// which read a whole command line and redact every flag on it, are then applied to the line from
+// the first such place where a curl command starts.
 //
 // It also reports whether it replaced an AWS secret that holds a `/` (slashedAWSSecret).
 func (e *redactEngine) redactAfterMarkers(t string) (string, bool) {

@@ -16,6 +16,18 @@ func BenchmarkRedactStringRepeatedAssignments(b *testing.B) {
 	}
 }
 
+// BenchmarkRedactStringLongAssignedValue covers copies of a value longer than replaceLiteralsShort: a
+// token as long as a JWT, assigned once and quoted again later in 8 KiB of output.
+func BenchmarkRedactStringLongAssignedValue(b *testing.B) {
+	value := strings.Repeat("abcdefghijklmnopqrstuvwxyz0123456789-_ABCDEFGHIJKLMNOPQRSTUVWXYZ", 10)
+	line := "ok  \tgithub.com/example/project/internal/endpoint\t0.123s\n"
+	text := "access_token=" + value + "\n" + strings.Repeat(line, 60) + "echo " + value + "\n" + strings.Repeat(line, 60)
+	b.SetBytes(int64(len(text)))
+	for b.Loop() {
+		RedactString(text)
+	}
+}
+
 func TestRedactStringRemovesBareCopiesLongestFirst(t *testing.T) {
 	out := RedactString("token=hunter2hunter2 password=hunter2hunter2xyz later hunter2hunter2xyz and hunter2hunter2")
 	if strings.Contains(out, "hunter2") || strings.Contains(out, "xyz") {
