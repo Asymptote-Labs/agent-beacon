@@ -175,9 +175,9 @@ func TestClaudeBashInterruptedOutputIsMarked(t *testing.T) {
 	})
 }
 
-// Claude Code's OTLP tool_result for the same call carries no output. The collector writes it
-// without a working directory, so its dedupe key differs from the hook's and the hook's output
-// reaches the log even when the collector's report is written first.
+// Claude Code's OTLP tool_result for the same call carries no output. When the collector writes it
+// first, the hook's report of the call is not a duplicate of it: it retains the output the
+// collector's lacks, and the first report of a call never shuts out a fuller one.
 func TestClaudeBashOutputSurvivesAnEarlierCollectorReport(t *testing.T) {
 	payload := postToolPayload("Bash", map[string]interface{}{"command": "npm test"},
 		map[string]interface{}{"stdout": "ok\n", "stderr": "", "interrupted": false})

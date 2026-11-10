@@ -21,8 +21,43 @@ type endpointDedupeEvent struct {
 	harness   string
 	sessionID string
 	key       string
-	callID    string
-	ts        time.Time
+	// callKey is key without the workspace: the call identity EventIDForLine derives, which every
+	// capture path computes the same way for one call. key keeps the workspace because it also
+	// serves the timing heuristic, where nothing else tells two lookalike calls apart.
+	callKey  string
+	callID   string
+	retained retainedFields
+	ts       time.Time
+}
+
+// retainedFields is the content a line carries about a call's outcome. A report of a call is only
+// a duplicate when an earlier report already holds everything it does: the first writer wins, so
+// a later report that carries more -- the hook's copy of a command whose collector copy has no
+// output -- would otherwise be dropped in favor of the thinner one.
+type retainedFields uint8
+
+const (
+	retainedCommandOutput retainedFields = 1 << iota
+	retainedExitCode
+	retainedDiff
+	retainedToolResult
+)
+
+func lineRetainedFields(event map[string]interface{}) retainedFields {
+	var out retainedFields
+	if nestedString(event, "command", "output") != "" {
+		out |= retainedCommandOutput
+	}
+	if command, ok := event["command"].(map[string]interface{}); ok && command["exit_code"] != nil {
+		out |= retainedExitCode
+	}
+	if nestedString(event, "file", "diff") != "" {
+		out |= retainedDiff
+	}
+	if nestedString(event, "gen_ai", "tool", "call", "result") != "" {
+		out |= retainedToolResult
+	}
+	return out
 }
 
 // IsDuplicateEndpointEvent reports whether candidateLine duplicates a recently
@@ -83,19 +118,25 @@ func DuplicateEndpointLines(existing, candidate []byte, window time.Duration) bo
 // kept on parsed events so the tail scan does not reparse the candidate for
 // every line it compares it against.
 func duplicateEndpointEvents(existing, candidate endpointDedupeEvent, effectiveWindow time.Duration) bool {
-	if existing.key != candidate.key {
-		return false
-	}
 	// An equal, non-empty tool call ID is the runtime's own statement that these
-	// two lines describe one call, and it settles the question on its own: no
-	// window, and no interest in which capture path reported it.
+	// two lines describe one call, and it settles which call this is on its own: no
+	// window, no interest in which capture path reported it, and no interest in
+	// the workspace, which one path knows and another does not (Codex's OTLP
+	// records carry no working directory; its session file does).
 	//
 	// The window is deliberately not applied here. A hook writes when the tool
 	// runs and the collector writes when its batch flushes, so the two reports
 	// of one call routinely land five seconds apart -- past the two-second
 	// window that is the only thing that ever collapsed them.
-	if existing.callID != "" && existing.callID == candidate.callID {
-		return true
+	//
+	// One call is still written twice when the later report retains something
+	// the earlier one lacks. Both lines then carry the same event.id, the call
+	// identity, so a reader can tell they are one call.
+	if existing.callID != "" && existing.callID == candidate.callID && existing.callKey == candidate.callKey {
+		return candidate.retained&^existing.retained == 0
+	}
+	if existing.key != candidate.key {
+		return false
 	}
 	// Without matching IDs, only the timing heuristic is left, and only across
 	// capture paths: two adjacent calls from one path can legitimately touch the
@@ -175,7 +216,11 @@ func endpointDedupeCandidate(line []byte) (endpointDedupeEvent, bool) {
 		strings.ToLower(workspace),
 		target,
 	}, "\x00")
-	return endpointDedupeEvent{action: strings.ToLower(action), harness: harness, sessionID: sessionID, key: key, callID: callID, ts: ts.UTC()}, true
+	callKey := strings.Join([]string{strings.ToLower(action), sessionID, target}, "\x00")
+	return endpointDedupeEvent{
+		action: strings.ToLower(action), harness: harness, sessionID: sessionID,
+		key: key, callKey: callKey, callID: callID, retained: lineRetainedFields(event), ts: ts.UTC(),
+	}, true
 }
 
 // dedupeSessionNeedle is the bytes every log line describing sessionID holds, or nil when there is

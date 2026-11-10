@@ -96,6 +96,21 @@ func TestIsDuplicateEndpointEvent(t *testing.T) {
 			candidate: `{"timestamp":"2026-08-21T18:00:01Z","event":{"action":"command.executed"},"harness":{"name":"cursor"},"session":{"id":"s1","working_directory":"/repo"},"command":{"command":"printf a"}}`,
 			want:      true,
 		},
+		// Codex's OTLP record carries no working directory and its session file does. The call ID
+		// and the command say these are one call; the session copy adds nothing, so it is dropped.
+		{
+			name:      "same call without a workspace on one path",
+			existing:  `{"timestamp":"2026-11-10T22:00:01Z","event":{"action":"command.executed"},"harness":{"name":"codex_cli","collection_method":"otlp"},"session":{"id":"c1"},"command":{"command":"sh probe.sh","output":"ok\n","exit_code":0},"tool":{"name":"exec_command","command":"sh probe.sh"},"gen_ai":{"tool":{"call":{"id":"call_1"}}}}`,
+			candidate: `{"timestamp":"2026-11-10T22:40:00Z","event":{"action":"command.executed"},"harness":{"name":"codex_cli","collection_method":"poll"},"session":{"id":"c1","working_directory":"/repo"},"repository":"/repo","command":{"command":"sh probe.sh","output":"ok\n","exit_code":0},"tool":{"name":"exec_command","command":"sh probe.sh"},"gen_ai":{"tool":{"call":{"id":"call_1"}}}}`,
+			want:      true,
+		},
+		// The first report of a call does not shut out a later one that retains more: here the
+		// collector's copy has no output and the hook's has it.
+		{
+			name:      "later report of one call retains more",
+			existing:  `{"timestamp":"2026-08-21T18:00:01Z","event":{"action":"command.executed"},"harness":{"name":"claude_code"},"session":{"id":"s1"},"command":{"command":"npm test"},"tool":{"name":"Bash","command":"npm test"},"gen_ai":{"tool":{"call":{"id":"toolu_1"}}}}`,
+			candidate: `{"timestamp":"2026-08-21T18:00:07Z","event":{"action":"command.executed"},"harness":{"name":"claude_code"},"session":{"id":"s1","working_directory":"/repo"},"command":{"command":"npm test","output":"ok\n"},"tool":{"name":"Bash","command":"npm test"},"gen_ai":{"tool":{"call":{"id":"toolu_1"}}}}`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "runtime.jsonl")
