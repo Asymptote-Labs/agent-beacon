@@ -19,4 +19,8 @@
 //     evaluates its arguments on the ExecutionFrame as cel-go's own call does, so the cost
 //     tracker sees the same argument stack and counts the same cost. Guarded by
 //     TestFastPathChangesNothing (cost equality) and TestInvalidRegexErrorsAtEval.
+//   - matcher.go's untracked evaluation relies on the checker's cost estimator (EstimateCost
+//     with a SizeEstimator) bounding the tracked cost, and on the overload IDs listed in
+//     untrackedOverloads. Guarded by TestUntrackedCostIsBounded, TestUntrackedShape and
+//     TestScanAgreesWithReferenceAtLowCostLimits.
 package threatrules

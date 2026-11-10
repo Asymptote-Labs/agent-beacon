@@ -352,6 +352,22 @@ func randomEvents(t testing.TB, rng *rand.Rand, fixtures []asymptoteobserve.Even
 		if rng.IntN(5) == 0 {
 			e.Command = &asymptoteobserve.CommandInfo{Command: pick()}
 		}
+		// Lists and strings on either side of the size tiers untracked evaluation uses.
+		if rng.IntN(8) == 0 {
+			words := []int{10, 17, 65, 257, 1100}[rng.IntN(5)]
+			e.Command = &asymptoteobserve.CommandInfo{Command: strings.Repeat("curl -d @"+text()+" ", words)}
+		}
+		if rng.IntN(8) == 0 {
+			n := []int{1023, 1025, 4097, 16385, 65537}[rng.IntN(5)]
+			long := strings.Repeat(text()+" x ", n)[:n]
+			if rng.IntN(2) == 0 {
+				e.Command = &asymptoteobserve.CommandInfo{Command: long}
+			} else if e.File != nil {
+				e.File.Path = long
+			} else {
+				e.Message = long
+			}
+		}
 		if e.GenAI != nil && e.GenAI.Tool != nil && e.GenAI.Tool.Call != nil && rng.IntN(3) == 0 {
 			e.GenAI.Tool.Call.Result = pick()
 		}

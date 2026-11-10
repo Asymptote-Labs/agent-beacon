@@ -46,7 +46,8 @@ func (c *CompiledRule) eval(m matcher, event asymptoteobserve.Event) (bool, erro
 	if c.derived {
 		event = withDerivedFields(event)
 	}
-	return evalObserved(m.prog, newEventActivation(event))
+	act := newEventActivation(event)
+	return evalObserved(m.program(act), act)
 }
 
 // evalObserved evaluates one compiled expression against an activation whose event the caller

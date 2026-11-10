@@ -39,6 +39,9 @@ type fastType struct {
 	a      *fastAdapter
 	cel    ref.Type         // the extension's type for the struct
 	fields map[string][]int // CEL field name -> index; nil for a name the extension leaves undefined
+	// sized are the indexes of the fields a rule can address, the ones whose sizes bound what it
+	// reads (matcher.go).
+	sized []int
 }
 
 // fastAdapter adapts values for rules: structs of the event's types become fastObjs, lists and maps
@@ -123,6 +126,7 @@ func newFastAdapter(env *cel.Env) (*fastAdapter, error) {
 			ft.fields[name] = f.Index
 			if base, ok := provider.FindStructFieldType(ft.cel.TypeName(), name); ok {
 				a.provider.fields[[2]string{ft.cel.TypeName(), name}] = indexedField(base, f.Index)
+				ft.sized = append(ft.sized, i)
 			}
 			if err := walk(f.Type); err != nil {
 				return err

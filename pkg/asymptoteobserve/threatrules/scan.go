@@ -49,7 +49,8 @@ func (s *eventScanner) scan(in *eventInput, hit func(rule int)) error {
 	}
 	for _, r := range candidates {
 		rule := s.rules[r]
-		matched, err := evalObserved(rule.match.prog, in.activation(rule.derived))
+		act := in.activation(rule.derived)
+		matched, err := evalObserved(rule.match.program(act), act)
 		if err != nil {
 			// Name the rule: an evaluation error belongs to the rule, not to the log, and the
 			// operator needs to know which to remove.
