@@ -171,7 +171,7 @@ func TestSetSessionSyncChangesOnlyItsOwnKey(t *testing.T) {
 	writeInventoryConfig(t, true, body)
 	calls := &[]string{}
 	old := newSessionSyncJob
-	newSessionSyncJob = func(bool, service.Kind) inventoryJobController {
+	newSessionSyncJob = func(bool, service.Kind) service.ScheduledJob {
 		return recordingInventoryJob{calls: calls, supported: true, unitPath: "/fake/s.plist"}
 	}
 	t.Cleanup(func() { newSessionSyncJob = old })

@@ -922,7 +922,7 @@ func plannedInstallActions(repair bool, kind service.Kind, otlpTargets, hookTarg
 	if unitPath, err := mgr.UnitPath(); err == nil {
 		serviceAction.Target = unitPath
 	}
-	inventoryAction, inventoryScheduled := plannedScheduledJob(plannedInventoryJob(cfg.UserMode, kind), "scheduled inventory heartbeat job")
+	inventoryAction, inventoryScheduled := plannedScheduledJob(service.InventoryManager{UserMode: cfg.UserMode, Kind: kind}, "scheduled inventory heartbeat job")
 	actions = append(actions,
 		plannedAction{Action: "write_file", Target: cfg.Collector.ConfigPath, Message: "collector configuration"},
 		serviceAction,
@@ -942,7 +942,7 @@ func plannedInstallActions(repair bool, kind service.Kind, otlpTargets, hookTarg
 	switch {
 	case sessionSync:
 		var sessionSyncAction plannedAction
-		sessionSyncAction, sessionSyncScheduled = plannedScheduledJob(plannedSessionSyncJob(cfg.UserMode, kind), "scheduled session sync job")
+		sessionSyncAction, sessionSyncScheduled = plannedScheduledJob(service.SessionSyncManager{UserMode: cfg.UserMode, Kind: kind}, "scheduled session sync job")
 		actions = append(actions, sessionSyncAction)
 	case sessionSyncChosen:
 		actions = append(actions, plannedAction{Action: "unload_service", Message: "remove scheduled session sync job if present"})
@@ -965,31 +965,12 @@ func plannedInstallActions(repair bool, kind service.Kind, otlpTargets, hookTarg
 	return actions
 }
 
-// plannedJob is what the plan asks of a scheduled job's manager: whether this host can schedule
-// the job and, when it can, where its unit goes.
-type plannedJob interface {
-	Supported() bool
-	UnsupportedReason() string
-	UnitPath() (string, error)
-}
-
-// plannedInventoryJob and plannedSessionSyncJob build the managers the plan asks. They are
-// variables so a test can plan for a host with a scheduler or without one, whichever it runs on.
-var (
-	plannedInventoryJob = func(userMode bool, kind service.Kind) plannedJob {
-		return service.InventoryManager{UserMode: userMode, Kind: kind}
-	}
-	plannedSessionSyncJob = func(userMode bool, kind service.Kind) plannedJob {
-		return service.SessionSyncManager{UserMode: userMode, Kind: kind}
-	}
-)
-
 // plannedScheduledJob is the plan's line for one scheduled job, and whether the install will start
 // it. An install skips a job on a host with no scheduler for it (Windows, or a supervised collector
 // in a container or under WSL) and says why, so the plan says the same. It used to name a launchd
 // plist under ~/Library/LaunchAgents there, and a step that started the job, neither of which the
 // install does.
-func plannedScheduledJob(job plannedJob, name string) (plannedAction, bool) {
+func plannedScheduledJob(job service.ScheduledJob, name string) (plannedAction, bool) {
 	if !job.Supported() {
 		return plannedAction{Action: "skip_unit", Message: name + " not installed: " + job.UnsupportedReason()}, false
 	}

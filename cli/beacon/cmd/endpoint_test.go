@@ -182,32 +182,12 @@ func TestCanonicalHookTargetsNormalizesAliasesToSwitchNames(t *testing.T) {
 	}
 }
 
-// fakePlannedJob stands in for a scheduled job's manager in the dry-run plan.
-type fakePlannedJob struct {
-	supported bool
-	unitPath  string
-}
-
-func (j fakePlannedJob) Supported() bool           { return j.supported }
-func (j fakePlannedJob) UnsupportedReason() string { return "no scheduler on this host" }
-func (j fakePlannedJob) UnitPath() (string, error) { return j.unitPath, nil }
-
-// planForHost makes the dry-run plan see a host that can schedule Beacon's jobs, or one that
-// cannot, whichever host the test runs on: a CI container has no launchd or systemd of its own.
-func planForHost(t *testing.T, scheduler bool) {
-	t.Helper()
-	oldInventory, oldSessionSync := plannedInventoryJob, plannedSessionSyncJob
-	t.Cleanup(func() { plannedInventoryJob, plannedSessionSyncJob = oldInventory, oldSessionSync })
-	plannedInventoryJob = func(bool, service.Kind) plannedJob {
-		return fakePlannedJob{supported: scheduler, unitPath: "/units/inventory"}
-	}
-	plannedSessionSyncJob = func(bool, service.Kind) plannedJob {
-		return fakePlannedJob{supported: scheduler, unitPath: "/units/session-sync"}
-	}
-}
+// hostSchedulesJobs reports whether this host can schedule Beacon's jobs (launchd on macOS,
+// systemd as PID 1 on Linux; not Windows or a container), so a plan test expects what the install
+// would do here. TestPlannedInstallActionsSkipJobsForASupervisedCollector covers the skip on any host.
+func hostSchedulesJobs() bool { return service.InventoryManager{UserMode: true}.Supported() }
 
 func TestPlannedInstallActionsSeparatesHookHarnesses(t *testing.T) {
-	planForHost(t, true)
 	old := endpointOpts
 	t.Cleanup(func() { endpointOpts = old })
 	endpointOpts.userMode = true
@@ -238,23 +218,27 @@ func TestPlannedInstallActionsSeparatesHookHarnesses(t *testing.T) {
 	if counts["devin"] != 0 {
 		t.Fatalf("legacy devin alias should be deduped, counts=%#v", counts)
 	}
-	inventoryUnits := 0
+	// A host with no scheduler skips the job, and the plan says so once instead.
+	inventoryLine := "write_unit"
+	if !hostSchedulesJobs() {
+		inventoryLine = "skip_unit"
+	}
+	inventoryLines := 0
 	for _, action := range actions {
-		if action.Action == "write_unit" && action.Message == "scheduled inventory heartbeat job" {
-			inventoryUnits++
+		if action.Action == inventoryLine && strings.HasPrefix(action.Message, "scheduled inventory heartbeat job") {
+			inventoryLines++
 		}
 		if action.Action == "load_service" {
 			t.Fatalf("--no-start plan must not load anything: %+v", action)
 		}
 	}
-	if inventoryUnits != 1 {
-		t.Fatalf("plan should write the scheduled inventory job once, got %d in %+v", inventoryUnits, actions)
+	if inventoryLines != 1 {
+		t.Fatalf("plan should name the scheduled inventory job once as %s, got %d in %+v", inventoryLine, inventoryLines, actions)
 	}
 }
 
 // The plan names the session sync job only when the install will turn it on or remove it.
 func TestPlannedInstallActionsFollowSessionSync(t *testing.T) {
-	planForHost(t, true)
 	testenv.SetHome(t, t.TempDir())
 	old := endpointOpts
 	t.Cleanup(func() { endpointOpts = old })
@@ -262,7 +246,7 @@ func TestPlannedInstallActionsFollowSessionSync(t *testing.T) {
 	endpointOpts.logPath = filepath.Join(t.TempDir(), "runtime.jsonl")
 	endpointOpts.noStart = false
 
-	plan := func() (units, loads, removals int) {
+	plan := func() (units, loads, removals, skips int) {
 		for _, action := range plannedInstallActions(false, service.KindAuto, nil, nil) {
 			switch {
 			case action.Action == "write_unit" && action.Message == "scheduled session sync job":
@@ -271,27 +255,35 @@ func TestPlannedInstallActionsFollowSessionSync(t *testing.T) {
 				loads++
 			case action.Action == "unload_service" && action.Message == "remove scheduled session sync job if present":
 				removals++
+			case action.Action == "skip_unit" && strings.HasPrefix(action.Message, "scheduled session sync job"):
+				skips++
 			}
 		}
-		return units, loads, removals
+		return units, loads, removals, skips
 	}
 	endpointOpts.sessionSync, endpointOpts.noSessionSync = false, false
-	if u, l, r := plan(); u+l+r != 0 {
-		t.Fatalf("default plan names the session sync job: units=%d loads=%d removals=%d", u, l, r)
+	if u, l, r, s := plan(); u+l+r+s != 0 {
+		t.Fatalf("default plan names the session sync job: units=%d loads=%d removals=%d skips=%d", u, l, r, s)
 	}
+	// --session-sync writes and starts the job, or on a host with no scheduler says it is skipped.
 	endpointOpts.sessionSync = true
-	if u, l, r := plan(); u != 1 || l != 1 || r != 0 {
-		t.Fatalf("--session-sync plan: units=%d loads=%d removals=%d", u, l, r)
+	wantScheduled, wantSkips := 1, 0
+	if !hostSchedulesJobs() {
+		wantScheduled, wantSkips = 0, 1
+	}
+	if u, l, r, s := plan(); u != wantScheduled || l != wantScheduled || r != 0 || s != wantSkips {
+		t.Fatalf("--session-sync plan: units=%d loads=%d removals=%d skips=%d", u, l, r, s)
 	}
 	endpointOpts.sessionSync, endpointOpts.noSessionSync = false, true
-	if u, l, r := plan(); u != 0 || l != 0 || r != 1 {
-		t.Fatalf("--no-session-sync plan: units=%d loads=%d removals=%d", u, l, r)
+	if u, l, r, s := plan(); u != 0 || l != 0 || r != 1 || s != 0 {
+		t.Fatalf("--no-session-sync plan: units=%d loads=%d removals=%d skips=%d", u, l, r, s)
 	}
 }
 
-// An install skips the inventory and session sync jobs on a host with no scheduler for them, and
-// says why. The plan has to say the same: it used to name a unit and a start step for each.
-func TestPlannedInstallActionsSkipScheduledJobsWithoutAScheduler(t *testing.T) {
+// A supervised collector has no scheduler on any platform, so the install skips the inventory and
+// session sync jobs and says why. The plan has to say the same: it used to name a launchd unit and
+// a start step for each.
+func TestPlannedInstallActionsSkipJobsForASupervisedCollector(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	old := endpointOpts
 	t.Cleanup(func() { endpointOpts = old })
@@ -300,62 +292,11 @@ func TestPlannedInstallActionsSkipScheduledJobsWithoutAScheduler(t *testing.T) {
 	endpointOpts.noStart = false
 	endpointOpts.sessionSync, endpointOpts.noSessionSync = true, false
 
-	jobs := []string{"scheduled inventory heartbeat job", "scheduled session sync job"}
-	count := func(actions []plannedAction, action, message string) int {
-		n := 0
-		for _, a := range actions {
-			if a.Action == action && a.Message == message {
-				n++
-			}
-		}
-		return n
-	}
-
-	planForHost(t, false)
-	actions := plannedInstallActions(false, service.KindAuto, nil, nil)
-	for _, job := range jobs {
-		if n := count(actions, "write_unit", job); n != 0 {
-			t.Errorf("plan writes a unit for the %s on a host that cannot schedule it: %+v", job, actions)
-		}
-		if n := count(actions, "load_service", "start "+job); n != 0 {
-			t.Errorf("plan starts the %s on a host that cannot schedule it: %+v", job, actions)
-		}
-		if n := count(actions, "skip_unit", job+" not installed: no scheduler on this host"); n != 1 {
-			t.Errorf("plan should say once that the %s is not installed and why, got %d in %+v", job, n, actions)
-		}
-	}
-	// The collector is not a scheduled job: the plan still writes and starts it.
-	if n := count(actions, "load_service", "start endpoint collector service"); n != 1 {
-		t.Errorf("plan should still start the collector, got %d in %+v", n, actions)
-	}
-
-	planForHost(t, true)
-	actions = plannedInstallActions(false, service.KindAuto, nil, nil)
-	for _, job := range jobs {
-		if count(actions, "write_unit", job) != 1 || count(actions, "load_service", "start "+job) != 1 {
-			t.Errorf("plan should write and start the %s on a host that can schedule it: %+v", job, actions)
-		}
-	}
-	for _, a := range actions {
-		if a.Action == "skip_unit" {
-			t.Errorf("plan skips a job on a host that can schedule it: %+v", a)
-		}
-	}
-}
-
-// The same through the real managers. A supervised collector has no scheduler on any platform, so
-// this holds wherever the test runs: no unit path belongs in the plan, least of all a launchd one.
-func TestPlannedInstallActionsNameNoLaunchdUnitForASupervisedCollector(t *testing.T) {
-	testenv.SetHome(t, t.TempDir())
-	old := endpointOpts
-	t.Cleanup(func() { endpointOpts = old })
-	endpointOpts.userMode, endpointOpts.systemMode = true, false
-	endpointOpts.logPath = filepath.Join(t.TempDir(), "runtime.jsonl")
-	endpointOpts.noStart = false
-	endpointOpts.sessionSync, endpointOpts.noSessionSync = true, false
-
-	skipped := 0
+	skipped, collectorStarts := 0, 0
 	for _, action := range plannedInstallActions(false, service.KindSupervised, nil, nil) {
+		if action.Action == "load_service" && action.Message == "start endpoint collector service" {
+			collectorStarts++
+		}
 		if strings.Contains(action.Target, "LaunchAgents") || strings.Contains(action.Target, "LaunchDaemons") {
 			t.Errorf("plan names a launchd unit for a supervised collector: %+v", action)
 		}
@@ -371,6 +312,10 @@ func TestPlannedInstallActionsNameNoLaunchdUnitForASupervisedCollector(t *testin
 	}
 	if skipped != 2 {
 		t.Errorf("plan should skip the inventory and session sync jobs, skipped %d", skipped)
+	}
+	// The collector is not a scheduled job: the plan still starts it.
+	if collectorStarts != 1 {
+		t.Errorf("plan should start the collector once, got %d", collectorStarts)
 	}
 }
 
