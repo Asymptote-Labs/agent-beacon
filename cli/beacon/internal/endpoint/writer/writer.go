@@ -294,7 +294,10 @@ func LastLine(path string) (string, error) {
 	defer f.Close()
 	var last string
 	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), MaxEventBytes)
+	// The buffer has to hold the JSON and the newline AppendEvent writes after it.
+	// A max of MaxEventBytes reports a legal full-size line as too long. The extra
+	// room matches scanBackfillLines, which reads the same log.
+	scanner.Buffer(make([]byte, 0, 64*1024), MaxEventBytes+1024)
 	for scanner.Scan() {
 		last = scanner.Text()
 	}
