@@ -300,6 +300,11 @@ func TestRedactionWorkIsLinear(t *testing.T) {
 		return repeatTo("token=AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY ", n)
 	}
 	texts["labeled key ids without secrets"] = func(n int) string { return repeatTo("token=xAKIAIOSFODNN7EXAMPLE::|,", n) }
+	// Key pairs after labeled key ids, each followed by a run a label could be spelled in.
+	texts["labeled key pairs before label runs"] = func(n int) string {
+		return repeatTo("token=AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY-"+strings.Repeat("_", 200)+": ", n/2) +
+			"token=AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" + repeatTo("-", n/2)
+	}
 	for name, text := range texts {
 		work := func(n int) int {
 			total := 0

@@ -379,6 +379,36 @@ func TestRedactStringURLLabelPasswordWithQueryString(t *testing.T) {
 	}
 }
 
+// awsPairLabelRun is 34 bytes of an AWS secret access key's alphabet: with a 6-byte label word
+// after it, the label is exactly as long as a secret access key, 40 bytes.
+const awsPairLabelRun = "Ab3Ab3Ab3Ab3Ab3Ab3Ab3Ab3Ab3Ab3Ab3x"
+
+// A labeled or flag value that ends in an AWS access key id takes the secret access key written
+// after it (awsPairRunsOn). This guards that a 40-byte run after the key id that is itself a
+// secret-named label with its separator is not taken for the secret: the value rule would run on
+// over the label, the label's own match would then lie inside that run-on and be skipped, and a
+// value under 8 bytes, which copy removal leaves alone, would be kept. The label's value is
+// redacted, as on main. The quoted and the `:` cases are the ones that kept the value; with `=`,
+// which no secret ends at, and after a flag, whose value the label rules redact first, it was
+// redacted already, and stays so. A label may also start in the 40 bytes and go on past them, in
+// bytes a secret does not hold (`-`, `_`, ſ), and a real secret access key can be where it starts.
+func TestRedactStringRedactsALabelAfterAnAWSKeyPair(t *testing.T) {
+	for input, want := range map[string]string{
+		`{"token": "AKIAIOSFODNN7EXAMPLE", "` + awsPairLabelRun + `Secret": "pin123"}`:            `{"token": "[REDACTED]", "` + awsPairLabelRun + `Secret": "[REDACTED]"}`,
+		"token=AKIAIOSFODNN7EXAMPLE," + awsPairLabelRun + "secret: pin123":                        "token=[REDACTED]," + awsPairLabelRun + "secret: [REDACTED]",
+		"token=AKIAIOSFODNN7EXAMPLE," + awsPairLabelRun + "secret=pin123":                         "token=[REDACTED]," + awsPairLabelRun + "secret=[REDACTED]",
+		"tool --access-key AKIAIOSFODNN7EXAMPLE " + awsPairLabelRun + "token: pin123":             "tool --access-key [REDACTED] " + awsPairLabelRun + "token: [REDACTED]",
+		"token=AKIAIOSFODNN7EXAMPLE," + awsPairLabelRun + "Secret--db-password=pin12":             "token=[REDACTED]," + awsPairLabelRun + "Secret--db-password=[REDACTED]",
+		"token=AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY--db-password: pin12": "token=[REDACTED],wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY--db-password: [REDACTED]",
+		"token=AKIAIOSFODNN7EXAMPLE," + awsPairLabelRun + "secret\u017fecret_apikey : pin12":      "token=[REDACTED]," + awsPairLabelRun + "secret\u017fecret_apikey : [REDACTED]",
+	} {
+		got := RedactString(input)
+		if strings.Contains(got, "pin12") || got != want {
+			t.Errorf("RedactString(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 // A URL's password after a scheme a rule replaced is redacted: the Bearer rule takes a scheme
 // written after it, and a copy or a token's tail can end right before `://`. A copy that holds
 // the password is still removed whole.
@@ -427,6 +457,14 @@ var redactIdempotenceInputs = []string{
 	"token=AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY}AKIAIOSFODNN7EXAMPLE",
 	"https://x-access-token:a,b@hostAKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
 	"token=abcdefgh12345678AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY-----BEGIN PRIVATE KEY-----",
+	// A 40-byte run after a labeled key id that is itself a label with its separator.
+	`{"token": "AKIAIOSFODNN7EXAMPLE", "` + awsPairLabelRun + `Secret": "pin123"}`,
+	"token=AKIAIOSFODNN7EXAMPLE," + awsPairLabelRun + "secret: pin123",
+	"token=AKIAIOSFODNN7EXAMPLE," + awsPairLabelRun + "secret=pin123",
+	"tool --access-key AKIAIOSFODNN7EXAMPLE " + awsPairLabelRun + "token: pin123",
+	"token=AKIAIOSFODNN7EXAMPLE," + awsPairLabelRun + "Secret--db-password=pin12",
+	"token=AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY--db-password: pin12",
+	"token=AKIAIOSFODNN7EXAMPLE," + awsPairLabelRun + "secret\u017fecret_apikey : pin12",
 	// A URL whose user name is a secret-named label: the label rules and the URL rule stop at
 	// different bytes, and each used to take one more piece per pass.
 	"https://x-access-token:abc@github.combcn_api_`@host",

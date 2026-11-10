@@ -734,6 +734,12 @@ func awsPairRunsOn(rule *redactionRule, t string, match []int) (string, int) {
 // t[run:end] ends in, before any separators `:` and `|` it takes, or -1. The key id may be glued to
 // what comes before it in the run (`@hostAKIA…`), where the rules for key ids would not take it for
 // one: it is redacted as part of the run, and so is the secret.
+//
+// Forty bytes that a secret-named label with its separator starts in are no secret
+// (`<34 bytes>secret: x`, `<40 bytes>--db-password=x`): running on over them would hide the
+// label's own match, which starts inside what the run replaces, from its rule. A label is spelled
+// in bytes the secret holds too, and may go on past it (labelRunEnd), so the label is looked for
+// where that run ends.
 func awsPairTailEnd(t string, run, end int) int {
 	k := end
 	for k > run && end-k < 8 && (t[k-1] == ':' || t[k-1] == '|') {
@@ -757,7 +763,32 @@ func awsPairTailEnd(t string, run, end int) int {
 	if m == nil {
 		return -1
 	}
-	return k + m[3]
+	tail := k + m[3]
+	label := labelRunEnd(t, tail)
+	redactWorked(label - tail)
+	if keptLabel(t, label) {
+		return -1
+	}
+	return tail
+}
+
+// labelRunEnd returns the end of the run from i of the bytes a label is spelled with, as the
+// case-insensitive label rules read them: letters, digits, `_`, `.` and `-`, and ſ and K, which
+// fold into s and k.
+func labelRunEnd(t string, i int) int {
+	for i < len(t) {
+		switch {
+		case labelClass[t[i]]:
+			i++
+		case strings.HasPrefix(t[i:], "\u017f"):
+			i += len("\u017f")
+		case strings.HasPrefix(t[i:], "\u212a"):
+			i += len("\u212a")
+		default:
+			return i
+		}
+	}
+	return i
 }
 
 // redactAWSPairTail is redactAWSPair after its key id: the separators, the secret (${1}) and
