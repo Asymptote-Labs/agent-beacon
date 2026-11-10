@@ -6,7 +6,6 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
-	"unsafe"
 )
 
 // A prefilter is a necessary condition for a regex to match, over the literal strings the text
@@ -283,6 +282,5 @@ func canon(s string) string {
 		b = utf8.AppendRune(b, canonRune(r))
 		i += n
 	}
-	// b is not written again, so the string can share its bytes rather than copy them.
-	return unsafe.String(unsafe.SliceData(b), len(b))
+	return string(b)
 }

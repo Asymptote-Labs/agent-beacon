@@ -3,7 +3,6 @@ package threatrules
 import (
 	"reflect"
 	"time"
-	"unsafe"
 
 	"github.com/google/cel-go/interpreter"
 
@@ -36,7 +35,7 @@ func (in *eventInput) activation(derived bool) *eventActivation {
 // on a field shares one canonicalization of it.
 type eventActivation struct {
 	e      any
-	canons map[canonKey]canonEntry
+	canons map[string]string // a string a prefilter looked at -> its canonical form
 	// The tier of sizes the event is within (matcher.go), measured on first use.
 	measured     bool
 	sTier, lTier int
@@ -61,30 +60,15 @@ func (a *eventActivation) ResolveName(name string) (any, bool) {
 func (a *eventActivation) Parent() interpreter.Activation { return nil }
 
 func (a *eventActivation) canon(s string) string {
-	// Keyed by address, not content (see canonKey); the entry keeps s alive so the key stays its own.
-	k := canonKey{unsafe.StringData(s), len(s)}
-	if c, ok := a.canons[k]; ok {
-		return c.canon
+	if c, ok := a.canons[s]; ok {
+		return c
 	}
 	if a.canons == nil {
-		a.canons = map[canonKey]canonEntry{}
+		a.canons = map[string]string{}
 	}
 	c := canon(s)
-	a.canons[k] = canonEntry{orig: s, canon: c}
+	a.canons[s] = c
 	return c
-}
-
-// canonKey identifies a string by its bytes' address and length: hashing a 3 KB tool result on
-// every lookup would cost what the cache saves.
-type canonKey struct {
-	p *byte
-	n int
-}
-
-// canonEntry keeps the original string so its memory cannot be freed and reused, under the same
-// key, by another string while the activation lives (rules can build strings, e.g. lowerAscii()).
-type canonEntry struct {
-	orig, canon string
 }
 
 // tier returns the smallest tier holding every string and list a rule can read of the activation's
