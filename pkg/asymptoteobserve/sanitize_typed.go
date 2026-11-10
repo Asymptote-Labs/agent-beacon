@@ -163,11 +163,29 @@ func (g genericSanitizer) strings(in []string) []string {
 // field is the value of an interface{} field, none of which is named for a credential: decoded as
 // the round trip decodes it, then sanitized as SanitizeMap sanitizes a value under such a name. A
 // value nested deeper than maxGenericDepth (or holding a cycle) is marshaled and decoded whole.
+//
+// A value already in the shape decoding gives (isDecoded), as a payload decoded from JSON is, is
+// sanitized as it is: decoding it would only copy every map, list and string in it first.
 func (g genericSanitizer) field(v any) any {
+	if !isDecoded(v, 0) {
+		v = decodedField(v)
+	}
+	return g.sanitizeDecoded(v)
+}
+
+// decodedField is v as the round trip decodes it, a value nested too deep marshaled and decoded
+// whole.
+func decodedField(v any) any {
 	d := decoded(v, 0)
 	if _, deep := d.(tooDeep); deep {
-		d = roundTrip(v)
+		return roundTrip(v)
 	}
+	return d
+}
+
+// sanitizeDecoded sanitizes a decoded value as SanitizeMap sanitizes a value under a name that
+// is not a credential's.
+func (g genericSanitizer) sanitizeDecoded(d any) any {
 	switch x := d.(type) {
 	case string:
 		return CleanString(x, g.opts.StringLimit, g.opts.RedactSecrets)
@@ -178,6 +196,46 @@ func (g genericSanitizer) field(v any) any {
 	default:
 		return x
 	}
+}
+
+// isDecoded reports whether decoded(v, depth) returns v unchanged: v holds only what decoding JSON
+// gives (nil, a bool, a float64 JSON can write, a string of valid UTF-8, and a non-nil []any or
+// map[string]any of those with keys of valid UTF-8), nested no deeper than maxGenericDepth. It is
+// decoded's own conditions, read without building anything. TestFieldIsDecodedThenSanitized holds
+// the two to the same answer.
+func isDecoded(v any, depth int) bool {
+	if depth > maxGenericDepth {
+		return false
+	}
+	switch x := v.(type) {
+	case nil, bool:
+		return true
+	case string:
+		return utf8.ValidString(x)
+	case float64:
+		return !math.IsNaN(x) && !math.IsInf(x, 0)
+	case []any:
+		if x == nil {
+			return false
+		}
+		for _, item := range x {
+			if !isDecoded(item, depth+1) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		if x == nil {
+			return false
+		}
+		for k, item := range x {
+			if !utf8.ValidString(k) || !isDecoded(item, depth+1) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // tooDeep is what decoded returns for a value nested deeper than maxGenericDepth, and for any

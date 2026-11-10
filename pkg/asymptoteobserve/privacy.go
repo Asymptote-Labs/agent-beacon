@@ -991,12 +991,18 @@ func IsSecretKeyName(key string) bool {
 // only credential word is "tokens", which is how a count of model tokens is named
 // (`max_tokens: 4096`, `input_tokens: "1200"`), where `GITHUB_TOKENS: abc` is a credential.
 func IsSecretField(key string, value interface{}) bool {
-	secret, onlyTokens := secretKeyName(key)
-	if !secret || onlyTokens && isNumber(value) {
-		return false
+	if text, ok := value.(string); ok {
+		return isSecretText(key, text)
 	}
-	text, ok := value.(string)
-	return !ok || !isAuthScheme(text)
+	secret, onlyTokens := secretKeyName(key)
+	return secret && !(onlyTokens && isNumber(value))
+}
+
+// isSecretText is IsSecretField for a string value, which the sanitizers hold as a string: making
+// it an interface{} to ask would allocate it again.
+func isSecretText(key, text string) bool {
+	secret, onlyTokens := secretKeyName(key)
+	return secret && !(onlyTokens && isNumberText(text)) && !isAuthScheme(text)
 }
 
 // isNumber reports whether a value is a number, or a string that only spells one.
@@ -1005,21 +1011,26 @@ func isNumber(value interface{}) bool {
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, json.Number:
 		return true
 	case string:
-		digits, point := 0, false
-		for i := range len(typed) {
-			switch c := typed[i]; {
-			case c >= '0' && c <= '9':
-				digits++
-			case c == '.' && !point:
-				point = true
-			case c == '-' && i == 0:
-			default:
-				return false
-			}
-		}
-		return digits > 0
+		return isNumberText(typed)
 	}
 	return false
+}
+
+// isNumberText reports whether a string only spells a number.
+func isNumberText(text string) bool {
+	digits, point := 0, false
+	for i := range len(text) {
+		switch c := text[i]; {
+		case c >= '0' && c <= '9':
+			digits++
+		case c == '.' && !point:
+			point = true
+		case c == '-' && i == 0:
+		default:
+			return false
+		}
+	}
+	return digits > 0
 }
 
 // IsSecretFlag reports whether an argument is a flag named for a secret written on its own, so the
@@ -1038,8 +1049,10 @@ var redactSecretFlagPattern = lazyPattern(`(?i)^` + redactFlagName + `$`)
 // name that runs one into the words before it (`PGPASSWORD`, `githubtoken`) is marked by how it
 // ends. `author`, `keyboard` and `PWD` are not secrets.
 func secretKeyName(key string) (secret, onlyTokens bool) {
-	var name strings.Builder
-	name.Grow(len(key))
+	// The lower-cased name is built in a buffer on the stack: this runs for every field of every
+	// map SanitizeMap sees, and a heap-allocated builder was most of its cost on short names.
+	var buf [64]byte
+	name := buf[:0]
 	start := 0
 	// tokenPending is a "token" word not yet judged: followed by "count" or "usage" it names a
 	// count (Codex and Gemini log `input_token_count`, `total_token_count`), like "tokens", and a
@@ -1048,38 +1061,38 @@ func secretKeyName(key string) (secret, onlyTokens bool) {
 	// endWord reports whether the word that ends here names a credential other than a token count,
 	// and starts the next one.
 	endWord := func() bool {
-		word := name.String()[start:]
-		start = name.Len()
+		word := name[start:]
+		start = len(name)
 		if tokenPending {
 			tokenPending = false
-			if slices.Contains(tokenCountWords, word) {
+			if containsWord(tokenCountWords, word) {
 				onlyTokens = true
 				return false
 			}
 			return true
 		}
-		if word == "tokens" {
+		if string(word) == "tokens" {
 			onlyTokens = true
 			return false
 		}
-		if word == "token" {
+		if string(word) == "token" {
 			tokenPending = true
 			return false
 		}
-		return slices.Contains(redactKeyWords, word)
+		return containsWord(redactKeyWords, word)
 	}
 	for i := range len(key) {
 		c := key[i]
 		switch {
 		case c >= 'a' && c <= 'z' || c >= '0' && c <= '9':
-			name.WriteByte(c)
+			name = append(name, c)
 		case c >= 'A' && c <= 'Z':
 			// A capital starts a word after a lower-case letter or a digit (`apiKey`), and after
 			// other capitals when a lower-case letter follows it (`APIKey`).
 			if i > 0 && (isLowerOrDigit(key[i-1]) || isUpper(key[i-1]) && i+1 < len(key) && key[i+1] >= 'a' && key[i+1] <= 'z') && endWord() {
 				return true, false
 			}
-			name.WriteByte(c + 'a' - 'A')
+			name = append(name, c+'a'-'A')
 		default:
 			if endWord() {
 				return true, false
@@ -1089,13 +1102,22 @@ func secretKeyName(key string) (secret, onlyTokens bool) {
 	if endWord() || tokenPending {
 		return true, false
 	}
-	whole := name.String()
 	for _, suffix := range redactKeySuffixes {
-		if strings.HasSuffix(whole, suffix) {
+		if len(name) >= len(suffix) && string(name[len(name)-len(suffix):]) == suffix {
 			return true, false
 		}
 	}
 	return onlyTokens, onlyTokens
+}
+
+// containsWord reports whether word is one of words, without converting it to a string.
+func containsWord(words []string, word []byte) bool {
+	for _, w := range words {
+		if string(word) == w {
+			return true
+		}
+	}
+	return false
 }
 
 func isLowerOrDigit(c byte) bool { return c >= 'a' && c <= 'z' || c >= '0' && c <= '9' }
@@ -1208,7 +1230,7 @@ func sanitizeField(key string, value interface{}, opts PrivacyOptions, limit int
 	case string:
 		// A value whose field is named for a credential is one, whatever it looks like:
 		// `{"password": "hunter2"}` has no shape a pattern could recognize.
-		if opts.RedactSecrets && typed != "" && IsSecretField(key, typed) {
+		if opts.RedactSecrets && typed != "" && isSecretText(key, typed) {
 			return redactedValue
 		}
 		return CleanString(typed, limit, opts.RedactSecrets)
