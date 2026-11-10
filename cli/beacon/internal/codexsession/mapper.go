@@ -26,9 +26,10 @@ type MapOptions struct {
 }
 
 type codexToolCall struct {
-	ID    string
-	Name  string
-	Input interface{}
+	ID        string
+	Name      string
+	Namespace string
+	Input     interface{}
 }
 
 type mapper struct {
@@ -130,7 +131,7 @@ func (m *mapper) consumeResponseItem(record Record, emit bool) {
 	case "message":
 		m.consumeMessage(record, item, emit)
 	case "custom_tool_call":
-		call := codexToolCall{ID: item.CallID, Name: item.Name, Input: item.Input}
+		call := codexToolCall{ID: item.CallID, Name: item.Name, Namespace: item.Namespace, Input: item.Input}
 		if call.ID != "" {
 			m.tools[call.ID] = call
 		}
@@ -143,7 +144,7 @@ func (m *mapper) consumeResponseItem(record Record, emit bool) {
 		}
 	case "function_call":
 		input := parseFunctionArguments(item.Arguments, item.Input)
-		call := codexToolCall{ID: item.CallID, Name: item.Name, Input: input}
+		call := codexToolCall{ID: item.CallID, Name: item.Name, Namespace: item.Namespace, Input: input}
 		if call.ID != "" {
 			m.tools[call.ID] = call
 		}
@@ -377,35 +378,39 @@ func (m *mapper) emitToolInvoked(record Record, call codexToolCall) {
 		return
 	}
 	ev := m.base(record, "tool.invoked", "tool", schema.SeverityInfo, schema.FidelityObserved, "Codex tool invocation observed")
-	ev.Tool = &schema.ToolInfo{Name: call.Name}
-	ev.GenAI = mergeGenAI(ev.GenAI, &schema.GenAIInfo{Tool: &schema.GenAIToolInfo{Name: call.Name, Call: &schema.GenAIToolCallInfo{ID: call.ID, Arguments: call.Input}}})
+	name := asymptoteobserve.CodexToolName(call.Name, call.Namespace)
+	ev.Tool = &schema.ToolInfo{Name: name}
+	ev.GenAI = mergeGenAI(ev.GenAI, &schema.GenAIInfo{Tool: &schema.GenAIToolInfo{Name: name, Call: &schema.GenAIToolCallInfo{ID: call.ID, Arguments: call.Input}}})
 	if command := commandFromTool(call); command != "" {
 		ev.Tool.Command = command
 	}
 	m.append(record, "tool.invoked."+firstNonEmpty(call.ID, itoa(record.Line)), ev)
 }
 
+// emitToolResult records a tool call's result as asymptoteobserve.NormalizeCodexToolResult defines
+// it, the definition the live collector applies to the same call's codex.tool_result record.
 func (m *mapper) emitToolResult(record Record, item *ResponseItem) {
 	call := m.tools[item.CallID]
 	if call.ID == "" {
 		call.ID = item.CallID
 	}
-	output := toolOutputText(item.Output)
-	if asymptoteobserve.IsShellCommandTool(call.Name) {
-		ev := m.base(record, "command.executed", "command", severityForStatus(item.Status), schema.FidelityObserved, "Codex command completed")
-		ev.Command = &schema.CommandInfo{Command: commandFromTool(call), Output: output}
-		ev.Tool = &schema.ToolInfo{Name: call.Name, Command: commandFromTool(call)}
-		ev.GenAI = toolResultGenAI(call, output)
-		m.append(record, "tool.result."+firstNonEmpty(call.ID, itoa(record.Line)), ev)
-		return
+	if call.Name == "" {
+		call.Name, call.Namespace = item.Name, item.Namespace
 	}
-	action := "tool.completed"
-	if isErrorStatus(item.Status) {
-		action = "tool.failed"
-	}
-	ev := m.base(record, action, "tool", severityForStatus(item.Status), schema.FidelityObserved, "Codex tool completed")
-	ev.Tool = &schema.ToolInfo{Name: call.Name}
-	ev.GenAI = toolResultGenAI(call, output)
+	fields := asymptoteobserve.NormalizeCodexToolResult(asymptoteobserve.CodexToolResult{
+		Name:      call.Name,
+		Namespace: call.Namespace,
+		CallID:    call.ID,
+		Arguments: call.Input,
+		Output:    toolOutputText(item.Output),
+		Failed:    isErrorStatus(item.Status),
+	})
+	ev := m.base(record, fields.Action, fields.Category, fields.Severity, schema.FidelityObserved, fields.Message)
+	ev.Tool = fields.Tool
+	ev.Command = fields.Command
+	ev.MCP = fields.MCP
+	ev.Content = fields.Content
+	ev.GenAI = mergeGenAI(ev.GenAI, &schema.GenAIInfo{Tool: fields.GenAITool})
 	m.append(record, "tool.result."+firstNonEmpty(call.ID, itoa(record.Line)), ev)
 }
 
@@ -561,10 +566,6 @@ func commandFromTool(call codexToolCall) string {
 	}
 }
 
-func toolResultGenAI(call codexToolCall, result string) *schema.GenAIInfo {
-	return &schema.GenAIInfo{Tool: &schema.GenAIToolInfo{Name: call.Name, Call: &schema.GenAIToolCallInfo{ID: call.ID, Arguments: call.Input, Result: result}}}
-}
-
 func usageFromCodex(raw *TokenUsage) *schema.GenAIUsageInfo {
 	if raw == nil || *raw == (TokenUsage{}) {
 		return nil
@@ -642,13 +643,6 @@ func mergeGenAI(base, next *schema.GenAIInfo) *schema.GenAIInfo {
 		base.Conversation = next.Conversation
 	}
 	return base
-}
-
-func severityForStatus(status string) schema.Severity {
-	if isErrorStatus(status) {
-		return schema.SeverityMedium
-	}
-	return schema.SeverityInfo
 }
 
 func isErrorStatus(status string) bool {

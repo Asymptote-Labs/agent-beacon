@@ -985,8 +985,8 @@ func TestCodexToolResultExtractsShellCommand(t *testing.T) {
 	if event.Command == nil || event.Command.Command != "date" {
 		t.Fatalf("command = %#v, want parsed date command", event.Command)
 	}
-	if event.Tool == nil || event.Tool.Command != `{"cmd":"date","workdir":"/tmp"}` {
-		t.Fatalf("tool payload not preserved: %#v", event.Tool)
+	if event.Tool == nil || event.Tool.Command != "date" {
+		t.Fatalf("tool.command = %#v, want the command line the session sync records", event.Tool)
 	}
 }
 
@@ -1003,8 +1003,8 @@ func TestCodexToolResultExtractsShellCommandArgument(t *testing.T) {
 	}
 	event := newBeaconEvent("tool.invoked", "tool", "info", "codex_cli", time.Now())
 	normalizeCodexToolResult(&event, map[string]interface{}{"tool": "deploy__run", "arguments": `{"command":"status"}`})
-	if event.Event.Action != "tool.invoked" || event.Command != nil {
-		t.Fatalf("non-shell tool with a command argument = %q %#v, want tool.invoked", event.Event.Action, event.Command)
+	if event.Event.Action != "tool.completed" || event.Command != nil {
+		t.Fatalf("non-shell tool with a command argument = %q %#v, want tool.completed", event.Event.Action, event.Command)
 	}
 }
 
