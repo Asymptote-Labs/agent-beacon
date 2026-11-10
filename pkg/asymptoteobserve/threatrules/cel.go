@@ -173,8 +173,8 @@ func selectsField(ast *cel.Ast, name string) bool {
 //
 // Derived fields (see DerivedFields) are filled on a copy of the event first, so a caller
 // holding only a program sees the same values a CompiledRule does. CompiledRule skips that
-// step for rules that never reference a derived field, and ScanEvents does it once per event
-// for all the rules that do.
+// step for rules that never reference a derived field, and ScanEvents and EventScanner do it
+// once per event for all the rules that do.
 func EvalMatch(prog cel.Program, event asymptoteobserve.Event) (bool, error) {
 	return evalMatch(prog, newEventActivation(withDerivedFields(event)))
 }

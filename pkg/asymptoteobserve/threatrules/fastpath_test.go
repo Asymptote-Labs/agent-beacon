@@ -397,21 +397,63 @@ func agree(t testing.TB, what string, fast, reference []*CompiledRule, events []
 	got, gotErr := ScanEvents(fast, events)
 	want, wantErr := ScanEvents(reference, events)
 	same("as one log", got, want, gotErr, wantErr)
-	scanner := newEventScanner(singleEventRules(fast))
+	scanner, err := NewEventScanner(singleEventRules(fast))
+	if err != nil {
+		t.Fatal(err)
+	}
 	singleReference := singleEventRules(reference)
+	steps, err := NewStepMatcher(correlationRules(fast))
+	if err != nil {
+		t.Fatal(err)
+	}
+	referenceSteps := correlationRules(reference)
 	for i, e := range events {
 		what := fmt.Sprintf("event %d (%s) alone", i, e.Event.Action)
-		var got []Finding
-		gotErr := scanner.scan(&eventInput{event: &e}, func(r int) {
-			got = append(got, scanner.rules[r].newFinding([]asymptoteobserve.Event{e}))
-		})
-		if gotErr != nil {
-			got = nil
-		}
+		got, gotErr := scanner.ScanEvent(e)
 		want, wantErr := ScanEvents(singleReference, []asymptoteobserve.Event{e})
 		same(what, got, want, gotErr, wantErr)
+		// The prepared event is scanned, then its steps matched, on one set of activations.
+		p := PrepareEvent(e)
+		got, gotErr = scanner.ScanPrepared(p)
+		same(what+", prepared", got, want, gotErr, wantErr)
+		any, anyErr := steps.AnyStep(p)
+		wantAny, wantAnyErr := anyStepReference(referenceSteps, e)
+		if any != wantAny || fmt.Sprint(anyErr) != fmt.Sprint(wantAnyErr) {
+			t.Fatalf("%s: AnyStep %v, %v; reference %v, %v", what, any, anyErr, wantAny, wantAnyErr)
+		}
 	}
 	return findings, errs
+}
+
+func correlationRules(rules []*CompiledRule) []*CompiledRule {
+	var out []*CompiledRule
+	for _, r := range rules {
+		if r.steps != nil {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// anyStepReference evaluates every step of every rule on the event as the correlation evaluator
+// does (CompiledRule.eval): true when one holds, otherwise the first failure in rule and step order.
+func anyStepReference(rules []*CompiledRule, e asymptoteobserve.Event) (bool, error) {
+	var first error
+	for _, r := range rules {
+		for i, st := range r.steps {
+			matched, err := r.eval(st, e)
+			if err != nil {
+				if first == nil {
+					first = fmt.Errorf("rule %q step %q: %w", r.rule.ID, r.rule.Correlation.Steps[i].ID, err)
+				}
+				continue
+			}
+			if matched {
+				return true, nil
+			}
+		}
+	}
+	return false, first
 }
 
 func findingRuleIDs(fs []Finding) []string {
@@ -713,5 +755,11 @@ func TestFastEnvIsInstalled(t *testing.T) {
 	}
 	if _, ok := env.CELTypeAdapter().(*fastAdapter); !ok {
 		t.Fatalf("Env adapts values with %T", env.CELTypeAdapter())
+	}
+}
+
+func TestEventScannerRejectsCorrelationRules(t *testing.T) {
+	if _, err := NewEventScanner([]*CompiledRule{readThenEgressRule(t)}); err == nil {
+		t.Fatal("NewEventScanner accepted a correlation rule")
 	}
 }
