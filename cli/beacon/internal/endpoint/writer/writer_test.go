@@ -424,7 +424,7 @@ func TestAppendEventDropsAnEmptiedGenAIObject(t *testing.T) {
 // The scanner has to hold that newline or it reports the legal line as too long.
 func TestLastLineReadsAMaxSizedEvent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.jsonl")
-	payload := bytes.Repeat([]byte("x"), MaxEventBytes)
+	payload := append(append([]byte(`"`), bytes.Repeat([]byte("x"), MaxEventBytes-2)...), '"')
 	if err := os.WriteFile(path, append(append([]byte("short\n"), payload...), '\n'), 0o600); err != nil {
 		t.Fatal(err)
 	}

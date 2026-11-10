@@ -24,6 +24,9 @@ const (
 	DefaultRotateBytes    = 10 * 1024 * 1024
 	DefaultRotateArchives = asymptoteobserve.DefaultRuntimeLogRotateArchives
 	RotateBytes           = DefaultRotateBytes
+	// MaxLineBytes bounds a scanner reading the runtime log. It has to hold a full-size event
+	// and the newline AppendEvent writes after it; at MaxEventBytes a legal line reads as too long.
+	MaxLineBytes = MaxEventBytes + 1024
 	// runtimeFileMode is the shared (system-mode) log's mode. A log inside the current user's home
 	// is private instead; asymptoteobserve.RuntimeLogModes decides, identically in all three writers.
 	runtimeFileMode = asymptoteobserve.SharedRuntimeLogFileMode
@@ -294,10 +297,7 @@ func LastLine(path string) (string, error) {
 	defer f.Close()
 	var last string
 	scanner := bufio.NewScanner(f)
-	// The buffer has to hold the JSON and the newline AppendEvent writes after it.
-	// A max of MaxEventBytes reports a legal full-size line as too long. The extra
-	// room matches scanBackfillLines, which reads the same log.
-	scanner.Buffer(make([]byte, 0, 64*1024), MaxEventBytes+1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), MaxLineBytes)
 	for scanner.Scan() {
 		last = scanner.Text()
 	}
