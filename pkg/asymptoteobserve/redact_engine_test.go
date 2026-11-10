@@ -305,6 +305,37 @@ func TestRedactionWorkIsLinear(t *testing.T) {
 		return repeatTo("token=AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY-"+strings.Repeat("_", 200)+": ", n/2) +
 			"token=AKIAIOSFODNN7EXAMPLE,wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" + repeatTo("-", n/2)
 	}
+	// Copies that end alike after one byte each, X+a^9 and X+a^10 for every printable X, so two
+	// states of the copy finder have as many children; a token of every shape, each a chain that
+	// asks for the copies; and a long run of `a`, over which the finder would go between those two
+	// states at every byte, with the tokens before it and after it. Their work per byte, that of
+	// the whole redaction, is held to a ceiling too, not only its growth: about 90 now, where it
+	// was over 3,000 when every chain read the whole text through child lists.
+	wideCopies := func(tokensFirst bool) func(n int) string {
+		return func(n int) string {
+			var b, tokens strings.Builder
+			for c := byte('!'); c <= '~'; c++ {
+				if c == 'a' || strings.IndexByte("\"'`,\\", c) >= 0 {
+					continue
+				}
+				fmt.Fprintf(&b, "token=%c%s\ntoken=%c%s\n", c, strings.Repeat("a", 9), c, strings.Repeat("a", 10))
+			}
+			for _, token := range adjacentSecrets {
+				tokens.WriteString(token + " ")
+			}
+			run := repeatTo("a", n-b.Len()-tokens.Len())
+			if tokensFirst {
+				return b.String() + tokens.String() + run
+			}
+			return b.String() + run + tokens.String()
+		}
+	}
+	texts["copies that end alike, tokens of every shape, a long run"] = wideCopies(true)
+	texts["copies that end alike, a long run, tokens of every shape"] = wideCopies(false)
+	perByte := map[string]int{
+		"copies that end alike, tokens of every shape, a long run": 128,
+		"copies that end alike, a long run, tokens of every shape": 128,
+	}
 	for name, text := range texts {
 		work := func(n int) int {
 			total := 0
@@ -318,6 +349,10 @@ func TestRedactionWorkIsLinear(t *testing.T) {
 			w := work(n)
 			if w > 5*previous/2+4096 {
 				t.Errorf("%s: work %d on %d bytes, %d on half as many: not linear", name, w, n, previous)
+				break
+			}
+			if ceiling := perByte[name]; ceiling > 0 && w > ceiling*n {
+				t.Errorf("%s: work %d on %d bytes, %d a byte, more than %d", name, w, n, w/n, ceiling)
 				break
 			}
 			previous = w

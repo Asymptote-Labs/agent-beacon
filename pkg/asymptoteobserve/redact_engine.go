@@ -244,13 +244,17 @@ type redactGate struct {
 	// neither looks into; a copy a token ran on over, as replacing a copy may (copyHidesMatch); or a
 	// replaced AWS secret's `/`, where a URL's password stopped.
 	hidden bool
-	// copies are the assigned values whose copies are removed after every rule has run.
-	copies map[string]struct{}
+	// copies are the assigned values whose copies are removed after every rule has run, and what
+	// the chains of this pass found of them in the text (copyIndex).
+	copies *copyIndex
 }
 
 func (g *redactGate) set(value string) {
 	if value != g.value {
 		g.value, g.scanned, g.known, g.present = value, false, 0, 0
+		if g.copies != nil {
+			g.copies.lo, g.copies.at = 0, g.copies.at[:0]
+		}
 	}
 }
 

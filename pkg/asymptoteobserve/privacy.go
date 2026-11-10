@@ -939,7 +939,9 @@ func redactPass(value string, gated bool) (string, bool) {
 	var kept bool
 	if text.holds(redactLabelNeedles) {
 		assigned, kept = captureAssigned(&text, engine, assigned)
-		text.copies = assigned
+		if len(assigned) > 0 {
+			text.copies = &copyIndex{values: assigned}
+		}
 	}
 	original := text.value
 	for i, rule := range redactionRules {

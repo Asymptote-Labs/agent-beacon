@@ -298,7 +298,7 @@ func TestOverCopyFindsWhatItsFirstSearchFound(t *testing.T) {
 			}
 		}
 		s := text.String()
-		c := &redactChain{t: s, copies: values}
+		c := &redactChain{t: s, copies: &copyIndex{values: values}}
 		for pos := 0; pos < len(s); {
 			start := pos + r.IntN(len(s)-pos)
 			item := []int{start, start + 1 + r.IntN(len(s)-start)}

@@ -90,39 +90,47 @@ func replaceLiteral(t, v, place string) (string, int) {
 // at i, so one pass finds, for every byte, the occurrence strings.Replacer would take there.
 //
 // A state's children are a list, the root's a table: literals are few and most states have one
-// child, while a table per state would cost a row per byte of every literal. A step follows at
-// most one edge forward and, on the way, failure links that each shorten the state, so a pass
-// costs at most twice the text's length in steps, each reading at most 256 edges.
+// child, while a table per state would cost a row per byte of every literal. A state with more
+// than literalListMax children also has them in a map, so following an edge reads at most
+// literalListMax list entries or one map entry, however many children a state has. A step
+// follows at most one edge forward and, on the way, failure links that each shorten the state, so
+// a pass costs at most twice the text's length in edge lookups.
+//
+// A table per wide state would make each lookup one load too, but it costs 1 KiB however few of
+// its 256 entries are used, and literals can be as long as the text: a set of literals made to
+// branch widely at every depth would cost that much per few bytes of them. The map costs a few
+// words per child.
 type literalFinder struct {
 	root    [256]int32 // the root's child by byte; 0 for none
 	label   []byte     // per state, the byte of the edge into it
 	child   []int32    // per state, its first child; 0 for none
 	sibling []int32    // per state, its parent's next child; 0 for none
-	fail    []int32    // per state, the longest proper suffix of its string that is a state
-	longest []int32    // per state, the length of the longest literal its string ends with
-	maxLen  int        // the longest literal's length
-	work    int        // edges and links followed
+	fanout  []int32    // per state, its number of children
+	wide    map[uint64]int32
+	fail    []int32 // per state, the longest proper suffix of its string that is a state
+	longest []int32 // per state, the length of the longest literal its string ends with
+	maxLen  int     // the longest literal's length
+	work    int     // list entries and map entries read, and links followed
+}
+
+// literalListMax is the most children a state's list is searched for an edge; a state with more
+// has them in literalFinder.wide.
+const literalListMax = 8
+
+// wideEdge is the key of state s's edge by c in literalFinder.wide.
+func wideEdge(s int32, c byte) uint64 {
+	return uint64(s)<<8 | uint64(c)
 }
 
 func newLiteralFinder(values []string) *literalFinder {
-	f := &literalFinder{label: []byte{0}, child: []int32{0}, sibling: []int32{0}, longest: []int32{0}}
+	f := &literalFinder{label: []byte{0}, child: []int32{0}, sibling: []int32{0}, fanout: []int32{0}, longest: []int32{0}}
 	for _, v := range values {
 		s := int32(0)
 		for i := len(v) - 1; i >= 0; i-- {
 			c := v[i]
 			next := f.next(s, c)
 			if next <= 0 {
-				next = int32(len(f.label))
-				f.label = append(f.label, c)
-				f.child = append(f.child, 0)
-				f.longest = append(f.longest, 0)
-				if s == 0 {
-					f.sibling = append(f.sibling, 0)
-					f.root[c] = next
-				} else {
-					f.sibling = append(f.sibling, f.child[s])
-					f.child[s] = next
-				}
+				next = f.add(s, c)
 			}
 			s = next
 		}
@@ -152,10 +160,47 @@ func newLiteralFinder(values []string) *literalFinder {
 	return f
 }
 
+// add makes a child of s by c and returns it. The state that gets its literalListMax+1st child
+// has all of them put in the map.
+func (f *literalFinder) add(s int32, c byte) int32 {
+	x := int32(len(f.label))
+	f.label = append(f.label, c)
+	f.child = append(f.child, 0)
+	f.fanout = append(f.fanout, 0)
+	f.longest = append(f.longest, 0)
+	if s == 0 {
+		f.sibling = append(f.sibling, 0)
+		f.root[c] = x
+		return x
+	}
+	f.sibling = append(f.sibling, f.child[s])
+	f.child[s] = x
+	f.fanout[s]++
+	switch {
+	case f.fanout[s] == literalListMax+1:
+		if f.wide == nil {
+			f.wide = map[uint64]int32{}
+		}
+		for y := f.child[s]; y != 0; y = f.sibling[y] {
+			f.wide[wideEdge(s, f.label[y])] = y
+		}
+	case f.fanout[s] > literalListMax+1:
+		f.wide[wideEdge(s, c)] = x
+	}
+	return x
+}
+
 // next returns s's child by c: 0 from the root, and -1 from another state, when it has none.
 func (f *literalFinder) next(s int32, c byte) int32 {
 	if s == 0 {
 		return f.root[c]
+	}
+	if f.fanout[s] > literalListMax {
+		f.work++
+		if x, ok := f.wide[wideEdge(s, c)]; ok {
+			return x
+		}
+		return -1
 	}
 	for x := f.child[s]; x != 0; x = f.sibling[x] {
 		f.work++
@@ -181,13 +226,24 @@ func (f *literalFinder) step(s int32, c byte) int32 {
 // for none), and the work done: one pass over t from its end.
 func (f *literalFinder) longestAt(t string) ([]int32, int) {
 	at := make([]int32, len(t))
+	return at, f.longestIn(t, at, 0, len(t))
+}
+
+// longestIn sets at[i-lo], for every i in [lo, hi), to the length of the longest literal that
+// starts at i in t, and returns the work done. The state the pass from the end is in at a byte
+// depends only on the bytes up to the longest literal's length after it, so the pass starts that
+// far past hi, or at the end: it reads at most that many bytes more than it sets.
+func (f *literalFinder) longestIn(t string, at []int32, lo, hi int) int {
 	before := f.work
+	from := min(len(t), hi+f.maxLen)
 	s := int32(0)
-	for i := len(t) - 1; i >= 0; i-- {
+	for i := from - 1; i >= lo; i-- {
 		s = f.step(s, t[i])
-		at[i] = f.longest[s]
+		if i < hi {
+			at[i-lo] = f.longest[s]
+		}
 	}
-	return at, len(t) + f.work - before
+	return from - lo + f.work - before
 }
 
 // replace replaces the literals in t with place, as replaceLiterals does, and returns the work

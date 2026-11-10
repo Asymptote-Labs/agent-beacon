@@ -9,22 +9,28 @@ import (
 )
 
 // The literal searches replace what strings.Replacer does, over literals that overlap, contain
-// each other, start or end alike, and texts made of their pieces: short literals, and the same
-// literals stretched past replaceLiteralsShort so replaceLiterals takes its own searches too.
+// each other, start or end alike, and texts made of their pieces: short literals, the same
+// literals stretched past replaceLiteralsShort so replaceLiterals takes its own searches too, and
+// many literals over a wider alphabet, whose states have more children than a list is searched for
+// (literalListMax).
 func TestLiteralSearchesAgreeWithReplacer(t *testing.T) {
 	r := rand.New(rand.NewPCG(3, 9))
-	for _, scale := range []int{1, 10} {
+	wide := 0
+	for _, c := range []struct {
+		alphabet      string
+		scale, values int
+	}{{"ab", 1, 5}, {"ab", 10, 5}, {"abcdefghijklmnopqrst", 1, 60}, {"abcdefghijklmnopqrst", 10, 60}} {
 		piece := func(n int) string {
-			b := make([]byte, 0, n*scale)
+			b := make([]byte, 0, n*c.scale)
 			for range n {
-				b = append(b, strings.Repeat(string("ab"[r.IntN(2)]), scale)...)
+				b = append(b, strings.Repeat(string(c.alphabet[r.IntN(len(c.alphabet))]), c.scale)...)
 			}
 			return string(b)
 		}
-		for range 20000 {
+		for range 10000 {
 			set := map[string]struct{}{}
-			for range 1 + r.IntN(5) {
-				set[piece(1+r.IntN(9))] = struct{}{}
+			for range 1 + r.IntN(c.values) {
+				set[piece(1+r.IntN(4))+"ab"[:r.IntN(3)]] = struct{}{}
 			}
 			values := slices.SortedFunc(maps.Keys(set), func(a, b string) int {
 				if len(a) != len(b) {
@@ -45,7 +51,11 @@ func TestLiteralSearchesAgreeWithReplacer(t *testing.T) {
 				pairs = append(pairs, v, "#")
 			}
 			want := strings.NewReplacer(pairs...).Replace(text.String())
-			if got, _ := newLiteralFinder(values).replace(text.String(), "#"); got != want {
+			f := newLiteralFinder(values)
+			if f.wide != nil {
+				wide++
+			}
+			if got, _ := f.replace(text.String(), "#"); got != want {
 				t.Fatalf("literals %q in %q: got %q, want %q", values, text.String(), got, want)
 			}
 			if got, _ := replaceLiterals(text.String(), values, "#"); got != want {
@@ -57,5 +67,8 @@ func TestLiteralSearchesAgreeWithReplacer(t *testing.T) {
 				}
 			}
 		}
+	}
+	if wide < 1000 {
+		t.Fatalf("only %d literal sets had a state with more than %d children", wide, literalListMax)
 	}
 }

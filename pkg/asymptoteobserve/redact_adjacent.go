@@ -348,16 +348,13 @@ type redactChain struct {
 	// last place followerAt was asked about and its answer.
 	runFrom, runTo int
 	asked          []redactAsked
-	// The assigned values whose copies are removed after every rule has run (overCopy), the
-	// length of the longest copy starting at each byte of t and of the longest value, read the
-	// first time an item asks, and whether running on over a copy, or over an AWS secret that
-	// holds a `/`, may hide a match from this pass, as replacing a copy may (copyHidesMatch);
-	// matches reports it to the gate.
-	copies      map[string]struct{}
-	copyAt      []int32
-	copyLongest int
-	hid         bool
-	slashed     bool
+	// The pass's assigned values whose copies are removed after every rule has run (overCopy),
+	// and whether running on over a copy, or over an AWS secret that holds a `/`, may hide a
+	// match from this pass, as replacing a copy may (copyHidesMatch); matches reports it to the
+	// gate.
+	copies  *copyIndex
+	hid     bool
+	slashed bool
 }
 
 // redactAsked is followerAt's answer for one follower at a place.
@@ -668,26 +665,17 @@ func (c *redactChain) run(si int, m []int, use redactUse, yield func([]int, reda
 // less than the longest copy's length before the item's end, and once the item runs on, a copy
 // that starts before its new end and ends past it takes it further.
 //
-// The first call on a chain finds the longest copy starting at every byte of the text in one pass
-// (literalFinder.longestAt); each item then reads its own bytes, which no other item of the chain
-// holds: what overCopy reads stays linear in the text.
+// What it reads of the text is what copyIndex.longestAt finds near the items, for every chain of
+// the pass that reads the same text, and each item reads its own bytes, which no other item of the
+// chain holds: what overCopy reads stays linear in the text.
 func (c *redactChain) overCopy(item []int) []int {
-	if len(c.copies) == 0 {
+	if c.copies == nil {
 		return item
 	}
-	if c.copyAt == nil {
-		values := make([]string, 0, len(c.copies))
-		for v := range c.copies {
-			values = append(values, v)
-		}
-		f := newLiteralFinder(values)
-		at, work := f.longestAt(c.t)
-		c.copyAt, c.copyLongest = at, f.maxLen
-		redactWorked(len(f.label) + work)
-	}
-	from, end := max(item[0]+1, item[1]-c.copyLongest+1), item[1]
+	idx := c.copies
+	from, end := max(item[0]+1, item[1]-idx.built().maxLen+1), item[1]
 	for x := from; x < end; x++ {
-		if e := x + int(c.copyAt[x]); e > end {
+		if e := x + int(idx.longestAt(c.t, x, end)); e > end {
 			end, c.hid = e, true
 		}
 	}
@@ -698,6 +686,52 @@ func (c *redactChain) overCopy(item []int) []int {
 	item = slices.Clone(item)
 	item[1] = end
 	return item
+}
+
+// copyIndex is what the chains of one redaction pass find of the assigned values in the text
+// (overCopy): their finder, built the first time a chain asks, and, for the text the gate holds,
+// the length of the longest copy starting at each byte of the stretch [lo, lo+len(at)) that the
+// chains asked about last. A rule that changes the text moves its bytes, so redactGate.set drops
+// what was found of it.
+type copyIndex struct {
+	values map[string]struct{}
+	finder *literalFinder
+	lo     int
+	at     []int32
+}
+
+// built returns the finder over the values, building it the first time.
+func (idx *copyIndex) built() *literalFinder {
+	if idx.finder == nil {
+		values := make([]string, 0, len(idx.values))
+		for v := range idx.values {
+			values = append(values, v)
+		}
+		idx.finder = newLiteralFinder(values)
+		redactWorked(len(idx.finder.label) + idx.finder.work)
+	}
+	return idx.finder
+}
+
+// longestAt returns the length of the longest copy starting at x in t, the text of the gate the
+// index belongs to, after built. Where it has not found that yet, it finds the bytes from x, or
+// from the end of the stretch it found last when that ends less than the longest value's length
+// before x, up to upto and at least that length past where it starts (literalFinder.longestIn). The
+// chains ask about places in order, so it finds each byte of the text at most once per chain, and
+// reads at most twice what it finds: only the stretches near items, however long the text.
+func (idx *copyIndex) longestAt(t string, x, upto int) int32 {
+	if hi := idx.lo + len(idx.at); idx.lo <= x && x < hi {
+		return idx.at[x-idx.lo]
+	}
+	f := idx.finder
+	hi := idx.lo + len(idx.at)
+	if len(idx.at) == 0 || x < idx.lo || x > hi+f.maxLen {
+		idx.lo, idx.at, hi = x, idx.at[:0], x
+	}
+	end := min(len(t), max(upto, x+1, hi+f.maxLen))
+	idx.at = slices.Grow(idx.at, end-hi)[:end-idx.lo]
+	redactWorked(f.longestIn(t, idx.at[hi-idx.lo:], hi, end))
+	return idx.at[x-idx.lo]
 }
 
 // slashedAWSSecret reports whether m, a match of the pattern expr, is one of the rule for an AWS
