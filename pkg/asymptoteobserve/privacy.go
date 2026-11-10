@@ -88,10 +88,9 @@ func quotedRules(kind quotedKind, keep func(string) bool) []redactionRule {
 			rest, ok := separator(rest)
 			return ok && strings.HasPrefix(rest, open)
 		}
-		replacement := "${1}" + redactedValue
 		rules = append(rules, redactionRule{
-			expr: `(?i)(` + prefix + quoted[0] + `)(?P<value>` + quoted[1] + `)`, replacement: replacement,
-			keep: keep, needles: needles, start: start, runsOn: awsPairRunsOn(replacement),
+			expr: `(?i)(` + prefix + quoted[0] + `)(?P<value>` + quoted[1] + `)`, replacement: "${1}" + redactedValue,
+			keep: keep, needles: needles, start: start, runsOn: awsPairRunsOn,
 		})
 	}
 	return rules
@@ -160,7 +159,9 @@ type redactionRule struct {
 	shape redactShapeKind
 	// runsOn, when set, returns the replacement of a match whose replaced text runs on past the
 	// match's end, and where that text ends; an end below 0 means the match is replaced as usual.
-	runsOn func(t string, match []int) (replacement string, end int)
+	// It is a plain function of the rule, not a closure, so building the rules allocates nothing
+	// for it (TestPackageInitStaysCheap).
+	runsOn func(rule *redactionRule, t string, match []int) (replacement string, end int)
 }
 
 // pattern is the rule's compiled pattern.
@@ -428,7 +429,7 @@ var redactionRules = concatRules([]redactionRule{
 	{
 		expr:        `(?i)(\b` + redactLabel + `(?P<q>` + redactOpenQuote + `)\s*[:=]\s*)(?P<value>` + redactBare + `)`,
 		replacement: "${1}${q}" + redactedValue + "${q}", keep: isLiteralOrAuthScheme, needles: redactQuotedLabelNeedles, start: startLabel,
-		runsOn: awsPairRunsOn("${1}${q}" + redactedValue + "${q}"),
+		runsOn: awsPairRunsOn,
 	},
 	// An unquoted value. A label opened by `?` or `&` is a URL query parameter, whose value ends
 	// at the `&` of the next one or the `#` of the fragment: `?api_key=x&user=alice` keeps
@@ -439,20 +440,20 @@ var redactionRules = concatRules([]redactionRule{
 		expr: `(?i)(?:([?&]` + redactLabel + `=)(?P<value>` + redactParamValue + `)|` +
 			`(\b` + redactLabel + `\s*[:=]\s*)(?P<value>` + redactUnquoted + `))`,
 		replacement: "${1}${3}" + redactedValue, keep: isAuthScheme, needles: redactLabelNeedles, start: startParam,
-		runsOn: awsPairRunsOn("${1}${3}" + redactedValue),
+		runsOn: awsPairRunsOn,
 	},
 	// A command-line flag: `--password x`, `--token=x`, `--api-key x`, and quoted, the way agents
 	// usually write arguments: `--password "x y"`, `--token='x'`. An unquoted value does not start
 	// with `=` or `:`, which is an assignment's separator after a word that only looks like a flag:
 	// a diff's removed line `-SECRET_KEY = 'x'`.
 }, quotedRules(quotedFlag, nil), []redactionRule{
-	{expr: `(?i)(` + redactFlag + `)([^\s"'=:-][^\s"']*)`, replacement: "${1}" + redactedValue, needles: redactFlagNeedles, start: startFlag, runsOn: awsPairRunsOn("${1}" + redactedValue)},
+	{expr: `(?i)(` + redactFlag + `)([^\s"'=:-][^\s"']*)`, replacement: "${1}" + redactedValue, needles: redactFlagNeedles, start: startFlag, runsOn: awsPairRunsOn},
 	// A flag and its value as two quoted items of an argument list, the way an MCP server's args
 	// are written in JSON, TOML and YAML: `"args": ["--api-key", "x"]`.
 	{
 		expr:        `(?i)(["']` + redactFlagName + `["']\s*,\s*["'])(?P<value>(?:[^"'\n\\]|\\[^\n])+)`,
 		replacement: "${1}" + redactedValue, keep: isRedactedValue, needles: redactListedFlagNeedles, start: startListedFlag,
-		runsOn: awsPairRunsOn("${1}" + redactedValue),
+		runsOn: awsPairRunsOn,
 	},
 	// curl's basic-auth credentials: `-u user:pass`, `-uuser:pass`, `--user user:pass` and
 	// `--proxy-user user:pass`. The user name and the colon stay. A bare `-u user` (curl prompts for
@@ -542,7 +543,7 @@ func (rule redactionRule) segmented() redactionRule {
 }
 
 // runningOn returns the rule with the text its matches replace running on where runsOn says.
-func (rule redactionRule) runningOn(runsOn func(t string, match []int) (string, int)) redactionRule {
+func (rule redactionRule) runningOn(runsOn func(rule *redactionRule, t string, match []int) (string, int)) redactionRule {
 	rule.runsOn = runsOn
 	return rule
 }
@@ -630,7 +631,7 @@ func (rule *redactionRule) flagPattern() *regexp.Regexp {
 // match's end, unless the rule's match runs on (runsOn).
 func (rule *redactionRule) replacing(t string, match []int) (string, int) {
 	if rule.runsOn != nil {
-		if replacement, end := rule.runsOn(t, match); end >= 0 {
+		if replacement, end := rule.runsOn(rule, t, match); end >= 0 {
 			return replacement, end
 		}
 	}
@@ -639,7 +640,7 @@ func (rule *redactionRule) replacing(t string, match []int) (string, int) {
 
 // urlRunningOn is the URL rule's runsOn: where urlRunsOn says, the text up to there is replaced
 // with what the rule keeps before the password, ${1}, and a marker.
-func urlRunningOn(t string, m []int) (string, int) {
+func urlRunningOn(_ *redactionRule, t string, m []int) (string, int) {
 	return "${1}" + redactedValue, urlRunsOn(t, m)
 }
 
@@ -713,22 +714,20 @@ func urlRunsOn(t string, m []int) int {
 	}
 }
 
-// awsPairRunsOn returns the runsOn of a rule for a labeled value or a flag's value whose match is
-// replaced with replacement: where the value ends in an AWS access key id that its secret follows
-// within a few separators, the replaced text runs on to the secret's end. The value stops at a
-// comma, a blank or a quote between them (`token=AKIA…,<secret>`), and once it is replaced the
-// rule for a key id and its secret finds no key id before the secret. The separators after the
-// value stay and the secret gets a marker of its own, as that rule writes a pair, so the value
+// awsPairRunsOn is the runsOn of a rule for a labeled value or a flag's value: where the value
+// ends in an AWS access key id that its secret follows within a few separators, the replaced text
+// runs on to the secret's end. The value stops at a comma, a blank or a quote between them
+// (`token=AKIA…,<secret>`), and once it is replaced the rule for a key id and its secret finds no
+// key id before the secret. The match is replaced with the rule's replacement, the separators after
+// the value stay and the secret gets a marker of its own, as that rule writes a pair, so the value
 // reads the same to the next pass: `token=[REDACTED],[REDACTED]`. The separators are blanks,
 // commas and quotes, which an expansion template reads as they are.
-func awsPairRunsOn(replacement string) func(t string, match []int) (string, int) {
-	return func(t string, match []int) (string, int) {
-		end := awsPairTailEnd(t, match[0], match[1])
-		if end < 0 {
-			return "", -1
-		}
-		return replacement + t[match[1]:end-awsPairKeyLen] + redactedValue, end
+func awsPairRunsOn(rule *redactionRule, t string, match []int) (string, int) {
+	end := awsPairTailEnd(t, match[0], match[1])
+	if end < 0 {
+		return "", -1
 	}
+	return rule.replacement + t[match[1]:end-awsPairKeyLen] + redactedValue, end
 }
 
 // awsPairTailEnd returns where the secret ends that follows an AWS access key id the run
